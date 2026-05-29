@@ -1417,6 +1417,32 @@ mod tests {
         if let Some(r) = run(&[m3], "main") { assert_eq!(r, "1", "slice café[3,4] len chars"); }
     }
 
+    /// string.trim / trim_start / trim_end.
+    #[test]
+    fn exec_string_trim() {
+        let call = |symbol: &str, args: Vec<IrExpr>, ty: Ty| IrExpr {
+            kind: IrExprKind::RuntimeCall { symbol: sym(symbol), args }, ty, span: None, def_id: None };
+        let len = |e: IrExpr| call("almide_rt_string_len", vec![e], Ty::Int);
+        let byte = |e: IrExpr, i: i64| call("__byte_at", vec![e, lit_int(i)], Ty::Int);
+        let ti = |e: IrExpr, exp: &str, msg: &str| { let m = mk_func("main", Ty::Int, e); if let Some(r) = run(&[m], "main") { assert_eq!(&r, exp, "{}", msg); } };
+
+        // trim("  hi  ") → "hi" (len 2, bytes 'h'(104) 'i'(105))
+        let tr = |sym_: &str, s: &str| call(sym_, vec![lit_str(s)], Ty::String);
+        ti(len(tr("almide_rt_string_trim", "  hi  ")), "2", "trim len");
+        ti(byte(tr("almide_rt_string_trim", "  hi  "), 0), "104", "trim[0]=='h'");
+        ti(byte(tr("almide_rt_string_trim", "\t\nhi\r "), 1), "105", "trim mixed ws [1]=='i'");
+        // trim_start leaves trailing ws: "  hi  " → "hi  " len 4
+        ti(len(tr("almide_rt_string_trim_start", "  hi  ")), "4", "trim_start len");
+        ti(byte(tr("almide_rt_string_trim_start", "  hi  "), 0), "104", "trim_start[0]=='h'");
+        // trim_end leaves leading ws: "  hi  " → "  hi" len 4
+        ti(len(tr("almide_rt_string_trim_end", "  hi  ")), "4", "trim_end len");
+        ti(byte(tr("almide_rt_string_trim_end", "  hi  "), 0), "32", "trim_end[0]==' '");
+        // all whitespace → empty
+        ti(len(tr("almide_rt_string_trim", "   ")), "0", "trim all ws → empty");
+        // no whitespace → unchanged
+        ti(len(tr("almide_rt_string_trim", "abc")), "3", "trim no-ws len");
+    }
+
     /// float.to_string — fixed 6-decimal, trailing zeros trimmed.
     #[test]
     fn exec_float_to_string() {

@@ -73,11 +73,12 @@ pub struct RuntimeFns {
     pub str_repeat: FuncIdx,
     pub str_contains: FuncIdx,
     pub float_to_string: FuncIdx,
+    pub str_trim: FuncIdx,
 }
 
 /// The number of *defined* runtime functions (they occupy function indices
 /// `IMPORT_COUNT .. IMPORT_COUNT + COUNT`).
-pub const COUNT: u32 = 33;
+pub const COUNT: u32 = 34;
 
 impl RuntimeFns {
     /// Defined runtime functions in code-section order, offset past the imports.
@@ -117,11 +118,12 @@ impl RuntimeFns {
             str_repeat: IMPORT_COUNT + 30,
             str_contains: IMPORT_COUNT + 31,
             float_to_string: IMPORT_COUNT + 32,
+            str_trim: IMPORT_COUNT + 33,
         }
     }
 
     /// Map of runtime function names to indices, for the build's name lookup.
-    pub fn name_table(&self) -> [(&'static str, FuncIdx); 33] {
+    pub fn name_table(&self) -> [(&'static str, FuncIdx); 34] {
         [
             ("__alloc", self.alloc),
             ("__rc_inc", self.rc_inc),
@@ -156,6 +158,7 @@ impl RuntimeFns {
             ("__string_repeat", self.str_repeat),
             ("__string_contains", self.str_contains),
             ("__float_to_string", self.float_to_string),
+            ("__string_trim", self.str_trim),
         ]
     }
 }
@@ -198,6 +201,7 @@ pub fn runtime_funcs(reg: &LayoutRegistry, heap_start: i32) -> Vec<WasmFunc> {
         build_str_repeat(),
         build_str_contains(),
         build_float_to_string(),
+        build_string_trim(),
     ]
 }
 
@@ -342,6 +346,73 @@ fn build_str_contains() -> WasmFunc {
     WasmFunc {
         name: "__string_contains".into(), params: vec![WasmTy::I32, WasmTy::I32], results: vec![WasmTy::I32],
         locals: vec![WasmTy::I32, WasmTy::I32, WasmTy::I32, WasmTy::I32, WasmTy::I32], // sl,subl,start,j,matched
+        body,
+    }
+}
+
+/// `__string_trim(s, mode: i32) -> i32` — strip ASCII whitespace. `mode & 1`
+/// trims the start, `mode & 2` trims the end (trim = 3, trim_start = 1,
+/// trim_end = 2). Whitespace = space or bytes 9..=13 (tab/LF/VT/FF/CR).
+fn build_string_trim() -> WasmFunc {
+    let rt = RuntimeFns::fixed();
+    const S: u32 = 0;
+    const MODE: u32 = 1;
+    const BL: u32 = 2;
+    const START: u32 = 3;
+    const END: u32 = 4;
+    const NEWLEN: u32 = 5;
+    const OUT: u32 = 6;
+    const B: u32 = 7;
+
+    // is_ws(B): (B == 32) | ((B - 9) <u 5)
+    let is_ws = vec![
+        Op::LocalGet(B), Op::Const(Const::I32(32)), Op::BinOp(B::I32Eq),
+        Op::LocalGet(B), Op::Const(Const::I32(9)), Op::BinOp(B::I32Sub), Op::Const(Const::I32(5)), Op::BinOp(B::I32LtU),
+        Op::BinOp(B::I32Or),
+    ];
+    let mut start_loop = vec![
+        Op::LocalGet(START), Op::LocalGet(END), Op::BinOp(B::I32GeU), Op::BrIf(1),
+        Op::LocalGet(S), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add), Op::LocalGet(START), Op::BinOp(B::I32Add), Op::Load(LoadKind::U8), Op::LocalSet(B),
+    ];
+    start_loop.extend(is_ws.clone());
+    start_loop.extend(vec![
+        Op::UnOp(U::I32Eqz), Op::BrIf(1),
+        Op::LocalGet(START), Op::Const(Const::I32(1)), Op::BinOp(B::I32Add), Op::LocalSet(START), Op::Br(0),
+    ]);
+    let mut end_loop = vec![
+        Op::LocalGet(END), Op::LocalGet(START), Op::BinOp(B::I32GtU), Op::UnOp(U::I32Eqz), Op::BrIf(1),
+        Op::LocalGet(S), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add), Op::LocalGet(END), Op::BinOp(B::I32Add), Op::Const(Const::I32(1)), Op::BinOp(B::I32Sub), Op::Load(LoadKind::U8), Op::LocalSet(B),
+    ];
+    end_loop.extend(is_ws);
+    end_loop.extend(vec![
+        Op::UnOp(U::I32Eqz), Op::BrIf(1),
+        Op::LocalGet(END), Op::Const(Const::I32(1)), Op::BinOp(B::I32Sub), Op::LocalSet(END), Op::Br(0),
+    ]);
+
+    let body = vec![
+        Op::LocalGet(S), Op::Load(LoadKind::I32), Op::LocalSet(BL),
+        Op::Const(Const::I32(0)), Op::LocalSet(START),
+        Op::LocalGet(BL), Op::LocalSet(END),
+        Op::LocalGet(MODE), Op::Const(Const::I32(1)), Op::BinOp(B::I32And),
+        Op::IfVoid { then: vec![Op::Block(vec![Op::Loop(start_loop)])], else_: vec![] },
+        Op::LocalGet(MODE), Op::Const(Const::I32(2)), Op::BinOp(B::I32And),
+        Op::IfVoid { then: vec![Op::Block(vec![Op::Loop(end_loop)])], else_: vec![] },
+        // newlen = end - start
+        Op::LocalGet(END), Op::LocalGet(START), Op::BinOp(B::I32Sub), Op::LocalSet(NEWLEN),
+        Op::Const(Const::I32(8)), Op::LocalGet(NEWLEN), Op::BinOp(B::I32Add),
+        Op::Call { idx: rt.alloc, pops: 1, pushes: 1 }, Op::LocalSet(OUT),
+        Op::LocalGet(OUT), Op::LocalGet(NEWLEN), Op::Store(StoreKind::I32),
+        Op::LocalGet(OUT), Op::Const(Const::I32(4)), Op::BinOp(B::I32Add), Op::LocalGet(NEWLEN), Op::Store(StoreKind::I32),
+        // memcpy(out + 8, s + 8 + start, newlen)
+        Op::LocalGet(OUT), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add),
+        Op::LocalGet(S), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add), Op::LocalGet(START), Op::BinOp(B::I32Add),
+        Op::LocalGet(NEWLEN),
+        Op::MemoryCopy,
+        Op::LocalGet(OUT),
+    ];
+    WasmFunc {
+        name: "__string_trim".into(), params: vec![WasmTy::I32, WasmTy::I32], results: vec![WasmTy::I32],
+        locals: vec![WasmTy::I32, WasmTy::I32, WasmTy::I32, WasmTy::I32, WasmTy::I32, WasmTy::I32], // bl,start,end,newlen,out,b
         body,
     }
 }

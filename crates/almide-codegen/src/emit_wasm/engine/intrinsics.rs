@@ -82,6 +82,9 @@ pub fn lower_intrinsic(
             call_runtime("__string_repeat", args, 1, ctx),
         "almide_rt_string_contains" if args.len() == 2 =>
             call_runtime("__string_contains", args, 1, ctx),
+        "almide_rt_string_trim" if args.len() == 1 => str_trim(&args[0], 3, ctx),
+        "almide_rt_string_trim_start" if args.len() == 1 => str_trim(&args[0], 1, ctx),
+        "almide_rt_string_trim_end" if args.len() == 1 => str_trim(&args[0], 2, ctx),
 
         // ── Map: Int or String keys; Int or pointer/i32 values (not Float). ──
         "almide_rt_map_new" if map_supported(ret_ty) =>
@@ -422,6 +425,15 @@ fn to_case(s: &IrExpr, upper: i32, ctx: &mut LowerCtx) -> Option<Vec<Op>> {
     let idx = (ctx.func_idx)("__string_to_case")?;
     let mut ops = lower_expr(s, ctx);
     ops.push(Op::Const(Const::I32(upper)));
+    ops.push(Op::Call { idx, pops: 2, pushes: 1 });
+    Some(ops)
+}
+
+/// `string.trim`/`trim_start`/`trim_end` — call __string_trim with the mode bits.
+fn str_trim(s: &IrExpr, mode: i32, ctx: &mut LowerCtx) -> Option<Vec<Op>> {
+    let idx = (ctx.func_idx)("__string_trim")?;
+    let mut ops = lower_expr(s, ctx);
+    ops.push(Op::Const(Const::I32(mode)));
     ops.push(Op::Call { idx, pops: 2, pushes: 1 });
     Some(ops)
 }
