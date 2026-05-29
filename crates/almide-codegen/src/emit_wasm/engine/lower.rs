@@ -1125,8 +1125,9 @@ fn lower_match_arms_with_result(arms: &[IrMatchArm], subj: Local, subj_ty: &Ty, 
     }
     if arms.len() == 1 {
         // Last arm (wildcard) — just emit body
-        bind_pattern(&arms[0].pattern, subj, subj_ty, ctx);
-        return lower_expr(&arms[0].body, ctx);
+        let mut binds = bind_pattern(&arms[0].pattern, subj, subj_ty, ctx);
+        binds.extend(lower_expr(&arms[0].body, ctx));
+        return binds;
     }
 
     let arm = &arms[0];
@@ -1137,8 +1138,9 @@ fn lower_match_arms_with_result(arms: &[IrMatchArm], subj: Local, subj_ty: &Ty, 
     ops.extend(pattern_condition(&arm.pattern, subj, subj_ty, ctx));
 
     let then_ops = {
-        bind_pattern(&arm.pattern, subj, subj_ty, ctx);
-        lower_expr(&arm.body, ctx)
+        let mut binds = bind_pattern(&arm.pattern, subj, subj_ty, ctx);
+        binds.extend(lower_expr(&arm.body, ctx));
+        binds
     };
     let else_ops = lower_match_arms_with_result(rest, subj, subj_ty, result_ty, ctx);
 
@@ -1151,8 +1153,9 @@ fn lower_match_arms_void(arms: &[IrMatchArm], subj: Local, subj_ty: &Ty, ctx: &m
         return vec![];
     }
     if arms.len() == 1 {
-        bind_pattern(&arms[0].pattern, subj, subj_ty, ctx);
-        return lower_expr_void(&arms[0].body, ctx);
+        let mut binds = bind_pattern(&arms[0].pattern, subj, subj_ty, ctx);
+        binds.extend(lower_expr_void(&arms[0].body, ctx));
+        return binds;
     }
 
     let arm = &arms[0];
@@ -1162,8 +1165,9 @@ fn lower_match_arms_void(arms: &[IrMatchArm], subj: Local, subj_ty: &Ty, ctx: &m
     ops.extend(pattern_condition(&arm.pattern, subj, subj_ty, ctx));
 
     let then_ops = {
-        bind_pattern(&arm.pattern, subj, subj_ty, ctx);
-        lower_expr_void(&arm.body, ctx)
+        let mut binds = bind_pattern(&arm.pattern, subj, subj_ty, ctx);
+        binds.extend(lower_expr_void(&arm.body, ctx));
+        binds
     };
     let else_ops = lower_match_arms_void(rest, subj, subj_ty, ctx);
 
@@ -1245,36 +1249,52 @@ fn pattern_condition(pattern: &IrPattern, subj: Local, _subj_ty: &Ty, ctx: &mut 
 }
 
 /// Bind pattern variables to the subject value.
-fn bind_pattern(pattern: &IrPattern, subj: Local, _subj_ty: &Ty, ctx: &mut LowerCtx) {
+/// Bind pattern variables, returning ops that load any payloads into their
+/// locals (to be emitted at the start of the arm body).
+fn bind_pattern(pattern: &IrPattern, subj: Local, _subj_ty: &Ty, ctx: &mut LowerCtx) -> Vec<Op> {
     match pattern {
         IrPattern::Bind { var, .. } => {
-            // The bound variable aliases the subject local directly — no copy needed.
-            ctx.var_map[var.0 as usize] = Some(subj);
+            // The bound variable aliases the subject local directly — no copy.
+            if (var.0 as usize) < ctx.var_map.len() {
+                ctx.var_map[var.0 as usize] = Some(subj);
+            }
+            vec![]
+        }
+        // Tagged-union payloads live at offset 4 (after the i32 tag).
+        IrPattern::Some { inner } | IrPattern::Ok { inner } | IrPattern::Err { inner } => {
+            bind_payload(inner, subj, 4, ctx)
         }
         IrPattern::Constructor { args, .. } => {
-            // Bind constructor arguments from payload
+            // Constructor args are packed after the tag at their natural widths.
+            let mut ops = Vec::new();
+            let mut off = 4i32;
             for arg in args.iter() {
-                if let IrPattern::Bind { var, .. } = arg {
-                    let local = ctx.alloc_local(WasmTy::I32);
-                    if (var.0 as usize) < ctx.var_map.len() {
-                        ctx.var_map[var.0 as usize] = Some(local);
-                    }
-                    // TODO: actually emit load from variant payload
+                if let IrPattern::Bind { ty, .. } = arg {
+                    ops.extend(bind_payload(arg, subj, off, ctx));
+                    off += wasm_byte_size(ty);
                 }
             }
+            ops
         }
-        IrPattern::Some { inner } | IrPattern::Ok { inner } | IrPattern::Err { inner } => {
-            if let IrPattern::Bind { var, .. } = inner.as_ref() {
-                // Bind payload: subj + 4 (skip tag)
-                let local = ctx.alloc_local(WasmTy::I32);
-                if (var.0 as usize) < ctx.var_map.len() {
-                    ctx.var_map[var.0 as usize] = Some(local);
-                }
-                // TODO: emit load payload into local
-            }
-        }
-        _ => {} // Wildcard, Lit — nothing to bind
+        _ => vec![], // Wildcard, Literal, Tuple/List/Record destructuring — TODO
     }
+}
+
+/// Load `subj[offset]` into a fresh local and bind `inner` (a Bind pattern) to it.
+fn bind_payload(inner: &IrPattern, subj: Local, offset: i32, ctx: &mut LowerCtx) -> Vec<Op> {
+    let IrPattern::Bind { var, ty } = inner else { return vec![] };
+    let wt = ty_to_wasm(ty);
+    let local = ctx.alloc_local(wt);
+    if (var.0 as usize) < ctx.var_map.len() {
+        ctx.var_map[var.0 as usize] = Some(local);
+    }
+    vec![
+        Op::LocalGet(subj),
+        Op::Const(Const::I32(offset)),
+        Op::BinOp(WBinOp::I32Add),
+        Op::Load(load_kind_of(wt)),
+        Op::LocalSet(local),
+    ]
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────

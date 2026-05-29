@@ -986,6 +986,43 @@ mod tests {
         }
     }
 
+    /// Match with payload binding: `match Some(42) { Some(x) => x, None => 0 }`
+    /// → 42, and the None subject → 0.
+    #[test]
+    fn exec_match_some_bind() {
+        use almide_ir::{IrMatchArm, IrPattern};
+        let opt_ty = Ty::Applied(
+            almide_lang::types::constructor::TypeConstructorId::Option, vec![Ty::Int]);
+        let build = |subject: IrExpr, vt: &VarTable, x: almide_ir::VarId| {
+            let arms = vec![
+                IrMatchArm {
+                    pattern: IrPattern::Some { inner: Box::new(IrPattern::Bind { var: x, ty: Ty::Int }) },
+                    guard: None,
+                    body: IrExpr { kind: IrExprKind::Var { id: x }, ty: Ty::Int, span: None, def_id: None },
+                },
+                IrMatchArm { pattern: IrPattern::None, guard: None, body: lit_int(0) },
+            ];
+            IrExpr {
+                kind: IrExprKind::Match { subject: Box::new(subject), arms },
+                ty: Ty::Int, span: None, def_id: None,
+            }
+        };
+        // Some(42) → 42
+        let mut vt = VarTable::new();
+        let x = vt.alloc(sym("x"), Ty::Int, almide_ir::Mutability::Let, None);
+        let some = IrExpr {
+            kind: IrExprKind::OptionSome { expr: Box::new(lit_int(42)) },
+            ty: opt_ty.clone(), span: None, def_id: None,
+        };
+        let main = mk_func("main", Ty::Int, build(some, &vt, x));
+        if let Some(r) = run_vt(&[main], &vt, "main") { assert_eq!(r, "42", "Some(42)"); }
+
+        // None → 0
+        let none = IrExpr { kind: IrExprKind::OptionNone, ty: opt_ty, span: None, def_id: None };
+        let main2 = mk_func("main", Ty::Int, build(none, &vt, x));
+        if let Some(r) = run_vt(&[main2], &vt, "main") { assert_eq!(r, "0", "None"); }
+    }
+
     /// List concatenation: `([1,2] + [3])[2]` → 3.
     #[test]
     fn exec_list_concat() {
