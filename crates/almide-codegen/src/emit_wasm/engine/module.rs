@@ -1417,6 +1417,33 @@ mod tests {
         if let Some(r) = run(&[m3], "main") { assert_eq!(r, "1", "slice café[3,4] len chars"); }
     }
 
+    /// string.to_upper / to_lower / repeat / contains.
+    #[test]
+    fn exec_string_transforms() {
+        let call = |symbol: &str, args: Vec<IrExpr>, ty: Ty| IrExpr {
+            kind: IrExprKind::RuntimeCall { symbol: sym(symbol), args }, ty, span: None, def_id: None };
+        let byte = |e: IrExpr, i: i64| call("__byte_at", vec![e, lit_int(i)], Ty::Int);
+        let len = |e: IrExpr| call("almide_rt_string_len", vec![e], Ty::Int);
+        let ti = |e: IrExpr, exp: &str, msg: &str| { let m = mk_func("main", Ty::Int, e); if let Some(r) = run(&[m], "main") { assert_eq!(&r, exp, "{}", msg); } };
+        let tb = |e: IrExpr, exp: &str, msg: &str| { let m = mk_func("main", Ty::Bool, e); if let Some(r) = run(&[m], "main") { assert_eq!(&r, exp, "{}", msg); } };
+
+        // to_upper("aB3") → "AB3" : byte0 'a'->'A'(65), byte1 'B' stays (66), byte2 '3' stays (51)
+        let up = || call("almide_rt_string_to_upper", vec![lit_str("aB3")], Ty::String);
+        ti(byte(up(), 0), "65", "to_upper[0]");
+        ti(byte(up(), 1), "66", "to_upper[1]");
+        ti(byte(up(), 2), "51", "to_upper[2]");
+        // to_lower("aB") → byte1 'B'->'b'(98)
+        ti(byte(call("almide_rt_string_to_lower", vec![lit_str("aB")], Ty::String), 1), "98", "to_lower[1]");
+        // repeat("ab", 3) → "ababab" len 6, byte4 'a'(97)
+        let rep = || call("almide_rt_string_repeat", vec![lit_str("ab"), lit_int(3)], Ty::String);
+        ti(len(rep()), "6", "repeat len");
+        ti(byte(rep(), 4), "97", "repeat[4]=='a'");
+        // contains
+        tb(call("almide_rt_string_contains", vec![lit_str("hello"), lit_str("ell")], Ty::Bool), "1", "contains ell");
+        tb(call("almide_rt_string_contains", vec![lit_str("hello"), lit_str("xyz")], Ty::Bool), "0", "!contains xyz");
+        tb(call("almide_rt_string_contains", vec![lit_str("hello"), lit_str("")], Ty::Bool), "1", "contains empty");
+    }
+
     /// string.starts_with / ends_with (byte comparison).
     #[test]
     fn exec_intrinsic_starts_ends_with() {

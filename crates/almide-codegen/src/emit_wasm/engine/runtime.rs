@@ -69,11 +69,14 @@ pub struct RuntimeFns {
     pub map_merge: FuncIdx,
     pub print: FuncIdx,
     pub println: FuncIdx,
+    pub to_case: FuncIdx,
+    pub str_repeat: FuncIdx,
+    pub str_contains: FuncIdx,
 }
 
 /// The number of *defined* runtime functions (they occupy function indices
 /// `IMPORT_COUNT .. IMPORT_COUNT + COUNT`).
-pub const COUNT: u32 = 29;
+pub const COUNT: u32 = 32;
 
 impl RuntimeFns {
     /// Defined runtime functions in code-section order, offset past the imports.
@@ -109,11 +112,14 @@ impl RuntimeFns {
             map_merge: IMPORT_COUNT + 26,
             print: IMPORT_COUNT + 27,
             println: IMPORT_COUNT + 28,
+            to_case: IMPORT_COUNT + 29,
+            str_repeat: IMPORT_COUNT + 30,
+            str_contains: IMPORT_COUNT + 31,
         }
     }
 
     /// Map of runtime function names to indices, for the build's name lookup.
-    pub fn name_table(&self) -> [(&'static str, FuncIdx); 29] {
+    pub fn name_table(&self) -> [(&'static str, FuncIdx); 32] {
         [
             ("__alloc", self.alloc),
             ("__rc_inc", self.rc_inc),
@@ -144,6 +150,9 @@ impl RuntimeFns {
             ("__map_merge", self.map_merge),
             ("__print", self.print),
             ("__println", self.println),
+            ("__string_to_case", self.to_case),
+            ("__string_repeat", self.str_repeat),
+            ("__string_contains", self.str_contains),
         ]
     }
 }
@@ -182,7 +191,155 @@ pub fn runtime_funcs(reg: &LayoutRegistry, heap_start: i32) -> Vec<WasmFunc> {
         build_map_merge(),
         build_print(),
         build_println(),
+        build_to_case(),
+        build_str_repeat(),
+        build_str_contains(),
     ]
+}
+
+/// `__string_to_case(s, upper: i32) -> i32` — ASCII case conversion (non-ASCII
+/// bytes pass through). upper != 0 → uppercase, else lowercase.
+fn build_to_case() -> WasmFunc {
+    let rt = RuntimeFns::fixed();
+    const S: u32 = 0;
+    const UPPER: u32 = 1;
+    const BL: u32 = 2;
+    const OUT: u32 = 3;
+    const I: u32 = 4;
+    const LO: u32 = 5;
+    const DELTA: u32 = 6;
+    const B: u32 = 7;
+
+    let mut loop_body = vec![
+        Op::LocalGet(I), Op::LocalGet(BL), Op::BinOp(B::I32GeU), Op::BrIf(1),
+        // b = s[8+i]
+        Op::LocalGet(S), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add), Op::LocalGet(I), Op::BinOp(B::I32Add), Op::Load(LoadKind::U8), Op::LocalSet(B),
+        // out[8+i] = ((b-lo) <u 26) ? b+delta : b
+        Op::LocalGet(OUT), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add), Op::LocalGet(I), Op::BinOp(B::I32Add),
+        Op::LocalGet(B), Op::LocalGet(LO), Op::BinOp(B::I32Sub), Op::Const(Const::I32(26)), Op::BinOp(B::I32LtU),
+        Op::If {
+            ty: WasmTy::I32,
+            then: vec![Op::LocalGet(B), Op::LocalGet(DELTA), Op::BinOp(B::I32Add)],
+            else_: vec![Op::LocalGet(B)],
+        },
+        Op::Store(StoreKind::I8),
+        Op::LocalGet(I), Op::Const(Const::I32(1)), Op::BinOp(B::I32Add), Op::LocalSet(I), Op::Br(0),
+    ];
+
+    let body = vec![
+        Op::LocalGet(S), Op::Load(LoadKind::I32), Op::LocalSet(BL),
+        // out = alloc(8 + bl) ; out.len = out.cap = bl
+        Op::Const(Const::I32(8)), Op::LocalGet(BL), Op::BinOp(B::I32Add),
+        Op::Call { idx: rt.alloc, pops: 1, pushes: 1 }, Op::LocalSet(OUT),
+        Op::LocalGet(OUT), Op::LocalGet(BL), Op::Store(StoreKind::I32),
+        Op::LocalGet(OUT), Op::Const(Const::I32(4)), Op::BinOp(B::I32Add), Op::LocalGet(BL), Op::Store(StoreKind::I32),
+        // upper: lo='a'(97), delta=-32 ; lower: lo='A'(65), delta=+32
+        Op::LocalGet(UPPER),
+        Op::If { ty: WasmTy::I32, then: vec![Op::Const(Const::I32(97))], else_: vec![Op::Const(Const::I32(65))] },
+        Op::LocalSet(LO),
+        Op::LocalGet(UPPER),
+        Op::If { ty: WasmTy::I32, then: vec![Op::Const(Const::I32(-32))], else_: vec![Op::Const(Const::I32(32))] },
+        Op::LocalSet(DELTA),
+        Op::Const(Const::I32(0)), Op::LocalSet(I),
+        Op::Block(vec![Op::Loop(loop_body)]),
+        Op::LocalGet(OUT),
+    ];
+    WasmFunc {
+        name: "__string_to_case".into(), params: vec![WasmTy::I32, WasmTy::I32], results: vec![WasmTy::I32],
+        locals: vec![WasmTy::I32, WasmTy::I32, WasmTy::I32, WasmTy::I32, WasmTy::I32, WasmTy::I32], // bl,out,i,lo,delta,b
+        body,
+    }
+}
+
+/// `__string_repeat(s, n: i64) -> i32` — `s` concatenated `n` times (n<=0 → "").
+fn build_str_repeat() -> WasmFunc {
+    let rt = RuntimeFns::fixed();
+    const S: u32 = 0;
+    const N: u32 = 1;  // i64
+    const BL: u32 = 2;
+    const NI: u32 = 3; // n as i32, clamped
+    const TOTAL: u32 = 4;
+    const OUT: u32 = 5;
+    const K: u32 = 6;
+
+    let mut loop_body = vec![
+        Op::LocalGet(K), Op::LocalGet(NI), Op::BinOp(B::I32GeU), Op::BrIf(1),
+        // memcpy(out + 8 + k*bl, s + 8, bl)
+        Op::LocalGet(OUT), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add),
+        Op::LocalGet(K), Op::LocalGet(BL), Op::BinOp(B::I32Mul), Op::BinOp(B::I32Add),
+        Op::LocalGet(S), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add),
+        Op::LocalGet(BL),
+        Op::MemoryCopy,
+        Op::LocalGet(K), Op::Const(Const::I32(1)), Op::BinOp(B::I32Add), Op::LocalSet(K), Op::Br(0),
+    ];
+    let body = vec![
+        Op::LocalGet(S), Op::Load(LoadKind::I32), Op::LocalSet(BL),
+        // ni = n < 0 ? 0 : wrap(n)
+        Op::LocalGet(N), Op::Const(Const::I64(0)), Op::BinOp(B::I64LtS),
+        Op::If { ty: WasmTy::I32, then: vec![Op::Const(Const::I32(0))], else_: vec![Op::LocalGet(N), Op::UnOp(U::I32WrapI64)] },
+        Op::LocalSet(NI),
+        // total = bl * ni
+        Op::LocalGet(BL), Op::LocalGet(NI), Op::BinOp(B::I32Mul), Op::LocalSet(TOTAL),
+        Op::Const(Const::I32(8)), Op::LocalGet(TOTAL), Op::BinOp(B::I32Add),
+        Op::Call { idx: rt.alloc, pops: 1, pushes: 1 }, Op::LocalSet(OUT),
+        Op::LocalGet(OUT), Op::LocalGet(TOTAL), Op::Store(StoreKind::I32),
+        Op::LocalGet(OUT), Op::Const(Const::I32(4)), Op::BinOp(B::I32Add), Op::LocalGet(TOTAL), Op::Store(StoreKind::I32),
+        Op::Const(Const::I32(0)), Op::LocalSet(K),
+        Op::Block(vec![Op::Loop(loop_body)]),
+        Op::LocalGet(OUT),
+    ];
+    WasmFunc {
+        name: "__string_repeat".into(), params: vec![WasmTy::I32, WasmTy::I64], results: vec![WasmTy::I32],
+        locals: vec![WasmTy::I32, WasmTy::I32, WasmTy::I32, WasmTy::I32, WasmTy::I32], // bl,ni,total,out,k
+        body,
+    }
+}
+
+/// `__string_contains(s, sub) -> i32` — naive substring search.
+fn build_str_contains() -> WasmFunc {
+    const S: u32 = 0;
+    const SUB: u32 = 1;
+    const SL: u32 = 2;
+    const SUBL: u32 = 3;
+    const START: u32 = 4;
+    const J: u32 = 5;
+    const MATCHED: u32 = 6;
+
+    // inner: compare subl bytes at `start`
+    let mut inner = vec![
+        Op::LocalGet(J), Op::LocalGet(SUBL), Op::BinOp(B::I32GeU), Op::BrIf(1),
+        // if s[8+start+j] != sub[8+j] { matched=0; break inner }
+        Op::LocalGet(S), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add), Op::LocalGet(START), Op::BinOp(B::I32Add), Op::LocalGet(J), Op::BinOp(B::I32Add), Op::Load(LoadKind::U8),
+        Op::LocalGet(SUB), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add), Op::LocalGet(J), Op::BinOp(B::I32Add), Op::Load(LoadKind::U8),
+        Op::BinOp(B::I32Ne),
+        Op::IfVoid { then: vec![Op::Const(Const::I32(0)), Op::LocalSet(MATCHED), Op::Br(2)], else_: vec![] },
+        Op::LocalGet(J), Op::Const(Const::I32(1)), Op::BinOp(B::I32Add), Op::LocalSet(J), Op::Br(0),
+    ];
+    let mut outer = vec![
+        // start > sl - subl → break outer (not found)
+        Op::LocalGet(START), Op::LocalGet(SL), Op::LocalGet(SUBL), Op::BinOp(B::I32Sub), Op::BinOp(B::I32GtU), Op::BrIf(1),
+        Op::Const(Const::I32(1)), Op::LocalSet(MATCHED),
+        Op::Const(Const::I32(0)), Op::LocalSet(J),
+        Op::Block(vec![Op::Loop(std::mem::take(&mut inner))]),
+        // if matched: return 1
+        Op::LocalGet(MATCHED), Op::IfVoid { then: vec![Op::Const(Const::I32(1)), Op::Return], else_: vec![] },
+        Op::LocalGet(START), Op::Const(Const::I32(1)), Op::BinOp(B::I32Add), Op::LocalSet(START), Op::Br(0),
+    ];
+    let body = vec![
+        Op::LocalGet(S), Op::Load(LoadKind::I32), Op::LocalSet(SL),
+        Op::LocalGet(SUB), Op::Load(LoadKind::I32), Op::LocalSet(SUBL),
+        // if subl > sl: return 0
+        Op::LocalGet(SUBL), Op::LocalGet(SL), Op::BinOp(B::I32GtU),
+        Op::IfVoid { then: vec![Op::Const(Const::I32(0)), Op::Return], else_: vec![] },
+        Op::Const(Const::I32(0)), Op::LocalSet(START),
+        Op::Block(vec![Op::Loop(std::mem::take(&mut outer))]),
+        Op::Const(Const::I32(0)), // not found
+    ];
+    WasmFunc {
+        name: "__string_contains".into(), params: vec![WasmTy::I32, WasmTy::I32], results: vec![WasmTy::I32],
+        locals: vec![WasmTy::I32, WasmTy::I32, WasmTy::I32, WasmTy::I32, WasmTy::I32], // sl,subl,start,j,matched
+        body,
+    }
 }
 
 // ── WASI stdout (fd_write) ───────────────────────────────────────────

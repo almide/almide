@@ -75,6 +75,12 @@ pub fn lower_intrinsic(
             call_runtime("__string_slice", args, 1, ctx),
         "almide_rt_string_char_at" if args.len() == 2 =>
             call_runtime("__string_get", args, 1, ctx),
+        "almide_rt_string_to_upper" if args.len() == 1 => to_case(&args[0], 1, ctx),
+        "almide_rt_string_to_lower" if args.len() == 1 => to_case(&args[0], 0, ctx),
+        "almide_rt_string_repeat" if args.len() == 2 =>
+            call_runtime("__string_repeat", args, 1, ctx),
+        "almide_rt_string_contains" if args.len() == 2 =>
+            call_runtime("__string_contains", args, 1, ctx),
 
         // ── Map: Int or String keys; Int or pointer/i32 values (not Float). ──
         "almide_rt_map_new" if map_supported(ret_ty) =>
@@ -408,6 +414,15 @@ fn map_kv(ty: &Ty) -> Option<(i32, Ty, Ty)> {
             Some((map_key_kind(&a[0])?, a[0].clone(), a[1].clone())),
         _ => None,
     }
+}
+
+/// `string.to_upper`/`to_lower` — call __string_to_case with the case flag.
+fn to_case(s: &IrExpr, upper: i32, ctx: &mut LowerCtx) -> Option<Vec<Op>> {
+    let idx = (ctx.func_idx)("__string_to_case")?;
+    let mut ops = lower_expr(s, ctx);
+    ops.push(Op::Const(Const::I32(upper)));
+    ops.push(Op::Call { idx, pops: 2, pushes: 1 });
+    Some(ops)
 }
 
 /// Lower an expr and widen an i32-width result to i64 (map slots are i64).
