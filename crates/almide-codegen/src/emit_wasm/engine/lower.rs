@@ -101,6 +101,14 @@ impl<'a> LowerCtx<'a> {
         self.var_map.get(var.0 as usize).copied().flatten()
     }
 
+    /// Bind a VarId to an existing local (e.g. a lambda parameter aliasing a
+    /// loop element). Used by the intrinsic registry's inline-lambda lowering.
+    pub fn map_var(&mut self, var: VarId, local: Local) {
+        if (var.0 as usize) < self.var_map.len() {
+            self.var_map[var.0 as usize] = Some(local);
+        }
+    }
+
     /// Get the non-param locals (for the WASM function definition).
     pub fn non_param_locals(&self) -> Vec<WasmTy> {
         self.locals[self.param_count as usize..].to_vec()
@@ -1290,7 +1298,7 @@ pub(super) fn wasm_byte_size(ty: &Ty) -> i32 {
 }
 
 /// The element type of a `List[T]` / `Set[T]` (None if not such a type).
-fn list_element_ty(ty: &Ty) -> Option<Ty> {
+pub(super) fn list_element_ty(ty: &Ty) -> Option<Ty> {
     use almide_lang::types::constructor::TypeConstructorId as TC;
     match ty {
         Ty::Applied(TC::List, args) | Ty::Applied(TC::Set, args) if !args.is_empty() => {

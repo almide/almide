@@ -815,6 +815,72 @@ mod tests {
         if let Some(r) = run(&[l], "main") { assert_eq!(r, "3"); }
     }
 
+    /// list.map with an inline lambda: `[1,2,3].map(x => x*2)` → [2,4,6];
+    /// indexing the result at 1 gives 4.
+    #[test]
+    fn exec_intrinsic_list_map() {
+        let mut vt = VarTable::new();
+        let x = vt.alloc(sym("x"), Ty::Int, almide_ir::Mutability::Let, None);
+        let list = IrExpr {
+            kind: IrExprKind::List { elements: vec![lit_int(1), lit_int(2), lit_int(3)] },
+            ty: Ty::list(Ty::Int), span: None, def_id: None,
+        };
+        let lam = IrExpr {
+            kind: IrExprKind::Lambda {
+                params: vec![(x, Ty::Int)],
+                body: Box::new(binop(almide_ir::BinOp::MulInt,
+                    IrExpr { kind: IrExprKind::Var { id: x }, ty: Ty::Int, span: None, def_id: None },
+                    lit_int(2), Ty::Int)),
+                lambda_id: None,
+            },
+            ty: Ty::Fn { params: vec![Ty::Int], ret: Box::new(Ty::Int) }, span: None, def_id: None,
+        };
+        let mapped = IrExpr {
+            kind: IrExprKind::RuntimeCall { symbol: sym("almide_rt_list_map"), args: vec![list, lam] },
+            ty: Ty::list(Ty::Int), span: None, def_id: None,
+        };
+        let index = IrExpr {
+            kind: IrExprKind::IndexAccess { object: Box::new(mapped), index: Box::new(lit_int(1)) },
+            ty: Ty::Int, span: None, def_id: None,
+        };
+        let main = mk_func("main", Ty::Int, index);
+        if let Some(r) = run_vt(&[main], &vt, "main") {
+            assert_eq!(r, "4", "[1,2,3].map(x=>x*2)[1]");
+        }
+    }
+
+    /// list.fold with an inline lambda: `[1,2,3,4].fold(0, (a,x) => a+x)` → 10.
+    #[test]
+    fn exec_intrinsic_list_fold() {
+        let mut vt = VarTable::new();
+        let acc = vt.alloc(sym("acc"), Ty::Int, almide_ir::Mutability::Let, None);
+        let x = vt.alloc(sym("x"), Ty::Int, almide_ir::Mutability::Let, None);
+        let v = |id| IrExpr { kind: IrExprKind::Var { id }, ty: Ty::Int, span: None, def_id: None };
+        let list = IrExpr {
+            kind: IrExprKind::List { elements: vec![lit_int(1), lit_int(2), lit_int(3), lit_int(4)] },
+            ty: Ty::list(Ty::Int), span: None, def_id: None,
+        };
+        let lam = IrExpr {
+            kind: IrExprKind::Lambda {
+                params: vec![(acc, Ty::Int), (x, Ty::Int)],
+                body: Box::new(binop(almide_ir::BinOp::AddInt, v(acc), v(x), Ty::Int)),
+                lambda_id: None,
+            },
+            ty: Ty::Fn { params: vec![Ty::Int, Ty::Int], ret: Box::new(Ty::Int) }, span: None, def_id: None,
+        };
+        let folded = IrExpr {
+            kind: IrExprKind::RuntimeCall {
+                symbol: sym("almide_rt_list_fold"),
+                args: vec![list, lit_int(0), lam],
+            },
+            ty: Ty::Int, span: None, def_id: None,
+        };
+        let main = mk_func("main", Ty::Int, folded);
+        if let Some(r) = run_vt(&[main], &vt, "main") {
+            assert_eq!(r, "10", "[1,2,3,4].fold(0,+)");
+        }
+    }
+
     /// Integer min/max/abs intrinsics: abs(-5)==5, min(3,7)==3, max(3,7)==7.
     #[test]
     fn exec_intrinsic_int_minmax_abs() {

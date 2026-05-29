@@ -14,7 +14,7 @@
 use almide_ir::IrExpr;
 use almide_lang::types::Ty;
 
-use super::ir::{Op, Const, WasmTy, LoadKind, BinOp as B, UnOp as U};
+use super::ir::{Op, Const, WasmTy, LoadKind, StoreKind, BinOp as B, UnOp as U};
 use super::layout::{self, string, list};
 use super::lower::{lower_expr, ty_to_wasm, wasm_byte_size, load_kind_of, LowerCtx};
 
@@ -44,7 +44,176 @@ pub fn lower_intrinsic(
         // ── Tier 2: route to an existing runtime function ──
         "almide_rt_int_to_string" => call_runtime("__int_to_string", &args[0..1], 1, ctx),
 
+        // ── Tier 3: higher-order with an inline (non-capturing) lambda ──
+        "almide_rt_list_map" if args.len() == 2 => list_map(&args[0], &args[1], ret_ty, ctx),
+        "almide_rt_list_fold" if args.len() == 3 => list_fold(&args[0], &args[1], &args[2], ret_ty, ctx),
+
         _ => None,
+    }
+}
+
+/// Extract a single-`Op::Block(Loop)` over a list with the standard header:
+/// sets up `xs`/`len`/`idx` locals, emits the bounds check, and runs `body`
+/// (which sees the element address computation already done into `elem`).
+///
+/// Returns (xs_local, idx_local, len_local).
+struct ListLoop { xs: u32, idx: u32, len: u32 }
+
+fn list_loop_header(xs_expr: &IrExpr, ctx: &mut LowerCtx) -> (ListLoop, Vec<Op>) {
+    let xs = ctx.alloc_local(WasmTy::I32);
+    let idx = ctx.alloc_local(WasmTy::I32);
+    let len = ctx.alloc_local(WasmTy::I32);
+    let mut ops = lower_expr(xs_expr, ctx);
+    ops.push(Op::LocalSet(xs));
+    ops.push(Op::LocalGet(xs));
+    ops.push(Op::FieldLoad { layout: layout::LIST, field: list::LEN, kind: LoadKind::I32 });
+    ops.push(Op::LocalSet(len));
+    ops.push(Op::Const(Const::I32(0)));
+    ops.push(Op::LocalSet(idx));
+    (ListLoop { xs, idx, len }, ops)
+}
+
+/// Load `xs[idx]` (element width `es`, kind `lk`) and push its address-free value.
+fn load_elem(xs: u32, idx: u32, es: i32, lk: LoadKind) -> Vec<Op> {
+    vec![
+        Op::LocalGet(xs),
+        Op::Const(Const::I32(8)),
+        Op::BinOp(B::I32Add),
+        Op::LocalGet(idx),
+        Op::Const(Const::I32(es)),
+        Op::BinOp(B::I32Mul),
+        Op::BinOp(B::I32Add),
+        Op::Load(lk),
+    ]
+}
+
+/// `list.map(xs, f)` with an inline lambda `f = (p) => body`. Builds a new list
+/// of the same length, applying the lowered body per element.
+fn list_map(xs_expr: &IrExpr, f: &IrExpr, ret_ty: &Ty, ctx: &mut LowerCtx) -> Option<Vec<Op>> {
+    let (pvar, pty, body) = inline_lambda(f, 1)?;
+    let in_es = super::lower::wasm_byte_size(&pty);
+    let in_lk = load_kind_of(ty_to_wasm(&pty));
+    let out_ty = super::lower::list_element_ty(ret_ty).unwrap_or(Ty::Int);
+    let out_es = super::lower::wasm_byte_size(&out_ty);
+    let out_sk = store_kind_of(ty_to_wasm(&out_ty));
+
+    let (lp, mut ops) = list_loop_header(xs_expr, ctx);
+    let out = ctx.alloc_local(WasmTy::I32);
+    let elem = ctx.alloc_local(ty_to_wasm(&pty));
+    ctx.map_var(pvar, elem);
+
+    // out = __alloc(8 + len*out_es); out.len = out.cap = len
+    let alloc = (ctx.func_idx)("__alloc")?;
+    ops.push(Op::Const(Const::I32(8)));
+    ops.push(Op::LocalGet(lp.len));
+    ops.push(Op::Const(Const::I32(out_es)));
+    ops.push(Op::BinOp(B::I32Mul));
+    ops.push(Op::BinOp(B::I32Add));
+    ops.push(Op::Call { idx: alloc, pops: 1, pushes: 1 });
+    ops.push(Op::LocalSet(out));
+    ops.push(Op::LocalGet(out));
+    ops.push(Op::LocalGet(lp.len));
+    ops.push(Op::Store(StoreKind::I32));
+    ops.push(Op::LocalGet(out));
+    ops.push(Op::Const(Const::I32(4)));
+    ops.push(Op::BinOp(B::I32Add));
+    ops.push(Op::LocalGet(lp.len));
+    ops.push(Op::Store(StoreKind::I32));
+
+    let mut loop_body = Vec::new();
+    loop_body.push(Op::LocalGet(lp.idx));
+    loop_body.push(Op::LocalGet(lp.len));
+    loop_body.push(Op::BinOp(B::I32GeU));
+    loop_body.push(Op::BrIf(1));
+    // elem = xs[idx]
+    loop_body.extend(load_elem(lp.xs, lp.idx, in_es, in_lk));
+    loop_body.push(Op::LocalSet(elem));
+    // out_addr = out + 8 + idx*out_es ; then body value ; store
+    loop_body.push(Op::LocalGet(out));
+    loop_body.push(Op::Const(Const::I32(8)));
+    loop_body.push(Op::BinOp(B::I32Add));
+    loop_body.push(Op::LocalGet(lp.idx));
+    loop_body.push(Op::Const(Const::I32(out_es)));
+    loop_body.push(Op::BinOp(B::I32Mul));
+    loop_body.push(Op::BinOp(B::I32Add));
+    loop_body.extend(lower_expr(body, ctx));
+    loop_body.push(Op::Store(out_sk));
+    // idx++
+    loop_body.push(Op::LocalGet(lp.idx));
+    loop_body.push(Op::Const(Const::I32(1)));
+    loop_body.push(Op::BinOp(B::I32Add));
+    loop_body.push(Op::LocalSet(lp.idx));
+    loop_body.push(Op::Br(0));
+
+    ops.push(Op::Block(vec![Op::Loop(loop_body)]));
+    ops.push(Op::LocalGet(out));
+    Some(ops)
+}
+
+/// `list.fold(xs, init, f)` with an inline lambda `f = (acc, elem) => body`.
+fn list_fold(xs_expr: &IrExpr, init: &IrExpr, f: &IrExpr, ret_ty: &Ty, ctx: &mut LowerCtx) -> Option<Vec<Op>> {
+    let (params, body) = inline_lambda_n(f, 2)?;
+    let (acc_var, acc_ty) = params[0].clone();
+    let (elem_var, elem_ty) = params[1].clone();
+    let acc_wasm = ty_to_wasm(ret_ty);
+    let in_es = super::lower::wasm_byte_size(&elem_ty);
+    let in_lk = load_kind_of(ty_to_wasm(&elem_ty));
+
+    let acc = ctx.alloc_local(acc_wasm);
+    let elem = ctx.alloc_local(ty_to_wasm(&elem_ty));
+    let _ = acc_ty;
+    let mut ops = lower_expr(init, ctx);
+    ops.push(Op::LocalSet(acc));
+    let (lp, header) = list_loop_header(xs_expr, ctx);
+    ops.extend(header);
+    ctx.map_var(acc_var, acc);
+    ctx.map_var(elem_var, elem);
+
+    let mut loop_body = Vec::new();
+    loop_body.push(Op::LocalGet(lp.idx));
+    loop_body.push(Op::LocalGet(lp.len));
+    loop_body.push(Op::BinOp(B::I32GeU));
+    loop_body.push(Op::BrIf(1));
+    loop_body.extend(load_elem(lp.xs, lp.idx, in_es, in_lk));
+    loop_body.push(Op::LocalSet(elem));
+    // acc = body(acc, elem)
+    loop_body.extend(lower_expr(body, ctx));
+    loop_body.push(Op::LocalSet(acc));
+    loop_body.push(Op::LocalGet(lp.idx));
+    loop_body.push(Op::Const(Const::I32(1)));
+    loop_body.push(Op::BinOp(B::I32Add));
+    loop_body.push(Op::LocalSet(lp.idx));
+    loop_body.push(Op::Br(0));
+
+    ops.push(Op::Block(vec![Op::Loop(loop_body)]));
+    ops.push(Op::LocalGet(acc));
+    Some(ops)
+}
+
+/// Match an inline lambda with exactly `n` params; return (params, body).
+fn inline_lambda_n(f: &IrExpr, n: usize) -> Option<(Vec<(almide_ir::VarId, Ty)>, &IrExpr)> {
+    match &f.kind {
+        almide_ir::IrExprKind::Lambda { params, body, .. } if params.len() == n => {
+            Some((params.clone(), body))
+        }
+        _ => None, // ClosureCreate / fn-ref args are not inlined (yet)
+    }
+}
+
+/// Single-param convenience wrapper around `inline_lambda_n`.
+fn inline_lambda(f: &IrExpr, n: usize) -> Option<(almide_ir::VarId, Ty, &IrExpr)> {
+    let (params, body) = inline_lambda_n(f, n)?;
+    let (v, t) = params[0].clone();
+    Some((v, t, body))
+}
+
+fn store_kind_of(wt: WasmTy) -> StoreKind {
+    use StoreKind as SK;
+    match wt {
+        WasmTy::I64 => SK::I64,
+        WasmTy::F64 => SK::F64,
+        WasmTy::F32 => SK::F32,
+        WasmTy::I32 => SK::I32,
     }
 }
 
