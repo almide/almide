@@ -23,6 +23,11 @@ use super::data::DataInterner;
 use super::module::SigTable;
 
 /// Lowering context for a single function.
+/// Named record type → its fields in declaration order. Lets the engine resolve
+/// `Ty::Named("Foo")` to concrete field offsets (the frontend leaves named
+/// record types unresolved in the IR).
+pub type RecordLayouts = std::collections::HashMap<almide_base::intern::Sym, Vec<(almide_base::intern::Sym, Ty)>>;
+
 pub struct LowerCtx<'a> {
     /// Maps VarId → WASM local index.
     var_map: Vec<Option<Local>>,
@@ -44,6 +49,8 @@ pub struct LowerCtx<'a> {
     pub lambda_binds: std::collections::HashMap<VarId, IrExpr>,
     /// Next scratch local index (for temporaries).
     next_local: u32,
+    /// Named record type layouts, for resolving `Ty::Named` field offsets.
+    pub record_types: &'a RecordLayouts,
 }
 
 impl<'a> LowerCtx<'a> {
@@ -54,6 +61,7 @@ impl<'a> LowerCtx<'a> {
         func_idx: &'a dyn Fn(&str) -> Option<FuncIdx>,
         interner: &'a mut DataInterner,
         sigs: &'a mut SigTable,
+        record_types: &'a RecordLayouts,
     ) -> Self {
         let mut var_map = vec![None; var_table.len()];
         let mut locals = Vec::new();
@@ -79,6 +87,7 @@ impl<'a> LowerCtx<'a> {
             sigs,
             lambda_binds: std::collections::HashMap::new(),
             next_local: param_count,
+            record_types,
         }
     }
 
@@ -155,8 +164,9 @@ pub fn lower_function(
     func_idx: &dyn Fn(&str) -> Option<FuncIdx>,
     interner: &mut DataInterner,
     sigs: &mut SigTable,
+    record_types: &RecordLayouts,
 ) -> WasmFunc {
-    let mut ctx = LowerCtx::new(&func.params, var_table, reg, func_idx, interner, sigs);
+    let mut ctx = LowerCtx::new(&func.params, var_table, reg, func_idx, interner, sigs, record_types);
     let has_result = !matches!(func.ret_ty, Ty::Unit);
     let body = lower_expr(&func.body, &mut ctx);
 
@@ -470,14 +480,14 @@ pub fn lower_expr(expr: &IrExpr, ctx: &mut LowerCtx) -> Vec<Op> {
             // from the same type, so they always agree.
             let mut ops = Vec::new();
             let rec = ctx.alloc_local(WasmTy::I32);
-            let total = record_total_size(&expr.ty)
+            let total = record_total_size(&expr.ty, ctx.record_types)
                 .unwrap_or_else(|| fields.iter().map(|(_, v)| wasm_byte_size(&v.ty)).sum());
             ops.push(Op::Const(Const::I32(total)));
             ops.push(Op::Alloc);
             ops.push(Op::LocalSet(rec));
 
             for (name, value) in fields.iter() {
-                let off = record_field_offset(&expr.ty, name.as_str())
+                let off = record_field_offset(&expr.ty, name.as_str(), ctx.record_types)
                     .map(|(o, _)| o)
                     .unwrap_or(0);
                 ops.push(Op::LocalGet(rec));
@@ -501,7 +511,7 @@ pub fn lower_expr(expr: &IrExpr, ctx: &mut LowerCtx) -> Vec<Op> {
         // ── Member access ──
         IrExprKind::Member { object, field } => {
             let mut ops = lower_expr(object, ctx);
-            let offset = record_field_offset(&object.ty, field.as_str())
+            let offset = record_field_offset(&object.ty, field.as_str(), ctx.record_types)
                 .map(|(o, _)| o)
                 .unwrap_or(0);
             if offset != 0 {
@@ -865,8 +875,45 @@ pub fn lower_expr(expr: &IrExpr, ctx: &mut LowerCtx) -> Vec<Op> {
             ops
         }
 
-        // ── SpreadRecord (record clone + field update not implemented) ──
-        IrExprKind::SpreadRecord { base: _, fields: _ } => vec![Op::Unsupported("SpreadRecord")],
+        // ── SpreadRecord: { ...base, f: v } ──
+        // Spread preserves the record type, so base and result share field
+        // offsets: copy the whole base record, then overwrite the named fields.
+        IrExprKind::SpreadRecord { base, fields } => {
+            let Some(total) = record_total_size(&expr.ty, ctx.record_types) else {
+                return vec![Op::Unsupported("SpreadRecord")];
+            };
+            let mut ops = Vec::new();
+            let out = ctx.alloc_local(WasmTy::I32);
+            let base_l = ctx.alloc_local(WasmTy::I32);
+            ops.extend(lower_expr(base, ctx));
+            ops.push(Op::LocalSet(base_l));
+            ops.push(Op::Const(Const::I32(total)));
+            ops.push(Op::Alloc);
+            ops.push(Op::LocalSet(out));
+            // memcpy(out, base, total)
+            ops.push(Op::LocalGet(out));
+            ops.push(Op::LocalGet(base_l));
+            ops.push(Op::Const(Const::I32(total)));
+            ops.push(Op::MemoryCopy);
+            // overwrite the explicitly-spread fields
+            for (name, value) in fields.iter() {
+                let off = record_field_offset(&expr.ty, name.as_str(), ctx.record_types).map(|(o, _)| o).unwrap_or(0);
+                ops.push(Op::LocalGet(out));
+                if off != 0 {
+                    ops.push(Op::Const(Const::I32(off)));
+                    ops.push(Op::BinOp(WBinOp::I32Add));
+                }
+                ops.extend(lower_expr(value, ctx));
+                let sk = match ty_to_wasm(&value.ty) {
+                    WasmTy::I64 => StoreKind::I64,
+                    WasmTy::F64 => StoreKind::F64,
+                    _ => StoreKind::I32,
+                };
+                ops.push(Op::Store(sk));
+            }
+            ops.push(Op::LocalGet(out));
+            ops
+        }
 
         // ── MapAccess (Swiss Table lookup not implemented) ──
         IrExprKind::MapAccess { object: _, key: _ } => vec![Op::Unsupported("MapAccess")],
@@ -1318,7 +1365,7 @@ fn pattern_condition(pattern: &IrPattern, subj: Local, _subj_ty: &Ty, ctx: &mut 
         // refutable sub-patterns (literals, nested variants) at their slots.
         IrPattern::Tuple { .. } | IrPattern::RecordPattern { .. } => {
             let mut ops = vec![Op::Const(Const::I32(1))];
-            for (off, ty, p) in sub_slots(pattern, _subj_ty) {
+            for (off, ty, p) in sub_slots(pattern, _subj_ty, ctx.record_types) {
                 if pattern_irrefutable(&p) { continue; }
                 let slot = ctx.alloc_local(ty_to_wasm(&ty));
                 ops.extend(load_at(subj, off, &ty, slot));
@@ -1334,7 +1381,7 @@ fn pattern_condition(pattern: &IrPattern, subj: Local, _subj_ty: &Ty, ctx: &mut 
                 Op::LocalGet(subj), Op::Load(LoadKind::I32),
                 Op::Const(Const::I32(elements.len() as i32)), Op::BinOp(WBinOp::I32Eq),
             ];
-            for (off, ty, p) in sub_slots(pattern, _subj_ty) {
+            for (off, ty, p) in sub_slots(pattern, _subj_ty, ctx.record_types) {
                 if pattern_irrefutable(&p) { continue; }
                 let slot = ctx.alloc_local(ty_to_wasm(&ty));
                 ops.extend(load_at(subj, off, &ty, slot));
@@ -1373,7 +1420,7 @@ fn pattern_fallback_ty(p: &IrPattern) -> Ty {
 
 /// The (byte offset, element type, sub-pattern) triples of a composite pattern,
 /// using `subj_ty` as the authority for layout (so offsets match construction).
-fn sub_slots<'a>(pattern: &'a IrPattern, subj_ty: &Ty) -> Vec<(i32, Ty, IrPattern)> {
+fn sub_slots(pattern: &IrPattern, subj_ty: &Ty, recs: &RecordLayouts) -> Vec<(i32, Ty, IrPattern)> {
     match pattern {
         IrPattern::Tuple { elements } => {
             let elem_tys: Vec<Ty> = match subj_ty {
@@ -1393,7 +1440,7 @@ fn sub_slots<'a>(pattern: &'a IrPattern, subj_ty: &Ty) -> Vec<(i32, Ty, IrPatter
             let mut out = Vec::new();
             for f in fields {
                 let Some(p) = &f.pattern else { continue };
-                if let Some((off, fty)) = record_field_offset(subj_ty, &f.name) {
+                if let Some((off, fty)) = record_field_offset(subj_ty, &f.name, recs) {
                     out.push((off, fty, p.clone()));
                 }
             }
@@ -1459,7 +1506,7 @@ fn bind_pattern(pattern: &IrPattern, subj: Local, subj_ty: &Ty, ctx: &mut LowerC
         }
         IrPattern::Tuple { .. } | IrPattern::RecordPattern { .. } | IrPattern::List { .. } => {
             let mut ops = Vec::new();
-            for (off, ty, p) in sub_slots(pattern, subj_ty) {
+            for (off, ty, p) in sub_slots(pattern, subj_ty, ctx.record_types) {
                 ops.extend(destructure_one(&p, subj, off, &ty, ctx));
             }
             ops
@@ -1534,11 +1581,17 @@ pub(super) fn load_kind_of(wt: WasmTy) -> LoadKind {
 /// Byte offset (and type) of a named field within a record type, computed by
 /// summing the natural widths of preceding fields in declared order. Returns
 /// None if the type is not a record or the field is absent.
-fn record_field_offset(ty: &Ty, name: &str) -> Option<(i32, Ty)> {
-    let fields = match ty {
-        Ty::Record { fields } | Ty::OpenRecord { fields } => fields,
-        _ => return None,
-    };
+/// Fields of a record type, resolving `Ty::Named` via the program's type decls.
+fn record_fields<'a>(ty: &'a Ty, recs: &'a RecordLayouts) -> Option<&'a [(almide_base::intern::Sym, Ty)]> {
+    match ty {
+        Ty::Record { fields } | Ty::OpenRecord { fields } => Some(fields.as_slice()),
+        Ty::Named(n, _) => recs.get(n).map(|v| v.as_slice()),
+        _ => None,
+    }
+}
+
+fn record_field_offset(ty: &Ty, name: &str, recs: &RecordLayouts) -> Option<(i32, Ty)> {
+    let fields = record_fields(ty, recs)?;
     let mut off = 0i32;
     for (fname, fty) in fields {
         if fname.as_str() == name {
@@ -1550,13 +1603,8 @@ fn record_field_offset(ty: &Ty, name: &str) -> Option<(i32, Ty)> {
 }
 
 /// Total byte size of a record type (sum of field widths), if known.
-fn record_total_size(ty: &Ty) -> Option<i32> {
-    match ty {
-        Ty::Record { fields } | Ty::OpenRecord { fields } => {
-            Some(fields.iter().map(|(_, t)| wasm_byte_size(t)).sum())
-        }
-        _ => None,
-    }
+fn record_total_size(ty: &Ty, recs: &RecordLayouts) -> Option<i32> {
+    record_fields(ty, recs).map(|fs| fs.iter().map(|(_, t)| wasm_byte_size(t)).sum())
 }
 
 // ── ForIn lowering ───────────────────────────────────────────────────
@@ -1653,7 +1701,7 @@ mod tests {
             visibility: IrVisibility::Private, doc: None, blank_lines_before: 0,
             def_id: None, mutated_params: vec![], module_origin: None,
         };
-        let wasm_func = lower_function(&func, &vt, &reg, &no_func_idx, &mut interner(), &mut SigTable::new());
+        let wasm_func = lower_function(&func, &vt, &reg, &no_func_idx, &mut interner(), &mut SigTable::new(), &RecordLayouts::new());
         assert_eq!(wasm_func.results, vec![WasmTy::I64]);
         assert!(verify_func_stack(&wasm_func).is_ok(), "stack verification failed: {:?}", verify_func_stack(&wasm_func));
     }
@@ -1678,7 +1726,7 @@ mod tests {
             visibility: IrVisibility::Private, doc: None, blank_lines_before: 0,
             def_id: None, mutated_params: vec![], module_origin: None,
         };
-        let wasm_func = lower_function(&func, &vt, &reg, &no_func_idx, &mut interner(), &mut SigTable::new());
+        let wasm_func = lower_function(&func, &vt, &reg, &no_func_idx, &mut interner(), &mut SigTable::new(), &RecordLayouts::new());
         assert!(verify_func_stack(&wasm_func).is_ok());
         // Should be: Const(1), Const(2), I64Add
         assert_eq!(wasm_func.body.len(), 3);
@@ -1710,7 +1758,7 @@ mod tests {
             visibility: IrVisibility::Private, doc: None, blank_lines_before: 0,
             def_id: None, mutated_params: vec![], module_origin: None,
         };
-        let wasm_func = lower_function(&func, &vt, &reg, &no_func_idx, &mut interner(), &mut SigTable::new());
+        let wasm_func = lower_function(&func, &vt, &reg, &no_func_idx, &mut interner(), &mut SigTable::new(), &RecordLayouts::new());
         assert!(verify_func_stack(&wasm_func).is_ok(), "{:?}", verify_func_stack(&wasm_func));
         assert!(wasm_func.results.is_empty());
     }
@@ -1735,7 +1783,7 @@ mod tests {
             visibility: IrVisibility::Private, doc: None, blank_lines_before: 0,
             def_id: None, mutated_params: vec![], module_origin: None,
         };
-        let wasm_func = lower_function(&func, &vt, &reg, &no_func_idx, &mut interner(), &mut SigTable::new());
+        let wasm_func = lower_function(&func, &vt, &reg, &no_func_idx, &mut interner(), &mut SigTable::new(), &RecordLayouts::new());
         assert!(verify_func_stack(&wasm_func).is_ok(), "{:?}", verify_func_stack(&wasm_func));
     }
 }

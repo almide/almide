@@ -23,7 +23,8 @@
 
 use std::collections::HashMap;
 
-use almide_ir::{IrFunction, VarTable};
+use almide_ir::{IrFunction, IrTypeDecl, IrTypeDeclKind, VarTable};
+use super::lower::RecordLayouts;
 use wasm_encoder::{
     CodeSection, ExportSection, Function, FunctionSection, GlobalSection, GlobalType,
     MemorySection, MemoryType, Module, TypeSection, ValType,
@@ -97,7 +98,16 @@ pub fn build_module(
     ir_funcs: &[IrFunction],
     var_table: &VarTable,
     reg: &LayoutRegistry,
+    type_decls: &[IrTypeDecl],
 ) -> Result<Vec<u8>, BuildError> {
+    // Resolve named record types to their field layouts so the engine can
+    // compute field offsets for Ty::Named (the IR leaves them unresolved).
+    let mut record_types: RecordLayouts = HashMap::new();
+    for td in type_decls {
+        if let IrTypeDeclKind::Record { fields } = &td.kind {
+            record_types.insert(td.name, fields.iter().map(|f| (f.name, f.ty.clone())).collect());
+        }
+    }
     // Imports occupy the lowest indices, then runtime functions, then user
     // functions.
     let rt = RuntimeFns::fixed();
@@ -119,7 +129,7 @@ pub fn build_module(
     let mut sigs = SigTable::new();
     let mut user_funcs: Vec<WasmFunc> = Vec::with_capacity(ir_funcs.len());
     for f in ir_funcs {
-        let mut wf = super::lower::lower_function(f, var_table, reg, &lookup, &mut interner, &mut sigs);
+        let mut wf = super::lower::lower_function(f, var_table, reg, &lookup, &mut interner, &mut sigs, &record_types);
         // Resolve Alloc / RcInc / RcDec / StringConcat into Calls to the runtime.
         // Stack-effect preserving, so verification below still holds.
         runtime::resolve_abstract_ops(&mut wf.body, &rt);
@@ -409,7 +419,7 @@ mod tests {
             return None;
         }
         let reg = LayoutRegistry::new();
-        let bytes = build_module(funcs, vt, &reg).expect("build should succeed");
+        let bytes = build_module(funcs, vt, &reg, &[]).expect("build should succeed");
         if let Err(e) = wasmparser::validate(&bytes) {
             panic!("module must validate before exec: {e}");
         }
@@ -721,7 +731,7 @@ mod tests {
         let vt = VarTable::new();
         let reg = LayoutRegistry::new();
         let main = mk_func("main", Ty::Int, lit_int(42));
-        let bytes = build_module(&[main], &vt, &reg).expect("build should succeed");
+        let bytes = build_module(&[main], &vt, &reg, &[]).expect("build should succeed");
         // Valid WASM magic header.
         assert_eq!(&bytes[0..4], b"\0asm");
         // Parses cleanly through wasmparser via the validate path.
@@ -757,7 +767,7 @@ mod tests {
             def_id: None,
         };
         let main = mk_func("main", Ty::Int, call);
-        let bytes = build_module(&[callee, main], &vt, &reg).expect("build should succeed");
+        let bytes = build_module(&[callee, main], &vt, &reg, &[]).expect("build should succeed");
         assert!(wasmparser::validate(&bytes).is_ok(), "module must validate");
     }
 
@@ -774,7 +784,7 @@ mod tests {
             def_id: None,
         };
         let main = mk_func("main", Ty::list(Ty::Int), list);
-        let bytes = build_module(&[main], &vt, &reg).expect("list build should succeed");
+        let bytes = build_module(&[main], &vt, &reg, &[]).expect("list build should succeed");
         assert!(wasmparser::validate(&bytes).is_ok(), "module must validate");
     }
 
@@ -796,7 +806,7 @@ mod tests {
             ty: Ty::String, span: None, def_id: None,
         };
         let main = mk_func("main", Ty::String, interp);
-        let err = build_module(&[main], &vt, &reg).unwrap_err();
+        let err = build_module(&[main], &vt, &reg, &[]).unwrap_err();
         assert!(matches!(err, BuildError::UnresolvedAbstract { op: "StringInterp", .. }), "got {:?}", err);
     }
 
@@ -2165,6 +2175,23 @@ mod tests {
         let none = IrExpr { kind: IrExprKind::OptionNone, ty: opt_ty, span: None, def_id: None };
         let main2 = mk_func("main", Ty::Int, build(none, &vt, x));
         if let Some(r) = run_vt(&[main2], &vt, "main") { assert_eq!(r, "0", "None"); }
+    }
+
+    /// SpreadRecord: { ...base, b: 99 } preserves a/c, overrides b.
+    #[test]
+    fn exec_spread_record() {
+        let rec_ty = Ty::Record { fields: vec![(sym("a"), Ty::Int), (sym("b"), Ty::Int), (sym("c"), Ty::Int)] };
+        let base = IrExpr { kind: IrExprKind::Record { name: None,
+            fields: vec![(sym("a"), lit_int(1)), (sym("b"), lit_int(2)), (sym("c"), lit_int(3))] },
+            ty: rec_ty.clone(), span: None, def_id: None };
+        let spread = IrExpr { kind: IrExprKind::SpreadRecord { base: Box::new(base), fields: vec![(sym("b"), lit_int(99))] },
+            ty: rec_ty.clone(), span: None, def_id: None };
+        let member = |obj: IrExpr, f: &str| IrExpr { kind: IrExprKind::Member { object: Box::new(obj), field: sym(f) },
+            ty: Ty::Int, span: None, def_id: None };
+        let ti = |e: IrExpr, exp: &str, msg: &str| { let m = mk_func("main", Ty::Int, e); if let Some(r) = run(&[m], "main") { assert_eq!(&r, exp, "{}", msg); } };
+        ti(member(spread.clone(), "a"), "1", "spread preserves a");
+        ti(member(spread.clone(), "b"), "99", "spread overrides b");
+        ti(member(spread, "c"), "3", "spread preserves c");
     }
 
     /// map.entries / from_entries round-trip (Map[Int,Int]).

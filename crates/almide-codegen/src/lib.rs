@@ -171,7 +171,7 @@ pub fn codegen_with(program: &mut IrProgram, target: Target, options: &CodegenOp
                 }
                 let reg = emit_wasm::engine::LayoutRegistry::new();
                 match emit_wasm::engine::build_module(
-                    &program.functions, &program.var_table, &reg,
+                    &program.functions, &program.var_table, &reg, &program.type_decls,
                 ) {
                     Ok(bytes) => return CodegenOutput::Binary(bytes),
                     Err(e) => eprintln!("[wasm-v2] {e}; falling back to legacy emitter"),
