@@ -893,6 +893,38 @@ mod tests {
         }
     }
 
+    /// list.flat_map: `[1,2] |> flat_map(x => [x, x*10])` → [1,10,2,20].
+    #[test]
+    fn exec_intrinsic_flat_map() {
+        let mk = |i: i64| {
+            let mut vt = VarTable::new();
+            let x = vt.alloc(sym("x"), Ty::Int, almide_ir::Mutability::Let, None);
+            let vx = || IrExpr { kind: IrExprKind::Var { id: x }, ty: Ty::Int, span: None, def_id: None };
+            let sublist = IrExpr {
+                kind: IrExprKind::List { elements: vec![vx(), binop(almide_ir::BinOp::MulInt, vx(), lit_int(10), Ty::Int)] },
+                ty: Ty::list(Ty::Int), span: None, def_id: None,
+            };
+            let lam = IrExpr {
+                kind: IrExprKind::Lambda { params: vec![(x, Ty::Int)], body: Box::new(sublist), lambda_id: None },
+                ty: Ty::Fn { params: vec![Ty::Int], ret: Box::new(Ty::list(Ty::Int)) }, span: None, def_id: None,
+            };
+            let xs = IrExpr {
+                kind: IrExprKind::List { elements: vec![lit_int(1), lit_int(2)] },
+                ty: Ty::list(Ty::Int), span: None, def_id: None,
+            };
+            let fm = IrExpr {
+                kind: IrExprKind::RuntimeCall { symbol: sym("almide_rt_list_flat_map"), args: vec![xs, lam] },
+                ty: Ty::list(Ty::Int), span: None, def_id: None,
+            };
+            (vt, IrExpr { kind: IrExprKind::IndexAccess { object: Box::new(fm), index: Box::new(lit_int(i)) }, ty: Ty::Int, span: None, def_id: None })
+        };
+        for (i, exp) in [(0, "1"), (1, "10"), (2, "2"), (3, "20")] {
+            let (vt, e) = mk(i);
+            let m = mk_func("main", Ty::Int, e);
+            if let Some(r) = run_vt(&[m], &vt, "main") { assert_eq!(&r, exp, "flat_map[{}]", i); }
+        }
+    }
+
     /// list.reverse: `[1,2,3].reverse()` → [3,2,1]; [0]==3, [2]==1.
     #[test]
     fn exec_intrinsic_reverse() {

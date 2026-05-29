@@ -55,6 +55,7 @@ pub fn lower_intrinsic(
         "almide_rt_list_find" if args.len() == 2 => list_find(&args[0], &args[1], ret_ty, ctx),
         "almide_rt_list_reverse" if args.len() == 1 => list_reverse(&args[0], ret_ty, ctx),
         "almide_rt_list_filter_map" if args.len() == 2 => list_filter_map(&args[0], &args[1], ret_ty, ctx),
+        "almide_rt_list_flat_map" if args.len() == 2 => list_flat_map(&args[0], &args[1], ret_ty, ctx),
 
         // ── Option / Result tag tests (tag @0: Some=1/None=0, Ok=0/Err=1) ──
         "almide_rt_option_is_some" => Some(load_tag(&args[0], ctx)),     // tag (1=Some)
@@ -453,6 +454,61 @@ fn list_filter_map(xs_expr: &IrExpr, f: &IrExpr, ret_ty: &Ty, ctx: &mut LowerCtx
     loop_body.push(Op::Br(0));
     ops.push(Op::Block(vec![Op::Loop(loop_body)]));
     ops.extend(set_list_len(out, oc));
+    ops.push(Op::LocalGet(out));
+    Some(ops)
+}
+
+/// `list.flat_map(xs, f)` — `f: (A) -> List[B]`, concatenating all results.
+/// Built incrementally via __list_concat (accumulator starts empty).
+fn list_flat_map(xs_expr: &IrExpr, f: &IrExpr, ret_ty: &Ty, ctx: &mut LowerCtx) -> Option<Vec<Op>> {
+    let (pvar, pty, body) = inline_lambda(f, 1, ctx)?;
+    let in_es = wasm_byte_size(&pty);
+    let in_lk = load_kind_of(ty_to_wasm(&pty));
+    let out_ty = super::lower::list_element_ty(ret_ty).unwrap_or(Ty::Int);
+    let out_es = wasm_byte_size(&out_ty);
+
+    let (lp, mut ops) = list_loop_header(xs_expr, ctx);
+    let out = ctx.alloc_local(WasmTy::I32);
+    let sub = ctx.alloc_local(WasmTy::I32);
+    let elem = ctx.alloc_local(ty_to_wasm(&pty));
+    ctx.map_var(pvar, elem);
+    let alloc = (ctx.func_idx)("__alloc")?;
+    let concat = (ctx.func_idx)("__list_concat")?;
+
+    // out = empty list (alloc header only, len = cap = 0)
+    ops.push(Op::Const(Const::I32(8)));
+    ops.push(Op::Call { idx: alloc, pops: 1, pushes: 1 });
+    ops.push(Op::LocalSet(out));
+    ops.push(Op::LocalGet(out));
+    ops.push(Op::Const(Const::I32(0)));
+    ops.push(Op::Store(StoreKind::I32));
+    ops.push(Op::LocalGet(out));
+    ops.push(Op::Const(Const::I32(4)));
+    ops.push(Op::BinOp(B::I32Add));
+    ops.push(Op::Const(Const::I32(0)));
+    ops.push(Op::Store(StoreKind::I32));
+
+    let mut loop_body = Vec::new();
+    loop_body.push(Op::LocalGet(lp.idx));
+    loop_body.push(Op::LocalGet(lp.len));
+    loop_body.push(Op::BinOp(B::I32GeU));
+    loop_body.push(Op::BrIf(1));
+    loop_body.extend(load_elem(lp.xs, lp.idx, in_es, in_lk));
+    loop_body.push(Op::LocalSet(elem));
+    loop_body.extend(lower_expr(&body, ctx)); // f(elem) → List[B] ptr
+    loop_body.push(Op::LocalSet(sub));
+    // out = __list_concat(out, sub, out_es)
+    loop_body.push(Op::LocalGet(out));
+    loop_body.push(Op::LocalGet(sub));
+    loop_body.push(Op::Const(Const::I32(out_es)));
+    loop_body.push(Op::Call { idx: concat, pops: 3, pushes: 1 });
+    loop_body.push(Op::LocalSet(out));
+    loop_body.push(Op::LocalGet(lp.idx));
+    loop_body.push(Op::Const(Const::I32(1)));
+    loop_body.push(Op::BinOp(B::I32Add));
+    loop_body.push(Op::LocalSet(lp.idx));
+    loop_body.push(Op::Br(0));
+    ops.push(Op::Block(vec![Op::Loop(loop_body)]));
     ops.push(Op::LocalGet(out));
     Some(ops)
 }
