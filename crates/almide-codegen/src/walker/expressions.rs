@@ -185,7 +185,7 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
             // MatchSubjectPass nanopass — walker just renders what's in the IR.
             let subj = render_expr(ctx, subject);
             let arms_raw = arms.iter()
-                .map(|arm| render_match_arm(ctx, arm, &expr.ty))
+                .map(|arm| super::statements::render_match_arm_ty(ctx, arm, &expr.ty, Some(&subject.ty)))
                 .collect::<Vec<_>>()
                 .join("\n");
             let arms_str = indent_lines(&arms_raw, 4);

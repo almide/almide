@@ -50,6 +50,12 @@ impl Parser {
             self.expect(TokenType::RParen)?;
             return Ok(first);
         }
+        // Anonymous record pattern: { x }, { x: p, y }, { x, .. }
+        if self.check(TokenType::LBrace) {
+            self.advance();
+            let (fields, rest) = self.parse_record_pattern_fields()?;
+            return Ok(Pattern::RecordPattern { name: sym(""), fields, rest });
+        }
         // List pattern: [], [a], [a, b, ...]
         if self.check(TokenType::LBracket) {
             self.advance();
@@ -161,30 +167,38 @@ impl Parser {
         }
         if self.check(TokenType::LBrace) {
             self.advance();
-            self.skip_newlines();
-            let mut fields = Vec::new();
-            let mut rest = false;
-            while !self.check(TokenType::RBrace) {
-                if self.check(TokenType::DotDot) {
-                    self.advance();
-                    rest = true;
-                    if self.check(TokenType::Comma) { self.advance(); }
-                    self.skip_newlines();
-                    break;
-                }
-                let field_name = self.expect_ident()?;
-                if self.check(TokenType::Colon) {
-                    self.advance();
-                    let pattern = self.parse_pattern()?;
-                    fields.push(FieldPattern { name: field_name, pattern: Some(pattern) });
-                } else {
-                    fields.push(FieldPattern { name: field_name, pattern: None });
-                }
-                if self.check(TokenType::Comma) { self.advance(); self.skip_newlines(); }
-            }
-            self.expect(TokenType::RBrace)?;
+            let (fields, rest) = self.parse_record_pattern_fields()?;
             return Ok(Pattern::RecordPattern { name, fields, rest });
         }
         Ok(Pattern::Constructor { name, args: Vec::new() })
+    }
+
+    /// Parse the body of a record pattern after the opening `{`, up to and
+    /// including the closing `}`. Fields are `name` (shorthand bind) or
+    /// `name: pattern`; a trailing `..` sets `rest`.
+    fn parse_record_pattern_fields(&mut self) -> Result<(Vec<FieldPattern>, bool), String> {
+        self.skip_newlines();
+        let mut fields = Vec::new();
+        let mut rest = false;
+        while !self.check(TokenType::RBrace) {
+            if self.check(TokenType::DotDot) {
+                self.advance();
+                rest = true;
+                if self.check(TokenType::Comma) { self.advance(); }
+                self.skip_newlines();
+                break;
+            }
+            let field_name = self.expect_ident()?;
+            if self.check(TokenType::Colon) {
+                self.advance();
+                let pattern = self.parse_pattern()?;
+                fields.push(FieldPattern { name: field_name, pattern: Some(pattern) });
+            } else {
+                fields.push(FieldPattern { name: field_name, pattern: None });
+            }
+            if self.check(TokenType::Comma) { self.advance(); self.skip_newlines(); }
+        }
+        self.expect(TokenType::RBrace)?;
+        Ok((fields, rest))
     }
 }
