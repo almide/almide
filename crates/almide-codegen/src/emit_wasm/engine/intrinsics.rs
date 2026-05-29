@@ -94,6 +94,8 @@ pub fn lower_intrinsic(
             map_collect(&args[0], 8, ctx),
         "almide_rt_map_remove" if args.len() == 2 && map_supported(&args[0].ty) =>
             map_remove_op(&args[0], &args[1], ctx),
+        "almide_rt_map_merge" if args.len() == 2 && map_supported(&args[0].ty) =>
+            map_merge_op(&args[0], &args[1], ctx),
         "almide_rt_list_sum" if args.len() == 1 => Some(list_sum(&args[0], ctx)),
         // sort: Int lists via the runtime selection sort; other element types
         // (Float/String/composite) fall back until typed comparators land.
@@ -466,6 +468,17 @@ fn map_remove_op(m: &IrExpr, k: &IrExpr, ctx: &mut LowerCtx) -> Option<Vec<Op>> 
     let idx = (ctx.func_idx)("__map_remove")?;
     let mut ops = lower_expr(m, ctx);
     ops.extend(lower_widened(k, &key_ty, ctx));
+    ops.push(Op::Const(Const::I32(kind)));
+    ops.push(Op::Call { idx, pops: 3, pushes: 1 });
+    Some(ops)
+}
+
+/// `map.merge(a, b) -> Map[K,V]` (b wins on duplicate keys).
+fn map_merge_op(a: &IrExpr, b: &IrExpr, ctx: &mut LowerCtx) -> Option<Vec<Op>> {
+    let (kind, _k, _v) = map_kv(&a.ty)?;
+    let idx = (ctx.func_idx)("__map_merge")?;
+    let mut ops = lower_expr(a, ctx);
+    ops.extend(lower_expr(b, ctx));
     ops.push(Op::Const(Const::I32(kind)));
     ops.push(Op::Call { idx, pops: 3, pushes: 1 });
     Some(ops)

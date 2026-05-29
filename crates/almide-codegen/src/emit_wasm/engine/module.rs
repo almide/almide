@@ -843,6 +843,53 @@ mod tests {
         ti(call_i("almide_rt_map_len", vec![set(lit(), 1, 99)], Ty::Int), "3", "len after overwrite");
     }
 
+    /// map.merge: `{1:10,2:20}` merged with `{2:99,3:30}` → b wins on key 2.
+    #[test]
+    fn exec_map_merge() {
+        use almide_lang::types::constructor::TypeConstructorId as TC;
+        let map_ty = || Ty::Applied(TC::Map, vec![Ty::Int, Ty::Int]);
+        let mk = |entries: Vec<(i64, i64)>| IrExpr {
+            kind: IrExprKind::MapLiteral { entries: entries.into_iter().map(|(k, v)| (lit_int(k), lit_int(v))).collect() },
+            ty: map_ty(), span: None, def_id: None,
+        };
+        let call = |symbol: &str, args: Vec<IrExpr>, ty: Ty| IrExpr {
+            kind: IrExprKind::RuntimeCall { symbol: sym(symbol), args }, ty, span: None, def_id: None };
+        let merged = || call("almide_rt_map_merge", vec![mk(vec![(1,10),(2,20)]), mk(vec![(2,99),(3,30)])], map_ty());
+        let get_or = |m: IrExpr, k: i64| call("almide_rt_map_get_or", vec![m, lit_int(k), lit_int(-1)], Ty::Int);
+        let ti = |e: IrExpr, exp: &str, msg: &str| { let m = mk_func("main", Ty::Int, e); if let Some(r) = run(&[m], "main") { assert_eq!(&r, exp, "{}", msg); } };
+        ti(call("almide_rt_map_len", vec![merged()], Ty::Int), "3", "merge len (keys 1,2,3)");
+        ti(get_or(merged(), 1), "10", "key 1 from a");
+        ti(get_or(merged(), 2), "99", "key 2 from b (wins)");
+        ti(get_or(merged(), 3), "30", "key 3 from b");
+    }
+
+    /// map.keys / map.values / map.remove on Map[Int,Int].
+    #[test]
+    fn exec_map_keys_values_remove() {
+        use almide_lang::types::constructor::TypeConstructorId as TC;
+        let map_ty = || Ty::Applied(TC::Map, vec![Ty::Int, Ty::Int]);
+        let lit = || IrExpr {
+            kind: IrExprKind::MapLiteral { entries: vec![
+                (lit_int(1), lit_int(10)), (lit_int(2), lit_int(20)), (lit_int(3), lit_int(30)),
+            ] },
+            ty: map_ty(), span: None, def_id: None,
+        };
+        let call = |symbol: &str, args: Vec<IrExpr>, ty: Ty| IrExpr {
+            kind: IrExprKind::RuntimeCall { symbol: sym(symbol), args }, ty, span: None, def_id: None };
+        let sum = |list: IrExpr| call("almide_rt_list_sum", vec![list], Ty::Int);
+        let ti = |e: IrExpr, exp: &str, msg: &str| { let m = mk_func("main", Ty::Int, e); if let Some(r) = run(&[m], "main") { assert_eq!(&r, exp, "{}", msg); } };
+        let tb = |e: IrExpr, exp: &str, msg: &str| { let m = mk_func("main", Ty::Bool, e); if let Some(r) = run(&[m], "main") { assert_eq!(&r, exp, "{}", msg); } };
+
+        // keys sum 1+2+3=6, values sum 10+20+30=60 (order is hash-dependent)
+        ti(sum(call("almide_rt_map_keys", vec![lit()], Ty::list(Ty::Int))), "6", "keys sum");
+        ti(sum(call("almide_rt_map_values", vec![lit()], Ty::list(Ty::Int))), "60", "values sum");
+        // remove 2 → len 2, no longer contains 2, still contains 1
+        let removed = || call("almide_rt_map_remove", vec![lit(), lit_int(2)], map_ty());
+        ti(call("almide_rt_map_len", vec![removed()], Ty::Int), "2", "len after remove");
+        tb(call("almide_rt_map_contains", vec![removed(), lit_int(2)], Ty::Bool), "0", "removed key gone");
+        tb(call("almide_rt_map_contains", vec![removed(), lit_int(1)], Ty::Bool), "1", "other key kept");
+    }
+
     /// Map[String, Int]: string-keyed lookup via FNV hash + __string_eq probing.
     /// {"a":1,"b":2,"c":3} → get "b" ==2, miss "z" ==-1, contains "c"==1, len 3.
     #[test]

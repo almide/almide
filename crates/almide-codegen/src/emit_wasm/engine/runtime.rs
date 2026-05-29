@@ -59,10 +59,11 @@ pub struct RuntimeFns {
     pub map_key_eq: FuncIdx,
     pub map_collect: FuncIdx, // keys/values into a List
     pub map_remove: FuncIdx,
+    pub map_merge: FuncIdx,
 }
 
 /// The number of runtime functions (they occupy indices `0..COUNT`).
-pub const COUNT: u32 = 26;
+pub const COUNT: u32 = 27;
 
 impl RuntimeFns {
     /// The runtime functions occupy the first `COUNT` indices, in this order.
@@ -94,11 +95,12 @@ impl RuntimeFns {
             map_key_eq: 23,
             map_collect: 24,
             map_remove: 25,
+            map_merge: 26,
         }
     }
 
     /// Map of runtime function names to indices, for the build's name lookup.
-    pub fn name_table(&self) -> [(&'static str, FuncIdx); 26] {
+    pub fn name_table(&self) -> [(&'static str, FuncIdx); 27] {
         [
             ("__alloc", self.alloc),
             ("__rc_inc", self.rc_inc),
@@ -126,6 +128,7 @@ impl RuntimeFns {
             ("__map_key_eq", self.map_key_eq),
             ("__map_collect", self.map_collect),
             ("__map_remove", self.map_remove),
+            ("__map_merge", self.map_merge),
         ]
     }
 }
@@ -161,7 +164,78 @@ pub fn runtime_funcs(reg: &LayoutRegistry, heap_start: i32) -> Vec<WasmFunc> {
         build_map_key_eq(),
         build_map_collect(),
         build_map_remove(),
+        build_map_merge(),
     ]
+}
+
+/// `__map_merge(a, b, kind) -> i32` — all of `a`, then all of `b` (b wins on
+/// duplicate keys). Functional: builds a fresh table.
+fn build_map_merge() -> WasmFunc {
+    let rt = RuntimeFns::fixed();
+    const A: u32 = 0;
+    const B_: u32 = 1;
+    const KIND: u32 = 2;
+    const NEWCAP: u32 = 3;
+    const OUT: u32 = 4;
+    const SLOT: u32 = 5;
+    const SRC: u32 = 6;   // map being copied
+    const SRCCAP: u32 = 7;
+    const EA: u32 = 8;
+
+    // copy all occupied entries of SRC (cap in SRCCAP) into OUT
+    let mut copy = Vec::new();
+    copy.extend([Op::LocalGet(SLOT), Op::LocalGet(SRCCAP), Op::BinOp(B::I32GeU), Op::BrIf(1)]);
+    copy.extend(map_tag_addr(SRC, SLOT)); copy.push(Op::Load(LoadKind::U8));
+    let put = {
+        let mut t = Vec::new();
+        t.extend(map_entry_addr(SRC, SRCCAP, SLOT)); t.push(Op::LocalSet(EA));
+        t.push(Op::LocalGet(OUT));
+        t.push(Op::LocalGet(EA)); t.push(Op::Load(LoadKind::I64));
+        t.push(Op::LocalGet(EA)); t.push(Op::Const(Const::I32(8))); t.push(Op::BinOp(B::I32Add)); t.push(Op::Load(LoadKind::I64));
+        t.push(Op::LocalGet(KIND));
+        t.push(Op::Call { idx: rt.map_put, pops: 4, pushes: 0 });
+        t
+    };
+    copy.push(Op::IfVoid { then: put, else_: vec![] });
+    copy.extend([Op::LocalGet(SLOT), Op::Const(Const::I32(1)), Op::BinOp(B::I32Add), Op::LocalSet(SLOT), Op::Br(0)]);
+    // a small helper to run the copy loop over a given (src, srccap) — emitted twice
+    let copy_loop = |src: u32, cap: u32| {
+        vec![
+            Op::LocalGet(src), Op::LocalSet(SRC),
+            Op::LocalGet(cap), Op::LocalSet(SRCCAP),
+            Op::Const(Const::I32(0)), Op::LocalSet(SLOT),
+            Op::Block(vec![Op::Loop(copy.clone())]),
+        ]
+    };
+
+    const ACAP: u32 = 9;
+    const BCAP: u32 = 10;
+    let mut body = vec![
+        Op::LocalGet(A), Op::Const(Const::I32(4)), Op::BinOp(B::I32Add), Op::Load(LoadKind::I32), Op::LocalSet(ACAP),
+        Op::LocalGet(B_), Op::Const(Const::I32(4)), Op::BinOp(B::I32Add), Op::Load(LoadKind::I32), Op::LocalSet(BCAP),
+        // newcap = (len(a) + len(b)) * 2 ; min 4
+        Op::LocalGet(A), Op::Load(LoadKind::I32), Op::LocalGet(B_), Op::Load(LoadKind::I32), Op::BinOp(B::I32Add),
+        Op::Const(Const::I32(2)), Op::BinOp(B::I32Mul), Op::LocalSet(NEWCAP),
+        Op::LocalGet(NEWCAP), Op::Const(Const::I32(4)), Op::BinOp(B::I32LtU),
+        Op::IfVoid { then: vec![Op::Const(Const::I32(4)), Op::LocalSet(NEWCAP)], else_: vec![] },
+        Op::Const(Const::I32(8)), Op::LocalGet(NEWCAP), Op::BinOp(B::I32Add),
+        Op::LocalGet(NEWCAP), Op::Const(Const::I32(MAP_ENTRY)), Op::BinOp(B::I32Mul), Op::BinOp(B::I32Add),
+        Op::Call { idx: rt.alloc, pops: 1, pushes: 1 }, Op::LocalSet(OUT),
+        Op::LocalGet(OUT), Op::Const(Const::I32(0)), Op::Store(StoreKind::I32),
+        Op::LocalGet(OUT), Op::Const(Const::I32(4)), Op::BinOp(B::I32Add), Op::LocalGet(NEWCAP), Op::Store(StoreKind::I32),
+    ];
+    body.extend(copy_loop(A, ACAP));
+    body.extend(copy_loop(B_, BCAP));
+    body.push(Op::LocalGet(OUT));
+
+    WasmFunc {
+        name: "__map_merge".into(), params: vec![WasmTy::I32, WasmTy::I32, WasmTy::I32], results: vec![WasmTy::I32],
+        locals: vec![
+            WasmTy::I32, WasmTy::I32, WasmTy::I32, WasmTy::I32, WasmTy::I32, // newcap,out,slot,src,srccap
+            WasmTy::I32, WasmTy::I32, WasmTy::I32, // ea, acap, bcap
+        ],
+        body,
+    }
 }
 
 /// `__map_collect(m, field_off, elem_size) -> i32` — collect each occupied
