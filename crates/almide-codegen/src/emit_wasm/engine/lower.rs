@@ -418,7 +418,7 @@ pub fn lower_expr(expr: &IrExpr, ctx: &mut LowerCtx) -> Vec<Op> {
 
         // ── Empty map → __map_new (Map[Int,Int] only) ──
         IrExprKind::EmptyMap => {
-            if super::intrinsics::is_int_int_map(&expr.ty) {
+            if super::intrinsics::map_supported(&expr.ty) {
                 if let Some(idx) = (ctx.func_idx)("__map_new") {
                     return vec![Op::Call { idx, pops: 0, pushes: 1 }];
                 }
@@ -824,22 +824,30 @@ pub fn lower_expr(expr: &IrExpr, ctx: &mut LowerCtx) -> Vec<Op> {
             ops
         }
 
-        // ── MapLiteral → __map_new + __map_set per entry (Map[Int,Int]) ──
+        // ── MapLiteral → __map_new + __map_set per entry ──
         IrExprKind::MapLiteral { entries } => {
-            if !super::intrinsics::is_int_int_map(&expr.ty) {
-                return vec![Op::Unsupported("MapLiteral")];
-            }
+            use almide_lang::types::constructor::TypeConstructorId as TC;
+            let (key_ty, val_ty) = match &expr.ty {
+                Ty::Applied(TC::Map, a) if a.len() == 2 && super::intrinsics::map_supported(&expr.ty) =>
+                    (a[0].clone(), a[1].clone()),
+                _ => return vec![Op::Unsupported("MapLiteral")],
+            };
             let (new_idx, set_idx) = match ((ctx.func_idx)("__map_new"), (ctx.func_idx)("__map_set")) {
                 (Some(n), Some(s)) => (n, s),
                 _ => return vec![Op::Unsupported("MapLiteral")],
+            };
+            let kind = if matches!(key_ty, Ty::String) { 1 } else { 0 };
+            let widen = |ops: &mut Vec<Op>, ty: &Ty| {
+                if matches!(ty_to_wasm(ty), WasmTy::I32) { ops.push(Op::UnOp(WUnOp::I64ExtendI32U)); }
             };
             let m = ctx.alloc_local(WasmTy::I32);
             let mut ops = vec![Op::Call { idx: new_idx, pops: 0, pushes: 1 }, Op::LocalSet(m)];
             for (k, v) in entries {
                 ops.push(Op::LocalGet(m));
-                ops.extend(lower_expr(k, ctx));
-                ops.extend(lower_expr(v, ctx));
-                ops.push(Op::Call { idx: set_idx, pops: 3, pushes: 1 });
+                ops.extend(lower_expr(k, ctx)); widen(&mut ops, &key_ty);
+                ops.extend(lower_expr(v, ctx)); widen(&mut ops, &val_ty);
+                ops.push(Op::Const(Const::I32(kind)));
+                ops.push(Op::Call { idx: set_idx, pops: 4, pushes: 1 });
                 ops.push(Op::LocalSet(m));
             }
             ops.push(Op::LocalGet(m));

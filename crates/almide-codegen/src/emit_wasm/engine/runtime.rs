@@ -55,10 +55,12 @@ pub struct RuntimeFns {
     pub map_get_or: FuncIdx,
     pub map_contains: FuncIdx,
     pub map_len: FuncIdx,
+    pub map_hash: FuncIdx,
+    pub map_key_eq: FuncIdx,
 }
 
 /// The number of runtime functions (they occupy indices `0..COUNT`).
-pub const COUNT: u32 = 22;
+pub const COUNT: u32 = 24;
 
 impl RuntimeFns {
     /// The runtime functions occupy the first `COUNT` indices, in this order.
@@ -86,11 +88,13 @@ impl RuntimeFns {
             map_get_or: 19,
             map_contains: 20,
             map_len: 21,
+            map_hash: 22,
+            map_key_eq: 23,
         }
     }
 
     /// Map of runtime function names to indices, for the build's name lookup.
-    pub fn name_table(&self) -> [(&'static str, FuncIdx); 22] {
+    pub fn name_table(&self) -> [(&'static str, FuncIdx); 24] {
         [
             ("__alloc", self.alloc),
             ("__rc_inc", self.rc_inc),
@@ -114,6 +118,8 @@ impl RuntimeFns {
             ("__map_get_or", self.map_get_or),
             ("__map_contains", self.map_contains),
             ("__map_len", self.map_len),
+            ("__map_hash", self.map_hash),
+            ("__map_key_eq", self.map_key_eq),
         ]
     }
 }
@@ -145,19 +151,92 @@ pub fn runtime_funcs(reg: &LayoutRegistry, heap_start: i32) -> Vec<WasmFunc> {
         build_map_get_or(),
         build_map_contains(),
         build_map_len(),
+        build_map_hash(),
+        build_map_key_eq(),
     ]
 }
 
-/// `__map_get_or(m, k, default: i64) -> i64` — value for `k`, or `default`.
-/// Like __map_get but returns the value directly (no Option allocation); this
-/// is the target of the `map.get(m, k) ?? default` fusion.
+/// `__map_hash(key: i64, kind: i32) -> i32` — kind 0 = Int (low 32 bits),
+/// kind 1 = String (FNV-1a over the bytes; key is the string pointer).
+fn build_map_hash() -> WasmFunc {
+    const KEY: u32 = 0;
+    const KIND: u32 = 1;
+    const P: u32 = 2;
+    const LEN: u32 = 3;
+    const H: u32 = 4;
+    const I: u32 = 5;
+
+    let mut fnv_loop = vec![
+        Op::LocalGet(I), Op::LocalGet(LEN), Op::BinOp(B::I32GeU), Op::BrIf(1),
+        // h = (h ^ byte[p+8+i]) * 16777619
+        Op::LocalGet(H),
+        Op::LocalGet(P), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add), Op::LocalGet(I), Op::BinOp(B::I32Add), Op::Load(LoadKind::U8),
+        Op::BinOp(B::I32Xor),
+        Op::Const(Const::I32(16777619)), Op::BinOp(B::I32Mul),
+        Op::LocalSet(H),
+        Op::LocalGet(I), Op::Const(Const::I32(1)), Op::BinOp(B::I32Add), Op::LocalSet(I), Op::Br(0),
+    ];
+    let string_hash = {
+        let mut t = vec![
+            Op::LocalGet(KEY), Op::UnOp(U::I32WrapI64), Op::LocalSet(P),
+            Op::LocalGet(P), Op::Load(LoadKind::I32), Op::LocalSet(LEN),
+            Op::Const(Const::I32(-2128831035)), Op::LocalSet(H), // 2166136261 (FNV offset)
+            Op::Const(Const::I32(0)), Op::LocalSet(I),
+        ];
+        t.push(Op::Block(vec![Op::Loop(std::mem::take(&mut fnv_loop))]));
+        t.push(Op::LocalGet(H));
+        t
+    };
+    WasmFunc {
+        name: "__map_hash".into(), params: vec![WasmTy::I64, WasmTy::I32], results: vec![WasmTy::I32],
+        locals: vec![WasmTy::I32, WasmTy::I32, WasmTy::I32, WasmTy::I32], // p, len, h, i
+        body: vec![
+            Op::LocalGet(KIND), Op::UnOp(U::I32Eqz),
+            Op::If {
+                ty: WasmTy::I32,
+                then: vec![Op::LocalGet(KEY), Op::UnOp(U::I32WrapI64)],
+                else_: string_hash,
+            },
+        ],
+    }
+}
+
+/// `__map_key_eq(a: i64, b: i64, kind: i32) -> i32` — Int: i64 eq; String:
+/// __string_eq over the two pointers.
+fn build_map_key_eq() -> WasmFunc {
+    let rt = RuntimeFns::fixed();
+    const A: u32 = 0;
+    const B_: u32 = 1;
+    const KIND: u32 = 2;
+    WasmFunc {
+        name: "__map_key_eq".into(), params: vec![WasmTy::I64, WasmTy::I64, WasmTy::I32], results: vec![WasmTy::I32],
+        locals: vec![],
+        body: vec![
+            Op::LocalGet(KIND), Op::UnOp(U::I32Eqz),
+            Op::If {
+                ty: WasmTy::I32,
+                then: vec![Op::LocalGet(A), Op::LocalGet(B_), Op::BinOp(B::I64Eq)],
+                else_: vec![
+                    Op::LocalGet(A), Op::UnOp(U::I32WrapI64),
+                    Op::LocalGet(B_), Op::UnOp(U::I32WrapI64),
+                    Op::Call { idx: rt.string_eq, pops: 2, pushes: 1 },
+                ],
+            },
+        ],
+    }
+}
+
+/// `__map_get_or(m, k, default: i64, kind: i32) -> i64` — value or default.
+/// Returns the value directly (no Option alloc); target of the `?? d` fusion.
 fn build_map_get_or() -> WasmFunc {
+    let rt = RuntimeFns::fixed();
     const M: u32 = 0;
     const K: u32 = 1;
     const DEF: u32 = 2;
-    const CAP: u32 = 3;
-    const SLOT: u32 = 4;
-    const EA: u32 = 5;
+    const KIND: u32 = 3;
+    const CAP: u32 = 4;
+    const SLOT: u32 = 5;
+    const EA: u32 = 6;
 
     let mut loop_body = Vec::new();
     loop_body.extend(map_tag_addr(M, SLOT)); loop_body.push(Op::Load(LoadKind::U8));
@@ -165,7 +244,8 @@ fn build_map_get_or() -> WasmFunc {
     loop_body.push(Op::IfVoid { then: vec![Op::LocalGet(DEF), Op::Return], else_: vec![] });
     loop_body.extend(map_entry_addr(M, CAP, SLOT)); loop_body.push(Op::LocalSet(EA));
     loop_body.push(Op::LocalGet(EA)); loop_body.push(Op::Load(LoadKind::I64));
-    loop_body.push(Op::LocalGet(K)); loop_body.push(Op::BinOp(B::I64Eq));
+    loop_body.push(Op::LocalGet(K)); loop_body.push(Op::LocalGet(KIND));
+    loop_body.push(Op::Call { idx: rt.map_key_eq, pops: 3, pushes: 1 });
     loop_body.push(Op::IfVoid {
         then: vec![Op::LocalGet(EA), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add), Op::Load(LoadKind::I64), Op::Return],
         else_: vec![],
@@ -176,12 +256,13 @@ fn build_map_get_or() -> WasmFunc {
         Op::LocalGet(M), Op::Const(Const::I32(4)), Op::BinOp(B::I32Add), Op::Load(LoadKind::I32), Op::LocalSet(CAP),
         Op::LocalGet(CAP), Op::UnOp(U::I32Eqz),
         Op::IfVoid { then: vec![Op::LocalGet(DEF), Op::Return], else_: vec![] },
-        Op::LocalGet(K), Op::UnOp(U::I32WrapI64), Op::LocalGet(CAP), Op::BinOp(B::I32RemU), Op::LocalSet(SLOT),
+        Op::LocalGet(K), Op::LocalGet(KIND), Op::Call { idx: rt.map_hash, pops: 2, pushes: 1 },
+        Op::LocalGet(CAP), Op::BinOp(B::I32RemU), Op::LocalSet(SLOT),
         Op::Loop(loop_body),
-        Op::LocalGet(DEF), // unreachable
+        Op::LocalGet(DEF),
     ];
     WasmFunc {
-        name: "__map_get_or".into(), params: vec![WasmTy::I32, WasmTy::I64, WasmTy::I64], results: vec![WasmTy::I64],
+        name: "__map_get_or".into(), params: vec![WasmTy::I32, WasmTy::I64, WasmTy::I64, WasmTy::I32], results: vec![WasmTy::I64],
         locals: vec![WasmTy::I32, WasmTy::I32, WasmTy::I32], // cap, slot, ea
         body,
     }
@@ -226,18 +307,19 @@ fn build_map_new() -> WasmFunc {
     }
 }
 
-/// `__map_put(m, k: i64, v: i64)` — insert/overwrite into a table with spare
-/// capacity (used while building; never resizes). Increments len for new keys.
+/// `__map_put(m, k: i64, v: i64, kind: i32)` — insert/overwrite into a table
+/// with spare capacity (build-time; never resizes). Bumps len for new keys.
 fn build_map_put() -> WasmFunc {
+    let rt = RuntimeFns::fixed();
     const M: u32 = 0;
     const K: u32 = 1;
     const V: u32 = 2;
-    const CAP: u32 = 3;
-    const SLOT: u32 = 4;
-    const EA: u32 = 5;
+    const KIND: u32 = 3;
+    const CAP: u32 = 4;
+    const SLOT: u32 = 5;
+    const EA: u32 = 6;
 
     let mut loop_body = Vec::new();
-    // if tag empty: insert new, bump len, return
     loop_body.extend(map_tag_addr(M, SLOT));
     loop_body.push(Op::Load(LoadKind::U8));
     loop_body.push(Op::UnOp(U::I32Eqz));
@@ -247,33 +329,33 @@ fn build_map_put() -> WasmFunc {
         t.extend(map_entry_addr(M, CAP, SLOT)); t.push(Op::LocalGet(K)); t.push(Op::Store(StoreKind::I64));
         t.extend(map_entry_addr(M, CAP, SLOT)); t.push(Op::Const(Const::I32(8))); t.push(Op::BinOp(B::I32Add));
         t.push(Op::LocalGet(V)); t.push(Op::Store(StoreKind::I64));
-        // m.len += 1
         t.push(Op::LocalGet(M)); t.push(Op::LocalGet(M)); t.push(Op::Load(LoadKind::I32));
         t.push(Op::Const(Const::I32(1))); t.push(Op::BinOp(B::I32Add)); t.push(Op::Store(StoreKind::I32));
         t.push(Op::Return);
         t
     };
     loop_body.push(Op::IfVoid { then: insert, else_: vec![] });
-    // occupied: if key matches, overwrite value, return
+    // occupied: if key matches (kind-dispatched), overwrite value, return
     loop_body.extend(map_entry_addr(M, CAP, SLOT)); loop_body.push(Op::LocalSet(EA));
     loop_body.push(Op::LocalGet(EA)); loop_body.push(Op::Load(LoadKind::I64));
-    loop_body.push(Op::LocalGet(K)); loop_body.push(Op::BinOp(B::I64Eq));
+    loop_body.push(Op::LocalGet(K)); loop_body.push(Op::LocalGet(KIND));
+    loop_body.push(Op::Call { idx: rt.map_key_eq, pops: 3, pushes: 1 });
     let overwrite = vec![
         Op::LocalGet(EA), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add),
         Op::LocalGet(V), Op::Store(StoreKind::I64), Op::Return,
     ];
     loop_body.push(Op::IfVoid { then: overwrite, else_: vec![] });
-    // probe: slot = (slot + 1) % cap
     loop_body.extend([Op::LocalGet(SLOT), Op::Const(Const::I32(1)), Op::BinOp(B::I32Add), Op::LocalGet(CAP), Op::BinOp(B::I32RemU), Op::LocalSet(SLOT), Op::Br(0)]);
 
     let body = vec![
         Op::LocalGet(M), Op::Const(Const::I32(4)), Op::BinOp(B::I32Add), Op::Load(LoadKind::I32), Op::LocalSet(CAP),
-        // slot = (k as u32) % cap
-        Op::LocalGet(K), Op::UnOp(U::I32WrapI64), Op::LocalGet(CAP), Op::BinOp(B::I32RemU), Op::LocalSet(SLOT),
+        // slot = hash(k, kind) % cap
+        Op::LocalGet(K), Op::LocalGet(KIND), Op::Call { idx: rt.map_hash, pops: 2, pushes: 1 },
+        Op::LocalGet(CAP), Op::BinOp(B::I32RemU), Op::LocalSet(SLOT),
         Op::Loop(loop_body),
     ];
     WasmFunc {
-        name: "__map_put".into(), params: vec![WasmTy::I32, WasmTy::I64, WasmTy::I64], results: vec![],
+        name: "__map_put".into(), params: vec![WasmTy::I32, WasmTy::I64, WasmTy::I64, WasmTy::I32], results: vec![],
         locals: vec![WasmTy::I32, WasmTy::I32, WasmTy::I32], // cap, slot, ea
         body,
     }
@@ -286,13 +368,14 @@ fn build_map_set() -> WasmFunc {
     const M: u32 = 0;
     const K: u32 = 1;
     const V: u32 = 2;
-    const OLDCAP: u32 = 3;
-    const NEWCAP: u32 = 4;
-    const OUT: u32 = 5;
-    const SLOT: u32 = 6;
-    const EA: u32 = 7;
+    const KIND: u32 = 3;
+    const OLDCAP: u32 = 4;
+    const NEWCAP: u32 = 5;
+    const OUT: u32 = 6;
+    const SLOT: u32 = 7;
+    const EA: u32 = 8;
 
-    // copy loop over old slots
+    // copy loop over old slots (re-put with the same kind)
     let mut copy = Vec::new();
     copy.extend([Op::LocalGet(SLOT), Op::LocalGet(OLDCAP), Op::BinOp(B::I32GeU), Op::BrIf(1)]);
     copy.extend(map_tag_addr(M, SLOT)); copy.push(Op::Load(LoadKind::U8));
@@ -302,7 +385,8 @@ fn build_map_set() -> WasmFunc {
         t.push(Op::LocalGet(OUT));
         t.push(Op::LocalGet(EA)); t.push(Op::Load(LoadKind::I64));            // key
         t.push(Op::LocalGet(EA)); t.push(Op::Const(Const::I32(8))); t.push(Op::BinOp(B::I32Add)); t.push(Op::Load(LoadKind::I64)); // val
-        t.push(Op::Call { idx: rt.map_put, pops: 3, pushes: 0 });
+        t.push(Op::LocalGet(KIND));
+        t.push(Op::Call { idx: rt.map_put, pops: 4, pushes: 0 });
         t
     };
     copy.push(Op::IfVoid { then: put_old, else_: vec![] });
@@ -310,50 +394,47 @@ fn build_map_set() -> WasmFunc {
 
     let body = vec![
         Op::LocalGet(M), Op::Const(Const::I32(4)), Op::BinOp(B::I32Add), Op::Load(LoadKind::I32), Op::LocalSet(OLDCAP),
-        // newcap = (len + 1) * 2 ; min 4
         Op::LocalGet(M), Op::Load(LoadKind::I32), Op::Const(Const::I32(1)), Op::BinOp(B::I32Add),
         Op::Const(Const::I32(2)), Op::BinOp(B::I32Mul), Op::LocalSet(NEWCAP),
         Op::LocalGet(NEWCAP), Op::Const(Const::I32(4)), Op::BinOp(B::I32LtU),
         Op::IfVoid { then: vec![Op::Const(Const::I32(4)), Op::LocalSet(NEWCAP)], else_: vec![] },
-        // out = __alloc(8 + newcap + newcap*16) ; out.len=0 ; out.cap=newcap
         Op::Const(Const::I32(8)), Op::LocalGet(NEWCAP), Op::BinOp(B::I32Add),
         Op::LocalGet(NEWCAP), Op::Const(Const::I32(MAP_ENTRY)), Op::BinOp(B::I32Mul), Op::BinOp(B::I32Add),
         Op::Call { idx: rt.alloc, pops: 1, pushes: 1 }, Op::LocalSet(OUT),
         Op::LocalGet(OUT), Op::Const(Const::I32(0)), Op::Store(StoreKind::I32),
         Op::LocalGet(OUT), Op::Const(Const::I32(4)), Op::BinOp(B::I32Add), Op::LocalGet(NEWCAP), Op::Store(StoreKind::I32),
-        // copy old entries
         Op::Const(Const::I32(0)), Op::LocalSet(SLOT),
         Op::Block(vec![Op::Loop(copy)]),
         // put (k, v)
-        Op::LocalGet(OUT), Op::LocalGet(K), Op::LocalGet(V), Op::Call { idx: rt.map_put, pops: 3, pushes: 0 },
+        Op::LocalGet(OUT), Op::LocalGet(K), Op::LocalGet(V), Op::LocalGet(KIND), Op::Call { idx: rt.map_put, pops: 4, pushes: 0 },
         Op::LocalGet(OUT),
     ];
     WasmFunc {
-        name: "__map_set".into(), params: vec![WasmTy::I32, WasmTy::I64, WasmTy::I64], results: vec![WasmTy::I32],
+        name: "__map_set".into(), params: vec![WasmTy::I32, WasmTy::I64, WasmTy::I64, WasmTy::I32], results: vec![WasmTy::I32],
         locals: vec![WasmTy::I32, WasmTy::I32, WasmTy::I32, WasmTy::I32, WasmTy::I32], // oldcap,newcap,out,slot,ea
         body,
     }
 }
 
-/// `__map_get(m, k) -> i32` — Option[Int]: Some(value) if present else None.
+/// `__map_get(m, k, kind) -> i32` — Option (payload i64): Some(value) or None.
 fn build_map_get() -> WasmFunc {
     let rt = RuntimeFns::fixed();
     const M: u32 = 0;
     const K: u32 = 1;
-    const CAP: u32 = 2;
-    const SLOT: u32 = 3;
-    const OPT: u32 = 4;
-    const EA: u32 = 5;
+    const KIND: u32 = 2;
+    const CAP: u32 = 3;
+    const SLOT: u32 = 4;
+    const OPT: u32 = 5;
+    const EA: u32 = 6;
 
     let mut loop_body = Vec::new();
-    // empty slot → return None (opt already tag 0)
     loop_body.extend(map_tag_addr(M, SLOT)); loop_body.push(Op::Load(LoadKind::U8));
     loop_body.push(Op::UnOp(U::I32Eqz));
     loop_body.push(Op::IfVoid { then: vec![Op::LocalGet(OPT), Op::Return], else_: vec![] });
-    // key match → Some(val)
     loop_body.extend(map_entry_addr(M, CAP, SLOT)); loop_body.push(Op::LocalSet(EA));
     loop_body.push(Op::LocalGet(EA)); loop_body.push(Op::Load(LoadKind::I64));
-    loop_body.push(Op::LocalGet(K)); loop_body.push(Op::BinOp(B::I64Eq));
+    loop_body.push(Op::LocalGet(K)); loop_body.push(Op::LocalGet(KIND));
+    loop_body.push(Op::Call { idx: rt.map_key_eq, pops: 3, pushes: 1 });
     let found = vec![
         Op::LocalGet(OPT), Op::Const(Const::I32(1)), Op::Store(StoreKind::I32),
         Op::LocalGet(OPT), Op::Const(Const::I32(4)), Op::BinOp(B::I32Add),
@@ -365,31 +446,32 @@ fn build_map_get() -> WasmFunc {
     loop_body.extend([Op::LocalGet(SLOT), Op::Const(Const::I32(1)), Op::BinOp(B::I32Add), Op::LocalGet(CAP), Op::BinOp(B::I32RemU), Op::LocalSet(SLOT), Op::Br(0)]);
 
     let body = vec![
-        // opt = __alloc(12) ; opt.tag = 0 (None)
         Op::Const(Const::I32(12)), Op::Call { idx: rt.alloc, pops: 1, pushes: 1 }, Op::LocalSet(OPT),
         Op::LocalGet(OPT), Op::Const(Const::I32(0)), Op::Store(StoreKind::I32),
         Op::LocalGet(M), Op::Const(Const::I32(4)), Op::BinOp(B::I32Add), Op::Load(LoadKind::I32), Op::LocalSet(CAP),
-        // empty map → None
         Op::LocalGet(CAP), Op::UnOp(U::I32Eqz),
         Op::IfVoid { then: vec![Op::LocalGet(OPT), Op::Return], else_: vec![] },
-        Op::LocalGet(K), Op::UnOp(U::I32WrapI64), Op::LocalGet(CAP), Op::BinOp(B::I32RemU), Op::LocalSet(SLOT),
+        Op::LocalGet(K), Op::LocalGet(KIND), Op::Call { idx: rt.map_hash, pops: 2, pushes: 1 },
+        Op::LocalGet(CAP), Op::BinOp(B::I32RemU), Op::LocalSet(SLOT),
         Op::Loop(loop_body),
-        Op::LocalGet(OPT), // unreachable (loop returns), keeps result type
+        Op::LocalGet(OPT),
     ];
     WasmFunc {
-        name: "__map_get".into(), params: vec![WasmTy::I32, WasmTy::I64], results: vec![WasmTy::I32],
+        name: "__map_get".into(), params: vec![WasmTy::I32, WasmTy::I64, WasmTy::I32], results: vec![WasmTy::I32],
         locals: vec![WasmTy::I32, WasmTy::I32, WasmTy::I32, WasmTy::I32], // cap, slot, opt, ea
         body,
     }
 }
 
-/// `__map_contains(m, k) -> i32`.
+/// `__map_contains(m, k, kind) -> i32`.
 fn build_map_contains() -> WasmFunc {
+    let rt = RuntimeFns::fixed();
     const M: u32 = 0;
     const K: u32 = 1;
-    const CAP: u32 = 2;
-    const SLOT: u32 = 3;
-    const EA: u32 = 4;
+    const KIND: u32 = 2;
+    const CAP: u32 = 3;
+    const SLOT: u32 = 4;
+    const EA: u32 = 5;
 
     let mut loop_body = Vec::new();
     loop_body.extend(map_tag_addr(M, SLOT)); loop_body.push(Op::Load(LoadKind::U8));
@@ -397,7 +479,8 @@ fn build_map_contains() -> WasmFunc {
     loop_body.push(Op::IfVoid { then: vec![Op::Const(Const::I32(0)), Op::Return], else_: vec![] });
     loop_body.extend(map_entry_addr(M, CAP, SLOT)); loop_body.push(Op::LocalSet(EA));
     loop_body.push(Op::LocalGet(EA)); loop_body.push(Op::Load(LoadKind::I64));
-    loop_body.push(Op::LocalGet(K)); loop_body.push(Op::BinOp(B::I64Eq));
+    loop_body.push(Op::LocalGet(K)); loop_body.push(Op::LocalGet(KIND));
+    loop_body.push(Op::Call { idx: rt.map_key_eq, pops: 3, pushes: 1 });
     loop_body.push(Op::IfVoid { then: vec![Op::Const(Const::I32(1)), Op::Return], else_: vec![] });
     loop_body.extend([Op::LocalGet(SLOT), Op::Const(Const::I32(1)), Op::BinOp(B::I32Add), Op::LocalGet(CAP), Op::BinOp(B::I32RemU), Op::LocalSet(SLOT), Op::Br(0)]);
 
@@ -405,12 +488,13 @@ fn build_map_contains() -> WasmFunc {
         Op::LocalGet(M), Op::Const(Const::I32(4)), Op::BinOp(B::I32Add), Op::Load(LoadKind::I32), Op::LocalSet(CAP),
         Op::LocalGet(CAP), Op::UnOp(U::I32Eqz),
         Op::IfVoid { then: vec![Op::Const(Const::I32(0)), Op::Return], else_: vec![] },
-        Op::LocalGet(K), Op::UnOp(U::I32WrapI64), Op::LocalGet(CAP), Op::BinOp(B::I32RemU), Op::LocalSet(SLOT),
+        Op::LocalGet(K), Op::LocalGet(KIND), Op::Call { idx: rt.map_hash, pops: 2, pushes: 1 },
+        Op::LocalGet(CAP), Op::BinOp(B::I32RemU), Op::LocalSet(SLOT),
         Op::Loop(loop_body),
-        Op::Const(Const::I32(0)), // unreachable
+        Op::Const(Const::I32(0)),
     ];
     WasmFunc {
-        name: "__map_contains".into(), params: vec![WasmTy::I32, WasmTy::I64], results: vec![WasmTy::I32],
+        name: "__map_contains".into(), params: vec![WasmTy::I32, WasmTy::I64, WasmTy::I32], results: vec![WasmTy::I32],
         locals: vec![WasmTy::I32, WasmTy::I32, WasmTy::I32], // cap, slot, ea
         body,
     }

@@ -75,18 +75,18 @@ pub fn lower_intrinsic(
         "almide_rt_string_char_at" if args.len() == 2 =>
             call_runtime("__string_get", args, 1, ctx),
 
-        // ── Map[Int, Int] (other key/value types fall back) ──
-        "almide_rt_map_new" if is_int_int_map(ret_ty) =>
+        // ── Map: Int or String keys; Int or pointer/i32 values (not Float). ──
+        "almide_rt_map_new" if map_supported(ret_ty) =>
             (ctx.func_idx)("__map_new").map(|idx| vec![Op::Call { idx, pops: 0, pushes: 1 }]),
-        "almide_rt_map_get" if args.len() == 2 && is_int_int_map(&args[0].ty) =>
-            call_runtime("__map_get", args, 1, ctx),
-        "almide_rt_map_get_or" if args.len() == 3 && is_int_int_map(&args[0].ty) =>
-            call_runtime("__map_get_or", args, 1, ctx),
-        "almide_rt_map_set" if args.len() == 3 && is_int_int_map(&args[0].ty) =>
-            call_runtime("__map_set", args, 1, ctx),
-        "almide_rt_map_contains" if args.len() == 2 && is_int_int_map(&args[0].ty) =>
-            call_runtime("__map_contains", args, 1, ctx),
-        "almide_rt_map_len" if args.len() == 1 && is_int_int_map(&args[0].ty) =>
+        "almide_rt_map_get" if args.len() == 2 && map_supported(&args[0].ty) =>
+            map_get(&args[0], &args[1], ctx),
+        "almide_rt_map_get_or" if args.len() == 3 && map_supported(&args[0].ty) =>
+            map_get_or(&args[0], &args[1], &args[2], ctx),
+        "almide_rt_map_set" if args.len() == 3 && map_supported(&args[0].ty) =>
+            map_set_op(&args[0], &args[1], &args[2], ctx),
+        "almide_rt_map_contains" if args.len() == 2 && map_supported(&args[0].ty) =>
+            map_contains_op(&args[0], &args[1], ctx),
+        "almide_rt_map_len" if args.len() == 1 && map_supported(&args[0].ty) =>
             call_runtime("__map_len", args, 1, ctx),
         "almide_rt_list_sum" if args.len() == 1 => Some(list_sum(&args[0], ctx)),
         // sort: Int lists via the runtime selection sort; other element types
@@ -363,12 +363,94 @@ fn option_map(o: &IrExpr, f: &IrExpr, ret_ty: &Ty, ctx: &mut LowerCtx) -> Option
     Some(ops)
 }
 
-/// True if `ty` is `Map[Int, Int]` — the only key/value combo the v1 Map
-/// runtime supports.
-pub(super) fn is_int_int_map(ty: &Ty) -> bool {
+/// The map key kind code for the runtime: Int → 0, String → 1.
+fn map_key_kind(k: &Ty) -> Option<i32> {
+    match k {
+        Ty::Int => Some(0),
+        Ty::String => Some(1),
+        _ => None,
+    }
+}
+
+/// A value type the map runtime can store in an i64 slot: i32-width (pointers,
+/// Bool, String) or i64 (Int). Float is excluded (would need a bitcast).
+fn map_val_ok(v: &Ty) -> bool {
+    matches!(ty_to_wasm(v), WasmTy::I32 | WasmTy::I64) && !matches!(v, Ty::Float)
+}
+
+/// `Map[K, V]` with a supported key kind and value type.
+pub(super) fn map_supported(ty: &Ty) -> bool {
     use almide_lang::types::constructor::TypeConstructorId as TC;
     matches!(ty, Ty::Applied(TC::Map, a) if a.len() == 2
-        && matches!(a[0], Ty::Int) && matches!(a[1], Ty::Int))
+        && map_key_kind(&a[0]).is_some() && map_val_ok(&a[1]))
+}
+
+/// Extract (kind_const, key_ty, val_ty) from a supported `Map[K,V]`.
+fn map_kv(ty: &Ty) -> Option<(i32, Ty, Ty)> {
+    use almide_lang::types::constructor::TypeConstructorId as TC;
+    match ty {
+        Ty::Applied(TC::Map, a) if a.len() == 2 =>
+            Some((map_key_kind(&a[0])?, a[0].clone(), a[1].clone())),
+        _ => None,
+    }
+}
+
+/// Lower an expr and widen an i32-width result to i64 (map slots are i64).
+fn lower_widened(e: &IrExpr, ty: &Ty, ctx: &mut LowerCtx) -> Vec<Op> {
+    let mut ops = lower_expr(e, ctx);
+    if matches!(ty_to_wasm(ty), WasmTy::I32) {
+        ops.push(Op::UnOp(U::I64ExtendI32U));
+    }
+    ops
+}
+
+/// `map.get(m, k) -> Option[V]`.
+fn map_get(m: &IrExpr, k: &IrExpr, ctx: &mut LowerCtx) -> Option<Vec<Op>> {
+    let (kind, key_ty, _v) = map_kv(&m.ty)?;
+    let idx = (ctx.func_idx)("__map_get")?;
+    let mut ops = lower_expr(m, ctx);
+    ops.extend(lower_widened(k, &key_ty, ctx));
+    ops.push(Op::Const(Const::I32(kind)));
+    ops.push(Op::Call { idx, pops: 3, pushes: 1 });
+    Some(ops)
+}
+
+/// `map.get(m, k) ?? default -> V` (fused). Narrows the i64 result for i32 V.
+fn map_get_or(m: &IrExpr, k: &IrExpr, default: &IrExpr, ctx: &mut LowerCtx) -> Option<Vec<Op>> {
+    let (kind, key_ty, val_ty) = map_kv(&m.ty)?;
+    let idx = (ctx.func_idx)("__map_get_or")?;
+    let mut ops = lower_expr(m, ctx);
+    ops.extend(lower_widened(k, &key_ty, ctx));
+    ops.extend(lower_widened(default, &val_ty, ctx));
+    ops.push(Op::Const(Const::I32(kind)));
+    ops.push(Op::Call { idx, pops: 4, pushes: 1 });
+    if matches!(ty_to_wasm(&val_ty), WasmTy::I32) {
+        ops.push(Op::UnOp(U::I32WrapI64));
+    }
+    Some(ops)
+}
+
+/// `map.set(m, k, v) -> Map[K,V]`.
+fn map_set_op(m: &IrExpr, k: &IrExpr, v: &IrExpr, ctx: &mut LowerCtx) -> Option<Vec<Op>> {
+    let (kind, key_ty, val_ty) = map_kv(&m.ty)?;
+    let idx = (ctx.func_idx)("__map_set")?;
+    let mut ops = lower_expr(m, ctx);
+    ops.extend(lower_widened(k, &key_ty, ctx));
+    ops.extend(lower_widened(v, &val_ty, ctx));
+    ops.push(Op::Const(Const::I32(kind)));
+    ops.push(Op::Call { idx, pops: 4, pushes: 1 });
+    Some(ops)
+}
+
+/// `map.contains(m, k) -> Bool`.
+fn map_contains_op(m: &IrExpr, k: &IrExpr, ctx: &mut LowerCtx) -> Option<Vec<Op>> {
+    let (kind, key_ty, _v) = map_kv(&m.ty)?;
+    let idx = (ctx.func_idx)("__map_contains")?;
+    let mut ops = lower_expr(m, ctx);
+    ops.extend(lower_widened(k, &key_ty, ctx));
+    ops.push(Op::Const(Const::I32(kind)));
+    ops.push(Op::Call { idx, pops: 3, pushes: 1 });
+    Some(ops)
 }
 
 /// Payload type of an `Option[T]` (None if not an Option).

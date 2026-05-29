@@ -400,7 +400,9 @@ mod tests {
         }
         let reg = LayoutRegistry::new();
         let bytes = build_module(funcs, vt, &reg).expect("build should succeed");
-        assert!(wasmparser::validate(&bytes).is_ok(), "module must validate before exec");
+        if let Err(e) = wasmparser::validate(&bytes) {
+            panic!("module must validate before exec: {e}");
+        }
 
         let seq = TMP_SEQ.fetch_add(1, Ordering::Relaxed);
         let path = std::env::temp_dir()
@@ -839,6 +841,34 @@ mod tests {
         // overwrite existing key keeps len at 3 and updates the value.
         ti(get_or(set(lit(), 1, 99), 1, -1), "99", "set overwrite");
         ti(call_i("almide_rt_map_len", vec![set(lit(), 1, 99)], Ty::Int), "3", "len after overwrite");
+    }
+
+    /// Map[String, Int]: string-keyed lookup via FNV hash + __string_eq probing.
+    /// {"a":1,"b":2,"c":3} → get "b" ==2, miss "z" ==-1, contains "c"==1, len 3.
+    #[test]
+    fn exec_map_string_int() {
+        use almide_lang::types::constructor::TypeConstructorId as TC;
+        let map_ty = || Ty::Applied(TC::Map, vec![Ty::String, Ty::Int]);
+        let opt_ty = || Ty::Applied(TC::Option, vec![Ty::Int]);
+        let lit = || IrExpr {
+            kind: IrExprKind::MapLiteral { entries: vec![
+                (lit_str("a"), lit_int(1)), (lit_str("b"), lit_int(2)), (lit_str("c"), lit_int(3)),
+            ] },
+            ty: map_ty(), span: None, def_id: None,
+        };
+        let get_or = |key: &str, d: i64| {
+            let g = IrExpr { kind: IrExprKind::RuntimeCall { symbol: sym("almide_rt_map_get"), args: vec![lit(), lit_str(key)] }, ty: opt_ty(), span: None, def_id: None };
+            IrExpr { kind: IrExprKind::UnwrapOr { expr: Box::new(g), fallback: Box::new(lit_int(d)) }, ty: Ty::Int, span: None, def_id: None }
+        };
+        let ti = |e: IrExpr, exp: &str, msg: &str| { let m = mk_func("main", Ty::Int, e); if let Some(r) = run(&[m], "main") { assert_eq!(&r, exp, "{}", msg); } };
+        let tb = |e: IrExpr, exp: &str, msg: &str| { let m = mk_func("main", Ty::Bool, e); if let Some(r) = run(&[m], "main") { assert_eq!(&r, exp, "{}", msg); } };
+        ti(get_or("b", -1), "2", "get b");
+        ti(get_or("z", -1), "-1", "miss z");
+        tb(IrExpr { kind: IrExprKind::RuntimeCall { symbol: sym("almide_rt_map_contains"), args: vec![lit(), lit_str("c")] }, ty: Ty::Bool, span: None, def_id: None }, "1", "contains c");
+        ti(IrExpr { kind: IrExprKind::RuntimeCall { symbol: sym("almide_rt_map_len"), args: vec![lit()] }, ty: Ty::Int, span: None, def_id: None }, "3", "len");
+        // distinct keys that may collide under FNV must stay separate
+        ti(get_or("a", -1), "1", "get a");
+        ti(get_or("c", -1), "3", "get c");
     }
 
     /// Stdlib intrinsics dispatched via the registry (Tier 1):
