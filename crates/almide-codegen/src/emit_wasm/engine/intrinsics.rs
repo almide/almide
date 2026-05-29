@@ -48,9 +48,78 @@ pub fn lower_intrinsic(
         "almide_rt_list_map" if args.len() == 2 => list_map(&args[0], &args[1], ret_ty, ctx),
         "almide_rt_list_filter" if args.len() == 2 => list_filter(&args[0], &args[1], ret_ty, ctx),
         "almide_rt_list_fold" if args.len() == 3 => list_fold(&args[0], &args[1], &args[2], ret_ty, ctx),
+        "almide_rt_list_any" if args.len() == 2 => list_any_all(&args[0], &args[1], true, ctx),
+        "almide_rt_list_all" if args.len() == 2 => list_any_all(&args[0], &args[1], false, ctx),
+        "almide_rt_list_count" if args.len() == 2 => list_count(&args[0], &args[1], ctx),
 
         _ => None,
     }
+}
+
+/// Build the per-element predicate loop for any/all/count.
+///
+/// Sets up the list header + element local, binds the lambda param, runs the
+/// predicate body each iteration (negated when `negate`), and on a truthy
+/// result runs `on_match` inside an `IfVoid`. Branch depth to the outer Block
+/// from inside `on_match` is 2 (If→Loop→Block) — used for early break.
+/// Returns the assembled ops (caller pre-initialises and post-reads its locals).
+fn predicate_loop(
+    xs_expr: &IrExpr, f: &IrExpr, negate: bool, on_match: Vec<Op>, ctx: &mut LowerCtx,
+) -> Option<Vec<Op>> {
+    let (pvar, pty, body) = inline_lambda(f, 1, ctx)?;
+    let es = wasm_byte_size(&pty);
+    let lk = load_kind_of(ty_to_wasm(&pty));
+    let (lp, mut ops) = list_loop_header(xs_expr, ctx);
+    let elem = ctx.alloc_local(ty_to_wasm(&pty));
+    ctx.map_var(pvar, elem);
+
+    let mut loop_body = Vec::new();
+    loop_body.push(Op::LocalGet(lp.idx));
+    loop_body.push(Op::LocalGet(lp.len));
+    loop_body.push(Op::BinOp(B::I32GeU));
+    loop_body.push(Op::BrIf(1));
+    loop_body.extend(load_elem(lp.xs, lp.idx, es, lk));
+    loop_body.push(Op::LocalSet(elem));
+    loop_body.extend(lower_expr(&body, ctx)); // predicate → i32 cond
+    if negate {
+        loop_body.push(Op::UnOp(U::I32Eqz));
+    }
+    loop_body.push(Op::IfVoid { then: on_match, else_: vec![] });
+    loop_body.push(Op::LocalGet(lp.idx));
+    loop_body.push(Op::Const(Const::I32(1)));
+    loop_body.push(Op::BinOp(B::I32Add));
+    loop_body.push(Op::LocalSet(lp.idx));
+    loop_body.push(Op::Br(0));
+    ops.push(Op::Block(vec![Op::Loop(loop_body)]));
+    Some(ops)
+}
+
+/// `list.any` / `list.all`. `any`: result starts 0, first match sets 1 + breaks.
+/// `all`: result starts 1, first non-match (negated predicate) sets 0 + breaks.
+fn list_any_all(xs_expr: &IrExpr, f: &IrExpr, is_any: bool, ctx: &mut LowerCtx) -> Option<Vec<Op>> {
+    let result = ctx.alloc_local(WasmTy::I32);
+    let set_val = if is_any { 1 } else { 0 };
+    let on_match = vec![Op::Const(Const::I32(set_val)), Op::LocalSet(result), Op::Br(2)];
+    let mut ops = vec![
+        Op::Const(Const::I32(if is_any { 0 } else { 1 })),
+        Op::LocalSet(result),
+    ];
+    ops.extend(predicate_loop(xs_expr, f, !is_any, on_match, ctx)?);
+    ops.push(Op::LocalGet(result));
+    Some(ops)
+}
+
+/// `list.count(xs, pred)` — number of matching elements (as Int/i64).
+fn list_count(xs_expr: &IrExpr, f: &IrExpr, ctx: &mut LowerCtx) -> Option<Vec<Op>> {
+    let c = ctx.alloc_local(WasmTy::I32);
+    let on_match = vec![
+        Op::LocalGet(c), Op::Const(Const::I32(1)), Op::BinOp(B::I32Add), Op::LocalSet(c),
+    ];
+    let mut ops = vec![Op::Const(Const::I32(0)), Op::LocalSet(c)];
+    ops.extend(predicate_loop(xs_expr, f, false, on_match, ctx)?);
+    ops.push(Op::LocalGet(c));
+    ops.push(Op::UnOp(U::I64ExtendI32U));
+    Some(ops)
 }
 
 /// Extract a single-`Op::Block(Loop)` over a list with the standard header:

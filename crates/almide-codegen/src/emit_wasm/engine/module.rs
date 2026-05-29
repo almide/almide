@@ -849,6 +849,58 @@ mod tests {
         }
     }
 
+    /// Build a predicate-HOF call `symbol(list, (x) => x CMP n)` with result ty.
+    fn pred_call(symbol: &str, elems: Vec<i64>, op: almide_ir::BinOp, n: i64, ret: Ty) -> (VarTable, IrExpr) {
+        let mut vt = VarTable::new();
+        let x = vt.alloc(sym("x"), Ty::Int, almide_ir::Mutability::Let, None);
+        let list = IrExpr {
+            kind: IrExprKind::List { elements: elems.into_iter().map(lit_int).collect() },
+            ty: Ty::list(Ty::Int), span: None, def_id: None,
+        };
+        let lam = IrExpr {
+            kind: IrExprKind::Lambda {
+                params: vec![(x, Ty::Int)],
+                body: Box::new(binop(op,
+                    IrExpr { kind: IrExprKind::Var { id: x }, ty: Ty::Int, span: None, def_id: None },
+                    lit_int(n), Ty::Bool)),
+                lambda_id: None,
+            },
+            ty: Ty::Fn { params: vec![Ty::Int], ret: Box::new(Ty::Bool) }, span: None, def_id: None,
+        };
+        let call = IrExpr {
+            kind: IrExprKind::RuntimeCall { symbol: sym(symbol), args: vec![list, lam] },
+            ty: ret, span: None, def_id: None,
+        };
+        (vt, call)
+    }
+
+    /// list.any / list.all with predicates.
+    #[test]
+    fn exec_intrinsic_any_all() {
+        use almide_ir::BinOp::Gt;
+        let cases: &[(&str, Vec<i64>, i64, &str)] = &[
+            ("almide_rt_list_any", vec![1, 2, 3], 2, "1"),  // any > 2 → true
+            ("almide_rt_list_any", vec![1, 2], 5, "0"),     // any > 5 → false
+            ("almide_rt_list_all", vec![2, 4, 6], 1, "1"),  // all > 1 → true
+            ("almide_rt_list_all", vec![2, 4, 6], 3, "0"),  // all > 3 → false
+        ];
+        for (sym_, elems, n, expect) in cases {
+            let (vt, call) = pred_call(sym_, elems.clone(), Gt, *n, Ty::Bool);
+            let main = mk_func("main", Ty::Bool, call);
+            if let Some(r) = run_vt(&[main], &vt, "main") {
+                assert_eq!(&r, expect, "{} {:?} > {}", sym_, elems, n);
+            }
+        }
+    }
+
+    /// list.count: `[1,2,3,4].count(x => x > 2)` → 2.
+    #[test]
+    fn exec_intrinsic_count() {
+        let (vt, call) = pred_call("almide_rt_list_count", vec![1, 2, 3, 4], almide_ir::BinOp::Gt, 2, Ty::Int);
+        let main = mk_func("main", Ty::Int, call);
+        if let Some(r) = run_vt(&[main], &vt, "main") { assert_eq!(r, "2"); }
+    }
+
     /// list.filter with an inline lambda: `[1,2,3,4].filter(x => x > 2)` →
     /// [3,4]; length 2 and element 0 is 3.
     #[test]
