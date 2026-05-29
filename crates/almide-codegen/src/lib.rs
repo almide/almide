@@ -164,6 +164,11 @@ pub fn codegen_with(program: &mut IrProgram, target: Target, options: &CodegenOp
             // verify → assemble pipeline; on any unsupported construct it falls
             // back to the legacy emitter so existing programs keep building.
             if std::env::var_os("ALMIDE_WASM_V2").is_some() {
+                if std::env::var_os("ALMIDE_WASM_V2_DUMP").is_some() {
+                    if let Ok(j) = serde_json::to_string_pretty(&program.functions) {
+                        eprintln!("[v2dump-ir]\n{j}");
+                    }
+                }
                 let reg = emit_wasm::engine::LayoutRegistry::new();
                 match emit_wasm::engine::build_module(
                     &program.functions, &program.var_table, &reg,

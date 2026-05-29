@@ -39,6 +39,9 @@ pub struct LowerCtx<'a> {
     pub interner: &'a mut DataInterner,
     /// Shared signature table for call_indirect type indices.
     pub sigs: &'a mut SigTable,
+    /// Non-capturing lambdas bound to a `let` (ClosureConversion hoists them);
+    /// recorded here so higher-order intrinsics can inline them at the use site.
+    pub lambda_binds: std::collections::HashMap<VarId, IrExpr>,
     /// Next scratch local index (for temporaries).
     next_local: u32,
 }
@@ -74,6 +77,7 @@ impl<'a> LowerCtx<'a> {
             func_idx,
             interner,
             sigs,
+            lambda_binds: std::collections::HashMap::new(),
             next_local: param_count,
         }
     }
@@ -206,6 +210,10 @@ pub fn lower_expr(expr: &IrExpr, ctx: &mut LowerCtx) -> Vec<Op> {
         IrExprKind::Var { id } => {
             if let Some(local) = ctx.get_var(*id) {
                 vec![Op::LocalGet(local)]
+            } else if ctx.lambda_binds.contains_key(id) {
+                // A bare lambda used as a value (not inlined by a HOF) — the
+                // engine has no first-class lambda value yet. Reject honestly.
+                vec![Op::Unsupported("lambda-value")]
             } else {
                 vec![Op::Const(Const::I32(0))] // unresolved var fallback
             }
@@ -893,6 +901,13 @@ fn expr_produces_value(expr: &IrExpr) -> bool {
 fn lower_stmt(stmt: &IrStmt, ctx: &mut LowerCtx) -> Vec<Op> {
     match &stmt.kind {
         IrStmtKind::Bind { var, ty, value, .. } => {
+            // A non-capturing lambda bound to a `let` has no runtime value — it
+            // is inlined at its use site by the higher-order intrinsics. Record
+            // it and emit nothing.
+            if matches!(value.kind, IrExprKind::Lambda { .. }) {
+                ctx.lambda_binds.insert(*var, value.clone());
+                return vec![];
+            }
             let local = ctx.bind_var(*var, ty);
             let mut ops = lower_expr(value, ctx);
             if expr_produces_value(value) {
@@ -959,6 +974,16 @@ fn lower_call(target: &CallTarget, args: &[IrExpr], ret_ty: &Ty, ctx: &mut Lower
     // pointer must be the first argument — so they build their own op sequence.
     if let CallTarget::Computed { callee } = target {
         return lower_indirect_call(callee, args, ret_ty, pushes, ctx);
+    }
+
+    // Stdlib module calls (`list.filter(xs, f)`) route to the intrinsic registry
+    // by their `almide_rt_<module>_<fn>` symbol. The registry lowers args itself
+    // so higher-order ops can inline their lambda argument.
+    if let CallTarget::Module { module, func, .. } = target {
+        let symbol = format!("almide_rt_{}_{}", module.as_str(), func.as_str());
+        if let Some(ops) = super::intrinsics::lower_intrinsic(&symbol, args, ret_ty, ctx) {
+            return ops;
+        }
     }
 
     let mut ops = Vec::new();

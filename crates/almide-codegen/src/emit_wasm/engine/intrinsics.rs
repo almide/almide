@@ -91,7 +91,7 @@ fn load_elem(xs: u32, idx: u32, es: i32, lk: LoadKind) -> Vec<Op> {
 /// `list.map(xs, f)` with an inline lambda `f = (p) => body`. Builds a new list
 /// of the same length, applying the lowered body per element.
 fn list_map(xs_expr: &IrExpr, f: &IrExpr, ret_ty: &Ty, ctx: &mut LowerCtx) -> Option<Vec<Op>> {
-    let (pvar, pty, body) = inline_lambda(f, 1)?;
+    let (pvar, pty, body) = inline_lambda(f, 1, ctx)?;
     let in_es = super::lower::wasm_byte_size(&pty);
     let in_lk = load_kind_of(ty_to_wasm(&pty));
     let out_ty = super::lower::list_element_ty(ret_ty).unwrap_or(Ty::Int);
@@ -137,7 +137,7 @@ fn list_map(xs_expr: &IrExpr, f: &IrExpr, ret_ty: &Ty, ctx: &mut LowerCtx) -> Op
     loop_body.push(Op::Const(Const::I32(out_es)));
     loop_body.push(Op::BinOp(B::I32Mul));
     loop_body.push(Op::BinOp(B::I32Add));
-    loop_body.extend(lower_expr(body, ctx));
+    loop_body.extend(lower_expr(&body, ctx));
     loop_body.push(Op::Store(out_sk));
     // idx++
     loop_body.push(Op::LocalGet(lp.idx));
@@ -154,7 +154,7 @@ fn list_map(xs_expr: &IrExpr, f: &IrExpr, ret_ty: &Ty, ctx: &mut LowerCtx) -> Op
 /// `list.filter(xs, pred)` with an inline lambda `pred = (p) => bool`.
 /// Over-allocates to the input length, then fixes len/cap to the match count.
 fn list_filter(xs_expr: &IrExpr, f: &IrExpr, ret_ty: &Ty, ctx: &mut LowerCtx) -> Option<Vec<Op>> {
-    let (pvar, pty, body) = inline_lambda(f, 1)?;
+    let (pvar, pty, body) = inline_lambda(f, 1, ctx)?;
     let es = super::lower::wasm_byte_size(&pty);
     let lk = load_kind_of(ty_to_wasm(&pty));
     let sk = store_kind_of(ty_to_wasm(&pty));
@@ -194,7 +194,7 @@ fn list_filter(xs_expr: &IrExpr, f: &IrExpr, ret_ty: &Ty, ctx: &mut LowerCtx) ->
     loop_body.push(Op::BrIf(1));
     loop_body.extend(load_elem(lp.xs, lp.idx, es, lk));
     loop_body.push(Op::LocalSet(elem));
-    loop_body.extend(lower_expr(body, ctx)); // predicate → i32 bool
+    loop_body.extend(lower_expr(&body, ctx)); // predicate → i32 bool
     loop_body.push(Op::IfVoid { then: keep, else_: vec![] });
     loop_body.push(Op::LocalGet(lp.idx));
     loop_body.push(Op::Const(Const::I32(1)));
@@ -218,7 +218,7 @@ fn list_filter(xs_expr: &IrExpr, f: &IrExpr, ret_ty: &Ty, ctx: &mut LowerCtx) ->
 
 /// `list.fold(xs, init, f)` with an inline lambda `f = (acc, elem) => body`.
 fn list_fold(xs_expr: &IrExpr, init: &IrExpr, f: &IrExpr, ret_ty: &Ty, ctx: &mut LowerCtx) -> Option<Vec<Op>> {
-    let (params, body) = inline_lambda_n(f, 2)?;
+    let (params, body) = inline_lambda_n(f, 2, ctx)?;
     let (acc_var, acc_ty) = params[0].clone();
     let (elem_var, elem_ty) = params[1].clone();
     let acc_wasm = ty_to_wasm(ret_ty);
@@ -243,7 +243,7 @@ fn list_fold(xs_expr: &IrExpr, init: &IrExpr, f: &IrExpr, ret_ty: &Ty, ctx: &mut
     loop_body.extend(load_elem(lp.xs, lp.idx, in_es, in_lk));
     loop_body.push(Op::LocalSet(elem));
     // acc = body(acc, elem)
-    loop_body.extend(lower_expr(body, ctx));
+    loop_body.extend(lower_expr(&body, ctx));
     loop_body.push(Op::LocalSet(acc));
     loop_body.push(Op::LocalGet(lp.idx));
     loop_body.push(Op::Const(Const::I32(1)));
@@ -256,19 +256,26 @@ fn list_fold(xs_expr: &IrExpr, init: &IrExpr, f: &IrExpr, ret_ty: &Ty, ctx: &mut
     Some(ops)
 }
 
-/// Match an inline lambda with exactly `n` params; return (params, body).
-fn inline_lambda_n(f: &IrExpr, n: usize) -> Option<(Vec<(almide_ir::VarId, Ty)>, &IrExpr)> {
-    match &f.kind {
+/// Resolve an inline lambda with exactly `n` params from `f`, which may be a
+/// `Lambda` directly or a `Var` bound to one (ClosureConversion hoists
+/// non-capturing lambdas to `let`s). Returns owned (params, body).
+fn inline_lambda_n(f: &IrExpr, n: usize, ctx: &LowerCtx) -> Option<(Vec<(almide_ir::VarId, Ty)>, IrExpr)> {
+    let lambda = match &f.kind {
+        almide_ir::IrExprKind::Lambda { .. } => f,
+        almide_ir::IrExprKind::Var { id } => ctx.lambda_binds.get(id)?,
+        _ => return None, // ClosureCreate / fn-ref args are not inlined (yet)
+    };
+    match &lambda.kind {
         almide_ir::IrExprKind::Lambda { params, body, .. } if params.len() == n => {
-            Some((params.clone(), body))
+            Some((params.clone(), (**body).clone()))
         }
-        _ => None, // ClosureCreate / fn-ref args are not inlined (yet)
+        _ => None,
     }
 }
 
 /// Single-param convenience wrapper around `inline_lambda_n`.
-fn inline_lambda(f: &IrExpr, n: usize) -> Option<(almide_ir::VarId, Ty, &IrExpr)> {
-    let (params, body) = inline_lambda_n(f, n)?;
+fn inline_lambda(f: &IrExpr, n: usize, ctx: &LowerCtx) -> Option<(almide_ir::VarId, Ty, IrExpr)> {
+    let (params, body) = inline_lambda_n(f, n, ctx)?;
     let (v, t) = params[0].clone();
     Some((v, t, body))
 }
