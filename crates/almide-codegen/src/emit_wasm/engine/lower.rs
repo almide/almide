@@ -1133,6 +1133,9 @@ fn lower_call(target: &CallTarget, args: &[IrExpr], ret_ty: &Ty, ctx: &mut Lower
                 // Unresolved function (e.g. an unimplemented stdlib fn) — reject
                 // so the build falls back to the legacy emitter rather than
                 // trapping at runtime.
+                if std::env::var_os("ALMIDE_WASM_V2_DUMP").is_some() {
+                    eprintln!("[v2-unresolved-fn] {}", name.as_str());
+                }
                 ops.push(Op::Unsupported("unresolved-fn"));
             }
         }
@@ -1144,6 +1147,9 @@ fn lower_call(target: &CallTarget, args: &[IrExpr], ret_ty: &Ty, ctx: &mut Lower
                 ops.push(Op::Call { idx, pops, pushes });
             } else {
                 // Stdlib dispatch (e.g. string.len, list.push) is not in v2 yet.
+                if std::env::var_os("ALMIDE_WASM_V2_DUMP").is_some() {
+                    eprintln!("[v2-stdlib-call] {}.{}", module.as_str(), method.as_str());
+                }
                 ops.push(Op::Unsupported("stdlib-call"));
             }
         }
