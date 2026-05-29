@@ -25,13 +25,14 @@ use std::collections::HashMap;
 
 use almide_ir::{IrFunction, VarTable};
 use wasm_encoder::{
-    CodeSection, ExportSection, Function, FunctionSection, MemorySection, MemoryType,
-    Module, TypeSection,
+    CodeSection, ExportSection, Function, FunctionSection, GlobalSection, GlobalType,
+    MemorySection, MemoryType, Module, TypeSection, ValType,
 };
 
 use super::ir::{Op, WasmFunc, WasmTy, FuncIdx, verify_func_stack};
 use super::emit::emit_ops;
 use super::layout::LayoutRegistry;
+use super::runtime::{self, RuntimeFns, HEAP_GLOBAL, HEAP_BASE};
 
 /// Errors produced while building a module from IR.
 #[derive(Debug)]
@@ -68,17 +69,27 @@ pub fn build_module(
     var_table: &VarTable,
     reg: &LayoutRegistry,
 ) -> Result<Vec<u8>, BuildError> {
-    // ── Phase A: assign a function index to every function, by name ──
+    // Runtime functions occupy the first `COUNT` indices; user functions follow.
+    let rt = RuntimeFns::fixed();
+    let runtime_funcs = runtime::runtime_funcs(reg);
+    let base = runtime::COUNT;
+
+    // ── Phase A: assign a function index to every user function, by name ──
+    // (offset past the runtime functions, which are emitted first)
     let mut name_idx: HashMap<String, FuncIdx> = HashMap::new();
     for (i, f) in ir_funcs.iter().enumerate() {
-        name_idx.insert(f.name.as_str().to_string(), i as FuncIdx);
+        name_idx.insert(f.name.as_str().to_string(), base + i as FuncIdx);
     }
     let lookup = |name: &str| name_idx.get(name).copied();
 
-    // ── Phase B: lower + verify each function ──
-    let mut funcs: Vec<WasmFunc> = Vec::with_capacity(ir_funcs.len());
+    // ── Phase B: lower → resolve abstract ops → verify ──
+    let mut funcs: Vec<WasmFunc> = Vec::with_capacity(runtime_funcs.len() + ir_funcs.len());
+    funcs.extend(runtime_funcs);
     for f in ir_funcs {
-        let wf = super::lower::lower_function(f, var_table, reg, &lookup);
+        let mut wf = super::lower::lower_function(f, var_table, reg, &lookup);
+        // Resolve Alloc / RcInc / RcDec into Calls to the runtime. This is
+        // stack-effect preserving, so verification below still holds.
+        runtime::resolve_abstract_ops(&mut wf.body, &rt);
         verify_func_stack(&wf).map_err(|detail| BuildError::StackVerify {
             func: wf.name.clone(),
             detail,
@@ -179,6 +190,16 @@ fn assemble(
         page_size_log2: None,
     });
     module.section(&memory);
+
+    // ── Global section ──
+    // Global 0: bump-allocator heap pointer (next free byte).
+    let mut globals = GlobalSection::new();
+    globals.global(
+        GlobalType { val_type: ValType::I32, mutable: true, shared: false },
+        &wasm_encoder::ConstExpr::i32_const(HEAP_BASE),
+    );
+    debug_assert_eq!(HEAP_GLOBAL, 0, "runtime expects the heap pointer at global 0");
+    module.section(&globals);
 
     // ── Export section ──
     let mut exports = ExportSection::new();
@@ -298,9 +319,10 @@ mod tests {
         assert!(wasmparser::validate(&bytes).is_ok(), "module must validate");
     }
 
-    /// A function that allocates (list literal) is rejected cleanly, not panicked.
+    /// A list literal now lowers through the runtime allocator and validates:
+    /// `Op::Alloc` is resolved to a `Call` to `__alloc`.
     #[test]
-    fn abstract_op_rejected() {
+    fn build_list_via_runtime_alloc() {
         let vt = VarTable::new();
         let reg = LayoutRegistry::new();
         let list = IrExpr {
@@ -310,7 +332,30 @@ mod tests {
             def_id: None,
         };
         let main = mk_func("main", Ty::list(Ty::Int), list);
+        let bytes = build_module(&[main], &vt, &reg).expect("list build should succeed");
+        assert!(wasmparser::validate(&bytes).is_ok(), "module must validate");
+    }
+
+    /// String interpolation still has no runtime — it is rejected cleanly
+    /// (via `StringConcat`), never panicked.
+    #[test]
+    fn string_interp_rejected() {
+        use almide_ir::IrStringPart;
+        let vt = VarTable::new();
+        let reg = LayoutRegistry::new();
+        let interp = IrExpr {
+            kind: IrExprKind::StringInterp {
+                parts: vec![
+                    IrStringPart::Lit { value: "x=".into() },
+                    IrStringPart::Expr { expr: lit_int(1) },
+                ],
+            },
+            ty: Ty::String,
+            span: None,
+            def_id: None,
+        };
+        let main = mk_func("main", Ty::String, interp);
         let err = build_module(&[main], &vt, &reg).unwrap_err();
-        assert!(matches!(err, BuildError::UnresolvedAbstract { .. }), "got {:?}", err);
+        assert!(matches!(err, BuildError::UnresolvedAbstract { op: "StringConcat", .. }), "got {:?}", err);
     }
 }

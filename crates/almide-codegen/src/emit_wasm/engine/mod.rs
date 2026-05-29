@@ -25,6 +25,7 @@ pub mod ir;
 pub mod emit;
 pub mod builder;
 pub mod lower;
+pub mod runtime;
 pub mod module;
 
 pub use layout::LayoutRegistry;

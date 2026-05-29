@@ -314,9 +314,10 @@ pub fn lower_expr(expr: &IrExpr, ctx: &mut LowerCtx) -> Vec<Op> {
             let elem_size = wasm_byte_size(&elements.first().map(|e| &e.ty).unwrap_or(&Ty::Int));
             let list = ctx.alloc_local(WasmTy::I32);
 
-            // alloc(header + len * elem_size)
-            let total = 8 + len * elem_size; // LEN(4) + CAP(4) + data
-            ops.push(Op::Const(Const::I32(total + 8))); // +8 for alloc header
+            // alloc(data size = LEN(4) + CAP(4) + len * elem_size).
+            // The 8-byte alloc header (size/rc) is added by __alloc itself.
+            let total = 8 + len * elem_size;
+            ops.push(Op::Const(Const::I32(total)));
             ops.push(Op::Alloc);
             ops.push(Op::LocalTee(list));
 
@@ -362,7 +363,7 @@ pub fn lower_expr(expr: &IrExpr, ctx: &mut LowerCtx) -> Vec<Op> {
             for elem in elements {
                 total_size += wasm_byte_size(&elem.ty);
             }
-            ops.push(Op::Const(Const::I32(total_size + 8))); // +8 alloc header
+            ops.push(Op::Const(Const::I32(total_size)));
             ops.push(Op::Alloc);
             ops.push(Op::LocalSet(tuple));
 
@@ -393,7 +394,7 @@ pub fn lower_expr(expr: &IrExpr, ctx: &mut LowerCtx) -> Vec<Op> {
             let rec = ctx.alloc_local(WasmTy::I32);
             let field_size = 4i32; // each field is a pointer or i32
             let total = (fields.len() as i32) * field_size;
-            ops.push(Op::Const(Const::I32(total + 8)));
+            ops.push(Op::Const(Const::I32(total)));
             ops.push(Op::Alloc);
             ops.push(Op::LocalSet(rec));
 
@@ -515,7 +516,7 @@ pub fn lower_expr(expr: &IrExpr, ctx: &mut LowerCtx) -> Vec<Op> {
             // Option layout: [tag:i32=1][payload]
             let mut ops = Vec::new();
             let opt = ctx.alloc_local(WasmTy::I32);
-            ops.push(Op::Const(Const::I32(12 + 8))); // tag(4) + payload(4..8) + alloc header
+            ops.push(Op::Const(Const::I32(12))); // tag(4) + payload(4..8) + alloc header
             ops.push(Op::Alloc);
             ops.push(Op::LocalTee(opt));
             ops.push(Op::Const(Const::I32(1))); // tag = Some
@@ -538,7 +539,7 @@ pub fn lower_expr(expr: &IrExpr, ctx: &mut LowerCtx) -> Vec<Op> {
             // Option None: [tag:i32=0]
             let mut ops = Vec::new();
             let opt = ctx.alloc_local(WasmTy::I32);
-            ops.push(Op::Const(Const::I32(12 + 8)));
+            ops.push(Op::Const(Const::I32(12)));
             ops.push(Op::Alloc);
             ops.push(Op::LocalTee(opt));
             ops.push(Op::Const(Const::I32(0))); // tag = None
@@ -551,7 +552,7 @@ pub fn lower_expr(expr: &IrExpr, ctx: &mut LowerCtx) -> Vec<Op> {
             // Result layout: [tag:i32=0 (Ok)][payload]
             let mut ops = Vec::new();
             let res = ctx.alloc_local(WasmTy::I32);
-            ops.push(Op::Const(Const::I32(12 + 8)));
+            ops.push(Op::Const(Const::I32(12)));
             ops.push(Op::Alloc);
             ops.push(Op::LocalTee(res));
             ops.push(Op::Const(Const::I32(0))); // tag = Ok
@@ -573,7 +574,7 @@ pub fn lower_expr(expr: &IrExpr, ctx: &mut LowerCtx) -> Vec<Op> {
         IrExprKind::ResultErr { expr: inner } => {
             let mut ops = Vec::new();
             let res = ctx.alloc_local(WasmTy::I32);
-            ops.push(Op::Const(Const::I32(12 + 8)));
+            ops.push(Op::Const(Const::I32(12)));
             ops.push(Op::Alloc);
             ops.push(Op::LocalTee(res));
             ops.push(Op::Const(Const::I32(1))); // tag = Err
@@ -662,7 +663,7 @@ pub fn lower_expr(expr: &IrExpr, ctx: &mut LowerCtx) -> Vec<Op> {
             // Allocate env
             let env_ptr = ctx.alloc_local(WasmTy::I32);
             if !captures.is_empty() {
-                ops.push(Op::Const(Const::I32(env_size + 8))); // +8 alloc header
+                ops.push(Op::Const(Const::I32(env_size)));
                 ops.push(Op::Alloc);
                 ops.push(Op::LocalSet(env_ptr));
 
@@ -684,7 +685,7 @@ pub fn lower_expr(expr: &IrExpr, ctx: &mut LowerCtx) -> Vec<Op> {
             }
 
             // Allocate closure pair
-            ops.push(Op::Const(Const::I32(pair_size + 8)));
+            ops.push(Op::Const(Const::I32(pair_size)));
             ops.push(Op::Alloc);
             ops.push(Op::LocalTee(closure));
 
