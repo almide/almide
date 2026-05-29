@@ -815,6 +815,17 @@ mod tests {
         if let Some(r) = run(&[l], "main") { assert_eq!(r, "3"); }
     }
 
+    /// Integer min/max/abs intrinsics: abs(-5)==5, min(3,7)==3, max(3,7)==7.
+    #[test]
+    fn exec_intrinsic_int_minmax_abs() {
+        let abs = mk_func("main", Ty::Int, rt_call("almide_rt_int_abs", vec![lit_int(-5)]));
+        if let Some(r) = run(&[abs], "main") { assert_eq!(r, "5", "abs(-5)"); }
+        let mn = mk_func("main", Ty::Int, rt_call("almide_rt_int_min", vec![lit_int(3), lit_int(7)]));
+        if let Some(r) = run(&[mn], "main") { assert_eq!(r, "3", "min(3,7)"); }
+        let mx = mk_func("main", Ty::Int, rt_call("almide_rt_int_max", vec![lit_int(3), lit_int(7)]));
+        if let Some(r) = run(&[mx], "main") { assert_eq!(r, "7", "max(3,7)"); }
+    }
+
     /// list.get_or with in-bounds and out-of-bounds indices:
     /// [10,20,30].get_or(1, 99)==20 ; .get_or(5, 99)==99.
     #[test]
