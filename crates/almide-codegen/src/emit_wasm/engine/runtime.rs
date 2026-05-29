@@ -40,10 +40,11 @@ pub struct RuntimeFns {
     pub int_to_string: FuncIdx,
     pub string_eq: FuncIdx,
     pub range: FuncIdx,
+    pub list_concat: FuncIdx,
 }
 
 /// The number of runtime functions (they occupy indices `0..COUNT`).
-pub const COUNT: u32 = 9;
+pub const COUNT: u32 = 10;
 
 impl RuntimeFns {
     /// The runtime functions occupy the first `COUNT` indices, in this order.
@@ -58,11 +59,12 @@ impl RuntimeFns {
             int_to_string: 6,
             string_eq: 7,
             range: 8,
+            list_concat: 9,
         }
     }
 
     /// Map of runtime function names to indices, for the build's name lookup.
-    pub fn name_table(&self) -> [(&'static str, FuncIdx); 9] {
+    pub fn name_table(&self) -> [(&'static str, FuncIdx); 10] {
         [
             ("__alloc", self.alloc),
             ("__rc_inc", self.rc_inc),
@@ -73,6 +75,7 @@ impl RuntimeFns {
             ("__int_to_string", self.int_to_string),
             ("__string_eq", self.string_eq),
             ("__range", self.range),
+            ("__list_concat", self.list_concat),
         ]
     }
 }
@@ -91,6 +94,7 @@ pub fn runtime_funcs(reg: &LayoutRegistry, heap_start: i32) -> Vec<WasmFunc> {
         build_int_to_string(),
         build_string_eq(),
         build_range(),
+        build_list_concat(),
     ]
 }
 
@@ -466,6 +470,55 @@ fn build_range() -> WasmFunc {
         params: vec![WasmTy::I64, WasmTy::I64, WasmTy::I32],
         results: vec![WasmTy::I32],
         locals: vec![WasmTy::I64, WasmTy::I32, WasmTy::I32, WasmTy::I32], // n64, n, list, i
+        body,
+    }
+}
+
+/// `__list_concat(a: i32, b: i32, elem_size: i32) -> i32`
+///
+/// Concatenates two lists of `elem_size`-byte elements into a fresh list.
+fn build_list_concat() -> WasmFunc {
+    let alloc_fn = RuntimeFns::fixed().alloc;
+    const A: u32 = 0;
+    const B_: u32 = 1;
+    const ES: u32 = 2;  // elem_size
+    const LA: u32 = 3;  // len(a)
+    const LB: u32 = 4;  // len(b)
+    const C: u32 = 5;   // result
+    const AB: u32 = 6;  // la*elem_size (a's byte length)
+
+    let body = vec![
+        Op::LocalGet(A), Op::Load(LoadKind::I32), Op::LocalSet(LA),
+        Op::LocalGet(B_), Op::Load(LoadKind::I32), Op::LocalSet(LB),
+        // ab = la * elem_size
+        Op::LocalGet(LA), Op::LocalGet(ES), Op::BinOp(B::I32Mul), Op::LocalSet(AB),
+        // c = __alloc(8 + (la+lb)*elem_size)
+        Op::Const(Const::I32(8)),
+        Op::LocalGet(LA), Op::LocalGet(LB), Op::BinOp(B::I32Add),
+        Op::LocalGet(ES), Op::BinOp(B::I32Mul), Op::BinOp(B::I32Add),
+        Op::Call { idx: alloc_fn, pops: 1, pushes: 1 }, Op::LocalSet(C),
+        // c.len = c.cap = la + lb
+        Op::LocalGet(C), Op::LocalGet(LA), Op::LocalGet(LB), Op::BinOp(B::I32Add), Op::Store(StoreKind::I32),
+        Op::LocalGet(C), Op::Const(Const::I32(4)), Op::BinOp(B::I32Add),
+        Op::LocalGet(LA), Op::LocalGet(LB), Op::BinOp(B::I32Add), Op::Store(StoreKind::I32),
+        // memcpy(c+8, a+8, ab)
+        Op::LocalGet(C), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add),
+        Op::LocalGet(A), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add),
+        Op::LocalGet(AB),
+        Op::MemoryCopy,
+        // memcpy(c+8+ab, b+8, lb*elem_size)
+        Op::LocalGet(C), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add), Op::LocalGet(AB), Op::BinOp(B::I32Add),
+        Op::LocalGet(B_), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add),
+        Op::LocalGet(LB), Op::LocalGet(ES), Op::BinOp(B::I32Mul),
+        Op::MemoryCopy,
+        Op::LocalGet(C),
+    ];
+
+    WasmFunc {
+        name: "__list_concat".into(),
+        params: vec![WasmTy::I32, WasmTy::I32, WasmTy::I32],
+        results: vec![WasmTy::I32],
+        locals: vec![WasmTy::I32, WasmTy::I32, WasmTy::I32, WasmTy::I32], // la, lb, c, ab
         body,
     }
 }

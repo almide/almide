@@ -242,10 +242,22 @@ pub fn lower_expr(expr: &IrExpr, ctx: &mut LowerCtx) -> Vec<Op> {
                         ops.push(Op::UnOp(WUnOp::I32Eqz));
                     }
                 }
+            } else if matches!(op, almide_ir::BinOp::ConcatList) {
+                // List concatenation: pass the element width so the runtime can
+                // copy raw bytes. (left.ty is List[T].)
+                let elem_size = list_element_ty(&left.ty)
+                    .map(|t| wasm_byte_size(&t))
+                    .unwrap_or(8);
+                ops.push(Op::Const(Const::I32(elem_size)));
+                if let Some(idx) = (ctx.func_idx)("__list_concat") {
+                    ops.push(Op::Call { idx, pops: 3, pushes: 1 });
+                } else {
+                    ops.push(Op::Unreachable);
+                }
             }
-            // Other None cases (ConcatList, ModFloat, Pow, matrix) have no runtime
-            // yet; they leave the stack unbalanced and are caught by the verifier
-            // until their runtimes land.
+            // Other None cases (ModFloat, Pow, matrix) have no runtime yet; they
+            // leave the stack unbalanced and are caught by the verifier until
+            // their runtimes land.
             ops
         }
 
