@@ -96,6 +96,8 @@ pub fn lower_intrinsic(
             map_remove_op(&args[0], &args[1], ctx),
         "almide_rt_map_merge" if args.len() == 2 && map_supported(&args[0].ty) =>
             map_merge_op(&args[0], &args[1], ctx),
+        "almide_rt_map_map_values" if args.len() == 2 && map_supported(&args[0].ty) && map_supported(ret_ty) =>
+            map_map_values(&args[0], &args[1], ret_ty, ctx),
         "almide_rt_list_sum" if args.len() == 1 => Some(list_sum(&args[0], ctx)),
         // sort: Int lists via the runtime selection sort; other element types
         // (Float/String/composite) fall back until typed comparators land.
@@ -470,6 +472,64 @@ fn map_remove_op(m: &IrExpr, k: &IrExpr, ctx: &mut LowerCtx) -> Option<Vec<Op>> 
     ops.extend(lower_widened(k, &key_ty, ctx));
     ops.push(Op::Const(Const::I32(kind)));
     ops.push(Op::Call { idx, pops: 3, pushes: 1 });
+    Some(ops)
+}
+
+/// `map.map(m, f: (V) -> B) -> Map[K, B]` — transform each value, keys kept.
+/// Iterates the source slots, lowering `f`'s body per entry, rebuilding via
+/// __map_set (functional). Pre-sizing via __map_put would be faster but set is
+/// safe on an initially-empty table.
+fn map_map_values(m: &IrExpr, f: &IrExpr, ret_ty: &Ty, ctx: &mut LowerCtx) -> Option<Vec<Op>> {
+    let (kind, _k, _v) = map_kv(&m.ty)?;
+    let (pvar, pty, body) = inline_lambda(f, 1, ctx)?; // f: (V) -> B
+    let in_lk = load_kind_of(ty_to_wasm(&pty));
+    let in_narrow = matches!(ty_to_wasm(&pty), WasmTy::I32);
+    let out_val_ty = map_kv(ret_ty)?.2; // B
+    let out_widen = matches!(ty_to_wasm(&out_val_ty), WasmTy::I32);
+    let (new_idx, set_idx) = ((ctx.func_idx)("__map_new")?, (ctx.func_idx)("__map_set")?);
+
+    let m_l = ctx.alloc_local(WasmTy::I32);
+    let cap_l = ctx.alloc_local(WasmTy::I32);
+    let out_l = ctx.alloc_local(WasmTy::I32);
+    let slot_l = ctx.alloc_local(WasmTy::I32);
+    let ea = ctx.alloc_local(WasmTy::I32);
+    let elem = ctx.alloc_local(ty_to_wasm(&pty));
+    ctx.map_var(pvar, elem);
+
+    let mut ops = lower_expr(m, ctx);
+    ops.push(Op::LocalSet(m_l));
+    ops.push(Op::LocalGet(m_l)); ops.push(Op::Const(Const::I32(4))); ops.push(Op::BinOp(B::I32Add)); ops.push(Op::Load(LoadKind::I32)); ops.push(Op::LocalSet(cap_l));
+    ops.push(Op::Call { idx: new_idx, pops: 0, pushes: 1 }); ops.push(Op::LocalSet(out_l));
+    ops.push(Op::Const(Const::I32(0))); ops.push(Op::LocalSet(slot_l));
+
+    // entry addr = m + 8 + cap + slot*16
+    let entry_addr = vec![
+        Op::LocalGet(m_l), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add), Op::LocalGet(cap_l), Op::BinOp(B::I32Add),
+        Op::LocalGet(slot_l), Op::Const(Const::I32(16)), Op::BinOp(B::I32Mul), Op::BinOp(B::I32Add),
+    ];
+    let mut on_occupied = entry_addr.clone();
+    on_occupied.push(Op::LocalSet(ea));
+    // elem = entry.val (narrow if i32)
+    on_occupied.push(Op::LocalGet(ea)); on_occupied.push(Op::Const(Const::I32(8))); on_occupied.push(Op::BinOp(B::I32Add)); on_occupied.push(Op::Load(in_lk));
+    if in_narrow { /* value already loaded at i32 width via in_lk */ }
+    on_occupied.push(Op::LocalSet(elem));
+    // out = __map_set(out, key, widen(f(elem)), kind)
+    on_occupied.push(Op::LocalGet(out_l));
+    on_occupied.push(Op::LocalGet(ea)); on_occupied.push(Op::Load(LoadKind::I64)); // key (i64)
+    on_occupied.extend(lower_expr(&body, ctx));
+    if out_widen { on_occupied.push(Op::UnOp(U::I64ExtendI32U)); }
+    on_occupied.push(Op::Const(Const::I32(kind)));
+    on_occupied.push(Op::Call { idx: set_idx, pops: 4, pushes: 1 });
+    on_occupied.push(Op::LocalSet(out_l));
+
+    let mut loop_body = vec![
+        Op::LocalGet(slot_l), Op::LocalGet(cap_l), Op::BinOp(B::I32GeU), Op::BrIf(1),
+        Op::LocalGet(m_l), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add), Op::LocalGet(slot_l), Op::BinOp(B::I32Add), Op::Load(LoadKind::U8),
+    ];
+    loop_body.push(Op::IfVoid { then: on_occupied, else_: vec![] });
+    loop_body.extend([Op::LocalGet(slot_l), Op::Const(Const::I32(1)), Op::BinOp(B::I32Add), Op::LocalSet(slot_l), Op::Br(0)]);
+    ops.push(Op::Block(vec![Op::Loop(loop_body)]));
+    ops.push(Op::LocalGet(out_l));
     Some(ops)
 }
 

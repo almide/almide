@@ -843,6 +843,38 @@ mod tests {
         ti(call_i("almide_rt_map_len", vec![set(lit(), 1, 99)], Ty::Int), "3", "len after overwrite");
     }
 
+    /// map.map (map_values): `{1:10,2:20}.map(v => v+1)` → {1:11, 2:21}.
+    #[test]
+    fn exec_map_map_values() {
+        use almide_lang::types::constructor::TypeConstructorId as TC;
+        let map_ty = || Ty::Applied(TC::Map, vec![Ty::Int, Ty::Int]);
+        let mut vt = VarTable::new();
+        let v = vt.alloc(sym("v"), Ty::Int, almide_ir::Mutability::Let, None);
+        let lit = || IrExpr {
+            kind: IrExprKind::MapLiteral { entries: vec![(lit_int(1), lit_int(10)), (lit_int(2), lit_int(20))] },
+            ty: map_ty(), span: None, def_id: None,
+        };
+        let lam = IrExpr {
+            kind: IrExprKind::Lambda {
+                params: vec![(v, Ty::Int)],
+                body: Box::new(binop(almide_ir::BinOp::AddInt,
+                    IrExpr { kind: IrExprKind::Var { id: v }, ty: Ty::Int, span: None, def_id: None }, lit_int(1), Ty::Int)),
+                lambda_id: None,
+            },
+            ty: Ty::Fn { params: vec![Ty::Int], ret: Box::new(Ty::Int) }, span: None, def_id: None,
+        };
+        let mapped = || IrExpr {
+            kind: IrExprKind::RuntimeCall { symbol: sym("almide_rt_map_map_values"), args: vec![lit(), lam.clone()] },
+            ty: map_ty(), span: None, def_id: None,
+        };
+        let get_or = |m: IrExpr, k: i64| IrExpr {
+            kind: IrExprKind::RuntimeCall { symbol: sym("almide_rt_map_get_or"), args: vec![m, lit_int(k), lit_int(-1)] },
+            ty: Ty::Int, span: None, def_id: None };
+        let ti = |e: IrExpr, exp: &str, msg: &str| { let m = mk_func("main", Ty::Int, e); if let Some(r) = run_vt(&[m], &vt, "main") { assert_eq!(&r, exp, "{}", msg); } };
+        ti(get_or(mapped(), 1), "11", "v[1]+1");
+        ti(get_or(mapped(), 2), "21", "v[2]+1");
+    }
+
     /// map.merge: `{1:10,2:20}` merged with `{2:99,3:30}` → b wins on key 2.
     #[test]
     fn exec_map_merge() {
