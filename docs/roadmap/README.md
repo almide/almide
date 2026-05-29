@@ -6,7 +6,7 @@
 
 ## Active
 
-11 items
+13 items
 
 | Item | Description |
 |------|-------------|
@@ -21,6 +21,8 @@
 | [WASM Optimization Roadmap](active/wasm-optimization-roadmap.md) |  |
 | [Perceus Void Block Stack Balance — CI Blocker](active/wasm-perceus-void-block.md) |  |
 | [WASM Remaining 15 Skips — Fix Roadmap](active/wasm-remaining-15.md) |  |
+| [WASM Stdlib Dispatch v2 — Declarative Recreate](active/wasm-stdlib-dispatch-v2.md) | Recreate WASM stdlib dispatch as a declarative registry on verified WasmIR |
+| [WASM Engine v2 — Correctness Bug Catalog](active/wasm-v2-correctness-bugs.md) | WASM engine v2 correctness bug catalog, by category, with detection and remediation |
 
 ## On Hold
 
