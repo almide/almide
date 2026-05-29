@@ -505,6 +505,92 @@ mod tests {
         }
     }
 
+    /// Recursion integration test: `fib(10)` → 55.
+    /// Exercises params, self-call, if-with-i64-result, comparison, +/-.
+    #[test]
+    fn exec_recursive_fib() {
+        use almide_ir::{IrParam, ParamBorrow, CallTarget, BinOp};
+        let mut vt = VarTable::new();
+        let n = vt.alloc(sym("n"), Ty::Int, almide_ir::Mutability::Let, None);
+        let var_n = || IrExpr { kind: IrExprKind::Var { id: n }, ty: Ty::Int, span: None, def_id: None };
+        let call_fib = |arg: IrExpr| IrExpr {
+            kind: IrExprKind::Call {
+                target: CallTarget::Named { name: sym("fib") },
+                args: vec![arg], type_args: vec![],
+            },
+            ty: Ty::Int, span: None, def_id: None,
+        };
+        // if n < 2 then n else fib(n-1) + fib(n-2)
+        let cond = binop(BinOp::Lt, var_n(), lit_int(2), Ty::Bool);
+        let rec = binop(
+            BinOp::AddInt,
+            call_fib(binop(BinOp::SubInt, var_n(), lit_int(1), Ty::Int)),
+            call_fib(binop(BinOp::SubInt, var_n(), lit_int(2), Ty::Int)),
+            Ty::Int,
+        );
+        let body = iff(cond, var_n(), rec, Ty::Int);
+        let mut fib = mk_func("fib", Ty::Int, body);
+        fib.params = vec![IrParam {
+            var: n, ty: Ty::Int, name: sym("n"), borrow: ParamBorrow::Own,
+            open_record: None, default: None, attrs: vec![],
+        }];
+
+        let main = mk_func("main", Ty::Int, call_fib(lit_int(10)));
+        if let Some(r) = run_vt(&[fib, main], &vt, "main") {
+            assert_eq!(r, "55");
+        }
+    }
+
+    /// While loop with mutable accumulators:
+    /// `var i=0; var sum=0; while i<5 { sum=sum+i; i=i+1 }; sum` → 10.
+    #[test]
+    fn exec_while_loop() {
+        use almide_ir::{IrStmt, IrStmtKind, Mutability, BinOp};
+        let mut vt = VarTable::new();
+        let i = vt.alloc(sym("i"), Ty::Int, Mutability::Var, None);
+        let sum = vt.alloc(sym("sum"), Ty::Int, Mutability::Var, None);
+        let var = |id| IrExpr { kind: IrExprKind::Var { id }, ty: Ty::Int, span: None, def_id: None };
+
+        let while_body = vec![
+            IrStmt {
+                kind: IrStmtKind::Assign {
+                    var: sum,
+                    value: binop(BinOp::AddInt, var(sum), var(i), Ty::Int),
+                },
+                span: None,
+            },
+            IrStmt {
+                kind: IrStmtKind::Assign {
+                    var: i,
+                    value: binop(BinOp::AddInt, var(i), lit_int(1), Ty::Int),
+                },
+                span: None,
+            },
+        ];
+        let while_expr = IrExpr {
+            kind: IrExprKind::While {
+                cond: Box::new(binop(BinOp::Lt, var(i), lit_int(5), Ty::Bool)),
+                body: while_body,
+            },
+            ty: Ty::Unit, span: None, def_id: None,
+        };
+        let block = IrExpr {
+            kind: IrExprKind::Block {
+                stmts: vec![
+                    IrStmt { kind: IrStmtKind::Bind { var: i, ty: Ty::Int, mutability: Mutability::Var, value: lit_int(0) }, span: None },
+                    IrStmt { kind: IrStmtKind::Bind { var: sum, ty: Ty::Int, mutability: Mutability::Var, value: lit_int(0) }, span: None },
+                    IrStmt { kind: IrStmtKind::Expr { expr: while_expr }, span: None },
+                ],
+                expr: Some(Box::new(var(sum))),
+            },
+            ty: Ty::Int, span: None, def_id: None,
+        };
+        let main = mk_func("main", Ty::Int, block);
+        if let Some(r) = run_vt(&[main], &vt, "main") {
+            assert_eq!(r, "10");
+        }
+    }
+
     /// End-to-end allocation: `[10, 20][1]` must return 20 at runtime,
     /// exercising __alloc + element store + element load through the runtime.
     #[test]
