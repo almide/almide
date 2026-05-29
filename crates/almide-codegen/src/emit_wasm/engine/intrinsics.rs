@@ -51,9 +51,57 @@ pub fn lower_intrinsic(
         "almide_rt_list_any" if args.len() == 2 => list_any_all(&args[0], &args[1], true, ctx),
         "almide_rt_list_all" if args.len() == 2 => list_any_all(&args[0], &args[1], false, ctx),
         "almide_rt_list_count" if args.len() == 2 => list_count(&args[0], &args[1], ctx),
+        "almide_rt_list_find" if args.len() == 2 => list_find(&args[0], &args[1], ret_ty, ctx),
 
         _ => None,
     }
+}
+
+/// `list.find(xs, pred) -> Option[A]` — first matching element wrapped in Some,
+/// else None. Option layout `[tag:i32 @0][payload @4]` (tag 1=Some, 0=None).
+fn list_find(xs_expr: &IrExpr, f: &IrExpr, _ret_ty: &Ty, ctx: &mut LowerCtx) -> Option<Vec<Op>> {
+    let (pvar, pty, body) = inline_lambda(f, 1, ctx)?;
+    let es = wasm_byte_size(&pty);
+    let lk = load_kind_of(ty_to_wasm(&pty));
+    let sk = store_kind_of(ty_to_wasm(&pty));
+    let (lp, mut ops) = list_loop_header(xs_expr, ctx);
+    let opt = ctx.alloc_local(WasmTy::I32);
+    let elem = ctx.alloc_local(ty_to_wasm(&pty));
+    ctx.map_var(pvar, elem);
+
+    // opt = __alloc(12); opt.tag = 0 (None by default)
+    let alloc = (ctx.func_idx)("__alloc")?;
+    ops.push(Op::Const(Const::I32(12)));
+    ops.push(Op::Call { idx: alloc, pops: 1, pushes: 1 });
+    ops.push(Op::LocalSet(opt));
+    ops.push(Op::LocalGet(opt));
+    ops.push(Op::Const(Const::I32(0)));
+    ops.push(Op::Store(StoreKind::I32));
+
+    // on match: opt.tag = 1; opt.payload = elem; break
+    let on_match = vec![
+        Op::LocalGet(opt), Op::Const(Const::I32(1)), Op::Store(StoreKind::I32),
+        Op::LocalGet(opt), Op::Const(Const::I32(4)), Op::BinOp(B::I32Add),
+        Op::LocalGet(elem), Op::Store(sk),
+        Op::Br(2),
+    ];
+    let mut loop_body = Vec::new();
+    loop_body.push(Op::LocalGet(lp.idx));
+    loop_body.push(Op::LocalGet(lp.len));
+    loop_body.push(Op::BinOp(B::I32GeU));
+    loop_body.push(Op::BrIf(1));
+    loop_body.extend(load_elem(lp.xs, lp.idx, es, lk));
+    loop_body.push(Op::LocalSet(elem));
+    loop_body.extend(lower_expr(&body, ctx));
+    loop_body.push(Op::IfVoid { then: on_match, else_: vec![] });
+    loop_body.push(Op::LocalGet(lp.idx));
+    loop_body.push(Op::Const(Const::I32(1)));
+    loop_body.push(Op::BinOp(B::I32Add));
+    loop_body.push(Op::LocalSet(lp.idx));
+    loop_body.push(Op::Br(0));
+    ops.push(Op::Block(vec![Op::Loop(loop_body)]));
+    ops.push(Op::LocalGet(opt));
+    Some(ops)
 }
 
 /// Build the per-element predicate loop for any/all/count.

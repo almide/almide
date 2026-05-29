@@ -893,6 +893,28 @@ mod tests {
         }
     }
 
+    /// list.find returns Option: `[1,2,3].find(x=>x>1) ?? -1` → 2 (Some(2));
+    /// `[1,2,3].find(x=>x>5) ?? -1` → -1 (None).
+    #[test]
+    fn exec_intrinsic_find() {
+        let opt_int = Ty::Applied(
+            almide_lang::types::constructor::TypeConstructorId::Option, vec![Ty::Int]);
+        let build = |n: i64| {
+            let (vt, find) = pred_call("almide_rt_list_find", vec![1, 2, 3], almide_ir::BinOp::Gt, n, opt_int.clone());
+            let unwrap_or = IrExpr {
+                kind: IrExprKind::UnwrapOr { expr: Box::new(find), fallback: Box::new(lit_int(-1)) },
+                ty: Ty::Int, span: None, def_id: None,
+            };
+            (vt, unwrap_or)
+        };
+        let (vt, found) = build(1);
+        let main = mk_func("main", Ty::Int, found);
+        if let Some(r) = run_vt(&[main], &vt, "main") { assert_eq!(r, "2", "find(x>1)"); }
+        let (vt2, none) = build(5);
+        let main2 = mk_func("main", Ty::Int, none);
+        if let Some(r) = run_vt(&[main2], &vt2, "main") { assert_eq!(r, "-1", "find(x>5)"); }
+    }
+
     /// list.count: `[1,2,3,4].count(x => x > 2)` → 2.
     #[test]
     fn exec_intrinsic_count() {
