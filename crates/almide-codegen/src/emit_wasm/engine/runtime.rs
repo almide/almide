@@ -38,10 +38,11 @@ pub struct RuntimeFns {
     pub strlen: FuncIdx,
     pub byte_at: FuncIdx,
     pub int_to_string: FuncIdx,
+    pub string_eq: FuncIdx,
 }
 
 /// The number of runtime functions (they occupy indices `0..COUNT`).
-pub const COUNT: u32 = 7;
+pub const COUNT: u32 = 8;
 
 impl RuntimeFns {
     /// The runtime functions occupy the first `COUNT` indices, in this order.
@@ -54,11 +55,12 @@ impl RuntimeFns {
             strlen: 4,
             byte_at: 5,
             int_to_string: 6,
+            string_eq: 7,
         }
     }
 
     /// Map of runtime function names to indices, for the build's name lookup.
-    pub fn name_table(&self) -> [(&'static str, FuncIdx); 7] {
+    pub fn name_table(&self) -> [(&'static str, FuncIdx); 8] {
         [
             ("__alloc", self.alloc),
             ("__rc_inc", self.rc_inc),
@@ -67,6 +69,7 @@ impl RuntimeFns {
             ("__strlen", self.strlen),
             ("__byte_at", self.byte_at),
             ("__int_to_string", self.int_to_string),
+            ("__string_eq", self.string_eq),
         ]
     }
 }
@@ -83,6 +86,7 @@ pub fn runtime_funcs(reg: &LayoutRegistry, heap_start: i32) -> Vec<WasmFunc> {
         build_strlen(),
         build_byte_at(),
         build_int_to_string(),
+        build_string_eq(),
     ]
 }
 
@@ -358,6 +362,47 @@ fn build_int_to_string() -> WasmFunc {
             WasmTy::I32, WasmTy::I64, WasmTy::I32, WasmTy::I32,
             WasmTy::I32, WasmTy::I32, WasmTy::I64,
         ],
+        body,
+    }
+}
+
+/// `__string_eq(a: i32, b: i32) -> i32` — 1 if the strings are byte-equal.
+fn build_string_eq() -> WasmFunc {
+    const A: u32 = 0;
+    const B_: u32 = 1;
+    const LA: u32 = 2; // i32: len(a)
+    const I: u32 = 3;  // i32: loop index
+
+    let body = vec![
+        // if len(a) != len(b) return 0
+        Op::LocalGet(A), Op::Load(LoadKind::I32), Op::LocalTee(LA),
+        Op::LocalGet(B_), Op::Load(LoadKind::I32),
+        Op::BinOp(B::I32Ne),
+        Op::IfVoid { then: vec![Op::Const(Const::I32(0)), Op::Return], else_: vec![] },
+        // i = 0; while i < la { if a[8+i] != b[8+i] return 0; i++ }
+        Op::Const(Const::I32(0)), Op::LocalSet(I),
+        Op::Block(vec![Op::Loop(vec![
+            Op::LocalGet(I), Op::LocalGet(LA), Op::BinOp(B::I32GeU), Op::BrIf(1),
+            // a[8+i]
+            Op::LocalGet(A), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add),
+            Op::LocalGet(I), Op::BinOp(B::I32Add), Op::Load(LoadKind::U8),
+            // b[8+i]
+            Op::LocalGet(B_), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add),
+            Op::LocalGet(I), Op::BinOp(B::I32Add), Op::Load(LoadKind::U8),
+            Op::BinOp(B::I32Ne),
+            Op::IfVoid { then: vec![Op::Const(Const::I32(0)), Op::Return], else_: vec![] },
+            Op::LocalGet(I), Op::Const(Const::I32(1)), Op::BinOp(B::I32Add), Op::LocalSet(I),
+            Op::Br(0),
+        ])]),
+        // all bytes matched
+        Op::Const(Const::I32(1)),
+    ];
+
+    WasmFunc {
+        name: "__string_eq".into(),
+        params: vec![WasmTy::I32, WasmTy::I32],
+        results: vec![WasmTy::I32],
+        locals: vec![WasmTy::I32, WasmTy::I32], // la, i
         body,
     }
 }

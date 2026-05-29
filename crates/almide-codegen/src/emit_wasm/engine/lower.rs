@@ -226,10 +226,20 @@ pub fn lower_expr(expr: &IrExpr, ctx: &mut LowerCtx) -> Vec<Op> {
             } else if matches!(op, almide_ir::BinOp::ConcatStr) {
                 // String concatenation → runtime call (resolved to __string_concat).
                 ops.push(Op::StringConcat);
+            } else if matches!(op, almide_ir::BinOp::Eq | almide_ir::BinOp::Neq)
+                && matches!(left.ty, Ty::String)
+            {
+                // String deep equality via runtime; Neq inverts the result.
+                if let Some(idx) = (ctx.func_idx)("__string_eq") {
+                    ops.push(Op::Call { idx, pops: 2, pushes: 1 });
+                    if matches!(op, almide_ir::BinOp::Neq) {
+                        ops.push(Op::UnOp(WUnOp::I32Eqz));
+                    }
+                }
             }
-            // Other None cases (ConcatList, ModFloat, Pow, matrix, String deep-eq)
-            // have no runtime yet; they leave the stack unbalanced and are caught
-            // by the verifier until their runtimes land.
+            // Other None cases (ConcatList, ModFloat, Pow, matrix) have no runtime
+            // yet; they leave the stack unbalanced and are caught by the verifier
+            // until their runtimes land.
             ops
         }
 
@@ -1097,7 +1107,7 @@ fn lower_match_arms_void(arms: &[IrMatchArm], subj: Local, subj_ty: &Ty, ctx: &m
 }
 
 /// Emit a condition check for a pattern. Pushes i32 (0 or 1) onto stack.
-fn pattern_condition(pattern: &IrPattern, subj: Local, _subj_ty: &Ty, _ctx: &mut LowerCtx) -> Vec<Op> {
+fn pattern_condition(pattern: &IrPattern, subj: Local, _subj_ty: &Ty, ctx: &mut LowerCtx) -> Vec<Op> {
     match pattern {
         IrPattern::Wildcard | IrPattern::Bind { .. } => {
             vec![Op::Const(Const::I32(1))] // always matches
@@ -1110,7 +1120,18 @@ fn pattern_condition(pattern: &IrPattern, subj: Local, _subj_ty: &Ty, _ctx: &mut
                 IrExprKind::LitBool { value } => {
                     vec![Op::LocalGet(subj), Op::Const(Const::I32(if *value { 1 } else { 0 })), Op::BinOp(WBinOp::I32Eq)]
                 }
-                _ => vec![Op::Const(Const::I32(1))], // TODO: string/float comparison
+                IrExprKind::LitStr { value } => {
+                    // subj == "literal" via __string_eq
+                    let off = ctx.interner.intern(value);
+                    let mut v = vec![Op::LocalGet(subj), Op::Const(Const::I32(off as i32))];
+                    if let Some(idx) = (ctx.func_idx)("__string_eq") {
+                        v.push(Op::Call { idx, pops: 2, pushes: 1 });
+                    } else {
+                        v.push(Op::Const(Const::I32(1)));
+                    }
+                    v
+                }
+                _ => vec![Op::Const(Const::I32(1))], // TODO: float comparison
             }
         }
         IrPattern::Constructor { name: _, .. } => {

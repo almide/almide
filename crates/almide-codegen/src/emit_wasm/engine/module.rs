@@ -848,6 +848,57 @@ mod tests {
         }
     }
 
+    /// String equality: `"foo" == "foo"` → 1, `"foo" == "bar"` → 0,
+    /// `"foo" != "bar"` → 1.
+    #[test]
+    fn exec_string_eq() {
+        let eq = |a: &str, b: &str, op| binop(op, lit_str(a), lit_str(b), Ty::Bool);
+        // "foo" == "foo" → if-then 1 else 0
+        let same = mk_func("main", Ty::Int,
+            iff(eq("foo", "foo", almide_ir::BinOp::Eq), lit_int(1), lit_int(0), Ty::Int));
+        if let Some(r) = run(&[same], "main") { assert_eq!(r, "1", "foo==foo"); }
+
+        let diff = mk_func("main", Ty::Int,
+            iff(eq("foo", "bar", almide_ir::BinOp::Eq), lit_int(1), lit_int(0), Ty::Int));
+        if let Some(r) = run(&[diff], "main") { assert_eq!(r, "0", "foo==bar"); }
+
+        let ne = mk_func("main", Ty::Int,
+            iff(eq("foo", "bar", almide_ir::BinOp::Neq), lit_int(1), lit_int(0), Ty::Int));
+        if let Some(r) = run(&[ne], "main") { assert_eq!(r, "1", "foo!=bar"); }
+
+        // Different lengths must be unequal: "ab" == "abc" → 0
+        let lens = mk_func("main", Ty::Int,
+            iff(eq("ab", "abc", almide_ir::BinOp::Eq), lit_int(1), lit_int(0), Ty::Int));
+        if let Some(r) = run(&[lens], "main") { assert_eq!(r, "0", "ab==abc"); }
+    }
+
+    /// Match on string literals dispatches via __string_eq:
+    /// `match "b" { "a" => 1, "b" => 2, _ => 0 }` → 2.
+    #[test]
+    fn exec_match_string() {
+        use almide_ir::{IrMatchArm, IrPattern};
+        fn str_arm(pat: &str, body: i64) -> IrMatchArm {
+            IrMatchArm {
+                pattern: IrPattern::Literal { expr: lit_str(pat) },
+                guard: None,
+                body: lit_int(body),
+            }
+        }
+        let arms = vec![
+            str_arm("a", 1),
+            str_arm("b", 2),
+            IrMatchArm { pattern: IrPattern::Wildcard, guard: None, body: lit_int(0) },
+        ];
+        let m = IrExpr {
+            kind: IrExprKind::Match { subject: Box::new(lit_str("b")), arms },
+            ty: Ty::Int, span: None, def_id: None,
+        };
+        let main = mk_func("main", Ty::Int, m);
+        if let Some(r) = run(&[main], "main") {
+            assert_eq!(r, "2", "match \"b\"");
+        }
+    }
+
     /// Record field access reads the correct (type-derived) offset:
     /// `{a: 1, b: 2}.b` → 2. With i64 fields this requires an 8-byte stride,
     /// so a non-first field exercises the offset computation.
