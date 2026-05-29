@@ -700,9 +700,9 @@ mod tests {
         let block = IrExpr {
             kind: IrExprKind::Block {
                 stmts: vec![
-                    IrStmt { kind: IrStmtKind::Bind { var: i, ty: Ty::Int, mutability: Mutability::Var, value: lit_int(0) }, span: None },
-                    IrStmt { kind: IrStmtKind::Bind { var: sum, ty: Ty::Int, mutability: Mutability::Var, value: lit_int(0) }, span: None },
-                    IrStmt { kind: IrStmtKind::Expr { expr: while_expr }, span: None },
+                    almide_ir::IrStmt { kind: almide_ir::IrStmtKind::Bind { var: i, ty: Ty::Int, mutability: Mutability::Var, value: lit_int(0) }, span: None },
+                    almide_ir::IrStmt { kind: almide_ir::IrStmtKind::Bind { var: sum, ty: Ty::Int, mutability: Mutability::Var, value: lit_int(0) }, span: None },
+                    almide_ir::IrStmt { kind: almide_ir::IrStmtKind::Expr { expr: while_expr }, span: None },
                 ],
                 expr: Some(Box::new(var(sum))),
             },
@@ -2137,8 +2137,8 @@ mod tests {
         let block = IrExpr {
             kind: IrExprKind::Block {
                 stmts: vec![
-                    IrStmt { kind: IrStmtKind::Bind { var: sum, ty: Ty::Int, mutability: Mutability::Var, value: lit_int(0) }, span: None },
-                    IrStmt { kind: IrStmtKind::Expr { expr: for_expr }, span: None },
+                    almide_ir::IrStmt { kind: almide_ir::IrStmtKind::Bind { var: sum, ty: Ty::Int, mutability: Mutability::Var, value: lit_int(0) }, span: None },
+                    almide_ir::IrStmt { kind: almide_ir::IrStmtKind::Expr { expr: for_expr }, span: None },
                 ],
                 expr: Some(Box::new(var(sum))),
             },
@@ -2233,6 +2233,71 @@ mod tests {
             ty: Ty::Int, span: None, def_id: None };
         ti(tix(elem1(), 0), "1", "enumerate[1].0 == index 1");
         ti(tix(elem1(), 1), "20", "enumerate[1].1 == value 20");
+    }
+
+    /// list.push / pop / IndexAssign: build [10,20,30] by push, set [1]=99, pop.
+    #[test]
+    fn exec_list_mutation() {
+        let li = Ty::list(Ty::Int);
+        let opt_int = Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, vec![Ty::Int]);
+        let mut vt = VarTable::new();
+        let xs = vt.alloc(sym("xs"), li.clone(), almide_ir::Mutability::Var, None);
+        let var_xs = || IrExpr { kind: IrExprKind::Var { id: xs }, ty: li.clone(), span: None, def_id: None };
+        let rt = |symbol: &str, args: Vec<IrExpr>, ty: Ty| IrExpr {
+            kind: IrExprKind::RuntimeCall { symbol: sym(symbol), args }, ty, span: None, def_id: None };
+        let push = |v: i64| almide_ir::IrStmt { kind: almide_ir::IrStmtKind::Expr {
+            expr: rt("almide_rt_list_push", vec![var_xs(), lit_int(v)], Ty::Unit) }, span: None };
+
+        // Build a function whose body runs the mutations then returns `tail`.
+        let build = |tail: IrExpr, ret: Ty| {
+            let stmts = vec![
+                almide_ir::IrStmt { kind: almide_ir::IrStmtKind::Bind { var: xs, mutability: almide_ir::Mutability::Var, ty: li.clone(),
+                    value: IrExpr { kind: IrExprKind::List { elements: vec![] }, ty: li.clone(), span: None, def_id: None } }, span: None },
+                push(10), push(20), push(30),
+                // xs[1] = 99
+                almide_ir::IrStmt { kind: almide_ir::IrStmtKind::IndexAssign { target: xs, index: lit_int(1), value: lit_int(99) }, span: None },
+            ];
+            let body = IrExpr { kind: IrExprKind::Block { stmts, expr: Some(Box::new(tail)) }, ty: ret.clone(), span: None, def_id: None };
+            mk_func("main", ret, body)
+        };
+        let getor = |i: i64| rt("almide_rt_list_get_or", vec![var_xs(), lit_int(i), lit_int(-1)], Ty::Int);
+        let len = || rt("almide_rt_list_len", vec![var_xs()], Ty::Int);
+
+        // after push×3: [10,20,30]; xs[1]=99 → [10,99,30]. len == 3, xs[1] == 99, xs[2] == 30.
+        if let Some(r) = run_vt(&[build(len(), Ty::Int)], &vt, "main") { assert_eq!(r, "3", "len after pushes"); }
+        if let Some(r) = run_vt(&[build(getor(1), Ty::Int)], &vt, "main") { assert_eq!(r, "99", "IndexAssign xs[1]=99"); }
+        if let Some(r) = run_vt(&[build(getor(0), Ty::Int)], &vt, "main") { assert_eq!(r, "10", "xs[0] preserved"); }
+
+        // pop after the above: removes 30, returns Some(30); then len == 2.
+        let pop_tail = |after: IrExpr, ret: Ty| {
+            let stmts = vec![
+                almide_ir::IrStmt { kind: almide_ir::IrStmtKind::Bind { var: xs, mutability: almide_ir::Mutability::Var, ty: li.clone(),
+                    value: IrExpr { kind: IrExprKind::List { elements: vec![] }, ty: li.clone(), span: None, def_id: None } }, span: None },
+                push(10), push(20), push(30),
+                almide_ir::IrStmt { kind: almide_ir::IrStmtKind::Expr { expr: IrExpr { kind: IrExprKind::UnwrapOr {
+                    expr: Box::new(rt("almide_rt_list_pop", vec![var_xs()], opt_int.clone())),
+                    fallback: Box::new(lit_int(-1)) }, ty: Ty::Int, span: None, def_id: None } }, span: None },
+            ];
+            let body = IrExpr { kind: IrExprKind::Block { stmts, expr: Some(Box::new(after)) }, ty: ret.clone(), span: None, def_id: None };
+            mk_func("main", ret, body)
+        };
+        if let Some(r) = run_vt(&[pop_tail(len(), Ty::Int)], &vt, "main") { assert_eq!(r, "2", "len after pop"); }
+        // pop returns Some(30): unwrap_or(-1) == 30
+        {
+            let mut vt2 = VarTable::new();
+            let ys = vt2.alloc(sym("ys"), li.clone(), almide_ir::Mutability::Var, None);
+            let vy = || IrExpr { kind: IrExprKind::Var { id: ys }, ty: li.clone(), span: None, def_id: None };
+            let stmts = vec![
+                almide_ir::IrStmt { kind: almide_ir::IrStmtKind::Bind { var: ys, mutability: almide_ir::Mutability::Var, ty: li.clone(),
+                    value: IrExpr { kind: IrExprKind::List { elements: vec![] }, ty: li.clone(), span: None, def_id: None } }, span: None },
+                almide_ir::IrStmt { kind: almide_ir::IrStmtKind::Expr { expr: rt("almide_rt_list_push", vec![vy(), lit_int(7)], Ty::Unit) }, span: None },
+            ];
+            let popped = IrExpr { kind: IrExprKind::UnwrapOr {
+                expr: Box::new(rt("almide_rt_list_pop", vec![vy()], opt_int.clone())), fallback: Box::new(lit_int(-1)) },
+                ty: Ty::Int, span: None, def_id: None };
+            let body = IrExpr { kind: IrExprKind::Block { stmts, expr: Some(Box::new(popped)) }, ty: Ty::Int, span: None, def_id: None };
+            if let Some(r) = run_vt(&[mk_func("main", Ty::Int, body)], &vt2, "main") { assert_eq!(r, "7", "pop returns Some(7)"); }
+        }
     }
 
     /// SpreadRecord: { ...base, b: 99 } preserves a/c, overrides b.
@@ -2516,8 +2581,8 @@ mod tests {
         let block = IrExpr {
             kind: IrExprKind::Block {
                 stmts: vec![
-                    IrStmt { kind: IrStmtKind::Bind { var: sum, ty: Ty::Int, mutability: Mutability::Var, value: lit_int(0) }, span: None },
-                    IrStmt { kind: IrStmtKind::Expr { expr: for_expr }, span: None },
+                    almide_ir::IrStmt { kind: almide_ir::IrStmtKind::Bind { var: sum, ty: Ty::Int, mutability: Mutability::Var, value: lit_int(0) }, span: None },
+                    almide_ir::IrStmt { kind: almide_ir::IrStmtKind::Expr { expr: for_expr }, span: None },
                 ],
                 expr: Some(Box::new(var(sum))),
             },

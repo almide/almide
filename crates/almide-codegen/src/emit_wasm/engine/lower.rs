@@ -1079,9 +1079,31 @@ fn lower_stmt(stmt: &IrStmt, ctx: &mut LowerCtx) -> Vec<Op> {
 
         IrStmtKind::Comment { .. } => vec![],
 
-        // IndexAssign, MapInsert, FieldAssign, BindDestructure, ListSwap, … are
-        // not lowered yet. Emit a marker so the builder rejects (→ legacy
-        // fallback) instead of silently dropping the side effect.
+        // `xs[i] = v` — store into the list's data area at the element width.
+        IrStmtKind::IndexAssign { target, index, value } => {
+            let (Some(list), false) = (ctx.get_var(*target), value.ty.is_unresolved()) else {
+                return vec![Op::Unsupported("index-assign-unresolved")];
+            };
+            let es = wasm_byte_size(&value.ty);
+            let sk = match ty_to_wasm(&value.ty) {
+                WasmTy::I64 => StoreKind::I64,
+                WasmTy::F64 => StoreKind::F64,
+                _ => StoreKind::I32,
+            };
+            let mut ops = vec![Op::LocalGet(list), Op::Const(Const::I32(8)), Op::BinOp(WBinOp::I32Add)];
+            ops.extend(lower_expr(index, ctx));
+            ops.push(Op::UnOp(WUnOp::I32WrapI64));
+            ops.push(Op::Const(Const::I32(es)));
+            ops.push(Op::BinOp(WBinOp::I32Mul));
+            ops.push(Op::BinOp(WBinOp::I32Add));
+            ops.extend(lower_expr(value, ctx));
+            ops.push(Op::Store(sk));
+            ops
+        }
+
+        // MapInsert, FieldAssign, BindDestructure, ListSwap, … are not lowered
+        // yet. Emit a marker so the builder rejects (→ legacy fallback) instead
+        // of silently dropping the side effect.
         _ => vec![Op::Unsupported("unhandled-stmt")],
     }
 }

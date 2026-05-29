@@ -154,6 +154,8 @@ pub fn lower_intrinsic(
         "almide_rt_list_repeat" if args.len() == 2 => list_repeat(&args[0], &args[1], ret_ty, ctx),
         "almide_rt_list_with_capacity" if args.len() == 1 => list_with_capacity(&args[0], ret_ty, ctx),
         "almide_rt_list_enumerate" if args.len() == 1 => list_enumerate(&args[0], ctx),
+        "almide_rt_list_push" if args.len() == 2 => list_push(&args[0], &args[1], ctx),
+        "almide_rt_list_pop" if args.len() == 1 => list_pop(&args[0], ret_ty, ctx),
         "almide_rt_string_starts_with" if args.len() == 2 => call_runtime("__string_starts_with", args, 1, ctx),
         "almide_rt_string_ends_with" if args.len() == 2 => call_runtime("__string_ends_with", args, 1, ctx),
 
@@ -1647,6 +1649,105 @@ fn list_enumerate(xs: &IrExpr, ctx: &mut LowerCtx) -> Option<Vec<Op>> {
     ];
     ops.push(Op::Block(vec![Op::Loop(loop_body)]));
     ops.push(Op::LocalGet(out));
+    Some(ops)
+}
+
+/// `list.push(mut xs, x)` — append in place when there is spare capacity, else
+/// reallocate (capacity doubling, amortized O(1)) and write the (possibly new)
+/// pointer back to `xs`'s local. `xs` must be a plain variable so we can write
+/// back. STAGE 1: assumes unique ownership (rc == 1); copy-on-write for shared
+/// lists is a later stage (the differential gate validates correctness).
+fn list_push(xs: &IrExpr, x: &IrExpr, ctx: &mut LowerCtx) -> Option<Vec<Op>> {
+    let var = match &xs.kind { almide_ir::IrExprKind::Var { id } => *id, _ => return None };
+    let dst = ctx.get_var(var)?;
+    let elem_ty = concrete_ty(super::lower::list_element_ty(&xs.ty))?;
+    let es = wasm_byte_size(&elem_ty);
+    let sk = store_kind_of(ty_to_wasm(&elem_ty));
+    let alloc = (ctx.func_idx)("__alloc")?;
+    let xs_l = ctx.alloc_local(WasmTy::I32);
+    let x_l = ctx.alloc_local(ty_to_wasm(&elem_ty));
+    let len = ctx.alloc_local(WasmTy::I32);
+    let cap = ctx.alloc_local(WasmTy::I32);
+    let newp = ctx.alloc_local(WasmTy::I32);
+    let newcap = ctx.alloc_local(WasmTy::I32);
+
+    let mut ops = lower_expr(xs, ctx);
+    ops.push(Op::LocalSet(xs_l));
+    ops.extend(lower_expr(x, ctx));
+    ops.push(Op::LocalSet(x_l));
+    ops.extend(vec![
+        Op::LocalGet(xs_l), Op::Load(LoadKind::I32), Op::LocalSet(len),
+        Op::LocalGet(xs_l), Op::Const(Const::I32(4)), Op::BinOp(B::I32Add), Op::Load(LoadKind::I32), Op::LocalSet(cap),
+    ]);
+
+    // in-place branch: data[len] = x ; len++ ; newp = xs
+    let in_place = vec![
+        Op::LocalGet(xs_l), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add),
+        Op::LocalGet(len), Op::Const(Const::I32(es)), Op::BinOp(B::I32Mul), Op::BinOp(B::I32Add),
+        Op::LocalGet(x_l), Op::Store(sk),
+        Op::LocalGet(xs_l), Op::LocalGet(len), Op::Const(Const::I32(1)), Op::BinOp(B::I32Add), Op::Store(StoreKind::I32),
+        Op::LocalGet(xs_l), Op::LocalSet(newp),
+    ];
+    // grow branch: newcap = cap==0 ? 4 : cap*2 ; new = alloc(8+newcap*es) ;
+    //   new.len = len+1 ; new.cap = newcap ; memcpy(new+8, xs+8, len*es) ;
+    //   new.data[len] = x ; newp = new
+    let grow = vec![
+        Op::LocalGet(cap), Op::UnOp(U::I32Eqz),
+        Op::If { ty: WasmTy::I32, then: vec![Op::Const(Const::I32(4))],
+                 else_: vec![Op::LocalGet(cap), Op::Const(Const::I32(2)), Op::BinOp(B::I32Mul)] },
+        Op::LocalSet(newcap),
+        Op::Const(Const::I32(8)), Op::LocalGet(newcap), Op::Const(Const::I32(es)), Op::BinOp(B::I32Mul), Op::BinOp(B::I32Add),
+        Op::Call { idx: alloc, pops: 1, pushes: 1 }, Op::LocalSet(newp),
+        Op::LocalGet(newp), Op::LocalGet(len), Op::Const(Const::I32(1)), Op::BinOp(B::I32Add), Op::Store(StoreKind::I32),
+        Op::LocalGet(newp), Op::Const(Const::I32(4)), Op::BinOp(B::I32Add), Op::LocalGet(newcap), Op::Store(StoreKind::I32),
+        Op::LocalGet(newp), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add),
+        Op::LocalGet(xs_l), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add),
+        Op::LocalGet(len), Op::Const(Const::I32(es)), Op::BinOp(B::I32Mul), Op::MemoryCopy,
+        Op::LocalGet(newp), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add),
+        Op::LocalGet(len), Op::Const(Const::I32(es)), Op::BinOp(B::I32Mul), Op::BinOp(B::I32Add),
+        Op::LocalGet(x_l), Op::Store(sk),
+    ];
+    // if len < cap → in_place else grow
+    ops.extend(vec![Op::LocalGet(len), Op::LocalGet(cap), Op::BinOp(B::I32LtU),
+        Op::IfVoid { then: in_place, else_: grow }]);
+    // write back the (possibly new) pointer; push is Unit
+    ops.push(Op::LocalGet(newp));
+    ops.push(Op::LocalSet(dst));
+    Some(ops)
+}
+
+/// `list.pop(mut xs) -> Option[A]` — remove and return the last element. In
+/// place (`len--`, pointer unchanged, no write-back); `None` when empty.
+fn list_pop(xs: &IrExpr, ret_ty: &Ty, ctx: &mut LowerCtx) -> Option<Vec<Op>> {
+    let a_ty = concrete_ty(option_payload_ty(ret_ty))?;
+    let es = wasm_byte_size(&a_ty);
+    let lk = load_kind_of(ty_to_wasm(&a_ty));
+    let sk = store_kind_of(ty_to_wasm(&a_ty));
+    let alloc = (ctx.func_idx)("__alloc")?;
+    let xs_l = ctx.alloc_local(WasmTy::I32);
+    let opt = ctx.alloc_local(WasmTy::I32);
+    let len = ctx.alloc_local(WasmTy::I32);
+
+    let mut ops = lower_expr(xs, ctx);
+    ops.push(Op::LocalSet(xs_l));
+    ops.extend(vec![
+        Op::Const(Const::I32(12)), Op::Call { idx: alloc, pops: 1, pushes: 1 }, Op::LocalSet(opt),
+        Op::LocalGet(opt), Op::Const(Const::I32(0)), Op::Store(StoreKind::I32),
+        Op::LocalGet(xs_l), Op::Load(LoadKind::I32), Op::LocalSet(len),
+    ]);
+    let some = vec![
+        // xs.len = len - 1
+        Op::LocalGet(xs_l), Op::LocalGet(len), Op::Const(Const::I32(1)), Op::BinOp(B::I32Sub), Op::Store(StoreKind::I32),
+        // opt.tag = 1 ; opt.payload = xs.data[len-1]
+        Op::LocalGet(opt), Op::Const(Const::I32(1)), Op::Store(StoreKind::I32),
+        Op::LocalGet(opt), Op::Const(Const::I32(4)), Op::BinOp(B::I32Add),
+        Op::LocalGet(xs_l), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add),
+        Op::LocalGet(len), Op::Const(Const::I32(1)), Op::BinOp(B::I32Sub), Op::Const(Const::I32(es)), Op::BinOp(B::I32Mul), Op::BinOp(B::I32Add),
+        Op::Load(lk), Op::Store(sk),
+    ];
+    ops.extend(vec![Op::LocalGet(len), Op::Const(Const::I32(0)), Op::BinOp(B::I32GtU),
+        Op::IfVoid { then: some, else_: vec![] }]);
+    ops.push(Op::LocalGet(opt));
     Some(ops)
 }
 
