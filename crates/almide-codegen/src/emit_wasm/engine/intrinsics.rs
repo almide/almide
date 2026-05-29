@@ -68,6 +68,9 @@ pub fn lower_intrinsic(
             Some(tagged_unwrap_or(&args[0], &args[1], false, ret_ty, ctx)),
         "almide_rt_option_map" if args.len() == 2 => option_map(&args[0], &args[1], ret_ty, ctx),
         "almide_rt_result_map" if args.len() == 2 => result_map(&args[0], &args[1], ret_ty, ctx),
+        "almide_rt_result_map_err" if args.len() == 2 => result_map_err(&args[0], &args[1], ret_ty, ctx),
+        "almide_rt_string_slice" if args.len() == 3 =>
+            call_runtime("__string_slice", args, 1, ctx),
         "almide_rt_list_sum" if args.len() == 1 => Some(list_sum(&args[0], ctx)),
         "almide_rt_list_contains" if args.len() == 2 => list_contains(&args[0], &args[1], ctx),
         "almide_rt_string_starts_with" if args.len() == 2 => call_runtime("__string_starts_with", args, 1, ctx),
@@ -194,6 +197,53 @@ fn result_map(r: &IrExpr, f: &IrExpr, ret_ty: &Ty, ctx: &mut LowerCtx) -> Option
         t.push(Op::Store(out_sk));
         t
     };
+    ops.push(Op::LocalGet(r_local));
+    ops.push(Op::Load(LoadKind::I32)); // tag
+    ops.push(Op::IfVoid { then: err_branch, else_: ok_branch });
+    ops.push(Op::LocalGet(out));
+    Some(ops)
+}
+
+/// `result.map_err(r, f)` — `Err(f(e))` when Err, the original `Ok(x)` otherwise.
+fn result_map_err(r: &IrExpr, f: &IrExpr, ret_ty: &Ty, ctx: &mut LowerCtx) -> Option<Vec<Op>> {
+    let (pvar, pty, body) = inline_lambda(f, 1, ctx)?;
+    let in_lk = load_kind_of(ty_to_wasm(&pty)); // E (incoming err)
+    let out_err_ty = result_err_ty(ret_ty).unwrap_or(Ty::String); // F
+    let out_sk = store_kind_of(ty_to_wasm(&out_err_ty));
+    let ok_ty = result_ok_ty(&r.ty).unwrap_or(Ty::Int); // A (passthrough)
+    let ok_lk = load_kind_of(ty_to_wasm(&ok_ty));
+    let ok_sk = store_kind_of(ty_to_wasm(&ok_ty));
+
+    let r_local = ctx.alloc_local(WasmTy::I32);
+    let out = ctx.alloc_local(WasmTy::I32);
+    let elem = ctx.alloc_local(ty_to_wasm(&pty));
+    ctx.map_var(pvar, elem);
+    let alloc = (ctx.func_idx)("__alloc")?;
+
+    let mut ops = lower_expr(r, ctx);
+    ops.push(Op::LocalSet(r_local));
+    ops.push(Op::Const(Const::I32(12)));
+    ops.push(Op::Call { idx: alloc, pops: 1, pushes: 1 });
+    ops.push(Op::LocalSet(out));
+
+    // tag != 0 (Err): map; tag == 0 (Ok): passthrough.
+    let err_branch = {
+        let mut t = vec![
+            Op::LocalGet(r_local), Op::Const(Const::I32(4)), Op::BinOp(B::I32Add),
+            Op::Load(in_lk), Op::LocalSet(elem),
+            Op::LocalGet(out), Op::Const(Const::I32(1)), Op::Store(StoreKind::I32),
+            Op::LocalGet(out), Op::Const(Const::I32(4)), Op::BinOp(B::I32Add),
+        ];
+        t.extend(lower_expr(&body, ctx));
+        t.push(Op::Store(out_sk));
+        t
+    };
+    let ok_branch = vec![
+        Op::LocalGet(out), Op::Const(Const::I32(0)), Op::Store(StoreKind::I32),
+        Op::LocalGet(out), Op::Const(Const::I32(4)), Op::BinOp(B::I32Add),
+        Op::LocalGet(r_local), Op::Const(Const::I32(4)), Op::BinOp(B::I32Add), Op::Load(ok_lk),
+        Op::Store(ok_sk),
+    ];
     ops.push(Op::LocalGet(r_local));
     ops.push(Op::Load(LoadKind::I32)); // tag
     ops.push(Op::IfVoid { then: err_branch, else_: ok_branch });

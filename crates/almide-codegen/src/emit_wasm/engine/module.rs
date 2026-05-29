@@ -1081,6 +1081,65 @@ mod tests {
         if let Some(r) = run(&[mx], "main") { assert_eq!(r, "7", "max(3,7)"); }
     }
 
+    /// result.map_err: Ok passes through, Err is mapped.
+    #[test]
+    fn exec_intrinsic_result_map_err() {
+        let res_ii = Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, vec![Ty::Int, Ty::Int]);
+        let build = |is_ok: bool| {
+            let mut vt = VarTable::new();
+            let e = vt.alloc(sym("e"), Ty::Int, almide_ir::Mutability::Let, None);
+            let inner = if is_ok {
+                IrExpr { kind: IrExprKind::ResultOk { expr: Box::new(lit_int(5)) }, ty: res_ii.clone(), span: None, def_id: None }
+            } else {
+                IrExpr { kind: IrExprKind::ResultErr { expr: Box::new(lit_int(3)) }, ty: res_ii.clone(), span: None, def_id: None }
+            };
+            let lam = IrExpr {
+                kind: IrExprKind::Lambda {
+                    params: vec![(e, Ty::Int)],
+                    body: Box::new(binop(almide_ir::BinOp::AddInt,
+                        IrExpr { kind: IrExprKind::Var { id: e }, ty: Ty::Int, span: None, def_id: None },
+                        lit_int(100), Ty::Int)),
+                    lambda_id: None,
+                },
+                ty: Ty::Fn { params: vec![Ty::Int], ret: Box::new(Ty::Int) }, span: None, def_id: None,
+            };
+            let mapped = IrExpr {
+                kind: IrExprKind::RuntimeCall { symbol: sym("almide_rt_result_map_err"), args: vec![inner, lam] },
+                ty: res_ii.clone(), span: None, def_id: None,
+            };
+            (vt, mapped)
+        };
+        // Ok(5).map_err(+100) ?? -1 == 5 (Ok preserved)
+        let (vt, ok) = build(true);
+        let uo = IrExpr { kind: IrExprKind::RuntimeCall { symbol: sym("almide_rt_result_unwrap_or"), args: vec![ok, lit_int(-1)] }, ty: Ty::Int, span: None, def_id: None };
+        let m = mk_func("main", Ty::Int, uo);
+        if let Some(r) = run_vt(&[m], &vt, "main") { assert_eq!(r, "5", "map_err Ok passthrough"); }
+        // Err(3).map_err(+100) is still Err
+        let (vt2, err) = build(false);
+        let ie = IrExpr { kind: IrExprKind::RuntimeCall { symbol: sym("almide_rt_result_is_err"), args: vec![err] }, ty: Ty::Bool, span: None, def_id: None };
+        let m2 = mk_func("main", Ty::Bool, ie);
+        if let Some(r) = run_vt(&[m2], &vt2, "main") { assert_eq!(r, "1", "map_err keeps Err"); }
+    }
+
+    /// string.slice by code points (UTF-8): slice("hello",1,4)=="ell" (len 3,
+    /// [0]=='e'); slice("café",3,4)=="é" (1 code point).
+    #[test]
+    fn exec_intrinsic_string_slice() {
+        let slice = |s: &str, a: i64, b: i64| IrExpr {
+            kind: IrExprKind::RuntimeCall { symbol: sym("almide_rt_string_slice"), args: vec![lit_str(s), lit_int(a), lit_int(b)] },
+            ty: Ty::String, span: None, def_id: None };
+        let len_of = |e: IrExpr| IrExpr { kind: IrExprKind::RuntimeCall { symbol: sym("almide_rt_string_len"), args: vec![e] }, ty: Ty::Int, span: None, def_id: None };
+        let byte_of = |e: IrExpr, i: i64| IrExpr { kind: IrExprKind::RuntimeCall { symbol: sym("__byte_at"), args: vec![e, lit_int(i)] }, ty: Ty::Int, span: None, def_id: None };
+
+        let m1 = mk_func("main", Ty::Int, len_of(slice("hello", 1, 4)));
+        if let Some(r) = run(&[m1], "main") { assert_eq!(r, "3", "slice hello[1,4] len"); }
+        let m2 = mk_func("main", Ty::Int, byte_of(slice("hello", 1, 4), 0));
+        if let Some(r) = run(&[m2], "main") { assert_eq!(r, "101", "slice[0]=='e'"); }
+        // café code points: c a f é ; slice(3,4) = "é" → 1 code point.
+        let m3 = mk_func("main", Ty::Int, len_of(slice("café", 3, 4)));
+        if let Some(r) = run(&[m3], "main") { assert_eq!(r, "1", "slice café[3,4] len chars"); }
+    }
+
     /// string.starts_with / ends_with (byte comparison).
     #[test]
     fn exec_intrinsic_starts_ends_with() {

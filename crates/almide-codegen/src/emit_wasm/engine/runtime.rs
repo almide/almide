@@ -43,10 +43,11 @@ pub struct RuntimeFns {
     pub list_concat: FuncIdx,
     pub starts_with: FuncIdx,
     pub ends_with: FuncIdx,
+    pub string_slice: FuncIdx,
 }
 
 /// The number of runtime functions (they occupy indices `0..COUNT`).
-pub const COUNT: u32 = 12;
+pub const COUNT: u32 = 13;
 
 impl RuntimeFns {
     /// The runtime functions occupy the first `COUNT` indices, in this order.
@@ -64,11 +65,12 @@ impl RuntimeFns {
             list_concat: 9,
             starts_with: 10,
             ends_with: 11,
+            string_slice: 12,
         }
     }
 
     /// Map of runtime function names to indices, for the build's name lookup.
-    pub fn name_table(&self) -> [(&'static str, FuncIdx); 12] {
+    pub fn name_table(&self) -> [(&'static str, FuncIdx); 13] {
         [
             ("__alloc", self.alloc),
             ("__rc_inc", self.rc_inc),
@@ -82,6 +84,7 @@ impl RuntimeFns {
             ("__list_concat", self.list_concat),
             ("__string_starts_with", self.starts_with),
             ("__string_ends_with", self.ends_with),
+            ("__string_slice", self.string_slice),
         ]
     }
 }
@@ -103,7 +106,95 @@ pub fn runtime_funcs(reg: &LayoutRegistry, heap_start: i32) -> Vec<WasmFunc> {
         build_list_concat(),
         build_prefix_cmp("__string_starts_with", false),
         build_prefix_cmp("__string_ends_with", true),
+        build_string_slice(),
     ]
+}
+
+/// `__string_slice(s, start: i64, end: i64) -> i32`
+///
+/// Returns the substring covering code points `[start, end)`. Converts the
+/// code-point indices to byte offsets by scanning UTF-8 boundaries, then copies
+/// that byte range into a fresh String. Out-of-range indices clamp to the ends.
+fn build_string_slice() -> WasmFunc {
+    let alloc_fn = RuntimeFns::fixed().alloc;
+    const S: u32 = 0;      // string ptr
+    const START: u32 = 1;  // i64
+    const END: u32 = 2;    // i64
+    const BL: u32 = 3;     // byte length
+    const SI: u32 = 4;     // start cp index (i32)
+    const EI: u32 = 5;     // end cp index (i32)
+    const SB: u32 = 6;     // start byte offset
+    const EB: u32 = 7;     // end byte offset
+    const B_: u32 = 8;     // byte cursor
+    const CP: u32 = 9;     // code-point counter
+    const OUT: u32 = 10;   // result ptr
+    const NB: u32 = 11;    // result byte count
+
+    // byte[b] is a code-point boundary: (byte & 0xC0) != 0x80
+    let is_boundary = vec![
+        Op::LocalGet(S), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add),
+        Op::LocalGet(B_), Op::BinOp(B::I32Add), Op::Load(LoadKind::U8),
+        Op::Const(Const::I32(0xC0)), Op::BinOp(B::I32And),
+        Op::Const(Const::I32(0x80)), Op::BinOp(B::I32Ne),
+    ];
+    // on boundary: if cp==si {sb=b}; if cp==ei {eb=b}; cp++
+    let on_boundary = vec![
+        Op::LocalGet(CP), Op::LocalGet(SI), Op::BinOp(B::I32Eq),
+        Op::IfVoid { then: vec![Op::LocalGet(B_), Op::LocalSet(SB)], else_: vec![] },
+        Op::LocalGet(CP), Op::LocalGet(EI), Op::BinOp(B::I32Eq),
+        Op::IfVoid { then: vec![Op::LocalGet(B_), Op::LocalSet(EB)], else_: vec![] },
+        Op::LocalGet(CP), Op::Const(Const::I32(1)), Op::BinOp(B::I32Add), Op::LocalSet(CP),
+    ];
+
+    let mut loop_body = vec![
+        Op::LocalGet(B_), Op::LocalGet(BL), Op::BinOp(B::I32GeU), Op::BrIf(1),
+    ];
+    loop_body.extend(is_boundary);
+    loop_body.push(Op::IfVoid { then: on_boundary, else_: vec![] });
+    loop_body.extend([Op::LocalGet(B_), Op::Const(Const::I32(1)), Op::BinOp(B::I32Add), Op::LocalSet(B_), Op::Br(0)]);
+
+    let body = vec![
+        Op::LocalGet(S), Op::Load(LoadKind::I32), Op::LocalSet(BL),
+        // si = wrap(start) ; ei = wrap(end) ; default sb=eb=bl
+        Op::LocalGet(START), Op::UnOp(U::I32WrapI64), Op::LocalSet(SI),
+        Op::LocalGet(END), Op::UnOp(U::I32WrapI64), Op::LocalSet(EI),
+        Op::LocalGet(BL), Op::LocalSet(SB),
+        Op::LocalGet(BL), Op::LocalSet(EB),
+        Op::Const(Const::I32(0)), Op::LocalSet(B_),
+        Op::Const(Const::I32(0)), Op::LocalSet(CP),
+        Op::Block(vec![Op::Loop(loop_body)]),
+        // nb = eb - sb ; if nb < 0 → 0
+        Op::LocalGet(EB), Op::LocalGet(SB), Op::BinOp(B::I32Sub), Op::LocalTee(NB),
+        Op::Const(Const::I32(0)), Op::BinOp(B::I32LtS),
+        Op::If {
+            ty: WasmTy::I32,
+            then: vec![Op::Const(Const::I32(0))],
+            else_: vec![Op::LocalGet(NB)],
+        },
+        Op::LocalSet(NB),
+        // out = __alloc(8 + nb) ; out.len = out.cap = nb
+        Op::Const(Const::I32(8)), Op::LocalGet(NB), Op::BinOp(B::I32Add),
+        Op::Call { idx: alloc_fn, pops: 1, pushes: 1 }, Op::LocalSet(OUT),
+        Op::LocalGet(OUT), Op::LocalGet(NB), Op::Store(StoreKind::I32),
+        Op::LocalGet(OUT), Op::Const(Const::I32(4)), Op::BinOp(B::I32Add), Op::LocalGet(NB), Op::Store(StoreKind::I32),
+        // memcpy(out+8, s+8+sb, nb)
+        Op::LocalGet(OUT), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add),
+        Op::LocalGet(S), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add), Op::LocalGet(SB), Op::BinOp(B::I32Add),
+        Op::LocalGet(NB),
+        Op::MemoryCopy,
+        Op::LocalGet(OUT),
+    ];
+
+    WasmFunc {
+        name: "__string_slice".into(),
+        params: vec![WasmTy::I32, WasmTy::I64, WasmTy::I64],
+        results: vec![WasmTy::I32],
+        locals: vec![
+            WasmTy::I32, WasmTy::I32, WasmTy::I32, WasmTy::I32, WasmTy::I32, // bl, si, ei, sb, eb
+            WasmTy::I32, WasmTy::I32, WasmTy::I32, WasmTy::I32, WasmTy::I32, // b, cp, out, nb (+1 spare)
+        ],
+        body,
+    }
 }
 
 /// `__string_starts_with(s, p)` / `__string_ends_with(s, p)` -> i32.
