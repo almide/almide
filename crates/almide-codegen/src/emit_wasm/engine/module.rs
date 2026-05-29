@@ -23,8 +23,8 @@
 
 use std::collections::HashMap;
 
-use almide_ir::{IrFunction, IrTypeDecl, IrTypeDeclKind, VarTable};
-use super::lower::{RecordLayouts, FnBodies};
+use almide_ir::{IrFunction, IrTypeDecl, IrTypeDeclKind, IrVariantKind, VarTable};
+use super::lower::{RecordLayouts, FnBodies, VariantLayouts};
 use wasm_encoder::{
     CodeSection, ExportSection, Function, FunctionSection, GlobalSection, GlobalType,
     MemorySection, MemoryType, Module, TypeSection, ValType,
@@ -71,6 +71,10 @@ pub enum BuildError {
     StackVerify { func: String, detail: String },
     /// A function still contains an abstract op that has no concrete lowering yet.
     UnresolvedAbstract { func: String, op: &'static str },
+    /// The assembled module failed wasm validation — a miscompile the
+    /// stack-effect verifier didn't catch (e.g. an i32/i64 type mismatch). The
+    /// universal safety net: reject rather than ship invalid wasm.
+    Invalid { detail: String },
 }
 
 impl std::fmt::Display for BuildError {
@@ -84,6 +88,7 @@ impl std::fmt::Display for BuildError {
                 "`{}` contains unresolved abstract op `{}` — needs runtime lowering (engine Phase 2)",
                 func, op,
             ),
+            BuildError::Invalid { detail } => write!(f, "assembled module failed validation: {}", detail),
         }
     }
 }
@@ -118,6 +123,22 @@ pub fn build_module(
             fn_bodies.insert(f.name, (params, f.body.clone()));
         }
     }
+
+    // Variant constructors → (tag, payload field types). Tag is the case index
+    // within its type; payload comes from the case's Tuple/Record fields.
+    let mut variants: VariantLayouts = HashMap::new();
+    for td in type_decls {
+        if let IrTypeDeclKind::Variant { cases, .. } = &td.kind {
+            for (tag, case) in cases.iter().enumerate() {
+                let payload: Vec<_> = match &case.kind {
+                    IrVariantKind::Unit => vec![],
+                    IrVariantKind::Tuple { fields } => fields.clone(),
+                    IrVariantKind::Record { fields } => fields.iter().map(|f| f.ty.clone()).collect(),
+                };
+                variants.insert(case.name, (tag as i32, payload));
+            }
+        }
+    }
     // Imports occupy the lowest indices, then runtime functions, then user
     // functions.
     let rt = RuntimeFns::fixed();
@@ -139,7 +160,7 @@ pub fn build_module(
     let mut sigs = SigTable::new();
     let mut user_funcs: Vec<WasmFunc> = Vec::with_capacity(ir_funcs.len());
     for f in ir_funcs {
-        let mut wf = super::lower::lower_function(f, var_table, reg, &lookup, &mut interner, &mut sigs, &record_types, &fn_bodies);
+        let mut wf = super::lower::lower_function(f, var_table, reg, &lookup, &mut interner, &mut sigs, &record_types, &fn_bodies, &variants);
         // Resolve Alloc / RcInc / RcDec / StringConcat into Calls to the runtime.
         // Stack-effect preserving, so verification below still holds.
         runtime::resolve_abstract_ops(&mut wf.body, &rt);
@@ -170,7 +191,16 @@ pub fn build_module(
     }
 
     // ── Phase E: assemble sections ──
-    Ok(assemble(&funcs, &name_idx, reg, &interner, heap_start, &mut sigs))
+    let bytes = assemble(&funcs, &name_idx, reg, &interner, heap_start, &mut sigs);
+
+    // ── Phase F: validate (universal safety net). The stack-effect verifier
+    //    checks depth, not value types — a miscompile that yields structurally
+    //    invalid wasm (e.g. i32/i64 mismatch) is rejected here so the build
+    //    falls back to the legacy emitter rather than shipping a bad module. ──
+    if let Err(e) = wasmparser::validate(&bytes) {
+        return Err(BuildError::Invalid { detail: e.to_string() });
+    }
+    Ok(bytes)
 }
 
 /// First offset of the string-literal data segment. Above the null page so

@@ -1,0 +1,22 @@
+// User-defined recursive variant (ADT): construction + match tag dispatch +
+// payload binding + recursion — the shape self-hosting (and json's Value) needs.
+type Json = | JNull | JBool(Bool) | JNum(Int) | JArr(List[Json])
+
+fn jsize(j: Json) -> Int = match j {
+  JNull => 1,
+  JBool(_) => 1,
+  JNum(_) => 1,
+  JArr(xs) => 1 + list.fold(xs, 0, (a, x) => a + jsize(x)),
+}
+
+fn jsum(j: Json) -> Int = match j {
+  JNum(n) => n,
+  JArr(xs) => list.fold(xs, 0, (a, x) => a + jsum(x)),
+  _ => 0,
+}
+
+fn main() -> Unit = {
+  let v = JArr([JNum(10), JBool(true), JNull, JArr([JNum(20), JNum(30)])])
+  println(int.to_string(jsize(v)))
+  println(int.to_string(jsum(v)))
+}

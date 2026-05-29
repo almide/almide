@@ -34,6 +34,11 @@ pub type RecordLayouts = std::collections::HashMap<almide_base::intern::Sym, Vec
 /// params include the leading `env` param (skipped at the inline site).
 pub type FnBodies = std::collections::HashMap<almide_base::intern::Sym, (Vec<(VarId, Ty)>, IrExpr)>;
 
+/// Variant constructor name → (tag index within its type, payload field types in
+/// order). Lets the engine lower `Ctor(args)` to a tagged heap value and resolve
+/// `match` arms to the right tag. (User-defined ADTs; Option/Result are built in.)
+pub type VariantLayouts = std::collections::HashMap<almide_base::intern::Sym, (i32, Vec<Ty>)>;
+
 pub struct LowerCtx<'a> {
     /// Maps VarId → WASM local index.
     var_map: Vec<Option<Local>>,
@@ -62,6 +67,9 @@ pub struct LowerCtx<'a> {
     pub record_types: &'a RecordLayouts,
     /// Lifted-closure bodies, for inlining non-capturing closures in HOFs.
     pub fn_bodies: &'a FnBodies,
+    /// Variant constructor layouts (tag + payload types), for ADT construction
+    /// and match tag resolution.
+    pub variants: &'a VariantLayouts,
 }
 
 impl<'a> LowerCtx<'a> {
@@ -74,6 +82,7 @@ impl<'a> LowerCtx<'a> {
         sigs: &'a mut SigTable,
         record_types: &'a RecordLayouts,
         fn_bodies: &'a FnBodies,
+        variants: &'a VariantLayouts,
     ) -> Self {
         let mut var_map = vec![None; var_table.len()];
         let mut locals = Vec::new();
@@ -102,6 +111,7 @@ impl<'a> LowerCtx<'a> {
             next_local: param_count,
             record_types,
             fn_bodies,
+            variants,
         }
     }
 
@@ -180,8 +190,9 @@ pub fn lower_function(
     sigs: &mut SigTable,
     record_types: &RecordLayouts,
     fn_bodies: &FnBodies,
+    variants: &VariantLayouts,
 ) -> WasmFunc {
-    let mut ctx = LowerCtx::new(&func.params, var_table, reg, func_idx, interner, sigs, record_types, fn_bodies);
+    let mut ctx = LowerCtx::new(&func.params, var_table, reg, func_idx, interner, sigs, record_types, fn_bodies, variants);
     let has_result = !matches!(func.ret_ty, Ty::Unit);
     let body = lower_expr(&func.body, &mut ctx);
 
@@ -1111,6 +1122,13 @@ fn lower_call(target: &CallTarget, args: &[IrExpr], ret_ty: &Ty, ctx: &mut Lower
         }
     }
 
+    // User-defined variant constructor `Ctor(args)` → tagged heap value.
+    if let CallTarget::Named { name, .. } = target {
+        if let Some((tag, payload)) = ctx.variants.get(name).cloned() {
+            return lower_variant_construct(tag, &payload, args, ctx);
+        }
+    }
+
     let mut ops = Vec::new();
     for arg in args {
         ops.extend(lower_expr(arg, ctx));
@@ -1198,6 +1216,37 @@ fn lower_indirect_call(
     // call_indirect pops the table index + every parameter (env + args).
     let pops = (args.len() as u8) + 1 /* env */ + 1 /* table idx */;
     ops.push(Op::CallIndirect { sig, pops, pushes });
+    ops
+}
+
+/// Construct a variant value `Ctor(args)`: a heap block `[tag:i32][payload...]`,
+/// payload fields packed at natural widths (offsets match match-arm binding).
+fn lower_variant_construct(tag: i32, payload: &[Ty], args: &[IrExpr], ctx: &mut LowerCtx) -> Vec<Op> {
+    // Generic payloads (TypeVar) have no guaranteed width — construction and
+    // match can't agree, so reject (→ legacy). Concrete variants (the common
+    // case, and what json / self-hosting use) lower here.
+    if payload.iter().any(Ty::is_unresolved) {
+        return vec![Op::Unsupported("variant-generic-payload")];
+    }
+    let total: i32 = 4 + payload.iter().map(wasm_byte_size).sum::<i32>();
+    let v = ctx.alloc_local(WasmTy::I32);
+    let mut ops = vec![Op::Const(Const::I32(total)), Op::Alloc, Op::LocalSet(v)];
+    ops.push(Op::LocalGet(v));
+    ops.push(Op::Const(Const::I32(tag)));
+    ops.push(Op::Store(StoreKind::I32));
+    let mut off = 4i32;
+    for (i, arg) in args.iter().enumerate() {
+        let fty = payload.get(i).unwrap_or(&arg.ty);
+        ops.push(Op::LocalGet(v));
+        if off != 0 {
+            ops.push(Op::Const(Const::I32(off)));
+            ops.push(Op::BinOp(WBinOp::I32Add));
+        }
+        ops.extend(lower_expr(arg, ctx));
+        ops.push(Op::Store(store_kind_of(ty_to_wasm(fty))));
+        off += wasm_byte_size(fty);
+    }
+    ops.push(Op::LocalGet(v));
     ops
 }
 
@@ -1361,13 +1410,16 @@ fn pattern_condition(pattern: &IrPattern, subj: Local, _subj_ty: &Ty, ctx: &mut 
                 _ => vec![Op::Const(Const::I32(1))], // TODO: float comparison
             }
         }
-        IrPattern::Constructor { name: _, .. } => {
-            // Load tag from variant and compare
-            // TODO: resolve tag index from variant name
+        IrPattern::Constructor { name, .. } => {
+            // Compare the value's tag (i32 @0) to this constructor's tag. Reject
+            // (→ legacy) if the constructor isn't a known user variant.
+            let Some(tag) = ctx.variants.get(&almide_base::intern::sym(name)).map(|(t, _)| *t) else {
+                return vec![Op::Unsupported("ctor-pattern-unresolved")];
+            };
             vec![
                 Op::LocalGet(subj),
-                Op::Load(LoadKind::I32), // load tag at offset 0
-                Op::Const(Const::I32(0)), // placeholder tag
+                Op::Load(LoadKind::I32),
+                Op::Const(Const::I32(tag)),
                 Op::BinOp(WBinOp::I32Eq),
             ]
         }
@@ -1546,12 +1598,19 @@ fn bind_pattern(pattern: &IrPattern, subj: Local, subj_ty: &Ty, ctx: &mut LowerC
             let pty = result_args(subj_ty).map(|(_, e)| e).unwrap_or_else(|| pattern_fallback_ty(inner));
             destructure_one(inner, subj, 4, &pty, ctx)
         }
-        IrPattern::Constructor { args, .. } => {
-            // Constructor args are packed after the tag at their natural widths.
+        IrPattern::Constructor { name, args } => {
+            // Args are packed after the tag; use the variant's declared payload
+            // types for offsets so a wildcard over a wide field doesn't misalign.
+            let payload = ctx.variants.get(&almide_base::intern::sym(name)).map(|(_, p)| p.clone());
+            // Match generic variants the same way construction rejects them.
+            if payload.as_ref().map_or(false, |p| p.iter().any(Ty::is_unresolved)) {
+                return vec![Op::Unsupported("variant-generic-payload")];
+            }
             let mut ops = Vec::new();
             let mut off = 4i32;
-            for arg in args.iter() {
-                let ty = pattern_fallback_ty(arg);
+            for (i, arg) in args.iter().enumerate() {
+                let ty = payload.as_ref().and_then(|p| p.get(i)).cloned()
+                    .unwrap_or_else(|| pattern_fallback_ty(arg));
                 ops.extend(destructure_one(arg, subj, off, &ty, ctx));
                 off += wasm_byte_size(&ty);
             }
@@ -1763,7 +1822,7 @@ mod tests {
             visibility: IrVisibility::Private, doc: None, blank_lines_before: 0,
             def_id: None, mutated_params: vec![], module_origin: None,
         };
-        let wasm_func = lower_function(&func, &vt, &reg, &no_func_idx, &mut interner(), &mut SigTable::new(), &RecordLayouts::new(), &FnBodies::new());
+        let wasm_func = lower_function(&func, &vt, &reg, &no_func_idx, &mut interner(), &mut SigTable::new(), &RecordLayouts::new(), &FnBodies::new(), &VariantLayouts::new());
         assert_eq!(wasm_func.results, vec![WasmTy::I64]);
         assert!(verify_func_stack(&wasm_func).is_ok(), "stack verification failed: {:?}", verify_func_stack(&wasm_func));
     }
@@ -1788,7 +1847,7 @@ mod tests {
             visibility: IrVisibility::Private, doc: None, blank_lines_before: 0,
             def_id: None, mutated_params: vec![], module_origin: None,
         };
-        let wasm_func = lower_function(&func, &vt, &reg, &no_func_idx, &mut interner(), &mut SigTable::new(), &RecordLayouts::new(), &FnBodies::new());
+        let wasm_func = lower_function(&func, &vt, &reg, &no_func_idx, &mut interner(), &mut SigTable::new(), &RecordLayouts::new(), &FnBodies::new(), &VariantLayouts::new());
         assert!(verify_func_stack(&wasm_func).is_ok());
         // Should be: Const(1), Const(2), I64Add
         assert_eq!(wasm_func.body.len(), 3);
@@ -1820,7 +1879,7 @@ mod tests {
             visibility: IrVisibility::Private, doc: None, blank_lines_before: 0,
             def_id: None, mutated_params: vec![], module_origin: None,
         };
-        let wasm_func = lower_function(&func, &vt, &reg, &no_func_idx, &mut interner(), &mut SigTable::new(), &RecordLayouts::new(), &FnBodies::new());
+        let wasm_func = lower_function(&func, &vt, &reg, &no_func_idx, &mut interner(), &mut SigTable::new(), &RecordLayouts::new(), &FnBodies::new(), &VariantLayouts::new());
         assert!(verify_func_stack(&wasm_func).is_ok(), "{:?}", verify_func_stack(&wasm_func));
         assert!(wasm_func.results.is_empty());
     }
@@ -1845,7 +1904,7 @@ mod tests {
             visibility: IrVisibility::Private, doc: None, blank_lines_before: 0,
             def_id: None, mutated_params: vec![], module_origin: None,
         };
-        let wasm_func = lower_function(&func, &vt, &reg, &no_func_idx, &mut interner(), &mut SigTable::new(), &RecordLayouts::new(), &FnBodies::new());
+        let wasm_func = lower_function(&func, &vt, &reg, &no_func_idx, &mut interner(), &mut SigTable::new(), &RecordLayouts::new(), &FnBodies::new(), &VariantLayouts::new());
         assert!(verify_func_stack(&wasm_func).is_ok(), "{:?}", verify_func_stack(&wasm_func));
     }
 }
