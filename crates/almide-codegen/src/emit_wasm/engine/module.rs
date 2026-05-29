@@ -1081,6 +1081,68 @@ mod tests {
         if let Some(r) = run(&[mx], "main") { assert_eq!(r, "7", "max(3,7)"); }
     }
 
+    /// list.sum and list.contains (Int elements).
+    #[test]
+    fn exec_intrinsic_sum_contains() {
+        let list = || IrExpr {
+            kind: IrExprKind::List { elements: vec![lit_int(10), lit_int(20), lit_int(30)] },
+            ty: Ty::list(Ty::Int), span: None, def_id: None,
+        };
+        let sum = mk_func("main", Ty::Int, IrExpr {
+            kind: IrExprKind::RuntimeCall { symbol: sym("almide_rt_list_sum"), args: vec![list()] },
+            ty: Ty::Int, span: None, def_id: None });
+        if let Some(r) = run(&[sum], "main") { assert_eq!(r, "60", "sum"); }
+        let has = mk_func("main", Ty::Bool, IrExpr {
+            kind: IrExprKind::RuntimeCall { symbol: sym("almide_rt_list_contains"), args: vec![list(), lit_int(20)] },
+            ty: Ty::Bool, span: None, def_id: None });
+        if let Some(r) = run(&[has], "main") { assert_eq!(r, "1", "contains 20"); }
+        let hasnt = mk_func("main", Ty::Bool, IrExpr {
+            kind: IrExprKind::RuntimeCall { symbol: sym("almide_rt_list_contains"), args: vec![list(), lit_int(99)] },
+            ty: Ty::Bool, span: None, def_id: None });
+        if let Some(r) = run(&[hasnt], "main") { assert_eq!(r, "0", "contains 99"); }
+    }
+
+    /// result.map: `Ok(5).map(x=>x*2) ?? -1` → 10; `Err(_).map(...) ?? -1` → -1.
+    #[test]
+    fn exec_intrinsic_result_map() {
+        let res_int = Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, vec![Ty::Int, Ty::String]);
+        let build = |is_ok: bool| {
+            let mut vt = VarTable::new();
+            let x = vt.alloc(sym("x"), Ty::Int, almide_ir::Mutability::Let, None);
+            let inner = if is_ok {
+                IrExpr { kind: IrExprKind::ResultOk { expr: Box::new(lit_int(5)) }, ty: res_int.clone(), span: None, def_id: None }
+            } else {
+                IrExpr { kind: IrExprKind::ResultErr { expr: Box::new(lit_str("boom")) }, ty: res_int.clone(), span: None, def_id: None }
+            };
+            let lam = IrExpr {
+                kind: IrExprKind::Lambda {
+                    params: vec![(x, Ty::Int)],
+                    body: Box::new(binop(almide_ir::BinOp::MulInt,
+                        IrExpr { kind: IrExprKind::Var { id: x }, ty: Ty::Int, span: None, def_id: None },
+                        lit_int(2), Ty::Int)),
+                    lambda_id: None,
+                },
+                ty: Ty::Fn { params: vec![Ty::Int], ret: Box::new(Ty::Int) }, span: None, def_id: None,
+            };
+            let mapped = IrExpr {
+                kind: IrExprKind::RuntimeCall { symbol: sym("almide_rt_result_map"), args: vec![inner, lam] },
+                ty: res_int.clone(), span: None, def_id: None,
+            };
+            // unwrap_or via the result intrinsic (Ok → payload, Err → fallback)
+            let uo = IrExpr {
+                kind: IrExprKind::RuntimeCall { symbol: sym("almide_rt_result_unwrap_or"), args: vec![mapped, lit_int(-1)] },
+                ty: Ty::Int, span: None, def_id: None,
+            };
+            (vt, uo)
+        };
+        let (vt, ok) = build(true);
+        let m = mk_func("main", Ty::Int, ok);
+        if let Some(r) = run_vt(&[m], &vt, "main") { assert_eq!(r, "10", "Ok(5).map(*2)"); }
+        let (vt2, err) = build(false);
+        let m2 = mk_func("main", Ty::Int, err);
+        if let Some(r) = run_vt(&[m2], &vt2, "main") { assert_eq!(r, "-1", "Err.map"); }
+    }
+
     /// Option/Result tag tests + unwrap_or via intrinsics.
     #[test]
     fn exec_intrinsic_option_result() {

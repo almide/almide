@@ -67,9 +67,145 @@ pub fn lower_intrinsic(
         "almide_rt_result_unwrap_or" if args.len() == 2 =>
             Some(tagged_unwrap_or(&args[0], &args[1], false, ret_ty, ctx)),
         "almide_rt_option_map" if args.len() == 2 => option_map(&args[0], &args[1], ret_ty, ctx),
+        "almide_rt_result_map" if args.len() == 2 => result_map(&args[0], &args[1], ret_ty, ctx),
+        "almide_rt_list_sum" if args.len() == 1 => Some(list_sum(&args[0], ctx)),
+        "almide_rt_list_contains" if args.len() == 2 => list_contains(&args[0], &args[1], ctx),
 
         _ => None,
     }
+}
+
+/// `list.sum(xs: List[Int])` — accumulate i64 elements.
+fn list_sum(xs_expr: &IrExpr, ctx: &mut LowerCtx) -> Vec<Op> {
+    let (lp, mut ops) = list_loop_header(xs_expr, ctx);
+    let acc = ctx.alloc_local(WasmTy::I64);
+    ops.push(Op::Const(Const::I64(0)));
+    ops.push(Op::LocalSet(acc));
+    let mut loop_body = Vec::new();
+    loop_body.push(Op::LocalGet(lp.idx));
+    loop_body.push(Op::LocalGet(lp.len));
+    loop_body.push(Op::BinOp(B::I32GeU));
+    loop_body.push(Op::BrIf(1));
+    loop_body.push(Op::LocalGet(acc));
+    loop_body.extend(load_elem(lp.xs, lp.idx, 8, LoadKind::I64));
+    loop_body.push(Op::BinOp(B::I64Add));
+    loop_body.push(Op::LocalSet(acc));
+    loop_body.push(Op::LocalGet(lp.idx));
+    loop_body.push(Op::Const(Const::I32(1)));
+    loop_body.push(Op::BinOp(B::I32Add));
+    loop_body.push(Op::LocalSet(lp.idx));
+    loop_body.push(Op::Br(0));
+    ops.push(Op::Block(vec![Op::Loop(loop_body)]));
+    ops.push(Op::LocalGet(acc));
+    ops
+}
+
+/// `list.contains(xs, x)` — scan for an element equal to `x`. Supports scalar
+/// elements (Int/Float/Bool) and String (deep eq); other element types fall
+/// back (None).
+fn list_contains(xs_expr: &IrExpr, x_expr: &IrExpr, ctx: &mut LowerCtx) -> Option<Vec<Op>> {
+    let elem_ty = super::lower::list_element_ty(&xs_expr.ty).unwrap_or(Ty::Int);
+    let wt = ty_to_wasm(&elem_ty);
+    let es = wasm_byte_size(&elem_ty);
+    let lk = load_kind_of(wt);
+    // Equality ops consuming [elem, x] → i32 bool, per element type.
+    let eq: Vec<Op> = match &elem_ty {
+        Ty::Int => vec![Op::BinOp(B::I64Eq)],
+        Ty::Float => vec![Op::BinOp(B::F64Eq)],
+        Ty::Bool => vec![Op::BinOp(B::I32Eq)],
+        Ty::String => vec![Op::Call { idx: (ctx.func_idx)("__string_eq")?, pops: 2, pushes: 1 }],
+        _ => return None,
+    };
+
+    let result = ctx.alloc_local(WasmTy::I32);
+    let xval = ctx.alloc_local(wt);
+    let elem = ctx.alloc_local(wt);
+    let mut ops = lower_expr(x_expr, ctx);
+    ops.push(Op::LocalSet(xval));
+    let (lp, header) = list_loop_header(xs_expr, ctx);
+    ops.extend(header);
+    ops.push(Op::Const(Const::I32(0)));
+    ops.push(Op::LocalSet(result));
+
+    let mut loop_body = Vec::new();
+    loop_body.push(Op::LocalGet(lp.idx));
+    loop_body.push(Op::LocalGet(lp.len));
+    loop_body.push(Op::BinOp(B::I32GeU));
+    loop_body.push(Op::BrIf(1));
+    loop_body.extend(load_elem(lp.xs, lp.idx, es, lk));
+    loop_body.push(Op::LocalSet(elem));
+    loop_body.push(Op::LocalGet(elem));
+    loop_body.push(Op::LocalGet(xval));
+    loop_body.extend(eq);
+    loop_body.push(Op::IfVoid {
+        then: vec![Op::Const(Const::I32(1)), Op::LocalSet(result), Op::Br(2)],
+        else_: vec![],
+    });
+    loop_body.push(Op::LocalGet(lp.idx));
+    loop_body.push(Op::Const(Const::I32(1)));
+    loop_body.push(Op::BinOp(B::I32Add));
+    loop_body.push(Op::LocalSet(lp.idx));
+    loop_body.push(Op::Br(0));
+    ops.push(Op::Block(vec![Op::Loop(loop_body)]));
+    ops.push(Op::LocalGet(result));
+    Some(ops)
+}
+
+/// `result.map(r, f)` — `Ok(f(x))` when Ok, the original `Err(e)` otherwise.
+fn result_map(r: &IrExpr, f: &IrExpr, ret_ty: &Ty, ctx: &mut LowerCtx) -> Option<Vec<Op>> {
+    let (pvar, pty, body) = inline_lambda(f, 1, ctx)?;
+    let in_lk = load_kind_of(ty_to_wasm(&pty));
+    let out_ok_ty = result_ok_ty(ret_ty).unwrap_or(Ty::Int);
+    let out_sk = store_kind_of(ty_to_wasm(&out_ok_ty));
+    // Err payload type (E) for passthrough copy.
+    let err_ty = result_err_ty(&r.ty).unwrap_or(Ty::String);
+    let err_lk = load_kind_of(ty_to_wasm(&err_ty));
+    let err_sk = store_kind_of(ty_to_wasm(&err_ty));
+
+    let r_local = ctx.alloc_local(WasmTy::I32);
+    let out = ctx.alloc_local(WasmTy::I32);
+    let elem = ctx.alloc_local(ty_to_wasm(&pty));
+    ctx.map_var(pvar, elem);
+    let alloc = (ctx.func_idx)("__alloc")?;
+
+    let mut ops = lower_expr(r, ctx);
+    ops.push(Op::LocalSet(r_local));
+    ops.push(Op::Const(Const::I32(12)));
+    ops.push(Op::Call { idx: alloc, pops: 1, pushes: 1 });
+    ops.push(Op::LocalSet(out));
+
+    // tag != 0 (Err): passthrough; tag == 0 (Ok): map.
+    let err_branch = vec![
+        Op::LocalGet(out), Op::Const(Const::I32(1)), Op::Store(StoreKind::I32),
+        Op::LocalGet(out), Op::Const(Const::I32(4)), Op::BinOp(B::I32Add),
+        Op::LocalGet(r_local), Op::Const(Const::I32(4)), Op::BinOp(B::I32Add), Op::Load(err_lk),
+        Op::Store(err_sk),
+    ];
+    let ok_branch = {
+        let mut t = vec![
+            Op::LocalGet(r_local), Op::Const(Const::I32(4)), Op::BinOp(B::I32Add),
+            Op::Load(in_lk), Op::LocalSet(elem),
+            Op::LocalGet(out), Op::Const(Const::I32(0)), Op::Store(StoreKind::I32),
+            Op::LocalGet(out), Op::Const(Const::I32(4)), Op::BinOp(B::I32Add),
+        ];
+        t.extend(lower_expr(&body, ctx));
+        t.push(Op::Store(out_sk));
+        t
+    };
+    ops.push(Op::LocalGet(r_local));
+    ops.push(Op::Load(LoadKind::I32)); // tag
+    ops.push(Op::IfVoid { then: err_branch, else_: ok_branch });
+    ops.push(Op::LocalGet(out));
+    Some(ops)
+}
+
+fn result_ok_ty(ty: &Ty) -> Option<Ty> {
+    use almide_lang::types::constructor::TypeConstructorId as TC;
+    match ty { Ty::Applied(TC::Result, a) if !a.is_empty() => Some(a[0].clone()), _ => None }
+}
+fn result_err_ty(ty: &Ty) -> Option<Ty> {
+    use almide_lang::types::constructor::TypeConstructorId as TC;
+    match ty { Ty::Applied(TC::Result, a) if a.len() >= 2 => Some(a[1].clone()), _ => None }
 }
 
 /// Load a tagged-union tag (i32 at offset 0): Some=1/None=0, Err=1/Ok=0.
