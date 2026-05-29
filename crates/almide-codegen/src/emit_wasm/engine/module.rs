@@ -1081,6 +1081,23 @@ mod tests {
         if let Some(r) = run(&[mx], "main") { assert_eq!(r, "7", "max(3,7)"); }
     }
 
+    /// string.starts_with / ends_with (byte comparison).
+    #[test]
+    fn exec_intrinsic_starts_ends_with() {
+        let call = |symbol: &str, s: &str, p: &str| IrExpr {
+            kind: IrExprKind::RuntimeCall { symbol: sym(symbol), args: vec![lit_str(s), lit_str(p)] },
+            ty: Ty::Bool, span: None, def_id: None };
+        let t = |e: IrExpr, exp: &str, msg: &str| {
+            let m = mk_func("main", Ty::Bool, e);
+            if let Some(r) = run(&[m], "main") { assert_eq!(&r, exp, "{}", msg); }
+        };
+        t(call("almide_rt_string_starts_with", "hello", "he"), "1", "hello starts he");
+        t(call("almide_rt_string_starts_with", "hello", "lo"), "0", "hello !starts lo");
+        t(call("almide_rt_string_starts_with", "hi", "hello"), "0", "prefix longer");
+        t(call("almide_rt_string_ends_with", "hello", "lo"), "1", "hello ends lo");
+        t(call("almide_rt_string_ends_with", "hello", "he"), "0", "hello !ends he");
+    }
+
     /// list.sum and list.contains (Int elements).
     #[test]
     fn exec_intrinsic_sum_contains() {

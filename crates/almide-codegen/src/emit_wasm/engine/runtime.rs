@@ -41,10 +41,12 @@ pub struct RuntimeFns {
     pub string_eq: FuncIdx,
     pub range: FuncIdx,
     pub list_concat: FuncIdx,
+    pub starts_with: FuncIdx,
+    pub ends_with: FuncIdx,
 }
 
 /// The number of runtime functions (they occupy indices `0..COUNT`).
-pub const COUNT: u32 = 10;
+pub const COUNT: u32 = 12;
 
 impl RuntimeFns {
     /// The runtime functions occupy the first `COUNT` indices, in this order.
@@ -60,11 +62,13 @@ impl RuntimeFns {
             string_eq: 7,
             range: 8,
             list_concat: 9,
+            starts_with: 10,
+            ends_with: 11,
         }
     }
 
     /// Map of runtime function names to indices, for the build's name lookup.
-    pub fn name_table(&self) -> [(&'static str, FuncIdx); 10] {
+    pub fn name_table(&self) -> [(&'static str, FuncIdx); 12] {
         [
             ("__alloc", self.alloc),
             ("__rc_inc", self.rc_inc),
@@ -76,6 +80,8 @@ impl RuntimeFns {
             ("__string_eq", self.string_eq),
             ("__range", self.range),
             ("__list_concat", self.list_concat),
+            ("__string_starts_with", self.starts_with),
+            ("__string_ends_with", self.ends_with),
         ]
     }
 }
@@ -95,7 +101,70 @@ pub fn runtime_funcs(reg: &LayoutRegistry, heap_start: i32) -> Vec<WasmFunc> {
         build_string_eq(),
         build_range(),
         build_list_concat(),
+        build_prefix_cmp("__string_starts_with", false),
+        build_prefix_cmp("__string_ends_with", true),
     ]
+}
+
+/// `__string_starts_with(s, p)` / `__string_ends_with(s, p)` -> i32.
+///
+/// Byte-compares `p` against the start (or end) of `s`. UTF-8 safe: matching
+/// whole encoded substrings is a pure byte comparison. `from_end` shifts the
+/// `s` offset by `len(s) - len(p)`.
+fn build_prefix_cmp(name: &str, from_end: bool) -> WasmFunc {
+    const S: u32 = 0;
+    const P: u32 = 1;
+    const SL: u32 = 2; // len(s)
+    const PL: u32 = 3; // len(p)
+    const I: u32 = 4;
+    const OFF: u32 = 5; // base offset into s's data
+
+    // s byte address: s + 8 + off + i ; p byte address: p + 8 + i
+    let s_byte = vec![
+        Op::LocalGet(S), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add),
+        Op::LocalGet(OFF), Op::BinOp(B::I32Add),
+        Op::LocalGet(I), Op::BinOp(B::I32Add),
+        Op::Load(LoadKind::U8),
+    ];
+    let p_byte = vec![
+        Op::LocalGet(P), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add),
+        Op::LocalGet(I), Op::BinOp(B::I32Add),
+        Op::Load(LoadKind::U8),
+    ];
+
+    let mut body = vec![
+        Op::LocalGet(S), Op::Load(LoadKind::I32), Op::LocalSet(SL),
+        Op::LocalGet(P), Op::Load(LoadKind::I32), Op::LocalSet(PL),
+        // if pl > sl: return 0
+        Op::LocalGet(PL), Op::LocalGet(SL), Op::BinOp(B::I32GtU),
+        Op::IfVoid { then: vec![Op::Const(Const::I32(0)), Op::Return], else_: vec![] },
+        // off = from_end ? sl - pl : 0
+    ];
+    if from_end {
+        body.extend([Op::LocalGet(SL), Op::LocalGet(PL), Op::BinOp(B::I32Sub), Op::LocalSet(OFF)]);
+    } else {
+        body.extend([Op::Const(Const::I32(0)), Op::LocalSet(OFF)]);
+    }
+    body.extend([Op::Const(Const::I32(0)), Op::LocalSet(I)]);
+
+    let mut loop_body = vec![
+        Op::LocalGet(I), Op::LocalGet(PL), Op::BinOp(B::I32GeU), Op::BrIf(1),
+    ];
+    loop_body.extend(s_byte);
+    loop_body.extend(p_byte);
+    loop_body.push(Op::BinOp(B::I32Ne));
+    loop_body.push(Op::IfVoid { then: vec![Op::Const(Const::I32(0)), Op::Return], else_: vec![] });
+    loop_body.extend([Op::LocalGet(I), Op::Const(Const::I32(1)), Op::BinOp(B::I32Add), Op::LocalSet(I), Op::Br(0)]);
+    body.push(Op::Block(vec![Op::Loop(loop_body)]));
+    body.push(Op::Const(Const::I32(1)));
+
+    WasmFunc {
+        name: name.into(),
+        params: vec![WasmTy::I32, WasmTy::I32],
+        results: vec![WasmTy::I32],
+        locals: vec![WasmTy::I32, WasmTy::I32, WasmTy::I32, WasmTy::I32], // sl, pl, i, off
+        body,
+    }
 }
 
 /// `__alloc(size: i32) -> i32`

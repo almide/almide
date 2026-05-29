@@ -70,6 +70,8 @@ pub fn lower_intrinsic(
         "almide_rt_result_map" if args.len() == 2 => result_map(&args[0], &args[1], ret_ty, ctx),
         "almide_rt_list_sum" if args.len() == 1 => Some(list_sum(&args[0], ctx)),
         "almide_rt_list_contains" if args.len() == 2 => list_contains(&args[0], &args[1], ctx),
+        "almide_rt_string_starts_with" if args.len() == 2 => call_runtime("__string_starts_with", args, 1, ctx),
+        "almide_rt_string_ends_with" if args.len() == 2 => call_runtime("__string_ends_with", args, 1, ctx),
 
         _ => None,
     }
