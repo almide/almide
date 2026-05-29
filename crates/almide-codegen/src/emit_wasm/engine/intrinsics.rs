@@ -74,6 +74,11 @@ pub fn lower_intrinsic(
         "almide_rt_string_char_at" if args.len() == 2 =>
             call_runtime("__string_get", args, 1, ctx),
         "almide_rt_list_sum" if args.len() == 1 => Some(list_sum(&args[0], ctx)),
+        // sort: Int lists via the runtime selection sort; other element types
+        // (Float/String/composite) fall back until typed comparators land.
+        "almide_rt_list_sort" if args.len() == 1
+            && matches!(super::lower::list_element_ty(&args[0].ty), Some(Ty::Int)) =>
+            call_runtime("__list_sort_int", args, 1, ctx),
         "almide_rt_list_contains" if args.len() == 2 => list_contains(&args[0], &args[1], ctx),
         "almide_rt_string_starts_with" if args.len() == 2 => call_runtime("__string_starts_with", args, 1, ctx),
         "almide_rt_string_ends_with" if args.len() == 2 => call_runtime("__string_ends_with", args, 1, ctx),

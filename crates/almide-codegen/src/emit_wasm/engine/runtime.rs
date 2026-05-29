@@ -45,10 +45,11 @@ pub struct RuntimeFns {
     pub ends_with: FuncIdx,
     pub string_slice: FuncIdx,
     pub string_get: FuncIdx,
+    pub list_sort_int: FuncIdx,
 }
 
 /// The number of runtime functions (they occupy indices `0..COUNT`).
-pub const COUNT: u32 = 14;
+pub const COUNT: u32 = 15;
 
 impl RuntimeFns {
     /// The runtime functions occupy the first `COUNT` indices, in this order.
@@ -68,11 +69,12 @@ impl RuntimeFns {
             ends_with: 11,
             string_slice: 12,
             string_get: 13,
+            list_sort_int: 14,
         }
     }
 
     /// Map of runtime function names to indices, for the build's name lookup.
-    pub fn name_table(&self) -> [(&'static str, FuncIdx); 14] {
+    pub fn name_table(&self) -> [(&'static str, FuncIdx); 15] {
         [
             ("__alloc", self.alloc),
             ("__rc_inc", self.rc_inc),
@@ -88,6 +90,7 @@ impl RuntimeFns {
             ("__string_ends_with", self.ends_with),
             ("__string_slice", self.string_slice),
             ("__string_get", self.string_get),
+            ("__list_sort_int", self.list_sort_int),
         ]
     }
 }
@@ -111,7 +114,77 @@ pub fn runtime_funcs(reg: &LayoutRegistry, heap_start: i32) -> Vec<WasmFunc> {
         build_prefix_cmp("__string_ends_with", true),
         build_string_slice(),
         build_string_get(),
+        build_list_sort_int(),
     ]
+}
+
+/// `__list_sort_int(xs: List[Int]) -> List[Int]` — ascending selection sort on
+/// a fresh copy (i64 elements, 8-byte stride). O(n²), fine for typical sizes.
+fn build_list_sort_int() -> WasmFunc {
+    let rt = RuntimeFns::fixed();
+    const XS: u32 = 0;
+    const LEN: u32 = 1;
+    const OUT: u32 = 2;
+    const I: u32 = 3;
+    const J: u32 = 4;
+    const MN: u32 = 5;   // index of current minimum
+    const TMP: u32 = 6;  // i64 swap temp
+
+    // address of out element k: out + 8 + k*8
+    let addr = |k: u32| vec![
+        Op::LocalGet(OUT), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add),
+        Op::LocalGet(k), Op::Const(Const::I32(8)), Op::BinOp(B::I32Mul), Op::BinOp(B::I32Add),
+    ];
+
+    // inner loop: find min index in [i+1, len)
+    let mut inner = vec![
+        Op::LocalGet(J), Op::LocalGet(LEN), Op::BinOp(B::I32GeU), Op::BrIf(1),
+        // if out[j] < out[mn] { mn = j }
+    ];
+    inner.extend(addr(J)); inner.push(Op::Load(LoadKind::I64));
+    inner.extend(addr(MN)); inner.push(Op::Load(LoadKind::I64));
+    inner.push(Op::BinOp(B::I64LtS));
+    inner.push(Op::IfVoid { then: vec![Op::LocalGet(J), Op::LocalSet(MN)], else_: vec![] });
+    inner.extend([Op::LocalGet(J), Op::Const(Const::I32(1)), Op::BinOp(B::I32Add), Op::LocalSet(J), Op::Br(0)]);
+
+    // outer loop body
+    let mut outer = vec![
+        Op::LocalGet(I), Op::LocalGet(LEN), Op::BinOp(B::I32GeU), Op::BrIf(1),
+        Op::LocalGet(I), Op::LocalSet(MN),
+        Op::LocalGet(I), Op::Const(Const::I32(1)), Op::BinOp(B::I32Add), Op::LocalSet(J),
+        Op::Block(vec![Op::Loop(inner)]),
+    ];
+    // swap out[i] and out[mn]: tmp = out[i]; out[i] = out[mn]; out[mn] = tmp
+    outer.extend(addr(I)); outer.push(Op::Load(LoadKind::I64)); outer.push(Op::LocalSet(TMP));
+    outer.extend(addr(I)); outer.extend(addr(MN)); outer.push(Op::Load(LoadKind::I64)); outer.push(Op::Store(StoreKind::I64));
+    outer.extend(addr(MN)); outer.push(Op::LocalGet(TMP)); outer.push(Op::Store(StoreKind::I64));
+    outer.extend([Op::LocalGet(I), Op::Const(Const::I32(1)), Op::BinOp(B::I32Add), Op::LocalSet(I), Op::Br(0)]);
+
+    let body = vec![
+        Op::LocalGet(XS), Op::Load(LoadKind::I32), Op::LocalSet(LEN),
+        // out = __alloc(8 + len*8); out.len = out.cap = len
+        Op::Const(Const::I32(8)), Op::LocalGet(LEN), Op::Const(Const::I32(8)), Op::BinOp(B::I32Mul), Op::BinOp(B::I32Add),
+        Op::Call { idx: rt.alloc, pops: 1, pushes: 1 }, Op::LocalSet(OUT),
+        Op::LocalGet(OUT), Op::LocalGet(LEN), Op::Store(StoreKind::I32),
+        Op::LocalGet(OUT), Op::Const(Const::I32(4)), Op::BinOp(B::I32Add), Op::LocalGet(LEN), Op::Store(StoreKind::I32),
+        // memcpy(out+8, xs+8, len*8)
+        Op::LocalGet(OUT), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add),
+        Op::LocalGet(XS), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add),
+        Op::LocalGet(LEN), Op::Const(Const::I32(8)), Op::BinOp(B::I32Mul),
+        Op::MemoryCopy,
+        // i = 0 ; selection sort
+        Op::Const(Const::I32(0)), Op::LocalSet(I),
+        Op::Block(vec![Op::Loop(outer)]),
+        Op::LocalGet(OUT),
+    ];
+
+    WasmFunc {
+        name: "__list_sort_int".into(),
+        params: vec![WasmTy::I32],
+        results: vec![WasmTy::I32],
+        locals: vec![WasmTy::I32, WasmTy::I32, WasmTy::I32, WasmTy::I32, WasmTy::I32, WasmTy::I64], // len,out,i,j,mn,tmp
+        body,
+    }
 }
 
 /// `__string_get(s, i: i64) -> i32` — `Some(s[i])` (a 1-code-point String) or

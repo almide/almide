@@ -1178,6 +1178,28 @@ mod tests {
         t(call("almide_rt_string_ends_with", "hello", "he"), "0", "hello !ends he");
     }
 
+    /// list.sort (Int, ascending): `[3,1,2].sort()` → [1,2,3]; [0]==1, [2]==3.
+    #[test]
+    fn exec_intrinsic_sort() {
+        let mk = |i: i64| {
+            let list = IrExpr {
+                kind: IrExprKind::List { elements: vec![lit_int(3), lit_int(1), lit_int(2)] },
+                ty: Ty::list(Ty::Int), span: None, def_id: None,
+            };
+            let sorted = IrExpr {
+                kind: IrExprKind::RuntimeCall { symbol: sym("almide_rt_list_sort"), args: vec![list] },
+                ty: Ty::list(Ty::Int), span: None, def_id: None,
+            };
+            IrExpr { kind: IrExprKind::IndexAccess { object: Box::new(sorted), index: Box::new(lit_int(i)) }, ty: Ty::Int, span: None, def_id: None }
+        };
+        let m0 = mk_func("main", Ty::Int, mk(0));
+        if let Some(r) = run(&[m0], "main") { assert_eq!(r, "1", "sort[0]"); }
+        let m1 = mk_func("main", Ty::Int, mk(1));
+        if let Some(r) = run(&[m1], "main") { assert_eq!(r, "2", "sort[1]"); }
+        let m2 = mk_func("main", Ty::Int, mk(2));
+        if let Some(r) = run(&[m2], "main") { assert_eq!(r, "3", "sort[2]"); }
+    }
+
     /// list.sum and list.contains (Int elements).
     #[test]
     fn exec_intrinsic_sum_contains() {
