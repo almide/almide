@@ -792,6 +792,85 @@ mod tests {
         }
     }
 
+    /// `Some(42)` then unwrap → 42 (tagged-union alloc + payload load).
+    #[test]
+    fn exec_option_unwrap() {
+        let some = IrExpr {
+            kind: IrExprKind::OptionSome { expr: Box::new(lit_int(42)) },
+            ty: Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, vec![Ty::Int]),
+            span: None, def_id: None,
+        };
+        let unwrap = IrExpr {
+            kind: IrExprKind::Unwrap { expr: Box::new(some) },
+            ty: Ty::Int, span: None, def_id: None,
+        };
+        let main = mk_func("main", Ty::Int, unwrap);
+        if let Some(r) = run(&[main], "main") {
+            assert_eq!(r, "42");
+        }
+    }
+
+    /// `Ok(7)` then unwrap → 7.
+    #[test]
+    fn exec_result_unwrap() {
+        let ok = IrExpr {
+            kind: IrExprKind::ResultOk { expr: Box::new(lit_int(7)) },
+            ty: Ty::Applied(
+                almide_lang::types::constructor::TypeConstructorId::Result,
+                vec![Ty::Int, Ty::String],
+            ),
+            span: None, def_id: None,
+        };
+        let unwrap = IrExpr {
+            kind: IrExprKind::Unwrap { expr: Box::new(ok) },
+            ty: Ty::Int, span: None, def_id: None,
+        };
+        let main = mk_func("main", Ty::Int, unwrap);
+        if let Some(r) = run(&[main], "main") {
+            assert_eq!(r, "7");
+        }
+    }
+
+    /// `(10, 20).1` → 20 (tuple element offset must account for i64 stride).
+    #[test]
+    fn exec_tuple_index() {
+        let tup = IrExpr {
+            kind: IrExprKind::Tuple { elements: vec![lit_int(10), lit_int(20)] },
+            ty: Ty::Tuple(vec![Ty::Int, Ty::Int]), span: None, def_id: None,
+        };
+        let idx = IrExpr {
+            kind: IrExprKind::TupleIndex { object: Box::new(tup), index: 1 },
+            ty: Ty::Int, span: None, def_id: None,
+        };
+        let main = mk_func("main", Ty::Int, idx);
+        if let Some(r) = run(&[main], "main") {
+            assert_eq!(r, "20", "tuple.1 of (10,20)");
+        }
+    }
+
+    /// Record field access reads the correct (type-derived) offset:
+    /// `{a: 1, b: 2}.b` → 2. With i64 fields this requires an 8-byte stride,
+    /// so a non-first field exercises the offset computation.
+    #[test]
+    fn exec_record_member() {
+        let rec_ty = Ty::Record { fields: vec![(sym("a"), Ty::Int), (sym("b"), Ty::Int)] };
+        let record = IrExpr {
+            kind: IrExprKind::Record {
+                name: None,
+                fields: vec![(sym("a"), lit_int(1)), (sym("b"), lit_int(2))],
+            },
+            ty: rec_ty.clone(), span: None, def_id: None,
+        };
+        let member = IrExpr {
+            kind: IrExprKind::Member { object: Box::new(record), field: sym("b") },
+            ty: Ty::Int, span: None, def_id: None,
+        };
+        let main = mk_func("main", Ty::Int, member);
+        if let Some(r) = run(&[main], "main") {
+            assert_eq!(r, "2", "record.b of {{a:1, b:2}}");
+        }
+    }
+
     /// Build `"${n}"` for an integer literal `n`.
     fn interp_int(n: i64) -> IrExpr {
         use almide_ir::IrStringPart;

@@ -408,17 +408,22 @@ pub fn lower_expr(expr: &IrExpr, ctx: &mut LowerCtx) -> Vec<Op> {
 
         // ── Record literal ──
         IrExprKind::Record { fields, .. } => {
+            // Fields are laid out in the record TYPE's canonical order at their
+            // natural byte widths. Both construction and Member read offsets
+            // from the same type, so they always agree.
             let mut ops = Vec::new();
             let rec = ctx.alloc_local(WasmTy::I32);
-            let field_size = 4i32; // each field is a pointer or i32
-            let total = (fields.len() as i32) * field_size;
+            let total = record_total_size(&expr.ty)
+                .unwrap_or_else(|| fields.iter().map(|(_, v)| wasm_byte_size(&v.ty)).sum());
             ops.push(Op::Const(Const::I32(total)));
             ops.push(Op::Alloc);
             ops.push(Op::LocalSet(rec));
 
-            for (i, (_name, value)) in fields.iter().enumerate() {
+            for (name, value) in fields.iter() {
+                let off = record_field_offset(&expr.ty, name.as_str())
+                    .map(|(o, _)| o)
+                    .unwrap_or(0);
                 ops.push(Op::LocalGet(rec));
-                let off = i as i32 * field_size;
                 if off != 0 {
                     ops.push(Op::Const(Const::I32(off)));
                     ops.push(Op::BinOp(WBinOp::I32Add));
@@ -439,8 +444,9 @@ pub fn lower_expr(expr: &IrExpr, ctx: &mut LowerCtx) -> Vec<Op> {
         // ── Member access ──
         IrExprKind::Member { object, field } => {
             let mut ops = lower_expr(object, ctx);
-            // TODO: resolve field offset from type. For now use linear search placeholder.
-            let offset = field_offset_placeholder(field.as_str());
+            let offset = record_field_offset(&object.ty, field.as_str())
+                .map(|(o, _)| o)
+                .unwrap_or(0);
             if offset != 0 {
                 ops.push(Op::Const(Const::I32(offset)));
                 ops.push(Op::BinOp(WBinOp::I32Add));
@@ -457,7 +463,13 @@ pub fn lower_expr(expr: &IrExpr, ctx: &mut LowerCtx) -> Vec<Op> {
         // ── TupleIndex ──
         IrExprKind::TupleIndex { object, index } => {
             let mut ops = lower_expr(object, ctx);
-            let offset = (*index as i32) * 4; // simplified: each element 4 bytes
+            // Element offset = sum of the byte sizes of all preceding elements
+            // (tuples pack elements at their natural width, not a fixed stride).
+            let offset = match &object.ty {
+                Ty::Tuple(elems) => elems.iter().take(*index)
+                    .map(|t| wasm_byte_size(t)).sum::<i32>(),
+                _ => (*index as i32) * 8, // fallback: assume widest
+            };
             if offset != 0 {
                 ops.push(Op::Const(Const::I32(offset)));
                 ops.push(Op::BinOp(WBinOp::I32Add));
@@ -1189,10 +1201,32 @@ fn wasm_byte_size(ty: &Ty) -> i32 {
     }
 }
 
-/// Placeholder field offset (sequential, 4 bytes per field).
-/// The real implementation should use record type info or LayoutRegistry.
-fn field_offset_placeholder(_field_name: &str) -> i32 {
-    0 // TODO: resolve from record type
+/// Byte offset (and type) of a named field within a record type, computed by
+/// summing the natural widths of preceding fields in declared order. Returns
+/// None if the type is not a record or the field is absent.
+fn record_field_offset(ty: &Ty, name: &str) -> Option<(i32, Ty)> {
+    let fields = match ty {
+        Ty::Record { fields } | Ty::OpenRecord { fields } => fields,
+        _ => return None,
+    };
+    let mut off = 0i32;
+    for (fname, fty) in fields {
+        if fname.as_str() == name {
+            return Some((off, fty.clone()));
+        }
+        off += wasm_byte_size(fty);
+    }
+    None
+}
+
+/// Total byte size of a record type (sum of field widths), if known.
+fn record_total_size(ty: &Ty) -> Option<i32> {
+    match ty {
+        Ty::Record { fields } | Ty::OpenRecord { fields } => {
+            Some(fields.iter().map(|(_, t)| wasm_byte_size(t)).sum())
+        }
+        _ => None,
+    }
 }
 
 // ── ForIn lowering ───────────────────────────────────────────────────
