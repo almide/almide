@@ -27,6 +27,7 @@ pub mod builder;
 pub mod lower;
 pub mod data;
 pub mod runtime;
+pub mod intrinsics;
 pub mod module;
 
 pub use layout::LayoutRegistry;

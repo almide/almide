@@ -800,6 +800,38 @@ mod tests {
         }
     }
 
+    /// Stdlib intrinsics dispatched via the registry (Tier 1):
+    /// string.len("hello")==5, list.len([10,20,30])==3.
+    #[test]
+    fn exec_intrinsic_len() {
+        let s = mk_func("main", Ty::Int, rt_call("almide_rt_string_len", vec![lit_str("hello")]));
+        if let Some(r) = run(&[s], "main") { assert_eq!(r, "5"); }
+
+        let list = IrExpr {
+            kind: IrExprKind::List { elements: vec![lit_int(10), lit_int(20), lit_int(30)] },
+            ty: Ty::list(Ty::Int), span: None, def_id: None,
+        };
+        let l = mk_func("main", Ty::Int, rt_call("almide_rt_list_len", vec![list]));
+        if let Some(r) = run(&[l], "main") { assert_eq!(r, "3"); }
+    }
+
+    /// list.get_or with in-bounds and out-of-bounds indices:
+    /// [10,20,30].get_or(1, 99)==20 ; .get_or(5, 99)==99.
+    #[test]
+    fn exec_intrinsic_list_get_or() {
+        let mk = |idx: i64| {
+            let list = IrExpr {
+                kind: IrExprKind::List { elements: vec![lit_int(10), lit_int(20), lit_int(30)] },
+                ty: Ty::list(Ty::Int), span: None, def_id: None,
+            };
+            rt_call("almide_rt_list_get_or", vec![list, lit_int(idx), lit_int(99)])
+        };
+        let in_b = mk_func("main", Ty::Int, mk(1));
+        if let Some(r) = run(&[in_b], "main") { assert_eq!(r, "20", "get_or(1)"); }
+        let out_b = mk_func("main", Ty::Int, mk(5));
+        if let Some(r) = run(&[out_b], "main") { assert_eq!(r, "99", "get_or(5)"); }
+    }
+
     /// A string literal lands in the data segment with the right byte length:
     /// `__strlen("hello")` → 5.
     #[test]

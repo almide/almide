@@ -331,6 +331,11 @@ pub fn lower_expr(expr: &IrExpr, ctx: &mut LowerCtx) -> Vec<Op> {
         }
 
         IrExprKind::RuntimeCall { symbol, args } => {
+            // Declarative stdlib dispatch first (the v2 intrinsic registry).
+            if let Some(ops) = super::intrinsics::lower_intrinsic(symbol.as_str(), args, &expr.ty, ctx) {
+                return ops;
+            }
+            // Then the engine's own runtime intrinsics by name.
             let mut ops = Vec::new();
             for arg in args {
                 ops.extend(lower_expr(arg, ctx));
@@ -340,7 +345,7 @@ pub fn lower_expr(expr: &IrExpr, ctx: &mut LowerCtx) -> Vec<Op> {
             if let Some(idx) = (ctx.func_idx)(symbol.as_str()) {
                 ops.push(Op::Call { idx, pops, pushes });
             } else {
-                // Unknown runtime intrinsic — reject (→ legacy fallback).
+                // Stdlib intrinsic not implemented in v2 yet — reject (→ legacy).
                 ops.push(Op::Unsupported("runtime-call"));
             }
             ops
@@ -1277,7 +1282,7 @@ fn bind_payload(inner: &IrPattern, subj: Local, offset: i32, ctx: &mut LowerCtx)
 // ── Helpers ──────────────────────────────────────────────────────────
 
 /// Byte size for a WASM value type.
-fn wasm_byte_size(ty: &Ty) -> i32 {
+pub(super) fn wasm_byte_size(ty: &Ty) -> i32 {
     match ty_to_wasm(ty) {
         WasmTy::I64 | WasmTy::F64 => 8,
         _ => 4,
@@ -1296,7 +1301,7 @@ fn list_element_ty(ty: &Ty) -> Option<Ty> {
 }
 
 /// LoadKind matching a WASM value type's natural width.
-fn load_kind_of(wt: WasmTy) -> LoadKind {
+pub(super) fn load_kind_of(wt: WasmTy) -> LoadKind {
     match wt {
         WasmTy::I64 => LoadKind::I64,
         WasmTy::F64 => LoadKind::F64,
