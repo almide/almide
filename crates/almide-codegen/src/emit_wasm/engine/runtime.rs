@@ -74,11 +74,14 @@ pub struct RuntimeFns {
     pub str_contains: FuncIdx,
     pub float_to_string: FuncIdx,
     pub str_trim: FuncIdx,
+    pub str_find_byte: FuncIdx,
+    pub str_index_of: FuncIdx,
+    pub str_last_index_of: FuncIdx,
 }
 
 /// The number of *defined* runtime functions (they occupy function indices
 /// `IMPORT_COUNT .. IMPORT_COUNT + COUNT`).
-pub const COUNT: u32 = 34;
+pub const COUNT: u32 = 37;
 
 impl RuntimeFns {
     /// Defined runtime functions in code-section order, offset past the imports.
@@ -119,11 +122,14 @@ impl RuntimeFns {
             str_contains: IMPORT_COUNT + 31,
             float_to_string: IMPORT_COUNT + 32,
             str_trim: IMPORT_COUNT + 33,
+            str_find_byte: IMPORT_COUNT + 34,
+            str_index_of: IMPORT_COUNT + 35,
+            str_last_index_of: IMPORT_COUNT + 36,
         }
     }
 
     /// Map of runtime function names to indices, for the build's name lookup.
-    pub fn name_table(&self) -> [(&'static str, FuncIdx); 34] {
+    pub fn name_table(&self) -> [(&'static str, FuncIdx); 37] {
         [
             ("__alloc", self.alloc),
             ("__rc_inc", self.rc_inc),
@@ -159,6 +165,9 @@ impl RuntimeFns {
             ("__string_contains", self.str_contains),
             ("__float_to_string", self.float_to_string),
             ("__string_trim", self.str_trim),
+            ("__string_find_byte", self.str_find_byte),
+            ("__string_index_of", self.str_index_of),
+            ("__string_last_index_of", self.str_last_index_of),
         ]
     }
 }
@@ -202,6 +211,9 @@ pub fn runtime_funcs(reg: &LayoutRegistry, heap_start: i32) -> Vec<WasmFunc> {
         build_str_contains(),
         build_float_to_string(),
         build_string_trim(),
+        build_string_find_byte(),
+        build_string_index_of(),
+        build_string_last_index_of(),
     ]
 }
 
@@ -413,6 +425,156 @@ fn build_string_trim() -> WasmFunc {
     WasmFunc {
         name: "__string_trim".into(), params: vec![WasmTy::I32, WasmTy::I32], results: vec![WasmTy::I32],
         locals: vec![WasmTy::I32, WasmTy::I32, WasmTy::I32, WasmTy::I32, WasmTy::I32, WasmTy::I32], // bl,start,end,newlen,out,b
+        body,
+    }
+}
+
+/// `__string_find_byte(s, sub, from: i32) -> i32` — lowest byte offset `>= from`
+/// at which `sub` occurs, or `-1`. Empty needle matches at `from`. Shared search
+/// primitive behind index_of / last_index_of / replace / split.
+fn build_string_find_byte() -> WasmFunc {
+    const S: u32 = 0;
+    const SUB: u32 = 1;
+    const FROM: u32 = 2;
+    const SL: u32 = 3;
+    const SUBL: u32 = 4;
+    const START: u32 = 5;
+    const J: u32 = 6;
+    const MATCHED: u32 = 7;
+
+    let inner = vec![
+        Op::LocalGet(J), Op::LocalGet(SUBL), Op::BinOp(B::I32GeU), Op::BrIf(1),
+        Op::LocalGet(S), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add), Op::LocalGet(START), Op::BinOp(B::I32Add), Op::LocalGet(J), Op::BinOp(B::I32Add), Op::Load(LoadKind::U8),
+        Op::LocalGet(SUB), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add), Op::LocalGet(J), Op::BinOp(B::I32Add), Op::Load(LoadKind::U8),
+        Op::BinOp(B::I32Ne),
+        Op::IfVoid { then: vec![Op::Const(Const::I32(0)), Op::LocalSet(MATCHED), Op::Br(2)], else_: vec![] },
+        Op::LocalGet(J), Op::Const(Const::I32(1)), Op::BinOp(B::I32Add), Op::LocalSet(J), Op::Br(0),
+    ];
+    let outer = vec![
+        Op::LocalGet(START), Op::LocalGet(SL), Op::LocalGet(SUBL), Op::BinOp(B::I32Sub), Op::BinOp(B::I32GtU), Op::BrIf(1),
+        Op::Const(Const::I32(1)), Op::LocalSet(MATCHED),
+        Op::Const(Const::I32(0)), Op::LocalSet(J),
+        Op::Block(vec![Op::Loop(inner)]),
+        Op::LocalGet(MATCHED), Op::IfVoid { then: vec![Op::LocalGet(START), Op::Return], else_: vec![] },
+        Op::LocalGet(START), Op::Const(Const::I32(1)), Op::BinOp(B::I32Add), Op::LocalSet(START), Op::Br(0),
+    ];
+    let body = vec![
+        Op::LocalGet(S), Op::Load(LoadKind::I32), Op::LocalSet(SL),
+        Op::LocalGet(SUB), Op::Load(LoadKind::I32), Op::LocalSet(SUBL),
+        // empty needle → match at `from`
+        Op::LocalGet(SUBL), Op::UnOp(U::I32Eqz),
+        Op::IfVoid { then: vec![Op::LocalGet(FROM), Op::Return], else_: vec![] },
+        // needle longer than haystack → not found
+        Op::LocalGet(SUBL), Op::LocalGet(SL), Op::BinOp(B::I32GtU),
+        Op::IfVoid { then: vec![Op::Const(Const::I32(-1)), Op::Return], else_: vec![] },
+        Op::LocalGet(FROM), Op::LocalSet(START),
+        Op::Block(vec![Op::Loop(outer)]),
+        Op::Const(Const::I32(-1)),
+    ];
+    WasmFunc {
+        name: "__string_find_byte".into(), params: vec![WasmTy::I32, WasmTy::I32, WasmTy::I32], results: vec![WasmTy::I32],
+        locals: vec![WasmTy::I32, WasmTy::I32, WasmTy::I32, WasmTy::I32, WasmTy::I32], // sl,subl,start,j,matched
+        body,
+    }
+}
+
+/// Count UTF-8 code-point boundaries in `s[0, upto_byte)`, leaving the count on
+/// the stack. Boundary = `(byte & 0xC0) != 0x80`.
+fn cp_count_ops(s: u32, upto: u32, cp: u32, b: u32) -> Vec<Op> {
+    let loop_body = vec![
+        Op::LocalGet(b), Op::LocalGet(upto), Op::BinOp(B::I32GeU), Op::BrIf(1),
+        Op::LocalGet(cp),
+        Op::LocalGet(s), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add), Op::LocalGet(b), Op::BinOp(B::I32Add), Op::Load(LoadKind::U8),
+        Op::Const(Const::I32(0xC0)), Op::BinOp(B::I32And), Op::Const(Const::I32(0x80)), Op::BinOp(B::I32Ne),
+        Op::BinOp(B::I32Add), Op::LocalSet(cp),
+        Op::LocalGet(b), Op::Const(Const::I32(1)), Op::BinOp(B::I32Add), Op::LocalSet(b), Op::Br(0),
+    ];
+    vec![
+        Op::Const(Const::I32(0)), Op::LocalSet(cp),
+        Op::Const(Const::I32(0)), Op::LocalSet(b),
+        Op::Block(vec![Op::Loop(loop_body)]),
+        Op::LocalGet(cp),
+    ]
+}
+
+/// `__string_index_of(s, sub) -> i32` — `Some(cp_index)` of the first match, or
+/// `None`. The payload is a code-point index (consistent with `string.slice`).
+fn build_string_index_of() -> WasmFunc {
+    let rt = RuntimeFns::fixed();
+    const S: u32 = 0;
+    const SUB: u32 = 1;
+    const POS: u32 = 2;  // byte offset of match, or -1
+    const OPT: u32 = 3;
+    const CP: u32 = 4;
+    const BC: u32 = 5;    // byte cursor for cp count
+
+    let mut body = vec![
+        Op::Const(Const::I32(12)), Op::Call { idx: rt.alloc, pops: 1, pushes: 1 }, Op::LocalSet(OPT),
+        Op::LocalGet(OPT), Op::Const(Const::I32(0)), Op::Store(StoreKind::I32),
+        Op::LocalGet(S), Op::LocalGet(SUB), Op::Const(Const::I32(0)),
+        Op::Call { idx: rt.str_find_byte, pops: 3, pushes: 1 }, Op::LocalSet(POS),
+        // pos < 0 → None
+        Op::LocalGet(POS), Op::Const(Const::I32(0)), Op::BinOp(B::I32LtS),
+        Op::IfVoid { then: vec![Op::LocalGet(OPT), Op::Return], else_: vec![] },
+    ];
+    // cp = code points in [0, pos)
+    body.extend(cp_count_ops(S, POS, CP, BC));
+    body.push(Op::LocalSet(CP));
+    body.extend(vec![
+        Op::LocalGet(OPT), Op::Const(Const::I32(1)), Op::Store(StoreKind::I32),
+        Op::LocalGet(OPT), Op::Const(Const::I32(4)), Op::BinOp(B::I32Add),
+        Op::LocalGet(CP), Op::UnOp(U::I64ExtendI32S), Op::Store(StoreKind::I64),
+        Op::LocalGet(OPT),
+    ]);
+    WasmFunc {
+        name: "__string_index_of".into(), params: vec![WasmTy::I32, WasmTy::I32], results: vec![WasmTy::I32],
+        locals: vec![WasmTy::I32, WasmTy::I32, WasmTy::I32, WasmTy::I32], // pos,opt,cp,bc
+        body,
+    }
+}
+
+/// `__string_last_index_of(s, sub) -> i32` — `Some(cp_index)` of the last match,
+/// or `None`. Repeated forward search keeping the highest match offset.
+fn build_string_last_index_of() -> WasmFunc {
+    let rt = RuntimeFns::fixed();
+    const S: u32 = 0;
+    const SUB: u32 = 1;
+    const POS: u32 = 2;   // last match byte offset, or -1
+    const CUR: u32 = 3;   // current search result
+    const OPT: u32 = 4;
+    const CP: u32 = 5;
+    const BC: u32 = 6;
+
+    let scan_loop = vec![
+        // cur = find_byte(s, sub, cur + 1)? — first iteration uses cur=find(.,0)
+        Op::LocalGet(CUR), Op::Const(Const::I32(0)), Op::BinOp(B::I32LtS), Op::BrIf(1), // cur<0 → stop
+        Op::LocalGet(CUR), Op::LocalSet(POS),
+        Op::LocalGet(S), Op::LocalGet(SUB), Op::LocalGet(CUR), Op::Const(Const::I32(1)), Op::BinOp(B::I32Add),
+        Op::Call { idx: rt.str_find_byte, pops: 3, pushes: 1 }, Op::LocalSet(CUR),
+        Op::Br(0),
+    ];
+    let mut body = vec![
+        Op::Const(Const::I32(12)), Op::Call { idx: rt.alloc, pops: 1, pushes: 1 }, Op::LocalSet(OPT),
+        Op::LocalGet(OPT), Op::Const(Const::I32(0)), Op::Store(StoreKind::I32),
+        Op::Const(Const::I32(-1)), Op::LocalSet(POS),
+        Op::LocalGet(S), Op::LocalGet(SUB), Op::Const(Const::I32(0)),
+        Op::Call { idx: rt.str_find_byte, pops: 3, pushes: 1 }, Op::LocalSet(CUR),
+        Op::Block(vec![Op::Loop(scan_loop)]),
+        // pos < 0 → None
+        Op::LocalGet(POS), Op::Const(Const::I32(0)), Op::BinOp(B::I32LtS),
+        Op::IfVoid { then: vec![Op::LocalGet(OPT), Op::Return], else_: vec![] },
+    ];
+    body.extend(cp_count_ops(S, POS, CP, BC));
+    body.push(Op::LocalSet(CP));
+    body.extend(vec![
+        Op::LocalGet(OPT), Op::Const(Const::I32(1)), Op::Store(StoreKind::I32),
+        Op::LocalGet(OPT), Op::Const(Const::I32(4)), Op::BinOp(B::I32Add),
+        Op::LocalGet(CP), Op::UnOp(U::I64ExtendI32S), Op::Store(StoreKind::I64),
+        Op::LocalGet(OPT),
+    ]);
+    WasmFunc {
+        name: "__string_last_index_of".into(), params: vec![WasmTy::I32, WasmTy::I32], results: vec![WasmTy::I32],
+        locals: vec![WasmTy::I32, WasmTy::I32, WasmTy::I32, WasmTy::I32, WasmTy::I32], // pos,cur,opt,cp,bc
         body,
     }
 }

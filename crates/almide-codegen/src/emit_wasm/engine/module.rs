@@ -1417,6 +1417,30 @@ mod tests {
         if let Some(r) = run(&[m3], "main") { assert_eq!(r, "1", "slice café[3,4] len chars"); }
     }
 
+    /// string.index_of / last_index_of → Option[Int] (code-point index).
+    #[test]
+    fn exec_string_index_of() {
+        let opt_int = Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, vec![Ty::Int]);
+        let idx = |symbol: &str, s: &str, sub: &str| {
+            let call = IrExpr {
+                kind: IrExprKind::RuntimeCall { symbol: sym(symbol), args: vec![lit_str(s), lit_str(sub)] },
+                ty: opt_int.clone(), span: None, def_id: None };
+            IrExpr { kind: IrExprKind::UnwrapOr { expr: Box::new(call), fallback: Box::new(lit_int(-1)) },
+                     ty: Ty::Int, span: None, def_id: None }
+        };
+        let ti = |e: IrExpr, exp: &str, msg: &str| { let m = mk_func("main", Ty::Int, e); if let Some(r) = run(&[m], "main") { assert_eq!(&r, exp, "{}", msg); } };
+
+        ti(idx("almide_rt_string_index_of", "hello", "ll"), "2", "index_of ll");
+        ti(idx("almide_rt_string_index_of", "hello", "h"), "0", "index_of h");
+        ti(idx("almide_rt_string_index_of", "hello", "z"), "-1", "index_of miss → None");
+        // UTF-8: "héllo" — é is one code point (2 bytes); "llo" starts at cp index 2
+        ti(idx("almide_rt_string_index_of", "héllo", "llo"), "2", "index_of utf8 cp index");
+        // last_index_of: overlapping "aba" in "ababa" → last at cp 2
+        ti(idx("almide_rt_string_last_index_of", "ababa", "aba"), "2", "last_index_of aba");
+        ti(idx("almide_rt_string_last_index_of", "hello", "l"), "3", "last_index_of l");
+        ti(idx("almide_rt_string_last_index_of", "hello", "z"), "-1", "last_index_of miss → None");
+    }
+
     /// string.trim / trim_start / trim_end.
     #[test]
     fn exec_string_trim() {

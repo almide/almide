@@ -85,6 +85,10 @@ pub fn lower_intrinsic(
         "almide_rt_string_trim" if args.len() == 1 => str_trim(&args[0], 3, ctx),
         "almide_rt_string_trim_start" if args.len() == 1 => str_trim(&args[0], 1, ctx),
         "almide_rt_string_trim_end" if args.len() == 1 => str_trim(&args[0], 2, ctx),
+        "almide_rt_string_index_of" if args.len() == 2 =>
+            call_runtime("__string_index_of", args, 1, ctx),
+        "almide_rt_string_last_index_of" if args.len() == 2 =>
+            call_runtime("__string_last_index_of", args, 1, ctx),
 
         // ── Map: Int or String keys; Int or pointer/i32 values (not Float). ──
         "almide_rt_map_new" if map_supported(ret_ty) =>
