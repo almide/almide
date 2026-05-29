@@ -28,6 +28,12 @@ use super::module::SigTable;
 /// record types unresolved in the IR).
 pub type RecordLayouts = std::collections::HashMap<almide_base::intern::Sym, Vec<(almide_base::intern::Sym, Ty)>>;
 
+/// Lifted-closure function bodies, keyed by `ClosureCreate.func_name`. Lets a
+/// higher-order intrinsic inline a non-capturing closure (empty env) directly
+/// from its lifted body instead of going through `call_indirect`. The stored
+/// params include the leading `env` param (skipped at the inline site).
+pub type FnBodies = std::collections::HashMap<almide_base::intern::Sym, (Vec<(VarId, Ty)>, IrExpr)>;
+
 pub struct LowerCtx<'a> {
     /// Maps VarId → WASM local index.
     var_map: Vec<Option<Local>>,
@@ -51,6 +57,8 @@ pub struct LowerCtx<'a> {
     next_local: u32,
     /// Named record type layouts, for resolving `Ty::Named` field offsets.
     pub record_types: &'a RecordLayouts,
+    /// Lifted-closure bodies, for inlining non-capturing closures in HOFs.
+    pub fn_bodies: &'a FnBodies,
 }
 
 impl<'a> LowerCtx<'a> {
@@ -62,6 +70,7 @@ impl<'a> LowerCtx<'a> {
         interner: &'a mut DataInterner,
         sigs: &'a mut SigTable,
         record_types: &'a RecordLayouts,
+        fn_bodies: &'a FnBodies,
     ) -> Self {
         let mut var_map = vec![None; var_table.len()];
         let mut locals = Vec::new();
@@ -88,6 +97,7 @@ impl<'a> LowerCtx<'a> {
             lambda_binds: std::collections::HashMap::new(),
             next_local: param_count,
             record_types,
+            fn_bodies,
         }
     }
 
@@ -165,8 +175,9 @@ pub fn lower_function(
     interner: &mut DataInterner,
     sigs: &mut SigTable,
     record_types: &RecordLayouts,
+    fn_bodies: &FnBodies,
 ) -> WasmFunc {
-    let mut ctx = LowerCtx::new(&func.params, var_table, reg, func_idx, interner, sigs, record_types);
+    let mut ctx = LowerCtx::new(&func.params, var_table, reg, func_idx, interner, sigs, record_types, fn_bodies);
     let has_result = !matches!(func.ret_ty, Ty::Unit);
     let body = lower_expr(&func.body, &mut ctx);
 
@@ -1732,7 +1743,7 @@ mod tests {
             visibility: IrVisibility::Private, doc: None, blank_lines_before: 0,
             def_id: None, mutated_params: vec![], module_origin: None,
         };
-        let wasm_func = lower_function(&func, &vt, &reg, &no_func_idx, &mut interner(), &mut SigTable::new(), &RecordLayouts::new());
+        let wasm_func = lower_function(&func, &vt, &reg, &no_func_idx, &mut interner(), &mut SigTable::new(), &RecordLayouts::new(), &FnBodies::new());
         assert_eq!(wasm_func.results, vec![WasmTy::I64]);
         assert!(verify_func_stack(&wasm_func).is_ok(), "stack verification failed: {:?}", verify_func_stack(&wasm_func));
     }
@@ -1757,7 +1768,7 @@ mod tests {
             visibility: IrVisibility::Private, doc: None, blank_lines_before: 0,
             def_id: None, mutated_params: vec![], module_origin: None,
         };
-        let wasm_func = lower_function(&func, &vt, &reg, &no_func_idx, &mut interner(), &mut SigTable::new(), &RecordLayouts::new());
+        let wasm_func = lower_function(&func, &vt, &reg, &no_func_idx, &mut interner(), &mut SigTable::new(), &RecordLayouts::new(), &FnBodies::new());
         assert!(verify_func_stack(&wasm_func).is_ok());
         // Should be: Const(1), Const(2), I64Add
         assert_eq!(wasm_func.body.len(), 3);
@@ -1789,7 +1800,7 @@ mod tests {
             visibility: IrVisibility::Private, doc: None, blank_lines_before: 0,
             def_id: None, mutated_params: vec![], module_origin: None,
         };
-        let wasm_func = lower_function(&func, &vt, &reg, &no_func_idx, &mut interner(), &mut SigTable::new(), &RecordLayouts::new());
+        let wasm_func = lower_function(&func, &vt, &reg, &no_func_idx, &mut interner(), &mut SigTable::new(), &RecordLayouts::new(), &FnBodies::new());
         assert!(verify_func_stack(&wasm_func).is_ok(), "{:?}", verify_func_stack(&wasm_func));
         assert!(wasm_func.results.is_empty());
     }
@@ -1814,7 +1825,7 @@ mod tests {
             visibility: IrVisibility::Private, doc: None, blank_lines_before: 0,
             def_id: None, mutated_params: vec![], module_origin: None,
         };
-        let wasm_func = lower_function(&func, &vt, &reg, &no_func_idx, &mut interner(), &mut SigTable::new(), &RecordLayouts::new());
+        let wasm_func = lower_function(&func, &vt, &reg, &no_func_idx, &mut interner(), &mut SigTable::new(), &RecordLayouts::new(), &FnBodies::new());
         assert!(verify_func_stack(&wasm_func).is_ok(), "{:?}", verify_func_stack(&wasm_func));
     }
 }

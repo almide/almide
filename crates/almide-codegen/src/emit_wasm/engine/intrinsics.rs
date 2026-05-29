@@ -1982,7 +1982,14 @@ fn inline_lambda_n(f: &IrExpr, n: usize, ctx: &LowerCtx) -> Option<(Vec<(almide_
     let lambda = match &f.kind {
         almide_ir::IrExprKind::Lambda { .. } => f,
         almide_ir::IrExprKind::Var { id } => ctx.lambda_binds.get(id)?,
-        _ => return None, // ClosureCreate / fn-ref args are not inlined (yet)
+        // A non-capturing closure (empty env) is inlinable from its lifted body:
+        // params are [env, p1..], skip env. Capturing closures need call_indirect.
+        almide_ir::IrExprKind::ClosureCreate { func_name, captures } if captures.is_empty() => {
+            let (params, body) = ctx.fn_bodies.get(func_name)?;
+            return (params.len() == n + 1)
+                .then(|| (params[1..].to_vec(), body.clone()));
+        }
+        _ => return None,
     };
     match &lambda.kind {
         almide_ir::IrExprKind::Lambda { params, body, .. } if params.len() == n => {

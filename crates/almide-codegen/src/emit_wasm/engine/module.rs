@@ -24,7 +24,7 @@
 use std::collections::HashMap;
 
 use almide_ir::{IrFunction, IrTypeDecl, IrTypeDeclKind, VarTable};
-use super::lower::RecordLayouts;
+use super::lower::{RecordLayouts, FnBodies};
 use wasm_encoder::{
     CodeSection, ExportSection, Function, FunctionSection, GlobalSection, GlobalType,
     MemorySection, MemoryType, Module, TypeSection, ValType,
@@ -108,6 +108,16 @@ pub fn build_module(
             record_types.insert(td.name, fields.iter().map(|f| (f.name, f.ty.clone())).collect());
         }
     }
+
+    // Lifted-closure bodies (`__closure_*`), so higher-order intrinsics can
+    // inline a non-capturing closure directly from its body.
+    let mut fn_bodies: FnBodies = HashMap::new();
+    for f in ir_funcs {
+        if f.name.as_str().starts_with("__closure_") {
+            let params = f.params.iter().map(|p| (p.var, p.ty.clone())).collect();
+            fn_bodies.insert(f.name, (params, f.body.clone()));
+        }
+    }
     // Imports occupy the lowest indices, then runtime functions, then user
     // functions.
     let rt = RuntimeFns::fixed();
@@ -129,7 +139,7 @@ pub fn build_module(
     let mut sigs = SigTable::new();
     let mut user_funcs: Vec<WasmFunc> = Vec::with_capacity(ir_funcs.len());
     for f in ir_funcs {
-        let mut wf = super::lower::lower_function(f, var_table, reg, &lookup, &mut interner, &mut sigs, &record_types);
+        let mut wf = super::lower::lower_function(f, var_table, reg, &lookup, &mut interner, &mut sigs, &record_types, &fn_bodies);
         // Resolve Alloc / RcInc / RcDec / StringConcat into Calls to the runtime.
         // Stack-effect preserving, so verification below still holds.
         runtime::resolve_abstract_ops(&mut wf.body, &rt);
