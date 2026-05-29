@@ -800,6 +800,47 @@ mod tests {
         }
     }
 
+    /// Map[Int,Int]: literal construction, get (hit/miss), len, contains, set
+    /// (insert + overwrite). Exercises the Swiss-table runtime end to end.
+    #[test]
+    fn exec_map_int_int() {
+        use almide_lang::types::constructor::TypeConstructorId as TC;
+        let map_ty = || Ty::Applied(TC::Map, vec![Ty::Int, Ty::Int]);
+        let opt_ty = || Ty::Applied(TC::Option, vec![Ty::Int]);
+        // {1:10, 2:20, 3:30}
+        let lit = || IrExpr {
+            kind: IrExprKind::MapLiteral { entries: vec![
+                (lit_int(1), lit_int(10)), (lit_int(2), lit_int(20)), (lit_int(3), lit_int(30)),
+            ] },
+            ty: map_ty(), span: None, def_id: None,
+        };
+        let get_or = |m: IrExpr, k: i64, d: i64| {
+            let g = IrExpr { kind: IrExprKind::RuntimeCall { symbol: sym("almide_rt_map_get"), args: vec![m, lit_int(k)] }, ty: opt_ty(), span: None, def_id: None };
+            IrExpr { kind: IrExprKind::UnwrapOr { expr: Box::new(g), fallback: Box::new(lit_int(d)) }, ty: Ty::Int, span: None, def_id: None }
+        };
+        let call_i = |symbol: &str, args: Vec<IrExpr>, ty: Ty| IrExpr {
+            kind: IrExprKind::RuntimeCall { symbol: sym(symbol), args }, ty, span: None, def_id: None };
+
+        let ti = |e: IrExpr, exp: &str, msg: &str| { let m = mk_func("main", Ty::Int, e); if let Some(r) = run(&[m], "main") { assert_eq!(&r, exp, "{}", msg); } };
+        let tb = |e: IrExpr, exp: &str, msg: &str| { let m = mk_func("main", Ty::Bool, e); if let Some(r) = run(&[m], "main") { assert_eq!(&r, exp, "{}", msg); } };
+
+        ti(get_or(lit(), 2, -1), "20", "get hit");
+        ti(get_or(lit(), 9, -1), "-1", "get miss");
+        ti(call_i("almide_rt_map_len", vec![lit()], Ty::Int), "3", "len");
+        tb(call_i("almide_rt_map_contains", vec![lit(), lit_int(3)], Ty::Bool), "1", "contains hit");
+        tb(call_i("almide_rt_map_contains", vec![lit(), lit_int(9)], Ty::Bool), "0", "contains miss");
+
+        // set: insert a new key, then look it up; len grows to 4.
+        let set = |m: IrExpr, k: i64, v: i64| IrExpr {
+            kind: IrExprKind::RuntimeCall { symbol: sym("almide_rt_map_set"), args: vec![m, lit_int(k), lit_int(v)] },
+            ty: map_ty(), span: None, def_id: None };
+        ti(get_or(set(lit(), 4, 40), 4, -1), "40", "set insert");
+        ti(call_i("almide_rt_map_len", vec![set(lit(), 4, 40)], Ty::Int), "4", "len after insert");
+        // overwrite existing key keeps len at 3 and updates the value.
+        ti(get_or(set(lit(), 1, 99), 1, -1), "99", "set overwrite");
+        ti(call_i("almide_rt_map_len", vec![set(lit(), 1, 99)], Ty::Int), "3", "len after overwrite");
+    }
+
     /// Stdlib intrinsics dispatched via the registry (Tier 1):
     /// string.len("hello")==5, list.len([10,20,30])==3.
     #[test]

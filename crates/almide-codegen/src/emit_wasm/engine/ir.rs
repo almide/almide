@@ -51,7 +51,7 @@ pub enum Const {
 #[derive(Debug, Clone, Copy)]
 pub enum BinOp {
     // i32
-    I32Add, I32Sub, I32Mul, I32DivU, I32DivS, I32RemS,
+    I32Add, I32Sub, I32Mul, I32DivU, I32DivS, I32RemS, I32RemU,
     I32And, I32Or, I32Xor, I32Shl, I32ShrU, I32ShrS,
     I32Eq, I32Ne, I32LtS, I32LeS, I32GtS, I32GeS, I32LtU, I32LeU, I32GtU, I32GeU,
     // i64

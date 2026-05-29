@@ -74,6 +74,18 @@ pub fn lower_intrinsic(
             call_runtime("__string_slice", args, 1, ctx),
         "almide_rt_string_char_at" if args.len() == 2 =>
             call_runtime("__string_get", args, 1, ctx),
+
+        // ── Map[Int, Int] (other key/value types fall back) ──
+        "almide_rt_map_new" if is_int_int_map(ret_ty) =>
+            (ctx.func_idx)("__map_new").map(|idx| vec![Op::Call { idx, pops: 0, pushes: 1 }]),
+        "almide_rt_map_get" if args.len() == 2 && is_int_int_map(&args[0].ty) =>
+            call_runtime("__map_get", args, 1, ctx),
+        "almide_rt_map_set" if args.len() == 3 && is_int_int_map(&args[0].ty) =>
+            call_runtime("__map_set", args, 1, ctx),
+        "almide_rt_map_contains" if args.len() == 2 && is_int_int_map(&args[0].ty) =>
+            call_runtime("__map_contains", args, 1, ctx),
+        "almide_rt_map_len" if args.len() == 1 && is_int_int_map(&args[0].ty) =>
+            call_runtime("__map_len", args, 1, ctx),
         "almide_rt_list_sum" if args.len() == 1 => Some(list_sum(&args[0], ctx)),
         // sort: Int lists via the runtime selection sort; other element types
         // (Float/String/composite) fall back until typed comparators land.
@@ -347,6 +359,14 @@ fn option_map(o: &IrExpr, f: &IrExpr, ret_ty: &Ty, ctx: &mut LowerCtx) -> Option
     ops.push(Op::IfVoid { then: some_branch, else_: none_branch });
     ops.push(Op::LocalGet(out));
     Some(ops)
+}
+
+/// True if `ty` is `Map[Int, Int]` — the only key/value combo the v1 Map
+/// runtime supports.
+pub(super) fn is_int_int_map(ty: &Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId as TC;
+    matches!(ty, Ty::Applied(TC::Map, a) if a.len() == 2
+        && matches!(a[0], Ty::Int) && matches!(a[1], Ty::Int))
 }
 
 /// Payload type of an `Option[T]` (None if not an Option).

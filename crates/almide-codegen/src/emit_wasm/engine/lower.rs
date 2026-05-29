@@ -416,8 +416,13 @@ pub fn lower_expr(expr: &IrExpr, ctx: &mut LowerCtx) -> Vec<Op> {
             ops
         }
 
-        // ── Empty map (Swiss Table not yet implemented) ──
+        // ── Empty map → __map_new (Map[Int,Int] only) ──
         IrExprKind::EmptyMap => {
+            if super::intrinsics::is_int_int_map(&expr.ty) {
+                if let Some(idx) = (ctx.func_idx)("__map_new") {
+                    return vec![Op::Call { idx, pops: 0, pushes: 1 }];
+                }
+            }
             vec![Op::Unsupported("EmptyMap")]
         }
 
@@ -819,8 +824,27 @@ pub fn lower_expr(expr: &IrExpr, ctx: &mut LowerCtx) -> Vec<Op> {
             ops
         }
 
-        // ── MapLiteral (Swiss Table not yet implemented) ──
-        IrExprKind::MapLiteral { entries: _ } => vec![Op::Unsupported("MapLiteral")],
+        // ── MapLiteral → __map_new + __map_set per entry (Map[Int,Int]) ──
+        IrExprKind::MapLiteral { entries } => {
+            if !super::intrinsics::is_int_int_map(&expr.ty) {
+                return vec![Op::Unsupported("MapLiteral")];
+            }
+            let (new_idx, set_idx) = match ((ctx.func_idx)("__map_new"), (ctx.func_idx)("__map_set")) {
+                (Some(n), Some(s)) => (n, s),
+                _ => return vec![Op::Unsupported("MapLiteral")],
+            };
+            let m = ctx.alloc_local(WasmTy::I32);
+            let mut ops = vec![Op::Call { idx: new_idx, pops: 0, pushes: 1 }, Op::LocalSet(m)];
+            for (k, v) in entries {
+                ops.push(Op::LocalGet(m));
+                ops.extend(lower_expr(k, ctx));
+                ops.extend(lower_expr(v, ctx));
+                ops.push(Op::Call { idx: set_idx, pops: 3, pushes: 1 });
+                ops.push(Op::LocalSet(m));
+            }
+            ops.push(Op::LocalGet(m));
+            ops
+        }
 
         // ── SpreadRecord (record clone + field update not implemented) ──
         IrExprKind::SpreadRecord { base: _, fields: _ } => vec![Op::Unsupported("SpreadRecord")],

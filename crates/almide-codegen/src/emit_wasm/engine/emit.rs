@@ -178,6 +178,7 @@ fn emit_binop(b: &BinOp, f: &mut Function) {
     let instr = match b {
         BinOp::I32Add => I32Add, BinOp::I32Sub => I32Sub, BinOp::I32Mul => I32Mul,
         BinOp::I32DivU => I32DivU, BinOp::I32DivS => I32DivS, BinOp::I32RemS => I32RemS,
+        BinOp::I32RemU => I32RemU,
         BinOp::I32And => I32And, BinOp::I32Or => I32Or, BinOp::I32Xor => I32Xor,
         BinOp::I32Shl => I32Shl, BinOp::I32ShrU => I32ShrU, BinOp::I32ShrS => I32ShrS,
         BinOp::I32Eq => I32Eq, BinOp::I32Ne => I32Ne,
