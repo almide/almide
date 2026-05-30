@@ -1,0 +1,179 @@
+// Self-hosting milestone 2: a JSON subsystem written entirely in Almide —
+// parser, serializer, and accessors over an Almide `Json` ADT. Unlike the
+// production `stdlib/json.almd` (which forwards to the native Rust runtime via
+// @intrinsic and therefore falls back to the legacy emitter under v2), this is
+// pure Almide source: it compiles natively to BOTH the Rust target and the v2
+// WASM engine. See docs/roadmap/active/json-self-host.md.
+//
+// To stay fully v2-lowerable (v2 is all-or-nothing per program), every function
+// uses recursion + match + tuples + string ops — no capturing higher-order
+// combinators. Numbers parse as Int (float left to the production cut-over).
+//
+// The `fn main` exercises parse -> stringify roundtrip + field extraction, so
+// scripts/wasm-v2-diff.sh builds it under v2 and legacy and compares output.
+
+type Json =
+  | VNull
+  | VBool(Bool)
+  | VInt(Int)
+  | VStr(String)
+  | VArr(List[Json])
+  | VObj(List[(String, Json)])
+
+// ── lexing helpers ──
+
+fn ch(s: String, i: Int) -> String = string.get(s, i) ?? ""
+fn is_ws(c: String) -> Bool = c == " " or c == "\n" or c == "\t" or c == "\r"
+fn digit_char(c: String) -> Bool = c >= "0" and c <= "9"
+
+fn skip_ws(s: String, i: Int) -> Int =
+  if i < string.len(s) and is_ws(ch(s, i)) then skip_ws(s, i + 1) else i
+
+fn scan_num(s: String, i: Int) -> Int =
+  if i < string.len(s) and (digit_char(ch(s, i)) or ch(s, i) == "-") then scan_num(s, i + 1) else i
+
+// Parse a JSON string body starting just after the opening quote. Returns the
+// decoded content and the index just past the closing quote.
+fn parse_str(s: String, i: Int, acc: String) -> (String, Int) = {
+  let c = ch(s, i)
+  if c == "\"" then (acc, i + 1)
+  else if c == "" then (acc, i)
+  else if c == "\\" then {
+    let e = ch(s, i + 1)
+    let decoded = match e {
+      "n" => "\n",
+      "t" => "\t",
+      "r" => "\r",
+      _   => e,
+    }
+    parse_str(s, i + 2, acc + decoded)
+  }
+  else parse_str(s, i + 1, acc + c)
+}
+
+// ── recursive-descent value parser, threading the cursor as (Json, Int) ──
+
+fn parse_array(s: String, i0: Int, acc: List[Json]) -> (Json, Int) = {
+  let i = skip_ws(s, i0)
+  if ch(s, i) == "]" then (VArr(acc), i + 1)
+  else {
+    let (v, j0) = parse_value(s, i)
+    let j = skip_ws(s, j0)
+    if ch(s, j) == "," then parse_array(s, j + 1, acc + [v])
+    else (VArr(acc + [v]), j + 1)
+  }
+}
+
+fn parse_object(s: String, i0: Int, acc: List[(String, Json)]) -> (Json, Int) = {
+  let i = skip_ws(s, i0)
+  if ch(s, i) == "}" then (VObj(acc), i + 1)
+  else {
+    let (key, j1) = parse_str(s, i + 1, "")
+    let j2 = skip_ws(s, j1)
+    let j3 = if ch(s, j2) == ":" then j2 + 1 else j2
+    let (v, j4) = parse_value(s, j3)
+    let j5 = skip_ws(s, j4)
+    if ch(s, j5) == "," then parse_object(s, j5 + 1, acc + [(key, v)])
+    else (VObj(acc + [(key, v)]), j5 + 1)
+  }
+}
+
+fn parse_value(s: String, i0: Int) -> (Json, Int) = {
+  let i = skip_ws(s, i0)
+  let c = ch(s, i)
+  if c == "[" then parse_array(s, i + 1, [])
+  else if c == "{" then parse_object(s, i + 1, [])
+  else if c == "\"" then {
+    let (str, j) = parse_str(s, i + 1, "")
+    (VStr(str), j)
+  }
+  else if c == "t" then (VBool(true), i + 4)
+  else if c == "f" then (VBool(false), i + 5)
+  else if c == "n" then (VNull, i + 4)
+  else {
+    let end = scan_num(s, i)
+    (VInt(int.parse(string.slice(s, i, end)) ?? 0), end)
+  }
+}
+
+fn parse(text: String) -> Json = {
+  let (v, _) = parse_value(text, 0)
+  v
+}
+
+// ── serializer ──
+
+fn escape(s: String) -> String =
+  s
+    |> string.replace("\\", "\\\\")
+    |> string.replace("\"", "\\\"")
+    |> string.replace("\n", "\\n")
+    |> string.replace("\r", "\\r")
+    |> string.replace("\t", "\\t")
+
+fn join_arr(xs: List[Json], i: Int, acc: String) -> String =
+  if i >= list.len(xs) then acc
+  else {
+    let piece = stringify(list.get_or(xs, i, VNull))
+    let next = if acc == "" then piece else acc + "," + piece
+    join_arr(xs, i + 1, next)
+  }
+
+fn join_obj(kvs: List[(String, Json)], i: Int, acc: String) -> String =
+  if i >= list.len(kvs) then acc
+  else {
+    let (k, v) = list.get_or(kvs, i, ("", VNull))
+    let piece = "\"" + escape(k) + "\":" + stringify(v)
+    let next = if acc == "" then piece else acc + "," + piece
+    join_obj(kvs, i + 1, next)
+  }
+
+fn stringify(v: Json) -> String = match v {
+  VNull    => "null",
+  VBool(b) => if b then "true" else "false",
+  VInt(n)  => int.to_string(n),
+  VStr(s)  => "\"" + escape(s) + "\"",
+  VArr(xs) => "[" + join_arr(xs, 0, "") + "]",
+  VObj(kv) => "{" + join_obj(kv, 0, "") + "}",
+}
+
+// ── accessors (recursion, no capturing closures) ──
+
+fn obj_get(kvs: List[(String, Json)], key: String, i: Int) -> Json =
+  if i >= list.len(kvs) then VNull
+  else {
+    let (k, v) = list.get_or(kvs, i, ("", VNull))
+    if k == key then v else obj_get(kvs, key, i + 1)
+  }
+
+fn vget(v: Json, key: String) -> Json = match v {
+  VObj(kvs) => obj_get(kvs, key, 0),
+  _         => VNull,
+}
+
+fn as_int(v: Json) -> Int = match v {
+  VInt(n) => n,
+  _       => 0,
+}
+
+fn as_str(v: Json) -> String = match v {
+  VStr(s) => s,
+  _       => "",
+}
+
+fn main() -> Unit = {
+  // Parse an object with nested array + string + int + bool, then roundtrip it.
+  let doc = parse("{\"name\":\"almide\",\"nums\":[1,22,3],\"ok\":true}")
+  println(stringify(doc))
+
+  // Field extraction.
+  println(as_str(vget(doc, "name")))
+  println(stringify(vget(doc, "nums")))
+  println(if as_int(vget(parse("{\"x\":42}"), "x")) == 42 then "x=42" else "x=?")
+
+  // Escaping roundtrip.
+  println(stringify(parse("\"a\\\"b\\nc\"")))
+
+  // Nested array.
+  println(stringify(parse("[1, [2, [3]], 4]")))
+}
