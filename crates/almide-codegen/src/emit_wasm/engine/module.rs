@@ -230,6 +230,10 @@ fn first_abstract_op(ops: &[Op]) -> Option<&'static str> {
             Op::StringConcat => return Some("StringConcat"),
             Op::StringInterp { .. } => return Some("StringInterp"),
             Op::Unsupported(what) => return Some(what),
+            // An unresolved break/continue means it sat outside any loop (or in
+            // a loop form the resolver doesn't cover) — reject → legacy.
+            Op::BreakLoop => return Some("break-outside-loop"),
+            Op::ContinueLoop => return Some("continue-outside-loop"),
 
             // Recurse into compound control flow.
             Op::Block(body) | Op::Loop(body) | Op::Seq(body) => {

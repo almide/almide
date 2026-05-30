@@ -197,6 +197,14 @@ pub enum Op {
     IfVoid { then: Vec<Op>, else_: Vec<Op> },
     Br(u32),
     BrIf(u32),
+    /// Placeholder `break`/`continue`: the target branch depth is relative to
+    /// the lexical nesting of WASM control frames (Block/Loop/If), which is not
+    /// known at lowering time because the surrounding `If`/`Match` frames are
+    /// assembled later. The enclosing loop's lowering resolves these to a
+    /// concrete `Br(depth)` via `resolve_loop_branches`. Any that survive
+    /// (a `break`/`continue` outside a loop) are rejected by `first_abstract_op`.
+    BreakLoop,
+    ContinueLoop,
     Return,
     Unreachable,
 
@@ -297,6 +305,8 @@ impl Op {
             Op::IfVoid { .. } => Compound, // pops 1 (cond)
             Op::BrIf(_) => Normal { pops: 1, pushes: 0 },
             Op::Br(_) | Op::Return | Op::Unreachable => Divergent,
+            // Unresolved break/continue diverge; resolved before emission.
+            Op::BreakLoop | Op::ContinueLoop => Divergent,
 
             // ── Calls ──
             Op::Call { pops, pushes, .. } | Op::CallIndirect { pops, pushes, .. }
@@ -429,6 +439,7 @@ fn op_name(op: &Op) -> &'static str {
         Op::Block(_) => "Block", Op::Loop(_) => "Loop",
         Op::If { .. } => "If", Op::IfVoid { .. } => "IfVoid",
         Op::Br(_) => "Br", Op::BrIf(_) => "BrIf",
+        Op::BreakLoop => "BreakLoop", Op::ContinueLoop => "ContinueLoop",
         Op::Return => "Return", Op::Unreachable => "Unreachable",
         Op::Call { .. } => "Call", Op::CallIndirect { .. } => "CallIndirect",
         Op::MemoryCopy => "MemoryCopy", Op::MemorySize => "MemorySize",

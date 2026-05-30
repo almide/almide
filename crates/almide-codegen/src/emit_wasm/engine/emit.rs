@@ -120,6 +120,9 @@ pub fn emit_op(op: &Op, f: &mut Function, reg: &LayoutRegistry) {
         }
         Op::Br(d) => { f.instruction(&Br(*d)); }
         Op::BrIf(d) => { f.instruction(&BrIf(*d)); }
+        Op::BreakLoop | Op::ContinueLoop => {
+            panic!("break/continue placeholder reached emission — loop lowering should have resolved or rejected it");
+        }
         Op::Return => { f.instruction(&Return); }
         Op::Unreachable => { f.instruction(&Unreachable); }
 

@@ -347,6 +347,11 @@ pub fn lower_expr(expr: &IrExpr, ctx: &mut LowerCtx) -> Vec<Op> {
                 loop_body.extend(lower_stmt(stmt, ctx));
             }
             loop_body.push(Op::Br(0)); // continue loop
+            // Resolve break/continue placeholders. At the top of `loop_body`
+            // the enclosing frames are Loop (index 0) and Block (index 1), so
+            // `break` → Br(1) (exit Block) and `continue` → Br(0) (re-enter
+            // Loop = re-check the condition). Nested If/Match push the depths.
+            resolve_loop_branches(&mut loop_body, 1, 0);
             ops.push(Op::Block(vec![Op::Loop(loop_body)]));
             ops
         }
@@ -783,8 +788,11 @@ pub fn lower_expr(expr: &IrExpr, ctx: &mut LowerCtx) -> Vec<Op> {
 
         // ── Misc ──
         IrExprKind::Hole | IrExprKind::Todo { .. } => vec![Op::Unreachable],
-        IrExprKind::Break => vec![Op::Br(1)],    // break out of loop block
-        IrExprKind::Continue => vec![Op::Br(0)],  // jump to loop head
+        // Branch depth is relative to the lexical WASM control-frame nesting
+        // (each enclosing If/Match/Block adds a level), which is unknown here.
+        // Emit placeholders; the enclosing loop resolves them structurally.
+        IrExprKind::Break => vec![Op::BreakLoop],
+        IrExprKind::Continue => vec![Op::ContinueLoop],
 
         // ── Remaining unhandled variants ──
         // A Unit-typed unknown produces nothing; anything else would need a
@@ -1784,10 +1792,17 @@ fn lower_for_in(var: VarId, iterable: &IrExpr, body: &[IrStmt], ctx: &mut LowerC
     loop_body.push(Op::Load(elem_load));
     loop_body.push(Op::LocalSet(elem));
 
-    // Body statements
+    // Body statements, wrapped in an inner "continue block" so that `continue`
+    // branches to the block's END — falling through to the idx++ below rather
+    // than skipping it (which would loop forever). From the body's top frame:
+    // inner Block (0), Loop (1), outer Block (2) → `continue` → Br(0) (exit
+    // inner block → idx++), `break` → Br(2) (exit outer block).
+    let mut body_ops = Vec::new();
     for stmt in body {
-        loop_body.extend(lower_stmt(stmt, ctx));
+        body_ops.extend(lower_stmt(stmt, ctx));
     }
+    resolve_loop_branches(&mut body_ops, 2, 0);
+    loop_body.push(Op::Block(body_ops));
 
     // idx++
     loop_body.push(Op::LocalGet(idx));
@@ -1798,6 +1813,34 @@ fn lower_for_in(var: VarId, iterable: &IrExpr, body: &[IrStmt], ctx: &mut LowerC
 
     ops.push(Op::Block(vec![Op::Loop(loop_body)]));
     ops
+}
+
+/// Resolve `BreakLoop`/`ContinueLoop` placeholders in a freshly-lowered loop
+/// body into concrete `Br(depth)`. WASM branch targets are relative to the
+/// lexical nesting of control frames (Block/Loop/If each add one level), so the
+/// depth depends on how deeply a `break`/`continue` is nested inside `if`/`match`
+/// arms — information only available once the op tree is assembled.
+///
+/// `brk`/`cont` are the branch depths for a placeholder sitting at the current
+/// frame level; descending into a Block/Loop/If/IfVoid increments both. `Seq`
+/// is flat (no WASM frame) so it does not. Already-concrete `Br`/`BrIf` and the
+/// placeholders of an inner, already-resolved loop are left untouched.
+fn resolve_loop_branches(ops: &mut [Op], brk: u32, cont: u32) {
+    for op in ops {
+        match op {
+            Op::BreakLoop => *op = Op::Br(brk),
+            Op::ContinueLoop => *op = Op::Br(cont),
+            Op::Block(body) | Op::Loop(body) => {
+                resolve_loop_branches(body, brk + 1, cont + 1);
+            }
+            Op::If { then, else_, .. } | Op::IfVoid { then, else_ } => {
+                resolve_loop_branches(then, brk + 1, cont + 1);
+                resolve_loop_branches(else_, brk + 1, cont + 1);
+            }
+            Op::Seq(body) => resolve_loop_branches(body, brk, cont),
+            _ => {}
+        }
+    }
 }
 
 // ── Tests ────────────────────────────────────────────────────────────
