@@ -83,11 +83,12 @@ pub struct RuntimeFns {
     pub str_join: FuncIdx,
     pub int_parse: FuncIdx,
     pub str_lines: FuncIdx,
+    pub str_cmp: FuncIdx,
 }
 
 /// The number of *defined* runtime functions (they occupy function indices
 /// `IMPORT_COUNT .. IMPORT_COUNT + COUNT`).
-pub const COUNT: u32 = 43;
+pub const COUNT: u32 = 44;
 
 impl RuntimeFns {
     /// Defined runtime functions in code-section order, offset past the imports.
@@ -137,11 +138,12 @@ impl RuntimeFns {
             str_join: IMPORT_COUNT + 40,
             int_parse: IMPORT_COUNT + 41,
             str_lines: IMPORT_COUNT + 42,
+            str_cmp: IMPORT_COUNT + 43,
         }
     }
 
     /// Map of runtime function names to indices, for the build's name lookup.
-    pub fn name_table(&self) -> [(&'static str, FuncIdx); 43] {
+    pub fn name_table(&self) -> [(&'static str, FuncIdx); 44] {
         [
             ("__alloc", self.alloc),
             ("__rc_inc", self.rc_inc),
@@ -186,6 +188,7 @@ impl RuntimeFns {
             ("__string_join", self.str_join),
             ("__int_parse", self.int_parse),
             ("__string_lines", self.str_lines),
+            ("__str_cmp", self.str_cmp),
         ]
     }
 }
@@ -238,7 +241,56 @@ pub fn runtime_funcs(reg: &LayoutRegistry, heap_start: i32) -> Vec<WasmFunc> {
         build_string_join(),
         build_int_parse(),
         build_string_lines(),
+        build_str_cmp(),
     ]
+}
+
+/// `__str_cmp(a, b) -> i32` — lexicographic byte comparison of two strings.
+/// Returns negative if a < b, 0 if equal, positive if a > b (memcmp-style):
+/// compare min(a.len, b.len) bytes; on the first differing byte return its
+/// difference, else return a.len - b.len. Matches the legacy emitter so the
+/// differential gate stays green. String layout: [bytelen:i32@0][cap@4][bytes@8].
+fn build_str_cmp() -> WasmFunc {
+    const A: u32 = 0;
+    const BP: u32 = 1;
+    const MINL: u32 = 2;
+    const IDX: u32 = 3;
+    const CA: u32 = 4;
+    const CB: u32 = 5;
+
+    let loop_body = vec![
+        // idx >= minl → break
+        Op::LocalGet(IDX), Op::LocalGet(MINL), Op::BinOp(B::I32GeU), Op::BrIf(1),
+        // ca = a[8+idx]
+        Op::LocalGet(A), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add), Op::LocalGet(IDX), Op::BinOp(B::I32Add), Op::Load(LoadKind::U8), Op::LocalSet(CA),
+        // cb = b[8+idx]
+        Op::LocalGet(BP), Op::Const(Const::I32(8)), Op::BinOp(B::I32Add), Op::LocalGet(IDX), Op::BinOp(B::I32Add), Op::Load(LoadKind::U8), Op::LocalSet(CB),
+        // if ca != cb { return ca - cb }
+        Op::LocalGet(CA), Op::LocalGet(CB), Op::BinOp(B::I32Ne),
+        Op::IfVoid { then: vec![Op::LocalGet(CA), Op::LocalGet(CB), Op::BinOp(B::I32Sub), Op::Return], else_: vec![] },
+        Op::LocalGet(IDX), Op::Const(Const::I32(1)), Op::BinOp(B::I32Add), Op::LocalSet(IDX), Op::Br(0),
+    ];
+    let body = vec![
+        // minl = min(a.len, b.len)
+        Op::LocalGet(A), Op::Load(LoadKind::I32),
+        Op::LocalGet(BP), Op::Load(LoadKind::I32),
+        Op::BinOp(B::I32LeU),
+        Op::If { ty: WasmTy::I32,
+            then: vec![Op::LocalGet(A), Op::Load(LoadKind::I32)],
+            else_: vec![Op::LocalGet(BP), Op::Load(LoadKind::I32)] },
+        Op::LocalSet(MINL),
+        Op::Const(Const::I32(0)), Op::LocalSet(IDX),
+        Op::Block(vec![Op::Loop(loop_body)]),
+        // equal prefix → return a.len - b.len
+        Op::LocalGet(A), Op::Load(LoadKind::I32),
+        Op::LocalGet(BP), Op::Load(LoadKind::I32),
+        Op::BinOp(B::I32Sub),
+    ];
+    WasmFunc {
+        name: "__str_cmp".into(), params: vec![WasmTy::I32, WasmTy::I32], results: vec![WasmTy::I32],
+        locals: vec![WasmTy::I32, WasmTy::I32, WasmTy::I32, WasmTy::I32], // minl, idx, ca, cb
+        body,
+    }
 }
 
 /// `__string_to_case(s, upper: i32) -> i32` — ASCII case conversion (non-ASCII

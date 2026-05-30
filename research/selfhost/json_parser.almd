@@ -6,16 +6,15 @@
 // Status:
 //   --target rust  : ✓ builds + runs (prints 35 for the main below)
 //   --target wasm  : ✓ builds + runs (legacy emitter)
-//   ALMIDE_WASM_V2 : builds, but TRAPS at runtime — the v2 engine has a bug in
-//                    recursion + heap-returning functions (tuple/string-returning
-//                    recursion). The standalone features work in isolation
-//                    (BindDestructure, variants, int.parse, list concat); the
-//                    combination in a recursive parser faults. This is the next
-//                    self-hosting gap for v2 (likely the Perceus-WASM RC path or
-//                    recursive call/param handling — to debug with a clean env).
+//   ALMIDE_WASM_V2 : ✓ builds + runs, prints 35 (matches legacy). Reaching this
+//                    took two engine fixes: (1) break/continue branch-depth
+//                    resolution so TCO'd tail recursion terminates, and (2)
+//                    lexicographic string ordering (__str_cmp) so `c >= "0"`
+//                    style comparisons are correct rather than pointer compares.
 //
-// When that gap is fixed, this file should go v2-OK; the differential gate
-// (scripts/wasm-v2-diff.sh) will confirm it matches the legacy output.
+// This is self-hosting milestone 1 (a JSON parser written in Almide running on
+// the v2 engine). The differential gate (scripts/wasm-v2-diff.sh) confirms the
+// v2 output matches the legacy emitter.
 
 type Json =
   | JNull

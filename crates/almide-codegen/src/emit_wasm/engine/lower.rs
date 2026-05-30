@@ -294,6 +294,24 @@ pub fn lower_expr(expr: &IrExpr, ctx: &mut LowerCtx) -> Vec<Op> {
                         ops.push(Op::UnOp(WUnOp::I32Eqz));
                     }
                 }
+            } else if matches!(op, almide_ir::BinOp::Lt | almide_ir::BinOp::Lte
+                | almide_ir::BinOp::Gt | almide_ir::BinOp::Gte)
+                && matches!(left.ty, Ty::String)
+            {
+                // Lexicographic string ordering: __str_cmp(a, b) returns
+                // negative / 0 / positive (memcmp-style), then compare to 0.
+                if let Some(idx) = (ctx.func_idx)("__str_cmp") {
+                    ops.push(Op::Call { idx, pops: 2, pushes: 1 });
+                    ops.push(Op::Const(Const::I32(0)));
+                    ops.push(Op::BinOp(match op {
+                        almide_ir::BinOp::Lt => WBinOp::I32LtS,
+                        almide_ir::BinOp::Lte => WBinOp::I32LeS,
+                        almide_ir::BinOp::Gt => WBinOp::I32GtS,
+                        _ => WBinOp::I32GeS,
+                    }));
+                } else {
+                    ops.push(Op::Unsupported("str-cmp-missing"));
+                }
             } else if matches!(op, almide_ir::BinOp::ConcatList) {
                 // List concatenation: pass the element width so the runtime can
                 // copy raw bytes. (left.ty is List[T].) Reject (→ legacy) on an
@@ -1293,6 +1311,9 @@ fn lower_binop(op: &almide_ir::BinOp, left_ty: &Ty) -> Option<WBinOp> {
 
         IrOp::Eq if matches!(left_ty, Ty::String) => return None, // deep eq → runtime
         IrOp::Neq if matches!(left_ty, Ty::String) => return None,
+        // String ordering is lexicographic (via __str_cmp), not a pointer
+        // compare — fall through to the runtime branch in the BinOp arm.
+        IrOp::Lt | IrOp::Lte | IrOp::Gt | IrOp::Gte if matches!(left_ty, Ty::String) => return None,
         IrOp::Eq => if is_int { WBinOp::I64Eq } else if is_float { WBinOp::F64Eq } else { WBinOp::I32Eq },
         IrOp::Neq => if is_int { WBinOp::I64Ne } else if is_float { WBinOp::F64Ne } else { WBinOp::I32Ne },
         IrOp::Lt => if is_float { WBinOp::F64Lt } else if is_int { WBinOp::I64LtS } else { WBinOp::I32LtS },
