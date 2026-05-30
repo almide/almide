@@ -73,7 +73,14 @@ self-hosting trustworthy. Each closed loop is evidence for the thesis.
 ## Self-hosting ladder (concrete milestones)
 
 1. **stdlib in Almide** — json → value → more; v2-compiled, differentially
-   verified. *(starting here)*
+   verified. *(in progress: `research/selfhost/json_parser.almd` — a JSON parser
+   in Almide. Builds + runs on Rust/legacy-WASM; the v2 engine builds it but
+   traps at runtime on recursion + heap-returning functions. Each isolated
+   feature works (BindDestructure, variants, int.parse, list concat); the
+   recursive-parser combination faults — the next v2 gap, likely the
+   Perceus-WASM RC path or recursive call/param handling. NB: the build-time
+   `wasmparser::validate` safety net catches structurally-invalid output, not
+   runtime traps — the differential gate is the net for those.)*
 2. **tools in Almide** — formatter, lint, LSP pieces.
 3. **compiler passes in Almide** — one nanopass, then more.
 4. **full compiler in Almide** — bootstrap: the Almide compiler compiles itself.
