@@ -217,6 +217,7 @@ fn emit_source(program: &mut IrProgram, target: Target, config: &target::TargetC
             output.push_str("impl<T: PartialEq> PartialEq for RcCow<T> { fn eq(&self, other: &Self) -> bool { *self.0 == *other.0 } }\n");
             output.push_str("impl<T: PartialEq> PartialEq<T> for RcCow<T> { fn eq(&self, other: &T) -> bool { *self.0 == *other } }\n");
             output.push_str("impl PartialEq<&str> for RcCow<String> { fn eq(&self, other: &&str) -> bool { self.0.as_str() == *other } }\n");
+            output.push_str("impl AsRef<str> for RcCow<String> { fn as_ref(&self) -> &str { self.0.as_str() } }\n");
             output.push_str("impl<T> std::ops::Deref for RcCow<T> { type Target = T; fn deref(&self) -> &T { &self.0 } }\n");
             output.push_str("impl<T: Clone> std::ops::DerefMut for RcCow<T> { fn deref_mut(&mut self) -> &mut T { std::rc::Rc::make_mut(&mut self.0) } }\n");
             output.push_str("impl<T> RcCow<T> { fn new(v: T) -> Self { RcCow(std::rc::Rc::new(v)) } fn make_mut(&mut self) -> &mut T where T: Clone { std::rc::Rc::make_mut(&mut self.0) } fn into_inner(self) -> T where T: Clone { std::rc::Rc::try_unwrap(self.0).unwrap_or_else(|rc| (*rc).clone()) } }\n");

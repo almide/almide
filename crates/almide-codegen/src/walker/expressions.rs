@@ -908,6 +908,17 @@ fn render_binop(ctx: &RenderContext, op: BinOp, left: &IrExpr, right: &IrExpr, _
             ctx.templates.render_with("power_expr", Some("Float"), &[], &[("left", l.as_str()), ("right", r.as_str())])
                 .unwrap_or_else(|| format!("pow(_, _)"))
         }
+        // String ordering (<, >, <=, >=): Rust's PartialOrd is not cross-type
+        // (String vs &str), and operands may be String / &str / RcCow<String>
+        // depending on borrow inference and clone insertion. Coerce both to
+        // &str via AsRef so any mix compares correctly. (== / != go through the
+        // almide_eq! macro, which already handles the cross-type impls.)
+        BinOp::Lt | BinOp::Gt | BinOp::Lte | BinOp::Gte if matches!(left.ty, Ty::String) => {
+            let op_str = match op {
+                BinOp::Lt => "<", BinOp::Gt => ">", BinOp::Lte => "<=", _ => ">=",
+            };
+            format!("(AsRef::<str>::as_ref(&({})) {} AsRef::<str>::as_ref(&({})))", l, op_str, r)
+        }
         _ => {
             let op_str = match op {
                 BinOp::AddInt | BinOp::AddFloat => "+",
