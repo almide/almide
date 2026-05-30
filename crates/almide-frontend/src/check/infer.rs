@@ -1124,23 +1124,60 @@ impl Checker {
                 let resolved = resolve_ty(ty, &self.uf);
                 let elem_ty = match &resolved {
                     Ty::Applied(TypeConstructorId::List, args) if !args.is_empty() => args[0].clone(),
+                    // Subject is still an unresolved inference var (e.g. a
+                    // lambda param not yet linked to its call site). Matching
+                    // `[..]` asserts it is a List, so pin its structure to
+                    // List[?elem] — otherwise the element pattern var
+                    // dead-ends at Unknown and leaks to the IR.
+                    Ty::TypeVar(_) => {
+                        let elem_v = self.fresh_var();
+                        self.unify_infer(&resolved, &Ty::list(elem_v.clone()));
+                        elem_v
+                    }
                     _ => Ty::Unknown,
                 };
                 for e in elements { self.bind_pattern(e, &elem_ty); }
             }
             ast::Pattern::Some { inner } => {
                 let resolved = resolve_ty(ty, &self.uf);
-                let it = match &resolved { Ty::Applied(TypeConstructorId::Option, args) if args.len() == 1 => args[0].clone(), _ => Ty::Unknown };
+                let it = match &resolved {
+                    Ty::Applied(TypeConstructorId::Option, args) if args.len() == 1 => args[0].clone(),
+                    // See List arm: pin an unresolved subject to Option[?inner].
+                    Ty::TypeVar(_) => {
+                        let inner_v = self.fresh_var();
+                        self.unify_infer(&resolved, &Ty::option(inner_v.clone()));
+                        inner_v
+                    }
+                    _ => Ty::Unknown,
+                };
                 self.bind_pattern(inner, &it);
             }
             ast::Pattern::Ok { inner } => {
                 let resolved = resolve_ty(ty, &self.uf);
-                let it = match &resolved { Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[0].clone(), _ => Ty::Unknown };
+                let it = match &resolved {
+                    Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[0].clone(),
+                    Ty::TypeVar(_) => {
+                        let ok_v = self.fresh_var();
+                        let err_v = self.fresh_var();
+                        self.unify_infer(&resolved, &Ty::result(ok_v.clone(), err_v));
+                        ok_v
+                    }
+                    _ => Ty::Unknown,
+                };
                 self.bind_pattern(inner, &it);
             }
             ast::Pattern::Err { inner } => {
                 let resolved = resolve_ty(ty, &self.uf);
-                let it = match &resolved { Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[1].clone(), _ => Ty::Unknown };
+                let it = match &resolved {
+                    Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[1].clone(),
+                    Ty::TypeVar(_) => {
+                        let ok_v = self.fresh_var();
+                        let err_v = self.fresh_var();
+                        self.unify_infer(&resolved, &Ty::result(ok_v, err_v.clone()));
+                        err_v
+                    }
+                    _ => Ty::Unknown,
+                };
                 self.bind_pattern(inner, &it);
             }
             ast::Pattern::None | ast::Pattern::Literal { .. } => {}
