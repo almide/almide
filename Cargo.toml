@@ -27,6 +27,12 @@ wasm-encoder = "0.225"
 lasso = { version = "0.7", features = ["multi-threaded"] }
 lsp-server = "0.7"
 lsp-types = "0.97"
+# Advisory cross-process file lock (flock) for the shared build scratch
+# dirs: serializes concurrent `almide run`/`build` invocations that share
+# /tmp/almide-run's single src/main.rs + target/. Already present in the
+# dependency tree transitively; used only under cfg(unix).
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 
 [dev-dependencies]
