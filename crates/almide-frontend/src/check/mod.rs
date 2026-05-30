@@ -31,7 +31,7 @@ mod exhaustiveness;
 use almide_lang::ast;
 use almide_base::diagnostic::Diagnostic;
 use crate::import_table::{ImportTable, build_import_table};
-use almide_base::intern::sym;
+use almide_base::intern::{Sym, sym};
 use crate::types::{Ty, TypeEnv};
 use types::{TyVarId, Constraint, FixHint, UnionFind, resolve_ty};
 
