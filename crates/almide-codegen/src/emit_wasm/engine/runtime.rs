@@ -2048,19 +2048,47 @@ fn build_alloc(reg: &LayoutRegistry) -> WasmFunc {
 
     const SIZE: u32 = 0;
     const BASE: u32 = 1;
+    const NH: u32 = 2;     // new heap pointer
+    const NEEDED: u32 = 3; // pages required to cover NH
 
     let body = vec![
         // base = HEAP
         Op::GlobalGet(HEAP_GLOBAL),
-        Op::LocalTee(BASE),
-        // HEAP = base + ((hdr + size + 7) & ~7)
+        Op::LocalSet(BASE),
+        // new_heap = base + ((hdr + size + 7) & ~7)
+        Op::LocalGet(BASE),
         Op::LocalGet(SIZE),
         Op::Const(Const::I32(hdr + 7)),
         Op::BinOp(B::I32Add),
         Op::Const(Const::I32(!7)),
         Op::BinOp(B::I32And),
         Op::BinOp(B::I32Add),
+        Op::LocalSet(NH),
+        Op::LocalGet(NH),
         Op::GlobalSet(HEAP_GLOBAL),
+        // Grow linear memory if the bump pointer now exceeds it. Without this
+        // the next store would trap once allocation crosses the initial pages.
+        // needed_pages = ceil(new_heap / 65536) = (new_heap + 65535) >> 16
+        Op::LocalGet(NH),
+        Op::Const(Const::I32(65535)),
+        Op::BinOp(B::I32Add),
+        Op::Const(Const::I32(16)),
+        Op::BinOp(B::I32ShrU),
+        Op::LocalSet(NEEDED),
+        // if needed > memory.size { memory.grow(needed - memory.size); drop }
+        Op::LocalGet(NEEDED),
+        Op::MemorySize,
+        Op::BinOp(B::I32GtU),
+        Op::IfVoid {
+            then: vec![
+                Op::LocalGet(NEEDED),
+                Op::MemorySize,
+                Op::BinOp(B::I32Sub),
+                Op::MemoryGrow,
+                Op::Drop,
+            ],
+            else_: vec![],
+        },
         // *(base + size_off) = size
         Op::LocalGet(BASE),
         Op::Const(Const::I32(size_off)),
@@ -2083,7 +2111,7 @@ fn build_alloc(reg: &LayoutRegistry) -> WasmFunc {
         name: "__alloc".into(),
         params: vec![WasmTy::I32],
         results: vec![WasmTy::I32],
-        locals: vec![WasmTy::I32], // base
+        locals: vec![WasmTy::I32, WasmTy::I32, WasmTy::I32], // base, new_heap, needed
         body,
     }
 }
