@@ -127,3 +127,39 @@ Quick wins first (small effort, high leverage):
 3. **4a** — ConcretizeTypes easy cases. Straightforward.
 4. **5b** — Expand Perceus proptest. Low effort, incremental.
 5. **1b-1g** — WASM emitter migration. Largest effort, tracked separately.
+
+  # 11. Status snapshot (2026-05-30) — closure / where / fold inference round
+
+  このラウンドで閉じたギャップ:
+  - **WASM closure-table regression**: ANF deny-list 反転（5cae928d）が
+    `Ty::Fn` のラムダを lift 対象に巻き込み、`pre_scan_closures` の
+    func-table 登録から漏れて `call_indirect` が未宣言 table 0 を参照
+    → 不正WASM。`needs_lift` の deny-list に Lambda/ClosureCreate を追加
+    して復元（802bb944）。
+  - **§1 (Inference↔Codegen contract) の実例 2 件を checker 側で根治**:
+    1. `test where greet = (name) => ...` の override ラムダ param が
+       Unknown 化 → checker で override 値をシャドウ元 fn シグネチャと
+       unify（88993d58 / 25a6f341）。
+    2. 未解決型変数を subject に `match` したとき `some(stack)` 等の内側
+       パターン変数が Unknown 化（fold accumulator `some([])`）→
+       `bind_pattern` で subject が `Ty::TypeVar` のとき
+       `Option/Result/List[?inner]` に unify してから束縛（e8d44dcb）。
+  - **anti-pattern 撤去**: lowering 側 `patch_lambda_params_from_checker` /
+    `patch_lambda_from_fn_sig` を削除（930bd486）。checker が source of
+    truth になり「Lowering never runs inference」原則に前進。
+    残: `lower_where_call_response` 内の同種パッチはまだ残（CallResponse の
+    checker 側 TypeMap 反映を確認後に撤去可能）。
+  - spec POSTCONDITION: 5 → 0（wasm/native とも）。
+
+  残る完全性ギャップ（このラウンドでは未着手、要・腰を据えた別アーク）:
+  - **§5 を保証に格上げ**: postcondition の release hard-fail 化。
+    現状 `hard_fail = cfg!(debug_assertions)`（pass.rs:248）。release では
+    print のみで素通り。注意: そのまま hard error 化すると、下記
+    under-constrained のような「今 warning で通っているプログラム」が
+    全て compile error になる破壊的変更。先に spec/exercises 全量で
+    影響件数を測ること。
+  - **under-constrained を明確に拒否**: `ok([])` を fold init にし err 値が
+    一度も現れないケースは err 型 `E` が原理的に未制約 → 現状
+    POSTCONDITION を踏むが warning 止まり。「曖昧なら型エラー」にするには
+    constraint solving 後の到達可能性解析（その TypeVar が本当に決まらない
+    か／後で決まるか）の線引き設計が要る。§5 の格上げと同時に行うのが筋。
