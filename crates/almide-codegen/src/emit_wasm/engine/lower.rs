@@ -1072,6 +1072,17 @@ fn lower_stmt(stmt: &IrStmt, ctx: &mut LowerCtx) -> Vec<Op> {
 
         IrStmtKind::Comment { .. } => vec![],
 
+        // `let (a, b) = expr` / `let { x, y } = expr` — evaluate the value into a
+        // local, then bind the pattern's variables from it (reusing the match
+        // destructuring machinery, which rejects unresolved layouts honestly).
+        IrStmtKind::BindDestructure { pattern, value } => {
+            let v = ctx.alloc_local(ty_to_wasm(&value.ty));
+            let mut ops = lower_expr(value, ctx);
+            ops.push(Op::LocalSet(v));
+            ops.extend(bind_pattern(pattern, v, &value.ty, ctx));
+            ops
+        }
+
         // `xs[i] = v` — store into the list's data area at the element width.
         IrStmtKind::IndexAssign { target, index, value } => {
             let (Some(list), false) = (ctx.get_var(*target), value.ty.is_unresolved()) else {
