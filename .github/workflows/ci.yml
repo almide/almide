@@ -75,12 +75,11 @@ jobs:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
 
       - name: Cargo tests
-        # --test-threads=1: fix_test spawns `almide run` as a sub-process
-        # that shares `.almide/cache` and `/tmp/almide-run` across threads,
-        # racing on cached binaries. Fix tracked in
-        # docs/roadmap/active/cargo-test-cache-race.md; single-thread run
-        # is the temporary workaround until per-test cache dirs land.
-        run: cargo test -- --test-threads=1
+        # Parallel-safe: the shared build scratch dir (/tmp/almide-run,
+        # /tmp/almide-build) is serialized across processes by an advisory
+        # flock (see src/cli/run.rs BuildDirLock). Unix only — this runner
+        # is ubuntu, so the lock applies.
+        run: cargo test
 
       - name: Almide spec tests (Rust target)
         run: |
@@ -204,7 +203,9 @@ jobs:
         if: runner.os != 'Windows'
         run: curl https://wasmtime.dev/install.sh -sSf | bash && echo "$HOME/.wasmtime/bin" >> $GITHUB_PATH
 
-      # --test-threads=1: see note on the primary Test Rust job.
+      # Keep --test-threads=1 here: this matrix includes windows-latest,
+      # where the build-scratch flock is a no-op (#[cfg(unix)]), so parallel
+      # `almide` subprocesses could still race the shared scratch dir.
       - run: cargo test -- --test-threads=1
 
       - uses: actions/upload-artifact@v4

@@ -57,6 +57,13 @@ fn needs_lift(expr: &IrExpr) -> bool {
         | IrExprKind::UnOp { .. }
         | IrExprKind::Deref { .. }
         | IrExprKind::Borrow { .. }
+        // Lambdas / closures must NOT be lifted: they must stay in
+        // argument position so the WASM closure-table pre-scan and
+        // HOF emission can see them. (Regression guard for 5cae928d:
+        // deny-list inversion swept in Fn-typed exprs that were never
+        // lifted by the prior allow-list.)
+        | IrExprKind::Lambda { .. }
+        | IrExprKind::ClosureCreate { .. }
     )
 }
 
