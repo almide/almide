@@ -73,7 +73,7 @@ Import required: json, math, random, datetime, regex, fs, http, log, testing,
                  error, crypto, uuid, set, value
 ```
 
-See [STDLIB-SPEC.md](./STDLIB-SPEC.md) for the complete stdlib function reference (381 functions across 22 modules).
+See [stdlib/](./stdlib/) for the complete stdlib function reference (834 functions across 39 modules).
 
 ## Notes
 

@@ -193,11 +193,11 @@ Almide emits WASM bytecode directly (no LLVM, no Cranelift). Each binary is self
 
 | Program | Size |
 |---------|-----:|
-| Hello World | **441 B** |
-| FizzBuzz | **705 B** |
-| Fibonacci (recursive) | **664 B** |
-| Closure + call_indirect | **748 B** |
-| Variant (match + float) | **1,271 B** |
+| Hello World | **467 B** |
+| FizzBuzz | **809 B** |
+| Fibonacci (recursive) | **682 B** |
+| Closure + call_indirect | **812 B** |
+| Variant (match + float) | **1,105 B** |
 
 These are raw `almide build --target wasm` output — no post-processing. `wasm-opt -O3` saves only 1–5 more bytes because the compiler's built-in dead code and dead data elimination already strips everything unused.
 
@@ -220,7 +220,7 @@ Almide compiles to Rust, which then compiles to native machine code. No runtime,
 | Targets | Rust (native), WASM (direct emit) |
 | Codegen | v3 — Nanopass + TOML templates, fully target-agnostic walker |
 | Stdlib | 834 functions across 39 modules |
-| Tests | 239 test files pass (Rust), 235 pass (WASM) |
+| Tests | 240 test files pass (Rust), 232 pass (WASM) |
 | MSR | 23/25 exercises pass (Sonnet 4.6, WASM, max 3 attempts) |
 | MiniGit Bench | 41/41 tests pass, 100% success rate ([ai-coding-lang-bench](https://github.com/mame/ai-coding-lang-bench)) |
 | Artifacts | `.almdi` module interface files via `almide compile` |
@@ -274,7 +274,7 @@ Browser-based compiler and runner. The Almide compiler runs as WASM — no serve
 - [docs/GRAMMAR.md](./docs/GRAMMAR.md) — EBNF grammar + stdlib reference
 - [docs/CHEATSHEET.md](./docs/CHEATSHEET.md) — Quick reference for AI code generation
 - [docs/DESIGN.md](./docs/DESIGN.md) — Design philosophy and trade-offs
-- [docs/STDLIB-SPEC.md](./docs/STDLIB-SPEC.md) — Standard library specification (381 functions)
+- [docs/stdlib/](./docs/stdlib/) — Standard library reference, per module (834 functions across 39 modules)
 - [docs/roadmap/](./docs/roadmap/README.md) — Language evolution plans
 
 ## Contributing

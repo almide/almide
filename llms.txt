@@ -207,6 +207,6 @@ Diagnostics for each carry a `try:` snippet that shows the Almide form.
 - License: MIT or Apache-2.0 (see LICENSE files).
 - Repo: <https://github.com/almide/almide>
 - Dojo (MSR benchmark): <https://github.com/almide/almide-dojo>
-- Current stable: v0.23.11 (prev v0.23.10). WASM engine foundation (WasmBuilder + LayoutRegistry + WasmIR), Lean 4 verified Perceus RC, StackBalancePass, Mono ICE fix, 237/240 WASM tests.
+- Current stable: v0.23.12 (prev v0.23.11). Precompiled runtime rlib (~20x faster `--release` builds, ~2.3x test loop), WASM-first parallel test loop, IR verifier gated to debug, heredoc UTF-8 dedent fix. 240/240 Rust tests, 232/240 WASM tests (8 skipped).
 - Baseline → 0.14.6 MSR: llama-3.3-70b 17/30 → 23/30 (+20pt);
   Sonnet 4.6 30/30 (100%) validates design.
