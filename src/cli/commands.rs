@@ -385,6 +385,128 @@ pub fn cmd_test_wasm(file: &str, _run_filter: Option<&str>) {
     }
 }
 
+/// Default `almide test`: run each file on the fast rustc-free WASM path; for
+/// any file the WASM path can't pass (emitter gap, wasm:skip, or a trap), fall
+/// back to the native rustc path, which is authoritative. The common case (most
+/// tests pass on WASM) is ~9x faster; the native fallback preserves correctness.
+pub fn cmd_test_fast(file: &str, no_check: bool, run_filter: Option<&str>) {
+    let test_files: Vec<String> = if !file.is_empty() {
+        let path = std::path::Path::new(file);
+        if path.is_dir() {
+            let mut files = collect_test_files(path);
+            files.sort();
+            if files.is_empty() {
+                eprintln!("No .almd files with test blocks found in {}", file);
+                std::process::exit(1);
+            }
+            files
+        } else {
+            vec![file.to_string()]
+        }
+    } else {
+        let mut files = Vec::new();
+        for dir in &["spec", "exercises"] {
+            let path = std::path::Path::new(dir);
+            if path.exists() { files.extend(collect_test_files(path)); }
+        }
+        if files.is_empty() { files = collect_test_files(std::path::Path::new(".")); }
+        files.sort();
+        if files.is_empty() {
+            eprintln!("No .almd files with test blocks found.");
+            std::process::exit(1);
+        }
+        files
+    };
+
+    let cpus = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
+    let tmp_dir = std::sync::Arc::new(std::env::temp_dir().join("almide-wasm-test"));
+    std::fs::create_dir_all(&*tmp_dir).ok();
+
+    // Phase 1: WASM (fast, rustc-free), parallel.
+    let wasm_outcomes: Vec<WasmTestOutcome> = {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (sem_tx, sem_rx) = std::sync::mpsc::sync_channel::<()>(cpus);
+        for _ in 0..cpus { let _ = sem_tx.send(()); }
+        let sem_tx = std::sync::Arc::new(sem_tx);
+        let sem_rx = std::sync::Arc::new(std::sync::Mutex::new(sem_rx));
+        let mut handles = Vec::new();
+        for tf in test_files.clone() {
+            let tx = tx.clone();
+            let td = tmp_dir.clone();
+            let sr = sem_rx.clone();
+            let st = sem_tx.clone();
+            handles.push(std::thread::spawn(move || {
+                let _ = sr.lock().unwrap().recv();
+                let o = compile_and_run_wasm_test(&tf, &td);
+                let _ = st.send(());
+                let _ = tx.send(o);
+            }));
+        }
+        drop(tx);
+        let v: Vec<_> = rx.iter().collect();
+        for h in handles { let _ = h.join(); }
+        v
+    };
+
+    let mut wasm_pass = 0usize;
+    let mut fallback: Vec<String> = Vec::new();
+    for o in wasm_outcomes {
+        match o {
+            WasmTestOutcome::Pass { .. } => wasm_pass += 1,
+            WasmTestOutcome::Fail { file, .. } | WasmTestOutcome::Skip { file, .. } => fallback.push(file),
+        }
+    }
+
+    // Phase 2: native rustc fallback (authoritative) for everything the WASM
+    // path didn't pass, parallel with per-file scratch dirs.
+    let mut program_args: Vec<String> = Vec::new();
+    if let Some(f) = run_filter { program_args.push(f.to_string()); }
+    let program_args = std::sync::Arc::new(program_args);
+
+    let native_results: Vec<(String, i32)> = {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (sem_tx, sem_rx) = std::sync::mpsc::sync_channel::<()>(cpus);
+        for _ in 0..cpus { let _ = sem_tx.send(()); }
+        let sem_tx = std::sync::Arc::new(sem_tx);
+        let sem_rx = std::sync::Arc::new(std::sync::Mutex::new(sem_rx));
+        let mut handles = Vec::new();
+        for tf in fallback.clone() {
+            let tx = tx.clone();
+            let args = program_args.clone();
+            let sr = sem_rx.clone();
+            let st = sem_tx.clone();
+            handles.push(std::thread::spawn(move || {
+                let _ = sr.lock().unwrap().recv();
+                let worker_dir = std::env::temp_dir()
+                    .join("almide-test")
+                    .join(tf.replace('/', "_").replace('.', "_"));
+                let code = match super::run::compile_to_binary(&tf, no_check, true, false, Some(&worker_dir)) {
+                    Ok(bin) => super::run::run_binary(&bin, &args),
+                    Err(e) => { eprintln!("Compile error for {}:\n{}", tf, e); 1 }
+                };
+                let _ = st.send(());
+                let _ = tx.send((tf, code));
+            }));
+        }
+        drop(tx);
+        let mut v: Vec<(String, i32)> = rx.iter().collect();
+        for h in handles { let _ = h.join(); }
+        v.sort_by(|a, b| a.0.cmp(&b.0));
+        v
+    };
+
+    let mut failed = 0;
+    for (file, code) in &native_results {
+        if *code != 0 { eprintln!("FAILED: {}", file); failed += 1; }
+    }
+    eprintln!("\n{} via WASM, {} via native fallback, {} failed (of {} files)",
+        wasm_pass, fallback.len().saturating_sub(failed), failed, test_files.len());
+    if failed > 0 {
+        std::process::exit(1);
+    }
+    eprintln!("All {} test file(s) passed", test_files.len());
+}
+
 pub fn cmd_test_ts(file: &str, _run_filter: Option<&str>) {
     use crate::{parse_file, canonicalize, check, diagnostic, resolve, project, project_fetch};
 
