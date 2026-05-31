@@ -226,6 +226,7 @@ pub fn almide_rt_list_binary_search(xs: &[i64], target: i64) -> Option<i64> {
     xs.binary_search(&target).ok().map(|i| i as i64)
 }
 
+//__ALMIDE_RT_BOUNDARY__
 pub fn process(xs: Vec<i64>) -> i64 {
     almide_rt_list_fold(almide_rt_list_filter(xs, move |x| (x > 0i64)), 0i64, move |acc, x| (acc + (x * 2i64)))
 }
