@@ -84,7 +84,7 @@ jobs:
       - name: Almide spec tests (Rust target)
         run: |
           ALMIDE=/tmp/almide-bin/almide
-          $ALMIDE test spec/
+          $ALMIDE test spec/ --target rust
 
       - name: Almide examples tests
         run: |
@@ -248,7 +248,7 @@ jobs:
         shell: bash
         run: |
           ALMIDE=${{ matrix.binary }}
-          $ALMIDE test spec/
+          $ALMIDE test spec/ --target rust
 
   # ═══════════════════════════════════════════════
   # Post-merge — trigger playground deploy
