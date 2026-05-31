@@ -1,326 +1,274 @@
 # Almide WASM Engine — Complete Redesign
 
-> **Status**: Design phase
-> **Motivation**: String layout migration (4→8 byte header) broke 35+ sites silently. Map Swiss Table migration broke all map closure ops. Root cause: raw WASM instruction emission with no type/layout abstraction.
-> **Goal**: Replace the 40-file hand-written assembler with a type-aware, layout-safe WASM compilation engine.
+> **Status**: Design phase — foundation (LayoutRegistry + WasmIR + WasmBuilder) exists, full recreate planned
+> **Motivation**: Hand-written WASM emission is the largest correctness gap. Also: WASM 3.0, WASI Preview 2, and Component Model all require a proper compilation pipeline, not raw instruction assembly.
+> **Goal**: Replace the 40-file hand-written assembler with a type-aware, layout-safe, stack-verified WASM compiler that outputs core modules or Component Model components.
 
 ## Problem Statement
 
-Current `emit_wasm/` is an assembler: AlmideIR → raw `wasm-encoder` instructions. Every memory access manually computes offsets:
-
-```rust
-// "load string data at index i" — 6 instructions, 3 magic numbers
-wasm!(self.func, {
-    local_get(str_ptr); i32_const(8); i32_add;
-    local_get(i); i32_add; i32_load8_u(0);
-});
-```
+Current `emit_wasm/` is an assembler: AlmideIR → raw `wasm-encoder` instructions. Every memory access manually computes offsets. Stack balance is verified by humans.
 
 **Consequences**:
 - Layout change → grep 40 files → miss sites → silent memory corruption
+- No static stack-effect verification → stack bugs at runtime
 - Swiss Table map iteration is 30+ lines of boilerplate per method
-- No way to verify layout consistency at compile time
-- Code is unreadable — intent buried in instruction soup
+- WASI Preview 1 raw imports can't interop with Component Model ecosystem
+- No WIT generation → can't participate in WASM component ecosystem
 
 ## Architecture
 
 ```
-AlmideIR (after nanopass)
+AlmideIR (after nanopass pipeline)
   ↓
-┌─────────────────────────────────┐
-│  Almide WASM Engine             │
-│                                 │
-│  LayoutRegistry                 │  ← single source of truth for memory layouts
-│  WasmIR (typed mid-level IR)    │  ← stack-machine IR with typed memory ops
-│  Lowering (AlmideIR → WasmIR)  │  ← semantic translation
-│  Optimize (WasmIR → WasmIR)    │  ← RC fusion, dead field elim, slot coloring
-│  Emit (WasmIR → wasm-encoder)  │  ← mechanical translation
-│                                 │
-└─────────────────────────────────┘
-  ↓
-WASM binary
+┌──────────────────────────────────────────────────┐
+│  Almide WASM Engine v2                           │
+│                                                  │
+│  LayoutRegistry          ← memory layout SoT     │
+│  Lowering (AlmideIR → WasmIR)                    │
+│  Stack-Effect Verifier   ← static balance proof   │
+│  Optimize (RC fusion, local coloring, peephole)   │
+│  Core Emit (WasmIR → wasm-encoder)               │
+│  Component Wrap (core → component + WIT)          │
+│  WASI Adapter (canonical ABI for system calls)    │
+│                                                  │
+└──────────────────────────────────────────────────┘
+  ↓                        ↓
+Core WASM module     Component (.wasm + WIT)
 ```
+
+### Key Design Decisions
+
+1. **Internal layout stays Almide-native** (LayoutRegistry). No canonical ABI overhead for internal data. Canonical ABI is only used at component boundaries (imports/exports).
+
+2. **Stack effects are structural, not annotated**. Each WasmIR Op declares `(pops: u8, pushes: u8)`. The verifier computes net stack effect per block/function and rejects mismatches before emission.
+
+3. **Component Model is a wrapper, not a rewrite**. The core module is compiled normally. A separate Component Wrap phase lifts it to a component by generating:
+   - WIT declarations from Almide's `pub fn` / `pub type` exports
+   - Canonical ABI adapter functions (Almide layout ↔ canonical layout)
+   - WASI Preview 2 imports via `wit-component`
+
+4. **WASI Preview 2 replaces Preview 1**. Current raw imports (`fd_write`, `clock_time_get`, etc.) are replaced with Component Model imports (`wasi:filesystem/types`, `wasi:http/outgoing-handler`, etc.).
 
 ## Core Components
 
-### 1. LayoutRegistry
+### 1. LayoutRegistry (exists)
 
-All memory layouts defined declaratively. **No hardcoded offsets anywhere else.**
+All memory layouts defined declaratively. No hardcoded offsets anywhere else.
 
-```rust
-pub struct LayoutRegistry {
-    layouts: Vec<MemLayout>,
-}
+Built-in layouts: String, List, SwissMap, Set, AllocHeader, ClosurePair, Variant, Option, Result.
 
-pub struct MemLayout {
-    pub name: &'static str,
-    pub fields: Vec<MemField>,
-}
-
-pub struct MemField {
-    pub name: &'static str,
-    pub offset: FieldOffset,  // Fixed(n) or Dynamic(expr)
-    pub ty: MemType,
-}
-
-pub enum FieldOffset {
-    Fixed(u32),
-    /// Offset depends on runtime value (e.g., map entries after tag array)
-    AfterField { field: &'static str },
-}
-
-pub enum MemType {
-    I32, I64, F32, F64, U8,
-    ByteArray,          // [u8; field.len]
-    Array(Box<MemType>), // [T; field.len]
-}
-```
-
-Definitions:
+### 2. WasmIR with Stack Effects
 
 ```rust
-registry.define("String", fields![
-    len  : I32 @ 0,
-    cap  : I32 @ 4,
-    data : ByteArray @ 8,
-]);
+pub struct WasmOp {
+    pub kind: WasmOpKind,
+    pub pops: u8,    // values consumed from stack
+    pub pushes: u8,  // values produced onto stack
+}
 
-registry.define("List", fields![
-    len  : I32 @ 0,
-    cap  : I32 @ 4,
-    data : Array(elem_type) @ 8,
-]);
+pub enum WasmOpKind {
+    // ── Typed memory access (layout-safe) ──
+    FieldLoad { layout: LayoutId, field: FieldId },   // pops: 1 (base), pushes: 1
+    FieldStore { layout: LayoutId, field: FieldId },   // pops: 2 (base, val), pushes: 0
+    FieldAddr { layout: LayoutId, field: FieldId },    // pops: 1 (base), pushes: 1 (addr)
 
-registry.define("SwissMap", fields![
-    len     : I32 @ 0,
-    cap     : I32 @ 4,
-    tags    : ByteArray @ 8,          // size = cap
-    entries : Array(entry_type) @ after("tags"),  // offset = 8 + cap
-]);
-```
-
-### 2. WasmIR
-
-Stack-machine IR that preserves Almide type information. Matches WASM's execution model but with typed operations.
-
-```rust
-pub enum WasmOp {
-    // ── Typed memory access ──
-    FieldLoad { base: Local, layout: LayoutId, field: FieldId },
-    FieldStore { base: Local, layout: LayoutId, field: FieldId },
-    ElemLoad { base: Local, layout: LayoutId, field: FieldId, index: Local, elem_ty: WasmType },
-    ElemStore { base: Local, layout: LayoutId, field: FieldId, index: Local, elem_ty: WasmType },
-
-    // ── Collection iteration ──
-    ListForEach { list: Local, elem_ty: WasmType, body: Vec<WasmOp> },
-    MapForEach { map: Local, key_ty: WasmType, val_ty: WasmType, body: Vec<WasmOp> },
+    // ── Collection iteration (single IR node) ──
+    ListForEach { body: Vec<WasmOp> },     // pops: 1 (list), pushes: 0
+    MapForEach { body: Vec<WasmOp> },      // pops: 1 (map), pushes: 0
 
     // ── Allocation ──
-    Alloc { layout: LayoutId, size_expr: SizeExpr },
-    AllocList { elem_ty: WasmType, len: Local },
-    AllocMap { key_ty: WasmType, val_ty: WasmType, cap: u32 },
+    Alloc { layout: LayoutId, size: SizeExpr },
+    AllocCollection { layout: LayoutId, len_local: Local, stride: u32 },
 
     // ── Reference counting ──
-    RcInc { ptr: Local },
-    RcDec { ptr: Local, layout: LayoutId },
-    CowCheck { ptr: Local, clone_body: Vec<WasmOp> },
+    RcInc,                                  // pops: 1 (ptr), pushes: 0
+    RcDec { layout: LayoutId },            // pops: 1 (ptr), pushes: 0
+    CowCheck { clone_body: Vec<WasmOp> },  // pops: 1 (ptr), pushes: 1 (ptr or clone)
 
-    // ── Control flow (WASM-native structured) ──
-    Block { body: Vec<WasmOp> },
+    // ── Structured control flow ──
+    Block { body: Vec<WasmOp>, result_ty: Option<ValType> },
     Loop { body: Vec<WasmOp> },
-    If { then: Vec<WasmOp>, else_: Vec<WasmOp> },
+    If { then: Vec<WasmOp>, else_: Vec<WasmOp>, result_ty: Option<ValType> },
     Br(u32),
     BrIf(u32),
     Return,
+    ReturnCall(FuncId),          // WASM 3.0 tail call
 
-    // ── Stack operations ──
+    // ── Stack primitives ──
     LocalGet(Local),
     LocalSet(Local),
+    LocalTee(Local),
     Const(WasmConst),
+    Drop,
     BinOp(WasmBinOp),
     Call(FuncId),
-    CallIndirect { sig: SigId, table_idx: Local },
+    CallIndirect { sig: SigId },
 
-    // ── String operations (first-class) ──
-    StringConcat { left: Local, right: Local },
-    StringInterp { parts: Vec<StringPart> },
+    // ── High-level ops (lowered to primitives in emit) ──
+    StringConcat,                           // pops: 2, pushes: 1
+    StringInterp { part_count: u32 },       // pops: N, pushes: 1
+    DeepEq { ty: AlmideTy },               // pops: 2, pushes: 1 (i32 bool)
 
-    // ── Comparison ──
-    DeepEq { ty: AlmideTy, left: Local, right: Local },
+    // ── Component Model canonical ABI ──
+    CanonLift { wit_func: WitFuncId },      // core → component boundary
+    CanonLower { wit_func: WitFuncId },     // component → core boundary
+    CanonStringToMemory,                    // canonical string → Almide string
+    CanonStringFromMemory,                  // Almide string → canonical string
+    CanonListToMemory { elem_ty: ValType }, // canonical list → Almide list
+    CanonListFromMemory { elem_ty: ValType },
+
+    // ── Memory ──
+    MemoryCopy { dst_mem: u32, src_mem: u32 },
+    MemoryGrow(u32),
+    MemorySize(u32),
+
+    Seq(Vec<WasmOp>),
+    Unreachable,
 }
 ```
 
-### 3. Lowering (AlmideIR → WasmIR)
-
-Each AlmideIR node maps to WasmIR ops. This is where semantic decisions happen.
+### 3. Stack-Effect Verifier
 
 ```rust
-fn lower_expr(expr: &IrExpr, ctx: &mut LowerCtx) -> Vec<WasmOp> {
-    match &expr.kind {
-        IrExprKind::StringInterp { parts } => {
-            vec![WasmOp::StringInterp {
-                parts: parts.iter().map(|p| lower_string_part(p, ctx)).collect(),
-            }]
-        }
-        IrExprKind::ForIn { var, iterable, body } if is_map(&iterable.ty) => {
-            vec![WasmOp::MapForEach {
-                map: ctx.lower_to_local(iterable),
-                key_ty: map_key_wasm_ty(&iterable.ty),
-                val_ty: map_val_wasm_ty(&iterable.ty),
-                body: lower_stmts(body, ctx),
-            }]
-        }
-        // ...
+fn verify_stack_balance(ops: &[WasmOp], expected_result: Option<ValType>) -> Result<(), StackError> {
+    let mut depth: i32 = 0;
+    for op in ops {
+        depth -= op.pops as i32;
+        if depth < 0 { return Err(StackError::Underflow { op, depth }); }
+        depth += op.pushes as i32;
     }
+    let expected = if expected_result.is_some() { 1 } else { 0 };
+    if depth != expected {
+        return Err(StackError::Imbalance { expected, actual: depth });
+    }
+    Ok(())
 }
 ```
 
-### 4. Emit (WasmIR → wasm-encoder)
+Runs recursively on every Block/If/Loop body. Nested scopes are verified independently.
 
-Mechanical translation. **This is the only place that knows raw WASM instructions.**
+### 4. Lowering (AlmideIR → WasmIR)
 
-```rust
-fn emit_op(op: &WasmOp, f: &mut Function, reg: &LayoutRegistry) {
-    match op {
-        WasmOp::FieldLoad { base, layout, field } => {
-            let offset = reg.resolve_offset(*layout, *field);
-            f.instruction(&LocalGet(*base));
-            f.instruction(&I32Load(mem_arg(offset)));
-        }
-        WasmOp::MapForEach { map, key_ty, val_ty, body } => {
-            let layout = reg.get("SwissMap");
-            // Emit Swiss Table iteration — ONCE, CORRECTLY
-            // cap, entry_base, tag check, skip empty — all here
-            emit_swiss_table_iter(f, reg, *map, *key_ty, *val_ty, body);
-        }
-        WasmOp::StringInterp { parts } => {
-            emit_string_interp(f, reg, parts);  // uses LayoutRegistry for offsets
-        }
-        // ...
-    }
-}
+Semantic translation. Each AlmideIR node maps to WasmIR ops.
+
+### 5. Core Emit (WasmIR → wasm-encoder)
+
+Mechanical translation. The **only** place that touches raw WASM instructions. Verified-correct WasmIR goes in, valid WASM bytes come out.
+
+### 6. Component Wrap
+
+Generates a Component Model component from the core module:
+
+```
+Core WASM module
+  + WIT declarations (from pub fn/type exports)
+  + Canonical ABI adapter functions
+  + WASI Preview 2 import declarations
+  = Component (.wasm)
 ```
 
-### 5. Optimization Passes (WasmIR → WasmIR)
+Uses `wit-component` crate for the heavy lifting. Almide generates:
+- **WIT from types**: `pub type User = { name: String, age: Int }` → `record user { name: string, age: s64 }`
+- **WIT from functions**: `pub fn greet(name: String) -> String` → `greet: func(name: string) -> string`
+- **Canonical ABI adapters**: Convert between Almide's internal layout and canonical ABI at export boundaries
 
-Run between lowering and emission:
+### 7. WASI Preview 2 Adapter
 
-| Pass | Effect | LLVM equivalent |
-|------|--------|-----------------|
-| **RC Fusion** | Cancel adjacent inc+dec | None (LLVM doesn't know RC) |
-| **Dead Field Elim** | Skip unused record fields in alloc | Partial (SROA) |
-| **Iterator Fusion** | Merge chained MapForEach/ListForEach | None |
-| **Const Folding** | Evaluate constant FieldLoad at compile time | Yes, but layout-unaware |
-| **Local Coloring** | Reuse WASM locals across non-overlapping lifetimes | Register allocation |
-| **Inline Expansion** | Inline small WasmIR function bodies | Yes |
-| **Peephole** | Pattern-match and simplify instruction sequences | Yes |
+Replaces raw WASI Preview 1 imports with Component Model imports:
+
+| Current (Preview 1) | New (Preview 2 via CM) |
+|---------------------|----------------------|
+| `fd_write(fd, iovs, ...)` | `wasi:cli/stdout.get-stdout` + `output-stream.write` |
+| `fd_read(fd, iovs, ...)` | `wasi:cli/stdin.get-stdin` + `input-stream.read` |
+| `path_open(...)` | `wasi:filesystem/types.open-at` |
+| `clock_time_get(...)` | `wasi:clocks/monotonic-clock.now` |
+| (none) | `wasi:http/outgoing-handler.handle` |
+
+## Implementation Phases
+
+### Phase 0: Stack-Effect Verifier
+
+Add `(pops, pushes)` to existing WasmIR Op enum. Implement verifier. Run on WasmBuilder output. This alone closes the correctness gap for the engine layer.
+
+- [ ] Add stack-effect fields to WasmIR Op
+- [ ] Implement `verify_stack_balance()` recursive checker
+- [ ] Wire into WasmBuilder — verify after each function is built
+- [ ] Gate: zero stack-effect violations on `almide test spec/ --target wasm`
+
+### Phase 1: New Lowering
+
+Replace hand-written emission with AlmideIR → WasmIR lowering.
+
+- [ ] `lower_expr()` for all IrExprKind variants
+- [ ] `lower_stmt()` for all IrStmtKind variants
+- [ ] `lower_function()` with local allocation and structured control flow
+- [ ] Core emit: WasmIR → wasm-encoder (mechanical)
+- [ ] Gate: all `spec/lang/` + `spec/stdlib/` pass through new pipeline (240/240)
+
+### Phase 2: Component Model
+
+- [ ] WIT generation from Almide pub exports (`almide build --target wasm-component`)
+- [ ] Canonical ABI adapter generation (string, list, record, variant, option, result)
+- [ ] `wit-component` integration for component wrapping
+- [ ] Gate: compiled component validates with `wasm-tools validate --features component-model`
+
+### Phase 3: WASI Preview 2
+
+- [ ] Replace fd_write/fd_read with `wasi:cli/std{in,out,err}`
+- [ ] Replace path_open/fd_seek etc. with `wasi:filesystem/types`
+- [ ] Replace clock_time_get with `wasi:clocks/monotonic-clock`
+- [ ] Add `wasi:http/outgoing-handler` for HTTP client
+- [ ] Gate: `almide run app.almd --target wasm` works on wasmtime with WASI Preview 2
+
+### Phase 4: Exception Handling (WASM 3.0 v2)
+
+Waiting for wasmtime to enable by default.
+
+- [ ] `try_table`/`throw` for effect fn `?` propagation
+- [ ] Zero-cost error path (no Result heap allocation)
+- [ ] Gate: effect fn benchmarks show measurable improvement
+
+### Phase 5: Component Model Async (WASM 3.0 v3)
+
+- [ ] `fan` → `future<T>` + `waitable-set` multiplex
+- [ ] `stream<T>` for streaming data
+- [ ] Gate: fan benchmarks work on wasmtime with WASI 0.3
 
 ## What Dies
 
-All of current `emit_wasm/`:
+All of current `emit_wasm/` (40 files, ~15K LOC):
 
-| File | Replacement |
-|------|------------|
-| `list_layout.rs` | `LayoutRegistry` definitions |
-| `calls_string.rs` | `lower_string_call()` + StringInterp/StringConcat ops |
-| `calls_map.rs` | `lower_map_call()` + MapForEach/FieldLoad ops |
-| `calls_map_closure.rs` | same — 500 lines of boilerplate → ~50 lines of lowering |
-| `calls_list*.rs` | `lower_list_call()` + ListForEach ops |
-| `runtime.rs` | Emit phase: runtime fns emitted from WasmIR |
-| `rt_string*.rs` | same |
-| `expressions.rs` | `lower_expr()` |
-| `statements.rs` | `lower_stmt()` |
-| `control.rs` | Lowering for loops/match + Block/Loop/If WasmIR ops |
-| `equality.rs` | `DeepEq` WasmIR op |
-| `scratch.rs` | Local allocator moves into emit phase |
+| Current | Replacement |
+|---------|------------|
+| `expressions.rs`, `statements.rs`, `control.rs` | `lower_expr()`, `lower_stmt()` |
+| `calls_*.rs` (12 files) | stdlib lowering rules |
+| `rt_*.rs` (6 files) | runtime as WasmIR sequences |
+| `runtime.rs`, `runtime_eq.rs` | emit phase primitives |
+| `closures.rs`, `calls_lambda.rs` | closure lowering |
+| `equality.rs`, `collections.rs` | `DeepEq` op, collection lowering |
+| `scratch.rs` | local allocator in emit phase |
+| `values.rs` | LayoutRegistry |
+| `dce.rs` | WasmIR-level DCE pass |
 
-## Implementation Plan
+Kept: `engine/` (LayoutRegistry, WasmIR, WasmBuilder, emit) — this IS the new engine.
 
-### Phase 1: Foundation (LayoutRegistry + WasmIR types)
-- [ ] `LayoutRegistry` with String, List, Map, Set, Variant, Record, Tuple, Option, Result
-- [ ] `WasmIR` enum with core ops
-- [ ] `emit_op()` for each WasmIR variant (the only wasm-encoder touchpoint)
-- [ ] Proof of concept: compile `"hello ${name}" |> println` through new pipeline
+## Existing Foundation
 
-### Phase 2: Lowering (AlmideIR → WasmIR)
-- [ ] `lower_expr()` for all IrExprKind variants
-- [ ] `lower_stmt()` for all IrStmtKind variants
-- [ ] `lower_function()` including local allocation and control flow
-- [ ] Gate: all `spec/lang/` tests pass through new pipeline
+Already implemented in `emit_wasm/engine/`:
+- **LayoutRegistry**: All layouts defined (String, List, SwissMap, Set, AllocHeader, ClosurePair, Variant, Option, Result)
+- **WasmIR**: 40+ op variants with typed memory access
+- **WasmBuilder**: Chainable API with layout-safe field access, collection iteration, RC ops
+- **Emit**: WasmIR → wasm-encoder translation
 
-### Phase 3: Stdlib & Runtime
-- [ ] String runtime (concat, interp, slice, trim, eq, cmp, etc.)
-- [ ] List runtime (push, map, filter, fold, sort, etc.)
-- [ ] Map runtime (get, set, delete, keys, values, fold, etc.)
-- [ ] Other stdlib modules
-- [ ] Gate: all `spec/stdlib/` tests pass
-
-### Phase 4: Optimization Passes
-- [ ] RC Fusion
-- [ ] Local Coloring
-- [ ] Peephole
-- [ ] Gate: all benchmarks match or beat current emit_wasm performance
-
-### Phase 5: Delete Old Code
-- [ ] Remove all `emit_wasm/*.rs` files
-- [ ] Single entry point: `wasm_engine::compile(ir_program) -> Vec<u8>`
-
-## Findings from v0.23.11 Patch Session (2026-05-27)
-
-Session fixed 18 test files (175→193/240) by patching emit_wasm directly. Key findings that inform the redesign:
-
-### 1. Stack Discipline is the Hardest Problem
-
-**The blocking CI bug**: Perceus/ANF inserts a trailing `Ret(var_ref)` in void functions. This becomes a Block tail expression that pushes a value onto the WASM stack. The IR type annotation says Unit (Perceus doesn't update it), but codegen actually emits `local.get` which pushes i32. Result: "values remaining on stack at end of block" — rejected by V8 and newer wasmtime.
-
-**Why WasmIR fixes this**: The emit phase can statically verify stack balance per block/function. Each `Op` has a known stack effect (+1, -1, 0). A void function whose ops sum to non-zero gets an automatic `Op::Drop`. No IR type annotation trust needed.
-
-### 2. Layout Offset Bugs are Systemic
-
-String layout change (4→8 byte header) broke 3 sites. Map Swiss Table migration broke 35+ sites. HTTP module had 15+ hardcoded offsets. All fixed by replacing `i32_const(4)` with `list_layout::DATA_OFFSET` — but this is still manual and fragile.
-
-**Why WasmIR fixes this**: `Op::FieldLoad { layout: STRING, field: DATA }` resolves offset via `LayoutRegistry`. Zero hardcoded offsets in lowering.
-
-### 3. rc_dec on Data Section Pointers Corrupts Memory
-
-`rc_dec(ptr)` reads `ptr-4` as refcount. Interned strings in the data section have no alloc header → memory corruption. Fixed by adding `ptr < heap_start` guard to rc_dec/rc_inc/cow_check.
-
-**Why WasmIR fixes this**: `Op::RcDec { ptr, layout }` in the emit phase can check pointer origin. Or better: the lowering phase never emits RcDec for compile-time-known interned values.
-
-### 4. wasmparser Validation+Stub Hides Bugs
-
-The old emit_wasm validated with wasmparser 0.225 and replaced broken functions with `unreachable` stubs. This silently degraded correctness. Worse: wasmparser 0.225 had false positives on valid WASM that wasm-tools 0.244 accepts. Removed entirely — codegen must produce valid WASM.
-
-**Why WasmIR fixes this**: Stack balance is verified structurally at the IR level before emission. If WasmIR is well-formed, the emitted WASM is guaranteed valid.
-
-### 5. Swiss Table Iteration is a Pattern, Not a Primitive
-
-Every map closure method (fold/each/any/all/count/find/update/map) reimplemented the Swiss Table iteration loop. Extracted `MapIter` helpers — but still 8 call sites.
-
-**Why WasmIR fixes this**: `Op::MapForEach { map, entry_stride, body }` is a single IR node. The emit phase generates the Swiss Table loop once.
-
-### 6. Perceus/ANF Transforms IR Types Unreliably
-
-Perceus changes block structure (inserts RcDec statements, Ret tail expressions) but doesn't always update `.ty` annotations. The WASM emitter can't trust `expr.ty` for stack management decisions.
-
-**Why WasmIR fixes this**: WasmIR doesn't carry type annotations — it carries stack effects. Each Op explicitly declares what it pushes/pops. No "trust the annotation" problem.
-
-### Current Blockers (require WasmEngine to fix properly)
-
-| Bug | Symptom | Root Cause |
-|-----|---------|-----------|
-| `filter \|> map` pipe | WASM stack mismatch in void function | Perceus tail expr in void block |
-| `mut` param | list.push via mut param traps | Pass-by-reference not implemented in WASM |
-| `bytes.from_list` + assert | Heap corruption in test function | Perceus drop ordering |
-| `group_by` + assert | Same as above | Same |
-| `opaque type` | ConcretizeTypes fails on Member | Upstream type checker issue |
-| `intra-module fn ref` | Wrong function table index | Closure conversion for module fns |
+23 files already migrated to LayoutRegistry. WasmBuilder used in list_layout.rs and Perceus core.
 
 ## Metrics
 
-- **Correctness**: `almide test spec/ --target wasm` — 240/240 (currently 193/240)
-- **Binary size**: ≤ current (336B hello world baseline)
-- **Performance**: ≥ current (5 wins vs Rust+LLVM baseline)
+- **Correctness**: `almide test spec/ --target wasm` — 240/240
+- **Stack safety**: zero stack-effect violations (structurally enforced)
+- **Layout safety**: zero hardcoded offsets (enforced by LayoutRegistry)
+- **Binary size**: ≤ current
+- **Performance**: ≥ current
 - **Code volume**: emit_wasm/ LOC reduced by ≥50%
-- **Layout bugs**: structurally impossible (enforced by LayoutRegistry)
-- **Stack bugs**: structurally impossible (verified at WasmIR level)
+- **Component Model**: validates with `wasm-tools validate --features component-model`
+- **WASI Preview 2**: runs on wasmtime without Preview 1 adapter

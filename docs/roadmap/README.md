@@ -24,7 +24,7 @@
 
 ## On Hold
 
-30 items
+29 items
 
 | Item | Description |
 |------|-------------|
@@ -54,20 +54,20 @@
 | [Shell Completions](on-hold/shell-completions.md) | almide completions subcommand for bash/zsh/fish auto-completion |
 | [Snapshot Testing](on-hold/snapshot-testing.md) | Built-in snapshot testing for output regression detection |
 | [Supervision & Actors](on-hold/supervision-and-actors.md) | Erlang-style actors, supervisors, and typed channels as stdlib modules |
-| [WASM Component Model](on-hold/wasm-component-model.md) | WebAssembly Component Model support with WIT bindings |
 | [WASM Exception Handling](on-hold/wasm-exception-handling.md) | WASM native exception handling (try_table/throw) for zero-cost effect fn error propagation |
 | [WASM HTTP Client](on-hold/wasm-http-client.md) | HTTP client support for the WASM target via WASI or host imports |
 | [Web Framework](on-hold/web-framework.md) | First-party Hono-like web framework with template and Codec integration |
 
 ## Done
 
-247 items
+248 items
 
 <details>
-<summary>Show all 247 completed items</summary>
+<summary>Show all 248 completed items</summary>
 
 | Done | Item | Description |
 |------|------|-------------|
+| 2026-05-29 | [WASM Component Model](done/wasm-component-model.md) | WebAssembly Component Model support with WIT bindings |
 | 2026-04-20 | [`almide docs-gen` — llms.txt Auto-Generation](done/llms-txt-autogen.md) | Auto-generate llms.txt from canonical sources (CHEATSHEET, diagnostics, stdlib) |
 | 2026-04-20 | [Whisper in Pure Almide](done/whisper-almide.md) | Whisper speech recognition implemented entirely in Almide |
 | 2026-04-20 | [Variant Exhaustiveness Refinement](done/variant-exhaustiveness-refinement.md) | Non-exhaustive match suggests missing arm code; unreachable arms become hard errors |

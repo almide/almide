@@ -123,8 +123,8 @@ pub fn emit_op(op: &Op, f: &mut Function, reg: &LayoutRegistry) {
         Op::Return => { f.instruction(&Return); }
         Op::Unreachable => { f.instruction(&Unreachable); }
 
-        Op::Call(idx) => { f.instruction(&Call(*idx)); }
-        Op::CallIndirect { sig } => {
+        Op::Call { idx, .. } => { f.instruction(&Call(*idx)); }
+        Op::CallIndirect { sig, .. } => {
             f.instruction(&CallIndirect { type_index: *sig, table_index: 0 });
         }
 

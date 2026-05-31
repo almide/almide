@@ -13,23 +13,57 @@
 //! IS a VDecl, closing the gap between the proof and the implementation.
 
 use almide_ir::*;
+use almide_ir::visit::{IrVisitor, walk_expr};
 use almide_lang::types::Ty;
-use super::pass::{NanoPass, PassResult, Target};
+use super::pass::{NanoPass, Postcondition, PassResult, Target};
 
 fn is_heap_type(ty: &Ty) -> bool {
     matches!(ty, Ty::String | Ty::Applied(_, _) | Ty::Record { .. } | Ty::Unknown | Ty::Fn { .. })
 }
 
 /// Does this expression produce a new heap allocation that should be lifted?
+///
+/// Inverted logic: any heap-typed expression that is NOT a simple value
+/// reference needs lifting. This way new IrExprKind variants are lifted
+/// by default (safe), rather than silently leaking (unsafe).
 fn needs_lift(expr: &IrExpr) -> bool {
     if !is_heap_type(&expr.ty) { return false; }
-    matches!(&expr.kind,
-        IrExprKind::Call { .. }
-        | IrExprKind::RuntimeCall { .. }
-        | IrExprKind::BinOp { .. }
-        | IrExprKind::If { .. }
-        | IrExprKind::Match { .. }
-        | IrExprKind::Block { .. }
+    // Expressions that don't produce NEW heap allocations never need lifting.
+    // Two categories:
+    //   1. Simple values: literals, variable references
+    //   2. Read operations: field/index access borrows from parent object,
+    //      whose lifetime Perceus already tracks
+    !matches!(&expr.kind,
+        // Category 1: simple values / references
+        IrExprKind::Var { .. }
+        | IrExprKind::EnvLoad { .. }
+        | IrExprKind::FnRef { .. }
+        | IrExprKind::LitInt { .. }
+        | IrExprKind::LitFloat { .. }
+        | IrExprKind::LitBool { .. }
+        | IrExprKind::LitStr { .. }
+        | IrExprKind::Unit
+        | IrExprKind::OptionNone
+        | IrExprKind::EmptyMap
+        | IrExprKind::Hole
+        | IrExprKind::Todo { .. }
+        | IrExprKind::Break
+        | IrExprKind::Continue
+        // Category 2: read operations (borrow from parent, no new alloc)
+        | IrExprKind::Member { .. }
+        | IrExprKind::TupleIndex { .. }
+        | IrExprKind::IndexAccess { .. }
+        | IrExprKind::MapAccess { .. }
+        | IrExprKind::UnOp { .. }
+        | IrExprKind::Deref { .. }
+        | IrExprKind::Borrow { .. }
+        // Lambdas / closures must NOT be lifted: they must stay in
+        // argument position so the WASM closure-table pre-scan and
+        // HOF emission can see them. (Regression guard for 5cae928d:
+        // deny-list inversion swept in Fn-typed exprs that were never
+        // lifted by the prior allow-list.)
+        | IrExprKind::Lambda { .. }
+        | IrExprKind::ClosureCreate { .. }
     )
 }
 
@@ -120,6 +154,59 @@ fn anf_expr(expr: &mut IrExpr, var_table: &mut VarTable, counter: &mut u32) {
             }
         }
         IrExprKind::Lambda { body, .. } => { anf_expr(body, var_table, counter); }
+
+        // Compound expressions with sub-expressions: recurse into children
+        IrExprKind::List { elements } | IrExprKind::Tuple { elements } | IrExprKind::Fan { exprs: elements } => {
+            for elem in elements.iter_mut() { anf_expr(elem, var_table, counter); }
+        }
+        IrExprKind::Record { fields, .. } => {
+            for (_, val) in fields.iter_mut() { anf_expr(val, var_table, counter); }
+        }
+        IrExprKind::SpreadRecord { base, fields } => {
+            anf_expr(base, var_table, counter);
+            for (_, val) in fields.iter_mut() { anf_expr(val, var_table, counter); }
+        }
+        IrExprKind::MapLiteral { entries } => {
+            for (k, v) in entries.iter_mut() {
+                anf_expr(k, var_table, counter);
+                anf_expr(v, var_table, counter);
+            }
+        }
+        IrExprKind::StringInterp { parts } => {
+            for part in parts.iter_mut() {
+                if let IrStringPart::Expr { expr: e } = part { anf_expr(e, var_table, counter); }
+            }
+        }
+        IrExprKind::OptionSome { expr: inner }
+        | IrExprKind::ResultOk { expr: inner }
+        | IrExprKind::ResultErr { expr: inner }
+        | IrExprKind::Unwrap { expr: inner }
+        | IrExprKind::Try { expr: inner }
+        | IrExprKind::ToOption { expr: inner }
+        | IrExprKind::Clone { expr: inner }
+        | IrExprKind::Deref { expr: inner }
+        | IrExprKind::ToVec { expr: inner }
+        | IrExprKind::BoxNew { expr: inner } => {
+            anf_expr(inner, var_table, counter);
+        }
+        IrExprKind::UnwrapOr { expr: inner, fallback } => {
+            anf_expr(inner, var_table, counter);
+            anf_expr(fallback, var_table, counter);
+        }
+        IrExprKind::Range { start, end, .. } => {
+            anf_expr(start, var_table, counter);
+            anf_expr(end, var_table, counter);
+        }
+        IrExprKind::Member { object, .. }
+        | IrExprKind::TupleIndex { object, .. }
+        | IrExprKind::OptionalChain { expr: object, .. } => {
+            anf_expr(object, var_table, counter);
+        }
+        IrExprKind::IndexAccess { object, index } | IrExprKind::MapAccess { object, key: index } => {
+            anf_expr(object, var_table, counter);
+            anf_expr(index, var_table, counter);
+        }
+
         _ => {
             // For Call, RuntimeCall, BinOp: lift heap sub-args
             anf_lift_children(expr, var_table, counter);
@@ -176,6 +263,10 @@ impl NanoPass for AnfPass {
     fn name(&self) -> &str { "ANF" }
     fn targets(&self) -> Option<Vec<Target>> { Some(vec![Target::Wasm]) }
 
+    fn postconditions(&self) -> Vec<Postcondition> {
+        vec![Postcondition::Custom(verify_anf_args_lifted)]
+    }
+
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         let mut counter = 0u32;
         for func in &mut program.functions {
@@ -189,4 +280,89 @@ impl NanoPass for AnfPass {
         }
         PassResult { program, changed: counter > 0 }
     }
+}
+
+// ── Postcondition: verify all heap-typed args are Var after ANF ──────
+
+fn expr_kind_name(kind: &IrExprKind) -> &'static str {
+    match kind {
+        IrExprKind::Var { .. } => "Var",
+        IrExprKind::LitInt { .. } => "LitInt",
+        IrExprKind::LitFloat { .. } => "LitFloat",
+        IrExprKind::LitBool { .. } => "LitBool",
+        IrExprKind::LitStr { .. } => "LitStr",
+        IrExprKind::Unit => "Unit",
+        IrExprKind::Call { .. } => "Call",
+        IrExprKind::RuntimeCall { .. } => "RuntimeCall",
+        IrExprKind::BinOp { .. } => "BinOp",
+        IrExprKind::UnOp { .. } => "UnOp",
+        IrExprKind::If { .. } => "If",
+        IrExprKind::Match { .. } => "Match",
+        IrExprKind::Block { .. } => "Block",
+        IrExprKind::Lambda { .. } => "Lambda",
+        IrExprKind::List { .. } => "List",
+        IrExprKind::Tuple { .. } => "Tuple",
+        IrExprKind::Record { .. } => "Record",
+        IrExprKind::MapLiteral { .. } => "MapLiteral",
+        IrExprKind::StringInterp { .. } => "StringInterp",
+        IrExprKind::ClosureCreate { .. } => "ClosureCreate",
+        IrExprKind::EnvLoad { .. } => "EnvLoad",
+        IrExprKind::Member { .. } => "Member",
+        IrExprKind::IndexAccess { .. } => "IndexAccess",
+        IrExprKind::OptionSome { .. } => "OptionSome",
+        IrExprKind::ResultOk { .. } => "ResultOk",
+        IrExprKind::ResultErr { .. } => "ResultErr",
+        IrExprKind::Fan { .. } => "Fan",
+        IrExprKind::ForIn { .. } => "ForIn",
+        IrExprKind::While { .. } => "While",
+        IrExprKind::Range { .. } => "Range",
+        _ => "Other",
+    }
+}
+
+fn verify_anf_args_lifted(program: &IrProgram) -> Vec<String> {
+    let mut violations = Vec::new();
+    struct Checker<'a> { violations: &'a mut Vec<String>, func_name: String }
+
+    impl<'a> IrVisitor for Checker<'a> {
+        fn visit_expr(&mut self, expr: &IrExpr) {
+            match &expr.kind {
+                IrExprKind::Call { args, .. } | IrExprKind::RuntimeCall { args, .. } => {
+                    for arg in args {
+                        if needs_lift(arg) {
+                            self.violations.push(format!(
+                                "[ANF] in {}: heap-typed call arg not lifted — kind={}, ty={:?}",
+                                self.func_name, expr_kind_name(&arg.kind), arg.ty,
+                            ));
+                        }
+                    }
+                }
+                IrExprKind::BinOp { left, right, .. } => {
+                    for arg in [left.as_ref(), right.as_ref()] {
+                        if needs_lift(arg) {
+                            self.violations.push(format!(
+                                "[ANF] in {}: heap-typed binop operand not lifted — kind={}, ty={:?}",
+                                self.func_name, expr_kind_name(&arg.kind), arg.ty,
+                            ));
+                        }
+                    }
+                }
+                _ => {}
+            }
+            walk_expr(self, expr);
+        }
+    }
+
+    for func in &program.functions {
+        if func.is_test { continue; }
+        let mut checker = Checker { violations: &mut violations, func_name: func.name.as_str().to_string() };
+        checker.visit_expr(&func.body);
+    }
+    for module in &program.modules {
+        for func in &module.functions {
+            let mut checker = Checker { violations: &mut violations, func_name: func.name.as_str().to_string() };
+            checker.visit_expr(&func.body);
+        }
+    }
+    violations
 }

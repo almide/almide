@@ -246,6 +246,13 @@ impl Pipeline {
         // `ALMIDE_VERIFY_IR` used to gate this — removed in S2 flip
         // (v0.14.7-phase3.2); `expr.ty` is now trustworthy by contract.
         let hard_fail = cfg!(debug_assertions);
+        // The inter-pass IR verifier + postcondition checks walk the entire
+        // (merged) program after EVERY pass. That's a developer safety net —
+        // it catches compiler bugs but does nothing for a correct build. In
+        // release it can't even fail hard, yet it dominates codegen time
+        // (~1.2s/file: 20 passes × verify(user + all merged stdlib functions)).
+        // Run it only in debug (cargo test / CI) or when explicitly requested.
+        let verify_ir = hard_fail || std::env::var_os("ALMIDE_VERIFY_IR").is_some();
 
         for pass in &self.passes {
             // Skip passes not relevant to this target
@@ -266,7 +273,12 @@ impl Pipeline {
             }
 
             let pass_name = pass.name();
+            let _pass_t = std::time::Instant::now();
             let result = pass.run(program, target);
+            if std::env::var_os("ALMIDE_PROFILE").is_some() {
+                let dt = _pass_t.elapsed().as_secs_f64();
+                if dt > 0.01 { eprintln!("[prof:pass] {:30} {:.3}s", pass_name, dt); }
+            }
             program = result.program;
 
             // IR dump (opt-in via ALMIDE_DUMP_IR=all or ALMIDE_DUMP_IR=pass1,pass2)
@@ -283,27 +295,29 @@ impl Pipeline {
                 eprintln!("── end {} ──\n", pass_name);
             }
 
-            // Inter-pass IR verification — always on.
-            let errors = almide_ir::verify_program(&program);
-            if !errors.is_empty() {
-                eprintln!("[IR CHECK] {} error(s) after pass '{}':", errors.len(), pass_name);
-                for e in &errors {
-                    eprintln!("  {}", e);
+            // Inter-pass IR verification (debug / opt-in only — see verify_ir).
+            if verify_ir {
+                let errors = almide_ir::verify_program(&program);
+                if !errors.is_empty() {
+                    eprintln!("[IR CHECK] {} error(s) after pass '{}':", errors.len(), pass_name);
+                    for e in &errors {
+                        eprintln!("  {}", e);
+                    }
+                    if hard_fail {
+                        panic!("IR verification failed after pass '{}'", pass_name);
+                    }
                 }
-                if hard_fail {
-                    panic!("IR verification failed after pass '{}'", pass_name);
-                }
-            }
 
-            // Postcondition verification — always on.
-            let postconds = pass.postconditions();
-            if !postconds.is_empty() {
-                let violations = verify_postconditions(pass_name, &program, &postconds);
-                for v in &violations {
-                    eprintln!("[POSTCONDITION VIOLATION] {}", v);
-                }
-                if !violations.is_empty() && hard_fail {
-                    panic!("Postcondition violation after pass '{}'", pass_name);
+                // Postcondition verification.
+                let postconds = pass.postconditions();
+                if !postconds.is_empty() {
+                    let violations = verify_postconditions(pass_name, &program, &postconds);
+                    for v in &violations {
+                        eprintln!("[POSTCONDITION VIOLATION] {}", v);
+                    }
+                    if !violations.is_empty() && hard_fail {
+                        panic!("Postcondition violation after pass '{}'", pass_name);
+                    }
                 }
             }
 

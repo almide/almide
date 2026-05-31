@@ -56,6 +56,11 @@ pub fn cmd_build(file: &str, output: Option<&str>, target: Option<&str>, release
         let project_dir = std::env::temp_dir().join("almide-build-cdylib");
         // Strip fn main() from the code — cdylib has no entry point
         let lib_code = rs_code.replace("fn main()", "fn __almide_unused_main()");
+        // Serialize across processes: the shared scratch dir's src + target
+        // would otherwise be corrupted by a concurrent `almide build`.
+        let _ = std::fs::create_dir_all(&project_dir);
+        let _flock = super::run::BuildDirLock::acquire(&project_dir)
+            .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
         match super::cargo_build_cdylib(&lib_code, &project_dir, &output, use_release) {
             Ok(lib_path) => {
                 eprintln!("Built {}", lib_path.display());
@@ -89,6 +94,13 @@ pub fn cmd_build(file: &str, output: Option<&str>, target: Option<&str>, release
         .unwrap_or_else(|| std::path::PathBuf::from("."));
     let has_deps = parsed.as_ref().map_or(false, |p| !p.dependencies.is_empty());
     let source_root = if !native_deps.is_empty() || has_deps { Some(toml_dir.as_path()) } else { None };
+    // Serialize across processes: the shared scratch dir's src + target would
+    // otherwise be corrupted by a concurrent `almide build`. Held through the
+    // copy-out below so the generated binary can't be overwritten between
+    // build and copy.
+    let _ = std::fs::create_dir_all(&project_dir);
+    let _flock = super::run::BuildDirLock::acquire(&project_dir)
+        .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
     match super::cargo_build_generated_with_native(&rs_code, &project_dir, use_release, native_deps, source_root) {
         Ok(bin_path) => {
             // Copy the built binary to the desired output location

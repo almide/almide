@@ -238,6 +238,11 @@ mod proptest_lean_rust {
         prop_oneof![
             Just(Ty::String),
             Just(Ty::Unknown),
+            Just(Ty::Applied(
+                almide_lang::types::constructor::TypeConstructorId::List, vec![Ty::Int],
+            )),
+            Just(Ty::Record { fields: vec![(almide_base::intern::sym("x"), Ty::Int)] }),
+            Just(Ty::Fn { params: vec![Ty::Int], ret: Box::new(Ty::Int) }),
         ]
     }
 
@@ -260,16 +265,36 @@ mod proptest_lean_rust {
 
     fn arb_stmt() -> impl Strategy<Value = IrStmt> {
         prop_oneof![
+            // RcInc
             arb_var_id().prop_map(|v| IrStmt {
                 kind: IrStmtKind::RcInc { var: v }, span: None,
             }),
+            // RcDec
             arb_var_id().prop_map(|v| IrStmt {
                 kind: IrStmtKind::RcDec { var: v }, span: None,
             }),
+            // Bind (immutable)
             (arb_var_id(), arb_ty()).prop_map(|(v, ty)| IrStmt {
                 kind: IrStmtKind::Bind {
                     var: v, ty: ty.clone(),
                     mutability: almide_ir::Mutability::Let,
+                    value: dummy_expr(ty),
+                },
+                span: None,
+            }),
+            // Bind (mutable)
+            (arb_var_id(), arb_heap_ty()).prop_map(|(v, ty)| IrStmt {
+                kind: IrStmtKind::Bind {
+                    var: v, ty: ty.clone(),
+                    mutability: almide_ir::Mutability::Var,
+                    value: dummy_expr(ty),
+                },
+                span: None,
+            }),
+            // Assign (mutable reassignment)
+            (arb_var_id(), arb_heap_ty()).prop_map(|(v, ty)| IrStmt {
+                kind: IrStmtKind::Assign {
+                    var: v,
                     value: dummy_expr(ty),
                 },
                 span: None,
@@ -511,6 +536,77 @@ mod proptest_lean_rust {
             shuffled.reverse();
             prop_assert_eq!(count_decs(&stmts, var), count_decs(&shuffled, var));
             prop_assert_eq!(count_incs(&stmts, var), count_incs(&shuffled, var));
+        }
+    }
+
+    // ── Assign does not change Inc/Dec counts ──
+    // Assign is a value overwrite, not an Inc/Dec operation.
+    proptest! {
+        #[test]
+        fn assign_does_not_affect_counts(stmts in arb_stmts(), var in arb_var_id(), ty in arb_heap_ty()) {
+            let decs_before = count_decs(&stmts, var);
+            let incs_before = count_incs(&stmts, var);
+            let mut with_assign = stmts;
+            with_assign.push(IrStmt {
+                kind: IrStmtKind::Assign { var, value: dummy_expr(ty) },
+                span: None,
+            });
+            prop_assert_eq!(count_decs(&with_assign, var), decs_before);
+            prop_assert_eq!(count_incs(&with_assign, var), incs_before);
+        }
+    }
+
+    // ── Applied/Record/Fn types are heap ──
+    proptest! {
+        #[test]
+        fn applied_record_fn_are_heap(ty in arb_heap_ty()) {
+            prop_assert!(is_heap_type(&ty), "{:?} must be heap", ty);
+        }
+    }
+
+    // ── Mutable var: Bind(var) + Assign(var) + 2*Dec = 2 decs ──
+    // Models: allocate, reassign, free both old and new values.
+    proptest! {
+        #[test]
+        fn mutable_reassign_two_decs(var in arb_var_id()) {
+            let stmts = vec![
+                IrStmt {
+                    kind: IrStmtKind::Bind {
+                        var, ty: Ty::String,
+                        mutability: almide_ir::Mutability::Var,
+                        value: dummy_expr(Ty::String),
+                    },
+                    span: None,
+                },
+                IrStmt { kind: IrStmtKind::RcDec { var }, span: None },
+                IrStmt {
+                    kind: IrStmtKind::Assign { var, value: dummy_expr(Ty::String) },
+                    span: None,
+                },
+                IrStmt { kind: IrStmtKind::RcDec { var }, span: None },
+            ];
+            prop_assert_eq!(count_decs(&stmts, var), 2);
+            prop_assert_eq!(count_incs(&stmts, var), 0);
+        }
+
+        #[test]
+        fn mutable_triple_reassign(var in arb_var_id()) {
+            let stmts = vec![
+                IrStmt {
+                    kind: IrStmtKind::Bind {
+                        var, ty: Ty::String,
+                        mutability: almide_ir::Mutability::Var,
+                        value: dummy_expr(Ty::String),
+                    },
+                    span: None,
+                },
+                IrStmt { kind: IrStmtKind::RcDec { var }, span: None },
+                IrStmt { kind: IrStmtKind::Assign { var, value: dummy_expr(Ty::String) }, span: None },
+                IrStmt { kind: IrStmtKind::RcDec { var }, span: None },
+                IrStmt { kind: IrStmtKind::Assign { var, value: dummy_expr(Ty::String) }, span: None },
+                IrStmt { kind: IrStmtKind::RcDec { var }, span: None },
+            ];
+            prop_assert_eq!(count_decs(&stmts, var), 3, "3 allocations need 3 decs");
         }
     }
 

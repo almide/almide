@@ -83,6 +83,28 @@ pub struct CodegenOptions {
     pub repr_c: bool,
 }
 
+/// Marker the Rust emitter inserts between the inlined runtime preamble and the
+/// user code. The rlib fast path splits generated source here: everything before
+/// is the runtime (provided instead by the precompiled `almide_rt` rlib), and
+/// everything after — the user code — is wrapped into a slim main that links it.
+pub const RT_BOUNDARY_MARKER: &str = "//__ALMIDE_RT_BOUNDARY__";
+
+/// Rebuild full generated Rust source into a slim main that links the `almide_rt`
+/// rlib instead of inlining the runtime. Splits on [`RT_BOUNDARY_MARKER`]: the
+/// user code (after the marker) is prefixed with the crate attrs, std imports, and
+/// `extern crate almide_rt`. Returns `None` if the marker is absent (e.g. the
+/// source predates this emitter or isn't a Rust target) so callers fall back.
+pub fn slim_main_with_external_runtime(full_rs: &str) -> Option<String> {
+    let idx = full_rs.find(RT_BOUNDARY_MARKER)?;
+    let user_code = full_rs[idx + RT_BOUNDARY_MARKER.len()..].trim_start_matches('\n');
+    let mut out = String::new();
+    out.push_str("#![allow(unused_parens, unused_variables, dead_code, unused_imports, unused_mut, unused_must_use)]\n\n");
+    out.push_str("use std::collections::HashMap;\nuse std::collections::HashSet;\n");
+    out.push_str("#[macro_use] extern crate almide_rt;\nuse almide_rt::*;\n\n");
+    out.push_str(user_code);
+    Some(out)
+}
+
 /// Strip `mod tests { ... }` blocks from runtime source (avoid conflicts with user tests)
 fn strip_test_blocks(src: &str) -> String {
     let mut out = String::new();
@@ -148,11 +170,15 @@ impl<'a> Verified<'a> {
 
 pub fn codegen_with(program: &mut IrProgram, target: Target, options: &CodegenOptions) -> CodegenOutput {
     let config = target::configure(target);
+    let prof = std::env::var_os("ALMIDE_PROFILE").is_some();
+    let pt = std::time::Instant::now();
 
     // Layer 2: Run Nanopass pipeline (semantic rewrites — takes ownership, returns modified)
     let owned = std::mem::take(program);
     let transformed = config.pipeline.run(owned, target);
     *program = transformed;
+    if prof { eprintln!("[prof:codegen] pipeline={:.3}s", pt.elapsed().as_secs_f64()); }
+    let et = std::time::Instant::now();
 
     // Layer 3: Target-specific emit
     match target {
@@ -160,13 +186,187 @@ pub fn codegen_with(program: &mut IrProgram, target: Target, options: &CodegenOp
             // AlmidePerceusBelt: Verified::verify() runs Lean 4-certified
             // RC balance check. Only verified programs can reach WASM emit.
             let verified = Verified::verify(program);
-            CodegenOutput::Binary(emit_wasm::emit_verified(verified))
+            let out = emit_wasm::emit_verified(verified);
+            if prof { eprintln!("[prof:codegen] wasm_emit={:.3}s", et.elapsed().as_secs_f64()); }
+            CodegenOutput::Binary(out)
         }
         Target::Wgsl => CodegenOutput::Source(emit_wgsl::emit(program)),
         _ => CodegenOutput::Source(emit_source(program, target, &config, options)),
     }
 }
 
+
+/// The fixed runtime prelude: AlmideConcat trait + impls, the almide_eq!/almide_ne!
+/// macros, and the RcCow<T> COW value type with its impls.
+///
+/// `for_crate` toggles between two emission modes:
+/// - `false` (inline): private items, plain `macro_rules!` — one self-contained main.rs.
+/// - `true` (rlib): `pub` items + `#[macro_export]` so a slim user main can link this
+///   as the `almide_rt` crate (`use almide_rt::*` + `#[macro_use] extern crate`).
+fn rust_runtime_prelude(for_crate: bool) -> String {
+    let vis = if for_crate { "pub " } else { "" };
+    let macro_attr = if for_crate { "#[macro_export]\n" } else { "" };
+    let mut s = String::new();
+    s.push_str(&format!("{vis}trait AlmideConcat<Rhs> {{ type Output; fn concat(self, rhs: Rhs) -> Self::Output; }}\n"));
+    s.push_str("impl AlmideConcat<String> for String { type Output = String; #[inline(always)] fn concat(self, rhs: String) -> String { format!(\"{}{}\", self, rhs) } }\n");
+    s.push_str("impl AlmideConcat<&str> for String { type Output = String; #[inline(always)] fn concat(self, rhs: &str) -> String { format!(\"{}{}\", self, rhs) } }\n");
+    s.push_str("impl AlmideConcat<String> for &str { type Output = String; #[inline(always)] fn concat(self, rhs: String) -> String { format!(\"{}{}\", self, rhs) } }\n");
+    s.push_str("impl AlmideConcat<&str> for &str { type Output = String; #[inline(always)] fn concat(self, rhs: &str) -> String { format!(\"{}{}\", self, rhs) } }\n");
+    s.push_str("impl<T: Clone> AlmideConcat<Vec<T>> for Vec<T> { type Output = Vec<T>; #[inline(always)] fn concat(self, rhs: Vec<T>) -> Vec<T> { let mut r = self; r.extend(rhs); r } }\n");
+    s.push_str(&format!("{macro_attr}macro_rules! almide_eq {{ ($a:expr, $b:expr) => {{ ($a) == ($b) }}; }}\n"));
+    s.push_str(&format!("{macro_attr}macro_rules! almide_ne {{ ($a:expr, $b:expr) => {{ ($a) != ($b) }}; }}\n"));
+    // RcCow<T>: COW value type. Clone = Rc::clone (O(1)), mutation = Rc::make_mut (COW).
+    // Inspired by Swift's value type semantics.
+    s.push_str(&format!("{vis}struct RcCow<T>({vis}std::rc::Rc<T>);\n"));
+    s.push_str("impl<T: std::fmt::Debug> std::fmt::Debug for RcCow<T> { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { self.0.fmt(f) } }\n");
+    s.push_str("impl<T: Clone> Clone for RcCow<T> { fn clone(&self) -> Self { RcCow(std::rc::Rc::clone(&self.0)) } }\n");
+    s.push_str("impl<T: PartialEq> PartialEq for RcCow<T> { fn eq(&self, other: &Self) -> bool { *self.0 == *other.0 } }\n");
+    s.push_str("impl<T: PartialEq> PartialEq<T> for RcCow<T> { fn eq(&self, other: &T) -> bool { *self.0 == *other } }\n");
+    s.push_str("impl PartialEq<&str> for RcCow<String> { fn eq(&self, other: &&str) -> bool { self.0.as_str() == *other } }\n");
+    s.push_str("impl<T> std::ops::Deref for RcCow<T> { type Target = T; fn deref(&self) -> &T { &self.0 } }\n");
+    s.push_str("impl<T: Clone> std::ops::DerefMut for RcCow<T> { fn deref_mut(&mut self) -> &mut T { std::rc::Rc::make_mut(&mut self.0) } }\n");
+    s.push_str(&format!("impl<T> RcCow<T> {{ {vis}fn new(v: T) -> Self {{ RcCow(std::rc::Rc::new(v)) }} {vis}fn make_mut(&mut self) -> &mut T where T: Clone {{ std::rc::Rc::make_mut(&mut self.0) }} {vis}fn into_inner(self) -> T where T: Clone {{ std::rc::Rc::try_unwrap(self.0).unwrap_or_else(|rc| (*rc).clone()) }} }}\n"));
+    s.push_str("impl<T> From<T> for RcCow<T> { fn from(v: T) -> Self { RcCow::new(v) } }\n");
+    s.push_str("impl<T: std::fmt::Display> std::fmt::Display for RcCow<T> { fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result { self.0.fmt(f) } }\n");
+    s.push_str("impl<T: std::hash::Hash> std::hash::Hash for RcCow<T> { fn hash<H: std::hash::Hasher>(&self, state: &mut H) { self.0.hash(state) } }\n");
+    // Blanket AlmideConcat: RcCow<T> + Rhs and RcCow<T> + Val<U> — 2 impls cover all combos.
+    s.push_str("impl<T: Clone, Rhs> AlmideConcat<Rhs> for RcCow<T> where T: AlmideConcat<Rhs> { type Output = RcCow<<T as AlmideConcat<Rhs>>::Output>; #[inline(always)] fn concat(self, rhs: Rhs) -> Self::Output { RcCow::new((*self).clone().concat(rhs)) } }\n");
+    s
+}
+
+/// Resolve inter-module runtime dependencies into `needed` (auto-extracted from
+/// source by build.rs — no manual whitelist). Fixpoint over RUNTIME_DEPS.
+fn resolve_runtime_deps(needed: &mut std::collections::HashSet<&str>) {
+    let mut added = true;
+    while added {
+        added = false;
+        for (module, deps) in crate::generated::rust_runtime::RUNTIME_DEPS {
+            if needed.contains(module) {
+                for dep in *deps {
+                    if needed.insert(dep) { added = true; }
+                }
+            }
+        }
+    }
+}
+
+/// Collect the runtime module bodies for the `needed` set: hoist top-level `use`
+/// to the front, deduplicate, and skip struct definitions the walker already
+/// emitted (present in `user_code`) to avoid E0428. Returns the assembled block.
+fn rust_runtime_modules(needed: &std::collections::HashSet<&str>, user_code: &str) -> String {
+    let mut use_set = std::collections::HashSet::new();
+    let mut use_lines = Vec::new();
+    let mut body_lines = Vec::new();
+    for (name, source) in crate::generated::rust_runtime::RUST_RUNTIME_MODULES {
+        if needed.contains(name) {
+            let stripped = strip_test_blocks(source);
+            let lines: Vec<&str> = stripped.lines().collect();
+            let mut i = 0;
+            while i < lines.len() {
+                let line = lines[i];
+                let trimmed = line.trim();
+                // Top-level use: not indented and starts with "use "
+                if !line.starts_with(' ') && !line.starts_with('\t')
+                    && trimmed.starts_with("use ") && trimmed.ends_with(';')
+                {
+                    if use_set.insert(trimmed.to_string()) {
+                        use_lines.push(trimmed.to_string());
+                    }
+                    i += 1;
+                    continue;
+                }
+                // Detect struct definitions: #[derive(...)] followed by pub struct Name
+                // Skip the block if user_code already contains that struct (walker emitted it).
+                if trimmed.starts_with("#[derive(") {
+                    if let Some(next) = lines.get(i + 1) {
+                        if let Some(struct_name) = next.trim().strip_prefix("pub struct ")
+                            .and_then(|s| s.split_whitespace().next())
+                            .map(|s| s.trim_end_matches('{').trim())
+                        {
+                            let needle = format!("struct {}", struct_name);
+                            if user_code.contains(&needle) {
+                                // Skip derive + struct + fields + closing brace
+                                i += 1; // skip #[derive]
+                                let mut depth = 0u32;
+                                while i < lines.len() {
+                                    if lines[i].contains('{') { depth += 1; }
+                                    if lines[i].contains('}') {
+                                        depth = depth.saturating_sub(1);
+                                        if depth == 0 { i += 1; break; }
+                                    }
+                                    i += 1;
+                                }
+                                continue;
+                            }
+                        }
+                    }
+                }
+                body_lines.push(line.to_string());
+                i += 1;
+            }
+            body_lines.push(String::new());
+        }
+    }
+    // Remove single-item `use a::b::X;` when a group `use a::b::{..., X, ...};` exists
+    let use_lines: Vec<String> = use_lines.into_iter().filter(|line| {
+        // Parse: use path::Item;
+        if let Some(rest) = line.strip_prefix("use ").and_then(|s| s.strip_suffix(';')) {
+            if !rest.contains('{') {
+                if let Some(pos) = rest.rfind("::") {
+                    let prefix = &rest[..pos];
+                    let item = &rest[pos + 2..];
+                    // Check if any group import covers this item
+                    let dominated = use_set.iter().any(|other| {
+                        if let Some(orest) = other.strip_prefix("use ").and_then(|s| s.strip_suffix(';')) {
+                            if let Some(opos) = orest.find("::{") {
+                                let oprefix = &orest[..opos];
+                                if oprefix == prefix {
+                                    let items_str = &orest[opos + 3..orest.len() - 1]; // strip ::{ and }
+                                    return items_str.split(',').any(|i| i.trim() == item);
+                                }
+                            }
+                        }
+                        false
+                    });
+                    if dominated { return false; }
+                }
+            }
+        }
+        true
+    }).collect();
+    let mut out = String::new();
+    for u in &use_lines { out.push_str(u); out.push('\n'); }
+    for line in &body_lines { out.push_str(line); out.push('\n'); }
+    out
+}
+
+/// Runtime modules that cannot live in the bare-rustc `almide_rt` rlib: `http`
+/// needs rustls, `zlib` needs flate2, and `sse` calls into `http` for its
+/// streaming transport. Programs using these stay on the cargo path; the rlib
+/// fast path only covers std-only programs (a link error otherwise falls back).
+pub const NON_STD_RUNTIME_MODULES: &[&str] = &["http", "zlib", "sse"];
+
+/// Emit the full `almide_rt` runtime crate source: the prelude (pub items +
+/// exported macros) plus every std-only runtime module. Built once into an
+/// `.rlib` and linked by slim user mains (see `CodegenOptions::external_runtime`).
+///
+/// Deterministic — depends only on the embedded runtime sources and the compiler
+/// version, so callers can cache the resulting rlib keyed by a hash of this output.
+pub fn emit_runtime_crate() -> String {
+    let mut out = String::new();
+    out.push_str("#![allow(unused_parens, unused_variables, dead_code, unused_imports, unused_mut, unused_must_use, non_snake_case)]\n\n");
+    out.push_str("use std::collections::HashMap;\nuse std::collections::HashSet;\n\n");
+    out.push_str(&rust_runtime_prelude(true));
+    // Every std-only runtime module (exclude external-dep modules).
+    let mut needed: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    for (name, _) in crate::generated::rust_runtime::RUST_RUNTIME_MODULES {
+        if !NON_STD_RUNTIME_MODULES.contains(name) {
+            needed.insert(*name);
+        }
+    }
+    out.push_str(&rust_runtime_modules(&needed, ""));
+    out
+}
 
 /// Emit source code for text targets (Rust, TypeScript, JavaScript).
 fn emit_source(program: &mut IrProgram, target: Target, config: &target::TargetConfig, options: &CodegenOptions) -> String {
@@ -184,135 +384,21 @@ fn emit_source(program: &mut IrProgram, target: Target, config: &target::TargetC
         Target::Rust => {
             output.push_str("#![allow(unused_parens, unused_variables, dead_code, unused_imports, unused_mut, unused_must_use)]\n\n");
             output.push_str("use std::collections::HashMap;\nuse std::collections::HashSet;\n\n");
-            output.push_str("trait AlmideConcat<Rhs> { type Output; fn concat(self, rhs: Rhs) -> Self::Output; }\n");
-            output.push_str("impl AlmideConcat<String> for String { type Output = String; #[inline(always)] fn concat(self, rhs: String) -> String { format!(\"{}{}\", self, rhs) } }\n");
-            output.push_str("impl AlmideConcat<&str> for String { type Output = String; #[inline(always)] fn concat(self, rhs: &str) -> String { format!(\"{}{}\", self, rhs) } }\n");
-            output.push_str("impl AlmideConcat<String> for &str { type Output = String; #[inline(always)] fn concat(self, rhs: String) -> String { format!(\"{}{}\", self, rhs) } }\n");
-            output.push_str("impl AlmideConcat<&str> for &str { type Output = String; #[inline(always)] fn concat(self, rhs: &str) -> String { format!(\"{}{}\", self, rhs) } }\n");
-            output.push_str("impl<T: Clone> AlmideConcat<Vec<T>> for Vec<T> { type Output = Vec<T>; #[inline(always)] fn concat(self, rhs: Vec<T>) -> Vec<T> { let mut r = self; r.extend(rhs); r } }\n");
-            output.push_str("macro_rules! almide_eq { ($a:expr, $b:expr) => { ($a) == ($b) }; }\n");
-            output.push_str("macro_rules! almide_ne { ($a:expr, $b:expr) => { ($a) != ($b) }; }\n");
-            // RcCow<T>: COW value type. Clone = Rc::clone (O(1)), mutation = Rc::make_mut (COW).
-            // Inspired by Swift's value type semantics.
-            output.push_str("struct RcCow<T>(std::rc::Rc<T>);\n");
-            output.push_str("impl<T: std::fmt::Debug> std::fmt::Debug for RcCow<T> { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { self.0.fmt(f) } }\n");
-            output.push_str("impl<T: Clone> Clone for RcCow<T> { fn clone(&self) -> Self { RcCow(std::rc::Rc::clone(&self.0)) } }\n");
-            output.push_str("impl<T: PartialEq> PartialEq for RcCow<T> { fn eq(&self, other: &Self) -> bool { *self.0 == *other.0 } }\n");
-            output.push_str("impl<T: PartialEq> PartialEq<T> for RcCow<T> { fn eq(&self, other: &T) -> bool { *self.0 == *other } }\n");
-            output.push_str("impl PartialEq<&str> for RcCow<String> { fn eq(&self, other: &&str) -> bool { self.0.as_str() == *other } }\n");
-            output.push_str("impl<T> std::ops::Deref for RcCow<T> { type Target = T; fn deref(&self) -> &T { &self.0 } }\n");
-            output.push_str("impl<T: Clone> std::ops::DerefMut for RcCow<T> { fn deref_mut(&mut self) -> &mut T { std::rc::Rc::make_mut(&mut self.0) } }\n");
-            output.push_str("impl<T> RcCow<T> { fn new(v: T) -> Self { RcCow(std::rc::Rc::new(v)) } fn make_mut(&mut self) -> &mut T where T: Clone { std::rc::Rc::make_mut(&mut self.0) } fn into_inner(self) -> T where T: Clone { std::rc::Rc::try_unwrap(self.0).unwrap_or_else(|rc| (*rc).clone()) } }\n");
-            output.push_str("impl<T> From<T> for RcCow<T> { fn from(v: T) -> Self { RcCow::new(v) } }\n");
-            output.push_str("impl<T: std::fmt::Display> std::fmt::Display for RcCow<T> { fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result { self.0.fmt(f) } }\n");
-            output.push_str("impl<T: std::hash::Hash> std::hash::Hash for RcCow<T> { fn hash<H: std::hash::Hasher>(&self, state: &mut H) { self.0.hash(state) } }\n");
-            // Blanket AlmideConcat: RcCow<T> + Rhs and RcCow<T> + Val<U> — 2 impls cover all combos.
-            output.push_str("impl<T: Clone, Rhs> AlmideConcat<Rhs> for RcCow<T> where T: AlmideConcat<Rhs> { type Output = RcCow<<T as AlmideConcat<Rhs>>::Output>; #[inline(always)] fn concat(self, rhs: Rhs) -> Self::Output { RcCow::new((*self).clone().concat(rhs)) } }\n");
-            // Include runtime modules referenced in the IR.
-            // The IrProgram tracks which stdlib modules are used across
-            // all functions and transitive dependencies — no text search.
+            output.push_str(&rust_runtime_prelude(false));
+            // Include runtime modules referenced in the IR. The IrProgram tracks
+            // which stdlib modules are used across all functions and transitive
+            // dependencies — no text search.
             let mut needed: std::collections::HashSet<&str> = std::collections::HashSet::new();
             for m in &program.used_stdlib_modules {
                 needed.insert(m.as_str());
             }
-            // Resolve inter-module runtime dependencies (auto-extracted
-            // from source by build.rs — no manual whitelist).
-            let mut added = true;
-            while added {
-                added = false;
-                for (module, deps) in crate::generated::rust_runtime::RUNTIME_DEPS {
-                    if needed.contains(module) {
-                        for dep in *deps {
-                            if needed.insert(dep) { added = true; }
-                        }
-                    }
-                }
-            }
-            // Collect runtime modules, hoist top-level `use` to front and deduplicate.
-            // Struct definitions in runtime sources that the walker already emitted
-            // (from stdlib/*.almd type declarations) are skipped to avoid E0428.
-            let mut use_set = std::collections::HashSet::new();
-            let mut use_lines = Vec::new();
-            let mut body_lines = Vec::new();
-            for (name, source) in crate::generated::rust_runtime::RUST_RUNTIME_MODULES {
-                if needed.contains(name) {
-                    let stripped = strip_test_blocks(source);
-                    let lines: Vec<&str> = stripped.lines().collect();
-                    let mut i = 0;
-                    while i < lines.len() {
-                        let line = lines[i];
-                        let trimmed = line.trim();
-                        // Top-level use: not indented and starts with "use "
-                        if !line.starts_with(' ') && !line.starts_with('\t')
-                            && trimmed.starts_with("use ") && trimmed.ends_with(';')
-                        {
-                            if use_set.insert(trimmed.to_string()) {
-                                use_lines.push(trimmed.to_string());
-                            }
-                            i += 1;
-                            continue;
-                        }
-                        // Detect struct definitions: #[derive(...)] followed by pub struct Name
-                        // Skip the block if user_code already contains that struct (walker emitted it).
-                        if trimmed.starts_with("#[derive(") {
-                            if let Some(next) = lines.get(i + 1) {
-                                if let Some(struct_name) = next.trim().strip_prefix("pub struct ")
-                                    .and_then(|s| s.split_whitespace().next())
-                                    .map(|s| s.trim_end_matches('{').trim())
-                                {
-                                    let needle = format!("struct {}", struct_name);
-                                    if user_code.contains(&needle) {
-                                        // Skip derive + struct + fields + closing brace
-                                        i += 1; // skip #[derive]
-                                        let mut depth = 0u32;
-                                        while i < lines.len() {
-                                            if lines[i].contains('{') { depth += 1; }
-                                            if lines[i].contains('}') {
-                                                depth = depth.saturating_sub(1);
-                                                if depth == 0 { i += 1; break; }
-                                            }
-                                            i += 1;
-                                        }
-                                        continue;
-                                    }
-                                }
-                            }
-                        }
-                        body_lines.push(line.to_string());
-                        i += 1;
-                    }
-                    body_lines.push(String::new());
-                }
-            }
-            // Remove single-item `use a::b::X;` when a group `use a::b::{..., X, ...};` exists
-            let use_lines: Vec<String> = use_lines.into_iter().filter(|line| {
-                // Parse: use path::Item;
-                if let Some(rest) = line.strip_prefix("use ").and_then(|s| s.strip_suffix(';')) {
-                    if !rest.contains('{') {
-                        if let Some(pos) = rest.rfind("::") {
-                            let prefix = &rest[..pos];
-                            let item = &rest[pos + 2..];
-                            // Check if any group import covers this item
-                            let dominated = use_set.iter().any(|other| {
-                                if let Some(orest) = other.strip_prefix("use ").and_then(|s| s.strip_suffix(';')) {
-                                    if let Some(opos) = orest.find("::{") {
-                                        let oprefix = &orest[..opos];
-                                        if oprefix == prefix {
-                                            let items_str = &orest[opos + 3..orest.len() - 1]; // strip ::{ and }
-                                            return items_str.split(',').any(|i| i.trim() == item);
-                                        }
-                                    }
-                                }
-                                false
-                            });
-                            if dominated { return false; }
-                        }
-                    }
-                }
-                true
-            }).collect();
-            for u in &use_lines { output.push_str(u); output.push('\n'); }
-            for line in &body_lines { output.push_str(line); output.push('\n'); }
+            resolve_runtime_deps(&mut needed);
+            output.push_str(&rust_runtime_modules(&needed, &user_code));
+            // Boundary marker: everything above is the inlined runtime preamble,
+            // everything below is user code. The rlib fast path (see CLI) splits
+            // here to swap the preamble for `extern crate almide_rt`.
+            output.push_str(RT_BOUNDARY_MARKER);
+            output.push('\n');
         }
         _ => {}
     }

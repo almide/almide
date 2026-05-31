@@ -397,7 +397,17 @@ fn strip_heredoc_indent(raw: &str) -> String {
         .unwrap_or(0);
 
     content.iter()
-        .map(|l| if l.len() >= indent { &l[indent..] } else { "" })
+        .map(|l| {
+            // `indent` is a byte length of leading whitespace measured over the
+            // non-blank lines. A whitespace-only line (excluded from that min)
+            // may hold multi-byte Unicode whitespace such as U+3000, so clamp
+            // the cut down to a char boundary — slicing mid-codepoint panics.
+            let mut cut = indent.min(l.len());
+            while cut > 0 && !l.is_char_boundary(cut) {
+                cut -= 1;
+            }
+            &l[cut..]
+        })
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -565,4 +575,35 @@ fn lex_operator(chars: &[char], pos: usize, line: usize, col: usize) -> (Token, 
 
 fn peek(chars: &[char], pos: usize) -> Option<char> {
     chars.get(pos).copied()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Regression: a heredoc whose blank line holds multi-byte Unicode whitespace
+    // (U+3000) used to panic in strip_heredoc_indent — the byte-offset dedent
+    // sliced mid-codepoint. The lexer must never crash (almide-syntax contract).
+    #[test]
+    fn heredoc_multibyte_whitespace_line_does_not_panic() {
+        let src = "let x = \"\"\"\n a\n\u{3000}\n  \"\"\"\n";
+        let tokens = Lexer::tokenize(src);
+        let s = tokens
+            .iter()
+            .find(|t| t.token_type == TokenType::String)
+            .expect("heredoc should lex to a String token");
+        // " a" dedents to "a"; the U+3000-only line is preserved (not split).
+        assert_eq!(s.value, "a\n\u{3000}");
+    }
+
+    #[test]
+    fn heredoc_ascii_dedent_still_works() {
+        let src = "let x = \"\"\"\n    one\n    two\n    \"\"\"\n";
+        let tokens = Lexer::tokenize(src);
+        let s = tokens
+            .iter()
+            .find(|t| t.token_type == TokenType::String)
+            .expect("heredoc should lex to a String token");
+        assert_eq!(s.value, "one\ntwo");
+    }
 }

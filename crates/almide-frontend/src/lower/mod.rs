@@ -792,61 +792,23 @@ fn rewrite_calls_in_expr(expr: &mut ast::Expr, path: &[Sym], override_name: &str
 }
 
 fn lower_where_bind(ctx: &mut LowerCtx, bind_name: &Sym, value: &ast::Expr) -> IrStmt {
-    let mut ir_val = lower_expr(ctx, value);
-    // Patch lambda params from checker's inferred Fn type
-    patch_lambda_params_from_checker(ctx, &mut ir_val, bind_name);
+    // The checker pins this binding's lambda param types during inference
+    // (`unify_where_override_with_fn_sig` in check/mod.rs), so `lower_expr`
+    // reads correct types straight from the TypeMap — no lowering-side patch.
+    let ir_val = lower_expr(ctx, value);
     let ty = ir_val.ty.clone();
     let var = ctx.define_var(bind_name.as_str(), ty.clone(), Mutability::Let, None);
     IrStmt { kind: IrStmtKind::Bind { var, mutability: Mutability::Let, ty, value: ir_val }, span: None }
 }
 
-/// If ir_val is a Lambda with Unknown params, try to resolve from checker's env.
-fn patch_lambda_params_from_checker(ctx: &mut LowerCtx, ir_val: &mut IrExpr, bind_name: &Sym) {
-    let IrExprKind::Lambda { params: ir_params, body, .. } = &mut ir_val.kind else { return };
-    if !ir_params.iter().any(|(_, ty)| matches!(ty, Ty::Unknown)) { return; }
-    // Check if checker stored a Fn type for this binding
-    let fn_ty = ctx.env.lookup_var(bind_name.as_str()).cloned();
-    let Some(Ty::Fn { params: sig_tys, ret }) = fn_ty else { return };
-    for (i, (var_id, var_ty)) in ir_params.iter_mut().enumerate() {
-        if let Some(concrete) = sig_tys.get(i) {
-            if !matches!(concrete, Ty::Unknown) && !matches!(concrete, Ty::TypeVar(_)) {
-                *var_ty = concrete.clone();
-                ctx.var_table.entries[var_id.0 as usize].ty = concrete.clone();
-            }
-        }
-    }
-    if matches!(body.ty, Ty::Unknown) && !matches!(*ret, Ty::Unknown) {
-        body.ty = *ret.clone();
-    }
-    ir_val.ty = Ty::Fn { params: sig_tys, ret };
-}
-
 fn lower_where_override(ctx: &mut LowerCtx, path: &[Sym], value: &ast::Expr, stmts: &mut Vec<IrStmt>, overrides: &mut Vec<(Vec<Sym>, String)>) {
+    // Param types already resolved by the checker (see lower_where_bind).
     let override_name = where_override_name(path);
-    let mut ir_val = lower_expr(ctx, value);
-    patch_lambda_from_fn_sig(ctx, &mut ir_val, path);
+    let ir_val = lower_expr(ctx, value);
     let ty = ir_val.ty.clone();
     let var = ctx.define_var(&override_name, ty.clone(), Mutability::Let, None);
     stmts.push(IrStmt { kind: IrStmtKind::Bind { var, mutability: Mutability::Let, ty, value: ir_val }, span: None });
     overrides.push((path.to_vec(), override_name));
-}
-
-fn patch_lambda_from_fn_sig(ctx: &mut LowerCtx, ir_val: &mut IrExpr, path: &[Sym]) {
-    let IrExprKind::Lambda { params: ir_params, body, .. } = &mut ir_val.kind else { return };
-    if !ir_params.iter().any(|(_, ty)| matches!(ty, Ty::Unknown)) { return; }
-    let Some(Ty::Fn { params: sig_tys, ret }) = resolve_target_fn_type(ctx, path) else { return };
-    let erased: Vec<Ty> = sig_tys.iter().map(erase_typevars).collect();
-    for (i, (var_id, var_ty)) in ir_params.iter_mut().enumerate() {
-        if let Some(concrete) = erased.get(i) {
-            if !matches!(concrete, Ty::Unknown) {
-                *var_ty = concrete.clone();
-                ctx.var_table.entries[var_id.0 as usize].ty = concrete.clone();
-            }
-        }
-    }
-    let erased_ret = erase_typevars(&ret);
-    if matches!(body.ty, Ty::Unknown) { body.ty = erased_ret.clone(); }
-    ir_val.ty = Ty::Fn { params: erased, ret: Box::new(body.ty.clone()) };
 }
 
 fn lower_where_call_response(ctx: &mut LowerCtx, target: &[Sym], params: &[ast::Pattern], response: &ast::Expr, stmts: &mut Vec<IrStmt>, overrides: &mut Vec<(Vec<Sym>, String)>) {

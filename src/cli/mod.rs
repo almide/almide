@@ -19,7 +19,7 @@ pub use build::cmd_build;
 pub use compile::cmd_compile;
 pub use emit::cmd_emit;
 pub use check::{cmd_check, cmd_check_json, cmd_check_effects};
-pub use commands::{cmd_init, cmd_test, cmd_test_json, cmd_test_wasm, cmd_test_ts, cmd_fmt, cmd_clean};
+pub use commands::{cmd_init, cmd_test, cmd_test_fast, cmd_test_json, cmd_test_wasm, cmd_test_ts, cmd_fmt, cmd_clean};
 pub use install::cmd_install;
 pub use selfupdate::cmd_self_update;
 pub use ide::{cmd_ide_outline, cmd_ide_doc, cmd_ide_stdlib_snapshot};
@@ -327,6 +327,56 @@ fn cargo_build_generated_with_native(
     let uses_matrix = rs_code.contains("almide_rt_matrix_");
     let uses_http = rs_code.contains("almide_rt_http_") || rs_code.contains("use rustls");
     let uses_zlib = rs_code.contains("almide_rt_zlib_") || rs_code.contains("use flate2");
+
+    // rlib fast path (dep-free): link the precompiled runtime instead of
+    // recompiling its ~2000 lines per build. The runtime is compiled at the same
+    // opt-level as the binary (3 for `--release`, 1 for debug/`almide run`), so
+    // it is fully optimized; only its compilation is amortized. Net: shipping
+    // builds drop from ~27-33s to ~1-2s (~20x).
+    //
+    // Tradeoff: because the runtime is a separate crate (no LTO), non-generic
+    // non-#[inline] runtime fns (e.g. string.trim/split) aren't inlined across
+    // the crate boundary, costing up to ~10% runtime on string/list-heavy hot
+    // loops (typically 2-5%). ThinLTO would recover it but erases the build win
+    // (it re-optimizes the runtime at link time). The planned fix is #[inline] on
+    // the hot runtime fns — see docs/roadmap. ALMIDE_NO_RTLIB=1 forces the
+    // monolithic cargo build (full cross-crate inlining) when a shipped binary
+    // must squeeze out that last few percent. Any rustc failure also falls
+    // through to the cargo path below, so correctness never regresses.
+    if std::env::var_os("ALMIDE_NO_RTLIB").is_none()
+        && !uses_matrix && !uses_http && !uses_zlib
+        && native_deps.is_empty() && source_root.is_none()
+    {
+        let opt_level = if release { "3" } else { "1" };
+        if let (Ok(rlib), Some(mut slim)) = (
+            ensure_runtime_rlib(opt_level),
+            crate::codegen::slim_main_with_external_runtime(rs_code),
+        ) {
+            if !slim.contains("fn main(") && !slim.contains("fn almide_main(") {
+                slim.push_str("\nfn main() {}\n");
+            }
+            let rlib_dir = rlib.parent().unwrap_or_else(|| std::path::Path::new("."));
+            let rs_path = project_dir.join("almide_gen_main.rs");
+            let bin_path = project_dir.join(if cfg!(windows) { "almide-out.exe" } else { "almide-out" });
+            if std::fs::write(&rs_path, &slim).is_ok() {
+                let mut cmd = std::process::Command::new(crate::find_rustc());
+                cmd.arg(&rs_path)
+                    .arg("-o").arg(&bin_path)
+                    .arg("--edition").arg("2021")
+                    .arg("-C").arg(format!("opt-level={opt_level}"))
+                    .arg("--extern").arg(format!("almide_rt={}", rlib.display()))
+                    .arg("-L").arg(rlib_dir)
+                    .arg("-A").arg("warnings");
+                if let Ok(output) = cmd.output() {
+                    if output.status.success() {
+                        return Ok(bin_path);
+                    }
+                    // else: fall through to the self-contained cargo build
+                }
+            }
+        }
+    }
+
     let src_dir = project_dir.join("src");
     std::fs::create_dir_all(&src_dir).map_err(|e| format!("failed to create {}: {}", src_dir.display(), e))?;
 
@@ -410,6 +460,80 @@ fn cargo_build_test(rs_code: &str, project_dir: &std::path::Path) -> Result<std:
     cargo_build_test_with_native(rs_code, project_dir, &[], None)
 }
 
+/// Path to the precompiled `almide_rt` runtime rlib, built once per process.
+///
+/// The runtime (string/list/map/... ops, RcCow, AlmideConcat, the equality
+/// macros) is identical across every compiled file, yet the inline-source model
+/// makes rustc recompile all ~2000 lines of it for each one (~2.2s/file). The
+/// rlib model — Rust's own — compiles it once into an `.rlib`; per-file rustc
+/// then just links it (~0.4s/file).
+///
+/// Keyed by a hash of the runtime source + rustc version + opt profile, so a
+/// compiler upgrade or a runtime edit transparently rebuilds. Cross-process
+/// builders serialize on a per-dir advisory lock; a warm cache is a stat.
+///
+/// `opt_level` selects the optimization the runtime is compiled at: "1" for
+/// tests/debug (where runtime speed is irrelevant), "3" for release shipping
+/// (so the linked runtime keeps full optimization). Each level is cached
+/// separately and built at most once per process.
+fn ensure_runtime_rlib(opt_level: &str) -> Result<std::path::PathBuf, String> {
+    use std::sync::{Mutex, OnceLock};
+    static CACHE: OnceLock<Mutex<std::collections::HashMap<String, Result<std::path::PathBuf, String>>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(std::collections::HashMap::new()));
+    {
+        let guard = cache.lock().unwrap();
+        if let Some(r) = guard.get(opt_level) {
+            return r.clone();
+        }
+    }
+    let result = build_runtime_rlib(opt_level);
+    cache.lock().unwrap().insert(opt_level.to_string(), result.clone());
+    result
+}
+
+fn build_runtime_rlib(opt_level: &str) -> Result<std::path::PathBuf, String> {
+    let src = crate::codegen::emit_runtime_crate();
+    let rustc = crate::find_rustc();
+    let rustc_ver = std::process::Command::new(&rustc)
+        .arg("--version")
+        .output()
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_default();
+    // The profile string here MUST match the per-file rustc invocation that links it.
+    let key = format!("{:016x}", hash64(format!("{src}|{rustc_ver}|opt{opt_level}|ed2021").as_bytes()));
+    let dir = std::env::temp_dir().join(format!("almide-rtlib-{key}"));
+    let rlib = dir.join("libalmide_rt.rlib");
+    if rlib.exists() {
+        return Ok(rlib);
+    }
+    std::fs::create_dir_all(&dir).map_err(|e| format!("rtlib dir: {e}"))?;
+    let _lock = run::BuildDirLock::acquire(&dir)?;
+    if rlib.exists() {
+        return Ok(rlib); // another builder won the race while we waited
+    }
+    let src_path = dir.join("almide_rt.rs");
+    std::fs::write(&src_path, &src).map_err(|e| format!("rtlib src: {e}"))?;
+    let output = std::process::Command::new(&rustc)
+        .arg(&src_path)
+        .arg("--crate-type").arg("lib")
+        .arg("--crate-name").arg("almide_rt")
+        .arg("--edition").arg("2021")
+        .arg("-C").arg(format!("opt-level={opt_level}"))
+        .arg("-C").arg("overflow-checks=no")
+        .arg("-A").arg("warnings")
+        .arg("--out-dir").arg(&dir)
+        .output()
+        .map_err(|e| format!("rtlib rustc: {e}"))?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).to_string());
+    }
+    if !rlib.exists() {
+        return Err("rtlib build produced no .rlib".to_string());
+    }
+    Ok(rlib)
+}
+
 fn cargo_build_test_with_native(
     rs_code: &str,
     project_dir: &std::path::Path,
@@ -423,6 +547,80 @@ fn cargo_build_test_with_native(
     if uses_zlib {
         all_deps.push(crate::project::NativeDep { name: "flate2".into(), spec: "1".into() });
     }
+
+    // Fast path: the generated test crate is dependency-free (the runtime is
+    // inlined as source). `cargo test --no-run` serializes concurrent builds on
+    // cargo's global `~/.cargo/.package-cache` lock — even across separate
+    // project dirs — so a parallel test run is effectively sequential. A bare
+    // `rustc --test` has no such lock, so per-file builds run truly in parallel.
+    if !uses_http && !uses_zlib && native_deps.is_empty() && source_root.is_none() {
+        let bin_path = project_dir.join("almide_test_bin");
+
+        // rlib fast path: link the precompiled runtime instead of recompiling
+        // its ~2000 lines per file (~2.2s → ~0.4s). Any failure (e.g. a runtime
+        // vs. user type collision that only manifests cross-crate) falls through
+        // to the inline path below, so this never regresses correctness — at
+        // worst a file pays one extra rustc. Opt out with ALMIDE_NO_RTLIB=1.
+        if std::env::var_os("ALMIDE_NO_RTLIB").is_none() {
+            if let (Ok(rlib), Some(mut slim)) = (
+                ensure_runtime_rlib("1"),
+                crate::codegen::slim_main_with_external_runtime(rs_code),
+            ) {
+                if !slim.contains("fn main(") && !slim.contains("fn almide_main(") {
+                    slim.push_str("\nfn main() {}\n");
+                }
+                let rlib_dir = rlib.parent().unwrap_or_else(|| std::path::Path::new("."));
+                let rs_path = project_dir.join("almide_test_main.rs");
+                if std::fs::write(&rs_path, &slim).is_ok() {
+                    // opt-level=0 for the slim main: the runtime (the part that
+                    // benefits from optimization) is already compiled into the
+                    // rlib at opt-level=1, and test user code is short-lived, so
+                    // optimizing it just burns compile time. opt0 + rlib is ~2.7x
+                    // over the inline opt1 path; opt1 + rlib only ~1.6x.
+                    let output = std::process::Command::new(crate::find_rustc())
+                        .arg(&rs_path)
+                        .arg("--test")
+                        .arg("-o").arg(&bin_path)
+                        .arg("--edition").arg("2021")
+                        .arg("-C").arg("opt-level=0")
+                        .arg("-C").arg("overflow-checks=no")
+                        .arg("--extern").arg(format!("almide_rt={}", rlib.display()))
+                        .arg("-L").arg(rlib_dir)
+                        .arg("-A").arg("warnings")
+                        .output();
+                    if let Ok(output) = output {
+                        if output.status.success() {
+                            return Ok(bin_path);
+                        }
+                        // else: fall through to the self-contained inline build
+                    }
+                }
+            }
+        }
+
+        let mut final_code = rs_code.to_string();
+        if !final_code.contains("fn main(") && !final_code.contains("fn almide_main(") {
+            final_code.push_str("\nfn main() {}\n");
+        }
+        let rs_path = project_dir.join("almide_test_main.rs");
+        std::fs::write(&rs_path, &final_code)
+            .map_err(|e| format!("failed to write {}: {}", rs_path.display(), e))?;
+        let output = std::process::Command::new(crate::find_rustc())
+            .arg(&rs_path)
+            .arg("--test")
+            .arg("-o").arg(&bin_path)
+            .arg("--edition").arg("2021")
+            .arg("-C").arg("opt-level=1")
+            .arg("-C").arg("overflow-checks=no")
+            .arg("-A").arg("warnings")
+            .output()
+            .map_err(|e| format!("failed to run rustc: {}", e))?;
+        if !output.status.success() {
+            return Err(String::from_utf8_lossy(&output.stderr).to_string());
+        }
+        return Ok(bin_path);
+    }
+
     let cargo_toml = build_cargo_toml(base_toml, &all_deps);
     let src_dir = project_dir.join("src");
     std::fs::create_dir_all(&src_dir).map_err(|e| format!("failed to create {}: {}", src_dir.display(), e))?;

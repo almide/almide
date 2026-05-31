@@ -31,7 +31,7 @@ mod exhaustiveness;
 use almide_lang::ast;
 use almide_base::diagnostic::Diagnostic;
 use crate::import_table::{ImportTable, build_import_table};
-use almide_base::intern::sym;
+use almide_base::intern::{Sym, sym};
 use crate::types::{Ty, TypeEnv};
 use types::{TyVarId, Constraint, FixHint, UnionFind, resolve_ty};
 
@@ -599,12 +599,19 @@ impl Checker {
             ast::TestWhere::Bind { name, value } => {
                 let mut val = value.clone();
                 let ty = self.infer_expr(&mut val);
+                // A `where greet = (name) => ...` binding shadows an existing
+                // top-level function. Unify the inferred lambda type with that
+                // function's signature so the lambda's parameter type variables
+                // get pinned — otherwise they stay unbound and leak into the IR
+                // as Unknown, tripping the ConcretizeTypes postcondition.
+                self.unify_where_override_with_fn_sig(&[*name], &ty);
                 let resolved = resolve_ty(&ty, &self.uf);
                 self.env.define_var(name.as_str(), resolved);
             }
             ast::TestWhere::Override { path, value } => {
                 let mut v = value.clone();
                 let ty = self.infer_expr(&mut v);
+                self.unify_where_override_with_fn_sig(path, &ty);
                 let resolved = resolve_ty(&ty, &self.uf);
                 let override_name = format!("__where_{}", path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("_"));
                 self.env.define_var(&override_name, resolved);
@@ -635,6 +642,37 @@ impl Checker {
                 for b in bindings { self.infer_test_where_inner(b); }
             }
         }
+    }
+
+    /// Unify a `where`-clause override value's inferred type with the
+    /// shadowed top-level function's signature, pinning the override
+    /// lambda's parameter type variables. `path` is the overridden
+    /// function's name path (`["greet"]` or `["http", "get"]`); `value_ty`
+    /// is the inferred type of the override expression.
+    ///
+    /// Without this, an override like `where greet = (name) => ...` leaves
+    /// `name`'s type variable unbound — it resolves to Unknown and leaks
+    /// into the IR, tripping the ConcretizeTypes postcondition (and falling
+    /// back to a wrong WASM ValType for non-i32 params).
+    ///
+    /// No-op when the path names no known function or the signature is
+    /// generic: unifying a lambda's `?N` param with a named TypeVar would
+    /// resolve it to `A`, which is itself unresolved at codegen time.
+    fn unify_where_override_with_fn_sig(&mut self, path: &[Sym], value_ty: &Ty) {
+        let name = if path.len() == 1 {
+            path[0]
+        } else {
+            sym(&path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("."))
+        };
+        let Some(sig) = self.env.functions.get(&name) else { return };
+        let sig_ty = Ty::Fn {
+            params: sig.params.iter().map(|(_, t)| t.clone()).collect(),
+            ret: Box::new(sig.ret.clone()),
+        };
+        let mut typevars = Vec::new();
+        TypeEnv::collect_typevars(&sig_ty, &mut typevars);
+        if !typevars.is_empty() { return; }
+        self.unify_infer(&sig_ty, value_ty);
     }
 }
 

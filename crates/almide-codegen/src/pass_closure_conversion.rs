@@ -17,7 +17,7 @@ use almide_ir::*;
 use almide_ir::visit::{IrVisitor, walk_expr, walk_stmt};
 use almide_lang::types::Ty;
 use almide_base::intern::sym;
-use super::pass::{NanoPass, PassResult, Target};
+use super::pass::{NanoPass, Postcondition, PassResult, Target};
 
 #[derive(Debug)]
 pub struct ClosureConversionPass;
@@ -30,6 +30,10 @@ impl NanoPass for ClosureConversionPass {
     }
 
     fn depends_on(&self) -> Vec<&'static str> { vec!["LambdaTypeResolve"] }
+
+    fn postconditions(&self) -> Vec<Postcondition> {
+        vec![Postcondition::Custom(verify_env_load_indices)]
+    }
 
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         let mut program_lifted = Vec::new();
@@ -578,4 +582,67 @@ impl<'a> IrMutVisitor for VarIdRewriter<'a> {
 fn rewrite_var_ids(expr: &mut IrExpr, mappings: &[(VarId, VarId, Ty)]) {
     let mut rewriter = VarIdRewriter { mappings };
     rewriter.visit_expr_mut(expr);
+}
+
+// ── Postcondition: verify EnvLoad indices are within bounds ──────────
+
+fn verify_env_load_indices(program: &IrProgram) -> Vec<String> {
+    let mut violations = Vec::new();
+
+    let check_funcs = |funcs: &[IrFunction], violations: &mut Vec<String>| {
+        for func in funcs {
+            // Lifted closures have __env as first param and ClosureCreate captures
+            // tell us the env size. But we can also verify structurally: collect
+            // the max EnvLoad index in each function and ensure it's consistent
+            // with the number of __cap_N bindings in the prologue.
+            let cap_count = count_cap_bindings(&func.body);
+            if cap_count == 0 { continue; }
+
+            let max_index = max_env_load_index(&func.body);
+            if let Some(max_idx) = max_index {
+                if max_idx >= cap_count as u32 {
+                    violations.push(format!(
+                        "[ClosureConversion] in {}: EnvLoad index {} >= cap_count {} (offset would be {})",
+                        func.name.as_str(), max_idx, cap_count, max_idx * 8,
+                    ));
+                }
+            }
+        }
+    };
+
+    check_funcs(&program.functions, &mut violations);
+    for module in &program.modules {
+        check_funcs(&module.functions, &mut violations);
+    }
+    violations
+}
+
+fn count_cap_bindings(expr: &IrExpr) -> usize {
+    // Count __cap_N let bindings in the top-level block prologue
+    if let IrExprKind::Block { stmts, .. } = &expr.kind {
+        stmts.iter().filter(|s| {
+            if let IrStmtKind::Bind { value, .. } = &s.kind {
+                matches!(&value.kind, IrExprKind::EnvLoad { .. })
+            } else {
+                false
+            }
+        }).count()
+    } else {
+        0
+    }
+}
+
+fn max_env_load_index(expr: &IrExpr) -> Option<u32> {
+    struct MaxIdx(Option<u32>);
+    impl IrVisitor for MaxIdx {
+        fn visit_expr(&mut self, expr: &IrExpr) {
+            if let IrExprKind::EnvLoad { index, .. } = &expr.kind {
+                self.0 = Some(self.0.map_or(*index, |m| m.max(*index)));
+            }
+            walk_expr(self, expr);
+        }
+    }
+    let mut finder = MaxIdx(None);
+    finder.visit_expr(expr);
+    finder.0
 }

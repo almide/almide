@@ -1019,6 +1019,36 @@ fn resolve_node_ty(expr: &IrExpr, vt: &VarTable, symbols: &SymbolTable) -> Optio
         IrExprKind::LitBool { .. } => Some(Ty::Bool),
         IrExprKind::LitStr { .. } => Some(Ty::String),
         IrExprKind::Unit => Some(Ty::Unit),
+        // StringInterp always produces String
+        IrExprKind::StringInterp { .. } => Some(Ty::String),
+        // Clone preserves the inner type
+        IrExprKind::Clone { expr } => {
+            if !expr.ty.has_unresolved_deep() { Some(expr.ty.clone()) } else { None }
+        }
+        // Range produces List[Int]
+        IrExprKind::Range { .. } => Some(Ty::Applied(
+            almide_lang::types::constructor::TypeConstructorId::List, vec![Ty::Int],
+        )),
+        // MapAccess: Map[K,V] → Option[V]
+        IrExprKind::MapAccess { object, .. } => {
+            let obj_ty = effective_ty(object, vt);
+            if let Ty::Applied(_, args) = &obj_ty {
+                args.get(1).cloned()
+                    .filter(|t| !t.has_unresolved_deep())
+                    .map(|v| Ty::Applied(
+                        almide_lang::types::constructor::TypeConstructorId::Option, vec![v],
+                    ))
+            } else { None }
+        }
+        // ResultOk wraps in Result[T, E]
+        IrExprKind::ResultOk { expr } => {
+            if !expr.ty.has_unresolved_deep() {
+                Some(Ty::Applied(
+                    almide_lang::types::constructor::TypeConstructorId::Result,
+                    vec![expr.ty.clone(), Ty::String],
+                ))
+            } else { None }
+        }
         IrExprKind::Call { target, args, .. } => resolve_call_ret_ty(target, args, vt, symbols),
         IrExprKind::RuntimeCall { symbol, args } => {
             // Post-IntrinsicLowering, the `Call { target: Module }` node

@@ -188,8 +188,8 @@ pub enum Op {
     Unreachable,
 
     // ── Calls ──
-    Call(FuncIdx),
-    CallIndirect { sig: SigIdx },
+    Call { idx: FuncIdx, pops: u8, pushes: u8 },
+    CallIndirect { sig: SigIdx, pops: u8, pushes: u8 },
 
     // ── Memory ──
     MemoryCopy,
@@ -201,6 +201,218 @@ pub enum Op {
     Seq(Vec<Op>),
 }
 
+// ── Stack-effect verification ─────────────────────────────────────────
+
+/// Stack effect: how many values an op consumes and produces.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StackEffect {
+    /// Normal op: pops N values, pushes M values.
+    Normal { pops: u8, pushes: u8 },
+    /// Divergent: unreachable after this (br, return, unreachable).
+    Divergent,
+    /// Compound: must verify children recursively (Block, Loop, If, Seq).
+    Compound,
+}
+
+impl Op {
+    /// Returns the stack effect of this op.
+    pub fn stack_effect(&self) -> StackEffect {
+        use StackEffect::*;
+        match self {
+            // ── Stack: push 1 ──
+            Op::LocalGet(_) | Op::GlobalGet(_) | Op::Const(_) | Op::MemorySize
+                => Normal { pops: 0, pushes: 1 },
+
+            // ── Stack: pop 1 ──
+            Op::LocalSet(_) | Op::GlobalSet(_) | Op::Drop
+                => Normal { pops: 1, pushes: 0 },
+
+            // ── Stack: pop 1, push 1 ──
+            Op::LocalTee(_) | Op::UnOp(_) | Op::Load(_) | Op::MemoryGrow
+                => Normal { pops: 1, pushes: 1 },
+
+            // ── Memory: pop 2, push 0 ──
+            Op::Store(_) | Op::FieldStore { .. }
+                => Normal { pops: 2, pushes: 0 },
+
+            // ── Arithmetic: pop 2, push 1 ──
+            Op::BinOp(_)
+                => Normal { pops: 2, pushes: 1 },
+
+            // ── Layout-safe memory: pop 1 (base), push 1 (value/addr) ──
+            Op::FieldLoad { .. } | Op::DynFieldAddr { .. }
+                => Normal { pops: 1, pushes: 1 },
+
+            // ── ElemAddr: pop 2 (base + index), push 1 (addr) ──
+            Op::ElemAddr { .. }
+                => Normal { pops: 2, pushes: 1 },
+
+            // ── Iteration: no net stack effect (uses locals) ──
+            Op::ListForEach { .. } | Op::MapForEach { .. }
+                => Compound,
+
+            // ── Abstract allocation: pop 1 (size), push 1 (ptr) ──
+            Op::Alloc => Normal { pops: 1, pushes: 1 },
+            Op::AllocCollection { .. } => Normal { pops: 0, pushes: 1 },
+
+            // ── Perceus RC: pop 1 (ptr) ──
+            Op::RcInc => Normal { pops: 1, pushes: 0 },
+            Op::RcDec { .. } => Normal { pops: 1, pushes: 0 },
+            Op::CowCheck { .. } => Compound,
+
+            // ── String ops ──
+            Op::StringConcat => Normal { pops: 2, pushes: 1 },
+            Op::StringInterp { parts } => {
+                let expr_count = parts.iter()
+                    .filter(|p| matches!(p, StringPart::Expr(_)))
+                    .count() as u8;
+                Normal { pops: expr_count, pushes: 1 }
+            }
+
+            // ── Deep equality: pop 2, push 1 (i32 bool) ──
+            Op::DeepEq { .. } => Normal { pops: 2, pushes: 1 },
+
+            // ── Control flow ──
+            Op::Block(_) | Op::Loop(_) | Op::Seq(_) => Compound,
+            Op::If { .. } => Compound,   // pops 1 (cond) + body effect
+            Op::IfVoid { .. } => Compound, // pops 1 (cond)
+            Op::BrIf(_) => Normal { pops: 1, pushes: 0 },
+            Op::Br(_) | Op::Return | Op::Unreachable => Divergent,
+
+            // ── Calls ──
+            Op::Call { pops, pushes, .. } | Op::CallIndirect { pops, pushes, .. }
+                => Normal { pops: *pops, pushes: *pushes },
+
+            // ── Memory bulk ──
+            Op::MemoryCopy => Normal { pops: 3, pushes: 0 },
+        }
+    }
+}
+
+/// Verify stack balance of a WasmIR function.
+///
+/// Returns Ok(()) if every block and the function body have correct
+/// stack balance. Returns Err with diagnostic on first violation.
+pub fn verify_func_stack(func: &WasmFunc) -> Result<(), String> {
+    let expected = func.results.len() as i32;
+    verify_ops(&func.body, expected, &func.name)
+}
+
+fn verify_ops(ops: &[Op], expected_net: i32, ctx: &str) -> Result<(), String> {
+    let mut depth: i32 = 0;
+
+    for (i, op) in ops.iter().enumerate() {
+        match op.stack_effect() {
+            StackEffect::Normal { pops, pushes } => {
+                depth -= pops as i32;
+                if depth < 0 {
+                    return Err(format!(
+                        "[StackVerify] {}: stack underflow at op #{} ({:?}), depth={}",
+                        ctx, i, op_name(op), depth,
+                    ));
+                }
+                depth += pushes as i32;
+            }
+            StackEffect::Divergent => {
+                // After divergent op, remaining ops in this sequence are unreachable.
+                // Stack balance is satisfied (divergent code can't violate it).
+                return Ok(());
+            }
+            StackEffect::Compound => {
+                verify_compound(op, &mut depth, ctx, i)?;
+            }
+        }
+    }
+
+    if depth != expected_net {
+        return Err(format!(
+            "[StackVerify] {}: stack imbalance — expected net {}, got {}",
+            ctx, expected_net, depth,
+        ));
+    }
+    Ok(())
+}
+
+fn verify_compound(op: &Op, depth: &mut i32, ctx: &str, idx: usize) -> Result<(), String> {
+    match op {
+        Op::Block(body) | Op::Loop(body) | Op::Seq(body) => {
+            // Block/Loop/Seq: body must have net 0 effect (no result type in current usage)
+            verify_ops(body, 0, ctx)?;
+        }
+        Op::If { then, else_ } => {
+            // Pops condition (i32)
+            *depth -= 1;
+            if *depth < 0 {
+                return Err(format!(
+                    "[StackVerify] {}: stack underflow at If condition, op #{}", ctx, idx,
+                ));
+            }
+            // Both branches must produce exactly 1 value (i32 result type)
+            verify_ops(then, 1, ctx)?;
+            verify_ops(else_, 1, ctx)?;
+            *depth += 1; // result
+        }
+        Op::IfVoid { then, else_ } => {
+            *depth -= 1;
+            if *depth < 0 {
+                return Err(format!(
+                    "[StackVerify] {}: stack underflow at IfVoid condition, op #{}", ctx, idx,
+                ));
+            }
+            verify_ops(then, 0, ctx)?;
+            if !else_.is_empty() {
+                verify_ops(else_, 0, ctx)?;
+            }
+        }
+        Op::ListForEach { body, .. } => {
+            // Body runs per element, must have net 0 effect
+            verify_ops(body, 0, ctx)?;
+        }
+        Op::MapForEach { body, .. } => {
+            verify_ops(body, 0, ctx)?;
+        }
+        Op::CowCheck { clone_body, .. } => {
+            // COW check: ptr on stack, if rc>1 run clone_body which must push 1 (new ptr)
+            // Net effect on outer stack: pop 1 (ptr), push 1 (ptr or clone)
+            *depth -= 1;
+            if *depth < 0 {
+                return Err(format!(
+                    "[StackVerify] {}: stack underflow at CowCheck, op #{}", ctx, idx,
+                ));
+            }
+            verify_ops(clone_body, 1, ctx)?;
+            *depth += 1;
+        }
+        _ => {} // non-compound ops handled by caller
+    }
+    Ok(())
+}
+
+fn op_name(op: &Op) -> &'static str {
+    match op {
+        Op::LocalGet(_) => "LocalGet", Op::LocalSet(_) => "LocalSet",
+        Op::LocalTee(_) => "LocalTee", Op::GlobalGet(_) => "GlobalGet",
+        Op::GlobalSet(_) => "GlobalSet", Op::Const(_) => "Const",
+        Op::Drop => "Drop", Op::BinOp(_) => "BinOp", Op::UnOp(_) => "UnOp",
+        Op::FieldLoad { .. } => "FieldLoad", Op::FieldStore { .. } => "FieldStore",
+        Op::ElemAddr { .. } => "ElemAddr", Op::Load(_) => "Load", Op::Store(_) => "Store",
+        Op::DynFieldAddr { .. } => "DynFieldAddr",
+        Op::ListForEach { .. } => "ListForEach", Op::MapForEach { .. } => "MapForEach",
+        Op::Alloc => "Alloc", Op::AllocCollection { .. } => "AllocCollection",
+        Op::RcInc => "RcInc", Op::RcDec { .. } => "RcDec",
+        Op::CowCheck { .. } => "CowCheck",
+        Op::StringConcat => "StringConcat", Op::StringInterp { .. } => "StringInterp",
+        Op::DeepEq { .. } => "DeepEq",
+        Op::Block(_) => "Block", Op::Loop(_) => "Loop",
+        Op::If { .. } => "If", Op::IfVoid { .. } => "IfVoid",
+        Op::Br(_) => "Br", Op::BrIf(_) => "BrIf",
+        Op::Return => "Return", Op::Unreachable => "Unreachable",
+        Op::Call { .. } => "Call", Op::CallIndirect { .. } => "CallIndirect",
+        Op::MemoryCopy => "MemoryCopy", Op::MemorySize => "MemorySize",
+        Op::MemoryGrow => "MemoryGrow", Op::Seq(_) => "Seq",
+    }
+}
+
 /// A compiled WASM function in WasmIR form.
 #[derive(Debug, Clone)]
 pub struct WasmFunc {
@@ -209,4 +421,118 @@ pub struct WasmFunc {
     pub results: Vec<WasmTy>,
     pub locals: Vec<WasmTy>,
     pub body: Vec<Op>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn void_func(body: Vec<Op>) -> WasmFunc {
+        WasmFunc { name: "test".into(), params: vec![], results: vec![], locals: vec![WasmTy::I32; 4], body }
+    }
+
+    fn i32_func(body: Vec<Op>) -> WasmFunc {
+        WasmFunc { name: "test".into(), params: vec![], results: vec![WasmTy::I32], locals: vec![WasmTy::I32; 4], body }
+    }
+
+    #[test]
+    fn empty_void_function_is_valid() {
+        assert!(verify_func_stack(&void_func(vec![])).is_ok());
+    }
+
+    #[test]
+    fn const_return_is_valid() {
+        let f = i32_func(vec![Op::Const(Const::I32(42))]);
+        assert!(verify_func_stack(&f).is_ok());
+    }
+
+    #[test]
+    fn missing_return_value_detected() {
+        let f = i32_func(vec![]); // needs 1 value but body is empty
+        assert!(verify_func_stack(&f).is_err());
+    }
+
+    #[test]
+    fn leftover_value_detected() {
+        let f = void_func(vec![Op::Const(Const::I32(1))]); // void fn but pushes 1
+        assert!(verify_func_stack(&f).is_err());
+    }
+
+    #[test]
+    fn stack_underflow_detected() {
+        let f = void_func(vec![Op::Drop]); // nothing to drop
+        assert!(verify_func_stack(&f).is_err());
+    }
+
+    #[test]
+    fn binop_balance() {
+        // Push 2, binop produces 1, total net = 1
+        let f = i32_func(vec![
+            Op::Const(Const::I32(1)),
+            Op::Const(Const::I32(2)),
+            Op::BinOp(BinOp::I32Add),
+        ]);
+        assert!(verify_func_stack(&f).is_ok());
+    }
+
+    #[test]
+    fn local_get_set_balance() {
+        let f = void_func(vec![
+            Op::Const(Const::I32(1)),
+            Op::LocalSet(0),
+        ]);
+        assert!(verify_func_stack(&f).is_ok());
+    }
+
+    #[test]
+    fn if_void_balance() {
+        let f = void_func(vec![
+            Op::Const(Const::I32(1)), // condition
+            Op::IfVoid { then: vec![], else_: vec![] },
+        ]);
+        assert!(verify_func_stack(&f).is_ok());
+    }
+
+    #[test]
+    fn if_result_balance() {
+        let f = i32_func(vec![
+            Op::Const(Const::I32(1)), // condition
+            Op::If {
+                then: vec![Op::Const(Const::I32(10))],
+                else_: vec![Op::Const(Const::I32(20))],
+            },
+        ]);
+        assert!(verify_func_stack(&f).is_ok());
+    }
+
+    #[test]
+    fn call_with_correct_effects() {
+        // Call pops 2, pushes 1 → net -1
+        let f = i32_func(vec![
+            Op::Const(Const::I32(1)),
+            Op::Const(Const::I32(2)),
+            Op::Call { idx: 0, pops: 2, pushes: 1 },
+        ]);
+        assert!(verify_func_stack(&f).is_ok());
+    }
+
+    #[test]
+    fn divergent_return_ok() {
+        // After Return, stack state doesn't matter
+        let f = void_func(vec![
+            Op::Return,
+        ]);
+        assert!(verify_func_stack(&f).is_ok());
+    }
+
+    #[test]
+    fn seq_flattened() {
+        let f = void_func(vec![
+            Op::Seq(vec![
+                Op::Const(Const::I32(1)),
+                Op::Drop,
+            ]),
+        ]);
+        assert!(verify_func_stack(&f).is_ok());
+    }
 }
