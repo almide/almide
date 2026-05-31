@@ -116,39 +116,51 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
                         macro_args.extend(args);
                         return IrExpr { kind: IrExprKind::RustMacro { name: name.clone(), args: macro_args }, ty, span, def_id: None };
                     }
-                    // __encode_list_T / __decode_list_T
-                    if name.starts_with("__encode_list_") || name.starts_with("__decode_list_") {
-                        let type_name = if name.starts_with("__encode_list_") {
-                            &name["__encode_list_".len()..]
-                        } else {
-                            &name["__decode_list_".len()..]
-                        };
-                        let primitives = ["string", "int", "float", "bool"];
-                        if primitives.contains(&type_name) {
-                            return IrExpr { kind: IrExprKind::Call {
-                                target: CallTarget::Named { name: format!("almide_rt_{}", name).into() },
-                                args, type_args,
-                            }, ty, span, def_id: None };
-                        } else {
-                            // Custom type: use generic encode/decode
-                            let codec_op = if name.starts_with("__encode") { "encode" } else { "decode" };
-                            let func_ref = format!("{}_{}", type_name, codec_op);
-                            let mut new_args = args;
-                            new_args.push(IrExpr {
-                                kind: IrExprKind::FnRef { name: func_ref.into() },
-                                ty: Ty::Unknown,
-                                span: None, def_id: None,
-                            });
-                            let rt_func = if name.starts_with("__encode") {
-                                "almide_rt_value_encode_list"
-                            } else {
-                                "almide_rt_value_decode_list"
-                            };
-                            return IrExpr { kind: IrExprKind::Call {
-                                target: CallTarget::Named { name: rt_func.into() },
-                                args: new_args, type_args,
-                            }, ty, span, def_id: None };
+                    // Codec synthetics (list/option/default, encode/decode) all
+                    // route through the bundled-Almide `value` generics, which
+                    // emit as `almide_rt_value_encode_list` etc. The element
+                    // encoder/decoder is appended as a FnRef: a value
+                    // constructor/extractor for primitives, or `T.encode`/
+                    // `T.decode` for nested Codec types. This is the single
+                    // source of truth — no native runtime helpers.
+                    //   __encode_list_T(xs)         → encode_list(xs, enc_T)
+                    //   __decode_list_T(v)          → decode_list(v, dec_T)
+                    //   __encode_option_T(o)        → encode_option(o, enc_T)
+                    //   __decode_option_T(v, key)   → decode_option(v, key, dec_T)
+                    //   __decode_default_T(v, k, d) → decode_with_default(v, k, d, dec_T)
+                    let elem_fns = |t: &str| -> (String, String) {
+                        match t {
+                            "string" => ("almide_rt_value_str".into(), "almide_rt_value_as_string".into()),
+                            "int" => ("almide_rt_value_int".into(), "almide_rt_value_as_int".into()),
+                            "float" => ("almide_rt_value_float".into(), "almide_rt_value_as_float".into()),
+                            "bool" => ("almide_rt_value_bool".into(), "almide_rt_value_as_bool".into()),
+                            other => (format!("{}_encode", other), format!("{}_decode", other)),
                         }
+                    };
+                    let codec = if let Some(t) = name.strip_prefix("__encode_list_") {
+                        Some(("almide_rt_value_encode_list", elem_fns(t).0))
+                    } else if let Some(t) = name.strip_prefix("__decode_list_") {
+                        Some(("almide_rt_value_decode_list", elem_fns(t).1))
+                    } else if let Some(t) = name.strip_prefix("__encode_option_") {
+                        Some(("almide_rt_value_encode_option", elem_fns(t).0))
+                    } else if let Some(t) = name.strip_prefix("__decode_option_") {
+                        Some(("almide_rt_value_decode_option", elem_fns(t).1))
+                    } else if let Some(t) = name.strip_prefix("__decode_default_") {
+                        Some(("almide_rt_value_decode_with_default", elem_fns(t).1))
+                    } else {
+                        None
+                    };
+                    if let Some((rt_func, fn_name)) = codec {
+                        let mut new_args = args;
+                        new_args.push(IrExpr {
+                            kind: IrExprKind::FnRef { name: fn_name.into() },
+                            ty: Ty::Unknown,
+                            span: None, def_id: None,
+                        });
+                        return IrExpr { kind: IrExprKind::Call {
+                            target: CallTarget::Named { name: rt_func.into() },
+                            args: new_args, type_args,
+                        }, ty, span, def_id: None };
                     }
                     // Other __ prefixed → almide_rt_
                     if name.starts_with("__") {

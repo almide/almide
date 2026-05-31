@@ -20,7 +20,7 @@ fn bool(b: Bool) -> Value = VBool(b)
 fn int(n: Int) -> Value = VInt(n)
 fn float(f: Float) -> Value = VFloat(f)
 fn str(s: String) -> Value = VStr(s)
-fn array(items: List[Value]) -> Value = VArr(items)
+fn array(xs: List[Value]) -> Value = VArr(xs)
 fn object(pairs: List[(String, Value)]) -> Value = VObj(pairs)
 
 // ── field access ──
@@ -51,16 +51,18 @@ fn as_array(v: Value) -> Result[List[Value], String] = match v { VArr(a) => ok(a
 
 fn encode_list[T](xs: List[T], f: (T) -> Value) -> Value = VArr(xs |> list.map(f))
 
-fn decode_each[T](xs: List[Value], f: (Value) -> Result[T, String], i: Int, acc: List[T]) -> Result[List[T], String] =
-  if i >= list.len(xs) then ok(acc)
-  else match f(list.get_or(xs, i, VNull)) {
-    ok(x)  => decode_each(xs, f, i + 1, acc + [x]),
-    err(e) => err(e),
-  }
-
+// Decode each element via `f`, short-circuiting on the first error. Uses
+// list.fold (a stdlib generic) rather than a bespoke recursive helper so
+// monomorphization instantiates it from inside the bundled codec helpers.
 fn decode_list[T](v: Value, f: (Value) -> Result[T, String]) -> Result[List[T], String] = match v {
-  VArr(xs) => decode_each(xs, f, 0, []),
-  _        => err("expected Array"),
+  VArr(xs) => list.fold(xs, ok([]), (acc, x) => match acc {
+    ok(done) => match f(x) {
+      ok(y)  => ok(done + [y]),
+      err(e) => err(e),
+    },
+    err(e) => err(e),
+  }),
+  _ => err("expected Array"),
 }
 
 fn encode_option[T](o: Option[T], f: (T) -> Value) -> Value = match o {
@@ -169,8 +171,11 @@ fn merge_pairs(base: List[(String, Value)], over: List[(String, Value)], i: Int)
     merge_pairs(upsert(base, k, v, 0), over, i + 1)
   }
 
-fn merge(a: Value, b: Value) -> Value = match (a, b) {
-  (VObj(pa), VObj(pb)) => VObj(merge_pairs(pa, pb, 0)),
+fn merge(a: Value, b: Value) -> Value = match a {
+  VObj(pa) => match b {
+    VObj(pb) => VObj(merge_pairs(pa, pb, 0)),
+    _ => b,
+  },
   _ => b,
 }
 

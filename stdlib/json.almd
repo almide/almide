@@ -16,7 +16,7 @@ fn from_int(n: Int) -> Value = value.int(n)
 fn from_bool(b: Bool) -> Value = value.bool(b)
 fn from_float(n: Float) -> Value = value.float(n)
 fn null() -> Value = value.null()
-fn array(items: List[Value]) -> Value = value.array(items)
+fn array(xs: List[Value]) -> Value = value.array(xs)
 fn object(entries: List[(String, Value)]) -> Value = value.object(entries)
 
 fn stringify(v: Value) -> String = value.stringify(v)
@@ -103,9 +103,21 @@ fn parse_value(s: String, i0: Int) -> (Value, Int) = {
   }
 }
 
+// A well-formed JSON value starts with one of these; the keyword literals
+// (true/false/null) are validated so a stray identifier like "not" doesn't
+// silently parse as `null`.
+fn valid_start(text: String, i: Int) -> Bool = {
+  let c = ch(text, i)
+  if c == "t" then string.slice(text, i, i + 4) == "true"
+  else if c == "f" then string.slice(text, i, i + 5) == "false"
+  else if c == "n" then string.slice(text, i, i + 4) == "null"
+  else c == "[" or c == "{" or c == "\"" or c == "-" or is_dig(c)
+}
+
 fn parse(text: String) -> Result[Value, String] = {
   let t = skip_ws(text, 0)
   if t >= string.len(text) then err("unexpected end of input")
+  else if not valid_start(text, t) then err("invalid JSON")
   else {
     let (v, _) = parse_value(text, 0)
     ok(v)
@@ -259,21 +271,35 @@ fn set_path(j: Value, path: JsonPath, value_arg: Value) -> Result[Value, String]
   JPath(segs) => set_walk(j, segs, 0, value_arg),
 }
 
+fn remove_at(xs: List[Value], idx: Int, i: Int, acc: List[Value]) -> List[Value] =
+  if i >= list.len(xs) then acc
+  else {
+    let x = list.get_or(xs, i, value.null())
+    let next = if i == idx then acc else acc + [x]
+    remove_at(xs, idx, i + 1, next)
+  }
+
+fn set_or_keep(j: Value, parent_path: JsonPath, replacement: Value) -> Value =
+  match set_path(j, parent_path, replacement) { ok(r) => r, err(_) => j }
+
 fn remove_path(j: Value, path: JsonPath) -> Value = match path {
   JPath(segs) =>
     if list.len(segs) == 0 then j
-    else match list.get_or(segs, list.len(segs) - 1, PField("")) {
-      PField(name) => {
-        let parent_path = JPath(list.take(segs, list.len(segs) - 1))
-        match get_path(j, parent_path) {
-          some(VObj(pairs)) => {
-            let pruned = value.omit(VObj(pairs), [name])
-            match set_path(j, parent_path, pruned) { ok(r) => r, err(_) => j }
+    else {
+      let parent_path = JPath(list.take(segs, list.len(segs) - 1))
+      match get_path(j, parent_path) {
+        some(parent) => match list.get_or(segs, list.len(segs) - 1, PField("")) {
+          PField(name) => match parent {
+            VObj(_) => set_or_keep(j, parent_path, value.omit(parent, [name])),
+            _ => j,
           },
-          _ => j,
-        }
-      },
-      PIndex(_) => j,
+          PIndex(idx) => match parent {
+            VArr(xs) => set_or_keep(j, parent_path, value.array(remove_at(xs, idx, 0, []))),
+            _ => j,
+          },
+        },
+        none => j,
+      }
     },
 }
 

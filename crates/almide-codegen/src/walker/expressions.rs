@@ -399,7 +399,7 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 // Box recursive fields (annotation is target-aware — empty for non-Rust)
                 if let Some(cn) = name {
                     if ctx.ann.boxed_fields.contains(&(cn.to_string(), k.to_string())) {
-                        val_str = format!("Box::new({})", val_str);
+                        val_str = format!("::std::boxed::Box::new({})", val_str);
                     }
                 }
                 // Rc-wrap Fn-typed fields: closures stored in struct fields use Rc<dyn Fn>
@@ -422,7 +422,7 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 let mut val_str = render_expr(ctx, default_expr);
                 let needs_box = name.as_ref()
                     .map_or(false, |cn| ctx.ann.boxed_fields.contains(&(cn.to_string(), field_name.clone())));
-                if needs_box { val_str = format!("Box::new({})", val_str); }
+                if needs_box { val_str = format!("::std::boxed::Box::new({})", val_str); }
                 field_strs.push(ctx.templates.render_with("record_field", None, &[], &[("name", field_name.as_str()), ("value", val_str.as_str())])
                     .unwrap_or_else(|| format!("{}: {}", field_name, val_str)));
             }
@@ -765,7 +765,7 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
             }
         }
         IrExprKind::BoxNew { expr: inner } => {
-            format!("Box::new({})", render_expr(ctx, inner))
+            format!("::std::boxed::Box::new({})", render_expr(ctx, inner))
         }
         IrExprKind::RcWrap { expr: inner, cast_ty } => {
             let s = render_expr(ctx, inner);
@@ -1144,7 +1144,7 @@ fn render_enum_constructor(ctx: &RenderContext, ctor_name: &str, enum_name: &str
             format!("{}.into_inner()", rendered)
         } else { rendered };
         if needs_box {
-            format!("Box::new({})", rendered)
+            format!("::std::boxed::Box::new({})", rendered)
         } else {
             rendered
         }

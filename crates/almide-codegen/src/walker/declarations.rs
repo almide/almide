@@ -74,7 +74,7 @@ pub fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
                         let is_recursive = ctx.ann.recursive_enums.contains(&*td.name);
                         let types: Vec<String> = fields.iter().map(|t| {
                             let rendered = render_type(ctx, t);
-                            if is_recursive && ty_contains_name(t, &td.name) { format!("Box<{}>", rendered) } else { rendered }
+                            if is_recursive && ty_contains_name(t, &td.name) { format!("::std::boxed::Box<{}>", rendered) } else { rendered }
                         }).collect();
                         let fields_str = types.join(", ");
                         // Named params via fn_param template (respects JS/TS)
@@ -96,7 +96,7 @@ pub fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
                             .map(|f| {
                                 let rendered = render_type(ctx, &f.ty);
                                 let boxed = if ctx.ann.recursive_enums.contains(&*td.name) && ty_contains_name(&f.ty, &td.name) {
-                                    format!("Box<{}>", rendered)
+                                    format!("::std::boxed::Box<{}>", rendered)
                                 } else {
                                     rendered
                                 };
