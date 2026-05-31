@@ -423,6 +423,37 @@ fn cargo_build_test_with_native(
     if uses_zlib {
         all_deps.push(crate::project::NativeDep { name: "flate2".into(), spec: "1".into() });
     }
+
+    // Fast path: the generated test crate is dependency-free (the runtime is
+    // inlined as source). `cargo test --no-run` serializes concurrent builds on
+    // cargo's global `~/.cargo/.package-cache` lock — even across separate
+    // project dirs — so a parallel test run is effectively sequential. A bare
+    // `rustc --test` has no such lock, so per-file builds run truly in parallel.
+    if !uses_http && !uses_zlib && native_deps.is_empty() && source_root.is_none() {
+        let mut final_code = rs_code.to_string();
+        if !final_code.contains("fn main(") && !final_code.contains("fn almide_main(") {
+            final_code.push_str("\nfn main() {}\n");
+        }
+        let rs_path = project_dir.join("almide_test_main.rs");
+        std::fs::write(&rs_path, &final_code)
+            .map_err(|e| format!("failed to write {}: {}", rs_path.display(), e))?;
+        let bin_path = project_dir.join("almide_test_bin");
+        let output = std::process::Command::new(crate::find_rustc())
+            .arg(&rs_path)
+            .arg("--test")
+            .arg("-o").arg(&bin_path)
+            .arg("--edition").arg("2021")
+            .arg("-C").arg("opt-level=1")
+            .arg("-C").arg("overflow-checks=no")
+            .arg("-A").arg("warnings")
+            .output()
+            .map_err(|e| format!("failed to run rustc: {}", e))?;
+        if !output.status.success() {
+            return Err(String::from_utf8_lossy(&output.stderr).to_string());
+        }
+        return Ok(bin_path);
+    }
+
     let cargo_toml = build_cargo_toml(base_toml, &all_deps);
     let src_dir = project_dir.join("src");
     std::fs::create_dir_all(&src_dir).map_err(|e| format!("failed to create {}: {}", src_dir.display(), e))?;

@@ -104,7 +104,12 @@ pub fn cmd_test(file: &str, no_check: bool, run_filter: Option<&str>) {
             let sem_tx = sem_tx.clone();
             handles.push(std::thread::spawn(move || {
                 let _ = sem_rx.lock().unwrap().recv();
-                let result = super::run::compile_to_binary(&test_file, no_check, true, false);
+                // Per-file scratch dir so cold rustc builds parallelize instead
+                // of serializing on the shared dir's BUILD_LOCK.
+                let worker_dir = std::env::temp_dir()
+                    .join("almide-test")
+                    .join(test_file.replace('/', "_").replace('.', "_"));
+                let result = super::run::compile_to_binary(&test_file, no_check, true, false, Some(&worker_dir));
                 let _ = sem_tx.send(());
                 let _ = tx.send((test_file, result));
             }));
