@@ -61,14 +61,15 @@ impl BuildDirLock {
 
 /// Compile an .almd file to a native binary, returning the path to the executable.
 /// Uses incremental caching: if the generated Rust code hasn't changed, skips cargo build.
-pub fn compile_to_binary(file: &str, no_check: bool, test_mode: bool, release: bool) -> Result<std::path::PathBuf, String> {
+pub fn compile_to_binary(file: &str, no_check: bool, test_mode: bool, release: bool, project_dir_override: Option<&std::path::Path>) -> Result<std::path::PathBuf, String> {
     let rs_code = try_compile(file, no_check).map_err(|_| "compile failed".to_string())?;
 
-    // Default shared scratch dir. Tests set `ALMIDE_RUN_PROJECT_DIR` to a
-    // unique path so parallel `cargo test --all` can't race on the shared
-    // `src/main.rs` / `target/debug/` inside it.
-    let project_dir = std::env::var_os("ALMIDE_RUN_PROJECT_DIR")
-        .map(std::path::PathBuf::from)
+    // Scratch dir. A per-call `project_dir_override` (one dir per test file)
+    // gives each parallel worker its own `src/main.rs`, so cold rustc builds
+    // run truly in parallel instead of serializing on the shared dir's
+    // `BUILD_LOCK`. Otherwise: `ALMIDE_RUN_PROJECT_DIR`, else a shared default.
+    let project_dir = project_dir_override.map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("ALMIDE_RUN_PROJECT_DIR").map(std::path::PathBuf::from))
         .unwrap_or_else(|| std::env::temp_dir().join("almide-run"));
     std::fs::create_dir_all(&project_dir)
         .map_err(|e| format!("Failed to create temp directory: {}", e))?;
@@ -120,7 +121,10 @@ pub fn compile_to_binary(file: &str, no_check: bool, test_mode: bool, release: b
     // concurrent build could overwrite the generated binary between our build
     // and our copy-out.
     static BUILD_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    let _guard = BUILD_LOCK.lock().unwrap();
+    // A unique per-call dir has its own src/main.rs, so the global mutex (which
+    // only exists to serialize the shared default dir) isn't needed — the
+    // per-dir flock still guards a separate process reusing the same dir.
+    let _guard = project_dir_override.is_none().then(|| BUILD_LOCK.lock().unwrap());
     let _flock = BuildDirLock::acquire(&project_dir)?;
 
     // Re-check the cache under the lock: another process/thread may have built
@@ -140,8 +144,17 @@ pub fn compile_to_binary(file: &str, no_check: bool, test_mode: bool, release: b
 
     match result {
         Ok(built_path) => {
-            // Copy built binary to per-file cached path
-            let _ = std::fs::copy(&built_path, &bin_path);
+            // Copy built binary to per-file cached path. The bare-rustc fast
+            // path doesn't create a cargo `target/<profile>/` dir, so ensure
+            // bin_path's parent exists, and surface a copy failure instead of
+            // silently leaving bin_path missing (→ "Failed to execute" at run).
+            if let Some(parent) = bin_path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            if let Err(e) = std::fs::copy(&built_path, &bin_path) {
+                return Err(format!("failed to stage built binary {} -> {}: {}",
+                    built_path.display(), bin_path.display(), e));
+            }
             let _ = std::fs::create_dir_all(&cache);
             let _ = std::fs::write(&hash_file, &code_hash);
             Ok(bin_path)
@@ -161,7 +174,7 @@ pub fn run_binary(bin: &std::path::Path, program_args: &[String]) -> i32 {
 }
 
 pub fn cmd_run_inner(file: &str, program_args: &[String], no_check: bool, test_mode: bool, release: bool) -> i32 {
-    match compile_to_binary(file, no_check, test_mode, release) {
+    match compile_to_binary(file, no_check, test_mode, release, None) {
         Ok(bin) => run_binary(&bin, program_args),
         Err(e) => {
             eprintln!("Compile error:\n{}", e);

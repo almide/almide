@@ -627,8 +627,12 @@ fn dispatch(cli: Cli) {
                 cli::cmd_test_ts(file_str, run.as_deref());
             } else if json {
                 cli::cmd_test_json(file_str, run.as_deref());
-            } else {
+            } else if matches!(target.as_deref(), Some("rust" | "native")) {
+                // Explicit pure-native run (e.g. CI's "Test Rust" job).
                 cli::cmd_test(file_str, no_check, run.as_deref());
+            } else {
+                // Default: fast rustc-free WASM path, native fallback for gaps.
+                cli::cmd_test_fast(file_str, no_check, run.as_deref());
             }
         }
         Commands::Check { file, deny_warnings, json, explain, effects } => {
