@@ -1,0 +1,25 @@
+# Host-architecture codegen determinism harness (NOT a workspace member — see
+# the root Cargo.toml `exclude`). Compiles one .almd source to WASM bytes using
+# the exact pipeline the browser playground uses (parse → check → lower → mono →
+# codegen(Target::Wasm)). Built BOTH natively and to wasm32-wasip1 by
+# scripts/check-host-determinism.sh; the two outputs must be byte-identical.
+#
+# Empty [workspace] makes this its own workspace root so the parent workspace
+# ignores it (it path-deps the parent's `almide` crate without being a member).
+[workspace]
+
+[package]
+name = "wasmgen-harness"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "wasmgen-harness"
+path = "src/main.rs"
+
+[dependencies]
+almide = { path = "../.." }
+
+[profile.release]
+opt-level = 2
