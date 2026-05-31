@@ -182,11 +182,14 @@ enum WasmTestOutcome {
 fn compile_and_run_wasm_test(test_file: &str, tmp_dir: &std::path::Path) -> WasmTestOutcome {
     use crate::{parse_file, canonicalize, check, diagnostic, resolve, project, project_fetch};
     let skip = |reason: String| WasmTestOutcome::Skip { file: test_file.to_string(), reason };
+    let prof = std::env::var_os("ALMIDE_PROFILE").is_some();
+    let mut marks: Vec<(&str, std::time::Instant)> = vec![("start", std::time::Instant::now())];
 
     let wasm_name = test_file.replace('/', "_").replace('.', "_") + ".wasm";
     let wasm_path = tmp_dir.join(&wasm_name);
 
     let (mut program, source_text, _parse_errors) = parse_file(test_file);
+    if prof { marks.push(("parse", std::time::Instant::now())); }
     if source_text.lines().take(3).any(|line| line.contains("// wasm:skip")) {
         return skip("wasm:skip".to_string());
     }
@@ -206,6 +209,7 @@ fn compile_and_run_wasm_test(test_file: &str, tmp_dir: &std::path::Path) -> Wasm
         Ok(r) => r,
         Err(e) => return skip(format!("resolve: {}", e)),
     };
+    if prof { marks.push(("resolve", std::time::Instant::now())); }
 
     let canon = canonicalize::canonicalize_program(
         &program,
@@ -218,6 +222,7 @@ fn compile_and_run_wasm_test(test_file: &str, tmp_dir: &std::path::Path) -> Wasm
     if diagnostics.iter().any(|d| d.level == diagnostic::Level::Error) {
         return skip("type errors".to_string());
     }
+    if prof { marks.push(("check_user", std::time::Instant::now())); }
 
     for (name, _, pkg_id, _) in &resolved.modules {
         if let Some(pid) = pkg_id.as_ref() {
@@ -250,9 +255,11 @@ fn compile_and_run_wasm_test(test_file: &str, tmp_dir: &std::path::Path) -> Wasm
         checker.env.self_module_name = saved_self;
         ir_program.modules.push(mod_ir_module);
     }
+    if prof { marks.push(("lower_modules", std::time::Instant::now())); }
     almide::ir_link::ir_link(&mut ir_program);
     almide::optimize::optimize_program(&mut ir_program);
     almide::mono::monomorphize(&mut ir_program);
+    if prof { marks.push(("opt_mono", std::time::Instant::now())); }
     let bytes = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         match almide::codegen::codegen(&mut ir_program, almide::codegen::pass::Target::Wasm) {
             almide::codegen::CodegenOutput::Binary(b) => b,
@@ -263,6 +270,15 @@ fn compile_and_run_wasm_test(test_file: &str, tmp_dir: &std::path::Path) -> Wasm
         Ok(b) => b,
         Err(_) => return skip("WASM codegen panic".to_string()),
     };
+    if prof {
+        marks.push(("codegen", std::time::Instant::now()));
+        let total = marks.last().unwrap().1.duration_since(marks[0].1).as_secs_f64();
+        let mut line = format!("[prof] {} total={:.3}s", test_file, total);
+        for w in marks.windows(2) {
+            line.push_str(&format!(" | {}={:.3}", w[1].0, w[1].1.duration_since(w[0].1).as_secs_f64()));
+        }
+        eprintln!("{}", line);
+    }
     if let Err(e) = std::fs::write(&wasm_path, &bytes) {
         return skip(format!("write: {}", e));
     }

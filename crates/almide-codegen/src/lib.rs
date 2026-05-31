@@ -148,11 +148,15 @@ impl<'a> Verified<'a> {
 
 pub fn codegen_with(program: &mut IrProgram, target: Target, options: &CodegenOptions) -> CodegenOutput {
     let config = target::configure(target);
+    let prof = std::env::var_os("ALMIDE_PROFILE").is_some();
+    let pt = std::time::Instant::now();
 
     // Layer 2: Run Nanopass pipeline (semantic rewrites — takes ownership, returns modified)
     let owned = std::mem::take(program);
     let transformed = config.pipeline.run(owned, target);
     *program = transformed;
+    if prof { eprintln!("[prof:codegen] pipeline={:.3}s", pt.elapsed().as_secs_f64()); }
+    let et = std::time::Instant::now();
 
     // Layer 3: Target-specific emit
     match target {
@@ -160,7 +164,9 @@ pub fn codegen_with(program: &mut IrProgram, target: Target, options: &CodegenOp
             // AlmidePerceusBelt: Verified::verify() runs Lean 4-certified
             // RC balance check. Only verified programs can reach WASM emit.
             let verified = Verified::verify(program);
-            CodegenOutput::Binary(emit_wasm::emit_verified(verified))
+            let out = emit_wasm::emit_verified(verified);
+            if prof { eprintln!("[prof:codegen] wasm_emit={:.3}s", et.elapsed().as_secs_f64()); }
+            CodegenOutput::Binary(out)
         }
         Target::Wgsl => CodegenOutput::Source(emit_wgsl::emit(program)),
         _ => CodegenOutput::Source(emit_source(program, target, &config, options)),
