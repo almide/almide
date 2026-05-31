@@ -1,7 +1,32 @@
 # JSON in Almide — self-hosting the codec (道A)
 
-Status: **foundation landed** (Almide-native JSON proven on v2 WASM + Rust);
-production cut-over **scoped, pending review**.
+Status: **production cut-over LANDED** (branch `json-self-host`). `stdlib/value.almd`
++ `stdlib/json.almd` are now pure Almide over the `Value` ADT — one source for
+both the Rust target and the WASM engine.
+
+## Outcome (what actually shipped)
+
+The cut-over turned out far cleaner than the big-bang this doc first feared.
+**Only `value.almd` + `json.almd` were rewritten** (native runtime, Codec derive,
+and `pass_builtin_lowering` were left untouched). It works because the codegen's
+runtime-module selection already prefers walker-emitted code: once value/json are
+pure Almide (no `@intrinsic`/`RuntimeCall`), the native `value`/`json` runtime
+modules are simply not pulled into value-using programs — no enum collision, no
+derive change. The Codec derive's `value.str/object/field/...` calls now resolve
+to the Almide implementations; the `__encode_list_T` helpers still resolve where
+needed without colliding.
+
+- **Rust target**: all 17 json/value/codec test files green (auto_derive 31,
+  codec_p0 14, codec_list/nested, variant_codec/decode, value_utils, …); full
+  240-file spec suite green. No regression.
+- **WASM legacy**: json/value run (now Almide-compiled), output unchanged.
+- **WASM v2**: falls back gracefully (correct output via legacy). v2-native json
+  is blocked only by v2 stdlib coverage (`string.replace`, `float.parse/to_string`,
+  `map`) — a separate engine workstream, not a cut-over concern.
+
+The native `runtime/rs/src/value.rs` + `json.rs` remain (residual; still used by
+`sse.rs`'s private streaming-JSON helpers) but are dead for value/json programs.
+Migrating sse + deleting the native value/json runtime is a follow-up.
 
 ## Goal
 
