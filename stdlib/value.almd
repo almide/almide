@@ -1,59 +1,217 @@
-@intrinsic("almide_rt_value_array")
-fn array(items: List[Value]) -> Value = _
+// value — the universal dynamic data model behind the Codec protocol, written
+// in pure Almide over the Value ADT. Single source of truth: this one source
+// compiles to BOTH the Rust target and the WASM engine — no separate native
+// runtime, no codegen special-casing. Self-hosting cut-over; see
+// docs/roadmap/active/json-self-host.md.
 
-@intrinsic("almide_rt_value_as_array")
-fn as_array(v: Value) -> Result[List[Value], String] = _
+type Value =
+  | VNull
+  | VBool(Bool)
+  | VInt(Int)
+  | VFloat(Float)
+  | VStr(String)
+  | VArr(List[Value])
+  | VObj(List[(String, Value)])
 
-@intrinsic("almide_rt_value_as_bool")
-fn as_bool(v: Value) -> Result[Bool, String] = _
+// ── construction ──
 
-@intrinsic("almide_rt_value_as_float")
-fn as_float(v: Value) -> Result[Float, String] = _
+fn null() -> Value = VNull
+fn bool(b: Bool) -> Value = VBool(b)
+fn int(n: Int) -> Value = VInt(n)
+fn float(f: Float) -> Value = VFloat(f)
+fn str(s: String) -> Value = VStr(s)
+fn array(xs: List[Value]) -> Value = VArr(xs)
+fn object(pairs: List[(String, Value)]) -> Value = VObj(pairs)
 
-@intrinsic("almide_rt_value_as_int")
-fn as_int(v: Value) -> Result[Int, String] = _
+// ── field access ──
 
-@intrinsic("almide_rt_value_as_string")
-fn as_string(v: Value) -> Result[String, String] = _
+fn obj_lookup(pairs: List[(String, Value)], key: String, i: Int) -> Result[Value, String] =
+  if i >= list.len(pairs) then err("missing field '" + key + "'")
+  else {
+    let (k, v) = list.get_or(pairs, i, ("", VNull))
+    if k == key then ok(v) else obj_lookup(pairs, key, i + 1)
+  }
 
-@intrinsic("almide_rt_value_bool")
-fn bool(b: Bool) -> Value = _
+fn field(v: Value, key: String) -> Result[Value, String] = match v {
+  VObj(pairs) => obj_lookup(pairs, key, 0),
+  _ => err("expected Object"),
+}
 
-@intrinsic("almide_rt_value_float")
-fn float(f: Float) -> Value = _
+fn get(v: Value, key: String) -> Result[Value, String] = field(v, key)
 
-@intrinsic("almide_rt_value_field")
-fn get(v: Value, key: String) -> Result[Value, String] = _
+// ── typed extraction ──
 
-@intrinsic("almide_rt_value_int")
-fn int(n: Int) -> Value = _
+fn as_string(v: Value) -> Result[String, String] = match v { VStr(s) => ok(s), _ => err("expected Str") }
+fn as_int(v: Value) -> Result[Int, String] = match v { VInt(n) => ok(n), _ => err("expected Int") }
+fn as_float(v: Value) -> Result[Float, String] = match v { VFloat(f) => ok(f), _ => err("expected Float") }
+fn as_bool(v: Value) -> Result[Bool, String] = match v { VBool(b) => ok(b), _ => err("expected Bool") }
+fn as_array(v: Value) -> Result[List[Value], String] = match v { VArr(a) => ok(a), _ => err("expected Array") }
 
-@intrinsic("almide_rt_value_merge")
-fn merge(a: Value, b: Value) -> Value = _
+// ── generic codec helpers (the Codec derive lowers list/option fields here) ──
 
-@intrinsic("almide_rt_value_null")
-fn null() -> Value = _
+fn encode_list[T](xs: List[T], f: (T) -> Value) -> Value = VArr(xs |> list.map(f))
 
-@intrinsic("almide_rt_value_object")
-fn object(pairs: List[(String, Value)]) -> Value = _
+// Decode each element via `f`, short-circuiting on the first error. Uses
+// list.fold (a stdlib generic) rather than a bespoke recursive helper so
+// monomorphization instantiates it from inside the bundled codec helpers.
+fn decode_list[T](v: Value, f: (Value) -> Result[T, String]) -> Result[List[T], String] = match v {
+  VArr(xs) => list.fold(xs, ok([]), (acc, x) => match acc {
+    ok(done) => match f(x) {
+      ok(y)  => ok(done + [y]),
+      err(e) => err(e),
+    },
+    err(e) => err(e),
+  }),
+  _ => err("expected Array"),
+}
 
-@intrinsic("almide_rt_value_omit")
-fn omit(v: Value, keys: List[String]) -> Value = _
+fn encode_option[T](o: Option[T], f: (T) -> Value) -> Value = match o {
+  some(x) => f(x),
+  none    => VNull,
+}
 
-@intrinsic("almide_rt_value_pick")
-fn pick(v: Value, keys: List[String]) -> Value = _
+fn decode_option[T](v: Value, key: String, f: (Value) -> Result[T, String]) -> Result[Option[T], String] =
+  match field(v, key) {
+    ok(VNull)  => ok(none),
+    ok(inner)  => match f(inner) { ok(x) => ok(some(x)), err(e) => err(e) },
+    err(_)     => ok(none),
+  }
 
-@intrinsic("almide_rt_value_str")
-fn str(s: String) -> Value = _
+fn decode_with_default[T](v: Value, key: String, default: T, f: (Value) -> Result[T, String]) -> Result[T, String] =
+  match field(v, key) {
+    ok(VNull) => ok(default),
+    ok(inner) => f(inner),
+    err(_)    => ok(default),
+  }
 
-@intrinsic("almide_rt_value_stringify")
-fn stringify(v: Value) -> String = _
+// Tagged-variant {"Tag": payload} extraction (variant Codec decode).
+fn tagged_variant(v: Value) -> Result[(String, Value), String] = match v {
+  VObj(pairs) =>
+    if list.len(pairs) == 1 then {
+      let (tag, payload) = list.get_or(pairs, 0, ("", VNull))
+      ok((tag, payload))
+    } else err("expected object with exactly 1 key for variant"),
+  _ => err("expected Object for variant decode"),
+}
 
-@intrinsic("almide_rt_value_to_camel_case")
-fn to_camel_case(v: Value) -> Value = _
+// ── stringify ──
 
-@intrinsic("almide_rt_value_to_snake_case")
-fn to_snake_case(v: Value) -> Value = _
+fn escape(s: String) -> String =
+  s
+    |> string.replace("\\", "\\\\")
+    |> string.replace("\"", "\\\"")
+    |> string.replace("\n", "\\n")
+    |> string.replace("\r", "\\r")
+    |> string.replace("\t", "\\t")
 
-@intrinsic("almide_rt_value_field")
-fn field(v: Value, key: String) -> Result[Value, String] = _
+fn join_arr(xs: List[Value], i: Int, acc: String) -> String =
+  if i >= list.len(xs) then acc
+  else {
+    let piece = stringify(list.get_or(xs, i, VNull))
+    let next = if acc == "" then piece else acc + "," + piece
+    join_arr(xs, i + 1, next)
+  }
+
+fn join_obj(kvs: List[(String, Value)], i: Int, acc: String) -> String =
+  if i >= list.len(kvs) then acc
+  else {
+    let (k, v) = list.get_or(kvs, i, ("", VNull))
+    let piece = "\"" + escape(k) + "\":" + stringify(v)
+    let next = if acc == "" then piece else acc + "," + piece
+    join_obj(kvs, i + 1, next)
+  }
+
+fn stringify(v: Value) -> String = match v {
+  VNull    => "null",
+  VBool(b) => if b then "true" else "false",
+  VInt(n)  => int.to_string(n),
+  VFloat(f) => float.to_string(f),
+  VStr(s)  => "\"" + escape(s) + "\"",
+  VArr(xs) => "[" + join_arr(xs, 0, "") + "]",
+  VObj(kv) => "{" + join_obj(kv, 0, "") + "}",
+}
+
+// ── object utilities ──
+
+fn key_in(keys: List[String], key: String, i: Int) -> Bool =
+  if i >= list.len(keys) then false
+  else if list.get_or(keys, i, "") == key then true
+  else key_in(keys, key, i + 1)
+
+fn filter_pairs(pairs: List[(String, Value)], keys: List[String], keep: Bool, i: Int, acc: List[(String, Value)]) -> List[(String, Value)] =
+  if i >= list.len(pairs) then acc
+  else {
+    let (k, v) = list.get_or(pairs, i, ("", VNull))
+    let inside = key_in(keys, k, 0)
+    let next = if inside == keep then acc + [(k, v)] else acc
+    filter_pairs(pairs, keys, keep, i + 1, next)
+  }
+
+fn pick(v: Value, keys: List[String]) -> Value = match v {
+  VObj(pairs) => VObj(filter_pairs(pairs, keys, true, 0, [])),
+  _ => v,
+}
+
+fn omit(v: Value, keys: List[String]) -> Value = match v {
+  VObj(pairs) => VObj(filter_pairs(pairs, keys, false, 0, [])),
+  _ => v,
+}
+
+fn upsert(pairs: List[(String, Value)], key: String, v: Value, i: Int) -> List[(String, Value)] =
+  if i >= list.len(pairs) then pairs + [(key, v)]
+  else {
+    let (k, _) = list.get_or(pairs, i, ("", VNull))
+    if k == key then list.set(pairs, i, (key, v)) else upsert(pairs, key, v, i + 1)
+  }
+
+fn merge_pairs(base: List[(String, Value)], over: List[(String, Value)], i: Int) -> List[(String, Value)] =
+  if i >= list.len(over) then base
+  else {
+    let (k, v) = list.get_or(over, i, ("", VNull))
+    merge_pairs(upsert(base, k, v, 0), over, i + 1)
+  }
+
+fn merge(a: Value, b: Value) -> Value = match a {
+  VObj(pa) => match b {
+    VObj(pb) => VObj(merge_pairs(pa, pb, 0)),
+    _ => b,
+  },
+  _ => b,
+}
+
+// snake_case → camelCase on object keys
+fn camel_key(s: String, i: Int, up: Bool, acc: String) -> String =
+  if i >= string.len(s) then acc
+  else {
+    let c = string.get(s, i) ?? ""
+    if c == "_" then camel_key(s, i + 1, true, acc)
+    else if up then camel_key(s, i + 1, false, acc + string.to_upper(c))
+    else camel_key(s, i + 1, false, acc + c)
+  }
+
+// camelCase → snake_case on object keys
+fn snake_key(s: String, i: Int, acc: String) -> String =
+  if i >= string.len(s) then acc
+  else {
+    let c = string.get(s, i) ?? ""
+    let lc = string.to_lower(c)
+    if c >= "A" and c <= "Z" and i > 0 then snake_key(s, i + 1, acc + "_" + lc)
+    else snake_key(s, i + 1, acc + lc)
+  }
+
+fn rename_keys(pairs: List[(String, Value)], rename: (String) -> String, i: Int, acc: List[(String, Value)]) -> List[(String, Value)] =
+  if i >= list.len(pairs) then acc
+  else {
+    let (k, v) = list.get_or(pairs, i, ("", VNull))
+    rename_keys(pairs, rename, i + 1, acc + [(rename(k), v)])
+  }
+
+fn to_camel_case(v: Value) -> Value = match v {
+  VObj(pairs) => VObj(rename_keys(pairs, (k) => camel_key(k, 0, false, ""), 0, [])),
+  _ => v,
+}
+
+fn to_snake_case(v: Value) -> Value = match v {
+  VObj(pairs) => VObj(rename_keys(pairs, (k) => snake_key(k, 0, ""), 0, [])),
+  _ => v,
+}

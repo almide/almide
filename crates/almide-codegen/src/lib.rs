@@ -160,6 +160,23 @@ pub fn codegen_with(program: &mut IrProgram, target: Target, options: &CodegenOp
             // AlmidePerceusBelt: Verified::verify() runs Lean 4-certified
             // RC balance check. Only verified programs can reach WASM emit.
             let verified = Verified::verify(program);
+            // Opt-in WASM engine v2 (ALMIDE_WASM_V2). Runs the new lowering →
+            // verify → assemble pipeline; on any unsupported construct it falls
+            // back to the legacy emitter so existing programs keep building.
+            if std::env::var_os("ALMIDE_WASM_V2").is_some() {
+                if std::env::var_os("ALMIDE_WASM_V2_DUMP").is_some() {
+                    if let Ok(j) = serde_json::to_string_pretty(&program.functions) {
+                        eprintln!("[v2dump-ir]\n{j}");
+                    }
+                }
+                let reg = emit_wasm::engine::LayoutRegistry::new();
+                match emit_wasm::engine::build_module(
+                    &program.functions, &program.var_table, &reg, &program.type_decls,
+                ) {
+                    Ok(bytes) => return CodegenOutput::Binary(bytes),
+                    Err(e) => eprintln!("[wasm-v2] {e}; falling back to legacy emitter"),
+                }
+            }
             CodegenOutput::Binary(emit_wasm::emit_verified(verified))
         }
         Target::Wgsl => CodegenOutput::Source(emit_wgsl::emit(program)),
@@ -200,6 +217,7 @@ fn emit_source(program: &mut IrProgram, target: Target, config: &target::TargetC
             output.push_str("impl<T: PartialEq> PartialEq for RcCow<T> { fn eq(&self, other: &Self) -> bool { *self.0 == *other.0 } }\n");
             output.push_str("impl<T: PartialEq> PartialEq<T> for RcCow<T> { fn eq(&self, other: &T) -> bool { *self.0 == *other } }\n");
             output.push_str("impl PartialEq<&str> for RcCow<String> { fn eq(&self, other: &&str) -> bool { self.0.as_str() == *other } }\n");
+            output.push_str("impl AsRef<str> for RcCow<String> { fn as_ref(&self) -> &str { self.0.as_str() } }\n");
             output.push_str("impl<T> std::ops::Deref for RcCow<T> { type Target = T; fn deref(&self) -> &T { &self.0 } }\n");
             output.push_str("impl<T: Clone> std::ops::DerefMut for RcCow<T> { fn deref_mut(&mut self) -> &mut T { std::rc::Rc::make_mut(&mut self.0) } }\n");
             output.push_str("impl<T> RcCow<T> { fn new(v: T) -> Self { RcCow(std::rc::Rc::new(v)) } fn make_mut(&mut self) -> &mut T where T: Clone { std::rc::Rc::make_mut(&mut self.0) } fn into_inner(self) -> T where T: Clone { std::rc::Rc::try_unwrap(self.0).unwrap_or_else(|rc| (*rc).clone()) } }\n");

@@ -1,0 +1,71 @@
+// Self-hosting probe — a JSON parser written in Almide (Loop 3, milestone 1 of
+// docs/roadmap/active/ideal-form.md). Exercises the language features a parser/
+// compiler needs: recursive variant (ADT), recursion, tuples, string ops, list
+// combinators, match. Subset: null / bool / integer / array.
+//
+// Status:
+//   --target rust  : ✓ builds + runs (prints 35 for the main below)
+//   --target wasm  : ✓ builds + runs (legacy emitter)
+//   ALMIDE_WASM_V2 : ✓ builds + runs, prints 35 (matches legacy). Reaching this
+//                    took two engine fixes: (1) break/continue branch-depth
+//                    resolution so TCO'd tail recursion terminates, and (2)
+//                    lexicographic string ordering (__str_cmp) so `c >= "0"`
+//                    style comparisons are correct rather than pointer compares.
+//
+// This is self-hosting milestone 1 (a JSON parser written in Almide running on
+// the v2 engine). The differential gate (scripts/wasm-v2-diff.sh) confirms the
+// v2 output matches the legacy emitter.
+
+type Json =
+  | JNull
+  | JBool(Bool)
+  | JNum(Int)
+  | JArr(List[Json])
+
+fn ch(s: String, i: Int) -> String = string.get(s, i) ?? ""
+fn is_ws(c: String) -> Bool = c == " " or c == "\n" or c == "\t" or c == "\r"
+fn is_digit(c: String) -> Bool = c >= "0" and c <= "9"
+
+fn skip_ws(s: String, i: Int) -> Int =
+  if i < string.len(s) and is_ws(ch(s, i)) then skip_ws(s, i + 1) else i
+
+fn scan_num(s: String, i: Int) -> Int =
+  if i < string.len(s) and (is_digit(ch(s, i)) or ch(s, i) == "-") then scan_num(s, i + 1) else i
+
+fn parse_number(s: String, i: Int) -> (Json, Int) = {
+  let end = scan_num(s, i)
+  (JNum(int.parse(string.slice(s, i, end)) ?? 0), end)
+}
+
+fn parse_array(s: String, i0: Int, acc: List[Json]) -> (Json, Int) = {
+  let i = skip_ws(s, i0)
+  if ch(s, i) == "]" then (JArr(acc), i + 1)
+  else {
+    let (v, j0) = parse_value(s, i)
+    let j = skip_ws(s, j0)
+    if ch(s, j) == "," then parse_array(s, j + 1, acc + [v])
+    else (JArr(acc + [v]), j + 1)
+  }
+}
+
+fn parse_value(s: String, i0: Int) -> (Json, Int) = {
+  let i = skip_ws(s, i0)
+  let c = ch(s, i)
+  if c == "[" then parse_array(s, i + 1, [])
+  else if c == "t" then (JBool(true), i + 4)
+  else if c == "f" then (JBool(false), i + 5)
+  else if c == "n" then (JNull, i + 4)
+  else parse_number(s, i)
+}
+
+// Recursive consumer over the parsed ADT (sums all JNum leaves).
+fn jsum(j: Json) -> Int = match j {
+  JNum(n) => n,
+  JArr(xs) => list.fold(xs, 0, (a, x) => a + jsum(x)),
+  _ => 0,
+}
+
+fn main() -> Unit = {
+  let (v, _) = parse_value("[1, 22, 3, [4, 5]]", 0)
+  println(int.to_string(jsum(v)))
+}

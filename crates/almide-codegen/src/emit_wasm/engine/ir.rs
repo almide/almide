@@ -18,12 +18,24 @@ pub type FuncIdx = u32;
 pub type SigIdx = u32;
 
 /// Primitive WASM value types.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum WasmTy {
     I32,
     I64,
     F32,
     F64,
+}
+
+impl WasmTy {
+    /// Convert to a wasm-encoder ValType for section encoding.
+    pub fn to_valtype(self) -> wasm_encoder::ValType {
+        match self {
+            WasmTy::I32 => wasm_encoder::ValType::I32,
+            WasmTy::I64 => wasm_encoder::ValType::I64,
+            WasmTy::F32 => wasm_encoder::ValType::F32,
+            WasmTy::F64 => wasm_encoder::ValType::F64,
+        }
+    }
 }
 
 /// A constant value.
@@ -39,7 +51,7 @@ pub enum Const {
 #[derive(Debug, Clone, Copy)]
 pub enum BinOp {
     // i32
-    I32Add, I32Sub, I32Mul, I32DivU, I32DivS, I32RemS,
+    I32Add, I32Sub, I32Mul, I32DivU, I32DivS, I32RemS, I32RemU,
     I32And, I32Or, I32Xor, I32Shl, I32ShrU, I32ShrS,
     I32Eq, I32Ne, I32LtS, I32LeS, I32GtS, I32GeS, I32LtU, I32LeU, I32GtU, I32GeU,
     // i64
@@ -180,10 +192,19 @@ pub enum Op {
     // ── Control flow ──
     Block(Vec<Op>),
     Loop(Vec<Op>),
-    If { then: Vec<Op>, else_: Vec<Op> },
+    /// `if` producing a single value of type `ty` (both branches push one `ty`).
+    If { ty: WasmTy, then: Vec<Op>, else_: Vec<Op> },
     IfVoid { then: Vec<Op>, else_: Vec<Op> },
     Br(u32),
     BrIf(u32),
+    /// Placeholder `break`/`continue`: the target branch depth is relative to
+    /// the lexical nesting of WASM control frames (Block/Loop/If), which is not
+    /// known at lowering time because the surrounding `If`/`Match` frames are
+    /// assembled later. The enclosing loop's lowering resolves these to a
+    /// concrete `Br(depth)` via `resolve_loop_branches`. Any that survive
+    /// (a `break`/`continue` outside a loop) are rejected by `first_abstract_op`.
+    BreakLoop,
+    ContinueLoop,
     Return,
     Unreachable,
 
@@ -199,6 +220,12 @@ pub enum Op {
     // ── Sequence ──
     /// A flat sequence of ops (for grouping without adding a WASM block).
     Seq(Vec<Op>),
+
+    /// A construct the engine cannot lower yet. Carries a label for diagnostics.
+    /// Treated as producing one value for stack-balance purposes, but the
+    /// module builder rejects any function containing it (→ legacy fallback),
+    /// so it never reaches emission.
+    Unsupported(&'static str),
 }
 
 // ── Stack-effect verification ─────────────────────────────────────────
@@ -278,6 +305,8 @@ impl Op {
             Op::IfVoid { .. } => Compound, // pops 1 (cond)
             Op::BrIf(_) => Normal { pops: 1, pushes: 0 },
             Op::Br(_) | Op::Return | Op::Unreachable => Divergent,
+            // Unresolved break/continue diverge; resolved before emission.
+            Op::BreakLoop | Op::ContinueLoop => Divergent,
 
             // ── Calls ──
             Op::Call { pops, pushes, .. } | Op::CallIndirect { pops, pushes, .. }
@@ -285,6 +314,10 @@ impl Op {
 
             // ── Memory bulk ──
             Op::MemoryCopy => Normal { pops: 3, pushes: 0 },
+
+            // ── Unsupported: pretend it leaves one value so stack balance
+            //    holds long enough for the builder to detect and reject it. ──
+            Op::Unsupported(_) => Normal { pops: 0, pushes: 1 },
         }
     }
 }
@@ -339,7 +372,7 @@ fn verify_compound(op: &Op, depth: &mut i32, ctx: &str, idx: usize) -> Result<()
             // Block/Loop/Seq: body must have net 0 effect (no result type in current usage)
             verify_ops(body, 0, ctx)?;
         }
-        Op::If { then, else_ } => {
+        Op::If { then, else_, .. } => {
             // Pops condition (i32)
             *depth -= 1;
             if *depth < 0 {
@@ -406,10 +439,12 @@ fn op_name(op: &Op) -> &'static str {
         Op::Block(_) => "Block", Op::Loop(_) => "Loop",
         Op::If { .. } => "If", Op::IfVoid { .. } => "IfVoid",
         Op::Br(_) => "Br", Op::BrIf(_) => "BrIf",
+        Op::BreakLoop => "BreakLoop", Op::ContinueLoop => "ContinueLoop",
         Op::Return => "Return", Op::Unreachable => "Unreachable",
         Op::Call { .. } => "Call", Op::CallIndirect { .. } => "CallIndirect",
         Op::MemoryCopy => "MemoryCopy", Op::MemorySize => "MemorySize",
         Op::MemoryGrow => "MemoryGrow", Op::Seq(_) => "Seq",
+        Op::Unsupported(_) => "Unsupported",
     }
 }
 
@@ -498,6 +533,7 @@ mod tests {
         let f = i32_func(vec![
             Op::Const(Const::I32(1)), // condition
             Op::If {
+                ty: WasmTy::I32,
                 then: vec![Op::Const(Const::I32(10))],
                 else_: vec![Op::Const(Const::I32(20))],
             },

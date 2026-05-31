@@ -4,6 +4,7 @@
 use almide_ir::*;
 use almide_ir::annotations::VarStorage;
 use almide_lang::types::{Ty, TypeConstructorId};
+use almide_base::intern::Sym;
 use super::RenderContext;
 use super::types::render_type;
 use super::expressions::render_expr;
@@ -357,8 +358,10 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
 
 // ── Match arm rendering ──
 
-pub fn render_match_arm(ctx: &RenderContext, arm: &IrMatchArm, match_ty: &almide_lang::types::Ty) -> String {
-    let pattern = render_pattern(ctx, &arm.pattern);
+/// Render a match arm, threading the subject type so anonymous record patterns
+/// resolve their Rust struct name.
+pub fn render_match_arm_ty(ctx: &RenderContext, arm: &IrMatchArm, match_ty: &almide_lang::types::Ty, subject_ty: Option<&almide_lang::types::Ty>) -> String {
+    let pattern = render_pattern_ty(ctx, &arm.pattern, subject_ty);
     // err() in a match arm where the match type is NOT Result: early return.
     // This handles `let x: T = match ... { none => err("msg") }` in
     // functions returning Result — the err() doesn't contribute a T value,
@@ -382,6 +385,115 @@ pub fn render_match_arm(ctx: &RenderContext, arm: &IrMatchArm, match_ty: &almide
 /// Check if any match arm uses a list pattern.
 pub fn arms_have_list_pattern(arms: &[IrMatchArm]) -> bool {
     arms.iter().any(|arm| matches!(&arm.pattern, IrPattern::List { .. }))
+}
+
+/// Resolve the Rust struct name (and total field count, if known) for an
+/// anonymous record whose value/scrutinee has type `ty`. Mirrors how record
+/// literals are named in codegen so patterns and constructors agree.
+fn anon_record_name(ctx: &RenderContext, ty: Option<&Ty>) -> (String, Option<usize>) {
+    match ty {
+        Some(Ty::Named(n, _)) =>
+            (n.to_string(), ctx.ann.record_field_counts.get(n.as_str()).copied()),
+        Some(Ty::Record { fields }) | Some(Ty::OpenRecord { fields }) => {
+            let mut names: Vec<String> = fields.iter().map(|(n, _)| n.to_string()).collect();
+            names.sort();
+            let name = ctx.ann.named_records.get(&names).cloned()
+                .or_else(|| ctx.ann.anon_records.get(&names).cloned())
+                .unwrap_or_else(|| names.join("_"));
+            (name, Some(fields.len()))
+        }
+        _ => ("_".into(), None),
+    }
+}
+
+/// Field (name, type) pairs of a record-typed scrutinee, for typing nested
+/// field sub-patterns.
+fn record_field_types(ty: Option<&Ty>) -> Vec<(Sym, Ty)> {
+    match ty {
+        Some(Ty::Record { fields }) | Some(Ty::OpenRecord { fields }) => fields.clone(),
+        _ => vec![],
+    }
+}
+
+fn applied_arg(ty: Option<&Ty>, ctor: TypeConstructorId, idx: usize) -> Option<Ty> {
+    match ty {
+        Some(Ty::Applied(c, args)) if *c == ctor => args.get(idx).cloned(),
+        _ => None,
+    }
+}
+
+/// Like `render_pattern`, but threads the scrutinee type so that anonymous
+/// record patterns (`{ x, y }`) can be qualified with their Rust struct name
+/// (which `render_pattern` alone cannot recover). Recurses through composites
+/// with the corresponding sub-types; delegates leaves to `render_pattern`.
+pub fn render_pattern_ty(ctx: &RenderContext, pat: &IrPattern, scrut: Option<&Ty>) -> String {
+    match pat {
+        IrPattern::RecordPattern { name, fields, rest } if name.is_empty() => {
+            let (type_name, total) = anon_record_name(ctx, scrut);
+            let qualified = match ctx.ann.ctor_to_enum.get(&type_name) {
+                Some(en) => ctx.templates.render_with("ctor_qualify", None, &[], &[("enum_name", en.as_str()), ("ctor_name", type_name.as_str())])
+                    .unwrap_or_else(|| format!("{}::{}", en, type_name)),
+                None => type_name,
+            };
+            let field_tys = record_field_types(scrut);
+            let fields_str = fields.iter().map(|f| {
+                let fty = field_tys.iter().find(|(n, _)| n.as_str() == f.name.as_str()).map(|(_, t)| t);
+                match &f.pattern {
+                    Some(p) => format!("{}: {}", f.name, render_pattern_ty(ctx, p, fty)),
+                    None => f.name.clone(),
+                }
+            }).collect::<Vec<_>>().join(", ");
+            let needs_rest = *rest || total.map_or(false, |n| fields.len() < n);
+            if needs_rest {
+                if fields_str.is_empty() {
+                    ctx.templates.render_with("record_pattern_rest_empty", None, &[], &[("name", qualified.as_str()), ("fields", "")])
+                        .unwrap_or_else(|| format!("{} {{ .. }}", qualified))
+                } else {
+                    ctx.templates.render_with("record_pattern_rest", None, &[], &[("name", qualified.as_str()), ("fields", fields_str.as_str())])
+                        .unwrap_or_else(|| format!("{} {{ {}, .. }}", qualified, fields_str))
+                }
+            } else {
+                ctx.templates.render_with("destructure_pattern", None, &[], &[("name", qualified.as_str()), ("fields", fields_str.as_str())])
+                    .unwrap_or_else(|| format!("{} {{ {} }}", qualified, fields_str))
+            }
+        }
+        IrPattern::Tuple { elements } => {
+            let elem_tys: Vec<Ty> = match scrut { Some(Ty::Tuple(ts)) => ts.clone(), _ => vec![] };
+            let elems = elements.iter().enumerate()
+                .map(|(i, e)| render_pattern_ty(ctx, e, elem_tys.get(i)))
+                .collect::<Vec<_>>().join(", ");
+            ctx.templates.render_with("tuple_literal", None, &[], &[("elements", elems.as_str())])
+                .unwrap_or_else(|| format!("({})", elems))
+        }
+        IrPattern::List { elements } => {
+            let ety = applied_arg(scrut, TypeConstructorId::List, 0);
+            if elements.is_empty() {
+                "[]".to_string()
+            } else {
+                let elems = elements.iter().map(|e| render_pattern_ty(ctx, e, ety.as_ref())).collect::<Vec<_>>().join(", ");
+                format!("[{}]", elems)
+            }
+        }
+        IrPattern::Some { inner } => {
+            let pty = applied_arg(scrut, TypeConstructorId::Option, 0);
+            let binding_s = render_pattern_ty(ctx, inner, pty.as_ref());
+            ctx.templates.render_with("pattern_some", None, &[], &[("binding", binding_s.as_str())])
+                .unwrap_or_else(|| format!("Some({})", binding_s))
+        }
+        IrPattern::Ok { inner } => {
+            let pty = applied_arg(scrut, TypeConstructorId::Result, 0);
+            let binding_s = render_pattern_ty(ctx, inner, pty.as_ref());
+            ctx.templates.render_with("pattern_ok", None, &[], &[("binding", binding_s.as_str())])
+                .unwrap_or_else(|| format!("Ok({})", binding_s))
+        }
+        IrPattern::Err { inner } => {
+            let pty = applied_arg(scrut, TypeConstructorId::Result, 1);
+            let binding_s = render_pattern_ty(ctx, inner, pty.as_ref());
+            ctx.templates.render_with("pattern_err", None, &[], &[("binding", binding_s.as_str())])
+                .unwrap_or_else(|| format!("Err({})", binding_s))
+        }
+        _ => render_pattern(ctx, pat),
+    }
 }
 
 pub fn render_pattern(ctx: &RenderContext, pat: &IrPattern) -> String {

@@ -324,3 +324,28 @@ test "pattern with record spread destructure" {
   assert_eq(port, 8080);
   assert_eq(debug, true)
 }
+
+test "match on anonymous record pattern" {
+  let pt = { x: 3, y: 4 };
+  let result = match pt {
+    { x, y } => x + y,
+  };
+  assert_eq(result, 7)
+}
+
+test "match record pattern with literal field" {
+  let p = { x: 10, y: 20 };
+  let label = match p {
+    { x: 0, y } => "x-zero",
+    { x, y } => "sum:" + int.to_string(x + y),
+  };
+  assert_eq(label, "sum:30")
+}
+
+test "match record pattern with rest" {
+  let cfg = { host: "h", port: 9090, debug: false };
+  let port = match cfg {
+    { port, .. } => port,
+  };
+  assert_eq(port, 9090)
+}

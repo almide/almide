@@ -1,115 +1,319 @@
-// json — bundled-Almide stdlib module (Stdlib Declarative Unification Stage 4d).
-//
-// Migrated mechanically from `stdlib/defs/json.toml` (29 fns). Runtime
-// impls stay in `runtime/rs/src/json.rs`. `JsonPath` is the opaque
-// path-traversal nominal type — the bundled side only refers to it.
-//
-// Runtime ABI — `j: &Value`, `key: &str`, `path: &AlmideJsonPath`, etc.
-// `from_string` / `from_int` / `from_bool` / `from_float` / `array`
-// used `Value::Str({s})` constructor templates in TOML. The bundled
-// form forwards to the `almide_json_from_*` runtime helpers that
-// match the convention without leaking the `Value` enum name into
-// every template (cleaner + uses the already-exposed runtime fns).
-// The TOML also dispatched `object` directly to `Value::Object(...)`
-// — we route through `almide_json_object(...)`.
-// `null` reuses `almide_rt_value_null()` exactly as before.
-// `set_path`'s TOML had a trailing `?` which is stripped here: the
-// Almide-level signature returns `Result[Value, String]`, so callers
-// propagate via `!` / `?` / match.
+// json — JSON parse / stringify / query over the shared `Value` ADT (defined in
+// value.almd), in pure Almide. Single source of truth: compiles to both the
+// Rust target and the WASM engine, no native runtime. See
+// docs/roadmap/active/json-self-host.md.
 
-@intrinsic("almide_rt_json_parse")
-fn parse(text: String) -> Result[Value, String] = _
+type PathSeg =
+  | PField(String)
+  | PIndex(Int)
 
-@intrinsic("almide_rt_json_stringify")
-fn stringify(v: Value) -> String = _
+type JsonPath = JPath(List[PathSeg])
 
-@intrinsic("almide_json_get")
-fn get(j: Value, key: String) -> Option[Value] = _
+// ── construction (delegates to the value module) ──
 
-@intrinsic("almide_json_keys")
-fn keys(j: Value) -> List[String] = _
+fn from_string(s: String) -> Value = value.str(s)
+fn from_int(n: Int) -> Value = value.int(n)
+fn from_bool(b: Bool) -> Value = value.bool(b)
+fn from_float(n: Float) -> Value = value.float(n)
+fn null() -> Value = value.null()
+fn array(xs: List[Value]) -> Value = value.array(xs)
+fn object(entries: List[(String, Value)]) -> Value = value.object(entries)
 
-@intrinsic("almide_json_from_string")
-fn from_string(s: String) -> Value = _
+fn stringify(v: Value) -> String = value.stringify(v)
 
-@intrinsic("almide_json_from_int")
-fn from_int(n: Int) -> Value = _
+// ── lexer ──
 
-@intrinsic("almide_json_from_bool")
-fn from_bool(b: Bool) -> Value = _
+fn ch(s: String, i: Int) -> String = string.get(s, i) ?? ""
+fn is_ws(c: String) -> Bool = c == " " or c == "\n" or c == "\t" or c == "\r"
+fn is_dig(c: String) -> Bool = c >= "0" and c <= "9"
 
-@intrinsic("almide_rt_value_null")
-fn null() -> Value = _
+fn skip_ws(s: String, i: Int) -> Int =
+  if i < string.len(s) and is_ws(ch(s, i)) then skip_ws(s, i + 1) else i
 
-@intrinsic("almide_json_array")
-fn array(items: List[Value]) -> Value = _
+fn scan_num(s: String, i: Int) -> Int =
+  if i < string.len(s) and (is_dig(ch(s, i)) or ch(s, i) == "-" or ch(s, i) == "+"
+      or ch(s, i) == "." or ch(s, i) == "e" or ch(s, i) == "E")
+    then scan_num(s, i + 1) else i
 
-@intrinsic("almide_json_from_float")
-fn from_float(n: Float) -> Value = _
+// ── string parsing with escapes ──
 
-@intrinsic("almide_json_stringify_pretty")
-fn stringify_pretty(j: Value) -> String = _
+fn parse_str(s: String, i: Int, acc: String) -> (String, Int) = {
+  let c = ch(s, i)
+  if c == "\"" then (acc, i + 1)
+  else if c == "" then (acc, i)
+  else if c == "\\" then {
+    let e = ch(s, i + 1)
+    let decoded = match e {
+      "n" => "\n",
+      "t" => "\t",
+      "r" => "\r",
+      _   => e,
+    }
+    parse_str(s, i + 2, acc + decoded)
+  }
+  else parse_str(s, i + 1, acc + c)
+}
 
-@intrinsic("almide_json_object")
-fn object(entries: List[(String, Value)]) -> Value = _
+// ── recursive-descent value parser, threading the cursor as (Value, Int) ──
 
-// ── key-based typed extraction ──
+fn parse_array(s: String, i0: Int, acc: List[Value]) -> (Value, Int) = {
+  let i = skip_ws(s, i0)
+  if ch(s, i) == "]" then (value.array(acc), i + 1)
+  else {
+    let (v, j0) = parse_value(s, i)
+    let j = skip_ws(s, j0)
+    if ch(s, j) == "," then parse_array(s, j + 1, acc + [v])
+    else (value.array(acc + [v]), j + 1)
+  }
+}
 
-@intrinsic("almide_json_get_string")
-fn get_string(j: Value, key: String) -> Option[String] = _
+fn parse_object(s: String, i0: Int, acc: List[(String, Value)]) -> (Value, Int) = {
+  let i = skip_ws(s, i0)
+  if ch(s, i) == "}" then (value.object(acc), i + 1)
+  else {
+    let (key, j1) = parse_str(s, i + 1, "")
+    let j2 = skip_ws(s, j1)
+    let j3 = if ch(s, j2) == ":" then j2 + 1 else j2
+    let (v, j4) = parse_value(s, j3)
+    let j5 = skip_ws(s, j4)
+    if ch(s, j5) == "," then parse_object(s, j5 + 1, acc + [(key, v)])
+    else (value.object(acc + [(key, v)]), j5 + 1)
+  }
+}
 
-@intrinsic("almide_json_get_int")
-fn get_int(j: Value, key: String) -> Option[Int] = _
+fn parse_value(s: String, i0: Int) -> (Value, Int) = {
+  let i = skip_ws(s, i0)
+  let c = ch(s, i)
+  if c == "[" then parse_array(s, i + 1, [])
+  else if c == "{" then parse_object(s, i + 1, [])
+  else if c == "\"" then {
+    let (str, j) = parse_str(s, i + 1, "")
+    (value.str(str), j)
+  }
+  else if c == "t" then (value.bool(true), i + 4)
+  else if c == "f" then (value.bool(false), i + 5)
+  else if c == "n" then (value.null(), i + 4)
+  else {
+    let end = scan_num(s, i)
+    let span = string.slice(s, i, end)
+    let v = if string.contains(span, ".") or string.contains(span, "e") or string.contains(span, "E")
+      then value.float(float.parse(span) ?? 0.0)
+      else value.int(int.parse(span) ?? 0)
+    (v, end)
+  }
+}
 
-@intrinsic("almide_json_get_float")
-fn get_float(j: Value, key: String) -> Option[Float] = _
+// A well-formed JSON value starts with one of these; the keyword literals
+// (true/false/null) are validated so a stray identifier like "not" doesn't
+// silently parse as `null`.
+fn valid_start(text: String, i: Int) -> Bool = {
+  let c = ch(text, i)
+  if c == "t" then string.slice(text, i, i + 4) == "true"
+  else if c == "f" then string.slice(text, i, i + 5) == "false"
+  else if c == "n" then string.slice(text, i, i + 4) == "null"
+  else c == "[" or c == "{" or c == "\"" or c == "-" or is_dig(c)
+}
 
-@intrinsic("almide_json_get_bool")
-fn get_bool(j: Value, key: String) -> Option[Bool] = _
+fn parse(text: String) -> Result[Value, String] = {
+  let t = skip_ws(text, 0)
+  if t >= string.len(text) then err("unexpected end of input")
+  else if not valid_start(text, t) then err("invalid JSON")
+  else {
+    let (v, _) = parse_value(text, 0)
+    ok(v)
+  }
+}
 
-@intrinsic("almide_json_get_array")
-fn get_array(j: Value, key: String) -> Option[List[Value]] = _
+// ── pretty stringify (2-space indent) ──
 
-// ── value extraction (keyless) ──
+fn indent(n: Int) -> String = string.repeat("  ", n)
 
-@intrinsic("almide_json_to_string")
-fn as_string(j: Value) -> Option[String] = _
+fn pretty_arr(xs: List[Value], i: Int, depth: Int, acc: String) -> String =
+  if i >= list.len(xs) then acc
+  else {
+    let piece = indent(depth + 1) + pretty(list.get_or(xs, i, value.null()), depth + 1)
+    let next = if acc == "" then piece else acc + ",\n" + piece
+    pretty_arr(xs, i + 1, depth, next)
+  }
 
-@intrinsic("almide_json_to_int")
-fn as_int(j: Value) -> Option[Int] = _
+fn pretty_obj(kvs: List[(String, Value)], i: Int, depth: Int, acc: String) -> String =
+  if i >= list.len(kvs) then acc
+  else {
+    let (k, v) = list.get_or(kvs, i, ("", value.null()))
+    let piece = indent(depth + 1) + "\"" + value.escape(k) + "\": " + pretty(v, depth + 1)
+    let next = if acc == "" then piece else acc + ",\n" + piece
+    pretty_obj(kvs, i + 1, depth, next)
+  }
 
-@intrinsic("almide_json_as_float")
-fn as_float(j: Value) -> Option[Float] = _
+fn pretty(v: Value, depth: Int) -> String = match v {
+  VArr(xs) => if list.len(xs) == 0 then "[]"
+    else "[\n" + pretty_arr(xs, 0, depth, "") + "\n" + indent(depth) + "]",
+  VObj(kv) => if list.len(kv) == 0 then "{}"
+    else "{\n" + pretty_obj(kv, 0, depth, "") + "\n" + indent(depth) + "}",
+  _ => value.stringify(v),
+}
 
-@intrinsic("almide_json_as_bool")
-fn as_bool(j: Value) -> Option[Bool] = _
+fn stringify_pretty(j: Value) -> String = pretty(j, 0)
 
-@intrinsic("almide_json_as_array")
-fn as_array(j: Value) -> Option[List[Value]] = _
+// ── keyless extractors (lenient: Int/Float coerce) ──
+
+fn as_string(j: Value) -> Option[String] = match j { VStr(s) => some(s), _ => none }
+fn as_int(j: Value) -> Option[Int] = match j {
+  VInt(n) => some(n),
+  VFloat(f) => some(float.to_int(f)),
+  _ => none,
+}
+fn as_float(j: Value) -> Option[Float] = match j {
+  VFloat(f) => some(f),
+  VInt(n) => some(int.to_float(n)),
+  _ => none,
+}
+fn as_bool(j: Value) -> Option[Bool] = match j { VBool(b) => some(b), _ => none }
+fn as_array(j: Value) -> Option[List[Value]] = match j { VArr(a) => some(a), _ => none }
+
+// ── key-based access ──
+
+fn get(j: Value, key: String) -> Option[Value] = match value.field(j, key) {
+  ok(v) => some(v),
+  err(_) => none,
+}
+
+fn get_string(j: Value, key: String) -> Option[String] = match get(j, key) {
+  some(v) => as_string(v),
+  none => none,
+}
+fn get_int(j: Value, key: String) -> Option[Int] = match get(j, key) {
+  some(v) => as_int(v),
+  none => none,
+}
+fn get_float(j: Value, key: String) -> Option[Float] = match get(j, key) {
+  some(v) => as_float(v),
+  none => none,
+}
+fn get_bool(j: Value, key: String) -> Option[Bool] = match get(j, key) {
+  some(v) => as_bool(v),
+  none => none,
+}
+fn get_array(j: Value, key: String) -> Option[List[Value]] = match get(j, key) {
+  some(v) => as_array(v),
+  none => none,
+}
+
+fn obj_keys(pairs: List[(String, Value)], i: Int, acc: List[String]) -> List[String] =
+  if i >= list.len(pairs) then acc
+  else {
+    let (k, _) = list.get_or(pairs, i, ("", value.null()))
+    obj_keys(pairs, i + 1, acc + [k])
+  }
+
+fn keys(j: Value) -> List[String] = match j {
+  VObj(pairs) => obj_keys(pairs, 0, []),
+  _ => [],
+}
 
 // ── path API ──
 
-@intrinsic("almide_rt_json_root")
-fn root() -> JsonPath = _
+fn root() -> JsonPath = JPath([])
+fn field(path: JsonPath, name: String) -> JsonPath = match path { JPath(segs) => JPath(segs + [PField(name)]) }
+fn index(path: JsonPath, i: Int) -> JsonPath = match path { JPath(segs) => JPath(segs + [PIndex(i)]) }
 
-@intrinsic("almide_rt_json_field")
-fn field(path: JsonPath, name: String) -> JsonPath = _
+fn step(v: Value, seg: PathSeg) -> Option[Value] = match seg {
+  PField(name) => get(v, name),
+  PIndex(i) => match v {
+    VArr(xs) => if i >= 0 and i < list.len(xs) then some(list.get_or(xs, i, value.null())) else none,
+    _ => none,
+  },
+}
 
-@intrinsic("almide_rt_json_index")
-fn index(path: JsonPath, i: Int) -> JsonPath = _
+fn walk(v: Value, segs: List[PathSeg], i: Int) -> Option[Value] =
+  if i >= list.len(segs) then some(v)
+  else match step(v, list.get_or(segs, i, PField(""))) {
+    some(next) => walk(next, segs, i + 1),
+    none => none,
+  }
 
-@intrinsic("almide_json_get_path")
-@borrow_ref(path)
-fn get_path(j: Value, path: JsonPath) -> Option[Value] = _
+fn get_path(j: Value, path: JsonPath) -> Option[Value] = match path {
+  JPath(segs) => walk(j, segs, 0),
+}
 
-@intrinsic("almide_json_set_path")
-@borrow_ref(path)
-@consume(value)
-fn set_path(j: Value, path: JsonPath, value: Value) -> Result[Value, String] = _
+// set_path: rebuild the object/array along the path with `value` at the leaf.
+fn set_pairs(pairs: List[(String, Value)], key: String, v: Value, i: Int, acc: List[(String, Value)], found: Bool) -> List[(String, Value)] =
+  if i >= list.len(pairs) then (if found then acc else acc + [(key, v)])
+  else {
+    let (k, old) = list.get_or(pairs, i, ("", value.null()))
+    if k == key then set_pairs(pairs, key, v, i + 1, acc + [(key, v)], true)
+    else set_pairs(pairs, key, v, i + 1, acc + [(k, old)], found)
+  }
 
-@intrinsic("almide_json_remove_path")
-@borrow_ref(path)
-fn remove_path(j: Value, path: JsonPath) -> Value = _
+fn set_walk(j: Value, segs: List[PathSeg], i: Int, leaf: Value) -> Result[Value, String] =
+  if i >= list.len(segs) then ok(leaf)
+  else match list.get_or(segs, i, PField("")) {
+    PField(name) => {
+      let pairs = match j { VObj(p) => p, _ => [] }
+      let child = match get(j, name) { some(c) => c, none => value.null() }
+      match set_walk(child, segs, i + 1, leaf) {
+        ok(nc) => ok(value.object(set_pairs(pairs, name, nc, 0, [], false))),
+        err(e) => err(e),
+      }
+    },
+    PIndex(idx) => match j {
+      VArr(xs) => if idx >= 0 and idx < list.len(xs) then
+        match set_walk(list.get_or(xs, idx, value.null()), segs, i + 1, leaf) {
+          ok(nc) => ok(value.array(list.set(xs, idx, nc))),
+          err(e) => err(e),
+        }
+        else err("index out of bounds"),
+      _ => err("expected Array for index path"),
+    },
+  }
 
-@intrinsic("almide_json_to_map")
-fn to_map(j: Value) -> Option[Map[String, String]] = _
+fn set_path(j: Value, path: JsonPath, value_arg: Value) -> Result[Value, String] = match path {
+  JPath(segs) => set_walk(j, segs, 0, value_arg),
+}
+
+fn remove_at(xs: List[Value], idx: Int, i: Int, acc: List[Value]) -> List[Value] =
+  if i >= list.len(xs) then acc
+  else {
+    let x = list.get_or(xs, i, value.null())
+    let next = if i == idx then acc else acc + [x]
+    remove_at(xs, idx, i + 1, next)
+  }
+
+fn set_or_keep(j: Value, parent_path: JsonPath, replacement: Value) -> Value =
+  match set_path(j, parent_path, replacement) { ok(r) => r, err(_) => j }
+
+fn remove_path(j: Value, path: JsonPath) -> Value = match path {
+  JPath(segs) =>
+    if list.len(segs) == 0 then j
+    else {
+      let parent_path = JPath(list.take(segs, list.len(segs) - 1))
+      match get_path(j, parent_path) {
+        some(parent) => match list.get_or(segs, list.len(segs) - 1, PField("")) {
+          PField(name) => match parent {
+            VObj(_) => set_or_keep(j, parent_path, value.omit(parent, [name])),
+            _ => j,
+          },
+          PIndex(idx) => match parent {
+            VArr(xs) => set_or_keep(j, parent_path, value.array(remove_at(xs, idx, 0, []))),
+            _ => j,
+          },
+        },
+        none => j,
+      }
+    },
+}
+
+// ── to_map: a flat string→string view of an object ──
+
+fn pairs_to_map(pairs: List[(String, Value)], i: Int, acc: Map[String, String]) -> Map[String, String] =
+  if i >= list.len(pairs) then acc
+  else {
+    let (k, v) = list.get_or(pairs, i, ("", value.null()))
+    let sv = match v { VStr(s) => s, _ => value.stringify(v) }
+    pairs_to_map(pairs, i + 1, map.set(acc, k, sv))
+  }
+
+fn to_map(j: Value) -> Option[Map[String, String]] = match j {
+  VObj(pairs) => some(pairs_to_map(pairs, 0, map.new())),
+  _ => none,
+}

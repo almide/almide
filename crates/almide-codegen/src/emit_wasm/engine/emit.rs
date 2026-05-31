@@ -102,8 +102,8 @@ pub fn emit_op(op: &Op, f: &mut Function, reg: &LayoutRegistry) {
             emit_ops(body, f, reg);
             f.instruction(&End);
         }
-        Op::If { then, else_ } => {
-            f.instruction(&If(wasm_encoder::BlockType::Result(wasm_encoder::ValType::I32)));
+        Op::If { ty, then, else_ } => {
+            f.instruction(&If(wasm_encoder::BlockType::Result(ty.to_valtype())));
             emit_ops(then, f, reg);
             f.instruction(&Else);
             emit_ops(else_, f, reg);
@@ -120,6 +120,9 @@ pub fn emit_op(op: &Op, f: &mut Function, reg: &LayoutRegistry) {
         }
         Op::Br(d) => { f.instruction(&Br(*d)); }
         Op::BrIf(d) => { f.instruction(&BrIf(*d)); }
+        Op::BreakLoop | Op::ContinueLoop => {
+            panic!("break/continue placeholder reached emission — loop lowering should have resolved or rejected it");
+        }
         Op::Return => { f.instruction(&Return); }
         Op::Unreachable => { f.instruction(&Unreachable); }
 
@@ -133,6 +136,10 @@ pub fn emit_op(op: &Op, f: &mut Function, reg: &LayoutRegistry) {
         Op::MemoryGrow => { f.instruction(&MemoryGrow(0)); }
 
         Op::Seq(ops) => emit_ops(ops, f, reg),
+
+        Op::Unsupported(what) => {
+            panic!("Op::Unsupported({what}) reached emission — module builder should have rejected it");
+        }
     }
 }
 
@@ -174,6 +181,7 @@ fn emit_binop(b: &BinOp, f: &mut Function) {
     let instr = match b {
         BinOp::I32Add => I32Add, BinOp::I32Sub => I32Sub, BinOp::I32Mul => I32Mul,
         BinOp::I32DivU => I32DivU, BinOp::I32DivS => I32DivS, BinOp::I32RemS => I32RemS,
+        BinOp::I32RemU => I32RemU,
         BinOp::I32And => I32And, BinOp::I32Or => I32Or, BinOp::I32Xor => I32Xor,
         BinOp::I32Shl => I32Shl, BinOp::I32ShrU => I32ShrU, BinOp::I32ShrS => I32ShrS,
         BinOp::I32Eq => I32Eq, BinOp::I32Ne => I32Ne,

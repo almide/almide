@@ -6,14 +6,17 @@
 
 ## Active
 
-11 items
+16 items
 
 | Item | Description |
 |------|-------------|
+| [ADR: Almide does not adopt WASM-GC](active/adr-no-wasm-gc.md) | ADR — Almide does not adopt WASM-GC; stays linear-memory + Perceus, cherry-picks non-GC WASM features |
 | [AlmidePerceusBelt](active/almide-perceus-belt.md) | AlmidePerceusBelt — formal memory safety guarantee for Almide |
 | [CI Warnings Cleanup](active/ci-warnings-cleanup.md) |  |
 | [Correctness Guarantee Gaps](active/correctness-guarantee-gaps.md) |  |
 | [Capability-Based Effect System](active/effect-system-capability.md) | Capability-based effect system for sandboxed AI agent containers |
+| [Almide Guarantees Charter](active/guarantees-charter.md) | Almide Guarantees Charter — eliminate categories of human/AI worry by mechanical, inferred, LLM-fixable guarantees ("proof without puzzles") |
+| [Almide — The Ideal Form](active/ideal-form.md) | Almide's ideal form — three reinforcing loops (guarantees, correctness, self-hosting) closing on a self-described, AI-maintainable language |
 | [LLM-first Language](active/llm-first-language.md) | Plan to make Almide the language LLMs write most accurately, measured by dojo MSR |
 | [Region-based Memory Management](active/region-inference.md) |  |
 | [Type Where Constraints](active/type-where-constraints.md) | where clauses on type/fn definitions for type constraints |
@@ -21,6 +24,8 @@
 | [WASM Optimization Roadmap](active/wasm-optimization-roadmap.md) |  |
 | [Perceus Void Block Stack Balance — CI Blocker](active/wasm-perceus-void-block.md) |  |
 | [WASM Remaining 15 Skips — Fix Roadmap](active/wasm-remaining-15.md) |  |
+| [WASM Stdlib Dispatch v2 — Declarative Recreate](active/wasm-stdlib-dispatch-v2.md) | Recreate WASM stdlib dispatch as a declarative registry on verified WasmIR |
+| [WASM Engine v2 — Correctness Bug Catalog](active/wasm-v2-correctness-bugs.md) | WASM engine v2 correctness bug catalog, by category, with detection and remediation |
 
 ## On Hold
 

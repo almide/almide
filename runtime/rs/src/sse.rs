@@ -5,7 +5,7 @@
 // only has to hand off a `(text_delta) -> Unit` callback for live
 // rendering and consume the final LLMResponse-shaped JSON.
 //
-// `Value` and `almide_http_request_stream` resolve via flat inlining
+// `SseJson` and `almide_http_request_stream` resolve via flat inlining
 // into the user program (the runtime crate isn't a workspace member —
 // every module's source is concatenated into a single file at compile
 // time). No `use crate::...` imports here.
@@ -26,6 +26,72 @@
 //
 // The almide caller `json.parse`s this and slots fields into
 // `almai.LLMResponse`.
+
+// Private streaming-JSON value + parser. The public Value/json runtime moved to
+// pure Almide (stdlib/value.almd, stdlib/json.almd); SSE keeps its own minimal
+// parser here so the native streaming path stays self-contained.
+#[derive(Clone, Debug)]
+enum SseJson {
+    Null,
+    Bool(bool),
+    Int(i64),
+    Float(f64),
+    Str(String),
+    Array(Vec<SseJson>),
+    Object(Vec<(String, SseJson)>),
+}
+
+fn sse_json_parse(text: &str) -> Result<SseJson, String> {
+    let chars: Vec<char> = text.chars().collect();
+    let mut pos = 0;
+    fn skip_ws(chars: &[char], pos: &mut usize) { while *pos < chars.len() && chars[*pos].is_whitespace() { *pos += 1; } }
+    fn parse_value(chars: &[char], pos: &mut usize) -> Result<SseJson, String> {
+        skip_ws(chars, pos);
+        if *pos >= chars.len() { return Err("unexpected end of input".into()); }
+        match chars[*pos] {
+            '"' => parse_string(chars, pos).map(SseJson::Str),
+            '{' => parse_object(chars, pos),
+            '[' => parse_array(chars, pos),
+            't' | 'f' => parse_bool(chars, pos),
+            'n' => parse_null(chars, pos),
+            c if c == '-' || c.is_ascii_digit() => parse_number(chars, pos),
+            c => Err(format!("unexpected char '{}' at pos {}", c, pos)),
+        }
+    }
+    fn parse_string(chars: &[char], pos: &mut usize) -> Result<String, String> {
+        *pos += 1; let mut s = String::new();
+        while *pos < chars.len() && chars[*pos] != '"' {
+            if chars[*pos] == '\\' {
+                *pos += 1;
+                match chars.get(*pos) {
+                    Some('n') => s.push('\n'), Some('t') => s.push('\t'), Some('r') => s.push('\r'),
+                    Some('b') => s.push('\u{0008}'), Some('f') => s.push('\u{000c}'),
+                    Some('"') => s.push('"'), Some('\\') => s.push('\\'), Some('/') => s.push('/'),
+                    Some('u') => {
+                        let hex: String = (1..=4).filter_map(|i| chars.get(*pos + i).copied()).collect();
+                        *pos += 4;
+                        if hex.len() == 4 { if let Ok(cp) = u32::from_str_radix(&hex, 16) { if let Some(ch) = char::from_u32(cp) { s.push(ch); } } }
+                    }
+                    _ => {}
+                }
+            } else { s.push(chars[*pos]); }
+            *pos += 1;
+        }
+        if *pos < chars.len() { *pos += 1; } Ok(s)
+    }
+    fn parse_number(chars: &[char], pos: &mut usize) -> Result<SseJson, String> {
+        let start = *pos; if chars[*pos]=='-'{*pos+=1;} while *pos<chars.len()&&chars[*pos].is_ascii_digit(){*pos+=1;} let mut is_float=false;
+        if *pos<chars.len()&&chars[*pos]=='.'{is_float=true;*pos+=1;while *pos<chars.len()&&chars[*pos].is_ascii_digit(){*pos+=1;}}
+        if *pos<chars.len()&&(chars[*pos]=='e'||chars[*pos]=='E'){is_float=true;*pos+=1;if *pos<chars.len()&&(chars[*pos]=='+'||chars[*pos]=='-'){*pos+=1;}while *pos<chars.len()&&chars[*pos].is_ascii_digit(){*pos+=1;}}
+        let s:String=chars[start..*pos].iter().collect();
+        if is_float{s.parse::<f64>().map(SseJson::Float).map_err(|e|e.to_string())}else{s.parse::<i64>().map(SseJson::Int).map_err(|e|e.to_string())}
+    }
+    fn parse_bool(chars:&[char],pos:&mut usize)->Result<SseJson,String>{if chars[*pos..].starts_with(&['t','r','u','e']){*pos+=4;Ok(SseJson::Bool(true))}else if chars[*pos..].starts_with(&['f','a','l','s','e']){*pos+=5;Ok(SseJson::Bool(false))}else{Err("expected bool".into())}}
+    fn parse_null(chars:&[char],pos:&mut usize)->Result<SseJson,String>{if chars[*pos..].starts_with(&['n','u','l','l']){*pos+=4;Ok(SseJson::Null)}else{Err("expected null".into())}}
+    fn parse_array(chars:&[char],pos:&mut usize)->Result<SseJson,String>{*pos+=1;skip_ws(chars,pos);let mut items=Vec::new();if *pos<chars.len()&&chars[*pos]==']'{*pos+=1;return Ok(SseJson::Array(items));}loop{items.push(parse_value(chars,pos)?);skip_ws(chars,pos);if *pos<chars.len()&&chars[*pos]==','{*pos+=1;skip_ws(chars,pos);}else{break;}}skip_ws(chars,pos);if *pos<chars.len()&&chars[*pos]==']'{*pos+=1;}Ok(SseJson::Array(items))}
+    fn parse_object(chars:&[char],pos:&mut usize)->Result<SseJson,String>{*pos+=1;skip_ws(chars,pos);let mut pairs=Vec::new();if *pos<chars.len()&&chars[*pos]=='}'{*pos+=1;return Ok(SseJson::Object(pairs));}loop{skip_ws(chars,pos);let key=parse_string(chars,pos)?;skip_ws(chars,pos);if *pos<chars.len()&&chars[*pos]==':'{*pos+=1;}let val=parse_value(chars,pos)?;pairs.push((key,val));skip_ws(chars,pos);if *pos<chars.len()&&chars[*pos]==','{*pos+=1;}else{break;}}skip_ws(chars,pos);if *pos<chars.len()&&chars[*pos]=='}'{*pos+=1;}Ok(SseJson::Object(pairs))}
+    parse_value(&chars, &mut pos)
+}
 
 pub fn almide_rt_sse_openai_chat(
     base_url: &str,
@@ -133,7 +199,7 @@ fn handle_sse_data(
     model_id: &mut String,
     on_text_delta: &mut impl FnMut(String),
 ) {
-    let parsed = match almide_rt_json_parse(payload) {
+    let parsed = match sse_json_parse(payload) {
         Ok(v) => v,
         Err(_) => return,
     };
@@ -154,7 +220,7 @@ fn handle_sse_data(
         }
     }
     let choices = match get_field(&parsed, "choices") {
-        Some(Value::Array(a)) => a,
+        Some(SseJson::Array(a)) => a,
         _ => return,
     };
     let first = match choices.first() {
@@ -176,7 +242,7 @@ fn handle_sse_data(
             content.push_str(&text);
         }
     }
-    if let Some(Value::Array(tcs)) = get_field(&delta, "tool_calls") {
+    if let Some(SseJson::Array(tcs)) = get_field(&delta, "tool_calls") {
         for tc in tcs {
             let idx = get_int(&tc, "index").unwrap_or(0) as usize;
             while tool_calls.len() <= idx {
@@ -202,10 +268,10 @@ fn handle_sse_data(
     }
 }
 
-// ── Tiny Value helpers (mirrors json.rs's getters) ──
+// ── Tiny SseJson helpers (mirrors json.rs's getters) ──
 
-fn get_field(v: &Value, key: &str) -> Option<Value> {
-    if let Value::Object(pairs) = v {
+fn get_field(v: &SseJson, key: &str) -> Option<SseJson> {
+    if let SseJson::Object(pairs) = v {
         for (k, val) in pairs {
             if k == key {
                 return Some(val.clone());
@@ -215,18 +281,18 @@ fn get_field(v: &Value, key: &str) -> Option<Value> {
     None
 }
 
-fn get_string(v: &Value, key: &str) -> Option<String> {
-    if let Some(Value::Str(s)) = get_field(v, key) {
+fn get_string(v: &SseJson, key: &str) -> Option<String> {
+    if let Some(SseJson::Str(s)) = get_field(v, key) {
         Some(s)
     } else {
         None
     }
 }
 
-fn get_int(v: &Value, key: &str) -> Option<i64> {
+fn get_int(v: &SseJson, key: &str) -> Option<i64> {
     match get_field(v, key) {
-        Some(Value::Int(i)) => Some(i),
-        Some(Value::Float(f)) => Some(f as i64),
+        Some(SseJson::Int(i)) => Some(i),
+        Some(SseJson::Float(f)) => Some(f as i64),
         _ => None,
     }
 }
@@ -298,7 +364,7 @@ pub fn almide_rt_sse_anthropic_messages(
                 }
             }
             if data_payload.is_empty() { continue; }
-            let parsed = match almide_rt_json_parse(&data_payload) {
+            let parsed = match sse_json_parse(&data_payload) {
                 Ok(v) => v,
                 Err(_) => continue,
             };
@@ -344,7 +410,7 @@ pub fn almide_rt_sse_anthropic_messages(
 
 fn handle_anthropic_event(
     event_name: &str,
-    parsed: &Value,
+    parsed: &SseJson,
     content: &mut String,
     tool_calls: &mut Vec<ToolCallAcc>,
     prompt_tokens: &mut i64,
