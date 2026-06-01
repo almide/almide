@@ -86,6 +86,62 @@ impl NanoPass for ClosureConversionPass {
 
 // ── Bottom-up Lambda → ClosureCreate conversion ─────────────────────
 
+/// Arg index of an inline-eligible list-combinator's lambda for the `Module`
+/// call form (e.g. egg's fused output), or None.
+fn module_inline_lambda_arg(target: &CallTarget) -> Option<usize> {
+    if let CallTarget::Module { module, func, .. } = target {
+        if module.as_str() == "list" {
+            return list_combinator_inline_arg(func.as_str());
+        }
+    }
+    None
+}
+
+/// Same, for the usual post-IntrinsicLowering `RuntimeCall` form
+/// (`almide_rt_list_<method>`). These are the only combinators the WASM emitter
+/// inline-splices (map/filter at arg 1, fold at arg 2); leaving exactly their
+/// lambda args raw keeps the fast path AND inline-context Perceus RC. A missed
+/// form only costs a perf regression (the arg becomes a ClosureCreate that
+/// dispatches via call_indirect), never correctness.
+fn runtime_inline_lambda_arg(symbol: &almide_base::intern::Sym) -> Option<usize> {
+    match symbol.as_str() {
+        "almide_rt_list_map" | "almide_rt_list_filter" => Some(1),
+        "almide_rt_list_fold" => Some(2),
+        _ => None,
+    }
+}
+
+fn list_combinator_inline_arg(func: &str) -> Option<usize> {
+    match func {
+        "map" | "filter" => Some(1),
+        "fold" => Some(2),
+        _ => None,
+    }
+}
+
+/// Convert nested closures inside a (potential) inline lambda's body, but keep
+/// the lambda itself RAW so the emitter can splice it. Non-lambda args fall back
+/// to normal conversion.
+fn keep_lambda_raw(
+    expr: IrExpr,
+    lifted: &mut Vec<IrFunction>,
+    counter: &mut u32,
+    vt: &mut VarTable,
+) -> IrExpr {
+    let IrExpr { kind, ty, span, def_id } = expr;
+    match kind {
+        IrExprKind::Lambda { params, body, lambda_id } => IrExpr {
+            kind: IrExprKind::Lambda {
+                params,
+                body: Box::new(convert_expr(*body, lifted, counter, vt)),
+                lambda_id,
+            },
+            ty, span, def_id,
+        },
+        other => convert_expr(IrExpr { kind: other, ty, span, def_id }, lifted, counter, vt),
+    }
+}
+
 fn convert_expr(
     expr: IrExpr,
     lifted: &mut Vec<IrFunction>,
@@ -104,17 +160,16 @@ fn convert_expr(
             let param_ids: HashSet<VarId> = params.iter().map(|(v, _)| *v).collect();
             let free = almide_ir::free_vars::free_vars(&body, &param_ids);
 
-            // 3a. No captures → keep as Lambda for potential inline expansion
-            //     in the WASM emitter (avoids call_indirect overhead).
-            if free.is_empty() {
-                return IrExpr {
-                    kind: IrExprKind::Lambda { params, body: Box::new(body), lambda_id },
-                    ty, span, def_id: None,
-                };
-            }
+            // A value-position lambda is always lifted to a ClosureCreate with a
+            // stable, globally-unique function name — even with NO captures (the
+            // emitter builds [table_idx, 0]). Inline-combinator args never reach
+            // here: they were kept raw at the Call/RuntimeCall site above. So we no
+            // longer leave capture-free *value* lambdas raw (that was the source of
+            // the fragile lambda_id-matched value path). (Closure v2, P2b/A.)
 
-            // 3b. Skip conversion for mutable captures (WASM emitter handles
-            //     those via heap cells in the Lambda-based path)
+            // Mutable captures stay raw: the emitter boxes them as heap cells in the
+            // Lambda path, and a lifted env doesn't yet thread the cell correctly
+            // (a P3 concern). So a mutate-captured lambda keeps the raw representation.
             if free.iter().any(|vid| body_assigns_to(&body, *vid)) {
                 return IrExpr {
                     kind: IrExprKind::Lambda { params, body: Box::new(body), lambda_id },
@@ -237,15 +292,31 @@ fn convert_expr(
             stmts: stmts.into_iter().map(|s| convert_stmt(s, lifted, counter, vt)).collect(),
             expr: tail.map(|e| Box::new(convert_expr(*e, lifted, counter, vt))),
         },
-        IrExprKind::Call { target, args, type_args } => IrExprKind::Call {
-            target: convert_target(target, lifted, counter, vt),
-            args: args.into_iter().map(|a| convert_expr(a, lifted, counter, vt)).collect(),
-            type_args,
-        },
-        IrExprKind::RuntimeCall { symbol, args } => IrExprKind::RuntimeCall {
-            symbol,
-            args: args.into_iter().map(|a| convert_expr(a, lifted, counter, vt)).collect(),
-        },
+        IrExprKind::Call { target, args, type_args } => {
+            // An inline-eligible list-combinator's lambda arg stays RAW so the WASM
+            // emitter splices it (no alloc / no call_indirect) and Perceus processes
+            // its body in the INLINE context — lifting it and re-inlining would
+            // corrupt RC. Every OTHER lambda becomes a ClosureCreate value.
+            // (Closure v2, P2b/A.)
+            let inline_idx = module_inline_lambda_arg(&target);
+            let args = args.into_iter().enumerate()
+                .map(|(i, a)| {
+                    if Some(i) == inline_idx { keep_lambda_raw(a, lifted, counter, vt) }
+                    else { convert_expr(a, lifted, counter, vt) }
+                })
+                .collect();
+            IrExprKind::Call { target: convert_target(target, lifted, counter, vt), args, type_args }
+        }
+        IrExprKind::RuntimeCall { symbol, args } => {
+            let inline_idx = runtime_inline_lambda_arg(&symbol);
+            let args = args.into_iter().enumerate()
+                .map(|(i, a)| {
+                    if Some(i) == inline_idx { keep_lambda_raw(a, lifted, counter, vt) }
+                    else { convert_expr(a, lifted, counter, vt) }
+                })
+                .collect();
+            IrExprKind::RuntimeCall { symbol, args }
+        }
         IrExprKind::If { cond, then, else_ } => IrExprKind::If {
             cond: Box::new(convert_expr(*cond, lifted, counter, vt)),
             then: Box::new(convert_expr(*then, lifted, counter, vt)),
