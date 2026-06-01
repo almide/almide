@@ -268,3 +268,60 @@ remaining walker codegen + the `CaptureClonePass` reorder complete it.
   `CanonicalizePass` and mutates only `lambda_id` (not function order), so the
   `Canonical` certificate is unaffected; closure table slots are assigned in scan
   order, independent of these ids, so emitted bytes stay host-deterministic.
+
+## Status & resume (RESUME HERE)
+
+### Done / in flight
+
+| Phase | What | State |
+|---|---|---|
+| P0 | program-unique closure id + register module lambdas | **merged** (`#329`) |
+| P1 | one shared free-var analysis in `almide-ir::free_vars` | **merged** (`#330`) |
+| P2b/A | value lambdas → `ClosureCreate`; only `map/filter/fold` inline args stay raw; capturing combinator lambdas now inline | **merged** (`#331`) |
+| P3 (Rust) | mutated-and-captured Copy locals → shared `Rc<Cell<T>>` (fixes the silent `0` instead of `15`) | **PR `#332`**, branch `closure-v2-p3`, verified (cargo test + spec 240/240) |
+
+P3-Rust is on branch `closure-v2-p3` (commits `22a7d87a` groundwork + `232a4fac` the fix).
+Work in a fresh worktree from `origin/develop` (or `origin/closure-v2-p3` to build on it);
+never touch the main checkout (it has unrelated uncommitted changes).
+
+### OPEN BUG — P3 (WASM): `?` on a closure binding drops the rest of the block
+
+An `effect fn` that **returns a closure** traps on WASM. Precisely isolated:
+
+```almide
+effect fn make_adder_e(n: Int) -> (Int) -> Int = (x) => x + n
+effect fn main() -> Unit = {
+  let add5 = make_adder_e(5)        // auto-`?` (IrExprKind::Try) → TRAPS on wasm
+  // let add5 = make_adder_e(5)!    // explicit Unwrap → WORKS (15)
+  println(int.to_string(add5(10)))
+}
+```
+
+Measured matrix (all correct on native):
+- non-effect fn returning a closure (`make_adder`): wasm OK.
+- effect fn with a closure **local, not returned**: wasm OK (105).
+- effect fn returning a closure, bound via **`!` (`Unwrap`)**: wasm OK (15).
+- effect fn returning a closure, bound via **auto-`?` (`Try`)**: wasm **TRAP** (15-expected).
+
+Root (from the emitted wasm of `main`): after the `Try` tag-check + value-extract,
+`add5` is immediately `rc_dec`'d and the tail `println(int.to_string(add5(10)))` is
+**gone**, leaving `alloc(4); i32.store 0; unreachable`. So the `Try` node on a
+closure-typed binding makes the block emit (or an upstream pass) **drop the
+subsequent statements** — the trap is the leftover stub `unreachable`. NOT the
+closure mechanism: the lifted body, `emit_closure_create`, `Try`'s
+`emit_load_at(Ty::Fn, 4)` (→ `i32_load`, since `ty_to_valtype(Ty::Fn)=I32`), and
+the `Computed`-callee `call_indirect` were all individually verified correct. NOT
+mutable-specific (immutable also traps). Pre-existing (independent of the P3-Rust
+fix; `CaptureClonePass` is `targets=[Rust]`). A `!` workaround exists.
+
+**Where to look next:**
+- `IrExprKind::Try` WASM emit: `emit_wasm/expressions.rs:694` (the `if tag!=0 {return}` + `emit_load_at(ty,4)`). Its `return_` sits inside the block; suspect the control-flow/stack interaction with a following `Bind` + the Perceus `rc_dec` ordering.
+- `pass_result_propagation.rs` (wraps effect-fn calls in `Try`; lines ~151/293/334) — does the `Try`-wrapped binding mis-mark `add5` as last-used, so Perceus decs it early and DCE/StackBalance drops the tail?
+- Compare the emitted wasm of the `!` (`Unwrap`, expressions.rs ~720) vs `?` (`Try`) versions of the repro — the `Unwrap` path is the known-good reference.
+- Re-check the `main` function body in `wasm-tools print` after a candidate fix: the tail `println(...add5(10)...)` must be present and the trailing `unreachable` gone.
+Repro files from this session: `/tmp/p3_eff_imm.almd` (traps), `/tmp/p3_eff_bang.almd` (works), `/tmp/p3_mut_local.almd` (the P3-Rust silent-wrong, now 15).
+
+### Remaining roadmap (after P3-WASM)
+- **P3 (WASM)**: fix the `Try`×closure-binding tail-drop above (and, separately, the narrow-int env sign-extension via `emit_load_at` if not yet covered).
+- **P4**: Rust reads the shared capture set directly (retire `needs_clone_type` + the implicit-move analysis) so there is truly one capture analysis for both targets.
+- **P5**: Lean — certify the env RC contract (`inc == dec` over captures) once it is keyed on the Closure node, closing the Perceus→binary proof chain.
