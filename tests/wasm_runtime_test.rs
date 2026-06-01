@@ -677,3 +677,27 @@ fn wasm_effect_fn_returns_closure_used_twice() {
          }\n",
     );
 }
+
+#[test]
+fn rust_process_exec_forwards_bound_list() {
+    // Regression (bug report 2026-06-02): forwarding a *bound* List[String] to
+    // process.exec emitted `&[String]` at the call site while the runtime shim took
+    // `&Vec<String>`, so `almide check` passed but `almide build` failed (E0308) —
+    // the worst failure mode (codegen produces invalid Rust). A List *literal*
+    // compiled fine, which made it sneaky. `process.*` is native-only, so this is a
+    // Rust-target build+run test: `run_rust` compiles via `almide run` and panics if
+    // the build fails, then we assert the output.
+    let out = run_rust(
+        "import process\n\
+         effect fn run(cmd: String, a: List[String]) -> String =\n\
+         \x20 match process.exec(cmd, a) {\n\
+         \x20   ok(o) => o,\n\
+         \x20   err(_) => \"\",\n\
+         \x20 }\n\
+         effect fn main() -> Unit = {\n\
+         \x20 let out = run(\"echo\", [\"hello\"])\n\
+         \x20 println(out)\n\
+         }\n",
+    );
+    assert_eq!(out, "hello");
+}

@@ -7,7 +7,7 @@ pub struct ProcessStatus {
     pub stderr: String,
 }
 
-pub fn almide_rt_process_exec(cmd: &str, args: &Vec<String>) -> Result<String, String> {
+pub fn almide_rt_process_exec(cmd: &str, args: &[String]) -> Result<String, String> {
     match std::process::Command::new(cmd).args(args).output() {
         Ok(out) => {
             if out.status.success() {
@@ -42,7 +42,7 @@ pub fn almide_rt_process_stdin_lines() -> Result<Vec<String>, String> {
         .map_err(|e| e.to_string())
 }
 
-pub fn almide_rt_process_exec_in(dir: &str, cmd: &str, args: &Vec<String>) -> Result<String, String> {
+pub fn almide_rt_process_exec_in(dir: &str, cmd: &str, args: &[String]) -> Result<String, String> {
     match std::process::Command::new(cmd).args(args).current_dir(dir).output() {
         Ok(out) => {
             if out.status.success() {
@@ -55,7 +55,7 @@ pub fn almide_rt_process_exec_in(dir: &str, cmd: &str, args: &Vec<String>) -> Re
     }
 }
 
-pub fn almide_rt_process_exec_with_stdin(cmd: &str, args: &Vec<String>, input: &str) -> Result<String, String> {
+pub fn almide_rt_process_exec_with_stdin(cmd: &str, args: &[String], input: &str) -> Result<String, String> {
     use std::io::Write;
     let mut child = std::process::Command::new(cmd)
         .args(args)
@@ -87,7 +87,7 @@ mod tests {
     }
 }
 
-pub fn almide_rt_process_exec_status(cmd: &str, args: &Vec<String>) -> Result<ProcessStatus, String> {
+pub fn almide_rt_process_exec_status(cmd: &str, args: &[String]) -> Result<ProcessStatus, String> {
     match std::process::Command::new(cmd).args(args).output() {
         Ok(out) => {
             let code = out.status.code().unwrap_or(-1) as i64;
@@ -107,7 +107,7 @@ pub fn almide_rt_process_env(key: &str) -> Option<String> {
     std::env::var(key).ok()
 }
 
-pub fn almide_rt_process_spawn(cmd: &str, args: &Vec<String>) -> Result<i64, String> {
+pub fn almide_rt_process_spawn(cmd: &str, args: &[String]) -> Result<i64, String> {
     std::process::Command::new(cmd)
         .args(args)
         .stdin(std::process::Stdio::null())
