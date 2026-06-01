@@ -273,10 +273,15 @@ impl Pipeline {
             }
 
             let pass_name = pass.name();
-            let _pass_t = std::time::Instant::now();
+            // Gate the clock read: std::time::Instant::now() panics on
+            // wasm32-unknown-unknown (the browser playground target), so only
+            // read it when profiling is actually requested.
+            let _pass_t = std::env::var_os("ALMIDE_PROFILE")
+                .is_some()
+                .then(std::time::Instant::now);
             let result = pass.run(program, target);
-            if std::env::var_os("ALMIDE_PROFILE").is_some() {
-                let dt = _pass_t.elapsed().as_secs_f64();
+            if let Some(t) = &_pass_t {
+                let dt = t.elapsed().as_secs_f64();
                 if dt > 0.01 { eprintln!("[prof:pass] {:30} {:.3}s", pass_name, dt); }
             }
             program = result.program;
