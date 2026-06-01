@@ -282,6 +282,7 @@ remaining walker codegen + the `CaptureClonePass` reorder complete it.
 | P3 (WASM) | auto-`?` closure binding called by name → `lower_call_target` mis-resolution (traps on wasm) | **FIXED**, branch `closure-v2-p3`, verified (spec 240/240 + cargo test + 2 regressions) |
 | P4 | Rust's two private free-var scans (`pass_capture_clone`, walker `CaptureCollector`) → the shared `almide_ir::free_vars` | **DONE** (`7bdc31f3`), branch `closure-v2-p3`, verified (spec 240/240 + cargo test); −218 LOC |
 | P5 | Lean — certify the env RC contract (`inc == dec` over captures), folding closures into the no-leak proof | **DONE** (`f6c55727`), `AlmidePerceusBelt/ClosureRc.lean`, `lake build` green, no `sorry` |
+| P6 | non-Copy mutable captures → shared cell (`SharedMut`/heap cell) so a closure's mutation propagates — was silently wrong on both targets | **DONE** (`f680b807`), branch `closure-v2-p3`, verified (spec 240/240 + cargo test + 2 cross-target regressions) |
 
 P3 is on branch `closure-v2-p3` (Rust: `22a7d87a` groundwork + `232a4fac` fix; WASM: the call-target fix below).
 Work in a fresh worktree from `origin/develop` (or `origin/closure-v2-p3` to build on it);
@@ -379,7 +380,37 @@ is the stronger result: it proves the code the compiler really emits is RC-corre
 closes the Perceus→binary proof chain for closures — the one path that was previously
 outside the proof.
 
+### DONE — P6: non-Copy mutable captures (the silent-wrong gap, closed)
+
+Surfaced while red-teaming completeness: `var acc: List = []; let f = () => list.push(acc, 1);
+f(); f(); list.len(acc)` returned **0** on BOTH targets — the closure's mutation was lost.
+P3 had only covered Copy scalars (`Rc<Cell>` / heap cell); a non-Copy capture went through
+Rust's `RcCow` (copy-on-write — a shared write clones, dropping the mutation) and WASM
+captured the list by value. The fix makes a captured-and-mutated non-Copy var a *shared* cell
+(`SharedMut<T>` = `Rc<RefCell<T>>` on Rust; the existing heap cell on WASM):
+
+- **Detection** keys on *mutation through the closure*, not the IR `Mutability` flag — a
+  `var` mutated only via a method (`list.push`) is recorded `Let` (never reassigned). Rust's
+  `CaptureClonePass` and WASM's `ClosureConversionPass` both scan for assignment / `&mut`-borrow
+  / in-place-mutator (`list.push` …) of a captured var.
+- **Rust**: `SharedMut` mirrors `Cell`'s `.get()/.set()` so reads/assigns lower unchanged;
+  only the constructor (`SharedMut::new`) and in-place mutation (`borrow_mut()`) branch by type;
+  RcCow is retired for these vars. A shared read borrows an owned snapshot (`&x.get()`) so it is
+  safe even in tail position where the cell is a block-local.
+- **WASM**: a mutated capture must stay a *raw* lambda (the heap-cell path) instead of lifting
+  to a `ClosureCreate` whose env loses the cell; `shared_mut_vars` (computed before conversion,
+  while the body still names the capture) seeds `mutable_captures` so the cell threads through
+  the env and `list.push`'s realloc writes the new pointer back to it.
+
+Verified native==wasm: mutate-through-capture (`2`), nested closures (`3`), Copy still works
+(`20`), read-only captures unchanged (`40`/`104`); spec 240/240; full `cargo test`; two new
+cross-target regressions. The Lean P5 proof already covers these cells with no change: a shared
+cell is an ordinary captured heap object (`Rc::clone` on capture, `dec` on drop), so
+`closure_env_rc_balanced` proves its `inc == dec` — content mutation is RC-orthogonal.
+
 ### Status: Closure Architecture v2 complete
 
-P0–P5 all landed on branch `closure-v2-p3` (P0/P1/P2b merged via #329/#330/#331; P3-Rust,
-P3-WASM, P4, P5 are the later commits on the branch). No remaining phases.
+P0–P6 all landed on branch `closure-v2-p3` (P0/P1/P2b merged via #329/#330/#331; P3-Rust,
+P3-WASM, P4, P5, P6 are the later commits on the branch). No remaining phases — closures are
+correct (incl. mutable captures of every type, both targets), use one capture analysis, and are
+RC-proven in Lean.

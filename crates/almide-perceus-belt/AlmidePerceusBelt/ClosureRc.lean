@@ -139,4 +139,16 @@ theorem closureScope_allHeapFreed (cv : VarId) (caps : List VarId) (cont : FnBod
     omega
   · exact decCaps_allHeapFreed caps cont h
 
+/-
+  P6 (mutable captures) needs NO new proof. A captured *mutable* var lowers to a
+  shared cell (`SharedMut` = `Rc<RefCell<T>>` on Rust, a heap cell on WASM). From
+  the reference-counting view that cell is an ordinary captured heap object: the
+  closure `Rc::clone`s it at create (an `inc`) and `dec`s it at drop — exactly the
+  discipline `closureScope` models. So `closure_env_rc_balanced` already certifies
+  its `inc == dec`, and `closureScope_allHeapFreed` that it is freed. The interior
+  mutation (`borrow_mut().push(…)`) changes the cell's *contents*, not its refcount,
+  so it is orthogonal to the RC contract. The env RC proof therefore covers captures
+  of every kind — immutable, Copy-mutable, and non-Copy-mutable alike.
+-/
+
 end AlmidePerceusBelt
