@@ -38,10 +38,10 @@ use super::values;
 /// Lookup for record/variant field types by nominal name.
 /// Used during pre-scan to resolve `Ty::Named` to concrete field types
 /// so that destructuring patterns allocate the correct WASM local valtypes.
-pub(super) type RecordFieldLookup = HashMap<String, Vec<(String, Ty)>>;
+pub(super) type RecordFieldLookup = std::collections::BTreeMap<String, Vec<(String, Ty)>>;
 
 /// Lookup for variant type info by nominal name.
-pub(super) type VariantInfoLookup = HashMap<String, Vec<VariantCase>>;
+pub(super) type VariantInfoLookup = std::collections::BTreeMap<String, Vec<VariantCase>>;
 
 impl FuncCompiler<'_> {
     /// Get the element type of a list variable from VarTable.
