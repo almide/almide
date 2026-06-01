@@ -636,10 +636,15 @@ mod closure_conversion {
         let program = mk_program(vec![func], vt);
         let result = run_pass(&ClosureConversionPass, program, Target::Wasm);
 
-        // Capture-free lambdas stay as Lambda (not lifted) for inline expansion
-        // in the WASM emitter — only lambdas with captures get lifted.
-        assert_eq!(result.functions.len(), 1,
-            "Capture-free lambda should NOT be lifted, got {} functions", result.functions.len());
+        // A value-position lambda (here `let f = (x) => x + 1`, called via a
+        // Computed callee — not an inline-combinator arg) is lifted to a stable
+        // ClosureCreate even when capture-free. Only inline-combinator lambda args
+        // stay raw now. So the program gains a lifted `__closure_*` function.
+        // (Closure v2, P2b/A — representation is use-based, not capture-based.)
+        assert_eq!(result.functions.len(), 2,
+            "Capture-free VALUE lambda should be lifted to a closure, got {} functions", result.functions.len());
+        assert!(result.functions.iter().any(|f| f.name.as_str().starts_with("__closure_")),
+            "expected a lifted __closure_* function");
     }
 }
 
