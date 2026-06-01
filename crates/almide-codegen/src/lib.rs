@@ -49,6 +49,7 @@ pub mod pass_peephole;
 pub mod pass_anf;
 pub mod pass_stack_balance;
 pub mod pass_perceus;
+pub mod pass_canonicalize;
 pub mod perceus_verified;
 pub mod pass_egg_saturation;
 pub mod pass_matrix_shape_spec;
@@ -168,6 +169,45 @@ impl<'a> Verified<'a> {
     }
 }
 
+/// AlmidePerceusBelt — determinism layer (L3). Sibling of [`Verified`].
+///
+/// A function's WASM index is its position in `program.functions` /
+/// `module.functions`. `Canonical` certifies those Vecs are in a
+/// content-derived canonical order (the [`pass_canonicalize`] postcondition), so
+/// the emitted module order is a pure function of the program — not of a host's
+/// `HashMap` iteration or a pass's append order. WASM emit accepts only
+/// `Canonical`, so a program reaches byte emission only after canonicalization:
+/// the type-level guarantee that the in-browser (wasm32) compiler cannot emit a
+/// module that diverges from the native one. This is the order-determinism
+/// analogue of how `Verified` gates emit on RC balance.
+///
+/// `certify` consumes a [`Verified`], so "RC-verified" is a prerequisite of
+/// "canonical" — you cannot mint this certificate for an unverified program.
+pub struct Canonical<'a>(pub(crate) &'a IrProgram);
+
+impl<'a> Canonical<'a> {
+    /// Refine `Verified` → `Canonical`, asserting the canonical-order
+    /// postcondition `CanonicalizePass` establishes. A violation means
+    /// `CanonicalizePass` was removed from the pipeline or a later pass reordered
+    /// functions — a compiler bug: debug builds panic, release builds warn and
+    /// proceed (determinism may regress; correctness does not).
+    pub(crate) fn certify(verified: Verified<'a>) -> Self {
+        let program = verified.0;
+        if !pass_canonicalize::is_canonical(program) {
+            debug_assert!(
+                false,
+                "Canonical::certify: program is not in canonical function order — \
+                 CanonicalizePass must run as the terminal WASM pass"
+            );
+            eprintln!(
+                "[Determinism] WASM emit reached without canonical function order — \
+                 output may be host-nondeterministic"
+            );
+        }
+        Self(program)
+    }
+}
+
 pub fn codegen_with(program: &mut IrProgram, target: Target, options: &CodegenOptions) -> CodegenOutput {
     let config = target::configure(target);
     let prof = std::env::var_os("ALMIDE_PROFILE").is_some();
@@ -187,10 +227,16 @@ pub fn codegen_with(program: &mut IrProgram, target: Target, options: &CodegenOp
     // Layer 3: Target-specific emit
     match target {
         Target::Wasm => {
-            // AlmidePerceusBelt: Verified::verify() runs Lean 4-certified
-            // RC balance check. Only verified programs can reach WASM emit.
+            // AlmidePerceusBelt: a program reaches WASM emit only after passing
+            // two type-state gates, in this order:
+            //   Verified  — Perceus RC balance (Lean 4-certified check)
+            //   Canonical — functions are in canonical emit order, so the wasm32
+            //               (browser) compiler can't diverge from native.
+            // `CanonicalizePass` (terminal pipeline pass) establishes the order;
+            // `Canonical::certify` consumes `Verified` and asserts it.
             let verified = Verified::verify(program);
-            let out = emit_wasm::emit_verified(verified);
+            let canonical = Canonical::certify(verified);
+            let out = emit_wasm::emit_certified(canonical);
             if let Some(et) = &et { eprintln!("[prof:codegen] wasm_emit={:.3}s", et.elapsed_secs()); }
             CodegenOutput::Binary(out)
         }

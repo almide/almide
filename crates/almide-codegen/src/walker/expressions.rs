@@ -412,10 +412,16 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
             // Fill in default fields that were not explicitly provided.
             // default_fields is keyed by both bare name ("Msg") and module-qualified
             // name ("dep_pkg.Msg"), so we try the exact ctor_name_str first.
-            let default_keys: Vec<(String, String)> = ctx.ann.default_fields.keys()
+            let mut default_keys: Vec<(String, String)> = ctx.ann.default_fields.keys()
                 .filter(|(cn, _)| cn == ctor_name_str)
                 .cloned()
                 .collect();
+            // `default_fields` is a HashMap, so `.keys()` iteration order is
+            // per-process (RandomState). Sort the default fields we append so
+            // the emitted struct literal is host-deterministic. Explicit fields
+            // are already in IR order; defaults follow in (ctor, field) order.
+            // Determinism Belt — Rust-target emit.
+            default_keys.sort();
             for (_, field_name) in &default_keys {
                 if explicit_names.contains(field_name.as_str()) { continue; }
                 let Some(default_expr) = ctx.ann.default_fields.get(&(ctor_name_str.to_string(), field_name.clone())) else { continue; };
