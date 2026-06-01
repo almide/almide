@@ -116,15 +116,23 @@ pub(super) fn pre_scan_closures(program: &IrProgram, emitter: &mut WasmEmitter) 
     // function table. After ClosureConversion, Lambda nodes become ClosureCreate
     // nodes referencing lifted __closure_N functions. These functions must be in
     // the table so call_indirect can dispatch them.
-    let mut closure_create_names: HashSet<String> = HashSet::new();
+    let mut closure_create_set: HashSet<String> = HashSet::new();
     for func in &program.functions {
-        collect_closure_creates(&func.body, &mut closure_create_names);
+        collect_closure_creates(&func.body, &mut closure_create_set);
     }
     for module in &program.modules {
         for func in &module.functions {
-            collect_closure_creates(&func.body, &mut closure_create_names);
+            collect_closure_creates(&func.body, &mut closure_create_set);
         }
     }
+    // Sort before assigning function-table slots: HashSet iteration order is
+    // host-dependent (hash seed + usize-width bucket layout), which made the
+    // compiler emit different `call_indirect` table indices when run on a
+    // 32-bit host (wasm32, the browser playground) vs a 64-bit host — a valid
+    // but divergent module that traps with `unreachable`. Sorting makes the
+    // table layout a pure function of the program (mirrors fn_ref_names.sort()).
+    let mut closure_create_names: Vec<String> = closure_create_set.into_iter().collect();
+    closure_create_names.sort();
     for name in &closure_create_names {
         if let Some(&func_idx) = emitter.func_map.get(name.as_str()) {
             if !emitter.func_to_table_idx.contains_key(&func_idx) {

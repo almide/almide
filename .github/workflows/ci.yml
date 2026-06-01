@@ -120,6 +120,50 @@ jobs:
           $ALMIDE test spec/ --target wasm
 
   # ═══════════════════════════════════════════════
+  # WASM host-arch codegen determinism
+  #
+  # The compiler runs as wasm32 in the browser playground but as 64-bit in the
+  # test suite. A codegen path whose output depends on host pointer width or
+  # HashMap iteration order emits a different — but stack-/RC-valid — module on
+  # 32-bit, which can trap (`RuntimeError: unreachable`). The stack/Perceus
+  # verifiers check one module's well-formedness, not reproducibility across
+  # hosts. This gate compiles each fixture with the compiler built BOTH natively
+  # and to wasm32-wasip1 and asserts byte-identical output.
+  # ═══════════════════════════════════════════════
+
+  wasm-host-determinism:
+    name: WASM host-arch determinism
+    if: github.server_url == 'https://github.com'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: wasm32-wasip1
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            tools/wasmgen-harness/target
+          key: wasmgen-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('**/Cargo.lock') }}-${{ hashFiles('crates/almide-codegen/src/emit_wasm/**') }}
+          restore-keys: wasmgen-${{ env.RUST_TOOLCHAIN }}-
+
+      - name: Install wasmtime
+        run: |
+          VERSION=$(curl -s https://api.github.com/repos/bytecodealliance/wasmtime/releases/latest | grep '"tag_name"' | cut -d'"' -f4)
+          curl -LO "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/wasmtime-${VERSION}-x86_64-linux.tar.xz"
+          tar -xf wasmtime-*.tar.xz
+          sudo mv wasmtime-*/wasmtime /usr/local/bin/
+          wasmtime --version
+
+      - name: Host-arch codegen determinism (wasm32 vs native, byte-identical)
+        run: scripts/check-host-determinism.sh
+
+  # ═══════════════════════════════════════════════
   # Lean Proofs (AlmidePerceusBelt)
   # ═══════════════════════════════════════════════
 
@@ -256,7 +300,9 @@ jobs:
 
   trigger-playground:
     name: Trigger Playground Deploy
-    needs: [test-rust, checks]
+    # Gate the deploy on host-arch determinism: the playground runs the compiler
+    # as wasm32, so a 32/64-bit codegen divergence must block deploy, not ship.
+    needs: [test-rust, checks, wasm-host-determinism]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
