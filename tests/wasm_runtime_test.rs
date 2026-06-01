@@ -508,3 +508,115 @@ fn wasm_cross_target_spec() {
         );
     }
 }
+
+// ── Closure Architecture v2, P0: cross-module closure identity ──
+// A submodule function returning a non-capturing lambda, applied across the
+// module boundary. Before P0 the WASM emitter correlated a raw Lambda to its
+// LambdaInfo by `lambda_id`, which resets to 0 per module — so a module lambda
+// collided with a main-program lambda of the same id, AND module lambdas were
+// never registered in the WASM closure pre-scan. `lib.neg()(5)` then returned
+// main's `add` body on WASM (native `1005 / -5`, WASM `1005 / 1005`), and a
+// no-main-lambda variant emitted invalid WASM ("table index out of bounds").
+// GlobalizeClosureIdsPass (program-unique ids) + scanning module functions in
+// the pre-scan fix both. These must run on WASM and match the native result.
+
+/// Write a multi-file project into a tempdir and assert its `main.almd`
+/// produces identical stdout on the Rust and WASM targets.
+fn assert_cross_target_project(files: &[(&str, &str)]) {
+    let bin = almide_bin();
+    if Command::new(&bin).arg("--version").output().is_err() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    for (rel, content) in files {
+        let p = dir.path().join(rel);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(&p, content).unwrap();
+    }
+
+    // Native: compile + run from inside the project dir (so almide.toml resolves).
+    let r = Command::new(&bin)
+        .current_dir(dir.path())
+        .args(["run", "main.almd"])
+        .output()
+        .expect("native run");
+    assert!(
+        r.status.success(),
+        "native compile/run failed:\n{}",
+        String::from_utf8_lossy(&r.stderr)
+    );
+    let rust_out = String::from_utf8_lossy(&r.stdout).trim().to_string();
+
+    // WASM: build, then run with wasmtime (skip the run if wasmtime is absent —
+    // the native arm and the build still gate, and the byte gate covers wasm32).
+    let b = Command::new(&bin)
+        .current_dir(dir.path())
+        .args(["build", "main.almd", "--target", "wasm", "-o", "out.wasm"])
+        .output()
+        .expect("wasm build");
+    assert!(
+        b.status.success(),
+        "wasm build failed:\n{}",
+        String::from_utf8_lossy(&b.stderr)
+    );
+    let w = match Command::new("wasmtime")
+        .current_dir(dir.path())
+        .arg("--dir=/")
+        .arg("out.wasm")
+        .output()
+    {
+        Ok(o) if o.status.code() != Some(127) => o,
+        _ => return, // wasmtime unavailable
+    };
+    assert!(
+        w.status.success(),
+        "wasm execution failed (invalid module?):\n{}",
+        String::from_utf8_lossy(&w.stderr)
+    );
+    let wasm_out = String::from_utf8_lossy(&w.stdout).trim().to_string();
+
+    assert_eq!(
+        rust_out, wasm_out,
+        "\ncross-module closure mismatch!\nRust: {:?}\nWASM: {:?}",
+        rust_out, wasm_out
+    );
+}
+
+const CROSS_PKG_TOML: &str = "[package]\nname = \"clostest\"\nversion = \"0.1.0\"\n\n[targets]\nwasm = true\n";
+const CROSS_PKG_LIB: &str = "pub fn neg() -> (Int) -> Int = (n) => 0 - n\n";
+
+#[test]
+fn wasm_cross_module_returned_non_capturing_lambda() {
+    assert_cross_target_project(&[
+        ("almide.toml", CROSS_PKG_TOML),
+        ("src/lib.almd", CROSS_PKG_LIB),
+        (
+            "main.almd",
+            "import self.lib\n\
+             fn apply(f: (Int) -> Int, x: Int) -> Int = f(x)\n\
+             fn add() -> (Int) -> Int = (n) => n + 1000\n\
+             fn main() -> Unit = {\n\
+             \x20 println(int.to_string(apply(add(), 5)))\n\
+             \x20 println(int.to_string(apply(lib.neg(), 5)))\n\
+             }\n",
+        ),
+    ]);
+}
+
+#[test]
+fn wasm_cross_module_lambda_without_local_decoy() {
+    // No main-program lambda for the module lambda to mis-resolve to: before P0
+    // this emitted invalid WASM ("unknown table 0: table index out of bounds").
+    assert_cross_target_project(&[
+        ("almide.toml", CROSS_PKG_TOML),
+        ("src/lib.almd", CROSS_PKG_LIB),
+        (
+            "main.almd",
+            "import self.lib\n\
+             fn apply(f: (Int) -> Int, x: Int) -> Int = f(x)\n\
+             fn main() -> Unit = {\n\
+             \x20 println(int.to_string(apply(lib.neg(), 5)))\n\
+             }\n",
+        ),
+    ]);
+}
