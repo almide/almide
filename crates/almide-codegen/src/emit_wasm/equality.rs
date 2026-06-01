@@ -3,6 +3,7 @@
 //! Type-aware recursive equality for List, Option, Result, Tuple, Record, Variant.
 
 use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use super::FuncCompiler;
 use super::VariantCase;
@@ -614,16 +615,15 @@ impl FuncCompiler<'_> {
 
     /// Find local index for a pattern field binding by name.
     pub(super) fn find_var_by_field(&self, field_name: &str, _case_fields: &[(String, Ty)]) -> Option<&u32> {
-        // Search var_map for VarIds whose name in var_table matches field_name
-        for (&var_id, local_idx) in &self.var_map {
-            if (var_id as usize) < self.var_table.len() {
-                let info = self.var_table.get(almide_ir::VarId(var_id));
-                if info.name == field_name {
-                    return Some(local_idx);
-                }
-            }
-        }
-        None
+        // Pick the SMALLEST matching VarId, not first-in-iteration: var_map is a
+        // HashMap whose iteration order is host-pointer-width dependent, so a
+        // first-match would choose a different local index on wasm32 (the
+        // playground) vs x86-64 → a wrong-slot local.get → garbage read → trap.
+        self.var_map.iter()
+            .filter(|&(&var_id, _)| (var_id as usize) < self.var_table.len()
+                && self.var_table.get(almide_ir::VarId(var_id)).name == field_name)
+            .min_by_key(|&(&var_id, _)| var_id)
+            .map(|(_, local_idx)| local_idx)
     }
 
 }
@@ -697,8 +697,8 @@ impl FuncCompiler<'_> {
 /// `FuncCompiler::extract_record_fields` delegates here.
 pub(super) fn extract_record_fields(
     ty: &Ty,
-    record_fields: &HashMap<String, Vec<(String, Ty)>>,
-    variant_info: &HashMap<String, Vec<VariantCase>>,
+    record_fields: &BTreeMap<String, Vec<(String, Ty)>>,
+    variant_info: &BTreeMap<String, Vec<VariantCase>>,
 ) -> Vec<(String, Ty)> {
     match ty {
         Ty::Record { fields } | Ty::OpenRecord { fields } => {

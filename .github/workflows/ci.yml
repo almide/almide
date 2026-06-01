@@ -141,7 +141,14 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
-          targets: wasm32-wasip1
+          targets: wasm32-wasip1, wasm32-unknown-unknown
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
 
       - uses: actions/cache@v4
         with:
@@ -149,7 +156,8 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             tools/wasmgen-harness/target
-          key: wasmgen-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('**/Cargo.lock') }}-${{ hashFiles('crates/almide-codegen/src/emit_wasm/**') }}
+            tools/wasmgen-harness-uu/target
+          key: wasmgen-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('**/Cargo.lock') }}-${{ hashFiles('crates/almide-codegen/src/emit_wasm/**', 'crates/almide-codegen/src/lib.rs', 'crates/almide-codegen/src/pass.rs') }}
           restore-keys: wasmgen-${{ env.RUST_TOOLCHAIN }}-
 
       - name: Install wasmtime
@@ -160,8 +168,11 @@ jobs:
           sudo mv wasmtime-*/wasmtime /usr/local/bin/
           wasmtime --version
 
-      - name: Host-arch codegen determinism (wasm32 vs native, byte-identical)
+      - name: Host-arch codegen determinism (wasm32-wasip1 vs native, byte-identical)
         run: scripts/check-host-determinism.sh
+
+      - name: Browser-ABI determinism (wasm32-unknown-unknown via node, no panic + byte-identical)
+        run: scripts/check-browser-determinism.sh
 
   # ═══════════════════════════════════════════════
   # Lean Proofs (AlmidePerceusBelt)
