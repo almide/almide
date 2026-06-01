@@ -1,0 +1,22 @@
+# Browser-ABI determinism harness: the SAME compile_to_wasm the playground uses,
+# built to wasm32-unknown-unknown (the actual browser target) via wasm-bindgen.
+# Run by scripts/check-browser-determinism.sh under node, it (1) must not panic
+# (wasm32-unknown-unknown lacks std::time etc.) and (2) must emit byte-identical
+# output to the native compiler. Standalone (own workspace).
+[workspace]
+
+[package]
+name = "wasmgen-harness-uu"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+almide = { path = "../.." }
+wasm-bindgen = "0.2"
+
+[profile.release]
+opt-level = 2
