@@ -186,6 +186,72 @@ raw `Lambda`) still need raw lambdas. Never split that across releases.
 | **P4** | Rust reads the shared capture set fully; retire `needs_clone_type` + the third (implicit-move) analysis | one analysis, both targets |
 | **P5** | Lean: certify `inc == dec` over env | the proof chain closes |
 
+## P3 ground truth (measured on develop, post-P2b/A)
+
+A behavioral probe of the three red-team "blockers" against the actual language
+**corrected the framing** — only one is a live bug:
+
+- **Recursion is moot.** A self-referential *local* lambda
+  (`let fact = (n) => ... fact(n-1)`) is rejected by the checker
+  (`E002 undefined function 'fact'`): recursion uses top-level `fn` (a named
+  `FnRef`, not a closure value). There is nothing to fix; the SCC pass is unneeded.
+- **Immutable captures already work**, heap ones included. `let prefix = "hi-"; (n) => prefix + n`
+  returns the right answer on **both** targets with correct RC — the "RC-through-env"
+  concern is, in practice, already handled for the immutable case.
+- **Mutable captures are the only real bug**, and it is serious:
+  - **Rust target — silent wrong result.** `var total = 0; let add = (x) => { total = total + x }; add(5); add(10); total`
+    returns **`0`** (should be `15`). The emitter renders `let add = move |x| { total = total + x }`:
+    the `move` closure captures a **copy** of `total` (it's `Copy`), so the outer
+    `total` never changes. (A *silent* wrong answer — the worst class for a
+    write-accuracy language.) An *escaping* mutable closure (`make_counter`) fails
+    to compile entirely (`rustc E0525`, FnMut-as-Fn).
+  - **WASM target — escape traps.** The heap-cell mechanism is correct for a
+    *non-escaping* mutable capture (returns `15`), but a mutable closure that
+    **escapes** its frame (`make_counter`) **traps at runtime**.
+
+### The fix (feature-sized, not a patch)
+
+A mutated-and-captured variable must be **shared mutable state**, not a moved/cloned
+copy — the same conclusion the WASM cell mechanism already implements, applied to
+Rust and corrected for escape:
+
+- **Rust**: a `Mutability::Var` captured-and-mutated var is lowered to
+  `Rc<Cell<T>>` (`Copy`) / `Rc<RefCell<T>>` (`!Copy`): declaration `Rc::new(Cell::new(init))`,
+  every read `→ .get()`, every write `→ .set(v)`, and the closure captures `Rc::clone`
+  (sharing the cell). Needs a detection set (`shared_mut_vars`) threaded into the
+  walker (Bind/Var/Assign) and `CaptureClonePass` (clone the `Rc`, not the value).
+- **WASM**: keep the heap cell, but fix the escape — the captured cell pointer
+  must be stored into the env even when the cell var isn't a direct local at the
+  closure-build site (the `var_map`-miss that stores `0`).
+
+This is the genuine content of "ByMutCell" — a new shared-cell representation
+threaded through both backends, not a one-line change. SCC-recursion and the
+broad RC-through-env work in the row below are *not* needed (recursion is moot,
+immutable RC already works).
+
+**Architectural intricacy (discovered while implementing).** The Rust fix is not
+just walker codegen — it needs a pipeline reorder. The capture classification
+(which vars are mutated-and-captured → `shared_mut`) currently lives in the
+walker's annotation phase, the *last* stage. But `CaptureClonePass` (much earlier)
+is what wraps a capturing lambda in `{ let __cap = v.clone(); move |..| ..__cap.. }`,
+and it *skips* `Copy` captures (an `Int` needs no pre-clone for a `move`). Once an
+`Int` counter becomes `Rc<Cell<i64>>` it is **no longer `Copy`**, so it now *does*
+need that clone-wrap — otherwise the `move` consumes the only `Rc` and the var is
+unusable after the closure. So `CaptureClonePass` must wrap `shared_mut` captures,
+but it runs *before* the classification that identifies them — a circular
+dependency. Resolving it cleanly means **computing the mutated-and-captured set
+once, early (before `CaptureClonePass`)**, and having both `CaptureClonePass` (wrap
++ `Rc::clone` the cell, mark `__cap` as `shared_mut` too) and the walker (Bind →
+`Rc::new(Cell::new())`, read → `.get()`, write → `.set()`, owned-context →
+`.get()`) consume it. That single shared analysis is the right structure (it
+mirrors P1's "one analysis, both consumers"); it is also why this is a focused
+feature, not a tail-of-session patch — a partial threading compiles but silently
+misbehaves in some context, the exact failure mode being fixed.
+
+Groundwork landed on the `closure-v2-p3` branch (not merged): the `shared_mut_vars`
+annotation + helper, and the Copy-vs-non-Copy split in the capture classifier. The
+remaining walker codegen + the `CaptureClonePass` reorder complete it.
+
 ## Honest limits
 
 - **P0 is a targeted fix, not the redesign.** It makes `lambda_id` program-unique

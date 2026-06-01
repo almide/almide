@@ -458,12 +458,21 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
             }
         }
 
-        // Phase 1: Collect all non-Copy `var` bindings
-        struct VarBindCollector { vars: std::collections::HashSet<u32> }
+        // Phase 1: Collect `var` bindings, split by Copy-ness. Non-Copy mutable
+        // vars (String/List/...) that are captured become `RcCow` (share via
+        // Rc::clone). Copy mutable vars (Int/Float/Bool) that are captured become
+        // a shared `Rc<Cell<T>>` (`shared_mut_vars`) — a plain `move` closure would
+        // copy them and silently drop the mutation. (Closure v2, P3.)
+        struct VarBindCollector {
+            vars: std::collections::HashSet<u32>,
+            copy_vars: std::collections::HashSet<u32>,
+        }
         impl almide_ir::visit::IrVisitor for VarBindCollector {
             fn visit_stmt(&mut self, stmt: &IrStmt) {
                 if let IrStmtKind::Bind { var, mutability: almide_ir::Mutability::Var, ty, .. } = &stmt.kind {
-                    if !matches!(ty, Ty::Int | Ty::Float | Ty::Bool | Ty::Unit | Ty::Unknown) {
+                    if matches!(ty, Ty::Int | Ty::Float | Ty::Bool) {
+                        self.copy_vars.insert(var.0);
+                    } else if !matches!(ty, Ty::Unit | Ty::Unknown) {
                         self.vars.insert(var.0);
                     }
                 }
@@ -473,7 +482,7 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
                 almide_ir::visit::walk_expr(self, expr);
             }
         }
-        let mut collector = VarBindCollector { vars: std::collections::HashSet::new() };
+        let mut collector = VarBindCollector { vars: std::collections::HashSet::new(), copy_vars: std::collections::HashSet::new() };
         use almide_ir::visit::IrVisitor;
         for func in &program.functions {
             collector.visit_expr(&func.body);
@@ -530,13 +539,21 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
             for func in &module.functions { cap.visit_expr(&func.body); }
         }
 
-        // Phase 3: Only vars captured by lambdas get RcCow; rest are LocalMut (let mut)
+        // Phase 3: captured non-Copy mutable vars → RcCow; rest LocalMut (let mut)
         for var_id in collector.vars {
             if exclude.contains(&var_id) { continue; }
             if cap.captured.contains(&var_id) {
                 ann.var_storage.insert(VarId(var_id), VarStorage::RcCow);
             }
             // LocalMut: no entry in var_storage → walker emits plain `let mut T`
+        }
+        // Captured Copy-type mutable vars → shared Rc<Cell<T>> so a mutation inside
+        // the closure is observed by the enclosing scope. (Closure v2, P3.)
+        for var_id in collector.copy_vars {
+            if exclude.contains(&var_id) { continue; }
+            if cap.captured.contains(&var_id) {
+                ann.shared_mut_vars.insert(VarId(var_id));
+            }
         }
     }
     let mut ctx = RenderContext {

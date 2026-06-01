@@ -48,6 +48,13 @@ pub struct CodegenAnnotations {
     /// derive `PartialEq` (a field transitively blocks equality — e.g.
     /// contains a Matrix or a function pointer).
     pub eq_blocked_types: HashSet<String>,
+    /// `Mutability::Var` locals that are captured-and-mutated by a closure. On the
+    /// Rust target these are lowered to a shared `Rc<Cell<T>>` / `Rc<RefCell<T>>`
+    /// cell (declaration, every read/write, and the closure capture go through the
+    /// cell) so a mutation inside the closure is observed by the enclosing scope —
+    /// a plain `move` closure would capture a *copy* and silently drop the mutation.
+    /// (Closure v2, P3.)
+    pub shared_mut_vars: HashSet<VarId>,
 }
 
 impl CodegenAnnotations {
@@ -66,6 +73,12 @@ impl CodegenAnnotations {
 
     pub fn is_rc_cow(&self, var: &VarId) -> bool {
         matches!(self.var_storage.get(var), Some(VarStorage::RcCow))
+    }
+
+    /// True if `var` is a closure-captured mutable local lowered to a shared cell
+    /// (`Rc<Cell<T>>`/`Rc<RefCell<T>>`) on the Rust target. (Closure v2, P3.)
+    pub fn is_shared_mut(&self, var: &VarId) -> bool {
+        self.shared_mut_vars.contains(var)
     }
 
     pub fn is_module_var(&self, var: &VarId, name: &str) -> bool {
