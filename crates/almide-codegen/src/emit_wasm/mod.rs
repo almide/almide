@@ -62,6 +62,12 @@ pub mod scratch;
 mod dce;
 
 use std::collections::HashMap;
+// BTreeMap for record_fields / variant_info: their iteration order reaches
+// emitted bytes (field offsets, variant sizes, the Unknown-type member-access
+// fallback), and HashMap iteration is host-pointer-width dependent (hashbrown's
+// h2 control byte = hash >> (usize_bits-7)), so a wasm32 host (the playground)
+// would pick different offsets than x86-64 and trap. BTreeMap is deterministic.
+use std::collections::BTreeMap;
 use wasm_encoder::{
     CodeSection, DataSection, ElementSection, Elements, ExportSection,
     Function, FunctionSection, GlobalSection, GlobalType, ImportSection,
@@ -336,9 +342,9 @@ pub struct WasmEmitter {
     pub user_exports: Vec<(String, String)>,
 
     // Type info: record/variant name → field list (for field offset computation)
-    pub record_fields: HashMap<String, Vec<(String, almide_lang::types::Ty)>>,
+    pub record_fields: BTreeMap<String, Vec<(String, almide_lang::types::Ty)>>,
     // Variant info: variant type name → list of (case_name, tag, fields)
-    pub variant_info: HashMap<String, Vec<VariantCase>>,
+    pub variant_info: BTreeMap<String, Vec<VariantCase>>,
     // Default field values: (type_name, field_name) → default IR expr
     pub default_fields: HashMap<(String, String), almide_ir::IrExpr>,
 
@@ -465,8 +471,8 @@ impl WasmEmitter {
             next_global: 5, // 0=heap_ptr, 1=free_list, 2=preopen_table, 3=preopen_count, 4=heap_start
             func_table: Vec::new(),
             func_to_table_idx: HashMap::new(),
-            record_fields: HashMap::new(),
-            variant_info: HashMap::new(),
+            record_fields: BTreeMap::new(),
+            variant_info: BTreeMap::new(),
             default_fields: HashMap::new(),
             lambdas: Vec::new(),
             fn_ref_wrappers: HashMap::new(),
@@ -1861,7 +1867,7 @@ fn register_anonymous_records(program: &IrProgram, emitter: &mut WasmEmitter) {
     fn walk_ty(
         ty: &Ty,
         seen: &mut HashSet<Vec<(String, String)>>,
-        record_fields: &mut HashMap<String, Vec<(String, Ty)>>,
+        record_fields: &mut BTreeMap<String, Vec<(String, Ty)>>,
     ) {
         match ty {
             Ty::Record { fields } | Ty::OpenRecord { fields } => {
@@ -1890,7 +1896,7 @@ fn register_anonymous_records(program: &IrProgram, emitter: &mut WasmEmitter) {
     fn walk_expr(
         expr: &IrExpr,
         seen: &mut HashSet<Vec<(String, String)>>,
-        record_fields: &mut HashMap<String, Vec<(String, Ty)>>,
+        record_fields: &mut BTreeMap<String, Vec<(String, Ty)>>,
     ) {
         walk_ty(&expr.ty, seen, record_fields);
         match &expr.kind {
@@ -1963,7 +1969,7 @@ fn register_anonymous_records(program: &IrProgram, emitter: &mut WasmEmitter) {
     fn walk_stmt(
         stmt: &IrStmt,
         seen: &mut HashSet<Vec<(String, String)>>,
-        record_fields: &mut HashMap<String, Vec<(String, Ty)>>,
+        record_fields: &mut BTreeMap<String, Vec<(String, Ty)>>,
     ) {
         match &stmt.kind {
             IrStmtKind::Bind { value, ty, .. } => {
