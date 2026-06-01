@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::collections::BTreeMap;
 use almide_ir::*;
 use almide_ir::visit_mut::{IrMutVisitor, walk_expr_mut, walk_stmt_mut};
 use almide_lang::types::Ty;
@@ -10,7 +11,7 @@ use super::specialization::substitute_ty;
 pub(super) fn rewrite_calls(
     program: &mut IrProgram,
     bound_fns: &HashMap<String, Vec<BoundedParam>>,
-    instances: &HashMap<MonoKey, HashMap<String, Ty>>,
+    instances: &BTreeMap<MonoKey, HashMap<String, Ty>>,
 ) {
     let fn_param_types: HashMap<String, Vec<Ty>> = program.functions.iter()
         .filter(|f| !f.is_test && bound_fns.contains_key::<str>(&f.name))
@@ -44,7 +45,7 @@ pub(super) fn rewrite_calls(
 
 struct RewriteVisitor<'a> {
     bound_fns: &'a HashMap<String, Vec<BoundedParam>>,
-    instances: &'a HashMap<MonoKey, HashMap<String, Ty>>,
+    instances: &'a BTreeMap<MonoKey, HashMap<String, Ty>>,
     fn_param_types: &'a HashMap<String, Vec<Ty>>,
     fn_generics: &'a HashMap<String, Vec<String>>,
     fn_ret_types: &'a HashMap<String, Ty>,
