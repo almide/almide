@@ -280,6 +280,7 @@ remaining walker codegen + the `CaptureClonePass` reorder complete it.
 | P2b/A | value lambdas → `ClosureCreate`; only `map/filter/fold` inline args stay raw; capturing combinator lambdas now inline | **merged** (`#331`) |
 | P3 (Rust) | mutated-and-captured Copy locals → shared `Rc<Cell<T>>` (fixes the silent `0` instead of `15`) | **PR `#332`**, branch `closure-v2-p3`, verified (cargo test + spec 240/240) |
 | P3 (WASM) | auto-`?` closure binding called by name → `lower_call_target` mis-resolution (traps on wasm) | **FIXED**, branch `closure-v2-p3`, verified (spec 240/240 + cargo test + 2 regressions) |
+| P4 | Rust's two private free-var scans (`pass_capture_clone`, walker `CaptureCollector`) → the shared `almide_ir::free_vars` | **DONE** (`7bdc31f3`), branch `closure-v2-p3`, verified (spec 240/240 + cargo test); −218 LOC |
 
 P3 is on branch `closure-v2-p3` (Rust: `22a7d87a` groundwork + `232a4fac` fix; WASM: the call-target fix below).
 Work in a fresh worktree from `origin/develop` (or `origin/closure-v2-p3` to build on it);
@@ -330,6 +331,30 @@ multiple calls in one expr, closure passed to a HOF) cross-target identical; spe
 full `cargo test`; 2 new regressions in `tests/wasm_runtime_test.rs`
 (`wasm_effect_fn_returns_closure_auto_try_binding`, `_used_twice`).
 
+### DONE — P4: one free-var analysis for both targets
+
+The capture set is now computed by exactly one function, `almide_ir::free_vars::free_vars`,
+for every consumer. Before P4 the Rust target had **two** private re-implementations that
+diverged subtly from it:
+- `pass_capture_clone::collect_free_vars` (fed the `__cap` clone-wrap), and
+- the walker's `CaptureCollector` (a lambda-depth/locals-stack walk; fed the `RcCow`
+  storage classification).
+
+Both are deleted; both call sites now use `free_vars`. The shared analysis is strictly
+more accurate — it tracks *all* binders (block `let`s including destructure, match-arm
+patterns, for-in vars, nested lambdas) and is safe-by-default for new IR nodes via
+`walk_expr`, where the hand-rolled scans silently dropped some — and it returns a
+VarId-sorted set, so the `__cap` bindings are now emitted deterministically. Net −218 LOC.
+
+What stays target-specific is the *projection* of that one set, which is correct, not
+duplication: Rust filters to clone-worthy captures (`needs_clone_type` skips `Copy`,
+`SHARED_MUT` forces the `Rc<Cell>` ones) and classifies `RcCow`; WASM stores every
+capture in the env. "Retire `needs_clone_type`" is realized as retiring the duplicate
+*scans* that fed it — the predicate itself is a one-line Rust clone policy, not an
+analysis. Verified: spec 240/240, full `cargo test`, and native==wasm on the tricky
+cases (mutable `Copy` capture → shared cell, a var captured by two closures, a nested
+closure capturing an outer-of-outer var).
+
 ### Remaining roadmap
-- **P4**: Rust reads the shared capture set directly (retire `needs_clone_type` + the implicit-move analysis) so there is truly one capture analysis for both targets.
+- **P5**: Lean — certify the env RC contract (`inc == dec` over captures) once it is keyed on the Closure node, closing the Perceus→binary proof chain.
 - **P5**: Lean — certify the env RC contract (`inc == dec` over captures) once it is keyed on the Closure node, closing the Perceus→binary proof chain.
