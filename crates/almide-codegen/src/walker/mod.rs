@@ -484,47 +484,28 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
             }
         }
 
-        // Phase 2: Find vars captured by lambdas
-        struct CaptureCollector {
-            captured: std::collections::HashSet<u32>,
-            lambda_depth: u32,
-            lambda_locals: Vec<std::collections::HashSet<u32>>,
-        }
-        impl almide_ir::visit::IrVisitor for CaptureCollector {
+        // Phase 2: Find vars captured by any lambda — via the single shared
+        // free-variable analysis (`almide_ir::free_vars`), the same one the WASM
+        // closure path uses. A lambda's captures are the free vars of its body
+        // relative to its params; the union over every lambda is the full captured
+        // set. `free_vars` tracks all binders (block lets incl. destructure, match
+        // arms, for-in vars, nested lambdas), so this is strictly more accurate than
+        // the old hand-rolled lambda-depth walker. (Closure v2, P4: one capture
+        // analysis for both targets.)
+        struct CaptureUnion { captured: std::collections::HashSet<u32> }
+        impl almide_ir::visit::IrVisitor for CaptureUnion {
             fn visit_expr(&mut self, expr: &IrExpr) {
-                match &expr.kind {
-                    IrExprKind::Lambda { params, body, .. } => {
-                        self.lambda_depth += 1;
-                        let mut locals = std::collections::HashSet::new();
-                        for (id, _) in params { locals.insert(id.0); }
-                        self.lambda_locals.push(locals);
-                        almide_ir::visit::walk_expr(self, body);
-                        self.lambda_locals.pop();
-                        self.lambda_depth -= 1;
-                    }
-                    IrExprKind::Var { id } if self.lambda_depth > 0 => {
-                        // Only capture if var is NOT defined inside the current lambda
-                        let is_local = self.lambda_locals.iter().any(|s| s.contains(&id.0));
-                        if !is_local {
-                            self.captured.insert(id.0);
-                        }
-                    }
-                    _ => almide_ir::visit::walk_expr(self, expr),
-                }
-            }
-            fn visit_stmt(&mut self, stmt: &IrStmt) {
-                // Track vars defined inside lambdas
-                if self.lambda_depth > 0 {
-                    if let IrStmtKind::Bind { var, .. } = &stmt.kind {
-                        if let Some(locals) = self.lambda_locals.last_mut() {
-                            locals.insert(var.0);
-                        }
+                if let IrExprKind::Lambda { params, body, .. } = &expr.kind {
+                    let param_set: std::collections::HashSet<VarId> =
+                        params.iter().map(|(v, _)| *v).collect();
+                    for v in almide_ir::free_vars::free_vars(body, &param_set) {
+                        self.captured.insert(v.0);
                     }
                 }
-                almide_ir::visit::walk_stmt(self, stmt);
+                almide_ir::visit::walk_expr(self, expr);
             }
         }
-        let mut cap = CaptureCollector { captured: std::collections::HashSet::new(), lambda_depth: 0, lambda_locals: Vec::new() };
+        let mut cap = CaptureUnion { captured: std::collections::HashSet::new() };
         for func in &program.functions { cap.visit_expr(&func.body); }
         for module in &program.modules {
             for func in &module.functions { cap.visit_expr(&func.body); }
