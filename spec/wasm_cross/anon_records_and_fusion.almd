@@ -1,0 +1,30 @@
+// Determinism Belt L3 cross-arch coverage.
+//
+// Exercises the two emit paths the L3 work touched, so the wasm32-vs-native
+// byte gate covers them:
+//   * Anonymous record shapes — now named by a content hash (FNV-1a over the
+//     field shape) instead of a `__anon_record_{count}` walk-order counter.
+//     `a` and `c` are the same shape and must dedup to one name.
+//   * egg-fused list pipelines — `map ∘ map` collapses to a single lambda whose
+//     fresh param name is now VarId-derived, not from a process-global counter.
+// Both must emit byte-identically whether the compiler runs natively or as
+// wasm32 (the browser playground), on the 1st compile or the Nth in a process.
+
+fn double(x: Int) -> Int = x * 2
+fn inc(x: Int) -> Int = x + 1
+
+fn run() -> Int = {
+  let pipe = [1, 2, 3, 4]
+    |> list.map((n) => double(n))
+    |> list.map((n) => inc(n))
+
+  let a = { x: 1, y: 2 }
+  let b = { label: "k", total: list.len(pipe) }
+  let c = { x: 9, y: 8 }   // same shape as `a` — dedups to one content name
+
+  a.x + a.y + b.total + c.x
+}
+
+fn main() -> Unit = {
+  println(int.to_string(run()))
+}

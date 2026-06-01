@@ -582,14 +582,19 @@ impl FuncCompiler<'_> {
 
 // ── Public API ──────────────────────────────────────────────────────
 
-/// Emit a WASM binary from an IR program (WASI mode).
-/// AlmidePerceusBelt: emit only accepts Verified programs.
-/// This is the type-state gate — unverified IR cannot reach WASM emission.
-pub fn emit_verified(verified: super::Verified<'_>) -> Vec<u8> {
-    emit(verified.0)
+/// Emit a WASM binary from a fully-certified IR program (WASI mode).
+///
+/// AlmidePerceusBelt: the sole public door to WASM emission accepts only a
+/// [`Canonical`](super::Canonical) program, which is reachable only by refining
+/// a [`Verified`](super::Verified) one (see `Canonical::certify`). So neither
+/// RC-unverified nor non-canonical IR can reach emission. `emit` below is
+/// `pub(crate)` so this stays the only entry — closing the prior bypass where a
+/// caller could invoke `emit` directly and skip the gate.
+pub fn emit_certified(canonical: super::Canonical<'_>) -> Vec<u8> {
+    emit(canonical.0)
 }
 
-pub fn emit(program: &IrProgram) -> Vec<u8> {
+pub(crate) fn emit(program: &IrProgram) -> Vec<u8> {
     let mut emitter = WasmEmitter::new();
 
     // Pre-scan: detect filesystem usage to conditionally include init_preopen_dirs
@@ -1849,12 +1854,47 @@ fn compile_variant_eq_funcs(emitter: &mut WasmEmitter, var_table: &almide_ir::Va
 
 use std::collections::HashSet;
 
+/// Content-derived, host-deterministic name for an anonymous record shape.
+///
+/// The name is a pure function of the field shape — the same
+/// `(field_name, Debug(ty))` key used for dedup below — so two structurally
+/// identical records get one name and the name is invariant to the IR walk
+/// order in which a record happens to be discovered. The previous
+/// `__anon_record_{record_fields.len()}` counter coupled the name to walk
+/// position, which is deterministic only as long as the entire upstream walk
+/// order is; the Determinism Belt prefers names that are a function of content,
+/// not provenance.
+///
+/// FNV-1a/64 is used deliberately instead of `std`'s `DefaultHasher`, whose
+/// `RandomState` seed varies per process (it would reintroduce exactly the
+/// non-determinism this is meant to remove). See
+/// docs/roadmap/active/determinism-belt.md.
+fn anon_record_name(key: &[(String, String)]) -> String {
+    const FNV_OFFSET: u64 = 0xcbf29ce484222325;
+    const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
+    let mut h = FNV_OFFSET;
+    let mut mix = |bytes: &[u8]| {
+        for &b in bytes {
+            h ^= b as u64;
+            h = h.wrapping_mul(FNV_PRIME);
+        }
+        // Field separator so `["ab","c"]` and `["a","bc"]` can't alias.
+        h ^= 0xff;
+        h = h.wrapping_mul(FNV_PRIME);
+    };
+    for (n, t) in key {
+        mix(n.as_bytes());
+        mix(t.as_bytes());
+    }
+    format!("__anon_record_{h:016x}")
+}
+
 /// Walk all IR expressions/statements and collect anonymous record shapes
 /// (i.e. `Ty::Record { fields }`). Each unique field-set is registered in
-/// `emitter.record_fields` under a synthetic name `__anon_record_N` so the
-/// emit-phase Member access fallback (which iterates record_fields looking
-/// for a match by field name) can find them when a lambda param's own type
-/// was left as Unknown/TypeVar by type inference.
+/// `emitter.record_fields` under a content-derived name (see
+/// [`anon_record_name`]) so the emit-phase Member access fallback (which
+/// iterates record_fields looking for a match by field name) can find them
+/// when a lambda param's own type was left as Unknown/TypeVar by inference.
 fn register_anonymous_records(program: &IrProgram, emitter: &mut WasmEmitter) {
     use almide_ir::{IrExpr, IrExprKind, IrStmt, IrStmtKind};
     let mut seen: HashSet<Vec<(String, String)>> = HashSet::new();
@@ -1877,8 +1917,8 @@ fn register_anonymous_records(program: &IrProgram, emitter: &mut WasmEmitter) {
                 let key: Vec<(String, String)> = field_vec.iter()
                     .map(|(n, t)| (n.clone(), format!("{:?}", t)))
                     .collect();
+                let name = anon_record_name(&key);
                 if seen.insert(key) {
-                    let name = format!("__anon_record_{}", record_fields.len());
                     record_fields.insert(name, field_vec.clone());
                 }
                 for (_, fty) in fields.iter() { walk_ty(fty, seen, record_fields); }
@@ -1925,8 +1965,8 @@ fn register_anonymous_records(program: &IrProgram, emitter: &mut WasmEmitter) {
                 let key: Vec<(String, String)> = field_vec.iter()
                     .map(|(n, t)| (n.clone(), format!("{:?}", t)))
                     .collect();
+                let name = anon_record_name(&key);
                 if field_vec.iter().all(|(_, t)| !t.is_unresolved()) && seen.insert(key) {
-                    let name = format!("__anon_record_{}", record_fields.len());
                     record_fields.insert(name, field_vec);
                 }
                 for (_, e) in fields.iter() { walk_expr(e, seen, record_fields); }

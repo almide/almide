@@ -207,6 +207,6 @@ Diagnostics for each carry a `try:` snippet that shows the Almide form.
 - License: MIT or Apache-2.0 (see LICENSE files).
 - Repo: <https://github.com/almide/almide>
 - Dojo (MSR benchmark): <https://github.com/almide/almide-dojo>
-- Current stable: v0.23.13 (prev v0.23.12). Fix host-arch WASM codegen divergence (HashMap iteration order leaked into function-table indices → the wasm32 playground compiler emitted a divergent module that trapped); now byte-identical across hosts, guarded by a `wasm-host-determinism` CI gate. WASM name section for trap attribution. 240/240 Rust tests, 232/240 WASM tests (8 skipped).
+- Current stable: v0.23.14 (prev v0.23.13). Determinism Belt L3: a `Canonical<IrProgram>` type-state + a terminal canonicalization pass make WASM emit order a pure function of content — emit accepts only `Canonical` (and `emit` is `pub(crate)`), so bytes are unreachable without the certificate, the order-determinism analogue of how `Verified` gates emit on RC balance. Also fixes egg fused-lambda param names drifting across compiles in a long-lived process (now VarId-derived), names anonymous records by content hash, sorts default struct-fields, and confines the compiler's clock reads to a wasm-safe shim behind a CI purity gate. 240/240 Rust tests.
 - Baseline → 0.14.6 MSR: llama-3.3-70b 17/30 → 23/30 (+20pt);
   Sonnet 4.6 30/30 (100%) validates design.
