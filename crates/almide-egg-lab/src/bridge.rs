@@ -833,24 +833,32 @@ fn lambda_ret_ty(expr: &IrExpr) -> Option<Ty> {
     }
 }
 
-use std::sync::atomic::{AtomicU64, Ordering};
-static EGG_FRESH_COUNTER: AtomicU64 = AtomicU64::new(0);
-
 /// Produce a uniquely-named `Sym` for lambda parameters synthesised
 /// during lower-time beta reduction. The codegen walker identifies
 /// variables by name (`var_table.get(id).name`), so two distinct
 /// `VarId`s with the same name collide into the same Rust binding —
 /// the Stage-1 `snapshot_pipe_chain` regression was caused by
 /// `compose_map_into_fold_fresh` allocating two params with the
-/// previous fixed name `__egg_v`. A process-local counter sidesteps
-/// the collision without needing walker changes.
-fn fresh_sym() -> Sym {
-    let n = EGG_FRESH_COUNTER.fetch_add(1, Ordering::Relaxed);
-    sym(&format!("__egg_v{n}"))
+/// previous fixed name `__egg_v`.
+///
+/// The suffix is `vt.len()`, which equals the `VarId` the imminent
+/// `vt.alloc` will assign (`VarTable::alloc` sets `id = entries.len()`):
+/// unique within the table AND a pure function of allocation order, so it
+/// resets per compile and never depends on process history. A previous
+/// process-global `AtomicU64` drifted across compiles in a long-lived
+/// process (e.g. the in-browser playground compiling repeatedly without
+/// reload), making the SAME input emit `__egg_v0` then `__egg_v1` — a
+/// same-input-different-output determinism bug on the Rust target. Raw
+/// atomics are also forbidden in the compile path by the Determinism Belt
+/// (they don't exist on wasm32-unknown-unknown). See
+/// docs/roadmap/active/determinism-belt.md.
+fn fresh_sym(vt: &VarTable) -> Sym {
+    sym(&format!("__egg_v{}", vt.len()))
 }
 
 fn build_identity_lambda(elem_ty: Ty, vt: &mut VarTable) -> IrExpr {
-    let var = vt.alloc(fresh_sym(), elem_ty.clone(), Mutability::Let, None);
+    let name = fresh_sym(vt);
+    let var = vt.alloc(name, elem_ty.clone(), Mutability::Let, None);
     IrExpr {
         kind: IrExprKind::Lambda {
             params: vec![(var, elem_ty.clone())],
@@ -879,7 +887,8 @@ fn compose_lambdas_fresh(
     let (f_param_id, f_param_ty, f_body) = unary_lambda_parts(f)?;
     let (g_param_id, _g_param_ty, g_body) = unary_lambda_parts(g)?;
 
-    let fresh = vt.alloc(fresh_sym(), f_param_ty.clone(), Mutability::Let, None);
+    let name = fresh_sym(vt);
+    let fresh = vt.alloc(name, f_param_ty.clone(), Mutability::Let, None);
     let fresh_var = IrExpr {
         kind: IrExprKind::Var { id: fresh },
         ty: f_param_ty.clone(),
@@ -917,7 +926,8 @@ fn compose_predicates_fresh(
     let (p_param_id, p_param_ty, p_body) = unary_lambda_parts(p)?;
     let (q_param_id, _q_param_ty, q_body) = unary_lambda_parts(q)?;
 
-    let fresh = vt.alloc(fresh_sym(), p_param_ty.clone(), Mutability::Let, None);
+    let name = fresh_sym(vt);
+    let fresh = vt.alloc(name, p_param_ty.clone(), Mutability::Let, None);
     let fresh_var = IrExpr {
         kind: IrExprKind::Var { id: fresh },
         ty: p_param_ty.clone(),
