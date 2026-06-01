@@ -171,18 +171,18 @@ impl<'a> Verified<'a> {
 pub fn codegen_with(program: &mut IrProgram, target: Target, options: &CodegenOptions) -> CodegenOutput {
     let config = target::configure(target);
     let prof = std::env::var_os("ALMIDE_PROFILE").is_some();
-    // Only read the clock when profiling: `std::time::Instant::now()` PANICS on
-    // wasm32-unknown-unknown (time is unsupported there), and the compiler runs
-    // on that target in the browser playground. An unconditional now() here
-    // crashed every in-browser compile.
-    let pt = prof.then(std::time::Instant::now);
+    // Time only through the sanctioned, wasm-safe shim. Raw std::time is
+    // forbidden in this crate (it panics on wasm32-unknown-unknown, the browser
+    // playground target) — see almide_base::profile and the forbidden-impurities
+    // CI gate.
+    let pt = almide_base::profile::ProfileTimer::start(prof);
 
     // Layer 2: Run Nanopass pipeline (semantic rewrites — takes ownership, returns modified)
     let owned = std::mem::take(program);
     let transformed = config.pipeline.run(owned, target);
     *program = transformed;
-    if let Some(pt) = &pt { eprintln!("[prof:codegen] pipeline={:.3}s", pt.elapsed().as_secs_f64()); }
-    let et = prof.then(std::time::Instant::now);
+    if let Some(pt) = &pt { eprintln!("[prof:codegen] pipeline={:.3}s", pt.elapsed_secs()); }
+    let et = almide_base::profile::ProfileTimer::start(prof);
 
     // Layer 3: Target-specific emit
     match target {
@@ -191,7 +191,7 @@ pub fn codegen_with(program: &mut IrProgram, target: Target, options: &CodegenOp
             // RC balance check. Only verified programs can reach WASM emit.
             let verified = Verified::verify(program);
             let out = emit_wasm::emit_verified(verified);
-            if let Some(et) = &et { eprintln!("[prof:codegen] wasm_emit={:.3}s", et.elapsed().as_secs_f64()); }
+            if let Some(et) = &et { eprintln!("[prof:codegen] wasm_emit={:.3}s", et.elapsed_secs()); }
             CodegenOutput::Binary(out)
         }
         Target::Wgsl => CodegenOutput::Source(emit_wgsl::emit(program)),
