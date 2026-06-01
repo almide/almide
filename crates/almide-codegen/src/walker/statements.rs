@@ -18,14 +18,32 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
             // capture rename (so the closure shares the cell).
             if ctx.ann.is_shared_mut(var) {
                 let name_s = ctx.var_name(*var).to_string();
-                let val_s = if name_s.starts_with("__cap_") {
-                    if let IrExprKind::Var { id } = &value.kind {
-                        format!("{}.clone()", ctx.var_name(*id))
-                    } else {
-                        format!("std::rc::Rc::new(std::cell::Cell::new({}))", render_expr(ctx, value))
-                    }
-                } else {
+                // Copy scalars use `Rc<Cell<T>>` (P3); non-Copy values use `SharedMut`
+                // (`Rc<RefCell<T>>`, P6). A `__cap_*` capture rename is an `Rc::clone`
+                // of the original for either kind, so the closure shares the SAME cell.
+                let is_copy = matches!(ty, Ty::Int | Ty::Float | Ty::Bool);
+                let fresh_cell = |ctx: &RenderContext| if is_copy {
                     format!("std::rc::Rc::new(std::cell::Cell::new({}))", render_expr(ctx, value))
+                } else {
+                    format!("SharedMut::new({})", render_expr(ctx, value))
+                };
+                // A `__cap_N` capture rename is an `Rc::clone` of the original shared
+                // cell. Its value is a bare `Var` or a `Clone{Var}` (CloneInsertionPass
+                // wraps non-Copy values) — either way emit a single `.clone()` of the
+                // cell so the closure shares it rather than allocating a fresh one.
+                let cap_orig = if name_s.starts_with("__cap_") {
+                    match &value.kind {
+                        IrExprKind::Var { id } => Some(*id),
+                        IrExprKind::Clone { expr: inner } => match &inner.kind {
+                            IrExprKind::Var { id } => Some(*id),
+                            _ => None,
+                        },
+                        _ => None,
+                    }
+                } else { None };
+                let val_s = match cap_orig {
+                    Some(id) => format!("{}.clone()", ctx.var_name(id)),
+                    None => fresh_cell(ctx),
                 };
                 return format!("let {} = {};", name_s, val_s);
             }
@@ -236,6 +254,10 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
             let var_ty = &ctx.var_table.get(*target).ty;
             let is_bytes = matches!(var_ty, Ty::Bytes);
             let cast_val = if is_bytes { format!("{} as u8", val_str) } else { val_str };
+            // Shared-mut non-Copy var (`SharedMut`, P6): index through the cell.
+            if ctx.ann.is_shared_mut(target) {
+                return format!("{}.borrow_mut()[{} as usize] = {};", target_str, idx_str, cast_val);
+            }
             match ctx.ann.get_var_storage(target, &target_str) {
                 VarStorage::ModuleRc => format!("{}.with(|c| std::rc::Rc::make_mut(&mut *c.borrow_mut())[{} as usize] = {});", upper, idx_str, cast_val),
                 VarStorage::ModuleCell => format!("{}.with(|c| c.get());", upper),
@@ -248,6 +270,10 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
             let upper = target_str.to_uppercase();
             let key_str = render_expr(ctx, key);
             let val_str = render_expr(ctx, value);
+            // Shared-mut non-Copy var (`SharedMut`, P6): insert through the cell.
+            if ctx.ann.is_shared_mut(target) {
+                return format!("{}.borrow_mut().insert({}, {});", target_str, key_str, val_str);
+            }
             match ctx.ann.get_var_storage(target, &target_str) {
                 VarStorage::ModuleRc => format!("{}.with(|c| std::rc::Rc::make_mut(&mut *c.borrow_mut()).insert({}, {}));", upper, key_str, val_str),
                 VarStorage::RcCow => format!("{}.make_mut().insert({}, {});", target_str, key_str, val_str),
@@ -259,6 +285,10 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
             let target_str = ctx.var_name(*target).to_string();
             let upper = target_str.to_uppercase();
             let val_str = render_expr(ctx, value);
+            // Shared-mut non-Copy var (`SharedMut`, P6): assign the field through the cell.
+            if ctx.ann.is_shared_mut(target) {
+                return format!("{}.borrow_mut().{} = {};", target_str, field, val_str);
+            }
             match ctx.ann.get_var_storage(target, &target_str) {
                 VarStorage::ModuleRc => format!("{}.with(|c| std::rc::Rc::make_mut(&mut *c.borrow_mut()).{} = {});", upper, field, val_str),
                 VarStorage::RcCow => format!("{}.make_mut().{} = {};", target_str, field, val_str),

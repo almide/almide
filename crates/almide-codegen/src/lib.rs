@@ -282,6 +282,17 @@ fn rust_runtime_prelude(for_crate: bool) -> String {
     s.push_str("impl<T: std::hash::Hash> std::hash::Hash for RcCow<T> { fn hash<H: std::hash::Hasher>(&self, state: &mut H) { self.0.hash(state) } }\n");
     // Blanket AlmideConcat: RcCow<T> + Rhs and RcCow<T> + Val<U> — 2 impls cover all combos.
     s.push_str("impl<T: Clone, Rhs> AlmideConcat<Rhs> for RcCow<T> where T: AlmideConcat<Rhs> { type Output = RcCow<<T as AlmideConcat<Rhs>>::Output>; #[inline(always)] fn concat(self, rhs: Rhs) -> Self::Output { RcCow::new((*self).clone().concat(rhs)) } }\n");
+    // SharedMut<T>: shared interior-mutable cell for a non-Copy `var` captured and
+    // mutated through a closure (Closure v2, P6). The non-Copy analogue of the
+    // `Rc<Cell<T>>` used for Copy captures: `Clone` is `Rc::clone` (O(1), shares the
+    // SAME cell) so a `move` closure's mutation is visible to the enclosing scope —
+    // unlike `RcCow`, whose `make_mut` clones on a shared write and loses it. The
+    // `get`/`set` API mirrors `Cell` so reads/assigns lower identically for both.
+    s.push_str(&format!("{vis}struct SharedMut<T>({vis}std::rc::Rc<std::cell::RefCell<T>>);\n"));
+    s.push_str("impl<T> Clone for SharedMut<T> { fn clone(&self) -> Self { SharedMut(std::rc::Rc::clone(&self.0)) } }\n");
+    s.push_str("impl<T: std::fmt::Debug> std::fmt::Debug for SharedMut<T> { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { self.0.borrow().fmt(f) } }\n");
+    s.push_str("impl<T: PartialEq> PartialEq for SharedMut<T> { fn eq(&self, other: &Self) -> bool { *self.0.borrow() == *other.0.borrow() } }\n");
+    s.push_str(&format!("impl<T> SharedMut<T> {{ {vis}fn new(v: T) -> Self {{ SharedMut(std::rc::Rc::new(std::cell::RefCell::new(v))) }} {vis}fn get(&self) -> T where T: Clone {{ self.0.borrow().clone() }} {vis}fn set(&self, v: T) {{ *self.0.borrow_mut() = v; }} {vis}fn borrow(&self) -> std::cell::Ref<'_, T> {{ self.0.borrow() }} {vis}fn borrow_mut(&self) -> std::cell::RefMut<'_, T> {{ self.0.borrow_mut() }} }}\n"));
     s
 }
 

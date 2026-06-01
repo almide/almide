@@ -701,3 +701,41 @@ fn rust_process_exec_forwards_bound_list() {
     );
     assert_eq!(out, "hello");
 }
+
+#[test]
+fn wasm_non_copy_mutable_capture_through_closure() {
+    // Closure v2 P6: mutating a captured non-Copy `var` through a closure must be
+    // visible to the enclosing scope — on BOTH targets. Before P6 it silently
+    // returned 0: Rust used `RcCow` (copy-on-write clones on a shared mutation),
+    // WASM captured the list by value (no shared cell). Copy scalars already worked
+    // (P3 shared cell); this is the non-Copy (`SharedMut` / heap-cell) analogue.
+    assert_cross_target_effect_main(
+        "effect fn main() -> Unit = {\n\
+         \x20 var acc: List[Int] = []\n\
+         \x20 let inner = () => { list.push(acc, 1) }\n\
+         \x20 inner()\n\
+         \x20 inner()\n\
+         \x20 println(int.to_string(list.len(acc)))\n\
+         }\n",
+    );
+}
+
+#[test]
+fn wasm_nested_non_copy_mutable_capture() {
+    // A non-Copy `var` bound inside a closure, mutated by a nested closure — the
+    // tail read of the shared cell must not outlive it (a Rust borrow-lifetime
+    // hazard) and the cell must thread through the WASM env. Cross-target = 3.
+    assert_cross_target_effect_main(
+        "effect fn main() -> Unit = {\n\
+         \x20 let outer = () => {\n\
+         \x20   var acc: List[Int] = []\n\
+         \x20   let inner = () => { list.push(acc, 1) }\n\
+         \x20   inner()\n\
+         \x20   inner()\n\
+         \x20   inner()\n\
+         \x20   list.len(acc)\n\
+         \x20 }\n\
+         \x20 println(int.to_string(outer()))\n\
+         }\n",
+    );
+}

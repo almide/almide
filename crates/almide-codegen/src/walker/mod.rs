@@ -514,6 +514,11 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
         // Phase 3: Only vars captured by lambdas get RcCow; rest are LocalMut (let mut)
         for var_id in collector.vars {
             if exclude.contains(&var_id) { continue; }
+            // Captured mutable vars that became shared cells (`Rc<Cell>` for Copy via
+            // P3, `SharedMut` for non-Copy via P6) are driven by the shared-mut path,
+            // NOT RcCow — RcCow's copy-on-write would lose a mutation made through the
+            // closure. (Closure v2 P6.)
+            if ann.is_shared_mut(&VarId(var_id)) { continue; }
             if cap.captured.contains(&var_id) {
                 ann.var_storage.insert(VarId(var_id), VarStorage::RcCow);
             }

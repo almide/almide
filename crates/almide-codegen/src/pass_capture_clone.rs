@@ -87,10 +87,6 @@ thread_local! {
     static SHARED_MUT: RefCell<HashSet<VarId>> = RefCell::new(HashSet::new());
 }
 
-fn is_copy_ty(ty: &Ty) -> bool {
-    matches!(ty, Ty::Int | Ty::Float | Ty::Bool)
-}
-
 /// Find every Copy-type (`Int`/`Float`/`Bool`) `Mutability::Var` local captured by
 /// a closure. As a moved copy its mutation would be invisible to the enclosing
 /// scope, so it must become a shared cell. (Closure v2, P3.)
@@ -100,9 +96,21 @@ fn detect_shared_mut(program: &IrProgram) -> HashSet<VarId> {
         fn visit_expr(&mut self, expr: &IrExpr) {
             if let IrExprKind::Lambda { params, body, .. } = &expr.kind {
                 let param_set: HashSet<VarId> = params.iter().map(|(v, _)| *v).collect();
+                // Vars this lambda mutates (assigned, or passed `&mut` to a method
+                // like `list.push`). A non-Copy `var` mutated ONLY through a method
+                // is recorded with `Mutability::Let` (it is never reassigned), so the
+                // mutability flag alone misses it — hence the explicit mutation scan.
+                let mut mutated = HashSet::new();
+                collect_mutated_vars(body, &mut mutated);
                 for v in almide_ir::free_vars::free_vars(body, &param_set) {
                     let info = self.vt.get(v);
-                    if matches!(info.mutability, Mutability::Var) && is_copy_ty(&info.ty) {
+                    // A captured var that is mutated through the closure must become a
+                    // shared cell so the mutation is visible to the enclosing scope.
+                    // Copy types lower to `Rc<Cell<T>>`, non-Copy to `SharedMut`
+                    // (`Rc<RefCell<T>>`) — the walker picks by type. Without this a
+                    // non-Copy capture went through `RcCow`, whose copy-on-write loses
+                    // the mutation. (Closure v2: P3 = Copy, P6 = non-Copy.)
+                    if matches!(info.mutability, Mutability::Var) || mutated.contains(&v) {
                         self.out.insert(v);
                     }
                 }
@@ -115,6 +123,32 @@ fn detect_shared_mut(program: &IrProgram) -> HashSet<VarId> {
     for f in &program.functions { w.visit_expr(&f.body); }
     for m in &program.modules { for f in &m.functions { w.visit_expr(&f.body); } }
     w.out
+}
+
+/// Collect VarIds an expression mutates: assignment targets and `&mut`-borrowed
+/// vars (the form `list.push(v, …)` etc. take after `BorrowInsertionPass`).
+fn collect_mutated_vars(expr: &IrExpr, out: &mut HashSet<VarId>) {
+    struct M<'a> { out: &'a mut HashSet<VarId> }
+    impl almide_ir::visit::IrVisitor for M<'_> {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            if let IrExprKind::Borrow { expr: inner, mutable: true, .. } = &e.kind {
+                if let IrExprKind::Var { id } = &inner.kind { self.out.insert(*id); }
+            }
+            almide_ir::visit::walk_expr(self, e);
+        }
+        fn visit_stmt(&mut self, s: &IrStmt) {
+            match &s.kind {
+                IrStmtKind::Assign { var, .. } => { self.out.insert(*var); }
+                IrStmtKind::IndexAssign { target, .. }
+                | IrStmtKind::MapInsert { target, .. }
+                | IrStmtKind::FieldAssign { target, .. } => { self.out.insert(*target); }
+                _ => {}
+            }
+            almide_ir::visit::walk_stmt(self, s);
+        }
+    }
+    use almide_ir::visit::IrVisitor;
+    M { out }.visit_expr(expr);
 }
 
 /// Collect all variables bound by a statement (Bind + BindDestructure).

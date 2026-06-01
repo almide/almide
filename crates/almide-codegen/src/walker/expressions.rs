@@ -730,6 +730,28 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 .unwrap_or_else(|| format!("(*{})", name_s))
         }
         IrExprKind::Borrow { expr: inner, as_str, mutable } => {
+            // Shared-mut non-Copy var (`SharedMut`, Closure v2 P6): borrow through the
+            // `RefCell` rather than the `.get()` clone a bare Var read would emit, so a
+            // mutating call (`list.push(acc, …)` → `&mut *acc.borrow_mut()`) writes the
+            // ONE shared cell the closure also holds. A shared read uses `&*acc.borrow()`
+            // (no clone). Copy shared-mut vars stay on the `Cell` `.get()` path below.
+            if let IrExprKind::Var { id } = &inner.kind {
+                if ctx.ann.is_shared_mut(id)
+                    && !matches!(ctx.var_table.get(*id).ty, Ty::Int | Ty::Float | Ty::Bool)
+                {
+                    let var_name = ctx.var_name(*id).to_string();
+                    return if *mutable {
+                        // In-place mutation writes the one shared cell.
+                        format!("&mut *{}.borrow_mut()", var_name)
+                    } else {
+                        // A shared read borrows an owned snapshot (`.get()` clones the
+                        // cell's value). Unlike `&*x.borrow()`, this owned temporary has
+                        // no lifetime tie to `x`, so it is also safe in tail position
+                        // where `x` is a block-local (`let outer = () => { var a = …; …; a })`.
+                        format!("&{}.get()", var_name)
+                    };
+                }
+            }
             // If the borrowed operand is a Var referencing a fn param
             // already emitted as a reference (`&T`, `&[T]`, `&str`),
             // skip the outer `&` to avoid `&&T` double-borrow. The

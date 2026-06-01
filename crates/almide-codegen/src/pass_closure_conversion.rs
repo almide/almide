@@ -36,6 +36,16 @@ impl NanoPass for ClosureConversionPass {
     }
 
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
+        // Detect captured vars a closure MUTATES, before conversion rewrites their
+        // references to `EnvLoad`s (after which the original VarId is gone). On WASM
+        // such a var must become a shared heap cell (`mutable_captures`), which the
+        // emitter seeds from `shared_mut_vars`. The IR `Mutability` flag is unreliable
+        // here — a non-Copy var mutated only via a method like `list.push` is recorded
+        // `Let` (it is never reassigned). (Closure v2 P6.)
+        for v in detect_mutated_captures(&program) {
+            program.codegen_annotations.shared_mut_vars.insert(v);
+        }
+
         let mut program_lifted = Vec::new();
         let mut counter = 0u32;
 
@@ -169,8 +179,12 @@ fn convert_expr(
 
             // Mutable captures stay raw: the emitter boxes them as heap cells in the
             // Lambda path, and a lifted env doesn't yet thread the cell correctly
-            // (a P3 concern). So a mutate-captured lambda keeps the raw representation.
-            if free.iter().any(|vid| body_assigns_to(&body, *vid)) {
+            // (a P3/P6 concern). So a mutate-captured lambda keeps the raw
+            // representation. "Mutate" includes in-place stdlib ops like
+            // `list.push(acc, …)` — not just reassignment `acc = …` — otherwise a
+            // non-Copy captured var mutated only through a method got lifted to a
+            // ClosureCreate that lost the mutation. (Closure v2 P6.)
+            if free.iter().any(|vid| body_mutates(&body, *vid)) {
                 return IrExpr {
                     kind: IrExprKind::Lambda { params, body: Box::new(body), lambda_id },
                     ty, span, def_id: None,
@@ -629,4 +643,83 @@ fn max_env_load_index(expr: &IrExpr) -> Option<u32> {
     let mut finder = MaxIdx(None);
     finder.visit_expr(expr);
     finder.0
+}
+
+// ── P6: captured-and-mutated var detection (need a shared cell on WASM) ──
+
+/// In-place stdlib mutators — they mutate `args[0]`. A captured var passed here
+/// must become a shared cell even when its IR `Mutability` reads `Let`.
+fn is_inplace_mutator(symbol: &str) -> bool {
+    matches!(symbol,
+        "almide_rt_list_push" | "almide_rt_list_pop" | "almide_rt_list_insert"
+        | "almide_rt_list_remove_at" | "almide_rt_list_set" | "almide_rt_list_sort"
+        | "almide_rt_list_reverse" | "almide_rt_list_clear"
+        | "almide_rt_map_insert" | "almide_rt_map_remove" | "almide_rt_map_clear" | "almide_rt_map_set"
+        | "almide_rt_set_add" | "almide_rt_set_insert" | "almide_rt_set_remove" | "almide_rt_set_clear"
+    )
+}
+
+/// Collects vars an expression mutates: assignment targets, `&mut`-borrows, and
+/// `args[0]` of an in-place stdlib mutator call.
+struct MutatedCollector { out: HashSet<VarId> }
+impl IrVisitor for MutatedCollector {
+    fn visit_expr(&mut self, e: &IrExpr) {
+        match &e.kind {
+            IrExprKind::Borrow { expr: inner, mutable: true, .. } => {
+                if let IrExprKind::Var { id } = &inner.kind { self.out.insert(*id); }
+            }
+            IrExprKind::RuntimeCall { symbol, args } if is_inplace_mutator(symbol) => {
+                if let Some(a) = args.first() {
+                    if let IrExprKind::Var { id } = &a.kind { self.out.insert(*id); }
+                }
+            }
+            _ => {}
+        }
+        walk_expr(self, e);
+    }
+    fn visit_stmt(&mut self, s: &IrStmt) {
+        match &s.kind {
+            IrStmtKind::Assign { var, .. } => { self.out.insert(*var); }
+            IrStmtKind::IndexAssign { target, .. }
+            | IrStmtKind::MapInsert { target, .. }
+            | IrStmtKind::FieldAssign { target, .. } => { self.out.insert(*target); }
+            _ => {}
+        }
+        walk_stmt(self, s);
+    }
+}
+
+/// Every lambda's captures that it mutates (`captures ∩ mutated-in-body`), across
+/// the whole program. Run while lambda bodies still reference the original
+/// capture VarIds — i.e. BEFORE conversion rewrites them to `EnvLoad`s.
+fn detect_mutated_captures(program: &IrProgram) -> HashSet<VarId> {
+    struct W { out: HashSet<VarId> }
+    impl IrVisitor for W {
+        fn visit_expr(&mut self, expr: &IrExpr) {
+            if let IrExprKind::Lambda { params, body, .. } = &expr.kind {
+                let param_set: HashSet<VarId> = params.iter().map(|(v, _)| *v).collect();
+                let mut mc = MutatedCollector { out: HashSet::new() };
+                mc.visit_expr(body);
+                for v in almide_ir::free_vars::free_vars(body, &param_set) {
+                    if mc.out.contains(&v) { self.out.insert(v); }
+                }
+            }
+            walk_expr(self, expr);
+        }
+    }
+    let mut w = W { out: HashSet::new() };
+    for f in &program.functions { w.visit_expr(&f.body); }
+    for tl in &program.top_lets { w.visit_expr(&tl.value); }
+    for m in &program.modules {
+        for f in &m.functions { w.visit_expr(&f.body); }
+        for tl in &m.top_lets { w.visit_expr(&tl.value); }
+    }
+    w.out
+}
+
+/// Does `body` mutate `var` (assignment, `&mut`-borrow, or in-place mutator call)?
+fn body_mutates(body: &IrExpr, var: VarId) -> bool {
+    let mut mc = MutatedCollector { out: HashSet::new() };
+    mc.visit_expr(body);
+    mc.out.contains(&var)
 }
