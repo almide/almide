@@ -281,6 +281,7 @@ remaining walker codegen + the `CaptureClonePass` reorder complete it.
 | P3 (Rust) | mutated-and-captured Copy locals → shared `Rc<Cell<T>>` (fixes the silent `0` instead of `15`) | **PR `#332`**, branch `closure-v2-p3`, verified (cargo test + spec 240/240) |
 | P3 (WASM) | auto-`?` closure binding called by name → `lower_call_target` mis-resolution (traps on wasm) | **FIXED**, branch `closure-v2-p3`, verified (spec 240/240 + cargo test + 2 regressions) |
 | P4 | Rust's two private free-var scans (`pass_capture_clone`, walker `CaptureCollector`) → the shared `almide_ir::free_vars` | **DONE** (`7bdc31f3`), branch `closure-v2-p3`, verified (spec 240/240 + cargo test); −218 LOC |
+| P5 | Lean — certify the env RC contract (`inc == dec` over captures), folding closures into the no-leak proof | **DONE** (`f6c55727`), `AlmidePerceusBelt/ClosureRc.lean`, `lake build` green, no `sorry` |
 
 P3 is on branch `closure-v2-p3` (Rust: `22a7d87a` groundwork + `232a4fac` fix; WASM: the call-target fix below).
 Work in a fresh worktree from `origin/develop` (or `origin/closure-v2-p3` to build on it);
@@ -355,6 +356,30 @@ analysis. Verified: spec 240/240, full `cargo test`, and native==wasm on the tri
 cases (mutable `Copy` capture → shared cell, a var captured by two closures, a nested
 closure capturing an outer-of-outer var).
 
-### Remaining roadmap
-- **P5**: Lean — certify the env RC contract (`inc == dec` over captures) once it is keyed on the Closure node, closing the Perceus→binary proof chain.
-- **P5**: Lean — certify the env RC contract (`inc == dec` over captures) once it is keyed on the Closure node, closing the Perceus→binary proof chain.
+### DONE — P5: the env RC contract, certified in Lean
+
+`AlmidePerceusBelt/ClosureRc.lean` (kernel-verified by `lake build`, no `sorry`/`axiom`).
+The compiler lowers a closure's lifecycle to ordinary `RcInc`/`RcDec` IR nodes
+(`PerceusPass` + Rule 6 in `pass_perceus.rs`): create inc's each captured heap var and
+allocs the closure object; drop dec's the object then each capture. `closureScope` models
+exactly that lowering using only the existing `inc`/`dec`/`vdecl` `FnBody` nodes — nothing
+axiomatic — and the contract is *derived*, not assumed:
+
+- `closure_env_rc_balanced` — over its captures a closure inc's and dec's each variable the
+  same number of times (`inc == dec`); its net contribution to every capture's refcount is 0.
+- `closure_preserves_isFreed` — a closure leaves the free-balance of every borrowed capture
+  intact (no leak, no double free of a captured value).
+- `closure_obj_freed` — the closure object itself is freed (the `dec cv` at drop).
+- `closureScope_allHeapFreed` — closures satisfy `allHeapFreed` whenever their continuation
+  does, folding them into the same end-to-end no-leak theorem (`perceus_all_heap_freed`) as
+  ordinary heap variables.
+
+Modeling the *actual* inc/dec lowering (rather than adding an axiomatic Closure constructor)
+is the stronger result: it proves the code the compiler really emits is RC-correct. This
+closes the Perceus→binary proof chain for closures — the one path that was previously
+outside the proof.
+
+### Status: Closure Architecture v2 complete
+
+P0–P5 all landed on branch `closure-v2-p3` (P0/P1/P2b merged via #329/#330/#331; P3-Rust,
+P3-WASM, P4, P5 are the later commits on the branch). No remaining phases.
