@@ -31,8 +31,20 @@ impl NanoPass for CaptureClonePass {
     }
 
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
+        // Pre-analysis (Closure v2, P3): a Copy-type `var` local (Int/Float/Bool)
+        // captured by a closure must become a shared `Rc<Cell<T>>` — a `move`
+        // closure would capture a *copy* and silently drop the mutation. Compute
+        // the set once here (before the wrap decision below), and publish it via
+        // `codegen_annotations` so the Rust walker emits cell ops. As non-`Copy`
+        // values these captures now also need the clone-wrap that `needs_clone_type`
+        // skips for `Copy` — `SHARED_MUT` forces it, and `wrap_lambda_with_clones`
+        // adds the `__cap` renames to the set so their reads/writes are cells too.
+        let shared = detect_shared_mut(&program);
+        for v in &shared { program.codegen_annotations.shared_mut_vars.insert(*v); }
+        SHARED_MUT.with(|m| *m.borrow_mut() = shared);
+
         let mut changed = false;
-        let IrProgram { functions, modules, var_table, .. } = &mut program;
+        let IrProgram { functions, modules, var_table, codegen_annotations, .. } = &mut program;
         for func in functions.iter_mut() {
             let param_vars: HashSet<VarId> = func.params.iter().map(|p| p.var).collect();
             PARAM_BORROWS.with(|m| {
@@ -53,6 +65,12 @@ impl NanoPass for CaptureClonePass {
                 }
             }
         }
+        // `wrap_lambda_with_clones` added the `__cap_*` renames of shared-mut
+        // captures to SHARED_MUT; persist them so their reads/writes are cells too.
+        SHARED_MUT.with(|m| {
+            for v in m.borrow().iter() { codegen_annotations.shared_mut_vars.insert(*v); }
+            m.borrow_mut().clear();
+        });
         PARAM_BORROWS.with(|m| m.borrow_mut().clear());
         PassResult { program, changed }
     }
@@ -62,6 +80,43 @@ use std::cell::RefCell;
 thread_local! {
     static PARAM_BORROWS: RefCell<std::collections::HashMap<VarId, ParamBorrow>> =
         RefCell::new(std::collections::HashMap::new());
+    /// Vars that must be lowered to a shared `Rc<Cell<T>>` on the Rust target
+    /// (Copy-type `var` locals captured by a closure, plus their `__cap` renames).
+    /// Populated per-run by `detect_shared_mut` + `wrap_lambda_with_clones`.
+    /// (Closure v2, P3.)
+    static SHARED_MUT: RefCell<HashSet<VarId>> = RefCell::new(HashSet::new());
+}
+
+fn is_copy_ty(ty: &Ty) -> bool {
+    matches!(ty, Ty::Int | Ty::Float | Ty::Bool)
+}
+
+/// Find every Copy-type (`Int`/`Float`/`Bool`) `Mutability::Var` local captured by
+/// a closure. As a moved copy its mutation would be invisible to the enclosing
+/// scope, so it must become a shared cell. (Closure v2, P3.)
+fn detect_shared_mut(program: &IrProgram) -> HashSet<VarId> {
+    struct LambdaWalker<'a> { vt: &'a VarTable, out: HashSet<VarId> }
+    impl almide_ir::visit::IrVisitor for LambdaWalker<'_> {
+        fn visit_expr(&mut self, expr: &IrExpr) {
+            if let IrExprKind::Lambda { params, body, .. } = &expr.kind {
+                let param_set: HashSet<VarId> = params.iter().map(|(v, _)| *v).collect();
+                let mut free = HashSet::new();
+                collect_free_vars(body, &param_set, &mut free);
+                for v in free {
+                    let info = self.vt.get(v);
+                    if matches!(info.mutability, Mutability::Var) && is_copy_ty(&info.ty) {
+                        self.out.insert(v);
+                    }
+                }
+            }
+            almide_ir::visit::walk_expr(self, expr);
+        }
+    }
+    use almide_ir::visit::IrVisitor;
+    let mut w = LambdaWalker { vt: &program.var_table, out: HashSet::new() };
+    for f in &program.functions { w.visit_expr(&f.body); }
+    for m in &program.modules { for f in &m.functions { w.visit_expr(&f.body); } }
+    w.out
 }
 
 /// Collect all variables bound by a statement (Bind + BindDestructure).
@@ -222,11 +277,13 @@ fn transform_expr(expr: &mut IrExpr, vt: &mut VarTable, scope_vars: &HashSet<Var
         let mut free_vars = HashSet::new();
         collect_free_vars(body, &param_set, &mut free_vars);
 
-        // Filter to only clone-worthy types from outer scope.
+        // Clone-worthy captures from the outer scope — plus shared-mut (`Rc<Cell>`)
+        // captures, which are no longer `Copy` and so now need the clone-wrap that
+        // `needs_clone_type` skips for `Copy` types. (Closure v2, P3.)
         let captures: Vec<VarId> = free_vars.into_iter()
             .filter(|v| {
                 if !scope_vars.contains(v) { return false; }
-                needs_clone_type(&vt.get(*v).ty)
+                needs_clone_type(&vt.get(*v).ty) || SHARED_MUT.with(|m| m.borrow().contains(v))
             })
             .collect();
 
@@ -289,6 +346,13 @@ fn wrap_lambda_with_clones(expr: &mut IrExpr, captures: &[VarId], vt: &mut VarTa
             None,
         );
         renames.insert(var_id, cap_var);
+
+        // The clone of a shared-mut capture is itself a shared cell (`Rc<Cell>`),
+        // so reads/writes of `__cap` inside the closure go through `.get()`/`.set()`
+        // too. (Closure v2, P3.)
+        if SHARED_MUT.with(|m| m.borrow().contains(&var_id)) {
+            SHARED_MUT.with(|m| { m.borrow_mut().insert(cap_var); });
+        }
 
         // If the captured var is a fn param with a borrowed runtime
         // representation (`&[T]` / `&str` / `&T`), the bare `Var` IR
@@ -669,33 +733,39 @@ fn replace_vars(expr: &mut IrExpr, renames: &std::collections::HashMap<VarId, Va
 }
 
 fn replace_vars_stmt(stmt: &mut IrStmt, renames: &std::collections::HashMap<VarId, VarId>) {
+    // A captured var that is WRITTEN inside the closure (Assign/IndexAssign/...)
+    // must have its write *target* renamed too, not just its read sites —
+    // otherwise the closure mutates the original var (capturing/moving it) instead
+    // of its `__cap` clone. (Closure v2, P3.)
+    fn rn(v: &mut VarId, renames: &std::collections::HashMap<VarId, VarId>) {
+        if let Some(&new) = renames.get(v) { *v = new; }
+    }
     match &mut stmt.kind {
-        IrStmtKind::Bind { value, .. } | IrStmtKind::BindDestructure { value, .. }
-        | IrStmtKind::Assign { value, .. } | IrStmtKind::FieldAssign { value, .. } => {
+        IrStmtKind::Bind { value, .. } | IrStmtKind::BindDestructure { value, .. } => {
             replace_vars(value, renames);
         }
-        IrStmtKind::IndexAssign { index, value, .. } => {
-            replace_vars(index, renames); replace_vars(value, renames);
+        IrStmtKind::Assign { var, value } => { rn(var, renames); replace_vars(value, renames); }
+        IrStmtKind::FieldAssign { target, value, .. } => { rn(target, renames); replace_vars(value, renames); }
+        IrStmtKind::IndexAssign { target, index, value } => {
+            rn(target, renames); replace_vars(index, renames); replace_vars(value, renames);
         }
-        IrStmtKind::MapInsert { key, value, .. } => {
-            replace_vars(key, renames); replace_vars(value, renames);
+        IrStmtKind::MapInsert { target, key, value } => {
+            rn(target, renames); replace_vars(key, renames); replace_vars(value, renames);
         }
-        IrStmtKind::ListSwap { a, b, .. } => {
-            replace_vars(a, renames); replace_vars(b, renames);
+        IrStmtKind::ListSwap { target, a, b } => {
+            rn(target, renames); replace_vars(a, renames); replace_vars(b, renames);
         }
-        IrStmtKind::ListReverse { end, .. } | IrStmtKind::ListRotateLeft { end, .. } => {
-            replace_vars(end, renames);
+        IrStmtKind::ListReverse { target, end } | IrStmtKind::ListRotateLeft { target, end } => {
+            rn(target, renames); replace_vars(end, renames);
         }
-        IrStmtKind::ListCopySlice { len, .. } => {
-            replace_vars(len, renames);
+        IrStmtKind::ListCopySlice { dst, src, len } => {
+            rn(dst, renames); rn(src, renames); replace_vars(len, renames);
         }
         IrStmtKind::Guard { cond, else_ } => {
             replace_vars(cond, renames); replace_vars(else_, renames);
         }
         IrStmtKind::Expr { expr } => replace_vars(expr, renames),
-        IrStmtKind::RcInc { var } | IrStmtKind::RcDec { var } => {
-            if let Some(new_id) = renames.get(var) { *var = *new_id; }
-        }
+        IrStmtKind::RcInc { var } | IrStmtKind::RcDec { var } => { rn(var, renames); }
         IrStmtKind::Comment { .. } => {}
     }
 }

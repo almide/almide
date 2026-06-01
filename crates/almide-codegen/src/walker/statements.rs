@@ -13,6 +13,22 @@ use super::helpers::{template_or, terminate_stmt, ty_has_named_typevar, erase_na
 pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
     match &stmt.kind {
         IrStmtKind::Bind { var, ty, value, mutability } => {
+            // Shared-mut local (`Rc<Cell<T>>`, Closure v2 P3): a fresh cell at the
+            // declaration, or an `Rc::clone` of the original for the `__cap_*`
+            // capture rename (so the closure shares the cell).
+            if ctx.ann.is_shared_mut(var) {
+                let name_s = ctx.var_name(*var).to_string();
+                let val_s = if name_s.starts_with("__cap_") {
+                    if let IrExprKind::Var { id } = &value.kind {
+                        format!("{}.clone()", ctx.var_name(*id))
+                    } else {
+                        format!("std::rc::Rc::new(std::cell::Cell::new({}))", render_expr(ctx, value))
+                    }
+                } else {
+                    format!("std::rc::Rc::new(std::cell::Cell::new({}))", render_expr(ctx, value))
+                };
+                return format!("let {} = {};", name_s, val_s);
+            }
             let name_s = ctx.var_name(*var).to_string();
             // List[Fn] Rc wrapping is now handled by RustLoweringPass
             // which inserts RcWrap nodes into the IR.
@@ -158,6 +174,11 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
         }
         IrStmtKind::Assign { var, value } => {
             let target_s = ctx.var_name(*var).to_string();
+            // Shared-mut local (`Rc<Cell<T>>`): write through the cell. Cell's
+            // interior mutability means the binding need not be `mut`. (Closure v2, P3.)
+            if ctx.ann.is_shared_mut(var) {
+                return format!("{}.set({});", target_s, render_expr(ctx, value));
+            }
             let upper = target_s.to_uppercase();
             let value_s = render_expr(ctx, value);
             match ctx.ann.get_var_storage(var, &target_s) {

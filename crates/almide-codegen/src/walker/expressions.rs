@@ -107,6 +107,10 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         // ── Variables ──
         IrExprKind::Var { id } => {
             let raw_name = ctx.var_name(*id).to_string();
+            // Shared-mut local (`Rc<Cell<T>>`): read the cell. (Closure v2, P3.)
+            if ctx.ann.is_shared_mut(id) {
+                return format!("{}.get()", raw_name);
+            }
             let var_info = ctx.var_table.get(*id);
             // Emit-time prefix: module_origin → "ALMIDE_RT_{ORIGIN}_{NAME}"
             let (name, upper) = if let Some(ref origin) = var_info.module_origin {
