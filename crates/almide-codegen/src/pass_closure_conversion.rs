@@ -100,10 +100,9 @@ fn convert_expr(
             // 1. Bottom-up: convert nested lambdas first
             let body = convert_expr(*body, lifted, counter, vt);
 
-            // 2. Free variable analysis
+            // 2. Free variable analysis (single source of truth in almide-ir).
             let param_ids: HashSet<VarId> = params.iter().map(|(v, _)| *v).collect();
-            let mut free = HashSet::new();
-            collect_free_vars(&body, &param_ids, &mut free);
+            let free = almide_ir::free_vars::free_vars(&body, &param_ids);
 
             // 3a. No captures → keep as Lambda for potential inline expansion
             //     in the WASM emitter (avoids call_indirect overhead).
@@ -411,94 +410,8 @@ fn convert_target(
     }
 }
 
-// ── Free variable analysis ──────────────────────────────────────────
-
-struct FreeVarCollector {
-    bound: HashSet<VarId>,
-    free: HashSet<VarId>,
-}
-
-impl IrVisitor for FreeVarCollector {
-    fn visit_expr(&mut self, expr: &IrExpr) {
-        match &expr.kind {
-            IrExprKind::Var { id } => {
-                if !self.bound.contains(id) { self.free.insert(*id); }
-            }
-            IrExprKind::ClosureCreate { captures, .. } => {
-                for (vid, _) in captures {
-                    if !self.bound.contains(vid) { self.free.insert(*vid); }
-                }
-            }
-            IrExprKind::Lambda { params, body, .. } => {
-                let saved = self.bound.clone();
-                for (v, _) in params { self.bound.insert(*v); }
-                self.visit_expr(body);
-                self.bound = saved;
-            }
-            IrExprKind::Block { stmts, expr: tail } => {
-                let saved = self.bound.clone();
-                for stmt in stmts {
-                    self.visit_stmt(stmt);
-                    match &stmt.kind {
-                        IrStmtKind::Bind { var, .. } => { self.bound.insert(*var); }
-                        IrStmtKind::BindDestructure { pattern, .. } => {
-                            collect_pattern_bindings(pattern, &mut self.bound);
-                        }
-                        _ => {}
-                    }
-                }
-                if let Some(e) = tail { self.visit_expr(e); }
-                self.bound = saved;
-            }
-            IrExprKind::Match { subject, arms } => {
-                self.visit_expr(subject);
-                for arm in arms {
-                    let saved = self.bound.clone();
-                    collect_pattern_bindings(&arm.pattern, &mut self.bound);
-                    if let Some(g) = &arm.guard { self.visit_expr(g); }
-                    self.visit_expr(&arm.body);
-                    self.bound = saved;
-                }
-            }
-            IrExprKind::ForIn { var, var_tuple, iterable, body } => {
-                self.visit_expr(iterable);
-                let saved = self.bound.clone();
-                self.bound.insert(*var);
-                if let Some(vt) = var_tuple { for v in vt { self.bound.insert(*v); } }
-                for s in body { self.visit_stmt(s); }
-                self.bound = saved;
-            }
-            _ => walk_expr(self, expr),
-        }
-    }
-}
-
-fn collect_free_vars(expr: &IrExpr, bound: &HashSet<VarId>, free: &mut HashSet<VarId>) {
-    let mut collector = FreeVarCollector { bound: bound.clone(), free: std::mem::take(free) };
-    collector.visit_expr(expr);
-    *free = collector.free;
-}
-
-fn collect_pattern_bindings(pattern: &IrPattern, bound: &mut HashSet<VarId>) {
-    match pattern {
-        IrPattern::Bind { var, .. } => { bound.insert(*var); }
-        IrPattern::Constructor { args, .. } => {
-            for p in args { collect_pattern_bindings(p, bound); }
-        }
-        IrPattern::RecordPattern { fields, .. } => {
-            for f in fields {
-                if let Some(p) = &f.pattern { collect_pattern_bindings(p, bound); }
-            }
-        }
-        IrPattern::Tuple { elements } => {
-            for p in elements { collect_pattern_bindings(p, bound); }
-        }
-        IrPattern::Some { inner } | IrPattern::Ok { inner } | IrPattern::Err { inner } => {
-            collect_pattern_bindings(inner, bound);
-        }
-        _ => {}
-    }
-}
+// Free-variable / capture analysis now lives in `almide_ir::free_vars` — the
+// single source of truth shared by this pass and the WASM emitter. (Closure v2, P1.)
 
 // ── Mutable capture detection ───────────────────────────────────────
 

@@ -23,6 +23,7 @@ mod use_count;
 mod verify;
 pub mod visit;
 pub mod visit_mut;
+pub mod free_vars;
 pub mod result;
 pub mod substitute;
 pub mod effect;
