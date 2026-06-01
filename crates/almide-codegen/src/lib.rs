@@ -49,6 +49,7 @@ pub mod pass_peephole;
 pub mod pass_anf;
 pub mod pass_stack_balance;
 pub mod pass_perceus;
+pub mod pass_globalize_closure_ids;
 pub mod pass_canonicalize;
 pub mod perceus_verified;
 pub mod pass_egg_saturation;

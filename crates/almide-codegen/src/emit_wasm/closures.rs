@@ -27,6 +27,19 @@ pub(super) fn pre_scan_closures(program: &IrProgram, emitter: &mut WasmEmitter) 
         let scope_vars: HashSet<u32> = func.params.iter().map(|p| p.var.0).collect();
         scan_closures(&func.body, scope_vars, &mut mutable_vars, &mut lambda_exprs, &mut fn_ref_set);
     }
+    // Module functions also carry raw Lambdas (e.g. a submodule combinator
+    // factory returning a non-capturing lambda). They are NOT flattened into
+    // program.functions on the WASM path, so without this scan they get no
+    // LambdaInfo / table slot, and a call site resolves to the wrong function
+    // (or none) — the cross-module closure bug. Order: functions then modules,
+    // IDENTICAL to compile_lambda_bodies so the positional index aligns.
+    // (Closure v2, P0.)
+    for module in &program.modules {
+        for func in &module.functions {
+            let scope_vars: HashSet<u32> = func.params.iter().map(|p| p.var.0).collect();
+            scan_closures(&func.body, scope_vars, &mut mutable_vars, &mut lambda_exprs, &mut fn_ref_set);
+        }
+    }
     // BFS: scan lambda bodies for nested lambdas (repeat until no new lambdas found)
     let mut scan_start = 0;
     loop {
@@ -154,6 +167,15 @@ pub(super) fn compile_lambda_bodies(program: &IrProgram, emitter: &mut WasmEmitt
     for func in &program.functions {
         let scope_vars: HashSet<u32> = func.params.iter().map(|p| p.var.0).collect();
         scan_closures(&func.body, scope_vars, &mut mutable_vars, &mut lambda_exprs, &mut fn_ref_set);
+    }
+    // Module functions, IDENTICAL order to pre_scan_closures (functions then
+    // modules) so emitter.lambdas[i] lines up with the pre-scan registration.
+    // (Closure v2, P0.)
+    for module in &program.modules {
+        for func in &module.functions {
+            let scope_vars: HashSet<u32> = func.params.iter().map(|p| p.var.0).collect();
+            scan_closures(&func.body, scope_vars, &mut mutable_vars, &mut lambda_exprs, &mut fn_ref_set);
+        }
     }
     // BFS: scan lambda bodies for nested lambdas
     let mut scan_start = 0;
