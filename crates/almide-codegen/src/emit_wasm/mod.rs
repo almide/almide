@@ -65,8 +65,8 @@ use std::collections::HashMap;
 use wasm_encoder::{
     CodeSection, DataSection, ElementSection, Elements, ExportSection,
     Function, FunctionSection, GlobalSection, GlobalType, ImportSection,
-    MemorySection, MemoryType, Module, RefType, TableSection, TableType,
-    TypeSection, ValType,
+    MemorySection, MemoryType, Module, NameMap, NameSection, RefType, TableSection,
+    TableType, TypeSection, ValType,
 };
 
 use almide_ir::IrProgram;
@@ -1557,6 +1557,25 @@ fn assemble(emitter: &mut WasmEmitter) -> Vec<u8> {
     }
     module.section(&data);
 
+    // ── Custom `name` section ──
+    // Attribute functions by name so a trap (e.g. a `RuntimeError: unreachable`
+    // surfaced in the browser playground) points at a named function instead of
+    // an anonymous `wasm-function[N]`. Built from func_map sorted by index, so it
+    // is host-deterministic (same as the rest of the module).
+    let mut fn_index_names: Vec<(u32, &str)> =
+        emitter.func_map.iter().map(|(name, &idx)| (idx, name.as_str())).collect();
+    fn_index_names.sort_by_key(|(idx, _)| *idx);
+    fn_index_names.dedup_by_key(|(idx, _)| *idx);
+    if !fn_index_names.is_empty() {
+        let mut fn_names = NameMap::new();
+        for (idx, name) in &fn_index_names {
+            fn_names.append(*idx, name);
+        }
+        let mut names = NameSection::new();
+        names.functions(&fn_names);
+        module.section(&names);
+    }
+
     module.finish()
 }
 
@@ -1690,8 +1709,15 @@ fn register_variant_eq_funcs(emitter: &mut WasmEmitter) {
         vec![ValType::I32, ValType::I32],
         vec![ValType::I32],
     );
-    // Collect variant names that need deep eq (have pointer fields)
-    let names: Vec<String> = emitter.variant_info.iter()
+    // Collect variant names that need deep eq (have pointer fields).
+    // Sort: variant_info is a HashMap, and its iteration order (host-dependent —
+    // hash seed + usize bucket layout) here determines the func indices these
+    // __eq_* functions reserve. Unsorted, a 32-bit host (wasm32) reserves them
+    // in a different order than a 64-bit host, shifting every later function's
+    // index and producing a divergent, trapping module. Sorting makes index
+    // reservation a pure function of the program, and must match the (also
+    // sorted) compile order in compile_variant_eq_funcs.
+    let mut names: Vec<String> = emitter.variant_info.iter()
         .filter(|(_, cases)| {
             cases.iter().any(|c| c.fields.iter().any(|(_, ft)| {
                 !matches!(ft, almide_lang::types::Ty::Int | almide_lang::types::Ty::Float | almide_lang::types::Ty::Bool | almide_lang::types::Ty::Unit)
@@ -1699,6 +1725,7 @@ fn register_variant_eq_funcs(emitter: &mut WasmEmitter) {
         })
         .map(|(name, _)| name.clone())
         .collect();
+    names.sort();
     for name in names {
         let func_idx = emitter.register_func(&format!("__eq_{}", name), type_idx);
         emitter.eq_funcs.insert(name, func_idx);
@@ -1708,10 +1735,16 @@ fn register_variant_eq_funcs(emitter: &mut WasmEmitter) {
 /// Compile variant deep-equality function bodies.
 /// Each function: (a: i32, b: i32) -> i32 — compares tag then dispatches to per-case field comparison.
 fn compile_variant_eq_funcs(emitter: &mut WasmEmitter, var_table: &almide_ir::VarTable) {
-    // Collect eq_funcs entries (name → func_idx) and corresponding cases
-    let eq_entries: Vec<(String, u32)> = emitter.eq_funcs.iter()
+    // Collect eq_funcs entries (name → func_idx) and corresponding cases.
+    // Sort by name so body-emission order matches the (sorted) index-reservation
+    // order in register_variant_eq_funcs. add_compiled pushes bodies positionally
+    // (function index = num_imports + push position), so the two orders MUST
+    // agree, and both must be host-independent — otherwise a 32-bit host places
+    // __eq_Foo's body at __eq_Bar's index and the module traps.
+    let mut eq_entries: Vec<(String, u32)> = emitter.eq_funcs.iter()
         .map(|(n, &idx)| (n.clone(), idx))
         .collect();
+    eq_entries.sort();
 
     for (name, _func_idx) in &eq_entries {
         let cases = match emitter.variant_info.get(name.as_str()) {

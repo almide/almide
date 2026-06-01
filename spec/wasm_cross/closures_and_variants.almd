@@ -1,0 +1,30 @@
+// Host-determinism fixture: exercises lifted closures (map/filter/fold) and
+// multiple variants with deep-eq — the two codegen sites whose iteration order
+// was host-dependent. Regression guard for the 32/64-bit codegen divergence.
+
+type Tree =
+  | Leaf(Int)
+  | Node(Int, Int)
+  | Empty
+
+fn label(t: Tree) -> String = match t {
+  Leaf(n)    => "leaf:" + int.to_string(n),
+  Node(a, b) => "node:" + int.to_string(a) + "," + int.to_string(b),
+  Empty      => "empty",
+}
+
+fn main() -> Unit = {
+  let nodes = [Leaf(1), Node(2, 3), Empty, Leaf(4), Node(5, 6)]
+  let sum = nodes
+    |> list.filter((t) => match t { Empty => false, _ => true })
+    |> list.map((t) => label(t))
+    |> list.enumerate
+    |> list.map((e) => {
+        let (i, s) = e
+        "${int.to_string(i)}: ${s}"
+      })
+    |> list.join("\n")
+  println(sum)
+  let total = [1, 2, 3, 4, 5] |> list.fold(0, (acc, x) => acc + x * x)
+  println("sumsq=" + int.to_string(total))
+}
