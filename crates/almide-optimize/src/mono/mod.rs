@@ -21,6 +21,7 @@ mod rewrite;
 mod propagation;
 
 use std::collections::HashMap;
+use std::collections::BTreeMap;
 use almide_ir::*;
 use almide_lang::types::Ty;
 
@@ -46,7 +47,13 @@ pub fn monomorphize(program: &mut IrProgram) {
     // Fixed-point loop: transitive monomorphization (A → B → C chains)
     // Converges when no new instances are discovered. Warns if instance count
     // exceeds 1000 (possible infinite expansion).
-    let mut all_instances: HashMap<MonoKey, HashMap<String, Ty>> = HashMap::new();
+    // BTreeMap, not HashMap: `new` (below) is iterated to append specialized
+    // functions to program.functions, and a function's WASM index is its position
+    // there. HashMap iteration order is host-pointer-width AND Sym-intern-order
+    // dependent, so the wasm32 playground compiler would assign different indices
+    // than x86-64 → a divergent/trapping module. MonoKey=(String,String) is Ord,
+    // so BTreeMap iterates in content order = a pure function of the program.
+    let mut all_instances: BTreeMap<MonoKey, HashMap<String, Ty>> = BTreeMap::new();
     let mut frontier_start: Option<usize> = None; // None = first round (scan all)
 
     loop {
@@ -62,7 +69,7 @@ pub fn monomorphize(program: &mut IrProgram) {
         };
 
         // Filter to only new instances
-        let new: HashMap<MonoKey, HashMap<String, Ty>> = instances.into_iter()
+        let new: BTreeMap<MonoKey, HashMap<String, Ty>> = instances.into_iter()
             .filter(|(k, _)| !all_instances.contains_key(k))
             .collect();
         if new.is_empty() {

@@ -1,0 +1,17 @@
+// Host-determinism fixture: exercises monomorphization — generic fns specialized
+// for multiple concrete types. The specialized-function append order (→ WASM
+// function indices) must be host-independent (regression guard for the
+// HashMap-ordered mono append that diverged on wasm32).
+fn pair_first[A, B](p: (A, B)) -> A = p.0
+fn wrap[T](x: T) -> List[T] = [x]
+fn sum_len[T](xs: List[T]) -> Int = list.len(xs)
+
+fn main() -> Unit = {
+  let a = pair_first((1, "x"))
+  let b = pair_first(("y", 2.0))
+  let c = wrap(42)
+  let d = wrap("hi")
+  let e = wrap(3.14)
+  let n = sum_len([1, 2, 3]) + sum_len(["a", "b"]) + list.len(c) + list.len(d) + list.len(e)
+  println("first=" + int.to_string(a) + " n=" + int.to_string(n) + " " + b)
+}

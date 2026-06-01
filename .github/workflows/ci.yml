@@ -221,6 +221,9 @@ jobs:
           $ALMIDE "$f" --target rust > /dev/null && echo "Rust emit OK"
           $ALMIDE "$f" --emit-ast    > /dev/null && echo "AST emit OK"
 
+      - name: Forbidden impurities (no raw clocks/threads in the compile path)
+        run: scripts/check-forbidden-impurities.sh
+
   # ═══════════════════════════════════════════════
   # Full CI — cross-platform (PRs to main only)
   # ═══════════════════════════════════════════════
