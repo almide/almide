@@ -365,14 +365,20 @@ impl IrVisitor for ClosureScanner<'_> {
     fn visit_expr(&mut self, expr: &IrExpr) {
         match &expr.kind {
             IrExprKind::Lambda { params, body, lambda_id } => {
-                let param_ids: HashSet<u32> = params.iter().map(|(vid, _)| vid.0).collect();
-                let mut body_vars = HashSet::new();
-                collect_var_refs(body, &mut body_vars);
-                let mut captures: Vec<u32> = body_vars.difference(&param_ids)
-                    .copied()
+                // Captures via the single shared analysis (almide_ir::free_vars),
+                // intersected with the enclosing scope as a safety net. This is
+                // provably identical to the prior `(flat-refs − params) ∩ scope`:
+                // free_vars already excludes the lambda's own params and any
+                // body-local bindings (it is scope-tracking), and `∩ scope_vars`
+                // is what removed those body-locals before. free_vars returns a
+                // VarId-sorted Vec, so the env layout stays deterministic.
+                // (Closure v2, P1 — one capture analysis.)
+                let param_set: HashSet<VarId> = params.iter().map(|(vid, _)| *vid).collect();
+                let captures: Vec<u32> = almide_ir::free_vars::free_vars(body, &param_set)
+                    .into_iter()
+                    .map(|vid| vid.0)
                     .filter(|vid| self.scope_vars.contains(vid))
                     .collect();
-                captures.sort();
                 let param_list: Vec<(VarId, Ty)> = params.iter()
                     .map(|(vid, ty)| (*vid, ty.clone()))
                     .collect();
@@ -465,28 +471,6 @@ fn resolve_lambda_param_ty(
         return body.ty.clone();
     }
     almide_lang::types::Ty::Int
-}
-
-// ── VarRefCollector: IrVisitor-based variable reference collector ────
-//
-// Collects all VarIds referenced in an expression tree (including inside
-// nested lambdas). Uses walk_expr for exhaustive traversal.
-
-struct VarRefCollector<'a> {
-    vars: &'a mut HashSet<u32>,
-}
-
-impl IrVisitor for VarRefCollector<'_> {
-    fn visit_expr(&mut self, expr: &IrExpr) {
-        if let IrExprKind::Var { id } = &expr.kind {
-            self.vars.insert(id.0);
-        }
-        walk_expr(self, expr);
-    }
-}
-
-pub(super) fn collect_var_refs(expr: &IrExpr, vars: &mut HashSet<u32>) {
-    VarRefCollector { vars }.visit_expr(expr);
 }
 
 /// Collect all ClosureCreate func_names referenced in an expression tree.
