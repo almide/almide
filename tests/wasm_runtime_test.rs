@@ -620,3 +620,60 @@ fn wasm_cross_module_lambda_without_local_decoy() {
         ),
     ]);
 }
+
+/// Like `assert_cross_target`, but for programs whose `main` is an `effect fn`.
+/// Such a main returns `Result[Unit, _]`, and wasmtime's `_start` prints the
+/// wrapped return value (a heap pointer) as a trailing line. Compare only the
+/// program's own output (the first `rust_out.lines().len()` lines). A trap
+/// still surfaces: `run_wasm` panics when wasmtime exits non-zero.
+fn assert_cross_target_effect_main(source: &str) {
+    let bin = almide_bin();
+    if Command::new(&bin).arg("--version").output().is_err() { return; }
+    if Command::new("node").arg("--version").output().is_err() { return; }
+
+    let rust_out = run_rust(source);
+    let wasm_out = run_wasm(source);
+    let rust_lines: Vec<&str> = rust_out.lines().collect();
+    let wasm_lines: Vec<&str> = wasm_out.lines().collect();
+    assert!(
+        wasm_lines.len() >= rust_lines.len(),
+        "\nWASM produced fewer lines than Rust (output dropped)!\nRust: {:?}\nWASM: {:?}\nSource:\n{}",
+        rust_out, wasm_out, source
+    );
+    assert_eq!(
+        rust_lines.as_slice(),
+        &wasm_lines[..rust_lines.len()],
+        "\nCross-target mismatch (effect main)!\nRust: {:?}\nWASM: {:?}\nSource:\n{}",
+        rust_out, wasm_out, source
+    );
+}
+
+#[test]
+fn wasm_effect_fn_returns_closure_auto_try_binding() {
+    // P3-WASM regression: an effect fn returning a closure, bound via auto-`?`.
+    // The binding's var type lagged at `Result[Fn, _]` (auto_try runs after
+    // lowering), so `add5(10)` mis-resolved to a Named call `add5` instead of a
+    // Computed call through the local. WASM then trapped on the unresolved call
+    // and Perceus freed the closure before the call. The `!` form always worked;
+    // this guards the `?` form (the common case). Expected: 15.
+    assert_cross_target_effect_main(
+        "effect fn make_adder_e(n: Int) -> (Int) -> Int = (x) => x + n\n\
+         effect fn main() -> Unit = {\n\
+         \x20 let add5 = make_adder_e(5)\n\
+         \x20 println(int.to_string(add5(10)))\n\
+         }\n",
+    );
+}
+
+#[test]
+fn wasm_effect_fn_returns_closure_used_twice() {
+    // Same auto-`?` closure binding, but the closure is called more than once —
+    // exercises Perceus inc/dec balance for the binding across multiple uses.
+    assert_cross_target_effect_main(
+        "effect fn make_adder_e(n: Int) -> (Int) -> Int = (x) => x + n\n\
+         effect fn main() -> Unit = {\n\
+         \x20 let add = make_adder_e(100)\n\
+         \x20 println(int.to_string(add(1) + add(2)))\n\
+         }\n",
+    );
+}

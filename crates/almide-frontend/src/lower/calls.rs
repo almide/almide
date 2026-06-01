@@ -152,18 +152,50 @@ pub(super) fn lower_call(ctx: &mut LowerCtx, callee: &ast::Expr, args: &[ast::Ex
     ctx.mk(IrExprKind::Call { target, args: ir_args, type_args: ta }, ty, span)
 }
 
+/// Unwrap `Result[T, _]` → `T`; any other type is returned unchanged.
+/// Mirrors the effect-fn auto-`?` unwrap so a binding whose *stored* type still
+/// carries the un-unwrapped `Result` is recognized by its Ok payload.
+fn strip_result_ok(ty: &Ty) -> Ty {
+    match ty {
+        Ty::Applied(TypeConstructorId::Result, args) if !args.is_empty() => args[0].clone(),
+        _ => ty.clone(),
+    }
+}
+
 pub(super) fn lower_call_target(ctx: &mut LowerCtx, callee: &ast::Expr) -> CallTarget {
     match &callee.kind {
         ast::ExprKind::Ident { name, .. } | ast::ExprKind::TypeName { name, .. } => {
-            // If the name resolves to a local variable (e.g., a closure), use Computed
-            // so that use-count tracking properly counts this as a use of that variable.
-            if let Some(var_id) = ctx.lookup_var(name)
-                && matches!(ctx.var_table.get(var_id).ty, crate::types::Ty::Fn { .. })
-            {
-                let ty = ctx.expr_ty(callee);
-                return CallTarget::Computed {
-                    callee: Box::new(ctx.mk(IrExprKind::Var { id: var_id }, ty, callee.span)),
-                };
+            // A name that resolves to a local binding is called *through that
+            // variable* (Computed), never as a top-level function — a local
+            // shadows any same-named fn, and Computed makes use-count / Perceus
+            // liveness count the call as a use of the variable.
+            //
+            // Callability is decided from the callee's use-site type, which the
+            // checker has already auto-`?`-unwrapped to the function type. The
+            // var's *stored* type can still lag at `Result[Fn, _]` here: in an
+            // effect fn the auto-`?` rewrite that unwraps the binding (auto_try)
+            // runs AFTER lowering, so `var_table[add5].ty` is `Result[Fn, _]`
+            // at this point. Reading only the stored type would mis-resolve
+            // `add5(10)` to `Named { add5 }`, which has no such function — the
+            // WASM emit then traps on an unresolved call and Perceus, seeing no
+            // use of the binding, frees the closure before the call (use-after-free).
+            // The Result-stripped stored type is a final fallback.
+            if let Some(var_id) = ctx.lookup_var(name) {
+                let use_ty = ctx.expr_ty(callee);
+                let stored = ctx.var_table.get(var_id).ty.clone();
+                if matches!(use_ty, Ty::Fn { .. })
+                    || matches!(stored, Ty::Fn { .. })
+                    || matches!(strip_result_ok(&stored), Ty::Fn { .. })
+                {
+                    let callee_ty = if matches!(use_ty, Ty::Fn { .. }) {
+                        use_ty
+                    } else {
+                        strip_result_ok(&stored)
+                    };
+                    return CallTarget::Computed {
+                        callee: Box::new(ctx.mk(IrExprKind::Var { id: var_id }, callee_ty, callee.span)),
+                    };
+                }
             }
             // Selective import: bare `from_string` → Module { json, from_string }.
             // (used-mark happens in checker pass; lowering only rewrites.)
