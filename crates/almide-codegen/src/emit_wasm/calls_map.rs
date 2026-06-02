@@ -465,12 +465,9 @@ impl FuncCompiler<'_> {
                       end;
                     end;
                 });
-                // Write back
-                if let almide_ir::IrExprKind::Var { id } = &args[0].kind {
-                    if let Some(&local_idx) = self.var_map.get(&id.0) {
-                        wasm!(self.func, { local_get(m); local_set(local_idx); });
-                    }
-                }
+                // Write back the (possibly reallocated) map ptr — into the cell for a
+                // mutable capture, else into the local/global. See emit_mutator_writeback.
+                self.emit_mutator_writeback(&args[0], m);
                 self.scratch.free_i32(tg);
                 self.scratch.free_i32(h2);
                 self.scratch.free_i32(eb);
@@ -560,12 +557,10 @@ impl FuncCompiler<'_> {
                     end; end;
                 });
                 if is_delete {
-                    if let almide_ir::IrExprKind::Var { id } = &args[0].kind {
-                        if let Some(&local_idx) = self.var_map.get(&id.0) {
-                            wasm!(self.func, { local_get(nm); local_set(local_idx); });
-                        }
-                    }
+                    // delete: in-place, write the rebuilt map back to its binding.
+                    self.emit_mutator_writeback(&args[0], nm);
                 } else {
+                    // remove: returns the rebuilt map as the expression value.
                     wasm!(self.func, { local_get(nm); });
                 }
                 self.scratch.free_i32(nidx);
@@ -871,15 +866,11 @@ impl FuncCompiler<'_> {
                     local_get(scratch); i32_const(0); i32_store(0);
                     local_get(scratch); i32_const(0); i32_store(map_cap_off);
                 });
-                if let almide_ir::IrExprKind::Var { id } = &args[0].kind {
-                    if let Some(&local_idx) = self.var_map.get(&id.0) {
-                        wasm!(self.func, { local_get(scratch); local_set(local_idx); });
-                    } else {
-                        wasm!(self.func, { drop; });
-                    }
-                } else {
-                    wasm!(self.func, { drop; });
-                }
+                // clear allocates a fresh empty map; write it back to the binding —
+                // into the cell for a mutable capture. clear -> Unit, so nothing is
+                // left on the stack (the old `drop` branches were unreachable: this
+                // arm pushes no operand). See emit_mutator_writeback.
+                self.emit_mutator_writeback(&args[0], scratch);
                 self.scratch.free_i32(scratch);
             }
             _ => return self.emit_map_closure_call(method, args),

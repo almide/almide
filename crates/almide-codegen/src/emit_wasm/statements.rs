@@ -113,10 +113,13 @@ impl FuncCompiler<'_> {
             }
 
             IrStmtKind::Assign { var, value } => {
-                // Peephole: s = s + "x" → string_append(s, "x") for O(1) amortized
+                // Peephole: s = s + "x" → string_append(s, "x") for O(1) amortized.
+                // Skip for a shared-cell capture: its local holds the CELL pointer, not
+                // the string, so the in-place byte store below would corrupt the cell.
+                // The general cell-aware Assign (further down) handles it. (Closure v2 P6.)
                 if let IrExprKind::BinOp { op: almide_ir::BinOp::ConcatStr, left, right } = &value.kind {
                     if let IrExprKind::Var { id } = &left.kind {
-                        if *id == *var {
+                        if *id == *var && !self.emitter.mutable_captures.contains(&var.0) {
                             if let Some(&local_idx) = self.var_map.get(&var.0) {
                                 // 1-char literal: inline capacity check + byte store
                                 if let IrExprKind::LitStr { value: lit } = &right.kind {
@@ -402,6 +405,12 @@ impl FuncCompiler<'_> {
                 // Resolve list pointer: local var or module-level global
                 let has_ptr = if let Some(&local_idx) = self.var_map.get(&target.0) {
                     wasm!(self.func, { local_get(local_idx); });
+                    // Shared-cell capture: the local holds the CELL pointer; deref it
+                    // to the list pointer. The element store is in place (same list),
+                    // so no write-back to the cell is needed. (Closure v2 P6.)
+                    if self.emitter.mutable_captures.contains(&target.0) {
+                        wasm!(self.func, { i32_load(0); });
+                    }
                     true
                 } else {
                     let name = if (target.0 as usize) < self.var_table.len() {

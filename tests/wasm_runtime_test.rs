@@ -739,3 +739,60 @@ fn wasm_nested_non_copy_mutable_capture() {
          }\n",
     );
 }
+
+#[test]
+fn wasm_sibling_closures_share_mutable_capture() {
+    // Closure v2 P6: two SIBLING closures capture the same non-Copy `var` — one
+    // mutates it, the other only reads it. The reader must observe the writer's
+    // mutation (they share one cell). On WASM the reader was lifted to a
+    // ClosureCreate/EnvLoad that loaded the raw cell ptr and used it as the list,
+    // so `list.len` read garbage (a leaked pointer) instead of 0; the fix keeps any
+    // shared-cell-capturing lambda raw so both closures share one heap cell.
+    // wipe() clears -> reader sees len 0. Cross-target = 0.
+    assert_cross_target_effect_main(
+        "effect fn main() -> Unit = {\n\
+         \x20 var xs: List[Int] = [7, 8, 9]\n\
+         \x20 let wipe = () => { list.clear(xs) }\n\
+         \x20 let size = () => { list.len(xs) }\n\
+         \x20 wipe()\n\
+         \x20 println(int.to_string(size()))\n\
+         }\n",
+    );
+}
+
+#[test]
+fn wasm_reader_closure_observes_writer_closure() {
+    // Same shared-cell sibling-closure case via in-place `list.pop`: the writer
+    // drains 3 of 4 elements, a separate reader closure reports the length. The
+    // reader must observe the pops through the shared cell. Cross-target = 1.
+    assert_cross_target_effect_main(
+        "effect fn main() -> Unit = {\n\
+         \x20 var xs: List[Int] = [5, 6, 7, 8]\n\
+         \x20 let drain = () => { list.pop(xs) }\n\
+         \x20 let report = () => { list.len(xs) }\n\
+         \x20 drain()\n\
+         \x20 drain()\n\
+         \x20 drain()\n\
+         \x20 println(int.to_string(report()))\n\
+         }\n",
+    );
+}
+
+#[test]
+fn wasm_bytes_mutable_capture_through_closure() {
+    // Closure v2 P6: a captured `var buf: Bytes` mutated through a closure must
+    // become a shared cell, like List/Map/String. `bytes.push` (and the rest of the
+    // bytes `&mut` builders) is an in-place mutator, but bytes' stdlib `mut`
+    // annotations are incomplete, so the cell-detection keys off the runtime's
+    // actual mutation surface. Before the fix WASM lost the appends (len 0). f()
+    // pushes twice -> len 2. Cross-target = 2.
+    assert_cross_target_effect_main(
+        "effect fn main() -> Unit = {\n\
+         \x20 var buf: Bytes = bytes.new(0)\n\
+         \x20 let f = () => { bytes.push(buf, 65) }\n\
+         \x20 f()\n\
+         \x20 f()\n\
+         \x20 println(int.to_string(bytes.len(buf)))\n\
+         }\n",
+    );
+}
