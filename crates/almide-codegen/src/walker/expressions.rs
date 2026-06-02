@@ -1066,7 +1066,17 @@ fn render_generic_call(ctx: &RenderContext, target: &CallTarget, args: &[IrExpr]
         }
         CallTarget::Module { .. } => unreachable!(),
     };
-    let args_str = args.iter().map(|a| render_expr_owned(ctx, a)).collect::<Vec<_>>().join(", ");
+    // Calling a closure VALUE (Computed target): a function-typed parameter of
+    // that closure is `Rc<dyn Fn>` (a closure can't take an `impl Fn` param), so
+    // box a fresh closure passed as such an argument. Named/Method calls go to
+    // real `fn`s whose `impl Fn` params accept the raw closure, so leave those.
+    let box_fn_args = matches!(target, CallTarget::Computed { .. });
+    let args_str = args.iter().map(|a| {
+        let s = render_expr_owned(ctx, a);
+        if box_fn_args && matches!(&a.ty, Ty::Fn { .. }) && !matches!(&a.kind, IrExprKind::RcWrap { .. }) {
+            format!("std::rc::Rc::new({})", s)
+        } else { s }
+    }).collect::<Vec<_>>().join(", ");
     ctx.templates.render_with("call_expr", None, &[], &[("callee", callee.as_str()), ("args", args_str.as_str())])
         .unwrap_or_else(|| format!("call(...)"))
 }
@@ -1172,6 +1182,11 @@ fn render_enum_constructor(ctx: &RenderContext, ctor_name: &str, enum_name: &str
         let is_rc_cow_var = matches!(&a.kind, IrExprKind::Var { id } if ctx.ann.is_rc_cow(id));
         let rendered = if is_rc_cow_var {
             format!("{}.into_inner()", rendered)
+        } else { rendered };
+        // A closure payload field is typed `Rc<dyn Fn>` (see the variant decl), so
+        // a fresh closure passed to the constructor must be boxed to match.
+        let rendered = if matches!(&a.ty, Ty::Fn { .. }) && !matches!(&a.kind, IrExprKind::RcWrap { .. }) {
+            format!("std::rc::Rc::new({})", rendered)
         } else { rendered };
         if needs_box {
             format!("Box::new({})", rendered)

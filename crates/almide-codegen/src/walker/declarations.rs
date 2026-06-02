@@ -73,7 +73,13 @@ pub fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
                     IrVariantKind::Tuple { fields } => {
                         let is_recursive = ctx.ann.recursive_enums.contains(&*td.name);
                         let types: Vec<String> = fields.iter().map(|t| {
-                            let rendered = render_type(ctx, t);
+                            // Fn payloads use Rc<dyn Fn> (impl Fn is invalid in field
+                            // position, Box<dyn Fn> is not Clone) — same as a struct field.
+                            let rendered = if matches!(t, Ty::Fn { .. }) {
+                                render_type_field_fn(ctx, t)
+                            } else {
+                                render_type(ctx, t)
+                            };
                             if is_recursive && ty_contains_name(t, &td.name) { format!("Box<{}>", rendered) } else { rendered }
                         }).collect();
                         let fields_str = types.join(", ");
@@ -94,7 +100,11 @@ pub fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
                     IrVariantKind::Record { fields } => {
                         let fields_str = fields.iter()
                             .map(|f| {
-                                let rendered = render_type(ctx, &f.ty);
+                                let rendered = if matches!(&f.ty, Ty::Fn { .. }) {
+                                    render_type_field_fn(ctx, &f.ty)
+                                } else {
+                                    render_type(ctx, &f.ty)
+                                };
                                 let boxed = if ctx.ann.recursive_enums.contains(&*td.name) && ty_contains_name(&f.ty, &td.name) {
                                     format!("Box<{}>", rendered)
                                 } else {
@@ -115,10 +125,22 @@ pub fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
             let variants_str = variants_parts.join(&sep);
             let full_name = format!("{}{}", td.name, generics_str);
             let has_hash = td.deriving.as_ref().map_or(false, |d| d.iter().any(|s| s.as_str() == "Hash"));
+            // A closure payload (Fn directly, or nested in a container) lowers to
+            // `Rc<dyn Fn>`, which is neither Debug nor PartialEq → derive Clone only.
+            let has_fn_fields = cases.iter().any(|v| match &v.kind {
+                IrVariantKind::Unit => false,
+                IrVariantKind::Tuple { fields } => fields.iter().any(ty_has_fn),
+                IrVariantKind::Record { fields } => fields.iter().any(|f| ty_has_fn(&f.ty)),
+            });
             let mut enum_attrs = decl_attrs.clone();
-            if has_hash { enum_attrs.push("has_hash"); }
+            if has_fn_fields { enum_attrs.push("has_fn_fields"); }
+            else if has_hash { enum_attrs.push("has_hash"); }
             let repr_prefix = if ctx.repr_c { "#[repr(C)]\n" } else { "" };
-            let fallback = format!("{}pub enum {} {{\n{}\n}}", repr_prefix, full_name, &variants_str);
+            let fallback = if has_fn_fields {
+                format!("#[derive(Clone)]\npub enum {} {{\n{}\n}}", full_name, &variants_str)
+            } else {
+                format!("{}pub enum {} {{\n{}\n}}", repr_prefix, full_name, &variants_str)
+            };
             ctx.templates.render_with("enum_decl", None, &enum_attrs, &[("name", full_name.as_str()), ("variants", variants_str.as_str())])
                 .unwrap_or(fallback)
         }
