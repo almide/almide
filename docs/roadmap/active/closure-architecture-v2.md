@@ -414,3 +414,10 @@ P0–P6 all landed on branch `closure-v2-p3` (P0/P1/P2b merged via #329/#330/#33
 P3-WASM, P4, P5, P6 are the later commits on the branch). No remaining phases — closures are
 correct (incl. mutable captures of every type, both targets), use one capture analysis, and are
 RC-proven in Lean.
+
+The capture-*cell* architecture is complete. A later adversarial cross-target sweep found
+adjacent divergences in how closures are *typed / parsed / stored* (string mutators on WASM,
+closure-in-tuple, list-index call, typed params, closure-in-map, non-Copy-element IndexAssign) —
+orthogonal to capture cells. Those are tracked separately in
+[Closure Codegen Cross-Target Gaps](closure-codegen-cross-target-gaps.md) (5 fixed via #334; 2 deep
+ones root-caused and open).
