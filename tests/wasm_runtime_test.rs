@@ -801,6 +801,80 @@ fn wasm_bytes_mutable_capture_through_closure() {
 }
 
 #[test]
+fn wasm_string_push_clear_in_place() {
+    // string.push / string.clear had NO WASM dispatch arm — they ICE'd the emitter
+    // (native worked). They are `mut s`/in-place mutators in is_inplace_mutator, so
+    // a captured String mutated through a closure also relied on this. push appends
+    // (via __string_append, write-back like list.push), clear sets len 0. 2 pushes
+    // of "ab" -> len 4. Cross-target = 4.
+    assert_cross_target_effect_main(
+        "effect fn main() -> Unit = {\n\
+         \x20 var s: String = \"\"\n\
+         \x20 let f = () => { string.push(s, \"ab\") }\n\
+         \x20 f()\n\
+         \x20 f()\n\
+         \x20 println(int.to_string(string.len(s)))\n\
+         }\n",
+    );
+}
+
+#[test]
+fn wasm_closure_stored_in_tuple() {
+    // A capture-mutating closure stored in a tuple, destructured into a `let`, and
+    // called. Rust typed the binding `(impl Fn(), i64)` → E0562 (impl Trait in a
+    // binding type). The let-type's nested Fn subtree is now erased to `_` so Rust
+    // infers the concrete closure type. 2 calls -> len 2. Cross-target = 2.
+    assert_cross_target_effect_main(
+        "effect fn main() -> Unit = {\n\
+         \x20 var acc: List[Int] = []\n\
+         \x20 let pair = (() => { list.push(acc, 1) }, 0)\n\
+         \x20 let (g, _) = pair\n\
+         \x20 g()\n\
+         \x20 g()\n\
+         \x20 println(int.to_string(list.len(acc)))\n\
+         }\n",
+    );
+}
+
+#[test]
+fn wasm_call_closure_through_list_index() {
+    // `fs[0]()` — calling a closure indexed out of a list. The parser read `[0](` as
+    // a const-generic type-args call (`fs::<0>()`), emitting an invalid bare-name
+    // call (native E0425 / wasm trap). `[...]( ` is now a type-args call only when
+    // the brackets name a type; an int index makes it `(fs[0])()`. 2 calls -> len 2.
+    assert_cross_target_effect_main(
+        "effect fn main() -> Unit = {\n\
+         \x20 var acc: List[Int] = []\n\
+         \x20 let fs = [() => { list.push(acc, 1) }]\n\
+         \x20 fs[0]()\n\
+         \x20 fs[0]()\n\
+         \x20 println(int.to_string(list.len(acc)))\n\
+         }\n",
+    );
+}
+
+#[test]
+fn wasm_typed_param_closure_capturing_mutable() {
+    // A closure with a TYPED param `(k: String) => …` that captures a mutated var
+    // (so it stays a raw, capture-clone-wrapped closure) dropped the param type in
+    // Rust codegen → `move |k| …` → E0282. The bind site now annotates the tail
+    // lambda's params through the capture-clone block. Word-count -> 3,2,2.
+    assert_cross_target_effect_main(
+        "effect fn main() -> Unit = {\n\
+         \x20 var m: Map[String, Int] = map.new()\n\
+         \x20 let bump = (k: String) => {\n\
+         \x20   let cur: Int = map.get_or(m, k, 0)\n\
+         \x20   map.insert(m, k, cur + 1)\n\
+         \x20 }\n\
+         \x20 for w in [\"a\", \"b\", \"a\", \"a\", \"b\"] { bump(w) }\n\
+         \x20 println(int.to_string(map.get_or(m, \"a\", -1)))\n\
+         \x20 println(int.to_string(map.get_or(m, \"b\", -1)))\n\
+         \x20 println(int.to_string(map.len(m)))\n\
+         }\n",
+    );
+}
+
+#[test]
 fn wasm_reassign_concat_capture_through_closure() {
     // A non-Copy `var` GROWN by reassignment-concat through a closure
     // (`xs = xs + [list.len(xs)]`, reading its own length each step) must behave
