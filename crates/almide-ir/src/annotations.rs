@@ -63,14 +63,24 @@ pub struct CodegenAnnotations {
 
 impl CodegenAnnotations {
     /// Look up the storage mode for a variable. Checks VarId first (precise),
-    /// then falls back to uppercased name (for cross-module synthetic refs).
+    /// then falls back to uppercased name for cross-module synthetic refs only.
+    ///
+    /// A genuine global is always referenced by its real VarId (registered at
+    /// classification time), so the VarId lookup hits. The by-name fallback is a
+    /// safety net for cross-module synthetic refs, whose names are
+    /// `ALMIDE_RT_`-prefixed and therefore collision-free. It must NOT match a
+    /// bare name like `N`: a local that merely shares the name with a user global
+    /// (e.g. a stdlib fn's `n` parameter when the program has a global `n`) would
+    /// otherwise be misclassified as the global and read through its thread_local.
     pub fn get_var_storage(&self, var: &VarId, name: &str) -> VarStorage {
         if let Some(s) = self.var_storage.get(var) {
             return *s;
         }
         let upper = name.to_uppercase();
-        if let Some(s) = self.var_storage_by_name.get(&upper) {
-            return *s;
+        if upper.starts_with("ALMIDE_RT_") {
+            if let Some(s) = self.var_storage_by_name.get(&upper) {
+                return *s;
+            }
         }
         VarStorage::Local
     }

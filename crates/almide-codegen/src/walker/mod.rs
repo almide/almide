@@ -94,6 +94,19 @@ impl<'a> RenderContext<'a> {
             name.to_string()
         }
     }
+
+    /// The thread_local static name for a global var, matching exactly what the
+    /// `render_program` top_let emission declares. Built from the RAW (un-escaped)
+    /// var name: `var_name(id)` raw-escapes Rust keywords (`box` → `r#box`), and
+    /// uppercasing that yields the invalid `R#BOX`, which mismatches the `BOX` the
+    /// declaration emits. Every read/write of a global must route through here.
+    pub(crate) fn global_static_name(&self, id: VarId) -> String {
+        let vi = self.var_table.get(id);
+        match &vi.module_origin {
+            Some(origin) => format!("ALMIDE_RT_{}_{}", origin.to_uppercase(), vi.name.to_uppercase()),
+            None => vi.name.to_uppercase(),
+        }
+    }
 }
 
 // ── Function rendering ──

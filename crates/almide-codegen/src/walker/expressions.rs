@@ -112,12 +112,15 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 return format!("{}.get()", raw_name);
             }
             let var_info = ctx.var_table.get(*id);
-            // Emit-time prefix: module_origin → "ALMIDE_RT_{ORIGIN}_{NAME}"
+            // Emit-time prefix: module_origin → "ALMIDE_RT_{ORIGIN}_{NAME}".
+            // `upper` (the thread_local static name) is built from the RAW name via
+            // global_static_name — uppercasing the keyword-escaped `r#box` would
+            // give the invalid `R#BOX`.
             let (name, upper) = if let Some(ref origin) = var_info.module_origin {
                 let prefixed = format!("ALMIDE_RT_{}_{}", origin.to_uppercase(), raw_name.to_uppercase());
-                (prefixed.clone(), prefixed)
+                (prefixed, ctx.global_static_name(*id))
             } else {
-                (raw_name.clone(), raw_name.to_uppercase())
+                (raw_name.clone(), ctx.global_static_name(*id))
             };
             let has_module = var_info.module_origin.is_some();
             // Module-level mutable var: dispatch by storage type
@@ -1261,7 +1264,7 @@ fn render_runtime_call(ctx: &RenderContext, symbol: &almide_base::intern::Sym, a
             if let IrExprKind::Borrow { expr: inner, .. } | IrExprKind::Clone { expr: inner } = &args[0].kind {
                 if let IrExprKind::Var { id } = &inner.kind {
                     let name = ctx.var_name(*id).to_string();
-                    let upper = name.to_uppercase();
+                    let upper = ctx.global_static_name(*id);
                     match ctx.ann.get_var_storage(id, &name) {
                         VarStorage::ModuleRc => {
                             let rest_args = args[1..].iter().map(|a| render_expr(ctx, a))
