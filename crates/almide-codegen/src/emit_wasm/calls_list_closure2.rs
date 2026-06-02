@@ -407,7 +407,15 @@ impl FuncCompiler<'_> {
                 let b_ty = self.resolve_list_elem(&args[1], None);
                 let a_size = values::byte_size(&a_ty) as i32;
                 let b_size = values::byte_size(&b_ty) as i32;
-                let ret_elem_ty = self.list_elem_ty(&self.stub_ret_ty);
+                // The result element type is the COMBINER's return type — take it
+                // directly so the `call_indirect` return type matches the
+                // combiner's compiled signature. For a closure-list zip the
+                // stub_ret_ty's element can be unresolved (defaults to i32), which
+                // mismatched the combiner's real i64 result and trapped.
+                let ret_elem_ty = match &args[2].ty {
+                    Ty::Fn { ret, .. } if !matches!(ret.as_ref(), Ty::Unknown) => (**ret).clone(),
+                    _ => self.list_elem_ty(&self.stub_ret_ty),
+                };
                 let out_size = values::byte_size(&ret_elem_ty) as i32;
                 let out_vt = values::ty_to_valtype(&ret_elem_ty).unwrap_or(ValType::I32);
                 let xs = self.scratch.alloc_i32();
