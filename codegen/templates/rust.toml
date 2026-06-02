@@ -465,7 +465,7 @@ template = "{{\n{body}\n}}"
 template = "{expr}"
 
 [box_wrap]
-template = "Box::new({inner})"
+template = "std::rc::Rc::new({inner})"
 
 [fan_expr]
 template = "std::thread::scope(|__s| {{ {spawns} {join_expr} }})"
