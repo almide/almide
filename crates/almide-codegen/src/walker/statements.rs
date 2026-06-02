@@ -7,7 +7,7 @@ use almide_lang::types::{Ty, TypeConstructorId};
 use super::RenderContext;
 use super::types::render_type;
 use super::expressions::render_expr;
-use super::helpers::{template_or, terminate_stmt, ty_has_named_typevar, erase_named_typevars};
+use super::helpers::{template_or, terminate_stmt, ty_has_named_typevar, erase_named_typevars, erase_fn_types};
 
 /// Check if an expression references a specific variable (any depth).
 pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
@@ -81,34 +81,63 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
             } else {
                 ty
             };
+            // Erase Fn types nested inside containers (tuple element, map value,
+            // record field, ...). Rust forbids `impl Trait` in a binding type
+            // (E0562), so `(impl Fn() -> () + Clone, i64)` is illegal; rewrite the
+            // Fn subtree to `_` (-> `(_, i64)`) and let Rust infer the concrete
+            // closure type from the RHS. A top-level Fn was already turned into
+            // Ty::Unknown above, so this only touches the nested-container case.
+            let fn_erased_owned;
+            let ty = if matches!(ty, Ty::Tuple(_) | Ty::Applied(..) | Ty::Named(_, _) | Ty::Record { .. } | Ty::OpenRecord { .. })
+                && ty.any_child_recursive(&|t| matches!(t, Ty::Fn { .. }))
+            {
+                fn_erased_owned = erase_fn_types(ty.clone());
+                &fn_erased_owned
+            } else {
+                ty
+            };
             let type_s = render_type(ctx, ty);
             // When binding a lambda to a Fn-typed variable (e.g. type alias Handler = (String) -> String),
             // the let type is erased to `_` but the lambda params have no type annotations either,
             // causing Rust type inference failure. Render lambda params with explicit types in this case.
+            let annotate_lambda = |params: &[(VarId, Ty)], body: &IrExpr| -> String {
+                let params_str = params.iter()
+                    .map(|(id, pty)| {
+                        let name = ctx.var_name(*id).to_string();
+                        if matches!(pty, Ty::Unknown) {
+                            name
+                        } else {
+                            format!("{}: {}", name, super::types::render_type(ctx, pty))
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let body_str = render_expr(ctx, body);
+                ctx.templates.render_with("lambda_single", None, &[], &[("params", params_str.as_str()), ("body", body_str.as_str())])
+                    .unwrap_or_else(|| format!("move |{}| {}", params_str, body_str))
+            };
+            let has_typed = |params: &[(VarId, Ty)]| params.iter().any(|(_, t)| !matches!(t, Ty::Unknown));
             let value_s = if matches!(ty, Ty::Unknown) {
-                if let IrExprKind::Lambda { params, body, .. } = &value.kind {
-                    let has_typed_params = params.iter().any(|(_, t)| !matches!(t, Ty::Unknown));
-                    if has_typed_params {
-                        let params_str = params.iter()
-                            .map(|(id, pty)| {
-                                let name = ctx.var_name(*id).to_string();
-                                if matches!(pty, Ty::Unknown) {
-                                    name
-                                } else {
-                                    let ty_str = super::types::render_type(ctx, pty);
-                                    format!("{}: {}", name, ty_str)
-                                }
-                            })
-                            .collect::<Vec<_>>()
-                            .join(", ");
-                        let body_str = render_expr(ctx, body);
-                        ctx.templates.render_with("lambda_single", None, &[], &[("params", params_str.as_str()), ("body", body_str.as_str())])
-                            .unwrap_or_else(|| format!("move |{}| {}", params_str, body_str))
-                    } else {
-                        render_expr(ctx, value)
+                match &value.kind {
+                    IrExprKind::Lambda { params, body, .. } if has_typed(params) => annotate_lambda(params, body),
+                    // Capture-clone-wrapped closure: a shared-mut-capturing raw closure
+                    // lowers to `{ let __cap = x.clone(); move |k| … }`. The wrapping
+                    // block hides the lambda from the bare-Lambda case above, so a typed
+                    // param rendered `move |k|` with no type → E0282. Annotate the tail
+                    // lambda's params, keeping the capture prologue. HOF-arg lambdas
+                    // never reach here (render_iter_chain splices them inline), so this
+                    // is safe. (Closure v2 P6.)
+                    IrExprKind::Block { stmts, expr: Some(tail) }
+                        if matches!(&tail.kind, IrExprKind::Lambda { params, .. } if has_typed(params)) =>
+                    {
+                        if let IrExprKind::Lambda { params, body, .. } = &tail.kind {
+                            let stmts_s = stmts.iter().map(|s| render_stmt(ctx, s)).collect::<Vec<_>>().join("\n");
+                            format!("{{\n{}\n{}\n}}", stmts_s, annotate_lambda(params, body))
+                        } else {
+                            render_expr(ctx, value)
+                        }
                     }
-                } else {
-                    render_expr(ctx, value)
+                    _ => render_expr(ctx, value),
                 }
             } else {
                 render_expr(ctx, value)

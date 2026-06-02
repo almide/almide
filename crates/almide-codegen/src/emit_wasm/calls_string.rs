@@ -467,6 +467,39 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(s1);
                 self.scratch.free_i32(s);
             }
+            // ── In-place mutators (Unit-returning, write back into the var) ──
+            // These mirror `list.push` / `list.clear`: the receiver is mutated
+            // and (for push) the possibly-reallocated pointer is written back
+            // into the var/cell via `emit_mutator_writeback`. They leave nothing
+            // on the stack (the call is in Unit context). See
+            // `is_inplace_mutator` in pass_closure_conversion.rs for the source
+            // of truth on which calls mutate `args[0]`.
+            "push" | "push_char" => {
+                // push(mut s, suffix) → Unit. `__string_append` appends suffix
+                // to s in place when s has spare capacity, else grows 2x and
+                // returns a new pointer — exactly the semantics native
+                // `s.push_str(suffix)` needs. push_char takes a 1-char String,
+                // so it is identical. Both args are `String` (i32 ptr).
+                let new_ptr = self.scratch.alloc_i32();
+                self.emit_expr(&args[0]);
+                self.emit_expr(&args[1]);
+                wasm!(self.func, {
+                    call(self.emitter.rt.string_append);
+                    local_set(new_ptr);
+                });
+                // Write the (possibly reallocated) string ptr back into the
+                // local / global / mutable-capture cell.
+                self.emit_mutator_writeback(&args[0], new_ptr);
+                self.scratch.free_i32(new_ptr);
+            }
+            "clear" => {
+                // clear(mut s) → Unit. Sets the length header to 0 in place.
+                // Capacity and buffer are kept (matches `String::clear`), so no
+                // writeback is needed — the pointer is unchanged. Mirrors
+                // `list.clear`.
+                self.emit_expr(&args[0]);
+                wasm!(self.func, { i32_const(0); i32_store(0); });
+            }
             _ => return false,
         }
         true

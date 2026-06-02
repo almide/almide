@@ -47,6 +47,7 @@ impl Parser {
         if self.current().token_type != TokenType::LBracket { return false; }
         let mut depth = 0;
         let mut i = 0;
+        let mut has_typename = false;
         loop {
             let tok = match self.peek_at(i) {
                 Some(t) => t,
@@ -57,9 +58,18 @@ impl Parser {
                 TokenType::RBracket => {
                     depth -= 1;
                     if depth == 0 {
-                        return self.peek_at(i + 1).map(|t| t.token_type == TokenType::LParen).unwrap_or(false);
+                        // `<expr>[...]( ` is a *type-args* call (e.g. `parse[Int](s)`)
+                        // ONLY when the brackets actually name a type. Otherwise the
+                        // brackets are a value INDEX and the parens a call on the
+                        // indexed element: `fs[0]()` is `(fs[0])()`, not `fs::<0>()`.
+                        // Without the TypeName gate, `[0]` (an int index) was misread
+                        // as a const-generic type argument, so calling a closure out
+                        // of a list (`fs[0]()`) emitted an invalid bare-name call.
+                        return has_typename
+                            && self.peek_at(i + 1).map(|t| t.token_type == TokenType::LParen).unwrap_or(false);
                     }
                 }
+                TokenType::TypeName => has_typename = true,
                 TokenType::EOF => return false,
                 _ => {}
             }

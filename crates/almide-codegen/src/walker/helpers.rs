@@ -64,6 +64,27 @@ pub fn erase_named_typevars(ty: Ty) -> Ty {
     }
 }
 
+/// Replace every Fn type (at any depth) with Ty::Unknown (rendered as `_`).
+///
+/// Rust forbids `impl Trait` in the type of a variable binding (E0562), so a
+/// `let`/`var` whose type *contains* a closure type — e.g. a tuple element
+/// `(impl Fn() -> () + Clone, i64)`, a map value `HashMap<String, impl Fn..>`,
+/// or a record field — cannot be written literally. Erasing the Fn subtree to
+/// `_` lets Rust infer the concrete (unnameable) closure type from the RHS,
+/// while preserving the surrounding container shape (`(_, i64)`,
+/// `HashMap<String, _>`). The closure value itself is emitted unchanged and is
+/// `Clone` (captures are `Rc`/`Copy` clones), so later `g.clone()()` call sites
+/// keep working.
+///
+/// A top-level Fn is already mapped to `Ty::Unknown` by the binding code before
+/// this runs, so this only rewrites Fn types nested inside containers.
+pub fn erase_fn_types(ty: Ty) -> Ty {
+    match &ty {
+        Ty::Fn { .. } => Ty::Unknown,
+        _ => ty.map_children(&|child| erase_fn_types(child.clone())),
+    }
+}
+
 /// Indent each non-empty line by the given number of spaces.
 pub fn indent_lines(s: &str, spaces: usize) -> String {
     let prefix = " ".repeat(spaces);
