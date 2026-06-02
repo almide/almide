@@ -796,3 +796,41 @@ fn wasm_bytes_mutable_capture_through_closure() {
          }\n",
     );
 }
+
+#[test]
+fn wasm_module_global_list_mutated_through_closure() {
+    // A module-level mutable global (`var g`) mutated through a closure must behave
+    // identically on both targets. On Rust the global lowers to a `thread_local!`
+    // `ModuleRc`; it was ALSO (wrongly) classified `shared_mut`, so the enclosing
+    // read emitted a lowercase `g.get()` that doesn't exist (`error[E0425]`) while
+    // the closure body used `G.with(…)`. Globals are now excluded from shared_mut.
+    // f() pushes twice -> len 2. Cross-target = 2.
+    assert_cross_target_effect_main(
+        "var g: List[Int] = []\n\
+         effect fn main() -> Unit = {\n\
+         \x20 let f = () => { list.push(g, 7) }\n\
+         \x20 f()\n\
+         \x20 f()\n\
+         \x20 println(int.to_string(list.len(g)))\n\
+         }\n",
+    );
+}
+
+#[test]
+fn wasm_module_global_map_mutated_through_closure() {
+    // Same, via `map.insert` invoked as an EXPRESSION on a `ModuleRc` global. The
+    // Rust walker only special-cased list push/pop/clear, so map/string/bytes
+    // mutators on a global mutated a discarded `(**c.borrow()).clone()` (silently
+    // wrong); the mutator set is now the shared `is_inplace_mutator`. Inserts two
+    // distinct keys -> len 2. Cross-target = 2.
+    assert_cross_target_effect_main(
+        "var g: Map[String, Int] = map.new()\n\
+         effect fn main() -> Unit = {\n\
+         \x20 let f = () => { map.insert(g, \"a\", 1) }\n\
+         \x20 let h = () => { map.insert(g, \"b\", 2) }\n\
+         \x20 f()\n\
+         \x20 h()\n\
+         \x20 println(int.to_string(map.len(g)))\n\
+         }\n",
+    );
+}

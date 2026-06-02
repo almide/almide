@@ -417,6 +417,24 @@ fn check_assign_to_let() {
 }
 
 #[test]
+fn check_index_assign_to_module_let() {
+    // A module-level `let g` is immutable just like a local `let`: index-assigning
+    // its contents must be rejected (E009), not silently slip through to a codegen
+    // error. `lookup_var` only sees locals, so this exercises the `top_lets` arm.
+    let errs = errors("let g: List[Int] = [1, 2, 3]\neffect fn main() -> Unit = {\n  g[0] = 9\n}");
+    assert!(errs.iter().any(|e| e.contains("immutable binding 'g'")),
+        "module-level `let g` index-assign should report E009, got: {:?}", errs);
+}
+
+#[test]
+fn check_index_assign_to_module_var_ok() {
+    // The `var` counterpart is fine — must NOT report the immutable-binding error.
+    let errs = errors("var g: List[Int] = [1, 2, 3]\neffect fn main() -> Unit = {\n  g[0] = 9\n}");
+    assert!(!errs.iter().any(|e| e.contains("immutable binding")),
+        "module-level `var g` index-assign should be allowed, got: {:?}", errs);
+}
+
+#[test]
 fn check_undefined_type() {
     let errs = errors("fn f() -> Foo = {\n  let x = 1\n  x\n}");
     // Should either error or treat as Unknown

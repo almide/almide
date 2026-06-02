@@ -1032,7 +1032,15 @@ impl Checker {
             ast::Stmt::IndexAssign { target, index, value, .. } => {
                 self.infer_expr(index);
                 self.infer_expr(value);
-                if self.env.lookup_var(target.as_str()).is_some() && !self.env.mutable_vars.contains(target) {
+                // A module-level `let g` is immutable just like a local `let` — its
+                // contents may not be index-assigned. `lookup_var` only sees locals,
+                // so without the `top_lets` arm a global `let g; g[2]=…` slipped past
+                // this check and only failed later as opaque rustc `E0425` (the
+                // ModuleRc lowering never kicks in for a non-mutable global). Catch it
+                // here with the same E009 locals get.
+                let is_known_binding = self.env.lookup_var(target.as_str()).is_some()
+                    || self.env.top_lets.contains_key(&sym(target.as_str()));
+                if is_known_binding && !self.env.mutable_vars.contains(target) {
                     let mut diag = super::err(
                         format!("cannot mutate immutable binding '{}'", target),
                         format!("Use 'var {} = ...' to declare a mutable variable", target),

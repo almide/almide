@@ -91,7 +91,18 @@ thread_local! {
 /// a closure. As a moved copy its mutation would be invisible to the enclosing
 /// scope, so it must become a shared cell. (Closure v2, P3.)
 fn detect_shared_mut(program: &IrProgram) -> HashSet<VarId> {
-    struct LambdaWalker<'a> { vt: &'a VarTable, out: HashSet<VarId> }
+    // Module-level globals are NOT closure cells. They lower to `static` /
+    // `thread_local!` storage (a mutated one becomes `ModuleRc`/`ModuleCell`) and
+    // are already globally reachable, so a closure references them directly by their
+    // storage class — it does not capture a heap cell. Marking a global `shared_mut`
+    // double-classifies it (ModuleRc AND SharedMut) and the two emit conflicting
+    // references: the closure body uses `G.with(…)` while the enclosing read uses a
+    // lowercase `g.get()` that doesn't exist → `error[E0425]: cannot find value g`.
+    // So exclude globals here; their mutability is handled by the ModuleRc path.
+    let globals: HashSet<VarId> = program.top_lets.iter().map(|t| t.var)
+        .chain(program.modules.iter().flat_map(|m| m.top_lets.iter().map(|t| t.var)))
+        .collect();
+    struct LambdaWalker<'a> { vt: &'a VarTable, globals: &'a HashSet<VarId>, out: HashSet<VarId> }
     impl almide_ir::visit::IrVisitor for LambdaWalker<'_> {
         fn visit_expr(&mut self, expr: &IrExpr) {
             if let IrExprKind::Lambda { params, body, .. } = &expr.kind {
@@ -103,6 +114,7 @@ fn detect_shared_mut(program: &IrProgram) -> HashSet<VarId> {
                 let mut mutated = HashSet::new();
                 collect_mutated_vars(body, &mut mutated);
                 for v in almide_ir::free_vars::free_vars(body, &param_set) {
+                    if self.globals.contains(&v) { continue; }
                     let info = self.vt.get(v);
                     // A captured var that is mutated through the closure must become a
                     // shared cell so the mutation is visible to the enclosing scope.
@@ -119,7 +131,7 @@ fn detect_shared_mut(program: &IrProgram) -> HashSet<VarId> {
         }
     }
     use almide_ir::visit::IrVisitor;
-    let mut w = LambdaWalker { vt: &program.var_table, out: HashSet::new() };
+    let mut w = LambdaWalker { vt: &program.var_table, globals: &globals, out: HashSet::new() };
     for f in &program.functions { w.visit_expr(&f.body); }
     for m in &program.modules { for f in &m.functions { w.visit_expr(&f.body); } }
     w.out

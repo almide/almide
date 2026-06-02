@@ -1225,10 +1225,14 @@ fn render_runtime_call(ctx: &RenderContext, symbol: &almide_base::intern::Sym, a
         }
         _ => {}
     }
-    // Mutating stdlib calls (push, pop, clear) on module-level or RcCow var
+    // Mutating stdlib calls on a module-level (`ModuleRc`) or `RcCow` var: route
+    // through `Rc::make_mut`/`.make_mut()` so the mutation hits the shared backing
+    // store, not a clone. The mutator set is the one source of truth in
+    // `pass_closure_conversion` (list/map/string/bytes &mut-on-args[0] fns); before
+    // it was only list push/pop/clear, so `map.insert`/`bytes.push`/… on a global
+    // silently mutated a discarded `(**c.borrow()).clone()`.
     if !args.is_empty() {
-        let is_mutating = matches!(symbol.as_str(),
-            "almide_rt_list_push" | "almide_rt_list_pop" | "almide_rt_list_clear");
+        let is_mutating = crate::pass_closure_conversion::is_inplace_mutator(symbol.as_str());
         if is_mutating {
             if let IrExprKind::Borrow { expr: inner, .. } | IrExprKind::Clone { expr: inner } = &args[0].kind {
                 if let IrExprKind::Var { id } = &inner.kind {

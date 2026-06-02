@@ -665,9 +665,11 @@ fn max_env_load_index(expr: &IrExpr) -> Option<u32> {
 
 // ── P6: captured-and-mutated var detection (need a shared cell on WASM) ──
 
-/// In-place stdlib mutators — they mutate `args[0]`. A captured var passed here
-/// must become a shared cell even when its IR `Mutability` reads `Let`.
-fn is_inplace_mutator(symbol: &str) -> bool {
+/// In-place stdlib mutators — runtime fns that take `&mut args[0]`. The single
+/// source of truth for "this call mutates its receiver": used both to mark a
+/// captured var a shared cell (WASM) and to route a mutator on a `ModuleRc`
+/// global through `Rc::make_mut(&mut *c.borrow_mut())` instead of a clone (Rust).
+pub(crate) fn is_inplace_mutator(symbol: &str) -> bool {
     // ONLY the runtime fns that take `&mut` on `args[0]` (verified against
     // runtime/rs/src/*.rs). The `list.set/insert/sort/reverse`, `map.set/remove`,
     // and all `set.*` ops return a NEW value (pure) — calling them in a closure and
