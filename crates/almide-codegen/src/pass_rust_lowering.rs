@@ -6,6 +6,7 @@
 //! 2. **Borrow index lift**: `xs[f(xs)] = v` → `{ let __idx = f(xs); xs[__idx] = v; }`
 //!    Resolves Rust simultaneous mutable+immutable borrow conflicts in IndexAssign.
 
+use std::collections::HashSet;
 use almide_ir::*;
 use almide_base::intern::sym;
 use super::pass::{NanoPass, PassResult, Target};
@@ -20,16 +21,21 @@ impl NanoPass for RustLoweringPass {
 
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         let mut changed = false;
+        // Shared-cell vars must NOT get the `xs = xs + [v]` → `xs.push(v)` rewrite:
+        // their binding is a `SharedMut`, so `xs.push(v)` renders as `xs.get().push(v)`
+        // — a push onto a discarded clone, losing the reassignment. Left as an Assign,
+        // the walker emits `xs.set(xs.get() + [v])` through the cell. (Closure v2 P6.)
+        let shared: HashSet<VarId> = program.codegen_annotations.shared_mut_vars.clone();
         let IrProgram { functions, top_lets, modules, var_table, .. } = &mut program;
         for func in functions.iter_mut() {
-            if rewrite_stmts_in_expr(&mut func.body, var_table) { changed = true; }
+            if rewrite_stmts_in_expr(&mut func.body, var_table, &shared) { changed = true; }
         }
         for tl in top_lets.iter_mut() {
-            if rewrite_stmts_in_expr(&mut tl.value, var_table) { changed = true; }
+            if rewrite_stmts_in_expr(&mut tl.value, var_table, &shared) { changed = true; }
         }
         for module in modules.iter_mut() {
             for func in module.functions.iter_mut() {
-                if rewrite_stmts_in_expr(&mut func.body, var_table) { changed = true; }
+                if rewrite_stmts_in_expr(&mut func.body, var_table, &shared) { changed = true; }
             }
         }
         PassResult { program, changed }
@@ -38,7 +44,7 @@ impl NanoPass for RustLoweringPass {
 
 /// Walk all stmts in expressions recursively. Also rewrites UnwrapOr
 /// fallback lambdas for List[Fn] contexts with RcWrap.
-fn rewrite_stmts_in_expr(expr: &mut IrExpr, vt: &mut VarTable) -> bool {
+fn rewrite_stmts_in_expr(expr: &mut IrExpr, vt: &mut VarTable, shared: &HashSet<VarId>) -> bool {
     let mut changed = false;
     // UnwrapOr with Fn fallback lambda: wrap in RcWrap for List[Fn] compatibility
     if let IrExprKind::UnwrapOr { expr: inner, fallback } = &mut expr.kind {
@@ -67,68 +73,68 @@ fn rewrite_stmts_in_expr(expr: &mut IrExpr, vt: &mut VarTable) -> bool {
     match &mut expr.kind {
         IrExprKind::Block { stmts, expr: tail } => {
             for s in stmts.iter_mut() {
-                if rewrite_stmt(s, vt) { changed = true; }
-                rewrite_stmts_in_stmt(s, vt, &mut changed);
+                if rewrite_stmt(s, vt, shared) { changed = true; }
+                rewrite_stmts_in_stmt(s, vt, shared, &mut changed);
             }
-            if let Some(e) = tail { if rewrite_stmts_in_expr(e, vt) { changed = true; } }
+            if let Some(e) = tail { if rewrite_stmts_in_expr(e, vt, shared) { changed = true; } }
         }
         IrExprKind::If { cond, then, else_ } => {
-            if rewrite_stmts_in_expr(cond, vt) { changed = true; }
-            if rewrite_stmts_in_expr(then, vt) { changed = true; }
-            if rewrite_stmts_in_expr(else_, vt) { changed = true; }
+            if rewrite_stmts_in_expr(cond, vt, shared) { changed = true; }
+            if rewrite_stmts_in_expr(then, vt, shared) { changed = true; }
+            if rewrite_stmts_in_expr(else_, vt, shared) { changed = true; }
         }
         IrExprKind::Match { subject, arms } => {
-            if rewrite_stmts_in_expr(subject, vt) { changed = true; }
+            if rewrite_stmts_in_expr(subject, vt, shared) { changed = true; }
             for arm in arms {
-                if let Some(g) = &mut arm.guard { rewrite_stmts_in_expr(g, vt); }
-                if rewrite_stmts_in_expr(&mut arm.body, vt) { changed = true; }
+                if let Some(g) = &mut arm.guard { rewrite_stmts_in_expr(g, vt, shared); }
+                if rewrite_stmts_in_expr(&mut arm.body, vt, shared) { changed = true; }
             }
         }
         IrExprKind::ForIn { iterable, body, .. } => {
-            if rewrite_stmts_in_expr(iterable, vt) { changed = true; }
+            if rewrite_stmts_in_expr(iterable, vt, shared) { changed = true; }
             for s in body.iter_mut() {
-                if rewrite_stmt(s, vt) { changed = true; }
-                rewrite_stmts_in_stmt(s, vt, &mut changed);
+                if rewrite_stmt(s, vt, shared) { changed = true; }
+                rewrite_stmts_in_stmt(s, vt, shared, &mut changed);
             }
         }
         IrExprKind::While { cond, body } => {
-            if rewrite_stmts_in_expr(cond, vt) { changed = true; }
+            if rewrite_stmts_in_expr(cond, vt, shared) { changed = true; }
             for s in body.iter_mut() {
-                if rewrite_stmt(s, vt) { changed = true; }
-                rewrite_stmts_in_stmt(s, vt, &mut changed);
+                if rewrite_stmt(s, vt, shared) { changed = true; }
+                rewrite_stmts_in_stmt(s, vt, shared, &mut changed);
             }
         }
         IrExprKind::Lambda { body, .. } => {
-            if rewrite_stmts_in_expr(body, vt) { changed = true; }
+            if rewrite_stmts_in_expr(body, vt, shared) { changed = true; }
         }
         _ => {}
     }
     changed
 }
 
-fn rewrite_stmts_in_stmt(stmt: &mut IrStmt, vt: &mut VarTable, changed: &mut bool) {
+fn rewrite_stmts_in_stmt(stmt: &mut IrStmt, vt: &mut VarTable, shared: &HashSet<VarId>, changed: &mut bool) {
     match &mut stmt.kind {
         IrStmtKind::Bind { value, .. } | IrStmtKind::BindDestructure { value, .. }
         | IrStmtKind::Assign { value, .. } | IrStmtKind::FieldAssign { value, .. } => {
-            if rewrite_stmts_in_expr(value, vt) { *changed = true; }
+            if rewrite_stmts_in_expr(value, vt, shared) { *changed = true; }
         }
         IrStmtKind::IndexAssign { index, value, .. } => {
-            if rewrite_stmts_in_expr(index, vt) { *changed = true; }
-            if rewrite_stmts_in_expr(value, vt) { *changed = true; }
+            if rewrite_stmts_in_expr(index, vt, shared) { *changed = true; }
+            if rewrite_stmts_in_expr(value, vt, shared) { *changed = true; }
         }
         IrStmtKind::Guard { cond, else_ } => {
-            if rewrite_stmts_in_expr(cond, vt) { *changed = true; }
-            if rewrite_stmts_in_expr(else_, vt) { *changed = true; }
+            if rewrite_stmts_in_expr(cond, vt, shared) { *changed = true; }
+            if rewrite_stmts_in_expr(else_, vt, shared) { *changed = true; }
         }
         IrStmtKind::Expr { expr } => {
-            if rewrite_stmts_in_expr(expr, vt) { *changed = true; }
+            if rewrite_stmts_in_expr(expr, vt, shared) { *changed = true; }
         }
         _ => {}
     }
 }
 
 /// Try to rewrite a single statement.
-fn rewrite_stmt(stmt: &mut IrStmt, vt: &mut VarTable) -> bool {
+fn rewrite_stmt(stmt: &mut IrStmt, vt: &mut VarTable, shared: &HashSet<VarId>) -> bool {
     let span = stmt.span;
     // (0) List[Fn] binding: wrap lambda elements in RcWrap
     if let IrStmtKind::Bind { ty, value, .. } = &mut stmt.kind {
@@ -155,9 +161,9 @@ fn rewrite_stmt(stmt: &mut IrStmt, vt: &mut VarTable) -> bool {
             }
         }
     }
-    // (1) xs = xs + [v] → xs.push(v)
+    // (1) xs = xs + [v] → xs.push(v) — but not for a shared cell (see run()).
     if let IrStmtKind::Assign { var, value } = &stmt.kind {
-        if let Some(push_stmt) = try_rewrite_push(*var, value, span) {
+        if let Some(push_stmt) = try_rewrite_push(*var, value, span, shared) {
             *stmt = push_stmt;
             return true;
         }
@@ -206,7 +212,10 @@ fn rewrite_stmt(stmt: &mut IrStmt, vt: &mut VarTable) -> bool {
 }
 
 /// Rewrite `xs = xs + [v]` → `Expr(Call(xs.push, [v]))`.
-fn try_rewrite_push(var: VarId, value: &IrExpr, span: Option<almide_base::Span>) -> Option<IrStmt> {
+fn try_rewrite_push(var: VarId, value: &IrExpr, span: Option<almide_base::Span>, shared: &HashSet<VarId>) -> Option<IrStmt> {
+    // A shared-cell var keeps its `Assign` so the walker writes through the cell
+    // (`xs.set(…)`); rewriting to `xs.push(v)` would push onto a discarded clone.
+    if shared.contains(&var) { return None; }
     let IrExprKind::BinOp { op: BinOp::ConcatList, left, right } = &value.kind else { return None; };
     let IrExprKind::List { elements } = &right.kind else { return None; };
     if elements.len() != 1 { return None; }

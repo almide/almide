@@ -578,6 +578,41 @@ impl FuncCompiler<'_> {
         );
         self.depth = guard.0;
     }
+
+    /// Write a freshly-(re)allocated heap object pointer back to the variable an
+    /// in-place mutator (`list.push`, `map.insert`, `string.push`, …) operates on.
+    ///
+    /// Every such op may relocate its target (grow + realloc), so the new pointer
+    /// must replace the old binding. There are three storage classes, and getting
+    /// any of them wrong is silently wrong (the mutation is lost or, worse, the
+    /// next read dereferences a stale pointer):
+    ///
+    /// - **mutable capture** — the local holds a *cell* pointer, not the object.
+    ///   Store the new object pointer *into* the cell (`i32_store(0)`), preserving
+    ///   the cell's identity so other closures sharing it observe the update. This
+    ///   is the case that the per-op write-backs historically missed (Closure
+    ///   Architecture v2, P6): they overwrote the local with the object pointer,
+    ///   corrupting the cell so subsequent cell-deref reads returned garbage.
+    /// - **local** — overwrite the local with the new pointer.
+    /// - **top-level global** — overwrite the global.
+    ///
+    /// `new_ptr` is a local already holding the new object pointer. No-op when the
+    /// target is not a bare `Var` (e.g. `foo().push(x)` has nowhere to write back).
+    pub fn emit_mutator_writeback(&mut self, target: &almide_ir::IrExpr, new_ptr: u32) {
+        let id = match &target.kind {
+            almide_ir::IrExprKind::Var { id } => id.0,
+            _ => return,
+        };
+        if self.emitter.mutable_captures.contains(&id) {
+            if let Some(&local_idx) = self.var_map.get(&id) {
+                wasm!(self.func, { local_get(local_idx); local_get(new_ptr); i32_store(0); });
+            }
+        } else if let Some(&local_idx) = self.var_map.get(&id) {
+            wasm!(self.func, { local_get(new_ptr); local_set(local_idx); });
+        } else if let Some(&(global_idx, _)) = self.emitter.top_let_globals.get(&id) {
+            wasm!(self.func, { local_get(new_ptr); global_set(global_idx); });
+        }
+    }
 }
 
 // ── Public API ──────────────────────────────────────────────────────

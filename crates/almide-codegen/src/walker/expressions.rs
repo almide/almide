@@ -107,6 +107,10 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         // ── Variables ──
         IrExprKind::Var { id } => {
             let raw_name = ctx.var_name(*id).to_string();
+            // Shared-mut local (`Rc<Cell<T>>`): read the cell. (Closure v2, P3.)
+            if ctx.ann.is_shared_mut(id) {
+                return format!("{}.get()", raw_name);
+            }
             let var_info = ctx.var_table.get(*id);
             // Emit-time prefix: module_origin → "ALMIDE_RT_{ORIGIN}_{NAME}"
             let (name, upper) = if let Some(ref origin) = var_info.module_origin {
@@ -726,6 +730,28 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 .unwrap_or_else(|| format!("(*{})", name_s))
         }
         IrExprKind::Borrow { expr: inner, as_str, mutable } => {
+            // Shared-mut non-Copy var (`SharedMut`, Closure v2 P6): borrow through the
+            // `RefCell` rather than the `.get()` clone a bare Var read would emit, so a
+            // mutating call (`list.push(acc, …)` → `&mut *acc.borrow_mut()`) writes the
+            // ONE shared cell the closure also holds. A shared read uses `&*acc.borrow()`
+            // (no clone). Copy shared-mut vars stay on the `Cell` `.get()` path below.
+            if let IrExprKind::Var { id } = &inner.kind {
+                if ctx.ann.is_shared_mut(id)
+                    && !matches!(ctx.var_table.get(*id).ty, Ty::Int | Ty::Float | Ty::Bool)
+                {
+                    let var_name = ctx.var_name(*id).to_string();
+                    return if *mutable {
+                        // In-place mutation writes the one shared cell.
+                        format!("&mut *{}.borrow_mut()", var_name)
+                    } else {
+                        // A shared read borrows an owned snapshot (`.get()` clones the
+                        // cell's value). Unlike `&*x.borrow()`, this owned temporary has
+                        // no lifetime tie to `x`, so it is also safe in tail position
+                        // where `x` is a block-local (`let outer = () => { var a = …; …; a })`.
+                        format!("&{}.get()", var_name)
+                    };
+                }
+            }
             // If the borrowed operand is a Var referencing a fn param
             // already emitted as a reference (`&T`, `&[T]`, `&str`),
             // skip the outer `&` to avoid `&&T` double-borrow. The
@@ -1199,10 +1225,14 @@ fn render_runtime_call(ctx: &RenderContext, symbol: &almide_base::intern::Sym, a
         }
         _ => {}
     }
-    // Mutating stdlib calls (push, pop, clear) on module-level or RcCow var
+    // Mutating stdlib calls on a module-level (`ModuleRc`) or `RcCow` var: route
+    // through `Rc::make_mut`/`.make_mut()` so the mutation hits the shared backing
+    // store, not a clone. The mutator set is the one source of truth in
+    // `pass_closure_conversion` (list/map/string/bytes &mut-on-args[0] fns); before
+    // it was only list push/pop/clear, so `map.insert`/`bytes.push`/… on a global
+    // silently mutated a discarded `(**c.borrow()).clone()`.
     if !args.is_empty() {
-        let is_mutating = matches!(symbol.as_str(),
-            "almide_rt_list_push" | "almide_rt_list_pop" | "almide_rt_list_clear");
+        let is_mutating = crate::pass_closure_conversion::is_inplace_mutator(symbol.as_str());
         if is_mutating {
             if let IrExprKind::Borrow { expr: inner, .. } | IrExprKind::Clone { expr: inner } = &args[0].kind {
                 if let IrExprKind::Var { id } = &inner.kind {

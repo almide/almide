@@ -20,7 +20,7 @@
 
 use std::collections::HashSet;
 use crate::{IrExpr, IrExprKind, IrStmt, IrStmtKind, IrPattern, VarId};
-use crate::visit::{IrVisitor, walk_expr};
+use crate::visit::{IrVisitor, walk_expr, walk_stmt};
 
 /// The free variables of `expr` relative to `bound` (typically a lambda's params
 /// plus any already-in-scope binders), as a deterministically-sorted `Vec`.
@@ -112,6 +112,26 @@ impl IrVisitor for FreeVarCollector {
             }
             _ => walk_expr(self, expr),
         }
+    }
+
+    fn visit_stmt(&mut self, stmt: &IrStmt) {
+        // The *target* of an assignment is a `VarId` field, not a `Var` expr, so the
+        // expr walk above never sees it. But a closure that writes a variable does
+        // reference it — count the target free so a write-only capture (`xs[0] = 9`,
+        // `s = …` with no read of `s`) is still recognized as captured. Without this
+        // such a closure captured nothing and the write went nowhere.
+        match &stmt.kind {
+            IrStmtKind::Assign { var, .. } => {
+                if !self.bound.contains(var) { self.free.insert(*var); }
+            }
+            IrStmtKind::IndexAssign { target, .. }
+            | IrStmtKind::MapInsert { target, .. }
+            | IrStmtKind::FieldAssign { target, .. } => {
+                if !self.bound.contains(target) { self.free.insert(*target); }
+            }
+            _ => {}
+        }
+        walk_stmt(self, stmt);
     }
 }
 

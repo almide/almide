@@ -391,11 +391,7 @@ impl FuncCompiler<'_> {
                 });
                 // Update the variable: need to store new_buf back
                 // The buf variable is the first arg — if it's a Var, update the local
-                if let almide_ir::IrExprKind::Var { id } = &args[0].kind {
-                    if let Some(&local_idx) = self.var_map.get(&id.0) {
-                        wasm!(self.func, { local_get(new_buf); local_set(local_idx); });
-                    }
-                }
+                self.emit_mutator_writeback(&args[0], new_buf);
                 self.scratch.free_i32(val);
                 self.scratch.free_i32(new_buf);
                 self.scratch.free_i32(old_len);
@@ -437,11 +433,7 @@ impl FuncCompiler<'_> {
                     local_get(fval);
                     f64_store(0);
                 });
-                if let almide_ir::IrExprKind::Var { id } = &args[0].kind {
-                    if let Some(&local_idx) = self.var_map.get(&id.0) {
-                        wasm!(self.func, { local_get(new_buf); local_set(local_idx); });
-                    }
-                }
+                self.emit_mutator_writeback(&args[0], new_buf);
                 self.scratch.free_f64(fval);
                 self.scratch.free_i32(new_buf);
                 self.scratch.free_i32(old_len);
@@ -1065,11 +1057,7 @@ impl FuncCompiler<'_> {
             _ => panic!("emit_bytes_append_i: unsupported size_bytes {size_bytes}"),
         }
         // Update the variable in-place when arg[0] is a Var.
-        if let almide_ir::IrExprKind::Var { id } = &args[0].kind {
-            if let Some(&local_idx) = self.var_map.get(&id.0) {
-                wasm!(self.func, { local_get(new_buf); local_set(local_idx); });
-            }
-        }
+        self.emit_mutator_writeback(&args[0], new_buf);
         self.scratch.free_i64(val_i64);
         self.scratch.free_i32(new_buf);
         self.scratch.free_i32(old_len);
@@ -1105,11 +1093,7 @@ impl FuncCompiler<'_> {
             wasm!(self.func, { local_get(fval); f64_store(0); });
         }
         let _ = as_f32; // satisfy unused-var lint when both branches identical
-        if let almide_ir::IrExprKind::Var { id } = &args[0].kind {
-            if let Some(&local_idx) = self.var_map.get(&id.0) {
-                wasm!(self.func, { local_get(new_buf); local_set(local_idx); });
-            }
-        }
+        self.emit_mutator_writeback(&args[0], new_buf);
         self.scratch.free_f64(fval);
         self.scratch.free_i32(new_buf);
         self.scratch.free_i32(old_len);
@@ -1320,11 +1304,7 @@ impl FuncCompiler<'_> {
                 i32_store8(i as u64);
             });
         }
-        if let almide_ir::IrExprKind::Var { id } = &args[0].kind {
-            if let Some(&local_idx) = self.var_map.get(&id.0) {
-                wasm!(self.func, { local_get(new_buf); local_set(local_idx); });
-            }
-        }
+        self.emit_mutator_writeback(&args[0], new_buf);
         self.scratch.free_i32(dst);
         self.scratch.free_i64(val_i64);
         self.scratch.free_i32(new_buf);
@@ -1379,11 +1359,7 @@ impl FuncCompiler<'_> {
                 i32_store8(i as u64);
             });
         }
-        if let almide_ir::IrExprKind::Var { id } = &args[0].kind {
-            if let Some(&local_idx) = self.var_map.get(&id.0) {
-                wasm!(self.func, { local_get(new_buf); local_set(local_idx); });
-            }
-        }
+        self.emit_mutator_writeback(&args[0], new_buf);
         self.scratch.free_i32(dst);
         self.scratch.free_i64(bits);
         self.scratch.free_i32(new_buf);

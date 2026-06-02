@@ -318,7 +318,14 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
                 Ty::Applied(TypeConstructorId::Map, args) if args.len() == 2 => Ty::Tuple(vec![args[0].clone(), args[1].clone()]),
                 _ => Ty::Unknown,
             };
-            let var_id = ctx.define_var(var, elem_ty.clone(), Mutability::Let, span.clone());
+            // For a tuple-destructure loop (`for (i, x) in …`) the loop var is a
+            // synthetic holder for each tuple — the real user bindings are the
+            // `var_tuple` components. Give it no span so the unused-variable check
+            // never flags it (it is never used directly, only destructured, and it
+            // inherits the first element's name → a spurious "unused 'i'"). A plain
+            // `for x in …` keeps its span so a genuinely unused `x` is still flagged.
+            let loop_var_span = if var_tuple.is_some() { None } else { span.clone() };
+            let var_id = ctx.define_var(var, elem_ty.clone(), Mutability::Let, loop_var_span);
             let tuple_vars = var_tuple.as_ref().map(|names| {
                 let tys = match &elem_ty {
                     Ty::Tuple(tys) => tys.clone(),

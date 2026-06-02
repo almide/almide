@@ -620,3 +620,238 @@ fn wasm_cross_module_lambda_without_local_decoy() {
         ),
     ]);
 }
+
+/// Like `assert_cross_target`, but for programs whose `main` is an `effect fn`.
+/// Such a main returns `Result[Unit, _]`, and wasmtime's `_start` prints the
+/// wrapped return value (a heap pointer) as a trailing line. Compare only the
+/// program's own output (the first `rust_out.lines().len()` lines). A trap
+/// still surfaces: `run_wasm` panics when wasmtime exits non-zero.
+fn assert_cross_target_effect_main(source: &str) {
+    let bin = almide_bin();
+    if Command::new(&bin).arg("--version").output().is_err() { return; }
+    if Command::new("node").arg("--version").output().is_err() { return; }
+
+    let rust_out = run_rust(source);
+    let wasm_out = run_wasm(source);
+    let rust_lines: Vec<&str> = rust_out.lines().collect();
+    let wasm_lines: Vec<&str> = wasm_out.lines().collect();
+    assert!(
+        wasm_lines.len() >= rust_lines.len(),
+        "\nWASM produced fewer lines than Rust (output dropped)!\nRust: {:?}\nWASM: {:?}\nSource:\n{}",
+        rust_out, wasm_out, source
+    );
+    assert_eq!(
+        rust_lines.as_slice(),
+        &wasm_lines[..rust_lines.len()],
+        "\nCross-target mismatch (effect main)!\nRust: {:?}\nWASM: {:?}\nSource:\n{}",
+        rust_out, wasm_out, source
+    );
+}
+
+#[test]
+fn wasm_effect_fn_returns_closure_auto_try_binding() {
+    // P3-WASM regression: an effect fn returning a closure, bound via auto-`?`.
+    // The binding's var type lagged at `Result[Fn, _]` (auto_try runs after
+    // lowering), so `add5(10)` mis-resolved to a Named call `add5` instead of a
+    // Computed call through the local. WASM then trapped on the unresolved call
+    // and Perceus freed the closure before the call. The `!` form always worked;
+    // this guards the `?` form (the common case). Expected: 15.
+    assert_cross_target_effect_main(
+        "effect fn make_adder_e(n: Int) -> (Int) -> Int = (x) => x + n\n\
+         effect fn main() -> Unit = {\n\
+         \x20 let add5 = make_adder_e(5)\n\
+         \x20 println(int.to_string(add5(10)))\n\
+         }\n",
+    );
+}
+
+#[test]
+fn wasm_effect_fn_returns_closure_used_twice() {
+    // Same auto-`?` closure binding, but the closure is called more than once —
+    // exercises Perceus inc/dec balance for the binding across multiple uses.
+    assert_cross_target_effect_main(
+        "effect fn make_adder_e(n: Int) -> (Int) -> Int = (x) => x + n\n\
+         effect fn main() -> Unit = {\n\
+         \x20 let add = make_adder_e(100)\n\
+         \x20 println(int.to_string(add(1) + add(2)))\n\
+         }\n",
+    );
+}
+
+#[test]
+fn rust_process_exec_forwards_bound_list() {
+    // Regression (bug report 2026-06-02): forwarding a *bound* List[String] to
+    // process.exec emitted `&[String]` at the call site while the runtime shim took
+    // `&Vec<String>`, so `almide check` passed but `almide build` failed (E0308) —
+    // the worst failure mode (codegen produces invalid Rust). A List *literal*
+    // compiled fine, which made it sneaky. `process.*` is native-only, so this is a
+    // Rust-target build+run test: `run_rust` compiles via `almide run` and panics if
+    // the build fails, then we assert the output.
+    let out = run_rust(
+        "import process\n\
+         effect fn run(cmd: String, a: List[String]) -> String =\n\
+         \x20 match process.exec(cmd, a) {\n\
+         \x20   ok(o) => o,\n\
+         \x20   err(_) => \"\",\n\
+         \x20 }\n\
+         effect fn main() -> Unit = {\n\
+         \x20 let out = run(\"echo\", [\"hello\"])\n\
+         \x20 println(out)\n\
+         }\n",
+    );
+    assert_eq!(out, "hello");
+}
+
+#[test]
+fn wasm_non_copy_mutable_capture_through_closure() {
+    // Closure v2 P6: mutating a captured non-Copy `var` through a closure must be
+    // visible to the enclosing scope — on BOTH targets. Before P6 it silently
+    // returned 0: Rust used `RcCow` (copy-on-write clones on a shared mutation),
+    // WASM captured the list by value (no shared cell). Copy scalars already worked
+    // (P3 shared cell); this is the non-Copy (`SharedMut` / heap-cell) analogue.
+    assert_cross_target_effect_main(
+        "effect fn main() -> Unit = {\n\
+         \x20 var acc: List[Int] = []\n\
+         \x20 let inner = () => { list.push(acc, 1) }\n\
+         \x20 inner()\n\
+         \x20 inner()\n\
+         \x20 println(int.to_string(list.len(acc)))\n\
+         }\n",
+    );
+}
+
+#[test]
+fn wasm_nested_non_copy_mutable_capture() {
+    // A non-Copy `var` bound inside a closure, mutated by a nested closure — the
+    // tail read of the shared cell must not outlive it (a Rust borrow-lifetime
+    // hazard) and the cell must thread through the WASM env. Cross-target = 3.
+    assert_cross_target_effect_main(
+        "effect fn main() -> Unit = {\n\
+         \x20 let outer = () => {\n\
+         \x20   var acc: List[Int] = []\n\
+         \x20   let inner = () => { list.push(acc, 1) }\n\
+         \x20   inner()\n\
+         \x20   inner()\n\
+         \x20   inner()\n\
+         \x20   list.len(acc)\n\
+         \x20 }\n\
+         \x20 println(int.to_string(outer()))\n\
+         }\n",
+    );
+}
+
+#[test]
+fn wasm_sibling_closures_share_mutable_capture() {
+    // Closure v2 P6: two SIBLING closures capture the same non-Copy `var` — one
+    // mutates it, the other only reads it. The reader must observe the writer's
+    // mutation (they share one cell). On WASM the reader was lifted to a
+    // ClosureCreate/EnvLoad that loaded the raw cell ptr and used it as the list,
+    // so `list.len` read garbage (a leaked pointer) instead of 0; the fix keeps any
+    // shared-cell-capturing lambda raw so both closures share one heap cell.
+    // wipe() clears -> reader sees len 0. Cross-target = 0.
+    assert_cross_target_effect_main(
+        "effect fn main() -> Unit = {\n\
+         \x20 var xs: List[Int] = [7, 8, 9]\n\
+         \x20 let wipe = () => { list.clear(xs) }\n\
+         \x20 let size = () => { list.len(xs) }\n\
+         \x20 wipe()\n\
+         \x20 println(int.to_string(size()))\n\
+         }\n",
+    );
+}
+
+#[test]
+fn wasm_reader_closure_observes_writer_closure() {
+    // Same shared-cell sibling-closure case via in-place `list.pop`: the writer
+    // drains 3 of 4 elements, a separate reader closure reports the length. The
+    // reader must observe the pops through the shared cell. Cross-target = 1.
+    assert_cross_target_effect_main(
+        "effect fn main() -> Unit = {\n\
+         \x20 var xs: List[Int] = [5, 6, 7, 8]\n\
+         \x20 let drain = () => { list.pop(xs) }\n\
+         \x20 let report = () => { list.len(xs) }\n\
+         \x20 drain()\n\
+         \x20 drain()\n\
+         \x20 drain()\n\
+         \x20 println(int.to_string(report()))\n\
+         }\n",
+    );
+}
+
+#[test]
+fn wasm_bytes_mutable_capture_through_closure() {
+    // Closure v2 P6: a captured `var buf: Bytes` mutated through a closure must
+    // become a shared cell, like List/Map/String. `bytes.push` (and the rest of the
+    // bytes `&mut` builders) is an in-place mutator, but bytes' stdlib `mut`
+    // annotations are incomplete, so the cell-detection keys off the runtime's
+    // actual mutation surface. Before the fix WASM lost the appends (len 0). f()
+    // pushes twice -> len 2. Cross-target = 2.
+    assert_cross_target_effect_main(
+        "effect fn main() -> Unit = {\n\
+         \x20 var buf: Bytes = bytes.new(0)\n\
+         \x20 let f = () => { bytes.push(buf, 65) }\n\
+         \x20 f()\n\
+         \x20 f()\n\
+         \x20 println(int.to_string(bytes.len(buf)))\n\
+         }\n",
+    );
+}
+
+#[test]
+fn wasm_reassign_concat_capture_through_closure() {
+    // A non-Copy `var` GROWN by reassignment-concat through a closure
+    // (`xs = xs + [list.len(xs)]`, reading its own length each step) must behave
+    // identically on both targets. On Rust the `xs = xs + [v]` → `xs.push(v)`
+    // peephole fired even though `xs` is a `SharedMut`, producing `xs.get().push(v)`
+    // — a push onto a discarded clone, so the reassignment was lost (native stayed
+    // [0], then panicked on `xs[3]`). The peephole now skips shared cells, leaving a
+    // cell-aware `xs.set(xs.get() + [v])`. Three appends -> [0,1,2,3], len 4.
+    assert_cross_target_effect_main(
+        "effect fn main() -> Unit = {\n\
+         \x20 var xs: List[Int] = [0]\n\
+         \x20 let app = () => { xs = xs + [list.len(xs)] }\n\
+         \x20 app()\n\
+         \x20 app()\n\
+         \x20 app()\n\
+         \x20 println(int.to_string(list.len(xs)))\n\
+         }\n",
+    );
+}
+
+#[test]
+fn wasm_module_global_list_mutated_through_closure() {
+    // A module-level mutable global (`var g`) mutated through a closure must behave
+    // identically on both targets. On Rust the global lowers to a `thread_local!`
+    // `ModuleRc`; it was ALSO (wrongly) classified `shared_mut`, so the enclosing
+    // read emitted a lowercase `g.get()` that doesn't exist (`error[E0425]`) while
+    // the closure body used `G.with(…)`. Globals are now excluded from shared_mut.
+    // f() pushes twice -> len 2. Cross-target = 2.
+    assert_cross_target_effect_main(
+        "var g: List[Int] = []\n\
+         effect fn main() -> Unit = {\n\
+         \x20 let f = () => { list.push(g, 7) }\n\
+         \x20 f()\n\
+         \x20 f()\n\
+         \x20 println(int.to_string(list.len(g)))\n\
+         }\n",
+    );
+}
+
+#[test]
+fn wasm_module_global_map_mutated_through_closure() {
+    // Same, via `map.insert` invoked as an EXPRESSION on a `ModuleRc` global. The
+    // Rust walker only special-cased list push/pop/clear, so map/string/bytes
+    // mutators on a global mutated a discarded `(**c.borrow()).clone()` (silently
+    // wrong); the mutator set is now the shared `is_inplace_mutator`. Inserts two
+    // distinct keys -> len 2. Cross-target = 2.
+    assert_cross_target_effect_main(
+        "var g: Map[String, Int] = map.new()\n\
+         effect fn main() -> Unit = {\n\
+         \x20 let f = () => { map.insert(g, \"a\", 1) }\n\
+         \x20 let h = () => { map.insert(g, \"b\", 2) }\n\
+         \x20 f()\n\
+         \x20 h()\n\
+         \x20 println(int.to_string(map.len(g)))\n\
+         }\n",
+    );
+}

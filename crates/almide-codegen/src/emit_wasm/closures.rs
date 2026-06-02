@@ -22,6 +22,15 @@ pub(super) fn pre_scan_closures(program: &IrProgram, emitter: &mut WasmEmitter) 
     let mut fn_ref_set: HashSet<String> = HashSet::new();
 
     let mut mutable_vars: HashSet<u32> = HashSet::new();
+    // Seed with captured-and-mutated vars detected before closure conversion
+    // (ClosureConversionPass → `shared_mut_vars`). Their references are now
+    // `EnvLoad`s, so scanning the closure body can't recover the original VarId,
+    // but those captures must still become shared heap cells. Covers a non-Copy
+    // var mutated only via a method (`list.push`), recorded `Mutability::Let`
+    // since it is never reassigned. (Closure v2 P6.)
+    for v in &program.codegen_annotations.shared_mut_vars {
+        mutable_vars.insert(v.0);
+    }
 
     for func in &program.functions {
         let scope_vars: HashSet<u32> = func.params.iter().map(|p| p.var.0).collect();
