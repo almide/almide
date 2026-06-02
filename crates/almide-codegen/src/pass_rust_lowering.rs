@@ -151,28 +151,91 @@ fn box_node(expr: &mut IrExpr) -> bool {
             for arm in arms.iter_mut() { c |= box_closure_value(&mut arm.body, &node_ty); }
             c
         }
-        IrExprKind::UnwrapOr { fallback, .. } if matches!(&node_ty, Ty::Fn { .. }) => {
-            box_closure_value(fallback, &node_ty)
-        }
-        // Container mutators: box the inserted closure against the receiver's
-        // element type (the value lives outside any literal, so the container
-        // node rules above can't reach it).
-        IrExprKind::RuntimeCall { symbol, args } => {
-            let vidx = match symbol.as_str() {
-                "almide_rt_list_push" => 1,
-                "almide_rt_map_insert" | "almide_rt_map_get_or" => 2,
-                _ => return false,
+        IrExprKind::UnwrapOr { fallback, expr } => {
+            // Box the `??` fallback when the result is itself a closure — directly
+            // `Fn`, or via the unwrap target's `Option[Fn]` element.
+            let fn_ty = match &node_ty {
+                Ty::Fn { .. } => Some(node_ty.clone()),
+                _ => expr.ty.option_inner().filter(|t| matches!(t, Ty::Fn { .. })),
             };
-            if args.len() <= vidx { return false; }
-            let elem = match symbol.as_str() {
-                "almide_rt_list_push" => list_elem_ty(&args[0].ty).cloned(),
-                _ => map_value_ty(&args[0].ty).cloned(),
-            };
-            match elem {
-                Some(ref et) if matches!(et, Ty::Fn { .. }) => box_closure_value(&mut args[vidx], et),
-                _ => false,
+            match fn_ty {
+                Some(ft) => box_closure_value(fallback, &ft),
+                None => false,
             }
         }
+        // `map.get_or` / `list.get_or` reaching codegen as an un-lowered module
+        // call (the `?? `-over-`map.get` fusion path): the call's type IS the
+        // value type, so box the default closure to match the (boxed) stored
+        // values. Other stdlib closure-storers arrive as `RuntimeCall` below.
+        IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
+            if func.as_str() == "get_or"
+                && matches!(module.as_str(), "map" | "list")
+                && matches!(&node_ty, Ty::Fn { .. }) =>
+        {
+            match args.last_mut() {
+                Some(default) => box_closure_value(default, &node_ty),
+                None => false,
+            }
+        }
+        IrExprKind::RuntimeCall { symbol, args } => {
+            let sym = symbol.as_str();
+            // (1) Value-storing calls: box the inserted/set closure against the
+            //     receiver's element/value type (the value lives outside any
+            //     literal, so the container node rules above can't reach it).
+            if let Some(vidx) = match sym {
+                "almide_rt_list_push" => Some(1usize),
+                "almide_rt_map_insert" | "almide_rt_map_set" | "almide_rt_map_get_or" => Some(2),
+                _ => None,
+            } {
+                if args.len() <= vidx { return false; }
+                let elem = match sym {
+                    "almide_rt_list_push" => list_elem_ty(&args[0].ty).cloned(),
+                    _ => map_value_ty(&args[0].ty).cloned(),
+                };
+                return match elem {
+                    Some(ref et) if matches!(et, Ty::Fn { .. }) => box_closure_value(&mut args[vidx], et),
+                    _ => false,
+                };
+            }
+            // (2) Closure-collecting `list.map`: the mapper's RESULT is the
+            //     collected element. When that element contains a closure, box
+            //     the Fn positions in the mapper's body so the produced list (and
+            //     a `map.from_list` of it) is uniformly `Rc<dyn Fn>` — the same
+            //     as a literal. (StdlibLowering left this as a runtime call, not
+            //     a fused IterChain, when the result feeds `map.from_entries`.)
+            if sym == "almide_rt_list_map" {
+                if let Some(mapper) = args.get_mut(1) {
+                    if let IrExprKind::Lambda { body, .. } = &mut mapper.kind {
+                        // Use the mapper body's OWN type as the collected element
+                        // type: the `list.map` result element may still be an
+                        // unresolved typevar at this point (e.g. when the closure
+                        // type comes from an inner `let clo: (Int)->Int`), whereas
+                        // the body type carries the resolved closure.
+                        let et = body.ty.clone();
+                        if ty_contains_fn(&et) {
+                            return box_fn_in_value(body, &et);
+                        }
+                    }
+                }
+            }
+            false
+        }
+        // Fused form of `list.map` (when StdlibLowering produced an IterChain):
+        // same rule as the runtime-call form — box the final map lambda's result.
+        IrExprKind::IterChain { steps, .. } => match list_elem_ty(&node_ty) {
+            Some(elem) if ty_contains_fn(elem) => {
+                let elem = elem.clone();
+                match steps.last_mut() {
+                    Some(IterStep::Map { lambda }) => {
+                        if let IrExprKind::Lambda { body, .. } = &mut lambda.kind {
+                            box_fn_in_value(body, &elem)
+                        } else { false }
+                    }
+                    _ => false,
+                }
+            }
+            _ => false,
+        },
         _ => false,
     }
 }
@@ -182,8 +245,30 @@ fn box_node(expr: &mut IrExpr) -> bool {
 /// closure nested in `[(k, closure)]` (map.from_list) is boxed.
 fn box_fn_in_value(value: &mut IrExpr, expected: &almide_lang::types::Ty) -> bool {
     use almide_lang::types::Ty;
+    // A capture-clone-wrapped value (`{ let __cap = …; <tuple/record/closure> }`,
+    // produced for a HOF mapper body that captures) hides the structural value
+    // behind a Block — descend into the tail to reach the tuple/record beneath.
+    if let IrExprKind::Block { expr: Some(tail), .. } = &mut value.kind {
+        return box_fn_in_value(tail, expected);
+    }
     match expected {
-        Ty::Fn { .. } => box_closure_value(value, expected),
+        // In a container-STORING position, a `Var` holding a closure (a
+        // let-bound closure placed into a tuple/list/map) must also be boxed —
+        // unlike a control-flow join, where `box_closure_value` leaves a `Var`
+        // branch alone. Already-`RcWrap`'d values are left as-is.
+        Ty::Fn { .. } => match &value.kind {
+            IrExprKind::Var { .. } => {
+                let inner = std::mem::replace(value, unit_ir());
+                *value = IrExpr {
+                    ty: inner.ty.clone(),
+                    span: inner.span,
+                    kind: IrExprKind::RcWrap { expr: Box::new(inner), cast_ty: Some(Box::new(expected.clone())) },
+                    def_id: None,
+                };
+                true
+            }
+            _ => box_closure_value(value, expected),
+        },
         Ty::Tuple(comps) => {
             if let IrExprKind::Tuple { elements } = &mut value.kind {
                 if elements.len() == comps.len() {
@@ -324,9 +409,25 @@ fn rewrite_stmts_in_stmt(stmt: &mut IrStmt, vt: &mut VarTable, shared: &HashSet<
         | IrStmtKind::Assign { value, .. } | IrStmtKind::FieldAssign { value, .. } => {
             if rewrite_stmts_in_expr(value, vt, shared) { *changed = true; }
         }
-        IrStmtKind::IndexAssign { index, value, .. } => {
+        IrStmtKind::IndexAssign { index, value, target } => {
             if rewrite_stmts_in_expr(index, vt, shared) { *changed = true; }
             if rewrite_stmts_in_expr(value, vt, shared) { *changed = true; }
+            // `xs[i] = closure` into a `List[Fn]` — box the stored closure.
+            let ety = list_elem_ty(&vt.get(*target).ty).cloned();
+            if let Some(et) = ety {
+                if matches!(&et, almide_lang::types::Ty::Fn { .. }) && box_closure_value(value, &et) { *changed = true; }
+            }
+        }
+        IrStmtKind::MapInsert { key, value, target } => {
+            if rewrite_stmts_in_expr(key, vt, shared) { *changed = true; }
+            if rewrite_stmts_in_expr(value, vt, shared) { *changed = true; }
+            // `m[k] = closure` / `m = map.set(m,k,closure)` (lowered to MapInsert)
+            // into a closure-valued map — box the stored closure. The expr-level
+            // boxing pass can't reach a statement value.
+            let vty = map_value_ty(&vt.get(*target).ty).cloned();
+            if let Some(vt_) = vty {
+                if matches!(&vt_, almide_lang::types::Ty::Fn { .. }) && box_closure_value(value, &vt_) { *changed = true; }
+            }
         }
         IrStmtKind::Guard { cond, else_ } => {
             if rewrite_stmts_in_expr(cond, vt, shared) { *changed = true; }

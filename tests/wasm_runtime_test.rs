@@ -1242,3 +1242,39 @@ fn wasm_closure_returning_closure_in_list() {
          }\n",
     );
 }
+
+#[test]
+fn wasm_closure_map_from_hof_then_coalesce() {
+    // Closures collected into a map by a HOF (`map.from_list(list.map(...))`),
+    // then read with `??`. The map values were a CONCRETE closure type (the
+    // boxing pass missed HOF-produced closures), so the `??` fallback (boxed)
+    // couldn't unify → E0308. `list.map`'s mapper result is now boxed, so the map
+    // is uniformly `Rc<dyn Fn>`. greeters["x"]() -> "hi-x".
+    assert_cross_target_effect_main(
+        "effect fn main() -> Unit = {\n\
+         \x20 let names = [\"x\", \"z\"]\n\
+         \x20 let greeters: Map[String, () -> String] = map.from_list(list.map(names, (nm) => (nm, () => \"hi-\" + nm)))\n\
+         \x20 let gx = greeters[\"x\"] ?? (() => \"?\")\n\
+         \x20 println(gx())\n\
+         }\n",
+    );
+}
+
+#[test]
+fn wasm_closure_map_set_then_coalesce() {
+    // A `Map[String, (Int) -> Int]` built with `map.set` (immutable update), read
+    // with `map.get(...) ?? fallback`. The stored closures and the `??` fallback
+    // are now both boxed to `Rc<dyn Fn>` (map.set value boxing + the get_or-as-
+    // module-call default boxing), so they unify. add(10)=11, neg(7)=-7.
+    assert_cross_target_effect_main(
+        "effect fn main() -> Unit = {\n\
+         \x20 var m: Map[String, (Int) -> Int] = map.new()\n\
+         \x20 m = map.set(m, \"add\", (x) => x + 1)\n\
+         \x20 m = map.set(m, \"neg\", (x) => 0 - x)\n\
+         \x20 let fa = map.get(m, \"add\") ?? ((x) => x)\n\
+         \x20 let fn_ = map.get(m, \"neg\") ?? ((x) => x)\n\
+         \x20 println(int.to_string(fa(10)))\n\
+         \x20 println(int.to_string(fn_(7)))\n\
+         }\n",
+    );
+}
