@@ -854,6 +854,67 @@ fn wasm_call_closure_through_list_index() {
 }
 
 #[test]
+fn wasm_closure_in_anonymous_record() {
+    // A closure stored in an ANONYMOUS record field, then called via `r.run()`.
+    // Rust gave `E0277`: the generic anon-record struct demanded `T: Clone + Debug
+    // + PartialEq`, which a closure fails. The struct now derives Clone only when a
+    // field is a closure (like a `type`-declared record's `has_fn_fields` path).
+    // A `type`-declared record already worked. f pushes twice -> len 2.
+    assert_cross_target_effect_main(
+        "effect fn main() -> Unit = {\n\
+         \x20 var acc: List[Int] = []\n\
+         \x20 let r = { run: () => { list.push(acc, 1) } }\n\
+         \x20 r.run()\n\
+         \x20 r.run()\n\
+         \x20 println(int.to_string(list.len(acc)))\n\
+         }\n",
+    );
+}
+
+#[test]
+fn wasm_indexassign_noncopy_element_through_closure() {
+    // IndexAssign of a NON-Copy element through a closure capturing the list:
+    // `xs: List[String]; () => { xs[0] = xs[0] + "!" }`. WASM trapped — the
+    // captured cell's `RcDec` ran a TYPED rc_dec over the cell ptr as if it were the
+    // list, reading cell[0] (the object ptr) as an element count and decref'ing
+    // garbage addresses. A plain rc_dec on the cell (matching the plain rc_inc on
+    // capture) fixes it. List[Int] (Copy elems) never hit the element-drop loop.
+    // Two appends -> "a!!".
+    assert_cross_target_effect_main(
+        "effect fn main() -> Unit = {\n\
+         \x20 var xs: List[String] = [\"a\", \"b\"]\n\
+         \x20 let f = () => { xs[0] = xs[0] + \"!\" }\n\
+         \x20 f()\n\
+         \x20 f()\n\
+         \x20 println(xs[0])\n\
+         }\n",
+    );
+}
+
+#[test]
+fn wasm_closures_stored_in_map() {
+    // Two DIFFERENT closures stored in a `Map[String, () -> Unit]`, then one
+    // extracted via get_or and called. Rust gave `E0308` — the map's erased `_`
+    // value type was inferred from the first closure, so the second (and the get_or
+    // default) couldn't unify. The closures going into `map.insert` / `map.get_or`
+    // are now `RcWrap`'d to `Rc<dyn Fn>`, so `_` infers one uniform boxed type (as
+    // a List[Fn] literal already does). f then h push -> len 2. Cross-target = 2.
+    assert_cross_target_effect_main(
+        "effect fn main() -> Unit = {\n\
+         \x20 var acc: List[Int] = []\n\
+         \x20 var m: Map[String, () -> Unit] = map.new()\n\
+         \x20 map.insert(m, \"a\", () => { list.push(acc, 1) })\n\
+         \x20 map.insert(m, \"b\", () => { list.push(acc, 1) })\n\
+         \x20 let f = map.get_or(m, \"a\", () => {})\n\
+         \x20 let h = map.get_or(m, \"b\", () => {})\n\
+         \x20 f()\n\
+         \x20 h()\n\
+         \x20 println(int.to_string(list.len(acc)))\n\
+         }\n",
+    );
+}
+
+#[test]
 fn wasm_typed_param_closure_capturing_mutable() {
     // A closure with a TYPED param `(k: String) => …` that captures a mutated var
     // (so it stays a raw, capture-clone-wrapped closure) dropped the param type in

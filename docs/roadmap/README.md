@@ -6,7 +6,7 @@
 
 ## Active
 
-15 items
+14 items
 
 | Item | Description |
 |------|-------------|
@@ -14,7 +14,6 @@
 | [Build Speed: Runtime rlib + Hot-Fn Inlining](active/build-speed-runtime-rlib.md) | Native build-speed — precompiled almide_rt runtime rlib, and recovering the shipping-build inlining gap with #[inline] |
 | [CI Warnings Cleanup](active/ci-warnings-cleanup.md) |  |
 | [Closure Architecture v2](active/closure-architecture-v2.md) | Closure Architecture v2 — one identity, one capture-set, lifting is lowering; separates closure REPRESENTATION from the inlining OPTIMIZATION |
-| [Closure Codegen Cross-Target Gaps](active/closure-codegen-cross-target-gaps.md) | Cross-target (native vs wasm) closure-codegen divergences found by the adversarial differential sweep — 5 fixed, 2 deep remaining |
 | [Correctness Guarantee Gaps](active/correctness-guarantee-gaps.md) |  |
 | [The Determinism / Purity Belt](active/determinism-belt.md) | Determinism/Purity Belt — a Perceus-analog that makes the compiler deterministic & target-portable by construction |
 | [Capability-Based Effect System](active/effect-system-capability.md) | Capability-based effect system for sandboxed AI agent containers |
@@ -64,13 +63,14 @@
 
 ## Done
 
-248 items
+249 items
 
 <details>
-<summary>Show all 248 completed items</summary>
+<summary>Show all 249 completed items</summary>
 
 | Done | Item | Description |
 |------|------|-------------|
+| 2026-06-02 | [Closure Codegen Cross-Target Gaps](done/closure-codegen-cross-target-gaps.md) | Cross-target (native vs wasm) closure-codegen divergences found by the adversarial differential sweep — all 8 fixed |
 | 2026-05-29 | [WASM Component Model](done/wasm-component-model.md) | WebAssembly Component Model support with WIT bindings |
 | 2026-04-20 | [`almide docs-gen` — llms.txt Auto-Generation](done/llms-txt-autogen.md) | Auto-generate llms.txt from canonical sources (CHEATSHEET, diagnostics, stdlib) |
 | 2026-04-20 | [Whisper in Pure Almide](done/whisper-almide.md) | Whisper speech recognition implemented entirely in Almide |

@@ -36,6 +36,10 @@ pub struct CodegenAnnotations {
     pub var_storage_by_name: HashMap<String, VarStorage>,
     pub ctor_to_enum: HashMap<String, String>,
     pub anon_records: HashMap<Vec<String>, String>,
+    /// Anon-record keys (sorted field names) whose struct has a closure (`Fn`)
+    /// field — its generated struct derives `Clone` only (a closure is not
+    /// `Debug`/`PartialEq`), like a `type`-declared record's `has_fn_fields` path.
+    pub anon_records_with_fn: std::collections::HashSet<Vec<String>>,
     pub named_records: HashMap<Vec<String>, String>,
     /// Field count of each nominal record type (name → number of fields).
     /// Used to decide whether a record destructure pattern needs a trailing
