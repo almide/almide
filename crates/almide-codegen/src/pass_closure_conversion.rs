@@ -721,32 +721,50 @@ impl IrVisitor for MutatedCollector {
     }
 }
 
-/// Every lambda's captures that it mutates (`captures ∩ mutated-in-body`), across
-/// the whole program. Run while lambda bodies still reference the original
-/// capture VarIds — i.e. BEFORE conversion rewrites them to `EnvLoad`s.
+/// Local `var`s that are CAPTURED by some lambda AND MUTATED ANYWHERE (in that
+/// lambda, another lambda, or the enclosing scope after capture) — these become
+/// shared heap cells so every closure capturing them observes the live value:
+/// capture-by-reference, matching Swift/JS/Python/Ruby/Go. (Previously only a
+/// mutation INSIDE the capturing lambda's body counted, so `let f = () => x;
+/// x = 42` snapshotted x at capture time.) Top-level globals are EXCLUDED — they
+/// have their own storage (module Cell/RefCell, read via top_let_globals), not a
+/// per-closure cell. Run before conversion rewrites captures to `EnvLoad`s.
 fn detect_mutated_captures(program: &IrProgram) -> HashSet<VarId> {
-    struct W { out: HashSet<VarId> }
-    impl IrVisitor for W {
+    // (1) every var mutated anywhere in the program
+    let mut mutated = MutatedCollector { out: HashSet::new() };
+    for f in &program.functions { mutated.visit_expr(&f.body); }
+    for tl in &program.top_lets { mutated.visit_expr(&tl.value); }
+    for m in &program.modules {
+        for f in &m.functions { mutated.visit_expr(&f.body); }
+        for tl in &m.top_lets { mutated.visit_expr(&tl.value); }
+    }
+    // (2) every var captured (free in some lambda body)
+    struct CapW { out: HashSet<VarId> }
+    impl IrVisitor for CapW {
         fn visit_expr(&mut self, expr: &IrExpr) {
             if let IrExprKind::Lambda { params, body, .. } = &expr.kind {
                 let param_set: HashSet<VarId> = params.iter().map(|(v, _)| *v).collect();
-                let mut mc = MutatedCollector { out: HashSet::new() };
-                mc.visit_expr(body);
                 for v in almide_ir::free_vars::free_vars(body, &param_set) {
-                    if mc.out.contains(&v) { self.out.insert(v); }
+                    self.out.insert(v);
                 }
             }
             walk_expr(self, expr);
         }
     }
-    let mut w = W { out: HashSet::new() };
-    for f in &program.functions { w.visit_expr(&f.body); }
-    for tl in &program.top_lets { w.visit_expr(&tl.value); }
+    let mut cap = CapW { out: HashSet::new() };
+    for f in &program.functions { cap.visit_expr(&f.body); }
+    for tl in &program.top_lets { cap.visit_expr(&tl.value); }
     for m in &program.modules {
-        for f in &m.functions { w.visit_expr(&f.body); }
-        for tl in &m.top_lets { w.visit_expr(&tl.value); }
+        for f in &m.functions { cap.visit_expr(&f.body); }
+        for tl in &m.top_lets { cap.visit_expr(&tl.value); }
     }
-    w.out
+    // (3) top-level globals are stored as Cell/RefCell, not per-closure cells
+    let top_vars: HashSet<VarId> = program.top_lets.iter().map(|tl| tl.var)
+        .chain(program.modules.iter().flat_map(|m| m.top_lets.iter().map(|tl| tl.var)))
+        .collect();
+    cap.out.intersection(&mutated.out).copied()
+        .filter(|v| !top_vars.contains(v))
+        .collect()
 }
 
 /// Does `body` mutate `var` (assignment, `&mut`-borrow, or in-place mutator call)?
