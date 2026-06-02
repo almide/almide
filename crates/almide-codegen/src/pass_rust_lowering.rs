@@ -71,20 +71,20 @@ fn box_closures_program(program: &mut IrProgram) -> bool {
     let mut changed = false;
     for f in program.functions.iter_mut() {
         let body = std::mem::replace(&mut f.body, unit_ir());
-        f.body = box_closures_expr(body, &mut changed);
+        f.body = box_closures_expr(body, true, &mut changed);
     }
     for tl in program.top_lets.iter_mut() {
         let v = std::mem::replace(&mut tl.value, unit_ir());
-        tl.value = box_closures_expr(v, &mut changed);
+        tl.value = box_closures_expr(v, true, &mut changed);
     }
     for m in program.modules.iter_mut() {
         for f in m.functions.iter_mut() {
             let body = std::mem::replace(&mut f.body, unit_ir());
-            f.body = box_closures_expr(body, &mut changed);
+            f.body = box_closures_expr(body, true, &mut changed);
         }
         for tl in m.top_lets.iter_mut() {
             let v = std::mem::replace(&mut tl.value, unit_ir());
-            tl.value = box_closures_expr(v, &mut changed);
+            tl.value = box_closures_expr(v, true, &mut changed);
         }
     }
     changed
@@ -94,10 +94,27 @@ fn unit_ir() -> IrExpr {
     IrExpr { kind: IrExprKind::Unit, ty: almide_lang::types::Ty::Unit, span: None, def_id: None }
 }
 
-/// Bottom-up walk: recurse into every child, then box this node's join slots.
-fn box_closures_expr(expr: IrExpr, changed: &mut bool) -> IrExpr {
-    let mut e = expr.map_children(&mut |c| box_closures_expr(c, changed));
-    if box_node(&mut e) { *changed = true; }
+/// True for a `fan.*` call (`fan.any`/`settle`/`race`/`map`/`timeout`, in either
+/// `Module{fan}` or already-lowered `almide_rt_fan_*` form). Their closure
+/// arguments run on threads and must stay raw (`Send + Sync`); `Rc<dyn Fn>` is
+/// neither, so boxing them would break the Rust target.
+fn is_fan_call(expr: &IrExpr) -> bool {
+    match &expr.kind {
+        IrExprKind::Call { target: CallTarget::Module { module, .. }, .. } => module.as_str() == "fan",
+        IrExprKind::RuntimeCall { symbol, .. } => symbol.as_str().starts_with("almide_rt_fan"),
+        _ => false,
+    }
+}
+
+/// Top-down walk: recurse into children, then box this node's join slots.
+/// `box_here` is cleared for the direct arguments of a `fan.*` call so their
+/// closures are not boxed (see `is_fan_call`).
+fn box_closures_expr(expr: IrExpr, box_here: bool, changed: &mut bool) -> IrExpr {
+    let child_box = !is_fan_call(&expr);
+    let mut e = expr.map_children(&mut |c| box_closures_expr(c, child_box, changed));
+    if box_here {
+        if box_node(&mut e) { *changed = true; }
+    }
     e
 }
 
