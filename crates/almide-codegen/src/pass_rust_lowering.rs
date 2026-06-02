@@ -107,6 +107,30 @@ fn rewrite_stmts_in_expr(expr: &mut IrExpr, vt: &mut VarTable, shared: &HashSet<
         IrExprKind::Lambda { body, .. } => {
             if rewrite_stmts_in_expr(body, vt, shared) { changed = true; }
         }
+        IrExprKind::RuntimeCall { symbol, args } => {
+            // Box closures going into / defaulting out of a `Map[K, Fn]` as
+            // `Rc<dyn Fn>`, so two DIFFERENT closures unify to one type — the map's
+            // erased `_` value type then infers from the boxed args, exactly as a
+            // `List[Fn]` literal does (case (0) above). Without this, distinct
+            // closures in a map fail to unify → rustc `E0308`. Receiver is args[0];
+            // the closure is args[2] for `insert(m,k,v)` and `get_or(m,k,default)`.
+            if matches!(symbol.as_str(), "almide_rt_map_insert" | "almide_rt_map_get_or") && args.len() >= 3 {
+                if let Some(fn_ty) = map_value_fn_ty(&args[0].ty) {
+                    if !matches!(&args[2].kind, IrExprKind::RcWrap { .. } | IrExprKind::Var { .. }) {
+                        let inner = std::mem::replace(&mut args[2], IrExpr {
+                            kind: IrExprKind::Unit, ty: almide_lang::types::Ty::Unit, span: None, def_id: None,
+                        });
+                        args[2] = IrExpr {
+                            ty: inner.ty.clone(), span: inner.span,
+                            kind: IrExprKind::RcWrap { expr: Box::new(inner), cast_ty: Some(Box::new(fn_ty)) },
+                            def_id: None,
+                        };
+                        changed = true;
+                    }
+                }
+            }
+            for a in args.iter_mut() { if rewrite_stmts_in_expr(a, vt, shared) { changed = true; } }
+        }
         _ => {}
     }
     changed
@@ -131,6 +155,17 @@ fn rewrite_stmts_in_stmt(stmt: &mut IrStmt, vt: &mut VarTable, shared: &HashSet<
         }
         _ => {}
     }
+}
+
+/// `Some(Fn)` when `ty` is `Map[K, Fn]` (closure-valued map) — the value type to
+/// box stored/defaulted closures to.
+fn map_value_fn_ty(ty: &almide_lang::types::Ty) -> Option<almide_lang::types::Ty> {
+    if let almide_lang::types::Ty::Applied(almide_lang::types::TypeConstructorId::Map, args) = ty {
+        if let Some(v) = args.get(1) {
+            if matches!(v, almide_lang::types::Ty::Fn { .. }) { return Some(v.clone()); }
+        }
+    }
+    None
 }
 
 /// Try to rewrite a single statement.
