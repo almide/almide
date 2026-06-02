@@ -149,6 +149,19 @@ pub(super) fn lower_call(ctx: &mut LowerCtx, callee: &ast::Expr, args: &[ast::Ex
         }
     }
 
+    // A call to a closure VALUE (Computed target) has, by definition, the
+    // callee's RETURN type — even when the inferred `ty` came back as the whole
+    // `Fn` type (which happens for a HOF lambda parameter whose concrete type is
+    // only fixed by the enclosing call's unification, after the body was checked).
+    // Leaving the node typed `fn(..) -> T` makes a later `acc + f(x)` trip the IR
+    // verifier (AddInt on a function value).
+    let ty = match &target {
+        CallTarget::Computed { callee } => match &callee.ty {
+            Ty::Fn { ret, .. } if !ret.has_unresolved_deep() => (**ret).clone(),
+            _ => ty,
+        },
+        _ => ty,
+    };
     ctx.mk(IrExprKind::Call { target, args: ir_args, type_args: ta }, ty, span)
 }
 

@@ -1171,3 +1171,23 @@ fn wasm_global_name_collides_with_stdlib_param() {
          }\n",
     );
 }
+
+#[test]
+fn wasm_closure_called_as_hof_lambda_param() {
+    // A closure that arrives as a higher-order-function lambda PARAMETER, called
+    // inside the lambda body: `list.fold(fns, 0, (acc, f) => acc + f(100))`. The
+    // call `f(100)` kept the type `fn(Int) -> Int` instead of its return `Int`
+    // (the param's concrete type is only fixed by the enclosing fold's
+    // unification, after the body was checked), so `acc + f(100)` tripped the IR
+    // verifier — a native ICE, and a structurally-broken WASM module. A Computed
+    // call's result type is now the callee's Fn return. fns = [+1, *2, -3];
+    // fns[0](10) = 11; fold over f(100) = 101 + 200 + 97 = 398.
+    assert_cross_target_effect_main(
+        "effect fn main() -> Unit = {\n\
+         \x20 let fns: List[(Int) -> Int] = [(x) => x + 1, (x) => x * 2, (x) => x - 3]\n\
+         \x20 println(int.to_string(fns[0](10)))\n\
+         \x20 let total = list.fold(fns, 0, (acc, f) => acc + f(100))\n\
+         \x20 println(int.to_string(total))\n\
+         }\n",
+    );
+}

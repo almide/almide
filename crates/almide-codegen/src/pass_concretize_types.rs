@@ -1093,6 +1093,17 @@ fn resolve_call_ret_ty(
                 }
             }
         }
+        // Calling a closure VALUE (`f(x)` where `f` is a Fn-typed var/expr — e.g.
+        // a HOF lambda parameter): the call's type is the callee's RETURN type, not
+        // its whole Fn type. Without this the node keeps the `fn(..) -> T` type and
+        // a later `acc + f(x)` trips the IR verifier (AddInt on a function value).
+        CallTarget::Computed { callee } => {
+            if let Ty::Fn { ret, .. } = &callee.ty {
+                if !ret.has_unresolved_deep() {
+                    return Some((**ret).clone());
+                }
+            }
+        }
         _ => {}
     }
 

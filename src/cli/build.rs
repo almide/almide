@@ -249,6 +249,19 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool) {
     // Monomorphize
     almide::mono::monomorphize(&mut ir_program);
 
+    // Verify IR integrity — gate the WASM emit on the same check the native
+    // path (main.rs) enforces. Without this an invalid IR (e.g. an unresolved
+    // closure-call result type) is emitted as a structurally-broken module that
+    // `almide build` reports as success (rc 0) but wasmtime refuses to load.
+    let verify_errors = almide::ir::verify_program(&ir_program);
+    if !verify_errors.is_empty() {
+        for e in &verify_errors {
+            eprintln!("internal compiler error: {}", e);
+        }
+        eprintln!("{} IR verification error(s) — no WASM emitted", verify_errors.len());
+        std::process::exit(1);
+    }
+
     // Codegen (nanopass pipeline + WASM binary emit)
     let bytes = match almide::codegen::codegen(&mut ir_program, almide::codegen::pass::Target::Wasm) {
         almide::codegen::CodegenOutput::Binary(b) => b,
