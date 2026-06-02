@@ -1088,11 +1088,12 @@ fn render_generic_call(ctx: &RenderContext, target: &CallTarget, args: &[IrExpr]
                     .join(", ");
                 let body_str = render_expr(ctx, body);
                 format!("(move |{}| {})", params_str, body_str)
-            } else if matches!(&callee.kind, IrExprKind::Member { .. }) {
-                // Member: (h.run)("hello") — required in Rust to call Fn-typed fields
-                format!("({})", render_expr(ctx, callee))
             } else {
-                render_expr(ctx, callee)
+                // Parenthesize ANY computed callee: a `Member` (h.run)("x"), a
+                // `??`/`match`/`if` that yields a closure — `match … {}(x)` is
+                // invalid Rust ("expected ;"), `(match … {})(x)` is correct — and a
+                // bare `(f)(x)` is harmless.
+                format!("({})", render_expr(ctx, callee))
             }
         }
         CallTarget::Module { .. } => unreachable!(),

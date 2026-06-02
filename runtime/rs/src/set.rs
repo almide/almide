@@ -14,9 +14,9 @@ pub fn almide_rt_set_difference<T: Eq + std::hash::Hash + Clone>(a: &HashSet<T>,
 pub fn almide_rt_set_symmetric_difference<T: Eq + std::hash::Hash + Clone>(a: &HashSet<T>, b: &HashSet<T>) -> HashSet<T> { a.symmetric_difference(b).cloned().collect() }
 pub fn almide_rt_set_is_subset<T: Eq + std::hash::Hash>(a: &HashSet<T>, b: &HashSet<T>) -> bool { a.is_subset(b) }
 pub fn almide_rt_set_is_disjoint<T: Eq + std::hash::Hash>(a: &HashSet<T>, b: &HashSet<T>) -> bool { a.is_disjoint(b) }
-pub fn almide_rt_set_filter<T: Eq + std::hash::Hash + Clone>(s: &HashSet<T>, mut f: impl FnMut(T) -> bool) -> HashSet<T> { s.iter().cloned().filter(|x| f(x.clone())).collect() }
-pub fn almide_rt_set_map<T: Eq + std::hash::Hash + Clone, U: Eq + std::hash::Hash>(s: &HashSet<T>, f: impl Fn(T) -> U) -> HashSet<U> { s.iter().cloned().map(f).collect() }
-pub fn almide_rt_set_fold<T: Eq + std::hash::Hash + Clone, B>(s: &HashSet<T>, init: B, f: impl Fn(B, T) -> B) -> B { s.iter().cloned().fold(init, f) }
-pub fn almide_rt_set_each<T: Eq + std::hash::Hash + Clone>(s: &HashSet<T>, mut f: impl FnMut(T)) { for x in s { f(x.clone()); } }
-pub fn almide_rt_set_any<T: Eq + std::hash::Hash + Clone>(s: &HashSet<T>, mut f: impl FnMut(T) -> bool) -> bool { s.iter().any(|x| f(x.clone())) }
-pub fn almide_rt_set_all<T: Eq + std::hash::Hash + Clone>(s: &HashSet<T>, mut f: impl FnMut(T) -> bool) -> bool { s.iter().all(|x| f(x.clone())) }
+pub fn almide_rt_set_filter<T: Eq + std::hash::Hash + Clone>(s: &HashSet<T>, f: std::rc::Rc<dyn Fn(T) -> bool>) -> HashSet<T> { let f = move |a| f(a); s.iter().cloned().filter(|x| f(x.clone())).collect() }
+pub fn almide_rt_set_map<T: Eq + std::hash::Hash + Clone, U: Eq + std::hash::Hash>(s: &HashSet<T>, f: std::rc::Rc<dyn Fn(T) -> U>) -> HashSet<U> { let f = move |a| f(a); s.iter().cloned().map(f).collect() }
+pub fn almide_rt_set_fold<T: Eq + std::hash::Hash + Clone, B>(s: &HashSet<T>, init: B, f: std::rc::Rc<dyn Fn(B, T) -> B>) -> B { let f = move |a, b| f(a, b); s.iter().cloned().fold(init, f) }
+pub fn almide_rt_set_each<T: Eq + std::hash::Hash + Clone>(s: &HashSet<T>, f: std::rc::Rc<dyn Fn(T)>) { let f = move |a| f(a); for x in s { f(x.clone()); } }
+pub fn almide_rt_set_any<T: Eq + std::hash::Hash + Clone>(s: &HashSet<T>, f: std::rc::Rc<dyn Fn(T) -> bool>) -> bool { let f = move |a| f(a); s.iter().any(|x| f(x.clone())) }
+pub fn almide_rt_set_all<T: Eq + std::hash::Hash + Clone>(s: &HashSet<T>, f: std::rc::Rc<dyn Fn(T) -> bool>) -> bool { let f = move |a| f(a); s.iter().all(|x| f(x.clone())) }

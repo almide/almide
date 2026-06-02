@@ -106,50 +106,20 @@ fn is_fan_call(expr: &IrExpr) -> bool {
     }
 }
 
-/// A runtime HOF that STORES the closure it receives into a container (so the
-/// closure must stay BOXED `Rc<dyn Fn>`). Every OTHER `almide_rt_*` HOF CONSUMES
-/// its closure in place via an `impl Fn`/`impl FnMut` parameter and must receive
-/// a RAW closure. This is the only enumeration the boxing pass needs — it is
-/// principled (storers = container-insertion ops), not a per-module guess.
-fn is_closure_storer(sym: &str) -> bool {
-    matches!(sym,
-        "almide_rt_list_push"
-        | "almide_rt_map_insert" | "almide_rt_map_set" | "almide_rt_map_get_or")
-}
-
-/// Adapt a CONSUMED closure arg so it satisfies a combinator's `impl Fn`
-/// parameter (`Rc<dyn Fn>` does not impl `Fn`/`FnMut`):
-///   - a freshly-boxed literal (`RcWrap(Lambda)`) → un-box to the raw `Lambda`;
-///   - a STORED closure value (`Rc<dyn Fn>` held in a var/field/call-result) →
-///     `&*x`, a `&dyn Fn`, which DOES impl `Fn` — no clone, no realloc.
-/// A list/option arg that merely CONTAINS closures is a container node (not a
-/// closure value itself), so it matches neither and its stored closures stay
-/// boxed.
+/// Un-box a freshly-boxed closure LITERAL back to a raw `impl Fn`
+/// (`RcWrap(Lambda|FnRef)` → `Lambda|FnRef`). Used only where a closure must be a
+/// bare `impl Fn`: a FUSED `IterChain` step (`.iter().map(move |x| …)`) and a
+/// `fan.*` arg (threads need `Send + Sync`). Everywhere else a closure stays
+/// `Rc<dyn Fn>` — the runtime HOFs take `Rc<dyn Fn>` directly, so no consumed/
+/// value distinction and no per-API allow-list is needed. A non-literal stays
+/// as-is (a stored `Rc<dyn Fn>` is already what every non-fused consumer wants).
 fn unbox_consumed(e: &mut IrExpr) -> bool {
-    use almide_lang::types::Ty;
-    // (a) Freshly-boxed literal / fn-ref → raw `impl Fn` (a bare lambda / fn item).
     if let IrExprKind::RcWrap { expr, .. } = &mut e.kind {
         if matches!(&expr.kind, IrExprKind::Lambda { .. } | IrExprKind::FnRef { .. }) {
             let inner = std::mem::replace(expr.as_mut(), unit_ir());
             *e = inner;
             return true;
         }
-    }
-    // (b) Stored `Rc<dyn Fn>` value → `&*x` (a `&dyn Fn`, which impls `Fn`). A bare
-    // `FnRef` is already a fn item (`impl Fn`), so it is excluded — only a value
-    // HELD as `Rc<dyn Fn>` (var/field/call-result) needs the `&*` adapter.
-    if matches!(&e.ty, Ty::Fn { .. })
-        && !matches!(&e.kind,
-            IrExprKind::Lambda { .. } | IrExprKind::RcWrap { .. } | IrExprKind::FnRef { .. })
-    {
-        let inner = std::mem::replace(e, unit_ir());
-        let (ty, span) = (inner.ty.clone(), inner.span);
-        let deref = IrExpr { kind: IrExprKind::Deref { expr: Box::new(inner) }, ty: ty.clone(), span, def_id: None };
-        *e = IrExpr {
-            kind: IrExprKind::Borrow { expr: Box::new(deref), as_str: false, mutable: false },
-            ty, span, def_id: None,
-        };
-        return true;
     }
     false
 }
@@ -197,25 +167,16 @@ fn box_node(expr: &mut IrExpr) -> bool {
         }
         return c;
     }
-    // Everything else just needs the CONSUMER exception: un-box the closures a
-    // combinator consumes in place. Storage of a closure (in a list/map/tuple/
-    // record/field/`if`-`match` join/`??` fallback) needs NO rule — the default
-    // arm above already boxed every closure literal where it sits, and a `Var`
-    // holding a closure is already `Rc<dyn Fn>`. This REPLACES the former ~14
-    // per-position boxing rules with the single invariant "box by default".
+    // Storage of a closure (in a list/map/tuple/record/field/`if`-`match` join/
+    // `??` fallback) needs NO rule — the default arm already boxed every closure
+    // literal where it sits, and a `Var` holding a closure is already
+    // `Rc<dyn Fn>`. Runtime HOFs take `Rc<dyn Fn>` too, so a boxed closure passed
+    // to `almide_rt_list_map`/`_fold`/`unwrap_or`/… needs NO un-box. The ONLY
+    // place a raw `impl Fn` is required is a FUSED `IterChain` step (below) and a
+    // `fan.*` arg (above). This REPLACES the former ~14 per-position boxing rules
+    // (and the consumed-vs-value allow-list) with: box by default, un-box only
+    // the two structural bare-closure sites.
     match &mut expr.kind {
-        // A non-STORER runtime HOF consumes its closure via an `impl Fn` param →
-        // un-box the direct consumed args. STORERS (`push`/`insert`/`set`/
-        // `get_or`) keep the boxed closure — it is stored, not called. A list/
-        // option arg that merely CONTAINS closures is a container node (not a
-        // closure value), so `unbox_consumed` leaves its closures boxed. Holds
-        // across ALL modules (list/map/set/option/result/…), not a name guess.
-        IrExprKind::RuntimeCall { symbol, args } => {
-            if is_closure_storer(symbol.as_str()) { return false; }
-            let mut c = false;
-            for a in args.iter_mut() { c |= unbox_consumed(a); }
-            c
-        }
         // Fused combinator chain: un-box every consumed step lambda. Closures the
         // map PRODUCES (nested in the body) are already boxed by the default arm.
         IrExprKind::IterChain { steps, .. } => {
