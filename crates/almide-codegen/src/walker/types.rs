@@ -2,7 +2,7 @@
 
 use almide_lang::types::{Ty, TypeConstructorId};
 use super::RenderContext;
-use super::helpers::{template_or, render_type_boxed_fn, render_type_rc_fn, ty_has_named_typevar};
+use super::helpers::{template_or, render_type_rc_fn};
 
 pub fn render_type(ctx: &RenderContext, ty: &Ty) -> String {
     match ty {
@@ -139,9 +139,11 @@ pub fn render_type(ctx: &RenderContext, ty: &Ty) -> String {
         }
         Ty::Fn { params, ret } => {
             let params_str = params.iter().map(|p| render_type(ctx, p)).collect::<Vec<_>>().join(", ");
-            // Nested Fn return may need boxing (Rust: Box<dyn Fn>; TS: identity)
+            // A nested returned closure is `Rc<dyn Fn>` (Clone — it is cloned at
+            // call sites), matching the `Rc::new` the value side emits for a
+            // curried lambda. `Box<dyn Fn>` is not Clone (E0599/E0271).
             let ret_str = if matches!(ret.as_ref(), Ty::Fn { .. }) {
-                render_type_boxed_fn(ctx, ret)
+                render_type_rc_fn(ctx, ret)
             } else {
                 render_type(ctx, ret)
             };

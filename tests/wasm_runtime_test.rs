@@ -1223,3 +1223,22 @@ fn wasm_record_field_list_of_closures() {
          }\n",
     );
 }
+
+#[test]
+fn wasm_closure_returning_closure_in_list() {
+    // Curried closures (`(Int) -> (Int) -> Int`) stored in a list: calling one
+    // yields an inner closure, which is then called. The inner returned closure
+    // rendered `Box<dyn Fn>` (not Clone → E0599 when cloned at the call site), and
+    // its value lacked the trait-object cast (E0271). Nested returned closures are
+    // now `Rc<dyn Fn>` with an explicit cast on both the type and the value sides.
+    // make_add(10)(5) = 15; make_mul(3)(4) = 12.
+    assert_cross_target_effect_main(
+        "effect fn main() -> Unit = {\n\
+         \x20 let factories: List[(Int) -> (Int) -> Int] = [(n) => (x) => x + n, (n) => (x) => x * n]\n\
+         \x20 let make_add = factories[0]\n\
+         \x20 let make_mul = factories[1]\n\
+         \x20 println(int.to_string((make_add(10))(5)))\n\
+         \x20 println(int.to_string((make_mul(3))(4)))\n\
+         }\n",
+    );
+}

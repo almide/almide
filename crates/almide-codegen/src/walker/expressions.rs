@@ -535,10 +535,15 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                     format!("(*{}).clone()", ctx.var_name(*id))
                 } else { render_expr(ctx, body) }
             } else { render_expr(ctx, body) };
-            // Nested lambda: wrap in Box for languages that need it (template returns identity in TS)
+            // Nested (curried) lambda: box the returned closure as `Rc<dyn Fn>`
+            // with an explicit cast, so `Rc<concrete-closure>` coerces to the
+            // trait object the outer closure's return type demands (E0271 without
+            // the cast). `Rc` (not `Box`) because the result is cloned at calls.
             if matches!(&body.kind, IrExprKind::Lambda { .. }) {
-                body_str = ctx.templates.render_with("box_wrap", None, &[], &[("inner", body_str.as_str())])
-                    .unwrap_or(body_str);
+                let wrapped = ctx.templates.render_with("box_wrap", None, &[], &[("inner", body_str.as_str())])
+                    .unwrap_or_else(|| format!("std::rc::Rc::new({})", body_str));
+                let cast = super::helpers::render_type_rc_fn(ctx, &body.ty);
+                body_str = format!("{} as {}", wrapped, cast);
             }
             ctx.templates.render_with("lambda_single", None, &[], &[("params", params_str.as_str()), ("body", body_str.as_str())])
                 .unwrap_or_else(|| format!("|_| {{ }}"))
