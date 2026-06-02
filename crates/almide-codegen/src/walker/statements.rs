@@ -106,6 +106,11 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
                         let name = ctx.var_name(*id).to_string();
                         if matches!(pty, Ty::Unknown) {
                             name
+                        } else if matches!(pty, Ty::Fn { .. }) {
+                            // A closure can't take an `impl Fn` parameter (E0562);
+                            // a function-typed param is `Rc<dyn Fn>` (callers box
+                            // the closure they pass — see render_generic_call).
+                            format!("{}: {}", name, super::helpers::render_type_field_fn(ctx, pty))
                         } else {
                             format!("{}: {}", name, super::types::render_type(ctx, pty))
                         }

@@ -1097,3 +1097,38 @@ fn wasm_bytes_set_at_shared_through_closure() {
          }\n",
     );
 }
+
+#[test]
+fn wasm_closure_as_variant_payload() {
+    // A closure stored as a tuple-variant payload `Run(() -> Unit)`. Native gave
+    // E0562 "impl Trait not allowed in field types" — the variant field rendered
+    // `impl Fn`. The payload type is now `Rc<dyn Fn>`, the enum derives Clone only,
+    // and the constructor boxes the closure. One Run fires, one Noop fires. len 2.
+    assert_cross_target_effect_main(
+        "type Action = Run(() -> Unit) | Noop\n\
+         effect fn main() -> Unit = {\n\
+         \x20 var acc: List[Int] = []\n\
+         \x20 let a = Run(() => { list.push(acc, 1) })\n\
+         \x20 match a { Run(f) => f(), Noop => {} }\n\
+         \x20 let b: Action = Noop\n\
+         \x20 match b { Run(f) => f(), Noop => { list.push(acc, 9) } }\n\
+         \x20 println(int.to_string(list.len(acc)))\n\
+         }\n",
+    );
+}
+
+#[test]
+fn wasm_closure_with_fn_typed_param() {
+    // A closure whose own parameter is function-typed: `(g: () -> Unit) => ...`.
+    // Native gave E0562 "impl Trait not allowed in closure parameters". The param
+    // is now `Rc<dyn Fn>` and the call site boxes the closure it passes. The inner
+    // closure runs 3 times, each adding 10 to a captured var -> p=30.
+    assert_cross_target_effect_main(
+        "effect fn main() -> Unit = {\n\
+         \x20 let run3 = (g: () -> Unit) => { g(); g(); g() }\n\
+         \x20 var p = 0\n\
+         \x20 run3(() => { p = p + 10 })\n\
+         \x20 println(\"p=\" + int.to_string(p))\n\
+         }\n",
+    );
+}
