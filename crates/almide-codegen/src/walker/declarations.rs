@@ -193,7 +193,14 @@ pub fn collect_record_field_counts(program: &IrProgram) -> HashMap<String, usize
     map
 }
 
+/// The anon-record keys (sorted field names) that have a closure field, as
+/// gathered by the most recent `collect_anon_records`. Call right after it.
+pub fn take_anon_fn_keys() -> HashSet<Vec<String>> {
+    ANON_FN_KEYS.with(|s| s.borrow().clone())
+}
+
 pub fn collect_anon_records(program: &IrProgram, named: &HashMap<Vec<String>, String>) -> HashMap<Vec<String>, String> {
+    ANON_FN_KEYS.with(|s| s.borrow_mut().clear());
     let named_set: HashSet<Vec<String>> = named.keys().cloned().collect();
     let mut seen: HashSet<Vec<String>> = HashSet::new();
 
@@ -393,12 +400,28 @@ pub(super) fn compute_eq_blocked_types(type_decls: &[IrTypeDecl]) -> HashSet<Str
     blocked
 }
 
+thread_local! {
+    /// Sorted field-name keys of anonymous records that have a closure (`Fn`) field.
+    /// Their generated struct must derive `Clone` only (a closure is not `Debug` /
+    /// `PartialEq`) — the same `has_fn_fields` relaxation a `type`-declared record
+    /// gets. Populated during `collect_anon_records`; read back into
+    /// `anon_records_with_fn`. Membership-only (never iterated for output), so it
+    /// does not affect host-deterministic emit. (Closure codegen cross-target gaps.)
+    static ANON_FN_KEYS: std::cell::RefCell<HashSet<Vec<String>>> =
+        std::cell::RefCell::new(HashSet::new());
+}
+
 fn collect_anon_from_ty(ty: &Ty, named: &HashSet<Vec<String>>, seen: &mut HashSet<Vec<String>>) {
     // Record/OpenRecord: register anonymous record fields
     if let Ty::Record { fields } | Ty::OpenRecord { fields } = ty {
         let mut names: Vec<String> = fields.iter().map(|(n, _)| n.to_string()).collect();
         names.sort();
-        if !named.contains(&names) { seen.insert(names); }
+        if !named.contains(&names) {
+            if fields.iter().any(|(_, t)| matches!(t, Ty::Fn { .. })) {
+                ANON_FN_KEYS.with(|s| { s.borrow_mut().insert(names.clone()); });
+            }
+            seen.insert(names);
+        }
     }
     // Recurse into all children uniformly
     for child in ty.children() {

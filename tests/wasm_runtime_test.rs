@@ -854,6 +854,44 @@ fn wasm_call_closure_through_list_index() {
 }
 
 #[test]
+fn wasm_closure_in_anonymous_record() {
+    // A closure stored in an ANONYMOUS record field, then called via `r.run()`.
+    // Rust gave `E0277`: the generic anon-record struct demanded `T: Clone + Debug
+    // + PartialEq`, which a closure fails. The struct now derives Clone only when a
+    // field is a closure (like a `type`-declared record's `has_fn_fields` path).
+    // A `type`-declared record already worked. f pushes twice -> len 2.
+    assert_cross_target_effect_main(
+        "effect fn main() -> Unit = {\n\
+         \x20 var acc: List[Int] = []\n\
+         \x20 let r = { run: () => { list.push(acc, 1) } }\n\
+         \x20 r.run()\n\
+         \x20 r.run()\n\
+         \x20 println(int.to_string(list.len(acc)))\n\
+         }\n",
+    );
+}
+
+#[test]
+fn wasm_indexassign_noncopy_element_through_closure() {
+    // IndexAssign of a NON-Copy element through a closure capturing the list:
+    // `xs: List[String]; () => { xs[0] = xs[0] + "!" }`. WASM trapped — the
+    // captured cell's `RcDec` ran a TYPED rc_dec over the cell ptr as if it were the
+    // list, reading cell[0] (the object ptr) as an element count and decref'ing
+    // garbage addresses. A plain rc_dec on the cell (matching the plain rc_inc on
+    // capture) fixes it. List[Int] (Copy elems) never hit the element-drop loop.
+    // Two appends -> "a!!".
+    assert_cross_target_effect_main(
+        "effect fn main() -> Unit = {\n\
+         \x20 var xs: List[String] = [\"a\", \"b\"]\n\
+         \x20 let f = () => { xs[0] = xs[0] + \"!\" }\n\
+         \x20 f()\n\
+         \x20 f()\n\
+         \x20 println(xs[0])\n\
+         }\n",
+    );
+}
+
+#[test]
 fn wasm_closures_stored_in_map() {
     // Two DIFFERENT closures stored in a `Map[String, () -> Unit]`, then one
     // extracted via get_or and called. Rust gave `E0308` — the map's erased `_`

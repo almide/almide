@@ -341,8 +341,19 @@ impl FuncCompiler<'_> {
             }
             IrStmtKind::RcDec { var } => {
                 if let Some(&local_idx) = self.var_map.get(&var.0) {
-                    let ty = &self.var_table.get(*var).ty;
-                    self.emit_typed_rc_dec(ty, local_idx);
+                    if self.emitter.mutable_captures.contains(&var.0) {
+                        // Captured shared cell: the local holds the CELL ptr, whose RC
+                        // a PLAIN `rc_inc` bumps on capture (see RcInc above). Balance
+                        // it with a PLAIN `rc_dec` on the cell — NOT a typed rc_dec,
+                        // which walks the cell ptr AS the object: cell[0] (the object
+                        // ptr) is read as the element count, so the element-drop loop
+                        // decrefs garbage addresses → trap. List[Int] (Copy elems, no
+                        // element drop) survived; List[String] trapped. (Closure v2 P6.)
+                        wasm!(self.func, { local_get(local_idx); call(self.emitter.rt.rc_dec); });
+                    } else {
+                        let ty = &self.var_table.get(*var).ty;
+                        self.emit_typed_rc_dec(ty, local_idx);
+                    }
                 }
             }
             IrStmtKind::Comment { .. } => {

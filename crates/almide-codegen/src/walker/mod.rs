@@ -565,6 +565,7 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
     // Build anonymous record maps (populated by target-specific pipeline)
     ctx.ann.named_records = collect_named_records(program);
     ctx.ann.anon_records = collect_anon_records(program, &ctx.ann.named_records);
+    ctx.ann.anon_records_with_fn = declarations::take_anon_fn_keys();
     ctx.ann.record_field_counts = collect_record_field_counts(program);
 
     let mut parts = Vec::new();
@@ -572,11 +573,20 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
     // Anonymous record struct definitions (only if anon_records is populated)
     if !ctx.ann.anon_records.is_empty() {
         for (field_names, struct_name) in &ctx.ann.anon_records {
+            // A closure field can't be Debug/PartialEq, so such a struct derives
+            // Clone only (the `has_fn_fields` struct_decl) and drops the
+            // `Debug + PartialEq` generic bounds — derive(Clone) re-adds `T: Clone`
+            // itself. Mirrors the `type`-declared record path. (Cross-target gaps.)
+            let has_fn = ctx.ann.anon_records_with_fn.contains(field_names);
             let generics: Vec<String> = (0..field_names.len())
                 .map(|i| {
                     let name_s = format!("T{}", i);
-                    ctx.templates.render_with("generic_bound_full", None, &[], &[("name", name_s.as_str())])
-                        .unwrap_or_else(|| format!("T{}", i))
+                    if has_fn {
+                        name_s
+                    } else {
+                        ctx.templates.render_with("generic_bound_full", None, &[], &[("name", name_s.as_str())])
+                            .unwrap_or_else(|| format!("T{}", i))
+                    }
                 })
                 .collect();
             let fields: Vec<String> = field_names.iter().enumerate()
@@ -588,7 +598,8 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
                 .collect();
             let fields_str = fields.join("\n");
             let full_name = format!("{}<{}>", struct_name, generics.join(", "));
-            let decl_attrs: Vec<&str> = if ctx.repr_c { vec!["repr_c"] } else { vec![] };
+            let mut decl_attrs: Vec<&str> = if ctx.repr_c { vec!["repr_c"] } else { vec![] };
+            if has_fn { decl_attrs.push("has_fn_fields"); }
             let repr_prefix = if ctx.repr_c { "#[repr(C)]\n" } else { "" };
             parts.push(ctx.templates.render_with("struct_decl", None, &decl_attrs, &[("name", full_name.as_str()), ("fields", fields_str.as_str())])
                 .unwrap_or_else(|| format!("{}pub struct {} {{\n{}\n}}", repr_prefix, struct_name, fields_str)));
