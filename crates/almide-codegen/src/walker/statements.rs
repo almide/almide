@@ -231,7 +231,7 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
             if ctx.ann.is_shared_mut(var) {
                 return format!("{}.set({});", target_s, render_expr(ctx, value));
             }
-            let upper = target_s.to_uppercase();
+            let upper = ctx.global_static_name(*var);
             let value_s = render_expr(ctx, value);
             match ctx.ann.get_var_storage(var, &target_s) {
                 VarStorage::ModuleCell => format!("{}.with(|c| c.set({}));", upper, value_s),
@@ -282,7 +282,7 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
         }
         IrStmtKind::IndexAssign { target, index, value } => {
             let target_str = ctx.var_name(*target).to_string();
-            let upper = target_str.to_uppercase();
+            let upper = ctx.global_static_name(*target);
             let idx_str = render_expr(ctx, index);
             let val_str = render_expr(ctx, value);
             let var_ty = &ctx.var_table.get(*target).ty;
@@ -301,7 +301,7 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
         }
         IrStmtKind::MapInsert { target, key, value } => {
             let target_str = ctx.var_name(*target).to_string();
-            let upper = target_str.to_uppercase();
+            let upper = ctx.global_static_name(*target);
             let key_str = render_expr(ctx, key);
             let val_str = render_expr(ctx, value);
             // Shared-mut non-Copy var (`SharedMut`, P6): insert through the cell.
@@ -317,7 +317,7 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
         }
         IrStmtKind::FieldAssign { target, field, value } => {
             let target_str = ctx.var_name(*target).to_string();
-            let upper = target_str.to_uppercase();
+            let upper = ctx.global_static_name(*target);
             let val_str = render_expr(ctx, value);
             // Shared-mut non-Copy var (`SharedMut`, P6): assign the field through the cell.
             if ctx.ann.is_shared_mut(target) {
@@ -385,7 +385,7 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
         }
         IrStmtKind::ListSwap { target, a, b } => {
             let t = ctx.var_name(*target).to_string();
-            let upper = t.to_uppercase();
+            let upper = ctx.global_static_name(*target);
             let a_s = render_expr(ctx, a);
             let b_s = render_expr(ctx, b);
             match ctx.ann.get_var_storage(target, &t) {
@@ -397,7 +397,7 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
         }
         IrStmtKind::ListReverse { target, end } => {
             let t = ctx.var_name(*target).to_string();
-            let upper = t.to_uppercase();
+            let upper = ctx.global_static_name(*target);
             let e = render_expr(ctx, end);
             match ctx.ann.get_var_storage(target, &t) {
                 VarStorage::ModuleRc => format!("{}.with(|c| std::rc::Rc::make_mut(&mut *c.borrow_mut())[..={} as usize].reverse());", upper, e),
@@ -408,7 +408,7 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
         }
         IrStmtKind::ListRotateLeft { target, end } => {
             let t = ctx.var_name(*target).to_string();
-            let upper = t.to_uppercase();
+            let upper = ctx.global_static_name(*target);
             let e = render_expr(ctx, end);
             match ctx.ann.get_var_storage(target, &t) {
                 VarStorage::ModuleRc => format!("{}.with(|c| std::rc::Rc::make_mut(&mut *c.borrow_mut())[..={} as usize].rotate_left(1));", upper, e),
@@ -420,12 +420,12 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
         IrStmtKind::ListCopySlice { dst, src, len } => {
             let d = ctx.var_name(*dst).to_string();
             let s = ctx.var_name(*src).to_string();
-            let upper_d = d.to_uppercase();
+            let upper_d = ctx.global_static_name(*dst);
             let n = render_expr(ctx, len);
             match ctx.ann.get_var_storage(dst, &d) {
                 VarStorage::ModuleRc => {
                     let src_read = if matches!(ctx.ann.get_var_storage(src, &s), VarStorage::ModuleRc) {
-                        format!("{}.with(|c| c.borrow().clone())", s.to_uppercase())
+                        format!("{}.with(|c| c.borrow().clone())", ctx.global_static_name(*src))
                     } else { s.clone() };
                     format!("{}.with(|c| std::rc::Rc::make_mut(&mut *c.borrow_mut())[..{n} as usize].copy_from_slice(&{src_read}[..{n} as usize]));", upper_d, n=n, src_read=src_read)
                 }

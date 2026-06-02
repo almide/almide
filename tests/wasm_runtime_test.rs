@@ -1132,3 +1132,42 @@ fn wasm_closure_with_fn_typed_param() {
          }\n",
     );
 }
+
+#[test]
+fn wasm_global_named_rust_keyword() {
+    // A global named `box` (a Rust reserved word). The thread_local static is
+    // declared `BOX` (raw name uppercased) but reads/writes used the keyword-
+    // escaped `r#box`, whose uppercase `R#BOX` is invalid Rust ("unknown prefix").
+    // Reads, writes, and the closure mutation now all route through the raw name.
+    assert_cross_target_effect_main(
+        "var box: List[Int] = []\n\
+         effect fn main() -> Unit = {\n\
+         \x20 let r = { run: () => { list.push(box, 42) } }\n\
+         \x20 r.run()\n\
+         \x20 r.run()\n\
+         \x20 r.run()\n\
+         \x20 println(int.to_string(list.len(box)))\n\
+         }\n",
+    );
+}
+
+#[test]
+fn wasm_global_name_collides_with_stdlib_param() {
+    // A mutable global `n: Int` collides by name with the `n` parameter of stdlib
+    // numeric helpers (e.g. `int.to_int8_checked(n)`). The storage classifier's
+    // by-name fallback misclassified that parameter as the global, so its body
+    // read `N.with(...)` (i64) where an f64 was expected -> rustc E0308. The
+    // fallback is now restricted to ALMIDE_RT_-prefixed cross-module names.
+    assert_cross_target_effect_main(
+        "var n: Int = 0\n\
+         var xs: List[Int] = []\n\
+         var s: String = \"\"\n\
+         effect fn main() -> Unit = {\n\
+         \x20 let step = () => { n = n + 1; list.push(xs, n); s = s + \"x\" }\n\
+         \x20 step(); step(); step()\n\
+         \x20 println(int.to_string(n))\n\
+         \x20 println(int.to_string(list.len(xs)))\n\
+         \x20 println(int.to_string(string.len(s)))\n\
+         }\n",
+    );
+}
