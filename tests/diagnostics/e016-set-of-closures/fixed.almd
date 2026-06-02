@@ -1,0 +1,5 @@
+effect fn main() -> Unit = {
+  var handlers: List[() -> Unit] = []
+  list.push(handlers, () => {})
+  println(int.to_string(list.len(handlers)))
+}

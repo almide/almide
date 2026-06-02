@@ -1,0 +1,3 @@
+expects_code = "E016"
+expects_error = "element type cannot contain a function"
+hint_substring = "List"

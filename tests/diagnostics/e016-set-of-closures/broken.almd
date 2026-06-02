@@ -1,0 +1,5 @@
+effect fn main() -> Unit = {
+  var handlers: Set[() -> Unit] = set.new()
+  set.insert(handlers, () => {})
+  println(int.to_string(set.len(handlers)))
+}
