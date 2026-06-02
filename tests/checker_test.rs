@@ -1079,3 +1079,33 @@ fn strict_matrix_float_alias_interop() {
         "fn f(m: Matrix) -> Int = matrix.rows(m)\nfn g() -> Int = {\n  let m: Matrix[Float] = matrix.zeros(3, 3)\n  f(m)\n}"
     );
 }
+
+#[test]
+fn set_of_closures_rejected() {
+    // A closure has no equality/hash, so a `Set` of closures is meaningless. The
+    // two targets disagreed (native rustc E0277, WASM silently dropped inserts and
+    // printed 0), so reject it at typecheck on both. (E016)
+    let errs = errors(
+        "effect fn main() -> Unit = {\n  var s: Set[() -> Unit] = set.new()\n}"
+    );
+    assert!(errs.iter().any(|e| e.contains("Set") && e.contains("function")),
+        "should reject Set[() -> Unit], got: {:?}", errs);
+}
+
+#[test]
+fn map_with_closure_key_rejected() {
+    // Same reason for a `Map` *key*. (E016)
+    let errs = errors(
+        "effect fn main() -> Unit = {\n  var m: Map[() -> Unit, Int] = map.new()\n}"
+    );
+    assert!(errs.iter().any(|e| e.contains("Map") && e.contains("key") && e.contains("function")),
+        "should reject Map[() -> Unit, Int], got: {:?}", errs);
+}
+
+#[test]
+fn map_with_closure_value_allowed() {
+    // A closure is fine as a `Map` *value* — only the key must be comparable.
+    has_no_errors(
+        "effect fn main() -> Unit = {\n  var m: Map[String, () -> Unit] = map.new()\n  map.insert(m, \"a\", () => {})\n}"
+    );
+}

@@ -942,6 +942,18 @@ impl Checker {
 
     // ── Statement checking ──
 
+    /// Reject a binding whose type uses a function in a position that demands
+    /// equality/hashing: a `Set` element or a `Map` key. Closures have neither,
+    /// so such a type is meaningless — and the two targets disagree (native
+    /// rustc rejects it, WASM silently drops the inserts). Closures are fine as
+    /// `Map` *values*.
+    pub(crate) fn check_collection_element_types(&mut self, ty: &Ty) {
+        let resolved = resolve_ty(ty, &self.uf);
+        if let Some((msg, hint)) = invalid_collection_type(&resolved) {
+            self.emit(super::err(msg, hint, "collection element type").with_code("E016"));
+        }
+    }
+
     pub(crate) fn check_stmt(&mut self, stmt: &mut ast::Stmt) {
         match stmt {
             ast::Stmt::Let { name, ty, value, span } => {
@@ -966,6 +978,7 @@ impl Checker {
                 if let Some(s) = span {
                     self.env.var_decl_locs.insert(sym(name), (s.line, s.col));
                 }
+                self.check_collection_element_types(&final_ty);
                 self.env.define_var(name, final_ty);
             }
             ast::Stmt::Var { name, ty, value, span } => {
@@ -986,6 +999,7 @@ impl Checker {
                 if let Some(s) = span {
                     self.env.var_decl_locs.insert(sym(name), (s.line, s.col));
                 }
+                self.check_collection_element_types(&final_ty);
                 self.env.define_var(name, final_ty);
                 self.env.mutable_vars.insert(sym(name));
                 self.env.var_lambda_depth.insert(sym(name), self.env.lambda_depth);
@@ -1467,4 +1481,48 @@ fn if_arm_fix_hint(then: &ast::Expr, else_: &ast::Expr) -> Option<FixHint> {
         }),
         (None, None) => None,
     }
+}
+
+/// True if `ty` mentions a function type anywhere (directly or nested in a
+/// container/tuple/record). Such a type can't be hashed or compared.
+fn ty_mentions_fn(ty: &Ty) -> bool {
+    match ty {
+        Ty::Fn { .. } => true,
+        Ty::Tuple(ts) => ts.iter().any(ty_mentions_fn),
+        Ty::Record { fields } | Ty::OpenRecord { fields } => fields.iter().any(|(_, t)| ty_mentions_fn(t)),
+        Ty::Applied(_, args) | Ty::Named(_, args) => args.iter().any(ty_mentions_fn),
+        _ => false,
+    }
+}
+
+/// `Some((message, hint))` if `ty` (or a nested type) uses a function where a
+/// comparable/hashable type is required: a `Set` element or a `Map` key.
+/// Closures are allowed as `Map` values, so only the key (arg 0) is checked.
+fn invalid_collection_type(ty: &Ty) -> Option<(&'static str, &'static str)> {
+    match ty {
+        Ty::Applied(TypeConstructorId::Set, args) if args.len() == 1 && ty_mentions_fn(&args[0]) => {
+            return Some((
+                "a `Set` element type cannot contain a function — closures have no equality or hashing",
+                "Closures can't be deduplicated. Keep them in a `List`, or build the set from a comparable key.",
+            ));
+        }
+        Ty::Applied(TypeConstructorId::Map, args) if args.len() == 2 && ty_mentions_fn(&args[0]) => {
+            return Some((
+                "a `Map` key type cannot contain a function — closures have no equality or hashing",
+                "Closures are fine as `Map` values; only the key must be comparable.",
+            ));
+        }
+        _ => {}
+    }
+    let children: Vec<&Ty> = match ty {
+        Ty::Tuple(ts) => ts.iter().collect(),
+        Ty::Record { fields } | Ty::OpenRecord { fields } => fields.iter().map(|(_, t)| t).collect(),
+        Ty::Applied(_, args) | Ty::Named(_, args) => args.iter().collect(),
+        Ty::Fn { params, ret } => params.iter().chain(std::iter::once(ret.as_ref())).collect(),
+        _ => Vec::new(),
+    };
+    for c in children {
+        if let Some(e) = invalid_collection_type(c) { return Some(e); }
+    }
+    None
 }
