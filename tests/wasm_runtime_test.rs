@@ -1191,3 +1191,35 @@ fn wasm_closure_called_as_hof_lambda_param() {
          }\n",
     );
 }
+
+#[test]
+fn wasm_variant_payload_parametered_closure() {
+    // A variant whose payload is a closure with a non-Unit signature
+    // (`Thunk((Int) -> Int)`). The variant field rendered `impl Fn(i64) -> i64`
+    // (E0562 in field types) for the parametered closure; it now renders
+    // `Rc<dyn Fn>`. Thunk((x) => x*x), matched and called with 9 -> 81.
+    assert_cross_target_effect_main(
+        "type Node = Leaf(Int) | Thunk((Int) -> Int)\n\
+         effect fn main() -> Unit = {\n\
+         \x20 let n = Thunk((x) => x * x)\n\
+         \x20 let r = match n { Leaf(v) => v, Thunk(f) => f(9) }\n\
+         \x20 println(int.to_string(r))\n\
+         }\n",
+    );
+}
+
+#[test]
+fn wasm_record_field_list_of_closures() {
+    // A struct/record field whose type CONTAINS a closure nested in a container
+    // (`stages: List[(Int) -> Int]`). The field type rendered `Vec<impl Fn>`
+    // (E0562: impl Trait in field types); `render_type_field_fn` now recurses
+    // into List/Map/Tuple, boxing every Fn to `Rc<dyn Fn>`. stages[1] = (x)=>x*3;
+    // (stages[1])(10) = 30; len 3.
+    assert_cross_target_effect_main(
+        "effect fn main() -> Unit = {\n\
+         \x20 let r = { stages: [(x) => x + 2, (x) => x * 3], extra: 0 }\n\
+         \x20 println(int.to_string((r.stages[1])(10)))\n\
+         \x20 println(int.to_string(list.len(r.stages)))\n\
+         }\n",
+    );
+}

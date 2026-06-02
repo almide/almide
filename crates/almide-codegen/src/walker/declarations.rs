@@ -34,13 +34,11 @@ pub fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
             let has_non_eq_fields = fields.iter().any(|f| ty_blocks_eq_with(&f.ty, &ctx.ann.eq_blocked_types));
             let fields_str = fields.iter()
                 .map(|f| {
-                    // Fn-typed struct fields: use Rc<dyn Fn> for cloneability
-                    // (impl Fn is invalid in struct position, Box<dyn Fn> is not Clone)
-                    let type_s = if matches!(&f.ty, Ty::Fn { .. }) {
-                        render_type_field_fn(ctx, &f.ty)
-                    } else {
-                        render_type(ctx, &f.ty)
-                    };
+                    // Closure-bearing struct fields use Rc<dyn Fn> (impl Fn is
+                    // invalid in struct position, Box<dyn Fn> is not Clone) — also
+                    // when the closure is nested in a List/Map/Tuple field. Fn-free
+                    // field types fall through to the normal renderer.
+                    let type_s = render_type_field_fn(ctx, &f.ty);
                     ctx.templates.render_with("struct_field", None, &[], &[("name", f.name.as_str()), ("type", type_s.as_str())])
                         .unwrap_or_else(|| format!("    pub {}: {},", f.name, render_type(ctx, &f.ty)))
                 })
@@ -73,13 +71,9 @@ pub fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
                     IrVariantKind::Tuple { fields } => {
                         let is_recursive = ctx.ann.recursive_enums.contains(&*td.name);
                         let types: Vec<String> = fields.iter().map(|t| {
-                            // Fn payloads use Rc<dyn Fn> (impl Fn is invalid in field
-                            // position, Box<dyn Fn> is not Clone) — same as a struct field.
-                            let rendered = if matches!(t, Ty::Fn { .. }) {
-                                render_type_field_fn(ctx, t)
-                            } else {
-                                render_type(ctx, t)
-                            };
+                            // Closure payloads (direct or nested in a container) use
+                            // Rc<dyn Fn> — same as a struct field.
+                            let rendered = render_type_field_fn(ctx, t);
                             if is_recursive && ty_contains_name(t, &td.name) { format!("Box<{}>", rendered) } else { rendered }
                         }).collect();
                         let fields_str = types.join(", ");
@@ -100,11 +94,7 @@ pub fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
                     IrVariantKind::Record { fields } => {
                         let fields_str = fields.iter()
                             .map(|f| {
-                                let rendered = if matches!(&f.ty, Ty::Fn { .. }) {
-                                    render_type_field_fn(ctx, &f.ty)
-                                } else {
-                                    render_type(ctx, &f.ty)
-                                };
+                                let rendered = render_type_field_fn(ctx, &f.ty);
                                 let boxed = if ctx.ann.recursive_enums.contains(&*td.name) && ty_contains_name(&f.ty, &td.name) {
                                     format!("Box<{}>", rendered)
                                 } else {
