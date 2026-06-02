@@ -798,6 +798,27 @@ fn wasm_bytes_mutable_capture_through_closure() {
 }
 
 #[test]
+fn wasm_reassign_concat_capture_through_closure() {
+    // A non-Copy `var` GROWN by reassignment-concat through a closure
+    // (`xs = xs + [list.len(xs)]`, reading its own length each step) must behave
+    // identically on both targets. On Rust the `xs = xs + [v]` → `xs.push(v)`
+    // peephole fired even though `xs` is a `SharedMut`, producing `xs.get().push(v)`
+    // — a push onto a discarded clone, so the reassignment was lost (native stayed
+    // [0], then panicked on `xs[3]`). The peephole now skips shared cells, leaving a
+    // cell-aware `xs.set(xs.get() + [v])`. Three appends -> [0,1,2,3], len 4.
+    assert_cross_target_effect_main(
+        "effect fn main() -> Unit = {\n\
+         \x20 var xs: List[Int] = [0]\n\
+         \x20 let app = () => { xs = xs + [list.len(xs)] }\n\
+         \x20 app()\n\
+         \x20 app()\n\
+         \x20 app()\n\
+         \x20 println(int.to_string(list.len(xs)))\n\
+         }\n",
+    );
+}
+
+#[test]
 fn wasm_module_global_list_mutated_through_closure() {
     // A module-level mutable global (`var g`) mutated through a closure must behave
     // identically on both targets. On Rust the global lowers to a `thread_local!`
