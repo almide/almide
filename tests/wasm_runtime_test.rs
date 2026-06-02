@@ -687,6 +687,9 @@ fn rust_process_exec_forwards_bound_list() {
     // compiled fine, which made it sneaky. `process.*` is native-only, so this is a
     // Rust-target build+run test: `run_rust` compiles via `almide run` and panics if
     // the build fails, then we assert the output.
+    // Skip when the `almide` binary isn't available (e.g. the CI Test Rust job runs
+    // `cargo test` without building it) — same guard the cross-target tests use.
+    if std::process::Command::new(almide_bin()).arg("--version").output().is_err() { return; }
     let out = run_rust(
         "import process\n\
          effect fn run(cmd: String, a: List[String]) -> String =\n\
