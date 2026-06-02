@@ -343,6 +343,13 @@ pub(super) fn ty_blocks_eq(ty: &Ty) -> bool {
     ty_blocks_eq_with(ty, &HashSet::new())
 }
 
+/// True if `ty` mentions a function type anywhere (directly or nested in a
+/// container/tuple/record). Such a type lowers to `Rc<dyn Fn>` (or a container
+/// thereof), which is neither `Debug` nor `PartialEq`.
+fn ty_has_fn(ty: &Ty) -> bool {
+    matches!(ty, Ty::Fn { .. }) || ty.children().iter().any(|c| ty_has_fn(c))
+}
+
 pub(super) fn ty_blocks_eq_with(ty: &Ty, eq_blocked_types: &HashSet<String>) -> bool {
     match ty {
         // Burn Tensor doesn't implement PartialEq
@@ -417,7 +424,11 @@ fn collect_anon_from_ty(ty: &Ty, named: &HashSet<Vec<String>>, seen: &mut HashSe
         let mut names: Vec<String> = fields.iter().map(|(n, _)| n.to_string()).collect();
         names.sort();
         if !named.contains(&names) {
-            if fields.iter().any(|(_, t)| matches!(t, Ty::Fn { .. })) {
+            // A field whose type CONTAINS a closure anywhere (`Fn`, `List[Fn]`,
+            // `Map[_, Fn]`, `(Fn, _)`, …) lowers to a type that is neither `Debug`
+            // nor `PartialEq`, so the generated struct must derive `Clone` only.
+            // Matching `Ty::Fn` alone missed boxed-closure containers.
+            if fields.iter().any(|(_, t)| ty_has_fn(t)) {
                 ANON_FN_KEYS.with(|s| { s.borrow_mut().insert(names.clone()); });
             }
             seen.insert(names);

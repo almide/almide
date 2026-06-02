@@ -126,6 +126,31 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(idx);
                 self.scratch.free_i32(buf);
             }
+            "set_at" => {
+                // bytes.set_at(b, i, val) -> Unit: in-place index write, no realloc.
+                // Same store as `set`, but returns Unit so nothing is left on the stack.
+                let buf = self.scratch.alloc_i32();
+                let idx = self.scratch.alloc_i32();
+                let val = self.scratch.alloc_i32();
+                self.emit_expr(&args[0]);
+                wasm!(self.func, { local_set(buf); });
+                self.emit_expr(&args[1]);
+                wasm!(self.func, { i32_wrap_i64; local_set(idx); });
+                self.emit_expr(&args[2]);
+                wasm!(self.func, {
+                    i32_wrap_i64; local_set(val);
+                    // bounds check: idx < len
+                    local_get(idx); local_get(buf); i32_load(0); i32_lt_u;
+                    if_empty;
+                      local_get(buf); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; local_get(idx); i32_add;
+                      local_get(val);
+                      i32_store8(0);
+                    end;
+                });
+                self.scratch.free_i32(val);
+                self.scratch.free_i32(idx);
+                self.scratch.free_i32(buf);
+            }
             "new" => {
                 // bytes.new(len) → Bytes: alloc [len:i32][zeroed data]
                 let n = self.scratch.alloc_i32();

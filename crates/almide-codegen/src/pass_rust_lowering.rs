@@ -21,6 +21,9 @@ impl NanoPass for RustLoweringPass {
 
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         let mut changed = false;
+        // (A) Box closures sitting in type-erased join slots as `Rc<dyn Fn>`.
+        //     Single source of truth — see `box_closures_program` below.
+        if box_closures_program(&mut program) { changed = true; }
         // Shared-cell vars must NOT get the `xs = xs + [v]` → `xs.push(v)` rewrite:
         // their binding is a `SharedMut`, so `xs.push(v)` renders as `xs.get().push(v)`
         // — a push onto a discarded clone, losing the reassignment. Left as an Assign,
@@ -42,34 +45,234 @@ impl NanoPass for RustLoweringPass {
     }
 }
 
-/// Walk all stmts in expressions recursively. Also rewrites UnwrapOr
-/// fallback lambdas for List[Fn] contexts with RcWrap.
-fn rewrite_stmts_in_expr(expr: &mut IrExpr, vt: &mut VarTable, shared: &HashSet<VarId>) -> bool {
+// ─────────────────────────────────────────────────────────────────────────
+// Closure boxing at type-erased join slots (Rust target).
+//
+// A closure value is an anonymous Rust type. When two DISTINCT closures must
+// collapse to ONE type — a uniform container's element, a `Map` value, an
+// `if`/`match` branch result that is itself a closure, a `??` fallback — rustc
+// cannot unify them (E0308 / E0562). We box such values to `Rc<dyn Fn>` (via
+// `RcWrap`) so the erased slot infers a single boxed type. The call side needs
+// no change: Rust's call operator auto-derefs `Rc<dyn Fn>`.
+//
+// This is the single source of truth that REPLACES the former per-API patches
+// (List[Fn] binding, Map insert/get_or, UnwrapOr fallback). It keys on the
+// SLOT's static type rather than the surrounding statement shape, so it also
+// covers record-field containers, `if`/`match` joins, `list.push`, and
+// `map.from_list` (the inner list-of-tuples literal) in one stroke.
+//
+// Standalone tuples/records are NOT join slots — their components keep distinct
+// types (the binding-type `Fn`→`_` erasure handles them). We descend INTO a
+// tuple/record only when it is the element of a uniform container that forces
+// the whole element to unify, e.g. `map.from_list([(k, closure)])`.
+// ─────────────────────────────────────────────────────────────────────────
+
+fn box_closures_program(program: &mut IrProgram) -> bool {
     let mut changed = false;
-    // UnwrapOr with Fn fallback lambda: wrap in RcWrap for List[Fn] compatibility
-    if let IrExprKind::UnwrapOr { expr: inner, fallback } = &mut expr.kind {
-        if matches!(&fallback.kind, IrExprKind::Lambda { .. })
-            && matches!(&expr.ty, almide_lang::types::Ty::Fn { .. })
-        {
-            if let Some(inner_fn_ty) = inner.ty.option_inner() {
-                if matches!(inner_fn_ty, almide_lang::types::Ty::Fn { .. }) {
-                    let old_fallback = std::mem::replace(fallback.as_mut(), IrExpr {
-                        kind: IrExprKind::Unit, ty: almide_lang::types::Ty::Unit, span: None, def_id: None,
-                    });
-                    *fallback.as_mut() = IrExpr {
-                        ty: old_fallback.ty.clone(),
-                        span: old_fallback.span,
-                        kind: IrExprKind::RcWrap {
-                            expr: Box::new(old_fallback),
-                            cast_ty: Some(Box::new(inner_fn_ty.clone())),
-                        },
-                        def_id: None,
-                    };
-                    changed = true;
-                }
-            }
+    for f in program.functions.iter_mut() {
+        let body = std::mem::replace(&mut f.body, unit_ir());
+        f.body = box_closures_expr(body, true, &mut changed);
+    }
+    for tl in program.top_lets.iter_mut() {
+        let v = std::mem::replace(&mut tl.value, unit_ir());
+        tl.value = box_closures_expr(v, true, &mut changed);
+    }
+    for m in program.modules.iter_mut() {
+        for f in m.functions.iter_mut() {
+            let body = std::mem::replace(&mut f.body, unit_ir());
+            f.body = box_closures_expr(body, true, &mut changed);
+        }
+        for tl in m.top_lets.iter_mut() {
+            let v = std::mem::replace(&mut tl.value, unit_ir());
+            tl.value = box_closures_expr(v, true, &mut changed);
         }
     }
+    changed
+}
+
+fn unit_ir() -> IrExpr {
+    IrExpr { kind: IrExprKind::Unit, ty: almide_lang::types::Ty::Unit, span: None, def_id: None }
+}
+
+/// True for a `fan.*` call (`fan.any`/`settle`/`race`/`map`/`timeout`, in either
+/// `Module{fan}` or already-lowered `almide_rt_fan_*` form). Their closure
+/// arguments run on threads and must stay raw (`Send + Sync`); `Rc<dyn Fn>` is
+/// neither, so boxing them would break the Rust target.
+fn is_fan_call(expr: &IrExpr) -> bool {
+    match &expr.kind {
+        IrExprKind::Call { target: CallTarget::Module { module, .. }, .. } => module.as_str() == "fan",
+        IrExprKind::RuntimeCall { symbol, .. } => symbol.as_str().starts_with("almide_rt_fan"),
+        _ => false,
+    }
+}
+
+/// Top-down walk: recurse into children, then box this node's join slots.
+/// `box_here` is cleared for the direct arguments of a `fan.*` call so their
+/// closures are not boxed (see `is_fan_call`).
+fn box_closures_expr(expr: IrExpr, box_here: bool, changed: &mut bool) -> IrExpr {
+    let child_box = !is_fan_call(&expr);
+    let mut e = expr.map_children(&mut |c| box_closures_expr(c, child_box, changed));
+    if box_here {
+        if box_node(&mut e) { *changed = true; }
+    }
+    e
+}
+
+/// Box closures in THIS node's type-erased slots (non-recursive).
+fn box_node(expr: &mut IrExpr) -> bool {
+    use almide_lang::types::Ty;
+    let node_ty = expr.ty.clone();
+    match &mut expr.kind {
+        // Uniform containers force every element to one type → box Fn positions.
+        IrExprKind::List { elements } => match list_elem_ty(&node_ty) {
+            Some(elem) if ty_contains_fn(elem) => {
+                let mut c = false;
+                for el in elements.iter_mut() { c |= box_fn_in_value(el, elem); }
+                c
+            }
+            _ => false,
+        },
+        IrExprKind::MapLiteral { entries } => match map_value_ty(&node_ty) {
+            Some(v) if ty_contains_fn(v) => {
+                let mut c = false;
+                for (_, val) in entries.iter_mut() { c |= box_fn_in_value(val, v); }
+                c
+            }
+            _ => false,
+        },
+        // Control-flow joins whose RESULT is itself a closure → box each branch.
+        IrExprKind::If { then, else_, .. } if matches!(&node_ty, Ty::Fn { .. }) => {
+            let a = box_closure_value(then, &node_ty);
+            let b = box_closure_value(else_, &node_ty);
+            a || b
+        }
+        IrExprKind::Match { arms, .. } if matches!(&node_ty, Ty::Fn { .. }) => {
+            let mut c = false;
+            for arm in arms.iter_mut() { c |= box_closure_value(&mut arm.body, &node_ty); }
+            c
+        }
+        IrExprKind::UnwrapOr { fallback, .. } if matches!(&node_ty, Ty::Fn { .. }) => {
+            box_closure_value(fallback, &node_ty)
+        }
+        // Container mutators: box the inserted closure against the receiver's
+        // element type (the value lives outside any literal, so the container
+        // node rules above can't reach it).
+        IrExprKind::RuntimeCall { symbol, args } => {
+            let vidx = match symbol.as_str() {
+                "almide_rt_list_push" => 1,
+                "almide_rt_map_insert" | "almide_rt_map_get_or" => 2,
+                _ => return false,
+            };
+            if args.len() <= vidx { return false; }
+            let elem = match symbol.as_str() {
+                "almide_rt_list_push" => list_elem_ty(&args[0].ty).cloned(),
+                _ => map_value_ty(&args[0].ty).cloned(),
+            };
+            match elem {
+                Some(ref et) if matches!(et, Ty::Fn { .. }) => box_closure_value(&mut args[vidx], et),
+                _ => false,
+            }
+        }
+        _ => false,
+    }
+}
+
+/// Box every Fn-typed position reachable in `value` given its expected uniform
+/// element type `expected`. Descends through tuple/record element types so a
+/// closure nested in `[(k, closure)]` (map.from_list) is boxed.
+fn box_fn_in_value(value: &mut IrExpr, expected: &almide_lang::types::Ty) -> bool {
+    use almide_lang::types::Ty;
+    match expected {
+        Ty::Fn { .. } => box_closure_value(value, expected),
+        Ty::Tuple(comps) => {
+            if let IrExprKind::Tuple { elements } = &mut value.kind {
+                if elements.len() == comps.len() {
+                    let mut c = false;
+                    for (el, ct) in elements.iter_mut().zip(comps.iter()) {
+                        if ty_contains_fn(ct) { c |= box_fn_in_value(el, ct); }
+                    }
+                    return c;
+                }
+            }
+            false
+        }
+        Ty::Record { fields } => {
+            if let IrExprKind::Record { fields: vfields, .. } = &mut value.kind {
+                let mut c = false;
+                for (fname, fty) in fields.iter() {
+                    if !ty_contains_fn(fty) { continue; }
+                    if let Some((_, fv)) = vfields.iter_mut().find(|(n, _)| n == fname) {
+                        c |= box_fn_in_value(fv, fty);
+                    }
+                }
+                return c;
+            }
+            false
+        }
+        _ => false,
+    }
+}
+
+/// Wrap a single closure value in `RcWrap` as `Rc<dyn Fn>`. Only fresh closure
+/// LITERALS (`Lambda`) are boxed; values already read out of a container/field
+/// (`Var`, `Member`, …) are left untouched (already boxed there). `if`/`match`/
+/// `Block` are descended so each leaf lambda unifies.
+fn box_closure_value(slot: &mut IrExpr, fn_ty: &almide_lang::types::Ty) -> bool {
+    match &mut slot.kind {
+        IrExprKind::If { then, else_, .. } => {
+            let a = box_closure_value(then, fn_ty);
+            let b = box_closure_value(else_, fn_ty);
+            return a || b;
+        }
+        IrExprKind::Match { arms, .. } => {
+            let mut c = false;
+            for arm in arms.iter_mut() { c |= box_closure_value(&mut arm.body, fn_ty); }
+            return c;
+        }
+        IrExprKind::Block { expr: Some(tail), .. } => {
+            return box_closure_value(tail, fn_ty);
+        }
+        IrExprKind::Lambda { .. } => { /* fall through to wrap */ }
+        _ => return false,
+    }
+    let inner = std::mem::replace(slot, unit_ir());
+    *slot = IrExpr {
+        ty: inner.ty.clone(),
+        span: inner.span,
+        kind: IrExprKind::RcWrap { expr: Box::new(inner), cast_ty: Some(Box::new(fn_ty.clone())) },
+        def_id: None,
+    };
+    true
+}
+
+/// True if `ty` mentions a function type at a position a uniform container would
+/// need to unify (directly, or inside a tuple/record element). Nested List/Map
+/// are their own containers — not descended here.
+fn ty_contains_fn(ty: &almide_lang::types::Ty) -> bool {
+    use almide_lang::types::Ty;
+    match ty {
+        Ty::Fn { .. } => true,
+        Ty::Tuple(ts) => ts.iter().any(ty_contains_fn),
+        Ty::Record { fields } => fields.iter().any(|(_, t)| ty_contains_fn(t)),
+        _ => false,
+    }
+}
+
+/// Element type of `List[E]`.
+fn list_elem_ty(ty: &almide_lang::types::Ty) -> Option<&almide_lang::types::Ty> {
+    use almide_lang::types::{Ty, TypeConstructorId};
+    if let Ty::Applied(TypeConstructorId::List, args) = ty { args.first() } else { None }
+}
+
+/// Value type of `Map[K, V]`.
+fn map_value_ty(ty: &almide_lang::types::Ty) -> Option<&almide_lang::types::Ty> {
+    use almide_lang::types::{Ty, TypeConstructorId};
+    if let Ty::Applied(TypeConstructorId::Map, args) = ty { args.get(1) } else { None }
+}
+
+/// Walk all stmts in expressions recursively (Rust push/index peepholes).
+fn rewrite_stmts_in_expr(expr: &mut IrExpr, vt: &mut VarTable, shared: &HashSet<VarId>) -> bool {
+    let mut changed = false;
     match &mut expr.kind {
         IrExprKind::Block { stmts, expr: tail } => {
             for s in stmts.iter_mut() {
@@ -107,28 +310,7 @@ fn rewrite_stmts_in_expr(expr: &mut IrExpr, vt: &mut VarTable, shared: &HashSet<
         IrExprKind::Lambda { body, .. } => {
             if rewrite_stmts_in_expr(body, vt, shared) { changed = true; }
         }
-        IrExprKind::RuntimeCall { symbol, args } => {
-            // Box closures going into / defaulting out of a `Map[K, Fn]` as
-            // `Rc<dyn Fn>`, so two DIFFERENT closures unify to one type — the map's
-            // erased `_` value type then infers from the boxed args, exactly as a
-            // `List[Fn]` literal does (case (0) above). Without this, distinct
-            // closures in a map fail to unify → rustc `E0308`. Receiver is args[0];
-            // the closure is args[2] for `insert(m,k,v)` and `get_or(m,k,default)`.
-            if matches!(symbol.as_str(), "almide_rt_map_insert" | "almide_rt_map_get_or") && args.len() >= 3 {
-                if let Some(fn_ty) = map_value_fn_ty(&args[0].ty) {
-                    if !matches!(&args[2].kind, IrExprKind::RcWrap { .. } | IrExprKind::Var { .. }) {
-                        let inner = std::mem::replace(&mut args[2], IrExpr {
-                            kind: IrExprKind::Unit, ty: almide_lang::types::Ty::Unit, span: None, def_id: None,
-                        });
-                        args[2] = IrExpr {
-                            ty: inner.ty.clone(), span: inner.span,
-                            kind: IrExprKind::RcWrap { expr: Box::new(inner), cast_ty: Some(Box::new(fn_ty)) },
-                            def_id: None,
-                        };
-                        changed = true;
-                    }
-                }
-            }
+        IrExprKind::RuntimeCall { args, .. } => {
             for a in args.iter_mut() { if rewrite_stmts_in_expr(a, vt, shared) { changed = true; } }
         }
         _ => {}
@@ -157,45 +339,9 @@ fn rewrite_stmts_in_stmt(stmt: &mut IrStmt, vt: &mut VarTable, shared: &HashSet<
     }
 }
 
-/// `Some(Fn)` when `ty` is `Map[K, Fn]` (closure-valued map) — the value type to
-/// box stored/defaulted closures to.
-fn map_value_fn_ty(ty: &almide_lang::types::Ty) -> Option<almide_lang::types::Ty> {
-    if let almide_lang::types::Ty::Applied(almide_lang::types::TypeConstructorId::Map, args) = ty {
-        if let Some(v) = args.get(1) {
-            if matches!(v, almide_lang::types::Ty::Fn { .. }) { return Some(v.clone()); }
-        }
-    }
-    None
-}
-
 /// Try to rewrite a single statement.
 fn rewrite_stmt(stmt: &mut IrStmt, vt: &mut VarTable, shared: &HashSet<VarId>) -> bool {
     let span = stmt.span;
-    // (0) List[Fn] binding: wrap lambda elements in RcWrap
-    if let IrStmtKind::Bind { ty, value, .. } = &mut stmt.kind {
-        if let almide_lang::types::Ty::Applied(almide_lang::types::TypeConstructorId::List, args) = ty {
-            if let Some(fn_ty) = args.first().cloned() {
-                if matches!(&fn_ty, almide_lang::types::Ty::Fn { .. }) {
-                    if let IrExprKind::List { elements } = &mut value.kind {
-                        let cast = Some(Box::new(fn_ty));
-                        for elem in elements.iter_mut() {
-                            let inner = std::mem::replace(elem, IrExpr {
-                                kind: IrExprKind::Unit, ty: almide_lang::types::Ty::Unit, span: None, def_id: None,
-                            });
-                            *elem = IrExpr {
-                                ty: inner.ty.clone(),
-                                span: inner.span,
-                                kind: IrExprKind::RcWrap { expr: Box::new(inner), cast_ty: cast.clone() },
-                                def_id: None,
-                            };
-                        }
-                        // Change type to mark it (walker will render Rc type from the RcWrap nodes)
-                        return true;
-                    }
-                }
-            }
-        }
-    }
     // (1) xs = xs + [v] → xs.push(v) — but not for a shared cell (see run()).
     if let IrStmtKind::Assign { var, value } = &stmt.kind {
         if let Some(push_stmt) = try_rewrite_push(*var, value, span, shared) {
