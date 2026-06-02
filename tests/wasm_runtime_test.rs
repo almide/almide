@@ -993,3 +993,107 @@ fn wasm_module_global_map_mutated_through_closure() {
          }\n",
     );
 }
+
+#[test]
+fn wasm_closure_selected_by_if_branch() {
+    // `let f = if c then A else B` where A, B are distinct closures. Native gave
+    // E0308 "if and else have incompatible types" (each branch a different
+    // anonymous closure). The unified boxing pass boxes both branches to
+    // `Rc<dyn Fn>` so the `if` unifies. 2 calls -> len 2. Cross-target = 2.
+    assert_cross_target_effect_main(
+        "effect fn main() -> Unit = {\n\
+         \x20 var acc: List[Int] = []\n\
+         \x20 let f = if true then (() => { list.push(acc, 1) }) else (() => { list.push(acc, 2) })\n\
+         \x20 f()\n\
+         \x20 f()\n\
+         \x20 println(int.to_string(list.len(acc)))\n\
+         }\n",
+    );
+}
+
+#[test]
+fn wasm_closure_selected_by_match_arm() {
+    // Same join via `match`. Native gave E0308 "match arms have incompatible
+    // types". Boxing each arm body unifies them. 1 call -> len 1.
+    assert_cross_target_effect_main(
+        "effect fn main() -> Unit = {\n\
+         \x20 var acc: List[Int] = []\n\
+         \x20 let k = 1\n\
+         \x20 let f = match k { 1 => (() => { list.push(acc, 10) }), _ => (() => { list.push(acc, 20) }) }\n\
+         \x20 f()\n\
+         \x20 println(int.to_string(list.len(acc)))\n\
+         }\n",
+    );
+}
+
+#[test]
+fn wasm_closure_in_map_from_list() {
+    // A closure as the value of a `map.from_list([(k, closure)])` literal. The old
+    // boxing covered `map.insert`/`get_or` only; from_list's closures live inside a
+    // list-of-tuples literal. The unified pass boxes Fn positions inside a uniform
+    // container's tuple elements, so the inner list-of-tuples is handled. len 1.
+    assert_cross_target_effect_main(
+        "effect fn main() -> Unit = {\n\
+         \x20 var acc: List[Int] = []\n\
+         \x20 let m: Map[String, () -> Unit] = map.from_list([(\"a\", () => { list.push(acc, 1) })])\n\
+         \x20 let f = map.get_or(m, \"a\", () => {})\n\
+         \x20 f()\n\
+         \x20 println(int.to_string(list.len(acc)))\n\
+         }\n",
+    );
+}
+
+#[test]
+fn wasm_closure_pushed_into_list_fn() {
+    // `list.push(fs, closure)` onto a `List[() -> Unit]` var. Boxing fired for list
+    // LITERALS only; pushing a closure into an existing `List[Fn]` was native
+    // E0562 "impl Trait not allowed in paths". The container-mutator rule boxes the
+    // pushed closure against the receiver's element type. len 1.
+    assert_cross_target_effect_main(
+        "effect fn main() -> Unit = {\n\
+         \x20 var acc: List[Int] = []\n\
+         \x20 var fs: List[() -> Unit] = []\n\
+         \x20 list.push(fs, () => { list.push(acc, 1) })\n\
+         \x20 let f = fs[0]\n\
+         \x20 f()\n\
+         \x20 println(int.to_string(list.len(acc)))\n\
+         }\n",
+    );
+}
+
+#[test]
+fn wasm_closure_list_in_record_field() {
+    // A list of TWO distinct closures stored in a record field `{ fs: [A, B] }`.
+    // The old List[Fn] boxing fired only for a direct `Bind`; here the list is a
+    // record field value, so native failed to box (E0308). The unified pass boxes
+    // any `List[Fn]` node regardless of parent. 3 calls -> len 3.
+    assert_cross_target_effect_main(
+        "effect fn main() -> Unit = {\n\
+         \x20 var acc: List[Int] = []\n\
+         \x20 let r = { fs: [() => { list.push(acc, 1) }, () => { list.push(acc, 2) }] }\n\
+         \x20 (r.fs[0])()\n\
+         \x20 (r.fs[1])()\n\
+         \x20 (r.fs[0])()\n\
+         \x20 println(int.to_string(list.len(acc)))\n\
+         }\n",
+    );
+}
+
+#[test]
+fn wasm_bytes_set_at_shared_through_closure() {
+    // `bytes.set_at` had no WASM dispatch arm -> fell through to an ICE in
+    // emit_wasm. Native ran fine. A `set_at` arm (in-place index store, no realloc,
+    // Unit return) was added. The Bytes buffer is shared by reference across the
+    // writer/reader closures, so after the writer sets index 0 to 99 the reader
+    // observes 99. Cross-target = 1, then 99, then 99.
+    assert_cross_target_effect_main(
+        "effect fn main() -> Unit = {\n\
+         \x20 var b: Bytes = bytes.from_list([1, 1, 1])\n\
+         \x20 let writer = () => { bytes.set_at(b, 0, 99); bytes.get_or(b, 0, -1) }\n\
+         \x20 let reader = () => { bytes.get_or(b, 0, -1) }\n\
+         \x20 println(int.to_string(reader()))\n\
+         \x20 println(int.to_string(writer()))\n\
+         \x20 println(int.to_string(reader()))\n\
+         }\n",
+    );
+}

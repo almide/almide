@@ -379,7 +379,16 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                         } else {
                             inner.clone()
                         };
-                        render_type(ctx, &ty)
+                        // A `List[Fn]` empty literal must not render
+                        // `Vec::<impl Fn>::new()` (E0562: impl Trait in path).
+                        // Closures stored in a list are boxed to `Rc<dyn Fn>`
+                        // (see the closure-boxing pass), so the turbofish element
+                        // type must match.
+                        if matches!(&ty, Ty::Fn { .. }) {
+                            super::helpers::render_type_field_fn(ctx, &ty)
+                        } else {
+                            render_type(ctx, &ty)
+                        }
                     }
                     _ => "_".into(),
                 };
