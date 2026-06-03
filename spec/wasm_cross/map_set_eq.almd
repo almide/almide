@@ -1,0 +1,45 @@
+// Regression: wasm `==` on Map/Set fell through to pointer identity, so two
+// structurally-equal containers built independently compared unequal (native
+// compares structurally). Now emits size + key/value containment, so equality
+// is order-independent: maps/sets built in a different insertion order are
+// still equal. Covers Int and String keys, a nested List value, and Set.
+fn yn(b: Bool) -> String = if b then "T" else "F"
+
+effect fn main() -> Unit = {
+  // Map[Int, String] — reordered insertion is still equal.
+  var ma: Map[Int, String] = map.new()
+  ma = map.set(ma, 1, "a"); ma = map.set(ma, 2, "b")
+  var mb: Map[Int, String] = map.new()
+  mb = map.set(mb, 2, "b"); mb = map.set(mb, 1, "a")
+  var mc: Map[Int, String] = map.new()
+  mc = map.set(mc, 1, "a"); mc = map.set(mc, 9, "b")
+  println(yn(ma == mb))
+  println(yn(ma == mc))
+
+  // Map[String, List[Int]] — value comparison recurses structurally.
+  var na: Map[String, List[Int]] = map.new()
+  na = map.set(na, "p", [1, 2]); na = map.set(na, "q", [3])
+  var nb: Map[String, List[Int]] = map.new()
+  nb = map.set(nb, "q", [3]); nb = map.set(nb, "p", [1, 2])
+  var nc: Map[String, List[Int]] = map.new()
+  nc = map.set(nc, "p", [1, 2]); nc = map.set(nc, "q", [9])
+  println(yn(na == nb))
+  println(yn(na == nc))
+
+  // Set[String] — reordered insertion is still equal; size matters.
+  var sa: Set[String] = set.new()
+  sa = set.insert(sa, "x"); sa = set.insert(sa, "y"); sa = set.insert(sa, "z")
+  var sb: Set[String] = set.new()
+  sb = set.insert(sb, "z"); sb = set.insert(sb, "x"); sb = set.insert(sb, "y")
+  var sc: Set[String] = set.new()
+  sc = set.insert(sc, "x"); sc = set.insert(sc, "y")
+  println(yn(sa == sb))
+  println(yn(sa == sc))
+
+  // Empty maps compare equal; empty vs non-empty differ.
+  var ea: Map[String, Int] = map.new()
+  var eb: Map[String, Int] = map.new()
+  eb = map.set(eb, "k", 1)
+  println(yn(ea == ea))
+  println(yn(ea == eb))
+}
