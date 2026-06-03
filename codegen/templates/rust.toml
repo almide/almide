@@ -255,12 +255,6 @@ template = "HashMap<{key}, {value}>"
 [type_set]
 template = "std::collections::HashSet<{inner}>"
 
-[type_fn]
-template = "impl Fn({params}) -> {return} + Clone"
-
-[type_fn_boxed]
-template = "Box<dyn Fn({params}) -> {return}>"
-
 # Fn type for struct fields: uses Rc for cloneability
 [type_fn_field]
 template = "std::rc::Rc<dyn Fn({params}) -> {return}>"
