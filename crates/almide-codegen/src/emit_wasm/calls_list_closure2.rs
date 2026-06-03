@@ -680,9 +680,12 @@ impl FuncCompiler<'_> {
                 });
                 if key_is_i64 { wasm!(self.func, { i64_load(0); local_set(cur_key); }); }
                 else { wasm!(self.func, { i32_load(0); local_set(cur_key); }); }
-                // Hash key → h1 (probe index) + h2 (tag)
-                if key_is_i64 { wasm!(self.func, { local_get(cur_key); i32_wrap_i64; }); }
-                else { wasm!(self.func, { local_get(cur_key); }); }
+                // Hash key → h1 (probe index) + h2 (tag). Push the RAW key (i64 for
+                // an Int key, ptr for String); `emit_hash_key` consumes the key's
+                // natural type and does its OWN i32 reduction. Pre-wrapping an Int
+                // key to i32 here fed `emit_hash_key`'s `local.tee` (an i64 temp) an
+                // i32 → "local.set's value type must be correct" (invalid module).
+                wasm!(self.func, { local_get(cur_key); });
                 self.emit_hash_key(&key_ty);
                 self.emit_h1_h2(cap_local, probe_idx, h2);
                 // Probe for existing key or empty slot
