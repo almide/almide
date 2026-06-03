@@ -70,6 +70,40 @@ fn collect_result_match_vars_expr(expr: &IrExpr, vars: &mut HashSet<u32>) {
             collect_result_match_vars_expr(cond, vars);
             for s in body { collect_result_match_vars_stmt(s, vars); }
         }
+        // `r ?? d` keeps `r` a Result (its OK type is the value of `??`). This is
+        // why a binding USED as a Result must skip the auto-? unwrap — without it,
+        // `r` would be unwrapped to its OK type and `??` would no longer type-check.
+        IrExprKind::UnwrapOr { expr: inner, fallback } => {
+            if let IrExprKind::Var { id } = &inner.kind { vars.insert(id.0); }
+            collect_result_match_vars_expr(inner, vars);
+            collect_result_match_vars_expr(fallback, vars);
+        }
+        // `r == ok(v)` / `r == err(e)` (and `!=`) likewise keep `r` a Result.
+        IrExprKind::BinOp { op: BinOp::Eq | BinOp::Neq, left, right } => {
+            let is_res = |e: &IrExpr| matches!(&e.kind,
+                IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. });
+            if is_res(right) { if let IrExprKind::Var { id } = &left.kind { vars.insert(id.0); } }
+            if is_res(left) { if let IrExprKind::Var { id } = &right.kind { vars.insert(id.0); } }
+            collect_result_match_vars_expr(left, vars);
+            collect_result_match_vars_expr(right, vars);
+        }
+        // Recurse through the remaining compound forms so a `r ?? d` / `r == ok(v)`
+        // nested in a call argument (e.g. `assert_eq(r ?? -1, 42)`) is still found.
+        IrExprKind::BinOp { left, right, .. } => {
+            collect_result_match_vars_expr(left, vars);
+            collect_result_match_vars_expr(right, vars);
+        }
+        IrExprKind::Call { args, .. } | IrExprKind::RuntimeCall { args, .. } => {
+            for a in args { collect_result_match_vars_expr(a, vars); }
+        }
+        IrExprKind::UnOp { operand, .. } => collect_result_match_vars_expr(operand, vars),
+        IrExprKind::Try { expr: inner } | IrExprKind::Unwrap { expr: inner }
+        | IrExprKind::Clone { expr: inner } | IrExprKind::Borrow { expr: inner, .. } => {
+            collect_result_match_vars_expr(inner, vars);
+        }
+        IrExprKind::Tuple { elements } | IrExprKind::List { elements } => {
+            for e in elements { collect_result_match_vars_expr(e, vars); }
+        }
         _ => {}
     }
 }
@@ -313,19 +347,13 @@ fn insert_try_stmt(stmt: IrStmt) -> IrStmt {
     let kind = match stmt.kind {
         IrStmtKind::Bind { var, mutability, ty, value } => {
             let mut new_value = insert_try(value, false);
-            // A binding explicitly annotated `Result[..]` keeps its Result. The
-            // auto-? top-level wrap unwraps a result-returning call to its ok
-            // type, which would leave `let r: Result[..] = call()` bound to a bare
-            // value — so `r ?? d` / `r == ok(v)` (e.g. on a `fan.timeout` result)
-            // no longer type-check. Undo that wrap when the declared type is Result.
-            if ty.is_result() {
-                let nv_ty = new_value.ty.clone();
-                let nv_span = new_value.span;
-                new_value = match new_value.kind {
-                    IrExprKind::Try { expr: inner } if inner.ty.is_result() => *inner,
-                    other => IrExpr { kind: other, ty: nv_ty, span: nv_span, def_id: None },
-                };
-            }
+            // NOTE: a binding USED as a Result (`r ?? d`, `r == ok(v)`, `match r {
+            // ok/err }`) is kept a Result by the usage-based skip set
+            // (`collect_result_match_vars`), applied in `insert_try_stmt_with_skip`.
+            // An earlier `if ty.is_result()` undo here was too broad — it also
+            // un-did the auto-? for a plain `let v = effectCall()` whose inferred
+            // type is the effect's `Result` (e.g. `effect fn boom() -> Result[..]`),
+            // leaving `v` a Result and breaking error propagation. Removed.
             if !matches!(&new_value.kind, IrExprKind::Try { .. })
                 && is_result_value(&new_value)
                 && !ty.is_result()
