@@ -90,17 +90,24 @@ effect fn read_file(path: String) -> String = fs.read_text(path)!
 - ユーザーが `-> Result[Unit, String]` を明示的に書いても動作するが、不要
 - **main は引数を取らない。** コマンドライン引数は `process.args()` で取得する（Go 方式）
 
-### 未処理エラー時のプログラム終了 — ⚠ クロスターゲット乖離
+### 未処理エラー時のプログラム終了 — クロスターゲット統一
 
-`main` に未処理の `Err`（auto-`?` 伝搬・`!` で unwrap した `Err`/`None`・ネストした effect 伝搬）が到達したときの**観測挙動が target で異なる**:
+`main` に未処理の `Err`（auto-`?` 伝搬・`!` で unwrap した `Err`・ネストした effect 伝搬）が
+到達したら、**両ターゲットで `exit code 1` ＋ stderr に `Error: <msg>`**（Display、引用符なし）。
+これは WASI/POSIX の作法（成功=exit0 / 失敗=非ゼロ+stderr）であり、Rust・Go 他の wasi 言語と
+揃える。`??`・`match` で処理済みのエラーは値が両 target 一致。
 
-| target | exit code | stderr | 状態 |
+| target | exit code | stderr | 実装 |
 |---|---|---|---|
-| **native** | `1` | `Error: "<msg>"`（Rust `Termination` trait） | ✅ |
-| **wasm** | `0` | （空） | ❌ **エラーを黙殺。`__main_runner` が `main` の `Result` を捨てている** |
+| **native** | `1` | `Error: <msg>` | `effect fn main` を `__almide_main` にリネームし、`Err` を Display で出す `fn main` ラッパ（Rust `Termination` の Debug `"引用符"` は使わない） |
+| **wasm** | `1` | `Error: <msg>` | `__main_runner` が `main` の `Result` tag を検査し、`Err` なら `Error: <msg>\n` を fd 2 + `proc_exit(1)` |
 
-つまり wasm では**失敗したプログラムが成功（exit 0・無出力）に見える**。これは単一ターゲットの correctness では捕まらない、最も危険な乖離（同一 well-typed ソースが target で別挙動）。意図する統一セマンティクスと修正方針は
-[docs/roadmap/active/correctness-guarantee-gaps.md §13](../roadmap/active/correctness-guarantee-gaps.md) を参照。`??` で処理済みのエラーは両 target で一致する（下記マトリクス）。
+テスト: `tests/wasm_runtime_test.rs::unhandled_main_error_terminates_consistently`,
+`successful_main_exits_zero_both_targets`（両者 native==wasm を exit/stderr で検証）。
+
+> **残存乖離**: `!` で **Option の `None`** を unwrap したケース（`list.first([])!`）は wasm がまだ
+> `Err` を main に伝搬できず exit 0 で黙殺する（`Err` Result は上表通り統一済み）。`!`/Option-`None`
+> の wasm 伝搬 lowering の別バグ。[correctness-guarantee-gaps.md §13](../roadmap/active/correctness-guarantee-gaps.md) 参照。
 
 テスト: `spec/lang/result_option_matrix_test.almd`
 

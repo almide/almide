@@ -1278,3 +1278,82 @@ fn wasm_closure_map_set_then_coalesce() {
          }\n",
     );
 }
+
+// ── Cross-target program termination on an unhandled error ──
+// `effect fn main` that fails must, on BOTH targets, exit non-zero and print
+// `Error: <msg>` to stderr (native via the Display `fn main` wrapper, wasm via
+// `__main_runner`'s tag check → fd_write(stderr) + proc_exit(1)).
+// Spec: docs/specs/result-option-effect.md §4.
+
+/// Compile+run on the native target; return (exit_code, stdout, stderr).
+fn run_native_capture(source: &str) -> (i32, String, String) {
+    let dir = tempfile::tempdir().unwrap();
+    let src_path = dir.path().join("test.almd");
+    std::fs::write(&src_path, source).unwrap();
+    let out = Command::new(almide_bin())
+        .args(["run", src_path.to_str().unwrap()])
+        .output()
+        .expect("failed to run almide");
+    (
+        out.status.code().unwrap_or(-1),
+        String::from_utf8_lossy(&out.stdout).trim().to_string(),
+        String::from_utf8_lossy(&out.stderr).trim().to_string(),
+    )
+}
+
+/// Compile to wasm + run via wasmtime; return (exit_code, stdout, stderr).
+/// `None` if wasmtime is unavailable (the assertion is then skipped).
+fn run_wasm_capture(source: &str) -> Option<(i32, String, String)> {
+    let dir = tempfile::tempdir().unwrap();
+    let src_path = dir.path().join("test.almd");
+    let wasm_path = dir.path().join("test.wasm");
+    std::fs::write(&src_path, source).unwrap();
+    let build = Command::new(almide_bin())
+        .args(["build", src_path.to_str().unwrap(), "--target", "wasm", "-o", wasm_path.to_str().unwrap()])
+        .output()
+        .expect("failed to build wasm");
+    assert!(build.status.success(), "wasm build failed:\n{}", String::from_utf8_lossy(&build.stderr));
+    match Command::new("wasmtime").arg("--dir=/").arg(wasm_path.to_str().unwrap()).output() {
+        Ok(o) if o.status.code() != Some(127) => Some((
+            o.status.code().unwrap_or(-1),
+            String::from_utf8_lossy(&o.stdout).trim().to_string(),
+            String::from_utf8_lossy(&o.stderr).trim().to_string(),
+        )),
+        _ => None,
+    }
+}
+
+#[test]
+fn unhandled_main_error_terminates_consistently() {
+    let src = "effect fn boom() -> Result[Int, String] = err(\"kaboom\")\n\
+               effect fn main() -> Unit = {\n\
+               \x20 let v = boom()\n\
+               \x20 println(int.to_string(v))\n\
+               }\n";
+    let (rc, _, rerr) = run_native_capture(src);
+    assert_ne!(rc, 0, "native must exit non-zero on an unhandled error");
+    assert_eq!(rerr, "Error: kaboom", "native stderr (Display, no Debug quotes)");
+    if let Some((wc, _, werr)) = run_wasm_capture(src) {
+        assert_ne!(wc, 0, "wasm must exit non-zero on an unhandled error");
+        assert_eq!(rc, wc, "exit codes must match cross-target");
+        assert_eq!(rerr, werr, "stderr must match cross-target byte-for-byte");
+    }
+}
+
+#[test]
+fn successful_main_exits_zero_both_targets() {
+    // Guards the wasm `__main_runner` tag check: an `Ok` main must NOT be misread
+    // as an error and aborted — it must exit 0 with its normal output.
+    let src = "effect fn good() -> Result[Int, String] = ok(7)\n\
+               effect fn main() -> Unit = {\n\
+               \x20 let v = good()\n\
+               \x20 println(int.to_string(v))\n\
+               }\n";
+    let (rc, rout, _) = run_native_capture(src);
+    assert_eq!(rc, 0);
+    assert_eq!(rout, "7");
+    if let Some((wc, wout, _)) = run_wasm_capture(src) {
+        assert_eq!(wc, 0, "an Ok main must exit 0 on wasm");
+        assert_eq!(wout, "7");
+    }
+}

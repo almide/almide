@@ -186,23 +186,27 @@ Quick wins first (small effort, high leverage):
   値が両 target 一致（実測通り、ここは健全）。
 
   **根本原因**: native は `effect fn main` → `Result<(),String>` を Rust `Termination` trait が
-  処理（err → stderr ＋ exit 1）。wasm は `_start = __main_runner` が `main` の `Result` を**捨てる**
-  ため err が消え、**失敗が成功（exit 0・無出力）に見える** — 単一ターゲット correctness では
-  決して捕まらない、最も危険な乖離。これは §12（fan の race/timeout/map-err）と同じ
-  「build は通るが観測非等価」クラス。
+  処理（err → stderr ＋ exit 1）。wasm は `_start = __main_runner` が `main` の `Result` を**捨てて**
+  いた ため err が消え、**失敗が成功（exit 0・無出力）に見えた** — 最も危険な乖離。
 
-  **修正方針**:
-  1. **exit code**（明白・低リスク）: `__main_runner` を「effect main のとき `main` の `Result` tag
-     （wasm Result レイアウト `[tag:i32@0][payload@4]`、tag≠0=`Err`）を検査し、`Err` なら
-     `proc_exit(1)`」に拡張。`proc_exit` は import 済み（`emitter.rt.proc_exit`）。
-     ⚠ **非 effect `fn main`（`Unit` 戻り）は Result tag を持たない** → 判定対象外にしないと
-     ok を err と誤判定して全 wasm main が壊れる。effect 限定（`ret_ty` が `Result[_,_]`）が必須。
-     回帰確認: ok/非effect main は exit 0 のまま（ケース 4・8）。
-  2. **stderr フォーマット**（**要・設計判断**）: native は Rust の `{:?}` 由来で `Error: "<msg>"`
-     （引用符・エスケープ付き）。完全一致には (a) wasm を同形式で fd 2 に出す か
-     (b) 両 target を統一形式（例 `error: <msg>` 引用符なし、native も custom Termination で揃える）。
-     後者の方がクリーンだが native の出力も変わる。どちらに寄せるか未決。
+  **✅ 修正済み（Result エラー経路）** — 設計判断は「WASI/POSIX の作法（成功=exit0 / 失敗=非ゼロ
+  +stderr）に従い、フォーマットは Rust Debug の `"引用符"` ワートを捨てて Display で統一」に決定:
+  1. **native**: `effect fn main` を `__almide_main` にリネームし、`Err` を `eprintln!("Error: {}", e)`
+     ＋ `exit(1)` で出す `fn main` ラッパを生成（`walker/mod.rs`）。出力が `Error: "<msg>"` →
+     `Error: <msg>` に（引用符が消える、これが正しい方向）。
+  2. **wasm**: `__main_runner` が effect main の `Result` tag（`[tag:i32@0][payload@4]`、tag≠0=`Err`）
+     を検査し、`Err` なら `Error: <msg>\n` を fd 2 + `proc_exit(1)`（`emit_wasm/mod.rs`）。
+     非 effect `fn main`（`Unit`）は tag を持たないので **effect 限定**（`is_effect`）— でないと ok を
+     err と誤判定して全 wasm main が壊れる。
+  - 検証: `tests/wasm_runtime_test.rs::{unhandled_main_error_terminates_consistently,
+    successful_main_exits_zero_both_targets}`。実測 8 ケース中 7 が native==wasm（exit/stderr 一致）。
 
-  検証は「観測出力（stdout/stderr/exit）を両 target で byte 比較する差分ゲート」が本筋
-  （cross-target equivalence の rank 1 force-multiplier）。この種の意図仕様の明文化（本節）と
-  ゲートが両輪。
+  **残存乖離（別バグ）**: `!` で **Option の `None`** を unwrap（`list.first([])!`、ケース 6）は
+  wasm がまだ `Err` を main の `Result` に伝搬できず（`Ok` にしてしまう）exit 0 で黙殺。これは
+  `__main_runner` ではなく **`!`/Option-`None` の wasm 伝搬 lowering の上流バグ**。`Err` Result の
+  伝搬は上記で統一済み。
+
+  これは §12（fan の race/timeout/map-err）と同じ「build は通るが観測非等価」クラス。残りの面的な
+  検出には「観測出力（stdout/stderr/exit）を両 target で byte 比較する差分ゲート」（cross-target
+  equivalence の rank 1 force-multiplier）が本筋。`tests/wasm_runtime_test.rs` の spec/wasm_cross
+  stdout 比較ハーネスがその部分実装（stdout のみ。stderr/exit 比較は本節の 2 テストで先行）。
