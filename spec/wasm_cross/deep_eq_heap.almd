@@ -1,0 +1,8 @@
+// Regression: deep-eq return_ corruption on unequal heap (String) elements (fixed).
+type Box = Tagged(String) | Empty
+effect fn main() -> Unit = {
+  println(if ["a","b"] == ["a","c"] then "eq" else "ne")
+  println(if ["a","b"] == ["a","b"] then "eq" else "ne")
+  println(if ("a", 1) == ("b", 1) then "eq" else "ne")
+  println(if Tagged("x") == Tagged("y") then "eq" else "ne")
+}
