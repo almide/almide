@@ -1509,16 +1509,25 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(list_scratch);
             }
             "any" => {
-                // fan.any(fns) → T: first success wins (unwrapped ok value)
-                // Sequential: try each, return first ok value
+                // fan.any(fns) → T: first success wins (unwrapped ok value).
+                // Sequential: try each, keep the first ok value in a scratch local
+                // and break out. fan.any is an EXPRESSION — the winner must be left
+                // on the operand stack for the enclosing context, NOT emitted with a
+                // function-level `return_` (which returned the wrong type out of the
+                // enclosing fn → invalid module for Int, silently-dropped result for
+                // String).
                 let list_scratch = self.scratch.alloc_i32();
                 let i = self.scratch.alloc_i32();
                 let res = self.scratch.alloc_i32();
                 let closure = self.scratch.alloc_i32();
+                let found = self.scratch.alloc_i32();
+                let val_vt = values::ty_to_valtype(result_ty).unwrap_or(ValType::I32);
+                let val_scratch = self.scratch.alloc(val_vt);
                 self.emit_expr(&args[0]);
                 wasm!(self.func, {
                     local_set(list_scratch);
                     i32_const(0); local_set(i);
+                    i32_const(0); local_set(found);
                     block_empty; loop_empty;
                       local_get(i); local_get(list_scratch); i32_load(0); i32_ge_u; br_if(1);
                       local_get(list_scratch); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
@@ -1533,21 +1542,27 @@ impl FuncCompiler<'_> {
                 }
                 wasm!(self.func, {
                       local_set(res);
-                      // If ok (tag==0), unwrap and return value
+                      // If ok (tag==0), capture the value and break out.
                       local_get(res); i32_load(0); i32_eqz;
                       if_empty;
                         local_get(res);
                 });
                 self.emit_load_at(result_ty, 4);
                 wasm!(self.func, {
-                        return_;
+                        local_set(val_scratch);
+                        i32_const(1); local_set(found);
+                        br(2); // break out of loop + block (if=0, loop=1, block=2)
                       end;
                       local_get(i); i32_const(1); i32_add; local_set(i);
                       br(0);
                     end; end;
+                    // No success → trap; otherwise leave the winner on the stack.
+                    local_get(found); i32_eqz;
+                    if_empty; unreachable; end;
+                    local_get(val_scratch);
                 });
-                // All failed: trap (no success found)
-                wasm!(self.func, { unreachable; });
+                self.scratch.free(val_scratch, val_vt);
+                self.scratch.free_i32(found);
                 self.scratch.free_i32(closure);
                 self.scratch.free_i32(res);
                 self.scratch.free_i32(i);
@@ -1560,6 +1575,7 @@ impl FuncCompiler<'_> {
                 let result = self.scratch.alloc_i32();
                 let i = self.scratch.alloc_i32();
                 let closure = self.scratch.alloc_i32();
+                let res_val = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
                 wasm!(self.func, {
                     local_set(list_scratch);
@@ -1580,22 +1596,29 @@ impl FuncCompiler<'_> {
                     let ti = self.emitter.register_type(vec![ValType::I32], vec![ValType::I32]);
                     wasm!(self.func, { call_indirect(ti, 0); });
                 }
+                // The closure result is an aliased (non-fresh) Result pointer. The
+                // settle list must own a reference, or the size-blind LIFO free-list
+                // allocator reuses/zeroes that block during later thunk calls and
+                // string allocations — corrupting the settled values. rc_inc it
+                // (returns the same ptr), then store `result[i] = it`. call_indirect
+                // left the result on the operand stack; stash it in a scratch so the
+                // store gets the correct [addr, value] order (the original stored in
+                // the reverse order, writing the list address INTO the Result block).
                 wasm!(self.func, {
-                      // Store result[i] = closure result
+                      call(self.emitter.rt.rc_inc);
+                      local_set(res_val);
+                      // result[i] address
                       local_get(result); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
                       local_get(i); i32_const(4); i32_mul; i32_add;
-                });
-                // swap: [result_ptr, result_i32_addr] → need [addr, value]
-                // Actually: stack has [closure_result, result_addr]. swap needed.
-                // Restructure: push addr first
-                // Let me fix the order:
-                wasm!(self.func, {
-                      i32_store(0); // store closure result at result[i]
+                      // value, then store
+                      local_get(res_val);
+                      i32_store(0);
                       local_get(i); i32_const(1); i32_add; local_set(i);
                       br(0);
                     end; end;
                     local_get(result);
                 });
+                self.scratch.free_i32(res_val);
                 self.scratch.free_i32(closure);
                 self.scratch.free_i32(i);
                 self.scratch.free_i32(result);
