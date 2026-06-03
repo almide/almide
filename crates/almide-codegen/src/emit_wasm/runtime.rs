@@ -687,7 +687,10 @@ fn compile_int_to_string(emitter: &mut WasmEmitter) {
     wasm!(f, { local_get(1); });
     f.instruction(&wasm_encoder::Instruction::LocalGet(3));
     f.instruction(&wasm_encoder::Instruction::I64Const(10));
-    f.instruction(&wasm_encoder::Instruction::I64RemS);
+    // UNSIGNED rem: `abs_n = 0 - n` produces the correct unsigned magnitude bits
+    // even for i64::MIN (0x8000…0 = 2^63), but a SIGNED rem would read those bits
+    // as negative and emit bytes below '0'. Unsigned keeps MIN's digits correct.
+    f.instruction(&wasm_encoder::Instruction::I64RemU);
     wasm!(f, {
         i32_wrap_i64;
         i32_const(48);
@@ -701,11 +704,11 @@ fn compile_int_to_string(emitter: &mut WasmEmitter) {
         i32_sub;
         local_set(1);
     });
-    // $abs_n /= 10
+    // $abs_n /= 10  (UNSIGNED — see the rem note above; keeps i64::MIN correct)
     wasm!(f, {
         local_get(3);
         i64_const(10);
-        i64_div_s;
+        i64_div_u;
         local_set(3);
         br(0);
         end;
@@ -810,6 +813,23 @@ fn compile_float_to_string(emitter: &mut WasmEmitter) {
         (1, ValType::I32), (1, ValType::I32), (1, ValType::F64),
         (1, ValType::I32), (1, ValType::I32), (1, ValType::I32),
     ]);
+
+    // Non-finite guard: `i64.trunc_f64_s` (below) TRAPS on NaN ('invalid conversion
+    // to integer') and on ±inf ('integer overflow'). Match native (Rust Display):
+    // NaN→"NaN", +inf→"inf", -inf→"-inf". (Large FINITE magnitudes ≥ 2^63 still
+    // overflow the trunc and need the shortest-round-trip rewrite — tracked
+    // separately; this stops the common inf/NaN crash-traps.)
+    let nan_str = emitter.intern_string("NaN") as i32;
+    let inf_str = emitter.intern_string("inf") as i32;
+    let neg_inf_str = emitter.intern_string("-inf") as i32;
+    wasm!(f, {
+        local_get(0); local_get(0); f64_ne;                 // NaN: f != f
+        if_empty; i32_const(nan_str); return_; end;
+        local_get(0); f64_const(f64::INFINITY); f64_eq;
+        if_empty; i32_const(inf_str); return_; end;
+        local_get(0); f64_const(f64::NEG_INFINITY); f64_eq;
+        if_empty; i32_const(neg_inf_str); return_; end;
+    });
 
     // int_str = int_to_string(trunc(f))
     wasm!(f, {
