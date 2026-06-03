@@ -509,7 +509,7 @@ fn rewrite_expr(
         IrExprKind::Deref { expr } => IrExprKind::Deref { expr: Box::new(rewrite_expr(*expr, effect_fns, mutable_vars)) },
         IrExprKind::Borrow { expr, as_str, mutable } => IrExprKind::Borrow { expr: Box::new(rewrite_expr(*expr, effect_fns, mutable_vars)), as_str, mutable },
         IrExprKind::BoxNew { expr } => IrExprKind::BoxNew { expr: Box::new(rewrite_expr(*expr, effect_fns, mutable_vars)) },
-        IrExprKind::RcWrap { expr, cast_ty } => IrExprKind::RcWrap { expr: Box::new(rewrite_expr(*expr, effect_fns, mutable_vars)), cast_ty },
+        IrExprKind::RcWrap { expr, cast_ty, wrap } => IrExprKind::RcWrap { expr: Box::new(rewrite_expr(*expr, effect_fns, mutable_vars)), cast_ty, wrap },
         IrExprKind::ToVec { expr } => IrExprKind::ToVec { expr: Box::new(rewrite_expr(*expr, effect_fns, mutable_vars)) },
         IrExprKind::MapLiteral { entries } => IrExprKind::MapLiteral {
             entries: entries.into_iter().map(|(k, v)| (rewrite_expr(k, effect_fns, mutable_vars), rewrite_expr(v, effect_fns, mutable_vars))).collect(),

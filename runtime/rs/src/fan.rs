@@ -1,25 +1,18 @@
 // Fan concurrency runtime functions
 
-pub fn almide_rt_fan_map<A: Send + 'static, B: Send + 'static>(
+// `fan.map` runs SEQUENTIALLY over an `Rc<dyn Fn>` thunk (the uniform closure
+// repr). This is what lets a closure VALUE bound to a var reach `fan.map`: that
+// value is an `Rc<dyn Fn>`, which is neither `Send` nor `Sync`, so it could not
+// be moved across the `thread::scope` boundary the parallel version required.
+// Results are identical to a parallel map (input order preserved); only the
+// (unobservable) parallelism is dropped. race/any/settle/timeout keep their
+// thread::scope and receive `Box<dyn Fn + Send[+ Sync]>` thunks (the box pass
+// boxes them), which still satisfy the existing `impl Fn + Send + Sync` bounds.
+pub fn almide_rt_fan_map<A, B>(
     items: Vec<A>,
-    f: impl Fn(A) -> Result<B, String> + Send + Sync + Clone,
+    f: std::rc::Rc<dyn Fn(A) -> Result<B, String>>,
 ) -> Vec<B> {
-    if items.is_empty() {
-        return Vec::new();
-    }
-    std::thread::scope(|s| {
-        let handles: Vec<_> = items
-            .into_iter()
-            .map(|item| {
-                let f = f.clone();
-                s.spawn(move || f(item))
-            })
-            .collect();
-        handles
-            .into_iter()
-            .map(|h| h.join().unwrap().unwrap())
-            .collect()
-    })
+    items.into_iter().map(|item| f(item).unwrap()).collect()
 }
 
 pub fn almide_rt_fan_race<T: Send + 'static>(
