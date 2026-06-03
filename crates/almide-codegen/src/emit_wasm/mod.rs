@@ -1242,6 +1242,21 @@ pub(crate) fn emit(program: &IrProgram) -> Vec<u8> {
         None
     };
 
+    // If `main` exists, wrap it in a void `__main_runner` so the exported
+    // `_start` is a clean WASI command `() -> ()`. `main` is an effect fn that
+    // returns a Result (an i32 at the wasm boundary); exporting it directly as
+    // `_start` leaves the entry non-void, so wasmtime runs it via `--invoke`
+    // and prints the return value to stdout — corrupting any observable-output
+    // capture (e.g. a cross-target equivalence diff). This occupies exactly the
+    // `__test_runner` slot (mutually exclusive with it), inheriting the same
+    // proven registration/compile ordering relative to closures and globals.
+    let main_runner_idx = if has_main {
+        let void_ty = emitter.register_type(vec![], vec![]);
+        Some(emitter.register_func("__main_runner", void_ty))
+    } else {
+        None
+    };
+
     // Pre-scan for lambdas and FnRefs — only these need element table entries.
     // (Previously all user functions were added unconditionally, bloating the
     // element table and preventing DCE from eliminating unused functions.)
@@ -1289,6 +1304,22 @@ pub(crate) fn emit(program: &IrProgram) -> Vec<u8> {
     // Test runner (if needed)
     if let Some(_runner_idx) = test_runner_idx {
         compile_test_runner(&mut emitter, &test_func_indices, init_globals_idx);
+    }
+
+    // Main runner (mirrors the test-runner slot; mutually exclusive with it).
+    // `main` already runs `__init_globals` itself (init_idx passed at its
+    // compilation), so the runner only calls `main` and drops its Result.
+    if main_runner_idx.is_some() {
+        let main_idx = *emitter.func_map.get("main")
+            .expect("has_main implies a registered `main`");
+        let drop_count = program.functions.iter()
+            .find(|f| f.name == "main" && !f.is_test)
+            .map(|f| {
+                let ret = if f.ret_ty.is_unresolved() { f.body.ty.clone() } else { f.ret_ty.clone() };
+                values::ret_type(&ret).len()
+            })
+            .unwrap_or(0);
+        compile_main_runner(&mut emitter, main_idx, drop_count);
     }
 
     // Lambda bodies and FnRef wrappers
@@ -1541,7 +1572,10 @@ fn assemble(emitter: &mut WasmEmitter) -> Vec<u8> {
     // ── Export section ──
     let mut exports = ExportSection::new();
     exports.export("memory", wasm_encoder::ExportKind::Memory, 0);
-    if let Some(&main_idx) = emitter.func_map.get("main") {
+    if let Some(&runner_idx) = emitter.func_map.get("__main_runner") {
+        // Void wrapper around `main` — keeps `_start` a clean WASI command.
+        exports.export("_start", wasm_encoder::ExportKind::Func, runner_idx);
+    } else if let Some(&main_idx) = emitter.func_map.get("main") {
         exports.export("_start", wasm_encoder::ExportKind::Func, main_idx);
     } else if let Some(&runner_idx) = emitter.func_map.get("__test_runner") {
         exports.export("_start", wasm_encoder::ExportKind::Func, runner_idx);
@@ -1744,6 +1778,21 @@ fn compile_test_runner(emitter: &mut WasmEmitter, tests: &[(u32, String)], init_
         f.instruction(&wasm_encoder::Instruction::Call(emitter.rt.println_str));
     }
 
+    f.instruction(&wasm_encoder::Instruction::End);
+    emitter.add_compiled(CompiledFunc::tracked(void_type, f));
+}
+
+/// Compile `__main_runner`: call `main` and drop its result so the exported
+/// `_start` is a void WASI command. `drop_count` is `main`'s wasm result arity
+/// (0 for a void `main`, 1 for an effect fn returning a `Result`). `main` runs
+/// `__init_globals` itself, so the runner does nothing else.
+fn compile_main_runner(emitter: &mut WasmEmitter, main_idx: u32, drop_count: usize) {
+    let void_type = emitter.register_type(vec![], vec![]);
+    let mut f = TrackedFunction::new([]);
+    f.instruction(&wasm_encoder::Instruction::Call(main_idx));
+    for _ in 0..drop_count {
+        f.instruction(&wasm_encoder::Instruction::Drop);
+    }
     f.instruction(&wasm_encoder::Instruction::End);
     emitter.add_compiled(CompiledFunc::tracked(void_type, f));
 }

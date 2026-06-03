@@ -23,9 +23,9 @@ pub fn eliminate_dead_code(emitter: &mut WasmEmitter) -> usize {
     // Step 1: Find entry points
     let mut entry_points: HashSet<u32> = HashSet::new();
 
-    // _start / main / __test_runner
+    // _start / main / __main_runner / __test_runner
     for (name, &idx) in &emitter.func_map {
-        if name == "main" || name == "__test_runner" || name == "__init_globals" {
+        if name == "main" || name == "__main_runner" || name == "__test_runner" || name == "__init_globals" {
             entry_points.insert(idx);
         }
     }
