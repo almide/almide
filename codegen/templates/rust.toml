@@ -250,7 +250,7 @@ template = "Option<{inner}>"
 template = "Result<{ok}, {err}>"
 
 [type_map]
-template = "HashMap<{key}, {value}>"
+template = "AlmideMap<{key}, {value}>"
 
 [type_set]
 template = "AlmideSet<{inner}>"
@@ -360,7 +360,7 @@ template = "_"
 template = "_"
 
 [empty_map]
-template = "HashMap::new()"
+template = "AlmideMap::new()"
 
 [try_expr]
 template = "({inner})?"
@@ -375,7 +375,7 @@ template = "r#{name}"
 template = "mut "
 
 [map_literal]
-template = "HashMap::from([{entries}])"
+template = "AlmideMap::from([{entries}])"
 
 [map_entry]
 template = "({key}, {value})"

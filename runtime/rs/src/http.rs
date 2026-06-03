@@ -29,7 +29,7 @@ impl AlmideHttpResponse {
     pub fn json(status: i64, body: String) -> Self {
         Self { status, body, headers: vec![("Content-Type".into(), "application/json".into())] }
     }
-    pub fn with_headers(status: i64, body: String, headers: HashMap<String, String>) -> Self {
+    pub fn with_headers(status: i64, body: String, headers: AlmideMap<String, String>) -> Self {
         Self { status, body, headers: headers.into_iter().collect() }
     }
 }
@@ -56,9 +56,9 @@ pub fn almide_rt_http_json(status: i64, body: &str) -> AlmideHttpResponse {
     AlmideHttpResponse::json(status, body.to_string())
 }
 
-pub fn almide_rt_http_with_headers(status: i64, body: &str, headers: &HashMap<String, String>) -> AlmideHttpResponse {
+pub fn almide_rt_http_with_headers(status: i64, body: &str, headers: &AlmideMap<String, String>) -> AlmideHttpResponse {
     let mut resp = AlmideHttpResponse::new(status, body.to_string());
-    for (k, v) in headers {
+    for (k, v) in headers.iter() {
         resp.headers.retain(|(ek, _)| !ek.eq_ignore_ascii_case(k));
         resp.headers.push((k.clone(), v.clone()));
     }
@@ -106,8 +106,8 @@ pub fn almide_http_req_header(req: &AlmideHttpRequest, key: &str) -> Option<Stri
     req.headers.iter().find(|(k, _)| k.eq_ignore_ascii_case(key)).map(|(_, v)| v.clone())
 }
 
-pub fn almide_http_query_params(req: &AlmideHttpRequest) -> HashMap<String, String> {
-    let mut params = HashMap::new();
+pub fn almide_http_query_params(req: &AlmideHttpRequest) -> AlmideMap<String, String> {
+    let mut params = AlmideMap::new();
     if let Some(q) = req.path.split('?').nth(1) {
         for pair in q.split('&') {
             let mut kv = pair.splitn(2, '=');
@@ -122,30 +122,30 @@ pub fn almide_http_query_params(req: &AlmideHttpRequest) -> HashMap<String, Stri
 // ── HTTP Client ──
 
 pub fn almide_http_get(url: &str) -> Result<String, String> {
-    almide_http_request("GET", url, "", &HashMap::new())
+    almide_http_request("GET", url, "", &AlmideMap::new())
 }
 
 pub fn almide_http_post(url: &str, body: &str) -> Result<String, String> {
-    almide_http_request("POST", url, body, &HashMap::new())
+    almide_http_request("POST", url, body, &AlmideMap::new())
 }
 
 pub fn almide_http_put(url: &str, body: &str) -> Result<String, String> {
-    almide_http_request("PUT", url, body, &HashMap::new())
+    almide_http_request("PUT", url, body, &AlmideMap::new())
 }
 
 pub fn almide_http_patch(url: &str, body: &str) -> Result<String, String> {
-    almide_http_request("PATCH", url, body, &HashMap::new())
+    almide_http_request("PATCH", url, body, &AlmideMap::new())
 }
 
 pub fn almide_http_delete(url: &str) -> Result<String, String> {
-    almide_http_request("DELETE", url, "", &HashMap::new())
+    almide_http_request("DELETE", url, "", &AlmideMap::new())
 }
 
-pub fn almide_http_get_with_headers(url: &str, headers: &HashMap<String, String>) -> Result<String, String> {
+pub fn almide_http_get_with_headers(url: &str, headers: &AlmideMap<String, String>) -> Result<String, String> {
     almide_http_request("GET", url, "", headers)
 }
 
-pub fn almide_http_request(method: &str, url: &str, body: &str, headers: &HashMap<String, String>) -> Result<String, String> {
+pub fn almide_http_request(method: &str, url: &str, body: &str, headers: &AlmideMap<String, String>) -> Result<String, String> {
     let (is_https, host, port, path) = parse_url(url)?;
 
     let stream = TcpStream::connect(format!("{}:{}", host, port))
@@ -169,7 +169,7 @@ pub fn almide_http_request(method: &str, url: &str, body: &str, headers: &HashMa
 }
 
 /// Perform HTTP request/response exchange over any Read+Write stream.
-fn http_exchange(stream: &mut (impl Read + Write), method: &str, host: &str, path: &str, body: &str, headers: &HashMap<String, String>) -> Result<String, String> {
+fn http_exchange(stream: &mut (impl Read + Write), method: &str, host: &str, path: &str, body: &str, headers: &AlmideMap<String, String>) -> Result<String, String> {
     let mut req = format!("{} {} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n", method, path, host);
     if !body.is_empty() {
         req.push_str(&format!("Content-Length: {}\r\n", body.len()));
@@ -177,7 +177,7 @@ fn http_exchange(stream: &mut (impl Read + Write), method: &str, host: &str, pat
             req.push_str("Content-Type: application/json\r\n");
         }
     }
-    for (k, v) in headers { req.push_str(&format!("{}: {}\r\n", k, v)); }
+    for (k, v) in headers.iter() { req.push_str(&format!("{}: {}\r\n", k, v)); }
     req.push_str("\r\n");
     req.push_str(body);
 
@@ -217,7 +217,7 @@ pub fn almide_http_request_stream(
     method: &str,
     url: &str,
     body: &str,
-    headers: &HashMap<String, String>,
+    headers: &AlmideMap<String, String>,
     mut on_chunk: impl FnMut(String),
 ) -> Result<(), String> {
     let (is_https, host, port, path) = parse_url(url)?;
@@ -249,7 +249,7 @@ fn http_exchange_stream<S: Read + Write, F: FnMut(&str)>(
     host: &str,
     path: &str,
     body: &str,
-    headers: &HashMap<String, String>,
+    headers: &AlmideMap<String, String>,
     on_chunk: &mut F,
 ) -> Result<(), String> {
     let mut req = format!("{} {} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n", method, path, host);
@@ -259,7 +259,7 @@ fn http_exchange_stream<S: Read + Write, F: FnMut(&str)>(
             req.push_str("Content-Type: application/json\r\n");
         }
     }
-    for (k, v) in headers {
+    for (k, v) in headers.iter() {
         req.push_str(&format!("{}: {}\r\n", k, v));
     }
     req.push_str("\r\n");

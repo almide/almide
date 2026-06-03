@@ -47,10 +47,13 @@ pub fn almide_rt_list_drop<T>(xs: Vec<T>, n: i64) -> Vec<T> { xs.into_iter().ski
 pub fn almide_rt_list_take_while<A: Clone>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> bool>) -> Vec<A> { let f = move |a| f(a); xs.into_iter().take_while(|x| f(x.clone())).collect() }
 pub fn almide_rt_list_drop_while<A: Clone>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> bool>) -> Vec<A> { let f = move |a| f(a); xs.into_iter().skip_while(|x| f(x.clone())).collect() }
 pub fn almide_rt_list_partition<A: Clone>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> bool>) -> (Vec<A>, Vec<A>) { let f = move |a| f(a); xs.into_iter().partition(|x| f(x.clone())) }
-pub fn almide_rt_list_group_by<A: Clone, B: std::hash::Hash + Eq + Clone>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> B>) -> std::collections::HashMap<B, Vec<A>> {
+pub fn almide_rt_list_group_by<A: Clone, B: PartialEq + Clone>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> B>) -> AlmideMap<B, Vec<A>> {
     let f = move |a| f(a);
-    let mut m: std::collections::HashMap<B, Vec<A>> = std::collections::HashMap::new();
-    for x in xs { let k = f(x.clone()); m.entry(k).or_default().push(x); }
+    let mut m: AlmideMap<B, Vec<A>> = AlmideMap::new();
+    for x in xs {
+        let k = f(x.clone());
+        if let Some(g) = m.get_mut(&k) { g.push(x); } else { m.insert(k, vec![x]); }
+    }
     m
 }
 pub fn almide_rt_list_slice<T: Clone>(xs: Vec<T>, start: i64, end: i64) -> Vec<T> { let s = start as usize; let e = (end as usize).min(xs.len()); if s >= e { vec![] } else { xs[s..e].to_vec() } }
