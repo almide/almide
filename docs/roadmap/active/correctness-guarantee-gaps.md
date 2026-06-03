@@ -163,3 +163,46 @@ Quick wins first (small effort, high leverage):
     POSTCONDITION を踏むが warning 止まり。「曖昧なら型エラー」にするには
     constraint solving 後の到達可能性解析（その TypeVar が本当に決まらない
     か／後で決まるか）の線引き設計が要る。§5 の格上げと同時に行うのが筋。
+
+  # 13. Status snapshot (2026-06-03) — cross-target program termination on unhandled error
+
+  effect / main / Option / Result は「型は付くが終了挙動が曲者」。`main` に**未処理エラー**が
+  到達したときの観測挙動を 8 ケース両 target 実測（`almide run` vs `build --target wasm`＋wasmtime）:
+
+  | # | ケース | native | wasm |
+  |---|---|---|---|
+  | 1 | main: effect err を auto-`?` 伝搬 | exit 1, stderr `Error: "kaboom"` | **exit 0, 無出力** ❌ |
+  | 2 | main: `boom()!` で `Err` を unwrap | exit 1, stderr `Error: "kaboom"` | **exit 0, 無出力** ❌ |
+  | 6 | main: `list.first([])!`（`None` を unwrap） | exit 1, stderr `Error: "none"` | **exit 0, 無出力** ❌ |
+  | 7 | ネストした effect の err 伝搬 | exit 1, stderr `Error: "deep"` | **exit 0, 無出力** ❌ |
+  | 3 | `boom() ?? 99`（`Err` を処理） | got 99 | got 99 ✅ |
+  | 5 | `list.first([]) ?? 42`（`None` を処理） | got 42 | got 42 ✅ |
+  | 4 | effect ok | got 7 | got 7 ✅ |
+  | 8 | 非 effect `fn main` | plain main | plain main ✅ |
+
+  **統一すべきセマンティクス（こうなってほしい）**: `main` に**未処理エラー**（auto-`?` 伝搬 /
+  `!` で unwrap した `Err`・`None` / ネスト effect 伝搬）が到達したら、**両 target で**
+  「**exit code ≠ 0** ＋ **stderr にエラーメッセージ**」。`??`・`match` で処理済みのエラーは
+  値が両 target 一致（実測通り、ここは健全）。
+
+  **根本原因**: native は `effect fn main` → `Result<(),String>` を Rust `Termination` trait が
+  処理（err → stderr ＋ exit 1）。wasm は `_start = __main_runner` が `main` の `Result` を**捨てる**
+  ため err が消え、**失敗が成功（exit 0・無出力）に見える** — 単一ターゲット correctness では
+  決して捕まらない、最も危険な乖離。これは §12（fan の race/timeout/map-err）と同じ
+  「build は通るが観測非等価」クラス。
+
+  **修正方針**:
+  1. **exit code**（明白・低リスク）: `__main_runner` を「effect main のとき `main` の `Result` tag
+     （wasm Result レイアウト `[tag:i32@0][payload@4]`、tag≠0=`Err`）を検査し、`Err` なら
+     `proc_exit(1)`」に拡張。`proc_exit` は import 済み（`emitter.rt.proc_exit`）。
+     ⚠ **非 effect `fn main`（`Unit` 戻り）は Result tag を持たない** → 判定対象外にしないと
+     ok を err と誤判定して全 wasm main が壊れる。effect 限定（`ret_ty` が `Result[_,_]`）が必須。
+     回帰確認: ok/非effect main は exit 0 のまま（ケース 4・8）。
+  2. **stderr フォーマット**（**要・設計判断**）: native は Rust の `{:?}` 由来で `Error: "<msg>"`
+     （引用符・エスケープ付き）。完全一致には (a) wasm を同形式で fd 2 に出す か
+     (b) 両 target を統一形式（例 `error: <msg>` 引用符なし、native も custom Termination で揃える）。
+     後者の方がクリーンだが native の出力も変わる。どちらに寄せるか未決。
+
+  検証は「観測出力（stdout/stderr/exit）を両 target で byte 比較する差分ゲート」が本筋
+  （cross-target equivalence の rank 1 force-multiplier）。この種の意図仕様の明文化（本節）と
+  ゲートが両輪。
