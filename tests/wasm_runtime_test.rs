@@ -1344,6 +1344,7 @@ fn run_wasm_capture(source: &str) -> Option<(i32, String, String)> {
 
 #[test]
 fn unhandled_main_error_terminates_consistently() {
+    if Command::new(almide_bin()).arg("--version").output().is_err() { return; }
     let src = "effect fn boom() -> Result[Int, String] = err(\"kaboom\")\n\
                effect fn main() -> Unit = {\n\
                \x20 let v = boom()\n\
@@ -1361,6 +1362,7 @@ fn unhandled_main_error_terminates_consistently() {
 
 #[test]
 fn successful_main_exits_zero_both_targets() {
+    if Command::new(almide_bin()).arg("--version").output().is_err() { return; }
     // Guards the wasm `__main_runner` tag check: an `Ok` main must NOT be misread
     // as an error and aborted — it must exit 0 with its normal output.
     let src = "effect fn good() -> Result[Int, String] = ok(7)\n\
