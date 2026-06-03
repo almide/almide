@@ -105,13 +105,39 @@ pub mod list {
     pub const DATA: FieldId = FieldId(2);
 }
 
-// Well-known field IDs for SwissMap.
+// Well-known field IDs + compact-ordered-dict tuning for the Map.
+//
+// The Map is a compact-ordered-dict (Python-dict / indexmap style): a hash INDEX
+// over a DENSE insertion-ordered entries array. Heap layout:
+//   [len:i32 @0][cap:i32 @4][tags:u8[cap] @8][index:i32[cap] @8+cap][entries:(K,V)[cap] @8+cap+cap*INDEX_SLOT_SIZE]
+// `LEN`/`CAP` are fixed-offset; the three array regions are cap-relative and are
+// addressed through the centralized `dict_*` helpers (never inline byte math) so
+// there is no layout magic number at any call site.
 pub mod map {
     use super::FieldId;
     pub const LEN: FieldId = FieldId(0);
     pub const CAP: FieldId = FieldId(1);
+    /// h2 fast-reject tag array, `cap` bytes @ header (0 = empty slot).
     pub const TAGS: FieldId = FieldId(2);
+    /// Dense `(key,val)` entries in INSERTION ORDER, `entries[0..len]`. (Field id
+    /// is nominal — its actual base is `8 + cap + cap*INDEX_SLOT_SIZE`, computed by
+    /// the `dict_*` helpers, not by `fixed_offset`.)
     pub const ENTRIES: FieldId = FieldId(3);
+
+    /// Bytes per INDEX slot (a 1-based `i32` pointer into the dense entries).
+    pub const INDEX_SLOT_SIZE: u32 = 4;
+    /// INDEX slot value meaning "empty" (entries are 1-based: slot `v` → `entries[v-1]`).
+    pub const EMPTY_INDEX: i32 = 0;
+    /// Initial capacity (always a power of two).
+    pub const INITIAL_CAP: u32 = 16;
+    /// Growth on overflow: `new_cap = cap << GROWTH_SHIFT` (4×).
+    pub const GROWTH_SHIFT: u32 = 2;
+    /// Load factor: grow when `len * LOAD_NUM > cap * LOAD_DEN` (75%).
+    pub const LOAD_NUM: u32 = 3;
+    pub const LOAD_DEN: u32 = 4;
+    /// Hash split: `h2` tag = `(hash >> H2_SHIFT) & H2_MASK`, coerced to ≥ 1.
+    pub const H2_SHIFT: u32 = 25;
+    pub const H2_MASK: u32 = 0x7F;
 }
 
 // Well-known field IDs for alloc header.
