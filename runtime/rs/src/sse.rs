@@ -34,7 +34,7 @@ pub fn almide_rt_sse_openai_chat(
     mut on_text_delta: impl FnMut(String),
 ) -> Result<String, String> {
     let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
-    let mut headers: HashMap<String, String> = HashMap::new();
+    let mut headers: AlmideMap<String, String> = AlmideMap::new();
     headers.insert("Authorization".to_string(), format!("Bearer {}", api_key));
     headers.insert("Content-Type".to_string(), "application/json".to_string());
     headers.insert("Accept".to_string(), "text/event-stream".to_string());
@@ -266,7 +266,7 @@ pub fn almide_rt_sse_anthropic_messages(
     mut on_text_delta: impl FnMut(String),
 ) -> Result<String, String> {
     let url = "https://api.anthropic.com/v1/messages".to_string();
-    let mut headers: HashMap<String, String> = HashMap::new();
+    let mut headers: AlmideMap<String, String> = AlmideMap::new();
     headers.insert("x-api-key".to_string(), api_key.to_string());
     headers.insert("anthropic-version".to_string(), "2023-06-01".to_string());
     headers.insert("Content-Type".to_string(), "application/json".to_string());
