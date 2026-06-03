@@ -15,7 +15,12 @@ impl FuncCompiler<'_> {
                 let (ks, vs) = self.map_kv_sizes(&args[0].ty);
                 let key_ty = self.map_key_ty(&args[0].ty);
                 let val_ty = self.map_val_ty(&args[0].ty);
-                let acc = self.scratch.alloc_i64();
+                // The accumulator's wasm type is the init's type (== fold result),
+                // NOT always i64 — a String/record/list accumulator is an i32 ptr,
+                // a Float is f64. Hardcoding i64 broke the wasm module (validation
+                // "expected i64, found i32") for any non-Int accumulator.
+                let acc_vt = values::ty_to_valtype(&args[1].ty).unwrap_or(ValType::I32);
+                let acc = self.scratch.alloc(acc_vt);
                 let closure = self.scratch.alloc_i32();
                 let it = self.map_iter_begin(&args[0], ks + vs);
                 self.emit_expr(&args[1]); // init
@@ -32,14 +37,14 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, { local_get(closure); i32_load(0); });
                 {
                     let key_vt = Self::key_valtype(&key_ty);
-                    let mut ct = vec![ValType::I32, ValType::I64, key_vt];
+                    let mut ct = vec![ValType::I32, acc_vt, key_vt];
                     if let Some(vt) = values::ty_to_valtype(&val_ty) { ct.push(vt); }
-                    self.emit_call_indirect(ct, vec![ValType::I64]);
+                    self.emit_call_indirect(ct, vec![acc_vt]);
                 }
                 wasm!(self.func, { local_set(acc); });
                 self.map_iter_loop_tail(&it);
                 wasm!(self.func, { local_get(acc); });
-                self.scratch.free_i64(acc);
+                self.scratch.free(acc, acc_vt);
                 self.scratch.free_i32(closure);
                 self.map_iter_end(it);
             }
