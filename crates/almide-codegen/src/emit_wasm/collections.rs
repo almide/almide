@@ -281,25 +281,38 @@ impl FuncCompiler<'_> {
             super::engine::layout::LIST, super::engine::layout::list::DATA,
         );
 
-        self.emit_expr(object); // ptr
+        // ptr → local (needed for both the bounds check's len load and the address)
+        self.emit_expr(object);
+        let ptr = self.scratch.alloc_i32();
+        wasm!(self.func, { local_set(ptr); });
 
-        // Optimize constant index: compute offset at compile time
+        // index → i32 local
+        let idx = self.scratch.alloc_i32();
         if let IrExprKind::LitInt { value } = &index.kind {
-            let offset = data_off + (*value as u32) * elem_size;
-            if is_bytes {
-                wasm!(self.func, { i32_load8_u(offset); i64_extend_i32_u; });
-            } else {
-                self.emit_load_at(result_ty, offset);
+            wasm!(self.func, { i32_const(*value as i32); local_set(idx); });
+        } else {
+            self.emit_expr(index);
+            if matches!(&index.ty, Ty::Int) {
+                wasm!(self.func, { i32_wrap_i64; });
             }
-            return;
+            wasm!(self.func, { local_set(idx); });
         }
 
-        wasm!(self.func, { i32_const(data_off as i32); i32_add; });
+        // Bounds check: trap if (idx as u32) >= len (len at list/bytes offset 0).
+        // A negative idx wraps to a huge u32 and is also caught. Native panics on
+        // OOB; trapping here stops the WASM OOB read — the prior code computed the
+        // address with no check and returned garbage past the buffer (undefined
+        // behavior). (Exact panic message + exit-code parity with native is a
+        // separate runtime-panic-unification contract item.)
+        wasm!(self.func, {
+            local_get(idx);
+            local_get(ptr); i32_load(0);
+            i32_ge_u;
+            if_empty; unreachable; end;
+        });
 
-        self.emit_expr(index);
-        if matches!(&index.ty, Ty::Int) {
-            wasm!(self.func, { i32_wrap_i64; });
-        }
+        // addr = ptr + data_off + idx * elem_size
+        wasm!(self.func, { local_get(ptr); i32_const(data_off as i32); i32_add; local_get(idx); });
         if elem_size > 1 {
             wasm!(self.func, { i32_const(elem_size as i32); i32_mul; });
         }
@@ -310,6 +323,9 @@ impl FuncCompiler<'_> {
         } else {
             self.emit_load_at(result_ty, 0);
         }
+
+        self.scratch.free_i32(idx);
+        self.scratch.free_i32(ptr);
     }
 
     /// Emit a tuple construction: allocate memory, store each element sequentially.
