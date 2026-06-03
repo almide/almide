@@ -440,13 +440,12 @@ impl FuncCompiler<'_> {
         wasm!(self.func, {
             local_set(b);
             local_set(a);
-            // Compare tags
+            // tags equal? → if so compute payload eq, else 0. (No `return_`: it
+            // returned 0 from the ENCLOSING function and corrupted its contract.)
             local_get(a); i32_load(0);
             local_get(b); i32_load(0);
-            i32_ne;
-            if_empty;
-              i32_const(0); return_; // different tags → not equal
-            end;
+            i32_eq;
+            if_i32;
         });
 
         if cases.is_empty() || cases.iter().all(|c| c.fields.is_empty()) {
@@ -469,15 +468,25 @@ impl FuncCompiler<'_> {
                     self.emit_load_at(field_ty, offset);
                     let ft = field_ty.clone();
                     self.emit_eq_typed(&ft);
-                    if i < case.fields.len() - 1 {
-                        wasm!(self.func, { i32_eqz; if_empty; i32_const(0); return_; end; });
+                    if i > 0 {
+                        wasm!(self.func, { i32_and; });
                     }
                     offset += field_size;
+                }
+                if case.fields.is_empty() {
+                    wasm!(self.func, { i32_const(1); });
                 }
             } else {
                 wasm!(self.func, { i32_const(1); });
             }
         }
+
+        // Close the tags-equal `if_i32`: tags differ → not equal.
+        wasm!(self.func, {
+            else_;
+            i32_const(0);
+            end;
+        });
 
         self.scratch.free_i32(b);
         self.scratch.free_i32(a);
