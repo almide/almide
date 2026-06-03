@@ -677,11 +677,23 @@ impl FuncCompiler<'_> {
                         key.clone(),
                         value.clone(),
                     ];
-                    self.emit_map_call("set", &set_args);
-                    if let Some(local_idx) = has_local {
-                        wasm!(self.func, { local_set(local_idx); });
-                    } else if let Some(g) = global_idx {
-                        wasm!(self.func, { global_set(g); });
+                    let is_cell = has_local.is_some() && self.emitter.mutable_captures.contains(&target.0);
+                    if is_cell {
+                        // Shared-cell capture: the local holds the CELL ptr; the new
+                        // map must be stored INTO the cell (cell[0] = new_map) so the
+                        // captured-and-shared map is updated, not a local copy that
+                        // local_set would discard (the outer scope keeps the old map).
+                        let cell_local = has_local.unwrap();
+                        wasm!(self.func, { local_get(cell_local); });
+                        self.emit_map_call("set", &set_args);
+                        wasm!(self.func, { i32_store(0); });
+                    } else {
+                        self.emit_map_call("set", &set_args);
+                        if let Some(local_idx) = has_local {
+                            wasm!(self.func, { local_set(local_idx); });
+                        } else if let Some(g) = global_idx {
+                            wasm!(self.func, { global_set(g); });
+                        }
                     }
                 }
             }

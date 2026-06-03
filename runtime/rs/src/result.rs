@@ -1,14 +1,17 @@
 // result extern — Rust native implementations
 
-pub fn almide_rt_result_map<T: Clone, U, E: Clone>(r: Result<T, E>, f: impl Fn(T) -> U) -> Result<U, E> {
+pub fn almide_rt_result_map<T: Clone, U, E: Clone>(r: Result<T, E>, f: std::rc::Rc<dyn Fn(T) -> U>) -> Result<U, E> {
+    let f = move |a| f(a);
     r.map(f)
 }
 
-pub fn almide_rt_result_map_err<T: Clone, E: Clone, F>(r: Result<T, E>, f: impl Fn(E) -> F) -> Result<T, F> {
+pub fn almide_rt_result_map_err<T: Clone, E: Clone, F>(r: Result<T, E>, f: std::rc::Rc<dyn Fn(E) -> F>) -> Result<T, F> {
+    let f = move |a| f(a);
     r.map_err(f)
 }
 
-pub fn almide_rt_result_and_then<T: Clone, U, E: Clone>(r: Result<T, E>, f: impl Fn(T) -> Result<U, E>) -> Result<U, E> {
+pub fn almide_rt_result_and_then<T: Clone, U, E: Clone>(r: Result<T, E>, f: std::rc::Rc<dyn Fn(T) -> Result<U, E>>) -> Result<U, E> {
+    let f = move |a| f(a);
     r.and_then(f)
 }
 
@@ -27,11 +30,13 @@ pub fn almide_rt_result_err<T, E: Clone>(r: &Result<T, E>) -> Option<E> {
     r.as_ref().err().cloned()
 }
 
-pub fn almide_rt_result_flat_map<T: Clone, U, E: Clone>(r: Result<T, E>, f: impl Fn(T) -> Result<U, E>) -> Result<U, E> {
+pub fn almide_rt_result_flat_map<T: Clone, U, E: Clone>(r: Result<T, E>, f: std::rc::Rc<dyn Fn(T) -> Result<U, E>>) -> Result<U, E> {
+    let f = move |a| f(a);
     r.and_then(f)
 }
 
-pub fn almide_rt_result_unwrap_or_else<T, E>(r: Result<T, E>, f: impl Fn(E) -> T) -> T {
+pub fn almide_rt_result_unwrap_or_else<T, E>(r: Result<T, E>, f: std::rc::Rc<dyn Fn(E) -> T>) -> T {
+    let f = move |a| f(a);
     r.unwrap_or_else(f)
 }
 
@@ -71,7 +76,8 @@ pub fn almide_rt_result_partition<T, E>(rs: Vec<Result<T, E>>) -> (Vec<T>, Vec<E
     (oks, errs)
 }
 
-pub fn almide_rt_result_collect_map<T, U, E>(xs: Vec<T>, mut f: impl FnMut(T) -> Result<U, E>) -> Result<Vec<U>, Vec<E>> {
+pub fn almide_rt_result_collect_map<T, U, E>(xs: Vec<T>, f: std::rc::Rc<dyn Fn(T) -> Result<U, E>>) -> Result<Vec<U>, Vec<E>> {
+    let f = move |a| f(a);
     let mut oks = Vec::new();
     let mut errs = Vec::new();
     for x in xs {

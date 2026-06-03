@@ -14,38 +14,47 @@ pub fn almide_rt_map_values<K, V: Clone>(m: &HashMap<K, V>) -> Vec<V> { m.values
 pub fn almide_rt_map_entries<K: Clone, V: Clone>(m: &HashMap<K, V>) -> Vec<(K, V)> { m.iter().map(|(k, v)| (k.clone(), v.clone())).collect() }
 pub fn almide_rt_map_merge<K: Eq + std::hash::Hash + Clone, V: Clone>(a: &HashMap<K, V>, b: &HashMap<K, V>) -> HashMap<K, V> { let mut r = a.clone(); for (k, v) in b { r.insert(k.clone(), v.clone()); } r }
 
-pub fn almide_rt_map_filter<K: Eq + std::hash::Hash + Clone, V: Clone>(m: &HashMap<K, V>, f: impl Fn(K, V) -> bool) -> HashMap<K, V> {
+pub fn almide_rt_map_filter<K: Eq + std::hash::Hash + Clone, V: Clone>(m: &HashMap<K, V>, f: std::rc::Rc<dyn Fn(K, V) -> bool>) -> HashMap<K, V> {
+    let f = move |a, b| f(a, b);
     m.iter().filter(|(k, v)| f((*k).clone(), (*v).clone())).map(|(k, v)| (k.clone(), v.clone())).collect()
 }
 
-pub fn almide_rt_map_map_values<K: Eq + std::hash::Hash + Clone, V: Clone, W>(m: &HashMap<K, V>, f: impl Fn(V) -> W) -> HashMap<K, W> {
+pub fn almide_rt_map_map_values<K: Eq + std::hash::Hash + Clone, V: Clone, W>(m: &HashMap<K, V>, f: std::rc::Rc<dyn Fn(V) -> W>) -> HashMap<K, W> {
+    let f = move |a| f(a);
     m.iter().map(|(k, v)| (k.clone(), f((*v).clone()))).collect()
 }
 
 pub fn almide_rt_map_from_entries<K: Eq + std::hash::Hash, V>(entries: Vec<(K, V)>) -> HashMap<K, V> { entries.into_iter().collect() }
 pub fn almide_rt_map_from_list<K: Eq + std::hash::Hash + Clone, V: Clone>(keys: &[K], values: &[V]) -> HashMap<K, V> { keys.iter().cloned().zip(values.iter().cloned()).collect() }
 
-pub fn almide_rt_map_fold<K: Clone, V: Clone, A>(m: &HashMap<K, V>, init: A, mut f: impl FnMut(A, K, V) -> A) -> A {
+pub fn almide_rt_map_fold<K: Clone, V: Clone, A>(m: &HashMap<K, V>, init: A, f: std::rc::Rc<dyn Fn(A, K, V) -> A>) -> A {
+    let f = move |a, k, v| f(a, k, v);
     let mut acc = init;
     for (k, v) in m { acc = f(acc, k.clone(), v.clone()); }
     acc
 }
-pub fn almide_rt_map_any<K: Clone, V: Clone>(m: &HashMap<K, V>, f: impl Fn(K, V) -> bool) -> bool {
+pub fn almide_rt_map_any<K: Clone, V: Clone>(m: &HashMap<K, V>, f: std::rc::Rc<dyn Fn(K, V) -> bool>) -> bool {
+    let f = move |a, b| f(a, b);
     m.iter().any(|(k, v)| f(k.clone(), v.clone()))
 }
-pub fn almide_rt_map_all<K: Clone, V: Clone>(m: &HashMap<K, V>, f: impl Fn(K, V) -> bool) -> bool {
+pub fn almide_rt_map_all<K: Clone, V: Clone>(m: &HashMap<K, V>, f: std::rc::Rc<dyn Fn(K, V) -> bool>) -> bool {
+    let f = move |a, b| f(a, b);
     m.iter().all(|(k, v)| f(k.clone(), v.clone()))
 }
-pub fn almide_rt_map_count<K: Clone, V: Clone>(m: &HashMap<K, V>, f: impl Fn(K, V) -> bool) -> i64 {
+pub fn almide_rt_map_count<K: Clone, V: Clone>(m: &HashMap<K, V>, f: std::rc::Rc<dyn Fn(K, V) -> bool>) -> i64 {
+    let f = move |a, b| f(a, b);
     m.iter().filter(|&(k, v)| f(k.clone(), v.clone())).count() as i64
 }
-pub fn almide_rt_map_each<K: Clone, V: Clone>(m: &HashMap<K, V>, f: impl Fn(K, V)) {
+pub fn almide_rt_map_each<K: Clone, V: Clone>(m: &HashMap<K, V>, f: std::rc::Rc<dyn Fn(K, V)>) {
+    let f = move |a, b| f(a, b);
     for (k, v) in m.iter() { f(k.clone(), v.clone()); }
 }
-pub fn almide_rt_map_find<K: Clone + Eq + std::hash::Hash, V: Clone>(m: &HashMap<K, V>, f: impl Fn(K, V) -> bool) -> Option<(K, V)> {
+pub fn almide_rt_map_find<K: Clone + Eq + std::hash::Hash, V: Clone>(m: &HashMap<K, V>, f: std::rc::Rc<dyn Fn(K, V) -> bool>) -> Option<(K, V)> {
+    let f = move |a, b| f(a, b);
     m.iter().find(|&(k, v)| f(k.clone(), v.clone())).map(|(k, v)| (k.clone(), v.clone()))
 }
-pub fn almide_rt_map_update<K: Eq + std::hash::Hash + Clone, V: Clone>(m: &HashMap<K, V>, key: K, f: impl Fn(V) -> V) -> HashMap<K, V> {
+pub fn almide_rt_map_update<K: Eq + std::hash::Hash + Clone, V: Clone>(m: &HashMap<K, V>, key: K, f: std::rc::Rc<dyn Fn(V) -> V>) -> HashMap<K, V> {
+    let f = move |a| f(a);
     let mut m = m.clone();
     if let Some(v) = m.get(&key).cloned() { m.insert(key, f(v)); }
     m

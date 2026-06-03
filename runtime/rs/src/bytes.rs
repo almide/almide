@@ -195,7 +195,8 @@ pub fn almide_rt_bytes_fill(b: &mut Vec<u8>, val: i64) {
     }
 }
 
-pub fn almide_rt_bytes_map_each(b: &Vec<u8>, f: impl Fn(i64) -> i64) -> Vec<u8> {
+pub fn almide_rt_bytes_map_each(b: &Vec<u8>, f: std::rc::Rc<dyn Fn(i64) -> i64>) -> Vec<u8> {
+    let f = move |a| f(a);
     b.iter().map(|x| f(*x as i64) as u8).collect()
 }
 

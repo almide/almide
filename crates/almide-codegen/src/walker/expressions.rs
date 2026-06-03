@@ -60,6 +60,42 @@ pub(crate) fn render_expr_owned(ctx: &RenderContext, expr: &IrExpr) -> String {
     render_expr(ctx, expr)
 }
 
+/// Render a closure literal (`move |params| body`). `annotate` adds explicit
+/// param types: a BOXED closure (`Rc::new(move |k| …) as Rc<dyn Fn(String)>`)
+/// needs them because the `as` cast does NOT back-infer the closure's param type
+/// (`|k|` alone is E0282). A bare combinator-consumed lambda passes
+/// `annotate = false` — a fused iterator adapter infers `&T` and an explicit `T`
+/// would mismatch.
+fn render_lambda(ctx: &RenderContext, params: &[(VarId, Ty)], body: &IrExpr, annotate: bool) -> String {
+    let params_str = params.iter()
+        .map(|(id, ty)| {
+            let name = ctx.var_name(*id).to_string();
+            if annotate && !ty.has_unresolved_deep() {
+                format!("{}: {}", name, render_type(ctx, ty))
+            } else {
+                name
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let mut body_str = if let IrExprKind::Var { id } = &body.kind {
+        if ctx.ann.is_rc_cow(id) {
+            format!("(*{}).clone()", ctx.var_name(*id))
+        } else { render_expr(ctx, body) }
+    } else { render_expr(ctx, body) };
+    // Nested (curried) lambda: box the returned closure as `Rc<dyn Fn>` with an
+    // explicit cast so `Rc<concrete-closure>` coerces to the trait object the
+    // outer closure's return type demands (E0271 without the cast).
+    if matches!(&body.kind, IrExprKind::Lambda { .. }) {
+        let wrapped = ctx.templates.render_with("box_wrap", None, &[], &[("inner", body_str.as_str())])
+            .unwrap_or_else(|| format!("std::rc::Rc::new({})", body_str));
+        let cast = super::helpers::render_type_rc_fn(ctx, &body.ty);
+        body_str = format!("{} as {}", wrapped, cast);
+    }
+    ctx.templates.render_with("lambda_single", None, &[], &[("params", params_str.as_str()), ("body", body_str.as_str())])
+        .unwrap_or_else(|| "|_| { }".to_string())
+}
+
 pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
     match &expr.kind {
         // ── Literals ──
@@ -418,10 +454,10 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                         val_str = format!("Box::new({})", val_str);
                     }
                 }
-                // Rc-wrap Fn-typed fields: closures stored in struct fields use Rc<dyn Fn>
-                if matches!(&v.ty, Ty::Fn { .. }) {
-                    val_str = format!("std::rc::Rc::new({})", val_str);
-                }
+                // A closure stored in a struct field is `Rc<dyn Fn>`; the
+                // box-by-default pass already boxed the field value, so no
+                // field-side `Rc::new` — that double-boxed it (this site had no
+                // `RcWrap` guard at all).
                 field_strs.push(ctx.templates.render_with("record_field", None, &[], &[("name", k.as_str()), ("value", val_str.as_str())])
                     .unwrap_or_else(|| format!("{}: {}", k, val_str)));
             }
@@ -525,29 +561,9 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         }
 
         // ── Lambda ──
-        IrExprKind::Lambda { params, body, .. } => {
-            let params_str = params.iter()
-                .map(|(id, _ty)| ctx.var_name(*id).to_string())
-                .collect::<Vec<_>>()
-                .join(", ");
-            let mut body_str = if let IrExprKind::Var { id } = &body.kind {
-                if ctx.ann.is_rc_cow(id) {
-                    format!("(*{}).clone()", ctx.var_name(*id))
-                } else { render_expr(ctx, body) }
-            } else { render_expr(ctx, body) };
-            // Nested (curried) lambda: box the returned closure as `Rc<dyn Fn>`
-            // with an explicit cast, so `Rc<concrete-closure>` coerces to the
-            // trait object the outer closure's return type demands (E0271 without
-            // the cast). `Rc` (not `Box`) because the result is cloned at calls.
-            if matches!(&body.kind, IrExprKind::Lambda { .. }) {
-                let wrapped = ctx.templates.render_with("box_wrap", None, &[], &[("inner", body_str.as_str())])
-                    .unwrap_or_else(|| format!("std::rc::Rc::new({})", body_str));
-                let cast = super::helpers::render_type_rc_fn(ctx, &body.ty);
-                body_str = format!("{} as {}", wrapped, cast);
-            }
-            ctx.templates.render_with("lambda_single", None, &[], &[("params", params_str.as_str()), ("body", body_str.as_str())])
-                .unwrap_or_else(|| format!("|_| {{ }}"))
-        }
+        // A bare (combinator-consumed) lambda leaves its params UNANNOTATED — a
+        // fused iterator adapter infers `&T`, and annotating `T` would mismatch.
+        IrExprKind::Lambda { params, body, .. } => render_lambda(ctx, params, body, false),
 
         // ── String interpolation ──
         IrExprKind::StringInterp { parts } => render_string_interp(ctx, parts),
@@ -817,10 +833,17 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
             format!("Box::new({})", render_expr(ctx, inner))
         }
         IrExprKind::RcWrap { expr: inner, cast_ty } => {
-            let s = render_expr(ctx, inner);
+            // A BOXED closure literal needs annotated params (the `as` cast does
+            // not back-infer them). Wrap in parens so a boxed-then-CALLED closure
+            // `(Rc::new(..) as T)(args)` parses (a cast can't be followed by `(`).
+            let s = if let IrExprKind::Lambda { params, body, .. } = &inner.kind {
+                render_lambda(ctx, params, body, true)
+            } else {
+                render_expr(ctx, inner)
+            };
             if let Some(ty) = cast_ty {
                 let rc_type = super::helpers::render_type_rc_fn(ctx, ty);
-                format!("std::rc::Rc::new({}) as {}", s, rc_type)
+                format!("(std::rc::Rc::new({}) as {})", s, rc_type)
             } else {
                 format!("std::rc::Rc::new({})", s)
             }
@@ -1065,26 +1088,23 @@ fn render_generic_call(ctx: &RenderContext, target: &CallTarget, args: &[IrExpr]
                     .join(", ");
                 let body_str = render_expr(ctx, body);
                 format!("(move |{}| {})", params_str, body_str)
-            } else if matches!(&callee.kind, IrExprKind::Member { .. }) {
-                // Member: (h.run)("hello") — required in Rust to call Fn-typed fields
-                format!("({})", render_expr(ctx, callee))
             } else {
-                render_expr(ctx, callee)
+                // Parenthesize ANY computed callee: a `Member` (h.run)("x"), a
+                // `??`/`match`/`if` that yields a closure — `match … {}(x)` is
+                // invalid Rust ("expected ;"), `(match … {})(x)` is correct — and a
+                // bare `(f)(x)` is harmless.
+                format!("({})", render_expr(ctx, callee))
             }
         }
         CallTarget::Module { .. } => unreachable!(),
     };
-    // Calling a closure VALUE (Computed target): a function-typed parameter of
-    // that closure is `Rc<dyn Fn>` (a closure can't take an `impl Fn` param), so
-    // box a fresh closure passed as such an argument. Named/Method calls go to
-    // real `fn`s whose `impl Fn` params accept the raw closure, so leave those.
-    let box_fn_args = matches!(target, CallTarget::Computed { .. });
-    let args_str = args.iter().map(|a| {
-        let s = render_expr_owned(ctx, a);
-        if box_fn_args && matches!(&a.ty, Ty::Fn { .. }) && !matches!(&a.kind, IrExprKind::RcWrap { .. }) {
-            format!("std::rc::Rc::new({})", s)
-        } else { s }
-    }).collect::<Vec<_>>().join(", ");
+    // A closure ARG is already `Rc<dyn Fn>`: the box-by-default pass boxed every
+    // closure literal where it sits — including a Named user-HOF arg, whose param
+    // is `Rc<dyn Fn>` under the uniform repr (top-level fns no longer take
+    // `impl Fn`). No call-site boxing here — re-wrapping a capture-clone
+    // `{ let __cap; lambda }` arg (kind `Block`, not `RcWrap`) double-boxed it.
+    let args_str = args.iter().map(|a| render_expr_owned(ctx, a))
+        .collect::<Vec<_>>().join(", ");
     ctx.templates.render_with("call_expr", None, &[], &[("callee", callee.as_str()), ("args", args_str.as_str())])
         .unwrap_or_else(|| format!("call(...)"))
 }
@@ -1191,11 +1211,10 @@ fn render_enum_constructor(ctx: &RenderContext, ctor_name: &str, enum_name: &str
         let rendered = if is_rc_cow_var {
             format!("{}.into_inner()", rendered)
         } else { rendered };
-        // A closure payload field is typed `Rc<dyn Fn>` (see the variant decl), so
-        // a fresh closure passed to the constructor must be boxed to match.
-        let rendered = if matches!(&a.ty, Ty::Fn { .. }) && !matches!(&a.kind, IrExprKind::RcWrap { .. }) {
-            format!("std::rc::Rc::new({})", rendered)
-        } else { rendered };
+        // A closure payload field is `Rc<dyn Fn>`; the box-by-default pass already
+        // boxed the closure value (a direct lambda → `RcWrap`, a capture-clone
+        // `{ let __cap; lambda }` → boxes the tail, a `Var` is already `Rc`), so no
+        // ctor-side boxing — wrapping again here double-boxed `Block`-shaped args.
         if needs_box {
             format!("Box::new({})", rendered)
         } else {

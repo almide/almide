@@ -106,11 +106,36 @@ fn is_fan_call(expr: &IrExpr) -> bool {
     }
 }
 
-/// Top-down walk: recurse into children, then box this node's join slots.
-/// `box_here` is cleared for the direct arguments of a `fan.*` call so their
-/// closures are not boxed (see `is_fan_call`).
+/// Un-box a freshly-boxed closure LITERAL back to a raw `impl Fn`
+/// (`RcWrap(Lambda|FnRef)` → `Lambda|FnRef`). Used only where a closure must be a
+/// bare `impl Fn`: a FUSED `IterChain` step (`.iter().map(move |x| …)`) and a
+/// `fan.*` arg (threads need `Send + Sync`). Everywhere else a closure stays
+/// `Rc<dyn Fn>` — the runtime HOFs take `Rc<dyn Fn>` directly, so no consumed/
+/// value distinction and no per-API allow-list is needed. A non-literal stays
+/// as-is (a stored `Rc<dyn Fn>` is already what every non-fused consumer wants).
+fn unbox_consumed(e: &mut IrExpr) -> bool {
+    if let IrExprKind::RcWrap { expr, .. } = &mut e.kind {
+        if matches!(&expr.kind, IrExprKind::Lambda { .. } | IrExprKind::FnRef { .. }) {
+            let inner = std::mem::replace(expr.as_mut(), unit_ir());
+            *e = inner;
+            return true;
+        }
+    }
+    false
+}
+
+/// Top-down walk: recurse into children boxing every closure literal by default
+/// (`box_node`), then — for a combinator / fan node — un-box its DIRECT consumed
+/// closure args. Un-boxing (rather than clearing `box_here`) keeps nesting exact:
+/// a closure STORED inside a consumed lambda's body stays boxed.
 fn box_closures_expr(expr: IrExpr, box_here: bool, changed: &mut bool) -> IrExpr {
-    let child_box = !is_fan_call(&expr);
+    // Clear box_here for a `fan.*` call's WHOLE subtree: its thunks run on threads
+    // and must stay raw `impl Fn + Send + Sync` — a boxed `Rc<dyn Fn>` is neither.
+    // This reaches thunks nested in a LIST arg (`fan.race([() => …, () => …])`),
+    // which an un-box of only the direct args would miss. Combinators are NOT
+    // cleared: they take `Rc<dyn Fn>` directly, so their closures stay boxed (only
+    // fused IterChain steps are un-boxed, in box_node).
+    let child_box = box_here && !is_fan_call(&expr);
     let mut e = expr.map_children(&mut |c| box_closures_expr(c, child_box, changed));
     if box_here {
         if box_node(&mut e) { *changed = true; }
@@ -122,120 +147,57 @@ fn box_closures_expr(expr: IrExpr, box_here: bool, changed: &mut bool) -> IrExpr
 fn box_node(expr: &mut IrExpr) -> bool {
     use almide_lang::types::Ty;
     let node_ty = expr.ty.clone();
-    match &mut expr.kind {
-        // Uniform containers force every element to one type → box Fn positions.
-        IrExprKind::List { elements } => match list_elem_ty(&node_ty) {
-            Some(elem) if ty_contains_fn(elem) => {
-                let mut c = false;
-                for el in elements.iter_mut() { c |= box_fn_in_value(el, elem); }
-                c
+    // UNIFORM-REPR: box every fresh closure LITERAL by default — a closure value
+    // is `Rc<dyn Fn>` everywhere it is stored/passed. Closures CONSUMED in place
+    // (combinators / IterChain / fan, which take `impl Fn`) are un-boxed below at
+    // their consumer node — that is exact for nesting (a closure STORED inside a
+    // consumed lambda's body stays boxed), unlike subtree-wide box_here clearing.
+    if matches!(&expr.kind, IrExprKind::Lambda { .. } | IrExprKind::FnRef { .. })
+        && matches!(&node_ty, Ty::Fn { .. })
+    {
+        // A top-level `fn` used as a VALUE (`FnRef`) is a fn item, not `Rc<dyn Fn>`
+        // — box it too so it unifies with closures in the same slot
+        // (`[dbl, (x) => …]`, a user-HOF arg). As a CALLEE it lives in `CallTarget`,
+        // not as an expr node, so a direct call `dbl(x)` is never boxed.
+        return box_closure_value(expr, &node_ty);
+    }
+    // fan.* closures run on threads and must stay RAW (`Send + Sync`); `Rc<dyn Fn>`
+    // is neither. fan is still a `Module{fan}` / `RuntimeCall{fan}` call here
+    // (FanLowering runs after this pass), so un-box its consumed closure args.
+    if is_fan_call(expr) {
+        let mut c = false;
+        match &mut expr.kind {
+            IrExprKind::Call { args, .. } | IrExprKind::RuntimeCall { args, .. } => {
+                for a in args.iter_mut() { c |= unbox_consumed(a); }
             }
-            _ => false,
-        },
-        IrExprKind::MapLiteral { entries } => match map_value_ty(&node_ty) {
-            Some(v) if ty_contains_fn(v) => {
-                let mut c = false;
-                for (_, val) in entries.iter_mut() { c |= box_fn_in_value(val, v); }
-                c
-            }
-            _ => false,
-        },
-        // Control-flow joins whose RESULT is itself a closure → box each branch.
-        IrExprKind::If { then, else_, .. } if matches!(&node_ty, Ty::Fn { .. }) => {
-            let a = box_closure_value(then, &node_ty);
-            let b = box_closure_value(else_, &node_ty);
-            a || b
+            _ => {}
         }
-        IrExprKind::Match { arms, .. } if matches!(&node_ty, Ty::Fn { .. }) => {
+        return c;
+    }
+    // Storage of a closure (in a list/map/tuple/record/field/`if`-`match` join/
+    // `??` fallback) needs NO rule — the default arm already boxed every closure
+    // literal where it sits, and a `Var` holding a closure is already
+    // `Rc<dyn Fn>`. Runtime HOFs take `Rc<dyn Fn>` too, so a boxed closure passed
+    // to `almide_rt_list_map`/`_fold`/`unwrap_or`/… needs NO un-box. The ONLY
+    // place a raw `impl Fn` is required is a FUSED `IterChain` step (below) and a
+    // `fan.*` arg (above). This REPLACES the former ~14 per-position boxing rules
+    // (and the consumed-vs-value allow-list) with: box by default, un-box only
+    // the two structural bare-closure sites.
+    match &mut expr.kind {
+        // Fused combinator chain: un-box every consumed step lambda. Closures the
+        // map PRODUCES (nested in the body) are already boxed by the default arm.
+        IrExprKind::IterChain { steps, .. } => {
             let mut c = false;
-            for arm in arms.iter_mut() { c |= box_closure_value(&mut arm.body, &node_ty); }
+            for step in steps.iter_mut() {
+                match step {
+                    IterStep::Map { lambda } | IterStep::Filter { lambda }
+                    | IterStep::FlatMap { lambda } | IterStep::FilterMap { lambda } => {
+                        c |= unbox_consumed(lambda);
+                    }
+                }
+            }
             c
         }
-        IrExprKind::UnwrapOr { fallback, expr } => {
-            // Box the `??` fallback when the result is itself a closure — directly
-            // `Fn`, or via the unwrap target's `Option[Fn]` element.
-            let fn_ty = match &node_ty {
-                Ty::Fn { .. } => Some(node_ty.clone()),
-                _ => expr.ty.option_inner().filter(|t| matches!(t, Ty::Fn { .. })),
-            };
-            match fn_ty {
-                Some(ft) => box_closure_value(fallback, &ft),
-                None => false,
-            }
-        }
-        // `map.get_or` / `list.get_or` reaching codegen as an un-lowered module
-        // call (the `?? `-over-`map.get` fusion path): the call's type IS the
-        // value type, so box the default closure to match the (boxed) stored
-        // values. Other stdlib closure-storers arrive as `RuntimeCall` below.
-        IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
-            if func.as_str() == "get_or"
-                && matches!(module.as_str(), "map" | "list")
-                && matches!(&node_ty, Ty::Fn { .. }) =>
-        {
-            match args.last_mut() {
-                Some(default) => box_closure_value(default, &node_ty),
-                None => false,
-            }
-        }
-        IrExprKind::RuntimeCall { symbol, args } => {
-            let sym = symbol.as_str();
-            // (1) Value-storing calls: box the inserted/set closure against the
-            //     receiver's element/value type (the value lives outside any
-            //     literal, so the container node rules above can't reach it).
-            if let Some(vidx) = match sym {
-                "almide_rt_list_push" => Some(1usize),
-                "almide_rt_map_insert" | "almide_rt_map_set" | "almide_rt_map_get_or" => Some(2),
-                _ => None,
-            } {
-                if args.len() <= vidx { return false; }
-                let elem = match sym {
-                    "almide_rt_list_push" => list_elem_ty(&args[0].ty).cloned(),
-                    _ => map_value_ty(&args[0].ty).cloned(),
-                };
-                return match elem {
-                    Some(ref et) if matches!(et, Ty::Fn { .. }) => box_closure_value(&mut args[vidx], et),
-                    _ => false,
-                };
-            }
-            // (2) Closure-collecting `list.map`: the mapper's RESULT is the
-            //     collected element. When that element contains a closure, box
-            //     the Fn positions in the mapper's body so the produced list (and
-            //     a `map.from_list` of it) is uniformly `Rc<dyn Fn>` — the same
-            //     as a literal. (StdlibLowering left this as a runtime call, not
-            //     a fused IterChain, when the result feeds `map.from_entries`.)
-            if sym == "almide_rt_list_map" {
-                if let Some(mapper) = args.get_mut(1) {
-                    if let IrExprKind::Lambda { body, .. } = &mut mapper.kind {
-                        // Use the mapper body's OWN type as the collected element
-                        // type: the `list.map` result element may still be an
-                        // unresolved typevar at this point (e.g. when the closure
-                        // type comes from an inner `let clo: (Int)->Int`), whereas
-                        // the body type carries the resolved closure.
-                        let et = body.ty.clone();
-                        if ty_contains_fn(&et) {
-                            return box_fn_in_value(body, &et);
-                        }
-                    }
-                }
-            }
-            false
-        }
-        // Fused form of `list.map` (when StdlibLowering produced an IterChain):
-        // same rule as the runtime-call form — box the final map lambda's result.
-        IrExprKind::IterChain { steps, .. } => match list_elem_ty(&node_ty) {
-            Some(elem) if ty_contains_fn(elem) => {
-                let elem = elem.clone();
-                match steps.last_mut() {
-                    Some(IterStep::Map { lambda }) => {
-                        if let IrExprKind::Lambda { body, .. } = &mut lambda.kind {
-                            box_fn_in_value(body, &elem)
-                        } else { false }
-                    }
-                    _ => false,
-                }
-            }
-            _ => false,
-        },
         _ => false,
     }
 }
@@ -252,23 +214,11 @@ fn box_fn_in_value(value: &mut IrExpr, expected: &almide_lang::types::Ty) -> boo
         return box_fn_in_value(tail, expected);
     }
     match expected {
-        // In a container-STORING position, a `Var` holding a closure (a
-        // let-bound closure placed into a tuple/list/map) must also be boxed —
-        // unlike a control-flow join, where `box_closure_value` leaves a `Var`
-        // branch alone. Already-`RcWrap`'d values are left as-is.
-        Ty::Fn { .. } => match &value.kind {
-            IrExprKind::Var { .. } => {
-                let inner = std::mem::replace(value, unit_ir());
-                *value = IrExpr {
-                    ty: inner.ty.clone(),
-                    span: inner.span,
-                    kind: IrExprKind::RcWrap { expr: Box::new(inner), cast_ty: Some(Box::new(expected.clone())) },
-                    def_id: None,
-                };
-                true
-            }
-            _ => box_closure_value(value, expected),
-        },
+        // UNIFORM-REPR SPIKE: a `Var` of `Ty::Fn` is ALREADY `Rc<dyn Fn>` (boxed
+        // at its binding / it is an `Rc<dyn Fn>` parameter), so storing it needs no
+        // re-box — wrapping it again would yield `Rc<Rc<dyn Fn>>` (the a6 over-box).
+        // Only fresh literals (Lambda, via control-flow joins) are boxed here.
+        Ty::Fn { .. } => box_closure_value(value, expected),
         Ty::Tuple(comps) => {
             if let IrExprKind::Tuple { elements } = &mut value.kind {
                 if elements.len() == comps.len() {
@@ -317,7 +267,7 @@ fn box_closure_value(slot: &mut IrExpr, fn_ty: &almide_lang::types::Ty) -> bool 
         IrExprKind::Block { expr: Some(tail), .. } => {
             return box_closure_value(tail, fn_ty);
         }
-        IrExprKind::Lambda { .. } => { /* fall through to wrap */ }
+        IrExprKind::Lambda { .. } | IrExprKind::FnRef { .. } => { /* fall through to wrap */ }
         _ => return false,
     }
     let inner = std::mem::replace(slot, unit_ir());

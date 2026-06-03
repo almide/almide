@@ -24,8 +24,11 @@ pub fn almide_rt_test_assert_some<T: std::fmt::Debug>(o: &Option<T>) {
     assert!(o.is_some(), "assert_some failed: got None");
 }
 
-pub fn almide_rt_test_assert_throws<F: FnOnce() + std::panic::UnwindSafe>(f: F, expected: &str) {
-    let result = std::panic::catch_unwind(f);
+pub fn almide_rt_test_assert_throws(f: std::rc::Rc<dyn Fn()>, expected: &str) {
+    // `Rc<dyn Fn>` is neither `FnOnce` nor `UnwindSafe`; wrap it in a fresh
+    // closure (FnOnce) and assert unwind-safety — the closure body is expected to
+    // panic, and its captured `Rc` is only read, so the catch is sound.
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || f()));
     match result {
         Err(panic) => {
             let msg = panic.downcast_ref::<String>().map(|s| s.as_str())
