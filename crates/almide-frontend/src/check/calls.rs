@@ -45,25 +45,29 @@ impl Checker {
                     self.check_constructor_args(name, &case, &arg_tys);
                     // Instantiate parent type's generics with fresh inference vars
                     let generic_args = self.instantiate_type_generics(type_name.as_str());
-                    // Unify constructor payload types with arg types to resolve generic vars.
-                    // e.g., Leaf(1) where Leaf(T) → unify T=?fresh with Int → ?fresh=Int
-                    if !generic_args.is_empty() {
-                        if let Some(ty_def) = self.env.types.get(&sym(type_name.as_str())).cloned() {
+                    // Unify each constructor arg with its payload type. For a GENERIC
+                    // variant this resolves the parent's vars (Leaf(1) → T=Int); for
+                    // ANY variant it also propagates a CONCRETE payload type — e.g. a
+                    // function payload `Tick((Unit) -> Int)` — into a lambda arg's
+                    // otherwise-unconstrained params. Without it a closure payload's
+                    // unused param stays unresolved and the WASM closure signature
+                    // mismatched the call site (an indirect-call trap). Was gated on
+                    // `!generic_args.is_empty()`, so non-generic variants were skipped.
+                    let subst: std::collections::HashMap<almide_base::intern::Sym, Ty> = if !generic_args.is_empty() {
+                        self.env.types.get(&sym(type_name.as_str())).cloned().map(|ty_def| {
                             let mut type_var_names = Vec::new();
                             crate::types::TypeEnv::collect_typevars(&ty_def, &mut type_var_names);
-                            // Build substitution map: named TypeVar name → fresh inference var
-                            let subst: std::collections::HashMap<almide_base::intern::Sym, Ty> = type_var_names.iter()
-                                .zip(generic_args.iter())
+                            type_var_names.iter().zip(generic_args.iter())
                                 .map(|(tv, fresh)| (*tv, fresh.clone()))
-                                .collect();
-                            // Get expected payload types for this case
-                            if let crate::types::VariantPayload::Tuple(expected) = &case.payload {
-                                for (aty, ety) in arg_tys.iter().zip(expected.iter()) {
-                                    // Substitute named TypeVars with fresh inference vars, then unify
-                                    let substituted = subst_ty(ety, &subst);
-                                    self.unify_infer(aty, &substituted);
-                                }
-                            }
+                                .collect()
+                        }).unwrap_or_default()
+                    } else {
+                        std::collections::HashMap::new()
+                    };
+                    if let crate::types::VariantPayload::Tuple(expected) = &case.payload {
+                        for (aty, ety) in arg_tys.iter().zip(expected.iter()) {
+                            let substituted = subst_ty(ety, &subst);
+                            self.unify_infer(aty, &substituted);
                         }
                     }
                     Ty::Named(type_name, generic_args)
