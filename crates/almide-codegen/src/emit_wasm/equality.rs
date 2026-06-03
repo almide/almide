@@ -231,6 +231,7 @@ impl FuncCompiler<'_> {
         let a = self.scratch.alloc_i32();
         let b = self.scratch.alloc_i32();
         let i = self.scratch.alloc_i32();
+        let matched = self.scratch.alloc_i32();
         let elem_size = values::byte_size(elem_ty);
         wasm!(self.func, {
             local_set(b); // b
@@ -247,6 +248,7 @@ impl FuncCompiler<'_> {
               else_;
                 // Compare element by element
                 i32_const(0); local_set(i); // i
+                i32_const(1); local_set(matched); // 1 until a mismatch is found
                 block_empty; loop_empty;
                   local_get(i); local_get(a); i32_load(0); i32_ge_u; br_if(1);
                   // Load a[i]
@@ -266,16 +268,20 @@ impl FuncCompiler<'_> {
         wasm!(self.func, {
                   i32_eqz; // not equal?
                   if_empty;
-                    i32_const(0); return_;
+                    // Mismatch: set result 0 and break out of the loop+block.
+                    // (NOT `return_` — that returned 0 from the ENCLOSING function,
+                    // corrupting its contract whenever a List/Tuple/Record of
+                    // unequal heap elements like String was compared.)
+                    i32_const(0); local_set(matched); br(2);
                   end;
                   local_get(i); i32_const(1); i32_add; local_set(i);
                   br(0);
                 end; end;
-                // All elements matched
-                i32_const(1);
+                local_get(matched);
               end;
             end;
         });
+        self.scratch.free_i32(matched);
         self.scratch.free_i32(i);
         self.scratch.free_i32(b);
         self.scratch.free_i32(a);
@@ -370,7 +376,13 @@ impl FuncCompiler<'_> {
             local_set(b); // b
             local_set(a); // a
         });
-        // Compare each field, short-circuit on mismatch
+        // AND every field's deep eq. NOT a `return_` short-circuit — that returned
+        // from the ENCLOSING function and corrupted its contract on a mismatch
+        // (e.g. a tuple with an unequal String element). Equality has no side
+        // effects, so evaluating all fields and AND-ing is equivalent and safe.
+        if elems.is_empty() {
+            wasm!(self.func, { i32_const(1); });
+        }
         let mut offset: u32 = 0;
         for (i, elem_ty) in elems.iter().enumerate() {
             let elem_size = values::byte_size(elem_ty);
@@ -380,13 +392,11 @@ impl FuncCompiler<'_> {
             self.emit_load_at(elem_ty, offset);
             let elem_clone = elem_ty.clone();
             self.emit_eq_typed(&elem_clone);
-            if i < elems.len() - 1 {
-                // Short-circuit: if not equal, return 0
-                wasm!(self.func, { i32_eqz; if_empty; i32_const(0); return_; end; });
+            if i > 0 {
+                wasm!(self.func, { i32_and; });
             }
             offset += elem_size;
         }
-        // If we reach here, all fields matched. Last comparison result is on stack.
         self.scratch.free_i32(b);
         self.scratch.free_i32(a);
     }
@@ -399,6 +409,11 @@ impl FuncCompiler<'_> {
             local_set(b);
             local_set(a);
         });
+        // AND every field's deep eq (see emit_tuple_eq_deep — `return_` corrupted
+        // the enclosing function on a mismatch).
+        if fields.is_empty() {
+            wasm!(self.func, { i32_const(1); });
+        }
         let mut offset: u32 = 0;
         for (i, (_, field_ty)) in fields.iter().enumerate() {
             let field_size = values::byte_size(field_ty);
@@ -408,8 +423,8 @@ impl FuncCompiler<'_> {
             self.emit_load_at(field_ty, offset);
             let field_clone = field_ty.clone();
             self.emit_eq_typed(&field_clone);
-            if i < fields.len() - 1 {
-                wasm!(self.func, { i32_eqz; if_empty; i32_const(0); return_; end; });
+            if i > 0 {
+                wasm!(self.func, { i32_and; });
             }
             offset += field_size;
         }
