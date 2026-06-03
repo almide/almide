@@ -1,6 +1,8 @@
 # WASM Remaining 15 Skips — Fix Roadmap
 
-> Current: 225/240 pass, 0 fail, 15 skip
+> **SUPERSEDED (2026-06-04)** — the "225/240" below is a historical milestone snapshot, NOT current state. On origin/develop the full `spec/` suite is green on both targets: 241/241 files native, 233/233 wasm-eligible (8 intentional `wasm:skip`), 2807 test cases all passing. Do not cite "225/240" as a current regression — see `docs/roadmap/active/determinism-belt.md` and the closure-repr convergence (uniform `Rc<dyn Fn>`, PR #345, on develop's first-parent mainline).
+>
+> Historical: 225/240 pass, 0 fail, 15 skip
 
 ## Skip Categories
 
