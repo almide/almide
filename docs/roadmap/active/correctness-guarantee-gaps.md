@@ -163,3 +163,38 @@ Quick wins first (small effort, high leverage):
     POSTCONDITION を踏むが warning 止まり。「曖昧なら型エラー」にするには
     constraint solving 後の到達可能性解析（その TypeVar が本当に決まらない
     か／後で決まるか）の線引き設計が要る。§5 の格上げと同時に行うのが筋。
+
+  # 12. Status snapshot (2026-06-03) — fan.* cross-target codegen + semantics
+
+  このラウンドで閉じたギャップ（build-correctness: well-typed fan source → 正しい native binary）:
+  - **native fan thunk codegen の E0308 / E0277**: race/any/settle に相異なる
+    キャプチャを持つ複数 thunk を渡すと、生成 Rust が `Vec<impl Fn>` に
+    別個のクロージャ型を詰めて E0308（"no two closures have the same type"）。
+    fan.map にクロージャ VALUE（uniform repr の `Rc<dyn Fn>`、!Send/!Sync）を
+    渡すと E0277。WASM は table-dispatch で両方とも正しく動くため、value-blind
+    な WASM-only spec がこの native build 破綻を隠していた。修正（20739311）:
+    - box パスが fan thunk を un-box する代わりに、race/any/settle は
+      `Box<dyn Fn() -> _ + Send + Sync>` で box する。`Box<dyn Fn + Send + Sync>`
+      自身が `Fn + Send + Sync` なので runtime の `Vec<impl Fn + Send + Sync>`
+      sig は無変更のまま、異種キャプチャ thunk が単一の要素型に統一される。
+      IR `RcWrap` に `wrap: FnBox`（`Rc` | `BoxSendSync`）を追加。
+    - fan.map は `Rc<dyn Fn>` を受けて sequential 実行（thread を張らない）。
+      これでクロージャ VALUE も通る（並列性は失うが結果は同一）。
+  - capturing-thunk の値検証 spec を追加（baac55c3）。CI の
+    `almide test spec/ --target rust` が native コンパイル経路を恒久的に踏む
+    ようになり、この種の native build 破綻が再発しても検出される。
+
+  残る完全性ギャップ（このラウンド未着手 — build ではなく cross-target **SEMANTIC** 乖離）:
+  - **fan.race / fan.any の勝者が target で非等価**: native は thread を張って
+    wall-clock 最速（非決定的）、WASM は list 順（race は fns[0] のみ実行、any は
+    list 順で最初の OK）。同一 well-typed source が target で異なる勝者を返しうる。
+    現状は回帰テストを `assert(a or b)` で非決定性許容にして整合させただけ。筋は
+    両 target を同一の決定的セマンティクス（例: 並列実行は保ったまま list 順で
+    最初の OK を勝者にする）へ揃えること。
+  - **fan.timeout が WASM では no-op**: native は thread + recv_timeout で本物の
+    タイムアウト、WASM は ms を無視して thunk を完走。長時間 thunk で挙動が乖離。
+  - **fan.map の err 時挙動が乖離**: native は `.unwrap()` で panic、WASM は err を
+    包んで enclosing fn の外へ伝播（return）。err を返す thunk で観測差。
+  いずれも build は通る（型は付く）が「同一ソースが target で別挙動」を起こす
+  cross-target 等価性ギャップ。[determinism-belt.md](determinism-belt.md) の枠で
+  扱うのが妥当。
