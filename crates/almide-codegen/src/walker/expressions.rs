@@ -844,7 +844,7 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         IrExprKind::BoxNew { expr: inner } => {
             format!("Box::new({})", render_expr(ctx, inner))
         }
-        IrExprKind::RcWrap { expr: inner, cast_ty } => {
+        IrExprKind::RcWrap { expr: inner, cast_ty, wrap } => {
             // A BOXED closure literal needs annotated params (the `as` cast does
             // not back-infer them). Wrap in parens so a boxed-then-CALLED closure
             // `(Rc::new(..) as T)(args)` parses (a cast can't be followed by `(`).
@@ -853,11 +853,23 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
             } else {
                 render_expr(ctx, inner)
             };
-            if let Some(ty) = cast_ty {
-                let rc_type = super::helpers::render_type_rc_fn(ctx, ty);
-                format!("(std::rc::Rc::new({}) as {})", s, rc_type)
-            } else {
-                format!("std::rc::Rc::new({})", s)
+            match wrap {
+                // fan.race/any/settle thunk: `Box<dyn Fn + Send + Sync>` is itself
+                // `Fn + Send + Sync`, so heterogeneous capturing thunks unify in the
+                // runtime's `Vec<impl Fn() -> _ + Send + Sync>` (fixes E0308).
+                almide_ir::FnBox::BoxSendSync => {
+                    let ty = cast_ty.as_deref().expect("fan thunk RcWrap always carries a Fn cast_ty");
+                    let box_type = super::helpers::render_type_box_fn(ctx, ty, "Send + Sync");
+                    format!("(Box::new({}) as {})", s, box_type)
+                }
+                almide_ir::FnBox::Rc => {
+                    if let Some(ty) = cast_ty {
+                        let rc_type = super::helpers::render_type_rc_fn(ctx, ty);
+                        format!("(std::rc::Rc::new({}) as {})", s, rc_type)
+                    } else {
+                        format!("std::rc::Rc::new({})", s)
+                    }
+                }
             }
         }
         IrExprKind::RustMacro { name, args } => {

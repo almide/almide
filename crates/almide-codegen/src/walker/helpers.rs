@@ -145,6 +145,24 @@ pub fn render_type_boxed_fn(ctx: &RenderContext, ty: &Ty) -> String {
     }
 }
 
+/// Render a `fan.*` thread-thunk's boxed trait-object type:
+/// `Box<dyn Fn(params) -> ret + {bounds}>` (`bounds` = `"Send + Sync"`).
+///
+/// `Box<dyn Fn + Send + Sync>` *itself* implements `Fn + Send + Sync`, so a boxed
+/// thunk slots into the runtime's `Vec<impl Fn() -> _ + Send + Sync>` parameter
+/// with no signature change — while distinct CAPTURING closures, which cannot
+/// share one `impl Fn` type (E0308), unify as one trait-object element type.
+pub fn render_type_box_fn(ctx: &RenderContext, ty: &Ty, bounds: &str) -> String {
+    match ty {
+        Ty::Fn { params, ret } => {
+            let params_str = params.iter().map(|p| super::types::render_type(ctx, p)).collect::<Vec<_>>().join(", ");
+            let ret_str = super::types::render_type(ctx, ret);
+            format!("Box<dyn Fn({}) -> {} + {}>", params_str, ret_str, bounds)
+        }
+        _ => super::types::render_type(ctx, ty),
+    }
+}
+
 /// True if `ty` mentions a function type anywhere (directly or nested).
 pub(super) fn ty_mentions_fn(ty: &Ty) -> bool {
     match ty {

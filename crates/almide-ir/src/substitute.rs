@@ -184,8 +184,8 @@ pub fn substitute_var_in_expr(expr: &IrExpr, var: VarId, replacement: &IrExpr) -
             kind: IrExprKind::BoxNew { expr: Box::new(sub(inner)) },
             ty: expr.ty.clone(), span: expr.span, def_id: expr.def_id,
         },
-        IrExprKind::RcWrap { expr: inner, cast_ty } => IrExpr {
-            kind: IrExprKind::RcWrap { expr: Box::new(sub(inner)), cast_ty: cast_ty.clone() },
+        IrExprKind::RcWrap { expr: inner, cast_ty, wrap } => IrExpr {
+            kind: IrExprKind::RcWrap { expr: Box::new(sub(inner)), cast_ty: cast_ty.clone(), wrap: *wrap },
             ty: expr.ty.clone(), span: expr.span, def_id: expr.def_id,
         },
         IrExprKind::ToVec { expr: inner } => IrExpr {

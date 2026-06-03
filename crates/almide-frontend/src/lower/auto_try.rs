@@ -313,6 +313,19 @@ fn insert_try_stmt(stmt: IrStmt) -> IrStmt {
     let kind = match stmt.kind {
         IrStmtKind::Bind { var, mutability, ty, value } => {
             let mut new_value = insert_try(value, false);
+            // A binding explicitly annotated `Result[..]` keeps its Result. The
+            // auto-? top-level wrap unwraps a result-returning call to its ok
+            // type, which would leave `let r: Result[..] = call()` bound to a bare
+            // value — so `r ?? d` / `r == ok(v)` (e.g. on a `fan.timeout` result)
+            // no longer type-check. Undo that wrap when the declared type is Result.
+            if ty.is_result() {
+                let nv_ty = new_value.ty.clone();
+                let nv_span = new_value.span;
+                new_value = match new_value.kind {
+                    IrExprKind::Try { expr: inner } if inner.ty.is_result() => *inner,
+                    other => IrExpr { kind: other, ty: nv_ty, span: nv_span, def_id: None },
+                };
+            }
             if !matches!(&new_value.kind, IrExprKind::Try { .. })
                 && is_result_value(&new_value)
                 && !ty.is_result()
