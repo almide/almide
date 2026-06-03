@@ -549,8 +549,20 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         }
         IrExprKind::ResultOk { expr: inner } => {
             let inner_s = render_expr_owned(ctx, inner);
-            ctx.templates.render_with("ok_expr", None, &[], &[("inner", inner_s.as_str())])
-                .unwrap_or_else(|| format!("Ok({})", inner_s))
+            // A bare `Ok(x)` is `Result<TyOf(x), _>` — the error type stays open
+            // for rustc to infer from context. That fails (E0282) when the
+            // surrounding call leaves E unconstrained, e.g.
+            // `result.unwrap_or(ok(10), -1)`: `unwrap_or<T, E>` names E only in its
+            // `Result<T, E>` parameter, so nothing pins it. The checker already
+            // resolved the full Result type (`expr.ty`), so emit a turbofish that
+            // carries it — defaulting a still-unconstrained error to String
+            // (Almide's conventional error type; mirrors the render_type fix).
+            if let Some((ok_s, err_s)) = result_turbofish_args(ctx, &expr.ty) {
+                format!("Ok::<{}, {}>({})", ok_s, err_s, inner_s)
+            } else {
+                ctx.templates.render_with("ok_expr", None, &[], &[("inner", inner_s.as_str())])
+                    .unwrap_or_else(|| format!("Ok({})", inner_s))
+            }
         }
         IrExprKind::ResultErr { expr: inner } => {
             let inner_str = render_expr(ctx, inner);
@@ -1200,6 +1212,26 @@ fn render_method_call_full(ctx: &RenderContext, object: &IrExpr, method: &str, a
 }
 
 /// Render an enum constructor call with optional Box wrapping for recursive types.
+/// For a `Result<Ok, Err>` type, render the `(ok, err)` turbofish arguments used
+/// to pin a `Ok(..)` / `Err(..)` constructor's phantom type parameters. The error
+/// type defaults to `String` when still unresolved (`Unknown` or an inference
+/// typevar), exactly as the `render_type` Result arm does for type positions
+/// (dv_13). Returns `None` for a non-Result type, leaving the bare constructor.
+fn result_turbofish_args(ctx: &RenderContext, ty: &Ty) -> Option<(String, String)> {
+    match ty {
+        Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => {
+            let ok_s = render_type(ctx, &args[0]);
+            let err_s = match &args[1] {
+                Ty::Unknown => "String".to_string(),
+                Ty::TypeVar(n) if n.starts_with('?') => "String".to_string(),
+                _ => render_type(ctx, &args[1]),
+            };
+            Some((ok_s, err_s))
+        }
+        _ => None,
+    }
+}
+
 fn render_enum_constructor(ctx: &RenderContext, ctor_name: &str, enum_name: &str, args: &[IrExpr]) -> String {
     let boxed_args: Vec<String> = args.iter().enumerate().map(|(i, a)| {
         let rendered = render_expr(ctx, a);
