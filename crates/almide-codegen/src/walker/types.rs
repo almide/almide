@@ -46,9 +46,18 @@ pub fn render_type(ctx: &RenderContext, ty: &Ty) -> String {
         Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => {
             let (ok, err) = (&args[0], &args[1]);
             let ok_s = render_type(ctx, ok);
-            let err_s = render_type(ctx, err);
+            // An UNCONSTRAINED error type (e.g. `ok(7)` whose `?E` is never forced
+            // concrete) renders as `_`, which rustc cannot infer (E0283). Default
+            // it to `String` — Almide's conventional error type (`effect fn` →
+            // `Result<_, String>`). A real generic error param (named typevar) is
+            // left untouched.
+            let err_s = match err {
+                Ty::Unknown => "String".to_string(),
+                Ty::TypeVar(n) if n.starts_with('?') => "String".to_string(),
+                _ => render_type(ctx, err),
+            };
             ctx.templates.render_with("type_result", None, &[], &[("ok", ok_s.as_str()), ("err", err_s.as_str())])
-                .unwrap_or_else(|| format!("Result<{}, {}>", render_type(ctx, ok), render_type(ctx, err)))
+                .unwrap_or_else(|| format!("Result<{}, {}>", ok_s, err_s))
         }
         Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 => {
             let inner = &args[0];
