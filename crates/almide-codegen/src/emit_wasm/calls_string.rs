@@ -250,6 +250,10 @@ impl FuncCompiler<'_> {
                 self.emit_expr(&args[0]);
                 wasm!(self.func, { call(self.emitter.rt.string.chars); });
             }
+            "run_length_encode" => {
+                self.emit_expr(&args[0]);
+                wasm!(self.func, { call(self.emitter.rt.string.run_length_encode); });
+            }
             "lines" => {
                 self.emit_expr(&args[0]);
                 wasm!(self.func, { call(self.emitter.rt.string.lines); });

@@ -85,6 +85,22 @@ impl FuncCompiler<'_> {
                 self.emit_result_eq_deep(&ok_ty, &err_ty);
             }
 
+            // Map/Set are structural: two maps are equal iff same size and every
+            // (k,v) of one is present with an equal value in the other; sets the
+            // same on keys. WASM previously fell through to `i32_eq` (pointer
+            // identity) so two structurally-equal maps built independently
+            // compared unequal — a real divergence from native.
+            Ty::Applied(TypeConstructorId::Map, args) => {
+                let key_ty = args.first().cloned().unwrap_or(Ty::Int);
+                let val_ty = args.get(1).cloned().unwrap_or(Ty::Int);
+                self.emit_map_eq_deep(&key_ty, &val_ty);
+            }
+
+            Ty::Applied(TypeConstructorId::Set, args) => {
+                let elem_ty = args.first().cloned().unwrap_or(Ty::Int);
+                self.emit_set_eq_deep(&elem_ty);
+            }
+
             Ty::Tuple(elems) => {
                 if elems.iter().all(|t| self.is_value_type(t)) {
                     let size: u32 = elems.iter().map(|t| values::byte_size(t)).sum();
@@ -283,6 +299,196 @@ impl FuncCompiler<'_> {
         });
         self.scratch.free_i32(matched);
         self.scratch.free_i32(i);
+        self.scratch.free_i32(b);
+        self.scratch.free_i32(a);
+    }
+
+    /// Structural map equality (Swiss table): [a_ptr, b_ptr] → i32.
+    /// Equal iff same size and every (k,v) of `a` is present in `b` with an
+    /// equal value. Iterates a's occupied slots and probes b for each key,
+    /// mirroring the `get` probe loop, then compares values recursively.
+    fn emit_map_eq_deep(&mut self, key_ty: &Ty, val_ty: &Ty) {
+        use super::engine::layout::{SWISS_MAP, map as lm};
+        let map_cap_off = self.emitter.layout_reg.fixed_offset(SWISS_MAP, lm::CAP);
+        let map_tags_off = self.emitter.layout_reg.fixed_offset(SWISS_MAP, lm::TAGS) as i32;
+        let ks = values::byte_size(key_ty);
+        let vs = values::byte_size(val_ty);
+        let es = ks + vs;
+
+        let a = self.scratch.alloc_i32();
+        let b = self.scratch.alloc_i32();
+        let result = self.scratch.alloc_i32();
+        let acap = self.scratch.alloc_i32();
+        let aeb = self.scratch.alloc_i32();
+        let ai = self.scratch.alloc_i32();
+        let sk32 = self.scratch.alloc_i32();
+        let sk64 = self.scratch.alloc_i64();
+        let bcap = self.scratch.alloc_i32();
+        let beb = self.scratch.alloc_i32();
+        let bidx = self.scratch.alloc_i32();
+        let h2 = self.scratch.alloc_i32();
+        let tg = self.scratch.alloc_i32();
+        let found = self.scratch.alloc_i32();
+
+        wasm!(self.func, {
+            local_set(b);
+            local_set(a);
+            // Same pointer → equal.
+            local_get(a); local_get(b); i32_eq;
+            if_i32; i32_const(1);
+            else_;
+              // Different size → not equal.
+              local_get(a); i32_load(0); local_get(b); i32_load(0); i32_ne;
+              if_i32; i32_const(0);
+              else_;
+                i32_const(1); local_set(result);
+                local_get(a); i32_load(map_cap_off); local_set(acap);
+                local_get(a); i32_const(map_tags_off); i32_add; local_get(acap); i32_add; local_set(aeb);
+                i32_const(0); local_set(ai);
+                block_empty; loop_empty;                                  // [A] a-exit, [B] a-loop
+                  local_get(ai); local_get(acap); i32_ge_u; br_if(1);     // done iterating a
+                  // Skip empty slots in a.
+                  local_get(a); i32_const(map_tags_off); i32_add; local_get(ai); i32_add; i32_load8_u(0); i32_eqz;
+                  if_empty; local_get(ai); i32_const(1); i32_add; local_set(ai); br(1); end;
+                  // Load this entry's key into the search-key register.
+                  local_get(aeb); local_get(ai); i32_const(es as i32); i32_mul; i32_add;
+        });
+        self.emit_key_load(key_ty, 0);
+        self.emit_search_key_store(key_ty, sk32, sk64);
+        // Probe b for the key.
+        wasm!(self.func, {
+                  i32_const(0); local_set(found);
+                  local_get(b); i32_load(map_cap_off); local_set(bcap);
+                  local_get(bcap); i32_eqz;
+                  if_empty; else_;                                        // [D] bcap==0 guard
+                    local_get(b); i32_const(map_tags_off); i32_add; local_get(bcap); i32_add; local_set(beb);
+        });
+        self.emit_search_key_load(key_ty, sk32, sk64);
+        self.emit_hash_key(key_ty);
+        self.emit_h1_h2(bcap, bidx, h2);
+        wasm!(self.func, {
+                    block_empty; loop_empty;                             // [E] probe-block, [F] probe-loop
+                      local_get(b); i32_const(map_tags_off); i32_add; local_get(bidx); i32_add; i32_load8_u(0); local_set(tg);
+                      local_get(tg); i32_eqz; br_if(1);                  // empty slot → key absent
+                      local_get(tg); local_get(h2); i32_eq;
+                      if_empty;                                          // [G] tag matches
+                        local_get(beb); local_get(bidx); i32_const(es as i32); i32_mul; i32_add;
+        });
+        self.emit_key_load(key_ty, 0);
+        self.emit_search_key_load(key_ty, sk32, sk64);
+        self.emit_key_eq(key_ty);
+        wasm!(self.func, {
+                        if_empty; i32_const(1); local_set(found); br(3); end;   // found → exit probe-block
+                      end;
+                      local_get(bidx); i32_const(1); i32_add;
+                      local_get(bcap); i32_const(1); i32_sub; i32_and;
+                      local_set(bidx); br(0);
+                    end; end;                                            // close F, E
+                  end;                                                   // close D
+                  // Key absent → maps differ.
+                  local_get(found); i32_eqz;
+                  if_empty; i32_const(0); local_set(result); br(2); end; // exit a-loop+block
+        });
+        // Compare the values (skip for valueless maps).
+        if vs > 0 {
+            wasm!(self.func, {
+                  local_get(aeb); local_get(ai); i32_const(es as i32); i32_mul; i32_add; i32_const(ks as i32); i32_add;
+            });
+            self.emit_load_at(val_ty, 0);
+            wasm!(self.func, {
+                  local_get(beb); local_get(bidx); i32_const(es as i32); i32_mul; i32_add; i32_const(ks as i32); i32_add;
+            });
+            self.emit_load_at(val_ty, 0);
+            self.emit_eq_typed(val_ty);
+            wasm!(self.func, {
+                  i32_eqz;
+                  if_empty; i32_const(0); local_set(result); br(2); end; // values differ → exit
+            });
+        }
+        wasm!(self.func, {
+                  local_get(ai); i32_const(1); i32_add; local_set(ai); br(0);
+                end; end;                                                // close B, A
+                local_get(result);
+              end;                                                       // close size-if
+            end;                                                         // close sameptr-if
+        });
+        self.scratch.free_i32(found);
+        self.scratch.free_i32(tg);
+        self.scratch.free_i32(h2);
+        self.scratch.free_i32(bidx);
+        self.scratch.free_i32(beb);
+        self.scratch.free_i32(bcap);
+        self.scratch.free_i64(sk64);
+        self.scratch.free_i32(sk32);
+        self.scratch.free_i32(ai);
+        self.scratch.free_i32(aeb);
+        self.scratch.free_i32(acap);
+        self.scratch.free_i32(result);
+        self.scratch.free_i32(b);
+        self.scratch.free_i32(a);
+    }
+
+    /// Structural set equality (dense list, insertion order): [a_ptr, b_ptr] → i32.
+    /// Sets are unsorted, so equal sets may differ in memory layout — compare by
+    /// size + containment (every element of `a` is in `b`) rather than byte-eq.
+    fn emit_set_eq_deep(&mut self, elem_ty: &Ty) {
+        use super::engine::layout::{LIST, list as ll};
+        let data_off = self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32;
+        let es = values::byte_size(elem_ty);
+        let ea_vt = values::ty_to_valtype(elem_ty).unwrap_or(ValType::I32);
+
+        let a = self.scratch.alloc_i32();
+        let b = self.scratch.alloc_i32();
+        let result = self.scratch.alloc_i32();
+        let ai = self.scratch.alloc_i32();
+        let bj = self.scratch.alloc_i32();
+        let found = self.scratch.alloc_i32();
+        let ea = self.scratch.alloc(ea_vt);
+
+        wasm!(self.func, {
+            local_set(b);
+            local_set(a);
+            local_get(a); local_get(b); i32_eq;
+            if_i32; i32_const(1);
+            else_;
+              local_get(a); i32_load(0); local_get(b); i32_load(0); i32_ne;
+              if_i32; i32_const(0);
+              else_;
+                i32_const(1); local_set(result);
+                i32_const(0); local_set(ai);
+                block_empty; loop_empty;                                 // [A] exit, [B] a-loop
+                  local_get(ai); local_get(a); i32_load(0); i32_ge_u; br_if(1);
+                  local_get(a); i32_const(data_off); i32_add; local_get(ai); i32_const(es as i32); i32_mul; i32_add;
+        });
+        self.emit_load_at(elem_ty, 0);
+        wasm!(self.func, {
+                  local_set(ea);
+                  i32_const(0); local_set(found);
+                  i32_const(0); local_set(bj);
+                  block_empty; loop_empty;                               // [C] scan-block, [D] scan-loop
+                    local_get(bj); local_get(b); i32_load(0); i32_ge_u; br_if(1);
+                    local_get(b); i32_const(data_off); i32_add; local_get(bj); i32_const(es as i32); i32_mul; i32_add;
+        });
+        self.emit_load_at(elem_ty, 0);
+        wasm!(self.func, { local_get(ea); });
+        self.emit_eq_typed(elem_ty);
+        wasm!(self.func, {
+                    if_empty; i32_const(1); local_set(found); br(2); end; // found → exit scan-block
+                    local_get(bj); i32_const(1); i32_add; local_set(bj); br(0);
+                  end; end;                                              // close D, C
+                  local_get(found); i32_eqz;
+                  if_empty; i32_const(0); local_set(result); br(2); end; // absent → exit a-loop+block
+                  local_get(ai); i32_const(1); i32_add; local_set(ai); br(0);
+                end; end;                                                // close B, A
+                local_get(result);
+              end;
+            end;
+        });
+        self.scratch.free(ea, ea_vt);
+        self.scratch.free_i32(found);
+        self.scratch.free_i32(bj);
+        self.scratch.free_i32(ai);
+        self.scratch.free_i32(result);
         self.scratch.free_i32(b);
         self.scratch.free_i32(a);
     }

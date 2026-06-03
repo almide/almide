@@ -184,6 +184,7 @@ pub struct StringRuntime {
     pub is_upper: u32,
     pub is_lower: u32,
     pub cmp: u32,
+    pub run_length_encode: u32,
 }
 
 /// Indices of built-in runtime functions.
@@ -432,6 +433,7 @@ impl WasmEmitter {
                     is_whitespace: 0, is_upper: 0, is_lower: 0,
                     cmp: 0,
                     char_count: 0,
+                    run_length_encode: 0,
                 },
                 value_stringify: 0,
                 json_escape_string: 0,

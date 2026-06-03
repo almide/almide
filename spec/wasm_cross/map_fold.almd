@@ -1,0 +1,22 @@
+// Regression: wasm map.fold hardcoded the accumulator local/closure-result as
+// i64, so any non-Int accumulator (String/record/list = i32 ptr, Float = f64)
+// failed wasm validation ("expected i64, found i32"). Now threads the init's
+// actual valtype. Order-independent here (sum is commutative; the String case
+// uses a single-entry map) so this locks in the TYPE fix, not iteration order
+// (which is a separate tracked divergence).
+effect fn main() -> Unit = {
+  var mi: Map[String, Int] = map.new()
+  mi = map.set(mi, "a", 10)
+  mi = map.set(mi, "b", 20)
+  mi = map.set(mi, "c", 30)
+  println(int.to_string(map.fold(mi, 0, (acc, k, v) => acc + v)))
+
+  var mf: Map[String, Float] = map.new()
+  mf = map.set(mf, "x", 1.5)
+  mf = map.set(mf, "y", 2.5)
+  println(float.to_string(map.fold(mf, 0.0, (acc, k, v) => acc + v)))
+
+  var ms: Map[String, String] = map.new()
+  ms = map.set(ms, "k", "v")
+  println(map.fold(ms, "[", (acc, k, v) => acc + k + "=" + v) + "]")
+}

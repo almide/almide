@@ -1,0 +1,15 @@
+// Regression: wasm map.filter walked the map as a dense array but it is a Swiss
+// table — it returned corrupt keys/values or trapped. Rebuilt as a rehash.
+// (Uses len + keyed get, not iteration order, which is a separate divergence.)
+effect fn main() -> Unit = {
+  var m: Map[String, Int] = map.new()
+  m = map.set(m, "a", 1)
+  m = map.set(m, "b", 2)
+  m = map.set(m, "c", 3)
+  m = map.set(m, "d", 4)
+  let f = map.filter(m, (k, v) => v > 2)
+  println(int.to_string(map.len(f)))
+  println(int.to_string(map.get(f, "c") ?? -1))
+  println(int.to_string(map.get(f, "d") ?? -1))
+  println(int.to_string(map.get(f, "a") ?? -99))
+}
