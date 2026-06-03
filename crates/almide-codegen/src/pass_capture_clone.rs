@@ -287,8 +287,20 @@ fn transform_expr(expr: &mut IrExpr, vt: &mut VarTable, scope_vars: &HashSet<Var
         IrExprKind::OptionSome { expr: e } | IrExprKind::ResultOk { expr: e }
         | IrExprKind::ResultErr { expr: e } | IrExprKind::Try { expr: e }
         | IrExprKind::Unwrap { expr: e } | IrExprKind::ToOption { expr: e }
-        | IrExprKind::Clone { expr: e } | IrExprKind::Deref { expr: e } => {
+        | IrExprKind::Clone { expr: e } | IrExprKind::Deref { expr: e }
+        // Single-expr wrappers introduced by earlier passes (BorrowInsertion,
+        // BoxDeref, ToVec materialisation, async). A lambda nested inside one of
+        // these — e.g. `list.join(&list.map(keys, k => …g…), …)` wraps the inner
+        // `map` in `Borrow` — was invisible to the capture-clone walk, so its
+        // captured non-Copy vars never got the pre-clone wrap and a later use of
+        // the var failed to compile (E0382). `replace_vars` already descends these,
+        // so the walk and the rename now agree.
+        | IrExprKind::Borrow { expr: e, .. } | IrExprKind::BoxNew { expr: e }
+        | IrExprKind::ToVec { expr: e } | IrExprKind::Await { expr: e } => {
             if transform_expr(e, vt, scope_vars) { changed = true; }
+        }
+        IrExprKind::RustMacro { args, .. } => {
+            for a in args { if transform_expr(a, vt, scope_vars) { changed = true; } }
         }
         IrExprKind::UnwrapOr { expr: e, fallback: f } => {
             if transform_expr(e, vt, scope_vars) { changed = true; }
@@ -311,6 +323,36 @@ fn transform_expr(expr: &mut IrExpr, vt: &mut VarTable, scope_vars: &HashSet<Var
         IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. }
         | IrExprKind::OptionalChain { expr: object, .. } => {
             if transform_expr(object, vt, scope_vars) { changed = true; }
+        }
+        // A fused iterator chain (produced by stream fusion) hides its step and
+        // collector lambdas from the generic recursion above. Without descending
+        // here, a `move` step closure that captures a non-Copy outer var (e.g. a
+        // map used inside `keys |> map(k => …get(g,k)…)`) never gets the pre-clone
+        // wrap, so the chain moves the var and a later use of it fails to compile
+        // (E0382). Recurse into the source and every embedded lambda. `replace_vars`
+        // already mirrors this shape, so a wrapped lambda's `__cap` renames carry
+        // through correctly.
+        IrExprKind::IterChain { source, steps, collector, .. } => {
+            if transform_expr(source, vt, scope_vars) { changed = true; }
+            for step in steps.iter_mut() {
+                match step {
+                    IterStep::Map { lambda } | IterStep::Filter { lambda }
+                    | IterStep::FlatMap { lambda } | IterStep::FilterMap { lambda } => {
+                        if transform_expr(lambda, vt, scope_vars) { changed = true; }
+                    }
+                }
+            }
+            match collector {
+                IterCollector::Collect => {}
+                IterCollector::Fold { init, lambda } => {
+                    if transform_expr(init, vt, scope_vars) { changed = true; }
+                    if transform_expr(lambda, vt, scope_vars) { changed = true; }
+                }
+                IterCollector::Any { lambda } | IterCollector::All { lambda }
+                | IterCollector::Find { lambda } | IterCollector::Count { lambda } => {
+                    if transform_expr(lambda, vt, scope_vars) { changed = true; }
+                }
+            }
         }
         _ => {}
     }

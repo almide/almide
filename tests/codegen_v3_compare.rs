@@ -190,10 +190,12 @@ fn test_walker_result_divergence() {
         span: None, def_id: None,
     };
 
-    // Rust: Ok(data)
+    // Rust: a turbofish carries the checker-resolved Result type so rustc never
+    // re-infers the phantom error param (which fails as E0282 when the surrounding
+    // call leaves it unconstrained, e.g. `result.unwrap_or(ok(..), default)`).
     let rust_templates = template::rust_templates();
     let rust_ctx = RenderContext::new(&rust_templates, &var_table);
-    assert_eq!(walker::render_expr(&rust_ctx, &ok_expr), "Ok(data)");
+    assert_eq!(walker::render_expr(&rust_ctx, &ok_expr), "Ok::<String, String>(data)");
 
 }
 
