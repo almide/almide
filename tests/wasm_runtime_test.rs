@@ -448,10 +448,17 @@ fn main() -> Unit = {
 
 #[test]
 fn wasm_cross_target_spec() {
-    // Skip if prerequisites unavailable
+    // The cross-target observable-equivalence GATE (ratchet). Every program in
+    // spec/wasm_cross/ must produce byte-identical (stdout, stderr, exit code) on
+    // native and wasm. A `// @xt-allow: <reason + tracking ref>` line marks a
+    // KNOWN / intentional divergence: it is exempt from the equality assertion but
+    // LOGGED, so a divergence is never silently ignored — and once it is fixed the
+    // gate flags the now-stale allow so the entry gets removed. Native is the
+    // reference; native==wasm is a hard invariant, not a "target difference".
     let bin = almide_bin();
     if Command::new(&bin).arg("--version").output().is_err() { return; }
-    if Command::new("node").arg("--version").output().is_err() { return; }
+    // Needs wasmtime to run the wasm command and capture its stderr + exit code.
+    if Command::new("wasmtime").arg("--version").output().is_err() { return; }
 
     let spec_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("spec/wasm_cross");
     if !spec_dir.exists() { return; }
@@ -462,50 +469,49 @@ fn wasm_cross_target_spec() {
         .filter(|e| e.path().extension().map(|x| x == "almd").unwrap_or(false))
         .collect();
     entries.sort_by_key(|e| e.path());
-
-    if entries.is_empty() {
-        return;
-    }
+    if entries.is_empty() { return; }
 
     let mut passed = 0;
-    let mut failed = Vec::new();
+    let mut allowed: Vec<String> = Vec::new();
+    let mut stale: Vec<String> = Vec::new();
+    let mut failed: Vec<String> = Vec::new();
 
     for entry in &entries {
         let path = entry.path();
         let name = path.file_stem().unwrap().to_str().unwrap().to_string();
         let source = std::fs::read_to_string(&path).unwrap();
+        let allow = source.lines().find_map(|l| {
+            l.trim().strip_prefix("// @xt-allow:").map(|r| r.trim().to_string())
+        });
 
-        let rust_out = run_rust(&source);
-        let wasm_result = std::panic::catch_unwind(|| run_wasm(&source));
+        let (rc, rout, rerr) = run_native_capture(&source);
+        let wasm = match std::panic::catch_unwind(|| run_wasm_capture(&source)) {
+            Ok(Some(w)) => w,
+            Ok(None) => return, // wasmtime unavailable mid-run → skip the gate
+            Err(_) => { failed.push(format!("{name}: WASM build/run panicked")); continue; }
+        };
+        let (wc, wout, werr) = wasm;
+        let equal = rc == wc && rout == wout && rerr == werr;
 
-        match wasm_result {
-            Ok(wasm_out) if wasm_out == rust_out => {
-                passed += 1;
-            }
-            Ok(wasm_out) => {
-                failed.push(format!(
-                    "{}: output mismatch\n  Rust: {:?}\n  WASM: {:?}",
-                    name, rust_out, wasm_out
-                ));
-            }
-            Err(e) => {
-                let msg = if let Some(s) = e.downcast_ref::<String>() {
-                    s.clone()
-                } else {
-                    "unknown panic".to_string()
-                };
-                failed.push(format!("{}: WASM failed\n  {}", name, msg.lines().next().unwrap_or("")));
-            }
+        match (equal, allow) {
+            (true, None) => passed += 1,
+            (true, Some(r)) => stale.push(format!("{name}: @xt-allow now MATCHES (was: {r}) — remove the directive")),
+            (false, Some(r)) => allowed.push(format!("{name}: {r}")),
+            (false, None) => failed.push(format!(
+                "{name}: cross-target divergence\n  native: exit={rc} stdout={rout:?} stderr={rerr:?}\n  wasm:   exit={wc} stdout={wout:?} stderr={werr:?}")),
         }
     }
 
-    eprintln!("\nwasm_cross_target_spec: {}/{} passed", passed, entries.len());
-    if !failed.is_empty() {
-        panic!(
-            "\n{} cross-target failures:\n\n{}",
-            failed.len(),
-            failed.join("\n\n")
-        );
+    eprintln!(
+        "\nwasm_cross_target_spec (gate): {passed} equal, {} tracked-divergence(s), {} stale-allow(s), {} unexpected",
+        allowed.len(), stale.len(), failed.len()
+    );
+    for a in &allowed { eprintln!("  ~ tracked: {a}"); }
+
+    let mut problems = failed;
+    problems.extend(stale);
+    if !problems.is_empty() {
+        panic!("\n{} cross-target gate problem(s):\n\n{}", problems.len(), problems.join("\n\n"));
     }
 }
 
@@ -1277,4 +1283,98 @@ fn wasm_closure_map_set_then_coalesce() {
          \x20 println(int.to_string(fn_(7)))\n\
          }\n",
     );
+}
+
+// ── Cross-target program termination on an unhandled error ──
+// `effect fn main` that fails must, on BOTH targets, exit non-zero and print
+// `Error: <msg>` to stderr (native via the Display `fn main` wrapper, wasm via
+// `__main_runner`'s tag check → fd_write(stderr) + proc_exit(1)).
+// Spec: docs/specs/result-option-effect.md §4.
+
+/// Compile+run on the native target; return (exit_code, stdout, stderr).
+/// Builds to a binary (compiler diagnostics discarded) THEN runs it, so the
+/// captured stderr is the PROGRAM's runtime stderr — not the compiler's warnings
+/// — matching the wasm path (build then wasmtime). Using `almide run` would mix
+/// compile-time warnings into stderr and spuriously diverge from wasm.
+fn run_native_capture(source: &str) -> (i32, String, String) {
+    let dir = tempfile::tempdir().unwrap();
+    let src_path = dir.path().join("test.almd");
+    let bin_path = dir.path().join("test_native_bin");
+    std::fs::write(&src_path, source).unwrap();
+    let build = Command::new(almide_bin())
+        .args(["build", src_path.to_str().unwrap(), "-o", bin_path.to_str().unwrap()])
+        .output()
+        .expect("failed to build native");
+    if !build.status.success() {
+        return (
+            build.status.code().unwrap_or(-1),
+            String::new(),
+            String::from_utf8_lossy(&build.stderr).trim().to_string(),
+        );
+    }
+    let out = Command::new(&bin_path).output().expect("failed to run native binary");
+    (
+        out.status.code().unwrap_or(-1),
+        String::from_utf8_lossy(&out.stdout).trim().to_string(),
+        String::from_utf8_lossy(&out.stderr).trim().to_string(),
+    )
+}
+
+/// Compile to wasm + run via wasmtime; return (exit_code, stdout, stderr).
+/// `None` if wasmtime is unavailable (the assertion is then skipped).
+fn run_wasm_capture(source: &str) -> Option<(i32, String, String)> {
+    let dir = tempfile::tempdir().unwrap();
+    let src_path = dir.path().join("test.almd");
+    let wasm_path = dir.path().join("test.wasm");
+    std::fs::write(&src_path, source).unwrap();
+    let build = Command::new(almide_bin())
+        .args(["build", src_path.to_str().unwrap(), "--target", "wasm", "-o", wasm_path.to_str().unwrap()])
+        .output()
+        .expect("failed to build wasm");
+    assert!(build.status.success(), "wasm build failed:\n{}", String::from_utf8_lossy(&build.stderr));
+    match Command::new("wasmtime").arg("--dir=/").arg(wasm_path.to_str().unwrap()).output() {
+        Ok(o) if o.status.code() != Some(127) => Some((
+            o.status.code().unwrap_or(-1),
+            String::from_utf8_lossy(&o.stdout).trim().to_string(),
+            String::from_utf8_lossy(&o.stderr).trim().to_string(),
+        )),
+        _ => None,
+    }
+}
+
+#[test]
+fn unhandled_main_error_terminates_consistently() {
+    if Command::new(almide_bin()).arg("--version").output().is_err() { return; }
+    let src = "effect fn boom() -> Result[Int, String] = err(\"kaboom\")\n\
+               effect fn main() -> Unit = {\n\
+               \x20 let v = boom()\n\
+               \x20 println(int.to_string(v))\n\
+               }\n";
+    let (rc, _, rerr) = run_native_capture(src);
+    assert_ne!(rc, 0, "native must exit non-zero on an unhandled error");
+    assert_eq!(rerr, "Error: kaboom", "native stderr (Display, no Debug quotes)");
+    if let Some((wc, _, werr)) = run_wasm_capture(src) {
+        assert_ne!(wc, 0, "wasm must exit non-zero on an unhandled error");
+        assert_eq!(rc, wc, "exit codes must match cross-target");
+        assert_eq!(rerr, werr, "stderr must match cross-target byte-for-byte");
+    }
+}
+
+#[test]
+fn successful_main_exits_zero_both_targets() {
+    if Command::new(almide_bin()).arg("--version").output().is_err() { return; }
+    // Guards the wasm `__main_runner` tag check: an `Ok` main must NOT be misread
+    // as an error and aborted — it must exit 0 with its normal output.
+    let src = "effect fn good() -> Result[Int, String] = ok(7)\n\
+               effect fn main() -> Unit = {\n\
+               \x20 let v = good()\n\
+               \x20 println(int.to_string(v))\n\
+               }\n";
+    let (rc, rout, _) = run_native_capture(src);
+    assert_eq!(rc, 0);
+    assert_eq!(rout, "7");
+    if let Some((wc, wout, _)) = run_wasm_capture(src) {
+        assert_eq!(wc, 0, "an Ok main must exit 0 on wasm");
+        assert_eq!(wout, "7");
+    }
 }

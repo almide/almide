@@ -725,16 +725,32 @@ impl FuncCompiler<'_> {
                 let scratch = self.scratch.alloc_i32();
                 if is_option {
                     // Option: ptr==0 → None (propagate as err), ptr!=0 → Some (payload at ptr)
+                    let err_ptr = self.scratch.alloc_i32();
+                    let none_str = self.emitter.intern_string("none") as i32;
+                    let alloc = self.emitter.rt.alloc;
                     wasm!(self.func, {
                         local_set(scratch);
                         local_get(scratch);
                         i32_eqz;
                         if_empty;
-                        // None → build an err Result and return it
-                        i32_const(0);
+                        // None → return `err("none")` so the unwrap propagates a real
+                        // Err Result, matching native's `.ok_or("none")?`. (Previously
+                        // returned a null ptr `0`, which the caller mis-read as `Ok`
+                        // tag → silent success / exit 0 on wasm.)
+                        i32_const(8);          // [tag:i32@0][String ptr@4]
+                        call(alloc);
+                        local_set(err_ptr);
+                        local_get(err_ptr);
+                        i32_const(1);          // tag = 1 (Err)
+                        i32_store(0);
+                        local_get(err_ptr);
+                        i32_const(none_str);   // err payload = "none"
+                        i32_store(4);
+                        local_get(err_ptr);
                         return_;
                         end;
                     });
+                    self.scratch.free_i32(err_ptr);
                     // Some: load payload from ptr
                     if !matches!(&expr.ty, Ty::Unit) {
                         wasm!(self.func, { local_get(scratch); });

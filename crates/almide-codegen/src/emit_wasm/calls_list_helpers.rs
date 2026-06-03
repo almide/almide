@@ -339,6 +339,14 @@ impl FuncCompiler<'_> {
         wasm!(self.func, {
             local_get(len); i32_const(2); i32_lt_u;
             if_empty;
+              // len < 2: nothing to sort, but still copy the 0/1 source elements
+              // to dst. The sort-proper path (scan_done==0) copies src→dst, but
+              // this short-circuit skipped it — so dst's data stayed the zeroed
+              // alloc and a singleton sort returned a zeroed element.
+              local_get(dst); i32_const(self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32); i32_add;
+              local_get(xs_ptr); i32_const(self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32); i32_add;
+              local_get(len); i32_const(es as i32); i32_mul;
+              memory_copy;
               i32_const(1); local_set(scan_done);
             else_;
               i32_const(1); local_set(is_asc);

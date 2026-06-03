@@ -1,0 +1,5 @@
+// @xt-allow: wasm float.to_string is fixed-precision, not shortest-round-trip (Ryu) — native 0.30000000000000004 vs wasm 0.3. Tracked in docs/roadmap/active/correctness-guarantee-gaps.md.
+effect fn main() -> Unit = {
+  println(float.to_string(0.1 + 0.2))
+  println(float.to_string(1.0 / 3.0))
+}
