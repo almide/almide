@@ -129,7 +129,14 @@ fn unbox_consumed(e: &mut IrExpr) -> bool {
 /// closure args. Un-boxing (rather than clearing `box_here`) keeps nesting exact:
 /// a closure STORED inside a consumed lambda's body stays boxed.
 fn box_closures_expr(expr: IrExpr, box_here: bool, changed: &mut bool) -> IrExpr {
-    let mut e = expr.map_children(&mut |c| box_closures_expr(c, box_here, changed));
+    // Clear box_here for a `fan.*` call's WHOLE subtree: its thunks run on threads
+    // and must stay raw `impl Fn + Send + Sync` — a boxed `Rc<dyn Fn>` is neither.
+    // This reaches thunks nested in a LIST arg (`fan.race([() => …, () => …])`),
+    // which an un-box of only the direct args would miss. Combinators are NOT
+    // cleared: they take `Rc<dyn Fn>` directly, so their closures stay boxed (only
+    // fused IterChain steps are un-boxed, in box_node).
+    let child_box = box_here && !is_fan_call(&expr);
+    let mut e = expr.map_children(&mut |c| box_closures_expr(c, child_box, changed));
     if box_here {
         if box_node(&mut e) { *changed = true; }
     }
