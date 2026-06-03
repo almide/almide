@@ -1124,4 +1124,63 @@ impl FuncCompiler<'_> {
             _ => { wasm!(self.func, { i32_load(0); i32_store(0); }); }
         }
     }
+
+    // ── Compact-ordered-dict addressing — every offset by name, zero magic numbers.
+    // Layout (SWISS_MAP id, header_size=8):
+    //   [len@0][cap@4][tags:u8[cap]@8][index:i32[cap]@8+cap][entries:(K,V)[cap]@8+cap+cap*INDEX_SLOT_SIZE]
+    // tags = h2 fast-reject (0=empty); index 1-based (slot v → entries[v-1], 0=empty);
+    // entries dense, insertion order [0..len], stride es=ks+vs, key@0 val@ks.
+
+    /// Push the INDEX region base `map + header + cap` (slots start after the tags).
+    pub(super) fn emit_dict_index_base(&mut self, map: u32, cap: u32) {
+        let hdr = self.emitter.layout_reg.header_size(super::engine::layout::SWISS_MAP) as i32;
+        wasm!(self.func, { local_get(map); i32_const(hdr); i32_add; local_get(cap); i32_add; });
+    }
+
+    /// Push the dense ENTRIES base `map + header + cap + cap*INDEX_SLOT_SIZE`.
+    pub(super) fn emit_dict_entries_base(&mut self, map: u32, cap: u32) {
+        use super::engine::layout::{SWISS_MAP, map as lm};
+        let hdr = self.emitter.layout_reg.header_size(SWISS_MAP) as i32;
+        wasm!(self.func, {
+            local_get(map); i32_const(hdr); i32_add;
+            local_get(cap); i32_add;
+            local_get(cap); i32_const(lm::INDEX_SLOT_SIZE as i32); i32_mul; i32_add;
+        });
+    }
+
+    /// Allocate + zero-init a COD table of `cap` slots (entry stride `es`) into `out`.
+    /// total = header + cap*(tag(1) + INDEX_SLOT_SIZE + es); len=0; cap=cap; tags+index zeroed
+    /// (the allocator reuses a free list, so it does NOT return zeroed memory).
+    pub(super) fn emit_dict_alloc(&mut self, out: u32, cap: u32, es: u32) {
+        use super::engine::layout::{SWISS_MAP, map as lm};
+        let hdr = self.emitter.layout_reg.header_size(SWISS_MAP) as i32;
+        let cap_off = self.emitter.layout_reg.fixed_offset(SWISS_MAP, lm::CAP);
+        let per_slot = 1 + lm::INDEX_SLOT_SIZE as i32 + es as i32;
+        let tag_plus_index = 1 + lm::INDEX_SLOT_SIZE as i32;
+        wasm!(self.func, {
+            i32_const(hdr); local_get(cap); i32_const(per_slot); i32_mul; i32_add;
+            call(self.emitter.rt.alloc); local_set(out);
+            local_get(out); i32_const(0); i32_store(0);             // len = 0
+            local_get(out); local_get(cap); i32_store(cap_off, 0);  // cap
+            // zero tags+index: memory_fill(out+header, 0, cap*(1+INDEX_SLOT_SIZE))
+            local_get(out); i32_const(hdr); i32_add;
+            i32_const(0);
+            local_get(cap); i32_const(tag_plus_index); i32_mul;
+            memory_fill(0);
+        });
+    }
+
+    /// Push a closure pair's env pointer (field load via the CLOSURE_PAIR layout).
+    pub(super) fn emit_closure_env(&mut self, closure: u32) {
+        use super::engine::layout::{CLOSURE_PAIR, closure as lc};
+        let off = self.emitter.layout_reg.fixed_offset(CLOSURE_PAIR, lc::ENV_PTR);
+        wasm!(self.func, { local_get(closure); i32_load(off); });
+    }
+
+    /// Push a closure pair's function-table index.
+    pub(super) fn emit_closure_table_idx(&mut self, closure: u32) {
+        use super::engine::layout::{CLOSURE_PAIR, closure as lc};
+        let off = self.emitter.layout_reg.fixed_offset(CLOSURE_PAIR, lc::TABLE_IDX);
+        wasm!(self.func, { local_get(closure); i32_load(off); });
+    }
 }
