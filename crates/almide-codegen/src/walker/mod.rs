@@ -310,10 +310,18 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
         String::new()
     };
 
+    // `effect fn main` is renamed to `__almide_main` and given a thin `fn main`
+    // wrapper (below) that reports an unhandled `Err` via Display (`Error: <msg>`)
+    // and exits 1 — instead of Rust's default `Termination`, which prints the
+    // Debug form (`Error: "<msg>"`, with quotes). This keeps the error format an
+    // intentional Almide decision and lets the WASM target match it byte-for-byte.
+    let is_rust_effect_main = matches!(ctx.target, Target::Rust)
+        && func.name.as_str() == "main" && func.is_effect && !func.is_test;
+
     // Sanitize function name: spaces/dots/hyphens → underscores.
     // Test blocks already carry `TEST_NAME_PREFIX` from lowering so they
     // cannot collide with user fns here — no conditional prefixing needed.
-    let raw_name = func.name.to_string();
+    let raw_name = if is_rust_effect_main { "__almide_main".to_string() } else { func.name.to_string() };
     let mut safe_name = raw_name.replace(' ', "_").replace('-', "_").replace('.', "_")
         .replace('+', "_plus_").replace('/', "_div_").replace('*', "_mul_")
         .replace('(', "").replace(')', "").replace(',', "_").replace(':', "_")
@@ -347,6 +355,13 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
     };
     let fn_code = fn_ctx.templates.render_with(construct, None, &[], &[("name", safe_name.as_str()), ("params", params_str.as_str()), ("return_type", ret_str.as_str()), ("body", body_str.as_str())])
         .unwrap_or_else(|| format!("fn {}() {{ }}", func.name));
+
+    // Wrap `effect fn main`: report an unhandled error via Display + exit 1.
+    let fn_code = if is_rust_effect_main {
+        format!("{}\n\nfn main() {{\n    if let Err(__almide_err) = __almide_main() {{\n        eprintln!(\"Error: {{}}\", __almide_err);\n        std::process::exit(1);\n    }}\n}}", fn_code)
+    } else {
+        fn_code
+    };
 
     // Prepend doc comment if present
     if let Some(ref doc) = func.doc {

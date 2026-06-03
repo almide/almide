@@ -1312,14 +1312,18 @@ pub(crate) fn emit(program: &IrProgram) -> Vec<u8> {
     if main_runner_idx.is_some() {
         let main_idx = *emitter.func_map.get("main")
             .expect("has_main implies a registered `main`");
-        let drop_count = program.functions.iter()
-            .find(|f| f.name == "main" && !f.is_test)
+        let main_func = program.functions.iter().find(|f| f.name == "main" && !f.is_test);
+        // Only `effect fn main` returns a `Result` that can carry an unhandled
+        // error. A plain `fn main` (`Unit`) cannot fail — never tag-check it, or
+        // its `Unit` payload would be misread as an `Err` tag and abort every run.
+        let is_effect = main_func.map(|f| f.is_effect).unwrap_or(false);
+        let drop_count = main_func
             .map(|f| {
                 let ret = if f.ret_ty.is_unresolved() { f.body.ty.clone() } else { f.ret_ty.clone() };
                 values::ret_type(&ret).len()
             })
             .unwrap_or(0);
-        compile_main_runner(&mut emitter, main_idx, drop_count);
+        compile_main_runner(&mut emitter, main_idx, drop_count, is_effect);
     }
 
     // Lambda bodies and FnRef wrappers
@@ -1786,14 +1790,74 @@ fn compile_test_runner(emitter: &mut WasmEmitter, tests: &[(u32, String)], init_
 /// `_start` is a void WASI command. `drop_count` is `main`'s wasm result arity
 /// (0 for a void `main`, 1 for an effect fn returning a `Result`). `main` runs
 /// `__init_globals` itself, so the runner does nothing else.
-fn compile_main_runner(emitter: &mut WasmEmitter, main_idx: u32, drop_count: usize) {
-    let void_type = emitter.register_type(vec![], vec![]);
-    let mut f = TrackedFunction::new([]);
-    f.instruction(&wasm_encoder::Instruction::Call(main_idx));
-    for _ in 0..drop_count {
-        f.instruction(&wasm_encoder::Instruction::Drop);
+fn compile_main_runner(emitter: &mut WasmEmitter, main_idx: u32, drop_count: usize, is_effect: bool) {
+    use wasm_encoder::Instruction as Ins;
+    fn m(offset: u64) -> wasm_encoder::MemArg {
+        wasm_encoder::MemArg { offset, align: 2, memory_index: 0 }
     }
-    f.instruction(&wasm_encoder::Instruction::End);
+    let void_type = emitter.register_type(vec![], vec![]);
+
+    // Non-effect `fn main` (returns `Unit`) cannot fail: call and drop its result.
+    if !is_effect {
+        let mut f = TrackedFunction::new([]);
+        f.instruction(&Ins::Call(main_idx));
+        for _ in 0..drop_count {
+            f.instruction(&Ins::Drop);
+        }
+        f.instruction(&Ins::End);
+        emitter.add_compiled(CompiledFunc::tracked(void_type, f));
+        return;
+    }
+
+    // `effect fn main` returns `Result<Unit, String>` (`[tag:i32@0][payload@4]`).
+    // On `Err`, write `Error: <msg>\n` to stderr (fd 2) and `proc_exit(1)` so the
+    // wasm command's failure (non-zero exit + stderr) matches native byte-for-byte
+    // (native's `fn main` wrapper emits the same `Error: <msg>` via Display + exit).
+    // On `Ok` (tag 0), fall through and return normally → exit 0.
+    let err_prefix = emitter.intern_string("Error: ") as i32;
+    let newline = emitter.intern_string("\n") as i32;
+    let data_off = emitter.layout_reg.fixed_offset(
+        engine::layout::STRING, engine::layout::string::DATA) as i32;
+    let concat = emitter.rt.concat_str;
+    let fd_write = emitter.rt.fd_write;
+    let proc_exit = emitter.rt.proc_exit;
+
+    // locals: 0 = main's Result ptr, 1 = composed "Error: <msg>\n" string ptr
+    let mut f = TrackedFunction::new([(2u32, ValType::I32)]);
+    f.instruction(&Ins::Call(main_idx));
+    f.instruction(&Ins::LocalSet(0));
+    f.instruction(&Ins::LocalGet(0));
+    f.instruction(&Ins::I32Load(m(0)));                    // tag
+    f.instruction(&Ins::If(wasm_encoder::BlockType::Empty));
+    //   msg = "Error: " ++ <err String @ payload> ++ "\n"
+    f.instruction(&Ins::I32Const(err_prefix));
+    f.instruction(&Ins::LocalGet(0));
+    f.instruction(&Ins::I32Load(m(4)));                    // err String ptr
+    f.instruction(&Ins::Call(concat));
+    f.instruction(&Ins::I32Const(newline));
+    f.instruction(&Ins::Call(concat));
+    f.instruction(&Ins::LocalSet(1));
+    //   iov[0] = { buf: msg + DATA, len: *msg } at scratch [0..8); nwritten at 8
+    f.instruction(&Ins::I32Const(0));
+    f.instruction(&Ins::LocalGet(1));
+    f.instruction(&Ins::I32Const(data_off));
+    f.instruction(&Ins::I32Add);
+    f.instruction(&Ins::I32Store(m(0)));
+    f.instruction(&Ins::I32Const(4));
+    f.instruction(&Ins::LocalGet(1));
+    f.instruction(&Ins::I32Load(m(0)));
+    f.instruction(&Ins::I32Store(m(0)));
+    //   fd_write(fd=2 stderr, iovs=0, iovs_len=1, nwritten=8)
+    f.instruction(&Ins::I32Const(2));
+    f.instruction(&Ins::I32Const(0));
+    f.instruction(&Ins::I32Const(1));
+    f.instruction(&Ins::I32Const(8));
+    f.instruction(&Ins::Call(fd_write));
+    f.instruction(&Ins::Drop);
+    f.instruction(&Ins::I32Const(1));
+    f.instruction(&Ins::Call(proc_exit));
+    f.instruction(&Ins::End);                              // end if
+    f.instruction(&Ins::End);                              // end function
     emitter.add_compiled(CompiledFunc::tracked(void_type, f));
 }
 
