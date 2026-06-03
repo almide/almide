@@ -1,0 +1,19 @@
+// Regression: wasm had no runtime fn / dispatch arm for string.run_length_encode
+// so the codegen panicked (ICE) instead of emitting. Now a two-pass byte-level
+// runtime fn builds List[(String, Int)]. ASCII only here — wasm groups by byte
+// and native by codepoint, so they agree on ASCII; multibyte is the separate
+// string-codepoint cluster.
+fn show(s: String) -> String =
+  string.run_length_encode(s)
+    |> list.map((r) => { let (c, n) = r; c + int.to_string(n) })
+    |> list.join(",")
+
+effect fn main() -> Unit = {
+  println(show(""))           // empty → no runs
+  println(show("x"))          // single char
+  println(show("aaabbc"))     // basic runs
+  println(show("aaaa"))       // one long run
+  println(show("abcde"))      // all distinct
+  println(show("aabbaa"))     // a repeated non-adjacently → separate runs
+  println(show("  ##  "))     // spaces and symbols
+}

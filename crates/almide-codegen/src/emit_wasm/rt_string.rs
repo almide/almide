@@ -96,6 +96,11 @@ pub fn register(emitter: &mut WasmEmitter) {
     // for sizing; `char_count` walks the data section and skips UTF-8
     // continuation bytes (bytes whose top two bits are `10`).
     emitter.rt.string.char_count = emitter.register_func("__str_char_count", ty_i32_i64);
+
+    // run_length_encode: (s) -> List[(String, Int)]. Byte-level runs (matches
+    // the byte-based rest of this runtime; native is codepoint-based, so the
+    // ASCII cases agree and multibyte joins the string-codepoint cluster).
+    emitter.rt.string.run_length_encode = emitter.register_func("__str_rle", ty_i32_i32);
 }
 
 /// Compile all string runtime function bodies.
@@ -133,6 +138,7 @@ pub fn compile(emitter: &mut WasmEmitter) {
     super::rt_string_extra::compile_is_lower(emitter);
     super::rt_string_extra::compile_cmp(emitter);
     compile_char_count(emitter);
+    compile_run_length_encode(emitter);
 }
 
 /// Count UTF-8 code points in a string (pointer to `[len:i32][bytes...]`).
@@ -702,6 +708,76 @@ fn compile_chars(emitter: &mut WasmEmitter) {
           br(0);
         end; end;
         local_get(2); end;
+    });
+    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+}
+
+/// run_length_encode(s) -> List[(String, Int)].
+/// Two passes over the byte payload: first count maximal runs of equal bytes to
+/// size the list exactly, then build a 1-char String + i64 count tuple per run.
+/// Each list slot holds a pointer to a 12-byte tuple `[str_ptr:i32 @0][cnt:i64 @4]`
+/// (tuple fields are laid out sequentially with no padding — see values::byte_size).
+/// Byte-granular like the rest of this runtime; native groups by codepoint, so
+/// ASCII inputs agree and multibyte is part of the string-codepoint gap.
+fn compile_run_length_encode(emitter: &mut WasmEmitter) {
+    let type_idx = emitter.func_type_indices[&emitter.rt.string.run_length_encode];
+    // locals: 1=blen 2=nr 3=i 4=cur 5=result 6=j 7=cnt 8=strp 9=tup
+    let mut f = Function::new([(9, ValType::I32)]);
+    wasm!(f, {
+        local_get(0); i32_load(0); local_set(1);                 // blen = *s
+        // ── Pass 1: count maximal runs into nr ──
+        i32_const(0); local_set(2);                              // nr = 0
+        i32_const(0); local_set(3);                              // i = 0
+        block_empty; loop_empty;
+          local_get(3); local_get(1); i32_ge_u; br_if(1);
+          local_get(0); i32_const(string_data_off()); i32_add; local_get(3); i32_add; i32_load8_u(0); local_set(4); // cur
+          local_get(2); i32_const(1); i32_add; local_set(2);     // nr += 1
+          local_get(3); i32_const(1); i32_add; local_set(3);     // i += 1
+          block_empty; loop_empty;                               // skip equal bytes
+            local_get(3); local_get(1); i32_ge_u; br_if(1);
+            local_get(0); i32_const(string_data_off()); i32_add; local_get(3); i32_add; i32_load8_u(0);
+            local_get(4); i32_ne; br_if(1);
+            local_get(3); i32_const(1); i32_add; local_set(3);
+            br(0);
+          end; end;
+          br(0);
+        end; end;
+        // ── Allocate the result list: [len=nr][nr * ptr] ──
+        i32_const(list_hdr()); local_get(2); i32_const(4); i32_mul; i32_add;
+        call(emitter.rt.alloc); local_set(5);
+        local_get(5); local_get(2); i32_store(0);
+        // ── Pass 2: emit one (char, count) tuple per run ──
+        i32_const(0); local_set(3);                              // i = 0
+        i32_const(0); local_set(6);                              // j = 0
+        block_empty; loop_empty;
+          local_get(3); local_get(1); i32_ge_u; br_if(1);
+          local_get(0); i32_const(string_data_off()); i32_add; local_get(3); i32_add; i32_load8_u(0); local_set(4); // cur
+          i32_const(1); local_set(7);                            // cnt = 1
+          local_get(3); i32_const(1); i32_add; local_set(3);     // i += 1
+          block_empty; loop_empty;
+            local_get(3); local_get(1); i32_ge_u; br_if(1);
+            local_get(0); i32_const(string_data_off()); i32_add; local_get(3); i32_add; i32_load8_u(0);
+            local_get(4); i32_ne; br_if(1);
+            local_get(7); i32_const(1); i32_add; local_set(7);   // cnt += 1
+            local_get(3); i32_const(1); i32_add; local_set(3);   // i += 1
+            br(0);
+          end; end;
+          // strp = one-char String holding `cur`
+          i32_const(1); call(emitter.rt.string_alloc); local_set(8);
+          local_get(8); i32_const(1); i32_store(0);              // len = 1
+          local_get(8); i32_const(1); i32_store(string_cap_off() as u32, 0); // cap = 1
+          local_get(8); local_get(4); i32_store8(string_data_off() as u32);  // data[0] = cur
+          // tup = [strp @0][cnt:i64 @4]
+          i32_const(12); call(emitter.rt.alloc); local_set(9);
+          local_get(9); local_get(8); i32_store(0);
+          local_get(9); local_get(7); i64_extend_i32_u; i64_store(4);
+          // result.data[j] = tup
+          local_get(5); i32_const(list_data_off()); i32_add; local_get(6); i32_const(4); i32_mul; i32_add;
+          local_get(9); i32_store(0);
+          local_get(6); i32_const(1); i32_add; local_set(6);     // j += 1
+          br(0);
+        end; end;
+        local_get(5); end;
     });
     emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
 }
