@@ -1,0 +1,103 @@
+// Value-asserting regression tests for the fan.* cross-target bugs.
+// The original fan specs only checked lengths / race winners, so corrupt
+// settled payloads, dropped/invalid fan.any results, and mis-typed
+// fan.timeout Results all slipped through. These lock in the actual values.
+
+effect fn succeed(x: Int) -> Result[Int, String] = ok(x)
+effect fn fail_with(msg: String) -> Result[Int, String] = err(msg)
+effect fn pick(s: String) -> Result[String, String] = ok(s)
+
+// ── fan.settle — every settled payload must survive (was zeroed/corrupt) ──
+test "fan.settle preserves ok and err payloads" {
+  let rs = fan.settle([
+    () => succeed(11),
+    () => fail_with("boom"),
+    () => succeed(33)
+  ]);
+  assert_eq(list.len(rs), 3)
+  assert_eq(rs[0], ok(11))
+  assert_eq(rs[1], err("boom"))
+  assert_eq(rs[2], ok(33))
+}
+
+// ── fan.any returning Int — must produce a valid module + correct value ──
+test "fan.any returns the Int winner" {
+  let w = fan.any([() => succeed(5)]);
+  assert_eq(w, 5)
+}
+
+// ── fan.any returning String — must not silently drop the winner ──
+// Two successes race by wall-clock on native (list-order on wasm), so EITHER is
+// a valid winner — the regression is that a valid String result is RETURNED, not
+// dropped/garbage (the original wasm bug). Tolerating both mirrors how
+// `fan_race_test` asserts a nondeterministic race winner.
+test "fan.any returns the String winner" {
+  let w = fan.any([() => pick("alpha"), () => pick("beta")]);
+  assert(w == "alpha" or w == "beta")
+}
+
+// ── fan.timeout Result bound to a Result let — ?? and == must type-check ──
+test "fan.timeout result supports ?? and ==" {
+  let r: Result[Int, String] = fan.timeout(5000, () => succeed(42));
+  assert_eq(r ?? -1, 42)
+  assert(r == ok(42))
+}
+
+// ── CAPTURING thunks (native E0308 / E0277) ───────────────────────────────
+// The cases above use non-capturing thunks, which coerce to fn pointers and so
+// compiled natively even before the fix. A thunk that CAPTURES a local is a
+// distinct anonymous closure type: two of them cannot share one `Vec<impl Fn>`
+// (E0308), and a captured closure VALUE is `Rc<dyn Fn>`, neither Send nor Sync
+// (E0277). The native runner (`almide test --target rust`) is what exercises
+// this — the wasm runner table-dispatches closures and never hit the bug. Each
+// case is crafted to a target-stable value (race: every winner equal; any: a
+// lone success) since native races by wall-clock while wasm runs list order.
+
+test "fan.race over capturing thunks (native E0308)" {
+  let a = 4
+  let b = 5
+  let w = fan.race([
+    () => succeed(a + 5),
+    () => succeed(b + 4)
+  ]);
+  assert_eq(w, 9)
+}
+
+test "fan.any over capturing thunks picks the lone success" {
+  let lo = 2
+  let hi = 8
+  let msg = "skip"
+  let w = fan.any([
+    () => fail_with(msg),
+    () => succeed(hi - lo)
+  ]);
+  assert_eq(w, 6)
+}
+
+test "fan.settle over capturing thunks preserves order and payloads" {
+  let x = 1
+  let oops = "boom"
+  let z = 3
+  let rs = fan.settle([
+    () => succeed(x * 10),
+    () => fail_with(oops),
+    () => succeed(z * 10)
+  ]);
+  assert_eq(list.len(rs), 3)
+  assert_eq(rs[0], ok(10))
+  assert_eq(rs[1], err("boom"))
+  assert_eq(rs[2], ok(30))
+}
+
+test "fan.map over a captured closure value (native E0277)" {
+  let k = 3
+  let f = (n: Int) => succeed(n + k)
+  let out = fan.map([1, 2, 3], f);
+  assert_eq(out, [4, 5, 6])
+}
+
+test "fan.map over a capturing literal lambda" {
+  let base = 100
+  let out = fan.map([1, 2, 3], (n: Int) => succeed(base + n));
+  assert_eq(out, [101, 102, 103])
+}

@@ -149,6 +149,25 @@ pub enum UnOp {
 #[serde(rename_all = "snake_case")]
 pub enum Mutability { Let, Var }
 
+/// How a boxed closure VALUE is wrapped on the Rust target (`RcWrap.wrap`).
+///
+/// `Rc` is the uniform `Rc<dyn Fn>` repr used everywhere a closure is stored or
+/// passed — single-threaded, cheap clone. `BoxSendSync` exists only for `fan.*`
+/// thread-run thunks (`fan.race`/`any`/`settle`): distinct CAPTURING closures
+/// cannot share one `Vec<impl Fn>` (E0308), so each is boxed to a trait object.
+/// `Box<dyn Fn + Send + Sync>` itself implements `Fn + Send + Sync`, so it slots
+/// into the runtime's existing `Vec<impl Fn() -> _ + Send + Sync>` thunk
+/// parameter with NO signature change. (`fan.map` keeps `Rc`: it runs
+/// sequentially over an `Rc<dyn Fn>`, which also accepts a closure VALUE that a
+/// `Send + Sync` box could not — an `Rc` is neither.)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum FnBox {
+    #[default]
+    Rc,
+    BoxSendSync,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VarInfo {
     pub name: Sym,
@@ -374,8 +393,10 @@ pub enum IrExprKind {
     Borrow { expr: Box<IrExpr>, as_str: bool, #[serde(default)] mutable: bool },
     /// Box wrapping: `Box::new(expr)`
     BoxNew { expr: Box<IrExpr> },
-    /// Rc wrapping: `std::rc::Rc::new(expr)` — for List[Fn] elements in Rust.
-    RcWrap { expr: Box<IrExpr>, cast_ty: Option<Box<almide_lang::types::Ty>> },
+    /// Closure-value boxing in Rust. `wrap` selects the trait-object wrapper:
+    /// `Rc<dyn Fn>` (uniform repr) or, for `fan.*` thread thunks,
+    /// `Box<dyn Fn + Send + Sync>` (see [`FnBox`]).
+    RcWrap { expr: Box<IrExpr>, cast_ty: Option<Box<almide_lang::types::Ty>>, #[serde(default)] wrap: FnBox },
     /// Macro invocation: `name!(args)` (Rust assert_eq!, println!, etc.)
     RustMacro { name: Sym, args: Vec<IrExpr> },
     /// ToVec: `(expr).to_vec()`
@@ -489,7 +510,7 @@ impl IrExpr {
             IrExprKind::Deref { expr } => IrExprKind::Deref { expr: Box::new(f(*expr)) },
             IrExprKind::Borrow { expr, as_str, mutable } => IrExprKind::Borrow { expr: Box::new(f(*expr)), as_str, mutable },
             IrExprKind::BoxNew { expr } => IrExprKind::BoxNew { expr: Box::new(f(*expr)) },
-            IrExprKind::RcWrap { expr, cast_ty } => IrExprKind::RcWrap { expr: Box::new(f(*expr)), cast_ty },
+            IrExprKind::RcWrap { expr, cast_ty, wrap } => IrExprKind::RcWrap { expr: Box::new(f(*expr)), cast_ty, wrap },
             IrExprKind::ToVec { expr } => IrExprKind::ToVec { expr: Box::new(f(*expr)) },
             IrExprKind::Await { expr } => IrExprKind::Await { expr: Box::new(f(*expr)) },
             IrExprKind::Try { expr } => IrExprKind::Try { expr: Box::new(f(*expr)) },

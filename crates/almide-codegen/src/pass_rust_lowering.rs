@@ -124,6 +124,58 @@ fn unbox_consumed(e: &mut IrExpr) -> bool {
     false
 }
 
+/// `fan.*` method name (`map`/`race`/`any`/`settle`/`timeout`) for a fan call in
+/// either `Module{fan, func}` or already-lowered `almide_rt_fan_*` form.
+fn fan_method(expr: &IrExpr) -> Option<String> {
+    match &expr.kind {
+        IrExprKind::Call { target: CallTarget::Module { module, func, .. }, .. }
+            if module.as_str() == "fan" => Some(func.as_str().to_string()),
+        IrExprKind::RuntimeCall { symbol, .. } =>
+            symbol.as_str().strip_prefix("almide_rt_fan_").map(str::to_string),
+        _ => None,
+    }
+}
+
+/// Box every thunk in a `fan.race/any/settle` thunk-LIST argument.
+fn box_fan_thunk_list(arg: &mut IrExpr, to: FnBox) -> bool {
+    if let IrExprKind::List { elements } = &mut arg.kind {
+        let mut c = false;
+        for el in elements.iter_mut() { c |= box_fan_thunk(el, to); }
+        return c;
+    }
+    // A thunk list bound to a var (rare) — can't box the individual closures.
+    false
+}
+
+/// Wrap a single fan thunk in `RcWrap { wrap: to }`, reaching THROUGH a
+/// capture-clone `{ let __cap = …; <lambda> }` block to box the inner closure
+/// (mirrors `box_closure_value`, so the boxed inner stays a bare Lambda whose
+/// params the `as` cast can annotate, and the block still evaluates to the boxed
+/// value). A bare VAR — a stored closure value — is left as-is: for `fan.map` it
+/// is already `Rc<dyn Fn>`; for race/any/settle a var-thunk cannot be made
+/// `Send + Sync` here (a documented edge of literal-thunk-list boxing).
+fn box_fan_thunk(slot: &mut IrExpr, to: FnBox) -> bool {
+    match &mut slot.kind {
+        IrExprKind::Block { expr: Some(tail), .. } => return box_fan_thunk(tail, to),
+        // Defensive: a closure already boxed by some earlier path — just re-tag.
+        IrExprKind::RcWrap { wrap, .. } => {
+            if *wrap != to { *wrap = to; return true; }
+            return false;
+        }
+        IrExprKind::Lambda { .. } | IrExprKind::FnRef { .. } => { /* wrap below */ }
+        _ => return false,
+    }
+    let inner = std::mem::replace(slot, unit_ir());
+    let fn_ty = inner.ty.clone();
+    *slot = IrExpr {
+        ty: fn_ty.clone(),
+        span: inner.span,
+        kind: IrExprKind::RcWrap { expr: Box::new(inner), cast_ty: Some(Box::new(fn_ty)), wrap: to },
+        def_id: None,
+    };
+    true
+}
+
 /// Top-down walk: recurse into children boxing every closure literal by default
 /// (`box_node`), then — for a combinator / fan node — un-box its DIRECT consumed
 /// closure args. Un-boxing (rather than clearing `box_here`) keeps nesting exact:
@@ -161,18 +213,32 @@ fn box_node(expr: &mut IrExpr) -> bool {
         // not as an expr node, so a direct call `dbl(x)` is never boxed.
         return box_closure_value(expr, &node_ty);
     }
-    // fan.* closures run on threads and must stay RAW (`Send + Sync`); `Rc<dyn Fn>`
-    // is neither. fan is still a `Module{fan}` / `RuntimeCall{fan}` call here
-    // (FanLowering runs after this pass), so un-box its consumed closure args.
-    if is_fan_call(expr) {
-        let mut c = false;
-        match &mut expr.kind {
-            IrExprKind::Call { args, .. } | IrExprKind::RuntimeCall { args, .. } => {
-                for a in args.iter_mut() { c |= unbox_consumed(a); }
-            }
-            _ => {}
-        }
-        return c;
+    // fan.* thread-thunk boxing. The whole fan subtree was left RAW (box_here
+    // cleared in box_closures_expr), so each thunk here is a bare Lambda / FnRef /
+    // capture-clone `{ …; <lambda> }` block. Box per fan API (fan is still a
+    // `Module{fan}` / `RuntimeCall{fan}` call here — FanLowering runs later):
+    //   race/any/settle → `Box<dyn Fn + Send + Sync>`: distinct CAPTURING thunks
+    //     cannot share one `impl Fn` type (E0308), but `Box<dyn Fn + Send + Sync>`
+    //     is itself `Fn + Send + Sync`, so they unify as one element type AND
+    //     satisfy the runtime's `Vec<impl Fn() -> _ + Send + Sync>` thunk bound.
+    //   map → `Rc<dyn Fn>`: the runtime runs it SEQUENTIALLY over an `Rc<dyn Fn>`,
+    //     which also accepts a closure VALUE in a var — a `Send + Sync` box can't,
+    //     since the uniform repr of a stored closure is `Rc` (neither Send nor Sync).
+    //   timeout → left raw: one monomorphic thunk already satisfies `impl Fn + Send`.
+    if let Some(method) = fan_method(expr) {
+        let args = match &mut expr.kind {
+            IrExprKind::Call { args, .. } | IrExprKind::RuntimeCall { args, .. } => args,
+            _ => return false,
+        };
+        return match method.as_str() {
+            "race" | "any" | "settle" => args.first_mut()
+                .map(|a| box_fan_thunk_list(a, FnBox::BoxSendSync))
+                .unwrap_or(false),
+            "map" => args.get_mut(1)
+                .map(|f| box_fan_thunk(f, FnBox::Rc))
+                .unwrap_or(false),
+            _ => false,
+        };
     }
     // Storage of a closure (in a list/map/tuple/record/field/`if`-`match` join/
     // `??` fallback) needs NO rule — the default arm already boxed every closure
@@ -274,7 +340,7 @@ fn box_closure_value(slot: &mut IrExpr, fn_ty: &almide_lang::types::Ty) -> bool 
     *slot = IrExpr {
         ty: inner.ty.clone(),
         span: inner.span,
-        kind: IrExprKind::RcWrap { expr: Box::new(inner), cast_ty: Some(Box::new(fn_ty.clone())) },
+        kind: IrExprKind::RcWrap { expr: Box::new(inner), cast_ty: Some(Box::new(fn_ty.clone())), wrap: FnBox::Rc },
         def_id: None,
     };
     true
