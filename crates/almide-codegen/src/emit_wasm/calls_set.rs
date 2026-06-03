@@ -141,6 +141,26 @@ impl FuncCompiler<'_> {
                         });
                         self.scratch.free_i64(s64);
                     }
+                    Some(ValType::F64) => {
+                        let sf = self.scratch.alloc(ValType::F64);
+                        self.emit_expr(&args[1]);
+                        wasm!(self.func, {
+                            local_set(sf);
+                            i32_const(0); local_set(s1);
+                            i32_const(0); local_set(s2);
+                            block_empty; loop_empty;
+                              local_get(s1); local_get(s); i32_load(0); i32_ge_u; br_if(1);
+                              local_get(s); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
+                              local_get(s1); i32_const(es); i32_mul; i32_add;
+                              f64_load(0); local_get(sf); f64_eq;
+                              if_empty; i32_const(1); local_set(s2); br(2); end;
+                              local_get(s1); i32_const(1); i32_add; local_set(s1);
+                              br(0);
+                            end; end;
+                            local_get(s2);
+                        });
+                        self.scratch.free(sf, ValType::F64);
+                    }
                     _ => {
                         let s3 = self.scratch.alloc_i32();
                         self.emit_expr(&args[1]);
@@ -848,6 +868,7 @@ impl FuncCompiler<'_> {
     fn emit_set_elem_eq(&mut self, elem_ty: &Ty) {
         match values::ty_to_valtype(elem_ty) {
             Some(ValType::I64) => { wasm!(self.func, { i64_eq; }); }
+            Some(ValType::F64) => { self.func.instruction(&wasm_encoder::Instruction::F64Eq); }
             _ => {
                 if matches!(elem_ty, Ty::String) {
                     wasm!(self.func, { call(self.emitter.rt.string.eq); });

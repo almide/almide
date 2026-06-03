@@ -253,7 +253,7 @@ template = "Result<{ok}, {err}>"
 template = "HashMap<{key}, {value}>"
 
 [type_set]
-template = "std::collections::HashSet<{inner}>"
+template = "AlmideSet<{inner}>"
 
 [type_fn]
 template = "impl Fn({params}) -> {return} + Clone"
