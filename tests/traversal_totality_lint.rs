@@ -30,12 +30,10 @@ const LEGACY_DEBT: &[&str] = &[
     "crates/almide-codegen/src/pass_auto_parallel.rs",
     "crates/almide-codegen/src/pass_borrow_inference.rs",
     "crates/almide-codegen/src/pass_box_deref.rs",
-    "crates/almide-codegen/src/pass_builtin_lowering.rs",
     "crates/almide-codegen/src/pass_capture_clone.rs",
     "crates/almide-codegen/src/pass_clone.rs",
     "crates/almide-codegen/src/pass_closure_conversion.rs",
     "crates/almide-codegen/src/pass_concretize_types.rs",
-    "crates/almide-codegen/src/pass_const_fold.rs",
     "crates/almide-codegen/src/pass_effect_inference.rs",
     "crates/almide-codegen/src/pass_fan_lowering.rs",
     "crates/almide-codegen/src/pass_lambda_type_resolve.rs",
@@ -178,12 +176,18 @@ fn find_violations(src: &str) -> Vec<Violation> {
         }
         let Some(close) = body_close else { continue };
 
-        // A catch-all is only a *recursion* drop when this match IS the descent.
-        // If the enclosing function delegates the rest of the walk to a canonical
-        // primitive (`walk_expr(_mut)` / `map_children` / `self.visit_*`), the
-        // match is a side-table override (binding collection, var shifting, …) and
-        // its `_ => {}` is correct — recursion happens via the delegation.
-        if enclosing_fn_delegates(src, b, open) {
+        // A silent catch-all only *drops a subtree* when this match is the
+        // descent itself. A match whose arms merely inspect/decide — a literal
+        // re-typer, a binding collector, a var-shifter whose recursion is a
+        // separate `walk_*` call *outside* the match — never recurses children,
+        // so its `_ => {}` is a legitimate "no action" default, not a drop.
+        // This match recurses iff an arm descends into a child: a known descent
+        // primitive, OR a self-call to the enclosing (recursive walker) function.
+        let body = &src[open..=close];
+        let recurses = has_descent_primitive(body)
+            || enclosing_fn_name(src, b, open)
+                .map_or(false, |name| body.contains(&format!("{}(", name)));
+        if !recurses {
             continue;
         }
 
@@ -194,26 +198,34 @@ fn find_violations(src: &str) -> Vec<Violation> {
     violations
 }
 
-/// Canonical-walk delegations: their presence in the enclosing function means
-/// the function descends via the exhaustive primitive, so a hand-written
-/// `.kind` match within it is a safe partial override, not the recursion point.
-const DELEGATIONS: &[&str] = &[
-    "walk_expr", "walk_stmt", "walk_pattern", "walk_expr_mut", "walk_stmt_mut",
-    "map_children", "map_exprs", ".visit_expr", ".visit_stmt",
-];
+/// Canonical descent primitives + the `*_expr(` / `*_stmt(` naming most
+/// hand-rolled recursive walkers use (`rewrite_expr`, `fold_expr`, `erase_expr`,
+/// …). Their presence in a match body means an arm recurses into a child.
+fn has_descent_primitive(body: &str) -> bool {
+    body.contains("walk_expr") || body.contains("walk_stmt")
+        || body.contains("map_children") || body.contains("map_exprs")
+        || body.contains(".visit_expr") || body.contains(".visit_stmt")
+        || body.contains("_expr(") || body.contains("_stmt(")
+}
 
-/// Does the function body enclosing byte `pos` call a canonical-walk primitive?
-fn enclosing_fn_delegates(src: &str, b: &[u8], pos: usize) -> bool {
-    // Find the innermost `fn …(…) … { … }` whose body brackets `pos`.
-    let mut best: Option<(usize, usize)> = None;
+/// Name of the innermost `fn …` whose body brackets byte `pos`. Used to detect a
+/// self-recursive walker (e.g. `rewrite_calls`) whose name does not match the
+/// `*_expr`/`*_stmt` convention.
+fn enclosing_fn_name(src: &str, b: &[u8], pos: usize) -> Option<String> {
+    let mut best: Option<(usize, usize, String)> = None;
     let mut search = 0;
     while let Some(rel) = src[search..].find("fn ") {
         let f = search + rel;
         search = f + 3;
-        let before_ok = f == 0 || !is_ident_byte(b[f - 1]);
-        if !before_ok { continue; }
-        // Body opens at the first `{` after the signature's `)` (skip `where`…).
-        let mut j = f + 3;
+        if !(f == 0 || !is_ident_byte(b[f - 1])) { continue; }
+        // Capture the function name (identifier right after `fn `).
+        let mut n = f + 3;
+        while n < b.len() && b[n] == b' ' { n += 1; }
+        let name_start = n;
+        while n < b.len() && is_ident_byte(b[n]) { n += 1; }
+        let name = src[name_start..n].to_string();
+        // Body opens at the first top-level `{` after the signature's `)`.
+        let mut j = n;
         let mut paren = 0i32;
         let mut seen_params = false;
         let mut body_open = None;
@@ -222,7 +234,7 @@ fn enclosing_fn_delegates(src: &str, b: &[u8], pos: usize) -> bool {
                 b'(' => { paren += 1; seen_params = true; }
                 b')' => paren -= 1,
                 b'{' if paren == 0 && seen_params => { body_open = Some(j); break; }
-                b';' if paren == 0 => break, // fn-type / trait decl, no body
+                b';' if paren == 0 => break,
                 _ => {}
             }
             j += 1;
@@ -240,18 +252,11 @@ fn enclosing_fn_delegates(src: &str, b: &[u8], pos: usize) -> bool {
             k += 1;
         }
         let Some(bc) = body_close else { continue };
-        if bo < pos && pos < bc {
-            // innermost = smallest containing range
-            if best.map_or(true, |(s, e)| bo > s || bc < e) {
-                best = Some((bo, bc));
-            }
+        if bo < pos && pos < bc && best.as_ref().map_or(true, |(s, e, _)| bo > *s || bc < *e) {
+            best = Some((bo, bc, name));
         }
     }
-    if let Some((s, e)) = best {
-        let body = &src[s..e];
-        return DELEGATIONS.iter().any(|d| body.contains(d));
-    }
-    false
+    best.map(|(_, _, name)| name)
 }
 
 fn scan_arms(src: &str, b: &[u8], open: usize, close: usize, out: &mut Vec<Violation>) {

@@ -5,9 +5,14 @@
 //!
 //! Conservative — only folds when both operands are LitFloat or LitInt and
 //! the operation is trivially safe (no divide-by-zero, no overflow on Int).
+//!
+//! Traversal goes through the canonical `IrMutVisitor`/`walk_expr_mut`
+//! (exhaustive, wildcard-free) rather than a hand-rolled `match expr.kind { …;
+//! _ => {} }`, so a foldable subtree under any wrapper / future node kind is
+//! reached — no silent drop (see docs/roadmap/active/codegen-traversal-totality.md).
 
 use almide_ir::*;
-use almide_lang::types::Ty;
+use almide_ir::visit_mut::{IrMutVisitor, walk_expr_mut};
 use super::pass::{NanoPass, PassResult, Target};
 
 #[derive(Debug)]
@@ -19,89 +24,55 @@ impl NanoPass for ConstFoldPass {
     fn depends_on(&self) -> Vec<&'static str> { vec![] }
 
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
-        let mut changed = false;
+        let mut folder = ConstFolder { changed: false };
         for func in &mut program.functions {
-            if rewrite_expr(&mut func.body) { changed = true; }
+            folder.visit_expr_mut(&mut func.body);
         }
         for tl in &mut program.top_lets {
-            if rewrite_expr(&mut tl.value) { changed = true; }
+            folder.visit_expr_mut(&mut tl.value);
         }
         for module in &mut program.modules {
             for func in &mut module.functions {
-                if rewrite_expr(&mut func.body) { changed = true; }
+                folder.visit_expr_mut(&mut func.body);
             }
             for tl in &mut module.top_lets {
-                if rewrite_expr(&mut tl.value) { changed = true; }
+                folder.visit_expr_mut(&mut tl.value);
             }
         }
-        PassResult { program, changed }
+        PassResult { program, changed: folder.changed }
     }
 }
 
-fn rewrite_expr(expr: &mut IrExpr) -> bool {
-    let mut changed = false;
+/// Bottom-up fold: descend into every child via the exhaustive `walk_expr_mut`,
+/// then fold this node if it is a constant arithmetic op (so a parent sees its
+/// already-folded children).
+struct ConstFolder {
+    changed: bool,
+}
 
-    match &mut expr.kind {
-        IrExprKind::Block { stmts, expr: tail } => {
-            for stmt in stmts.iter_mut() { if rewrite_stmt(stmt) { changed = true; } }
-            if let Some(e) = tail { if rewrite_expr(e) { changed = true; } }
-        }
-        IrExprKind::If { cond, then, else_ } => {
-            if rewrite_expr(cond) { changed = true; }
-            if rewrite_expr(then) { changed = true; }
-            if rewrite_expr(else_) { changed = true; }
-        }
-        IrExprKind::Match { subject, arms } => {
-            if rewrite_expr(subject) { changed = true; }
-            for arm in arms {
-                if let Some(g) = &mut arm.guard { if rewrite_expr(g) { changed = true; } }
-                if rewrite_expr(&mut arm.body) { changed = true; }
+impl IrMutVisitor for ConstFolder {
+    fn visit_expr_mut(&mut self, expr: &mut IrExpr) {
+        walk_expr_mut(self, expr);
+
+        if let IrExprKind::BinOp { op, left, right } = &expr.kind {
+            if let Some(folded) = try_fold(*op, left, right) {
+                expr.kind = folded;
+                self.changed = true;
             }
         }
-        IrExprKind::ForIn { iterable, body, .. } => {
-            if rewrite_expr(iterable) { changed = true; }
-            for stmt in body.iter_mut() { if rewrite_stmt(stmt) { changed = true; } }
+        if let IrExprKind::UnOp { op: UnOp::NegFloat, operand } = &expr.kind {
+            if let IrExprKind::LitFloat { value } = &operand.kind {
+                expr.kind = IrExprKind::LitFloat { value: -*value };
+                self.changed = true;
+            }
         }
-        IrExprKind::While { cond, body } => {
-            if rewrite_expr(cond) { changed = true; }
-            for stmt in body.iter_mut() { if rewrite_stmt(stmt) { changed = true; } }
-        }
-        IrExprKind::Lambda { body, .. } => {
-            if rewrite_expr(body) { changed = true; }
-        }
-        IrExprKind::Call { args, .. } => {
-            for a in args.iter_mut() { if rewrite_expr(a) { changed = true; } }
-        }
-        IrExprKind::BinOp { left, right, .. } => {
-            if rewrite_expr(left) { changed = true; }
-            if rewrite_expr(right) { changed = true; }
-        }
-        IrExprKind::UnOp { operand, .. } => {
-            if rewrite_expr(operand) { changed = true; }
-        }
-        _ => {}
-    }
-
-    if let IrExprKind::BinOp { op, left, right } = &expr.kind {
-        if let Some(folded) = try_fold(*op, left, right) {
-            expr.kind = folded;
-            changed = true;
+        if let IrExprKind::UnOp { op: UnOp::NegInt, operand } = &expr.kind {
+            if let IrExprKind::LitInt { value } = &operand.kind {
+                expr.kind = IrExprKind::LitInt { value: -*value };
+                self.changed = true;
+            }
         }
     }
-    if let IrExprKind::UnOp { op: UnOp::NegFloat, operand } = &expr.kind {
-        if let IrExprKind::LitFloat { value } = &operand.kind {
-            expr.kind = IrExprKind::LitFloat { value: -*value };
-            changed = true;
-        }
-    }
-    if let IrExprKind::UnOp { op: UnOp::NegInt, operand } = &expr.kind {
-        if let IrExprKind::LitInt { value } = &operand.kind {
-            expr.kind = IrExprKind::LitInt { value: -*value };
-            changed = true;
-        }
-    }
-
-    changed
 }
 
 fn try_fold(op: BinOp, left: &IrExpr, right: &IrExpr) -> Option<IrExprKind> {
@@ -161,36 +132,3 @@ fn try_fold(op: BinOp, left: &IrExpr, right: &IrExpr) -> Option<IrExprKind> {
     }
     None
 }
-
-fn rewrite_stmt(stmt: &mut IrStmt) -> bool {
-    let mut changed = false;
-    match &mut stmt.kind {
-        IrStmtKind::Bind { value, .. }
-        | IrStmtKind::BindDestructure { value, .. }
-        | IrStmtKind::Assign { value, .. }
-        | IrStmtKind::FieldAssign { value, .. } => {
-            if rewrite_expr(value) { changed = true; }
-        }
-        IrStmtKind::IndexAssign { index, value, .. } => {
-            if rewrite_expr(index) { changed = true; }
-            if rewrite_expr(value) { changed = true; }
-        }
-        IrStmtKind::MapInsert { key, value, .. } => {
-            if rewrite_expr(key) { changed = true; }
-            if rewrite_expr(value) { changed = true; }
-        }
-        IrStmtKind::Guard { cond, else_ } => {
-            if rewrite_expr(cond) { changed = true; }
-            if rewrite_expr(else_) { changed = true; }
-        }
-        IrStmtKind::Expr { expr } => {
-            if rewrite_expr(expr) { changed = true; }
-        }
-        _ => {}
-    }
-    changed
-}
-
-// Suppress unused import warning.
-#[allow(dead_code)]
-fn _ty_marker(_: Ty) {}
