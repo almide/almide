@@ -109,7 +109,7 @@ fn erase_expr(expr: IrExpr) -> IrExpr {
                 CallTarget::Computed { callee } => CallTarget::Computed {
                     callee: Box::new(erase_expr(*callee)),
                 },
-                other => other,
+                other @ (CallTarget::Named { .. } | CallTarget::Module { .. }) => other,
             };
             IrExprKind::Call { target, args, type_args }
         }
@@ -166,7 +166,7 @@ fn erase_expr(expr: IrExpr) -> IrExpr {
         IrExprKind::StringInterp { parts } => IrExprKind::StringInterp {
             parts: parts.into_iter().map(|p| match p {
                 IrStringPart::Expr { expr } => IrStringPart::Expr { expr: erase_expr(expr) },
-                other => other,
+                lit @ IrStringPart::Lit { .. } => lit,
             }).collect(),
         },
         IrExprKind::Tuple { elements } => IrExprKind::Tuple {
@@ -198,7 +198,9 @@ fn erase_expr(expr: IrExpr) -> IrExpr {
         IrExprKind::RustMacro { name, args } => IrExprKind::RustMacro {
             name, args: args.into_iter().map(erase_expr).collect(),
         },
-        other => other,
+        // Any other kind: recurse into every child (total by construction).
+        other => return IrExpr { kind: other, ty, span, def_id: None }
+            .map_children(&mut erase_expr),
     };
 
     IrExpr { kind, ty, span, def_id: None }
@@ -218,7 +220,7 @@ fn erase_stmts(stmts: Vec<IrStmt>) -> Vec<IrStmt> {
             IrStmtKind::BindDestructure { pattern, value } => IrStmtKind::BindDestructure {
                 pattern, value: erase_expr(value),
             },
-            other => other,
+            other => return IrStmt { kind: other, span: s.span }.map_exprs(&mut erase_expr),
         };
         IrStmt { kind, span: s.span }
     }).collect()

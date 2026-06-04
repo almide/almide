@@ -418,7 +418,7 @@ fn convert_expr(
         IrExprKind::StringInterp { parts } => IrExprKind::StringInterp {
             parts: parts.into_iter().map(|p| match p {
                 IrStringPart::Expr { expr } => IrStringPart::Expr { expr: convert_expr(expr, lifted, counter, vt, shared) },
-                other => other,
+                lit @ IrStringPart::Lit { .. } => lit,
             }).collect(),
         },
         IrExprKind::ResultOk { expr } => IrExprKind::ResultOk { expr: Box::new(convert_expr(*expr, lifted, counter, vt, shared)) },
@@ -446,8 +446,10 @@ fn convert_expr(
             name, args: args.into_iter().map(|a| convert_expr(a, lifted, counter, vt, shared)).collect(),
         },
 
-        // Leaf nodes — no conversion needed
-        other => other,
+        // Any other kind: recurse into every child so a Lambda nested in a
+        // not-yet-listed node is still lifted (total by construction).
+        other => return IrExpr { kind: other, ty, span, def_id: None }
+            .map_children(&mut |e| convert_expr(e, lifted, counter, vt, shared)),
     };
 
     IrExpr { kind, ty, span, def_id: None }
@@ -490,7 +492,8 @@ fn convert_stmt(
         IrStmtKind::Expr { expr } => IrStmtKind::Expr {
             expr: convert_expr(expr, lifted, counter, vt, shared),
         },
-        other => other,
+        other => return IrStmt { kind: other, span: stmt.span }
+            .map_exprs(&mut |e| convert_expr(e, lifted, counter, vt, shared)),
     };
     IrStmt { kind, span: stmt.span }
 }
@@ -509,7 +512,7 @@ fn convert_target(
         CallTarget::Computed { callee } => CallTarget::Computed {
             callee: Box::new(convert_expr(*callee, lifted, counter, vt, shared)),
         },
-        other => other,
+        other @ (CallTarget::Named { .. } | CallTarget::Module { .. }) => other,
     }
 }
 
