@@ -176,6 +176,41 @@ impl FuncCompiler<'_> {
         None
     }
 
+    /// Resolve the concrete return *type* of a closure argument as a `Ty`.
+    ///
+    /// Unlike `resolve_closure_ret_valtype` (which collapses to a coarse
+    /// `ValType`), this keeps the source-level `Ty` so callers can size the
+    /// result *and* pick the right load/store width and `call_indirect`
+    /// signature. Resolution order mirrors `emit_list_map`:
+    ///   1. `Ty::Fn.ret`            (post-inference, usually concrete)
+    ///   2. Lambda body's own `.ty` (pre-closure-conversion)
+    ///   3. lifted closure's registered WASM return ValType → placeholder `Ty`
+    /// Falls back to `fallback` when every source is unresolved.
+    pub(super) fn resolve_closure_ret_ty(&self, fn_expr: &IrExpr, fallback: &Ty) -> Ty {
+        let mut ret = fallback.clone();
+        if let Ty::Fn { ret: r, .. } = &fn_expr.ty {
+            if !r.is_unresolved() {
+                ret = (**r).clone();
+            }
+        }
+        if ret.is_unresolved() {
+            if let almide_ir::IrExprKind::Lambda { body, .. } = &fn_expr.kind {
+                if !body.ty.is_unresolved() {
+                    ret = body.ty.clone();
+                }
+            }
+        }
+        // Final reconciliation with the lifted closure's actual WASM signature,
+        // same as emit_list_map: if the registered ret valtype disagrees with
+        // the `Ty` we derived (e.g. inference left it Unknown→i32 but the
+        // closure really returns i64), trust the registered ABI width.
+        let ret_vt = values::ty_to_valtype(&ret);
+        match self.resolve_closure_ret_valtype(fn_expr) {
+            Some(actual) if Some(actual) != ret_vt => values::vt_to_placeholder_ty(actual),
+            _ => ret,
+        }
+    }
+
     /// Resolve the concrete type of the first non-env parameter of a closure
     /// argument. Like `resolve_closure_ret_valtype` but for the input side.
     /// Used to size the `param_ty`/`in_elem_ty` in `emit_list_map` etc. when

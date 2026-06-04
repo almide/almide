@@ -1,0 +1,90 @@
+// Cross-target gate for TYPE-CHANGING map.map and set.map closures.
+//
+// Native is the oracle: applying a closure whose return type differs from the
+// collection's value/element type yields a collection of the NEW type
+// (Map[K,V] with (V)->B => Map[K,B]; Set[A] with (A)->B => Set[B]). The WASM
+// emitter previously kept the SOURCE value/element width — wrong call_indirect
+// signature (trap) for map.map, wrong load/store width (truncated dedup) for
+// set.map. This program exercises every width transition (i64<->i32 pointer,
+// f64, tuple) on both String and Int keys and must be byte-identical wasm==native.
+//
+// NO @xt-allow: this is a fixed invariant, not a tracked divergence.
+
+fn show_map_si(m: Map[String, Int]) -> String =
+  map.entries(m)
+    |> list.map((e) => { let (k, v) = e; k + "=" + int.to_string(v) })
+    |> list.join(",")
+
+fn show_map_ss(m: Map[String, String]) -> String =
+  map.entries(m)
+    |> list.map((e) => { let (k, v) = e; k + "=" + v })
+    |> list.join(",")
+
+fn show_map_sf(m: Map[String, Float]) -> String =
+  map.entries(m)
+    |> list.map((e) => { let (k, v) = e; k + "=" + float.to_string(v) })
+    |> list.join(",")
+
+fn show_map_ii(m: Map[Int, Int]) -> String =
+  map.entries(m)
+    |> list.map((e) => { let (k, v) = e; int.to_string(k) + "=" + int.to_string(v) })
+    |> list.join(",")
+
+fn main() -> Unit = {
+  // ── map.map: value TYPE CHANGES (String key) ──
+  let ms = map.from_list([("a", "xx"), ("bb", "yyy"), ("ccc", "z")])
+  // String -> Int (i32 ptr -> i64): widen
+  println(show_map_si(map.map(ms, (v) => string.len(v))))
+
+  let mi = map.from_list([("a", 1), ("b", 22), ("c", 333)])
+  // Int -> String (i64 -> i32 ptr): narrow
+  println(show_map_ss(map.map(mi, (v) => int.to_string(v) + "!")))
+  // Int -> Float (i64 -> f64): same width, different valtype
+  println(show_map_sf(map.map(mi, (v) => int.to_float(v) / 2.0)))
+
+  // map.map: value -> tuple (i64 -> i32 ptr)
+  let mt = map.map(mi, (v) => (v, v * v))
+  let tparts = map.entries(mt)
+    |> list.map((e) => { let (k, p) = e; let (x, y) = p; k + "=" + int.to_string(x) + ":" + int.to_string(y) })
+    |> list.join(",")
+  println(tparts)
+
+  // ── map.map with Int KEYS (ks = 8) — key bytes preserved across rewrite ──
+  let mik = map.from_list([(1, "xx"), (2, "yyy"), (3, "z")])
+  println(show_map_ii(map.map(mik, (v) => string.len(v))))
+
+  // ── map.map regression: same value type still works ──
+  let mr = map.from_list([("a", 1), ("b", 2), ("c", 3)])
+  println(show_map_si(map.map(mr, (v) => v * 10)))
+
+  // ── set.map: element TYPE CHANGES ──
+  // String -> Int via string.len; "bb"/"dd" both => 2, dedup keeps one
+  let ss = set.from_list(["a", "bb", "ccc", "dd"])
+  let s_si = set.map(ss, (x) => string.len(x))
+    |> set.to_list
+    |> list.map((v) => int.to_string(v))
+    |> list.join(",")
+  println(s_si)
+
+  // Int -> String
+  let si = set.from_list([1, 2, 3])
+  let s_is = set.map(si, (x) => "n" + int.to_string(x))
+    |> set.to_list
+    |> list.join(",")
+  println(s_is)
+
+  // Int -> Bool: 4 elements collapse to {false, true}
+  let sb = set.from_list([1, 2, 3, 4])
+  let s_ib = set.map(sb, (x) => x % 2 == 0)
+    |> set.to_list
+    |> list.map((b) => if b then "T" else "F")
+    |> list.join(",")
+  println(s_ib)
+
+  // set.map regression: same element type still works
+  let s_ii = set.map(si, (x) => x * 10)
+    |> set.to_list
+    |> list.map((v) => int.to_string(v))
+    |> list.join(",")
+  println(s_ii)
+}
