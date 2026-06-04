@@ -47,7 +47,6 @@ const LEGACY_DEBT: &[&str] = &[
     "crates/almide-codegen/src/pass_result_propagation.rs",
     "crates/almide-codegen/src/pass_rust_lowering.rs",
     "crates/almide-codegen/src/pass_shadow_resolve.rs",
-    "crates/almide-codegen/src/pass_stdlib_lowering.rs",
     "crates/almide-codegen/src/pass_tco.rs",
 ];
 
@@ -183,15 +182,28 @@ fn find_violations(src: &str) -> Vec<Violation> {
         // This match recurses iff an arm descends into a child: a known descent
         // primitive, OR a self-call to the enclosing (recursive walker) function.
         let body = &src[open..=close];
+        let enclosing = enclosing_fn(src, b, open);
         let recurses = has_descent_primitive(body)
-            || enclosing_fn_name(src, b, open)
-                .map_or(false, |name| body.contains(&format!("{}(", name)));
+            || enclosing.as_ref().map_or(false, |(name, _)| body.contains(&format!("{}(", name)));
         if !recurses {
             continue;
         }
 
+        // Deferral: an empty `_ => {}` is NOT a drop when the enclosing fn recurses
+        // the SAME scrutinee via an external `<var>.map_children`/`map_exprs` after
+        // the match — the "decide special cases, recurse the default outside" pattern
+        // (e.g. `match &expr.kind { Special => …; _ => {} } expr.map_children(…)`).
+        // The external primitive is exhaustive, so the default IS handled.
+        let defers = match (scrutinee_var(scrutinee), enclosing.as_ref()) {
+            (Some(v), Some((_, fn_close))) => {
+                let tail = &src[close.min(*fn_close)..*fn_close];
+                tail.contains(&format!("{v}.map_children(")) || tail.contains(&format!("{v}.map_exprs("))
+            }
+            _ => false,
+        };
+
         // Within (open, close), find catch-all arms at arm-level (depth == 1).
-        scan_arms(src, b, open, close, &mut violations);
+        scan_arms(src, b, open, close, defers, &mut violations);
     }
 
     violations
@@ -207,10 +219,11 @@ fn has_descent_primitive(body: &str) -> bool {
         || body.contains("_expr(") || body.contains("_stmt(")
 }
 
-/// Name of the innermost `fn …` whose body brackets byte `pos`. Used to detect a
-/// self-recursive walker (e.g. `rewrite_calls`) whose name does not match the
-/// `*_expr`/`*_stmt` convention.
-fn enclosing_fn_name(src: &str, b: &[u8], pos: usize) -> Option<String> {
+/// Name and body-close byte of the innermost `fn …` whose body brackets `pos`.
+/// The name detects a self-recursive walker (e.g. `rewrite_calls`) whose name
+/// doesn't match the `*_expr`/`*_stmt` convention; the close bounds the tail in
+/// which an external `map_children`/`map_exprs` deferral may live.
+fn enclosing_fn(src: &str, b: &[u8], pos: usize) -> Option<(String, usize)> {
     let mut best: Option<(usize, usize, String)> = None;
     let mut search = 0;
     while let Some(rel) = src[search..].find("fn ") {
@@ -255,10 +268,10 @@ fn enclosing_fn_name(src: &str, b: &[u8], pos: usize) -> Option<String> {
             best = Some((bo, bc, name));
         }
     }
-    best.map(|(_, _, name)| name)
+    best.map(|(_, bc, name)| (name, bc))
 }
 
-fn scan_arms(src: &str, b: &[u8], open: usize, close: usize, out: &mut Vec<Violation>) {
+fn scan_arms(src: &str, b: &[u8], open: usize, close: usize, defers: bool, out: &mut Vec<Violation>) {
     // Walk the body; an arm pattern begins at arm-level (depth 1) right after the
     // body `{`, or after a top-level `,`/`}` of a previous arm. We detect a `=>`
     // at depth 1 and inspect the preceding pattern + following body.
@@ -278,8 +291,15 @@ fn scan_arms(src: &str, b: &[u8], open: usize, close: usize, out: &mut Vec<Viola
                 let (body, next) = read_arm_body(b, src, body_start, close);
                 if let Some(binder) = catchall_binder(&pat) {
                     if let Some(reason) = silent_body(&body, binder.as_deref()) {
-                        let line = src[..arm_pat_start].bytes().filter(|&c| c == b'\n').count() + 1;
-                        out.push(Violation { line, arm: format!("{} => {}  [{}]", pat, body.trim(), reason) });
+                        // An empty `_ => {}` that defers to an external map_children/
+                        // map_exprs on the scrutinee is not a drop. (A non-empty drop —
+                        // `other => other` / `_ => x.kind` — produces the match value
+                        // itself, so it can never defer; always flag it.)
+                        let deferral = reason == "empty" && defers;
+                        if !deferral {
+                            let line = src[..arm_pat_start].bytes().filter(|&c| c == b'\n').count() + 1;
+                            out.push(Violation { line, arm: format!("{} => {}  [{}]", pat, body.trim(), reason) });
+                        }
                     }
                 }
                 i = next;
@@ -335,6 +355,17 @@ fn read_arm_body(b: &[u8], src: &str, start: usize, close: usize) -> (String, us
 
 fn is_ident_byte(c: u8) -> bool {
     c == b'_' || c.is_ascii_alphanumeric()
+}
+
+/// The scrutinee variable of a `match … .kind` — the identifier immediately
+/// before `.kind` (`expr` from `&expr.kind`, `self` from `self.kind`). None for
+/// non-trivial scrutinees like `foo().kind` (no `<var>.map_children` deferral).
+fn scrutinee_var(scrutinee: &str) -> Option<String> {
+    let head = scrutinee.trim().split(".kind").next()?;
+    let ident: String = head.chars().rev()
+        .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+        .collect::<String>().chars().rev().collect();
+    if ident.is_empty() { None } else { Some(ident) }
 }
 
 /// If `pat` is a catch-all (`_` or a single bare binder), return Some(binder
