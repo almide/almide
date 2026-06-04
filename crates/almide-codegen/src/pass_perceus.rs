@@ -1112,6 +1112,11 @@ impl IrVisitor for DecCollector<'_> {
 
 /// Recursively collect all variables used in tail expressions at any nesting level.
 fn collect_all_tail_vars(expr: &IrExpr, vars: &mut HashSet<VarId>) {
+    // Tail-CONTEXT analysis: only positions that flow to a return are walked. A
+    // plain exhaustive walk would over-collect (treat consumed Call args etc. as
+    // returned) and so suppress leak diagnostics, so the non-tail node kinds are
+    // listed as explicit no-ops, not recursed — total by construction, semantics
+    // unchanged.
     match &expr.kind {
         IrExprKind::Block { stmts, expr: Some(tail) } => {
             // Variables in this block's tail
@@ -1122,7 +1127,12 @@ fn collect_all_tail_vars(expr: &IrExpr, vars: &mut HashSet<VarId>) {
                     IrStmtKind::Bind { value, .. } => collect_all_tail_vars(value, vars),
                     IrStmtKind::Assign { value, .. } => collect_all_tail_vars(value, vars),
                     IrStmtKind::Expr { expr } => collect_all_tail_vars(expr, vars),
-                    _ => {}
+                    IrStmtKind::BindDestructure { .. } | IrStmtKind::FieldAssign { .. }
+                    | IrStmtKind::Guard { .. } | IrStmtKind::IndexAssign { .. }
+                    | IrStmtKind::MapInsert { .. } | IrStmtKind::ListSwap { .. }
+                    | IrStmtKind::ListReverse { .. } | IrStmtKind::ListRotateLeft { .. }
+                    | IrStmtKind::ListCopySlice { .. } | IrStmtKind::RcInc { .. }
+                    | IrStmtKind::RcDec { .. } | IrStmtKind::Comment { .. } => {}
                 }
             }
             collect_all_tail_vars(tail, vars);
@@ -1131,7 +1141,13 @@ fn collect_all_tail_vars(expr: &IrExpr, vars: &mut HashSet<VarId>) {
             for stmt in stmts {
                 match &stmt.kind {
                     IrStmtKind::Bind { value, .. } => collect_all_tail_vars(value, vars),
-                    _ => {}
+                    IrStmtKind::Assign { .. } | IrStmtKind::Expr { .. }
+                    | IrStmtKind::BindDestructure { .. } | IrStmtKind::FieldAssign { .. }
+                    | IrStmtKind::Guard { .. } | IrStmtKind::IndexAssign { .. }
+                    | IrStmtKind::MapInsert { .. } | IrStmtKind::ListSwap { .. }
+                    | IrStmtKind::ListReverse { .. } | IrStmtKind::ListRotateLeft { .. }
+                    | IrStmtKind::ListCopySlice { .. } | IrStmtKind::RcInc { .. }
+                    | IrStmtKind::RcDec { .. } | IrStmtKind::Comment { .. } => {}
                 }
             }
         }
@@ -1145,7 +1161,26 @@ fn collect_all_tail_vars(expr: &IrExpr, vars: &mut HashSet<VarId>) {
             for arm in arms { collect_all_tail_vars(&arm.body, vars); }
         }
         IrExprKind::Lambda { body, .. } => collect_all_tail_vars(body, vars),
-        _ => {}
+        // No return/tail position in any other node kind — listed so a new kind
+        // forces a tail-or-not decision instead of silently joining this no-op set.
+        IrExprKind::Await { .. } | IrExprKind::BinOp { .. } | IrExprKind::Borrow { .. }
+        | IrExprKind::BoxNew { .. } | IrExprKind::Break | IrExprKind::Call { .. }
+        | IrExprKind::Clone { .. } | IrExprKind::ClosureCreate { .. } | IrExprKind::Continue
+        | IrExprKind::Deref { .. } | IrExprKind::EmptyMap | IrExprKind::EnvLoad { .. }
+        | IrExprKind::Fan { .. } | IrExprKind::FnRef { .. } | IrExprKind::ForIn { .. }
+        | IrExprKind::Hole | IrExprKind::IndexAccess { .. } | IrExprKind::InlineRust { .. }
+        | IrExprKind::IterChain { .. } | IrExprKind::List { .. } | IrExprKind::LitBool { .. }
+        | IrExprKind::LitFloat { .. } | IrExprKind::LitInt { .. } | IrExprKind::LitStr { .. }
+        | IrExprKind::MapAccess { .. } | IrExprKind::MapLiteral { .. } | IrExprKind::Member { .. }
+        | IrExprKind::OptionNone | IrExprKind::OptionSome { .. } | IrExprKind::OptionalChain { .. }
+        | IrExprKind::Range { .. } | IrExprKind::RcWrap { .. } | IrExprKind::Record { .. }
+        | IrExprKind::RenderedCall { .. } | IrExprKind::ResultErr { .. } | IrExprKind::ResultOk { .. }
+        | IrExprKind::RuntimeCall { .. } | IrExprKind::RustMacro { .. } | IrExprKind::SpreadRecord { .. }
+        | IrExprKind::StringInterp { .. } | IrExprKind::TailCall { .. } | IrExprKind::ToOption { .. }
+        | IrExprKind::ToVec { .. } | IrExprKind::Todo { .. } | IrExprKind::Try { .. }
+        | IrExprKind::Tuple { .. } | IrExprKind::TupleIndex { .. } | IrExprKind::UnOp { .. }
+        | IrExprKind::Unit | IrExprKind::Unwrap { .. } | IrExprKind::UnwrapOr { .. }
+        | IrExprKind::Var { .. } | IrExprKind::While { .. } => {}
     }
 }
 
@@ -1171,6 +1206,13 @@ fn collect_var_refs_stmt(stmt: &IrStmt, refs: &mut HashSet<VarId>) {
         IrStmtKind::Expr { expr } => collect_var_refs_expr(expr, refs),
         IrStmtKind::Guard { cond, else_ } => { collect_var_refs_expr(cond, refs); collect_var_refs_expr(else_, refs); }
         IrStmtKind::RcInc { var } | IrStmtKind::RcDec { var } => { refs.insert(*var); }
-        _ => {}
+        // Explicit no-op, NOT a recurse: this ref set drives last-use → RcDec
+        // placement, so its semantics must not change. Listing every remaining
+        // kind makes a new IrStmtKind a compile error here, never a silent drop.
+        IrStmtKind::BindDestructure { .. }
+        | IrStmtKind::IndexAssign { .. } | IrStmtKind::MapInsert { .. }
+        | IrStmtKind::FieldAssign { .. } | IrStmtKind::ListSwap { .. }
+        | IrStmtKind::ListReverse { .. } | IrStmtKind::ListRotateLeft { .. }
+        | IrStmtKind::ListCopySlice { .. } | IrStmtKind::Comment { .. } => {}
     }
 }
