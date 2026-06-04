@@ -87,116 +87,25 @@ fn compute_syntactic_counts_module(module: &IrModule) -> HashMap<VarId, u32> {
     counts
 }
 
-fn count_syntactic(expr: &IrExpr, counts: &mut HashMap<VarId, u32>) {
-    match &expr.kind {
-        IrExprKind::Var { id } => { *counts.entry(*id).or_insert(0) += 1; }
-        IrExprKind::BinOp { left, right, .. } => {
-            count_syntactic(left, counts); count_syntactic(right, counts);
+/// Counts every syntactic `Var` use by riding the exhaustive `IrVisitor` walk —
+/// so no node kind (incl. `IterChain`/`RcWrap`/`TailCall`, present here because
+/// StreamFusion/TCO run before this pass) can silently drop a subtree and
+/// under-count a var, which would desync the `remaining` last-use tracking.
+struct SyntacticCounter<'a> {
+    counts: &'a mut HashMap<VarId, u32>,
+}
+
+impl IrVisitor for SyntacticCounter<'_> {
+    fn visit_expr(&mut self, expr: &IrExpr) {
+        if let IrExprKind::Var { id } = &expr.kind {
+            *self.counts.entry(*id).or_insert(0) += 1;
         }
-        IrExprKind::UnOp { operand, .. } => count_syntactic(operand, counts),
-        IrExprKind::If { cond, then, else_ } => {
-            count_syntactic(cond, counts); count_syntactic(then, counts); count_syntactic(else_, counts);
-        }
-        IrExprKind::Match { subject, arms } => {
-            count_syntactic(subject, counts);
-            for arm in arms {
-                if let Some(g) = &arm.guard { count_syntactic(g, counts); }
-                count_syntactic(&arm.body, counts);
-            }
-        }
-        IrExprKind::Block { stmts, expr } => {
-            for s in stmts { count_syntactic_stmt(s, counts); }
-            if let Some(e) = expr { count_syntactic(e, counts); }
-        }
-        IrExprKind::Call { target, args, .. } => {
-            match target {
-                CallTarget::Method { object, .. } => count_syntactic(object, counts),
-                CallTarget::Computed { callee } => count_syntactic(callee, counts),
-                _ => {}
-            }
-            for a in args { count_syntactic(a, counts); }
-        }
-        IrExprKind::RuntimeCall { args, .. } => {
-            for a in args { count_syntactic(a, counts); }
-        }
-        IrExprKind::List { elements } | IrExprKind::Tuple { elements }
-        | IrExprKind::Fan { exprs: elements } => {
-            for e in elements { count_syntactic(e, counts); }
-        }
-        IrExprKind::Record { fields, .. } => {
-            for (_, e) in fields { count_syntactic(e, counts); }
-        }
-        IrExprKind::SpreadRecord { base, fields } => {
-            count_syntactic(base, counts);
-            for (_, e) in fields { count_syntactic(e, counts); }
-        }
-        IrExprKind::MapLiteral { entries } => {
-            for (k, v) in entries { count_syntactic(k, counts); count_syntactic(v, counts); }
-        }
-        IrExprKind::Range { start, end, .. } => {
-            count_syntactic(start, counts); count_syntactic(end, counts);
-        }
-        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. }
-        | IrExprKind::OptionalChain { expr: object, .. } => count_syntactic(object, counts),
-        IrExprKind::IndexAccess { object, index } => {
-            count_syntactic(object, counts); count_syntactic(index, counts);
-        }
-        IrExprKind::MapAccess { object, key } => {
-            count_syntactic(object, counts); count_syntactic(key, counts);
-        }
-        IrExprKind::ForIn { iterable, body, .. } => {
-            count_syntactic(iterable, counts);
-            for s in body { count_syntactic_stmt(s, counts); }
-        }
-        IrExprKind::While { cond, body } => {
-            count_syntactic(cond, counts);
-            for s in body { count_syntactic_stmt(s, counts); }
-        }
-        IrExprKind::Lambda { body, .. } => count_syntactic(body, counts),
-        IrExprKind::StringInterp { parts } => {
-            for p in parts { if let IrStringPart::Expr { expr } = p { count_syntactic(expr, counts); } }
-        }
-        IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr }
-        | IrExprKind::OptionSome { expr } | IrExprKind::Try { expr }
-        | IrExprKind::Unwrap { expr } | IrExprKind::ToOption { expr }
-        | IrExprKind::Await { expr }
-        | IrExprKind::Clone { expr } | IrExprKind::Deref { expr }
-        | IrExprKind::Borrow { expr, .. } | IrExprKind::BoxNew { expr }
-        | IrExprKind::ToVec { expr } => count_syntactic(expr, counts),
-        IrExprKind::UnwrapOr { expr, fallback } => {
-            count_syntactic(expr, counts); count_syntactic(fallback, counts);
-        }
-        IrExprKind::RustMacro { args, .. } => {
-            for a in args { count_syntactic(a, counts); }
-        }
-        _ => {}
+        walk_expr(self, expr); // exhaustive recursion into all children
     }
 }
 
-fn count_syntactic_stmt(stmt: &IrStmt, counts: &mut HashMap<VarId, u32>) {
-    match &stmt.kind {
-        IrStmtKind::Bind { value, .. } | IrStmtKind::BindDestructure { value, .. }
-        | IrStmtKind::Assign { value, .. } => count_syntactic(value, counts),
-        IrStmtKind::IndexAssign { index, value, .. } => {
-            count_syntactic(index, counts); count_syntactic(value, counts);
-        }
-        IrStmtKind::MapInsert { key, value, .. } => {
-            count_syntactic(key, counts); count_syntactic(value, counts);
-        }
-        IrStmtKind::FieldAssign { value, .. } => count_syntactic(value, counts),
-        IrStmtKind::ListSwap { a, b, .. } => {
-            count_syntactic(a, counts); count_syntactic(b, counts);
-        }
-        IrStmtKind::ListReverse { end, .. } | IrStmtKind::ListRotateLeft { end, .. } => {
-            count_syntactic(end, counts);
-        }
-        IrStmtKind::ListCopySlice { len, .. } => count_syntactic(len, counts),
-        IrStmtKind::Expr { expr } => count_syntactic(expr, counts),
-        IrStmtKind::Guard { cond, else_ } => {
-            count_syntactic(cond, counts); count_syntactic(else_, counts);
-        }
-        IrStmtKind::Comment { .. } | IrStmtKind::RcInc { .. } | IrStmtKind::RcDec { .. } => {}
-    }
+fn count_syntactic(expr: &IrExpr, counts: &mut HashMap<VarId, u32>) {
+    SyntacticCounter { counts }.visit_expr(expr);
 }
 
 // ── Clone ID classification ────────────────────────────────────────
@@ -534,7 +443,15 @@ fn insert_clones_live(
         IrExprKind::RustMacro { name, args } => IrExprKind::RustMacro {
             name, args: args.into_iter().map(|a| insert_clones_live(a, always, eligible, remaining, in_loop)).collect(),
         },
-        other => other,
+        // Default: recurse into every child through the exhaustive `map_children`
+        // chokepoint, so no un-listed node kind (`IterChain`/`RcWrap`/`TailCall`/
+        // future variants) silently drops its subtree — that was the DIV2-sibling
+        // (clone insertion blind to closures fused inside a chain). Leaf kinds have
+        // no children and pass through unchanged.
+        other => {
+            let e = IrExpr { kind: other, ty: ty.clone(), span, def_id: None };
+            return e.map_children(&mut |child| insert_clones_live(child, always, eligible, remaining, in_loop));
+        }
     };
 
     IrExpr { kind, ty, span, def_id: None }
@@ -569,7 +486,12 @@ fn insert_clone_stmts_live(
             IrStmtKind::MapInsert { target, key, value } => IrStmtKind::MapInsert {
                 target, key: insert_clones_live(key, always, eligible, remaining, in_loop), value: insert_clones_live(value, always, eligible, remaining, in_loop),
             },
-            other => other,
+            // Default: recurse every expr child via the exhaustive `map_exprs`
+            // chokepoint so no un-listed stmt kind (`ListSwap`/`ListReverse`/… —
+            // which `count_syntactic` already counts) drops its expr subtree.
+            other => IrStmt { kind: other, span: s.span }
+                .map_exprs(&mut |e| insert_clones_live(e, always, eligible, remaining, in_loop))
+                .kind,
         };
         IrStmt { kind, span: s.span }
     }).collect()

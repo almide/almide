@@ -31,7 +31,6 @@ const LEGACY_DEBT: &[&str] = &[
     "crates/almide-codegen/src/pass_borrow_inference.rs",
     "crates/almide-codegen/src/pass_box_deref.rs",
     "crates/almide-codegen/src/pass_capture_clone.rs",
-    "crates/almide-codegen/src/pass_clone.rs",
     "crates/almide-codegen/src/pass_closure_conversion.rs",
     "crates/almide-codegen/src/pass_concretize_types.rs",
     "crates/almide-codegen/src/pass_effect_inference.rs",
