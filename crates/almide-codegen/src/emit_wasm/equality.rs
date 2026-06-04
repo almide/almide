@@ -303,10 +303,10 @@ impl FuncCompiler<'_> {
         self.scratch.free_i32(a);
     }
 
-    /// Structural map equality (Swiss table): [a_ptr, b_ptr] → i32.
+    /// Structural map equality (compact-ordered-dict): [a_ptr, b_ptr] → i32.
     /// Equal iff same size and every (k,v) of `a` is present in `b` with an
-    /// equal value. Iterates a's occupied slots and probes b for each key,
-    /// mirroring the `get` probe loop, then compares values recursively.
+    /// equal value. Walks a's dense entries in insertion order and probes b's
+    /// COD index for each key, then compares values recursively.
     fn emit_map_eq_deep(&mut self, key_ty: &Ty, val_ty: &Ty) {
         use super::engine::layout::{SWISS_MAP, map as lm};
         let map_cap_off = self.emitter.layout_reg.fixed_offset(SWISS_MAP, lm::CAP);
@@ -319,13 +319,16 @@ impl FuncCompiler<'_> {
         let b = self.scratch.alloc_i32();
         let result = self.scratch.alloc_i32();
         let acap = self.scratch.alloc_i32();
+        let alen = self.scratch.alloc_i32();
         let aeb = self.scratch.alloc_i32();
         let ai = self.scratch.alloc_i32();
         let sk32 = self.scratch.alloc_i32();
         let sk64 = self.scratch.alloc_i64();
         let bcap = self.scratch.alloc_i32();
+        let bib = self.scratch.alloc_i32();
         let beb = self.scratch.alloc_i32();
         let bidx = self.scratch.alloc_i32();
+        let bei = self.scratch.alloc_i32();
         let h2 = self.scratch.alloc_i32();
         let tg = self.scratch.alloc_i32();
         let found = self.scratch.alloc_i32();
@@ -342,15 +345,16 @@ impl FuncCompiler<'_> {
               if_i32; i32_const(0);
               else_;
                 i32_const(1); local_set(result);
+                local_get(a); i32_load(0); local_set(alen);
                 local_get(a); i32_load(map_cap_off); local_set(acap);
-                local_get(a); i32_const(map_tags_off); i32_add; local_get(acap); i32_add; local_set(aeb);
+        });
+        self.emit_dict_entries_base(a, acap);
+        wasm!(self.func, {
+                local_set(aeb);
                 i32_const(0); local_set(ai);
                 block_empty; loop_empty;                                  // [A] a-exit, [B] a-loop
-                  local_get(ai); local_get(acap); i32_ge_u; br_if(1);     // done iterating a
-                  // Skip empty slots in a.
-                  local_get(a); i32_const(map_tags_off); i32_add; local_get(ai); i32_add; i32_load8_u(0); i32_eqz;
-                  if_empty; local_get(ai); i32_const(1); i32_add; local_set(ai); br(1); end;
-                  // Load this entry's key into the search-key register.
+                  local_get(ai); local_get(alen); i32_ge_u; br_if(1);     // done iterating a (dense)
+                  // Load this dense entry's key into the search-key register.
                   local_get(aeb); local_get(ai); i32_const(es as i32); i32_mul; i32_add;
         });
         self.emit_key_load(key_ty, 0);
@@ -361,8 +365,11 @@ impl FuncCompiler<'_> {
                   local_get(b); i32_load(map_cap_off); local_set(bcap);
                   local_get(bcap); i32_eqz;
                   if_empty; else_;                                        // [D] bcap==0 guard
-                    local_get(b); i32_const(map_tags_off); i32_add; local_get(bcap); i32_add; local_set(beb);
         });
+        self.emit_dict_index_base(b, bcap);
+        wasm!(self.func, { local_set(bib); });
+        self.emit_dict_entries_base(b, bcap);
+        wasm!(self.func, { local_set(beb); });
         self.emit_search_key_load(key_ty, sk32, sk64);
         self.emit_hash_key(key_ty);
         self.emit_h1_h2(bcap, bidx, h2);
@@ -372,7 +379,10 @@ impl FuncCompiler<'_> {
                       local_get(tg); i32_eqz; br_if(1);                  // empty slot → key absent
                       local_get(tg); local_get(h2); i32_eq;
                       if_empty;                                          // [G] tag matches
-                        local_get(beb); local_get(bidx); i32_const(es as i32); i32_mul; i32_add;
+                        // bei = index[bidx] - 1 (1-based pointer into dense entries)
+                        local_get(bib); local_get(bidx); i32_const(lm::INDEX_SLOT_SIZE as i32); i32_mul; i32_add;
+                        i32_load(0); i32_const(1); i32_sub; local_set(bei);
+                        local_get(beb); local_get(bei); i32_const(es as i32); i32_mul; i32_add;
         });
         self.emit_key_load(key_ty, 0);
         self.emit_search_key_load(key_ty, sk32, sk64);
@@ -396,7 +406,7 @@ impl FuncCompiler<'_> {
             });
             self.emit_load_at(val_ty, 0);
             wasm!(self.func, {
-                  local_get(beb); local_get(bidx); i32_const(es as i32); i32_mul; i32_add; i32_const(ks as i32); i32_add;
+                  local_get(beb); local_get(bei); i32_const(es as i32); i32_mul; i32_add; i32_const(ks as i32); i32_add;
             });
             self.emit_load_at(val_ty, 0);
             self.emit_eq_typed(val_ty);
@@ -415,13 +425,16 @@ impl FuncCompiler<'_> {
         self.scratch.free_i32(found);
         self.scratch.free_i32(tg);
         self.scratch.free_i32(h2);
+        self.scratch.free_i32(bei);
         self.scratch.free_i32(bidx);
         self.scratch.free_i32(beb);
+        self.scratch.free_i32(bib);
         self.scratch.free_i32(bcap);
         self.scratch.free_i64(sk64);
         self.scratch.free_i32(sk32);
         self.scratch.free_i32(ai);
         self.scratch.free_i32(aeb);
+        self.scratch.free_i32(alen);
         self.scratch.free_i32(acap);
         self.scratch.free_i32(result);
         self.scratch.free_i32(b);

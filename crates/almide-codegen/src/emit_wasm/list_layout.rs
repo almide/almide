@@ -70,18 +70,9 @@ impl FuncCompiler<'_> {
         w.get(list_local).field_load(LIST, list::LEN);
     }
 
-    // ── Swiss Table helpers ──
+    // ── Compact-ordered-dict tag helpers (the tags array is unchanged from the old layout) ──
 
-    /// Swiss Table setup: load cap, compute entries_base. Stack: `[]`
-    /// Sets `cap_local = map[CAP]`, `eb_local = map + TAGS_OFFSET + cap`.
-    pub fn emit_swiss_setup(&mut self, map: u32, cap_local: u32, eb_local: u32) {
-        use super::engine::{WasmBuilder, layout::{SWISS_MAP, map as m}};
-        let mut w = WasmBuilder::new(&mut self.func, &self.emitter.layout_reg);
-        w.get(map).field_load(SWISS_MAP, m::CAP).set(cap_local);
-        w.get(map).field_addr(SWISS_MAP, m::TAGS).get(cap_local).add().set(eb_local);
-    }
-
-    /// Load Swiss Table tag at index. Stack: `[] → [tag:i32]`
+    /// Load the COD tag byte at slot index. Stack: `[] → [tag:i32]`
     pub fn emit_swiss_tag_load(&mut self, map: u32, idx: u32) {
         use super::engine::{WasmBuilder, layout::{SWISS_MAP, map as m, MemType}};
         let mut w = WasmBuilder::new(&mut self.func, &self.emitter.layout_reg);
