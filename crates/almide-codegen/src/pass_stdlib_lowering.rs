@@ -652,7 +652,12 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
             symbol,
             args: args.into_iter().map(|a| rewrite_expr(a)).collect(),
         },
-        other => other,
+        // Default: recurse every child via the exhaustive map_children chokepoint
+        // so no un-listed node kind silently drops its subtree.
+        other => {
+            let e = IrExpr { kind: other, ty: ty.clone(), span, def_id: None };
+            return e.map_children(&mut |c| rewrite_expr(c));
+        }
     };
 
     IrExpr { kind, ty, span, def_id: None }
@@ -713,7 +718,10 @@ fn rewrite_stmts(stmts: Vec<IrStmt>) -> Vec<IrStmt> {
             IrStmtKind::MapInsert { target, key, value } => IrStmtKind::MapInsert {
                 target, key: rewrite_expr(key), value: rewrite_expr(value),
             },
-            other => other,
+            // Default: recurse every expr child via the exhaustive map_exprs chokepoint.
+            other => IrStmt { kind: other, span: s.span }
+                .map_exprs(&mut |e| rewrite_expr(e))
+                .kind,
         };
         IrStmt { kind, span: s.span }
     }).collect()
@@ -1254,119 +1262,45 @@ fn count_lambda_body_uses(expr: &IrExpr, targets: &HashSet<VarId>) -> HashMap<Va
 }
 
 fn count_lbu_expr(expr: &IrExpr, targets: &HashSet<VarId>, counts: &mut HashMap<VarId, u32>, in_multi: bool) {
-    match &expr.kind {
-        IrExprKind::Var { id } if targets.contains(id) => {
-            *counts.entry(*id).or_insert(0) += if in_multi { 2 } else { 1 };
-        }
-        IrExprKind::Block { stmts, expr } => {
-            for s in stmts { count_lbu_stmt(s, targets, counts, in_multi); }
-            if let Some(e) = expr { count_lbu_expr(e, targets, counts, in_multi); }
-        }
-        IrExprKind::If { cond, then, else_ } => {
-            count_lbu_expr(cond, targets, counts, in_multi);
-            count_lbu_expr(then, targets, counts, in_multi);
-            count_lbu_expr(else_, targets, counts, in_multi);
-        }
-        IrExprKind::Match { subject, arms } => {
-            count_lbu_expr(subject, targets, counts, in_multi);
-            for arm in arms {
-                if let Some(g) = &arm.guard { count_lbu_expr(g, targets, counts, in_multi); }
-                count_lbu_expr(&arm.body, targets, counts, in_multi);
-            }
-        }
-        IrExprKind::ForIn { iterable, body, .. } => {
-            count_lbu_expr(iterable, targets, counts, in_multi);
-            for s in body { count_lbu_stmt(s, targets, counts, true); }
-        }
-        IrExprKind::While { cond, body } => {
-            count_lbu_expr(cond, targets, counts, true);
-            for s in body { count_lbu_stmt(s, targets, counts, true); }
-        }
-        IrExprKind::Lambda { body, .. } => {
-            count_lbu_expr(body, targets, counts, true);
-        }
-        IrExprKind::Call { target, args, .. } => {
-            match target {
-                CallTarget::Method { object, .. } => count_lbu_expr(object, targets, counts, in_multi),
-                CallTarget::Computed { callee } => count_lbu_expr(callee, targets, counts, in_multi),
-                _ => {}
-            }
-            for a in args { count_lbu_expr(a, targets, counts, in_multi); }
-        }
-        IrExprKind::BinOp { left, right, .. } => {
-            count_lbu_expr(left, targets, counts, in_multi);
-            count_lbu_expr(right, targets, counts, in_multi);
-        }
-        IrExprKind::UnOp { operand, .. } => count_lbu_expr(operand, targets, counts, in_multi),
-        IrExprKind::List { elements } | IrExprKind::Tuple { elements }
-        | IrExprKind::Fan { exprs: elements } => {
-            for e in elements { count_lbu_expr(e, targets, counts, in_multi); }
-        }
-        IrExprKind::Record { fields, .. } => {
-            for (_, e) in fields { count_lbu_expr(e, targets, counts, in_multi); }
-        }
-        IrExprKind::SpreadRecord { base, fields } => {
-            count_lbu_expr(base, targets, counts, in_multi);
-            for (_, e) in fields { count_lbu_expr(e, targets, counts, in_multi); }
-        }
-        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. }
-        | IrExprKind::OptionalChain { expr: object, .. } => count_lbu_expr(object, targets, counts, in_multi),
-        IrExprKind::IndexAccess { object, index } | IrExprKind::MapAccess { object, key: index } => {
-            count_lbu_expr(object, targets, counts, in_multi);
-            count_lbu_expr(index, targets, counts, in_multi);
-        }
-        IrExprKind::Range { start, end, .. } => {
-            count_lbu_expr(start, targets, counts, in_multi);
-            count_lbu_expr(end, targets, counts, in_multi);
-        }
-        IrExprKind::StringInterp { parts } => {
-            for p in parts { if let IrStringPart::Expr { expr } = p { count_lbu_expr(expr, targets, counts, in_multi); } }
-        }
-        IrExprKind::MapLiteral { entries } => {
-            for (k, v) in entries { count_lbu_expr(k, targets, counts, in_multi); count_lbu_expr(v, targets, counts, in_multi); }
-        }
-        IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr }
-        | IrExprKind::OptionSome { expr } | IrExprKind::Try { expr }
-        | IrExprKind::Unwrap { expr } | IrExprKind::ToOption { expr }
-        | IrExprKind::Clone { expr } | IrExprKind::Deref { expr }
-        | IrExprKind::Borrow { expr, .. } | IrExprKind::BoxNew { expr }
-        | IrExprKind::ToVec { expr } | IrExprKind::Await { expr } => {
-            count_lbu_expr(expr, targets, counts, in_multi);
-        }
-        IrExprKind::UnwrapOr { expr, fallback } => {
-            count_lbu_expr(expr, targets, counts, in_multi);
-            count_lbu_expr(fallback, targets, counts, in_multi);
-        }
-        IrExprKind::RustMacro { args, .. } => {
-            for a in args { count_lbu_expr(a, targets, counts, in_multi); }
-        }
-        _ => {}
-    }
+    LbuCounter { targets, counts, in_multi }.visit_expr(expr);
 }
 
-fn count_lbu_stmt(stmt: &IrStmt, targets: &HashSet<VarId>, counts: &mut HashMap<VarId, u32>, in_multi: bool) {
-    match &stmt.kind {
-        IrStmtKind::Bind { value, .. } | IrStmtKind::BindDestructure { value, .. }
-        | IrStmtKind::Assign { value, .. } | IrStmtKind::FieldAssign { value, .. } => {
-            count_lbu_expr(value, targets, counts, in_multi);
+/// Counts target-var uses by riding the exhaustive `IrVisitor` walk, so no node
+/// kind (incl. IterChain/RcWrap/TailCall) drops a subtree and under-counts — which
+/// would let a captured var move when it must clone. A use inside a loop or nested
+/// lambda counts double (conservative: forces a clone).
+struct LbuCounter<'a> {
+    targets: &'a HashSet<VarId>,
+    counts: &'a mut HashMap<VarId, u32>,
+    in_multi: bool,
+}
+
+impl IrVisitor for LbuCounter<'_> {
+    fn visit_expr(&mut self, expr: &IrExpr) {
+        match &expr.kind {
+            IrExprKind::Var { id } if self.targets.contains(id) => {
+                *self.counts.entry(*id).or_insert(0) += if self.in_multi { 2 } else { 1 };
+            }
+            // Multi-execution contexts: their bodies run per-iteration/per-call,
+            // so a use inside counts double.
+            IrExprKind::ForIn { iterable, body, .. } => {
+                self.visit_expr(iterable);
+                let saved = std::mem::replace(&mut self.in_multi, true);
+                for s in body { self.visit_stmt(s); }
+                self.in_multi = saved;
+            }
+            IrExprKind::While { cond, body } => {
+                let saved = std::mem::replace(&mut self.in_multi, true);
+                self.visit_expr(cond);
+                for s in body { self.visit_stmt(s); }
+                self.in_multi = saved;
+            }
+            IrExprKind::Lambda { body, .. } => {
+                let saved = std::mem::replace(&mut self.in_multi, true);
+                self.visit_expr(body);
+                self.in_multi = saved;
+            }
+            _ => walk_expr(self, expr), // default: recurse all children at current in_multi
         }
-        IrStmtKind::IndexAssign { index, value, .. } | IrStmtKind::MapInsert { key: index, value, .. } => {
-            count_lbu_expr(index, targets, counts, in_multi);
-            count_lbu_expr(value, targets, counts, in_multi);
-        }
-        IrStmtKind::Expr { expr } => count_lbu_expr(expr, targets, counts, in_multi),
-        IrStmtKind::Guard { cond, else_ } => {
-            count_lbu_expr(cond, targets, counts, in_multi);
-            count_lbu_expr(else_, targets, counts, in_multi);
-        }
-        IrStmtKind::ListSwap { a, b, .. } => {
-            count_lbu_expr(a, targets, counts, in_multi);
-            count_lbu_expr(b, targets, counts, in_multi);
-        }
-        IrStmtKind::ListReverse { end, .. } | IrStmtKind::ListRotateLeft { end, .. } => {
-            count_lbu_expr(end, targets, counts, in_multi);
-        }
-        IrStmtKind::ListCopySlice { len, .. } => count_lbu_expr(len, targets, counts, in_multi),
-        IrStmtKind::Comment { .. } | IrStmtKind::RcInc { .. } | IrStmtKind::RcDec { .. } => {}
     }
 }
