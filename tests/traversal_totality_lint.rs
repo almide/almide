@@ -26,18 +26,6 @@ use std::path::{Path, PathBuf};
 /// Each must be migrated to a canonical primitive (`IrMutVisitor`/`map_children`)
 /// or have its catch-all made loud/delegating; then delete it from this list.
 const LEGACY_DEBT: &[&str] = &[
-    "crates/almide-codegen/src/pass_anf.rs",
-    "crates/almide-codegen/src/pass_borrow_inference.rs",
-    "crates/almide-codegen/src/pass_capture_clone.rs",
-    "crates/almide-codegen/src/pass_concretize_types.rs",
-    "crates/almide-codegen/src/pass_effect_inference.rs",
-    "crates/almide-codegen/src/pass_lambda_type_resolve.rs",
-    "crates/almide-codegen/src/pass_licm.rs",
-    "crates/almide-codegen/src/pass_matrix_shape_spec.rs",
-    "crates/almide-codegen/src/pass_mut_param_lowering.rs",
-    "crates/almide-codegen/src/pass_peephole.rs",
-    "crates/almide-codegen/src/pass_rust_lowering.rs",
-    "crates/almide-codegen/src/pass_tco.rs",
 ];
 
 fn repo_root() -> PathBuf {

@@ -129,7 +129,34 @@ fn hoist_loops(expr: &mut IrExpr, vt: &mut VarTable, pure_fns: &HashSet<Sym>, mm
             if hoist_loops(cond, vt, pure_fns, mm) { changed = true; }
             for s in body { if hoist_loops_stmt(s, vt, pure_fns, mm) { changed = true; } }
         }
-        _ => {}
+        // Explicit-preserve: hoisting is selective — these node kinds are
+        // not descended for loop discovery here. Listing every remaining
+        // variant makes a new IrExprKind a compile error, not a silent drop.
+        IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. }
+        | IrExprKind::LitStr { .. } | IrExprKind::LitBool { .. }
+        | IrExprKind::Unit | IrExprKind::Var { .. } | IrExprKind::FnRef { .. }
+        | IrExprKind::BinOp { .. } | IrExprKind::UnOp { .. }
+        | IrExprKind::Fan { .. } | IrExprKind::Break | IrExprKind::Continue
+        | IrExprKind::Call { .. } | IrExprKind::TailCall { .. }
+        | IrExprKind::RuntimeCall { .. } | IrExprKind::List { .. }
+        | IrExprKind::MapLiteral { .. } | IrExprKind::EmptyMap
+        | IrExprKind::Record { .. } | IrExprKind::SpreadRecord { .. }
+        | IrExprKind::Tuple { .. } | IrExprKind::Range { .. }
+        | IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. }
+        | IrExprKind::IndexAccess { .. } | IrExprKind::MapAccess { .. }
+        | IrExprKind::StringInterp { .. } | IrExprKind::ResultOk { .. }
+        | IrExprKind::ResultErr { .. } | IrExprKind::OptionSome { .. }
+        | IrExprKind::OptionNone | IrExprKind::Try { .. }
+        | IrExprKind::Unwrap { .. } | IrExprKind::UnwrapOr { .. }
+        | IrExprKind::ToOption { .. } | IrExprKind::OptionalChain { .. }
+        | IrExprKind::Await { .. } | IrExprKind::Clone { .. }
+        | IrExprKind::Deref { .. } | IrExprKind::Borrow { .. }
+        | IrExprKind::BoxNew { .. } | IrExprKind::RcWrap { .. }
+        | IrExprKind::RustMacro { .. } | IrExprKind::ToVec { .. }
+        | IrExprKind::RenderedCall { .. } | IrExprKind::InlineRust { .. }
+        | IrExprKind::ClosureCreate { .. } | IrExprKind::EnvLoad { .. }
+        | IrExprKind::IterChain { .. } | IrExprKind::Hole
+        | IrExprKind::Todo { .. } => {}
     }
     changed
 }
@@ -185,7 +212,36 @@ fn try_hoist_from_loop(expr: &mut IrExpr, vt: &mut VarTable, pure_fns: &HashSet<
                 extract_invariants_from_stmt(stmt, &loop_defined, vt, &mut hoisted, pure_fns, mm);
             }
         }
-        _ => {}
+        // Explicit-preserve: only loop heads (ForIn/While) drive hoisting
+        // here; every other node kind yields no hoisted bindings. Listing
+        // each variant turns a new IrExprKind into a compile error.
+        IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. }
+        | IrExprKind::LitStr { .. } | IrExprKind::LitBool { .. }
+        | IrExprKind::Unit | IrExprKind::Var { .. } | IrExprKind::FnRef { .. }
+        | IrExprKind::BinOp { .. } | IrExprKind::UnOp { .. }
+        | IrExprKind::If { .. } | IrExprKind::Match { .. }
+        | IrExprKind::Block { .. } | IrExprKind::Fan { .. }
+        | IrExprKind::Break | IrExprKind::Continue
+        | IrExprKind::Call { .. } | IrExprKind::TailCall { .. }
+        | IrExprKind::RuntimeCall { .. } | IrExprKind::List { .. }
+        | IrExprKind::MapLiteral { .. } | IrExprKind::EmptyMap
+        | IrExprKind::Record { .. } | IrExprKind::SpreadRecord { .. }
+        | IrExprKind::Tuple { .. } | IrExprKind::Range { .. }
+        | IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. }
+        | IrExprKind::IndexAccess { .. } | IrExprKind::MapAccess { .. }
+        | IrExprKind::Lambda { .. } | IrExprKind::StringInterp { .. }
+        | IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. }
+        | IrExprKind::OptionSome { .. } | IrExprKind::OptionNone
+        | IrExprKind::Try { .. } | IrExprKind::Unwrap { .. }
+        | IrExprKind::UnwrapOr { .. } | IrExprKind::ToOption { .. }
+        | IrExprKind::OptionalChain { .. } | IrExprKind::Await { .. }
+        | IrExprKind::Clone { .. } | IrExprKind::Deref { .. }
+        | IrExprKind::Borrow { .. } | IrExprKind::BoxNew { .. }
+        | IrExprKind::RcWrap { .. } | IrExprKind::RustMacro { .. }
+        | IrExprKind::ToVec { .. } | IrExprKind::RenderedCall { .. }
+        | IrExprKind::InlineRust { .. } | IrExprKind::ClosureCreate { .. }
+        | IrExprKind::EnvLoad { .. } | IrExprKind::IterChain { .. }
+        | IrExprKind::Hole | IrExprKind::Todo { .. } => {}
     }
 
     hoisted
@@ -262,7 +318,13 @@ fn collect_pattern_defined_vars(pat: &IrPattern, defined: &mut HashSet<VarId>) {
                 if let Some(p) = &f.pattern { collect_pattern_defined_vars(p, defined); }
             }
         }
-        _ => {}
+        // Explicit-preserve (zero behavior change): these patterns bind no
+        // vars that the current analysis tracks. NOTE: `List` does bind vars
+        // inside `elements` and was already dropped by the prior `_ => {}` —
+        // preserving that exact behavior here, but now a NEW IrPattern variant
+        // is a compile error instead of a silent miss. See residual risk.
+        IrPattern::Wildcard | IrPattern::Literal { .. }
+        | IrPattern::None | IrPattern::List { .. } => {}
     }
 }
 
@@ -313,7 +375,35 @@ fn collect_defined_vars_expr(expr: &IrExpr, defined: &mut HashSet<VarId>, mm: &M
                 }
             }
         }
-        _ => {}
+        // Explicit-preserve: only the scopes/loops/mutating-Module-calls above
+        // define variables relevant to LICM. Every other node (including Call
+        // with a non-Module target) defines nothing. Listing each variant
+        // turns a new IrExprKind into a compile error instead of a silent miss.
+        IrExprKind::Call { .. } | IrExprKind::TailCall { .. }
+        | IrExprKind::RuntimeCall { .. }
+        | IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. }
+        | IrExprKind::LitStr { .. } | IrExprKind::LitBool { .. }
+        | IrExprKind::Unit | IrExprKind::Var { .. } | IrExprKind::FnRef { .. }
+        | IrExprKind::BinOp { .. } | IrExprKind::UnOp { .. }
+        | IrExprKind::Fan { .. } | IrExprKind::Break | IrExprKind::Continue
+        | IrExprKind::List { .. } | IrExprKind::MapLiteral { .. }
+        | IrExprKind::EmptyMap | IrExprKind::Record { .. }
+        | IrExprKind::SpreadRecord { .. } | IrExprKind::Tuple { .. }
+        | IrExprKind::Range { .. } | IrExprKind::Member { .. }
+        | IrExprKind::TupleIndex { .. } | IrExprKind::IndexAccess { .. }
+        | IrExprKind::MapAccess { .. } | IrExprKind::StringInterp { .. }
+        | IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. }
+        | IrExprKind::OptionSome { .. } | IrExprKind::OptionNone
+        | IrExprKind::Try { .. } | IrExprKind::Unwrap { .. }
+        | IrExprKind::UnwrapOr { .. } | IrExprKind::ToOption { .. }
+        | IrExprKind::OptionalChain { .. } | IrExprKind::Await { .. }
+        | IrExprKind::Clone { .. } | IrExprKind::Deref { .. }
+        | IrExprKind::Borrow { .. } | IrExprKind::BoxNew { .. }
+        | IrExprKind::RcWrap { .. } | IrExprKind::RustMacro { .. }
+        | IrExprKind::ToVec { .. } | IrExprKind::RenderedCall { .. }
+        | IrExprKind::InlineRust { .. } | IrExprKind::ClosureCreate { .. }
+        | IrExprKind::EnvLoad { .. } | IrExprKind::IterChain { .. }
+        | IrExprKind::Hole | IrExprKind::Todo { .. } => {}
     }
 }
 
@@ -349,7 +439,16 @@ fn extract_invariants_from_stmt(
             // the hoisted binding's type (Result<(),_>) incompatible with
             // non-effect function return type (()).
         }
-        _ => {}
+        // Explicit-preserve: only Bind / Expr / Assign / Guard values are
+        // examined for invariant sub-expressions. The remaining statement
+        // kinds carry no hoistable RHS in this analysis. Listing each one
+        // makes a new IrStmtKind a compile error, not a silent skip.
+        IrStmtKind::BindDestructure { .. } | IrStmtKind::FieldAssign { .. }
+        | IrStmtKind::IndexAssign { .. } | IrStmtKind::MapInsert { .. }
+        | IrStmtKind::ListSwap { .. } | IrStmtKind::ListReverse { .. }
+        | IrStmtKind::ListRotateLeft { .. } | IrStmtKind::ListCopySlice { .. }
+        | IrStmtKind::RcInc { .. } | IrStmtKind::RcDec { .. }
+        | IrStmtKind::Comment { .. } => {}
     }
 }
 
@@ -397,7 +496,7 @@ fn try_hoist_expr(
             match target {
                 CallTarget::Method { object, .. } => try_hoist_expr(object, loop_defined, vt, hoisted, pure_fns, mm),
                 CallTarget::Computed { callee } => try_hoist_expr(callee, loop_defined, vt, hoisted, pure_fns, mm),
-                _ => {}
+                other @ (CallTarget::Named { .. } | CallTarget::Module { .. }) => { let _ = other; }
             }
             for arg in args {
                 try_hoist_expr(arg, loop_defined, vt, hoisted, pure_fns, mm);
@@ -483,7 +582,30 @@ fn try_hoist_expr(
                 extract_invariants_from_stmt(stmt, &nested_defined, vt, hoisted, pure_fns, mm);
             }
         }
-        _ => {}
+        // Explicit-preserve: the whole-expression hoist check above already
+        // decided these nodes are not worth recursing into for sub-part
+        // hoisting (they are leaves, control flow with their own scoping, or
+        // wrappers handled by the whole-expr path). Listing every remaining
+        // variant turns a new IrExprKind into a compile error, not a silent
+        // dropped subtree.
+        IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. }
+        | IrExprKind::LitStr { .. } | IrExprKind::LitBool { .. }
+        | IrExprKind::Unit | IrExprKind::Var { .. } | IrExprKind::FnRef { .. }
+        | IrExprKind::Match { .. } | IrExprKind::Block { .. }
+        | IrExprKind::Fan { .. } | IrExprKind::Break | IrExprKind::Continue
+        | IrExprKind::TailCall { .. } | IrExprKind::MapLiteral { .. }
+        | IrExprKind::EmptyMap | IrExprKind::SpreadRecord { .. }
+        | IrExprKind::TupleIndex { .. } | IrExprKind::Lambda { .. }
+        | IrExprKind::OptionNone | IrExprKind::Try { .. }
+        | IrExprKind::Unwrap { .. } | IrExprKind::UnwrapOr { .. }
+        | IrExprKind::ToOption { .. } | IrExprKind::Await { .. }
+        | IrExprKind::Clone { .. } | IrExprKind::Deref { .. }
+        | IrExprKind::Borrow { .. } | IrExprKind::BoxNew { .. }
+        | IrExprKind::RcWrap { .. } | IrExprKind::RustMacro { .. }
+        | IrExprKind::ToVec { .. } | IrExprKind::RenderedCall { .. }
+        | IrExprKind::InlineRust { .. } | IrExprKind::ClosureCreate { .. }
+        | IrExprKind::EnvLoad { .. } | IrExprKind::IterChain { .. }
+        | IrExprKind::Hole | IrExprKind::Todo { .. } => {}
     }
 }
 
@@ -518,7 +640,36 @@ fn has_assignment(expr: &IrExpr) -> bool {
         }
         IrExprKind::If { cond, then, else_ } => has_assignment(cond) || has_assignment(then) || has_assignment(else_),
         IrExprKind::Match { subject, arms } => has_assignment(subject) || arms.iter().any(|a| has_assignment(&a.body)),
-        _ => false,
+        // Explicit-preserve: only Block/If/Match are scanned for nested
+        // assignments here; an Assign reachable through any other node kind
+        // would not be hoistable for other reasons (impurity / control flow).
+        // Listing each variant makes a new IrExprKind a compile error.
+        IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. }
+        | IrExprKind::LitStr { .. } | IrExprKind::LitBool { .. }
+        | IrExprKind::Unit | IrExprKind::Var { .. } | IrExprKind::FnRef { .. }
+        | IrExprKind::BinOp { .. } | IrExprKind::UnOp { .. }
+        | IrExprKind::Fan { .. } | IrExprKind::ForIn { .. }
+        | IrExprKind::While { .. } | IrExprKind::Break | IrExprKind::Continue
+        | IrExprKind::Call { .. } | IrExprKind::TailCall { .. }
+        | IrExprKind::RuntimeCall { .. } | IrExprKind::List { .. }
+        | IrExprKind::MapLiteral { .. } | IrExprKind::EmptyMap
+        | IrExprKind::Record { .. } | IrExprKind::SpreadRecord { .. }
+        | IrExprKind::Tuple { .. } | IrExprKind::Range { .. }
+        | IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. }
+        | IrExprKind::IndexAccess { .. } | IrExprKind::MapAccess { .. }
+        | IrExprKind::Lambda { .. } | IrExprKind::StringInterp { .. }
+        | IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. }
+        | IrExprKind::OptionSome { .. } | IrExprKind::OptionNone
+        | IrExprKind::Try { .. } | IrExprKind::Unwrap { .. }
+        | IrExprKind::UnwrapOr { .. } | IrExprKind::ToOption { .. }
+        | IrExprKind::OptionalChain { .. } | IrExprKind::Await { .. }
+        | IrExprKind::Clone { .. } | IrExprKind::Deref { .. }
+        | IrExprKind::Borrow { .. } | IrExprKind::BoxNew { .. }
+        | IrExprKind::RcWrap { .. } | IrExprKind::RustMacro { .. }
+        | IrExprKind::ToVec { .. } | IrExprKind::RenderedCall { .. }
+        | IrExprKind::InlineRust { .. } | IrExprKind::ClosureCreate { .. }
+        | IrExprKind::EnvLoad { .. } | IrExprKind::IterChain { .. }
+        | IrExprKind::Hole | IrExprKind::Todo { .. } => false,
     }
 }
 
@@ -527,7 +678,14 @@ fn has_assignment_stmt(stmt: &IrStmt) -> bool {
         IrStmtKind::Assign { .. } | IrStmtKind::FieldAssign { .. } | IrStmtKind::IndexAssign { .. } => true,
         IrStmtKind::Expr { expr } => has_assignment(expr),
         IrStmtKind::Bind { value, .. } => has_assignment(value),
-        _ => false,
+        // Explicit-preserve: remaining statement kinds carry no nested
+        // expression that could hide a hoistable assignment here. Listing
+        // each one makes a new IrStmtKind a compile error.
+        IrStmtKind::BindDestructure { .. } | IrStmtKind::MapInsert { .. }
+        | IrStmtKind::ListSwap { .. } | IrStmtKind::ListReverse { .. }
+        | IrStmtKind::ListRotateLeft { .. } | IrStmtKind::ListCopySlice { .. }
+        | IrStmtKind::Guard { .. } | IrStmtKind::RcInc { .. }
+        | IrStmtKind::RcDec { .. } | IrStmtKind::Comment { .. } => false,
     }
 }
 
@@ -545,7 +703,7 @@ fn has_control_flow(expr: &IrExpr) -> bool {
             let target_cf = match target {
                 CallTarget::Method { object, .. } => has_control_flow(object),
                 CallTarget::Computed { callee } => has_control_flow(callee),
-                _ => false,
+                CallTarget::Named { .. } | CallTarget::Module { .. } => false,
             };
             target_cf || args.iter().any(|a| has_control_flow(a))
         }
@@ -572,7 +730,28 @@ fn has_control_flow(expr: &IrExpr) -> bool {
         IrExprKind::UnwrapOr { expr: e, fallback: f } => {
             has_control_flow(e) || has_control_flow(f)
         }
-        _ => false,
+        // Explicit-preserve: these node kinds are treated as control-flow-free
+        // for hoisting (Match/Lambda are conservatively reported as false here
+        // because their bodies have their own scoping). Preserving the prior
+        // `false` for every remaining variant makes a new IrExprKind a compile
+        // error, not a silent miss.
+        IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. }
+        | IrExprKind::LitStr { .. } | IrExprKind::LitBool { .. }
+        | IrExprKind::Unit | IrExprKind::Var { .. } | IrExprKind::FnRef { .. }
+        | IrExprKind::Match { .. } | IrExprKind::Fan { .. }
+        | IrExprKind::TailCall { .. } | IrExprKind::MapLiteral { .. }
+        | IrExprKind::EmptyMap | IrExprKind::Record { .. }
+        | IrExprKind::SpreadRecord { .. } | IrExprKind::Range { .. }
+        | IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. }
+        | IrExprKind::IndexAccess { .. } | IrExprKind::MapAccess { .. }
+        | IrExprKind::Lambda { .. } | IrExprKind::StringInterp { .. }
+        | IrExprKind::OptionNone | IrExprKind::Await { .. }
+        | IrExprKind::Borrow { .. } | IrExprKind::BoxNew { .. }
+        | IrExprKind::RcWrap { .. } | IrExprKind::RustMacro { .. }
+        | IrExprKind::ToVec { .. } | IrExprKind::RenderedCall { .. }
+        | IrExprKind::InlineRust { .. } | IrExprKind::ClosureCreate { .. }
+        | IrExprKind::EnvLoad { .. } | IrExprKind::IterChain { .. }
+        | IrExprKind::Hole | IrExprKind::Todo { .. } => false,
     }
 }
 
@@ -582,7 +761,14 @@ fn has_control_flow_stmt(stmt: &IrStmt) -> bool {
         | IrStmtKind::FieldAssign { value, .. } => has_control_flow(value),
         IrStmtKind::Expr { expr } => has_control_flow(expr),
         IrStmtKind::Guard { cond, else_ } => has_control_flow(cond) || has_control_flow(else_),
-        _ => false,
+        // Explicit-preserve: remaining statement kinds carry no expression
+        // whose control flow would block hoisting here. Listing each one makes
+        // a new IrStmtKind a compile error.
+        IrStmtKind::BindDestructure { .. } | IrStmtKind::IndexAssign { .. }
+        | IrStmtKind::MapInsert { .. } | IrStmtKind::ListSwap { .. }
+        | IrStmtKind::ListReverse { .. } | IrStmtKind::ListRotateLeft { .. }
+        | IrStmtKind::ListCopySlice { .. } | IrStmtKind::RcInc { .. }
+        | IrStmtKind::RcDec { .. } | IrStmtKind::Comment { .. } => false,
     }
 }
 
@@ -628,7 +814,8 @@ fn is_pure(expr: &IrExpr, pure_fns: &HashSet<Sym>) -> bool {
                     pure_fns.contains(&key)
                 }
                 CallTarget::Named { name } => pure_fns.contains(name),
-                _ => false,
+                // Method/Computed dispatch can hide effects → conservatively impure.
+                CallTarget::Method { .. } | CallTarget::Computed { .. } => false,
             };
             call_pure && args.iter().all(|a| is_pure(a, pure_fns))
         }
@@ -662,12 +849,22 @@ fn is_pure(expr: &IrExpr, pure_fns: &HashSet<Sym>) -> bool {
         IrExprKind::StringInterp { parts } => {
             parts.iter().all(|p| match p {
                 IrStringPart::Expr { expr } => is_pure(expr, pure_fns),
-                _ => true,
+                lit @ IrStringPart::Lit { .. } => { let _ = lit; true }
             })
         }
 
-        // Everything else: conservatively impure
-        _ => false,
+        // Everything else: conservatively impure. Listed explicitly so a new
+        // IrExprKind is a compile error here, not a silently-impure default.
+        IrExprKind::If { .. } | IrExprKind::Match { .. }
+        | IrExprKind::Block { .. } | IrExprKind::Fan { .. }
+        | IrExprKind::ForIn { .. } | IrExprKind::While { .. }
+        | IrExprKind::TailCall { .. } | IrExprKind::RuntimeCall { .. }
+        | IrExprKind::Lambda { .. } | IrExprKind::Try { .. }
+        | IrExprKind::Unwrap { .. } | IrExprKind::ToOption { .. }
+        | IrExprKind::OptionalChain { .. } | IrExprKind::Await { .. }
+        | IrExprKind::RcWrap { .. } | IrExprKind::InlineRust { .. }
+        | IrExprKind::ClosureCreate { .. } | IrExprKind::EnvLoad { .. }
+        | IrExprKind::IterChain { .. } | IrExprKind::Todo { .. } => false,
     }
 }
 
@@ -680,7 +877,7 @@ fn refs_are_outside_loop(expr: &IrExpr, loop_defined: &HashSet<VarId>) -> bool {
             let target_ok = match target {
                 CallTarget::Method { object, .. } => refs_are_outside_loop(object, loop_defined),
                 CallTarget::Computed { callee } => refs_are_outside_loop(callee, loop_defined),
-                _ => true,
+                CallTarget::Named { .. } | CallTarget::Module { .. } => true,
             };
             target_ok && args.iter().all(|a| refs_are_outside_loop(a, loop_defined))
         }
@@ -730,7 +927,7 @@ fn refs_are_outside_loop(expr: &IrExpr, loop_defined: &HashSet<VarId>) -> bool {
         IrExprKind::StringInterp { parts } => {
             parts.iter().all(|p| match p {
                 IrStringPart::Expr { expr } => refs_are_outside_loop(expr, loop_defined),
-                _ => true,
+                lit @ IrStringPart::Lit { .. } => { let _ = lit; true }
             })
         }
         IrExprKind::MapLiteral { entries } => {
@@ -759,8 +956,21 @@ fn refs_are_outside_loop(expr: &IrExpr, loop_defined: &HashSet<VarId>) -> bool {
                         && refs_are_outside_loop(&a.body, loop_defined)
                 })
         }
-        // Leaf nodes (LitInt, LitFloat, LitStr, LitBool, Unit, OptionNone, etc.)
-        _ => true,
+        // Leaf nodes and nodes whose inner refs aren't tracked here: treated as
+        // "all refs outside loop" (true). Listed explicitly so a new IrExprKind
+        // is a compile error, not a silent always-true default.
+        IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. }
+        | IrExprKind::LitStr { .. } | IrExprKind::LitBool { .. }
+        | IrExprKind::Unit | IrExprKind::FnRef { .. } | IrExprKind::Fan { .. }
+        | IrExprKind::ForIn { .. } | IrExprKind::While { .. }
+        | IrExprKind::Break | IrExprKind::Continue | IrExprKind::TailCall { .. }
+        | IrExprKind::RuntimeCall { .. } | IrExprKind::EmptyMap
+        | IrExprKind::OptionNone | IrExprKind::Await { .. }
+        | IrExprKind::RcWrap { .. } | IrExprKind::RustMacro { .. }
+        | IrExprKind::RenderedCall { .. } | IrExprKind::InlineRust { .. }
+        | IrExprKind::ClosureCreate { .. } | IrExprKind::EnvLoad { .. }
+        | IrExprKind::IterChain { .. } | IrExprKind::Hole
+        | IrExprKind::Todo { .. } => true,
     }
 }
 
@@ -861,7 +1071,8 @@ fn expr_is_pure_with(expr: &IrExpr, pure_fns: &HashSet<Sym>) -> bool {
                     pure_fns.contains(&key)
                 }
                 CallTarget::Named { name } => pure_fns.contains(name),
-                _ => false,
+                // Method/Computed dispatch can hide effects → conservatively impure.
+                CallTarget::Method { .. } | CallTarget::Computed { .. } => false,
             };
             call_pure && args.iter().all(|a| expr_is_pure_with(a, pure_fns))
         }
@@ -899,11 +1110,22 @@ fn expr_is_pure_with(expr: &IrExpr, pure_fns: &HashSet<Sym>) -> bool {
         IrExprKind::StringInterp { parts } => {
             parts.iter().all(|p| match p {
                 IrStringPart::Expr { expr } => expr_is_pure_with(expr, pure_fns),
-                _ => true,
+                lit @ IrStringPart::Lit { .. } => { let _ = lit; true }
             })
         }
-        // ForIn, While, Fan, Await, etc. — conservatively impure
-        _ => false,
+        // ForIn, While, Fan, Await, etc. — conservatively impure. Listed
+        // explicitly so a new IrExprKind is a compile error here, not a
+        // silently-impure default.
+        IrExprKind::Fan { .. } | IrExprKind::ForIn { .. }
+        | IrExprKind::While { .. } | IrExprKind::TailCall { .. }
+        | IrExprKind::RuntimeCall { .. } | IrExprKind::MapLiteral { .. }
+        | IrExprKind::SpreadRecord { .. } | IrExprKind::MapAccess { .. }
+        | IrExprKind::Try { .. } | IrExprKind::Unwrap { .. }
+        | IrExprKind::ToOption { .. } | IrExprKind::OptionalChain { .. }
+        | IrExprKind::Await { .. } | IrExprKind::RcWrap { .. }
+        | IrExprKind::InlineRust { .. } | IrExprKind::ClosureCreate { .. }
+        | IrExprKind::EnvLoad { .. } | IrExprKind::IterChain { .. }
+        | IrExprKind::Todo { .. } => false,
     }
 }
 

@@ -307,12 +307,57 @@ fn substitute_var(expr: &mut IrExpr, from: VarId, to: VarId) {
                 match &mut s.kind {
                     IrStmtKind::Bind { value, .. } | IrStmtKind::Assign { value, .. } => substitute_var(value, from, to),
                     IrStmtKind::Expr { expr } => substitute_var(expr, from, to),
-                    _ => {}
+                    // Explicit-preserve: substitute_var only descends into the
+                    // statement forms produced by the binary-rec rewrite
+                    // (Bind / Assign / Expr). Other statement kinds are never
+                    // traversed here — no-op, total-by-construction.
+                    IrStmtKind::BindDestructure { .. }
+                    | IrStmtKind::IndexAssign { .. }
+                    | IrStmtKind::MapInsert { .. }
+                    | IrStmtKind::FieldAssign { .. }
+                    | IrStmtKind::Guard { .. }
+                    | IrStmtKind::Comment { .. }
+                    | IrStmtKind::RcInc { .. }
+                    | IrStmtKind::RcDec { .. }
+                    | IrStmtKind::ListSwap { .. }
+                    | IrStmtKind::ListReverse { .. }
+                    | IrStmtKind::ListRotateLeft { .. }
+                    | IrStmtKind::ListCopySlice { .. } => {}
                 }
             }
             if let Some(e) = expr { substitute_var(e, from, to); }
         }
-        _ => {}
+        // Explicit-preserve: substitute_var performs a surgical single-VarId
+        // replacement over only the forms the binary-rec rewrite constructs.
+        // Recursing more would risk double-processing. Leaves and every other
+        // variant are no-ops — total-by-construction.
+        IrExprKind::Var { .. }
+        | IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. }
+        | IrExprKind::LitStr { .. } | IrExprKind::LitBool { .. }
+        | IrExprKind::Unit | IrExprKind::FnRef { .. }
+        | IrExprKind::Match { .. } | IrExprKind::Fan { .. }
+        | IrExprKind::ForIn { .. } | IrExprKind::While { .. }
+        | IrExprKind::Break | IrExprKind::Continue
+        | IrExprKind::TailCall { .. } | IrExprKind::RuntimeCall { .. }
+        | IrExprKind::List { .. } | IrExprKind::MapLiteral { .. }
+        | IrExprKind::EmptyMap | IrExprKind::Record { .. }
+        | IrExprKind::SpreadRecord { .. } | IrExprKind::Tuple { .. }
+        | IrExprKind::Range { .. } | IrExprKind::Member { .. }
+        | IrExprKind::TupleIndex { .. } | IrExprKind::IndexAccess { .. }
+        | IrExprKind::MapAccess { .. } | IrExprKind::Lambda { .. }
+        | IrExprKind::StringInterp { .. }
+        | IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. }
+        | IrExprKind::OptionSome { .. } | IrExprKind::OptionNone
+        | IrExprKind::Try { .. } | IrExprKind::Unwrap { .. }
+        | IrExprKind::UnwrapOr { .. } | IrExprKind::ToOption { .. }
+        | IrExprKind::OptionalChain { .. } | IrExprKind::Await { .. }
+        | IrExprKind::Clone { .. } | IrExprKind::Deref { .. }
+        | IrExprKind::Borrow { .. } | IrExprKind::BoxNew { .. }
+        | IrExprKind::RcWrap { .. } | IrExprKind::RustMacro { .. }
+        | IrExprKind::ToVec { .. } | IrExprKind::RenderedCall { .. }
+        | IrExprKind::InlineRust { .. } | IrExprKind::ClosureCreate { .. }
+        | IrExprKind::EnvLoad { .. } | IrExprKind::IterChain { .. }
+        | IrExprKind::Hole | IrExprKind::Todo { .. } => {}
     }
 }
 
@@ -438,8 +483,38 @@ fn all_self_calls_in_tail_pos(expr: &IrExpr, fn_name: &str) -> (bool, bool) {
             (has, all)
         }
 
-        // Anything else: scan for non-tail self-calls
-        _ => scan_non_tail(expr, fn_name),
+        // Anything else: scan for non-tail self-calls.
+        // Explicit-preserve: every remaining variant (including a Call that is
+        // NOT a self-call, which falls through the guarded arm above) delegates
+        // to scan_non_tail — same RHS the catch-all had, total-by-construction.
+        IrExprKind::Call { .. }
+        | IrExprKind::TailCall { .. } | IrExprKind::RuntimeCall { .. }
+        | IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. }
+        | IrExprKind::LitStr { .. } | IrExprKind::LitBool { .. }
+        | IrExprKind::Unit | IrExprKind::Var { .. } | IrExprKind::FnRef { .. }
+        | IrExprKind::BinOp { .. } | IrExprKind::UnOp { .. }
+        | IrExprKind::Fan { .. } | IrExprKind::ForIn { .. }
+        | IrExprKind::While { .. } | IrExprKind::Break | IrExprKind::Continue
+        | IrExprKind::List { .. } | IrExprKind::MapLiteral { .. }
+        | IrExprKind::EmptyMap | IrExprKind::Record { .. }
+        | IrExprKind::SpreadRecord { .. } | IrExprKind::Tuple { .. }
+        | IrExprKind::Range { .. } | IrExprKind::Member { .. }
+        | IrExprKind::TupleIndex { .. } | IrExprKind::IndexAccess { .. }
+        | IrExprKind::MapAccess { .. } | IrExprKind::Lambda { .. }
+        | IrExprKind::StringInterp { .. }
+        | IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. }
+        | IrExprKind::OptionSome { .. } | IrExprKind::OptionNone
+        | IrExprKind::Try { .. } | IrExprKind::Unwrap { .. }
+        | IrExprKind::UnwrapOr { .. } | IrExprKind::ToOption { .. }
+        | IrExprKind::OptionalChain { .. } | IrExprKind::Await { .. }
+        | IrExprKind::Clone { .. } | IrExprKind::Deref { .. }
+        | IrExprKind::Borrow { .. } | IrExprKind::BoxNew { .. }
+        | IrExprKind::RcWrap { .. } | IrExprKind::RustMacro { .. }
+        | IrExprKind::ToVec { .. } | IrExprKind::RenderedCall { .. }
+        | IrExprKind::InlineRust { .. } | IrExprKind::ClosureCreate { .. }
+        | IrExprKind::EnvLoad { .. } | IrExprKind::IterChain { .. }
+        | IrExprKind::Hole | IrExprKind::Todo { .. }
+            => scan_non_tail(expr, fn_name),
     }
 }
 
@@ -566,8 +641,19 @@ fn scan_non_tail(expr: &IrExpr, fn_name: &str) -> (bool, bool) {
         IrExprKind::RustMacro { args, .. } => {
             any_has_self_call(args.iter(), fn_name)
         }
-        // Leaf nodes: no self-calls
-        _ => (false, true),
+        // Leaf nodes (and codegen-internal nodes that never carry a TCO-relevant
+        // self-call): no self-calls. Explicit-preserve — same RHS the catch-all
+        // had, total-by-construction so a new IrExprKind is a compile error here.
+        IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. }
+        | IrExprKind::LitStr { .. } | IrExprKind::LitBool { .. }
+        | IrExprKind::Unit | IrExprKind::Var { .. } | IrExprKind::FnRef { .. }
+        | IrExprKind::Break | IrExprKind::Continue
+        | IrExprKind::OptionNone | IrExprKind::EmptyMap
+        | IrExprKind::TailCall { .. } | IrExprKind::RuntimeCall { .. }
+        | IrExprKind::RcWrap { .. } | IrExprKind::RenderedCall { .. }
+        | IrExprKind::InlineRust { .. } | IrExprKind::ClosureCreate { .. }
+        | IrExprKind::EnvLoad { .. } | IrExprKind::IterChain { .. }
+        | IrExprKind::Hole | IrExprKind::Todo { .. } => (false, true),
     }
 }
 
@@ -850,8 +936,43 @@ fn rewrite_tail_expr(
             }
         }
 
-        // Base case: assign result and break
-        _ => {
+        // Base case: assign result and break.
+        // Explicit-preserve: every remaining variant — including a Call that is
+        // NOT a self-call, a ResultOk in a non-effect fn, and a Block with no
+        // trailing expr (all of which fall through the guarded/partial arms
+        // above) — is a base case emitted via emit_base_case. Same RHS the
+        // catch-all had, total-by-construction.
+        //
+        // These patterns bind nothing (`{ .. }` / unit variants), so `expr`
+        // is not partially moved and remains usable whole — exactly as `_` was.
+        IrExprKind::Call { .. } | IrExprKind::ResultOk { .. }
+        | IrExprKind::Block { .. }
+        | IrExprKind::TailCall { .. } | IrExprKind::RuntimeCall { .. }
+        | IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. }
+        | IrExprKind::LitStr { .. } | IrExprKind::LitBool { .. }
+        | IrExprKind::Unit | IrExprKind::Var { .. } | IrExprKind::FnRef { .. }
+        | IrExprKind::BinOp { .. } | IrExprKind::UnOp { .. }
+        | IrExprKind::Fan { .. } | IrExprKind::ForIn { .. }
+        | IrExprKind::While { .. } | IrExprKind::Break | IrExprKind::Continue
+        | IrExprKind::List { .. } | IrExprKind::MapLiteral { .. }
+        | IrExprKind::EmptyMap | IrExprKind::Record { .. }
+        | IrExprKind::SpreadRecord { .. } | IrExprKind::Tuple { .. }
+        | IrExprKind::Range { .. } | IrExprKind::Member { .. }
+        | IrExprKind::TupleIndex { .. } | IrExprKind::IndexAccess { .. }
+        | IrExprKind::MapAccess { .. } | IrExprKind::Lambda { .. }
+        | IrExprKind::StringInterp { .. }
+        | IrExprKind::ResultErr { .. } | IrExprKind::OptionSome { .. }
+        | IrExprKind::OptionNone | IrExprKind::Try { .. }
+        | IrExprKind::Unwrap { .. } | IrExprKind::UnwrapOr { .. }
+        | IrExprKind::ToOption { .. } | IrExprKind::OptionalChain { .. }
+        | IrExprKind::Await { .. } | IrExprKind::Clone { .. }
+        | IrExprKind::Deref { .. } | IrExprKind::Borrow { .. }
+        | IrExprKind::BoxNew { .. } | IrExprKind::RcWrap { .. }
+        | IrExprKind::RustMacro { .. } | IrExprKind::ToVec { .. }
+        | IrExprKind::RenderedCall { .. } | IrExprKind::InlineRust { .. }
+        | IrExprKind::ClosureCreate { .. } | IrExprKind::EnvLoad { .. }
+        | IrExprKind::IterChain { .. }
+        | IrExprKind::Hole | IrExprKind::Todo { .. } => {
             emit_base_case(expr, result_var)
         }
     }

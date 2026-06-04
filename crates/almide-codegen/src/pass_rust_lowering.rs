@@ -414,7 +414,25 @@ fn rewrite_stmts_in_expr(expr: &mut IrExpr, vt: &mut VarTable, shared: &HashSet<
         IrExprKind::RuntimeCall { args, .. } => {
             for a in args.iter_mut() { if rewrite_stmts_in_expr(a, vt, shared) { changed = true; } }
         }
-        _ => {}
+        // No nested statements to rewrite — listed explicitly so a new
+        // statement-bearing IrExprKind is a compile error, not a silent miss.
+        IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. } | IrExprKind::LitStr { .. }
+        | IrExprKind::LitBool { .. } | IrExprKind::Unit | IrExprKind::Var { .. }
+        | IrExprKind::FnRef { .. } | IrExprKind::BinOp { .. } | IrExprKind::UnOp { .. }
+        | IrExprKind::Fan { .. } | IrExprKind::Break | IrExprKind::Continue
+        | IrExprKind::Call { .. } | IrExprKind::TailCall { .. } | IrExprKind::List { .. }
+        | IrExprKind::MapLiteral { .. } | IrExprKind::EmptyMap | IrExprKind::Record { .. }
+        | IrExprKind::SpreadRecord { .. } | IrExprKind::Tuple { .. } | IrExprKind::Range { .. }
+        | IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. } | IrExprKind::IndexAccess { .. }
+        | IrExprKind::MapAccess { .. } | IrExprKind::StringInterp { .. } | IrExprKind::ResultOk { .. }
+        | IrExprKind::ResultErr { .. } | IrExprKind::OptionSome { .. } | IrExprKind::OptionNone
+        | IrExprKind::Try { .. } | IrExprKind::Unwrap { .. } | IrExprKind::UnwrapOr { .. }
+        | IrExprKind::ToOption { .. } | IrExprKind::OptionalChain { .. } | IrExprKind::Await { .. }
+        | IrExprKind::Clone { .. } | IrExprKind::Deref { .. } | IrExprKind::Borrow { .. }
+        | IrExprKind::BoxNew { .. } | IrExprKind::RcWrap { .. } | IrExprKind::RustMacro { .. }
+        | IrExprKind::ToVec { .. } | IrExprKind::RenderedCall { .. } | IrExprKind::InlineRust { .. }
+        | IrExprKind::ClosureCreate { .. } | IrExprKind::EnvLoad { .. } | IrExprKind::IterChain { .. }
+        | IrExprKind::Hole | IrExprKind::Todo { .. } => {}
     }
     changed
 }
@@ -452,7 +470,11 @@ fn rewrite_stmts_in_stmt(stmt: &mut IrStmt, vt: &mut VarTable, shared: &HashSet<
         IrStmtKind::Expr { expr } => {
             if rewrite_stmts_in_expr(expr, vt, shared) { *changed = true; }
         }
-        _ => {}
+        // No statement value to descend — listed explicitly so a new
+        // expr-bearing IrStmtKind is a compile error, not a silent miss.
+        IrStmtKind::Comment { .. } | IrStmtKind::RcDec { .. } | IrStmtKind::RcInc { .. }
+        | IrStmtKind::ListCopySlice { .. } | IrStmtKind::ListReverse { .. }
+        | IrStmtKind::ListRotateLeft { .. } | IrStmtKind::ListSwap { .. } => {}
     }
 }
 
