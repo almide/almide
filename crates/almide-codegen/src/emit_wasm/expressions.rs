@@ -455,89 +455,43 @@ impl FuncCompiler<'_> {
                     });
                     self.scratch.free_i32(scratch);
                 } else {
+                    // COD construction: alloc a table sized for n, then put each
+                    // (key, val) via the shared probe-and-place helper (duplicate
+                    // literal keys → last value wins, dense insertion order kept).
                     let ks = if let Some((k, _)) = entries.first() { values::byte_size(&k.ty) } else { 4 };
                     let vs = if let Some((_, v)) = entries.first() { values::byte_size(&v.ty) } else { 4 };
-                    let entry_size = ks + vs; // no tag per entry
+                    let es = ks + vs;
                     let key_ty = if let Some((k, _)) = entries.first() { k.ty.clone() } else { Ty::String };
-                    let mut cap = 16u32;
+                    let mut cap = super::engine::layout::map::INITIAL_CAP;
                     while cap < n * 2 { cap *= 2; }
-                    // Swiss Table: [header][tags: cap bytes][entries: cap * entry_size]
-                    let total = self.emitter.layout_reg.header_size(super::engine::layout::SWISS_MAP) as i32 as u32 + cap + cap * entry_size;
 
                     let map = self.scratch.alloc_i32();
-                    let idx = self.scratch.alloc_i32();
-                    let eb = self.scratch.alloc_i32(); // entries_base
-                    let h2_lit = self.scratch.alloc_i32();
-                    wasm!(self.func, {
-                        i32_const(total as i32);
-                        call(self.emitter.rt.alloc);
-                        local_set(map);
-                        local_get(map); i32_const(n as i32); i32_store(0);
-                        local_get(map); i32_const(cap as i32); i32_store(self.emitter.layout_reg.fixed_offset(super::engine::layout::SWISS_MAP, super::engine::layout::map::CAP));
-                        // entries_base = map + 8 + cap
-                        local_get(map); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::SWISS_MAP, super::engine::layout::map::TAGS) as i32); i32_add;
-                        i32_const(cap as i32); i32_add; local_set(eb);
-                    });
+                    let cap_local = self.scratch.alloc_i32();
+                    let ib = self.scratch.alloc_i32();
+                    let eb = self.scratch.alloc_i32();
+                    let tmp = self.scratch.alloc_i32();
+                    wasm!(self.func, { i32_const(cap as i32); local_set(cap_local); });
+                    self.emit_dict_alloc(map, cap_local, es);
+                    self.emit_dict_index_base(map, cap_local);
+                    wasm!(self.func, { local_set(ib); });
+                    self.emit_dict_entries_base(map, cap_local);
+                    wasm!(self.func, { local_set(eb); });
 
                     for (key, val) in entries {
+                        // Materialize the (key, val) into a temp entry buffer.
+                        wasm!(self.func, { i32_const(es as i32); call(self.emitter.rt.alloc); local_set(tmp); local_get(tmp); });
                         self.emit_expr(key);
-                        let sk = if matches!(key_ty, Ty::Int) {
-                            let sk = self.scratch.alloc_i64();
-                            wasm!(self.func, { local_tee(sk); });
-                            sk
-                        } else {
-                            let sk = self.scratch.alloc_i32();
-                            wasm!(self.func, { local_tee(sk); });
-                            sk
-                        };
-                        self.emit_hash_key(&key_ty);
-                        // Split into h1 + h2
-                        let ht = self.scratch.alloc_i32();
-                        wasm!(self.func, {
-                            local_tee(ht);
-                            i32_const(cap as i32 - 1); i32_and; local_set(idx);
-                            local_get(ht);
-                            i32_const(25); i32_shr_u; i32_const(0x7F); i32_and;
-                            local_tee(h2_lit);
-                            i32_eqz;
-                            if_empty; i32_const(1); local_set(h2_lit); end;
-                        });
-                        self.scratch.free_i32(ht);
-                        // Probe for empty tag
-                        wasm!(self.func, {
-                            block_empty; loop_empty;
-                              local_get(map); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::SWISS_MAP, super::engine::layout::map::TAGS) as i32); i32_add;
-                              local_get(idx); i32_add; i32_load8_u(0);
-                              i32_eqz; br_if(1);
-                              local_get(idx); i32_const(1); i32_add;
-                              i32_const(cap as i32 - 1); i32_and;
-                              local_set(idx); br(0);
-                            end; end;
-                            // Store tag (1 byte)
-                            local_get(map); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::SWISS_MAP, super::engine::layout::map::TAGS) as i32); i32_add;
-                            local_get(idx); i32_add; local_get(h2_lit); i32_store8(0);
-                            // Store key at entries_base + idx * entry_size
-                            local_get(eb); local_get(idx); i32_const(entry_size as i32); i32_mul; i32_add;
-                        });
-                        if matches!(key_ty, Ty::Int) {
-                            wasm!(self.func, { local_get(sk); i64_store(0); });
-                            self.scratch.free_i64(sk);
-                        } else {
-                            wasm!(self.func, { local_get(sk); i32_store(0); });
-                            self.scratch.free_i32(sk);
-                        }
-                        // Store value at entries_base + idx * entry_size + ks
-                        wasm!(self.func, {
-                            local_get(eb); local_get(idx); i32_const(entry_size as i32); i32_mul; i32_add;
-                            i32_const(ks as i32); i32_add;
-                        });
+                        self.emit_key_store(&key_ty, 0);
+                        wasm!(self.func, { local_get(tmp); i32_const(ks as i32); i32_add; });
                         self.emit_expr(val);
                         self.emit_store_at(&val.ty, 0);
+                        self.emit_dict_put_entry(map, cap_local, ib, eb, tmp, es, ks, vs, &key_ty);
                     }
                     wasm!(self.func, { local_get(map); });
-                    self.scratch.free_i32(h2_lit);
+                    self.scratch.free_i32(tmp);
                     self.scratch.free_i32(eb);
-                    self.scratch.free_i32(idx);
+                    self.scratch.free_i32(ib);
+                    self.scratch.free_i32(cap_local);
                     self.scratch.free_i32(map);
                 }
             }

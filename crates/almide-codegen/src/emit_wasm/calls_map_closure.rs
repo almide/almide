@@ -5,7 +5,6 @@
 use super::FuncCompiler;
 use super::values;
 use almide_ir::IrExpr;
-use almide_lang::types::Ty;
 use wasm_encoder::ValType;
 
 impl FuncCompiler<'_> {
@@ -170,14 +169,12 @@ impl FuncCompiler<'_> {
                 self.map_iter_end(it);
             }
             "filter" => {
-                // filter(m, pred) → Map: rebuild a Swiss table from the entries
-                // where pred(k, v) is true. The map is a Swiss table — the old
-                // dense `[len][entries]` walk read garbage / trapped. Mirrors
-                // `remove`'s rehash-into-a-fresh-table, but keeps an entry when
-                // `pred(k, v)` is true (vs `remove`'s key-mismatch).
+                // filter(m, pred) → Map: dense-walk the source entries[0..len] in
+                // insertion order; for each entry where pred(k, v) is true, append it
+                // to a fresh COD table (source keys are unique, so put_entry always
+                // appends — order preserved). Dest cap = source cap (filter never grows).
                 use super::engine::layout::{SWISS_MAP, map as lm};
-                let map_tags_off = self.emitter.layout_reg.fixed_offset(SWISS_MAP, lm::TAGS) as i32;
-                let map_cap_off = self.emitter.layout_reg.fixed_offset(SWISS_MAP, lm::CAP) as i32;
+                let map_cap_off = self.emitter.layout_reg.fixed_offset(SWISS_MAP, lm::CAP);
                 let (ks, vs) = self.map_kv_sizes(&args[0].ty);
                 let key_ty = self.map_key_ty(&args[0].ty);
                 let val_ty = self.map_val_ty(&args[0].ty);
@@ -185,12 +182,13 @@ impl FuncCompiler<'_> {
                 let m = self.scratch.alloc_i32();
                 let closure = self.scratch.alloc_i32();
                 let cap = self.scratch.alloc_i32();
+                let len = self.scratch.alloc_i32();
                 let nm = self.scratch.alloc_i32();
-                let i = self.scratch.alloc_i32();
+                let ib = self.scratch.alloc_i32();
                 let eb_old = self.scratch.alloc_i32();
                 let eb_new = self.scratch.alloc_i32();
-                let h2r = self.scratch.alloc_i32();
-                let nidx = self.scratch.alloc_i32();
+                let i = self.scratch.alloc_i32();
+                let entry = self.scratch.alloc_i32();
 
                 self.emit_expr(&args[0]);
                 wasm!(self.func, { local_set(m); });
@@ -198,80 +196,49 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, {
                     local_set(closure);
                     local_get(m); i32_load(map_cap_off); local_set(cap);
+                    local_get(m); i32_load(0); local_set(len);
                 });
-                self.emit_alloc_table(nm, cap, es as i32);
+                self.emit_dict_alloc(nm, cap, es);
+                self.emit_dict_index_base(nm, cap);
+                wasm!(self.func, { local_set(ib); });
+                self.emit_dict_entries_base(nm, cap);
+                wasm!(self.func, { local_set(eb_new); });
+                self.emit_dict_entries_base(m, cap);
                 wasm!(self.func, {
-                    local_get(m); i32_const(map_tags_off); i32_add;
-                    local_get(cap); i32_add; local_set(eb_old);
-                    local_get(nm); i32_const(map_tags_off); i32_add;
-                    local_get(cap); i32_add; local_set(eb_new);
+                    local_set(eb_old);
                     i32_const(0); local_set(i);
                     block_empty; loop_empty;
-                      local_get(i); local_get(cap); i32_ge_u; br_if(1);
-                      local_get(m); i32_const(map_tags_off); i32_add;
-                      local_get(i); i32_add; i32_load8_u(0);
-                      if_empty; // occupied (tag != 0)
-                        // pred(env, k, v)
-                        local_get(closure); i32_load(4); // env
-                        local_get(eb_old); local_get(i); i32_const(es as i32); i32_mul; i32_add;
+                      local_get(i); local_get(len); i32_ge_u; br_if(1);
+                      local_get(eb_old); local_get(i); i32_const(es as i32); i32_mul; i32_add; local_set(entry);
+                      // pred(env, k, v)
+                      local_get(closure); i32_load(4); // env
+                      local_get(entry);
                 });
                 self.emit_key_load(&key_ty, 0);
-                wasm!(self.func, {
-                        local_get(eb_old); local_get(i); i32_const(es as i32); i32_mul; i32_add;
-                        i32_const(ks as i32); i32_add;
-                });
+                wasm!(self.func, { local_get(entry); i32_const(ks as i32); i32_add; });
                 self.emit_load_at(&val_ty, 0);
-                wasm!(self.func, {
-                        local_get(closure); i32_load(0); // table_idx
-                });
+                wasm!(self.func, { local_get(closure); i32_load(0); }); // table_idx
                 {
                     let key_vt = Self::key_valtype(&key_ty);
                     let mut ct = vec![ValType::I32, key_vt];
                     if let Some(vt) = values::ty_to_valtype(&val_ty) { ct.push(vt); }
                     self.emit_call_indirect(ct, vec![ValType::I32]);
                 }
+                wasm!(self.func, { if_empty; }); // pred true → keep
+                self.emit_dict_put_entry(nm, cap, ib, eb_new, entry, es, ks, vs, &key_ty);
                 wasm!(self.func, {
-                        if_empty; // pred true → keep: rehash into nm
-                          local_get(eb_old); local_get(i); i32_const(es as i32); i32_mul; i32_add;
-                });
-                self.emit_key_load(&key_ty, 0);
-                self.emit_hash_key(&key_ty);
-                self.emit_h1_h2(cap, nidx, h2r);
-                wasm!(self.func, {
-                          block_empty; loop_empty;
-                            local_get(nm); i32_const(map_tags_off); i32_add;
-                            local_get(nidx); i32_add; i32_load8_u(0);
-                            i32_eqz; br_if(1);
-                            local_get(nidx); i32_const(1); i32_add;
-                            local_get(cap); i32_const(1); i32_sub; i32_and;
-                            local_set(nidx); br(0);
-                          end; end;
-                          // copy tag
-                          local_get(nm); i32_const(map_tags_off); i32_add;
-                          local_get(nidx); i32_add;
-                          local_get(m); i32_const(map_tags_off); i32_add;
-                          local_get(i); i32_add; i32_load8_u(0);
-                          i32_store8(0);
-                          // copy entry
-                          local_get(eb_new); local_get(nidx); i32_const(es as i32); i32_mul; i32_add;
-                          local_get(eb_old); local_get(i); i32_const(es as i32); i32_mul; i32_add;
-                          i32_const(es as i32); memory_copy;
-                          // len++
-                          local_get(nm);
-                          local_get(nm); i32_load(0); i32_const(1); i32_add;
-                          i32_store(0);
-                        end; // pred-true if
-                      end; // occupied if
+                      end; // pred-true if
                       local_get(i); i32_const(1); i32_add; local_set(i); br(0);
                     end; end;
                     local_get(nm);
                 });
-                self.scratch.free_i32(nidx);
-                self.scratch.free_i32(h2r);
+                self.scratch.free_i32(entry);
+                self.scratch.free_i32(i);
                 self.scratch.free_i32(eb_new);
                 self.scratch.free_i32(eb_old);
-                self.scratch.free_i32(i);
+                self.scratch.free_i32(ib);
                 self.scratch.free_i32(nm);
+                self.scratch.free_i32(len);
                 self.scratch.free_i32(cap);
                 self.scratch.free_i32(closure);
                 self.scratch.free_i32(m);
@@ -308,10 +275,10 @@ impl FuncCompiler<'_> {
                 self.map_iter_end(it);
             }
             "find" => {
-                // find(m, pred) → Option[(K, V)]
+                // find(m, pred) → Option[(K, V)]: dense-walk entries[0..len] in
+                // insertion order; return the first (k, v) where pred(k, v) is true.
                 use super::engine::layout::{SWISS_MAP, map as lm};
-                let MAP_TAGS_OFFSET = self.emitter.layout_reg.fixed_offset(SWISS_MAP, lm::TAGS) as i32;
-                let MAP_CAP_OFFSET = self.emitter.layout_reg.fixed_offset(SWISS_MAP, lm::CAP);
+                let map_cap_off = self.emitter.layout_reg.fixed_offset(SWISS_MAP, lm::CAP);
                 let (ks, vs) = self.map_kv_sizes(&args[0].ty);
                 let key_ty = self.map_key_ty(&args[0].ty);
                 let val_ty = self.map_val_ty(&args[0].ty);
@@ -319,41 +286,35 @@ impl FuncCompiler<'_> {
                 let map_ptr = self.scratch.alloc_i32();
                 let closure = self.scratch.alloc_i32();
                 let i = self.scratch.alloc_i32();
+                let len = self.scratch.alloc_i32();
                 let cap = self.scratch.alloc_i32();
                 let eb = self.scratch.alloc_i32();
                 let result = self.scratch.alloc_i32();
                 let tuple_ptr = self.scratch.alloc_i32();
+                let ent = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
                 wasm!(self.func, { local_set(map_ptr); });
                 self.emit_expr(&args[1]);
                 wasm!(self.func, {
                     local_set(closure);
-                    local_get(map_ptr); i32_load(MAP_CAP_OFFSET as u32); local_set(cap);
-                    local_get(map_ptr); i32_const(MAP_TAGS_OFFSET); i32_add;
-                    local_get(cap); i32_add; local_set(eb);
+                    local_get(map_ptr); i32_load(0); local_set(len);
+                    local_get(map_ptr); i32_load(map_cap_off); local_set(cap);
+                });
+                self.emit_dict_entries_base(map_ptr, cap);
+                wasm!(self.func, {
+                    local_set(eb);
                     i32_const(0); local_set(i);
                     i32_const(0); local_set(result); // none
                     block_empty; loop_empty;
-                      local_get(i); local_get(cap); i32_ge_u; br_if(1);
-                      local_get(map_ptr); i32_const(MAP_TAGS_OFFSET); i32_add;
-                      local_get(i); i32_add; i32_load8_u(0); i32_eqz;
-                      if_empty;
-                        local_get(i); i32_const(1); i32_add; local_set(i); br(1);
-                      end;
+                      local_get(i); local_get(len); i32_ge_u; br_if(1);
+                      local_get(eb); local_get(i); i32_const(entry as i32); i32_mul; i32_add; local_set(ent);
                       local_get(closure); i32_load(4);
-                      local_get(eb);
-                      local_get(i); i32_const(entry as i32); i32_mul; i32_add;
+                      local_get(ent);
                 });
                 self.emit_key_load(&key_ty, 0);
-                wasm!(self.func, {
-                      local_get(eb);
-                      local_get(i); i32_const(entry as i32); i32_mul; i32_add;
-                      i32_const(ks as i32); i32_add;
-                });
+                wasm!(self.func, { local_get(ent); i32_const(ks as i32); i32_add; });
                 self.emit_load_at(&val_ty, 0);
-                wasm!(self.func, {
-                      local_get(closure); i32_load(0);
-                });
+                wasm!(self.func, { local_get(closure); i32_load(0); });
                 {
                     let key_vt = Self::key_valtype(&key_ty);
                     let mut ct = vec![ValType::I32, key_vt];
@@ -362,24 +323,9 @@ impl FuncCompiler<'_> {
                 }
                 wasm!(self.func, {
                       if_empty;
-                        // Alloc tuple (key, val) and wrap in Option
+                        // Alloc the (key, val) tuple (one contiguous block) and wrap in Some.
                         i32_const(entry as i32); call(self.emitter.rt.alloc); local_set(tuple_ptr);
-                        // Copy key
-                        local_get(tuple_ptr);
-                        local_get(eb);
-                        local_get(i); i32_const(entry as i32); i32_mul; i32_add;
-                });
-                self.emit_elem_copy_sized(ks);
-                // Copy val
-                wasm!(self.func, {
-                        local_get(tuple_ptr); i32_const(ks as i32); i32_add;
-                        local_get(eb);
-                        local_get(i); i32_const(entry as i32); i32_mul; i32_add;
-                        i32_const(ks as i32); i32_add;
-                });
-                self.emit_elem_copy_sized(vs);
-                wasm!(self.func, {
-                        // Wrap in some
+                        local_get(tuple_ptr); local_get(ent); i32_const(entry as i32); memory_copy;
                         i32_const(4); call(self.emitter.rt.alloc); local_set(result);
                         local_get(result); local_get(tuple_ptr); i32_store(0);
                         br(2); // break out of loop
@@ -389,128 +335,106 @@ impl FuncCompiler<'_> {
                     end; end;
                     local_get(result); // result (none=0 or some ptr)
                 });
+                self.scratch.free_i32(ent);
                 self.scratch.free_i32(tuple_ptr);
                 self.scratch.free_i32(result);
                 self.scratch.free_i32(eb);
                 self.scratch.free_i32(cap);
+                self.scratch.free_i32(len);
                 self.scratch.free_i32(i);
                 self.scratch.free_i32(closure);
                 self.scratch.free_i32(map_ptr);
             }
             "update" => {
-                // update(m, key, f) → Map: apply f to value at key
-                // Swiss Table: memcpy entire map, then find+modify value in the copy.
+                // update(m, key, f) → Map: byte-copy the whole COD table (keys/tags/
+                // index unchanged), dense-scan for the key (found_idx = dense entry
+                // index), then apply f to the value at that dense position in the copy.
                 use super::engine::layout::{SWISS_MAP, map as lm};
-                let MAP_TAGS_OFFSET = self.emitter.layout_reg.fixed_offset(SWISS_MAP, lm::TAGS) as i32;
-                let MAP_CAP_OFFSET = self.emitter.layout_reg.fixed_offset(SWISS_MAP, lm::CAP);
-                let MAP_HEADER_SIZE = self.emitter.layout_reg.header_size(SWISS_MAP) as i32;
+                let map_cap_off = self.emitter.layout_reg.fixed_offset(SWISS_MAP, lm::CAP);
+                let map_hdr = self.emitter.layout_reg.header_size(SWISS_MAP) as i32;
                 let (ks, vs) = self.map_kv_sizes(&args[0].ty);
                 let key_ty = self.map_key_ty(&args[0].ty);
                 let val_ty = self.map_val_ty(&args[0].ty);
                 let entry = ks + vs;
+                let per_slot = 1 + lm::INDEX_SLOT_SIZE as i32 + entry as i32;
                 let map_ptr = self.scratch.alloc_i32();
                 let closure = self.scratch.alloc_i32();
-                let search_key_i64 = self.scratch.alloc_i64();
-                let search_key_i32 = self.scratch.alloc_i32();
+                let sk32 = self.scratch.alloc_i32();
+                let sk64 = self.scratch.alloc_i64();
                 let i = self.scratch.alloc_i32();
+                let len = self.scratch.alloc_i32();
                 let cap = self.scratch.alloc_i32();
                 let eb = self.scratch.alloc_i32();
                 let found_idx = self.scratch.alloc_i32();
                 let new_map = self.scratch.alloc_i32();
                 let total_size = self.scratch.alloc_i32();
+                let valaddr = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
                 wasm!(self.func, { local_set(map_ptr); });
-                // Store search key
                 self.emit_expr(&args[1]); // key
-                match &key_ty {
-                    Ty::Int => {
-                        wasm!(self.func, { local_set(search_key_i64); });
-                    }
-                    _ => {
-                        wasm!(self.func, { local_set(search_key_i32); });
-                    }
-                }
+                self.emit_search_key_store(&key_ty, sk32, sk64);
                 self.emit_expr(&args[2]); // closure f
                 wasm!(self.func, {
                     local_set(closure);
-                    local_get(map_ptr); i32_load(MAP_CAP_OFFSET as u32); local_set(cap);
-                    local_get(map_ptr); i32_const(MAP_TAGS_OFFSET); i32_add;
-                    local_get(cap); i32_add; local_set(eb);
-                    // Find key index by scanning occupied slots
+                    local_get(map_ptr); i32_load(0); local_set(len);
+                    local_get(map_ptr); i32_load(map_cap_off); local_set(cap);
+                });
+                self.emit_dict_entries_base(map_ptr, cap);
+                wasm!(self.func, {
+                    local_set(eb);
                     i32_const(0); local_set(i);
                     i32_const(-1); local_set(found_idx);
                     block_empty; loop_empty;
-                      local_get(i); local_get(cap); i32_ge_u; br_if(1);
-                      // Skip empty slots
-                      local_get(map_ptr); i32_const(MAP_TAGS_OFFSET); i32_add;
-                      local_get(i); i32_add; i32_load8_u(0); i32_eqz;
-                      if_empty;
-                        local_get(i); i32_const(1); i32_add; local_set(i); br(1);
-                      end;
-                      local_get(eb);
-                      local_get(i); i32_const(entry as i32); i32_mul; i32_add;
+                      local_get(i); local_get(len); i32_ge_u; br_if(1);
+                      local_get(eb); local_get(i); i32_const(entry as i32); i32_mul; i32_add;
                 });
                 self.emit_key_load(&key_ty, 0);
-                match &key_ty {
-                    Ty::Int => {
-                        wasm!(self.func, { local_get(search_key_i64); });
-                    }
-                    _ => {
-                        wasm!(self.func, { local_get(search_key_i32); });
-                    }
-                }
+                self.emit_search_key_load(&key_ty, sk32, sk64);
                 self.emit_key_eq(&key_ty);
                 wasm!(self.func, {
                       if_empty; local_get(i); local_set(found_idx); br(2); end; // found → break
                       local_get(i); i32_const(1); i32_add; local_set(i);
                       br(0);
                     end; end;
-                    // If not found, return original
+                    // If not found, return the original map unchanged.
                     local_get(found_idx); i32_const(0); i32_lt_s;
                     if_i32; local_get(map_ptr);
                     else_;
-                      // Copy entire Swiss Table: header + tags + entries
-                      // total_size = MAP_HEADER_SIZE + cap + cap * entry
-                      i32_const(MAP_HEADER_SIZE);
-                      local_get(cap); i32_add;
-                      local_get(cap); i32_const(entry as i32); i32_mul; i32_add;
+                      // Byte-copy the whole COD table: header + cap*per_slot.
+                      i32_const(map_hdr);
+                      local_get(cap); i32_const(per_slot); i32_mul; i32_add;
                       local_tee(total_size);
                       call(self.emitter.rt.alloc); local_set(new_map);
-                      // memcpy entire map
                       local_get(new_map); local_get(map_ptr); local_get(total_size);
                       memory_copy;
-                      // Compute entry base in new map
-                      // new_eb = new_map + MAP_TAGS_OFFSET + cap
-                      // Apply f to value at found_idx
-                      local_get(new_map); i32_const(MAP_TAGS_OFFSET); i32_add;
-                      local_get(cap); i32_add;
+                });
+                // valaddr = dense entries base(new_map, cap) + found_idx*entry + ks
+                self.emit_dict_entries_base(new_map, cap);
+                wasm!(self.func, {
                       local_get(found_idx); i32_const(entry as i32); i32_mul; i32_add;
-                      i32_const(ks as i32); i32_add; // dst val addr on stack
+                      i32_const(ks as i32); i32_add; local_set(valaddr);
+                      local_get(valaddr);              // dst val addr
                       local_get(closure); i32_load(4); // env
-                      // Load old val from same addr
-                      local_get(new_map); i32_const(MAP_TAGS_OFFSET); i32_add;
-                      local_get(cap); i32_add;
-                      local_get(found_idx); i32_const(entry as i32); i32_mul; i32_add;
-                      i32_const(ks as i32); i32_add;
+                      local_get(valaddr);              // load old val from same addr
                 });
                 self.emit_load_at(&val_ty, 0);
-                wasm!(self.func, {
-                      local_get(closure); i32_load(0); // table_idx
-                });
+                wasm!(self.func, { local_get(closure); i32_load(0); }); // table_idx
                 self.emit_closure_call(&val_ty, &val_ty);
                 self.emit_store_at(&val_ty, 0);
                 wasm!(self.func, {
                       local_get(new_map);
                     end;
                 });
+                self.scratch.free_i32(valaddr);
                 self.scratch.free_i32(total_size);
                 self.scratch.free_i32(new_map);
                 self.scratch.free_i32(found_idx);
                 self.scratch.free_i32(eb);
                 self.scratch.free_i32(cap);
+                self.scratch.free_i32(len);
                 self.scratch.free_i32(i);
-                self.scratch.free_i32(search_key_i32);
-                self.scratch.free_i64(search_key_i64);
+                self.scratch.free_i32(sk32);
+                self.scratch.free_i64(sk64);
                 self.scratch.free_i32(closure);
                 self.scratch.free_i32(map_ptr);
             }
@@ -522,53 +446,46 @@ impl FuncCompiler<'_> {
     // (filter method is handled via map.set insertion — see calls_map.rs)
 }
 
-// ── Swiss Table iteration helpers ──
+// ── Compact-ordered-dict iteration helpers ──
 
-/// Scratch locals for iterating a Swiss Table map.
+/// Scratch locals for iterating a compact-ordered-dict map in insertion order.
 pub(super) struct MapIter {
     pub map: u32,       // map pointer
-    pub cap: u32,       // capacity (number of slots)
-    pub eb: u32,        // entry base (pointer to first entry, after tags)
-    pub i: u32,         // slot index (0..cap)
+    pub cap: u32,       // capacity (slot count) — needed only to derive the entries base
+    pub len: u32,       // entry count (dense walk bound)
+    pub eb: u32,        // dense entries base (map + header + cap + cap*INDEX_SLOT_SIZE)
+    pub i: u32,         // dense entry index (0..len)
     pub entry_size: u32, // key_size + val_size
 }
 
 impl FuncCompiler<'_> {
-    /// Allocate scratch locals and emit Swiss Table setup:
-    /// cap = map[CAP_OFFSET], eb = map + TAGS_OFFSET + cap, i = 0.
+    /// Allocate scratch locals and emit COD setup: len = map[0], cap = map[CAP],
+    /// eb = dense entries base, i = 0. Iteration walks the dense entries[0..len].
     pub(super) fn map_iter_begin(&mut self, map_expr: &IrExpr, entry_size: u32) -> MapIter {
         use super::engine::layout::{SWISS_MAP, map as lm};
-                let MAP_TAGS_OFFSET = self.emitter.layout_reg.fixed_offset(SWISS_MAP, lm::TAGS) as i32;
-                let MAP_CAP_OFFSET = self.emitter.layout_reg.fixed_offset(SWISS_MAP, lm::CAP);
+        let map_cap_off = self.emitter.layout_reg.fixed_offset(SWISS_MAP, lm::CAP);
         let map = self.scratch.alloc_i32();
         let cap = self.scratch.alloc_i32();
+        let len = self.scratch.alloc_i32();
         let eb = self.scratch.alloc_i32();
         let i = self.scratch.alloc_i32();
         self.emit_expr(map_expr);
         wasm!(self.func, {
             local_set(map);
-            local_get(map); i32_load(MAP_CAP_OFFSET as u32); local_set(cap);
-            local_get(map); i32_const(MAP_TAGS_OFFSET); i32_add;
-            local_get(cap); i32_add; local_set(eb);
-            i32_const(0); local_set(i);
+            local_get(map); i32_load(0); local_set(len);
+            local_get(map); i32_load(map_cap_off); local_set(cap);
         });
-        MapIter { map, cap, eb, i, entry_size }
+        self.emit_dict_entries_base(map, cap);
+        wasm!(self.func, { local_set(eb); i32_const(0); local_set(i); });
+        MapIter { map, cap, len, eb, i, entry_size }
     }
 
-    /// Emit loop header: block/loop, break if i >= cap, skip empty tag.
-    /// After this, the current slot is guaranteed occupied.
+    /// Emit loop header: block/loop, break if i >= len. Dense entries are all
+    /// occupied (no tag scan), so the current entry is always valid.
     pub(super) fn map_iter_loop_head(&mut self, it: &MapIter) {
-        use super::engine::layout::{SWISS_MAP, map as lm};
-        let MAP_TAGS_OFFSET = self.emitter.layout_reg.fixed_offset(SWISS_MAP, lm::TAGS) as i32;
         wasm!(self.func, {
             block_empty; loop_empty;
-              local_get(it.i); local_get(it.cap); i32_ge_u; br_if(1);
-              // tag check: skip empty
-              local_get(it.map); i32_const(MAP_TAGS_OFFSET); i32_add;
-              local_get(it.i); i32_add; i32_load8_u(0); i32_eqz;
-              if_empty;
-                local_get(it.i); i32_const(1); i32_add; local_set(it.i); br(1);
-              end;
+              local_get(it.i); local_get(it.len); i32_ge_u; br_if(1);
         });
     }
 
@@ -602,23 +519,24 @@ impl FuncCompiler<'_> {
     pub(super) fn map_iter_end(&mut self, it: MapIter) {
         self.scratch.free_i32(it.i);
         self.scratch.free_i32(it.eb);
+        self.scratch.free_i32(it.len);
         self.scratch.free_i32(it.cap);
         self.scratch.free_i32(it.map);
     }
 
-    /// Allocate a full copy of a Swiss Table map (header + tags + entries).
-    /// Returns scratch local holding the new map pointer.
+    /// Allocate a full byte-copy of a COD map (header + tags + index + dense
+    /// entries). Safe for `map`, which transforms values in place: keys, tags,
+    /// and index pointers are unchanged, so the copied index stays valid.
     pub(super) fn map_copy_full(&mut self, it: &MapIter) -> u32 {
         use super::engine::layout::{SWISS_MAP, map as lm};
-        let MAP_TAGS_OFFSET = self.emitter.layout_reg.fixed_offset(SWISS_MAP, lm::TAGS) as i32;
-        let MAP_HEADER_SIZE = self.emitter.layout_reg.header_size(SWISS_MAP) as i32;
+        let map_hdr = self.emitter.layout_reg.header_size(SWISS_MAP) as i32;
+        let per_slot = 1 + lm::INDEX_SLOT_SIZE as i32 + it.entry_size as i32;
         let total = self.scratch.alloc_i32();
         let new_map = self.scratch.alloc_i32();
         wasm!(self.func, {
-            // total = HEADER + cap + cap * entry_size
-            i32_const(MAP_HEADER_SIZE);
-            local_get(it.cap); i32_add;
-            local_get(it.cap); i32_const(it.entry_size as i32); i32_mul; i32_add;
+            // total = header + cap*(tag(1) + INDEX_SLOT_SIZE + entry_size)
+            i32_const(map_hdr);
+            local_get(it.cap); i32_const(per_slot); i32_mul; i32_add;
             local_tee(total);
             call(self.emitter.rt.alloc); local_set(new_map);
             local_get(new_map); local_get(it.map); local_get(total);
@@ -628,15 +546,11 @@ impl FuncCompiler<'_> {
         new_map
     }
 
-    /// Compute entry base for a copied map: new_map + TAGS_OFFSET + cap.
+    /// Compute the dense entries base of a copied map.
     pub(super) fn map_copy_entry_base(&mut self, new_map: u32, it: &MapIter) -> u32 {
-        use super::engine::layout::{SWISS_MAP, map as lm};
-        let MAP_TAGS_OFFSET = self.emitter.layout_reg.fixed_offset(SWISS_MAP, lm::TAGS) as i32;
         let new_eb = self.scratch.alloc_i32();
-        wasm!(self.func, {
-            local_get(new_map); i32_const(MAP_TAGS_OFFSET); i32_add;
-            local_get(it.cap); i32_add; local_set(new_eb);
-        });
+        self.emit_dict_entries_base(new_map, it.cap);
+        wasm!(self.func, { local_set(new_eb); });
         new_eb
     }
 }

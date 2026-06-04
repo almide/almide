@@ -1,0 +1,79 @@
+// Map is a compact-ordered-dict: iteration is insertion order on BOTH targets.
+// Every line below reveals key/value ORDER (not just counts), so a regression to
+// hash-order iteration on either target would break the byte-for-byte comparison.
+
+fn show(label: String, m: Map[String, Int]) -> String = {
+  let parts = map.entries(m) |> list.map((e) => {
+    let (k, v) = e
+    "${k}=${int.to_string(v)}"
+  })
+  "${label}: [${list.join(parts, ", ")}]"
+}
+
+fn main() -> Unit = {
+  // Literal preserves insertion order (deliberately NOT alphabetical/hash order).
+  let lit = ["zebra": 1, "apple": 2, "mango": 3, "delta": 4]
+  println(show("literal", lit))
+
+  // set: new key appends; updating an existing key keeps its position.
+  let s1 = map.set(lit, "echo", 5)
+  println(show("set-new", s1))
+  println(show("set-update", map.set(s1, "apple", 20)))
+
+  // set past INITIAL_CAP forces a grow; dense order must stay 0,1,2,...,29.
+  var big: Map[String, Int] = [:]
+  for n in list.range(0, 30) {
+    big = map.set(big, "k${int.to_string(n)}", n)
+  }
+  println("grow-len: ${int.to_string(map.len(big))}")
+  println("grow-keys: [${list.join(map.keys(big), ",")}]")
+
+  // insert (mutable, in-place) preserves order across its own grow.
+  var mp: Map[String, Int] = [:]
+  for n in list.range(0, 20) {
+    map.insert(mp, "i${int.to_string(n)}", n)
+  }
+  println("insert-keys: [${list.join(map.keys(mp), ",")}]")
+
+  // remove preserves the survivors' order.
+  println(show("remove", map.remove(s1, "mango")))
+
+  // merge: a's order first, then b-only keys; b overrides a's values in place.
+  println(show("merge", map.merge(["x": 1, "y": 2, "z": 3], ["y": 20, "w": 40])))
+
+  // from_list: insertion order, duplicate key keeps first position with last value.
+  println(show("from_list", map.from_list([("p", 1), ("q", 2), ("p", 9), ("r", 3)])))
+
+  // for-in iterates in insertion order.
+  var acc = ""
+  for (k, v) in lit { acc = acc + "${k}/" }
+  println("for-in: ${acc}")
+
+  // filter preserves order; map keeps order while transforming values.
+  println("filter-keys: [${list.join(map.keys(map.filter(big, (k, v) => v % 2 == 0)), ",")}]")
+  println(show("map", map.map(lit, (v) => v * 100)))
+
+  // find returns the first match in insertion order.
+  let fstr = match map.find(lit, (k, v) => v >= 2) {
+    some(pair) => { let (k, v) = pair; "${k}=${int.to_string(v)}" }
+    none => "none"
+  }
+  println("find: ${fstr}")
+
+  // update applies f at a key, keeping its position.
+  println(show("update", map.update(lit, "apple", (v) => v + 1000)))
+
+  // equality is order-independent: same entries inserted in a different order are equal.
+  var reordered: Map[String, Int] = [:]
+  reordered = map.set(reordered, "c", 3)
+  reordered = map.set(reordered, "a", 1)
+  reordered = map.set(reordered, "b", 2)
+  println("eq: ${if ["a": 1, "b": 2, "c": 3] == reordered then "true" else "false"}")
+  println("neq: ${if ["a": 1, "b": 2, "c": 3] == ["a": 1, "b": 99, "c": 3] then "true" else "false"}")
+
+  // group_by builds Map[B, List[A]] in first-seen key order with in-order grouped lists.
+  let grouped = list.group_by([10, 21, 32, 43, 54, 65], (x) => if x % 2 == 0 then "even" else "odd")
+  println("group-keys: [${list.join(map.keys(grouped), ",")}]")
+  let evens = map.get(grouped, "even") ?? []
+  println("group-even: [${list.join(list.map(evens, (x) => int.to_string(x)), ",")}]")
+}
