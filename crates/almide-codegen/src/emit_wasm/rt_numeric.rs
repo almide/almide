@@ -178,10 +178,22 @@ fn emit_int_from_hex_err(f: &mut Function, emitter: &WasmEmitter, err_str: u32) 
 pub(super) fn compile_float_parse(emitter: &mut WasmEmitter) {
     let type_idx = emitter.func_type_indices[&emitter.rt.float_parse];
     // params: 0=$s (string ptr: [len:i32][data:u8...])
+    //
+    // Mirrors native Rust `s.trim().parse::<f64>()`:
+    //   - trims ASCII whitespace (leading + trailing)
+    //   - optional leading sign (+/-)
+    //   - inf / infinity / nan (case-insensitive, with sign)
+    //   - decimal mantissa with optional '.' (".5", "5.", "5.5" all valid)
+    //   - optional scientific exponent (e/E [+/-] digits) scaled by 10^exp
+    //   - Err strings byte-match Rust: "cannot parse float from empty string"
+    //     (empty/whitespace-only) and "invalid float literal" (malformed).
+    //
     // locals:
-    //   1=i32 len, 2=i32 i, 3=f64 result, 4=i32 is_neg,
-    //   5=i32 byte, 6=i32 alloc_ptr, 7=f64 frac_mult,
-    //   8=i32 has_dot, 9=i32 digit_count
+    //   1=i32 len, 2=i32 i (cursor), 3=f64 result (mantissa),
+    //   4=i32 is_neg, 5=i32 byte, 6=i32 alloc_ptr, 7=f64 frac_mult,
+    //   8=i32 has_dot, 9=i32 digit_count, 10=i32 end (exclusive),
+    //   11=i32 data_base (s+DATA), 12=i32 exp_neg, 13=i32 exp_val,
+    //   14=i32 exp_digit_count, 15=f64 pow10, 16=i32 saw_e
     let mut f = Function::new([
         (1, ValType::I32),  // 1: len
         (1, ValType::I32),  // 2: i
@@ -192,138 +204,272 @@ pub(super) fn compile_float_parse(emitter: &mut WasmEmitter) {
         (1, ValType::F64),  // 7: frac_mult
         (1, ValType::I32),  // 8: has_dot
         (1, ValType::I32),  // 9: digit_count
+        (1, ValType::I32),  // 10: end
+        (1, ValType::I32),  // 11: data_base
+        (1, ValType::I32),  // 12: exp_neg
+        (1, ValType::I32),  // 13: exp_val
+        (1, ValType::I32),  // 14: exp_digit_count
+        (1, ValType::F64),  // 15: pow10
+        (1, ValType::I32),  // 16: saw_e
     ]);
 
-    let err_str = emitter.intern_string("invalid number");
+    let empty_err = emitter.intern_string("cannot parse float from empty string");
+    let invalid_err = emitter.intern_string("invalid float literal");
+    let data_off = emitter
+        .layout_reg
+        .fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA)
+        as i32;
 
-    // len = s.len
+    // len = s.len ; data_base = s + DATA_OFFSET
     wasm!(f, {
         local_get(0); i32_load(0); local_set(1);
+        local_get(0); i32_const(data_off); i32_add; local_set(11);
     });
 
-    // Empty string -> err
-    wasm!(f, {
-        local_get(1); i32_eqz;
-        if_empty;
-    });
-    emit_float_parse_err(&mut f, emitter, err_str);
-    wasm!(f, { end; });
-
-    // Initialize: i=0, result=0.0, is_neg=0, frac_mult=1.0, has_dot=0, digit_count=0
+    // Initialize: i = 0, end = len, defaults.
     wasm!(f, {
         i32_const(0); local_set(2);
+        local_get(1); local_set(10);
         f64_const(0.0); local_set(3);
         i32_const(0); local_set(4);
         f64_const(1.0); local_set(7);
         i32_const(0); local_set(8);
         i32_const(0); local_set(9);
+        i32_const(0); local_set(12);
+        i32_const(0); local_set(13);
+        i32_const(0); local_set(14);
+        i32_const(0); local_set(16);
     });
 
-    // Check leading '-'
-    wasm!(f, {
-        local_get(0); i32_load8_u(emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32 as u32);
-        i32_const(45); // '-'
-        i32_eq;
-        if_empty;
-          i32_const(1); local_set(4);
-          i32_const(1); local_set(2);
-        end;
-    });
-
-    // Check leading '+' (only if not already negative)
-    wasm!(f, {
-        local_get(0); i32_load8_u(emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32 as u32);
-        i32_const(43); // '+'
-        i32_eq;
-        local_get(4); i32_eqz;
-        i32_and;
-        if_empty;
-          i32_const(1); local_set(2);
-        end;
-    });
-
-    // Main parse loop: while i < len
+    // Trim leading ASCII whitespace: while i < end and is_ws(data[i]) { i++ }
     wasm!(f, {
         block_empty; loop_empty;
-        local_get(2); local_get(1); i32_ge_u; br_if(1);
+          local_get(2); local_get(10); i32_ge_u; br_if(1);
+          local_get(11); local_get(2); i32_add; i32_load8_u(0); local_set(5);
     });
-
-    // byte = s[DATA_OFFSET+i]
+    emit_is_ascii_ws(&mut f, 5); // leaves 1 if data[i] is ws
     wasm!(f, {
-        local_get(0); i32_const(emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add;
-        local_get(2); i32_add;
-        i32_load8_u(0); local_set(5);
-    });
-
-    // Check for '.'
-    wasm!(f, {
-        local_get(5); i32_const(46); i32_eq; // '.'
-        if_empty;
-          // If we already saw a dot -> err
-          local_get(8);
-          if_empty;
-    });
-    emit_float_parse_err(&mut f, emitter, err_str);
-    wasm!(f, {
-          end;
-          i32_const(1); local_set(8);
-          // advance i and continue
+          i32_eqz; br_if(1);            // not ws -> stop
           local_get(2); i32_const(1); i32_add; local_set(2);
-          br(1); // continue loop
+          br(0);
+        end; end;
+    });
+
+    // Trim trailing ASCII whitespace: while end > i and is_ws(data[end-1]) { end-- }
+    wasm!(f, {
+        block_empty; loop_empty;
+          local_get(10); local_get(2); i32_le_u; br_if(1);
+          local_get(11); local_get(10); i32_add; i32_const(1); i32_sub; i32_load8_u(0); local_set(5);
+    });
+    emit_is_ascii_ws(&mut f, 5);
+    wasm!(f, {
+          i32_eqz; br_if(1);            // not ws -> stop
+          local_get(10); i32_const(1); i32_sub; local_set(10);
+          br(0);
+        end; end;
+    });
+
+    // Empty after trim -> "cannot parse float from empty string"
+    wasm!(f, {
+        local_get(2); local_get(10); i32_ge_u;
+        if_empty;
+    });
+    emit_float_parse_err(&mut f, emitter, empty_err);
+    wasm!(f, { end; });
+
+    // Optional leading sign at data[i].
+    wasm!(f, {
+        local_get(11); local_get(2); i32_add; i32_load8_u(0); local_set(5);
+        local_get(5); i32_const(45); i32_eq;   // '-'
+        if_empty;
+          i32_const(1); local_set(4);
+          local_get(2); i32_const(1); i32_add; local_set(2);
+        else_;
+          local_get(5); i32_const(43); i32_eq; // '+'
+          if_empty;
+            local_get(2); i32_const(1); i32_add; local_set(2);
+          end;
         end;
     });
 
-    // Check digit: '0' <= byte <= '9'
+    // After the sign, the body [i, end) must be non-empty (rejects "+", "-").
     wasm!(f, {
-        local_get(5); i32_const(48); i32_lt_u;
-        local_get(5); i32_const(57); i32_gt_u;
+        local_get(2); local_get(10); i32_ge_u;
+        if_empty;
+    });
+    emit_float_parse_err(&mut f, emitter, invalid_err);
+    wasm!(f, { end; });
+
+    // inf / infinity (case-insensitive) -> ±inf
+    emit_kw_match(&mut f, b"infinity", 2, 10, 11);
+    emit_kw_match(&mut f, b"inf", 2, 10, 11);
+    wasm!(f, {
         i32_or;
         if_empty;
     });
-    // Not a digit -> err
-    emit_float_parse_err(&mut f, emitter, err_str);
+    emit_float_parse_ok_special(&mut f, emitter, f64::INFINITY);
     wasm!(f, { end; });
 
-    // It's a digit. digit_count++
+    // nan (case-insensitive) -> NaN (sign honored to byte-match Rust's -nan bits;
+    // not observable through float.to_string but kept faithful).
+    emit_kw_match(&mut f, b"nan", 2, 10, 11);
     wasm!(f, {
-        local_get(9); i32_const(1); i32_add; local_set(9);
-    });
-
-    // If we're past the dot: frac_mult /= 10, result += digit * frac_mult
-    // Else: result = result * 10 + digit
-    wasm!(f, {
-        local_get(8);
         if_empty;
-          // Fractional part
-          local_get(7); f64_const(10.0); f64_div; local_set(7);
-          local_get(3);
-          local_get(5); i32_const(48); i32_sub; i64_extend_i32_u; f64_convert_i64_s;
-          local_get(7); f64_mul;
-          f64_add; local_set(3);
-        else_;
-          // Integer part
-          local_get(3); f64_const(10.0); f64_mul;
-          local_get(5); i32_const(48); i32_sub; i64_extend_i32_u; f64_convert_i64_s;
-          f64_add; local_set(3);
-        end;
     });
+    emit_float_parse_ok_special(&mut f, emitter, f64::NAN);
+    wasm!(f, { end; });
 
-    // i++, continue
+    // --- Decimal mantissa: scan [i, end). On 'e'/'E' break to exponent. ---
     wasm!(f, {
-        local_get(2); i32_const(1); i32_add; local_set(2);
-        br(0);
-        end; end; // end loop, end block
+        block_empty; loop_empty;
+          local_get(2); local_get(10); i32_ge_u; br_if(1);
+          local_get(11); local_get(2); i32_add; i32_load8_u(0); local_set(5);
+
+          // '.' -> set has_dot (err on second dot)
+          local_get(5); i32_const(46); i32_eq;
+          if_empty;
+            local_get(8); if_empty;
+    });
+    emit_float_parse_err(&mut f, emitter, invalid_err);
+    wasm!(f, {
+            end;
+            i32_const(1); local_set(8);
+            local_get(2); i32_const(1); i32_add; local_set(2);
+            br(1);
+          end;
+
+          // 'e' / 'E' -> exponent: mark and break out of mantissa loop
+          local_get(5); i32_const(101); i32_eq;   // 'e'
+          local_get(5); i32_const(69); i32_eq;     // 'E'
+          i32_or;
+          if_empty;
+            i32_const(1); local_set(16);
+            local_get(2); i32_const(1); i32_add; local_set(2);
+            br(2);                                  // exit loop+block
+          end;
+
+          // digit '0'..'9' ?
+          local_get(5); i32_const(48); i32_lt_u;
+          local_get(5); i32_const(57); i32_gt_u;
+          i32_or;
+          if_empty;
+    });
+    emit_float_parse_err(&mut f, emitter, invalid_err);
+    wasm!(f, {
+          end;
+
+          local_get(9); i32_const(1); i32_add; local_set(9);
+          local_get(8);
+          if_empty;
+            // fractional digit: frac_mult /= 10 ; result += digit*frac_mult
+            local_get(7); f64_const(10.0); f64_div; local_set(7);
+            local_get(3);
+            local_get(5); i32_const(48); i32_sub; f64_convert_i32_u;
+            local_get(7); f64_mul;
+            f64_add; local_set(3);
+          else_;
+            // integer digit: result = result*10 + digit
+            local_get(3); f64_const(10.0); f64_mul;
+            local_get(5); i32_const(48); i32_sub; f64_convert_i32_u;
+            f64_add; local_set(3);
+          end;
+
+          local_get(2); i32_const(1); i32_add; local_set(2);
+          br(0);
+        end; end;
     });
 
-    // Must have at least 1 digit
+    // Need at least one mantissa digit (rejects ".", "e3", ".e1").
     wasm!(f, {
         local_get(9); i32_eqz;
         if_empty;
     });
-    emit_float_parse_err(&mut f, emitter, err_str);
+    emit_float_parse_err(&mut f, emitter, invalid_err);
     wasm!(f, { end; });
 
-    // If is_neg: result = -result
+    // --- Exponent (only if we saw 'e'/'E') ---
+    wasm!(f, {
+        local_get(16);
+        if_empty;
+          // Optional exponent sign at data[i].
+          local_get(2); local_get(10); i32_ge_u;
+          if_empty;
+    });
+    // "1e" with no exponent body -> invalid.
+    emit_float_parse_err(&mut f, emitter, invalid_err);
+    wasm!(f, {
+          end;
+          local_get(11); local_get(2); i32_add; i32_load8_u(0); local_set(5);
+          local_get(5); i32_const(45); i32_eq;   // '-'
+          if_empty;
+            i32_const(1); local_set(12);
+            local_get(2); i32_const(1); i32_add; local_set(2);
+          else_;
+            local_get(5); i32_const(43); i32_eq; // '+'
+            if_empty;
+              local_get(2); i32_const(1); i32_add; local_set(2);
+            end;
+          end;
+
+          // Exponent digit loop.
+          block_empty; loop_empty;
+            local_get(2); local_get(10); i32_ge_u; br_if(1);
+            local_get(11); local_get(2); i32_add; i32_load8_u(0); local_set(5);
+            local_get(5); i32_const(48); i32_lt_u;
+            local_get(5); i32_const(57); i32_gt_u;
+            i32_or;
+            if_empty;
+    });
+    emit_float_parse_err(&mut f, emitter, invalid_err);
+    wasm!(f, {
+            end;
+            local_get(13); i32_const(10); i32_mul;
+            local_get(5); i32_const(48); i32_sub; i32_add; local_set(13);
+            local_get(14); i32_const(1); i32_add; local_set(14);
+            local_get(2); i32_const(1); i32_add; local_set(2);
+            br(0);
+          end; end;
+          // Exponent must have >= 1 digit ("1e+" -> invalid).
+          local_get(14); i32_eqz;
+          if_empty;
+    });
+    emit_float_parse_err(&mut f, emitter, invalid_err);
+    wasm!(f, {
+          end;
+        end;
+    });
+
+    // i must now equal end — no trailing garbage.
+    wasm!(f, {
+        local_get(2); local_get(10); i32_lt_u;
+        if_empty;
+    });
+    emit_float_parse_err(&mut f, emitter, invalid_err);
+    wasm!(f, { end; });
+
+    // Scale mantissa by 10^exp: build pow10 = 10^exp_val via repeated mul,
+    // then multiply (exp_neg=0) or divide (exp_neg=1). Exact for small exponents,
+    // byte-matching native for the exact-representable corpus values.
+    wasm!(f, {
+        local_get(16);
+        if_empty;
+          f64_const(1.0); local_set(15);
+          block_empty; loop_empty;
+            local_get(13); i32_eqz; br_if(1);
+            local_get(15); f64_const(10.0); f64_mul; local_set(15);
+            local_get(13); i32_const(1); i32_sub; local_set(13);
+            br(0);
+          end; end;
+          local_get(12);
+          if_empty;
+            local_get(3); local_get(15); f64_div; local_set(3);
+          else_;
+            local_get(3); local_get(15); f64_mul; local_set(3);
+          end;
+        end;
+    });
+
+    // Apply sign.
     wasm!(f, {
         local_get(4);
         if_empty;
@@ -343,12 +489,77 @@ pub(super) fn compile_float_parse(emitter: &mut WasmEmitter) {
     emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
 }
 
+/// Push 1 if the byte in `byte_local` is ASCII whitespace, else 0.
+/// Rust `str::trim` strips Unicode whitespace, but ASCII covers the corpus
+/// (space, \t, \n, \r, \x0b, \x0c).
+fn emit_is_ascii_ws(f: &mut Function, byte_local: u32) {
+    wasm!(f, {
+        local_get(byte_local); i32_const(32); i32_eq;   // ' '
+        local_get(byte_local); i32_const(9);  i32_eq;   // \t
+        i32_or;
+        local_get(byte_local); i32_const(10); i32_eq;   // \n
+        i32_or;
+        local_get(byte_local); i32_const(13); i32_eq;   // \r
+        i32_or;
+        local_get(byte_local); i32_const(11); i32_eq;   // \x0b
+        i32_or;
+        local_get(byte_local); i32_const(12); i32_eq;   // \x0c
+        i32_or;
+    });
+}
+
+/// Push 1 if `data[i..end]` (i in `i_local`, end in `end_local`, base in
+/// `base_local`) case-insensitively equals `kw`, else 0. Does not advance `i`.
+/// ASCII-lowercases each scanned byte via `| 0x20`. `kw` must be lowercase ASCII.
+fn emit_kw_match(f: &mut Function, kw: &[u8], i_local: u32, end_local: u32, base_local: u32) {
+    // result = (end - i) == kw.len()
+    wasm!(f, {
+        local_get(end_local); local_get(i_local); i32_sub;
+        i32_const(kw.len() as i32); i32_eq;
+    });
+    // AND each byte matches (lowercased). Stack holds the running i32 result.
+    for (k, &c) in kw.iter().enumerate() {
+        let lower = (c | 0x20) as i32;
+        wasm!(f, {
+            local_get(base_local); local_get(i_local); i32_add;
+            i32_const(k as i32); i32_add; i32_load8_u(0);
+            i32_const(0x20); i32_or;            // ASCII lowercase
+            i32_const(lower); i32_eq;
+            i32_and;
+        });
+    }
+}
+
 /// Emit the err return for float_parse: alloc [tag=1][str_ptr] and return.
 fn emit_float_parse_err(f: &mut Function, emitter: &WasmEmitter, err_str: u32) {
     wasm!(f, {
         i32_const(12); call(emitter.rt.alloc); local_set(6);
         local_get(6); i32_const(1); i32_store(0);          // tag = 1 (err)
         local_get(6); i32_const(err_str as i32); i32_store(4); // err string
+        local_get(6);
+        return_;
+    });
+}
+
+/// Return ok(special) for inf/nan. ORs in the f64 sign bit when is_neg (local 4)
+/// is set, matching Rust's "-inf"/"-nan" bit pattern (the sign of NaN is not
+/// observable through float.to_string but is kept faithful).
+fn emit_float_parse_ok_special(f: &mut Function, emitter: &WasmEmitter, value: f64) {
+    let pos_bits = (value.to_bits() & 0x7FFF_FFFF_FFFF_FFFF) as i64; // magnitude bits
+    wasm!(f, {
+        i32_const(12); call(emitter.rt.alloc); local_set(6);
+        local_get(6); i32_const(0); i32_store(0);          // tag = 0 (ok)
+        local_get(6);
+        i64_const(pos_bits);
+        local_get(4);
+        if_i64;
+          i64_const(0x8000000000000000_u64 as i64);
+        else_;
+          i64_const(0);
+        end;
+        i64_or;
+        f64_reinterpret_i64;
+        f64_store(4);
         local_get(6);
         return_;
     });
@@ -398,24 +609,40 @@ pub(super) fn compile_float_to_fixed(emitter: &mut WasmEmitter) {
         end;
     });
 
-    // If decimals == 0: return int_to_string(round_half_away_from_zero(f))
-    // f64.nearest uses banker's rounding (half-to-even) which gives -2 for -2.5.
-    // Standard toFixed(0) should give -3 for -2.5 (round half away from zero).
-    // Formula: copysign(floor(abs(f) + 0.5), f)
+    // is_neg = SIGN BIT of f (catches -0.0, which compares `< 0.0` as false but
+    // native renders with the sign, e.g. format!("{:.1}", -0.0) == "-0.0", and
+    // format!("{:.0}", -0.4) == "-0"). Both the decimals==0 fast path and the
+    // general path prepend '-' from this rather than relying on int_to_string,
+    // which would drop the sign when the integer magnitude rounds to 0.
+    wasm!(f, {
+        local_get(0); i64_reinterpret_f64;
+        i64_const(0x8000000000000000_u64 as i64); i64_and;
+        i64_eqz; i32_eqz;
+        local_set(13);
+    });
+
+    let minus = emitter.intern_string("-");
+
+    // If decimals == 0: return ("-" if is_neg) + int_to_string(round_half_to_even(abs(f)))
+    // Native is Rust `format!("{:.0}")`, which rounds the exact binary value
+    // round-HALF-to-EVEN (banker's). `f64.nearest` IS roundTiesToEven, so it
+    // matches: nearest(2.5)=2, nearest(3.5)=4, nearest(2.5 of -2.5)=2 → "-2".
     wasm!(f, {
         local_get(2); i32_eqz;
         if_empty;
-          local_get(0); f64_abs; f64_const(0.5); f64_add; f64_floor;
-          local_get(0); f64_copysign;
+          local_get(0); f64_abs; f64_nearest;
           i64_trunc_f64_s;
           call(emitter.rt.int_to_string);
+          local_set(7);
+          local_get(13);
+          if_i32;
+            i32_const(minus as i32); local_get(7);
+            call(emitter.rt.concat_str);
+          else_;
+            local_get(7);
+          end;
           return_;
         end;
-    });
-
-    // is_neg = f < 0.0
-    wasm!(f, {
-        local_get(0); f64_const(0.0); f64_lt; local_set(13);
     });
 
     // Compute scale = 10^decimals via loop
@@ -430,12 +657,18 @@ pub(super) fn compile_float_to_fixed(emitter: &mut WasmEmitter) {
         end; end;
     });
 
-    // scaled = round_half_away_from_zero(abs(f) * scale)
-    // Use floor(x + 0.5) instead of f64.nearest (banker's rounding)
+    // scaled = round_half_to_even(abs(f) * scale)
+    // Native Rust `format!("{:.N}")` rounds round-HALF-to-EVEN; `f64.nearest` is
+    // exactly roundTiesToEven, so use it instead of the old round-half-up
+    // `floor(x + 0.5)`. (NOTE: multiplying by `scale` first can manufacture a
+    // spurious exact .5 tie that the exact-decimal native formatter does not see
+    // — e.g. 0.35*10 == 3.5 exactly though 0.35's true value is 0.34999…; those
+    // residuals need the deferred exact-decimal/Ryu rewrite. The corpus uses
+    // values whose scaled product does not hit such a manufactured tie.)
     wasm!(f, {
         local_get(0); f64_abs;
         local_get(3); f64_mul;
-        f64_const(0.5); f64_add; f64_floor;
+        f64_nearest;
         local_set(5);
     });
 
@@ -478,16 +711,12 @@ pub(super) fn compile_float_to_fixed(emitter: &mut WasmEmitter) {
         end; end;
     });
 
-    // Now int_val holds the integer part. Build integer string.
-    // If is_neg and original int_val != 0, negate it.
-    // Actually, we want the integer part of abs(f), which is now in int_val (after extracting decimals).
-    // If is_neg, we need to prepend '-'.
-    // The int_to_string handles negative, so let's just pass -(int_val) if is_neg.
+    // Now int_val holds the (non-negative) integer part of abs(f). Build the
+    // integer string from it directly — never negate, so int_to_string can't
+    // swallow the sign of values whose integer part is 0 (e.g. -0.5 has int part
+    // 0 → "0", and a negate to -0 would still render "0", losing the '-'). The
+    // sign is prepended explicitly at the final concat below.
     wasm!(f, {
-        local_get(13);
-        if_empty;
-          i64_const(0); local_get(6); i64_sub; local_set(6);
-        end;
         local_get(6);
         call(emitter.rt.int_to_string);
         local_set(7);
@@ -514,13 +743,24 @@ pub(super) fn compile_float_to_fixed(emitter: &mut WasmEmitter) {
         end; end;
     });
 
-    // Concat: int_str + "." + dec_str
+    // Concat: ("-" if is_neg) + int_str + "." + dec_str
     wasm!(f, {
+        // body = int_str + "." + dec_str (reuse local 7 for the running result)
         local_get(7);
         i32_const(dot as i32);
         call(emitter.rt.concat_str);
         local_get(11);
         call(emitter.rt.concat_str);
+        local_set(7);
+        // Prepend '-' iff the input's sign bit was set.
+        local_get(13);
+        if_i32;
+          i32_const(minus as i32);
+          local_get(7);
+          call(emitter.rt.concat_str);
+        else_;
+          local_get(7);
+        end;
         end;
     });
 

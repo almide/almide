@@ -1,0 +1,68 @@
+// Cross-target gate for the three DRIVABLE float divergences, against the native
+// oracle (runtime/rs/src/float.rs):
+//   float.to_string : Rust f64 Display (with a ".0" suffix for whole values)
+//   float.parse     : s.trim().parse::<f64>()  (Err strings byte-compared)
+//   float.to_fixed  : format!("{:.N}")  (round-HALF-to-EVEN)
+//
+// Only EXACT-representable floats are used (0.5, -0.5, -0.0, 1.5, 100.0, -10.75,
+// 0.25, 0.125, ...), and for to_fixed only inputs whose `abs(f) * 10^N` lands on
+// an exact integer or exact half so there is no manufactured-tie disagreement
+// with native's exact-decimal formatter. The deferred residuals (shortest-round-
+// trip Ryu precision and the |x| >= 2^63 magnitude trap, plus exact-decimal ties
+// such as 0.05@1dp) are intentionally NOT exercised here. No @xt-allow.
+
+fn pshow(s: String) -> String =
+  match float.parse(s) {
+    ok(v)  => "Ok(" + float.to_string(v) + ")",
+    err(e) => "Err(" + e + ")",
+  }
+
+effect fn main() -> Unit = {
+  // ---- float.to_string: sign must survive |x| < 1 and -0.0 ----
+  println(float.to_string(-0.5))
+  println(float.to_string(-0.0))
+  println(float.to_string(-0.25))
+  println(float.to_string(-0.125))
+  println(float.to_string(-10.75))
+  println(float.to_string(0.5))
+  println(float.to_string(0.0))
+  println(float.to_string(1.5))
+  println(float.to_string(100.0))
+
+  // ---- float.parse: whitespace, sign, scientific, inf/nan, error strings ----
+  println(pshow("2.5"))
+  println(pshow("  2.5  "))
+  println(pshow("\t-0.5\n"))
+  println(pshow("+5"))
+  println(pshow("1e3"))
+  println(pshow("1.5e-2"))
+  println(pshow(".5"))
+  println(pshow("5."))
+  println(pshow("inf"))
+  println(pshow("-inf"))
+  println(pshow("infinity"))
+  println(pshow("INFINITY"))
+  println(pshow("nan"))
+  println(pshow("NaN"))
+  println(pshow(""))
+  println(pshow("   "))
+  println(pshow("+"))
+  println(pshow("abc"))
+  println(pshow("1.2.3"))
+  println(pshow("1e"))
+  println(pshow("0x1"))
+
+  // ---- float.to_fixed: round-HALF-to-EVEN + sign on |x| < 1 ----
+  println(float.to_fixed(0.125, 2))   // 0.12  (exact half, ties to even-down)
+  println(float.to_fixed(0.135, 2))   // 0.14
+  println(float.to_fixed(2.5, 0))     // 2     (ties to even)
+  println(float.to_fixed(3.5, 0))     // 4     (ties to even)
+  println(float.to_fixed(-2.5, 0))    // -2
+  println(float.to_fixed(-0.5, 1))    // -0.5  (sign survives 0 integer part)
+  println(float.to_fixed(-0.0, 2))    // -0.00
+  println(float.to_fixed(0.5, 2))     // 0.50
+  println(float.to_fixed(10.75, 1))   // 10.8
+  println(float.to_fixed(-10.75, 1))  // -10.8
+  println(float.to_fixed(100.0, 2))   // 100.00
+  println(float.to_fixed(0.25, 3))    // 0.250
+}
