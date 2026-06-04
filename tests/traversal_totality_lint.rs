@@ -27,11 +27,8 @@ use std::path::{Path, PathBuf};
 /// or have its catch-all made loud/delegating; then delete it from this list.
 const LEGACY_DEBT: &[&str] = &[
     "crates/almide-codegen/src/pass_anf.rs",
-    "crates/almide-codegen/src/pass_auto_parallel.rs",
     "crates/almide-codegen/src/pass_borrow_inference.rs",
-    "crates/almide-codegen/src/pass_box_deref.rs",
     "crates/almide-codegen/src/pass_capture_clone.rs",
-    "crates/almide-codegen/src/pass_closure_conversion.rs",
     "crates/almide-codegen/src/pass_concretize_types.rs",
     "crates/almide-codegen/src/pass_effect_inference.rs",
     "crates/almide-codegen/src/pass_lambda_type_resolve.rs",
@@ -39,7 +36,6 @@ const LEGACY_DEBT: &[&str] = &[
     "crates/almide-codegen/src/pass_matrix_shape_spec.rs",
     "crates/almide-codegen/src/pass_mut_param_lowering.rs",
     "crates/almide-codegen/src/pass_peephole.rs",
-    "crates/almide-codegen/src/pass_result_erasure.rs",
     "crates/almide-codegen/src/pass_rust_lowering.rs",
     "crates/almide-codegen/src/pass_tco.rs",
 ];

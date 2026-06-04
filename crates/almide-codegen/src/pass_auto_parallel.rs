@@ -412,7 +412,7 @@ fn rewrite_expr(
                     CallTarget::Method { object: Box::new(rewrite_expr(*object, effect_fns, mutable_vars)), method },
                 CallTarget::Computed { callee } =>
                     CallTarget::Computed { callee: Box::new(rewrite_expr(*callee, effect_fns, mutable_vars)) },
-                other => other,
+                other @ (CallTarget::Named { .. } | CallTarget::Module { .. }) => other,
             };
             IrExprKind::Call { target, args, type_args }
         }
@@ -497,7 +497,7 @@ fn rewrite_expr(
         IrExprKind::StringInterp { parts } => IrExprKind::StringInterp {
             parts: parts.into_iter().map(|p| match p {
                 IrStringPart::Expr { expr } => IrStringPart::Expr { expr: rewrite_expr(expr, effect_fns, mutable_vars) },
-                other => other,
+                lit @ IrStringPart::Lit { .. } => lit,
             }).collect(),
         },
         IrExprKind::Try { expr } => IrExprKind::Try { expr: Box::new(rewrite_expr(*expr, effect_fns, mutable_vars)) },
@@ -530,7 +530,9 @@ fn rewrite_expr(
             template,
             args: args.into_iter().map(|(n, a)| (n, rewrite_expr(a, effect_fns, mutable_vars))).collect(),
         },
-        other => other,
+        // Any other kind: recurse into every child (total by construction).
+        other => return IrExpr { kind: other, ty, span, def_id: None }
+            .map_children(&mut |e| rewrite_expr(e, effect_fns, mutable_vars)),
     };
 
     IrExpr { kind, ty, span, def_id: None }
@@ -576,7 +578,8 @@ fn rewrite_stmts(
                 target, field,
                 value: rewrite_expr(value, effect_fns, mutable_vars),
             },
-            other => other,
+            other => return IrStmt { kind: other, span: s.span }
+                .map_exprs(&mut |e| rewrite_expr(e, effect_fns, mutable_vars)),
         };
         IrStmt { kind, span: s.span }
     }).collect()
