@@ -111,47 +111,53 @@ fn fnbody_to_block(mut fb: FnBody) -> (Vec<IrStmt>, Option<Box<IrExpr>>) {
 
 /// Recursively apply Perceus to expressions (handles nested blocks).
 fn perceus_expr(expr: &mut IrExpr, var_table: &mut VarTable) {
-    match &mut expr.kind {
-        IrExprKind::Block { stmts, expr: tail } => {
-            let old_stmts = std::mem::take(stmts);
-            let old_tail = tail.take();
-            let fb = block_to_fnbody(old_stmts, old_tail);
-            let fb = perceus_fnbody(fb, var_table);
-            let fb = insert_ret_decs(fb, var_table);
-            let (new_stmts, new_tail) = fnbody_to_block(fb);
-            *stmts = new_stmts;
-            *tail = new_tail;
+    PerceusDriver { var_table }.visit_expr_mut(expr);
+}
+
+/// Drives Rc insertion through the exhaustive IrMutVisitor walk. The Block/While/
+/// ForIn arms run the FnBody round-trip (the actual Rc insertion) and are kept
+/// verbatim; the default delegates to walk_expr_mut so a Block nested inside any
+/// previously-dropped kind (call args, IterChain/RcWrap payloads) is reached too.
+/// This only ADDS balanced (Lean-certified) Rc processing — never removes it — so
+/// it has no silent-leak direction; new placements surface as traps / native==wasm.
+struct PerceusDriver<'a> {
+    var_table: &'a mut VarTable,
+}
+
+impl IrMutVisitor for PerceusDriver<'_> {
+    fn visit_expr_mut(&mut self, expr: &mut IrExpr) {
+        match &mut expr.kind {
+            IrExprKind::Block { stmts, expr: tail } => {
+                let old_stmts = std::mem::take(stmts);
+                let old_tail = tail.take();
+                let fb = block_to_fnbody(old_stmts, old_tail);
+                let fb = perceus_fnbody(fb, self.var_table);
+                let fb = insert_ret_decs(fb, self.var_table);
+                let (new_stmts, new_tail) = fnbody_to_block(fb);
+                *stmts = new_stmts;
+                *tail = new_tail;
+            }
+            IrExprKind::While { cond, body } => {
+                self.visit_expr_mut(cond);
+                // Convert while body stmts to FnBody chain (Nop terminus)
+                let old_body = std::mem::take(body);
+                let fb = block_to_fnbody(old_body, None); // None = Nop
+                let fb = perceus_fnbody(fb, self.var_table);
+                let fb = insert_ret_decs(fb, self.var_table); // Dec before Nop for heap locals
+                let (new_body, _) = fnbody_to_block(fb);
+                *body = new_body;
+            }
+            IrExprKind::ForIn { iterable, body, .. } => {
+                self.visit_expr_mut(iterable);
+                let old_body = std::mem::take(body);
+                let fb = block_to_fnbody(old_body, None);
+                let fb = perceus_fnbody(fb, self.var_table);
+                let fb = insert_ret_decs(fb, self.var_table);
+                let (new_body, _) = fnbody_to_block(fb);
+                *body = new_body;
+            }
+            _ => walk_expr_mut(self, expr),
         }
-        IrExprKind::If { cond, then, else_ } => {
-            perceus_expr(cond, var_table);
-            perceus_expr(then, var_table);
-            perceus_expr(else_, var_table);
-        }
-        IrExprKind::Match { subject, arms } => {
-            perceus_expr(subject, var_table);
-            for arm in arms { perceus_expr(&mut arm.body, var_table); }
-        }
-        IrExprKind::Lambda { body, .. } => { perceus_expr(body, var_table); }
-        IrExprKind::While { cond, body } => {
-            perceus_expr(cond, var_table);
-            // Convert while body stmts to FnBody chain (Nop terminus)
-            let old_body = std::mem::take(body);
-            let fb = block_to_fnbody(old_body, None); // None = Nop
-            let fb = perceus_fnbody(fb, var_table);
-            let fb = insert_ret_decs(fb, var_table); // inserts Dec before Nop for heap locals
-            let (new_body, _) = fnbody_to_block(fb);
-            *body = new_body;
-        }
-        IrExprKind::ForIn { iterable, body, .. } => {
-            perceus_expr(iterable, var_table);
-            let old_body = std::mem::take(body);
-            let fb = block_to_fnbody(old_body, None);
-            let fb = perceus_fnbody(fb, var_table);
-            let fb = insert_ret_decs(fb, var_table);
-            let (new_body, _) = fnbody_to_block(fb);
-            *body = new_body;
-        }
-        _ => {}
     }
 }
 
