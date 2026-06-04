@@ -42,7 +42,6 @@ const LEGACY_DEBT: &[&str] = &[
     "crates/almide-codegen/src/pass_matrix_shape_spec.rs",
     "crates/almide-codegen/src/pass_mut_param_lowering.rs",
     "crates/almide-codegen/src/pass_peephole.rs",
-    "crates/almide-codegen/src/pass_perceus.rs",
     "crates/almide-codegen/src/pass_result_erasure.rs",
     "crates/almide-codegen/src/pass_result_propagation.rs",
     "crates/almide-codegen/src/pass_rust_lowering.rs",
