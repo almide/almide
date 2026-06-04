@@ -174,11 +174,9 @@ impl FuncCompiler<'_> {
                               local_get(s1); i32_const(es); i32_mul; i32_add;
                               i32_load(0); local_get(s3);
                         });
-                        if matches!(&elem_ty, Ty::String) {
-                            wasm!(self.func, { call(self.emitter.rt.string.eq); });
-                        } else {
-                            wasm!(self.func, { i32_eq; });
-                        }
+                        // Structural eq: String + compound elements compare by value
+                        // (deep), matching native set containment.
+                        self.emit_eq_typed(&elem_ty);
                         wasm!(self.func, {
                               if_empty; i32_const(1); local_set(s2); br(2); end;
                               local_get(s1); i32_const(1); i32_add; local_set(s1);
@@ -865,18 +863,14 @@ impl FuncCompiler<'_> {
 
     /// Emit equality comparison for set elements.
     /// Expects two values of elem_ty on the WASM stack, leaves i32 (0 or 1).
+    ///
+    /// Delegates to the shared type-directed deep equality (`emit_eq_typed`) so
+    /// compound elements (tuples, nested lists, records) compare by STRUCTURE, not
+    /// pointer identity — matching native `Set` containment/dedup semantics. For
+    /// Int/Float/Bool/String this lowers to the same `i64_eq`/`f64_eq`/`i32_eq`/
+    /// `string.eq` it did before.
     fn emit_set_elem_eq(&mut self, elem_ty: &Ty) {
-        match values::ty_to_valtype(elem_ty) {
-            Some(ValType::I64) => { wasm!(self.func, { i64_eq; }); }
-            Some(ValType::F64) => { self.func.instruction(&wasm_encoder::Instruction::F64Eq); }
-            _ => {
-                if matches!(elem_ty, Ty::String) {
-                    wasm!(self.func, { call(self.emitter.rt.string.eq); });
-                } else {
-                    wasm!(self.func, { i32_eq; });
-                }
-            }
-        }
+        self.emit_eq_typed(elem_ty);
     }
 
     fn set_elem_ty(&self, ty: &Ty) -> Ty {
