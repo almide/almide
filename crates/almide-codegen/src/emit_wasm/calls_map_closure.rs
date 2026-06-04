@@ -244,29 +244,67 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(m);
             }
             "map" => {
-                // map(m, f) → Map[K, B]: copy Swiss Table, transform each occupied value
+                // map(m, f) → Map[K, B]: rebuild the COD table transforming each
+                // value via f. The closure's return type B can differ from the
+                // source value type V — so the *new* value valtype/width follows
+                // B, the call_indirect signature is (V)->B, and the rebuilt table
+                // uses the new entry stride es_new = ks + vs_new. Keys, tags, and
+                // the hash index are value-width-independent, so they are copied
+                // verbatim (insertion order + lookups preserved). When B == V this
+                // degenerates to the old same-width copy-and-transform.
+                use super::engine::layout::map as lm;
                 let (ks, vs) = self.map_kv_sizes(&args[0].ty);
                 let val_ty = self.map_val_ty(&args[0].ty);
+                // Closure return type (the NEW value type). Fall back to the
+                // source value type when inference left it unresolved.
+                let new_val_ty = self.resolve_closure_ret_ty(&args[1], &val_ty);
+                let vs_new = values::byte_size(&new_val_ty);
+                let es_old = ks + vs;
+                let es_new = ks + vs_new;
                 let closure = self.scratch.alloc_i32();
-                let it = self.map_iter_begin(&args[0], ks + vs);
+                let it = self.map_iter_begin(&args[0], es_old);
                 self.emit_expr(&args[1]);
                 wasm!(self.func, { local_set(closure); });
-                let new_map = self.map_copy_full(&it);
-                let new_eb = self.map_copy_entry_base(new_map, &it);
+                // Allocate a fresh table at the new entry stride, then copy the
+                // value-width-independent prefix (header + tags + index) verbatim
+                // from the source so len/cap/tags/index match exactly.
+                let new_map = self.scratch.alloc_i32();
+                self.emit_dict_alloc(new_map, it.cap, es_new);
+                // prefix_size = header + cap*(tag(1) + INDEX_SLOT_SIZE)
+                let hdr = self.emitter.layout_reg.header_size(super::engine::layout::SWISS_MAP) as i32;
+                let tag_plus_index = 1 + lm::INDEX_SLOT_SIZE as i32;
+                wasm!(self.func, {
+                    local_get(new_map);
+                    local_get(it.map);
+                    i32_const(hdr);
+                    local_get(it.cap); i32_const(tag_plus_index); i32_mul; i32_add;
+                    memory_copy;
+                });
+                let new_eb = self.scratch.alloc_i32();
+                self.emit_dict_entries_base(new_map, it.cap);
+                wasm!(self.func, { local_set(new_eb); });
                 self.map_iter_loop_head(&it);
-                // dst = new_eb + i*entry + ks (val addr in copy)
+                // Copy the key bytes (unchanged) from source entry i into dst entry i.
                 wasm!(self.func, {
                     local_get(new_eb);
-                    local_get(it.i); i32_const((ks + vs) as i32); i32_mul; i32_add;
+                    local_get(it.i); i32_const(es_new as i32); i32_mul; i32_add;
+                    local_get(it.eb);
+                    local_get(it.i); i32_const(es_old as i32); i32_mul; i32_add;
+                    i32_const(ks as i32); memory_copy;
+                });
+                // dst = new_eb + i*es_new + ks (new val addr in the rebuilt table)
+                wasm!(self.func, {
+                    local_get(new_eb);
+                    local_get(it.i); i32_const(es_new as i32); i32_mul; i32_add;
                     i32_const(ks as i32); i32_add;
                 });
-                // f(env, old_val) → new_val
+                // f(env, old_val) → new_val, then store at the new value width.
                 wasm!(self.func, { local_get(closure); i32_load(4); });
                 self.map_iter_val_addr(&it, ks);
                 self.emit_load_at(&val_ty, 0);
                 wasm!(self.func, { local_get(closure); i32_load(0); });
-                self.emit_closure_call(&val_ty, &val_ty);
-                self.emit_store_at(&val_ty, 0);
+                self.emit_closure_call(&val_ty, &new_val_ty);
+                self.emit_store_at(&new_val_ty, 0);
                 self.map_iter_loop_tail(&it);
                 wasm!(self.func, { local_get(new_map); });
                 self.scratch.free_i32(new_eb);
@@ -522,35 +560,5 @@ impl FuncCompiler<'_> {
         self.scratch.free_i32(it.len);
         self.scratch.free_i32(it.cap);
         self.scratch.free_i32(it.map);
-    }
-
-    /// Allocate a full byte-copy of a COD map (header + tags + index + dense
-    /// entries). Safe for `map`, which transforms values in place: keys, tags,
-    /// and index pointers are unchanged, so the copied index stays valid.
-    pub(super) fn map_copy_full(&mut self, it: &MapIter) -> u32 {
-        use super::engine::layout::{SWISS_MAP, map as lm};
-        let map_hdr = self.emitter.layout_reg.header_size(SWISS_MAP) as i32;
-        let per_slot = 1 + lm::INDEX_SLOT_SIZE as i32 + it.entry_size as i32;
-        let total = self.scratch.alloc_i32();
-        let new_map = self.scratch.alloc_i32();
-        wasm!(self.func, {
-            // total = header + cap*(tag(1) + INDEX_SLOT_SIZE + entry_size)
-            i32_const(map_hdr);
-            local_get(it.cap); i32_const(per_slot); i32_mul; i32_add;
-            local_tee(total);
-            call(self.emitter.rt.alloc); local_set(new_map);
-            local_get(new_map); local_get(it.map); local_get(total);
-            memory_copy;
-        });
-        self.scratch.free_i32(total);
-        new_map
-    }
-
-    /// Compute the dense entries base of a copied map.
-    pub(super) fn map_copy_entry_base(&mut self, new_map: u32, it: &MapIter) -> u32 {
-        let new_eb = self.scratch.alloc_i32();
-        self.emit_dict_entries_base(new_map, it.cap);
-        wasm!(self.func, { local_set(new_eb); });
-        new_eb
     }
 }

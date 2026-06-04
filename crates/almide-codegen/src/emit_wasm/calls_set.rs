@@ -772,10 +772,16 @@ impl FuncCompiler<'_> {
                 // set.map = list.map + dedup
                 // 1. Emit list.map (result on stack)
                 self.emit_list_closure_call("map", args);
-                // 2. Dedup the result using set.from_list logic (insert-if-not-exists)
-                // The map result type is the closure return type = element type of the new set
-                // For simplicity: use from_list which already deduplicates
-                let result_elem_ty = self.set_elem_ty(&args[0].ty); // same elem type for now
+                // 2. Dedup the result (insert-if-not-exists). The mapped list's
+                // element type is the CLOSURE RETURN type — which can differ from
+                // the source set's element type for a type-changing map (e.g.
+                // Set[String] with String->Int). The dedup must load/compare/copy
+                // and stride at that NEW element width, not the source's; using
+                // the source type here loaded/stored the wrong number of bytes
+                // (native "1,2,3" vs wasm "1"). Fall back to the source element
+                // type only when the closure return is left unresolved.
+                let src_elem_ty = self.set_elem_ty(&args[0].ty);
+                let result_elem_ty = self.resolve_closure_ret_ty(&args[1], &src_elem_ty);
                 let es = values::byte_size(&result_elem_ty) as i32;
                 let mapped = self.scratch.alloc_i32();
                 let result = self.scratch.alloc_i32();
