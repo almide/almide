@@ -1,16 +1,19 @@
 
-// fan.any, fan.settle, fan.timeout
+// fan.any, fan.settle, fan.timeout.
+// fan.any is now DETERMINISTIC: it tries thunks in LIST ORDER and returns the
+// FIRST Ok as Result[T, String]; if all fail it returns a defined Err. In a test
+// block (no auto-unwrap) the binding is the full Result, asserted on `ok(v)`.
 effect fn succeed(x: Int) -> Result[Int, String] = ok(x)
 
 effect fn fail(msg: String) -> Result[Int, String] = err(msg)
 
-// ── fan.any — first success wins ──
+// ── fan.any — first success in list order wins (deterministic) ──
 test "fan.any first success" {
   let result = fan.any([
     () => succeed(42),
     () => succeed(99)
   ]);
-  assert(result == 42 or result == 99)
+  assert_eq(result, ok(42))
 }
 
 test "fan.any skips failures" {
@@ -18,7 +21,15 @@ test "fan.any skips failures" {
     () => fail("nope"),
     () => succeed(7)
   ]);
-  assert_eq(result, 7)
+  assert_eq(result, ok(7))
+}
+
+test "fan.any all fail returns a defined error" {
+  let result = fan.any([
+    () => fail("a"),
+    () => fail("b")
+  ]);
+  assert_eq(result, err("fan.any: all candidates failed"))
 }
 
 // ── fan.settle — collect all results ──
