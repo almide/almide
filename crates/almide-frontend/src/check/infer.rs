@@ -482,12 +482,18 @@ impl Checker {
                 let sc = resolve_ty(&subject_ty, &self.uf);
                 self.check_match_exhaustiveness(&sc, arms);
                 let mut arm_types = Vec::new();
+                // Real (un-substituted) arm types, used to pick the overall match
+                // result type. An `err(..)` arm produces a genuine `Result[T, E]`
+                // value — it is NOT divergent — so even when every arm is `err`,
+                // the match still has a concrete Result type (not `Never`).
+                let mut arm_real_types = Vec::new();
                 for arm in arms.iter_mut() {
                     self.env.push_scope();
                     let sub_c = resolve_ty(&subject_ty, &self.uf);
                     self.bind_pattern(&arm.pattern, &sub_c);
                     if let Some(ref mut guard) = arm.guard { self.infer_expr(guard); }
                     let arm_ty = self.infer_expr(&mut arm.body);
+                    arm_real_types.push(arm_ty.clone());
                     // err() in a match arm is an early return — unify as Never
                     // so it doesn't constrain sibling arm types.
                     let arm_ty = if matches!(&arm.body.kind, ExprKind::Err { .. }) {
@@ -513,7 +519,23 @@ impl Checker {
                     for aty in &arm_types[1..] {
                         self.constrain(first.clone(), aty.clone(), "match arm");
                     }
-                    first
+                    // The overall match type is the first non-`Never` arm type.
+                    // `Never` arms (every `err(..)` arm) carry no useful result
+                    // type but they DO produce a Result value, so when they are
+                    // the only arms we recover the concrete type from the real
+                    // (un-substituted) arm types — preferring an `err` arm's
+                    // `Result[T, E]` so the match types as Result, never `Never`.
+                    if matches!(first, Ty::Never) {
+                        arm_types.iter()
+                            .find(|t| !matches!(t, Ty::Never))
+                            .cloned()
+                            .or_else(|| arm_real_types.iter()
+                                .find(|t| !matches!(resolve_ty(t, &self.uf), Ty::Never))
+                                .cloned())
+                            .unwrap_or(first)
+                    } else {
+                        first
+                    }
                 } else {
                     Ty::Unit
                 }

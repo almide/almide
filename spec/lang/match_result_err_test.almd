@@ -1,0 +1,101 @@
+// match_result_err_test — a `match` expression whose arms construct a Result
+// must type as Result (and emit a Result pointer on WASM) even when one or more
+// arms are `err(..)`.
+//
+// Regression: a match with an `err(..)` arm was typed `Never` (each `err` arm
+// is unified as Never to avoid constraining siblings; with no non-err arm the
+// whole match collapsed to Never). On WASM that left the function body type as
+// non-valtype, so the epilogue appended `unreachable` and the function trapped
+// (exit 134) — while native ran correctly. Now the match recovers the concrete
+// Result type from the arm values, so native == WASM.
+
+// ── Every arm is err ──
+fn all_err(x: Int) -> Result[Int, String] = match x {
+  2 => err("two"),
+  _ => err("other"),
+}
+
+test "all-err match: literal arm" {
+  assert_eq(all_err(2), err("two"))
+}
+
+test "all-err match: wildcard arm" {
+  assert_eq(all_err(5), err("other"))
+}
+
+// ── Mixed: err arm + ok arm ──
+fn mixed(x: Int) -> Result[Int, String] = match x {
+  2 => err("bad"),
+  _ => ok(x * 10),
+}
+
+test "mixed match: err arm taken" {
+  assert_eq(mixed(2), err("bad"))
+}
+
+test "mixed match: ok arm taken" {
+  assert_eq(mixed(7), ok(70))
+}
+
+// ── Nested match returning Result with err arms ──
+fn nested(x: Int) -> Result[Int, String] = match x {
+  0 => err("zero"),
+  _ => match x {
+    1 => err("one"),
+    _ => ok(x),
+  },
+}
+
+test "nested match: outer err" {
+  assert_eq(nested(0), err("zero"))
+}
+
+test "nested match: inner err" {
+  assert_eq(nested(1), err("one"))
+}
+
+test "nested match: inner ok" {
+  assert_eq(nested(9), ok(9))
+}
+
+// ── Guarded arm returning err ──
+fn guarded(x: Int) -> Result[Int, String] = match x {
+  n if n < 0 => err("neg"),
+  0 => err("zero"),
+  _ => ok(x),
+}
+
+test "guarded match: guard err" {
+  assert_eq(guarded(0 - 4), err("neg"))
+}
+
+test "guarded match: literal err" {
+  assert_eq(guarded(0), err("zero"))
+}
+
+test "guarded match: ok arm" {
+  assert_eq(guarded(8), ok(8))
+}
+
+// ── Option analogue: a match with `none` arms must type as Option (not Never).
+// `none` was never collapsed to Never, so this is a guard against regressing
+// the sibling path while fixing the Result path. ──
+fn opt_all_none(x: Int) -> Option[Int] = match x {
+  2 => none,
+  _ => none,
+}
+
+fn opt_mixed(x: Int) -> Option[Int] = match x {
+  2 => none,
+  _ => some(x * 10),
+}
+
+test "option match: all none" {
+  assert_eq(opt_all_none(2), none);
+  assert_eq(opt_all_none(5), none)
+}
+
+test "option match: mixed" {
+  assert_eq(opt_mixed(2), none);
+  assert_eq(opt_mixed(3), some(30))
+}
