@@ -189,34 +189,55 @@ impl FuncCompiler<'_> {
                 let end = self.scratch.alloc_i32();
                 let new_len = self.scratch.alloc_i32();
                 let dst = self.scratch.alloc_i32();
+                let len = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
-                wasm!(self.func, { local_set(xs); });
+                wasm!(self.func, {
+                    local_set(xs);
+                    local_get(xs); i32_load(0); local_set(len);
+                });
                 self.emit_expr(&args[1]); // start
                 wasm!(self.func, { i32_wrap_i64; local_set(start); });
                 self.emit_expr(&args[2]); // end
                 wasm!(self.func, {
                     i32_wrap_i64; local_set(end);
-                    local_get(end); local_get(start); i32_sub; local_set(new_len);
+                    // Clamp start and end to [0, len] using UNSIGNED comparison so that
+                    // negative indices (huge when unsigned, matching native's i64→usize
+                    // cast) and out-of-range indices saturate to len. Mirrors native:
+                    //   s = start; e = min(end, len); if s >= e { [] } else { xs[s..e] }
+                    // start = min_u(start, len)
+                    local_get(start); local_get(len);
+                      local_get(start); local_get(len); i32_lt_u; select;
+                    local_set(start);
+                    // end = min_u(end, len)
+                    local_get(end); local_get(len);
+                      local_get(end); local_get(len); i32_lt_u; select;
+                    local_set(end);
+                    // new_len = (end > start) ? end - start : 0
+                    local_get(end); local_get(start); i32_sub;
+                      i32_const(0);
+                      local_get(end); local_get(start); i32_gt_u; select;
+                    local_set(new_len);
                     i32_const(list_hdr); local_get(new_len); i32_const(es); i32_mul; i32_add;
                     call(self.emitter.rt.alloc); local_set(dst);
                     local_get(dst); local_get(new_len); i32_store(0);
-                    // copy loop — reuse new_len as i
-                    i32_const(0); local_set(new_len);
+                    // copy loop: dst[i] = xs[start + i] for i in 0..new_len (len reused as i)
+                    i32_const(0); local_set(len);
                     block_empty; loop_empty;
-                      local_get(new_len); local_get(end); local_get(start); i32_sub; i32_ge_u; br_if(1);
+                      local_get(len); local_get(new_len); i32_ge_u; br_if(1);
                       local_get(dst); i32_const(list_data_off); i32_add;
-                      local_get(new_len); i32_const(es); i32_mul; i32_add;
+                      local_get(len); i32_const(es); i32_mul; i32_add;
                       local_get(xs); i32_const(list_data_off); i32_add;
-                      local_get(start); local_get(new_len); i32_add;
+                      local_get(start); local_get(len); i32_add;
                       i32_const(es); i32_mul; i32_add;
                 });
                 self.emit_elem_copy(&elem_ty);
                 wasm!(self.func, {
-                      local_get(new_len); i32_const(1); i32_add; local_set(new_len);
+                      local_get(len); i32_const(1); i32_add; local_set(len);
                       br(0);
                     end; end;
                     local_get(dst);
                 });
+                self.scratch.free_i32(len);
                 self.scratch.free_i32(dst);
                 self.scratch.free_i32(new_len);
                 self.scratch.free_i32(end);
@@ -732,6 +753,11 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, {
                     i32_wrap_i64; local_set(idx);
                     local_get(xs); i32_load(0); local_set(old_len);
+                    // Clamp idx to [0, old_len] (unsigned) so that out-of-range or negative
+                    // indices append at the end. Mirrors native's idx = min(i as usize, len).
+                    local_get(idx); local_get(old_len);
+                      local_get(idx); local_get(old_len); i32_lt_u; select;
+                    local_set(idx);
                     // new_len = old_len + 1
                     i32_const(list_hdr); local_get(old_len); i32_const(1); i32_add; i32_const(es); i32_mul; i32_add;
                     call(self.emitter.rt.alloc); local_set(dst);
@@ -796,6 +822,10 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, {
                     i32_wrap_i64; local_set(idx);
                     local_get(xs); i32_load(0); local_set(old_len);
+                    // Native is a no-op when i >= len (returns the list unchanged). Guard
+                    // with an UNSIGNED compare so negative indices (huge unsigned) are no-ops.
+                    local_get(idx); local_get(old_len); i32_lt_u;
+                    if_i32;
                     // new_len = old_len - 1
                     i32_const(list_hdr); local_get(old_len); i32_const(1); i32_sub; i32_const(es); i32_mul; i32_add;
                     call(self.emitter.rt.alloc); local_set(dst);
@@ -831,6 +861,10 @@ impl FuncCompiler<'_> {
                       br(0);
                     end; end;
                     local_get(dst);
+                    else_;
+                    // i >= len → return the list unchanged
+                    local_get(xs);
+                    end;
                 });
                 self.scratch.free_i32(i);
                 self.scratch.free_i32(dst);

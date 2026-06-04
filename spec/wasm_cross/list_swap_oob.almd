@@ -1,0 +1,6 @@
+// list.swap with an out-of-range index must be a no-op on both targets
+// (no OOB heap read/write). Native oracle: swaps only when BOTH indices < len.
+fn main() -> Unit = {
+  let xs = [1, 2, 3]
+  println(list.join(list.swap(xs, 0, 10) |> list.map((x) => int.to_string(x)), ","))
+}

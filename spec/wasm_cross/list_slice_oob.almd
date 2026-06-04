@@ -1,0 +1,13 @@
+// list.slice with out-of-range / past-the-end indices must clamp identically
+// on native and wasm (no OOB heap reads). Native oracle: end clamps to len,
+// start >= effective_end yields []. See runtime/rs/src/list.rs almide_rt_list_slice.
+fn main() -> Unit = {
+  let xs = [10, 20, 30, 40, 50]
+  // end past len → clamp to len
+  println(list.join(list.slice(xs, 2, 6) |> list.map((x) => int.to_string(x)), ","))
+  println(list.join(list.slice(xs, 2, 10) |> list.map((x) => int.to_string(x)), ","))
+  // start past len → empty
+  println("[" + list.join(list.slice(xs, 10, 20) |> list.map((x) => int.to_string(x)), ",") + "]")
+  // length of a clamped slice
+  println(int.to_string(list.len(list.slice(xs, 2, 99))))
+}

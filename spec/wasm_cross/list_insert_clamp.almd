@@ -1,0 +1,10 @@
+// list.insert clamps an out-of-range index to the end on BOTH targets
+// (graceful, consistent with slice/remove_at/swap). Native oracle:
+// idx = min(i as usize, len), then insert. An in-bounds insert still shifts.
+fn main() -> Unit = {
+  let xs = [1, 2, 3]
+  // index past len → append at end
+  println(list.join(list.insert(xs, 10, 9) |> list.map((x) => int.to_string(x)), ","))
+  // in-bounds insert still works
+  println(list.join(list.insert([1, 2, 3], 1, 9) |> list.map((x) => int.to_string(x)), ","))
+}
