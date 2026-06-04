@@ -394,42 +394,27 @@ fn eliminate_redundant_rc(func: &mut IrFunction, var_table: &VarTable) -> bool {
 }
 
 fn eliminate_in_expr(expr: &mut IrExpr, var_table: &VarTable) -> bool {
-    let mut changed = false;
-    match &mut expr.kind {
-        IrExprKind::Block { stmts, expr: tail } => {
-            if eliminate_in_block(stmts, var_table) { changed = true; }
-            for stmt in stmts.iter_mut() {
-                match &mut stmt.kind {
-                    IrStmtKind::Bind { value, .. } | IrStmtKind::Assign { value, .. } => {
-                        if eliminate_in_expr(value, var_table) { changed = true; }
-                    }
-                    IrStmtKind::Expr { expr } => {
-                        if eliminate_in_expr(expr, var_table) { changed = true; }
-                    }
-                    _ => {}
-                }
-            }
-            if let Some(tail) = tail {
-                if eliminate_in_expr(tail, var_table) { changed = true; }
-            }
+    let mut v = EliminateRc { var_table, changed: false };
+    v.visit_expr_mut(expr);
+    v.changed
+}
+
+/// Removes redundant RcInc/RcDec pairs from every block, riding the exhaustive
+/// IrMutVisitor walk so nested blocks inside any node kind (loop bodies, call
+/// args, …) are scanned too. Eliminating a redundant pair is always valid, so the
+/// now-total recursion can only find MORE pairs.
+struct EliminateRc<'a> {
+    var_table: &'a VarTable,
+    changed: bool,
+}
+
+impl IrMutVisitor for EliminateRc<'_> {
+    fn visit_expr_mut(&mut self, expr: &mut IrExpr) {
+        if let IrExprKind::Block { stmts, .. } = &mut expr.kind {
+            if eliminate_in_block(stmts, self.var_table) { self.changed = true; }
         }
-        IrExprKind::If { cond, then, else_ } => {
-            if eliminate_in_expr(cond, var_table) { changed = true; }
-            if eliminate_in_expr(then, var_table) { changed = true; }
-            if eliminate_in_expr(else_, var_table) { changed = true; }
-        }
-        IrExprKind::Match { subject, arms } => {
-            if eliminate_in_expr(subject, var_table) { changed = true; }
-            for arm in arms {
-                if eliminate_in_expr(&mut arm.body, var_table) { changed = true; }
-            }
-        }
-        IrExprKind::Lambda { body, .. } => {
-            if eliminate_in_expr(body, var_table) { changed = true; }
-        }
-        _ => {}
+        walk_expr_mut(self, expr); // recurse all children (incl. previously-dropped kinds)
     }
-    changed
 }
 
 /// Scan a block for eliminable Inc/Dec pairs.
@@ -1013,91 +998,91 @@ fn verify_branch_balance(
     var_table: &VarTable,
     fn_name: &str,
 ) {
-    match &expr.kind {
-        IrExprKind::Block { stmts, expr: tail } => {
-            // Collect heap vars bound in THIS block
-            let mut local_vars = outer_heap_vars.clone();
-            for stmt in stmts {
-                if let IrStmtKind::Bind { var, ty, .. } = &stmt.kind {
-                    if is_heap_type(ty) && !env_load_vars.contains(var) {
-                        local_vars.insert(*var);
-                    }
-                }
-            }
-            // Recurse into statement values and tail
-            for stmt in stmts {
-                match &stmt.kind {
-                    IrStmtKind::Bind { value, .. } | IrStmtKind::Assign { value, .. } =>
-                        verify_branch_balance(value, &local_vars, env_load_vars, var_table, fn_name),
-                    IrStmtKind::Expr { expr } =>
-                        verify_branch_balance(expr, &local_vars, env_load_vars, var_table, fn_name),
-                    _ => {}
-                }
-            }
-            if let Some(tail) = tail {
-                verify_branch_balance(tail, &local_vars, env_load_vars, var_table, fn_name);
-            }
-        }
-        IrExprKind::If { cond, then, else_ } => {
-            verify_branch_balance(cond, outer_heap_vars, env_load_vars, var_table, fn_name);
-            // Check: both branches should have consistent Dec for outer heap vars
-            // Only check vars that are REFERENCED in at least one branch
-            let then_decs = collect_decs_in_expr(then);
-            let else_decs = collect_decs_in_expr(else_);
-            let mut then_refs = HashSet::new();
-            let mut else_refs = HashSet::new();
-            collect_var_refs_expr(then, &mut then_refs);
-            collect_var_refs_expr(else_, &mut else_refs);
-            for var in outer_heap_vars {
-                // Only check if var is referenced in BOTH branches
-                let in_both = then_refs.contains(var) && else_refs.contains(var);
-                if !in_both { continue; } // referenced in only one branch → not a branch issue
-                let in_then = then_decs.contains(var);
-                let in_else = else_decs.contains(var);
-                if in_then != in_else {
-                    let name = var_table.get(*var).name.as_str();
-                    eprintln!(
-                        "[perceus-belt] BRANCH-LEAK: `{}` (VarId {}) in `{}` — Dec'd in {} but not {}",
-                        name, var.0, fn_name,
-                        if in_then { "then" } else { "else" },
-                        if in_then { "else" } else { "then" },
-                    );
-                }
-            }
-            verify_branch_balance(then, outer_heap_vars, env_load_vars, var_table, fn_name);
-            verify_branch_balance(else_, outer_heap_vars, env_load_vars, var_table, fn_name);
-        }
-        IrExprKind::Match { subject, arms } => {
-            verify_branch_balance(subject, outer_heap_vars, env_load_vars, var_table, fn_name);
-            if arms.len() > 1 {
-                let arm_decs: Vec<HashSet<VarId>> = arms.iter()
-                    .map(|arm| collect_decs_in_expr(&arm.body))
-                    .collect();
-                let arm_refs: Vec<HashSet<VarId>> = arms.iter()
-                    .map(|arm| { let mut r = HashSet::new(); collect_var_refs_expr(&arm.body, &mut r); r })
-                    .collect();
-                for var in outer_heap_vars {
-                    // Only check if var is referenced in MULTIPLE arms.
-                    // A var referenced in only one arm is defined inside it → not a branch issue.
-                    let ref_count = arm_refs.iter().filter(|r| r.contains(var)).count();
-                    if ref_count < 2 { continue; }
-                    let first_has = arm_decs[0].contains(var);
-                    for (i, decs) in arm_decs.iter().enumerate().skip(1) {
-                        if decs.contains(var) != first_has {
-                            let name = var_table.get(*var).name.as_str();
-                            eprintln!(
-                                "[perceus-belt] BRANCH-LEAK: `{}` (VarId {}) in `{}` — Dec'd in arm 0 but not arm {}",
-                                name, var.0, fn_name, i,
-                            );
+    BranchBalance { heap_vars: outer_heap_vars.clone(), env_load_vars, var_table, fn_name }
+        .visit_expr(expr);
+}
+
+/// Diagnostic (post-insertion, no Rc decision): reports a heap var Dec'd on one
+/// branch but not another. Rides the exhaustive IrVisitor walk — the special
+/// Block (extend heap_vars) and If/Match (branch-consistency) arms are kept; the
+/// default delegates to walk_expr so no node kind drops its subtree.
+struct BranchBalance<'a> {
+    heap_vars: HashSet<VarId>,
+    env_load_vars: &'a HashSet<VarId>,
+    var_table: &'a VarTable,
+    fn_name: &'a str,
+}
+
+impl IrVisitor for BranchBalance<'_> {
+    fn visit_expr(&mut self, expr: &IrExpr) {
+        match &expr.kind {
+            IrExprKind::Block { stmts, .. } => {
+                let saved = self.heap_vars.clone();
+                for stmt in stmts {
+                    if let IrStmtKind::Bind { var, ty, .. } = &stmt.kind {
+                        if is_heap_type(ty) && !self.env_load_vars.contains(var) {
+                            self.heap_vars.insert(*var);
                         }
                     }
                 }
+                walk_expr(self, expr); // recurse stmts + tail with the extended heap_vars
+                self.heap_vars = saved;
             }
-            for arm in arms {
-                verify_branch_balance(&arm.body, outer_heap_vars, env_load_vars, var_table, fn_name);
+            IrExprKind::If { cond, then, else_ } => {
+                self.visit_expr(cond);
+                // Both branches should Dec each outer heap var referenced in BOTH.
+                let then_decs = collect_decs_in_expr(then);
+                let else_decs = collect_decs_in_expr(else_);
+                let mut then_refs = HashSet::new();
+                let mut else_refs = HashSet::new();
+                collect_var_refs_expr(then, &mut then_refs);
+                collect_var_refs_expr(else_, &mut else_refs);
+                for var in &self.heap_vars {
+                    let in_both = then_refs.contains(var) && else_refs.contains(var);
+                    if !in_both { continue; }
+                    let in_then = then_decs.contains(var);
+                    let in_else = else_decs.contains(var);
+                    if in_then != in_else {
+                        let name = self.var_table.get(*var).name.as_str();
+                        eprintln!(
+                            "[perceus-belt] BRANCH-LEAK: `{}` (VarId {}) in `{}` — Dec'd in {} but not {}",
+                            name, var.0, self.fn_name,
+                            if in_then { "then" } else { "else" },
+                            if in_then { "else" } else { "then" },
+                        );
+                    }
+                }
+                self.visit_expr(then);
+                self.visit_expr(else_);
             }
+            IrExprKind::Match { subject, arms } => {
+                self.visit_expr(subject);
+                if arms.len() > 1 {
+                    let arm_decs: Vec<HashSet<VarId>> = arms.iter()
+                        .map(|arm| collect_decs_in_expr(&arm.body))
+                        .collect();
+                    let arm_refs: Vec<HashSet<VarId>> = arms.iter()
+                        .map(|arm| { let mut r = HashSet::new(); collect_var_refs_expr(&arm.body, &mut r); r })
+                        .collect();
+                    for var in &self.heap_vars {
+                        let ref_count = arm_refs.iter().filter(|r| r.contains(var)).count();
+                        if ref_count < 2 { continue; }
+                        let first_has = arm_decs[0].contains(var);
+                        for (i, decs) in arm_decs.iter().enumerate().skip(1) {
+                            if decs.contains(var) != first_has {
+                                let name = self.var_table.get(*var).name.as_str();
+                                eprintln!(
+                                    "[perceus-belt] BRANCH-LEAK: `{}` (VarId {}) in `{}` — Dec'd in arm 0 but not arm {}",
+                                    name, var.0, self.fn_name, i,
+                                );
+                            }
+                        }
+                    }
+                }
+                for arm in arms { self.visit_expr(&arm.body); }
+            }
+            _ => walk_expr(self, expr),
         }
-        _ => {}
     }
 }
 
@@ -1109,26 +1094,19 @@ fn collect_decs_in_expr(expr: &IrExpr) -> HashSet<VarId> {
 }
 
 fn scan_decs(expr: &IrExpr, decs: &mut HashSet<VarId>) {
-    match &expr.kind {
-        IrExprKind::Block { stmts, expr: tail } => {
-            for stmt in stmts {
-                if let IrStmtKind::RcDec { var } = &stmt.kind { decs.insert(*var); }
-                match &stmt.kind {
-                    IrStmtKind::Bind { value, .. } | IrStmtKind::Assign { value, .. } => scan_decs(value, decs),
-                    IrStmtKind::Expr { expr } => scan_decs(expr, decs),
-                    _ => {}
-                }
-            }
-            if let Some(tail) = tail { scan_decs(tail, decs); }
-        }
-        IrExprKind::If { cond, then, else_ } => {
-            scan_decs(cond, decs); scan_decs(then, decs); scan_decs(else_, decs);
-        }
-        IrExprKind::Match { subject, arms } => {
-            scan_decs(subject, decs);
-            for arm in arms { scan_decs(&arm.body, decs); }
-        }
-        _ => {}
+    DecCollector { decs }.visit_expr(expr);
+}
+
+/// Collects every RcDec'd var (diagnostic input to verify_branch_balance), riding
+/// the exhaustive IrVisitor walk so no node kind drops its subtree.
+struct DecCollector<'a> {
+    decs: &'a mut HashSet<VarId>,
+}
+
+impl IrVisitor for DecCollector<'_> {
+    fn visit_stmt(&mut self, stmt: &IrStmt) {
+        if let IrStmtKind::RcDec { var } = &stmt.kind { self.decs.insert(*var); }
+        walk_stmt(self, stmt);
     }
 }
 
