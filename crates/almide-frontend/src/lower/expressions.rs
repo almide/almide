@@ -184,8 +184,8 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
             // operand widths. Mirrors the fn-arg and let-binding
             // coercion rules — the same authoritative-context rule
             // applies to any pairing where one side locks the width.
-            super::statements::coerce_literal_to_sized(&mut r, &l.ty);
-            super::statements::coerce_literal_to_sized(&mut l, &r.ty);
+            super::statements::coerce_literal_to_sized(&mut r, &l.ty, ctx.env);
+            super::statements::coerce_literal_to_sized(&mut l, &r.ty, ctx.env);
             // Resolve operand types: if expr.ty is Unknown, try VarTable lookup
             let left_ty = if l.ty == Ty::Unknown {
                 if let IrExprKind::Var { id } = &l.kind { ctx.var_table.get(*id).ty.clone() } else { l.ty.clone() }

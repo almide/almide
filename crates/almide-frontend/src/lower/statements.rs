@@ -3,7 +3,7 @@
 use almide_lang::ast;
 use almide_base::intern::sym;
 use almide_ir::*;
-use crate::types::{Ty, TypeConstructorId};
+use crate::types::{Ty, TypeConstructorId, TypeEnv};
 use super::LowerCtx;
 use super::expressions::lower_expr;
 
@@ -26,7 +26,7 @@ pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &ast::Stmt) -> IrStmt {
             // at codegen time because the value keeps its structural type.
             let val_ty = if let Some(te) = ty {
                 let declared = super::types::resolve_type_expr(te);
-                override_record_literal_ty(&mut ir_val, &declared);
+                override_record_literal_ty(&mut ir_val, &declared, ctx.env);
                 declared
             } else {
                 ir_val.ty.clone()
@@ -38,7 +38,7 @@ pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &ast::Stmt) -> IrStmt {
             let mut ir_val = lower_expr(ctx, value);
             let val_ty = if let Some(te) = ty {
                 let declared = super::types::resolve_type_expr(te);
-                override_record_literal_ty(&mut ir_val, &declared);
+                override_record_literal_ty(&mut ir_val, &declared, ctx.env);
                 declared
             } else {
                 ir_val.ty.clone()
@@ -95,7 +95,7 @@ pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &ast::Stmt) -> IrStmt {
 /// the declared type should win. Otherwise multiple nominal types with
 /// identical field shapes (Dog vs Cat, both `{name: String}`) collide at
 /// codegen because `collect_named_records` keys by sorted field names.
-fn override_record_literal_ty(ir_val: &mut IrExpr, declared: &Ty) {
+fn override_record_literal_ty(ir_val: &mut IrExpr, declared: &Ty, env: &TypeEnv) {
     // Nominal record type override — keeps `Dog` / `Cat` distinct even
     // when their structural shapes match.
     if matches!(declared, Ty::Named(_, _)) {
@@ -106,13 +106,19 @@ fn override_record_literal_ty(ir_val: &mut IrExpr, declared: &Ty) {
                 }
             }
             IrExprKind::Block { expr: Some(inner), .. } => {
-                override_record_literal_ty(inner, declared);
+                override_record_literal_ty(inner, declared, env);
                 if matches!(ir_val.ty, Ty::Record { .. } | Ty::OpenRecord { .. } | Ty::Unknown) {
                     ir_val.ty = declared.clone();
                 }
             }
             _ => {}
         }
+        // A named record/alias whose structural shape carries sized fields
+        // (`type Rec = { b: Int8, n: Int }`) still needs its bare-literal
+        // field values narrowed to the sized field types. The nominal retag
+        // above only fixes the record's *own* type tag; `coerce_literal_to_sized`
+        // resolves the Named type and descends into the field literals.
+        coerce_literal_to_sized(ir_val, declared, env);
         return;
     }
 
@@ -124,7 +130,7 @@ fn override_record_literal_ty(ir_val: &mut IrExpr, declared: &Ty) {
     // `expr.ty` for the literal suffix (`42i64` → `42i32`), so this
     // is the single hook that makes `let x: Int32 = 42` emit correct
     // Rust instead of an `i64` / `i32` mismatch.
-    coerce_literal_to_sized(ir_val, declared);
+    coerce_literal_to_sized(ir_val, declared, env);
 }
 
 /// Whether `ty` is one of the sized numeric types the Stage 1a/1b
@@ -146,19 +152,74 @@ pub(crate) fn is_sized_numeric(ty: &Ty) -> bool {
 /// type — which matches the Stage 1b rule that literals flow into
 /// sized slots but named-variable refs don't (they retype instead
 /// with an explicit conversion).
-pub(crate) fn coerce_literal_to_sized(ir_val: &mut IrExpr, declared: &Ty) {
-    if !is_sized_numeric(declared) { return; }
-    match &mut ir_val.kind {
-        IrExprKind::LitInt { .. } if ir_val.ty == Ty::Int => {
-            ir_val.ty = declared.clone();
-        }
-        IrExprKind::LitFloat { .. } if ir_val.ty == Ty::Float => {
-            ir_val.ty = declared.clone();
-        }
-        IrExprKind::UnOp { op: almide_ir::UnOp::NegInt, operand } => {
-            if matches!(&operand.kind, IrExprKind::LitInt { .. }) && operand.ty == Ty::Int {
-                operand.ty = declared.clone();
+///
+/// Recurses through container literals so a sized field nested inside a
+/// list / tuple / record annotation also coerces: `let a: List[(Int8,
+/// Int)] = [(1, 100)]` retypes the `1` element to `Int8` while the type
+/// checker only narrowed the *binding* type (the inner literal keeps the
+/// default `Ty::Int` in `expr_types`, so codegen would otherwise emit
+/// `1i64` against a `Vec<(i8, i64)>` slot — an E0308). The declared type
+/// drives the descent; the value literal's own shape must match for any
+/// element to be touched.
+pub(crate) fn coerce_literal_to_sized(ir_val: &mut IrExpr, declared: &Ty, env: &TypeEnv) {
+    use almide_lang::types::constructor::TypeConstructorId;
+    // Look through blocks/parenthesized tails: a literal can be wrapped in
+    // a single-tail block (e.g. `{ (1, 2) }`) by lowering.
+    if let IrExprKind::Block { expr: Some(tail), .. } = &mut ir_val.kind {
+        coerce_literal_to_sized(tail, declared, env);
+        return;
+    }
+    // Resolve a named type alias to its structural form so a record / sized
+    // alias declared via `type Rec = { b: Int8, .. }` (a `Ty::Named`) becomes
+    // its `Ty::Record { .. }` / `Ty::Int8` / etc. before the match below.
+    // `resolve_named` is a no-op for non-Named types, so the scalar / List /
+    // Tuple arms are unaffected.
+    let resolved = env.resolve_named(declared);
+    let declared = &resolved;
+    match declared {
+        // Scalar sized numeric slot: retype a bare default-typed literal.
+        _ if is_sized_numeric(declared) => match &mut ir_val.kind {
+            IrExprKind::LitInt { .. } if ir_val.ty == Ty::Int => {
                 ir_val.ty = declared.clone();
+            }
+            IrExprKind::LitFloat { .. } if ir_val.ty == Ty::Float => {
+                ir_val.ty = declared.clone();
+            }
+            IrExprKind::UnOp { op: almide_ir::UnOp::NegInt, operand } => {
+                if matches!(&operand.kind, IrExprKind::LitInt { .. }) && operand.ty == Ty::Int {
+                    operand.ty = declared.clone();
+                    ir_val.ty = declared.clone();
+                }
+            }
+            _ => {}
+        },
+        // List[T]: every element literal is coerced against T.
+        Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 => {
+            if let IrExprKind::List { elements } = &mut ir_val.kind {
+                for e in elements.iter_mut() {
+                    coerce_literal_to_sized(e, &args[0], env);
+                }
+            }
+        }
+        // Tuple([t0, t1, ...]): element i is coerced against t_i.
+        Ty::Tuple(elem_tys) => {
+            if let IrExprKind::Tuple { elements } = &mut ir_val.kind {
+                if elements.len() == elem_tys.len() {
+                    for (e, t) in elements.iter_mut().zip(elem_tys.iter()) {
+                        coerce_literal_to_sized(e, t, env);
+                    }
+                }
+            }
+        }
+        // Structural record annotation `{ b: Int8, n: Int }`: coerce each
+        // field value against its declared field type, matched by name.
+        Ty::Record { fields: decl_fields } | Ty::OpenRecord { fields: decl_fields } => {
+            if let IrExprKind::Record { fields, .. } = &mut ir_val.kind {
+                for (fname, fvalue) in fields.iter_mut() {
+                    if let Some((_, fty)) = decl_fields.iter().find(|(n, _)| n == fname) {
+                        coerce_literal_to_sized(fvalue, fty, env);
+                    }
+                }
             }
         }
         _ => {}

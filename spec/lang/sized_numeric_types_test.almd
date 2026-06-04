@@ -172,3 +172,90 @@ test "Int8 sign extends to Int64" {
   let z: Int64 = y.to_int64()
   assert_eq(z, -1)
 }
+
+// ── Container-literal field narrowing ────────────────────────────
+//
+// A sized numeric type nested inside a list / tuple / record
+// annotation must coerce the element literal's width. The checker
+// only narrows the *binding* type; the inner literal keeps the
+// default `Ty::Int` in expr_types, so without lowering-side
+// coercion codegen emits `1i64` against a `Vec<(i8, i64)>` slot
+// (E0308 on native). Regression guard for that bug.
+
+test "List of (Int8, Int) tuples narrows element literal" {
+  let a: List[(Int8, Int)] = [(1, 100)]
+  let p = a[0]
+  assert_eq(p.0.to_int64(), 1)
+  assert_eq(p.1, 100)
+}
+
+test "List[Int8] narrows every element literal" {
+  let a: List[Int8] = [1, 2, 3]
+  assert_eq(list.len(a), 3)
+  assert_eq(a[2].to_int64(), 3)
+}
+
+test "List of (UInt8, Int16) narrows mixed-width elements" {
+  let a: List[(UInt8, Int16)] = [(7, 300)]
+  let p = a[0]
+  assert_eq(p.0.to_int64(), 7)
+  assert_eq(p.1.to_int64(), 300)
+}
+
+test "Structural record with Int8 field narrows literal" {
+  let r: { b: Int8, n: Int } = { b: 5, n: 99 }
+  assert_eq(r.b.to_int64(), 5)
+  assert_eq(r.n, 99)
+}
+
+test "Nested tuple narrows Int8 at depth" {
+  let t: ((Int8, Int), Int) = ((1, 2), 3)
+  let inner = t.0
+  assert_eq(inner.0.to_int64(), 1)
+  assert_eq(inner.1, 2)
+  assert_eq(t.1, 3)
+}
+
+test "Bare (Int8, Int) tuple narrows first element" {
+  let t: (Int8, Int) = (1, 2)
+  assert_eq(t.0.to_int64(), 1)
+  assert_eq(t.1, 2)
+}
+
+test "List[Int] stays i64 (regression)" {
+  let a: List[Int] = [1, 2]
+  assert_eq(list.len(a), 2)
+  assert_eq(a[1], 2)
+}
+
+// ── Named-record-alias field narrowing ───────────────────────────
+//
+// A record declared via a NAMED type alias (`type Rec = { b: Int8, .. }`)
+// is `Ty::Named("Rec")`, not structural `Ty::Record`, so the structural
+// record arm was skipped: native emitted `Rec { b: 127i64, .. }` (E0308)
+// and WASM was SILENT-WRONG (the 8-byte write into the 1-byte Int8 slot
+// corrupted the next field's offset). Lowering now resolves the named
+// alias before descending, so the field literal narrows on both targets.
+
+type SizedRec = { b: Int8, n: Int }
+type USizedRec = { x: UInt8, y: Int }
+
+test "Named record alias with Int8 field narrows literal" {
+  let r: SizedRec = { b: 127, n: 9999 }
+  assert_eq(r.b.to_int64(), 127)
+  assert_eq(r.n, 9999)
+}
+
+test "Named record alias with UInt8 field narrows literal" {
+  let u: USizedRec = { x: 200, y: 5 }
+  assert_eq(u.x.to_int64(), 200)
+  assert_eq(u.y, 5)
+}
+
+test "Named record alias nested inside a tuple narrows field" {
+  let v: (SizedRec, Int) = ({ b: 127, n: 9999 }, 42)
+  let r = v.0
+  assert_eq(r.b.to_int64(), 127)
+  assert_eq(r.n, 9999)
+  assert_eq(v.1, 42)
+}

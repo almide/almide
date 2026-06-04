@@ -121,20 +121,20 @@ pub(super) fn lower_call(ctx: &mut LowerCtx, callee: &ast::Expr, args: &[ast::Ex
         if matches!(name.as_str(), "assert_eq" | "assert_ne") && ir_args.len() == 2 {
             let l_ty = ir_args[0].ty.clone();
             let r_ty = ir_args[1].ty.clone();
-            super::statements::coerce_literal_to_sized(&mut ir_args[1], &l_ty);
-            super::statements::coerce_literal_to_sized(&mut ir_args[0], &r_ty);
+            super::statements::coerce_literal_to_sized(&mut ir_args[1], &l_ty, ctx.env);
+            super::statements::coerce_literal_to_sized(&mut ir_args[0], &r_ty, ctx.env);
         }
         if let Some(sig) = ctx.env.functions.get(name).cloned() {
             for (i, (_, param_ty)) in sig.params.iter().enumerate() {
                 if let Some(arg) = ir_args.get_mut(i) {
-                    super::statements::coerce_literal_to_sized(arg, param_ty);
+                    super::statements::coerce_literal_to_sized(arg, param_ty, ctx.env);
                 }
             }
         } else if let Some((module, func)) = name.as_str().split_once('.') {
             if let Some(sig) = crate::stdlib::lookup_sig(module, func) {
                 for (i, (_, param_ty)) in sig.params.iter().enumerate() {
                     if let Some(arg) = ir_args.get_mut(i) {
-                        super::statements::coerce_literal_to_sized(arg, param_ty);
+                        super::statements::coerce_literal_to_sized(arg, param_ty, ctx.env);
                     }
                 }
             }
@@ -143,7 +143,7 @@ pub(super) fn lower_call(ctx: &mut LowerCtx, callee: &ast::Expr, args: &[ast::Ex
         if let Some(sig) = crate::stdlib::lookup_sig(module.as_str(), func.as_str()) {
             for (i, (_, param_ty)) in sig.params.iter().enumerate() {
                 if let Some(arg) = ir_args.get_mut(i) {
-                    super::statements::coerce_literal_to_sized(arg, param_ty);
+                    super::statements::coerce_literal_to_sized(arg, param_ty, ctx.env);
                 }
             }
         }
