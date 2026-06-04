@@ -34,18 +34,13 @@ const LEGACY_DEBT: &[&str] = &[
     "crates/almide-codegen/src/pass_closure_conversion.rs",
     "crates/almide-codegen/src/pass_concretize_types.rs",
     "crates/almide-codegen/src/pass_effect_inference.rs",
-    "crates/almide-codegen/src/pass_fan_lowering.rs",
     "crates/almide-codegen/src/pass_lambda_type_resolve.rs",
     "crates/almide-codegen/src/pass_licm.rs",
-    "crates/almide-codegen/src/pass_list_pattern.rs",
-    "crates/almide-codegen/src/pass_match_lowering.rs",
     "crates/almide-codegen/src/pass_matrix_shape_spec.rs",
     "crates/almide-codegen/src/pass_mut_param_lowering.rs",
     "crates/almide-codegen/src/pass_peephole.rs",
     "crates/almide-codegen/src/pass_result_erasure.rs",
-    "crates/almide-codegen/src/pass_result_propagation.rs",
     "crates/almide-codegen/src/pass_rust_lowering.rs",
-    "crates/almide-codegen/src/pass_shadow_resolve.rs",
     "crates/almide-codegen/src/pass_tco.rs",
 ];
 

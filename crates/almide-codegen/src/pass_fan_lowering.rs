@@ -145,8 +145,9 @@ fn rewrite_expr(expr: IrExpr, inside_fan: bool) -> IrExpr {
         IrExprKind::OptionalChain { expr, field } => IrExprKind::OptionalChain {
             expr: Box::new(rewrite_expr(*expr, inside_fan)), field,
         },
-        // Leaf nodes: pass through
-        other => other,
+        // Any other kind: recurse into every child (total by construction).
+        other => return IrExpr { kind: other, ty, span, def_id: None }
+            .map_children(&mut |e| rewrite_expr(e, inside_fan)),
     };
 
     IrExpr { kind, ty, span, def_id: None }
@@ -171,7 +172,8 @@ fn rewrite_stmts(stmts: Vec<IrStmt>, inside_fan: bool) -> Vec<IrStmt> {
                 cond: rewrite_expr(cond, inside_fan),
                 else_: rewrite_expr(else_, inside_fan),
             },
-            other => other,
+            other => return IrStmt { kind: other, ..stmt }
+                .map_exprs(&mut |e| rewrite_expr(e, inside_fan)),
         };
         IrStmt { kind, ..stmt }
     }).collect()
@@ -185,7 +187,8 @@ fn rewrite_target(target: CallTarget, inside_fan: bool) -> CallTarget {
         CallTarget::Computed { callee } => CallTarget::Computed {
             callee: Box::new(rewrite_expr(*callee, inside_fan)),
         },
-        other => other,
+        // No IrExpr children — total by construction (new variant = compile error).
+        other @ (CallTarget::Named { .. } | CallTarget::Module { .. }) => other,
     }
 }
 

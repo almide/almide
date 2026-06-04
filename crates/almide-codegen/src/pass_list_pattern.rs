@@ -132,7 +132,13 @@ fn rewrite_expr(expr: IrExpr, vt: &mut VarTable) -> (IrExpr, bool) {
             let body = rewrite_stmts(body, vt, &mut changed);
             IrExprKind::While { cond: Box::new(c), body }
         }
-        other => other,
+        other => {
+            // Any other kind: recurse into every child so a list-pattern Match
+            // nested in a not-yet-listed node is still desugared (total).
+            let mapped = IrExpr { kind: other, ty: expr.ty, span: expr.span, def_id: None }
+                .map_children(&mut |e| { let (r, c) = rewrite_expr(e, vt); changed |= c; r });
+            return (mapped, changed);
+        }
     };
     (IrExpr { kind, ty: expr.ty, span: expr.span, def_id: None }, changed)
 }
@@ -157,7 +163,8 @@ fn rewrite_stmts(stmts: Vec<IrStmt>, vt: &mut VarTable, changed: &mut bool) -> V
                 let (e, c2) = rewrite_expr(else_, vt); *changed |= c2;
                 IrStmtKind::Guard { cond: c, else_: e }
             }
-            other => other,
+            other => return IrStmt { kind: other, span: s.span }
+                .map_exprs(&mut |e| { let (r, c) = rewrite_expr(e, vt); *changed |= c; r }),
         };
         IrStmt { kind, span: s.span }
     }).collect()
