@@ -245,3 +245,40 @@ Quick wins first (small effort, high leverage):
   検出には「観測出力（stdout/stderr/exit）を両 target で byte 比較する差分ゲート」（cross-target
   equivalence の rank 1 force-multiplier）が本筋。`tests/wasm_runtime_test.rs` の spec/wasm_cross
   stdout 比較ハーネスがその部分実装（stdout のみ。stderr/exit 比較は本節の 2 テストで先行）。
+
+  # 14. Cross-target divergence burndown map (2026-06-04) — 面的ハントの結果
+
+  **ゲートは既に存在する**（#352）。`tests/wasm_runtime_test.rs::wasm_cross_target_spec` が
+  `spec/wasm_cross/*.almd` を native+wasm 両方で走らせ **(exit, stdout, stderr) を byte 比較**、
+  `// @xt-allow: <理由>` で tracked 乖離を管理（現状 1 件 = float 最短往復）。native がオラクル。
+  よって本丸は「ゲートを建てる」ではなく **`@xt-allow` 債務の burn down**（traversal-totality の
+  LEGACY_DEBT と同型の ratchet）。
+
+  **面的ハント（並列 61 エージェント・169 プローブ・各乖離を独立再現）で native↔WASM の実バグ
+  46 件を検出。fan だけではない。** dedup すると **8 つの根本原因クラスタ**:
+
+  | # | クラスタ（根本原因） | 件数 | 優先 | locus |
+  |---|---|---|---|---|
+  | A | WASM 文字列が**バイト index**、native は**コードポイント**（chars/slice/reverse/take/codepoint/pad…、reverse は不正UTF-8生成） | 9 | 高 | `emit_wasm/rt_string*` |
+  | B | WASM `int/float.parse` が緩い＋**オーバーフロー無検査**（`ok(ゴミ)` を返す） | 8 | 高（無言の誤値） | wasm parse runtime |
+  | C | WASM `float.to_string`：`\|x\|≥2^63` で **trap**、`-0.0` 符号消失、to_fixed 丸め差 | 4 | 中高 | wasm float fmt |
+  | D | 複合要素の等価が WASM では**ポインタ同一性**、native は構造的（map/set 複合キー, list.contains/dedup on nested） | 4 | 高 | wasm element-eq |
+  | E | WASM list が**境界無検査 → OOB ヒープ読み/破壊**（slice/insert/remove_at/swap） | 5 | **高（セキュリティ）** | wasm list runtime |
+  | F | 型を変えるクロージャの map.map/set.map が **trap**（indirect call 型不一致） | 2 | 中 | wasm closure dispatch |
+  | G | **fan.\*** = §12。WASM は `fns[0]` のみ走る逐次スタブ、native は thread::scope。副作用集合・勝者・全失敗（panic101/trap134/propagate1）が乖離 | 6 | **契約決定が先** | `emit_wasm/calls.rs:1478-1561` + `runtime/rs/src/fan.rs` |
+  | H | div/mod by zero（native panic101 vs wasm trap134）、const畳み込み div0（native コンパイルエラー）、Map の Display | 3 | 中 | wasm arith/display |
+
+  §13（termination）も §12（fan）も、この 8 クラスタの一部分。
+
+  **fan(G) は契約の決定が前提**（§12 の深掘り）。native/wasm のどちらも今は仕様逸脱（native race は
+  Ok のみ拾う＝実質 any、wasm は fns[0] のみ）。推奨契約は **「決定論的 list-order-first」**: 両 target
+  で全 thunk 実行 → リスト順で最初の OK を勝者 → 全失敗は統一 Err を main-error 終了パス（§13）へ。
+  これで並行非決定性が消え native==wasm が自明に成立し差分ゲートに乗る。代替「true Promise.race
+  （最初に完了、Ok/Err 問わず）」は wall-clock 依存で決定論にならずゲートに乗らない。
+
+  **burndown 手順**（LEGACY_DEBT と同じ grandfather→drain）: 各クラスタの決定論 repro を
+  `spec/wasm_cross/` に追加 → 根本修正 → `@xt-allow` を外す。fan の勝者は非決定的なので raw race は
+  byte ゲートに不適 — 全失敗 / 副作用集合 / 順序保証のある fan.settle で枠組む。
+  **推奨順（価値×着手容易さ）**: **E（セキュリティ）→ B（parse）→ A（文字列）→ D（等価）→
+  C（float）→ H（div/mod）→ F（closure）→ G（fan、契約決定後）**。各クラスタ = 1 PR。
+  [determinism-belt.md](determinism-belt.md) の枠と接続。
