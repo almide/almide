@@ -838,16 +838,18 @@ impl FuncCompiler<'_> {
                         // Compare xs[i] with xs[i-1]
                         local_get(xs); i32_const(list_data_off); i32_add;
                         local_get(i); i32_const(es); i32_mul; i32_add;
-                        i32_load(0);
+                });
+                self.emit_load_at(&elem_ty, 0);
+                wasm!(self.func, {
                         local_get(xs); i32_const(list_data_off); i32_add;
                         local_get(i); i32_const(1); i32_sub;
                         i32_const(es); i32_mul; i32_add;
-                        i32_load(0);
                 });
-                match &elem_ty {
-                    Ty::String => { wasm!(self.func, { call(self.emitter.rt.string.eq); }); }
-                    _ => { wasm!(self.func, { i32_eq; }); }
-                }
+                self.emit_load_at(&elem_ty, 0);
+                // Structural eq: collapse consecutive value-equal elements
+                // (String + compound), matching native dedup-by-`==`, not pointer
+                // identity.
+                self.emit_eq_typed(&elem_ty);
                 wasm!(self.func, {
                         i32_eqz; // not equal → include
                         if_empty;

@@ -746,36 +746,148 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(s);
             }
             Ty::Bool => {} // identity hash: 0 or 1, already i32
+            // Tuple keys, and records/Named-records whose fields include a heap
+            // POINTER (e.g. a String or nested list field), must hash by VALUE so
+            // two structurally-equal keys built from distinct allocations land in
+            // the same bucket — otherwise probing never finds the match even with
+            // a correct value-equality. Walk the fields and fold each field's
+            // value-hash recursively (`emit_hash_value`). Records with only inline
+            // value fields keep the cheaper byte-FNV path below.
+            Ty::Tuple(_) => {
+                let fields = self.key_struct_fields(key_ty).unwrap_or_default();
+                self.emit_hash_fields(&fields);
+            }
             Ty::Named(_, _) | Ty::Record { .. } | Ty::Variant { .. } => {
-                // Records and variants are heap structs; FNV-1a over their content
-                // bytes (dereferencing the pointer). For variants this is the tag —
-                // hashing the POINTER would be identity-on-allocation and break value
-                // equality, since each constructor call allocates a fresh struct.
-                let size = self.key_content_size(key_ty);
-                if size == 0 {
-                    // No known content layout: identity hash (the key value itself).
+                let struct_fields = self.key_struct_fields(key_ty);
+                let has_ptr = struct_fields.as_ref()
+                    .map(|fs| fs.iter().any(|(_, t)| !Self::ty_is_inline_value(t)))
+                    .unwrap_or(false);
+                if let (true, Some(fields)) = (has_ptr, struct_fields) {
+                    // Record/Named-record with pointer field(s): value-structural hash.
+                    self.emit_hash_fields(&fields);
                 } else {
-                    let ptr = self.scratch.alloc_i32();
-                    let h = self.scratch.alloc_i32();
-                    wasm!(self.func, {
-                        local_set(ptr);
-                        i32_const(0x811C9DC5u32 as i32); local_set(h);
-                    });
-                    for b in 0..size {
+                    // Records and variants are heap structs; FNV-1a over their content
+                    // bytes (dereferencing the pointer). For variants this is the tag —
+                    // hashing the POINTER would be identity-on-allocation and break value
+                    // equality, since each constructor call allocates a fresh struct.
+                    let size = self.key_content_size(key_ty);
+                    if size == 0 {
+                        // No known content layout: identity hash (the key value itself).
+                    } else {
+                        let ptr = self.scratch.alloc_i32();
+                        let h = self.scratch.alloc_i32();
                         wasm!(self.func, {
-                            local_get(h);
-                            local_get(ptr); i32_load8_u(b);
-                            i32_xor;
-                            i32_const(0x01000193u32 as i32); i32_mul;
-                            local_set(h);
+                            local_set(ptr);
+                            i32_const(0x811C9DC5u32 as i32); local_set(h);
                         });
+                        for b in 0..size {
+                            wasm!(self.func, {
+                                local_get(h);
+                                local_get(ptr); i32_load8_u(b);
+                                i32_xor;
+                                i32_const(0x01000193u32 as i32); i32_mul;
+                                local_set(h);
+                            });
+                        }
+                        wasm!(self.func, { local_get(h); });
+                        self.scratch.free_i32(h);
+                        self.scratch.free_i32(ptr);
                     }
-                    wasm!(self.func, { local_get(h); });
-                    self.scratch.free_i32(h);
-                    self.scratch.free_i32(ptr);
                 }
             }
             _ => {} // other pointers: identity hash
+        }
+    }
+
+    /// True if a value of `ty` is stored INLINE (no heap pointer). Strings, lists,
+    /// records, tuples, etc. are pointers; ints/floats/bools/narrow-ints are inline.
+    /// Used to decide whether a compound key needs value-structural hashing/eq.
+    fn ty_is_inline_value(ty: &Ty) -> bool {
+        matches!(ty,
+            Ty::Int | Ty::Float | Ty::Bool | Ty::Unit
+            | Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64
+            | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64
+            | Ty::Float32 | Ty::Float64)
+    }
+
+    /// Flat (name, ty) fields of a struct-like key (Tuple or Record/Named-record),
+    /// laid out sequentially in memory. None for variants and non-struct keys.
+    /// Single source of truth so hashing and equality see identical layout.
+    fn key_struct_fields(&self, key_ty: &Ty) -> Option<Vec<(String, Ty)>> {
+        match key_ty {
+            Ty::Tuple(elems) => Some(
+                elems.iter().enumerate()
+                    .map(|(i, t)| (format!("_{i}"), t.clone()))
+                    .collect()),
+            Ty::Record { fields } => Some(
+                fields.iter().map(|(n, t)| (n.to_string(), t.clone())).collect()),
+            Ty::Named(name, _) if !self.emitter.variant_info.contains_key(name.as_str()) => {
+                self.emitter.record_fields.get(name.as_str()).cloned()
+            }
+            _ => None,
+        }
+    }
+
+    /// Value-structural FNV-1a hash of a struct-like key. Consumes the struct
+    /// pointer on the stack, leaves an i32 hash. Folds each field's value-hash
+    /// (`emit_hash_value`) at its sequential offset so structurally-equal keys —
+    /// even with pointer fields like Strings — hash identically.
+    fn emit_hash_fields(&mut self, fields: &[(String, Ty)]) {
+        let ptr = self.scratch.alloc_i32();
+        let h = self.scratch.alloc_i32();
+        wasm!(self.func, {
+            local_set(ptr);
+            i32_const(0x811C9DC5u32 as i32); local_set(h);
+        });
+        let mut offset = 0u32;
+        for (_, fty) in fields {
+            // h = (h ^ field_hash) * FNV_prime
+            wasm!(self.func, {
+                local_get(ptr);
+            });
+            self.emit_load_at(fty, offset);
+            self.emit_hash_value(fty);
+            wasm!(self.func, {
+                local_get(h); i32_xor;
+                i32_const(0x01000193u32 as i32); i32_mul;
+                local_set(h);
+            });
+            offset += values::byte_size(fty);
+        }
+        wasm!(self.func, { local_get(h); });
+        self.scratch.free_i32(h);
+        self.scratch.free_i32(ptr);
+    }
+
+    /// Value-structural hash of a single value of `ty` on the stack → i32.
+    /// Mirrors `emit_eq_typed`'s notion of equality so hash and eq never disagree:
+    /// ints by value, strings by content bytes, tuples/records by their fields.
+    fn emit_hash_value(&mut self, ty: &Ty) {
+        match ty {
+            // Int: reuse the i64 mix from emit_hash_key.
+            Ty::Int | Ty::Int64 | Ty::UInt64 => self.emit_hash_key(&Ty::Int),
+            // Narrow ints ride in i32 already — fold their value directly.
+            Ty::Int8 | Ty::Int16 | Ty::Int32
+            | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::Bool => { /* value already i32 */ }
+            // Float bits → i32 mix (reinterpret then fold high/low halves).
+            Ty::Float | Ty::Float64 => {
+                let tmp = self.scratch.alloc_i64();
+                wasm!(self.func, {
+                    i64_reinterpret_f64; local_tee(tmp);
+                    i64_const(32); i64_shr_u; local_get(tmp); i64_xor;
+                    i32_wrap_i64;
+                });
+                self.scratch.free_i64(tmp);
+            }
+            Ty::Float32 => { wasm!(self.func, { i32_reinterpret_f32; }); }
+            Ty::String | Ty::Bytes => self.emit_hash_key(&Ty::String),
+            Ty::Tuple(_) | Ty::Record { .. } | Ty::Named(_, _) | Ty::Variant { .. } => {
+                self.emit_hash_key(ty);
+            }
+            // Other heap types (List, Option, …): identity hash of the pointer.
+            // Rare as nested key fields; equality still recurses structurally, so a
+            // weaker hash only costs probe collisions, never correctness.
+            _ => {}
         }
     }
 
@@ -809,17 +921,32 @@ impl FuncCompiler<'_> {
         match key_ty {
             Ty::Int => { wasm!(self.func, { i64_eq; }); }
             Ty::String => { wasm!(self.func, { call(self.emitter.rt.string.eq); }); }
+            // Tuple keys, and records/Named-records with a heap POINTER field
+            // (String / nested list), need STRUCTURAL equality — `mem_eq` would
+            // compare the field's pointer bytes, not its contents, so two equal-
+            // content keys built from distinct allocations would miss. Route through
+            // the shared type-directed deep equality (matching `emit_hash_key`, which
+            // hashes these by value too, so hash and eq stay consistent).
+            Ty::Tuple(_) => { self.emit_eq_typed(key_ty); }
             Ty::Named(_, _) | Ty::Record { .. } | Ty::Variant { .. } => {
-                // Compare the dereferenced content (matching emit_hash_key's coverage so
-                // hash and equality stay consistent): full record bytes, or a variant's
-                // tag. byte_size(record/variant) is only the pointer size (4), so the old
-                // mem_eq(4) compared just the first 4 content bytes. When the layout is
-                // unknown, fall back to pointer identity (matching the identity hash).
-                let size = self.key_content_size(key_ty);
-                if size == 0 {
-                    wasm!(self.func, { i32_eq; });
+                let struct_fields = self.key_struct_fields(key_ty);
+                let has_ptr = struct_fields.as_ref()
+                    .map(|fs| fs.iter().any(|(_, t)| !Self::ty_is_inline_value(t)))
+                    .unwrap_or(false);
+                if has_ptr {
+                    self.emit_eq_typed(key_ty);
                 } else {
-                    wasm!(self.func, { i32_const(size as i32); call(self.emitter.rt.mem_eq); });
+                    // Compare the dereferenced content (matching emit_hash_key's coverage so
+                    // hash and equality stay consistent): full record bytes, or a variant's
+                    // tag. byte_size(record/variant) is only the pointer size (4), so the old
+                    // mem_eq(4) compared just the first 4 content bytes. When the layout is
+                    // unknown, fall back to pointer identity (matching the identity hash).
+                    let size = self.key_content_size(key_ty);
+                    if size == 0 {
+                        wasm!(self.func, { i32_eq; });
+                    } else {
+                        wasm!(self.func, { i32_const(size as i32); call(self.emitter.rt.mem_eq); });
+                    }
                 }
             }
             _ => { wasm!(self.func, { i32_eq; }); }

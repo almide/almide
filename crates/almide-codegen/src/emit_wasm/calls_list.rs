@@ -932,67 +932,41 @@ impl FuncCompiler<'_> {
                 // list.contains(list, elem) -> Bool (i32)
                 let elem_ty = self.resolve_list_elem(&args[0], None);
                 let elem_size = values::byte_size(&elem_ty);
+                let target_vt = values::ty_to_valtype(&elem_ty).unwrap_or(ValType::I32);
                 let list_ptr = self.scratch.alloc_i32();
                 let idx = self.scratch.alloc_i32();
                 let result = self.scratch.alloc_i32();
+                // Hold the search target in a valtype-matched register (i64 Int,
+                // f64 Float, i32 pointer for String/compound). The element load and
+                // compare below use `emit_load_at`/`emit_eq_typed(elem_ty)` so both
+                // sides agree on width and use STRUCTURAL (deep) equality — matching
+                // native `xs.contains(&x)`, not pointer identity.
+                let target = self.scratch.alloc(target_vt);
                 self.emit_expr(&args[0]);
                 wasm!(self.func, { local_set(list_ptr); });
-                // Save target to i64 scratch or i32 scratch depending on type
-                match values::ty_to_valtype(&elem_ty) {
-                    Some(ValType::I64) => {
-                        let target = self.scratch.alloc_i64();
-                        self.emit_expr(&args[1]);
-                        wasm!(self.func, {
-                            local_set(target);
-                            i32_const(0); local_set(idx);
-                            i32_const(0); local_set(result); // result = false
-                            block_empty; loop_empty;
-                              local_get(idx); local_get(list_ptr); i32_load(0); i32_ge_u; br_if(1);
-                              local_get(list_ptr); i32_const(list_data_off); i32_add;
-                              local_get(idx); i32_const(elem_size as i32); i32_mul; i32_add;
-                              i64_load(0);
-                              local_get(target); i64_eq;
-                              if_empty;
-                                i32_const(1); local_set(result); br(2);
-                              end;
-                              local_get(idx); i32_const(1); i32_add; local_set(idx);
-                              br(0);
-                            end; end;
-                            local_get(result);
-                        });
-                        self.scratch.free_i64(target);
-                    }
-                    _ => {
-                        // i32 types: String, Option, etc.
-                        let target = self.scratch.alloc_i32();
-                        self.emit_expr(&args[1]);
-                        wasm!(self.func, {
-                            local_set(target);
-                            i32_const(0); local_set(idx);
-                            i32_const(0); local_set(result);
-                            block_empty; loop_empty;
-                              local_get(idx); local_get(list_ptr); i32_load(0); i32_ge_u; br_if(1);
-                              local_get(list_ptr); i32_const(list_data_off); i32_add;
-                              local_get(idx); i32_const(elem_size as i32); i32_mul; i32_add;
-                              i32_load(0);
-                              local_get(target);
-                        });
-                        match &elem_ty {
-                            Ty::String => { wasm!(self.func, { call(self.emitter.rt.string.eq); }); }
-                            _ => { wasm!(self.func, { i32_eq; }); }
-                        }
-                        wasm!(self.func, {
-                              if_empty;
-                                i32_const(1); local_set(result); br(2);
-                              end;
-                              local_get(idx); i32_const(1); i32_add; local_set(idx);
-                              br(0);
-                            end; end;
-                            local_get(result);
-                        });
-                        self.scratch.free_i32(target);
-                    }
-                }
+                self.emit_expr(&args[1]);
+                wasm!(self.func, {
+                    local_set(target);
+                    i32_const(0); local_set(idx);
+                    i32_const(0); local_set(result); // result = false
+                    block_empty; loop_empty;
+                      local_get(idx); local_get(list_ptr); i32_load(0); i32_ge_u; br_if(1);
+                      local_get(list_ptr); i32_const(list_data_off); i32_add;
+                      local_get(idx); i32_const(elem_size as i32); i32_mul; i32_add;
+                });
+                self.emit_load_at(&elem_ty, 0);
+                wasm!(self.func, { local_get(target); });
+                self.emit_eq_typed(&elem_ty);
+                wasm!(self.func, {
+                      if_empty;
+                        i32_const(1); local_set(result); br(2);
+                      end;
+                      local_get(idx); i32_const(1); i32_add; local_set(idx);
+                      br(0);
+                    end; end;
+                    local_get(result);
+                });
+                self.scratch.free(target, target_vt);
                 self.scratch.free_i32(result);
                 self.scratch.free_i32(idx);
                 self.scratch.free_i32(list_ptr);
