@@ -5,14 +5,19 @@
 // value is an `Rc<dyn Fn>`, which is neither `Send` nor `Sync`, so it could not
 // be moved across the `thread::scope` boundary the parallel version required.
 // Results are identical to a parallel map (input order preserved); only the
-// (unobservable) parallelism is dropped. race/any/settle/timeout keep their
+// (unobservable) parallelism is dropped. race/settle/timeout keep their
 // thread::scope and receive `Box<dyn Fn + Send[+ Sync]>` thunks (the box pass
 // boxes them), which still satisfy the existing `impl Fn + Send + Sync` bounds.
+//
+// `fan.map` is EFFECTFUL: if any element fn returns `Err`, the whole map
+// propagates the FIRST `Err` (in list order) as a defined Result error. The
+// caller's auto-`?` then routes it to the effect-main termination path
+// (`Error: <msg>` + exit 1), byte-identical to the wasm `__main_runner`.
 pub fn almide_rt_fan_map<A, B>(
     items: Vec<A>,
     f: std::rc::Rc<dyn Fn(A) -> Result<B, String>>,
-) -> Vec<B> {
-    items.into_iter().map(|item| f(item).unwrap()).collect()
+) -> Result<Vec<B>, String> {
+    items.into_iter().map(|item| f(item)).collect()
 }
 
 pub fn almide_rt_fan_race<T: Send + 'static>(
@@ -34,10 +39,19 @@ pub fn almide_rt_fan_race<T: Send + 'static>(
     })
 }
 
-pub fn almide_rt_fan_any<T: Send + 'static>(
-    thunks: Vec<impl Fn() -> Result<T, String> + Send + Sync>,
-) -> T {
-    almide_rt_fan_race(thunks)
+// `fan.any` tries the thunks in LIST ORDER and returns the FIRST `Ok`
+// (deterministic — NOT wall-clock fastest). If every candidate fails it returns
+// a defined `Err`, never panicking or trapping. This is intentionally NOT
+// `fan.race` (which is parallel + wall-clock nondeterministic and stays as-is).
+pub fn almide_rt_fan_any<T>(
+    thunks: Vec<impl Fn() -> Result<T, String>>,
+) -> Result<T, String> {
+    for thunk in &thunks {
+        if let Ok(val) = thunk() {
+            return Ok(val);
+        }
+    }
+    Err("fan.any: all candidates failed".to_string())
 }
 
 pub fn almide_rt_fan_settle<T: Send + 'static>(

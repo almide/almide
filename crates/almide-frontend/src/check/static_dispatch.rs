@@ -81,7 +81,11 @@ impl Checker {
                 }
                 match field {
                     "map" => {
-                        // fan.map(xs, f) -> List[B] where xs: List[A], f: Fn(A) -> B
+                        // fan.map(xs, f) -> Result[List[B], String] where xs: List[A],
+                        // f: Fn(A) -> Result[B, String]. EFFECTFUL: the first element
+                        // Err (in list order) propagates as the whole map's Err. The
+                        // Result is auto-unwrapped in effect-fn bindings and auto-`?`
+                        // propagated, exactly like a user effect fn call.
                         if arg_tys.len() != 2 {
                             self.emit(super::err(
                                 format!("fan.map() expects 2 arguments but got {}", arg_tys.len()),
@@ -103,7 +107,7 @@ impl Checker {
                                 "fan.map callback");
                             resolve_ty(&ret_var, &self.uf)
                         });
-                        return Some(Ty::list(result_elem));
+                        return Some(Ty::result(Ty::list(result_elem), Ty::String));
                     }
                     "race" => {
                         // fan.race(thunks) -> T where thunks: List[Fn() -> T]
@@ -118,7 +122,11 @@ impl Checker {
                         return Some(unwrap_list_fn_return(&list_ty));
                     }
                     "any" => {
-                        // fan.any(thunks) -> T — first success, all fail = error
+                        // fan.any(thunks) -> Result[T, String] — try thunks in LIST
+                        // ORDER, return the FIRST Ok (deterministic); if ALL fail,
+                        // return a defined Err ("fan.any: all candidates failed").
+                        // EFFECTFUL: auto-unwrapped in effect-fn bindings and auto-`?`
+                        // propagated, like a user effect fn call.
                         if arg_tys.len() != 1 {
                             self.emit(super::err(
                                 format!("fan.any() expects 1 argument but got {}", arg_tys.len()),
@@ -127,7 +135,7 @@ impl Checker {
                             return Some(Ty::Unknown);
                         }
                         let list_ty = resolve_ty(&arg_tys[0], &self.uf);
-                        return Some(unwrap_list_fn_return(&list_ty));
+                        return Some(Ty::result(unwrap_list_fn_return(&list_ty), Ty::String));
                     }
                     "settle" => {
                         // fan.settle(thunks) -> List[Result[T, String]]

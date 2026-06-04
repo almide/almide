@@ -1,0 +1,10 @@
+// fan.any all-fail: when EVERY candidate fails, fan.any returns a defined
+// Err("fan.any: all candidates failed"), which the effect-main termination
+// surfaces as "Error: fan.any: all candidates failed" + exit 1 on BOTH targets.
+// NOT a native panic (exit 101) and NOT a wasm unreachable trap (exit 134).
+effect fn fail_n(m: String) -> Result[Int, String] = err(m)
+
+effect fn main() -> Unit = {
+  let winner = fan.any([() => fail_n("a"), () => fail_n("b"), () => fail_n("c")])
+  println("unreachable: " + int.to_string(winner))
+}

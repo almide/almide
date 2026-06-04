@@ -21,19 +21,19 @@ test "fan.settle preserves ok and err payloads" {
 }
 
 // ── fan.any returning Int — must produce a valid module + correct value ──
+// fan.any is now Result[T, String]; the test-block binding is the full Result.
 test "fan.any returns the Int winner" {
   let w = fan.any([() => succeed(5)]);
-  assert_eq(w, 5)
+  assert_eq(w, ok(5))
 }
 
 // ── fan.any returning String — must not silently drop the winner ──
-// Two successes race by wall-clock on native (list-order on wasm), so EITHER is
-// a valid winner — the regression is that a valid String result is RETURNED, not
-// dropped/garbage (the original wasm bug). Tolerating both mirrors how
-// `fan_race_test` asserts a nondeterministic race winner.
+// fan.any is now DETERMINISTIC (first Ok in list order) on BOTH targets, so the
+// winner is always the first success ("alpha"). The original regression was that
+// a valid String result was dropped/garbage on wasm; this locks in the value.
 test "fan.any returns the String winner" {
   let w = fan.any([() => pick("alpha"), () => pick("beta")]);
-  assert(w == "alpha" or w == "beta")
+  assert_eq(w, ok("alpha"))
 }
 
 // ── fan.timeout Result bound to a Result let — ?? and == must type-check ──
@@ -71,7 +71,7 @@ test "fan.any over capturing thunks picks the lone success" {
     () => fail_with(msg),
     () => succeed(hi - lo)
   ]);
-  assert_eq(w, 6)
+  assert_eq(w, ok(6))
 }
 
 test "fan.settle over capturing thunks preserves order and payloads" {
@@ -93,11 +93,11 @@ test "fan.map over a captured closure value (native E0277)" {
   let k = 3
   let f = (n: Int) => succeed(n + k)
   let out = fan.map([1, 2, 3], f);
-  assert_eq(out, [4, 5, 6])
+  assert_eq(out, ok([4, 5, 6]))
 }
 
 test "fan.map over a capturing literal lambda" {
   let base = 100
   let out = fan.map([1, 2, 3], (n: Int) => succeed(base + n));
-  assert_eq(out, [101, 102, 103])
+  assert_eq(out, ok([101, 102, 103]))
 }

@@ -1,0 +1,34 @@
+// fan.map / fan.any / fan.settle DETERMINISTIC contract (native == wasm).
+// All cases succeed (exit 0). fan.race / fan.timeout are deliberately excluded
+// (race is wall-clock nondeterministic; both are deferred). The error paths
+// (element-Err, all-fail) live in fan_map_err.almd / fan_any_allfail.almd, which
+// terminate with a defined "Error: <msg>" + exit 1 on both targets.
+effect fn dbl(x: Int) -> Result[Int, String] = ok(x * 2)
+effect fn label(x: Int) -> Result[String, String] = ok("n" + int.to_string(x))
+effect fn ok_n(x: Int) -> Result[Int, String] = ok(x)
+effect fn fail_n(m: String) -> Result[Int, String] = err(m)
+
+effect fn main() -> Unit = {
+  // fan.map: maps in list order, auto-unwraps + auto-? in effect context.
+  let doubled = fan.map([1, 2, 3, 4], (x) => dbl(x))
+  println(int.to_string(list.len(doubled)) + ":"
+    + int.to_string(doubled[0]) + "," + int.to_string(doubled[1]) + ","
+    + int.to_string(doubled[2]) + "," + int.to_string(doubled[3]))
+
+  // fan.map preserves element order (String payloads, captured offset).
+  let off = 10
+  let labels = fan.map([off + 1, off + 2], (x) => label(x))
+  println(labels[0] + "|" + labels[1])
+
+  // fan.map over an empty list.
+  let empty = fan.map([], (x: Int) => dbl(x))
+  println("empty=" + int.to_string(list.len(empty)))
+
+  // fan.any: FIRST Ok in list order wins (deterministic, NOT wall-clock).
+  let first = fan.any([() => fail_n("skip"), () => ok_n(7), () => ok_n(99)])
+  println("any=" + int.to_string(first))
+
+  // fan.settle: List[Result] in list order; ok/err payloads preserved.
+  let settled = fan.settle([() => ok_n(1), () => fail_n("bad"), () => ok_n(3)])
+  println("settle=" + int.to_string(list.len(settled)))
+}
