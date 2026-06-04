@@ -138,7 +138,16 @@ fn rewrite_calls(expr: &mut IrExpr, mut_fns: &std::collections::HashMap<String, 
                     IrStmtKind::Bind { value, .. } => rewrite_calls(value, mut_fns),
                     IrStmtKind::Assign { value, .. } => rewrite_calls(value, mut_fns),
                     IrStmtKind::Expr { expr } => rewrite_calls(expr, mut_fns),
-                    _ => {}
+                    // Explicit-preserve: mutation lowering only rewrites call sites
+                    // reachable through the statement kinds above. The remaining
+                    // kinds are listed so a new IrStmtKind is a compile error here,
+                    // not a silently-dropped subtree.
+                    IrStmtKind::BindDestructure { .. } | IrStmtKind::IndexAssign { .. }
+                    | IrStmtKind::MapInsert { .. } | IrStmtKind::FieldAssign { .. }
+                    | IrStmtKind::Guard { .. } | IrStmtKind::Comment { .. }
+                    | IrStmtKind::RcInc { .. } | IrStmtKind::RcDec { .. }
+                    | IrStmtKind::ListSwap { .. } | IrStmtKind::ListReverse { .. }
+                    | IrStmtKind::ListRotateLeft { .. } | IrStmtKind::ListCopySlice { .. } => {}
                 }
                 i += 1;
             }
@@ -160,7 +169,13 @@ fn rewrite_calls(expr: &mut IrExpr, mut_fns: &std::collections::HashMap<String, 
                     IrStmtKind::Bind { value, .. } => rewrite_calls(value, mut_fns),
                     IrStmtKind::Assign { value, .. } => rewrite_calls(value, mut_fns),
                     IrStmtKind::Expr { expr } => rewrite_calls(expr, mut_fns),
-                    _ => {}
+                    // Explicit-preserve (see Block above).
+                    IrStmtKind::BindDestructure { .. } | IrStmtKind::IndexAssign { .. }
+                    | IrStmtKind::MapInsert { .. } | IrStmtKind::FieldAssign { .. }
+                    | IrStmtKind::Guard { .. } | IrStmtKind::Comment { .. }
+                    | IrStmtKind::RcInc { .. } | IrStmtKind::RcDec { .. }
+                    | IrStmtKind::ListSwap { .. } | IrStmtKind::ListReverse { .. }
+                    | IrStmtKind::ListRotateLeft { .. } | IrStmtKind::ListCopySlice { .. } => {}
                 }
             }
         }
@@ -171,10 +186,45 @@ fn rewrite_calls(expr: &mut IrExpr, mut_fns: &std::collections::HashMap<String, 
                     IrStmtKind::Bind { value, .. } => rewrite_calls(value, mut_fns),
                     IrStmtKind::Assign { value, .. } => rewrite_calls(value, mut_fns),
                     IrStmtKind::Expr { expr } => rewrite_calls(expr, mut_fns),
-                    _ => {}
+                    // Explicit-preserve (see Block above).
+                    IrStmtKind::BindDestructure { .. } | IrStmtKind::IndexAssign { .. }
+                    | IrStmtKind::MapInsert { .. } | IrStmtKind::FieldAssign { .. }
+                    | IrStmtKind::Guard { .. } | IrStmtKind::Comment { .. }
+                    | IrStmtKind::RcInc { .. } | IrStmtKind::RcDec { .. }
+                    | IrStmtKind::ListSwap { .. } | IrStmtKind::ListReverse { .. }
+                    | IrStmtKind::ListRotateLeft { .. } | IrStmtKind::ListCopySlice { .. } => {}
                 }
             }
         }
-        _ => {}
+        // Explicit-preserve: this pass walks the structural-control nodes above
+        // to reach mutating call sites; the remaining expression kinds either
+        // contain no statement-level call sites to rewrite or are leaves. Listing
+        // every kind makes a new IrExprKind a compile error rather than a silently
+        // un-rewritten (native↔WASM divergent) subtree.
+        IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. }
+        | IrExprKind::LitStr { .. } | IrExprKind::LitBool { .. }
+        | IrExprKind::Unit | IrExprKind::Var { .. } | IrExprKind::FnRef { .. }
+        | IrExprKind::BinOp { .. } | IrExprKind::UnOp { .. }
+        | IrExprKind::Fan { .. } | IrExprKind::Break | IrExprKind::Continue
+        | IrExprKind::Call { .. } | IrExprKind::TailCall { .. }
+        | IrExprKind::RuntimeCall { .. } | IrExprKind::List { .. }
+        | IrExprKind::MapLiteral { .. } | IrExprKind::EmptyMap
+        | IrExprKind::Record { .. } | IrExprKind::SpreadRecord { .. }
+        | IrExprKind::Tuple { .. } | IrExprKind::Range { .. }
+        | IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. }
+        | IrExprKind::IndexAccess { .. } | IrExprKind::MapAccess { .. }
+        | IrExprKind::Lambda { .. } | IrExprKind::StringInterp { .. }
+        | IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. }
+        | IrExprKind::OptionSome { .. } | IrExprKind::OptionNone
+        | IrExprKind::Try { .. } | IrExprKind::Unwrap { .. }
+        | IrExprKind::UnwrapOr { .. } | IrExprKind::ToOption { .. }
+        | IrExprKind::OptionalChain { .. } | IrExprKind::Await { .. }
+        | IrExprKind::Clone { .. } | IrExprKind::Deref { .. }
+        | IrExprKind::Borrow { .. } | IrExprKind::BoxNew { .. }
+        | IrExprKind::RcWrap { .. } | IrExprKind::RustMacro { .. }
+        | IrExprKind::ToVec { .. } | IrExprKind::RenderedCall { .. }
+        | IrExprKind::InlineRust { .. } | IrExprKind::ClosureCreate { .. }
+        | IrExprKind::EnvLoad { .. } | IrExprKind::IterChain { .. }
+        | IrExprKind::Hole | IrExprKind::Todo { .. } => {}
     }
 }

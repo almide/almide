@@ -132,203 +132,57 @@ impl NanoPass for EffectInferencePass {
 
 /// Collect direct effects from stdlib calls in an expression.
 fn collect_direct_effects(expr: &IrExpr) -> HashSet<Effect> {
-    let mut effects = HashSet::new();
-    collect_effects_inner(expr, &mut effects);
-    effects
+    let mut collector = EffectCollector { effects: HashSet::new() };
+    collector.visit_expr(expr);
+    collector.effects
 }
 
-fn collect_effects_inner(expr: &IrExpr, effects: &mut HashSet<Effect>) {
-    match &expr.kind {
-        // Module call: list.map, fs.read_text, etc.
-        IrExprKind::Call { target: CallTarget::Module { module, .. }, args, .. } => {
-            if let Some(effect) = module_to_effect(module) {
-                effects.insert(effect);
-            }
-            // Check for math.random specifically
-            if module == "math" {
-                // math module functions that use randomness
-                // (detected by function name in args or specific math functions)
-            }
-            for arg in args {
-                collect_effects_inner(arg, effects);
-            }
-        }
-
-        // Named call: almide_rt_fs_read_text, etc.
-        IrExprKind::Call { target: CallTarget::Named { name }, args, .. } => {
-            if let Some(effect) = runtime_name_to_effect(name) {
-                effects.insert(effect);
-            }
-            for arg in args {
-                collect_effects_inner(arg, effects);
-            }
-        }
-
-        // Pre-resolved runtime call (from @intrinsic). Symbol follows
-        // the same `almide_rt_<m>_<f>` mangling as Named, so reuse
-        // `runtime_name_to_effect`.
-        IrExprKind::RuntimeCall { symbol, args } => {
-            if let Some(effect) = runtime_name_to_effect(symbol) {
-                effects.insert(effect);
-            }
-            for arg in args {
-                collect_effects_inner(arg, effects);
-            }
-        }
-
-        // Fan expressions
-        IrExprKind::Fan { exprs } => {
-            effects.insert(Effect::Fan);
-            for e in exprs {
-                collect_effects_inner(e, effects);
-            }
-        }
-
-        // Recurse into all other expression kinds
-        IrExprKind::Call { args, target, .. } => {
-            if let CallTarget::Method { object, .. } = target {
-                collect_effects_inner(object, effects);
-            }
-            if let CallTarget::Computed { callee } = target {
-                collect_effects_inner(callee, effects);
-            }
-            for arg in args {
-                collect_effects_inner(arg, effects);
-            }
-        }
-
-        IrExprKind::Block { stmts, expr } => {
-            for stmt in stmts {
-                collect_effects_from_stmt(stmt, effects);
-            }
-            if let Some(e) = expr {
-                collect_effects_inner(e, effects);
-            }
-        }
-
-        IrExprKind::If { cond, then, else_ } => {
-            collect_effects_inner(cond, effects);
-            collect_effects_inner(then, effects);
-            collect_effects_inner(else_, effects);
-        }
-
-        IrExprKind::Match { subject, arms } => {
-            collect_effects_inner(subject, effects);
-            for arm in arms {
-                if let Some(g) = &arm.guard {
-                    collect_effects_inner(g, effects);
-                }
-                collect_effects_inner(&arm.body, effects);
-            }
-        }
-
-        IrExprKind::Lambda { body, .. } => {
-            collect_effects_inner(body, effects);
-        }
-
-        IrExprKind::ForIn { iterable, body, .. } => {
-            collect_effects_inner(iterable, effects);
-            for stmt in body {
-                collect_effects_from_stmt(stmt, effects);
-            }
-        }
-
-        IrExprKind::While { cond, body } => {
-            collect_effects_inner(cond, effects);
-            for stmt in body {
-                collect_effects_from_stmt(stmt, effects);
-            }
-        }
-
-        IrExprKind::BinOp { left, right, .. } => {
-            collect_effects_inner(left, effects);
-            collect_effects_inner(right, effects);
-        }
-
-        IrExprKind::UnOp { operand, .. } => {
-            collect_effects_inner(operand, effects);
-        }
-
-        IrExprKind::List { elements } | IrExprKind::Tuple { elements } => {
-            for e in elements {
-                collect_effects_inner(e, effects);
-            }
-        }
-
-        IrExprKind::Record { fields, .. } => {
-            for (_, v) in fields {
-                collect_effects_inner(v, effects);
-            }
-        }
-
-        IrExprKind::SpreadRecord { base, fields } => {
-            collect_effects_inner(base, effects);
-            for (_, v) in fields {
-                collect_effects_inner(v, effects);
-            }
-        }
-
-        IrExprKind::OptionSome { expr } | IrExprKind::ResultOk { expr }
-        | IrExprKind::ResultErr { expr } | IrExprKind::Try { expr }
-        | IrExprKind::Unwrap { expr } | IrExprKind::ToOption { expr }
-        | IrExprKind::Member { object: expr, .. } | IrExprKind::OptionalChain { expr, .. }
-        | IrExprKind::Borrow { expr, .. }
-        | IrExprKind::ToVec { expr } | IrExprKind::Clone { expr }
-        | IrExprKind::Deref { expr } => {
-            collect_effects_inner(expr, effects);
-        }
-        IrExprKind::UnwrapOr { expr, fallback } => {
-            collect_effects_inner(expr, effects);
-            collect_effects_inner(fallback, effects);
-        }
-
-        IrExprKind::StringInterp { parts } => {
-            for part in parts {
-                if let IrStringPart::Expr { expr } = part {
-                    collect_effects_inner(expr, effects);
-                }
-            }
-        }
-
-        IrExprKind::MapLiteral { entries } => {
-            for (k, v) in entries {
-                collect_effects_inner(k, effects);
-                collect_effects_inner(v, effects);
-            }
-        }
-
-        IrExprKind::Range { start, end, .. } => {
-            collect_effects_inner(start, effects);
-            collect_effects_inner(end, effects);
-        }
-
-        IrExprKind::IndexAccess { object, index } => {
-            collect_effects_inner(object, effects);
-            collect_effects_inner(index, effects);
-        }
-
-        IrExprKind::MapAccess { object, key } => {
-            collect_effects_inner(object, effects);
-            collect_effects_inner(key, effects);
-        }
-
-        // Leaf nodes — no effects
-        _ => {}
-    }
+/// Traversal-total effect collector. Classifies the effect-bearing nodes
+/// (module/named/runtime calls, fan) and delegates *all* descent — into those
+/// nodes' children and into every other node — to `walk_expr`/`walk_stmt`.
+/// A new `IrExprKind`/`IrStmtKind` variant is automatically traversed, and a
+/// forgotten one is a compile error in the almide-ir walk primitive, not a
+/// silently-dropped subtree here.
+struct EffectCollector {
+    effects: HashSet<Effect>,
 }
 
-fn collect_effects_from_stmt(stmt: &IrStmt, effects: &mut HashSet<Effect>) {
-    match &stmt.kind {
-        IrStmtKind::Bind { value, .. } => collect_effects_inner(value, effects),
-        IrStmtKind::Assign { value, .. } => collect_effects_inner(value, effects),
-        IrStmtKind::Expr { expr } => collect_effects_inner(expr, effects),
-        IrStmtKind::Guard { cond, else_ } => {
-            collect_effects_inner(cond, effects);
-            collect_effects_inner(else_, effects);
+impl IrVisitor for EffectCollector {
+    fn visit_expr(&mut self, expr: &IrExpr) {
+        match &expr.kind {
+            // Module call: list.map, fs.read_text, etc.
+            IrExprKind::Call { target: CallTarget::Module { module, .. }, .. } => {
+                if let Some(effect) = module_to_effect(module) {
+                    self.effects.insert(effect);
+                }
+            }
+
+            // Named call: almide_rt_fs_read_text, etc.
+            IrExprKind::Call { target: CallTarget::Named { name }, .. } => {
+                if let Some(effect) = runtime_name_to_effect(name) {
+                    self.effects.insert(effect);
+                }
+            }
+
+            // Pre-resolved runtime call (from @intrinsic). Symbol follows
+            // the same `almide_rt_<m>_<f>` mangling as Named, so reuse
+            // `runtime_name_to_effect`.
+            IrExprKind::RuntimeCall { symbol, .. } => {
+                if let Some(effect) = runtime_name_to_effect(symbol) {
+                    self.effects.insert(effect);
+                }
+            }
+
+            // Fan expressions.
+            IrExprKind::Fan { .. } => {
+                self.effects.insert(Effect::Fan);
+            }
+
+            _ => {}
         }
-        IrStmtKind::BindDestructure { value, .. } => collect_effects_inner(value, effects),
-        IrStmtKind::FieldAssign { value, .. } => collect_effects_inner(value, effects),
-        _ => {}
+        // Exhaustive descent into all children (covers the non-classified
+        // nodes, and the children of the classified ones above).
+        walk_expr(self, expr);
     }
 }
 
@@ -337,88 +191,52 @@ fn build_call_graph(program: &IrProgram) -> HashMap<String, HashSet<String>> {
     let mut graph: HashMap<String, HashSet<String>> = HashMap::new();
 
     for func in &program.functions {
-        let mut callees = HashSet::new();
-        collect_callees(&func.body, &mut callees);
-        graph.insert(func.name.to_string(), callees);
+        graph.insert(func.name.to_string(), collect_callees(&func.body));
     }
 
     for module in &program.modules {
         for func in &module.functions {
-            let mut callees = HashSet::new();
-            collect_callees(&func.body, &mut callees);
             let qualified = format!("{}.{}", module.name, func.name);
-            graph.insert(qualified, callees);
+            graph.insert(qualified, collect_callees(&func.body));
         }
     }
 
     graph
 }
 
-fn collect_callees(expr: &IrExpr, callees: &mut HashSet<String>) {
-    match &expr.kind {
-        IrExprKind::Call { target: CallTarget::Named { name }, args, .. } => {
-            // Skip runtime functions — they're stdlib, not user functions
-            if !name.starts_with("almide_rt_") {
-                callees.insert(name.to_string());
-            }
-            for arg in args {
-                collect_callees(arg, callees);
-            }
-        }
-        IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } => {
-            callees.insert(format!("{}.{}", module, func));
-            for arg in args {
-                collect_callees(arg, callees);
-            }
-        }
-        IrExprKind::Block { stmts, expr } => {
-            for stmt in stmts {
-                match &stmt.kind {
-                    IrStmtKind::Bind { value, .. } | IrStmtKind::Assign { value, .. } => collect_callees(value, callees),
-                    IrStmtKind::Expr { expr } => collect_callees(expr, callees),
-                    IrStmtKind::Guard { cond, else_ } => {
-                        collect_callees(cond, callees);
-                        collect_callees(else_, callees);
-                    }
-                    IrStmtKind::BindDestructure { value, .. } => collect_callees(value, callees),
-                    _ => {}
+fn collect_callees(expr: &IrExpr) -> HashSet<String> {
+    let mut collector = CalleeCollector { callees: HashSet::new() };
+    collector.visit_expr(expr);
+    collector.callees
+}
+
+/// Traversal-total callee collector. Records the user-function call targets
+/// (named non-runtime calls + module calls) and delegates *all* descent to
+/// `walk_expr`/`walk_stmt`. A new node kind is automatically traversed, and a
+/// forgotten one is a compile error in the almide-ir walk primitive, not a
+/// silently-dropped subtree here.
+struct CalleeCollector {
+    callees: HashSet<String>,
+}
+
+impl IrVisitor for CalleeCollector {
+    fn visit_expr(&mut self, expr: &IrExpr) {
+        match &expr.kind {
+            IrExprKind::Call { target: CallTarget::Named { name }, .. }
+            | IrExprKind::TailCall { target: CallTarget::Named { name }, .. } => {
+                // Skip runtime functions — they're stdlib, not user functions.
+                if !name.starts_with("almide_rt_") {
+                    self.callees.insert(name.to_string());
                 }
             }
-            if let Some(e) = expr { collect_callees(e, callees); }
-        }
-        IrExprKind::If { cond, then, else_ } => {
-            collect_callees(cond, callees);
-            collect_callees(then, callees);
-            collect_callees(else_, callees);
-        }
-        IrExprKind::Lambda { body, .. } => collect_callees(body, callees),
-        IrExprKind::Match { subject, arms } => {
-            collect_callees(subject, callees);
-            for arm in arms {
-                if let Some(g) = &arm.guard { collect_callees(g, callees); }
-                collect_callees(&arm.body, callees);
+            IrExprKind::Call { target: CallTarget::Module { module, func, .. }, .. }
+            | IrExprKind::TailCall { target: CallTarget::Module { module, func, .. }, .. } => {
+                self.callees.insert(format!("{}.{}", module, func));
             }
+            _ => {}
         }
-        IrExprKind::ForIn { iterable, body, .. } => {
-            collect_callees(iterable, callees);
-            for stmt in body {
-                match &stmt.kind {
-                    IrStmtKind::Bind { value, .. } | IrStmtKind::Assign { value, .. } => collect_callees(value, callees),
-                    IrStmtKind::Expr { expr } => collect_callees(expr, callees),
-                    _ => {}
-                }
-            }
-        }
-        IrExprKind::Call { target, args, .. } => {
-            if let CallTarget::Method { object, .. } = target { collect_callees(object, callees); }
-            if let CallTarget::Computed { callee } = target { collect_callees(callee, callees); }
-            for arg in args { collect_callees(arg, callees); }
-        }
-        IrExprKind::BinOp { left, right, .. } => {
-            collect_callees(left, callees);
-            collect_callees(right, callees);
-        }
-        _ => {}
+        // Exhaustive descent into all children.
+        walk_expr(self, expr);
     }
 }
 

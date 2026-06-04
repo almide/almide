@@ -354,7 +354,27 @@ fn transform_expr(expr: &mut IrExpr, vt: &mut VarTable, scope_vars: &HashSet<Var
                 }
             }
         }
-        _ => {}
+        IrExprKind::TailCall { target, args } => {
+            match target {
+                CallTarget::Method { object, .. } => { if transform_expr(object, vt, scope_vars) { changed = true; } }
+                CallTarget::Computed { callee } => { if transform_expr(callee, vt, scope_vars) { changed = true; } }
+                CallTarget::Named { .. } | CallTarget::Module { .. } => {}
+            }
+            for a in args { if transform_expr(a, vt, scope_vars) { changed = true; } }
+        }
+        IrExprKind::RcWrap { expr: e, .. } => { if transform_expr(e, vt, scope_vars) { changed = true; } }
+        IrExprKind::InlineRust { args, .. } => {
+            for (_, a) in args { if transform_expr(a, vt, scope_vars) { changed = true; } }
+        }
+        // True leaves (no child `IrExpr`). Listed explicitly so a new
+        // child-bearing IrExprKind is a compile error here, not a silently
+        // dropped subtree (the native↔WASM capture-divergence class).
+        IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. } | IrExprKind::LitStr { .. }
+        | IrExprKind::LitBool { .. } | IrExprKind::Unit | IrExprKind::Var { .. }
+        | IrExprKind::FnRef { .. } | IrExprKind::Break | IrExprKind::Continue
+        | IrExprKind::EmptyMap | IrExprKind::OptionNone | IrExprKind::RenderedCall { .. }
+        | IrExprKind::ClosureCreate { .. } | IrExprKind::EnvLoad { .. }
+        | IrExprKind::Hole | IrExprKind::Todo { .. } => {}
     }
 
     // Now check: is this expr itself a Lambda with captured vars that need cloning?
@@ -617,7 +637,26 @@ fn replace_vars(expr: &mut IrExpr, renames: &std::collections::HashMap<VarId, Va
                 }
             }
         }
-        _ => {}
+        IrExprKind::TailCall { target, args } => {
+            match target {
+                CallTarget::Method { object, .. } => replace_vars(object, renames),
+                CallTarget::Computed { callee } => replace_vars(callee, renames),
+                CallTarget::Named { .. } | CallTarget::Module { .. } => {}
+            }
+            for a in args { replace_vars(a, renames); }
+        }
+        IrExprKind::RcWrap { expr: e, .. } => replace_vars(e, renames),
+        IrExprKind::InlineRust { args, .. } => {
+            for (_, a) in args { replace_vars(a, renames); }
+        }
+        // True leaves (no child `IrExpr`); `Var` is renamed above. Listed
+        // explicitly so a new child-bearing IrExprKind is a compile error.
+        IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. } | IrExprKind::LitStr { .. }
+        | IrExprKind::LitBool { .. } | IrExprKind::Unit | IrExprKind::FnRef { .. }
+        | IrExprKind::Break | IrExprKind::Continue
+        | IrExprKind::EmptyMap | IrExprKind::OptionNone | IrExprKind::RenderedCall { .. }
+        | IrExprKind::ClosureCreate { .. } | IrExprKind::EnvLoad { .. }
+        | IrExprKind::Hole | IrExprKind::Todo { .. } => {}
     }
 }
 

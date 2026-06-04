@@ -117,7 +117,20 @@ fn anf_expr(expr: &mut IrExpr, var_table: &mut VarTable, counter: &mut u32) {
                         anf_expr(cond, var_table, counter);
                         anf_expr(else_, var_table, counter);
                     }
-                    _ => {}
+                    // Explicit-preserve: statement kinds carrying no heap
+                    // sub-expression to ANF-lift (or only simple var/key refs).
+                    // Listed so a new IrStmtKind is a compile error, not a drop.
+                    IrStmtKind::BindDestructure { .. }
+                    | IrStmtKind::IndexAssign { .. }
+                    | IrStmtKind::MapInsert { .. }
+                    | IrStmtKind::FieldAssign { .. }
+                    | IrStmtKind::Comment { .. }
+                    | IrStmtKind::RcInc { .. }
+                    | IrStmtKind::RcDec { .. }
+                    | IrStmtKind::ListSwap { .. }
+                    | IrStmtKind::ListReverse { .. }
+                    | IrStmtKind::ListRotateLeft { .. }
+                    | IrStmtKind::ListCopySlice { .. } => {}
                 }
             }
             if let Some(t) = tail { anf_expr(t, var_table, counter); }
@@ -138,7 +151,19 @@ fn anf_expr(expr: &mut IrExpr, var_table: &mut VarTable, counter: &mut u32) {
                     IrStmtKind::Bind { value, .. } | IrStmtKind::Assign { value, .. } =>
                         anf_expr(value, var_table, counter),
                     IrStmtKind::Expr { expr } => anf_expr(expr, var_table, counter),
-                    _ => {}
+                    // Explicit-preserve: no heap sub-expression to ANF-lift.
+                    IrStmtKind::Guard { .. }
+                    | IrStmtKind::BindDestructure { .. }
+                    | IrStmtKind::IndexAssign { .. }
+                    | IrStmtKind::MapInsert { .. }
+                    | IrStmtKind::FieldAssign { .. }
+                    | IrStmtKind::Comment { .. }
+                    | IrStmtKind::RcInc { .. }
+                    | IrStmtKind::RcDec { .. }
+                    | IrStmtKind::ListSwap { .. }
+                    | IrStmtKind::ListReverse { .. }
+                    | IrStmtKind::ListRotateLeft { .. }
+                    | IrStmtKind::ListCopySlice { .. } => {}
                 }
             }
         }
@@ -149,7 +174,19 @@ fn anf_expr(expr: &mut IrExpr, var_table: &mut VarTable, counter: &mut u32) {
                     IrStmtKind::Bind { value, .. } | IrStmtKind::Assign { value, .. } =>
                         anf_expr(value, var_table, counter),
                     IrStmtKind::Expr { expr } => anf_expr(expr, var_table, counter),
-                    _ => {}
+                    // Explicit-preserve: no heap sub-expression to ANF-lift.
+                    IrStmtKind::Guard { .. }
+                    | IrStmtKind::BindDestructure { .. }
+                    | IrStmtKind::IndexAssign { .. }
+                    | IrStmtKind::MapInsert { .. }
+                    | IrStmtKind::FieldAssign { .. }
+                    | IrStmtKind::Comment { .. }
+                    | IrStmtKind::RcInc { .. }
+                    | IrStmtKind::RcDec { .. }
+                    | IrStmtKind::ListSwap { .. }
+                    | IrStmtKind::ListReverse { .. }
+                    | IrStmtKind::ListRotateLeft { .. }
+                    | IrStmtKind::ListCopySlice { .. } => {}
                 }
             }
         }
@@ -250,7 +287,65 @@ fn anf_lift_children(expr: &mut IrExpr, var_table: &mut VarTable, counter: &mut 
                 });
             }
         }
-        _ => {}
+        // Explicit-preserve: this helper only lifts the children of Call /
+        // RuntimeCall / BinOp (the kinds that route here from `anf_expr`'s
+        // catch-all). Every other kind has no arg-position heap child to lift
+        // — but they are listed so a new IrExprKind is a compile error here,
+        // not a silently un-lifted (leaking) node.
+        IrExprKind::LitInt { .. }
+        | IrExprKind::LitFloat { .. }
+        | IrExprKind::LitStr { .. }
+        | IrExprKind::LitBool { .. }
+        | IrExprKind::Unit
+        | IrExprKind::Var { .. }
+        | IrExprKind::FnRef { .. }
+        | IrExprKind::UnOp { .. }
+        | IrExprKind::If { .. }
+        | IrExprKind::Match { .. }
+        | IrExprKind::Block { .. }
+        | IrExprKind::Fan { .. }
+        | IrExprKind::ForIn { .. }
+        | IrExprKind::While { .. }
+        | IrExprKind::Break
+        | IrExprKind::Continue
+        | IrExprKind::TailCall { .. }
+        | IrExprKind::List { .. }
+        | IrExprKind::MapLiteral { .. }
+        | IrExprKind::EmptyMap
+        | IrExprKind::Record { .. }
+        | IrExprKind::SpreadRecord { .. }
+        | IrExprKind::Tuple { .. }
+        | IrExprKind::Range { .. }
+        | IrExprKind::Member { .. }
+        | IrExprKind::TupleIndex { .. }
+        | IrExprKind::IndexAccess { .. }
+        | IrExprKind::MapAccess { .. }
+        | IrExprKind::Lambda { .. }
+        | IrExprKind::StringInterp { .. }
+        | IrExprKind::ResultOk { .. }
+        | IrExprKind::ResultErr { .. }
+        | IrExprKind::OptionSome { .. }
+        | IrExprKind::OptionNone
+        | IrExprKind::Try { .. }
+        | IrExprKind::Unwrap { .. }
+        | IrExprKind::UnwrapOr { .. }
+        | IrExprKind::ToOption { .. }
+        | IrExprKind::OptionalChain { .. }
+        | IrExprKind::Await { .. }
+        | IrExprKind::Clone { .. }
+        | IrExprKind::Deref { .. }
+        | IrExprKind::Borrow { .. }
+        | IrExprKind::BoxNew { .. }
+        | IrExprKind::RcWrap { .. }
+        | IrExprKind::RustMacro { .. }
+        | IrExprKind::ToVec { .. }
+        | IrExprKind::RenderedCall { .. }
+        | IrExprKind::InlineRust { .. }
+        | IrExprKind::ClosureCreate { .. }
+        | IrExprKind::EnvLoad { .. }
+        | IrExprKind::IterChain { .. }
+        | IrExprKind::Hole
+        | IrExprKind::Todo { .. } => {}
     }
 
     *expr = wrap_with_lets(owned, lifted);
@@ -326,28 +421,28 @@ fn verify_anf_args_lifted(program: &IrProgram) -> Vec<String> {
 
     impl<'a> IrVisitor for Checker<'a> {
         fn visit_expr(&mut self, expr: &IrExpr) {
-            match &expr.kind {
-                IrExprKind::Call { args, .. } | IrExprKind::RuntimeCall { args, .. } => {
-                    for arg in args {
-                        if needs_lift(arg) {
-                            self.violations.push(format!(
-                                "[ANF] in {}: heap-typed call arg not lifted — kind={}, ty={:?}",
-                                self.func_name, expr_kind_name(&arg.kind), arg.ty,
-                            ));
-                        }
+            // Decision-only: inspect Call/RuntimeCall args and BinOp operands for
+            // un-lifted heap exprs. Recursion into children is the external
+            // `walk_expr` below — so this uses `if let` (no catch-all that could
+            // drop a subtree; every node is still walked exhaustively).
+            if let IrExprKind::Call { args, .. } | IrExprKind::RuntimeCall { args, .. } = &expr.kind {
+                for arg in args {
+                    if needs_lift(arg) {
+                        self.violations.push(format!(
+                            "[ANF] in {}: heap-typed call arg not lifted — kind={}, ty={:?}",
+                            self.func_name, expr_kind_name(&arg.kind), arg.ty,
+                        ));
                     }
                 }
-                IrExprKind::BinOp { left, right, .. } => {
-                    for arg in [left.as_ref(), right.as_ref()] {
-                        if needs_lift(arg) {
-                            self.violations.push(format!(
-                                "[ANF] in {}: heap-typed binop operand not lifted — kind={}, ty={:?}",
-                                self.func_name, expr_kind_name(&arg.kind), arg.ty,
-                            ));
-                        }
+            } else if let IrExprKind::BinOp { left, right, .. } = &expr.kind {
+                for arg in [left.as_ref(), right.as_ref()] {
+                    if needs_lift(arg) {
+                        self.violations.push(format!(
+                            "[ANF] in {}: heap-typed binop operand not lifted — kind={}, ty={:?}",
+                            self.func_name, expr_kind_name(&arg.kind), arg.ty,
+                        ));
                     }
                 }
-                _ => {}
             }
             walk_expr(self, expr);
         }

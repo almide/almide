@@ -680,7 +680,23 @@ fn check_needs_ownership(expr: &IrExpr, var: VarId, needs: &mut bool) {
             }
             for arg in args { check_needs_ownership(arg, var, needs); }
         }
-        _ => {}
+        // Leaves and nodes that carry no borrowable child use of `var` in this
+        // analysis. Explicit-preserve (not recurse-more): borrow inference is
+        // sensitive to which refs are seen, so every un-handled variant is
+        // listed with the original `=> {}` behaviour, total-by-construction.
+        // `Var { id }` where `id != var` (the `id == var` case is the guarded
+        // arm at the top — a bare self-reference whose ownership is decided by
+        // its enclosing context, e.g. Block tail / arg position).
+        IrExprKind::Var { .. }
+        | IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. }
+        | IrExprKind::LitStr { .. } | IrExprKind::LitBool { .. }
+        | IrExprKind::Unit | IrExprKind::FnRef { .. }
+        | IrExprKind::Break | IrExprKind::Continue
+        | IrExprKind::TailCall { .. } | IrExprKind::EmptyMap
+        | IrExprKind::OptionNone | IrExprKind::RcWrap { .. }
+        | IrExprKind::RenderedCall { .. } | IrExprKind::InlineRust { .. }
+        | IrExprKind::ClosureCreate { .. } | IrExprKind::EnvLoad { .. }
+        | IrExprKind::Hole | IrExprKind::Todo { .. } => {}
     }
 }
 
@@ -700,7 +716,11 @@ fn check_needs_ownership_stmt(stmt: &IrStmt, var: VarId, needs: &mut bool) {
             check_needs_ownership(cond, var, needs);
             check_needs_ownership(else_, var, needs);
         }
-        _ => {}
+        // Explicit-preserve: stmt kinds with no ownership-relevant child expr
+        // (or only VarId operands). Same `=> {}` behaviour as before.
+        IrStmtKind::Comment { .. } | IrStmtKind::RcInc { .. } | IrStmtKind::RcDec { .. }
+        | IrStmtKind::ListSwap { .. } | IrStmtKind::ListReverse { .. }
+        | IrStmtKind::ListRotateLeft { .. } | IrStmtKind::ListCopySlice { .. } => {}
     }
 }
 
@@ -796,7 +816,24 @@ fn check_needs_refmut(expr: &IrExpr, var: VarId, needs: &mut bool) {
         IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr }
         | IrExprKind::OptionSome { expr } => check_needs_refmut(expr, var, needs),
         IrExprKind::Lambda { body, .. } => check_needs_refmut(body, var, needs),
-        _ => {}
+        // Explicit-preserve: nodes whose children cannot forward `var` into a
+        // RefMut callee slot for the purposes of this analysis. Listed
+        // explicitly with the original `=> {}` behaviour (total-by-construction).
+        IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. }
+        | IrExprKind::LitStr { .. } | IrExprKind::LitBool { .. }
+        | IrExprKind::Unit | IrExprKind::FnRef { .. } | IrExprKind::Fan { .. }
+        | IrExprKind::Break | IrExprKind::Continue | IrExprKind::TailCall { .. }
+        | IrExprKind::List { .. } | IrExprKind::MapLiteral { .. } | IrExprKind::EmptyMap
+        | IrExprKind::Record { .. } | IrExprKind::SpreadRecord { .. }
+        | IrExprKind::Tuple { .. } | IrExprKind::Range { .. }
+        | IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. }
+        | IrExprKind::IndexAccess { .. } | IrExprKind::MapAccess { .. }
+        | IrExprKind::StringInterp { .. } | IrExprKind::OptionNone
+        | IrExprKind::OptionalChain { .. } | IrExprKind::RcWrap { .. }
+        | IrExprKind::RustMacro { .. } | IrExprKind::RenderedCall { .. }
+        | IrExprKind::InlineRust { .. } | IrExprKind::ClosureCreate { .. }
+        | IrExprKind::EnvLoad { .. } | IrExprKind::IterChain { .. }
+        | IrExprKind::Hole | IrExprKind::Todo { .. } => {}
     }
 }
 
@@ -816,7 +853,11 @@ fn check_needs_refmut_stmt(stmt: &IrStmt, var: VarId, needs: &mut bool) {
             check_needs_refmut(cond, var, needs);
             check_needs_refmut(else_, var, needs);
         }
-        _ => {}
+        // Explicit-preserve: stmt kinds with no RefMut-relevant child expr.
+        // Same `=> {}` behaviour as before.
+        IrStmtKind::Comment { .. } | IrStmtKind::RcInc { .. } | IrStmtKind::RcDec { .. }
+        | IrStmtKind::ListSwap { .. } | IrStmtKind::ListReverse { .. }
+        | IrStmtKind::ListRotateLeft { .. } | IrStmtKind::ListCopySlice { .. } => {}
     }
 }
 
@@ -1148,7 +1189,18 @@ fn rewrite_calls(expr: IrExpr, sigs: &HashMap<String, Vec<ParamBorrow>>, mod_sco
             } else { args };
             IrExprKind::RuntimeCall { symbol, args }
         }
-        other => other,
+        // Explicit-preserve: leaves + nodes this call-rewriter intentionally
+        // does NOT descend into (TailCall / RcWrap / InlineRust args are left
+        // untouched, matching the original `other => other`). Listed explicitly
+        // so a new IrExprKind variant is a compile error here.
+        kind @ (IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. }
+            | IrExprKind::LitStr { .. } | IrExprKind::LitBool { .. }
+            | IrExprKind::Unit | IrExprKind::Var { .. } | IrExprKind::FnRef { .. }
+            | IrExprKind::Break | IrExprKind::Continue | IrExprKind::TailCall { .. }
+            | IrExprKind::EmptyMap | IrExprKind::OptionNone | IrExprKind::RcWrap { .. }
+            | IrExprKind::RenderedCall { .. } | IrExprKind::InlineRust { .. }
+            | IrExprKind::ClosureCreate { .. } | IrExprKind::EnvLoad { .. }
+            | IrExprKind::Hole | IrExprKind::Todo { .. }) => kind,
     };
 
     IrExpr { kind, ty, span, def_id: None }
@@ -1167,7 +1219,13 @@ fn rewrite_calls_stmt(stmt: IrStmt, sigs: &HashMap<String, Vec<ParamBorrow>>, mo
         IrStmtKind::BindDestructure { pattern, value } => IrStmtKind::BindDestructure {
             pattern, value: rewrite_calls(value, sigs, mod_scope),
         },
-        other => other,
+        // Explicit-preserve: stmt kinds this rewriter does NOT descend into,
+        // matching the original `other => other` (zero behaviour change).
+        kind @ (IrStmtKind::IndexAssign { .. } | IrStmtKind::MapInsert { .. }
+            | IrStmtKind::FieldAssign { .. } | IrStmtKind::Comment { .. }
+            | IrStmtKind::RcInc { .. } | IrStmtKind::RcDec { .. }
+            | IrStmtKind::ListSwap { .. } | IrStmtKind::ListReverse { .. }
+            | IrStmtKind::ListRotateLeft { .. } | IrStmtKind::ListCopySlice { .. }) => kind,
     };
     IrStmt { kind, span: stmt.span }
 }
@@ -1296,7 +1354,30 @@ fn hoist_expr(expr: IrExpr, vt: &mut VarTable) -> IrExpr {
         IrExprKind::UnwrapOr { expr, fallback } => IrExprKind::UnwrapOr {
             expr: Box::new(hoist_expr(*expr, vt)), fallback: Box::new(hoist_expr(*fallback, vt)),
         },
-        other => other,
+        // Explicit-preserve: nodes this hoist pass does NOT descend into. The
+        // &mut-conflict hoist only fires at Call / RuntimeCall sites and the
+        // compound forms above; everything else is returned unchanged, exactly
+        // as the original `other => other` did (zero behaviour change).
+        kind @ (IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. }
+            | IrExprKind::LitStr { .. } | IrExprKind::LitBool { .. }
+            | IrExprKind::Unit | IrExprKind::Var { .. } | IrExprKind::FnRef { .. }
+            | IrExprKind::Fan { .. } | IrExprKind::Break | IrExprKind::Continue
+            | IrExprKind::TailCall { .. } | IrExprKind::List { .. }
+            | IrExprKind::MapLiteral { .. } | IrExprKind::EmptyMap
+            | IrExprKind::Record { .. } | IrExprKind::SpreadRecord { .. }
+            | IrExprKind::Tuple { .. } | IrExprKind::Range { .. }
+            | IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. }
+            | IrExprKind::IndexAccess { .. } | IrExprKind::MapAccess { .. }
+            | IrExprKind::StringInterp { .. } | IrExprKind::OptionNone
+            | IrExprKind::ToOption { .. } | IrExprKind::OptionalChain { .. }
+            | IrExprKind::Await { .. } | IrExprKind::Clone { .. }
+            | IrExprKind::Deref { .. } | IrExprKind::Borrow { .. }
+            | IrExprKind::BoxNew { .. } | IrExprKind::RcWrap { .. }
+            | IrExprKind::RustMacro { .. } | IrExprKind::ToVec { .. }
+            | IrExprKind::RenderedCall { .. } | IrExprKind::InlineRust { .. }
+            | IrExprKind::ClosureCreate { .. } | IrExprKind::EnvLoad { .. }
+            | IrExprKind::IterChain { .. } | IrExprKind::Hole
+            | IrExprKind::Todo { .. }) => kind,
     };
 
     IrExpr { kind, ty, span, def_id: None }
@@ -1361,7 +1442,12 @@ fn hoist_stmt(stmt: IrStmt, vt: &mut VarTable) -> IrStmt {
         IrStmtKind::FieldAssign { target, field, value } => IrStmtKind::FieldAssign {
             target, field, value: hoist_expr(value, vt),
         },
-        other => other,
+        // Explicit-preserve: stmt kinds with no hoistable child expr, matching
+        // the original `other => other` (zero behaviour change).
+        kind @ (IrStmtKind::Comment { .. } | IrStmtKind::RcInc { .. }
+            | IrStmtKind::RcDec { .. } | IrStmtKind::ListSwap { .. }
+            | IrStmtKind::ListReverse { .. } | IrStmtKind::ListRotateLeft { .. }
+            | IrStmtKind::ListCopySlice { .. }) => kind,
     };
     IrStmt { kind, span: stmt.span }
 }
