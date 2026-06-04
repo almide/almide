@@ -45,7 +45,6 @@ const LEGACY_DEBT: &[&str] = &[
     "crates/almide-codegen/src/pass_result_erasure.rs",
     "crates/almide-codegen/src/pass_result_propagation.rs",
     "crates/almide-codegen/src/pass_rust_lowering.rs",
-    "crates/almide-codegen/src/pass_shadow_resolve.rs",
     "crates/almide-codegen/src/pass_tco.rs",
 ];
 

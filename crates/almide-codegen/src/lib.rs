@@ -37,7 +37,6 @@ pub mod pass_match_lowering;
 pub mod pass_match_subject;
 pub mod pass_result_erasure;
 pub mod pass_result_propagation;
-pub mod pass_shadow_resolve;
 pub mod pass_intrinsic_lowering;
 pub mod pass_normalize_runtime_calls;
 pub mod pass_stdlib_lowering;
