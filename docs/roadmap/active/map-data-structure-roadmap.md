@@ -20,15 +20,20 @@ Shipped so far:
   ORDER** — native stays `Vec` (see ② on why no native hash index).
 - **wasm `Set`**: dense `[len][cap][data…]` list (insertion order).
 
-**PENDING (next focused session): wasm `Map` → compact-ordered-dict (②).** It is STILL a
-Swiss Table (hash-bucket iteration = the one remaining map cross-target divergence). Per
-② below: keep dense `(key,val)` entries (insertion order, iterate `0..len`) + add a
-separate hash INDEX region for O(1) lookup; centralized `dict_*` helpers + a layout
-abstraction put every offset behind a name (the magic-number cure). ~23 ops
-(`calls_map.rs` + `calls_map_closure.rs`) + 6 map-iterating external sites (`control.rs`
-for-in, `statements.rs` GC-drop, `expressions.rs` literal, `equality.rs` eq,
-`calls_list_closure2.rs` group_by, `calls_http.rs` headers) switch together (big-bang).
-Full plan: workflow `wf_1a3614dd`, memory `project_wasm_compact_ordered_dict`.
+**SHIPPED: wasm `Map` → compact-ordered-dict (②).** Branch `xtarget-wasm-map-order`
+(layout consts `709b6764`, helpers `715acc1e`, op switch `89a5833e`). Dense `(key,val)`
+entries (insertion order, iterate `0..len`) + a separate hash INDEX region (tags + 1-based
+slot pointers) for O(1) lookup; centralized `emit_dict_*` helpers + named `layout::map`
+consts put every offset behind a name (the magic-number cure). All map-layout sites
+switched together (`calls_map.rs` + `calls_map_closure.rs` + `control.rs` for-in,
+`expressions.rs` literal, `equality.rs` eq, `calls_list_closure2.rs` group_by,
+`calls_http.rs` headers). `calls_value.rs` was confirmed NOT a map (its `=8` offsets are
+`List[(String,Value)]` object payloads). Verified byte-identical native==wasm across the
+full spec suite + all `spec/wasm_cross/*.almd`; new `map_insertion_order.almd` locks the
+order guarantee into the gate (the prior corpus only checked order-independent counts).
+The dead Swiss helpers (`emit_map_resize`/`emit_alloc_table`/`emit_swiss_setup`) are gone;
+`set` now grows by load factor (fixing a >16-entry overflow). Full notes: memory
+`project_wasm_compact_ordered_dict`.
 
 > ⚠️ The earlier **seq-in-entry** attempt — a wrong hack that changed the entry *stride*
 > and so forced touching every hand-coded stride site → magic-number proliferation, 6
