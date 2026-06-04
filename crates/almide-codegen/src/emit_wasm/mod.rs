@@ -185,6 +185,22 @@ pub struct StringRuntime {
     pub is_lower: u32,
     pub cmp: u32,
     pub run_length_encode: u32,
+    /// UTF-8 codepoint helpers (shared by codepoint-aware string ops).
+    /// `utf8_width(s, byte_i) -> i32`: byte width (1-4) of the codepoint whose
+    /// lead byte sits at data offset `byte_i`. Stray continuation bytes and a
+    /// width that would read past the end both clamp to 1.
+    pub utf8_width: u32,
+    /// `utf8_scalar(s, byte_i) -> i64`: Unicode scalar value decoded from the
+    /// codepoint at data offset `byte_i`. Malformed sequences yield the lead
+    /// byte (width-1 fallback), never an OOB read.
+    pub utf8_scalar: u32,
+    /// `utf8_byte_of_cp(s, n) -> i32`: byte offset (within the data section) of
+    /// the start of the n-th codepoint. `n >= count` returns the byte length.
+    pub utf8_byte_of_cp: u32,
+    /// `utf8_snap(s, byte_i) -> i32`: byte_i rounded DOWN to the nearest UTF-8
+    /// char boundary (clamped to [0, byte_len]). Mirrors native `slice`'s
+    /// boundary-safe byte indexing.
+    pub utf8_snap: u32,
 }
 
 /// Indices of built-in runtime functions.
@@ -434,6 +450,10 @@ impl WasmEmitter {
                     cmp: 0,
                     char_count: 0,
                     run_length_encode: 0,
+                    utf8_width: 0,
+                    utf8_scalar: 0,
+                    utf8_byte_of_cp: 0,
+                    utf8_snap: 0,
                 },
                 value_stringify: 0,
                 json_escape_string: 0,

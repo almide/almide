@@ -1,0 +1,50 @@
+// Cross-target gate for int.parse: the WASM runtime must byte-match the native
+// oracle `s.trim().parse::<i64>().map_err(|e| e.to_string())` for every failure
+// mode — empty-after-trim, lone sign, embedded non-digit, and i64 overflow in
+// both directions (incl. the i64::MIN edge that has no positive counterpart).
+// The Err payload STRING is part of the compared output, so the four std
+// messages must reproduce exactly.
+
+fn show(s: String) -> String =
+  match int.parse(s) {
+    ok(v)  => "Ok(" + int.to_string(v) + ")",
+    err(e) => "Err(" + e + ")",
+  }
+
+effect fn main() -> Unit = {
+  // Plain + leading zeros + explicit plus sign
+  println(show("42"))
+  println(show("+5"))
+  println(show("007"))
+  println(show("-1"))
+
+  // ASCII whitespace trimming (leading / trailing / both / tab+newline)
+  println(show("  42  "))
+  println(show("\t-7\n"))
+  println(show(" +100"))
+
+  // Empty / whitespace-only after trim
+  println(show(""))
+  println(show("   "))
+  println(show("\t\n"))
+
+  // Lone sign (no digits follow)
+  println(show("+"))
+  println(show("-"))
+
+  // Embedded / leading non-digit
+  println(show("abc"))
+  println(show("12x"))
+  println(show("1 2"))
+  println(show(" - 5"))
+
+  // i64::MAX boundary
+  println(show("9223372036854775807"))
+  println(show("9223372036854775808"))
+  println(show("99999999999999999999"))
+
+  // i64::MIN boundary (magnitude has no positive counterpart)
+  println(show("-9223372036854775808"))
+  println(show("-9223372036854775809"))
+  println(show("-99999999999999999999"))
+}

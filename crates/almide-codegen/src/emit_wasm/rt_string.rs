@@ -101,6 +101,23 @@ pub fn register(emitter: &mut WasmEmitter) {
     // the byte-based rest of this runtime; native is codepoint-based, so the
     // ASCII cases agree and multibyte joins the string-codepoint cluster).
     emitter.rt.string.run_length_encode = emitter.register_func("__str_rle", ty_i32_i32);
+
+    // ── Shared UTF-8 codepoint helpers ──
+    // IMPORTANT: registration order here MUST match the compile() call order
+    // below — function bodies are emitted to the code section in compile order
+    // and bound to indices in registration order. These four are registered
+    // and compiled last, after run_length_encode.
+    // utf8_width(s, byte_i) -> i32 : byte width (1-4) of the codepoint whose
+    //   lead byte is at data offset byte_i. Bounds-safe (clamped to remaining
+    //   bytes; stray continuation byte → 1).
+    emitter.rt.string.utf8_width = emitter.register_func("__utf8_width", ty_i32x2_i32);
+    // utf8_scalar(s, byte_i) -> i64 : Unicode scalar of the codepoint at byte_i.
+    emitter.rt.string.utf8_scalar = emitter.register_func("__utf8_scalar", ty_i32x2_i64);
+    // utf8_byte_of_cp(s, n) -> i32 : byte offset of the start of the n-th
+    //   codepoint (n >= count → byte length).
+    emitter.rt.string.utf8_byte_of_cp = emitter.register_func("__utf8_byte_of_cp", ty_i32x2_i32);
+    // utf8_snap(s, byte_i) -> i32 : byte_i snapped down to a char boundary.
+    emitter.rt.string.utf8_snap = emitter.register_func("__utf8_snap", ty_i32x2_i32);
 }
 
 /// Compile all string runtime function bodies.
@@ -139,6 +156,166 @@ pub fn compile(emitter: &mut WasmEmitter) {
     super::rt_string_extra::compile_cmp(emitter);
     compile_char_count(emitter);
     compile_run_length_encode(emitter);
+    compile_utf8_width(emitter);
+    compile_utf8_scalar(emitter);
+    compile_utf8_byte_of_cp(emitter);
+    compile_utf8_snap(emitter);
+}
+
+// ── Shared UTF-8 codepoint helpers ──
+//
+// UTF-8 lead-byte classification (see task spec):
+//   b0 < 0x80          → width 1 (ASCII)
+//   0x80 <= b0 < 0xC0  → continuation byte (malformed as a lead) → width 1
+//   0xC0 <= b0 < 0xE0  → width 2
+//   0xE0 <= b0 < 0xF0  → width 3
+//   b0 >= 0xF0         → width 4
+// The width is then clamped so it never runs past the byte length — a
+// truncated trailing sequence reads only the bytes that exist.
+
+/// `utf8_width(s, byte_i) -> i32`. Returns the byte width (1-4) of the codepoint
+/// whose lead byte is at data offset `byte_i`, clamped to the remaining bytes.
+fn compile_utf8_width(emitter: &mut WasmEmitter) {
+    let type_idx = emitter.func_type_indices[&emitter.rt.string.utf8_width];
+    // params: 0=s, 1=byte_i | locals: 2=blen, 3=b0, 4=width
+    let mut f = Function::new([(3, ValType::I32)]);
+    wasm!(f, {
+        local_get(0); i32_load(0); local_set(2);                 // blen = *s
+        // b0 = s[data + byte_i]
+        local_get(0); i32_const(string_data_off()); i32_add; local_get(1); i32_add;
+        i32_load8_u(0); local_set(3);
+        // width by lead-byte class
+        local_get(3); i32_const(0x80); i32_lt_u;
+        if_i32; i32_const(1);
+        else_;
+          local_get(3); i32_const(0xF0); i32_ge_u;
+          if_i32; i32_const(4);
+          else_;
+            local_get(3); i32_const(0xE0); i32_ge_u;
+            if_i32; i32_const(3);
+            else_;
+              local_get(3); i32_const(0xC0); i32_ge_u;
+              if_i32; i32_const(2);
+              else_; i32_const(1); // continuation byte as lead → 1
+              end;
+            end;
+          end;
+        end;
+        local_set(4);
+        // clamp width to remaining bytes: if byte_i + width > blen → blen - byte_i
+        local_get(1); local_get(4); i32_add; local_get(2); i32_gt_u;
+        if_i32;
+          local_get(2); local_get(1); i32_sub;
+        else_;
+          local_get(4);
+        end;
+        end;
+    });
+    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+}
+
+/// `utf8_scalar(s, byte_i) -> i64`. Decodes the Unicode scalar at data offset
+/// `byte_i`. Combines the lead byte's low bits with `width-1` continuation
+/// bytes. A malformed/truncated sequence (width clamped to 1) yields the raw
+/// lead byte.
+fn compile_utf8_scalar(emitter: &mut WasmEmitter) {
+    let type_idx = emitter.func_type_indices[&emitter.rt.string.utf8_scalar];
+    // params: 0=s, 1=byte_i | locals: 2=width, 3=b0, 4=scalar(i64), 5=k(i32), 6=cont(i32)
+    let mut f = Function::new([
+        (1, ValType::I32), (1, ValType::I32), (1, ValType::I64),
+        (1, ValType::I32), (1, ValType::I32),
+    ]);
+    wasm!(f, {
+        local_get(0); local_get(1); call(emitter.rt.string.utf8_width); local_set(2);
+        local_get(0); i32_const(string_data_off()); i32_add; local_get(1); i32_add;
+        i32_load8_u(0); local_set(3);                            // b0
+        // width 1 → scalar = b0 (ASCII or fallback)
+        local_get(2); i32_const(1); i32_eq;
+        if_i64;
+          local_get(3); i64_extend_i32_u;
+        else_;
+          // mask lead bits: 2→0x1F, 3→0x0F, 4→0x07
+          local_get(2); i32_const(2); i32_eq;
+          if_i32; i32_const(0x1F);
+          else_;
+            local_get(2); i32_const(3); i32_eq;
+            if_i32; i32_const(0x0F); else_; i32_const(0x07); end;
+          end;
+          local_get(3); i32_and; i64_extend_i32_u; local_set(4); // scalar = b0 & mask
+          // fold in (width-1) continuation bytes
+          i32_const(1); local_set(5);                            // k = 1
+          block_empty; loop_empty;
+            local_get(5); local_get(2); i32_ge_u; br_if(1);
+            local_get(0); i32_const(string_data_off()); i32_add;
+            local_get(1); i32_add; local_get(5); i32_add;
+            i32_load8_u(0); i32_const(0x3F); i32_and; local_set(6); // cont = byte & 0x3F
+            local_get(4); i64_const(6); i64_shl;
+            local_get(6); i64_extend_i32_u; i64_or; local_set(4);   // scalar = (scalar<<6) | cont
+            local_get(5); i32_const(1); i32_add; local_set(5);
+            br(0);
+          end; end;
+          local_get(4);
+        end;
+        end;
+    });
+    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+}
+
+/// `utf8_snap(s, byte_i) -> i32`. Rounds `byte_i` DOWN to the nearest UTF-8
+/// char boundary, clamped to `[0, byte_len]`. A boundary is any byte that is
+/// not a continuation byte (`0x80..0xC0`). Mirrors native slice's
+/// `is_char_boundary` round-down so a byte range never splits a codepoint.
+fn compile_utf8_snap(emitter: &mut WasmEmitter) {
+    let type_idx = emitter.func_type_indices[&emitter.rt.string.utf8_snap];
+    // params: 0=s, 1=byte_i | locals: 2=blen, 3=i, 4=byte
+    let mut f = Function::new([(3, ValType::I32)]);
+    wasm!(f, {
+        local_get(0); i32_load(0); local_set(2);                 // blen
+        // i = min(byte_i, blen)
+        local_get(1); local_get(2); i32_lt_u;
+        if_i32; local_get(1); else_; local_get(2); end;
+        local_set(3);
+        block_empty; loop_empty;
+          // stop at 0 or at a non-continuation byte
+          local_get(3); i32_eqz; br_if(1);
+          local_get(3); local_get(2); i32_ge_u; br_if(1);       // i == blen is a boundary
+          local_get(0); i32_const(string_data_off()); i32_add; local_get(3); i32_add; i32_load8_u(0);
+          i32_const(0xC0); i32_and; i32_const(0x80); i32_ne; br_if(1); // not continuation → boundary
+          local_get(3); i32_const(1); i32_sub; local_set(3);
+          br(0);
+        end; end;
+        local_get(3);
+        end;
+    });
+    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+}
+
+/// `utf8_byte_of_cp(s, n) -> i32`. Walks `n` codepoints from the start and
+/// returns the byte offset of the n-th one (or the byte length if `n` exceeds
+/// the codepoint count, so callers get a clean "to the end" boundary).
+fn compile_utf8_byte_of_cp(emitter: &mut WasmEmitter) {
+    let type_idx = emitter.func_type_indices[&emitter.rt.string.utf8_byte_of_cp];
+    // params: 0=s, 1=n | locals: 2=blen, 3=off, 4=cp
+    let mut f = Function::new([(3, ValType::I32)]);
+    wasm!(f, {
+        local_get(0); i32_load(0); local_set(2);                 // blen
+        i32_const(0); local_set(3);                              // off = 0
+        i32_const(0); local_set(4);                              // cp = 0
+        block_empty; loop_empty;
+          // stop when we've passed n codepoints or run out of bytes
+          local_get(4); local_get(1); i32_ge_s; br_if(1);
+          local_get(3); local_get(2); i32_ge_u; br_if(1);
+          // off += width(off)
+          local_get(3);
+          local_get(0); local_get(3); call(emitter.rt.string.utf8_width);
+          i32_add; local_set(3);
+          local_get(4); i32_const(1); i32_add; local_set(4);
+          br(0);
+        end; end;
+        local_get(3);
+        end;
+    });
+    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
 }
 
 /// Count UTF-8 code points in a string (pointer to `[len:i32][bytes...]`).
@@ -312,20 +489,35 @@ fn compile_slice(emitter: &mut WasmEmitter) {
     emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
 }
 
+/// reverse(s): reverse by CODEPOINT. Each codepoint's bytes are copied in
+/// forward order, but whole codepoints are placed from the end of the output
+/// toward the start — so multibyte sequences stay valid UTF-8 (native parity).
 fn compile_reverse(emitter: &mut WasmEmitter) {
     let type_idx = emitter.func_type_indices[&emitter.rt.string.reverse];
-    let mut f = Function::new([(1, ValType::I32), (1, ValType::I32), (1, ValType::I32)]);
+    // params: 0=s | locals: 1=blen, 2=result, 3=in_off, 4=out_off, 5=width, 6=k
+    let mut f = Function::new([(6, ValType::I32)]);
     wasm!(f, {
-        local_get(0); i32_load(0); local_set(1);
+        local_get(0); i32_load(0); local_set(1);                 // blen
         local_get(1); call(emitter.rt.string_alloc); local_set(2);
-        i32_const(0); local_set(3);
+        i32_const(0); local_set(3);                              // in_off = 0
+        local_get(1); local_set(4);                              // out_off = blen (write end-first)
         block_empty; loop_empty;
           local_get(3); local_get(1); i32_ge_u; br_if(1);
-          local_get(2); i32_const(string_data_off()); i32_add; local_get(3); i32_add;
-          local_get(0); i32_const(string_data_off()); i32_add;
-          local_get(1); i32_const(1); i32_sub; local_get(3); i32_sub; i32_add;
-          i32_load8_u(0); i32_store8(0);
-          local_get(3); i32_const(1); i32_add; local_set(3);
+          // width of codepoint at in_off
+          local_get(0); local_get(3); call(emitter.rt.string.utf8_width); local_set(5);
+          // out_off -= width (start of this codepoint in the output)
+          local_get(4); local_get(5); i32_sub; local_set(4);
+          // copy width bytes forward: out[out_off + k] = in[in_off + k]
+          i32_const(0); local_set(6);
+          block_empty; loop_empty;
+            local_get(6); local_get(5); i32_ge_u; br_if(1);
+            local_get(2); i32_const(string_data_off()); i32_add; local_get(4); i32_add; local_get(6); i32_add;
+            local_get(0); i32_const(string_data_off()); i32_add; local_get(3); i32_add; local_get(6); i32_add;
+            i32_load8_u(0); i32_store8(0);
+            local_get(6); i32_const(1); i32_add; local_set(6);
+            br(0);
+          end; end;
+          local_get(3); local_get(5); i32_add; local_set(3);     // in_off += width
           br(0);
         end; end;
         local_get(2); end;
@@ -553,34 +745,64 @@ fn compile_count(emitter: &mut WasmEmitter) {
 
 // ── Padding / trimming ──
 
+/// Build a 1-codepoint String holding the FIRST codepoint of `pad`. Empty
+/// `pad` degenerates to a width-0 string (native uses `' '`, but pad is never
+/// empty in practice for the padding ops; an empty pad simply pads with
+/// nothing on both targets — kept consistent here).
+fn emit_pad_first_cp(emitter: &mut WasmEmitter, f: &mut Function, pad_local: u32, out_local: u32) {
+    // width of first codepoint (0 if pad empty)
+    wasm!(*f, {
+        local_get(pad_local); i32_load(0); i32_eqz;
+        if_i32;
+          i32_const(0); call(emitter.rt.string_alloc);
+        else_;
+          // unit = slice(pad, 0, width(pad, 0))
+          local_get(pad_local); i32_const(0);
+          local_get(pad_local); i32_const(0); call(emitter.rt.string.utf8_width);
+          call(emitter.rt.string.slice);
+        end;
+        local_set(out_local);
+    });
+}
+
+/// pad_start(s, width, pad): width measured in CODEPOINTS; pad unit = first
+/// codepoint of `pad`, repeated (width - char_count(s)) times, prepended.
 fn compile_pad_start(emitter: &mut WasmEmitter) {
     let type_idx = emitter.func_type_indices[&emitter.rt.string.pad_start];
-    let mut f = Function::new([(1, ValType::I32), (1, ValType::I32), (1, ValType::I32)]);
+    // params: 0=s, 1=width, 2=pad | locals: 3=count, 4=n, 5=unit, 6=fill
+    let mut f = Function::new([(4, ValType::I32)]);
     wasm!(f, {
-        local_get(0); i32_load(0); local_set(3);
+        local_get(0); call(emitter.rt.string.char_count); i32_wrap_i64; local_set(3);
         local_get(3); local_get(1); i32_ge_u;
         if_i32; local_get(0);
         else_;
-          local_get(1); local_get(3); i32_sub; local_set(4);
-          local_get(2); local_get(4); call(emitter.rt.string.repeat); local_set(5);
-          local_get(5); local_get(0); call(emitter.rt.concat_str);
+          local_get(1); local_get(3); i32_sub; local_set(4);    // n = width - count
+    });
+    emit_pad_first_cp(emitter, &mut f, 2, 5);                    // unit (local 5)
+    wasm!(f, {
+          local_get(5); local_get(4); call(emitter.rt.string.repeat); local_set(6);
+          local_get(6); local_get(0); call(emitter.rt.concat_str);
         end;
         end;
     });
     emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
 }
 
+/// pad_end(s, width, pad): like pad_start but appended.
 fn compile_pad_end(emitter: &mut WasmEmitter) {
     let type_idx = emitter.func_type_indices[&emitter.rt.string.pad_end];
-    let mut f = Function::new([(1, ValType::I32), (1, ValType::I32), (1, ValType::I32)]);
+    let mut f = Function::new([(4, ValType::I32)]);
     wasm!(f, {
-        local_get(0); i32_load(0); local_set(3);
+        local_get(0); call(emitter.rt.string.char_count); i32_wrap_i64; local_set(3);
         local_get(3); local_get(1); i32_ge_u;
         if_i32; local_get(0);
         else_;
           local_get(1); local_get(3); i32_sub; local_set(4);
-          local_get(2); local_get(4); call(emitter.rt.string.repeat); local_set(5);
-          local_get(0); local_get(5); call(emitter.rt.concat_str);
+    });
+    emit_pad_first_cp(emitter, &mut f, 2, 5);
+    wasm!(f, {
+          local_get(5); local_get(4); call(emitter.rt.string.repeat); local_set(6);
+          local_get(0); local_get(6); call(emitter.rt.concat_str);
         end;
         end;
     });
@@ -683,30 +905,42 @@ fn compile_case_transform(emitter: &mut WasmEmitter, type_idx: u32, lo: i32, hi:
 
 // ── Decompose ──
 
+/// chars(s): one element per CODEPOINT, each a String holding that codepoint's
+/// 1-4 UTF-8 bytes. The list length is the codepoint count (worst case = byte
+/// length, so we size the list buffer by byte length and only fill `j` slots).
 fn compile_chars(emitter: &mut WasmEmitter) {
     let type_idx = emitter.func_type_indices[&emitter.rt.string.chars];
-    let mut f = Function::new([
-        (1, ValType::I32), (1, ValType::I32), (1, ValType::I32), (1, ValType::I32),
-    ]);
+    // params: 0=s | locals: 1=blen, 2=result, 3=in_off, 4=str, 5=width, 6=j, 7=k
+    let mut f = Function::new([(7, ValType::I32)]);
     wasm!(f, {
-        local_get(0); i32_load(0); local_set(1);
+        local_get(0); i32_load(0); local_set(1);                 // blen
+        // worst-case slots = blen (all-ASCII); fewer codepoints just leave gaps
         i32_const(list_hdr()); local_get(1); i32_const(4); i32_mul; i32_add;
         call(emitter.rt.alloc); local_set(2);
-        local_get(2); local_get(1); i32_store(0);
-        i32_const(0); local_set(3);
+        i32_const(0); local_set(3);                              // in_off = 0
+        i32_const(0); local_set(6);                              // j = 0 (codepoint index)
         block_empty; loop_empty;
           local_get(3); local_get(1); i32_ge_u; br_if(1);
-          i32_const(1); call(emitter.rt.string_alloc); local_set(4);
-          local_get(4); i32_const(1); i32_store(0);
-          local_get(4); i32_const(1); i32_store(string_cap_off() as u32, 0);
-          local_get(4);
-          local_get(0); i32_const(string_data_off()); i32_add; local_get(3); i32_add; i32_load8_u(0);
-          i32_store8(string_data_off() as u32);
-          local_get(2); i32_const(list_data_off()); i32_add; local_get(3); i32_const(4); i32_mul; i32_add;
+          local_get(0); local_get(3); call(emitter.rt.string.utf8_width); local_set(5);
+          // str = alloc(width); copy width bytes
+          local_get(5); call(emitter.rt.string_alloc); local_set(4);
+          i32_const(0); local_set(7);
+          block_empty; loop_empty;
+            local_get(7); local_get(5); i32_ge_u; br_if(1);
+            local_get(4); i32_const(string_data_off()); i32_add; local_get(7); i32_add;
+            local_get(0); i32_const(string_data_off()); i32_add; local_get(3); i32_add; local_get(7); i32_add;
+            i32_load8_u(0); i32_store8(0);
+            local_get(7); i32_const(1); i32_add; local_set(7);
+            br(0);
+          end; end;
+          // result.data[j] = str
+          local_get(2); i32_const(list_data_off()); i32_add; local_get(6); i32_const(4); i32_mul; i32_add;
           local_get(4); i32_store(0);
-          local_get(3); i32_const(1); i32_add; local_set(3);
+          local_get(3); local_get(5); i32_add; local_set(3);     // in_off += width
+          local_get(6); i32_const(1); i32_add; local_set(6);     // j += 1
           br(0);
         end; end;
+        local_get(2); local_get(6); i32_store(0);                // result.len = j
         local_get(2); end;
     });
     emitter.add_compiled(CompiledFunc::tracked(type_idx, f));

@@ -267,8 +267,11 @@ Quick wins first (small effort, high leverage):
   | F | 型を変えるクロージャの map.map/set.map が **trap**（indirect call 型不一致） | 2 | 中 | wasm closure dispatch |
   | G | **fan.\*** = §12。WASM は `fns[0]` のみ走る逐次スタブ、native は thread::scope。副作用集合・勝者・全失敗（panic101/trap134/propagate1）が乖離 | 6 | **契約決定が先** | `emit_wasm/calls.rs:1478-1561` + `runtime/rs/src/fan.rs` |
   | H | div/mod by zero（native panic101 vs wasm trap134）、const畳み込み div0（native コンパイルエラー）、Map の Display | 3 | 中 | wasm arith/display |
+  | A-case | to_upper/to_lower/capitalize が WASM は**ASCII のみ**（±32 byte-wise）、native は全 Unicode（é→É, ß→SS 伸長, Greek/Cyrillic）。A の敵対的検証で発見 | — | 中（要 Unicode case 表、重い）| `emit_wasm/calls_string.rs` emit_str_case_convert |
 
-  §13（termination）も §12（fan）も、この 8 クラスタの一部分。
+  §13（termination）も §12（fan）も、この 8（+A-case）クラスタの一部分。
+
+  **進捗（burndown, 2026-06-04）**: ✅ **E**（#363 マージ, OOB 境界チェック）、✅ **B-int**（#364 マージ, parse オーバーフロー/符号/trim + 4 エラー文字列）、✅ **A**（文字列コードポイント化: 4 UTF-8 ヘルパー + 全 op 変換、負 n は i32::MAX クランプ、2-arg slice の i64::MAX デフォルトは i64 クランプで修正）。残: D / C+B-float / H / F / G(fan) / A-case。
 
   **fan(G) は契約の決定が前提**（§12 の深掘り）。native/wasm のどちらも今は仕様逸脱（native race は
   Ok のみ拾う＝実質 any、wasm は fns[0] のみ）。推奨契約は **「決定論的 list-order-first」**: 両 target
