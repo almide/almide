@@ -364,7 +364,10 @@ fn insert_try_in_fan(expr: IrExpr) -> IrExpr {
             cond: Box::new(insert_try_in_fan(*cond)),
             body: body.into_iter().map(insert_try_in_fan_stmt).collect(),
         },
-        other => other,
+        // Any other kind: recurse into every child so a Fan nested in a
+        // not-yet-listed node still gets Try insertion (total by construction).
+        other => return IrExpr { kind: other, ty, span, def_id: None }
+            .map_children(&mut insert_try_in_fan),
     };
     IrExpr { kind, ty, span, def_id: None }
 }
@@ -388,7 +391,8 @@ fn insert_try_in_fan_stmt(stmt: IrStmt) -> IrStmt {
         IrStmtKind::Assign { var, value } => IrStmtKind::Assign {
             var, value: insert_try_in_fan(value),
         },
-        other => other,
+        other => return IrStmt { kind: other, span: stmt.span }
+            .map_exprs(&mut insert_try_in_fan),
     };
     IrStmt { kind, span: stmt.span }
 }
