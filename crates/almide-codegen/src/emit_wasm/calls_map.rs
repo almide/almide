@@ -746,19 +746,14 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(s);
             }
             Ty::Bool => {} // identity hash: 0 or 1, already i32
-            Ty::Named(_, _) | Ty::Record { .. } => {
-                // Hash record fields: FNV-1a over field bytes
-                let fields = if let Ty::Record { fields } = key_ty {
-                    fields.iter().map(|(n, t)| (n.to_string(), t.clone())).collect::<Vec<_>>()
-                } else if let Ty::Named(name, _) = key_ty {
-                    self.emitter.record_fields.get(name.as_str()).cloned().unwrap_or_default()
-                } else if let Some(fs) = self.emitter.record_fields.get("") {
-                    fs.clone()
-                } else {
-                    vec![]
-                };
-                if fields.is_empty() {
-                    // No fields known: identity hash
+            Ty::Named(_, _) | Ty::Record { .. } | Ty::Variant { .. } => {
+                // Records and variants are heap structs; FNV-1a over their content
+                // bytes (dereferencing the pointer). For variants this is the tag —
+                // hashing the POINTER would be identity-on-allocation and break value
+                // equality, since each constructor call allocates a fresh struct.
+                let size = self.key_content_size(key_ty);
+                if size == 0 {
+                    // No known content layout: identity hash (the key value itself).
                 } else {
                     let ptr = self.scratch.alloc_i32();
                     let h = self.scratch.alloc_i32();
@@ -766,20 +761,14 @@ impl FuncCompiler<'_> {
                         local_set(ptr);
                         i32_const(0x811C9DC5u32 as i32); local_set(h);
                     });
-                    let mut offset = 0u32;
-                    for (_, fty) in &fields {
-                        let fsize = super::values::byte_size(fty);
-                        // Hash each byte of the field
-                        for b in 0..fsize {
-                            wasm!(self.func, {
-                                local_get(h);
-                                local_get(ptr); i32_load8_u(offset + b);
-                                i32_xor;
-                                i32_const(0x01000193u32 as i32); i32_mul;
-                                local_set(h);
-                            });
-                        }
-                        offset += fsize;
+                    for b in 0..size {
+                        wasm!(self.func, {
+                            local_get(h);
+                            local_get(ptr); i32_load8_u(b);
+                            i32_xor;
+                            i32_const(0x01000193u32 as i32); i32_mul;
+                            local_set(h);
+                        });
                     }
                     wasm!(self.func, { local_get(h); });
                     self.scratch.free_i32(h);
@@ -820,11 +809,45 @@ impl FuncCompiler<'_> {
         match key_ty {
             Ty::Int => { wasm!(self.func, { i64_eq; }); }
             Ty::String => { wasm!(self.func, { call(self.emitter.rt.string.eq); }); }
-            Ty::Named(_, _) | Ty::Record { .. } => {
-                let size = super::values::byte_size(key_ty);
-                wasm!(self.func, { i32_const(size as i32); call(self.emitter.rt.mem_eq); });
+            Ty::Named(_, _) | Ty::Record { .. } | Ty::Variant { .. } => {
+                // Compare the dereferenced content (matching emit_hash_key's coverage so
+                // hash and equality stay consistent): full record bytes, or a variant's
+                // tag. byte_size(record/variant) is only the pointer size (4), so the old
+                // mem_eq(4) compared just the first 4 content bytes. When the layout is
+                // unknown, fall back to pointer identity (matching the identity hash).
+                let size = self.key_content_size(key_ty);
+                if size == 0 {
+                    wasm!(self.func, { i32_eq; });
+                } else {
+                    wasm!(self.func, { i32_const(size as i32); call(self.emitter.rt.mem_eq); });
+                }
             }
             _ => { wasm!(self.func, { i32_eq; }); }
+        }
+    }
+    /// Resolve a record/Named key's fields (name, type), or empty if the layout is
+    /// unknown. Single source of truth for hashing AND equality so they can't drift.
+    fn record_key_fields(&self, key_ty: &Ty) -> Vec<(String, Ty)> {
+        if let Ty::Record { fields } = key_ty {
+            fields.iter().map(|(n, t)| (n.to_string(), t.clone())).collect::<Vec<_>>()
+        } else if let Ty::Named(name, _) = key_ty {
+            self.emitter.record_fields.get(name.as_str()).cloned().unwrap_or_default()
+        } else if let Some(fs) = self.emitter.record_fields.get("") {
+            fs.clone()
+        } else {
+            vec![]
+        }
+    }
+    /// Byte count of a heap key's content for hashing/equality (0 if unknown).
+    /// Variants hash/compare their TAG only: each constructor allocates a fresh
+    /// struct (so the pointer is not stable) and the payload padding to the
+    /// variant's max size is uninitialized (so comparing it is non-deterministic);
+    /// the tag uniquely identifies a nullary case. Records use their full field size.
+    fn key_content_size(&self, key_ty: &Ty) -> u32 {
+        match key_ty {
+            Ty::Variant { .. } => 4,
+            Ty::Named(name, _) if self.emitter.variant_info.contains_key(name.as_str()) => 4,
+            _ => self.record_key_fields(key_ty).iter().map(|(_, t)| super::values::byte_size(t)).sum(),
         }
     }
     pub(super) fn emit_search_key_store(&mut self, key_ty: &Ty, s32: u32, s64: u32) {

@@ -131,27 +131,31 @@ impl<'a> WasmBuilder<'a> {
         }); });
     }
 
-    /// Iterate occupied Swiss Table entries.
+    /// Iterate the dense entries of a compact-ordered-dict map in insertion order.
+    /// `cap_l` is a scratch local (used transiently for the capacity, then the len
+    /// bound). Walks `entries[0..len]` — every dense entry is occupied (no tag scan).
     pub fn map_foreach(
         &mut self, map: u32, entry: u32, cap_l: u32, eb: u32, idx: u32,
         entry_stride: u32, body: impl FnOnce(&mut Self),
     ) {
+        let len_off = self.reg.fixed_offset(SWISS_MAP, map::LEN);
+        let len_ty = self.reg.field(SWISS_MAP, map::LEN).ty;
         let cap_off = self.reg.fixed_offset(SWISS_MAP, map::CAP);
         let cap_ty = self.reg.field(SWISS_MAP, map::CAP).ty;
         let tags_off = self.reg.fixed_offset(SWISS_MAP, map::TAGS);
-        let tag_ty = self.reg.field(SWISS_MAP, map::TAGS).ty;
 
+        // Dense entries base = map + header + cap + cap*INDEX_SLOT_SIZE (after tags + index).
         self.get(map).emit_load(cap_off, cap_ty).set(cap_l);
-        self.get(map).i32c(tags_off as i32).add().get(cap_l).add().set(eb);
+        self.get(map).i32c(tags_off as i32).add()
+            .get(cap_l).add()
+            .get(cap_l).i32c(map::INDEX_SLOT_SIZE as i32).mul().add()
+            .set(eb);
+        // Reuse cap_l to hold the len bound (cap only needed for the base above).
+        self.get(map).emit_load(len_off, len_ty).set(cap_l);
         self.i32c(0).set(idx);
 
         self.block(|w| { w.loop_(|w| {
             w.get(idx).get(cap_l).ge_u().br_if(1);
-
-            // skip empty tag
-            w.get(map).i32c(tags_off as i32).add().get(idx).add();
-            w.emit_load(0, tag_ty).eqz();
-            w.if_void(|w| { w.get(idx).i32c(1).add().set(idx).br(1); }, |_| {});
 
             w.get(eb).get(idx).i32c(entry_stride as i32).mul().add().set(entry);
 

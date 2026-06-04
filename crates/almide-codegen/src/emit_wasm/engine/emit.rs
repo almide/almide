@@ -252,14 +252,17 @@ fn emit_map_foreach(
 ) {
     use wasm_encoder::Instruction::*;
     use super::layout;
+    // Compact-ordered-dict: walk dense entries[0..len] in insertion order.
+    let len_off = reg.fixed_offset(layout::SWISS_MAP, layout::map::LEN);
+    let len_align = reg.field(layout::SWISS_MAP, layout::map::LEN).ty.align_exp();
     let cap_off = reg.fixed_offset(layout::SWISS_MAP, layout::map::CAP);
     let cap_align = reg.field(layout::SWISS_MAP, layout::map::CAP).ty.align_exp();
     let tags_off = reg.fixed_offset(layout::SWISS_MAP, layout::map::TAGS);
-    let tag_align = reg.field(layout::SWISS_MAP, layout::map::TAGS).ty.align_exp();
     let cap_l = entry + 1;
     let eb_l = entry + 2;
     let idx = entry + 3;
 
+    // Dense entries base = map + header + cap + cap*INDEX_SLOT_SIZE (after tags + index).
     f.instruction(&LocalGet(map));
     f.instruction(&I32Load(ma(cap_off, cap_align)));
     f.instruction(&LocalSet(cap_l));
@@ -268,7 +271,15 @@ fn emit_map_foreach(
     f.instruction(&I32Add);
     f.instruction(&LocalGet(cap_l));
     f.instruction(&I32Add);
+    f.instruction(&LocalGet(cap_l));
+    f.instruction(&I32Const(layout::map::INDEX_SLOT_SIZE as i32));
+    f.instruction(&I32Mul);
+    f.instruction(&I32Add);
     f.instruction(&LocalSet(eb_l));
+    // Reuse cap_l to hold the len bound (cap only needed for the base above).
+    f.instruction(&LocalGet(map));
+    f.instruction(&I32Load(ma(len_off, len_align)));
+    f.instruction(&LocalSet(cap_l));
     f.instruction(&I32Const(0));
     f.instruction(&LocalSet(idx));
     f.instruction(&Block(wasm_encoder::BlockType::Empty));
@@ -277,20 +288,6 @@ fn emit_map_foreach(
     f.instruction(&LocalGet(cap_l));
     f.instruction(&I32GeU);
     f.instruction(&BrIf(1));
-    f.instruction(&LocalGet(map));
-    f.instruction(&I32Const(tags_off as i32));
-    f.instruction(&I32Add);
-    f.instruction(&LocalGet(idx));
-    f.instruction(&I32Add);
-    f.instruction(&I32Load8U(ma(0, tag_align)));
-    f.instruction(&I32Eqz);
-    f.instruction(&If(wasm_encoder::BlockType::Empty));
-    f.instruction(&LocalGet(idx));
-    f.instruction(&I32Const(1));
-    f.instruction(&I32Add);
-    f.instruction(&LocalSet(idx));
-    f.instruction(&Br(1));
-    f.instruction(&End);
     f.instruction(&LocalGet(eb_l));
     f.instruction(&LocalGet(idx));
     f.instruction(&I32Const(stride as i32));
