@@ -320,35 +320,33 @@ fn fmt_for_in_comments() {
 
 #[test]
 fn fmt_roundtrip_idempotency_all_spec_files() {
-    let spec_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("spec");
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let mut tested = 0u32;
-    let mut skipped = Vec::new();
     let mut failures = Vec::new();
 
-    // Known non-idempotent files (temporary — raw string r"..." loses raw flag during format)
-    let skip_files: &[&str] = &["regex_test.almd"];
+    // No skip list: every checked-in .almd must parse, reformat, reparse, and
+    // reach a fixpoint. A file that stops parsing is a FAILURE, not a skip —
+    // silent skips shrink coverage without anyone noticing. (The old
+    // regex_test.almd raw-string entry was stale: it round-trips today.)
+    let mut files = walkdir(root.join("spec").as_path());
+    files.extend(walkdir(root.join("examples").as_path()));
 
-    for entry in walkdir(spec_dir.as_path()) {
-        let path = entry;
-        if skip_files.iter().any(|s| path.to_string_lossy().ends_with(s)) {
-            skipped.push(format!("{}: known non-idempotent (raw strings)", path.display()));
-            continue;
-        }
+    for path in files {
         let source = match std::fs::read_to_string(&path) {
             Ok(s) => s,
-            Err(_) => {
-                skipped.push(format!("{}: read error", path.display()));
+            Err(e) => {
+                failures.push(format!("{}: read error: {}", path.display(), e));
                 continue;
             }
         };
 
-        // First parse
+        // First parse — every checked-in .almd must parse.
         let tokens1 = Lexer::tokenize(&source);
         let mut parser1 = Parser::new(tokens1);
         let prog1 = match parser1.parse() {
             Ok(p) => p,
-            Err(_) => {
-                skipped.push(format!("{}: parse error", path.display()));
+            Err(e) => {
+                failures.push(format!("{}: source failed to parse: {}", path.display(), e));
                 continue;
             }
         };
@@ -407,14 +405,7 @@ fn fmt_roundtrip_idempotency_all_spec_files() {
         tested += 1;
     }
 
-    eprintln!(
-        "fmt roundtrip/idempotency: {} files tested, {} skipped",
-        tested,
-        skipped.len()
-    );
-    for s in &skipped {
-        eprintln!("  SKIP: {}", s);
-    }
+    eprintln!("fmt roundtrip/idempotency: {} files tested, 0 skipped", tested);
 
     if !failures.is_empty() {
         for f in &failures {
