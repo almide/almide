@@ -20,3 +20,12 @@ wasm-bindgen = "0.2"
 
 [profile.release]
 opt-level = 2
+
+# Disable wasm-pack's post-build wasm-opt pass on the HARNESS binary. The gate
+# verifies the bytes the compiler EMITS, not the harness's own size/speed — and
+# the wasm-opt binary wasm-pack pins (cached under ~/.cache/.wasm-pack) is old
+# enough to SIGSEGV on this module (hit on CI 2026-06-06 after rt_libm landed;
+# a current binaryen handles it fine). Skipping it removes the irrelevant,
+# version-fragile step entirely.
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false
