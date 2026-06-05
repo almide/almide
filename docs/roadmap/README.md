@@ -6,7 +6,7 @@
 
 ## Active
 
-15 items
+16 items
 
 | Item | Description |
 |------|-------------|
@@ -17,6 +17,7 @@
 | [Closure cross-target completeness](active/closure-cross-target-completeness.md) |  |
 | [Codegen traversal totality](active/codegen-traversal-totality.md) |  |
 | [Correctness Guarantee Gaps](active/correctness-guarantee-gaps.md) |  |
+| [Cross-Target Completeness (the Lid)](active/cross-target-completeness.md) | Cross-target completeness lid — the staged path from "all known divergences fixed + byte-diff gate" to structural equivalence (drain → interpreter+fuzz → selfhost → kernel proofs), with the live drain queue |
 | [The Determinism / Purity Belt](active/determinism-belt.md) | Determinism/Purity Belt — a Perceus-analog that makes the compiler deterministic & target-portable by construction |
 | [Capability-Based Effect System](active/effect-system-capability.md) | Capability-based effect system for sandboxed AI agent containers |
 | [LLM-first Language](active/llm-first-language.md) | Plan to make Almide the language LLMs write most accurately, measured by dojo MSR |
