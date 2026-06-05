@@ -30,6 +30,7 @@ use super::pass_anf::AnfPass;
 use super::pass_stack_balance::StackBalancePass;
 use super::pass_perceus::{PerceusPass, PerceusOptPass, PerceusVerifyPass};
 use super::pass_canonicalize::CanonicalizePass;
+use super::pass_globalize_closure_ids::GlobalizeClosureIdsPass;
 use super::pass_egg_saturation::EggSaturationPass;
 use super::pass_matrix_shape_spec::MatrixShapeSpecPass;
 use super::pass_const_fold::ConstFoldPass;
@@ -221,6 +222,11 @@ fn build_pipeline(target: Target) -> Pipeline {
         // TailCallMark: mark tail-position calls for WASM return_call emission.
         // Must run after all passes that may create or transform calls.
         .add(TailCallMarkPass)
+        // GlobalizeClosureIds: re-stamp every residual raw Lambda with a
+        // program-unique lambda_id so the emitter's id-keyed lambda↔LambdaInfo
+        // correlation is exact across modules. Runs late (after any pass that
+        // could clone a lambda) and before Canonicalize. (Closure v2, P0.)
+        .add(GlobalizeClosureIdsPass)
         // Canonicalize: terminal pass. Sort functions into content-derived order
         // so the emitted module is host-deterministic by construction. MUST be
         // last — `Canonical::certify` asserts its postcondition at the emit gate,

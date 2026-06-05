@@ -286,43 +286,38 @@ impl FuncCompiler<'_> {
                     call(self.emitter.rt.alloc); local_set(hdr_list);
                     local_get(hdr_list); local_get(len); i32_store(0);
                 });
-                // Swiss Table iteration: scan occupied slots
+                // Dense COD walk: emit entries[0..len] in insertion order (output index == i).
+                let (ks, vs) = self.map_kv_sizes(&args[2].ty);
+                let es = ks + vs;
+                let list_data_off = self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32;
                 let map_cap = self.scratch.alloc_i32();
                 let map_eb = self.scratch.alloc_i32();
-                let j = self.scratch.alloc_i32(); // output index
                 wasm!(self.func, {
                     local_get(hdr_map); i32_load(self.emitter.layout_reg.fixed_offset(super::engine::layout::SWISS_MAP, super::engine::layout::map::CAP)); local_set(map_cap);
-                    local_get(hdr_map); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::SWISS_MAP, super::engine::layout::map::TAGS) as i32); i32_add;
-                    local_get(map_cap); i32_add; local_set(map_eb);
+                });
+                self.emit_dict_entries_base(hdr_map, map_cap);
+                wasm!(self.func, {
+                    local_set(map_eb);
                     i32_const(0); local_set(i);
-                    i32_const(0); local_set(j);
                     block_empty; loop_empty;
-                      local_get(i); local_get(map_cap); i32_ge_u; br_if(1);
-                      local_get(hdr_map); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::SWISS_MAP, super::engine::layout::map::TAGS) as i32); i32_add;
-                      local_get(i); i32_add; i32_load8_u(0); i32_eqz;
-                      if_empty;
-                        local_get(i); i32_const(1); i32_add; local_set(i); br(1);
-                      end;
-                      // Build tuple (key, val) from occupied entry
-                      i32_const(8); call(self.emitter.rt.alloc); local_set(tuple);
-                      // entry = map_eb + i * 8 (entry_size = key(4) + val(4) = 8)
+                      local_get(i); local_get(len); i32_ge_u; br_if(1);
+                      // tuple = copy of entries[i] (key@0, val@ks — es bytes contiguous)
+                      i32_const(es as i32); call(self.emitter.rt.alloc); local_set(tuple);
                       local_get(tuple);
-                      local_get(map_eb); local_get(i); i32_const(8); i32_mul; i32_add;
-                      i32_load(0); i32_store(0); // key
-                      local_get(tuple);
-                      local_get(map_eb); local_get(i); i32_const(8); i32_mul; i32_add;
-                      i32_load(4); i32_store(4); // val
-                      // hdr_list[j] = tuple
-                      local_get(hdr_list); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
-                      local_get(j); i32_const(4); i32_mul; i32_add;
+                      local_get(map_eb); local_get(i); i32_const(es as i32); i32_mul; i32_add;
+                      i32_const(es as i32); memory_copy;
+                      // hdr_list[i] = tuple
+                      local_get(hdr_list); i32_const(list_data_off); i32_add;
+                      local_get(i); i32_const(4); i32_mul; i32_add;
                       local_get(tuple); i32_store(0);
-                      local_get(j); i32_const(1); i32_add; local_set(j);
                       local_get(i); i32_const(1); i32_add; local_set(i);
                       br(0);
                     end; end;
                     local_get(s); local_get(hdr_list); i32_store(12);
                     local_get(s);
                 });
+                self.scratch.free_i32(map_eb);
+                self.scratch.free_i32(map_cap);
                 self.scratch.free_i32(tuple);
                 self.scratch.free_i32(i);
                 self.scratch.free_i32(len);

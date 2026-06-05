@@ -1,0 +1,10 @@
+// Cluster-H: an abortable top-let used MID-main must still abort at STARTUP
+// (declaration-order eager), not at first use — so no stdout is emitted on
+// either target. Locks the evaluation-timing contract, not just the message.
+let zero = 0
+let half = 10 / zero
+
+fn main() -> Unit = {
+  println("before use")
+  println("${half}")
+}

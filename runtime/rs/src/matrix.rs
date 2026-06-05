@@ -218,7 +218,8 @@ pub fn almide_rt_matrix_fma3(
         .collect()
 }
 
-pub fn almide_rt_matrix_map(m: &AlmideMatrix, f: impl Fn(f64) -> f64) -> AlmideMatrix {
+pub fn almide_rt_matrix_map(m: &AlmideMatrix, f: std::rc::Rc<dyn Fn(f64) -> f64>) -> AlmideMatrix {
+    let f = move |x| f(x);
     m.iter().map(|row| row.iter().map(|x| f(*x)).collect()).collect()
 }
 

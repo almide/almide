@@ -215,7 +215,58 @@ fn rewrite_expr(expr: &mut IrExpr, shapes: &mut HashMap<VarId, Shape>) -> bool {
         IrExprKind::Record { fields, .. } => {
             for (_, e) in fields { if rewrite_expr(e, shapes) { changed = true; } }
         }
-        _ => {}
+        // Explicit-preserve: every other node kind is left untouched by this
+        // shape-specialization pass. Listing them all (instead of `_ => {}`)
+        // makes the descent total-by-construction — a new IrExprKind variant
+        // becomes a compile error here, forcing a deliberate traversal choice
+        // rather than silently dropping the subtree.
+        IrExprKind::LitInt { .. }
+        | IrExprKind::LitFloat { .. }
+        | IrExprKind::LitStr { .. }
+        | IrExprKind::LitBool { .. }
+        | IrExprKind::Unit
+        | IrExprKind::Var { .. }
+        | IrExprKind::FnRef { .. }
+        | IrExprKind::Fan { .. }
+        | IrExprKind::ForIn { .. }
+        | IrExprKind::While { .. }
+        | IrExprKind::Break
+        | IrExprKind::Continue
+        | IrExprKind::TailCall { .. }
+        | IrExprKind::RuntimeCall { .. }
+        | IrExprKind::MapLiteral { .. }
+        | IrExprKind::EmptyMap
+        | IrExprKind::SpreadRecord { .. }
+        | IrExprKind::Range { .. }
+        | IrExprKind::Member { .. }
+        | IrExprKind::TupleIndex { .. }
+        | IrExprKind::IndexAccess { .. }
+        | IrExprKind::MapAccess { .. }
+        | IrExprKind::StringInterp { .. }
+        | IrExprKind::ResultOk { .. }
+        | IrExprKind::ResultErr { .. }
+        | IrExprKind::OptionSome { .. }
+        | IrExprKind::OptionNone
+        | IrExprKind::Try { .. }
+        | IrExprKind::Unwrap { .. }
+        | IrExprKind::UnwrapOr { .. }
+        | IrExprKind::ToOption { .. }
+        | IrExprKind::OptionalChain { .. }
+        | IrExprKind::Await { .. }
+        | IrExprKind::Clone { .. }
+        | IrExprKind::Deref { .. }
+        | IrExprKind::Borrow { .. }
+        | IrExprKind::BoxNew { .. }
+        | IrExprKind::RcWrap { .. }
+        | IrExprKind::RustMacro { .. }
+        | IrExprKind::ToVec { .. }
+        | IrExprKind::RenderedCall { .. }
+        | IrExprKind::InlineRust { .. }
+        | IrExprKind::ClosureCreate { .. }
+        | IrExprKind::EnvLoad { .. }
+        | IrExprKind::IterChain { .. }
+        | IrExprKind::Hole
+        | IrExprKind::Todo { .. } => {}
     }
 
     // Now look at self: is it a small matmul we can unroll?
@@ -267,7 +318,24 @@ fn rewrite_stmt(stmt: &mut IrStmt, shapes: &mut HashMap<VarId, Shape>) -> bool {
         IrStmtKind::Expr { expr } => {
             if rewrite_expr(expr, shapes) { changed = true; }
         }
-        _ => {}
+        // Explicit-preserve: the shape-specialization pass only descends into
+        // bind/assign/expr statements (the only ones that introduce or carry a
+        // matmul-bearing expression whose shape table we track). All other
+        // statement kinds are left untouched. Listing them (instead of `_ => {}`)
+        // makes the descent total-by-construction — a new IrStmtKind variant is
+        // a compile error here, not a silent subtree drop.
+        IrStmtKind::BindDestructure { .. }
+        | IrStmtKind::IndexAssign { .. }
+        | IrStmtKind::MapInsert { .. }
+        | IrStmtKind::FieldAssign { .. }
+        | IrStmtKind::Guard { .. }
+        | IrStmtKind::Comment { .. }
+        | IrStmtKind::RcInc { .. }
+        | IrStmtKind::RcDec { .. }
+        | IrStmtKind::ListSwap { .. }
+        | IrStmtKind::ListReverse { .. }
+        | IrStmtKind::ListRotateLeft { .. }
+        | IrStmtKind::ListCopySlice { .. } => {}
     }
     changed
 }

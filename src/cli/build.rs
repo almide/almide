@@ -249,6 +249,30 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool) {
     // Monomorphize
     almide::mono::monomorphize(&mut ir_program);
 
+    // Verify IR integrity — gate the WASM emit on the same check the native
+    // path (main.rs) enforces. Without this an invalid IR (e.g. an unresolved
+    // closure-call result type) is emitted as a structurally-broken module that
+    // `almide build` reports as success (rc 0) but wasmtime refuses to load.
+    let verify_errors = almide::ir::verify_program(&ir_program);
+    if !verify_errors.is_empty() {
+        for e in &verify_errors {
+            eprintln!("internal compiler error: {}", e);
+        }
+        eprintln!("{} IR verification error(s) — no WASM emitted", verify_errors.len());
+        std::process::exit(1);
+    }
+
+    // fan.timeout is a wall-clock effect; the WASM target has no clock, so the
+    // thunk always runs to completion and the timeout never elapses. Warn loudly
+    // at build time rather than diverging silently from native.
+    if almide::codegen::program_uses_fan_timeout(&ir_program) {
+        eprintln!(
+            "warning: fan.timeout uses a wall clock, which the WASM target has none of — \
+             on WASM the thunk runs to completion and the timeout never elapses, so its result \
+             can differ from native. fan.timeout is excluded from the cross-target equivalence guarantee."
+        );
+    }
+
     // Codegen (nanopass pipeline + WASM binary emit)
     let bytes = match almide::codegen::codegen(&mut ir_program, almide::codegen::pass::Target::Wasm) {
         almide::codegen::CodegenOutput::Binary(b) => b,

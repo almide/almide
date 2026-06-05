@@ -85,6 +85,22 @@ impl FuncCompiler<'_> {
                 self.emit_result_eq_deep(&ok_ty, &err_ty);
             }
 
+            // Map/Set are structural: two maps are equal iff same size and every
+            // (k,v) of one is present with an equal value in the other; sets the
+            // same on keys. WASM previously fell through to `i32_eq` (pointer
+            // identity) so two structurally-equal maps built independently
+            // compared unequal — a real divergence from native.
+            Ty::Applied(TypeConstructorId::Map, args) => {
+                let key_ty = args.first().cloned().unwrap_or(Ty::Int);
+                let val_ty = args.get(1).cloned().unwrap_or(Ty::Int);
+                self.emit_map_eq_deep(&key_ty, &val_ty);
+            }
+
+            Ty::Applied(TypeConstructorId::Set, args) => {
+                let elem_ty = args.first().cloned().unwrap_or(Ty::Int);
+                self.emit_set_eq_deep(&elem_ty);
+            }
+
             Ty::Tuple(elems) => {
                 if elems.iter().all(|t| self.is_value_type(t)) {
                     let size: u32 = elems.iter().map(|t| values::byte_size(t)).sum();
@@ -231,6 +247,7 @@ impl FuncCompiler<'_> {
         let a = self.scratch.alloc_i32();
         let b = self.scratch.alloc_i32();
         let i = self.scratch.alloc_i32();
+        let matched = self.scratch.alloc_i32();
         let elem_size = values::byte_size(elem_ty);
         wasm!(self.func, {
             local_set(b); // b
@@ -247,6 +264,7 @@ impl FuncCompiler<'_> {
               else_;
                 // Compare element by element
                 i32_const(0); local_set(i); // i
+                i32_const(1); local_set(matched); // 1 until a mismatch is found
                 block_empty; loop_empty;
                   local_get(i); local_get(a); i32_load(0); i32_ge_u; br_if(1);
                   // Load a[i]
@@ -266,17 +284,224 @@ impl FuncCompiler<'_> {
         wasm!(self.func, {
                   i32_eqz; // not equal?
                   if_empty;
-                    i32_const(0); return_;
+                    // Mismatch: set result 0 and break out of the loop+block.
+                    // (NOT `return_` — that returned 0 from the ENCLOSING function,
+                    // corrupting its contract whenever a List/Tuple/Record of
+                    // unequal heap elements like String was compared.)
+                    i32_const(0); local_set(matched); br(2);
                   end;
                   local_get(i); i32_const(1); i32_add; local_set(i);
                   br(0);
                 end; end;
-                // All elements matched
-                i32_const(1);
+                local_get(matched);
               end;
             end;
         });
+        self.scratch.free_i32(matched);
         self.scratch.free_i32(i);
+        self.scratch.free_i32(b);
+        self.scratch.free_i32(a);
+    }
+
+    /// Structural map equality (compact-ordered-dict): [a_ptr, b_ptr] → i32.
+    /// Equal iff same size and every (k,v) of `a` is present in `b` with an
+    /// equal value. Walks a's dense entries in insertion order and probes b's
+    /// COD index for each key, then compares values recursively.
+    fn emit_map_eq_deep(&mut self, key_ty: &Ty, val_ty: &Ty) {
+        use super::engine::layout::{SWISS_MAP, map as lm};
+        let map_cap_off = self.emitter.layout_reg.fixed_offset(SWISS_MAP, lm::CAP);
+        let map_tags_off = self.emitter.layout_reg.fixed_offset(SWISS_MAP, lm::TAGS) as i32;
+        let ks = values::byte_size(key_ty);
+        let vs = values::byte_size(val_ty);
+        let es = ks + vs;
+
+        let a = self.scratch.alloc_i32();
+        let b = self.scratch.alloc_i32();
+        let result = self.scratch.alloc_i32();
+        let acap = self.scratch.alloc_i32();
+        let alen = self.scratch.alloc_i32();
+        let aeb = self.scratch.alloc_i32();
+        let ai = self.scratch.alloc_i32();
+        let sk32 = self.scratch.alloc_i32();
+        let sk64 = self.scratch.alloc_i64();
+        let bcap = self.scratch.alloc_i32();
+        let bib = self.scratch.alloc_i32();
+        let beb = self.scratch.alloc_i32();
+        let bidx = self.scratch.alloc_i32();
+        let bei = self.scratch.alloc_i32();
+        let h2 = self.scratch.alloc_i32();
+        let tg = self.scratch.alloc_i32();
+        let found = self.scratch.alloc_i32();
+
+        wasm!(self.func, {
+            local_set(b);
+            local_set(a);
+            // Same pointer → equal.
+            local_get(a); local_get(b); i32_eq;
+            if_i32; i32_const(1);
+            else_;
+              // Different size → not equal.
+              local_get(a); i32_load(0); local_get(b); i32_load(0); i32_ne;
+              if_i32; i32_const(0);
+              else_;
+                i32_const(1); local_set(result);
+                local_get(a); i32_load(0); local_set(alen);
+                local_get(a); i32_load(map_cap_off); local_set(acap);
+        });
+        self.emit_dict_entries_base(a, acap);
+        wasm!(self.func, {
+                local_set(aeb);
+                i32_const(0); local_set(ai);
+                block_empty; loop_empty;                                  // [A] a-exit, [B] a-loop
+                  local_get(ai); local_get(alen); i32_ge_u; br_if(1);     // done iterating a (dense)
+                  // Load this dense entry's key into the search-key register.
+                  local_get(aeb); local_get(ai); i32_const(es as i32); i32_mul; i32_add;
+        });
+        self.emit_key_load(key_ty, 0);
+        self.emit_search_key_store(key_ty, sk32, sk64);
+        // Probe b for the key.
+        wasm!(self.func, {
+                  i32_const(0); local_set(found);
+                  local_get(b); i32_load(map_cap_off); local_set(bcap);
+                  local_get(bcap); i32_eqz;
+                  if_empty; else_;                                        // [D] bcap==0 guard
+        });
+        self.emit_dict_index_base(b, bcap);
+        wasm!(self.func, { local_set(bib); });
+        self.emit_dict_entries_base(b, bcap);
+        wasm!(self.func, { local_set(beb); });
+        self.emit_search_key_load(key_ty, sk32, sk64);
+        self.emit_hash_key(key_ty);
+        self.emit_h1_h2(bcap, bidx, h2);
+        wasm!(self.func, {
+                    block_empty; loop_empty;                             // [E] probe-block, [F] probe-loop
+                      local_get(b); i32_const(map_tags_off); i32_add; local_get(bidx); i32_add; i32_load8_u(0); local_set(tg);
+                      local_get(tg); i32_eqz; br_if(1);                  // empty slot → key absent
+                      local_get(tg); local_get(h2); i32_eq;
+                      if_empty;                                          // [G] tag matches
+                        // bei = index[bidx] - 1 (1-based pointer into dense entries)
+                        local_get(bib); local_get(bidx); i32_const(lm::INDEX_SLOT_SIZE as i32); i32_mul; i32_add;
+                        i32_load(0); i32_const(1); i32_sub; local_set(bei);
+                        local_get(beb); local_get(bei); i32_const(es as i32); i32_mul; i32_add;
+        });
+        self.emit_key_load(key_ty, 0);
+        self.emit_search_key_load(key_ty, sk32, sk64);
+        self.emit_key_eq(key_ty);
+        wasm!(self.func, {
+                        if_empty; i32_const(1); local_set(found); br(3); end;   // found → exit probe-block
+                      end;
+                      local_get(bidx); i32_const(1); i32_add;
+                      local_get(bcap); i32_const(1); i32_sub; i32_and;
+                      local_set(bidx); br(0);
+                    end; end;                                            // close F, E
+                  end;                                                   // close D
+                  // Key absent → maps differ.
+                  local_get(found); i32_eqz;
+                  if_empty; i32_const(0); local_set(result); br(2); end; // exit a-loop+block
+        });
+        // Compare the values (skip for valueless maps).
+        if vs > 0 {
+            wasm!(self.func, {
+                  local_get(aeb); local_get(ai); i32_const(es as i32); i32_mul; i32_add; i32_const(ks as i32); i32_add;
+            });
+            self.emit_load_at(val_ty, 0);
+            wasm!(self.func, {
+                  local_get(beb); local_get(bei); i32_const(es as i32); i32_mul; i32_add; i32_const(ks as i32); i32_add;
+            });
+            self.emit_load_at(val_ty, 0);
+            self.emit_eq_typed(val_ty);
+            wasm!(self.func, {
+                  i32_eqz;
+                  if_empty; i32_const(0); local_set(result); br(2); end; // values differ → exit
+            });
+        }
+        wasm!(self.func, {
+                  local_get(ai); i32_const(1); i32_add; local_set(ai); br(0);
+                end; end;                                                // close B, A
+                local_get(result);
+              end;                                                       // close size-if
+            end;                                                         // close sameptr-if
+        });
+        self.scratch.free_i32(found);
+        self.scratch.free_i32(tg);
+        self.scratch.free_i32(h2);
+        self.scratch.free_i32(bei);
+        self.scratch.free_i32(bidx);
+        self.scratch.free_i32(beb);
+        self.scratch.free_i32(bib);
+        self.scratch.free_i32(bcap);
+        self.scratch.free_i64(sk64);
+        self.scratch.free_i32(sk32);
+        self.scratch.free_i32(ai);
+        self.scratch.free_i32(aeb);
+        self.scratch.free_i32(alen);
+        self.scratch.free_i32(acap);
+        self.scratch.free_i32(result);
+        self.scratch.free_i32(b);
+        self.scratch.free_i32(a);
+    }
+
+    /// Structural set equality (dense list, insertion order): [a_ptr, b_ptr] → i32.
+    /// Sets are unsorted, so equal sets may differ in memory layout — compare by
+    /// size + containment (every element of `a` is in `b`) rather than byte-eq.
+    fn emit_set_eq_deep(&mut self, elem_ty: &Ty) {
+        use super::engine::layout::{LIST, list as ll};
+        let data_off = self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32;
+        let es = values::byte_size(elem_ty);
+        let ea_vt = values::ty_to_valtype(elem_ty).unwrap_or(ValType::I32);
+
+        let a = self.scratch.alloc_i32();
+        let b = self.scratch.alloc_i32();
+        let result = self.scratch.alloc_i32();
+        let ai = self.scratch.alloc_i32();
+        let bj = self.scratch.alloc_i32();
+        let found = self.scratch.alloc_i32();
+        let ea = self.scratch.alloc(ea_vt);
+
+        wasm!(self.func, {
+            local_set(b);
+            local_set(a);
+            local_get(a); local_get(b); i32_eq;
+            if_i32; i32_const(1);
+            else_;
+              local_get(a); i32_load(0); local_get(b); i32_load(0); i32_ne;
+              if_i32; i32_const(0);
+              else_;
+                i32_const(1); local_set(result);
+                i32_const(0); local_set(ai);
+                block_empty; loop_empty;                                 // [A] exit, [B] a-loop
+                  local_get(ai); local_get(a); i32_load(0); i32_ge_u; br_if(1);
+                  local_get(a); i32_const(data_off); i32_add; local_get(ai); i32_const(es as i32); i32_mul; i32_add;
+        });
+        self.emit_load_at(elem_ty, 0);
+        wasm!(self.func, {
+                  local_set(ea);
+                  i32_const(0); local_set(found);
+                  i32_const(0); local_set(bj);
+                  block_empty; loop_empty;                               // [C] scan-block, [D] scan-loop
+                    local_get(bj); local_get(b); i32_load(0); i32_ge_u; br_if(1);
+                    local_get(b); i32_const(data_off); i32_add; local_get(bj); i32_const(es as i32); i32_mul; i32_add;
+        });
+        self.emit_load_at(elem_ty, 0);
+        wasm!(self.func, { local_get(ea); });
+        self.emit_eq_typed(elem_ty);
+        wasm!(self.func, {
+                    if_empty; i32_const(1); local_set(found); br(2); end; // found → exit scan-block
+                    local_get(bj); i32_const(1); i32_add; local_set(bj); br(0);
+                  end; end;                                              // close D, C
+                  local_get(found); i32_eqz;
+                  if_empty; i32_const(0); local_set(result); br(2); end; // absent → exit a-loop+block
+                  local_get(ai); i32_const(1); i32_add; local_set(ai); br(0);
+                end; end;                                                // close B, A
+                local_get(result);
+              end;
+            end;
+        });
+        self.scratch.free(ea, ea_vt);
+        self.scratch.free_i32(found);
+        self.scratch.free_i32(bj);
+        self.scratch.free_i32(ai);
+        self.scratch.free_i32(result);
         self.scratch.free_i32(b);
         self.scratch.free_i32(a);
     }
@@ -370,7 +595,13 @@ impl FuncCompiler<'_> {
             local_set(b); // b
             local_set(a); // a
         });
-        // Compare each field, short-circuit on mismatch
+        // AND every field's deep eq. NOT a `return_` short-circuit — that returned
+        // from the ENCLOSING function and corrupted its contract on a mismatch
+        // (e.g. a tuple with an unequal String element). Equality has no side
+        // effects, so evaluating all fields and AND-ing is equivalent and safe.
+        if elems.is_empty() {
+            wasm!(self.func, { i32_const(1); });
+        }
         let mut offset: u32 = 0;
         for (i, elem_ty) in elems.iter().enumerate() {
             let elem_size = values::byte_size(elem_ty);
@@ -380,13 +611,11 @@ impl FuncCompiler<'_> {
             self.emit_load_at(elem_ty, offset);
             let elem_clone = elem_ty.clone();
             self.emit_eq_typed(&elem_clone);
-            if i < elems.len() - 1 {
-                // Short-circuit: if not equal, return 0
-                wasm!(self.func, { i32_eqz; if_empty; i32_const(0); return_; end; });
+            if i > 0 {
+                wasm!(self.func, { i32_and; });
             }
             offset += elem_size;
         }
-        // If we reach here, all fields matched. Last comparison result is on stack.
         self.scratch.free_i32(b);
         self.scratch.free_i32(a);
     }
@@ -399,6 +628,11 @@ impl FuncCompiler<'_> {
             local_set(b);
             local_set(a);
         });
+        // AND every field's deep eq (see emit_tuple_eq_deep — `return_` corrupted
+        // the enclosing function on a mismatch).
+        if fields.is_empty() {
+            wasm!(self.func, { i32_const(1); });
+        }
         let mut offset: u32 = 0;
         for (i, (_, field_ty)) in fields.iter().enumerate() {
             let field_size = values::byte_size(field_ty);
@@ -408,8 +642,8 @@ impl FuncCompiler<'_> {
             self.emit_load_at(field_ty, offset);
             let field_clone = field_ty.clone();
             self.emit_eq_typed(&field_clone);
-            if i < fields.len() - 1 {
-                wasm!(self.func, { i32_eqz; if_empty; i32_const(0); return_; end; });
+            if i > 0 {
+                wasm!(self.func, { i32_and; });
             }
             offset += field_size;
         }
@@ -425,13 +659,12 @@ impl FuncCompiler<'_> {
         wasm!(self.func, {
             local_set(b);
             local_set(a);
-            // Compare tags
+            // tags equal? → if so compute payload eq, else 0. (No `return_`: it
+            // returned 0 from the ENCLOSING function and corrupted its contract.)
             local_get(a); i32_load(0);
             local_get(b); i32_load(0);
-            i32_ne;
-            if_empty;
-              i32_const(0); return_; // different tags → not equal
-            end;
+            i32_eq;
+            if_i32;
         });
 
         if cases.is_empty() || cases.iter().all(|c| c.fields.is_empty()) {
@@ -454,15 +687,25 @@ impl FuncCompiler<'_> {
                     self.emit_load_at(field_ty, offset);
                     let ft = field_ty.clone();
                     self.emit_eq_typed(&ft);
-                    if i < case.fields.len() - 1 {
-                        wasm!(self.func, { i32_eqz; if_empty; i32_const(0); return_; end; });
+                    if i > 0 {
+                        wasm!(self.func, { i32_and; });
                     }
                     offset += field_size;
+                }
+                if case.fields.is_empty() {
+                    wasm!(self.func, { i32_const(1); });
                 }
             } else {
                 wasm!(self.func, { i32_const(1); });
             }
         }
+
+        // Close the tags-equal `if_i32`: tags differ → not equal.
+        wasm!(self.func, {
+            else_;
+            i32_const(0);
+            end;
+        });
 
         self.scratch.free_i32(b);
         self.scratch.free_i32(a);

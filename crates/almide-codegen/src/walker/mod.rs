@@ -56,11 +56,17 @@ pub struct RenderContext<'a> {
     /// `RefMut` param into another `RefMut` callee slot (Rust
     /// auto-reborrows).
     pub ref_mut_params: std::collections::HashSet<VarId>,
+    /// Names of user-defined record/variant types that have a generated
+    /// `AlmideRepr` impl (see `render_repr_impl`). A `Ty::Named` in a compound
+    /// interpolation part routes through `almide_repr` only when it is in this
+    /// set, so a value with the impl renders to its literal form while opaque
+    /// `Named` references (e.g. runtime newtypes) stay on the Display path.
+    pub repr_named_types: std::collections::HashSet<almide_base::intern::Sym>,
 }
 
 impl<'a> RenderContext<'a> {
     pub fn new(templates: &'a TemplateSet, var_table: &'a VarTable) -> Self {
-        Self { templates, var_table, indent: 0, target: Target::Rust, auto_unwrap: false, is_test: false, ann: CodegenAnnotations::default(), type_aliases: std::collections::HashMap::new(), generic_types: std::collections::HashSet::new(), minimal_generic_bounds: false, repr_c: false, ref_params: std::collections::HashSet::new(), ref_mut_params: std::collections::HashSet::new() }
+        Self { templates, var_table, indent: 0, target: Target::Rust, auto_unwrap: false, is_test: false, ann: CodegenAnnotations::default(), type_aliases: std::collections::HashMap::new(), generic_types: std::collections::HashSet::new(), minimal_generic_bounds: false, repr_c: false, ref_params: std::collections::HashSet::new(), ref_mut_params: std::collections::HashSet::new(), repr_named_types: std::collections::HashSet::new() }
     }
 
     pub fn with_target(mut self, target: Target) -> Self {
@@ -92,6 +98,19 @@ impl<'a> RenderContext<'a> {
                 .unwrap_or_else(|| name.to_string())
         } else {
             name.to_string()
+        }
+    }
+
+    /// The thread_local static name for a global var, matching exactly what the
+    /// `render_program` top_let emission declares. Built from the RAW (un-escaped)
+    /// var name: `var_name(id)` raw-escapes Rust keywords (`box` → `r#box`), and
+    /// uppercasing that yields the invalid `R#BOX`, which mismatches the `BOX` the
+    /// declaration emits. Every read/write of a global must route through here.
+    pub(crate) fn global_static_name(&self, id: VarId) -> String {
+        let vi = self.var_table.get(id);
+        match &vi.module_origin {
+            Some(origin) => format!("ALMIDE_RT_{}_{}", origin.to_uppercase(), vi.name.to_uppercase()),
+            None => vi.name.to_uppercase(),
         }
     }
 }
@@ -134,6 +153,7 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
         repr_c: ctx.repr_c,
         ref_params,
         ref_mut_params,
+        repr_named_types: ctx.repr_named_types.clone(),
     };
 
     // Dispatch-only fns (body is Hole): `@inline_rust` / `@intrinsic`
@@ -297,10 +317,27 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
         String::new()
     };
 
+    // `effect fn main` is renamed to `__almide_main` and given a thin `fn main`
+    // wrapper (below) that reports an unhandled `Err` via Display (`Error: <msg>`)
+    // and exits 1 — instead of Rust's default `Termination`, which prints the
+    // Debug form (`Error: "<msg>"`, with quotes). This keeps the error format an
+    // intentional Almide decision and lets the WASM target match it byte-for-byte.
+    let is_rust_effect_main = matches!(ctx.target, Target::Rust)
+        && func.name.as_str() == "main" && func.is_effect && !func.is_test;
+    // A plain (non-effect) `fn main` also needs the wrapper when there are
+    // abortable lazy top-lets to force at startup (wasm-eager parity).
+    let is_rust_plain_main_with_forces = matches!(ctx.target, Target::Rust)
+        && func.name.as_str() == "main" && !func.is_effect && !func.is_test
+        && !ctx.ann.eager_force_top_lets.is_empty();
+
     // Sanitize function name: spaces/dots/hyphens → underscores.
     // Test blocks already carry `TEST_NAME_PREFIX` from lowering so they
     // cannot collide with user fns here — no conditional prefixing needed.
-    let raw_name = func.name.to_string();
+    let raw_name = if is_rust_effect_main || is_rust_plain_main_with_forces {
+        "__almide_main".to_string()
+    } else {
+        func.name.to_string()
+    };
     let mut safe_name = raw_name.replace(' ', "_").replace('-', "_").replace('.', "_")
         .replace('+', "_plus_").replace('/', "_div_").replace('*', "_mul_")
         .replace('(', "").replace(')', "").replace(',', "_").replace(':', "_")
@@ -335,6 +372,21 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
     let fn_code = fn_ctx.templates.render_with(construct, None, &[], &[("name", safe_name.as_str()), ("params", params_str.as_str()), ("return_type", ret_str.as_str()), ("body", body_str.as_str())])
         .unwrap_or_else(|| format!("fn {}() {{ }}", func.name));
 
+    // Wrap `effect fn main`: report an unhandled error via Display + exit 1.
+    // Both wrapper shapes first FORCE the abortable lazy top-lets in declaration
+    // order, so an aborting initializer (integer `/`/`%`) fires at startup —
+    // byte-identical to wasm's eager top-let evaluation in `_start`.
+    let force_lines: String = ctx.ann.eager_force_top_lets.iter()
+        .map(|name| format!("    std::sync::LazyLock::force(&{});\n", name))
+        .collect();
+    let fn_code = if is_rust_effect_main {
+        format!("{}\n\nfn main() {{\n{}    if let Err(__almide_err) = __almide_main() {{\n        eprintln!(\"Error: {{}}\", __almide_err);\n        std::process::exit(1);\n    }}\n}}", fn_code, force_lines)
+    } else if is_rust_plain_main_with_forces {
+        format!("{}\n\nfn main() {{\n{}    __almide_main();\n}}", fn_code, force_lines)
+    } else {
+        fn_code
+    };
+
     // Prepend doc comment if present
     if let Some(ref doc) = func.doc {
         let doc_lines: String = doc.lines()
@@ -345,6 +397,27 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
     } else {
         fn_code
     }
+}
+
+/// Whether an expression contains an integer `/` or `%` anywhere — the ops that
+/// render as the aborting totality macros (`Error: <msg>` + exit 1). Uses the
+/// exhaustive `IrVisitor` walk so new IR nodes are traversed automatically.
+fn contains_aborting_int_div(expr: &IrExpr) -> bool {
+    use almide_ir::visit::{IrVisitor, walk_expr};
+    struct Finder { found: bool }
+    impl IrVisitor for Finder {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            if self.found { return; }
+            if matches!(&e.kind, IrExprKind::BinOp { op: BinOp::DivInt | BinOp::ModInt, .. }) {
+                self.found = true;
+                return;
+            }
+            walk_expr(self, e);
+        }
+    }
+    let mut f = Finder { found: false };
+    f.visit_expr(expr);
+    f.found
 }
 
 // ── Full program rendering ──
@@ -373,6 +446,17 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
             generic_types.insert(td.name);
         }
     }
+    // Record/variant types that get a generated `AlmideRepr` impl — a value of
+    // such a type interpolated in a string renders to its literal form. Gate
+    // mirrors `render_repr_impl` (closure-bearing types are excluded).
+    let mut repr_named_types = std::collections::HashSet::new();
+    for td in program.type_decls.iter()
+        .chain(program.modules.iter().flat_map(|m| m.type_decls.iter()))
+    {
+        if declarations::type_has_repr_impl(td) {
+            repr_named_types.insert(td.name);
+        }
+    }
     let mut ann = ctx.ann.clone();
     // Compute which user types cannot derive PartialEq (contain Matrix,
     // Fn, or a field whose type itself blocks equality). Must consider
@@ -396,7 +480,18 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
             } else {
                 vi.name.to_uppercase()
             };
+            // An initializer containing integer `/` or `%` can abort (the totality
+            // macros) — `fn main` forces it at entry, in declaration order, so the
+            // abort fires at startup exactly like wasm's eager top-let evaluation.
+            // Pure lazies stay lazy: their timing is unobservable.
+            if contains_aborting_int_div(&tl.value) {
+                ann.eager_force_top_lets.push(full_name.clone());
+            }
             ann.lazy_top_let_names.insert(full_name);
+        } else {
+            // Const-kind top_lets declare as `const NAME_UPPER` — references
+            // must render uppercased too (see const_top_let_vars).
+            ann.const_top_let_vars.insert(tl.var);
         }
     }
     // Module top_lets are flattened into program.top_lets by ir_link_flatten.
@@ -484,47 +579,28 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
             }
         }
 
-        // Phase 2: Find vars captured by lambdas
-        struct CaptureCollector {
-            captured: std::collections::HashSet<u32>,
-            lambda_depth: u32,
-            lambda_locals: Vec<std::collections::HashSet<u32>>,
-        }
-        impl almide_ir::visit::IrVisitor for CaptureCollector {
+        // Phase 2: Find vars captured by any lambda — via the single shared
+        // free-variable analysis (`almide_ir::free_vars`), the same one the WASM
+        // closure path uses. A lambda's captures are the free vars of its body
+        // relative to its params; the union over every lambda is the full captured
+        // set. `free_vars` tracks all binders (block lets incl. destructure, match
+        // arms, for-in vars, nested lambdas), so this is strictly more accurate than
+        // the old hand-rolled lambda-depth walker. (Closure v2, P4: one capture
+        // analysis for both targets.)
+        struct CaptureUnion { captured: std::collections::HashSet<u32> }
+        impl almide_ir::visit::IrVisitor for CaptureUnion {
             fn visit_expr(&mut self, expr: &IrExpr) {
-                match &expr.kind {
-                    IrExprKind::Lambda { params, body, .. } => {
-                        self.lambda_depth += 1;
-                        let mut locals = std::collections::HashSet::new();
-                        for (id, _) in params { locals.insert(id.0); }
-                        self.lambda_locals.push(locals);
-                        almide_ir::visit::walk_expr(self, body);
-                        self.lambda_locals.pop();
-                        self.lambda_depth -= 1;
-                    }
-                    IrExprKind::Var { id } if self.lambda_depth > 0 => {
-                        // Only capture if var is NOT defined inside the current lambda
-                        let is_local = self.lambda_locals.iter().any(|s| s.contains(&id.0));
-                        if !is_local {
-                            self.captured.insert(id.0);
-                        }
-                    }
-                    _ => almide_ir::visit::walk_expr(self, expr),
-                }
-            }
-            fn visit_stmt(&mut self, stmt: &IrStmt) {
-                // Track vars defined inside lambdas
-                if self.lambda_depth > 0 {
-                    if let IrStmtKind::Bind { var, .. } = &stmt.kind {
-                        if let Some(locals) = self.lambda_locals.last_mut() {
-                            locals.insert(var.0);
-                        }
+                if let IrExprKind::Lambda { params, body, .. } = &expr.kind {
+                    let param_set: std::collections::HashSet<VarId> =
+                        params.iter().map(|(v, _)| *v).collect();
+                    for v in almide_ir::free_vars::free_vars(body, &param_set) {
+                        self.captured.insert(v.0);
                     }
                 }
-                almide_ir::visit::walk_stmt(self, stmt);
+                almide_ir::visit::walk_expr(self, expr);
             }
         }
-        let mut cap = CaptureCollector { captured: std::collections::HashSet::new(), lambda_depth: 0, lambda_locals: Vec::new() };
+        let mut cap = CaptureUnion { captured: std::collections::HashSet::new() };
         for func in &program.functions { cap.visit_expr(&func.body); }
         for module in &program.modules {
             for func in &module.functions { cap.visit_expr(&func.body); }
@@ -533,11 +609,20 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
         // Phase 3: Only vars captured by lambdas get RcCow; rest are LocalMut (let mut)
         for var_id in collector.vars {
             if exclude.contains(&var_id) { continue; }
+            // Captured mutable vars that became shared cells (`Rc<Cell>` for Copy via
+            // P3, `SharedMut` for non-Copy via P6) are driven by the shared-mut path,
+            // NOT RcCow — RcCow's copy-on-write would lose a mutation made through the
+            // closure. (Closure v2 P6.)
+            if ann.is_shared_mut(&VarId(var_id)) { continue; }
             if cap.captured.contains(&var_id) {
                 ann.var_storage.insert(VarId(var_id), VarStorage::RcCow);
             }
             // LocalMut: no entry in var_storage → walker emits plain `let mut T`
         }
+        // Note: captured Copy-type mutable vars (Int/Float/Bool) are classified as
+        // `shared_mut_vars` (→ `Rc<Cell<T>>`) by CaptureClonePass, which runs before
+        // it must decide whether to clone-wrap the (now non-Copy) capture. Those
+        // flow in via `program.codegen_annotations` → `ctx.ann`. (Closure v2, P3.)
     }
     let mut ctx = RenderContext {
         templates: ctx.templates,
@@ -553,6 +638,7 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
         repr_c: ctx.repr_c,
         ref_params: std::collections::HashSet::new(),
         ref_mut_params: std::collections::HashSet::new(),
+        repr_named_types,
     };
     for td in &program.type_decls {
         if let IrTypeDeclKind::Variant { cases, .. } = &td.kind {
@@ -575,6 +661,7 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
     // Build anonymous record maps (populated by target-specific pipeline)
     ctx.ann.named_records = collect_named_records(program);
     ctx.ann.anon_records = collect_anon_records(program, &ctx.ann.named_records);
+    ctx.ann.anon_records_with_fn = declarations::take_anon_fn_keys();
     ctx.ann.record_field_counts = collect_record_field_counts(program);
 
     let mut parts = Vec::new();
@@ -582,11 +669,20 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
     // Anonymous record struct definitions (only if anon_records is populated)
     if !ctx.ann.anon_records.is_empty() {
         for (field_names, struct_name) in &ctx.ann.anon_records {
+            // A closure field can't be Debug/PartialEq, so such a struct derives
+            // Clone only (the `has_fn_fields` struct_decl) and drops the
+            // `Debug + PartialEq` generic bounds — derive(Clone) re-adds `T: Clone`
+            // itself. Mirrors the `type`-declared record path. (Cross-target gaps.)
+            let has_fn = ctx.ann.anon_records_with_fn.contains(field_names);
             let generics: Vec<String> = (0..field_names.len())
                 .map(|i| {
                     let name_s = format!("T{}", i);
-                    ctx.templates.render_with("generic_bound_full", None, &[], &[("name", name_s.as_str())])
-                        .unwrap_or_else(|| format!("T{}", i))
+                    if has_fn {
+                        name_s
+                    } else {
+                        ctx.templates.render_with("generic_bound_full", None, &[], &[("name", name_s.as_str())])
+                            .unwrap_or_else(|| format!("T{}", i))
+                    }
                 })
                 .collect();
             let fields: Vec<String> = field_names.iter().enumerate()
@@ -598,10 +694,49 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
                 .collect();
             let fields_str = fields.join("\n");
             let full_name = format!("{}<{}>", struct_name, generics.join(", "));
-            let decl_attrs: Vec<&str> = if ctx.repr_c { vec!["repr_c"] } else { vec![] };
+            let mut decl_attrs: Vec<&str> = if ctx.repr_c { vec!["repr_c"] } else { vec![] };
+            if has_fn { decl_attrs.push("has_fn_fields"); }
             let repr_prefix = if ctx.repr_c { "#[repr(C)]\n" } else { "" };
             parts.push(ctx.templates.render_with("struct_decl", None, &decl_attrs, &[("name", full_name.as_str()), ("fields", fields_str.as_str())])
                 .unwrap_or_else(|| format!("{}pub struct {} {{\n{}\n}}", repr_prefix, struct_name, fields_str)));
+
+            // `AlmideRepr` impl for the anonymous struct: `"${rec}"` renders an
+            // anonymous record to `{ x: 1, y: 2 }` — NO type name, because it HAS
+            // none — byte-identically with the WASM anon-record walk. A
+            // closure-bearing anon record (`has_fn`) is not `AlmideRepr`, so it is
+            // skipped (it never reaches compound interp). Fields render in the
+            // struct's own field order, which is the SORTED field-name list (this
+            // `field_names` is the sorted key from `collect_anon_records`); the
+            // WASM walk sorts to match (see `emit_repr_record`).
+            if !has_fn {
+                let bare_generics: Vec<String> = (0..field_names.len())
+                    .map(|i| format!("T{}", i)).collect();
+                // The anon struct declares each param via `generic_bound_full`
+                // (`T: Clone + Debug + PartialEq`); the impl must satisfy those
+                // same bounds, plus `AlmideRepr` so the field reprs compose.
+                // Reuse the template so the bounds stay in lock-step with the decl.
+                let impl_bounds = bare_generics.iter()
+                    .map(|t| {
+                        let own = ctx.templates.render_with("generic_bound_full", None, &[], &[("name", t.as_str())])
+                            .unwrap_or_else(|| format!("{}: Clone + std::fmt::Debug + PartialEq", t));
+                        match own.split_once(':') {
+                            Some((name, rest)) => format!("{}: AlmideRepr +{}", name.trim_end(), rest),
+                            None => format!("{}: AlmideRepr", t),
+                        }
+                    })
+                    .collect::<Vec<_>>().join(", ");
+                let target = format!("{}<{}>", struct_name, bare_generics.join(", "));
+                let fmt = field_names.iter().enumerate()
+                    .map(|(i, name)| format!("{}{}: {{}}", if i > 0 { ", " } else { "" }, name))
+                    .collect::<Vec<_>>().join("");
+                let args = field_names.iter()
+                    .map(|name| format!("self.{}.almide_repr()", name))
+                    .collect::<Vec<_>>().join(", ");
+                parts.push(format!(
+                    "impl<{}> AlmideRepr for {} {{ fn almide_repr(&self) -> String {{ format!(\"{{{{ {} }}}}\", {}) }} }}",
+                    impl_bounds, target, fmt, args
+                ));
+            }
         }
     }
 

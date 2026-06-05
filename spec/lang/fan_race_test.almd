@@ -1,20 +1,29 @@
-
-// fan.race — first to complete wins
+// fan.race — the FIRST thunk in LIST ORDER to SETTLE (deterministic, not
+// wall-clock): thunk[0]'s Result (Ok or Err). Distinct from fan.any, which skips
+// failures to find the first Ok. In a test block fan.race yields a Result[T, E].
 effect fn fast() -> Result[String, String] = ok("fast")
 
 effect fn slow() -> Result[String, String] = ok("slow")
 
-test "fan.race basic" {
+test "fan.race returns the first thunk's result, deterministically" {
   let winner = fan.race([
     () => fast(),
     () => slow()
   ]);
-  assert(winner == "fast" or winner == "slow")
+  assert_eq(winner, ok("fast"))   // thunk[0], never "slow"
 }
 
 test "fan.race single thunk" {
   let result = fan.race([
     () => fast()
   ]);
-  assert_eq(result, "fast")
+  assert_eq(result, ok("fast"))
+}
+
+test "fan.race surfaces the head thunk's error (first to settle, even if Err)" {
+  let r = fan.race([
+    () => err("boom"),
+    () => ok("unreached")
+  ]);
+  assert_eq(r, err("boom"))
 }

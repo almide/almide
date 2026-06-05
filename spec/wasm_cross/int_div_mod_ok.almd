@@ -1,0 +1,17 @@
+// Non-aborting integer `/` and `%` (incl. negative operands and the now-total
+// codepath) stay byte-identical on both targets — the regression guard that the
+// checked-div rewrite did not perturb ordinary division. Divisors are shielded so
+// the values are computed at runtime, exercising the same guarded path as the
+// abort cases but landing on the happy branch.
+fn den(x: Int, base: Int) -> Int = (x - x) + base
+
+fn main() -> Unit = {
+  let a = 17 / den(7, 5)
+  let b = 17 % den(7, 5)
+  let c = -17 / den(7, 5)
+  let d = -17 % den(7, 5)
+  println(int.to_string(a))
+  println(int.to_string(b))
+  println(int.to_string(c))
+  println(int.to_string(d))
+}

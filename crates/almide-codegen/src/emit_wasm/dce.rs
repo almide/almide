@@ -23,9 +23,9 @@ pub fn eliminate_dead_code(emitter: &mut WasmEmitter) -> usize {
     // Step 1: Find entry points
     let mut entry_points: HashSet<u32> = HashSet::new();
 
-    // _start / main / __test_runner
+    // _start / main / __main_runner / __test_runner
     for (name, &idx) in &emitter.func_map {
-        if name == "main" || name == "__test_runner" || name == "__init_globals" {
+        if name == "main" || name == "__main_runner" || name == "__test_runner" || name == "__init_globals" {
             entry_points.insert(idx);
         }
     }
@@ -138,7 +138,17 @@ pub fn eliminate_dead_data(emitter: &mut WasmEmitter) -> usize {
     new_data.push(emitter.data_bytes[0]);
     old_to_new.insert(data_start, data_start); // newline stays at same offset
 
-    let mut read_pos = 1usize; // skip newline
+    // Preserve the embedded Unicode case-table region verbatim. It sits at the
+    // FRONT of data_bytes (right after the newline byte) and must NOT be walked as
+    // interned-string `[len][cap][data]` entries (its raw bytes would misparse and
+    // corrupt the keep/compact loop + heap), nor shift when dead strings are
+    // compacted (the case lookup functions bake its absolute addresses). Copy it
+    // through unchanged and begin the interned-string walk after it.
+    let table_bytes = emitter.case_table_bytes;
+    if table_bytes > 0 {
+        new_data.extend_from_slice(&emitter.data_bytes[1..1 + table_bytes]);
+    }
+    let mut read_pos = 1usize + table_bytes; // skip newline + case tables
     while read_pos + 8 <= emitter.data_bytes.len() {
         let old_offset = data_start + read_pos as u32;
         let slen = u32::from_le_bytes([

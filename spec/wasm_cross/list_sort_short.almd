@@ -1,0 +1,7 @@
+// Regression: list.sort of a 0/1-length list returned a zeroed element (fixed).
+effect fn main() -> Unit = {
+  let a = list.sort([5])
+  println(int.to_string(a[0]))
+  let b = list.sort([3, 1, 2])
+  println(int.to_string(b[0]) + int.to_string(b[2]))
+}

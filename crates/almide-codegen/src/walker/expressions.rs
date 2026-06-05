@@ -60,6 +60,42 @@ pub(crate) fn render_expr_owned(ctx: &RenderContext, expr: &IrExpr) -> String {
     render_expr(ctx, expr)
 }
 
+/// Render a closure literal (`move |params| body`). `annotate` adds explicit
+/// param types: a BOXED closure (`Rc::new(move |k| …) as Rc<dyn Fn(String)>`)
+/// needs them because the `as` cast does NOT back-infer the closure's param type
+/// (`|k|` alone is E0282). A bare combinator-consumed lambda passes
+/// `annotate = false` — a fused iterator adapter infers `&T` and an explicit `T`
+/// would mismatch.
+fn render_lambda(ctx: &RenderContext, params: &[(VarId, Ty)], body: &IrExpr, annotate: bool) -> String {
+    let params_str = params.iter()
+        .map(|(id, ty)| {
+            let name = ctx.var_name(*id).to_string();
+            if annotate && !ty.has_unresolved_deep() {
+                format!("{}: {}", name, render_type(ctx, ty))
+            } else {
+                name
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let mut body_str = if let IrExprKind::Var { id } = &body.kind {
+        if ctx.ann.is_rc_cow(id) {
+            format!("(*{}).clone()", ctx.var_name(*id))
+        } else { render_expr(ctx, body) }
+    } else { render_expr(ctx, body) };
+    // Nested (curried) lambda: box the returned closure as `Rc<dyn Fn>` with an
+    // explicit cast so `Rc<concrete-closure>` coerces to the trait object the
+    // outer closure's return type demands (E0271 without the cast).
+    if matches!(&body.kind, IrExprKind::Lambda { .. }) {
+        let wrapped = ctx.templates.render_with("box_wrap", None, &[], &[("inner", body_str.as_str())])
+            .unwrap_or_else(|| format!("std::rc::Rc::new({})", body_str));
+        let cast = super::helpers::render_type_rc_fn(ctx, &body.ty);
+        body_str = format!("{} as {}", wrapped, cast);
+    }
+    ctx.templates.render_with("lambda_single", None, &[], &[("params", params_str.as_str()), ("body", body_str.as_str())])
+        .unwrap_or_else(|| "|_| { }".to_string())
+}
+
 pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
     match &expr.kind {
         // ── Literals ──
@@ -107,13 +143,20 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         // ── Variables ──
         IrExprKind::Var { id } => {
             let raw_name = ctx.var_name(*id).to_string();
+            // Shared-mut local (`Rc<Cell<T>>`): read the cell. (Closure v2, P3.)
+            if ctx.ann.is_shared_mut(id) {
+                return format!("{}.get()", raw_name);
+            }
             let var_info = ctx.var_table.get(*id);
-            // Emit-time prefix: module_origin → "ALMIDE_RT_{ORIGIN}_{NAME}"
+            // Emit-time prefix: module_origin → "ALMIDE_RT_{ORIGIN}_{NAME}".
+            // `upper` (the thread_local static name) is built from the RAW name via
+            // global_static_name — uppercasing the keyword-escaped `r#box` would
+            // give the invalid `R#BOX`.
             let (name, upper) = if let Some(ref origin) = var_info.module_origin {
                 let prefixed = format!("ALMIDE_RT_{}_{}", origin.to_uppercase(), raw_name.to_uppercase());
-                (prefixed.clone(), prefixed)
+                (prefixed, ctx.global_static_name(*id))
             } else {
-                (raw_name.clone(), raw_name.to_uppercase())
+                (raw_name.clone(), ctx.global_static_name(*id))
             };
             let has_module = var_info.module_origin.is_some();
             // Module-level mutable var: dispatch by storage type
@@ -129,7 +172,9 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
             if ctx.ann.lazy_vars.contains(id) || is_module_lazy {
                 ctx.templates.render_with("deref_lazy", None, &[], &[("name", upper.as_str())])
                     .unwrap_or_else(|| upper.clone())
-            } else if has_module {
+            } else if has_module || ctx.ann.const_top_let_vars.contains(id) {
+                // Const top_lets declare as `const NAME_UPPER` — a lowercase
+                // source binding must not emit its raw name (E0425).
                 upper
             } else {
                 raw_name
@@ -375,7 +420,16 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                         } else {
                             inner.clone()
                         };
-                        render_type(ctx, &ty)
+                        // A `List[Fn]` empty literal must not render
+                        // `Vec::<impl Fn>::new()` (E0562: impl Trait in path).
+                        // Closures stored in a list are boxed to `Rc<dyn Fn>`
+                        // (see the closure-boxing pass), so the turbofish element
+                        // type must match.
+                        if matches!(&ty, Ty::Fn { .. }) {
+                            super::helpers::render_type_field_fn(ctx, &ty)
+                        } else {
+                            render_type(ctx, &ty)
+                        }
                     }
                     _ => "_".into(),
                 };
@@ -402,10 +456,10 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                         val_str = format!("Box::new({})", val_str);
                     }
                 }
-                // Rc-wrap Fn-typed fields: closures stored in struct fields use Rc<dyn Fn>
-                if matches!(&v.ty, Ty::Fn { .. }) {
-                    val_str = format!("std::rc::Rc::new({})", val_str);
-                }
+                // A closure stored in a struct field is `Rc<dyn Fn>`; the
+                // box-by-default pass already boxed the field value, so no
+                // field-side `Rc::new` — that double-boxed it (this site had no
+                // `RcWrap` guard at all).
                 field_strs.push(ctx.templates.render_with("record_field", None, &[], &[("name", k.as_str()), ("value", val_str.as_str())])
                     .unwrap_or_else(|| format!("{}: {}", k, val_str)));
             }
@@ -497,8 +551,20 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         }
         IrExprKind::ResultOk { expr: inner } => {
             let inner_s = render_expr_owned(ctx, inner);
-            ctx.templates.render_with("ok_expr", None, &[], &[("inner", inner_s.as_str())])
-                .unwrap_or_else(|| format!("Ok({})", inner_s))
+            // A bare `Ok(x)` is `Result<TyOf(x), _>` — the error type stays open
+            // for rustc to infer from context. That fails (E0282) when the
+            // surrounding call leaves E unconstrained, e.g.
+            // `result.unwrap_or(ok(10), -1)`: `unwrap_or<T, E>` names E only in its
+            // `Result<T, E>` parameter, so nothing pins it. The checker already
+            // resolved the full Result type (`expr.ty`), so emit a turbofish that
+            // carries it — defaulting a still-unconstrained error to String
+            // (Almide's conventional error type; mirrors the render_type fix).
+            if let Some((ok_s, err_s)) = result_turbofish_args(ctx, &expr.ty) {
+                format!("Ok::<{}, {}>({})", ok_s, err_s, inner_s)
+            } else {
+                ctx.templates.render_with("ok_expr", None, &[], &[("inner", inner_s.as_str())])
+                    .unwrap_or_else(|| format!("Ok({})", inner_s))
+            }
         }
         IrExprKind::ResultErr { expr: inner } => {
             let inner_str = render_expr(ctx, inner);
@@ -509,24 +575,9 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         }
 
         // ── Lambda ──
-        IrExprKind::Lambda { params, body, .. } => {
-            let params_str = params.iter()
-                .map(|(id, _ty)| ctx.var_name(*id).to_string())
-                .collect::<Vec<_>>()
-                .join(", ");
-            let mut body_str = if let IrExprKind::Var { id } = &body.kind {
-                if ctx.ann.is_rc_cow(id) {
-                    format!("(*{}).clone()", ctx.var_name(*id))
-                } else { render_expr(ctx, body) }
-            } else { render_expr(ctx, body) };
-            // Nested lambda: wrap in Box for languages that need it (template returns identity in TS)
-            if matches!(&body.kind, IrExprKind::Lambda { .. }) {
-                body_str = ctx.templates.render_with("box_wrap", None, &[], &[("inner", body_str.as_str())])
-                    .unwrap_or(body_str);
-            }
-            ctx.templates.render_with("lambda_single", None, &[], &[("params", params_str.as_str()), ("body", body_str.as_str())])
-                .unwrap_or_else(|| format!("|_| {{ }}"))
-        }
+        // A bare (combinator-consumed) lambda leaves its params UNANNOTATED — a
+        // fused iterator adapter infers `&T`, and annotating `T` would mismatch.
+        IrExprKind::Lambda { params, body, .. } => render_lambda(ctx, params, body, false),
 
         // ── String interpolation ──
         IrExprKind::StringInterp { parts } => render_string_interp(ctx, parts),
@@ -585,7 +636,19 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 .unwrap_or_else(|| format!("map([{}])", parts.join(", ")))
         }
         IrExprKind::EmptyMap => {
-            template_or(ctx, "empty_map", &[], "HashMap::new()")
+            // Render `AlmideMap::<K, V>::new()` with the key/value types from the
+            // literal's resolved type, so an annotated empty map (`[:]: Map[K,V]`)
+            // routed through `almide_repr` infers (native E0282 otherwise). When
+            // the types are unknown they erase to `_` (inference fills them from
+            // the surrounding context, as before this turbofish).
+            let (key_ty, value_ty) = match &expr.ty {
+                Ty::Applied(TypeConstructorId::Map, args) if args.len() == 2 => {
+                    (render_map_type_arg(ctx, &args[0]), render_map_type_arg(ctx, &args[1]))
+                }
+                _ => ("_".to_string(), "_".to_string()),
+            };
+            ctx.templates.render_with("empty_map", None, &[], &[("key_type", key_ty.as_str()), ("value_type", value_ty.as_str())])
+                .unwrap_or_else(|| format!("AlmideMap::<{}, {}>::new()", key_ty, value_ty))
         }
 
         // ── SpreadRecord ──
@@ -726,6 +789,28 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 .unwrap_or_else(|| format!("(*{})", name_s))
         }
         IrExprKind::Borrow { expr: inner, as_str, mutable } => {
+            // Shared-mut non-Copy var (`SharedMut`, Closure v2 P6): borrow through the
+            // `RefCell` rather than the `.get()` clone a bare Var read would emit, so a
+            // mutating call (`list.push(acc, …)` → `&mut *acc.borrow_mut()`) writes the
+            // ONE shared cell the closure also holds. A shared read uses `&*acc.borrow()`
+            // (no clone). Copy shared-mut vars stay on the `Cell` `.get()` path below.
+            if let IrExprKind::Var { id } = &inner.kind {
+                if ctx.ann.is_shared_mut(id)
+                    && !matches!(ctx.var_table.get(*id).ty, Ty::Int | Ty::Float | Ty::Bool)
+                {
+                    let var_name = ctx.var_name(*id).to_string();
+                    return if *mutable {
+                        // In-place mutation writes the one shared cell.
+                        format!("&mut *{}.borrow_mut()", var_name)
+                    } else {
+                        // A shared read borrows an owned snapshot (`.get()` clones the
+                        // cell's value). Unlike `&*x.borrow()`, this owned temporary has
+                        // no lifetime tie to `x`, so it is also safe in tail position
+                        // where `x` is a block-local (`let outer = () => { var a = …; …; a })`.
+                        format!("&{}.get()", var_name)
+                    };
+                }
+            }
             // If the borrowed operand is a Var referencing a fn param
             // already emitted as a reference (`&T`, `&[T]`, `&str`),
             // skip the outer `&` to avoid `&&T` double-borrow. The
@@ -773,13 +858,32 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         IrExprKind::BoxNew { expr: inner } => {
             format!("Box::new({})", render_expr(ctx, inner))
         }
-        IrExprKind::RcWrap { expr: inner, cast_ty } => {
-            let s = render_expr(ctx, inner);
-            if let Some(ty) = cast_ty {
-                let rc_type = super::helpers::render_type_rc_fn(ctx, ty);
-                format!("std::rc::Rc::new({}) as {}", s, rc_type)
+        IrExprKind::RcWrap { expr: inner, cast_ty, wrap } => {
+            // A BOXED closure literal needs annotated params (the `as` cast does
+            // not back-infer them). Wrap in parens so a boxed-then-CALLED closure
+            // `(Rc::new(..) as T)(args)` parses (a cast can't be followed by `(`).
+            let s = if let IrExprKind::Lambda { params, body, .. } = &inner.kind {
+                render_lambda(ctx, params, body, true)
             } else {
-                format!("std::rc::Rc::new({})", s)
+                render_expr(ctx, inner)
+            };
+            match wrap {
+                // fan.race/any/settle thunk: `Box<dyn Fn + Send + Sync>` is itself
+                // `Fn + Send + Sync`, so heterogeneous capturing thunks unify in the
+                // runtime's `Vec<impl Fn() -> _ + Send + Sync>` (fixes E0308).
+                almide_ir::FnBox::BoxSendSync => {
+                    let ty = cast_ty.as_deref().expect("fan thunk RcWrap always carries a Fn cast_ty");
+                    let box_type = super::helpers::render_type_box_fn(ctx, ty, "Send + Sync");
+                    format!("(Box::new({}) as {})", s, box_type)
+                }
+                almide_ir::FnBox::Rc => {
+                    if let Some(ty) = cast_ty {
+                        let rc_type = super::helpers::render_type_rc_fn(ctx, ty);
+                        format!("(std::rc::Rc::new({}) as {})", s, rc_type)
+                    } else {
+                        format!("std::rc::Rc::new({})", s)
+                    }
+                }
             }
         }
         IrExprKind::RustMacro { name, args } => {
@@ -910,6 +1014,20 @@ fn render_binop(ctx: &RenderContext, op: BinOp, left: &IrExpr, right: &IrExpr, _
             ctx.templates.render_with("power_expr", Some("Int"), &[], &[("left", l.as_str()), ("right", r.as_str())])
                 .unwrap_or_else(|| format!("pow(_, _)"))
         }
+        // Integer `/` and `%` are total: a zero divisor or signed MIN/-1 overflow
+        // aborts via the almide_div!/almide_mod! prelude macros (`Error: <msg>\n` +
+        // exit 1) instead of panicking. The macro is generic over all int widths and
+        // is not const-evaluable, so a literal `10 / 0` compiles (no rustc
+        // `unconditional_panic`) and aborts at runtime — matching the WASM trap.
+        // Float div/mod keep IEEE semantics and fall through to the bare-operator arm.
+        BinOp::DivInt => {
+            ctx.templates.render_with("div_int", None, &[], &[("left", l.as_str()), ("right", r.as_str())])
+                .unwrap_or_else(|| format!("almide_div!({}, {})", l, r))
+        }
+        BinOp::ModInt => {
+            ctx.templates.render_with("mod_int", None, &[], &[("left", l.as_str()), ("right", r.as_str())])
+                .unwrap_or_else(|| format!("almide_mod!({}, {})", l, r))
+        }
         BinOp::PowFloat => {
             ctx.templates.render_with("power_expr", Some("Float"), &[], &[("left", l.as_str()), ("right", r.as_str())])
                 .unwrap_or_else(|| format!("pow(_, _)"))
@@ -919,8 +1037,10 @@ fn render_binop(ctx: &RenderContext, op: BinOp, left: &IrExpr, right: &IrExpr, _
                 BinOp::AddInt | BinOp::AddFloat => "+",
                 BinOp::SubInt | BinOp::SubFloat => "-",
                 BinOp::MulInt | BinOp::MulFloat => "*",
-                BinOp::DivInt | BinOp::DivFloat => "/",
-                BinOp::ModInt | BinOp::ModFloat => "%",
+                // DivInt/ModInt are matched above (totality macros) and must never
+                // reach this bare-operator fallback — fall to "??" loudly if they do.
+                BinOp::DivFloat => "/",
+                BinOp::ModFloat => "%",
                 BinOp::Lt => "<",
                 BinOp::Gt => ">",
                 BinOp::Lte => "<=",
@@ -1022,16 +1142,23 @@ fn render_generic_call(ctx: &RenderContext, target: &CallTarget, args: &[IrExpr]
                     .join(", ");
                 let body_str = render_expr(ctx, body);
                 format!("(move |{}| {})", params_str, body_str)
-            } else if matches!(&callee.kind, IrExprKind::Member { .. }) {
-                // Member: (h.run)("hello") — required in Rust to call Fn-typed fields
-                format!("({})", render_expr(ctx, callee))
             } else {
-                render_expr(ctx, callee)
+                // Parenthesize ANY computed callee: a `Member` (h.run)("x"), a
+                // `??`/`match`/`if` that yields a closure — `match … {}(x)` is
+                // invalid Rust ("expected ;"), `(match … {})(x)` is correct — and a
+                // bare `(f)(x)` is harmless.
+                format!("({})", render_expr(ctx, callee))
             }
         }
         CallTarget::Module { .. } => unreachable!(),
     };
-    let args_str = args.iter().map(|a| render_expr_owned(ctx, a)).collect::<Vec<_>>().join(", ");
+    // A closure ARG is already `Rc<dyn Fn>`: the box-by-default pass boxed every
+    // closure literal where it sits — including a Named user-HOF arg, whose param
+    // is `Rc<dyn Fn>` under the uniform repr (top-level fns no longer take
+    // `impl Fn`). No call-site boxing here — re-wrapping a capture-clone
+    // `{ let __cap; lambda }` arg (kind `Block`, not `RcWrap`) double-boxed it.
+    let args_str = args.iter().map(|a| render_expr_owned(ctx, a))
+        .collect::<Vec<_>>().join(", ");
     ctx.templates.render_with("call_expr", None, &[], &[("callee", callee.as_str()), ("args", args_str.as_str())])
         .unwrap_or_else(|| format!("call(...)"))
 }
@@ -1127,6 +1254,26 @@ fn render_method_call_full(ctx: &RenderContext, object: &IrExpr, method: &str, a
 }
 
 /// Render an enum constructor call with optional Box wrapping for recursive types.
+/// For a `Result<Ok, Err>` type, render the `(ok, err)` turbofish arguments used
+/// to pin a `Ok(..)` / `Err(..)` constructor's phantom type parameters. The error
+/// type defaults to `String` when still unresolved (`Unknown` or an inference
+/// typevar), exactly as the `render_type` Result arm does for type positions
+/// (dv_13). Returns `None` for a non-Result type, leaving the bare constructor.
+fn result_turbofish_args(ctx: &RenderContext, ty: &Ty) -> Option<(String, String)> {
+    match ty {
+        Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => {
+            let ok_s = render_type(ctx, &args[0]);
+            let err_s = match &args[1] {
+                Ty::Unknown => "String".to_string(),
+                Ty::TypeVar(n) if n.starts_with('?') => "String".to_string(),
+                _ => render_type(ctx, &args[1]),
+            };
+            Some((ok_s, err_s))
+        }
+        _ => None,
+    }
+}
+
 fn render_enum_constructor(ctx: &RenderContext, ctor_name: &str, enum_name: &str, args: &[IrExpr]) -> String {
     let boxed_args: Vec<String> = args.iter().enumerate().map(|(i, a)| {
         let rendered = render_expr(ctx, a);
@@ -1138,6 +1285,10 @@ fn render_enum_constructor(ctx: &RenderContext, ctor_name: &str, enum_name: &str
         let rendered = if is_rc_cow_var {
             format!("{}.into_inner()", rendered)
         } else { rendered };
+        // A closure payload field is `Rc<dyn Fn>`; the box-by-default pass already
+        // boxed the closure value (a direct lambda → `RcWrap`, a capture-clone
+        // `{ let __cap; lambda }` → boxes the tail, a `Var` is already `Rc`), so no
+        // ctor-side boxing — wrapping again here double-boxed `Block`-shaped args.
         if needs_box {
             format!("Box::new({})", rendered)
         } else {
@@ -1199,15 +1350,19 @@ fn render_runtime_call(ctx: &RenderContext, symbol: &almide_base::intern::Sym, a
         }
         _ => {}
     }
-    // Mutating stdlib calls (push, pop, clear) on module-level or RcCow var
+    // Mutating stdlib calls on a module-level (`ModuleRc`) or `RcCow` var: route
+    // through `Rc::make_mut`/`.make_mut()` so the mutation hits the shared backing
+    // store, not a clone. The mutator set is the one source of truth in
+    // `pass_closure_conversion` (list/map/string/bytes &mut-on-args[0] fns); before
+    // it was only list push/pop/clear, so `map.insert`/`bytes.push`/… on a global
+    // silently mutated a discarded `(**c.borrow()).clone()`.
     if !args.is_empty() {
-        let is_mutating = matches!(symbol.as_str(),
-            "almide_rt_list_push" | "almide_rt_list_pop" | "almide_rt_list_clear");
+        let is_mutating = crate::pass_closure_conversion::is_inplace_mutator(symbol.as_str());
         if is_mutating {
             if let IrExprKind::Borrow { expr: inner, .. } | IrExprKind::Clone { expr: inner } = &args[0].kind {
                 if let IrExprKind::Var { id } = &inner.kind {
                     let name = ctx.var_name(*id).to_string();
-                    let upper = name.to_uppercase();
+                    let upper = ctx.global_static_name(*id);
                     match ctx.ann.get_var_storage(id, &name) {
                         VarStorage::ModuleRc => {
                             let rest_args = args[1..].iter().map(|a| render_expr(ctx, a))
@@ -1242,6 +1397,42 @@ fn render_runtime_call(ctx: &RenderContext, symbol: &almide_base::intern::Sym, a
     format!("{}({})", symbol.as_str(), args_str)
 }
 
+/// A COMPOUND interpolation part — one whose value has no `Display` and must be
+/// rendered via `AlmideRepr` to its Almide-literal form. Scalars (numbers,
+/// `Bool`, `Unit`) and bare `String` keep their plain `{}` Display path so the
+/// emitted code for existing programs is byte-identical.
+///
+/// Scope: the types backed by an `AlmideRepr` impl on BOTH targets, recursively
+/// composed — the structural containers (`List`, `Map`, `Set`, `Option`,
+/// `Result`, `Tuple`) plus user-defined records and variants. A record/variant
+/// is identified by name via `ctx.repr_named_types` (the set of types that got a
+/// generated `AlmideRepr` impl); an anonymous record (`Ty::Record`/`OpenRecord`)
+/// is always repr-backed. Closure-bearing types are excluded from the set, so a
+/// value with an `Fn` field stays on the Display path (it has no repr).
+/// Render a key/value type for an empty-map turbofish, erasing unresolved
+/// named typevars to `_` exactly like the empty-list `inner_type` path.
+fn render_map_type_arg(ctx: &RenderContext, ty: &Ty) -> String {
+    let ty = if ty_has_named_typevar(ty) { erase_named_typevars(ty.clone()) } else { ty.clone() };
+    render_type(ctx, &ty)
+}
+
+fn ty_needs_repr(ctx: &RenderContext, ty: &Ty) -> bool {
+    use TypeConstructorId::{List, Map, Set, Option as OptionId, Result as ResultId};
+    match ty {
+        // Backed container constructors → repr.
+        Ty::Applied(id, _) => matches!(id, List | Map | Set | OptionId | ResultId),
+        // Tuples → repr.
+        Ty::Tuple(..) => true,
+        // Anonymous records get an inline literal repr.
+        Ty::Record { .. } | Ty::OpenRecord { .. } => true,
+        // Named records/variants → repr only when a generated impl exists.
+        Ty::Named(name, _) => ctx.repr_named_types.contains(name),
+        // Everything else (scalars, String, Bool, Unit, Fn, Unknown, …) stays on
+        // the Display path.
+        _ => false,
+    }
+}
+
 fn render_string_interp(ctx: &RenderContext, parts: &[IrStringPart]) -> String {
     let mut fmt_parts = Vec::new();
     let mut arg_parts = Vec::new();
@@ -1259,7 +1450,18 @@ fn render_string_interp(ctx: &RenderContext, parts: &[IrStringPart]) -> String {
             }
             IrStringPart::Expr { expr } => {
                 fmt_parts.push("{}".to_string());
-                arg_parts.push(render_expr(ctx, expr));
+                // A COMPOUND part (List/Map/Set/Tuple/Option/Result/record/variant)
+                // has no `Display`; route it through the `AlmideRepr` trait so it
+                // renders to its Almide-literal form (`[1, 2, 3]`, `["a": 1]`, …).
+                // Bare String/Int/Float/Bool keep the plain `{}` Display path so
+                // existing programs' emitted code is byte-identical. `almide_repr`
+                // takes `&T` and has ref-forwarding impls, so `&(...)` is correct
+                // whether the part renders to an owned value or an existing borrow.
+                if ty_needs_repr(ctx, &expr.ty) {
+                    arg_parts.push(format!("almide_repr(&({}))", render_expr(ctx, expr)));
+                } else {
+                    arg_parts.push(render_expr(ctx, expr));
+                }
             }
         }
     }

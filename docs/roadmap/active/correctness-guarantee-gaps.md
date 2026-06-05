@@ -163,3 +163,125 @@ Quick wins first (small effort, high leverage):
     POSTCONDITION を踏むが warning 止まり。「曖昧なら型エラー」にするには
     constraint solving 後の到達可能性解析（その TypeVar が本当に決まらない
     か／後で決まるか）の線引き設計が要る。§5 の格上げと同時に行うのが筋。
+
+  # 12. Status snapshot (2026-06-03) — fan.* cross-target codegen + semantics
+
+  このラウンドで閉じたギャップ（build-correctness: well-typed fan source → 正しい native binary）:
+  - **native fan thunk codegen の E0308 / E0277**: race/any/settle に相異なる
+    キャプチャを持つ複数 thunk を渡すと、生成 Rust が `Vec<impl Fn>` に
+    別個のクロージャ型を詰めて E0308（"no two closures have the same type"）。
+    fan.map にクロージャ VALUE（uniform repr の `Rc<dyn Fn>`、!Send/!Sync）を
+    渡すと E0277。WASM は table-dispatch で両方とも正しく動くため、value-blind
+    な WASM-only spec がこの native build 破綻を隠していた。修正（20739311）:
+    - box パスが fan thunk を un-box する代わりに、race/any/settle は
+      `Box<dyn Fn() -> _ + Send + Sync>` で box する。`Box<dyn Fn + Send + Sync>`
+      自身が `Fn + Send + Sync` なので runtime の `Vec<impl Fn + Send + Sync>`
+      sig は無変更のまま、異種キャプチャ thunk が単一の要素型に統一される。
+      IR `RcWrap` に `wrap: FnBox`（`Rc` | `BoxSendSync`）を追加。
+    - fan.map は `Rc<dyn Fn>` を受けて sequential 実行（thread を張らない）。
+      これでクロージャ VALUE も通る（並列性は失うが結果は同一）。
+  - capturing-thunk の値検証 spec を追加（baac55c3）。CI の
+    `almide test spec/ --target rust` が native コンパイル経路を恒久的に踏む
+    ようになり、この種の native build 破綻が再発しても検出される。
+
+  残る完全性ギャップ（このラウンド未着手 — build ではなく cross-target **SEMANTIC** 乖離）:
+  - **fan.race / fan.any の勝者が target で非等価**: native は thread を張って
+    wall-clock 最速（非決定的）、WASM は list 順（race は fns[0] のみ実行、any は
+    list 順で最初の OK）。同一 well-typed source が target で異なる勝者を返しうる。
+    現状は回帰テストを `assert(a or b)` で非決定性許容にして整合させただけ。筋は
+    両 target を同一の決定的セマンティクス（例: 並列実行は保ったまま list 順で
+    最初の OK を勝者にする）へ揃えること。
+  - **fan.timeout が WASM では no-op**: native は thread + recv_timeout で本物の
+    タイムアウト、WASM は ms を無視して thunk を完走。長時間 thunk で挙動が乖離。
+  - **fan.map の err 時挙動が乖離**: native は `.unwrap()` で panic、WASM は err を
+    包んで enclosing fn の外へ伝播（return）。err を返す thunk で観測差。
+  いずれも build は通る（型は付く）が「同一ソースが target で別挙動」を起こす
+  cross-target 等価性ギャップ。[determinism-belt.md](determinism-belt.md) の枠で
+  扱うのが妥当。
+
+  # 13. Status snapshot (2026-06-03) — cross-target program termination on unhandled error
+
+  effect / main / Option / Result は「型は付くが終了挙動が曲者」。`main` に**未処理エラー**が
+  到達したときの観測挙動を 8 ケース両 target 実測（`almide run` vs `build --target wasm`＋wasmtime）:
+
+  | # | ケース | native | wasm |
+  |---|---|---|---|
+  | 1 | main: effect err を auto-`?` 伝搬 | exit 1, stderr `Error: "kaboom"` | **exit 0, 無出力** ❌ |
+  | 2 | main: `boom()!` で `Err` を unwrap | exit 1, stderr `Error: "kaboom"` | **exit 0, 無出力** ❌ |
+  | 6 | main: `list.first([])!`（`None` を unwrap） | exit 1, stderr `Error: "none"` | **exit 0, 無出力** ❌ |
+  | 7 | ネストした effect の err 伝搬 | exit 1, stderr `Error: "deep"` | **exit 0, 無出力** ❌ |
+  | 3 | `boom() ?? 99`（`Err` を処理） | got 99 | got 99 ✅ |
+  | 5 | `list.first([]) ?? 42`（`None` を処理） | got 42 | got 42 ✅ |
+  | 4 | effect ok | got 7 | got 7 ✅ |
+  | 8 | 非 effect `fn main` | plain main | plain main ✅ |
+
+  **統一すべきセマンティクス（こうなってほしい）**: `main` に**未処理エラー**（auto-`?` 伝搬 /
+  `!` で unwrap した `Err`・`None` / ネスト effect 伝搬）が到達したら、**両 target で**
+  「**exit code ≠ 0** ＋ **stderr にエラーメッセージ**」。`??`・`match` で処理済みのエラーは
+  値が両 target 一致（実測通り、ここは健全）。
+
+  **根本原因**: native は `effect fn main` → `Result<(),String>` を Rust `Termination` trait が
+  処理（err → stderr ＋ exit 1）。wasm は `_start = __main_runner` が `main` の `Result` を**捨てて**
+  いた ため err が消え、**失敗が成功（exit 0・無出力）に見えた** — 最も危険な乖離。
+
+  **✅ 修正済み（Result エラー経路）** — 設計判断は「WASI/POSIX の作法（成功=exit0 / 失敗=非ゼロ
+  +stderr）に従い、フォーマットは Rust Debug の `"引用符"` ワートを捨てて Display で統一」に決定:
+  1. **native**: `effect fn main` を `__almide_main` にリネームし、`Err` を `eprintln!("Error: {}", e)`
+     ＋ `exit(1)` で出す `fn main` ラッパを生成（`walker/mod.rs`）。出力が `Error: "<msg>"` →
+     `Error: <msg>` に（引用符が消える、これが正しい方向）。
+  2. **wasm**: `__main_runner` が effect main の `Result` tag（`[tag:i32@0][payload@4]`、tag≠0=`Err`）
+     を検査し、`Err` なら `Error: <msg>\n` を fd 2 + `proc_exit(1)`（`emit_wasm/mod.rs`）。
+     非 effect `fn main`（`Unit`）は tag を持たないので **effect 限定**（`is_effect`）— でないと ok を
+     err と誤判定して全 wasm main が壊れる。
+  - 検証: `tests/wasm_runtime_test.rs::{unhandled_main_error_terminates_consistently,
+    successful_main_exits_zero_both_targets}`。実測 8 ケース中 7 が native==wasm（exit/stderr 一致）。
+
+  **残存乖離（別バグ）**: `!` で **Option の `None`** を unwrap（`list.first([])!`、ケース 6）は
+  wasm がまだ `Err` を main の `Result` に伝搬できず（`Ok` にしてしまう）exit 0 で黙殺。これは
+  `__main_runner` ではなく **`!`/Option-`None` の wasm 伝搬 lowering の上流バグ**。`Err` Result の
+  伝搬は上記で統一済み。
+
+  これは §12（fan の race/timeout/map-err）と同じ「build は通るが観測非等価」クラス。残りの面的な
+  検出には「観測出力（stdout/stderr/exit）を両 target で byte 比較する差分ゲート」（cross-target
+  equivalence の rank 1 force-multiplier）が本筋。`tests/wasm_runtime_test.rs` の spec/wasm_cross
+  stdout 比較ハーネスがその部分実装（stdout のみ。stderr/exit 比較は本節の 2 テストで先行）。
+
+  # 14. Cross-target divergence burndown map (2026-06-04) — 面的ハントの結果
+
+  **ゲートは既に存在する**（#352）。`tests/wasm_runtime_test.rs::wasm_cross_target_spec` が
+  `spec/wasm_cross/*.almd` を native+wasm 両方で走らせ **(exit, stdout, stderr) を byte 比較**、
+  `// @xt-allow: <理由>` で tracked 乖離を管理（現状 1 件 = float 最短往復）。native がオラクル。
+  よって本丸は「ゲートを建てる」ではなく **`@xt-allow` 債務の burn down**（traversal-totality の
+  LEGACY_DEBT と同型の ratchet）。
+
+  **面的ハント（並列 61 エージェント・169 プローブ・各乖離を独立再現）で native↔WASM の実バグ
+  46 件を検出。fan だけではない。** dedup すると **8 つの根本原因クラスタ**:
+
+  | # | クラスタ（根本原因） | 件数 | 優先 | locus |
+  |---|---|---|---|---|
+  | A | WASM 文字列が**バイト index**、native は**コードポイント**（chars/slice/reverse/take/codepoint/pad…、reverse は不正UTF-8生成） | 9 | 高 | `emit_wasm/rt_string*` |
+  | B | WASM `int/float.parse` が緩い＋**オーバーフロー無検査**（`ok(ゴミ)` を返す） | 8 | 高（無言の誤値） | wasm parse runtime |
+  | C | WASM `float.to_string`：`\|x\|≥2^63` で **trap**、`-0.0` 符号消失、to_fixed 丸め差 | 4 | 中高 | wasm float fmt |
+  | D | 複合要素の等価が WASM では**ポインタ同一性**、native は構造的（map/set 複合キー, list.contains/dedup on nested） | 4 | 高 | wasm element-eq |
+  | E | WASM list が**境界無検査 → OOB ヒープ読み/破壊**（slice/insert/remove_at/swap） | 5 | **高（セキュリティ）** | wasm list runtime |
+  | F | 型を変えるクロージャの map.map/set.map が **trap**（indirect call 型不一致） | 2 | 中 | wasm closure dispatch |
+  | G | **fan.\*** = §12。WASM は `fns[0]` のみ走る逐次スタブ、native は thread::scope。副作用集合・勝者・全失敗（panic101/trap134/propagate1）が乖離 | 6 | **契約決定が先** | `emit_wasm/calls.rs:1478-1561` + `runtime/rs/src/fan.rs` |
+  | H | div/mod by zero（native panic101 vs wasm trap134）、const畳み込み div0（native コンパイルエラー）、Map の Display | 3 | 中 | wasm arith/display |
+  | A-case | to_upper/to_lower/capitalize が WASM は**ASCII のみ**（±32 byte-wise）、native は全 Unicode（é→É, ß→SS 伸長, Greek/Cyrillic）。A の敵対的検証で発見 | — | 中（要 Unicode case 表、重い）| `emit_wasm/calls_string.rs` emit_str_case_convert |
+
+  §13（termination）も §12（fan）も、この 8（+A-case）クラスタの一部分。
+
+  **進捗（burndown, 2026-06-04）**: ✅ **E**（#363 マージ, OOB 境界チェック）、✅ **B-int**（#364 マージ, parse オーバーフロー/符号/trim + 4 エラー文字列）、✅ **A**（文字列コードポイント化: 4 UTF-8 ヘルパー + 全 op 変換、負 n は i32::MAX クランプ、2-arg slice の i64::MAX デフォルトは i64 クランプで修正）。残: D / C+B-float / H / F / G(fan) / A-case。
+
+  **fan(G) は契約の決定が前提**（§12 の深掘り）。native/wasm のどちらも今は仕様逸脱（native race は
+  Ok のみ拾う＝実質 any、wasm は fns[0] のみ）。推奨契約は **「決定論的 list-order-first」**: 両 target
+  で全 thunk 実行 → リスト順で最初の OK を勝者 → 全失敗は統一 Err を main-error 終了パス（§13）へ。
+  これで並行非決定性が消え native==wasm が自明に成立し差分ゲートに乗る。代替「true Promise.race
+  （最初に完了、Ok/Err 問わず）」は wall-clock 依存で決定論にならずゲートに乗らない。
+
+  **burndown 手順**（LEGACY_DEBT と同じ grandfather→drain）: 各クラスタの決定論 repro を
+  `spec/wasm_cross/` に追加 → 根本修正 → `@xt-allow` を外す。fan の勝者は非決定的なので raw race は
+  byte ゲートに不適 — 全失敗 / 副作用集合 / 順序保証のある fan.settle で枠組む。
+  **推奨順（価値×着手容易さ）**: **E（セキュリティ）→ B（parse）→ A（文字列）→ D（等価）→
+  C（float）→ H（div/mod）→ F（closure）→ G（fan、契約決定後）**。各クラスタ = 1 PR。
+  [determinism-belt.md](determinism-belt.md) の枠と接続。

@@ -6,125 +6,45 @@ use super::*;
 /// e.g. LitInt(1) + LitInt(2) → LitInt(3)
 pub fn constant_fold(program: &mut IrProgram) {
     for f in &mut program.functions {
-        fold_expr(&mut f.body);
+        fold_in_place(&mut f.body);
     }
     for tl in &mut program.top_lets {
-        fold_expr(&mut tl.value);
+        fold_in_place(&mut tl.value);
     }
 }
 
-fn fold_expr(expr: &mut IrExpr) {
-    // Recurse first (bottom-up)
-    match &mut expr.kind {
-        IrExprKind::BinOp { left, right, .. } => {
-            fold_expr(left);
-            fold_expr(right);
-        }
-        IrExprKind::UnOp { operand, .. } => fold_expr(operand),
-        IrExprKind::Block { stmts, expr: tail } => {
-            for s in stmts { fold_stmt(s); }
-            if let Some(t) = tail { fold_expr(t); }
-        }
+/// Constant-fold `slot` in place. `fold_expr` is by-value so its recursion can
+/// go through `IrExpr::map_children`; this swaps a placeholder in to take
+/// ownership and writes the folded result back.
+fn fold_in_place(slot: &mut IrExpr) {
+    let placeholder = IrExpr { kind: IrExprKind::Unit, ty: slot.ty.clone(), span: None, def_id: None };
+    let taken = std::mem::replace(slot, placeholder);
+    *slot = fold_expr(taken);
+}
 
-        IrExprKind::If { cond, then, else_ } => {
-            fold_expr(cond);
-            fold_expr(then);
-            fold_expr(else_);
-        }
-        IrExprKind::Call { args, .. } => {
-            for a in args { fold_expr(a); }
-        }
-        IrExprKind::List { elements } | IrExprKind::Tuple { elements }
-        | IrExprKind::Fan { exprs: elements } => {
-            for e in elements { fold_expr(e); }
-        }
-        IrExprKind::Lambda { body, .. } => fold_expr(body),
-        IrExprKind::Match { subject, arms } => {
-            fold_expr(subject);
-            for a in arms {
-                if let Some(g) = &mut a.guard { fold_expr(g); }
-                fold_expr(&mut a.body);
-            }
-        }
-        IrExprKind::ForIn { iterable, body, .. } => {
-            fold_expr(iterable);
-            for s in body { fold_stmt(s); }
-        }
-        IrExprKind::While { cond, body } => {
-            fold_expr(cond);
-            for s in body { fold_stmt(s); }
-        }
-        IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr }
-        | IrExprKind::OptionSome { expr } | IrExprKind::Try { expr }
-        | IrExprKind::Await { expr }
-        | IrExprKind::Unwrap { expr } | IrExprKind::ToOption { expr }
-        | IrExprKind::Clone { expr } | IrExprKind::Deref { expr }
-        | IrExprKind::Borrow { expr, .. } | IrExprKind::BoxNew { expr }
-        | IrExprKind::RcWrap { expr, .. }
-        | IrExprKind::ToVec { expr } => fold_expr(expr),
-        IrExprKind::UnwrapOr { expr: e, fallback: f } => {
-            fold_expr(e);
-            fold_expr(f);
-        }
-        IrExprKind::OptionalChain { expr: object, .. } => fold_expr(object),
-        IrExprKind::RustMacro { args, .. } => {
-            for a in args { fold_expr(a); }
-        }
-        IrExprKind::InlineRust { args, .. } => {
-            for (_, a) in args { fold_expr(a); }
-        }
-        IrExprKind::IterChain { source, steps, collector, .. } => {
-            fold_expr(source);
-            for step in steps {
-                match step {
-                    super::IterStep::Map { lambda } | super::IterStep::Filter { lambda }
-                    | super::IterStep::FlatMap { lambda } | super::IterStep::FilterMap { lambda } => {
-                        fold_expr(lambda);
-                    }
-                }
-            }
-            match collector {
-                super::IterCollector::Collect => {}
-                super::IterCollector::Fold { init, lambda } => { fold_expr(init); fold_expr(lambda); }
-                super::IterCollector::Any { lambda } | super::IterCollector::All { lambda }
-                | super::IterCollector::Find { lambda } | super::IterCollector::Count { lambda } => {
-                    fold_expr(lambda);
-                }
-            }
-        }
-        IrExprKind::Record { fields, .. } => {
-            for (_, v) in fields { fold_expr(v); }
-        }
-        IrExprKind::SpreadRecord { base, fields } => {
-            fold_expr(base);
-            for (_, v) in fields { fold_expr(v); }
-        }
-        IrExprKind::Range { start, end, .. } => {
-            fold_expr(start);
-            fold_expr(end);
-        }
-        IrExprKind::IndexAccess { object, index } => {
-            fold_expr(object);
-            fold_expr(index);
-        }
-        IrExprKind::MapAccess { object, key } => {
-            fold_expr(object);
-            fold_expr(key);
-        }
-        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } => fold_expr(object),
-        IrExprKind::MapLiteral { entries } => {
-            for (k, v) in entries { fold_expr(k); fold_expr(v); }
-        }
-        IrExprKind::StringInterp { parts } => {
-            for p in parts {
-                if let IrStringPart::Expr { expr: e } = p { fold_expr(e); }
-            }
-        }
-        _ => {}
+/// Bottom-up constant fold.
+///
+/// Recursion goes through `IrExpr::map_children` — the single wildcard-free
+/// traversal primitive (it lists every `IrExprKind`, so adding a variant is a
+/// compile error there). A hand-rolled `match expr.kind { …; _ => {} }` here
+/// would silently drop the children of any un-listed or future node kind — the
+/// exact failure class behind the native↔WASM capture divergences (DIV2). See
+/// docs/roadmap/active/codegen-traversal-totality.md.
+fn fold_expr(mut expr: IrExpr) -> IrExpr {
+    // 1. Fold every child first, so parents see already-folded literals.
+    expr = expr.map_children(&mut |e| fold_expr(e));
+    // 2. Fold this node if it has now become a constant operation.
+    if let Some(kind) = try_fold(&expr) {
+        expr.kind = kind;
     }
+    expr
+}
 
-    // Now try to fold this node
-    let folded = match &expr.kind {
+/// The node-level fold decision: the replacement kind, or `None` when no fold
+/// applies. This is a *value* match — its `_ => None` is a legitimate "nothing
+/// to fold" default, not a recursion drop.
+fn try_fold(expr: &IrExpr) -> Option<IrExprKind> {
+    match &expr.kind {
         IrExprKind::BinOp { op, left, right } => {
             match (&left.kind, &right.kind) {
                 (IrExprKind::LitInt { value: a }, IrExprKind::LitInt { value: b }) => {
@@ -171,40 +91,5 @@ fn fold_expr(expr: &mut IrExpr) {
             }
         }
         _ => None,
-    };
-
-    if let Some(kind) = folded {
-        expr.kind = kind;
-    }
-}
-
-fn fold_stmt(stmt: &mut IrStmt) {
-    match &mut stmt.kind {
-        IrStmtKind::Bind { value, .. } | IrStmtKind::BindDestructure { value, .. }
-        | IrStmtKind::Assign { value, .. } | IrStmtKind::FieldAssign { value, .. } => fold_expr(value),
-        IrStmtKind::IndexAssign { index, value, .. } => {
-            fold_expr(index);
-            fold_expr(value);
-        }
-        IrStmtKind::MapInsert { key, value, .. } => {
-            fold_expr(key);
-            fold_expr(value);
-        }
-        IrStmtKind::Guard { cond, else_ } => {
-            fold_expr(cond);
-            fold_expr(else_);
-        }
-        IrStmtKind::ListSwap { a, b, .. } => {
-            fold_expr(a);
-            fold_expr(b);
-        }
-        IrStmtKind::ListReverse { end, .. } | IrStmtKind::ListRotateLeft { end, .. } => {
-            fold_expr(end);
-        }
-        IrStmtKind::ListCopySlice { len, .. } => {
-            fold_expr(len);
-        }
-        IrStmtKind::Expr { expr } => fold_expr(expr),
-        IrStmtKind::Comment { .. } | IrStmtKind::RcInc { .. } | IrStmtKind::RcDec { .. } => {}
     }
 }

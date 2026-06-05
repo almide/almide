@@ -124,12 +124,14 @@ fn rewrite_expr(expr: IrExpr, vt: &mut VarTable) -> IrExpr {
         IrExprKind::StringInterp { parts } => IrExprKind::StringInterp {
             parts: parts.into_iter().map(|p| match p {
                 IrStringPart::Expr { expr } => IrStringPart::Expr { expr: rewrite_expr(expr, vt) },
-                other => other,
+                lit @ IrStringPart::Lit { .. } => lit,
             }).collect(),
         },
 
-        // Leaf nodes — return as-is
-        other => other,
+        // Any other kind: recurse into every child so a Match nested in a
+        // not-yet-listed node is still lowered (total by construction).
+        other => return IrExpr { kind: other, ty: expr.ty, span: expr.span, def_id: None }
+            .map_children(&mut |e| rewrite_expr(e, vt)),
     };
 
     IrExpr { kind, ty: expr.ty, span: expr.span, def_id: None }
@@ -157,7 +159,7 @@ fn rewrite_stmts(stmts: Vec<IrStmt>, vt: &mut VarTable) -> Vec<IrStmt> {
                 pattern,
                 value: rewrite_expr(value, vt),
             },
-            other => other,
+            other => return IrStmt { kind: other, span: s.span }.map_exprs(&mut |e| rewrite_expr(e, vt)),
         };
         IrStmt { kind, span: s.span }
     }).collect()

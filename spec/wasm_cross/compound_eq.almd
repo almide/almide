@@ -1,0 +1,90 @@
+// Cross-target structural equality for COMPOUND elements (tuples, nested lists,
+// records). Native uses Rust `PartialEq` (deep) everywhere; WASM previously
+// compared compound elements by POINTER identity, so two distinct heap objects
+// with identical contents miscompared as unequal. This fixture pins the WASM
+// list/set/map element-comparison to the same type-directed deep equality `==`
+// uses, so containment / dedup / key-lookup are byte-identical on both targets.
+//
+// Covered ops: list.contains, list.index_of, list.dedup, list.unique,
+// set.from_list/insert/contains, map.from_list/insert/get/contains — over tuple,
+// nested-list, and record (incl. String-field) element/key types.
+
+type P = { name: String, age: Int }
+
+fn b(x: Bool) -> String = if x then "T" else "F"
+fn oi(o: Option[Int]) -> String =
+  if option.is_some(o) then "S" + int.to_string(o ?? -1) else "N"
+fn os(o: Option[String]) -> String =
+  if option.is_some(o) then "S" + (o ?? "?") else "N"
+fn oj(o: Option[Int]) -> String =
+  if option.is_some(o) then "S" + int.to_string(o ?? -1) else "N"
+
+fn main() -> Unit = {
+  // ── list.contains: tuple & nested-list elements ──
+  let lt: List[(Int, Int)] = [(1, 2), (3, 4)]
+  println(b(list.contains(lt, (1, 2))))   // T
+  println(b(list.contains(lt, (3, 4))))   // T
+  println(b(list.contains(lt, (5, 6))))   // F
+  let lnl: List[List[Int]] = [[1, 2], [3, 4]]
+  println(b(list.contains(lnl, [1, 2])))  // T
+  println(b(list.contains(lnl, [9, 9])))  // F
+
+  // ── list.index_of ──
+  println(oi(list.index_of(lt, (1, 2))))  // S0
+  println(oi(list.index_of(lt, (3, 4))))  // S1
+  println(oi(list.index_of(lt, (7, 8))))  // N
+  println(oi(list.index_of(lnl, [3, 4]))) // S1
+
+  // ── list.dedup (consecutive) ──
+  let dt: List[(Int, Int)] = [(1, 2), (1, 2), (3, 4), (3, 4), (1, 2)]
+  println(int.to_string(list.len(list.dedup(dt))))     // 3
+
+  // ── list.unique (all) ──
+  let ut: List[(Int, Int)] = [(1, 2), (3, 4), (1, 2), (3, 4)]
+  println(int.to_string(list.len(list.unique(ut))))    // 2
+  let unl: List[List[Int]] = [[1, 2], [3, 4], [1, 2]]
+  println(int.to_string(list.len(list.unique(unl))))   // 2
+
+  // ── Set of tuples: dedup on build, contains, insert dup vs new ──
+  let s0: Set[(Int, Int)] = set.from_list([(1, 2), (3, 4), (1, 2)])
+  println(int.to_string(set.len(s0)))                  // 2
+  println(b(set.contains(s0, (3, 4))))                 // T
+  println(b(set.contains(s0, (9, 9))))                 // F
+  let s1 = set.insert(s0, (1, 2))                      // dup
+  println(int.to_string(set.len(s1)))                  // 2
+  let s2 = set.insert(s0, (5, 6))                      // new
+  println(int.to_string(set.len(s2)))                  // 3
+
+  // ── Map with tuple keys: same-content key twice → overwrite, get ──
+  var mt: Map[(Int, Int), String] =
+    map.from_list([((1, 2), "a"), ((3, 4), "b")])
+  map.insert(mt, (1, 2), "z")
+  println(int.to_string(map.len(mt)))                  // 2
+  println(os(map.get(mt, (1, 2))))                     // Sz
+  println(os(map.get(mt, (3, 4))))                     // Sb
+  println(os(map.get(mt, (9, 9))))                     // N
+  println(b(map.contains(mt, (3, 4))))                 // T
+
+  // ── Record keys/elements with a String (pointer) field ──
+  // Each literal is a fresh allocation of identical content: value-structural
+  // hash + eq must collapse them.
+  var mr: Map[P, Int] =
+    map.from_list([({ name: "alice", age: 30 }, 1), ({ name: "bob", age: 25 }, 2)])
+  map.insert(mr, { name: "alice", age: 30 }, 99)
+  println(int.to_string(map.len(mr)))                  // 2
+  println(oj(map.get(mr, { name: "alice", age: 30 }))) // S99
+  println(oj(map.get(mr, { name: "carol", age: 9 })))  // N
+
+  let sr: Set[P] =
+    set.from_list([{ name: "x", age: 1 }, { name: "y", age: 2 }, { name: "x", age: 1 }])
+  println(int.to_string(set.len(sr)))                  // 2
+  println(b(set.contains(sr, { name: "y", age: 2 })))  // T
+
+  let lr = [{ name: "p", age: 1 }, { name: "p", age: 1 }, { name: "q", age: 2 }]
+  println(int.to_string(list.len(list.unique(lr))))    // 2
+
+  // ── Primitive-element regression: still correct ──
+  let ls = ["a", "b", "a"]
+  println(b(list.contains(ls, "b")))                   // T
+  println(int.to_string(list.len(list.unique(ls))))    // 2
+}

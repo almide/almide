@@ -1,0 +1,1015 @@
+# WASM runtime ⇄ native-oracle differential-verification registry
+# ====================================================================
+#
+# Stage 1c of the completeness roadmap: the NEW-ROUTINE ORACLE-PAIRING GATE.
+#
+# WHY THIS EXISTS
+# ---------------
+# Cluster analysis of every cross-target (native ⇄ WASM) bug found that ~72%
+# were the hand-written WASM runtime in `crates/almide-codegen/src/emit_wasm/`
+# DRIFTING from the std-backed native runtime in `runtime/rs/src/`. The native
+# runtime is the ORACLE — it delegates to Rust's std (`str::to_uppercase`,
+# `f64::Display`, `str::parse::<f64>`, …), which is correct by construction. The
+# WASM runtime re-implements the same observable behavior in raw wasm bytes, and
+# every place those two implementations can disagree is a latent cross-target
+# bug.
+#
+# THE FORWARD KILL (grandfather-then-drain ratchet)
+# -------------------------------------------------
+# This is the repo's proven pattern (cf. the `@xt-allow` cross-target gate and
+# the LEGACY_DEBT drain): every WASM runtime routine MUST be registered here with
+# the status of its differential verification against the native oracle.
+#   - A NEW routine cannot merge unregistered (the check script fails CI).
+#   - A new routine SHOULD ship a paired differential test and be "verified".
+#     "grandfathered" is the pre-existing backlog — DO NOT add to it.
+#   - Existing unverified routines are "grandfathered" and drained over time
+#     (Stage 2): each gets a paired differential test, then flips to "verified".
+#
+# SCHEMA
+# ------
+# Top level:
+#   [[routine]]            one table per WASM runtime function (`fn compile_*`).
+#
+# Per-routine fields:
+#   file      (string, required)  basename within emit_wasm/, e.g. "rt_string.rs".
+#                                  `file` + `routine` is the COMPOSITE KEY — two
+#                                  routines share the bare name `compile_cmp` /
+#                                  `compile_helpers` across files, so the bare
+#                                  name alone is NOT unique.
+#   routine   (string, required)  the exact `fn compile_*` name.
+#   status    (enum,   required)  EXACTLY one of two strings:
+#                                    "verified"      — a differential / equivalence
+#                                                      test demonstrably exercises
+#                                                      this routine against the
+#                                                      native oracle (or, for the
+#                                                      table-generators, against
+#                                                      `char`/`str` std methods).
+#                                    "grandfathered" — pre-existing, no paired
+#                                                      differential test yet. The
+#                                                      Stage-2 drain backlog.
+#   oracle    (string, required)  the native counterpart this routine must match,
+#                                  e.g. "runtime/rs/src/string.rs::to_uppercase"
+#                                  or "Rust char::is_whitespace". Free text; for
+#                                  the structural/observable routines with no
+#                                  single std fn, name the behavior it defines.
+#   test      (string, OPTIONAL)  REQUIRED iff status = "verified". The differential
+#                                  test that covers it, as "<path>::<test-name>".
+#                                  The check script asserts the path exists AND the
+#                                  name appears in that file. For the cross-target
+#                                  gate the <test-name> is the harness test and the
+#                                  fixture that exercises this routine is named in
+#                                  `note`.
+#   note      (string, optional)  why the oracle pairing is what it is, when not
+#                                  obvious (which fixture drives the gate, etc.).
+#
+# The two differential test TIERS cited below:
+#   1. The cross-target equivalence GATE:
+#        tests/wasm_runtime_test.rs::wasm_cross_target_spec
+#      runs every spec/wasm_cross/*.almd on BOTH native and wasm and asserts
+#      byte-identical (stdout, stderr, exit). Native is the oracle. A routine is
+#      "verified" by this gate when a fixture exercises its stdlib surface; the
+#      driving fixture is named in `note`.
+#   2. Per-op cross-target differential tests:
+#        tests/wasm_runtime_test.rs::wasm_<op>   (via assert_cross_target)
+#      each compiles one program to Rust and to WASM and compares stdout.
+#   3. Inline Σ-probe / std-equivalence tests in the emitter modules themselves
+#        (rt_string_case.rs, rt_string.rs) — exhaustively compare the emit-time
+#        generated tables against `char`/`str` std methods.
+#
+# To regenerate the routine inventory the check script validates against:
+#   grep -rhoE 'fn compile_[a-zA-Z0-9_]+' crates/almide-codegen/src/emit_wasm/
+#
+# EXCLUDED (intentionally absent — structural/orchestration emitters, NOT runtime
+# functions mirroring a native runtime/rs counterpart). The check script's
+# routine-name extraction must skip these; they are listed in the script's
+# STRUCTURAL_EXCLUDE set and documented there:
+#   functions.rs: compile_function, compile_module_function,
+#                 compile_function_with_init, compile_function_inner
+#                   — the user IrFunction → wasm body compiler (not a runtime fn).
+#   closures.rs:  compile_lambda_bodies   — lambda pre-scan/orchestration.
+#   mod.rs:       compile_init_globals, compile_test_runner, compile_main_runner
+#                   — structural program runners (_start / test harness).
+#   runtime.rs:   compile_runtime         — the top-level "compile all bodies"
+#                                            dispatcher (calls the others).
+#   rt_dragon.rs: compile_driver, compile_helpers
+#                   — emit-order dispatchers (compile_driver just calls
+#                     compile_float_to_string; compile_helpers just emits the
+#                     bignum bodies). The behavior lives in the routines they call.
+#   rt_dec2flt.rs: compile_helpers
+#                   — same: an emit-order dispatcher for the dec2flt bodies.
+# `compile_variant_eq_funcs` is KEPT (not excluded): it generates per-type deep
+# equality, which IS observable behavior mirroring native `almide_eq!`/PartialEq.
+
+# ── functions.rs ─────────────────────────────────────────────────────
+#   (all structural — see EXCLUDED above)
+
+# ── mod.rs ───────────────────────────────────────────────────────────
+[[routine]]
+file = "mod.rs"
+routine = "compile_variant_eq_funcs"
+status = "verified"
+oracle = "native derived PartialEq / almide_eq! deep variant equality"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "spec/wasm_cross/deep_eq_heap.almd compares `Tagged(\"x\") == Tagged(\"y\")` (variant), list, and tuple equality byte-identically native vs wasm; records_variants.almd also exercises variant construction/eq."
+
+[[routine]]
+file = "mod.rs"
+routine = "compile_repr_funcs"
+status = "verified"
+oracle = "Generated per-type AlmideRepr impls on native (walker/declarations.rs render_repr_impl) — recursive named types repr via runtime dispatch on both targets"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "Added in PR-3 (compound repr): per-type __repr_<Type> wasm fns for RECURSIVE named types (cycle-set DFS; bodies sorted by name for host determinism); exercised by spec/wasm_cross/compound_repr_recursive_interp.almd (self/mutual recursion, generics, anon records)."
+
+# ── runtime.rs ───────────────────────────────────────────────────────
+[[routine]]
+file = "runtime.rs"
+routine = "compile_alloc"
+status = "grandfathered"
+oracle = "no native counterpart — bump allocator backing every heap value"
+note = "Implicitly load-bearing for every heap fixture, but no test isolates allocator semantics (alignment, capacity growth). Drain: a stress fixture asserting layout invariants."
+
+[[routine]]
+file = "runtime.rs"
+routine = "compile_rc_inc"
+status = "grandfathered"
+oracle = "native Rc::clone refcount discipline (Perceus-inserted)"
+note = "Exercised transitively by every shared heap value; no test isolates the refcount itself. spec/wasm_cross/memory_stress.almd stresses it but does not assert counts."
+
+[[routine]]
+file = "runtime.rs"
+routine = "compile_rc_dec"
+status = "grandfathered"
+oracle = "native Rc drop / free discipline (Perceus-inserted)"
+note = "See compile_rc_inc. Drain: a leak/double-free differential under memory_stress."
+
+[[routine]]
+file = "runtime.rs"
+routine = "compile_cow_check"
+status = "grandfathered"
+oracle = "native Rc::make_mut copy-on-write before in-place mutation"
+note = "Drain: a fixture mutating an aliased list/string through one binding and reading the other."
+
+[[routine]]
+file = "runtime.rs"
+routine = "compile_heap_save"
+status = "grandfathered"
+oracle = "no native counterpart — wasm heap-pointer save/restore for scratch reuse"
+
+[[routine]]
+file = "runtime.rs"
+routine = "compile_heap_restore"
+status = "grandfathered"
+oracle = "no native counterpart — wasm heap-pointer save/restore for scratch reuse"
+
+[[routine]]
+file = "runtime.rs"
+routine = "compile_println_str"
+status = "verified"
+oracle = "native println! to stdout"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "Every spec/wasm_cross fixture prints via println; the gate compares stdout bytes, so string println is verified across all of them (e.g. string_ops.almd)."
+
+[[routine]]
+file = "runtime.rs"
+routine = "compile_int_to_string"
+status = "verified"
+oracle = "runtime/rs/src/int.rs::almide_rt_int_to_string (i64::to_string)"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "spec/wasm_cross/num_edge_to_string.almd and int_parse_overflow.almd render i64 edge values (MIN/MAX, negatives) through int.to_string; byte-identical native vs wasm."
+
+[[routine]]
+file = "runtime.rs"
+routine = "compile_println_int"
+status = "verified"
+oracle = "native println! of an i64"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "Covered transitively wherever an Int is printed directly; num_edge_to_string.almd drives it."
+
+[[routine]]
+file = "runtime.rs"
+routine = "compile_concat_str"
+status = "verified"
+oracle = "native String `+` / format! concatenation"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "spec/wasm_cross/string_ops.almd and compound_repr_interp.almd build strings via interpolation/`+`; gate compares bytes."
+
+[[routine]]
+file = "runtime.rs"
+routine = "compile_string_append"
+status = "verified"
+oracle = "runtime/rs/src/string.rs::almide_rt_string_push (String::push_str)"
+test = "tests/wasm_runtime_test.rs::wasm_string_push_clear_in_place"
+note = "Differential test pushes/clears a String in place and compares native vs wasm output."
+
+[[routine]]
+file = "runtime.rs"
+routine = "compile_string_alloc"
+status = "grandfathered"
+oracle = "no native counterpart — wasm string header/data allocation primitive"
+note = "Backs every string-producing routine; no test isolates the allocation primitive."
+
+[[routine]]
+file = "runtime.rs"
+routine = "compile_div_trap"
+status = "verified"
+oracle = "native checked integer division (div-by-zero / overflow panic + exit code)"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "spec/wasm_cross/int_div_by_zero.almd, int_mod_by_zero.almd, int_div_overflow.almd, int_mod_overflow.almd assert byte-identical stderr + exit code on the trapping path."
+
+[[routine]]
+file = "runtime.rs"
+routine = "compile_init_preopen_dirs"
+status = "grandfathered"
+oracle = "native std::fs cwd / path resolution (WASI preopen mapping)"
+note = "fs/WASI path mapping has no cross-target fixture (the gate runs pure-compute programs)."
+
+[[routine]]
+file = "runtime.rs"
+routine = "compile_resolve_path"
+status = "grandfathered"
+oracle = "native std::path::Path normalization for fs.* calls"
+note = "See compile_init_preopen_dirs — no fs differential fixture yet."
+
+[[routine]]
+file = "runtime.rs"
+routine = "compile_bytes_f16_to_f64"
+status = "grandfathered"
+oracle = "native f16→f64 widening (bytes.read_f16 family)"
+note = "No cross-target fixture reads an f16; drain with a bytes-endian differential."
+
+# ── runtime_eq.rs ────────────────────────────────────────────────────
+[[routine]]
+file = "runtime_eq.rs"
+routine = "compile_option_eq_i64"
+status = "verified"
+oracle = "native Option<i64> PartialEq"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "spec/wasm_cross/option_result.almd compares Option[Int] values; gate asserts equality bytes match."
+
+[[routine]]
+file = "runtime_eq.rs"
+routine = "compile_option_eq_str"
+status = "verified"
+oracle = "native Option<String> PartialEq"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "spec/wasm_cross/option_result.almd compares Option[String] values."
+
+[[routine]]
+file = "runtime_eq.rs"
+routine = "compile_result_eq_i64_str"
+status = "verified"
+oracle = "native Result<i64,String> PartialEq"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "spec/wasm_cross/match_result.almd / option_result.almd compare Result values."
+
+[[routine]]
+file = "runtime_eq.rs"
+routine = "compile_mem_eq"
+status = "verified"
+oracle = "native byte-slice / String PartialEq (almide_eq!)"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "spec/wasm_cross/deep_eq_heap.almd and compound_eq.almd compare strings/heap blocks for equality byte-identically."
+
+[[routine]]
+file = "runtime_eq.rs"
+routine = "compile_list_eq"
+status = "verified"
+oracle = "native Vec PartialEq (element-wise almide_eq!)"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "spec/wasm_cross/deep_eq_heap.almd compares `[\"a\",\"b\"] == [\"a\",\"c\"]`; compound_eq.almd drives list.contains/index_of/unique which lean on list element eq."
+
+[[routine]]
+file = "runtime_eq.rs"
+routine = "compile_list_list_str_cmp"
+status = "verified"
+oracle = "native Vec<String> / nested-list Ord (lexicographic)"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "spec/wasm_cross/list_sort_short.almd and list_comprehensive.almd sort lists of strings; ordering compared byte-identically."
+
+[[routine]]
+file = "runtime_eq.rs"
+routine = "compile_concat_list"
+status = "verified"
+oracle = "native Vec concatenation (`+` / extend)"
+test = "tests/wasm_runtime_test.rs::wasm_list_concat"
+note = "Differential test concatenates lists native vs wasm; list_comprehensive.almd also covers it."
+
+[[routine]]
+file = "runtime_eq.rs"
+routine = "compile_int_parse"
+status = "verified"
+oracle = "runtime/rs/src/int.rs::almide_rt_int_parse (str::trim().parse::<i64>)"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "spec/wasm_cross/int_parse_overflow.almd parses overflow / malformed inputs; both targets must produce the same Result + error bytes. string_whitespace.almd exercises int.parse with surrounding whitespace."
+
+# ── rt_string.rs ─────────────────────────────────────────────────────
+[[routine]]
+file = "rt_string.rs"
+routine = "compile_utf8_width"
+status = "verified"
+oracle = "Rust UTF-8 lead-byte width (str char-boundary stepping)"
+test = "crates/almide-codegen/src/emit_wasm/rt_string.rs::derived_classification_matches_from_utf8_lossy"
+note = "The utf8_lossy_tests Σ-probe (300k fuzzed byte strings) checks the derived lead-group classification — which drives width — equals String::from_utf8_lossy. Also exercised by string_codepoint.almd / string_from_bytes.almd."
+
+[[routine]]
+file = "rt_string.rs"
+routine = "compile_utf8_scalar"
+status = "verified"
+oracle = "Rust char scalar decode (str::chars)"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "spec/wasm_cross/string_codepoint.almd decodes multibyte scalars via string.codepoint/chars; byte-identical native vs wasm."
+
+[[routine]]
+file = "rt_string.rs"
+routine = "compile_utf8_snap"
+status = "verified"
+oracle = "runtime/rs/src/string.rs::snap_to_char_boundary (str::is_char_boundary)"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "spec/wasm_cross/string_codepoint.almd slices multibyte strings at non-boundary byte offsets (string.slice/get); both targets snap identically."
+
+[[routine]]
+file = "rt_string.rs"
+routine = "compile_utf8_byte_of_cp"
+status = "verified"
+oracle = "Rust char-index → byte-offset mapping"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "string_codepoint.almd's string.take/drop/get convert char positions to byte offsets identically."
+
+[[routine]]
+file = "rt_string.rs"
+routine = "compile_char_count"
+status = "verified"
+oracle = "runtime/rs/src/string.rs::almide_rt_string_char_count (str::chars().count())"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "spec/wasm_cross/string_codepoint.almd and string_whitespace.almd use string.len (char count) on multibyte input."
+
+[[routine]]
+file = "rt_string.rs"
+routine = "compile_eq"
+status = "verified"
+oracle = "native String PartialEq"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "spec/wasm_cross/deep_eq_heap.almd / compound_eq.almd compare strings."
+
+[[routine]]
+file = "rt_string.rs"
+routine = "compile_contains"
+status = "verified"
+oracle = "runtime/rs/src/string.rs::almide_rt_string_contains (str::contains)"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "spec/wasm_cross/string_ops.almd exercises string.contains."
+
+[[routine]]
+file = "rt_string.rs"
+routine = "compile_is_unicode_ws"
+status = "verified"
+oracle = "Rust char::is_whitespace (Unicode White_Space)"
+test = "crates/almide-codegen/src/emit_wasm/rt_string.rs::whitespace_ranges_match_char_is_whitespace"
+note = "The ws_tests Σ-probe asserts the emit-time ranges equal char::is_whitespace over U+0000..=U+3001 (VT/FF/NBSP in, ZWSP out). string_whitespace.almd drives the runtime path."
+
+[[routine]]
+file = "rt_string.rs"
+routine = "compile_trim"
+status = "verified"
+oracle = "runtime/rs/src/string.rs::almide_rt_string_trim (str::trim)"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "spec/wasm_cross/string_whitespace.almd trims Unicode-whitespace-padded strings."
+
+[[routine]]
+file = "rt_string.rs"
+routine = "compile_slice"
+status = "verified"
+oracle = "runtime/rs/src/string.rs::almide_rt_string_slice (boundary-snapped byte slice)"
+test = "tests/wasm_runtime_test.rs::wasm_list_slice"
+note = "string_codepoint.almd / string_ops.almd slice multibyte and ASCII strings byte-identically; wasm_list_slice covers list slicing alongside."
+
+[[routine]]
+file = "rt_string.rs"
+routine = "compile_reverse"
+status = "verified"
+oracle = "runtime/rs/src/string.rs::almide_rt_string_reverse (chars().rev())"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "spec/wasm_cross/string_codepoint.almd reverses multibyte strings (by scalar, not byte)."
+
+[[routine]]
+file = "rt_string.rs"
+routine = "compile_repeat"
+status = "verified"
+oracle = "runtime/rs/src/string.rs::almide_rt_string_repeat (str::repeat)"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "spec/wasm_cross/string_ops.almd uses string.repeat."
+
+[[routine]]
+file = "rt_string.rs"
+routine = "compile_index_of"
+status = "verified"
+oracle = "runtime/rs/src/string.rs::almide_rt_string_index_of (str::find — BYTE offset)"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "spec/wasm_cross/string_ops.almd uses string.index_of; both targets return byte offsets."
+
+[[routine]]
+file = "rt_string.rs"
+routine = "compile_replace"
+status = "verified"
+oracle = "runtime/rs/src/string.rs::almide_rt_string_replace (str::replace)"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "spec/wasm_cross/string_ops.almd uses string.replace."
+
+[[routine]]
+file = "rt_string.rs"
+routine = "compile_split"
+status = "verified"
+oracle = "runtime/rs/src/string.rs::almide_rt_string_split (str::split)"
+test = "tests/wasm_runtime_test.rs::wasm_string_split"
+note = "wasm_string_split + wasm_string_split_empty differential tests; string_ops.almd also drives it."
+
+[[routine]]
+file = "rt_string.rs"
+routine = "compile_join"
+status = "verified"
+oracle = "runtime/rs/src/string.rs::almide_rt_string_join (slice::join)"
+test = "tests/wasm_runtime_test.rs::wasm_string_join"
+note = "Differential test joins a list of strings native vs wasm."
+
+[[routine]]
+file = "rt_string.rs"
+routine = "compile_count"
+status = "verified"
+oracle = "runtime/rs/src/string.rs::almide_rt_string_count (str::matches().count())"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "spec/wasm_cross/string_rle.almd / string_ops.almd cover substring counting paths."
+
+[[routine]]
+file = "rt_string.rs"
+routine = "compile_pad_start"
+status = "verified"
+oracle = "runtime/rs/src/string.rs::almide_rt_string_pad_left (char-count padding)"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "spec/wasm_cross/string_codepoint.almd uses string.pad_start on multibyte input."
+
+[[routine]]
+file = "rt_string.rs"
+routine = "compile_pad_end"
+status = "verified"
+oracle = "runtime/rs/src/string.rs::almide_rt_string_pad_right (char-count padding)"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "spec/wasm_cross/string_codepoint.almd uses string.pad_end."
+
+[[routine]]
+file = "rt_string.rs"
+routine = "compile_trim_start"
+status = "verified"
+oracle = "runtime/rs/src/string.rs::almide_rt_string_trim_start (str::trim_start)"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "spec/wasm_cross/string_whitespace.almd uses string.trim_start with Unicode whitespace."
+
+[[routine]]
+file = "rt_string.rs"
+routine = "compile_trim_end"
+status = "verified"
+oracle = "runtime/rs/src/string.rs::almide_rt_string_trim_end (str::trim_end)"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "spec/wasm_cross/string_whitespace.almd uses string.trim_end."
+
+[[routine]]
+file = "rt_string.rs"
+routine = "compile_to_upper"
+status = "verified"
+oracle = "runtime/rs/src/string.rs::almide_rt_string_to_upper (str::to_uppercase)"
+test = "crates/almide-codegen/src/emit_wasm/rt_string_case.rs::tables_reproduce_char_methods"
+note = "The case-table Σ-probe asserts the emitted upper/lower tables reproduce char::to_uppercase/to_lowercase (incl. ß→SS length change, Greek/Cyrillic). string_case_unicode.almd drives the runtime path through the gate."
+
+[[routine]]
+file = "rt_string.rs"
+routine = "compile_to_lower"
+status = "verified"
+oracle = "runtime/rs/src/string.rs::almide_rt_string_to_lower (str::to_lowercase)"
+test = "crates/almide-codegen/src/emit_wasm/rt_string_case.rs::tables_reproduce_char_methods"
+note = "See compile_to_upper; the same Σ-probe covers lowercasing and Final_Sigma (final_sigma_via_serialized_sets)."
+
+[[routine]]
+file = "rt_string.rs"
+routine = "compile_chars"
+status = "verified"
+oracle = "runtime/rs/src/string.rs::almide_rt_string_chars (str::chars)"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "spec/wasm_cross/string_codepoint.almd splits multibyte strings into scalars via string.chars."
+
+[[routine]]
+file = "rt_string.rs"
+routine = "compile_run_length_encode"
+status = "verified"
+oracle = "runtime/rs/src/string.rs::almide_rt_string_run_length_encode"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "spec/wasm_cross/string_rle.almd run-length-encodes strings; native vs wasm byte-identical."
+
+[[routine]]
+file = "rt_string.rs"
+routine = "compile_lines"
+status = "verified"
+oracle = "runtime/rs/src/string.rs::almide_rt_string_lines (str::lines)"
+test = "tests/wasm_runtime_test.rs::wasm_string_lines"
+note = "Differential test; string_ops.almd also uses string.lines."
+
+[[routine]]
+file = "rt_string.rs"
+routine = "compile_utf8_classify"
+status = "verified"
+oracle = "Rust UTF-8 maximal-subpart classification (String::from_utf8_lossy)"
+test = "crates/almide-codegen/src/emit_wasm/rt_string.rs::derived_classification_matches_from_utf8_lossy"
+note = "The utf8_lossy_tests Σ-probe (300k fuzzed inputs) asserts the derived classification equals std from_utf8_lossy; string_from_bytes.almd drives the runtime path."
+
+[[routine]]
+file = "rt_string.rs"
+routine = "compile_from_bytes"
+status = "verified"
+oracle = "runtime/rs/src/string.rs::almide_rt_string_from_bytes (String::from_utf8_lossy)"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "spec/wasm_cross/string_from_bytes.almd round-trips bytes↔string incl. invalid UTF-8 (U+FFFD replacement) byte-identically."
+
+[[routine]]
+file = "rt_string.rs"
+routine = "compile_to_bytes"
+status = "verified"
+oracle = "runtime/rs/src/string.rs::almide_rt_string_to_bytes (str::bytes)"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "spec/wasm_cross/string_from_bytes.almd uses string.to_bytes on multibyte input."
+
+[[routine]]
+file = "rt_string.rs"
+routine = "compile_utf8_emit_scalar"
+status = "verified"
+oracle = "Rust char → UTF-8 encode (char::encode_utf8 / from_u32)"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "spec/wasm_cross/string_codepoint.almd uses string.from_codepoint to re-encode scalars (incl. surrogate/out-of-range → empty), matching native char::from_u32."
+
+[[routine]]
+file = "rt_string.rs"
+routine = "compile_case_map_lookup"
+status = "verified"
+oracle = "Rust char::to_uppercase/to_lowercase mapping table"
+test = "crates/almide-codegen/src/emit_wasm/rt_string_case.rs::tables_reproduce_char_methods"
+note = "The case lookup binary-searches the Σ-probe-derived table the test validates against char methods."
+
+[[routine]]
+file = "rt_string.rs"
+routine = "compile_set_member"
+status = "verified"
+oracle = "Rust set membership (Cased / Case_Ignorable bitset probe)"
+test = "crates/almide-codegen/src/emit_wasm/rt_string_case.rs::final_sigma_via_serialized_sets"
+note = "final_sigma_via_serialized_sets validates the serialized Cased/CI sets this routine probes against the std-derived sets."
+
+[[routine]]
+file = "rt_string.rs"
+routine = "compile_final_sigma"
+status = "verified"
+oracle = "Unicode Final_Sigma special-casing in str::to_lowercase (Σ→ς)"
+test = "crates/almide-codegen/src/emit_wasm/rt_string_case.rs::final_sigma_via_serialized_sets"
+note = "Directly validated against the std Final_Sigma scan; string_case_unicode.almd drives it through the gate."
+
+[[routine]]
+file = "rt_string.rs"
+routine = "compile_str_case_map"
+status = "verified"
+oracle = "runtime/rs/src/string.rs to_upper/to_lower (whole-string case fold)"
+test = "crates/almide-codegen/src/emit_wasm/rt_string_case.rs::tables_reproduce_char_methods"
+note = "The whole-string driver over compile_case_map_lookup; validated by the case-table Σ-probe + string_case_unicode.almd."
+
+[[routine]]
+file = "rt_string.rs"
+routine = "compile_str_capitalize"
+status = "verified"
+oracle = "runtime/rs/src/string.rs::almide_rt_string_capitalize (first char to_uppercase)"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "spec/wasm_cross/string_case_unicode.almd capitalizes strings with a non-ASCII leading char."
+
+# ── rt_string_extra.rs ───────────────────────────────────────────────
+[[routine]]
+file = "rt_string_extra.rs"
+routine = "compile_replace_first"
+status = "grandfathered"
+oracle = "runtime/rs/src/string.rs::almide_rt_string_replace_first"
+note = "No cross-target fixture calls string.replace_first yet. Drain: add it to string_ops.almd."
+
+[[routine]]
+file = "rt_string_extra.rs"
+routine = "compile_last_index_of"
+status = "verified"
+oracle = "runtime/rs/src/string.rs::almide_rt_string_last_index_of (str::rfind — BYTE offset)"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "Fixed 2026-06-05 (drain PR-A): empty pattern now Some(byte_len) matching str::rfind; corpus locks empty/ASCII/multibyte/astral subjects"
+
+[[routine]]
+file = "rt_string_extra.rs"
+routine = "compile_strip_prefix"
+status = "grandfathered"
+oracle = "runtime/rs/src/string.rs::almide_rt_string_strip_prefix (str::strip_prefix)"
+note = "No cross-target fixture. Drain: add string.strip_prefix to string_ops.almd."
+
+[[routine]]
+file = "rt_string_extra.rs"
+routine = "compile_strip_suffix"
+status = "grandfathered"
+oracle = "runtime/rs/src/string.rs::almide_rt_string_strip_suffix (str::strip_suffix)"
+note = "No cross-target fixture. Drain alongside strip_prefix."
+
+[[routine]]
+file = "rt_string_extra.rs"
+routine = "compile_byte_predicate_range"
+status = "grandfathered"
+oracle = "Rust ASCII byte-class predicates (is_ascii_digit etc.)"
+note = "Helper behind is_digit/is_alpha/is_alnum; those have no cross-target fixture yet."
+
+[[routine]]
+file = "rt_string_extra.rs"
+routine = "compile_is_digit"
+status = "grandfathered"
+oracle = "runtime/rs/src/string.rs::almide_rt_string_is_digit (char::is_ascii_digit)"
+note = "No cross-target fixture for string.is_digit."
+
+[[routine]]
+file = "rt_string_extra.rs"
+routine = "compile_is_alpha"
+status = "verified"
+oracle = "runtime/rs/src/string.rs::almide_rt_string_is_alpha (char::is_alphabetic — Unicode!)"
+test = "crates/almide-codegen/src/emit_wasm/rt_unicode_tables.rs::alphabetic_table_matches_char_method"
+note = "Fixed 2026-06-05 (drain PR-A): codepoint walk + oracle-derived Alphabetic range table; Σ-probe lock over all scalars + spec/wasm_cross/string_predicates.almd (byte-identical via tests/wasm_runtime_test.rs::wasm_cross_target_spec)"
+
+[[routine]]
+file = "rt_string_extra.rs"
+routine = "compile_is_alnum"
+status = "verified"
+oracle = "runtime/rs/src/string.rs::almide_rt_string_is_alphanumeric (Unicode)"
+test = "crates/almide-codegen/src/emit_wasm/rt_unicode_tables.rs::alphanumeric_table_matches_char_method"
+note = "Fixed 2026-06-05 (drain PR-A): codepoint walk + Alphanumeric range table; Σ-probe lock + spec/wasm_cross/string_predicates.almd (byte-identical via tests/wasm_runtime_test.rs::wasm_cross_target_spec)"
+
+[[routine]]
+file = "rt_string_extra.rs"
+routine = "compile_is_whitespace"
+status = "grandfathered"
+oracle = "runtime/rs/src/string.rs::almide_rt_string_is_whitespace (all chars char::is_whitespace)"
+note = "The is_unicode_ws RANGES are Σ-probe-verified, but the string.is_whitespace WRAPPER (empty-string + all-chars folding) has no cross-target fixture. Drain: add to string_whitespace.almd."
+
+[[routine]]
+file = "rt_string_extra.rs"
+routine = "compile_is_upper"
+status = "verified"
+oracle = "runtime/rs/src/string.rs::almide_rt_string_is_upper (Unicode case query)"
+test = "crates/almide-codegen/src/emit_wasm/rt_unicode_tables.rs::uppercase_table_matches_char_method"
+note = "Fixed 2026-06-05 (drain PR-A): any-alpha guard + Uppercase property table (was vacuous-true on multibyte/no-letter strings); Σ-probe lock + spec/wasm_cross/string_predicates.almd (byte-identical via tests/wasm_runtime_test.rs::wasm_cross_target_spec)"
+
+[[routine]]
+file = "rt_string_extra.rs"
+routine = "compile_is_lower"
+status = "verified"
+oracle = "runtime/rs/src/string.rs::almide_rt_string_is_lower (Unicode case query)"
+test = "crates/almide-codegen/src/emit_wasm/rt_unicode_tables.rs::lowercase_table_matches_char_method"
+note = "Fixed 2026-06-05 (drain PR-A): any-alpha guard + Lowercase property table; Σ-probe lock + spec/wasm_cross/string_predicates.almd (byte-identical via tests/wasm_runtime_test.rs::wasm_cross_target_spec)"
+
+[[routine]]
+file = "rt_string_extra.rs"
+routine = "compile_case_predicate"
+status = "verified"
+oracle = "Rust char case predicate helper (is_uppercase/is_lowercase)"
+test = "crates/almide-codegen/src/emit_wasm/rt_unicode_tables.rs::uppercase_table_matches_char_method"
+note = "Shared is_upper/is_lower body (any_alpha + all_ok walk over Alphabetic + case property tables); verified through both predicate Σ-probes + spec/wasm_cross/string_predicates.almd (byte-identical via tests/wasm_runtime_test.rs::wasm_cross_target_spec)"
+
+[[routine]]
+file = "rt_string_extra.rs"
+routine = "compile_all_codepoints_predicate"
+status = "verified"
+oracle = "Shared is_alpha/is_alnum body: !s.is_empty() && s.chars().all(|c| property(c)) (runtime/rs/src/string.rs:32,34 shape)"
+test = "crates/almide-codegen/src/emit_wasm/rt_unicode_tables.rs::alphabetic_table_matches_char_method"
+note = "Added in drain PR-A; codepoint walk via existing utf8_scalar/utf8_width; verified through the is_alpha/is_alnum Σ-probes + spec/wasm_cross/string_predicates.almd"
+
+[[routine]]
+file = "rt_string_extra.rs"
+routine = "compile_prop_membership"
+status = "verified"
+oracle = "Binary search over an RLE [lo,hi] range table derived at emit time from char::is_* (std is the source)"
+test = "crates/almide-codegen/src/emit_wasm/rt_unicode_tables.rs::alphabetic_table_matches_char_method"
+note = "Added in drain PR-A; the 4 Σ-probe locks exercise the search against every scalar 0..=0x10FFFF for each table"
+
+[[routine]]
+file = "rt_string_extra.rs"
+routine = "compile_cmp"
+status = "grandfathered"
+oracle = "native str Ord (lexicographic byte comparison)"
+note = "String comparison helper; list_sort_short.almd sorts strings but exercises list_list_str_cmp, not this scalar str cmp directly. Drain: a sort-of-bare-strings fixture."
+
+# ── rt_numeric.rs ────────────────────────────────────────────────────
+[[routine]]
+file = "rt_numeric.rs"
+routine = "compile_int_from_hex"
+status = "grandfathered"
+oracle = "runtime/rs/src/int.rs::almide_rt_int_parse_hex (i64::from_str_radix base 16)"
+note = "No cross-target fixture calls int.parse_hex / int.from_hex."
+
+[[routine]]
+file = "rt_numeric.rs"
+routine = "compile_float_parse"
+status = "verified"
+oracle = "runtime/rs/src/float.rs / string.rs to_float (str::trim().parse::<f64> — correctly rounded)"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "spec/wasm_cross/float_parse.almd parses 0.1/0.2/0.3, 2^53 boundaries, subnormals, sci-notation, overflow — each printed via float.to_string so a 1-ULP error shows as different bytes. The Clinger AlgorithmM impl is proven byte-identical to str::parse::<f64> over 2.55M fuzzed inputs (rt_dec2flt.rs header)."
+
+[[routine]]
+file = "rt_numeric.rs"
+routine = "compile_float_to_fixed"
+status = "grandfathered"
+oracle = "native float.to_fixed / format!(\"{:.N}\") fixed-precision formatting"
+note = "No cross-target fixture calls float.to_fixed (distinct from float.to_string / Dragon4)."
+
+[[routine]]
+file = "rt_numeric.rs"
+routine = "compile_float_pow"
+status = "grandfathered"
+oracle = "runtime/rs/src/float.rs pow / math.rs powf (f64::powf)"
+note = "No cross-target fixture exercises float ** / math.pow; transcendental rounding can diverge from libm."
+
+[[routine]]
+file = "rt_numeric.rs"
+routine = "compile_math_sin"
+status = "grandfathered"
+oracle = "native f64::sin (libm)"
+note = "No cross-target fixture for math.sin; the wasm polynomial approximation vs native libm may diverge in the last ULPs — drain needs a tolerance-or-exact decision."
+
+[[routine]]
+file = "rt_numeric.rs"
+routine = "compile_math_cos"
+status = "grandfathered"
+oracle = "native f64::cos (libm)"
+note = "See compile_math_sin."
+
+[[routine]]
+file = "rt_numeric.rs"
+routine = "compile_math_tan"
+status = "grandfathered"
+oracle = "native f64::tan (libm)"
+note = "See compile_math_sin."
+
+[[routine]]
+file = "rt_numeric.rs"
+routine = "compile_math_log"
+status = "grandfathered"
+oracle = "native f64::ln / log (libm)"
+note = "See compile_math_sin."
+
+[[routine]]
+file = "rt_numeric.rs"
+routine = "compile_math_log10"
+status = "grandfathered"
+oracle = "native f64::log10 (libm)"
+note = "See compile_math_sin."
+
+[[routine]]
+file = "rt_numeric.rs"
+routine = "compile_math_log2"
+status = "grandfathered"
+oracle = "native f64::log2 (libm)"
+note = "See compile_math_sin."
+
+[[routine]]
+file = "rt_numeric.rs"
+routine = "compile_math_exp"
+status = "grandfathered"
+oracle = "native f64::exp (libm)"
+note = "See compile_math_sin."
+
+# ── rt_dragon.rs (Dragon4 float.to_string + bignum helpers) ──────────
+[[routine]]
+file = "rt_dragon.rs"
+routine = "compile_float_to_string"
+status = "verified"
+oracle = "runtime/rs/src/float.rs::almide_rt_float_to_string (f64 Display, shortest round-trip + .0 suffix)"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "spec/wasm_cross/float_shortest_roundtrip.almd and num_edge_to_string.almd render 0.1+0.2, 1/3, |x|>=2^63, 1e20, 1e-10 etc. byte-identically. The Dragon4 impl was validated against format!(\"{}\", x) over 20M random+boundary f64 (rt_dragon.rs header)."
+
+[[routine]]
+file = "rt_dragon.rs"
+routine = "compile_norm"
+status = "verified"
+oracle = "bignum normalize subroutine of Dragon4 / dec2flt"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "Internal bignum helper exercised transitively by float_shortest_roundtrip.almd (Dragon4) and float_parse.almd (dec2flt); both validated to 20M / 2.55M inputs."
+
+[[routine]]
+file = "rt_dragon.rs"
+routine = "compile_mul_small"
+status = "verified"
+oracle = "bignum *= u32 subroutine of Dragon4 / dec2flt"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "Internal bignum helper; see compile_norm. Driven by float_shortest_roundtrip.almd / float_parse.almd."
+
+[[routine]]
+file = "rt_dragon.rs"
+routine = "compile_cmp"
+status = "verified"
+oracle = "bignum compare (-1/0/1) subroutine of Dragon4 / dec2flt"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "Internal bignum helper; see compile_norm."
+
+[[routine]]
+file = "rt_dragon.rs"
+routine = "compile_add"
+status = "verified"
+oracle = "bignum += subroutine of Dragon4 / dec2flt"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "Internal bignum helper; see compile_norm."
+
+[[routine]]
+file = "rt_dragon.rs"
+routine = "compile_sub"
+status = "verified"
+oracle = "bignum -= subroutine of Dragon4 / dec2flt"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "Internal bignum helper; see compile_norm."
+
+[[routine]]
+file = "rt_dragon.rs"
+routine = "compile_shl"
+status = "verified"
+oracle = "bignum <<= subroutine of Dragon4 / dec2flt"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "Internal bignum helper; see compile_norm."
+
+[[routine]]
+file = "rt_dragon.rs"
+routine = "compile_copy"
+status = "verified"
+oracle = "bignum copy subroutine of Dragon4 / dec2flt"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "Internal bignum helper; see compile_norm."
+
+# ── rt_dec2flt.rs (Clinger AlgorithmM decimal → f64) ─────────────────
+[[routine]]
+file = "rt_dec2flt.rs"
+routine = "compile_dec2flt"
+status = "verified"
+oracle = "str::parse::<f64> (IEEE-754 round-to-nearest-even)"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "spec/wasm_cross/float_parse.almd drives it; proven byte-identical to str::parse::<f64> over 2.55M fuzzed + boundary inputs (rt_dec2flt.rs header)."
+
+[[routine]]
+file = "rt_dec2flt.rs"
+routine = "compile_bn_add_small"
+status = "verified"
+oracle = "bignum += u32 subroutine of dec2flt"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "Internal helper exercised by float_parse.almd; see compile_dec2flt."
+
+[[routine]]
+file = "rt_dec2flt.rs"
+routine = "compile_bn_bit_len"
+status = "verified"
+oracle = "bignum bit-length subroutine of dec2flt"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "Internal helper exercised by float_parse.almd; see compile_dec2flt."
+
+# ── rt_value.rs (JSON Value model) ───────────────────────────────────
+[[routine]]
+file = "rt_value.rs"
+routine = "compile_json_escape_string"
+status = "verified"
+oracle = "runtime/rs/src/json.rs / value.rs JSON string escaping (serde_json-compatible)"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "spec/wasm_cross/json_value.almd stringifies values containing strings; escapes compared byte-identically."
+
+[[routine]]
+file = "rt_value.rs"
+routine = "compile_value_stringify"
+status = "verified"
+oracle = "runtime/rs/src/value.rs::stringify (value.stringify)"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "spec/wasm_cross/json_value.almd round-trips parse→stringify; output bytes must match native."
+
+[[routine]]
+file = "rt_value.rs"
+routine = "compile_json_parse"
+status = "verified"
+oracle = "runtime/rs/src/json.rs::parse (json.parse)"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "spec/wasm_cross/json_value.almd parses a JSON document; the parsed structure (via as_int/as_string/get) must match native."
+
+[[routine]]
+file = "rt_value.rs"
+routine = "compile_json_parse_at"
+status = "verified"
+oracle = "internal recursive-descent step of json.parse"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "The per-node recursion under compile_json_parse; driven by json_value.almd."
+
+[[routine]]
+file = "rt_value.rs"
+routine = "compile_json_get_path"
+status = "verified"
+oracle = "runtime/rs/src/value.rs path get (value.get)"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "spec/wasm_cross/json_value.almd navigates the parsed value with value.get."
+
+[[routine]]
+file = "rt_value.rs"
+routine = "compile_json_set_path"
+status = "grandfathered"
+oracle = "runtime/rs/src/value.rs path set (value.set)"
+note = "json_value.almd reads but does not value.set a path; no cross-target fixture mutates a Value path. Drain: extend json_value.almd."
+
+[[routine]]
+file = "rt_value.rs"
+routine = "compile_json_remove_path"
+status = "grandfathered"
+oracle = "runtime/rs/src/value.rs path remove (value.remove)"
+note = "No cross-target fixture removes a Value path. Drain alongside set_path."
+
+# ── rt_encoding.rs (base64 / hex) ────────────────────────────────────
+[[routine]]
+file = "rt_encoding.rs"
+routine = "compile_base64_encode"
+status = "grandfathered"
+oracle = "runtime/rs/src/* base64 encode (standard alphabet + padding)"
+note = "No cross-target fixture exercises base64. Drain: add an encoding fixture."
+
+[[routine]]
+file = "rt_encoding.rs"
+routine = "compile_base64_decode"
+status = "grandfathered"
+oracle = "runtime/rs/src/* base64 decode (incl. invalid-input error path)"
+note = "No cross-target fixture. Drain alongside base64_encode."
+
+[[routine]]
+file = "rt_encoding.rs"
+routine = "compile_hex_encode"
+status = "grandfathered"
+oracle = "runtime/rs/src/hex.rs encode"
+note = "No cross-target fixture for hex.encode. Drain: add an encoding fixture."
+
+[[routine]]
+file = "rt_encoding.rs"
+routine = "compile_hex_decode"
+status = "grandfathered"
+oracle = "runtime/rs/src/hex.rs decode (incl. odd-length / non-hex error path)"
+note = "No cross-target fixture. Drain alongside hex_encode."
+
+# ── rt_regex.rs (regex engine) ───────────────────────────────────────
+[[routine]]
+file = "rt_regex.rs"
+routine = "compile_skip_class"
+status = "grandfathered"
+oracle = "runtime/rs/src/regex.rs char-class skip (regex crate parity)"
+note = "No cross-target fixture exercises regex. The whole rt_regex.rs cluster is the largest grandfathered block — drain needs a regex differential fixture set."
+
+[[routine]]
+file = "rt_regex.rs"
+routine = "compile_match_class"
+status = "grandfathered"
+oracle = "runtime/rs/src/regex.rs char-class match"
+note = "See compile_skip_class."
+
+[[routine]]
+file = "rt_regex.rs"
+routine = "compile_match_atom"
+status = "grandfathered"
+oracle = "runtime/rs/src/regex.rs single-atom match"
+note = "See compile_skip_class."
+
+[[routine]]
+file = "rt_regex.rs"
+routine = "compile_atom_len"
+status = "grandfathered"
+oracle = "runtime/rs/src/regex.rs atom-length computation"
+note = "See compile_skip_class."
+
+[[routine]]
+file = "rt_regex.rs"
+routine = "compile_skip_group"
+status = "grandfathered"
+oracle = "runtime/rs/src/regex.rs group skip"
+note = "See compile_skip_class."
+
+[[routine]]
+file = "rt_regex.rs"
+routine = "compile_match_anchored"
+status = "grandfathered"
+oracle = "runtime/rs/src/regex.rs anchored match"
+note = "See compile_skip_class."
+
+[[routine]]
+file = "rt_regex.rs"
+routine = "compile_match_search"
+status = "grandfathered"
+oracle = "runtime/rs/src/regex.rs unanchored search (regex.is_match / find)"
+note = "See compile_skip_class."
+
+[[routine]]
+file = "rt_regex.rs"
+routine = "compile_captures_inner"
+status = "grandfathered"
+oracle = "runtime/rs/src/regex.rs capture-group extraction"
+note = "See compile_skip_class."
+
+[[routine]]
+file = "rt_regex.rs"
+routine = "compile_captures_search"
+status = "grandfathered"
+oracle = "runtime/rs/src/regex.rs capture search (regex.captures)"
+note = "See compile_skip_class."

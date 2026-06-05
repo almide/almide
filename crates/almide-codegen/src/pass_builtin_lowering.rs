@@ -355,7 +355,14 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
         },
         IrExprKind::Clone { expr } => IrExprKind::Clone { expr: Box::new(rewrite_expr(*expr)) },
         IrExprKind::Deref { expr } => IrExprKind::Deref { expr: Box::new(rewrite_expr(*expr)) },
-        other => other,
+        // No builtin lowering applies to this node — recurse into its children
+        // via the exhaustive `map_children` so a lowerable call nested inside an
+        // un-listed / future kind is still reached (was a silent `other => other`
+        // drop). See docs/roadmap/active/codegen-traversal-totality.md.
+        other => {
+            return IrExpr { kind: other, ty, span, def_id: None }
+                .map_children(&mut |e| rewrite_expr(e));
+        }
     };
 
     IrExpr { kind, ty, span, def_id: None }
@@ -403,7 +410,9 @@ fn rewrite_stmts(stmts: Vec<IrStmt>) -> Vec<IrStmt> {
             IrStmtKind::BindDestructure { pattern, value } => IrStmtKind::BindDestructure {
                 pattern, value: rewrite_expr(value),
             },
-            other => other,
+            // Recurse the exprs of any other statement kind via `map_exprs`
+            // (was a silent drop of e.g. IndexAssign/MapInsert/ListSwap exprs).
+            other => return IrStmt { kind: other, span: s.span }.map_exprs(&mut |e| rewrite_expr(e)),
         };
         IrStmt { kind, span: s.span }
     }).collect()

@@ -37,7 +37,6 @@ pub mod pass_match_lowering;
 pub mod pass_match_subject;
 pub mod pass_result_erasure;
 pub mod pass_result_propagation;
-pub mod pass_shadow_resolve;
 pub mod pass_intrinsic_lowering;
 pub mod pass_normalize_runtime_calls;
 pub mod pass_stdlib_lowering;
@@ -49,6 +48,7 @@ pub mod pass_peephole;
 pub mod pass_anf;
 pub mod pass_stack_balance;
 pub mod pass_perceus;
+pub mod pass_globalize_closure_ids;
 pub mod pass_canonicalize;
 pub mod perceus_verified;
 pub mod pass_egg_saturation;
@@ -140,6 +140,47 @@ fn strip_test_blocks(src: &str) -> String {
 /// - WASM: Nanopass → direct binary emit → .wasm bytes
 pub fn codegen(program: &mut IrProgram, target: Target) -> CodegenOutput {
     codegen_with(program, target, &CodegenOptions::default())
+}
+
+/// True iff the program calls `fan.timeout`. `fan.timeout` is a wall-clock effect
+/// (no portable, deterministic cross-target meaning, like the fs/clock IO ops). On
+/// the WASM target there is no clock, no scheduler, and no threads, so the thunk
+/// simply runs to completion and the timeout NEVER elapses. The CLI uses this to
+/// warn at build time when emitting WASM, so the divergence is loud, not silent.
+pub fn program_uses_fan_timeout(program: &IrProgram) -> bool {
+    use almide_ir::visit::{IrVisitor, walk_expr, walk_stmt};
+    use almide_ir::{CallTarget, IrExprKind};
+    struct Scan {
+        found: bool,
+    }
+    impl IrVisitor for Scan {
+        fn visit_expr(&mut self, expr: &almide_ir::IrExpr) {
+            if self.found {
+                return;
+            }
+            if let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, .. } = &expr.kind {
+                if module.as_str() == "fan" && func.as_str() == "timeout" {
+                    self.found = true;
+                    return;
+                }
+            }
+            walk_expr(self, expr);
+        }
+        fn visit_stmt(&mut self, stmt: &almide_ir::IrStmt) {
+            if self.found {
+                return;
+            }
+            walk_stmt(self, stmt);
+        }
+    }
+    let mut scan = Scan { found: false };
+    for func in &program.functions {
+        scan.visit_expr(&func.body);
+        if scan.found {
+            return true;
+        }
+    }
+    false
 }
 
 /// AlmidePerceusBelt: type-state verified program.
@@ -265,6 +306,15 @@ fn rust_runtime_prelude(for_crate: bool) -> String {
     s.push_str("impl<T: Clone> AlmideConcat<Vec<T>> for Vec<T> { type Output = Vec<T>; #[inline(always)] fn concat(self, rhs: Vec<T>) -> Vec<T> { let mut r = self; r.extend(rhs); r } }\n");
     s.push_str(&format!("{macro_attr}macro_rules! almide_eq {{ ($a:expr, $b:expr) => {{ ($a) == ($b) }}; }}\n"));
     s.push_str(&format!("{macro_attr}macro_rules! almide_ne {{ ($a:expr, $b:expr) => {{ ($a) != ($b) }}; }}\n"));
+    // almide_div!/almide_mod!: total integer `/` and `%`. `checked_div`/`checked_rem`
+    // return `None` for BOTH a zero divisor AND signed `MIN / -1` overflow, so one
+    // arm distinguishes the two messages by the divisor (b == 0). Generic over every
+    // int width (i8..i64, u*); the Call form is not const-evaluable, so rustc's
+    // `deny(unconditional_panic)` never fires on a literal `10 / 0` and the diagnostic
+    // is the runtime abort below — byte-identical to the §13 termination convention
+    // (`Error: <msg>\n` + exit 1) and to the WASM div/mod trap.
+    s.push_str(&format!("{macro_attr}macro_rules! almide_div {{ ($a:expr, $b:expr) => {{{{ let (__a, __b) = ($a, $b); match __a.checked_div(__b) {{ Some(__v) => __v, None => {{ eprintln!(\"Error: {{}}\", if __b == 0 {{ \"division by zero\" }} else {{ \"integer overflow\" }}); std::process::exit(1); }} }} }}}}; }}\n"));
+    s.push_str(&format!("{macro_attr}macro_rules! almide_mod {{ ($a:expr, $b:expr) => {{{{ let (__a, __b) = ($a, $b); match __a.checked_rem(__b) {{ Some(__v) => __v, None => {{ eprintln!(\"Error: {{}}\", if __b == 0 {{ \"division by zero\" }} else {{ \"integer overflow\" }}); std::process::exit(1); }} }} }}}}; }}\n"));
     // RcCow<T>: COW value type. Clone = Rc::clone (O(1)), mutation = Rc::make_mut (COW).
     // Inspired by Swift's value type semantics.
     s.push_str(&format!("{vis}struct RcCow<T>({vis}std::rc::Rc<T>);\n"));
@@ -281,6 +331,89 @@ fn rust_runtime_prelude(for_crate: bool) -> String {
     s.push_str("impl<T: std::hash::Hash> std::hash::Hash for RcCow<T> { fn hash<H: std::hash::Hasher>(&self, state: &mut H) { self.0.hash(state) } }\n");
     // Blanket AlmideConcat: RcCow<T> + Rhs and RcCow<T> + Val<U> — 2 impls cover all combos.
     s.push_str("impl<T: Clone, Rhs> AlmideConcat<Rhs> for RcCow<T> where T: AlmideConcat<Rhs> { type Output = RcCow<<T as AlmideConcat<Rhs>>::Output>; #[inline(always)] fn concat(self, rhs: Rhs) -> Self::Output { RcCow::new((*self).clone().concat(rhs)) } }\n");
+    // SharedMut<T>: shared interior-mutable cell for a non-Copy `var` captured and
+    // mutated through a closure (Closure v2, P6). The non-Copy analogue of the
+    // `Rc<Cell<T>>` used for Copy captures: `Clone` is `Rc::clone` (O(1), shares the
+    // SAME cell) so a `move` closure's mutation is visible to the enclosing scope —
+    // unlike `RcCow`, whose `make_mut` clones on a shared write and loses it. The
+    // `get`/`set` API mirrors `Cell` so reads/assigns lower identically for both.
+    s.push_str(&format!("{vis}struct SharedMut<T>({vis}std::rc::Rc<std::cell::RefCell<T>>);\n"));
+    s.push_str("impl<T> Clone for SharedMut<T> { fn clone(&self) -> Self { SharedMut(std::rc::Rc::clone(&self.0)) } }\n");
+    s.push_str("impl<T: std::fmt::Debug> std::fmt::Debug for SharedMut<T> { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { self.0.borrow().fmt(f) } }\n");
+    s.push_str("impl<T: PartialEq> PartialEq for SharedMut<T> { fn eq(&self, other: &Self) -> bool { *self.0.borrow() == *other.0.borrow() } }\n");
+    s.push_str(&format!("impl<T> SharedMut<T> {{ {vis}fn new(v: T) -> Self {{ SharedMut(std::rc::Rc::new(std::cell::RefCell::new(v))) }} {vis}fn get(&self) -> T where T: Clone {{ self.0.borrow().clone() }} {vis}fn set(&self, v: T) {{ *self.0.borrow_mut() = v; }} {vis}fn borrow(&self) -> std::cell::Ref<'_, T> {{ self.0.borrow() }} {vis}fn borrow_mut(&self) -> std::cell::RefMut<'_, T> {{ self.0.borrow_mut() }} }}\n"));
+    s.push_str(&almide_repr_prelude(vis));
+    s
+}
+
+/// The `AlmideRepr` trait + std-type impls used by compound string interpolation.
+///
+/// `"${compound}"` must render a value back to its **Almide literal form**
+/// (`[1, 2, 3]`, `["a": 1]`, `(1, "x")`, `some(v)`, …) byte-identically on the
+/// Rust and WASM targets. Each compound interpolation part is lowered (by the
+/// walker) to `almide_repr(&part)`; recursion is automatic via the trait, so a
+/// `List[Map[String, List[Int]]]` composes with no per-shape generated code.
+///
+/// String *escaping inside a container* mirrors `almide_rt_value_stringify`
+/// exactly (`\\ \" \n \r \t`) so the two repr layers never diverge. A BARE
+/// top-level `${s}` String stays raw — the walker only routes *compound* parts
+/// here, so the quoting `impl AlmideRepr for String` is reached only from inside
+/// a container.
+///
+/// Numeric/Bool reprs delegate to the same `Display` path as bare interpolation
+/// (`format!("{}", …)`), never a second formatter, so an `Int`/`Float`/`Bool`
+/// inside a container reads identically to the same value interpolated bare.
+///
+/// `AlmideMap` / `AlmideSet` impls live in their runtime modules (map.rs /
+/// set.rs) because those types are only pulled in when `needed` — emitting the
+/// impl here would reference an undefined type in std-only programs.
+fn almide_repr_prelude(vis: &str) -> String {
+    let mut s = String::new();
+    s.push_str(&format!("{vis}trait AlmideRepr {{ fn almide_repr(&self) -> String; }}\n"));
+    // Free function: the uniform call site the walker emits for a compound part.
+    s.push_str(&format!("{vis}fn almide_repr<T: AlmideRepr + ?Sized>(x: &T) -> String {{ x.almide_repr() }}\n"));
+    // Escape a string for container context — identical set to almide_rt_value_stringify.
+    s.push_str(&format!("{vis}fn almide_repr_str(sv: &str) -> String {{ format!(\"\\\"{{}}\\\"\", sv.replace('\\\\', \"\\\\\\\\\").replace('\\\"', \"\\\\\\\"\").replace('\\n', \"\\\\n\").replace('\\r', \"\\\\r\").replace('\\t', \"\\\\t\")) }}\n"));
+    // Primitives: numbers/bools route through the SAME Display path as bare interp.
+    for t in ["i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f32", "f64", "bool"] {
+        s.push_str(&format!("impl AlmideRepr for {t} {{ fn almide_repr(&self) -> String {{ format!(\"{{}}\", self) }} }}\n"));
+    }
+    // Strings inside a container are double-quoted + escaped. The impl TARGET of
+    // every std type below is FULLY QUALIFIED (`std::string::String`,
+    // `std::boxed::Box`, …): a user `type Box = { … }` / `type Vec = …` lowers to
+    // a `pub struct Box`/`pub struct Vec` that would otherwise SHADOW the std type
+    // at the impl site, binding this blanket impl to the user struct (E0614:
+    // `(**self)` on a non-pointer, or a method-not-found). Qualifying pins each
+    // blanket to the real std type so the user's own type keeps its generated impl.
+    s.push_str("impl AlmideRepr for std::string::String { fn almide_repr(&self) -> String { almide_repr_str(self) } }\n");
+    s.push_str("impl AlmideRepr for str { fn almide_repr(&self) -> String { almide_repr_str(self) } }\n");
+    // List: `[a, b, c]`, empty `[]`.
+    s.push_str("impl<T: AlmideRepr> AlmideRepr for std::vec::Vec<T> { fn almide_repr(&self) -> String { let mut o = String::from(\"[\"); for (i, e) in self.iter().enumerate() { if i > 0 { o.push_str(\", \"); } o.push_str(&e.almide_repr()); } o.push(']'); o } }\n");
+    // Option: `some(v)` / `none`.
+    s.push_str("impl<T: AlmideRepr> AlmideRepr for std::option::Option<T> { fn almide_repr(&self) -> String { match self { Some(v) => format!(\"some({})\", v.almide_repr()), None => \"none\".to_string() } } }\n");
+    // Result: `ok(v)` / `err(e)`.
+    s.push_str("impl<T: AlmideRepr, E: AlmideRepr> AlmideRepr for std::result::Result<T, E> { fn almide_repr(&self) -> String { match self { Ok(v) => format!(\"ok({})\", v.almide_repr()), Err(e) => format!(\"err({})\", e.almide_repr()) } } }\n");
+    // RcCow / SharedMut transparently forward to the wrapped value.
+    s.push_str("impl<T: AlmideRepr> AlmideRepr for RcCow<T> { fn almide_repr(&self) -> String { (**self).almide_repr() } }\n");
+    s.push_str("impl<T: AlmideRepr + Clone> AlmideRepr for SharedMut<T> { fn almide_repr(&self) -> String { self.0.borrow().almide_repr() } }\n");
+    // Reference forwarders so `almide_repr(&&x)` and slice elements compose.
+    s.push_str("impl<T: AlmideRepr + ?Sized> AlmideRepr for &T { fn almide_repr(&self) -> String { (**self).almide_repr() } }\n");
+    s.push_str("impl<T: AlmideRepr + ?Sized> AlmideRepr for std::boxed::Box<T> { fn almide_repr(&self) -> String { (**self).almide_repr() } }\n");
+    // Tuples: `(a, b, …)` for arities 2..=12 (the parser caps tuple width well below this).
+    let names = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L"];
+    for arity in 2..=names.len() {
+        let used = &names[..arity];
+        let bounds = used.iter().map(|n| format!("{n}: AlmideRepr")).collect::<Vec<_>>().join(", ");
+        let tys = used.join(", ");
+        // Build the body: push each `self.i.almide_repr()` separated by ", ".
+        let pushes = (0..arity).map(|i| {
+            let sep = if i > 0 { "o.push_str(\", \"); " } else { "" };
+            format!("{sep}o.push_str(&self.{i}.almide_repr());")
+        }).collect::<Vec<_>>().join(" ");
+        s.push_str(&format!(
+            "impl<{bounds}> AlmideRepr for ({tys},) {{ fn almide_repr(&self) -> String {{ let mut o = String::from(\"(\"); {pushes} o.push(')'); o }} }}\n"
+        ));
+    }
     s
 }
 

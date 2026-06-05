@@ -6,25 +6,30 @@
 
 ## Active
 
-11 items
+16 items
 
 | Item | Description |
 |------|-------------|
 | [AlmidePerceusBelt](active/almide-perceus-belt.md) | AlmidePerceusBelt — formal memory safety guarantee for Almide |
+| [Build Speed: Runtime rlib + Hot-Fn Inlining](active/build-speed-runtime-rlib.md) | Native build-speed — precompiled almide_rt runtime rlib, and recovering the shipping-build inlining gap with #[inline] |
 | [CI Warnings Cleanup](active/ci-warnings-cleanup.md) |  |
+| [Closure Architecture v2](active/closure-architecture-v2.md) | Closure Architecture v2 — one identity, one capture-set, lifting is lowering; separates closure REPRESENTATION from the inlining OPTIMIZATION |
+| [Closure cross-target completeness](active/closure-cross-target-completeness.md) |  |
+| [Codegen traversal totality](active/codegen-traversal-totality.md) |  |
 | [Correctness Guarantee Gaps](active/correctness-guarantee-gaps.md) |  |
+| [Cross-Target Completeness (the Lid)](active/cross-target-completeness.md) | Cross-target completeness lid — the staged path from "all known divergences fixed + byte-diff gate" to structural equivalence (drain → interpreter+fuzz → selfhost → kernel proofs), with the live drain queue |
+| [The Determinism / Purity Belt](active/determinism-belt.md) | Determinism/Purity Belt — a Perceus-analog that makes the compiler deterministic & target-portable by construction |
 | [Capability-Based Effect System](active/effect-system-capability.md) | Capability-based effect system for sandboxed AI agent containers |
 | [LLM-first Language](active/llm-first-language.md) | Plan to make Almide the language LLMs write most accurately, measured by dojo MSR |
-| [Region-based Memory Management](active/region-inference.md) |  |
+| [Map / Set data-structure roadmap](active/map-data-structure-roadmap.md) |  |
 | [Type Where Constraints](active/type-where-constraints.md) | where clauses on type/fn definitions for type constraints |
 | [Almide WASM Engine — Complete Redesign](active/wasm-engine-redesign.md) |  |
 | [WASM Optimization Roadmap](active/wasm-optimization-roadmap.md) |  |
-| [Perceus Void Block Stack Balance — CI Blocker](active/wasm-perceus-void-block.md) |  |
-| [WASM Remaining 15 Skips — Fix Roadmap](active/wasm-remaining-15.md) |  |
+| [WASM Platform Frontier — beyond core Wasm 3.0](active/wasm-platform-frontier.md) | Post-Wasm-3.0 platform tracking — WASI 0.3 / Component Model, stack switching, shared-everything-threads |
 
 ## On Hold
 
-29 items
+30 items
 
 | Item | Description |
 |------|-------------|
@@ -48,6 +53,7 @@
 | [Performance Research: Path to World #1](on-hold/performance-research.md) | Research plan to surpass hand-written Rust via semantic-aware optimization |
 | [Porta Embedded — Sub-10KB Almide IoT Agents on WASI Hosts](on-hold/porta-embedded.md) | Porta-style WASI agent runtime for IoT: <10KB Almide guests on tiny hosts |
 | [Rainbow Bridge — Wrap External Code as Almide Packages](on-hold/rainbow-bridge.md) | Wrap external Rust/TS/Python code as native Almide packages via @extern |
+| [Region-based Memory Management](on-hold/region-inference.md) | Region-based memory management — Phase 1+2 shipped, Phase 3 (full inference) on hold for server workloads |
 | [Research: Modification Survival Rate Paper](on-hold/research-modification-survival-rate-paper.md) | Academic paper measuring LLM code modification survival across languages |
 | [The Rumbling — Almide OSS Rewrite Campaign](on-hold/rumbling.md) | Campaign to rewrite OSS tools in Almide to prove WASM size and LLM accuracy |
 | [Secure by Design](on-hold/secure-by-design.md) | Five-layer security model making web vulnerabilities compile-time errors |
@@ -60,13 +66,16 @@
 
 ## Done
 
-248 items
+251 items
 
 <details>
-<summary>Show all 248 completed items</summary>
+<summary>Show all 251 completed items</summary>
 
 | Done | Item | Description |
 |------|------|-------------|
+| 2026-06-05 | [WASM Remaining 15 Skips — Fix Roadmap](done/wasm-remaining-15.md) | WASM spec skip burndown — fixable skips all resolved, 233/233 wasm-eligible (8 intentional skips) |
+| 2026-06-05 | [Perceus Void Block Stack Balance — CI Blocker](done/wasm-perceus-void-block.md) | StackBalancePass — void-context blocks never leak stack values (wasmtime 45+ strict validation) |
+| 2026-06-02 | [Closure Codegen Cross-Target Gaps](done/closure-codegen-cross-target-gaps.md) | Cross-target (native vs wasm) closure-codegen divergences found by the adversarial differential sweep — all 8 fixed |
 | 2026-05-29 | [WASM Component Model](done/wasm-component-model.md) | WebAssembly Component Model support with WIT bindings |
 | 2026-04-20 | [`almide docs-gen` — llms.txt Auto-Generation](done/llms-txt-autogen.md) | Auto-generate llms.txt from canonical sources (CHEATSHEET, diagnostics, stdlib) |
 | 2026-04-20 | [Whisper in Pure Almide](done/whisper-almide.md) | Whisper speech recognition implemented entirely in Almide |

@@ -1,0 +1,52 @@
+// Regression: WASM string.to_upper / to_lower / capitalize must produce the SAME
+// bytes as native (Rust str::to_uppercase / str::to_lowercase / first-char
+// char::to_uppercase). Previously the WASM runtime folded ONLY ASCII a-z<->A-Z
+// (±32 byte loop), so every non-ASCII case op diverged: accents, Greek, Cyrillic,
+// the length-CHANGING maps (ß -> SS), and the context-sensitive Greek sigma
+// (Final_Sigma: word-final ς vs medial σ). The runtime now embeds oracle-derived
+// Unicode case tables (crates/almide-codegen/src/emit_wasm/rt_string_case.rs) and
+// resolves Final_Sigma at runtime — byte-identical to native for ALL scalars.
+effect fn main() -> Unit = {
+  // ── ASCII (the old fast path; still correct) ──
+  println(string.to_upper("hello, world!"))   // HELLO, WORLD!
+  println(string.to_lower("HELLO, WORLD!"))   // hello, world!
+
+  // ── Latin-1 / accents (1:1 maps) ──
+  println(string.to_upper("café crème"))      // CAFÉ CRÈME
+  println(string.to_lower("CAFÉ CRÈME"))      // café crème
+  println(string.to_upper("àÉîõü"))           // ÀÉÎÕÜ
+
+  // ── Length-changing maps (output longer than input) ──
+  println(string.to_upper("straße"))          // STRASSE  (ß -> SS)
+  println(string.to_upper("ﬁle ﬄ"))          // FILE FFL (ligatures)
+  println(string.to_upper("ŉ"))               // ʼN       (U+0149 -> 2 scalars)
+
+  // ── Cyrillic ──
+  println(string.to_upper("привет, мир"))     // ПРИВЕТ, МИР
+  println(string.to_lower("ПРИВЕТ, МИР"))     // привет, мир
+
+  // ── Greek Final_Sigma (the context-sensitive case) ──
+  println(string.to_lower("Σ"))               // σ   (lone -> medial)
+  println(string.to_lower("ΟΔΟΣ"))            // οδος (word-final -> ς)
+  println(string.to_lower("ΣΟΣ"))             // σος  (start σ, end ς)
+  println(string.to_lower("ΑΣΑ"))             // ασα  (medial -> σ)
+  println(string.to_lower("ΑΣ ΒΣ"))           // ας βς (each word-final -> ς)
+  println(string.to_lower("ΣΣ"))              // σς   (first medial, second final)
+  println(string.to_upper("σοφία τέλος"))     // ΣΟΦΊΑ ΤΈΛΟΣ
+
+  // ── İ / dotted-I (U+0130 -> i + combining dot above) ──
+  println(string.to_lower("İ"))               // i̇
+
+  // ── capitalize: first scalar uppercased, REST VERBATIM (no recase, no Σ rule) ──
+  println(string.capitalize("über"))          // Über
+  println(string.capitalize("ßeta"))          // SSeta  (ß -> SS as head)
+  println(string.capitalize("σοσ"))           // Σοσ    (tail σ kept, NOT lowered to ς)
+  println(string.capitalize("ΣΟΣ"))           // ΣΟΣ
+  println(string.capitalize("hELLO"))         // HELLO  (tail not lowercased)
+  println(string.capitalize("123abc"))        // 123abc (non-cased head unchanged)
+  println(string.capitalize(""))              // (empty)
+
+  // ── Astral plane (Deseret, has case mappings) via from_codepoint ──
+  println(string.to_lower(string.from_codepoint(66560)))  // 𐐀 U+10400 -> 𐐨 U+10428
+  println(string.to_upper(string.from_codepoint(66600)))  // 𐐨 U+10428 -> 𐐀 U+10400
+}

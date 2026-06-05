@@ -1,7 +1,10 @@
+<!-- description: Region-based memory management — Phase 1+2 shipped, Phase 3 (full inference) on hold for server workloads -->
 # Region-based Memory Management
 
+> **Status**: On hold — Phase 1+2 shipped (v0.23.4) and cover the practical patterns.
+> Phase 3 (full region inference) targets long-running servers, a secondary use case;
+> revisit when that workload becomes primary.
 > Almide WASM uses a bump allocator with automatic region scoping.
-> Phase 1+2 handle most practical patterns. Phase 3 targets the remaining edge cases.
 
 ## Implemented
 

@@ -1,0 +1,11 @@
+// fan.map element-Err propagation through an INLINE lambda (vs fan_map_err.almd's
+// named `(x) => step(x)`). The first element fn that returns Err (in list order)
+// makes the whole fan.map produce that Err, which the effect-main termination
+// surfaces as "Error: <msg>" + exit 1 on BOTH targets — native via the Display
+// `fn main` wrapper, wasm via __main_runner. The inline `if ... then err(...) else
+// ok(x * 10)` body must still pin x:Int so the i64 `x * 10` path matches native.
+effect fn main() -> Unit = {
+  let mapped = fan.map([1, 2, 3], (x) =>
+    if x == 2 then err("element " + int.to_string(x) + " failed") else ok(x * 10))
+  println("unreachable: " + int.to_string(list.len(mapped)))
+}

@@ -176,6 +176,41 @@ impl FuncCompiler<'_> {
         None
     }
 
+    /// Resolve the concrete return *type* of a closure argument as a `Ty`.
+    ///
+    /// Unlike `resolve_closure_ret_valtype` (which collapses to a coarse
+    /// `ValType`), this keeps the source-level `Ty` so callers can size the
+    /// result *and* pick the right load/store width and `call_indirect`
+    /// signature. Resolution order mirrors `emit_list_map`:
+    ///   1. `Ty::Fn.ret`            (post-inference, usually concrete)
+    ///   2. Lambda body's own `.ty` (pre-closure-conversion)
+    ///   3. lifted closure's registered WASM return ValType → placeholder `Ty`
+    /// Falls back to `fallback` when every source is unresolved.
+    pub(super) fn resolve_closure_ret_ty(&self, fn_expr: &IrExpr, fallback: &Ty) -> Ty {
+        let mut ret = fallback.clone();
+        if let Ty::Fn { ret: r, .. } = &fn_expr.ty {
+            if !r.is_unresolved() {
+                ret = (**r).clone();
+            }
+        }
+        if ret.is_unresolved() {
+            if let almide_ir::IrExprKind::Lambda { body, .. } = &fn_expr.kind {
+                if !body.ty.is_unresolved() {
+                    ret = body.ty.clone();
+                }
+            }
+        }
+        // Final reconciliation with the lifted closure's actual WASM signature,
+        // same as emit_list_map: if the registered ret valtype disagrees with
+        // the `Ty` we derived (e.g. inference left it Unknown→i32 but the
+        // closure really returns i64), trust the registered ABI width.
+        let ret_vt = values::ty_to_valtype(&ret);
+        match self.resolve_closure_ret_valtype(fn_expr) {
+            Some(actual) if Some(actual) != ret_vt => values::vt_to_placeholder_ty(actual),
+            _ => ret,
+        }
+    }
+
     /// Resolve the concrete type of the first non-env parameter of a closure
     /// argument. Like `resolve_closure_ret_valtype` but for the input side.
     /// Used to size the `param_ty`/`in_elem_ty` in `emit_list_map` etc. when
@@ -339,6 +374,14 @@ impl FuncCompiler<'_> {
         wasm!(self.func, {
             local_get(len); i32_const(2); i32_lt_u;
             if_empty;
+              // len < 2: nothing to sort, but still copy the 0/1 source elements
+              // to dst. The sort-proper path (scan_done==0) copies src→dst, but
+              // this short-circuit skipped it — so dst's data stayed the zeroed
+              // alloc and a singleton sort returned a zeroed element.
+              local_get(dst); i32_const(self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32); i32_add;
+              local_get(xs_ptr); i32_const(self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32); i32_add;
+              local_get(len); i32_const(es as i32); i32_mul;
+              memory_copy;
               i32_const(1); local_set(scan_done);
             else_;
               i32_const(1); local_set(is_asc);
@@ -537,26 +580,23 @@ impl FuncCompiler<'_> {
     pub(super) fn emit_list_index_of(&mut self, args: &[IrExpr]) {
         let elem_ty = self.resolve_list_elem(&args[0], None);
         let elem_size = values::byte_size(&elem_ty);
+        let search_vt = values::ty_to_valtype(&elem_ty).unwrap_or(ValType::I32);
         let xs_ptr = self.scratch.alloc_i32();
         let i = self.scratch.alloc_i32();
         let found_ptr = self.scratch.alloc_i32();
         let result = self.scratch.alloc_i32();
-        let search_val_i64 = self.scratch.alloc_i64();
-        let search_val_i32 = self.scratch.alloc_i32();
+        // Hold the search value in a valtype-matched register so the per-element
+        // comparison loads and compares at the correct width (i64 for Int, f64 for
+        // Float, i32 pointer for String/compound). The element load below uses
+        // `emit_load_at(elem_ty)` and the compare uses `emit_eq_typed(elem_ty)`,
+        // so both sides agree on width and on STRUCTURAL (deep) equality — matching
+        // native `position(|v| *v == x)`, not pointer identity.
+        let search_val = self.scratch.alloc(search_vt);
 
         self.emit_expr(&args[0]);
         wasm!(self.func, { local_set(xs_ptr); });
-        // Store search value
-        match values::ty_to_valtype(&elem_ty) {
-            Some(ValType::I64) => {
-                self.emit_expr(&args[1]);
-                wasm!(self.func, { local_set(search_val_i64); });
-            }
-            _ => {
-                self.emit_expr(&args[1]);
-                wasm!(self.func, { local_set(search_val_i32); });
-            }
-        }
+        self.emit_expr(&args[1]);
+        wasm!(self.func, { local_set(search_val); });
         wasm!(self.func, {
             i32_const(0); local_set(i); // i
             i32_const(0); local_set(result); // result (default: none)
@@ -564,54 +604,26 @@ impl FuncCompiler<'_> {
               local_get(i);
               local_get(xs_ptr); i32_load(0); // len
               i32_ge_u; br_if(1);
+              local_get(xs_ptr); i32_const(self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32); i32_add;
+              local_get(i); i32_const(elem_size as i32); i32_mul; i32_add;
         });
-        // Compare element
-        match values::ty_to_valtype(&elem_ty) {
-            Some(ValType::I64) => {
-                wasm!(self.func, {
-                    local_get(xs_ptr); i32_const(self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32); i32_add;
-                    local_get(i); i32_const(8); i32_mul; i32_add;
-                    i64_load(0);
-                    local_get(search_val_i64); i64_eq;
-                    if_empty;
-                      // Found: store some(i) and break
-                      i32_const(self.emitter.layout_reg.header_size(LIST) as i32); call(self.emitter.rt.alloc); local_set(found_ptr);
-                      local_get(found_ptr); local_get(i); i64_extend_i32_u; i64_store(0);
-                      local_get(found_ptr); local_set(result); br(2);
-                    end;
-                });
-            }
-            _ => {
-                wasm!(self.func, {
-                    local_get(xs_ptr); i32_const(self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32); i32_add;
-                    local_get(i); i32_const(elem_size as i32); i32_mul; i32_add;
-                    i32_load(0);
-                    local_get(search_val_i32);
-                });
-                // String eq or i32 eq
-                if matches!(&elem_ty, Ty::String) {
-                    wasm!(self.func, { call(self.emitter.rt.string.eq); });
-                } else {
-                    wasm!(self.func, { i32_eq; });
-                }
-                wasm!(self.func, {
-                    if_empty;
-                      i32_const(self.emitter.layout_reg.header_size(LIST) as i32); call(self.emitter.rt.alloc); local_set(found_ptr);
-                      local_get(found_ptr); local_get(i); i64_extend_i32_u; i64_store(0);
-                      local_get(found_ptr); local_set(result); br(2);
-                    end;
-                });
-            }
-        }
+        self.emit_load_at(&elem_ty, 0);
+        wasm!(self.func, { local_get(search_val); });
+        self.emit_eq_typed(&elem_ty);
         wasm!(self.func, {
+              if_empty;
+                // Found: store some(i) and break
+                i32_const(self.emitter.layout_reg.header_size(LIST) as i32); call(self.emitter.rt.alloc); local_set(found_ptr);
+                local_get(found_ptr); local_get(i); i64_extend_i32_u; i64_store(0);
+                local_get(found_ptr); local_set(result); br(2);
+              end;
               local_get(i); i32_const(1); i32_add; local_set(i);
               br(0);
             end; end;
             local_get(result); // result (none if not found)
         });
 
-        self.scratch.free_i32(search_val_i32);
-        self.scratch.free_i64(search_val_i64);
+        self.scratch.free(search_val, search_vt);
         self.scratch.free_i32(result);
         self.scratch.free_i32(found_ptr);
         self.scratch.free_i32(i);
@@ -646,15 +658,16 @@ impl FuncCompiler<'_> {
                 local_get(j); local_get(dst); i32_load(0); i32_ge_u; br_if(1);
                 local_get(src); i32_const(self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32); i32_add;
                 local_get(i); i32_const(es); i32_mul; i32_add;
-                i32_load(0);
+        });
+        self.emit_load_at(&elem_ty, 0);
+        wasm!(self.func, {
                 local_get(dst); i32_const(self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32); i32_add;
                 local_get(j); i32_const(es); i32_mul; i32_add;
-                i32_load(0);
         });
-        match &elem_ty {
-            Ty::String => { wasm!(self.func, { call(self.emitter.rt.string.eq); }); }
-            _ => { wasm!(self.func, { i32_eq; }); }
-        }
+        self.emit_load_at(&elem_ty, 0);
+        // Structural eq: collapse all value-equal elements (String + compound),
+        // matching native unique-by-`==`, not by pointer identity.
+        self.emit_eq_typed(&elem_ty);
         wasm!(self.func, {
                 if_empty; i32_const(1); local_set(found); br(2); end;
                 local_get(j); i32_const(1); i32_add; local_set(j);

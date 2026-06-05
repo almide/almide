@@ -64,6 +64,27 @@ pub fn erase_named_typevars(ty: Ty) -> Ty {
     }
 }
 
+/// Replace every Fn type (at any depth) with Ty::Unknown (rendered as `_`).
+///
+/// Rust forbids `impl Trait` in the type of a variable binding (E0562), so a
+/// `let`/`var` whose type *contains* a closure type — e.g. a tuple element
+/// `(impl Fn() -> () + Clone, i64)`, a map value `HashMap<String, impl Fn..>`,
+/// or a record field — cannot be written literally. Erasing the Fn subtree to
+/// `_` lets Rust infer the concrete (unnameable) closure type from the RHS,
+/// while preserving the surrounding container shape (`(_, i64)`,
+/// `HashMap<String, _>`). The closure value itself is emitted unchanged and is
+/// `Clone` (captures are `Rc`/`Copy` clones), so later `g.clone()()` call sites
+/// keep working.
+///
+/// A top-level Fn is already mapped to `Ty::Unknown` by the binding code before
+/// this runs, so this only rewrites Fn types nested inside containers.
+pub fn erase_fn_types(ty: Ty) -> Ty {
+    match &ty {
+        Ty::Fn { .. } => Ty::Unknown,
+        _ => ty.map_children(&|child| erase_fn_types(child.clone())),
+    }
+}
+
 /// Indent each non-empty line by the given number of spaces.
 pub fn indent_lines(s: &str, spaces: usize) -> String {
     let prefix = " ".repeat(spaces);
@@ -99,52 +120,87 @@ pub fn render_body_content(ctx: &RenderContext, expr: &almide_ir::IrExpr) -> Str
 
 /// Render a Fn type as Rc<dyn Fn(...) -> T> (for Fn types inside collections — cloneable)
 pub fn render_type_rc_fn(ctx: &RenderContext, ty: &Ty) -> String {
+    // A boxed closure VALUE (RcWrap) uses the same all-`Rc<dyn Fn>` rendering as a
+    // field: a nested returned closure must be `Rc<dyn Fn>` (Clone), not
+    // `Box<dyn Fn>` — a closure-returning-closure result is cloned at call sites,
+    // and `Box<dyn Fn>` is not `Clone` (E0599).
+    render_type_field_fn(ctx, ty)
+}
+
+/// Render a `fan.*` thread-thunk's boxed trait-object type:
+/// `Box<dyn Fn(params) -> ret + {bounds}>` (`bounds` = `"Send + Sync"`).
+///
+/// `Box<dyn Fn + Send + Sync>` *itself* implements `Fn + Send + Sync`, so a boxed
+/// thunk slots into the runtime's `Vec<impl Fn() -> _ + Send + Sync>` parameter
+/// with no signature change — while distinct CAPTURING closures, which cannot
+/// share one `impl Fn` type (E0308), unify as one trait-object element type.
+pub fn render_type_box_fn(ctx: &RenderContext, ty: &Ty, bounds: &str) -> String {
     match ty {
         Ty::Fn { params, ret } => {
             let params_str = params.iter().map(|p| super::types::render_type(ctx, p)).collect::<Vec<_>>().join(", ");
-            let ret_str = if matches!(ret.as_ref(), Ty::Fn { .. }) {
-                render_type_boxed_fn(ctx, ret)
-            } else {
-                super::types::render_type(ctx, ret)
-            };
-            ctx.templates.render_with("type_fn_field", None, &[], &[("params", params_str.as_str()), ("return", ret_str.as_str())])
-                .unwrap_or_else(|| format!("std::rc::Rc<dyn Fn({}) -> {}>", params_str, ret_str))
+            let ret_str = super::types::render_type(ctx, ret);
+            format!("Box<dyn Fn({}) -> {} + {}>", params_str, ret_str, bounds)
         }
         _ => super::types::render_type(ctx, ty),
     }
 }
 
-/// Render a Fn type as Box<dyn Fn(...) -> T> (for nested impl Trait in Rust)
-pub fn render_type_boxed_fn(ctx: &RenderContext, ty: &Ty) -> String {
+/// True if `ty` mentions a function type anywhere (directly or nested).
+pub(super) fn ty_mentions_fn(ty: &Ty) -> bool {
     match ty {
-        Ty::Fn { params, ret } => {
-            let params_str = params.iter().map(|p| super::types::render_type(ctx, p)).collect::<Vec<_>>().join(", ");
-            let ret_str = if matches!(ret.as_ref(), Ty::Fn { .. }) {
-                render_type_boxed_fn(ctx, ret)
-            } else {
-                super::types::render_type(ctx, ret)
-            };
-            ctx.templates.render_with("type_fn_boxed", None, &[], &[("params", params_str.as_str()), ("return", ret_str.as_str())])
-                .unwrap_or_else(|| ctx.templates.render_with("type_fn", None, &[], &[("params", params_str.as_str()), ("return", ret_str.as_str())])
-                    .unwrap_or_else(|| "BoxFn".into()))
-        }
-        _ => super::types::render_type(ctx, ty),
+        Ty::Fn { .. } => true,
+        Ty::Tuple(ts) => ts.iter().any(ty_mentions_fn),
+        Ty::Record { fields } | Ty::OpenRecord { fields } => fields.iter().any(|(_, t)| ty_mentions_fn(t)),
+        Ty::Applied(_, args) | Ty::Named(_, args) => args.iter().any(ty_mentions_fn),
+        _ => false,
     }
 }
 
-/// Render a Fn type as Rc<dyn Fn(...) -> T> for struct fields (cloneable, no impl Trait)
+/// Render a type for a STORAGE position (struct/record field, variant payload),
+/// rendering every `Fn` — directly or nested inside a `List`/`Map`/`Tuple`/
+/// `Option`/`Result` — as `Rc<dyn Fn(...) -> T>` rather than `impl Fn` (which is
+/// illegal in field types, E0562) or `Box<dyn Fn>` (not `Clone`). Fn-free
+/// subtrees fall through to the normal `render_type`.
 pub fn render_type_field_fn(ctx: &RenderContext, ty: &Ty) -> String {
+    use almide_lang::types::constructor::TypeConstructorId as TCI;
+    // Fast path: no closure anywhere → render normally.
+    if !ty_mentions_fn(ty) {
+        return super::types::render_type(ctx, ty);
+    }
+    let rf = |t: &Ty| render_type_field_fn(ctx, t);
+    let tmpl = |name: &str, kv: &[(&str, &str)], fb: String| {
+        ctx.templates.render_with(name, None, &[], kv).unwrap_or(fb)
+    };
     match ty {
         Ty::Fn { params, ret } => {
-            let params_str = params.iter().map(|p| super::types::render_type(ctx, p)).collect::<Vec<_>>().join(", ");
-            let ret_str = if matches!(ret.as_ref(), Ty::Fn { .. }) {
-                render_type_field_fn(ctx, ret)
-            } else {
-                super::types::render_type(ctx, ret)
-            };
-            ctx.templates.render_with("type_fn_field", None, &[], &[("params", params_str.as_str()), ("return", ret_str.as_str())])
-                .unwrap_or_else(|| format!("std::rc::Rc<dyn Fn({}) -> {}>", params_str, ret_str))
+            let params_str = params.iter().map(&rf).collect::<Vec<_>>().join(", ");
+            let ret_str = rf(ret);
+            tmpl("type_fn_field", &[("params", params_str.as_str()), ("return", ret_str.as_str())],
+                format!("std::rc::Rc<dyn Fn({}) -> {}>", params_str, ret_str))
         }
+        Ty::Tuple(elems) => {
+            let parts = elems.iter().map(&rf).collect::<Vec<_>>().join(", ");
+            tmpl("type_tuple", &[("elements", parts.as_str())], format!("({})", parts))
+        }
+        Ty::Applied(TCI::List, args) if args.len() == 1 => {
+            let inner = rf(&args[0]);
+            tmpl("type_list", &[("inner", inner.as_str())], format!("Vec<{}>", inner))
+        }
+        Ty::Applied(TCI::Map, args) if args.len() == 2 => {
+            let (k, v) = (rf(&args[0]), rf(&args[1]));
+            tmpl("type_map", &[("key", k.as_str()), ("value", v.as_str())], format!("HashMap<{}, {}>", k, v))
+        }
+        Ty::Applied(TCI::Option, args) if args.len() == 1 => {
+            let inner = rf(&args[0]);
+            tmpl("type_option", &[("inner", inner.as_str())], format!("Option<{}>", inner))
+        }
+        Ty::Applied(TCI::Result, args) if args.len() == 2 => {
+            let (ok, err) = (rf(&args[0]), rf(&args[1]));
+            tmpl("type_result", &[("ok", ok.as_str()), ("err", err.as_str())], format!("Result<{}, {}>", ok, err))
+        }
+        // Set[Fn] is rejected at typecheck (E016); render conservatively if reached.
+        // Other Fn-containing shapes (e.g. a user generic over a closure) are rare —
+        // fall back to render_type, which at least keeps the container correct.
         _ => super::types::render_type(ctx, ty),
     }
 }

@@ -164,9 +164,9 @@ impl FuncCompiler<'_> {
         self.scratch.free_i32(list_scratch);
     }
 
-    /// Emit for-in over a Map (Swiss Table).
-    /// Layout: [len:i32][cap:i32][tags: cap bytes][entries: cap × (key+val)]
-    /// Iterates slot 0..cap, skips empty tags (tag==0).
+    /// Emit for-in over a Map (compact-ordered-dict).
+    /// Layout: [len:i32][cap:i32][tags: cap bytes][index: cap×4][entries: cap × (key+val)]
+    /// Walks the dense entries[0..len] in insertion order (no tag scan).
     fn emit_for_in_map(&mut self, var: almide_ir::VarId, var_tuple: Option<&[almide_ir::VarId]>, iterable: &IrExpr, body: &[IrStmt]) {
 
         let (key_ty, val_ty, key_size, val_size) = if let Ty::Applied(_, args) = &iterable.ty {
@@ -179,23 +179,22 @@ impl FuncCompiler<'_> {
             (Ty::String, Ty::Int, 4u32, 4u32)
         };
         let entry_size = key_size + val_size;
+        let map_cap_off = self.emitter.layout_reg.fixed_offset(super::engine::layout::SWISS_MAP, super::engine::layout::map::CAP);
 
         let m = self.scratch.alloc_i32();      // map ptr
-        let cap = self.scratch.alloc_i32();     // capacity
-        let eb = self.scratch.alloc_i32();      // entry base (ptr to first entry)
-        let idx = self.scratch.alloc_i32();     // slot index (0..cap)
+        let cap = self.scratch.alloc_i32();     // capacity (to derive the entries base)
+        let len = self.scratch.alloc_i32();     // entry count (dense walk bound)
+        let eb = self.scratch.alloc_i32();      // dense entries base
+        let idx = self.scratch.alloc_i32();     // dense entry index (0..len)
 
         self.emit_expr(iterable);
         wasm!(self.func, {
             local_set(m);
-            // cap = m[self.emitter.layout_reg.fixed_offset(super::engine::layout::SWISS_MAP, super::engine::layout::map::CAP) as i32]
-            local_get(m); i32_load(self.emitter.layout_reg.fixed_offset(super::engine::layout::SWISS_MAP, super::engine::layout::map::CAP) as i32 as u32); local_set(cap);
-            // entry_base = m + self.emitter.layout_reg.fixed_offset(super::engine::layout::SWISS_MAP, super::engine::layout::map::TAGS) as i32 + cap
-            local_get(m); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::SWISS_MAP, super::engine::layout::map::TAGS) as i32); i32_add;
-            local_get(cap); i32_add; local_set(eb);
-            // idx = 0
-            i32_const(0); local_set(idx);
+            local_get(m); i32_load(0); local_set(len);
+            local_get(m); i32_load(map_cap_off); local_set(cap);
         });
+        self.emit_dict_entries_base(m, cap);
+        wasm!(self.func, { local_set(eb); i32_const(0); local_set(idx); });
 
         // block $break { loop $loop { ... } }
         wasm!(self.func, { block_empty; });
@@ -203,25 +202,13 @@ impl FuncCompiler<'_> {
         wasm!(self.func, { loop_empty; });
         let loop_guard = self.depth_push();
 
-        // Break if idx >= cap
+        // Break if idx >= len (dense entries are all occupied — no tag skip)
         wasm!(self.func, {
-            local_get(idx); local_get(cap); i32_ge_u;
+            local_get(idx); local_get(len); i32_ge_u;
             br_if(self.depth - break_guard.saved() - 1);
         });
 
-        // Check tag: if tag[idx] == 0 (empty), skip to next slot
-        wasm!(self.func, {
-            local_get(m); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::SWISS_MAP, super::engine::layout::map::TAGS) as i32); i32_add;
-            local_get(idx); i32_add; i32_load8_u(0);
-            i32_eqz;
-            if_empty;
-                // Skip: idx++; br $loop
-                local_get(idx); i32_const(1); i32_add; local_set(idx);
-                br(self.depth - loop_guard.saved());
-            end;
-        });
-
-        // Occupied slot: load key/value into tuple vars
+        // Dense entry: load key/value into tuple vars
         if let Some(tuple_vars) = var_tuple {
             // Load key
             if let Some(&k_local) = tuple_vars.first().and_then(|tv| self.var_map.get(&tv.0)) {
@@ -268,6 +255,7 @@ impl FuncCompiler<'_> {
 
         self.scratch.free_i32(idx);
         self.scratch.free_i32(eb);
+        self.scratch.free_i32(len);
         self.scratch.free_i32(cap);
         self.scratch.free_i32(m);
     }

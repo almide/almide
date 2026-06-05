@@ -25,7 +25,7 @@ pub fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
         String::new()
     };
 
-    match &td.kind {
+    let decl = match &td.kind {
         IrTypeDeclKind::Record { fields } => {
             let has_fn_fields = fields.iter().any(|f| matches!(&f.ty, Ty::Fn { .. }));
             // Matrix / Fn / transitively-blocking types prevent PartialEq derive.
@@ -34,13 +34,11 @@ pub fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
             let has_non_eq_fields = fields.iter().any(|f| ty_blocks_eq_with(&f.ty, &ctx.ann.eq_blocked_types));
             let fields_str = fields.iter()
                 .map(|f| {
-                    // Fn-typed struct fields: use Rc<dyn Fn> for cloneability
-                    // (impl Fn is invalid in struct position, Box<dyn Fn> is not Clone)
-                    let type_s = if matches!(&f.ty, Ty::Fn { .. }) {
-                        render_type_field_fn(ctx, &f.ty)
-                    } else {
-                        render_type(ctx, &f.ty)
-                    };
+                    // Closure-bearing struct fields use Rc<dyn Fn> (impl Fn is
+                    // invalid in struct position, Box<dyn Fn> is not Clone) — also
+                    // when the closure is nested in a List/Map/Tuple field. Fn-free
+                    // field types fall through to the normal renderer.
+                    let type_s = render_type_field_fn(ctx, &f.ty);
                     ctx.templates.render_with("struct_field", None, &[], &[("name", f.name.as_str()), ("type", type_s.as_str())])
                         .unwrap_or_else(|| format!("    pub {}: {},", f.name, render_type(ctx, &f.ty)))
                 })
@@ -73,7 +71,9 @@ pub fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
                     IrVariantKind::Tuple { fields } => {
                         let is_recursive = ctx.ann.recursive_enums.contains(&*td.name);
                         let types: Vec<String> = fields.iter().map(|t| {
-                            let rendered = render_type(ctx, t);
+                            // Closure payloads (direct or nested in a container) use
+                            // Rc<dyn Fn> — same as a struct field.
+                            let rendered = render_type_field_fn(ctx, t);
                             if is_recursive && ty_contains_name(t, &td.name) { format!("Box<{}>", rendered) } else { rendered }
                         }).collect();
                         let fields_str = types.join(", ");
@@ -94,7 +94,7 @@ pub fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
                     IrVariantKind::Record { fields } => {
                         let fields_str = fields.iter()
                             .map(|f| {
-                                let rendered = render_type(ctx, &f.ty);
+                                let rendered = render_type_field_fn(ctx, &f.ty);
                                 let boxed = if ctx.ann.recursive_enums.contains(&*td.name) && ty_contains_name(&f.ty, &td.name) {
                                     format!("Box<{}>", rendered)
                                 } else {
@@ -115,10 +115,22 @@ pub fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
             let variants_str = variants_parts.join(&sep);
             let full_name = format!("{}{}", td.name, generics_str);
             let has_hash = td.deriving.as_ref().map_or(false, |d| d.iter().any(|s| s.as_str() == "Hash"));
+            // A closure payload (Fn directly, or nested in a container) lowers to
+            // `Rc<dyn Fn>`, which is neither Debug nor PartialEq → derive Clone only.
+            let has_fn_fields = cases.iter().any(|v| match &v.kind {
+                IrVariantKind::Unit => false,
+                IrVariantKind::Tuple { fields } => fields.iter().any(ty_has_fn),
+                IrVariantKind::Record { fields } => fields.iter().any(|f| ty_has_fn(&f.ty)),
+            });
             let mut enum_attrs = decl_attrs.clone();
-            if has_hash { enum_attrs.push("has_hash"); }
+            if has_fn_fields { enum_attrs.push("has_fn_fields"); }
+            else if has_hash { enum_attrs.push("has_hash"); }
             let repr_prefix = if ctx.repr_c { "#[repr(C)]\n" } else { "" };
-            let fallback = format!("{}pub enum {} {{\n{}\n}}", repr_prefix, full_name, &variants_str);
+            let fallback = if has_fn_fields {
+                format!("#[derive(Clone)]\npub enum {} {{\n{}\n}}", full_name, &variants_str)
+            } else {
+                format!("{}pub enum {} {{\n{}\n}}", repr_prefix, full_name, &variants_str)
+            };
             ctx.templates.render_with("enum_decl", None, &enum_attrs, &[("name", full_name.as_str()), ("variants", variants_str.as_str())])
                 .unwrap_or(fallback)
         }
@@ -145,6 +157,130 @@ pub fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
             let type_s = render_type(ctx, target);
             ctx.templates.render_with("type_alias", None, &[], &[("name", td.name.as_str()), ("type", type_s.as_str())])
                 .unwrap_or_else(|| format!("type {} = {};", td.name, render_type(ctx, target)))
+        }
+    };
+
+    // Emit the `AlmideRepr` impl for records/variants so a record/variant value
+    // interpolated in a string (`"${p}"`) renders to its Almide-literal form —
+    // the SAME construction-literal format `deriving Repr` produces — on BOTH
+    // targets (the WASM half walks the same layout). Closure-bearing types are
+    // skipped (a closure is not `AlmideRepr`; they never reach compound interp).
+    if let Some(impl_s) = render_repr_impl(ctx, td) {
+        format!("{decl}\n{impl_s}")
+    } else {
+        decl
+    }
+}
+
+/// Build `impl AlmideRepr for <Type>` for a record or variant type, mirroring
+/// the `auto_derive_repr` literal format:
+///   record       → `P { x: 1, y: 2 }`     (field declaration order)
+///   tuple variant→ `Click(10, 20)`
+///   record variant→`Scroll { dy: 5 }`
+///   nullary       → `Quit`
+/// Each field/payload routes through `almide_repr()`, so strings get quoted,
+/// floats use the `Display` form, and nested compounds recurse — identical to
+/// how a field renders inside any other container. Returns `None` for types
+/// that cannot back a repr (closure fields) or are not records/variants.
+/// Whether a type decl gets a generated `AlmideRepr` impl: a record or variant
+/// whose fields/payloads are all `AlmideRepr` (no closure field). The interp
+/// router (`ty_needs_repr`) and the impl emitter share this predicate so the
+/// "this Named type is repr-backed" decision is made in exactly one place.
+pub fn type_has_repr_impl(td: &IrTypeDecl) -> bool {
+    match &td.kind {
+        IrTypeDeclKind::Record { fields } => !fields.iter().any(|f| ty_has_fn(&f.ty)),
+        IrTypeDeclKind::Variant { cases, .. } => !cases.iter().any(|v| match &v.kind {
+            IrVariantKind::Unit => false,
+            IrVariantKind::Tuple { fields } => fields.iter().any(ty_has_fn),
+            IrVariantKind::Record { fields } => fields.iter().any(|f| ty_has_fn(&f.ty)),
+        }),
+        _ => false,
+    }
+}
+
+fn render_repr_impl(ctx: &RenderContext, td: &IrTypeDecl) -> Option<String> {
+    // Records/variants without a closure field back a repr; skip everything else.
+    if !type_has_repr_impl(td) { return None; }
+
+    // Generic header + target. The impl GENERICS carry every param's bounds; the
+    // impl TARGET uses BARE params. For a generic type these MUST differ:
+    //   impl<T: AlmideRepr + Clone + PartialEq> AlmideRepr for Tree<T> { … }
+    //                       ^^^^^^^^^^^^^^^^^^^ bounds belong here          ^^^ bare
+    // Reusing the decl's bounded `<T: Clone + PartialEq>` as the target emits the
+    // invalid `for Tree<T: Clone + PartialEq>` (E0229: associated-item-constraint
+    // not allowed). The param's own bound set is whatever the struct/enum decl
+    // declared (via the `generic_bound` template), plus `AlmideRepr` so the field
+    // reprs compose; rendering them through the same template keeps the impl
+    // bounds in lock-step with the type decl (Rust requires the impl to satisfy
+    // every bound the type definition declares).
+    let (impl_generics, target_args) = match td.generics.as_ref().filter(|g| !g.is_empty()) {
+        Some(generics) => {
+            let impl_bounds = generics.iter().map(|g| {
+                // The type DEFINITION declares each param via `generic_bound`
+                // (`T: Clone + PartialEq`); the impl must satisfy those same
+                // bounds, so reuse the rendered form and splice `AlmideRepr` in
+                // right after the `name:` colon → `T: AlmideRepr + Clone + …`.
+                let own = ctx.templates.render_with("generic_bound", None, &[], &[("name", g.name.as_str())])
+                    .unwrap_or_else(|| format!("{}: Clone + PartialEq", g.name));
+                match own.split_once(':') {
+                    Some((name, rest)) => format!("{}: AlmideRepr +{}", name.trim_end(), rest),
+                    None => format!("{}: AlmideRepr", g.name),
+                }
+            }).collect::<Vec<_>>().join(", ");
+            let bare = generics.iter().map(|g| g.name.to_string()).collect::<Vec<_>>().join(", ");
+            (format!("<{}>", impl_bounds), format!("<{}>", bare))
+        }
+        None => (String::new(), String::new()),
+    };
+    let full_name = format!("{}{}", td.name, target_args);
+
+    let body = match &td.kind {
+        IrTypeDeclKind::Record { fields } => {
+            // `Type { f0: {}, f1: {} }`, fields in declaration order.
+            let fmt = fields.iter().enumerate()
+                .map(|(i, f)| format!("{}{}: {{}}", if i > 0 { ", " } else { "" }, f.name))
+                .collect::<Vec<_>>().join("");
+            let args = fields.iter()
+                .map(|f| format!("self.{}.almide_repr()", f.name))
+                .collect::<Vec<_>>().join(", ");
+            format!("format!(\"{} {{{{ {} }}}}\", {})", td.name, fmt, args)
+        }
+        IrTypeDeclKind::Variant { cases, .. } => {
+            let arms = cases.iter().map(|v| render_repr_variant_arm(&td.name, v))
+                .collect::<Vec<_>>().join("\n            ");
+            format!("match self {{\n            {}\n        }}", arms)
+        }
+        _ => return None,
+    };
+
+    Some(format!(
+        "impl{} AlmideRepr for {} {{ fn almide_repr(&self) -> String {{ {} }} }}",
+        impl_generics, full_name, body
+    ))
+}
+
+/// One match arm of a variant's `AlmideRepr` impl.
+fn render_repr_variant_arm(type_name: &str, v: &IrVariantDecl) -> String {
+    match &v.kind {
+        IrVariantKind::Unit => {
+            // Nullary constructor → bare name.
+            format!("{}::{} => \"{}\".to_string(),", type_name, v.name, v.name)
+        }
+        IrVariantKind::Tuple { fields } => {
+            // `Click(10, 20)`: positional bindings v0, v1, … rendered via repr.
+            let binds = (0..fields.len()).map(|i| format!("v{}", i)).collect::<Vec<_>>().join(", ");
+            let fmt = (0..fields.len()).map(|_| "{}").collect::<Vec<_>>().join(", ");
+            let args = (0..fields.len()).map(|i| format!("v{}.almide_repr()", i)).collect::<Vec<_>>().join(", ");
+            format!("{}::{}({}) => format!(\"{}({})\", {}),", type_name, v.name, binds, v.name, fmt, args)
+        }
+        IrVariantKind::Record { fields } => {
+            // `Scroll { dy: 5 }`: named bindings, field declaration order.
+            let binds = fields.iter().map(|f| f.name.to_string()).collect::<Vec<_>>().join(", ");
+            let fmt = fields.iter().enumerate()
+                .map(|(i, f)| format!("{}{}: {{}}", if i > 0 { ", " } else { "" }, f.name))
+                .collect::<Vec<_>>().join("");
+            let args = fields.iter().map(|f| format!("{}.almide_repr()", f.name)).collect::<Vec<_>>().join(", ");
+            format!("{}::{} {{ {} }} => format!(\"{} {{{{ {} }}}}\", {}),", type_name, v.name, binds, v.name, fmt, args)
         }
     }
 }
@@ -193,7 +329,14 @@ pub fn collect_record_field_counts(program: &IrProgram) -> HashMap<String, usize
     map
 }
 
+/// The anon-record keys (sorted field names) that have a closure field, as
+/// gathered by the most recent `collect_anon_records`. Call right after it.
+pub fn take_anon_fn_keys() -> HashSet<Vec<String>> {
+    ANON_FN_KEYS.with(|s| s.borrow().clone())
+}
+
 pub fn collect_anon_records(program: &IrProgram, named: &HashMap<Vec<String>, String>) -> HashMap<Vec<String>, String> {
+    ANON_FN_KEYS.with(|s| s.borrow_mut().clear());
     let named_set: HashSet<Vec<String>> = named.keys().cloned().collect();
     let mut seen: HashSet<Vec<String>> = HashSet::new();
 
@@ -336,6 +479,13 @@ pub(super) fn ty_blocks_eq(ty: &Ty) -> bool {
     ty_blocks_eq_with(ty, &HashSet::new())
 }
 
+/// True if `ty` mentions a function type anywhere (directly or nested in a
+/// container/tuple/record). Such a type lowers to `Rc<dyn Fn>` (or a container
+/// thereof), which is neither `Debug` nor `PartialEq`.
+fn ty_has_fn(ty: &Ty) -> bool {
+    matches!(ty, Ty::Fn { .. }) || ty.children().iter().any(|c| ty_has_fn(c))
+}
+
 pub(super) fn ty_blocks_eq_with(ty: &Ty, eq_blocked_types: &HashSet<String>) -> bool {
     match ty {
         // Burn Tensor doesn't implement PartialEq
@@ -393,12 +543,32 @@ pub(super) fn compute_eq_blocked_types(type_decls: &[IrTypeDecl]) -> HashSet<Str
     blocked
 }
 
+thread_local! {
+    /// Sorted field-name keys of anonymous records that have a closure (`Fn`) field.
+    /// Their generated struct must derive `Clone` only (a closure is not `Debug` /
+    /// `PartialEq`) — the same `has_fn_fields` relaxation a `type`-declared record
+    /// gets. Populated during `collect_anon_records`; read back into
+    /// `anon_records_with_fn`. Membership-only (never iterated for output), so it
+    /// does not affect host-deterministic emit. (Closure codegen cross-target gaps.)
+    static ANON_FN_KEYS: std::cell::RefCell<HashSet<Vec<String>>> =
+        std::cell::RefCell::new(HashSet::new());
+}
+
 fn collect_anon_from_ty(ty: &Ty, named: &HashSet<Vec<String>>, seen: &mut HashSet<Vec<String>>) {
     // Record/OpenRecord: register anonymous record fields
     if let Ty::Record { fields } | Ty::OpenRecord { fields } = ty {
         let mut names: Vec<String> = fields.iter().map(|(n, _)| n.to_string()).collect();
         names.sort();
-        if !named.contains(&names) { seen.insert(names); }
+        if !named.contains(&names) {
+            // A field whose type CONTAINS a closure anywhere (`Fn`, `List[Fn]`,
+            // `Map[_, Fn]`, `(Fn, _)`, …) lowers to a type that is neither `Debug`
+            // nor `PartialEq`, so the generated struct must derive `Clone` only.
+            // Matching `Ty::Fn` alone missed boxed-closure containers.
+            if fields.iter().any(|(_, t)| ty_has_fn(t)) {
+                ANON_FN_KEYS.with(|s| { s.borrow_mut().insert(names.clone()); });
+            }
+            seen.insert(names);
+        }
     }
     // Recurse into all children uniformly
     for child in ty.children() {

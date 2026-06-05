@@ -113,10 +113,13 @@ impl FuncCompiler<'_> {
             }
 
             IrStmtKind::Assign { var, value } => {
-                // Peephole: s = s + "x" → string_append(s, "x") for O(1) amortized
+                // Peephole: s = s + "x" → string_append(s, "x") for O(1) amortized.
+                // Skip for a shared-cell capture: its local holds the CELL pointer, not
+                // the string, so the in-place byte store below would corrupt the cell.
+                // The general cell-aware Assign (further down) handles it. (Closure v2 P6.)
                 if let IrExprKind::BinOp { op: almide_ir::BinOp::ConcatStr, left, right } = &value.kind {
                     if let IrExprKind::Var { id } = &left.kind {
-                        if *id == *var {
+                        if *id == *var && !self.emitter.mutable_captures.contains(&var.0) {
                             if let Some(&local_idx) = self.var_map.get(&var.0) {
                                 // 1-char literal: inline capacity check + byte store
                                 if let IrExprKind::LitStr { value: lit } = &right.kind {
@@ -338,8 +341,19 @@ impl FuncCompiler<'_> {
             }
             IrStmtKind::RcDec { var } => {
                 if let Some(&local_idx) = self.var_map.get(&var.0) {
-                    let ty = &self.var_table.get(*var).ty;
-                    self.emit_typed_rc_dec(ty, local_idx);
+                    if self.emitter.mutable_captures.contains(&var.0) {
+                        // Captured shared cell: the local holds the CELL ptr, whose RC
+                        // a PLAIN `rc_inc` bumps on capture (see RcInc above). Balance
+                        // it with a PLAIN `rc_dec` on the cell — NOT a typed rc_dec,
+                        // which walks the cell ptr AS the object: cell[0] (the object
+                        // ptr) is read as the element count, so the element-drop loop
+                        // decrefs garbage addresses → trap. List[Int] (Copy elems, no
+                        // element drop) survived; List[String] trapped. (Closure v2 P6.)
+                        wasm!(self.func, { local_get(local_idx); call(self.emitter.rt.rc_dec); });
+                    } else {
+                        let ty = &self.var_table.get(*var).ty;
+                        self.emit_typed_rc_dec(ty, local_idx);
+                    }
                 }
             }
             IrStmtKind::Comment { .. } => {
@@ -402,6 +416,12 @@ impl FuncCompiler<'_> {
                 // Resolve list pointer: local var or module-level global
                 let has_ptr = if let Some(&local_idx) = self.var_map.get(&target.0) {
                     wasm!(self.func, { local_get(local_idx); });
+                    // Shared-cell capture: the local holds the CELL pointer; deref it
+                    // to the list pointer. The element store is in place (same list),
+                    // so no write-back to the cell is needed. (Closure v2 P6.)
+                    if self.emitter.mutable_captures.contains(&target.0) {
+                        wasm!(self.func, { i32_load(0); });
+                    }
                     true
                 } else {
                     let name = if (target.0 as usize) < self.var_table.len() {
@@ -657,11 +677,23 @@ impl FuncCompiler<'_> {
                         key.clone(),
                         value.clone(),
                     ];
-                    self.emit_map_call("set", &set_args);
-                    if let Some(local_idx) = has_local {
-                        wasm!(self.func, { local_set(local_idx); });
-                    } else if let Some(g) = global_idx {
-                        wasm!(self.func, { global_set(g); });
+                    let is_cell = has_local.is_some() && self.emitter.mutable_captures.contains(&target.0);
+                    if is_cell {
+                        // Shared-cell capture: the local holds the CELL ptr; the new
+                        // map must be stored INTO the cell (cell[0] = new_map) so the
+                        // captured-and-shared map is updated, not a local copy that
+                        // local_set would discard (the outer scope keeps the old map).
+                        let cell_local = has_local.unwrap();
+                        wasm!(self.func, { local_get(cell_local); });
+                        self.emit_map_call("set", &set_args);
+                        wasm!(self.func, { i32_store(0); });
+                    } else {
+                        self.emit_map_call("set", &set_args);
+                        if let Some(local_idx) = has_local {
+                            wasm!(self.func, { local_set(local_idx); });
+                        } else if let Some(g) = global_idx {
+                            wasm!(self.func, { global_set(g); });
+                        }
                     }
                 }
             }

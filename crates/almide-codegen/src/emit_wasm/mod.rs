@@ -23,7 +23,14 @@ mod runtime;
 mod runtime_eq;
 mod rt_string;
 mod rt_string_extra;
+mod rt_string_case;
+mod rt_unicode_tables;
 mod rt_numeric;
+mod rt_dragon;
+mod rt_dec2flt;
+mod rt_repr;
+mod rt_float_display;
+mod calls_string_repr;
 mod expressions;
 mod stdlib_dispatch;
 mod calls;
@@ -181,9 +188,80 @@ pub struct StringRuntime {
     pub is_alpha: u32,
     pub is_alnum: u32,
     pub is_whitespace: u32,
+    /// `is_unicode_ws(scalar) -> i32`: 1 iff `scalar` has the Unicode White_Space
+    /// property (Rust `char::is_whitespace`). The single source of truth for all
+    /// trim / is_whitespace / parse-trim sites.
+    pub is_unicode_ws: u32,
+    /// `utf8_classify(buf, i, n) -> i32`: classify the UTF-8 sequence at byte `i`
+    /// for `from_utf8_lossy`. Returns `(consumed << 1) | valid` — `valid`=1 means
+    /// copy `consumed` bytes; `valid`=0 means a maximal invalid subpart of
+    /// `consumed` bytes (emit one U+FFFD).
+    pub utf8_classify: u32,
     pub is_upper: u32,
     pub is_lower: u32,
     pub cmp: u32,
+    pub run_length_encode: u32,
+    /// UTF-8 codepoint helpers (shared by codepoint-aware string ops).
+    /// `utf8_width(s, byte_i) -> i32`: byte width (1-4) of the codepoint whose
+    /// lead byte sits at data offset `byte_i`. Stray continuation bytes and a
+    /// width that would read past the end both clamp to 1.
+    pub utf8_width: u32,
+    /// `utf8_scalar(s, byte_i) -> i64`: Unicode scalar value decoded from the
+    /// codepoint at data offset `byte_i`. Malformed sequences yield the lead
+    /// byte (width-1 fallback), never an OOB read.
+    pub utf8_scalar: u32,
+    /// `utf8_byte_of_cp(s, n) -> i32`: byte offset (within the data section) of
+    /// the start of the n-th codepoint. `n >= count` returns the byte length.
+    pub utf8_byte_of_cp: u32,
+    /// `utf8_snap(s, byte_i) -> i32`: byte_i rounded DOWN to the nearest UTF-8
+    /// char boundary (clamped to [0, byte_len]). Mirrors native `slice`'s
+    /// boundary-safe byte indexing.
+    pub utf8_snap: u32,
+    // ── Oracle-derived Unicode property membership (in `rt_unicode_tables`) ──
+    /// `(scalar: i32) -> i32` (0/1): binary-search the embedded property range
+    /// table for `is_alphabetic` / `is_alphanumeric` / `is_uppercase` /
+    /// `is_lowercase`. These make the WASM string predicates full-Unicode and
+    /// byte-identical to native's `char` methods. Each searches the table at the
+    /// matching `prop_*_table` offset below.
+    pub prop_alpha: u32,
+    pub prop_alnum: u32,
+    pub prop_upper: u32,
+    pub prop_lower: u32,
+    /// Data-section offsets of the embedded `[len][cap][data]` range-table blobs
+    /// (interned via `intern_bytes`, so dead-data elimination may relocate or
+    /// drop them). The membership helpers above emit the BARE offset as their
+    /// only data `i32.const` so a relocation stays correct.
+    pub prop_alpha_table: u32,
+    pub prop_alnum_table: u32,
+    pub prop_upper_table: u32,
+    pub prop_lower_table: u32,
+    // ── Full-Unicode case folding (oracle-derived tables in `rt_string_case`) ──
+    /// `__utf8_emit_scalar(dst, byte_off, scalar) -> i32`: encode `scalar` as
+    /// UTF-8 at `dst`'s data section + byte_off; returns the advanced byte_off.
+    pub utf8_emit_scalar: u32,
+    /// `__case_map_lookup(map_sel, scalar) -> i32`: binary-search the UPPER(0) /
+    /// LOWER(1) map; returns the absolute address of the `[len][bytes]` value
+    /// record, or -1 on miss (identity).
+    pub case_map_lookup: u32,
+    /// `__set_member(set_sel, scalar) -> i32`: 1 iff `scalar` is in the
+    /// CASED(0) / CASE_IGNORABLE(1) sorted key array.
+    pub set_member: u32,
+    /// `__final_sigma(s, byte_off) -> i32`: ς(U+03C2) or σ(U+03C3) for a Σ at
+    /// `byte_off`, per the Unicode Final_Sigma context rule.
+    pub final_sigma: u32,
+    /// `__str_case_map(s, is_upper) -> i32`: the unified two-pass case driver.
+    pub str_case_map: u32,
+    /// `__str_capitalize(s) -> i32`: first scalar uppercased, rest verbatim.
+    pub capitalize: u32,
+}
+
+/// Absolute linear-memory addresses + counts of the embedded case tables.
+#[derive(Clone, Copy)]
+struct CaseTableOffsets {
+    upper_keys: u32, upper_offs: u32, upper_n: u32,
+    lower_keys: u32, lower_offs: u32, lower_n: u32,
+    cased: u32, cased_n: u32,
+    ci: u32, ci_n: u32,
 }
 
 /// Indices of built-in runtime functions.
@@ -203,6 +281,11 @@ pub struct RuntimeFuncs {
     pub println_int: u32,
     pub concat_str: u32,
     pub string_append: u32,
+    /// __div_trap(msg_ptr: i32) -> () — write the interned message string
+    /// (already `Error: <msg>\n`) to stderr and `proc_exit(1)`. Shared by the
+    /// integer div/mod zero-divisor and signed-overflow abort paths so the failure
+    /// matches native byte-for-byte (§13 termination convention).
+    pub div_trap: u32,
     /// __string_alloc(len: i32) -> i32
     /// Allocate string with header: writes len AND cap, returns ptr.
     /// Eliminates the class of bugs where cap is forgotten after alloc.
@@ -268,6 +351,19 @@ pub struct RuntimeFuncs {
     /// __init_preopen_dirs() → ()
     /// Called at _start to discover preopened directories.
     pub init_preopen_dirs: u32,
+    /// Dragon4 shortest-decimal helper functions (float.to_string).
+    pub dragon: rt_dragon::DragonRuntime,
+    pub decfloat: rt_dec2flt::DecFloatRuntime,
+    /// __repr_str(s: i32) -> i32: double-quote + escape a string for the
+    /// Almide-literal repr of a string INSIDE a container (compound string
+    /// interpolation). Escape set mirrors `almide_rt_value_stringify` and the
+    /// native `almide_repr_str`: `\\ \" \n \r \t`.
+    pub repr_str: u32,
+    /// __float_display(f: f64) -> i32: the `Display`-form float text used by
+    /// string interpolation — the Dragon4 `float.to_string` output with a
+    /// trailing `.0` removed, matching the native Rust `Display` oracle
+    /// (`0.0` → `0`, `1.0` → `1`; non-integral values are unchanged).
+    pub float_display: u32,
 }
 
 /// Import descriptor for WASM import section.
@@ -310,6 +406,14 @@ pub struct WasmEmitter {
     // String pool
     strings: HashMap<String, u32>,
     data_bytes: Vec<u8>,
+
+    /// Embedded Unicode case-mapping table offsets (Some only when the program
+    /// uses string case ops — see `embed_case_tables` / `program_uses_case_op`).
+    case_tables: Option<CaseTableOffsets>,
+    /// Total bytes of the case-table region at the FRONT of `data_bytes` (after
+    /// the newline byte). `eliminate_dead_data` skips this region so the table
+    /// is never misparsed as interned-string entries. 0 when no case op.
+    pub case_table_bytes: usize,
 
     // Runtime function indices
     pub rt: RuntimeFuncs,
@@ -360,6 +464,15 @@ pub struct WasmEmitter {
     pub mutable_captures: HashSet<u32>,
     // Deep-equality functions per variant type: type_name → func_idx
     pub eq_funcs: HashMap<String, u32>,
+    // Almide-literal repr functions per NAMED record/variant type: type_name →
+    // func_idx. A `__repr_<Type>(ptr) -> str_ptr` walks one finite value of that
+    // type back to its literal form, recursing into self/mutually-recursive type
+    // references as a CALL (terminating at runtime over the finite value) — the
+    // same shape as the native `AlmideRepr` trait dispatch. Without this, a
+    // recursive ADT (`type Tree = Leaf(Int) | Node(Tree, Tree)`) would expand its
+    // type graph forever at compile time. Reserved (sorted, host-deterministic)
+    // before compilation, mirroring `eq_funcs`.
+    pub repr_funcs: BTreeMap<String, u32>,
     // Whether the program uses filesystem operations (fs.read_text, etc.)
     pub needs_fs: bool,
 }
@@ -398,6 +511,8 @@ impl WasmEmitter {
             strings: HashMap::new(),
             // First byte is newline at NEWLINE_OFFSET
             data_bytes: vec![0x0A],
+            case_tables: None,
+            case_table_bytes: 0,
             rt: RuntimeFuncs {
                 fd_write: 0, alloc: 0, rc_inc: 0, rc_dec: 0, cow_check: 0,
                 heap_save: 0, heap_restore: 0, heap_start_global: 0,
@@ -411,6 +526,7 @@ impl WasmEmitter {
                 base64_encode_url: 0, base64_decode_url: 0,
                 hex_encode: 0, hex_encode_upper: 0, hex_decode: 0,
                 concat_str: 0,
+                div_trap: 0,
                 string_append: 0,
                 string_alloc: 0,
                 concat_list: 0,
@@ -429,9 +545,23 @@ impl WasmEmitter {
                     replace_first: 0, last_index_of: 0,
                     strip_prefix: 0, strip_suffix: 0,
                     is_digit: 0, is_alpha: 0, is_alnum: 0,
-                    is_whitespace: 0, is_upper: 0, is_lower: 0,
+                    is_whitespace: 0, is_unicode_ws: 0, utf8_classify: 0, is_upper: 0, is_lower: 0,
                     cmp: 0,
                     char_count: 0,
+                    run_length_encode: 0,
+                    utf8_width: 0,
+                    utf8_scalar: 0,
+                    utf8_byte_of_cp: 0,
+                    utf8_snap: 0,
+                    prop_alpha: 0, prop_alnum: 0, prop_upper: 0, prop_lower: 0,
+                    prop_alpha_table: 0, prop_alnum_table: 0,
+                    prop_upper_table: 0, prop_lower_table: 0,
+                    utf8_emit_scalar: 0,
+                    case_map_lookup: 0,
+                    set_member: 0,
+                    final_sigma: 0,
+                    str_case_map: 0,
+                    capitalize: 0,
                 },
                 value_stringify: 0,
                 json_escape_string: 0,
@@ -459,6 +589,10 @@ impl WasmEmitter {
                 fd_prestat_dir_name: 0,
                 resolve_path: 0,
                 init_preopen_dirs: 0,
+                dragon: rt_dragon::DragonRuntime::default(),
+                decfloat: rt_dec2flt::DecFloatRuntime::default(),
+                repr_str: 0,
+                float_display: 0,
             },
             heap_ptr_global: 0,
             free_list_global: 1,
@@ -480,6 +614,7 @@ impl WasmEmitter {
             effect_fns: HashSet::new(),
             mutable_captures: HashSet::new(),
             eq_funcs: HashMap::new(),
+            repr_funcs: BTreeMap::new(),
             user_exports: Vec::new(),
             needs_fs: false,
         }
@@ -517,6 +652,61 @@ impl WasmEmitter {
     /// Add a compiled function body.
     pub fn add_compiled(&mut self, compiled: CompiledFunc) {
         self.compiled.push(compiled);
+    }
+
+    /// Embed the oracle-derived Unicode case tables at the FRONT of `data_bytes`
+    /// (immediately after the newline byte), recording their absolute addresses.
+    ///
+    /// Placement at the front is MANDATORY: it sits at a fixed low offset that
+    /// never moves when interned string literals (appended later, during function
+    /// compilation) are compacted by `eliminate_dead_data`. Must be called once,
+    /// before any string is interned (asserted), so the baked `i32_const` offsets
+    /// in the case runtime functions stay valid for the life of the module.
+    fn embed_case_tables(&mut self) {
+        debug_assert_eq!(
+            self.data_bytes.len(), 1,
+            "case tables must be embedded before any string interning"
+        );
+        let t = rt_string_case::generate_case_tables();
+
+        fn pad4(db: &mut Vec<u8>) {
+            while db.len() % 4 != 0 { db.push(0); }
+        }
+        fn push_u32s(db: &mut Vec<u8>, arr: &[u32]) -> u32 {
+            pad4(db);
+            let base = NEWLINE_OFFSET + db.len() as u32;
+            for &x in arr { db.extend_from_slice(&x.to_le_bytes()); }
+            base
+        }
+        fn push_bytes(db: &mut Vec<u8>, bytes: &[u8]) -> u32 {
+            let base = NEWLINE_OFFSET + db.len() as u32;
+            db.extend_from_slice(bytes);
+            base
+        }
+
+        // For each map: place VALS first so its base is known, then bake the OFFS
+        // array as ABSOLUTE addresses into VALS, then the KEYS search array.
+        let db = &mut self.data_bytes;
+        let upper_vals = push_bytes(db, &t.upper.vals);
+        let upper_keys = push_u32s(db, &t.upper.keys);
+        let upper_offs_abs: Vec<u32> = t.upper.val_offsets.iter().map(|o| upper_vals + o).collect();
+        let upper_offs = push_u32s(db, &upper_offs_abs);
+
+        let lower_vals = push_bytes(db, &t.lower.vals);
+        let lower_keys = push_u32s(db, &t.lower.keys);
+        let lower_offs_abs: Vec<u32> = t.lower.val_offsets.iter().map(|o| lower_vals + o).collect();
+        let lower_offs = push_u32s(db, &lower_offs_abs);
+
+        let cased = push_u32s(db, &t.cased);
+        let ci = push_u32s(db, &t.case_ignorable);
+
+        self.case_table_bytes = self.data_bytes.len() - 1;
+        self.case_tables = Some(CaseTableOffsets {
+            upper_keys, upper_offs, upper_n: t.upper.keys.len() as u32,
+            lower_keys, lower_offs, lower_n: t.lower.keys.len() as u32,
+            cased, cased_n: t.cased.len() as u32,
+            ci, ci_n: t.case_ignorable.len() as u32,
+        });
     }
 }
 
@@ -578,6 +768,41 @@ impl FuncCompiler<'_> {
         );
         self.depth = guard.0;
     }
+
+    /// Write a freshly-(re)allocated heap object pointer back to the variable an
+    /// in-place mutator (`list.push`, `map.insert`, `string.push`, …) operates on.
+    ///
+    /// Every such op may relocate its target (grow + realloc), so the new pointer
+    /// must replace the old binding. There are three storage classes, and getting
+    /// any of them wrong is silently wrong (the mutation is lost or, worse, the
+    /// next read dereferences a stale pointer):
+    ///
+    /// - **mutable capture** — the local holds a *cell* pointer, not the object.
+    ///   Store the new object pointer *into* the cell (`i32_store(0)`), preserving
+    ///   the cell's identity so other closures sharing it observe the update. This
+    ///   is the case that the per-op write-backs historically missed (Closure
+    ///   Architecture v2, P6): they overwrote the local with the object pointer,
+    ///   corrupting the cell so subsequent cell-deref reads returned garbage.
+    /// - **local** — overwrite the local with the new pointer.
+    /// - **top-level global** — overwrite the global.
+    ///
+    /// `new_ptr` is a local already holding the new object pointer. No-op when the
+    /// target is not a bare `Var` (e.g. `foo().push(x)` has nowhere to write back).
+    pub fn emit_mutator_writeback(&mut self, target: &almide_ir::IrExpr, new_ptr: u32) {
+        let id = match &target.kind {
+            almide_ir::IrExprKind::Var { id } => id.0,
+            _ => return,
+        };
+        if self.emitter.mutable_captures.contains(&id) {
+            if let Some(&local_idx) = self.var_map.get(&id) {
+                wasm!(self.func, { local_get(local_idx); local_get(new_ptr); i32_store(0); });
+            }
+        } else if let Some(&local_idx) = self.var_map.get(&id) {
+            wasm!(self.func, { local_get(new_ptr); local_set(local_idx); });
+        } else if let Some(&(global_idx, _)) = self.emitter.top_let_globals.get(&id) {
+            wasm!(self.func, { local_get(new_ptr); global_set(global_idx); });
+        }
+    }
 }
 
 // ── Public API ──────────────────────────────────────────────────────
@@ -621,6 +846,13 @@ pub(crate) fn emit(program: &IrProgram) -> Vec<u8> {
                 );
             }
         }
+    }
+
+    // Embed the Unicode case-mapping tables at the FRONT of the data section
+    // (while data_bytes is still just the newline byte) when the program uses any
+    // string case op. Gated to keep non-case-folding modules lean (~51KB tables).
+    if program_uses_case_op(program) {
+        emitter.embed_case_tables();
     }
 
     // Phase 1: Register types and function indices
@@ -1207,6 +1439,21 @@ pub(crate) fn emit(program: &IrProgram) -> Vec<u8> {
         None
     };
 
+    // If `main` exists, wrap it in a void `__main_runner` so the exported
+    // `_start` is a clean WASI command `() -> ()`. `main` is an effect fn that
+    // returns a Result (an i32 at the wasm boundary); exporting it directly as
+    // `_start` leaves the entry non-void, so wasmtime runs it via `--invoke`
+    // and prints the return value to stdout — corrupting any observable-output
+    // capture (e.g. a cross-target equivalence diff). This occupies exactly the
+    // `__test_runner` slot (mutually exclusive with it), inheriting the same
+    // proven registration/compile ordering relative to closures and globals.
+    let main_runner_idx = if has_main {
+        let void_ty = emitter.register_type(vec![], vec![]);
+        Some(emitter.register_func("__main_runner", void_ty))
+    } else {
+        None
+    };
+
     // Pre-scan for lambdas and FnRefs — only these need element table entries.
     // (Previously all user functions were added unconditionally, bloating the
     // element table and preventing DCE from eliminating unused functions.)
@@ -1214,6 +1461,10 @@ pub(crate) fn emit(program: &IrProgram) -> Vec<u8> {
 
     // Pre-register variant deep-equality functions (must be before compilation starts)
     register_variant_eq_funcs(&mut emitter);
+
+    // Pre-register per-type Almide-literal repr functions (recursive ADTs walk via
+    // call, not inline expansion). Must reserve indices before compilation starts.
+    register_repr_funcs(&mut emitter);
 
     // Phase 2: Compile function bodies (order must match registration order)
     runtime::compile_runtime(&mut emitter);
@@ -1256,11 +1507,36 @@ pub(crate) fn emit(program: &IrProgram) -> Vec<u8> {
         compile_test_runner(&mut emitter, &test_func_indices, init_globals_idx);
     }
 
+    // Main runner (mirrors the test-runner slot; mutually exclusive with it).
+    // `main` already runs `__init_globals` itself (init_idx passed at its
+    // compilation), so the runner only calls `main` and drops its Result.
+    if main_runner_idx.is_some() {
+        let main_idx = *emitter.func_map.get("main")
+            .expect("has_main implies a registered `main`");
+        let main_func = program.functions.iter().find(|f| f.name == "main" && !f.is_test);
+        // Only `effect fn main` returns a `Result` that can carry an unhandled
+        // error. A plain `fn main` (`Unit`) cannot fail — never tag-check it, or
+        // its `Unit` payload would be misread as an `Err` tag and abort every run.
+        let is_effect = main_func.map(|f| f.is_effect).unwrap_or(false);
+        let drop_count = main_func
+            .map(|f| {
+                let ret = if f.ret_ty.is_unresolved() { f.body.ty.clone() } else { f.ret_ty.clone() };
+                values::ret_type(&ret).len()
+            })
+            .unwrap_or(0);
+        compile_main_runner(&mut emitter, main_idx, drop_count, is_effect);
+    }
+
     // Lambda bodies and FnRef wrappers
     closures::compile_lambda_bodies(program, &mut emitter);
 
     // Compile variant deep-equality functions (bodies, after all user code)
     compile_variant_eq_funcs(&mut emitter, &program.var_table);
+
+    // Compile per-type repr function bodies (after eq funcs, same sorted-order
+    // index/body contract). Order relative to eq funcs matches the registration
+    // order above (eq funcs reserved first, then repr funcs).
+    compile_repr_funcs(&mut emitter, &program.var_table);
 
     // Phase 2.5: Dead Code Elimination
     let dce_count = dce::eliminate_dead_code(&mut emitter);
@@ -1426,9 +1702,20 @@ fn assemble(emitter: &mut WasmEmitter) -> Vec<u8> {
     // The heap grows upward via `__alloc`. There is no reserved scratch
     // region — string interpolation builds results inline directly on the
     // heap (see `calls_string::emit_string_interp`).
+    // Data layout: [data bytes][8-byte alignment][heap...]. The active data
+    // segment (newline + embedded case tables + interned string literals) is
+    // written into linear memory at instantiation, so the INITIAL memory must
+    // already cover it — derive the page count from the heap start (>= data_end)
+    // rather than a fixed 2 pages. The ~51KB case tables roughly halve the
+    // literal headroom of the old fixed 128KB minimum, so a large-literal
+    // case-folding program could otherwise overrun it and fail to instantiate.
+    let data_end = NEWLINE_OFFSET + emitter.data_bytes.len() as u32;
+    let heap_start_aligned = (data_end + 7) & !7;
+    const WASM_PAGE_BYTES: u32 = 65536;
+    let min_pages = heap_start_aligned.div_ceil(WASM_PAGE_BYTES).max(2);
     let mut memory = MemorySection::new();
     memory.memory(MemoryType {
-        minimum: 2,             // 128KB initial — minimal footprint; allocator grows exponentially
+        minimum: min_pages as u64,  // covers the full data region; allocator grows from here
         maximum: Some(65536),   // 4GB max (WASM32 hard limit) — explicit so V8 doesn't apply a smaller default
         memory64: false,
         shared: false,
@@ -1438,9 +1725,6 @@ fn assemble(emitter: &mut WasmEmitter) -> Vec<u8> {
 
     // ── Global section ──
     let mut globals = GlobalSection::new();
-    // Data layout: [data bytes][8-byte alignment][heap...]
-    let data_end = NEWLINE_OFFSET + emitter.data_bytes.len() as u32;
-    let heap_start_aligned = (data_end + 7) & !7;
     // Global 0: heap pointer (memory 0)
     globals.global(
         GlobalType {
@@ -1506,7 +1790,10 @@ fn assemble(emitter: &mut WasmEmitter) -> Vec<u8> {
     // ── Export section ──
     let mut exports = ExportSection::new();
     exports.export("memory", wasm_encoder::ExportKind::Memory, 0);
-    if let Some(&main_idx) = emitter.func_map.get("main") {
+    if let Some(&runner_idx) = emitter.func_map.get("__main_runner") {
+        // Void wrapper around `main` — keeps `_start` a clean WASI command.
+        exports.export("_start", wasm_encoder::ExportKind::Func, runner_idx);
+    } else if let Some(&main_idx) = emitter.func_map.get("main") {
         exports.export("_start", wasm_encoder::ExportKind::Func, main_idx);
     } else if let Some(&runner_idx) = emitter.func_map.get("__test_runner") {
         exports.export("_start", wasm_encoder::ExportKind::Func, runner_idx);
@@ -1713,6 +2000,81 @@ fn compile_test_runner(emitter: &mut WasmEmitter, tests: &[(u32, String)], init_
     emitter.add_compiled(CompiledFunc::tracked(void_type, f));
 }
 
+/// Compile `__main_runner`: call `main` and drop its result so the exported
+/// `_start` is a void WASI command. `drop_count` is `main`'s wasm result arity
+/// (0 for a void `main`, 1 for an effect fn returning a `Result`). `main` runs
+/// `__init_globals` itself, so the runner does nothing else.
+fn compile_main_runner(emitter: &mut WasmEmitter, main_idx: u32, drop_count: usize, is_effect: bool) {
+    use wasm_encoder::Instruction as Ins;
+    fn m(offset: u64) -> wasm_encoder::MemArg {
+        wasm_encoder::MemArg { offset, align: 2, memory_index: 0 }
+    }
+    let void_type = emitter.register_type(vec![], vec![]);
+
+    // Non-effect `fn main` (returns `Unit`) cannot fail: call and drop its result.
+    if !is_effect {
+        let mut f = TrackedFunction::new([]);
+        f.instruction(&Ins::Call(main_idx));
+        for _ in 0..drop_count {
+            f.instruction(&Ins::Drop);
+        }
+        f.instruction(&Ins::End);
+        emitter.add_compiled(CompiledFunc::tracked(void_type, f));
+        return;
+    }
+
+    // `effect fn main` returns `Result<Unit, String>` (`[tag:i32@0][payload@4]`).
+    // On `Err`, write `Error: <msg>\n` to stderr (fd 2) and `proc_exit(1)` so the
+    // wasm command's failure (non-zero exit + stderr) matches native byte-for-byte
+    // (native's `fn main` wrapper emits the same `Error: <msg>` via Display + exit).
+    // On `Ok` (tag 0), fall through and return normally → exit 0.
+    let err_prefix = emitter.intern_string("Error: ") as i32;
+    let newline = emitter.intern_string("\n") as i32;
+    let data_off = emitter.layout_reg.fixed_offset(
+        engine::layout::STRING, engine::layout::string::DATA) as i32;
+    let concat = emitter.rt.concat_str;
+    let fd_write = emitter.rt.fd_write;
+    let proc_exit = emitter.rt.proc_exit;
+
+    // locals: 0 = main's Result ptr, 1 = composed "Error: <msg>\n" string ptr
+    let mut f = TrackedFunction::new([(2u32, ValType::I32)]);
+    f.instruction(&Ins::Call(main_idx));
+    f.instruction(&Ins::LocalSet(0));
+    f.instruction(&Ins::LocalGet(0));
+    f.instruction(&Ins::I32Load(m(0)));                    // tag
+    f.instruction(&Ins::If(wasm_encoder::BlockType::Empty));
+    //   msg = "Error: " ++ <err String @ payload> ++ "\n"
+    f.instruction(&Ins::I32Const(err_prefix));
+    f.instruction(&Ins::LocalGet(0));
+    f.instruction(&Ins::I32Load(m(4)));                    // err String ptr
+    f.instruction(&Ins::Call(concat));
+    f.instruction(&Ins::I32Const(newline));
+    f.instruction(&Ins::Call(concat));
+    f.instruction(&Ins::LocalSet(1));
+    //   iov[0] = { buf: msg + DATA, len: *msg } at scratch [0..8); nwritten at 8
+    f.instruction(&Ins::I32Const(0));
+    f.instruction(&Ins::LocalGet(1));
+    f.instruction(&Ins::I32Const(data_off));
+    f.instruction(&Ins::I32Add);
+    f.instruction(&Ins::I32Store(m(0)));
+    f.instruction(&Ins::I32Const(4));
+    f.instruction(&Ins::LocalGet(1));
+    f.instruction(&Ins::I32Load(m(0)));
+    f.instruction(&Ins::I32Store(m(0)));
+    //   fd_write(fd=2 stderr, iovs=0, iovs_len=1, nwritten=8)
+    f.instruction(&Ins::I32Const(2));
+    f.instruction(&Ins::I32Const(0));
+    f.instruction(&Ins::I32Const(1));
+    f.instruction(&Ins::I32Const(8));
+    f.instruction(&Ins::Call(fd_write));
+    f.instruction(&Ins::Drop);
+    f.instruction(&Ins::I32Const(1));
+    f.instruction(&Ins::Call(proc_exit));
+    f.instruction(&Ins::End);                              // end if
+    f.instruction(&Ins::End);                              // end function
+    emitter.add_compiled(CompiledFunc::tracked(void_type, f));
+}
+
 /// Pre-register variant deep-equality functions for all variant types with pointer fields.
 /// Must be called before Phase 2 (compilation) so func_idx is known at emit time.
 fn register_variant_eq_funcs(emitter: &mut WasmEmitter) {
@@ -1844,6 +2206,196 @@ fn compile_variant_eq_funcs(emitter: &mut WasmEmitter, var_table: &almide_ir::Va
                 }
             }
 
+            compiler.func.instruction(&wasm_encoder::Instruction::End);
+            compiler.func
+        };
+
+        emitter.add_compiled(CompiledFunc::tracked(type_idx, compiled_func));
+    }
+}
+
+/// A named record/variant type is repr-backed unless it (transitively, through a
+/// container) holds a closure field — a closure has no Almide-literal form, so it
+/// never reaches compound interpolation. Mirrors the native `type_has_repr_impl`
+/// closure gate so the two targets agree on exactly which types get a repr.
+fn ty_field_has_closure(ty: &almide_lang::types::Ty) -> bool {
+    matches!(ty, almide_lang::types::Ty::Fn { .. })
+        || ty.children().into_iter().any(ty_field_has_closure)
+}
+
+/// Collect the names of named types referenced anywhere inside `ty` (directly or
+/// nested in a container / tuple / record), into `out`.
+fn collect_named_refs(ty: &almide_lang::types::Ty, out: &mut HashSet<String>) {
+    if let almide_lang::types::Ty::Named(n, _) = ty {
+        out.insert(n.to_string());
+    }
+    for child in ty.children() {
+        collect_named_refs(child, out);
+    }
+}
+
+/// The set of named record/variant types that lie on a reference CYCLE — i.e. a
+/// type that can reach itself through its fields/cases (self-recursion like
+/// `Tree = … Node(Tree, Tree)`, or mutual recursion `A → B → A`). Only these need
+/// a per-type repr function: a NON-recursive type stays on the inline walk, where
+/// the concrete `Ty::Named(_, type_args)` at the interpolation site resolves its
+/// fields' types (so a generic non-recursive type like `Box[Int]` reprs its `T`
+/// payload correctly). A recursive type's inline walk would instead expand its
+/// type graph forever at compile time, so it routes through its repr fn where the
+/// self-reference is a runtime CALL.
+fn recursive_type_names(emitter: &WasmEmitter) -> HashSet<String> {
+    // Edge set: type name → directly-referenced named types (through fields).
+    let mut edges: HashMap<String, HashSet<String>> = HashMap::new();
+    for (name, cases) in &emitter.variant_info {
+        let mut refs = HashSet::new();
+        for c in cases {
+            for (_, ft) in &c.fields { collect_named_refs(ft, &mut refs); }
+        }
+        edges.insert(name.clone(), refs);
+    }
+    let case_names: HashSet<String> = emitter.variant_info.values()
+        .flat_map(|cases| cases.iter().map(|c| c.name.clone()))
+        .collect();
+    for (name, fields) in &emitter.record_fields {
+        if name.starts_with("__anon_record_") || case_names.contains(name)
+            || emitter.variant_info.contains_key(name) { continue; }
+        let mut refs = HashSet::new();
+        for (_, ft) in fields { collect_named_refs(ft, &mut refs); }
+        edges.insert(name.clone(), refs);
+    }
+
+    // A type is recursive iff it can reach itself. Reachability via DFS over the
+    // edge set (only edges to nodes that are themselves typed are followed).
+    let mut recursive = HashSet::new();
+    for start in edges.keys() {
+        let mut stack: Vec<String> = edges[start].iter().cloned().collect();
+        let mut seen: HashSet<String> = HashSet::new();
+        while let Some(n) = stack.pop() {
+            if &n == start { recursive.insert(start.clone()); break; }
+            if !seen.insert(n.clone()) { continue; }
+            if let Some(next) = edges.get(&n) {
+                for m in next { stack.push(m.clone()); }
+            }
+        }
+    }
+    recursive
+}
+
+/// Pre-register one `__repr_<TypeName>(ptr: i32) -> i32` per repr-backed NAMED
+/// record/variant type that lies on a reference cycle. Recursion (self / mutual)
+/// becomes a CALL into the callee's repr fn, so a finite runtime value terminates
+/// exactly like the native trait dispatch — inline expansion of a recursive type
+/// graph would loop forever at compile time. NON-recursive types are walked
+/// inline (the concrete type args at the interpolation site resolve their fields).
+///
+/// Reserve indices in SORTED name order so they are a pure function of the
+/// program (the same 32-bit/64-bit host-determinism contract as
+/// `register_variant_eq_funcs`); the (also sorted) compile order must match.
+fn register_repr_funcs(emitter: &mut WasmEmitter) {
+    let type_idx = emitter.register_type(vec![ValType::I32], vec![ValType::I32]);
+
+    let recursive = recursive_type_names(emitter);
+
+    // Repr-backed RECURSIVE named types: every recursive variant type, plus every
+    // recursive named record. A record case-name is also stored in `record_fields`
+    // (for field access), so restrict records to declared record types — not the
+    // synthetic `__anon_record_*` shapes (walked inline) and not the variant CASE
+    // names (a `Node` value reprs through its variant type's fn, by tag). A type
+    // with a closure field is excluded.
+    let mut names: Vec<String> = Vec::new();
+    for (name, cases) in &emitter.variant_info {
+        let has_closure = cases.iter().any(|c| c.fields.iter().any(|(_, ft)| ty_field_has_closure(ft)));
+        if recursive.contains(name) && !has_closure {
+            names.push(name.clone());
+        }
+    }
+    // Variant CASE names that are also keyed in record_fields — skip them as
+    // standalone record reprs (they are reached via the owning variant type).
+    let case_names: HashSet<String> = emitter.variant_info.values()
+        .flat_map(|cases| cases.iter().map(|c| c.name.clone()))
+        .collect();
+    for (name, fields) in &emitter.record_fields {
+        let is_anon = name.starts_with("__anon_record_");
+        let is_variant_case = case_names.contains(name);
+        let is_variant_type = emitter.variant_info.contains_key(name);
+        let has_closure = fields.iter().any(|(_, ft)| ty_field_has_closure(ft));
+        if recursive.contains(name) && !is_anon && !is_variant_case && !is_variant_type && !has_closure {
+            names.push(name.clone());
+        }
+    }
+    names.sort();
+    names.dedup();
+    for name in names {
+        let func_idx = emitter.register_func(&format!("__repr_{}", name), type_idx);
+        emitter.repr_funcs.insert(name, func_idx);
+    }
+}
+
+/// Compile each `__repr_<TypeName>` body: load the value pointer (param 0) and
+/// run the SAME structural walk the inline path uses (`emit_repr_record` /
+/// `emit_repr_variant`). Nested named-type fields recurse as a CALL because
+/// `emit_repr_value` routes a repr-backed `Ty::Named` through its repr fn (see
+/// `calls_string_repr.rs`). Body-emit order is sorted to match the (sorted)
+/// index reservation in `register_repr_funcs`.
+fn compile_repr_funcs(emitter: &mut WasmEmitter, var_table: &almide_ir::VarTable) {
+    let mut entries: Vec<(String, u32)> = emitter.repr_funcs.iter()
+        .map(|(n, &idx)| (n.clone(), idx))
+        .collect();
+    entries.sort();
+
+    for (name, _func_idx) in &entries {
+        let type_idx = emitter.register_type(vec![ValType::I32], vec![ValType::I32]);
+
+        // One repr fn walks a SINGLE level (children recurse via call), so its
+        // scratch demand is bounded by one type's field/case count — the generous
+        // caps below mirror the eq-fn setup and never approach the inline-expansion
+        // overflow that motivated these functions.
+        let mut local_decls = Vec::new();
+        let scratch_i32_cap = 32usize;
+        let scratch_i64_cap = 8usize;
+        let scratch_f64_cap = 2usize;
+        let scratch_i32_base = 1u32; // after the single `ptr` param
+        for _ in 0..scratch_i32_cap { local_decls.push((1, ValType::I32)); }
+        let scratch_i64_base = scratch_i32_base + scratch_i32_cap as u32;
+        for _ in 0..scratch_i64_cap { local_decls.push((1, ValType::I64)); }
+        let scratch_f64_base = scratch_i64_base + scratch_i64_cap as u32;
+        for _ in 0..scratch_f64_cap { local_decls.push((1, ValType::F64)); }
+
+        let wasm_func = TrackedFunction::new(local_decls);
+        let mut scratch_alloc = scratch::ScratchAllocator::new();
+        scratch_alloc.set_bases_with_capacity(
+            scratch_i32_base, scratch_i32_cap,
+            scratch_i64_base, scratch_i64_cap,
+            scratch_f64_base, scratch_f64_cap,
+        );
+
+        // The repr emitters dispatch on the static `Ty` of the value: a variant
+        // type → `emit_repr_variant`, otherwise a record → `emit_repr_record`.
+        let is_variant = emitter.variant_info.contains_key(name.as_str());
+        let ty = almide_lang::types::Ty::Named(almide_base::intern::sym(name), Vec::new());
+
+        let compiled_func = {
+            let mut compiler = FuncCompiler {
+                emitter: &mut *emitter,
+                func: wasm_func,
+                var_map: std::collections::HashMap::new(),
+                depth: 0,
+                loop_stack: Vec::new(),
+                scratch: scratch_alloc,
+                var_table,
+                stub_ret_ty: almide_lang::types::Ty::Unit,
+                current_module_name: None,
+            };
+
+            // Push the value pointer (param 0); the walk consumes it from the
+            // stack and leaves the result string pointer (the return value).
+            wasm!(compiler.func, { local_get(0); });
+            if is_variant {
+                compiler.emit_repr_variant(&ty);
+            } else {
+                let fields = compiler.extract_record_fields(&ty);
+                compiler.emit_repr_record(Some(name.as_str()), &fields);
+            }
             compiler.func.instruction(&wasm_encoder::Instruction::End);
             compiler.func
         };
@@ -2059,6 +2611,71 @@ mod tests {
 }
 
 /// Scan IR program for filesystem module calls (fs.read_text, fs.write_text, etc.).
+/// True iff the program references `string.to_upper` / `to_lower` / `capitalize`
+/// in any form (resolved module call, unresolved method call, or runtime call).
+/// Conservative by design: matching every dispatch form the emitter handles means
+/// the pre-scan never misses a reachable case op (a miss would leave the always-
+/// compiled case lookup functions baking stale offsets — silently wrong).
+fn program_uses_case_op(program: &IrProgram) -> bool {
+    use almide_ir::{IrExprKind, CallTarget};
+    use almide_ir::visit::{IrVisitor, walk_expr, walk_stmt};
+
+    fn is_case_fn(name: &str) -> bool {
+        // Accept both the bare method name and a "string."-qualified one: the
+        // Module arm sees a bare `func`, but the unresolved Method arm (and the
+        // calls.rs UFCS fallback) can carry a dotted "string.to_upper". Missing a
+        // form would leave the case tables un-embedded while the runtime fns stay
+        // DCE-live — silently wrong, so keep this strictly broader than dispatch.
+        let name = name.strip_prefix("string.").unwrap_or(name);
+        matches!(name, "to_upper" | "to_lower" | "capitalize")
+    }
+
+    struct CaseScanner { found: bool }
+    impl IrVisitor for CaseScanner {
+        fn visit_expr(&mut self, expr: &almide_ir::IrExpr) {
+            if self.found { return; }
+            match &expr.kind {
+                IrExprKind::Call { target: CallTarget::Module { module, func, .. }, .. }
+                    if module.as_str() == "string" && is_case_fn(func.as_str()) =>
+                {
+                    self.found = true;
+                    return;
+                }
+                IrExprKind::Call { target: CallTarget::Method { method, .. }, .. }
+                    if is_case_fn(method.as_str()) =>
+                {
+                    self.found = true;
+                    return;
+                }
+                IrExprKind::RuntimeCall { symbol, .. }
+                    if matches!(
+                        symbol.as_str(),
+                        "almide_rt_string_to_upper"
+                            | "almide_rt_string_to_lower"
+                            | "almide_rt_string_capitalize"
+                    ) =>
+                {
+                    self.found = true;
+                    return;
+                }
+                _ => {}
+            }
+            walk_expr(self, expr);
+        }
+        fn visit_stmt(&mut self, stmt: &almide_ir::IrStmt) {
+            if self.found { return; }
+            walk_stmt(self, stmt);
+        }
+    }
+
+    let mut scanner = CaseScanner { found: false };
+    for func in &program.functions {
+        scanner.visit_expr(&func.body);
+        if scanner.found { return true; }
+    }
+    false
+}
+
 fn program_uses_fs(program: &IrProgram) -> bool {
     use almide_ir::{IrExprKind, IrStmtKind, CallTarget};
     use almide_ir::visit::{IrVisitor, walk_expr, walk_stmt};

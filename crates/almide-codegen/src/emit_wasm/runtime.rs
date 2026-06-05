@@ -187,6 +187,11 @@ pub fn register_runtime_functions(emitter: &mut WasmEmitter) {
     let str_alloc_ty = emitter.register_type(vec![ValType::I32], vec![ValType::I32]);
     emitter.rt.string_alloc = emitter.register_func("__string_alloc", str_alloc_ty);
 
+    // __div_trap(msg_ptr: i32) -> () — integer div/mod abort: write the interned
+    // `Error: <msg>\n` string to stderr (fd 2) and proc_exit(1).
+    let div_trap_ty = emitter.register_type(vec![ValType::I32], vec![]);
+    emitter.rt.div_trap = emitter.register_func("__div_trap", div_trap_ty);
+
     // Note: string interpolation is now emitted inline at the call site
     // (see `calls_string::emit_string_interp`). No scratch runtime helpers.
 
@@ -292,6 +297,17 @@ pub fn register_runtime_functions(emitter: &mut WasmEmitter) {
     // Regex runtime
     super::rt_regex::register(emitter);
 
+    // Dragon4 big-integer helpers for float.to_string.
+    super::rt_dragon::register(emitter);
+    // Correctly-rounded decimal→f64 for float.parse (reuses the Dragon4 bignum).
+    super::rt_dec2flt::register(emitter);
+    // Compound-repr string escape helper (registered last → compiled last so the
+    // func-index order matches; see the compile-order note in `compile_runtime`).
+    super::rt_repr::register(emitter);
+    // Display-form float text for string interpolation (reuses the Dragon4
+    // driver). Registered right after rt_repr so the compile order below matches.
+    super::rt_float_display::register(emitter);
+
     // Global 0: __heap_ptr (memory 0 bump allocator)
     emitter.heap_ptr_global = 0;
     // Global 1: __preopen_table (ptr to heap-allocated table of [fd, path_ptr, path_len] entries)
@@ -310,11 +326,15 @@ pub fn compile_runtime(emitter: &mut WasmEmitter) {
     compile_heap_restore(emitter);
     compile_println_str(emitter);
     compile_int_to_string(emitter);
-    compile_float_to_string(emitter);
+    // float.to_string driver (Dragon4 shortest-decimal). Registered early, so
+    // its body is emitted here; the bignum helpers (registered late) are
+    // compiled at the end of this function via `compile_helpers`.
+    super::rt_dragon::compile_driver(emitter);
     compile_println_int(emitter);
     compile_concat_str(emitter);
     compile_string_append(emitter);
     compile_string_alloc(emitter);
+    compile_div_trap(emitter);
     super::runtime_eq::compile_option_eq_i64(emitter);
     super::runtime_eq::compile_option_eq_str(emitter);
     super::runtime_eq::compile_result_eq_i64_str(emitter);
@@ -351,6 +371,16 @@ pub fn compile_runtime(emitter: &mut WasmEmitter) {
     super::rt_value::compile(emitter);
     // Regex runtime
     super::rt_regex::compile(emitter);
+    // Dragon4 bignum helpers (registered last in register_runtime_functions,
+    // so their bodies must be emitted last to keep func-index order).
+    super::rt_dragon::compile_helpers(emitter);
+    // decimal→f64 parser bodies (registered right after the Dragon4 helpers).
+    super::rt_dec2flt::compile_helpers(emitter);
+    // Compound-repr string escape (registered last in register_runtime, so its
+    // body is emitted last to keep func-index order).
+    super::rt_repr::compile(emitter);
+    // Display-form float text (registered right after rt_repr → compiled here).
+    super::rt_float_display::compile(emitter);
 }
 
 /// __alloc(size: i32) -> i32
@@ -687,7 +717,10 @@ fn compile_int_to_string(emitter: &mut WasmEmitter) {
     wasm!(f, { local_get(1); });
     f.instruction(&wasm_encoder::Instruction::LocalGet(3));
     f.instruction(&wasm_encoder::Instruction::I64Const(10));
-    f.instruction(&wasm_encoder::Instruction::I64RemS);
+    // UNSIGNED rem: `abs_n = 0 - n` produces the correct unsigned magnitude bits
+    // even for i64::MIN (0x8000…0 = 2^63), but a SIGNED rem would read those bits
+    // as negative and emit bytes below '0'. Unsigned keeps MIN's digits correct.
+    f.instruction(&wasm_encoder::Instruction::I64RemU);
     wasm!(f, {
         i32_wrap_i64;
         i32_const(48);
@@ -701,11 +734,11 @@ fn compile_int_to_string(emitter: &mut WasmEmitter) {
         i32_sub;
         local_set(1);
     });
-    // $abs_n /= 10
+    // $abs_n /= 10  (UNSIGNED — see the rem note above; keeps i64::MIN correct)
     wasm!(f, {
         local_get(3);
         i64_const(10);
-        i64_div_s;
+        i64_div_u;
         local_set(3);
         br(0);
         end;
@@ -797,103 +830,6 @@ fn compile_int_to_string(emitter: &mut WasmEmitter) {
 
     // return $result
     wasm!(f, { local_get(6); end; });
-
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
-}
-
-/// __float_to_string(f: f64) -> i32
-/// Multi-digit decimal: integer_part + "." + decimal_digits (up to 15, trailing zeros trimmed)
-fn compile_float_to_string(emitter: &mut WasmEmitter) {
-    let type_idx = emitter.func_type_indices[&emitter.rt.float_to_string];
-    // locals: 0=f64 input | 1=i32 int_str, 2=i32 result, 3=f64 frac, 4=i32 buf, 5=i32 count, 6=i32 digit
-    let mut f = Function::new([
-        (1, ValType::I32), (1, ValType::I32), (1, ValType::F64),
-        (1, ValType::I32), (1, ValType::I32), (1, ValType::I32),
-    ]);
-
-    // int_str = int_to_string(trunc(f))
-    wasm!(f, {
-        local_get(0);
-        i64_trunc_f64_s;
-        call(emitter.rt.int_to_string);
-        local_set(1);
-        // frac = abs(f) - abs(trunc(f))
-        local_get(0); f64_abs;
-        local_get(0); i64_trunc_f64_s; f64_convert_i64_s; f64_abs;
-        f64_sub;
-        local_set(3);
-        // Alloc scratch buffer for decimal digits (max 20)
-        i32_const(20); call(emitter.rt.alloc); local_set(4);
-        i32_const(0); local_set(5); // count = 0
-    });
-    // Loop: extract digits while frac > 0 and count < 15
-    wasm!(f, {
-        block_empty; loop_empty;
-          local_get(5); i32_const(15); i32_ge_u; br_if(1);
-          // digit = trunc(frac * 10)
-          local_get(3); f64_const(10.0); f64_mul; local_set(3);
-          local_get(3); i64_trunc_f64_s; i32_wrap_i64; local_set(6);
-          // buf[count] = '0' + digit
-          local_get(4); local_get(5); i32_add;
-          local_get(6); i32_const(48); i32_add;
-          i32_store8(0);
-          // frac = frac - digit
-          local_get(3); local_get(6); i64_extend_i32_u; f64_convert_i64_s; f64_sub; local_set(3);
-          local_get(5); i32_const(1); i32_add; local_set(5);
-          // Stop if frac is essentially 0
-          local_get(3); f64_const(0.000000000000001); f64_lt;
-          br_if(1);
-          br(0);
-        end; end;
-    });
-    // Ensure at least 1 digit (for "X.0")
-    wasm!(f, {
-        local_get(5); i32_eqz;
-        if_empty;
-          local_get(4); i32_const(48); i32_store8(0); // '0'
-          i32_const(1); local_set(5);
-        end;
-    });
-    // Trim trailing zeros (but keep at least 1 digit)
-    wasm!(f, {
-        block_empty; loop_empty;
-          local_get(5); i32_const(1); i32_le_u; br_if(1);
-          local_get(4); local_get(5); i32_const(1); i32_sub; i32_add;
-          i32_load8_u(0);
-          i32_const(48); // '0'
-          i32_ne; br_if(1);
-          local_get(5); i32_const(1); i32_sub; local_set(5);
-          br(0);
-        end; end;
-    });
-    // Build frac string from buf[0..count]
-    // String layout: [len:i32][cap:i32][data@8]
-    wasm!(f, {
-        i32_const(emitter.layout_reg.header_size(super::engine::layout::STRING) as i32); local_get(5); i32_add;
-        call(emitter.rt.alloc); local_set(2);
-        local_get(2); local_get(5); i32_store(0);
-        local_get(2); local_get(5); i32_store(emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::CAP) as i32 as u32, 0);
-        // Copy digits
-        i32_const(0); local_set(6);
-        block_empty; loop_empty;
-          local_get(6); local_get(5); i32_ge_u; br_if(1);
-          local_get(2); i32_const(emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; local_get(6); i32_add;
-          local_get(4); local_get(6); i32_add; i32_load8_u(0);
-          i32_store8(0);
-          local_get(6); i32_const(1); i32_add; local_set(6);
-          br(0);
-        end; end;
-    });
-    // Result: int_str + "." + frac_str
-    let dot = emitter.intern_string(".");
-    wasm!(f, {
-        local_get(1);
-        i32_const(dot as i32);
-        call(emitter.rt.concat_str);
-        local_get(2);
-        call(emitter.rt.concat_str);
-        end;
-    });
 
     emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
 }
@@ -1021,6 +957,64 @@ fn compile_string_alloc(emitter: &mut WasmEmitter) {
         w.get(1);
     }
     f.instruction(&wasm_encoder::Instruction::End);
+    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+}
+
+/// __div_trap(msg_ptr: i32)
+/// Integer div/mod abort: write the interned message string at `msg_ptr` — already
+/// the full `Error: <msg>\n` text, [len:i32][cap:i32][data@DATA] layout — to stderr
+/// via WASI fd_write, then `proc_exit(1)`. The shared trap keeps the div-by-zero and
+/// signed-overflow paths a single function call at every emit site.
+fn compile_div_trap(emitter: &mut WasmEmitter) {
+    // WASI fd for stderr (matches native `eprintln!` → fd 2).
+    const STDERR_FD: i32 = 2;
+    // Exit code on an aborting integer op (matches native `std::process::exit(1)`).
+    const ABORT_EXIT_CODE: i32 = 1;
+    // Scratch layout for the single fd_write iovec: [buf:i32@0][len:i32@4], with the
+    // returned byte count written at [8]. Mirrors `compile_println_str`.
+    const IOV_BUF_OFF: i32 = 0;
+    const IOV_LEN_OFF: i32 = 4;
+    const NWRITTEN_OFF: i32 = 8;
+    const IOV_BASE: i32 = 0;
+    const IOV_COUNT: i32 = 1;
+
+    let type_idx = emitter.func_type_indices[&emitter.rt.div_trap];
+    let data_off = string_data_off();
+    let fd_write = emitter.rt.fd_write;
+    let proc_exit = emitter.rt.proc_exit;
+
+    // param 0 = msg_ptr (interned `Error: <msg>\n` string)
+    let mut f = Function::new([]);
+    // iov[0].buf = msg_ptr + DATA  (skip the len+cap header)
+    wasm!(f, {
+        i32_const(IOV_BUF_OFF);
+        local_get(0);
+        i32_const(data_off);
+        i32_add;
+        i32_store(0);
+    });
+    // iov[0].len = *msg_ptr  (the byte length, which already includes the newline)
+    wasm!(f, {
+        i32_const(IOV_LEN_OFF);
+        local_get(0);
+        i32_load(0);
+        i32_store(0);
+    });
+    // fd_write(stderr, iovs=IOV_BASE, iovs_len=IOV_COUNT, nwritten=NWRITTEN_OFF)
+    wasm!(f, {
+        i32_const(STDERR_FD);
+        i32_const(IOV_BASE);
+        i32_const(IOV_COUNT);
+        i32_const(NWRITTEN_OFF);
+        call(fd_write);
+        drop;
+    });
+    // proc_exit(1) — diverges; never returns.
+    wasm!(f, {
+        i32_const(ABORT_EXIT_CODE);
+        call(proc_exit);
+        end;
+    });
     emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
 }
 

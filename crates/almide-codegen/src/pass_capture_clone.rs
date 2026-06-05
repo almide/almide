@@ -31,8 +31,20 @@ impl NanoPass for CaptureClonePass {
     }
 
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
+        // Pre-analysis (Closure v2, P3): a Copy-type `var` local (Int/Float/Bool)
+        // captured by a closure must become a shared `Rc<Cell<T>>` — a `move`
+        // closure would capture a *copy* and silently drop the mutation. Compute
+        // the set once here (before the wrap decision below), and publish it via
+        // `codegen_annotations` so the Rust walker emits cell ops. As non-`Copy`
+        // values these captures now also need the clone-wrap that `needs_clone_type`
+        // skips for `Copy` — `SHARED_MUT` forces it, and `wrap_lambda_with_clones`
+        // adds the `__cap` renames to the set so their reads/writes are cells too.
+        let shared = detect_shared_mut(&program);
+        for v in &shared { program.codegen_annotations.shared_mut_vars.insert(*v); }
+        SHARED_MUT.with(|m| *m.borrow_mut() = shared);
+
         let mut changed = false;
-        let IrProgram { functions, modules, var_table, .. } = &mut program;
+        let IrProgram { functions, modules, var_table, codegen_annotations, .. } = &mut program;
         for func in functions.iter_mut() {
             let param_vars: HashSet<VarId> = func.params.iter().map(|p| p.var).collect();
             PARAM_BORROWS.with(|m| {
@@ -53,6 +65,12 @@ impl NanoPass for CaptureClonePass {
                 }
             }
         }
+        // `wrap_lambda_with_clones` added the `__cap_*` renames of shared-mut
+        // captures to SHARED_MUT; persist them so their reads/writes are cells too.
+        SHARED_MUT.with(|m| {
+            for v in m.borrow().iter() { codegen_annotations.shared_mut_vars.insert(*v); }
+            m.borrow_mut().clear();
+        });
         PARAM_BORROWS.with(|m| m.borrow_mut().clear());
         PassResult { program, changed }
     }
@@ -62,6 +80,87 @@ use std::cell::RefCell;
 thread_local! {
     static PARAM_BORROWS: RefCell<std::collections::HashMap<VarId, ParamBorrow>> =
         RefCell::new(std::collections::HashMap::new());
+    /// Vars that must be lowered to a shared `Rc<Cell<T>>` on the Rust target
+    /// (Copy-type `var` locals captured by a closure, plus their `__cap` renames).
+    /// Populated per-run by `detect_shared_mut` + `wrap_lambda_with_clones`.
+    /// (Closure v2, P3.)
+    static SHARED_MUT: RefCell<HashSet<VarId>> = RefCell::new(HashSet::new());
+}
+
+/// Find every Copy-type (`Int`/`Float`/`Bool`) `Mutability::Var` local captured by
+/// a closure. As a moved copy its mutation would be invisible to the enclosing
+/// scope, so it must become a shared cell. (Closure v2, P3.)
+fn detect_shared_mut(program: &IrProgram) -> HashSet<VarId> {
+    // Module-level globals are NOT closure cells. They lower to `static` /
+    // `thread_local!` storage (a mutated one becomes `ModuleRc`/`ModuleCell`) and
+    // are already globally reachable, so a closure references them directly by their
+    // storage class — it does not capture a heap cell. Marking a global `shared_mut`
+    // double-classifies it (ModuleRc AND SharedMut) and the two emit conflicting
+    // references: the closure body uses `G.with(…)` while the enclosing read uses a
+    // lowercase `g.get()` that doesn't exist → `error[E0425]: cannot find value g`.
+    // So exclude globals here; their mutability is handled by the ModuleRc path.
+    let globals: HashSet<VarId> = program.top_lets.iter().map(|t| t.var)
+        .chain(program.modules.iter().flat_map(|m| m.top_lets.iter().map(|t| t.var)))
+        .collect();
+    struct LambdaWalker<'a> { vt: &'a VarTable, globals: &'a HashSet<VarId>, out: HashSet<VarId> }
+    impl almide_ir::visit::IrVisitor for LambdaWalker<'_> {
+        fn visit_expr(&mut self, expr: &IrExpr) {
+            if let IrExprKind::Lambda { params, body, .. } = &expr.kind {
+                let param_set: HashSet<VarId> = params.iter().map(|(v, _)| *v).collect();
+                // Vars this lambda mutates (assigned, or passed `&mut` to a method
+                // like `list.push`). A non-Copy `var` mutated ONLY through a method
+                // is recorded with `Mutability::Let` (it is never reassigned), so the
+                // mutability flag alone misses it — hence the explicit mutation scan.
+                let mut mutated = HashSet::new();
+                collect_mutated_vars(body, &mut mutated);
+                for v in almide_ir::free_vars::free_vars(body, &param_set) {
+                    if self.globals.contains(&v) { continue; }
+                    let info = self.vt.get(v);
+                    // A captured var that is mutated through the closure must become a
+                    // shared cell so the mutation is visible to the enclosing scope.
+                    // Copy types lower to `Rc<Cell<T>>`, non-Copy to `SharedMut`
+                    // (`Rc<RefCell<T>>`) — the walker picks by type. Without this a
+                    // non-Copy capture went through `RcCow`, whose copy-on-write loses
+                    // the mutation. (Closure v2: P3 = Copy, P6 = non-Copy.)
+                    if matches!(info.mutability, Mutability::Var) || mutated.contains(&v) {
+                        self.out.insert(v);
+                    }
+                }
+            }
+            almide_ir::visit::walk_expr(self, expr);
+        }
+    }
+    use almide_ir::visit::IrVisitor;
+    let mut w = LambdaWalker { vt: &program.var_table, globals: &globals, out: HashSet::new() };
+    for f in &program.functions { w.visit_expr(&f.body); }
+    for m in &program.modules { for f in &m.functions { w.visit_expr(&f.body); } }
+    w.out
+}
+
+/// Collect VarIds an expression mutates: assignment targets and `&mut`-borrowed
+/// vars (the form `list.push(v, …)` etc. take after `BorrowInsertionPass`).
+fn collect_mutated_vars(expr: &IrExpr, out: &mut HashSet<VarId>) {
+    struct M<'a> { out: &'a mut HashSet<VarId> }
+    impl almide_ir::visit::IrVisitor for M<'_> {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            if let IrExprKind::Borrow { expr: inner, mutable: true, .. } = &e.kind {
+                if let IrExprKind::Var { id } = &inner.kind { self.out.insert(*id); }
+            }
+            almide_ir::visit::walk_expr(self, e);
+        }
+        fn visit_stmt(&mut self, s: &IrStmt) {
+            match &s.kind {
+                IrStmtKind::Assign { var, .. } => { self.out.insert(*var); }
+                IrStmtKind::IndexAssign { target, .. }
+                | IrStmtKind::MapInsert { target, .. }
+                | IrStmtKind::FieldAssign { target, .. } => { self.out.insert(*target); }
+                _ => {}
+            }
+            almide_ir::visit::walk_stmt(self, s);
+        }
+    }
+    use almide_ir::visit::IrVisitor;
+    M { out }.visit_expr(expr);
 }
 
 /// Collect all variables bound by a statement (Bind + BindDestructure).
@@ -188,8 +287,20 @@ fn transform_expr(expr: &mut IrExpr, vt: &mut VarTable, scope_vars: &HashSet<Var
         IrExprKind::OptionSome { expr: e } | IrExprKind::ResultOk { expr: e }
         | IrExprKind::ResultErr { expr: e } | IrExprKind::Try { expr: e }
         | IrExprKind::Unwrap { expr: e } | IrExprKind::ToOption { expr: e }
-        | IrExprKind::Clone { expr: e } | IrExprKind::Deref { expr: e } => {
+        | IrExprKind::Clone { expr: e } | IrExprKind::Deref { expr: e }
+        // Single-expr wrappers introduced by earlier passes (BorrowInsertion,
+        // BoxDeref, ToVec materialisation, async). A lambda nested inside one of
+        // these — e.g. `list.join(&list.map(keys, k => …g…), …)` wraps the inner
+        // `map` in `Borrow` — was invisible to the capture-clone walk, so its
+        // captured non-Copy vars never got the pre-clone wrap and a later use of
+        // the var failed to compile (E0382). `replace_vars` already descends these,
+        // so the walk and the rename now agree.
+        | IrExprKind::Borrow { expr: e, .. } | IrExprKind::BoxNew { expr: e }
+        | IrExprKind::ToVec { expr: e } | IrExprKind::Await { expr: e } => {
             if transform_expr(e, vt, scope_vars) { changed = true; }
+        }
+        IrExprKind::RustMacro { args, .. } => {
+            for a in args { if transform_expr(a, vt, scope_vars) { changed = true; } }
         }
         IrExprKind::UnwrapOr { expr: e, fallback: f } => {
             if transform_expr(e, vt, scope_vars) { changed = true; }
@@ -213,20 +324,72 @@ fn transform_expr(expr: &mut IrExpr, vt: &mut VarTable, scope_vars: &HashSet<Var
         | IrExprKind::OptionalChain { expr: object, .. } => {
             if transform_expr(object, vt, scope_vars) { changed = true; }
         }
-        _ => {}
+        // A fused iterator chain (produced by stream fusion) hides its step and
+        // collector lambdas from the generic recursion above. Without descending
+        // here, a `move` step closure that captures a non-Copy outer var (e.g. a
+        // map used inside `keys |> map(k => …get(g,k)…)`) never gets the pre-clone
+        // wrap, so the chain moves the var and a later use of it fails to compile
+        // (E0382). Recurse into the source and every embedded lambda. `replace_vars`
+        // already mirrors this shape, so a wrapped lambda's `__cap` renames carry
+        // through correctly.
+        IrExprKind::IterChain { source, steps, collector, .. } => {
+            if transform_expr(source, vt, scope_vars) { changed = true; }
+            for step in steps.iter_mut() {
+                match step {
+                    IterStep::Map { lambda } | IterStep::Filter { lambda }
+                    | IterStep::FlatMap { lambda } | IterStep::FilterMap { lambda } => {
+                        if transform_expr(lambda, vt, scope_vars) { changed = true; }
+                    }
+                }
+            }
+            match collector {
+                IterCollector::Collect => {}
+                IterCollector::Fold { init, lambda } => {
+                    if transform_expr(init, vt, scope_vars) { changed = true; }
+                    if transform_expr(lambda, vt, scope_vars) { changed = true; }
+                }
+                IterCollector::Any { lambda } | IterCollector::All { lambda }
+                | IterCollector::Find { lambda } | IterCollector::Count { lambda } => {
+                    if transform_expr(lambda, vt, scope_vars) { changed = true; }
+                }
+            }
+        }
+        IrExprKind::TailCall { target, args } => {
+            match target {
+                CallTarget::Method { object, .. } => { if transform_expr(object, vt, scope_vars) { changed = true; } }
+                CallTarget::Computed { callee } => { if transform_expr(callee, vt, scope_vars) { changed = true; } }
+                CallTarget::Named { .. } | CallTarget::Module { .. } => {}
+            }
+            for a in args { if transform_expr(a, vt, scope_vars) { changed = true; } }
+        }
+        IrExprKind::RcWrap { expr: e, .. } => { if transform_expr(e, vt, scope_vars) { changed = true; } }
+        IrExprKind::InlineRust { args, .. } => {
+            for (_, a) in args { if transform_expr(a, vt, scope_vars) { changed = true; } }
+        }
+        // True leaves (no child `IrExpr`). Listed explicitly so a new
+        // child-bearing IrExprKind is a compile error here, not a silently
+        // dropped subtree (the native↔WASM capture-divergence class).
+        IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. } | IrExprKind::LitStr { .. }
+        | IrExprKind::LitBool { .. } | IrExprKind::Unit | IrExprKind::Var { .. }
+        | IrExprKind::FnRef { .. } | IrExprKind::Break | IrExprKind::Continue
+        | IrExprKind::EmptyMap | IrExprKind::OptionNone | IrExprKind::RenderedCall { .. }
+        | IrExprKind::ClosureCreate { .. } | IrExprKind::EnvLoad { .. }
+        | IrExprKind::Hole | IrExprKind::Todo { .. } => {}
     }
 
     // Now check: is this expr itself a Lambda with captured vars that need cloning?
     if let IrExprKind::Lambda { params, body, .. } = &expr.kind {
         let param_set: HashSet<VarId> = params.iter().map(|(v, _)| *v).collect();
-        let mut free_vars = HashSet::new();
-        collect_free_vars(body, &param_set, &mut free_vars);
-
-        // Filter to only clone-worthy types from outer scope.
-        let captures: Vec<VarId> = free_vars.into_iter()
+        // Capture set via the single shared analysis (`almide_ir::free_vars`) — the
+        // same one WASM ClosureConversion uses. Returns a VarId-sorted Vec, so the
+        // resulting `__cap` bindings are emitted in deterministic order.
+        let captures: Vec<VarId> = almide_ir::free_vars::free_vars(body, &param_set).into_iter()
+            // Clone-worthy captures from the outer scope — plus shared-mut (`Rc<Cell>`)
+            // captures, which are no longer `Copy` and so now need the clone-wrap that
+            // `needs_clone_type` skips for `Copy` types. (Closure v2, P3.)
             .filter(|v| {
                 if !scope_vars.contains(v) { return false; }
-                needs_clone_type(&vt.get(*v).ty)
+                needs_clone_type(&vt.get(*v).ty) || SHARED_MUT.with(|m| m.borrow().contains(v))
             })
             .collect();
 
@@ -289,6 +452,13 @@ fn wrap_lambda_with_clones(expr: &mut IrExpr, captures: &[VarId], vt: &mut VarTa
             None,
         );
         renames.insert(var_id, cap_var);
+
+        // The clone of a shared-mut capture is itself a shared cell (`Rc<Cell>`),
+        // so reads/writes of `__cap` inside the closure go through `.get()`/`.set()`
+        // too. (Closure v2, P3.)
+        if SHARED_MUT.with(|m| m.borrow().contains(&var_id)) {
+            SHARED_MUT.with(|m| { m.borrow_mut().insert(cap_var); });
+        }
 
         // If the captured var is a fn param with a borrowed runtime
         // representation (`&[T]` / `&str` / `&T`), the bare `Var` IR
@@ -353,203 +523,6 @@ fn wrap_lambda_with_clones(expr: &mut IrExpr, captures: &[VarId], vt: &mut VarTa
         ty,
         span, def_id: None,
     };
-}
-
-// ── Free variable collection ──
-
-fn collect_free_vars(expr: &IrExpr, bound: &HashSet<VarId>, free: &mut HashSet<VarId>) {
-    match &expr.kind {
-        IrExprKind::Var { id } => {
-            if !bound.contains(id) { free.insert(*id); }
-        }
-        IrExprKind::Lambda { params, body, .. } => {
-            let mut inner_bound = bound.clone();
-            for (v, _) in params { inner_bound.insert(*v); }
-            collect_free_vars(body, &inner_bound, free);
-        }
-        IrExprKind::Block { stmts, expr: tail } => {
-            let mut local_bound = bound.clone();
-            for stmt in stmts {
-                collect_free_vars_stmt(stmt, &local_bound, free);
-                if let IrStmtKind::Bind { var, .. } = &stmt.kind {
-                    local_bound.insert(*var);
-                }
-            }
-            if let Some(e) = tail { collect_free_vars(e, &local_bound, free); }
-        }
-        IrExprKind::Call { target, args, .. } => {
-            match target {
-                CallTarget::Method { object, .. } => collect_free_vars(object, bound, free),
-                CallTarget::Computed { callee } => collect_free_vars(callee, bound, free),
-                _ => {}
-            }
-            for a in args { collect_free_vars(a, bound, free); }
-        }
-        IrExprKind::RuntimeCall { args, .. } => {
-            for a in args { collect_free_vars(a, bound, free); }
-        }
-        IrExprKind::BinOp { left, right, .. } => {
-            collect_free_vars(left, bound, free);
-            collect_free_vars(right, bound, free);
-        }
-        IrExprKind::UnOp { operand, .. } => collect_free_vars(operand, bound, free),
-        IrExprKind::If { cond, then, else_ } => {
-            collect_free_vars(cond, bound, free);
-            collect_free_vars(then, bound, free);
-            collect_free_vars(else_, bound, free);
-        }
-        IrExprKind::Match { subject, arms } => {
-            collect_free_vars(subject, bound, free);
-            for arm in arms {
-                let mut arm_bound = bound.clone();
-                collect_pattern_bindings(&arm.pattern, &mut arm_bound);
-                if let Some(g) = &arm.guard { collect_free_vars(g, &arm_bound, free); }
-                collect_free_vars(&arm.body, &arm_bound, free);
-            }
-        }
-        IrExprKind::ForIn { var, var_tuple, iterable, body } => {
-            collect_free_vars(iterable, bound, free);
-            let mut loop_bound = bound.clone();
-            loop_bound.insert(*var);
-            if let Some(vt) = var_tuple { for v in vt { loop_bound.insert(*v); } }
-            for s in body { collect_free_vars_stmt(s, &loop_bound, free); }
-        }
-        IrExprKind::While { cond, body } => {
-            collect_free_vars(cond, bound, free);
-            for s in body { collect_free_vars_stmt(s, bound, free); }
-        }
-        IrExprKind::List { elements } | IrExprKind::Tuple { elements }
-        | IrExprKind::Fan { exprs: elements } => {
-            for e in elements { collect_free_vars(e, bound, free); }
-        }
-        IrExprKind::Record { fields, .. } => {
-            for (_, v) in fields { collect_free_vars(v, bound, free); }
-        }
-        IrExprKind::SpreadRecord { base, fields } => {
-            collect_free_vars(base, bound, free);
-            for (_, v) in fields { collect_free_vars(v, bound, free); }
-        }
-        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. }
-        | IrExprKind::OptionalChain { expr: object, .. } => {
-            collect_free_vars(object, bound, free);
-        }
-        IrExprKind::IndexAccess { object, index } | IrExprKind::MapAccess { object, key: index } => {
-            collect_free_vars(object, bound, free);
-            collect_free_vars(index, bound, free);
-        }
-        IrExprKind::OptionSome { expr: e } | IrExprKind::ResultOk { expr: e }
-        | IrExprKind::ResultErr { expr: e } | IrExprKind::Try { expr: e }
-        | IrExprKind::Unwrap { expr: e } | IrExprKind::ToOption { expr: e }
-        | IrExprKind::Clone { expr: e } | IrExprKind::Deref { expr: e } => {
-            collect_free_vars(e, bound, free);
-        }
-        IrExprKind::UnwrapOr { expr: e, fallback: f } => {
-            collect_free_vars(e, bound, free);
-            collect_free_vars(f, bound, free);
-        }
-        IrExprKind::StringInterp { parts } => {
-            for p in parts {
-                if let IrStringPart::Expr { expr: e } = p { collect_free_vars(e, bound, free); }
-            }
-        }
-        IrExprKind::Range { start, end, .. } => {
-            collect_free_vars(start, bound, free);
-            collect_free_vars(end, bound, free);
-        }
-        IrExprKind::MapLiteral { entries } => {
-            for (k, v) in entries {
-                collect_free_vars(k, bound, free);
-                collect_free_vars(v, bound, free);
-            }
-        }
-        IrExprKind::Borrow { expr: e, .. }
-        | IrExprKind::BoxNew { expr: e }
-        | IrExprKind::ToVec { expr: e }
-        | IrExprKind::Await { expr: e } => {
-            collect_free_vars(e, bound, free);
-        }
-        IrExprKind::RustMacro { args, .. } => {
-            for a in args { collect_free_vars(a, bound, free); }
-        }
-        IrExprKind::IterChain { source, steps, collector, .. } => {
-            collect_free_vars(source, bound, free);
-            for step in steps {
-                match step {
-                    IterStep::Map { lambda } | IterStep::Filter { lambda }
-                    | IterStep::FlatMap { lambda } | IterStep::FilterMap { lambda } => {
-                        collect_free_vars(lambda, bound, free);
-                    }
-                }
-            }
-            match collector {
-                IterCollector::Collect => {}
-                IterCollector::Fold { init, lambda } => {
-                    collect_free_vars(init, bound, free);
-                    collect_free_vars(lambda, bound, free);
-                }
-                IterCollector::Any { lambda } | IterCollector::All { lambda }
-                | IterCollector::Find { lambda } | IterCollector::Count { lambda } => {
-                    collect_free_vars(lambda, bound, free);
-                }
-            }
-        }
-        _ => {}
-    }
-}
-
-fn collect_free_vars_stmt(stmt: &IrStmt, bound: &HashSet<VarId>, free: &mut HashSet<VarId>) {
-    match &stmt.kind {
-        IrStmtKind::Bind { value, .. } | IrStmtKind::BindDestructure { value, .. }
-        | IrStmtKind::Assign { value, .. } | IrStmtKind::FieldAssign { value, .. } => {
-            collect_free_vars(value, bound, free);
-        }
-        IrStmtKind::IndexAssign { index, value, .. } => {
-            collect_free_vars(index, bound, free);
-            collect_free_vars(value, bound, free);
-        }
-        IrStmtKind::MapInsert { key, value, .. } => {
-            collect_free_vars(key, bound, free);
-            collect_free_vars(value, bound, free);
-        }
-        IrStmtKind::ListSwap { a, b, .. } => {
-            collect_free_vars(a, bound, free);
-            collect_free_vars(b, bound, free);
-        }
-        IrStmtKind::ListReverse { end, .. } | IrStmtKind::ListRotateLeft { end, .. } => {
-            collect_free_vars(end, bound, free);
-        }
-        IrStmtKind::ListCopySlice { len, .. } => {
-            collect_free_vars(len, bound, free);
-        }
-        IrStmtKind::Guard { cond, else_ } => {
-            collect_free_vars(cond, bound, free);
-            collect_free_vars(else_, bound, free);
-        }
-        IrStmtKind::Expr { expr } => collect_free_vars(expr, bound, free),
-        IrStmtKind::RcInc { var } | IrStmtKind::RcDec { var } => { free.insert(*var); }
-        IrStmtKind::Comment { .. } => {}
-    }
-}
-
-fn collect_pattern_bindings(pattern: &IrPattern, bound: &mut HashSet<VarId>) {
-    match pattern {
-        IrPattern::Bind { var, .. } => { bound.insert(*var); }
-        IrPattern::Constructor { args, .. } => {
-            for a in args { collect_pattern_bindings(a, bound); }
-        }
-        IrPattern::Tuple { elements } => {
-            for e in elements { collect_pattern_bindings(e, bound); }
-        }
-        IrPattern::Some { inner, .. } | IrPattern::Ok { inner, .. } | IrPattern::Err { inner, .. } => {
-            collect_pattern_bindings(inner, bound);
-        }
-        IrPattern::RecordPattern { fields, .. } => {
-            for f in fields {
-                if let Some(p) = &f.pattern { collect_pattern_bindings(p, bound); }
-            }
-        }
-        _ => {}
-    }
 }
 
 // ── Variable replacement ──
@@ -664,38 +637,63 @@ fn replace_vars(expr: &mut IrExpr, renames: &std::collections::HashMap<VarId, Va
                 }
             }
         }
-        _ => {}
+        IrExprKind::TailCall { target, args } => {
+            match target {
+                CallTarget::Method { object, .. } => replace_vars(object, renames),
+                CallTarget::Computed { callee } => replace_vars(callee, renames),
+                CallTarget::Named { .. } | CallTarget::Module { .. } => {}
+            }
+            for a in args { replace_vars(a, renames); }
+        }
+        IrExprKind::RcWrap { expr: e, .. } => replace_vars(e, renames),
+        IrExprKind::InlineRust { args, .. } => {
+            for (_, a) in args { replace_vars(a, renames); }
+        }
+        // True leaves (no child `IrExpr`); `Var` is renamed above. Listed
+        // explicitly so a new child-bearing IrExprKind is a compile error.
+        IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. } | IrExprKind::LitStr { .. }
+        | IrExprKind::LitBool { .. } | IrExprKind::Unit | IrExprKind::FnRef { .. }
+        | IrExprKind::Break | IrExprKind::Continue
+        | IrExprKind::EmptyMap | IrExprKind::OptionNone | IrExprKind::RenderedCall { .. }
+        | IrExprKind::ClosureCreate { .. } | IrExprKind::EnvLoad { .. }
+        | IrExprKind::Hole | IrExprKind::Todo { .. } => {}
     }
 }
 
 fn replace_vars_stmt(stmt: &mut IrStmt, renames: &std::collections::HashMap<VarId, VarId>) {
+    // A captured var that is WRITTEN inside the closure (Assign/IndexAssign/...)
+    // must have its write *target* renamed too, not just its read sites —
+    // otherwise the closure mutates the original var (capturing/moving it) instead
+    // of its `__cap` clone. (Closure v2, P3.)
+    fn rn(v: &mut VarId, renames: &std::collections::HashMap<VarId, VarId>) {
+        if let Some(&new) = renames.get(v) { *v = new; }
+    }
     match &mut stmt.kind {
-        IrStmtKind::Bind { value, .. } | IrStmtKind::BindDestructure { value, .. }
-        | IrStmtKind::Assign { value, .. } | IrStmtKind::FieldAssign { value, .. } => {
+        IrStmtKind::Bind { value, .. } | IrStmtKind::BindDestructure { value, .. } => {
             replace_vars(value, renames);
         }
-        IrStmtKind::IndexAssign { index, value, .. } => {
-            replace_vars(index, renames); replace_vars(value, renames);
+        IrStmtKind::Assign { var, value } => { rn(var, renames); replace_vars(value, renames); }
+        IrStmtKind::FieldAssign { target, value, .. } => { rn(target, renames); replace_vars(value, renames); }
+        IrStmtKind::IndexAssign { target, index, value } => {
+            rn(target, renames); replace_vars(index, renames); replace_vars(value, renames);
         }
-        IrStmtKind::MapInsert { key, value, .. } => {
-            replace_vars(key, renames); replace_vars(value, renames);
+        IrStmtKind::MapInsert { target, key, value } => {
+            rn(target, renames); replace_vars(key, renames); replace_vars(value, renames);
         }
-        IrStmtKind::ListSwap { a, b, .. } => {
-            replace_vars(a, renames); replace_vars(b, renames);
+        IrStmtKind::ListSwap { target, a, b } => {
+            rn(target, renames); replace_vars(a, renames); replace_vars(b, renames);
         }
-        IrStmtKind::ListReverse { end, .. } | IrStmtKind::ListRotateLeft { end, .. } => {
-            replace_vars(end, renames);
+        IrStmtKind::ListReverse { target, end } | IrStmtKind::ListRotateLeft { target, end } => {
+            rn(target, renames); replace_vars(end, renames);
         }
-        IrStmtKind::ListCopySlice { len, .. } => {
-            replace_vars(len, renames);
+        IrStmtKind::ListCopySlice { dst, src, len } => {
+            rn(dst, renames); rn(src, renames); replace_vars(len, renames);
         }
         IrStmtKind::Guard { cond, else_ } => {
             replace_vars(cond, renames); replace_vars(else_, renames);
         }
         IrStmtKind::Expr { expr } => replace_vars(expr, renames),
-        IrStmtKind::RcInc { var } | IrStmtKind::RcDec { var } => {
-            if let Some(new_id) = renames.get(var) { *var = *new_id; }
-        }
+        IrStmtKind::RcInc { var } | IrStmtKind::RcDec { var } => { rn(var, renames); }
         IrStmtKind::Comment { .. } => {}
     }
 }

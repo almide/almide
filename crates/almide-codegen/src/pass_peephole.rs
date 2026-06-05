@@ -5,6 +5,7 @@
 //! Runs AFTER CloneInsertionPass so it sees the final ownership structure.
 
 use almide_ir::*;
+use almide_ir::visit_mut::{IrMutVisitor, walk_expr_mut};
 use super::pass::{NanoPass, PassResult, Target};
 
 #[derive(Debug)]
@@ -16,72 +17,70 @@ impl NanoPass for PeepholePass {
     fn depends_on(&self) -> Vec<&'static str> { vec![] }
 
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
-        let mut changed = false;
+        let mut v = Peephole { changed: false };
         for func in &mut program.functions {
-            if rewrite_expr(&mut func.body) { changed = true; }
+            v.visit_expr_mut(&mut func.body);
         }
         for tl in &mut program.top_lets {
-            if rewrite_expr(&mut tl.value) { changed = true; }
+            v.visit_expr_mut(&mut tl.value);
         }
         for module in &mut program.modules {
             for func in &mut module.functions {
-                if rewrite_expr(&mut func.body) { changed = true; }
+                v.visit_expr_mut(&mut func.body);
             }
             for tl in &mut module.top_lets {
-                if rewrite_expr(&mut tl.value) { changed = true; }
+                v.visit_expr_mut(&mut tl.value);
             }
         }
-        PassResult { program, changed }
+        PassResult { program, changed: v.changed }
     }
 }
 
-fn rewrite_expr(expr: &mut IrExpr) -> bool {
-    let mut changed = false;
-    match &mut expr.kind {
-        IrExprKind::Block { stmts, expr: tail } => {
-            if rewrite_stmts(stmts) { changed = true; }
-            if let Some(e) = tail { if rewrite_expr(e) { changed = true; } }
-        }
-        IrExprKind::If { cond, then, else_ } => {
-            if rewrite_expr(cond) { changed = true; }
-            if rewrite_expr(then) { changed = true; }
-            if rewrite_expr(else_) { changed = true; }
-        }
-        IrExprKind::Match { subject, arms } => {
-            if rewrite_expr(subject) { changed = true; }
-            for arm in arms {
-                if let Some(g) = &mut arm.guard { if rewrite_expr(g) { changed = true; } }
-                if rewrite_expr(&mut arm.body) { changed = true; }
-            }
-        }
-        IrExprKind::ForIn { iterable, body, .. } => {
-            if rewrite_expr(iterable) { changed = true; }
-            if rewrite_stmts(body) { changed = true; }
-        }
-        IrExprKind::While { cond, body } => {
-            if rewrite_expr(cond) { changed = true; }
-            if rewrite_stmts(body) { changed = true; }
-        }
-        IrExprKind::Lambda { body, .. } => {
-            if rewrite_expr(body) { changed = true; }
-        }
-        IrExprKind::BinOp { left, right, .. } => {
-            if rewrite_expr(left) { changed = true; }
-            if rewrite_expr(right) { changed = true; }
-        }
-        IrExprKind::UnOp { operand, .. } => {
-            if rewrite_expr(operand) { changed = true; }
-        }
-        IrExprKind::UnwrapOr { expr: inner, fallback } => {
-            if rewrite_expr(inner) { changed = true; }
-            if rewrite_expr(fallback) { changed = true; }
-        }
-        IrExprKind::Call { args, .. } | IrExprKind::RuntimeCall { args, .. } => {
-            for a in args { if rewrite_expr(a) { changed = true; } }
-        }
-        _ => {}
-    }
+/// Post-order peephole rewriter.
+///
+/// Child recursion goes through the canonical, wildcard-free `walk_expr_mut`, so
+/// the per-expression fusion/copy-loop rewrites are reached inside *every* node
+/// kind (Record fields, `Try`/`Clone` wrappers, map literals, …). A partial
+/// hand-rolled `match … { _ => {} }` would silently skip the unlisted kinds and
+/// drop their subtrees — the native↔WASM divergence class.
+///
+/// The only kinds handled explicitly are those carrying a `Vec<IrStmt>`
+/// (`Block` / `ForIn` / `While`): they route their statement vector through
+/// `rewrite_stmts` so the cross-statement sequence detectors (vec-init / swap /
+/// reverse / rotate idioms) keep running. Those arms early-return from the match
+/// (no `walk_expr_mut`) so the statement bodies are visited exactly once.
+struct Peephole {
+    changed: bool,
+}
 
+impl IrMutVisitor for Peephole {
+    fn visit_expr_mut(&mut self, expr: &mut IrExpr) {
+        match &mut expr.kind {
+            IrExprKind::Block { stmts, expr: tail } => {
+                self.rewrite_stmts(stmts);
+                if let Some(e) = tail { self.visit_expr_mut(e); }
+            }
+            IrExprKind::ForIn { iterable, body, .. } => {
+                self.visit_expr_mut(iterable);
+                self.rewrite_stmts(body);
+            }
+            IrExprKind::While { cond, body } => {
+                self.visit_expr_mut(cond);
+                self.rewrite_stmts(body);
+            }
+            // Every other kind: exhaustive child recursion via the IR visitor —
+            // any future variant is traversed automatically.
+            _ => walk_expr_mut(self, expr),
+        }
+
+        self.local_rewrite(expr);
+    }
+}
+
+impl Peephole {
+    /// Apply the single-expression peephole rewrites to `expr` after its children
+    /// have already been rewritten (post-order). Sets `self.changed` on a hit.
+    fn local_rewrite(&mut self, expr: &mut IrExpr) {
     // ── Fusion: unwrap_or(map.get(m, k), default) → map.get_or(m, k, default) ──
     // Eliminates heap allocation for Option return in the common ?? pattern.
     if let IrExprKind::UnwrapOr { expr: inner, fallback } = &expr.kind {
@@ -104,7 +103,8 @@ fn rewrite_expr(expr: &mut IrExpr) -> bool {
                     span: expr.span,
                     def_id: None,
                 };
-                return true;
+                self.changed = true;
+                return;
             }
         }
         // Also handle RuntimeCall form (post-IntrinsicLowering)
@@ -128,7 +128,8 @@ fn rewrite_expr(expr: &mut IrExpr) -> bool {
                     span: expr.span,
                     def_id: None,
                 };
-                return true;
+                self.changed = true;
+                return;
             }
         }
     }
@@ -138,92 +139,93 @@ fn rewrite_expr(expr: &mut IrExpr) -> bool {
         if var_tuple.is_none() && body.len() == 1 {
             if let Some(copy) = try_detect_copy_loop(*var, iterable, &body[0]) {
                 *expr = copy;
-                return true;
+                self.changed = true;
             }
         }
     }
-
-    changed
-}
-
-fn rewrite_stmts(stmts: &mut Vec<IrStmt>) -> bool {
-    // First recurse into sub-exprs of each stmt
-    let mut changed = false;
-    for stmt in stmts.iter_mut() {
-        match &mut stmt.kind {
-            IrStmtKind::Bind { value, .. } | IrStmtKind::BindDestructure { value, .. }
-            | IrStmtKind::Assign { value, .. } | IrStmtKind::FieldAssign { value, .. } => {
-                if rewrite_expr(value) { changed = true; }
-            }
-            IrStmtKind::IndexAssign { index, value, .. } => {
-                if rewrite_expr(index) { changed = true; }
-                if rewrite_expr(value) { changed = true; }
-            }
-            IrStmtKind::MapInsert { key, value, .. } => {
-                if rewrite_expr(key) { changed = true; }
-                if rewrite_expr(value) { changed = true; }
-            }
-            IrStmtKind::Guard { cond, else_ } => {
-                if rewrite_expr(cond) { changed = true; }
-                if rewrite_expr(else_) { changed = true; }
-            }
-            IrStmtKind::Expr { expr } => {
-                if rewrite_expr(expr) { changed = true; }
-            }
-            IrStmtKind::ListSwap { a, b, .. } => {
-                if rewrite_expr(a) { changed = true; }
-                if rewrite_expr(b) { changed = true; }
-            }
-            IrStmtKind::ListReverse { end, .. } | IrStmtKind::ListRotateLeft { end, .. } => {
-                if rewrite_expr(end) { changed = true; }
-            }
-            IrStmtKind::ListCopySlice { len, .. } => {
-                if rewrite_expr(len) { changed = true; }
-            }
-            _ => {}
-        }
     }
 
-    // Multi-stmt peephole: work on indices, collect results
-    let orig = std::mem::take(stmts);
-    let mut result = Vec::with_capacity(orig.len());
-    let len = orig.len();
-    // Convert to indexable slice, consume via into_iter at the end
-    let slice = &orig;
-    let mut i = 0;
-    while i < len {
-        // 3-stmt patterns
-        if i + 2 < len {
-            if let Some(s) = try_detect_vec_init(&slice[i], &slice[i + 1], &slice[i + 2]) {
-                result.push(s); i += 3; changed = true; continue;
-            }
-            if let Some(s) = try_detect_reverse_block(&slice[i], &slice[i + 1], &slice[i + 2]) {
-                result.push(s); i += 3; changed = true; continue;
-            }
-            if let Some(s) = try_detect_rotate(&slice[i], &slice[i + 1], &slice[i + 2]) {
-                result.push(s); i += 3; changed = true; continue;
-            }
-            if let Some(s) = try_detect_swap(&slice[i], &slice[i + 1], &slice[i + 2]) {
-                result.push(s); i += 3; changed = true; continue;
+    /// Cross-statement sequence analysis. Recurses each statement's sub-exprs
+    /// through `visit_expr_mut` (so the per-expr rewrites still fire inside
+    /// statements), then collapses the recognized multi-statement idioms.
+    fn rewrite_stmts(&mut self, stmts: &mut Vec<IrStmt>) {
+        // First recurse into sub-exprs of each stmt
+        for stmt in stmts.iter_mut() {
+            match &mut stmt.kind {
+                IrStmtKind::Bind { value, .. } | IrStmtKind::BindDestructure { value, .. }
+                | IrStmtKind::Assign { value, .. } | IrStmtKind::FieldAssign { value, .. } => {
+                    self.visit_expr_mut(value);
+                }
+                IrStmtKind::IndexAssign { index, value, .. } => {
+                    self.visit_expr_mut(index);
+                    self.visit_expr_mut(value);
+                }
+                IrStmtKind::MapInsert { key, value, .. } => {
+                    self.visit_expr_mut(key);
+                    self.visit_expr_mut(value);
+                }
+                IrStmtKind::Guard { cond, else_ } => {
+                    self.visit_expr_mut(cond);
+                    self.visit_expr_mut(else_);
+                }
+                IrStmtKind::Expr { expr } => {
+                    self.visit_expr_mut(expr);
+                }
+                IrStmtKind::ListSwap { a, b, .. } => {
+                    self.visit_expr_mut(a);
+                    self.visit_expr_mut(b);
+                }
+                IrStmtKind::ListReverse { end, .. } | IrStmtKind::ListRotateLeft { end, .. } => {
+                    self.visit_expr_mut(end);
+                }
+                IrStmtKind::ListCopySlice { len, .. } => {
+                    self.visit_expr_mut(len);
+                }
+                // No recursable sub-exprs (Comment / RcInc / RcDec).
+                IrStmtKind::Comment { .. } | IrStmtKind::RcInc { .. } | IrStmtKind::RcDec { .. } => {}
             }
         }
 
-        // Self-assignment elimination
-        if let IrStmtKind::Assign { var, value } = &slice[i].kind {
-            let is_self = match &value.kind {
-                IrExprKind::Var { id } => id == var,
-                IrExprKind::Clone { expr } => matches!(&expr.kind, IrExprKind::Var { id } if id == var),
-                _ => false,
-            };
-            if is_self { i += 1; changed = true; continue; }
+        // Multi-stmt peephole: work on indices, collect results
+        let orig = std::mem::take(stmts);
+        let mut result = Vec::with_capacity(orig.len());
+        let len = orig.len();
+        // Convert to indexable slice, consume via into_iter at the end
+        let slice = &orig;
+        let mut i = 0;
+        while i < len {
+            // 3-stmt patterns
+            if i + 2 < len {
+                if let Some(s) = try_detect_vec_init(&slice[i], &slice[i + 1], &slice[i + 2]) {
+                    result.push(s); i += 3; self.changed = true; continue;
+                }
+                if let Some(s) = try_detect_reverse_block(&slice[i], &slice[i + 1], &slice[i + 2]) {
+                    result.push(s); i += 3; self.changed = true; continue;
+                }
+                if let Some(s) = try_detect_rotate(&slice[i], &slice[i + 1], &slice[i + 2]) {
+                    result.push(s); i += 3; self.changed = true; continue;
+                }
+                if let Some(s) = try_detect_swap(&slice[i], &slice[i + 1], &slice[i + 2]) {
+                    result.push(s); i += 3; self.changed = true; continue;
+                }
+            }
+
+            // Self-assignment elimination
+            if let IrStmtKind::Assign { var, value } = &slice[i].kind {
+                let is_self = match &value.kind {
+                    IrExprKind::Var { id } => id == var,
+                    IrExprKind::Clone { expr } => matches!(&expr.kind, IrExprKind::Var { id } if id == var),
+                    _ => false,
+                };
+                if is_self { i += 1; self.changed = true; continue; }
+            }
+
+            result.push(orig[i].clone());
+            i += 1;
         }
 
-        result.push(orig[i].clone());
-        i += 1;
+        *stmts = result;
     }
-
-    *stmts = result;
-    changed
 }
 
 // ── Pattern detectors ──────────────────────────────────────────

@@ -184,8 +184,8 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
             // operand widths. Mirrors the fn-arg and let-binding
             // coercion rules — the same authoritative-context rule
             // applies to any pairing where one side locks the width.
-            super::statements::coerce_literal_to_sized(&mut r, &l.ty);
-            super::statements::coerce_literal_to_sized(&mut l, &r.ty);
+            super::statements::coerce_literal_to_sized(&mut r, &l.ty, ctx.env);
+            super::statements::coerce_literal_to_sized(&mut l, &r.ty, ctx.env);
             // Resolve operand types: if expr.ty is Unknown, try VarTable lookup
             let left_ty = if l.ty == Ty::Unknown {
                 if let IrExprKind::Var { id } = &l.kind { ctx.var_table.get(*id).ty.clone() } else { l.ty.clone() }
@@ -318,7 +318,14 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
                 Ty::Applied(TypeConstructorId::Map, args) if args.len() == 2 => Ty::Tuple(vec![args[0].clone(), args[1].clone()]),
                 _ => Ty::Unknown,
             };
-            let var_id = ctx.define_var(var, elem_ty.clone(), Mutability::Let, span.clone());
+            // For a tuple-destructure loop (`for (i, x) in …`) the loop var is a
+            // synthetic holder for each tuple — the real user bindings are the
+            // `var_tuple` components. Give it no span so the unused-variable check
+            // never flags it (it is never used directly, only destructured, and it
+            // inherits the first element's name → a spurious "unused 'i'"). A plain
+            // `for x in …` keeps its span so a genuinely unused `x` is still flagged.
+            let loop_var_span = if var_tuple.is_some() { None } else { span.clone() };
+            let var_id = ctx.define_var(var, elem_ty.clone(), Mutability::Let, loop_var_span);
             let tuple_vars = var_tuple.as_ref().map(|names| {
                 let tys = match &elem_ty {
                     Ty::Tuple(tys) => tys.clone(),
@@ -561,8 +568,13 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
                 ast::StringPart::Lit { value } => IrStringPart::Lit { value: value.clone() },
                 ast::StringPart::Expr { expr } => {
                     let mut ir_expr = lower_expr(ctx, expr);
-                    // Operator protocol: dispatch to Repr convention if available
-                    if let Some(repr_fn) = ctx.find_convention_fn(&ir_expr.ty, "repr") {
+                    // Operator protocol: dispatch to an EXPLICIT user `repr` only.
+                    // An auto-derived `repr` is intentionally NOT used here — the
+                    // record/variant instead falls through to the codegen
+                    // `AlmideRepr` impl (the canonical literal form with quoted
+                    // strings), so an auto-derived and a plain record interpolate
+                    // byte-identically. An explicit `fn X.repr` still wins.
+                    if let Some(repr_fn) = ctx.find_explicit_convention_fn(&ir_expr.ty, "repr") {
                         ir_expr = ctx.mk(IrExprKind::Call {
                             target: CallTarget::Named { name: repr_fn },
                             args: vec![ir_expr], type_args: vec![],
@@ -622,7 +634,27 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
 
         // ── Misc ──
         ast::ExprKind::Paren { expr, .. } => lower_expr(ctx, expr),
-        ast::ExprKind::TypeAscription { expr, .. } => lower_expr(ctx, expr),
+        ast::ExprKind::TypeAscription { expr, ty: ascribed_te } => {
+            // The ascription pins the inner expression's type (`[]: List[Int]`).
+            // Lower the inner expr, then adopt the ascribed type when the inner
+            // came back less resolved — an empty collection literal otherwise
+            // carries an unresolved element type, which codegen renders as an
+            // uninferable `Vec::<_>::new()` (native E0282) under `almide_repr`.
+            // The annotation's own `TypeExpr` is the authoritative source: the
+            // checker's resolved type-map entry for the ascription can still be
+            // an unresolved `List[?]` when nothing outside the annotation
+            // constrained the element.
+            let mut inner = lower_expr(ctx, expr);
+            if inner.ty.has_unresolved_deep() {
+                let ascribed = resolve_type_expr(ascribed_te);
+                if !ascribed.has_unresolved_deep() {
+                    inner.ty = ascribed;
+                } else if !ty.has_unresolved_deep() {
+                    inner.ty = ty;
+                }
+            }
+            inner
+        }
         ast::ExprKind::Hole => ctx.mk(IrExprKind::Hole, ty, span),
         ast::ExprKind::Todo { message, .. } => ctx.mk(IrExprKind::Todo { message: message.clone() }, ty, span),
         ast::ExprKind::Error => ctx.mk(IrExprKind::Unit, Ty::Unknown, span),

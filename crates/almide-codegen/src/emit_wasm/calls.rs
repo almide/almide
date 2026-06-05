@@ -789,11 +789,11 @@ impl FuncCompiler<'_> {
                     }
                     "to_upper" | "string.to_upper" if matches!(object.ty, Ty::String) => {
                         self.emit_expr(object);
-                        self.emit_str_case_convert(true);
+                        wasm!(self.func, { call(self.emitter.rt.string.to_upper); });
                     }
                     "to_lower" | "string.to_lower" if matches!(object.ty, Ty::String) => {
                         self.emit_expr(object);
-                        self.emit_str_case_convert(false);
+                        wasm!(self.func, { call(self.emitter.rt.string.to_lower); });
                     }
                     "starts_with" | "string.starts_with" | "ends_with" | "string.ends_with" if matches!(object.ty, Ty::String) => {
                         let m = method.strip_prefix("string.").unwrap_or(method);
@@ -1407,12 +1407,22 @@ impl FuncCompiler<'_> {
     fn emit_fan_call(&mut self, func: &str, args: &[IrExpr], result_ty: &Ty) {
         match func {
             "map" => {
-                // fan.map(xs, f) — apply effect fn f to each element, unwrap Results
-                // f returns Result[T, E] (i32 ptr). We unwrap ok values into result list.
+                // fan.map(xs, f) → Result[List[B], String]: apply effect fn f to each
+                // element (f returns Result[B, E], an i32 ptr), collecting the unwrapped
+                // ok values in LIST ORDER. If any element fails, the WHOLE map produces
+                // that element's Err Result (the FIRST err in list order) — a DEFINED
+                // Result, not a wasm trap. The standard Try wrapper / effect-main path
+                // then propagates it, byte-identical to native's collect::<Result<_>>().
+                //
+                // result_ty is now Result[List[B], String]; peel one layer for the list,
+                // then another for the element.
+                let list_ty = match result_ty {
+                    Ty::Applied(_, a) => a.first().cloned().unwrap_or(Ty::Unknown),
+                    _ => result_ty.clone(),
+                };
                 let elem_ty = self.resolve_list_elem(&args[0], None);
                 let es = values::byte_size(&elem_ty) as i32;
-                // Determine output element type from result_ty
-                let out_elem_ty = if let Ty::Applied(_, a) = result_ty {
+                let out_elem_ty = if let Ty::Applied(_, a) = &list_ty {
                     a.first().cloned().unwrap_or(Ty::Int)
                 } else { Ty::Int };
                 let out_es = values::byte_size(&out_elem_ty) as i32;
@@ -1422,11 +1432,13 @@ impl FuncCompiler<'_> {
                 let dst = self.scratch.alloc_i32();
                 let i = self.scratch.alloc_i32();
                 let res = self.scratch.alloc_i32();
+                let err_ptr = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
                 wasm!(self.func, { local_set(xs); });
                 self.emit_expr(&args[1]);
                 wasm!(self.func, {
                     local_set(closure);
+                    i32_const(0); local_set(err_ptr);
                     local_get(xs); i32_load(0); local_set(len);
                     i32_const(self.emitter.layout_reg.header_size(super::engine::layout::LIST) as i32); local_get(len); i32_const(out_es); i32_mul; i32_add;
                     call(self.emitter.rt.alloc); local_set(dst);
@@ -1452,9 +1464,10 @@ impl FuncCompiler<'_> {
                 }
                 wasm!(self.func, {
                       local_set(res);
-                      // Unwrap Result: if err, propagate
+                      // First element Err: stash it and break out of loop+block (DON'T
+                      // trap/return). Depths from inside this `if`: if=0, loop=1, block=2.
                       local_get(res); i32_load(0); i32_const(0); i32_ne;
-                      if_empty; local_get(res); return_; end;
+                      if_empty; local_get(res); local_set(err_ptr); br(2); end;
                       // Store unwrapped ok value into dst
                       local_get(dst); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
                       local_get(i); i32_const(out_es); i32_mul; i32_add;
@@ -1466,8 +1479,19 @@ impl FuncCompiler<'_> {
                       local_get(i); i32_const(1); i32_add; local_set(i);
                       br(0);
                     end; end;
-                    local_get(dst);
+                    // Produce a Result ptr: err_ptr if an element failed, else Ok(dst).
+                    local_get(err_ptr); i32_eqz;
+                    if_i32;
+                      // Ok(dst): [tag:0][list ptr@4]
+                      i32_const(8); call(self.emitter.rt.alloc); local_set(res);
+                      local_get(res); i32_const(0); i32_store(0);
+                      local_get(res); local_get(dst); i32_store(4);
+                      local_get(res);
+                    else_;
+                      local_get(err_ptr);
+                    end;
                 });
+                self.scratch.free_i32(err_ptr);
                 self.scratch.free_i32(res);
                 self.scratch.free_i32(i);
                 self.scratch.free_i32(dst);
@@ -1476,49 +1500,63 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(xs);
             }
             "race" => {
-                // fan.race(fns: List[() -> Result[T,E]]) → T
-                // Sequential: call first fn, unwrap result
-                // fns is a list of closures. Call fns[0]().
+                // fan.race(fns: List[() -> Result[T,E]]) → Result[T, String]: the FIRST
+                // thunk in LIST ORDER to SETTLE = fns[0]'s Result (Ok or Err),
+                // deterministic (NOT wall-clock). Distinct from fan.any (which SKIPS
+                // failures): race leaves fns[0]'s Result as-is for the standard
+                // effectful auto-unwrap. An empty list yields a DEFINED Err (no OOB read).
                 let list_scratch = self.scratch.alloc_i32();
+                let closure = self.scratch.alloc_i32();
+                let out = self.scratch.alloc_i32();
+                let fail_msg = self.emitter.intern_string("fan.race: no candidates") as i32;
+                let data_off = self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32;
                 self.emit_expr(&args[0]);
                 wasm!(self.func, {
                     local_set(list_scratch);
-                    // Get first closure: fns[0]
-                    local_get(list_scratch); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add; i32_load(0);
-                });
-                // Call the closure (0-arg + env)
-                let res_scratch = self.scratch.alloc_i32();
-                wasm!(self.func, {
-                    local_set(res_scratch); // closure ptr
-                    local_get(res_scratch); i32_load(4); // env
-                    local_get(res_scratch); i32_load(0); // table_idx
+                    local_get(list_scratch); i32_load(0); i32_eqz; // len == 0
+                    if_empty;
+                      // Err("fan.race: no candidates"): [tag:1][msg@4]
+                      i32_const(8); call(self.emitter.rt.alloc); local_set(out);
+                      local_get(out); i32_const(1); i32_store(0);
+                      local_get(out); i32_const(fail_msg); i32_store(4);
+                    else_;
+                      // out = fns[0]()
+                      local_get(list_scratch); i32_const(data_off); i32_add; i32_load(0); local_set(closure);
+                      local_get(closure); i32_load(4); // env
+                      local_get(closure); i32_load(0); // table_idx
                 });
                 {
                     let ti = self.emitter.register_type(vec![ValType::I32], vec![ValType::I32]);
                     wasm!(self.func, { call_indirect(ti, 0); });
                 }
-                // Unwrap Result
                 wasm!(self.func, {
-                    local_set(res_scratch);
-                    local_get(res_scratch); i32_load(0); i32_const(0); i32_ne;
-                    if_empty; local_get(res_scratch); return_; end;
-                    local_get(res_scratch);
+                      local_set(out);
+                    end;
+                    local_get(out);
                 });
-                self.emit_load_at(result_ty, 4);
-                self.scratch.free_i32(res_scratch);
+                self.scratch.free_i32(out);
+                self.scratch.free_i32(closure);
                 self.scratch.free_i32(list_scratch);
             }
             "any" => {
-                // fan.any(fns) → T: first success wins (unwrapped ok value)
-                // Sequential: try each, return first ok value
+                // fan.any(fns) → Result[T, String]: try thunks in LIST ORDER, return
+                // the FIRST Ok Result (deterministic — NOT wall-clock fastest). The
+                // thunk's own `Ok(value)` Result ptr IS the fan.any result, so it is
+                // left on the stack as-is. If EVERY candidate fails, produce a DEFINED
+                // Err("fan.any: all candidates failed") Result — never a wasm trap. The
+                // standard Try wrapper / effect-main path then surfaces it, matching
+                // native's Err byte-for-byte ("Error: fan.any: all candidates failed").
                 let list_scratch = self.scratch.alloc_i32();
                 let i = self.scratch.alloc_i32();
                 let res = self.scratch.alloc_i32();
                 let closure = self.scratch.alloc_i32();
+                let out = self.scratch.alloc_i32();
+                let fail_msg = self.emitter.intern_string("fan.any: all candidates failed") as i32;
                 self.emit_expr(&args[0]);
                 wasm!(self.func, {
                     local_set(list_scratch);
                     i32_const(0); local_set(i);
+                    i32_const(0); local_set(out);
                     block_empty; loop_empty;
                       local_get(i); local_get(list_scratch); i32_load(0); i32_ge_u; br_if(1);
                       local_get(list_scratch); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
@@ -1533,21 +1571,25 @@ impl FuncCompiler<'_> {
                 }
                 wasm!(self.func, {
                       local_set(res);
-                      // If ok (tag==0), unwrap and return value
+                      // First Ok (tag==0): this thunk's Ok Result IS the result; break.
                       local_get(res); i32_load(0); i32_eqz;
                       if_empty;
-                        local_get(res);
-                });
-                self.emit_load_at(result_ty, 4);
-                wasm!(self.func, {
-                        return_;
+                        local_get(res); local_set(out);
+                        br(2); // break out of loop + block (if=0, loop=1, block=2)
                       end;
                       local_get(i); i32_const(1); i32_add; local_set(i);
                       br(0);
                     end; end;
+                    // All failed → Err("fan.any: all candidates failed"): [tag:1][msg@4].
+                    local_get(out); i32_eqz;
+                    if_empty;
+                      i32_const(8); call(self.emitter.rt.alloc); local_set(out);
+                      local_get(out); i32_const(1); i32_store(0);
+                      local_get(out); i32_const(fail_msg); i32_store(4);
+                    end;
+                    local_get(out);
                 });
-                // All failed: trap (no success found)
-                wasm!(self.func, { unreachable; });
+                self.scratch.free_i32(out);
                 self.scratch.free_i32(closure);
                 self.scratch.free_i32(res);
                 self.scratch.free_i32(i);
@@ -1560,6 +1602,7 @@ impl FuncCompiler<'_> {
                 let result = self.scratch.alloc_i32();
                 let i = self.scratch.alloc_i32();
                 let closure = self.scratch.alloc_i32();
+                let res_val = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
                 wasm!(self.func, {
                     local_set(list_scratch);
@@ -1580,22 +1623,29 @@ impl FuncCompiler<'_> {
                     let ti = self.emitter.register_type(vec![ValType::I32], vec![ValType::I32]);
                     wasm!(self.func, { call_indirect(ti, 0); });
                 }
+                // The closure result is an aliased (non-fresh) Result pointer. The
+                // settle list must own a reference, or the size-blind LIFO free-list
+                // allocator reuses/zeroes that block during later thunk calls and
+                // string allocations — corrupting the settled values. rc_inc it
+                // (returns the same ptr), then store `result[i] = it`. call_indirect
+                // left the result on the operand stack; stash it in a scratch so the
+                // store gets the correct [addr, value] order (the original stored in
+                // the reverse order, writing the list address INTO the Result block).
                 wasm!(self.func, {
-                      // Store result[i] = closure result
+                      call(self.emitter.rt.rc_inc);
+                      local_set(res_val);
+                      // result[i] address
                       local_get(result); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
                       local_get(i); i32_const(4); i32_mul; i32_add;
-                });
-                // swap: [result_ptr, result_i32_addr] → need [addr, value]
-                // Actually: stack has [closure_result, result_addr]. swap needed.
-                // Restructure: push addr first
-                // Let me fix the order:
-                wasm!(self.func, {
-                      i32_store(0); // store closure result at result[i]
+                      // value, then store
+                      local_get(res_val);
+                      i32_store(0);
                       local_get(i); i32_const(1); i32_add; local_set(i);
                       br(0);
                     end; end;
                     local_get(result);
                 });
+                self.scratch.free_i32(res_val);
                 self.scratch.free_i32(closure);
                 self.scratch.free_i32(i);
                 self.scratch.free_i32(result);

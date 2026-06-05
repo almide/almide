@@ -104,5 +104,5 @@ pub fn almide_rt_int_from_uint64(n: u64) -> i64 { n as i64 }
 
 //__ALMIDE_RT_BOUNDARY__
 pub fn parse_int(s: &str) -> Result<i64, String> {
-    Ok((almide_rt_int_parse(&*s))?)
+    Ok::<i64, String>((almide_rt_int_parse(&*s))?)
 }

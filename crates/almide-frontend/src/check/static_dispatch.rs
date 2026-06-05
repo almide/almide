@@ -81,7 +81,11 @@ impl Checker {
                 }
                 match field {
                     "map" => {
-                        // fan.map(xs, f) -> List[B] where xs: List[A], f: Fn(A) -> B
+                        // fan.map(xs, f) -> Result[List[B], String] where xs: List[A],
+                        // f: Fn(A) -> Result[B, String]. EFFECTFUL: the first element
+                        // Err (in list order) propagates as the whole map's Err. The
+                        // Result is auto-unwrapped in effect-fn bindings and auto-`?`
+                        // propagated, exactly like a user effect fn call.
                         if arg_tys.len() != 2 {
                             self.emit(super::err(
                                 format!("fan.map() expects 2 arguments but got {}", arg_tys.len()),
@@ -94,19 +98,35 @@ impl Checker {
                             Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 => args[0].clone(),
                             _ => Ty::Unknown,
                         };
-                        // Infer return type from f's return type
-                        let fn_ty = resolve_ty(&arg_tys[1], &self.uf);
-                        let result_elem = unwrap_fn_return(&fn_ty).unwrap_or_else(|| {
-                            let ret_var = self.fresh_var();
-                            self.constrain(arg_tys[1].clone(),
-                                Ty::Fn { params: vec![elem_ty], ret: Box::new(ret_var.clone()) },
-                                "fan.map callback");
-                            resolve_ty(&ret_var, &self.uf)
-                        });
-                        return Some(Ty::list(result_elem));
+                        // Pin the callback's full type — `Fn(elem_ty) -> Result[B, String]`
+                        // — UNCONDITIONALLY, mirroring the normal `list.map` rule
+                        // (check/calls.rs constrains the arg to `Fn { params: arg_tys, .. }`),
+                        // with fan.map's added contract that the callback returns a Result.
+                        // Two things hinge on this being unconditional, not a fallback:
+                        //   - Param pinning: an inline lambda whose return type resolves on
+                        //     its own — e.g. `(x) => ok(x * 10)` — would otherwise leave `x`
+                        //     a free var that resolves to Ty::Unknown in the IR. WASM closure
+                        //     registration then falls back to i32 for the param while the body
+                        //     emits i64 for `x * 10` (validator: i32 != i64).
+                        //   - Return contract: a callback returning a bare Int or an Option
+                        //     (e.g. `(x) => x * 10` / `(x) => some(...)`) is ill-typed and is
+                        //     now reported at check time, instead of silently lowering to
+                        //     invalid Rust (E0308: expected Result, found Int/Option).
+                        let result_elem = self.fresh_var();
+                        let callback_ret = Ty::result(result_elem.clone(), Ty::String);
+                        self.constrain(arg_tys[1].clone(),
+                            Ty::Fn { params: vec![elem_ty], ret: Box::new(callback_ret) },
+                            "fan.map callback");
+                        return Some(Ty::result(Ty::list(resolve_ty(&result_elem, &self.uf)), Ty::String));
                     }
                     "race" => {
-                        // fan.race(thunks) -> T where thunks: List[Fn() -> T]
+                        // fan.race(thunks) -> Result[T, String] — the FIRST thunk in
+                        // LIST ORDER to SETTLE (deterministic, NOT wall-clock): thunk[0]'s
+                        // result, Ok(v) or Err(e). Distinct from fan.any, which SKIPS
+                        // failures to find the first Ok. EFFECTFUL like fan.any: a head Err
+                        // is auto-`?` propagated to the unified main-error exit. (The
+                        // wall-clock "fastest wins" has no portable, deterministic meaning;
+                        // every async model's deterministic kernel is source/list order.)
                         if arg_tys.len() != 1 {
                             self.emit(super::err(
                                 format!("fan.race() expects 1 argument but got {}", arg_tys.len()),
@@ -115,10 +135,14 @@ impl Checker {
                             return Some(Ty::Unknown);
                         }
                         let list_ty = resolve_ty(&arg_tys[0], &self.uf);
-                        return Some(unwrap_list_fn_return(&list_ty));
+                        return Some(Ty::result(unwrap_list_fn_return(&list_ty), Ty::String));
                     }
                     "any" => {
-                        // fan.any(thunks) -> T — first success, all fail = error
+                        // fan.any(thunks) -> Result[T, String] — try thunks in LIST
+                        // ORDER, return the FIRST Ok (deterministic); if ALL fail,
+                        // return a defined Err ("fan.any: all candidates failed").
+                        // EFFECTFUL: auto-unwrapped in effect-fn bindings and auto-`?`
+                        // propagated, like a user effect fn call.
                         if arg_tys.len() != 1 {
                             self.emit(super::err(
                                 format!("fan.any() expects 1 argument but got {}", arg_tys.len()),
@@ -127,7 +151,7 @@ impl Checker {
                             return Some(Ty::Unknown);
                         }
                         let list_ty = resolve_ty(&arg_tys[0], &self.uf);
-                        return Some(unwrap_list_fn_return(&list_ty));
+                        return Some(Ty::result(unwrap_list_fn_return(&list_ty), Ty::String));
                     }
                     "settle" => {
                         // fan.settle(thunks) -> List[Result[T, String]]

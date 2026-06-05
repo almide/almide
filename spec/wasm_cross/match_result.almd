@@ -1,0 +1,46 @@
+// Cross-target coverage: a `match` whose arms construct a Result with `err(..)`
+// arms. Regression — such a match was typed `Never`, so the WASM function
+// epilogue appended `unreachable` and trapped (exit 134) while native ran fine.
+// Now native == WASM byte-for-byte on stdout.
+
+fn all_err(x: Int) -> Result[Int, String] = match x {
+  2 => err("two"),
+  _ => err("other"),
+}
+
+fn mixed(x: Int) -> Result[Int, String] = match x {
+  2 => err("bad"),
+  _ => ok(x * 10),
+}
+
+fn nested(x: Int) -> Result[Int, String] = match x {
+  0 => err("zero"),
+  _ => match x {
+    1 => err("one"),
+    _ => ok(x),
+  },
+}
+
+fn guarded(x: Int) -> Result[Int, String] = match x {
+  n if n < 0 => err("neg"),
+  0 => err("zero"),
+  _ => ok(x),
+}
+
+fn show(r: Result[Int, String]) -> String = match r {
+  ok(v) => "ok(" + int.to_string(v) + ")",
+  err(e) => "err(" + e + ")",
+}
+
+fn main() -> Unit = {
+  println(show(all_err(2)))
+  println(show(all_err(5)))
+  println(show(mixed(2)))
+  println(show(mixed(7)))
+  println(show(nested(0)))
+  println(show(nested(1)))
+  println(show(nested(9)))
+  println(show(guarded(0 - 4)))
+  println(show(guarded(0)))
+  println(show(guarded(8)))
+}

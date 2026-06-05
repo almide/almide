@@ -67,3 +67,32 @@ dce.rs            WASM-level dead function elimination
 2. Implement body in `rt_*.rs` (`compile_*` function).
 3. Dispatch in `calls_*.rs` (method match arm).
 4. Add Almide test in `spec/stdlib/`.
+
+### Adding a wasm runtime routine (the oracle-pairing gate)
+
+Every `fn compile_*` in `emit_wasm/` is a hand-written wasm reimplementation of
+behavior the **native runtime is the oracle for** (`runtime/rs/src/*`, which
+delegates to Rust std). ~72% of all cross-target bugs were this wasm runtime
+drifting from that oracle. So a new runtime routine must do TWO things, enforced
+by `scripts/check-rt-oracle-registry.sh` (CI `checks` job + a lefthook
+pre-commit hook):
+
+1. **Register it** in `crates/almide-codegen/rt-oracle-registry.toml` with the
+   native counterpart it mirrors (`oracle = "..."`). The composite key is
+   `file::routine` — two routines share the bare name across files.
+2. **Pair it with a differential test against the oracle**, then set
+   `status = "verified"` and cite the test as `test = "<path>::<name>"`. The
+   simplest differential test is a `spec/wasm_cross/*.almd` fixture that exercises
+   the stdlib surface: the `wasm_cross_target_spec` gate runs it on native and
+   wasm and asserts byte-identical (stdout, stderr, exit). For
+   table-generators, an inline Σ-probe against `char`/`str` std methods (see
+   `rt_string_case.rs`, `rt_string.rs`) is the pattern.
+
+`status = "grandfathered"` is the **pre-existing drain backlog** (Stage 2): a
+routine with no paired differential test yet. **Do NOT add new routines as
+grandfathered** — ship the test. The gate fails if a routine is unregistered, if
+a registry entry's routine no longer exists, or if a `verified` entry's cited
+test path/name is missing. Structural/orchestration emitters (user-fn body
+compiler, the `_start`/test runners, emit-order dispatchers) are NOT runtime
+routines — they live in the script's `STRUCTURAL_EXCLUDE` set and the registry's
+`EXCLUDED` header.

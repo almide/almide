@@ -797,15 +797,15 @@ Or separate lines? Leaning toward comma-separated for conciseness.
 
 How Almide's type system compares after all planned extensions are implemented:
 
-| Feature | Almide (planned) | vibe-lang | TypeScript | Rust |
-|---------|------------------|-----------|------------|------|
-| Row polymorphism | **Yes** (PureScript-style) | No | Structural subtyping (weaker) | No |
-| Union types | **Yes** (inline) | No | Yes (but unsound) | No (tagged enum only) |
-| Structural generic bounds | **Yes** (`T: { field, .. }`) | Trait bounds | No | Trait bounds |
-| Effect tracking | Binary (pure/effect) | Effect rows (richer) | None | None |
-| Variance | Intentionally none | Full | Full | Full |
-| HKT | **Yes** (container protocols) | Partial | No | No (GAT workaround) |
-| Dependent types | No | No | Conditional types (limited) | No |
+| Feature | Almide (planned) | TypeScript | Rust |
+|---------|------------------|------------|------|
+| Row polymorphism | **Yes** (PureScript-style) | Structural subtyping (weaker) | No |
+| Union types | **Yes** (inline) | Yes (but unsound) | No (tagged enum only) |
+| Structural generic bounds | **Yes** (`T: { field, .. }`) | No | Trait bounds |
+| Effect tracking | Binary (pure/effect) | None | None |
+| Variance | Intentionally none | Full | Full |
+| HKT | **Yes** (container protocols) | No | No (GAT workaround) |
+| Dependent types | No | Conditional types (limited) | No |
 
 ### Where Almide will be uniquely strong
 

@@ -455,89 +455,43 @@ impl FuncCompiler<'_> {
                     });
                     self.scratch.free_i32(scratch);
                 } else {
+                    // COD construction: alloc a table sized for n, then put each
+                    // (key, val) via the shared probe-and-place helper (duplicate
+                    // literal keys → last value wins, dense insertion order kept).
                     let ks = if let Some((k, _)) = entries.first() { values::byte_size(&k.ty) } else { 4 };
                     let vs = if let Some((_, v)) = entries.first() { values::byte_size(&v.ty) } else { 4 };
-                    let entry_size = ks + vs; // no tag per entry
+                    let es = ks + vs;
                     let key_ty = if let Some((k, _)) = entries.first() { k.ty.clone() } else { Ty::String };
-                    let mut cap = 16u32;
+                    let mut cap = super::engine::layout::map::INITIAL_CAP;
                     while cap < n * 2 { cap *= 2; }
-                    // Swiss Table: [header][tags: cap bytes][entries: cap * entry_size]
-                    let total = self.emitter.layout_reg.header_size(super::engine::layout::SWISS_MAP) as i32 as u32 + cap + cap * entry_size;
 
                     let map = self.scratch.alloc_i32();
-                    let idx = self.scratch.alloc_i32();
-                    let eb = self.scratch.alloc_i32(); // entries_base
-                    let h2_lit = self.scratch.alloc_i32();
-                    wasm!(self.func, {
-                        i32_const(total as i32);
-                        call(self.emitter.rt.alloc);
-                        local_set(map);
-                        local_get(map); i32_const(n as i32); i32_store(0);
-                        local_get(map); i32_const(cap as i32); i32_store(self.emitter.layout_reg.fixed_offset(super::engine::layout::SWISS_MAP, super::engine::layout::map::CAP));
-                        // entries_base = map + 8 + cap
-                        local_get(map); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::SWISS_MAP, super::engine::layout::map::TAGS) as i32); i32_add;
-                        i32_const(cap as i32); i32_add; local_set(eb);
-                    });
+                    let cap_local = self.scratch.alloc_i32();
+                    let ib = self.scratch.alloc_i32();
+                    let eb = self.scratch.alloc_i32();
+                    let tmp = self.scratch.alloc_i32();
+                    wasm!(self.func, { i32_const(cap as i32); local_set(cap_local); });
+                    self.emit_dict_alloc(map, cap_local, es);
+                    self.emit_dict_index_base(map, cap_local);
+                    wasm!(self.func, { local_set(ib); });
+                    self.emit_dict_entries_base(map, cap_local);
+                    wasm!(self.func, { local_set(eb); });
 
                     for (key, val) in entries {
+                        // Materialize the (key, val) into a temp entry buffer.
+                        wasm!(self.func, { i32_const(es as i32); call(self.emitter.rt.alloc); local_set(tmp); local_get(tmp); });
                         self.emit_expr(key);
-                        let sk = if matches!(key_ty, Ty::Int) {
-                            let sk = self.scratch.alloc_i64();
-                            wasm!(self.func, { local_tee(sk); });
-                            sk
-                        } else {
-                            let sk = self.scratch.alloc_i32();
-                            wasm!(self.func, { local_tee(sk); });
-                            sk
-                        };
-                        self.emit_hash_key(&key_ty);
-                        // Split into h1 + h2
-                        let ht = self.scratch.alloc_i32();
-                        wasm!(self.func, {
-                            local_tee(ht);
-                            i32_const(cap as i32 - 1); i32_and; local_set(idx);
-                            local_get(ht);
-                            i32_const(25); i32_shr_u; i32_const(0x7F); i32_and;
-                            local_tee(h2_lit);
-                            i32_eqz;
-                            if_empty; i32_const(1); local_set(h2_lit); end;
-                        });
-                        self.scratch.free_i32(ht);
-                        // Probe for empty tag
-                        wasm!(self.func, {
-                            block_empty; loop_empty;
-                              local_get(map); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::SWISS_MAP, super::engine::layout::map::TAGS) as i32); i32_add;
-                              local_get(idx); i32_add; i32_load8_u(0);
-                              i32_eqz; br_if(1);
-                              local_get(idx); i32_const(1); i32_add;
-                              i32_const(cap as i32 - 1); i32_and;
-                              local_set(idx); br(0);
-                            end; end;
-                            // Store tag (1 byte)
-                            local_get(map); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::SWISS_MAP, super::engine::layout::map::TAGS) as i32); i32_add;
-                            local_get(idx); i32_add; local_get(h2_lit); i32_store8(0);
-                            // Store key at entries_base + idx * entry_size
-                            local_get(eb); local_get(idx); i32_const(entry_size as i32); i32_mul; i32_add;
-                        });
-                        if matches!(key_ty, Ty::Int) {
-                            wasm!(self.func, { local_get(sk); i64_store(0); });
-                            self.scratch.free_i64(sk);
-                        } else {
-                            wasm!(self.func, { local_get(sk); i32_store(0); });
-                            self.scratch.free_i32(sk);
-                        }
-                        // Store value at entries_base + idx * entry_size + ks
-                        wasm!(self.func, {
-                            local_get(eb); local_get(idx); i32_const(entry_size as i32); i32_mul; i32_add;
-                            i32_const(ks as i32); i32_add;
-                        });
+                        self.emit_key_store(&key_ty, 0);
+                        wasm!(self.func, { local_get(tmp); i32_const(ks as i32); i32_add; });
                         self.emit_expr(val);
                         self.emit_store_at(&val.ty, 0);
+                        self.emit_dict_put_entry(map, cap_local, ib, eb, tmp, es, ks, vs, &key_ty);
                     }
                     wasm!(self.func, { local_get(map); });
-                    self.scratch.free_i32(h2_lit);
+                    self.scratch.free_i32(tmp);
                     self.scratch.free_i32(eb);
-                    self.scratch.free_i32(idx);
+                    self.scratch.free_i32(ib);
+                    self.scratch.free_i32(cap_local);
                     self.scratch.free_i32(map);
                 }
             }
@@ -725,16 +679,32 @@ impl FuncCompiler<'_> {
                 let scratch = self.scratch.alloc_i32();
                 if is_option {
                     // Option: ptr==0 → None (propagate as err), ptr!=0 → Some (payload at ptr)
+                    let err_ptr = self.scratch.alloc_i32();
+                    let none_str = self.emitter.intern_string("none") as i32;
+                    let alloc = self.emitter.rt.alloc;
                     wasm!(self.func, {
                         local_set(scratch);
                         local_get(scratch);
                         i32_eqz;
                         if_empty;
-                        // None → build an err Result and return it
-                        i32_const(0);
+                        // None → return `err("none")` so the unwrap propagates a real
+                        // Err Result, matching native's `.ok_or("none")?`. (Previously
+                        // returned a null ptr `0`, which the caller mis-read as `Ok`
+                        // tag → silent success / exit 0 on wasm.)
+                        i32_const(8);          // [tag:i32@0][String ptr@4]
+                        call(alloc);
+                        local_set(err_ptr);
+                        local_get(err_ptr);
+                        i32_const(1);          // tag = 1 (Err)
+                        i32_store(0);
+                        local_get(err_ptr);
+                        i32_const(none_str);   // err payload = "none"
+                        i32_store(4);
+                        local_get(err_ptr);
                         return_;
                         end;
                     });
+                    self.scratch.free_i32(err_ptr);
                     // Some: load payload from ptr
                     if !matches!(&expr.ty, Ty::Unit) {
                         wasm!(self.func, { local_get(scratch); });
@@ -1017,27 +987,15 @@ impl FuncCompiler<'_> {
                     wasm!(self.func, { i64_mul; });
                 }
             }
+            // Integer `/` and `%` are total: a zero divisor (or signed MIN/-1, which
+            // wasm's div_s traps but rem_s silently DEFINES as 0) aborts with
+            // `Error: <msg>\n` + exit 1 instead of diverging from native. See
+            // `emit_checked_int_div_mod`.
             BinOp::DivInt => {
-                self.emit_expr(left);
-                self.emit_expr(right);
-                let instr = match (is_i32_int, is_unsigned_int) {
-                    (true, true) => wasm_encoder::Instruction::I32DivU,
-                    (true, false) => wasm_encoder::Instruction::I32DivS,
-                    (false, true) => wasm_encoder::Instruction::I64DivU,
-                    (false, false) => wasm_encoder::Instruction::I64DivS,
-                };
-                self.func.instruction(&instr);
+                self.emit_checked_int_div_mod(left, right, /*is_mod=*/false, is_i32_int, is_unsigned_int);
             }
             BinOp::ModInt => {
-                self.emit_expr(left);
-                self.emit_expr(right);
-                let instr = match (is_i32_int, is_unsigned_int) {
-                    (true, true) => wasm_encoder::Instruction::I32RemU,
-                    (true, false) => wasm_encoder::Instruction::I32RemS,
-                    (false, true) => wasm_encoder::Instruction::I64RemU,
-                    (false, false) => wasm_encoder::Instruction::I64RemS,
-                };
-                self.func.instruction(&instr);
+                self.emit_checked_int_div_mod(left, right, /*is_mod=*/true, is_i32_int, is_unsigned_int);
             }
             BinOp::AddFloat => {
                 self.emit_expr(left);
@@ -1288,6 +1246,127 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i64(result_s);
                 self.scratch.free_i64(base_s);
             }
+        }
+    }
+
+    /// Emit a total integer `/` or `%`: spill both operands to scratch, guard the
+    /// divisor, then run the raw div/rem. A zero divisor aborts with `division by
+    /// zero`; for SIGNED div AND rem, the width's `MIN op -1` aborts with `integer
+    /// overflow` (wasm `i64.rem_s`/narrow `i32.div_s` of MIN/-1 do NOT trap, so the
+    /// explicit check is what keeps wasm aligned with native `checked_div`/`checked_rem`).
+    /// Both abort paths call `__div_trap` with the interned `Error: <msg>\n` string.
+    fn emit_checked_int_div_mod(
+        &mut self,
+        left: &IrExpr,
+        right: &IrExpr,
+        is_mod: bool,
+        is_i32_int: bool,
+        is_unsigned_int: bool,
+    ) {
+        // Divisor -1 — the second half of the signed `MIN / -1` overflow witness.
+        const NEG_ONE: i64 = -1;
+        let div_by_zero_msg = self.emitter.intern_string("Error: division by zero\n") as i32;
+        let overflow_msg = self.emitter.intern_string("Error: integer overflow\n") as i32;
+        let div_trap = self.emitter.rt.div_trap;
+
+        // Most-negative value of the operand width — `MIN / -1` is the only signed
+        // overflow. Narrow ints run as i32 arithmetic, so an i8/i16 MIN must be the
+        // TRUE per-width MIN (e.g. i8 -128), not i32::MIN: `i32.div_s(-128, -1)` is
+        // 128 and does NOT trap, yet native `i8::checked_div` returns None.
+        let width_min: i64 = match left.ty {
+            Ty::Int8 => i8::MIN as i64,
+            Ty::Int16 => i16::MIN as i64,
+            Ty::Int32 => i32::MIN as i64,
+            _ => i64::MIN,
+        };
+
+        if is_i32_int {
+            let la = self.scratch.alloc_i32();
+            let rb = self.scratch.alloc_i32();
+            self.emit_expr(left);
+            wasm!(self.func, { local_set(la); });
+            self.emit_expr(right);
+            wasm!(self.func, { local_set(rb); });
+
+            // if rb == 0 { div_trap("division by zero") }
+            wasm!(self.func, {
+                local_get(rb);
+                i32_eqz;
+                if_empty;
+                i32_const(div_by_zero_msg);
+                call(div_trap);
+                end;
+            });
+            // Signed overflow: if la == width_min && rb == -1 { div_trap("integer overflow") }
+            if !is_unsigned_int {
+                wasm!(self.func, {
+                    local_get(la);
+                    i32_const(width_min as i32);
+                    i32_eq;
+                    local_get(rb);
+                    i32_const(NEG_ONE as i32);
+                    i32_eq;
+                    i32_and;
+                    if_empty;
+                    i32_const(overflow_msg);
+                    call(div_trap);
+                    end;
+                });
+            }
+            // The checked operands are now safe — run the raw op.
+            wasm!(self.func, { local_get(la); local_get(rb); });
+            let instr = match (is_mod, is_unsigned_int) {
+                (false, true) => wasm_encoder::Instruction::I32DivU,
+                (false, false) => wasm_encoder::Instruction::I32DivS,
+                (true, true) => wasm_encoder::Instruction::I32RemU,
+                (true, false) => wasm_encoder::Instruction::I32RemS,
+            };
+            self.func.instruction(&instr);
+            self.scratch.free_i32(rb);
+            self.scratch.free_i32(la);
+        } else {
+            let la = self.scratch.alloc_i64();
+            let rb = self.scratch.alloc_i64();
+            self.emit_expr(left);
+            wasm!(self.func, { local_set(la); });
+            self.emit_expr(right);
+            wasm!(self.func, { local_set(rb); });
+
+            // if rb == 0 { div_trap("division by zero") }
+            wasm!(self.func, {
+                local_get(rb);
+                i64_eqz;
+                if_empty;
+                i32_const(div_by_zero_msg);
+                call(div_trap);
+                end;
+            });
+            // Signed overflow: if la == i64::MIN && rb == -1 { div_trap("integer overflow") }
+            if !is_unsigned_int {
+                wasm!(self.func, {
+                    local_get(la);
+                    i64_const(width_min);
+                    i64_eq;
+                    local_get(rb);
+                    i64_const(NEG_ONE);
+                    i64_eq;
+                    i32_and;
+                    if_empty;
+                    i32_const(overflow_msg);
+                    call(div_trap);
+                    end;
+                });
+            }
+            wasm!(self.func, { local_get(la); local_get(rb); });
+            let instr = match (is_mod, is_unsigned_int) {
+                (false, true) => wasm_encoder::Instruction::I64DivU,
+                (false, false) => wasm_encoder::Instruction::I64DivS,
+                (true, true) => wasm_encoder::Instruction::I64RemU,
+                (true, false) => wasm_encoder::Instruction::I64RemS,
+            };
+            self.func.instruction(&instr);
+            self.scratch.free_i64(rb);
+            self.scratch.free_i64(la);
         }
     }
 

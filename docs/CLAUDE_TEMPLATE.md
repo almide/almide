@@ -11,7 +11,7 @@ a && b                         a and b
 a || b                         a or b
 !x                             not x
 if cond { ... }                if cond then expr else expr
-|x| x + 1                     fn(x) => x + 1
+|x| x + 1                     (x) => x + 1
 let mut x = 0                  var x = 0
 return expr                    (last expression IS the return)
 fn foo() -> Int { ... }        fn foo() -> Int = { ... }
@@ -48,8 +48,9 @@ let name = match list.get(args, 1) {
   none => "default",
 }
 
-// Lambda
-let doubled = list.map(xs, fn(x) => x * 2)
+// Lambda — params in parens, NO `fn` keyword (single or multi-arg)
+let doubled = list.map(xs, (x) => x * 2)
+let total = list.fold(xs, 0, (acc, x) => acc + x)
 
 // For loop
 for item in items {

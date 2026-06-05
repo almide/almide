@@ -407,7 +407,15 @@ impl FuncCompiler<'_> {
                 let b_ty = self.resolve_list_elem(&args[1], None);
                 let a_size = values::byte_size(&a_ty) as i32;
                 let b_size = values::byte_size(&b_ty) as i32;
-                let ret_elem_ty = self.list_elem_ty(&self.stub_ret_ty);
+                // The result element type is the COMBINER's return type — take it
+                // directly so the `call_indirect` return type matches the
+                // combiner's compiled signature. For a closure-list zip the
+                // stub_ret_ty's element can be unresolved (defaults to i32), which
+                // mismatched the combiner's real i64 result and trapped.
+                let ret_elem_ty = match &args[2].ty {
+                    Ty::Fn { ret, .. } if !matches!(ret.as_ref(), Ty::Unknown) => (**ret).clone(),
+                    _ => self.list_elem_ty(&self.stub_ret_ty),
+                };
                 let out_size = values::byte_size(&ret_elem_ty) as i32;
                 let out_vt = values::ty_to_valtype(&ret_elem_ty).unwrap_or(ValType::I32);
                 let xs = self.scratch.alloc_i32();
@@ -644,23 +652,28 @@ impl FuncCompiler<'_> {
                     end; end;
                 });
 
-                // Phase 2: Build Swiss Table map
-                // Allocate Swiss Table with cap = next_pow2(max(len*2, 16))
+                // Phase 2: Build the compact-ordered-dict map.
+                // cap = next_pow2(max(len*2, INITIAL_CAP)) — always > distinct keys, so no grow.
                 let cap_local = self.scratch.alloc_i32();
-                let eb = self.scratch.alloc_i32(); // entries base
+                let ib = self.scratch.alloc_i32(); // index base
+                let eb = self.scratch.alloc_i32(); // dense entries base
+                let cand_ei = self.scratch.alloc_i32(); // candidate dense entry index during probe
                 let h2 = self.scratch.alloc_i32();
                 let probe_idx = self.scratch.alloc_i32();
                 wasm!(self.func, {
-                    // cap = next power of 2 >= max(len * 2, 16)
-                    i32_const(16); local_set(cap_local);
+                    // cap = next power of 2 >= max(len * 2, INITIAL_CAP)
+                    i32_const(lm::INITIAL_CAP as i32); local_set(cap_local);
                     block_empty; loop_empty;
                       local_get(cap_local); local_get(len); i32_const(2); i32_mul; i32_ge_u; br_if(1);
                       local_get(cap_local); i32_const(1); i32_shl; local_set(cap_local);
                       br(0);
                     end; end;
                 });
-                self.emit_alloc_table(map_ptr, cap_local, entry_size as i32);
-                self.emit_swiss_setup(map_ptr, j, eb); // j reused as cap_check, eb = entries base
+                self.emit_dict_alloc(map_ptr, cap_local, entry_size as u32);
+                self.emit_dict_index_base(map_ptr, cap_local);
+                wasm!(self.func, { local_set(ib); });
+                self.emit_dict_entries_base(map_ptr, cap_local);
+                wasm!(self.func, { local_set(eb); });
                 wasm!(self.func, {
                     i32_const(0); local_set(map_len);
                     i32_const(0); local_set(i);
@@ -672,9 +685,12 @@ impl FuncCompiler<'_> {
                 });
                 if key_is_i64 { wasm!(self.func, { i64_load(0); local_set(cur_key); }); }
                 else { wasm!(self.func, { i32_load(0); local_set(cur_key); }); }
-                // Hash key → h1 (probe index) + h2 (tag)
-                if key_is_i64 { wasm!(self.func, { local_get(cur_key); i32_wrap_i64; }); }
-                else { wasm!(self.func, { local_get(cur_key); }); }
+                // Hash key → h1 (probe index) + h2 (tag). Push the RAW key (i64 for
+                // an Int key, ptr for String); `emit_hash_key` consumes the key's
+                // natural type and does its OWN i32 reduction. Pre-wrapping an Int
+                // key to i32 here fed `emit_hash_key`'s `local.tee` (an i64 temp) an
+                // i32 → "local.set's value type must be correct" (invalid module).
+                wasm!(self.func, { local_get(cur_key); });
                 self.emit_hash_key(&key_ty);
                 self.emit_h1_h2(cap_local, probe_idx, h2);
                 // Probe for existing key or empty slot
@@ -692,8 +708,10 @@ impl FuncCompiler<'_> {
                         end;
                         local_get(j); local_get(h2); i32_eq;
                         if_empty;
-                          // Tag matches: compare key
-                          local_get(eb); local_get(probe_idx); i32_const(entry_size); i32_mul; i32_add;
+                          // Tag matches: deref index[probe_idx]-1 → dense entry, compare key
+                          local_get(ib); local_get(probe_idx); i32_const(lm::INDEX_SLOT_SIZE as i32); i32_mul; i32_add;
+                          i32_load(0); i32_const(1); i32_sub; local_set(cand_ei);
+                          local_get(eb); local_get(cand_ei); i32_const(entry_size); i32_mul; i32_add;
                 });
                 if key_is_i64 { wasm!(self.func, { i64_load(0); local_get(cur_key); i64_eq; }); }
                 else {
@@ -702,7 +720,7 @@ impl FuncCompiler<'_> {
                 }
                 wasm!(self.func, {
                           if_empty;
-                            local_get(probe_idx); local_set(found_idx);
+                            local_get(cand_ei); local_set(found_idx);
                             br(3);
                           end;
                         end;
@@ -744,14 +762,17 @@ impl FuncCompiler<'_> {
                         i32_const(ks); i32_add;
                         local_get(new_list); i32_store(0);
                       else_;
-                        // === Not found: insert new entry ===
+                        // === Not found: append a new dense entry at map_len ===
                 });
-                // Write tag (h2) at probe_idx
+                // Write tag (h2) at the probe slot
                 wasm!(self.func, { local_get(h2); });
                 self.emit_swiss_tag_store(map_ptr, probe_idx);
                 wasm!(self.func, {
-                        // Write key
-                        local_get(eb); local_get(probe_idx); i32_const(entry_size); i32_mul; i32_add;
+                        // index[probe_idx] = map_len + 1 (1-based pointer into dense entries)
+                        local_get(ib); local_get(probe_idx); i32_const(lm::INDEX_SLOT_SIZE as i32); i32_mul; i32_add;
+                        local_get(map_len); i32_const(1); i32_add; i32_store(0);
+                        // Write key at dense entries[map_len]
+                        local_get(eb); local_get(map_len); i32_const(entry_size); i32_mul; i32_add;
                         local_get(cur_key);
                 });
                 if key_is_i64 { wasm!(self.func, { i64_store(0); }); }
@@ -768,8 +789,8 @@ impl FuncCompiler<'_> {
                 self.emit_load_at(&elem_ty, 0);
                 self.emit_store_at(&elem_ty, 0);
                 wasm!(self.func, {
-                        // Write list ptr in entry
-                        local_get(eb); local_get(probe_idx); i32_const(entry_size); i32_mul; i32_add;
+                        // Write list ptr at dense entries[map_len] + ks
+                        local_get(eb); local_get(map_len); i32_const(entry_size); i32_mul; i32_add;
                         i32_const(ks); i32_add;
                         local_get(new_list); i32_store(0);
                         local_get(map_len); i32_const(1); i32_add; local_set(map_len);
@@ -782,7 +803,9 @@ impl FuncCompiler<'_> {
                 });
                 self.scratch.free_i32(probe_idx);
                 self.scratch.free_i32(h2);
+                self.scratch.free_i32(cand_ei);
                 self.scratch.free_i32(eb);
+                self.scratch.free_i32(ib);
                 self.scratch.free_i32(cap_local);
 
                 if key_is_i64 { self.scratch.free_i64(cur_key); } else { self.scratch.free_i32(cur_key); }

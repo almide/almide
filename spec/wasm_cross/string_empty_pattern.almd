@@ -1,0 +1,30 @@
+// Cross-target probe for count / last_index_of with the EMPTY pattern.
+//
+// Native semantics (verified against the Rust runtime):
+//   "s".matches("").count() == s.chars().count() + 1   (CODEPOINT count + 1)
+//   "s".rfind("")           == Some(s.len())            (BYTE length)
+// The WASM runtime previously short-circuited empty patterns to 0; this matrix
+// pins the corrected behaviour byte-for-byte across native and WASM, including
+// multibyte subjects where codepoint-count and byte-length differ.
+
+fn opt(x: Option[Int]) -> String = match x {
+  Some(v) => int.to_string(v),
+  None => "none",
+}
+
+fn main() -> Unit = {
+  // count with empty pattern == char count + 1
+  println("count empty/empty=" + int.to_string(string.count("", "")))
+  println("count ascii/empty=" + int.to_string(string.count("abc", "")))
+  println("count cjk/empty=" + int.to_string(string.count("日本", "")))      // 2 chars
+  println("count mixed/empty=" + int.to_string(string.count("a日b", "")))    // 3 chars
+  // last_index_of with empty pattern == Some(byte length)
+  println("lio empty/empty=" + opt(string.last_index_of("", "")))
+  println("lio ascii/empty=" + opt(string.last_index_of("abc", "")))         // Some(3)
+  println("lio cjk/empty=" + opt(string.last_index_of("日本", "")))          // Some(6 bytes)
+  println("lio mixed/empty=" + opt(string.last_index_of("a日b", "")))        // Some(5 bytes)
+  // non-empty pattern behaviour is unchanged (regression guard)
+  println("count ab=" + int.to_string(string.count("ababab", "ab")))
+  println("lio ab=" + opt(string.last_index_of("ababab", "ab")))
+  println("lio miss=" + opt(string.last_index_of("abc", "z")))
+}

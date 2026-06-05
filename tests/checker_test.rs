@@ -417,6 +417,24 @@ fn check_assign_to_let() {
 }
 
 #[test]
+fn check_index_assign_to_module_let() {
+    // A module-level `let g` is immutable just like a local `let`: index-assigning
+    // its contents must be rejected (E009), not silently slip through to a codegen
+    // error. `lookup_var` only sees locals, so this exercises the `top_lets` arm.
+    let errs = errors("let g: List[Int] = [1, 2, 3]\neffect fn main() -> Unit = {\n  g[0] = 9\n}");
+    assert!(errs.iter().any(|e| e.contains("immutable binding 'g'")),
+        "module-level `let g` index-assign should report E009, got: {:?}", errs);
+}
+
+#[test]
+fn check_index_assign_to_module_var_ok() {
+    // The `var` counterpart is fine — must NOT report the immutable-binding error.
+    let errs = errors("var g: List[Int] = [1, 2, 3]\neffect fn main() -> Unit = {\n  g[0] = 9\n}");
+    assert!(!errs.iter().any(|e| e.contains("immutable binding")),
+        "module-level `var g` index-assign should be allowed, got: {:?}", errs);
+}
+
+#[test]
 fn check_undefined_type() {
     let errs = errors("fn f() -> Foo = {\n  let x = 1\n  x\n}");
     // Should either error or treat as Unknown
@@ -1059,5 +1077,35 @@ fn strict_matrix_float_alias_interop() {
     );
     has_no_errors(
         "fn f(m: Matrix) -> Int = matrix.rows(m)\nfn g() -> Int = {\n  let m: Matrix[Float] = matrix.zeros(3, 3)\n  f(m)\n}"
+    );
+}
+
+#[test]
+fn set_of_closures_rejected() {
+    // A closure has no equality/hash, so a `Set` of closures is meaningless. The
+    // two targets disagreed (native rustc E0277, WASM silently dropped inserts and
+    // printed 0), so reject it at typecheck on both. (E016)
+    let errs = errors(
+        "effect fn main() -> Unit = {\n  var s: Set[() -> Unit] = set.new()\n}"
+    );
+    assert!(errs.iter().any(|e| e.contains("Set") && e.contains("function")),
+        "should reject Set[() -> Unit], got: {:?}", errs);
+}
+
+#[test]
+fn map_with_closure_key_rejected() {
+    // Same reason for a `Map` *key*. (E016)
+    let errs = errors(
+        "effect fn main() -> Unit = {\n  var m: Map[() -> Unit, Int] = map.new()\n}"
+    );
+    assert!(errs.iter().any(|e| e.contains("Map") && e.contains("key") && e.contains("function")),
+        "should reject Map[() -> Unit, Int], got: {:?}", errs);
+}
+
+#[test]
+fn map_with_closure_value_allowed() {
+    // A closure is fine as a `Map` *value* — only the key must be comparable.
+    has_no_errors(
+        "effect fn main() -> Unit = {\n  var m: Map[String, () -> Unit] = map.new()\n  map.insert(m, \"a\", () => {})\n}"
     );
 }

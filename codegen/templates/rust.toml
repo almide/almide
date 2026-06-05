@@ -31,6 +31,14 @@ template = "almide_rt_{module}_{func}({args})"
 [binary_op]
 template = "({left} {op} {right})"
 
+# Integer `/` and `%` are total (zero divisor / signed MIN-by-(-1) overflow abort
+# with `Error: <msg>\n` + exit 1 via the prelude macros), not the bare operator.
+[div_int]
+template = "almide_div!({left}, {right})"
+
+[mod_int]
+template = "almide_mod!({left}, {right})"
+
 [field_access]
 template = "{expr}.{field}"
 
@@ -250,16 +258,10 @@ template = "Option<{inner}>"
 template = "Result<{ok}, {err}>"
 
 [type_map]
-template = "HashMap<{key}, {value}>"
+template = "AlmideMap<{key}, {value}>"
 
 [type_set]
-template = "std::collections::HashSet<{inner}>"
-
-[type_fn]
-template = "impl Fn({params}) -> {return} + Clone"
-
-[type_fn_boxed]
-template = "Box<dyn Fn({params}) -> {return}>"
+template = "AlmideSet<{inner}>"
 
 # Fn type for struct fields: uses Rc for cloneability
 [type_fn_field]
@@ -315,6 +317,10 @@ template = "#[derive(Clone, Debug, PartialEq)]\npub struct {name} {{\n{fields}\n
 template = "    pub {name}: {type},"
 
 [[enum_decl]]
+when_attr = "has_fn_fields"
+template = "#[derive(Clone)]\npub enum {name} {{\n{variants}\n}}"
+
+[[enum_decl]]
 when_attr = "has_hash"
 template = "#[derive(Clone, Debug, PartialEq, Eq, Hash)]\npub enum {name} {{\n{variants}\n}}"
 
@@ -356,7 +362,7 @@ template = "_"
 template = "_"
 
 [empty_map]
-template = "HashMap::new()"
+template = "AlmideMap::<{key_type}, {value_type}>::new()"
 
 [try_expr]
 template = "({inner})?"
@@ -371,7 +377,7 @@ template = "r#{name}"
 template = "mut "
 
 [map_literal]
-template = "HashMap::from([{entries}])"
+template = "AlmideMap::from([{entries}])"
 
 [map_entry]
 template = "({key}, {value})"
@@ -461,7 +467,7 @@ template = "{{\n{body}\n}}"
 template = "{expr}"
 
 [box_wrap]
-template = "Box::new({inner})"
+template = "std::rc::Rc::new({inner})"
 
 [fan_expr]
 template = "std::thread::scope(|__s| {{ {spawns} {join_expr} }})"

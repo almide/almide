@@ -1,0 +1,103 @@
+// Value-asserting regression tests for the fan.* cross-target bugs.
+// The original fan specs only checked lengths / race winners, so corrupt
+// settled payloads, dropped/invalid fan.any results, and mis-typed
+// fan.timeout Results all slipped through. These lock in the actual values.
+
+effect fn succeed(x: Int) -> Result[Int, String] = ok(x)
+effect fn fail_with(msg: String) -> Result[Int, String] = err(msg)
+effect fn pick(s: String) -> Result[String, String] = ok(s)
+
+// ── fan.settle — every settled payload must survive (was zeroed/corrupt) ──
+test "fan.settle preserves ok and err payloads" {
+  let rs = fan.settle([
+    () => succeed(11),
+    () => fail_with("boom"),
+    () => succeed(33)
+  ]);
+  assert_eq(list.len(rs), 3)
+  assert_eq(rs[0], ok(11))
+  assert_eq(rs[1], err("boom"))
+  assert_eq(rs[2], ok(33))
+}
+
+// ── fan.any returning Int — must produce a valid module + correct value ──
+// fan.any is now Result[T, String]; the test-block binding is the full Result.
+test "fan.any returns the Int winner" {
+  let w = fan.any([() => succeed(5)]);
+  assert_eq(w, ok(5))
+}
+
+// ── fan.any returning String — must not silently drop the winner ──
+// fan.any is now DETERMINISTIC (first Ok in list order) on BOTH targets, so the
+// winner is always the first success ("alpha"). The original regression was that
+// a valid String result was dropped/garbage on wasm; this locks in the value.
+test "fan.any returns the String winner" {
+  let w = fan.any([() => pick("alpha"), () => pick("beta")]);
+  assert_eq(w, ok("alpha"))
+}
+
+// ── fan.timeout Result bound to a Result let — ?? and == must type-check ──
+test "fan.timeout result supports ?? and ==" {
+  let r: Result[Int, String] = fan.timeout(5000, () => succeed(42));
+  assert_eq(r ?? -1, 42)
+  assert(r == ok(42))
+}
+
+// ── CAPTURING thunks (native E0308 / E0277) ───────────────────────────────
+// The cases above use non-capturing thunks, which coerce to fn pointers and so
+// compiled natively even before the fix. A thunk that CAPTURES a local is a
+// distinct anonymous closure type: two of them cannot share one `Vec<impl Fn>`
+// (E0308), and a captured closure VALUE is `Rc<dyn Fn>`, neither Send nor Sync
+// (E0277). The native runner (`almide test --target rust`) is what exercises
+// this — the wasm runner table-dispatches closures and never hit the bug.
+// fan.race is now deterministic on BOTH targets (thunk[0]'s settled Result, a
+// Result[T, E] in a test block), so a head thunk is the stable winner.
+
+test "fan.race over capturing thunks (native E0308)" {
+  let a = 4
+  let b = 5
+  let w = fan.race([
+    () => succeed(a + 5),
+    () => succeed(b + 4)
+  ]);
+  assert_eq(w, ok(9))   // thunk[0] = a + 5 = 9, deterministically
+}
+
+test "fan.any over capturing thunks picks the lone success" {
+  let lo = 2
+  let hi = 8
+  let msg = "skip"
+  let w = fan.any([
+    () => fail_with(msg),
+    () => succeed(hi - lo)
+  ]);
+  assert_eq(w, ok(6))
+}
+
+test "fan.settle over capturing thunks preserves order and payloads" {
+  let x = 1
+  let oops = "boom"
+  let z = 3
+  let rs = fan.settle([
+    () => succeed(x * 10),
+    () => fail_with(oops),
+    () => succeed(z * 10)
+  ]);
+  assert_eq(list.len(rs), 3)
+  assert_eq(rs[0], ok(10))
+  assert_eq(rs[1], err("boom"))
+  assert_eq(rs[2], ok(30))
+}
+
+test "fan.map over a captured closure value (native E0277)" {
+  let k = 3
+  let f = (n: Int) => succeed(n + k)
+  let out = fan.map([1, 2, 3], f);
+  assert_eq(out, ok([4, 5, 6]))
+}
+
+test "fan.map over a capturing literal lambda" {
+  let base = 100
+  let out = fan.map([1, 2, 3], (n: Int) => succeed(base + n));
+  assert_eq(out, ok([101, 102, 103]))
+}

@@ -121,20 +121,20 @@ pub(super) fn lower_call(ctx: &mut LowerCtx, callee: &ast::Expr, args: &[ast::Ex
         if matches!(name.as_str(), "assert_eq" | "assert_ne") && ir_args.len() == 2 {
             let l_ty = ir_args[0].ty.clone();
             let r_ty = ir_args[1].ty.clone();
-            super::statements::coerce_literal_to_sized(&mut ir_args[1], &l_ty);
-            super::statements::coerce_literal_to_sized(&mut ir_args[0], &r_ty);
+            super::statements::coerce_literal_to_sized(&mut ir_args[1], &l_ty, ctx.env);
+            super::statements::coerce_literal_to_sized(&mut ir_args[0], &r_ty, ctx.env);
         }
         if let Some(sig) = ctx.env.functions.get(name).cloned() {
             for (i, (_, param_ty)) in sig.params.iter().enumerate() {
                 if let Some(arg) = ir_args.get_mut(i) {
-                    super::statements::coerce_literal_to_sized(arg, param_ty);
+                    super::statements::coerce_literal_to_sized(arg, param_ty, ctx.env);
                 }
             }
         } else if let Some((module, func)) = name.as_str().split_once('.') {
             if let Some(sig) = crate::stdlib::lookup_sig(module, func) {
                 for (i, (_, param_ty)) in sig.params.iter().enumerate() {
                     if let Some(arg) = ir_args.get_mut(i) {
-                        super::statements::coerce_literal_to_sized(arg, param_ty);
+                        super::statements::coerce_literal_to_sized(arg, param_ty, ctx.env);
                     }
                 }
             }
@@ -143,27 +143,72 @@ pub(super) fn lower_call(ctx: &mut LowerCtx, callee: &ast::Expr, args: &[ast::Ex
         if let Some(sig) = crate::stdlib::lookup_sig(module.as_str(), func.as_str()) {
             for (i, (_, param_ty)) in sig.params.iter().enumerate() {
                 if let Some(arg) = ir_args.get_mut(i) {
-                    super::statements::coerce_literal_to_sized(arg, param_ty);
+                    super::statements::coerce_literal_to_sized(arg, param_ty, ctx.env);
                 }
             }
         }
     }
 
+    // A call to a closure VALUE (Computed target) has, by definition, the
+    // callee's RETURN type — even when the inferred `ty` came back as the whole
+    // `Fn` type (which happens for a HOF lambda parameter whose concrete type is
+    // only fixed by the enclosing call's unification, after the body was checked).
+    // Leaving the node typed `fn(..) -> T` makes a later `acc + f(x)` trip the IR
+    // verifier (AddInt on a function value).
+    let ty = match &target {
+        CallTarget::Computed { callee } => match &callee.ty {
+            Ty::Fn { ret, .. } if !ret.has_unresolved_deep() => (**ret).clone(),
+            _ => ty,
+        },
+        _ => ty,
+    };
     ctx.mk(IrExprKind::Call { target, args: ir_args, type_args: ta }, ty, span)
+}
+
+/// Unwrap `Result[T, _]` → `T`; any other type is returned unchanged.
+/// Mirrors the effect-fn auto-`?` unwrap so a binding whose *stored* type still
+/// carries the un-unwrapped `Result` is recognized by its Ok payload.
+fn strip_result_ok(ty: &Ty) -> Ty {
+    match ty {
+        Ty::Applied(TypeConstructorId::Result, args) if !args.is_empty() => args[0].clone(),
+        _ => ty.clone(),
+    }
 }
 
 pub(super) fn lower_call_target(ctx: &mut LowerCtx, callee: &ast::Expr) -> CallTarget {
     match &callee.kind {
         ast::ExprKind::Ident { name, .. } | ast::ExprKind::TypeName { name, .. } => {
-            // If the name resolves to a local variable (e.g., a closure), use Computed
-            // so that use-count tracking properly counts this as a use of that variable.
-            if let Some(var_id) = ctx.lookup_var(name)
-                && matches!(ctx.var_table.get(var_id).ty, crate::types::Ty::Fn { .. })
-            {
-                let ty = ctx.expr_ty(callee);
-                return CallTarget::Computed {
-                    callee: Box::new(ctx.mk(IrExprKind::Var { id: var_id }, ty, callee.span)),
-                };
+            // A name that resolves to a local binding is called *through that
+            // variable* (Computed), never as a top-level function — a local
+            // shadows any same-named fn, and Computed makes use-count / Perceus
+            // liveness count the call as a use of the variable.
+            //
+            // Callability is decided from the callee's use-site type, which the
+            // checker has already auto-`?`-unwrapped to the function type. The
+            // var's *stored* type can still lag at `Result[Fn, _]` here: in an
+            // effect fn the auto-`?` rewrite that unwraps the binding (auto_try)
+            // runs AFTER lowering, so `var_table[add5].ty` is `Result[Fn, _]`
+            // at this point. Reading only the stored type would mis-resolve
+            // `add5(10)` to `Named { add5 }`, which has no such function — the
+            // WASM emit then traps on an unresolved call and Perceus, seeing no
+            // use of the binding, frees the closure before the call (use-after-free).
+            // The Result-stripped stored type is a final fallback.
+            if let Some(var_id) = ctx.lookup_var(name) {
+                let use_ty = ctx.expr_ty(callee);
+                let stored = ctx.var_table.get(var_id).ty.clone();
+                if matches!(use_ty, Ty::Fn { .. })
+                    || matches!(stored, Ty::Fn { .. })
+                    || matches!(strip_result_ok(&stored), Ty::Fn { .. })
+                {
+                    let callee_ty = if matches!(use_ty, Ty::Fn { .. }) {
+                        use_ty
+                    } else {
+                        strip_result_ok(&stored)
+                    };
+                    return CallTarget::Computed {
+                        callee: Box::new(ctx.mk(IrExprKind::Var { id: var_id }, callee_ty, callee.span)),
+                    };
+                }
             }
             // Selective import: bare `from_string` → Module { json, from_string }.
             // (used-mark happens in checker pass; lowering only rewrites.)

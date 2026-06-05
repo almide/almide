@@ -22,10 +22,32 @@ pub(super) fn pre_scan_closures(program: &IrProgram, emitter: &mut WasmEmitter) 
     let mut fn_ref_set: HashSet<String> = HashSet::new();
 
     let mut mutable_vars: HashSet<u32> = HashSet::new();
+    // Seed with captured-and-mutated vars detected before closure conversion
+    // (ClosureConversionPass → `shared_mut_vars`). Their references are now
+    // `EnvLoad`s, so scanning the closure body can't recover the original VarId,
+    // but those captures must still become shared heap cells. Covers a non-Copy
+    // var mutated only via a method (`list.push`), recorded `Mutability::Let`
+    // since it is never reassigned. (Closure v2 P6.)
+    for v in &program.codegen_annotations.shared_mut_vars {
+        mutable_vars.insert(v.0);
+    }
 
     for func in &program.functions {
         let scope_vars: HashSet<u32> = func.params.iter().map(|p| p.var.0).collect();
         scan_closures(&func.body, scope_vars, &mut mutable_vars, &mut lambda_exprs, &mut fn_ref_set);
+    }
+    // Module functions also carry raw Lambdas (e.g. a submodule combinator
+    // factory returning a non-capturing lambda). They are NOT flattened into
+    // program.functions on the WASM path, so without this scan they get no
+    // LambdaInfo / table slot, and a call site resolves to the wrong function
+    // (or none) — the cross-module closure bug. Order: functions then modules,
+    // IDENTICAL to compile_lambda_bodies so the positional index aligns.
+    // (Closure v2, P0.)
+    for module in &program.modules {
+        for func in &module.functions {
+            let scope_vars: HashSet<u32> = func.params.iter().map(|p| p.var.0).collect();
+            scan_closures(&func.body, scope_vars, &mut mutable_vars, &mut lambda_exprs, &mut fn_ref_set);
+        }
     }
     // BFS: scan lambda bodies for nested lambdas (repeat until no new lambdas found)
     let mut scan_start = 0;
@@ -154,6 +176,15 @@ pub(super) fn compile_lambda_bodies(program: &IrProgram, emitter: &mut WasmEmitt
     for func in &program.functions {
         let scope_vars: HashSet<u32> = func.params.iter().map(|p| p.var.0).collect();
         scan_closures(&func.body, scope_vars, &mut mutable_vars, &mut lambda_exprs, &mut fn_ref_set);
+    }
+    // Module functions, IDENTICAL order to pre_scan_closures (functions then
+    // modules) so emitter.lambdas[i] lines up with the pre-scan registration.
+    // (Closure v2, P0.)
+    for module in &program.modules {
+        for func in &module.functions {
+            let scope_vars: HashSet<u32> = func.params.iter().map(|p| p.var.0).collect();
+            scan_closures(&func.body, scope_vars, &mut mutable_vars, &mut lambda_exprs, &mut fn_ref_set);
+        }
     }
     // BFS: scan lambda bodies for nested lambdas
     let mut scan_start = 0;
@@ -343,14 +374,20 @@ impl IrVisitor for ClosureScanner<'_> {
     fn visit_expr(&mut self, expr: &IrExpr) {
         match &expr.kind {
             IrExprKind::Lambda { params, body, lambda_id } => {
-                let param_ids: HashSet<u32> = params.iter().map(|(vid, _)| vid.0).collect();
-                let mut body_vars = HashSet::new();
-                collect_var_refs(body, &mut body_vars);
-                let mut captures: Vec<u32> = body_vars.difference(&param_ids)
-                    .copied()
+                // Captures via the single shared analysis (almide_ir::free_vars),
+                // intersected with the enclosing scope as a safety net. This is
+                // provably identical to the prior `(flat-refs − params) ∩ scope`:
+                // free_vars already excludes the lambda's own params and any
+                // body-local bindings (it is scope-tracking), and `∩ scope_vars`
+                // is what removed those body-locals before. free_vars returns a
+                // VarId-sorted Vec, so the env layout stays deterministic.
+                // (Closure v2, P1 — one capture analysis.)
+                let param_set: HashSet<VarId> = params.iter().map(|(vid, _)| *vid).collect();
+                let captures: Vec<u32> = almide_ir::free_vars::free_vars(body, &param_set)
+                    .into_iter()
+                    .map(|vid| vid.0)
                     .filter(|vid| self.scope_vars.contains(vid))
                     .collect();
-                captures.sort();
                 let param_list: Vec<(VarId, Ty)> = params.iter()
                     .map(|(vid, ty)| (*vid, ty.clone()))
                     .collect();
@@ -443,28 +480,6 @@ fn resolve_lambda_param_ty(
         return body.ty.clone();
     }
     almide_lang::types::Ty::Int
-}
-
-// ── VarRefCollector: IrVisitor-based variable reference collector ────
-//
-// Collects all VarIds referenced in an expression tree (including inside
-// nested lambdas). Uses walk_expr for exhaustive traversal.
-
-struct VarRefCollector<'a> {
-    vars: &'a mut HashSet<u32>,
-}
-
-impl IrVisitor for VarRefCollector<'_> {
-    fn visit_expr(&mut self, expr: &IrExpr) {
-        if let IrExprKind::Var { id } = &expr.kind {
-            self.vars.insert(id.0);
-        }
-        walk_expr(self, expr);
-    }
-}
-
-pub(super) fn collect_var_refs(expr: &IrExpr, vars: &mut HashSet<u32>) {
-    VarRefCollector { vars }.visit_expr(expr);
 }
 
 /// Collect all ClosureCreate func_names referenced in an expression tree.

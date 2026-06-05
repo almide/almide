@@ -7,12 +7,46 @@ use almide_lang::types::{Ty, TypeConstructorId};
 use super::RenderContext;
 use super::types::render_type;
 use super::expressions::render_expr;
-use super::helpers::{template_or, terminate_stmt, ty_has_named_typevar, erase_named_typevars};
+use super::helpers::{template_or, terminate_stmt, ty_has_named_typevar, erase_named_typevars, erase_fn_types};
 
 /// Check if an expression references a specific variable (any depth).
 pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
     match &stmt.kind {
         IrStmtKind::Bind { var, ty, value, mutability } => {
+            // Shared-mut local (`Rc<Cell<T>>`, Closure v2 P3): a fresh cell at the
+            // declaration, or an `Rc::clone` of the original for the `__cap_*`
+            // capture rename (so the closure shares the cell).
+            if ctx.ann.is_shared_mut(var) {
+                let name_s = ctx.var_name(*var).to_string();
+                // Copy scalars use `Rc<Cell<T>>` (P3); non-Copy values use `SharedMut`
+                // (`Rc<RefCell<T>>`, P6). A `__cap_*` capture rename is an `Rc::clone`
+                // of the original for either kind, so the closure shares the SAME cell.
+                let is_copy = matches!(ty, Ty::Int | Ty::Float | Ty::Bool);
+                let fresh_cell = |ctx: &RenderContext| if is_copy {
+                    format!("std::rc::Rc::new(std::cell::Cell::new({}))", render_expr(ctx, value))
+                } else {
+                    format!("SharedMut::new({})", render_expr(ctx, value))
+                };
+                // A `__cap_N` capture rename is an `Rc::clone` of the original shared
+                // cell. Its value is a bare `Var` or a `Clone{Var}` (CloneInsertionPass
+                // wraps non-Copy values) — either way emit a single `.clone()` of the
+                // cell so the closure shares it rather than allocating a fresh one.
+                let cap_orig = if name_s.starts_with("__cap_") {
+                    match &value.kind {
+                        IrExprKind::Var { id } => Some(*id),
+                        IrExprKind::Clone { expr: inner } => match &inner.kind {
+                            IrExprKind::Var { id } => Some(*id),
+                            _ => None,
+                        },
+                        _ => None,
+                    }
+                } else { None };
+                let val_s = match cap_orig {
+                    Some(id) => format!("{}.clone()", ctx.var_name(id)),
+                    None => fresh_cell(ctx),
+                };
+                return format!("let {} = {};", name_s, val_s);
+            }
             let name_s = ctx.var_name(*var).to_string();
             // List[Fn] Rc wrapping is now handled by RustLoweringPass
             // which inserts RcWrap nodes into the IR.
@@ -47,34 +81,68 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
             } else {
                 ty
             };
+            // Erase Fn types nested inside containers (tuple element, map value,
+            // record field, ...). Rust forbids `impl Trait` in a binding type
+            // (E0562), so `(impl Fn() -> () + Clone, i64)` is illegal; rewrite the
+            // Fn subtree to `_` (-> `(_, i64)`) and let Rust infer the concrete
+            // closure type from the RHS. A top-level Fn was already turned into
+            // Ty::Unknown above, so this only touches the nested-container case.
+            let fn_erased_owned;
+            let ty = if matches!(ty, Ty::Tuple(_) | Ty::Applied(..) | Ty::Named(_, _) | Ty::Record { .. } | Ty::OpenRecord { .. })
+                && ty.any_child_recursive(&|t| matches!(t, Ty::Fn { .. }))
+            {
+                fn_erased_owned = erase_fn_types(ty.clone());
+                &fn_erased_owned
+            } else {
+                ty
+            };
             let type_s = render_type(ctx, ty);
             // When binding a lambda to a Fn-typed variable (e.g. type alias Handler = (String) -> String),
             // the let type is erased to `_` but the lambda params have no type annotations either,
             // causing Rust type inference failure. Render lambda params with explicit types in this case.
+            let annotate_lambda = |params: &[(VarId, Ty)], body: &IrExpr| -> String {
+                let params_str = params.iter()
+                    .map(|(id, pty)| {
+                        let name = ctx.var_name(*id).to_string();
+                        if matches!(pty, Ty::Unknown) {
+                            name
+                        } else if matches!(pty, Ty::Fn { .. }) {
+                            // A closure can't take an `impl Fn` parameter (E0562);
+                            // a function-typed param is `Rc<dyn Fn>` (callers box
+                            // the closure they pass — see render_generic_call).
+                            format!("{}: {}", name, super::helpers::render_type_field_fn(ctx, pty))
+                        } else {
+                            format!("{}: {}", name, super::types::render_type(ctx, pty))
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let body_str = render_expr(ctx, body);
+                ctx.templates.render_with("lambda_single", None, &[], &[("params", params_str.as_str()), ("body", body_str.as_str())])
+                    .unwrap_or_else(|| format!("move |{}| {}", params_str, body_str))
+            };
+            let has_typed = |params: &[(VarId, Ty)]| params.iter().any(|(_, t)| !matches!(t, Ty::Unknown));
             let value_s = if matches!(ty, Ty::Unknown) {
-                if let IrExprKind::Lambda { params, body, .. } = &value.kind {
-                    let has_typed_params = params.iter().any(|(_, t)| !matches!(t, Ty::Unknown));
-                    if has_typed_params {
-                        let params_str = params.iter()
-                            .map(|(id, pty)| {
-                                let name = ctx.var_name(*id).to_string();
-                                if matches!(pty, Ty::Unknown) {
-                                    name
-                                } else {
-                                    let ty_str = super::types::render_type(ctx, pty);
-                                    format!("{}: {}", name, ty_str)
-                                }
-                            })
-                            .collect::<Vec<_>>()
-                            .join(", ");
-                        let body_str = render_expr(ctx, body);
-                        ctx.templates.render_with("lambda_single", None, &[], &[("params", params_str.as_str()), ("body", body_str.as_str())])
-                            .unwrap_or_else(|| format!("move |{}| {}", params_str, body_str))
-                    } else {
-                        render_expr(ctx, value)
+                match &value.kind {
+                    IrExprKind::Lambda { params, body, .. } if has_typed(params) => annotate_lambda(params, body),
+                    // Capture-clone-wrapped closure: a shared-mut-capturing raw closure
+                    // lowers to `{ let __cap = x.clone(); move |k| … }`. The wrapping
+                    // block hides the lambda from the bare-Lambda case above, so a typed
+                    // param rendered `move |k|` with no type → E0282. Annotate the tail
+                    // lambda's params, keeping the capture prologue. HOF-arg lambdas
+                    // never reach here (render_iter_chain splices them inline), so this
+                    // is safe. (Closure v2 P6.)
+                    IrExprKind::Block { stmts, expr: Some(tail) }
+                        if matches!(&tail.kind, IrExprKind::Lambda { params, .. } if has_typed(params)) =>
+                    {
+                        if let IrExprKind::Lambda { params, body, .. } = &tail.kind {
+                            let stmts_s = stmts.iter().map(|s| render_stmt(ctx, s)).collect::<Vec<_>>().join("\n");
+                            format!("{{\n{}\n{}\n}}", stmts_s, annotate_lambda(params, body))
+                        } else {
+                            render_expr(ctx, value)
+                        }
                     }
-                } else {
-                    render_expr(ctx, value)
+                    _ => render_expr(ctx, value),
                 }
             } else {
                 render_expr(ctx, value)
@@ -158,7 +226,12 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
         }
         IrStmtKind::Assign { var, value } => {
             let target_s = ctx.var_name(*var).to_string();
-            let upper = target_s.to_uppercase();
+            // Shared-mut local (`Rc<Cell<T>>`): write through the cell. Cell's
+            // interior mutability means the binding need not be `mut`. (Closure v2, P3.)
+            if ctx.ann.is_shared_mut(var) {
+                return format!("{}.set({});", target_s, render_expr(ctx, value));
+            }
+            let upper = ctx.global_static_name(*var);
             let value_s = render_expr(ctx, value);
             match ctx.ann.get_var_storage(var, &target_s) {
                 VarStorage::ModuleCell => format!("{}.with(|c| c.set({}));", upper, value_s),
@@ -209,12 +282,16 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
         }
         IrStmtKind::IndexAssign { target, index, value } => {
             let target_str = ctx.var_name(*target).to_string();
-            let upper = target_str.to_uppercase();
+            let upper = ctx.global_static_name(*target);
             let idx_str = render_expr(ctx, index);
             let val_str = render_expr(ctx, value);
             let var_ty = &ctx.var_table.get(*target).ty;
             let is_bytes = matches!(var_ty, Ty::Bytes);
             let cast_val = if is_bytes { format!("{} as u8", val_str) } else { val_str };
+            // Shared-mut non-Copy var (`SharedMut`, P6): index through the cell.
+            if ctx.ann.is_shared_mut(target) {
+                return format!("{}.borrow_mut()[{} as usize] = {};", target_str, idx_str, cast_val);
+            }
             match ctx.ann.get_var_storage(target, &target_str) {
                 VarStorage::ModuleRc => format!("{}.with(|c| std::rc::Rc::make_mut(&mut *c.borrow_mut())[{} as usize] = {});", upper, idx_str, cast_val),
                 VarStorage::ModuleCell => format!("{}.with(|c| c.get());", upper),
@@ -224,9 +301,13 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
         }
         IrStmtKind::MapInsert { target, key, value } => {
             let target_str = ctx.var_name(*target).to_string();
-            let upper = target_str.to_uppercase();
+            let upper = ctx.global_static_name(*target);
             let key_str = render_expr(ctx, key);
             let val_str = render_expr(ctx, value);
+            // Shared-mut non-Copy var (`SharedMut`, P6): insert through the cell.
+            if ctx.ann.is_shared_mut(target) {
+                return format!("{}.borrow_mut().insert({}, {});", target_str, key_str, val_str);
+            }
             match ctx.ann.get_var_storage(target, &target_str) {
                 VarStorage::ModuleRc => format!("{}.with(|c| std::rc::Rc::make_mut(&mut *c.borrow_mut()).insert({}, {}));", upper, key_str, val_str),
                 VarStorage::RcCow => format!("{}.make_mut().insert({}, {});", target_str, key_str, val_str),
@@ -236,8 +317,12 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
         }
         IrStmtKind::FieldAssign { target, field, value } => {
             let target_str = ctx.var_name(*target).to_string();
-            let upper = target_str.to_uppercase();
+            let upper = ctx.global_static_name(*target);
             let val_str = render_expr(ctx, value);
+            // Shared-mut non-Copy var (`SharedMut`, P6): assign the field through the cell.
+            if ctx.ann.is_shared_mut(target) {
+                return format!("{}.borrow_mut().{} = {};", target_str, field, val_str);
+            }
             match ctx.ann.get_var_storage(target, &target_str) {
                 VarStorage::ModuleRc => format!("{}.with(|c| std::rc::Rc::make_mut(&mut *c.borrow_mut()).{} = {});", upper, field, val_str),
                 VarStorage::RcCow => format!("{}.make_mut().{} = {};", target_str, field, val_str),
@@ -300,7 +385,7 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
         }
         IrStmtKind::ListSwap { target, a, b } => {
             let t = ctx.var_name(*target).to_string();
-            let upper = t.to_uppercase();
+            let upper = ctx.global_static_name(*target);
             let a_s = render_expr(ctx, a);
             let b_s = render_expr(ctx, b);
             match ctx.ann.get_var_storage(target, &t) {
@@ -312,7 +397,7 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
         }
         IrStmtKind::ListReverse { target, end } => {
             let t = ctx.var_name(*target).to_string();
-            let upper = t.to_uppercase();
+            let upper = ctx.global_static_name(*target);
             let e = render_expr(ctx, end);
             match ctx.ann.get_var_storage(target, &t) {
                 VarStorage::ModuleRc => format!("{}.with(|c| std::rc::Rc::make_mut(&mut *c.borrow_mut())[..={} as usize].reverse());", upper, e),
@@ -323,7 +408,7 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
         }
         IrStmtKind::ListRotateLeft { target, end } => {
             let t = ctx.var_name(*target).to_string();
-            let upper = t.to_uppercase();
+            let upper = ctx.global_static_name(*target);
             let e = render_expr(ctx, end);
             match ctx.ann.get_var_storage(target, &t) {
                 VarStorage::ModuleRc => format!("{}.with(|c| std::rc::Rc::make_mut(&mut *c.borrow_mut())[..={} as usize].rotate_left(1));", upper, e),
@@ -335,12 +420,12 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
         IrStmtKind::ListCopySlice { dst, src, len } => {
             let d = ctx.var_name(*dst).to_string();
             let s = ctx.var_name(*src).to_string();
-            let upper_d = d.to_uppercase();
+            let upper_d = ctx.global_static_name(*dst);
             let n = render_expr(ctx, len);
             match ctx.ann.get_var_storage(dst, &d) {
                 VarStorage::ModuleRc => {
                     let src_read = if matches!(ctx.ann.get_var_storage(src, &s), VarStorage::ModuleRc) {
-                        format!("{}.with(|c| c.borrow().clone())", s.to_uppercase())
+                        format!("{}.with(|c| c.borrow().clone())", ctx.global_static_name(*src))
                     } else { s.clone() };
                     format!("{}.with(|c| std::rc::Rc::make_mut(&mut *c.borrow_mut())[..{n} as usize].copy_from_slice(&{src_read}[..{n} as usize]));", upper_d, n=n, src_read=src_read)
                 }

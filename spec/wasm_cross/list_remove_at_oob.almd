@@ -1,0 +1,6 @@
+// list.remove_at with an index >= len must be a no-op on both targets
+// (no OOB heap read/write). Native oracle: returns the list unchanged.
+fn main() -> Unit = {
+  let xs = [1, 2, 3]
+  println(list.join(list.remove_at(xs, 10) |> list.map((x) => int.to_string(x)), ","))
+}

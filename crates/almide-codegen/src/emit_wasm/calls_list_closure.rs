@@ -617,6 +617,15 @@ impl FuncCompiler<'_> {
                       br(0);
                     end; end;
                 });
+                // Native is a no-op (returns the copy unchanged) unless BOTH indices are
+                // in range. Guard the in-place swap with UNSIGNED compares so negative
+                // indices (huge unsigned) are treated as out of range.
+                wasm!(self.func, {
+                    local_get(idx_i); local_get(len); i32_lt_u;
+                    local_get(idx_j); local_get(len); i32_lt_u;
+                    i32_and;
+                    if_empty;
+                });
                 // Swap dst[i] and dst[j] using typed scratch local as temp
                 // tmp = dst[i]
                 wasm!(self.func, {
@@ -640,7 +649,7 @@ impl FuncCompiler<'_> {
                     local_get(tmp);
                 });
                 self.emit_store_at(&elem_ty, 0);
-                wasm!(self.func, { local_get(dst); });
+                wasm!(self.func, { end; local_get(dst); });
                 self.scratch.free(tmp, elem_vt);
                 self.scratch.free_i32(k);
                 self.scratch.free_i32(dst);
@@ -829,16 +838,18 @@ impl FuncCompiler<'_> {
                         // Compare xs[i] with xs[i-1]
                         local_get(xs); i32_const(list_data_off); i32_add;
                         local_get(i); i32_const(es); i32_mul; i32_add;
-                        i32_load(0);
+                });
+                self.emit_load_at(&elem_ty, 0);
+                wasm!(self.func, {
                         local_get(xs); i32_const(list_data_off); i32_add;
                         local_get(i); i32_const(1); i32_sub;
                         i32_const(es); i32_mul; i32_add;
-                        i32_load(0);
                 });
-                match &elem_ty {
-                    Ty::String => { wasm!(self.func, { call(self.emitter.rt.string.eq); }); }
-                    _ => { wasm!(self.func, { i32_eq; }); }
-                }
+                self.emit_load_at(&elem_ty, 0);
+                // Structural eq: collapse consecutive value-equal elements
+                // (String + compound), matching native dedup-by-`==`, not pointer
+                // identity.
+                self.emit_eq_typed(&elem_ty);
                 wasm!(self.func, {
                         i32_eqz; // not equal → include
                         if_empty;

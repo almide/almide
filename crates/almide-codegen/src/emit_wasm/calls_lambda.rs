@@ -195,6 +195,12 @@ impl FuncCompiler<'_> {
                     // Perceus closure capture rc_inc is now handled by PerceusPass (IR-level RcInc)
                     wasm!(self.func, { local_get(local_idx); });
                     self.emit_store_at(ty, offset);
+                } else if let Some(&(global_idx, _)) = self.emitter.top_let_globals.get(&vid.0) {
+                    // A module-level `let`/`var` (e.g. `let BASE = 100`) captured by
+                    // the closure lives in a WASM global, not the function-local
+                    // var_map — load it from the global into the capture env.
+                    wasm!(self.func, { global_get(global_idx); });
+                    self.emit_store_at(ty, offset);
                 } else {
                     // This should not happen after closure conversion —
                     // all captured vars should be in var_map (as locals or env-loaded params)

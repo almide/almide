@@ -1,0 +1,7 @@
+// Regression: i64::MIN garbage + float non-finite traps (fixed).
+effect fn main() -> Unit = {
+  println(int.to_string(0 - 9223372036854775807 - 1))
+  println(float.to_string(1.0 / 0.0))
+  println(float.to_string(0.0 - 1.0 / 0.0))
+  println(float.to_string(0.0 / 0.0))
+}

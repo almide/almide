@@ -290,7 +290,30 @@ fn erase_type_aliases(program: &mut IrProgram, aliases: &HashMap<String, Ty>) {
             IrExprKind::ResultOk { expr: e } | IrExprKind::ResultErr { expr: e }
             | IrExprKind::OptionSome { expr: e } | IrExprKind::Try { expr: e }
             | IrExprKind::Unwrap { expr: e } | IrExprKind::Clone { expr: e } => erase_expr(e, aliases),
-            _ => {}
+            // Explicit-preserve (total-by-construction). The head of this
+            // fn already ran `erase_ty(&mut expr.ty, ..)` for this node;
+            // these variants intentionally do not descend further (exactly
+            // the old `_ => {}` behaviour). Listing every remaining kind
+            // makes a future IrExprKind variant a compile error here so a
+            // new node carrying an aliasable subtree cannot be silently
+            // skipped.
+            IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. }
+            | IrExprKind::LitStr { .. } | IrExprKind::LitBool { .. }
+            | IrExprKind::Unit | IrExprKind::Var { .. } | IrExprKind::FnRef { .. }
+            | IrExprKind::Fan { .. } | IrExprKind::Break | IrExprKind::Continue
+            | IrExprKind::MapLiteral { .. } | IrExprKind::EmptyMap
+            | IrExprKind::SpreadRecord { .. } | IrExprKind::Range { .. }
+            | IrExprKind::TupleIndex { .. } | IrExprKind::MapAccess { .. }
+            | IrExprKind::StringInterp { .. } | IrExprKind::OptionNone
+            | IrExprKind::UnwrapOr { .. } | IrExprKind::ToOption { .. }
+            | IrExprKind::OptionalChain { .. } | IrExprKind::Await { .. }
+            | IrExprKind::Deref { .. } | IrExprKind::Borrow { .. }
+            | IrExprKind::BoxNew { .. } | IrExprKind::RcWrap { .. }
+            | IrExprKind::RustMacro { .. } | IrExprKind::ToVec { .. }
+            | IrExprKind::RenderedCall { .. } | IrExprKind::InlineRust { .. }
+            | IrExprKind::ClosureCreate { .. } | IrExprKind::EnvLoad { .. }
+            | IrExprKind::IterChain { .. } | IrExprKind::Hole
+            | IrExprKind::Todo { .. } => {}
         }
     }
 
@@ -306,7 +329,20 @@ fn erase_type_aliases(program: &mut IrProgram, aliases: &HashMap<String, Ty>) {
                 erase_expr(value, aliases);
                 erase_pattern(pattern, aliases);
             }
-            _ => {}
+            // Explicit-preserve (total-by-construction). These statement
+            // kinds carry no `Ty::Named` slot or aliasable subtree that
+            // alias-erasure needs to touch (the assignable expressions
+            // inside IndexAssign/MapInsert/FieldAssign/Guard contain only
+            // values whose own types are erased when their enclosing
+            // expression is visited). Zero behaviour change vs the old
+            // `_ => {}`; listing every kind makes a new IrStmtKind a
+            // compile error here.
+            IrStmtKind::IndexAssign { .. } | IrStmtKind::MapInsert { .. }
+            | IrStmtKind::FieldAssign { .. } | IrStmtKind::Guard { .. }
+            | IrStmtKind::Comment { .. } | IrStmtKind::RcInc { .. }
+            | IrStmtKind::RcDec { .. } | IrStmtKind::ListSwap { .. }
+            | IrStmtKind::ListReverse { .. } | IrStmtKind::ListRotateLeft { .. }
+            | IrStmtKind::ListCopySlice { .. } => {}
         }
     }
 
@@ -547,7 +583,49 @@ fn propagate_ty_down(expr: &mut IrExpr, expected: &Ty) {
                 propagate_ty_down(&mut arm.body, expected);
             }
         }
-        _ => {}
+        // Explicit-preserve (total-by-construction). The guarded arms above
+        // handle the wrapper/branch shapes whose `expr.kind` and `expected`
+        // line up; every other (kind, expected) pairing — including a
+        // wrapper kind whose `expected` shape did NOT match its guard —
+        // falls here and is a no-op, exactly as the old `_ => {}`. The merge
+        // of `expr.ty` with `expected` already happened above, so there is
+        // nothing further to push down. Wildcarding only the `expected`
+        // slot keeps the fall-through identical while making the first
+        // tuple element exhaustive: a new IrExprKind variant is a compile
+        // error here. `If`/`Match` are NOT re-listed: their arms above are
+        // unguarded, so they already cover every `expected` and re-listing
+        // them would be an unreachable pattern.
+        (IrExprKind::OptionSome { .. }, _)
+        | (IrExprKind::ResultOk { .. }, _)
+        | (IrExprKind::ResultErr { .. }, _)
+        | (IrExprKind::List { .. }, _)
+        | (IrExprKind::Tuple { .. }, _)
+        | (IrExprKind::Block { .. }, _)
+        | (IrExprKind::LitInt { .. }, _) | (IrExprKind::LitFloat { .. }, _)
+        | (IrExprKind::LitStr { .. }, _) | (IrExprKind::LitBool { .. }, _)
+        | (IrExprKind::Unit, _) | (IrExprKind::Var { .. }, _)
+        | (IrExprKind::FnRef { .. }, _) | (IrExprKind::BinOp { .. }, _)
+        | (IrExprKind::UnOp { .. }, _) | (IrExprKind::Fan { .. }, _)
+        | (IrExprKind::ForIn { .. }, _) | (IrExprKind::While { .. }, _)
+        | (IrExprKind::Break, _) | (IrExprKind::Continue, _)
+        | (IrExprKind::Call { .. }, _) | (IrExprKind::TailCall { .. }, _)
+        | (IrExprKind::RuntimeCall { .. }, _)
+        | (IrExprKind::MapLiteral { .. }, _) | (IrExprKind::EmptyMap, _)
+        | (IrExprKind::Record { .. }, _) | (IrExprKind::SpreadRecord { .. }, _)
+        | (IrExprKind::Range { .. }, _) | (IrExprKind::Member { .. }, _)
+        | (IrExprKind::TupleIndex { .. }, _) | (IrExprKind::IndexAccess { .. }, _)
+        | (IrExprKind::MapAccess { .. }, _) | (IrExprKind::Lambda { .. }, _)
+        | (IrExprKind::StringInterp { .. }, _) | (IrExprKind::OptionNone, _)
+        | (IrExprKind::Try { .. }, _) | (IrExprKind::Unwrap { .. }, _)
+        | (IrExprKind::UnwrapOr { .. }, _) | (IrExprKind::ToOption { .. }, _)
+        | (IrExprKind::OptionalChain { .. }, _) | (IrExprKind::Await { .. }, _)
+        | (IrExprKind::Clone { .. }, _) | (IrExprKind::Deref { .. }, _)
+        | (IrExprKind::Borrow { .. }, _) | (IrExprKind::BoxNew { .. }, _)
+        | (IrExprKind::RcWrap { .. }, _) | (IrExprKind::RustMacro { .. }, _)
+        | (IrExprKind::ToVec { .. }, _) | (IrExprKind::RenderedCall { .. }, _)
+        | (IrExprKind::InlineRust { .. }, _) | (IrExprKind::ClosureCreate { .. }, _)
+        | (IrExprKind::EnvLoad { .. }, _) | (IrExprKind::IterChain { .. }, _)
+        | (IrExprKind::Hole, _) | (IrExprKind::Todo { .. }, _) => {}
     }
 }
 
@@ -912,6 +990,14 @@ pub fn infer_var_type_from_body(body: &IrExpr, var: VarId) -> Option<Ty> {
         IrExprKind::Match { subject, arms } =>
             infer_var_type_from_body(subject, var)
                 .or_else(|| arms.iter().find_map(|a| infer_var_type_from_body(&a.body, var))),
+        // Look through Result/Option constructors so a wrapped body like
+        // `ok(x * 10)` or `some(x * 10)` still exposes `x`'s use site. Without
+        // this, a callback whose param type the checker failed to pin would have
+        // no body-derived fallback either.
+        IrExprKind::ResultOk { expr }
+        | IrExprKind::ResultErr { expr }
+        | IrExprKind::OptionSome { expr } =>
+            infer_var_type_from_body(expr, var),
         _ => None,
     }
 }
@@ -1090,6 +1176,17 @@ fn resolve_call_ret_ty(
             if let Some(ret) = symbols.lookup_named(name.as_str()) {
                 if !ret.has_unresolved_deep() {
                     return Some(ret.clone());
+                }
+            }
+        }
+        // Calling a closure VALUE (`f(x)` where `f` is a Fn-typed var/expr — e.g.
+        // a HOF lambda parameter): the call's type is the callee's RETURN type, not
+        // its whole Fn type. Without this the node keeps the `fn(..) -> T` type and
+        // a later `acc + f(x)` trips the IR verifier (AddInt on a function value).
+        CallTarget::Computed { callee } => {
+            if let Ty::Fn { ret, .. } = &callee.ty {
+                if !ret.has_unresolved_deep() {
+                    return Some((**ret).clone());
                 }
             }
         }

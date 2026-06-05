@@ -189,34 +189,55 @@ impl FuncCompiler<'_> {
                 let end = self.scratch.alloc_i32();
                 let new_len = self.scratch.alloc_i32();
                 let dst = self.scratch.alloc_i32();
+                let len = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
-                wasm!(self.func, { local_set(xs); });
+                wasm!(self.func, {
+                    local_set(xs);
+                    local_get(xs); i32_load(0); local_set(len);
+                });
                 self.emit_expr(&args[1]); // start
                 wasm!(self.func, { i32_wrap_i64; local_set(start); });
                 self.emit_expr(&args[2]); // end
                 wasm!(self.func, {
                     i32_wrap_i64; local_set(end);
-                    local_get(end); local_get(start); i32_sub; local_set(new_len);
+                    // Clamp start and end to [0, len] using UNSIGNED comparison so that
+                    // negative indices (huge when unsigned, matching native's i64→usize
+                    // cast) and out-of-range indices saturate to len. Mirrors native:
+                    //   s = start; e = min(end, len); if s >= e { [] } else { xs[s..e] }
+                    // start = min_u(start, len)
+                    local_get(start); local_get(len);
+                      local_get(start); local_get(len); i32_lt_u; select;
+                    local_set(start);
+                    // end = min_u(end, len)
+                    local_get(end); local_get(len);
+                      local_get(end); local_get(len); i32_lt_u; select;
+                    local_set(end);
+                    // new_len = (end > start) ? end - start : 0
+                    local_get(end); local_get(start); i32_sub;
+                      i32_const(0);
+                      local_get(end); local_get(start); i32_gt_u; select;
+                    local_set(new_len);
                     i32_const(list_hdr); local_get(new_len); i32_const(es); i32_mul; i32_add;
                     call(self.emitter.rt.alloc); local_set(dst);
                     local_get(dst); local_get(new_len); i32_store(0);
-                    // copy loop — reuse new_len as i
-                    i32_const(0); local_set(new_len);
+                    // copy loop: dst[i] = xs[start + i] for i in 0..new_len (len reused as i)
+                    i32_const(0); local_set(len);
                     block_empty; loop_empty;
-                      local_get(new_len); local_get(end); local_get(start); i32_sub; i32_ge_u; br_if(1);
+                      local_get(len); local_get(new_len); i32_ge_u; br_if(1);
                       local_get(dst); i32_const(list_data_off); i32_add;
-                      local_get(new_len); i32_const(es); i32_mul; i32_add;
+                      local_get(len); i32_const(es); i32_mul; i32_add;
                       local_get(xs); i32_const(list_data_off); i32_add;
-                      local_get(start); local_get(new_len); i32_add;
+                      local_get(start); local_get(len); i32_add;
                       i32_const(es); i32_mul; i32_add;
                 });
                 self.emit_elem_copy(&elem_ty);
                 wasm!(self.func, {
-                      local_get(new_len); i32_const(1); i32_add; local_set(new_len);
+                      local_get(len); i32_const(1); i32_add; local_set(len);
                       br(0);
                     end; end;
                     local_get(dst);
                 });
+                self.scratch.free_i32(len);
                 self.scratch.free_i32(dst);
                 self.scratch.free_i32(new_len);
                 self.scratch.free_i32(end);
@@ -732,6 +753,11 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, {
                     i32_wrap_i64; local_set(idx);
                     local_get(xs); i32_load(0); local_set(old_len);
+                    // Clamp idx to [0, old_len] (unsigned) so that out-of-range or negative
+                    // indices append at the end. Mirrors native's idx = min(i as usize, len).
+                    local_get(idx); local_get(old_len);
+                      local_get(idx); local_get(old_len); i32_lt_u; select;
+                    local_set(idx);
                     // new_len = old_len + 1
                     i32_const(list_hdr); local_get(old_len); i32_const(1); i32_add; i32_const(es); i32_mul; i32_add;
                     call(self.emitter.rt.alloc); local_set(dst);
@@ -796,6 +822,10 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, {
                     i32_wrap_i64; local_set(idx);
                     local_get(xs); i32_load(0); local_set(old_len);
+                    // Native is a no-op when i >= len (returns the list unchanged). Guard
+                    // with an UNSIGNED compare so negative indices (huge unsigned) are no-ops.
+                    local_get(idx); local_get(old_len); i32_lt_u;
+                    if_i32;
                     // new_len = old_len - 1
                     i32_const(list_hdr); local_get(old_len); i32_const(1); i32_sub; i32_const(es); i32_mul; i32_add;
                     call(self.emitter.rt.alloc); local_set(dst);
@@ -831,6 +861,10 @@ impl FuncCompiler<'_> {
                       br(0);
                     end; end;
                     local_get(dst);
+                    else_;
+                    // i >= len → return the list unchanged
+                    local_get(xs);
+                    end;
                 });
                 self.scratch.free_i32(i);
                 self.scratch.free_i32(dst);
@@ -898,67 +932,41 @@ impl FuncCompiler<'_> {
                 // list.contains(list, elem) -> Bool (i32)
                 let elem_ty = self.resolve_list_elem(&args[0], None);
                 let elem_size = values::byte_size(&elem_ty);
+                let target_vt = values::ty_to_valtype(&elem_ty).unwrap_or(ValType::I32);
                 let list_ptr = self.scratch.alloc_i32();
                 let idx = self.scratch.alloc_i32();
                 let result = self.scratch.alloc_i32();
+                // Hold the search target in a valtype-matched register (i64 Int,
+                // f64 Float, i32 pointer for String/compound). The element load and
+                // compare below use `emit_load_at`/`emit_eq_typed(elem_ty)` so both
+                // sides agree on width and use STRUCTURAL (deep) equality — matching
+                // native `xs.contains(&x)`, not pointer identity.
+                let target = self.scratch.alloc(target_vt);
                 self.emit_expr(&args[0]);
                 wasm!(self.func, { local_set(list_ptr); });
-                // Save target to i64 scratch or i32 scratch depending on type
-                match values::ty_to_valtype(&elem_ty) {
-                    Some(ValType::I64) => {
-                        let target = self.scratch.alloc_i64();
-                        self.emit_expr(&args[1]);
-                        wasm!(self.func, {
-                            local_set(target);
-                            i32_const(0); local_set(idx);
-                            i32_const(0); local_set(result); // result = false
-                            block_empty; loop_empty;
-                              local_get(idx); local_get(list_ptr); i32_load(0); i32_ge_u; br_if(1);
-                              local_get(list_ptr); i32_const(list_data_off); i32_add;
-                              local_get(idx); i32_const(elem_size as i32); i32_mul; i32_add;
-                              i64_load(0);
-                              local_get(target); i64_eq;
-                              if_empty;
-                                i32_const(1); local_set(result); br(2);
-                              end;
-                              local_get(idx); i32_const(1); i32_add; local_set(idx);
-                              br(0);
-                            end; end;
-                            local_get(result);
-                        });
-                        self.scratch.free_i64(target);
-                    }
-                    _ => {
-                        // i32 types: String, Option, etc.
-                        let target = self.scratch.alloc_i32();
-                        self.emit_expr(&args[1]);
-                        wasm!(self.func, {
-                            local_set(target);
-                            i32_const(0); local_set(idx);
-                            i32_const(0); local_set(result);
-                            block_empty; loop_empty;
-                              local_get(idx); local_get(list_ptr); i32_load(0); i32_ge_u; br_if(1);
-                              local_get(list_ptr); i32_const(list_data_off); i32_add;
-                              local_get(idx); i32_const(elem_size as i32); i32_mul; i32_add;
-                              i32_load(0);
-                              local_get(target);
-                        });
-                        match &elem_ty {
-                            Ty::String => { wasm!(self.func, { call(self.emitter.rt.string.eq); }); }
-                            _ => { wasm!(self.func, { i32_eq; }); }
-                        }
-                        wasm!(self.func, {
-                              if_empty;
-                                i32_const(1); local_set(result); br(2);
-                              end;
-                              local_get(idx); i32_const(1); i32_add; local_set(idx);
-                              br(0);
-                            end; end;
-                            local_get(result);
-                        });
-                        self.scratch.free_i32(target);
-                    }
-                }
+                self.emit_expr(&args[1]);
+                wasm!(self.func, {
+                    local_set(target);
+                    i32_const(0); local_set(idx);
+                    i32_const(0); local_set(result); // result = false
+                    block_empty; loop_empty;
+                      local_get(idx); local_get(list_ptr); i32_load(0); i32_ge_u; br_if(1);
+                      local_get(list_ptr); i32_const(list_data_off); i32_add;
+                      local_get(idx); i32_const(elem_size as i32); i32_mul; i32_add;
+                });
+                self.emit_load_at(&elem_ty, 0);
+                wasm!(self.func, { local_get(target); });
+                self.emit_eq_typed(&elem_ty);
+                wasm!(self.func, {
+                      if_empty;
+                        i32_const(1); local_set(result); br(2);
+                      end;
+                      local_get(idx); i32_const(1); i32_add; local_set(idx);
+                      br(0);
+                    end; end;
+                    local_get(result);
+                });
+                self.scratch.free(target, target_vt);
                 self.scratch.free_i32(result);
                 self.scratch.free_i32(idx);
                 self.scratch.free_i32(list_ptr);
@@ -1108,21 +1116,9 @@ impl FuncCompiler<'_> {
                     _ => { wasm!(self.func, { i32_store(0); }); }
                 }
 
-                // Write back to var: xs = new_ptr (handles local, global, and mutable capture)
-                if let almide_ir::IrExprKind::Var { id } = &args[0].kind {
-                    if self.emitter.mutable_captures.contains(&id.0) {
-                        // Mutable capture: store new_ptr into the cell
-                        if let Some(&local_idx) = self.var_map.get(&id.0) {
-                            wasm!(self.func, { local_get(local_idx); local_get(new_ptr); i32_store(0); });
-                        }
-                    } else if let Some(&local_idx) = self.var_map.get(&id.0) {
-                        // Local var
-                        wasm!(self.func, { local_get(new_ptr); local_set(local_idx); });
-                    } else if let Some(&(global_idx, _)) = self.emitter.top_let_globals.get(&id.0) {
-                        // Global var
-                        wasm!(self.func, { local_get(new_ptr); global_set(global_idx); });
-                    }
-                }
+                // Write back the (possibly reallocated) list ptr — into the cell for a
+                // mutable capture, else into the local/global. See emit_mutator_writeback.
+                self.emit_mutator_writeback(&args[0], new_ptr);
 
                 wasm!(self.func, { end; }); // end if/else
 

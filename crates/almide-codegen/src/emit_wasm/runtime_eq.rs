@@ -411,179 +411,208 @@ pub(super) fn compile_concat_list(emitter: &mut WasmEmitter) {
 /// tag=0 ok, tag=1 err.
 pub(super) fn compile_int_parse(emitter: &mut WasmEmitter) {
     let type_idx = emitter.func_type_indices[&emitter.rt.int_parse];
-    // params: 0=$s
-    // locals: 1=$len, 2=$i, 3=$result(i64), 4=$is_neg, 5=$byte, 6=$alloc_ptr
+    // Byte-for-byte mirror of the native oracle
+    //   `s.trim().parse::<i64>().map_err(|e| e.to_string())`
+    // (runtime/rs/src/int.rs). The cross-target diff gate compares the Err
+    // payload STRING, so the four std error messages must be reproduced exactly:
+    //   - empty after trim   → "cannot parse integer from empty string"
+    //   - lone sign / nondigit → "invalid digit found in string"
+    //   - > i64::MAX          → "number too large to fit in target type"
+    //   - < i64::MIN          → "number too small to fit in target type"
+    //
+    // params: 0=$s (string ptr: [len:i32][cap:i32][data:u8...])
+    // locals:
+    //   1=len, 2=i (cursor), 3=end (exclusive, after trailing trim),
+    //   4=is_neg, 5=byte, 6=alloc_ptr, 7=acc (i64 magnitude, u64 semantics),
+    //   8=digit_count, 9=limit (i64, max magnitude for the sign, u64 semantics),
+    //   10=tmp (i64 scratch for overflow math)
     let mut f = Function::new([
         (1, ValType::I32),  // 1: len
         (1, ValType::I32),  // 2: i
-        (1, ValType::I64),  // 3: result
+        (1, ValType::I32),  // 3: end
         (1, ValType::I32),  // 4: is_neg
         (1, ValType::I32),  // 5: byte
         (1, ValType::I32),  // 6: alloc_ptr
+        (1, ValType::I64),  // 7: acc (magnitude)
+        (1, ValType::I32),  // 8: digit_count
+        (1, ValType::I64),  // 9: limit
+        (1, ValType::I64),  // 10: tmp
     ]);
 
-    // len = s.len
+    let data_off = emitter.layout_reg.fixed_offset(
+        super::engine::layout::STRING, super::engine::layout::string::DATA) as i32;
+
+    // The four distinct std error strings (deduped by intern_string).
+    let err_empty = emitter.intern_string("cannot parse integer from empty string");
+    let err_digit = emitter.intern_string("invalid digit found in string");
+    let err_large = emitter.intern_string("number too large to fit in target type");
+    let err_small = emitter.intern_string("number too small to fit in target type");
+    let alloc = emitter.rt.alloc;
+
+    // Emit an `err(<interned string>)` return: alloc [tag=1][str_ptr] and return.
+    let emit_err = |f: &mut Function, err_str: u32| {
+        wasm!(f, {
+            i32_const(12);
+            call(alloc);
+            local_set(6);
+            local_get(6); i32_const(1); i32_store(0);              // tag = 1 (err)
+            local_get(6); i32_const(err_str as i32); i32_store(4); // err string ptr
+            local_get(6);
+            return_;
+        });
+    };
+
+    // Emit `byte = s[data_off + idx_local]`.
+    let load_byte = |f: &mut Function, idx_local: u32, dst: u32| {
+        wasm!(f, {
+            local_get(0); i32_const(data_off); i32_add;
+            local_get(idx_local); i32_add;
+            i32_load8_u(0); local_set(dst);
+        });
+    };
+
+    // len = s.len  (byte length lives at the LEN field, offset 0)
     wasm!(f, {
-        local_get(0);
-        i32_load(0);
-        local_set(1);
+        local_get(0); i32_load(0); local_set(1);
     });
 
-    // Empty string → err
+    // Trim leading + trailing Unicode whitespace (matches native s.trim().parse),
+    // codepoint-aware via the shared __is_unicode_ws helpers. i=cursor(2), end=3,
+    // string ptr=0, scratch q=5.
+    wasm!(f, { i32_const(0); local_set(2); });
+    super::rt_string::emit_trim_forward(&mut f, emitter, 2, 1);
+    wasm!(f, { local_get(1); local_set(3); });
+    super::rt_string::emit_trim_backward(&mut f, emitter, 3, 2, 5);
+
+    // ── Empty after trim → "cannot parse integer from empty string" ──
+    wasm!(f, { local_get(2); local_get(3); i32_ge_u; if_empty; });
+    emit_err(&mut f, err_empty);
+    wasm!(f, { end; });
+
+    // ── Optional single leading sign ──
+    wasm!(f, { i32_const(0); local_set(4); }); // is_neg = 0
+    load_byte(&mut f, 2, 5);
     wasm!(f, {
-        local_get(1);
-        i32_eqz;
+        local_get(5); i32_const(45); i32_eq; // '-'
         if_empty;
-    });
-    // Return err("empty string")
-    let err_str = emitter.intern_string("invalid number");
-    wasm!(f, {
-        i32_const(12);
-        call(emitter.rt.alloc);
-        local_set(6);
-        local_get(6);
-        i32_const(1);
-        i32_store(0);
-        local_get(6);
-        i32_const(err_str as i32);
-        i32_store(4);
-        local_get(6);
-        return_;
+          i32_const(1); local_set(4);
+          local_get(2); i32_const(1); i32_add; local_set(2);
+        else_;
+          local_get(5); i32_const(43); i32_eq; // '+'
+          if_empty;
+            local_get(2); i32_const(1); i32_add; local_set(2);
+          end;
         end;
     });
 
-    // i = 0, result = 0, is_neg = 0
-    wasm!(f, {
-        i32_const(0);
-        local_set(2);
-        i64_const(0);
-        local_set(3);
-        i32_const(0);
-        local_set(4);
-    });
+    // ── No digits after sign → "invalid digit found in string" ──
+    wasm!(f, { local_get(2); local_get(3); i32_ge_u; if_empty; });
+    emit_err(&mut f, err_digit);
+    wasm!(f, { end; });
 
-    // Check leading '-'
+    // ── limit = is_neg ? 0x8000000000000000 (|i64::MIN|) : i64::MAX ──
     wasm!(f, {
-        local_get(0);
-        i32_load8_u(emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32 as u32);
-        i32_const(45);
-        i32_eq;
-        if_empty;
-        i32_const(1);
-        local_set(4);
-        i32_const(1);
-        local_set(2);
-        end;
-    });
-
-    // Check leading '+'
-    wasm!(f, {
-        local_get(0);
-        i32_load8_u(emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32 as u32);
-        i32_const(43);
-        i32_eq;
         local_get(4);
-        i32_eqz;
-        i32_and;
         if_empty;
-        i32_const(1);
-        local_set(2);
+          i64_const(i64::MIN); // bit pattern 0x8000000000000000 == 2^63 unsigned
+          local_set(9);
+        else_;
+          i64_const(i64::MAX);
+          local_set(9);
         end;
     });
 
-    // Loop: while i < len
+    // acc = 0, digit_count = 0
     wasm!(f, {
-        block_empty;
-        loop_empty;
-        local_get(2);
-        local_get(1);
-        i32_ge_u;
-        br_if(1);
+        i64_const(0); local_set(7);
+        i32_const(0); local_set(8);
     });
 
-    // byte = s[STRING_DATA_OFFSET+i]
-    wasm!(f, {
-        local_get(0);
-        i32_const(emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32);
-        i32_add;
-        local_get(2);
-        i32_add;
-        i32_load8_u(0);
-        local_set(5);
+    // ── Main parse loop: while i < end ──
+    wasm!(f, { block_empty; loop_empty;
+        local_get(2); local_get(3); i32_ge_u; br_if(1);
     });
 
-    // if byte < '0' || byte > '9' → err
+    // byte = s[i]
+    load_byte(&mut f, 2, 5);
+
+    // Non-digit → "invalid digit found in string"
     wasm!(f, {
-        local_get(5);
-        i32_const(48);
-        i32_lt_u;
-        local_get(5);
-        i32_const(57);
-        i32_gt_u;
+        local_get(5); i32_const(48); i32_lt_u; // < '0'
+        local_get(5); i32_const(57); i32_gt_u; // > '9'
         i32_or;
         if_empty;
     });
+    emit_err(&mut f, err_digit);
+    wasm!(f, { end; });
+
+    // d = (byte - '0') as i64  →  tmp
     wasm!(f, {
-        i32_const(12);
-        call(emitter.rt.alloc);
-        local_set(6);
-        local_get(6);
-        i32_const(1);
-        i32_store(0);
-        local_get(6);
-        i32_const(err_str as i32);
-        i32_store(4);
-        local_get(6);
-        return_;
-        end;
+        local_get(5); i32_const(48); i32_sub;
+        i64_extend_i32_u; local_set(10);
     });
 
-    // result = result * 10 + (byte - '0')
+    // ── Overflow step 1: if acc > limit/10 → overflow (acc*10 already exceeds limit) ──
+    // Unsigned `a > b` ≡ !(b >= a), expressed via i64_ge_u + i32_eqz.
     wasm!(f, {
-        local_get(3);
-        i64_const(10);
-        i64_mul;
-        local_get(5);
-        i32_const(48);
-        i32_sub;
-        i64_extend_i32_u;
-        i64_add;
-        local_set(3);
+        local_get(9); i64_const(10); i64_div_u; // limit/10
+        local_get(7);                            // acc
+        i64_ge_u;                                // (limit/10) >= acc  ≡  acc <= limit/10
+        i32_eqz;                                 // → acc > limit/10
+        if_empty;
+    });
+    wasm!(f, { local_get(4); if_empty; });
+    emit_err(&mut f, err_small);
+    wasm!(f, { else_; });
+    emit_err(&mut f, err_large);
+    wasm!(f, { end; end; });
+
+    // acc = acc * 10  (safe: acc <= limit/10, so acc*10 <= limit < u64::MAX)
+    wasm!(f, {
+        local_get(7); i64_const(10); i64_mul; local_set(7);
     });
 
-    // i++
+    // ── Overflow step 2: if acc > limit - d → overflow (adding d would exceed) ──
     wasm!(f, {
-        local_get(2);
-        i32_const(1);
-        i32_add;
-        local_set(2);
+        local_get(9); local_get(10); i64_sub; // limit - d
+        local_get(7);                          // acc
+        i64_ge_u;                              // (limit - d) >= acc
+        i32_eqz;                               // → acc > limit - d
+        if_empty;
+    });
+    wasm!(f, { local_get(4); if_empty; });
+    emit_err(&mut f, err_small);
+    wasm!(f, { else_; });
+    emit_err(&mut f, err_large);
+    wasm!(f, { end; end; });
+
+    // acc = acc + d
+    wasm!(f, {
+        local_get(7); local_get(10); i64_add; local_set(7);
+    });
+
+    // i++, continue
+    wasm!(f, {
+        local_get(2); i32_const(1); i32_add; local_set(2);
         br(0);
-        end;
-        end;
+        end; end;
     });
 
-    // if is_neg: result = -result
+    // ── Materialize signed i64 value ──
+    // Negative: value = 0 - acc (two's-complement; wraps exactly to i64::MIN when
+    // acc == 2^63). Positive: value = acc (acc <= i64::MAX, fits).
     wasm!(f, {
         local_get(4);
         if_empty;
-        i64_const(0);
-        local_get(3);
-        i64_sub;
-        local_set(3);
+          i64_const(0); local_get(7); i64_sub; local_set(7);
         end;
     });
 
-    // Return ok(result): alloc [tag=0, value=result]
+    // Return ok(value): alloc [tag=0][value:i64]
     wasm!(f, {
-        i32_const(12);
-        call(emitter.rt.alloc);
-        local_set(6);
-        local_get(6);
-        i32_const(0);
-        i32_store(0);
-        local_get(6);
-        local_get(3);
-        i64_store(4);
+        i32_const(12); call(alloc); local_set(6);
+        local_get(6); i32_const(0); i32_store(0); // tag = 0 (ok)
+        local_get(6); local_get(7); i64_store(4); // value
         local_get(6);
         end;
     });

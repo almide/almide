@@ -28,6 +28,18 @@ pub struct CodegenAnnotations {
     /// emitting `(*NAME)` — scalar `Const` top_lets (plain `const
     /// NAME: i64 = 42;`) must NOT be dereferenced.
     pub lazy_top_let_names: HashSet<String>,
+    /// Uppercased names of `Lazy` top_lets whose initializer can ABORT (today:
+    /// contains an integer `/` or `%`, which abort on a zero divisor / MIN÷-1).
+    /// `fn main` forces these in DECLARATION ORDER before running, so an aborting
+    /// initializer fires at startup — matching wasm, which evaluates every top-let
+    /// eagerly in `_start`. Pure lazies stay lazy (timing is unobservable for them).
+    pub eager_force_top_lets: Vec<String>,
+    /// VarIds of `Const`-kind top_lets. Their declarations render as
+    /// `const NAME_UPPER: T = ...;`, so every reference must also render the
+    /// uppercased name — a lowercase source binding (`let zero = 0`) would
+    /// otherwise emit `zero` against `const ZERO` (E0425, native-only failure
+    /// while wasm builds: a cross-target divergence).
+    pub const_top_let_vars: HashSet<VarId>,
     /// Unified variable storage classification.
     /// Keyed by VarId for local vars (RcCow) and module vars with known ids.
     pub var_storage: HashMap<VarId, VarStorage>,
@@ -36,6 +48,10 @@ pub struct CodegenAnnotations {
     pub var_storage_by_name: HashMap<String, VarStorage>,
     pub ctor_to_enum: HashMap<String, String>,
     pub anon_records: HashMap<Vec<String>, String>,
+    /// Anon-record keys (sorted field names) whose struct has a closure (`Fn`)
+    /// field — its generated struct derives `Clone` only (a closure is not
+    /// `Debug`/`PartialEq`), like a `type`-declared record's `has_fn_fields` path.
+    pub anon_records_with_fn: std::collections::HashSet<Vec<String>>,
     pub named_records: HashMap<Vec<String>, String>,
     /// Field count of each nominal record type (name → number of fields).
     /// Used to decide whether a record destructure pattern needs a trailing
@@ -48,24 +64,47 @@ pub struct CodegenAnnotations {
     /// derive `PartialEq` (a field transitively blocks equality — e.g.
     /// contains a Matrix or a function pointer).
     pub eq_blocked_types: HashSet<String>,
+    /// `Mutability::Var` locals that are captured-and-mutated by a closure. On the
+    /// Rust target these are lowered to a shared `Rc<Cell<T>>` / `Rc<RefCell<T>>`
+    /// cell (declaration, every read/write, and the closure capture go through the
+    /// cell) so a mutation inside the closure is observed by the enclosing scope —
+    /// a plain `move` closure would capture a *copy* and silently drop the mutation.
+    /// (Closure v2, P3.)
+    pub shared_mut_vars: HashSet<VarId>,
 }
 
 impl CodegenAnnotations {
     /// Look up the storage mode for a variable. Checks VarId first (precise),
-    /// then falls back to uppercased name (for cross-module synthetic refs).
+    /// then falls back to uppercased name for cross-module synthetic refs only.
+    ///
+    /// A genuine global is always referenced by its real VarId (registered at
+    /// classification time), so the VarId lookup hits. The by-name fallback is a
+    /// safety net for cross-module synthetic refs, whose names are
+    /// `ALMIDE_RT_`-prefixed and therefore collision-free. It must NOT match a
+    /// bare name like `N`: a local that merely shares the name with a user global
+    /// (e.g. a stdlib fn's `n` parameter when the program has a global `n`) would
+    /// otherwise be misclassified as the global and read through its thread_local.
     pub fn get_var_storage(&self, var: &VarId, name: &str) -> VarStorage {
         if let Some(s) = self.var_storage.get(var) {
             return *s;
         }
         let upper = name.to_uppercase();
-        if let Some(s) = self.var_storage_by_name.get(&upper) {
-            return *s;
+        if upper.starts_with("ALMIDE_RT_") {
+            if let Some(s) = self.var_storage_by_name.get(&upper) {
+                return *s;
+            }
         }
         VarStorage::Local
     }
 
     pub fn is_rc_cow(&self, var: &VarId) -> bool {
         matches!(self.var_storage.get(var), Some(VarStorage::RcCow))
+    }
+
+    /// True if `var` is a closure-captured mutable local lowered to a shared cell
+    /// (`Rc<Cell<T>>`/`Rc<RefCell<T>>`) on the Rust target. (Closure v2, P3.)
+    pub fn is_shared_mut(&self, var: &VarId) -> bool {
+        self.shared_mut_vars.contains(var)
     }
 
     pub fn is_module_var(&self, var: &VarId, name: &str) -> bool {

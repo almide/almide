@@ -1,0 +1,68 @@
+// Cluster-H completion: record / variant / integral-float string interpolation.
+//
+// `"${value}"` renders a record or variant back to its Almide-literal form — the
+// same construction-literal format `deriving Repr` produces — byte-identically
+// on native and WASM, recursively composing with the container machinery
+// (PR #379). This file is the cross-target gate for:
+//   • records (multi-field, string + float fields, nested, in containers)
+//   • variants (tuple payload, record payload, nullary, in containers)
+//   • integer-valued floats in interpolation (Display form drops the `.0`)
+//   • inline-annotated empty collection literals
+//
+// The container shapes themselves are gated by compound_repr_interp.almd; here
+// the new surface is records, variants, and the bare-float Display form.
+
+type Point = { x: Int, y: Int }
+type Person = { name: String, age: Int, score: Float }
+type Line = { start: Point, end: Point }
+type Event = Click(Int, Int) | Scroll { dy: Int } | Quit
+type Shape = Circle(Float) | Rect(Int, Int) | Label { text: String, at: Point }
+
+fn main() -> Unit = {
+  // ── Records: `Type { f: v, … }`, field declaration order ──
+  println("point=${Point { x: 1, y: 2 }}")
+  // String fields are quoted + escaped; float fields use the Display form.
+  println("person=${Person { name: "Ada \"A\"", age: 36, score: 9.5 }}")
+  // An integer-valued float field drops its `.0` (`10.0` → `10`).
+  println("person_int=${Person { name: "Bob", age: 40, score: 10.0 }}")
+  // Nested record (record field inside a record).
+  println("line=${Line { start: Point { x: 1, y: 2 }, end: Point { x: 3, y: 4 } }}")
+  // Record inside a list / option / map.
+  let pts: List[Point] = [Point { x: 1, y: 2 }, Point { x: 5, y: 6 }]
+  println("points=${pts}")
+  let op: Option[Point] = some(Point { x: 7, y: 8 })
+  println("opt_rec=${op}")
+  let pm: Map[String, Point] = ["o": Point { x: 0, y: 0 }]
+  println("rec_map=${pm}")
+
+  // ── Variants: constructor form ──
+  println("click=${Click(10, 20)}")       // tuple payload
+  println("scroll=${Scroll { dy: 5 }}")    // record payload
+  println("quit=${Quit}")                  // nullary
+  // Variant with a float payload (Display form, integral drops `.0`).
+  println("circle=${Circle(2.0)}")
+  println("circle_f=${Circle(2.5)}")
+  // Variant inside a list / map (value).
+  let shapes: List[Shape] =
+    [Circle(1.0), Rect(2, 3), Label { text: "box", at: Point { x: 0, y: 0 } }]
+  println("shapes=${shapes}")
+  let sm: Map[String, Shape] = ["a": Circle(3.0), "b": Rect(4, 5)]
+  println("shape_map=${sm}")
+
+  // ── Bare integral-float interpolation: Display form (oracle = native `{}`) ──
+  println("zero=${0.0}")
+  println("neg_zero=${-0.0}")
+  println("one=${1.0}")
+  println("big=${1e300}")
+  println("frac=${0.25}")
+  // Floats inside a container inherit the same Display form.
+  println("float_list=${[0.0, 1.0, 0.5]}")
+  let ft: (Float, Float) = (2.0, 3.5)
+  println("float_tuple=${ft}")
+
+  // ── Inline-annotated empty collection literals ──
+  println("empty_list=${[]: List[Int]}")
+  println("empty_map=${[:]: Map[String, Int]}")
+  println("empty_set=${set.from_list([]): Set[Int]}")
+  println("empty_nested=${[]: List[List[Int]]}")
+}

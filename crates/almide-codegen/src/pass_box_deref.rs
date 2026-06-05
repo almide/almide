@@ -220,7 +220,7 @@ fn insert_derefs(expr: IrExpr, deref_ids: &HashSet<VarId>) -> IrExpr {
                 CallTarget::Computed { callee } => CallTarget::Computed {
                     callee: Box::new(insert_derefs(*callee, deref_ids)),
                 },
-                other => other,
+                other @ (CallTarget::Named { .. } | CallTarget::Module { .. }) => other,
             };
             IrExprKind::Call { target, args, type_args }
         }
@@ -268,7 +268,7 @@ fn insert_derefs(expr: IrExpr, deref_ids: &HashSet<VarId>) -> IrExpr {
         IrExprKind::StringInterp { parts } => IrExprKind::StringInterp {
             parts: parts.into_iter().map(|p| match p {
                 IrStringPart::Expr { expr } => IrStringPart::Expr { expr: insert_derefs(expr, deref_ids) },
-                other => other,
+                lit @ IrStringPart::Lit { .. } => lit,
             }).collect(),
         },
         IrExprKind::Unwrap { expr } => IrExprKind::Unwrap { expr: Box::new(insert_derefs(*expr, deref_ids)) },
@@ -303,7 +303,9 @@ fn insert_derefs(expr: IrExpr, deref_ids: &HashSet<VarId>) -> IrExpr {
             cond: Box::new(insert_derefs(*cond, deref_ids)),
             body: insert_deref_stmts(body, deref_ids),
         },
-        other => other,
+        // Any other kind: recurse into every child (total by construction).
+        other => return IrExpr { kind: other, ty, span, def_id: None }
+            .map_children(&mut |e| insert_derefs(e, deref_ids)),
     };
 
     IrExpr { kind, ty, span, def_id: None }
@@ -320,71 +322,47 @@ fn insert_deref_stmts(stmts: Vec<IrStmt>, deref_ids: &HashSet<VarId>) -> Vec<IrS
             IrStmtKind::Guard { cond, else_ } => IrStmtKind::Guard {
                 cond: insert_derefs(cond, deref_ids), else_: insert_derefs(else_, deref_ids),
             },
-            other => other,
+            other => return IrStmt { kind: other, span: s.span }
+                .map_exprs(&mut |e| insert_derefs(e, deref_ids)),
         };
         IrStmt { kind, span: s.span }
     }).collect()
 }
 
 fn collect_from_expr(expr: &IrExpr, recursive_enums: &HashSet<String>, type_decls: &[IrTypeDecl], name_to_var: &std::collections::HashMap<String, Vec<VarId>>, deref_vars: &mut HashSet<VarId>) {
-    match &expr.kind {
-        IrExprKind::Match { subject, arms } => {
-            // Check if subject type is a recursive enum
+    DerefCollector { recursive_enums, type_decls, name_to_var, deref_vars }.visit_expr(expr);
+}
+
+/// Walks every expression collecting Box'd recursive-enum bindings that need a
+/// Deref. Riding the exhaustive `IrVisitor` means a recursive-enum Match nested
+/// inside any node kind (list/tuple/record/…) is found too — matching the now-total
+/// `insert_derefs` side. Collecting an extra deref var is rustc-checked, never silent.
+struct DerefCollector<'a> {
+    recursive_enums: &'a HashSet<String>,
+    type_decls: &'a [IrTypeDecl],
+    name_to_var: &'a std::collections::HashMap<String, Vec<VarId>>,
+    deref_vars: &'a mut HashSet<VarId>,
+}
+
+impl IrVisitor for DerefCollector<'_> {
+    fn visit_expr(&mut self, expr: &IrExpr) {
+        if let IrExprKind::Match { subject, arms } = &expr.kind {
+            // A recursive-enum match binds Box'd fields — collect their deref vars.
             let enum_name = match &subject.ty {
                 Ty::Named(n, _) => Some(n.clone()),
                 Ty::Variant { name, .. } => Some(name.clone()),
                 _ => None,
             };
-
             if let Some(ref ename) = enum_name {
-                if recursive_enums.contains(ename.as_str()) {
-                    // Find the type decl to know which fields are recursive
-                    let td = type_decls.iter().find(|td| *ename == td.name);
+                if self.recursive_enums.contains(ename.as_str()) {
+                    let td = self.type_decls.iter().find(|td| *ename == td.name);
                     for arm in arms {
-                        collect_deref_from_pattern(&arm.pattern, ename, td, name_to_var, deref_vars);
-                        collect_from_expr(&arm.body, recursive_enums, type_decls, name_to_var, deref_vars);
+                        collect_deref_from_pattern(&arm.pattern, ename, td, self.name_to_var, self.deref_vars);
                     }
-                } else {
-                    for arm in arms {
-                        collect_from_expr(&arm.body, recursive_enums, type_decls, name_to_var, deref_vars);
-                    }
-                }
-            } else {
-                for arm in arms {
-                    collect_from_expr(&arm.body, recursive_enums, type_decls, name_to_var, deref_vars);
                 }
             }
-            collect_from_expr(subject, recursive_enums, type_decls, name_to_var, deref_vars);
         }
-        IrExprKind::Block { stmts, expr: e } => {
-            for s in stmts { collect_from_stmt(s, recursive_enums, type_decls, name_to_var, deref_vars); }
-            if let Some(e) = e { collect_from_expr(e, recursive_enums, type_decls, name_to_var, deref_vars); }
-        }
-        IrExprKind::If { cond, then, else_ } => {
-            collect_from_expr(cond, recursive_enums, type_decls, name_to_var, deref_vars);
-            collect_from_expr(then, recursive_enums, type_decls, name_to_var, deref_vars);
-            collect_from_expr(else_, recursive_enums, type_decls, name_to_var, deref_vars);
-        }
-        IrExprKind::Call { args, .. }
-        | IrExprKind::RuntimeCall { args, .. } => {
-            for a in args { collect_from_expr(a, recursive_enums, type_decls, name_to_var, deref_vars); }
-        }
-        IrExprKind::BinOp { left, right, .. } => {
-            collect_from_expr(left, recursive_enums, type_decls, name_to_var, deref_vars);
-            collect_from_expr(right, recursive_enums, type_decls, name_to_var, deref_vars);
-        }
-        IrExprKind::Lambda { body, .. } => collect_from_expr(body, recursive_enums, type_decls, name_to_var, deref_vars),
-        _ => {}
-    }
-}
-
-fn collect_from_stmt(stmt: &IrStmt, recursive_enums: &HashSet<String>, type_decls: &[IrTypeDecl], name_to_var: &std::collections::HashMap<String, Vec<VarId>>, deref_vars: &mut HashSet<VarId>) {
-    match &stmt.kind {
-        IrStmtKind::Bind { value, .. } | IrStmtKind::Assign { value, .. } => {
-            collect_from_expr(value, recursive_enums, type_decls, name_to_var, deref_vars);
-        }
-        IrStmtKind::Expr { expr } => collect_from_expr(expr, recursive_enums, type_decls, name_to_var, deref_vars),
-        _ => {}
+        walk_expr(self, expr); // recurse subject, arm bodies, and every other kind
     }
 }
 

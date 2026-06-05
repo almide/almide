@@ -2,7 +2,7 @@
 
 use almide_lang::types::{Ty, TypeConstructorId};
 use super::RenderContext;
-use super::helpers::{template_or, render_type_boxed_fn, render_type_rc_fn, ty_has_named_typevar};
+use super::helpers::template_or;
 
 pub fn render_type(ctx: &RenderContext, ty: &Ty) -> String {
     match ty {
@@ -46,9 +46,18 @@ pub fn render_type(ctx: &RenderContext, ty: &Ty) -> String {
         Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => {
             let (ok, err) = (&args[0], &args[1]);
             let ok_s = render_type(ctx, ok);
-            let err_s = render_type(ctx, err);
+            // An UNCONSTRAINED error type (e.g. `ok(7)` whose `?E` is never forced
+            // concrete) renders as `_`, which rustc cannot infer (E0283). Default
+            // it to `String` — Almide's conventional error type (`effect fn` →
+            // `Result<_, String>`). A real generic error param (named typevar) is
+            // left untouched.
+            let err_s = match err {
+                Ty::Unknown => "String".to_string(),
+                Ty::TypeVar(n) if n.starts_with('?') => "String".to_string(),
+                _ => render_type(ctx, err),
+            };
             ctx.templates.render_with("type_result", None, &[], &[("ok", ok_s.as_str()), ("err", err_s.as_str())])
-                .unwrap_or_else(|| format!("Result<{}, {}>", render_type(ctx, ok), render_type(ctx, err)))
+                .unwrap_or_else(|| format!("Result<{}, {}>", ok_s, err_s))
         }
         Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 => {
             let inner = &args[0];
@@ -137,16 +146,13 @@ pub fn render_type(ctx: &RenderContext, ty: &Ty) -> String {
                 format!("{}<{}>", name, args_str)
             }
         }
-        Ty::Fn { params, ret } => {
-            let params_str = params.iter().map(|p| render_type(ctx, p)).collect::<Vec<_>>().join(", ");
-            // Nested Fn return may need boxing (Rust: Box<dyn Fn>; TS: identity)
-            let ret_str = if matches!(ret.as_ref(), Ty::Fn { .. }) {
-                render_type_boxed_fn(ctx, ret)
-            } else {
-                render_type(ctx, ret)
-            };
-            ctx.templates.render_with("type_fn", None, &[], &[("params", params_str.as_str()), ("return", ret_str.as_str())])
-                .unwrap_or_else(|| format!("Fn({})", params_str))
+        Ty::Fn { .. } => {
+            // UNIFORM-REPR SPIKE: every closure type — in ANY position (var, field,
+            // function parameter, return) — is `Rc<dyn Fn(...) -> T>`. This kills the
+            // `impl Fn` vs `Rc<dyn Fn>` split that forced per-site boxing decisions
+            // and the HOF-param E0277 divergence. `render_type_field_fn` already
+            // renders every (possibly nested) Fn as `Rc<dyn Fn>`.
+            super::helpers::render_type_field_fn(ctx, ty)
         }
         Ty::Tuple(elems) => {
             let parts = elems.iter().map(|t| render_type(ctx, t)).collect::<Vec<_>>().join(", ");
@@ -163,6 +169,14 @@ pub fn render_type(ctx: &RenderContext, ty: &Ty) -> String {
         Ty::Unknown | Ty::Union(_) => {
             template_or(ctx, "unknown_type", &[], "_")
         }
+        // The bottom type renders as `()` — consistent with how the rest of
+        // codegen treats it (`Ty::Unit | Ty::Never` are grouped in
+        // pass_stack_balance and emit_wasm/values). A diverging value is never
+        // used, so `()` is a sound placeholder. Without this arm a `Ty::Never`
+        // reaching a NAMED position (e.g. `Rc<dyn Fn() -> Never>` under the
+        // uniform closure repr — a closure body that always throws) fell to the
+        // Display fallback and emitted the invalid Rust type name `Never`.
+        Ty::Never => template_or(ctx, "type_unit", &[], "()"),
         Ty::Variant { name, .. } => name.to_string(),
         // Fallback
         #[allow(unreachable_patterns)]

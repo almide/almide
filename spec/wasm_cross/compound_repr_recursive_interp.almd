@@ -1,0 +1,76 @@
+// Cross-target gate for the recursive / generic / anonymous repr surface.
+//
+// `"${value}"` renders a value back to its Almide-literal form byte-identically
+// on native and WASM. This file covers the shapes the inline type-driven walk
+// CANNOT handle on WASM and that route through per-type repr functions, plus the
+// generic and anonymous record shapes whose field types/orders must converge:
+//
+//   • Self-recursive ADTs (`Tree = Leaf(Int) | Node(Tree, Tree)`) — the WASM
+//     walk recurses via a CALL into `__repr_Tree` (terminating on the finite
+//     value), not an infinite compile-time type-graph expansion.
+//   • Self-recursive records (`Node = { val, kids: List[Node] }`).
+//   • Mutually-recursive records (`A → B → A`).
+//   • Generic records / variants (`Holder[Int]`, `Either[Int, String]`) — the
+//     concrete type args at the interpolation site resolve each payload's repr.
+//   • Anonymous records (`{ x: 1, y: 2 }`) — NO type name; fields render in
+//     SORTED name order on BOTH targets (the native synthesized `AlmdRec_*`
+//     struct stores fields sorted; the WASM walk sorts to match).
+
+type Tree = Leaf(Int) | Node(Tree, Tree)
+type RNode = { val: Int, kids: List[RNode] }
+type A = { b: List[B] }
+type B = { a: List[A] }
+type Holder[T] = { value: T, label: String }
+type Either[L, R] = Left(L) | Right(R)
+
+fn main() -> Unit = {
+  // ── Self-recursive variant ADT ──
+  let leaf: Tree = Leaf(42)
+  println("leaf=${leaf}")
+  let tree: Tree = Node(Node(Leaf(1), Leaf(2)), Leaf(3))
+  println("tree=${tree}")
+  // Recursive ADT inside containers.
+  let forest: List[Tree] = [Leaf(7), Node(Leaf(8), Leaf(9))]
+  println("forest=${forest}")
+  let opt_tree: Option[Tree] = some(Node(Leaf(4), Leaf(5)))
+  println("opt_tree=${opt_tree}")
+
+  // ── Self-recursive record (List indirection makes it native-legal) ──
+  let rleaf: RNode = { val: 1, kids: [] }
+  println("rleaf=${rleaf}")
+  let rtree: RNode = { val: 1, kids: [{ val: 2, kids: [] }, { val: 3, kids: [] }] }
+  println("rtree=${rtree}")
+
+  // ── Mutual recursion (A references B references A) ──
+  let ma: A = { b: [] }
+  let mb: B = { a: [ma] }
+  let top: A = { b: [mb] }
+  println("mutual=${top}")
+
+  // ── Generic record: the site's concrete type args resolve the `T` payload ──
+  let bi: Holder[Int] = { value: 42, label: "answer" }
+  println("box_int=${bi}")
+  let bs: Holder[String] = { value: "hi", label: "greet" }
+  println("box_str=${bs}")
+  let bl: Holder[List[Int]] = { value: [1, 2, 3], label: "nums" }
+  println("box_list=${bl}")
+
+  // ── Generic variant: each constructor's payload resolves to the site type ──
+  let el: Either[Int, String] = Left(5)
+  println("either_left=${el}")
+  let er: Either[Int, String] = Right("x")
+  println("either_right=${er}")
+  let es: List[Either[Int, String]] = [Left(1), Right("y")]
+  println("either_list=${es}")
+
+  // ── Anonymous records: no type name, fields in SORTED name order ──
+  let anon = { x: 1, y: 2 }
+  println("anon=${anon}")
+  // Source order is zebra, apple, mango → sorted render is apple, mango, zebra
+  // (values stay bound to their names: apple=2, mango=3, zebra=1).
+  let anon_unsorted = { zebra: 1, apple: 2, mango: 3 }
+  println("anon_sorted=${anon_unsorted}")
+  // Anonymous record nested in a list.
+  let anon_list = [{ x: 1, y: 2 }, { x: 3, y: 4 }]
+  println("anon_list=${anon_list}")
+}

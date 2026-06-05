@@ -36,6 +36,25 @@ impl NanoPass for ClosureConversionPass {
     }
 
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
+        // Detect captured vars a closure MUTATES, before conversion rewrites their
+        // references to `EnvLoad`s (after which the original VarId is gone). On WASM
+        // such a var must become a shared heap cell (`mutable_captures`), which the
+        // emitter seeds from `shared_mut_vars`. The IR `Mutability` flag is unreliable
+        // here — a non-Copy var mutated only via a method like `list.push` is recorded
+        // `Let` (it is never reassigned). (Closure v2 P6.)
+        for v in detect_mutated_captures(&program) {
+            program.codegen_annotations.shared_mut_vars.insert(v);
+        }
+
+        // A lambda that CAPTURES a shared cell var — even one it only reads — must
+        // stay raw, not be lifted to a ClosureCreate/EnvLoad. The lifted env path
+        // does not thread the heap cell (a reader closure would load the raw cell
+        // ptr and use it as the object → garbage; sibling closures would not share
+        // one cell). The raw Lambda path boxes captures as heap cells correctly, so
+        // keeping these lambdas raw is what makes sibling/reader closures observe a
+        // shared mutable capture consistently on WASM. (Closure v2 P6.)
+        let shared: HashSet<VarId> = program.codegen_annotations.shared_mut_vars.clone();
+
         let mut program_lifted = Vec::new();
         let mut counter = 0u32;
 
@@ -49,13 +68,13 @@ impl NanoPass for ClosureConversionPass {
         for func in functions.iter_mut() {
             func.body = convert_expr(
                 std::mem::take(&mut func.body),
-                &mut program_lifted, &mut counter, var_table,
+                &mut program_lifted, &mut counter, var_table, &shared,
             );
         }
         for tl in top_lets.iter_mut() {
             tl.value = convert_expr(
                 std::mem::take(&mut tl.value),
-                &mut program_lifted, &mut counter, var_table,
+                &mut program_lifted, &mut counter, var_table, &shared,
             );
         }
         let any_changed = !program_lifted.is_empty();
@@ -67,13 +86,13 @@ impl NanoPass for ClosureConversionPass {
             for func in module.functions.iter_mut() {
                 func.body = convert_expr(
                     std::mem::take(&mut func.body),
-                    &mut module_lifted, &mut counter, var_table,
+                    &mut module_lifted, &mut counter, var_table, &shared,
                 );
             }
             for tl in module.top_lets.iter_mut() {
                 tl.value = convert_expr(
                     std::mem::take(&mut tl.value),
-                    &mut module_lifted, &mut counter, var_table,
+                    &mut module_lifted, &mut counter, var_table, &shared,
                 );
             }
             if !module_lifted.is_empty() { module_changed = true; }
@@ -86,11 +105,69 @@ impl NanoPass for ClosureConversionPass {
 
 // ── Bottom-up Lambda → ClosureCreate conversion ─────────────────────
 
+/// Arg index of an inline-eligible list-combinator's lambda for the `Module`
+/// call form (e.g. egg's fused output), or None.
+fn module_inline_lambda_arg(target: &CallTarget) -> Option<usize> {
+    if let CallTarget::Module { module, func, .. } = target {
+        if module.as_str() == "list" {
+            return list_combinator_inline_arg(func.as_str());
+        }
+    }
+    None
+}
+
+/// Same, for the usual post-IntrinsicLowering `RuntimeCall` form
+/// (`almide_rt_list_<method>`). These are the only combinators the WASM emitter
+/// inline-splices (map/filter at arg 1, fold at arg 2); leaving exactly their
+/// lambda args raw keeps the fast path AND inline-context Perceus RC. A missed
+/// form only costs a perf regression (the arg becomes a ClosureCreate that
+/// dispatches via call_indirect), never correctness.
+fn runtime_inline_lambda_arg(symbol: &almide_base::intern::Sym) -> Option<usize> {
+    match symbol.as_str() {
+        "almide_rt_list_map" | "almide_rt_list_filter" => Some(1),
+        "almide_rt_list_fold" => Some(2),
+        _ => None,
+    }
+}
+
+fn list_combinator_inline_arg(func: &str) -> Option<usize> {
+    match func {
+        "map" | "filter" => Some(1),
+        "fold" => Some(2),
+        _ => None,
+    }
+}
+
+/// Convert nested closures inside a (potential) inline lambda's body, but keep
+/// the lambda itself RAW so the emitter can splice it. Non-lambda args fall back
+/// to normal conversion.
+fn keep_lambda_raw(
+    expr: IrExpr,
+    lifted: &mut Vec<IrFunction>,
+    counter: &mut u32,
+    vt: &mut VarTable,
+    shared: &HashSet<VarId>,
+) -> IrExpr {
+    let IrExpr { kind, ty, span, def_id } = expr;
+    match kind {
+        IrExprKind::Lambda { params, body, lambda_id } => IrExpr {
+            kind: IrExprKind::Lambda {
+                params,
+                body: Box::new(convert_expr(*body, lifted, counter, vt, shared)),
+                lambda_id,
+            },
+            ty, span, def_id,
+        },
+        other => convert_expr(IrExpr { kind: other, ty, span, def_id }, lifted, counter, vt, shared),
+    }
+}
+
 fn convert_expr(
     expr: IrExpr,
     lifted: &mut Vec<IrFunction>,
     counter: &mut u32,
     vt: &mut VarTable,
+    shared: &HashSet<VarId>,
 ) -> IrExpr {
     let span = expr.span;
     let mut ty = expr.ty.clone();
@@ -98,25 +175,32 @@ fn convert_expr(
     let kind = match expr.kind {
         IrExprKind::Lambda { params, body, lambda_id } => {
             // 1. Bottom-up: convert nested lambdas first
-            let body = convert_expr(*body, lifted, counter, vt);
+            let body = convert_expr(*body, lifted, counter, vt, shared);
 
-            // 2. Free variable analysis
+            // 2. Free variable analysis (single source of truth in almide-ir).
             let param_ids: HashSet<VarId> = params.iter().map(|(v, _)| *v).collect();
-            let mut free = HashSet::new();
-            collect_free_vars(&body, &param_ids, &mut free);
+            let free = almide_ir::free_vars::free_vars(&body, &param_ids);
 
-            // 3a. No captures → keep as Lambda for potential inline expansion
-            //     in the WASM emitter (avoids call_indirect overhead).
-            if free.is_empty() {
-                return IrExpr {
-                    kind: IrExprKind::Lambda { params, body: Box::new(body), lambda_id },
-                    ty, span, def_id: None,
-                };
-            }
+            // A value-position lambda is always lifted to a ClosureCreate with a
+            // stable, globally-unique function name — even with NO captures (the
+            // emitter builds [table_idx, 0]). Inline-combinator args never reach
+            // here: they were kept raw at the Call/RuntimeCall site above. So we no
+            // longer leave capture-free *value* lambdas raw (that was the source of
+            // the fragile lambda_id-matched value path). (Closure v2, P2b/A.)
 
-            // 3b. Skip conversion for mutable captures (WASM emitter handles
-            //     those via heap cells in the Lambda-based path)
-            if free.iter().any(|vid| body_assigns_to(&body, *vid)) {
+            // Shared-cell captures stay raw: the emitter boxes them as heap cells in
+            // the Lambda path, and a lifted env doesn't thread the cell correctly
+            // (a P3/P6 concern). A lambda is kept raw if it captures any var that is a
+            // shared cell — whether THIS lambda mutates it (`list.push(acc, …)` or
+            // `acc = …`) or merely READS it while a sibling closure mutates it. The
+            // read-only case matters: `let read = () => list.len(xs)` beside
+            // `let wipe = () => list.clear(xs)` — if `read` were lifted it would load
+            // the raw cell ptr and use it as the list (garbage), and the two closures
+            // would not share one cell. `shared` is the program-wide shared-cell set
+            // (every var some closure mutates), so it already covers this lambda's own
+            // mutations; `body_mutates` stays as a belt-and-suspenders fallback for a
+            // var the global detection might miss. (Closure v2 P6.)
+            if free.iter().any(|vid| shared.contains(vid) || body_mutates(&body, *vid)) {
                 return IrExpr {
                     kind: IrExprKind::Lambda { params, body: Box::new(body), lambda_id },
                     ty, span, def_id: None,
@@ -235,119 +319,137 @@ fn convert_expr(
         // ── Recursive conversion for all other nodes ──
 
         IrExprKind::Block { stmts, expr: tail } => IrExprKind::Block {
-            stmts: stmts.into_iter().map(|s| convert_stmt(s, lifted, counter, vt)).collect(),
-            expr: tail.map(|e| Box::new(convert_expr(*e, lifted, counter, vt))),
+            stmts: stmts.into_iter().map(|s| convert_stmt(s, lifted, counter, vt, shared)).collect(),
+            expr: tail.map(|e| Box::new(convert_expr(*e, lifted, counter, vt, shared))),
         },
-        IrExprKind::Call { target, args, type_args } => IrExprKind::Call {
-            target: convert_target(target, lifted, counter, vt),
-            args: args.into_iter().map(|a| convert_expr(a, lifted, counter, vt)).collect(),
-            type_args,
-        },
-        IrExprKind::RuntimeCall { symbol, args } => IrExprKind::RuntimeCall {
-            symbol,
-            args: args.into_iter().map(|a| convert_expr(a, lifted, counter, vt)).collect(),
-        },
+        IrExprKind::Call { target, args, type_args } => {
+            // An inline-eligible list-combinator's lambda arg stays RAW so the WASM
+            // emitter splices it (no alloc / no call_indirect) and Perceus processes
+            // its body in the INLINE context — lifting it and re-inlining would
+            // corrupt RC. Every OTHER lambda becomes a ClosureCreate value.
+            // (Closure v2, P2b/A.)
+            let inline_idx = module_inline_lambda_arg(&target);
+            let args = args.into_iter().enumerate()
+                .map(|(i, a)| {
+                    if Some(i) == inline_idx { keep_lambda_raw(a, lifted, counter, vt, shared) }
+                    else { convert_expr(a, lifted, counter, vt, shared) }
+                })
+                .collect();
+            IrExprKind::Call { target: convert_target(target, lifted, counter, vt, shared), args, type_args }
+        }
+        IrExprKind::RuntimeCall { symbol, args } => {
+            let inline_idx = runtime_inline_lambda_arg(&symbol);
+            let args = args.into_iter().enumerate()
+                .map(|(i, a)| {
+                    if Some(i) == inline_idx { keep_lambda_raw(a, lifted, counter, vt, shared) }
+                    else { convert_expr(a, lifted, counter, vt, shared) }
+                })
+                .collect();
+            IrExprKind::RuntimeCall { symbol, args }
+        }
         IrExprKind::If { cond, then, else_ } => IrExprKind::If {
-            cond: Box::new(convert_expr(*cond, lifted, counter, vt)),
-            then: Box::new(convert_expr(*then, lifted, counter, vt)),
-            else_: Box::new(convert_expr(*else_, lifted, counter, vt)),
+            cond: Box::new(convert_expr(*cond, lifted, counter, vt, shared)),
+            then: Box::new(convert_expr(*then, lifted, counter, vt, shared)),
+            else_: Box::new(convert_expr(*else_, lifted, counter, vt, shared)),
         },
         IrExprKind::Match { subject, arms } => IrExprKind::Match {
-            subject: Box::new(convert_expr(*subject, lifted, counter, vt)),
+            subject: Box::new(convert_expr(*subject, lifted, counter, vt, shared)),
             arms: arms.into_iter().map(|arm| IrMatchArm {
                 pattern: arm.pattern,
-                guard: arm.guard.map(|g| convert_expr(g, lifted, counter, vt)),
-                body: convert_expr(arm.body, lifted, counter, vt),
+                guard: arm.guard.map(|g| convert_expr(g, lifted, counter, vt, shared)),
+                body: convert_expr(arm.body, lifted, counter, vt, shared),
             }).collect(),
         },
         IrExprKind::ForIn { var, var_tuple, iterable, body } => IrExprKind::ForIn {
             var, var_tuple,
-            iterable: Box::new(convert_expr(*iterable, lifted, counter, vt)),
-            body: body.into_iter().map(|s| convert_stmt(s, lifted, counter, vt)).collect(),
+            iterable: Box::new(convert_expr(*iterable, lifted, counter, vt, shared)),
+            body: body.into_iter().map(|s| convert_stmt(s, lifted, counter, vt, shared)).collect(),
         },
         IrExprKind::While { cond, body } => IrExprKind::While {
-            cond: Box::new(convert_expr(*cond, lifted, counter, vt)),
-            body: body.into_iter().map(|s| convert_stmt(s, lifted, counter, vt)).collect(),
+            cond: Box::new(convert_expr(*cond, lifted, counter, vt, shared)),
+            body: body.into_iter().map(|s| convert_stmt(s, lifted, counter, vt, shared)).collect(),
         },
         IrExprKind::BinOp { op, left, right } => IrExprKind::BinOp {
             op,
-            left: Box::new(convert_expr(*left, lifted, counter, vt)),
-            right: Box::new(convert_expr(*right, lifted, counter, vt)),
+            left: Box::new(convert_expr(*left, lifted, counter, vt, shared)),
+            right: Box::new(convert_expr(*right, lifted, counter, vt, shared)),
         },
         IrExprKind::UnOp { op, operand } => IrExprKind::UnOp {
-            op, operand: Box::new(convert_expr(*operand, lifted, counter, vt)),
+            op, operand: Box::new(convert_expr(*operand, lifted, counter, vt, shared)),
         },
         IrExprKind::List { elements } => IrExprKind::List {
-            elements: elements.into_iter().map(|e| convert_expr(e, lifted, counter, vt)).collect(),
+            elements: elements.into_iter().map(|e| convert_expr(e, lifted, counter, vt, shared)).collect(),
         },
         IrExprKind::Tuple { elements } => IrExprKind::Tuple {
-            elements: elements.into_iter().map(|e| convert_expr(e, lifted, counter, vt)).collect(),
+            elements: elements.into_iter().map(|e| convert_expr(e, lifted, counter, vt, shared)).collect(),
         },
         IrExprKind::Fan { exprs } => IrExprKind::Fan {
-            exprs: exprs.into_iter().map(|e| convert_expr(e, lifted, counter, vt)).collect(),
+            exprs: exprs.into_iter().map(|e| convert_expr(e, lifted, counter, vt, shared)).collect(),
         },
         IrExprKind::Record { name, fields } => IrExprKind::Record {
-            name, fields: fields.into_iter().map(|(k, v)| (k, convert_expr(v, lifted, counter, vt))).collect(),
+            name, fields: fields.into_iter().map(|(k, v)| (k, convert_expr(v, lifted, counter, vt, shared))).collect(),
         },
         IrExprKind::SpreadRecord { base, fields } => IrExprKind::SpreadRecord {
-            base: Box::new(convert_expr(*base, lifted, counter, vt)),
-            fields: fields.into_iter().map(|(k, v)| (k, convert_expr(v, lifted, counter, vt))).collect(),
+            base: Box::new(convert_expr(*base, lifted, counter, vt, shared)),
+            fields: fields.into_iter().map(|(k, v)| (k, convert_expr(v, lifted, counter, vt, shared))).collect(),
         },
         IrExprKind::MapLiteral { entries } => IrExprKind::MapLiteral {
-            entries: entries.into_iter().map(|(k, v)| (convert_expr(k, lifted, counter, vt), convert_expr(v, lifted, counter, vt))).collect(),
+            entries: entries.into_iter().map(|(k, v)| (convert_expr(k, lifted, counter, vt, shared), convert_expr(v, lifted, counter, vt, shared))).collect(),
         },
         IrExprKind::Range { start, end, inclusive } => IrExprKind::Range {
-            start: Box::new(convert_expr(*start, lifted, counter, vt)),
-            end: Box::new(convert_expr(*end, lifted, counter, vt)),
+            start: Box::new(convert_expr(*start, lifted, counter, vt, shared)),
+            end: Box::new(convert_expr(*end, lifted, counter, vt, shared)),
             inclusive,
         },
         IrExprKind::Member { object, field } => IrExprKind::Member {
-            object: Box::new(convert_expr(*object, lifted, counter, vt)), field,
+            object: Box::new(convert_expr(*object, lifted, counter, vt, shared)), field,
         },
         IrExprKind::TupleIndex { object, index } => IrExprKind::TupleIndex {
-            object: Box::new(convert_expr(*object, lifted, counter, vt)), index,
+            object: Box::new(convert_expr(*object, lifted, counter, vt, shared)), index,
         },
         IrExprKind::IndexAccess { object, index } => IrExprKind::IndexAccess {
-            object: Box::new(convert_expr(*object, lifted, counter, vt)),
-            index: Box::new(convert_expr(*index, lifted, counter, vt)),
+            object: Box::new(convert_expr(*object, lifted, counter, vt, shared)),
+            index: Box::new(convert_expr(*index, lifted, counter, vt, shared)),
         },
         IrExprKind::MapAccess { object, key } => IrExprKind::MapAccess {
-            object: Box::new(convert_expr(*object, lifted, counter, vt)),
-            key: Box::new(convert_expr(*key, lifted, counter, vt)),
+            object: Box::new(convert_expr(*object, lifted, counter, vt, shared)),
+            key: Box::new(convert_expr(*key, lifted, counter, vt, shared)),
         },
         IrExprKind::StringInterp { parts } => IrExprKind::StringInterp {
             parts: parts.into_iter().map(|p| match p {
-                IrStringPart::Expr { expr } => IrStringPart::Expr { expr: convert_expr(expr, lifted, counter, vt) },
-                other => other,
+                IrStringPart::Expr { expr } => IrStringPart::Expr { expr: convert_expr(expr, lifted, counter, vt, shared) },
+                lit @ IrStringPart::Lit { .. } => lit,
             }).collect(),
         },
-        IrExprKind::ResultOk { expr } => IrExprKind::ResultOk { expr: Box::new(convert_expr(*expr, lifted, counter, vt)) },
-        IrExprKind::ResultErr { expr } => IrExprKind::ResultErr { expr: Box::new(convert_expr(*expr, lifted, counter, vt)) },
-        IrExprKind::OptionSome { expr } => IrExprKind::OptionSome { expr: Box::new(convert_expr(*expr, lifted, counter, vt)) },
-        IrExprKind::Try { expr } => IrExprKind::Try { expr: Box::new(convert_expr(*expr, lifted, counter, vt)) },
-        IrExprKind::Unwrap { expr } => IrExprKind::Unwrap { expr: Box::new(convert_expr(*expr, lifted, counter, vt)) },
-        IrExprKind::ToOption { expr } => IrExprKind::ToOption { expr: Box::new(convert_expr(*expr, lifted, counter, vt)) },
+        IrExprKind::ResultOk { expr } => IrExprKind::ResultOk { expr: Box::new(convert_expr(*expr, lifted, counter, vt, shared)) },
+        IrExprKind::ResultErr { expr } => IrExprKind::ResultErr { expr: Box::new(convert_expr(*expr, lifted, counter, vt, shared)) },
+        IrExprKind::OptionSome { expr } => IrExprKind::OptionSome { expr: Box::new(convert_expr(*expr, lifted, counter, vt, shared)) },
+        IrExprKind::Try { expr } => IrExprKind::Try { expr: Box::new(convert_expr(*expr, lifted, counter, vt, shared)) },
+        IrExprKind::Unwrap { expr } => IrExprKind::Unwrap { expr: Box::new(convert_expr(*expr, lifted, counter, vt, shared)) },
+        IrExprKind::ToOption { expr } => IrExprKind::ToOption { expr: Box::new(convert_expr(*expr, lifted, counter, vt, shared)) },
         IrExprKind::UnwrapOr { expr, fallback } => IrExprKind::UnwrapOr {
-            expr: Box::new(convert_expr(*expr, lifted, counter, vt)),
-            fallback: Box::new(convert_expr(*fallback, lifted, counter, vt)),
+            expr: Box::new(convert_expr(*expr, lifted, counter, vt, shared)),
+            fallback: Box::new(convert_expr(*fallback, lifted, counter, vt, shared)),
         },
         IrExprKind::OptionalChain { expr, field } => IrExprKind::OptionalChain {
-            expr: Box::new(convert_expr(*expr, lifted, counter, vt)), field,
+            expr: Box::new(convert_expr(*expr, lifted, counter, vt, shared)), field,
         },
-        IrExprKind::Clone { expr } => IrExprKind::Clone { expr: Box::new(convert_expr(*expr, lifted, counter, vt)) },
-        IrExprKind::Deref { expr } => IrExprKind::Deref { expr: Box::new(convert_expr(*expr, lifted, counter, vt)) },
+        IrExprKind::Clone { expr } => IrExprKind::Clone { expr: Box::new(convert_expr(*expr, lifted, counter, vt, shared)) },
+        IrExprKind::Deref { expr } => IrExprKind::Deref { expr: Box::new(convert_expr(*expr, lifted, counter, vt, shared)) },
         IrExprKind::Borrow { expr, as_str, mutable } => IrExprKind::Borrow {
-            expr: Box::new(convert_expr(*expr, lifted, counter, vt)), as_str, mutable,
+            expr: Box::new(convert_expr(*expr, lifted, counter, vt, shared)), as_str, mutable,
         },
-        IrExprKind::BoxNew { expr } => IrExprKind::BoxNew { expr: Box::new(convert_expr(*expr, lifted, counter, vt)) },
-        IrExprKind::ToVec { expr } => IrExprKind::ToVec { expr: Box::new(convert_expr(*expr, lifted, counter, vt)) },
-        IrExprKind::Await { expr } => IrExprKind::Await { expr: Box::new(convert_expr(*expr, lifted, counter, vt)) },
+        IrExprKind::BoxNew { expr } => IrExprKind::BoxNew { expr: Box::new(convert_expr(*expr, lifted, counter, vt, shared)) },
+        IrExprKind::ToVec { expr } => IrExprKind::ToVec { expr: Box::new(convert_expr(*expr, lifted, counter, vt, shared)) },
+        IrExprKind::Await { expr } => IrExprKind::Await { expr: Box::new(convert_expr(*expr, lifted, counter, vt, shared)) },
         IrExprKind::RustMacro { name, args } => IrExprKind::RustMacro {
-            name, args: args.into_iter().map(|a| convert_expr(a, lifted, counter, vt)).collect(),
+            name, args: args.into_iter().map(|a| convert_expr(a, lifted, counter, vt, shared)).collect(),
         },
 
-        // Leaf nodes — no conversion needed
-        other => other,
+        // Any other kind: recurse into every child so a Lambda nested in a
+        // not-yet-listed node is still lifted (total by construction).
+        other => return IrExpr { kind: other, ty, span, def_id: None }
+            .map_children(&mut |e| convert_expr(e, lifted, counter, vt, shared)),
     };
 
     IrExpr { kind, ty, span, def_id: None }
@@ -358,38 +460,40 @@ fn convert_stmt(
     lifted: &mut Vec<IrFunction>,
     counter: &mut u32,
     vt: &mut VarTable,
+    shared: &HashSet<VarId>,
 ) -> IrStmt {
     let kind = match stmt.kind {
         IrStmtKind::Bind { var, mutability, ty, value } => IrStmtKind::Bind {
-            var, mutability, ty, value: convert_expr(value, lifted, counter, vt),
+            var, mutability, ty, value: convert_expr(value, lifted, counter, vt, shared),
         },
         IrStmtKind::BindDestructure { pattern, value } => IrStmtKind::BindDestructure {
-            pattern, value: convert_expr(value, lifted, counter, vt),
+            pattern, value: convert_expr(value, lifted, counter, vt, shared),
         },
         IrStmtKind::Assign { var, value } => IrStmtKind::Assign {
-            var, value: convert_expr(value, lifted, counter, vt),
+            var, value: convert_expr(value, lifted, counter, vt, shared),
         },
         IrStmtKind::IndexAssign { target, index, value } => IrStmtKind::IndexAssign {
             target,
-            index: convert_expr(index, lifted, counter, vt),
-            value: convert_expr(value, lifted, counter, vt),
+            index: convert_expr(index, lifted, counter, vt, shared),
+            value: convert_expr(value, lifted, counter, vt, shared),
         },
         IrStmtKind::MapInsert { target, key, value } => IrStmtKind::MapInsert {
             target,
-            key: convert_expr(key, lifted, counter, vt),
-            value: convert_expr(value, lifted, counter, vt),
+            key: convert_expr(key, lifted, counter, vt, shared),
+            value: convert_expr(value, lifted, counter, vt, shared),
         },
         IrStmtKind::FieldAssign { target, field, value } => IrStmtKind::FieldAssign {
-            target, field, value: convert_expr(value, lifted, counter, vt),
+            target, field, value: convert_expr(value, lifted, counter, vt, shared),
         },
         IrStmtKind::Guard { cond, else_ } => IrStmtKind::Guard {
-            cond: convert_expr(cond, lifted, counter, vt),
-            else_: convert_expr(else_, lifted, counter, vt),
+            cond: convert_expr(cond, lifted, counter, vt, shared),
+            else_: convert_expr(else_, lifted, counter, vt, shared),
         },
         IrStmtKind::Expr { expr } => IrStmtKind::Expr {
-            expr: convert_expr(expr, lifted, counter, vt),
+            expr: convert_expr(expr, lifted, counter, vt, shared),
         },
-        other => other,
+        other => return IrStmt { kind: other, span: stmt.span }
+            .map_exprs(&mut |e| convert_expr(e, lifted, counter, vt, shared)),
     };
     IrStmt { kind, span: stmt.span }
 }
@@ -399,106 +503,21 @@ fn convert_target(
     lifted: &mut Vec<IrFunction>,
     counter: &mut u32,
     vt: &mut VarTable,
+    shared: &HashSet<VarId>,
 ) -> CallTarget {
     match target {
         CallTarget::Method { object, method } => CallTarget::Method {
-            object: Box::new(convert_expr(*object, lifted, counter, vt)), method,
+            object: Box::new(convert_expr(*object, lifted, counter, vt, shared)), method,
         },
         CallTarget::Computed { callee } => CallTarget::Computed {
-            callee: Box::new(convert_expr(*callee, lifted, counter, vt)),
+            callee: Box::new(convert_expr(*callee, lifted, counter, vt, shared)),
         },
-        other => other,
+        other @ (CallTarget::Named { .. } | CallTarget::Module { .. }) => other,
     }
 }
 
-// ── Free variable analysis ──────────────────────────────────────────
-
-struct FreeVarCollector {
-    bound: HashSet<VarId>,
-    free: HashSet<VarId>,
-}
-
-impl IrVisitor for FreeVarCollector {
-    fn visit_expr(&mut self, expr: &IrExpr) {
-        match &expr.kind {
-            IrExprKind::Var { id } => {
-                if !self.bound.contains(id) { self.free.insert(*id); }
-            }
-            IrExprKind::ClosureCreate { captures, .. } => {
-                for (vid, _) in captures {
-                    if !self.bound.contains(vid) { self.free.insert(*vid); }
-                }
-            }
-            IrExprKind::Lambda { params, body, .. } => {
-                let saved = self.bound.clone();
-                for (v, _) in params { self.bound.insert(*v); }
-                self.visit_expr(body);
-                self.bound = saved;
-            }
-            IrExprKind::Block { stmts, expr: tail } => {
-                let saved = self.bound.clone();
-                for stmt in stmts {
-                    self.visit_stmt(stmt);
-                    match &stmt.kind {
-                        IrStmtKind::Bind { var, .. } => { self.bound.insert(*var); }
-                        IrStmtKind::BindDestructure { pattern, .. } => {
-                            collect_pattern_bindings(pattern, &mut self.bound);
-                        }
-                        _ => {}
-                    }
-                }
-                if let Some(e) = tail { self.visit_expr(e); }
-                self.bound = saved;
-            }
-            IrExprKind::Match { subject, arms } => {
-                self.visit_expr(subject);
-                for arm in arms {
-                    let saved = self.bound.clone();
-                    collect_pattern_bindings(&arm.pattern, &mut self.bound);
-                    if let Some(g) = &arm.guard { self.visit_expr(g); }
-                    self.visit_expr(&arm.body);
-                    self.bound = saved;
-                }
-            }
-            IrExprKind::ForIn { var, var_tuple, iterable, body } => {
-                self.visit_expr(iterable);
-                let saved = self.bound.clone();
-                self.bound.insert(*var);
-                if let Some(vt) = var_tuple { for v in vt { self.bound.insert(*v); } }
-                for s in body { self.visit_stmt(s); }
-                self.bound = saved;
-            }
-            _ => walk_expr(self, expr),
-        }
-    }
-}
-
-fn collect_free_vars(expr: &IrExpr, bound: &HashSet<VarId>, free: &mut HashSet<VarId>) {
-    let mut collector = FreeVarCollector { bound: bound.clone(), free: std::mem::take(free) };
-    collector.visit_expr(expr);
-    *free = collector.free;
-}
-
-fn collect_pattern_bindings(pattern: &IrPattern, bound: &mut HashSet<VarId>) {
-    match pattern {
-        IrPattern::Bind { var, .. } => { bound.insert(*var); }
-        IrPattern::Constructor { args, .. } => {
-            for p in args { collect_pattern_bindings(p, bound); }
-        }
-        IrPattern::RecordPattern { fields, .. } => {
-            for f in fields {
-                if let Some(p) = &f.pattern { collect_pattern_bindings(p, bound); }
-            }
-        }
-        IrPattern::Tuple { elements } => {
-            for p in elements { collect_pattern_bindings(p, bound); }
-        }
-        IrPattern::Some { inner } | IrPattern::Ok { inner } | IrPattern::Err { inner } => {
-            collect_pattern_bindings(inner, bound);
-        }
-        _ => {}
-    }
-}
+// Free-variable / capture analysis now lives in `almide_ir::free_vars` — the
+// single source of truth shared by this pass and the WASM emitter. (Closure v2, P1.)
 
 // ── Mutable capture detection ───────────────────────────────────────
 
@@ -645,4 +664,115 @@ fn max_env_load_index(expr: &IrExpr) -> Option<u32> {
     let mut finder = MaxIdx(None);
     finder.visit_expr(expr);
     finder.0
+}
+
+// ── P6: captured-and-mutated var detection (need a shared cell on WASM) ──
+
+/// In-place stdlib mutators — runtime fns that take `&mut args[0]`. The single
+/// source of truth for "this call mutates its receiver": used both to mark a
+/// captured var a shared cell (WASM) and to route a mutator on a `ModuleRc`
+/// global through `Rc::make_mut(&mut *c.borrow_mut())` instead of a clone (Rust).
+pub(crate) fn is_inplace_mutator(symbol: &str) -> bool {
+    // ONLY the runtime fns that take `&mut` on `args[0]` (verified against
+    // runtime/rs/src/*.rs). The `list.set/insert/sort/reverse`, `map.set/remove`,
+    // and all `set.*` ops return a NEW value (pure) — calling them in a closure and
+    // discarding the result is a no-op, not a captured mutation.
+    matches!(symbol,
+        "almide_rt_list_push" | "almide_rt_list_pop" | "almide_rt_list_clear"
+        | "almide_rt_map_insert" | "almide_rt_map_delete" | "almide_rt_map_clear"
+        | "almide_rt_string_push" | "almide_rt_string_push_char" | "almide_rt_string_clear"
+    )
+    // Bytes builders mutate their buffer in place (the runtime takes `&mut`): push,
+    // clear, fill, copy_within, set_at, as_mut_ptr, plus every append_*/set_*/write_*.
+    // Matched by shape — the read side is read_*/get/slice/len/… (disjoint). This is
+    // the complete &mut set in runtime/rs/src/bytes.rs; note bytes' stdlib `mut`
+    // annotations are incomplete (only push/set_at/copy_within), so we cannot key off
+    // the `mut` keyword here and instead encode the runtime's actual mutation surface.
+    || symbol.strip_prefix("almide_rt_bytes_").is_some_and(|m| {
+        matches!(m, "push" | "clear" | "fill" | "copy_within" | "set_at" | "as_mut_ptr")
+            || m.starts_with("append_") || m.starts_with("set_") || m.starts_with("write_")
+    })
+}
+
+/// Collects vars an expression mutates: assignment targets, `&mut`-borrows, and
+/// `args[0]` of an in-place stdlib mutator call.
+struct MutatedCollector { out: HashSet<VarId> }
+impl IrVisitor for MutatedCollector {
+    fn visit_expr(&mut self, e: &IrExpr) {
+        match &e.kind {
+            IrExprKind::Borrow { expr: inner, mutable: true, .. } => {
+                if let IrExprKind::Var { id } = &inner.kind { self.out.insert(*id); }
+            }
+            IrExprKind::RuntimeCall { symbol, args } if is_inplace_mutator(symbol) => {
+                if let Some(a) = args.first() {
+                    if let IrExprKind::Var { id } = &a.kind { self.out.insert(*id); }
+                }
+            }
+            _ => {}
+        }
+        walk_expr(self, e);
+    }
+    fn visit_stmt(&mut self, s: &IrStmt) {
+        match &s.kind {
+            IrStmtKind::Assign { var, .. } => { self.out.insert(*var); }
+            IrStmtKind::IndexAssign { target, .. }
+            | IrStmtKind::MapInsert { target, .. }
+            | IrStmtKind::FieldAssign { target, .. } => { self.out.insert(*target); }
+            _ => {}
+        }
+        walk_stmt(self, s);
+    }
+}
+
+/// Local `var`s that are CAPTURED by some lambda AND MUTATED ANYWHERE (in that
+/// lambda, another lambda, or the enclosing scope after capture) — these become
+/// shared heap cells so every closure capturing them observes the live value:
+/// capture-by-reference, matching Swift/JS/Python/Ruby/Go. (Previously only a
+/// mutation INSIDE the capturing lambda's body counted, so `let f = () => x;
+/// x = 42` snapshotted x at capture time.) Top-level globals are EXCLUDED — they
+/// have their own storage (module Cell/RefCell, read via top_let_globals), not a
+/// per-closure cell. Run before conversion rewrites captures to `EnvLoad`s.
+fn detect_mutated_captures(program: &IrProgram) -> HashSet<VarId> {
+    // (1) every var mutated anywhere in the program
+    let mut mutated = MutatedCollector { out: HashSet::new() };
+    for f in &program.functions { mutated.visit_expr(&f.body); }
+    for tl in &program.top_lets { mutated.visit_expr(&tl.value); }
+    for m in &program.modules {
+        for f in &m.functions { mutated.visit_expr(&f.body); }
+        for tl in &m.top_lets { mutated.visit_expr(&tl.value); }
+    }
+    // (2) every var captured (free in some lambda body)
+    struct CapW { out: HashSet<VarId> }
+    impl IrVisitor for CapW {
+        fn visit_expr(&mut self, expr: &IrExpr) {
+            if let IrExprKind::Lambda { params, body, .. } = &expr.kind {
+                let param_set: HashSet<VarId> = params.iter().map(|(v, _)| *v).collect();
+                for v in almide_ir::free_vars::free_vars(body, &param_set) {
+                    self.out.insert(v);
+                }
+            }
+            walk_expr(self, expr);
+        }
+    }
+    let mut cap = CapW { out: HashSet::new() };
+    for f in &program.functions { cap.visit_expr(&f.body); }
+    for tl in &program.top_lets { cap.visit_expr(&tl.value); }
+    for m in &program.modules {
+        for f in &m.functions { cap.visit_expr(&f.body); }
+        for tl in &m.top_lets { cap.visit_expr(&tl.value); }
+    }
+    // (3) top-level globals are stored as Cell/RefCell, not per-closure cells
+    let top_vars: HashSet<VarId> = program.top_lets.iter().map(|tl| tl.var)
+        .chain(program.modules.iter().flat_map(|m| m.top_lets.iter().map(|tl| tl.var)))
+        .collect();
+    cap.out.intersection(&mutated.out).copied()
+        .filter(|v| !top_vars.contains(v))
+        .collect()
+}
+
+/// Does `body` mutate `var` (assignment, `&mut`-borrow, or in-place mutator call)?
+fn body_mutates(body: &IrExpr, var: VarId) -> bool {
+    let mut mc = MutatedCollector { out: HashSet::new() };
+    mc.visit_expr(body);
+    mc.out.contains(&var)
 }

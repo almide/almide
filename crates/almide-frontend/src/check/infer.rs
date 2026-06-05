@@ -482,12 +482,18 @@ impl Checker {
                 let sc = resolve_ty(&subject_ty, &self.uf);
                 self.check_match_exhaustiveness(&sc, arms);
                 let mut arm_types = Vec::new();
+                // Real (un-substituted) arm types, used to pick the overall match
+                // result type. An `err(..)` arm produces a genuine `Result[T, E]`
+                // value — it is NOT divergent — so even when every arm is `err`,
+                // the match still has a concrete Result type (not `Never`).
+                let mut arm_real_types = Vec::new();
                 for arm in arms.iter_mut() {
                     self.env.push_scope();
                     let sub_c = resolve_ty(&subject_ty, &self.uf);
                     self.bind_pattern(&arm.pattern, &sub_c);
                     if let Some(ref mut guard) = arm.guard { self.infer_expr(guard); }
                     let arm_ty = self.infer_expr(&mut arm.body);
+                    arm_real_types.push(arm_ty.clone());
                     // err() in a match arm is an early return — unify as Never
                     // so it doesn't constrain sibling arm types.
                     let arm_ty = if matches!(&arm.body.kind, ExprKind::Err { .. }) {
@@ -513,7 +519,23 @@ impl Checker {
                     for aty in &arm_types[1..] {
                         self.constrain(first.clone(), aty.clone(), "match arm");
                     }
-                    first
+                    // The overall match type is the first non-`Never` arm type.
+                    // `Never` arms (every `err(..)` arm) carry no useful result
+                    // type but they DO produce a Result value, so when they are
+                    // the only arms we recover the concrete type from the real
+                    // (un-substituted) arm types — preferring an `err` arm's
+                    // `Result[T, E]` so the match types as Result, never `Never`.
+                    if matches!(first, Ty::Never) {
+                        arm_types.iter()
+                            .find(|t| !matches!(t, Ty::Never))
+                            .cloned()
+                            .or_else(|| arm_real_types.iter()
+                                .find(|t| !matches!(resolve_ty(t, &self.uf), Ty::Never))
+                                .cloned())
+                            .unwrap_or(first)
+                    } else {
+                        first
+                    }
                 } else {
                     Ty::Unit
                 }
@@ -942,6 +964,18 @@ impl Checker {
 
     // ── Statement checking ──
 
+    /// Reject a binding whose type uses a function in a position that demands
+    /// equality/hashing: a `Set` element or a `Map` key. Closures have neither,
+    /// so such a type is meaningless — and the two targets disagree (native
+    /// rustc rejects it, WASM silently drops the inserts). Closures are fine as
+    /// `Map` *values*.
+    pub(crate) fn check_collection_element_types(&mut self, ty: &Ty) {
+        let resolved = resolve_ty(ty, &self.uf);
+        if let Some((msg, hint)) = invalid_collection_type(&resolved) {
+            self.emit(super::err(msg, hint, "collection element type").with_code("E016"));
+        }
+    }
+
     pub(crate) fn check_stmt(&mut self, stmt: &mut ast::Stmt) {
         match stmt {
             ast::Stmt::Let { name, ty, value, span } => {
@@ -966,6 +1000,7 @@ impl Checker {
                 if let Some(s) = span {
                     self.env.var_decl_locs.insert(sym(name), (s.line, s.col));
                 }
+                self.check_collection_element_types(&final_ty);
                 self.env.define_var(name, final_ty);
             }
             ast::Stmt::Var { name, ty, value, span } => {
@@ -986,6 +1021,7 @@ impl Checker {
                 if let Some(s) = span {
                     self.env.var_decl_locs.insert(sym(name), (s.line, s.col));
                 }
+                self.check_collection_element_types(&final_ty);
                 self.env.define_var(name, final_ty);
                 self.env.mutable_vars.insert(sym(name));
                 self.env.var_lambda_depth.insert(sym(name), self.env.lambda_depth);
@@ -1032,7 +1068,15 @@ impl Checker {
             ast::Stmt::IndexAssign { target, index, value, .. } => {
                 self.infer_expr(index);
                 self.infer_expr(value);
-                if self.env.lookup_var(target.as_str()).is_some() && !self.env.mutable_vars.contains(target) {
+                // A module-level `let g` is immutable just like a local `let` — its
+                // contents may not be index-assigned. `lookup_var` only sees locals,
+                // so without the `top_lets` arm a global `let g; g[2]=…` slipped past
+                // this check and only failed later as opaque rustc `E0425` (the
+                // ModuleRc lowering never kicks in for a non-mutable global). Catch it
+                // here with the same E009 locals get.
+                let is_known_binding = self.env.lookup_var(target.as_str()).is_some()
+                    || self.env.top_lets.contains_key(&sym(target.as_str()));
+                if is_known_binding && !self.env.mutable_vars.contains(target) {
                     let mut diag = super::err(
                         format!("cannot mutate immutable binding '{}'", target),
                         format!("Use 'var {} = ...' to declare a mutable variable", target),
@@ -1459,4 +1503,48 @@ fn if_arm_fix_hint(then: &ast::Expr, else_: &ast::Expr) -> Option<FixHint> {
         }),
         (None, None) => None,
     }
+}
+
+/// True if `ty` mentions a function type anywhere (directly or nested in a
+/// container/tuple/record). Such a type can't be hashed or compared.
+fn ty_mentions_fn(ty: &Ty) -> bool {
+    match ty {
+        Ty::Fn { .. } => true,
+        Ty::Tuple(ts) => ts.iter().any(ty_mentions_fn),
+        Ty::Record { fields } | Ty::OpenRecord { fields } => fields.iter().any(|(_, t)| ty_mentions_fn(t)),
+        Ty::Applied(_, args) | Ty::Named(_, args) => args.iter().any(ty_mentions_fn),
+        _ => false,
+    }
+}
+
+/// `Some((message, hint))` if `ty` (or a nested type) uses a function where a
+/// comparable/hashable type is required: a `Set` element or a `Map` key.
+/// Closures are allowed as `Map` values, so only the key (arg 0) is checked.
+fn invalid_collection_type(ty: &Ty) -> Option<(&'static str, &'static str)> {
+    match ty {
+        Ty::Applied(TypeConstructorId::Set, args) if args.len() == 1 && ty_mentions_fn(&args[0]) => {
+            return Some((
+                "a `Set` element type cannot contain a function — closures have no equality or hashing",
+                "Closures can't be deduplicated. Keep them in a `List`, or build the set from a comparable key.",
+            ));
+        }
+        Ty::Applied(TypeConstructorId::Map, args) if args.len() == 2 && ty_mentions_fn(&args[0]) => {
+            return Some((
+                "a `Map` key type cannot contain a function — closures have no equality or hashing",
+                "Closures are fine as `Map` values; only the key must be comparable.",
+            ));
+        }
+        _ => {}
+    }
+    let children: Vec<&Ty> = match ty {
+        Ty::Tuple(ts) => ts.iter().collect(),
+        Ty::Record { fields } | Ty::OpenRecord { fields } => fields.iter().map(|(_, t)| t).collect(),
+        Ty::Applied(_, args) | Ty::Named(_, args) => args.iter().collect(),
+        Ty::Fn { params, ret } => params.iter().chain(std::iter::once(ret.as_ref())).collect(),
+        _ => Vec::new(),
+    };
+    for c in children {
+        if let Some(e) = invalid_collection_type(c) { return Some(e); }
+    }
+    None
 }

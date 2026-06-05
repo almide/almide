@@ -13,7 +13,7 @@
 //! reachable from a typed list-callback call are `!is_unresolved_structural()`.
 
 use almide_ir::*;
-use almide_ir::visit::{IrVisitor, walk_expr, walk_stmt};
+use almide_ir::visit::{IrVisitor, walk_expr};
 use almide_lang::types::Ty;
 use super::pass::{NanoPass, PassResult, Postcondition, Target};
 
@@ -218,7 +218,38 @@ fn resolve_expr(expr: &mut IrExpr, vt: &mut VarTable) {
         IrExprKind::MapAccess { object, key } => {
             resolve_expr(object, vt); resolve_expr(key, vt);
         }
-        _ => {}
+        // Leaf / non-type-bearing kinds: nothing to descend into for the
+        // top-down type propagation. Listed explicitly so a new IrExprKind
+        // is a compile error here, never a silently-dropped subtree.
+        IrExprKind::LitInt { .. }
+        | IrExprKind::LitFloat { .. }
+        | IrExprKind::LitStr { .. }
+        | IrExprKind::LitBool { .. }
+        | IrExprKind::Unit
+        | IrExprKind::Var { .. }
+        | IrExprKind::FnRef { .. }
+        | IrExprKind::Fan { .. }
+        | IrExprKind::Break
+        | IrExprKind::Continue
+        | IrExprKind::TailCall { .. }
+        | IrExprKind::EmptyMap
+        | IrExprKind::OptionNone
+        | IrExprKind::Unwrap { .. }
+        | IrExprKind::UnwrapOr { .. }
+        | IrExprKind::ToOption { .. }
+        | IrExprKind::OptionalChain { .. }
+        | IrExprKind::Borrow { .. }
+        | IrExprKind::BoxNew { .. }
+        | IrExprKind::RcWrap { .. }
+        | IrExprKind::RustMacro { .. }
+        | IrExprKind::ToVec { .. }
+        | IrExprKind::RenderedCall { .. }
+        | IrExprKind::InlineRust { .. }
+        | IrExprKind::ClosureCreate { .. }
+        | IrExprKind::EnvLoad { .. }
+        | IrExprKind::IterChain { .. }
+        | IrExprKind::Hole
+        | IrExprKind::Todo { .. } => {}
     }
 
     // Post-visit: sync expr.ty from VarTable for Var nodes,
@@ -297,7 +328,17 @@ fn resolve_stmt(stmt: &mut IrStmt, vt: &mut VarTable) {
         IrStmtKind::Guard { cond, else_ } => {
             resolve_expr(cond, vt); resolve_expr(else_, vt);
         }
-        _ => {}
+        // Statements with no type to propagate into (or whose IrExpr
+        // children — ListSwap/ListReverse/ListRotateLeft/ListCopySlice
+        // operands — the original catch-all intentionally left untouched).
+        // Listed explicitly so a new IrStmtKind is a compile error here.
+        IrStmtKind::Comment { .. }
+        | IrStmtKind::ListCopySlice { .. }
+        | IrStmtKind::ListReverse { .. }
+        | IrStmtKind::ListRotateLeft { .. }
+        | IrStmtKind::ListSwap { .. }
+        | IrStmtKind::RcDec { .. }
+        | IrStmtKind::RcInc { .. } => {}
     }
 }
 
@@ -703,54 +744,6 @@ fn resolve_via_tuple_index(expr: &IrExpr, params: &[(VarId, Ty)]) -> Option<Ty> 
         }
     }
     None
-}
-
-/// Infer a lambda parameter's type by scanning the body for operations
-/// that constrain it (e.g., `p + 1.0` → p is Float).
-pub(crate) fn infer_param_ty_from_body(body: &IrExpr, target: VarId) -> Option<Ty> {
-    fn walk(expr: &IrExpr, target: VarId) -> Option<Ty> {
-        match &expr.kind {
-            IrExprKind::BinOp { left, right, .. } => {
-                if let IrExprKind::Var { id } = &left.kind {
-                    if *id == target && !right.ty.is_unresolved_structural() {
-                        return Some(right.ty.clone());
-                    }
-                }
-                if let IrExprKind::Var { id } = &right.kind {
-                    if *id == target && !left.ty.is_unresolved_structural() {
-                        return Some(left.ty.clone());
-                    }
-                }
-                walk(left, target).or_else(|| walk(right, target))
-            }
-            IrExprKind::If { cond, then, else_ } => {
-                walk(cond, target).or_else(|| walk(then, target)).or_else(|| walk(else_, target))
-            }
-            IrExprKind::Block { stmts, expr: tail } => {
-                for s in stmts { if let Some(t) = walk_stmt(s, target) { return Some(t); } }
-                tail.as_ref().and_then(|e| walk(e, target))
-            }
-            IrExprKind::Match { subject, arms } => {
-                walk(subject, target).or_else(|| {
-                    arms.iter().find_map(|arm| walk(&arm.body, target))
-                })
-            }
-            IrExprKind::Call { args, .. } => {
-                args.iter().find_map(|a| walk(a, target))
-            }
-            _ => None,
-        }
-    }
-    fn walk_stmt(stmt: &IrStmt, target: VarId) -> Option<Ty> {
-        match &stmt.kind {
-            IrStmtKind::Bind { value, .. } => walk(value, target),
-            IrStmtKind::BindDestructure { value, .. } => walk(value, target),
-            IrStmtKind::Assign { value, .. } => walk(value, target),
-            IrStmtKind::Expr { expr } => walk(expr, target),
-            _ => None,
-        }
-    }
-    walk(body, target)
 }
 
 /// Compute the return type of a stdlib list Call node from the

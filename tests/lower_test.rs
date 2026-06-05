@@ -588,3 +588,25 @@ fn lower_float_division() {
     let ir = lower("fn f(a: Float, b: Float) -> Float = a / b");
     assert!(matches!(ir.functions[0].body.kind, IrExprKind::BinOp { op: BinOp::DivFloat, .. }));
 }
+
+#[test]
+fn for_tuple_loop_var_no_spurious_unused_warning() {
+    // Regression (bug report 2026-06-02): `for (i, x) in …` created a synthetic
+    // loop var that inherited the first element's name ("i") AND a span, so it was
+    // flagged "unused variable 'i'" even though `i` is used in the body. The real
+    // bindings are the var_tuple components; the synthetic holder must not warn.
+    let ir = lower(
+        "effect fn main() -> Unit = {\n\
+         \x20 let xs = [\"a\", \"b\", \"c\"]\n\
+         \x20 for (i, x) in list.enumerate(xs) {\n\
+         \x20   println(int.to_string(i + 1) + \": \" + x)\n\
+         \x20 }\n\
+         }\n",
+    );
+    let warnings = collect_unused_var_warnings(&ir, "test.almd");
+    assert!(
+        !warnings.iter().any(|w| w.message.contains("unused variable 'i'")),
+        "spurious unused-var warning for a used enumerate index: {:?}",
+        warnings.iter().map(|w| w.message.clone()).collect::<Vec<_>>(),
+    );
+}
