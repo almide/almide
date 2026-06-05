@@ -1,0 +1,52 @@
+// Cross-target differential fixture: base64 encode/decode (standard + URL-safe).
+//
+// Native `runtime/rs/src/base64.rs` is the oracle (RFC 4648, canonical padded
+// form for BOTH alphabets); the WASM runtime `emit_wasm/rt_encoding.rs` must
+// produce byte-identical output, including the decode error strings:
+//   - "invalid base64 character"
+//   - "invalid base64 length: <orig_len>"
+// Drains the rt-oracle-registry compile_base64_{encode,decode} entries, and
+// guards the regressions where WASM encode emitted empty strings and the
+// char→value table mapped '0'..'9' with the wrong offset.
+
+import base64
+import hex
+
+fn show_dec(label: String, r: Result[Bytes, String]) -> Unit = {
+  match r {
+    Ok(d) => println(label + " ok:" + hex.encode(d)),
+    Err(e) => println(label + " err:" + e),
+  }
+}
+
+fn main() -> Unit = {
+  // ── encode: RFC 4648 vectors + the 0/1/2-byte tails ──
+  println(base64.encode(bytes.from_string("")))        // (empty)
+  println(base64.encode(bytes.from_string("f")))       // Zg==
+  println(base64.encode(bytes.from_string("fo")))      // Zm8=
+  println(base64.encode(bytes.from_string("foo")))     // Zm9v
+  println(base64.encode(bytes.from_string("foob")))    // Zm9vYg==
+  println(base64.encode(bytes.from_string("fooba")))   // Zm9vYmE=
+  println(base64.encode(bytes.from_string("foobar")))  // Zm9vYmFy
+  println(base64.encode(bytes.from_string("Man")))     // TWFu
+  println(base64.encode(bytes.from_string("Ma")))      // TWE=
+  println(base64.encode(bytes.from_string("M")))       // TQ==
+  println(base64.encode(bytes.from_string("Many hands make light work.")))
+
+  // ── encode: 62/63 symbol distinction (std '+'/'/'  vs  url '-'/'_') ──
+  println(base64.encode(bytes.from_list([251, 255, 191])))      // +/+/  (padded)
+  println(base64.encode_url(bytes.from_list([251, 255, 191])))  // -_-_  (padded)
+
+  // ── decode: round-trip + padded forms ──
+  show_dec("d_man", base64.decode("TWFu"))         // 4d616e
+  show_dec("d_foo", base64.decode("Zm9v"))         // 666f6f (the '0'..'9' offset regression)
+  show_dec("d_fooba", base64.decode("Zm9vYmE="))   // 666f6f6261
+  show_dec("d_m", base64.decode("TQ=="))           // 4d
+  show_dec("d_url", base64.decode_url("-_-_"))      // fbffbf
+
+  // ── decode: error strings ──
+  show_dec("e_char", base64.decode("T*Fu"))   // invalid base64 character
+  show_dec("e_pad", base64.decode("Q=Fu"))    // stray '=' → invalid base64 character
+  show_dec("e_len", base64.decode("Q"))       // invalid base64 length: 1
+  show_dec("e_len2", base64.decode("TWFuZ"))  // invalid base64 length: 5
+}

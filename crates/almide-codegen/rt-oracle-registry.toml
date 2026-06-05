@@ -233,9 +233,10 @@ note = "See compile_init_preopen_dirs — no fs differential fixture yet."
 [[routine]]
 file = "runtime.rs"
 routine = "compile_bytes_f16_to_f64"
-status = "grandfathered"
-oracle = "native f16→f64 widening (bytes.read_f16 family)"
-note = "No cross-target fixture reads an f16; drain with a bytes-endian differential."
+status = "verified"
+oracle = "runtime/rs/src/bytes.rs::f16_bits_to_f64 (bytes.read_f16 family)"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "spec/wasm_cross/bytes_f16.almd: ±inf / NaN / ±0 / subnormal / normals. Drain PR-D fixed the exp-all-ones path (was finite ±f32::MAX, now ±inf / NaN)."
 
 # ── runtime_eq.rs ────────────────────────────────────────────────────
 [[routine]]
@@ -701,9 +702,10 @@ note = "String comparison helper; list_sort_short.almd sorts strings but exercis
 [[routine]]
 file = "rt_numeric.rs"
 routine = "compile_int_from_hex"
-status = "grandfathered"
-oracle = "runtime/rs/src/int.rs::almide_rt_int_parse_hex (i64::from_str_radix base 16)"
-note = "No cross-target fixture calls int.parse_hex / int.from_hex."
+status = "verified"
+oracle = "runtime/rs/src/int.rs::almide_rt_int_parse_hex (i64::from_str_radix(s.trim().trim_start_matches(\"0x\"), 16))"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "spec/wasm_cross/int_from_hex.almd. Drain PR-D rewrote this to mirror the native oracle EXACTLY: trim, lowercase-only + REPEATED 0x strip, no underscore skip, sign-after-strip, the four std ParseIntError strings + overflow. See contract_notes (0X/0x0x quirks)."
 
 [[routine]]
 file = "rt_numeric.rs"
@@ -903,52 +905,58 @@ note = "The per-node recursion under compile_json_parse; driven by json_value.al
 file = "rt_value.rs"
 routine = "compile_json_get_path"
 status = "verified"
-oracle = "runtime/rs/src/value.rs path get (value.get)"
+oracle = "runtime/rs/src/json.rs::almide_json_get_path (negative-index normalize: len + i)"
 test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
-note = "spec/wasm_cross/json_value.almd navigates the parsed value with value.get."
+note = "spec/wasm_cross/{json_value,json_path_edges}.almd. Drain PR-D added negative-Index normalization (was None) so get_path mirrors the infallible native oracle."
 
 [[routine]]
 file = "rt_value.rs"
 routine = "compile_json_set_path"
-status = "grandfathered"
-oracle = "runtime/rs/src/value.rs path set (value.set)"
-note = "json_value.almd reads but does not value.set a path; no cross-target fixture mutates a Value path. Drain: extend json_value.almd."
+status = "verified"
+oracle = "runtime/rs/src/json.rs::almide_json_set_path / set_at_steps (fully INFALLIBLE: Field over a non-object autovivifies, Index non-array & OOB are no-ops)"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "spec/wasm_cross/json_path_edges.almd. Drain PR-D made Index INFALLIBLE: negative normalize, non-array root → no-op (was reading object pairs as an array / trapping on a scalar root), OOB → no-op (was Err 'path error: index out of bounds'). Drain PR-D remediation made Field INFALLIBLE too: a Field step over a non-object (Int/String/Null/Bool/Array) node now AUTOVIVIFIES — it replaces the node with a fresh single-key object, seeding every absent/non-object descent with native's `Object(vec![])` (empty object, not null) so a following Index step's local no-op rebuilds as `{}` and a following Field appends; was Err 'path error: expected object'. Covered rows: av_* (Field-over-{int,str,null,bool,array} nested+final, mid-path replace, deep chain, Field-after-Index autoviv, Field-then-Index `{x:{}}`, Index-then-Field `{x:{y:{}}}`, Index-OOB-then-Field whole-subtree no-op)."
 
 [[routine]]
 file = "rt_value.rs"
 routine = "compile_json_remove_path"
-status = "grandfathered"
-oracle = "runtime/rs/src/value.rs path remove (value.remove)"
-note = "No cross-target fixture removes a Value path. Drain alongside set_path."
+status = "verified"
+oracle = "runtime/rs/src/json.rs::almide_json_remove_path / remove_at_steps (infallible Index)"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "spec/wasm_cross/json_path_edges.almd. Drain PR-D added negative-Index normalization (top + nested + intermediate rebuild) so remove_path mirrors the native oracle."
 
 # ── rt_encoding.rs (base64 / hex) ────────────────────────────────────
 [[routine]]
 file = "rt_encoding.rs"
 routine = "compile_base64_encode"
-status = "grandfathered"
-oracle = "runtime/rs/src/* base64 encode (standard alphabet + padding)"
-note = "No cross-target fixture exercises base64. Drain: add an encoding fixture."
+status = "verified"
+oracle = "runtime/rs/src/base64.rs::encode_with (RFC 4648, standard + URL-safe, canonical padded)"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "spec/wasm_cross/encoding_base64.almd. Drain PR-D created the native oracle (the almide_rt_base64_* fns did not exist → E0425) and fixed the WASM encode (stale offset literals left output empty; string_alloc now writes the len header)."
 
 [[routine]]
 file = "rt_encoding.rs"
 routine = "compile_base64_decode"
-status = "grandfathered"
-oracle = "runtime/rs/src/* base64 decode (incl. invalid-input error path)"
-note = "No cross-target fixture. Drain alongside base64_encode."
+status = "verified"
+oracle = "runtime/rs/src/base64.rs::decode_str (strip '=', length/char errors)"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "spec/wasm_cross/encoding_base64.almd. Drain PR-D fixed the stale read offsets and the '0'..'9' char→value offset in emit_b64_decode_char (was -4, must be +4), and added the 'invalid base64 length: N' / 'invalid base64 character' strings to match native byte-for-byte."
 
 [[routine]]
 file = "rt_encoding.rs"
 routine = "compile_hex_encode"
-status = "grandfathered"
-oracle = "runtime/rs/src/hex.rs encode"
-note = "No cross-target fixture for hex.encode. Drain: add an encoding fixture."
+status = "verified"
+oracle = "runtime/rs/src/hex.rs::almide_rt_hex_encode"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "spec/wasm_cross/encoding_base64.almd uses hex.encode to dump decoded Bytes byte-for-byte across targets."
 
 [[routine]]
 file = "rt_encoding.rs"
 routine = "compile_hex_decode"
-status = "grandfathered"
-oracle = "runtime/rs/src/hex.rs decode (incl. odd-length / non-hex error path)"
-note = "No cross-target fixture. Drain alongside hex_encode."
+status = "verified"
+oracle = "runtime/rs/src/hex.rs::almide_rt_hex_decode (odd-length / non-hex error path with position)"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "spec/wasm_cross/encoding_base64.almd exercises the error path. Drain PR-D appended the position/length detail the WASM strings dropped: 'hex string has odd length: N' / 'invalid hex char at N' (hi at 2*pair, lo at 2*pair+1)."
 
 # ── rt_regex.rs (regex engine) ───────────────────────────────────────
 [[routine]]
