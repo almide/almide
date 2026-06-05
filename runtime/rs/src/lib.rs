@@ -34,3 +34,4 @@ pub mod result;
 pub mod set;
 pub mod testing;
 pub mod hex;
+pub mod base64;

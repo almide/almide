@@ -11,6 +11,56 @@ use super::rt_string::{string_data_off, string_hdr, string_cap_off, list_data_of
 use wasm_encoder::{ValType};
 use super::TrackedFunction as Function;
 
+// Value heap tags (see `compile_value_stringify`): 0=null, 1=bool, 2=int,
+// 3=float, 4=string, 5=array, 6=object. Only the container tags matter for the
+// path walkers; the rest are "scalar" and never index/field into.
+const VTAG_ARRAY: i32 = 5;
+const VTAG_OBJECT: i32 = 6;
+
+/// Size in bytes of a heap value box: `[tag:i32][payload:i32]`. The payload is
+/// the inline scalar (bool/int), or a pointer (string/array/object pairs-list).
+const VALUE_BOX_SIZE: i32 = 8;
+
+/// Emit in-place negative-index normalization, mirroring the native oracle
+/// `if i < 0 { len as i64 + i }` (runtime/rs/src/json.rs get/set/remove paths):
+/// `if idx_local < 0 { idx_local += len_local }`. After this, the standard
+/// `idx < 0 || idx >= len` bounds check rejects an index that is still negative
+/// (e.g. -5 over len 3), so an out-of-range normalized index stays a no-op.
+fn emit_normalize_neg_index(f: &mut Function, idx_local: u32, len_local: u32) {
+    wasm!(f, {
+        local_get(idx_local); i32_const(0); i32_lt_s;
+        if_empty;
+          local_get(idx_local); local_get(len_local); i32_add; local_set(idx_local);
+        end;
+    });
+}
+
+/// Emit a freshly-allocated empty-object value `{}` and leave its pointer in
+/// `dst_local` (a scratch i32 local).
+///
+/// This is the wasm mirror of the native autovivification seed: every native
+/// `set_at_steps` branch that descends into a missing key OR a non-object node
+/// recurses with `&Value::Object(vec![])` (runtime/rs/src/json.rs:284,288), and
+/// an Index step over that empty object is a local no-op that yields `{}`
+/// (`j.clone()`, json.rs:299). Seeding the forward-walk placeholder with `{}`
+/// rather than `null` makes a following Index step rebuild as `{}` (not `null`)
+/// and a following Field step append into the empty pairs list — byte-matching
+/// native for both Field-over-non-object and Field-then-Index autoviv chains.
+///
+/// Layout: pairs list is `[len=0]` (header only, no slots) → `alloc(list_hdr())`;
+/// the value box is `[tag=VTAG_OBJECT][pairs_ptr]` → `alloc(VALUE_BOX_SIZE)`.
+fn emit_make_empty_object(f: &mut Function, dst_local: u32, alloc: u32) {
+    // scratch local 15 holds the pairs list while we build the value box; both
+    // 15 and dst are clobbered deterministically here.
+    wasm!(f, {
+        i32_const(list_hdr()); call(alloc); local_set(15); // empty pairs list
+        local_get(15); i32_const(0); i32_store(0);          // len = 0
+        i32_const(VALUE_BOX_SIZE); call(alloc); local_set(dst_local);
+        local_get(dst_local); i32_const(VTAG_OBJECT); i32_store(0);
+        local_get(dst_local); local_get(15); i32_store(4);
+    });
+}
+
 /// Register runtime function signatures.
 pub(super) fn register(emitter: &mut WasmEmitter) {
     let ty = emitter.register_type(vec![ValType::I32], vec![ValType::I32]);
@@ -1149,12 +1199,15 @@ fn compile_json_get_path(emitter: &mut WasmEmitter) {
           local_get(7); i32_const(2); i32_eq;
           if_empty;
             // cur_val must be array (tag=5)
-            local_get(8); i32_load(0); i32_const(5); i32_ne;
+            local_get(8); i32_load(0); i32_const(VTAG_ARRAY); i32_ne;
             if_empty; i32_const(0); return_; end; // not array → none
             local_get(8); i32_load(4); local_set(9); // list
             local_get(9); i32_load(0); local_set(10); // len
             local_get(6); i32_load(8); local_set(11); // index value
-            // Bounds check
+    });
+    emit_normalize_neg_index(&mut f, 11, 10); // native: i<0 → len+i
+    wasm!(f, {
+            // Bounds check (still-negative-after-normalize counts as OOB)
             local_get(11); i32_const(0); i32_lt_s;
             local_get(11); local_get(10); i32_ge_s;
             i32_or;
@@ -1193,9 +1246,11 @@ fn compile_json_set_path(emitter: &mut WasmEmitter) {
     let alloc = emitter.rt.alloc;
     let str_eq = emitter.rt.string.eq;
 
-    let err_not_obj = emitter.intern_string("path error: expected object");
-    let err_not_arr = emitter.intern_string("path error: expected array");
-    let err_oob = emitter.intern_string("path error: index out of bounds");
+    // set_path is now FULLY INFALLIBLE, mirroring native `set_at_steps`: an Index
+    // step over a non-array or an OOB index is a local no-op, and a Field step
+    // over a non-object node AUTOVIVIFIES (replaces it with a fresh single-key
+    // object). No path produces an Err — the prior "expected array" / "index out
+    // of bounds" / "expected object" strings were all removed.
 
     // Locals: param 0=value, param 1=path, param 2=new_val
     // 3=seg_count, 4=cur_path, 5=segs_arr, 6=depth, 7=seg_ptr, 8=seg_tag
@@ -1256,76 +1311,106 @@ fn compile_json_set_path(emitter: &mut WasmEmitter) {
           i32_load(0); local_set(9);
     });
 
-    // Navigate field during forward walk
+    // Navigate field during forward walk.
+    //
+    // Native `set_at_steps` Field match (runtime/rs/src/json.rs:277-289) is
+    // INFALLIBLE: an object recurses into the matching/absent key (seeding the
+    // absent key with `Object(vec![])`), and a NON-object node is REPLACED by a
+    // fresh single-key object built from `Object(vec![])` too. So both
+    // "key absent in object" and "node is not an object" descend into an empty
+    // object — i.e. the placeholder for the next depth is `{}`, never `null` and
+    // never an Err. The prior `path error: expected object` Err diverged: native
+    // autovivifies here instead of failing.
     wasm!(f, {
           local_get(8); i32_const(1); i32_eq;
           if_empty;
-            local_get(9); i32_load(0); i32_const(6); i32_ne;
-            if_empty;
-              i32_const(8); call(alloc); local_set(14);
-              local_get(14); i32_const(1); i32_store(0);
-              local_get(14); i32_const(err_not_obj as i32); i32_store(4);
-              local_get(14); return_;
-            end;
-            local_get(9); i32_load(4); local_set(10); // pairs list
-            local_get(10); i32_load(0); local_set(11); // len
-            i32_const(0); local_set(12);
             i32_const(0); local_set(17); // found = 0
-            block_empty; loop_empty;
-              local_get(12); local_get(11); i32_ge_u; br_if(1);
-              local_get(10); i32_const(list_data_off()); i32_add;
-              local_get(12); i32_const(4); i32_mul; i32_add;
-              i32_load(0); local_set(13); // pair
-              local_get(13); i32_load(0);
-              local_get(7); i32_load(8);
-              call(str_eq);
-              if_empty;
-                local_get(16); local_get(6); i32_const(1); i32_add; i32_const(4); i32_mul; i32_add;
-                local_get(13); i32_load(4); i32_store(0);
-                i32_const(1); local_set(17);
-                br(2);
-              end;
-              local_get(12); i32_const(1); i32_add; local_set(12);
-              br(0);
-            end; end;
-            // If key not found, store null placeholder for the next level
+            // Only scan pairs when cur_val is actually an object; otherwise it
+            // is a non-object that native replaces (autoviv) — leave found = 0.
+            local_get(9); i32_load(0); i32_const(VTAG_OBJECT); i32_eq;
+            if_empty;
+              local_get(9); i32_load(4); local_set(10); // pairs list
+              local_get(10); i32_load(0); local_set(11); // len
+              i32_const(0); local_set(12);
+              block_empty; loop_empty;
+                local_get(12); local_get(11); i32_ge_u; br_if(1);
+                local_get(10); i32_const(list_data_off()); i32_add;
+                local_get(12); i32_const(4); i32_mul; i32_add;
+                i32_load(0); local_set(13); // pair
+                local_get(13); i32_load(0);
+                local_get(7); i32_load(8);
+                call(str_eq);
+                if_empty;
+                  local_get(16); local_get(6); i32_const(1); i32_add; i32_const(4); i32_mul; i32_add;
+                  local_get(13); i32_load(4); i32_store(0);
+                  i32_const(1); local_set(17);
+                  br(2);
+                end;
+                local_get(12); i32_const(1); i32_add; local_set(12);
+                br(0);
+              end; end;
+            end;
+            // Key absent (or cur_val was a non-object): seed the next depth with
+            // a fresh empty object, mirroring native `Object(vec![])`.
             local_get(17); i32_eqz;
             if_empty;
-              i32_const(4); call(alloc); local_set(17);
-              local_get(17); i32_const(0); i32_store(0); // null value
+    });
+    emit_make_empty_object(&mut f, 17, alloc);
+    wasm!(f, {
               local_get(16); local_get(6); i32_const(1); i32_add; i32_const(4); i32_mul; i32_add;
               local_get(17); i32_store(0);
             end;
           end;
     });
 
-    // Navigate index during forward walk
+    // Navigate index during forward walk. Native `set_at_steps` Index match
+    // (runtime/rs/src/json.rs:290-300) makes a non-array node OR an OOB index a
+    // LOCAL no-op (`j.clone()` / array unchanged) — it does NOT abort the outer
+    // operation. The leaf-to-root rebuild's Index branch already reproduces that
+    // local no-op (it discards `cur_built` and re-emits `orig_val` = the node at
+    // this depth), so the forward walk must NOT hard-return the original root:
+    // doing so erased any autovivification that happened at a shallower depth
+    // (e.g. `.x[0].y` over a scalar root → native `{"x":{}}`, not the untouched
+    // root). The forward walk only needs a valid placeholder for the next depth;
+    // the rebuild throws it away at this Index level. Use an empty object so the
+    // placeholder is never garbage and matches native's `Object(vec![])` seed.
+    let emit_index_noop_placeholder = |f: &mut Function| {
+        // val_stack[depth+1] = {}  (don't-care value; rebuild discards it here)
+        emit_make_empty_object(f, 17, alloc);
+        wasm!(f, {
+            local_get(16); local_get(6); i32_const(1); i32_add; i32_const(4); i32_mul; i32_add;
+            local_get(17); i32_store(0);
+        });
+    };
     wasm!(f, {
           local_get(8); i32_const(2); i32_eq;
           if_empty;
-            local_get(9); i32_load(0); i32_const(5); i32_ne;
+            local_get(9); i32_load(0); i32_const(VTAG_ARRAY); i32_ne;
             if_empty;
-              i32_const(8); call(alloc); local_set(14);
-              local_get(14); i32_const(1); i32_store(0);
-              local_get(14); i32_const(err_not_arr as i32); i32_store(4);
-              local_get(14); return_;
-            end;
+    });
+    emit_index_noop_placeholder(&mut f);
+    wasm!(f, {
+            else_;
             local_get(9); i32_load(4); local_set(10); // list
             local_get(10); i32_load(0); local_set(11); // len
             local_get(7); i32_load(8); local_set(18); // idx
+    });
+    emit_normalize_neg_index(&mut f, 18, 11);
+    wasm!(f, {
             local_get(18); i32_const(0); i32_lt_s;
             local_get(18); local_get(11); i32_ge_s;
             i32_or;
             if_empty;
-              i32_const(8); call(alloc); local_set(14);
-              local_get(14); i32_const(1); i32_store(0);
-              local_get(14); i32_const(err_oob as i32); i32_store(4);
-              local_get(14); return_;
-            end;
+    });
+    emit_index_noop_placeholder(&mut f);
+    wasm!(f, {
+            else_;
             local_get(16); local_get(6); i32_const(1); i32_add; i32_const(4); i32_mul; i32_add;
             local_get(10); i32_const(list_data_off()); i32_add;
             local_get(18); i32_const(4); i32_mul; i32_add;
             i32_load(0); i32_store(0);
+            end;
+            end;
           end;
     });
 
@@ -1355,7 +1440,7 @@ fn compile_json_set_path(emitter: &mut WasmEmitter) {
     wasm!(f, {
           local_get(8); i32_const(1); i32_eq;
           if_empty;
-            local_get(14); i32_load(0); i32_const(6); i32_eq;
+            local_get(14); i32_load(0); i32_const(VTAG_OBJECT); i32_eq;
             if_empty;
               // Clone pairs, replacing matching key
               local_get(14); i32_load(4); local_set(10); // old pairs
@@ -1418,54 +1503,76 @@ fn compile_json_set_path(emitter: &mut WasmEmitter) {
                 local_get(17); i32_store(0);
               end;
               // Build object
-              i32_const(8); call(alloc); local_set(9);
-              local_get(9); i32_const(6); i32_store(0);
+              i32_const(VALUE_BOX_SIZE); call(alloc); local_set(9);
+              local_get(9); i32_const(VTAG_OBJECT); i32_store(0);
               local_get(9); local_get(15); i32_store(4);
             else_;
-              // Not an object: create single-key object
-              i32_const(8); call(alloc); local_set(15); // list (1 slot + header)
+              // Not an object → AUTOVIVIFY: replace it with a fresh single-key
+              // object {seg_key: cur_built}, mirroring native `set_at_steps`
+              // Field-over-non-object (json.rs:288).
+              i32_const(list_hdr() + 4); call(alloc); local_set(15); // pairs list: 1 slot
               local_get(15); i32_const(1); i32_store(0);
-              i32_const(8); call(alloc); local_set(17); // pair
+              i32_const(VALUE_BOX_SIZE); call(alloc); local_set(17); // pair [key][val]
               local_get(17); local_get(7); i32_load(8); i32_store(0);
               local_get(17); local_get(9); i32_store(4);
               local_get(15); i32_const(list_data_off()); i32_add; local_get(17); i32_store(0);
-              i32_const(8); call(alloc); local_set(9);
-              local_get(9); i32_const(6); i32_store(0);
+              i32_const(VALUE_BOX_SIZE); call(alloc); local_set(9);
+              local_get(9); i32_const(VTAG_OBJECT); i32_store(0);
               local_get(9); local_get(15); i32_store(4);
             end;
           end;
     });
 
-    // Rebuild for index segment
+    // Rebuild for index segment. Native `set_at_steps` Index match:
+    //   - non-array → j.clone() (no-op); OOB → array unchanged (no-op).
+    // So when orig is not an array OR the (normalized) index is OOB, keep the
+    // original value as the rebuilt node instead of fabricating an array.
     wasm!(f, {
           local_get(8); i32_const(2); i32_eq;
           if_empty;
-            local_get(14); i32_load(4); local_set(10); // old list
-            local_get(10); i32_load(0); local_set(11); // len
-            local_get(7); i32_load(8); local_set(18); // idx
-            // Clone list replacing at idx
-            i32_const(list_hdr()); local_get(11); i32_const(4); i32_mul; i32_add;
-            call(alloc); local_set(15);
-            local_get(15); local_get(11); i32_store(0);
-            i32_const(0); local_set(12);
-            block_empty; loop_empty;
-              local_get(12); local_get(11); i32_ge_u; br_if(1);
-              local_get(15); i32_const(list_data_off()); i32_add;
-              local_get(12); i32_const(4); i32_mul; i32_add;
-              local_get(12); local_get(18); i32_eq;
-              if_i32; local_get(9);
+            // Non-array → no-op: cur_built = orig_val.
+            local_get(14); i32_load(0); i32_const(VTAG_ARRAY); i32_ne;
+            if_empty;
+              local_get(14); local_set(9);
+            else_;
+              local_get(14); i32_load(4); local_set(10); // old list
+              local_get(10); i32_load(0); local_set(11); // len
+              local_get(7); i32_load(8); local_set(18); // idx
+    });
+    emit_normalize_neg_index(&mut f, 18, 11);
+    wasm!(f, {
+              // OOB (incl. still-negative) → no-op: cur_built = orig_val.
+              local_get(18); i32_const(0); i32_lt_s;
+              local_get(18); local_get(11); i32_ge_s;
+              i32_or;
+              if_empty;
+                local_get(14); local_set(9);
               else_;
-                local_get(10); i32_const(list_data_off()); i32_add;
-                local_get(12); i32_const(4); i32_mul; i32_add;
-                i32_load(0);
+                // Clone list replacing at idx
+                i32_const(list_hdr()); local_get(11); i32_const(4); i32_mul; i32_add;
+                call(alloc); local_set(15);
+                local_get(15); local_get(11); i32_store(0);
+                i32_const(0); local_set(12);
+                block_empty; loop_empty;
+                  local_get(12); local_get(11); i32_ge_u; br_if(1);
+                  local_get(15); i32_const(list_data_off()); i32_add;
+                  local_get(12); i32_const(4); i32_mul; i32_add;
+                  local_get(12); local_get(18); i32_eq;
+                  if_i32; local_get(9);
+                  else_;
+                    local_get(10); i32_const(list_data_off()); i32_add;
+                    local_get(12); i32_const(4); i32_mul; i32_add;
+                    i32_load(0);
+                  end;
+                  i32_store(0);
+                  local_get(12); i32_const(1); i32_add; local_set(12);
+                  br(0);
+                end; end;
+                i32_const(8); call(alloc); local_set(9);
+                local_get(9); i32_const(VTAG_ARRAY); i32_store(0);
+                local_get(9); local_get(15); i32_store(4);
               end;
-              i32_store(0);
-              local_get(12); i32_const(1); i32_add; local_set(12);
-              br(0);
-            end; end;
-            i32_const(8); call(alloc); local_set(9);
-            local_get(9); i32_const(5); i32_store(0);
-            local_get(9); local_get(15); i32_store(4);
+            end;
           end;
     });
 
@@ -1587,15 +1694,18 @@ fn compile_json_remove_path(emitter: &mut WasmEmitter) {
     wasm!(f, {
           local_get(7); i32_const(2); i32_eq;
           if_empty;
-            local_get(8); i32_load(0); i32_const(5); i32_ne;
-            if_empty; local_get(0); return_; end;
+            local_get(8); i32_load(0); i32_const(VTAG_ARRAY); i32_ne;
+            if_empty; local_get(0); return_; end; // non-array → no-op (orig)
             local_get(8); i32_load(4); local_set(9);
             local_get(9); i32_load(0); local_set(10);
             local_get(6); i32_load(8); local_set(17);
+    });
+    emit_normalize_neg_index(&mut f, 17, 10);
+    wasm!(f, {
             local_get(17); i32_const(0); i32_lt_s;
             local_get(17); local_get(10); i32_ge_s;
             i32_or;
-            if_empty; local_get(0); return_; end;
+            if_empty; local_get(0); return_; end; // OOB → no-op (orig)
             local_get(14); local_get(5); i32_const(1); i32_add; i32_const(4); i32_mul; i32_add;
             local_get(9); i32_const(list_data_off()); i32_add;
             local_get(17); i32_const(4); i32_mul; i32_add;
@@ -1661,15 +1771,18 @@ fn compile_json_remove_path(emitter: &mut WasmEmitter) {
     wasm!(f, {
         local_get(7); i32_const(2); i32_eq;
         if_empty;
-          local_get(8); i32_load(0); i32_const(5); i32_ne;
-          if_empty; local_get(0); return_; end;
+          local_get(8); i32_load(0); i32_const(VTAG_ARRAY); i32_ne;
+          if_empty; local_get(0); return_; end; // non-array → no-op (orig)
           local_get(8); i32_load(4); local_set(9);
           local_get(9); i32_load(0); local_set(10);
           local_get(6); i32_load(8); local_set(17);
+    });
+    emit_normalize_neg_index(&mut f, 17, 10);
+    wasm!(f, {
           local_get(17); i32_const(0); i32_lt_s;
           local_get(17); local_get(10); i32_ge_s;
           i32_or;
-          if_empty; local_get(0); return_; end;
+          if_empty; local_get(0); return_; end; // OOB → no-op (orig)
           // Alloc new list (len - 1)
           local_get(10); i32_const(1); i32_sub; local_set(13);
           i32_const(list_hdr()); local_get(13); i32_const(4); i32_mul; i32_add;
@@ -1692,7 +1805,7 @@ fn compile_json_remove_path(emitter: &mut WasmEmitter) {
             br(0);
           end; end;
           i32_const(8); call(alloc); local_set(16);
-          local_get(16); i32_const(5); i32_store(0);
+          local_get(16); i32_const(VTAG_ARRAY); i32_store(0);
           local_get(16); local_get(15); i32_store(4);
         end;
     });
@@ -1749,35 +1862,46 @@ fn compile_json_remove_path(emitter: &mut WasmEmitter) {
           end;
     });
 
-    // Rebuild index
+    // Rebuild index (intermediate Index segment, e.g. xs[2].name). The forward
+    // walk already validated this level is an array with an in-bounds index, so
+    // a non-array here is a defensive no-op; the normalization mirrors the
+    // forward walk so a negative intermediate index targets the same slot.
     wasm!(f, {
           local_get(7); i32_const(2); i32_eq;
           if_empty;
-            local_get(8); i32_load(4); local_set(9);
-            local_get(9); i32_load(0); local_set(10);
-            local_get(6); i32_load(8); local_set(17);
-            i32_const(list_hdr()); local_get(10); i32_const(4); i32_mul; i32_add;
-            call(alloc); local_set(15);
-            local_get(15); local_get(10); i32_store(0);
-            i32_const(0); local_set(11);
-            block_empty; loop_empty;
-              local_get(11); local_get(10); i32_ge_u; br_if(1);
-              local_get(15); i32_const(list_data_off()); i32_add;
-              local_get(11); i32_const(4); i32_mul; i32_add;
-              local_get(11); local_get(17); i32_eq;
-              if_i32; local_get(16);
-              else_;
-                local_get(9); i32_const(list_data_off()); i32_add;
+            local_get(8); i32_load(0); i32_const(VTAG_ARRAY); i32_ne;
+            if_empty;
+              local_get(8); local_set(16); // non-array → keep orig as built node
+            else_;
+              local_get(8); i32_load(4); local_set(9);
+              local_get(9); i32_load(0); local_set(10);
+              local_get(6); i32_load(8); local_set(17);
+    });
+    emit_normalize_neg_index(&mut f, 17, 10);
+    wasm!(f, {
+              i32_const(list_hdr()); local_get(10); i32_const(4); i32_mul; i32_add;
+              call(alloc); local_set(15);
+              local_get(15); local_get(10); i32_store(0);
+              i32_const(0); local_set(11);
+              block_empty; loop_empty;
+                local_get(11); local_get(10); i32_ge_u; br_if(1);
+                local_get(15); i32_const(list_data_off()); i32_add;
                 local_get(11); i32_const(4); i32_mul; i32_add;
-                i32_load(0);
-              end;
-              i32_store(0);
-              local_get(11); i32_const(1); i32_add; local_set(11);
-              br(0);
-            end; end;
-            i32_const(8); call(alloc); local_set(16);
-            local_get(16); i32_const(5); i32_store(0);
-            local_get(16); local_get(15); i32_store(4);
+                local_get(11); local_get(17); i32_eq;
+                if_i32; local_get(16);
+                else_;
+                  local_get(9); i32_const(list_data_off()); i32_add;
+                  local_get(11); i32_const(4); i32_mul; i32_add;
+                  i32_load(0);
+                end;
+                i32_store(0);
+                local_get(11); i32_const(1); i32_add; local_set(11);
+                br(0);
+              end; end;
+              i32_const(8); call(alloc); local_set(16);
+              local_get(16); i32_const(VTAG_ARRAY); i32_store(0);
+              local_get(16); local_get(15); i32_store(4);
+            end;
           end;
     });
 

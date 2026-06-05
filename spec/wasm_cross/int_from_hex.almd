@@ -1,0 +1,43 @@
+// Cross-target differential fixture: int.from_hex.
+//
+// Native oracle (runtime/rs/src/int.rs):
+//   i64::from_str_radix(s.trim().trim_start_matches("0x"), 16).map_err(|e| e.to_string())
+// The WASM runtime `emit_wasm/rt_numeric.rs::compile_int_from_hex` must mirror
+// it exactly, INCLUDING the native quirks (see contract_notes):
+//   - "0X10" → Err (the "0x" strip is lowercase-only / case-sensitive)
+//   - "0x0xff" → Ok(255) (trim_start_matches strips "0x" REPEATEDLY)
+//   - "f_f" → Err (NO underscore skipping)
+//   - sign accepted after 0x-strip ("0x-ff" → -255)
+// and the four std ParseIntError strings (shared with int.parse).
+
+fn show(label: String, r: Result[Int, String]) -> Unit = {
+  match r {
+    Ok(v) => println(label + " ok:" + int.to_string(v)),
+    Err(e) => println(label + " err:" + e),
+  }
+}
+
+fn main() -> Unit = {
+  show("ff", int.from_hex("ff"))                 // 255
+  show("FF", int.from_hex("FF"))                 // 255
+  show("0xff", int.from_hex("0xff"))             // 255
+  show("0Xff", int.from_hex("0Xff"))             // err: invalid digit found in string
+  show("0X10", int.from_hex("0X10"))             // err: invalid digit found in string
+  show("0x0xff", int.from_hex("0x0xff"))         // 255  (repeated strip)
+  show("0x0x0x10", int.from_hex("0x0x0x10"))     // 16
+  show("f_f", int.from_hex("f_f"))               // err: invalid digit found in string
+  show("ws", int.from_hex("  ff  "))             // 255  (trim)
+  show("-ff", int.from_hex("-ff"))               // -255
+  show("+ff", int.from_hex("+ff"))               // 255
+  show("0x-ff", int.from_hex("0x-ff"))           // -255
+  show("-0xff", int.from_hex("-0xff"))           // err: invalid digit found in string
+  show("empty", int.from_hex(""))                // err: cannot parse integer from empty string
+  show("0x", int.from_hex("0x"))                 // err: cannot parse integer from empty string
+  show("0x0x", int.from_hex("0x0x"))             // err: cannot parse integer from empty string
+  show("plus", int.from_hex("+"))                // err: invalid digit found in string
+  show("z", int.from_hex("z"))                   // err: invalid digit found in string
+  show("00xff", int.from_hex("00xff"))           // err: invalid digit found in string
+  show("max", int.from_hex("7fffffffffffffff"))  // 9223372036854775807
+  show("over", int.from_hex("8000000000000000")) // err: number too large to fit in target type
+  show("min", int.from_hex("-8000000000000000")) // -9223372036854775808
+}
