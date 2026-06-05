@@ -33,10 +33,12 @@ use super::TrackedFunction as Function;
 // NLIMBS limbs cover values up to ~2^(32*NLIMBS). The widest intermediate is
 // S for the largest/smallest exponents scaled by 10^k; 128 limbs = 4096 bits
 // is ample headroom (max needed is < ~1100 bits + log2(10^k) ≈ 2150 bits).
-const NLIMBS: u32 = 128;
-const BN_HDR: u32 = 4; // len word
-const BN_BYTES: u32 = BN_HDR + NLIMBS * 4; // 516
-const BN_STRIDE: u32 = (BN_BYTES + 15) & !15; // 528, 16-aligned
+// `pub(super)` so the decimal→f64 parser (`rt_dec2flt`) can lay out bignums in
+// the SAME format the shared `__dragon_*` helpers expect ([len:i32][u32 limbs]).
+pub(super) const NLIMBS: u32 = 128;
+pub(super) const BN_HDR: u32 = 4; // len word
+pub(super) const BN_BYTES: u32 = BN_HDR + NLIMBS * 4; // 516
+pub(super) const BN_STRIDE: u32 = (BN_BYTES + 15) & !15; // 528, 16-aligned
 
 // Offsets of the five bignums within the scratch block.
 const OFF_R: u32 = 0;

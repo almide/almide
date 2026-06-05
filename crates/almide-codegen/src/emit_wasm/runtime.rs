@@ -294,6 +294,8 @@ pub fn register_runtime_functions(emitter: &mut WasmEmitter) {
 
     // Dragon4 big-integer helpers for float.to_string.
     super::rt_dragon::register(emitter);
+    // Correctly-rounded decimal→f64 for float.parse (reuses the Dragon4 bignum).
+    super::rt_dec2flt::register(emitter);
 
     // Global 0: __heap_ptr (memory 0 bump allocator)
     emitter.heap_ptr_global = 0;
@@ -360,6 +362,8 @@ pub fn compile_runtime(emitter: &mut WasmEmitter) {
     // Dragon4 bignum helpers (registered last in register_runtime_functions,
     // so their bodies must be emitted last to keep func-index order).
     super::rt_dragon::compile_helpers(emitter);
+    // decimal→f64 parser bodies (registered right after the Dragon4 helpers).
+    super::rt_dec2flt::compile_helpers(emitter);
 }
 
 /// __alloc(size: i32) -> i32
