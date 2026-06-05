@@ -126,6 +126,23 @@ pub fn register(emitter: &mut WasmEmitter) {
     // utf8_snap(s, byte_i) -> i32 : byte_i snapped down to a char boundary.
     emitter.rt.string.utf8_snap = emitter.register_func("__utf8_snap", ty_i32x2_i32);
 
+    // ── Unicode property membership (oracle-derived range tables) ──
+    // (scalar) -> i32 (0/1): binary-search the embedded property range table.
+    // Registered + compiled here (in order), AFTER the utf8_* helpers and BEFORE
+    // the case-folding group — same registration==compile discipline as those.
+    emitter.rt.string.prop_alpha = emitter.register_func("__str_prop_alpha", ty_i32_i32);
+    emitter.rt.string.prop_alnum = emitter.register_func("__str_prop_alnum", ty_i32_i32);
+    emitter.rt.string.prop_upper = emitter.register_func("__str_prop_upper", ty_i32_i32);
+    emitter.rt.string.prop_lower = emitter.register_func("__str_prop_lower", ty_i32_i32);
+    // Intern the range tables now so the helper bodies can reference their
+    // offsets as constants (and the dead-data eliminator keeps a table iff a
+    // live predicate references its offset).
+    use super::rt_unicode_tables::{intern_table, UnicodeProp};
+    emitter.rt.string.prop_alpha_table = intern_table(emitter, UnicodeProp::Alphabetic);
+    emitter.rt.string.prop_alnum_table = intern_table(emitter, UnicodeProp::Alphanumeric);
+    emitter.rt.string.prop_upper_table = intern_table(emitter, UnicodeProp::Uppercase);
+    emitter.rt.string.prop_lower_table = intern_table(emitter, UnicodeProp::Lowercase);
+
     // ── Full-Unicode case folding ──
     // Registered + compiled LAST, in identical order (same discipline as the
     // utf8_* helpers and Dragon4): bodies bind to indices by registration and
@@ -186,6 +203,9 @@ pub fn compile(emitter: &mut WasmEmitter) {
     compile_utf8_scalar(emitter);
     compile_utf8_byte_of_cp(emitter);
     compile_utf8_snap(emitter);
+    // Unicode property membership helpers — compiled here in registration order
+    // (alpha, alnum, upper, lower), between the utf8_* helpers and case folding.
+    super::rt_string_extra::compile_prop_membership(emitter);
     // Case folding — compiled LAST, in registration order.
     compile_utf8_emit_scalar(emitter);
     compile_case_map_lookup(emitter);
@@ -886,7 +906,9 @@ fn compile_count(emitter: &mut WasmEmitter) {
         i32_const(0); local_set(4); // pos
         local_get(1); i32_load(0); local_set(5); // sub_len
         local_get(5); i32_eqz;
-        if_i64; i64_const(0);
+        // Empty pattern: native `s.matches("").count()` == s.chars().count() + 1
+        // (one empty match at every char boundary, including the end).
+        if_i64; local_get(0); call(emitter.rt.string.char_count); i64_const(1); i64_add;
         else_;
           block_empty; loop_empty;
             local_get(0); local_get(4); local_get(0); i32_load(0);
