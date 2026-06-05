@@ -1,0 +1,36 @@
+// fan.map with an INLINE-lambda callback whose Result wrapper hides the param's
+// use site, e.g. `(x) => ok(x * 10)`. This is the shape that diverged: the named
+// callback in fan_deterministic.almd (`(x) => dbl(x)`) pins x:Int through dbl's
+// signature, but an inline `ok(x * 10)` lambda left x as a free var -> Ty::Unknown
+// in the IR. The WASM closure registration then read x as i32 while the body
+// emitted i64 for `x * 10`, so the module FAILED the validator (i32 != i64) and
+// never built. Native was fine. The fix pins the callback param to the list
+// element type unconditionally in the checker (fan.map type rule). All cases here
+// must build AND produce byte-identical output on native and wasm.
+effect fn main() -> Unit = {
+  // Bare inline ok(...) over Int — the original break (i64 payload behind a Result).
+  let tens = fan.map([1, 2, 3], (x) => ok(x * 10))
+  println("tens=" + int.to_string(list.len(tens)) + ":"
+    + int.to_string(tens[0]) + "," + int.to_string(tens[1]) + "," + int.to_string(tens[2]))
+
+  // Inline lambda that captures an outer Int.
+  let factor = 100
+  let scaled = fan.map([1, 2], (x) => ok(x * factor))
+  println("scaled=" + int.to_string(scaled[0]) + "," + int.to_string(scaled[1]))
+
+  // Inline lambda whose Result CHANGES the element type (Int -> String).
+  let named = fan.map([7, 8], (x) => ok("n" + int.to_string(x)))
+  println("named=" + named[0] + "|" + named[1])
+
+  // Inline lambda over a String list (no i64 payload — control for the type axis).
+  let banged = fan.map(["a", "b"], (s) => ok(s + "!"))
+  println("banged=" + banged[0] + "," + banged[1])
+
+  // Inline lambda with a nested closure in the body, still ok-wrapped.
+  let nested = fan.map([1, 2, 3], (x) => {
+    let bump = (y) => y + x
+    ok(bump(1000))
+  })
+  println("nested=" + int.to_string(nested[0]) + ","
+    + int.to_string(nested[1]) + "," + int.to_string(nested[2]))
+}

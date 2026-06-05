@@ -990,6 +990,14 @@ pub fn infer_var_type_from_body(body: &IrExpr, var: VarId) -> Option<Ty> {
         IrExprKind::Match { subject, arms } =>
             infer_var_type_from_body(subject, var)
                 .or_else(|| arms.iter().find_map(|a| infer_var_type_from_body(&a.body, var))),
+        // Look through Result/Option constructors so a wrapped body like
+        // `ok(x * 10)` or `some(x * 10)` still exposes `x`'s use site. Without
+        // this, a callback whose param type the checker failed to pin would have
+        // no body-derived fallback either.
+        IrExprKind::ResultOk { expr }
+        | IrExprKind::ResultErr { expr }
+        | IrExprKind::OptionSome { expr } =>
+            infer_var_type_from_body(expr, var),
         _ => None,
     }
 }
