@@ -471,57 +471,18 @@ pub(super) fn compile_int_parse(emitter: &mut WasmEmitter) {
         });
     };
 
-    // Emit `is_ascii_ws(byte_local)` → i32 (1 if whitespace) on the stack.
-    // Matches Rust char::is_whitespace for ASCII: {0x09..=0x0D, 0x20}.
-    let push_is_ws = |f: &mut Function, byte_local: u32| {
-        wasm!(f, {
-            // byte == 0x20
-            local_get(byte_local); i32_const(0x20); i32_eq;
-            // (byte >= 0x09) & (byte <= 0x0D)
-            local_get(byte_local); i32_const(0x09); i32_ge_u;
-            local_get(byte_local); i32_const(0x0D); i32_le_u;
-            i32_and;
-            i32_or;
-        });
-    };
-
     // len = s.len  (byte length lives at the LEN field, offset 0)
     wasm!(f, {
         local_get(0); i32_load(0); local_set(1);
     });
 
-    // ── Trim leading ASCII whitespace: i = 0; while i < len && is_ws(s[i]): i++ ──
+    // Trim leading + trailing Unicode whitespace (matches native s.trim().parse),
+    // codepoint-aware via the shared __is_unicode_ws helpers. i=cursor(2), end=3,
+    // string ptr=0, scratch q=5.
     wasm!(f, { i32_const(0); local_set(2); });
-    wasm!(f, { block_empty; loop_empty;
-        local_get(2); local_get(1); i32_ge_u; br_if(1); // i >= len → stop
-    });
-    load_byte(&mut f, 2, 5);
-    push_is_ws(&mut f, 5);
-    wasm!(f, {
-        i32_eqz; br_if(1);                              // not ws → stop
-        local_get(2); i32_const(1); i32_add; local_set(2);
-        br(0);
-        end; end;
-    });
-
-    // ── Trim trailing ASCII whitespace: end = len; while end > i && is_ws(s[end-1]): end-- ──
+    super::rt_string::emit_trim_forward(&mut f, emitter, 2, 1);
     wasm!(f, { local_get(1); local_set(3); });
-    wasm!(f, { block_empty; loop_empty;
-        local_get(3); local_get(2); i32_le_u; br_if(1); // end <= i → stop
-    });
-    // byte = s[end-1]
-    wasm!(f, {
-        local_get(0); i32_const(data_off); i32_add;
-        local_get(3); i32_add; i32_const(1); i32_sub;
-        i32_load8_u(0); local_set(5);
-    });
-    push_is_ws(&mut f, 5);
-    wasm!(f, {
-        i32_eqz; br_if(1);                              // not ws → stop
-        local_get(3); i32_const(1); i32_sub; local_set(3);
-        br(0);
-        end; end;
-    });
+    super::rt_string::emit_trim_backward(&mut f, emitter, 3, 2, 5);
 
     // ── Empty after trim → "cannot parse integer from empty string" ──
     wasm!(f, { local_get(2); local_get(3); i32_ge_u; if_empty; });

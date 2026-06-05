@@ -184,6 +184,10 @@ pub struct StringRuntime {
     pub is_alpha: u32,
     pub is_alnum: u32,
     pub is_whitespace: u32,
+    /// `is_unicode_ws(scalar) -> i32`: 1 iff `scalar` has the Unicode White_Space
+    /// property (Rust `char::is_whitespace`). The single source of truth for all
+    /// trim / is_whitespace / parse-trim sites.
+    pub is_unicode_ws: u32,
     pub is_upper: u32,
     pub is_lower: u32,
     pub cmp: u32,
@@ -489,7 +493,7 @@ impl WasmEmitter {
                     replace_first: 0, last_index_of: 0,
                     strip_prefix: 0, strip_suffix: 0,
                     is_digit: 0, is_alpha: 0, is_alnum: 0,
-                    is_whitespace: 0, is_upper: 0, is_lower: 0,
+                    is_whitespace: 0, is_unicode_ws: 0, is_upper: 0, is_lower: 0,
                     cmp: 0,
                     char_count: 0,
                     run_length_encode: 0,
