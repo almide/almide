@@ -260,6 +260,14 @@ fn compile_and_run_wasm_test(test_file: &str, tmp_dir: &std::path::Path) -> Wasm
     almide::optimize::optimize_program(&mut ir_program);
     almide::mono::monomorphize(&mut ir_program);
     if prof { marks.push(("opt_mono", std::time::Instant::now())); }
+    // fan.timeout has no wall clock on WASM (runs the thunk to completion); warn.
+    if almide::codegen::program_uses_fan_timeout(&ir_program) {
+        eprintln!(
+            "warning: fan.timeout uses a wall clock, which the WASM target has none of — \
+             on WASM the thunk runs to completion and the timeout never elapses, so its result \
+             can differ from native. fan.timeout is excluded from the cross-target equivalence guarantee."
+        );
+    }
     let bytes = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         match almide::codegen::codegen(&mut ir_program, almide::codegen::pass::Target::Wasm) {
             almide::codegen::CodegenOutput::Binary(b) => b,

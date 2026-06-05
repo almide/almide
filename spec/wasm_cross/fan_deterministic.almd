@@ -1,8 +1,9 @@
-// fan.map / fan.any / fan.settle DETERMINISTIC contract (native == wasm).
-// All cases succeed (exit 0). fan.race / fan.timeout are deliberately excluded
-// (race is wall-clock nondeterministic; both are deferred). The error paths
-// (element-Err, all-fail) live in fan_map_err.almd / fan_any_allfail.almd, which
-// terminate with a defined "Error: <msg>" + exit 1 on both targets.
+// fan.map / fan.race / fan.any / fan.settle DETERMINISTIC contract (native == wasm).
+// All cases succeed (exit 0). fan.race is now thunk[0]'s settled result in LIST
+// ORDER (no longer wall-clock), so it joins the gate; only fan.timeout stays
+// excluded (it is a wall-clock effect with no portable meaning). The error paths
+// (element-Err, all-fail, race head-Err) live in fan_map_err.almd / fan_any_allfail.almd,
+// which terminate with a defined "Error: <msg>" + exit 1 on both targets.
 effect fn dbl(x: Int) -> Result[Int, String] = ok(x * 2)
 effect fn label(x: Int) -> Result[String, String] = ok("n" + int.to_string(x))
 effect fn ok_n(x: Int) -> Result[Int, String] = ok(x)
@@ -23,6 +24,12 @@ effect fn main() -> Unit = {
   // fan.map over an empty list.
   let empty = fan.map([], (x: Int) => dbl(x))
   println("empty=" + int.to_string(list.len(empty)))
+
+  // fan.race: the FIRST thunk in list order to SETTLE = thunk[0]'s result
+  // (deterministic, NOT wall-clock fastest). Differs from fan.any: race takes the
+  // head even if it is the only one tried; any skips failures.
+  let raced = fan.race([() => ok_n(10), () => ok_n(20), () => ok_n(30)])
+  println("race=" + int.to_string(raced))
 
   // fan.any: FIRST Ok in list order wins (deterministic, NOT wall-clock).
   let first = fan.any([() => fail_n("skip"), () => ok_n(7), () => ok_n(99)])

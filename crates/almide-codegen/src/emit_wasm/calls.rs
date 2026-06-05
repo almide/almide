@@ -1500,36 +1500,42 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(xs);
             }
             "race" => {
-                // fan.race(fns: List[() -> Result[T,E]]) → T
-                // Sequential: call first fn, unwrap result
-                // fns is a list of closures. Call fns[0]().
+                // fan.race(fns: List[() -> Result[T,E]]) → Result[T, String]: the FIRST
+                // thunk in LIST ORDER to SETTLE = fns[0]'s Result (Ok or Err),
+                // deterministic (NOT wall-clock). Distinct from fan.any (which SKIPS
+                // failures): race leaves fns[0]'s Result as-is for the standard
+                // effectful auto-unwrap. An empty list yields a DEFINED Err (no OOB read).
                 let list_scratch = self.scratch.alloc_i32();
+                let closure = self.scratch.alloc_i32();
+                let out = self.scratch.alloc_i32();
+                let fail_msg = self.emitter.intern_string("fan.race: no candidates") as i32;
+                let data_off = self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32;
                 self.emit_expr(&args[0]);
                 wasm!(self.func, {
                     local_set(list_scratch);
-                    // Get first closure: fns[0]
-                    local_get(list_scratch); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add; i32_load(0);
-                });
-                // Call the closure (0-arg + env)
-                let res_scratch = self.scratch.alloc_i32();
-                wasm!(self.func, {
-                    local_set(res_scratch); // closure ptr
-                    local_get(res_scratch); i32_load(4); // env
-                    local_get(res_scratch); i32_load(0); // table_idx
+                    local_get(list_scratch); i32_load(0); i32_eqz; // len == 0
+                    if_empty;
+                      // Err("fan.race: no candidates"): [tag:1][msg@4]
+                      i32_const(8); call(self.emitter.rt.alloc); local_set(out);
+                      local_get(out); i32_const(1); i32_store(0);
+                      local_get(out); i32_const(fail_msg); i32_store(4);
+                    else_;
+                      // out = fns[0]()
+                      local_get(list_scratch); i32_const(data_off); i32_add; i32_load(0); local_set(closure);
+                      local_get(closure); i32_load(4); // env
+                      local_get(closure); i32_load(0); // table_idx
                 });
                 {
                     let ti = self.emitter.register_type(vec![ValType::I32], vec![ValType::I32]);
                     wasm!(self.func, { call_indirect(ti, 0); });
                 }
-                // Unwrap Result
                 wasm!(self.func, {
-                    local_set(res_scratch);
-                    local_get(res_scratch); i32_load(0); i32_const(0); i32_ne;
-                    if_empty; local_get(res_scratch); return_; end;
-                    local_get(res_scratch);
+                      local_set(out);
+                    end;
+                    local_get(out);
                 });
-                self.emit_load_at(result_ty, 4);
-                self.scratch.free_i32(res_scratch);
+                self.scratch.free_i32(out);
+                self.scratch.free_i32(closure);
                 self.scratch.free_i32(list_scratch);
             }
             "any" => {

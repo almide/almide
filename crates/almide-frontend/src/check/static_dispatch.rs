@@ -110,7 +110,13 @@ impl Checker {
                         return Some(Ty::result(Ty::list(result_elem), Ty::String));
                     }
                     "race" => {
-                        // fan.race(thunks) -> T where thunks: List[Fn() -> T]
+                        // fan.race(thunks) -> Result[T, String] — the FIRST thunk in
+                        // LIST ORDER to SETTLE (deterministic, NOT wall-clock): thunk[0]'s
+                        // result, Ok(v) or Err(e). Distinct from fan.any, which SKIPS
+                        // failures to find the first Ok. EFFECTFUL like fan.any: a head Err
+                        // is auto-`?` propagated to the unified main-error exit. (The
+                        // wall-clock "fastest wins" has no portable, deterministic meaning;
+                        // every async model's deterministic kernel is source/list order.)
                         if arg_tys.len() != 1 {
                             self.emit(super::err(
                                 format!("fan.race() expects 1 argument but got {}", arg_tys.len()),
@@ -119,7 +125,7 @@ impl Checker {
                             return Some(Ty::Unknown);
                         }
                         let list_ty = resolve_ty(&arg_tys[0], &self.uf);
-                        return Some(unwrap_list_fn_return(&list_ty));
+                        return Some(Ty::result(unwrap_list_fn_return(&list_ty), Ty::String));
                     }
                     "any" => {
                         // fan.any(thunks) -> Result[T, String] — try thunks in LIST
