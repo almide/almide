@@ -20,23 +20,22 @@ pub fn almide_rt_fan_map<A, B>(
     items.into_iter().map(|item| f(item)).collect()
 }
 
-pub fn almide_rt_fan_race<T: Send + 'static>(
-    thunks: Vec<impl Fn() -> Result<T, String> + Send + Sync>,
-) -> T {
-    use std::sync::mpsc;
-    let (tx, rx) = mpsc::channel();
-    std::thread::scope(|s| {
-        for thunk in &thunks {
-            let tx = tx.clone();
-            s.spawn(move || {
-                if let Ok(val) = thunk() {
-                    let _ = tx.send(val);
-                }
-            });
-        }
-        drop(tx);
-        rx.recv().unwrap()
-    })
+// `fan.race` returns the FIRST thunk in LIST ORDER to SETTLE — i.e. thunk[0]'s
+// `Result` (Ok or Err), DETERMINISTIC (not wall-clock fastest, which is neither
+// reproducible nor expressible on the single-threaded WASM target). It differs
+// from `fan.any`, which SKIPS failures to find the first Ok: race surfaces
+// thunk[0]'s Err. Since fan thunks are pure (capturing a `var` is a compile
+// error), the non-head thunks are observably irrelevant, so evaluating only the
+// head is equivalent to "start all, take the first to settle". An empty list is
+// a defined Err, never a panic. EFFECTFUL: the caller's auto-`?` routes a head
+// Err to the unified main-error exit, byte-identical to the wasm path.
+pub fn almide_rt_fan_race<T>(
+    thunks: Vec<impl Fn() -> Result<T, String>>,
+) -> Result<T, String> {
+    match thunks.into_iter().next() {
+        Some(thunk) => thunk(),
+        None => Err("fan.race: no candidates".to_string()),
+    }
 }
 
 // `fan.any` tries the thunks in LIST ORDER and returns the FIRST `Ok`

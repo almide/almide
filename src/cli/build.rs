@@ -262,6 +262,17 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool) {
         std::process::exit(1);
     }
 
+    // fan.timeout is a wall-clock effect; the WASM target has no clock, so the
+    // thunk always runs to completion and the timeout never elapses. Warn loudly
+    // at build time rather than diverging silently from native.
+    if almide::codegen::program_uses_fan_timeout(&ir_program) {
+        eprintln!(
+            "warning: fan.timeout uses a wall clock, which the WASM target has none of — \
+             on WASM the thunk runs to completion and the timeout never elapses, so its result \
+             can differ from native. fan.timeout is excluded from the cross-target equivalence guarantee."
+        );
+    }
+
     // Codegen (nanopass pipeline + WASM binary emit)
     let bytes = match almide::codegen::codegen(&mut ir_program, almide::codegen::pass::Target::Wasm) {
         almide::codegen::CodegenOutput::Binary(b) => b,

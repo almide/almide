@@ -142,6 +142,47 @@ pub fn codegen(program: &mut IrProgram, target: Target) -> CodegenOutput {
     codegen_with(program, target, &CodegenOptions::default())
 }
 
+/// True iff the program calls `fan.timeout`. `fan.timeout` is a wall-clock effect
+/// (no portable, deterministic cross-target meaning, like the fs/clock IO ops). On
+/// the WASM target there is no clock, no scheduler, and no threads, so the thunk
+/// simply runs to completion and the timeout NEVER elapses. The CLI uses this to
+/// warn at build time when emitting WASM, so the divergence is loud, not silent.
+pub fn program_uses_fan_timeout(program: &IrProgram) -> bool {
+    use almide_ir::visit::{IrVisitor, walk_expr, walk_stmt};
+    use almide_ir::{CallTarget, IrExprKind};
+    struct Scan {
+        found: bool,
+    }
+    impl IrVisitor for Scan {
+        fn visit_expr(&mut self, expr: &almide_ir::IrExpr) {
+            if self.found {
+                return;
+            }
+            if let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, .. } = &expr.kind {
+                if module.as_str() == "fan" && func.as_str() == "timeout" {
+                    self.found = true;
+                    return;
+                }
+            }
+            walk_expr(self, expr);
+        }
+        fn visit_stmt(&mut self, stmt: &almide_ir::IrStmt) {
+            if self.found {
+                return;
+            }
+            walk_stmt(self, stmt);
+        }
+    }
+    let mut scan = Scan { found: false };
+    for func in &program.functions {
+        scan.visit_expr(&func.body);
+        if scan.found {
+            return true;
+        }
+    }
+    false
+}
+
 /// AlmidePerceusBelt: type-state verified program.
 ///
 /// Construction requires passing Perceus RC verification (Lean 4 certified).

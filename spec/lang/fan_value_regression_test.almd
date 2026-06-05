@@ -49,9 +49,9 @@ test "fan.timeout result supports ?? and ==" {
 // distinct anonymous closure type: two of them cannot share one `Vec<impl Fn>`
 // (E0308), and a captured closure VALUE is `Rc<dyn Fn>`, neither Send nor Sync
 // (E0277). The native runner (`almide test --target rust`) is what exercises
-// this — the wasm runner table-dispatches closures and never hit the bug. Each
-// case is crafted to a target-stable value (race: every winner equal; any: a
-// lone success) since native races by wall-clock while wasm runs list order.
+// this — the wasm runner table-dispatches closures and never hit the bug.
+// fan.race is now deterministic on BOTH targets (thunk[0]'s settled Result, a
+// Result[T, E] in a test block), so a head thunk is the stable winner.
 
 test "fan.race over capturing thunks (native E0308)" {
   let a = 4
@@ -60,7 +60,7 @@ test "fan.race over capturing thunks (native E0308)" {
     () => succeed(a + 5),
     () => succeed(b + 4)
   ]);
-  assert_eq(w, 9)
+  assert_eq(w, ok(9))   // thunk[0] = a + 5 = 9, deterministically
 }
 
 test "fan.any over capturing thunks picks the lone success" {
