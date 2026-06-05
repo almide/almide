@@ -1385,6 +1385,31 @@ fn render_runtime_call(ctx: &RenderContext, symbol: &almide_base::intern::Sym, a
     format!("{}({})", symbol.as_str(), args_str)
 }
 
+/// A COMPOUND interpolation part — one whose value has no `Display` and must be
+/// rendered via `AlmideRepr` to its Almide-literal form. Scalars (numbers,
+/// `Bool`, `Unit`) and bare `String` keep their plain `{}` Display path so the
+/// emitted code for existing programs is byte-identical.
+///
+/// Scope (this PR — cluster-H compound interpolation): the STRUCTURAL types that
+/// are backed by an `AlmideRepr` impl on BOTH targets — `List`, `Map`, `Set`,
+/// `Option`, `Result`, and `Tuple`, recursively composed. User-defined records
+/// and variants are deliberately left on the Display path here: to repr them we
+/// would also need the WASM record/variant field-walk emitters, and rendering
+/// them native-only would re-introduce a native↔WASM divergence (the exact bug
+/// class this work closes). They stay scoped out until both targets back them.
+fn ty_needs_repr(ty: &Ty) -> bool {
+    use TypeConstructorId::{List, Map, Set, Option as OptionId, Result as ResultId};
+    match ty {
+        // Backed container constructors → repr.
+        Ty::Applied(id, _) => matches!(id, List | Map | Set | OptionId | ResultId),
+        // Tuples → repr.
+        Ty::Tuple(..) => true,
+        // Everything else (scalars, String, Bool, Unit, records, variants,
+        // Named, Fn, Unknown, …) stays on the Display path.
+        _ => false,
+    }
+}
+
 fn render_string_interp(ctx: &RenderContext, parts: &[IrStringPart]) -> String {
     let mut fmt_parts = Vec::new();
     let mut arg_parts = Vec::new();
@@ -1402,7 +1427,18 @@ fn render_string_interp(ctx: &RenderContext, parts: &[IrStringPart]) -> String {
             }
             IrStringPart::Expr { expr } => {
                 fmt_parts.push("{}".to_string());
-                arg_parts.push(render_expr(ctx, expr));
+                // A COMPOUND part (List/Map/Set/Tuple/Option/Result/record/variant)
+                // has no `Display`; route it through the `AlmideRepr` trait so it
+                // renders to its Almide-literal form (`[1, 2, 3]`, `["a": 1]`, …).
+                // Bare String/Int/Float/Bool keep the plain `{}` Display path so
+                // existing programs' emitted code is byte-identical. `almide_repr`
+                // takes `&T` and has ref-forwarding impls, so `&(...)` is correct
+                // whether the part renders to an owned value or an existing borrow.
+                if ty_needs_repr(&expr.ty) {
+                    arg_parts.push(format!("almide_repr(&({}))", render_expr(ctx, expr)));
+                } else {
+                    arg_parts.push(render_expr(ctx, expr));
+                }
             }
         }
     }

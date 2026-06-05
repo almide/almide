@@ -1,0 +1,83 @@
+// compound_repr_interp_test — `"${compound}"` renders a value to its
+// Almide-literal form (List/Map/Set/Tuple/Option/Result + nesting), identical
+// on native and WASM. Records/variants are scoped out (Display path), so they
+// are not asserted here.
+
+// ── List ──
+test "repr list of ints" {
+  assert_eq("${[1, 2, 3]}", "[1, 2, 3]")
+}
+
+test "repr empty list" {
+  let xs: List[Int] = [];
+  assert_eq("${xs}", "[]")
+}
+
+// ── Map (brackets, Swift-style) ──
+test "repr map string keys" {
+  assert_eq("${["a": 1, "b": 2]}", "[\"a\": 1, \"b\": 2]")
+}
+
+test "repr map int keys" {
+  let m: Map[Int, String] = [1: "x", 2: "y"];
+  assert_eq("${m}", "[1: \"x\", 2: \"y\"]")
+}
+
+test "repr empty map" {
+  let m: Map[String, Int] = [:];
+  assert_eq("${m}", "[:]")
+}
+
+// ── Set (constructor form, no set literal) ──
+test "repr set dedups in insertion order" {
+  assert_eq("${set.from_list([3, 1, 2, 1])}", "set.from_list([3, 1, 2])")
+}
+
+// ── Tuple ──
+test "repr heterogeneous tuple" {
+  assert_eq("${(1, "x", true)}", "(1, \"x\", true)")
+}
+
+// ── Option ──
+test "repr option some" {
+  let o: Option[Int] = some(5);
+  assert_eq("${o}", "some(5)")
+}
+
+test "repr option none" {
+  let o: Option[Int] = none;
+  assert_eq("${o}", "none")
+}
+
+// ── Result ──
+test "repr result ok" {
+  let r: Result[Int, String] = ok(7);
+  assert_eq("${r}", "ok(7)")
+}
+
+test "repr result err" {
+  let r: Result[Int, String] = err("bad");
+  assert_eq("${r}", "err(\"bad\")")
+}
+
+// ── Nesting ──
+test "repr nested list of maps" {
+  assert_eq("${[["a": [1, 2]], ["b": [3]]]}", "[[\"a\": [1, 2]], [\"b\": [3]]]")
+}
+
+// ── String escaping inside a container ──
+test "repr escapes string inside container" {
+  let xs: List[String] = ["a\"b", "c\td", "e\\f"];
+  assert_eq("${xs}", "[\"a\\\"b\", \"c\\td\", \"e\\\\f\"]")
+}
+
+// ── Bare string interpolation stays RAW (unchanged) ──
+test "bare string interpolation is not quoted" {
+  let s = "hello";
+  assert_eq("${s}", "hello")
+}
+
+// ── Floats inside a container use the shortest-round-trip path ──
+test "repr floats inside list" {
+  assert_eq("${[0.1, 0.2]}", "[0.1, 0.2]")
+}

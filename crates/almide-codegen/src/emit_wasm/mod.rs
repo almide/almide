@@ -27,6 +27,8 @@ mod rt_string_case;
 mod rt_numeric;
 mod rt_dragon;
 mod rt_dec2flt;
+mod rt_repr;
+mod calls_string_repr;
 mod expressions;
 mod stdlib_dispatch;
 mod calls;
@@ -332,6 +334,11 @@ pub struct RuntimeFuncs {
     /// Dragon4 shortest-decimal helper functions (float.to_string).
     pub dragon: rt_dragon::DragonRuntime,
     pub decfloat: rt_dec2flt::DecFloatRuntime,
+    /// __repr_str(s: i32) -> i32: double-quote + escape a string for the
+    /// Almide-literal repr of a string INSIDE a container (compound string
+    /// interpolation). Escape set mirrors `almide_rt_value_stringify` and the
+    /// native `almide_repr_str`: `\\ \" \n \r \t`.
+    pub repr_str: u32,
 }
 
 /// Import descriptor for WASM import section.
@@ -547,6 +554,7 @@ impl WasmEmitter {
                 init_preopen_dirs: 0,
                 dragon: rt_dragon::DragonRuntime::default(),
                 decfloat: rt_dec2flt::DecFloatRuntime::default(),
+                repr_str: 0,
             },
             heap_ptr_global: 0,
             free_list_global: 1,

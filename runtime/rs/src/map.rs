@@ -67,6 +67,27 @@ impl<K: PartialEq, V> AlmideMap<K, V> {
     }
 }
 
+// Almide-literal repr for compound string interpolation: `["a": 1, "b": 2]`
+// (brackets, Swift-style), empty → `[:]`, keys rendered in their own literal
+// form (string keys quoted, int keys bare). Pair order = insertion order, so the
+// output matches the wasm compact-ordered-dict walk byte-for-byte.
+impl<K: AlmideRepr, V: AlmideRepr> AlmideRepr for AlmideMap<K, V> {
+    fn almide_repr(&self) -> String {
+        if self.entries.is_empty() {
+            return "[:]".to_string();
+        }
+        let mut o = String::from("[");
+        for (i, (k, v)) in self.entries.iter().enumerate() {
+            if i > 0 { o.push_str(", "); }
+            o.push_str(&k.almide_repr());
+            o.push_str(": ");
+            o.push_str(&v.almide_repr());
+        }
+        o.push(']');
+        o
+    }
+}
+
 // Map equality is order-INDEPENDENT (same size + same key/value pairs), matching
 // std HashMap and the wasm structural Map `==`.
 impl<K: PartialEq, V: PartialEq> PartialEq for AlmideMap<K, V> {

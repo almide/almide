@@ -52,6 +52,22 @@ impl<T: PartialEq> AlmideSet<T> {
     }
 }
 
+// Almide-literal repr for compound string interpolation. Almide has no set
+// literal, so a set renders in CONSTRUCTOR form `set.from_list([a, b, c])`
+// (empty → `set.from_list([])`). Element order = insertion order, matching the
+// wasm dense-list Set walk byte-for-byte.
+impl<T: AlmideRepr> AlmideRepr for AlmideSet<T> {
+    fn almide_repr(&self) -> String {
+        let mut o = String::from("set.from_list([");
+        for (i, e) in self.items.iter().enumerate() {
+            if i > 0 { o.push_str(", "); }
+            o.push_str(&e.almide_repr());
+        }
+        o.push_str("])");
+        o
+    }
+}
+
 // Set equality is order-INDEPENDENT (same size + same members), matching both
 // std HashSet semantics and the wasm structural Set `==`.
 impl<T: PartialEq> PartialEq for AlmideSet<T> {

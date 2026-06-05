@@ -785,8 +785,16 @@ impl FuncCompiler<'_> {
                         });
                     }
                     _ => {
-                        // Fallback: emit the expression (already a string pointer or unsupported)
+                        // COMPOUND part (List/Map/Set/Tuple/Option/Result): walk it
+                        // to its Almide-literal repr, byte-identical with native. The
+                        // walk is type-driven (see `emit_repr_value`); `emit_expr`
+                        // leaves the value on the stack, then the repr consumes it.
+                        // The old fallback treated a compound's HEAP POINTER as a
+                        // string pointer → silent garbage. Records/variants are scoped
+                        // out (the walker leaves them on the Display path) so they do
+                        // not reach here.
                         self.emit_expr(expr);
+                        self.emit_repr_value(&expr.ty);
                     }
                 }
             }
