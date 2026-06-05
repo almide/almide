@@ -1,0 +1,123 @@
+// Cross-target regex engine corpus (headline features).
+//
+// Each line prints a single observable result; the wasm_cross gate runs this on
+// native and wasm and asserts byte-identical stdout. The native engine
+// (runtime/rs/src/regex.rs) is the oracle. Covers: alternation, escape atoms
+// (incl. negated + escaped literals), class escapes ([\d] / [^\d]), capture
+// contents incl. optional-miss, multibyte '.' / class on 日本語, anchors,
+// quantifiers, replace (verbatim), split edges, full_match, find_all, empty
+// alternation arms (leading/trailing/middle), and replace over empty matches at
+// end-of-string (native end-index guard).
+import regex
+
+fn b2s(b: Bool) -> String = if b then "T" else "F"
+
+fn ostr(o: Option[String]) -> String =
+  match o { some(s) => s, none => "NONE" }
+
+fn olist(o: Option[List[String]]) -> String =
+  match o { some(xs) => "[" + string.join(xs, "|") + "]", none => "NONE" }
+
+fn main() -> Unit = {
+  // ── alternation ──
+  println(b2s(regex.is_match("a|b", "zzb")))
+  println(b2s(regex.is_match("foo|bar|baz", "xbazy")))
+  println(ostr(regex.find("(a|b)+", "qabbaq")))
+  println(b2s(regex.full_match("a|bb|ccc", "ccc")))
+  println(ostr(regex.find("gr(a|e)y", "grey")))
+
+  // ── escape atoms ──
+  println(b2s(regex.is_match("\\.", "a.b")))
+  println(b2s(regex.is_match("\\.", "axb")))
+  println(ostr(regex.find("\\d+", "ab123cd")))
+  println(ostr(regex.find("\\D+", "ab123cd")))
+  println(ostr(regex.find("\\w+", "  hi_there!")))
+  println(ostr(regex.find("\\W+", "ab!!cd")))
+  println(ostr(regex.find("\\s+", "a   b")))
+  println(ostr(regex.find("\\S+", "   word ")))
+  println(b2s(regex.is_match("a\\+b", "a+b")))
+  println(b2s(regex.is_match("a\\+b", "aab")))
+
+  // ── class escapes ──
+  println(ostr(regex.find("[\\d]+", "xx42yy")))
+  println(b2s(regex.is_match("[^\\d]", "5")))
+  println(b2s(regex.is_match("[^\\d]", "a")))
+  println(ostr(regex.find("[\\w]+", "@@abc@@")))
+  println(ostr(regex.find("[a-z\\d]+", "AB3cd9!!")))
+
+  // ── captures (incl. optional-miss) ──
+  println(olist(regex.captures("(\\d+)-(\\d+)", "12-34")))
+  println(olist(regex.captures("(a)(b)(c)", "abc")))
+  println(olist(regex.captures("(x)?(y)", "y")))
+  println(olist(regex.captures("(\\w+)@(\\w+)", "user@host")))
+  println(olist(regex.captures("(\\d+)", "hello")))
+  println(olist(regex.captures("no groups", "no groups")))
+
+  // ── multibyte '.' / class / anchors ──
+  println(ostr(regex.find(".", "日本語")))
+  println(ostr(regex.find("..", "日本語")))
+  println(b2s(regex.is_match("本", "日本語")))
+  println(ostr(regex.find("[本語]+", "日本語!")))
+  println(b2s(regex.is_match("^日", "日本語")))
+  println(b2s(regex.is_match("語$", "日本語")))
+  println(b2s(regex.is_match("a.b", "a\nb")))
+
+  // ── quantifiers ──
+  println(ostr(regex.find("a*", "aaab")))
+  println(ostr(regex.find("colou?r", "color")))
+  println(ostr(regex.find("colou?r", "colour")))
+  println(ostr(regex.find("a+", "baaa")))
+
+  // ── replace (verbatim rep) ──
+  println(regex.replace("[0-9]+", "a1b22c333", "#"))
+  println(regex.replace("a", "aaa", "$1"))
+  println(regex.replace_first("[0-9]+", "a1b2c3", "X"))
+  println(regex.replace("[0-9]+", "no digits", "X"))
+
+  // ── split edges ──
+  println("[" + string.join(regex.split(",", "a,,b,"), "|") + "]")
+  println("[" + string.join(regex.split("[,;]", "a,b;c"), "|") + "]")
+  println("[" + string.join(regex.split(",", "hello"), "|") + "]")
+  println("[" + string.join(regex.split("", "abc"), "|") + "]")
+  println("[" + string.join(regex.split("\\s+", "hello   world  foo"), "|") + "]")
+
+  // ── full_match / find_all ──
+  println(b2s(regex.full_match("[0-9]+", "123")))
+  println(b2s(regex.full_match("[0-9]+", "abc123")))
+  println(b2s(regex.full_match("", "")))
+  println("[" + string.join(regex.find_all("[0-9]+", "a1b22c333"), "|") + "]")
+  println("[" + string.join(regex.find_all("\\w+", "one two  three"), "|") + "]")
+  println("[" + string.join(regex.find_all("[本語]", "日本語日本"), "|") + "]")
+
+  // ── empty alternation arms (leading / trailing / middle / triple / nested) ──
+  // An empty arm is an empty Seq that matches length-0 at any position. wasm
+  // previously dropped TRAILING empty arms (parser appended a spurious atom).
+  println(b2s(regex.is_match("a|", "zzz")))       // trailing empty → T
+  println(b2s(regex.is_match("|a", "zzz")))       // leading empty  → T
+  println(b2s(regex.is_match("a||b", "zzz")))     // middle empty   → T
+  println(b2s(regex.is_match("a|||", "zzz")))     // triple → T
+  println(ostr(regex.find("a|", "bza")))          // empty match at pos 0 → <>
+  println(ostr(regex.find("|a", "bza")))          // <>
+  println(b2s(regex.full_match("a|", "")))        // empty arm full-matches "" → T
+  println("[" + string.join(regex.find_all("a|", "bza"), "|") + "]")  // zero-width loop
+  println("[" + string.join(regex.split("a|", "abc"), "|") + "]")
+  println(olist(regex.captures("(a|)", "b")))     // group with empty arm → [""]
+  println(olist(regex.captures("(|a)", "b")))     // leading-empty group  → [""]
+  println(b2s(regex.is_match("(a|)*", "z")))      // quantified empty-arm group → T
+
+  // ── replace / replace_first over EMPTY matches (native end-index guard) ──
+  // `x*` / `a*` / empty pattern match length-0 at end-of-string; native used to
+  // panic indexing chars[len]. Both targets now insert the rep at each zero-width
+  // position and skip the missing end char.
+  println("<" + regex.replace("x*", "ab", "-") + ">")        // -a-b-
+  println("<" + regex.replace("", "ab", "-") + ">")          // empty pattern
+  println("<" + regex.replace("a*", "aaa", "-") + ">")       // greedy then empty-at-end
+  println("<" + regex.replace("a*", "bbb", "-") + ">")       // all zero-width
+  println("<" + regex.replace("b?", "abc", "-") + ">")       // optional zero-width mix
+  println("<" + regex.replace("a|", "abc", "-") + ">")       // empty arm
+  println("<" + regex.replace("x*", "", "-") + ">")          // empty match on empty text
+  println("<" + regex.replace("x*", "本a", "-") + ">")       // multibyte zero-width
+  println("<" + regex.replace_first("x*", "ab", "-") + ">")  // replace_first empty-at-start
+  println("<" + regex.replace_first("a*", "aaa", "-") + ">")
+  println("<" + regex.replace_first("a|", "abc", "-") + ">")
+}

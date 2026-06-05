@@ -1,6 +1,7 @@
-// hex stdlib tests
+// hex + base64 stdlib tests
 
 import hex
+import base64
 
 test "hex encode lowercase" {
   let b = bytes.from_string("Hi")
@@ -45,5 +46,96 @@ test "hex decode rejects non-hex chars" {
   match hex.decode("4Z") {
     ok(_) => assert(false)
     err(_) => assert(true)
+  }
+}
+
+test "hex decode error detail includes position" {
+  match hex.decode("abc") {
+    ok(_) => assert(false)
+    err(e) => assert_eq(e, "hex string has odd length: 3")
+  }
+  match hex.decode("4Z") {
+    ok(_) => assert(false)
+    err(e) => assert_eq(e, "invalid hex char at 1")
+  }
+  match hex.decode("ZZ") {
+    ok(_) => assert(false)
+    err(e) => assert_eq(e, "invalid hex char at 0")
+  }
+}
+
+// ── base64 (RFC 4648, standard + URL-safe, canonical padded form) ──
+
+test "base64 encode RFC 4648 vectors" {
+  assert_eq(base64.encode(bytes.from_string("")), "")
+  assert_eq(base64.encode(bytes.from_string("f")), "Zg==")
+  assert_eq(base64.encode(bytes.from_string("fo")), "Zm8=")
+  assert_eq(base64.encode(bytes.from_string("foo")), "Zm9v")
+  assert_eq(base64.encode(bytes.from_string("foob")), "Zm9vYg==")
+  assert_eq(base64.encode(bytes.from_string("fooba")), "Zm9vYmE=")
+  assert_eq(base64.encode(bytes.from_string("foobar")), "Zm9vYmFy")
+  assert_eq(base64.encode(bytes.from_string("Man")), "TWFu")
+  assert_eq(base64.encode(bytes.from_string("Ma")), "TWE=")
+  assert_eq(base64.encode(bytes.from_string("M")), "TQ==")
+}
+
+test "base64 decode round-trip" {
+  match base64.decode("Zm9vYmFy") {
+    ok(b) => assert_eq(hex.encode(b), "666f6f626172")
+    err(_) => assert(false)
+  }
+  match base64.decode("TWE=") {
+    ok(b) => assert_eq(hex.encode(b), "4d61")
+    err(_) => assert(false)
+  }
+}
+
+test "base64 url-safe distinguishes 62/63 symbols" {
+  // 0xFB,0xFF,0xBF → std '+/+/', url '-_-_' (both padded to multiple of 4)
+  assert_eq(base64.encode(bytes.from_list([251, 255, 191])), "+/+/")
+  assert_eq(base64.encode_url(bytes.from_list([251, 255, 191])), "-_-_")
+  match base64.decode_url("-_-_") {
+    ok(b) => assert_eq(hex.encode(b), "fbffbf")
+    err(_) => assert(false)
+  }
+}
+
+test "base64 decode error strings" {
+  match base64.decode("T*Fu") {
+    ok(_) => assert(false)
+    err(e) => assert_eq(e, "invalid base64 character")
+  }
+  match base64.decode("Q") {
+    ok(_) => assert(false)
+    err(e) => assert_eq(e, "invalid base64 length: 1")
+  }
+}
+
+// ── int.from_hex (native i64::from_str_radix oracle, with quirks) ──
+
+test "int from_hex basics and quirks" {
+  assert_eq(int.from_hex("ff") ?? -1, 255)
+  assert_eq(int.from_hex("0xff") ?? -1, 255)
+  assert_eq(int.from_hex("0x0xff") ?? -1, 255)   // repeated 0x strip
+  assert_eq(int.from_hex("-ff") ?? -1, -255)
+  assert_eq(int.from_hex("0x-ff") ?? 0, -255)    // sign after strip
+  assert_eq(int.from_hex("  ff  ") ?? -1, 255)   // trim
+}
+
+test "int from_hex rejects native-strict inputs" {
+  // case-sensitive 0x strip → '0Xff' then 'X' is an invalid digit
+  match int.from_hex("0Xff") {
+    ok(_) => assert(false)
+    err(e) => assert_eq(e, "invalid digit found in string")
+  }
+  // no underscore skipping
+  match int.from_hex("f_f") {
+    ok(_) => assert(false)
+    err(e) => assert_eq(e, "invalid digit found in string")
+  }
+  // empty after strip
+  match int.from_hex("0x") {
+    ok(_) => assert(false)
+    err(e) => assert_eq(e, "cannot parse integer from empty string")
   }
 }

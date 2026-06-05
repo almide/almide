@@ -1,0 +1,112 @@
+// Cross-target differential fixture: json get/set/remove_path edge cases.
+//
+// Native `runtime/rs/src/json.rs` path ops are the INFALLIBLE oracle. The WASM
+// `emit_wasm/rt_value.rs` path walkers had 8 divergences this locks down:
+//   1. get_path negative Index normalizes (len + i); WASM returned None.
+//   2. set_path negative Index normalizes (top + nested); WASM left unchanged.
+//   3. set_path Index over an OBJECT → no-op; WASM read pairs as an array (garbage).
+//   4. set_path Index over a SCALAR/bool/null root → no-op; WASM produced [] then trapped.
+//   5. set_path OOB Index → infallible no-op; WASM returned Err.
+//   6. remove_path negative Index normalizes (top + nested); WASM left unchanged.
+// Plus a "set then operate again" chain to prove the scalar-root case no longer
+// traps on a subsequent op.
+//
+// set_path AUTOVIVIFICATION (native `set_at_steps` Field over a non-object):
+// native REPLACES a non-object node with a fresh single-key object and seeds
+// every absent/non-object descent with `Object(vec![])` (json.rs:284,288). WASM
+// returned `Err("path error: expected object")` — a divergence. The subtle cross
+// case is Field-then-Index over an autovivified node: native's Index local no-op
+// yields the autoviv `{}` (`j.clone()`), not the untouched root and not `null`.
+
+import json
+
+fn p_get(label: String, o: Option[Value]) -> Unit = {
+  match o {
+    Some(v) => println(label + ":" + json.stringify(v)),
+    None => println(label + ":None"),
+  }
+}
+fn p_set(label: String, r: Result[Value, String]) -> Unit = {
+  match r {
+    Ok(v) => println(label + ":" + json.stringify(v)),
+    Err(e) => println(label + " err:" + e),
+  }
+}
+fn p_rm(label: String, v: Value) -> Unit = println(label + ":" + json.stringify(v))
+
+fn main() -> Unit = {
+  let arr = json.parse("[10, 20, 30]") ?? json.null()
+  let obj = json.parse("{\"a\":1,\"b\":2}") ?? json.null()
+  let nested = json.parse("{\"xs\":[10, 20, 30]}") ?? json.null()
+  let deep = json.parse("{\"xs\":[{\"k\":\"a\"},{\"k\":\"b\"},{\"k\":\"c\"}]}") ?? json.null()
+  let scalar = json.parse("42") ?? json.null()
+  let boolv = json.parse("true") ?? json.null()
+  let nullv = json.null()
+
+  // 1. get_path negative index (top + nested) and OOB → None
+  p_get("g_neg1", json.get_path(arr, json.index(json.root(), -1)))   // 30
+  p_get("g_neg3", json.get_path(arr, json.index(json.root(), -3)))   // 10
+  p_get("g_negoob", json.get_path(arr, json.index(json.root(), -5))) // None
+  p_get("g_posoob", json.get_path(arr, json.index(json.root(), 5)))  // None
+  p_get("g_nest_neg", json.get_path(nested, json.index(json.field(json.root(), "xs"), -1))) // 30
+
+  // 2. set_path negative index (top + nested)
+  p_set("s_neg", json.set_path(arr, json.index(json.root(), -1), json.from_int(99)))         // [10,20,99]
+  p_set("s_nest_neg", json.set_path(nested, json.index(json.field(json.root(), "xs"), -1), json.from_int(99))) // {"xs":[10,20,99]}
+  p_set("s_deep_neg", json.set_path(deep, json.field(json.index(json.field(json.root(), "xs"), -1), "k"), json.from_string("Z"))) // ...{"k":"Z"}
+
+  // 3/4. set_path Index over object / scalar / bool / null → no-op
+  p_set("s_idx_obj", json.set_path(obj, json.index(json.root(), 0), json.from_int(99)))    // {"a":1,"b":2}
+  p_set("s_scalar", json.set_path(scalar, json.index(json.root(), 0), json.from_int(99)))  // 42
+  p_set("s_bool", json.set_path(boolv, json.index(json.root(), 2), json.from_int(99)))     // true
+  p_set("s_null", json.set_path(nullv, json.index(json.root(), 0), json.from_int(99)))     // null
+
+  // 5. set_path OOB index → infallible no-op (not Err)
+  p_set("s_oob", json.set_path(arr, json.index(json.root(), 5), json.from_int(99)))         // [10,20,30]
+  p_set("s_negoob", json.set_path(arr, json.index(json.root(), -5), json.from_int(99)))     // [10,20,30]
+
+  // 6. remove_path negative index (top + nested) and no-op cases
+  p_rm("r_neg", json.remove_path(arr, json.index(json.root(), -1)))                          // [10,20]
+  p_rm("r_nest_neg", json.remove_path(nested, json.index(json.field(json.root(), "xs"), -1))) // {"xs":[10,20]}
+  p_rm("r_idx_obj", json.remove_path(obj, json.index(json.root(), 0)))                        // {"a":1,"b":2}
+  p_rm("r_oob", json.remove_path(arr, json.index(json.root(), 5)))                            // [10,20,30]
+  p_rm("r_deep_neg", json.remove_path(deep, json.field(json.index(json.field(json.root(), "xs"), -1), "k"))) // ...{}
+
+  // chain: set over scalar root (no-op) then operate again — must not trap
+  let chained = json.set_path(scalar, json.index(json.root(), 0), json.from_int(99)) ?? json.null()
+  p_rm("chain", json.remove_path(chained, json.index(json.root(), 0)))                         // 42
+
+  // 7. set_path AUTOVIVIFICATION: Field over a non-object replaces it with a
+  //    fresh object and seeds nested/absent descents with `{}`. WASM previously
+  //    returned Err("path error: expected object").
+  let int42 = json.from_int(42)
+  let strv = json.from_string("hi")
+  // Field over a non-object ROOT, nested + final, for every scalar kind:
+  p_set("av_int_nest", json.set_path(int42, json.field(json.field(json.root(), "x"), "y"), json.from_int(1)))   // {"x":{"y":1}}
+  p_set("av_int_final", json.set_path(int42, json.field(json.root(), "x"), json.from_int(1)))                    // {"x":1}
+  p_set("av_str_nest", json.set_path(strv, json.field(json.field(json.root(), "x"), "y"), json.from_int(1)))     // {"x":{"y":1}}
+  p_set("av_null_final", json.set_path(nullv, json.field(json.root(), "x"), json.from_int(1)))                   // {"x":1}
+  p_set("av_bool_nest", json.set_path(boolv, json.field(json.field(json.root(), "x"), "y"), json.from_int(1)))   // {"x":{"y":1}}
+  // Field over an ARRAY (a non-object) → replaced, nested + final:
+  p_set("av_arr_nest", json.set_path(arr, json.field(json.field(json.root(), "x"), "y"), json.from_int(9)))      // {"x":{"y":9}}
+  p_set("av_arr_final", json.set_path(arr, json.field(json.root(), "x"), json.from_int(9)))                      // {"x":9}
+  // Field over a non-object MID-PATH (the int VALUE at "a" is replaced):
+  let oa5 = json.object([("a", json.from_int(5))])
+  p_set("av_mid", json.set_path(oa5, json.field(json.field(json.root(), "a"), "b"), json.from_int(1)))           // {"a":{"b":1}}
+  // Deep chain over a scalar root:
+  p_set("av_deep", json.set_path(int42, json.field(json.field(json.field(json.root(), "x"), "y"), "z"), json.from_int(1))) // {"x":{"y":{"z":1}}}
+  // Field AFTER Index over an int element (a[1]=7 autovivifies to {"z":3}):
+  let inner = json.array([json.object([]), json.from_int(7)])
+  let oa_inner = json.object([("a", inner)])
+  p_set("av_after_idx", json.set_path(oa_inner, json.field(json.index(json.field(json.root(), "a"), 1), "z"), json.from_int(3))) // {"a":[{},{"z":3}]}
+  // Field-THEN-Index over an autovivified node: Index local no-op yields the
+  // autoviv `{}` (NOT the untouched root, NOT null):
+  p_set("av_field_idx", json.set_path(int42, json.field(json.index(json.field(json.root(), "x"), 0), "y"), json.from_int(1)))   // {"x":{}}
+  p_set("av_idx_field2", json.set_path(int42, json.index(json.field(json.field(json.root(), "x"), "y"), 0), json.from_int(1)))  // {"x":{"y":{}}}
+  // Field after an OOB Index keeps the whole subtree a no-op (Index OOB wins):
+  let oa1 = json.object([("a", json.array([json.from_int(1)]))])
+  p_set("av_idx_oob", json.set_path(oa1, json.field(json.index(json.field(json.root(), "a"), 5), "z"), json.from_int(7)))       // {"a":[1]}
+  // Index-then-field over an EXISTING int array element (root array):
+  let rootarr = json.array([json.from_int(7)])
+  p_set("av_root_arr", json.set_path(rootarr, json.field(json.index(json.root(), 0), "y"), json.from_int(1)))    // [{"y":1}]
+}

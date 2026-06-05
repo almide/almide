@@ -7,165 +7,221 @@ use wasm_encoder::{Instruction, ValType};
 use super::TrackedFunction as Function;
 
 /// __int_from_hex(s: i32) -> i32
-/// Parses a hex string (e.g. "ff", "FF", "0xff") to i64, returns Result[Int, String].
+///
+/// Byte-for-byte mirror of the native oracle (runtime/rs/src/int.rs):
+///   `i64::from_str_radix(s.trim().trim_start_matches("0x"), 16).map_err(|e| e.to_string())`
+/// The quirks this implies (all native-as-oracle, see contract_notes):
+///   - `trim()` strips leading/trailing Unicode whitespace.
+///   - `trim_start_matches("0x")` strips a lowercase "0x" prefix REPEATEDLY
+///     ("0x0xff" → "ff" → 255) and is CASE-SENSITIVE ("0X10" is NOT stripped,
+///     so it then fails on 'X' as an invalid digit).
+///   - NO underscore skipping ("f_f" is an invalid digit).
+///   - a single sign (+/-) is accepted AFTER 0x-stripping ("0x-ff" → -255).
+///   - the four std `ParseIntError` strings are reproduced exactly (shared with
+///     int.parse, deduped by intern_string).
 /// Layout: [tag:i32][value:i64] = 12 bytes. tag=0 ok, tag=1 err (str ptr at offset 4).
 pub(super) fn compile_int_from_hex(emitter: &mut WasmEmitter) {
     let type_idx = emitter.func_type_indices[&emitter.rt.int_from_hex];
+    let data_off = emitter.layout_reg.fixed_offset(
+        super::engine::layout::STRING, super::engine::layout::string::DATA) as i32;
+
+    // The same four std error strings int.parse uses (intern dedups them).
+    let err_empty = emitter.intern_string("cannot parse integer from empty string");
+    let err_digit = emitter.intern_string("invalid digit found in string");
+    let err_large = emitter.intern_string("number too large to fit in target type");
+    let err_small = emitter.intern_string("number too small to fit in target type");
+    let alloc = emitter.rt.alloc;
+
+    const RADIX: i64 = 16;
     // params: 0=$s (string ptr: [len:i32][data:u8...])
     // locals:
-    //   1=i32 len, 2=i32 i, 3=i64 result, 4=i32 byte, 5=i32 alloc_ptr, 6=i32 digit
+    //   1=len, 2=i (cursor), 3=end (exclusive, after trailing trim),
+    //   4=is_neg, 5=byte, 6=alloc_ptr, 7=acc (i64 magnitude, u64 semantics),
+    //   8=digit (i32), 9=limit (i64 max magnitude for sign), 10=tmp (i64)
     let mut f = Function::new([
         (1, ValType::I32),  // 1: len
         (1, ValType::I32),  // 2: i
-        (1, ValType::I64),  // 3: result
-        (1, ValType::I32),  // 4: byte
-        (1, ValType::I32),  // 5: alloc_ptr
-        (1, ValType::I32),  // 6: digit
+        (1, ValType::I32),  // 3: end
+        (1, ValType::I32),  // 4: is_neg
+        (1, ValType::I32),  // 5: byte
+        (1, ValType::I32),  // 6: alloc_ptr
+        (1, ValType::I64),  // 7: acc
+        (1, ValType::I32),  // 8: digit
+        (1, ValType::I64),  // 9: limit
+        (1, ValType::I64),  // 10: tmp
+        (1, ValType::I32),  // 11: scratch for trim_backward
     ]);
 
-    let err_str = emitter.intern_string("invalid hex");
+    // Emit an `err(<interned string>)` return: alloc [tag=1][str_ptr] and return.
+    let emit_err = |f: &mut Function, err_str: u32| {
+        wasm!(f, {
+            i32_const(12); call(alloc); local_set(6);
+            local_get(6); i32_const(1); i32_store(0);
+            local_get(6); i32_const(err_str as i32); i32_store(4);
+            local_get(6);
+            return_;
+        });
+    };
+    // Emit `byte = s[data_off + idx_local]`.
+    let load_byte = |f: &mut Function, idx_local: u32, dst: u32| {
+        wasm!(f, {
+            local_get(0); i32_const(data_off); i32_add;
+            local_get(idx_local); i32_add;
+            i32_load8_u(0); local_set(dst);
+        });
+    };
 
     // len = s.len
-    wasm!(f, {
-        local_get(0); i32_load(0); local_set(1);
-    });
+    wasm!(f, { local_get(0); i32_load(0); local_set(1); });
 
-    // Empty string -> err
-    wasm!(f, {
-        local_get(1); i32_eqz;
-        if_empty;
-    });
-    emit_int_from_hex_err(&mut f, emitter, err_str);
-    wasm!(f, { end; });
+    // Trim leading + trailing Unicode whitespace (s.trim()).
+    wasm!(f, { i32_const(0); local_set(2); });
+    super::rt_string::emit_trim_forward(&mut f, emitter, 2, 1);
+    wasm!(f, { local_get(1); local_set(3); });
+    super::rt_string::emit_trim_backward(&mut f, emitter, 3, 2, 11);
 
-    // i = 0, result = 0
-    wasm!(f, {
-        i32_const(0); local_set(2);
-        i64_const(0); local_set(3);
-    });
-
-    // Skip optional "0x" or "0X" prefix
-    wasm!(f, {
-        local_get(1); i32_const(2); i32_ge_u;
-        if_empty;
-          local_get(0); i32_load8_u(emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32 as u32); // first byte
-          i32_const(48); // '0'
-          i32_eq;
-          if_empty;
-            local_get(0); i32_const(emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; i32_const(1); i32_add; i32_load8_u(0); // second byte
-            local_set(4);
-            local_get(4); i32_const(120); i32_eq; // 'x'
-            local_get(4); i32_const(88); i32_eq; // 'X'
-            i32_or;
-            if_empty;
-              i32_const(2); local_set(2); // skip "0x"
-            end;
-          end;
-        end;
-    });
-
-    // After skipping prefix, check we still have digits
-    wasm!(f, {
-        local_get(2); local_get(1); i32_ge_u;
-        if_empty;
-    });
-    emit_int_from_hex_err(&mut f, emitter, err_str);
-    wasm!(f, { end; });
-
-    // Main parse loop: while i < len
+    // Strip a lowercase "0x" prefix REPEATEDLY: while (end-i >= 2 && s[i]=='0' && s[i+1]=='x') i += 2.
     wasm!(f, {
         block_empty; loop_empty;
-        local_get(2); local_get(1); i32_ge_u; br_if(1);
+          // need at least 2 chars remaining
+          local_get(3); local_get(2); i32_sub; i32_const(2); i32_lt_s; br_if(1);
+    });
+    load_byte(&mut f, 2, 5);
+    wasm!(f, {
+          local_get(5); i32_const(48); i32_ne; br_if(1);   // s[i] != '0'
+    });
+    // s[i+1] == 'x' (lowercase only)
+    wasm!(f, { i32_const(0); local_set(5); }); // reuse byte; compute s[i+1]
+    wasm!(f, {
+          local_get(0); i32_const(data_off); i32_add; local_get(2); i32_add; i32_const(1); i32_add;
+          i32_load8_u(0); local_set(5);
+          local_get(5); i32_const(120); i32_ne; br_if(1);   // s[i+1] != 'x'
+          local_get(2); i32_const(2); i32_add; local_set(2); // i += 2
+          br(0);
+        end; end;
     });
 
-    // byte = s[DATA_OFFSET+i]
-    wasm!(f, {
-        local_get(0); i32_const(emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add;
-        local_get(2); i32_add;
-        i32_load8_u(0); local_set(4);
-    });
+    // Empty after trim + strip → "cannot parse integer from empty string"
+    wasm!(f, { local_get(2); local_get(3); i32_ge_u; if_empty; });
+    emit_err(&mut f, err_empty);
+    wasm!(f, { end; });
 
-    // Skip underscores (common in hex literals)
+    // Optional single leading sign (from_str_radix accepts +/-).
+    wasm!(f, { i32_const(0); local_set(4); }); // is_neg = 0
+    load_byte(&mut f, 2, 5);
     wasm!(f, {
-        local_get(4); i32_const(95); i32_eq; // '_'
+        local_get(5); i32_const(45); i32_eq; // '-'
         if_empty;
+          i32_const(1); local_set(4);
           local_get(2); i32_const(1); i32_add; local_set(2);
-          br(1); // continue loop
+        else_;
+          local_get(5); i32_const(43); i32_eq; // '+'
+          if_empty;
+            local_get(2); i32_const(1); i32_add; local_set(2);
+          end;
         end;
     });
 
-    // Classify: '0'-'9' -> 0-9, 'a'-'f' -> 10-15, 'A'-'F' -> 10-15, else err
-    // digit = -1 (sentinel for invalid)
+    // No digits after sign → "invalid digit found in string"
+    wasm!(f, { local_get(2); local_get(3); i32_ge_u; if_empty; });
+    emit_err(&mut f, err_digit);
+    wasm!(f, { end; });
+
+    // limit = is_neg ? |i64::MIN| : i64::MAX  (u64 semantics)
     wasm!(f, {
-        i32_const(-1); local_set(6);
-        // Check '0' <= byte <= '9'
-        local_get(4); i32_const(48); i32_ge_u;
-        local_get(4); i32_const(57); i32_le_u;
-        i32_and;
+        local_get(4);
+        if_empty; i64_const(i64::MIN); local_set(9);
+        else_; i64_const(i64::MAX); local_set(9); end;
+        i64_const(0); local_set(7);   // acc = 0
+    });
+
+    // Main parse loop: while i < end
+    wasm!(f, { block_empty; loop_empty;
+        local_get(2); local_get(3); i32_ge_u; br_if(1);
+    });
+    load_byte(&mut f, 2, 5);
+
+    // Classify hex digit: '0'-'9' → 0-9, 'a'-'f' → 10-15, 'A'-'F' → 10-15, else -1.
+    wasm!(f, {
+        i32_const(-1); local_set(8);
+        local_get(5); i32_const(48); i32_ge_u;
+        local_get(5); i32_const(57); i32_le_u; i32_and;
         if_empty;
-          local_get(4); i32_const(48); i32_sub; local_set(6);
+          local_get(5); i32_const(48); i32_sub; local_set(8);
         else_;
-          // Check 'a' <= byte <= 'f'
-          local_get(4); i32_const(97); i32_ge_u;
-          local_get(4); i32_const(102); i32_le_u;
-          i32_and;
+          local_get(5); i32_const(97); i32_ge_u;
+          local_get(5); i32_const(102); i32_le_u; i32_and;
           if_empty;
-            local_get(4); i32_const(87); i32_sub; local_set(6); // 'a'-87 = 10
+            local_get(5); i32_const(87); i32_sub; local_set(8); // 'a'-87 = 10
           else_;
-            // Check 'A' <= byte <= 'F'
-            local_get(4); i32_const(65); i32_ge_u;
-            local_get(4); i32_const(70); i32_le_u;
-            i32_and;
+            local_get(5); i32_const(65); i32_ge_u;
+            local_get(5); i32_const(70); i32_le_u; i32_and;
             if_empty;
-              local_get(4); i32_const(55); i32_sub; local_set(6); // 'A'-55 = 10
+              local_get(5); i32_const(55); i32_sub; local_set(8); // 'A'-55 = 10
             end;
           end;
         end;
     });
 
-    // If digit == -1 -> err
-    wasm!(f, {
-        local_get(6); i32_const(-1); i32_eq;
-        if_empty;
-    });
-    emit_int_from_hex_err(&mut f, emitter, err_str);
+    // Invalid digit → "invalid digit found in string"
+    wasm!(f, { local_get(8); i32_const(-1); i32_eq; if_empty; });
+    emit_err(&mut f, err_digit);
     wasm!(f, { end; });
 
-    // result = result * 16 + digit
-    wasm!(f, {
-        local_get(3); i64_const(16); i64_mul;
-        local_get(6); i64_extend_i32_u;
-        i64_add; local_set(3);
-    });
+    // d (i64) → tmp
+    wasm!(f, { local_get(8); i64_extend_i32_u; local_set(10); });
 
-    // i++
+    // Overflow step 1: acc > limit/RADIX → overflow.
     wasm!(f, {
+        local_get(9); i64_const(RADIX); i64_div_u;
+        local_get(7); i64_ge_u; i32_eqz;
+        if_empty;
+    });
+    wasm!(f, { local_get(4); if_empty; });
+    emit_err(&mut f, err_small);
+    wasm!(f, { else_; });
+    emit_err(&mut f, err_large);
+    wasm!(f, { end; end; });
+
+    // acc = acc * RADIX
+    wasm!(f, { local_get(7); i64_const(RADIX); i64_mul; local_set(7); });
+
+    // Overflow step 2: acc > limit - d → overflow.
+    wasm!(f, {
+        local_get(9); local_get(10); i64_sub;
+        local_get(7); i64_ge_u; i32_eqz;
+        if_empty;
+    });
+    wasm!(f, { local_get(4); if_empty; });
+    emit_err(&mut f, err_small);
+    wasm!(f, { else_; });
+    emit_err(&mut f, err_large);
+    wasm!(f, { end; end; });
+
+    // acc = acc + d; i++
+    wasm!(f, {
+        local_get(7); local_get(10); i64_add; local_set(7);
         local_get(2); i32_const(1); i32_add; local_set(2);
         br(0);
-        end; end; // end loop, end block
+        end; end;
     });
 
-    // Return ok(result): alloc [tag=0, value=result]
+    // Materialize signed value: negative → 0 - acc (wraps to i64::MIN at 2^63).
     wasm!(f, {
-        i32_const(12); call(emitter.rt.alloc); local_set(5);
-        local_get(5); i32_const(0); i32_store(0);   // tag = 0 (ok)
-        local_get(5); local_get(3); i64_store(4);    // value
-        local_get(5);
+        local_get(4);
+        if_empty; i64_const(0); local_get(7); i64_sub; local_set(7); end;
+    });
+
+    // Return ok(value): alloc [tag=0][value:i64]
+    wasm!(f, {
+        i32_const(12); call(alloc); local_set(6);
+        local_get(6); i32_const(0); i32_store(0);
+        local_get(6); local_get(7); i64_store(4);
+        local_get(6);
         end;
     });
 
     emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
-}
-
-/// Emit the err return for int_from_hex: alloc [tag=1][str_ptr] and return.
-fn emit_int_from_hex_err(f: &mut Function, emitter: &WasmEmitter, err_str: u32) {
-    wasm!(f, {
-        i32_const(12); call(emitter.rt.alloc); local_set(5);
-        local_get(5); i32_const(1); i32_store(0);              // tag = 1 (err)
-        local_get(5); i32_const(err_str as i32); i32_store(4); // err string
-        local_get(5);
-        return_;
-    });
 }
 
 /// __float_parse(s: i32) -> i32

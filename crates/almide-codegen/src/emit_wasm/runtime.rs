@@ -1387,8 +1387,15 @@ pub(super) fn compile_bytes_f16_to_f64(emitter: &mut WasmEmitter) {
         else_;
             local_get(2); i32_const(31); i32_eq;
             if_f64;
-                // inf/nan: return sign-preserving large value for simplicity
-                local_get(5); f64_const(3.4028235e38); f64_mul;
+                // exp all-ones: mant==0 → ±inf (sign-preserving), mant!=0 → NaN.
+                // Mirrors native f16_bits_to_f64 (runtime/rs/src/bytes.rs): the
+                // previous `sign * f32::MAX` was finite and diverged.
+                local_get(3); i32_eqz;
+                if_f64;
+                    local_get(5); f64_const(f64::INFINITY); f64_mul; // ±inf
+                else_;
+                    f64_const(f64::NAN);
+                end;
             else_;
                 // normal: sign_f * (1 + mant/1024) * 2^(exp-15)
                 // 2^(exp-15) computed as f64 bit pattern:
