@@ -586,9 +586,10 @@ note = "No cross-target fixture calls string.replace_first yet. Drain: add it to
 [[routine]]
 file = "rt_string_extra.rs"
 routine = "compile_last_index_of"
-status = "grandfathered"
+status = "verified"
 oracle = "runtime/rs/src/string.rs::almide_rt_string_last_index_of (str::rfind — BYTE offset)"
-note = "No cross-target fixture calls string.last_index_of. Drain: add to string_ops.almd."
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "Fixed 2026-06-05 (drain PR-A): empty pattern now Some(byte_len) matching str::rfind; corpus locks empty/ASCII/multibyte/astral subjects"
 
 [[routine]]
 file = "rt_string_extra.rs"
@@ -621,16 +622,18 @@ note = "No cross-target fixture for string.is_digit."
 [[routine]]
 file = "rt_string_extra.rs"
 routine = "compile_is_alpha"
-status = "grandfathered"
+status = "verified"
 oracle = "runtime/rs/src/string.rs::almide_rt_string_is_alpha (char::is_alphabetic — Unicode!)"
-note = "CONFIRMED DIVERGENT 2026-06-05: is_alpha(α)/is_alpha(漢) = native true, wasm false (ASCII-only). Fix = oracle-derived Alphabetic range table (the case-table Σ-probe pattern). Drain HIGH priority."
+test = "crates/almide-codegen/src/emit_wasm/rt_unicode_tables.rs::alphabetic_table_matches_char_method"
+note = "Fixed 2026-06-05 (drain PR-A): codepoint walk + oracle-derived Alphabetic range table; Σ-probe lock over all scalars + spec/wasm_cross/string_predicates.almd (byte-identical via tests/wasm_runtime_test.rs::wasm_cross_target_spec)"
 
 [[routine]]
 file = "rt_string_extra.rs"
 routine = "compile_is_alnum"
-status = "grandfathered"
+status = "verified"
 oracle = "runtime/rs/src/string.rs::almide_rt_string_is_alphanumeric (Unicode)"
-note = "Same Unicode-vs-ASCII risk as is_alpha; no fixture."
+test = "crates/almide-codegen/src/emit_wasm/rt_unicode_tables.rs::alphanumeric_table_matches_char_method"
+note = "Fixed 2026-06-05 (drain PR-A): codepoint walk + Alphanumeric range table; Σ-probe lock + spec/wasm_cross/string_predicates.almd (byte-identical via tests/wasm_runtime_test.rs::wasm_cross_target_spec)"
 
 [[routine]]
 file = "rt_string_extra.rs"
@@ -642,23 +645,42 @@ note = "The is_unicode_ws RANGES are Σ-probe-verified, but the string.is_whites
 [[routine]]
 file = "rt_string_extra.rs"
 routine = "compile_is_upper"
-status = "grandfathered"
+status = "verified"
 oracle = "runtime/rs/src/string.rs::almide_rt_string_is_upper (Unicode case query)"
-note = "No fixture; Unicode-vs-ASCII risk."
+test = "crates/almide-codegen/src/emit_wasm/rt_unicode_tables.rs::uppercase_table_matches_char_method"
+note = "Fixed 2026-06-05 (drain PR-A): any-alpha guard + Uppercase property table (was vacuous-true on multibyte/no-letter strings); Σ-probe lock + spec/wasm_cross/string_predicates.almd (byte-identical via tests/wasm_runtime_test.rs::wasm_cross_target_spec)"
 
 [[routine]]
 file = "rt_string_extra.rs"
 routine = "compile_is_lower"
-status = "grandfathered"
+status = "verified"
 oracle = "runtime/rs/src/string.rs::almide_rt_string_is_lower (Unicode case query)"
-note = "No fixture; Unicode-vs-ASCII risk."
+test = "crates/almide-codegen/src/emit_wasm/rt_unicode_tables.rs::lowercase_table_matches_char_method"
+note = "Fixed 2026-06-05 (drain PR-A): any-alpha guard + Lowercase property table; Σ-probe lock + spec/wasm_cross/string_predicates.almd (byte-identical via tests/wasm_runtime_test.rs::wasm_cross_target_spec)"
 
 [[routine]]
 file = "rt_string_extra.rs"
 routine = "compile_case_predicate"
-status = "grandfathered"
+status = "verified"
 oracle = "Rust char case predicate helper (is_uppercase/is_lowercase)"
-note = "Helper behind is_upper/is_lower; no fixture."
+test = "crates/almide-codegen/src/emit_wasm/rt_unicode_tables.rs::uppercase_table_matches_char_method"
+note = "Shared is_upper/is_lower body (any_alpha + all_ok walk over Alphabetic + case property tables); verified through both predicate Σ-probes + spec/wasm_cross/string_predicates.almd (byte-identical via tests/wasm_runtime_test.rs::wasm_cross_target_spec)"
+
+[[routine]]
+file = "rt_string_extra.rs"
+routine = "compile_all_codepoints_predicate"
+status = "verified"
+oracle = "Shared is_alpha/is_alnum body: !s.is_empty() && s.chars().all(|c| property(c)) (runtime/rs/src/string.rs:32,34 shape)"
+test = "crates/almide-codegen/src/emit_wasm/rt_unicode_tables.rs::alphabetic_table_matches_char_method"
+note = "Added in drain PR-A; codepoint walk via existing utf8_scalar/utf8_width; verified through the is_alpha/is_alnum Σ-probes + spec/wasm_cross/string_predicates.almd"
+
+[[routine]]
+file = "rt_string_extra.rs"
+routine = "compile_prop_membership"
+status = "verified"
+oracle = "Binary search over an RLE [lo,hi] range table derived at emit time from char::is_* (std is the source)"
+test = "crates/almide-codegen/src/emit_wasm/rt_unicode_tables.rs::alphabetic_table_matches_char_method"
+note = "Added in drain PR-A; the 4 Σ-probe locks exercise the search against every scalar 0..=0x10FFFF for each table"
 
 [[routine]]
 file = "rt_string_extra.rs"

@@ -1,0 +1,56 @@
+// Cross-target probe matrix for the Unicode-aware string predicates.
+//
+// Native derives is_alpha/is_alphanumeric/is_upper/is_lower from Rust's
+// full-Unicode char methods; the WASM target uses oracle-derived range tables
+// (rt_unicode_tables.rs) walked per codepoint. This matrix exercises every
+// interesting Unicode category so the cross-target diff gate proves native and
+// WASM agree byte-for-byte. Each row prints the 4 predicate results for a
+// carefully chosen scalar class.
+
+fn b(x: Bool) -> String = if x then "T" else "F"
+
+fn row(label: String, s: String) -> Unit =
+  println(label + ": alpha=" + b(string.is_alpha(s))
+    + " alnum=" + b(string.is_alphanumeric(s))
+    + " upper=" + b(string.is_upper(s))
+    + " lower=" + b(string.is_lower(s)))
+
+fn main() -> Unit = {
+  // ASCII
+  row("ascii_upper", "ABC")
+  row("ascii_lower", "abc")
+  row("ascii_digit", "123")
+  row("ascii_alnum", "Ab1")
+  row("ascii_punct", "A.B")     // has an alpha, '.' is non-alpha
+  row("ascii_dotonly", "...")   // no alpha at all
+  // Greek (cased, plus the Σ/σ pair)
+  row("greek_lower", "αβγ")
+  row("greek_upper", "ΑΒΓ")
+  row("greek_sigma_up", "Σ")
+  row("greek_sigma_lo", "σ")
+  // Cyrillic
+  row("cyrillic", "ягд")
+  // CJK (alphabetic but caseless)
+  row("cjk", "日本")
+  row("cjk_with_digit", "日2")
+  // Arabic-Indic digits (Nd: alnum but not alpha)
+  row("arabic_indic", "٣٤٥")
+  // Fullwidth Latin (cased)
+  row("fullwidth_up", "ＡＢＣ")
+  row("fullwidth_lo", "ａｂｃ")
+  // Numeric-but-not-alpha categories
+  row("superscript", "²")       // No
+  row("fraction", "½")          // No
+  // Roman numerals (Nl: alphabetic AND cased)
+  row("roman_up", "Ⅴ")
+  row("roman_lo", "ⅴ")
+  row("no_only", "²½")          // alnum, not alpha, no case
+  // Titlecase + modifier + eszett edge cases
+  row("titlecase", "ǅ")         // alpha, neither upper nor lower
+  row("modifier", "ʰ")          // Lm: alpha, lowercase
+  row("eszett", "ß")            // alpha, lowercase
+  // Mixed / boundary
+  row("digit_letter", "a1")     // not all alpha; alpha 'a' is lower
+  row("mixed_case_uni", "Ａa")  // fullwidth-upper + ascii-lower
+  row("empty", "")
+}
