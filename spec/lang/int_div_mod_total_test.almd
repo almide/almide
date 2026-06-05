@@ -1,0 +1,28 @@
+// Integer `/` and `%` are TOTAL: a zero divisor or signed `MIN / -1` overflow aborts
+// (`Error: <msg>\n` + exit 1) instead of panicking, byte-identically on native and
+// wasm. The aborting cases are covered by the spec/wasm_cross/ gate (an aborting
+// program can't be an in-test assertion). This file is the happy-path regression
+// guard: the checked-div rewrite (native `almide_div!`/`almide_mod!`, wasm guarded
+// div/rem) must not perturb ordinary results — including negative operands, whose
+// truncated-toward-zero `/` and sign-of-dividend `%` are easy to get wrong.
+
+fn shield(x: Int, v: Int) -> Int = (x - x) + v
+
+test "integer division truncates toward zero" {
+  assert_eq(17 / 5, 3)
+  assert_eq(17 / shield(7, 5), 3)
+  assert_eq(-17 / 5, -3)
+  assert_eq(-17 / shield(7, 5), -3)
+}
+
+test "integer remainder takes sign of dividend" {
+  assert_eq(17 % 5, 2)
+  assert_eq(17 % shield(7, 5), 2)
+  assert_eq(-17 % 5, -2)
+  assert_eq(-17 % shield(7, 5), -2)
+}
+
+test "division by one is identity" {
+  assert_eq(42 / shield(7, 1), 42)
+  assert_eq(-42 % shield(7, 1), 0)
+}

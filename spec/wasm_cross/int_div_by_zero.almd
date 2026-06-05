@@ -1,0 +1,12 @@
+// Integer `/` by zero aborts with "Error: division by zero" + exit 1 on BOTH
+// targets, not a native panic (exit 101) nor a wasm `unreachable` trap (exit 134).
+// `den(7)` shields the divisor so neither target const-folds it away — the
+// runtime div path (native `almide_div!`, wasm `__div_trap`) is what's exercised.
+// The leading print locks stdout/stderr interleaving across the abort.
+fn den(x: Int) -> Int = x - x
+
+fn main() -> Unit = {
+  println("before")
+  let r = 10 / den(7)
+  println(int.to_string(r))
+}

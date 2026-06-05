@@ -1,0 +1,13 @@
+// Signed `MIN / -1` overflows and aborts with "Error: integer overflow" + exit 1
+// on BOTH targets. `neg_one(7)` shields the `-1` divisor from const-folding. Native
+// runs `almide_div!` (checked_div → None on MIN/-1); wasm's `i64.div_s` would TRAP
+// here (exit 134), so the explicit MIN/-1 guard before the divide converts that into
+// the same defined abort as native.
+fn neg_one(x: Int) -> Int = (x - x) - 1
+
+fn main() -> Unit = {
+  println("before")
+  let m: Int = -9223372036854775807 - 1
+  let r = m / neg_one(7)
+  println(int.to_string(r))
+}

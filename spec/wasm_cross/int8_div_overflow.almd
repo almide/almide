@@ -1,0 +1,15 @@
+// Narrow-width signed `MIN / -1` overflow (Int8: -128 / -1) aborts with
+// "Error: integer overflow" + exit 1 on BOTH targets. This is the width-trap guard:
+// Int8 lowers to i32 arithmetic in wasm, and `i32.div_s(-128, -1)` is 128 — it does
+// NOT trap — yet native `i8::checked_div` returns None. The wasm overflow check must
+// compare against the TRUE per-width MIN (i8 -128), not i32::MIN, or wasm would
+// silently return 128 (`i8`-wrapped to -128) while native aborts. `neg_one_i8(7)`
+// shields the -1 divisor from const-folding.
+fn neg_one_i8(x: Int8) -> Int8 = (x - x) - 1
+
+fn main() -> Unit = {
+  println("before")
+  let m: Int8 = -128
+  let r: Int8 = m / neg_one_i8(7)
+  println(int.to_string(int.from_int8(r)))
+}

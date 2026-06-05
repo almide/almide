@@ -987,27 +987,15 @@ impl FuncCompiler<'_> {
                     wasm!(self.func, { i64_mul; });
                 }
             }
+            // Integer `/` and `%` are total: a zero divisor (or signed MIN/-1, which
+            // wasm's div_s traps but rem_s silently DEFINES as 0) aborts with
+            // `Error: <msg>\n` + exit 1 instead of diverging from native. See
+            // `emit_checked_int_div_mod`.
             BinOp::DivInt => {
-                self.emit_expr(left);
-                self.emit_expr(right);
-                let instr = match (is_i32_int, is_unsigned_int) {
-                    (true, true) => wasm_encoder::Instruction::I32DivU,
-                    (true, false) => wasm_encoder::Instruction::I32DivS,
-                    (false, true) => wasm_encoder::Instruction::I64DivU,
-                    (false, false) => wasm_encoder::Instruction::I64DivS,
-                };
-                self.func.instruction(&instr);
+                self.emit_checked_int_div_mod(left, right, /*is_mod=*/false, is_i32_int, is_unsigned_int);
             }
             BinOp::ModInt => {
-                self.emit_expr(left);
-                self.emit_expr(right);
-                let instr = match (is_i32_int, is_unsigned_int) {
-                    (true, true) => wasm_encoder::Instruction::I32RemU,
-                    (true, false) => wasm_encoder::Instruction::I32RemS,
-                    (false, true) => wasm_encoder::Instruction::I64RemU,
-                    (false, false) => wasm_encoder::Instruction::I64RemS,
-                };
-                self.func.instruction(&instr);
+                self.emit_checked_int_div_mod(left, right, /*is_mod=*/true, is_i32_int, is_unsigned_int);
             }
             BinOp::AddFloat => {
                 self.emit_expr(left);
@@ -1258,6 +1246,127 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i64(result_s);
                 self.scratch.free_i64(base_s);
             }
+        }
+    }
+
+    /// Emit a total integer `/` or `%`: spill both operands to scratch, guard the
+    /// divisor, then run the raw div/rem. A zero divisor aborts with `division by
+    /// zero`; for SIGNED div AND rem, the width's `MIN op -1` aborts with `integer
+    /// overflow` (wasm `i64.rem_s`/narrow `i32.div_s` of MIN/-1 do NOT trap, so the
+    /// explicit check is what keeps wasm aligned with native `checked_div`/`checked_rem`).
+    /// Both abort paths call `__div_trap` with the interned `Error: <msg>\n` string.
+    fn emit_checked_int_div_mod(
+        &mut self,
+        left: &IrExpr,
+        right: &IrExpr,
+        is_mod: bool,
+        is_i32_int: bool,
+        is_unsigned_int: bool,
+    ) {
+        // Divisor -1 — the second half of the signed `MIN / -1` overflow witness.
+        const NEG_ONE: i64 = -1;
+        let div_by_zero_msg = self.emitter.intern_string("Error: division by zero\n") as i32;
+        let overflow_msg = self.emitter.intern_string("Error: integer overflow\n") as i32;
+        let div_trap = self.emitter.rt.div_trap;
+
+        // Most-negative value of the operand width — `MIN / -1` is the only signed
+        // overflow. Narrow ints run as i32 arithmetic, so an i8/i16 MIN must be the
+        // TRUE per-width MIN (e.g. i8 -128), not i32::MIN: `i32.div_s(-128, -1)` is
+        // 128 and does NOT trap, yet native `i8::checked_div` returns None.
+        let width_min: i64 = match left.ty {
+            Ty::Int8 => i8::MIN as i64,
+            Ty::Int16 => i16::MIN as i64,
+            Ty::Int32 => i32::MIN as i64,
+            _ => i64::MIN,
+        };
+
+        if is_i32_int {
+            let la = self.scratch.alloc_i32();
+            let rb = self.scratch.alloc_i32();
+            self.emit_expr(left);
+            wasm!(self.func, { local_set(la); });
+            self.emit_expr(right);
+            wasm!(self.func, { local_set(rb); });
+
+            // if rb == 0 { div_trap("division by zero") }
+            wasm!(self.func, {
+                local_get(rb);
+                i32_eqz;
+                if_empty;
+                i32_const(div_by_zero_msg);
+                call(div_trap);
+                end;
+            });
+            // Signed overflow: if la == width_min && rb == -1 { div_trap("integer overflow") }
+            if !is_unsigned_int {
+                wasm!(self.func, {
+                    local_get(la);
+                    i32_const(width_min as i32);
+                    i32_eq;
+                    local_get(rb);
+                    i32_const(NEG_ONE as i32);
+                    i32_eq;
+                    i32_and;
+                    if_empty;
+                    i32_const(overflow_msg);
+                    call(div_trap);
+                    end;
+                });
+            }
+            // The checked operands are now safe — run the raw op.
+            wasm!(self.func, { local_get(la); local_get(rb); });
+            let instr = match (is_mod, is_unsigned_int) {
+                (false, true) => wasm_encoder::Instruction::I32DivU,
+                (false, false) => wasm_encoder::Instruction::I32DivS,
+                (true, true) => wasm_encoder::Instruction::I32RemU,
+                (true, false) => wasm_encoder::Instruction::I32RemS,
+            };
+            self.func.instruction(&instr);
+            self.scratch.free_i32(rb);
+            self.scratch.free_i32(la);
+        } else {
+            let la = self.scratch.alloc_i64();
+            let rb = self.scratch.alloc_i64();
+            self.emit_expr(left);
+            wasm!(self.func, { local_set(la); });
+            self.emit_expr(right);
+            wasm!(self.func, { local_set(rb); });
+
+            // if rb == 0 { div_trap("division by zero") }
+            wasm!(self.func, {
+                local_get(rb);
+                i64_eqz;
+                if_empty;
+                i32_const(div_by_zero_msg);
+                call(div_trap);
+                end;
+            });
+            // Signed overflow: if la == i64::MIN && rb == -1 { div_trap("integer overflow") }
+            if !is_unsigned_int {
+                wasm!(self.func, {
+                    local_get(la);
+                    i64_const(width_min);
+                    i64_eq;
+                    local_get(rb);
+                    i64_const(NEG_ONE);
+                    i64_eq;
+                    i32_and;
+                    if_empty;
+                    i32_const(overflow_msg);
+                    call(div_trap);
+                    end;
+                });
+            }
+            wasm!(self.func, { local_get(la); local_get(rb); });
+            let instr = match (is_mod, is_unsigned_int) {
+                (false, true) => wasm_encoder::Instruction::I64DivU,
+                (false, false) => wasm_encoder::Instruction::I64DivS,
+                (true, true) => wasm_encoder::Instruction::I64RemU,
+                (true, false) => wasm_encoder::Instruction::I64RemS,
+            };
+            self.func.instruction(&instr);
+            self.scratch.free_i64(rb);
+            self.scratch.free_i64(la);
         }
     }
 

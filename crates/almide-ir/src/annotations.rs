@@ -28,6 +28,18 @@ pub struct CodegenAnnotations {
     /// emitting `(*NAME)` — scalar `Const` top_lets (plain `const
     /// NAME: i64 = 42;`) must NOT be dereferenced.
     pub lazy_top_let_names: HashSet<String>,
+    /// Uppercased names of `Lazy` top_lets whose initializer can ABORT (today:
+    /// contains an integer `/` or `%`, which abort on a zero divisor / MIN÷-1).
+    /// `fn main` forces these in DECLARATION ORDER before running, so an aborting
+    /// initializer fires at startup — matching wasm, which evaluates every top-let
+    /// eagerly in `_start`. Pure lazies stay lazy (timing is unobservable for them).
+    pub eager_force_top_lets: Vec<String>,
+    /// VarIds of `Const`-kind top_lets. Their declarations render as
+    /// `const NAME_UPPER: T = ...;`, so every reference must also render the
+    /// uppercased name — a lowercase source binding (`let zero = 0`) would
+    /// otherwise emit `zero` against `const ZERO` (E0425, native-only failure
+    /// while wasm builds: a cross-target divergence).
+    pub const_top_let_vars: HashSet<VarId>,
     /// Unified variable storage classification.
     /// Keyed by VarId for local vars (RcCow) and module vars with known ids.
     pub var_storage: HashMap<VarId, VarStorage>,

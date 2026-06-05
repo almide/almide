@@ -306,6 +306,15 @@ fn rust_runtime_prelude(for_crate: bool) -> String {
     s.push_str("impl<T: Clone> AlmideConcat<Vec<T>> for Vec<T> { type Output = Vec<T>; #[inline(always)] fn concat(self, rhs: Vec<T>) -> Vec<T> { let mut r = self; r.extend(rhs); r } }\n");
     s.push_str(&format!("{macro_attr}macro_rules! almide_eq {{ ($a:expr, $b:expr) => {{ ($a) == ($b) }}; }}\n"));
     s.push_str(&format!("{macro_attr}macro_rules! almide_ne {{ ($a:expr, $b:expr) => {{ ($a) != ($b) }}; }}\n"));
+    // almide_div!/almide_mod!: total integer `/` and `%`. `checked_div`/`checked_rem`
+    // return `None` for BOTH a zero divisor AND signed `MIN / -1` overflow, so one
+    // arm distinguishes the two messages by the divisor (b == 0). Generic over every
+    // int width (i8..i64, u*); the Call form is not const-evaluable, so rustc's
+    // `deny(unconditional_panic)` never fires on a literal `10 / 0` and the diagnostic
+    // is the runtime abort below — byte-identical to the §13 termination convention
+    // (`Error: <msg>\n` + exit 1) and to the WASM div/mod trap.
+    s.push_str(&format!("{macro_attr}macro_rules! almide_div {{ ($a:expr, $b:expr) => {{{{ let (__a, __b) = ($a, $b); match __a.checked_div(__b) {{ Some(__v) => __v, None => {{ eprintln!(\"Error: {{}}\", if __b == 0 {{ \"division by zero\" }} else {{ \"integer overflow\" }}); std::process::exit(1); }} }} }}}}; }}\n"));
+    s.push_str(&format!("{macro_attr}macro_rules! almide_mod {{ ($a:expr, $b:expr) => {{{{ let (__a, __b) = ($a, $b); match __a.checked_rem(__b) {{ Some(__v) => __v, None => {{ eprintln!(\"Error: {{}}\", if __b == 0 {{ \"division by zero\" }} else {{ \"integer overflow\" }}); std::process::exit(1); }} }} }}}}; }}\n"));
     // RcCow<T>: COW value type. Clone = Rc::clone (O(1)), mutation = Rc::make_mut (COW).
     // Inspired by Swift's value type semantics.
     s.push_str(&format!("{vis}struct RcCow<T>({vis}std::rc::Rc<T>);\n"));

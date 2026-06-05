@@ -1,0 +1,12 @@
+// Integer `%` by zero aborts with "Error: division by zero" + exit 1 on BOTH
+// targets (the message matches `/` — both are "division by zero"). `den(7)`
+// shields the divisor so neither target const-folds. Native runs `almide_mod!`
+// (checked_rem → None on a zero divisor); wasm guards before `i64.rem_s`, which
+// would otherwise TRAP on a zero divisor with a bare `unreachable` (exit 134).
+fn den(x: Int) -> Int = x - x
+
+fn main() -> Unit = {
+  println("before")
+  let r = 10 % den(7)
+  println(int.to_string(r))
+}

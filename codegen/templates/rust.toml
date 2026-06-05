@@ -31,6 +31,14 @@ template = "almide_rt_{module}_{func}({args})"
 [binary_op]
 template = "({left} {op} {right})"
 
+# Integer `/` and `%` are total (zero divisor / signed MIN-by-(-1) overflow abort
+# with `Error: <msg>\n` + exit 1 via the prelude macros), not the bare operator.
+[div_int]
+template = "almide_div!({left}, {right})"
+
+[mod_int]
+template = "almide_mod!({left}, {right})"
+
 [field_access]
 template = "{expr}.{field}"
 

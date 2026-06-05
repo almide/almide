@@ -187,6 +187,11 @@ pub fn register_runtime_functions(emitter: &mut WasmEmitter) {
     let str_alloc_ty = emitter.register_type(vec![ValType::I32], vec![ValType::I32]);
     emitter.rt.string_alloc = emitter.register_func("__string_alloc", str_alloc_ty);
 
+    // __div_trap(msg_ptr: i32) -> () — integer div/mod abort: write the interned
+    // `Error: <msg>\n` string to stderr (fd 2) and proc_exit(1).
+    let div_trap_ty = emitter.register_type(vec![ValType::I32], vec![]);
+    emitter.rt.div_trap = emitter.register_func("__div_trap", div_trap_ty);
+
     // Note: string interpolation is now emitted inline at the call site
     // (see `calls_string::emit_string_interp`). No scratch runtime helpers.
 
@@ -326,6 +331,7 @@ pub fn compile_runtime(emitter: &mut WasmEmitter) {
     compile_concat_str(emitter);
     compile_string_append(emitter);
     compile_string_alloc(emitter);
+    compile_div_trap(emitter);
     super::runtime_eq::compile_option_eq_i64(emitter);
     super::runtime_eq::compile_option_eq_str(emitter);
     super::runtime_eq::compile_result_eq_i64_str(emitter);
@@ -946,6 +952,64 @@ fn compile_string_alloc(emitter: &mut WasmEmitter) {
         w.get(1);
     }
     f.instruction(&wasm_encoder::Instruction::End);
+    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+}
+
+/// __div_trap(msg_ptr: i32)
+/// Integer div/mod abort: write the interned message string at `msg_ptr` — already
+/// the full `Error: <msg>\n` text, [len:i32][cap:i32][data@DATA] layout — to stderr
+/// via WASI fd_write, then `proc_exit(1)`. The shared trap keeps the div-by-zero and
+/// signed-overflow paths a single function call at every emit site.
+fn compile_div_trap(emitter: &mut WasmEmitter) {
+    // WASI fd for stderr (matches native `eprintln!` → fd 2).
+    const STDERR_FD: i32 = 2;
+    // Exit code on an aborting integer op (matches native `std::process::exit(1)`).
+    const ABORT_EXIT_CODE: i32 = 1;
+    // Scratch layout for the single fd_write iovec: [buf:i32@0][len:i32@4], with the
+    // returned byte count written at [8]. Mirrors `compile_println_str`.
+    const IOV_BUF_OFF: i32 = 0;
+    const IOV_LEN_OFF: i32 = 4;
+    const NWRITTEN_OFF: i32 = 8;
+    const IOV_BASE: i32 = 0;
+    const IOV_COUNT: i32 = 1;
+
+    let type_idx = emitter.func_type_indices[&emitter.rt.div_trap];
+    let data_off = string_data_off();
+    let fd_write = emitter.rt.fd_write;
+    let proc_exit = emitter.rt.proc_exit;
+
+    // param 0 = msg_ptr (interned `Error: <msg>\n` string)
+    let mut f = Function::new([]);
+    // iov[0].buf = msg_ptr + DATA  (skip the len+cap header)
+    wasm!(f, {
+        i32_const(IOV_BUF_OFF);
+        local_get(0);
+        i32_const(data_off);
+        i32_add;
+        i32_store(0);
+    });
+    // iov[0].len = *msg_ptr  (the byte length, which already includes the newline)
+    wasm!(f, {
+        i32_const(IOV_LEN_OFF);
+        local_get(0);
+        i32_load(0);
+        i32_store(0);
+    });
+    // fd_write(stderr, iovs=IOV_BASE, iovs_len=IOV_COUNT, nwritten=NWRITTEN_OFF)
+    wasm!(f, {
+        i32_const(STDERR_FD);
+        i32_const(IOV_BASE);
+        i32_const(IOV_COUNT);
+        i32_const(NWRITTEN_OFF);
+        call(fd_write);
+        drop;
+    });
+    // proc_exit(1) — diverges; never returns.
+    wasm!(f, {
+        i32_const(ABORT_EXIT_CODE);
+        call(proc_exit);
+        end;
+    });
     emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
 }
 

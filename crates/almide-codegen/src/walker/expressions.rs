@@ -172,7 +172,9 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
             if ctx.ann.lazy_vars.contains(id) || is_module_lazy {
                 ctx.templates.render_with("deref_lazy", None, &[], &[("name", upper.as_str())])
                     .unwrap_or_else(|| upper.clone())
-            } else if has_module {
+            } else if has_module || ctx.ann.const_top_let_vars.contains(id) {
+                // Const top_lets declare as `const NAME_UPPER` — a lowercase
+                // source binding must not emit its raw name (E0425).
                 upper
             } else {
                 raw_name
@@ -1000,6 +1002,20 @@ fn render_binop(ctx: &RenderContext, op: BinOp, left: &IrExpr, right: &IrExpr, _
             ctx.templates.render_with("power_expr", Some("Int"), &[], &[("left", l.as_str()), ("right", r.as_str())])
                 .unwrap_or_else(|| format!("pow(_, _)"))
         }
+        // Integer `/` and `%` are total: a zero divisor or signed MIN/-1 overflow
+        // aborts via the almide_div!/almide_mod! prelude macros (`Error: <msg>\n` +
+        // exit 1) instead of panicking. The macro is generic over all int widths and
+        // is not const-evaluable, so a literal `10 / 0` compiles (no rustc
+        // `unconditional_panic`) and aborts at runtime — matching the WASM trap.
+        // Float div/mod keep IEEE semantics and fall through to the bare-operator arm.
+        BinOp::DivInt => {
+            ctx.templates.render_with("div_int", None, &[], &[("left", l.as_str()), ("right", r.as_str())])
+                .unwrap_or_else(|| format!("almide_div!({}, {})", l, r))
+        }
+        BinOp::ModInt => {
+            ctx.templates.render_with("mod_int", None, &[], &[("left", l.as_str()), ("right", r.as_str())])
+                .unwrap_or_else(|| format!("almide_mod!({}, {})", l, r))
+        }
         BinOp::PowFloat => {
             ctx.templates.render_with("power_expr", Some("Float"), &[], &[("left", l.as_str()), ("right", r.as_str())])
                 .unwrap_or_else(|| format!("pow(_, _)"))
@@ -1009,8 +1025,10 @@ fn render_binop(ctx: &RenderContext, op: BinOp, left: &IrExpr, right: &IrExpr, _
                 BinOp::AddInt | BinOp::AddFloat => "+",
                 BinOp::SubInt | BinOp::SubFloat => "-",
                 BinOp::MulInt | BinOp::MulFloat => "*",
-                BinOp::DivInt | BinOp::DivFloat => "/",
-                BinOp::ModInt | BinOp::ModFloat => "%",
+                // DivInt/ModInt are matched above (totality macros) and must never
+                // reach this bare-operator fallback — fall to "??" loudly if they do.
+                BinOp::DivFloat => "/",
+                BinOp::ModFloat => "%",
                 BinOp::Lt => "<",
                 BinOp::Gt => ">",
                 BinOp::Lte => "<=",

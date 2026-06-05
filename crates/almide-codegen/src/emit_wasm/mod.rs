@@ -261,6 +261,11 @@ pub struct RuntimeFuncs {
     pub println_int: u32,
     pub concat_str: u32,
     pub string_append: u32,
+    /// __div_trap(msg_ptr: i32) -> () — write the interned message string
+    /// (already `Error: <msg>\n`) to stderr and `proc_exit(1)`. Shared by the
+    /// integer div/mod zero-divisor and signed-overflow abort paths so the failure
+    /// matches native byte-for-byte (§13 termination convention).
+    pub div_trap: u32,
     /// __string_alloc(len: i32) -> i32
     /// Allocate string with header: writes len AND cap, returns ptr.
     /// Eliminates the class of bugs where cap is forgotten after alloc.
@@ -487,6 +492,7 @@ impl WasmEmitter {
                 base64_encode_url: 0, base64_decode_url: 0,
                 hex_encode: 0, hex_encode_upper: 0, hex_decode: 0,
                 concat_str: 0,
+                div_trap: 0,
                 string_append: 0,
                 string_alloc: 0,
                 concat_list: 0,
