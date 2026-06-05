@@ -1,0 +1,12 @@
+// A const-foldable `10 / 0` must COMPILE and abort identically on both targets.
+// Before integer div/mod became total, native leaked rustc's
+// `deny(unconditional_panic)` on the literal as an ICE-class
+// "codegen produced invalid Rust — this is an Almide bug". Routing `/` through
+// the (non-const-evaluable) `almide_div!` macro means rustc never const-evaluates
+// the divide, so the literal builds and aborts at RUNTIME with the same
+// "Error: division by zero" + exit 1 as the shielded-divisor case.
+fn main() -> Unit = {
+  println("before")
+  let r = 10 / 0
+  println(int.to_string(r))
+}

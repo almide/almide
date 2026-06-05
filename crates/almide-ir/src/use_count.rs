@@ -569,6 +569,13 @@ fn is_const_expr(expr: &IrExpr, const_vars: &std::collections::HashSet<u32>) -> 
         // String requires heap allocation — not const-compatible in Rust
         IrExprKind::LitStr { .. } => false,
         IrExprKind::UnOp { operand, .. } => is_const_expr(operand, const_vars),
+        // Integer `/` and `%` render as the almide_div!/almide_mod! totality macros
+        // (abort with `Error: <msg>` + exit 1), which are not const-evaluable Rust —
+        // a top-level let containing one must take the Lazy (runtime) path, where the
+        // abort fires at startup exactly like wasm's top-let evaluation. Plain
+        // literal-by-nonzero-literal division is folded by pass_const_fold before
+        // classification, so `10 / 2` still reaches codegen as a Const literal.
+        IrExprKind::BinOp { op: crate::BinOp::DivInt | crate::BinOp::ModInt, .. } => false,
         IrExprKind::BinOp { left, right, .. } => is_const_expr(left, const_vars) && is_const_expr(right, const_vars),
         IrExprKind::Var { id } => const_vars.contains(&id.0),
         _ => false,
