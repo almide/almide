@@ -49,11 +49,14 @@ impl FuncCompiler<'_> {
             Ty::UInt8 | Ty::UInt16 | Ty::UInt32 => {
                 wasm!(self.func, { i64_extend_i32_u; call(self.emitter.rt.int_to_string); });
             }
+            // A float inside a container uses the SAME Display form as a bare
+            // interpolated float — native `AlmideRepr for f64` is `format!("{}",
+            // self)`, so an integer-valued float drops its `.0` here too.
             Ty::Float | Ty::Float64 => {
-                wasm!(self.func, { call(self.emitter.rt.float_to_string); });
+                wasm!(self.func, { call(self.emitter.rt.float_display); });
             }
             Ty::Float32 => {
-                wasm!(self.func, { f64_promote_f32; call(self.emitter.rt.float_to_string); });
+                wasm!(self.func, { f64_promote_f32; call(self.emitter.rt.float_display); });
             }
             Ty::Bool => {
                 let t = self.emitter.intern_string("true");
@@ -88,9 +91,46 @@ impl FuncCompiler<'_> {
                 let elems = elems.clone();
                 self.emit_repr_tuple(&elems);
             }
-            // Anything else is not a backed compound (records/variants are scoped
-            // out — see `ty_needs_repr`); leave the value as-is. Unreachable in
-            // practice because the walker only routes backed shapes here.
+            // ── Recursive named record/variant → per-type repr fn ──
+            // A self/mutually-recursive named type must NOT inline-expand its type
+            // graph (infinite at compile time); it routes through its reserved
+            // `__repr_<Type>(ptr) -> str` function, so recursion is a runtime CALL
+            // that bottoms out on the finite value — exactly like native trait
+            // dispatch. Only recursive types get a reserved fn (see
+            // `register_repr_funcs`); the value pointer is already on the stack.
+            Ty::Named(name, _) if self.emitter.repr_funcs.contains_key(name.as_str()) => {
+                let f = self.emitter.repr_funcs[name.as_str()];
+                wasm!(self.func, { call(f); });
+            }
+            // ── Non-recursive named variant → inline walk ──
+            // Inlining is finite (acyclic) AND keeps the concrete `type_args` at
+            // this site, so a generic variant (`Wrapper[Int]`) reprs its payload
+            // with the resolved type — a monomorphic per-type fn could not.
+            Ty::Named(name, _) if self.emitter.variant_info.contains_key(name.as_str()) => {
+                self.emit_repr_variant(ty);
+            }
+            // ── Non-recursive named record (or opaque newtype) → inline walk ──
+            // Same rationale: acyclic, and the site's `type_args` resolve a generic
+            // record's field types (`Box[Int]` reprs its `T` value correctly).
+            Ty::Named(..) => {
+                let fields = self.extract_record_fields(ty);
+                let type_name = match ty {
+                    Ty::Named(n, _) => Some(n.to_string()),
+                    _ => None,
+                };
+                self.emit_repr_record(type_name.as_deref(), &fields);
+            }
+            // ── Anonymous records → inline literal walk (no type name) ──
+            // Structurally finite (an anon record cannot reference itself), so
+            // inline expansion is safe. Fields render in SORTED name order to
+            // match the native synthesized struct (`AlmdRec_*` field order is the
+            // sorted field-name list); see `emit_repr_record`.
+            Ty::Record { .. } | Ty::OpenRecord { .. } => {
+                let fields = self.extract_record_fields(ty);
+                self.emit_repr_record(None, &fields);
+            }
+            // Anything else has no repr (the walker only routes backed shapes
+            // here); leave the value as-is.
             _ => {}
         }
     }
@@ -339,4 +379,199 @@ impl FuncCompiler<'_> {
 
         self.scratch.free_i32(res);
     }
+
+    /// Record walk: `TypeName { f0: <repr>, f1: <repr> }`, fields at sequential
+    /// offsets (record layout `[field0][field1]...`).
+    ///
+    /// A NAMED record renders its fields in declaration order (the layout order),
+    /// `TypeName { f0: …, f1: … }`. An ANONYMOUS record has no `type_name` and
+    /// renders just `{ f0: …, … }`; its fields render in SORTED name order so the
+    /// output matches the native synthesized `AlmdRec_*` struct, whose field list
+    /// is the sorted field-name set (`collect_anon_records` sorts). The VALUE of
+    /// each field is still loaded from its real layout offset (source order), so
+    /// reordering the render does not misalign reads.
+    pub(super) fn emit_repr_record(&mut self, type_name: Option<&str>, fields: &[(String, Ty)]) {
+        let open = match type_name {
+            Some(n) => format!("{} {{ ", n),
+            None => "{ ".to_string(),
+        };
+        let open_s = self.emitter.intern_string(&open) as i32;
+        let close_s = self.emitter.intern_string(" }") as i32;
+
+        // Pair each field with its absolute layout offset (in declaration order),
+        // then choose the render order: named → declaration order; anonymous →
+        // sorted by field name (matches the native anon struct's field order).
+        let mut placed: Vec<(usize, u32)> = Vec::with_capacity(fields.len());
+        let mut offset = 0u32;
+        for (idx, (_, fty)) in fields.iter().enumerate() {
+            placed.push((idx, offset));
+            offset += values::byte_size(fty);
+        }
+        if type_name.is_none() {
+            placed.sort_by(|&(a, _), &(b, _)| fields[a].0.cmp(&fields[b].0));
+        }
+
+        let rec = self.scratch.alloc_i32();
+        let acc = self.scratch.alloc_i32();
+        let concat = self.emitter.rt.concat_str;
+
+        wasm!(self.func, {
+            local_set(rec);
+            i32_const(open_s); local_set(acc);
+        });
+        for (render_idx, &(field_idx, field_off)) in placed.iter().enumerate() {
+            let (fname, fty) = &fields[field_idx];
+            // `, f: ` (the `, ` separator before every field but the first is
+            // folded into the label so the whole prefix is one interned string).
+            let label = format!("{}{}: ", if render_idx > 0 { ", " } else { "" }, fname);
+            let label_s = self.emitter.intern_string(&label) as i32;
+            wasm!(self.func, {
+                local_get(acc); i32_const(label_s); call(concat); local_set(acc);
+                local_get(acc);
+                local_get(rec); i32_const(field_off as i32); i32_add;
+            });
+            self.emit_load_at(fty, 0);
+            self.emit_repr_value(fty);
+            wasm!(self.func, { call(concat); local_set(acc); });
+        }
+        wasm!(self.func, { local_get(acc); i32_const(close_s); call(concat); });
+
+        self.scratch.free_i32(acc);
+        self.scratch.free_i32(rec);
+    }
+
+    /// Variant walk. Layout `[tag:i32][payload...]`; the tag selects the case.
+    /// Each case renders in its constructor form, matching the native impl:
+    ///   tuple variant  → `Click(<repr>, <repr>)`
+    ///   record variant → `Scroll { dy: <repr> }`
+    ///   nullary        → `Quit`
+    /// Cases are dispatched by a chain of `if tag == k` tests (the final case is
+    /// the trailing `else`), so exactly one constructor renders.
+    pub(super) fn emit_repr_variant(&mut self, ty: &Ty) {
+        let (type_name, type_args) = match ty {
+            Ty::Named(n, args) => (n.to_string(), args.clone()),
+            _ => return,
+        };
+        let mut cases = match self.emitter.variant_info.get(type_name.as_str()) {
+            Some(c) => c.clone(),
+            None => return,
+        };
+        // Substitute the site's concrete type args into each case's payload types
+        // so a generic variant (`Wrapper[Int]`) reprs its payload with the resolved
+        // type, not the raw `T`. Generic names are collected from ALL constructors
+        // (so `Either[A,B]` indexes A,B consistently), mirroring
+        // `extract_record_fields`. With no type args, the cases are unchanged.
+        if !type_args.is_empty() {
+            // Collect generic-param names as OWNED strings first (they borrow from
+            // `cases`, which is mutated below).
+            let generic_names: Vec<String> = {
+                let mut names: Vec<&str> = Vec::new();
+                for case in &cases {
+                    for (_, fty) in &case.fields {
+                        super::expressions::collect_type_param_names(fty, &mut names);
+                    }
+                }
+                names.into_iter().map(|s| s.to_string()).collect()
+            };
+            if !generic_names.is_empty() {
+                let name_refs: Vec<&str> = generic_names.iter().map(|s| s.as_str()).collect();
+                for case in &mut cases {
+                    for (_, fty) in &mut case.fields {
+                        *fty = super::expressions::substitute_type_params(fty, &name_refs, &type_args);
+                    }
+                }
+            }
+        }
+        // Payload starts after the tag word — the same offset the constructor
+        // and match-destructure use (`variant_tag_offset`, the single source of
+        // truth). The tag itself is the leading i32 of the cell.
+        let payload_off = self.variant_tag_offset(ty);
+
+        let val = self.scratch.alloc_i32();
+        let tag = self.scratch.alloc_i32();
+        wasm!(self.func, {
+            local_set(val);
+            local_get(val); i32_load(0); local_set(tag); // tag @ cell start
+        });
+
+        let n = cases.len();
+        for (idx, case) in cases.iter().enumerate() {
+            let is_last = idx + 1 == n;
+            if !is_last {
+                // if tag == case.tag { <case> } else { …next… }
+                wasm!(self.func, {
+                    local_get(tag); i32_const(case.tag as i32); i32_eq;
+                    if_i32;
+                });
+            }
+            self.emit_repr_variant_case(val, payload_off, &case.name, &case.fields);
+            if !is_last {
+                wasm!(self.func, { else_; });
+            }
+        }
+        // Close one `end` per non-final case (the if/else chain nests N-1 deep).
+        for _ in 0..n.saturating_sub(1) {
+            wasm!(self.func, { end; });
+        }
+
+        self.scratch.free_i32(tag);
+        self.scratch.free_i32(val);
+    }
+
+    /// Render one variant case onto the stack from the value pointer in `val`.
+    /// Tuple-variant fields carry synthetic `_0, _1, …` names (see
+    /// `register_type_info`); they render positionally, `Click(a, b)`. Real
+    /// field names render as a record-variant, `Scroll { dy: v }`. No fields →
+    /// the bare constructor name.
+    fn emit_repr_variant_case(&mut self, val: u32, payload_off: u32, ctor: &str, fields: &[(String, Ty)]) {
+        if fields.is_empty() {
+            let name_s = self.emitter.intern_string(ctor) as i32;
+            wasm!(self.func, { i32_const(name_s); });
+            return;
+        }
+
+        let is_tuple = fields.iter().all(|(n, _)| is_synthetic_index_name(n));
+        let (open, close): (String, String) = if is_tuple {
+            (format!("{}(", ctor), ")".to_string())
+        } else {
+            (format!("{} {{ ", ctor), " }".to_string())
+        };
+        let open_s = self.emitter.intern_string(&open) as i32;
+        let close_s = self.emitter.intern_string(&close) as i32;
+
+        let acc = self.scratch.alloc_i32();
+        let concat = self.emitter.rt.concat_str;
+        wasm!(self.func, { i32_const(open_s); local_set(acc); });
+
+        let mut offset = payload_off;
+        for (idx, (fname, fty)) in fields.iter().enumerate() {
+            // Tuple payload: `, ` separators only. Record payload: `, f: `.
+            let label = if is_tuple {
+                if idx > 0 { ", ".to_string() } else { String::new() }
+            } else {
+                format!("{}{}: ", if idx > 0 { ", " } else { "" }, fname)
+            };
+            if !label.is_empty() {
+                let label_s = self.emitter.intern_string(&label) as i32;
+                wasm!(self.func, { local_get(acc); i32_const(label_s); call(concat); local_set(acc); });
+            }
+            wasm!(self.func, {
+                local_get(acc);
+                local_get(val); i32_const(offset as i32); i32_add;
+            });
+            self.emit_load_at(fty, 0);
+            self.emit_repr_value(fty);
+            wasm!(self.func, { call(concat); local_set(acc); });
+            offset += values::byte_size(fty);
+        }
+        wasm!(self.func, { local_get(acc); i32_const(close_s); call(concat); });
+        self.scratch.free_i32(acc);
+    }
+}
+
+/// A synthetic tuple-variant field name `_0`, `_1`, … (assigned in
+/// `register_type_info`). Such names mark a tuple-payload variant, rendered
+/// positionally; any other name marks a record-payload variant.
+fn is_synthetic_index_name(name: &str) -> bool {
+    name.strip_prefix('_').map_or(false, |rest| !rest.is_empty() && rest.bytes().all(|b| b.is_ascii_digit()))
 }

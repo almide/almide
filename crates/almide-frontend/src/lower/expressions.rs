@@ -568,8 +568,13 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
                 ast::StringPart::Lit { value } => IrStringPart::Lit { value: value.clone() },
                 ast::StringPart::Expr { expr } => {
                     let mut ir_expr = lower_expr(ctx, expr);
-                    // Operator protocol: dispatch to Repr convention if available
-                    if let Some(repr_fn) = ctx.find_convention_fn(&ir_expr.ty, "repr") {
+                    // Operator protocol: dispatch to an EXPLICIT user `repr` only.
+                    // An auto-derived `repr` is intentionally NOT used here — the
+                    // record/variant instead falls through to the codegen
+                    // `AlmideRepr` impl (the canonical literal form with quoted
+                    // strings), so an auto-derived and a plain record interpolate
+                    // byte-identically. An explicit `fn X.repr` still wins.
+                    if let Some(repr_fn) = ctx.find_explicit_convention_fn(&ir_expr.ty, "repr") {
                         ir_expr = ctx.mk(IrExprKind::Call {
                             target: CallTarget::Named { name: repr_fn },
                             args: vec![ir_expr], type_args: vec![],
@@ -629,7 +634,27 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
 
         // ── Misc ──
         ast::ExprKind::Paren { expr, .. } => lower_expr(ctx, expr),
-        ast::ExprKind::TypeAscription { expr, .. } => lower_expr(ctx, expr),
+        ast::ExprKind::TypeAscription { expr, ty: ascribed_te } => {
+            // The ascription pins the inner expression's type (`[]: List[Int]`).
+            // Lower the inner expr, then adopt the ascribed type when the inner
+            // came back less resolved — an empty collection literal otherwise
+            // carries an unresolved element type, which codegen renders as an
+            // uninferable `Vec::<_>::new()` (native E0282) under `almide_repr`.
+            // The annotation's own `TypeExpr` is the authoritative source: the
+            // checker's resolved type-map entry for the ascription can still be
+            // an unresolved `List[?]` when nothing outside the annotation
+            // constrained the element.
+            let mut inner = lower_expr(ctx, expr);
+            if inner.ty.has_unresolved_deep() {
+                let ascribed = resolve_type_expr(ascribed_te);
+                if !ascribed.has_unresolved_deep() {
+                    inner.ty = ascribed;
+                } else if !ty.has_unresolved_deep() {
+                    inner.ty = ty;
+                }
+            }
+            inner
+        }
         ast::ExprKind::Hole => ctx.mk(IrExprKind::Hole, ty, span),
         ast::ExprKind::Todo { message, .. } => ctx.mk(IrExprKind::Todo { message: message.clone() }, ty, span),
         ast::ExprKind::Error => ctx.mk(IrExprKind::Unit, Ty::Unknown, span),

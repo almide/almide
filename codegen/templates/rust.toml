@@ -362,7 +362,7 @@ template = "_"
 template = "_"
 
 [empty_map]
-template = "AlmideMap::new()"
+template = "AlmideMap::<{key_type}, {value_type}>::new()"
 
 [try_expr]
 template = "({inner})?"

@@ -378,21 +378,27 @@ fn almide_repr_prelude(vis: &str) -> String {
     for t in ["i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f32", "f64", "bool"] {
         s.push_str(&format!("impl AlmideRepr for {t} {{ fn almide_repr(&self) -> String {{ format!(\"{{}}\", self) }} }}\n"));
     }
-    // Strings inside a container are double-quoted + escaped.
-    s.push_str("impl AlmideRepr for String { fn almide_repr(&self) -> String { almide_repr_str(self) } }\n");
+    // Strings inside a container are double-quoted + escaped. The impl TARGET of
+    // every std type below is FULLY QUALIFIED (`std::string::String`,
+    // `std::boxed::Box`, …): a user `type Box = { … }` / `type Vec = …` lowers to
+    // a `pub struct Box`/`pub struct Vec` that would otherwise SHADOW the std type
+    // at the impl site, binding this blanket impl to the user struct (E0614:
+    // `(**self)` on a non-pointer, or a method-not-found). Qualifying pins each
+    // blanket to the real std type so the user's own type keeps its generated impl.
+    s.push_str("impl AlmideRepr for std::string::String { fn almide_repr(&self) -> String { almide_repr_str(self) } }\n");
     s.push_str("impl AlmideRepr for str { fn almide_repr(&self) -> String { almide_repr_str(self) } }\n");
     // List: `[a, b, c]`, empty `[]`.
-    s.push_str("impl<T: AlmideRepr> AlmideRepr for Vec<T> { fn almide_repr(&self) -> String { let mut o = String::from(\"[\"); for (i, e) in self.iter().enumerate() { if i > 0 { o.push_str(\", \"); } o.push_str(&e.almide_repr()); } o.push(']'); o } }\n");
+    s.push_str("impl<T: AlmideRepr> AlmideRepr for std::vec::Vec<T> { fn almide_repr(&self) -> String { let mut o = String::from(\"[\"); for (i, e) in self.iter().enumerate() { if i > 0 { o.push_str(\", \"); } o.push_str(&e.almide_repr()); } o.push(']'); o } }\n");
     // Option: `some(v)` / `none`.
-    s.push_str("impl<T: AlmideRepr> AlmideRepr for Option<T> { fn almide_repr(&self) -> String { match self { Some(v) => format!(\"some({})\", v.almide_repr()), None => \"none\".to_string() } } }\n");
+    s.push_str("impl<T: AlmideRepr> AlmideRepr for std::option::Option<T> { fn almide_repr(&self) -> String { match self { Some(v) => format!(\"some({})\", v.almide_repr()), None => \"none\".to_string() } } }\n");
     // Result: `ok(v)` / `err(e)`.
-    s.push_str("impl<T: AlmideRepr, E: AlmideRepr> AlmideRepr for Result<T, E> { fn almide_repr(&self) -> String { match self { Ok(v) => format!(\"ok({})\", v.almide_repr()), Err(e) => format!(\"err({})\", e.almide_repr()) } } }\n");
+    s.push_str("impl<T: AlmideRepr, E: AlmideRepr> AlmideRepr for std::result::Result<T, E> { fn almide_repr(&self) -> String { match self { Ok(v) => format!(\"ok({})\", v.almide_repr()), Err(e) => format!(\"err({})\", e.almide_repr()) } } }\n");
     // RcCow / SharedMut transparently forward to the wrapped value.
     s.push_str("impl<T: AlmideRepr> AlmideRepr for RcCow<T> { fn almide_repr(&self) -> String { (**self).almide_repr() } }\n");
     s.push_str("impl<T: AlmideRepr + Clone> AlmideRepr for SharedMut<T> { fn almide_repr(&self) -> String { self.0.borrow().almide_repr() } }\n");
     // Reference forwarders so `almide_repr(&&x)` and slice elements compose.
     s.push_str("impl<T: AlmideRepr + ?Sized> AlmideRepr for &T { fn almide_repr(&self) -> String { (**self).almide_repr() } }\n");
-    s.push_str("impl<T: AlmideRepr + ?Sized> AlmideRepr for Box<T> { fn almide_repr(&self) -> String { (**self).almide_repr() } }\n");
+    s.push_str("impl<T: AlmideRepr + ?Sized> AlmideRepr for std::boxed::Box<T> { fn almide_repr(&self) -> String { (**self).almide_repr() } }\n");
     // Tuples: `(a, b, …)` for arities 2..=12 (the parser caps tuple width well below this).
     let names = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L"];
     for arity in 2..=names.len() {

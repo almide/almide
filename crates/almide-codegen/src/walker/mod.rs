@@ -56,11 +56,17 @@ pub struct RenderContext<'a> {
     /// `RefMut` param into another `RefMut` callee slot (Rust
     /// auto-reborrows).
     pub ref_mut_params: std::collections::HashSet<VarId>,
+    /// Names of user-defined record/variant types that have a generated
+    /// `AlmideRepr` impl (see `render_repr_impl`). A `Ty::Named` in a compound
+    /// interpolation part routes through `almide_repr` only when it is in this
+    /// set, so a value with the impl renders to its literal form while opaque
+    /// `Named` references (e.g. runtime newtypes) stay on the Display path.
+    pub repr_named_types: std::collections::HashSet<almide_base::intern::Sym>,
 }
 
 impl<'a> RenderContext<'a> {
     pub fn new(templates: &'a TemplateSet, var_table: &'a VarTable) -> Self {
-        Self { templates, var_table, indent: 0, target: Target::Rust, auto_unwrap: false, is_test: false, ann: CodegenAnnotations::default(), type_aliases: std::collections::HashMap::new(), generic_types: std::collections::HashSet::new(), minimal_generic_bounds: false, repr_c: false, ref_params: std::collections::HashSet::new(), ref_mut_params: std::collections::HashSet::new() }
+        Self { templates, var_table, indent: 0, target: Target::Rust, auto_unwrap: false, is_test: false, ann: CodegenAnnotations::default(), type_aliases: std::collections::HashMap::new(), generic_types: std::collections::HashSet::new(), minimal_generic_bounds: false, repr_c: false, ref_params: std::collections::HashSet::new(), ref_mut_params: std::collections::HashSet::new(), repr_named_types: std::collections::HashSet::new() }
     }
 
     pub fn with_target(mut self, target: Target) -> Self {
@@ -147,6 +153,7 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
         repr_c: ctx.repr_c,
         ref_params,
         ref_mut_params,
+        repr_named_types: ctx.repr_named_types.clone(),
     };
 
     // Dispatch-only fns (body is Hole): `@inline_rust` / `@intrinsic`
@@ -439,6 +446,17 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
             generic_types.insert(td.name);
         }
     }
+    // Record/variant types that get a generated `AlmideRepr` impl — a value of
+    // such a type interpolated in a string renders to its literal form. Gate
+    // mirrors `render_repr_impl` (closure-bearing types are excluded).
+    let mut repr_named_types = std::collections::HashSet::new();
+    for td in program.type_decls.iter()
+        .chain(program.modules.iter().flat_map(|m| m.type_decls.iter()))
+    {
+        if declarations::type_has_repr_impl(td) {
+            repr_named_types.insert(td.name);
+        }
+    }
     let mut ann = ctx.ann.clone();
     // Compute which user types cannot derive PartialEq (contain Matrix,
     // Fn, or a field whose type itself blocks equality). Must consider
@@ -620,6 +638,7 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
         repr_c: ctx.repr_c,
         ref_params: std::collections::HashSet::new(),
         ref_mut_params: std::collections::HashSet::new(),
+        repr_named_types,
     };
     for td in &program.type_decls {
         if let IrTypeDeclKind::Variant { cases, .. } = &td.kind {
@@ -680,6 +699,44 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
             let repr_prefix = if ctx.repr_c { "#[repr(C)]\n" } else { "" };
             parts.push(ctx.templates.render_with("struct_decl", None, &decl_attrs, &[("name", full_name.as_str()), ("fields", fields_str.as_str())])
                 .unwrap_or_else(|| format!("{}pub struct {} {{\n{}\n}}", repr_prefix, struct_name, fields_str)));
+
+            // `AlmideRepr` impl for the anonymous struct: `"${rec}"` renders an
+            // anonymous record to `{ x: 1, y: 2 }` — NO type name, because it HAS
+            // none — byte-identically with the WASM anon-record walk. A
+            // closure-bearing anon record (`has_fn`) is not `AlmideRepr`, so it is
+            // skipped (it never reaches compound interp). Fields render in the
+            // struct's own field order, which is the SORTED field-name list (this
+            // `field_names` is the sorted key from `collect_anon_records`); the
+            // WASM walk sorts to match (see `emit_repr_record`).
+            if !has_fn {
+                let bare_generics: Vec<String> = (0..field_names.len())
+                    .map(|i| format!("T{}", i)).collect();
+                // The anon struct declares each param via `generic_bound_full`
+                // (`T: Clone + Debug + PartialEq`); the impl must satisfy those
+                // same bounds, plus `AlmideRepr` so the field reprs compose.
+                // Reuse the template so the bounds stay in lock-step with the decl.
+                let impl_bounds = bare_generics.iter()
+                    .map(|t| {
+                        let own = ctx.templates.render_with("generic_bound_full", None, &[], &[("name", t.as_str())])
+                            .unwrap_or_else(|| format!("{}: Clone + std::fmt::Debug + PartialEq", t));
+                        match own.split_once(':') {
+                            Some((name, rest)) => format!("{}: AlmideRepr +{}", name.trim_end(), rest),
+                            None => format!("{}: AlmideRepr", t),
+                        }
+                    })
+                    .collect::<Vec<_>>().join(", ");
+                let target = format!("{}<{}>", struct_name, bare_generics.join(", "));
+                let fmt = field_names.iter().enumerate()
+                    .map(|(i, name)| format!("{}{}: {{}}", if i > 0 { ", " } else { "" }, name))
+                    .collect::<Vec<_>>().join("");
+                let args = field_names.iter()
+                    .map(|name| format!("self.{}.almide_repr()", name))
+                    .collect::<Vec<_>>().join(", ");
+                parts.push(format!(
+                    "impl<{}> AlmideRepr for {} {{ fn almide_repr(&self) -> String {{ format!(\"{{{{ {} }}}}\", {}) }} }}",
+                    impl_bounds, target, fmt, args
+                ));
+            }
         }
     }
 

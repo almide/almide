@@ -43,6 +43,8 @@ pub struct LowerCtx<'a> {
     type_map: &'a TypeMap,
     fn_defaults: HashMap<Sym, Vec<Option<ast::Expr>>>,
     type_conventions: HashMap<Sym, std::collections::HashSet<Sym>>,
+    /// `Type.convention` names the user wrote explicitly (vs auto-derived).
+    explicit_convention_fns: std::collections::HashSet<Sym>,
     protocol_bounds: HashMap<Sym, Vec<Sym>>,
     lambda_id_counter: u32,
     /// Maps const param name → VarId for value parameter lowering.
@@ -62,6 +64,7 @@ impl<'a> LowerCtx<'a> {
             type_map,
             fn_defaults: HashMap::new(),
             type_conventions: HashMap::new(),
+            explicit_convention_fns: std::collections::HashSet::new(),
             protocol_bounds: HashMap::new(),
             lambda_id_counter: 0,
             const_param_vars: HashMap::new(),
@@ -74,6 +77,21 @@ impl<'a> LowerCtx<'a> {
     /// Returns the fully qualified function name if:
     /// - The function is explicitly defined in env.functions, OR
     /// - The type declares `deriving <Convention>` (auto-derive will generate the function)
+    /// A convention method the user wrote EXPLICITLY (not one auto-derive will
+    /// synthesize). String interpolation of a record/variant uses this — when no
+    /// explicit `repr` exists it falls through to the codegen `AlmideRepr` impl,
+    /// the canonical Almide-literal form (quoted strings, Display floats), so a
+    /// `deriving Repr` record and a plain record interpolate identically.
+    pub(super) fn find_explicit_convention_fn(&self, ty: &Ty, convention: &str) -> Option<Sym> {
+        if let Ty::Named(type_name, _) = ty {
+            let fn_name = sym(&format!("{}.{}", type_name, convention));
+            if self.explicit_convention_fns.contains(&fn_name) {
+                return Some(fn_name);
+            }
+        }
+        None
+    }
+
     pub(super) fn find_convention_fn(&self, ty: &Ty, convention: &str) -> Option<Sym> {
         if let Ty::Named(type_name, _) = ty {
             let fn_name = sym(&format!("{}.{}", type_name, convention));
@@ -218,6 +236,27 @@ fn lower_program_with_prefix(prog: &ast::Program, env: &TypeEnv, type_map: &Type
             for conv in derives {
                 ctx.type_conventions.entry(*conv).or_default().insert(*name);
             }
+        }
+    }
+
+    // Collect convention methods the user wrote EXPLICITLY (a dotted `fn X.repr`
+    // or an `impl` method), as opposed to ones auto-derive will synthesize. The
+    // interpolation `repr` dispatch uses this so a `deriving Repr` record falls
+    // through to the codegen `AlmideRepr` impl (canonical literal form) while a
+    // hand-written `fn X.repr` still overrides it.
+    for decl in &prog.decls {
+        match decl {
+            ast::Decl::Fn { name, body: Some(_), .. } if name.as_str().contains('.') => {
+                ctx.explicit_convention_fns.insert(*name);
+            }
+            ast::Decl::Impl { for_, methods, .. } => {
+                for m in methods {
+                    if let ast::Decl::Fn { name, body: Some(_), .. } = m {
+                        ctx.explicit_convention_fns.insert(sym(&format!("{}.{}", for_, name)));
+                    }
+                }
+            }
+            _ => {}
         }
     }
 

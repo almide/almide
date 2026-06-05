@@ -28,6 +28,7 @@ mod rt_numeric;
 mod rt_dragon;
 mod rt_dec2flt;
 mod rt_repr;
+mod rt_float_display;
 mod calls_string_repr;
 mod expressions;
 mod stdlib_dispatch;
@@ -339,6 +340,11 @@ pub struct RuntimeFuncs {
     /// interpolation). Escape set mirrors `almide_rt_value_stringify` and the
     /// native `almide_repr_str`: `\\ \" \n \r \t`.
     pub repr_str: u32,
+    /// __float_display(f: f64) -> i32: the `Display`-form float text used by
+    /// string interpolation — the Dragon4 `float.to_string` output with a
+    /// trailing `.0` removed, matching the native Rust `Display` oracle
+    /// (`0.0` → `0`, `1.0` → `1`; non-integral values are unchanged).
+    pub float_display: u32,
 }
 
 /// Import descriptor for WASM import section.
@@ -439,6 +445,15 @@ pub struct WasmEmitter {
     pub mutable_captures: HashSet<u32>,
     // Deep-equality functions per variant type: type_name → func_idx
     pub eq_funcs: HashMap<String, u32>,
+    // Almide-literal repr functions per NAMED record/variant type: type_name →
+    // func_idx. A `__repr_<Type>(ptr) -> str_ptr` walks one finite value of that
+    // type back to its literal form, recursing into self/mutually-recursive type
+    // references as a CALL (terminating at runtime over the finite value) — the
+    // same shape as the native `AlmideRepr` trait dispatch. Without this, a
+    // recursive ADT (`type Tree = Leaf(Int) | Node(Tree, Tree)`) would expand its
+    // type graph forever at compile time. Reserved (sorted, host-deterministic)
+    // before compilation, mirroring `eq_funcs`.
+    pub repr_funcs: BTreeMap<String, u32>,
     // Whether the program uses filesystem operations (fs.read_text, etc.)
     pub needs_fs: bool,
 }
@@ -555,6 +570,7 @@ impl WasmEmitter {
                 dragon: rt_dragon::DragonRuntime::default(),
                 decfloat: rt_dec2flt::DecFloatRuntime::default(),
                 repr_str: 0,
+                float_display: 0,
             },
             heap_ptr_global: 0,
             free_list_global: 1,
@@ -576,6 +592,7 @@ impl WasmEmitter {
             effect_fns: HashSet::new(),
             mutable_captures: HashSet::new(),
             eq_funcs: HashMap::new(),
+            repr_funcs: BTreeMap::new(),
             user_exports: Vec::new(),
             needs_fs: false,
         }
@@ -1423,6 +1440,10 @@ pub(crate) fn emit(program: &IrProgram) -> Vec<u8> {
     // Pre-register variant deep-equality functions (must be before compilation starts)
     register_variant_eq_funcs(&mut emitter);
 
+    // Pre-register per-type Almide-literal repr functions (recursive ADTs walk via
+    // call, not inline expansion). Must reserve indices before compilation starts.
+    register_repr_funcs(&mut emitter);
+
     // Phase 2: Compile function bodies (order must match registration order)
     runtime::compile_runtime(&mut emitter);
 
@@ -1489,6 +1510,11 @@ pub(crate) fn emit(program: &IrProgram) -> Vec<u8> {
 
     // Compile variant deep-equality functions (bodies, after all user code)
     compile_variant_eq_funcs(&mut emitter, &program.var_table);
+
+    // Compile per-type repr function bodies (after eq funcs, same sorted-order
+    // index/body contract). Order relative to eq funcs matches the registration
+    // order above (eq funcs reserved first, then repr funcs).
+    compile_repr_funcs(&mut emitter, &program.var_table);
 
     // Phase 2.5: Dead Code Elimination
     let dce_count = dce::eliminate_dead_code(&mut emitter);
@@ -2158,6 +2184,196 @@ fn compile_variant_eq_funcs(emitter: &mut WasmEmitter, var_table: &almide_ir::Va
                 }
             }
 
+            compiler.func.instruction(&wasm_encoder::Instruction::End);
+            compiler.func
+        };
+
+        emitter.add_compiled(CompiledFunc::tracked(type_idx, compiled_func));
+    }
+}
+
+/// A named record/variant type is repr-backed unless it (transitively, through a
+/// container) holds a closure field — a closure has no Almide-literal form, so it
+/// never reaches compound interpolation. Mirrors the native `type_has_repr_impl`
+/// closure gate so the two targets agree on exactly which types get a repr.
+fn ty_field_has_closure(ty: &almide_lang::types::Ty) -> bool {
+    matches!(ty, almide_lang::types::Ty::Fn { .. })
+        || ty.children().into_iter().any(ty_field_has_closure)
+}
+
+/// Collect the names of named types referenced anywhere inside `ty` (directly or
+/// nested in a container / tuple / record), into `out`.
+fn collect_named_refs(ty: &almide_lang::types::Ty, out: &mut HashSet<String>) {
+    if let almide_lang::types::Ty::Named(n, _) = ty {
+        out.insert(n.to_string());
+    }
+    for child in ty.children() {
+        collect_named_refs(child, out);
+    }
+}
+
+/// The set of named record/variant types that lie on a reference CYCLE — i.e. a
+/// type that can reach itself through its fields/cases (self-recursion like
+/// `Tree = … Node(Tree, Tree)`, or mutual recursion `A → B → A`). Only these need
+/// a per-type repr function: a NON-recursive type stays on the inline walk, where
+/// the concrete `Ty::Named(_, type_args)` at the interpolation site resolves its
+/// fields' types (so a generic non-recursive type like `Box[Int]` reprs its `T`
+/// payload correctly). A recursive type's inline walk would instead expand its
+/// type graph forever at compile time, so it routes through its repr fn where the
+/// self-reference is a runtime CALL.
+fn recursive_type_names(emitter: &WasmEmitter) -> HashSet<String> {
+    // Edge set: type name → directly-referenced named types (through fields).
+    let mut edges: HashMap<String, HashSet<String>> = HashMap::new();
+    for (name, cases) in &emitter.variant_info {
+        let mut refs = HashSet::new();
+        for c in cases {
+            for (_, ft) in &c.fields { collect_named_refs(ft, &mut refs); }
+        }
+        edges.insert(name.clone(), refs);
+    }
+    let case_names: HashSet<String> = emitter.variant_info.values()
+        .flat_map(|cases| cases.iter().map(|c| c.name.clone()))
+        .collect();
+    for (name, fields) in &emitter.record_fields {
+        if name.starts_with("__anon_record_") || case_names.contains(name)
+            || emitter.variant_info.contains_key(name) { continue; }
+        let mut refs = HashSet::new();
+        for (_, ft) in fields { collect_named_refs(ft, &mut refs); }
+        edges.insert(name.clone(), refs);
+    }
+
+    // A type is recursive iff it can reach itself. Reachability via DFS over the
+    // edge set (only edges to nodes that are themselves typed are followed).
+    let mut recursive = HashSet::new();
+    for start in edges.keys() {
+        let mut stack: Vec<String> = edges[start].iter().cloned().collect();
+        let mut seen: HashSet<String> = HashSet::new();
+        while let Some(n) = stack.pop() {
+            if &n == start { recursive.insert(start.clone()); break; }
+            if !seen.insert(n.clone()) { continue; }
+            if let Some(next) = edges.get(&n) {
+                for m in next { stack.push(m.clone()); }
+            }
+        }
+    }
+    recursive
+}
+
+/// Pre-register one `__repr_<TypeName>(ptr: i32) -> i32` per repr-backed NAMED
+/// record/variant type that lies on a reference cycle. Recursion (self / mutual)
+/// becomes a CALL into the callee's repr fn, so a finite runtime value terminates
+/// exactly like the native trait dispatch — inline expansion of a recursive type
+/// graph would loop forever at compile time. NON-recursive types are walked
+/// inline (the concrete type args at the interpolation site resolve their fields).
+///
+/// Reserve indices in SORTED name order so they are a pure function of the
+/// program (the same 32-bit/64-bit host-determinism contract as
+/// `register_variant_eq_funcs`); the (also sorted) compile order must match.
+fn register_repr_funcs(emitter: &mut WasmEmitter) {
+    let type_idx = emitter.register_type(vec![ValType::I32], vec![ValType::I32]);
+
+    let recursive = recursive_type_names(emitter);
+
+    // Repr-backed RECURSIVE named types: every recursive variant type, plus every
+    // recursive named record. A record case-name is also stored in `record_fields`
+    // (for field access), so restrict records to declared record types — not the
+    // synthetic `__anon_record_*` shapes (walked inline) and not the variant CASE
+    // names (a `Node` value reprs through its variant type's fn, by tag). A type
+    // with a closure field is excluded.
+    let mut names: Vec<String> = Vec::new();
+    for (name, cases) in &emitter.variant_info {
+        let has_closure = cases.iter().any(|c| c.fields.iter().any(|(_, ft)| ty_field_has_closure(ft)));
+        if recursive.contains(name) && !has_closure {
+            names.push(name.clone());
+        }
+    }
+    // Variant CASE names that are also keyed in record_fields — skip them as
+    // standalone record reprs (they are reached via the owning variant type).
+    let case_names: HashSet<String> = emitter.variant_info.values()
+        .flat_map(|cases| cases.iter().map(|c| c.name.clone()))
+        .collect();
+    for (name, fields) in &emitter.record_fields {
+        let is_anon = name.starts_with("__anon_record_");
+        let is_variant_case = case_names.contains(name);
+        let is_variant_type = emitter.variant_info.contains_key(name);
+        let has_closure = fields.iter().any(|(_, ft)| ty_field_has_closure(ft));
+        if recursive.contains(name) && !is_anon && !is_variant_case && !is_variant_type && !has_closure {
+            names.push(name.clone());
+        }
+    }
+    names.sort();
+    names.dedup();
+    for name in names {
+        let func_idx = emitter.register_func(&format!("__repr_{}", name), type_idx);
+        emitter.repr_funcs.insert(name, func_idx);
+    }
+}
+
+/// Compile each `__repr_<TypeName>` body: load the value pointer (param 0) and
+/// run the SAME structural walk the inline path uses (`emit_repr_record` /
+/// `emit_repr_variant`). Nested named-type fields recurse as a CALL because
+/// `emit_repr_value` routes a repr-backed `Ty::Named` through its repr fn (see
+/// `calls_string_repr.rs`). Body-emit order is sorted to match the (sorted)
+/// index reservation in `register_repr_funcs`.
+fn compile_repr_funcs(emitter: &mut WasmEmitter, var_table: &almide_ir::VarTable) {
+    let mut entries: Vec<(String, u32)> = emitter.repr_funcs.iter()
+        .map(|(n, &idx)| (n.clone(), idx))
+        .collect();
+    entries.sort();
+
+    for (name, _func_idx) in &entries {
+        let type_idx = emitter.register_type(vec![ValType::I32], vec![ValType::I32]);
+
+        // One repr fn walks a SINGLE level (children recurse via call), so its
+        // scratch demand is bounded by one type's field/case count — the generous
+        // caps below mirror the eq-fn setup and never approach the inline-expansion
+        // overflow that motivated these functions.
+        let mut local_decls = Vec::new();
+        let scratch_i32_cap = 32usize;
+        let scratch_i64_cap = 8usize;
+        let scratch_f64_cap = 2usize;
+        let scratch_i32_base = 1u32; // after the single `ptr` param
+        for _ in 0..scratch_i32_cap { local_decls.push((1, ValType::I32)); }
+        let scratch_i64_base = scratch_i32_base + scratch_i32_cap as u32;
+        for _ in 0..scratch_i64_cap { local_decls.push((1, ValType::I64)); }
+        let scratch_f64_base = scratch_i64_base + scratch_i64_cap as u32;
+        for _ in 0..scratch_f64_cap { local_decls.push((1, ValType::F64)); }
+
+        let wasm_func = TrackedFunction::new(local_decls);
+        let mut scratch_alloc = scratch::ScratchAllocator::new();
+        scratch_alloc.set_bases_with_capacity(
+            scratch_i32_base, scratch_i32_cap,
+            scratch_i64_base, scratch_i64_cap,
+            scratch_f64_base, scratch_f64_cap,
+        );
+
+        // The repr emitters dispatch on the static `Ty` of the value: a variant
+        // type → `emit_repr_variant`, otherwise a record → `emit_repr_record`.
+        let is_variant = emitter.variant_info.contains_key(name.as_str());
+        let ty = almide_lang::types::Ty::Named(almide_base::intern::sym(name), Vec::new());
+
+        let compiled_func = {
+            let mut compiler = FuncCompiler {
+                emitter: &mut *emitter,
+                func: wasm_func,
+                var_map: std::collections::HashMap::new(),
+                depth: 0,
+                loop_stack: Vec::new(),
+                scratch: scratch_alloc,
+                var_table,
+                stub_ret_ty: almide_lang::types::Ty::Unit,
+                current_module_name: None,
+            };
+
+            // Push the value pointer (param 0); the walk consumes it from the
+            // stack and leaves the result string pointer (the return value).
+            wasm!(compiler.func, { local_get(0); });
+            if is_variant {
+                compiler.emit_repr_variant(&ty);
+            } else {
+                let fields = compiler.extract_record_fields(&ty);
+                compiler.emit_repr_record(Some(name.as_str()), &fields);
+            }
             compiler.func.instruction(&wasm_encoder::Instruction::End);
             compiler.func
         };
