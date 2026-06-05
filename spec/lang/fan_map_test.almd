@@ -30,3 +30,39 @@ test "fan.map with capture" {
   let results = fan.map([1, 2, 3], (x) => add_offset(x, offset));
   assert_eq(results, ok([101, 102, 103]))
 }
+
+// ── Inline-lambda callbacks ──
+// These wrap the param in an `ok(...)`/`err(...)` directly in the lambda body
+// (no named effect fn). The Result wrapper hides the param's use site, so the
+// checker must still pin the callback param to the list element type. Otherwise
+// the param stays a free var -> Ty::Unknown -> WASM reads it as i32 while the
+// body emits i64 (validator: i32 != i64). All shapes are exercised here.
+
+test "fan.map inline ok lambda (i64 payload)" {
+  // The original break: `x * 10` is i64; without the param pin the wasm closure
+  // registered x as i32 and the module failed to build.
+  let results = fan.map([1, 2, 3], (x) => ok(x * 10));
+  assert_eq(results, ok([10, 20, 30]))
+}
+
+test "fan.map inline lambda capturing an outer Int" {
+  let factor = 100;
+  let results = fan.map([1, 2], (x) => ok(x * factor));
+  assert_eq(results, ok([100, 200]))
+}
+
+test "fan.map inline lambda changing the element type" {
+  let results = fan.map([7, 8], (x) => ok("n" + int.to_string(x)));
+  assert_eq(results, ok(["n7", "n8"]))
+}
+
+test "fan.map inline lambda over String elements" {
+  let results = fan.map(["a", "b"], (s) => ok(s + "!"));
+  assert_eq(results, ok(["a!", "b!"]))
+}
+
+test "fan.map inline lambda propagating element Err" {
+  let results = fan.map([1, 2, 3], (x) =>
+    if x == 2 then err("boom") else ok(x * 10));
+  assert_eq(results, err("boom"))
+}
