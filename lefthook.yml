@@ -3,6 +3,9 @@ pre-commit:
     roadmap-readme:
       glob: "docs/roadmap/{active,on-hold,done}/*.md"
       run: bash docs/roadmap/generate-readme.sh > docs/roadmap/README.md && git add docs/roadmap/README.md
+    rt-oracle-registry:
+      glob: "{crates/almide-codegen/src/emit_wasm/*.rs,crates/almide-codegen/rt-oracle-registry.toml,scripts/check-rt-oracle-registry.sh}"
+      run: scripts/check-rt-oracle-registry.sh
 
 commit-msg:
   scripts:
