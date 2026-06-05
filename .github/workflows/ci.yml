@@ -239,6 +239,9 @@ jobs:
       - name: Forbidden impurities (no raw clocks/threads in the compile path)
         run: scripts/check-forbidden-impurities.sh
 
+      - name: WASM runtime oracle-pairing registry (every compile_* registered + verified tests exist)
+        run: scripts/check-rt-oracle-registry.sh
+
   # ═══════════════════════════════════════════════
   # Full CI — cross-platform (PRs to main only)
   # ═══════════════════════════════════════════════
