@@ -1,0 +1,66 @@
+// Regression: WASM float.parse must produce the SAME f64 as native
+// (Rust `s.trim().parse::<f64>()`), i.e. correctly-rounded round-to-nearest-even.
+// The old WASM parser accumulated the mantissa in f64 (`acc*10+digit`, `*10^exp`),
+// which is NOT correctly rounded: "0.3" → 0.30000000000000004, long mantissas drift,
+// subnormals collapse to 0. The runtime now uses Clinger AlgorithmM with exact
+// big-integer arithmetic (crates/almide-codegen/src/emit_wasm/rt_dec2flt.rs),
+// reusing the Dragon4 bignum. Each parse is printed via the (shortest-round-trip)
+// float.to_string so any 1-ULP error would show as different bytes.
+effect fn main() -> Unit = {
+  // Classic non-exact decimals (each was wrong by ≥1 ULP before).
+  println(float.to_string(float.parse("0.1")!))   // 0.1
+  println(float.to_string(float.parse("0.2")!))   // 0.2
+  println(float.to_string(float.parse("0.3")!))   // 0.3  (was 0.30000000000000004)
+  println(float.to_string(float.parse("8.7")!))
+  println(float.to_string(float.parse("1.1")!))
+  println(float.to_string(float.parse("123.456")!))
+
+  // 2^53 boundary + long integers (f64 can't hold all digits exactly).
+  println(float.to_string(float.parse("9007199254740993")!))
+  println(float.to_string(float.parse("123456789012345678")!))
+
+  // Scientific notation, sign, trimming.
+  println(float.to_string(float.parse("6.022e23")!))
+  println(float.to_string(float.parse("-1.6021766e-19")!))
+  println(float.to_string(float.parse("  +3.14  ")!))
+  println(float.to_string(float.parse("1E3")!))
+
+  // Overflow / largest finite / smallest normal.
+  println(float.to_string(float.parse("1.7976931348623157e308")!))
+  println(float.to_string(float.parse("1e308")!))
+  println(float.to_string(float.parse("1e309")!))            // inf
+  println(float.to_string(float.parse("2.2250738585072014e-308")!))
+
+  // Subnormals (were 0 before): smallest subnormal and rounding around it.
+  println(float.to_string(float.parse("5e-324")!))           // smallest subnormal
+  println(float.to_string(float.parse("2.5e-324")!))         // ties to even
+  println(float.to_string(float.parse("2.4e-324")!))         // → 0
+  println(float.to_string(float.parse("1e-323")!))
+  println(float.to_string(float.parse("1e-400")!))           // underflow → 0
+
+  // Exponent saturation: a huge base-10 exponent must give inf/0, never wrap the
+  // i32 exponent accumulator (e.g. "1e4294967296" used to wrap to exp 0 → 1.0).
+  println(float.to_string(float.parse("1e2147483648")!))   // inf
+  println(float.to_string(float.parse("1e4294967296")!))   // inf
+  println(float.to_string(float.parse("1e-2147483649")!))  // 0
+  println(float.to_string(float.parse("1e1000000000000")!))  // inf
+
+  // Leading zeros must NOT consume the significand-digit budget — this is the flat
+  // decimal `float.to_string` emits for a tiny float, so parse(to_string(x)) == x.
+  println(float.to_string(float.parse("0.0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000222507385850720138")!))
+
+  // Non-finite + sign.
+  println(float.to_string(float.parse("inf")!))
+  println(float.to_string(float.parse("-inf")!))
+  println(float.to_string(float.parse("infinity")!))
+  println(float.to_string(float.parse("nan")!))
+  println(float.to_string(float.parse("-0")!))               // -0
+
+  // Error strings must byte-match Rust's ParseFloatError.
+  match float.parse("abc")   { ok(v) => println("?"), err(e) => println(e) }
+  match float.parse("")      { ok(v) => println("?"), err(e) => println(e) }
+  match float.parse("   ")   { ok(v) => println("?"), err(e) => println(e) }
+  match float.parse("1e")    { ok(v) => println("?"), err(e) => println(e) }
+  match float.parse("1.2.3") { ok(v) => println("?"), err(e) => println(e) }
+  match float.parse("1.0x")  { ok(v) => println("?"), err(e) => println(e) }
+}

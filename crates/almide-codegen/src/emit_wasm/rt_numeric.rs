@@ -211,10 +211,25 @@ pub(super) fn compile_float_parse(emitter: &mut WasmEmitter) {
         (1, ValType::I32),  // 14: exp_digit_count
         (1, ValType::F64),  // 15: pow10
         (1, ValType::I32),  // 16: saw_e
+        (1, ValType::I32),  // 17: sig (significand bignum ptr)
+        (1, ValType::I32),  // 18: frac_count (fractional digits kept in sig)
+        (1, ValType::I32),  // 19: started (seen the first significant digit)
+        (1, ValType::I32),  // 20: sig_digits (significant digits accumulated)
+        (1, ValType::I32),  // 21: sticky (a dropped significand digit was non-zero)
     ]);
 
     let empty_err = emitter.intern_string("cannot parse float from empty string");
     let invalid_err = emitter.intern_string("invalid float literal");
+    let sig_stride = super::rt_dragon::BN_STRIDE as i32;
+    let sig_hdr = super::rt_dragon::BN_HDR as i32;
+    let mul_small = emitter.rt.dragon.mul_small;
+    let bn_add_small = emitter.rt.decfloat.bn_add_small;
+    let dec2flt = emitter.rt.decfloat.dec2flt;
+    // Saturate the base-10 exponent magnitude well before it can overflow the i32
+    // accumulator (`exp_val*10 + digit`). Any |exp10| past a few hundred already
+    // rounds to ±inf or ±0 in __dec2flt, so clamping here can't change a result —
+    // it only stops a huge exponent ("1e2147483648") from wrapping i32 to garbage.
+    let exp_magnitude_clamp = 100_000_000_i32;
     let data_off = emitter
         .layout_reg
         .fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA)
@@ -239,6 +254,15 @@ pub(super) fn compile_float_parse(emitter: &mut WasmEmitter) {
         i32_const(0); local_set(13);
         i32_const(0); local_set(14);
         i32_const(0); local_set(16);
+        // Significand bignum (len=1, limb0=0) — built digit by digit, then handed
+        // to __dec2flt for correctly-rounded scaling. frac_count = fractional digits.
+        i32_const(sig_stride); call(emitter.rt.alloc); local_set(17);
+        local_get(17); i32_const(1); i32_store(0);
+        local_get(17); i32_const(sig_hdr); i32_add; i32_const(0); i32_store(0);
+        i32_const(0); local_set(18);
+        i32_const(0); local_set(19);   // started
+        i32_const(0); local_set(20);   // sig_digits
+        i32_const(0); local_set(21);   // sticky
     });
 
     // Trim leading ASCII whitespace: while i < end and is_ws(data[i]) { i++ }
@@ -358,20 +382,29 @@ pub(super) fn compile_float_parse(emitter: &mut WasmEmitter) {
     wasm!(f, {
           end;
 
-          local_get(9); i32_const(1); i32_add; local_set(9);
-          local_get(8);
+          local_get(9); i32_const(1); i32_add; local_set(9);   // digit_count++ (all digits)
+          // started |= (digit != 0) — leading zeros carry no significance.
+          local_get(19); local_get(5); i32_const(48); i32_ne; i32_or; local_set(19);
+          local_get(19); i32_eqz;
           if_empty;
-            // fractional digit: frac_mult /= 10 ; result += digit*frac_mult
-            local_get(7); f64_const(10.0); f64_div; local_set(7);
-            local_get(3);
-            local_get(5); i32_const(48); i32_sub; f64_convert_i32_u;
-            local_get(7); f64_mul;
-            f64_add; local_set(3);
+            // Leading zero: it only advances the fractional scale (frac_count),
+            // never the significand or the precision budget. So a flat decimal
+            // like "0.000…0123" keeps full precision for its real digits.
+            local_get(8); if_empty; local_get(18); i32_const(1); i32_add; local_set(18); end;
           else_;
-            // integer digit: result = result*10 + digit
-            local_get(3); f64_const(10.0); f64_mul;
-            local_get(5); i32_const(48); i32_sub; f64_convert_i32_u;
-            f64_add; local_set(3);
+            // Significant digit. Accumulate sig = sig*10 + digit while under the
+            // precision cap (keeps the bignum within NLIMBS); track the exact
+            // decimal exponent via frac_count. Past the cap, drop the digit but
+            // OR a non-zero value into `sticky` so __dec2flt can break a tie.
+            local_get(20); i32_const(super::rt_dec2flt::SIG_DIGIT_CAP); i32_lt_u;
+            if_empty;
+              local_get(17); i32_const(super::rt_dec2flt::DECIMAL_BASE); call(mul_small);
+              local_get(17); local_get(5); i32_const(48); i32_sub; call(bn_add_small);
+              local_get(20); i32_const(1); i32_add; local_set(20);   // sig_digits++
+              local_get(8); if_empty; local_get(18); i32_const(1); i32_add; local_set(18); end;
+            else_;
+              local_get(21); local_get(5); i32_const(48); i32_ne; i32_or; local_set(21);
+            end;
           end;
 
           local_get(2); i32_const(1); i32_add; local_set(2);
@@ -423,8 +456,13 @@ pub(super) fn compile_float_parse(emitter: &mut WasmEmitter) {
     emit_float_parse_err(&mut f, emitter, invalid_err);
     wasm!(f, {
             end;
-            local_get(13); i32_const(10); i32_mul;
-            local_get(5); i32_const(48); i32_sub; i32_add; local_set(13);
+            // exp_val = exp_val*10 + digit, saturating at exp_magnitude_clamp so a
+            // huge exponent can't wrap the i32 accumulator (see clamp definition).
+            local_get(13); i32_const(exp_magnitude_clamp); i32_lt_u;
+            if_empty;
+              local_get(13); i32_const(10); i32_mul;
+              local_get(5); i32_const(48); i32_sub; i32_add; local_set(13);
+            end;
             local_get(14); i32_const(1); i32_add; local_set(14);
             local_get(2); i32_const(1); i32_add; local_set(2);
             br(0);
@@ -447,41 +485,23 @@ pub(super) fn compile_float_parse(emitter: &mut WasmEmitter) {
     emit_float_parse_err(&mut f, emitter, invalid_err);
     wasm!(f, { end; });
 
-    // Scale mantissa by 10^exp: build pow10 = 10^exp_val via repeated mul,
-    // then multiply (exp_neg=0) or divide (exp_neg=1). Exact for small exponents,
-    // byte-matching native for the exact-representable corpus values.
+    // exp10 = (exp_neg ? -exp_val : exp_val) - frac_count. Hand the significand +
+    // decimal exponent to __dec2flt for the correctly-rounded f64 (Clinger
+    // AlgorithmM, exact big-integer arithmetic); __dec2flt applies the sign.
     wasm!(f, {
-        local_get(16);
-        if_empty;
-          f64_const(1.0); local_set(15);
-          block_empty; loop_empty;
-            local_get(13); i32_eqz; br_if(1);
-            local_get(15); f64_const(10.0); f64_mul; local_set(15);
-            local_get(13); i32_const(1); i32_sub; local_set(13);
-            br(0);
-          end; end;
-          local_get(12);
-          if_empty;
-            local_get(3); local_get(15); f64_div; local_set(3);
-          else_;
-            local_get(3); local_get(15); f64_mul; local_set(3);
-          end;
+        local_get(12);                          // exp_neg
+        if_i32;
+          i32_const(0); local_get(13); i32_sub; // -exp_val
+        else_;
+          local_get(13);                        // exp_val
         end;
-    });
-
-    // Apply sign.
-    wasm!(f, {
-        local_get(4);
-        if_empty;
-          local_get(3); f64_neg; local_set(3);
-        end;
-    });
-
-    // Return ok(result): alloc 12 bytes [tag=0][f64]
-    wasm!(f, {
+        local_get(18); i32_sub;                 // - frac_count → exp10
+        local_set(14);
+        local_get(4); local_get(17); local_get(14); local_get(21); call(dec2flt); local_set(3);
+        // Return ok(result): alloc 12 bytes [tag=0][f64]
         i32_const(12); call(emitter.rt.alloc); local_set(6);
-        local_get(6); i32_const(0); i32_store(0);     // tag = 0 (ok)
-        local_get(6); local_get(3); f64_store(4);      // value
+        local_get(6); i32_const(0); i32_store(0);
+        local_get(6); local_get(3); f64_store(4);
         local_get(6);
         end;
     });

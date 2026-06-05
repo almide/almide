@@ -26,6 +26,7 @@ mod rt_string_extra;
 mod rt_string_case;
 mod rt_numeric;
 mod rt_dragon;
+mod rt_dec2flt;
 mod expressions;
 mod stdlib_dispatch;
 mod calls;
@@ -316,6 +317,7 @@ pub struct RuntimeFuncs {
     pub init_preopen_dirs: u32,
     /// Dragon4 shortest-decimal helper functions (float.to_string).
     pub dragon: rt_dragon::DragonRuntime,
+    pub decfloat: rt_dec2flt::DecFloatRuntime,
 }
 
 /// Import descriptor for WASM import section.
@@ -529,6 +531,7 @@ impl WasmEmitter {
                 resolve_path: 0,
                 init_preopen_dirs: 0,
                 dragon: rt_dragon::DragonRuntime::default(),
+                decfloat: rt_dec2flt::DecFloatRuntime::default(),
             },
             heap_ptr_global: 0,
             free_list_global: 1,
