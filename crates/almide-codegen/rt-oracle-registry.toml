@@ -958,66 +958,105 @@ oracle = "runtime/rs/src/hex.rs::almide_rt_hex_decode (odd-length / non-hex erro
 test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
 note = "spec/wasm_cross/encoding_base64.almd exercises the error path. Drain PR-D appended the position/length detail the WASM strings dropped: 'hex string has odd length: N' / 'invalid hex char at N' (hi at 2*pair, lo at 2*pair+1)."
 
-# ── rt_regex.rs (regex engine) ───────────────────────────────────────
-[[routine]]
-file = "rt_regex.rs"
-routine = "compile_skip_class"
-status = "grandfathered"
-oracle = "runtime/rs/src/regex.rs char-class skip (regex crate parity)"
-note = "No cross-target fixture exercises regex. The whole rt_regex.rs cluster is the largest grandfathered block — drain needs a regex differential fixture set."
+# ── rt_regex.rs (regex engine — node-graph backtracking interpreter) ──
+# The wasm engine was rewritten as a runtime node-graph compiler+matcher that
+# mirrors the native oracle (runtime/rs/src/regex.rs) function-for-function:
+# rx_compile / rx_parse_alts / rx_parse_piece / rx_parse_atom / rx_parse_escape /
+# rx_parse_class (parser) and rx_node_matches / rx_match_alts / rx_match_seq /
+# rx_match_rep / rx_match_one / rx_find_at (matcher). All 12 are pinned by the
+# differential fuzz lock (tests/regex_fuzz_test.rs) — 8 ops (is_match/find/
+# find_all/full_match/captures/split/replace/replace_first) at 220 cases/op in CI
+# (a one-time 800/op = 6400-case sweep proven), plus the headline + generated
+# cross-target corpora (spec/wasm_cross/regex_engine.almd, regex_fuzz_batch.almd).
+# The grammar emits EMPTY alternation arms (leading/trailing/middle, fully-empty
+# pattern) and replace/replace_first over empty matches — the two cross-target
+# divergences last fixed here: (1) wasm dropped trailing empty arms (parser
+# appended a spurious atom; now the '|' branch continues the loop), and (2) native
+# `replace` panicked indexing chars[len] on a zero-width match at end-of-string
+# (now guarded). The old byte-walking routines (skip_class/match_class/match_atom/
+# atom_len/skip_group/match_anchored/match_search/captures_inner/captures_search)
+# were deleted in the rewrite.
 
 [[routine]]
 file = "rt_regex.rs"
-routine = "compile_match_class"
-status = "grandfathered"
-oracle = "runtime/rs/src/regex.rs char-class match"
-note = "See compile_skip_class."
+routine = "compile_compile"
+status = "verified"
+oracle = "runtime/rs/src/regex.rs rx_compile (parse-per-call, no cache; resets ncap/pos, allocates arena)"
+test = "tests/regex_fuzz_test.rs::regex_differential_fuzz"
 
 [[routine]]
 file = "rt_regex.rs"
-routine = "compile_match_atom"
-status = "grandfathered"
-oracle = "runtime/rs/src/regex.rs single-atom match"
-note = "See compile_skip_class."
+routine = "compile_parse_alts"
+status = "verified"
+oracle = "runtime/rs/src/regex.rs rx_parse_alts (split on '|' incl. EMPTY arms leading/trailing/middle → empty Seq, stop at ')' in_group)"
+test = "tests/regex_fuzz_test.rs::regex_differential_fuzz"
 
 [[routine]]
 file = "rt_regex.rs"
-routine = "compile_atom_len"
-status = "grandfathered"
-oracle = "runtime/rs/src/regex.rs atom-length computation"
-note = "See compile_skip_class."
+routine = "compile_parse_piece"
+status = "verified"
+oracle = "runtime/rs/src/regex.rs rx_parse_piece (atom then * + ? quantifier)"
+test = "tests/regex_fuzz_test.rs::regex_differential_fuzz"
 
 [[routine]]
 file = "rt_regex.rs"
-routine = "compile_skip_group"
-status = "grandfathered"
-oracle = "runtime/rs/src/regex.rs group skip"
-note = "See compile_skip_class."
+routine = "compile_parse_atom"
+status = "verified"
+oracle = "runtime/rs/src/regex.rs rx_parse_atom (. ^ $ \\ [ ( else lit; UTF-8 scalar literals)"
+test = "tests/regex_fuzz_test.rs::regex_differential_fuzz"
 
 [[routine]]
 file = "rt_regex.rs"
-routine = "compile_match_anchored"
-status = "grandfathered"
-oracle = "runtime/rs/src/regex.rs anchored match"
-note = "See compile_skip_class."
+routine = "compile_parse_escape"
+status = "verified"
+oracle = "runtime/rs/src/regex.rs rx_parse_escape (d D w W s S as ASCII Class; n t r control Lit; default escaped Lit)"
+test = "tests/regex_fuzz_test.rs::regex_differential_fuzz"
 
 [[routine]]
 file = "rt_regex.rs"
-routine = "compile_match_search"
-status = "grandfathered"
-oracle = "runtime/rs/src/regex.rs unanchored search (regex.is_match / find)"
-note = "See compile_skip_class."
+routine = "compile_parse_class"
+status = "verified"
+oracle = "runtime/rs/src/regex.rs rx_parse_class (negation, \\d\\w\\s expansion, a-b ranges, \\] handling)"
+test = "tests/regex_fuzz_test.rs::regex_differential_fuzz"
 
 [[routine]]
 file = "rt_regex.rs"
-routine = "compile_captures_inner"
-status = "grandfathered"
-oracle = "runtime/rs/src/regex.rs capture-group extraction"
-note = "See compile_skip_class."
+routine = "compile_node_matches"
+status = "verified"
+oracle = "runtime/rs/src/regex.rs rx_node_matches (Lit==scalar, Dot=scalar!='\\n', Class ranges XOR negated)"
+test = "tests/regex_fuzz_test.rs::regex_differential_fuzz"
 
 [[routine]]
 file = "rt_regex.rs"
-routine = "compile_captures_search"
-status = "grandfathered"
-oracle = "runtime/rs/src/regex.rs capture search (regex.captures)"
-note = "See compile_skip_class."
+routine = "compile_match_alts"
+status = "verified"
+oracle = "runtime/rs/src/regex.rs rx_match_alts (try each alt, clone/restore caps)"
+test = "tests/regex_fuzz_test.rs::regex_differential_fuzz"
+
+[[routine]]
+file = "rt_regex.rs"
+routine = "compile_match_seq"
+status = "verified"
+oracle = "runtime/rs/src/regex.rs rx_match_seq (anchors as nodes, else delegate to rep)"
+test = "tests/regex_fuzz_test.rs::regex_differential_fuzz"
+
+[[routine]]
+file = "rt_regex.rs"
+routine = "compile_match_rep"
+status = "verified"
+oracle = "runtime/rs/src/regex.rs rx_match_rep (greedy, zero-width guard, caps save/restore)"
+test = "tests/regex_fuzz_test.rs::regex_differential_fuzz"
+
+[[routine]]
+file = "rt_regex.rs"
+routine = "compile_match_one"
+status = "verified"
+oracle = "runtime/rs/src/regex.rs rx_match_one (consume one scalar; Group records caps[ci-1] by lexical index)"
+test = "tests/regex_fuzz_test.rs::regex_differential_fuzz"
+
+[[routine]]
+file = "rt_regex.rs"
+routine = "compile_find_at"
+status = "verified"
+oracle = "runtime/rs/src/regex.rs rx_find_at (search start..=len, fresh caps per pos, sets match_start)"
+test = "tests/regex_fuzz_test.rs::regex_differential_fuzz"

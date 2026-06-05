@@ -280,7 +280,18 @@ pub fn almide_regex_replace(pat: &str, s: &str, rep: &str) -> String {
         if let Some((start, end, _)) = rx_find_at(&rx, &chars, pos) {
             result.extend(&chars[pos..start]);
             result.push_str(rep);
-            pos = if end > start { end } else { result.push(chars[end]); end + 1 };
+            pos = if end > start {
+                end
+            } else {
+                // Zero-width match: emit the char at `end` and step past it so the
+                // search advances. At end-of-string there is no char to emit
+                // (`end == chars.len()`); guard the index so we don't panic and
+                // simply advance past the end to terminate the loop.
+                if end < chars.len() {
+                    result.push(chars[end]);
+                }
+                end + 1
+            };
         } else {
             result.extend(&chars[pos..]);
             break;
@@ -344,6 +355,51 @@ pub fn almide_regex_captures(pat: &str, s: &str) -> Option<Vec<String>> {
         Some(result)
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Regression: `replace` over a pattern that matches EMPTY at end-of-string
+    // (e.g. `x*`, `a*`, ``) must NOT panic indexing `chars[len]`. The zero-width
+    // advance emits the char at the match position and skips it at end-of-string.
+    #[test]
+    fn replace_empty_match_at_end_no_panic() {
+        assert_eq!(almide_regex_replace("x*", "ab", "-"), "-a-b-");
+        assert_eq!(almide_regex_replace("", "ab", "-"), "-a-b-");
+        assert_eq!(almide_regex_replace("a*", "aaa", "-"), "--");
+        assert_eq!(almide_regex_replace("a*", "bbb", "-"), "-b-b-b-");
+        assert_eq!(almide_regex_replace("b?", "abc", "-"), "-a--c-");
+        assert_eq!(almide_regex_replace("x*", "", "-"), "-");
+        assert_eq!(almide_regex_replace("", "", "-"), "-");
+        // multibyte: zero-width positions land on scalar boundaries.
+        assert_eq!(almide_regex_replace("x*", "本a", "-"), "-本-a-");
+    }
+
+    #[test]
+    fn replace_first_empty_match() {
+        assert_eq!(almide_regex_replace_first("x*", "ab", "-"), "-ab");
+        assert_eq!(almide_regex_replace_first("a*", "aaa", "-"), "-");
+        assert_eq!(almide_regex_replace_first("a*", "bbb", "-"), "-bbb");
+        assert_eq!(almide_regex_replace_first("x*", "", "-"), "-");
+    }
+
+    // Empty alternation arms (an empty arm = empty Seq that matches length-0).
+    #[test]
+    fn empty_alternation_arms() {
+        assert!(almide_regex_is_match("a|", "zzz")); // trailing empty arm
+        assert!(almide_regex_is_match("|a", "zzz")); // leading empty arm
+        assert!(almide_regex_is_match("a||b", "zzz")); // middle empty arm
+        assert!(almide_regex_is_match("a|||", "zzz")); // triple
+        assert_eq!(almide_regex_find("a|", "bza"), Some(String::new())); // empty match at 0
+        assert!(almide_regex_full_match("a|", "")); // empty arm full-matches ""
+        assert_eq!(almide_regex_replace("a|", "abc", "-"), "--b-c-");
+        assert_eq!(
+            almide_regex_captures("(a|)", "b"),
+            Some(vec![String::new()])
+        );
     }
 }
 
