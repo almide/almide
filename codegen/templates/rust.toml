@@ -72,9 +72,14 @@ template = "almide_ne!({left}, {right})"
 when_type = "Int"
 template = "{left}.pow({right} as u32)"
 
+# Float `**` routes through the vendored musl-libm pow (almide_rt_math_fpow →
+# almide_rt_libm_pow), NOT platform `f64::powf`, so the result is deterministic
+# across platforms AND bit-identical to the WASM target (which calls __float_pow →
+# __libm_pow). The call form also fixes the precedence trap of `-2.0 ** 0.5`
+# rendering as `-2f64.powf(0.5)` == `-(2.powf(0.5))`.
 [[power_expr]]
 when_type = "Float"
-template = "{left}.powf({right})"
+template = "almide_rt_math_fpow({left}, {right})"
 
 # ── Option / Result ──
 

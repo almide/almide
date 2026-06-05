@@ -45,6 +45,7 @@ runtime.rs::compile_runtime
 rt_dragon.rs::compile_driver
 rt_dragon.rs::compile_helpers
 rt_dec2flt.rs::compile_helpers
+rt_libm.rs::compile_helpers
 "
 
 # The exclude set as a clean newline-delimited list (blank lines stripped, so a

@@ -575,6 +575,18 @@ fn emit_source(program: &mut IrProgram, target: Target, config: &target::TargetC
             for m in &program.used_stdlib_modules {
                 needed.insert(m.as_str());
             }
+            // A few operators lower to a runtime call (not a CallTarget::Module),
+            // so the IR's used-module set misses them — e.g. float `**` renders
+            // `almide_rt_math_fpow(..)` via the power_expr template. Union in any
+            // module whose `almide_rt_<module>_` symbol literally appears in the
+            // emitted user code so the body (and its transitive deps) is included.
+            for (name, _) in crate::generated::rust_runtime::RUST_RUNTIME_MODULES {
+                if !needed.contains(name)
+                    && user_code.contains(&format!("almide_rt_{}_", name))
+                {
+                    needed.insert(name);
+                }
+            }
             resolve_runtime_deps(&mut needed);
             output.push_str(&rust_runtime_modules(&needed, &user_code));
             // Boundary marker: everything above is the inlined runtime preamble,

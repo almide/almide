@@ -1,19 +1,29 @@
 // math extern — Rust native implementations
 
 // Trigonometry
-#[inline(always)] pub fn almide_rt_math_sin(x: f64) -> f64 { x.sin() }
-#[inline(always)] pub fn almide_rt_math_cos(x: f64) -> f64 { x.cos() }
-#[inline(always)] pub fn almide_rt_math_tan(x: f64) -> f64 { x.tan() }
+// sin/cos/tan delegate to the vendored musl-libm reference (runtime/rs/src/libm.rs)
+// instead of the platform `f64::sin`/`cos`/`tan`. The system libm's last-ULP result
+// is platform-specific, so it can't be a stable cross-target oracle. The vendored
+// algorithm is deterministic across platforms AND bit-identical to the WASM port
+// (`emit_wasm/rt_libm.rs`), which mirrors libm.rs function-for-function.
+#[inline(always)] pub fn almide_rt_math_sin(x: f64) -> f64 { almide_rt_libm_sin(x) }
+#[inline(always)] pub fn almide_rt_math_cos(x: f64) -> f64 { almide_rt_libm_cos(x) }
+#[inline(always)] pub fn almide_rt_math_tan(x: f64) -> f64 { almide_rt_libm_tan(x) }
 #[inline(always)] pub fn almide_rt_math_asin(x: f64) -> f64 { x.asin() }
 #[inline(always)] pub fn almide_rt_math_acos(x: f64) -> f64 { x.acos() }
 #[inline(always)] pub fn almide_rt_math_atan(x: f64) -> f64 { x.atan() }
 #[inline(always)] pub fn almide_rt_math_atan2(y: f64, x: f64) -> f64 { y.atan2(x) }
 
 // Logarithms / exponentials
-#[inline(always)] pub fn almide_rt_math_log(x: f64) -> f64 { x.ln() }
-#[inline(always)] pub fn almide_rt_math_log2(x: f64) -> f64 { x.log2() }
-#[inline(always)] pub fn almide_rt_math_log10(x: f64) -> f64 { x.log10() }
-#[inline(always)] pub fn almide_rt_math_exp(x: f64) -> f64 { x.exp() }
+// log/log2/log10/exp delegate to the vendored musl-libm reference
+// (runtime/rs/src/libm.rs) for the same cross-platform-deterministic +
+// bit-identical-to-WASM guarantee as sin/cos/tan. Platform f64::ln/log2/log10/exp
+// differ in the last ULP per OS, so they can't be a stable cross-target oracle.
+#[inline(always)] pub fn almide_rt_math_log(x: f64) -> f64 { almide_rt_libm_log(x) }
+#[inline(always)] pub fn almide_rt_math_log2(x: f64) -> f64 { almide_rt_libm_log2(x) }
+#[inline(always)] pub fn almide_rt_math_log10(x: f64) -> f64 { almide_rt_libm_log10(x) }
+#[inline(always)] pub fn almide_rt_math_exp(x: f64) -> f64 { almide_rt_libm_exp(x) }
+// Integer pow (math.pow on Int) stays exact integer exponentiation.
 #[inline(always)] pub fn almide_rt_math_pow(base: i64, exp: i64) -> i64 { base.pow(exp as u32) }
 
 // Rounding
@@ -37,7 +47,10 @@
 // Float min/max
 #[inline(always)] pub fn almide_rt_math_fmin(a: f64, b: f64) -> f64 { a.min(b) }
 #[inline(always)] pub fn almide_rt_math_fmax(a: f64, b: f64) -> f64 { a.max(b) }
-#[inline(always)] pub fn almide_rt_math_fpow(base: f64, exp: f64) -> f64 { base.powf(exp) }
+// Float pow delegates to the vendored musl-libm `pow` (deterministic +
+// bit-identical to the WASM port). This also makes all the special cases
+// (0/inf/nan/neg-base, odd/even integer exponent) match exactly cross-target.
+#[inline(always)] pub fn almide_rt_math_fpow(base: f64, exp: f64) -> f64 { almide_rt_libm_pow(base, exp) }
 
 // Factorial / combinatorics
 pub fn almide_rt_math_factorial(n: i64) -> i64 {

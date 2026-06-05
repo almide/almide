@@ -1,0 +1,73 @@
+// Cross-target equivalence for float `**` / math.fpow.
+//
+// Both targets route `**` through the vendored musl-libm pow (native:
+// almide_rt_math_fpow -> almide_rt_libm_pow; wasm: __float_pow -> __libm_pow),
+// so every result is byte-identical. This pins the sweep-confirmed outright bugs
+// the old hand-rolled wasm `**` had:
+//   - fpow(-2.0, 0.5) == NaN   (wasm previously used abs(base) -> a real value)
+//   - fpow(-2.0, 3.0) == -8.0  (odd integer exponent keeps the sign)
+//   - fpow(-2.0, 2.0) == 4.0   (even integer exponent)
+//   - fpow(0.0, -1.0) == inf   (wasm previously returned 0)
+//   - fpow(2.0, inf)  must NOT TRAP (the old i64-trunc of inf trapped exit 134)
+import math
+
+fn pp(b: Float, e: Float) -> Unit = println(float.to_string(b ** e))
+
+fn main() -> Unit = {
+  let pinf = 1.0 / 0.0
+  let ninf = -1.0 / 0.0
+  let nan = 0.0 / 0.0
+
+  // integer exponents (exact)
+  pp(2.0, 10.0)
+  pp(2.0, 0.0)
+  pp(2.0, 1.0)
+  pp(2.0, -1.0)
+  pp(2.0, -3.0)
+  pp(3.0, 4.0)
+  pp(10.0, 3.0)
+  pp(10.0, -3.0)
+
+  // negative base, integer exponent: sign by parity
+  pp(0.0 - 2.0, 2.0)
+  pp(0.0 - 2.0, 3.0)
+  pp(0.0 - 2.0, 4.0)
+  pp(0.0 - 1.0, 9.0)
+
+  // negative base, non-integer exponent -> NaN
+  pp(0.0 - 2.0, 0.5)
+  pp(0.0 - 1.0, 2.2)
+
+  // fractional exponents
+  pp(2.0, 0.5)
+  pp(2.0, 0.3333333333333333)
+  pp(3.0, 0.3333333333333333)
+  pp(9.0, 0.5)
+  pp(0.5, 3.0)
+  pp(100.0, 0.5)
+  pp(2.718281828459045, 2.0)
+
+  // zero / one bases
+  pp(0.0, 2.0)
+  pp(0.0, -1.0)         // +inf
+  pp(1.0, 100.0)
+  pp(1.0, nan)          // 1**anything == 1
+
+  // infinite exponents (must not trap)
+  pp(2.0, pinf)
+  pp(2.0, ninf)
+  pp(0.5, pinf)
+  pp(0.5, ninf)
+  pp(0.0 - 1.0, pinf)   // (-1)**inf == 1
+
+  // infinite / nan bases
+  pp(pinf, 2.0)
+  pp(pinf, -2.0)
+  pp(nan, 2.0)
+
+  // overflow / underflow magnitudes
+  pp(10.0, 308.0)
+  pp(10.0, 309.0)       // overflow -> inf
+  pp(10.0, -309.0)
+  pp(1.0000001, 100000000.0)
+}
