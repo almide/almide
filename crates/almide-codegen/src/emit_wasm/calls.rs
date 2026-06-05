@@ -789,11 +789,11 @@ impl FuncCompiler<'_> {
                     }
                     "to_upper" | "string.to_upper" if matches!(object.ty, Ty::String) => {
                         self.emit_expr(object);
-                        self.emit_str_case_convert(true);
+                        wasm!(self.func, { call(self.emitter.rt.string.to_upper); });
                     }
                     "to_lower" | "string.to_lower" if matches!(object.ty, Ty::String) => {
                         self.emit_expr(object);
-                        self.emit_str_case_convert(false);
+                        wasm!(self.func, { call(self.emitter.rt.string.to_lower); });
                     }
                     "starts_with" | "string.starts_with" | "ends_with" | "string.ends_with" if matches!(object.ty, Ty::String) => {
                         let m = method.strip_prefix("string.").unwrap_or(method);

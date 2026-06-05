@@ -271,22 +271,8 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, { call(self.emitter.rt.string.to_lower); });
             }
             "capitalize" => {
-                let s = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
-                wasm!(self.func, {
-                    local_set(s);
-                    local_get(s); i32_load(0); i32_eqz;
-                    if_i32; local_get(s);
-                    else_;
-                      local_get(s); i32_const(0); i32_const(1);
-                      call(self.emitter.rt.string.slice);
-                      call(self.emitter.rt.string.to_upper);
-                      local_get(s); i32_const(1); local_get(s); i32_load(0);
-                      call(self.emitter.rt.string.slice);
-                      call(self.emitter.rt.concat_str);
-                    end;
-                });
-                self.scratch.free_i32(s);
+                wasm!(self.func, { call(self.emitter.rt.string.capitalize); });
             }
             "chars" => {
                 self.emit_expr(&args[0]);
@@ -805,118 +791,5 @@ impl FuncCompiler<'_> {
                 }
             }
         }
-    }
-
-    /// ASCII case conversion. Expects string ptr on stack. Returns new string ptr.
-    pub(super) fn emit_str_case_convert(&mut self, is_upper: bool) {
-        // String ptr is on stack. Store to scratch local.
-        let src = self.scratch.alloc_i32();
-        let dst = self.scratch.alloc_i32();
-        let s = self.scratch.alloc_i32();
-        let s1 = self.scratch.alloc_i32();
-        wasm!(self.func, {
-            local_set(src);
-            // Alloc dst with same len: [len:i32][cap:i32][data...]
-            i32_const(self.emitter.layout_reg.header_size(super::engine::layout::STRING) as i32);
-            local_get(src);
-            i32_load(0);
-            i32_add;
-            call(self.emitter.rt.alloc);
-            local_set(dst);
-            // Store len in dst
-            local_get(dst);
-            local_get(src);
-            i32_load(0);
-            i32_store(0);
-            // Store cap = len in dst
-            local_get(dst);
-            local_get(src);
-            i32_load(0);
-            i32_store(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::CAP) as i32 as u32);
-        });
-        // Loop: convert each byte
-        wasm!(self.func, {
-            i32_const(0);
-            local_set(s);
-            block_empty;
-            loop_empty;
-        });
-        let depth_guard = self.depth_push_n(2);
-        wasm!(self.func, {
-            local_get(s);
-            local_get(src);
-            i32_load(0);
-            i32_ge_u;
-            br_if(1);
-            // dst addr
-            local_get(dst);
-            i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32);
-            i32_add;
-            local_get(s);
-            i32_add;
-            // src byte
-            local_get(src);
-            i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32);
-            i32_add;
-            local_get(s);
-            i32_add;
-            i32_load8_u(0);
-            // Convert
-            local_set(s1);
-        });
-        if is_upper {
-            wasm!(self.func, {
-                local_get(s1);
-                i32_const(97);
-                i32_ge_u;
-                local_get(s1);
-                i32_const(122);
-                i32_le_u;
-                i32_and;
-                if_i32;
-                local_get(s1);
-                i32_const(32);
-                i32_sub;
-                else_;
-                local_get(s1);
-                end;
-            });
-        } else {
-            wasm!(self.func, {
-                local_get(s1);
-                i32_const(65);
-                i32_ge_u;
-                local_get(s1);
-                i32_const(90);
-                i32_le_u;
-                i32_and;
-                if_i32;
-                local_get(s1);
-                i32_const(32);
-                i32_add;
-                else_;
-                local_get(s1);
-                end;
-            });
-        }
-        wasm!(self.func, {
-            i32_store8(0);
-            local_get(s);
-            i32_const(1);
-            i32_add;
-            local_set(s);
-            br(0);
-        });
-        self.depth_pop(depth_guard);
-        wasm!(self.func, {
-            end;
-            end;
-            // Return dst
-            local_get(dst);
-        });
-        self.scratch.free_i32(s1);
-        self.scratch.free_i32(s);
-        self.scratch.free_i32(dst);
-        self.scratch.free_i32(src);
     }
 }
