@@ -106,6 +106,8 @@ pub fn register(emitter: &mut WasmEmitter) {
     // source of truth for every trim / is_whitespace / parse-trim site. No
     // dependency on the utf8_* helpers (it takes an already-decoded scalar).
     emitter.rt.string.is_unicode_ws = emitter.register_func("__is_unicode_ws", ty_i32_i32);
+    // UTF-8 sequence classifier for from_utf8_lossy: __utf8_classify(buf, i, n) -> i32.
+    emitter.rt.string.utf8_classify = emitter.register_func("__utf8_classify", ty_i32x3_i32);
 
     // ── Shared UTF-8 codepoint helpers ──
     // IMPORTANT: registration order here MUST match the compile() call order
@@ -179,6 +181,7 @@ pub fn compile(emitter: &mut WasmEmitter) {
     compile_char_count(emitter);
     compile_run_length_encode(emitter);
     compile_is_unicode_ws(emitter);
+    compile_utf8_classify(emitter);
     compile_utf8_width(emitter);
     compile_utf8_scalar(emitter);
     compile_utf8_byte_of_cp(emitter);
@@ -489,6 +492,54 @@ mod ws_tests {
     }
 }
 
+#[cfg(test)]
+mod utf8_lossy_tests {
+    use super::{ASCII_MAX, CONT_MASK, CONT_TAG, utf8_lead_groups};
+
+    // Reference from_utf8_lossy built on the DERIVED lead groups + the same
+    // maximal-subpart logic the WASM emits; must equal std byte-for-byte.
+    fn my_lossy(bytes: &[u8]) -> Vec<u8> {
+        let groups = utf8_lead_groups();
+        let class = |b0: u8| groups.iter().find(|g| b0 >= g.0 && b0 <= g.1).map(|g| (g.2, g.3, g.4)).unwrap_or((0, 0, 0));
+        let fffd = '\u{FFFD}'.to_string().into_bytes();
+        let mut out = Vec::new();
+        let mut i = 0;
+        while i < bytes.len() {
+            let b0 = bytes[i];
+            if b0 as i32 <= ASCII_MAX { out.push(b0); i += 1; continue; }
+            let (w, lo2, hi2) = class(b0);
+            if w == 0 { out.extend_from_slice(&fffd); i += 1; continue; }
+            let (mut consumed, mut ok) = (1usize, true);
+            for k in 1..w as usize {
+                if i + k >= bytes.len() { ok = false; break; }
+                let bk = bytes[i + k];
+                let valid = if k == 1 { bk >= lo2 && bk <= hi2 } else { (bk as i32 & CONT_MASK) == CONT_TAG };
+                if !valid { ok = false; break; }
+                consumed += 1;
+            }
+            if ok { out.extend_from_slice(&bytes[i..i + w as usize]); i += w as usize; }
+            else { out.extend_from_slice(&fffd); i += consumed; }
+        }
+        out
+    }
+
+    #[test]
+    fn derived_classification_matches_from_utf8_lossy() {
+        assert_eq!(utf8_lead_groups().len(), 8, "the 8 canonical UTF-8 lead-byte groups");
+        let mut seed = 0xABCDEF1234567890u64;
+        let mut rng = || { seed ^= seed << 13; seed ^= seed >> 7; seed ^= seed << 17; seed };
+        for _ in 0..300_000 {
+            let n = (rng() % 8) as usize;
+            // bias toward lead/continuation bytes to hit the edge cases
+            let bytes: Vec<u8> = (0..n).map(|_| {
+                match rng() % 4 { 0 => 0x80 + (rng() % 0x40) as u8, 1 => 0xC0 + (rng() % 0x40) as u8, _ => (rng() % 256) as u8 }
+            }).collect();
+            let want = String::from_utf8_lossy(&bytes).into_owned().into_bytes();
+            assert_eq!(my_lossy(&bytes), want, "{bytes:?}");
+        }
+    }
+}
+
 /// `__is_unicode_ws(scalar) -> i32`: 1 iff `scalar` has the Unicode White_Space
 /// property. The OR of `lo <= scalar <= hi` over the emit-time-generated ranges.
 fn compile_is_unicode_ws(emitter: &mut WasmEmitter) {
@@ -557,17 +608,21 @@ pub(super) fn emit_trim_backward(f: &mut Function, emitter: &WasmEmitter, end_lo
 
 fn compile_trim(emitter: &mut WasmEmitter) {
     let type_idx = emitter.func_type_indices[&emitter.rt.string.trim];
-    // locals: 1=len, 2=start, 3=end, 4=q
+    const S: u32 = 0; // param: string ptr
+    const LEN: u32 = 1;
+    const START: u32 = 2;
+    const END: u32 = 3;
+    const Q: u32 = 4; // scratch for the backward walk
     let mut f = Function::new([(4, ValType::I32)]);
     wasm!(f, {
-        local_get(0); i32_load(0); local_set(1);
-        i32_const(0); local_set(2);
-        local_get(1); local_set(3);
+        local_get(S); i32_load(0); local_set(LEN);
+        i32_const(0); local_set(START);
+        local_get(LEN); local_set(END);
     });
-    emit_trim_forward(&mut f, emitter, 2, 1);
-    emit_trim_backward(&mut f, emitter, 3, 2, 4);
+    emit_trim_forward(&mut f, emitter, START, LEN);
+    emit_trim_backward(&mut f, emitter, END, START, Q);
     wasm!(f, {
-        local_get(0); local_get(2); local_get(3);
+        local_get(S); local_get(START); local_get(END);
         call(emitter.rt.string.slice);
         end;
     });
@@ -918,15 +973,17 @@ fn compile_pad_end(emitter: &mut WasmEmitter) {
 
 fn compile_trim_start(emitter: &mut WasmEmitter) {
     let type_idx = emitter.func_type_indices[&emitter.rt.string.trim_start];
-    // locals: 1=len, 2=start
+    const S: u32 = 0; // param
+    const LEN: u32 = 1;
+    const START: u32 = 2;
     let mut f = Function::new([(2, ValType::I32)]);
     wasm!(f, {
-        local_get(0); i32_load(0); local_set(1);
-        i32_const(0); local_set(2);
+        local_get(S); i32_load(0); local_set(LEN);
+        i32_const(0); local_set(START);
     });
-    emit_trim_forward(&mut f, emitter, 2, 1);
+    emit_trim_forward(&mut f, emitter, START, LEN);
     wasm!(f, {
-        local_get(0); local_get(2); local_get(1);
+        local_get(S); local_get(START); local_get(LEN);
         call(emitter.rt.string.slice);
         end;
     });
@@ -935,15 +992,18 @@ fn compile_trim_start(emitter: &mut WasmEmitter) {
 
 fn compile_trim_end(emitter: &mut WasmEmitter) {
     let type_idx = emitter.func_type_indices[&emitter.rt.string.trim_end];
-    // locals: 1=end, 2=q, 3=floor(=0)
+    const S: u32 = 0; // param
+    const END: u32 = 1;
+    const Q: u32 = 2; // scratch for the backward walk
+    const FLOOR: u32 = 3; // 0 — never trim below the start
     let mut f = Function::new([(3, ValType::I32)]);
     wasm!(f, {
-        local_get(0); i32_load(0); local_set(1);
-        i32_const(0); local_set(3);
+        local_get(S); i32_load(0); local_set(END);
+        i32_const(0); local_set(FLOOR);
     });
-    emit_trim_backward(&mut f, emitter, 1, 3, 2);
+    emit_trim_backward(&mut f, emitter, END, FLOOR, Q);
     wasm!(f, {
-        local_get(0); i32_const(0); local_get(1);
+        local_get(S); i32_const(0); local_get(END);
         call(emitter.rt.string.slice);
         end;
     });
@@ -1109,24 +1169,208 @@ fn compile_lines(emitter: &mut WasmEmitter) {
     emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
 }
 
-fn compile_from_bytes(emitter: &mut WasmEmitter) {
-    let type_idx = emitter.func_type_indices[&emitter.rt.string.from_bytes];
-    let mut f = Function::new([(1, ValType::I32), (1, ValType::I32), (1, ValType::I32)]);
+/// U+FFFD REPLACEMENT CHARACTER — `from_utf8_lossy` emits one per maximal invalid
+/// subpart.
+const REPLACEMENT_SCALAR: i32 = '\u{FFFD}' as i32;
+/// Largest ASCII scalar; a byte `<=` this is a complete 1-byte sequence.
+const ASCII_MAX: i32 = 0x7F;
+/// A UTF-8 continuation byte has its top two bits `0b10`: `(b & CONT_MASK) == CONT_TAG`.
+const CONT_MASK: i32 = 0b1100_0000;
+const CONT_TAG: i32 = 0b1000_0000;
+/// Any valid continuation byte (`0b10_111111`), used to probe `from_utf8` below.
+const CONT_SAMPLE: u8 = 0b1011_1111;
+
+/// Pack a `__utf8_classify` result: `consumed` bytes, `valid` flag (1 = well-formed
+/// sequence to copy; 0 = maximal invalid subpart → emit one U+FFFD, resume after).
+const fn classify_packed(consumed: i32, valid: i32) -> i32 {
+    (consumed << 1) | valid
+}
+
+/// Derive a non-ASCII lead byte's UTF-8 classification from Rust's OWN validator
+/// (no hardcoded Table 3-7 constants): returns `(width, lo2, hi2)` — the sequence
+/// length and the valid 2nd-byte range — or `(0, 0, 0)` if `b0` can't start a valid
+/// sequence. Probing `std::str::from_utf8` keeps this locked to std's exact UTF-8
+/// rules, the same the native `from_utf8_lossy` runtime uses.
+fn utf8_lead_class(b0: u8) -> (u8, u8, u8) {
+    for width in 2u8..=4 {
+        let (mut lo, mut hi) = (None, None);
+        for b1 in 0u8..=u8::MAX {
+            let mut seq = vec![b0, b1];
+            seq.resize(width as usize, CONT_SAMPLE); // valid trailing continuations
+            if std::str::from_utf8(&seq).is_ok_and(|s| s.chars().count() == 1) {
+                lo.get_or_insert(b1);
+                hi = Some(b1);
+            }
+        }
+        if let (Some(lo), Some(hi)) = (lo, hi) {
+            return (width, lo, hi);
+        }
+    }
+    (0, 0, 0)
+}
+
+/// Lead bytes grouped into contiguous runs of identical `(width, lo2, hi2)` —
+/// `(lead_lo, lead_hi, width, lo2, hi2)`. Built from [`utf8_lead_class`], so the
+/// boundaries are oracle-derived, never hand-written hex. Cached: the derivation
+/// probes `from_utf8` ~98k times, so compute it once per process rather than per
+/// module compile.
+fn utf8_lead_groups() -> &'static [(u8, u8, u8, u8, u8)] {
+    static GROUPS: LazyLock<Vec<(u8, u8, u8, u8, u8)>> = LazyLock::new(|| {
+        let mut groups: Vec<(u8, u8, u8, u8, u8)> = Vec::new();
+        for b0 in (ASCII_MAX as u8 + 1)..=u8::MAX {
+            let (w, lo2, hi2) = utf8_lead_class(b0);
+            if w == 0 {
+                continue; // invalid lead → handled by the width==0 default
+            }
+            match groups.last_mut() {
+                Some(g) if g.1 + 1 == b0 && (g.2, g.3, g.4) == (w, lo2, hi2) => g.1 = b0,
+                _ => groups.push((b0, b0, w, lo2, hi2)),
+            }
+        }
+        groups
+    });
+    &GROUPS
+}
+
+/// `__utf8_classify(buf, i, n) -> i32`: classify the UTF-8 sequence starting at
+/// `buf[i]` (within `n` bytes), returning `classify_packed(consumed, valid)`.
+/// Replicates Rust `String::from_utf8_lossy`'s maximal-subpart subdivision.
+fn compile_utf8_classify(emitter: &mut WasmEmitter) {
+    let type_idx = emitter.func_type_indices[&emitter.rt.string.utf8_classify];
+    let groups = utf8_lead_groups();
+    const BUF: u32 = 0; // params
+    const I: u32 = 1;
+    const N: u32 = 2;
+    const B0: u32 = 3; // locals
+    const WIDTH: u32 = 4; // 0 ⇒ invalid lead
+    const LO2: u32 = 5;
+    const HI2: u32 = 6;
+    const CONSUMED: u32 = 7;
+    const K: u32 = 8;
+    const BK: u32 = 9;
+    let mut f = Function::new([(7, ValType::I32)]);
     wasm!(f, {
-        local_get(0); i32_load(0); local_set(1);
-        i32_const(string_hdr()); local_get(1); i32_add;
-        call(emitter.rt.alloc); local_set(2);
-        local_get(2); local_get(1); i32_store(0);
-        i32_const(0); local_set(3);
+        local_get(BUF); local_get(I); i32_add; i32_load8_u(0); local_set(B0);
+        local_get(B0); i32_const(ASCII_MAX); i32_le_u;
+        if_empty; i32_const(classify_packed(1, 1)); return_; end;   // ASCII: 1 byte, valid
+        i32_const(0); local_set(WIDTH);
+    });
+    // Lead-byte width + 2nd-byte range, generated from the derived groups.
+    for (lead_lo, lead_hi, width, lo2, hi2) in groups {
+        wasm!(f, {
+            local_get(B0); i32_const(*lead_lo as i32); i32_ge_u;
+            local_get(B0); i32_const(*lead_hi as i32); i32_le_u; i32_and;
+            if_empty;
+              i32_const(*width as i32); local_set(WIDTH);
+              i32_const(*lo2 as i32); local_set(LO2);
+              i32_const(*hi2 as i32); local_set(HI2);
+            end;
+        });
+    }
+    wasm!(f, {
+        local_get(WIDTH); i32_eqz;
+        if_empty; i32_const(classify_packed(1, 0)); return_; end;   // invalid lead: 1-byte subpart
+        // Validate continuation bytes: 2nd in [lo2,hi2]; 3rd/4th are plain continuations.
+        // On the first failure the maximal subpart ends, so `consumed < width`.
+        i32_const(1); local_set(CONSUMED);
+        i32_const(1); local_set(K);
         block_empty; loop_empty;
-          local_get(3); local_get(1); i32_ge_u; br_if(1);
-          local_get(2); i32_const(string_data_off()); i32_add; local_get(3); i32_add;
-          local_get(0); i32_const(list_data_off()); i32_add; local_get(3); i32_const(8); i32_mul; i32_add;
-          i64_load(0); i32_wrap_i64; i32_store8(0);
-          local_get(3); i32_const(1); i32_add; local_set(3);
+          local_get(K); local_get(WIDTH); i32_ge_u; br_if(1);             // matched all → valid
+          local_get(I); local_get(K); i32_add; local_get(N); i32_ge_u; br_if(1);   // truncated
+          local_get(BUF); local_get(I); i32_add; local_get(K); i32_add; i32_load8_u(0); local_set(BK);
+          // valid = (k == 1) ? lo2 <= bk <= hi2 : bk is a continuation byte
+          local_get(K); i32_const(1); i32_eq;
+          if_i32;
+            local_get(BK); local_get(LO2); i32_ge_u; local_get(BK); local_get(HI2); i32_le_u; i32_and;
+          else_;
+            local_get(BK); i32_const(CONT_MASK); i32_and; i32_const(CONT_TAG); i32_eq;
+          end;
+          i32_eqz; br_if(1);
+          local_get(CONSUMED); i32_const(1); i32_add; local_set(CONSUMED);
+          local_get(K); i32_const(1); i32_add; local_set(K);
           br(0);
         end; end;
-        local_get(2); end;
+        // classify_packed(consumed, consumed == width)
+        local_get(CONSUMED); i32_const(1); i32_shl;
+        local_get(CONSUMED); local_get(WIDTH); i32_eq;
+        i32_or;
+        end;
+    });
+    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+}
+
+/// `from_bytes(list) -> String`: UTF-8-lossy decode of the byte list (each element
+/// truncated to a byte), the inverse of `to_bytes`. Two passes over a scratch byte
+/// buffer: classify each sequence, copy well-formed bytes through, emit one U+FFFD
+/// per maximal invalid subpart — byte-identical to native `String::from_utf8_lossy`.
+fn compile_from_bytes(emitter: &mut WasmEmitter) {
+    let type_idx = emitter.func_type_indices[&emitter.rt.string.from_bytes];
+    let classify = emitter.rt.string.utf8_classify;
+    let emit_scalar = emitter.rt.string.utf8_emit_scalar;
+    let alloc = emitter.rt.alloc;
+    let do_ = string_data_off();
+    const LIST: u32 = 0; // param
+    const N: u32 = 1; // byte count
+    const BUF: u32 = 2; // scratch byte buffer
+    const I: u32 = 3; // cursor
+    const TOTAL: u32 = 4; // pass-1 output byte length
+    const R: u32 = 5; // packed classify result
+    const CONSUMED: u32 = 6;
+    const OUT: u32 = 7; // output string ptr
+    const WOFF: u32 = 8; // pass-2 write offset
+    // ASCII-out and FFFD-out byte counts for pass-1 sizing.
+    let fffd_len = '\u{FFFD}'.len_utf8() as i32;
+    let mut f = Function::new([(8, ValType::I32)]);
+    wasm!(f, {
+        // n = list length; copy elements (truncated to bytes) into a scratch buffer.
+        local_get(LIST); i32_load(0); local_set(N);
+        local_get(N); call(alloc); local_set(BUF);
+        i32_const(0); local_set(I);
+        block_empty; loop_empty;
+          local_get(I); local_get(N); i32_ge_u; br_if(1);
+          local_get(BUF); local_get(I); i32_add;
+          local_get(LIST); i32_const(list_data_off()); i32_add; local_get(I); i32_const(8); i32_mul; i32_add;
+          i64_load(0); i32_wrap_i64; i32_store8(0);
+          local_get(I); i32_const(1); i32_add; local_set(I);
+          br(0);
+        end; end;
+        // PASS 1: output byte length (valid run = consumed bytes; invalid = one U+FFFD).
+        i32_const(0); local_set(TOTAL);
+        i32_const(0); local_set(I);
+        block_empty; loop_empty;
+          local_get(I); local_get(N); i32_ge_u; br_if(1);
+          local_get(BUF); local_get(I); local_get(N); call(classify); local_set(R);
+          local_get(R); i32_const(1); i32_shr_u; local_set(CONSUMED);   // R >> 1
+          local_get(R); i32_const(1); i32_and;                          // valid bit
+          if_i32; local_get(CONSUMED); else_; i32_const(fffd_len); end;
+          local_get(TOTAL); i32_add; local_set(TOTAL);
+          local_get(I); local_get(CONSUMED); i32_add; local_set(I);
+          br(0);
+        end; end;
+        // alloc the output string.
+        i32_const(string_hdr()); local_get(TOTAL); i32_add; call(alloc); local_set(OUT);
+        local_get(OUT); local_get(TOTAL); i32_store(0);
+        // PASS 2: fill (copy valid bytes, emit U+FFFD for each invalid subpart).
+        i32_const(0); local_set(WOFF);
+        i32_const(0); local_set(I);
+        block_empty; loop_empty;
+          local_get(I); local_get(N); i32_ge_u; br_if(1);
+          local_get(BUF); local_get(I); local_get(N); call(classify); local_set(R);
+          local_get(R); i32_const(1); i32_shr_u; local_set(CONSUMED);
+          local_get(R); i32_const(1); i32_and;
+          if_empty;
+            local_get(OUT); i32_const(do_); i32_add; local_get(WOFF); i32_add;
+            local_get(BUF); local_get(I); i32_add;
+            local_get(CONSUMED);
+            memory_copy;
+            local_get(WOFF); local_get(CONSUMED); i32_add; local_set(WOFF);
+          else_;
+            local_get(OUT); local_get(WOFF); i32_const(REPLACEMENT_SCALAR); call(emit_scalar); local_set(WOFF);
+          end;
+          local_get(I); local_get(CONSUMED); i32_add; local_set(I);
+          br(0);
+        end; end;
+        local_get(OUT); end;
     });
     emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
 }

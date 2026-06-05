@@ -246,16 +246,18 @@ pub(super) fn compile_is_whitespace(emitter: &mut WasmEmitter) {
     let uw = emitter.rt.string.utf8_width;
     let us = emitter.rt.string.utf8_scalar;
     let isws = emitter.rt.string.is_unicode_ws;
-    // locals: 1=blen, 2=i
+    const S: u32 = 0; // param: string ptr
+    const BLEN: u32 = 1;
+    const I: u32 = 2;
     let mut f = Function::new([(2, ValType::I32)]);
     wasm!(f, {
-        local_get(0); i32_load(0); local_set(1);
-        i32_const(0); local_set(2);
+        local_get(S); i32_load(0); local_set(BLEN);
+        i32_const(0); local_set(I);
         block_empty; loop_empty;
-          local_get(2); local_get(1); i32_ge_u; br_if(1);   // end (incl. empty) → all WS
-          local_get(0); local_get(2); call(us); i32_wrap_i64; call(isws); i32_eqz;
-          if_empty; i32_const(0); return_; end;              // a non-WS codepoint → false
-          local_get(0); local_get(2); call(uw); local_get(2); i32_add; local_set(2);
+          local_get(I); local_get(BLEN); i32_ge_u; br_if(1);   // end (incl. empty) → all WS
+          local_get(S); local_get(I); call(us); i32_wrap_i64; call(isws); i32_eqz;
+          if_empty; i32_const(0); return_; end;                // a non-WS codepoint → false
+          local_get(S); local_get(I); call(uw); local_get(I); i32_add; local_set(I);
           br(0);
         end; end;
         i32_const(1);
