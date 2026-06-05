@@ -102,6 +102,11 @@ pub fn register(emitter: &mut WasmEmitter) {
     // ASCII cases agree and multibyte joins the string-codepoint cluster).
     emitter.rt.string.run_length_encode = emitter.register_func("__str_rle", ty_i32_i32);
 
+    // Unicode White_Space membership: __is_unicode_ws(scalar) -> i32. The single
+    // source of truth for every trim / is_whitespace / parse-trim site. No
+    // dependency on the utf8_* helpers (it takes an already-decoded scalar).
+    emitter.rt.string.is_unicode_ws = emitter.register_func("__is_unicode_ws", ty_i32_i32);
+
     // ── Shared UTF-8 codepoint helpers ──
     // IMPORTANT: registration order here MUST match the compile() call order
     // below — function bodies are emitted to the code section in compile order
@@ -173,6 +178,7 @@ pub fn compile(emitter: &mut WasmEmitter) {
     super::rt_string_extra::compile_cmp(emitter);
     compile_char_count(emitter);
     compile_run_length_encode(emitter);
+    compile_is_unicode_ws(emitter);
     compile_utf8_width(emitter);
     compile_utf8_scalar(emitter);
     compile_utf8_byte_of_cp(emitter);
@@ -441,48 +447,125 @@ fn compile_contains(emitter: &mut WasmEmitter) {
     emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
 }
 
+/// The Unicode `White_Space` codepoint ranges, derived AT EMIT TIME from Rust
+/// `char::is_whitespace` — so the set is exactly what native `str::trim` /
+/// `char::is_whitespace` use, and stays locked to the compiler's Unicode version
+/// (no hardcoded codepoints). Currently 10 contiguous runs over 25 codepoints:
+/// the ASCII run U+0009..=U+000D and U+0020, plus U+0085, U+00A0, U+1680,
+/// U+2000..=U+200A, U+2028..=U+2029, U+202F, U+205F, U+3000. NOTE: VT (U+000B)
+/// and FF (U+000C) ARE whitespace; ZWSP (U+200B) is NOT.
+fn whitespace_ranges() -> Vec<(u32, u32)> {
+    let mut runs: Vec<(u32, u32)> = Vec::new();
+    for cp in 0u32..=char::MAX as u32 {
+        if !char::from_u32(cp).is_some_and(|c| c.is_whitespace()) {
+            continue;
+        }
+        match runs.last_mut() {
+            Some(last) if last.1 + 1 == cp => last.1 = cp,
+            _ => runs.push((cp, cp)),
+        }
+    }
+    runs
+}
+
+#[cfg(test)]
+mod ws_tests {
+    /// The generated ranges must cover exactly Rust's White_Space set, contiguously.
+    #[test]
+    fn whitespace_ranges_match_char_is_whitespace() {
+        let runs = super::whitespace_ranges();
+        let total: u32 = runs.iter().map(|(lo, hi)| hi - lo + 1).sum();
+        assert_eq!(total, 25, "Unicode White_Space is 25 codepoints");
+        // Every codepoint in a run is whitespace; gaps between runs are not.
+        for cp in 0u32..=0x3001 {
+            let in_runs = runs.iter().any(|(lo, hi)| cp >= *lo && cp <= *hi);
+            let is_ws = char::from_u32(cp).is_some_and(|c| c.is_whitespace());
+            assert_eq!(in_runs, is_ws, "U+{cp:04X}");
+        }
+        // VT/FF are whitespace; ZWSP is not (the boundary the byte version got wrong).
+        let member = |cp: u32| runs.iter().any(|(lo, hi)| cp >= *lo && cp <= *hi);
+        assert!(member(0x0B) && member(0x0C) && member(0xA0) && member(0x3000));
+        assert!(!member(0x200B));
+    }
+}
+
+/// `__is_unicode_ws(scalar) -> i32`: 1 iff `scalar` has the Unicode White_Space
+/// property. The OR of `lo <= scalar <= hi` over the emit-time-generated ranges.
+fn compile_is_unicode_ws(emitter: &mut WasmEmitter) {
+    let type_idx = emitter.func_type_indices[&emitter.rt.string.is_unicode_ws];
+    let mut f = Function::new([]);
+    wasm!(f, { i32_const(0); }); // running OR accumulator
+    for (lo, hi) in whitespace_ranges() {
+        if lo == hi {
+            wasm!(f, { local_get(0); i32_const(lo as i32); i32_eq; i32_or; });
+        } else {
+            wasm!(f, {
+                local_get(0); i32_const(lo as i32); i32_ge_u;
+                local_get(0); i32_const(hi as i32); i32_le_u;
+                i32_and; i32_or;
+            });
+        }
+    }
+    wasm!(f, { end; });
+    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+}
+
+/// Emit a forward codepoint loop that advances `pos_local` past leading
+/// White_Space, stopping at `end_local` (decode scalar → `__is_unicode_ws`,
+/// advance by `utf8_width`). The string pointer is local 0. Shared by the trim
+/// runtime fns and the leading-trim in int/float `.parse`.
+pub(super) fn emit_trim_forward(f: &mut Function, emitter: &WasmEmitter, pos_local: u32, end_local: u32) {
+    let uw = emitter.rt.string.utf8_width;
+    let us = emitter.rt.string.utf8_scalar;
+    let isws = emitter.rt.string.is_unicode_ws;
+    wasm!(f, {
+        block_empty; loop_empty;
+          local_get(pos_local); local_get(end_local); i32_ge_u; br_if(1);
+          local_get(0); local_get(pos_local); call(us); i32_wrap_i64; call(isws); i32_eqz; br_if(1);
+          local_get(0); local_get(pos_local); call(uw); local_get(pos_local); i32_add; local_set(pos_local);
+          br(0);
+        end; end;
+    });
+}
+
+/// Emit a backward codepoint loop that shrinks `end_local` past trailing
+/// White_Space, not below `floor_local` (step back over UTF-8 continuation bytes
+/// to the lead byte, decode scalar → `__is_unicode_ws`). `q_local` is scratch.
+/// The string pointer is local 0. Shared with int/float `.parse` trailing trim.
+pub(super) fn emit_trim_backward(f: &mut Function, emitter: &WasmEmitter, end_local: u32, floor_local: u32, q_local: u32) {
+    let us = emitter.rt.string.utf8_scalar;
+    let isws = emitter.rt.string.is_unicode_ws;
+    let do_ = string_data_off();
+    wasm!(f, {
+        block_empty; loop_empty;
+          local_get(end_local); local_get(floor_local); i32_le_u; br_if(1);
+          // q = end-1; step back over continuation bytes (0b10xxxxxx) to the lead byte.
+          local_get(end_local); i32_const(1); i32_sub; local_set(q_local);
+          block_empty; loop_empty;
+            local_get(0); i32_const(do_); i32_add; local_get(q_local); i32_add; i32_load8_u(0);
+            i32_const(0xC0); i32_and; i32_const(0x80); i32_ne; br_if(1);   // lead byte → stop
+            local_get(q_local); i32_eqz; br_if(1);
+            local_get(q_local); i32_const(1); i32_sub; local_set(q_local);
+            br(0);
+          end; end;
+          local_get(0); local_get(q_local); call(us); i32_wrap_i64; call(isws); i32_eqz; br_if(1);
+          local_get(q_local); local_set(end_local);
+          br(0);
+        end; end;
+    });
+}
+
 fn compile_trim(emitter: &mut WasmEmitter) {
     let type_idx = emitter.func_type_indices[&emitter.rt.string.trim];
-    let mut f = Function::new([
-        (1, ValType::I32), (1, ValType::I32), (1, ValType::I32), (1, ValType::I32),
-    ]);
+    // locals: 1=len, 2=start, 3=end, 4=q
+    let mut f = Function::new([(4, ValType::I32)]);
     wasm!(f, {
         local_get(0); i32_load(0); local_set(1);
-        i32_const(0); local_set(2); // start
-        local_get(1); local_set(3); // end = len
+        i32_const(0); local_set(2);
+        local_get(1); local_set(3);
     });
-    // Find start (skip whitespace)
-    wasm!(f, {
-        block_empty; loop_empty;
-          local_get(2); local_get(3); i32_ge_u; br_if(1);
-          local_get(0); i32_const(string_data_off()); i32_add; local_get(2); i32_add; i32_load8_u(0);
-          local_set(1);
-          local_get(1); i32_const(32); i32_eq;
-          local_get(1); i32_const(9); i32_eq; i32_or;
-          local_get(1); i32_const(10); i32_eq; i32_or;
-          local_get(1); i32_const(13); i32_eq; i32_or;
-          i32_eqz; br_if(1);
-          local_get(2); i32_const(1); i32_add; local_set(2);
-          br(0);
-        end; end;
-    });
-    // Find end (skip trailing whitespace)
-    wasm!(f, {
-        block_empty; loop_empty;
-          local_get(3); local_get(2); i32_le_u; br_if(1);
-          local_get(0); i32_const(string_data_off()); i32_add;
-          local_get(3); i32_const(1); i32_sub; i32_add; i32_load8_u(0);
-          local_set(1);
-          local_get(1); i32_const(32); i32_eq;
-          local_get(1); i32_const(9); i32_eq; i32_or;
-          local_get(1); i32_const(10); i32_eq; i32_or;
-          local_get(1); i32_const(13); i32_eq; i32_or;
-          i32_eqz; br_if(1);
-          local_get(3); i32_const(1); i32_sub; local_set(3);
-          br(0);
-        end; end;
-    });
-    // slice(s, start, end)
+    emit_trim_forward(&mut f, emitter, 2, 1);
+    emit_trim_backward(&mut f, emitter, 3, 2, 4);
     wasm!(f, {
         local_get(0); local_get(2); local_get(3);
         call(emitter.rt.string.slice);
@@ -835,24 +918,14 @@ fn compile_pad_end(emitter: &mut WasmEmitter) {
 
 fn compile_trim_start(emitter: &mut WasmEmitter) {
     let type_idx = emitter.func_type_indices[&emitter.rt.string.trim_start];
-    let mut f = Function::new([(1, ValType::I32), (1, ValType::I32)]);
+    // locals: 1=len, 2=start
+    let mut f = Function::new([(2, ValType::I32)]);
     wasm!(f, {
         local_get(0); i32_load(0); local_set(1);
         i32_const(0); local_set(2);
-        block_empty; loop_empty;
-          local_get(2); local_get(1); i32_ge_u; br_if(1);
-          local_get(0); i32_const(string_data_off()); i32_add; local_get(2); i32_add; i32_load8_u(0);
-          local_tee(1);
-          i32_const(32); i32_eq;
-          local_get(1); i32_const(9); i32_eq; i32_or;
-          local_get(1); i32_const(10); i32_eq; i32_or;
-          local_get(1); i32_const(13); i32_eq; i32_or;
-          i32_eqz; br_if(1);
-          local_get(2); i32_const(1); i32_add; local_set(2);
-          local_get(0); i32_load(0); local_set(1);
-          br(0);
-        end; end;
-        local_get(0); i32_load(0); local_set(1);
+    });
+    emit_trim_forward(&mut f, emitter, 2, 1);
+    wasm!(f, {
         local_get(0); local_get(2); local_get(1);
         call(emitter.rt.string.slice);
         end;
@@ -862,22 +935,14 @@ fn compile_trim_start(emitter: &mut WasmEmitter) {
 
 fn compile_trim_end(emitter: &mut WasmEmitter) {
     let type_idx = emitter.func_type_indices[&emitter.rt.string.trim_end];
-    let mut f = Function::new([(1, ValType::I32), (1, ValType::I32)]);
+    // locals: 1=end, 2=q, 3=floor(=0)
+    let mut f = Function::new([(3, ValType::I32)]);
     wasm!(f, {
         local_get(0); i32_load(0); local_set(1);
-        block_empty; loop_empty;
-          local_get(1); i32_eqz; br_if(1);
-          local_get(0); i32_const(string_data_off()); i32_add;
-          local_get(1); i32_const(1); i32_sub; i32_add;
-          i32_load8_u(0); local_set(2);
-          local_get(2); i32_const(32); i32_eq;
-          local_get(2); i32_const(9); i32_eq; i32_or;
-          local_get(2); i32_const(10); i32_eq; i32_or;
-          local_get(2); i32_const(13); i32_eq; i32_or;
-          i32_eqz; br_if(1);
-          local_get(1); i32_const(1); i32_sub; local_set(1);
-          br(0);
-        end; end;
+        i32_const(0); local_set(3);
+    });
+    emit_trim_backward(&mut f, emitter, 1, 3, 2);
+    wasm!(f, {
         local_get(0); i32_const(0); local_get(1);
         call(emitter.rt.string.slice);
         end;

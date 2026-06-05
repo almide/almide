@@ -235,33 +235,30 @@ pub(super) fn compile_is_alnum(emitter: &mut WasmEmitter) {
     emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
 }
 
-/// is_whitespace: space(32), tab(9), LF(10), CR(13). Empty string returns false.
+/// is_whitespace: every codepoint has the Unicode White_Space property (Rust
+/// `char::is_whitespace`, via `__is_unicode_ws`). Mirrors native
+/// `s.chars().all(|c| c.is_whitespace())`, so the EMPTY string is vacuously TRUE
+/// (Rust `.all()` on an empty iterator) — the old byte version wrongly returned
+/// false for "" and missed VT/FF and all non-ASCII whitespace.
 pub(super) fn compile_is_whitespace(emitter: &mut WasmEmitter) {
     let func_idx = emitter.rt.string.is_whitespace;
     let type_idx = emitter.func_type_indices[&func_idx];
-    let mut f = Function::new([(1, ValType::I32), (1, ValType::I32)]);
+    let uw = emitter.rt.string.utf8_width;
+    let us = emitter.rt.string.utf8_scalar;
+    let isws = emitter.rt.string.is_unicode_ws;
+    // locals: 1=blen, 2=i
+    let mut f = Function::new([(2, ValType::I32)]);
     wasm!(f, {
         local_get(0); i32_load(0); local_set(1);
-        local_get(1); i32_eqz;
-        if_i32; i32_const(0);
-        else_;
-          i32_const(0); local_set(2);
-          block_empty; loop_empty;
-            local_get(2); local_get(1); i32_ge_u; br_if(1);
-            local_get(0); i32_const(string_data_off()); i32_add; local_get(2); i32_add; i32_load8_u(0);
-            local_tee(1);
-            i32_const(32); i32_eq;
-            local_get(1); i32_const(9); i32_eq; i32_or;
-            local_get(1); i32_const(10); i32_eq; i32_or;
-            local_get(1); i32_const(13); i32_eq; i32_or;
-            i32_eqz;
-            br_if(1);
-            local_get(0); i32_load(0); local_set(1);
-            local_get(2); i32_const(1); i32_add; local_set(2);
-            br(0);
-          end; end;
-          local_get(2); local_get(0); i32_load(0); i32_eq;
-        end;
+        i32_const(0); local_set(2);
+        block_empty; loop_empty;
+          local_get(2); local_get(1); i32_ge_u; br_if(1);   // end (incl. empty) → all WS
+          local_get(0); local_get(2); call(us); i32_wrap_i64; call(isws); i32_eqz;
+          if_empty; i32_const(0); return_; end;              // a non-WS codepoint → false
+          local_get(0); local_get(2); call(uw); local_get(2); i32_add; local_set(2);
+          br(0);
+        end; end;
+        i32_const(1);
         end;
     });
     emitter.add_compiled(CompiledFunc::tracked(type_idx, f));

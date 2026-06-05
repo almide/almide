@@ -265,33 +265,11 @@ pub(super) fn compile_float_parse(emitter: &mut WasmEmitter) {
         i32_const(0); local_set(21);   // sticky
     });
 
-    // Trim leading ASCII whitespace: while i < end and is_ws(data[i]) { i++ }
-    wasm!(f, {
-        block_empty; loop_empty;
-          local_get(2); local_get(10); i32_ge_u; br_if(1);
-          local_get(11); local_get(2); i32_add; i32_load8_u(0); local_set(5);
-    });
-    emit_is_ascii_ws(&mut f, 5); // leaves 1 if data[i] is ws
-    wasm!(f, {
-          i32_eqz; br_if(1);            // not ws -> stop
-          local_get(2); i32_const(1); i32_add; local_set(2);
-          br(0);
-        end; end;
-    });
-
-    // Trim trailing ASCII whitespace: while end > i and is_ws(data[end-1]) { end-- }
-    wasm!(f, {
-        block_empty; loop_empty;
-          local_get(10); local_get(2); i32_le_u; br_if(1);
-          local_get(11); local_get(10); i32_add; i32_const(1); i32_sub; i32_load8_u(0); local_set(5);
-    });
-    emit_is_ascii_ws(&mut f, 5);
-    wasm!(f, {
-          i32_eqz; br_if(1);            // not ws -> stop
-          local_get(10); i32_const(1); i32_sub; local_set(10);
-          br(0);
-        end; end;
-    });
+    // Trim leading + trailing Unicode whitespace (matches native s.trim().parse),
+    // codepoint-aware via the shared __is_unicode_ws helpers. i=cursor(2),
+    // end=10, string ptr=0, scratch q=5.
+    super::rt_string::emit_trim_forward(&mut f, emitter, 2, 10);
+    super::rt_string::emit_trim_backward(&mut f, emitter, 10, 2, 5);
 
     // Empty after trim -> "cannot parse float from empty string"
     wasm!(f, {
@@ -507,25 +485,6 @@ pub(super) fn compile_float_parse(emitter: &mut WasmEmitter) {
     });
 
     emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
-}
-
-/// Push 1 if the byte in `byte_local` is ASCII whitespace, else 0.
-/// Rust `str::trim` strips Unicode whitespace, but ASCII covers the corpus
-/// (space, \t, \n, \r, \x0b, \x0c).
-fn emit_is_ascii_ws(f: &mut Function, byte_local: u32) {
-    wasm!(f, {
-        local_get(byte_local); i32_const(32); i32_eq;   // ' '
-        local_get(byte_local); i32_const(9);  i32_eq;   // \t
-        i32_or;
-        local_get(byte_local); i32_const(10); i32_eq;   // \n
-        i32_or;
-        local_get(byte_local); i32_const(13); i32_eq;   // \r
-        i32_or;
-        local_get(byte_local); i32_const(11); i32_eq;   // \x0b
-        i32_or;
-        local_get(byte_local); i32_const(12); i32_eq;   // \x0c
-        i32_or;
-    });
 }
 
 /// Push 1 if `data[i..end]` (i in `i_local`, end in `end_local`, base in
