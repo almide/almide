@@ -1,5 +1,24 @@
-// @xt-allow: wasm float.to_string is fixed-precision, not shortest-round-trip (Ryu) — native 0.30000000000000004 vs wasm 0.3. Tracked in docs/roadmap/active/correctness-guarantee-gaps.md.
+// Regression: WASM float.to_string must produce the SAME bytes as native —
+// Rust's f64 Display (shortest round-tripping decimal, fixed notation) plus the
+// ".0" integer suffix. The WASM runtime implements Dragon4 with exact
+// big-integer arithmetic (crates/almide-codegen/src/emit_wasm/rt_dragon.rs).
+// Previously WASM emitted fixed-precision digits (native 0.30000000000000004 vs
+// wasm 0.3) AND trapped via i64_trunc for |x| >= 2^63.
 effect fn main() -> Unit = {
-  println(float.to_string(0.1 + 0.2))
-  println(float.to_string(1.0 / 3.0))
+  // Shortest round-trip (was fixed-precision before)
+  println(float.to_string(0.1 + 0.2))     // 0.30000000000000004
+  println(float.to_string(0.1 * 3.0))     // 0.30000000000000004
+  println(float.to_string(1.0 / 3.0))     // 0.3333333333333333
+  println(float.to_string(123.456))       // 123.456
+  println(float.to_string(0.0 - 123.456)) // -123.456
+  // |x| >= 2^63 (was an i64_trunc overflow trap)
+  println(float.to_string(9223372036854775808.0))  // 9223372036854776000.0  (2^63)
+  println(float.to_string(18446744073709551616.0)) // 18446744073709552000.0  (2^64)
+  println(float.to_string(1234567890123456789.0))  // 1234567890123456800.0
+  // Very large / very small magnitudes render in fixed (never scientific) form
+  println(float.to_string(1e20))          // 100000000000000000000.0
+  println(float.to_string(1e-10))         // 0.0000000001
+  // Integer-valued floats get the ".0" suffix; sub-1 negatives keep their sign
+  println(float.to_string(0.0 - 0.5))     // -0.5
+  println(float.to_string(100.0))         // 100.0
 }
