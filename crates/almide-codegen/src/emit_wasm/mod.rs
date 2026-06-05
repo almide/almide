@@ -24,6 +24,7 @@ mod runtime_eq;
 mod rt_string;
 mod rt_string_extra;
 mod rt_string_case;
+mod rt_unicode_tables;
 mod rt_numeric;
 mod rt_dragon;
 mod rt_dec2flt;
@@ -216,6 +217,24 @@ pub struct StringRuntime {
     /// char boundary (clamped to [0, byte_len]). Mirrors native `slice`'s
     /// boundary-safe byte indexing.
     pub utf8_snap: u32,
+    // ── Oracle-derived Unicode property membership (in `rt_unicode_tables`) ──
+    /// `(scalar: i32) -> i32` (0/1): binary-search the embedded property range
+    /// table for `is_alphabetic` / `is_alphanumeric` / `is_uppercase` /
+    /// `is_lowercase`. These make the WASM string predicates full-Unicode and
+    /// byte-identical to native's `char` methods. Each searches the table at the
+    /// matching `prop_*_table` offset below.
+    pub prop_alpha: u32,
+    pub prop_alnum: u32,
+    pub prop_upper: u32,
+    pub prop_lower: u32,
+    /// Data-section offsets of the embedded `[len][cap][data]` range-table blobs
+    /// (interned via `intern_bytes`, so dead-data elimination may relocate or
+    /// drop them). The membership helpers above emit the BARE offset as their
+    /// only data `i32.const` so a relocation stays correct.
+    pub prop_alpha_table: u32,
+    pub prop_alnum_table: u32,
+    pub prop_upper_table: u32,
+    pub prop_lower_table: u32,
     // ── Full-Unicode case folding (oracle-derived tables in `rt_string_case`) ──
     /// `__utf8_emit_scalar(dst, byte_off, scalar) -> i32`: encode `scalar` as
     /// UTF-8 at `dst`'s data section + byte_off; returns the advanced byte_off.
@@ -534,6 +553,9 @@ impl WasmEmitter {
                     utf8_scalar: 0,
                     utf8_byte_of_cp: 0,
                     utf8_snap: 0,
+                    prop_alpha: 0, prop_alnum: 0, prop_upper: 0, prop_lower: 0,
+                    prop_alpha_table: 0, prop_alnum_table: 0,
+                    prop_upper_table: 0, prop_lower_table: 0,
                     utf8_emit_scalar: 0,
                     case_map_lookup: 0,
                     set_member: 0,

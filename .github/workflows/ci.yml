@@ -200,14 +200,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Two complementary checks — both are required for the "proven" claim:
+      # 1. grep for `sorry`: `lake build` only WARNS on sorry, so the grep is what
+      #    enforces that every theorem is actually proven, not stubbed.
+      # 2. `lake build`: kernel-checks that the proofs really compile — without it
+      #    a broken proof (or one that only ever built locally) passes CI silently.
       - name: Verify 0 sorry
         run: |
           if grep -rn '\bsorry\b' crates/almide-perceus-belt/AlmidePerceusBelt/ --include='*.lean'; then
             echo "::error::sorry found in Lean proofs — all theorems must be fully proven"
-            echo "Run 'cd crates/almide-perceus-belt && lake build' locally to verify"
             exit 1
           fi
-          echo "✓ 0 sorry in Lean proofs (kernel verification: run lake build locally)"
+          echo "✓ 0 sorry in Lean proofs"
+
+      - name: Kernel-check proofs (lake build)
+        uses: leanprover/lean-action@v1
+        with:
+          lake-package-directory: crates/almide-perceus-belt
 
   # ═══════════════════════════════════════════════
   # Checks
@@ -238,6 +247,9 @@ jobs:
 
       - name: Forbidden impurities (no raw clocks/threads in the compile path)
         run: scripts/check-forbidden-impurities.sh
+
+      - name: WASM runtime oracle-pairing registry (every compile_* registered + verified tests exist)
+        run: scripts/check-rt-oracle-registry.sh
 
   # ═══════════════════════════════════════════════
   # Full CI — cross-platform (PRs to main only)

@@ -35,7 +35,10 @@ Consumers restrict the capabilities of dependency packages. Security Layer 3.
 
 Attach effect sets to type information inside the compiler (add EffectSet to FnType).
 User syntax remains unchanged — still just `effect fn`.
-Explicit effect syntax like vibe-lang's `with {Async}` is **not adopted**.
+Explicit effect-row syntax like `with {Async}` is **not adopted** — it forces every
+author (human or LLM) to choose effect sets per function, adds keywords, and moves
+the restriction boundary to the wrong place. Almide keeps `effect fn` + inference,
+and enforces restrictions at the package boundary (additive, no breaking changes).
 
 ---
 
@@ -51,12 +54,3 @@ Explicit effect syntax like vibe-lang's `with {Async}` is **not adopted**.
 | `Fan` | fan | ✅ |
 | `Log` | log | ✅ |
 
-## Differentiation from vibe-lang
-
-| | vibe-lang | Almide |
-|---|-----------|--------|
-| User syntax | Explicit `with {Async, Error}` | `effect fn` only — inferred |
-| LLM burden | Must choose effects | No changes |
-| Restriction scope | Function level | Package boundary |
-| New keywords | `with`, `handle` | None |
-| Breaking changes | — | None (additive) |

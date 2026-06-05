@@ -1,6 +1,8 @@
+<!-- description: StackBalancePass — void-context blocks never leak stack values (wasmtime 45+ strict validation) -->
+<!-- done: 2026-06-05 -->
 # Perceus Void Block Stack Balance — CI Blocker
 
-> **Status**: Active — StackBalancePass implemented, pending CI verification
+> **Status**: ✅ Done (v0.23.11, 2026-06-05) — StackBalancePass landed (`pass_stack_balance.rs`), CI + Cross-Target CI green
 > **Tests**: `wasm_list_nested_map_filter`, `wasm_cross_target_spec`
 > **Error**: `values remaining on stack at end of block` (wasmtime 45+)
 

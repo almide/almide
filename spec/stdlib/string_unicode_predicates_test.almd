@@ -1,0 +1,111 @@
+// Unicode-aware string predicate tests.
+//
+// These pin the full-Unicode semantics of is_alpha/is_alphanumeric/is_upper/
+// is_lower and the empty-pattern behaviour of count/last_index_of. They run on
+// BOTH native (Rust char methods) and WASM (oracle-derived range tables) and
+// must agree — the values below are the native oracle.
+
+// ── is_alpha (full Unicode) ──
+
+test "is_alpha ascii" {
+  assert(string.is_alpha("abcXYZ"));
+  assert(not string.is_alpha("ab1"));
+  assert(not string.is_alpha(""))
+}
+
+test "is_alpha unicode letters" {
+  assert(string.is_alpha("αβγ"));      // Greek
+  assert(string.is_alpha("ягд"));      // Cyrillic
+  assert(string.is_alpha("日本"));      // CJK
+  assert(string.is_alpha("ＡＢＣ"));    // fullwidth
+  assert(string.is_alpha("ǅ"));        // titlecase
+  assert(string.is_alpha("ʰ"));        // modifier letter
+  assert(string.is_alpha("ß"))         // eszett
+}
+
+test "is_alpha excludes numeric categories" {
+  assert(not string.is_alpha("٣"));    // Arabic-Indic digit (Nd)
+  assert(not string.is_alpha("²"));    // superscript (No)
+  assert(not string.is_alpha("½"))     // fraction (No)
+}
+
+test "is_alpha roman numerals are alphabetic" {
+  assert(string.is_alpha("Ⅴ"));        // Nl is alphabetic
+  assert(string.is_alpha("ⅴ"))
+}
+
+// ── is_alphanumeric (full Unicode) ──
+
+test "is_alphanumeric unicode" {
+  assert(string.is_alphanumeric("abc123"));
+  assert(string.is_alphanumeric("αβ٣"));   // letter + Arabic-Indic digit
+  assert(string.is_alphanumeric("²½"));    // No category counts as alnum
+  assert(string.is_alphanumeric("５"));     // fullwidth digit
+  assert(not string.is_alphanumeric("A.B"));
+  assert(not string.is_alphanumeric(""))
+}
+
+// ── is_upper / is_lower (any-alpha guard + per-codepoint case) ──
+
+test "is_upper requires an alphabetic char" {
+  assert(not string.is_upper("123"));   // no alpha → false (was vacuously true)
+  assert(not string.is_upper(""));
+  assert(string.is_upper("ABC"));
+  assert(string.is_upper("A.B"))        // alpha present, non-alpha ignored
+}
+
+test "is_upper unicode" {
+  assert(string.is_upper("ΑΒΓ"));       // Greek upper
+  assert(string.is_upper("Σ"));
+  assert(string.is_upper("ＡＢＣ"));     // fullwidth upper
+  assert(string.is_upper("Ⅴ"));         // roman numeral upper
+  assert(not string.is_upper("αβγ"));
+  assert(not string.is_upper("ǅ"));     // titlecase is neither upper nor lower
+  assert(not string.is_upper("日本"))   // caseless → no alpha-is-upper, but
+}                                        // 日本 has alpha that is not upper → false
+
+test "is_lower requires an alphabetic char" {
+  assert(not string.is_lower("123"));
+  assert(not string.is_lower(""));
+  assert(string.is_lower("abc"));
+  assert(string.is_lower("a.b"))
+}
+
+test "is_lower unicode" {
+  assert(string.is_lower("αβγ"));
+  assert(string.is_lower("σ"));
+  assert(string.is_lower("ａｂｃ"));     // fullwidth lower
+  assert(string.is_lower("ⅴ"));         // roman numeral lower
+  assert(string.is_lower("ʰ"));         // modifier letter is lowercase
+  assert(string.is_lower("ß"));
+  assert(not string.is_lower("ABC"));
+  assert(not string.is_lower("ǅ"))
+}
+
+test "multibyte string is not simultaneously upper and lower" {
+  // The old WASM byte-loop reported BOTH true for any multibyte string.
+  assert(not (string.is_upper("日本") and string.is_lower("日本")));
+  assert(not (string.is_upper("αΒ") and string.is_lower("αΒ")))
+}
+
+// ── count / last_index_of with empty pattern ──
+
+test "count with empty pattern is char count plus one" {
+  assert_eq(string.count("", ""), 1);
+  assert_eq(string.count("abc", ""), 4);
+  assert_eq(string.count("日本", ""), 3);     // 2 codepoints + 1
+  assert_eq(string.count("a日b", ""), 4)      // 3 codepoints + 1
+}
+
+test "last_index_of with empty pattern is byte length" {
+  assert_eq(string.last_index_of("", ""), some(0));
+  assert_eq(string.last_index_of("abc", ""), some(3));
+  assert_eq(string.last_index_of("日本", ""), some(6));   // 6 bytes
+  assert_eq(string.last_index_of("a日b", ""), some(5))    // 5 bytes
+}
+
+test "count and last_index_of unaffected for non-empty pattern" {
+  assert_eq(string.count("ababab", "ab"), 3);
+  assert_eq(string.last_index_of("ababab", "ab"), some(4));
+  assert_eq(string.last_index_of("abc", "z"), none)
+}
