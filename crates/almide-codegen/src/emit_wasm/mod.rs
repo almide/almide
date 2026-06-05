@@ -188,6 +188,11 @@ pub struct StringRuntime {
     /// property (Rust `char::is_whitespace`). The single source of truth for all
     /// trim / is_whitespace / parse-trim sites.
     pub is_unicode_ws: u32,
+    /// `utf8_classify(buf, i, n) -> i32`: classify the UTF-8 sequence at byte `i`
+    /// for `from_utf8_lossy`. Returns `(consumed << 1) | valid` — `valid`=1 means
+    /// copy `consumed` bytes; `valid`=0 means a maximal invalid subpart of
+    /// `consumed` bytes (emit one U+FFFD).
+    pub utf8_classify: u32,
     pub is_upper: u32,
     pub is_lower: u32,
     pub cmp: u32,
@@ -493,7 +498,7 @@ impl WasmEmitter {
                     replace_first: 0, last_index_of: 0,
                     strip_prefix: 0, strip_suffix: 0,
                     is_digit: 0, is_alpha: 0, is_alnum: 0,
-                    is_whitespace: 0, is_unicode_ws: 0, is_upper: 0, is_lower: 0,
+                    is_whitespace: 0, is_unicode_ws: 0, utf8_classify: 0, is_upper: 0, is_lower: 0,
                     cmp: 0,
                     char_count: 0,
                     run_length_encode: 0,

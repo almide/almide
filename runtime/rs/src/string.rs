@@ -38,7 +38,15 @@ pub fn almide_rt_string_capitalize(s: &str) -> String { let mut c = s.chars(); m
 pub fn almide_rt_string_to_int(s: &str) -> Result<i64, String> { s.trim().parse::<i64>().map_err(|e| e.to_string()) }
 pub fn almide_rt_string_to_float(s: &str) -> Result<f64, String> { s.trim().parse::<f64>().map_err(|e| e.to_string()) }
 pub fn almide_rt_string_to_bytes(s: &str) -> Vec<i64> { s.bytes().map(|b| b as i64).collect() }
-pub fn almide_rt_string_from_bytes(bytes: &Vec<i64>) -> String { bytes.iter().map(|&b| b as u8 as char).collect() }
+// UTF-8 lossy decode — the inverse of `to_bytes` (which emits UTF-8), matching
+// Almide's `bytes.to_string_lossy` and every other language's bytes→string. (Was
+// a Latin-1 `b as u8 as char` map, which broke the round-trip on all non-ASCII.)
+// Each i64 is truncated to a byte (`b as u8`, preserving the prior wrap), then the
+// byte sequence is decoded as UTF-8 with U+FFFD for each maximal invalid subpart.
+pub fn almide_rt_string_from_bytes(bytes: &[i64]) -> String {
+    let v: Vec<u8> = bytes.iter().map(|&b| b as u8).collect();
+    String::from_utf8_lossy(&v).into_owned()
+}
 pub fn almide_rt_string_codepoint(s: &str) -> Option<i64> { s.chars().next().map(|c| c as i64) }
 pub fn almide_rt_string_from_codepoint(cp: i64) -> String { char::from_u32(cp as u32).map(|c| c.to_string()).unwrap_or_default() }
 

@@ -1,0 +1,32 @@
+// Regression: string.from_bytes must be UTF-8 decode (the inverse of to_bytes),
+// byte-identical native==WASM. Native used to map each byte to a Latin-1 scalar
+// (`b as u8 as char`), which corrupted every non-ASCII string and broke the
+// to_bytes round-trip; it is now `String::from_utf8_lossy` (U+FFFD per maximal
+// invalid subpart), matching to_bytes, Almide's own bytes.to_string_lossy, and
+// every other language. The WASM runtime does the same lossy decode. string.len
+// is BYTE length, so this asserts on byte counts / round-tripped content.
+effect fn main() -> Unit = {
+  // Round-trip valid UTF-8 (was broken on native for all non-ASCII).
+  println(string.from_bytes(string.to_bytes("Σ")))                  // Σ
+  println(string.from_bytes(string.to_bytes("café")))              // café
+  println(string.from_bytes(string.to_bytes("日本語 😀 ∑")))        // 日本語 😀 ∑
+  println(string.from_bytes([72, 105]))                            // Hi
+  println(int.to_string(string.len(string.from_bytes([])))) // 0
+
+  // Lossy: invalid sequences become U+FFFD (3 bytes) per maximal subpart.
+  // Print the byte length of the decoded result (U+FFFD = 3 bytes each).
+  println(int.to_string(string.len(string.from_bytes([255]))))               // 3  (1× FFFD)
+  println(int.to_string(string.len(string.from_bytes([195, 40]))))           // 4  (FFFD + '(')
+  println(int.to_string(string.len(string.from_bytes([195]))))               // 3  (truncated lead)
+  println(int.to_string(string.len(string.from_bytes([72, 255, 73]))))       // 5  (H FFFD I)
+  println(int.to_string(string.len(string.from_bytes([224, 160, 32]))))      // 4  (E0 A0 valid prefix, then space)
+  println(int.to_string(string.len(string.from_bytes([240, 144, 128]))))     // 3  (truncated 4-byte)
+  println(int.to_string(string.len(string.from_bytes([237, 160, 128]))))     // 9  (surrogate → 3× FFFD)
+  println(int.to_string(string.len(string.from_bytes([192, 128]))))          // 6  (overlong → 2× FFFD)
+  println(int.to_string(string.len(string.from_bytes([244, 144, 128, 128])))) // 12 (> U+10FFFF → 4× FFFD)
+  println(int.to_string(string.len(string.from_bytes([226, 130]))))          // 3  (truncated 3-byte)
+  println(int.to_string(string.len(string.from_bytes([128, 128, 128]))))     // 9  (lone continuations)
+
+  // Mixed valid + invalid in one input (exact byte dump via to_bytes length).
+  println(int.to_string(list.len(string.to_bytes(string.from_bytes([206, 163, 255, 65])))))  // Σ(2) + FFFD(3) + A(1) = 6
+}
