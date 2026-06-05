@@ -296,6 +296,9 @@ pub fn register_runtime_functions(emitter: &mut WasmEmitter) {
     super::rt_dragon::register(emitter);
     // Correctly-rounded decimal→f64 for float.parse (reuses the Dragon4 bignum).
     super::rt_dec2flt::register(emitter);
+    // Compound-repr string escape helper (registered last → compiled last so the
+    // func-index order matches; see the compile-order note in `compile_runtime`).
+    super::rt_repr::register(emitter);
 
     // Global 0: __heap_ptr (memory 0 bump allocator)
     emitter.heap_ptr_global = 0;
@@ -364,6 +367,9 @@ pub fn compile_runtime(emitter: &mut WasmEmitter) {
     super::rt_dragon::compile_helpers(emitter);
     // decimal→f64 parser bodies (registered right after the Dragon4 helpers).
     super::rt_dec2flt::compile_helpers(emitter);
+    // Compound-repr string escape (registered last in register_runtime, so its
+    // body is emitted last to keep func-index order).
+    super::rt_repr::compile(emitter);
 }
 
 /// __alloc(size: i32) -> i32

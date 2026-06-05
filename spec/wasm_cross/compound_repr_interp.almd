@@ -1,0 +1,67 @@
+// Cluster-H: compound-type string interpolation = Almide-literal repr.
+//
+// `"${compound}"` renders a value back to its Almide-literal form, recursively
+// composed, byte-identically on native and WASM. This file is the cross-target
+// gate for the structural shapes backed by `AlmideRepr` (native) / the recursive
+// rt repr emitters (WASM): List, Map, Set, Tuple, Option, Result, and nesting.
+//
+// Records and variants are intentionally NOT exercised here — they are scoped
+// out of this pass (they stay on the Display path on both targets) precisely so
+// no native↔WASM divergence is introduced. See `ty_needs_repr`.
+
+fn main() -> Unit = {
+  // ── List: `[a, b, c]`, empty `[]` ──
+  println("list=${[1, 2, 3]}")
+  let el: List[Int] = []
+  println("empty_list=${el}")
+
+  // ── Map: `[k: v, …]` (brackets), string + int keys, empty `[:]` ──
+  println("smap=${["a": 1, "b": 2]}")
+  let imap: Map[Int, String] = [10: "x", 20: "y"]
+  println("imap=${imap}")
+  let emap: Map[String, Int] = [:]
+  println("empty_map=${emap}")
+
+  // A ≥9-entry map exercises dict index regrowth — insertion order must hold.
+  let big: Map[String, Int] =
+    ["a": 1, "b": 2, "c": 3, "d": 4, "e": 5, "f": 6, "g": 7, "h": 8, "i": 9, "j": 10]
+  println("big_map=${big}")
+
+  // ── Set: constructor form `set.from_list([...])` (dedup, insertion order) ──
+  println("set=${set.from_list([3, 1, 2, 1, 3])}")
+  let sstr: Set[String] = set.from_list(["x", "y", "x", "z"])
+  println("set_str=${sstr}")
+
+  // ── Tuple: `(a, b, …)`, heterogeneous ──
+  println("tuple=${(1, "two", true)}")
+
+  // ── Option: `some(v)` / `none` ──
+  let os: Option[Int] = some(42)
+  let on: Option[Int] = none
+  println("opt_some=${os}")
+  println("opt_none=${on}")
+
+  // ── Result: `ok(v)` / `err(e)` ──
+  let ro: Result[Int, String] = ok(7)
+  let re: Result[Int, String] = err("boom")
+  println("res_ok=${ro}")
+  println("res_err=${re}")
+
+  // ── Nesting: List[Map], Map values containing lists, option-in-list ──
+  println("nested=${[["a": [1, 2]], ["b": [3]]]}")
+  let mv: Map[String, List[Int]] = ["xs": [1, 2, 3], "ys": [4, 5]]
+  println("map_of_lists=${mv}")
+  let lo: List[Option[Int]] = [some(1), none, some(3)]
+  println("list_of_opt=${lo}")
+  let deep: List[Map[String, List[Option[Int]]]] = [["k": [some(1), none]]]
+  println("deep=${deep}")
+
+  // ── String values inside containers: quote/newline/tab/backslash escape lock ──
+  let esc: List[String] = ["say \"hi\"", "tab\tgap", "back\\slash", "new\nline"]
+  println("escapes=${esc}")
+
+  // ── Floats inside containers route through the shortest-round-trip path ──
+  println("floats=${[0.1, 0.2, 0.30000000000000004]}")
+  let fmap: Map[Int, Float] = [1: 0.5, 2: 0.30000000000000004]
+  println("float_map=${fmap}")
+}

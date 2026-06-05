@@ -333,6 +333,72 @@ fn rust_runtime_prelude(for_crate: bool) -> String {
     s.push_str("impl<T: std::fmt::Debug> std::fmt::Debug for SharedMut<T> { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { self.0.borrow().fmt(f) } }\n");
     s.push_str("impl<T: PartialEq> PartialEq for SharedMut<T> { fn eq(&self, other: &Self) -> bool { *self.0.borrow() == *other.0.borrow() } }\n");
     s.push_str(&format!("impl<T> SharedMut<T> {{ {vis}fn new(v: T) -> Self {{ SharedMut(std::rc::Rc::new(std::cell::RefCell::new(v))) }} {vis}fn get(&self) -> T where T: Clone {{ self.0.borrow().clone() }} {vis}fn set(&self, v: T) {{ *self.0.borrow_mut() = v; }} {vis}fn borrow(&self) -> std::cell::Ref<'_, T> {{ self.0.borrow() }} {vis}fn borrow_mut(&self) -> std::cell::RefMut<'_, T> {{ self.0.borrow_mut() }} }}\n"));
+    s.push_str(&almide_repr_prelude(vis));
+    s
+}
+
+/// The `AlmideRepr` trait + std-type impls used by compound string interpolation.
+///
+/// `"${compound}"` must render a value back to its **Almide literal form**
+/// (`[1, 2, 3]`, `["a": 1]`, `(1, "x")`, `some(v)`, …) byte-identically on the
+/// Rust and WASM targets. Each compound interpolation part is lowered (by the
+/// walker) to `almide_repr(&part)`; recursion is automatic via the trait, so a
+/// `List[Map[String, List[Int]]]` composes with no per-shape generated code.
+///
+/// String *escaping inside a container* mirrors `almide_rt_value_stringify`
+/// exactly (`\\ \" \n \r \t`) so the two repr layers never diverge. A BARE
+/// top-level `${s}` String stays raw — the walker only routes *compound* parts
+/// here, so the quoting `impl AlmideRepr for String` is reached only from inside
+/// a container.
+///
+/// Numeric/Bool reprs delegate to the same `Display` path as bare interpolation
+/// (`format!("{}", …)`), never a second formatter, so an `Int`/`Float`/`Bool`
+/// inside a container reads identically to the same value interpolated bare.
+///
+/// `AlmideMap` / `AlmideSet` impls live in their runtime modules (map.rs /
+/// set.rs) because those types are only pulled in when `needed` — emitting the
+/// impl here would reference an undefined type in std-only programs.
+fn almide_repr_prelude(vis: &str) -> String {
+    let mut s = String::new();
+    s.push_str(&format!("{vis}trait AlmideRepr {{ fn almide_repr(&self) -> String; }}\n"));
+    // Free function: the uniform call site the walker emits for a compound part.
+    s.push_str(&format!("{vis}fn almide_repr<T: AlmideRepr + ?Sized>(x: &T) -> String {{ x.almide_repr() }}\n"));
+    // Escape a string for container context — identical set to almide_rt_value_stringify.
+    s.push_str(&format!("{vis}fn almide_repr_str(sv: &str) -> String {{ format!(\"\\\"{{}}\\\"\", sv.replace('\\\\', \"\\\\\\\\\").replace('\\\"', \"\\\\\\\"\").replace('\\n', \"\\\\n\").replace('\\r', \"\\\\r\").replace('\\t', \"\\\\t\")) }}\n"));
+    // Primitives: numbers/bools route through the SAME Display path as bare interp.
+    for t in ["i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f32", "f64", "bool"] {
+        s.push_str(&format!("impl AlmideRepr for {t} {{ fn almide_repr(&self) -> String {{ format!(\"{{}}\", self) }} }}\n"));
+    }
+    // Strings inside a container are double-quoted + escaped.
+    s.push_str("impl AlmideRepr for String { fn almide_repr(&self) -> String { almide_repr_str(self) } }\n");
+    s.push_str("impl AlmideRepr for str { fn almide_repr(&self) -> String { almide_repr_str(self) } }\n");
+    // List: `[a, b, c]`, empty `[]`.
+    s.push_str("impl<T: AlmideRepr> AlmideRepr for Vec<T> { fn almide_repr(&self) -> String { let mut o = String::from(\"[\"); for (i, e) in self.iter().enumerate() { if i > 0 { o.push_str(\", \"); } o.push_str(&e.almide_repr()); } o.push(']'); o } }\n");
+    // Option: `some(v)` / `none`.
+    s.push_str("impl<T: AlmideRepr> AlmideRepr for Option<T> { fn almide_repr(&self) -> String { match self { Some(v) => format!(\"some({})\", v.almide_repr()), None => \"none\".to_string() } } }\n");
+    // Result: `ok(v)` / `err(e)`.
+    s.push_str("impl<T: AlmideRepr, E: AlmideRepr> AlmideRepr for Result<T, E> { fn almide_repr(&self) -> String { match self { Ok(v) => format!(\"ok({})\", v.almide_repr()), Err(e) => format!(\"err({})\", e.almide_repr()) } } }\n");
+    // RcCow / SharedMut transparently forward to the wrapped value.
+    s.push_str("impl<T: AlmideRepr> AlmideRepr for RcCow<T> { fn almide_repr(&self) -> String { (**self).almide_repr() } }\n");
+    s.push_str("impl<T: AlmideRepr + Clone> AlmideRepr for SharedMut<T> { fn almide_repr(&self) -> String { self.0.borrow().almide_repr() } }\n");
+    // Reference forwarders so `almide_repr(&&x)` and slice elements compose.
+    s.push_str("impl<T: AlmideRepr + ?Sized> AlmideRepr for &T { fn almide_repr(&self) -> String { (**self).almide_repr() } }\n");
+    s.push_str("impl<T: AlmideRepr + ?Sized> AlmideRepr for Box<T> { fn almide_repr(&self) -> String { (**self).almide_repr() } }\n");
+    // Tuples: `(a, b, …)` for arities 2..=12 (the parser caps tuple width well below this).
+    let names = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L"];
+    for arity in 2..=names.len() {
+        let used = &names[..arity];
+        let bounds = used.iter().map(|n| format!("{n}: AlmideRepr")).collect::<Vec<_>>().join(", ");
+        let tys = used.join(", ");
+        // Build the body: push each `self.i.almide_repr()` separated by ", ".
+        let pushes = (0..arity).map(|i| {
+            let sep = if i > 0 { "o.push_str(\", \"); " } else { "" };
+            format!("{sep}o.push_str(&self.{i}.almide_repr());")
+        }).collect::<Vec<_>>().join(" ");
+        s.push_str(&format!(
+            "impl<{bounds}> AlmideRepr for ({tys},) {{ fn almide_repr(&self) -> String {{ let mut o = String::from(\"(\"); {pushes} o.push(')'); o }} }}\n"
+        ));
+    }
     s
 }
 
