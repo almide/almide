@@ -22,7 +22,25 @@ fn extract_doc_comment(comments: &[String]) -> Option<String> {
 
 impl Parser {
     pub fn parse_single_expr(&mut self) -> Result<crate::ast::Expr, String> {
-        self.parse_expr()
+        let expr = self.parse_expr()?;
+        // A trailing `: Type` pins the expression's type, exactly as in call-arg
+        // position. This matters for string interpolation: `"${[]: List[Int]}"`
+        // sub-parses through here, and the annotation is the only thing that
+        // gives an empty collection literal a concrete element type. (A `::`
+        // is a path separator, not the start of an ascription.)
+        if self.check(crate::lexer::TokenType::Colon)
+            && self.peek_at(1).map(|t| &t.token_type) != Some(&crate::lexer::TokenType::Colon)
+        {
+            let span = expr.span;
+            self.advance(); // skip ':'
+            let ty = self.parse_type_expr()?;
+            return Ok(crate::ast::Expr::new(
+                self.next_id(),
+                span,
+                crate::ast::ExprKind::TypeAscription { expr: Box::new(expr), ty },
+            ));
+        }
+        Ok(expr)
     }
 
     pub fn parse(&mut self) -> Result<Program, String> {

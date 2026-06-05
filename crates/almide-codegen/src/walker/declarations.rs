@@ -25,7 +25,7 @@ pub fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
         String::new()
     };
 
-    match &td.kind {
+    let decl = match &td.kind {
         IrTypeDeclKind::Record { fields } => {
             let has_fn_fields = fields.iter().any(|f| matches!(&f.ty, Ty::Fn { .. }));
             // Matrix / Fn / transitively-blocking types prevent PartialEq derive.
@@ -157,6 +157,130 @@ pub fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
             let type_s = render_type(ctx, target);
             ctx.templates.render_with("type_alias", None, &[], &[("name", td.name.as_str()), ("type", type_s.as_str())])
                 .unwrap_or_else(|| format!("type {} = {};", td.name, render_type(ctx, target)))
+        }
+    };
+
+    // Emit the `AlmideRepr` impl for records/variants so a record/variant value
+    // interpolated in a string (`"${p}"`) renders to its Almide-literal form —
+    // the SAME construction-literal format `deriving Repr` produces — on BOTH
+    // targets (the WASM half walks the same layout). Closure-bearing types are
+    // skipped (a closure is not `AlmideRepr`; they never reach compound interp).
+    if let Some(impl_s) = render_repr_impl(ctx, td) {
+        format!("{decl}\n{impl_s}")
+    } else {
+        decl
+    }
+}
+
+/// Build `impl AlmideRepr for <Type>` for a record or variant type, mirroring
+/// the `auto_derive_repr` literal format:
+///   record       → `P { x: 1, y: 2 }`     (field declaration order)
+///   tuple variant→ `Click(10, 20)`
+///   record variant→`Scroll { dy: 5 }`
+///   nullary       → `Quit`
+/// Each field/payload routes through `almide_repr()`, so strings get quoted,
+/// floats use the `Display` form, and nested compounds recurse — identical to
+/// how a field renders inside any other container. Returns `None` for types
+/// that cannot back a repr (closure fields) or are not records/variants.
+/// Whether a type decl gets a generated `AlmideRepr` impl: a record or variant
+/// whose fields/payloads are all `AlmideRepr` (no closure field). The interp
+/// router (`ty_needs_repr`) and the impl emitter share this predicate so the
+/// "this Named type is repr-backed" decision is made in exactly one place.
+pub fn type_has_repr_impl(td: &IrTypeDecl) -> bool {
+    match &td.kind {
+        IrTypeDeclKind::Record { fields } => !fields.iter().any(|f| ty_has_fn(&f.ty)),
+        IrTypeDeclKind::Variant { cases, .. } => !cases.iter().any(|v| match &v.kind {
+            IrVariantKind::Unit => false,
+            IrVariantKind::Tuple { fields } => fields.iter().any(ty_has_fn),
+            IrVariantKind::Record { fields } => fields.iter().any(|f| ty_has_fn(&f.ty)),
+        }),
+        _ => false,
+    }
+}
+
+fn render_repr_impl(ctx: &RenderContext, td: &IrTypeDecl) -> Option<String> {
+    // Records/variants without a closure field back a repr; skip everything else.
+    if !type_has_repr_impl(td) { return None; }
+
+    // Generic header + target. The impl GENERICS carry every param's bounds; the
+    // impl TARGET uses BARE params. For a generic type these MUST differ:
+    //   impl<T: AlmideRepr + Clone + PartialEq> AlmideRepr for Tree<T> { … }
+    //                       ^^^^^^^^^^^^^^^^^^^ bounds belong here          ^^^ bare
+    // Reusing the decl's bounded `<T: Clone + PartialEq>` as the target emits the
+    // invalid `for Tree<T: Clone + PartialEq>` (E0229: associated-item-constraint
+    // not allowed). The param's own bound set is whatever the struct/enum decl
+    // declared (via the `generic_bound` template), plus `AlmideRepr` so the field
+    // reprs compose; rendering them through the same template keeps the impl
+    // bounds in lock-step with the type decl (Rust requires the impl to satisfy
+    // every bound the type definition declares).
+    let (impl_generics, target_args) = match td.generics.as_ref().filter(|g| !g.is_empty()) {
+        Some(generics) => {
+            let impl_bounds = generics.iter().map(|g| {
+                // The type DEFINITION declares each param via `generic_bound`
+                // (`T: Clone + PartialEq`); the impl must satisfy those same
+                // bounds, so reuse the rendered form and splice `AlmideRepr` in
+                // right after the `name:` colon → `T: AlmideRepr + Clone + …`.
+                let own = ctx.templates.render_with("generic_bound", None, &[], &[("name", g.name.as_str())])
+                    .unwrap_or_else(|| format!("{}: Clone + PartialEq", g.name));
+                match own.split_once(':') {
+                    Some((name, rest)) => format!("{}: AlmideRepr +{}", name.trim_end(), rest),
+                    None => format!("{}: AlmideRepr", g.name),
+                }
+            }).collect::<Vec<_>>().join(", ");
+            let bare = generics.iter().map(|g| g.name.to_string()).collect::<Vec<_>>().join(", ");
+            (format!("<{}>", impl_bounds), format!("<{}>", bare))
+        }
+        None => (String::new(), String::new()),
+    };
+    let full_name = format!("{}{}", td.name, target_args);
+
+    let body = match &td.kind {
+        IrTypeDeclKind::Record { fields } => {
+            // `Type { f0: {}, f1: {} }`, fields in declaration order.
+            let fmt = fields.iter().enumerate()
+                .map(|(i, f)| format!("{}{}: {{}}", if i > 0 { ", " } else { "" }, f.name))
+                .collect::<Vec<_>>().join("");
+            let args = fields.iter()
+                .map(|f| format!("self.{}.almide_repr()", f.name))
+                .collect::<Vec<_>>().join(", ");
+            format!("format!(\"{} {{{{ {} }}}}\", {})", td.name, fmt, args)
+        }
+        IrTypeDeclKind::Variant { cases, .. } => {
+            let arms = cases.iter().map(|v| render_repr_variant_arm(&td.name, v))
+                .collect::<Vec<_>>().join("\n            ");
+            format!("match self {{\n            {}\n        }}", arms)
+        }
+        _ => return None,
+    };
+
+    Some(format!(
+        "impl{} AlmideRepr for {} {{ fn almide_repr(&self) -> String {{ {} }} }}",
+        impl_generics, full_name, body
+    ))
+}
+
+/// One match arm of a variant's `AlmideRepr` impl.
+fn render_repr_variant_arm(type_name: &str, v: &IrVariantDecl) -> String {
+    match &v.kind {
+        IrVariantKind::Unit => {
+            // Nullary constructor → bare name.
+            format!("{}::{} => \"{}\".to_string(),", type_name, v.name, v.name)
+        }
+        IrVariantKind::Tuple { fields } => {
+            // `Click(10, 20)`: positional bindings v0, v1, … rendered via repr.
+            let binds = (0..fields.len()).map(|i| format!("v{}", i)).collect::<Vec<_>>().join(", ");
+            let fmt = (0..fields.len()).map(|_| "{}").collect::<Vec<_>>().join(", ");
+            let args = (0..fields.len()).map(|i| format!("v{}.almide_repr()", i)).collect::<Vec<_>>().join(", ");
+            format!("{}::{}({}) => format!(\"{}({})\", {}),", type_name, v.name, binds, v.name, fmt, args)
+        }
+        IrVariantKind::Record { fields } => {
+            // `Scroll { dy: 5 }`: named bindings, field declaration order.
+            let binds = fields.iter().map(|f| f.name.to_string()).collect::<Vec<_>>().join(", ");
+            let fmt = fields.iter().enumerate()
+                .map(|(i, f)| format!("{}{}: {{}}", if i > 0 { ", " } else { "" }, f.name))
+                .collect::<Vec<_>>().join("");
+            let args = fields.iter().map(|f| format!("{}.almide_repr()", f.name)).collect::<Vec<_>>().join(", ");
+            format!("{}::{} {{ {} }} => format!(\"{} {{{{ {} }}}}\", {}),", type_name, v.name, binds, v.name, fmt, args)
         }
     }
 }

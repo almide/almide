@@ -1,7 +1,23 @@
 // compound_repr_interp_test — `"${compound}"` renders a value to its
-// Almide-literal form (List/Map/Set/Tuple/Option/Result + nesting), identical
-// on native and WASM. Records/variants are scoped out (Display path), so they
-// are not asserted here.
+// Almide-literal form, identical on native and WASM: List/Map/Set/Tuple/Option/
+// Result and nesting, plus user-defined records and variants (the same
+// construction-literal form `deriving Repr` produces) and the Display form of
+// an interpolated float.
+
+type ReprPoint = { x: Int, y: Int }
+type ReprPerson = { name: String, score: Float }
+type ReprEvent = Click(Int, Int) | Scroll { dy: Int } | Quit
+// Recursive ADTs: the repr walk recurses over the finite value (a runtime call
+// on WASM, trait dispatch on native), never an infinite compile-time expansion.
+type ReprTree = Leaf(Int) | Node(ReprTree, ReprTree)
+type ReprRNode = { val: Int, kids: List[ReprRNode] }
+// Mutual recursion (A → B → A), legal via List indirection.
+type ReprA = { bs: List[ReprB] }
+type ReprB = { as_: List[ReprA] }
+// Generic record / variant: the interpolation site's concrete type args resolve
+// each payload's repr.
+type ReprHolder[T] = { value: T, label: String }
+type ReprEither[L, R] = Left(L) | Right(R)
 
 // ── List ──
 test "repr list of ints" {
@@ -80,4 +96,113 @@ test "bare string interpolation is not quoted" {
 // ── Floats inside a container use the shortest-round-trip path ──
 test "repr floats inside list" {
   assert_eq("${[0.1, 0.2]}", "[0.1, 0.2]")
+}
+
+// ── Records: `Type { f: v, … }`, field declaration order ──
+test "repr record" {
+  assert_eq("${ReprPoint { x: 1, y: 2 }}", "ReprPoint { x: 1, y: 2 }")
+}
+
+test "repr record with string and float fields" {
+  // String field quoted + escaped; integer-valued float drops its `.0`.
+  assert_eq("${ReprPerson { name: "Ada", score: 10.0 }}", "ReprPerson { name: \"Ada\", score: 10 }")
+}
+
+test "repr record inside a list" {
+  let ps: List[ReprPoint] = [ReprPoint { x: 1, y: 2 }, ReprPoint { x: 3, y: 4 }];
+  assert_eq("${ps}", "[ReprPoint { x: 1, y: 2 }, ReprPoint { x: 3, y: 4 }]")
+}
+
+// ── Variants: constructor form ──
+test "repr tuple-payload variant" {
+  let e: ReprEvent = Click(10, 20);
+  assert_eq("${e}", "Click(10, 20)")
+}
+
+test "repr record-payload variant" {
+  let e: ReprEvent = Scroll { dy: 5 };
+  assert_eq("${e}", "Scroll { dy: 5 }")
+}
+
+test "repr nullary variant" {
+  let e: ReprEvent = Quit;
+  assert_eq("${e}", "Quit")
+}
+
+// ── Bare integral-float interpolation uses the Display form (drops `.0`) ──
+test "repr integral float drops decimal" {
+  assert_eq("${1.0}", "1")
+}
+
+test "repr negative zero float" {
+  assert_eq("${-0.0}", "-0")
+}
+
+test "repr fractional float keeps digits" {
+  assert_eq("${0.25}", "0.25")
+}
+
+// ── Inline-annotated empty collection literals ──
+test "repr annotated empty list" {
+  assert_eq("${[]: List[Int]}", "[]")
+}
+
+test "repr annotated empty map" {
+  assert_eq("${[:]: Map[String, Int]}", "[:]")
+}
+
+// ── Recursive ADTs: walk recurses over the finite value, not the type graph ──
+test "repr recursive variant leaf" {
+  let t: ReprTree = Leaf(42)
+  assert_eq("${t}", "Leaf(42)")
+}
+
+test "repr recursive variant nested" {
+  let t: ReprTree = Node(Node(Leaf(1), Leaf(2)), Leaf(3))
+  assert_eq("${t}", "Node(Node(Leaf(1), Leaf(2)), Leaf(3))")
+}
+
+test "repr recursive record" {
+  let n: ReprRNode = { val: 1, kids: [{ val: 2, kids: [] }] }
+  assert_eq("${n}", "ReprRNode { val: 1, kids: [ReprRNode { val: 2, kids: [] }] }")
+}
+
+test "repr mutually recursive records" {
+  let a: ReprA = { bs: [] }
+  let b: ReprB = { as_: [a] }
+  let top: ReprA = { bs: [b] }
+  assert_eq("${top}", "ReprA { bs: [ReprB { as_: [ReprA { bs: [] }] }] }")
+}
+
+// ── Generic record / variant: site type args resolve each payload's repr ──
+test "repr generic record int payload" {
+  let h: ReprHolder[Int] = { value: 42, label: "answer" }
+  assert_eq("${h}", "ReprHolder { value: 42, label: \"answer\" }")
+}
+
+test "repr generic record string payload" {
+  let h: ReprHolder[String] = { value: "hi", label: "g" }
+  assert_eq("${h}", "ReprHolder { value: \"hi\", label: \"g\" }")
+}
+
+test "repr generic variant left and right" {
+  let l: ReprEither[Int, String] = Left(5)
+  assert_eq("${l}", "Left(5)")
+  let r: ReprEither[Int, String] = Right("x")
+  assert_eq("${r}", "Right(\"x\")")
+}
+
+// ── Anonymous records: NO type name, fields in SORTED name order ──
+// Field names are unique to this test so the literal cannot unify with a named
+// record of the same shape (which would render WITH that type's name).
+test "repr anonymous record" {
+  let r = { ax: 1, ay: 2 }
+  assert_eq("${r}", "{ ax: 1, ay: 2 }")
+}
+
+test "repr anonymous record sorts fields by name" {
+  // Source order zebra, apple, mango → sorted render apple, mango, zebra;
+  // values stay bound to their names (apple=2, mango=3, zebra=1).
+  let r = { zebra: 1, apple: 2, mango: 3 }
+  assert_eq("${r}", "{ apple: 2, mango: 3, zebra: 1 }")
 }

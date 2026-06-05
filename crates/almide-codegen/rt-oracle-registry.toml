@@ -112,6 +112,14 @@ oracle = "native derived PartialEq / almide_eq! deep variant equality"
 test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
 note = "spec/wasm_cross/deep_eq_heap.almd compares `Tagged(\"x\") == Tagged(\"y\")` (variant), list, and tuple equality byte-identically native vs wasm; records_variants.almd also exercises variant construction/eq."
 
+[[routine]]
+file = "mod.rs"
+routine = "compile_repr_funcs"
+status = "verified"
+oracle = "Generated per-type AlmideRepr impls on native (walker/declarations.rs render_repr_impl) — recursive named types repr via runtime dispatch on both targets"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "Added in PR-3 (compound repr): per-type __repr_<Type> wasm fns for RECURSIVE named types (cycle-set DFS; bodies sorted by name for host determinism); exercised by spec/wasm_cross/compound_repr_recursive_interp.almd (self/mutual recursion, generics, anon records)."
+
 # ── runtime.rs ───────────────────────────────────────────────────────
 [[routine]]
 file = "runtime.rs"

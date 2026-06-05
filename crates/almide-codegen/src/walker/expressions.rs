@@ -636,7 +636,19 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 .unwrap_or_else(|| format!("map([{}])", parts.join(", ")))
         }
         IrExprKind::EmptyMap => {
-            template_or(ctx, "empty_map", &[], "HashMap::new()")
+            // Render `AlmideMap::<K, V>::new()` with the key/value types from the
+            // literal's resolved type, so an annotated empty map (`[:]: Map[K,V]`)
+            // routed through `almide_repr` infers (native E0282 otherwise). When
+            // the types are unknown they erase to `_` (inference fills them from
+            // the surrounding context, as before this turbofish).
+            let (key_ty, value_ty) = match &expr.ty {
+                Ty::Applied(TypeConstructorId::Map, args) if args.len() == 2 => {
+                    (render_map_type_arg(ctx, &args[0]), render_map_type_arg(ctx, &args[1]))
+                }
+                _ => ("_".to_string(), "_".to_string()),
+            };
+            ctx.templates.render_with("empty_map", None, &[], &[("key_type", key_ty.as_str()), ("value_type", value_ty.as_str())])
+                .unwrap_or_else(|| format!("AlmideMap::<{}, {}>::new()", key_ty, value_ty))
         }
 
         // ── SpreadRecord ──
@@ -1390,22 +1402,33 @@ fn render_runtime_call(ctx: &RenderContext, symbol: &almide_base::intern::Sym, a
 /// `Bool`, `Unit`) and bare `String` keep their plain `{}` Display path so the
 /// emitted code for existing programs is byte-identical.
 ///
-/// Scope (this PR — cluster-H compound interpolation): the STRUCTURAL types that
-/// are backed by an `AlmideRepr` impl on BOTH targets — `List`, `Map`, `Set`,
-/// `Option`, `Result`, and `Tuple`, recursively composed. User-defined records
-/// and variants are deliberately left on the Display path here: to repr them we
-/// would also need the WASM record/variant field-walk emitters, and rendering
-/// them native-only would re-introduce a native↔WASM divergence (the exact bug
-/// class this work closes). They stay scoped out until both targets back them.
-fn ty_needs_repr(ty: &Ty) -> bool {
+/// Scope: the types backed by an `AlmideRepr` impl on BOTH targets, recursively
+/// composed — the structural containers (`List`, `Map`, `Set`, `Option`,
+/// `Result`, `Tuple`) plus user-defined records and variants. A record/variant
+/// is identified by name via `ctx.repr_named_types` (the set of types that got a
+/// generated `AlmideRepr` impl); an anonymous record (`Ty::Record`/`OpenRecord`)
+/// is always repr-backed. Closure-bearing types are excluded from the set, so a
+/// value with an `Fn` field stays on the Display path (it has no repr).
+/// Render a key/value type for an empty-map turbofish, erasing unresolved
+/// named typevars to `_` exactly like the empty-list `inner_type` path.
+fn render_map_type_arg(ctx: &RenderContext, ty: &Ty) -> String {
+    let ty = if ty_has_named_typevar(ty) { erase_named_typevars(ty.clone()) } else { ty.clone() };
+    render_type(ctx, &ty)
+}
+
+fn ty_needs_repr(ctx: &RenderContext, ty: &Ty) -> bool {
     use TypeConstructorId::{List, Map, Set, Option as OptionId, Result as ResultId};
     match ty {
         // Backed container constructors → repr.
         Ty::Applied(id, _) => matches!(id, List | Map | Set | OptionId | ResultId),
         // Tuples → repr.
         Ty::Tuple(..) => true,
-        // Everything else (scalars, String, Bool, Unit, records, variants,
-        // Named, Fn, Unknown, …) stays on the Display path.
+        // Anonymous records get an inline literal repr.
+        Ty::Record { .. } | Ty::OpenRecord { .. } => true,
+        // Named records/variants → repr only when a generated impl exists.
+        Ty::Named(name, _) => ctx.repr_named_types.contains(name),
+        // Everything else (scalars, String, Bool, Unit, Fn, Unknown, …) stays on
+        // the Display path.
         _ => false,
     }
 }
@@ -1434,7 +1457,7 @@ fn render_string_interp(ctx: &RenderContext, parts: &[IrStringPart]) -> String {
                 // existing programs' emitted code is byte-identical. `almide_repr`
                 // takes `&T` and has ref-forwarding impls, so `&(...)` is correct
                 // whether the part renders to an owned value or an existing borrow.
-                if ty_needs_repr(&expr.ty) {
+                if ty_needs_repr(ctx, &expr.ty) {
                     arg_parts.push(format!("almide_repr(&({}))", render_expr(ctx, expr)));
                 } else {
                     arg_parts.push(render_expr(ctx, expr));

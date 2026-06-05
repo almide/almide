@@ -780,8 +780,10 @@ impl FuncCompiler<'_> {
                     }
                     Ty::Float => {
                         self.emit_expr(expr);
+                        // Display form: an integer-valued float drops its `.0`
+                        // (`${1.0}` → `1`), matching the native Rust `Display`.
                         wasm!(self.func, {
-                            call(self.emitter.rt.float_to_string);
+                            call(self.emitter.rt.float_display);
                         });
                     }
                     _ => {
