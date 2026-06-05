@@ -1,0 +1,9 @@
+// Cluster-H: top-let initializers that can abort evaluate EAGERLY at startup.
+// `bad` is never used, but both targets must abort before main runs: wasm
+// evaluates every top-let in _start; native forces abortable lazies at main
+// entry. Without the force, native would lazily skip the abort (silent-alive).
+let bad = 10 / 0
+
+fn main() -> Unit = {
+  println("never reached")
+}

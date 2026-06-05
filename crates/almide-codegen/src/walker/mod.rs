@@ -317,11 +317,20 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
     // intentional Almide decision and lets the WASM target match it byte-for-byte.
     let is_rust_effect_main = matches!(ctx.target, Target::Rust)
         && func.name.as_str() == "main" && func.is_effect && !func.is_test;
+    // A plain (non-effect) `fn main` also needs the wrapper when there are
+    // abortable lazy top-lets to force at startup (wasm-eager parity).
+    let is_rust_plain_main_with_forces = matches!(ctx.target, Target::Rust)
+        && func.name.as_str() == "main" && !func.is_effect && !func.is_test
+        && !ctx.ann.eager_force_top_lets.is_empty();
 
     // Sanitize function name: spaces/dots/hyphens → underscores.
     // Test blocks already carry `TEST_NAME_PREFIX` from lowering so they
     // cannot collide with user fns here — no conditional prefixing needed.
-    let raw_name = if is_rust_effect_main { "__almide_main".to_string() } else { func.name.to_string() };
+    let raw_name = if is_rust_effect_main || is_rust_plain_main_with_forces {
+        "__almide_main".to_string()
+    } else {
+        func.name.to_string()
+    };
     let mut safe_name = raw_name.replace(' ', "_").replace('-', "_").replace('.', "_")
         .replace('+', "_plus_").replace('/', "_div_").replace('*', "_mul_")
         .replace('(', "").replace(')', "").replace(',', "_").replace(':', "_")
@@ -357,8 +366,16 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
         .unwrap_or_else(|| format!("fn {}() {{ }}", func.name));
 
     // Wrap `effect fn main`: report an unhandled error via Display + exit 1.
+    // Both wrapper shapes first FORCE the abortable lazy top-lets in declaration
+    // order, so an aborting initializer (integer `/`/`%`) fires at startup —
+    // byte-identical to wasm's eager top-let evaluation in `_start`.
+    let force_lines: String = ctx.ann.eager_force_top_lets.iter()
+        .map(|name| format!("    std::sync::LazyLock::force(&{});\n", name))
+        .collect();
     let fn_code = if is_rust_effect_main {
-        format!("{}\n\nfn main() {{\n    if let Err(__almide_err) = __almide_main() {{\n        eprintln!(\"Error: {{}}\", __almide_err);\n        std::process::exit(1);\n    }}\n}}", fn_code)
+        format!("{}\n\nfn main() {{\n{}    if let Err(__almide_err) = __almide_main() {{\n        eprintln!(\"Error: {{}}\", __almide_err);\n        std::process::exit(1);\n    }}\n}}", fn_code, force_lines)
+    } else if is_rust_plain_main_with_forces {
+        format!("{}\n\nfn main() {{\n{}    __almide_main();\n}}", fn_code, force_lines)
     } else {
         fn_code
     };
@@ -373,6 +390,27 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
     } else {
         fn_code
     }
+}
+
+/// Whether an expression contains an integer `/` or `%` anywhere — the ops that
+/// render as the aborting totality macros (`Error: <msg>` + exit 1). Uses the
+/// exhaustive `IrVisitor` walk so new IR nodes are traversed automatically.
+fn contains_aborting_int_div(expr: &IrExpr) -> bool {
+    use almide_ir::visit::{IrVisitor, walk_expr};
+    struct Finder { found: bool }
+    impl IrVisitor for Finder {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            if self.found { return; }
+            if matches!(&e.kind, IrExprKind::BinOp { op: BinOp::DivInt | BinOp::ModInt, .. }) {
+                self.found = true;
+                return;
+            }
+            walk_expr(self, e);
+        }
+    }
+    let mut f = Finder { found: false };
+    f.visit_expr(expr);
+    f.found
 }
 
 // ── Full program rendering ──
@@ -424,7 +462,18 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
             } else {
                 vi.name.to_uppercase()
             };
+            // An initializer containing integer `/` or `%` can abort (the totality
+            // macros) — `fn main` forces it at entry, in declaration order, so the
+            // abort fires at startup exactly like wasm's eager top-let evaluation.
+            // Pure lazies stay lazy: their timing is unobservable.
+            if contains_aborting_int_div(&tl.value) {
+                ann.eager_force_top_lets.push(full_name.clone());
+            }
             ann.lazy_top_let_names.insert(full_name);
+        } else {
+            // Const-kind top_lets declare as `const NAME_UPPER` — references
+            // must render uppercased too (see const_top_let_vars).
+            ann.const_top_let_vars.insert(tl.var);
         }
     }
     // Module top_lets are flattened into program.top_lets by ir_link_flatten.
