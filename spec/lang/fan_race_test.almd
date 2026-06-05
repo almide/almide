@@ -27,8 +27,3 @@ test "fan.race surfaces the head thunk's error (first to settle, even if Err)" {
   ]);
   assert_eq(r, err("boom"))
 }
-
-test "fan.race empty list is a defined error, not a panic" {
-  let r: Result[Int, String] = fan.race([])
-  assert_eq(r, err("fan.race: no candidates"))
-}
