@@ -28,6 +28,7 @@ mod rt_unicode_tables;
 mod rt_numeric;
 mod rt_dragon;
 mod rt_dec2flt;
+mod rt_libm;
 mod rt_repr;
 mod rt_float_display;
 mod calls_string_repr;
@@ -354,6 +355,9 @@ pub struct RuntimeFuncs {
     /// Dragon4 shortest-decimal helper functions (float.to_string).
     pub dragon: rt_dragon::DragonRuntime,
     pub decfloat: rt_dec2flt::DecFloatRuntime,
+    /// Vendored musl-libm trig (sin/cos/tan + their kernels/argument reduction).
+    /// Mirrors `runtime/rs/src/libm.rs` so trig is bit-identical native↔wasm.
+    pub libm: rt_libm::LibmRuntime,
     /// __repr_str(s: i32) -> i32: double-quote + escape a string for the
     /// Almide-literal repr of a string INSIDE a container (compound string
     /// interpolation). Escape set mirrors `almide_rt_value_stringify` and the
@@ -410,10 +414,17 @@ pub struct WasmEmitter {
     /// Embedded Unicode case-mapping table offsets (Some only when the program
     /// uses string case ops — see `embed_case_tables` / `program_uses_case_op`).
     case_tables: Option<CaseTableOffsets>,
-    /// Total bytes of the case-table region at the FRONT of `data_bytes` (after
-    /// the newline byte). `eliminate_dead_data` skips this region so the table
-    /// is never misparsed as interned-string entries. 0 when no case op.
+    /// Total bytes of the protected table region at the FRONT of `data_bytes`
+    /// (after the newline byte): Unicode case tables AND the vendored-libm
+    /// 2/pi (IPIO2) / PIO2 tables. `eliminate_dead_data` skips this whole region
+    /// so the raw table bytes are never misparsed as interned-string entries and
+    /// never shift when dead strings are compacted (the lookup functions bake
+    /// absolute addresses). 0 when neither case ops nor trig are used.
     pub case_table_bytes: usize,
+    /// Absolute byte offsets of the embedded libm trig tables (the `IPIO2`
+    /// 2/pi table and `PIO2` extended-precision pi/2 table). `Some` only when
+    /// the program uses `math.sin/cos/tan` — see `embed_libm_tables`.
+    pub libm_tables: Option<rt_libm::LibmTableOffsets>,
 
     // Runtime function indices
     pub rt: RuntimeFuncs,
@@ -512,6 +523,7 @@ impl WasmEmitter {
             // First byte is newline at NEWLINE_OFFSET
             data_bytes: vec![0x0A],
             case_tables: None,
+            libm_tables: None,
             case_table_bytes: 0,
             rt: RuntimeFuncs {
                 fd_write: 0, alloc: 0, rc_inc: 0, rc_dec: 0, cow_check: 0,
@@ -591,6 +603,7 @@ impl WasmEmitter {
                 init_preopen_dirs: 0,
                 dragon: rt_dragon::DragonRuntime::default(),
                 decfloat: rt_dec2flt::DecFloatRuntime::default(),
+                libm: rt_libm::LibmRuntime::default(),
                 repr_str: 0,
                 float_display: 0,
             },
@@ -707,6 +720,35 @@ impl WasmEmitter {
             cased, cased_n: t.cased.len() as u32,
             ci, ci_n: t.case_ignorable.len() as u32,
         });
+    }
+
+    /// Embed the vendored-libm 2/pi (`IPIO2`) and `PIO2` constant tables into the
+    /// FRONT protected region of `data_bytes`, immediately after the case tables
+    /// (if any) and before any string is interned. Their absolute addresses are
+    /// recorded and baked as `i32_const` into the `rt_libm` runtime, so — like the
+    /// case tables — they must sit at a fixed low offset that `eliminate_dead_data`
+    /// never moves. Adds to the protected `case_table_bytes` prefix.
+    fn embed_libm_tables(&mut self) {
+        debug_assert!(
+            self.data_bytes.len() == 1 + self.case_table_bytes,
+            "libm tables must be embedded right after case tables, before string interning"
+        );
+        fn pad8(db: &mut Vec<u8>) {
+            while db.len() % 8 != 0 { db.push(0); }
+        }
+        // IPIO2: 690 × i32. PIO2: 8 × f64 (8-byte aligned for f64.load).
+        let db = &mut self.data_bytes;
+        let ipio2_base = NEWLINE_OFFSET + db.len() as u32;
+        for &x in rt_libm::IPIO2.iter() {
+            db.extend_from_slice(&x.to_le_bytes());
+        }
+        pad8(db);
+        let pio2_base = NEWLINE_OFFSET + db.len() as u32;
+        for &x in rt_libm::PIO2.iter() {
+            db.extend_from_slice(&x.to_le_bytes());
+        }
+        self.case_table_bytes = self.data_bytes.len() - 1;
+        self.libm_tables = Some(rt_libm::LibmTableOffsets { ipio2_base, pio2_base });
     }
 }
 
@@ -853,6 +895,11 @@ pub(crate) fn emit(program: &IrProgram) -> Vec<u8> {
     // string case op. Gated to keep non-case-folding modules lean (~51KB tables).
     if program_uses_case_op(program) {
         emitter.embed_case_tables();
+    }
+    // Embed the libm 2/pi / PIO2 tables (front protected region, after case
+    // tables, before any string interning) when the program uses trig.
+    if program_uses_trig(program) {
+        emitter.embed_libm_tables();
     }
 
     // Phase 1: Register types and function indices
@@ -2672,6 +2719,71 @@ fn program_uses_case_op(program: &IrProgram) -> bool {
     for func in &program.functions {
         scanner.visit_expr(&func.body);
         if scanner.found { return true; }
+    }
+    false
+}
+
+/// True iff the program references `math.sin` / `math.cos` / `math.tan` in any
+/// dispatch form (resolved module call, unresolved method call, or runtime call).
+/// Conservative — same contract as `program_uses_case_op`: a miss would leave the
+/// always-compiled trig runtime baking stale table offsets (silently wrong), so
+/// this is strictly broader than dispatch and also walks module bodies, not just
+/// top-level functions.
+fn program_uses_trig(program: &IrProgram) -> bool {
+    use almide_ir::{IrExprKind, CallTarget};
+    use almide_ir::visit::{IrVisitor, walk_expr, walk_stmt};
+
+    fn is_trig_fn(name: &str) -> bool {
+        let name = name.strip_prefix("math.").unwrap_or(name);
+        matches!(name, "sin" | "cos" | "tan")
+    }
+
+    struct TrigScanner { found: bool }
+    impl IrVisitor for TrigScanner {
+        fn visit_expr(&mut self, expr: &almide_ir::IrExpr) {
+            if self.found { return; }
+            match &expr.kind {
+                IrExprKind::Call { target: CallTarget::Module { module, func, .. }, .. }
+                    if module.as_str() == "math" && is_trig_fn(func.as_str()) =>
+                {
+                    self.found = true;
+                    return;
+                }
+                IrExprKind::Call { target: CallTarget::Method { method, .. }, .. }
+                    if is_trig_fn(method.as_str()) =>
+                {
+                    self.found = true;
+                    return;
+                }
+                IrExprKind::RuntimeCall { symbol, .. }
+                    if matches!(
+                        symbol.as_str(),
+                        "almide_rt_math_sin" | "almide_rt_math_cos" | "almide_rt_math_tan"
+                    ) =>
+                {
+                    self.found = true;
+                    return;
+                }
+                _ => {}
+            }
+            walk_expr(self, expr);
+        }
+        fn visit_stmt(&mut self, stmt: &almide_ir::IrStmt) {
+            if self.found { return; }
+            walk_stmt(self, stmt);
+        }
+    }
+
+    let mut scanner = TrigScanner { found: false };
+    for func in &program.functions {
+        scanner.visit_expr(&func.body);
+        if scanner.found { return true; }
+    }
+    for module in &program.modules {
+        for func in &module.functions {
+            scanner.visit_expr(&func.body);
+            if scanner.found { return true; }
+        }
     }
     false
 }

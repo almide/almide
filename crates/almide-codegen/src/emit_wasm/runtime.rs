@@ -274,6 +274,12 @@ pub fn register_runtime_functions(emitter: &mut WasmEmitter) {
     // __math_exp(x: f64) -> f64  (e^x)
     emitter.rt.math_exp = emitter.register_func("__math_exp", f64_f64_ty);
 
+    // Vendored-libm trig helpers (floor/scalbn/rem_pio2[_large]/k_sin/k_cos/k_tan).
+    // Registered here so the __math_sin/cos/tan bodies (compiled by rt_numeric in
+    // the slots just above) can reference these indices. Compile order below must
+    // mirror this registration order (see `compile_runtime`).
+    super::rt_libm::register(emitter);
+
     // __bytes_f16_to_f64(bits: i32) -> f64  (IEEE-754 half-precision expand)
     let i32_f64_ty = emitter.register_type(vec![ValType::I32], vec![ValType::F64]);
     emitter.rt.bytes_f16_to_f64 = emitter.register_func("__bytes_f16_to_f64", i32_f64_ty);
@@ -356,6 +362,9 @@ pub fn compile_runtime(emitter: &mut WasmEmitter) {
     super::rt_numeric::compile_math_log10(emitter);
     super::rt_numeric::compile_math_log2(emitter);
     super::rt_numeric::compile_math_exp(emitter);
+    // Vendored-libm trig helper bodies. Compile order MUST match the registration
+    // order in `register_runtime` (right after __math_exp).
+    super::rt_libm::compile_helpers(emitter);
     compile_bytes_f16_to_f64(emitter);
     // Compile order MUST match registration order in `register_runtime`.
     super::rt_encoding::compile_base64_encode(emitter, /*url_safe=*/false);

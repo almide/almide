@@ -1,0 +1,56 @@
+// Cross-target equivalence for the vendored-libm trig (math.sin/cos/tan).
+//
+// Both targets run the SAME musl-libm algorithm (native: runtime/rs/src/libm.rs,
+// wasm: emit_wasm/rt_libm.rs), so every result must be byte-identical. Printed via
+// float.to_string (Dragon4), which is itself byte-identical cross-target, so any
+// diff the gate catches is the MATH. The point set deliberately hits each rem_pio2
+// path: small (|x|<pi/4), the small/medium pi/2-quadrant branches, and the
+// rem_pio2_large path (huge args — including the recompute/argument-distillation
+// route that depends on the 2/pi table).
+
+import math
+
+fn show(x: Float) -> Unit = {
+  println(float.to_string(math.sin(x)))
+  println(float.to_string(math.cos(x)))
+  println(float.to_string(math.tan(x)))
+}
+
+fn main() -> Unit = {
+  // tiny / small-arg fast path
+  show(0.0)
+  show(0.5)
+  show(-0.5)
+  show(0.6744)   // k_tan |x| >= 0.6744 boundary
+  // pi/2-quadrant small + medium cases
+  show(1.0)
+  show(0.7853981633974483)   // pi/4
+  show(1.5707963267948966)   // pi/2
+  show(3.141592653589793)    // pi
+  show(6.283185307179586)    // 2pi
+  show(2.0)
+  show(10.0)
+  show(100.0)
+  show(1000.0)
+  // medium rem_pio2 (|x| < 2^20 * pi/2)
+  show(1000000.0)
+  // rem_pio2_large path (the 2/pi table + recompute distillation)
+  show(10000000000.0)
+  show(1000000000000.0)
+  show(100000000000000.0)    // recompute path (was the off-by-one br-depth bug)
+  show(1000000000000000.0)
+  show(1e16)
+  show(1e18)
+  show(1e100)
+  show(1e300)
+  // libm rem_pio2 regression args
+  show(-3054214.5490637687)
+  show(917340800458.2274)
+  // non-finite (constructed without literals)
+  let pinf = 1.0 / 0.0
+  let ninf = -1.0 / 0.0
+  let nan = 0.0 / 0.0
+  show(pinf)
+  show(ninf)
+  show(nan)
+}

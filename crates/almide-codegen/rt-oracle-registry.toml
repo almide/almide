@@ -97,6 +97,9 @@
 #                     bignum bodies). The behavior lives in the routines they call.
 #   rt_dec2flt.rs: compile_helpers
 #                   — same: an emit-order dispatcher for the dec2flt bodies.
+#   rt_libm.rs:   compile_helpers
+#                   — same: an emit-order dispatcher for the vendored-libm trig
+#                     bodies (floor/scalbn/rem_pio2[_large]/k_sin/k_cos/k_tan).
 # `compile_variant_eq_funcs` is KEPT (not excluded): it generates per-type deep
 # equality, which IS observable behavior mirroring native `almide_eq!`/PartialEq.
 
@@ -716,65 +719,74 @@ note = "spec/wasm_cross/float_parse.almd parses 0.1/0.2/0.3, 2^53 boundaries, su
 [[routine]]
 file = "rt_numeric.rs"
 routine = "compile_float_to_fixed"
-status = "grandfathered"
-oracle = "native float.to_fixed / format!(\"{:.N}\") fixed-precision formatting"
-note = "No cross-target fixture calls float.to_fixed (distinct from float.to_string / Dragon4)."
+status = "verified"
+oracle = "runtime/rs/src/float.rs::almide_rt_float_to_fixed (format!(\"{:.N}\", x))"
+test = "tests/float_to_fixed_cross_target_test.rs::to_fixed_cross_target_random_fuzz"
+note = "Drain PR-C Phase B: this rt_numeric slot is now a thin delegator to rt_dragon.rs::compile_float_to_fixed (the Dragon4 exact fixed-precision formatter). Proven byte-identical to format!(\"{:.N}\") AND cross-target over 2000 fuzzed (value,N) + boundary cases (round-half-even ties, exact binary expansion at large N, carry, sign-on-zero, inf/nan). spec/wasm_cross/float_to_fixed.almd is the always-on gate fixture."
 
 [[routine]]
 file = "rt_numeric.rs"
 routine = "compile_float_pow"
-status = "grandfathered"
-oracle = "runtime/rs/src/float.rs pow / math.rs powf (f64::powf)"
-note = "No cross-target fixture exercises float ** / math.pow; transcendental rounding can diverge from libm."
+status = "verified"
+oracle = "runtime/rs/src/libm.rs::almide_rt_libm_pow (vendored musl-libm pow)"
+test = "tests/libm_explog_pow_cross_target_test.rs::pow_cross_target_random_fuzz"
+note = "Drain PR-C Phase B: __float_pow now dispatches to the vendored __libm_pow, so float ** is bit-identical native==wasm AND fixes the sweep bugs (pow(-2,0.5)=NaN, pow(0,-1)=inf, pow(2,inf) no trap, odd/even integer-exponent sign). spec/wasm_cross/math_pow.almd is the gate fixture."
 
 [[routine]]
 file = "rt_numeric.rs"
 routine = "compile_math_sin"
-status = "grandfathered"
-oracle = "native f64::sin (libm)"
-note = "No cross-target fixture for math.sin; the wasm polynomial approximation vs native libm may diverge in the last ULPs — drain needs a tolerance-or-exact decision."
+status = "verified"
+oracle = "runtime/rs/src/libm.rs::almide_rt_libm_sin (vendored musl-libm sin, the same algorithm — native now also runs the vendored fn, not platform f64::sin)"
+test = "tests/libm_trig_cross_target_test.rs::trig_cross_target_random_fuzz"
+note = "Drain PR-C: native and wasm both run the SAME vendored musl-libm sin (libm 0.2.16 / FreeBSD msun), so the result is bit-identical native==wasm AND deterministic across platforms (the StrictMath decision). The __math_sin body dispatches to __libm_rem_pio2 + the kernels. Proven byte-identical over 4000 random-bit + boundary points (random_fuzz/boundary tests) and against libm's own published vectors (trig_native_matches_libm_published_vectors). spec/wasm_cross/trig_libm.almd is the always-on gate fixture."
 
 [[routine]]
 file = "rt_numeric.rs"
 routine = "compile_math_cos"
-status = "grandfathered"
-oracle = "native f64::cos (libm)"
-note = "See compile_math_sin."
+status = "verified"
+oracle = "runtime/rs/src/libm.rs::almide_rt_libm_cos (vendored musl-libm cos)"
+test = "tests/libm_trig_cross_target_test.rs::trig_cross_target_random_fuzz"
+note = "See compile_math_sin — same vendored-libm cross-target guarantee."
 
 [[routine]]
 file = "rt_numeric.rs"
 routine = "compile_math_tan"
-status = "grandfathered"
-oracle = "native f64::tan (libm)"
-note = "See compile_math_sin."
+status = "verified"
+oracle = "runtime/rs/src/libm.rs::almide_rt_libm_tan (vendored musl-libm tan)"
+test = "tests/libm_trig_cross_target_test.rs::trig_cross_target_random_fuzz"
+note = "See compile_math_sin — same vendored-libm cross-target guarantee."
 
 [[routine]]
 file = "rt_numeric.rs"
 routine = "compile_math_log"
-status = "grandfathered"
-oracle = "native f64::ln / log (libm)"
-note = "See compile_math_sin."
+status = "verified"
+oracle = "runtime/rs/src/libm.rs::almide_rt_libm_log (vendored musl-libm log; native math.rs now also runs the vendored fn, not platform f64::ln)"
+test = "tests/libm_explog_pow_cross_target_test.rs::explog_cross_target_random_fuzz"
+note = "Drain PR-C Phase B: __math_log dispatches to the vendored __libm_log (e_log.c). Bit-identical native==wasm AND deterministic across platforms; fixes log(0.0)=-inf (was NaN) and log(neg)=NaN. spec/wasm_cross/math_explog.almd is the gate fixture."
 
 [[routine]]
 file = "rt_numeric.rs"
 routine = "compile_math_log10"
-status = "grandfathered"
-oracle = "native f64::log10 (libm)"
-note = "See compile_math_sin."
+status = "verified"
+oracle = "runtime/rs/src/libm.rs::almide_rt_libm_log10 (vendored musl-libm log10)"
+test = "tests/libm_explog_pow_cross_target_test.rs::explog_cross_target_random_fuzz"
+note = "See compile_math_log — dispatches to __libm_log10 (e_log10.c); exact powers of ten stay exact via the extra-precision split."
 
 [[routine]]
 file = "rt_numeric.rs"
 routine = "compile_math_log2"
-status = "grandfathered"
-oracle = "native f64::log2 (libm)"
-note = "See compile_math_sin."
+status = "verified"
+oracle = "runtime/rs/src/libm.rs::almide_rt_libm_log2 (vendored musl-libm log2)"
+test = "tests/libm_explog_pow_cross_target_test.rs::explog_cross_target_random_fuzz"
+note = "See compile_math_log — dispatches to __libm_log2 (e_log2.c); exact powers of two stay exact."
 
 [[routine]]
 file = "rt_numeric.rs"
 routine = "compile_math_exp"
-status = "grandfathered"
-oracle = "native f64::exp (libm)"
-note = "See compile_math_sin."
+status = "verified"
+oracle = "runtime/rs/src/libm.rs::almide_rt_libm_exp (vendored musl-libm exp)"
+test = "tests/libm_explog_pow_cross_target_test.rs::explog_cross_target_random_fuzz"
+note = "See compile_math_log — dispatches to __libm_exp (e_exp.c); fixes exp(-745)=5e-324 (subnormal, was clamped to 0) and exp overflow=inf."
 
 # ── rt_dragon.rs (Dragon4 float.to_string + bignum helpers) ──────────
 [[routine]]
@@ -841,6 +853,14 @@ oracle = "bignum copy subroutine of Dragon4 / dec2flt"
 test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
 note = "Internal bignum helper; see compile_norm."
 
+[[routine]]
+file = "rt_dragon.rs"
+routine = "compile_float_to_fixed"
+status = "verified"
+oracle = "runtime/rs/src/float.rs::almide_rt_float_to_fixed (format!(\"{:.N}\", x))"
+test = "tests/float_to_fixed_cross_target_test.rs::to_fixed_cross_target_random_fuzz"
+note = "Drain PR-C Phase B: the exact fixed-precision formatter. Riding the Dragon4 bignum helpers, it renders the f64's exact binary value m*2^e rounded to N places round-half-to-EVEN — reproducing format!(\"{:.N}\") byte-for-byte with no 10^N i64 overflow (the old multiply-then-round impl trapped at N>=19 and rounded wrong). Proven byte-identical to the format! oracle AND cross-target over 2000 fuzzed (value,N) + boundary cases. The rt_numeric.rs::compile_float_to_fixed slot delegates here. spec/wasm_cross/float_to_fixed.almd is the gate fixture."
+
 # ── rt_dec2flt.rs (Clinger AlgorithmM decimal → f64) ─────────────────
 [[routine]]
 file = "rt_dec2flt.rs"
@@ -865,6 +885,114 @@ status = "verified"
 oracle = "bignum bit-length subroutine of dec2flt"
 test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
 note = "Internal helper exercised by float_parse.almd; see compile_dec2flt."
+
+# ── rt_libm.rs (vendored musl-libm trig: sin/cos/tan) ────────────────
+# All mirror runtime/rs/src/libm.rs, which is itself the vendored libm 0.2.16
+# (FreeBSD msun) — the SAME algorithm on both targets, so trig is bit-identical
+# native==wasm AND deterministic across platforms. Covered by the random-bit fuzz
+# + boundary cross-target tests and the always-on spec/wasm_cross/trig_libm.almd
+# fixture run through tests/wasm_runtime_test.rs::wasm_cross_target_spec.
+[[routine]]
+file = "rt_libm.rs"
+routine = "compile_floor"
+status = "verified"
+oracle = "runtime/rs/src/libm.rs::vfloor (libm generic floor, round toward -inf)"
+test = "tests/libm_trig_cross_target_test.rs::trig_cross_target_random_fuzz"
+note = "Argument-reduction helper used by rem_pio2_large; exercised by every huge-arg trig point in the fuzz/boundary batteries + trig_libm.almd."
+
+[[routine]]
+file = "rt_libm.rs"
+routine = "compile_scalbn"
+status = "verified"
+oracle = "runtime/rs/src/libm.rs::vscalbn (libm generic scalbn, x*2^n with prescaling)"
+test = "tests/libm_trig_cross_target_test.rs::trig_cross_target_random_fuzz"
+note = "Argument-reduction helper used by rem_pio2_large; see compile_floor."
+
+[[routine]]
+file = "rt_libm.rs"
+routine = "compile_rem_pio2_large"
+status = "verified"
+oracle = "runtime/rs/src/libm.rs::rem_pio2_large (libm k_rem_pio2: 2/pi table + recompute distillation)"
+test = "tests/libm_trig_cross_target_test.rs::trig_cross_target_random_fuzz"
+note = "The huge-arg argument reduction (|x| >= 2^20*pi/2). Reads the embedded IPIO2 (2/pi) + PIO2 tables. The fuzz battery's random-bit points hit this path including the recompute/argument-distillation branch."
+
+[[routine]]
+file = "rt_libm.rs"
+routine = "compile_rem_pio2"
+status = "verified"
+oracle = "runtime/rs/src/libm.rs::rem_pio2 (libm e_rem_pio2: medium/small + large dispatch)"
+test = "tests/libm_trig_cross_target_test.rs::trig_cross_target_random_fuzz"
+note = "Top-level argument reduction; dispatches to the small/medium pi/2-quadrant branches and to rem_pio2_large. All branches covered by the boundary + fuzz points."
+
+[[routine]]
+file = "rt_libm.rs"
+routine = "compile_k_sin"
+status = "verified"
+oracle = "runtime/rs/src/libm.rs::k_sin (libm k_sin, degree-13 sine kernel on [-pi/4,pi/4])"
+test = "tests/libm_trig_cross_target_test.rs::trig_cross_target_random_fuzz"
+note = "Sine kernel; reached by math.sin/cos after argument reduction."
+
+[[routine]]
+file = "rt_libm.rs"
+routine = "compile_k_cos"
+status = "verified"
+oracle = "runtime/rs/src/libm.rs::k_cos (libm k_cos, degree-14 cosine kernel on [-pi/4,pi/4])"
+test = "tests/libm_trig_cross_target_test.rs::trig_cross_target_random_fuzz"
+note = "Cosine kernel; reached by math.sin/cos after argument reduction."
+
+[[routine]]
+file = "rt_libm.rs"
+routine = "compile_k_tan"
+status = "verified"
+oracle = "runtime/rs/src/libm.rs::k_tan (libm k_tan, degree-27 tangent kernel, big-x and odd/-1/tan branches)"
+test = "tests/libm_trig_cross_target_test.rs::trig_cross_target_random_fuzz"
+note = "Tangent kernel; reached by math.tan after argument reduction."
+
+# Drain PR-C Phase B: exp / log / log2 / log10 / pow ported from the same vendored
+# libm 0.2.16 (FreeBSD msun) into hand-written WASM. Each mirrors the native fn in
+# runtime/rs/src/libm.rs, proven bit-identical to upstream libm over 5M random
+# points each (native harness) and byte-identical native==wasm over the random-bit
+# + boundary cross-target batteries. spec/wasm_cross/{math_explog,math_pow}.almd are
+# the always-on gate fixtures.
+[[routine]]
+file = "rt_libm.rs"
+routine = "compile_exp"
+status = "verified"
+oracle = "runtime/rs/src/libm.rs::exp (libm e_exp.c — k*ln2 reduction + degree-5 Remez R)"
+test = "tests/libm_explog_pow_cross_target_test.rs::explog_cross_target_random_fuzz"
+note = "Reached by math.exp; the overflow/underflow-to-subnormal edges are pinned by explog_cross_target_boundary + math_explog.almd."
+
+[[routine]]
+file = "rt_libm.rs"
+routine = "compile_log"
+status = "verified"
+oracle = "runtime/rs/src/libm.rs::log (libm e_log.c — 2^k(1+f) reduction + degree-14 Remez R)"
+test = "tests/libm_explog_pow_cross_target_test.rs::explog_cross_target_random_fuzz"
+note = "Natural log; the shared reduction kernel is also used by log2/log10. log(0)=-inf, log(neg)=NaN pinned by the boundary test + math_explog.almd."
+
+[[routine]]
+file = "rt_libm.rs"
+routine = "compile_log2"
+status = "verified"
+oracle = "runtime/rs/src/libm.rs::log2 (libm e_log2.c — log kernel + extra-precision /log(2))"
+test = "tests/libm_explog_pow_cross_target_test.rs::explog_cross_target_random_fuzz"
+note = "Reached by math.log2; exact powers of two stay exact via the extra-precision split."
+
+[[routine]]
+file = "rt_libm.rs"
+routine = "compile_log10"
+status = "verified"
+oracle = "runtime/rs/src/libm.rs::log10 (libm e_log10.c — log kernel + extra-precision /log(10))"
+test = "tests/libm_explog_pow_cross_target_test.rs::explog_cross_target_random_fuzz"
+note = "Reached by math.log10; exact powers of ten stay exact."
+
+[[routine]]
+file = "rt_libm.rs"
+routine = "compile_pow"
+status = "verified"
+oracle = "runtime/rs/src/libm.rs::pow (libm e_pow.c — exhaustive special cases + log2(x), y*log2(x), 2**(...))"
+test = "tests/libm_explog_pow_cross_target_test.rs::pow_cross_target_random_fuzz"
+note = "Reached by float ** (and math.fpow) via __float_pow. Handles every special case (0/inf/nan, neg base with odd/even int exponent, |y| huge) — the source of the sweep-confirmed fpow fixes. pow_cross_target_boundary + math_pow.almd pin them."
 
 # ── rt_value.rs (JSON Value model) ───────────────────────────────────
 [[routine]]

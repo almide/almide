@@ -23,6 +23,7 @@ pub mod fs;
 pub mod http;
 pub mod io;
 pub mod json;
+pub mod libm;
 pub mod sse;
 pub mod map;
 pub mod math;
