@@ -23,6 +23,7 @@ mod runtime;
 mod runtime_eq;
 mod rt_string;
 mod rt_string_extra;
+mod rt_string_case;
 mod rt_numeric;
 mod rt_dragon;
 mod expressions;
@@ -202,6 +203,33 @@ pub struct StringRuntime {
     /// char boundary (clamped to [0, byte_len]). Mirrors native `slice`'s
     /// boundary-safe byte indexing.
     pub utf8_snap: u32,
+    // ── Full-Unicode case folding (oracle-derived tables in `rt_string_case`) ──
+    /// `__utf8_emit_scalar(dst, byte_off, scalar) -> i32`: encode `scalar` as
+    /// UTF-8 at `dst`'s data section + byte_off; returns the advanced byte_off.
+    pub utf8_emit_scalar: u32,
+    /// `__case_map_lookup(map_sel, scalar) -> i32`: binary-search the UPPER(0) /
+    /// LOWER(1) map; returns the absolute address of the `[len][bytes]` value
+    /// record, or -1 on miss (identity).
+    pub case_map_lookup: u32,
+    /// `__set_member(set_sel, scalar) -> i32`: 1 iff `scalar` is in the
+    /// CASED(0) / CASE_IGNORABLE(1) sorted key array.
+    pub set_member: u32,
+    /// `__final_sigma(s, byte_off) -> i32`: ς(U+03C2) or σ(U+03C3) for a Σ at
+    /// `byte_off`, per the Unicode Final_Sigma context rule.
+    pub final_sigma: u32,
+    /// `__str_case_map(s, is_upper) -> i32`: the unified two-pass case driver.
+    pub str_case_map: u32,
+    /// `__str_capitalize(s) -> i32`: first scalar uppercased, rest verbatim.
+    pub capitalize: u32,
+}
+
+/// Absolute linear-memory addresses + counts of the embedded case tables.
+#[derive(Clone, Copy)]
+struct CaseTableOffsets {
+    upper_keys: u32, upper_offs: u32, upper_n: u32,
+    lower_keys: u32, lower_offs: u32, lower_n: u32,
+    cased: u32, cased_n: u32,
+    ci: u32, ci_n: u32,
 }
 
 /// Indices of built-in runtime functions.
@@ -331,6 +359,14 @@ pub struct WasmEmitter {
     strings: HashMap<String, u32>,
     data_bytes: Vec<u8>,
 
+    /// Embedded Unicode case-mapping table offsets (Some only when the program
+    /// uses string case ops — see `embed_case_tables` / `program_uses_case_op`).
+    case_tables: Option<CaseTableOffsets>,
+    /// Total bytes of the case-table region at the FRONT of `data_bytes` (after
+    /// the newline byte). `eliminate_dead_data` skips this region so the table
+    /// is never misparsed as interned-string entries. 0 when no case op.
+    pub case_table_bytes: usize,
+
     // Runtime function indices
     pub rt: RuntimeFuncs,
 
@@ -418,6 +454,8 @@ impl WasmEmitter {
             strings: HashMap::new(),
             // First byte is newline at NEWLINE_OFFSET
             data_bytes: vec![0x0A],
+            case_tables: None,
+            case_table_bytes: 0,
             rt: RuntimeFuncs {
                 fd_write: 0, alloc: 0, rc_inc: 0, rc_dec: 0, cow_check: 0,
                 heap_save: 0, heap_restore: 0, heap_start_global: 0,
@@ -457,6 +495,12 @@ impl WasmEmitter {
                     utf8_scalar: 0,
                     utf8_byte_of_cp: 0,
                     utf8_snap: 0,
+                    utf8_emit_scalar: 0,
+                    case_map_lookup: 0,
+                    set_member: 0,
+                    final_sigma: 0,
+                    str_case_map: 0,
+                    capitalize: 0,
                 },
                 value_stringify: 0,
                 json_escape_string: 0,
@@ -543,6 +587,61 @@ impl WasmEmitter {
     /// Add a compiled function body.
     pub fn add_compiled(&mut self, compiled: CompiledFunc) {
         self.compiled.push(compiled);
+    }
+
+    /// Embed the oracle-derived Unicode case tables at the FRONT of `data_bytes`
+    /// (immediately after the newline byte), recording their absolute addresses.
+    ///
+    /// Placement at the front is MANDATORY: it sits at a fixed low offset that
+    /// never moves when interned string literals (appended later, during function
+    /// compilation) are compacted by `eliminate_dead_data`. Must be called once,
+    /// before any string is interned (asserted), so the baked `i32_const` offsets
+    /// in the case runtime functions stay valid for the life of the module.
+    fn embed_case_tables(&mut self) {
+        debug_assert_eq!(
+            self.data_bytes.len(), 1,
+            "case tables must be embedded before any string interning"
+        );
+        let t = rt_string_case::generate_case_tables();
+
+        fn pad4(db: &mut Vec<u8>) {
+            while db.len() % 4 != 0 { db.push(0); }
+        }
+        fn push_u32s(db: &mut Vec<u8>, arr: &[u32]) -> u32 {
+            pad4(db);
+            let base = NEWLINE_OFFSET + db.len() as u32;
+            for &x in arr { db.extend_from_slice(&x.to_le_bytes()); }
+            base
+        }
+        fn push_bytes(db: &mut Vec<u8>, bytes: &[u8]) -> u32 {
+            let base = NEWLINE_OFFSET + db.len() as u32;
+            db.extend_from_slice(bytes);
+            base
+        }
+
+        // For each map: place VALS first so its base is known, then bake the OFFS
+        // array as ABSOLUTE addresses into VALS, then the KEYS search array.
+        let db = &mut self.data_bytes;
+        let upper_vals = push_bytes(db, &t.upper.vals);
+        let upper_keys = push_u32s(db, &t.upper.keys);
+        let upper_offs_abs: Vec<u32> = t.upper.val_offsets.iter().map(|o| upper_vals + o).collect();
+        let upper_offs = push_u32s(db, &upper_offs_abs);
+
+        let lower_vals = push_bytes(db, &t.lower.vals);
+        let lower_keys = push_u32s(db, &t.lower.keys);
+        let lower_offs_abs: Vec<u32> = t.lower.val_offsets.iter().map(|o| lower_vals + o).collect();
+        let lower_offs = push_u32s(db, &lower_offs_abs);
+
+        let cased = push_u32s(db, &t.cased);
+        let ci = push_u32s(db, &t.case_ignorable);
+
+        self.case_table_bytes = self.data_bytes.len() - 1;
+        self.case_tables = Some(CaseTableOffsets {
+            upper_keys, upper_offs, upper_n: t.upper.keys.len() as u32,
+            lower_keys, lower_offs, lower_n: t.lower.keys.len() as u32,
+            cased, cased_n: t.cased.len() as u32,
+            ci, ci_n: t.case_ignorable.len() as u32,
+        });
     }
 }
 
@@ -682,6 +781,13 @@ pub(crate) fn emit(program: &IrProgram) -> Vec<u8> {
                 );
             }
         }
+    }
+
+    // Embed the Unicode case-mapping tables at the FRONT of the data section
+    // (while data_bytes is still just the newline byte) when the program uses any
+    // string case op. Gated to keep non-case-folding modules lean (~51KB tables).
+    if program_uses_case_op(program) {
+        emitter.embed_case_tables();
     }
 
     // Phase 1: Register types and function indices
@@ -1522,9 +1628,20 @@ fn assemble(emitter: &mut WasmEmitter) -> Vec<u8> {
     // The heap grows upward via `__alloc`. There is no reserved scratch
     // region — string interpolation builds results inline directly on the
     // heap (see `calls_string::emit_string_interp`).
+    // Data layout: [data bytes][8-byte alignment][heap...]. The active data
+    // segment (newline + embedded case tables + interned string literals) is
+    // written into linear memory at instantiation, so the INITIAL memory must
+    // already cover it — derive the page count from the heap start (>= data_end)
+    // rather than a fixed 2 pages. The ~51KB case tables roughly halve the
+    // literal headroom of the old fixed 128KB minimum, so a large-literal
+    // case-folding program could otherwise overrun it and fail to instantiate.
+    let data_end = NEWLINE_OFFSET + emitter.data_bytes.len() as u32;
+    let heap_start_aligned = (data_end + 7) & !7;
+    const WASM_PAGE_BYTES: u32 = 65536;
+    let min_pages = heap_start_aligned.div_ceil(WASM_PAGE_BYTES).max(2);
     let mut memory = MemorySection::new();
     memory.memory(MemoryType {
-        minimum: 2,             // 128KB initial — minimal footprint; allocator grows exponentially
+        minimum: min_pages as u64,  // covers the full data region; allocator grows from here
         maximum: Some(65536),   // 4GB max (WASM32 hard limit) — explicit so V8 doesn't apply a smaller default
         memory64: false,
         shared: false,
@@ -1534,9 +1651,6 @@ fn assemble(emitter: &mut WasmEmitter) -> Vec<u8> {
 
     // ── Global section ──
     let mut globals = GlobalSection::new();
-    // Data layout: [data bytes][8-byte alignment][heap...]
-    let data_end = NEWLINE_OFFSET + emitter.data_bytes.len() as u32;
-    let heap_start_aligned = (data_end + 7) & !7;
     // Global 0: heap pointer (memory 0)
     globals.global(
         GlobalType {
@@ -2233,6 +2347,71 @@ mod tests {
 }
 
 /// Scan IR program for filesystem module calls (fs.read_text, fs.write_text, etc.).
+/// True iff the program references `string.to_upper` / `to_lower` / `capitalize`
+/// in any form (resolved module call, unresolved method call, or runtime call).
+/// Conservative by design: matching every dispatch form the emitter handles means
+/// the pre-scan never misses a reachable case op (a miss would leave the always-
+/// compiled case lookup functions baking stale offsets — silently wrong).
+fn program_uses_case_op(program: &IrProgram) -> bool {
+    use almide_ir::{IrExprKind, CallTarget};
+    use almide_ir::visit::{IrVisitor, walk_expr, walk_stmt};
+
+    fn is_case_fn(name: &str) -> bool {
+        // Accept both the bare method name and a "string."-qualified one: the
+        // Module arm sees a bare `func`, but the unresolved Method arm (and the
+        // calls.rs UFCS fallback) can carry a dotted "string.to_upper". Missing a
+        // form would leave the case tables un-embedded while the runtime fns stay
+        // DCE-live — silently wrong, so keep this strictly broader than dispatch.
+        let name = name.strip_prefix("string.").unwrap_or(name);
+        matches!(name, "to_upper" | "to_lower" | "capitalize")
+    }
+
+    struct CaseScanner { found: bool }
+    impl IrVisitor for CaseScanner {
+        fn visit_expr(&mut self, expr: &almide_ir::IrExpr) {
+            if self.found { return; }
+            match &expr.kind {
+                IrExprKind::Call { target: CallTarget::Module { module, func, .. }, .. }
+                    if module.as_str() == "string" && is_case_fn(func.as_str()) =>
+                {
+                    self.found = true;
+                    return;
+                }
+                IrExprKind::Call { target: CallTarget::Method { method, .. }, .. }
+                    if is_case_fn(method.as_str()) =>
+                {
+                    self.found = true;
+                    return;
+                }
+                IrExprKind::RuntimeCall { symbol, .. }
+                    if matches!(
+                        symbol.as_str(),
+                        "almide_rt_string_to_upper"
+                            | "almide_rt_string_to_lower"
+                            | "almide_rt_string_capitalize"
+                    ) =>
+                {
+                    self.found = true;
+                    return;
+                }
+                _ => {}
+            }
+            walk_expr(self, expr);
+        }
+        fn visit_stmt(&mut self, stmt: &almide_ir::IrStmt) {
+            if self.found { return; }
+            walk_stmt(self, stmt);
+        }
+    }
+
+    let mut scanner = CaseScanner { found: false };
+    for func in &program.functions {
+        scanner.visit_expr(&func.body);
+        if scanner.found { return true; }
+    }
+    false
+}
+
 fn program_uses_fs(program: &IrProgram) -> bool {
     use almide_ir::{IrExprKind, IrStmtKind, CallTarget};
     use almide_ir::visit::{IrVisitor, walk_expr, walk_stmt};
