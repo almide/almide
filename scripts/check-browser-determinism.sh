@@ -22,8 +22,11 @@ command -v node      >/dev/null || { echo "::warning::node not found — skippin
 echo "==> Building native harness"
 cargo build --release --manifest-path "$NATIVE_HARNESS/Cargo.toml" -q || { echo "::error::native harness build failed"; exit 2; }
 echo "==> Building browser harness (wasm32-unknown-unknown via wasm-pack)"
-( cd "$UU_HARNESS" && wasm-pack build --target nodejs --out-dir "$WORK/pkg" ) >/dev/null 2>&1 \
-  || { echo "::error::wasm32-unknown-unknown harness build failed"; exit 2; }
+# Capture the build log and print it on failure — a gate that fails without
+# showing WHY violates the project's own diagnostics principle (it cost a
+# debugging round-trip when this failed on CI but built fine locally).
+( cd "$UU_HARNESS" && wasm-pack --version && wasm-pack build --target nodejs --out-dir "$WORK/pkg" ) > "$WORK/uu-build.log" 2>&1 \
+  || { echo "::error::wasm32-unknown-unknown harness build failed — log tail follows"; tail -100 "$WORK/uu-build.log"; exit 2; }
 
 cat > "$WORK/run.js" <<'JS'
 const pkg = require(process.argv[2]);
