@@ -292,6 +292,9 @@ pub fn register_runtime_functions(emitter: &mut WasmEmitter) {
     // Regex runtime
     super::rt_regex::register(emitter);
 
+    // Dragon4 big-integer helpers for float.to_string.
+    super::rt_dragon::register(emitter);
+
     // Global 0: __heap_ptr (memory 0 bump allocator)
     emitter.heap_ptr_global = 0;
     // Global 1: __preopen_table (ptr to heap-allocated table of [fd, path_ptr, path_len] entries)
@@ -310,7 +313,10 @@ pub fn compile_runtime(emitter: &mut WasmEmitter) {
     compile_heap_restore(emitter);
     compile_println_str(emitter);
     compile_int_to_string(emitter);
-    compile_float_to_string(emitter);
+    // float.to_string driver (Dragon4 shortest-decimal). Registered early, so
+    // its body is emitted here; the bignum helpers (registered late) are
+    // compiled at the end of this function via `compile_helpers`.
+    super::rt_dragon::compile_driver(emitter);
     compile_println_int(emitter);
     compile_concat_str(emitter);
     compile_string_append(emitter);
@@ -351,6 +357,9 @@ pub fn compile_runtime(emitter: &mut WasmEmitter) {
     super::rt_value::compile(emitter);
     // Regex runtime
     super::rt_regex::compile(emitter);
+    // Dragon4 bignum helpers (registered last in register_runtime_functions,
+    // so their bodies must be emitted last to keep func-index order).
+    super::rt_dragon::compile_helpers(emitter);
 }
 
 /// __alloc(size: i32) -> i32
@@ -800,145 +809,6 @@ fn compile_int_to_string(emitter: &mut WasmEmitter) {
 
     // return $result
     wasm!(f, { local_get(6); end; });
-
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
-}
-
-/// __float_to_string(f: f64) -> i32
-/// Multi-digit decimal: integer_part + "." + decimal_digits (up to 15, trailing zeros trimmed)
-fn compile_float_to_string(emitter: &mut WasmEmitter) {
-    let type_idx = emitter.func_type_indices[&emitter.rt.float_to_string];
-    // locals: 0=f64 input | 1=i32 int_str, 2=i32 result, 3=f64 frac, 4=i32 buf,
-    //         5=i32 count, 6=i32 digit, 7=i32 is_neg (from the f64 SIGN BIT — catches -0.0)
-    let mut f = Function::new([
-        (1, ValType::I32), (1, ValType::I32), (1, ValType::F64),
-        (1, ValType::I32), (1, ValType::I32), (1, ValType::I32),
-        (1, ValType::I32),
-    ]);
-
-    // Non-finite guard: `i64.trunc_f64_s` (below) TRAPS on NaN ('invalid conversion
-    // to integer') and on ±inf ('integer overflow'). Match native (Rust Display):
-    // NaN→"NaN", +inf→"inf", -inf→"-inf". (Large FINITE magnitudes ≥ 2^63 still
-    // overflow the trunc and need the shortest-round-trip rewrite — tracked
-    // separately; this stops the common inf/NaN crash-traps.)
-    let nan_str = emitter.intern_string("NaN") as i32;
-    let inf_str = emitter.intern_string("inf") as i32;
-    let neg_inf_str = emitter.intern_string("-inf") as i32;
-    wasm!(f, {
-        local_get(0); local_get(0); f64_ne;                 // NaN: f != f
-        if_empty; i32_const(nan_str); return_; end;
-        local_get(0); f64_const(f64::INFINITY); f64_eq;
-        if_empty; i32_const(inf_str); return_; end;
-        local_get(0); f64_const(f64::NEG_INFINITY); f64_eq;
-        if_empty; i32_const(neg_inf_str); return_; end;
-    });
-
-    // is_neg = SIGN BIT of f (bits & 0x8000000000000000 != 0).
-    // The sign bit catches -0.0 too (which compares `< 0.0` as false), so this is
-    // the only way to reproduce native Rust Display's "-0.0" / "-0.5" output.
-    wasm!(f, {
-        local_get(0); i64_reinterpret_f64;
-        i64_const(0x8000000000000000_u64 as i64); i64_and;
-        i64_eqz; i32_eqz;          // (bits & sign) != 0  →  1
-        local_set(7);
-    });
-
-    // int_str = int_to_string(trunc(abs(f)))  — always non-negative, so int_to_string
-    // NEVER emits its own '-'; the sign is prepended once at the end.
-    wasm!(f, {
-        local_get(0); f64_abs;
-        i64_trunc_f64_s;
-        call(emitter.rt.int_to_string);
-        local_set(1);
-        // frac = abs(f) - trunc(abs(f))
-        local_get(0); f64_abs;
-        local_get(0); f64_abs; i64_trunc_f64_s; f64_convert_i64_s;
-        f64_sub;
-        local_set(3);
-        // Alloc scratch buffer for decimal digits (max 20)
-        i32_const(20); call(emitter.rt.alloc); local_set(4);
-        i32_const(0); local_set(5); // count = 0
-    });
-    // Loop: extract digits while frac > 0 and count < 15
-    wasm!(f, {
-        block_empty; loop_empty;
-          local_get(5); i32_const(15); i32_ge_u; br_if(1);
-          // digit = trunc(frac * 10)
-          local_get(3); f64_const(10.0); f64_mul; local_set(3);
-          local_get(3); i64_trunc_f64_s; i32_wrap_i64; local_set(6);
-          // buf[count] = '0' + digit
-          local_get(4); local_get(5); i32_add;
-          local_get(6); i32_const(48); i32_add;
-          i32_store8(0);
-          // frac = frac - digit
-          local_get(3); local_get(6); i64_extend_i32_u; f64_convert_i64_s; f64_sub; local_set(3);
-          local_get(5); i32_const(1); i32_add; local_set(5);
-          // Stop if frac is essentially 0
-          local_get(3); f64_const(0.000000000000001); f64_lt;
-          br_if(1);
-          br(0);
-        end; end;
-    });
-    // Ensure at least 1 digit (for "X.0")
-    wasm!(f, {
-        local_get(5); i32_eqz;
-        if_empty;
-          local_get(4); i32_const(48); i32_store8(0); // '0'
-          i32_const(1); local_set(5);
-        end;
-    });
-    // Trim trailing zeros (but keep at least 1 digit)
-    wasm!(f, {
-        block_empty; loop_empty;
-          local_get(5); i32_const(1); i32_le_u; br_if(1);
-          local_get(4); local_get(5); i32_const(1); i32_sub; i32_add;
-          i32_load8_u(0);
-          i32_const(48); // '0'
-          i32_ne; br_if(1);
-          local_get(5); i32_const(1); i32_sub; local_set(5);
-          br(0);
-        end; end;
-    });
-    // Build frac string from buf[0..count]
-    // String layout: [len:i32][cap:i32][data@8]
-    wasm!(f, {
-        i32_const(emitter.layout_reg.header_size(super::engine::layout::STRING) as i32); local_get(5); i32_add;
-        call(emitter.rt.alloc); local_set(2);
-        local_get(2); local_get(5); i32_store(0);
-        local_get(2); local_get(5); i32_store(emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::CAP) as i32 as u32, 0);
-        // Copy digits
-        i32_const(0); local_set(6);
-        block_empty; loop_empty;
-          local_get(6); local_get(5); i32_ge_u; br_if(1);
-          local_get(2); i32_const(emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; local_get(6); i32_add;
-          local_get(4); local_get(6); i32_add; i32_load8_u(0);
-          i32_store8(0);
-          local_get(6); i32_const(1); i32_add; local_set(6);
-          br(0);
-        end; end;
-    });
-    // Result: ("-" if is_neg) + int_str + "." + frac_str
-    let dot = emitter.intern_string(".");
-    let minus = emitter.intern_string("-");
-    wasm!(f, {
-        // body = int_str + "." + frac_str  (reuse local 1 to hold the running result)
-        local_get(1);
-        i32_const(dot as i32);
-        call(emitter.rt.concat_str);
-        local_get(2);
-        call(emitter.rt.concat_str);
-        local_set(1);
-        // Prepend '-' iff the sign bit was set (covers -0.0 → "-0.0").
-        local_get(7);
-        if_i32;
-          i32_const(minus as i32);
-          local_get(1);
-          call(emitter.rt.concat_str);
-        else_;
-          local_get(1);
-        end;
-        end;
-    });
 
     emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
 }

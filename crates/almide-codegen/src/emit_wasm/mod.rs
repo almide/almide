@@ -24,6 +24,7 @@ mod runtime_eq;
 mod rt_string;
 mod rt_string_extra;
 mod rt_numeric;
+mod rt_dragon;
 mod expressions;
 mod stdlib_dispatch;
 mod calls;
@@ -285,6 +286,8 @@ pub struct RuntimeFuncs {
     /// __init_preopen_dirs() → ()
     /// Called at _start to discover preopened directories.
     pub init_preopen_dirs: u32,
+    /// Dragon4 shortest-decimal helper functions (float.to_string).
+    pub dragon: rt_dragon::DragonRuntime,
 }
 
 /// Import descriptor for WASM import section.
@@ -481,6 +484,7 @@ impl WasmEmitter {
                 fd_prestat_dir_name: 0,
                 resolve_path: 0,
                 init_preopen_dirs: 0,
+                dragon: rt_dragon::DragonRuntime::default(),
             },
             heap_ptr_global: 0,
             free_list_global: 1,
