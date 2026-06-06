@@ -193,9 +193,19 @@ if [ "$((n_ver + n_grand))" -ne "$n_reg" ]; then
 fi
 
 echo "----"
+# ── Ratchet ceiling: the grandfathered count may only go DOWN ──
+# Current floor after the 2026-06-06 drain: 3 honest survivors (cow_check =
+# a real aliasing-semantics divergence spanning both targets' VarStorage model;
+# init_preopen_dirs/resolve_path = fs corpus-locking blocked). When you drain
+# one, LOWER this constant in the same PR — never raise it.
+MAX_GRANDFATHERED=3
+if [ "$n_grand" -gt "$MAX_GRANDFATHERED" ]; then
+  fail=1
+  echo "::error::grandfathered count $n_grand exceeds the ratchet ceiling $MAX_GRANDFATHERED — new routines must ship verified (see crates/almide-codegen/CLAUDE.md)"
+fi
 if [ "$fail" -ne 0 ]; then
   echo "::error::rt-oracle-registry gate FAILED — see messages above."
   exit 1
 fi
 echo "rt-oracle-registry: OK — $n_actual runtime routines, all registered ($n_reg entries)."
-echo "  verified=$n_ver  grandfathered=$n_grand  (grandfathered = Stage-2 drain backlog)"
+echo "  verified=$n_ver  grandfathered=$n_grand / ceiling $MAX_GRANDFATHERED  (grandfathered = Stage-2 drain backlog)"
