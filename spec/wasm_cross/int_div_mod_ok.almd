@@ -1,3 +1,4 @@
+// @contract: C-003
 // Non-aborting integer `/` and `%` (incl. negative operands and the now-total
 // codepath) stay byte-identical on both targets — the regression guard that the
 // checked-div rewrite did not perturb ordinary division. Divisors are shielded so

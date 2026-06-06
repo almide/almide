@@ -1,3 +1,4 @@
+// @contract: C-036
 type Point = { x: Int, y: Int }
 
 fn distance_sq(a: Point, b: Point) -> Int =

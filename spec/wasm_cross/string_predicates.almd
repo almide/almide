@@ -1,3 +1,4 @@
+// @contract: C-018
 // Cross-target probe matrix for the Unicode-aware string predicates.
 //
 // Native derives is_alpha/is_alphanumeric/is_upper/is_lower from Rust's

@@ -1,3 +1,4 @@
+// @contract: C-033
 // Cross-target alias copy-on-write (value semantics).
 //
 // Almide values are independent after a copy-bind: `var b = a` (or `let b = a`,

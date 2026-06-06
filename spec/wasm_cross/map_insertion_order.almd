@@ -1,3 +1,4 @@
+// @contract: C-013
 // Map is a compact-ordered-dict: iteration is insertion order on BOTH targets.
 // Every line below reveals key/value ORDER (not just counts), so a regression to
 // hash-order iteration on either target would break the byte-for-byte comparison.

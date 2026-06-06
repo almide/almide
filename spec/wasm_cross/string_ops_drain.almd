@@ -1,3 +1,4 @@
+// @contract: C-019
 // Cross-target drain fixture for the 7 rt_string_extra runtime routines:
 //   compile_replace_first, compile_strip_prefix, compile_strip_suffix,
 //   compile_byte_predicate_range (via is_digit), compile_is_digit,

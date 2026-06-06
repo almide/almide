@@ -1,0 +1,35 @@
+# Canonical evidence-class vocabulary — the SINGLE SOURCE OF TRUTH.
+#
+# Sourced by BOTH gates so the enum can never drift between them:
+#   - scripts/check-contracts.sh          (the contract-ledger gate)
+#   - scripts/check-rt-oracle-registry.sh (the wasm-runtime oracle-pairing gate)
+#
+# One class per line, ranked WEAKEST -> STRONGEST (the line order IS the rank:
+# line 1 = rank 0, line 2 = rank 1, ...). The rank drives two things:
+#   1. The "strongest evidence" column in docs/contracts/README.md (highest rank
+#      among a contract's evidence wins).
+#   2. The >= fixture FLOOR rule (rank >= 2): an `active` contract MUST carry at
+#      least one evidence of class fixture-or-stronger; doc-only / by-construction
+#      alone cannot certify observable cross-target behaviour.
+#
+# Lines beginning with '#' and blank lines are comments — the gates strip them.
+# DO NOT reorder without auditing both gates: the rank is positional.
+#
+# rank 0  doc-only         prose only, no executable artifact (RED for active contracts;
+#                          legitimate ONLY for status=flagged-for-revision).
+# rank 1  by-construction  property holds by HOW code is emitted; pinned by a structural
+#                          artifact (named const, anti-regression lint, emit invariant,
+#                          host-determinism check) but no value-level cross-target oracle.
+# rank 2  fixture          a spec/wasm_cross/*.almd run on BOTH targets by
+#                          wasm_cross_target_spec, asserted byte-identical (the FLOOR).
+# rank 3  fuzz             a Rust differential test over N randomized + boundary inputs
+#                          (REQUIRES n=N on the evidence entry).
+# rank 4  exhaustive       an emit-time Sigma-probe checking the generated artifact against
+#                          the std oracle over the COMPLETE finite input domain.
+# rank 5  lean             a machine-checked Lean theorem (the repo's `0 sorry` belt).
+doc-only
+by-construction
+fixture
+fuzz
+exhaustive
+lean

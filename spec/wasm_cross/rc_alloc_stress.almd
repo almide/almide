@@ -1,3 +1,4 @@
+// @contract: C-041
 // Cross-target drain fixture for the heap/RC primitives in emit_wasm/runtime.rs:
 //   compile_alloc, compile_rc_inc, compile_rc_dec, compile_string_alloc.
 //

@@ -1,3 +1,4 @@
+// @contract: C-024
 // Regression: WASM float.parse must produce the SAME f64 as native
 // (Rust `s.trim().parse::<f64>()`), i.e. correctly-rounded round-to-nearest-even.
 // The old WASM parser accumulated the mantissa in f64 (`acc*10+digit`, `*10^exp`),

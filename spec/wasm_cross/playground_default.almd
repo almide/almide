@@ -1,3 +1,4 @@
+// @contract: C-036
 // Mini Markdown → HTML — ADT + pattern match + pipes + string interp
 
 type Block =

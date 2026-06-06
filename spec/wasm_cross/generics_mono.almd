@@ -1,3 +1,4 @@
+// @contract: C-040
 // Host-determinism fixture: exercises monomorphization — generic fns specialized
 // for multiple concrete types. The specialized-function append order (→ WASM
 // function indices) must be host-independent (regression guard for the

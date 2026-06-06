@@ -1,3 +1,4 @@
+// @contract: C-023
 // Regression: WASM float.to_string must produce the SAME bytes as native —
 // Rust's f64 Display (shortest round-tripping decimal, fixed notation) plus the
 // ".0" integer suffix. The WASM runtime implements Dragon4 with exact

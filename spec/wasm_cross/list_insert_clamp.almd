@@ -1,3 +1,4 @@
+// @contract: C-034
 // list.insert clamps an out-of-range index to the end on BOTH targets
 // (graceful, consistent with slice/remove_at/swap). Native oracle:
 // idx = min(i as usize, len), then insert. An in-bounds insert still shifts.

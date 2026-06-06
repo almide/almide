@@ -1,3 +1,4 @@
+// @contract: C-008
 // Cluster-H: compound-type string interpolation = Almide-literal repr.
 //
 // `"${compound}"` renders a value back to its Almide-literal form, recursively

@@ -1,3 +1,4 @@
+// @contract: C-005
 // fan.race head-Err: race takes the FIRST thunk in list order to settle, so if
 // thunk[0] returns Err, that Err IS the result — surfaced as "Error: <msg>" +
 // exit 1 on BOTH targets (native Display `fn main` wrapper / wasm __main_runner).

@@ -1,3 +1,4 @@
+// @contract: C-002
 // Signed `MIN % -1` overflows and aborts with "Error: integer overflow" + exit 1
 // on BOTH targets. This is the silent-divergence case the explicit guard exists for:
 // wasm `i64.rem_s` DEFINES `MIN % -1 = 0` (it does NOT trap), so without the check

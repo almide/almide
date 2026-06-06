@@ -1,3 +1,4 @@
+// @contract: C-043
 // Cross-target gate for a user type named `Box` coexisting with a recursive enum.
 //
 // A recursive enum needs heap INDIRECTION on the Rust target, emitted as

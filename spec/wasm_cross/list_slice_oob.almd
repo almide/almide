@@ -1,3 +1,4 @@
+// @contract: C-034
 // list.slice with out-of-range / past-the-end indices must clamp identically
 // on native and wasm (no OOB heap reads). Native oracle: end clamps to len,
 // start >= effective_end yields []. See runtime/rs/src/list.rs almide_rt_list_slice.

@@ -1,3 +1,4 @@
+// @contract: C-013
 // Regression: wasm map.filter walked the map as a dense array but it is a Swiss
 // table — it returned corrupt keys/values or trapped. Rebuilt as a rehash.
 // (Uses len + keyed get, not iteration order, which is a separate divergence.)

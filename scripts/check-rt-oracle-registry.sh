@@ -22,9 +22,15 @@ cd "$(dirname "$0")/.." || { echo "::error::cannot cd to repo root"; exit 2; }
 
 EMIT_DIR="crates/almide-codegen/src/emit_wasm"
 REGISTRY="crates/almide-codegen/rt-oracle-registry.toml"
+# Shared, single-source-of-truth evidence-class vocabulary. A verified routine MAY
+# carry an OPTIONAL `class = "..."` (mirroring docs/contracts/contracts.toml); if
+# present it must be one of these. Sourcing the SAME file the contract gate uses
+# means the two enums provably cannot drift.
+CLASS_FILE="scripts/lib/contract-classes.txt"
 
 [ -d "$EMIT_DIR" ] || { echo "::error::$EMIT_DIR not found (run from repo root)"; exit 2; }
 [ -f "$REGISTRY" ] || { echo "::error::$REGISTRY not found"; exit 2; }
+[ -f "$CLASS_FILE" ] || { echo "::error::$CLASS_FILE not found"; exit 2; }
 
 # ── Structural / orchestration emitters that are NOT runtime functions ──
 # These compile user IrFunctions, lambda bodies, the _start / test harness, or are
@@ -178,6 +184,20 @@ while IFS=$'\t' read -r key spec; do
     echo "::error::$key is 'verified' but test '$name' was not found in $path"
   fi
 done < <(verified_tests)
+
+# ── (e) class enum (the contract-ledger unification) ──
+# A `class = "..."` line in any [[routine]] block must be a valid evidence class
+# from the shared scripts/lib/contract-classes.txt. This keeps the registry's
+# optional class= vocabulary identical to the contract ledger's — one list file,
+# no drift. Grandfathered entries carry no class= and are unaffected.
+VALID_CLASSES="$(grep -vE '^[[:space:]]*(#|$)' "$CLASS_FILE")"
+while IFS= read -r cls; do
+  [ -z "$cls" ] && continue
+  if ! printf '%s\n' "$VALID_CLASSES" | grep -qxF "$cls"; then
+    fail=1
+    echo "::error::registry has class \"$cls\" which is not a valid evidence class (see $CLASS_FILE: $(printf '%s' "$VALID_CLASSES" | paste -sd, -))"
+  fi
+done < <(grep -E '^class[ \t]*=' "$REGISTRY" | sed -E 's/^class[ \t]*=[ \t]*"//; s/".*$//' | sort -u)
 
 n_actual="$(printf '%s\n' "$ACTUAL" | grep -c . || true)"
 n_reg="$(printf '%s\n' "$REGISTERED" | grep -c . || true)"

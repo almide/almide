@@ -1,3 +1,4 @@
+// @contract: C-019
 // Regression: wasm had no runtime fn / dispatch arm for string.run_length_encode
 // so the codegen panicked (ICE) instead of emitting. Now a two-pass byte-level
 // runtime fn builds List[(String, Int)]. ASCII only here — wasm groups by byte

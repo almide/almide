@@ -1,3 +1,4 @@
+// @contract: C-022
 // Regression: string.from_bytes must be UTF-8 decode (the inverse of to_bytes),
 // byte-identical native==WASM. Native used to map each byte to a Latin-1 scalar
 // (`b as u8 as char`), which corrupted every non-ASCII string and broke the

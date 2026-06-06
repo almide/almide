@@ -1,3 +1,4 @@
+// @contract: C-001
 // A const-foldable `10 / 0` must COMPILE and abort identically on both targets.
 // Before integer div/mod became total, native leaked rustc's
 // `deny(unconditional_panic)` on the literal as an ICE-class

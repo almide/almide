@@ -1,3 +1,4 @@
+// @contract: C-029
 // Cross-target gate for int.parse: the WASM runtime must byte-match the native
 // oracle `s.trim().parse::<i64>().map_err(|e| e.to_string())` for every failure
 // mode — empty-after-trim, lone sign, embedded non-digit, and i64 overflow in

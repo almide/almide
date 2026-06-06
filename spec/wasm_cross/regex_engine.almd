@@ -1,3 +1,4 @@
+// @contract: C-032
 // Cross-target regex engine corpus (headline features).
 //
 // Each line prints a single observable result; the wasm_cross gate runs this on

@@ -1,3 +1,4 @@
+// @contract: C-031
 import json
 
 fn main() -> Unit = {
