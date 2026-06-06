@@ -796,19 +796,48 @@ fn compile_replace(emitter: &mut WasmEmitter) {
 /// Base case: no delimiter found → [s]
 fn compile_split(emitter: &mut WasmEmitter) {
     let type_idx = emitter.func_type_indices[&emitter.rt.string.split];
-    // params: 0=s, 1=delim | locals: 2=idx(i64), 3=d_len, 4=before, 5=rest, 6=rest_list, 7=result
+    // params: 0=s, 1=delim
+    // locals: 2=idx(i64), 3=d_len, 4=before, 5=rest, 6=rest_list, 7=result
+    //   empty-delim branch reuses: 8=blen, 9=in_off, 10=width, 11=slot(j)
     let mut f = Function::new([
         (1, ValType::I64), (1, ValType::I32), (1, ValType::I32),
         (1, ValType::I32), (1, ValType::I32), (1, ValType::I32),
+        (4, ValType::I32),
     ]);
     wasm!(f, {
         local_get(1); i32_load(0); local_set(3); // d_len
-        // Empty delimiter: return [s] to avoid infinite recursion on index_of("x", "") == 0.
+        // Empty delimiter: split per CODEPOINT with a leading + trailing empty
+        // string — native `s.split("")` yields ["", c0, c1, …, ""] (and ["", ""]
+        // for ""). The old branch returned [s] (no split), diverging on every
+        // call (Cluster-2 finding #2). Slots = char_count + 2.
         local_get(3); i32_eqz;
         if_empty;
-          i32_const(12); call(emitter.rt.alloc); local_set(7);
-          local_get(7); i32_const(1); i32_store(0);
-          local_get(7); local_get(0); i32_store(8);
+          local_get(0); i32_load(0); local_set(8);                 // blen = *s
+          // result list: [len = char_count + 2][slot ptrs…]. Worst case (all
+          // ASCII) char_count == blen, so blen + 2 slots is always enough.
+          i32_const(list_hdr()); local_get(8); i32_const(2); i32_add; i32_const(4); i32_mul; i32_add;
+          call(emitter.rt.alloc); local_set(7);
+          // slot[0] = "" (leading empty)
+          local_get(7); i32_const(list_data_off()); i32_add;
+          i32_const(0); call(emitter.rt.string_alloc); i32_store(0);
+          i32_const(0); local_set(9);                              // in_off = 0
+          i32_const(1); local_set(11);                             // slot = 1 (after leading "")
+          block_empty; loop_empty;
+            local_get(9); local_get(8); i32_ge_u; br_if(1);
+            local_get(0); local_get(9); call(emitter.rt.string.utf8_width); local_set(10); // width
+            // slot[slot] = slice(s, in_off, in_off + width)  (one codepoint)
+            local_get(7); i32_const(list_data_off()); i32_add; local_get(11); i32_const(4); i32_mul; i32_add;
+            local_get(0); local_get(9); local_get(9); local_get(10); i32_add;
+            call(emitter.rt.string.slice); i32_store(0);
+            local_get(9); local_get(10); i32_add; local_set(9);    // in_off += width
+            local_get(11); i32_const(1); i32_add; local_set(11);   // slot += 1
+            br(0);
+          end; end;
+          // slot[slot] = "" (trailing empty)
+          local_get(7); i32_const(list_data_off()); i32_add; local_get(11); i32_const(4); i32_mul; i32_add;
+          i32_const(0); call(emitter.rt.string_alloc); i32_store(0);
+          // result.len = slot + 1  (== char_count + 2)
+          local_get(7); local_get(11); i32_const(1); i32_add; i32_store(0);
           local_get(7); return_;
         end;
         local_get(0); local_get(1); call(emitter.rt.string.index_of); local_set(2);
@@ -1100,31 +1129,39 @@ fn compile_chars(emitter: &mut WasmEmitter) {
 }
 
 /// run_length_encode(s) -> List[(String, Int)].
-/// Two passes over the byte payload: first count maximal runs of equal bytes to
-/// size the list exactly, then build a 1-char String + i64 count tuple per run.
-/// Each list slot holds a pointer to a 12-byte tuple `[str_ptr:i32 @0][cnt:i64 @4]`
-/// (tuple fields are laid out sequentially with no padding — see values::byte_size).
-/// Byte-granular like the rest of this runtime; native groups by codepoint, so
-/// ASCII inputs agree and multibyte is part of the string-codepoint gap.
+/// Two passes over the byte payload: first count maximal runs of equal CODEPOINTS
+/// to size the list exactly, then build a String (the whole codepoint, not one
+/// byte) + i64 count tuple per run. Each list slot holds a pointer to a 12-byte
+/// tuple `[str_ptr:i32 @0][cnt:i64 @4]` (tuple fields are laid out sequentially
+/// with no padding — see values::byte_size). Codepoint-granular to match native
+/// `s.chars()` grouping — multibyte `ﬀ`/`İ` now agree (Cluster-2 finding #6);
+/// runs are compared by Unicode scalar (`utf8_scalar`) and advanced by
+/// `utf8_width`.
 fn compile_run_length_encode(emitter: &mut WasmEmitter) {
     let type_idx = emitter.func_type_indices[&emitter.rt.string.run_length_encode];
-    // locals: 1=blen 2=nr 3=i 4=cur 5=result 6=j 7=cnt 8=strp 9=tup
-    let mut f = Function::new([(9, ValType::I32)]);
+    // locals: 1=blen 2=nr 3=i(byte off) 4=cur(i64 scalar) 5=result 6=j 7=cnt
+    //         8=strp 9=tup 10=run_start(byte off) 11=width(i32)
+    let mut f = Function::new([
+        (3, ValType::I32),  // 1=blen 2=nr 3=i
+        (1, ValType::I64),  // 4=cur (Unicode scalar)
+        (5, ValType::I32),  // 5=result 6=j 7=cnt 8=strp 9=tup
+        (2, ValType::I32),  // 10=run_start 11=width
+    ]);
     wasm!(f, {
         local_get(0); i32_load(0); local_set(1);                 // blen = *s
-        // ── Pass 1: count maximal runs into nr ──
+        // ── Pass 1: count maximal runs (by codepoint scalar) into nr ──
         i32_const(0); local_set(2);                              // nr = 0
-        i32_const(0); local_set(3);                              // i = 0
+        i32_const(0); local_set(3);                              // i = 0 (byte offset)
         block_empty; loop_empty;
           local_get(3); local_get(1); i32_ge_u; br_if(1);
-          local_get(0); i32_const(string_data_off()); i32_add; local_get(3); i32_add; i32_load8_u(0); local_set(4); // cur
+          local_get(0); local_get(3); call(emitter.rt.string.utf8_scalar); local_set(4); // cur scalar
           local_get(2); i32_const(1); i32_add; local_set(2);     // nr += 1
-          local_get(3); i32_const(1); i32_add; local_set(3);     // i += 1
-          block_empty; loop_empty;                               // skip equal bytes
+          local_get(0); local_get(3); call(emitter.rt.string.utf8_width); local_get(3); i32_add; local_set(3); // i += width
+          block_empty; loop_empty;                               // skip equal codepoints
             local_get(3); local_get(1); i32_ge_u; br_if(1);
-            local_get(0); i32_const(string_data_off()); i32_add; local_get(3); i32_add; i32_load8_u(0);
-            local_get(4); i32_ne; br_if(1);
-            local_get(3); i32_const(1); i32_add; local_set(3);
+            local_get(0); local_get(3); call(emitter.rt.string.utf8_scalar);
+            local_get(4); i64_ne; br_if(1);
+            local_get(0); local_get(3); call(emitter.rt.string.utf8_width); local_get(3); i32_add; local_set(3);
             br(0);
           end; end;
           br(0);
@@ -1133,27 +1170,27 @@ fn compile_run_length_encode(emitter: &mut WasmEmitter) {
         i32_const(list_hdr()); local_get(2); i32_const(4); i32_mul; i32_add;
         call(emitter.rt.alloc); local_set(5);
         local_get(5); local_get(2); i32_store(0);
-        // ── Pass 2: emit one (char, count) tuple per run ──
+        // ── Pass 2: emit one (codepoint-string, count) tuple per run ──
         i32_const(0); local_set(3);                              // i = 0
         i32_const(0); local_set(6);                              // j = 0
         block_empty; loop_empty;
           local_get(3); local_get(1); i32_ge_u; br_if(1);
-          local_get(0); i32_const(string_data_off()); i32_add; local_get(3); i32_add; i32_load8_u(0); local_set(4); // cur
+          local_get(3); local_set(10);                           // run_start = i
+          local_get(0); local_get(3); call(emitter.rt.string.utf8_scalar); local_set(4); // cur scalar
+          local_get(0); local_get(3); call(emitter.rt.string.utf8_width); local_set(11); // width
           i32_const(1); local_set(7);                            // cnt = 1
-          local_get(3); i32_const(1); i32_add; local_set(3);     // i += 1
+          local_get(3); local_get(11); i32_add; local_set(3);    // i += width
           block_empty; loop_empty;
             local_get(3); local_get(1); i32_ge_u; br_if(1);
-            local_get(0); i32_const(string_data_off()); i32_add; local_get(3); i32_add; i32_load8_u(0);
-            local_get(4); i32_ne; br_if(1);
+            local_get(0); local_get(3); call(emitter.rt.string.utf8_scalar);
+            local_get(4); i64_ne; br_if(1);
             local_get(7); i32_const(1); i32_add; local_set(7);   // cnt += 1
-            local_get(3); i32_const(1); i32_add; local_set(3);   // i += 1
+            local_get(0); local_get(3); call(emitter.rt.string.utf8_width); local_get(3); i32_add; local_set(3); // i += width
             br(0);
           end; end;
-          // strp = one-char String holding `cur`
-          i32_const(1); call(emitter.rt.string_alloc); local_set(8);
-          local_get(8); i32_const(1); i32_store(0);              // len = 1
-          local_get(8); i32_const(1); i32_store(string_cap_off() as u32, 0); // cap = 1
-          local_get(8); local_get(4); i32_store8(string_data_off() as u32);  // data[0] = cur
+          // strp = slice(s, run_start, run_start + width): the whole codepoint
+          local_get(0); local_get(10); local_get(10); local_get(11); i32_add;
+          call(emitter.rt.string.slice); local_set(8);
           // tup = [strp @0][cnt:i64 @4]
           i32_const(12); call(emitter.rt.alloc); local_set(9);
           local_get(9); local_get(8); i32_store(0);

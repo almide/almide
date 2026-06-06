@@ -5,7 +5,85 @@ use almide_ir::IrExpr;
 use almide_lang::types::Ty;
 use wasm_encoder::Instruction;
 
+/// Bit width at and above which a `bits`-wide mask saturates to "all ones".
+/// `int.wrap_*` / `int.rotate_*` model an N-bit register; for `bits >= 64` the
+/// register is the full i64, so the mask is `u64::MAX`. This mirrors the native
+/// guard `if bits >= 64 { u64::MAX } else { (1u64 << bits) - 1 }`
+/// (runtime/rs/src/int.rs). Without it, wasm `i64.shl` masks the shift amount
+/// `mod 64`, so `1 << 64` wraps to `1` and the mask collapses to `0` — every
+/// `bits >= 64` result silently became garbage (Cluster-2 finding #1).
+const FULL_WIDTH_BITS: i64 = 64;
+/// All-ones i64 = `u64::MAX` reinterpreted: the saturated mask for `bits >= 64`.
+const FULL_WIDTH_MASK: i64 = -1;
+
 impl FuncCompiler<'_> {
+    /// Push the `bits`-wide low mask onto the wasm stack, matching the native
+    /// `if bits >= 64 { u64::MAX } else { (1u64 << bits) - 1 }`. `bits_local`
+    /// must already hold the (i64) bit width. The `1 << bits` is still evaluated
+    /// for the `bits >= 64` branch but `select` discards it, so the wasm shift's
+    /// mod-64 wrap never reaches the result.
+    fn emit_wrap_mask(&mut self, bits_local: u32) {
+        // wasm `select` pops [val_if_true, val_if_false, cond] and yields
+        // val_if_true when cond != 0. cond = (bits >= FULL_WIDTH_BITS).
+        wasm!(self.func, {
+            // val_if_true = u64::MAX  (saturated mask for bits >= 64)
+            i64_const(FULL_WIDTH_MASK);
+            // val_if_false = (1 << bits) - 1   (valid only for 0 <= bits < 64)
+            i64_const(1); local_get(bits_local); i64_shl; i64_const(1); i64_sub;
+            // cond
+            local_get(bits_local); i64_const(FULL_WIDTH_BITS); i64_ge_s;
+            select;
+        });
+    }
+
+    /// Emit Rust-`f64::max`/`f64::min` semantics for two already-emitted args.
+    /// Differs from the raw `f64.max`/`f64.min` wasm instructions, which follow
+    /// IEEE-754-2019 `maximum`/`minimum` and PROPAGATE NaN; Rust (and libm
+    /// `fmax`/`fmin`) IGNORE a NaN operand and return the other. Logic, matching
+    /// `runtime/rs/src/float.rs` / `math.rs` bit-for-bit (incl. signed-zero
+    /// order: `max(0,-0) = 0`, `max(-0,0) = -0`):
+    ///   max = if a.is_nan {b} else if b.is_nan {a} else if a <  b {b} else {a}
+    ///   min = if a.is_nan {b} else if b.is_nan {a} else if b <  a {b} else {a}
+    /// (Cluster-2 finding #4.)
+    fn emit_float_min_max(&mut self, args: &[IrExpr], is_max: bool) {
+        let a = self.scratch.alloc_f64();
+        let b = self.scratch.alloc_f64();
+        self.emit_expr(&args[0]);
+        wasm!(self.func, { local_set(a); });
+        self.emit_expr(&args[1]);
+        wasm!(self.func, { local_set(b); });
+        wasm!(self.func, {
+            // if a != a (a is NaN) { b }
+            local_get(a); local_get(a); f64_ne;
+            if_f64;
+              local_get(b);
+            else_;
+              // else if b != b (b is NaN) { a }
+              local_get(b); local_get(b); f64_ne;
+              if_f64;
+                local_get(a);
+              else_;
+                // strict comparison; for max: a < b ? b : a; for min: b < a ? b : a
+                local_get(a); local_get(b);
+        });
+        if is_max {
+            wasm!(self.func, { f64_lt; }); // a < b
+        } else {
+            wasm!(self.func, { f64_gt; }); // a > b  ≡  b < a
+        }
+        wasm!(self.func, {
+                if_f64;
+                  local_get(b);
+                else_;
+                  local_get(a);
+                end;
+              end;
+            end;
+        });
+        self.scratch.free_f64(b);
+        self.scratch.free_f64(a);
+    }
+
     /// Dispatch a float stdlib method call. Returns true if handled.
     pub(super) fn emit_float_call(&mut self, method: &str, args: &[IrExpr]) -> bool {
         use super::stdlib_dispatch::StdlibOp;
@@ -24,7 +102,7 @@ impl FuncCompiler<'_> {
             "to_int" => {
                 // truncate f64 → i64 (saturating: NaN→0, ±Inf→i64::MAX/MIN)
                 self.emit_expr(&args[0]);
-                self.func.instruction(&wasm_encoder::Instruction::I64TruncSatF64S);
+                self.func.instruction(&Instruction::I64TruncSatF64S);
             }
             "round" => {
                 // Round half away from zero: copysign(floor(abs(x) + 0.5), x)
@@ -60,42 +138,64 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, { f64_convert_i64_s; });
             }
             "sign" => {
-                // sign(n) → -1.0, 0.0, or 1.0
+                // float.sign == Rust `f64::signum`: copysign(1.0, x) for every
+                // non-NaN x (so sign(0.0)=1, sign(-0.0)=-1, sign(±inf)=±1), and
+                // NaN for NaN. The old three-way (returns 0 for ±0.0/NaN)
+                // diverged from native (Cluster-2 finding #3). NaN is detected by
+                // `x != x`; copysign propagates the sign bit of zeros/infs too.
                 let tmp = self.scratch.alloc_f64();
                 self.emit_expr(&args[0]);
                 wasm!(self.func, {
                     local_set(tmp);
-                    local_get(tmp); f64_const(0.0); f64_lt;
+                    // if x != x { x (NaN) } else { copysign(1.0, x) }
+                    local_get(tmp); local_get(tmp); f64_ne;
                     if_f64;
-                      f64_const(-1.0);
+                      local_get(tmp);
                     else_;
-                      local_get(tmp); f64_const(0.0); f64_gt;
-                      if_f64;
-                        f64_const(1.0);
-                      else_;
-                        f64_const(0.0);
-                      end;
+                      f64_const(1.0); local_get(tmp); f64_copysign;
                     end;
                 });
                 self.scratch.free_f64(tmp);
             }
             "min" => {
-                self.emit_expr(&args[0]);
-                self.emit_expr(&args[1]);
-                self.func.instruction(&Instruction::F64Min);
+                // Rust `f64::min` (NaN-ignoring), NOT the NaN-propagating f64.min.
+                self.emit_float_min_max(args, false);
             }
             "max" => {
-                self.emit_expr(&args[0]);
-                self.emit_expr(&args[1]);
-                self.func.instruction(&Instruction::F64Max);
+                // Rust `f64::max` (NaN-ignoring), NOT the NaN-propagating f64.max.
+                self.emit_float_min_max(args, true);
             }
             "clamp" => {
-                // clamp(n, lo, hi) = max(lo, min(n, hi))
-                self.emit_expr(&args[1]); // lo
-                self.emit_expr(&args[0]); // n
-                self.emit_expr(&args[2]); // hi
-                self.func.instruction(&Instruction::F64Min); // min(n, hi)
-                self.func.instruction(&Instruction::F64Max); // max(lo, min(n, hi))
+                // float.clamp == Rust `f64::clamp`: `if n < lo {lo} else if
+                // n > hi {hi} else {n}` (well-defined when lo <= hi and neither
+                // is NaN — the same precondition native `f64::clamp` asserts).
+                // Emitted directly rather than via NaN-ignoring min/max so it is
+                // bit-identical to native for every valid (n, lo, hi).
+                let n = self.scratch.alloc_f64();
+                let lo = self.scratch.alloc_f64();
+                let hi = self.scratch.alloc_f64();
+                self.emit_expr(&args[0]);
+                wasm!(self.func, { local_set(n); });
+                self.emit_expr(&args[1]);
+                wasm!(self.func, { local_set(lo); });
+                self.emit_expr(&args[2]);
+                wasm!(self.func, {
+                    local_set(hi);
+                    local_get(n); local_get(lo); f64_lt;
+                    if_f64;
+                      local_get(lo);
+                    else_;
+                      local_get(n); local_get(hi); f64_gt;
+                      if_f64;
+                        local_get(hi);
+                      else_;
+                        local_get(n);
+                      end;
+                    end;
+                });
+                self.scratch.free_f64(hi);
+                self.scratch.free_f64(lo);
+                self.scratch.free_f64(n);
             }
             "is_nan" => {
                 // NaN != NaN. Store to avoid double eval.
@@ -400,39 +500,27 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i64(n);
             }
             "wrap_add" => {
-                // wrap_add(a, b, bits)
+                // wrap_add(a, b, bits): (a + b) & wrap_mask(bits)
                 let bits = self.scratch.alloc_i64();
                 self.emit_expr(&args[0]);
                 self.emit_expr(&args[1]);
                 wasm!(self.func, { i64_add; });
                 self.emit_expr(&args[2]);
-                // mask = (1 << bits) - 1
-                wasm!(self.func, {
-                    local_set(bits);
-                    i64_const(1);
-                    local_get(bits);
-                    i64_shl;
-                    i64_const(1);
-                    i64_sub;
-                    i64_and;
-                });
+                wasm!(self.func, { local_set(bits); });
+                self.emit_wrap_mask(bits);
+                wasm!(self.func, { i64_and; });
                 self.scratch.free_i64(bits);
             }
             "wrap_mul" => {
+                // wrap_mul(a, b, bits): (a * b) & wrap_mask(bits)
                 let bits = self.scratch.alloc_i64();
                 self.emit_expr(&args[0]);
                 self.emit_expr(&args[1]);
                 wasm!(self.func, { i64_mul; });
                 self.emit_expr(&args[2]);
-                wasm!(self.func, {
-                    local_set(bits);
-                    i64_const(1);
-                    local_get(bits);
-                    i64_shl;
-                    i64_const(1);
-                    i64_sub;
-                    i64_and;
-                });
+                wasm!(self.func, { local_set(bits); });
+                self.emit_wrap_mask(bits);
+                wasm!(self.func, { i64_and; });
                 self.scratch.free_i64(bits);
             }
             "to_hex" => {
@@ -526,10 +614,20 @@ impl FuncCompiler<'_> {
             }
             "rotate_right" | "rotate_left" => {
                 // rotate_{left,right}(a, n, bits)
-                // mask = (1 << bits) - 1; v = a & mask
+                // mask = wrap_mask(bits); v = a & mask
                 // rotate_left:  ((v << n) | (v >> (bits - n))) & mask
                 // rotate_right: ((v >> n) | (v << (bits - n))) & mask
+                // TOTAL like int `/`/`%` (C-001): a width `bits <= 0` has no
+                // register to rotate (and native's `n % bits` would divide by
+                // zero), so abort with `Error: rotate width must be positive` +
+                // exit 1 — byte-identical to the native runtime guard — instead
+                // of a divergent native panic (101) / wasm trap (134).
                 let is_left = method == "rotate_left";
+                let rot_width_msg = self
+                    .emitter
+                    .intern_string("Error: rotate width must be positive\n")
+                    as i32;
+                let div_trap = self.emitter.rt.div_trap;
                 let a = self.scratch.alloc_i64();
                 let n = self.scratch.alloc_i64();
                 let bits = self.scratch.alloc_i64();
@@ -543,8 +641,15 @@ impl FuncCompiler<'_> {
                 self.emit_expr(&args[2]);
                 wasm!(self.func, {
                     local_set(bits);
-                    // mask = (1 << bits) - 1
-                    i64_const(1); local_get(bits); i64_shl; i64_const(1); i64_sub;
+                    // if bits <= 0 { abort("rotate width must be positive") }
+                    local_get(bits); i64_const(0); i64_le_s;
+                    if_empty;
+                      i32_const(rot_width_msg); call(div_trap);
+                    end;
+                });
+                // mask = wrap_mask(bits)  (u64::MAX for bits >= 64)
+                self.emit_wrap_mask(bits);
+                wasm!(self.func, {
                     local_set(mask);
                     // v = a & mask
                     local_get(a); local_get(mask); i64_and; local_set(v);
@@ -661,14 +766,12 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i64(a);
             }
             "fmin" => {
-                self.emit_expr(&args[0]);
-                self.emit_expr(&args[1]);
-                self.func.instruction(&Instruction::F64Min);
+                // math.fmin == native `f64::min` (NaN-ignoring), NOT f64.min.
+                self.emit_float_min_max(args, false);
             }
             "fmax" => {
-                self.emit_expr(&args[0]);
-                self.emit_expr(&args[1]);
-                self.func.instruction(&Instruction::F64Max);
+                // math.fmax == native `f64::max` (NaN-ignoring), NOT f64.max.
+                self.emit_float_min_max(args, true);
             }
             "sign" => {
                 // math.sign(n: Int) → Int (-1, 0, 1)
@@ -688,30 +791,50 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i64(s);
             }
             "pow" => {
-                // pow(base: Int, exp: Int) → Int
-                // Loop: result = 1; for i in 0..exp: result *= base
+                // pow(base: Int, exp: Int) → Int. TOTAL like int `/`/`%` (C-001):
+                // a NEGATIVE exponent has no integer result, so abort with
+                // `Error: negative exponent` + exit 1 (byte-identical to the
+                // native `almide_rt_math_pow`). Non-negative: exponentiation by
+                // squaring with WRAPPING i64 multiply — O(log exp), matching
+                // native bit-for-bit and never hanging on a huge exponent (the
+                // old `for i in 0..exp` loop ran `exp` iterations).
+                let neg_exp_msg =
+                    self.emitter.intern_string("Error: negative exponent\n") as i32;
+                let div_trap = self.emitter.rt.div_trap;
                 self.emit_expr(&args[0]); // base
                 self.emit_expr(&args[1]); // exp
                 let exp = self.scratch.alloc_i64();
                 let base = self.scratch.alloc_i64();
                 let result = self.scratch.alloc_i64();
-                let i = self.scratch.alloc_i64();
                 wasm!(self.func, {
-                    local_set(exp);       // exp
-                    local_set(base);   // base
-                    i64_const(1);
-                    local_set(result);   // result = 1
-                    i64_const(0);
-                    local_set(i);   // i = 0
+                    local_set(exp);
+                    local_set(base);
+                    // if exp < 0 { abort("negative exponent") }
+                    local_get(exp); i64_const(0); i64_lt_s;
+                    if_empty;
+                      i32_const(neg_exp_msg); call(div_trap);
+                    end;
+                    i64_const(1); local_set(result);   // result = 1
+                    // exponentiation by squaring; exp treated as an unsigned count
                     block_empty; loop_empty;
-                      local_get(i); local_get(exp); i64_ge_s; br_if(1);
-                      local_get(result); local_get(base); i64_mul; local_set(result);
-                      local_get(i); i64_const(1); i64_add; local_set(i);
+                      local_get(exp); i64_eqz; br_if(1);          // while exp != 0
+                      // if exp & 1 == 1 { result *= base }
+                      local_get(exp); i64_const(1); i64_and; i64_const(1); i64_eq;
+                      if_empty;
+                        local_get(result); local_get(base); i64_mul; local_set(result);
+                      end;
+                      // exp >>= 1  (logical: exp is a non-negative count here)
+                      local_get(exp); i64_const(1); i64_shr_u; local_set(exp);
+                      // if exp != 0 { base *= base }   (avoid a final useless square)
+                      local_get(exp); i64_eqz;
+                      if_empty;
+                      else_;
+                        local_get(base); local_get(base); i64_mul; local_set(base);
+                      end;
                       br(0);
                     end; end;
                     local_get(result);
                 });
-                self.scratch.free_i64(i);
                 self.scratch.free_i64(result);
                 self.scratch.free_i64(base);
                 self.scratch.free_i64(exp);
@@ -780,7 +903,16 @@ impl FuncCompiler<'_> {
             "log_gamma" => {
                 // Lanczos approximation (g=7, n=9 coefficients)
                 // log_gamma(x) = 0.5*ln(2π) + (x+0.5)*ln(t) - t + ln(Ag(x))
-                // where t = x+g+0.5, Ag(x) = c0 + c1/(x+1) + ... + c8/(x+8)
+                // where t = x+g+0.5, Ag(x) = c0 + c1/(x+1) + ... + c8/(x+8).
+                // Bit-identical to native `almide_rt_math_log_gamma`: SAME Lanczos
+                // coeffs, SAME `t = x + LANCZOS_G_OFFSET`, SAME `HALF_LN_2PI`
+                // constant, and BOTH `ln` calls route through the vendored
+                // musl-libm `__libm_log` (`math_log`), never the platform `f64::ln`
+                // — so the old ~1-ULP drift (Cluster-2 finding #7) is gone.
+                /// t = x + g + 0.5 with Lanczos g = 7 (mirrors native LANCZOS_G_OFFSET).
+                const LANCZOS_G_OFFSET: f64 = 7.5;
+                /// 0.5·ln(2π), pinned bit-pattern (mirrors native HALF_LN_2PI).
+                const HALF_LN_2PI: f64 = 0.9189385332046727;
                 let x = self.scratch.alloc_f64();
                 let t = self.scratch.alloc_f64();
                 let ag = self.scratch.alloc_f64();
@@ -804,7 +936,7 @@ impl FuncCompiler<'_> {
                     });
                 }
                 wasm!(self.func, {
-                    local_get(x); f64_const(7.5); f64_add; local_set(t);
+                    local_get(x); f64_const(LANCZOS_G_OFFSET); f64_add; local_set(t);
                 });
                 // Reuse ag as final result: ag = ln(ag)
                 wasm!(self.func, {
@@ -813,7 +945,7 @@ impl FuncCompiler<'_> {
                 // result = 0.5*ln(2π) + (x+0.5)*ln(t) - t + ag
                 // Reuse t slot: compute ln(t) and store back
                 wasm!(self.func, {
-                    f64_const(0.9189385332046727);
+                    f64_const(HALF_LN_2PI);
                     local_get(x); f64_const(0.5); f64_add;
                     local_get(t); call(self.emitter.rt.math_log);
                     f64_mul;

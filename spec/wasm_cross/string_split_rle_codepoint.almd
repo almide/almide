@@ -1,0 +1,15 @@
+// @contract: C-050
+// `string.split(s, "")` splits per CODEPOINT with a leading + trailing empty
+// string — native `s.split("")` is `["", c0, c1, …, ""]` (and `["", ""]` for "").
+// `string.run_length_encode` groups by CODEPOINT (native `s.chars()`), so the
+// run string is the whole codepoint, not one byte. Both used to be byte-granular
+// on wasm (empty-delim returned [s]; rle emitted invalid single-byte strings for
+// multibyte). Now byte-identical on both targets, including multibyte.
+fn main() -> Unit = {
+  println("${string.split("abc", "")}")    // ["", "a", "b", "c", ""]
+  println("${string.split("日本", "")}")   // ["", "日", "本", ""]
+  println("${string.split("", "")}")       // ["", ""]
+  println("${string.run_length_encode("aaabb")}")  // ASCII runs
+  println("${string.run_length_encode("ﬀ")}")      // [("ﬀ", 1)]
+  println("${string.run_length_encode("aaİİb")}")  // codepoint runs
+}

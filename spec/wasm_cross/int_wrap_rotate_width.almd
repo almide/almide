@@ -1,0 +1,16 @@
+// @contract: C-048
+// `int.wrap_add`/`wrap_mul`/`rotate_*` model an N-bit register; for `bits >= 64`
+// the mask saturates to u64::MAX (`if bits >= 64 { u64::MAX } else { (1<<bits)-1 }`).
+// The wasm emit used to compute `(1 << bits) - 1` directly, and `i64.shl` masks
+// the shift amount mod 64, so `1 << 64` wrapped to 1 and the mask collapsed to 0
+// — every `bits >= 64` result silently became garbage. Now byte-identical.
+fn main() -> Unit = {
+  println(int.to_string(int.rotate_left(1, 1, 63)))   // 2
+  println(int.to_string(int.rotate_left(1, 1, 64)))   // 2  (was wasm 0)
+  println(int.to_string(int.rotate_left(1, 1, 65)))   // 3  (was wasm 1)
+  println(int.to_string(int.rotate_right(8, 1, 64)))  // 4
+  println(int.to_string(int.wrap_mul(3, 3, 64)))      // 9  (was wasm 0)
+  println(int.to_string(int.wrap_mul(7, 7, 8)))       // 49
+  println(int.to_string(int.wrap_add(1, 1, 100)))     // 2
+  println(int.to_string(int.wrap_add(65535, 2, 16)))  // 1  (16-bit wrap)
+}

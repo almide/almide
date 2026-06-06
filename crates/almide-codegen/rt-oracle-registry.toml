@@ -476,7 +476,7 @@ status = "verified"
 class = "fixture"
 oracle = "runtime/rs/src/string.rs::almide_rt_string_split (str::split)"
 test = "tests/wasm_runtime_test.rs::wasm_string_split"
-note = "wasm_string_split + wasm_string_split_empty differential tests; string_ops.almd also drives it."
+note = "wasm_string_split + wasm_string_split_empty (now also asserts the empty-delimiter CODEPOINT split, leading/trailing empties) differential tests; spec/wasm_cross/string_split_rle_codepoint.almd (C-050) pins the empty-delimiter path; string_ops.almd also drives it."
 
 [[routine]]
 file = "rt_string.rs"
@@ -566,7 +566,7 @@ status = "verified"
 class = "fixture"
 oracle = "runtime/rs/src/string.rs::almide_rt_string_run_length_encode"
 test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
-note = "spec/wasm_cross/string_rle.almd run-length-encodes strings; native vs wasm byte-identical."
+note = "Groups runs by CODEPOINT (utf8_scalar compare + utf8_width advance), matching native s.chars(); the run string is the whole codepoint. spec/wasm_cross/string_rle.almd (ASCII) + string_split_rle_codepoint.almd (C-050, multibyte ﬀ/İ) are byte-identical native vs wasm."
 
 [[routine]]
 file = "rt_string.rs"

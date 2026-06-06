@@ -1,0 +1,11 @@
+// @contract: C-051
+// `math.log_gamma` is bit-identical on both targets: same Lanczos polynomial,
+// same `t = x + 7.5`, same `0.5·ln(2π)` constant, and BOTH `ln` calls route
+// through the vendored musl-libm `log` (never the platform `f64::ln`). Native
+// previously used the platform `ln`, drifting ~1 ULP from the wasm vendored port.
+fn main() -> Unit = {
+  println(float.to_string(math.log_gamma(math.fpow(math.e(), math.e()))))  // x ~= 15.154
+  println(float.to_string(math.log_gamma(5.0)))
+  println(float.to_string(math.log_gamma(0.5)))
+  println(float.to_string(math.log_gamma(100.25)))
+}
