@@ -1,8 +1,10 @@
-# C-033 — Copy-on-write for aliased mutables (KNOWN DIVERGENCE)
+# C-033 — Copy-on-write for aliased mutables
 
 > Prose companion to contract C-033 in [contracts.toml](contracts.toml).
-> Status: **flagged-for-revision**. Ported verbatim from the grandfathered
-> `cow_check` note in
+> Status: **active** — FIXED by AliasCowPass + native pass_clone (PR #394,
+> 2026-06-06): the truth table below is now byte-identical on both targets,
+> locked by `spec/wasm_cross/alias_cow.almd`. The history below was ported from
+> the formerly-grandfathered `cow_check` note in
 > [crates/almide-codegen/rt-oracle-registry.toml](../../crates/almide-codegen/rt-oracle-registry.toml).
 > This is the SOLE doc-only contract — it records a real, currently-unfixable
 > native<->wasm divergence, not a behaviour we can yet certify.

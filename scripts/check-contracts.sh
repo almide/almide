@@ -238,7 +238,7 @@ done
 # Current floor: the documented divergences that cannot yet be made equivalent —
 # C-006 (fan.timeout wall clock) and C-033 (aliased-mutable COW). LOWER this in
 # the same PR that converges one; never raise it.
-MAX_FLAGGED=2
+MAX_FLAGGED=1
 n_flagged="$(printf '%s\n' "$META" | awk -F'\t' '$3=="flagged-for-revision"' | grep -c . || true)"
 n_active=$((n_contracts - n_flagged))
 if [ "$n_flagged" -gt "$MAX_FLAGGED" ]; then

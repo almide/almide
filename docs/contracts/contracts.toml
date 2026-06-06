@@ -432,13 +432,14 @@ evidence  = [
 # ── KNOWN DIVERGENCE: COPY-ON-WRITE FOR ALIASED MUTABLES ────────────
 [[contract]]
 id        = "C-033"
-title     = "Value semantics for aliased mutables (copy-on-write) — KNOWN DIVERGENCE"
-statement = "`var b = a; a[i] = v` must leave `b` unchanged on both targets. This currently DIVERGES native vs wasm: the wasm pipeline coalesces aliased mutable vars into one local (and copy-propagates the alias), so heap COW cannot separate them, and native itself has matching VarStorage classification gaps (the same minimal repro hits E0382 on the Rust target). Tracked against the grandfathered rt-oracle-registry `cow_check` routine; a correct fix spans the VarStorage/alias-coalescing model on both targets."
+title     = "Value semantics for aliased mutables (copy-on-write)"
+statement = "`var b = a; a[i] = v` leaves `b` unchanged on both targets: heap-typed vars that are copy-aliased AND mutated in place get a copy-on-write at every mutation site (AliasCowPass may-alias analysis -> needs_cow; wasm clones via __cow_check before IndexAssign/FieldAssign/ListSwap/Reverse/Rotate/CopySlice and in-place stdlib mutators; native counts mutation targets as uses so aliased binds clone-at-bind). The full alias-shape truth table (A-M: chains, branch arms, record fields, destructures, map/string in-place) behaves identically on both targets."
 since     = "0.24.0"
-status    = "flagged-for-revision"
+status    = "active"
 doc       = "C-033-cow-truth-table.md"
 evidence  = [
-  { path = "crates/almide-codegen/rt-oracle-registry.toml", name = "compile_cow_check", class = "doc-only" },
+  { path = "spec/wasm_cross/alias_cow.almd", class = "fixture" },
+  { path = "spec/lang/alias_cow_test.almd", class = "fixture" },
 ]
 
 # ── LIST BOUNDS GRACEFULNESS ─────────────────────────────────────────
