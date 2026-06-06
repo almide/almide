@@ -27,6 +27,23 @@ pub fn ty_to_valtype(ty: &Ty) -> Option<ValType> {
         Ty::Bytes => Some(ValType::I32),  // pointer to [len:i32][data:u8...]
         Ty::Matrix => Some(ValType::I32), // pointer to heap-allocated matrix
         Ty::Unit | Ty::Never => None,
+        // Second net behind the hard codegen-entry gate
+        // (`pass_concretize_types::assert_types_concretized`). That gate refuses
+        // to emit when any reachable expr.ty is Unknown/TypeVar, so a residual
+        // unresolved type must NEVER reach this catch-all. If one does, the
+        // `Some(I32)` fallback below is exactly the historical `Unknown→i32`
+        // silent-miscompile (the `fan.map` class). `debug_assert` makes that a
+        // loud test/CI failure pinpointing the leak; release keeps the harmless
+        // i32 default since the gate already aborted the build for real bugs.
+        Ty::Unknown | Ty::TypeVar(_) => {
+            debug_assert!(
+                false,
+                "ty_to_valtype: unresolved type {ty:?} reached WASM emit — the \
+                 ConcretizeTypes hard gate should have rejected this program. \
+                 This is a compiler bug (Unknown→i32 fallback)."
+            );
+            Some(ValType::I32)
+        }
         // All heap types (Record, Variant, List, etc.) use i32 pointers
         _ => Some(ValType::I32),
     }

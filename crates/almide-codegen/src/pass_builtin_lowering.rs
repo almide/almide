@@ -131,12 +131,35 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
                             }, ty, span, def_id: None };
                         } else {
                             // Custom type: use generic encode/decode
-                            let codec_op = if name.starts_with("__encode") { "encode" } else { "decode" };
+                            let is_encode = name.starts_with("__encode");
+                            let codec_op = if is_encode { "encode" } else { "decode" };
                             let func_ref = format!("{}_{}", type_name, codec_op);
+                            // The per-element codec function reference has a
+                            // precise signature — leaving it `Ty::Unknown` here
+                            // is exactly the latent unresolved-type that the
+                            // codegen-entry completeness gate now rejects, and
+                            // the Unknown would otherwise pick an arbitrary repr.
+                            //   encode: Item.encode : (Item) -> Value
+                            //   decode: Item.decode : (Value) -> Result[Item, String]
+                            // (`Value` is the codec intermediate, `Ty::Named("Value")`.)
+                            let elem_ty = Ty::Named(type_name.into(), vec![]);
+                            let value_ty = Ty::Named("Value".into(), vec![]);
+                            use almide_lang::types::constructor::TypeConstructorId;
+                            let fn_ref_ty = if is_encode {
+                                Ty::Fn { params: vec![elem_ty], ret: Box::new(value_ty) }
+                            } else {
+                                Ty::Fn {
+                                    params: vec![value_ty],
+                                    ret: Box::new(Ty::Applied(
+                                        TypeConstructorId::Result,
+                                        vec![elem_ty, Ty::String],
+                                    )),
+                                }
+                            };
                             let mut new_args = args;
                             new_args.push(IrExpr {
                                 kind: IrExprKind::FnRef { name: func_ref.into() },
-                                ty: Ty::Unknown,
+                                ty: fn_ref_ty,
                                 span: None, def_id: None,
                             });
                             let rt_func = if name.starts_with("__encode") {
