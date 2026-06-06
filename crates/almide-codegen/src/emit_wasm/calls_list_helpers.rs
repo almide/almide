@@ -22,16 +22,28 @@ enum SortKind {
     String,
     /// i32 List[String]-pointer elements, 4 bytes, `__list_list_str_cmp` call + `i32_le_s`.
     ListString,
+    /// Any totally-ordered element type whose width comes from `byte_size` and
+    /// whose comparison routes through the shared `emit_ord_cmp3` total-order
+    /// emitter. Covers Bool, Tuple, Option, nested List, variants — everything
+    /// `emit_ord_cmp3` handles — so `list.sort` is no longer an ICE for those.
+    Ord(Ty),
 }
 
 impl SortKind {
     fn elem_size(&self) -> u32 {
-        match self { SortKind::Int | SortKind::Float => 8, _ => 4 }
+        match self {
+            SortKind::Int | SortKind::Float => 8,
+            SortKind::Ord(ty) => values::byte_size(ty),
+            _ => 4,
+        }
     }
+    /// WASM load width for one element. For `Ord(ty)` it follows the type's
+    /// natural bucket (i64 for Int, f64 for Float, i32 for Bool/pointers).
     fn emit_load(&self, f: &mut super::TrackedFunction) {
         match self {
             SortKind::Int => { f.instruction(&Instruction::I64Load(wasm_encoder::MemArg { offset: 0, align: 3, memory_index: 0 })); }
             SortKind::Float => { f.instruction(&Instruction::F64Load(wasm_encoder::MemArg { offset: 0, align: 3, memory_index: 0 })); }
+            SortKind::Ord(ty) => Self::emit_ld_for(f, ty),
             _ => { f.instruction(&Instruction::I32Load(wasm_encoder::MemArg { offset: 0, align: 2, memory_index: 0 })); }
         }
     }
@@ -39,6 +51,7 @@ impl SortKind {
         match self {
             SortKind::Int => { f.instruction(&Instruction::I64Store(wasm_encoder::MemArg { offset: 0, align: 3, memory_index: 0 })); }
             SortKind::Float => { f.instruction(&Instruction::F64Store(wasm_encoder::MemArg { offset: 0, align: 3, memory_index: 0 })); }
+            SortKind::Ord(ty) => Self::emit_st_for(f, ty),
             _ => { f.instruction(&Instruction::I32Store(wasm_encoder::MemArg { offset: 0, align: 2, memory_index: 0 })); }
         }
     }
@@ -46,50 +59,23 @@ impl SortKind {
         self.emit_load(f);
         self.emit_store(f);
     }
-    /// Emit swap: *left_addr ↔ *right_addr using tmp_ptr as scratch.
-    fn emit_swap(&self, f: &mut super::TrackedFunction, left: u32, right: u32, tmp: u32) {
-        match self {
-            SortKind::Int => {
-                // tmp_i64 = *left; *left = *right; *right = tmp_i64
-                // Use tmp memory for i64
-                wasm!(f, {
-                    local_get(tmp); local_get(left); i64_load(0); i64_store(0);
-                    local_get(left); local_get(right); i64_load(0); i64_store(0);
-                    local_get(right); local_get(tmp); i64_load(0); i64_store(0);
-                });
-            }
-            SortKind::Float => {
-                wasm!(f, {
-                    local_get(tmp); local_get(left); f64_load(0); f64_store(0);
-                    local_get(left); local_get(right); f64_load(0); f64_store(0);
-                    local_get(right); local_get(tmp); f64_load(0); f64_store(0);
-                });
-            }
-            _ => {
-                wasm!(f, {
-                    local_get(tmp); local_get(left); i32_load(0); i32_store(0);
-                    local_get(left); local_get(right); i32_load(0); i32_store(0);
-                    local_get(right); local_get(tmp); i32_load(0); i32_store(0);
-                });
-            }
+
+    /// Free function variants of load/store keyed on the WASM bucket of `ty`.
+    /// Static so they don't need a `FuncCompiler` borrow inside `SortKind`.
+    fn emit_ld_for(f: &mut super::TrackedFunction, ty: &Ty) {
+        match values::ty_to_valtype(ty) {
+            Some(ValType::I64) => { f.instruction(&Instruction::I64Load(wasm_encoder::MemArg { offset: 0, align: 3, memory_index: 0 })); }
+            Some(ValType::F64) => { f.instruction(&Instruction::F64Load(wasm_encoder::MemArg { offset: 0, align: 3, memory_index: 0 })); }
+            Some(ValType::F32) => { f.instruction(&Instruction::F32Load(wasm_encoder::MemArg { offset: 0, align: 2, memory_index: 0 })); }
+            _ => { f.instruction(&Instruction::I32Load(wasm_encoder::MemArg { offset: 0, align: 2, memory_index: 0 })); }
         }
     }
-
-    /// Emit `dst[j] <= key` comparison, leaving an i32 boolean on the stack.
-    fn emit_le_cmp(&self, f: &mut super::TrackedFunction, emitter: &WasmEmitter) {
-        match self {
-            SortKind::Int => { f.instruction(&Instruction::I64LeS); }
-            SortKind::Float => { f.instruction(&Instruction::F64Le); }
-            SortKind::String => {
-                f.instruction(&Instruction::Call(emitter.rt.string.cmp));
-                f.instruction(&Instruction::I32Const(0));
-                f.instruction(&Instruction::I32LeS);
-            }
-            SortKind::ListString => {
-                f.instruction(&Instruction::Call(emitter.rt.list_list_str_cmp));
-                f.instruction(&Instruction::I32Const(0));
-                f.instruction(&Instruction::I32LeS);
-            }
+    fn emit_st_for(f: &mut super::TrackedFunction, ty: &Ty) {
+        match values::ty_to_valtype(ty) {
+            Some(ValType::I64) => { f.instruction(&Instruction::I64Store(wasm_encoder::MemArg { offset: 0, align: 3, memory_index: 0 })); }
+            Some(ValType::F64) => { f.instruction(&Instruction::F64Store(wasm_encoder::MemArg { offset: 0, align: 3, memory_index: 0 })); }
+            Some(ValType::F32) => { f.instruction(&Instruction::F32Store(wasm_encoder::MemArg { offset: 0, align: 2, memory_index: 0 })); }
+            _ => { f.instruction(&Instruction::I32Store(wasm_encoder::MemArg { offset: 0, align: 2, memory_index: 0 })); }
         }
     }
 }
@@ -300,6 +286,28 @@ impl FuncCompiler<'_> {
         None
     }
 
+    /// Emit `dst[a] <= dst[b]` for the merge-sort comparison, consuming the two
+    /// loaded element values on the stack and leaving an i32 boolean. The fast
+    /// kinds compare inline; `Ord(ty)` routes through the shared total-order
+    /// emitter (`emit_ord_cmp3` returns sign, `<= 0` means `a <= b`).
+    fn emit_sort_le_cmp(&mut self, kind: &SortKind) {
+        match kind {
+            SortKind::Int => { wasm!(self.func, { i64_le_s; }); }
+            SortKind::Float => { wasm!(self.func, { f64_le; }); }
+            SortKind::String => {
+                wasm!(self.func, { call(self.emitter.rt.string.cmp); i32_const(0); i32_le_s; });
+            }
+            SortKind::ListString => {
+                wasm!(self.func, { call(self.emitter.rt.list_list_str_cmp); i32_const(0); i32_le_s; });
+            }
+            SortKind::Ord(ty) => {
+                let ty = ty.clone();
+                self.emit_ord_cmp3(&ty);
+                wasm!(self.func, { i32_const(0); i32_le_s; });
+            }
+        }
+    }
+
     /// Emit list.sort (insertion sort for List[Int], List[String], and
     /// List[List[String]] via lexicographic inner-list comparison).
     pub(super) fn emit_list_sort(&mut self, args: &[IrExpr]) {
@@ -331,9 +339,19 @@ impl FuncCompiler<'_> {
             {
                 self.emit_list_sort_generic(args, SortKind::ListString)
             }
+            // Everything else totally-ordered (Bool, Tuple, Option, Result,
+            // nested List, variants) sorts through the shared `emit_ord_cmp3`
+            // comparator — the same total order the native `Ord` derive uses.
+            // An unresolved element type still ICEs (we cannot pick a width or a
+            // comparison for it) rather than emit a wrong-typed sort.
+            t if !t.is_unresolved() => {
+                let kt = (*t).clone();
+                self.emit_list_sort_generic(args, SortKind::Ord(kt))
+            }
             _ => panic!(
                 "[ICE] emit_wasm: no WASM dispatch for `list.sort` with \
-                 unsupported element type `{:?}` — extend emit_list_sort_*",
+                 unresolved element type `{:?}` — type inference must \
+                 concretize it before codegen",
                 elem_ty
             ),
         }
@@ -403,7 +421,7 @@ impl FuncCompiler<'_> {
         // We need both values for two comparisons. Duplicate via locals.
         // Actually, emit_le_cmp consumes both. Let me do two separate scans? No, too slow.
         // Simpler: just check dst[i] <= dst[i+1] for ascending.
-        kind.emit_le_cmp(&mut self.func, self.emitter); // dst[i] <= dst[i+1]
+        self.emit_sort_le_cmp(&kind); // dst[i] <= dst[i+1]
         wasm!(self.func, {
                 i32_eqz;
                 if_empty; i32_const(0); local_set(is_asc); end;
@@ -417,7 +435,7 @@ impl FuncCompiler<'_> {
                 local_get(i); i32_const(es as i32); i32_mul; i32_add;
         });
         kind.emit_load(&mut self.func); // xs[i]
-        kind.emit_le_cmp(&mut self.func, self.emitter); // dst[i+1] <= dst[i]
+        self.emit_sort_le_cmp(&kind); // dst[i+1] <= dst[i]
         wasm!(self.func, {
                 i32_eqz;
                 if_empty; i32_const(0); local_set(is_desc); end;
@@ -509,7 +527,7 @@ impl FuncCompiler<'_> {
                       local_get(dst); i32_const(self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32); i32_add; local_get(ri); i32_const(es as i32); i32_mul; i32_add;
         });
         kind.emit_load(&mut self.func); // load dst[ri]
-        kind.emit_le_cmp(&mut self.func, self.emitter); // dst[li] <= dst[ri]
+        self.emit_sort_le_cmp(&kind); // dst[li] <= dst[ri]
         wasm!(self.func, {
                     end;
                   else_;

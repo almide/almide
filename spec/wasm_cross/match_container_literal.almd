@@ -1,0 +1,54 @@
+// @contract: C-036
+// A literal nested inside a container constructor pattern — some("x"), some(5),
+// ok(0), err(404) — must compare the inner value, not just the tag. wasm
+// previously emitted only the Some/Ok/Err non-null/tag guard and ran the arm
+// body UNCONDITIONALLY, so `some("(")` matched `some("[")` and every
+// string/int-dispatching state machine (e.g. balanced-parens) silently diverged
+// from native. Now the inner-literal equality is emitted via the shared
+// type-directed `==`, byte-identical on both targets.
+
+// String literal in Some — the headline case.
+fn cs(c: Option[String]) -> String = match c {
+  some("target") => "T",
+  some("other")  => "O",
+  some(_)        => "?",
+  none           => "N",
+}
+
+// Int literal in Some.
+fn ci(c: Option[Int]) -> String = match c {
+  some(5) => "FIVE",
+  some(9) => "NINE",
+  some(_) => "?",
+  none    => "N",
+}
+
+// Int literals in Ok / Err (native compiles Result-int-literal patterns; the
+// Result-STRING-literal pattern is a separate native walker limitation and is
+// intentionally not exercised here).
+fn ck(r: Result[Int, Int]) -> String = match r {
+  ok(0)    => "ZERO",
+  ok(_)    => "OK",
+  err(404) => "NF",
+  err(_)   => "ERR",
+}
+
+// Distilled balanced-parens core: a stack top compared by string literal. The
+// bug made `is_match("(")` true for any non-empty top.
+fn closes(top: Option[String], ch: String) -> Bool = match top {
+  some("(") => ch == ")",
+  some("[") => ch == "]",
+  some("{") => ch == "}",
+  _         => false,
+}
+
+fn main() -> Unit = {
+  println("s=" + cs(some("target")) + cs(some("other")) + cs(some("zzz")) + cs(none))
+  println("i=" + ci(some(5)) + ci(some(9)) + ci(some(7)))
+  println("k=" + ck(ok(0)) + ck(ok(3)) + ck(err(404)) + ck(err(7)))
+  // ( closes with ) but not ]; [ closes with ] but not )
+  println("b=" + b(closes(some("("), ")")) + b(closes(some("("), "]"))
+            + b(closes(some("["), "]")) + b(closes(some("["), ")")))
+}
+
+fn b(x: Bool) -> String = if x then "T" else "F"

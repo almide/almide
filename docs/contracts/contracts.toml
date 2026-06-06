@@ -446,7 +446,7 @@ evidence  = [
 [[contract]]
 id        = "C-034"
 title     = "Out-of-range list ops clamp / no-op gracefully (no OOB heap access)"
-statement = "Out-of-range `list.insert` clamps the index to the end (`min(i, len)`), `list.remove_at` / `list.swap` with an index >= len are no-ops, and `list.slice` clamps past-the-end indices (end -> len, start >= effective_end -> []) — all byte-identical native == wasm with no OOB heap read/write. Native (runtime/rs/src/list.rs) is the oracle for each."
+statement = "Out-of-range `list.insert` clamps the index to the end (`min(i, len)`), `list.remove_at` / `list.swap` with an index >= len are no-ops, `list.slice` clamps past-the-end indices (end -> len, start >= effective_end -> []), and `list.with_capacity(n)` starts empty without header corruption for any n (the data byte count is computed in i64 and the capacity clamped so `hdr + bytes` never overflows i32) — all byte-identical native == wasm with no OOB heap read/write. Native (runtime/rs/src/list.rs) is the oracle for each."
 since     = "0.24.0"
 status    = "active"
 evidence  = [
@@ -455,6 +455,7 @@ evidence  = [
   { path = "spec/wasm_cross/list_swap_oob.almd", class = "fixture" },
   { path = "spec/wasm_cross/list_slice_oob.almd", class = "fixture" },
   { path = "spec/wasm_cross/list_sort_short.almd", class = "fixture" },
+  { path = "spec/wasm_cross/list_with_capacity.almd", class = "fixture" },
 ]
 
 [[contract]]
@@ -473,7 +474,7 @@ evidence  = [
 [[contract]]
 id        = "C-036"
 title     = "Records, variants, and pattern matching are byte-identical"
-statement = "Record construction/field-access, variant construction (tuple/record/nullary payloads), and `match` over them — including matches whose arms construct a Result with `err(..)` — produce byte-identical results native == wasm. A match typed `Never` no longer appends a wasm `unreachable` epilogue (trap exit 134) while native runs fine."
+statement = "Record construction/field-access, variant construction (tuple/record/nullary payloads), and `match` over them — including matches whose arms construct a Result with `err(..)`, and a LITERAL nested inside a container constructor (`some(\"x\")`, `some(5)`, `ok(0)`, `err(404)`) — produce byte-identical results native == wasm. The inner-literal equality is now emitted on wasm (previously `some(\"x\")` matched ANY `some(_)` because only the non-null tag was checked, silently breaking every string/int-dispatching match). A match typed `Never` no longer appends a wasm `unreachable` epilogue (trap exit 134) while native runs fine."
 since     = "0.24.0"
 status    = "active"
 evidence  = [
@@ -481,6 +482,7 @@ evidence  = [
   { path = "spec/wasm_cross/match_result.almd", class = "fixture" },
   { path = "spec/wasm_cross/closures_and_variants.almd", class = "fixture" },
   { path = "spec/wasm_cross/playground_default.almd", class = "fixture" },
+  { path = "spec/wasm_cross/match_container_literal.almd", class = "fixture" },
 ]
 
 [[contract]]
@@ -601,4 +603,15 @@ since     = "0.24.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/cross_module_spread.almd", class = "fixture" },
+]
+
+# ── LIST TOTAL-ORDER OPS (min / max / sort / sort_by / unique_by) ─────
+[[contract]]
+id        = "C-053"
+title     = "list.min/max/sort/sort_by/unique_by are type-directed and total, native == wasm"
+statement = "`list.min`/`list.max` (extremum), `list.sort`/`list.sort_by` (ascending order), and `list.unique_by` (first-of-each-key dedup) are byte-identical native == wasm for EVERY totally-ordered element type — Int, Bool (false<true), String, Tuple (lexicographic), nested List (lexicographic with shorter-first tiebreak), Option (none<some), and variants (tag order) — and for any Eq key type the `unique_by`/`sort_by` callback returns. The wasm side routes all ordering through one type-directed total-order emitter (`emit_ord_cmp3`, the ordering twin of `emit_eq_typed`) instead of a hard-coded i64 element load; an unresolved element type is an emit-time ICE, never a silent wrong comparison or unbounded display loop."
+since     = "0.24.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/list_total_order.almd", class = "fixture" },
 ]

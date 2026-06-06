@@ -894,15 +894,25 @@ impl FuncCompiler<'_> {
                 } else {
                     self.resolve_closure_ret_valtype(&args[1]).unwrap_or(ValType::I64)
                 };
-                // i32 = heap pointer (String/List/Record). i64 = Int. f64 = Float.
-                // For sort comparison, i32 keys use string.cmp, i64/f64 use numeric compare.
-                // This is correct only when heap pointer keys are always String
-                // (the only supported comparable heap type today) — other pointer
-                // types will mis-sort, but would have been broken before too.
+                // The keys array stores each key by its WASM bucket: i32 (a
+                // Bool value, a String/List/Tuple heap pointer) or i64/f64 (Int/
+                // Float). `key_is_str` selects only the *storage/swap width*
+                // (i32 vs i64). The *comparison* is type-directed via
+                // `emit_ord_cmp3` below, so a Bool key (i32 value 0/1) is no
+                // longer mistaken for a String pointer and fed to `string.cmp`.
                 let key_is_str = matches!(key_vt, ValType::I32);
                 let ks: i32 = match key_vt {
                     ValType::I64 | ValType::F64 => 8,
                     _ => 4,
+                };
+                // Concrete key type for the order comparison. Prefer the
+                // resolved closure return type (keeps Bool/String/Variant
+                // distinct); fall back to the ValType-derived placeholder
+                // (i32 → String pointer) only when inference left it generic.
+                let cmp_key_ty = if !key_ty_initial.is_unresolved() {
+                    key_ty_initial.clone()
+                } else {
+                    values::vt_to_placeholder_ty(key_vt)
                 };
                 // Synthesize a concrete key_ty for `emit_closure_call` sizing.
                 let key_ty = values::vt_to_placeholder_ty(key_vt);
@@ -996,13 +1006,16 @@ impl FuncCompiler<'_> {
                         local_get(keys);
                         local_get(j); i32_const(ks); i32_mul; i32_add;
                 });
+                // Load keys[j] and keys[j+1] at the storage width, then ask the
+                // type-directed total-order emitter whether keys[j] > keys[j+1]
+                // (a descending adjacent pair → swap). One code path for every
+                // key type; `emit_ord_cmp3` returns sign(a <=> b).
                 if key_is_str {
                     wasm!(self.func, {
                         i32_load(0);
                         local_get(keys);
                         local_get(j); i32_const(1); i32_add; i32_const(ks); i32_mul; i32_add;
                         i32_load(0);
-                        call(self.emitter.rt.string.cmp); i32_const(0); i32_gt_s;
                     });
                 } else {
                     wasm!(self.func, {
@@ -1010,9 +1023,10 @@ impl FuncCompiler<'_> {
                         local_get(keys);
                         local_get(j); i32_const(1); i32_add; i32_const(ks); i32_mul; i32_add;
                         i64_load(0);
-                        i64_gt_s;
                     });
                 }
+                self.emit_ord_cmp3(&cmp_key_ty);
+                wasm!(self.func, { i32_const(0); i32_gt_s; });
                 wasm!(self.func, {
                         if_empty;
                           // Swap keys[j] and keys[j+1]

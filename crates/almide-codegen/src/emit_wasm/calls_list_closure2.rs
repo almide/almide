@@ -489,9 +489,20 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(xs);
             }
             "unique_by" => {
-                // unique_by(xs, f) → List[A]: remove dupes by key, keep first (O(n²))
+                // unique_by(xs, f) → List[A]: remove dupes by key, keep first (O(n²)).
+                //
+                // The key function's return type is resolved from the closure
+                // (was hard-coded to `Ty::Int`/i64). When the real key was a
+                // Bool (i32) the i64 `call_indirect` signature disagreed with
+                // the registered closure ABI → `indirect call type mismatch`
+                // trap on wasm. Keys are now stored at their natural width and
+                // compared with the shared `emit_eq_typed`, matching native
+                // `HashSet`-based dedup for any `Eq` key type.
                 let elem_ty = self.resolve_list_elem(&args[0], None);
                 let es = values::byte_size(&elem_ty) as i32;
+                let key_ty = self.resolve_closure_ret_ty(&args[1], &Ty::Int);
+                let ks = values::byte_size(&key_ty) as i32;
+                let key_vt = values::ty_to_valtype(&key_ty).unwrap_or(ValType::I32);
                 let xs = self.scratch.alloc_i32();
                 let closure = self.scratch.alloc_i32();
                 let len = self.scratch.alloc_i32();
@@ -502,15 +513,15 @@ impl FuncCompiler<'_> {
                 let out_count = self.scratch.alloc_i32();
                 let j = self.scratch.alloc_i32();
                 let found = self.scratch.alloc_i32();
-                let key_val = self.scratch.alloc_i64();
+                let key_val = self.scratch.alloc(key_vt);
                 self.emit_expr(&args[0]);
                 wasm!(self.func, { local_set(xs); });
                 self.emit_expr(&args[1]);
                 wasm!(self.func, {
                     local_set(closure);
                     local_get(xs); i32_load(0); local_set(len);
-                    // Alloc keys array: len * 8
-                    local_get(len); i32_const(8); i32_mul;
+                    // Alloc keys array: len * ks
+                    local_get(len); i32_const(ks); i32_mul;
                     call(self.emitter.rt.alloc); local_set(keys);
                     // Compute all keys
                     i32_const(0); local_set(i);
@@ -524,12 +535,15 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, {
                       local_get(closure); i32_load(0); // table_idx
                 });
-                self.emit_closure_call(&elem_ty, &Ty::Int); // key fn returns Int (i64)
+                self.emit_closure_call(&elem_ty, &key_ty);
                 wasm!(self.func, {
                       local_set(key_val);
                       local_get(keys);
-                      local_get(i); i32_const(8); i32_mul; i32_add;
-                      local_get(key_val); i64_store(0);
+                      local_get(i); i32_const(ks); i32_mul; i32_add;
+                      local_get(key_val);
+                });
+                self.emit_store_at(&key_ty, 0);
+                wasm!(self.func, {
                       local_get(i); i32_const(1); i32_add; local_set(i);
                       br(0);
                     end; end;
@@ -538,22 +552,29 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, {
                     i32_const(list_hdr); local_get(len); i32_const(es); i32_mul; i32_add;
                     call(self.emitter.rt.alloc); local_set(dst);
-                    local_get(len); i32_const(8); i32_mul;
+                    local_get(len); i32_const(ks); i32_mul;
                     call(self.emitter.rt.alloc); local_set(seen_keys);
                     i32_const(0); local_set(out_count);
                     i32_const(0); local_set(i);
                     block_empty; loop_empty;
                       local_get(i); local_get(len); i32_ge_u; br_if(1);
                       local_get(keys);
-                      local_get(i); i32_const(8); i32_mul; i32_add;
-                      i64_load(0); local_set(key_val);
+                      local_get(i); i32_const(ks); i32_mul; i32_add;
+                });
+                self.emit_load_at(&key_ty, 0);
+                wasm!(self.func, {
+                      local_set(key_val);
                       i32_const(0); local_set(j);
                       i32_const(0); local_set(found);
                       block_empty; loop_empty;
                         local_get(j); local_get(out_count); i32_ge_u; br_if(1);
                         local_get(seen_keys);
-                        local_get(j); i32_const(8); i32_mul; i32_add;
-                        i64_load(0); local_get(key_val); i64_eq;
+                        local_get(j); i32_const(ks); i32_mul; i32_add;
+                });
+                self.emit_load_at(&key_ty, 0);
+                wasm!(self.func, { local_get(key_val); });
+                self.emit_eq_typed(&key_ty);
+                wasm!(self.func, {
                         if_empty; i32_const(1); local_set(found); br(2); end;
                         local_get(j); i32_const(1); i32_add; local_set(j);
                         br(0);
@@ -568,8 +589,11 @@ impl FuncCompiler<'_> {
                 self.emit_elem_copy(&elem_ty);
                 wasm!(self.func, {
                         local_get(seen_keys);
-                        local_get(out_count); i32_const(8); i32_mul; i32_add;
-                        local_get(key_val); i64_store(0);
+                        local_get(out_count); i32_const(ks); i32_mul; i32_add;
+                        local_get(key_val);
+                });
+                self.emit_store_at(&key_ty, 0);
+                wasm!(self.func, {
                         local_get(out_count); i32_const(1); i32_add; local_set(out_count);
                       end;
                       local_get(i); i32_const(1); i32_add; local_set(i);
@@ -578,7 +602,7 @@ impl FuncCompiler<'_> {
                     local_get(dst); local_get(out_count); i32_store(0);
                     local_get(dst);
                 });
-                self.scratch.free_i64(key_val);
+                self.scratch.free(key_val, key_vt);
                 self.scratch.free_i32(found);
                 self.scratch.free_i32(j);
                 self.scratch.free_i32(out_count);
