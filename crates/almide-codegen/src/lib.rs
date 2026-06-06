@@ -264,6 +264,17 @@ pub fn codegen_with(program: &mut IrProgram, target: Target, options: &CodegenOp
     let transformed = config.pipeline.run(owned, target);
     *program = transformed;
     if let Some(pt) = &pt { eprintln!("[prof:codegen] pipeline={:.3}s", pt.elapsed_secs()); }
+
+    // HARD type-completeness gate (both targets, both debug and release).
+    // After the full pipeline, every reachable IrExpr.ty must be concrete —
+    // no Unknown/TypeVar and no value-position Never. A residual is a compiler
+    // bug: WASM emit would silently fall back to i32 (`ty_to_valtype`'s catch-all,
+    // the `fan.map` silent-miscompile class) and Rust emit to an arbitrary type.
+    // `assert_types_concretized` refuses to emit and aborts with a clean,
+    // span-tagged diagnostic (a controlled error, not an ICE). Stage-1(iv) of
+    // the correctness completeness roadmap.
+    pass_concretize_types::assert_types_concretized(program);
+
     let et = almide_base::profile::ProfileTimer::start(prof);
 
     // Layer 3: Target-specific emit
