@@ -29,6 +29,7 @@ use super::pass_peephole::PeepholePass;
 use super::pass_anf::AnfPass;
 use super::pass_stack_balance::StackBalancePass;
 use super::pass_perceus::{PerceusPass, PerceusOptPass, PerceusVerifyPass};
+use super::pass_alias_cow::AliasCowPass;
 use super::pass_canonicalize::CanonicalizePass;
 use super::pass_globalize_closure_ids::GlobalizeClosureIdsPass;
 use super::pass_egg_saturation::EggSaturationPass;
@@ -210,6 +211,12 @@ fn build_pipeline(target: Target) -> Pipeline {
         // Without this, void functions can have Ret tails that push values onto
         // the WASM stack — rejected by strict validators (wasmtime 45+, V8).
         .add(StackBalancePass)
+        // AliasCow: mark heap locals that are copy-aliased AND mutated in place, so
+        // the emitter clones them at the mutation site via __cow_check (value
+        // semantics). Runs after Peephole/ClosureConversion/ANF so every mutation
+        // kind (ListSwap/Reverse/… and the final RuntimeCall mutators) and the var
+        // types are settled. Pure analysis — writes only codegen_annotations.
+        .add(AliasCowPass)
         // Perceus: insert RcInc/RcDec nodes based on types.
         // Runs after ANF (all heap allocs are VDecls) and closure conversion.
         .add(PerceusPass)

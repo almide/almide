@@ -44,7 +44,9 @@ pub use substitute::{substitute_var_in_expr, substitute_var_in_stmt};
 // ── Identifiers ─────────────────────────────────────────────────
 
 /// Unique variable identifier. Eliminates shadowing ambiguity.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+/// `Ord` so VarId sets can be `BTreeSet` for deterministic iteration
+/// (e.g. `CodegenAnnotations::needs_cow`, read by the host-deterministic WASM emitter).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct VarId(pub u32);
 
 /// Unique definition identifier. Identifies every named definition

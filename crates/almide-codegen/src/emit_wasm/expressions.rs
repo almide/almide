@@ -7,6 +7,7 @@ use wasm_encoder::{Instruction, ValType};
 use super::FuncCompiler;
 use super::values;
 use super::wasm_macro::wasm;
+use crate::pass_closure_conversion::is_inplace_mutator;
 
 #[derive(Clone, Copy)]
 pub(super) enum CmpKind {
@@ -315,6 +316,16 @@ impl FuncCompiler<'_> {
                 self.emit_tail_call(target, args, &expr.ty);
             }
             IrExprKind::RuntimeCall { symbol, args } => {
+                // In-place stdlib mutators (`list.push`, `map.insert`, `string.push`,
+                // bytes builders, …) mutate args[0] through its shared pointer. If
+                // args[0] is a copy-aliased COW target, clone it into its own local
+                // first so the sibling binding is not corrupted. Fires BEFORE any
+                // dispatch branch reads args[0]. No-op for non-COW vars.
+                if is_inplace_mutator(symbol.as_str()) {
+                    if let Some(IrExprKind::Var { id }) = args.first().map(|a| &a.kind) {
+                        self.cow_if_needed(id.0);
+                    }
+                }
                 // Resolved runtime call from @intrinsic. Preferred path:
                 // look up the mangled symbol in `func_map` and emit
                 // `call(idx)` after each arg. Fallback: the WASM runtime

@@ -194,16 +194,12 @@ fi
 
 echo "----"
 # ── Ratchet ceiling: the grandfathered count may only go DOWN ──
-# Current floor after the 2026-06-06 fs drain: 1 honest survivor — cow_check, a
-# real aliasing-semantics divergence spanning both targets' VarStorage model (the
-# wasm pipeline coalesces aliased mutable vars into one local, so heap COW cannot
-# separate them, and native itself has matching classification gaps). The two fs
-# routines (init_preopen_dirs/resolve_path) were drained to verified via the
-# 2-op spec/wasm_cross/fs_preopen_resolve.almd fixture (preopen scan + longest-
-# prefix resolve + `./` normalization, byte-identical & cwd-independent under the
-# gate's `wasmtime --dir=/`). When you drain another, LOWER this constant in the
-# same PR — never raise it.
-MAX_GRANDFATHERED=1
+# ZERO. The drain is complete (2026-06-06): cow_check was fixed (value
+# semantics for aliased mutable collections, locked by spec/wasm_cross/alias_cow.almd)
+# and the fs pair was corpus-locked by spec/wasm_cross/fs_preopen_resolve.almd.
+# Every wasm runtime routine is verified against its native oracle. New routines
+# MUST ship verified — this ceiling never rises.
+MAX_GRANDFATHERED=0
 if [ "$n_grand" -gt "$MAX_GRANDFATHERED" ]; then
   fail=1
   echo "::error::grandfathered count $n_grand exceeds the ratchet ceiling $MAX_GRANDFATHERED — new routines must ship verified (see crates/almide-codegen/CLAUDE.md)"
