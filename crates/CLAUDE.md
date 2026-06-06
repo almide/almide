@@ -27,8 +27,15 @@ almide-ir             Typed IR, VarTable, visitors
 almide-frontend       Type checker, constraint solver, AST→IR lowering
 almide-optimize       Monomorphization, DCE, constant propagation
 almide-codegen        Nanopass pipeline, TOML templates, walker, WASM emit
+almide-interp         Pre-codegen IR tree-walker — 3rd cross-target oracle / executable spec
 almide-tools          Formatter, module interface, language server
 ```
+
+`almide-interp` is a *sibling consumer* of the linked IR, not part of the
+compile pipeline: it runs the IR at the cut point **after** `lower → optimize →
+mono → ir_link` but **before** any of `almide-codegen`'s target-lowering passes,
+so it shares no codegen pass with either backend. See
+[almide-interp/CLAUDE.md](./almide-interp/CLAUDE.md).
 
 ## Core Design Principles
 
@@ -47,6 +54,6 @@ almide-tools          Formatter, module interface, language server
 ## When Adding a New Feature
 
 - **New syntax** → almide-syntax (parser) → almide-frontend (checker + lowering) → almide-codegen (passes + templates)
-- **New stdlib function** → `stdlib/defs/<module>.toml` + `runtime/rs/<module>.rs` + WASM runtime in `emit_wasm/rt_*.rs`
+- **New stdlib function** → `stdlib/defs/<module>.toml` + `runtime/rs/<module>.rs` + WASM runtime in `emit_wasm/rt_*.rs`. To keep the 3-way oracle covering it (instead of skipping it), also add the glue to almide-interp's bridge — it is hand-maintained, NOT auto-generated. See [almide-interp/CLAUDE.md](./almide-interp/CLAUDE.md#coverage-model--does-a-new-stdlib-fn-get-covered-automatically).
 - **New type** → almide-types (Ty variant) → almide-frontend (inference rules) → almide-ir (IR nodes) → almide-codegen (emission)
 - **New codegen target** → almide-codegen (pass pipeline + TOML template + target entry)

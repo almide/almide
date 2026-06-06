@@ -410,6 +410,9 @@ impl FuncCompiler<'_> {
 
             IrStmtKind::IndexAssign { target, index, value } => {
                 // xs[i] = v → store value at ptr + data_off + i * elem_size
+                // COW the (possibly aliased) target into its own local first, so a
+                // sibling binding sharing this list does not see the write.
+                self.cow_if_needed(target.0);
                 let target_ty = &self.var_table.get(*target).ty;
                 let is_bytes = matches!(target_ty, Ty::Bytes);
                 let elem_size = if is_bytes { 1u32 } else { super::values::byte_size(&value.ty) };
@@ -467,6 +470,7 @@ impl FuncCompiler<'_> {
             }
             IrStmtKind::FieldAssign { target, field, value } => {
                 // record.field = value
+                self.cow_if_needed(target.0);
                 let var_ty = &self.var_table.get(*target).ty;
                 let fields = self.extract_record_fields(var_ty);
                 let tag_offset = self.variant_tag_offset(var_ty);
@@ -479,6 +483,7 @@ impl FuncCompiler<'_> {
                 }
             }
             IrStmtKind::ListSwap { target, a, b } => {
+                self.cow_if_needed(target.0);
                 let elem_ty = self.list_elem_ty_var(*target);
                 let elem_size = values::byte_size(&elem_ty) as i32;
                 if self.emit_var_get(target) {
@@ -520,6 +525,7 @@ impl FuncCompiler<'_> {
                 }
             }
             IrStmtKind::ListReverse { target, end } => {
+                self.cow_if_needed(target.0);
                 let elem_ty = self.list_elem_ty_var(*target);
                 let elem_size = values::byte_size(&elem_ty) as i32;
                 let elem_shift = (elem_size as u32).trailing_zeros();
@@ -595,6 +601,7 @@ impl FuncCompiler<'_> {
                 }
             }
             IrStmtKind::ListRotateLeft { target, end } => {
+                self.cow_if_needed(target.0);
                 let elem_ty = self.list_elem_ty_var(*target);
                 let elem_size = values::byte_size(&elem_ty) as i32;
                 if self.emit_var_get(target) {
@@ -634,7 +641,8 @@ impl FuncCompiler<'_> {
                 }
             }
             IrStmtKind::ListCopySlice { dst, src, len } => {
-                // dst[..n].copy_from_slice(&src[..n])
+                // dst[..n].copy_from_slice(&src[..n]) — only dst is written.
+                self.cow_if_needed(dst.0);
                 let dst_ok = self.emit_var_get(dst);
                 if dst_ok {
                     let dst_ptr = self.scratch.alloc_i32();

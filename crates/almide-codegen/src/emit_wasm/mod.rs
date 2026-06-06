@@ -473,6 +473,11 @@ pub struct WasmEmitter {
     pub effect_fns: HashSet<String>,
     // Mutable variables captured by closures: these must use heap cells instead of locals
     pub mutable_captures: HashSet<u32>,
+    // Copy-aliased, in-place-mutated heap locals (AliasCowPass). At each mutation
+    // site of one of these, the emitter inserts __cow_check + write-back so the
+    // alias is preserved (value semantics). Empty for non-aliasing programs → the
+    // direct mutation path is byte-identical to before.
+    pub needs_cow: HashSet<u32>,
     // Deep-equality functions per variant type: type_name → func_idx
     pub eq_funcs: HashMap<String, u32>,
     // Almide-literal repr functions per NAMED record/variant type: type_name →
@@ -637,6 +642,7 @@ impl WasmEmitter {
             lambda_counter: std::cell::Cell::new(0),
             effect_fns: HashSet::new(),
             mutable_captures: HashSet::new(),
+            needs_cow: HashSet::new(),
             eq_funcs: HashMap::new(),
             repr_funcs: BTreeMap::new(),
             repr_func_tys: BTreeMap::new(),
@@ -857,6 +863,25 @@ impl FuncCompiler<'_> {
             wasm!(self.func, { local_get(new_ptr); global_set(global_idx); });
         }
     }
+
+    /// Copy-on-write guard for the in-place mutation of a heap local. If `id` is a
+    /// COW target (copy-aliased + mutated; see AliasCowPass) and stored in a plain
+    /// local, load it, call `__cow_check` (clones iff rc>1), and write the returned
+    /// pointer back to the local BEFORE the mutation reads it. The alias keeps the
+    /// old pointer (whose rc __cow_check decremented), so the mutation can no longer
+    /// reach it.
+    ///
+    /// No-op when `id` is not a COW target → the direct mutation path is unchanged
+    /// (byte-identical wasm for non-aliasing programs). Also skipped for shared-cell
+    /// captures (deliberately reference-shared) and for vars without a plain local
+    /// (globals don't alias at the source level; AliasCowPass excludes them).
+    pub fn cow_if_needed(&mut self, id: u32) {
+        if !self.emitter.needs_cow.contains(&id) { return; }
+        if self.emitter.mutable_captures.contains(&id) { return; }
+        let Some(&local_idx) = self.var_map.get(&id) else { return };
+        let cow_check = self.emitter.rt.cow_check;
+        wasm!(self.func, { local_get(local_idx); call(cow_check); local_set(local_idx); });
+    }
 }
 
 // ── Public API ──────────────────────────────────────────────────────
@@ -878,6 +903,10 @@ pub(crate) fn emit(program: &IrProgram) -> Vec<u8> {
 
     // Pre-scan: detect filesystem usage to conditionally include init_preopen_dirs
     emitter.needs_fs = program_uses_fs(program);
+
+    // Copy the COW-target var set (AliasCowPass) onto the emitter as bare u32s,
+    // mirroring `mutable_captures`. Read at every in-place mutation emit site.
+    emitter.needs_cow = program.codegen_annotations.needs_cow.iter().map(|v| v.0).collect();
 
     // Phase 0: Collect `@intrinsic(symbol)` → (module, fn_name) from every
     // bundled stdlib source so the `RuntimeCall` fallback path can route
@@ -1829,7 +1858,7 @@ fn assemble(emitter: &mut WasmEmitter) -> Vec<u8> {
         },
         &wasm_encoder::ConstExpr::i32_const(heap_start_aligned as i32),
     );
-    emitter.rt.heap_start_global = 4;
+    emitter.rt.heap_start_global = runtime::HEAP_START_GLOBAL_IDX;
 
     // Top-level let globals
     for &(_, vt, bits) in &emitter.top_let_init {

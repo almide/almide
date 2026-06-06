@@ -1,0 +1,107 @@
+// Value semantics: a copy-bind makes the bindings independent, so an in-place
+// mutation of one is invisible through the other. Runs on BOTH targets via
+// `almide test` (WASM with native fallback). The cross-target byte-equality of
+// the same surface is locked separately by spec/wasm_cross/alias_cow.almd.
+
+type Box = { items: List[Int] }
+
+test "alias cow: IndexAssign through a var-alias" {
+  var a = [1, 2, 3]
+  var b = a
+  a[0] = 999
+  assert_eq(a, [999, 2, 3])
+  assert_eq(b, [1, 2, 3])
+}
+
+test "alias cow: mutate the alias, original is unchanged" {
+  var a = [1, 2, 3]
+  var b = a
+  b[0] = 77
+  assert_eq(a, [1, 2, 3])
+  assert_eq(b, [77, 2, 3])
+}
+
+test "alias cow: immutable let-alias" {
+  var a = [1, 2, 3]
+  let b = a
+  a[0] = 999
+  assert_eq(a, [999, 2, 3])
+  assert_eq(b, [1, 2, 3])
+}
+
+test "alias cow: alias chain a -> b -> c" {
+  var a = [1, 2, 3]
+  var b = a
+  var c = b
+  a[0] = 99
+  assert_eq(a, [99, 2, 3])
+  assert_eq(b, [1, 2, 3])
+  assert_eq(c, [1, 2, 3])
+}
+
+test "alias cow: branch-arm alias" {
+  var a = [1, 2, 3]
+  var b = if true then a else [9, 9, 9]
+  a[0] = 99
+  assert_eq(a, [99, 2, 3])
+  assert_eq(b, [1, 2, 3])
+}
+
+test "alias cow: record-field alias mutated in place" {
+  var r = Box { items: [1, 2, 3] }
+  var b = r.items
+  b[0] = 99
+  assert_eq(r.items, [1, 2, 3])
+  assert_eq(b, [99, 2, 3])
+}
+
+test "alias cow: FieldAssign keeps the alias record" {
+  var a = Box { items: [1, 2, 3] }
+  var b = a
+  a.items = [7, 7, 7]
+  assert_eq(a.items, [7, 7, 7])
+  assert_eq(b.items, [1, 2, 3])
+}
+
+test "alias cow: list.push into spare capacity" {
+  var a = [1, 2, 3]
+  list.pop(a)
+  var b = a
+  list.push(a, 99)
+  assert_eq(a, [1, 2, 99])
+  assert_eq(b, [1, 2])
+}
+
+test "alias cow: list.clear in place" {
+  var a = [1, 2, 3]
+  var b = a
+  list.clear(a)
+  assert_eq(list.len(a), 0)
+  assert_eq(b, [1, 2, 3])
+}
+
+test "alias cow: list.pop in place" {
+  var a = [1, 2, 3]
+  var b = a
+  let _ = list.pop(a)
+  assert_eq(a, [1, 2])
+  assert_eq(b, [1, 2, 3])
+}
+
+test "alias cow: map.insert in place" {
+  var m = map.set(map.new(), "x", 1)
+  var b = m
+  map.insert(m, "y", 2)
+  assert(map.contains(m, "y"))
+  assert(not map.contains(b, "y"))
+  assert_eq(map.len(m), 2)
+  assert_eq(map.len(b), 1)
+}
+
+test "alias cow: string.push in place" {
+  var s = "hi"
+  var b = s
+  string.push(s, "!")
+  assert_eq(s, "hi!")
+  assert_eq(b, "hi")
+}
