@@ -1,0 +1,102 @@
+// Cross-target drain fixture for the heap/RC primitives in emit_wasm/runtime.rs:
+//   compile_alloc, compile_rc_inc, compile_rc_dec, compile_string_alloc.
+//
+// These have no directly-callable surface; their oracle is "any program whose
+// allocation / refcount / growth behavior is observable must produce the same
+// result on native and wasm". The gate (wasm_cross_target_spec) runs this on both
+// targets and asserts byte-identical stdout. Native is the oracle. The IR-level
+// complement is the Lean-certified Perceus RC discipline (AlmidePerceusBelt:
+// PerceusVerifyPass in crates/almide-codegen/src/target.rs), which proves Inc/Dec
+// balance; this fixture is the *executable* counterpart — heavy churn with no
+// corruption proves the runtime primitives honor that discipline.
+//
+// Deliberately avoids the aliased-mutation path (`var b = a; a[i] = v`), which is
+// a known native<->wasm divergence (WASM lacks copy-on-write at IndexAssign — see
+// the cow_check registry note). Everything here builds fresh values and reads them
+// back, so a leak / double-free / realloc bug would surface as a wrong result.
+
+// alloc + realloc growth: push N elements, sum must be exact.
+fn test_growth_sum() -> String = {
+  var xs: List[Int] = []
+  for i in 0..1000 { list.push(xs, i) }
+  var total = 0
+  for x in xs { total = total + x }
+  int.to_string(total) + " " + int.to_string(list.len(xs))   // 499500 1000
+}
+
+// string_alloc growth: builder loop with interleaved reads.
+fn test_string_builder() -> String = {
+  var s = ""
+  for _ in 0..200 { s = s + "x" }
+  var dots = ""
+  for i in 0..50 { dots = dots + "." + int.to_string(i % 10) }
+  int.to_string(string.len(s)) + " " + int.to_string(string.len(dots)) + " " + string.slice(dots, 0, 6)
+}
+
+// rc_inc/rc_dec balance: build many nested structures, drop them, churn the heap.
+// A refcount imbalance corrupts a later allocation reusing freed blocks.
+fn build_nested(seed: Int) -> List[List[Int]] = {
+  var outer: List[List[Int]] = []
+  for i in 0..20 {
+    outer = outer + [[seed + i, seed + i * 2, seed + i * 3]]
+  }
+  outer
+}
+fn test_rc_churn() -> String = {
+  var checksum = 0
+  for round in 0..50 {
+    let nested = build_nested(round * 100)
+    let mid = nested[10]
+    checksum = checksum + mid[2]      // (round*100 + 30) summed over 50 rounds
+  }
+  int.to_string(checksum)
+}
+
+// Map insert/lookup churn (alloc/rehash + rc on string keys). map.insert mutates.
+fn test_map_churn() -> String = {
+  var hits = 0
+  for round in 0..30 {
+    var m = map.new()
+    for i in 0..40 {
+      map.insert(m, "k" + int.to_string(i), i * round)
+    }
+    let v = map.get(m, "k20") ?? -1
+    hits = hits + v
+  }
+  int.to_string(hits)                  // sum over rounds of 20*round
+}
+
+// Set insert/contains churn. set.insert returns a new set.
+fn test_set_churn() -> String = {
+  var found = 0
+  for _ in 0..30 {
+    var s = set.new()
+    for i in 0..40 { s = set.insert(s, i * 2) }
+    found = found + (if set.contains(s, 40) then 1 else 0)
+    found = found + (if set.contains(s, 41) then 1 else 0)
+  }
+  int.to_string(found)                 // 30 (only the even one is present each round)
+}
+
+// Deep recursion building + summing fresh lists (alloc pressure, no aliasing).
+fn sum_to(n: Int) -> Int =
+  if n <= 0 then 0 else n + sum_to(n - 1)
+fn test_deep_alloc() -> String = {
+  var acc = 0
+  for k in 0..100 {
+    let xs = list.repeat(k, k % 10 + 1)
+    var s = 0
+    for x in xs { s = s + x }
+    acc = acc + s
+  }
+  int.to_string(acc) + " " + int.to_string(sum_to(100))
+}
+
+fn main() -> Unit = {
+  println(test_growth_sum())
+  println(test_string_builder())
+  println(test_rc_churn())
+  println(test_map_churn())
+  println(test_set_churn())
+  println(test_deep_alloc())
+}

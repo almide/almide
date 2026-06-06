@@ -1,0 +1,108 @@
+// Cross-target drain fixture for the 7 rt_string_extra runtime routines:
+//   compile_replace_first, compile_strip_prefix, compile_strip_suffix,
+//   compile_byte_predicate_range (via is_digit), compile_is_digit,
+//   compile_is_whitespace, compile_cmp (via < on String).
+//
+// The gate (tests/wasm_runtime_test.rs::wasm_cross_target_spec) runs this on BOTH
+// native and wasm and asserts byte-identical stdout. Native is the oracle.
+//
+// Probe matrix is aimed at the STRUCTURAL differences between the std-backed
+// native runtime (runtime/rs/src/string.rs) and the hand-written wasm bytes
+// (crates/almide-codegen/src/emit_wasm/rt_string_extra.rs):
+//   - cmp is BYTE-lexicographic with a length tiebreak, NOT codepoint order
+//     ("ä" > "z" because 0xC3 > 0x7A; "apple" > "Apple" because 'a' > 'A').
+//   - replace_first with an EMPTY pattern: native find("") = Some(0), so `to`
+//     is spliced in at position 0.
+//   - strip_prefix/strip_suffix with an EMPTY affix return Some(whole); with the
+//     affix == the whole string return Some(""); multibyte affixes slice on byte
+//     boundaries identically on both targets.
+//   - is_digit is ASCII-only (native is_ascii_digit): fullwidth/Arabic-Indic
+//     digits and the empty string are all false.
+//   - is_whitespace mirrors native chars().all(char::is_whitespace): the empty
+//     string is VACUOUSLY TRUE, and the set is full-Unicode White_Space (VT/FF
+//     and NBSP are whitespace), not just ASCII space/tab/CR/LF.
+
+fn b2s(b: Bool) -> String = if b then "T" else "F"
+
+fn from_code(code: Int) -> String = {
+  var bs: List[Int] = []
+  list.push(bs, code)
+  string.from_bytes(bs)
+}
+fn from_codes2(a: Int, b: Int) -> String = {
+  var bs: List[Int] = []
+  list.push(bs, a)
+  list.push(bs, b)
+  string.from_bytes(bs)
+}
+
+fn section_cmp() -> Unit = {
+  println("CMP")
+  println(b2s("ä" < "z"))
+  println(b2s("z" < "ä"))
+  println(b2s("abc" < "abcd"))
+  println(b2s("abcd" < "abc"))
+  println(b2s("" < "a"))
+  println(b2s("a" < ""))
+  println(b2s("abc" < "abc"))
+  println(b2s("日" < "本"))
+  println(b2s("apple" < "Apple"))
+  println(b2s("Apple" < "apple"))
+}
+
+fn section_replace_first() -> Unit = {
+  println("REPLACE_FIRST")
+  println(string.replace_first("aXbXc", "X", "_"))
+  println(string.replace_first("hello", "l", "L"))
+  println(string.replace_first("hello", "z", "Z"))
+  println(string.replace_first("", "x", "y"))
+  println(string.replace_first("abc", "", "_"))
+  println(string.replace_first("日本日", "日", "X"))
+  println(string.replace_first("ab", "ab", "CD"))
+}
+
+fn section_strip() -> Unit = {
+  println("STRIP_PREFIX")
+  println(string.strip_prefix("hello", "he") ?? "NONE")
+  println(string.strip_prefix("hello", "xy") ?? "NONE")
+  println(string.strip_prefix("hello", "") ?? "NONE")
+  println(string.strip_prefix("hello", "hello") ?? "NONE")
+  println(string.strip_prefix("日本語", "日") ?? "NONE")
+  println(string.strip_prefix("ab", "abc") ?? "NONE")
+
+  println("STRIP_SUFFIX")
+  println(string.strip_suffix("hello", "lo") ?? "NONE")
+  println(string.strip_suffix("hello", "xy") ?? "NONE")
+  println(string.strip_suffix("hello", "") ?? "NONE")
+  println(string.strip_suffix("hello", "hello") ?? "NONE")
+  println(string.strip_suffix("日本語", "語") ?? "NONE")
+  println(string.strip_suffix("ab", "xab") ?? "NONE")
+}
+
+fn section_predicates() -> Unit = {
+  println("IS_DIGIT")
+  println(b2s(string.is_digit("123")))
+  println(b2s(string.is_digit("12a")))
+  println(b2s(string.is_digit("")))
+  println(b2s(string.is_digit("０")))
+  println(b2s(string.is_digit("٣")))
+  println(b2s(string.is_digit("-1")))
+  println(b2s(string.is_digit(from_code(55))))
+
+  println("IS_WHITESPACE")
+  println(b2s(string.is_whitespace("   ")))
+  println(b2s(string.is_whitespace(" \t\n")))
+  println(b2s(string.is_whitespace("a ")))
+  println(b2s(string.is_whitespace("")))
+  println(b2s(string.is_whitespace(from_code(11))))
+  println(b2s(string.is_whitespace(from_code(12))))
+  println(b2s(string.is_whitespace(from_codes2(194, 160))))
+  println(b2s(string.is_whitespace(from_code(97))))
+}
+
+fn main() -> Unit = {
+  section_cmp()
+  section_replace_first()
+  section_strip()
+  section_predicates()
+}

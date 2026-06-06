@@ -127,42 +127,49 @@ note = "Added in PR-3 (compound repr): per-type __repr_<Type> wasm fns for RECUR
 [[routine]]
 file = "runtime.rs"
 routine = "compile_alloc"
-status = "grandfathered"
-oracle = "no native counterpart — bump allocator backing every heap value"
-note = "Implicitly load-bearing for every heap fixture, but no test isolates allocator semantics (alignment, capacity growth). Drain: a stress fixture asserting layout invariants."
+status = "verified"
+oracle = "no native counterpart — bump allocator (+free-list reuse) backing every heap value; oracle is observable correctness of programs under heavy allocation"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "spec/wasm_cross/rc_alloc_stress.almd: 1000-element list growth (sum=499500), deep per-iteration list allocation, map/set rehash churn — all byte-identical, so a misaligned or under-sized allocation would surface as a wrong result. memory_stress.almd adds nested/concurrent-list growth."
 
 [[routine]]
 file = "runtime.rs"
 routine = "compile_rc_inc"
-status = "grandfathered"
-oracle = "native Rc::clone refcount discipline (Perceus-inserted)"
-note = "Exercised transitively by every shared heap value; no test isolates the refcount itself. spec/wasm_cross/memory_stress.almd stresses it but does not assert counts."
+status = "verified"
+oracle = "native Rc::clone refcount discipline (Perceus-inserted; AlmidePerceusBelt PerceusVerifyPass certifies Inc/Dec balance at the IR level)"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "spec/wasm_cross/rc_alloc_stress.almd test_rc_churn builds + drops 50 rounds of nested List[List[Int]] and reads a checksum; an under-count would free-then-reuse a still-live block and corrupt the result. Byte-identical native vs wasm = balanced Inc."
 
 [[routine]]
 file = "runtime.rs"
 routine = "compile_rc_dec"
-status = "grandfathered"
-oracle = "native Rc drop / free discipline (Perceus-inserted)"
-note = "See compile_rc_inc. Drain: a leak/double-free differential under memory_stress."
+status = "verified"
+oracle = "native Rc drop / free-list push discipline (Perceus-inserted; AlmidePerceusBelt-certified IR balance)"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "spec/wasm_cross/rc_alloc_stress.almd churns the free list (build+drop nested structures, map/set rounds): a double-free or premature free would hand a reused block to a live value and diverge. Byte-identical = correct Dec + free-list reuse."
 
 [[routine]]
 file = "runtime.rs"
 routine = "compile_cow_check"
 status = "grandfathered"
-oracle = "native Rc::make_mut copy-on-write before in-place mutation"
-note = "Drain: a fixture mutating an aliased list/string through one binding and reading the other."
+oracle = "native Rc::make_mut / RcCow copy-on-write before in-place mutation (walker/statements.rs IndexAssign)"
+note = "CANNOT be flipped — drain found a REAL native<->wasm DIVERGENCE that this routine is supposed to prevent but does not: __cow_check has NO callers in the wasm emitter (IndexAssign/FieldAssign/ListSwap/ListReverse mutate in place), so `var b = a; a[i] = v` corrupts the alias on wasm while native copies-on-write. Probe: native `999,2,3,4,5 | 1,2,3,4,5` vs wasm `999,2,3,4,5 | 999,2,3,4,5`. Wiring __cow_check at IndexAssign is necessary but NOT sufficient — the wasm pipeline also coalesces aliased mutable `var`s into one local (and copy-propagates the alias), so heap COW cannot separate them; native itself has matching classification gaps (the same minimal repro hits E0382 move-after-use on the Rust target). A correct fix spans the VarStorage/alias-coalescing model on both targets and is out of scope for this drain. WOULD verify it: a write-back-to-distinct-local COW at every in-place mutation site + suppression of mutable-var alias copy-prop, then a `var b = a; a[i]=v; read both` fixture. Left grandfathered HONESTLY rather than force a false flip."
 
 [[routine]]
 file = "runtime.rs"
 routine = "compile_heap_save"
-status = "grandfathered"
-oracle = "no native counterpart — wasm heap-pointer save/restore for scratch reuse"
+status = "verified"
+oracle = "bytes.heap_save() -> Int (opaque checkpoint); native runtime/rs/src/bytes.rs returns 0, wasm returns the bump pointer — the checkpoint is never observed, only its round-trip with heap_restore"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "spec/wasm_cross/heap_arena.almd takes a checkpoint, allocates scratch, restores, and verifies post-restore results across 40 rounds + a nested checkpoint; the opaque checkpoint value is never printed (it differs per target by design), only the observable results, which are byte-identical."
 
 [[routine]]
 file = "runtime.rs"
 routine = "compile_heap_restore"
-status = "grandfathered"
-oracle = "no native counterpart — wasm heap-pointer save/restore for scratch reuse"
+status = "verified"
+oracle = "bytes.heap_restore(checkpoint) -> Unit; native is a no-op (Rust allocator), wasm resets the bump pointer — both must leave subsequent allocations coherent"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "spec/wasm_cross/heap_arena.almd: after each restore the wasm bump pointer is reused while native ignores it; the nested-checkpoint case proves an inner restore does not corrupt outer live data (outer list still reads 55). Byte-identical observable output."
 
 [[routine]]
 file = "runtime.rs"
@@ -207,9 +214,10 @@ note = "Differential test pushes/clears a String in place and compares native vs
 [[routine]]
 file = "runtime.rs"
 routine = "compile_string_alloc"
-status = "grandfathered"
-oracle = "no native counterpart — wasm string header/data allocation primitive"
-note = "Backs every string-producing routine; no test isolates the allocation primitive."
+status = "verified"
+oracle = "no native counterpart — wasm string header/data allocation primitive (len/cap written by construction)"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "spec/wasm_cross/rc_alloc_stress.almd test_string_builder grows a string 200 single-char appends + an interleaved 50-iteration builder and reads back len/slice; a mis-sized header or cap would corrupt the length or data. Byte-identical native vs wasm."
 
 [[routine]]
 file = "runtime.rs"
@@ -223,15 +231,15 @@ note = "spec/wasm_cross/int_div_by_zero.almd, int_mod_by_zero.almd, int_div_over
 file = "runtime.rs"
 routine = "compile_init_preopen_dirs"
 status = "grandfathered"
-oracle = "native std::fs cwd / path resolution (WASI preopen mapping)"
-note = "fs/WASI path mapping has no cross-target fixture (the gate runs pure-compute programs)."
+oracle = "native std::fs (no preopen concept); wasm scans fd_prestat_get to map WASI preopen dirs"
+note = "Drain probe confirmed it WORKS for a single fs op pair: under the gate's `wasmtime --dir=/`, `fs.write(\"/tmp/...\", c)` lands at the correct host path and a following `fs.exists` resolves it — byte-identical to native (proving the preopen scan + resolve_path are correct). But it cannot be corpus-locked: the wasm fs runtime has a PRE-EXISTING multi-operation trap (out-of-bounds memory access) — a THIRD fs op in the same program (e.g. write+exists+exists, or fs.read_text/fs.is_file) aborts (exit 134), independent of this routine. A robust gate fixture is impossible until that fs trap is fixed. WOULD verify it: fix the wasm fs multi-op path (fd/scratch handling in calls_fs.rs read_text/is_file), then a write+exists+read round-trip fixture printing only content (not the target-specific fd/path)."
 
 [[routine]]
 file = "runtime.rs"
 routine = "compile_resolve_path"
 status = "grandfathered"
-oracle = "native std::path::Path normalization for fs.* calls"
-note = "See compile_init_preopen_dirs — no fs differential fixture yet."
+oracle = "native std::path::Path (the path is used directly); wasm maps an absolute path to the longest-prefix preopen fd + relative remainder"
+note = "Same blocker as compile_init_preopen_dirs: the single write+exists pair is byte-identical native vs wasm (the write lands at the right host path AND exists re-resolves it, exercising resolve_path's prefix match twice), but the wasm fs runtime traps on a 3rd fs op (out-of-bounds), so no robust corpus fixture is possible. Left grandfathered HONESTLY; WOULD verify it once the wasm fs multi-op trap is fixed, via a write+exists+read fixture over relative/absolute/normalized paths."
 
 [[routine]]
 file = "runtime.rs"
@@ -591,9 +599,10 @@ note = "spec/wasm_cross/string_case_unicode.almd capitalizes strings with a non-
 [[routine]]
 file = "rt_string_extra.rs"
 routine = "compile_replace_first"
-status = "grandfathered"
-oracle = "runtime/rs/src/string.rs::almide_rt_string_replace_first"
-note = "No cross-target fixture calls string.replace_first yet. Drain: add it to string_ops.almd."
+status = "verified"
+oracle = "runtime/rs/src/string.rs::almide_rt_string_replace_first (str::find + splice)"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "spec/wasm_cross/string_ops_drain.almd locks the structural edges byte-identically: empty pattern (native find(\"\")=Some(0) splices `to` at index 0), empty subject (no-op), pattern==subject, multibyte (日本日)."
 
 [[routine]]
 file = "rt_string_extra.rs"
@@ -606,30 +615,34 @@ note = "Fixed 2026-06-05 (drain PR-A): empty pattern now Some(byte_len) matching
 [[routine]]
 file = "rt_string_extra.rs"
 routine = "compile_strip_prefix"
-status = "grandfathered"
+status = "verified"
 oracle = "runtime/rs/src/string.rs::almide_rt_string_strip_prefix (str::strip_prefix)"
-note = "No cross-target fixture. Drain: add string.strip_prefix to string_ops.almd."
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "spec/wasm_cross/string_ops_drain.almd: empty prefix → Some(whole), prefix==whole → Some(\"\"), prefix longer than subject → None, multibyte (日本語/日) byte-boundary slice — all byte-identical."
 
 [[routine]]
 file = "rt_string_extra.rs"
 routine = "compile_strip_suffix"
-status = "grandfathered"
+status = "verified"
 oracle = "runtime/rs/src/string.rs::almide_rt_string_strip_suffix (str::strip_suffix)"
-note = "No cross-target fixture. Drain alongside strip_prefix."
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "spec/wasm_cross/string_ops_drain.almd: empty suffix → Some(whole), suffix==whole → Some(\"\"), suffix longer than subject → None, multibyte (日本語/語) — all byte-identical."
 
 [[routine]]
 file = "rt_string_extra.rs"
 routine = "compile_byte_predicate_range"
-status = "grandfathered"
-oracle = "Rust ASCII byte-class predicates (is_ascii_digit etc.)"
-note = "Helper behind is_digit/is_alpha/is_alnum; those have no cross-target fixture yet."
+status = "verified"
+oracle = "Rust ASCII byte-class predicate shape: !empty && every byte in [lo,hi]"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "Sole live caller is compile_is_digit (range 48..57). spec/wasm_cross/string_ops_drain.almd exercises the empty→false, all-in-range→true, any-out-of-range→false, and multibyte-lead-byte→false paths byte-identically; ASCII digits 48..57 are exactly the in-range bytes and any multibyte lead byte (>=0xC2) is out of range."
 
 [[routine]]
 file = "rt_string_extra.rs"
 routine = "compile_is_digit"
-status = "grandfathered"
-oracle = "runtime/rs/src/string.rs::almide_rt_string_is_digit (char::is_ascii_digit)"
-note = "No cross-target fixture for string.is_digit."
+status = "verified"
+oracle = "runtime/rs/src/string.rs::almide_rt_string_is_digit (!empty && all char::is_ascii_digit)"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "spec/wasm_cross/string_ops_drain.almd: ASCII-only contract locked — fullwidth ０ (U+FF10) and Arabic-Indic ٣ are false, empty is false, '-1' is false, '123'/'0' and a runtime-built '7' are true; byte-identical."
 
 [[routine]]
 file = "rt_string_extra.rs"
@@ -650,9 +663,10 @@ note = "Fixed 2026-06-05 (drain PR-A): codepoint walk + Alphanumeric range table
 [[routine]]
 file = "rt_string_extra.rs"
 routine = "compile_is_whitespace"
-status = "grandfathered"
-oracle = "runtime/rs/src/string.rs::almide_rt_string_is_whitespace (all chars char::is_whitespace)"
-note = "The is_unicode_ws RANGES are Σ-probe-verified, but the string.is_whitespace WRAPPER (empty-string + all-chars folding) has no cross-target fixture. Drain: add to string_whitespace.almd."
+status = "verified"
+oracle = "runtime/rs/src/string.rs::almide_rt_string_is_whitespace (s.chars().all(char::is_whitespace))"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "spec/wasm_cross/string_ops_drain.almd locks the WRAPPER (the is_unicode_ws ranges were already Σ-probe-verified): empty string is VACUOUSLY TRUE (chars().all over an empty iter), and full-Unicode White_Space members built at runtime — VT (0x0B), FF (0x0C), NBSP (0xC2 0xA0) — are all true, while a non-WS char is false; byte-identical."
 
 [[routine]]
 file = "rt_string_extra.rs"
@@ -697,9 +711,10 @@ note = "Added in drain PR-A; the 4 Σ-probe locks exercise the search against ev
 [[routine]]
 file = "rt_string_extra.rs"
 routine = "compile_cmp"
-status = "grandfathered"
-oracle = "native str Ord (lexicographic byte comparison)"
-note = "String comparison helper; list_sort_short.almd sorts strings but exercises list_list_str_cmp, not this scalar str cmp directly. Drain: a sort-of-bare-strings fixture."
+status = "verified"
+oracle = "native str Ord (unsigned byte-wise lexicographic comparison with length tiebreak)"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "spec/wasm_cross/string_ops_drain.almd drives __str_cmp through `<` on String and locks the BYTE (not codepoint) ordering: \"ä\"(0xC3..) > \"z\"(0x7A), \"apple\" > \"Apple\" ('a'=97 > 'A'=65), shorter common prefix sorts first (\"abc\" < \"abcd\"), empty sorts first, equal → false, multibyte (日/本); byte-identical."
 
 # ── rt_numeric.rs ────────────────────────────────────────────────────
 [[routine]]
