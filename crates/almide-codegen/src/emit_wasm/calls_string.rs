@@ -6,6 +6,17 @@ use super::FuncCompiler;
 use almide_ir::{IrExpr, IrStringPart};
 use almide_lang::types::Ty;
 
+/// Saturation ceiling for an i64 codepoint COUNT in `take`/`drop`/`take_end`/
+/// `drop_end` (C-054). Any count `>= count(s)` — including a negative i64
+/// (huge as `usize`) or any value `>= 2^32` — means "the whole string" / "drop
+/// everything". `i32::MAX` is larger than any materializable codepoint count
+/// (a string that long cannot exist in linear memory), and the downstream
+/// `utf8_byte_of_cp` / `cp = count - n` logic floors it to the string's actual
+/// length, so this sentinel reproduces native's unsigned `n as usize` behavior
+/// with a lossless `i32_wrap_i64`. Named so the relationship to the i32 ceiling
+/// is explicit instead of a bare `2147483647` literal.
+const STRING_COUNT_HUGE: i64 = i32::MAX as i64;
+
 impl FuncCompiler<'_> {
     /// Dispatch a string stdlib method call. Returns true if handled.
     pub(super) fn emit_string_call(
@@ -127,7 +138,18 @@ impl FuncCompiler<'_> {
             "repeat" => {
                 self.emit_expr(&args[0]);
                 self.emit_expr(&args[1]);
-                wasm!(self.func, { i32_wrap_i64; call(self.emitter.rt.string.repeat); });
+                // Unsigned-saturate the i64 count to [0, i32::MAX] before
+                // narrowing (C-054): a bare i32_wrap_i64 turned `2^32` into 0
+                // (empty) and `2^32+k` into a small in-range count, silently
+                // producing the wrong string. A count past i32::MAX cannot be
+                // materialized on either target (native `s.repeat(n as usize)`
+                // aborts on the multi-GB request, wasm `memory.grow` fails), so
+                // saturating to the sentinel keeps the wrap lossless and both
+                // targets both-fail. Native `n as usize` is UNSIGNED, so a
+                // NEGATIVE count is huge (also both-fail), NOT empty.
+                const STRING_REPEAT_MAX_COUNT: i64 = i32::MAX as i64;
+                self.emit_clamp_count_to_i32(super::calls_list_helpers::ClampHi::Const(STRING_REPEAT_MAX_COUNT));
+                wasm!(self.func, { call(self.emitter.rt.string.repeat); });
             }
             "slice" => {
                 // slice(s, start, end) — BYTE indices, clamped to [0, byte_len]
@@ -139,21 +161,23 @@ impl FuncCompiler<'_> {
                 // runtime would read as a huge unsigned → trap. Clamping to the
                 // byte length degrades the sentinel to "to the end" safely.
                 let s_ptr = self.scratch.alloc_i32();
+                let byte_len = self.scratch.alloc_i32();
                 let start_b = self.scratch.alloc_i32();
                 let end_b = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
-                wasm!(self.func, { local_set(s_ptr); });
-                // start (clamped to [0, byte_len], then snapped to a boundary)
+                wasm!(self.func, { local_set(s_ptr); local_get(s_ptr); i32_load(0); local_set(byte_len); });
+                // start = (start.max(0)).min(byte_len) on the i64 BEFORE
+                // narrowing (C-054) — native `string.slice` clamps SIGNED
+                // (`(start.max(0) as usize).min(len)`), so a NEGATIVE start maps
+                // to 0, not to byte_len. (This differs from `list.slice`, whose
+                // oracle is `start as usize` → unsigned.) The same SIGNED rule
+                // `end` below already uses; a start >= 2^32 saturates to byte_len
+                // instead of wrapping to a small in-range offset. Then snap down
+                // to a char boundary.
                 self.emit_expr(&args[1]);
+                self.emit_clamp_count_signed_i32(super::calls_list_helpers::ClampHi::LenLocal(byte_len));
                 wasm!(self.func, {
-                    i32_wrap_i64; local_set(start_b);
-                    // clamp negative → 0
-                    local_get(start_b); i32_const(0); i32_lt_s;
-                    if_empty; i32_const(0); local_set(start_b); end;
-                    // clamp > byte_len → byte_len
-                    local_get(start_b); local_get(s_ptr); i32_load(0); i32_gt_u;
-                    if_empty; local_get(s_ptr); i32_load(0); local_set(start_b); end;
-                    // snap down to char boundary
+                    local_set(start_b);
                     local_get(s_ptr); local_get(start_b);
                     call(self.emitter.rt.string.utf8_snap); local_set(start_b);
                 });
@@ -205,6 +229,7 @@ impl FuncCompiler<'_> {
                     end;
                 });
                 self.scratch.free_i32(s_ptr);
+                self.scratch.free_i32(byte_len);
                 self.scratch.free_i32(start_b);
                 self.scratch.free_i32(end_b);
             }
@@ -251,14 +276,24 @@ impl FuncCompiler<'_> {
             "pad_start" => {
                 self.emit_expr(&args[0]);
                 self.emit_expr(&args[1]);
-                wasm!(self.func, { i32_wrap_i64; });
+                // Unsigned-saturate the i64 WIDTH (a target codepoint COUNT)
+                // before narrowing (C-054): native `width as usize` is UNSIGNED,
+                // so a NEGATIVE or `>= 2^32` width is enormous (`len >= w` false →
+                // pads toward a multi-GB string that aborts). A bare i32_wrap_i64
+                // turned `2^32+k` into a small in-range width → silently the
+                // WRONG (short) result. Clamping to the i32::MAX sentinel keeps
+                // small widths exact and makes huge widths both-fail (wasm
+                // memory.grow / native abort) instead of wasm-wrong-short.
+                self.emit_clamp_count_to_i32(super::calls_list_helpers::ClampHi::Const(STRING_COUNT_HUGE));
                 self.emit_expr(&args[2]);
                 wasm!(self.func, { call(self.emitter.rt.string.pad_start); });
             }
             "pad_end" => {
                 self.emit_expr(&args[0]);
                 self.emit_expr(&args[1]);
-                wasm!(self.func, { i32_wrap_i64; });
+                // Unsigned-saturate the i64 WIDTH before narrowing — same rule as
+                // pad_start (C-054); see that comment.
+                self.emit_clamp_count_to_i32(super::calls_list_helpers::ClampHi::Const(STRING_COUNT_HUGE));
                 self.emit_expr(&args[2]);
                 wasm!(self.func, { call(self.emitter.rt.string.pad_end); });
             }
@@ -499,12 +534,15 @@ impl FuncCompiler<'_> {
                 self.emit_expr(&args[0]);
                 wasm!(self.func, { local_set(s); });
                 self.emit_expr(&args[1]);
+                // Unsigned saturate the i64 COUNT (C-054): native take_end uses
+                // `n as usize >= count → start 0` (whole string). A negative `n`
+                // OR any `n >= 2^32` means "the whole string"; both map to the
+                // huge sentinel here, so `cp = count - n` underflows to <0 and is
+                // floored to start 0 below. The old bare wrap + sign-check missed
+                // `2^32`/`2^32+k` (they wrap to small non-negative counts).
+                self.emit_clamp_count_to_i32(super::calls_list_helpers::ClampHi::Const(STRING_COUNT_HUGE));
                 wasm!(self.func, {
-                    i32_wrap_i64; local_set(n);
-                    // negative n → i32::MAX so cp = count - n underflows to <0 → start 0 →
-                    // whole string, matching native take_end (n as usize >= count → start 0).
-                    local_get(n); i32_const(0); i32_lt_s;
-                    if_empty; i32_const(2147483647); local_set(n); end;
+                    local_set(n);
                     // cp = char_count(s) - n
                     local_get(s); call(self.emitter.rt.string.char_count); i32_wrap_i64;
                     local_get(n); i32_sub; local_set(cp);
@@ -529,12 +567,13 @@ impl FuncCompiler<'_> {
                 self.emit_expr(&args[0]);
                 wasm!(self.func, { local_set(s); });
                 self.emit_expr(&args[1]);
+                // Unsigned saturate the i64 COUNT (C-054): native drop_end uses
+                // `n as usize >= count → end 0` (empty). A negative `n` OR any
+                // `n >= 2^32` means "drop everything"; both map to the huge
+                // sentinel here, so `cp = count - n` underflows to <0 → end 0.
+                self.emit_clamp_count_to_i32(super::calls_list_helpers::ClampHi::Const(STRING_COUNT_HUGE));
                 wasm!(self.func, {
-                    i32_wrap_i64; local_set(n);
-                    // negative n → i32::MAX so cp = count - n underflows to <0 → end 0 →
-                    // empty, matching native drop_end (n as usize >= count → end 0).
-                    local_get(n); i32_const(0); i32_lt_s;
-                    if_empty; i32_const(2147483647); local_set(n); end;
+                    local_set(n);
                     local_get(s); call(self.emitter.rt.string.char_count); i32_wrap_i64;
                     local_get(n); i32_sub; local_set(cp); // cp = count - n
                     local_get(cp); i32_const(0); i32_lt_s;
@@ -555,13 +594,18 @@ impl FuncCompiler<'_> {
                 self.emit_expr(&args[0]);
                 wasm!(self.func, { local_set(s); });
                 self.emit_expr(&args[1]);
+                // Saturate the i64 codepoint COUNT to [0, i32::MAX] BEFORE the
+                // wrap (C-054). Native `take(n as usize)` is UNSIGNED, so a
+                // negative `n` (huge as usize) AND any `n >= 2^32` mean "the
+                // whole string". A bare `i32_wrap_i64` + sign-check missed the
+                // `2^32`/`2^32+k` cases (they wrap to 0 / a small in-range count
+                // — NON-negative — so the sign-check never fired and the result
+                // was an empty / wrong prefix). The unsigned clamp maps all of
+                // them to the STRING_COUNT_HUGE sentinel, and `byte_of_cp` then
+                // clamps to byte_len → whole string.
+                self.emit_clamp_count_to_i32(super::calls_list_helpers::ClampHi::Const(STRING_COUNT_HUGE));
                 wasm!(self.func, {
-                    i32_wrap_i64; local_set(n);
-                    // negative n → huge (i32::MAX): byte_of_cp clamps to byte_len → whole
-                    // string, matching native `take(n as usize)` (a negative i64 casts to a
-                    // huge usize). NOT clamp-to-0.
-                    local_get(n); i32_const(0); i32_lt_s;
-                    if_empty; i32_const(2147483647); local_set(n); end;
+                    local_set(n);
                     local_get(s); i32_const(0);
                     local_get(s); local_get(n); call(self.emitter.rt.string.utf8_byte_of_cp);
                     call(self.emitter.rt.string.slice);
@@ -577,12 +621,13 @@ impl FuncCompiler<'_> {
                 self.emit_expr(&args[0]);
                 wasm!(self.func, { local_set(s); });
                 self.emit_expr(&args[1]);
+                // Unsigned saturate the i64 COUNT (C-054): native
+                // `drop(n as usize)` treats a negative `n` and any `n >= 2^32`
+                // as "drop everything" (empty). The clamp maps them to the huge
+                // sentinel; `byte_of_cp` then clamps the start to byte_len.
+                self.emit_clamp_count_to_i32(super::calls_list_helpers::ClampHi::Const(STRING_COUNT_HUGE));
                 wasm!(self.func, {
-                    i32_wrap_i64; local_set(n);
-                    // negative n → huge (i32::MAX): byte_of_cp clamps to byte_len → drop
-                    // everything (empty), matching native `drop(n as usize)`.
-                    local_get(n); i32_const(0); i32_lt_s;
-                    if_empty; i32_const(2147483647); local_set(n); end;
+                    local_set(n);
                     local_get(s);
                     local_get(s); local_get(n); call(self.emitter.rt.string.utf8_byte_of_cp);
                     local_get(s); i32_load(0);

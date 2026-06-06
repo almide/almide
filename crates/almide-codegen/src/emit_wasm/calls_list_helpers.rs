@@ -10,6 +10,18 @@ use almide_lang::types::Ty;
 use wasm_encoder::{Function, Instruction, ValType};
 use super::engine::layout::{LIST, list as ll};
 
+/// Upper bound for `emit_clamp_count_to_i32` — the value a too-large `Int`
+/// count saturates to (mirrors native's `min(n, len)` / capacity-ceiling).
+#[derive(Clone, Copy)]
+pub(super) enum ClampHi {
+    /// A runtime list length held in this i32 local (always >= 0).
+    LenLocal(u32),
+    /// A compile-time non-negative element-count ceiling (e.g. `repeat`'s
+    /// byte-budget cap). The relationship to its byte budget is named at the
+    /// call site (`MAX_REPEAT_*` / element size), never a raw literal.
+    Const(i64),
+}
+
 /// Distinguishes the element shapes supported by `emit_list_sort_generic`.
 /// Each variant knows its element size, load/store width, and comparison strategy.
 enum SortKind {
@@ -226,6 +238,146 @@ impl FuncCompiler<'_> {
         None
     }
 
+    /// Narrow an i64 element-COUNT to an i32 SATURATED to `[0, hi]` **before**
+    /// the `i32_wrap_i64` narrowing — the only correct order.
+    ///
+    /// Almide `Int` is i64; list/string sizing arithmetic (alloc size,
+    /// `len - n`, copy bounds) runs in i32. A bare `i32_wrap_i64` of a count
+    /// like `2^32-1`, `2^32`, or a negative `-1` truncates *before* any clamp,
+    /// so the downstream `len - n` underflows (OOB read → trap or a corrupt
+    /// length exposing uninitialized heap), silently no-ops, or — for `chunk`'s
+    /// `i32_div_u` — divides by a wrapped 0.
+    ///
+    /// Native is the oracle, and it treats a count as **UNSIGNED**: it casts the
+    /// i64 to `usize` (`n as usize`) and then does `min(n, len)` (or the
+    /// equivalent `n as usize >= len` short-circuit in `take_end`/`drop_end`).
+    /// A negative i64 has its sign bit set, so as `u64`/`usize` it is enormous
+    /// and saturates to `hi` — NOT to 0. (`take(-1)` returns the WHOLE list,
+    /// `drop(-1)` returns `[]`; `chunk(-1)` groups into one chunk.) The earlier
+    /// `max(count, 0)` lo-clamp was wrong: it mapped `-1` to 0 (empty / div-by-0)
+    /// instead of to `hi`.
+    ///
+    /// So the clamp is a single UNSIGNED minimum, `min_u(count, hi)`, computed on
+    /// the full i64 (mirrors the C-034 `with_capacity` rule and is the same
+    /// operation as `emit_clamp_index_to_len_i32`: a count and an unsigned index
+    /// saturate identically). After it the value is in `[0, hi]` and
+    /// `i32_wrap_i64` is lossless. See C-054.
+    ///
+    /// Stack: `[count_i64]` → `[clamped_i32]`. The non-negative upper bound is
+    /// chosen by `hi`: a runtime list length (`ClampHi::LenLocal`) or a
+    /// compile-time element-count ceiling (`ClampHi::Const`, e.g. `repeat`'s
+    /// byte-budget cap, or `chunk`/`windows`'s `i32::MAX` "huge" sentinel).
+    pub(super) fn emit_clamp_count_to_i32(&mut self, hi: ClampHi) {
+        let count = self.scratch.alloc_i64();
+        wasm!(self.func, { local_set(count); });
+        // min_u(count, hi): `[count, hi, count <_u hi]` selects `count` when it
+        // fits and `hi` otherwise. The comparison is UNSIGNED so a negative i64
+        // (huge as u64) saturates to `hi` — matching native's `n as usize`.
+        // `hi` is non-negative; widening it via `i64_extend_i32_u` is lossless.
+        wasm!(self.func, { local_get(count); });
+        self.emit_push_clamp_hi_i64(&hi);
+        wasm!(self.func, { local_get(count); });
+        self.emit_push_clamp_hi_i64(&hi);
+        wasm!(self.func, {
+            i64_lt_u; select;
+            // Now in [0, hi]: the wrap is lossless.
+            i32_wrap_i64;
+        });
+        self.scratch.free_i64(count);
+    }
+
+    /// Narrow an i64 BYTE/CHAR INDEX to an i32 clamped to `[0, hi]` with SIGNED
+    /// saturation — `(idx.max(0)).min(hi)` — **before** the `i32_wrap_i64`.
+    ///
+    /// This is the SIGNED twin of `emit_clamp_count_to_i32`. It exists because
+    /// `string.slice` is the one op whose native oracle clamps SIGNED, not
+    /// unsigned: `almide_rt_string_slice` does `(start.max(0) as usize).min(len)`
+    /// (and the symmetric expression for `end`), so a NEGATIVE start maps to `0`
+    /// (then `if s >= e {""}` only triggers when the END is also small) — NOT to
+    /// `len`. The unsigned `min_u` used by counts and by `list.slice` (whose
+    /// oracle is `start as usize`) would instead send a negative start to `len`,
+    /// which is the wrong result for `string.slice`. A start `>= 2^32` is huge as
+    /// i64 and `.min(hi)` clamps it to `hi`, so the truncation class is still
+    /// closed. See C-054.
+    ///
+    /// Stack: `[idx_i64]` → `[clamped_i32]` (always in `[0, hi]`).
+    pub(super) fn emit_clamp_count_signed_i32(&mut self, hi: ClampHi) {
+        let idx = self.scratch.alloc_i64();
+        wasm!(self.func, {
+            local_set(idx);
+            // lo-clamp: max(idx, 0). `[idx, 0, idx >= 0]` selects `idx` when
+            // non-negative and `0` for a negative i64 (matches `idx.max(0)`).
+            local_get(idx); i64_const(0);
+              local_get(idx); i64_const(0); i64_ge_s; select;
+            local_set(idx);
+        });
+        // hi-clamp: min(idx, hi). `idx` is now non-negative, so signed and
+        // unsigned compare agree; `i64_le_s` is fine.
+        wasm!(self.func, { local_get(idx); });
+        self.emit_push_clamp_hi_i64(&hi);
+        wasm!(self.func, { local_get(idx); });
+        self.emit_push_clamp_hi_i64(&hi);
+        wasm!(self.func, {
+            i64_le_s; select;
+            i32_wrap_i64;
+        });
+        self.scratch.free_i64(idx);
+    }
+
+    /// Push the clamp ceiling as an i64 (non-negative).
+    fn emit_push_clamp_hi_i64(&mut self, hi: &ClampHi) {
+        match *hi {
+            ClampHi::LenLocal(idx) => { wasm!(self.func, { local_get(idx); i64_extend_i32_u; }); }
+            ClampHi::Const(n) => { wasm!(self.func, { i64_const(n); }); }
+        }
+    }
+
+    /// Clamp an i64 list INDEX (interpreted UNSIGNED, matching native's
+    /// `i as usize`) to `[0, len]` before narrowing — `min_u(i, len)`. A
+    /// negative i64 has its sign bit set, so as u64 it is huge and saturates
+    /// to `len` (native `(neg as usize).min(len)` also gives `len`); a count
+    /// past 2^32 no longer wraps to a small in-range index. Used by `insert`,
+    /// whose out-of-range index appends at the end (C-054).
+    ///
+    /// Stack: `[idx_i64]` → `[clamped_i32]` (always in `[0, len]`).
+    pub(super) fn emit_clamp_index_to_len_i32(&mut self, len_local: u32) {
+        let idx = self.scratch.alloc_i64();
+        wasm!(self.func, {
+            local_set(idx);
+            local_get(idx);
+            local_get(len_local); i64_extend_i32_u;
+              local_get(idx); local_get(len_local); i64_extend_i32_u; i64_lt_u; select;
+            i32_wrap_i64;
+        });
+        self.scratch.free_i64(idx);
+    }
+
+    /// Narrow an i64 list INDEX (interpreted UNSIGNED) for a bounds-checked op
+    /// (`set` / `get_or` / `remove_at` whose OOB case is a no-op / default).
+    /// Writes the in-bounds predicate `(idx_u < len)` — computed on the FULL
+    /// i64, so an index >= 2^32 is correctly rejected instead of wrapping to a
+    /// small in-range index — into `in_bounds_local`, and leaves the narrowed
+    /// idx SATURATED to `[0, len]` on the stack (so any address arithmetic is
+    /// in-range even when out of bounds; the flag gates the actual access).
+    /// See C-054.
+    ///
+    /// Stack: `[idx_i64]` → `[saturated_idx_i32]`; sets `in_bounds_local: i32`.
+    pub(super) fn emit_checked_index_i32(&mut self, len_local: u32, in_bounds_local: u32) {
+        let idx = self.scratch.alloc_i64();
+        wasm!(self.func, {
+            local_set(idx);
+            // in_bounds = idx_u < len_u  (on the full i64, no truncation)
+            local_get(idx); local_get(len_local); i64_extend_i32_u; i64_lt_u;
+            local_set(in_bounds_local);
+            // saturated idx = min_u(idx, len) so addressing never goes OOB
+            local_get(idx);
+            local_get(len_local); i64_extend_i32_u;
+              local_get(idx); local_get(len_local); i64_extend_i32_u; i64_lt_u; select;
+            i32_wrap_i64;
+        });
+        self.scratch.free_i64(idx);
+    }
+
     /// Copy one element from [stack: dst_addr, src_addr] based on type.
     pub(super) fn emit_elem_copy(&mut self, ty: &Ty) {
         match values::ty_to_valtype(ty) {
@@ -293,7 +445,14 @@ impl FuncCompiler<'_> {
     fn emit_sort_le_cmp(&mut self, kind: &SortKind) {
         match kind {
             SortKind::Int => { wasm!(self.func, { i64_le_s; }); }
-            SortKind::Float => { wasm!(self.func, { f64_le; }); }
+            // Float sort uses IEEE-754 totalOrder, NOT `f64_le` (which is false
+            // for any NaN pair and treats -0.0 == +0.0), so it matches native
+            // `f64::total_cmp` byte-for-byte: `total_cmp(a,b) <= 0` ⟺ a <= b.
+            // C-055.
+            SortKind::Float => {
+                self.emit_ord_cmp3(&Ty::Float);
+                wasm!(self.func, { i32_const(0); i32_le_s; });
+            }
             SortKind::String => {
                 wasm!(self.func, { call(self.emitter.rt.string.cmp); i32_const(0); i32_le_s; });
             }

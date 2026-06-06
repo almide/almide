@@ -284,18 +284,24 @@ impl FuncCompiler<'_> {
                 let es = values::byte_size(&elem_ty) as i32;
                 let xs = self.scratch.alloc_i32();
                 let idx = self.scratch.alloc_i32();
+                let in_bounds = self.scratch.alloc_i32();
                 let closure = self.scratch.alloc_i32();
                 let len = self.scratch.alloc_i32();
                 let dst = self.scratch.alloc_i32();
                 let copy_i = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
-                wasm!(self.func, { local_set(xs); });
+                wasm!(self.func, { local_set(xs); local_get(xs); i32_load(0); local_set(len); });
                 self.emit_expr(&args[1]);
-                wasm!(self.func, { i32_wrap_i64; local_set(idx); });
+                // idx = min_u(i, len); in_bounds = (i_u < len) on the full i64.
+                // Native `list.update` is a no-op when i is OOB AND does NOT
+                // call `f` (the `if let Some` body is skipped); a huge/negative
+                // i64 must take that path, not wrap to a small in-range slot
+                // and run f on the wrong element (C-054).
+                self.emit_checked_index_i32(len, in_bounds);
+                wasm!(self.func, { local_set(idx); });
                 self.emit_expr(&args[2]);
                 wasm!(self.func, {
                     local_set(closure);
-                    local_get(xs); i32_load(0); local_set(len);
                     // Alloc copy
                     i32_const(list_hdr); local_get(len); i32_const(es); i32_mul; i32_add;
                     call(self.emitter.rt.alloc); local_set(dst);
@@ -315,8 +321,11 @@ impl FuncCompiler<'_> {
                       br(0);
                     end; end;
                 });
-                // Replace dst[idx] with f(dst[idx])
+                // Replace dst[idx] with f(dst[idx]) — only when in bounds.
+                // Native skips both the write AND the f-call on OOB.
                 wasm!(self.func, {
+                    local_get(in_bounds);
+                    if_empty;
                     local_get(dst); i32_const(list_data_off); i32_add;
                     local_get(idx); i32_const(es); i32_mul; i32_add;
                     // Call f(dst[idx])
@@ -330,11 +339,12 @@ impl FuncCompiler<'_> {
                 });
                 self.emit_closure_call(&elem_ty, &elem_ty);
                 self.emit_elem_store(&elem_ty);
-                wasm!(self.func, { local_get(dst); });
+                wasm!(self.func, { end; local_get(dst); });
                 self.scratch.free_i32(copy_i);
                 self.scratch.free_i32(dst);
                 self.scratch.free_i32(len);
                 self.scratch.free_i32(closure);
+                self.scratch.free_i32(in_bounds);
                 self.scratch.free_i32(idx);
                 self.scratch.free_i32(xs);
             }

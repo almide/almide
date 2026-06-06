@@ -204,6 +204,34 @@ impl Value {
         }
         Some(a.len().cmp(&b.len()))
     }
+
+    /// TOTAL order used by the list ordering ops (`list.sort`/`min`/`max`/
+    /// `sort_by`) — distinct from `partial_cmp_val`, which the SCALAR `<`/`>`
+    /// operators use and which keeps IEEE partiality for NaN (C-049). Here
+    /// Float compares by IEEE-754 totalOrder (`f64::total_cmp`: NaN at the top,
+    /// `-0.0 < +0.0`), mirroring native's `_float` runtime variants and the
+    /// wasm sign-magnitude bit trick, so the 3-way oracle agrees on
+    /// `List[Float]` ordering (C-055). Returns `None` only for genuinely
+    /// incomparable shapes (the sort then reports a non-comparable abort).
+    pub fn total_cmp_val(&self, other: &Value) -> Option<std::cmp::Ordering> {
+        use Value::*;
+        match (self, other) {
+            (Float(a), Float(b)) => Some(a.total_cmp(b)),
+            (List(a), List(b)) => Self::total_cmp_seq(a, b),
+            (Tuple(a), Tuple(b)) => Self::total_cmp_seq(a, b),
+            _ => self.partial_cmp_val(other),
+        }
+    }
+
+    fn total_cmp_seq(a: &[Value], b: &[Value]) -> Option<std::cmp::Ordering> {
+        for (x, y) in a.iter().zip(b.iter()) {
+            match x.total_cmp_val(y)? {
+                std::cmp::Ordering::Equal => continue,
+                ord => return Some(ord),
+            }
+        }
+        Some(a.len().cmp(&b.len()))
+    }
 }
 
 // ── Display: the bare `println` / Display form ──────────────────
