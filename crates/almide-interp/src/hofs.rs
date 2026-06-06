@@ -386,13 +386,13 @@ impl<'a> Interpreter<'a> {
             keyed.push((key, item));
         }
         // Stable sort by key. `slice::sort_by` is stable (mirrors native
-        // `sort_by_key`); compare keys with the same total order the backends'
-        // `Ord` keys use (`Value::partial_cmp_val`: Int/Bool/String → natural
-        // `cmp`). Incomparable keys (only the can't-actually-compile Float case)
-        // collapse to `Equal`, which under a stable sort leaves input order — no
-        // panic, no spurious vote.
+        // `sort_by_key`); compare keys with the same TOTAL order the backends
+        // use (`total_cmp_val`: Int/Bool/String → natural `cmp`, Float →
+        // IEEE-754 totalOrder so a Float key now sorts byte-identically to the
+        // native `_float` variant and the wasm bit-trick — C-055). Genuinely
+        // incomparable keys collapse to `Equal` (stable → input order).
         keyed.sort_by(|(ka, _), (kb, _)| {
-            ka.partial_cmp_val(kb).unwrap_or(std::cmp::Ordering::Equal)
+            ka.total_cmp_val(kb).unwrap_or(std::cmp::Ordering::Equal)
         });
         Flow::val(Value::list(keyed.into_iter().map(|(_, item)| item).collect()))
     }
@@ -693,6 +693,9 @@ impl<'a> Interpreter<'a> {
                 _ => Flow::Abort("internal: list.concat bad args".into()),
             }),
             ("list", "sum") => Some(self.list_sum(args)),
+            ("list", "product") => Some(self.list_product(args)),
+            ("list", "min") => Some(self.list_min_max(args, false)),
+            ("list", "max") => Some(self.list_min_max(args, true)),
             ("list", "join") => Some(self.list_join(args)),
             ("list", "sort") => Some(self.list_sort(args)),
             ("list", "enumerate") => Some(match args.first().and_then(|v| v.as_iter_items()) {
@@ -845,6 +848,38 @@ impl<'a> Interpreter<'a> {
         }
     }
 
+    /// `list.product` — two's-complement WRAPPING fold (identity 1), mirroring
+    /// the native `almide_rt_list_product` (`fold(1, wrapping_mul)`) and the
+    /// wasm `i64.mul` accumulator. The wrapping fold is the language's
+    /// integer-overflow law (C-056); std `.product()` would diverge under
+    /// debug overflow-checks. `list.product`'s stdlib type is `List[Int]`, so
+    /// the Float arm is unreachable in practice but kept symmetric with
+    /// `list_sum` for non-typed/error-recovery IR.
+    fn list_product(&mut self, args: &[Value]) -> Flow {
+        match args.first().and_then(|v| v.as_iter_items()) {
+            Some(items) => {
+                if items.iter().all(|v| matches!(v, Value::Int(_))) {
+                    let p: i64 = items
+                        .iter()
+                        .map(|v| if let Value::Int(n) = v { *n } else { 1 })
+                        .fold(1i64, |a, b| a.wrapping_mul(b));
+                    Flow::val(Value::Int(p))
+                } else {
+                    let p: f64 = items
+                        .iter()
+                        .map(|v| match v {
+                            Value::Float(f) => *f,
+                            Value::Int(n) => *n as f64,
+                            _ => 1.0,
+                        })
+                        .product();
+                    Flow::val(Value::Float(p))
+                }
+            }
+            None => Flow::Abort("internal: list.product on non-list".into()),
+        }
+    }
+
     fn list_join(&mut self, args: &[Value]) -> Flow {
         match (args.first().and_then(|v| v.as_iter_items()), args.get(1)) {
             (Some(items), Some(Value::Str(sep))) => {
@@ -859,8 +894,12 @@ impl<'a> Interpreter<'a> {
         match args.first().and_then(|v| v.as_iter_items()) {
             Some(mut items) => {
                 let mut ok = true;
+                // TOTAL order (C-055): Float compares by `total_cmp`, matching
+                // the backends' `List[Float]` totalOrder. `partial_cmp_val`
+                // would leave NaNs in place and break agreement with native ==
+                // wasm.
                 items.sort_by(|a, b| {
-                    a.partial_cmp_val(b).unwrap_or_else(|| {
+                    a.total_cmp_val(b).unwrap_or_else(|| {
                         ok = false;
                         std::cmp::Ordering::Equal
                     })
@@ -872,6 +911,33 @@ impl<'a> Interpreter<'a> {
                 }
             }
             None => Flow::Abort("internal: list.sort on non-list".into()),
+        }
+    }
+
+    /// `list.min` / `list.max` over a totally-ordered element list → Option[A].
+    /// Float uses totalOrder (`total_cmp_val`), so NaN is the max and `-0.0`
+    /// the lesser of the two zeros — agreeing with the backends' `_float`
+    /// runtime variants and the scalar-`float.min`/`max` asymmetry (those keep
+    /// C-049 NaN-ignoring). Empty → none. C-055.
+    fn list_min_max(&mut self, args: &[Value], want_max: bool) -> Flow {
+        match args.first().and_then(|v| v.as_iter_items()) {
+            Some(items) => {
+                let mut best: Option<Value> = None;
+                for v in items {
+                    let take = match &best {
+                        None => true,
+                        Some(b) => match v.total_cmp_val(b) {
+                            Some(ord) => if want_max { ord.is_gt() } else { ord.is_lt() },
+                            // Non-comparable element: abstain rather than vote
+                            // wrong (a wrong third vote is worse than a skip).
+                            None => return Flow::Unsupported("list.min/max on non-comparable elements".into()),
+                        },
+                    };
+                    if take { best = Some(v); }
+                }
+                Flow::val(Value::Option(best.map(Box::new)))
+            }
+            None => Flow::Abort("internal: list.min/max on non-list".into()),
         }
     }
 }

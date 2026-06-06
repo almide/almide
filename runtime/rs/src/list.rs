@@ -12,9 +12,34 @@ pub fn almide_rt_list_index_of<T: PartialEq>(xs: &[T], x: T) -> Option<i64> { xs
 pub fn almide_rt_list_join(xs: &[String], sep: &str) -> String { xs.join(sep) }
 pub fn almide_rt_list_reverse<A: Clone>(xs: &[A]) -> Vec<A> { xs.iter().rev().cloned().collect() }
 pub fn almide_rt_list_sort<A: Ord + Clone>(xs: &[A]) -> Vec<A> { let mut v = xs.to_vec(); v.sort(); v }
-pub fn almide_rt_list_sum(xs: &[i64]) -> i64 { xs.iter().sum() }
+// Float ordering uses IEEE-754 totalOrder (`f64::total_cmp`): NaN takes its
+// totalOrder position (greatest, after +inf; with a -NaN before -inf) and
+// `-0.0 < +0.0`. `f64` is not `Ord`, so `list.sort`/`min`/`max` on `List[Float]`
+// (and `sort_by` with a Float key) route to these float-specific variants
+// instead of the `Ord`-bounded generics (IntrinsicLoweringPass swaps the
+// symbol). This is the ORDERING twin of the wasm sign-magnitude bit trick and
+// matches the interp's `total_cmp`. NOTE: this list-min/max totalOrder is a
+// DIFFERENT contract from the SCALAR `float.min`/`max`/`math.fmin`/`fmax`,
+// which keep their C-049 NaN-IGNORING semantics. See C-055.
+pub fn almide_rt_list_sort_float(xs: &[f64]) -> Vec<f64> { let mut v = xs.to_vec(); v.sort_by(|a, b| a.total_cmp(b)); v }
+pub fn almide_rt_list_min_float(xs: &[f64]) -> Option<f64> { xs.iter().copied().min_by(|a, b| a.total_cmp(b)) }
+pub fn almide_rt_list_max_float(xs: &[f64]) -> Option<f64> { xs.iter().copied().max_by(|a, b| a.total_cmp(b)) }
+pub fn almide_rt_list_sort_by_float<A: Clone>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> f64>) -> Vec<A> {
+    let f = move |a| f(a);
+    let mut v = xs;
+    v.sort_by(|a, b| f(a.clone()).total_cmp(&f(b.clone())));
+    v
+}
+// `list.sum`/`list.product` follow the language's integer-overflow law:
+// TWO'S-COMPLEMENT WRAPPING at runtime, identical to plain `a + b` / `a * b`
+// (contract C-001/C-047 family) and byte-identical to wasm's `i64.add`/`i64.mul`.
+// Std `Iterator::sum`/`product` would PANIC under `-C overflow-checks` (debug /
+// `cargo test`) yet wrap in release — a profile-dependent split that diverges
+// from wasm. Folding with the explicit `wrapping_*` ops removes that split, so
+// the result is the same on native (any profile) and wasm. See C-056.
+pub fn almide_rt_list_sum(xs: &[i64]) -> i64 { xs.iter().fold(0i64, |a, &b| a.wrapping_add(b)) }
 pub fn almide_rt_list_sum_float(xs: &[f64]) -> f64 { xs.iter().sum() }
-pub fn almide_rt_list_product(xs: &[i64]) -> i64 { xs.iter().product() }
+pub fn almide_rt_list_product(xs: &[i64]) -> i64 { xs.iter().fold(1i64, |a, &b| a.wrapping_mul(b)) }
 pub fn almide_rt_list_product_float(xs: &[f64]) -> f64 { xs.iter().product() }
 pub fn almide_rt_list_min<T: Ord + Clone>(xs: &[T]) -> Option<T> { xs.iter().min().cloned() }
 pub fn almide_rt_list_max<T: Ord + Clone>(xs: &[T]) -> Option<T> { xs.iter().max().cloned() }

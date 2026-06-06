@@ -27,68 +27,50 @@ impl FuncCompiler<'_> {
                 let vt = values::ty_to_valtype(&elem_ty).unwrap_or(ValType::I32);
                 let xs = self.scratch.alloc_i32();
                 let idx = self.scratch.alloc_i32();
-                // Store xs, i
+                let in_bounds = self.scratch.alloc_i32();
+                let len = self.scratch.alloc_i32();
+                // Store xs, len, i
                 self.emit_expr(&args[0]);
-                wasm!(self.func, { local_set(xs); });
+                wasm!(self.func, { local_set(xs); local_get(xs); i32_load(0); local_set(len); });
                 self.emit_expr(&args[1]); // i: i64
-                wasm!(self.func, { i32_wrap_i64; local_set(idx); });
-                // bounds check: i < 0 || i >= len → default
+                // idx = min_u(i, len); in_bounds = (i_u < len) on the full i64,
+                // so a negative OR a >= 2^32 index returns the default rather
+                // than wrapping to a small in-range slot (C-054). The unsigned
+                // test folds both `i < 0` and `i >= len` into one comparison.
+                self.emit_checked_index_i32(len, in_bounds);
+                wasm!(self.func, { local_set(idx); });
+                // in_bounds ? xs[idx] : default
+                let load_at = |this: &mut Self| {
+                    wasm!(this.func, {
+                        local_get(xs); i32_const(list_data_off); i32_add;
+                        local_get(idx); i32_const(elem_size as i32); i32_mul; i32_add;
+                    });
+                };
                 match vt {
                     ValType::I64 => {
-                        wasm!(self.func, {
-                            local_get(idx); // i
-                            local_get(xs); i32_load(0); // len
-                            i32_ge_u;
-                            local_get(idx); i32_const(0); i32_lt_s;
-                            i32_or;
-                            if_i64;
-                        });
-                        self.emit_expr(&args[2]); // default
-                        wasm!(self.func, {
-                            else_;
-                              local_get(xs); i32_const(list_data_off); i32_add;
-                              local_get(idx); i32_const(elem_size as i32); i32_mul; i32_add;
-                              i64_load(0);
-                            end;
-                        });
+                        wasm!(self.func, { local_get(in_bounds); if_i64; });
+                        load_at(self);
+                        wasm!(self.func, { i64_load(0); else_; });
+                        self.emit_expr(&args[2]);
+                        wasm!(self.func, { end; });
                     }
                     ValType::F64 => {
-                        wasm!(self.func, {
-                            local_get(idx);
-                            local_get(xs); i32_load(0);
-                            i32_ge_u;
-                            local_get(idx); i32_const(0); i32_lt_s;
-                            i32_or;
-                            if_f64;
-                        });
+                        wasm!(self.func, { local_get(in_bounds); if_f64; });
+                        load_at(self);
+                        wasm!(self.func, { f64_load(0); else_; });
                         self.emit_expr(&args[2]);
-                        wasm!(self.func, {
-                            else_;
-                              local_get(xs); i32_const(list_data_off); i32_add;
-                              local_get(idx); i32_const(elem_size as i32); i32_mul; i32_add;
-                              f64_load(0);
-                            end;
-                        });
+                        wasm!(self.func, { end; });
                     }
                     _ => {
-                        wasm!(self.func, {
-                            local_get(idx);
-                            local_get(xs); i32_load(0);
-                            i32_ge_u;
-                            local_get(idx); i32_const(0); i32_lt_s;
-                            i32_or;
-                            if_i32;
-                        });
+                        wasm!(self.func, { local_get(in_bounds); if_i32; });
+                        load_at(self);
+                        wasm!(self.func, { i32_load(0); else_; });
                         self.emit_expr(&args[2]);
-                        wasm!(self.func, {
-                            else_;
-                              local_get(xs); i32_const(list_data_off); i32_add;
-                              local_get(idx); i32_const(elem_size as i32); i32_mul; i32_add;
-                              i32_load(0);
-                            end;
-                        });
+                        wasm!(self.func, { end; });
                     }
                 }
+                self.scratch.free_i32(len);
+                self.scratch.free_i32(in_bounds);
                 self.scratch.free_i32(idx);
                 self.scratch.free_i32(xs);
             }
@@ -97,18 +79,19 @@ impl FuncCompiler<'_> {
                 let elem_ty = self.resolve_list_elem(&args[0], None);
                 let es = values::byte_size(&elem_ty) as i32;
                 let xs = self.scratch.alloc_i32();
-                let n = self.scratch.alloc_i32();
+                let len = self.scratch.alloc_i32();
                 let new_len = self.scratch.alloc_i32();
                 let dst = self.scratch.alloc_i32();
                 let i = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
-                wasm!(self.func, { local_set(xs); });
+                wasm!(self.func, { local_set(xs); local_get(xs); i32_load(0); local_set(len); });
                 self.emit_expr(&args[1]);
+                // new_len = min_u(n, len): take's UNSIGNED `min(n as usize, len)`
+                // IS the clamp, computed on the i64 count before narrowing
+                // (C-054). A negative `n` (huge as usize) saturates to len →
+                // whole list, matching native `take(n as usize)`.
+                self.emit_clamp_count_to_i32(super::calls_list_helpers::ClampHi::LenLocal(len));
                 wasm!(self.func, {
-                    i32_wrap_i64; local_set(n);
-                    // new_len = min(n, len)
-                    local_get(n); local_get(xs); i32_load(0); i32_lt_u;
-                    if_i32; local_get(n); else_; local_get(xs); i32_load(0); end;
                     local_set(new_len);
                     i32_const(list_hdr); local_get(new_len); i32_const(es); i32_mul; i32_add;
                     call(self.emitter.rt.alloc); local_set(dst);
@@ -131,7 +114,7 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(i);
                 self.scratch.free_i32(dst);
                 self.scratch.free_i32(new_len);
-                self.scratch.free_i32(n);
+                self.scratch.free_i32(len);
                 self.scratch.free_i32(xs);
             }
             "drop" => {
@@ -139,21 +122,23 @@ impl FuncCompiler<'_> {
                 let elem_ty = self.resolve_list_elem(&args[0], None);
                 let es = values::byte_size(&elem_ty) as i32;
                 let xs = self.scratch.alloc_i32();
+                let len = self.scratch.alloc_i32();
                 let start = self.scratch.alloc_i32();
                 let new_len = self.scratch.alloc_i32();
                 let dst = self.scratch.alloc_i32();
                 let i = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
-                wasm!(self.func, { local_set(xs); });
+                wasm!(self.func, { local_set(xs); local_get(xs); i32_load(0); local_set(len); });
                 self.emit_expr(&args[1]);
+                // start = min_u(n, len) on the i64 count (C-054); then
+                // new_len = len - start can never underflow. A negative `n`
+                // (huge as usize) saturates to len → drops everything (empty),
+                // matching native `skip(n as usize)`.
+                self.emit_clamp_count_to_i32(super::calls_list_helpers::ClampHi::LenLocal(len));
                 wasm!(self.func, {
-                    i32_wrap_i64; local_set(start);
-                    // start = min(n, len)
-                    local_get(start); local_get(xs); i32_load(0); i32_lt_u;
-                    if_i32; local_get(start); else_; local_get(xs); i32_load(0); end;
                     local_set(start);
                     // new_len = len - start
-                    local_get(xs); i32_load(0); local_get(start); i32_sub;
+                    local_get(len); local_get(start); i32_sub;
                     local_set(new_len);
                     i32_const(list_hdr); local_get(new_len); i32_const(es); i32_mul; i32_add;
                     call(self.emitter.rt.alloc); local_set(dst);
@@ -178,6 +163,7 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(dst);
                 self.scratch.free_i32(new_len);
                 self.scratch.free_i32(start);
+                self.scratch.free_i32(len);
                 self.scratch.free_i32(xs);
             }
             "slice" => {
@@ -195,22 +181,22 @@ impl FuncCompiler<'_> {
                     local_set(xs);
                     local_get(xs); i32_load(0); local_set(len);
                 });
-                self.emit_expr(&args[1]); // start
-                wasm!(self.func, { i32_wrap_i64; local_set(start); });
-                self.emit_expr(&args[2]); // end
+                // Saturate start/end to [0, len] on the i64 index BEFORE
+                // narrowing (C-054), UNSIGNED — native `list.slice` is
+                // `s = start as usize; e = (end as usize).min(len)`, so a
+                // negative/huge index is enormous as usize and `min_u(_, len)`
+                // sends it to len (then the `if end > start` guard empties). A
+                // bare i32_wrap_i64 was wrong for indices >= 2^32 (they wrap to a
+                // small IN-range index). NOTE this is UNSIGNED, unlike
+                // `string.slice` whose oracle clamps SIGNED (`start.max(0)`).
+                //   s = min_u(start,len); e = min_u(end,len);
+                //   if s >= e { [] } else { xs[s..e] }
+                self.emit_expr(&args[1]); // start (i64)
+                self.emit_clamp_count_to_i32(super::calls_list_helpers::ClampHi::LenLocal(len));
+                wasm!(self.func, { local_set(start); });
+                self.emit_expr(&args[2]); // end (i64)
+                self.emit_clamp_count_to_i32(super::calls_list_helpers::ClampHi::LenLocal(len));
                 wasm!(self.func, {
-                    i32_wrap_i64; local_set(end);
-                    // Clamp start and end to [0, len] using UNSIGNED comparison so that
-                    // negative indices (huge when unsigned, matching native's i64→usize
-                    // cast) and out-of-range indices saturate to len. Mirrors native:
-                    //   s = start; e = min(end, len); if s >= e { [] } else { xs[s..e] }
-                    // start = min_u(start, len)
-                    local_get(start); local_get(len);
-                      local_get(start); local_get(len); i32_lt_u; select;
-                    local_set(start);
-                    // end = min_u(end, len)
-                    local_get(end); local_get(len);
-                      local_get(end); local_get(len); i32_lt_u; select;
                     local_set(end);
                     // new_len = (end > start) ? end - start : 0
                     local_get(end); local_get(start); i32_sub;
@@ -722,17 +708,29 @@ impl FuncCompiler<'_> {
                 // set(xs, i, val) → List[A]: copy + replace element at i
                 let elem_ty = self.resolve_list_elem(&args[0], None);
                 let es = values::byte_size(&elem_ty) as i32;
+                let val_vt = values::ty_to_valtype(&elem_ty).unwrap_or(ValType::I32);
                 let xs = self.scratch.alloc_i32();
                 let idx = self.scratch.alloc_i32();
+                let in_bounds = self.scratch.alloc_i32();
                 let len = self.scratch.alloc_i32();
                 let dst = self.scratch.alloc_i32();
                 let i = self.scratch.alloc_i32();
+                let val = self.scratch.alloc(val_vt);
                 self.emit_expr(&args[0]);
-                wasm!(self.func, { local_set(xs); });
+                wasm!(self.func, { local_set(xs); local_get(xs); i32_load(0); local_set(len); });
                 self.emit_expr(&args[1]); // i: i64
+                // idx = min_u(i, len); in_bounds = (i_u < len) on the full i64.
+                // Native `list.set` no-ops when i is OOB (`get_mut` → None), so
+                // a huge/negative i64 must take the no-op path, not wrap to a
+                // small in-range index and overwrite the wrong slot (C-054).
+                self.emit_checked_index_i32(len, in_bounds);
+                wasm!(self.func, { local_set(idx); });
+                // Evaluate `val` EAGERLY (native passes it by value before the
+                // call), then store conditionally — so a side-effecting value
+                // expr runs whether or not the index is in bounds.
+                self.emit_expr(&args[2]);
                 wasm!(self.func, {
-                    i32_wrap_i64; local_set(idx);
-                    local_get(xs); i32_load(0); local_set(len);
+                    local_set(val);
                     // Alloc copy
                     i32_const(list_hdr); local_get(len); i32_const(es); i32_mul; i32_add;
                     call(self.emitter.rt.alloc); local_set(dst);
@@ -751,18 +749,20 @@ impl FuncCompiler<'_> {
                       local_get(i); i32_const(1); i32_add; local_set(i);
                       br(0);
                     end; end;
+                    // Overwrite dst[idx] with val — only when in bounds.
+                    local_get(in_bounds);
+                    if_empty;
+                      local_get(dst); i32_const(list_data_off); i32_add;
+                      local_get(idx); i32_const(es); i32_mul; i32_add;
+                      local_get(val);
                 });
-                // Overwrite dst[idx] with val
-                wasm!(self.func, {
-                    local_get(dst); i32_const(list_data_off); i32_add;
-                    local_get(idx); i32_const(es); i32_mul; i32_add;
-                });
-                self.emit_expr(&args[2]);
                 self.emit_elem_store(&elem_ty);
-                wasm!(self.func, { local_get(dst); });
+                wasm!(self.func, { end; local_get(dst); });
+                self.scratch.free(val, val_vt);
                 self.scratch.free_i32(i);
                 self.scratch.free_i32(dst);
                 self.scratch.free_i32(len);
+                self.scratch.free_i32(in_bounds);
                 self.scratch.free_i32(idx);
                 self.scratch.free_i32(xs);
             }
@@ -776,15 +776,14 @@ impl FuncCompiler<'_> {
                 let dst = self.scratch.alloc_i32();
                 let i = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
-                wasm!(self.func, { local_set(xs); });
+                wasm!(self.func, { local_set(xs); local_get(xs); i32_load(0); local_set(old_len); });
                 self.emit_expr(&args[1]);
+                // idx = min_u(i, old_len) on the full i64 (C-054): out-of-range
+                // or negative indices append at the end, mirroring native's
+                // `idx = (i as usize).min(len)`. The old i32_wrap_i64 + i32 min
+                // let an index >= 2^32 wrap to a small in-range insert point.
+                self.emit_clamp_index_to_len_i32(old_len);
                 wasm!(self.func, {
-                    i32_wrap_i64; local_set(idx);
-                    local_get(xs); i32_load(0); local_set(old_len);
-                    // Clamp idx to [0, old_len] (unsigned) so that out-of-range or negative
-                    // indices append at the end. Mirrors native's idx = min(i as usize, len).
-                    local_get(idx); local_get(old_len);
-                      local_get(idx); local_get(old_len); i32_lt_u; select;
                     local_set(idx);
                     // new_len = old_len + 1
                     i32_const(list_hdr); local_get(old_len); i32_const(1); i32_add; i32_const(es); i32_mul; i32_add;
@@ -841,18 +840,21 @@ impl FuncCompiler<'_> {
                 let es = values::byte_size(&elem_ty) as i32;
                 let xs = self.scratch.alloc_i32();
                 let idx = self.scratch.alloc_i32();
+                let in_bounds = self.scratch.alloc_i32();
                 let old_len = self.scratch.alloc_i32();
                 let dst = self.scratch.alloc_i32();
                 let i = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
-                wasm!(self.func, { local_set(xs); });
+                wasm!(self.func, { local_set(xs); local_get(xs); i32_load(0); local_set(old_len); });
                 self.emit_expr(&args[1]);
+                // idx = min_u(i, old_len); in_bounds = (i_u < old_len) on the
+                // full i64. Native is a no-op when i >= len; an index >= 2^32
+                // must take the no-op path, not wrap to a small in-range index
+                // and remove the wrong element (C-054).
+                self.emit_checked_index_i32(old_len, in_bounds);
                 wasm!(self.func, {
-                    i32_wrap_i64; local_set(idx);
-                    local_get(xs); i32_load(0); local_set(old_len);
-                    // Native is a no-op when i >= len (returns the list unchanged). Guard
-                    // with an UNSIGNED compare so negative indices (huge unsigned) are no-ops.
-                    local_get(idx); local_get(old_len); i32_lt_u;
+                    local_set(idx);
+                    local_get(in_bounds);
                     if_i32;
                     // new_len = old_len - 1
                     i32_const(list_hdr); local_get(old_len); i32_const(1); i32_sub; i32_const(es); i32_mul; i32_add;
@@ -897,6 +899,7 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(i);
                 self.scratch.free_i32(dst);
                 self.scratch.free_i32(old_len);
+                self.scratch.free_i32(in_bounds);
                 self.scratch.free_i32(idx);
                 self.scratch.free_i32(xs);
             }
@@ -913,22 +916,30 @@ impl FuncCompiler<'_> {
 
                 let list = self.scratch.alloc_i32();
                 let idx = self.scratch.alloc_i32();
+                let in_bounds = self.scratch.alloc_i32();
+                let len = self.scratch.alloc_i32();
                 let result = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
-                wasm!(self.func, { local_set(list); });
+                wasm!(self.func, { local_set(list); local_get(list); i32_load(0); local_set(len); });
                 self.emit_expr(&args[1]);
-                // Index is always Int (i64) — wrap to i32 for memory addressing.
-                // Check both explicit type and Unknown (which may actually be Int from TupleIndex etc.)
+                // Index is normally Int (i64); a tuple-index residual may arrive
+                // already i32. For the i64 case the bounds check runs on the FULL
+                // i64 (C-054) so a negative or >= 2^32 index returns `none`
+                // instead of wrapping to a small in-range slot. The i32 case
+                // keeps the simple unsigned compare.
                 if matches!(&args[1].ty, Ty::Int) || args[1].ty.is_unresolved() {
-                    wasm!(self.func, { i32_wrap_i64; });
+                    self.emit_checked_index_i32(len, in_bounds);
+                    wasm!(self.func, { local_set(idx); });
+                } else {
+                    wasm!(self.func, {
+                        local_set(idx);
+                        local_get(idx); local_get(len); i32_lt_u; local_set(in_bounds);
+                    });
                 }
                 wasm!(self.func, {
-                    local_set(idx);
-                    // bounds: idx >= len → none(0)
-                    local_get(idx);
-                    local_get(list);
-                    i32_load(0); // len
-                    i32_ge_u;
+                    // bounds: !in_bounds → none(0)
+                    local_get(in_bounds);
+                    i32_eqz;
                     if_i32;
                     i32_const(0); // none
                     else_;
@@ -953,6 +964,8 @@ impl FuncCompiler<'_> {
                     end;
                 });
                 self.scratch.free_i32(result);
+                self.scratch.free_i32(len);
+                self.scratch.free_i32(in_bounds);
                 self.scratch.free_i32(idx);
                 self.scratch.free_i32(list);
             }

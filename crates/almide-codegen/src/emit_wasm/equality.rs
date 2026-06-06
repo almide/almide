@@ -827,9 +827,18 @@ impl FuncCompiler<'_> {
             Ty::Int | Ty::Int64 | Ty::UInt64
             | Ty::Int8 | Ty::Int16 | Ty::Int32
             | Ty::UInt8 | Ty::UInt16 | Ty::UInt32
-            | Ty::Float | Ty::Float64 | Ty::Float32
             | Ty::Bool => {
                 self.emit_scalar_ord_sign(ty);
+            }
+            // Float total order (C-055): `f64` is not totally ordered by the
+            // native `<`/`>` (NaN compares false on every axis, `-0.0 == +0.0`),
+            // so list min/max/sort/sort_by-float-key route through IEEE-754
+            // totalOrder — the ordering twin of native `f64::total_cmp`. Map
+            // each f64 to a monotone i64 KEY (sign-magnitude bit flip) and take
+            // the signed `(a > b) - (a < b)` sign on the keys; NaN lands at the
+            // top, `-NaN` at the bottom, `-0.0 < +0.0`.
+            Ty::Float | Ty::Float64 | Ty::Float32 => {
+                self.emit_float_total_order_sign();
             }
             // Variant comparison reduces to tag order, then field order. The
             // existing variant `emit_cmp_instruction(Lt/Gt)` only compares
@@ -910,6 +919,54 @@ impl FuncCompiler<'_> {
         wasm!(self.func, { i32_sub; });
         self.scratch.free(a, vt);
         self.scratch.free(b, vt);
+    }
+
+    /// IEEE-754 totalOrder sign for two f64s on the stack as `[a, b]`. Maps
+    /// each f64 to a monotone i64 KEY, then takes the signed key sign
+    /// `(ka > kb) - (ka < kb)` ∈ {-1, 0, 1}. The KEY transform is the exact
+    /// twin of `f64::total_cmp` (so native == wasm byte-for-byte):
+    ///
+    /// ```text
+    /// key = bits ^ ((bits >>_s 63) >>_u 1)
+    /// ```
+    ///
+    /// A non-negative bit pattern is unchanged; a negative one has its lower
+    /// 63 bits flipped (sign bit kept), which makes more-negative values sort
+    /// below less-negative ones and places `-0.0` just below `+0.0`. NaN keeps
+    /// its sign-extremal position. See C-055.
+    fn emit_float_total_order_sign(&mut self) {
+        let kb = self.scratch.alloc_i64();
+        let ka = self.scratch.alloc_i64();
+        // [a, b] → key(b) into kb, key(a) into ka.
+        self.emit_f64_total_order_key();
+        wasm!(self.func, { local_set(kb); });
+        self.emit_f64_total_order_key();
+        wasm!(self.func, { local_set(ka); });
+        // sign = (ka > kb) - (ka < kb)
+        wasm!(self.func, {
+            local_get(ka); local_get(kb); i64_gt_s;
+            local_get(ka); local_get(kb); i64_lt_s;
+            i32_sub;
+        });
+        self.scratch.free_i64(ka);
+        self.scratch.free_i64(kb);
+    }
+
+    /// `[f64]` → `[i64 total-order key]`. `key = bits ^ ((bits >>_s 63) >>_u 1)`,
+    /// the same transform `f64::total_cmp` applies. (`>>_s` = arithmetic, `>>_u`
+    /// = logical, per the Rust std source.) Also used by `sort_by` with a Float
+    /// key, which pre-transforms each key so the parallel key array can ride the
+    /// plain i64 storage/compare/swap path (C-055).
+    pub(super) fn emit_f64_total_order_key(&mut self) {
+        let bits = self.scratch.alloc_i64();
+        wasm!(self.func, {
+            i64_reinterpret_f64; local_set(bits);
+            local_get(bits);
+            // mask = (bits >>_s 63) >>_u 1
+            local_get(bits); i64_const(63); i64_shr_s; i64_const(1); i64_shr_u;
+            i64_xor;
+        });
+        self.scratch.free_i64(bits);
     }
 
     /// Option ordering: `None < Some(_)`; two `Some` recurse on the inner type.

@@ -55,6 +55,12 @@ impl NanoPass for IntrinsicLoweringPass {
             map: &'a HashMap<(Sym, Sym), Sym>,
             defaults: &'a HashMap<Sym, DefaultArgs>,
             symbols: &'a HashSet<Sym>,
+            /// Rust target only: `f64` is not `Ord`, so a `List[Float]` ordering
+            /// op routes to a `_float` runtime variant that uses `total_cmp`.
+            /// On wasm the emitter dispatches by method name (the symbol is
+            /// never consumed), and ConcretizeTypes runs AFTER this pass there,
+            /// so types are not yet reliable — hence the swap is Rust-only.
+            route_float_ord: bool,
         }
         impl<'a> Rewriter<'a> {
             fn fill_defaults(&self, symbol: Sym, args: &mut Vec<IrExpr>) {
@@ -64,6 +70,32 @@ impl NanoPass for IntrinsicLoweringPass {
                     if let Some(def_expr) = &defs[idx] {
                         args.push(ast_literal_to_ir_expr(def_expr));
                     }
+                }
+            }
+
+            /// Swap an `Ord`-bounded list ordering symbol for its `total_cmp`
+            /// `_float` variant when the ordered element/key type is `Float`.
+            /// Keyed by the runtime symbol so the (module, func) detail is
+            /// irrelevant. See C-055.
+            fn route_symbol(&self, symbol: Sym, args: &[IrExpr]) -> Sym {
+                if !self.route_float_ord {
+                    return symbol;
+                }
+                let elem_is_float = |list_arg: Option<&IrExpr>| -> bool {
+                    matches!(list_arg.map(|a| &a.ty),
+                        Some(Ty::Applied(TypeConstructorId::List, inner))
+                            if inner.first() == Some(&Ty::Float))
+                };
+                let key_is_float = |fn_arg: Option<&IrExpr>| -> bool {
+                    matches!(fn_arg.map(|a| &a.ty),
+                        Some(Ty::Fn { ret, .. }) if **ret == Ty::Float)
+                };
+                match symbol.as_str() {
+                    "almide_rt_list_sort" if elem_is_float(args.first()) => sym("almide_rt_list_sort_float"),
+                    "almide_rt_list_min" if elem_is_float(args.first()) => sym("almide_rt_list_min_float"),
+                    "almide_rt_list_max" if elem_is_float(args.first()) => sym("almide_rt_list_max_float"),
+                    "almide_rt_list_sort_by" if key_is_float(args.get(1)) => sym("almide_rt_list_sort_by_float"),
+                    _ => symbol,
                 }
             }
         }
@@ -76,6 +108,7 @@ impl NanoPass for IntrinsicLoweringPass {
                         let Some(&symbol) = self.map.get(&(*module, *func)) else { return };
                         let mut args = std::mem::take(args);
                         self.fill_defaults(symbol, &mut args);
+                        let symbol = self.route_symbol(symbol, &args);
                         expr.kind = IrExprKind::RuntimeCall { symbol, args };
                     }
                     CallTarget::Named { name } => {
@@ -96,6 +129,7 @@ impl NanoPass for IntrinsicLoweringPass {
                             let symbol = *name;
                             let mut args = std::mem::take(args);
                             self.fill_defaults(symbol, &mut args);
+                            let symbol = self.route_symbol(symbol, &args);
                             expr.kind = IrExprKind::RuntimeCall { symbol, args };
                             return;
                         }
@@ -106,6 +140,7 @@ impl NanoPass for IntrinsicLoweringPass {
                                 if let Some(&symbol) = self.map.get(&(m, f)) {
                                     let mut args = std::mem::take(args);
                                     self.fill_defaults(symbol, &mut args);
+                                    let symbol = self.route_symbol(symbol, &args);
                                     expr.kind = IrExprKind::RuntimeCall { symbol, args };
                                 }
                             }
@@ -132,6 +167,7 @@ impl NanoPass for IntrinsicLoweringPass {
                         new_args.push(obj);
                         new_args.extend(std::mem::take(args));
                         self.fill_defaults(symbol, &mut new_args);
+                        let symbol = self.route_symbol(symbol, &new_args);
                         expr.kind = IrExprKind::RuntimeCall { symbol, args: new_args };
                     }
                     _ => {}
@@ -142,7 +178,12 @@ impl NanoPass for IntrinsicLoweringPass {
             }
         }
 
-        let mut rw = Rewriter { map: &map, defaults: &defaults, symbols: &symbols };
+        let mut rw = Rewriter {
+            map: &map,
+            defaults: &defaults,
+            symbols: &symbols,
+            route_float_ord: matches!(_target, Target::Rust),
+        };
         for func in &mut program.functions {
             rw.visit_expr_mut(&mut func.body);
         }
