@@ -1,3 +1,4 @@
+// @contract: C-038
 // Cross-target gate for SIZED-INTEGER fields in record / variant construction.
 //
 // `type M = { a: Int8, b: Int }` + `M { a: 5, b: 9 }`: the bare literal `5`

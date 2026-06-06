@@ -1,3 +1,4 @@
+// @contract: C-005
 // fan.map element-Err propagation through an INLINE lambda (vs fan_map_err.almd's
 // named `(x) => step(x)`). The first element fn that returns Err (in list order)
 // makes the whole fan.map produce that Err, which the effect-main termination

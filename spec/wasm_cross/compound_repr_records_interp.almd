@@ -1,3 +1,4 @@
+// @contract: C-009, C-011
 // Cluster-H completion: record / variant / integral-float string interpolation.
 //
 // `"${value}"` renders a record or variant back to its Almide-literal form — the

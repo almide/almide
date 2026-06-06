@@ -1,3 +1,4 @@
+// @contract: C-038
 // Sized-numeric literals in tuple / list / nested / named-record positions must
 // narrow to the declared field width (Int8 -> i8, ...) so native compiles and
 // wasm stores at the right width. Was: native E0308 + wasm silent field corruption.

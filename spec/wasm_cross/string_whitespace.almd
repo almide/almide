@@ -1,3 +1,4 @@
+// @contract: C-021
 // Regression: WASM string.trim / trim_start / trim_end / is_whitespace and the
 // leading/trailing trim in int.parse / float.parse must match native
 // (Rust str::trim* / char::is_whitespace = the Unicode White_Space property, 25

@@ -251,6 +251,15 @@ jobs:
       - name: WASM runtime oracle-pairing registry (every compile_* registered + verified tests exist)
         run: scripts/check-rt-oracle-registry.sh
 
+      - name: Contract ledger traceability (every contract evidenced, every fixture contracted)
+        run: scripts/check-contracts.sh
+
+      - name: Contract README up to date (regenerate and diff)
+        run: |
+          bash docs/contracts/generate-readme.sh > docs/contracts/README.md
+          git diff --exit-code -- docs/contracts/README.md \
+            || { echo "::error::docs/contracts/README.md is stale — run: bash docs/contracts/generate-readme.sh > docs/contracts/README.md"; exit 1; }
+
   # ═══════════════════════════════════════════════
   # Full CI — cross-platform (PRs to main only)
   # ═══════════════════════════════════════════════

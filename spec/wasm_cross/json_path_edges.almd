@@ -1,3 +1,4 @@
+// @contract: C-031
 // Cross-target differential fixture: json get/set/remove_path edge cases.
 //
 // Native `runtime/rs/src/json.rs` path ops are the INFALLIBLE oracle. The WASM

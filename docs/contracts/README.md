@@ -1,0 +1,77 @@
+# Almide Behavior Contracts
+
+> Auto-generated from [contracts.toml](contracts.toml).
+> Run `bash docs/contracts/generate-readme.sh > docs/contracts/README.md` to update.
+>
+> Each contract is a NORMATIVE, observable promise the compiler keeps on BOTH
+> targets (native Rust + wasm32: stdout, stderr, exit code). Native is the oracle;
+> native == wasm is a hard invariant. Every contract is traceable to executable
+> evidence (a `spec/wasm_cross/*.almd` fixture, a differential fuzz, an emit-time
+> Σ-probe, or a Lean theorem) — no claimed behaviour rests on prose alone.
+
+## Change discipline
+
+- **Changing any observable behaviour REQUIRES updating the contract statement
+  AND its evidence in the SAME PR.**
+- A **new** behaviour = a new `C-NNN` + ≥1 fixture.
+- **Removing a divergence** = flip `status` to `active` and drop the flag in the
+  same PR. The `flagged-for-revision` count is a ratchet — it may only go **down**.
+- The gate (`scripts/check-contracts.sh`, CI + lefthook) enforces that every
+  contract has real evidence, every fixture names its contract(s), and the link is
+  bidirectional.
+
+Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
+`fixture` < `fuzz` < `exhaustive` < `lean`. An **active** contract must carry
+≥1 evidence of class ≥ `fixture`.
+
+46 contracts
+
+| ID | Contract | Since | Status | Strongest Evidence | # Fixtures |
+|----|----------|-------|--------|--------------------|-----------:|
+| C-001 | Integer division/modulo by zero is total — it aborts, never traps | 0.24.0 | active | fixture | 3 |
+| C-002 | Signed MIN / -1 overflow aborts, at the TRUE per-width MIN | 0.24.0 | active | fixture | 3 |
+| C-003 | Non-aborting integer div/mod stay byte-identical | 0.24.0 | active | fixture | 1 |
+| C-004 | fan.race / fan.any / fan.map / fan.settle are deterministic by list order | 0.24.0 | active | fixture | 2 |
+| C-005 | fan error propagation surfaces as the unified main-error abort | 0.24.0 | active | fixture | 4 |
+| C-006 | [fan.timeout is the SOLE documented wall-clock divergence (wasm warns)](C-006-fan-timeout-divergence.md) | 0.24.0 | flagged-for-revision | by-construction | 0 |
+| C-007 | Abortable top-level lets evaluate eagerly at startup | 0.24.0 | active | fixture | 2 |
+| C-008 | [Compound interpolation renders the Almide-literal repr (containers)](C-008-009-010-repr.md) | 0.24.0 | active | fixture | 1 |
+| C-009 | [Record / variant / anonymous-record interpolation repr (field sorting)](C-008-009-010-repr.md) | 0.24.0 | active | fixture | 2 |
+| C-010 | [Recursive / generic ADT interpolation repr keyed by instantiation](C-008-009-010-repr.md) | 0.24.0 | active | fixture | 2 |
+| C-011 | Bare-float interpolation Display drops .0; float.to_string keeps it | 0.24.0 | active | fixture | 4 |
+| C-012 | Const-folded non-finite floats emit named constants | 0.24.0 | active | fixture | 1 |
+| C-013 | Map is a compact-ordered-dict: iteration is insertion order | 0.24.0 | active | fixture | 3 |
+| C-014 | Set is insertion-ordered and deterministic | 0.24.0 | active | fixture | 1 |
+| C-015 | Structural deep equality for compound elements and heap values | 0.24.0 | active | fixture | 3 |
+| C-016 | UTF-8 codepoint-aware string ops are byte-identical | 0.24.0 | active | fixture | 2 |
+| C-017 | Empty-pattern count / last_index_of follow native codepoint/byte semantics | 0.24.0 | active | fixture | 1 |
+| C-018 | Unicode string predicates match Rust char methods over the full domain | 0.24.0 | active | exhaustive | 1 |
+| C-019 | rt_string_extra ops (replace_first, strip_*, predicates, cmp) match native | 0.24.0 | active | fixture | 2 |
+| C-020 | Unicode case transforms (to_upper/to_lower/capitalize) are full-Unicode | 0.24.0 | active | exhaustive | 1 |
+| C-021 | Whitespace trim / is_whitespace use the full Unicode White_Space property | 0.24.0 | active | fixture | 1 |
+| C-022 | string.from_bytes is UTF-8-lossy decode (inverse of to_bytes) | 0.24.0 | active | exhaustive | 1 |
+| C-023 | float.to_string is shortest round-tripping decimal (Dragon4) | 0.24.0 | active | fixture | 2 |
+| C-024 | float.parse is correctly-rounded round-to-nearest-even (Clinger AlgorithmM) | 0.24.0 | active | fixture | 1 |
+| C-025 | float.to_fixed is round-half-to-even on the exact binary value | 0.24.0 | active | fuzz(1000) | 1 |
+| C-026 | Vendored-libm trig / exp / log / pow are byte-identical cross-target | 0.24.0 | active | fuzz(4000) | 3 |
+| C-027 | base64 encode/decode (standard + URL-safe) is byte-identical incl. errors | 0.24.0 | active | fixture | 1 |
+| C-028 | int.from_hex mirrors i64::from_str_radix incl. native quirks | 0.24.0 | active | fixture | 1 |
+| C-029 | int.parse error modes byte-match native ParseIntError | 0.24.0 | active | fixture | 1 |
+| C-030 | hex.encode / hex.decode are byte-identical incl. positional error detail | 0.24.0 | active | fixture | 1 |
+| C-031 | json get/set/remove_path edge cases match the infallible native oracle | 0.24.0 | active | fixture | 2 |
+| C-032 | Regex engine is byte-identical to the native engine over a fuzzed grammar | 0.24.0 | active | fuzz(220) | 2 |
+| C-033 | [Value semantics for aliased mutables (copy-on-write) — KNOWN DIVERGENCE](C-033-cow-truth-table.md) | 0.24.0 | flagged-for-revision | doc-only | 0 |
+| C-034 | Out-of-range list ops clamp / no-op gracefully (no OOB heap access) | 0.24.0 | active | fixture | 5 |
+| C-035 | Effect-main errors terminate uniformly: Error: <msg> + exit 1 | 0.24.0 | active | fixture | 3 |
+| C-036 | Records, variants, and pattern matching are byte-identical | 0.24.0 | active | fixture | 4 |
+| C-037 | bytes.read_f16_le decodes IEEE-754 half floats identically | 0.24.0 | active | fixture | 1 |
+| C-038 | Sized-integer literals narrow to the declared field width | 0.24.0 | active | fixture | 2 |
+| C-039 | Type-changing map.map / set.map yield a collection of the new type | 0.24.0 | active | fixture | 2 |
+| C-040 | Codegen emit is host-architecture deterministic | 0.24.0 | active | fixture | 3 |
+| C-041 | Heap / RC primitives honour the Lean-certified Perceus discipline | 0.24.0 | active | lean | 3 |
+| C-042 | fs preopen-dir scan + path resolution is observable-equivalent | 0.24.0 | active | fixture | 1 |
+| C-043 | A user type named Box coexists with recursive-enum heap indirection | 0.24.0 | active | fixture | 1 |
+| C-044 | Result/Option construction and matching are byte-identical | 0.24.0 | active | fixture | 3 |
+| C-045 | A List[String] param works across join / len / index / iteration | 0.24.0 | active | fixture | 3 |
+| C-046 | Record spread-update and cross-module monomorphization are byte-identical | 0.24.0 | active | fixture | 1 |
+

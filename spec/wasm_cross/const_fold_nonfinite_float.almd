@@ -1,3 +1,4 @@
+// @contract: C-012
 // Cross-target gate for const-folded NON-FINITE floats (inf / NaN).
 //
 // A float expression that const-folds to a non-finite value (`1e300 * 1e300`)

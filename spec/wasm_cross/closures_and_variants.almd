@@ -1,3 +1,4 @@
+// @contract: C-036
 // Host-determinism fixture: exercises lifted closures (map/filter/fold) and
 // multiple variants with deep-eq — the two codegen sites whose iteration order
 // was host-dependent. Regression guard for the 32/64-bit codegen divergence.

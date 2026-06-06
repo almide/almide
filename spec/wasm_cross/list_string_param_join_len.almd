@@ -1,3 +1,4 @@
+// @contract: C-045
 // Cross-target gate for a `List[String]` PARAM consumed by both `string.join`
 // and `list.len` (plus index / iteration).
 //

@@ -1,3 +1,4 @@
+// @contract: C-002
 // Narrow-width signed `MIN / -1` overflow (Int8: -128 / -1) aborts with
 // "Error: integer overflow" + exit 1 on BOTH targets. This is the width-trap guard:
 // Int8 lowers to i32 arithmetic in wasm, and `i32.div_s(-128, -1)` is 128 — it does

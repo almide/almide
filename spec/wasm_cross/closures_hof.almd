@@ -1,3 +1,4 @@
+// @contract: C-040
 fn apply(f: (Int) -> Int, x: Int) -> Int = f(x)
 
 fn compose(f: (Int) -> Int, g: (Int) -> Int) -> (Int) -> Int =

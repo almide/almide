@@ -1,3 +1,4 @@
+// @contract: C-015
 // Cross-target structural equality for COMPOUND elements (tuples, nested lists,
 // records). Native uses Rust `PartialEq` (deep) everywhere; WASM previously
 // compared compound elements by POINTER identity, so two distinct heap objects

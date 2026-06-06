@@ -271,9 +271,30 @@ parse_int(s)!                          // unwrap, propagate err (effect fn only)
 - New MSR work goes to Dojo. `research/benchmark/msr/` and `research/benchmark/framework/` are archived.
 - The bridge: Dojo's PR gate will run a task subset as part of this repo's CI (future).
 
+## Behavior Contracts
+
+Every observable cross-target promise (native Rust ⇄ wasm32: stdout, stderr, exit
+code) is a named `[[contract]]` in [docs/contracts/contracts.toml](./docs/contracts/contracts.toml),
+traceable to executable evidence: a `spec/wasm_cross/*.almd` fixture, a
+differential fuzz, an emit-time Σ-probe, or a Lean theorem. The index is
+[docs/contracts/README.md](./docs/contracts/README.md) (auto-generated).
+
+**Changing observable behavior = update the contract ledger in the SAME PR.**
+
+- A new behavior = a new `C-NNN` + ≥1 fixture, and the fixture declares it on a
+  `// @contract: C-NNN` header line (the reverse link is mandatory and symmetric).
+- Removing a divergence = flip `status` to `active`, drop the flag, lower the
+  ratchet — same PR. The `flagged-for-revision` count may only go DOWN.
+- `scripts/check-contracts.sh` (CI `checks` job + a lefthook pre-commit hook)
+  enforces that every contract has evidence of class ≥ fixture, every fixture
+  names its contract(s), and the link is bidirectional. The evidence-class
+  vocabulary is shared with the rt-oracle-registry via
+  `scripts/lib/contract-classes.txt`.
+
 ## Documentation
 
 - 言語仕様: `docs/specs/` — ルールは [docs/specs/CLAUDE.md](./docs/specs/CLAUDE.md)
 - コンパイラ設計: `docs/ARCHITECTURE.md`
 - 言語リファレンス: `docs/CHEATSHEET.md`
 - ロードマップ: `docs/roadmap/`
+- 振る舞い契約: `docs/contracts/` — クロスターゲット等価性の契約台帳

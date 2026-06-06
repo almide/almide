@@ -1,3 +1,4 @@
+// @contract: C-010
 // Cross-target gate for RECURSIVE GENERIC ADT repr (`"${value}"`).
 //
 // A recursive generic type (`Tree[T] = Leaf(T) | Node(Tree[T], Tree[T])`)

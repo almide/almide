@@ -1,3 +1,4 @@
+// @contract: C-037
 // Cross-target differential fixture: bytes.read_f16_le (IEEE-754 half → f64).
 //
 // Native oracle `runtime/rs/src/bytes.rs::f16_bits_to_f64`. The WASM expander

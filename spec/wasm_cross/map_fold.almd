@@ -1,3 +1,4 @@
+// @contract: C-013
 // Regression: wasm map.fold hardcoded the accumulator local/closure-result as
 // i64, so any non-Int accumulator (String/record/list = i32 ptr, Float = f64)
 // failed wasm validation ("expected i64, found i32"). Now threads the init's

@@ -1,3 +1,4 @@
+// @contract: C-026
 // Cross-target equivalence for math.exp / log / log2 / log10.
 //
 // Both targets run the SAME vendored musl-libm reference (native:

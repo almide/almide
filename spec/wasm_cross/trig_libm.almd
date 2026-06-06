@@ -1,3 +1,4 @@
+// @contract: C-026
 // Cross-target equivalence for the vendored-libm trig (math.sin/cos/tan).
 //
 // Both targets run the SAME musl-libm algorithm (native: runtime/rs/src/libm.rs,

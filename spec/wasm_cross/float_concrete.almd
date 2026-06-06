@@ -1,3 +1,4 @@
+// @contract: C-011
 // Cross-target gate for the three DRIVABLE float divergences, against the native
 // oracle (runtime/rs/src/float.rs):
 //   float.to_string : Rust f64 Display (with a ".0" suffix for whole values)
