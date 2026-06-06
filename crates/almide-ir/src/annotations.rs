@@ -1,4 +1,4 @@
-use std::collections::{HashSet, HashMap};
+use std::collections::{HashSet, HashMap, BTreeSet};
 use crate::{VarId, IrExpr};
 
 /// How a variable is stored at the Rust codegen level.
@@ -71,6 +71,18 @@ pub struct CodegenAnnotations {
     /// a plain `move` closure would capture a *copy* and silently drop the mutation.
     /// (Closure v2, P3.)
     pub shared_mut_vars: HashSet<VarId>,
+    /// Heap-typed function-local vars that are BOTH copy-aliased (some other live
+    /// binding shares their heap value via `var b = a`, `let b = a`, `b = r.field`,
+    /// an if/match arm, or a destructure element) AND mutated in place (IndexAssign,
+    /// FieldAssign, ListSwap/Reverse/RotateLeft/CopySlice, or an in-place stdlib
+    /// mutator like `list.push`/`map.insert`). Without a copy-on-write at the
+    /// mutation, the sibling binding would observe the mutation — violating Almide's
+    /// value semantics (RcCow doc, `lib.rs`). Populated by `AliasCowPass`.
+    ///
+    /// A `BTreeSet` (not `HashSet`) so iteration order is deterministic: the WASM
+    /// emitter reads this to gate per-site COW, and a non-deterministic order could
+    /// perturb emit and break the host-deterministic wasm32-vs-native byte gate.
+    pub needs_cow: BTreeSet<VarId>,
 }
 
 impl CodegenAnnotations {
@@ -105,6 +117,12 @@ impl CodegenAnnotations {
     /// (`Rc<Cell<T>>`/`Rc<RefCell<T>>`) on the Rust target. (Closure v2, P3.)
     pub fn is_shared_mut(&self, var: &VarId) -> bool {
         self.shared_mut_vars.contains(var)
+    }
+
+    /// True if `var` is a copy-aliased, in-place-mutated heap local that needs a
+    /// copy-on-write at its mutation sites to preserve value semantics. (AliasCowPass.)
+    pub fn needs_cow(&self, var: &VarId) -> bool {
+        self.needs_cow.contains(var)
     }
 
     pub fn is_module_var(&self, var: &VarId, name: &str) -> bool {
