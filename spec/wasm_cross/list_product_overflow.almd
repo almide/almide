@@ -1,0 +1,27 @@
+// @contract: C-056
+// list.product follows the language's integer-overflow law: two's-complement
+// WRAPPING at runtime — identical to list.sum, to plain `a * b` (C-001/C-047),
+// and to the wasm `i64.mul` accumulator.
+//
+// Before: native `Iterator::product` PANICKED under debug `-C overflow-checks`
+// (exit 101) but wrapped in release and on wasm — a profile-dependent split.
+// Now native folds with `wrapping_mul` (identity 1) so the result is the same on
+// every profile and byte-identical to wasm.
+//
+// i64::MAX = 9223372036854775807.
+
+fn main() -> Unit = {
+  // i64::MAX * 2 wraps to -2 (the fuzzer seed-55512 class).
+  println("max*2: " + int.to_string(list.product([9223372036854775807, 2])))
+
+  // A longer overflowing product still wraps, no panic/trap.
+  println("big:   " + int.to_string(list.product([9223372036854775807, 9223372036854775807, 4])))
+
+  // Empty product = 1; ordinary products are exact.
+  println("empty: " + int.to_string(list.product([])))
+  println("small: " + int.to_string(list.product([2, 3, 4])))
+  println("zero:  " + int.to_string(list.product([7, 0, 9223372036854775807])))
+
+  // Sum at the same boundary wraps the same way (consistency anchor).
+  println("sum:   " + int.to_string(list.sum([9223372036854775807, 9223372036854775807])))
+}

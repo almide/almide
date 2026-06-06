@@ -169,6 +169,23 @@ pub fn infer_borrow_signatures(program: &mut IrProgram) -> HashMap<String, Vec<P
         }
     }
 
+    // Float ordering variants (IntrinsicLoweringPass swaps `..._sort` →
+    // `..._sort_float` etc. for `List[Float]`; C-055). They have the SAME
+    // borrow shape as their base symbol — `sort`/`min`/`max` borrow the slice,
+    // `sort_by` consumes the Vec — so alias the base signature rather than
+    // re-deriving it (the float variants are runtime-only and carry no
+    // `@intrinsic` attr to seed from).
+    for (base, float_var) in [
+        ("almide_rt_list_sort", "almide_rt_list_sort_float"),
+        ("almide_rt_list_min", "almide_rt_list_min_float"),
+        ("almide_rt_list_max", "almide_rt_list_max_float"),
+        ("almide_rt_list_sort_by", "almide_rt_list_sort_by_float"),
+    ] {
+        if let Some(b) = sigs.get(base).cloned() {
+            sigs.insert(float_var.to_string(), b);
+        }
+    }
+
     for _iter in 0..6 {
         // Snapshot current sigs into thread-local so check_needs_ownership can see them.
         SIGS_SNAPSHOT.with(|s| *s.borrow_mut() = sigs.clone());

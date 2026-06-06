@@ -683,3 +683,37 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/list_total_order.almd", class = "fixture" },
 ]
+
+# ── LIST/STRING Int-COUNT & INDEX TRUNCATION (Cluster-B) ─────────────
+[[contract]]
+id        = "C-054"
+title     = "List/string Int counts and indices are i64-clamped before narrowing — no truncation, no OOB"
+statement = "Every list/string op that takes an `Int` (i64) COUNT or INDEX clamps it on the FULL i64 value BEFORE the wasm `i32_wrap_i64` narrowing, so a value at/over the 2^32 boundary can never wrap to a small in-range value, and a NEGATIVE value takes native's unsigned `n as usize` path — never the wrong lo-clamp-to-0 result (the C-034 `with_capacity` rule generalized via named `emit_clamp_count_to_i32` (UNSIGNED `min_u`) / `emit_clamp_count_signed_i32` (SIGNED `max(0).min`) / `emit_clamp_index_to_len_i32` / `emit_checked_index_i32` helpers). For UNSIGNED COUNTS — `list.take`/`drop`/`take_end`/`drop_end`/`chunk`/`windows`, `list.slice` start/end, `string.take`/`drop`/`take_end`/`drop_end`, `string.repeat`, `string.pad_start`/`pad_end` widths — the count is `min(n as usize, hi)`: a NEGATIVE count is enormous as `usize` and saturates to `hi`, so `take(-1)` returns the WHOLE collection, `drop(-1)` returns empty, `chunk(-1)` groups into ONE chunk (was a div-by-0 TRAP), `windows(-1)` is empty (was a wrong non-empty length), and `string.take(s, 2^32)` returns the whole string (was empty); a count `>= 2^32` likewise saturates instead of wrapping to a small in-range count. The size-bounded `repeat`/`chunk`/`windows`/`pad` use an `i32::MAX` sentinel so a genuinely huge count BOTH-FAILS (wasm `memory.grow` / native abort) rather than wasm silently emptying/short-cutting. The ONE exception is `string.slice` start/end, whose native oracle clamps SIGNED (`(x.max(0) as usize).min(len)`): a negative `string.slice` start maps to 0, handled by the separate SIGNED helper. For INDICES — `list.get`/`get_or`/`set`/`insert`/`remove_at`/`swap`/`update` — the index is UNSIGNED (`i as usize`) so a negative or `>= 2^32` index takes native's no-op / default / append path. Previously `list.drop_end(xs, 2^32-1)` returned a corrupt length exposing uninitialized heap, `list.take_end(xs, 2^32-1)` TRAPPED (exit 134), `list.chunk(xs, -1)` TRAPPED on wasm while native made one chunk, and `string.take(s, 2^32)` returned empty on wasm while native returned the whole string — all now byte-identical native == wasm at the 2^31 / 2^32 boundary and for negative counts on small inputs. The fixtures exercise COUNT boundaries (not SIZE boundaries), so no allocation exceeds a few KiB and the result is machine-independent."
+since     = "0.24.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/list_count_index_truncation.almd", class = "fixture" },
+  { path = "spec/wasm_cross/string_count_truncation.almd", class = "fixture" },
+]
+
+# ── FLOAT LIST ORDERING = IEEE-754 totalOrder (Cluster-B) ────────────
+[[contract]]
+id        = "C-055"
+title     = "list.min/max/sort/sort_by over Float use IEEE-754 totalOrder, valid + identical on both targets"
+statement = "`list.sort`/`list.min`/`list.max` over `List[Float]` and `list.sort_by` with a Float key ORDER by IEEE-754 totalOrder (the ordering twin of `f64::total_cmp`): a +NaN takes the greatest totalOrder position (after +inf), a -NaN the least (before -inf), and `-0.0 < +0.0`. This makes Float ordering legal and byte-identical native == wasm, fixing the divergence where native REJECTED it at compile (`f64: Ord` unsatisfied) while wasm either accepted it with NaN-unaware `f64.le` or emitted an INVALID module (the `sort_by` Float-key path stored an f64 into an i64 local → `local.set` validator error). Native routes `List[Float]` ordering to `total_cmp`-based `_float` runtime variants (IntrinsicLowering swaps the symbol); wasm mirrors with the sign-magnitude bit trick inside `emit_ord_cmp3`'s Float arm (`key = bits ^ ((bits >>_s 63) >>_u 1)`, a monotone i64 key) and pre-transforms `sort_by` Float keys onto the i64 storage path; interp mirrors with `f64::total_cmp`. NaN-SIGN CAVEAT: the totalOrder POSITION of a NaN depends on its sign bit, which for a COMPUTED NaN (`0.0/0.0`) is implementation-defined — native/wasm const-fold it to +NaN (top) while the interp's runtime `divsd` yields -NaN (bottom), so the 3-way fixture stays sign-deterministic (uses ±inf, not a divided NaN); the +NaN-at-top positioning is verified native == wasm directly. ASYMMETRY (named deliberately): this list-extremum/ordering totalOrder is a DIFFERENT contract from the SCALAR `float.min`/`float.max`/`math.fmin`/`math.fmax`, which keep their C-049 NaN-IGNORING semantics — a resolved-but-unsupported sort element type is still a clean emit-time ICE, never an invalid module."
+since     = "0.24.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/list_float_total_order.almd", class = "fixture" },
+]
+
+# ── list.product OVERFLOW WRAPS (Cluster-B) ──────────────────────────
+[[contract]]
+id        = "C-056"
+title     = "list.product wraps on i64 overflow, consistent with list.sum and plain `*`"
+statement = "`list.product` follows the language's integer-overflow law — two's-complement WRAPPING at runtime, identical to `list.sum`, to plain `a * b` (C-001/C-047 family), and to the wasm `i64.mul` accumulator. Native folds with `wrapping_mul` (identity 1) so the result is the SAME on any build profile; the old `Iterator::product` PANICKED under debug `-C overflow-checks` (exit 101) while wrapping in release and on wasm — a profile-dependent split now removed. `[i64::MAX, 2]` yields `-2` byte-identically native == wasm; the empty product is `1`. The interp gained a matching `list.product` arm so the 3-way oracle covers it instead of skipping."
+since     = "0.24.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/list_product_overflow.almd", class = "fixture" },
+]
