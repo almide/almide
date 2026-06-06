@@ -328,10 +328,17 @@ fn main() -> Unit = {
 
 #[test]
 fn wasm_string_split_empty() {
+    // Non-matching delimiter ("x") returns [s]; an EMPTY delimiter ("") splits
+    // per CODEPOINT with a leading + trailing empty string (native `s.split("")`).
     assert_cross_target(r#"
 fn main() -> Unit = {
   let parts = string.split("hello", "x")
   println(int.to_string(list.len(parts)) + " " + parts[0])
+  let cps = string.split("ab", "")
+  println(int.to_string(list.len(cps)))
+  println(cps[0] + "|" + cps[1] + "|" + cps[2] + "|" + cps[3])
+  let multi = string.split("日本", "")
+  println(int.to_string(list.len(multi)) + " " + multi[1] + multi[2])
 }
 "#);
 }

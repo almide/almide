@@ -14,8 +14,15 @@ pub fn almide_rt_float_ceil(n: f64) -> f64 { n.ceil() }
 pub fn almide_rt_float_floor(n: f64) -> f64 { n.floor() }
 pub fn almide_rt_float_round(n: f64) -> f64 { n.round() }
 pub fn almide_rt_float_sqrt(n: f64) -> f64 { n.sqrt() }
-pub fn almide_rt_float_min(a: f64, b: f64) -> f64 { a.min(b) }
-pub fn almide_rt_float_max(a: f64, b: f64) -> f64 { a.max(b) }
+// Explicit NaN/tie decision tree — see almide_rt_math_fmin/fmax (math.rs) for
+// why `f64::min`/`f64::max` (llvm.minnum/maxnum, unspecified ±0-tie order)
+// must not be used. Ties return the FIRST operand (C-049).
+pub fn almide_rt_float_min(a: f64, b: f64) -> f64 {
+    if a.is_nan() { b } else if b.is_nan() { a } else if a > b { b } else { a }
+}
+pub fn almide_rt_float_max(a: f64, b: f64) -> f64 {
+    if a.is_nan() { b } else if b.is_nan() { a } else if a < b { b } else { a }
+}
 pub fn almide_rt_float_clamp(n: f64, lo: f64, hi: f64) -> f64 { n.clamp(lo, hi) }
 pub fn almide_rt_float_sign(n: f64) -> f64 { n.signum() }
 pub fn almide_rt_float_to_int(n: f64) -> i64 { n as i64 }

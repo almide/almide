@@ -605,6 +605,74 @@ evidence  = [
   { path = "spec/wasm_cross/cross_module_spread.almd", class = "fixture" },
 ]
 
+# ── NUMERIC TOTALITY: pow / rotate (Cluster-2) ───────────────────────
+[[contract]]
+id        = "C-047"
+title     = "math.pow negative exponent and rotate non-positive width are total — they abort, never trap/wrap"
+statement = "`math.pow(base, exp)` with a NEGATIVE exponent aborts with stderr `Error: negative exponent` + exit 1 on BOTH targets (never the old native `exp as u32` u32-wrap garbage nor the wasm `return 1`); `int.rotate_left`/`rotate_right` with a non-positive `bits` width abort with `Error: rotate width must be positive` + exit 1 (never a native rem-by-zero panic exit 101 nor a wasm `i64.rem_s` trap exit 134). Non-negative pow stays byte-identical including overflow, which wraps under exponentiation-by-squaring (`2^64=0`, `0^0=1`, exponents `>= 2^32` define the full i64 count and never hang)."
+since     = "0.24.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/int_pow_negative_exponent.almd", class = "fixture" },
+  { path = "spec/wasm_cross/int_pow_overflow_wraps.almd", class = "fixture" },
+  { path = "spec/wasm_cross/int_rotate_nonpositive_width.almd", class = "fixture" },
+]
+
+# ── NUMERIC WRAP/ROTATE WIDTH MASK (Cluster-2) ───────────────────────
+[[contract]]
+id        = "C-048"
+title     = "int.wrap_* / int.rotate_* saturate the mask to u64::MAX for bits >= 64"
+statement = "`int.wrap_add`/`wrap_mul`/`rotate_left`/`rotate_right` model an N-bit register: for `bits >= 64` the low-bit mask is `u64::MAX`, matching native `if bits >= 64 { u64::MAX } else { (1u64 << bits) - 1 }`. The wasm emit computed `(1 << bits) - 1` directly, but `i64.shl` masks the shift amount mod 64 so `1 << 64` wrapped to 1 and the mask collapsed to 0 — every `bits >= 64` result silently diverged. Now byte-identical native == wasm via a `bits >= 64 ? -1 : (1<<bits)-1` select."
+since     = "0.24.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/int_wrap_rotate_width.almd", class = "fixture" },
+]
+
+# ── FLOAT IEEE SIGN / NaN-IGNORING MIN-MAX (Cluster-2) ───────────────
+[[contract]]
+id        = "C-049"
+title     = "float.sign is f64::signum; float/math min/max ignore NaN"
+statement = "`float.sign` == Rust `f64::signum` — `copysign(1.0, x)` for every non-NaN x (so `sign(0.0)=1`, `sign(-0.0)=-1`, `sign(±inf)=±1`) and NaN for NaN — NOT the old three-way sign (0 for ±0.0/NaN). `float.max`/`float.min`/`math.fmax`/`math.fmin` IGNORE a NaN operand and return the other, and on ±0 ties ALL FOUR return the FIRST operand (`max(0,-0)=0`, `max(-0,0)=-0`). Both targets implement the same explicit NaN/tie decision tree — never the NaN-propagating raw `f64.max`/`f64.min` wasm instructions, and never the llvm.minnum/maxnum intrinsics, whose unspecified ±0-tie order let x86 `maxsd` return the SECOND operand when inlined. All byte-identical native == wasm == interp."
+since     = "0.24.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/float_sign_minmax_ieee.almd", class = "fixture" },
+]
+
+# ── STRING CODEPOINT GRANULARITY: split("") / rle (Cluster-2) ────────
+[[contract]]
+id        = "C-050"
+title     = "string.split(\"\") and string.run_length_encode are codepoint-granular"
+statement = "`string.split(s, \"\")` splits per CODEPOINT with a leading and trailing empty string — native `s.split(\"\")` yields `[\"\", c0, c1, …, \"\"]` (and `[\"\", \"\"]` for the empty string). `string.run_length_encode` groups runs by CODEPOINT (native `s.chars()`), the run string being the whole codepoint. The wasm emit used to return `[s]` for an empty delimiter (no split) and group rle by BYTE (emitting invalid single-byte strings for multibyte input). Now byte-identical native == wasm, including multibyte."
+since     = "0.24.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/string_split_rle_codepoint.almd", class = "fixture" },
+]
+
+# ── TRANSCENDENTAL: log_gamma vendored-libm bit-exactness (Cluster-2) ─
+[[contract]]
+id        = "C-051"
+title     = "math.log_gamma is bit-identical (both targets use the vendored musl-libm log)"
+statement = "`math.log_gamma` is bit-identical native == wasm: the same Lanczos polynomial, `t = x + 7.5`, and pinned `0.5·ln(2π)` constant, with BOTH `ln` evaluations routed through the vendored musl-libm `log` rather than the platform `f64::ln`. Native previously called the platform `ln`, which drifts ~1 ULP per OS from the wasm vendored port (the StrictMath/fdlibm cross-target-determinism decision shared with sin/cos/exp/log)."
+since     = "0.24.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/math_log_gamma.almd", class = "fixture" },
+]
+
+# ── EMPTY-COLLECTION FOLD CODEGEN COMPLETENESS (Cluster-2) ───────────
+[[contract]]
+id        = "C-052"
+title     = "A fold over an empty collection compiles on both targets (unconstrained element params defaulted)"
+statement = "A `list`/`map`/`set` `.fold` over an EMPTY collection whose element/key/value types the closure never uses is well-typed but under-constrained (Rust would need a turbofish). Codegen defaults those unconstrained closure params (and the empty collection literal's element slots) to a concrete placeholder so the build succeeds on BOTH targets — native rustc no longer reports E0283 and wasm no longer falls back to i32 / refuses at the ConcretizeTypes gate. The collection is empty so the closure is never invoked, making the default unobservable; using the SAME default on both sides keeps native == wasm. Non-empty folds that DO use the params still infer normally."
+since     = "0.24.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/empty_collection_fold.almd", class = "fixture" },
+]
+
 # ── LIST TOTAL-ORDER OPS (min / max / sort / sort_by / unique_by) ─────
 [[contract]]
 id        = "C-053"
