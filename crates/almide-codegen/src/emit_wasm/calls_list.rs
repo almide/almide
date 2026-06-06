@@ -506,12 +506,30 @@ impl FuncCompiler<'_> {
                 self.emit_list_index_of(args);
             }
             "min" | "max" => {
-                // min/max(xs: List[Int]) → Option[Int]
+                // min/max(xs: List[A]) → Option[A], for any totally-ordered A.
+                //
+                // Element handling is type-directed: the element width (stride,
+                // load/store) comes from `byte_size`/`ty_to_valtype`, and the
+                // candidate-vs-best test goes through the shared total-order
+                // emitter `emit_ord_cmp3`. The old code hard-coded i64 (stride 8,
+                // `i64_load`, `i64_lt_s`), which read garbage for every non-Int
+                // element type — String/Tuple/List/Bool — producing wrong
+                // extrema (and an unbounded display loop when a List-pointer was
+                // mis-read as an i64). Matching the native oracle
+                // `xs.iter().min()` (Rust derived `Ord`) needs the real type.
                 let is_max = method == "max";
+                let elem_ty = self.resolve_list_elem(&args[0], None);
+                let es = values::byte_size(&elem_ty) as i32;
+                let vt = values::ty_to_valtype(&elem_ty).unwrap_or(ValType::I32);
                 let xs = self.scratch.alloc_i32();
                 let i = self.scratch.alloc_i32();
-                let best = self.scratch.alloc_i64();
-                let candidate = self.scratch.alloc_i64();
+                let out = self.scratch.alloc_i32();
+                let best = self.scratch.alloc(vt);
+                let candidate = self.scratch.alloc(vt);
+                // Result of `emit_ord_cmp3(candidate, best)` (sign): take the
+                // candidate when it is strictly more extreme than the running
+                // best (`> 0` for max, `< 0` for min).
+                let cmp = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
                 wasm!(self.func, {
                     local_set(xs);
@@ -519,37 +537,47 @@ impl FuncCompiler<'_> {
                     if_i32; i32_const(0); // none
                     else_;
                       // best = xs[0]
-                      local_get(xs); i32_const(list_data_off); i32_add; i64_load(0); local_set(best);
+                      local_get(xs); i32_const(list_data_off); i32_add;
+                });
+                self.emit_load_at(&elem_ty, 0);
+                wasm!(self.func, {
+                      local_set(best);
                       i32_const(1); local_set(i); // i=1
                       block_empty; loop_empty;
                         local_get(i); local_get(xs); i32_load(0); i32_ge_u; br_if(1);
                         local_get(xs); i32_const(list_data_off); i32_add;
-                        local_get(i); i32_const(8); i32_mul; i32_add;
-                        i64_load(0); local_set(candidate);
+                        local_get(i); i32_const(es); i32_mul; i32_add;
                 });
+                self.emit_load_at(&elem_ty, 0);
+                wasm!(self.func, { local_set(candidate); });
+                // cmp = sign(candidate <=> best)
+                wasm!(self.func, { local_get(candidate); local_get(best); });
+                self.emit_ord_cmp3(&elem_ty);
+                wasm!(self.func, { local_set(cmp); });
                 if is_max {
-                    wasm!(self.func, {
-                        local_get(candidate); local_get(best); i64_gt_s;
-                        if_empty; local_get(candidate); local_set(best); end;
-                    });
+                    wasm!(self.func, { local_get(cmp); i32_const(0); i32_gt_s; });
                 } else {
-                    wasm!(self.func, {
-                        local_get(candidate); local_get(best); i64_lt_s;
-                        if_empty; local_get(candidate); local_set(best); end;
-                    });
+                    wasm!(self.func, { local_get(cmp); i32_const(0); i32_lt_s; });
                 }
                 wasm!(self.func, {
+                        if_empty; local_get(candidate); local_set(best); end;
                         local_get(i); i32_const(1); i32_add; local_set(i);
                         br(0);
                       end; end;
-                      // some(best)
-                      i32_const(8); call(self.emitter.rt.alloc); local_set(i);
-                      local_get(i); local_get(best); i64_store(0);
-                      local_get(i);
+                      // some(best): allocate a payload slot sized for the element
+                      // and store best at offset 0 with the matching width.
+                      i32_const(es); call(self.emitter.rt.alloc); local_set(out);
+                      local_get(out); local_get(best);
+                });
+                self.emit_store_at(&elem_ty, 0);
+                wasm!(self.func, {
+                      local_get(out);
                     end;
                 });
-                self.scratch.free_i64(candidate);
-                self.scratch.free_i64(best);
+                self.scratch.free_i32(cmp);
+                self.scratch.free(candidate, vt);
+                self.scratch.free(best, vt);
+                self.scratch.free_i32(out);
                 self.scratch.free_i32(i);
                 self.scratch.free_i32(xs);
             }
@@ -974,13 +1002,55 @@ impl FuncCompiler<'_> {
             "with_capacity" => {
                 // list.with_capacity(cap: Int) -> List[A]
                 // Layout: [len:i32][cap:i32][data...]. Preallocate data space.
+                //
+                // Capacity is only a PERF HINT and the list starts empty
+                // (len=0), so the eagerly-reserved data is clamped to a
+                // memory-safe ceiling. Two failure modes this guards:
+                //   1. `cap*elem_size` overflowing the i32 heap-size argument
+                //      (i32::MAX wrapped mod 2^32 to ~0, so `alloc` reserved
+                //      nothing while the stored cap claimed billions of slots —
+                //      the next alloc overlapped this header → garbage `len`,
+                //      and `push` wrote OOB).
+                //   2. a multi-GB pre-reservation exhausting wasm linear memory
+                //      (`memory.grow` fails → `unreachable` trap), where native
+                //      returns a working empty list.
+                // Clamping the PRE-RESERVATION is observably identical to native
+                // (the list is empty either way); `push` grows past the clamped
+                // cap normally. The STORED cap equals the backing buffer, so
+                // push's `len < cap` fast path never outruns it.
                 let elem_ty = self.resolve_list_elem(&args[0], None);
-                let elem_size = values::byte_size(&elem_ty);
+                let elem_size = values::byte_size(&elem_ty) as i64;
+                // Ceiling on eagerly-reserved DATA bytes: large enough to honor
+                // realistic hints, small enough to never exhaust wasm memory.
+                // SHARED with native — runtime/rs/src/list.rs clamps its eager
+                // Vec reservation to the same named ceiling (C-034), so a huge
+                // hint aborts on NEITHER target.
+                const MAX_WITH_CAPACITY_PREALLOC_BYTES: i64 = 64 * 1024 * 1024; // 64 MiB
+                let max_cap = (MAX_WITH_CAPACITY_PREALLOC_BYTES / elem_size) as i32;
                 let new_ptr = self.scratch.alloc_i32();
                 let cap_local = self.scratch.alloc_i32();
+                let cap64 = self.scratch.alloc_i64();
+                // Evaluate the requested capacity once (it is an i64 Int).
                 self.emit_expr(&args[0]);
-                wasm!(self.func, { i32_wrap_i64; local_set(cap_local); });
-                // alloc: 8 + cap * elem_size
+                wasm!(self.func, { local_set(cap64); });
+                // cap_local = clamp(req, 0, max_cap), done on the i64 value so
+                // the lossy wrap to i32 happens only on an already-safe number.
+                wasm!(self.func, {
+                    local_get(cap64); i64_const(0); i64_lt_s;
+                    if_i32;
+                      i32_const(0);                          // negative → empty
+                    else_;
+                      local_get(cap64);
+                      i32_const(max_cap as i32); i64_extend_i32_s; i64_gt_s;
+                      if_i32;
+                        i32_const(max_cap as i32);           // saturate
+                      else_;
+                        local_get(cap64); i32_wrap_i64;      // fits
+                      end;
+                    end;
+                    local_set(cap_local);
+                });
+                // alloc: hdr + cap * elem_size  (cap is clamped → no overflow)
                 wasm!(self.func, {
                     i32_const(list_hdr);
                     local_get(cap_local); i32_const(elem_size as i32); i32_mul;
@@ -989,10 +1059,11 @@ impl FuncCompiler<'_> {
                     local_set(new_ptr);
                     // len = 0
                     local_get(new_ptr); i32_const(0); i32_store(0);
-                    // cap = requested
+                    // cap = clamped capacity (matches the backing buffer)
                     local_get(new_ptr); local_get(cap_local); i32_store(4);
                     local_get(new_ptr);
                 });
+                self.scratch.free_i64(cap64);
                 self.scratch.free_i32(cap_local);
                 self.scratch.free_i32(new_ptr);
             }

@@ -1,0 +1,34 @@
+// @contract: C-034
+// list.with_capacity(n) starts empty (len=0) on both targets; an over-large n
+// must neither corrupt the list header nor trap. The wasm emitter (1) computed
+// the data byte count `n * elem_size` in i32, so n = i32::MAX wrapped `n*8`
+// mod 2^32 to ~0 — alloc reserved no data while the stored cap claimed billions
+// of slots, so the next allocation overlapped this list's header (garbage `len`)
+// and push wrote OOB; and (2) when it DID try to honor a multi-GB reservation,
+// `memory.grow` failed and trapped (`unreachable`) where native returns an empty
+// list. The eagerly-reserved data is now clamped to a memory-safe ceiling and
+// the stored cap matches the backing buffer — observably identical to native's
+// empty Vec (capacity is only a perf hint; len is 0 either way), and push grows
+// past the clamped cap normally.
+effect fn main() -> Unit = {
+  var a: List[Int] = list.with_capacity(2147483647)
+  // A second over-large reservation in the SAME program (the multi-GB-grow
+  // trap surface): must not exhaust wasm memory.
+  var huge: List[String] = list.with_capacity(2147483647)
+  var b: List[String] = list.with_capacity(5)
+  var c: List[Int] = list.with_capacity(0)
+  println("a=${a}")
+  println("huge=${huge}")
+  println("b=${b}")
+  println("c=${c}")
+  // push after a huge requested cap must still grow correctly (clamped cap is
+  // consistent with the backing buffer, so the fast path never outruns it).
+  list.push(a, 1)
+  list.push(a, 2)
+  list.push(a, 3)
+  list.push(b, "x")
+  list.push(huge, "y")
+  println("a2=${a}")
+  println("b2=${b}")
+  println("huge2=${huge}")
+}

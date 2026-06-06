@@ -1032,6 +1032,32 @@ impl FuncCompiler<'_> {
             IrPattern::Wildcard => {
                 false
             }
+            // A literal nested inside a container constructor, e.g.
+            // `some("target")`, `ok(0)`, `err("EOF")`. The container guard
+            // (`Some`/`Ok`/`Err`) only checked the tag/non-null; the inner
+            // literal equality was NEVER emitted, so wasm matched ANY
+            // `some(_)`/`ok(_)`/`err(_)` — silently wrong for every
+            // string/int-dispatching match (e.g. balanced-parens on wasm
+            // matched `(` against `[`). Load the inner value and compare it to
+            // the literal with the shared type-directed equality, then emit the
+            // body only on a match.
+            IrPattern::Literal { expr: lit_expr } => {
+                wasm!(self.func, { local_get(container_scratch); });
+                self.emit_load_at(inner_ty, inner_offset);
+                self.emit_expr(lit_expr);
+                let inner_ty_c = inner_ty.clone();
+                self.emit_eq_typed(&inner_ty_c);
+                let bt = values::block_type(result_ty);
+                self.func.instruction(&Instruction::If(bt));
+                let lit_guard = self.depth_push();
+                self.emit_arm_body_or_guard(arm, arms, outer_scratch, subject_ty, result_ty, idx, is_last);
+                wasm!(self.func, { else_; });
+                if is_last { wasm!(self.func, { unreachable; }); }
+                else { self.emit_match_arms(arms, outer_scratch, subject_ty, result_ty, idx + 1); }
+                self.depth_pop(lit_guard);
+                wasm!(self.func, { end; });
+                true // body was emitted conditionally
+            }
             IrPattern::Tuple { elements } => {
                 // Inner value is a tuple pointer
                 let inner_scratch = self.scratch.alloc_i32();

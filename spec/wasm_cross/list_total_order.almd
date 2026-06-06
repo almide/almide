@@ -1,0 +1,59 @@
+// @contract: C-053
+// Type-directed total order for list.min/max/sort/sort_by/unique_by.
+//
+// Before: the wasm min/max emitter hard-coded an i64 element load (stride 8),
+// so String/Tuple/List/Bool elements were read as garbage — wrong extrema, and
+// a List-pointer mis-read as an i64 made the result display loop forever. sort
+// ICEd on Bool/Tuple; sort_by mistook a Bool key (i32 0/1) for a String pointer
+// and fed it to string.cmp; unique_by hard-coded the key fn return as i64 and
+// trapped `indirect call type mismatch` for a Bool key.
+//
+// After: every ordering routes through `emit_ord_cmp3` (the ordering twin of
+// `emit_eq_typed`), matching native's derived `Ord` (`xs.iter().min()` etc.).
+effect fn main() -> Unit = {
+  // ── min / max across the type lattice ──
+  println("i_min=${list.min([5, 2, 8, 2, 1])}")
+  println("i_max=${list.max([5, 2, 8, 2, 1])}")
+  // i64 extremes — the field must not be truncated to 0
+  println("i_minx=${list.min([-9223372036854775808, 0, 9223372036854775807])}")
+  println("i_maxx=${list.max([-9223372036854775808, 0, 9223372036854775807])}")
+  println("b_min=${list.min([true, false, true])}")
+  println("b_max=${list.max([true, false, true])}")
+  println("s_min=${list.min(["banana", "apple", "cherry"])}")
+  println("s_max=${list.max(["zebra", "apple", "mango"])}")
+  // Tuple: lexicographic, incl. an i64::MIN field that must read correctly
+  println("t_min=${list.min([(2, "b"), (1, "z"), (1, "a")])}")
+  println("t_max=${list.max([(2, "b"), (1, "z"), (1, "a")])}")
+  println("tb_max=${list.max([(true, false), (true, true), (false, true)])}")
+  println("ti_max=${list.max([(-9223372036854775808, false), (256, true)])}")
+  // nested List: lexicographic with shorter-first prefix tiebreak
+  println("l_min=${list.min([[1, 2], [1], [1, 2, 3], [0, 9]])}")
+  println("l_max=${list.max([[1, 2], [1], [1, 2, 3], [0, 9]])}")
+  println("ls_min=${list.min([["b"], ["a", "z"], ["a"]])}")
+  // Option: none < some
+  println("o_min=${list.min([some(5), none, some(2)])}")
+  println("o_max=${list.max([some(5), none, some(2)])}")
+  // empty → none
+  let e: List[Int] = []
+  println("e_min=${list.min(e)}")
+
+  // ── sort across the type lattice ──
+  println("s_int=${list.sort([5, 2, 8, 1, 2])}")
+  println("s_str=${list.sort(["banana", "apple", "cherry"])}")
+  println("s_bool=${list.sort([true, false, true, false])}")
+  println("s_tup=${list.sort([(2, "b"), (1, "z"), (1, "a")])}")
+  println("s_lint=${list.sort([[1, 2], [1], [1, 2, 3], [0, 9]])}")
+  println("s_opt=${list.sort([some(5), none, some(2), none])}")
+
+  // ── sort_by with various key types (Bool / String / Int keys) ──
+  println("sb_bool=${list.sort_by([3, 1, 2, 4], ((x) => x % 2 == 0))}")
+  println("sb_str=${list.sort_by([3, 1, 20], ((x) => int.to_string(x)))}")
+  println("sb_len=${list.sort_by(["bbb", "a", "cc"], ((s) => string.len(s)))}")
+  println("sb_bool2=${list.sort_by([true, false, true, false, true], ((b) => b))}")
+
+  // ── unique_by with various key types ──
+  println("u_bool=${list.unique_by([1, 2, 3], ((x) => true))}")
+  println("u_parity=${list.unique_by([1, 2, 3, 4, 5], ((x) => x % 2 == 0))}")
+  println("u_modk=${list.unique_by([10, 21, 32, 43], ((x) => x % 10))}")
+  println("u_id=${list.unique_by([3, 1, 3, 2, 1], ((x) => x))}")
+}

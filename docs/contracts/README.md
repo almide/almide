@@ -24,7 +24,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 `fixture` < `fuzz` < `exhaustive` < `lean`. An **active** contract must carry
 ≥1 evidence of class ≥ `fixture`.
 
-52 contracts
+53 contracts
 
 | ID | Contract | Since | Status | Strongest Evidence | # Fixtures |
 |----|----------|-------|--------|--------------------|-----------:|
@@ -61,9 +61,9 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-031 | json get/set/remove_path edge cases match the infallible native oracle | 0.24.0 | active | fixture | 2 |
 | C-032 | Regex engine is byte-identical to the native engine over a fuzzed grammar | 0.24.0 | active | fuzz(220) | 2 |
 | C-033 | [Value semantics for aliased mutables (copy-on-write)](C-033-cow-truth-table.md) | 0.24.0 | active | fixture | 1 |
-| C-034 | Out-of-range list ops clamp / no-op gracefully (no OOB heap access) | 0.24.0 | active | fixture | 5 |
+| C-034 | Out-of-range list ops clamp / no-op gracefully (no OOB heap access) | 0.24.0 | active | fixture | 6 |
 | C-035 | Effect-main errors terminate uniformly: Error: <msg> + exit 1 | 0.24.0 | active | fixture | 3 |
-| C-036 | Records, variants, and pattern matching are byte-identical | 0.24.0 | active | fixture | 4 |
+| C-036 | Records, variants, and pattern matching are byte-identical | 0.24.0 | active | fixture | 5 |
 | C-037 | bytes.read_f16_le decodes IEEE-754 half floats identically | 0.24.0 | active | fixture | 1 |
 | C-038 | Sized-integer literals narrow to the declared field width | 0.24.0 | active | fixture | 2 |
 | C-039 | Type-changing map.map / set.map yield a collection of the new type | 0.24.0 | active | fixture | 2 |
@@ -80,4 +80,5 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-050 | string.split(\ | 0.24.0 | active | fixture | 1 |
 | C-051 | math.log_gamma is bit-identical (both targets use the vendored musl-libm log) | 0.24.0 | active | fixture | 1 |
 | C-052 | A fold over an empty collection compiles on both targets (unconstrained element params defaulted) | 0.24.0 | active | fixture | 1 |
+| C-053 | list.min/max/sort/sort_by/unique_by are type-directed and total, native == wasm | 0.24.0 | active | fixture | 1 |
 
