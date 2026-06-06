@@ -1109,3 +1109,42 @@ fn map_with_closure_value_allowed() {
         "effect fn main() -> Unit = {\n  var m: Map[String, () -> Unit] = map.new()\n  map.insert(m, \"a\", () => {})\n}"
     );
 }
+
+#[test]
+fn enum_name_record_construction_rejected() {
+    // Constructing a record literal via the ENUM TYPE name (not a case name) is a
+    // category error. The two targets disagreed (native rustc leaked E0574, WASM
+    // accepted it and mis-constructed the value with an empty field), so reject it
+    // at typecheck on both with a proper diagnostic. (E017)
+    let errs = errors(
+        "type V = Tag(Float) | Named { who: String }\nfn main() -> Unit = {\n  let v = V { who: \"x\" }\n  println(\"${v}\")\n}"
+    );
+    assert!(errs.iter().any(|e| e.contains("enum type 'V'") && e.contains("record syntax")),
+        "should reject `V {{ who: ... }}` on the enum type name, got: {:?}", errs);
+}
+
+#[test]
+fn enum_name_record_construction_hint_lists_cases() {
+    // The hint must name the available record-variant case so the fix is obvious.
+    let hints = error_hints(
+        "type V = Tag(Float) | Named { who: String }\nfn main() -> Unit = {\n  let v = V { who: \"x\" }\n  println(\"${v}\")\n}"
+    );
+    assert!(hints.iter().any(|h| h.contains("Named")),
+        "hint should mention the `Named` case, got: {:?}", hints);
+}
+
+#[test]
+fn record_type_construction_still_allowed() {
+    // A legitimate record TYPE (not an enum) must still construct fine.
+    has_no_errors(
+        "type Point = { x: Int, y: Int }\nfn main() -> Unit = {\n  let p = Point { x: 1, y: 2 }\n  println(\"${p.x}\")\n}"
+    );
+}
+
+#[test]
+fn record_variant_case_construction_still_allowed() {
+    // Constructing the record-bearing CASE (not the enum type) is the correct form.
+    has_no_errors(
+        "type V = Tag(Float) | Named { who: String }\nfn main() -> Unit = {\n  let v = Named { who: \"x\" }\n  println(\"${v}\")\n}"
+    );
+}

@@ -130,6 +130,20 @@ pub(super) fn lower_call(ctx: &mut LowerCtx, callee: &ast::Expr, args: &[ast::Ex
                     super::statements::coerce_literal_to_sized(arg, param_ty, ctx.env);
                 }
             }
+        } else if let Some((_, case)) = ctx.env.constructors.get(&almide_base::intern::sym(name)).cloned() {
+            // Tuple-payload variant constructor (`Click(Int32, Int)`): narrow each
+            // bare-literal arg to its declared payload type so `Click(42, 9)` emits
+            // `Click(42i32, 9i64)` — without this the `42` stays `i64`, which native
+            // rustc rejects (E0308) and WASM writes at the wrong byte width,
+            // corrupting the next payload field. Mirrors the record-construction
+            // coercion in `expressions.rs` (`declared_record_ty` path).
+            if let crate::types::VariantPayload::Tuple(param_tys) = &case.payload {
+                for (i, param_ty) in param_tys.iter().enumerate() {
+                    if let Some(arg) = ir_args.get_mut(i) {
+                        super::statements::coerce_literal_to_sized(arg, param_ty, ctx.env);
+                    }
+                }
+            }
         } else if let Some((module, func)) = name.as_str().split_once('.') {
             if let Some(sig) = crate::stdlib::lookup_sig(module, func) {
                 for (i, (_, param_ty)) in sig.params.iter().enumerate() {

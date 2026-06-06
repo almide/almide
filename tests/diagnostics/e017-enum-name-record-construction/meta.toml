@@ -1,0 +1,3 @@
+expects_code = "E017"
+expects_error = "cannot construct enum type 'V' with record syntax"
+hint_substring = "Named"

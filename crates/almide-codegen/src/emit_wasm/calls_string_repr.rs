@@ -98,8 +98,21 @@ impl FuncCompiler<'_> {
             // that bottoms out on the finite value — exactly like native trait
             // dispatch. Only recursive types get a reserved fn (see
             // `register_repr_funcs`); the value pointer is already on the stack.
-            Ty::Named(name, _) if self.emitter.repr_funcs.contains_key(name.as_str()) => {
-                let f = self.emitter.repr_funcs[name.as_str()];
+            Ty::Named(..) if self.emitter.repr_funcs.contains_key(super::mangle_repr_ty(ty).as_str())
+                || matches!(ty, Ty::Named(n, _) if self.emitter.repr_funcs.contains_key(n.as_str())) => {
+                // Route to the per-INSTANTIATION repr fn (`Tree[Int]` → __repr_Tree_Int)
+                // so the payload reprs with the concrete `T`. A non-generic recursive
+                // type mangles to its bare name (the `Tree[Int]` key falls back to the
+                // bare `Tree` key only if an instantiation fn was never registered —
+                // which can't happen for a site that reached here with concrete args).
+                let mangled = super::mangle_repr_ty(ty);
+                let f = self.emitter.repr_funcs.get(mangled.as_str())
+                    .or_else(|| match ty {
+                        Ty::Named(n, _) => self.emitter.repr_funcs.get(n.as_str()),
+                        _ => None,
+                    })
+                    .copied()
+                    .expect("guard guarantees one of the keys exists");
                 wasm!(self.func, { call(f); });
             }
             // ── Non-recursive named variant → inline walk ──

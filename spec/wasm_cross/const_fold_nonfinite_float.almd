@@ -1,0 +1,29 @@
+// Cross-target gate for const-folded NON-FINITE floats (inf / NaN).
+//
+// A float expression that const-folds to a non-finite value (`1e300 * 1e300`)
+// has no Rust literal form: `format!("{}", inf)` is the bare identifier `inf`,
+// which the `{value}f64` literal template turned into the undefined `inff64`
+// (native E0425, wrapped as "an Almide bug"); WASM ran fine. The fix emits the
+// associated constant (`f64::INFINITY` / `f64::NEG_INFINITY` / `f64::NAN`) for
+// non-finite literals. Runtime-COMPUTED inf/NaN already printed identically and
+// must keep doing so.
+
+fn overflow(x: Float) -> Float = x * x
+
+fn main() -> Unit = {
+  // Const-folded positive infinity.
+  let pos = 1e300 * 1e300
+  println("pos=${float.to_string(pos)}")
+
+  // Const-folded negative infinity.
+  let neg = -1e300 * 1e300
+  println("neg=${float.to_string(neg)}")
+
+  // Runtime-computed infinity (through a fn) — same printed form on both.
+  let rt = overflow(1e300)
+  println("rt=${float.to_string(rt)}")
+
+  // Equality with the runtime value confirms the folded literal IS infinity,
+  // not a giant finite number.
+  println("eq=${pos == rt}")
+}

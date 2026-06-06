@@ -144,6 +144,32 @@ impl Checker {
             ExprKind::Record { name, fields, .. } => {
                 for f in fields.iter_mut() { self.infer_expr(&mut f.value); }
                 if let Some(n) = name {
+                    // Constructing `EnumType { field: ... }` via the ENUM type
+                    // name (not a case name) is a category error: an enum has no
+                    // fields of its own. Native rustc would leak E0574 and WASM
+                    // silently mis-constructs, so reject it here with a proper
+                    // diagnostic that lists the available record-variant cases.
+                    if !self.env.constructors.contains_key(&sym(n)) {
+                        if let Some(Ty::Variant { cases, .. }) = self.env.types.get(&sym(n)) {
+                            let record_cases: Vec<&str> = cases.iter()
+                                .filter(|c| matches!(c.payload, VariantPayload::Record(_)))
+                                .map(|c| c.name.as_str())
+                                .collect();
+                            let hint = if record_cases.is_empty() {
+                                format!("`{}` is an enum type; none of its cases take named fields. Construct a case directly, e.g. `{}::SomeCase(...)`.", n, n)
+                            } else {
+                                format!("`{}` is an enum type, not a record. Construct a case instead: {}.",
+                                    n,
+                                    record_cases.iter().map(|c| format!("`{} {{ ... }}`", c)).collect::<Vec<_>>().join(" or "))
+                            };
+                            self.emit(super::err(
+                                format!("cannot construct enum type '{}' with record syntax", n),
+                                hint,
+                                format!("record literal {}", n),
+                            ).with_code("E017"));
+                            return Ty::Unknown;
+                        }
+                    }
                     // Variant constructor → resolve to parent type name
                     let type_name = self.env.constructors.get(&sym(n))
                         .map(|(vname, _)| *vname)

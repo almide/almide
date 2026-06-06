@@ -1,0 +1,30 @@
+// Cross-target gate for a user type named `Box` coexisting with a recursive enum.
+//
+// A recursive enum needs heap INDIRECTION on the Rust target, emitted as
+// `Box<Tree>`. A user `type Box = ...` shadows std `Box` at that site, so the
+// bare `Box<Tree>` / `Box::new(...)` resolves to the USER struct (E0072 / E0107
+// / E0599) on native. WASM was unaffected (it has no `Box`). The fix qualifies
+// the indirection as `std::boxed::Box` everywhere the recursive-enum pass emits
+// it, so the user `Box` and the std indirection no longer collide. This file
+// uses BOTH a user `Box` type and a recursive enum in one program.
+
+type Box = { width: Int, height: Int }
+type Tree = Leaf(Int) | Node(Tree, Tree)
+
+fn depth(t: Tree) -> Int = match t {
+  Leaf(_) => 1,
+  Node(l, r) => 1 + int.max(depth(l), depth(r)),
+}
+
+fn main() -> Unit = {
+  let b = Box { width: 3, height: 4 }
+  println("box=${b.width}x${b.height}")
+
+  let t = Node(Leaf(1), Node(Leaf(2), Leaf(3)))
+  println("tree=${t}")
+  println("depth=${depth(t)}")
+
+  // A list of user Boxes alongside a recursive tree — both representations live.
+  let boxes: List[Box] = [Box { width: 1, height: 2 }, Box { width: 5, height: 6 }]
+  println("boxes=${boxes}")
+}

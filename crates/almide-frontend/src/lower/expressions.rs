@@ -166,7 +166,20 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
         // ── Records ──
         ast::ExprKind::Record { name, fields, .. } => {
             let fs = fields.iter().map(|f| (f.name, lower_expr(ctx, &f.value))).collect();
-            ctx.mk(IrExprKind::Record { name: *name, fields: fs }, ty, span)
+            let mut rec = ctx.mk(IrExprKind::Record { name: *name, fields: fs }, ty, span);
+            // Narrow bare integer/float literals in sized fields to their
+            // declared field type (`{ a: Int8 }` ← `a: 5` must emit `5i8`, not
+            // `5i64`). Inference leaves the literal at the default `Ty::Int`
+            // even with no binding annotation, so the construction site itself
+            // — driven by the declared struct/case field types — is the only
+            // place this is guaranteed to run. Without it native rustc rejects
+            // `M { a: 5i64 }` (E0308) and WASM writes the wrong byte width into
+            // the field, corrupting the next field. Mirrors the let/var path
+            // in `override_record_literal_ty`.
+            if let Some(decl) = name.and_then(|n| super::statements::declared_record_ty(ctx.env, n)) {
+                super::statements::coerce_literal_to_sized(&mut rec, &decl, ctx.env);
+            }
+            rec
         }
         ast::ExprKind::SpreadRecord { base, fields, .. } => {
             let ir_base = lower_expr(ctx, base);
