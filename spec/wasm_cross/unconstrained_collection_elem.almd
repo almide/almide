@@ -1,4 +1,4 @@
-// @contract: C-059
+// @contract: C-055
 // A generic-collection constructor whose element type NO argument constrains —
 // `list.with_capacity(cap: Int) -> List[A]`, `set.new() -> Set[A]`, or an empty
 // `[]` in value position — is well-typed but under-constrained when its result
