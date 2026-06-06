@@ -1,0 +1,54 @@
+// Cross-target drain fixture for the 2 fs runtime routines:
+//   runtime.rs::compile_init_preopen_dirs  — scans fd_prestat_get to build the
+//                                             WASI preopen-dir table at startup.
+//   runtime.rs::compile_resolve_path       — maps an absolute path to the
+//                                             longest-prefix preopen fd + the
+//                                             relative remainder.
+//
+// The gate (tests/wasm_runtime_test.rs::wasm_cross_target_spec) runs this on BOTH
+// native and wasm and asserts byte-identical stdout/stderr/exit. Native is the
+// oracle (std::fs, which has NO preopen concept — the path is used directly);
+// the wasm runtime must reproduce that observable behavior through the preopen
+// scan + resolve. Under the gate harness, wasm runs as `wasmtime --dir=/ <wasm>`,
+// so `/` is the sole preopen and __resolve_path's job is to match it as the
+// longest (only) prefix and strip it to a relative remainder.
+//
+// What this LOCKS:
+//   - __init_preopen_dirs runs once at _start (before any fs op): the write
+//     below would fail to open if the preopen table were empty/wrong.
+//   - __resolve_path is exercised TWICE — once for the write path and once for a
+//     `./`-NORMALIZED form of the SAME path on read-back. Both must resolve to the
+//     same host file under the `/` preopen, so the readback equals what was
+//     written. This exercises the prefix match AND the host path-normalization
+//     edge (`/tmp/./x` == `/tmp/x`) identically on both targets.
+//
+// Why an ABSOLUTE path under /tmp (not a relative path): the choice makes the
+// fixture CWD-INDEPENDENT by construction — the resolved host file is the same
+// regardless of the directory the gate binary/wasmtime is launched from (the gate
+// runs both targets with no explicit cwd, inheriting the cargo-test cwd). The
+// file is created+read within this ONE program, so it is self-contained and
+// order-independent across the gate's fixtures; `fs.write` uses O_CREAT|O_TRUNC,
+// so any prior/concurrent content is overwritten with the same constant bytes.
+//
+// ── OP-COUNT CEILING (do NOT add a third fs op) ──
+// The wasm fs runtime has a PRE-EXISTING, separate trap: a fixed scratch buffer
+// that a WASI host call (path_filestat_get / fd_read) writes into is later
+// reclaimed onto the bump-allocator free list with a poisoned `next` field, so a
+// THIRD fs op (or heavy allocation after an fs op) sends __alloc's free-list walk
+// out of bounds (exit 134). This fixture deliberately stays at TWO fs ops with
+// only a trailing println, which is in the stable zone (verified byte-identical &
+// stable across repeated runs and across two launch cwds). Adding a third fs op
+// here will reintroduce the trap and is NOT what these two routines are about —
+// see the rt-oracle-registry notes for compile_init_preopen_dirs.
+
+import fs
+
+effect fn main() -> Unit = {
+  let path = "/tmp/almide_xt_fs_preopen_resolve.txt"
+  let _ = fs.write(path, "PREOPEN-RESOLVE-OK")!
+  // Read back through a `./`-normalized form of the SAME absolute path: this is a
+  // second, distinct __resolve_path call whose prefix match + normalization must
+  // land on the identical host file.
+  let readback = fs.read_text("/tmp/./almide_xt_fs_preopen_resolve.txt")!
+  println(readback)
+}
