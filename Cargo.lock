@@ -103,6 +103,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "almide-interp"
+version = "0.1.0"
+dependencies = [
+ "almide-base",
+ "almide-frontend",
+ "almide-ir",
+ "almide-lang",
+ "almide-optimize",
+ "tempfile",
+]
+
+[[package]]
 name = "almide-ir"
 version = "0.12.2"
 dependencies = [

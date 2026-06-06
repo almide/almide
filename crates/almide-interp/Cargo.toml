@@ -1,0 +1,22 @@
+[package]
+name = "almide-interp"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "Almide IR tree-walking interpreter — the executable spec / third cross-target oracle"
+
+[dependencies]
+almide-base = { path = "../almide-base" }
+almide-lang = { path = "../almide-lang" }
+almide-ir = { path = "../almide-ir" }
+almide-frontend = { path = "../almide-frontend" }
+almide-optimize = { path = "../almide-optimize" }
+
+[dev-dependencies]
+# The test battery lowers .almd source to IR through the same public frontend
+# functions the driver uses, then interprets. No fixtures, all inline.
+#
+# `interp_cross_target_test.rs` additionally drives the native and WASM backends
+# as subprocesses (the `almide` binary built into the workspace target dir) to
+# run the 3-way oracle over `spec/wasm_cross/*.almd`, so it needs a scratch dir.
+tempfile = "3"
