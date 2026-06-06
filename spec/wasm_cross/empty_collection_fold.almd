@@ -1,0 +1,23 @@
+// @contract: C-052
+// A `list`/`map`/`set` `.fold` over an EMPTY collection whose element/key/value
+// types the closure never uses leaves those generic params unconstrained — a
+// well-typed but under-constrained program (Rust would need a turbofish).
+// Codegen defaults the unconstrained params to a concrete placeholder so the
+// build succeeds on BOTH targets (native rustc no longer reports E0283; wasm no
+// longer falls back to i32 / refuses at the ConcretizeTypes gate). Non-empty
+// folds that DO use the params are the regression guard.
+fn main() -> Unit = {
+  // Empty folds — params unused, collection empty.
+  let a: Float = list.fold([], -42.5, ((acc, x) => acc))
+  let b: Int = map.fold(map.new(), 7, ((acc, k, v) => acc))
+  let c: Int = set.fold(set.new(), 99, ((acc, x) => acc))
+  println(float.to_string(a))  // -42.5
+  println(int.to_string(b))    // 7
+  println(int.to_string(c))    // 99
+  // Non-empty folds that USE the element/key/value — must still infer normally.
+  let m = map.set(map.set(map.new(), "x", 10), "y", 20)
+  let s: Int = map.fold(m, 0, ((acc, k, v) => acc + v))
+  println(int.to_string(s))    // 30
+  let t: Int = list.fold([1, 2, 3], 0, ((acc, x) => acc + x))
+  println(int.to_string(t))    // 6
+}

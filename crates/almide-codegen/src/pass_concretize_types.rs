@@ -42,6 +42,7 @@ use almide_ir::*;
 use almide_ir::visit::{walk_expr, walk_stmt};
 use almide_ir::visit_mut::{walk_expr_mut, walk_stmt_mut};
 use almide_lang::types::Ty;
+use almide_lang::types::constructor::TypeConstructorId;
 use super::pass::{NanoPass, PassResult, Postcondition, Target};
 
 #[derive(Debug)]
@@ -744,6 +745,126 @@ fn back_propagate_fold_acc(expr: &mut IrExpr, vt: &mut VarTable) -> bool {
     changed
 }
 
+/// The concrete type a genuinely-UNCONSTRAINED fold-closure collection param is
+/// defaulted to. When a fold runs over an EMPTY collection whose element type(s)
+/// the checker could only leave `Unknown` (`map.fold(map.new(), …)`,
+/// `list.fold([], …)`) AND the closure never uses those params, K/V/elem have no
+/// inference source — the program is well-typed but under-constrained, exactly
+/// the case Rust needs a turbofish for. The collection is empty, so the closure
+/// is never invoked and the param's runtime representation is unobservable; we
+/// pick `Int` (i64 — representable identically on both targets, trivially
+/// Clone/Hash/Eq) so codegen emits a concrete annotation instead of bare params
+/// (native rustc E0283) / a wasm Unknown→i32 fallback. Any concrete choice is
+/// observationally equivalent; `Int` is the least surprising.
+const UNCONSTRAINED_FOLD_PARAM_DEFAULT: Ty = Ty::Int;
+
+/// Describe a `<module>.fold` over an element-unresolved (empty) collection: the
+/// closure-param indices that mirror the collection's element type(s), and the
+/// constructor whose args are those element types. The accumulator param (index
+/// 0) is handled by [`back_propagate_fold_acc`] and is never defaulted here.
+fn fold_collection_shape(expr: &IrExpr) -> Option<(&'static [usize], TypeConstructorId)> {
+    use almide_lang::types::constructor::TypeConstructorId as TCI;
+    // The fold call appears in three shapes depending on pass ordering:
+    //   - `Call { Module { module, func } }`          (Rust pipeline: pre-lowering)
+    //   - `Call { Named { "almide_rt_<m>_fold" } }`   (post-ResolveCalls)
+    //   - `RuntimeCall { "almide_rt_<m>_fold" }`      (WASM pipeline: post-StdlibLowering)
+    // Decode (module, func) from whichever we see; the arg layout
+    // (collection, init, closure) is identical across all three.
+    let (module, func, args): (String, String, &Vec<IrExpr>) = match &expr.kind {
+        IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } => {
+            (module.as_str().to_string(), func.as_str().to_string(), args)
+        }
+        IrExprKind::Call { target: CallTarget::Named { name }, args, .. } => {
+            (decode_rt_module(name.as_str())?, decode_rt_func(name.as_str())?, args)
+        }
+        IrExprKind::RuntimeCall { symbol, args } => {
+            (decode_rt_module(symbol.as_str())?, decode_rt_func(symbol.as_str())?, args)
+        }
+        _ => return None,
+    };
+    if func != "fold" || args.len() < 3 { return None; }
+    // The collection arg must itself be element-unresolved (empty literal /
+    // `*.new()`); a non-empty collection pins the element types the normal way.
+    if !args[0].ty.has_unresolved_deep() { return None; }
+    match module.as_str() {
+        // list.fold(xs, init, (acc, elem) -> acc): param 1 = elem
+        "list" => Some((&[1], TCI::List)),
+        // set.fold(s, init, (acc, elem) -> acc):   param 1 = elem
+        "set" => Some((&[1], TCI::Set)),
+        // map.fold(m, init, (acc, k, v) -> acc):   params 1 = K, 2 = V
+        "map" => Some((&[1, 2], TCI::Map)),
+        _ => None,
+    }
+}
+
+/// `almide_rt_<module>_<func>` → `<module>` (the stdlib module segment).
+fn decode_rt_module(sym: &str) -> Option<String> {
+    let rest = sym.strip_prefix("almide_rt_")?;
+    let under = rest.find('_')?;
+    Some(rest[..under].to_string())
+}
+/// `almide_rt_<module>_<func>` → `<func>` (the remainder after the module).
+fn decode_rt_func(sym: &str) -> Option<String> {
+    let rest = sym.strip_prefix("almide_rt_")?;
+    let under = rest.find('_')?;
+    Some(rest[under + 1..].to_string())
+}
+
+/// Default the unresolved element type(s) of a fold over an EMPTY collection to
+/// [`UNCONSTRAINED_FOLD_PARAM_DEFAULT`], consistently across (a) the collection
+/// argument's `Applied(C, [..])` type (the `map.new()` / `[]` literal — its
+/// `Borrow`/`RuntimeCall`/`RcWrap` wrappers all read this) and (b) the mirroring
+/// closure params (lambda annotation + VarTable + `Ty::Fn` wrapper). The closure
+/// is never invoked (empty collection), so the choice is unobservable; making it
+/// the SAME default on both sides keeps native == wasm. Returns true on change.
+fn default_unconstrained_fold_params(expr: &mut IrExpr, vt: &mut VarTable) -> bool {
+    let Some((param_indices, ctor)) = fold_collection_shape(expr) else { return false; };
+    let args = match &mut expr.kind {
+        IrExprKind::Call { args, .. } | IrExprKind::RuntimeCall { args, .. } => args,
+        _ => return false,
+    };
+    let mut changed = false;
+
+    // (a) Default the empty collection literal's element type slots.
+    if let Ty::Applied(c, elems) = &mut args[0].ty {
+        if *c == ctor {
+            for e in elems.iter_mut() {
+                if e.has_unresolved_deep() {
+                    *e = UNCONSTRAINED_FOLD_PARAM_DEFAULT;
+                    changed = true;
+                }
+            }
+        }
+    }
+
+    // (b) Default the mirroring closure params (lambda + VarTable + Fn wrapper).
+    let Some(lambda) = args.get_mut(2) else { return changed; };
+    if let IrExprKind::Lambda { params, .. } = &mut lambda.kind {
+        for &idx in param_indices {
+            if let Some((vid, pty)) = params.get_mut(idx) {
+                if pty.has_unresolved_deep() {
+                    *pty = UNCONSTRAINED_FOLD_PARAM_DEFAULT;
+                    if (vid.0 as usize) < vt.len() {
+                        vt.entries[vid.0 as usize].ty = UNCONSTRAINED_FOLD_PARAM_DEFAULT;
+                    }
+                    changed = true;
+                }
+            }
+        }
+    }
+    if let Ty::Fn { params, .. } = &mut lambda.ty {
+        for &idx in param_indices {
+            if let Some(p) = params.get_mut(idx) {
+                if p.has_unresolved_deep() {
+                    *p = UNCONSTRAINED_FOLD_PARAM_DEFAULT;
+                    changed = true;
+                }
+            }
+        }
+    }
+    changed
+}
+
 // ── Core walker ────────────────────────────────────────────────────
 
 fn concretize_expr(expr: &mut IrExpr, vt: &mut VarTable, symbols: &SymbolTable, enclosing_ret: &Ty) {
@@ -885,6 +1006,14 @@ impl<'a> IrMutVisitor for Concretizer<'a> {
                 }
             }
         }
+
+        // Empty-collection fold: a `list`/`set`/`map` `.fold` over an empty
+        // collection leaves the closure's element/key/value params unconstrained
+        // (the closure never uses them). Default those to a concrete placeholder
+        // so codegen emits a real annotation — otherwise native rustc reports
+        // E0283 and wasm falls back to i32 (Cluster-2 finding #8). Runs for all
+        // three modules, after the accumulator back-prop above.
+        default_unconstrained_fold_params(expr, self.vt);
 
         // Now resolve this node's type from child types + VarTable + symbols.
         if (expr.ty).has_unresolved_deep() {

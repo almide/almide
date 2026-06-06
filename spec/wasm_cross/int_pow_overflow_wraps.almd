@@ -1,0 +1,15 @@
+// @contract: C-047
+// Non-negative `math.pow` is byte-identical on both targets, including OVERFLOW,
+// which wraps (the wrap-arithmetic contract) under exponentiation-by-squaring:
+// `2^64 = 0`, `0^0 = 1`, large exponents (>= 2^32) define the full i64 count and
+// never hang. Regression guard that the totality rewrite did not perturb the
+// happy path. `base`/`exp` are computed at runtime so no const-folding hides it.
+fn id(x: Int) -> Int = x + (x - x)
+
+fn main() -> Unit = {
+  println(int.to_string(math.pow(id(2), id(3))))    // 8
+  println(int.to_string(math.pow(id(2), id(64))))   // 0 (overflow wraps)
+  println(int.to_string(math.pow(id(0), id(0))))    // 1
+  println(int.to_string(math.pow(id(7), id(23))))   // 8922003266371364727
+  println(int.to_string(math.pow(id(10), id(19))))  // -8446744073709551616
+}

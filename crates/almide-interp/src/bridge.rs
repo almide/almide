@@ -110,8 +110,17 @@ fn float_fn(func: &str, args: &[Value]) -> Option<Flow> {
         "floor" => Flow::val(Value::Float(as_float(args.first())?.floor())),
         "round" => Flow::val(Value::Float(as_float(args.first())?.round())),
         "sqrt" => Flow::val(Value::Float(as_float(args.first())?.sqrt())),
-        "min" => Flow::val(Value::Float(as_float(args.first())?.min(as_float(args.get(1))?))),
-        "max" => Flow::val(Value::Float(as_float(args.first())?.max(as_float(args.get(1))?))),
+        // Explicit NaN/tie tree mirroring runtime/rs/src/float.rs
+        // almide_rt_float_min/max — NOT f64::min/max (llvm.minnum/maxnum has
+        // unspecified ±0-tie order). Ties return the FIRST operand (C-049).
+        "min" => {
+            let (a, b) = (as_float(args.first())?, as_float(args.get(1))?);
+            Flow::val(Value::Float(if a.is_nan() { b } else if b.is_nan() { a } else if a > b { b } else { a }))
+        }
+        "max" => {
+            let (a, b) = (as_float(args.first())?, as_float(args.get(1))?);
+            Flow::val(Value::Float(if a.is_nan() { b } else if b.is_nan() { a } else if a < b { b } else { a }))
+        }
         "sign" => Flow::val(Value::Float(as_float(args.first())?.signum())),
         "is_nan" => Flow::val(Value::Bool(as_float(args.first())?.is_nan())),
         "is_infinite" => Flow::val(Value::Bool(as_float(args.first())?.is_infinite())),
