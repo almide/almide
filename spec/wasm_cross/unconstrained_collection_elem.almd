@@ -1,0 +1,31 @@
+// @contract: C-059
+// A generic-collection constructor whose element type NO argument constrains —
+// `list.with_capacity(cap: Int) -> List[A]`, `set.new() -> Set[A]`, or an empty
+// `[]` in value position — is well-typed but under-constrained when its result
+// is only ever consumed by an element-agnostic op (`list.len`, `set.len`). WASM
+// carries no element type and runs fine, but native Rust lowers the constructor
+// to a generic fn (`almide_rt_list_with_capacity<A>`) / `Vec::<A>::new()` and
+// rustc rejects the unconstrained `A` with E0282/E0283 — a cross-target
+// asymmetry (compiles on WASM, not native). The element is unobservable (the
+// container is empty), so ConcretizeTypes defaults it to a concrete placeholder
+// on BOTH targets, and the Rust walker emits the matching turbofish
+// (`with_capacity::<i64>` / `set.new::<i64>`). Both targets now build and print
+// byte-identically. The typed-let form (which pins the element) is the
+// regression guard.
+fn main() -> Unit = {
+  // Direct-use in value position — element type never constrained by an arg.
+  let a: Int = list.len(list.with_capacity(8))   // 0
+  let b: Int = list.len([])                       // 0
+  let c: Int = set.len(set.new())                 // 0
+  // Same constructors inside string interpolation (a distinct emit position).
+  println("a=${a} b=${b} c=${c}")
+  println("interp=${list.len(list.with_capacity(4))}")  // 0
+
+  // Regression guard: the typed-let / populated forms pin the element the
+  // normal way and must keep working.
+  let xs: List[Int] = list.with_capacity(8)
+  let ys: List[Int] = xs + [7]
+  println("ys=${list.len(ys)}")                   // 1
+  let st: Set[Int] = set.insert(set.new(), 5)
+  println("st=${set.len(st)}")                    // 1
+}

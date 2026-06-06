@@ -1058,7 +1058,60 @@ impl Checker {
                 self.bind_pattern(pattern, &val_resolved);
             }
             ast::Stmt::Assign { name, value, .. } => {
-                self.infer_expr(value);
+                let val_ty = self.infer_expr(value);
+                // A mut-receiver stdlib mutator (`list.push`, `map.insert`,
+                // `string.push`, …) returns Unit and mutates in place. Writing
+                // `b = list.push(b, x)` therefore assigns Unit to a non-Unit
+                // binding. Native catches this at rustc (E0308 "expected Vec,
+                // found ()"); WASM erases Unit and silently RUNS the program —
+                // a cross-target asymmetry (compiles on one target, not the
+                // other). Reject it in the checker so BOTH targets agree, with
+                // the fix spelled out: drop the assignment (the call already
+                // mutates) or rebuild a fresh value.
+                let var_ty = self.env.lookup_var(name).cloned();
+                if let Some(var_ty) = &var_ty {
+                    let val_resolved = resolve_ty(&val_ty, &self.uf);
+                    let var_resolved = self.env.resolve_named(var_ty);
+                    if matches!(val_resolved, Ty::Unit) && !matches!(var_resolved, Ty::Unit | Ty::Unknown) {
+                        // Rebuild form is type-directed: a List concatenates a
+                        // singleton, a String appends a suffix string. Other
+                        // collections (Map/Set/Bytes) have no `+` rebuild, so we
+                        // steer toward the statement form only.
+                        let rebuild = match &var_resolved {
+                            Ty::Applied(TypeConstructorId::List, _) => Some(format!("{0} = {0} + [<item>]", name)),
+                            Ty::String => Some(format!("{0} = {0} + \"<suffix>\"", name)),
+                            _ => None,
+                        };
+                        let snippet = match &rebuild {
+                            Some(rb) => format!(
+                                "// the mutator already updates '{n}' in place — drop the `{n} =` and call it as a statement:\n<mutator>({n}, ...)\n// or rebuild a fresh value:\n{rb}",
+                                n = name,
+                            ),
+                            None => format!(
+                                "// the mutator already updates '{n}' in place — drop the `{n} =` and call it as a statement:\n<mutator>({n}, ...)",
+                                n = name,
+                            ),
+                        };
+                        let hint = match &rebuild {
+                            Some(rb) => format!(
+                                "the right-hand side returns Unit (an in-place mutator). Call it as a \
+                                 statement instead of assigning its result, or rebuild '{}' with a \
+                                 value-returning expression like `{}`",
+                                name, rb
+                            ),
+                            None => format!(
+                                "the right-hand side returns Unit (an in-place mutator). Call it as a \
+                                 statement instead of assigning its result — '{}' is already mutated in place",
+                                name
+                            ),
+                        };
+                        self.emit(super::err(
+                            format!("cannot assign a Unit value to '{}'", name),
+                            hint,
+                            format!("{} = ...", name),
+                        ).with_code("E001").with_try(snippet));
+                    }
+                }
                 if self.env.lookup_var(name).is_some() && !self.env.mutable_vars.contains(&sym(name)) {
                     let is_param = self.env.param_vars.contains(&sym(name));
                     let hint = if is_param {

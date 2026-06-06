@@ -169,8 +169,129 @@ impl NanoPass for ConcretizeTypesPass {
             }
         }
 
+        // Phase 3: Final empty-payload defaulting sweep. A residual
+        // `List[Unknown]` / `Set[Unknown]` / `Map[K, Unknown]` / `Option[Unknown]`
+        // that survived inference sits in an UNOBSERVABLE slot — the container is
+        // empty or the payload is never materialized, so the element type is
+        // unobservable on WASM (a 4-byte `[len=0]` header carries no element
+        // bytes). The hard gate whitelists exactly these via
+        // `unresolved_only_in_empty_payloads`. But native rustc still emits the
+        // slot syntactically (`Vec::<_>::new()`, `almide_rt_list_with_capacity::
+        // <_>()`) and DEMANDS the `_` be inferable — so a genuinely-unconstrained
+        // empty container (e.g. `list.len(list.with_capacity(8))`,
+        // `list.len([])` in value position) compiles on WASM but fails native
+        // with E0282/E0283. That is a cross-target asymmetry. Default those
+        // whitelisted slots to the SAME concrete placeholder C-052 uses for
+        // unconstrained fold params: the choice is unobservable (empty payload),
+        // and using one default on both targets keeps native == wasm while
+        // giving rustc a concrete element type to emit.
+        default_empty_payload_program(&mut program, &mut prog_vt);
+
         program.var_table = prog_vt;
         PassResult { program, changed: true }
+    }
+}
+
+/// The concrete type a residual UNOBSERVABLE empty-container payload slot is
+/// defaulted to in Phase 3. Same value and rationale as
+/// [`UNCONSTRAINED_FOLD_PARAM_DEFAULT`]: the slot holds no runtime bytes (the
+/// container is empty / the payload is never materialized), so any concrete
+/// choice is observationally equivalent; `Int` (i64) is the least-surprising,
+/// is `Clone`/`Hash`/`Eq`, and is representable identically on both targets.
+const UNOBSERVABLE_PAYLOAD_DEFAULT: Ty = Ty::Int;
+
+/// Replace every residual `Unknown`/`TypeVar` that sits in an UNOBSERVABLE
+/// empty-container payload slot with [`UNOBSERVABLE_PAYLOAD_DEFAULT`], in place.
+///
+/// Mirrors the slot structure that [`unresolved_only_in_empty_payloads`]
+/// whitelists (so this sweep only ever touches slots the hard gate already
+/// considers unobservable): the element of `Option`/`List`/`Set`, the VALUE of
+/// `Map` (its KEY is load-bearing and left untouched), and those positions
+/// nested through `Record`/`Tuple` fields. A load-bearing Unknown (bare, in a
+/// `Tuple` element, `Result` Ok, `Fn` param/ret, or a Map KEY) is NOT touched —
+/// it stays a hard-gate violation so a real inference bug still surfaces.
+fn default_empty_payload_ty(ty: &mut Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId as TCI;
+    if !ty.has_unresolved_deep() { return false; }
+    match ty {
+        Ty::Applied(TCI::Option, args)
+        | Ty::Applied(TCI::List, args)
+        | Ty::Applied(TCI::Set, args) if args.len() == 1 => {
+            if matches!(args[0], Ty::Unknown | Ty::TypeVar(_)) {
+                args[0] = UNOBSERVABLE_PAYLOAD_DEFAULT;
+                true
+            } else {
+                default_empty_payload_ty(&mut args[0])
+            }
+        }
+        // Map VALUE only — the KEY is hashed/compared, so a key Unknown is a
+        // real bug and must keep failing the gate.
+        Ty::Applied(TCI::Map, args) if args.len() == 2 && !args[0].has_unresolved_deep() => {
+            if matches!(args[1], Ty::Unknown | Ty::TypeVar(_)) {
+                args[1] = UNOBSERVABLE_PAYLOAD_DEFAULT;
+                true
+            } else {
+                default_empty_payload_ty(&mut args[1])
+            }
+        }
+        Ty::Record { fields } | Ty::OpenRecord { fields } => {
+            let mut changed = false;
+            for (_, t) in fields.iter_mut() { changed |= default_empty_payload_ty(t); }
+            changed
+        }
+        Ty::Tuple(elems) => {
+            // Only descend; an Unknown directly in a tuple ELEMENT is
+            // load-bearing and intentionally left for the gate.
+            let mut changed = false;
+            for e in elems.iter_mut() { changed |= default_empty_payload_ty(e); }
+            changed
+        }
+        _ => false,
+    }
+}
+
+/// Apply [`default_empty_payload_ty`] to every reachable `IrExpr.ty`, plus the
+/// VarTable entries, function signatures, and lambda/bind annotations, so the
+/// residual unobservable slots are concrete by the time emit runs — on BOTH
+/// targets, from one defaulting choice.
+fn default_empty_payload_program(program: &mut IrProgram, vt: &mut VarTable) {
+    struct Defaulter;
+    impl IrMutVisitor for Defaulter {
+        fn visit_expr_mut(&mut self, expr: &mut IrExpr) {
+            walk_expr_mut(self, expr);
+            default_empty_payload_ty(&mut expr.ty);
+            if let IrExprKind::Lambda { params, .. } = &mut expr.kind {
+                for (_, pty) in params.iter_mut() { default_empty_payload_ty(pty); }
+            }
+        }
+        fn visit_stmt_mut(&mut self, stmt: &mut IrStmt) {
+            walk_stmt_mut(self, stmt);
+            if let IrStmtKind::Bind { ty, .. } = &mut stmt.kind {
+                default_empty_payload_ty(ty);
+            }
+        }
+    }
+    let mut d = Defaulter;
+    for func in &mut program.functions {
+        default_empty_payload_ty(&mut func.ret_ty);
+        d.visit_expr_mut(&mut func.body);
+    }
+    for tl in &mut program.top_lets {
+        default_empty_payload_ty(&mut tl.ty);
+        d.visit_expr_mut(&mut tl.value);
+    }
+    for module in &mut program.modules {
+        for func in &mut module.functions {
+            default_empty_payload_ty(&mut func.ret_ty);
+            d.visit_expr_mut(&mut func.body);
+        }
+        for tl in &mut module.top_lets {
+            default_empty_payload_ty(&mut tl.ty);
+            d.visit_expr_mut(&mut tl.value);
+        }
+    }
+    for entry in &mut vt.entries {
+        default_empty_payload_ty(&mut entry.ty);
     }
 }
 

@@ -1,0 +1,77 @@
+// match_literal_reachable_test — A literal nested in a constructor pattern is a
+// REFINEMENT of that constructor, not a full cover. A literal arm must not
+// shadow a later binder arm of the same constructor, and distinct literals
+// must not shadow each other (no false E014 "unreachable match arm"). These
+// programs must both check clean AND run byte-identically on native and wasm.
+
+// some(literal) then some(binder): the binder catches every other Int.
+fn ci(o: Option[Int]) -> String = match o {
+  some(1) => "one",
+  some(2) => "two",
+  some(x) => "other:" + int.to_string(x),
+  none    => "nothing",
+}
+
+// none BETWEEN the literal and the binder: the outer Some/None space is
+// complete before the binder, yet the binder stays reachable (Int is infinite).
+fn ci_gap(o: Option[Int]) -> String = match o {
+  some(1) => "one",
+  none    => "nothing",
+  some(x) => "other:" + int.to_string(x),
+}
+
+// ok(literal)/err(binder)/ok(binder): Result with a literal refinement.
+fn ck(r: Result[Int, String]) -> String = match r {
+  ok(0)  => "zero",
+  err(e) => "err:" + e,
+  ok(n)  => "ok:" + int.to_string(n),
+}
+
+// String literals in some().
+fn cs(o: Option[String]) -> String = match o {
+  some("a") => "A",
+  some("b") => "B",
+  none      => "N",
+  some(x)   => "X:" + x,
+}
+
+// Bare distinct Int literals followed by a binder.
+fn cn(n: Int) -> String = match n {
+  1 => "a",
+  2 => "b",
+  3 => "c",
+  x => "z:" + int.to_string(x),
+}
+
+test "literal some then binder reachable" {
+  assert_eq(ci(some(1)), "one");
+  assert_eq(ci(some(2)), "two");
+  assert_eq(ci(some(9)), "other:9");
+  assert_eq(ci(none), "nothing")
+}
+
+test "literal some with none gap then binder reachable" {
+  assert_eq(ci_gap(some(1)), "one");
+  assert_eq(ci_gap(some(7)), "other:7");
+  assert_eq(ci_gap(none), "nothing")
+}
+
+test "result literal then binder reachable" {
+  assert_eq(ck(ok(0)), "zero");
+  assert_eq(ck(ok(5)), "ok:5");
+  assert_eq(ck(err("boom")), "err:boom")
+}
+
+test "string literal some then binder reachable" {
+  assert_eq(cs(some("a")), "A");
+  assert_eq(cs(some("b")), "B");
+  assert_eq(cs(some("z")), "X:z");
+  assert_eq(cs(none), "N")
+}
+
+test "distinct int literals do not shadow" {
+  assert_eq(cn(1), "a");
+  assert_eq(cn(2), "b");
+  assert_eq(cn(3), "c");
+  assert_eq(cn(99), "z:99")
+}

@@ -76,6 +76,8 @@ make install   # cargo build --release + install to ~/.local/bin/almide
 cargo build --release
 
 almide run app.almd              # Compile + execute
+almide run app.almd --target wasm  # Compile + execute on wasmtime (byte-identical to native)
+almide run app.almd -- arg1 arg2 # Program args go after --
 almide build app.almd -o app     # Build binary
 almide build app.almd --target wasm  # Build WASM
 almide test                      # Find all .almd with test blocks (recursive)

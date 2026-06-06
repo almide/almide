@@ -42,7 +42,15 @@ enum Commands {
         /// Rust runs in dev profile.
         #[arg(long)]
         release: bool,
-        /// Arguments passed to the program
+        /// Execution target: `rust` (default, native binary) or `wasm`
+        /// (build a wasm32-wasi module and execute it on the `wasmtime`
+        /// CLI). Both targets must produce byte-identical observable
+        /// behavior — the cross-target equivalence guarantee.
+        #[arg(long)]
+        target: Option<String>,
+        /// Arguments passed to the program. Almide's own flags (`--target`,
+        /// `--no-check`, `--release`) are consumed before these; anything
+        /// after a `--` separator is forwarded verbatim to the program.
         #[arg(allow_hyphen_values = true)]
         program_args: Vec<String>,
     },
@@ -611,9 +619,9 @@ fn dispatch(cli: Cli) {
     };
     match command {
         Commands::Init => cli::cmd_init(),
-        Commands::Run { file, no_check, release, program_args } => {
+        Commands::Run { file, no_check, release, target, program_args } => {
             let file = resolve_file(file);
-            cli::cmd_run(&file, &program_args, no_check, release);
+            cli::cmd_run(&file, &program_args, no_check, release, target.as_deref());
         }
         Commands::Build { file, o, target, release, fast, unchecked_index, no_check, repr_c, cdylib } => {
             let file = resolve_file(file);

@@ -683,3 +683,25 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/list_total_order.almd", class = "fixture" },
 ]
+
+# ── ASSIGN-OF-UNIT REJECTION (in-place mutator misuse, Cluster-A) ─────
+[[contract]]
+id        = "C-058"
+title     = "Assigning a Unit-returning in-place mutator's result is a checker error on both targets"
+statement = "An in-place stdlib mutator (`list.push`, `string.push`, `map.set` on a mut receiver — anything returning Unit) MUST be used as a STATEMENT, not assigned. `b = list.push(b, x)` assigns Unit to a non-Unit binding: native used to fail only at rustc (E0308 'expected Vec, found ()') while WASM erased Unit and silently RAN the program — a build-success asymmetry (compiled on WASM, not native). The checker now rejects the Unit-to-non-Unit assignment (E001) with a type-directed hint (call it as a statement, or rebuild with `b = b + [item]` for a List / `s + \"…\"` for a String), so BOTH targets reject identically. The well-typed statement form is byte-identical native == wasm."
+since     = "0.24.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/inplace_mutator_statement.almd", class = "fixture" },
+]
+
+# ── UNCONSTRAINED GENERIC-COLLECTION ELEMENT (with_capacity/set.new, Cluster-A) ─
+[[contract]]
+id        = "C-059"
+title     = "An unconstrained generic-collection element compiles on both targets (element defaulted + turbofished)"
+statement = "A generic-collection constructor whose element type NO argument constrains — `list.with_capacity(cap: Int) -> List[A]`, `set.new() -> Set[A]`, or an empty `[]` in value position — is well-typed but under-constrained when its result is only consumed by an element-agnostic op (`list.len`, `set.len`). WASM carries no element type and runs fine, but native lowers the constructor to a generic fn (`almide_rt_list_with_capacity<A>`) / `Vec::<A>::new()` and rustc rejects the unconstrained `A` (E0282/E0283) — a build-success asymmetry. The element is unobservable (the container is empty), so ConcretizeTypes' final empty-payload sweep defaults it to a concrete placeholder (the same `Int` as C-052) on BOTH targets, and the Rust walker emits the matching turbofish (`with_capacity::<i64>`, `set.new::<i64>`). Both targets now build and print byte-identically; the typed-let / populated forms (which pin the element) are the regression guard."
+since     = "0.24.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/unconstrained_collection_elem.almd", class = "fixture" },
+]
