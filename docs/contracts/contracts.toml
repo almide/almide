@@ -663,11 +663,11 @@ evidence  = [
   { path = "spec/wasm_cross/math_log_gamma.almd", class = "fixture" },
 ]
 
-# ── EMPTY-COLLECTION FOLD CODEGEN COMPLETENESS (Cluster-2) ───────────
+# ── EMPTY-COLLECTION FOLD: ANNOTATE THE COLLECTION (folds into C-058) ─
 [[contract]]
 id        = "C-052"
-title     = "A fold over an empty collection compiles on both targets (unconstrained element params defaulted)"
-statement = "A `list`/`map`/`set` `.fold` over an EMPTY collection whose element/key/value types the closure never uses is well-typed but under-constrained (Rust would need a turbofish). Codegen defaults those unconstrained closure params (and the empty collection literal's element slots) to a concrete placeholder so the build succeeds on BOTH targets — native rustc no longer reports E0283 and wasm no longer falls back to i32 / refuses at the ConcretizeTypes gate. The collection is empty so the closure is never invoked, making the default unobservable; using the SAME default on both sides keeps native == wasm. Non-empty folds that DO use the params still infer normally."
+title     = "A fold over an empty collection requires the collection to carry an element type (no codegen defaulting)"
+statement = "A `list`/`map`/`set` `.fold` over an EMPTY collection whose element/key/value types the closure never uses still requires the EMPTY collection to carry an element type. This is the SAME undecidable-empty-collection class as C-058: an unannotated empty `[]` / `map.new()` / `set.new()` here is a frontend compile error (E018) on BOTH targets, not a slot codegen defaults — the former `Int` defaulting (`default_unconstrained_fold_params`) was a layer violation and has been removed. Once the empty collection is ANNOTATED, its element type pins the closure params the normal way and the fold builds + prints byte-identically native == wasm even though the closure is never invoked. Non-empty folds that DO use the params still infer normally."
 since     = "0.24.0"
 status    = "active"
 evidence  = [
@@ -717,4 +717,27 @@ since     = "0.24.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/list_product_overflow.almd", class = "fixture" },
+]
+
+# ── ASSIGN-OF-UNIT REJECTION (in-place mutator misuse, Cluster-A) ─────
+[[contract]]
+id        = "C-057"
+title     = "Assigning a Unit-returning in-place mutator's result is a checker error on both targets"
+statement = "An in-place stdlib mutator (`list.push`, `string.push`, `map.set` on a mut receiver — anything returning Unit) MUST be used as a STATEMENT, not assigned. `b = list.push(b, x)` assigns Unit to a non-Unit binding: native used to fail only at rustc (E0308 'expected Vec, found ()') while WASM erased Unit and silently RAN the program — a build-success asymmetry (compiled on WASM, not native). The checker now rejects the Unit-to-non-Unit assignment (E001) with a type-directed hint (call it as a statement, or rebuild with `b = b + [item]` for a List / `s + \"…\"` for a String), so BOTH targets reject identically. The well-typed statement form is byte-identical native == wasm."
+since     = "0.24.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/inplace_mutator_statement.almd", class = "fixture" },
+]
+
+# ── UNDECIDABLE EMPTY COLLECTION = COMPILE ERROR (Rust/Swift rule, never defaulted) ─
+[[contract]]
+id        = "C-058"
+title     = "An empty collection with an uninferable element type is a compile error on both targets, never silently defaulted"
+statement = "An empty collection whose element type CANNOT be inferred from any surrounding context — an empty `[]` / `[:]` literal, `set.new()`, `map.new()`, or `list.with_capacity(n)` consumed only by element-agnostic ops, and the iterable of a `for _ in []` — is a COMPILE ERROR on BOTH targets (frontend `E018`), resolved by a type annotation. Almide follows Rust/Swift: an undecidable empty collection demands an explicit element type and is NEVER silently defaulted to an arbitrary one (observability is irrelevant, exactly as in Rust/Swift — `for _ in []` is an error even though the element is never read). This replaces the former defaulting behavior (old C-055, which set the element to `Int` in codegen so both targets built): defaulting an undecidable element in codegen was a layer violation and observably mis-typed record fields. Because the check runs in the type checker before code generation, BOTH targets reject identically (previously native rustc failed with E0282/E0283 on the emitted `Vec::<_>::new()` while WASM, carrying no element type, ran — a build-success asymmetry). The ANNOTATED forms of every producer build and print byte-identically native == wasm; a bare list literal also accepts the inline `[]: List[T]` call-arg annotation. A rigid generic parameter (`fn f[T]() -> List[T] = []`) is a concrete element type and is accepted. The fold over an empty collection (former C-052 defaulting) folds into this rule: the empty collection must be annotated."
+since     = "0.24.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/empty_collection_annotated.almd", class = "fixture" },
+  { path = "tests/diagnostics/e018-empty-collection-element/broken.almd", class = "fixture" },
 ]

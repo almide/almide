@@ -1,6 +1,6 @@
 # CLI Specification
 
-> Last updated: 2026-03-28
+> Last updated: 2026-06-06
 
 ## Overview
 
@@ -20,16 +20,21 @@ almide <command> [options] [arguments]
 
 ```bash
 almide run                              # src/main.almd を実行
-almide run app.almd                     # 指定ファイルを実行
+almide run app.almd                     # 指定ファイルを実行 (native)
+almide run app.almd --target wasm       # wasm をビルドして wasmtime で実行
 almide run -- --flag value              # -- 以降はプログラムの引数
 almide run app.almd -- arg1 arg2        # ファイル指定 + プログラム引数
 ```
 
 | オプション | 説明 |
 |---|---|
+| `--target rust\|wasm` | 実行ターゲット。`rust`（既定、ネイティブバイナリ）または `wasm`（`wasm32-wasi` をビルドし `wasmtime` CLI で実行）。両ターゲットは同一の観測可能挙動（stdout/stderr/exit）を出す（クロスターゲット等価性保証）。`wasm` には PATH に `wasmtime` が必要 |
 | `--no-check` | 型チェックをスキップ |
+| `--release` | 最適化ビルド (cargo --release) |
 
-プログラム内で `env.args()` を呼ぶと `--` 以降の引数が `List[String]` で返る。
+`almide` 自身のフラグ（`--target` / `--no-check` / `--release`）は `--` の前で解釈され、`--` 以降はそのままプログラムに渡る（`cargo run` と同じ規約）。プログラム内で `env.args()` を呼ぶと `--` 以降の引数が `List[String]` で返る。
+
+テスト: `tests/run_target_flag_test.rs`
 
 ---
 

@@ -1,0 +1,33 @@
+// @contract: C-058
+// An empty collection whose element type cannot be inferred from context is a
+// COMPILE ERROR on both targets (E018) — never silently defaulted (the
+// Rust/Swift rule; see tests/diagnostics/e018-empty-collection-element for the
+// error itself). The resolution is a type annotation. This fixture pins the
+// POSITIVE side of that contract: the annotated forms of every empty-collection
+// producer — empty `[]` / `[:]`, `set.new()`, `map.new()`, and
+// `list.with_capacity(n)` — build and print byte-identically native == wasm.
+// (The unannotated forms are rejected before codegen, so there is no
+// cross-target asymmetry left to diverge.)
+fn main() -> Unit = {
+  // Empty literals, element type pinned by the binding annotation.
+  let xs: List[Int] = []
+  let m: Map[String, Int] = [:]
+  println("xs=${list.len(xs)} m=${map.len(m)}")        // xs=0 m=0
+
+  // Generic constructors whose element NO argument constrains — annotated.
+  let s: Set[Int] = set.new()
+  let mm: Map[String, Int] = map.new()
+  let cap: List[Int] = list.with_capacity(8)
+  println("s=${set.len(s)} mm=${map.len(mm)} cap=${list.len(cap)}")  // s=0 mm=0 cap=0
+
+  // The annotated empties accept the normal populating ops and stay correct.
+  let xs2: List[Int] = xs + [7]
+  let s2: Set[Int] = set.insert(s, 5)
+  let cap2: List[Int] = cap + [1, 2, 3]
+  println("xs2=${list.len(xs2)} s2=${set.len(s2)} cap2=${list.len(cap2)}")  // 1 1 3
+
+  // for over an explicitly-typed empty list runs zero times.
+  var n = 99
+  for _ in xs { n = 0 }
+  println("n=${n}")                                    // n=99
+}

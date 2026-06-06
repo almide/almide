@@ -1,0 +1,36 @@
+// @contract: C-057
+// An in-place stdlib mutator (`list.push`, `string.push`, `map.set` … — a `mut`
+// receiver returning Unit) MUST be used as a STATEMENT, not assigned. Writing
+// `b = list.push(b, x)` assigns Unit to a non-Unit binding: native used to fail
+// only at rustc (E0308 "expected Vec, found ()") while WASM erased Unit and ran
+// the program — a build-success ASYMMETRY (compiled on WASM, not native). The
+// checker now rejects the assignment on BOTH targets (see
+// tests/diagnostics/e001-assign-unit-result), so the only well-typed form is the
+// statement form below. This fixture pins that the statement form is byte-
+// identical native == wasm — the behavior the rejection steers every program to.
+fn main() -> Unit = {
+  // list.push as a statement — mutates `b` in place.
+  var b: List[Int] = []
+  list.push(b, 1)
+  list.push(b, 2)
+  list.push(b, 3)
+  println("b=${list.len(b)}")          // 3
+
+  // string.push as a statement — mutates `s` in place.
+  var s: String = "x"
+  string.push(s, "y")
+  string.push(s, "z")
+  println("s=${s}")                     // xyz
+
+  // map.set returns a value — assignment IS valid for it (not a Unit mutator).
+  var m: Map[String, Int] = [:]
+  m = map.set(m, "a", 1)
+  m = map.set(m, "b", 2)
+  println("m=${map.len(m)}")            // 2
+
+  // The value-rebuild alternative the diagnostic suggests for lists.
+  var c: List[Int] = []
+  c = c + [10]
+  c = c + [20]
+  println("c=${list.len(c)}")           // 2
+}
