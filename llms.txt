@@ -164,6 +164,7 @@ let root_i = float.to_int(root_f)    // truncating
 | E014 | Unreachable match arm | Drop the dead arm, or tighten the earlier arm so this one is reachable |
 | E015 | Possible stdlib reimplementation (warning) | Delegate via the `try:` shim, or rename if intentionally different |
 | E016 | Function in a `Set` element or `Map` key | Keep closures in a `List`, or use a comparable key (closures are fine as `Map` values) |
+| E017 | Record construction on an enum type name | Construct a specific record-bearing case (`Named { ... }`), not the enum type |
 | E420 | Function visibility violation (callee is private) | Make the callee public, or add a public shim |
 
 A rustc 4-digit code (`error[E0XXX]`) leaking through always indicates

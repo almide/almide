@@ -120,6 +120,23 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
             }
         }
         IrExprKind::LitFloat { value } => {
+            // Non-finite floats (a const-fold can produce inf/NaN, e.g.
+            // `1e300 * 1e300`) have no Rust literal form: `format!("{}", inf)`
+            // is the bare identifier `inf`, which the `{value}f64` template
+            // turns into the undefined `inff64` (E0425). Emit the associated
+            // constant directly — it needs no numeric suffix and is valid for
+            // both f64 and f32.
+            if !value.is_finite() {
+                let f32_suffix = matches!(expr.ty, Ty::Float32);
+                let assoc = if f32_suffix { "f32" } else { "f64" };
+                return if value.is_nan() {
+                    format!("{}::NAN", assoc)
+                } else if *value > 0.0 {
+                    format!("{}::INFINITY", assoc)
+                } else {
+                    format!("{}::NEG_INFINITY", assoc)
+                };
+            }
             let value_s = format!("{}", value);
             if matches!(expr.ty, Ty::Float32) {
                 format!("{}f32", value_s)
@@ -453,7 +470,7 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 // Box recursive fields (annotation is target-aware — empty for non-Rust)
                 if let Some(cn) = name {
                     if ctx.ann.boxed_fields.contains(&(cn.to_string(), k.to_string())) {
-                        val_str = format!("Box::new({})", val_str);
+                        val_str = format!("std::boxed::Box::new({})", val_str);
                     }
                 }
                 // A closure stored in a struct field is `Rc<dyn Fn>`; the
@@ -482,7 +499,7 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 let mut val_str = render_expr(ctx, default_expr);
                 let needs_box = name.as_ref()
                     .map_or(false, |cn| ctx.ann.boxed_fields.contains(&(cn.to_string(), field_name.clone())));
-                if needs_box { val_str = format!("Box::new({})", val_str); }
+                if needs_box { val_str = format!("std::boxed::Box::new({})", val_str); }
                 field_strs.push(ctx.templates.render_with("record_field", None, &[], &[("name", field_name.as_str()), ("value", val_str.as_str())])
                     .unwrap_or_else(|| format!("{}: {}", field_name, val_str)));
             }
@@ -856,7 +873,7 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
             }
         }
         IrExprKind::BoxNew { expr: inner } => {
-            format!("Box::new({})", render_expr(ctx, inner))
+            format!("std::boxed::Box::new({})", render_expr(ctx, inner))
         }
         IrExprKind::RcWrap { expr: inner, cast_ty, wrap } => {
             // A BOXED closure literal needs annotated params (the `as` cast does
@@ -874,7 +891,7 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 almide_ir::FnBox::BoxSendSync => {
                     let ty = cast_ty.as_deref().expect("fan thunk RcWrap always carries a Fn cast_ty");
                     let box_type = super::helpers::render_type_box_fn(ctx, ty, "Send + Sync");
-                    format!("(Box::new({}) as {})", s, box_type)
+                    format!("(std::boxed::Box::new({}) as {})", s, box_type)
                 }
                 almide_ir::FnBox::Rc => {
                     if let Some(ty) = cast_ty {
@@ -1290,7 +1307,7 @@ fn render_enum_constructor(ctx: &RenderContext, ctor_name: &str, enum_name: &str
         // `{ let __cap; lambda }` → boxes the tail, a `Var` is already `Rc`), so no
         // ctor-side boxing — wrapping again here double-boxed `Block`-shaped args.
         if needs_box {
-            format!("Box::new({})", rendered)
+            format!("std::boxed::Box::new({})", rendered)
         } else {
             rendered
         }

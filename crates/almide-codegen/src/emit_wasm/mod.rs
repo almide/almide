@@ -483,7 +483,18 @@ pub struct WasmEmitter {
     // recursive ADT (`type Tree = Leaf(Int) | Node(Tree, Tree)`) would expand its
     // type graph forever at compile time. Reserved (sorted, host-deterministic)
     // before compilation, mirroring `eq_funcs`.
+    // Keyed by the MANGLED instantiation name (`Tree_Int`, `Tree_String`,
+    // `Tree_List_Int`), not the bare type name. A generic recursive ADT
+    // (`type Tree[T] = Leaf(T) | Node(Tree[T], Tree[T])`) needs a SEPARATE repr
+    // fn per concrete `T`: the fn renders its payload TEXT, which differs by `T`
+    // (a `Leaf(Int)` reprs `1`, a `Leaf(String)` reprs `"a"`). A monomorphic
+    // by-bare-name fn read the payload as a raw `TypeVar` and printed `T {  }`.
+    // Non-generic recursive types mangle to their bare name (backward compatible).
     pub repr_funcs: BTreeMap<String, u32>,
+    // The concrete instantiation `Ty::Named(name, args)` behind each mangled
+    // `repr_funcs` key, so `compile_repr_funcs` walks the body with the real
+    // type args (substituted into each case's payload), not empty args.
+    pub repr_func_tys: BTreeMap<String, Ty>,
     // Whether the program uses filesystem operations (fs.read_text, etc.)
     pub needs_fs: bool,
 }
@@ -628,6 +639,7 @@ impl WasmEmitter {
             mutable_captures: HashSet::new(),
             eq_funcs: HashMap::new(),
             repr_funcs: BTreeMap::new(),
+            repr_func_tys: BTreeMap::new(),
             user_exports: Vec::new(),
             needs_fs: false,
         }
@@ -1511,7 +1523,7 @@ pub(crate) fn emit(program: &IrProgram) -> Vec<u8> {
 
     // Pre-register per-type Almide-literal repr functions (recursive ADTs walk via
     // call, not inline expansion). Must reserve indices before compilation starts.
-    register_repr_funcs(&mut emitter);
+    register_repr_funcs(&mut emitter, program);
 
     // Phase 2: Compile function bodies (order must match registration order)
     runtime::compile_runtime(&mut emitter);
@@ -2338,7 +2350,7 @@ fn recursive_type_names(emitter: &WasmEmitter) -> HashSet<String> {
 /// Reserve indices in SORTED name order so they are a pure function of the
 /// program (the same 32-bit/64-bit host-determinism contract as
 /// `register_variant_eq_funcs`); the (also sorted) compile order must match.
-fn register_repr_funcs(emitter: &mut WasmEmitter) {
+fn register_repr_funcs(emitter: &mut WasmEmitter, program: &IrProgram) {
     let type_idx = emitter.register_type(vec![ValType::I32], vec![ValType::I32]);
 
     let recursive = recursive_type_names(emitter);
@@ -2349,11 +2361,11 @@ fn register_repr_funcs(emitter: &mut WasmEmitter) {
     // synthetic `__anon_record_*` shapes (walked inline) and not the variant CASE
     // names (a `Node` value reprs through its variant type's fn, by tag). A type
     // with a closure field is excluded.
-    let mut names: Vec<String> = Vec::new();
+    let mut base_names: HashSet<String> = HashSet::new();
     for (name, cases) in &emitter.variant_info {
         let has_closure = cases.iter().any(|c| c.fields.iter().any(|(_, ft)| ty_field_has_closure(ft)));
         if recursive.contains(name) && !has_closure {
-            names.push(name.clone());
+            base_names.insert(name.clone());
         }
     }
     // Variant CASE names that are also keyed in record_fields — skip them as
@@ -2367,14 +2379,135 @@ fn register_repr_funcs(emitter: &mut WasmEmitter) {
         let is_variant_type = emitter.variant_info.contains_key(name);
         let has_closure = fields.iter().any(|(_, ft)| ty_field_has_closure(ft));
         if recursive.contains(name) && !is_anon && !is_variant_case && !is_variant_type && !has_closure {
-            names.push(name.clone());
+            base_names.insert(name.clone());
         }
     }
-    names.sort();
-    names.dedup();
-    for name in names {
-        let func_idx = emitter.register_func(&format!("__repr_{}", name), type_idx);
-        emitter.repr_funcs.insert(name, func_idx);
+
+    // Discover the concrete INSTANTIATIONS of these recursive types used in the
+    // program (`Tree[Int]`, `Tree[String]`, `Tree[List[Int]]`). Each needs its
+    // own repr fn keyed by the mangled name — a monomorphic by-bare-name fn
+    // reads the `T` payload as a raw `TypeVar`. The recursive references inside
+    // a fn body resolve to the SAME instantiation (`Node`'s children are
+    // `Tree[T]` → `Tree[Int]` for the `Tree[Int]` fn), so the site-level
+    // instantiations are the full set — no new ones appear transitively.
+    // A non-generic recursive type (`type IntTree = Leaf(Int) | ...`) yields the
+    // bare-name key (empty args → mangle is just the name), preserving behavior.
+    let mut instantiations: BTreeMap<String, Ty> = BTreeMap::new();
+    // Always register the bare-name fn for every recursive type: a recursive type
+    // with NO interpolation site still needs its reserved slot iff something else
+    // (e.g. a nested non-generic recursive field) routes to it, and the
+    // non-generic case is reached via the bare name at dispatch.
+    for name in &base_names {
+        let bare = Ty::Named(almide_base::intern::sym(name), Vec::new());
+        instantiations.insert(name.clone(), bare);
+    }
+    collect_repr_instantiations(program, &base_names, &mut instantiations);
+
+    // Reserve indices in SORTED key order (host-determinism contract); the
+    // compile order in `compile_repr_funcs` must match.
+    for (mangled, ty) in instantiations {
+        let func_idx = emitter.register_func(&format!("__repr_{}", mangled), type_idx);
+        emitter.repr_funcs.insert(mangled.clone(), func_idx);
+        emitter.repr_func_tys.insert(mangled, ty);
+    }
+}
+
+/// Mangle a concrete type into the suffix used to key per-instantiation repr
+/// fns (`Tree[Int]` → `Tree_Int`, `Tree[List[Int]]` → `Tree_List_Int`). Mirrors
+/// the Rust-walker `mangle_ty_for_mono` convention so the two targets name
+/// instantiations identically. A type with no args mangles to its bare name.
+pub(super) fn mangle_repr_ty(ty: &Ty) -> String {
+    use almide_lang::types::constructor::TypeConstructorId;
+    match ty {
+        Ty::Int => "Int".into(),
+        Ty::Float => "Float".into(),
+        Ty::String => "String".into(),
+        Ty::Bool => "Bool".into(),
+        Ty::Int8 => "Int8".into(),
+        Ty::Int16 => "Int16".into(),
+        Ty::Int32 => "Int32".into(),
+        Ty::UInt8 => "UInt8".into(),
+        Ty::UInt16 => "UInt16".into(),
+        Ty::UInt32 => "UInt32".into(),
+        Ty::UInt64 => "UInt64".into(),
+        Ty::Float32 => "Float32".into(),
+        Ty::Bytes => "Bytes".into(),
+        Ty::Unit => "Unit".into(),
+        Ty::Named(name, args) => {
+            if args.is_empty() { name.to_string() }
+            else { format!("{}_{}", name, args.iter().map(mangle_repr_ty).collect::<Vec<_>>().join("_")) }
+        }
+        Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 =>
+            format!("List_{}", mangle_repr_ty(&args[0])),
+        Ty::Applied(id, args) => {
+            let name = format!("{:?}", id);
+            if args.is_empty() { name } else {
+                format!("{}_{}", name, args.iter().map(mangle_repr_ty).collect::<Vec<_>>().join("_"))
+            }
+        }
+        _ => "Unknown".into(),
+    }
+}
+
+/// Walk every expression type in the program, recording each concrete
+/// instantiation `Ty::Named(base, non-empty-args)` of a recursive repr-backed
+/// type (`base` ∈ `base_names`), keyed by its mangled name. Nested instantiations
+/// (`List[Tree[Int]]` → `Tree[Int]`) are found by scanning each type's subtree.
+fn collect_repr_instantiations(
+    program: &IrProgram,
+    base_names: &HashSet<String>,
+    out: &mut BTreeMap<String, Ty>,
+) {
+    use almide_ir::visit::{IrVisitor, walk_expr};
+    struct Collector<'a> {
+        base_names: &'a HashSet<String>,
+        out: &'a mut BTreeMap<String, Ty>,
+    }
+    impl<'a> Collector<'a> {
+        fn scan_ty(&mut self, ty: &Ty) {
+            // A generic recursive type used concretely: record the instantiation.
+            if let Ty::Named(name, args) = ty {
+                if !args.is_empty()
+                    && self.base_names.contains(name.as_str())
+                    && !args.iter().any(ty_is_unresolved_repr)
+                {
+                    out_insert(self.out, ty);
+                }
+            }
+            // Descend into every child type (List/Tuple/Map/Option/Result/Named
+            // args, Record fields) so nested instantiations surface too.
+            for child in ty.children() {
+                self.scan_ty(child);
+            }
+        }
+    }
+    fn out_insert(out: &mut BTreeMap<String, Ty>, ty: &Ty) {
+        out.insert(mangle_repr_ty(ty), ty.clone());
+    }
+    impl<'a> IrVisitor for Collector<'a> {
+        fn visit_expr(&mut self, expr: &almide_ir::IrExpr) {
+            self.scan_ty(&expr.ty);
+            walk_expr(self, expr);
+        }
+    }
+    let mut c = Collector { base_names, out };
+    for func in &program.functions {
+        c.visit_expr(&func.body);
+    }
+    for module in &program.modules {
+        for func in &module.functions {
+            c.visit_expr(&func.body);
+        }
+    }
+}
+
+/// A type still carrying an unresolved `TypeVar`/`Unknown` is not a real
+/// instantiation — skip it (the corresponding bare-name fn handles the
+/// degenerate case, and we must not mangle a `TypeVar` into a fn name).
+fn ty_is_unresolved_repr(ty: &Ty) -> bool {
+    match ty {
+        Ty::TypeVar(_) | Ty::Unknown => true,
+        _ => ty.children().iter().any(|c| ty_is_unresolved_repr(c)),
     }
 }
 
@@ -2390,7 +2523,7 @@ fn compile_repr_funcs(emitter: &mut WasmEmitter, var_table: &almide_ir::VarTable
         .collect();
     entries.sort();
 
-    for (name, _func_idx) in &entries {
+    for (mangled, _func_idx) in &entries {
         let type_idx = emitter.register_type(vec![ValType::I32], vec![ValType::I32]);
 
         // One repr fn walks a SINGLE level (children recurse via call), so its
@@ -2418,8 +2551,17 @@ fn compile_repr_funcs(emitter: &mut WasmEmitter, var_table: &almide_ir::VarTable
 
         // The repr emitters dispatch on the static `Ty` of the value: a variant
         // type → `emit_repr_variant`, otherwise a record → `emit_repr_record`.
-        let is_variant = emitter.variant_info.contains_key(name.as_str());
-        let ty = almide_lang::types::Ty::Named(almide_base::intern::sym(name), Vec::new());
+        // The instantiation `Ty` (e.g. `Tree[Int]`) carries the concrete type
+        // args so the variant/record walk substitutes them into each payload —
+        // this is the whole point of keying by instantiation. The dispatch base
+        // name is the type's own name (`Tree`), not the mangled key.
+        let ty = emitter.repr_func_tys.get(mangled).cloned()
+            .unwrap_or_else(|| almide_lang::types::Ty::Named(almide_base::intern::sym(mangled), Vec::new()));
+        let base_name = match &ty {
+            almide_lang::types::Ty::Named(n, _) => n.to_string(),
+            _ => mangled.clone(),
+        };
+        let is_variant = emitter.variant_info.contains_key(base_name.as_str());
 
         let compiled_func = {
             let mut compiler = FuncCompiler {
@@ -2441,7 +2583,7 @@ fn compile_repr_funcs(emitter: &mut WasmEmitter, var_table: &almide_ir::VarTable
                 compiler.emit_repr_variant(&ty);
             } else {
                 let fields = compiler.extract_record_fields(&ty);
-                compiler.emit_repr_record(Some(name.as_str()), &fields);
+                compiler.emit_repr_record(Some(base_name.as_str()), &fields);
             }
             compiler.func.instruction(&wasm_encoder::Instruction::End);
             compiler.func

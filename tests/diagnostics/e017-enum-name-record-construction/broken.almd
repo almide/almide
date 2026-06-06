@@ -1,0 +1,6 @@
+type V = Tag(Float) | Named { who: String }
+
+fn main() -> Unit = {
+  let v = V { who: "x" }
+  println("${v}")
+}

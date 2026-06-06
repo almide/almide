@@ -139,7 +139,7 @@ pub fn render_type_box_fn(ctx: &RenderContext, ty: &Ty, bounds: &str) -> String 
         Ty::Fn { params, ret } => {
             let params_str = params.iter().map(|p| super::types::render_type(ctx, p)).collect::<Vec<_>>().join(", ");
             let ret_str = super::types::render_type(ctx, ret);
-            format!("Box<dyn Fn({}) -> {} + {}>", params_str, ret_str, bounds)
+            format!("std::boxed::Box<dyn Fn({}) -> {} + {}>", params_str, ret_str, bounds)
         }
         _ => super::types::render_type(ctx, ty),
     }
