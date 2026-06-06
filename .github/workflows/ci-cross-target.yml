@@ -41,7 +41,11 @@ jobs:
 
       - name: Install wasmtime
         run: |
-          VERSION=$(curl -s https://api.github.com/repos/bytecodealliance/wasmtime/releases/latest | grep '"tag_name"' | cut -d'"' -f4)
+          # Pinned (not "latest"): the unauthenticated releases/latest API call is
+          # rate-limited per runner IP and intermittently returns an error body,
+          # yielding an empty VERSION and a garbage download (hit 2026-06-06).
+          # A pinned toolchain is also reproducible. Bump deliberately.
+          VERSION=v42.0.1
           curl -LO "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/wasmtime-${VERSION}-x86_64-linux.tar.xz"
           tar -xf wasmtime-*.tar.xz
           sudo mv wasmtime-*/wasmtime /usr/local/bin/
