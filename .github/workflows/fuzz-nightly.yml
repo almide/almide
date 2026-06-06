@@ -1,0 +1,151 @@
+name: Fuzz (nightly)
+
+# Stage 3 of the completeness roadmap: the generative differential fuzzer
+# (tools/xtarget-fuzz) hunts native↔WASM observable divergences and
+# codegen failures on a schedule. This runs ONLY nightly (and on manual
+# dispatch) — it is deliberately kept out of the PR/push CI so the fast
+# checks stay lean. If it finds anything, it uploads the minimized repros
+# and opens/updates a tracking issue.
+
+on:
+  schedule:
+    # 03:00 UTC daily — off-peak, well clear of the push/PR CI windows.
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: "Fuzz time budget in minutes"
+        required: false
+        default: "60"
+      seed:
+        description: "Campaign seed (blank = random, logged in output)"
+        required: false
+        default: ""
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_TOOLCHAIN: "1.89.0"
+  # Default budget for the scheduled run; the dispatch input overrides it.
+  FUZZ_MINUTES: "60"
+
+jobs:
+  fuzz:
+    if: github.server_url == 'https://github.com'
+    name: Generative differential fuzz
+    runs-on: ubuntu-latest
+    # Hard ceiling well above the fuzz budget so a hung child can never
+    # wedge the runner indefinitely.
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: fuzz-cargo-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: fuzz-cargo-${{ env.RUST_TOOLCHAIN }}-
+
+      # Build the compiler once — the fuzzer shells out to this binary.
+      - name: Build almide
+        run: cargo build --release --bin almide
+
+      # Build the fuzzer (its own workspace; path-deps the compiler crate).
+      - name: Build fuzzer
+        working-directory: tools/xtarget-fuzz
+        run: cargo build --release
+
+      - name: Install wasmtime
+        # Pinned to an exact release rather than the `releases/latest` API:
+        # the unauthenticated API call is rate-limited and broke CI when it
+        # returned a 403 instead of a tag. A fixed version is also more
+        # reproducible for the differential gate (matches develop's ci.yml).
+        run: |
+          VERSION=v42.0.1
+          curl -LO "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/wasmtime-${VERSION}-x86_64-linux.tar.xz"
+          tar -xf wasmtime-*.tar.xz
+          sudo mv wasmtime-*/wasmtime /usr/local/bin/
+          wasmtime --version
+
+      - name: Run fuzz campaign
+        id: campaign
+        run: |
+          MINUTES="${{ github.event.inputs.minutes || env.FUZZ_MINUTES }}"
+          SEED_ARG=""
+          if [ -n "${{ github.event.inputs.seed }}" ]; then
+            SEED_ARG="--seed ${{ github.event.inputs.seed }}"
+          fi
+          # The fuzzer exits non-zero iff it recorded a finding; capture
+          # that without failing the step so we can branch on it.
+          set +e
+          ./tools/xtarget-fuzz/target/release/xtarget-fuzz run \
+            --minutes "$MINUTES" \
+            --repo "$PWD" \
+            --almide "$PWD/target/release/almide" \
+            $SEED_ARG \
+            2>&1 | tee fuzz-output.txt
+          STATUS=${PIPESTATUS[0]}
+          set -e
+          echo "status=$STATUS" >> "$GITHUB_OUTPUT"
+          FINDINGS_DIR="tools/xtarget-fuzz/findings"
+          COUNT=0
+          if [ -d "$FINDINGS_DIR" ]; then
+            COUNT=$(find "$FINDINGS_DIR" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')
+          fi
+          echo "findings=$COUNT" >> "$GITHUB_OUTPUT"
+
+      - name: Upload findings
+        if: steps.campaign.outputs.findings != '0'
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-findings-${{ github.run_id }}
+          path: |
+            tools/xtarget-fuzz/findings/
+            fuzz-output.txt
+          retention-days: 30
+
+      - name: Open / update tracking issue
+        if: steps.campaign.outputs.findings != '0'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          COUNT="${{ steps.campaign.outputs.findings }}"
+          TITLE="Nightly fuzz: $COUNT cross-target finding(s)"
+          # Summarize the finding kinds for the issue body.
+          SUMMARY=$(find tools/xtarget-fuzz/findings -name meta.txt -exec cat {} \; \
+            | grep -E '^(kind|summary|reproduce)' | head -60 || true)
+          BODY=$(cat <<EOF
+          The nightly generative differential fuzzer recorded **$COUNT** unique finding(s).
+
+          Artifacts (minimized repros + both-target outputs) are attached to
+          [run #${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}).
+
+          Each finding's \`meta.txt\` includes a deterministic replay command:
+          \`xtarget-fuzz replay --seed <S> --index <I>\`.
+
+          <details><summary>Finding summaries</summary>
+
+          \`\`\`
+          $SUMMARY
+          \`\`\`
+
+          </details>
+          EOF
+          )
+          # Reuse an open issue with the fuzz label if one exists, else open.
+          EXISTING=$(gh issue list --label fuzz --state open --json number --jq '.[0].number' || echo "")
+          if [ -n "$EXISTING" ]; then
+            gh issue comment "$EXISTING" --body "$BODY"
+          else
+            gh label create fuzz --color B60205 --description "Found by the nightly differential fuzzer" 2>/dev/null || true
+            gh issue create --title "$TITLE" --body "$BODY" --label fuzz
+          fi
