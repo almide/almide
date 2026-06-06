@@ -1,4 +1,4 @@
-// @contract: C-054
+// @contract: C-057
 // An in-place stdlib mutator (`list.push`, `string.push`, `map.set` … — a `mut`
 // receiver returning Unit) MUST be used as a STATEMENT, not assigned. Writing
 // `b = list.push(b, x)` assigns Unit to a non-Unit binding: native used to fail

@@ -1,0 +1,3 @@
+expects_code = "E018"
+expects_error = "cannot infer the element type of"
+hint_substring = "annotate"

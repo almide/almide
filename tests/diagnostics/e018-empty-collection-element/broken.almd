@@ -1,0 +1,10 @@
+// An empty collection whose element type NO context constrains is a compile
+// error on BOTH targets (Almide follows Rust/Swift). Here `[]` is only ever
+// consumed by `list.len`, which is element-agnostic, so the element type has no
+// inference source. Native rustc would reject the emitted `Vec::<_>::new()`
+// (E0282); WASM carries no element type and used to RUN — that cross-target
+// asymmetry is what the frontend E018 closes. It is NEVER silently defaulted.
+fn main() -> Unit = {
+  let n: Int = list.len([])
+  println(int.to_string(n))
+}

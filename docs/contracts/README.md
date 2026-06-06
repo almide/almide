@@ -79,8 +79,8 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-049 | float.sign is f64::signum; float/math min/max ignore NaN | 0.24.0 | active | fixture | 1 |
 | C-050 | string.split(\ | 0.24.0 | active | fixture | 1 |
 | C-051 | math.log_gamma is bit-identical (both targets use the vendored musl-libm log) | 0.24.0 | active | fixture | 1 |
-| C-052 | A fold over an empty collection compiles on both targets (unconstrained element params defaulted) | 0.24.0 | active | fixture | 1 |
+| C-052 | A fold over an empty collection requires the collection to carry an element type (no codegen defaulting) | 0.24.0 | active | fixture | 1 |
 | C-053 | list.min/max/sort/sort_by/unique_by are type-directed and total, native == wasm | 0.24.0 | active | fixture | 1 |
-| C-054 | Assigning a Unit-returning in-place mutator's result is a checker error on both targets | 0.24.0 | active | fixture | 1 |
-| C-055 | An unconstrained generic-collection element compiles on both targets (element defaulted + turbofished) | 0.24.0 | active | fixture | 1 |
+| C-057 | Assigning a Unit-returning in-place mutator's result is a checker error on both targets | 0.24.0 | active | fixture | 1 |
+| C-058 | An empty collection with an uninferable element type is a compile error on both targets, never silently defaulted | 0.24.0 | active | fixture | 1 |
 

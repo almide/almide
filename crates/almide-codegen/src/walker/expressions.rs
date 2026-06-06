@@ -406,7 +406,7 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         }
 
         // ── Pre-resolved runtime call (from @intrinsic / NormalizeRuntimeCalls) ──
-        IrExprKind::RuntimeCall { symbol, args } => render_runtime_call(ctx, symbol, args, &expr.ty),
+        IrExprKind::RuntimeCall { symbol, args } => render_runtime_call(ctx, symbol, args),
 
         // ── Calls ──
         IrExprKind::Call { target, args, .. } | IrExprKind::TailCall { target, args } => {
@@ -1356,57 +1356,7 @@ fn coerce_to_owned_string(rendered: &str, expr: &IrExpr) -> String {
 
 // ── Extracted sub-functions (reduce render_expr complexity) ──
 
-/// The runtime symbols of generic-collection constructors whose element type
-/// is unconstrained by any argument (so native rustc needs an explicit type to
-/// instantiate the generic). Keep this list in lockstep with the `@intrinsic`
-/// stdlib fns of the form `fn ctor[A](non-A args) -> Container[A]`.
-const UNCONSTRAINED_GENERIC_CTOR_SYMBOLS: &[&str] = &[
-    "almide_rt_list_with_capacity", // list.with_capacity(cap: Int) -> List[A]
-    "almide_rt_set_new",            // set.new() -> Set[A]
-];
-
-/// If `symbol` is an argument-free generic-collection constructor and its
-/// concrete result element type is known, return the `::<Elem>` turbofish to
-/// instantiate the runtime fn's type parameter. Returns `None` (no turbofish)
-/// when the symbol is not in the set or the element type is still unresolved —
-/// in which case the ConcretizeTypes hard gate would already have refused the
-/// build, so we never silently emit a `::<_>` that rustc can't infer.
-fn runtime_generic_ctor_turbofish(ctx: &RenderContext, symbol: &str, result_ty: &Ty) -> Option<String> {
-    if !UNCONSTRAINED_GENERIC_CTOR_SYMBOLS.contains(&symbol) {
-        return None;
-    }
-    // Pull the element type out of the concrete result container.
-    let elem = match result_ty {
-        Ty::Applied(TypeConstructorId::List, args)
-        | Ty::Applied(TypeConstructorId::Set, args) if args.len() == 1 => &args[0],
-        _ => return None,
-    };
-    if elem.has_unresolved_deep() {
-        return None;
-    }
-    Some(format!("::<{}>", super::types::render_type(ctx, elem)))
-}
-
-fn render_runtime_call(ctx: &RenderContext, symbol: &almide_base::intern::Sym, args: &[IrExpr], result_ty: &Ty) -> String {
-    // Generic-collection constructors whose element type is NOT constrained by
-    // any argument — `list.with_capacity(cap: Int) -> List[A]` and
-    // `set.new() -> Set[A]`. Native Rust lowers them to a generic fn
-    // (`fn almide_rt_list_with_capacity<A>(..) -> Vec<A>`); when the result is
-    // only consumed by an element-agnostic op (`list.len`, `set.size`), `A`
-    // has no inference source and rustc reports E0282/E0283 — yet WASM, which
-    // carries no element type, runs fine (the cross-target asymmetry of the
-    // `with_capacity`/`set.new` direct-use family). ConcretizeTypes Phase 3 has
-    // already defaulted the result element to a concrete type (unobservable —
-    // the container is empty), so emit it as an explicit turbofish here, the
-    // same way `EmptyMap` renders `AlmideMap::<K, V>::new()` and the empty list
-    // renders `Vec::<T>::new()`. A redundant turbofish (when args DO pin `A`)
-    // would still be valid Rust, but we only add it for these argument-free
-    // constructors so a non-generic runtime fn never gets a spurious `::<…>`.
-    if let Some(turbofish) = runtime_generic_ctor_turbofish(ctx, symbol.as_str(), result_ty) {
-        let args_str = args.iter().map(|a| render_expr_owned(ctx, a))
-            .collect::<Vec<_>>().join(", ");
-        return format!("{}{}({})", symbol.as_str(), turbofish, args_str);
-    }
+fn render_runtime_call(ctx: &RenderContext, symbol: &almide_base::intern::Sym, args: &[IrExpr]) -> String {
     // Inline numeric casts
     match symbol.as_str() {
         "almide_rt_float_from_int" | "almide_rt_int_to_float" if args.len() == 1 => {

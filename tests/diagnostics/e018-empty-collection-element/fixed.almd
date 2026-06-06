@@ -1,0 +1,8 @@
+// The fix: annotate the empty collection's element type. Binding `[]` to an
+// explicitly-typed `let` pins the element (`Int`), so the program type-checks
+// and builds byte-identically on both targets.
+fn main() -> Unit = {
+  let xs: List[Int] = []
+  let n: Int = list.len(xs)
+  println(int.to_string(n))
+}

@@ -83,7 +83,11 @@ test "generic struct" {
 
 test "empty for" {
   var n = 99
-  for _ in [] { n = 0 }
+  // An empty iterable must carry an element type (Almide follows Rust/Swift —
+  // a bare `for _ in []` is undecidable, see E018). Bind it with an explicit
+  // type; the loop still runs zero times.
+  let empty: List[Int] = []
+  for _ in empty { n = 0 }
   assert_eq(n, 99)
 }
 

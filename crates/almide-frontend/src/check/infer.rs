@@ -131,7 +131,11 @@ impl Checker {
             }
 
             ExprKind::List { elements, .. } => {
-                if elements.is_empty() { Ty::list(self.fresh_var()) }
+                if elements.is_empty() {
+                    let ty = Ty::list(self.fresh_var());
+                    self.register_empty_collection(ty.clone(), super::EmptyCollectionKind::ListLiteral);
+                    ty
+                }
                 else {
                     let first = self.infer_expr(&mut elements[0]);
                     for elem in elements.iter_mut().skip(1) { let et = self.infer_expr(elem); self.constrain(first.clone(), et, "list element"); }
@@ -170,11 +174,59 @@ impl Checker {
                             return Ty::Unknown;
                         }
                     }
-                    // Variant constructor → resolve to parent type name
-                    let type_name = self.env.constructors.get(&sym(n))
-                        .map(|(vname, _)| *vname)
-                        .unwrap_or_else(|| sym(n));
-                    Ty::Named(type_name, vec![])
+                    // Constrain each provided field value to its DECLARED field
+                    // type (with the parent type's generics instantiated to fresh
+                    // vars). This is the record-literal analogue of the tuple
+                    // payload unification in `check_call_with_type_args`: it pins
+                    // an otherwise-unconstrained field value — e.g. an empty `[]`
+                    // assigned to a `List[Shape]` field resolves its element to
+                    // `Shape`, so the value is concrete (no spurious E018) and the
+                    // IR carries the real type. Field-COUNT / name validation stays
+                    // wherever it already lives; this only adds the type flow.
+                    //
+                    // Two declaration sources: a record-VARIANT case
+                    // (`| Group { items: List[Shape] }`, found in `constructors`)
+                    // and a bare NAMED RECORD type (`type WithList = { items:
+                    // List[Int] }`, resolved from `env.types`). Both reduce to a
+                    // `(field, declared_ty)` list with generics already substituted.
+                    let (result_ty, decl_fields): (Ty, Vec<(Sym, Ty)>) =
+                        if let Some((type_name, case)) = self.env.constructors.get(&sym(n)).cloned() {
+                            let generic_args = self.instantiate_type_generics(type_name.as_str());
+                            let subst: std::collections::HashMap<Sym, Ty> = if !generic_args.is_empty() {
+                                self.env.types.get(&type_name).cloned().map(|ty_def| {
+                                    let mut tv_names = Vec::new();
+                                    crate::types::TypeEnv::collect_typevars(&ty_def, &mut tv_names);
+                                    tv_names.iter().zip(generic_args.iter())
+                                        .map(|(tv, fresh)| (*tv, fresh.clone())).collect()
+                                }).unwrap_or_default()
+                            } else { std::collections::HashMap::new() };
+                            let decl = match &case.payload {
+                                crate::types::VariantPayload::Record(fs) =>
+                                    fs.iter().map(|(fname, fty)| (*fname, super::calls::subst_ty(fty, &subst))).collect(),
+                                _ => Vec::new(),
+                            };
+                            (Ty::Named(type_name, generic_args), decl)
+                        } else {
+                            // Named record type: instantiate its generics with
+                            // fresh vars so the declared field types carry the
+                            // SAME vars as the result type (so e.g. `List[T]`
+                            // unifies across the field and the binding's ascription).
+                            let generic_args = self.instantiate_type_generics(n);
+                            let named = Ty::Named(sym(n), generic_args);
+                            let decl = match self.env.resolve_named(&named) {
+                                Ty::Record { fields } | Ty::OpenRecord { fields } => fields,
+                                _ => Vec::new(),
+                            };
+                            (named, decl)
+                        };
+                    for f in fields.iter() {
+                        if let Some((_, ety)) = decl_fields.iter().find(|(fname, _)| fname.as_str() == f.name.as_str()) {
+                            if let Some(vty) = self.type_map.get(&f.value.id).cloned() {
+                                self.constrain(ety.clone(), vty, format!("field {}", f.name));
+                            }
+                        }
+                    }
+                    result_ty
                 }
                 else {
                     let field_tys: Vec<(Sym, Ty)> = fields.iter().map(|f| {
@@ -627,6 +679,13 @@ impl Checker {
                 self.call_span_hint = expr.span;
                 let ty = self.infer_call(callee, args, named_args, type_args);
                 self.call_span_hint = prev_call;
+                // A generic collection constructor whose element type NO argument
+                // constrains — `set.new()` / `list.with_capacity(n)` — must have
+                // its element pinned by context (annotation / later use). Register
+                // it for the post-solve undecidable-empty-collection check (E018).
+                if let Some(kind) = empty_collection_ctor_kind(callee) {
+                    self.register_empty_collection(ty.clone(), kind);
+                }
                 ty
             }
 
@@ -816,7 +875,11 @@ impl Checker {
             ExprKind::Error | ExprKind::Placeholder => Ty::Unknown,
 
             ExprKind::MapLiteral { entries, .. } => {
-                if entries.is_empty() { Ty::map_of(self.fresh_var(), self.fresh_var()) }
+                if entries.is_empty() {
+                    let ty = Ty::map_of(self.fresh_var(), self.fresh_var());
+                    self.register_empty_collection(ty.clone(), super::EmptyCollectionKind::MapLiteral);
+                    ty
+                }
                 else {
                     let kt = self.infer_expr(&mut entries[0].0);
                     let vt = self.infer_expr(&mut entries[0].1);
@@ -825,7 +888,11 @@ impl Checker {
                     Ty::map_of(kt, vt)
                 }
             }
-            ExprKind::EmptyMap => Ty::map_of(self.fresh_var(), self.fresh_var()),
+            ExprKind::EmptyMap => {
+                let ty = Ty::map_of(self.fresh_var(), self.fresh_var());
+                self.register_empty_collection(ty.clone(), super::EmptyCollectionKind::MapLiteral);
+                ty
+            }
 
             ExprKind::TypeAscription { expr, ty } => {
                 let inferred = self.infer_expr(expr);
@@ -963,7 +1030,18 @@ impl Checker {
         iterable: &mut Box<ast::Expr>,
         body: &mut Vec<ast::Stmt>,
     ) -> Ty {
+        // An empty-list iterable (`for _ in []`) registers a generic ListLiteral
+        // site via `infer_expr` below; retag it as `ForInEmpty` so the E018 hint
+        // suggests the for-position fix `for _ in ([] : List[Int])` rather than a
+        // `let`-binding example.
+        let iterable_is_empty_list = matches!(&iterable.kind,
+            ExprKind::List { elements, .. } if elements.is_empty());
         let iter_ty = self.infer_expr(iterable);
+        if iterable_is_empty_list {
+            if let Some(last) = self.deferred_empty_collection_checks.last_mut() {
+                last.kind = super::EmptyCollectionKind::ForInEmpty;
+            }
+        }
         self.env.push_scope();
         let iter_resolved = resolve_ty(&iter_ty, &self.uf);
         let elem_ty = match &iter_resolved {
@@ -1000,6 +1078,18 @@ impl Checker {
         if let Some((msg, hint)) = invalid_collection_type(&resolved) {
             self.emit(super::err(msg, hint, "collection element type").with_code("E016"));
         }
+    }
+
+    /// Record an empty-collection producer to re-check after constraint solving
+    /// (the undecidable-empty-collection / E018 rule). The current span is
+    /// captured now; the element type is verified post-solve in
+    /// [`Checker::validate_empty_collection_elements`].
+    pub(crate) fn register_empty_collection(&mut self, ty: Ty, kind: super::EmptyCollectionKind) {
+        self.deferred_empty_collection_checks.push(super::EmptyCollectionSite {
+            ty,
+            kind,
+            span: self.current_span,
+        });
     }
 
     pub(crate) fn check_stmt(&mut self, stmt: &mut ast::Stmt) {
@@ -1068,7 +1158,11 @@ impl Checker {
                 // other). Reject it in the checker so BOTH targets agree, with
                 // the fix spelled out: drop the assignment (the call already
                 // mutates) or rebuild a fresh value.
-                let var_ty = self.env.lookup_var(name).cloned();
+                // A local binding (`lookup_var`) OR a module-level `var`
+                // (`top_lets`) — both are valid assignment targets and both carry
+                // a concrete declared type to flow into the value.
+                let var_ty = self.env.lookup_var(name).cloned()
+                    .or_else(|| self.env.top_lets.get(&sym(name)).cloned());
                 if let Some(var_ty) = &var_ty {
                     let val_resolved = resolve_ty(&val_ty, &self.uf);
                     let var_resolved = self.env.resolve_named(var_ty);
@@ -1110,6 +1204,16 @@ impl Checker {
                             hint,
                             format!("{} = ...", name),
                         ).with_code("E001").with_try(snippet));
+                    } else {
+                        // Unify the assigned value's type with the variable's
+                        // declared type. The variable already carries a concrete
+                        // type from its `var`/`let` declaration; flowing it into
+                        // the value pins an otherwise-unconstrained element — e.g.
+                        // `items = []` for `var items: List[Int]` resolves `[]`'s
+                        // element to `Int` (it is the source of truth, exactly as
+                        // a typed `let` binding is). Without this, an empty literal
+                        // assigned to a typed var stays undecidable (E018).
+                        self.constrain(var_ty.clone(), val_ty.clone(), format!("assign {}", name));
                     }
                 }
                 if self.env.lookup_var(name).is_some() && !self.env.mutable_vars.contains(&sym(name)) {
@@ -1626,4 +1730,24 @@ fn invalid_collection_type(ty: &Ty) -> Option<(&'static str, &'static str)> {
         if let Some(e) = invalid_collection_type(c) { return Some(e); }
     }
     None
+}
+
+/// If `callee` names a generic collection constructor whose element type NO
+/// argument can constrain — `set.new()` (`Set[A]`) or `list.with_capacity(n)`
+/// (`List[A]`, the only arg being the capacity) — return its
+/// [`EmptyCollectionKind`] so the call is registered for the undecidable-empty
+/// check (E018). Any other callee returns `None`. Matched structurally on the
+/// `module.func` member form the parser produces for stdlib calls.
+fn empty_collection_ctor_kind(callee: &ast::Expr) -> Option<super::EmptyCollectionKind> {
+    let ExprKind::Member { object, field } = &callee.kind else { return None; };
+    let ExprKind::Ident { name: module } = &object.kind else { return None; };
+    match (module.as_str(), field.as_str()) {
+        ("set", "new") => Some(super::EmptyCollectionKind::SetNew),
+        ("list", "with_capacity") => Some(super::EmptyCollectionKind::ListWithCapacity),
+        // `map.new()` is the constructor analogue of the empty `[:]` literal —
+        // a generic `Map[K, V]` with no key/value-bearing argument. Same fix
+        // family as the map literal (annotate the key/value types).
+        ("map", "new") => Some(super::EmptyCollectionKind::MapLiteral),
+        _ => None,
+    }
 }

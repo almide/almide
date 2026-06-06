@@ -42,7 +42,6 @@ use almide_ir::*;
 use almide_ir::visit::{walk_expr, walk_stmt};
 use almide_ir::visit_mut::{walk_expr_mut, walk_stmt_mut};
 use almide_lang::types::Ty;
-use almide_lang::types::constructor::TypeConstructorId;
 use super::pass::{NanoPass, PassResult, Postcondition, Target};
 
 #[derive(Debug)]
@@ -169,129 +168,8 @@ impl NanoPass for ConcretizeTypesPass {
             }
         }
 
-        // Phase 3: Final empty-payload defaulting sweep. A residual
-        // `List[Unknown]` / `Set[Unknown]` / `Map[K, Unknown]` / `Option[Unknown]`
-        // that survived inference sits in an UNOBSERVABLE slot — the container is
-        // empty or the payload is never materialized, so the element type is
-        // unobservable on WASM (a 4-byte `[len=0]` header carries no element
-        // bytes). The hard gate whitelists exactly these via
-        // `unresolved_only_in_empty_payloads`. But native rustc still emits the
-        // slot syntactically (`Vec::<_>::new()`, `almide_rt_list_with_capacity::
-        // <_>()`) and DEMANDS the `_` be inferable — so a genuinely-unconstrained
-        // empty container (e.g. `list.len(list.with_capacity(8))`,
-        // `list.len([])` in value position) compiles on WASM but fails native
-        // with E0282/E0283. That is a cross-target asymmetry. Default those
-        // whitelisted slots to the SAME concrete placeholder C-052 uses for
-        // unconstrained fold params: the choice is unobservable (empty payload),
-        // and using one default on both targets keeps native == wasm while
-        // giving rustc a concrete element type to emit.
-        default_empty_payload_program(&mut program, &mut prog_vt);
-
         program.var_table = prog_vt;
         PassResult { program, changed: true }
-    }
-}
-
-/// The concrete type a residual UNOBSERVABLE empty-container payload slot is
-/// defaulted to in Phase 3. Same value and rationale as
-/// [`UNCONSTRAINED_FOLD_PARAM_DEFAULT`]: the slot holds no runtime bytes (the
-/// container is empty / the payload is never materialized), so any concrete
-/// choice is observationally equivalent; `Int` (i64) is the least-surprising,
-/// is `Clone`/`Hash`/`Eq`, and is representable identically on both targets.
-const UNOBSERVABLE_PAYLOAD_DEFAULT: Ty = Ty::Int;
-
-/// Replace every residual `Unknown`/`TypeVar` that sits in an UNOBSERVABLE
-/// empty-container payload slot with [`UNOBSERVABLE_PAYLOAD_DEFAULT`], in place.
-///
-/// Mirrors the slot structure that [`unresolved_only_in_empty_payloads`]
-/// whitelists (so this sweep only ever touches slots the hard gate already
-/// considers unobservable): the element of `Option`/`List`/`Set`, the VALUE of
-/// `Map` (its KEY is load-bearing and left untouched), and those positions
-/// nested through `Record`/`Tuple` fields. A load-bearing Unknown (bare, in a
-/// `Tuple` element, `Result` Ok, `Fn` param/ret, or a Map KEY) is NOT touched —
-/// it stays a hard-gate violation so a real inference bug still surfaces.
-fn default_empty_payload_ty(ty: &mut Ty) -> bool {
-    use almide_lang::types::constructor::TypeConstructorId as TCI;
-    if !ty.has_unresolved_deep() { return false; }
-    match ty {
-        Ty::Applied(TCI::Option, args)
-        | Ty::Applied(TCI::List, args)
-        | Ty::Applied(TCI::Set, args) if args.len() == 1 => {
-            if matches!(args[0], Ty::Unknown | Ty::TypeVar(_)) {
-                args[0] = UNOBSERVABLE_PAYLOAD_DEFAULT;
-                true
-            } else {
-                default_empty_payload_ty(&mut args[0])
-            }
-        }
-        // Map VALUE only — the KEY is hashed/compared, so a key Unknown is a
-        // real bug and must keep failing the gate.
-        Ty::Applied(TCI::Map, args) if args.len() == 2 && !args[0].has_unresolved_deep() => {
-            if matches!(args[1], Ty::Unknown | Ty::TypeVar(_)) {
-                args[1] = UNOBSERVABLE_PAYLOAD_DEFAULT;
-                true
-            } else {
-                default_empty_payload_ty(&mut args[1])
-            }
-        }
-        Ty::Record { fields } | Ty::OpenRecord { fields } => {
-            let mut changed = false;
-            for (_, t) in fields.iter_mut() { changed |= default_empty_payload_ty(t); }
-            changed
-        }
-        Ty::Tuple(elems) => {
-            // Only descend; an Unknown directly in a tuple ELEMENT is
-            // load-bearing and intentionally left for the gate.
-            let mut changed = false;
-            for e in elems.iter_mut() { changed |= default_empty_payload_ty(e); }
-            changed
-        }
-        _ => false,
-    }
-}
-
-/// Apply [`default_empty_payload_ty`] to every reachable `IrExpr.ty`, plus the
-/// VarTable entries, function signatures, and lambda/bind annotations, so the
-/// residual unobservable slots are concrete by the time emit runs — on BOTH
-/// targets, from one defaulting choice.
-fn default_empty_payload_program(program: &mut IrProgram, vt: &mut VarTable) {
-    struct Defaulter;
-    impl IrMutVisitor for Defaulter {
-        fn visit_expr_mut(&mut self, expr: &mut IrExpr) {
-            walk_expr_mut(self, expr);
-            default_empty_payload_ty(&mut expr.ty);
-            if let IrExprKind::Lambda { params, .. } = &mut expr.kind {
-                for (_, pty) in params.iter_mut() { default_empty_payload_ty(pty); }
-            }
-        }
-        fn visit_stmt_mut(&mut self, stmt: &mut IrStmt) {
-            walk_stmt_mut(self, stmt);
-            if let IrStmtKind::Bind { ty, .. } = &mut stmt.kind {
-                default_empty_payload_ty(ty);
-            }
-        }
-    }
-    let mut d = Defaulter;
-    for func in &mut program.functions {
-        default_empty_payload_ty(&mut func.ret_ty);
-        d.visit_expr_mut(&mut func.body);
-    }
-    for tl in &mut program.top_lets {
-        default_empty_payload_ty(&mut tl.ty);
-        d.visit_expr_mut(&mut tl.value);
-    }
-    for module in &mut program.modules {
-        for func in &mut module.functions {
-            default_empty_payload_ty(&mut func.ret_ty);
-            d.visit_expr_mut(&mut func.body);
-        }
-        for tl in &mut module.top_lets {
-            default_empty_payload_ty(&mut tl.ty);
-            d.visit_expr_mut(&mut tl.value);
-        }
-    }
-    for entry in &mut vt.entries {
-        default_empty_payload_ty(&mut entry.ty);
     }
 }
 
@@ -866,126 +744,6 @@ fn back_propagate_fold_acc(expr: &mut IrExpr, vt: &mut VarTable) -> bool {
     changed
 }
 
-/// The concrete type a genuinely-UNCONSTRAINED fold-closure collection param is
-/// defaulted to. When a fold runs over an EMPTY collection whose element type(s)
-/// the checker could only leave `Unknown` (`map.fold(map.new(), …)`,
-/// `list.fold([], …)`) AND the closure never uses those params, K/V/elem have no
-/// inference source — the program is well-typed but under-constrained, exactly
-/// the case Rust needs a turbofish for. The collection is empty, so the closure
-/// is never invoked and the param's runtime representation is unobservable; we
-/// pick `Int` (i64 — representable identically on both targets, trivially
-/// Clone/Hash/Eq) so codegen emits a concrete annotation instead of bare params
-/// (native rustc E0283) / a wasm Unknown→i32 fallback. Any concrete choice is
-/// observationally equivalent; `Int` is the least surprising.
-const UNCONSTRAINED_FOLD_PARAM_DEFAULT: Ty = Ty::Int;
-
-/// Describe a `<module>.fold` over an element-unresolved (empty) collection: the
-/// closure-param indices that mirror the collection's element type(s), and the
-/// constructor whose args are those element types. The accumulator param (index
-/// 0) is handled by [`back_propagate_fold_acc`] and is never defaulted here.
-fn fold_collection_shape(expr: &IrExpr) -> Option<(&'static [usize], TypeConstructorId)> {
-    use almide_lang::types::constructor::TypeConstructorId as TCI;
-    // The fold call appears in three shapes depending on pass ordering:
-    //   - `Call { Module { module, func } }`          (Rust pipeline: pre-lowering)
-    //   - `Call { Named { "almide_rt_<m>_fold" } }`   (post-ResolveCalls)
-    //   - `RuntimeCall { "almide_rt_<m>_fold" }`      (WASM pipeline: post-StdlibLowering)
-    // Decode (module, func) from whichever we see; the arg layout
-    // (collection, init, closure) is identical across all three.
-    let (module, func, args): (String, String, &Vec<IrExpr>) = match &expr.kind {
-        IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } => {
-            (module.as_str().to_string(), func.as_str().to_string(), args)
-        }
-        IrExprKind::Call { target: CallTarget::Named { name }, args, .. } => {
-            (decode_rt_module(name.as_str())?, decode_rt_func(name.as_str())?, args)
-        }
-        IrExprKind::RuntimeCall { symbol, args } => {
-            (decode_rt_module(symbol.as_str())?, decode_rt_func(symbol.as_str())?, args)
-        }
-        _ => return None,
-    };
-    if func != "fold" || args.len() < 3 { return None; }
-    // The collection arg must itself be element-unresolved (empty literal /
-    // `*.new()`); a non-empty collection pins the element types the normal way.
-    if !args[0].ty.has_unresolved_deep() { return None; }
-    match module.as_str() {
-        // list.fold(xs, init, (acc, elem) -> acc): param 1 = elem
-        "list" => Some((&[1], TCI::List)),
-        // set.fold(s, init, (acc, elem) -> acc):   param 1 = elem
-        "set" => Some((&[1], TCI::Set)),
-        // map.fold(m, init, (acc, k, v) -> acc):   params 1 = K, 2 = V
-        "map" => Some((&[1, 2], TCI::Map)),
-        _ => None,
-    }
-}
-
-/// `almide_rt_<module>_<func>` → `<module>` (the stdlib module segment).
-fn decode_rt_module(sym: &str) -> Option<String> {
-    let rest = sym.strip_prefix("almide_rt_")?;
-    let under = rest.find('_')?;
-    Some(rest[..under].to_string())
-}
-/// `almide_rt_<module>_<func>` → `<func>` (the remainder after the module).
-fn decode_rt_func(sym: &str) -> Option<String> {
-    let rest = sym.strip_prefix("almide_rt_")?;
-    let under = rest.find('_')?;
-    Some(rest[under + 1..].to_string())
-}
-
-/// Default the unresolved element type(s) of a fold over an EMPTY collection to
-/// [`UNCONSTRAINED_FOLD_PARAM_DEFAULT`], consistently across (a) the collection
-/// argument's `Applied(C, [..])` type (the `map.new()` / `[]` literal — its
-/// `Borrow`/`RuntimeCall`/`RcWrap` wrappers all read this) and (b) the mirroring
-/// closure params (lambda annotation + VarTable + `Ty::Fn` wrapper). The closure
-/// is never invoked (empty collection), so the choice is unobservable; making it
-/// the SAME default on both sides keeps native == wasm. Returns true on change.
-fn default_unconstrained_fold_params(expr: &mut IrExpr, vt: &mut VarTable) -> bool {
-    let Some((param_indices, ctor)) = fold_collection_shape(expr) else { return false; };
-    let args = match &mut expr.kind {
-        IrExprKind::Call { args, .. } | IrExprKind::RuntimeCall { args, .. } => args,
-        _ => return false,
-    };
-    let mut changed = false;
-
-    // (a) Default the empty collection literal's element type slots.
-    if let Ty::Applied(c, elems) = &mut args[0].ty {
-        if *c == ctor {
-            for e in elems.iter_mut() {
-                if e.has_unresolved_deep() {
-                    *e = UNCONSTRAINED_FOLD_PARAM_DEFAULT;
-                    changed = true;
-                }
-            }
-        }
-    }
-
-    // (b) Default the mirroring closure params (lambda + VarTable + Fn wrapper).
-    let Some(lambda) = args.get_mut(2) else { return changed; };
-    if let IrExprKind::Lambda { params, .. } = &mut lambda.kind {
-        for &idx in param_indices {
-            if let Some((vid, pty)) = params.get_mut(idx) {
-                if pty.has_unresolved_deep() {
-                    *pty = UNCONSTRAINED_FOLD_PARAM_DEFAULT;
-                    if (vid.0 as usize) < vt.len() {
-                        vt.entries[vid.0 as usize].ty = UNCONSTRAINED_FOLD_PARAM_DEFAULT;
-                    }
-                    changed = true;
-                }
-            }
-        }
-    }
-    if let Ty::Fn { params, .. } = &mut lambda.ty {
-        for &idx in param_indices {
-            if let Some(p) = params.get_mut(idx) {
-                if p.has_unresolved_deep() {
-                    *p = UNCONSTRAINED_FOLD_PARAM_DEFAULT;
-                    changed = true;
-                }
-            }
-        }
-    }
-    changed
-}
-
 // ── Core walker ────────────────────────────────────────────────────
 
 fn concretize_expr(expr: &mut IrExpr, vt: &mut VarTable, symbols: &SymbolTable, enclosing_ret: &Ty) {
@@ -1127,14 +885,6 @@ impl<'a> IrMutVisitor for Concretizer<'a> {
                 }
             }
         }
-
-        // Empty-collection fold: a `list`/`set`/`map` `.fold` over an empty
-        // collection leaves the closure's element/key/value params unconstrained
-        // (the closure never uses them). Default those to a concrete placeholder
-        // so codegen emits a real annotation — otherwise native rustc reports
-        // E0283 and wasm falls back to i32 (Cluster-2 finding #8). Runs for all
-        // three modules, after the accumulator back-prop above.
-        default_unconstrained_fold_params(expr, self.vt);
 
         // Now resolve this node's type from child types + VarTable + symbols.
         if (expr.ty).has_unresolved_deep() {
@@ -1750,24 +1500,41 @@ fn unresolved_only_in_empty_payloads(ty: &Ty) -> bool {
     // Nothing unresolved ⇒ not "unresolved only in payloads" (the caller already
     // gates on `has_unresolved_deep`, but be explicit so the helper is total).
     if !ty.has_unresolved_deep() { return false; }
+    // A bare residual `Unknown`/`TypeVar` is legit ONLY in an `Option` element
+    // slot. That is the one undecidable-empty-payload class the frontend E018
+    // check does NOT own: an unannotated `none` that is only ever `none`
+    // (a recursive record field — `let leaf = { value: 1, left: none }`), whose
+    // `Option` payload is never materialized. Every OTHER undecidable empty
+    // collection — an empty `[]` / `[:]` / `set.new()` / `map.new()` /
+    // `list.with_capacity` whose element the program never pins — is now a
+    // user-facing compile error raised in the frontend BEFORE codegen (E018),
+    // so a bare-`Unknown` `List`/`Set` element or `Map` value can no longer
+    // reach this gate from user code. We therefore no longer whitelist it: the
+    // gate is back to "an Unknown here is a COMPILER bug". The collection slots
+    // still RECURSE (so a `List[Option[Unknown]]` of only-`none` elements stays
+    // legit through the `Option`), but a bare `Unknown` directly in them is a
+    // violation again.
     fn ok(ty: &Ty) -> bool {
         // A concrete subtree is always fine.
         if !ty.has_unresolved_deep() { return true; }
         use almide_lang::types::constructor::TypeConstructorId as TCI;
         match ty {
-            // Empty-container payload slots: the single element of
-            // Option/List/Set may be Unknown (empty ⇒ no payload bytes).
-            Ty::Applied(TCI::Option, args)
-            | Ty::Applied(TCI::List, args)
-            | Ty::Applied(TCI::Set, args) if args.len() == 1 => {
-                // The element may be Unknown OR a deeper empty-payload shape.
+            // Option element: a bare `Unknown`/`TypeVar` here is the never-
+            // materialized `none` payload — the one whitelisted leaf.
+            Ty::Applied(TCI::Option, args) if args.len() == 1 => {
                 matches!(args[0], Ty::Unknown | Ty::TypeVar(_)) || ok(&args[0])
             }
-            // Map[K, V]: the VALUE may be an empty-payload Unknown, but the KEY
-            // is load-bearing (hashed/compared) — a key Unknown is a real bug.
+            // List/Set element: only a DEEPER empty-payload shape (e.g. an
+            // `Option` of `none`) is legit; a bare `Unknown` here was an
+            // undecidable empty collection and is now an E018 the frontend
+            // rejects first, so it is a gate violation again.
+            Ty::Applied(TCI::List, args)
+            | Ty::Applied(TCI::Set, args) if args.len() == 1 => ok(&args[0]),
+            // Map[K, V]: the KEY is load-bearing (hashed/compared). The VALUE,
+            // like a List element, is legit only via a deeper empty payload —
+            // a bare `Unknown` value is an undecidable empty map (E018).
             Ty::Applied(TCI::Map, args) if args.len() == 2 => {
-                !args[0].has_unresolved_deep()
-                    && (matches!(args[1], Ty::Unknown | Ty::TypeVar(_)) || ok(&args[1]))
+                !args[0].has_unresolved_deep() && ok(&args[1])
             }
             // Records/tuples are transparent: qualify iff EVERY unresolved field
             // is itself an empty-payload slot.
@@ -2146,21 +1913,33 @@ mod hard_gate_tests {
         assert!(collect_unresolved_sites(&prog).is_empty(),
             "record with Unknown only in Option payloads is whitelisted");
 
-        // Direct predicate checks.
+        // Direct predicate checks. The ONLY whitelisted bare-Unknown leaf is an
+        // `Option` payload (a never-materialized `none`); every other undecidable
+        // empty collection is now rejected in the frontend (E018) before it can
+        // reach this gate, so the gate no longer whitelists them.
         assert!(unresolved_only_in_empty_payloads(&opt_unknown));
-        assert!(unresolved_only_in_empty_payloads(&Ty::Applied(TCI::List, vec![Ty::Unknown])));
         assert!(unresolved_only_in_empty_payloads(&rec_ty));
+        // A bare-Unknown List/Set element or Map value is NO LONGER whitelisted —
+        // it would be an undecidable empty collection, which E018 rejects first,
+        // so reaching here is a compiler bug.
+        assert!(!unresolved_only_in_empty_payloads(&Ty::Applied(TCI::List, vec![Ty::Unknown])),
+            "bare List[Unknown] is now an E018 the frontend owns — a gate violation");
+        assert!(!unresolved_only_in_empty_payloads(&Ty::Applied(TCI::Set, vec![Ty::Unknown])),
+            "bare Set[Unknown] is now an E018 the frontend owns — a gate violation");
+        assert!(!unresolved_only_in_empty_payloads(&Ty::Applied(TCI::Map, vec![Ty::String, Ty::Unknown])),
+            "bare Map[_, Unknown] is now an E018 the frontend owns — a gate violation");
+        // A List/Set of only-`none` elements stays legit THROUGH the Option.
+        assert!(unresolved_only_in_empty_payloads(&Ty::Applied(TCI::List, vec![opt_unknown.clone()])),
+            "List[Option[Unknown]] (a list of nones) is legit via the Option payload");
         // Load-bearing Unknowns are NOT whitelisted.
         assert!(!unresolved_only_in_empty_payloads(&Ty::Unknown), "bare Unknown is load-bearing");
         assert!(!unresolved_only_in_empty_payloads(&Ty::Tuple(vec![Ty::Int, Ty::Unknown])),
             "tuple element Unknown is load-bearing");
         assert!(!unresolved_only_in_empty_payloads(&Ty::Applied(TCI::Result, vec![Ty::Unknown, Ty::String])),
             "Result Ok Unknown is load-bearing");
-        // Map KEY Unknown is load-bearing; Map VALUE Unknown is not.
+        // Map KEY Unknown is load-bearing.
         assert!(!unresolved_only_in_empty_payloads(&Ty::Applied(TCI::Map, vec![Ty::Unknown, Ty::Int])),
             "Map key Unknown is load-bearing");
-        assert!(unresolved_only_in_empty_payloads(&Ty::Applied(TCI::Map, vec![Ty::String, Ty::Unknown])),
-            "Map value Unknown is an empty payload");
         // A fully concrete type is never reported as payload-only.
         assert!(!unresolved_only_in_empty_payloads(&Ty::Int));
     }
