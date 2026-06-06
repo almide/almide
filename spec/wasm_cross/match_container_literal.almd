@@ -23,9 +23,9 @@ fn ci(c: Option[Int]) -> String = match c {
   none    => "N",
 }
 
-// Int literals in Ok / Err (native compiles Result-int-literal patterns; the
-// Result-STRING-literal pattern is a separate native walker limitation and is
-// intentionally not exercised here).
+// Int literals in Ok / Err. The Result-STRING-literal pattern (`ok("good")`)
+// that used to fail to build natively is now fixed and exercised in its own
+// fixture, match_payload_string_literal.almd.
 fn ck(r: Result[Int, Int]) -> String = match r {
   ok(0)    => "ZERO",
   ok(_)    => "OK",

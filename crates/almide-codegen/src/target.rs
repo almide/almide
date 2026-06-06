@@ -22,6 +22,7 @@ use super::pass_intrinsic_lowering::IntrinsicLoweringPass;
 use super::pass_normalize_runtime_calls::NormalizeRuntimeCallsPass;
 use super::pass_stdlib_lowering::StdlibLoweringPass;
 use super::pass_match_subject::MatchSubjectPass;
+use super::pass_pattern_literal_guard::PatternLiteralGuardPass;
 use super::pass_effect_inference::EffectInferencePass;
 use super::pass_tco::TailCallOptPass;
 use super::pass_licm::LICMPass;
@@ -96,6 +97,12 @@ fn build_pipeline(target: Target) -> Pipeline {
                 // about pre-rewrite information.
                 .add(LambdaTypeResolvePass)
                 .add(ConcretizeTypesPass)
+                // Hoist payload-nested string literals (`ok("x")`, `Word("hi")`)
+                // into Bind + `==` guards BEFORE MatchSubject so the as_deref /
+                // &* subject deref only ever sees top-level / already-handled
+                // literals — one reconciliation path per literal. Runs after
+                // ConcretizeTypes so the literal/payload type is resolved.
+                .add(PatternLiteralGuardPass)
                 // Verify all user-module calls resolve to known IrFunctions.
                 .add(ResolveCallsPass)
                 // BoxDeref: insert Deref IR nodes for Box'd pattern vars (before CloneInsertion)

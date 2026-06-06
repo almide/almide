@@ -474,7 +474,7 @@ evidence  = [
 [[contract]]
 id        = "C-036"
 title     = "Records, variants, and pattern matching are byte-identical"
-statement = "Record construction/field-access, variant construction (tuple/record/nullary payloads), and `match` over them — including matches whose arms construct a Result with `err(..)`, and a LITERAL nested inside a container constructor (`some(\"x\")`, `some(5)`, `ok(0)`, `err(404)`) — produce byte-identical results native == wasm. The inner-literal equality is now emitted on wasm (previously `some(\"x\")` matched ANY `some(_)` because only the non-null tag was checked, silently breaking every string/int-dispatching match). A match typed `Never` no longer appends a wasm `unreachable` epilogue (trap exit 134) while native runs fine."
+statement = "Record construction/field-access, variant construction (tuple/record/nullary payloads), and `match` over them — including matches whose arms construct a Result with `err(..)`, and a LITERAL nested inside a container constructor (`some(\"x\")`, `some(5)`, `ok(0)`, `err(404)`) — produce byte-identical results native == wasm. The inner-literal equality is emitted on BOTH targets: wasm structurally checks the tag then ANDs in a value compare (previously `some(\"x\")` matched ANY `some(_)` because only the non-null tag was checked); native hoists a payload-nested STRING literal into a `Bind` + `==` guard (`Ok(__s) if __s == \"good\"`) — previously `ok(\"good\")` emitted `Ok(\"good\")` against a `Result<String,String>` value and FAILED TO BUILD (rustc E0308 &str vs String), so these programs could not run cross-target at all. The hoist is the single mechanism for a string literal in any payload position at any depth (`ok(\"x\")`, `err(\"x\")`, `Word(\"x\")`, `KV(\"k\", n)`, `Pair(1, \"one\")`, `ok(some(\"x\")))`, `(\"a\", 1)`, and literal+guard combos); a literal arm refines, later binding arms stay reachable, byte-identical to the wasm tag→value→guard order. Int/Bool/Float payload literals remain bare Rust patterns. A match typed `Never` no longer appends a wasm `unreachable` epilogue (trap exit 134) while native runs fine."
 since     = "0.24.0"
 status    = "active"
 evidence  = [
@@ -483,6 +483,7 @@ evidence  = [
   { path = "spec/wasm_cross/closures_and_variants.almd", class = "fixture" },
   { path = "spec/wasm_cross/playground_default.almd", class = "fixture" },
   { path = "spec/wasm_cross/match_container_literal.almd", class = "fixture" },
+  { path = "spec/wasm_cross/match_payload_string_literal.almd", class = "fixture" },
 ]
 
 [[contract]]
