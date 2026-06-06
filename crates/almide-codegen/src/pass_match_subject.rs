@@ -2,11 +2,15 @@
 //!
 //! Target: Rust only.
 //!
-//! Rust's `match` on `String` requires `.as_str()` to match against `&str` literals.
-//! `Option<String>` requires `.as_deref()` to match `Some("literal")` patterns.
+//! Rust's `match` on `String` requires `&*s` (`.as_str()`) to match a top-level
+//! `&str` literal pattern: `match &*s { "good" => .. }`. This pass inserts the
+//! `Borrow { as_str: true }` IR node on such subjects so the walker never checks
+//! types.
 //!
-//! This pass inserts `Borrow { as_str: true }` or `Call { Method "as_deref" }` IR nodes
-//! on match subjects, so the walker never needs to check types.
+//! String literals nested INSIDE a payload (`some("x")`, `ok("x")`, `Word("x")`)
+//! cannot be reconciled by a subject deref — they are hoisted into `==` guards by
+//! `PatternLiteralGuardPass`, which runs earlier. This pass therefore only ever
+//! handles the top-level-String-subject case.
 //!
 //! Traversal goes through the canonical `IrMutVisitor`/`walk_expr_mut` (exhaustive,
 //! wildcard-free) rather than a hand-rolled `match expr.kind { …; _ => {} }`, so a
@@ -15,7 +19,7 @@
 
 use almide_ir::*;
 use almide_ir::visit_mut::{IrMutVisitor, walk_expr_mut};
-use almide_lang::types::{Ty, TypeConstructorId};
+use almide_lang::types::Ty;
 use super::pass::{NanoPass, PassResult, Target};
 
 #[derive(Debug)]
@@ -82,36 +86,13 @@ fn transform_match_subject(subject: &mut Box<IrExpr>, arms: &[IrMatchArm]) {
         }
     }
 
-    // Option<String> subject with Some("literal") patterns → wrap with method call .as_deref()
-    // Also trigger when inner type is Unknown/TypeVar — if patterns contain string literals,
-    // the subject is Option<String> even if not fully resolved at this point.
-    if let Ty::Applied(TypeConstructorId::Option, args) = &subject.ty {
-        let inner_is_string = args.len() == 1 && matches!(&args[0], Ty::String | Ty::Unknown | Ty::TypeVar(_));
-        if inner_is_string {
-            let has_some_str_pat = arms.iter().any(|a| {
-                if let IrPattern::Some { inner } = &a.pattern {
-                    matches!(inner.as_ref(), IrPattern::Literal { expr } if matches!(&expr.kind, IrExprKind::LitStr { .. }))
-                } else { false }
-            });
-            if has_some_str_pat {
-                let inner = std::mem::replace(
-                    subject.as_mut(),
-                    IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None },
-                );
-                let deref_ty = Ty::Applied(TypeConstructorId::Option, vec![Ty::String]);
-                **subject = IrExpr {
-                    kind: IrExprKind::Call {
-                        target: CallTarget::Method {
-                            object: Box::new(inner),
-                            method: "as_deref".into(),
-                        },
-                        args: vec![],
-                        type_args: vec![],
-                    },
-                    ty: deref_ty,
-                    span: subject.span, def_id: None,
-                };
-            }
-        }
-    }
+    // A `Some("literal")` payload was previously reconciled here by wrapping the
+    // subject in `.as_deref()` (Option<String> -> Option<&str>). That path is now
+    // owned by `PatternLiteralGuardPass`, which runs FIRST and rewrites EVERY
+    // payload-nested string literal — `Some("x")` included — into `Some(__s) if
+    // __s == "x"`. So by the time MatchSubject runs, no `Some(Literal)` survives
+    // and a single mechanism handles string-literal payloads at any depth (see
+    // contract C-036). The top-level `String` subject above keeps its `&*s` deref:
+    // there is no payload to bind, and `match &*s { "good" => .. }` is the
+    // idiomatic Rust form.
 }
