@@ -177,8 +177,18 @@ pub fn parse_toml(path: &Path) -> Result<Project, String> {
 /// Returns `Err` with a human-readable message when the pin is violated.
 /// `ALMIDE_SKIP_VERSION_CHECK=1` bypasses the check.
 pub fn check_compiler_version(project: &Project) -> Result<(), String> {
+    let skip = std::env::var("ALMIDE_SKIP_VERSION_CHECK").is_ok();
+    check_compiler_version_with(project, skip)
+}
+
+/// Env-free core of [`check_compiler_version`]: the `ALMIDE_SKIP_VERSION_CHECK`
+/// bypass arrives as the `skip` parameter so tests never touch process env.
+/// (Process env is process-GLOBAL: parallel `cargo test` threads racing on
+/// `set_var`/`remove_var` made any env-reading sibling test flaky — the
+/// recurring `check_rejects_malformed_pin` CI failure.)
+pub fn check_compiler_version_with(project: &Project, skip: bool) -> Result<(), String> {
     let Some(required) = project.package.almide_min.as_deref() else { return Ok(()); };
-    if std::env::var("ALMIDE_SKIP_VERSION_CHECK").is_ok() { return Ok(()); }
+    if skip { return Ok(()); }
     let installed = env!("CARGO_PKG_VERSION");
     let req = semver::VersionReq::parse(&format!(">={}", required))
         .map_err(|e| format!(
