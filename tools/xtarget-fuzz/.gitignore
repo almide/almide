@@ -1,0 +1,9 @@
+# Build output (own workspace).
+/target
+
+# Per-worker build/run scratch dirs (native cargo caches, temp .almd).
+/.scratch
+
+# Recorded findings — uploaded as CI artifacts, not committed. Delete to
+# reset; inspect locally after a campaign.
+/findings

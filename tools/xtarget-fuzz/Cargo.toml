@@ -1,0 +1,35 @@
+# Almide generative differential fuzzer (Stage 3 of the completeness
+# roadmap). Hunts the composition space continuously for native↔WASM
+# observable divergences and compiler crashes.
+#
+# Like tools/wasmgen-harness, this is NOT a member of the parent
+# workspace — the empty `[workspace]` table below makes it its own
+# workspace root, so the parent's `cargo test` / `cargo build` ignore
+# it while it path-deps the parent `almide` crate (for the AST, parser,
+# and formatter). The parent root Cargo.toml also lists it under
+# `exclude` for belt-and-suspenders isolation.
+[workspace]
+
+[package]
+name = "xtarget-fuzz"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "xtarget-fuzz"
+path = "src/main.rs"
+
+[dependencies]
+# The parent compiler crate re-exports `ast`, `lexer`, `parser`, and
+# `fmt` — everything the generator and the AST-mutation engine need.
+# We deliberately do NOT depend on the codegen/check pipeline directly:
+# the oracle ladder shells out to the freshly built `almide` binary so
+# that a compiler ICE crashes the child process, not the fuzzer.
+almide = { path = "../.." }
+# `ExprKind::Int` carries a `serde_json::Value`, so the AST-mutation and
+# minimizer paths need to build those literal values directly.
+serde_json = "1"
+
+[profile.release]
+opt-level = 2
