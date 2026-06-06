@@ -219,8 +219,18 @@ pub fn almide_rt_list_par_all<A: Send + Sync + Clone>(xs: &[A], f: impl Fn(A) ->
 // skips all reallocations up to `cap` pushes. Useful when the caller
 // knows the final size up front (Q1_0 tensor decode, fixed-size bulk
 // transforms).
+//
+// The EAGER reservation is clamped to this many bytes — capacity is an
+// unobservable hint (`push` grows past it normally), but an unclamped eager
+// reservation aborts on huge requests (`with_capacity(i32::MAX)` over a
+// 24-byte element = ~51.5 GB, machine-dependent) while wasm clamps. One
+// ceiling on BOTH targets keeps `with_capacity` total: mirrors
+// MAX_WITH_CAPACITY_PREALLOC_BYTES in emit_wasm/calls_list.rs (C-034).
+pub const MAX_WITH_CAPACITY_PREALLOC_BYTES: usize = 64 * 1024 * 1024; // 64 MiB
 #[inline(always)] pub fn almide_rt_list_with_capacity<A>(cap: i64) -> Vec<A> {
-    Vec::with_capacity(cap.max(0) as usize)
+    let elem_size = std::mem::size_of::<A>().max(1);
+    let max_cap = MAX_WITH_CAPACITY_PREALLOC_BYTES / elem_size;
+    Vec::with_capacity((cap.max(0) as usize).min(max_cap))
 }
 pub fn almide_rt_list_pop<A>(xs: &mut Vec<A>) -> Option<A> { xs.pop() }
 pub fn almide_rt_list_clear<A>(xs: &mut Vec<A>) { xs.clear(); }

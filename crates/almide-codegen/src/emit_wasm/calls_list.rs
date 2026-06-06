@@ -1022,6 +1022,9 @@ impl FuncCompiler<'_> {
                 let elem_size = values::byte_size(&elem_ty) as i64;
                 // Ceiling on eagerly-reserved DATA bytes: large enough to honor
                 // realistic hints, small enough to never exhaust wasm memory.
+                // SHARED with native — runtime/rs/src/list.rs clamps its eager
+                // Vec reservation to the same named ceiling (C-034), so a huge
+                // hint aborts on NEITHER target.
                 const MAX_WITH_CAPACITY_PREALLOC_BYTES: i64 = 64 * 1024 * 1024; // 64 MiB
                 let max_cap = (MAX_WITH_CAPACITY_PREALLOC_BYTES / elem_size) as i32;
                 let new_ptr = self.scratch.alloc_i32();

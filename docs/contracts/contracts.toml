@@ -446,7 +446,7 @@ evidence  = [
 [[contract]]
 id        = "C-034"
 title     = "Out-of-range list ops clamp / no-op gracefully (no OOB heap access)"
-statement = "Out-of-range `list.insert` clamps the index to the end (`min(i, len)`), `list.remove_at` / `list.swap` with an index >= len are no-ops, `list.slice` clamps past-the-end indices (end -> len, start >= effective_end -> []), and `list.with_capacity(n)` starts empty without header corruption for any n (the data byte count is computed in i64 and the capacity clamped so `hdr + bytes` never overflows i32) — all byte-identical native == wasm with no OOB heap read/write. Native (runtime/rs/src/list.rs) is the oracle for each."
+statement = "Out-of-range `list.insert` clamps the index to the end (`min(i, len)`), `list.remove_at` / `list.swap` with an index >= len are no-ops, `list.slice` clamps past-the-end indices (end -> len, start >= effective_end -> []), and `list.with_capacity(n)` starts empty without header corruption for any n — all byte-identical native == wasm with no OOB heap read/write. `with_capacity` is TOTAL on both targets: capacity is an unobservable hint whose EAGER reservation is clamped to the SAME named byte ceiling (`MAX_WITH_CAPACITY_PREALLOC_BYTES` = 64 MiB, runtime/rs/src/list.rs == emit_wasm/calls_list.rs), so a huge request neither aborts native (`Vec::with_capacity(i32::MAX)` over a 24-byte element = ~51.5 GB, machine-dependent) nor corrupts the wasm header (the data byte count is computed in i64 so `hdr + bytes` never overflows i32); `push` grows past the clamped reservation normally. Native (runtime/rs/src/list.rs) is the oracle for each."
 since     = "0.24.0"
 status    = "active"
 evidence  = [
