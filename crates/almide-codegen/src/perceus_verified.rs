@@ -141,18 +141,24 @@ fn verify_expr_inner(
                     if matches!(&value.kind, IrExprKind::EnvLoad { .. }) { continue; }
                     if ctx.env_load_vars.contains(var) { continue; }
                     if ctx.returned_vars.contains(var) { continue; }
-                    // TCO trampoline temporaries (`__tco_*`) and branch-lift
-                    // temporaries (`__br_*`) DO get an RcDec, but in a sibling/outer
-                    // block from their Bind: the value is threaded through a loop or
-                    // branch reassignment (`Assign loopvar = Var __tco_tmp`), so the
-                    // matching Dec lands one scope away. This flat, per-block rule
-                    // counts `count_decs` only within the Bind's own block and so
-                    // reads decs==0 — a false positive, not a leak (verified by
-                    // probing `sum_acc`: the RcDec exists; the cross-target gate
-                    // would trap on a double-free and does not). This is a distinct
-                    // class from the ANF move-out tails handled by `moved_out_vars`.
-                    // Replacing this name-prefix exclusion with scope-aware Dec
-                    // accounting is a tracked perceus-belt follow-up.
+                    // `__tco_*`/`__br_*` are the TCO-trampoline / branch-lift
+                    // temporaries. Each is bound to the iteration's new value and
+                    // then MOVED into the loop-carried param / branch var by a bare
+                    // `Assign param = __tco_tmp` — a move, so `decs==0` for the temp
+                    // is CORRECT (its reference transfers to the param), the same
+                    // sound move-out relation as `moved_out_vars`, one expressed via
+                    // `Assign` instead of a block tail. The companion hazard — the
+                    // param's OLD value being overwritten with no Dec — is closed in
+                    // the trampoline itself: `pass_tco::tco_managed_params` Dec's the
+                    // old value before each fresh-allocation reassignment (and adopts
+                    // ownership with an entry Inc), so a tail-recursive heap
+                    // accumulator over a List/Record/Map/String literal now runs in
+                    // constant wasm memory. Non-fresh reassignments (a bare carry, or
+                    // `list.drop`-style threading that may reuse the buffer in place)
+                    // are left unmanaged there — conservatively leaked rather than
+                    // risk a double-free — and remain the only residue this exclusion
+                    // covers. Replacing the name-prefix test with structural
+                    // move-via-`Assign` accounting is a tracked follow-up.
                     let vname = ctx.var_table.get(*var).name.as_str();
                     if vname.starts_with("__tco_") || vname.starts_with("__br_") { continue; }
 
