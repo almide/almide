@@ -603,12 +603,25 @@ fn print_error_explanation(code: &str) {
 /// recursion depth is bounded by heap and identical on every host. The size is a
 /// virtual reservation — pages are committed lazily as the stack grows — so it
 /// costs no physical memory for shallow programs.
+///
+/// Overridable via `ALMIDE_COMPILER_STACK` (bytes), the analogue of rustc's
+/// `RUST_MIN_STACK`: a non-numeric or empty value falls back to the default. The
+/// override exists mainly so a regression test can pin a deliberately small
+/// stack and prove that compilation stays within bounded native stack on wide /
+/// deep input (see `tests/compiler_stack_test.rs`).
 const COMPILER_STACK_SIZE: usize = 256 * 1024 * 1024; // 256 MiB
+
+fn compiler_stack_size() -> usize {
+    match std::env::var("ALMIDE_COMPILER_STACK") {
+        Ok(v) => v.trim().parse::<usize>().ok().filter(|n| *n > 0).unwrap_or(COMPILER_STACK_SIZE),
+        Err(_) => COMPILER_STACK_SIZE,
+    }
+}
 
 fn main() {
     let child = std::thread::Builder::new()
         .name("almide-main".to_string())
-        .stack_size(COMPILER_STACK_SIZE)
+        .stack_size(compiler_stack_size())
         .spawn(run_main)
         .expect("failed to spawn the compiler driver thread");
     // A panic on the worker thread has already printed via the default hook;

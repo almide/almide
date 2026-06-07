@@ -741,3 +741,15 @@ evidence  = [
   { path = "spec/wasm_cross/empty_collection_annotated.almd", class = "fixture" },
   { path = "tests/diagnostics/e018-empty-collection-element/broken.almd", class = "fixture" },
 ]
+
+# ── COMPILE-TIME RECURSION IS HOST/PROFILE-INDEPENDENT (no stack-overflow crash) ─
+[[contract]]
+id        = "C-059"
+title     = "Compilation does not overflow the native stack on wide or deep input, identically on every host and build profile"
+statement = "Whether a program COMPILES is a function of the program, not of the host OS's default thread-stack size or the compiler's build profile. Two mechanisms make this so. (1) The compiler driver runs the whole parse → check → lower → emit pipeline on a dedicated worker thread with a fixed 256 MiB stack (overridable by `ALMIDE_COMPILER_STACK`, the analogue of rustc's `RUST_MIN_STACK`), so the achievable depth is decoupled from the OS main-thread limit — which is ~8 MiB on Linux/macOS but only ~1 MiB on Windows. Before this, a program that compiled on Unix could overflow the stack mid-codegen on Windows (it was a release-blocking crash in the Windows CI matrix build, a `float.to_fixed` fuzz body that exceeded the 1 MiB Windows main stack), and deeper inputs split debug-vs-release (unoptimized frames are ~48 KiB, far larger). (2) The Perceus RC-insertion pass (`pass_perceus`) walks the function-body statement chain ITERATIVELY — `split_chain` linearizes the `FnBody` continuation chain and the per-node passes fold over it — so a function body of N sibling statements costs O(1) native stack rather than recursing once per statement (formerly ~48 KiB/frame, overflowing the 256 MiB driver near ~5460 statements and a 1 MiB stack near ~20). A WIDE machine-generated body is therefore NOT rejected and NOT crashed: it compiles and runs byte-identical native == wasm. Expression NESTING (the orthogonal dimension) stays bounded deterministically by the parser's `MAX_DEPTH = 500`, a constant identical on both targets and both profiles — so the one remaining limit is a clean diagnostic, never a SIGSEGV. The de-recursion is behavior-preserving: the codegen snapshots and the full cross-target gate are byte-for-byte unchanged."
+since     = "0.25.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/wide_function_body.almd", class = "fixture" },
+  { path = "tests/compiler_stack_test.rs", name = "wide_function_body_compiles_in_small_stack", class = "fixture" },
+]
