@@ -27,13 +27,23 @@ impl WasmEmitter {
 }
 ```
 
-### Status: implementation ready
+### Status: hard-error 化済み（B.5 完了, 2026-06-07）
 
-PerceusVerifyPass (perceus-belt) は 0 violations:
+PerceusVerifyPass (perceus-belt) は **spec コーパス上で 0 violations**（394 ファイルを wasm
+emit して計測）。violation > 0 は **hard error**（`almide build --target wasm` を
+`error: [COMPILER BUG] Perceus RC verification failed` で拒否）。
 - Global: 全 heap var に Dec あり (leak なし)
 - Global: dec_count <= inc_count + 1 (double-free なし)
 - Per-branch: if/else/match の全 arm で Dec 一貫性
-- 除外: EnvLoad のみ (borrowed = 正当)
+- 除外（leak 判定のみ、いずれも「所有権がこのブロックを離れる」= Perceus "moved" 関係）:
+  - `EnvLoad` バインド（クロージャ環境から借用 = 非所有）
+  - **`returned_vars`**（関数 return 末尾 = 所有権が関数を脱出）
+  - **`moved_out_vars`**（`Block{expr:Some(Var x)}` の `x` = bare-Var ブロック末尾。所有権は
+    ブロックの消費側に移り、そちらが Dec を持つ。ANF が生む `__perceus_ret`/`__anf_*` 末尾一時の
+    偽陽性を構造的に排除 — `IrVisitor` の網羅走査で収集、名前プレフィックス band-aid ではない）
+  - `__tco_*` / `__br_*` 名前プレフィックス（TCO/branch 一時。Dec は実在するが Bind と別ブロックに
+    あり、フラットな per-block `count_decs` がローカルに 0 と読む偽陽性。scope-aware Dec accounting
+    への置換は follow-up）
 
 ### What Phase B guarantees
 
@@ -45,28 +55,57 @@ PerceusVerifyPass (perceus-belt) は 0 violations:
 「検証ロジック自体が正しい」
 = 検証関数にバグがあれば、不正な IR が Verified として通過する可能性
 
-## Phase B.5: warn-mode → hard-error(2026-06-07 の実証で前倒し)
+## Phase B.5: warn-mode → hard-error(2026-06-07 完了)
 
-**実証データ**: v0.25.0 リリースが `[Perceus] 5 RC violation(s)`(HOF-closure `__perceus_ret` の
-RcDec 漏れ。repro = `research/benchmark/stdlib/precise_all.almd` の `bench` fn)を**警告だけで
-出荷していた**。`Verified::verify`(almide-codegen/src/lib.rs)は意図的 warn-mode で、violation が
-あっても `Verified` を発行する — 現状の `Verified` は「検証を実行した」であり「合格した」ではない。
-型 doc の "unverified programs cannot reach emission" と実態が矛盾し、契約 C-041 にも反する。
+**実証データ**: v0.25.0 リリースが `[Perceus] N RC violation(s)`(HOF-closure `__perceus_ret`。
+repro = `research/benchmark/stdlib/precise_all.almd` の `bench` fn、最小化 = `f()` の後に
+`println("[" + name + "]")` を末尾に持つ HOF)を**警告だけで出荷していた**。`Verified::verify`
+(almide-codegen/src/lib.rs)は意図的 warn-mode で、violation があっても `Verified` を発行していた
+— 当時の `Verified` は「検証を実行した」であり「合格した」ではなかった。型 doc の "unverified
+programs cannot reach emission" と実態が矛盾し、契約 C-041 にも反していた。
+
+**根本原因の訂正（重要）**: これは当初想定した「RcDec **漏れ**」では**なかった**。RC は均衡しており
+**偽陽性**である。`__perceus_ret` は自分の定義ブロックの bare-Var 末尾(`Block{expr:Some(Var ret)}`)
+= **move-out**で、所有権は消費側の `Bind __anf_*` に移り、そちらが `RcDec __anf_*` を持つ
+(dump_rc_trace で実証: `__perceus_ret` への `RcInc` は無く move、消費側 `__anf_1` に Dec が実在)。
+ここで Dec を**追加すれば二重解放**になる。verify が「関数 return で脱出する var」(`returned_vars`)
+と「ブロックから move-out する var」を区別せず、後者を leak と誤判定していたのが真因。フラットな
+`collect_all_tail_vars`(tail-context 解析として `Block{expr:None}` の `Expr` 文へ降りない)では
+`__perceus_ret` を拾えず `returned_vars` が空になっていた。
+
+**修正**: `collect_moved_out_vars`(`IrVisitor` の網羅走査、total-by-construction)で全 `Block` の
+bare-Var 末尾を構造的に収集し、leak 判定のみを免除する独立集合 `moved_out_vars` を導入。
+`returned_vars` への単純マージ(=全チェック skip)ではなく leak のみ免除としたのは、move 済み値への
+Dec = 二重解放を引き続き検出するため。5 引数を `VerifyCtx` に集約。名前プレフィックス band-aid では
+なく**構造的**な move-out 認識。
 
 **判断: 警告は受け手が違う。** violation はユーザーコードのバグではなくコンパイラ挿入 RC のバグで、
 ユーザーには直せない。よって診断分類は **ICE**。"leaks, not unsoundness" は深刻度の話であって
 ゲート開閉の理由にならない(深刻度が決めるのはメッセージの口調だけ)。
 
-- [ ] `Verified::verify`: violation > 0 で **hard error(ICE 扱い)** — 「コンパイラのバグです。
-      報告してください」+ エラーコード付き
-- [ ] 脱出ハッチ `--emit-unverified`: 明示フラグでのみ emit 続行し、**manifest に
-      `perceus_verified: false` を記録**(認証の waiver モデル: 逸脱は存在してよいが必ず成果物に
-      記録される。`make verify` では赤)
-- [ ] 今回の 5 violation を修正 + **HOF-closure bench パターンの fixture を spec/ に追加**。
-      真の穴はコーパス — このパターンが spec に無いため CI green のまま退行がリリースに乗った
-      (C-041 evidence 拡充)
-- [ ] 上の Status「0 violations」を「0 violations **on the spec corpus**」に訂正
-      (コーパス外で 5 件発生した事実の反映)
+- [x] `Verified::verify`: violation > 0 で **hard error** —
+      `error: [COMPILER BUG] Perceus RC verification failed`「コンパイラのバグです。報告して
+      ください」+ `--emit-unverified` 案内。controlled `process::exit(1)`
+      (`assert_types_concretized` と同方式・同じ `[COMPILER BUG]` 体裁、`panic!` バックトレース
+      でも数値 E-コードでもない — 後者は rustc の `E060x` 空間と紛らわしいため避けた)
+- [x] 脱出ハッチ `--emit-unverified`(`almide build` のみ): 明示フラグでのみ emit 続行し warning を
+      出す。`run`/`test` は waiver 非対応で常に hard-error(漏れる成果物を黙って実行させない)。
+      **manifest への `perceus_verified: false` 記録は未実装** — ビルド manifest 機構自体が未整備の
+      ため、trust-layer の receipts 作業(trust-layer.md)に follow-up として送る
+- [x] `__perceus_ret` 偽陽性を構造的に修正(上記)+ **HOF-closure fixture を spec/ に追加**
+      (`spec/wasm_cross/hof_closure_string_tail.almd`, `// @contract: C-041`)。真の穴はコーパス —
+      このパターンが spec に無いため CI green のまま退行がリリースに乗った。fixture は move-out を
+      HOF/nested/returned-String/map-churn で網羅し native==wasm バイト同一を保証(C-041 evidence 拡充)
+- [x] 上の Status「0 violations」を「0 violations **on the spec corpus**」に訂正
+
+### follow-up（B.5 で構造化しきれなかった分、明示的トレードオフ）
+
+- `__tco_*` / `__br_*` の名前プレフィックス除外を **scope-aware Dec accounting** に置換する。現状は
+  偽陽性抑制として正しく機能している(Dec は実在、Bind と別ブロック)が、名前依存は理想形ではない。
+  `moved_out_vars` のような構造的規則(move-via-`Assign` フロー)で置換できるか要調査。ただし TCO の
+  RC 規約は ANF move-out と異なり(`Assign loopvar = Var tmp` と `RcDec tmp` が両方存在)、安易な
+  統合は偽陰性リスクがあるため別タスクとして慎重に扱う。
+- `--emit-unverified` の manifest 記録(上記）。
 
 ## Phase A: Lean 4 Formal Proof (future)
 

@@ -543,6 +543,7 @@ evidence  = [
   { path = "spec/wasm_cross/rc_alloc_stress.almd", class = "fixture" },
   { path = "spec/wasm_cross/memory_stress.almd", class = "fixture" },
   { path = "spec/wasm_cross/heap_arena.almd", class = "fixture" },
+  { path = "spec/wasm_cross/hof_closure_string_tail.almd", class = "fixture" },
   { path = "crates/almide-perceus-belt/AlmidePerceusBelt/Heap.lean", name = "perceus_fixes_heap", class = "lean" },
   { path = "crates/almide-perceus-belt/AlmidePerceusBelt/ClosureRc.lean", name = "closureScope_decs", class = "lean" },
 ]
