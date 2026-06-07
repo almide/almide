@@ -590,7 +590,35 @@ fn print_error_explanation(code: &str) {
     println!("{}", explanation);
 }
 
+/// The parse → check → lower → emit pipeline is deeply recursive: AST and IR
+/// walks, and type-directed codegen (e.g. `emit_eq_typed` / `emit_ord_cmp3`,
+/// container-literal emission) recurse with the shape of the input program. A
+/// sufficiently deep or wide machine-generated expression can therefore exhaust
+/// the OS's *default* main-thread stack — which is platform-dependent: ~8 MiB on
+/// Linux/macOS but only ~1 MiB on Windows. That made compilation depth a silent
+/// cross-platform divergence (a program that compiled on Unix overflowed the
+/// stack mid-codegen on Windows). We follow the same strategy production
+/// compilers use (rustc spawns its driver on an enlarged thread): run the whole
+/// driver on a worker thread with a large, fixed stack, so the achievable
+/// recursion depth is bounded by heap and identical on every host. The size is a
+/// virtual reservation — pages are committed lazily as the stack grows — so it
+/// costs no physical memory for shallow programs.
+const COMPILER_STACK_SIZE: usize = 256 * 1024 * 1024; // 256 MiB
+
 fn main() {
+    let child = std::thread::Builder::new()
+        .name("almide-main".to_string())
+        .stack_size(COMPILER_STACK_SIZE)
+        .spawn(run_main)
+        .expect("failed to spawn the compiler driver thread");
+    // A panic on the worker thread has already printed via the default hook;
+    // mirror the main-thread panic exit code (101) so behavior is unchanged.
+    if child.join().is_err() {
+        std::process::exit(101);
+    }
+}
+
+fn run_main() {
     crate::diagnostic_render::init_color();
     // Legacy mode: `almide file.almd [--target X]` → rewrite as `almide emit file.almd [--target X]`
     let raw_args: Vec<String> = std::env::args().collect();
