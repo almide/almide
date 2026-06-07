@@ -213,7 +213,11 @@ pub fn cmd_run(file: &str, program_args: &[String], no_check: bool, release: boo
 /// `wasmtime`'s own exit code is propagated unchanged, so a guest
 /// `proc_exit(n)` surfaces as `n` exactly as a native binary's exit would.
 fn cmd_run_wasm(file: &str, program_args: &[String]) -> i32 {
-    let bytes = match super::build::compile_to_wasm_bytes(file) {
+    // `run` does not expose the `--emit-unverified` waiver: running a module that
+    // failed the Perceus RC gate would silently execute leaky/double-freeing code,
+    // so a verification failure is always a hard error here. The waiver is
+    // build-only (you opt into shipping a known-bad artifact, not into running it).
+    let bytes = match super::build::compile_to_wasm_bytes(file, false) {
         Ok(b) => b,
         Err(()) => return 1,
     };
