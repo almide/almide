@@ -1,6 +1,13 @@
 //! `[package].almide` compiler-version pin (roadmap: compiler-version-pin).
+//!
+//! All checks go through the env-free `check_compiler_version_with(project,
+//! skip)` core — process env is process-GLOBAL, and parallel `cargo test`
+//! threads racing on `set_var`/`remove_var` made env-reading sibling tests
+//! flaky (the recurring `check_rejects_malformed_pin` CI failure). The thin
+//! env-reading wrapper `check_compiler_version` stays untested here by design:
+//! it only reads the var and delegates.
 
-use almide::project::{parse_toml, check_compiler_version, Package, Project};
+use almide::project::{parse_toml, check_compiler_version_with, Package, Project};
 
 fn write_toml(dir: &std::path::Path, body: &str) -> std::path::PathBuf {
     let p = dir.join("almide.toml");
@@ -41,40 +48,40 @@ fn parse_omitted_field_is_none() {
 fn check_passes_on_sufficient_version() {
     // Installed version is env!("CARGO_PKG_VERSION"). Pin it to 0.0.1 → always OK.
     let p = mk_project(Some("0.0.1"));
-    assert!(check_compiler_version(&p).is_ok());
+    assert!(check_compiler_version_with(&p, false).is_ok());
 }
 
 #[test]
 fn check_skipped_when_field_omitted() {
     let p = mk_project(None);
-    assert!(check_compiler_version(&p).is_ok());
+    assert!(check_compiler_version_with(&p, false).is_ok());
 }
 
-// NOTE: the insufficient-version and env-var-bypass paths both touch
-// the shared `ALMIDE_SKIP_VERSION_CHECK` env var. Running them as
-// separate `#[test]` cases lets them interleave under cargo's parallel
-// runner — the bypass case's set/unset window can leak into the error
-// case. We fold them into a single test so the env manipulation is
-// strictly serial.
 #[test]
-fn check_errors_and_env_bypass_are_both_respected() {
-    // Part 1 — without the env var set, an insufficient pin errors.
-    unsafe { std::env::remove_var("ALMIDE_SKIP_VERSION_CHECK"); }
+fn check_errors_on_insufficient_version() {
     let p = mk_project(Some("99.0.0"));
-    let err = check_compiler_version(&p).unwrap_err();
+    let err = check_compiler_version_with(&p, false).unwrap_err();
     assert!(err.contains("requires almide >= 99.0.0"), "msg:\n{}", err);
     assert!(err.contains("installed version"), "msg:\n{}", err);
+}
 
-    // Part 2 — with the env var set, the same call bypasses.
-    unsafe { std::env::set_var("ALMIDE_SKIP_VERSION_CHECK", "1"); }
-    let ok = check_compiler_version(&p).is_ok();
-    unsafe { std::env::remove_var("ALMIDE_SKIP_VERSION_CHECK"); }
-    assert!(ok, "skip env var should bypass");
+#[test]
+fn check_skip_bypasses_insufficient_version() {
+    let p = mk_project(Some("99.0.0"));
+    assert!(check_compiler_version_with(&p, true).is_ok(), "skip should bypass");
 }
 
 #[test]
 fn check_rejects_malformed_pin() {
     let p = mk_project(Some("not-a-version"));
-    let err = check_compiler_version(&p).unwrap_err();
+    let err = check_compiler_version_with(&p, false).unwrap_err();
     assert!(err.contains("invalid"), "msg:\n{}", err);
+}
+
+#[test]
+fn check_skip_bypasses_malformed_pin() {
+    // The bypass short-circuits BEFORE pin parsing — same as the wrapper with
+    // ALMIDE_SKIP_VERSION_CHECK set.
+    let p = mk_project(Some("not-a-version"));
+    assert!(check_compiler_version_with(&p, true).is_ok());
 }

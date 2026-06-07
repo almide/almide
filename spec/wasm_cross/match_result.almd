@@ -1,3 +1,4 @@
+// @contract: C-035, C-036, C-044
 // Cross-target coverage: a `match` whose arms construct a Result with `err(..)`
 // arms. Regression — such a match was typed `Never`, so the WASM function
 // epilogue appended `unreachable` and trapped (exit 134) while native ran fine.

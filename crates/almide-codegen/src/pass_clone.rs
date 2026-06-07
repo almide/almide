@@ -102,6 +102,26 @@ impl IrVisitor for SyntacticCounter<'_> {
         }
         walk_expr(self, expr); // exhaustive recursion into all children
     }
+
+    fn visit_stmt(&mut self, stmt: &IrStmt) {
+        // An in-place mutation `a[i]=v` / `a.f=v` / `a[k]=v` reads-and-writes `a`,
+        // but the target is a bare `VarId` field — NOT a `Var` expr node — so the
+        // expr walk above never sees it. Count it explicitly: this makes the
+        // mutation a *use* of `a`, so when an alias `var b = a` precedes it, the
+        // bind is no longer `a`'s last use → the eligible-move path clones at the
+        // bind instead of moving, and the later in-place write operates on owned
+        // `a` (not a moved value → no E0382). Without this, shapes B/C/I above
+        // emit `let mut b = a;`/`a.clone(); f(a);` then mutate the moved `a`.
+        match &stmt.kind {
+            IrStmtKind::IndexAssign { target, .. }
+            | IrStmtKind::MapInsert { target, .. }
+            | IrStmtKind::FieldAssign { target, .. } => {
+                *self.counts.entry(*target).or_insert(0) += 1;
+            }
+            _ => {}
+        }
+        walk_stmt(self, stmt); // exhaustive recursion into the stmt's expr children
+    }
 }
 
 fn count_syntactic(expr: &IrExpr, counts: &mut HashMap<VarId, u32>) {
@@ -457,6 +477,17 @@ fn insert_clones_live(
     IrExpr { kind, ty, span, def_id: None }
 }
 
+/// Account an in-place-mutation `target` as a use, mirroring the +1 that
+/// `SyntacticCounter::visit_stmt` recorded. Only `eligible` (last-use-move) vars
+/// track `remaining`; `always`/move-by-default vars don't appear there.
+fn count_target_use(target: VarId, eligible: &HashSet<VarId>, remaining: &mut HashMap<VarId, u32>) {
+    if eligible.contains(&target) {
+        if let Some(r) = remaining.get_mut(&target) {
+            *r = r.saturating_sub(1);
+        }
+    }
+}
+
 fn insert_clone_stmts_live(
     stmts: Vec<IrStmt>,
     always: &HashSet<VarId>,
@@ -477,15 +508,30 @@ fn insert_clone_stmts_live(
             IrStmtKind::BindDestructure { pattern, value } => IrStmtKind::BindDestructure {
                 pattern, value: insert_clones_live(value, always, eligible, remaining, in_loop),
             },
-            IrStmtKind::IndexAssign { target, index, value } => IrStmtKind::IndexAssign {
-                target, index: insert_clones_live(index, always, eligible, remaining, in_loop), value: insert_clones_live(value, always, eligible, remaining, in_loop),
-            },
-            IrStmtKind::FieldAssign { target, field, value } => IrStmtKind::FieldAssign {
-                target, field, value: insert_clones_live(value, always, eligible, remaining, in_loop),
-            },
-            IrStmtKind::MapInsert { target, key, value } => IrStmtKind::MapInsert {
-                target, key: insert_clones_live(key, always, eligible, remaining, in_loop), value: insert_clones_live(value, always, eligible, remaining, in_loop),
-            },
+            // In-place mutations: process the sub-exprs first (they may consume
+            // vars), THEN account the target as a use of `target` itself —
+            // `count_target_use` decrements `remaining[target]` to match the +1
+            // that `SyntacticCounter::visit_stmt` added, keeping last-use tracking
+            // consistent for any later use of `target`. The target binding is NOT
+            // cloned/moved (the statement writes through it in place); this is a
+            // pure counter decrement.
+            IrStmtKind::IndexAssign { target, index, value } => {
+                let index = insert_clones_live(index, always, eligible, remaining, in_loop);
+                let value = insert_clones_live(value, always, eligible, remaining, in_loop);
+                count_target_use(target, eligible, remaining);
+                IrStmtKind::IndexAssign { target, index, value }
+            }
+            IrStmtKind::FieldAssign { target, field, value } => {
+                let value = insert_clones_live(value, always, eligible, remaining, in_loop);
+                count_target_use(target, eligible, remaining);
+                IrStmtKind::FieldAssign { target, field, value }
+            }
+            IrStmtKind::MapInsert { target, key, value } => {
+                let key = insert_clones_live(key, always, eligible, remaining, in_loop);
+                let value = insert_clones_live(value, always, eligible, remaining, in_loop);
+                count_target_use(target, eligible, remaining);
+                IrStmtKind::MapInsert { target, key, value }
+            }
             // Default: recurse every expr child via the exhaustive `map_exprs`
             // chokepoint so no un-listed stmt kind (`ListSwap`/`ListReverse`/… —
             // which `count_syntactic` already counts) drops its expr subtree.

@@ -1,0 +1,35 @@
+// @contract: C-045
+// Cross-target gate for a `List[String]` PARAM consumed by both `string.join`
+// and `list.len` (plus index / iteration).
+//
+// A `List[String]` function param renders as `&[String]` on Rust (so `list.len`
+// can take it). `almide_rt_string_join` declared `&Vec<String>`, so passing the
+// `&[String]` param tripped E0308 (`&[String]` vs `&Vec<String>`) — codegen
+// produced invalid Rust. WASM was unaffected. The fix makes the join runtime
+// accept `&[String]` (matching `almide_rt_list_join`), so ANY combination of
+// join / len / index / iteration over the same param compiles on both targets.
+
+fn summary(xs: List[String]) -> String = {
+  let n = list.len(xs)
+  string.join(xs, ",") + "/" + int.to_string(n)
+}
+
+fn first_and_count(xs: List[String]) -> String = {
+  let n = list.len(xs)
+  xs[0] + ":" + int.to_string(n)
+}
+
+fn joined_with_iter(xs: List[String]) -> String = {
+  var acc = ""
+  for x in xs { acc = acc + x }
+  acc + "|" + string.join(xs, "-") + "|" + int.to_string(list.len(xs))
+}
+
+fn main() -> Unit = {
+  let items = ["a", "b", "c"]
+  println(summary(items))
+  println(first_and_count(items))
+  println(joined_with_iter(items))
+  // Owned literal still joins (the &Vec → &[String] coercion path).
+  println(string.join(["x", "y"], "+"))
+}

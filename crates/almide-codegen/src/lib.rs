@@ -31,10 +31,12 @@ pub mod pass_box_deref;
 pub mod pass_builtin_lowering;
 pub mod pass_capture_clone;
 pub mod pass_clone;
+pub mod pass_alias_cow;
 pub mod pass_fan_lowering;
 pub mod pass_list_pattern;
 pub mod pass_match_lowering;
 pub mod pass_match_subject;
+pub mod pass_pattern_literal_guard;
 pub mod pass_result_erasure;
 pub mod pass_result_propagation;
 pub mod pass_intrinsic_lowering;
@@ -263,6 +265,17 @@ pub fn codegen_with(program: &mut IrProgram, target: Target, options: &CodegenOp
     let transformed = config.pipeline.run(owned, target);
     *program = transformed;
     if let Some(pt) = &pt { eprintln!("[prof:codegen] pipeline={:.3}s", pt.elapsed_secs()); }
+
+    // HARD type-completeness gate (both targets, both debug and release).
+    // After the full pipeline, every reachable IrExpr.ty must be concrete —
+    // no Unknown/TypeVar and no value-position Never. A residual is a compiler
+    // bug: WASM emit would silently fall back to i32 (`ty_to_valtype`'s catch-all,
+    // the `fan.map` silent-miscompile class) and Rust emit to an arbitrary type.
+    // `assert_types_concretized` refuses to emit and aborts with a clean,
+    // span-tagged diagnostic (a controlled error, not an ICE). Stage-1(iv) of
+    // the correctness completeness roadmap.
+    pass_concretize_types::assert_types_concretized(program);
+
     let et = almide_base::profile::ProfileTimer::start(prof);
 
     // Layer 3: Target-specific emit
@@ -574,6 +587,18 @@ fn emit_source(program: &mut IrProgram, target: Target, config: &target::TargetC
             let mut needed: std::collections::HashSet<&str> = std::collections::HashSet::new();
             for m in &program.used_stdlib_modules {
                 needed.insert(m.as_str());
+            }
+            // A few operators lower to a runtime call (not a CallTarget::Module),
+            // so the IR's used-module set misses them — e.g. float `**` renders
+            // `almide_rt_math_fpow(..)` via the power_expr template. Union in any
+            // module whose `almide_rt_<module>_` symbol literally appears in the
+            // emitted user code so the body (and its transitive deps) is included.
+            for (name, _) in crate::generated::rust_runtime::RUST_RUNTIME_MODULES {
+                if !needed.contains(name)
+                    && user_code.contains(&format!("almide_rt_{}_", name))
+                {
+                    needed.insert(name);
+                }
             }
             resolve_runtime_deps(&mut needed);
             output.push_str(&rust_runtime_modules(&needed, &user_code));

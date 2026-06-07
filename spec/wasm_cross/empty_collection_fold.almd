@@ -1,0 +1,29 @@
+// @contract: C-052
+// A `list`/`map`/`set` `.fold` over an EMPTY collection whose element/key/value
+// types the closure never uses still requires the EMPTY collection to carry an
+// element type. Almide follows Rust/Swift: an empty `[]` / `map.new()` /
+// `set.new()` whose element type cannot be inferred from context is a compile
+// error (E018, frontend, both targets) — never silently defaulted. Once the
+// empty collection is annotated, the closure params are pinned by the
+// collection's element type the normal way and the fold builds + runs
+// byte-identically on BOTH targets even though the closure is never invoked.
+// Non-empty folds that DO use the params are the regression guard.
+fn main() -> Unit = {
+  // Empty folds — params unused, collection empty — but the empty collection's
+  // element type is ANNOTATED (the E018-resolving form), so K/V/elem are pinned.
+  let empty_l: List[Int] = []
+  let empty_m: Map[String, Int] = map.new()
+  let empty_s: Set[Int] = set.new()
+  let a: Float = list.fold(empty_l, -42.5, ((acc, x) => acc))
+  let b: Int = map.fold(empty_m, 7, ((acc, k, v) => acc))
+  let c: Int = set.fold(empty_s, 99, ((acc, x) => acc))
+  println(float.to_string(a))  // -42.5
+  println(int.to_string(b))    // 7
+  println(int.to_string(c))    // 99
+  // Non-empty folds that USE the element/key/value — must still infer normally.
+  let m = map.set(map.set(map.new(), "x", 10), "y", 20)
+  let s: Int = map.fold(m, 0, ((acc, k, v) => acc + v))
+  println(int.to_string(s))    // 30
+  let t: Int = list.fold([1, 2, 3], 0, ((acc, x) => acc + x))
+  println(int.to_string(t))    // 6
+}

@@ -1,3 +1,4 @@
+// @contract: C-039
 // Cross-target gate for TYPE-CHANGING map.map and set.map closures.
 //
 // Native is the oracle: applying a closure whose return type differs from the

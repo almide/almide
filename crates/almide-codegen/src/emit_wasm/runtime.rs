@@ -144,8 +144,14 @@ pub fn register_runtime_functions(emitter: &mut WasmEmitter) {
     let rc_dec_ty = emitter.register_type(vec![ValType::I32], vec![]);
     emitter.rt.rc_dec = emitter.register_func("__rc_dec", rc_dec_ty);
 
-    // __cow_check(ptr: i32, size: i32) -> i32 — if rc>1, copy data, dec old rc, return new ptr
-    let cow_check_ty = emitter.register_type(vec![ValType::I32, ValType::I32], vec![ValType::I32]);
+    // __cow_check(ptr: i32) -> i32 — copy-on-write guard for in-place mutation.
+    // If rc<=1 (unique owner) returns ptr unchanged; if rc>1 (a live alias exists)
+    // allocs a fresh block, memcpys the data, decrements the old rc, and returns the
+    // new ptr. The copy length is read from the alloc header's SIZE field (set by
+    // __alloc) — so no per-call-site byte-size argument is needed (every collection
+    // header records its own data size). This realizes Almide value semantics: a
+    // mutation through one binding never reaches another binding aliasing the value.
+    let cow_check_ty = emitter.register_type(vec![ValType::I32], vec![ValType::I32]);
     emitter.rt.cow_check = emitter.register_func("__cow_check", cow_check_ty);
 
     // __heap_save() -> i32   — return current heap pointer
@@ -274,6 +280,12 @@ pub fn register_runtime_functions(emitter: &mut WasmEmitter) {
     // __math_exp(x: f64) -> f64  (e^x)
     emitter.rt.math_exp = emitter.register_func("__math_exp", f64_f64_ty);
 
+    // Vendored-libm trig helpers (floor/scalbn/rem_pio2[_large]/k_sin/k_cos/k_tan).
+    // Registered here so the __math_sin/cos/tan bodies (compiled by rt_numeric in
+    // the slots just above) can reference these indices. Compile order below must
+    // mirror this registration order (see `compile_runtime`).
+    super::rt_libm::register(emitter);
+
     // __bytes_f16_to_f64(bits: i32) -> f64  (IEEE-754 half-precision expand)
     let i32_f64_ty = emitter.register_type(vec![ValType::I32], vec![ValType::F64]);
     emitter.rt.bytes_f16_to_f64 = emitter.register_func("__bytes_f16_to_f64", i32_f64_ty);
@@ -316,6 +328,20 @@ pub fn register_runtime_functions(emitter: &mut WasmEmitter) {
     emitter.preopen_count_global = 2;
 }
 
+/// Global index of the immutable `__heap_start` low-bound (see `next_global`
+/// layout note: 0=heap_ptr, 1=free_list, 2=preopen_table, 3=preopen_count,
+/// 4=heap_start). Named so the header-guard runtime fns and the assemble-time
+/// global declaration share one source of truth.
+///
+/// NOTE: this is the CORRECT low bound. The legacy `emitter.rt.heap_start_global`
+/// field is only assigned (to this value) in `assemble`, AFTER `compile_runtime` —
+/// so at runtime-fn compile time it is still 0 (= the moving heap_ptr global). The
+/// rc_inc/rc_dec header guard therefore bakes `global.get 0`, which makes them
+/// no-ops for every heap pointer (a pure bump-allocate-and-leak model — sound, no
+/// frees). `compile_cow_check` deliberately uses THIS constant instead, so its
+/// data-section guard is correct independent of that legacy field.
+pub const HEAP_START_GLOBAL_IDX: u32 = 4;
+
 /// Compile all runtime function bodies.
 pub fn compile_runtime(emitter: &mut WasmEmitter) {
     compile_alloc(emitter);
@@ -356,6 +382,9 @@ pub fn compile_runtime(emitter: &mut WasmEmitter) {
     super::rt_numeric::compile_math_log10(emitter);
     super::rt_numeric::compile_math_log2(emitter);
     super::rt_numeric::compile_math_exp(emitter);
+    // Vendored-libm trig helper bodies. Compile order MUST match the registration
+    // order in `register_runtime` (right after __math_exp).
+    super::rt_libm::compile_helpers(emitter);
     compile_bytes_f16_to_f64(emitter);
     // Compile order MUST match registration order in `register_runtime`.
     super::rt_encoding::compile_base64_encode(emitter, /*url_safe=*/false);
@@ -535,33 +564,45 @@ fn compile_rc_dec(emitter: &mut WasmEmitter) {
     emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
 }
 
+/// __cow_check(ptr) -> ptr. See registration comment in `register_runtime`.
+///
+/// Returns a FRESH, uniquely-owned copy of the heap object so an in-place mutation
+/// of the result is invisible through any other binding that aliased `ptr` (Almide
+/// value semantics; only emitted at the mutation sites of `AliasCowPass`-marked
+/// vars). The data byte length is read from the alloc header's SIZE field, so the
+/// body carries no hardcoded element-size — it works uniformly for List/String/
+/// Map/Record/Bytes/variant blocks, all of which __alloc stamps with their size.
+///
+/// This clones UNCONDITIONALLY (a data-section pointer, which has no header, is the
+/// only pass-through). It does NOT branch on the refcount: in the current WASM
+/// runtime the rc header guard (rc_inc/rc_dec) is a no-op (a bump-allocate-and-leak
+/// model — see `HEAP_START_GLOBAL_IDX`), so the rc never reflects aliasing and a
+/// `rc>1` test would never fire. Unconditional clone matches the Rust target's
+/// eager `.clone()` at the bind: correct, and the extra copy when the alias is
+/// already dead is the accepted, conservative cost of `needs_cow` marking. The
+/// original block is left untouched (it leaks like every other block today), so no
+/// refcount bookkeeping is needed.
 fn compile_cow_check(emitter: &mut WasmEmitter) {
     use super::engine::{WasmBuilder, layout::*};
     let type_idx = emitter.func_type_indices[&emitter.rt.cow_check];
-    let rc_neg = emitter.layout_reg.alloc_header_neg_offset(alloc::RC) as i32;
-    let rc_ty = emitter.layout_reg.field(ALLOC_HEADER, alloc::RC).ty;
-    let heap_start = emitter.rt.heap_start_global;
+    let size_neg = emitter.layout_reg.alloc_header_neg_offset(alloc::SIZE) as i32;
+    let size_ty = emitter.layout_reg.field(ALLOC_HEADER, alloc::SIZE).ty;
     let alloc_fn = emitter.rt.alloc;
 
-    let mut f = Function::new([(1, ValType::I32)]); // local 2: $new_ptr
+    // locals: 1 = $size (data byte count), 2 = $new_ptr
+    let mut f = Function::new([(2, ValType::I32)]);
     {
         let w = &mut WasmBuilder::new(&mut f, &emitter.layout_reg);
-        // Data section → unique
-        w.get(0).gget(heap_start).lt_u();
+        // A data-section ptr (below heap_start) has no alloc header → not a heap
+        // object → nothing to clone, return as-is. Uses the immutable heap_start
+        // global directly (the rt field is still 0 at this compile point).
+        w.get(0).gget(HEAP_START_GLOBAL_IDX).lt_u();
         w.if_void(|w| { w.get(0).ret(); }, |_| {});
-        // if rc <= 1 → unique owner, return as-is
-        w.get(0).i32c(rc_neg).sub().emit_load(0, rc_ty);
-        w.i32c(1).raw(wasm_encoder::Instruction::I32LeU);
-        w.if_void(|w| { w.get(0).ret(); }, |_| {});
-        // Shared: alloc new, memcpy, dec old rc
+        // size = header.SIZE; new = alloc(size); memcpy(new, ptr, size); return new.
+        w.get(0).i32c(size_neg).sub().emit_load(0, size_ty).set(1);
         w.get(1).call(alloc_fn).set(2);
         w.get(2).get(0).get(1).memory_copy();
-        // old rc -= 1
-        w.get(0).i32c(rc_neg).sub();
-        w.get(0).i32c(rc_neg).sub().emit_load(0, rc_ty);
-        w.i32c(1).sub();
-        w.emit_store(0, rc_ty);
-        w.get(2); // return new ptr
+        w.get(2); // return the fresh clone
     }
     f.instruction(&wasm_encoder::Instruction::End);
     emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
@@ -1378,8 +1419,15 @@ pub(super) fn compile_bytes_f16_to_f64(emitter: &mut WasmEmitter) {
         else_;
             local_get(2); i32_const(31); i32_eq;
             if_f64;
-                // inf/nan: return sign-preserving large value for simplicity
-                local_get(5); f64_const(3.4028235e38); f64_mul;
+                // exp all-ones: mant==0 → ±inf (sign-preserving), mant!=0 → NaN.
+                // Mirrors native f16_bits_to_f64 (runtime/rs/src/bytes.rs): the
+                // previous `sign * f32::MAX` was finite and diverged.
+                local_get(3); i32_eqz;
+                if_f64;
+                    local_get(5); f64_const(f64::INFINITY); f64_mul; // ±inf
+                else_;
+                    f64_const(f64::NAN);
+                end;
             else_;
                 // normal: sign_f * (1 + mant/1024) * 2^(exp-15)
                 // 2^(exp-15) computed as f64 bit pattern:

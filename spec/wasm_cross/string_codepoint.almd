@@ -1,3 +1,4 @@
+// @contract: C-016
 // UTF-8 codepoint-aware string ops: native (Rust char-based) is the oracle and
 // WASM must byte-match it. Exercises chars/reverse/slice/take/drop/first/last/
 // get/codepoint/from_codepoint/pad on ASCII + multibyte input (Latin-1 accent,

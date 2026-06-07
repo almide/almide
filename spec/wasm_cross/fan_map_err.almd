@@ -1,3 +1,4 @@
+// @contract: C-005
 // fan.map element-Err propagation: the FIRST element fn that returns Err (in
 // list order) makes the whole fan.map produce that Err, which the effect-main
 // termination surfaces as "Error: <msg>" + exit 1 on BOTH targets — native via

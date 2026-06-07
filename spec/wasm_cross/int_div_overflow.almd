@@ -1,3 +1,4 @@
+// @contract: C-002
 // Signed `MIN / -1` overflows and aborts with "Error: integer overflow" + exit 1
 // on BOTH targets. `neg_one(7)` shields the `-1` divisor from const-folding. Native
 // runs `almide_div!` (checked_div → None on MIN/-1); wasm's `i64.div_s` would TRAP

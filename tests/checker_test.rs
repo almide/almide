@@ -1109,3 +1109,113 @@ fn map_with_closure_value_allowed() {
         "effect fn main() -> Unit = {\n  var m: Map[String, () -> Unit] = map.new()\n  map.insert(m, \"a\", () => {})\n}"
     );
 }
+
+#[test]
+fn enum_name_record_construction_rejected() {
+    // Constructing a record literal via the ENUM TYPE name (not a case name) is a
+    // category error. The two targets disagreed (native rustc leaked E0574, WASM
+    // accepted it and mis-constructed the value with an empty field), so reject it
+    // at typecheck on both with a proper diagnostic. (E017)
+    let errs = errors(
+        "type V = Tag(Float) | Named { who: String }\nfn main() -> Unit = {\n  let v = V { who: \"x\" }\n  println(\"${v}\")\n}"
+    );
+    assert!(errs.iter().any(|e| e.contains("enum type 'V'") && e.contains("record syntax")),
+        "should reject `V {{ who: ... }}` on the enum type name, got: {:?}", errs);
+}
+
+#[test]
+fn enum_name_record_construction_hint_lists_cases() {
+    // The hint must name the available record-variant case so the fix is obvious.
+    let hints = error_hints(
+        "type V = Tag(Float) | Named { who: String }\nfn main() -> Unit = {\n  let v = V { who: \"x\" }\n  println(\"${v}\")\n}"
+    );
+    assert!(hints.iter().any(|h| h.contains("Named")),
+        "hint should mention the `Named` case, got: {:?}", hints);
+}
+
+#[test]
+fn record_type_construction_still_allowed() {
+    // A legitimate record TYPE (not an enum) must still construct fine.
+    has_no_errors(
+        "type Point = { x: Int, y: Int }\nfn main() -> Unit = {\n  let p = Point { x: 1, y: 2 }\n  println(\"${p.x}\")\n}"
+    );
+}
+
+#[test]
+fn record_variant_case_construction_still_allowed() {
+    // Constructing the record-bearing CASE (not the enum type) is the correct form.
+    has_no_errors(
+        "type V = Tag(Float) | Named { who: String }\nfn main() -> Unit = {\n  let v = Named { who: \"x\" }\n  println(\"${v}\")\n}"
+    );
+}
+
+// ── E014 reachability with literal sub-patterns (A2 regression-lock) ──
+//
+// A literal nested in a constructor pattern (`some(1)`, `ok(0)`, `some("a")`)
+// is a REFINEMENT of that constructor, not a full cover of it. So:
+//   • a literal arm must NOT shadow a later binder arm of the same ctor, and
+//   • two DISTINCT literals must NOT shadow each other.
+// The `is_useful` infinite-domain guard (`enumerable`) realizes this: after
+// `some(1)`, the value `some(2)` is still uncovered (Int is infinite), so
+// `some(x)` stays reachable. These positive cases must check clean.
+
+#[test]
+fn literal_some_then_binder_is_reachable() {
+    // some(1)/some(2)/some(x)/none — the binder catches every other Int.
+    has_no_errors(
+        "fn f(o: Option[Int]) -> String = match o {\n  some(1) => \"a\"\n  some(2) => \"b\"\n  some(x) => \"o\"\n  none => \"n\"\n}"
+    );
+}
+
+#[test]
+fn literal_some_with_none_between_binder_is_reachable() {
+    // The outer Some/None space is complete BEFORE the binder, so this drives
+    // the `enumerable && is_complete` arm of `is_useful` — the binder is still
+    // reachable because the inner Int domain is infinite.
+    has_no_errors(
+        "fn f(o: Option[Int]) -> String = match o {\n  some(1) => \"a\"\n  none => \"n\"\n  some(x) => \"o\"\n}"
+    );
+}
+
+#[test]
+fn literal_result_then_binder_is_reachable() {
+    has_no_errors(
+        "fn f(r: Result[Int, String]) -> String = match r {\n  ok(0) => \"z\"\n  err(e) => e\n  ok(n) => \"n\"\n}"
+    );
+}
+
+#[test]
+fn string_literal_some_then_binder_is_reachable() {
+    has_no_errors(
+        "fn f(o: Option[String]) -> String = match o {\n  some(\"a\") => \"A\"\n  none => \"N\"\n  some(x) => x\n}"
+    );
+}
+
+#[test]
+fn distinct_int_literals_do_not_shadow() {
+    has_no_errors(
+        "fn f(n: Int) -> String = match n {\n  1 => \"a\"\n  2 => \"b\"\n  3 => \"c\"\n  x => \"o\"\n}"
+    );
+}
+
+// Negative direction: the loosening must NOT swallow genuine dead arms. A
+// binder BEFORE a same-ctor literal covers it (the binder already matches
+// `some(1)`), and a duplicate literal is dead — both stay E014.
+
+#[test]
+fn binder_before_literal_is_still_unreachable() {
+    let errs = errors(
+        "fn f(o: Option[Int]) -> String = match o {\n  some(x) => \"o\"\n  some(1) => \"a\"\n  none => \"n\"\n}"
+    );
+    assert!(errs.iter().any(|e| e.contains("unreachable match arm")),
+        "some(1) after some(x) must report E014, got: {:?}", errs);
+}
+
+#[test]
+fn duplicate_int_literal_is_still_unreachable() {
+    let errs = errors(
+        "fn f(o: Option[Int]) -> String = match o {\n  some(1) => \"a\"\n  some(1) => \"d\"\n  some(x) => \"o\"\n  none => \"n\"\n}"
+    );
+    assert!(errs.iter().any(|e| e.contains("unreachable match arm")),
+        "duplicate some(1) must report E014, got: {:?}", errs);
+}

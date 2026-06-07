@@ -1,0 +1,3 @@
+expects_code = "E001"
+expects_error = "cannot assign a Unit value"
+hint_substring = "in-place mutator"

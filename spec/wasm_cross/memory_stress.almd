@@ -1,3 +1,4 @@
+// @contract: C-041
 // Memory stress tests — catch layout bugs, buffer overflows, heap corruption.
 
 fn count_matches(xs: List[Int], expected: (Int) -> Int, n: Int) -> Int = {

@@ -226,6 +226,36 @@ pub(crate) fn coerce_literal_to_sized(ir_val: &mut IrExpr, declared: &Ty, env: &
     }
 }
 
+/// Resolve the declared field types of a named record construction
+/// (`Name { ... }`) into a structural `Ty::Record`, so the construction
+/// site can narrow bare-literal field values to their sized field types
+/// (`coerce_literal_to_sized`). `name` may be either:
+///   - a record TYPE name (`type Rec = { a: Int8 }`) — looked up in
+///     `env.types` and resolved to its `Ty::Record` shape, or
+///   - a record-bearing VARIANT case (`Scroll { dy: Int8 }`) — found in
+///     `env.constructors`, whose `VariantPayload::Record` carries the fields.
+/// Returns `None` for anonymous records, tuple/unit cases, or unknown names
+/// (nothing to coerce against).
+pub(crate) fn declared_record_ty(env: &TypeEnv, name: almide_base::intern::Sym) -> Option<Ty> {
+    // Variant case with a record payload takes priority: a case name and a
+    // type name never collide (constructors are registered separately), but
+    // checking constructors first matches the checker's resolution order.
+    if let Some((_, case)) = env.constructors.get(&name) {
+        if let crate::types::VariantPayload::Record(fields) = &case.payload {
+            return Some(Ty::Record { fields: fields.clone() });
+        }
+        return None;
+    }
+    // Record type name: resolve the alias to its structural record form.
+    if let Some(ty) = env.types.get(&name) {
+        let resolved = env.resolve_named(ty);
+        if matches!(resolved, Ty::Record { .. } | Ty::OpenRecord { .. }) {
+            return Some(resolved);
+        }
+    }
+    None
+}
+
 // ── Pattern lowering ────────────────────────────────────────────
 
 pub(super) fn lower_pattern(ctx: &mut LowerCtx, pat: &ast::Pattern, ty: &Ty) -> IrPattern {

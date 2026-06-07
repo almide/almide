@@ -227,6 +227,12 @@ macro_rules! wasm {
     (@emit $f:expr, i32_div_u; $($rest:tt)*) => {
         $f.instruction(&wasm_encoder::Instruction::I32DivU); wasm!(@emit $f, $($rest)*)
     };
+    (@emit $f:expr, i32_div_s; $($rest:tt)*) => {
+        $f.instruction(&wasm_encoder::Instruction::I32DivS); wasm!(@emit $f, $($rest)*)
+    };
+    (@emit $f:expr, i32_trunc_f64_s; $($rest:tt)*) => {
+        $f.instruction(&wasm_encoder::Instruction::I32TruncF64S); wasm!(@emit $f, $($rest)*)
+    };
     (@emit $f:expr, i32_rem_u; $($rest:tt)*) => {
         $f.instruction(&wasm_encoder::Instruction::I32RemU); wasm!(@emit $f, $($rest)*)
     };

@@ -7,6 +7,7 @@ use wasm_encoder::{Instruction, ValType};
 use super::FuncCompiler;
 use super::values;
 use super::wasm_macro::wasm;
+use crate::pass_closure_conversion::is_inplace_mutator;
 
 #[derive(Clone, Copy)]
 pub(super) enum CmpKind {
@@ -315,6 +316,16 @@ impl FuncCompiler<'_> {
                 self.emit_tail_call(target, args, &expr.ty);
             }
             IrExprKind::RuntimeCall { symbol, args } => {
+                // In-place stdlib mutators (`list.push`, `map.insert`, `string.push`,
+                // bytes builders, …) mutate args[0] through its shared pointer. If
+                // args[0] is a copy-aliased COW target, clone it into its own local
+                // first so the sibling binding is not corrupted. Fires BEFORE any
+                // dispatch branch reads args[0]. No-op for non-COW vars.
+                if is_inplace_mutator(symbol.as_str()) {
+                    if let Some(IrExprKind::Var { id }) = args.first().map(|a| &a.kind) {
+                        self.cow_if_needed(id.0);
+                    }
+                }
                 // Resolved runtime call from @intrinsic. Preferred path:
                 // look up the mangled symbol in `func_map` and emit
                 // `call(idx)` after each arg. Fallback: the WASM runtime
@@ -1193,58 +1204,14 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i64(base_s);
             }
             BinOp::PowFloat => {
-                // Float power: check if exp == 0.5 → sqrt, else integer loop
-                let base_s = self.scratch.alloc_i64();
-                let result_s = self.scratch.alloc_i64();
-                let counter_s = self.scratch.alloc_i32();
+                // Float `**` -> __float_pow -> vendored musl-libm __libm_pow. The old
+                // inline impl (sqrt for exp==0.5, integer multiply loop otherwise) was
+                // wrong for negative bases / non-integer exponents and TRAPPED on an
+                // infinite exponent (i64.trunc_f64_s of inf). The vendored pow handles
+                // every special case and is bit-identical to native almide_rt_math_fpow.
                 self.emit_expr(left);
-                wasm!(self.func, { i64_reinterpret_f64; local_set(base_s); });
                 self.emit_expr(right);
-                // Check if exp == 0.5
-                wasm!(self.func, {
-                    f64_const(0.5);
-                    f64_eq;
-                    if_f64;
-                    local_get(base_s);
-                    f64_reinterpret_i64;
-                    f64_sqrt;
-                    else_;
-                });
-                // Integer loop for non-0.5 exponent
-                self.emit_expr(right);
-                wasm!(self.func, {
-                    i64_trunc_f64_s;
-                    i32_wrap_i64;
-                    local_set(counter_s);
-                    f64_const(1.0);
-                    i64_reinterpret_f64;
-                    local_set(result_s);
-                    block_empty;
-                    loop_empty;
-                    local_get(counter_s);
-                    i32_eqz;
-                    br_if(1);
-                    local_get(result_s);
-                    f64_reinterpret_i64;
-                    local_get(base_s);
-                    f64_reinterpret_i64;
-                    f64_mul;
-                    i64_reinterpret_f64;
-                    local_set(result_s);
-                    local_get(counter_s);
-                    i32_const(1);
-                    i32_sub;
-                    local_set(counter_s);
-                    br(0);
-                    end;
-                    end;
-                    local_get(result_s);
-                    f64_reinterpret_i64;
-                    end;
-                });
-                self.scratch.free_i32(counter_s);
-                self.scratch.free_i64(result_s);
-                self.scratch.free_i64(base_s);
+                wasm!(self.func, { call(self.emitter.rt.float_pow); });
             }
         }
     }

@@ -88,6 +88,47 @@ pub struct Checker {
     /// Map literal key types to validate after constraint solving.
     /// Each entry: (key_type, span) — checked via `is_hash()` once types are resolved.
     pub(crate) deferred_map_key_checks: Vec<(Ty, Option<crate::ast::Span>)>,
+    /// Empty-collection producers whose element type must be inferable from
+    /// context. Each entry is the producer's result `Ty` (carrying the fresh
+    /// element type var), the construct kind (for the diagnostic's wording), and
+    /// its span. Validated post-solve by [`Checker::validate_empty_collection_elements`]:
+    /// if a slot is STILL an unresolved var after the whole program is solved, the
+    /// element type cannot be inferred and it is a compile error (E018) — the
+    /// Rust/Swift rule, never silently defaulted. See `docs/contracts` C-058.
+    pub(crate) deferred_empty_collection_checks: Vec<EmptyCollectionSite>,
+}
+
+/// The construct that produced an empty collection whose element type the
+/// checker must be able to infer from context. Carried by an
+/// [`EmptyCollectionSite`] so the E018 diagnostic can name the exact form and
+/// show a matching annotation example.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum EmptyCollectionKind {
+    /// An empty list literal `[]`.
+    ListLiteral,
+    /// An empty map literal `[:]` / `{}` (or the desugared `EmptyMap`).
+    MapLiteral,
+    /// `set.new()` — a generic `Set[A]` constructor with no element argument.
+    SetNew,
+    /// `list.with_capacity(n)` — a generic `List[A]` constructor whose only
+    /// argument is the capacity, not an element.
+    ListWithCapacity,
+    /// The iterable of a `for _ in []` loop (an empty list literal in iterable
+    /// position). Distinguished so the hint can suggest annotating the iterable.
+    ForInEmpty,
+}
+
+/// One empty-collection producer to re-check after constraint solving.
+#[derive(Debug, Clone)]
+pub(crate) struct EmptyCollectionSite {
+    /// The producer's result type, e.g. `List[?A]` / `Set[?A]` / `Map[?K, ?V]`.
+    /// Resolved against the union-find post-solve; if any element/key/value slot
+    /// is still an unresolved var, the element type was never pinned by context.
+    pub ty: Ty,
+    /// Which construct produced it (drives the diagnostic wording + example).
+    pub kind: EmptyCollectionKind,
+    /// Source span of the offending expression.
+    pub span: Option<crate::ast::Span>,
 }
 
 impl Checker {
@@ -107,6 +148,7 @@ impl Checker {
             deferred_tuple_indices: Vec::new(),
             deferred_field_accesses: Vec::new(),
             deferred_map_key_checks: Vec::new(),
+            deferred_empty_collection_checks: Vec::new(),
         }
     }
 
@@ -267,6 +309,7 @@ impl Checker {
         self.resolve_deferred_tuple_indices();
         resolve_type_map(&mut self.type_map, &self.uf);
         self.validate_map_key_types();
+        self.validate_empty_collection_elements();
         // Unused import warnings
         for imp in &program.imports {
             let (path, alias, span) = match imp {
@@ -422,6 +465,7 @@ impl Checker {
         self.resolve_deferred_tuple_indices();
         resolve_type_map(&mut self.type_map, &self.uf);
         self.validate_map_key_types();
+        self.validate_empty_collection_elements();
         self.current_module_prefix = saved_prefix;
 
         // Restore
@@ -559,9 +603,18 @@ impl Checker {
                 let wcs = clauses.clone();
                 for wc in &wcs { self.infer_test_where_inner(wc); }
             }
-            ast::Decl::TopLet { name, value, mutable, .. } => {
+            ast::Decl::TopLet { name, ty, value, mutable, .. } => {
                 if *mutable { self.env.mutable_vars.insert(sym(name)); }
                 let ity = self.infer_expr(value);
+                // A declared type annotation on a top-level `let`/`var` is the
+                // source of truth — flow it into the value so an annotated empty
+                // collection (`var items: List[Int] = []`) pins its element, the
+                // same as a local typed `let` binding. (Was dropped here, so the
+                // element stayed undecidable and tripped E018.)
+                if let Some(te) = ty {
+                    let declared = self.resolve_type_expr(te);
+                    self.constrain(declared, ity.clone(), format!("top let {}", name));
+                }
                 let resolved = resolve_ty(&ity, &self.uf);
                 // Update env.top_lets with the fully inferred type.
                 // `register_decls` seeds module top_lets under the
@@ -683,8 +736,14 @@ fn infer_default_exprs(checker: &mut Checker, ty: &mut ast::TypeExpr) {
         for case in cases {
             if let ast::VariantCase::Record { fields, .. } = case {
                 for field in fields {
+                    let declared = checker.resolve_type_expr(&field.ty);
                     if let Some(ref mut default_expr) = field.default {
-                        checker.infer_expr(default_expr);
+                        let val_ty = checker.infer_expr(default_expr);
+                        // The field's declared type is the source of truth for
+                        // its default value — flow it in so an empty default
+                        // (`items: List[Shape] = []`) pins its element to `Shape`
+                        // instead of staying undecidable (E018).
+                        checker.constrain(declared, val_ty, format!("default for field {}", field.name));
                     }
                 }
             }
@@ -897,6 +956,111 @@ impl Checker {
                 }
                 self.diagnostics.push(diag);
             }
+        }
+    }
+
+    /// Reject empty-collection producers whose element type the program never
+    /// pins down (post-solve). The Rust/Swift rule: an empty `[]`/`[:]`/set whose
+    /// element type cannot be inferred from any surrounding context is a COMPILE
+    /// ERROR — not a slot codegen may silently default. Firing here, in the
+    /// frontend, makes the error identical on BOTH targets (Rust rustc would
+    /// reject `Vec::<_>::new()` with E0282; wasm carries no element type and used
+    /// to run — that cross-target asymmetry is what this closes). Observability is
+    /// irrelevant, exactly as in Rust/Swift: `for _ in []` is an error even though
+    /// the element is never read. Each `?A` that survived the whole-program solve
+    /// (against `self.uf`) had no inference source; a populated/annotated form
+    /// would have unified it the normal way and resolved clean here.
+    fn validate_empty_collection_elements(&mut self) {
+        let checks = std::mem::take(&mut self.deferred_empty_collection_checks);
+        for site in checks {
+            let resolved = resolve_ty(&site.ty, &self.uf);
+            if !Self::has_unconstrained_element(&resolved) { continue; }
+            // `what` names the construct; `fix` is a CONCRETE, parseable
+            // annotation that resolves it. The let-binding form is the primary
+            // fix (it always works); the inline `[]: List[Int]` call-arg form is
+            // offered only for the bare list literal, where it is verified to
+            // parse and infer.
+            let (what, fix) = match site.kind {
+                EmptyCollectionKind::ListLiteral => (
+                    "empty list `[]`",
+                    "bind it with an explicit element type, e.g. `let xs: List[Int] = []`, \
+                     or annotate the literal inline: `list.len([]: List[Int])`",
+                ),
+                EmptyCollectionKind::MapLiteral => (
+                    "empty map `[:]`",
+                    "bind it with explicit key/value types, e.g. `let m: Map[String, Int] = [:]`",
+                ),
+                EmptyCollectionKind::SetNew => (
+                    "`set.new()`",
+                    "bind it with an explicit element type, e.g. `let s: Set[Int] = set.new()`",
+                ),
+                EmptyCollectionKind::ListWithCapacity => (
+                    "`list.with_capacity(n)`",
+                    "bind it with an explicit element type, e.g. `let xs: List[Int] = list.with_capacity(n)`",
+                ),
+                EmptyCollectionKind::ForInEmpty => (
+                    "the empty list iterated by `for`",
+                    "bind the list to an explicitly-typed variable first, e.g. \
+                     `let xs: List[Int] = []` then `for _ in xs { ... }`",
+                ),
+            };
+            let hint = format!(
+                "{}'s element type cannot be inferred here. An empty collection \
+                 carries no element to infer from — {}. (Almide follows Rust/Swift: \
+                 an undecidable empty collection is an error even if its elements are \
+                 never read; it is never silently defaulted.)",
+                what, fix,
+            );
+            let try_fix = match site.kind {
+                EmptyCollectionKind::ListLiteral => "let xs: List[Int] = []",
+                EmptyCollectionKind::MapLiteral => "let m: Map[String, Int] = [:]",
+                EmptyCollectionKind::SetNew => "let s: Set[Int] = set.new()",
+                EmptyCollectionKind::ListWithCapacity => "let xs: List[Int] = list.with_capacity(n)",
+                EmptyCollectionKind::ForInEmpty => "let xs: List[Int] = []\nfor _ in xs { ... }",
+            };
+            let mut diag = err(
+                format!("cannot infer the element type of {}", what),
+                hint,
+                format!("{} with no element-type context", what),
+            ).with_code("E018").with_try(try_fix);
+            if let Some(s) = site.span {
+                diag.file = self.source_file.clone();
+                diag.line = Some(s.line);
+                diag.col = Some(s.col);
+                if s.end_col > s.col { diag.end_col = Some(s.end_col); }
+            }
+            self.diagnostics.push(diag);
+        }
+    }
+
+    /// True when `ty` (already resolved against the union-find) is a collection
+    /// whose element/key/value slot is still an unresolved INFERENCE var — i.e.
+    /// the element type was never pinned by context. `List[?A]`, `Set[?A]`,
+    /// `Map[?K, _]`, `Map[_, ?V]` all qualify; a fully-concrete collection does
+    /// not. We look one constructor deep (the producer's own container); a
+    /// concrete element that itself nests an unresolved deeper payload is some
+    /// OTHER expression's empty collection and is reported at its own site.
+    ///
+    /// A `?`-prefixed `TypeVar` is a fresh inference var (`fresh_var`) that the
+    /// solver left unbound — undecidable. A BARE `TypeVar` (`T`, no `?`) is a
+    /// rigid GENERIC PARAMETER, a perfectly good concrete element type in its
+    /// scope: `fn make[T]() -> List[T] = []` is fine (Rust accepts
+    /// `Vec::<T>::new()`), so it must NOT trigger the error.
+    fn has_unconstrained_element(ty: &Ty) -> bool {
+        use crate::types::TypeConstructorId as TCI;
+        // Only an `Unknown` or a fresh inference var (`?`-prefixed) is
+        // undecidable; a rigid generic param (`T`) is concrete.
+        let is_unresolved = |t: &Ty| match t {
+            Ty::Unknown => true,
+            Ty::TypeVar(n) => n.as_str().starts_with('?'),
+            _ => false,
+        };
+        match ty {
+            Ty::Applied(TCI::List, args) | Ty::Applied(TCI::Set, args) if args.len() == 1 =>
+                is_unresolved(&args[0]),
+            Ty::Applied(TCI::Map, args) if args.len() == 2 =>
+                is_unresolved(&args[0]) || is_unresolved(&args[1]),
+            _ => false,
         }
     }
 

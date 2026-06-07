@@ -1,3 +1,4 @@
+// @contract: C-015
 // Regression: deep-eq return_ corruption on unequal heap (String) elements (fixed).
 type Box = Tagged(String) | Empty
 effect fn main() -> Unit = {

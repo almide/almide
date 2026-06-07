@@ -1,3 +1,4 @@
+// @contract: C-004
 // fan.map with an INLINE-lambda callback whose Result wrapper hides the param's
 // use site, e.g. `(x) => ok(x * 10)`. This is the shape that diverged: the named
 // callback in fan_deterministic.almd (`(x) => dbl(x)`) pins x:Int through dbl's

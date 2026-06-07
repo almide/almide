@@ -1,0 +1,74 @@
+// @contract: C-025
+// Cross-target equivalence for float.to_fixed.
+//
+// to_fixed reproduces native `format!("{:.N}", x)` EXACTLY on both targets: the
+// decimal is the f64's exact binary value m*2^e rounded to N places, round-half-
+// to-EVEN on the exact value. The wasm implementation rides the Dragon4 big-integer
+// machinery (rt_dragon.rs), so there is no 10^N i64 overflow (the old impl trapped
+// for N >= 19) and no multiply-then-round error. This fixture locks:
+//   - round-half-to-even on the exact value: 2.5@0 -> "2", 3.5@0 -> "4"
+//   - exact-binary truncation: 2.675@2 -> "2.67", 1.005@2 -> "1.00", 0.05@1 -> "0.1"
+//   - the full exact expansion at large N (0.1@25 -> 0.1000000000000000055511151)
+//   - carry propagation (99.5@0 -> "100", 0.999999@2 -> "1.00")
+//   - sign on a zero magnitude (-0.4@0 -> "-0")
+//   - inf/-inf/NaN
+
+fn p(v: Float, n: Int) -> Unit = println(float.to_fixed(v, n))
+
+fn main() -> Unit = {
+  // round-half-to-even on the exact value
+  p(0.5, 0)
+  p(1.5, 0)
+  p(2.5, 0)
+  p(3.5, 0)
+  p(255.5, 0)
+  p(256.5, 0)
+  p(99.5, 0)
+
+  // exact-binary truncation / rounding
+  p(0.125, 2)
+  p(0.125, 3)
+  p(0.0625, 3)
+  p(0.0625, 4)
+  p(2.675, 2)
+  p(1.005, 2)
+  p(0.045, 2)
+  p(0.35, 1)
+  p(0.05, 1)
+  p(9.995, 2)
+  p(0.999999, 2)
+
+  // plain values + trailing zeros
+  p(8.0, 3)
+  p(0.0, 2)
+  p(2.0, 0)
+  p(123.456, 2)
+  p(123.456, 0)
+
+  // huge magnitudes (no i64 overflow, exact integer rendering)
+  p(100000000000000000000.0, 0)
+  p(100000000000000000000.0, 3)
+  p(123456789.98765433, 5)
+
+  // large N: the exact binary expansion (was wrong / trapped before)
+  p(0.1, 17)
+  p(0.1, 20)
+  p(0.1, 25)
+  p(0.3333333333333333, 25)
+
+  // tiny values round to zeros
+  p(0.0001, 5)
+  p(0.000001, 5)
+  p(0.0000000001, 5)
+
+  // sign on zero-magnitude results
+  p(0.0 - 123.456, 2)
+
+  // non-finite
+  let inf = 1.0 / 0.0
+  let ninf = -1.0 / 0.0
+  let nan = 0.0 / 0.0
+  p(inf, 2)
+  p(ninf, 2)
+  p(nan, 2)
+}

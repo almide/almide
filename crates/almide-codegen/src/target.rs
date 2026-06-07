@@ -22,6 +22,7 @@ use super::pass_intrinsic_lowering::IntrinsicLoweringPass;
 use super::pass_normalize_runtime_calls::NormalizeRuntimeCallsPass;
 use super::pass_stdlib_lowering::StdlibLoweringPass;
 use super::pass_match_subject::MatchSubjectPass;
+use super::pass_pattern_literal_guard::PatternLiteralGuardPass;
 use super::pass_effect_inference::EffectInferencePass;
 use super::pass_tco::TailCallOptPass;
 use super::pass_licm::LICMPass;
@@ -29,6 +30,7 @@ use super::pass_peephole::PeepholePass;
 use super::pass_anf::AnfPass;
 use super::pass_stack_balance::StackBalancePass;
 use super::pass_perceus::{PerceusPass, PerceusOptPass, PerceusVerifyPass};
+use super::pass_alias_cow::AliasCowPass;
 use super::pass_canonicalize::CanonicalizePass;
 use super::pass_globalize_closure_ids::GlobalizeClosureIdsPass;
 use super::pass_egg_saturation::EggSaturationPass;
@@ -95,6 +97,12 @@ fn build_pipeline(target: Target) -> Pipeline {
                 // about pre-rewrite information.
                 .add(LambdaTypeResolvePass)
                 .add(ConcretizeTypesPass)
+                // Hoist payload-nested string literals (`ok("x")`, `Word("hi")`)
+                // into Bind + `==` guards BEFORE MatchSubject so the as_deref /
+                // &* subject deref only ever sees top-level / already-handled
+                // literals — one reconciliation path per literal. Runs after
+                // ConcretizeTypes so the literal/payload type is resolved.
+                .add(PatternLiteralGuardPass)
                 // Verify all user-module calls resolve to known IrFunctions.
                 .add(ResolveCallsPass)
                 // BoxDeref: insert Deref IR nodes for Box'd pattern vars (before CloneInsertion)
@@ -210,6 +218,12 @@ fn build_pipeline(target: Target) -> Pipeline {
         // Without this, void functions can have Ret tails that push values onto
         // the WASM stack — rejected by strict validators (wasmtime 45+, V8).
         .add(StackBalancePass)
+        // AliasCow: mark heap locals that are copy-aliased AND mutated in place, so
+        // the emitter clones them at the mutation site via __cow_check (value
+        // semantics). Runs after Peephole/ClosureConversion/ANF so every mutation
+        // kind (ListSwap/Reverse/… and the final RuntimeCall mutators) and the var
+        // types are settled. Pure analysis — writes only codegen_annotations.
+        .add(AliasCowPass)
         // Perceus: insert RcInc/RcDec nodes based on types.
         // Runs after ANF (all heap allocs are VDecls) and closure conversion.
         .add(PerceusPass)

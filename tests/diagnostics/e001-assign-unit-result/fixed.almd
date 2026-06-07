@@ -1,0 +1,8 @@
+// The fix: call the mutator as a statement (it already updates `b` in place),
+// or rebuild a fresh value with `b = b + [item]`. Either is byte-identical on
+// both targets.
+fn main() -> Unit = {
+  var b: List[Int] = []
+  list.push(b, 1)
+  println(int.to_string(list.len(b)))
+}

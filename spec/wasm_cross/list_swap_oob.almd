@@ -1,3 +1,4 @@
+// @contract: C-034
 // list.swap with an out-of-range index must be a no-op on both targets
 // (no OOB heap read/write). Native oracle: swaps only when BOTH indices < len.
 fn main() -> Unit = {

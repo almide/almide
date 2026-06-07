@@ -12,7 +12,7 @@ pub fn almide_rt_string_starts_with(s: &str, prefix: &str) -> bool { s.starts_wi
 pub fn almide_rt_string_ends_with(s: &str, suffix: &str) -> bool { s.ends_with(suffix) }
 pub fn almide_rt_string_split(s: &str, sep: &str) -> Vec<String> { s.split(sep).map(|x| x.to_string()).collect() }
 pub fn almide_rt_string_replace(s: &str, from: &str, to: &str) -> String { s.replace(from, to) }
-pub fn almide_rt_string_join(parts: &Vec<String>, sep: &str) -> String { parts.join(sep) }
+pub fn almide_rt_string_join(parts: &[String], sep: &str) -> String { parts.join(sep) }
 pub fn almide_rt_string_repeat(s: &str, n: i64) -> String { s.repeat(n as usize) }
 pub fn almide_rt_string_reverse(s: &str) -> String { s.chars().rev().collect() }
 pub fn almide_rt_string_chars(s: &str) -> Vec<String> { s.chars().map(|c| c.to_string()).collect() }

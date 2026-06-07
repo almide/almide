@@ -937,6 +937,21 @@ impl<'a> IrMutVisitor for Concretizer<'a> {
                 }
             }
         }
+        // Destructuring let: `let (k, v) = pair`, `let some(x) = opt`, … The
+        // checker can leave the bound pattern vars `Unknown` when the subject's
+        // type resolved only after binding (e.g. `pair` is `list.zip(..)[i]`,
+        // whose tuple element type ConcretizeTypes pins during THIS bottom-up
+        // walk). Once `value.ty` is concrete, push it into the pattern bindings
+        // and their VarTable entries — the same propagation `match` already gets
+        // (via `propagate_pattern_ty` in the Match arm), now extended to the
+        // statement form so later `Var` refs and the hard gate see concrete types
+        // instead of a leftover `Unknown` (the `let (k, v) = pair` → `v: Unknown`
+        // class).
+        if let IrStmtKind::BindDestructure { pattern, value } = &mut stmt.kind {
+            if !(value.ty).has_unresolved_deep() {
+                propagate_pattern_ty(pattern, &value.ty, self.vt);
+            }
+        }
     }
 }
 
@@ -1109,6 +1124,21 @@ fn resolve_node_ty(expr: &IrExpr, vt: &VarTable, symbols: &SymbolTable) -> Optio
         IrExprKind::StringInterp { .. } => Some(Ty::String),
         // Clone preserves the inner type
         IrExprKind::Clone { expr } => {
+            if !expr.ty.has_unresolved_deep() { Some(expr.ty.clone()) } else { None }
+        }
+        // Layout-transparent codegen wrappers: the node's value type is the
+        // inner expression's type. `*box` (Deref), `Box::new(x)` (BoxNew),
+        // `(x).to_vec()` (ToVec), `&x` / `&*x` (Borrow), and `await x` all
+        // carry the same Almide-level `Ty` as their operand — the wrapper is a
+        // representation detail the emit layer applies, not a type change. After
+        // the bottom-up walk the operand is concrete, so we can pull its type up.
+        // Each makes one more shape resolvable instead of bottoming out at the
+        // `_ => None` arm and surfacing as an audit violation.
+        IrExprKind::Deref { expr }
+        | IrExprKind::BoxNew { expr }
+        | IrExprKind::ToVec { expr }
+        | IrExprKind::Borrow { expr, .. }
+        | IrExprKind::Await { expr } => {
             if !expr.ty.has_unresolved_deep() { Some(expr.ty.clone()) } else { None }
         }
         // Range produces List[Int]
@@ -1355,91 +1385,242 @@ fn reconcile_binop(op: BinOp, lt: &Ty, rt: &Ty) -> Option<BinOp> {
 }
 
 
-// ── Audit: count remaining unresolved types (diagnostic) ────────────
+// ── Audit / hard gate: residual unresolved (or value-Never) types ───
+//
+// Two consumers share one collector ([`collect_unresolved_sites`]):
+//
+//   1. The `ConcretizeTypes` postcondition ([`audit_remaining_unresolved`]),
+//      verified mid-pipeline in debug / `ALMIDE_VERIFY_IR` builds.
+//   2. The HARD codegen-entry gate ([`assert_types_concretized`]), run
+//      unconditionally on EVERY build (debug AND release, Rust AND WASM)
+//      right before emit. A surviving `Ty::Unknown` (or a value-position
+//      `Ty::Never`) here is the root of the `Unknown→i32` WASM fallback that
+//      silently miscompiled `fan.map` and friends: this gate turns that whole
+//      class from a runtime trap into a clean compile-time error.
+//
+// Both read the same skip predicate so "what is a legitimate residual" is
+// defined in exactly one place.
 
-/// Postcondition audit: report any reachable IrExpr with an unresolved
-/// type after this pass. Runs on every build. Violations are the
-/// harness's responsibility (panic in debug, diagnostic in release).
-/// A few node shapes (Break/Continue, `err(_)!` guards, OpenRecord
-/// constraints) legitimately carry unresolved types at runtime and are
-/// skipped below.
-fn audit_remaining_unresolved(program: &IrProgram) -> Vec<String> {
+/// One residual-unresolved expression, with enough context for a diagnostic
+/// that names the function and source span. `span` is `None` when the IR node
+/// lost its provenance (synthetic nodes inserted by passes).
+#[derive(Debug, Clone)]
+pub struct UnresolvedSite {
+    /// Enclosing function, e.g. `fn main` or `list::map`.
+    pub location: String,
+    /// IR node kind name (`Var`, `Member`, `Call`, …).
+    pub kind: &'static str,
+    /// `{:?}` of the offending `Ty` (e.g. `Unknown`, `Tuple([Unknown, Int])`).
+    pub ty: String,
+    /// Source span of the node, if it carries one.
+    pub span: Option<almide_base::span::Span>,
+    /// Extra context (var name + stored ty, member field, …).
+    pub detail: String,
+    /// True when the violation is a value-position `Ty::Never` rather than an
+    /// `Unknown`/`TypeVar`. Distinguished so the diagnostic can say which.
+    pub value_never: bool,
+}
+
+/// A node whose `ty` is unresolved but which legitimately has no concrete
+/// runtime type to fill in — these are NOT violations. The list is small and
+/// every entry is justified; it is the single source of truth shared by the
+/// soft audit and the hard gate.
+fn is_legit_unresolved(expr: &IrExpr) -> bool {
+    // Nodes that have no runtime representation at all.
+    matches!(&expr.kind,
+        IrExprKind::Break | IrExprKind::Continue
+        | IrExprKind::Hole | IrExprKind::Todo { .. }
+        | IrExprKind::OptionNone
+        | IrExprKind::EmptyMap
+    )
+    // Empty list literal `[]` whose element type could not be pinned down by
+    // either upstream inference or `propagate_expected_ty`. The stored element
+    // count is zero, so every emit path — `Vec::<T>::new()` on Rust, the 4-byte
+    // `[len=0]` header on WASM — produces the same bytes regardless of `T`.
+    // Treating it as a violation would force the gate to stay soft just to
+    // cover `for _ in []` / `fan.map([], f)` style uses that have no bearing on
+    // runtime behavior.
+    || matches!(&expr.kind,
+        IrExprKind::List { elements } if elements.is_empty())
+    // `ResultErr(...)` or `Unwrap { ResultErr(...) }` in guard-else: the Ok
+    // slot may remain Unknown because the checker can't determine it from
+    // `err()` alone. The ok-path is unreachable at runtime so the Unknown is
+    // harmless.
+    || matches!(&expr.kind, IrExprKind::ResultErr { .. })
+    || matches!(&expr.kind,
+        IrExprKind::Unwrap { expr: inner }
+            if matches!(inner.kind, IrExprKind::ResultErr { .. }))
+    // `Block` whose sole tail is the same skipped `Unwrap` pattern — the block
+    // is just the desugared `else { err(...)! }` wrapper that lowering emits for
+    // `guard` statements. `Block.ty` mirrors `tail.ty`, so marking only the
+    // Unwrap would leave the outer Block as a spurious violation.
+    || matches!(&expr.kind,
+        IrExprKind::Block { stmts, expr: Some(tail) }
+            if stmts.is_empty()
+                && matches!(&tail.kind,
+                    IrExprKind::Unwrap { expr: inner }
+                        if matches!(inner.kind, IrExprKind::ResultErr { .. })))
+    // OpenRecord-typed expressions: an open-record bound
+    // (`fn f(x: { name: String, .. })`) is a structural constraint, not an
+    // inference failure. The Var node for such a param trivially carries its
+    // declared OpenRecord ty through monomorphization's `__Unknown` fallback
+    // path. Emit handles OpenRecord via its structural dispatch — no Unknown
+    // slot to fill.
+    || matches!(&expr.ty, Ty::OpenRecord { .. })
+    // The node's type is unresolved ONLY inside empty-container payload slots
+    // (`Option[Unknown]`, `List[Unknown]`, `Set[Unknown]`, `Map[_, Unknown]`,
+    // possibly nested in a `Record`/`Tuple`). This generalizes the two leaf
+    // entries above (bare `OptionNone`, empty `[]`) one level up: an unannotated
+    // `let leaf = { value: 1, left: none, right: none }` gives the *record* —
+    // and any `Var`/`Member` reading it — a type whose only Unknowns sit in the
+    // `Option` payloads of fields that are only ever `none`. A `some(x)` /
+    // non-empty literal would have pinned the payload during inference, so an
+    // Unknown payload that survived here is NEVER materialized; the container is
+    // empty/None at runtime and its payload type is unobservable on both targets
+    // (the very property that makes the bare-`OptionNone`/empty-`[]` entries
+    // sound — emit already handles those exact slots). A bare `Unknown`, or one
+    // inside a Tuple/Result-Ok/Fn position (which DOES carry a value), is not
+    // covered and still fails the gate.
+    || unresolved_only_in_empty_payloads(&expr.ty)
+}
+
+/// True when every `Unknown`/`TypeVar` in `ty` sits in an *empty-container
+/// payload* position — the element slot of `Option`/`List`/`Set`, or the value
+/// slot of `Map` — possibly nested through `Record`/`Tuple` fields. Such a slot
+/// holds no bytes unless the container is populated, and a populated container
+/// would have pinned the payload during inference; so an Unknown that reaches
+/// here marks an empty/None container whose payload type is unobservable.
+///
+/// Returns `false` for a fully-concrete `ty` (so it never masks a real value),
+/// for a bare `Unknown`/`TypeVar`, and for an Unknown in any value-bearing
+/// position (`Tuple` element, `Result` Ok, `Map` KEY, `Fn` param/ret) — those
+/// stay hard violations.
+fn unresolved_only_in_empty_payloads(ty: &Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId as TCI;
+    // Nothing unresolved ⇒ not "unresolved only in payloads" (the caller already
+    // gates on `has_unresolved_deep`, but be explicit so the helper is total).
+    if !ty.has_unresolved_deep() { return false; }
+    // A bare residual `Unknown`/`TypeVar` is legit ONLY in an `Option` element
+    // slot. That is the one undecidable-empty-payload class the frontend E018
+    // check does NOT own: an unannotated `none` that is only ever `none`
+    // (a recursive record field — `let leaf = { value: 1, left: none }`), whose
+    // `Option` payload is never materialized. Every OTHER undecidable empty
+    // collection — an empty `[]` / `[:]` / `set.new()` / `map.new()` /
+    // `list.with_capacity` whose element the program never pins — is now a
+    // user-facing compile error raised in the frontend BEFORE codegen (E018),
+    // so a bare-`Unknown` `List`/`Set` element or `Map` value can no longer
+    // reach this gate from user code. We therefore no longer whitelist it: the
+    // gate is back to "an Unknown here is a COMPILER bug". The collection slots
+    // still RECURSE (so a `List[Option[Unknown]]` of only-`none` elements stays
+    // legit through the `Option`), but a bare `Unknown` directly in them is a
+    // violation again.
+    fn ok(ty: &Ty) -> bool {
+        // A concrete subtree is always fine.
+        if !ty.has_unresolved_deep() { return true; }
+        use almide_lang::types::constructor::TypeConstructorId as TCI;
+        match ty {
+            // Option element: a bare `Unknown`/`TypeVar` here is the never-
+            // materialized `none` payload — the one whitelisted leaf.
+            Ty::Applied(TCI::Option, args) if args.len() == 1 => {
+                matches!(args[0], Ty::Unknown | Ty::TypeVar(_)) || ok(&args[0])
+            }
+            // List/Set element: only a DEEPER empty-payload shape (e.g. an
+            // `Option` of `none`) is legit; a bare `Unknown` here was an
+            // undecidable empty collection and is now an E018 the frontend
+            // rejects first, so it is a gate violation again.
+            Ty::Applied(TCI::List, args)
+            | Ty::Applied(TCI::Set, args) if args.len() == 1 => ok(&args[0]),
+            // Map[K, V]: the KEY is load-bearing (hashed/compared). The VALUE,
+            // like a List element, is legit only via a deeper empty payload —
+            // a bare `Unknown` value is an undecidable empty map (E018).
+            Ty::Applied(TCI::Map, args) if args.len() == 2 => {
+                !args[0].has_unresolved_deep() && ok(&args[1])
+            }
+            // Records/tuples are transparent: qualify iff EVERY unresolved field
+            // is itself an empty-payload slot.
+            Ty::Record { fields } | Ty::OpenRecord { fields } => {
+                fields.iter().all(|(_, t)| ok(t))
+            }
+            Ty::Tuple(elems) => elems.iter().all(ok),
+            // Anything else carrying an Unknown (bare Unknown/TypeVar, Result,
+            // Fn, …) is load-bearing — not covered.
+            _ => false,
+        }
+    }
+    let _ = TCI::Option; // keep the import used on all cfgs
+    ok(ty)
+}
+
+/// True when `expr` is a value-position `Ty::Never` violation. `Ty::Never` is
+/// legitimate for *divergent* expressions — `break` / `continue` / `todo()` /
+/// a hole never yield a value, and a call to a `-> Never` function diverges. It
+/// is a BUG only when a node that DOES produce a usable runtime value is typed
+/// `Never`: emit would then have to materialize a value of an uninhabited type,
+/// the value-Never analogue of the `Unknown→i32` fallback. Mirrors the wasm
+/// `ty_to_valtype` convention where `Never` maps to "no value" (`None`).
+fn is_value_never(expr: &IrExpr) -> bool {
+    if expr.ty != Ty::Never { return false; }
+    // Inherently-divergent kinds are *allowed* to be Never.
+    !matches!(&expr.kind,
+        IrExprKind::Break | IrExprKind::Continue
+        | IrExprKind::Hole | IrExprKind::Todo { .. }
+        // A call / runtime-call may legitimately be a `-> Never` divergent
+        // function (panic, exit). Control-flow joins (If/Match/Block) inherit
+        // Never from a diverging branch and are fine. Returning/propagation
+        // wrappers likewise carry through a diverging inner.
+        | IrExprKind::Call { .. } | IrExprKind::TailCall { .. }
+        | IrExprKind::RuntimeCall { .. } | IrExprKind::RustMacro { .. }
+        | IrExprKind::If { .. } | IrExprKind::Match { .. }
+        | IrExprKind::Block { .. }
+        | IrExprKind::Try { .. } | IrExprKind::Unwrap { .. }
+    )
+}
+
+/// Walk every reachable expression and collect residual unresolved-type (or
+/// value-`Never`) sites that are NOT covered by [`is_legit_unresolved`]. This
+/// is the shared engine behind the soft audit and the hard gate.
+pub fn collect_unresolved_sites(program: &IrProgram) -> Vec<UnresolvedSite> {
     struct Auditor<'a> {
         location: String,
-        remaining: usize,
-        samples: Vec<String>,
+        sites: Vec<UnresolvedSite>,
         var_table: &'a VarTable,
+    }
+    impl<'a> Auditor<'a> {
+        fn detail_of(&self, expr: &IrExpr) -> String {
+            match &expr.kind {
+                IrExprKind::Var { id } => {
+                    if (id.0 as usize) < self.var_table.entries.len() {
+                        let info = &self.var_table.entries[id.0 as usize];
+                        format!("var_id={} name={} stored_ty={:?}", id.0, info.name.as_str(), info.ty)
+                    } else {
+                        format!("var_id={}", id.0)
+                    }
+                }
+                IrExprKind::Member { field, .. } => format!("member={}", field.as_str()),
+                IrExprKind::Call { .. } => "(call)".to_string(),
+                _ => String::new(),
+            }
+        }
+        fn record(&mut self, expr: &IrExpr, value_never: bool) {
+            let detail = self.detail_of(expr);
+            self.sites.push(UnresolvedSite {
+                location: self.location.clone(),
+                kind: kind_name(&expr.kind),
+                ty: format!("{:?}", expr.ty),
+                span: expr.span,
+                detail,
+                value_never,
+            });
+        }
     }
     impl<'a> IrVisitor for Auditor<'a> {
         fn visit_expr(&mut self, expr: &IrExpr) {
             if (expr.ty).has_unresolved_deep() {
-                // Skip nodes that legitimately have no runtime representation
-                let skip = matches!(&expr.kind,
-                    IrExprKind::Break | IrExprKind::Continue
-                    | IrExprKind::Hole | IrExprKind::Todo { .. }
-                    | IrExprKind::OptionNone
-                    | IrExprKind::EmptyMap
-                )
-                // Empty list literal `[]` whose element type could not be
-                // pinned down by either upstream inference or
-                // `propagate_expected_ty`. The stored element count is
-                // zero, so every emit path — `Vec::<T>::new()` on Rust,
-                // the 4-byte `[len=0]` header on WASM — produces the same
-                // bytes regardless of `T`. Treating it as a violation
-                // would force the audit to stay soft just to cover
-                // `for _ in []` / `fan.map([], f)` style uses that have
-                // no bearing on runtime behavior.
-                || matches!(&expr.kind,
-                    IrExprKind::List { elements } if elements.is_empty())
-                // `ResultErr(...)` or `Unwrap { ResultErr(...) }` in guard-else:
-                // the Ok slot may remain Unknown because the checker can't
-                // determine it from `err()` alone. The ok-path is unreachable
-                // at runtime so the Unknown is harmless.
-                || matches!(&expr.kind, IrExprKind::ResultErr { .. })
-                || matches!(&expr.kind,
-                    IrExprKind::Unwrap { expr: inner }
-                        if matches!(inner.kind, IrExprKind::ResultErr { .. }))
-                // `Block` whose sole tail is the same skipped `Unwrap`
-                // pattern — the block is just the desugared `else
-                // { err(...)! }` wrapper that lowering emits for
-                // `guard` statements. `Block.ty` mirrors `tail.ty`, so
-                // marking only the Unwrap would leave the outer Block
-                // as a spurious violation.
-                || matches!(&expr.kind,
-                    IrExprKind::Block { stmts, expr: Some(tail) }
-                        if stmts.is_empty()
-                            && matches!(&tail.kind,
-                                IrExprKind::Unwrap { expr: inner }
-                                    if matches!(inner.kind, IrExprKind::ResultErr { .. })))
-                // OpenRecord-typed expressions: an open-record bound
-                // (`fn f(x: { name: String, .. })`) is a structural
-                // constraint, not an inference failure. The Var node
-                // for such a param trivially carries its declared
-                // OpenRecord ty through monomorphization's `__Unknown`
-                // fallback path. Emit handles OpenRecord via its
-                // structural dispatch — no Unknown slot to fill.
-                || matches!(&expr.ty, Ty::OpenRecord { .. });
-                if !skip {
-                    self.remaining += 1;
-                    if self.samples.len() < 5 {
-                        let extra = match &expr.kind {
-                            IrExprKind::Var { id } => {
-                                if (id.0 as usize) < self.var_table.entries.len() {
-                                    let info = &self.var_table.entries[id.0 as usize];
-                                    format!(" var_id={} name={} stored_ty={:?}", id.0, info.name.as_str(), info.ty)
-                                } else {
-                                    format!(" var_id={}", id.0)
-                                }
-                            }
-                            IrExprKind::Member { field, .. } => format!(" member={}", field.as_str()),
-                            IrExprKind::Call { .. } => " (call)".to_string(),
-                            _ => String::new(),
-                        };
-                        self.samples.push(format!("[{}] {:?} ty={:?}{}",
-                            self.location,
-                            kind_name(&expr.kind), expr.ty, extra));
-                    }
+                if !is_legit_unresolved(expr) {
+                    self.record(expr, false);
                 }
+            } else if is_value_never(expr) {
+                self.record(expr, true);
             }
             walk_expr(self, expr);
         }
@@ -1509,7 +1690,7 @@ fn audit_remaining_unresolved(program: &IrProgram) -> Vec<String> {
             _ => "(unknown-variant)",
         }
     }
-    let mut a = Auditor { location: String::new(), remaining: 0, samples: Vec::new(), var_table: &program.var_table };
+    let mut a = Auditor { location: String::new(), sites: Vec::new(), var_table: &program.var_table };
     for f in &program.functions {
         a.location = format!("fn {}", f.name);
         a.visit_expr(&f.body);
@@ -1521,10 +1702,245 @@ fn audit_remaining_unresolved(program: &IrProgram) -> Vec<String> {
             a.visit_expr(&f.body);
         }
     }
-    if a.remaining > 0 {
-        vec![format!("[ConcretizeTypes] {} expressions remain with unresolved types. Samples: {}",
-            a.remaining, a.samples.join(" | "))]
-    } else {
-        Vec::new()
+    a.sites
+}
+
+/// Render one site as a one-line span-tagged description.
+fn render_site(s: &UnresolvedSite) -> String {
+    let loc = match s.span {
+        Some(sp) => format!("{}:{}:{}", s.location, sp.line, sp.col),
+        None => format!("{} <no span>", s.location),
+    };
+    let detail = if s.detail.is_empty() { String::new() } else { format!(" {}", s.detail) };
+    let what = if s.value_never { "value-Never" } else { "unresolved" };
+    format!("[{}] {} {} ty={}{}", loc, what, s.kind, s.ty, detail)
+}
+
+/// Postcondition audit (soft): used by the mid-pipeline `ConcretizeTypes`
+/// postcondition. Returns a single summary violation string when any residual
+/// site survives, formatted like the historical message so existing log
+/// scrapers (`grep POSTCONDITION VIOLATION`) keep working.
+fn audit_remaining_unresolved(program: &IrProgram) -> Vec<String> {
+    let sites = collect_unresolved_sites(program);
+    if sites.is_empty() { return Vec::new(); }
+    let samples: Vec<String> = sites.iter().take(5).map(render_site).collect();
+    vec![format!("[ConcretizeTypes] {} expression(s) remain with unresolved types. Samples: {}",
+        sites.len(), samples.join(" | "))]
+}
+
+/// HARD codegen-entry gate. Runs on EVERY build (debug AND release, Rust AND
+/// WASM) right before emit. If any reachable expression still carries a
+/// `Ty::Unknown`/`Ty::TypeVar` (or a value-position `Ty::Never`) that the
+/// concretization machinery could not resolve, this is a COMPILER bug — emit
+/// would otherwise fall back to `i32` on WASM (the `fan.map` silent-miscompile
+/// class) or to an arbitrary type on Rust. We refuse to emit and abort with a
+/// clean, structured diagnostic that names the function + span. This is a
+/// compiler-bug detector, so the message targets compiler developers ("please
+/// report"); it is a controlled error, NOT an ICE (no panic, no backtrace).
+///
+/// The detection ([`collect_unresolved_sites`]) is a pure function, unit-tested
+/// directly; this wrapper only adds the formatting + abort so the test process
+/// is never killed.
+pub fn assert_types_concretized(program: &IrProgram) {
+    let sites = collect_unresolved_sites(program);
+    if sites.is_empty() { return; }
+
+    let mut msg = String::new();
+    msg.push_str("error: [COMPILER BUG] internal type resolution failed before codegen\n");
+    msg.push_str(&format!(
+        "  {} expression(s) still carry an unresolved (Unknown/TypeVar) or value-Never type\n",
+        sites.len()
+    ));
+    msg.push_str("  after the ConcretizeTypes pass. Emitting these would silently fall back to a\n");
+    msg.push_str("  wrong runtime representation (e.g. the WASM Unknown→i32 fallback), so the build\n");
+    msg.push_str("  is refused instead. This is a compiler bug, not an error in your program.\n");
+    // Cap the listed sites so a pathological program can't flood the terminal;
+    // the count above always reflects the true total.
+    const MAX_LISTED: usize = 20;
+    for s in sites.iter().take(MAX_LISTED) {
+        msg.push_str(&format!("    {}\n", render_site(s)));
+    }
+    if sites.len() > MAX_LISTED {
+        msg.push_str(&format!("    ... and {} more\n", sites.len() - MAX_LISTED));
+    }
+    msg.push_str("  hint: please report this at https://github.com/almide/almide/issues\n");
+    msg.push_str("        with the source above — include the function name(s) and span(s) shown.\n");
+
+    eprint!("{}", msg);
+    // Controlled abort: print the diagnostic, then terminate the build with a
+    // non-zero status. This mirrors the established codegen failure convention
+    // (`main.rs` build paths, the generated div-by-zero runtime) — a clean
+    // process exit, NOT a `panic!` that would dump a Rust backtrace (an ICE) or
+    // be swallowed as a "skip" by the spec harness's `catch_unwind`. The
+    // collector is unit-tested separately so this branch never runs under
+    // `cargo test` for a well-formed program.
+    std::process::exit(1);
+}
+
+#[cfg(test)]
+mod hard_gate_tests {
+    use super::*;
+    use almide_ir::{IrFunction, IrStmt, IrStmtKind, IrVisibility, Mutability, VarId};
+
+    fn expr(kind: IrExprKind, ty: Ty) -> IrExpr {
+        IrExpr { kind, ty, span: None, def_id: None }
+    }
+
+    fn make_fn(name: &str, body: IrExpr) -> IrFunction {
+        IrFunction {
+            name: name.into(),
+            params: vec![],
+            ret_ty: body.ty.clone(),
+            body,
+            is_effect: false,
+            is_async: false,
+            is_test: false,
+            generics: None,
+            extern_attrs: vec![],
+            export_attrs: vec![],
+            attrs: vec![],
+            visibility: IrVisibility::Public,
+            doc: None,
+            blank_lines_before: 0,
+            def_id: None,
+            mutated_params: vec![],
+            module_origin: None,
+        }
+    }
+
+    fn program(body: IrExpr, var_table: VarTable) -> IrProgram {
+        IrProgram {
+            functions: vec![make_fn("main", body)],
+            top_lets: vec![],
+            type_decls: vec![],
+            var_table,
+            def_table: Default::default(),
+            modules: vec![],
+            type_registry: Default::default(),
+            effect_fn_names: Default::default(),
+            effect_map: Default::default(),
+            codegen_annotations: Default::default(),
+            used_stdlib_modules: Default::default(),
+        }
+    }
+
+    /// A synthetic Unknown-carrying IR (a `Member` access typed Unknown — NOT
+    /// in the legitimate-residual skip list) must fail the postcondition / gate.
+    #[test]
+    fn synthetic_unknown_member_is_a_violation() {
+        let mut vt = VarTable::new();
+        let rec = vt.alloc("rec".into(), Ty::Unknown, Mutability::Let, None);
+        let body = expr(
+            IrExprKind::Member {
+                object: Box::new(expr(IrExprKind::Var { id: rec }, Ty::Unknown)),
+                field: "field".into(),
+            },
+            Ty::Unknown,
+        );
+        let prog = program(body, vt);
+        let sites = collect_unresolved_sites(&prog);
+        // The Member node and the Var node both carry Unknown → at least one
+        // violation, none of them whitelisted.
+        assert!(!sites.is_empty(), "Unknown Member must be flagged");
+        assert!(sites.iter().any(|s| s.kind == "Member"), "Member site expected: {sites:?}");
+        assert!(sites.iter().all(|s| !s.value_never), "these are Unknown, not Never");
+        // The soft audit must agree with the hard collector.
+        assert!(!audit_remaining_unresolved(&prog).is_empty());
+    }
+
+    /// A fully-concrete program produces zero sites (the gate is silent).
+    #[test]
+    fn concrete_program_has_no_sites() {
+        let body = expr(IrExprKind::LitInt { value: 7 }, Ty::Int);
+        let prog = program(body, VarTable::new());
+        assert!(collect_unresolved_sites(&prog).is_empty());
+        assert!(audit_remaining_unresolved(&prog).is_empty());
+    }
+
+    /// Whitelisted residuals (empty list literal, OptionNone) are NOT flagged,
+    /// so the hard gate does not regress programs the soft audit accepted.
+    #[test]
+    fn whitelisted_residuals_are_not_violations() {
+        let empty_list = expr(
+            IrExprKind::List { elements: vec![] },
+            Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, vec![Ty::Unknown]),
+        );
+        let prog = program(empty_list, VarTable::new());
+        assert!(collect_unresolved_sites(&prog).is_empty(), "empty `[]` is whitelisted");
+
+        let none = expr(IrExprKind::OptionNone, Ty::Applied(
+            almide_lang::types::constructor::TypeConstructorId::Option, vec![Ty::Unknown]));
+        let prog = program(none, VarTable::new());
+        assert!(collect_unresolved_sites(&prog).is_empty(), "OptionNone is whitelisted");
+    }
+
+    /// A value-position `Ty::Never` (a `Var` typed Never) is a violation, but a
+    /// divergent call typed Never is allowed — distinguishing "uninhabited value
+    /// materialized" from "expression diverges".
+    #[test]
+    fn value_never_var_flagged_but_divergent_call_allowed() {
+        let mut vt = VarTable::new();
+        let v = vt.alloc("v".into(), Ty::Never, Mutability::Let, None);
+        let body = expr(IrExprKind::Var { id: v }, Ty::Never);
+        let prog = program(body, vt);
+        let sites = collect_unresolved_sites(&prog);
+        assert!(sites.iter().any(|s| s.value_never && s.kind == "Var"),
+            "value-Never Var must be flagged: {sites:?}");
+
+        // A diverging `todo()`-style hole / break is allowed to be Never.
+        let brk = expr(IrExprKind::Break, Ty::Never);
+        let prog = program(brk, VarTable::new());
+        assert!(collect_unresolved_sites(&prog).is_empty(), "Break:Never is allowed");
+    }
+
+    /// An unannotated record whose Unknowns live ONLY in `Option`/`List` payload
+    /// slots (an only-ever-`none` field, `let leaf = { value: 1, left: none }`)
+    /// is whitelisted; the same record with an Unknown in a load-bearing slot
+    /// (a `Result` Ok, a tuple element) is NOT — the gate stays strict there.
+    #[test]
+    fn unknown_only_in_empty_container_payloads_is_whitelisted() {
+        use almide_lang::types::constructor::TypeConstructorId as TCI;
+        let opt_unknown = Ty::Applied(TCI::Option, vec![Ty::Unknown]);
+        let rec_ty = Ty::Record { fields: vec![
+            ("value".into(), Ty::Int),
+            ("left".into(), opt_unknown.clone()),
+            ("right".into(), opt_unknown.clone()),
+        ] };
+        // A Var carrying this record type is whitelisted (payload-only Unknown).
+        let mut vt = VarTable::new();
+        let leaf = vt.alloc("leaf".into(), rec_ty.clone(), Mutability::Let, None);
+        let prog = program(expr(IrExprKind::Var { id: leaf }, rec_ty.clone()), vt);
+        assert!(collect_unresolved_sites(&prog).is_empty(),
+            "record with Unknown only in Option payloads is whitelisted");
+
+        // Direct predicate checks. The ONLY whitelisted bare-Unknown leaf is an
+        // `Option` payload (a never-materialized `none`); every other undecidable
+        // empty collection is now rejected in the frontend (E018) before it can
+        // reach this gate, so the gate no longer whitelists them.
+        assert!(unresolved_only_in_empty_payloads(&opt_unknown));
+        assert!(unresolved_only_in_empty_payloads(&rec_ty));
+        // A bare-Unknown List/Set element or Map value is NO LONGER whitelisted —
+        // it would be an undecidable empty collection, which E018 rejects first,
+        // so reaching here is a compiler bug.
+        assert!(!unresolved_only_in_empty_payloads(&Ty::Applied(TCI::List, vec![Ty::Unknown])),
+            "bare List[Unknown] is now an E018 the frontend owns — a gate violation");
+        assert!(!unresolved_only_in_empty_payloads(&Ty::Applied(TCI::Set, vec![Ty::Unknown])),
+            "bare Set[Unknown] is now an E018 the frontend owns — a gate violation");
+        assert!(!unresolved_only_in_empty_payloads(&Ty::Applied(TCI::Map, vec![Ty::String, Ty::Unknown])),
+            "bare Map[_, Unknown] is now an E018 the frontend owns — a gate violation");
+        // A List/Set of only-`none` elements stays legit THROUGH the Option.
+        assert!(unresolved_only_in_empty_payloads(&Ty::Applied(TCI::List, vec![opt_unknown.clone()])),
+            "List[Option[Unknown]] (a list of nones) is legit via the Option payload");
+        // Load-bearing Unknowns are NOT whitelisted.
+        assert!(!unresolved_only_in_empty_payloads(&Ty::Unknown), "bare Unknown is load-bearing");
+        assert!(!unresolved_only_in_empty_payloads(&Ty::Tuple(vec![Ty::Int, Ty::Unknown])),
+            "tuple element Unknown is load-bearing");
+        assert!(!unresolved_only_in_empty_payloads(&Ty::Applied(TCI::Result, vec![Ty::Unknown, Ty::String])),
+            "Result Ok Unknown is load-bearing");
+        // Map KEY Unknown is load-bearing.
+        assert!(!unresolved_only_in_empty_payloads(&Ty::Applied(TCI::Map, vec![Ty::Unknown, Ty::Int])),
+            "Map key Unknown is load-bearing");
+        // A fully concrete type is never reported as payload-only.
+        assert!(!unresolved_only_in_empty_payloads(&Ty::Int));
     }
 }

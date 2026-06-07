@@ -42,7 +42,15 @@ enum Commands {
         /// Rust runs in dev profile.
         #[arg(long)]
         release: bool,
-        /// Arguments passed to the program
+        /// Execution target: `rust` (default, native binary) or `wasm`
+        /// (build a wasm32-wasi module and execute it on the `wasmtime`
+        /// CLI). Both targets must produce byte-identical observable
+        /// behavior — the cross-target equivalence guarantee.
+        #[arg(long)]
+        target: Option<String>,
+        /// Arguments passed to the program. Almide's own flags (`--target`,
+        /// `--no-check`, `--release`) are consumed before these; anything
+        /// after a `--` separator is forwarded verbatim to the program.
         #[arg(allow_hyphen_values = true)]
         program_args: Vec<String>,
     },
@@ -582,7 +590,48 @@ fn print_error_explanation(code: &str) {
     println!("{}", explanation);
 }
 
+/// The parse → check → lower → emit pipeline is deeply recursive: AST and IR
+/// walks, and type-directed codegen (e.g. `emit_eq_typed` / `emit_ord_cmp3`,
+/// container-literal emission) recurse with the shape of the input program. A
+/// sufficiently deep or wide machine-generated expression can therefore exhaust
+/// the OS's *default* main-thread stack — which is platform-dependent: ~8 MiB on
+/// Linux/macOS but only ~1 MiB on Windows. That made compilation depth a silent
+/// cross-platform divergence (a program that compiled on Unix overflowed the
+/// stack mid-codegen on Windows). We follow the same strategy production
+/// compilers use (rustc spawns its driver on an enlarged thread): run the whole
+/// driver on a worker thread with a large, fixed stack, so the achievable
+/// recursion depth is bounded by heap and identical on every host. The size is a
+/// virtual reservation — pages are committed lazily as the stack grows — so it
+/// costs no physical memory for shallow programs.
+///
+/// Overridable via `ALMIDE_COMPILER_STACK` (bytes), the analogue of rustc's
+/// `RUST_MIN_STACK`: a non-numeric or empty value falls back to the default. The
+/// override exists mainly so a regression test can pin a deliberately small
+/// stack and prove that compilation stays within bounded native stack on wide /
+/// deep input (see `tests/compiler_stack_test.rs`).
+const COMPILER_STACK_SIZE: usize = 256 * 1024 * 1024; // 256 MiB
+
+fn compiler_stack_size() -> usize {
+    match std::env::var("ALMIDE_COMPILER_STACK") {
+        Ok(v) => v.trim().parse::<usize>().ok().filter(|n| *n > 0).unwrap_or(COMPILER_STACK_SIZE),
+        Err(_) => COMPILER_STACK_SIZE,
+    }
+}
+
 fn main() {
+    let child = std::thread::Builder::new()
+        .name("almide-main".to_string())
+        .stack_size(compiler_stack_size())
+        .spawn(run_main)
+        .expect("failed to spawn the compiler driver thread");
+    // A panic on the worker thread has already printed via the default hook;
+    // mirror the main-thread panic exit code (101) so behavior is unchanged.
+    if child.join().is_err() {
+        std::process::exit(101);
+    }
+}
+
+fn run_main() {
     crate::diagnostic_render::init_color();
     // Legacy mode: `almide file.almd [--target X]` → rewrite as `almide emit file.almd [--target X]`
     let raw_args: Vec<String> = std::env::args().collect();
@@ -611,9 +660,9 @@ fn dispatch(cli: Cli) {
     };
     match command {
         Commands::Init => cli::cmd_init(),
-        Commands::Run { file, no_check, release, program_args } => {
+        Commands::Run { file, no_check, release, target, program_args } => {
             let file = resolve_file(file);
-            cli::cmd_run(&file, &program_args, no_check, release);
+            cli::cmd_run(&file, &program_args, no_check, release, target.as_deref());
         }
         Commands::Build { file, o, target, release, fast, unchecked_index, no_check, repr_c, cdylib } => {
             let file = resolve_file(file);

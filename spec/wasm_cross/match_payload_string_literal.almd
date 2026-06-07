@@ -1,0 +1,83 @@
+// @contract: C-036
+// The NATIVE half of the inner-literal container-pattern promise. The wasm side
+// (match_container_literal.almd) already compared payload-nested literals via the
+// shared type-directed `==`; native FAILED TO BUILD for any String literal in a
+// payload position (`ok("good")` emitted `Ok("good")` where the value is
+// `Result<String, String>` — &str vs String, rustc E0308), so these programs
+// could not be exercised cross-target at all.
+//
+// Native now hoists every payload-nested string literal into a `Bind` + `==`
+// guard (`Ok(__s) if __s == "good"`), the same refinement the wasm tag+value
+// check performs: a literal arm refines, later binding arms stay reachable, and
+// arm order / fall-through is byte-identical native == wasm. Int / Bool / Float
+// literals stay bare Rust patterns (already legal in payload position).
+
+// ── Result[String, _] — the headline broken case ──────────────────
+fn classify(r: Result[String, String]) -> String = match r {
+  ok("good")  => "GOOD",
+  ok(_)       => "OK",
+  err("bad")  => "BAD",
+  err(_)      => "ERR",
+}
+
+// ── User variant, single String payload ───────────────────────────
+type Tok = Word(String) | Num(Int)
+fn tok(t: Tok) -> String = match t {
+  Word("hi") => "HI",
+  Word(_)    => "W",
+  Num(7)     => "SEVEN",
+  Num(_)     => "N",
+}
+
+// ── User variant, multiple fields, one is a String literal ────────
+type Ev = KV(String, Int) | Tag(String)
+fn ev(e: Ev) -> String = match e {
+  KV("count", n) => "C" + int.to_string(n),
+  KV(_, n)       => "K" + int.to_string(n),
+  Tag("hot")     => "HOT",
+  Tag(_)         => "T",
+}
+
+// ── Mixed int + string literal payloads in the same constructor ───
+type Rec = Pair(Int, String)
+fn rec(r: Rec) -> String = match r {
+  Pair(1, "one") => "1ONE",
+  Pair(1, _)     => "1X",
+  Pair(_, "one") => "XONE",
+  Pair(_, _)     => "XX",
+}
+
+// ── Nested: ok(some("x")) — literal two levels deep ───────────────
+fn nested(r: Result[Option[String], String]) -> String = match r {
+  ok(some("hi")) => "OKHI",
+  ok(some(_))    => "OKS",
+  ok(none)       => "OKN",
+  err(_)         => "E",
+}
+
+// ── Tuple subject with a String literal element ───────────────────
+fn tup(t: (String, Int)) -> String = match t {
+  ("a", 1) => "A1",
+  ("a", _) => "AX",
+  (_, _)   => "XX",
+}
+
+// ── A guard combined with a literal payload (guard ANDs in) ───────
+type W2 = Word2(String, Int)
+fn guarded(w: W2) -> String = match w {
+  Word2("hi", n) if n > 3 => "HIBIG",
+  Word2("hi", _)          => "HISMALL",
+  Word2(_, _)             => "OTHER",
+}
+
+fn main() -> Unit = {
+  println("result=" + classify(ok("good")) + "/" + classify(ok("x"))
+                    + "/" + classify(err("bad")) + "/" + classify(err("y")))
+  println("tok=" + tok(Word("hi")) + "/" + tok(Word("yo")) + "/" + tok(Num(7)) + "/" + tok(Num(2)))
+  println("ev=" + ev(KV("count", 5)) + "/" + ev(KV("other", 9)) + "/" + ev(Tag("hot")) + "/" + ev(Tag("cold")))
+  println("rec=" + rec(Pair(1, "one")) + "/" + rec(Pair(1, "z")) + "/" + rec(Pair(2, "one")) + "/" + rec(Pair(2, "z")))
+  println("nested=" + nested(ok(some("hi"))) + "/" + nested(ok(some("yo")))
+                    + "/" + nested(ok(none)) + "/" + nested(err("e")))
+  println("tup=" + tup(("a", 1)) + "/" + tup(("a", 2)) + "/" + tup(("b", 1)))
+  println("guard=" + guarded(Word2("hi", 5)) + "/" + guarded(Word2("hi", 1)) + "/" + guarded(Word2("yo", 9)))
+}

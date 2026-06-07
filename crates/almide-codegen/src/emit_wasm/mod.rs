@@ -28,6 +28,7 @@ mod rt_unicode_tables;
 mod rt_numeric;
 mod rt_dragon;
 mod rt_dec2flt;
+mod rt_libm;
 mod rt_repr;
 mod rt_float_display;
 mod calls_string_repr;
@@ -354,6 +355,9 @@ pub struct RuntimeFuncs {
     /// Dragon4 shortest-decimal helper functions (float.to_string).
     pub dragon: rt_dragon::DragonRuntime,
     pub decfloat: rt_dec2flt::DecFloatRuntime,
+    /// Vendored musl-libm trig (sin/cos/tan + their kernels/argument reduction).
+    /// Mirrors `runtime/rs/src/libm.rs` so trig is bit-identical native↔wasm.
+    pub libm: rt_libm::LibmRuntime,
     /// __repr_str(s: i32) -> i32: double-quote + escape a string for the
     /// Almide-literal repr of a string INSIDE a container (compound string
     /// interpolation). Escape set mirrors `almide_rt_value_stringify` and the
@@ -410,10 +414,17 @@ pub struct WasmEmitter {
     /// Embedded Unicode case-mapping table offsets (Some only when the program
     /// uses string case ops — see `embed_case_tables` / `program_uses_case_op`).
     case_tables: Option<CaseTableOffsets>,
-    /// Total bytes of the case-table region at the FRONT of `data_bytes` (after
-    /// the newline byte). `eliminate_dead_data` skips this region so the table
-    /// is never misparsed as interned-string entries. 0 when no case op.
+    /// Total bytes of the protected table region at the FRONT of `data_bytes`
+    /// (after the newline byte): Unicode case tables AND the vendored-libm
+    /// 2/pi (IPIO2) / PIO2 tables. `eliminate_dead_data` skips this whole region
+    /// so the raw table bytes are never misparsed as interned-string entries and
+    /// never shift when dead strings are compacted (the lookup functions bake
+    /// absolute addresses). 0 when neither case ops nor trig are used.
     pub case_table_bytes: usize,
+    /// Absolute byte offsets of the embedded libm trig tables (the `IPIO2`
+    /// 2/pi table and `PIO2` extended-precision pi/2 table). `Some` only when
+    /// the program uses `math.sin/cos/tan` — see `embed_libm_tables`.
+    pub libm_tables: Option<rt_libm::LibmTableOffsets>,
 
     // Runtime function indices
     pub rt: RuntimeFuncs,
@@ -462,6 +473,11 @@ pub struct WasmEmitter {
     pub effect_fns: HashSet<String>,
     // Mutable variables captured by closures: these must use heap cells instead of locals
     pub mutable_captures: HashSet<u32>,
+    // Copy-aliased, in-place-mutated heap locals (AliasCowPass). At each mutation
+    // site of one of these, the emitter inserts __cow_check + write-back so the
+    // alias is preserved (value semantics). Empty for non-aliasing programs → the
+    // direct mutation path is byte-identical to before.
+    pub needs_cow: HashSet<u32>,
     // Deep-equality functions per variant type: type_name → func_idx
     pub eq_funcs: HashMap<String, u32>,
     // Almide-literal repr functions per NAMED record/variant type: type_name →
@@ -472,7 +488,18 @@ pub struct WasmEmitter {
     // recursive ADT (`type Tree = Leaf(Int) | Node(Tree, Tree)`) would expand its
     // type graph forever at compile time. Reserved (sorted, host-deterministic)
     // before compilation, mirroring `eq_funcs`.
+    // Keyed by the MANGLED instantiation name (`Tree_Int`, `Tree_String`,
+    // `Tree_List_Int`), not the bare type name. A generic recursive ADT
+    // (`type Tree[T] = Leaf(T) | Node(Tree[T], Tree[T])`) needs a SEPARATE repr
+    // fn per concrete `T`: the fn renders its payload TEXT, which differs by `T`
+    // (a `Leaf(Int)` reprs `1`, a `Leaf(String)` reprs `"a"`). A monomorphic
+    // by-bare-name fn read the payload as a raw `TypeVar` and printed `T {  }`.
+    // Non-generic recursive types mangle to their bare name (backward compatible).
     pub repr_funcs: BTreeMap<String, u32>,
+    // The concrete instantiation `Ty::Named(name, args)` behind each mangled
+    // `repr_funcs` key, so `compile_repr_funcs` walks the body with the real
+    // type args (substituted into each case's payload), not empty args.
+    pub repr_func_tys: BTreeMap<String, Ty>,
     // Whether the program uses filesystem operations (fs.read_text, etc.)
     pub needs_fs: bool,
 }
@@ -512,6 +539,7 @@ impl WasmEmitter {
             // First byte is newline at NEWLINE_OFFSET
             data_bytes: vec![0x0A],
             case_tables: None,
+            libm_tables: None,
             case_table_bytes: 0,
             rt: RuntimeFuncs {
                 fd_write: 0, alloc: 0, rc_inc: 0, rc_dec: 0, cow_check: 0,
@@ -591,6 +619,7 @@ impl WasmEmitter {
                 init_preopen_dirs: 0,
                 dragon: rt_dragon::DragonRuntime::default(),
                 decfloat: rt_dec2flt::DecFloatRuntime::default(),
+                libm: rt_libm::LibmRuntime::default(),
                 repr_str: 0,
                 float_display: 0,
             },
@@ -613,8 +642,10 @@ impl WasmEmitter {
             lambda_counter: std::cell::Cell::new(0),
             effect_fns: HashSet::new(),
             mutable_captures: HashSet::new(),
+            needs_cow: HashSet::new(),
             eq_funcs: HashMap::new(),
             repr_funcs: BTreeMap::new(),
+            repr_func_tys: BTreeMap::new(),
             user_exports: Vec::new(),
             needs_fs: false,
         }
@@ -707,6 +738,35 @@ impl WasmEmitter {
             cased, cased_n: t.cased.len() as u32,
             ci, ci_n: t.case_ignorable.len() as u32,
         });
+    }
+
+    /// Embed the vendored-libm 2/pi (`IPIO2`) and `PIO2` constant tables into the
+    /// FRONT protected region of `data_bytes`, immediately after the case tables
+    /// (if any) and before any string is interned. Their absolute addresses are
+    /// recorded and baked as `i32_const` into the `rt_libm` runtime, so — like the
+    /// case tables — they must sit at a fixed low offset that `eliminate_dead_data`
+    /// never moves. Adds to the protected `case_table_bytes` prefix.
+    fn embed_libm_tables(&mut self) {
+        debug_assert!(
+            self.data_bytes.len() == 1 + self.case_table_bytes,
+            "libm tables must be embedded right after case tables, before string interning"
+        );
+        fn pad8(db: &mut Vec<u8>) {
+            while db.len() % 8 != 0 { db.push(0); }
+        }
+        // IPIO2: 690 × i32. PIO2: 8 × f64 (8-byte aligned for f64.load).
+        let db = &mut self.data_bytes;
+        let ipio2_base = NEWLINE_OFFSET + db.len() as u32;
+        for &x in rt_libm::IPIO2.iter() {
+            db.extend_from_slice(&x.to_le_bytes());
+        }
+        pad8(db);
+        let pio2_base = NEWLINE_OFFSET + db.len() as u32;
+        for &x in rt_libm::PIO2.iter() {
+            db.extend_from_slice(&x.to_le_bytes());
+        }
+        self.case_table_bytes = self.data_bytes.len() - 1;
+        self.libm_tables = Some(rt_libm::LibmTableOffsets { ipio2_base, pio2_base });
     }
 }
 
@@ -803,6 +863,25 @@ impl FuncCompiler<'_> {
             wasm!(self.func, { local_get(new_ptr); global_set(global_idx); });
         }
     }
+
+    /// Copy-on-write guard for the in-place mutation of a heap local. If `id` is a
+    /// COW target (copy-aliased + mutated; see AliasCowPass) and stored in a plain
+    /// local, load it, call `__cow_check` (clones iff rc>1), and write the returned
+    /// pointer back to the local BEFORE the mutation reads it. The alias keeps the
+    /// old pointer (whose rc __cow_check decremented), so the mutation can no longer
+    /// reach it.
+    ///
+    /// No-op when `id` is not a COW target → the direct mutation path is unchanged
+    /// (byte-identical wasm for non-aliasing programs). Also skipped for shared-cell
+    /// captures (deliberately reference-shared) and for vars without a plain local
+    /// (globals don't alias at the source level; AliasCowPass excludes them).
+    pub fn cow_if_needed(&mut self, id: u32) {
+        if !self.emitter.needs_cow.contains(&id) { return; }
+        if self.emitter.mutable_captures.contains(&id) { return; }
+        let Some(&local_idx) = self.var_map.get(&id) else { return };
+        let cow_check = self.emitter.rt.cow_check;
+        wasm!(self.func, { local_get(local_idx); call(cow_check); local_set(local_idx); });
+    }
 }
 
 // ── Public API ──────────────────────────────────────────────────────
@@ -824,6 +903,10 @@ pub(crate) fn emit(program: &IrProgram) -> Vec<u8> {
 
     // Pre-scan: detect filesystem usage to conditionally include init_preopen_dirs
     emitter.needs_fs = program_uses_fs(program);
+
+    // Copy the COW-target var set (AliasCowPass) onto the emitter as bare u32s,
+    // mirroring `mutable_captures`. Read at every in-place mutation emit site.
+    emitter.needs_cow = program.codegen_annotations.needs_cow.iter().map(|v| v.0).collect();
 
     // Phase 0: Collect `@intrinsic(symbol)` → (module, fn_name) from every
     // bundled stdlib source so the `RuntimeCall` fallback path can route
@@ -853,6 +936,11 @@ pub(crate) fn emit(program: &IrProgram) -> Vec<u8> {
     // string case op. Gated to keep non-case-folding modules lean (~51KB tables).
     if program_uses_case_op(program) {
         emitter.embed_case_tables();
+    }
+    // Embed the libm 2/pi / PIO2 tables (front protected region, after case
+    // tables, before any string interning) when the program uses trig.
+    if program_uses_trig(program) {
+        emitter.embed_libm_tables();
     }
 
     // Phase 1: Register types and function indices
@@ -1464,7 +1552,7 @@ pub(crate) fn emit(program: &IrProgram) -> Vec<u8> {
 
     // Pre-register per-type Almide-literal repr functions (recursive ADTs walk via
     // call, not inline expansion). Must reserve indices before compilation starts.
-    register_repr_funcs(&mut emitter);
+    register_repr_funcs(&mut emitter, program);
 
     // Phase 2: Compile function bodies (order must match registration order)
     runtime::compile_runtime(&mut emitter);
@@ -1770,7 +1858,7 @@ fn assemble(emitter: &mut WasmEmitter) -> Vec<u8> {
         },
         &wasm_encoder::ConstExpr::i32_const(heap_start_aligned as i32),
     );
-    emitter.rt.heap_start_global = 4;
+    emitter.rt.heap_start_global = runtime::HEAP_START_GLOBAL_IDX;
 
     // Top-level let globals
     for &(_, vt, bits) in &emitter.top_let_init {
@@ -2291,7 +2379,7 @@ fn recursive_type_names(emitter: &WasmEmitter) -> HashSet<String> {
 /// Reserve indices in SORTED name order so they are a pure function of the
 /// program (the same 32-bit/64-bit host-determinism contract as
 /// `register_variant_eq_funcs`); the (also sorted) compile order must match.
-fn register_repr_funcs(emitter: &mut WasmEmitter) {
+fn register_repr_funcs(emitter: &mut WasmEmitter, program: &IrProgram) {
     let type_idx = emitter.register_type(vec![ValType::I32], vec![ValType::I32]);
 
     let recursive = recursive_type_names(emitter);
@@ -2302,11 +2390,11 @@ fn register_repr_funcs(emitter: &mut WasmEmitter) {
     // synthetic `__anon_record_*` shapes (walked inline) and not the variant CASE
     // names (a `Node` value reprs through its variant type's fn, by tag). A type
     // with a closure field is excluded.
-    let mut names: Vec<String> = Vec::new();
+    let mut base_names: HashSet<String> = HashSet::new();
     for (name, cases) in &emitter.variant_info {
         let has_closure = cases.iter().any(|c| c.fields.iter().any(|(_, ft)| ty_field_has_closure(ft)));
         if recursive.contains(name) && !has_closure {
-            names.push(name.clone());
+            base_names.insert(name.clone());
         }
     }
     // Variant CASE names that are also keyed in record_fields — skip them as
@@ -2320,14 +2408,135 @@ fn register_repr_funcs(emitter: &mut WasmEmitter) {
         let is_variant_type = emitter.variant_info.contains_key(name);
         let has_closure = fields.iter().any(|(_, ft)| ty_field_has_closure(ft));
         if recursive.contains(name) && !is_anon && !is_variant_case && !is_variant_type && !has_closure {
-            names.push(name.clone());
+            base_names.insert(name.clone());
         }
     }
-    names.sort();
-    names.dedup();
-    for name in names {
-        let func_idx = emitter.register_func(&format!("__repr_{}", name), type_idx);
-        emitter.repr_funcs.insert(name, func_idx);
+
+    // Discover the concrete INSTANTIATIONS of these recursive types used in the
+    // program (`Tree[Int]`, `Tree[String]`, `Tree[List[Int]]`). Each needs its
+    // own repr fn keyed by the mangled name — a monomorphic by-bare-name fn
+    // reads the `T` payload as a raw `TypeVar`. The recursive references inside
+    // a fn body resolve to the SAME instantiation (`Node`'s children are
+    // `Tree[T]` → `Tree[Int]` for the `Tree[Int]` fn), so the site-level
+    // instantiations are the full set — no new ones appear transitively.
+    // A non-generic recursive type (`type IntTree = Leaf(Int) | ...`) yields the
+    // bare-name key (empty args → mangle is just the name), preserving behavior.
+    let mut instantiations: BTreeMap<String, Ty> = BTreeMap::new();
+    // Always register the bare-name fn for every recursive type: a recursive type
+    // with NO interpolation site still needs its reserved slot iff something else
+    // (e.g. a nested non-generic recursive field) routes to it, and the
+    // non-generic case is reached via the bare name at dispatch.
+    for name in &base_names {
+        let bare = Ty::Named(almide_base::intern::sym(name), Vec::new());
+        instantiations.insert(name.clone(), bare);
+    }
+    collect_repr_instantiations(program, &base_names, &mut instantiations);
+
+    // Reserve indices in SORTED key order (host-determinism contract); the
+    // compile order in `compile_repr_funcs` must match.
+    for (mangled, ty) in instantiations {
+        let func_idx = emitter.register_func(&format!("__repr_{}", mangled), type_idx);
+        emitter.repr_funcs.insert(mangled.clone(), func_idx);
+        emitter.repr_func_tys.insert(mangled, ty);
+    }
+}
+
+/// Mangle a concrete type into the suffix used to key per-instantiation repr
+/// fns (`Tree[Int]` → `Tree_Int`, `Tree[List[Int]]` → `Tree_List_Int`). Mirrors
+/// the Rust-walker `mangle_ty_for_mono` convention so the two targets name
+/// instantiations identically. A type with no args mangles to its bare name.
+pub(super) fn mangle_repr_ty(ty: &Ty) -> String {
+    use almide_lang::types::constructor::TypeConstructorId;
+    match ty {
+        Ty::Int => "Int".into(),
+        Ty::Float => "Float".into(),
+        Ty::String => "String".into(),
+        Ty::Bool => "Bool".into(),
+        Ty::Int8 => "Int8".into(),
+        Ty::Int16 => "Int16".into(),
+        Ty::Int32 => "Int32".into(),
+        Ty::UInt8 => "UInt8".into(),
+        Ty::UInt16 => "UInt16".into(),
+        Ty::UInt32 => "UInt32".into(),
+        Ty::UInt64 => "UInt64".into(),
+        Ty::Float32 => "Float32".into(),
+        Ty::Bytes => "Bytes".into(),
+        Ty::Unit => "Unit".into(),
+        Ty::Named(name, args) => {
+            if args.is_empty() { name.to_string() }
+            else { format!("{}_{}", name, args.iter().map(mangle_repr_ty).collect::<Vec<_>>().join("_")) }
+        }
+        Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 =>
+            format!("List_{}", mangle_repr_ty(&args[0])),
+        Ty::Applied(id, args) => {
+            let name = format!("{:?}", id);
+            if args.is_empty() { name } else {
+                format!("{}_{}", name, args.iter().map(mangle_repr_ty).collect::<Vec<_>>().join("_"))
+            }
+        }
+        _ => "Unknown".into(),
+    }
+}
+
+/// Walk every expression type in the program, recording each concrete
+/// instantiation `Ty::Named(base, non-empty-args)` of a recursive repr-backed
+/// type (`base` ∈ `base_names`), keyed by its mangled name. Nested instantiations
+/// (`List[Tree[Int]]` → `Tree[Int]`) are found by scanning each type's subtree.
+fn collect_repr_instantiations(
+    program: &IrProgram,
+    base_names: &HashSet<String>,
+    out: &mut BTreeMap<String, Ty>,
+) {
+    use almide_ir::visit::{IrVisitor, walk_expr};
+    struct Collector<'a> {
+        base_names: &'a HashSet<String>,
+        out: &'a mut BTreeMap<String, Ty>,
+    }
+    impl<'a> Collector<'a> {
+        fn scan_ty(&mut self, ty: &Ty) {
+            // A generic recursive type used concretely: record the instantiation.
+            if let Ty::Named(name, args) = ty {
+                if !args.is_empty()
+                    && self.base_names.contains(name.as_str())
+                    && !args.iter().any(ty_is_unresolved_repr)
+                {
+                    out_insert(self.out, ty);
+                }
+            }
+            // Descend into every child type (List/Tuple/Map/Option/Result/Named
+            // args, Record fields) so nested instantiations surface too.
+            for child in ty.children() {
+                self.scan_ty(child);
+            }
+        }
+    }
+    fn out_insert(out: &mut BTreeMap<String, Ty>, ty: &Ty) {
+        out.insert(mangle_repr_ty(ty), ty.clone());
+    }
+    impl<'a> IrVisitor for Collector<'a> {
+        fn visit_expr(&mut self, expr: &almide_ir::IrExpr) {
+            self.scan_ty(&expr.ty);
+            walk_expr(self, expr);
+        }
+    }
+    let mut c = Collector { base_names, out };
+    for func in &program.functions {
+        c.visit_expr(&func.body);
+    }
+    for module in &program.modules {
+        for func in &module.functions {
+            c.visit_expr(&func.body);
+        }
+    }
+}
+
+/// A type still carrying an unresolved `TypeVar`/`Unknown` is not a real
+/// instantiation — skip it (the corresponding bare-name fn handles the
+/// degenerate case, and we must not mangle a `TypeVar` into a fn name).
+fn ty_is_unresolved_repr(ty: &Ty) -> bool {
+    match ty {
+        Ty::TypeVar(_) | Ty::Unknown => true,
+        _ => ty.children().iter().any(|c| ty_is_unresolved_repr(c)),
     }
 }
 
@@ -2343,7 +2552,7 @@ fn compile_repr_funcs(emitter: &mut WasmEmitter, var_table: &almide_ir::VarTable
         .collect();
     entries.sort();
 
-    for (name, _func_idx) in &entries {
+    for (mangled, _func_idx) in &entries {
         let type_idx = emitter.register_type(vec![ValType::I32], vec![ValType::I32]);
 
         // One repr fn walks a SINGLE level (children recurse via call), so its
@@ -2371,8 +2580,17 @@ fn compile_repr_funcs(emitter: &mut WasmEmitter, var_table: &almide_ir::VarTable
 
         // The repr emitters dispatch on the static `Ty` of the value: a variant
         // type → `emit_repr_variant`, otherwise a record → `emit_repr_record`.
-        let is_variant = emitter.variant_info.contains_key(name.as_str());
-        let ty = almide_lang::types::Ty::Named(almide_base::intern::sym(name), Vec::new());
+        // The instantiation `Ty` (e.g. `Tree[Int]`) carries the concrete type
+        // args so the variant/record walk substitutes them into each payload —
+        // this is the whole point of keying by instantiation. The dispatch base
+        // name is the type's own name (`Tree`), not the mangled key.
+        let ty = emitter.repr_func_tys.get(mangled).cloned()
+            .unwrap_or_else(|| almide_lang::types::Ty::Named(almide_base::intern::sym(mangled), Vec::new()));
+        let base_name = match &ty {
+            almide_lang::types::Ty::Named(n, _) => n.to_string(),
+            _ => mangled.clone(),
+        };
+        let is_variant = emitter.variant_info.contains_key(base_name.as_str());
 
         let compiled_func = {
             let mut compiler = FuncCompiler {
@@ -2394,7 +2612,7 @@ fn compile_repr_funcs(emitter: &mut WasmEmitter, var_table: &almide_ir::VarTable
                 compiler.emit_repr_variant(&ty);
             } else {
                 let fields = compiler.extract_record_fields(&ty);
-                compiler.emit_repr_record(Some(name.as_str()), &fields);
+                compiler.emit_repr_record(Some(base_name.as_str()), &fields);
             }
             compiler.func.instruction(&wasm_encoder::Instruction::End);
             compiler.func
@@ -2672,6 +2890,71 @@ fn program_uses_case_op(program: &IrProgram) -> bool {
     for func in &program.functions {
         scanner.visit_expr(&func.body);
         if scanner.found { return true; }
+    }
+    false
+}
+
+/// True iff the program references `math.sin` / `math.cos` / `math.tan` in any
+/// dispatch form (resolved module call, unresolved method call, or runtime call).
+/// Conservative — same contract as `program_uses_case_op`: a miss would leave the
+/// always-compiled trig runtime baking stale table offsets (silently wrong), so
+/// this is strictly broader than dispatch and also walks module bodies, not just
+/// top-level functions.
+fn program_uses_trig(program: &IrProgram) -> bool {
+    use almide_ir::{IrExprKind, CallTarget};
+    use almide_ir::visit::{IrVisitor, walk_expr, walk_stmt};
+
+    fn is_trig_fn(name: &str) -> bool {
+        let name = name.strip_prefix("math.").unwrap_or(name);
+        matches!(name, "sin" | "cos" | "tan")
+    }
+
+    struct TrigScanner { found: bool }
+    impl IrVisitor for TrigScanner {
+        fn visit_expr(&mut self, expr: &almide_ir::IrExpr) {
+            if self.found { return; }
+            match &expr.kind {
+                IrExprKind::Call { target: CallTarget::Module { module, func, .. }, .. }
+                    if module.as_str() == "math" && is_trig_fn(func.as_str()) =>
+                {
+                    self.found = true;
+                    return;
+                }
+                IrExprKind::Call { target: CallTarget::Method { method, .. }, .. }
+                    if is_trig_fn(method.as_str()) =>
+                {
+                    self.found = true;
+                    return;
+                }
+                IrExprKind::RuntimeCall { symbol, .. }
+                    if matches!(
+                        symbol.as_str(),
+                        "almide_rt_math_sin" | "almide_rt_math_cos" | "almide_rt_math_tan"
+                    ) =>
+                {
+                    self.found = true;
+                    return;
+                }
+                _ => {}
+            }
+            walk_expr(self, expr);
+        }
+        fn visit_stmt(&mut self, stmt: &almide_ir::IrStmt) {
+            if self.found { return; }
+            walk_stmt(self, stmt);
+        }
+    }
+
+    let mut scanner = TrigScanner { found: false };
+    for func in &program.functions {
+        scanner.visit_expr(&func.body);
+        if scanner.found { return true; }
+    }
+    for module in &program.modules {
+        for func in &module.functions {
+            scanner.visit_expr(&func.body);
+            if scanner.found { return true; }
+        }
     }
     false
 }

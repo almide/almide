@@ -4,8 +4,11 @@ pre-commit:
       glob: "docs/roadmap/{active,on-hold,done}/*.md"
       run: bash docs/roadmap/generate-readme.sh > docs/roadmap/README.md && git add docs/roadmap/README.md
     rt-oracle-registry:
-      glob: "{crates/almide-codegen/src/emit_wasm/*.rs,crates/almide-codegen/rt-oracle-registry.toml,scripts/check-rt-oracle-registry.sh}"
+      glob: "{crates/almide-codegen/src/emit_wasm/*.rs,crates/almide-codegen/rt-oracle-registry.toml,scripts/check-rt-oracle-registry.sh,scripts/lib/contract-classes.txt}"
       run: scripts/check-rt-oracle-registry.sh
+    contracts:
+      glob: "{docs/contracts/contracts.toml,docs/contracts/*.md,spec/wasm_cross/*.almd,crates/almide-codegen/rt-oracle-registry.toml,scripts/check-contracts.sh,scripts/lib/contract-classes.txt}"
+      run: scripts/check-contracts.sh && bash docs/contracts/generate-readme.sh > docs/contracts/README.md && git add docs/contracts/README.md
 
 commit-msg:
   scripts:

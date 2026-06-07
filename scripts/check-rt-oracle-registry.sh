@@ -22,9 +22,15 @@ cd "$(dirname "$0")/.." || { echo "::error::cannot cd to repo root"; exit 2; }
 
 EMIT_DIR="crates/almide-codegen/src/emit_wasm"
 REGISTRY="crates/almide-codegen/rt-oracle-registry.toml"
+# Shared, single-source-of-truth evidence-class vocabulary. A verified routine MAY
+# carry an OPTIONAL `class = "..."` (mirroring docs/contracts/contracts.toml); if
+# present it must be one of these. Sourcing the SAME file the contract gate uses
+# means the two enums provably cannot drift.
+CLASS_FILE="scripts/lib/contract-classes.txt"
 
 [ -d "$EMIT_DIR" ] || { echo "::error::$EMIT_DIR not found (run from repo root)"; exit 2; }
 [ -f "$REGISTRY" ] || { echo "::error::$REGISTRY not found"; exit 2; }
+[ -f "$CLASS_FILE" ] || { echo "::error::$CLASS_FILE not found"; exit 2; }
 
 # ── Structural / orchestration emitters that are NOT runtime functions ──
 # These compile user IrFunctions, lambda bodies, the _start / test harness, or are
@@ -45,6 +51,7 @@ runtime.rs::compile_runtime
 rt_dragon.rs::compile_driver
 rt_dragon.rs::compile_helpers
 rt_dec2flt.rs::compile_helpers
+rt_libm.rs::compile_helpers
 "
 
 # The exclude set as a clean newline-delimited list (blank lines stripped, so a
@@ -178,6 +185,20 @@ while IFS=$'\t' read -r key spec; do
   fi
 done < <(verified_tests)
 
+# ── (e) class enum (the contract-ledger unification) ──
+# A `class = "..."` line in any [[routine]] block must be a valid evidence class
+# from the shared scripts/lib/contract-classes.txt. This keeps the registry's
+# optional class= vocabulary identical to the contract ledger's — one list file,
+# no drift. Grandfathered entries carry no class= and are unaffected.
+VALID_CLASSES="$(grep -vE '^[[:space:]]*(#|$)' "$CLASS_FILE")"
+while IFS= read -r cls; do
+  [ -z "$cls" ] && continue
+  if ! printf '%s\n' "$VALID_CLASSES" | grep -qxF "$cls"; then
+    fail=1
+    echo "::error::registry has class \"$cls\" which is not a valid evidence class (see $CLASS_FILE: $(printf '%s' "$VALID_CLASSES" | paste -sd, -))"
+  fi
+done < <(grep -E '^class[ \t]*=' "$REGISTRY" | sed -E 's/^class[ \t]*=[ \t]*"//; s/".*$//' | sort -u)
+
 n_actual="$(printf '%s\n' "$ACTUAL" | grep -c . || true)"
 n_reg="$(printf '%s\n' "$REGISTERED" | grep -c . || true)"
 n_ver="$(grep -c '^status = "verified"' "$REGISTRY" || true)"
@@ -192,9 +213,20 @@ if [ "$((n_ver + n_grand))" -ne "$n_reg" ]; then
 fi
 
 echo "----"
+# ── Ratchet ceiling: the grandfathered count may only go DOWN ──
+# ZERO. The drain is complete (2026-06-06): cow_check was fixed (value
+# semantics for aliased mutable collections, locked by spec/wasm_cross/alias_cow.almd)
+# and the fs pair was corpus-locked by spec/wasm_cross/fs_preopen_resolve.almd.
+# Every wasm runtime routine is verified against its native oracle. New routines
+# MUST ship verified — this ceiling never rises.
+MAX_GRANDFATHERED=0
+if [ "$n_grand" -gt "$MAX_GRANDFATHERED" ]; then
+  fail=1
+  echo "::error::grandfathered count $n_grand exceeds the ratchet ceiling $MAX_GRANDFATHERED — new routines must ship verified (see crates/almide-codegen/CLAUDE.md)"
+fi
 if [ "$fail" -ne 0 ]; then
   echo "::error::rt-oracle-registry gate FAILED — see messages above."
   exit 1
 fi
 echo "rt-oracle-registry: OK — $n_actual runtime routines, all registered ($n_reg entries)."
-echo "  verified=$n_ver  grandfathered=$n_grand  (grandfathered = Stage-2 drain backlog)"
+echo "  verified=$n_ver  grandfathered=$n_grand / ceiling $MAX_GRANDFATHERED  (grandfathered = Stage-2 drain backlog)"

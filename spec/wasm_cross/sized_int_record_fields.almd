@@ -1,0 +1,39 @@
+// @contract: C-038
+// Cross-target gate for SIZED-INTEGER fields in record / variant construction.
+//
+// `type M = { a: Int8, b: Int }` + `M { a: 5, b: 9 }`: the bare literal `5`
+// stays the default `Int` (i64) unless it is narrowed to the declared field
+// type. Without the narrowing, native rustc rejects `M { a: 5i64 }` (E0308) and
+// WASM writes the wrong byte WIDTH for `a`, so the next field `b` reads garbage.
+// The construction site (driven by the declared field types) coerces each bare
+// literal — this covers plain records, NESTED records, record-variant payloads
+// (`Scroll { dy: Int8 }`), AND tuple-variant payloads (`Click(Int32, Int)`).
+// Field access after construction must read back the exact stored value.
+
+type Inner = { x: Int8, y: Int32 }
+type Outer = { a: UInt8, inner: Inner, b: Int16 }
+type Event = Click(Int32, Int) | Scroll { dy: Int8 }
+
+fn main() -> Unit = {
+  // Nested record with sized fields at every level.
+  let o = Outer { a: 200, inner: Inner { x: 7, y: 100000 }, b: 30000 }
+  // Field access reads the exact stored width (no neighbor corruption).
+  println("fields=${o.a} ${o.inner.x} ${o.inner.y} ${o.b}")
+  println("outer=${o}")
+
+  // Record-variant payload.
+  let s = Scroll { dy: 5 }
+  println("scroll=${s}")
+
+  // Tuple-variant payload: an Int32 first field must not corrupt the Int next.
+  let c = Click(42, 9)
+  println("click=${c}")
+
+  // A list of sized-int records: every element literal coerces.
+  let xs: List[Inner] = [Inner { x: 1, y: 10 }, Inner { x: 2, y: 20 }]
+  println("list=${xs}")
+
+  // Negative sized literals round-trip too.
+  let n = Inner { x: -8, y: -50000 }
+  println("neg=${n.x} ${n.y}")
+}

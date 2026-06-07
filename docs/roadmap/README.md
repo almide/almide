@@ -6,7 +6,7 @@
 
 ## Active
 
-16 items
+17 items
 
 | Item | Description |
 |------|-------------|
@@ -22,6 +22,7 @@
 | [Capability-Based Effect System](active/effect-system-capability.md) | Capability-based effect system for sandboxed AI agent containers |
 | [LLM-first Language](active/llm-first-language.md) | Plan to make Almide the language LLMs write most accurately, measured by dojo MSR |
 | [Map / Set data-structure roadmap](active/map-data-structure-roadmap.md) |  |
+| [Protocols: declared conformance + opt-in `any P`](active/protocol-any-existentials.md) | Declared conformance + opt-in `any P` existentials — take Go's interface-value ergonomics without its implicit-satisfaction and nil-interface traps; the one Swift idea worth stealing, none of the rest |
 | [Type Where Constraints](active/type-where-constraints.md) | where clauses on type/fn definitions for type constraints |
 | [Almide WASM Engine — Complete Redesign](active/wasm-engine-redesign.md) |  |
 | [WASM Optimization Roadmap](active/wasm-optimization-roadmap.md) |  |

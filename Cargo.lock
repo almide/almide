@@ -22,7 +22,7 @@ checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
 
 [[package]]
 name = "almide"
-version = "0.24.0"
+version = "0.25.0"
 dependencies = [
  "almide-base",
  "almide-codegen",
@@ -100,6 +100,18 @@ dependencies = [
  "almide-lang",
  "serde",
  "toml",
+]
+
+[[package]]
+name = "almide-interp"
+version = "0.1.0"
+dependencies = [
+ "almide-base",
+ "almide-frontend",
+ "almide-ir",
+ "almide-lang",
+ "almide-optimize",
+ "tempfile",
 ]
 
 [[package]]

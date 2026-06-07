@@ -1,3 +1,4 @@
+// @contract: C-001, C-035
 // Integer `/` by zero aborts with "Error: division by zero" + exit 1 on BOTH
 // targets, not a native panic (exit 101) nor a wasm `unreachable` trap (exit 134).
 // `den(7)` shields the divisor so neither target const-folds it away — the

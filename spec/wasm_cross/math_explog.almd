@@ -1,0 +1,71 @@
+// @contract: C-026
+// Cross-target equivalence for math.exp / log / log2 / log10.
+//
+// Both targets run the SAME vendored musl-libm reference (native:
+// runtime/rs/src/libm.rs, wasm: emit_wasm/rt_libm.rs), so every result must be
+// byte-identical. Printed via float.to_string (Dragon4, itself byte-identical
+// cross-target), so any diff the gate catches is the MATH. Covers the headline
+// values AND the sweep-confirmed special cases:
+//   - log(0.0) == -inf  (wasm previously returned NaN via a wrong x<=0 guard)
+//   - log(neg) == NaN
+//   - exp(-745) == the subnormal 5e-324 (wasm previously clamped to 0 too early)
+//   - exp overflow -> inf
+import math
+
+fn pe(x: Float) -> Unit = println(float.to_string(math.exp(x)))
+fn pl(x: Float) -> Unit = println(float.to_string(math.log(x)))
+fn p2(x: Float) -> Unit = println(float.to_string(math.log2(x)))
+fn p10(x: Float) -> Unit = println(float.to_string(math.log10(x)))
+
+fn main() -> Unit = {
+  // exp: small / reduction / overflow / underflow-to-subnormal
+  pe(0.0)
+  pe(1.0)
+  pe(-1.0)
+  pe(0.5)
+  pe(2.5)
+  pe(10.0)
+  pe(-10.0)
+  pe(709.0)
+  pe(709.7827)
+  pe(710.0)          // overflow -> inf
+  pe(-700.0)
+  pe(-745.0)         // subnormal 5e-324 (was clamped to 0)
+  pe(-745.2)
+  pe(-746.0)         // underflow -> 0
+  pe(-0.0001)
+  pe(0.0001)
+
+  // log (natural)
+  pl(1.0)
+  pl(2.718281828459045)
+  pl(10.0)
+  pl(0.5)
+  pl(1000000.0)
+  pl(1.0e-300)
+  pl(1.0e300)
+  pl(0.0)            // -inf (was NaN)
+  pl(-2.0)           // NaN
+  pl(2.0)
+  pl(123.456)
+
+  // log2 — exact powers of two stay exact
+  p2(1.0)
+  p2(2.0)
+  p2(8.0)
+  p2(1024.0)
+  p2(3.0)
+  p2(0.5)
+  p2(0.0)            // -inf
+  p2(1.0e100)
+
+  // log10 — exact powers of ten stay exact
+  p10(1.0)
+  p10(10.0)
+  p10(100.0)
+  p10(1000.0)
+  p10(2.0)
+  p10(0.5)
+  p10(0.0)           // -inf
+  p10(1.0e-10)
+}

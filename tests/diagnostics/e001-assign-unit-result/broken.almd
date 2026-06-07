@@ -1,0 +1,9 @@
+// `list.push` has a mut receiver and returns Unit — it mutates `b` in place.
+// Assigning its Unit result back to `b` (a `List[Int]`) is a type error. Native
+// caught it only at rustc (E0308 "expected Vec, found ()"); WASM erased Unit and
+// silently RAN the program. The checker now rejects it so BOTH targets agree.
+fn main() -> Unit = {
+  var b: List[Int] = []
+  b = list.push(b, 1)
+  println(int.to_string(list.len(b)))
+}

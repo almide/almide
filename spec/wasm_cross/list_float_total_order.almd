@@ -1,0 +1,56 @@
+// @contract: C-055
+// list.sort / list.min / list.max over List[Float] and list.sort_by with a Float
+// key ORDER by IEEE-754 totalOrder (the ordering twin of f64::total_cmp): NaN
+// takes its totalOrder position (greatest, after +inf) and -0.0 < +0.0.
+//
+// Before: native REJECTED Float ordering at compile (`f64: Ord` unsatisfied)
+// while wasm accepted it — and the `sort_by` Float-key path emitted an INVALID
+// wasm module (an f64 stored into an i64 local → `local.set` validator error).
+// A program valid on one target only, or an invalid module, is always a bug.
+//
+// Fix: native routes List[Float] ordering to `total_cmp`-based `_float` runtime
+// variants; wasm mirrors with the sign-magnitude bit trick in emit_ord_cmp3's
+// Float arm and pre-transforms sort_by Float keys onto the i64 path; interp
+// mirrors with f64::total_cmp. All three votes agree.
+//
+// ASYMMETRY (deliberate): this list-extremum/ordering totalOrder is DISTINCT
+// from the SCALAR float.min/float.max/math.fmin/math.fmax, which keep their
+// C-049 NaN-IGNORING semantics.
+
+type R = { name: String, v: Float }
+
+fn fmtf(xs: List[Float]) -> String = list.join(list.map(xs, (x) => float.to_string(x)), ",")
+fn fmtr(xs: List[R]) -> String = list.join(list.map(xs, (r) => r.name), ",")
+
+fn main() -> Unit = {
+  let xs = [3.5, 1.2, 2.8, 1.2, 0.0]
+  println("sort: " + fmtf(list.sort(xs)))
+  println("min:  " + float.to_string(list.min(xs) ?? 99.0))
+  println("max:  " + float.to_string(list.max(xs) ?? 99.0))
+
+  // -0.0 < +0.0 under totalOrder.
+  println("sort zeros: " + fmtf(list.sort([0.0, -0.0])))
+
+  // Negatives sort by magnitude with sign.
+  let ns = [-1.5, -3.0, -0.5, 2.0]
+  println("sort neg: " + fmtf(list.sort(ns)))
+  println("min neg:  " + float.to_string(list.min(ns) ?? 99.0))
+  println("max neg:  " + float.to_string(list.max(ns) ?? 99.0))
+
+  // +inf / -inf land at the totalOrder extremes (just inside ±NaN). These have
+  // a DETERMINISTIC sign on all three judges, unlike a divided NaN whose sign is
+  // implementation-defined (rustc const-folds `0.0/0.0` to +NaN, an x86 runtime
+  // `divsd` yields -NaN — see the contract note). NaN's top/bottom position is
+  // exercised in the native/wasm-only path that the contract cites; here we keep
+  // the 3-way-oracle fixture sign-deterministic.
+  let inf = 1.0 / 0.0
+  let ninf = -1.0 / 0.0
+  let ws = [1.0, ninf, -2.0, inf, 0.5]
+  println("sort inf: " + fmtf(list.sort(ws)))
+  println("max inf:  " + float.to_string(list.max(ws) ?? 99.0))
+  println("min inf:  " + float.to_string(list.min(ws) ?? 99.0))
+
+  // sort_by a Float key (the path that emitted an invalid module).
+  let rs = [R{name: "a", v: 3.5}, R{name: "b", v: 1.2}, R{name: "c", v: 2.8}, R{name: "d", v: -1.0}]
+  println("sort_by: " + fmtr(list.sort_by(rs, (r) => r.v)))
+}

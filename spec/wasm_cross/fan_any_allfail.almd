@@ -1,3 +1,4 @@
+// @contract: C-005
 // fan.any all-fail: when EVERY candidate fails, fan.any returns a defined
 // Err("fan.any: all candidates failed"), which the effect-main termination
 // surfaces as "Error: fan.any: all candidates failed" + exit 1 on BOTH targets.

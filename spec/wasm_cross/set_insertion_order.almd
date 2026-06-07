@@ -1,3 +1,4 @@
+// @contract: C-014
 // Native Set was std HashSet (hash-bucket order, randomized per process); wasm
 // Set is a dense insertion-order list. So set iteration diverged native-vs-wasm
 // AND was nondeterministic on native. Native Set is now an insertion-ordered

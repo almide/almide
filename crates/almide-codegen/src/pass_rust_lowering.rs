@@ -264,6 +264,22 @@ fn box_node(expr: &mut IrExpr) -> bool {
             }
             c
         }
+        // Codec list helpers `almide_rt_value_encode_list` /
+        // `_decode_list` take a GENERIC `F: Fn(T) -> _` element codec (NOT
+        // `Rc<dyn Fn>`), so — like a fused IterChain step and a `fan.*` thunk —
+        // their per-element fn argument must stay a raw `impl Fn`. The element
+        // codec is the LAST positional arg (a bare `Item_encode` / `Item_decode`
+        // `FnRef`, given a precise `Ty::Fn` by BuiltinLowering so it clears the
+        // type-completeness gate). The default arm above boxed it to `Rc<dyn Fn>`;
+        // un-box it here. This is the same structural "consumer takes impl Fn"
+        // rule as fan/IterChain, keyed on the call shape rather than a per-symbol
+        // allow-list.
+        IrExprKind::Call { target: CallTarget::Named { name }, args, .. }
+            if matches!(name.as_str(),
+                "almide_rt_value_encode_list" | "almide_rt_value_decode_list") =>
+        {
+            args.last_mut().map(unbox_consumed).unwrap_or(false)
+        }
         _ => false,
     }
 }

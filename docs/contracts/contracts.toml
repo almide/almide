@@ -1,0 +1,755 @@
+# ====================================================================
+# ALMIDE BEHAVIOR CONTRACT LEDGER — the language's cross-target law book
+# ====================================================================
+#
+# Each [[contract]] is a NORMATIVE, observable promise the compiler keeps on
+# BOTH backends (native Rust and wasm32). "Observable" = stdout, stderr, exit
+# code. Native is the oracle; native == wasm is a hard invariant, NOT a "target
+# difference". This ledger is the human-readable + machine-checkable index of
+# every such promise, with a TRACEABLE link to the executable evidence that
+# certifies it.
+#
+# WHY THIS EXISTS
+# ---------------
+# The cross-target equivalence GATE (tests/wasm_runtime_test.rs::wasm_cross_target_spec)
+# and the wasm-runtime ORACLE-PAIRING registry (crates/almide-codegen/rt-oracle-registry.toml)
+# already enforce equivalence at the test + routine level. This ledger adds the
+# missing layer: a stable, named CONTRACT each fixture certifies, so that
+#   (a) every cross-target fixture is traceable to the promise it locks, and
+#   (b) every promise is traceable to executable proof — no claimed behaviour
+#       rests on prose alone.
+# The gate (scripts/check-contracts.sh) makes that bidirectional link mandatory.
+#
+# SCHEMA  (flat TOML, one scalar per line — kept awk-parseable like the registry)
+# ------
+#   [[contract]]
+#   id        (string, REQUIRED)  ^C-[0-9]{3}$, unique. THE PRIMARY KEY.
+#   title     (string, REQUIRED)  one line.
+#   statement (string, REQUIRED)  the normative behaviour, <= 3 sentences. When a
+#                                 table / longer prose is needed, the statement is
+#                                 a 1-line summary and `doc` points at the prose.
+#   since     (string, REQUIRED)  version the contract became normative.
+#   status    (enum,   REQUIRED)  "active" | "flagged-for-revision".
+#   doc       (string, OPTIONAL)  basename of a docs/contracts/*.md prose file.
+#   evidence  (array,  REQUIRED)  >= 1 inline-table entries; each:
+#                 path  (string, REQUIRED)  repo-root-relative; must exist on disk.
+#                 class (string, REQUIRED)  one of scripts/lib/contract-classes.txt.
+#                 name  (string, OPTIONAL)  REQUIRED for *.rs / *.lean / *.toml or
+#                                           when class in {fuzz, lean, exhaustive};
+#                                           the `fn`/theorem/routine the gate greps.
+#                 n     (int,    OPTIONAL)  REQUIRED iff class="fuzz"; the sample count.
+#
+# THE FLOOR RULE: an `active` contract MUST carry >= 1 evidence of rank >= fixture
+# (see scripts/lib/contract-classes.txt). doc-only / by-construction ALONE fail an
+# active contract. status="flagged-for-revision" is exempt (may rest on doc-only):
+# it records a KNOWN, currently-unfixable divergence (the ratchet may only shrink).
+#
+# CHANGE DISCIPLINE: changing any observable behaviour REQUIRES updating the
+# contract statement AND its evidence in the SAME PR. A new behaviour = a new
+# C-NNN + >= 1 fixture. Removing a divergence = flip status to active and drop the
+# flag in the same PR. The flagged count is a ratchet; it may only go DOWN.
+#
+# REVERSE LINK: every spec/wasm_cross/*.almd declares the contract(s) it certifies
+# on a `// @contract: C-NNN[, C-MMM]` header line. The link is BIDIRECTIONAL and
+# the gate enforces symmetry.
+
+
+# ── INTEGER DIV/MOD TOTALITY (PR #378) ───────────────────────────────
+[[contract]]
+id        = "C-001"
+title     = "Integer division/modulo by zero is total — it aborts, never traps"
+statement = "Integer `/` and `%` by a zero divisor MUST abort with stderr `Error: division by zero` and exit code 1 on BOTH targets — never a native panic (exit 101) nor a wasm `unreachable` trap (exit 134). The `%`-by-zero message is identical to `/` (both `division by zero`). This holds for a runtime-shielded divisor AND a const-foldable literal `10 / 0`, which must still COMPILE: `/` and `%` route through the non-const-evaluable `almide_div!` / `__div_trap`, so rustc never const-evaluates the divide and the abort happens at runtime."
+since     = "0.24.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/int_div_by_zero.almd", class = "fixture" },
+  { path = "spec/wasm_cross/int_mod_by_zero.almd", class = "fixture" },
+  { path = "spec/wasm_cross/int_div_by_zero_literal.almd", class = "fixture" },
+  { path = "crates/almide-codegen/rt-oracle-registry.toml", name = "compile_div_trap", class = "doc-only" },
+]
+
+[[contract]]
+id        = "C-002"
+title     = "Signed MIN / -1 overflow aborts, at the TRUE per-width MIN"
+statement = "Signed integer `MIN / -1` and `MIN % -1` MUST abort with stderr `Error: integer overflow` and exit 1 on BOTH targets, using the true per-width MIN. Int8 `-128 / -1` must abort even though it lowers to i32 in wasm where `i32.div_s(-128, -1) = 128` does not trap; and wasm `i64.rem_s` DEFINES `MIN % -1 = 0` (no trap), so an explicit MIN/-1 guard before the op realigns wasm with native's `checked_div`/`checked_rem` returning None."
+since     = "0.24.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/int_div_overflow.almd", class = "fixture" },
+  { path = "spec/wasm_cross/int_mod_overflow.almd", class = "fixture" },
+  { path = "spec/wasm_cross/int8_div_overflow.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-003"
+title     = "Non-aborting integer div/mod stay byte-identical"
+statement = "Ordinary (non-aborting) integer `/` and `%` — including negative operands and the now-total guarded codepath — MUST produce byte-identical results on both targets. The checked-div rewrite must not perturb the happy path; shielded divisors exercise the same guarded path landing on the non-aborting branch."
+since     = "0.24.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/int_div_mod_ok.almd", class = "fixture" },
+]
+
+# ── FAN DETERMINISM (PR #377, #369) ──────────────────────────────────
+[[contract]]
+id        = "C-004"
+title     = "fan.race / fan.any / fan.map / fan.settle are deterministic by list order"
+statement = "`fan.race` returns thunk[0]'s settled result in LIST ORDER (Ok or Err), NOT wall-clock fastest. `fan.any` tries thunks in list order and returns the first Ok. `fan.map` runs element fns sequentially in list order; `fan.settle` returns results in list order. All are byte-identical native == wasm. (race takes thunk[0] even on Err; any skips failures to find an Ok.)"
+since     = "0.24.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/fan_deterministic.almd", class = "fixture" },
+  { path = "spec/wasm_cross/fan_map_inline_lambda.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-005"
+title     = "fan error propagation surfaces as the unified main-error abort"
+statement = "The first element fn returning Err in `fan.map` (named or inline lambda), a head-Err in `fan.race`, and the all-fail case of `fan.any` (defined `Err(\"fan.any: all candidates failed\")`) all propagate as `Error: <msg>` + exit 1 on BOTH targets via the effect-main termination — NOT a native panic (101) nor a wasm trap (134)."
+since     = "0.24.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/fan_map_err.almd", class = "fixture" },
+  { path = "spec/wasm_cross/fan_map_inline_err.almd", class = "fixture" },
+  { path = "spec/wasm_cross/fan_any_allfail.almd", class = "fixture" },
+  { path = "spec/wasm_cross/fan_race_err.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-006"
+title     = "fan.timeout is the SOLE documented wall-clock divergence (wasm warns)"
+statement = "`fan.timeout` is the single documented cross-target divergence (N=1): a wall-clock effect with no portable meaning. Native uses a real thread + `recv_timeout`; wasm has no clock/scheduler/threads, so the thunk runs to completion and the timeout never elapses. The CLI MUST emit a build-time warning when emitting wasm for a program using `fan.timeout`, so the divergence is loud, not silent. It deliberately has NO spec/wasm_cross fixture — it is the exemption, not an equivalence promise."
+since     = "0.24.0"
+status    = "flagged-for-revision"
+doc       = "C-006-fan-timeout-divergence.md"
+evidence  = [
+  { path = "crates/almide-codegen/src/lib.rs", name = "program_uses_fan_timeout", class = "by-construction" },
+]
+
+# ── EAGER ABORTABLE TOP-LETS (Cluster-H) ─────────────────────────────
+[[contract]]
+id        = "C-007"
+title     = "Abortable top-level lets evaluate eagerly at startup"
+statement = "A top-level `let` whose initializer can abort MUST be evaluated EAGERLY at program startup, in declaration order, on both targets — even if the binding is never used and even if it would be used only mid-main. wasm evaluates every top-let in `_start`; native forces abortable lazies at main entry. So an abortable top-let aborts before any of main's stdout is emitted."
+since     = "0.24.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/top_let_div_eager.almd", class = "fixture" },
+  { path = "spec/wasm_cross/top_let_div_used.almd", class = "fixture" },
+]
+
+# ── COMPOUND / RECORD / RECURSIVE REPR INTERPOLATION (PR #379) ───────
+[[contract]]
+id        = "C-008"
+title     = "Compound interpolation renders the Almide-literal repr (containers)"
+statement = "`\"${compound}\"` renders a value back to its Almide-literal form, recursively, byte-identically on both targets, for List, Map (`[\"a\": 1]`), Set, Tuple, Option (some), Result (ok), and arbitrary nesting. Backed by `AlmideRepr` (native) / the recursive rt repr emitters (wasm), gated by `ty_needs_repr`."
+since     = "0.24.0"
+status    = "active"
+doc       = "C-008-009-010-repr.md"
+evidence  = [
+  { path = "spec/wasm_cross/compound_repr_interp.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-009"
+title     = "Record / variant / anonymous-record interpolation repr (field sorting)"
+statement = "`\"${value}\"` renders records (`P { x: 1 }`), variants (tuple/record/nullary payloads), and anonymous records to their Almide construction-literal form — the same format `deriving Repr` produces — byte-identically on both targets. Anonymous records have NO type name and render their fields in SORTED name order on BOTH targets (native synthesized `AlmdRec_*` stores fields sorted; the wasm walk sorts to match)."
+since     = "0.24.0"
+status    = "active"
+doc       = "C-008-009-010-repr.md"
+evidence  = [
+  { path = "spec/wasm_cross/compound_repr_records_interp.almd", class = "fixture" },
+  { path = "spec/wasm_cross/compound_repr_recursive_interp.almd", class = "fixture" },
+  { path = "crates/almide-codegen/rt-oracle-registry.toml", name = "compile_repr_funcs", class = "doc-only" },
+]
+
+[[contract]]
+id        = "C-010"
+title     = "Recursive / generic ADT interpolation repr keyed by instantiation"
+statement = "Self-recursive ADTs/records, mutually-recursive records, and generic records/variants render their repr via per-type `__repr_*` wasm functions that recurse by CALL on the finite value, not by infinite compile-time type expansion. Generic types key the repr fn by INSTANTIATION (`__repr_Tree_Int` vs `__repr_Tree_String`), substituting site type-args through recursive references, so concrete payloads repr identically to native trait dispatch."
+since     = "0.24.0"
+status    = "active"
+doc       = "C-008-009-010-repr.md"
+evidence  = [
+  { path = "spec/wasm_cross/compound_repr_recursive_interp.almd", class = "fixture" },
+  { path = "spec/wasm_cross/recursive_generic_repr_interp.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-011"
+title     = "Bare-float interpolation Display drops .0; float.to_string keeps it"
+statement = "An integer-valued float in interpolation `\"${f}\"` renders via the Display form, which DROPS the `.0` suffix, whereas `float.to_string` keeps the `.0` for whole values. Both forms are byte-identical across targets."
+since     = "0.24.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/compound_repr_records_interp.almd", class = "fixture" },
+  { path = "spec/wasm_cross/float_concrete.almd", class = "fixture" },
+  { path = "spec/wasm_cross/num_edge_to_string.almd", class = "fixture" },
+  { path = "spec/wasm_cross/int_float_ops.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-012"
+title     = "Const-folded non-finite floats emit named constants"
+statement = "A float expression that const-folds to a non-finite value (inf/NaN) MUST emit the associated Rust constant (`f64::INFINITY` / `f64::NEG_INFINITY` / `f64::NAN`), not the bare identifier (`inff64`/`NaNf64` were invalid Rust = an E0425 ICE-class bug). Runtime-COMPUTED inf/NaN already printed identically and must keep doing so. Both targets byte-identical."
+since     = "0.24.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/const_fold_nonfinite_float.almd", class = "fixture" },
+]
+
+# ── DETERMINISM BELT: ORDERED CONTAINERS (PR #354) ───────────────────
+[[contract]]
+id        = "C-013"
+title     = "Map is a compact-ordered-dict: iteration is insertion order"
+statement = "Map iteration order is INSERTION order on both targets (compact-ordered-dict: dense entries + hash index). Every order-exposing op (keys/values/fold/filter/iteration) reveals insertion order byte-identically; a regression to hash-order on either target breaks the gate."
+since     = "0.24.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/map_insertion_order.almd", class = "fixture" },
+  { path = "spec/wasm_cross/map_filter.almd", class = "fixture" },
+  { path = "spec/wasm_cross/map_fold.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-014"
+title     = "Set is insertion-ordered and deterministic"
+statement = "Set iteration is INSERTION order on both targets and deterministic. Native Set was std HashSet (hash-bucket, per-process randomized) and is now an insertion-ordered Vec-backed AlmideSet, so every order-exposing op is native == wasm and deterministic. (Set[Float] equality on wasm, which used i32_eq, is fixed too.)"
+since     = "0.24.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/set_insertion_order.almd", class = "fixture" },
+]
+
+# ── DEEP STRUCTURAL EQUALITY ─────────────────────────────────────────
+[[contract]]
+id        = "C-015"
+title     = "Structural deep equality for compound elements and heap values"
+statement = "`==` / `!=` and every containment / dedup / key-lookup op compare COMPOUND elements (tuples, nested lists, records incl. String fields) by type-directed DEEP equality on both targets — native via Rust `PartialEq`, wasm via per-type deep-eq functions (not pointer identity). Two distinct heap objects with identical contents compare equal; Map/Set equality is size + key/value containment, so containers built in a different insertion order are still equal."
+since     = "0.24.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/compound_eq.almd", class = "fixture" },
+  { path = "spec/wasm_cross/deep_eq_heap.almd", class = "fixture" },
+  { path = "spec/wasm_cross/map_set_eq.almd", class = "fixture" },
+]
+
+# ── UNICODE STRING SURFACE ───────────────────────────────────────────
+[[contract]]
+id        = "C-016"
+title     = "UTF-8 codepoint-aware string ops are byte-identical"
+statement = "Codepoint-aware string ops (chars/reverse/slice/take/drop/first/last/get/codepoint/from_codepoint/pad) operate on Unicode scalars and are byte-identical native == wasm on ASCII and multibyte input (Latin-1 accent, CJK, 4-byte emoji, 3-byte currency). Native (Rust char-based) is the oracle; the wasm runtime must byte-match it for every scalar."
+since     = "0.24.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/string_codepoint.almd", class = "fixture" },
+  { path = "spec/wasm_cross/string_ops.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-017"
+title     = "Empty-pattern count / last_index_of follow native codepoint/byte semantics"
+statement = "`count` with the empty pattern returns the CODEPOINT count + 1 (`s.matches(\"\").count() == s.chars().count() + 1`); `last_index_of` with the empty pattern returns the BYTE length (`s.rfind(\"\") == Some(s.len())`). Both are byte-identical native == wasm, including multibyte subjects where codepoint-count and byte-length differ; wasm no longer short-circuits the empty pattern to 0."
+since     = "0.24.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/string_empty_pattern.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-018"
+title     = "Unicode string predicates match Rust char methods over the full domain"
+statement = "`is_alpha` / `is_alphanumeric` / `is_upper` / `is_lower` derive from Rust's full-Unicode `char` methods on native; the wasm target walks oracle-derived range tables (rt_unicode_tables.rs) per codepoint, byte-identical to native for every interesting Unicode category. The tables are exhaustively probed against the std `char` methods over the complete scalar domain at emit time."
+since     = "0.24.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/string_predicates.almd", class = "fixture" },
+  { path = "crates/almide-codegen/src/emit_wasm/rt_unicode_tables.rs", name = "alphabetic_table_matches_char_method", class = "exhaustive" },
+  { path = "crates/almide-codegen/src/emit_wasm/rt_unicode_tables.rs", name = "alphanumeric_table_matches_char_method", class = "exhaustive" },
+  { path = "crates/almide-codegen/src/emit_wasm/rt_unicode_tables.rs", name = "uppercase_table_matches_char_method", class = "exhaustive" },
+  { path = "crates/almide-codegen/src/emit_wasm/rt_unicode_tables.rs", name = "lowercase_table_matches_char_method", class = "exhaustive" },
+]
+
+[[contract]]
+id        = "C-019"
+title     = "rt_string_extra ops (replace_first, strip_*, predicates, cmp) match native"
+statement = "`replace_first`, `strip_prefix`/`strip_suffix`, `is_digit` (ASCII-only), `is_whitespace` (full-Unicode White_Space, empty-string vacuously true), and String `<` (BYTE-lexicographic with a length tiebreak, NOT codepoint order) are byte-identical native == wasm. Empty-pattern/affix edge cases follow native exactly: `replace_first` splices at position 0, `strip_prefix`/`strip_suffix` of an empty affix return the whole string."
+since     = "0.24.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/string_ops_drain.almd", class = "fixture" },
+  { path = "spec/wasm_cross/string_rle.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-020"
+title     = "Unicode case transforms (to_upper/to_lower/capitalize) are full-Unicode"
+statement = "`to_upper` / `to_lower` / `capitalize` produce the SAME bytes as native (Rust `str::to_uppercase` / `str::to_lowercase` / first-char `char::to_uppercase`) for ALL scalars — accents, Greek, Cyrillic, the length-CHANGING maps (ß -> SS), and the context-sensitive Greek sigma (Final_Sigma: word-final ς vs medial σ). The wasm runtime embeds oracle-derived Unicode case tables and resolves Final_Sigma at runtime; the tables are exhaustively probed against the std `char` methods at emit time."
+since     = "0.24.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/string_case_unicode.almd", class = "fixture" },
+  { path = "crates/almide-codegen/src/emit_wasm/rt_string_case.rs", name = "tables_reproduce_char_methods", class = "exhaustive" },
+  { path = "crates/almide-codegen/src/emit_wasm/rt_string_case.rs", name = "final_sigma_via_serialized_sets", class = "exhaustive" },
+]
+
+[[contract]]
+id        = "C-021"
+title     = "Whitespace trim / is_whitespace use the full Unicode White_Space property"
+statement = "`trim` / `trim_start` / `trim_end` / `is_whitespace` and the leading/trailing trim inside `int.parse` / `float.parse` match native (Rust `str::trim*` / `char::is_whitespace`, the 25-codepoint Unicode White_Space property) byte-identically. The old wasm checked only {0x09,0x0A,0x0D,0x20}; `is_whitespace(\"\")` is now correctly true, routed through the oracle-derived `__is_unicode_ws`."
+since     = "0.24.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/string_whitespace.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-022"
+title     = "string.from_bytes is UTF-8-lossy decode (inverse of to_bytes)"
+statement = "`string.from_bytes` is a UTF-8 decode (`String::from_utf8_lossy`, U+FFFD per maximal invalid subpart), the exact inverse of `to_bytes`, byte-identical native == wasm — not the old Latin-1 `b as u8 as char` mapping that corrupted every non-ASCII string. `string.len` is BYTE length, so the round-trip is asserted on byte counts and content. The wasm runtime's byte-class derivation is differentially fuzzed (300k randomized byte sequences + boundary cases) against `from_utf8_lossy` at emit time."
+since     = "0.24.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/string_from_bytes.almd", class = "fixture" },
+  { path = "crates/almide-codegen/src/emit_wasm/rt_string.rs", name = "derived_classification_matches_from_utf8_lossy", class = "fuzz", n = 300000 },
+]
+
+# ── FLOAT FORMATTING / PARSING (Dragon4 / dec2flt) ──────────────────
+[[contract]]
+id        = "C-023"
+title     = "float.to_string is shortest round-tripping decimal (Dragon4)"
+statement = "`float.to_string` produces the SAME bytes as native Rust f64 Display — the shortest round-tripping decimal in fixed notation, with the `.0` integer suffix — byte-identical native == wasm. The wasm runtime implements Dragon4 with exact big-integer arithmetic (rt_dragon.rs); there is no fixed-precision drift (native 0.30000000000000004 vs the old wasm 0.3) and no `i64_trunc` trap for |x| >= 2^63."
+since     = "0.24.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/float_shortest_roundtrip.almd", class = "fixture" },
+  { path = "spec/wasm_cross/num_edge_to_string.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-024"
+title     = "float.parse is correctly-rounded round-to-nearest-even (Clinger AlgorithmM)"
+statement = "`float.parse` produces the SAME f64 as native (`s.trim().parse::<f64>()`), i.e. correctly-rounded round-to-nearest-even, with byte-identical Err strings. The wasm runtime uses Clinger AlgorithmM with exact big-integer arithmetic (rt_dec2flt.rs, reusing the Dragon4 bignum); the old f64-accumulator parser (`acc*10+digit`) was not correctly rounded (\"0.3\" -> 0.30000000000000004, subnormals collapsing to 0)."
+since     = "0.24.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/float_parse.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-025"
+title     = "float.to_fixed is round-half-to-even on the exact binary value"
+statement = "`float.to_fixed(x, n)` reproduces native `format!(\"{:.N}\", x)` EXACTLY on both targets: the decimal is the f64's exact binary value m*2^e rounded to N places, round-HALF-to-EVEN on the exact value. The wasm implementation rides the Dragon4 big-integer machinery (rt_dragon.rs), so there is no 10^N i64 overflow (the old impl trapped for N >= 19) and no multiply-then-round error; carry propagation, signed-zero, and inf/NaN all match. A differential fuzz suite certifies the continuous input space."
+since     = "0.24.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/float_to_fixed.almd", class = "fixture" },
+  { path = "tests/float_to_fixed_cross_target_test.rs", name = "to_fixed_cross_target_random_fuzz", class = "fuzz", n = 1000 },
+]
+
+# ── VENDORED-LIBM MATH ───────────────────────────────────────────────
+[[contract]]
+id        = "C-026"
+title     = "Vendored-libm trig / exp / log / pow are byte-identical cross-target"
+statement = "`math.sin/cos/tan`, `math.exp/log/log2/log10`, and float `**` / `math.fpow` route through the SAME vendored musl-libm reference on both targets (native runtime/rs/src/libm.rs, wasm rt_libm.rs), so every result is byte-identical — printed via the (itself byte-identical) Dragon4 `float.to_string`. Special cases match libm: `log(0) = -inf`, `log(neg) = NaN`, `exp(-745) = 5e-324`, `fpow(-2,0.5) = NaN`, `fpow(-2,3) = -8`, `fpow(2,inf)` does not trap. Differential fuzz suites certify the continuous input space."
+since     = "0.24.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/trig_libm.almd", class = "fixture" },
+  { path = "spec/wasm_cross/math_explog.almd", class = "fixture" },
+  { path = "spec/wasm_cross/math_pow.almd", class = "fixture" },
+  { path = "tests/libm_trig_cross_target_test.rs", name = "trig_cross_target_random_fuzz", class = "fuzz", n = 4000 },
+  { path = "tests/libm_explog_pow_cross_target_test.rs", name = "explog_cross_target_random_fuzz", class = "fuzz", n = 1200 },
+  { path = "tests/libm_explog_pow_cross_target_test.rs", name = "pow_cross_target_random_fuzz", class = "fuzz", n = 1200 },
+]
+
+# ── ENCODINGS / RADIX PARSING ────────────────────────────────────────
+[[contract]]
+id        = "C-027"
+title     = "base64 encode/decode (standard + URL-safe) is byte-identical incl. errors"
+statement = "base64 encode/decode for BOTH alphabets (standard + URL-safe) produces byte-identical output native == wasm — RFC 4648 canonical padded form — including the decode error strings `invalid base64 character` and `invalid base64 length: <orig_len>`. Native runtime/rs/src/base64.rs is the oracle; the wasm runtime rt_encoding.rs must match it exactly."
+since     = "0.24.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/encoding_base64.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-028"
+title     = "int.from_hex mirrors i64::from_str_radix incl. native quirks"
+statement = "`int.from_hex` mirrors native `i64::from_str_radix(s.trim().trim_start_matches(\"0x\"), 16)` exactly, INCLUDING the quirks: `0X10` -> Err (the `0x` strip is lowercase-only), `0x0xff` -> Ok(255) (`trim_start_matches` strips `0x` repeatedly), `f_f` -> Err (no underscore skipping), `0x-ff` -> -255 (sign accepted after strip). The four std ParseIntError strings reproduce exactly, byte-identical native == wasm."
+since     = "0.24.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/int_from_hex.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-029"
+title     = "int.parse error modes byte-match native ParseIntError"
+statement = "`int.parse` byte-matches native `s.trim().parse::<i64>().map_err(|e| e.to_string())` for every failure mode — empty-after-trim, lone sign, embedded non-digit, and i64 overflow in both directions (incl. the i64::MIN edge with no positive counterpart). The Err payload STRING is part of the compared output, so the four std messages must reproduce exactly."
+since     = "0.24.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/int_parse_overflow.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-030"
+title     = "hex.encode / hex.decode are byte-identical incl. positional error detail"
+statement = "`hex.encode` / `hex.decode` produce byte-identical output native == wasm, including the positional decode error strings `hex string has odd length: N` and `invalid hex char at N` (hi nibble at `2*pair`, lo at `2*pair+1`). Native runtime/rs/src/hex.rs is the oracle; the wasm rt_encoding.rs runtime must mirror it exactly, including the error detail the old wasm strings dropped."
+since     = "0.24.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/encoding_base64.almd", class = "fixture" },
+]
+
+# ── JSON PATH OPS ────────────────────────────────────────────────────
+[[contract]]
+id        = "C-031"
+title     = "json get/set/remove_path edge cases match the infallible native oracle"
+statement = "`json.get_path` / `set_path` / `remove_path` reproduce native runtime/rs/src/json.rs byte-identically across all edge cases: negative-Index normalization (`len + i`), Index over an object/scalar/null root as an infallible no-op, OOB Index no-op, and Field-over-non-object autovivification (replace with a fresh single-key object, seed descents with `Object(vec![])`). The wasm rt_value.rs path walkers had 8 divergences this locks down."
+since     = "0.24.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/json_path_edges.almd", class = "fixture" },
+  { path = "spec/wasm_cross/json_value.almd", class = "fixture" },
+]
+
+# ── REGEX ENGINE ─────────────────────────────────────────────────────
+[[contract]]
+id        = "C-032"
+title     = "Regex engine is byte-identical to the native engine over a fuzzed grammar"
+statement = "The regex engine produces byte-identical results native == wasm for alternation, escape atoms, class escapes, captures (incl. optional-miss), multibyte `.`/class on CJK, anchors, quantifiers, replace, split edges, full_match, find_all, empty alternation arms, and end-of-string empty-match replace. Native runtime/rs/src/regex.rs is the oracle; a deterministic differential fuzz over the regex grammar certifies the input space beyond the headline corpus."
+since     = "0.24.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/regex_engine.almd", class = "fixture" },
+  { path = "spec/wasm_cross/regex_fuzz_batch.almd", class = "fixture" },
+  { path = "tests/regex_fuzz_test.rs", name = "regex_differential_fuzz", class = "fuzz", n = 220 },
+]
+
+# ── KNOWN DIVERGENCE: COPY-ON-WRITE FOR ALIASED MUTABLES ────────────
+[[contract]]
+id        = "C-033"
+title     = "Value semantics for aliased mutables (copy-on-write)"
+statement = "`var b = a; a[i] = v` leaves `b` unchanged on both targets: heap-typed vars that are copy-aliased AND mutated in place get a copy-on-write at every mutation site (AliasCowPass may-alias analysis -> needs_cow; wasm clones via __cow_check before IndexAssign/FieldAssign/ListSwap/Reverse/Rotate/CopySlice and in-place stdlib mutators; native counts mutation targets as uses so aliased binds clone-at-bind). The full alias-shape truth table (A-M: chains, branch arms, record fields, destructures, map/string in-place) behaves identically on both targets."
+since     = "0.24.0"
+status    = "active"
+doc       = "C-033-cow-truth-table.md"
+evidence  = [
+  { path = "spec/wasm_cross/alias_cow.almd", class = "fixture" },
+  { path = "spec/lang/alias_cow_test.almd", class = "fixture" },
+]
+
+# ── LIST BOUNDS GRACEFULNESS ─────────────────────────────────────────
+[[contract]]
+id        = "C-034"
+title     = "Out-of-range list ops clamp / no-op gracefully (no OOB heap access)"
+statement = "Out-of-range `list.insert` clamps the index to the end (`min(i, len)`), `list.remove_at` / `list.swap` with an index >= len are no-ops, `list.slice` clamps past-the-end indices (end -> len, start >= effective_end -> []), and `list.with_capacity(n)` starts empty without header corruption for any n — all byte-identical native == wasm with no OOB heap read/write. `with_capacity` is TOTAL on both targets: capacity is an unobservable hint whose EAGER reservation is clamped to the SAME named byte ceiling (`MAX_WITH_CAPACITY_PREALLOC_BYTES` = 64 MiB, runtime/rs/src/list.rs == emit_wasm/calls_list.rs), so a huge request neither aborts native (`Vec::with_capacity(i32::MAX)` over a 24-byte element = ~51.5 GB, machine-dependent) nor corrupts the wasm header (the data byte count is computed in i64 so `hdr + bytes` never overflows i32); `push` grows past the clamped reservation normally. Native (runtime/rs/src/list.rs) is the oracle for each."
+since     = "0.24.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/list_insert_clamp.almd", class = "fixture" },
+  { path = "spec/wasm_cross/list_remove_at_oob.almd", class = "fixture" },
+  { path = "spec/wasm_cross/list_swap_oob.almd", class = "fixture" },
+  { path = "spec/wasm_cross/list_slice_oob.almd", class = "fixture" },
+  { path = "spec/wasm_cross/list_sort_short.almd", class = "fixture" },
+  { path = "spec/wasm_cross/list_with_capacity.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-035"
+title     = "Effect-main errors terminate uniformly: Error: <msg> + exit 1"
+statement = "An effect `fn main` that yields Err, and any uncaught abort surfaced through the main-error path, terminate with stderr `Error: <msg>` + exit 1 on BOTH targets — native via the Display `fn main` wrapper, wasm via `__main_runner` (proc_exit + stderr) — never a native panic (101) nor a wasm `unreachable` trap (134). This is the unified termination the div/mod and fan abort contracts rely on."
+since     = "0.24.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/int_div_by_zero.almd", class = "fixture" },
+  { path = "spec/wasm_cross/match_result.almd", class = "fixture" },
+  { path = "spec/wasm_cross/option_result.almd", class = "fixture" },
+]
+
+# ── RECORDS / VARIANTS / SIZED INTEGERS ──────────────────────────────
+[[contract]]
+id        = "C-036"
+title     = "Records, variants, and pattern matching are byte-identical"
+statement = "Record construction/field-access, variant construction (tuple/record/nullary payloads), and `match` over them — including matches whose arms construct a Result with `err(..)`, and a LITERAL nested inside a container constructor (`some(\"x\")`, `some(5)`, `ok(0)`, `err(404)`) — produce byte-identical results native == wasm. The inner-literal equality is emitted on BOTH targets: wasm structurally checks the tag then ANDs in a value compare (previously `some(\"x\")` matched ANY `some(_)` because only the non-null tag was checked); native hoists a payload-nested STRING literal into a `Bind` + `==` guard (`Ok(__s) if __s == \"good\"`) — previously `ok(\"good\")` emitted `Ok(\"good\")` against a `Result<String,String>` value and FAILED TO BUILD (rustc E0308 &str vs String), so these programs could not run cross-target at all. The hoist is the single mechanism for a string literal in any payload position at any depth (`ok(\"x\")`, `err(\"x\")`, `Word(\"x\")`, `KV(\"k\", n)`, `Pair(1, \"one\")`, `ok(some(\"x\")))`, `(\"a\", 1)`, and literal+guard combos); a literal arm refines, later binding arms stay reachable, byte-identical to the wasm tag→value→guard order. Int/Bool/Float payload literals remain bare Rust patterns. A match typed `Never` no longer appends a wasm `unreachable` epilogue (trap exit 134) while native runs fine."
+since     = "0.24.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/records_variants.almd", class = "fixture" },
+  { path = "spec/wasm_cross/match_result.almd", class = "fixture" },
+  { path = "spec/wasm_cross/closures_and_variants.almd", class = "fixture" },
+  { path = "spec/wasm_cross/playground_default.almd", class = "fixture" },
+  { path = "spec/wasm_cross/match_container_literal.almd", class = "fixture" },
+  { path = "spec/wasm_cross/match_payload_string_literal.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-037"
+title     = "bytes.read_f16_le decodes IEEE-754 half floats identically"
+statement = "`bytes.read_f16_le` (IEEE-754 half -> f64) is byte-identical native == wasm, including the exp-all-ones path rendering ±inf / NaN (zero and nonzero mantissa) rather than the finite ±f32::MAX — over ±inf, NaN, ±0, the smallest subnormal, a few normals, and the largest finite half. Native runtime/rs/src/bytes.rs::f16_bits_to_f64 is the oracle for the wasm expander."
+since     = "0.24.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/bytes_f16.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-038"
+title     = "Sized-integer literals narrow to the declared field width"
+statement = "A bare literal assigned to a sized-integer field/element (Int8/Int16/Int32) narrows to the declared width at the construction site, so native rustc accepts it (no E0308 from `5i64` in an Int8 field) and wasm writes the correct byte WIDTH (so the next field is not read as garbage). This holds for plain records, nested records, record-variant and tuple-variant payloads, and tuple/list/nested literal positions; field access reads back the exact stored value, byte-identical native == wasm."
+since     = "0.24.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/sized_int_record_fields.almd", class = "fixture" },
+  { path = "spec/wasm_cross/sized_numeric_literals.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-039"
+title     = "Type-changing map.map / set.map yield a collection of the new type"
+statement = "Applying a closure whose return type differs from the collection's value/element type yields a collection of the NEW type (`Map[K,V]` with `(V)->B` => `Map[K,B]`; `Set[A]` with `(A)->B` => `Set[B]`), byte-identical native == wasm. The wasm emitter no longer keeps the SOURCE width — every width transition (i64<->i32 pointer, f64, tuple) uses the correct call_indirect signature and load/store width."
+since     = "0.24.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/map_set_typechange.almd", class = "fixture" },
+  { path = "spec/wasm_cross/map_set_ops.almd", class = "fixture" },
+]
+
+# ── HOST-DETERMINISM (emit-time) ─────────────────────────────────────
+[[contract]]
+id        = "C-040"
+title     = "Codegen emit is host-architecture deterministic"
+statement = "The compiler emits byte-identical output whether it runs natively (x86-64/aarch64) or as wasm32 (the browser playground), on the 1st compile or the Nth in a process. Anonymous-record naming (content hash, not a walk-order counter), egg-fused lambda param names (VarId-derived), monomorphization append order, and lifted-closure iteration order are all host-independent — enforced by HashMap->BTreeMap emit ordering and the check-host-determinism gate, with cross-arch byte fixtures."
+since     = "0.24.0"
+status    = "active"
+evidence  = [
+  { path = "scripts/check-host-determinism.sh", class = "by-construction" },
+  { path = "spec/wasm_cross/anon_records_and_fusion.almd", class = "fixture" },
+  { path = "spec/wasm_cross/generics_mono.almd", class = "fixture" },
+  { path = "spec/wasm_cross/closures_hof.almd", class = "fixture" },
+]
+
+# ── HEAP / RC / PERCEUS ──────────────────────────────────────────────
+[[contract]]
+id        = "C-041"
+title     = "Heap / RC primitives honour the Lean-certified Perceus discipline"
+statement = "alloc/realloc-growth, refcount inc/dec, string alloc, and the arena checkpoint primitives (heap_save/heap_restore) produce byte-identical observable results native == wasm under heavy churn — no leak, double-free, or realloc clobber. The IR-level Inc/Dec balance is certified by the `0 sorry` Lean Perceus belt; these fixtures are the executable counterpart. The opaque checkpoint value (0 native vs a real pointer wasm) is never printed."
+since     = "0.24.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/rc_alloc_stress.almd", class = "fixture" },
+  { path = "spec/wasm_cross/memory_stress.almd", class = "fixture" },
+  { path = "spec/wasm_cross/heap_arena.almd", class = "fixture" },
+  { path = "crates/almide-perceus-belt/AlmidePerceusBelt/Heap.lean", name = "perceus_fixes_heap", class = "lean" },
+  { path = "crates/almide-perceus-belt/AlmidePerceusBelt/ClosureRc.lean", name = "closureScope_decs", class = "lean" },
+]
+
+# ── FILESYSTEM (WASI PREOPEN RESOLUTION) ─────────────────────────────
+[[contract]]
+id        = "C-042"
+title     = "fs preopen-dir scan + path resolution is observable-equivalent"
+statement = "The wasm fs runtime scans `fd_prestat_get` at `_start` to build the WASI preopen-dir table, then resolves an absolute path to the longest-prefix preopen fd + relative remainder (incl. `./` normalization), reproducing native std::fs (which has no preopen concept) byte-identically. A write + `./`-normalized read-back of the same path resolves to the same host file under the `/` preopen, CWD-independently."
+since     = "0.24.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/fs_preopen_resolve.almd", class = "fixture" },
+]
+
+# ── RECURSIVE-ENUM HEAP INDIRECTION / NAME COLLISION ────────────────
+[[contract]]
+id        = "C-043"
+title     = "A user type named Box coexists with recursive-enum heap indirection"
+statement = "A recursive enum needs heap indirection on the Rust target, emitted as `std::boxed::Box<Tree>`; a user `type Box = ...` no longer collides with it (the recursive-enum pass fully-qualifies the std indirection everywhere), so native compiles (no E0072/E0107/E0599) and the program is byte-identical native == wasm. wasm has no `Box` and was already unaffected."
+since     = "0.24.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/user_box_recursive_enum.almd", class = "fixture" },
+]
+
+# ── RESULT / OPTION MATCH ────────────────────────────────────────────
+[[contract]]
+id        = "C-044"
+title     = "Result/Option construction and matching are byte-identical"
+statement = "Construction and `match` over Result (`ok`/`err`) and Option (`some`/`none`), including `??` fallback, `?` Result->Option, and matches whose arms build a Result, produce byte-identical results native == wasm. A Result-constructing match is not mis-typed `Never` (which trapped wasm exit 134 while native ran)."
+since     = "0.24.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/match_result.almd", class = "fixture" },
+  { path = "spec/wasm_cross/option_result.almd", class = "fixture" },
+  { path = "spec/wasm_cross/control_flow.almd", class = "fixture" },
+]
+
+# ── LIST[STRING] PARAM CODEGEN ───────────────────────────────────────
+[[contract]]
+id        = "C-045"
+title     = "A List[String] param works across join / len / index / iteration"
+statement = "A `List[String]` function param renders as `&[String]` on Rust and can be consumed by ANY combination of `string.join`, `list.len`, indexing, and iteration on both targets, byte-identically. The join runtime accepts `&[String]` (matching the list-join runtime), so passing the `&[String]` param no longer trips E0308 (`&[String]` vs `&Vec<String>`); wasm was unaffected."
+since     = "0.24.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/list_string_param_join_len.almd", class = "fixture" },
+  { path = "spec/wasm_cross/list_comprehensive.almd", class = "fixture" },
+  { path = "spec/wasm_cross/list_sort_short.almd", class = "fixture" },
+]
+
+# ── RECORD SPREAD-UPDATE / CROSS-MODULE MONOMORPHIZATION ─────────────
+[[contract]]
+id        = "C-046"
+title     = "Record spread-update and cross-module monomorphization are byte-identical"
+statement = "Record spread-update (`{ ...rec, field: v }`) and the monomorphizer's lifted-function generation across module / diamond-dependency boundaries (the spread-heavy record + pipe-chain + shared-import pattern that broke ceangal-anime) produce byte-identical results native == wasm. The spread copies all unmentioned fields and overrides the named ones; shared imports through a diamond no longer generate broken lifted functions on either target."
+since     = "0.24.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/cross_module_spread.almd", class = "fixture" },
+]
+
+# ── NUMERIC TOTALITY: pow / rotate (Cluster-2) ───────────────────────
+[[contract]]
+id        = "C-047"
+title     = "math.pow negative exponent and rotate non-positive width are total — they abort, never trap/wrap"
+statement = "`math.pow(base, exp)` with a NEGATIVE exponent aborts with stderr `Error: negative exponent` + exit 1 on BOTH targets (never the old native `exp as u32` u32-wrap garbage nor the wasm `return 1`); `int.rotate_left`/`rotate_right` with a non-positive `bits` width abort with `Error: rotate width must be positive` + exit 1 (never a native rem-by-zero panic exit 101 nor a wasm `i64.rem_s` trap exit 134). Non-negative pow stays byte-identical including overflow, which wraps under exponentiation-by-squaring (`2^64=0`, `0^0=1`, exponents `>= 2^32` define the full i64 count and never hang)."
+since     = "0.24.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/int_pow_negative_exponent.almd", class = "fixture" },
+  { path = "spec/wasm_cross/int_pow_overflow_wraps.almd", class = "fixture" },
+  { path = "spec/wasm_cross/int_rotate_nonpositive_width.almd", class = "fixture" },
+]
+
+# ── NUMERIC WRAP/ROTATE WIDTH MASK (Cluster-2) ───────────────────────
+[[contract]]
+id        = "C-048"
+title     = "int.wrap_* / int.rotate_* saturate the mask to u64::MAX for bits >= 64"
+statement = "`int.wrap_add`/`wrap_mul`/`rotate_left`/`rotate_right` model an N-bit register: for `bits >= 64` the low-bit mask is `u64::MAX`, matching native `if bits >= 64 { u64::MAX } else { (1u64 << bits) - 1 }`. The wasm emit computed `(1 << bits) - 1` directly, but `i64.shl` masks the shift amount mod 64 so `1 << 64` wrapped to 1 and the mask collapsed to 0 — every `bits >= 64` result silently diverged. Now byte-identical native == wasm via a `bits >= 64 ? -1 : (1<<bits)-1` select."
+since     = "0.24.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/int_wrap_rotate_width.almd", class = "fixture" },
+]
+
+# ── FLOAT IEEE SIGN / NaN-IGNORING MIN-MAX (Cluster-2) ───────────────
+[[contract]]
+id        = "C-049"
+title     = "float.sign is f64::signum; float/math min/max ignore NaN"
+statement = "`float.sign` == Rust `f64::signum` — `copysign(1.0, x)` for every non-NaN x (so `sign(0.0)=1`, `sign(-0.0)=-1`, `sign(±inf)=±1`) and NaN for NaN — NOT the old three-way sign (0 for ±0.0/NaN). `float.max`/`float.min`/`math.fmax`/`math.fmin` IGNORE a NaN operand and return the other, and on ±0 ties ALL FOUR return the FIRST operand (`max(0,-0)=0`, `max(-0,0)=-0`). Both targets implement the same explicit NaN/tie decision tree — never the NaN-propagating raw `f64.max`/`f64.min` wasm instructions, and never the llvm.minnum/maxnum intrinsics, whose unspecified ±0-tie order let x86 `maxsd` return the SECOND operand when inlined. All byte-identical native == wasm == interp."
+since     = "0.24.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/float_sign_minmax_ieee.almd", class = "fixture" },
+]
+
+# ── STRING CODEPOINT GRANULARITY: split("") / rle (Cluster-2) ────────
+[[contract]]
+id        = "C-050"
+title     = "string.split(\"\") and string.run_length_encode are codepoint-granular"
+statement = "`string.split(s, \"\")` splits per CODEPOINT with a leading and trailing empty string — native `s.split(\"\")` yields `[\"\", c0, c1, …, \"\"]` (and `[\"\", \"\"]` for the empty string). `string.run_length_encode` groups runs by CODEPOINT (native `s.chars()`), the run string being the whole codepoint. The wasm emit used to return `[s]` for an empty delimiter (no split) and group rle by BYTE (emitting invalid single-byte strings for multibyte input). Now byte-identical native == wasm, including multibyte."
+since     = "0.24.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/string_split_rle_codepoint.almd", class = "fixture" },
+]
+
+# ── TRANSCENDENTAL: log_gamma vendored-libm bit-exactness (Cluster-2) ─
+[[contract]]
+id        = "C-051"
+title     = "math.log_gamma is bit-identical (both targets use the vendored musl-libm log)"
+statement = "`math.log_gamma` is bit-identical native == wasm: the same Lanczos polynomial, `t = x + 7.5`, and pinned `0.5·ln(2π)` constant, with BOTH `ln` evaluations routed through the vendored musl-libm `log` rather than the platform `f64::ln`. Native previously called the platform `ln`, which drifts ~1 ULP per OS from the wasm vendored port (the StrictMath/fdlibm cross-target-determinism decision shared with sin/cos/exp/log)."
+since     = "0.24.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/math_log_gamma.almd", class = "fixture" },
+]
+
+# ── EMPTY-COLLECTION FOLD: ANNOTATE THE COLLECTION (folds into C-058) ─
+[[contract]]
+id        = "C-052"
+title     = "A fold over an empty collection requires the collection to carry an element type (no codegen defaulting)"
+statement = "A `list`/`map`/`set` `.fold` over an EMPTY collection whose element/key/value types the closure never uses still requires the EMPTY collection to carry an element type. This is the SAME undecidable-empty-collection class as C-058: an unannotated empty `[]` / `map.new()` / `set.new()` here is a frontend compile error (E018) on BOTH targets, not a slot codegen defaults — the former `Int` defaulting (`default_unconstrained_fold_params`) was a layer violation and has been removed. Once the empty collection is ANNOTATED, its element type pins the closure params the normal way and the fold builds + prints byte-identically native == wasm even though the closure is never invoked. Non-empty folds that DO use the params still infer normally."
+since     = "0.24.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/empty_collection_fold.almd", class = "fixture" },
+]
+
+# ── LIST TOTAL-ORDER OPS (min / max / sort / sort_by / unique_by) ─────
+[[contract]]
+id        = "C-053"
+title     = "list.min/max/sort/sort_by/unique_by are type-directed and total, native == wasm"
+statement = "`list.min`/`list.max` (extremum), `list.sort`/`list.sort_by` (ascending order), and `list.unique_by` (first-of-each-key dedup) are byte-identical native == wasm for EVERY totally-ordered element type — Int, Bool (false<true), String, Tuple (lexicographic), nested List (lexicographic with shorter-first tiebreak), Option (none<some), and variants (tag order) — and for any Eq key type the `unique_by`/`sort_by` callback returns. The wasm side routes all ordering through one type-directed total-order emitter (`emit_ord_cmp3`, the ordering twin of `emit_eq_typed`) instead of a hard-coded i64 element load; an unresolved element type is an emit-time ICE, never a silent wrong comparison or unbounded display loop."
+since     = "0.24.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/list_total_order.almd", class = "fixture" },
+]
+
+# ── LIST/STRING Int-COUNT & INDEX TRUNCATION (Cluster-B) ─────────────
+[[contract]]
+id        = "C-054"
+title     = "List/string Int counts and indices are i64-clamped before narrowing — no truncation, no OOB"
+statement = "Every list/string op that takes an `Int` (i64) COUNT or INDEX clamps it on the FULL i64 value BEFORE the wasm `i32_wrap_i64` narrowing, so a value at/over the 2^32 boundary can never wrap to a small in-range value, and a NEGATIVE value takes native's unsigned `n as usize` path — never the wrong lo-clamp-to-0 result (the C-034 `with_capacity` rule generalized via named `emit_clamp_count_to_i32` (UNSIGNED `min_u`) / `emit_clamp_count_signed_i32` (SIGNED `max(0).min`) / `emit_clamp_index_to_len_i32` / `emit_checked_index_i32` helpers). For UNSIGNED COUNTS — `list.take`/`drop`/`take_end`/`drop_end`/`chunk`/`windows`, `list.slice` start/end, `string.take`/`drop`/`take_end`/`drop_end`, `string.repeat`, `string.pad_start`/`pad_end` widths — the count is `min(n as usize, hi)`: a NEGATIVE count is enormous as `usize` and saturates to `hi`, so `take(-1)` returns the WHOLE collection, `drop(-1)` returns empty, `chunk(-1)` groups into ONE chunk (was a div-by-0 TRAP), `windows(-1)` is empty (was a wrong non-empty length), and `string.take(s, 2^32)` returns the whole string (was empty); a count `>= 2^32` likewise saturates instead of wrapping to a small in-range count. The size-bounded `repeat`/`chunk`/`windows`/`pad` use an `i32::MAX` sentinel so a genuinely huge count BOTH-FAILS (wasm `memory.grow` / native abort) rather than wasm silently emptying/short-cutting. The ONE exception is `string.slice` start/end, whose native oracle clamps SIGNED (`(x.max(0) as usize).min(len)`): a negative `string.slice` start maps to 0, handled by the separate SIGNED helper. For INDICES — `list.get`/`get_or`/`set`/`insert`/`remove_at`/`swap`/`update` — the index is UNSIGNED (`i as usize`) so a negative or `>= 2^32` index takes native's no-op / default / append path. Previously `list.drop_end(xs, 2^32-1)` returned a corrupt length exposing uninitialized heap, `list.take_end(xs, 2^32-1)` TRAPPED (exit 134), `list.chunk(xs, -1)` TRAPPED on wasm while native made one chunk, and `string.take(s, 2^32)` returned empty on wasm while native returned the whole string — all now byte-identical native == wasm at the 2^31 / 2^32 boundary and for negative counts on small inputs. The fixtures exercise COUNT boundaries (not SIZE boundaries), so no allocation exceeds a few KiB and the result is machine-independent."
+since     = "0.24.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/list_count_index_truncation.almd", class = "fixture" },
+  { path = "spec/wasm_cross/string_count_truncation.almd", class = "fixture" },
+]
+
+# ── FLOAT LIST ORDERING = IEEE-754 totalOrder (Cluster-B) ────────────
+[[contract]]
+id        = "C-055"
+title     = "list.min/max/sort/sort_by over Float use IEEE-754 totalOrder, valid + identical on both targets"
+statement = "`list.sort`/`list.min`/`list.max` over `List[Float]` and `list.sort_by` with a Float key ORDER by IEEE-754 totalOrder (the ordering twin of `f64::total_cmp`): a +NaN takes the greatest totalOrder position (after +inf), a -NaN the least (before -inf), and `-0.0 < +0.0`. This makes Float ordering legal and byte-identical native == wasm, fixing the divergence where native REJECTED it at compile (`f64: Ord` unsatisfied) while wasm either accepted it with NaN-unaware `f64.le` or emitted an INVALID module (the `sort_by` Float-key path stored an f64 into an i64 local → `local.set` validator error). Native routes `List[Float]` ordering to `total_cmp`-based `_float` runtime variants (IntrinsicLowering swaps the symbol); wasm mirrors with the sign-magnitude bit trick inside `emit_ord_cmp3`'s Float arm (`key = bits ^ ((bits >>_s 63) >>_u 1)`, a monotone i64 key) and pre-transforms `sort_by` Float keys onto the i64 storage path; interp mirrors with `f64::total_cmp`. NaN-SIGN CAVEAT: the totalOrder POSITION of a NaN depends on its sign bit, which for a COMPUTED NaN (`0.0/0.0`) is implementation-defined — native/wasm const-fold it to +NaN (top) while the interp's runtime `divsd` yields -NaN (bottom), so the 3-way fixture stays sign-deterministic (uses ±inf, not a divided NaN); the +NaN-at-top positioning is verified native == wasm directly. ASYMMETRY (named deliberately): this list-extremum/ordering totalOrder is a DIFFERENT contract from the SCALAR `float.min`/`float.max`/`math.fmin`/`math.fmax`, which keep their C-049 NaN-IGNORING semantics — a resolved-but-unsupported sort element type is still a clean emit-time ICE, never an invalid module."
+since     = "0.24.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/list_float_total_order.almd", class = "fixture" },
+]
+
+# ── list.product OVERFLOW WRAPS (Cluster-B) ──────────────────────────
+[[contract]]
+id        = "C-056"
+title     = "list.product wraps on i64 overflow, consistent with list.sum and plain `*`"
+statement = "`list.product` follows the language's integer-overflow law — two's-complement WRAPPING at runtime, identical to `list.sum`, to plain `a * b` (C-001/C-047 family), and to the wasm `i64.mul` accumulator. Native folds with `wrapping_mul` (identity 1) so the result is the SAME on any build profile; the old `Iterator::product` PANICKED under debug `-C overflow-checks` (exit 101) while wrapping in release and on wasm — a profile-dependent split now removed. `[i64::MAX, 2]` yields `-2` byte-identically native == wasm; the empty product is `1`. The interp gained a matching `list.product` arm so the 3-way oracle covers it instead of skipping."
+since     = "0.24.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/list_product_overflow.almd", class = "fixture" },
+]
+
+# ── ASSIGN-OF-UNIT REJECTION (in-place mutator misuse, Cluster-A) ─────
+[[contract]]
+id        = "C-057"
+title     = "Assigning a Unit-returning in-place mutator's result is a checker error on both targets"
+statement = "An in-place stdlib mutator (`list.push`, `string.push`, `map.set` on a mut receiver — anything returning Unit) MUST be used as a STATEMENT, not assigned. `b = list.push(b, x)` assigns Unit to a non-Unit binding: native used to fail only at rustc (E0308 'expected Vec, found ()') while WASM erased Unit and silently RAN the program — a build-success asymmetry (compiled on WASM, not native). The checker now rejects the Unit-to-non-Unit assignment (E001) with a type-directed hint (call it as a statement, or rebuild with `b = b + [item]` for a List / `s + \"…\"` for a String), so BOTH targets reject identically. The well-typed statement form is byte-identical native == wasm."
+since     = "0.24.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/inplace_mutator_statement.almd", class = "fixture" },
+]
+
+# ── UNDECIDABLE EMPTY COLLECTION = COMPILE ERROR (Rust/Swift rule, never defaulted) ─
+[[contract]]
+id        = "C-058"
+title     = "An empty collection with an uninferable element type is a compile error on both targets, never silently defaulted"
+statement = "An empty collection whose element type CANNOT be inferred from any surrounding context — an empty `[]` / `[:]` literal, `set.new()`, `map.new()`, or `list.with_capacity(n)` consumed only by element-agnostic ops, and the iterable of a `for _ in []` — is a COMPILE ERROR on BOTH targets (frontend `E018`), resolved by a type annotation. Almide follows Rust/Swift: an undecidable empty collection demands an explicit element type and is NEVER silently defaulted to an arbitrary one (observability is irrelevant, exactly as in Rust/Swift — `for _ in []` is an error even though the element is never read). This replaces the former defaulting behavior (old C-055, which set the element to `Int` in codegen so both targets built): defaulting an undecidable element in codegen was a layer violation and observably mis-typed record fields. Because the check runs in the type checker before code generation, BOTH targets reject identically (previously native rustc failed with E0282/E0283 on the emitted `Vec::<_>::new()` while WASM, carrying no element type, ran — a build-success asymmetry). The ANNOTATED forms of every producer build and print byte-identically native == wasm; a bare list literal also accepts the inline `[]: List[T]` call-arg annotation. A rigid generic parameter (`fn f[T]() -> List[T] = []`) is a concrete element type and is accepted. The fold over an empty collection (former C-052 defaulting) folds into this rule: the empty collection must be annotated."
+since     = "0.24.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/empty_collection_annotated.almd", class = "fixture" },
+  { path = "tests/diagnostics/e018-empty-collection-element/broken.almd", class = "fixture" },
+]
+
+# ── COMPILE-TIME RECURSION IS HOST/PROFILE-INDEPENDENT (no stack-overflow crash) ─
+[[contract]]
+id        = "C-059"
+title     = "Compilation does not overflow the native stack on wide or deep input, identically on every host and build profile"
+statement = "Whether a program COMPILES is a function of the program, not of the host OS's default thread-stack size or the compiler's build profile. Two mechanisms make this so. (1) The compiler driver runs the whole parse → check → lower → emit pipeline on a dedicated worker thread with a fixed 256 MiB stack (overridable by `ALMIDE_COMPILER_STACK`, the analogue of rustc's `RUST_MIN_STACK`), so the achievable depth is decoupled from the OS main-thread limit — which is ~8 MiB on Linux/macOS but only ~1 MiB on Windows. Before this, a program that compiled on Unix could overflow the stack mid-codegen on Windows (it was a release-blocking crash in the Windows CI matrix build, a `float.to_fixed` fuzz body that exceeded the 1 MiB Windows main stack), and deeper inputs split debug-vs-release (unoptimized frames are ~48 KiB, far larger). (2) The Perceus RC-insertion pass (`pass_perceus`) walks the function-body statement chain ITERATIVELY — `split_chain` linearizes the `FnBody` continuation chain and the per-node passes fold over it — so a function body of N sibling statements costs O(1) native stack rather than recursing once per statement (formerly ~48 KiB/frame, overflowing the 256 MiB driver near ~5460 statements and a 1 MiB stack near ~20). A WIDE machine-generated body is therefore NOT rejected and NOT crashed: it compiles and runs byte-identical native == wasm. Expression NESTING (the orthogonal dimension) stays bounded deterministically by the parser's `MAX_DEPTH = 500`, a constant identical on both targets and both profiles — so the one remaining limit is a clean diagnostic, never a SIGSEGV. The de-recursion is behavior-preserving: the codegen snapshots and the full cross-target gate are byte-for-byte unchanged."
+since     = "0.25.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/wide_function_body.almd", class = "fixture" },
+  { path = "tests/compiler_stack_test.rs", name = "wide_function_body_compiles_in_small_stack", class = "fixture" },
+]

@@ -156,23 +156,63 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool) {
     let default_output = format!("{}.wasm", file.strip_suffix(".almd").unwrap_or("a.out"));
     let output = output.unwrap_or(&default_output);
 
+    // The whole parse→check→lower→emit pipeline lives in `compile_to_wasm_bytes`
+    // so `almide run --target wasm` produces the byte-identical module this
+    // command writes — the cross-target equivalence guarantee depends on both
+    // entry points sharing one code path. Any compile diagnostic was already
+    // printed there; we just propagate the exit.
+    let bytes = match compile_to_wasm_bytes(file) {
+        Ok(b) => b,
+        Err(()) => std::process::exit(1),
+    };
+
+    let pre_size = bytes.len();
+    if let Err(e) = std::fs::write(output, &bytes) {
+        eprintln!("Failed to write {}: {}", output, e);
+        std::process::exit(1);
+    }
+
+    // Post-process: wasm-opt -O3 (binaryen) shrinks size + sometimes helps
+    // perf via constant prop / dead-store elim across stdlib calls. Default-on
+    // (round-trip verified across spec/ on WASM target — 197 pass identical
+    // with and without wasm-opt). Opt-out via ALMIDE_NO_WASM_OPT=1.
+    // Silent skip if wasm-opt is not installed.
+    let opt_out = std::env::var("ALMIDE_NO_WASM_OPT").map(|v| v == "1" || v == "true").unwrap_or(false);
+    if !opt_out {
+        if let Ok(post_size) = run_wasm_opt(output) {
+            let pct = if pre_size > 0 { 100.0 * (pre_size - post_size) as f64 / pre_size as f64 } else { 0.0 };
+            eprintln!("Built {} ({} bytes → {} bytes, -{:.1}%)", output, pre_size, post_size, pct);
+            return;
+        }
+        // wasm-opt not available → silent fallback to unoptimized output.
+    }
+    eprintln!("Built {} ({} bytes)", output, pre_size);
+}
+
+/// Compile an `.almd` file to a raw wasm32-wasi module (no wasm-opt, no file IO).
+///
+/// This is the single source of truth for the direct-WASM pipeline, shared by
+/// `almide build --target wasm` and `almide run --target wasm`, so both emit
+/// the byte-identical module the cross-target equivalence guarantee promises.
+/// Compile diagnostics are rendered to stderr here; on any error it returns
+/// `Err(())` and the caller decides how to terminate.
+pub(crate) fn compile_to_wasm_bytes(file: &str) -> Result<Vec<u8>, ()> {
     let (mut program, source_text, parse_errors) = parse_file(file);
 
     if !parse_errors.is_empty() {
         for e in &parse_errors {
             eprintln!("{}", crate::diagnostic_render::display_with_source(e, &source_text));
         }
-        std::process::exit(1);
+        return Err(());
     }
 
     // Resolve dependencies
     let dep_paths: Vec<(project::PkgId, std::path::PathBuf)> = if std::path::Path::new("almide.toml").exists() {
         if let Ok(proj) = project::parse_toml(std::path::Path::new("almide.toml")) {
-            project_fetch::fetch_all_deps(&proj)
-                .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); })
-                .into_iter()
-                .map(|fd| (fd.pkg_id, fd.source_dir))
-                .collect()
+            match project_fetch::fetch_all_deps(&proj) {
+                Ok(deps) => deps.into_iter().map(|fd| (fd.pkg_id, fd.source_dir)).collect(),
+                Err(e) => { eprintln!("{}", e); return Err(()); }
+            }
         } else {
             vec![]
         }
@@ -180,8 +220,10 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool) {
         vec![]
     };
 
-    let mut resolved = resolve::resolve_imports_with_deps(file, &program, &dep_paths)
-        .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
+    let mut resolved = match resolve::resolve_imports_with_deps(file, &program, &dep_paths) {
+        Ok(r) => r,
+        Err(e) => { eprintln!("{}", e); return Err(()); }
+    };
 
     // Type check
     let canon = canonicalize::canonicalize_program(
@@ -196,7 +238,7 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool) {
         for d in &diagnostics {
             eprintln!("{}", crate::diagnostic_render::display_with_source(d, &source_text));
         }
-        std::process::exit(1);
+        return Err(());
     }
 
     // Pre-register versioned names before root lowering
@@ -259,7 +301,7 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool) {
             eprintln!("internal compiler error: {}", e);
         }
         eprintln!("{} IR verification error(s) — no WASM emitted", verify_errors.len());
-        std::process::exit(1);
+        return Err(());
     }
 
     // fan.timeout is a wall-clock effect; the WASM target has no clock, so the
@@ -278,28 +320,7 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool) {
         almide::codegen::CodegenOutput::Binary(b) => b,
         almide::codegen::CodegenOutput::Source(_) => unreachable!(),
     };
-
-    let pre_size = bytes.len();
-    if let Err(e) = std::fs::write(output, &bytes) {
-        eprintln!("Failed to write {}: {}", output, e);
-        std::process::exit(1);
-    }
-
-    // Post-process: wasm-opt -O3 (binaryen) shrinks size + sometimes helps
-    // perf via constant prop / dead-store elim across stdlib calls. Default-on
-    // (round-trip verified across spec/ on WASM target — 197 pass identical
-    // with and without wasm-opt). Opt-out via ALMIDE_NO_WASM_OPT=1.
-    // Silent skip if wasm-opt is not installed.
-    let opt_out = std::env::var("ALMIDE_NO_WASM_OPT").map(|v| v == "1" || v == "true").unwrap_or(false);
-    if !opt_out {
-        if let Ok(post_size) = run_wasm_opt(output) {
-            let pct = if pre_size > 0 { 100.0 * (pre_size - post_size) as f64 / pre_size as f64 } else { 0.0 };
-            eprintln!("Built {} ({} bytes → {} bytes, -{:.1}%)", output, pre_size, post_size, pct);
-            return;
-        }
-        // wasm-opt not available → silent fallback to unoptimized output.
-    }
-    eprintln!("Built {} ({} bytes)", output, pre_size);
+    Ok(bytes)
 }
 
 /// Run `wasm-opt -O3 --enable-simd` on the output file, in-place.

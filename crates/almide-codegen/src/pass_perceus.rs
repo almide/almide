@@ -161,68 +161,109 @@ impl IrMutVisitor for PerceusDriver<'_> {
     }
 }
 
-/// Insert Perceus Inc/Dec into a FnBody chain.
-fn perceus_fnbody(fb: FnBody, var_table: &mut VarTable) -> FnBody {
-    match fb {
-        FnBody::VDecl { var, ty, mutability, mut expr, body } => {
-            let body = perceus_fnbody(*body, var_table);
-            // Recurse into the expression (handles nested blocks)
-            perceus_expr(&mut expr, var_table);
-            // Rule 1: RcInc for heap alias
-            let needs_inc = is_heap_type(&ty) && matches!(&expr.kind,
-                IrExprKind::Var { .. } | IrExprKind::Clone { .. } | IrExprKind::Deref { .. });
-            let inc_var = if needs_inc {
-                match &expr.kind {
-                    IrExprKind::Var { id } => Some(*id),
-                    IrExprKind::Clone { expr: e } | IrExprKind::Deref { expr: e } =>
-                        if let IrExprKind::Var { id } = &e.kind { Some(*id) } else { None },
-                    _ => None,
-                }
-            } else { None };
-            // Rule 5: RcInc for closure captures
-            let capture_incs: Vec<VarId> = if let IrExprKind::ClosureCreate { captures, .. } = &expr.kind {
-                captures.iter().filter(|(_, ty)| is_heap_type(ty)).map(|(v, _)| *v).collect()
-            } else { vec![] };
+/// A `FnBody` chain node with its continuation (`body`) detached. Linearizing
+/// the chain into a `Vec<ChainHead>` + terminal lets the per-node passes below
+/// fold over a function body ITERATIVELY instead of recursing once per
+/// statement. A wide `fn` body (thousands of sibling statements) is an N-deep
+/// `FnBody` chain (`block_to_fnbody`); a recursive walk over it grows the native
+/// stack with the program's statement count and overflows it (e.g. Windows'
+/// 1 MiB main-thread stack). Heads carry only their own data; the terminal
+/// (`Ret`/`Nop`) and the per-node logic are applied while re-linking each head
+/// to the already-processed remainder — tail-to-head, identical to the former
+/// recursion's post-order.
+enum ChainHead {
+    VDecl { var: VarId, ty: Ty, mutability: Mutability, expr: IrExpr },
+    Assign { var: VarId, expr: IrExpr },
+    Inc { var: VarId },
+    Dec { var: VarId },
+    Expr { expr: IrExpr },
+    Stmt { stmt: IrStmt },
+}
 
-            let mut result = FnBody::VDecl { var, ty, mutability, expr, body: Box::new(body) };
-            // Wrap with Inc nodes
-            if let Some(id) = inc_var {
-                result = FnBody::Inc { var: id, body: Box::new(result) };
+/// Split a `FnBody` chain into its forward-ordered heads and its terminal
+/// (`Ret`/`Nop`). Iterative — O(1) native stack regardless of chain length.
+fn split_chain(mut fb: FnBody) -> (Vec<ChainHead>, FnBody) {
+    let mut heads = Vec::new();
+    loop {
+        match fb {
+            FnBody::VDecl { var, ty, mutability, expr, body } => {
+                heads.push(ChainHead::VDecl { var, ty, mutability, expr });
+                fb = *body;
             }
-            for cap in capture_incs.into_iter().rev() {
-                result = FnBody::Inc { var: cap, body: Box::new(result) };
+            FnBody::Assign { var, expr, body } => {
+                heads.push(ChainHead::Assign { var, expr });
+                fb = *body;
             }
-            result
+            FnBody::Inc { var, body } => { heads.push(ChainHead::Inc { var }); fb = *body; }
+            FnBody::Dec { var, body } => { heads.push(ChainHead::Dec { var }); fb = *body; }
+            FnBody::Expr { expr, body } => { heads.push(ChainHead::Expr { expr }); fb = *body; }
+            FnBody::Stmt { stmt, body } => { heads.push(ChainHead::Stmt { stmt }); fb = *body; }
+            term @ (FnBody::Ret { .. } | FnBody::Nop) => return (heads, term),
         }
-        FnBody::Assign { var, mut expr, body } => {
-            let body = perceus_fnbody(*body, var_table);
-            perceus_expr(&mut expr, var_table);
-            // Mutable assign: do NOT Dec old value here.
-            // The WASM emitter handles mutable vars with local.set — the old
-            // pointer is overwritten but NOT freed mid-scope. The scope-exit
-            // Dec handles the final value. Intermediate old values leak by
-            // design in the current model (same as Koka's approach for var).
-            // TODO: proper old-value recovery requires COW or arena allocation.
-            FnBody::Assign { var, expr, body: Box::new(body) }
-        }
-        FnBody::Expr { mut expr, body } => {
-            let body = perceus_fnbody(*body, var_table);
-            perceus_expr(&mut expr, var_table);
-            FnBody::Expr { expr, body: Box::new(body) }
-        }
-        FnBody::Stmt { stmt, body } => {
-            let body = perceus_fnbody(*body, var_table);
-            FnBody::Stmt { stmt, body: Box::new(body) }
-        }
-        FnBody::Inc { var, body } => FnBody::Inc { var, body: Box::new(perceus_fnbody(*body, var_table)) },
-        FnBody::Dec { var, body } => FnBody::Dec { var, body: Box::new(perceus_fnbody(*body, var_table)) },
-        FnBody::Ret { expr } => {
-            // Rule 2+4: Insert Dec for all live heap vars before return.
-            // Collect all heap VDecls in scope, insert Dec for each.
-            FnBody::Ret { expr }
-        }
-        FnBody::Nop => FnBody::Nop,
     }
+}
+
+/// Insert Perceus Inc/Dec into a FnBody chain. Iterative over the chain so a
+/// function body with N statements costs O(1) native stack, not O(N) (see
+/// [`ChainHead`]). Folding the heads tail-to-head reproduces the former
+/// post-order recursion exactly: each node's `expr` is `perceus_expr`-processed
+/// (and `var_table` temps allocated) after the remainder, in the same order.
+fn perceus_fnbody(fb: FnBody, var_table: &mut VarTable) -> FnBody {
+    let (heads, terminal) = split_chain(fb);
+    // Ret/Nop are returned unchanged here (Dec insertion happens in
+    // insert_ret_decs), matching the former Ret/Nop arms.
+    let mut result = terminal;
+    for head in heads.into_iter().rev() {
+        result = match head {
+            ChainHead::VDecl { var, ty, mutability, mut expr } => {
+                // Recurse into the expression (handles nested blocks)
+                perceus_expr(&mut expr, var_table);
+                // Rule 1: RcInc for heap alias
+                let needs_inc = is_heap_type(&ty) && matches!(&expr.kind,
+                    IrExprKind::Var { .. } | IrExprKind::Clone { .. } | IrExprKind::Deref { .. });
+                let inc_var = if needs_inc {
+                    match &expr.kind {
+                        IrExprKind::Var { id } => Some(*id),
+                        IrExprKind::Clone { expr: e } | IrExprKind::Deref { expr: e } =>
+                            if let IrExprKind::Var { id } = &e.kind { Some(*id) } else { None },
+                        _ => None,
+                    }
+                } else { None };
+                // Rule 5: RcInc for closure captures
+                let capture_incs: Vec<VarId> = if let IrExprKind::ClosureCreate { captures, .. } = &expr.kind {
+                    captures.iter().filter(|(_, ty)| is_heap_type(ty)).map(|(v, _)| *v).collect()
+                } else { vec![] };
+
+                let mut node = FnBody::VDecl { var, ty, mutability, expr, body: Box::new(result) };
+                // Wrap with Inc nodes
+                if let Some(id) = inc_var {
+                    node = FnBody::Inc { var: id, body: Box::new(node) };
+                }
+                for cap in capture_incs.into_iter().rev() {
+                    node = FnBody::Inc { var: cap, body: Box::new(node) };
+                }
+                node
+            }
+            ChainHead::Assign { var, mut expr } => {
+                perceus_expr(&mut expr, var_table);
+                // Mutable assign: do NOT Dec old value here.
+                // The WASM emitter handles mutable vars with local.set — the old
+                // pointer is overwritten but NOT freed mid-scope. The scope-exit
+                // Dec handles the final value. Intermediate old values leak by
+                // design in the current model (same as Koka's approach for var).
+                // TODO: proper old-value recovery requires COW or arena allocation.
+                FnBody::Assign { var, expr, body: Box::new(result) }
+            }
+            ChainHead::Expr { mut expr } => {
+                perceus_expr(&mut expr, var_table);
+                FnBody::Expr { expr, body: Box::new(result) }
+            }
+            ChainHead::Stmt { stmt } => FnBody::Stmt { stmt, body: Box::new(result) },
+            ChainHead::Inc { var } => FnBody::Inc { var, body: Box::new(result) },
+            ChainHead::Dec { var } => FnBody::Dec { var, body: Box::new(result) },
+        };
+    }
+    result
 }
 
 /// Collect all heap VDecl vars from the chain, insert Dec before Ret.
@@ -235,34 +276,46 @@ fn insert_ret_decs(fb: FnBody, var_table: &mut VarTable) -> FnBody {
 }
 
 fn collect_heap_vdecls(fb: &FnBody, vars: &mut Vec<VarId>) {
-    match fb {
-        FnBody::VDecl { var, ty, body, .. } => {
-            if is_heap_type(ty) { vars.push(*var); }
-            collect_heap_vdecls(body, vars);
+    // Iterative chain walk — O(1) native stack for an N-statement body.
+    let mut cur = fb;
+    loop {
+        match cur {
+            FnBody::VDecl { var, ty, body, .. } => {
+                if is_heap_type(ty) { vars.push(*var); }
+                cur = body;
+            }
+            FnBody::Assign { body, .. } | FnBody::Inc { body, .. }
+            | FnBody::Dec { body, .. } | FnBody::Expr { body, .. }
+            | FnBody::Stmt { body, .. } => cur = body,
+            FnBody::Ret { .. } | FnBody::Nop => return,
         }
-        FnBody::Assign { body, .. } | FnBody::Inc { body, .. }
-        | FnBody::Dec { body, .. } | FnBody::Expr { body, .. }
-        | FnBody::Stmt { body, .. } => collect_heap_vdecls(body, vars),
-        FnBody::Ret { .. } | FnBody::Nop => {}
     }
 }
 
 fn collect_ret_vars(fb: &FnBody) -> HashSet<VarId> {
-    let mut vars = HashSet::new();
-    match fb {
-        FnBody::Ret { expr } => { collect_var_refs_expr(expr, &mut vars); }
-        FnBody::VDecl { body, .. } | FnBody::Assign { body, .. }
-        | FnBody::Inc { body, .. } | FnBody::Dec { body, .. }
-        | FnBody::Expr { body, .. } | FnBody::Stmt { body, .. } => {
-            vars = collect_ret_vars(body);
+    // The result depends only on the terminal `Ret` expr; walk to it iteratively.
+    let mut cur = fb;
+    loop {
+        match cur {
+            FnBody::Ret { expr } => {
+                let mut vars = HashSet::new();
+                collect_var_refs_expr(expr, &mut vars);
+                return vars;
+            }
+            FnBody::VDecl { body, .. } | FnBody::Assign { body, .. }
+            | FnBody::Inc { body, .. } | FnBody::Dec { body, .. }
+            | FnBody::Expr { body, .. } | FnBody::Stmt { body, .. } => cur = body,
+            FnBody::Nop => return HashSet::new(),
         }
-        FnBody::Nop => {}
     }
-    vars
 }
 
 fn insert_decs_before_ret(fb: FnBody, heap_vars: &[VarId], ret_vars: &HashSet<VarId>, var_table: &mut VarTable) -> FnBody {
-    match fb {
+    // Iterative over the chain (see [`ChainHead`]): the non-terminal nodes are
+    // pass-throughs (the former recursion only rebuilt them around the processed
+    // remainder), and the Dec-insertion logic runs at the terminal (`Ret`/`Nop`).
+    let (heads, terminal) = split_chain(fb);
+    let mut result = match terminal {
         FnBody::Ret { expr } => {
             // Variables used inside the return expression (but not AS the return value)
             // need tail lift: let __ret = expr; Dec(vars); Ret(__ret)
@@ -282,62 +335,65 @@ fn insert_decs_before_ret(fb: FnBody, heap_vars: &[VarId], ret_vars: &HashSet<Va
                 .collect();
 
             if vars_to_dec.is_empty() {
-                return FnBody::Ret { expr };
-            }
-
-            // Check if any var_to_dec is used inside the ret expr
-            let needs_lift = vars_to_dec.iter().any(|v| ret_vars.contains(v));
-            if needs_lift && !matches!(&expr.kind, IrExprKind::Var { .. }) {
-                // Tail lift: let __ret = expr; Dec(vars); Ret(__ret)
-                let ret_ty = expr.ty.clone();
-                let ret_var = var_table.alloc(
-                    almide_base::intern::sym("__perceus_ret"),
-                    ret_ty.clone(),
-                    Mutability::Let,
-                    None,
-                );
-                let mut result = FnBody::Ret {
-                    expr: IrExpr { kind: IrExprKind::Var { id: ret_var }, ty: ret_ty.clone(), span: None, def_id: None }
-                };
-                for var in vars_to_dec.iter().rev() {
-                    result = FnBody::Dec { var: *var, body: Box::new(result) };
-                }
-                FnBody::VDecl { var: ret_var, ty: ret_ty, mutability: Mutability::Let, expr, body: Box::new(result) }
+                FnBody::Ret { expr }
             } else {
-                // No lift needed — just insert Decs before Ret
-                let mut result = FnBody::Ret { expr };
-                for var in vars_to_dec.iter().rev() {
-                    result = FnBody::Dec { var: *var, body: Box::new(result) };
+                // Check if any var_to_dec is used inside the ret expr
+                let needs_lift = vars_to_dec.iter().any(|v| ret_vars.contains(v));
+                if needs_lift && !matches!(&expr.kind, IrExprKind::Var { .. }) {
+                    // Tail lift: let __ret = expr; Dec(vars); Ret(__ret)
+                    let ret_ty = expr.ty.clone();
+                    let ret_var = var_table.alloc(
+                        almide_base::intern::sym("__perceus_ret"),
+                        ret_ty.clone(),
+                        Mutability::Let,
+                        None,
+                    );
+                    let mut res = FnBody::Ret {
+                        expr: IrExpr { kind: IrExprKind::Var { id: ret_var }, ty: ret_ty.clone(), span: None, def_id: None }
+                    };
+                    for var in vars_to_dec.iter().rev() {
+                        res = FnBody::Dec { var: *var, body: Box::new(res) };
+                    }
+                    FnBody::VDecl { var: ret_var, ty: ret_ty, mutability: Mutability::Let, expr, body: Box::new(res) }
+                } else {
+                    // No lift needed — just insert Decs before Ret
+                    let mut res = FnBody::Ret { expr };
+                    for var in vars_to_dec.iter().rev() {
+                        res = FnBody::Dec { var: *var, body: Box::new(res) };
+                    }
+                    res
                 }
-                result
             }
         }
-        FnBody::VDecl { var, ty, mutability, expr, body } =>
-            FnBody::VDecl { var, ty, mutability, expr, body: Box::new(insert_decs_before_ret(*body, heap_vars, ret_vars, var_table)) },
-        FnBody::Assign { var, expr, body } =>
-            FnBody::Assign { var, expr, body: Box::new(insert_decs_before_ret(*body, heap_vars, ret_vars, var_table)) },
-        FnBody::Inc { var, body } =>
-            FnBody::Inc { var, body: Box::new(insert_decs_before_ret(*body, heap_vars, ret_vars, var_table)) },
-        FnBody::Dec { var, body } =>
-            FnBody::Dec { var, body: Box::new(insert_decs_before_ret(*body, heap_vars, ret_vars, var_table)) },
-        FnBody::Expr { expr, body } =>
-            FnBody::Expr { expr, body: Box::new(insert_decs_before_ret(*body, heap_vars, ret_vars, var_table)) },
-        FnBody::Stmt { stmt, body } =>
-            FnBody::Stmt { stmt, body: Box::new(insert_decs_before_ret(*body, heap_vars, ret_vars, var_table)) },
         FnBody::Nop => {
             // While/for body: insert Dec for heap vars bound in this body.
-            let mut result = FnBody::Nop;
+            let mut res = FnBody::Nop;
             for var in heap_vars.iter().rev() {
                 let info = var_table.get(*var);
                 let name = info.name.as_str();
                 if !name.starts_with("__tco_") && !name.starts_with("__br_")
                     && !name.starts_with("__perceus_old") {
-                    result = FnBody::Dec { var: *var, body: Box::new(result) };
+                    res = FnBody::Dec { var: *var, body: Box::new(res) };
                 }
             }
-            result
+            res
         }
+        // split_chain only ever yields Ret or Nop as the terminal.
+        other => other,
+    };
+    for head in heads.into_iter().rev() {
+        result = match head {
+            ChainHead::VDecl { var, ty, mutability, expr } =>
+                FnBody::VDecl { var, ty, mutability, expr, body: Box::new(result) },
+            ChainHead::Assign { var, expr } =>
+                FnBody::Assign { var, expr, body: Box::new(result) },
+            ChainHead::Inc { var } => FnBody::Inc { var, body: Box::new(result) },
+            ChainHead::Dec { var } => FnBody::Dec { var, body: Box::new(result) },
+            ChainHead::Expr { expr } => FnBody::Expr { expr, body: Box::new(result) },
+            ChainHead::Stmt { stmt } => FnBody::Stmt { stmt, body: Box::new(result) },
+        };
     }
+    result
 }
 
 #[derive(Debug)]

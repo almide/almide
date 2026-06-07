@@ -1,3 +1,4 @@
+// @contract: C-046
 // RED test: cross-module spread record with diamond dependency + test pipes.
 // Reproduces ceangal-anime func validation failure.
 // Trigger: tween.almd test blocks use pipe chains on spread-heavy record type,

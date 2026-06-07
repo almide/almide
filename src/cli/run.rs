@@ -183,6 +183,70 @@ pub fn cmd_run_inner(file: &str, program_args: &[String], no_check: bool, test_m
     }
 }
 
-pub fn cmd_run(file: &str, program_args: &[String], no_check: bool, release: bool) {
-    std::process::exit(cmd_run_inner(file, program_args, no_check, false, release));
+pub fn cmd_run(file: &str, program_args: &[String], no_check: bool, release: bool, target: Option<&str>) {
+    let code = match target {
+        // Default and explicit native target: the cargo/rustc path.
+        None | Some("rust") | Some("native") => cmd_run_inner(file, program_args, no_check, false, release),
+        // WASM target: build the same module `almide build --target wasm`
+        // emits, then execute it on the `wasmtime` CLI. Both targets must
+        // produce byte-identical stdout/stderr/exit — the cross-target gate.
+        Some("wasm") | Some("wasm32") | Some("wasi") => cmd_run_wasm(file, program_args),
+        Some(other) => {
+            eprintln!(
+                "error: unknown run target '{}'\n  \
+                 in `almide run --target {}`\n  \
+                 supported targets: rust (default, native binary), wasm (wasmtime)\n  \
+                 hint: drop --target to run natively, or use `--target wasm`",
+                other, other
+            );
+            1
+        }
+    };
+    std::process::exit(code);
+}
+
+/// Build `file` to a wasm32-wasi module and execute it on the `wasmtime` CLI.
+///
+/// Mirrors the test runner's wasm invocation (`wasmtime --dir=/ <module>`) so
+/// the observable behavior matches `almide test --target wasm` and the
+/// `spec/wasm_cross` gate. Program args after `--` are forwarded to the guest.
+/// `wasmtime`'s own exit code is propagated unchanged, so a guest
+/// `proc_exit(n)` surfaces as `n` exactly as a native binary's exit would.
+fn cmd_run_wasm(file: &str, program_args: &[String]) -> i32 {
+    let bytes = match super::build::compile_to_wasm_bytes(file) {
+        Ok(b) => b,
+        Err(()) => return 1,
+    };
+
+    // Stage the module under a per-content temp name so concurrent `almide run`
+    // invocations never race on one path (the build scratch dir is shared).
+    let wasm_name = format!("almide-run-{:016x}.wasm", hash64(&bytes));
+    let wasm_path = std::env::temp_dir().join(wasm_name);
+    if let Err(e) = std::fs::write(&wasm_path, &bytes) {
+        eprintln!("error: failed to stage wasm module {}: {}", wasm_path.display(), e);
+        return 1;
+    }
+
+    // `--dir=/` preopens the host root so WASI fs ops resolve the same absolute
+    // paths native sees — matches `compile_and_run_wasm_test`. Program args go
+    // after the module path; wasmtime forwards them to the guest as argv.
+    let status = Command::new("wasmtime")
+        .arg("--dir=/")
+        .arg(&wasm_path)
+        .args(program_args)
+        .status();
+    let _ = std::fs::remove_file(&wasm_path);
+    match status {
+        Ok(s) => s.code().unwrap_or(1),
+        Err(e) => {
+            eprintln!(
+                "error: failed to run wasm module on wasmtime: {}\n  \
+                 in `almide run --target wasm {}`\n  \
+                 hint: the `wasmtime` CLI must be on PATH to execute wasm \
+                 (install: https://wasmtime.dev) — or run natively without --target",
+                e, file
+            );
+            1
+        }
+    }
 }

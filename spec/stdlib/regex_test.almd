@@ -84,3 +84,79 @@ test "regex.captures returns some for match" {
   let cap = regex.captures("(\\d+)-(\\d+)", "abc-123-456");
   assert_eq(cap.is_some(), true)
 }
+
+// ── capture CONTENTS (previously broken: wasm reused slot 0 by nesting depth) ──
+test "regex.captures contents per lexical group" {
+  assert_eq(regex.captures("(\\d+)-(\\d+)", "12-34"), some(["12", "34"]));
+  assert_eq(regex.captures("(a)(b)(c)", "abc"), some(["a", "b", "c"]));
+  assert_eq(regex.captures("(\\w+)@(\\w+)", "user@host"), some(["user", "host"]))
+}
+
+test "regex.captures optional-miss is empty string" {
+  assert_eq(regex.captures("(x)?(y)", "y"), some(["", "y"]));
+  assert_eq(regex.captures("(a)?b", "b"), some([""]))
+}
+
+test "regex.captures none when no groups" {
+  assert_eq(regex.captures("\\d+", "12"), none)
+}
+
+// ── alternation (was entirely unsupported in wasm) ──
+test "regex.alternation" {
+  assert_eq(regex.is_match("a|b", "zzb"), true);
+  assert_eq(regex.is_match("foo|bar|baz", "xbazy"), true);
+  assert_eq(regex.find("(a|b)+", "qabbaq"), some("abba"));
+  assert_eq(regex.full_match("a|bb|ccc", "ccc"), true);
+  assert_eq(regex.find("gr(a|e)y", "grey"), some("grey"))
+}
+
+// ── escape atoms (negated + escaped literals) ──
+test "regex.escape atoms" {
+  assert_eq(regex.is_match("a\\+b", "a+b"), true);
+  assert_eq(regex.is_match("a\\+b", "aab"), false);
+  assert_eq(regex.find("\\D+", "ab123cd"), some("ab"));
+  assert_eq(regex.find("\\S+", "   word "), some("word"))
+}
+
+// ── class internal escapes ──
+test "regex.class escapes" {
+  assert_eq(regex.find("[\\d]+", "xx42yy"), some("42"));
+  assert_eq(regex.is_match("[^\\d]", "5"), false);
+  assert_eq(regex.is_match("[^\\d]", "a"), true);
+  assert_eq(regex.find("[\\w]+", "@@abc@@"), some("abc"))
+}
+
+// ── multibyte (scalar-based; '.' matches one scalar, not one byte) ──
+test "regex.multibyte" {
+  assert_eq(regex.find(".", "日本語"), some("日"));
+  assert_eq(regex.find("..", "日本語"), some("日本"));
+  assert_eq(regex.is_match("本", "日本語"), true);
+  assert_eq(regex.find("[本語]+", "日本語!"), some("本語"))
+}
+
+// ── empty alternation arms (an empty arm = empty Seq, matches length-0) ──
+// wasm previously dropped TRAILING empty arms.
+test "regex.empty alternation arms" {
+  assert_eq(regex.is_match("a|", "zzz"), true);    // trailing
+  assert_eq(regex.is_match("|a", "zzz"), true);    // leading
+  assert_eq(regex.is_match("a||b", "zzz"), true);  // middle
+  assert_eq(regex.is_match("a|||", "zzz"), true);  // triple
+  assert_eq(regex.find("a|", "bza"), some(""));    // empty match at pos 0
+  assert_eq(regex.full_match("a|", ""), true);
+  assert_eq(regex.captures("(a|)", "b"), some([""]));
+  assert_eq(regex.captures("(|a)", "b"), some([""]))
+}
+
+// ── replace / replace_first over EMPTY matches at end-of-string ──
+// native used to panic indexing chars[len]; now guarded (and wasm matches).
+test "regex.replace over empty matches" {
+  assert_eq(regex.replace("x*", "ab", "-"), "-a-b-");
+  assert_eq(regex.replace("", "ab", "-"), "-a-b-");
+  assert_eq(regex.replace("a*", "aaa", "-"), "--");
+  assert_eq(regex.replace("a*", "bbb", "-"), "-b-b-b-");
+  assert_eq(regex.replace("b?", "abc", "-"), "-a--c-");
+  assert_eq(regex.replace("x*", "", "-"), "-");
+  assert_eq(regex.replace("x*", "本a", "-"), "-本-a-");
+  assert_eq(regex.replace_first("x*", "ab", "-"), "-ab");
+  assert_eq(regex.replace_first("a*", "aaa", "-"), "-")
+}

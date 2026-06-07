@@ -1,3 +1,4 @@
+// @contract: C-045
 fn main() -> Unit = {
   // repeat + IndexAssign
   var rep = list.repeat(0, 4)
