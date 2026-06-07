@@ -45,6 +45,29 @@ PerceusVerifyPass (perceus-belt) は 0 violations:
 「検証ロジック自体が正しい」
 = 検証関数にバグがあれば、不正な IR が Verified として通過する可能性
 
+## Phase B.5: warn-mode → hard-error(2026-06-07 の実証で前倒し)
+
+**実証データ**: v0.25.0 リリースが `[Perceus] 5 RC violation(s)`(HOF-closure `__perceus_ret` の
+RcDec 漏れ。repro = `research/benchmark/stdlib/precise_all.almd` の `bench` fn)を**警告だけで
+出荷していた**。`Verified::verify`(almide-codegen/src/lib.rs)は意図的 warn-mode で、violation が
+あっても `Verified` を発行する — 現状の `Verified` は「検証を実行した」であり「合格した」ではない。
+型 doc の "unverified programs cannot reach emission" と実態が矛盾し、契約 C-041 にも反する。
+
+**判断: 警告は受け手が違う。** violation はユーザーコードのバグではなくコンパイラ挿入 RC のバグで、
+ユーザーには直せない。よって診断分類は **ICE**。"leaks, not unsoundness" は深刻度の話であって
+ゲート開閉の理由にならない(深刻度が決めるのはメッセージの口調だけ)。
+
+- [ ] `Verified::verify`: violation > 0 で **hard error(ICE 扱い)** — 「コンパイラのバグです。
+      報告してください」+ エラーコード付き
+- [ ] 脱出ハッチ `--emit-unverified`: 明示フラグでのみ emit 続行し、**manifest に
+      `perceus_verified: false` を記録**(認証の waiver モデル: 逸脱は存在してよいが必ず成果物に
+      記録される。`make verify` では赤)
+- [ ] 今回の 5 violation を修正 + **HOF-closure bench パターンの fixture を spec/ に追加**。
+      真の穴はコーパス — このパターンが spec に無いため CI green のまま退行がリリースに乗った
+      (C-041 evidence 拡充)
+- [ ] 上の Status「0 violations」を「0 violations **on the spec corpus**」に訂正
+      (コーパス外で 5 件発生した事実の反映)
+
 ## Phase A: Lean 4 Formal Proof (future)
 
 Lean 4 で Perceus ルールの正しさを機械証明し、lean4-rust-backend で Rust に変換。

@@ -1,0 +1,29 @@
+# Precision Benchmark Baseline — 2026-06-07
+# almide 0.25.0 (PATH binary) vs rustc 1.95.0 stable (wasm32-wasip1, --release)
+# wasmtime 42.0.1, min-of-5 interleaved runs
+# CONDITIONS: machine under load (2x rustc @100% from agent pipeline, load avg 4.0,
+#   8 cores / 4 perf). fib38 variance +/-5%; single-digit-ms benches +/-10-15%.
+#   sort_1M / map_insert flips need re-verification on a quiet machine.
+# Source pair: precise_all.almd / rust_wasm_compare/src/precise_all.rs (faithful twins)
+# Binary size: almide_bench.wasm 5,872 B vs precise-all.wasm ~109 KB (18.6x smaller)
+# NOTE: almide build emitted "[Perceus] 5 RC violation(s)" (HOF-closure __perceus_ret
+#   RcDec leak) — warn-mode let this ship in the 0.25.0 release. Filed as bug.
+
+benchmark        almide    rust     ratio   status    v0.23.4-baseline
+fib38            145.2ms   142.7ms  1.02x   TIE       ~1.0x TIE
+sort_1M          5.8ms     4.8ms    1.21x   LOSS      0.91x WIN   << flipped (opponent improved)
+list_map_1M      3.3ms     0.7ms    4.71x   LOSS      3.9x LOSS   << almide improved 3.9->3.3ms, rust 1.6->0.7ms
+list_filter_1M   2.6ms     1.7ms    1.53x   LOSS      1.5x LOSS
+list_fold_1M     1.1ms     0.4ms    2.75x   LOSS      2.8x LOSS
+str_concat_1M    3.0ms     1.4ms    2.14x   LOSS      2.2x LOSS
+map_insert_100k  4.2ms     3.7ms    1.14x   LOSS      0.90x TIE   << flipped (opponent improved)
+map_get_100k     4.8ms     5.4ms    0.89x   WIN       0.79x WIN
+int_parse_1M     55.6ms    56.0ms   0.99x   TIE       0.86x WIN
+int_tostring_1M  18.6ms    50.8ms   0.37x   WIN       0.59x WIN   << almide improved 35->18.6ms
+math_sqrt_1M     0.4ms     1.4ms    0.29x   WIN       0.27x WIN
+
+SCORE: 3 WIN / 2 TIE / 6 LOSS  (v0.23.4 was 5W/2T/4L — the OPPONENT moved, almide did not regress)
+
+LESSON: the perf target must be re-derived against CURRENT stable rustc on every
+measurement. A ratio ratchet vs a frozen opponent silently rots. The CI perf gate
+must rebuild the Rust twin with current stable and ratchet the RATIO, not the ms.
