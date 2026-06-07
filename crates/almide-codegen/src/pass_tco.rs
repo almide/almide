@@ -784,33 +784,10 @@ fn rewrite_to_loop(func: &mut IrFunction, var_table: &mut VarTable) -> HashSet<u
         .map(|p| (p.var, p.ty.clone()))
         .collect();
 
-    // Close the tail-recursive heap-accumulator leak: when a self-tail-call
-    // overwrites a heap param P with a FRESH allocation each iteration (a List /
-    // Record / Map / String literal or a string concat — `tco_managed_params`),
-    // the OLD value of P is dead the instant it is reassigned, and the new value
-    // cannot alias it (a literal allocates a new block). Such a `dec_param` gets:
-    //   - an entry `Inc` (the loop ADOPTS ownership of the caller's borrowed-in
-    //     value so the first per-iteration `Dec` releases the loop's added ref,
-    //     not the caller's still-live one — see `body_stmts` below),
-    //   - a `Dec` before every loop reassignment (free the dead old value),
-    //   - a `Dec` at every base case whose result is NON-heap (free the final
-    //     value); a heap-typed base-case result might carry P out to the caller,
-    //     so its Dec is suppressed (the caller frees it) — see `emit_base_case`.
-    // Params reassigned via a bare carry (`f(P, …)`), a possibly-in-place-reusing
-    // call (`f(list.drop(P,1))`), or any non-literal arg are left UNMANAGED: their
-    // new value may alias the old, so a Dec could use-after-free. Conservative —
-    // those keep the pre-existing (bounded-per-call) leak rather than risk a
-    // double-free now that frees are live.
-    let dec_params: Vec<VarId> = tco_managed_params(&func.body, &params, fn_name.as_str());
-    if std::env::var("ALMIDE_TCO_DEBUG").is_ok() {
-        let names = |vs: &[VarId]| vs.iter().map(|v| var_table.get(*v).name.as_str().to_string()).collect::<Vec<_>>();
-        eprintln!("[tco] {} dec_params={:?}", fn_name.as_str(), names(&dec_params));
-    }
-
     // Rewrite the body expression
     let old_body = std::mem::take(&mut func.body);
     let is_effect = func.is_effect;
-    let rewritten = rewrite_tail_expr(old_body, &fn_name, &params, &temps, result_var, is_effect, &dec_params);
+    let rewritten = rewrite_tail_expr(old_body, &fn_name, &params, &temps, result_var, is_effect);
 
     // Build the default value for the result variable
     let default_val = default_for_type(&ret_ty);
@@ -832,14 +809,17 @@ fn rewrite_to_loop(func: &mut IrFunction, var_table: &mut VarTable) -> HashSet<u
         span: None,
     };
 
-    // The while body is just the rewritten body. (A previous trailing
-    // `RcDec __tco_tmp_*` here was both DEAD — every path through the rewritten
-    // body ends in `continue` or `break`, so a statement after it is unreachable —
-    // and WRONG: each temp is MOVED into its param (`param = __tco_tmp`), so
-    // Dec-ing it would free the live loop value. The old-value Dec for heap params
-    // is now emitted correctly at the reassignment / base-case sites; see
-    // `dec_params` and `emit_tail_call_replacement` / `emit_base_case`.
-    let while_body = vec![while_body_stmt];
+    // Perceus: RcDec for heap-typed TCO temporaries at end of while body.
+    // These temps hold intermediate values (e.g., list.drop result) that
+    // are consumed per iteration and should be freed.
+    let mut while_body = vec![while_body_stmt];
+    for (tmp_var, tmp_ty) in &temps {
+        if matches!(tmp_ty, Ty::String | Ty::Applied(_, _) | Ty::Record { .. }
+            | Ty::Unknown | Ty::Fn { .. })
+        {
+            while_body.push(IrStmt { kind: IrStmtKind::RcDec { var: *tmp_var }, span: None });
+        }
+    }
 
     let while_expr = IrExpr {
         kind: IrExprKind::While {
@@ -876,20 +856,9 @@ fn rewrite_to_loop(func: &mut IrFunction, var_table: &mut VarTable) -> HashSet<u
         tail_var
     };
 
-    // Entry Inc for dec-managed heap params: converts the borrowed-in param value
-    // to callee-owned, so the uniform `Dec`-before-reassign (and base-case `Dec`)
-    // balances on the FIRST iteration too (it releases this added ref, leaving the
-    // caller's own ref intact for the caller to Dec). Without it, iteration 1 would
-    // free the caller's value early.
-    let mut body_stmts = vec![bind_result];
-    for p in &dec_params {
-        body_stmts.push(IrStmt { kind: IrStmtKind::RcInc { var: *p }, span: None });
-    }
-    body_stmts.push(while_stmt);
-
     func.body = IrExpr {
         kind: IrExprKind::Block {
-            stmts: body_stmts,
+            stmts: vec![bind_result, while_stmt],
             expr: Some(Box::new(tail_expr)),
         },
         ty: func.ret_ty.clone(),
@@ -897,69 +866,6 @@ fn rewrite_to_loop(func: &mut IrFunction, var_table: &mut VarTable) -> HashSet<u
     };
 
     reverted_to_own
-}
-
-/// Heap-typed for TCO RC purposes (mirrors Perceus `is_heap_type`).
-fn tco_is_heap(ty: &Ty) -> bool {
-    matches!(ty, Ty::String | Ty::Applied(_, _) | Ty::Record { .. }
-        | Ty::Unknown | Ty::Fn { .. })
-}
-
-/// A heap param P is "managed" (entry-Inc + per-reassign Dec + base-case Dec) iff,
-/// in EVERY self-tail-call, the argument in P's position is a FRESH allocation:
-/// a `List`/`Record`/`Map`/string literal or a string concat. A fresh allocation
-/// is a brand-new heap block, so it can never alias P's OLD value — making
-/// `Dec(old P)` before the reassignment provably free of use-after-free. (Any
-/// heap SUBcomponent of P borrowed into the fresh value, e.g. `Acc{ tag: P.tag }`
-/// — would be a move, but a field-read producing a heap value is Inc'd by Perceus
-/// Rule-1 on aliasing, so the Dec only frees what is truly dead.) Bare carries,
-/// in-place-reusing calls (`list.drop`/`map`/`filter` over a single-use source),
-/// and any non-literal arg are conservatively UNMANAGED: their new value might BE
-/// the old block, so a Dec could double-free now that frees are live.
-///
-/// WASM has no `Borrow`/`Clone` IR nodes (those passes are Rust-only), so the
-/// fresh-allocation shape — not a borrow annotation — is the soundness signal.
-fn tco_managed_params(body: &IrExpr, params: &[(VarId, Ty)], fn_name: &str) -> Vec<VarId> {
-    use almide_ir::visit::{IrVisitor, walk_expr, walk_stmt};
-    // managed[i] starts true; a non-fresh self-call arg flips it false. We do NOT
-    // pre-filter by `tco_is_heap(param.ty)`: at TCO time a record/variant param is
-    // an unresolved `Ty::Named` (not yet `Ty::Record`), so a type test would miss
-    // it. Instead we rely on the arg shape — `is_fresh_alloc` only matches
-    // heap-allocating literals (List/Record/Map/String/concat), so "all args fresh"
-    // already IMPLIES the param is heap. A non-heap param (e.g. `n` fed `n - 1`)
-    // never has a fresh arg, so it is excluded automatically — and is thus never
-    // handed a (corruption-prone) rc_dec on a scalar.
-    let mut managed: Vec<bool> = vec![true; params.len()];
-    struct V<'a> { fn_name: &'a str, managed: &'a mut Vec<bool>, saw_self_call: bool }
-    impl IrVisitor for V<'_> {
-        fn visit_expr(&mut self, e: &IrExpr) {
-            if let IrExprKind::Call { target: CallTarget::Named { name }, args, .. } = &e.kind {
-                if name.as_str() == self.fn_name {
-                    self.saw_self_call = true;
-                    for (i, arg) in args.iter().enumerate() {
-                        if i < self.managed.len() && !is_fresh_alloc(arg) {
-                            self.managed[i] = false;
-                        }
-                    }
-                }
-            }
-            walk_expr(self, e);
-        }
-        fn visit_stmt(&mut self, s: &IrStmt) { walk_stmt(self, s); }
-    }
-    let mut v = V { fn_name, managed: &mut managed, saw_self_call: false };
-    v.visit_expr(body);
-    if !v.saw_self_call { return Vec::new(); }
-    params.iter().zip(managed).filter_map(|((var, _), m)| m.then_some(*var)).collect()
-}
-
-/// A self-tail-call argument that is a brand-new heap allocation (cannot alias any
-/// existing value). Conservative: only the unambiguous literal/concat forms.
-fn is_fresh_alloc(e: &IrExpr) -> bool {
-    matches!(&e.kind,
-        IrExprKind::List { .. } | IrExprKind::Record { .. } | IrExprKind::MapLiteral { .. }
-        | IrExprKind::LitStr { .. } | IrExprKind::StringInterp { .. }
-        | IrExprKind::BinOp { op: BinOp::ConcatStr, .. })
 }
 
 /// Rewrite an expression in tail position:
@@ -974,23 +880,22 @@ fn rewrite_tail_expr(
     temps: &[(VarId, Ty)],
     result_var: VarId,
     is_effect: bool,
-    dec_params: &[VarId],
 ) -> IrExpr {
     match expr.kind {
         // Self-recursive call in tail position -> reassign params and continue
         IrExprKind::Call { target: CallTarget::Named { name }, args, .. } if name == fn_name => {
-            emit_tail_call_replacement(args, params, temps, result_var, dec_params)
+            emit_tail_call_replacement(args, params, temps, result_var)
         }
 
         // Effect fn: unwrap ok(expr) in tail position — assign the inner value
         IrExprKind::ResultOk { expr: inner } if is_effect => {
-            emit_base_case(*inner, result_var, dec_params)
+            emit_base_case(*inner, result_var)
         }
 
         // If: recurse into both branches
         IrExprKind::If { cond, then, else_ } => {
-            let new_then = rewrite_tail_expr(*then, fn_name, params, temps, result_var, is_effect, dec_params);
-            let new_else = rewrite_tail_expr(*else_, fn_name, params, temps, result_var, is_effect, dec_params);
+            let new_then = rewrite_tail_expr(*then, fn_name, params, temps, result_var, is_effect);
+            let new_else = rewrite_tail_expr(*else_, fn_name, params, temps, result_var, is_effect);
             IrExpr {
                 kind: IrExprKind::If {
                     cond,
@@ -1008,7 +913,7 @@ fn rewrite_tail_expr(
                 IrMatchArm {
                     pattern: arm.pattern,
                     guard: arm.guard,
-                    body: rewrite_tail_expr(arm.body, fn_name, params, temps, result_var, is_effect, dec_params),
+                    body: rewrite_tail_expr(arm.body, fn_name, params, temps, result_var, is_effect),
                 }
             }).collect();
             IrExpr {
@@ -1020,7 +925,7 @@ fn rewrite_tail_expr(
 
         // Block: recurse into trailing expr
         IrExprKind::Block { stmts, expr: Some(tail) } => {
-            let new_tail = rewrite_tail_expr(*tail, fn_name, params, temps, result_var, is_effect, dec_params);
+            let new_tail = rewrite_tail_expr(*tail, fn_name, params, temps, result_var, is_effect);
             IrExpr {
                 kind: IrExprKind::Block {
                     stmts,
@@ -1068,7 +973,7 @@ fn rewrite_tail_expr(
         | IrExprKind::ClosureCreate { .. } | IrExprKind::EnvLoad { .. }
         | IrExprKind::IterChain { .. }
         | IrExprKind::Hole | IrExprKind::Todo { .. } => {
-            emit_base_case(expr, result_var, dec_params)
+            emit_base_case(expr, result_var)
         }
     }
 }
@@ -1095,7 +1000,6 @@ fn emit_tail_call_replacement(
     params: &[(VarId, Ty)],
     temps: &[(VarId, Ty)],
     _result_var: VarId,
-    dec_params: &[VarId],
 ) -> IrExpr {
     let mut stmts: Vec<IrStmt> = Vec::new();
 
@@ -1115,16 +1019,6 @@ fn emit_tail_call_replacement(
             },
             span: None,
         });
-    }
-
-    // Free the OLD value of each dec-managed heap param BEFORE overwriting it.
-    // The new values are already captured in the temps above (which only borrowed
-    // the old params), so the old values are now dead and unaliased — Dec-ing them
-    // is safe and is exactly the per-iteration free that closes the accumulator
-    // leak. (Done after ALL temp binds so an arg that borrows several params still
-    // reads their live old values first.)
-    for p in dec_params {
-        stmts.push(IrStmt { kind: IrStmtKind::RcDec { var: *p }, span: None });
     }
 
     // Assign params from temporaries
@@ -1165,15 +1059,7 @@ fn emit_tail_call_replacement(
 /// __tco_result = expr
 /// break
 /// ```
-fn emit_base_case(expr: IrExpr, result_var: VarId, dec_params: &[VarId]) -> IrExpr {
-    // A heap-typed base-case result may MOVE a managed param out to the caller
-    // (e.g. `then s` returns the accumulator). Freeing the param here would then
-    // be a use-after-free on the returned value, so suppress the exit Dec for a
-    // heap result and let the caller own it. A non-heap result (Int/Bool/…) cannot
-    // carry a param out, so the params are dead after the assign and freeing the
-    // final loop value here balances the entry `Inc`.
-    let result_is_heap = tco_is_heap(&expr.ty);
-
+fn emit_base_case(expr: IrExpr, result_var: VarId) -> IrExpr {
     let assign = IrStmt {
         kind: IrStmtKind::Assign {
             var: result_var,
@@ -1181,13 +1067,6 @@ fn emit_base_case(expr: IrExpr, result_var: VarId, dec_params: &[VarId]) -> IrEx
         },
         span: None,
     };
-
-    let mut stmts = vec![assign];
-    if !result_is_heap {
-        for p in dec_params {
-            stmts.push(IrStmt { kind: IrStmtKind::RcDec { var: *p }, span: None });
-        }
-    }
 
     let break_expr = IrExpr {
         kind: IrExprKind::Break,
@@ -1197,7 +1076,7 @@ fn emit_base_case(expr: IrExpr, result_var: VarId, dec_params: &[VarId]) -> IrEx
 
     IrExpr {
         kind: IrExprKind::Block {
-            stmts,
+            stmts: vec![assign],
             expr: Some(Box::new(break_expr)),
         },
         ty: Ty::Unit,

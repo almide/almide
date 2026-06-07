@@ -161,94 +161,6 @@ impl IrMutVisitor for PerceusDriver<'_> {
     }
 }
 
-// ── Exit-tail-block flattening (pre-Perceus) ────────────────────────────────
-//
-// TCO rewrites a self-tail-call that is the TAIL of a block into a nested block
-// ending in `continue`/`break`:  `Block{ A, tail: Block{ B, tail: continue } }`.
-// That nesting breaks heap-local cleanup two ways once frees are live:
-//   1. Perceus places a heap local's `RcDec` at the OUTER block end, after the
-//      nested `continue` — unreachable dead code, so the local leaks every
-//      iteration.
-//   2. The flat per-scope verifier (`perceus_verified::count_decs`) only counts
-//      a Dec at the SAME nesting level as the `Bind`, so a Dec moved into the
-//      nested exit block reads as "no RcDec" (false leak) and refuses the build.
-// Flattening the nested exit block UP — `Block{ A ++ B, tail: continue }` —
-// makes `continue` the block's own tail. Then `insert_decs_before_ret` naturally
-// emits the heap-local Dec as a same-level statement BEFORE the exit: reachable
-// (correct execution) AND counted by the verifier. It also dissolves the
-// `__perceus_ret = { … continue }` tail-lift bug: with `continue` as the tail,
-// `collect_ret_vars` sees no escaping value, so no lift is attempted.
-//
-// Semantically transparent: a block's value IS its tail, so inlining a
-// tail-positioned block preserves meaning. Applied before any Dec insertion.
-
-/// Flatten loop-exit nesting so a `continue`/`break` becomes its enclosing
-/// block's own TAIL. Two shapes, applied post-order (innermost first):
-///   (a) Trailing discarded-exit statement — `Block{ …, Expr(X) ; tail: None }`
-///       where `X` always exits — is the no-value form TCO emits when the
-///       self-call is a discarded tail. Promote `X` to the block's tail.
-///   (b) Tail block ending in an exit — `Block{ A ; tail: Block{ B ; tail: exit }}`
-///       — hoist `B` up and make `exit` the outer tail.
-/// After this, `insert_decs_before_ret` sees `continue`/`break` as the terminal
-/// and emits each heap-local Dec as a same-level statement BEFORE it: reachable
-/// (no leak) and at the Bind's level (counted by the flat verifier).
-fn flatten_exit_tail_blocks(body: &mut IrExpr) {
-    struct Flattener;
-    impl IrMutVisitor for Flattener {
-        fn visit_expr_mut(&mut self, e: &mut IrExpr) {
-            walk_expr_mut(self, e); // children first (innermost nesting collapses first)
-            if let IrExprKind::Block { stmts, expr } = &mut e.kind {
-                // (a) Promote a trailing always-exit `Expr` statement to the tail.
-                #[allow(clippy::collapsible_if)]
-                if expr.is_none() {
-                    if let Some(IrStmtKind::Expr { expr: last }) = stmts.last().map(|s| &s.kind) {
-                        if expr_always_exits(last) {
-                            if let Some(IrStmt { kind: IrStmtKind::Expr { expr: x }, .. }) = stmts.pop() {
-                                *expr = Some(Box::new(x));
-                            }
-                        }
-                    }
-                }
-                // (b) Absorb a tail block that ends in a bare exit.
-                if let Some(tail) = expr {
-                    while tail_block_ends_in_exit(tail) {
-                        if let IrExprKind::Block { stmts: inner, expr: inner_tail } = &mut tail.kind {
-                            let mut hoisted = std::mem::take(inner);
-                            stmts.append(&mut hoisted);
-                            *tail = inner_tail.take().expect("checked by tail_block_ends_in_exit");
-                        } else {
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-    }
-    Flattener.visit_expr_mut(body);
-}
-
-/// True iff `t` is a `Block` whose own tail is a bare `continue`/`break`.
-fn tail_block_ends_in_exit(t: &IrExpr) -> bool {
-    matches!(&t.kind, IrExprKind::Block { expr: Some(inner), .. }
-        if matches!(inner.kind, IrExprKind::Continue | IrExprKind::Break))
-}
-
-/// Unconditionally exits the loop iteration (continue/break), possibly through a
-/// trailing block/if/match — but NOT through a nested loop.
-fn expr_always_exits(e: &IrExpr) -> bool {
-    match &e.kind {
-        IrExprKind::Continue | IrExprKind::Break => true,
-        IrExprKind::Block { stmts, expr } =>
-            expr.as_deref().is_some_and(expr_always_exits)
-                || stmts.iter().any(|s| matches!(&s.kind,
-                    IrStmtKind::Expr { expr } if expr_always_exits(expr))),
-        IrExprKind::If { then, else_, .. } => expr_always_exits(then) && expr_always_exits(else_),
-        IrExprKind::Match { arms, .. } =>
-            !arms.is_empty() && arms.iter().all(|a| expr_always_exits(&a.body)),
-        _ => false,
-    }
-}
-
 /// A `FnBody` chain node with its continuation (`body`) detached. Linearizing
 /// the chain into a `Vec<ChainHead>` + terminal lets the per-node passes below
 /// fold over a function body ITERATIVELY instead of recursing once per
@@ -725,11 +637,6 @@ fn is_heap_type(ty: &Ty) -> bool {
 /// Block IR → FnBody chain → Perceus rules → FnBody → Block IR.
 fn insert_rc_ops(func: &mut IrFunction, var_table: &mut VarTable) -> bool {
     if func.is_test { return false; }
-
-    // Flatten TCO's nested `…continue`/`…break` tail-blocks so heap-local Decs
-    // land as same-level statements before the exit (reachable AND verifier-
-    // visible). See `flatten_exit_tail_blocks`. Must precede Dec insertion.
-    flatten_exit_tail_blocks(&mut func.body);
 
     // Apply Perceus recursively to the entire function body
     perceus_expr(&mut func.body, var_table);

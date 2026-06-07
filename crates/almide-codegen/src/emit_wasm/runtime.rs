@@ -513,11 +513,7 @@ fn compile_rc_inc(emitter: &mut WasmEmitter) {
     let type_idx = emitter.func_type_indices[&emitter.rt.rc_inc];
     let rc_neg = emitter.layout_reg.alloc_header_neg_offset(alloc::RC) as i32;
     let rc_ty = emitter.layout_reg.field(ALLOC_HEADER, alloc::RC).ty;
-    // Correct immutable heap_start low-bound (global 4). The legacy
-    // `emitter.rt.heap_start_global` field is still 0 (= moving heap_ptr) at
-    // compile_runtime time, which baked this guard into a no-op (bump-and-leak).
-    // Using the constant activates real reference counting + frees.
-    let heap_start = HEAP_START_GLOBAL_IDX;
+    let heap_start = emitter.rt.heap_start_global;
 
     let mut f = Function::new([]);
     {
@@ -542,8 +538,7 @@ fn compile_rc_dec(emitter: &mut WasmEmitter) {
     let rc_neg = emitter.layout_reg.alloc_header_neg_offset(alloc::RC) as i32;
     let rc_ty = emitter.layout_reg.field(ALLOC_HEADER, alloc::RC).ty;
     let hdr = emitter.layout_reg.header_size(ALLOC_HEADER) as i32;
-    // Correct heap_start low-bound (global 4); see compile_rc_inc note. Activates frees.
-    let heap_start = HEAP_START_GLOBAL_IDX;
+    let heap_start = emitter.rt.heap_start_global;
     let free_list = emitter.free_list_global;
 
     let mut f = Function::new([(1, ValType::I32)]); // local 1: $rc
