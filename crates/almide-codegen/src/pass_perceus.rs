@@ -663,10 +663,23 @@ fn collect_moved_out_vars(expr: &IrExpr, vars: &mut HashSet<VarId>) {
     struct MovedOutCollector<'a> { vars: &'a mut HashSet<VarId> }
     impl IrVisitor for MovedOutCollector<'_> {
         fn visit_expr(&mut self, expr: &IrExpr) {
-            if let IrExprKind::Block { expr: Some(tail), .. } = &expr.kind {
-                if let IrExprKind::Var { id } = &tail.kind {
-                    self.vars.insert(*id);
+            match &expr.kind {
+                IrExprKind::Block { expr: Some(tail), .. } => {
+                    if let IrExprKind::Var { id } = &tail.kind {
+                        self.vars.insert(*id);
+                    }
                 }
+                // A bare-`Var` iterated by `for x in v` is CONSUMED (the borrow
+                // inference marks a for-in iterable as owned), so ownership is moved
+                // into the loop and a missing Dec in the var's block is a move, not
+                // a leak. Without this, `let cs = […]; for c in cs { … }` (cs's last
+                // use) is false-positive-flagged — the snaidhm `make_circle` case.
+                IrExprKind::ForIn { iterable, .. } => {
+                    if let IrExprKind::Var { id } = &iterable.kind {
+                        self.vars.insert(*id);
+                    }
+                }
+                _ => {}
             }
             walk_expr(self, expr);
         }
