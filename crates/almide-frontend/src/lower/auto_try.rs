@@ -236,10 +236,24 @@ fn insert_try(expr: IrExpr, in_match_subject: bool) -> IrExpr {
             op,
             operand: Box::new(insert_try(*operand, false)),
         },
-        IrExprKind::Call { target, args, type_args } => IrExprKind::Call {
-            target,
-            args: args.into_iter().map(|a| insert_try(a, false)).collect(),
-            type_args,
+        IrExprKind::Call { target, args, type_args } => {
+            // `result.*` / `option.*` functions consume their FIRST argument AS a
+            // Result/Option (UFCS: `r.unwrap_or(d)` == `result.unwrap_or(r, d)`).
+            // That arg must NOT be auto-?'d, exactly like the `??` (UnwrapOr) and
+            // match-subject exceptions — otherwise `result.unwrap_or(int.parse(s), d)`
+            // becomes `result.unwrap_or((int.parse(s))?, d)`, unwrapping the Result
+            // the callee needs (E0308 at build; passes check/test). The `true` flag
+            // suppresses only the top-level wrap of that arg, like a match subject.
+            let skip_first = matches!(&target,
+                CallTarget::Module { module, .. }
+                    if module.as_str() == "result" || module.as_str() == "option");
+            IrExprKind::Call {
+                target,
+                args: args.into_iter().enumerate()
+                    .map(|(i, a)| insert_try(a, skip_first && i == 0))
+                    .collect(),
+                type_args,
+            }
         },
         IrExprKind::Lambda { params, body, lambda_id } => IrExprKind::Lambda {
             params, body, lambda_id,
