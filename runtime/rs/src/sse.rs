@@ -31,7 +31,7 @@ pub fn almide_rt_sse_openai_chat(
     base_url: &str,
     api_key: &str,
     body_json: &str,
-    mut on_text_delta: impl FnMut(String),
+    on_text_delta: std::rc::Rc<dyn Fn(String)>,
 ) -> Result<String, String> {
     let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
     let mut headers: AlmideMap<String, String> = AlmideMap::new();
@@ -83,7 +83,7 @@ pub fn almide_rt_sse_openai_chat(
                 &mut total_tokens,
                 &mut finish_reason,
                 &mut model_id,
-                &mut on_text_delta,
+                &on_text_delta,
             );
         }
     })?;
@@ -131,7 +131,7 @@ fn handle_sse_data(
     total_tokens: &mut i64,
     finish_reason: &mut String,
     model_id: &mut String,
-    on_text_delta: &mut impl FnMut(String),
+    on_text_delta: &std::rc::Rc<dyn Fn(String)>,
 ) {
     let parsed = match almide_rt_json_parse(payload) {
         Ok(v) => v,
@@ -263,7 +263,7 @@ fn json_escape(s: &str) -> String {
 pub fn almide_rt_sse_anthropic_messages(
     api_key: &str,
     body_json: &str,
-    mut on_text_delta: impl FnMut(String),
+    on_text_delta: std::rc::Rc<dyn Fn(String)>,
 ) -> Result<String, String> {
     let url = "https://api.anthropic.com/v1/messages".to_string();
     let mut headers: AlmideMap<String, String> = AlmideMap::new();
@@ -311,7 +311,7 @@ pub fn almide_rt_sse_anthropic_messages(
                 &mut completion_tokens,
                 &mut finish_reason,
                 &mut model_id,
-                &mut on_text_delta,
+                &on_text_delta,
             );
         }
     })?;
@@ -351,7 +351,7 @@ fn handle_anthropic_event(
     completion_tokens: &mut i64,
     finish_reason: &mut String,
     model_id: &mut String,
-    on_text_delta: &mut impl FnMut(String),
+    on_text_delta: &std::rc::Rc<dyn Fn(String)>,
 ) {
     match event_name {
         "message_start" => {

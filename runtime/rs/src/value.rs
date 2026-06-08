@@ -230,4 +230,14 @@ pub fn almide_rt_value_stringify(v: &Value) -> String {
     }
 }
 
+// `Value` participates in compound string interpolation / derived `Repr` the
+// same as any other type: a user record/variant with a `Value` field deriving
+// `Repr` generates `self.<field>.almide_repr()`, so `Value` must impl
+// `AlmideRepr`. Without this, e.g. `type Tool: Repr = { parameters: Value }`
+// failed to compile (E0599: no method `almide_repr` for `Value`). The repr is
+// the JSON text — consistent with how `Value` stringifies elsewhere.
+impl AlmideRepr for Value {
+    fn almide_repr(&self) -> String { almide_rt_value_stringify(self) }
+}
+
 // json_parse and json_stringify moved to json.rs
