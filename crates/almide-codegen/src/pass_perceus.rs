@@ -306,27 +306,31 @@ fn perceus_fnbody(fb: FnBody, var_table: &mut VarTable) -> FnBody {
             ChainHead::VDecl { var, ty, mutability, mut expr } => {
                 // Recurse into the expression (handles nested blocks)
                 perceus_expr(&mut expr, var_table);
-                // Rule 1: RcInc for heap alias
-                let needs_inc = is_heap_type(&ty) && matches!(&expr.kind,
-                    IrExprKind::Var { .. } | IrExprKind::Clone { .. } | IrExprKind::Deref { .. });
-                let inc_var = if needs_inc {
-                    match &expr.kind {
-                        IrExprKind::Var { id } => Some(*id),
-                        IrExprKind::Clone { expr: e } | IrExprKind::Deref { expr: e } =>
-                            if let IrExprKind::Var { id } = &e.kind { Some(*id) } else { None },
-                        _ => None,
-                    }
-                } else { None };
-                // Rule 5: RcInc for closure captures
+                // Rule 1 (unified): a heap local bound to a BORROWED ALIAS must
+                // acquire its own reference, or its scope-end Dec under-counts and
+                // double-frees the value the alias points into. Inc the BOUND var
+                // AFTER the bind: it is then loop-body-local (balances the per-
+                // iteration scope-end Dec) and works for aliases produced through
+                // match/if/block tails, where no pre-existing source var exists to
+                // Inc beforehand. `yields_borrowed_alias` subsumes the former
+                // Var/Clone/Deref allow-list — Inc-after on the bound var is
+                // equivalent to Inc-before on the source they alias.
+                let alias_inc = is_heap_type(&ty) && yields_borrowed_alias(&expr);
+                // Rule 5: RcInc for closure captures (captured vars exist BEFORE
+                // the bind, so these Incs wrap around the VDecl).
                 let capture_incs: Vec<VarId> = if let IrExprKind::ClosureCreate { captures, .. } = &expr.kind {
                     captures.iter().filter(|(_, ty)| is_heap_type(ty)).map(|(v, _)| *v).collect()
                 } else { vec![] };
 
-                let mut node = FnBody::VDecl { var, ty, mutability, expr, body: Box::new(result) };
-                // Wrap with Inc nodes
-                if let Some(id) = inc_var {
-                    node = FnBody::Inc { var: id, body: Box::new(node) };
-                }
+                // `let var = expr; rc_inc(var); <rest>` — the Inc lives in the
+                // VDecl body so it stays at the bind's chain level (verifier-
+                // counted) and runs once per loop iteration for in-loop binds.
+                let body = if alias_inc {
+                    FnBody::Inc { var, body: Box::new(result) }
+                } else {
+                    result
+                };
+                let mut node = FnBody::VDecl { var, ty, mutability, expr, body: Box::new(body) };
                 for cap in capture_incs.into_iter().rev() {
                     node = FnBody::Inc { var: cap, body: Box::new(node) };
                 }
@@ -368,8 +372,15 @@ fn collect_heap_vdecls(fb: &FnBody, vars: &mut Vec<VarId>) {
     let mut cur = fb;
     loop {
         match cur {
-            FnBody::VDecl { var, ty, body, .. } => {
-                if is_heap_type(ty) { vars.push(*var); }
+            FnBody::VDecl { var, ty, expr, body, .. } => {
+                // An `EnvLoad`-bound local BORROWS the closure environment's
+                // captured value — the env owns it (Rule-5 Inc'd it at capture).
+                // A scope-end Dec here would free a value the env still holds, so
+                // the next call or the env teardown double-frees it. Exclude such
+                // borrow locals from the scope-end Dec (they own no reference).
+                if is_heap_type(ty) && !matches!(expr.kind, IrExprKind::EnvLoad { .. }) {
+                    vars.push(*var);
+                }
                 cur = body;
             }
             FnBody::Assign { body, .. } | FnBody::Inc { body, .. }
@@ -717,9 +728,100 @@ fn scan_env_loads(expr: &IrExpr, vars: &mut HashSet<VarId>) {
     }
 }
 
-fn is_heap_type(ty: &Ty) -> bool {
-    matches!(ty, Ty::String | Ty::Applied(_, _) | Ty::Record { .. } | Ty::Unknown | Ty::Fn { .. })
+pub(crate) fn is_heap_type(ty: &Ty) -> bool {
+    // `Ty::Named` is a DECLARED nominal record/variant (`type P = {...}`); its
+    // runtime repr is a heap pointer (emit's `ty_to_valtype`/`byte_size` already
+    // treat it as i32/4-byte). It must be classified heap so its locals get a
+    // scope-end Dec and its alias-binds get an Inc — without this every declared
+    // record/variant local leaks (anonymous `Ty::Record` was handled, the nominal
+    // `Ty::Named` was not). An opaque alias to a heap type (`type H = String`) is
+    // also a heap pointer; an alias to a scalar never reaches codegen as `Named`.
+    matches!(ty, Ty::String | Ty::Applied(_, _) | Ty::Record { .. } | Ty::Named(..) | Ty::Unknown | Ty::Fn { .. })
 }
+
+/// Does `e`, bound to a heap local, yield a BORROWED ALIAS of an existing owned
+/// heap value — as opposed to a freshly-owned allocation?
+///
+/// This is the exhaustive FRESH-vs-ALIAS classification at the heart of correct
+/// reference counting. A local bound to an alias shares a refcount it does not
+/// own; without an Inc at bind, its scope-end Dec under-counts and double-frees
+/// the value the alias points into (still owned by its container/source). So an
+/// alias-bound heap local must acquire its own reference (Inc-after-bind), while
+/// a fresh-bound one already owns its single reference and must NOT be Inc'd
+/// (that would leak). Returning/moving the alias out is also correct under this
+/// rule: the Inc gives the escaping value its own reference, which the consumer's
+/// Dec then balances.
+///
+/// The two directions are asymmetric in cost: a missing Inc on an alias =
+/// double-free (a crash/hang), an extra Inc on a fresh value = a leak. The
+/// classification is therefore total (no wildcard arm — a newly added
+/// `IrExprKind` must be classified deliberately, not silently defaulted).
+/// Tail-yielding forms (`match`/`if`/block) recurse into their tails: a value
+/// flows out through the tail, so an alias in ANY tail makes the whole
+/// expression able to yield an alias. `match` with a literal/data-constant
+/// fallback arm stays correct because Inc/Dec are runtime no-ops on data-section
+/// constants (`ptr < heap_start`).
+/// Runtime calls that return a BORROWED ALIAS of an element of a heap container
+/// argument (the stored pointer, no copy) — so a local or container that takes
+/// the result must acquire its own reference, exactly like a `Member`/`Index`
+/// access. Only the DIRECT-element accessors belong here; the Option-returning
+/// lookups surface their alias through a `match` arm instead (see the call site).
+fn is_alias_returning_runtime_call(symbol: &str) -> bool {
+    matches!(symbol, "almide_rt_list_get_or" | "almide_rt_map_get_or")
+}
+
+pub(crate) fn yields_borrowed_alias(e: &IrExpr) -> bool {
+    use IrExprKind::*;
+    match &e.kind {
+        // ── Definite aliases: borrow an existing owned reference ──
+        Var { .. } | Clone { .. } | Deref { .. }
+        | Member { .. } | TupleIndex { .. } | IndexAccess { .. }
+        | MapAccess { .. } | OptionalChain { .. } => true,
+
+        // ── Wrapper peels: extract the payload OUT of a Result/Option box ──
+        // `r?`/`r!`/`o ?? d` surface the wrapped heap value, which the box owns;
+        // a local bound to it shares the box's reference and must acquire its own
+        // (else its scope-end Dec frees a value the box — or the container the box
+        // borrowed from, e.g. `value.get(v, k)?` aliasing a field of `v` — still
+        // holds). This holds whether the box is fresh or itself an alias, so the
+        // peel is an alias unconditionally (for a heap payload; scalars are gated
+        // out by `is_heap_type`). `UnwrapOr`'s fallback rides the same Inc — a
+        // data-constant fallback makes it a runtime no-op, a fresh-heap fallback
+        // leaks (the safe direction).
+        Unwrap { .. } | ToOption { .. } | Try { .. } | UnwrapOr { .. } => true,
+
+        // ── Direct element/value accessors: borrow an element of a container ──
+        // `list.get_or`/`map.get_or` return the stored element POINTER directly
+        // (no copy), so the result aliases the container exactly like a Member or
+        // IndexAccess. The Option-returning lookups (`list.get`/`first`/`last`/
+        // `find`, `map.get`) surface their aliased payload through a `match` arm
+        // `Var`, already covered by the tail recursion below — so they are not
+        // listed here (dup'ing their fresh Option box would not help the payload).
+        RuntimeCall { symbol, .. } => is_alias_returning_runtime_call(symbol.as_str()),
+
+        // ── Tail-yielding forms: alias iff any tail can alias ──
+        Match { arms, .. } => arms.iter().any(|a| yields_borrowed_alias(&a.body)),
+        If { then, else_, .. } =>
+            yields_borrowed_alias(then) || yields_borrowed_alias(else_),
+        Block { expr: Some(tail), .. } => yields_borrowed_alias(tail),
+        Block { expr: None, .. } => false,
+
+        // ── Definite fresh allocations: the binding owns a new reference ──
+        LitInt { .. } | LitFloat { .. } | LitBool { .. } | LitStr { .. } | Unit
+        | OptionNone | Hole | Todo { .. }
+        | List { .. } | Record { .. } | MapLiteral { .. } | EmptyMap | Tuple { .. }
+        | StringInterp { .. } | SpreadRecord { .. }
+        | Call { .. } | RenderedCall { .. } | RustMacro { .. }
+        | InlineRust { .. } | TailCall { .. }
+        | ResultOk { .. } | ResultErr { .. } | OptionSome { .. }
+        | ClosureCreate { .. } | Lambda { .. } | FnRef { .. }
+        | BinOp { .. } | UnOp { .. } | Range { .. } | ToVec { .. } | IterChain { .. }
+        | Fan { .. } | Await { .. }
+        | RcWrap { .. } | BoxNew { .. } | Borrow { .. } | EnvLoad { .. }
+        | Break { .. } | Continue { .. } | While { .. } | ForIn { .. } => false,
+    }
+}
+
 
 /// Insert RC operations into a function body using FnBody conversion.
 /// Block IR → FnBody chain → Perceus rules → FnBody → Block IR.

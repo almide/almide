@@ -89,7 +89,7 @@ impl FuncCompiler<'_> {
             for (field_name, field_ty) in &type_fields {
                 if let Some(expr) = explicit_map.get(field_name.as_str()) {
                     wasm!(self.func, { local_get(scratch); });
-                    self.emit_expr(expr);
+                    self.emit_stored_field(expr);
                     let store_ty = if expr.ty.is_unresolved() {
                         field_ty
                     } else {
@@ -124,7 +124,7 @@ impl FuncCompiler<'_> {
             for (_, field_expr) in fields {
                 let field_size = values::byte_size(&field_expr.ty);
                 wasm!(self.func, { local_get(scratch); });
-                self.emit_expr(field_expr);
+                self.emit_stored_field(field_expr);
                 self.emit_store_at(&field_expr.ty, offset);
                 offset += field_size;
             }
@@ -265,7 +265,7 @@ impl FuncCompiler<'_> {
         for (i, elem) in elements.iter().enumerate() {
             let offset = 8 + (i as u32) * elem_size;
             wasm!(self.func, { local_get(scratch); });
-            self.emit_expr(elem);
+            self.emit_stored_field(elem);
             self.emit_store_at(&elem.ty, offset);
         }
 
@@ -368,7 +368,7 @@ impl FuncCompiler<'_> {
             };
             let size = values::byte_size(&elem_ty);
             wasm!(self.func, { local_get(scratch); });
-            self.emit_expr(elem);
+            self.emit_stored_field(elem);
             self.emit_store_at(&elem_ty, offset);
             offset += size;
         }

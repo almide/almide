@@ -1043,7 +1043,10 @@ impl FuncCompiler<'_> {
                     wasm!(self.func, { local_set(list_ptr); });
                     let source_elem_ty = self.resolve_list_elem(source_expr, None);
                     let source_elem_size = values::byte_size(&source_elem_ty);
-                    self.emit_expr(&args[1]);
+                    // See the non-fused path: dup an alias accumulator seed so the
+                    // fold loop owns its reference and the caller's Dec of the seed
+                    // local cannot double-free the (empty-list) returned result.
+                    self.emit_stored_field(&args[1]);
                     wasm!(self.func, { local_set(acc); });
                     // Pointer-based iteration: ptr and end instead of idx
                     let ptr = self.scratch.alloc_i32();
@@ -1152,7 +1155,11 @@ impl FuncCompiler<'_> {
                 let end_ptr = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
                 wasm!(self.func, { local_set(list_ptr); });
-                self.emit_expr(&args[1]);
+                // The accumulator is MOVE-STORED into the fold loop and returned
+                // as the result (unchanged when the list is empty). Dup an alias
+                // seed so the loop owns its own reference and the caller's
+                // scope-end Dec of the seed local does not double-free the result.
+                self.emit_stored_field(&args[1]);
                 wasm!(self.func, { local_set(acc); });
                 if !is_inline_lambda {
                     self.emit_expr(&args[2]);

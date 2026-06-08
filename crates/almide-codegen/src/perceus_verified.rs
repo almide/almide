@@ -22,7 +22,9 @@ use almide_lang::types::Ty;
 /// Lean-certified: Ty.isHeap
 /// Corresponds to: `def Ty.isHeap : Ty → Bool`
 pub fn is_heap_type(ty: &Ty) -> bool {
-    matches!(ty, Ty::String | Ty::Applied(_, _) | Ty::Record { .. }
+    // Keep in sync with pass_perceus::is_heap_type — `Ty::Named` (declared nominal
+    // record/variant) is a heap pointer, so the verifier accounts for its Inc/Dec.
+    matches!(ty, Ty::String | Ty::Applied(_, _) | Ty::Record { .. } | Ty::Named(..)
         | Ty::Unknown | Ty::Fn { .. })
 }
 

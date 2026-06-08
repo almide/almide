@@ -560,9 +560,22 @@ fn compile_rc_dec(emitter: &mut WasmEmitter) {
             w.get(1).i32c(1).sub();
             w.emit_store(0, rc_ty);
         }, |w| {
-            // rc <= 1: dead block. Push to free list for reuse.
+            // rc <= 1: about to free. DOUBLE-FREE GUARD: a freed block is stamped
+            // rc=0 below; seeing rc==0 here means a second Dec on an already-dead
+            // block → trap LOUD instead of pushing it onto the free list twice,
+            // which forms a cycle that spins __alloc's free-list walk forever (a
+            // silent hang). A real latent double-free thus surfaces as a wasm trap
+            // = a native==wasm divergence the cross-target gate catches.
+            w.get(1).eqz();
+            w.if_void(|w| { w.unreachable_(); }, |_| {});
+            // Push to free list for reuse.
             w.get(0).gget(free_list).emit_store(0, MemType::I32);
             w.get(0).i32c(hdr).sub().gset(free_list);
+            // Stamp the freed block rc=0 (the double-free sentinel). __alloc
+            // restores rc=1 on reuse, so the sentinel only marks dead blocks.
+            w.get(0).i32c(rc_neg).sub();
+            w.i32c(0);
+            w.emit_store(0, rc_ty);
         });
     }
     f.instruction(&wasm_encoder::Instruction::End);
