@@ -58,7 +58,7 @@ fn to_snake_case(v: Value) -> Value = _
 @intrinsic("almide_rt_value_field")
 fn field(v: Value, key: String) -> Result[Value, String] = _
 
-// Object keys, in insertion order. `value` and `json` share the Value type, so
-// this reuses json.keys' runtime (#416 — `value.keys` previously did not exist).
-@intrinsic("almide_json_keys")
+// Object keys, in insertion order. Backed by `almide_rt_value_keys` in the value
+// runtime so a value-only program links natively (#416).
+@intrinsic("almide_rt_value_keys")
 fn keys(v: Value) -> List[String] = _

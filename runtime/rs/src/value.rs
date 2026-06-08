@@ -111,6 +111,17 @@ pub fn almide_rt___decode_default_bool(v: Value, key: String, default: bool) -> 
 
 // ── Value utilities ──
 
+/// Object keys in insertion order. Lives in the `value` runtime (not reusing
+/// `almide_json_keys`) so a program that uses `value.keys` but never `json` still
+/// links — the native runtime is included per-module, so a cross-module reference
+/// would be undefined on a value-only program (#416 native-link fix).
+pub fn almide_rt_value_keys(v: &Value) -> Vec<String> {
+    match v {
+        Value::Object(entries) => entries.iter().map(|(k, _)| k.clone()).collect(),
+        _ => vec![],
+    }
+}
+
 /// Pick specific keys from an Object, discarding the rest.
 pub fn almide_rt_value_pick(v: &Value, keys: &[String]) -> Value {
     match v {
