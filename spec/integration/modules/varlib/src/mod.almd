@@ -2,6 +2,10 @@ type Policy = Never | OnFailure | Always
 
 type Wrapper = Wrap(Int) | Empty
 
+type Shape =
+  | Circle { radius: Int }
+  | Dot
+
 fn parse_tag(s: String) -> Option[String] =
   if string.starts_with(s, "tag:") then Some(string.slice(s, 4, string.len(s)))
   else None

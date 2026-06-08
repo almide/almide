@@ -149,12 +149,17 @@ impl Checker {
             ExprKind::Record { name, fields, .. } => {
                 for f in fields.iter_mut() { self.infer_expr(&mut f.value); }
                 if let Some(n) = name {
+                    // A qualified record-variant name (`mod.Ctor { … }`) keys the
+                    // constructor table by its BARE name, so strip any module prefix
+                    // before a ctor lookup — otherwise a cross-module record-variant
+                    // is mis-typed as a standalone `mod.Ctor` type (#412).
+                    let ctor_sym = n.rsplit_once('.').map(|(_, b)| sym(b)).unwrap_or_else(|| sym(n));
                     // Constructing `EnumType { field: ... }` via the ENUM type
                     // name (not a case name) is a category error: an enum has no
                     // fields of its own. Native rustc would leak E0574 and WASM
                     // silently mis-constructs, so reject it here with a proper
                     // diagnostic that lists the available record-variant cases.
-                    if !self.env.constructors.contains_key(&sym(n)) {
+                    if !self.env.constructors.contains_key(&ctor_sym) {
                         if let Some(Ty::Variant { cases, .. }) = self.env.types.get(&sym(n)) {
                             let record_cases: Vec<&str> = cases.iter()
                                 .filter(|c| matches!(c.payload, VariantPayload::Record(_)))
@@ -191,7 +196,7 @@ impl Checker {
                     // List[Int] }`, resolved from `env.types`). Both reduce to a
                     // `(field, declared_ty)` list with generics already substituted.
                     let (result_ty, decl_fields): (Ty, Vec<(Sym, Ty)>) =
-                        if let Some((type_name, case)) = self.env.lookup_ctor(&sym(n)) {
+                        if let Some((type_name, case)) = self.env.lookup_ctor(&ctor_sym) {
                             let generic_args = self.instantiate_type_generics(type_name.as_str());
                             let subst: std::collections::HashMap<Sym, Ty> = if !generic_args.is_empty() {
                                 self.env.types.get(&type_name).cloned().map(|ty_def| {

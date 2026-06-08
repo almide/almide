@@ -166,7 +166,11 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
         // ── Records ──
         ast::ExprKind::Record { name, fields, .. } => {
             let fs = fields.iter().map(|f| (f.name, lower_expr(ctx, &f.value))).collect();
-            let mut rec = ctx.mk(IrExprKind::Record { name: *name, fields: fs }, ty, span);
+            // Strip a module prefix on a qualified record-variant name (`mod.Ctor`):
+            // the IR carries the bare ctor name (the expr's type already pins the
+            // module), so both backends resolve the variant by bare name + type (#412).
+            let ctor_name = (*name).map(|n| n.as_str().rsplit_once('.').map(|(_, b)| sym(b)).unwrap_or(n));
+            let mut rec = ctx.mk(IrExprKind::Record { name: ctor_name, fields: fs }, ty, span);
             // Narrow bare integer/float literals in sized fields to their
             // declared field type (`{ a: Int8 }` ← `a: 5` must emit `5i8`, not
             // `5i64`). Inference leaves the literal at the default `Ty::Int`

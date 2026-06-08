@@ -19,6 +19,15 @@ test "cross-module variant constructor call (with payload)" {
   assert_eq(n, 42)
 }
 
+test "cross-module record-variant construction and pattern (#412)" {
+  let c = varlib.Circle { radius: 7 }
+  let r = match c {
+    varlib.Circle { radius } => radius,
+    varlib.Dot => 0,
+  }
+  assert_eq(r, 7)
+}
+
 test "cross-module variant as default value" {
   let w = varlib.Empty
   let fallback = varlib.Wrap(99)

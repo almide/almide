@@ -304,8 +304,13 @@ pub(super) fn lower_pattern(ctx: &mut LowerCtx, pat: &ast::Pattern, ty: &Ty) -> 
             IrPattern::Constructor { name: bare_name.to_string(), args: ir_args }
         }
         ast::Pattern::RecordPattern { name, fields, rest } => {
+            // Normalize module-qualified names: "command.Move" → "Move" (mirrors the
+            // Constructor arm above). Without this a cross-module record-variant
+            // pattern keeps its `mod.Ctor` name into the IR, so field-type resolution
+            // and both backends fail to find the variant (#412).
+            let bare_name = name.as_str().rsplit_once('.').map(|(_, b)| sym(b)).unwrap_or(*name);
             let ir_fields: Vec<IrFieldPattern> = fields.iter().map(|f| {
-                let field_ty = resolve_record_field_ty(ctx, name, &f.name);
+                let field_ty = resolve_record_field_ty(ctx, &bare_name, &f.name);
                 IrFieldPattern {
                     name: f.name.to_string(),
                     pattern: f.pattern.as_ref().map(|p| lower_pattern(ctx, p, &field_ty)),
@@ -315,12 +320,12 @@ pub(super) fn lower_pattern(ctx: &mut LowerCtx, pat: &ast::Pattern, ty: &Ty) -> 
             let mut ir_fields = ir_fields;
             for (i, f) in fields.iter().enumerate() {
                 if f.pattern.is_none() {
-                    let field_ty = resolve_record_field_ty(ctx, name, &f.name);
+                    let field_ty = resolve_record_field_ty(ctx, &bare_name, &f.name);
                     let var = ctx.define_var(&f.name, field_ty.clone(), Mutability::Let, None);
                     ir_fields[i].pattern = Some(IrPattern::Bind { var, ty: field_ty });
                 }
             }
-            IrPattern::RecordPattern { name: name.to_string(), fields: ir_fields, rest: *rest }
+            IrPattern::RecordPattern { name: bare_name.to_string(), fields: ir_fields, rest: *rest }
         }
         ast::Pattern::Tuple { elements } => {
             let elem_tys = match ty {
