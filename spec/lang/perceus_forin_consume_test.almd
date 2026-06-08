@@ -1,0 +1,38 @@
+// Regression (snaidhm `make_circle`): a `let`-bound list literal whose only use
+// is being iterated by `for ... in` (its last use), inside a closure, must not
+// trip the WASM Perceus RC-leak gate. The iterable is CONSUMED — moved into the
+// loop — so a missing Dec in the var's block is a move, not a leak.
+
+type P = { x: Float, y: Float }
+
+test "let-list consumed by for-in inside a closure" {
+  let make = (n: Int) => {
+    let pts = [
+      { x: 1.0, y: 2.0 },
+      { x: 3.0, y: 4.0 },
+      { x: 5.0, y: 6.0 },
+    ]
+    var acc: List[Float] = []
+    for p in pts {
+      acc = acc + [p.x + p.y]
+    }
+    acc
+  }
+  let r = make(3)
+  assert_eq(list.len(r), 3)
+}
+
+// Top-level fn variant of the same shape.
+fn sums(pts: List[P]) -> List[Float] = {
+  var acc: List[Float] = []
+  for p in pts {
+    acc = acc + [p.x + p.y]
+  }
+  acc
+}
+
+test "for-in consume at top level" {
+  let pts2 = [{ x: 10.0, y: 1.0 }, { x: 20.0, y: 2.0 }]
+  let s = sums(pts2)
+  assert_eq(list.len(s), 2)
+}
