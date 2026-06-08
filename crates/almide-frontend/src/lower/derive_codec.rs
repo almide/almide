@@ -433,13 +433,116 @@ pub(super) fn auto_derive_variant_decode(vt: &mut VarTable, type_name: &str, typ
                     ty: result_ty.clone(), span: None, def_id: None,
                 }
             }
-            _ => {
-                // For Tuple/Record variants, just wrap in Ok for now (payload decode is complex)
-                IrExpr {
-                    kind: IrExprKind::ResultErr { expr: Box::new(IrExpr {
-                        kind: IrExprKind::LitStr { value: format!("variant {} payload decode not yet implemented", case.name) },
-                        ty: Ty::String, span: None, def_id: None,
+            IrVariantKind::Tuple { fields } => {
+                // Payload is a positional array `[e0, e1, …]` (see variant encode).
+                // Bind `_arr = value.as_array(payload)?`, decode each element by its
+                // field type, then `Ok(Ctor(e0, e1, …))`.
+                let arr_ty = Ty::list(value_ty.clone());
+                let arr_var = vt.alloc(sym("_arr"), arr_ty.clone(), Mutability::Let, None);
+                let as_array = IrExpr {
+                    kind: IrExprKind::Try { expr: Box::new(IrExpr {
+                        kind: IrExprKind::Call {
+                            target: CallTarget::Module { module: sym("value"), func: sym("as_array"), def_id: None },
+                            args: vec![IrExpr { kind: IrExprKind::Var { id: var_payload }, ty: value_ty.clone(), span: None, def_id: None }],
+                            type_args: vec![],
+                        },
+                        ty: Ty::result(arr_ty.clone(), Ty::String), span: None, def_id: None,
                     })},
+                    ty: arr_ty.clone(), span: None, def_id: None,
+                };
+                let mut stmts = vec![IrStmt {
+                    kind: IrStmtKind::Bind { var: arr_var, mutability: Mutability::Let, ty: arr_ty.clone(), value: as_array },
+                    span: None,
+                }];
+                let mut elem_vars = vec![];
+                for (i, field_ty) in fields.iter().enumerate() {
+                    let elem = IrExpr {
+                        kind: IrExprKind::IndexAccess {
+                            object: Box::new(IrExpr { kind: IrExprKind::Var { id: arr_var }, ty: arr_ty.clone(), span: None, def_id: None }),
+                            index: Box::new(IrExpr { kind: IrExprKind::LitInt { value: i as i64 }, ty: Ty::Int, span: None, def_id: None }),
+                        },
+                        ty: value_ty.clone(), span: None, def_id: None,
+                    };
+                    let decoded = decode_field_value(elem, field_ty, &value_ty);
+                    let ev = vt.alloc(sym(&format!("_e{}", i)), field_ty.clone(), Mutability::Let, None);
+                    stmts.push(IrStmt {
+                        kind: IrStmtKind::Bind { var: ev, mutability: Mutability::Let, ty: field_ty.clone(), value: decoded },
+                        span: None,
+                    });
+                    elem_vars.push(ev);
+                }
+                let ctor = IrExpr {
+                    kind: IrExprKind::Call {
+                        target: CallTarget::Named { name: case.name },
+                        args: elem_vars.iter().map(|v| IrExpr { kind: IrExprKind::Var { id: *v }, ty: Ty::Unknown, span: None, def_id: None }).collect(),
+                        type_args: vec![],
+                    },
+                    ty: type_ty.clone(), span: None, def_id: None,
+                };
+                IrExpr {
+                    kind: IrExprKind::Block {
+                        stmts,
+                        expr: Some(Box::new(IrExpr { kind: IrExprKind::ResultOk { expr: Box::new(ctor) }, ty: result_ty.clone(), span: None, def_id: None })),
+                    },
+                    ty: result_ty.clone(), span: None, def_id: None,
+                }
+            }
+            IrVariantKind::Record { fields } => {
+                // Payload is `{ "field": value, … }` (see variant encode). Decode each
+                // field by key/type, then `Ok(Ctor { field: …, … })`.
+                let mut stmts = vec![];
+                let mut field_pairs = vec![];
+                for f in fields {
+                    let key = f.alias.map(|a| a.to_string()).unwrap_or_else(|| f.name.to_string());
+                    let decoded = if f.ty.is_option() {
+                        let inner_ty = f.ty.inner().cloned().unwrap_or_else(|| f.ty.clone());
+                        IrExpr {
+                            kind: IrExprKind::Try { expr: Box::new(IrExpr {
+                                kind: IrExprKind::Call {
+                                    target: CallTarget::Named { name: sym(&format!("__decode_option_{}", decode_func_suffix(&inner_ty))) },
+                                    args: vec![
+                                        IrExpr { kind: IrExprKind::Var { id: var_payload }, ty: value_ty.clone(), span: None, def_id: None },
+                                        IrExpr { kind: IrExprKind::LitStr { value: key.clone() }, ty: Ty::String, span: None, def_id: None },
+                                    ],
+                                    type_args: vec![],
+                                },
+                                ty: Ty::result(f.ty.clone(), Ty::String), span: None, def_id: None,
+                            })},
+                            ty: f.ty.clone(), span: None, def_id: None,
+                        }
+                    } else {
+                        let get_field = IrExpr {
+                            kind: IrExprKind::Try { expr: Box::new(IrExpr {
+                                kind: IrExprKind::Call {
+                                    target: CallTarget::Module { module: sym("value"), func: sym("field"), def_id: None },
+                                    args: vec![
+                                        IrExpr { kind: IrExprKind::Var { id: var_payload }, ty: value_ty.clone(), span: None, def_id: None },
+                                        IrExpr { kind: IrExprKind::LitStr { value: key.clone() }, ty: Ty::String, span: None, def_id: None },
+                                    ],
+                                    type_args: vec![],
+                                },
+                                ty: Ty::result(value_ty.clone(), Ty::String), span: None, def_id: None,
+                            })},
+                            ty: value_ty.clone(), span: None, def_id: None,
+                        };
+                        decode_field_value(get_field, &f.ty, &value_ty)
+                    };
+                    let fv = vt.alloc(sym(&format!("_{}", f.name)), f.ty.clone(), Mutability::Let, None);
+                    stmts.push(IrStmt {
+                        kind: IrStmtKind::Bind { var: fv, mutability: Mutability::Let, ty: f.ty.clone(), value: decoded },
+                        span: None,
+                    });
+                    field_pairs.push((f.name, IrExpr { kind: IrExprKind::Var { id: fv }, ty: Ty::Unknown, span: None, def_id: None }));
+                }
+                let record = IrExpr {
+                    kind: IrExprKind::Record { name: Some(case.name), fields: field_pairs },
+                    ty: type_ty.clone(), span: None, def_id: None,
+                };
+                IrExpr {
+                    kind: IrExprKind::Block {
+                        stmts,
+                        expr: Some(Box::new(IrExpr { kind: IrExprKind::ResultOk { expr: Box::new(record) }, ty: result_ty.clone(), span: None, def_id: None })),
+                    },
                     ty: result_ty.clone(), span: None, def_id: None,
                 }
             }
