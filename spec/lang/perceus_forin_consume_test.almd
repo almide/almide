@@ -32,7 +32,7 @@ fn sums(pts: List[P]) -> List[Float] = {
 }
 
 test "for-in consume at top level" {
-  let local = [{ x: 10.0, y: 1.0 }, { x: 20.0, y: 2.0 }]
-  let s = sums(local)
+  let pts2 = [{ x: 10.0, y: 1.0 }, { x: 20.0, y: 2.0 }]
+  let s = sums(pts2)
   assert_eq(list.len(s), 2)
 }
