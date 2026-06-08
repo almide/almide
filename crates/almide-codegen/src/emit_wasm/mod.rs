@@ -1250,7 +1250,7 @@ pub(crate) fn emit(program: &IrProgram) -> Vec<u8> {
     // match the layout chosen by the corresponding stdlib emit (see
     // calls_http.rs `response`/`json`).
     use almide_lang::types::Ty as _Ty;
-    emitter.record_fields.insert("Response".to_string(), vec![
+    emitter.record_fields.insert("HttpResponse".to_string(), vec![
         ("status".to_string(),  _Ty::Int),     // i64 @ 0
         ("body".to_string(),    _Ty::String),  // i32 ptr @ 8
         ("headers".to_string(),
@@ -1258,7 +1258,7 @@ pub(crate) fn emit(program: &IrProgram) -> Vec<u8> {
                 _Ty::Tuple(vec![_Ty::String, _Ty::String]),
             ])),                                // i32 ptr @ 12
     ]);
-    emitter.record_fields.insert("Request".to_string(), vec![
+    emitter.record_fields.insert("HttpRequest".to_string(), vec![
         ("method".to_string(),  _Ty::String),
         ("path".to_string(),    _Ty::String),
         ("body".to_string(),    _Ty::String),
