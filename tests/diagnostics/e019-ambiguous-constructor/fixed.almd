@@ -1,0 +1,7 @@
+type Cmd = | Stop | Send(Int)
+type Event = | Tick | Emit(Int)
+
+fn main() -> Unit = {
+  let x = Send(5)
+  println("${x}")
+}
