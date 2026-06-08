@@ -1,0 +1,48 @@
+// #411: derived `Codec` decode for variant payloads (tuple- and record-variants),
+// not just unit variants. Each test round-trips encode → decode and pattern-matches
+// the result. Previously `T.decode` returned `Err("variant … payload decode not yet
+// implemented")` for any non-unit case.
+
+type Color: Codec = { r: Int, g: Int, b: Int }
+
+type Shape: Codec =
+  | Wrap(Color)
+  | Tag { name: String, c: Color }
+  | Multi(List[Int])
+  | Pair(Int, String)
+  | Plain
+
+test "tuple variant with a nested Codec type" {
+  match Shape.decode(Shape.encode(Wrap({ r: 1, g: 2, b: 3 }))) {
+    ok(Wrap(c)) => assert_eq(c.g, 2),
+    _ => assert(false),
+  }
+}
+
+test "record variant" {
+  match Shape.decode(Shape.encode(Tag { name: "hi", c: { r: 4, g: 5, b: 6 } })) {
+    ok(Tag { name, c }) => { assert_eq(name, "hi"); assert_eq(c.b, 6) },
+    _ => assert(false),
+  }
+}
+
+test "tuple variant with a List field" {
+  match Shape.decode(Shape.encode(Multi([1, 2, 3]))) {
+    ok(Multi(xs)) => assert_eq(list.len(xs), 3),
+    _ => assert(false),
+  }
+}
+
+test "multi-element tuple variant" {
+  match Shape.decode(Shape.encode(Pair(7, "x"))) {
+    ok(Pair(n, s)) => { assert_eq(n, 7); assert_eq(s, "x") },
+    _ => assert(false),
+  }
+}
+
+test "unit variant still works" {
+  match Shape.decode(Shape.encode(Plain)) {
+    ok(Plain) => assert(true),
+    _ => assert(false),
+  }
+}
