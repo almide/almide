@@ -1,0 +1,3 @@
+expects_code = "E019"
+expects_error = "ambiguous constructor"
+hint_substring = "Rename"

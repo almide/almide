@@ -99,7 +99,8 @@ impl Checker {
                 if let Some(Ty::ConstParam { ty, .. }) = self.env.types.get(&sym(name)).cloned() {
                     return *ty;
                 }
-                if let Some((type_name, case)) = self.env.constructors.get(&sym(name)).cloned() {
+                if let Some((type_name, case)) = self.env.lookup_ctor(&sym(name)) {
+                    self.report_ambiguous_ctor(name);
                     match &case.payload {
                         VariantPayload::Tuple(tys) if !tys.is_empty() => {
                             // Constructor with payload used as value → function type
@@ -190,7 +191,7 @@ impl Checker {
                     // List[Int] }`, resolved from `env.types`). Both reduce to a
                     // `(field, declared_ty)` list with generics already substituted.
                     let (result_ty, decl_fields): (Ty, Vec<(Sym, Ty)>) =
-                        if let Some((type_name, case)) = self.env.constructors.get(&sym(n)).cloned() {
+                        if let Some((type_name, case)) = self.env.lookup_ctor(&sym(n)) {
                             let generic_args = self.instantiate_type_generics(type_name.as_str());
                             let subst: std::collections::HashMap<Sym, Ty> = if !generic_args.is_empty() {
                                 self.env.types.get(&type_name).cloned().map(|ty_def| {
@@ -281,7 +282,7 @@ impl Checker {
                         return let_ty;
                     }
                     // Cross-module variant constructor as value: dispatch.Never, binary.ImportFunc
-                    if let Some((type_name, case)) = self.env.constructors.get(&sym(field)).cloned() {
+                    if let Some((type_name, case)) = self.env.lookup_ctor(&sym(field)) {
                         let resolved_mod = self.env.import_table.resolve(mod_name)
                             .unwrap_or(sym(mod_name));
                         let qualified = format!("{}.{}", resolved_mod.as_str(), type_name.as_str());

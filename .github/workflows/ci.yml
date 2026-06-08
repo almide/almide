@@ -14,6 +14,12 @@ on:
       - '*.md'
       - 'LICENSE'
 
+# Cancel superseded runs on the same ref so a burst of pushes doesn't fire N
+# concurrent runs that all re-download tools and trip the per-IP rate limit.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
   RUST_TOOLCHAIN: "1.89.0"
@@ -84,7 +90,13 @@ jobs:
           # yielding an empty VERSION and a garbage download (hit 2026-06-06).
           # A pinned toolchain is also reproducible. Bump deliberately.
           VERSION=v42.0.1
-          curl -LO "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/wasmtime-${VERSION}-x86_64-linux.tar.xz"
+          # Retry with `-f` (fail on HTTP error, e.g. a 403 rate-limit body) so a
+          # transient per-IP rate-limit on the release asset is retried, not saved
+          # as a 92-byte "not a tar archive".
+          for i in 1 2 3 4 5; do
+            curl -fLO "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/wasmtime-${VERSION}-x86_64-linux.tar.xz" && break
+            echo "wasmtime download failed (rate-limit?), retry ${i}/5"; sleep 15; rm -f wasmtime-*.tar.xz
+          done
           tar -xf wasmtime-*.tar.xz
           sudo mv wasmtime-*/wasmtime /usr/local/bin/
           wasmtime --version
@@ -125,15 +137,26 @@ jobs:
       - name: Setup almide
         run: chmod +x /tmp/almide-bin/almide
 
+      - name: Cache wasmtime tarball
+        uses: actions/cache@v4
+        with:
+          path: wasmtime-v42.0.1-x86_64-linux.tar.xz
+          key: wasmtime-v42.0.1-x86_64-linux
       - name: Install wasmtime
         run: |
-          # Pinned (not "latest"): the unauthenticated releases/latest API call is
-          # rate-limited per runner IP and intermittently returns an error body,
-          # yielding an empty VERSION and a garbage download (hit 2026-06-06).
-          # A pinned toolchain is also reproducible. Bump deliberately.
+          # Pinned + cached + retried. On a cache hit the tarball is already here,
+          # so the per-IP-rate-limited release download runs at most once per key.
+          # `-f` turns a 403 rate-limit body into a retry instead of a 92-byte
+          # "not a tar archive". Bump VERSION and the cache key together.
           VERSION=v42.0.1
-          curl -LO "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/wasmtime-${VERSION}-x86_64-linux.tar.xz"
-          tar -xf wasmtime-*.tar.xz
+          TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
+          if [ ! -s "$TARBALL" ]; then
+            for i in 1 2 3 4 5; do
+              curl -fLO "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" && break
+              echo "wasmtime download failed (rate-limit?), retry ${i}/5"; sleep 15; rm -f "$TARBALL"
+            done
+          fi
+          tar -xf "$TARBALL"
           sudo mv wasmtime-*/wasmtime /usr/local/bin/
           wasmtime --version
 
@@ -183,15 +206,26 @@ jobs:
           key: wasmgen-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('**/Cargo.lock') }}-${{ hashFiles('crates/almide-codegen/src/emit_wasm/**', 'crates/almide-codegen/src/lib.rs', 'crates/almide-codegen/src/pass.rs') }}
           restore-keys: wasmgen-${{ env.RUST_TOOLCHAIN }}-
 
+      - name: Cache wasmtime tarball
+        uses: actions/cache@v4
+        with:
+          path: wasmtime-v42.0.1-x86_64-linux.tar.xz
+          key: wasmtime-v42.0.1-x86_64-linux
       - name: Install wasmtime
         run: |
-          # Pinned (not "latest"): the unauthenticated releases/latest API call is
-          # rate-limited per runner IP and intermittently returns an error body,
-          # yielding an empty VERSION and a garbage download (hit 2026-06-06).
-          # A pinned toolchain is also reproducible. Bump deliberately.
+          # Pinned + cached + retried. On a cache hit the tarball is already here,
+          # so the per-IP-rate-limited release download runs at most once per key.
+          # `-f` turns a 403 rate-limit body into a retry instead of a 92-byte
+          # "not a tar archive". Bump VERSION and the cache key together.
           VERSION=v42.0.1
-          curl -LO "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/wasmtime-${VERSION}-x86_64-linux.tar.xz"
-          tar -xf wasmtime-*.tar.xz
+          TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
+          if [ ! -s "$TARBALL" ]; then
+            for i in 1 2 3 4 5; do
+              curl -fLO "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" && break
+              echo "wasmtime download failed (rate-limit?), retry ${i}/5"; sleep 15; rm -f "$TARBALL"
+            done
+          fi
+          tar -xf "$TARBALL"
           sudo mv wasmtime-*/wasmtime /usr/local/bin/
           wasmtime --version
 
@@ -225,8 +259,36 @@ jobs:
           fi
           echo "✓ 0 sorry in Lean proofs"
 
+      - name: Cache elan + Lean toolchain
+        uses: actions/cache@v4
+        with:
+          path: ~/.elan
+          key: elan-${{ runner.os }}-${{ hashFiles('crates/almide-perceus-belt/lean-toolchain') }}
+
+      - name: Install elan (retry-resilient)
+        # lean-action's internal elan-init has no retry, so a transient GitHub 504
+        # (or 403 rate-limit) on the elan tarball download fails the whole job.
+        # Pre-install elan here with a retry loop — and cache ~/.elan above — so
+        # lean-action finds elan already in PATH and skips its own fragile download.
+        run: |
+          if [ ! -x "$HOME/.elan/bin/elan" ]; then
+            for i in 1 2 3 4 5; do
+              curl -sSfL https://github.com/leanprover/elan/releases/latest/download/elan-x86_64-unknown-linux-gnu.tar.gz -o /tmp/elan.tar.gz && break
+              echo "elan download failed (504/rate-limit?), retry ${i}/5"; sleep 20; rm -f /tmp/elan.tar.gz
+            done
+            tar xzf /tmp/elan.tar.gz -C /tmp
+            /tmp/elan-init -y --default-toolchain none --no-modify-path
+          fi
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+
       - name: Kernel-check proofs (lake build)
         uses: leanprover/lean-action@v1
+        # Authenticate the elan/toolchain release-tag API calls so they use the
+        # 5000/hr authenticated limit instead of the 60/hr per-IP one that
+        # intermittently 403s with "failed to parse latest release tag".
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           lake-package-directory: crates/almide-perceus-belt
 

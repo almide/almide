@@ -83,7 +83,7 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
         }
         ast::ExprKind::TypeName { name, .. } => {
             // Variant constructor used as value (e.g., Red)
-            if let Some((_, case)) = ctx.env.constructors.get(&sym(name)) {
+            if let Some((_, case)) = ctx.env.lookup_ctor(&sym(name)) {
                 if let crate::types::VariantPayload::Tuple(param_tys) = &case.payload {
                     if !param_tys.is_empty() && matches!(&ty, Ty::Fn { .. }) {
                         // Constructor with payload as function value → generate lambda
@@ -496,7 +496,7 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
                 }
 
                 // Cross-module variant constructor as value: dispatch.Never, binary.ImportFunc
-                if let Some((type_name, case)) = ctx.env.constructors.get(field).cloned() {
+                if let Some((type_name, case)) = ctx.env.lookup_ctor(field) {
                     let resolved = ctx.env.import_table.aliases.get(mod_name).copied()
                         .unwrap_or(*mod_name);
                     let qualified = format!("{}.{}", resolved.as_str(), type_name.as_str());

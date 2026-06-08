@@ -84,6 +84,12 @@ pub enum CodegenOutput {
 pub struct CodegenOptions {
     /// Emit `#[repr(C)]` on structs/enums for stable C ABI layout.
     pub repr_c: bool,
+    /// Waiver for the Perceus RC gate (`--emit-unverified`): when a function
+    /// fails Perceus verification, emit it anyway with a warning instead of
+    /// refusing the build. A violation is a compiler bug (callee-inserted RC,
+    /// not user code), so the default is a hard error; this flag exists only as
+    /// an explicit, recorded escape hatch for shipping despite a known leak.
+    pub allow_unverified: bool,
 }
 
 /// Marker the Rust emitter inserts between the inlined runtime preamble and the
@@ -194,11 +200,17 @@ pub fn program_uses_fan_timeout(program: &IrProgram) -> bool {
 pub struct Verified<'a>(pub(crate) &'a IrProgram);
 
 impl<'a> Verified<'a> {
-    /// Verify Perceus RC balance and construct Verified gate.
-    /// Violations are reported as warnings. The program still compiles
-    /// (Perceus violations cause leaks, not unsoundness), but the
-    /// verification result is tracked for future hard-error mode.
-    fn verify(program: &'a IrProgram) -> Self {
+    /// Verify Perceus RC balance and construct the `Verified` gate.
+    ///
+    /// A violation is a bug in the compiler's *own* inserted RC ops (the callee,
+    /// not user code), so the receiver who can act on it is the compiler author,
+    /// not the user — the diagnostic class is therefore ICE, and the default is a
+    /// hard refusal to emit (controlled `process::exit`, mirroring
+    /// [`pass_concretize_types::assert_types_concretized`], NOT a `panic!`
+    /// backtrace). "leaks, not unsoundness" sets the message's tone, not whether
+    /// the gate opens. `allow_unverified` (`--emit-unverified`) is the explicit
+    /// waiver: emit despite a known leak, with a warning, for deliberate use.
+    fn verify(program: &'a IrProgram, allow_unverified: bool) -> Self {
         let mut total_violations = 0usize;
         for func in &program.functions {
             if func.is_test { continue; }
@@ -206,7 +218,28 @@ impl<'a> Verified<'a> {
             total_violations += violations;
         }
         if total_violations > 0 {
-            eprintln!("[Perceus] {total_violations} RC violation(s) — WASM may leak memory");
+            if allow_unverified {
+                eprintln!(
+                    "[Perceus] warning: {total_violations} RC violation(s) emitted unverified \
+                     (--emit-unverified) — the WASM artifact may leak memory"
+                );
+            } else {
+                // ICE convention: same shape as `assert_types_concretized` — a
+                // `[COMPILER BUG]` diagnostic + controlled `process::exit`, NOT a
+                // numeric E-code (those collide with the rustc `E060x` space the
+                // diagnostics registry reserves) and NOT a `panic!` backtrace.
+                eprintln!(
+                    "error: [COMPILER BUG] Perceus RC verification failed\n  \
+                     {total_violations} function-internal RC violation(s) (see the [perceus-belt] \
+                     lines above) would emit a WASM artifact that leaks or double-frees memory, so \
+                     the build is refused.\n  \
+                     This is a bug in the compiler's inserted reference counting, NOT an error in \
+                     your program — you cannot fix it in source.\n  \
+                     hint: please report this at https://github.com/almide/almide/issues with the \
+                     source above; to ship the leaky artifact anyway, re-run with --emit-unverified."
+                );
+                std::process::exit(1);
+            }
         }
         Self(program)
     }
@@ -288,7 +321,7 @@ pub fn codegen_with(program: &mut IrProgram, target: Target, options: &CodegenOp
             //               (browser) compiler can't diverge from native.
             // `CanonicalizePass` (terminal pipeline pass) establishes the order;
             // `Canonical::certify` consumes `Verified` and asserts it.
-            let verified = Verified::verify(program);
+            let verified = Verified::verify(program, options.allow_unverified);
             let canonical = Canonical::certify(verified);
             let out = emit_wasm::emit_certified(canonical);
             if let Some(et) = &et { eprintln!("[prof:codegen] wasm_emit={:.3}s", et.elapsed_secs()); }

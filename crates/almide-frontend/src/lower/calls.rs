@@ -130,7 +130,7 @@ pub(super) fn lower_call(ctx: &mut LowerCtx, callee: &ast::Expr, args: &[ast::Ex
                     super::statements::coerce_literal_to_sized(arg, param_ty, ctx.env);
                 }
             }
-        } else if let Some((_, case)) = ctx.env.constructors.get(&almide_base::intern::sym(name)).cloned() {
+        } else if let Some((_, case)) = ctx.env.lookup_ctor(&almide_base::intern::sym(name)) {
             // Tuple-payload variant constructor (`Click(Int32, Int)`): narrow each
             // bare-literal arg to its declared payload type so `Click(42, 9)` emits
             // `Click(42i32, 9i64)` — without this the `42` stays `i64`, which native
@@ -241,7 +241,7 @@ pub(super) fn lower_call_target(ctx: &mut LowerCtx, callee: &ast::Expr) -> CallT
                     || ctx.env.import_table.aliases.contains_key(module))
                 {
                     // Cross-module variant constructor call: binary.ImportFunc(0)
-                    if let Some((type_name, _)) = ctx.env.constructors.get(field) {
+                    if let Some((type_name, _)) = ctx.env.lookup_ctor(field) {
                         let resolved = ctx.env.import_table.aliases.get(module).copied()
                             .unwrap_or(*module);
                         let qualified = format!("{}.{}", resolved.as_str(), type_name.as_str());

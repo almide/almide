@@ -212,7 +212,7 @@ impl Checker {
             });
             if let Some(m) = resolved_module {
                 // Cross-module variant constructor call: binary.ImportFunc(0)
-                if let Some((type_name, case)) = self.env.constructors.get(&sym(field)).cloned() {
+                if let Some((type_name, case)) = self.env.lookup_ctor(&sym(field)) {
                     let qualified = format!("{}.{}", m, type_name.as_str());
                     if self.env.types.contains_key(&sym(&qualified)) {
                         self.check_constructor_args(field, &case, arg_tys);

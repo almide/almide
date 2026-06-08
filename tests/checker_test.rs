@@ -1219,3 +1219,26 @@ fn duplicate_int_literal_is_still_unreachable() {
     assert!(errs.iter().any(|e| e.contains("unreachable match arm")),
         "duplicate some(1) must report E014, got: {:?}", errs);
 }
+
+#[test]
+fn ambiguous_constructor_reports_e019() {
+    // The same ctor `Pong` in two variant types is ambiguous when used bare (#413).
+    let errs = errors(
+        "type Cmd = | Pong | Move(Int)\n\
+         type Resp = | Pong | Ack(Int)\n\
+         fn cmd(c: Cmd) -> Int = match c { Pong => 1, Move(x) => x }\n\
+         fn main() -> Unit = { println(int.to_string(cmd(Pong))) }"
+    );
+    assert!(errs.iter().any(|e| e.contains("ambiguous constructor 'Pong'")),
+        "ambiguous ctor must report E019, got: {:?}", errs);
+}
+
+#[test]
+fn unambiguous_constructor_is_not_flagged() {
+    // A ctor name in exactly one type must NOT trip the ambiguity check.
+    has_no_errors(
+        "type Cmd = | Stop | Move(Int)\n\
+         fn cmd(c: Cmd) -> Int = match c { Stop => 0, Move(x) => x }\n\
+         fn main() -> Unit = { println(int.to_string(cmd(Stop))) }"
+    );
+}

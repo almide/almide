@@ -138,7 +138,7 @@ pub fn cmd_emit(file: &str, target: &str, emit_ast: bool, emit_ir: bool, emit_di
                 "wgsl" => codegen::pass::Target::Wgsl,
                 other => { eprintln!("Unknown target: {}. Use rust, wgsl.", other); std::process::exit(1); }
             };
-            let opts = codegen::CodegenOptions { repr_c };
+            let opts = codegen::CodegenOptions { repr_c, allow_unverified: false };
             match codegen::codegen_with(ir, t, &opts) {
                 codegen::CodegenOutput::Source(code) => print!("{}", code),
                 codegen::CodegenOutput::Binary(_) => unreachable!(),

@@ -1,7 +1,7 @@
 use std::process::Command;
 use crate::{compile_with_ir, parse_file, canonicalize, check, diagnostic, resolve, project, project_fetch};
 
-pub fn cmd_build(file: &str, output: Option<&str>, target: Option<&str>, release: bool, fast: bool, _unchecked_index: bool, no_check: bool, repr_c: bool, cdylib: bool) {
+pub fn cmd_build(file: &str, output: Option<&str>, target: Option<&str>, release: bool, fast: bool, _unchecked_index: bool, no_check: bool, repr_c: bool, cdylib: bool, emit_unverified: bool) {
     let is_npm = matches!(target, Some("npm"));
     let is_wasm = matches!(target, Some("wasm" | "wasm32" | "wasi"));
     let is_wasm_direct = matches!(target, Some("wasm"));
@@ -13,7 +13,7 @@ pub fn cmd_build(file: &str, output: Option<&str>, target: Option<&str>, release
 
     // Direct WASM emit: .almd → IR → WASM binary (no rustc)
     if is_wasm_direct {
-        cmd_build_wasm_direct(file, output, no_check);
+        cmd_build_wasm_direct(file, output, no_check, emit_unverified);
         return;
     }
 
@@ -40,7 +40,7 @@ pub fn cmd_build(file: &str, output: Option<&str>, target: Option<&str>, release
         output_raw.to_string()
     };
 
-    let opts = crate::codegen::CodegenOptions { repr_c };
+    let opts = crate::codegen::CodegenOptions { repr_c, allow_unverified: false };
     let (rs_code, _ir) = crate::try_compile_with_ir(file, no_check, &opts)
         .unwrap_or_else(|_| std::process::exit(1));
 
@@ -152,7 +152,7 @@ fn cmd_build_wasi_rustc(rs_code: &str, output: &str) {
 }
 
 /// Direct WASM emit: parse → check → lower → optimize → monomorphize → emit WASM binary.
-fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool) {
+fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allow_unverified: bool) {
     let default_output = format!("{}.wasm", file.strip_suffix(".almd").unwrap_or("a.out"));
     let output = output.unwrap_or(&default_output);
 
@@ -161,7 +161,7 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool) {
     // command writes — the cross-target equivalence guarantee depends on both
     // entry points sharing one code path. Any compile diagnostic was already
     // printed there; we just propagate the exit.
-    let bytes = match compile_to_wasm_bytes(file) {
+    let bytes = match compile_to_wasm_bytes(file, allow_unverified) {
         Ok(b) => b,
         Err(()) => std::process::exit(1),
     };
@@ -196,7 +196,7 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool) {
 /// the byte-identical module the cross-target equivalence guarantee promises.
 /// Compile diagnostics are rendered to stderr here; on any error it returns
 /// `Err(())` and the caller decides how to terminate.
-pub(crate) fn compile_to_wasm_bytes(file: &str) -> Result<Vec<u8>, ()> {
+pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool) -> Result<Vec<u8>, ()> {
     let (mut program, source_text, parse_errors) = parse_file(file);
 
     if !parse_errors.is_empty() {
@@ -315,8 +315,12 @@ pub(crate) fn compile_to_wasm_bytes(file: &str) -> Result<Vec<u8>, ()> {
         );
     }
 
-    // Codegen (nanopass pipeline + WASM binary emit)
-    let bytes = match almide::codegen::codegen(&mut ir_program, almide::codegen::pass::Target::Wasm) {
+    // Codegen (nanopass pipeline + WASM binary emit). The Perceus RC gate
+    // (`Verified::verify`) runs inside this path; `allow_unverified` selects
+    // hard-error (default) vs the `--emit-unverified` waiver. It does not change
+    // emitted bytes, so the build/run cross-target byte-identity still holds.
+    let opts = almide::codegen::CodegenOptions { repr_c: false, allow_unverified };
+    let bytes = match almide::codegen::codegen_with(&mut ir_program, almide::codegen::pass::Target::Wasm, &opts) {
         almide::codegen::CodegenOutput::Binary(b) => b,
         almide::codegen::CodegenOutput::Source(_) => unreachable!(),
     };

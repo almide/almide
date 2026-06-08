@@ -12,8 +12,13 @@ use std::sync::Arc;
 #[cfg(not(target_arch = "wasm32"))]
 use rustls::{ClientConfig, ClientConnection, StreamOwned, RootCertStore};
 
-// ── Response type ──
-pub type Response = AlmideHttpResponse;
+// ── HTTP response/request type aliases ──
+// Named `HttpResponse`/`HttpRequest` (not `Response`/`Request`) so the emitted
+// alias never collides with a user/dependency `enum Response` in the same Rust
+// module (E0428). The `HttpRequest` alias also gives the user-facing `HttpRequest`
+// type a Rust name so `http.serve` handlers compile.
+pub type HttpResponse = AlmideHttpResponse;
+pub type HttpRequest = AlmideHttpRequest;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct AlmideHttpResponse {

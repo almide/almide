@@ -115,8 +115,13 @@ fn compile_function_inner(
     // Simple functions (pure recursion, no stdlib calls) get minimal scratch.
     // Complex functions (stdlib pipelines) get full capacity.
     let needs_full_scratch = body_needs_scratch(&func.body);
+    // Generous fixed caps: scratch locals live at `base..base+cap`, so a deep
+    // stdlib pipeline that needs more simultaneous temps than the cap overflows
+    // (#417) and falls back to the native build. These margins cover realistic
+    // functions; the exact fix is a two-pass emit that sizes caps to the measured
+    // high-water mark. Unused scratch locals are zero-cost declarations.
     let (scratch_i32_cap, scratch_i64_cap, scratch_f64_cap, scratch_v128_cap) = if needs_full_scratch {
-        (48usize, 16usize, 16usize, 8usize)
+        (64usize, 48usize, 48usize, 8usize)
     } else {
         // Minimal: enough for basic match/if temporaries
         (4usize, 2usize, 2usize, 0usize)

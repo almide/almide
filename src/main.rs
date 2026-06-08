@@ -82,6 +82,11 @@ enum Commands {
         /// Build as shared library (.dylib/.so) instead of executable
         #[arg(long)]
         cdylib: bool,
+        /// Emit the WASM module even if the Perceus RC gate fails (waiver for a
+        /// known compiler-RC bug; the artifact may leak memory). Without this a
+        /// verification failure is a hard error.
+        #[arg(long)]
+        emit_unverified: bool,
     },
     /// Run tests
     Test {
@@ -664,9 +669,9 @@ fn dispatch(cli: Cli) {
             let file = resolve_file(file);
             cli::cmd_run(&file, &program_args, no_check, release, target.as_deref());
         }
-        Commands::Build { file, o, target, release, fast, unchecked_index, no_check, repr_c, cdylib } => {
+        Commands::Build { file, o, target, release, fast, unchecked_index, no_check, repr_c, cdylib, emit_unverified } => {
             let file = resolve_file(file);
-            cli::cmd_build(&file, o.as_deref(), target.as_deref(), release || fast, fast, unchecked_index, no_check, repr_c, cdylib);
+            cli::cmd_build(&file, o.as_deref(), target.as_deref(), release || fast, fast, unchecked_index, no_check, repr_c, cdylib, emit_unverified);
         }
         Commands::Test { file, run, no_check, json, target } => {
             let file_str = file.as_deref().unwrap_or("");

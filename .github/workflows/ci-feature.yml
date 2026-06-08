@@ -15,6 +15,12 @@ on:
       - 'LICENSE'
       - '.tasks/**'
 
+# Cancel superseded runs on the same ref so a burst of pushes doesn't fire N
+# concurrent runs that all re-download tools and trip the per-IP rate limit.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
   RUST_TOOLCHAIN: "1.89.0"

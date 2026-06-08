@@ -592,11 +592,13 @@ fn verify_function(func: &IrFunction, var_table: &VarTable) {
 pub fn perceus_verify_function(func: &IrFunction, var_table: &VarTable) -> usize {
     let mut returned_vars: HashSet<VarId> = HashSet::new();
     collect_all_tail_vars(&func.body, &mut returned_vars);
+    let mut moved_out_vars: HashSet<VarId> = HashSet::new();
+    collect_moved_out_vars(&func.body, &mut moved_out_vars);
     let mut env_load_vars_set: HashSet<VarId> = HashSet::new();
     scan_env_loads(&func.body, &mut env_load_vars_set);
 
     let issues = super::perceus_verified::verify_expr(
-        &func.body, var_table, &returned_vars, &env_load_vars_set,
+        &func.body, var_table, &returned_vars, &moved_out_vars, &env_load_vars_set,
     );
     for (var, msg) in &issues {
         let name = var_table.get(*var).name.as_str();
@@ -643,6 +645,36 @@ fn insert_rc_ops(func: &mut IrFunction, var_table: &mut VarTable) -> bool {
     // This avoids double-free (caller Dec + callee Dec on same pointer).
 
     true
+}
+
+/// Collect every var that is moved out of its defining block as a bare-`Var`
+/// block tail. The block's value *is* that var, so ownership transfers to
+/// whatever consumes the block (an enclosing Bind, a return, a call arg); that
+/// consumer carries the Dec. Such a var therefore must not be required to have a
+/// Dec inside its own block — without this set the leak rule would false-positive
+/// on every ANF-lifted tail temporary (e.g. `__perceus_ret`, `__anf_*`).
+///
+/// Exhaustive `IrVisitor` walk — total by construction, so a newly added node
+/// kind that nests blocks cannot silently drop a moved-out tail (unlike the
+/// hand-rolled, tail-context `collect_all_tail_vars`, which deliberately does not
+/// descend into discarded statement positions).
+fn collect_moved_out_vars(expr: &IrExpr, vars: &mut HashSet<VarId>) {
+    use almide_ir::visit::{IrVisitor, walk_expr};
+    struct MovedOutCollector<'a> { vars: &'a mut HashSet<VarId> }
+    impl IrVisitor for MovedOutCollector<'_> {
+        fn visit_expr(&mut self, expr: &IrExpr) {
+            if let IrExprKind::Block { expr: Some(tail), .. } = &expr.kind {
+                if let IrExprKind::Var { id } = &tail.kind {
+                    self.vars.insert(*id);
+                }
+            }
+            walk_expr(self, expr);
+        }
+        fn visit_stmt(&mut self, stmt: &IrStmt) {
+            almide_ir::visit::walk_stmt(self, stmt);
+        }
+    }
+    MovedOutCollector { vars }.visit_expr(expr);
 }
 
 /// Control-flow-aware verification: check branches independently.

@@ -1,7 +1,8 @@
 # WASM Optimization Roadmap
 
-> Almide's WASM emitter: 336B hello world, 5 wins / 2 ties / 4 losses vs Rust+LLVM (v0.23.4).
-> This roadmap targets winning **all 11** benchmarks.
+> Almide's WASM emitter: 336B hello world. **Current: 3 wins / 2 ties / 6 losses vs Rust+LLVM
+> (v0.25.0 vs rustc 1.95, 2026-06-07 — 相手も動く。Baseline Update 参照)**. v0.23.4 時点は 5W/2T/4L。
+> This roadmap targets winning **all 11** benchmarks against *current stable* rustc.
 
 ## Precision Benchmark (1M scale, v0.23.4)
 
@@ -20,6 +21,43 @@
 | math_sqrt_1M       |   0.4ms |  1.5ms | **0.27x**  | ✓ WIN      |
 
 **Score: 5 wins, 2 ties, 4 losses**
+
+---
+
+## Baseline Update 2026-06-07 — v0.25.0 vs rustc 1.95 (相手が動いた)
+
+| Benchmark          | Almide 0.25.0 | Rust 1.95 | Ratio     | Status  | v0.23.4比 |
+|--------------------|---------------|-----------|-----------|---------|-----------|
+| fib38              | 145.2ms       | 142.7ms   | 1.02x     | ≈ TIE   | TIE 維持 |
+| sort_1M            |   5.8ms       |  4.8ms    | 1.21x     | ✗ LOSING | **WIN→LOSS 反転** |
+| list_map_1M        |   3.3ms       |  0.7ms    | 4.7x      | ✗ LOSING | Almide 改善・比は悪化 |
+| list_filter_1M     |   2.6ms       |  1.7ms    | 1.53x     | ✗ LOSING | 横ばい |
+| list_fold_1M       |   1.1ms       |  0.4ms    | 2.75x     | ✗ LOSING | 横ばい |
+| str_concat_1M      |   3.0ms       |  1.4ms    | 2.14x     | ✗ LOSING | 横ばい |
+| map_insert_100k    |   4.2ms       |  3.7ms    | 1.14x     | ✗ LOSING | **TIE→LOSS 反転** |
+| map_get_100k       |   4.8ms       |  5.4ms    | **0.89x** | ✓ WIN   | WIN 維持 |
+| int_parse_1M       |  55.6ms       | 56.0ms    | 0.99x     | ≈ TIE   | WIN→TIE |
+| int_tostring_1M    |  18.6ms       | 50.8ms    | **0.37x** | ✓ WIN   | **35→18.6ms 改善** |
+| math_sqrt_1M       |   0.4ms       |  1.4ms    | **0.29x** | ✓ WIN   | WIN 維持 |
+
+**Score: 3 wins / 2 ties / 6 losses.** Almide は非退行(むしろ改善)だが、rustc 1.95 + wasmtime 42 が
+map 1.6→0.7ms / sort 6.7→4.8ms と前進し 2 本が反転した。生データ・計測条件:
+`research/benchmark/stdlib/results/v0.25.0-vs-rust1.95.txt`(負荷あり機・min-of-5。
+sort / map_insert の反転は静音環境で要再確認)。バイナリサイズは Almide 5.9KB vs Rust 109KB(18.6x)。
+
+### 教訓 → タスク: ratio-ratchet gate
+
+凍結した相手への目標値は黙って腐る。下の Fix Plan の Expected 値は旧 rustc 相手の導出で、
+達成しても map は ~2.9x 残る。
+
+- [ ] **perf-ratchet gate**: Rust 双子(`rust_wasm_compare/src/precise_all.rs`)を **current stable
+      rustc で毎回再ビルド**し、min-of-5 の RATIO をラチェット(悪化で CI 赤)。結果 JSON は
+      `make verify` dossier の性能項目を兼ねる
+- [ ] **Fix Plan の Expected を rustc 1.95 基準で再導出**(fold ≈TIE、concat ≈TIE が見込み。
+      map は hoist 後も ~2.9x → Rust の 0.7ms ≒ 23GB/s は帯域律速であり、そこまで詰める追加施策が
+      11/11 の本丸)
+- [ ] **sort_1M / map_insert_100k の反転調査** — 静音環境で再計測 → 実差なら根因分析
+- [ ] 着手順: fold(小)→ str_concat(小)→ map base-pointer hoist(中)→ filter(大)
 
 ---
 

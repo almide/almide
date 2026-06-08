@@ -1,0 +1,47 @@
+// @contract: C-041
+// HOF-closure String-tail RC discipline — the `__perceus_ret` move-out class.
+//
+// A higher-order fn whose body calls a closure parameter and then evaluates a
+// String expression in tail position ANF-lifts that String into a temporary
+// (`__perceus_ret`) that is MOVED OUT of its block into the enclosing consumer
+// (an arg, a return, an interpolation temp). v0.25.0 shipped a Perceus-verify
+// FALSE POSITIVE that flagged this move-out as a leak and so let an RC
+// "violation" reach a release as a mere warning — the spec corpus had no such
+// fixture to catch it. With the structural moved-out exemption the RC is
+// balanced, the Perceus gate passes, and native == wasm byte-identically here.
+// A genuine double-free in the wasm runtime would trap (exit 134) on the
+// repeated String churn below; a genuine leak would still print identically but
+// is excluded by the verified Inc/Dec balance.
+
+// String tail after calling a `() -> Unit` closure param (the exact repro).
+fn bench(name: String, f: () -> Unit) -> Unit = {
+  f()
+  println("[" + name + "]")
+}
+
+// HOF that RETURNS a String built from a closure result — `__perceus_ret` in
+// true return position as well as moved-out into the concatenation temporaries.
+fn wrap(label: String, gen: () -> String) -> String = {
+  let body = gen()
+  "<" + label + ">" + body + "</" + label + ">"
+}
+
+fn main() -> Unit = {
+  bench("alpha", () => { println("  run alpha") })
+  bench("beta", () => { println("  run beta") })
+
+  // Capturing closures feeding a returned-String HOF, mapped for heap churn:
+  // each element allocates and frees several intermediate strings.
+  let prefix = "item"
+  let rendered = [0, 1, 2, 3, 4]
+    |> list.map((n) => wrap("li", () => prefix + "-" + int.to_string(n)))
+  for s in rendered {
+    println(s)
+  }
+
+  // Nested HOF: the closure passed to `bench` itself calls `bench` again, so a
+  // String-tail move-out happens inside another String-tail move-out's scope.
+  bench("nested", () => {
+    bench("inner", () => { println("    deep") })
+  })
+}

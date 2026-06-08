@@ -210,6 +210,11 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(result);
                 self.scratch.free_i32(v);
             }
+            // value.keys shares json.keys' object-key extraction. Its native
+            // intrinsic moved to the value runtime (`almide_rt_value_keys`) so a
+            // value-only program links, which routed it here instead of the
+            // RuntimeCall path — so dispatch it explicitly (#416).
+            "keys" => self.emit_json_keys(args),
             _ => panic!(
                 "[ICE] emit_wasm: no WASM dispatch for `value.{}` — \
                  add an arm in emit_value_call or resolve upstream",

@@ -232,8 +232,19 @@ impl Parser {
         ))
     }
 
+    /// True if the current token is a word that is a keyword only in
+    /// expression/pattern position but a valid field/member NAME here — the
+    /// Result/Option value constructors and `todo`. Its lexeme (`ok`, `err`, …)
+    /// is taken as the name. Lets `{ ok: Bool }`, `r.ok`, `Ack { ok: true }` parse.
+    pub(crate) fn is_soft_keyword_name(&self) -> bool {
+        matches!(
+            self.current().token_type,
+            TokenType::Ok | TokenType::Err | TokenType::Some | TokenType::None | TokenType::Todo
+        )
+    }
+
     pub(crate) fn expect_any_name(&mut self) -> Result<Sym, String> {
-        if self.check(TokenType::Ident) || self.check(TokenType::Ident) || self.check(TokenType::TypeName) {
+        if self.check(TokenType::Ident) || self.check(TokenType::TypeName) || self.is_soft_keyword_name() {
             return Ok(self.advance_and_get_sym());
         }
         let tok = self.current();

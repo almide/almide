@@ -665,6 +665,12 @@ fn check_needs_ownership(expr: &IrExpr, var: VarId, needs: &mut bool) {
             check_needs_ownership(expr, var, needs);
         }
         IrExprKind::UnwrapOr { expr, fallback } => {
+            // Both the unwrapped value and the `??` fallback flow OUT as the result,
+            // so a param used as either ESCAPES and needs ownership — else the
+            // fallback arm renders as a borrowed `&str`/`&[T]` while the unwrapped
+            // arm is owned, and the lowered match's arms mismatch (#414). Mirrors
+            // the If/Match/Option-wrapping escaping-child handling above.
+            if is_var(expr, var) || is_var(fallback, var) { *needs = true; return; }
             check_needs_ownership(expr, var, needs);
             check_needs_ownership(fallback, var, needs);
         }
@@ -1236,10 +1242,21 @@ fn rewrite_calls_stmt(stmt: IrStmt, sigs: &HashMap<String, Vec<ParamBorrow>>, mo
         IrStmtKind::BindDestructure { pattern, value } => IrStmtKind::BindDestructure {
             pattern, value: rewrite_calls(value, sigs, mod_scope),
         },
-        // Explicit-preserve: stmt kinds this rewriter does NOT descend into,
-        // matching the original `other => other` (zero behaviour change).
-        kind @ (IrStmtKind::IndexAssign { .. } | IrStmtKind::MapInsert { .. }
-            | IrStmtKind::FieldAssign { .. } | IrStmtKind::Comment { .. }
+        // Assign-with-computed-subexpr kinds: descend into the index/key/value so a
+        // stdlib call there (e.g. `m[string.take(s, i)] = …`) gets its borrow args
+        // annotated — else the call's `&str`/`&[T]` arg renders as an owned value
+        // and rustc rejects it (#415). The earlier `other => other` skipped these.
+        IrStmtKind::IndexAssign { target, index, value } => IrStmtKind::IndexAssign {
+            target, index: rewrite_calls(index, sigs, mod_scope), value: rewrite_calls(value, sigs, mod_scope),
+        },
+        IrStmtKind::MapInsert { target, key, value } => IrStmtKind::MapInsert {
+            target, key: rewrite_calls(key, sigs, mod_scope), value: rewrite_calls(value, sigs, mod_scope),
+        },
+        IrStmtKind::FieldAssign { target, field, value } => IrStmtKind::FieldAssign {
+            target, field, value: rewrite_calls(value, sigs, mod_scope),
+        },
+        // Explicit-preserve: no rewrite-relevant expr children (or handled elsewhere).
+        kind @ (IrStmtKind::Comment { .. }
             | IrStmtKind::RcInc { .. } | IrStmtKind::RcDec { .. }
             | IrStmtKind::ListSwap { .. } | IrStmtKind::ListReverse { .. }
             | IrStmtKind::ListRotateLeft { .. } | IrStmtKind::ListCopySlice { .. }) => kind,

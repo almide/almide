@@ -91,6 +91,26 @@ pub fn verify_rc_balance(
     issues
 }
 
+/// Read-only context for the recursive RC verifier. Bundles the var table and
+/// the "ownership leaves this scope" exemption sets so the recursion threads one
+/// reference instead of four positional params.
+struct VerifyCtx<'a> {
+    var_table: &'a VarTable,
+    /// Vars in function-return (tail) position: ownership escapes the function,
+    /// so the callee must NOT Dec them.
+    returned_vars: &'a std::collections::HashSet<VarId>,
+    /// Vars moved out of their defining block as a bare-`Var` block tail:
+    /// ownership transfers to the block's consumer (an enclosing Bind, a return,
+    /// a call arg), which carries the Dec — so a missing Dec in the var's own
+    /// block is correct, not a leak. This is the block-level generalization of
+    /// `returned_vars` (the function-level escape): both are the Perceus "moved"
+    /// relation, one scope apart.
+    moved_out_vars: &'a std::collections::HashSet<VarId>,
+    /// Vars bound directly from an `EnvLoad`: borrowed from the closure
+    /// environment, not owned, so no Dec.
+    env_load_vars: &'a std::collections::HashSet<VarId>,
+}
+
 /// Lean-certified recursive verification of entire expression tree.
 /// Walks all blocks, if/else, match, while, for-in.
 /// Reports (VarId, message) for every violation.
@@ -98,18 +118,18 @@ pub fn verify_expr(
     expr: &IrExpr,
     var_table: &VarTable,
     returned_vars: &std::collections::HashSet<VarId>,
+    moved_out_vars: &std::collections::HashSet<VarId>,
     env_load_vars: &std::collections::HashSet<VarId>,
 ) -> Vec<(VarId, &'static str)> {
+    let ctx = VerifyCtx { var_table, returned_vars, moved_out_vars, env_load_vars };
     let mut issues = Vec::new();
-    verify_expr_inner(expr, var_table, returned_vars, env_load_vars, &mut issues);
+    verify_expr_inner(expr, &ctx, &mut issues);
     issues
 }
 
 fn verify_expr_inner(
     expr: &IrExpr,
-    var_table: &VarTable,
-    returned_vars: &std::collections::HashSet<VarId>,
-    env_load_vars: &std::collections::HashSet<VarId>,
+    ctx: &VerifyCtx,
     issues: &mut Vec<(VarId, &'static str)>,
 ) {
     match &expr.kind {
@@ -119,22 +139,37 @@ fn verify_expr_inner(
                 if let IrStmtKind::Bind { var, ty, value, .. } = &stmt.kind {
                     if !is_heap_type(ty) { continue; }
                     if matches!(&value.kind, IrExprKind::EnvLoad { .. }) { continue; }
-                    if env_load_vars.contains(var) { continue; }
-                    if returned_vars.contains(var) { continue; }
-                    // TCO temporaries have their own RC management
-                    let vname = var_table.get(*var).name.as_str();
+                    if ctx.env_load_vars.contains(var) { continue; }
+                    if ctx.returned_vars.contains(var) { continue; }
+                    // TCO trampoline temporaries (`__tco_*`) and branch-lift
+                    // temporaries (`__br_*`) DO get an RcDec, but in a sibling/outer
+                    // block from their Bind: the value is threaded through a loop or
+                    // branch reassignment (`Assign loopvar = Var __tco_tmp`), so the
+                    // matching Dec lands one scope away. This flat, per-block rule
+                    // counts `count_decs` only within the Bind's own block and so
+                    // reads decs==0 — a false positive, not a leak (verified by
+                    // probing `sum_acc`: the RcDec exists; the cross-target gate
+                    // would trap on a double-free and does not). This is a distinct
+                    // class from the ANF move-out tails handled by `moved_out_vars`.
+                    // Replacing this name-prefix exclusion with scope-aware Dec
+                    // accounting is a tracked perceus-belt follow-up.
+                    let vname = ctx.var_table.get(*var).name.as_str();
                     if vname.starts_with("__tco_") || vname.starts_with("__br_") { continue; }
 
                     let decs = count_decs(stmts, *var);
                     let incs = count_incs(stmts, *var);
-                    let info = var_table.get(*var);
+                    let info = ctx.var_table.get(*var);
                     let is_mutable = matches!(info.mutability, almide_ir::Mutability::Var);
 
-                    // Lean theorem: single_dec_frees
-                    if decs == 0 && !is_mutable {
+                    // Lean theorem: single_dec_frees. A var moved out of this
+                    // block (bare-`Var` tail) has its Dec carried by the block's
+                    // consumer, so decs==0 here is correct, not a leak.
+                    if decs == 0 && !is_mutable && !ctx.moved_out_vars.contains(var) {
                         issues.push((*var, "LEAK: no RcDec"));
                     }
-                    // Lean theorem: inc_dec_is_id (balance check)
+                    // Lean theorem: inc_dec_is_id (balance check). Still enforced
+                    // for moved-out vars: a Dec on an already-moved value is a
+                    // double-free, so this check is NOT exempted.
                     if !is_mutable && decs > incs + 1 {
                         issues.push((*var, "DOUBLE-FREE: too many RcDec"));
                     }
@@ -144,45 +179,45 @@ fn verify_expr_inner(
             for stmt in stmts {
                 match &stmt.kind {
                     IrStmtKind::Bind { value, .. } | IrStmtKind::Assign { value, .. } =>
-                        verify_expr_inner(value, var_table, returned_vars, env_load_vars, issues),
+                        verify_expr_inner(value, ctx, issues),
                     IrStmtKind::Expr { expr } =>
-                        verify_expr_inner(expr, var_table, returned_vars, env_load_vars, issues),
+                        verify_expr_inner(expr, ctx, issues),
                     IrStmtKind::Guard { cond, else_ } => {
-                        verify_expr_inner(cond, var_table, returned_vars, env_load_vars, issues);
-                        verify_expr_inner(else_, var_table, returned_vars, env_load_vars, issues);
+                        verify_expr_inner(cond, ctx, issues);
+                        verify_expr_inner(else_, ctx, issues);
                     }
                     _ => {}
                 }
             }
             if let Some(t) = tail {
-                verify_expr_inner(t, var_table, returned_vars, env_load_vars, issues);
+                verify_expr_inner(t, ctx, issues);
             }
         }
         IrExprKind::If { cond, then, else_ } => {
-            verify_expr_inner(cond, var_table, returned_vars, env_load_vars, issues);
-            verify_expr_inner(then, var_table, returned_vars, env_load_vars, issues);
-            verify_expr_inner(else_, var_table, returned_vars, env_load_vars, issues);
+            verify_expr_inner(cond, ctx, issues);
+            verify_expr_inner(then, ctx, issues);
+            verify_expr_inner(else_, ctx, issues);
         }
         IrExprKind::Match { subject, arms } => {
-            verify_expr_inner(subject, var_table, returned_vars, env_load_vars, issues);
+            verify_expr_inner(subject, ctx, issues);
             for arm in arms {
-                verify_expr_inner(&arm.body, var_table, returned_vars, env_load_vars, issues);
+                verify_expr_inner(&arm.body, ctx, issues);
             }
         }
         IrExprKind::While { cond, body } => {
-            verify_expr_inner(cond, var_table, returned_vars, env_load_vars, issues);
+            verify_expr_inner(cond, ctx, issues);
             for stmt in body {
                 match &stmt.kind {
                     IrStmtKind::Bind { value, .. } | IrStmtKind::Assign { value, .. } =>
-                        verify_expr_inner(value, var_table, returned_vars, env_load_vars, issues),
+                        verify_expr_inner(value, ctx, issues),
                     IrStmtKind::Expr { expr } =>
-                        verify_expr_inner(expr, var_table, returned_vars, env_load_vars, issues),
+                        verify_expr_inner(expr, ctx, issues),
                     _ => {}
                 }
             }
         }
         IrExprKind::Lambda { body, .. } =>
-            verify_expr_inner(body, var_table, returned_vars, env_load_vars, issues),
+            verify_expr_inner(body, ctx, issues),
         _ => {}
     }
 }
