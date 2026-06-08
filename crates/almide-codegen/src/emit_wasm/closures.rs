@@ -252,10 +252,10 @@ pub(super) fn compile_lambda_bodies(program: &IrProgram, emitter: &mut WasmEmitt
             local_idx += 1;
         }
 
-        // ScratchAllocator locals
-        let scratch_i32_cap = 32usize;
-        let scratch_i64_cap = 16usize;
-        let scratch_f64_cap = 16usize;
+        // ScratchAllocator locals — generous fixed caps, see functions.rs note (#417).
+        let scratch_i32_cap = 64usize;
+        let scratch_i64_cap = 48usize;
+        let scratch_f64_cap = 48usize;
         let scratch_i32_base = local_idx;
         for _ in 0..scratch_i32_cap { local_decls.push((1, ValType::I32)); local_idx += 1; }
         let scratch_i64_base = local_idx;
