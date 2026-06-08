@@ -489,7 +489,15 @@ pub fn register_type_decl(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, 
     }
     if let Ty::Variant { name: ref mut vn, ref cases } = resolved {
         *vn = sym(name);
-        for case in cases { env.constructors.insert(case.name, (sym(name), case.clone())); }
+        // Push (not overwrite) so a constructor name declared in multiple variant
+        // types keeps ALL candidates — needed to detect ambiguity (#413) instead of
+        // silently letting the last-registered type win.
+        for case in cases {
+            let entry = env.constructors.entry(case.name).or_default();
+            if !entry.iter().any(|(t, _)| *t == sym(name)) {
+                entry.push((sym(name), case.clone()));
+            }
+        }
     }
     let key = prefixed_key(prefix, name);
     env.types.insert(sym(&key), resolved.clone());

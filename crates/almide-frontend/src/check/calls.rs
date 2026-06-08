@@ -23,6 +23,29 @@ pub(crate) fn subst_ty(ty: &Ty, subst: &HashMap<Sym, Ty>) -> Ty {
 }
 
 impl Checker {
+    /// Report a bare constructor name declared in more than one variant type
+    /// (e.g. a local type and a dependency's) — an ambiguous name (#413). The
+    /// caller still resolves to the first candidate; this surfaces the conflict as
+    /// a clear source-level error so the user qualifies/renames, instead of the
+    /// silent wrong-type resolution that later fails as a cryptic generated-Rust
+    /// E0769. Returns true if it was ambiguous.
+    pub(crate) fn report_ambiguous_ctor(&mut self, name: &str) -> bool {
+        let key = sym(name);
+        if self.env.ctor_candidate_count(&key) > 1 {
+            let types = self.env.ctor_candidate_types(&key).iter()
+                .map(|t| t.as_str().to_string())
+                .collect::<Vec<_>>().join(" and ");
+            self.emit(super::err(
+                format!("ambiguous constructor '{}': declared in {}", name, types),
+                format!("Rename the constructor in one of them so its name is unique (a qualified `Type.{}` is not yet supported)", name),
+                format!("constructor {}", name),
+            ).with_code("E019"));
+            true
+        } else {
+            false
+        }
+    }
+
     pub(crate) fn check_call_with_type_args(&mut self, callee: &mut ast::Expr, args: &mut [ast::Expr], type_args: Option<&[Ty]>) -> Ty {
         let arg_tys: Vec<Ty> = args.iter_mut().map(|a| self.infer_expr(a)).collect();
         let callee_span_snapshot = callee.span;
@@ -41,7 +64,8 @@ impl Checker {
                 ret
             }
             ExprKind::TypeName { name, .. } => {
-                if let Some((type_name, case)) = self.env.constructors.get(&sym(name)).cloned() {
+                if let Some((type_name, case)) = self.env.lookup_ctor(&sym(name)) {
+                    self.report_ambiguous_ctor(name);
                     self.check_constructor_args(name, &case, &arg_tys);
                     // Instantiate parent type's generics with fresh inference vars
                     let generic_args = self.instantiate_type_generics(type_name.as_str());
@@ -399,7 +423,7 @@ impl Checker {
         let Some(sig) = sig else {
             self.last_mut_params = vec![];
             // No function signature found — try constructor, variable, or report error
-            if let Some((type_name, case)) = self.env.constructors.get(&sym(name)).cloned() {
+            if let Some((type_name, case)) = self.env.lookup_ctor(&sym(name)) {
                 self.check_constructor_args(name, &case, arg_tys);
                 let generic_args = self.instantiate_type_generics(type_name.as_str());
                 return Ty::Named(type_name, generic_args);
