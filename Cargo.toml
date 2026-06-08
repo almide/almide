@@ -5,7 +5,7 @@ exclude = ["research/benchmark/stdlib/rust_wasm_compare", "tools/wasmgen-harness
 
 [package]
 name = "almide"
-version = "0.26.0"
+version = "0.26.1"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 
