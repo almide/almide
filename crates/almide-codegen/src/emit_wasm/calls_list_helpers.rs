@@ -881,7 +881,10 @@ impl FuncCompiler<'_> {
                 local_get(src); i32_const(self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32); i32_add;
                 local_get(i); i32_const(es); i32_mul; i32_add;
         });
-        self.emit_elem_copy(&elem_ty);
+        // SHARE: a unique element copied from the borrowed source list into the fresh
+        // result — dup it so the result owns its reference (else the source's
+        // scope-end Dec deep-frees the element the result now holds).
+        self.emit_elem_copy_owned(&elem_ty);
         wasm!(self.func, {
                 local_get(dst);
                 local_get(dst); i32_load(0); i32_const(1); i32_add;
