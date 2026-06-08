@@ -240,7 +240,7 @@ pub(crate) fn declared_record_ty(env: &TypeEnv, name: almide_base::intern::Sym) 
     // Variant case with a record payload takes priority: a case name and a
     // type name never collide (constructors are registered separately), but
     // checking constructors first matches the checker's resolution order.
-    if let Some((_, case)) = env.constructors.get(&name) {
+    if let Some((_, case)) = env.lookup_ctor(&name) {
         if let crate::types::VariantPayload::Record(fields) = &case.payload {
             return Some(Ty::Record { fields: fields.clone() });
         }
@@ -371,7 +371,7 @@ fn get_constructor_payload_tys_from_subject(ctx: &LowerCtx, ctor_name: &str, sub
         }
     }
     // Fallback: constructor registry (may have uninstantiated generic types)
-    if let Some((_, case)) = ctx.env.constructors.get(&sym(ctor_name)) {
+    if let Some((_, case)) = ctx.env.lookup_ctor(&sym(ctor_name)) {
         match &case.payload {
             crate::types::VariantPayload::Tuple(tys) => tys.clone(),
             crate::types::VariantPayload::Record(fs) => fs.iter().map(|(_, t)| t.clone()).collect(),
@@ -392,7 +392,7 @@ fn get_constructor_payload_tys_from_subject(ctx: &LowerCtx, ctor_name: &str, sub
 fn resolve_record_field_ty(ctx: &LowerCtx, record_name: &str, field_name: &str) -> Ty {
     if let Some(type_def) = ctx.env.types.get(&sym(record_name)) {
         ctx.resolve_field_ty(type_def, field_name)
-    } else if let Some((_, case)) = ctx.env.constructors.get(&sym(record_name)) {
+    } else if let Some((_, case)) = ctx.env.lookup_ctor(&sym(record_name)) {
         if let crate::types::VariantPayload::Record(fs) = &case.payload {
             fs.iter().find(|(n, _)| n == field_name).map(|(_, t)| t.clone()).unwrap_or(Ty::Unknown)
         } else { Ty::Unknown }

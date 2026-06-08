@@ -1250,7 +1250,7 @@ pub(crate) fn emit(program: &IrProgram) -> Vec<u8> {
     // match the layout chosen by the corresponding stdlib emit (see
     // calls_http.rs `response`/`json`).
     use almide_lang::types::Ty as _Ty;
-    emitter.record_fields.insert("Response".to_string(), vec![
+    emitter.record_fields.insert("HttpResponse".to_string(), vec![
         ("status".to_string(),  _Ty::Int),     // i64 @ 0
         ("body".to_string(),    _Ty::String),  // i32 ptr @ 8
         ("headers".to_string(),
@@ -1258,7 +1258,7 @@ pub(crate) fn emit(program: &IrProgram) -> Vec<u8> {
                 _Ty::Tuple(vec![_Ty::String, _Ty::String]),
             ])),                                // i32 ptr @ 12
     ]);
-    emitter.record_fields.insert("Request".to_string(), vec![
+    emitter.record_fields.insert("HttpRequest".to_string(), vec![
         ("method".to_string(),  _Ty::String),
         ("path".to_string(),    _Ty::String),
         ("body".to_string(),    _Ty::String),
@@ -1974,16 +1974,17 @@ fn compile_init_globals(emitter: &mut WasmEmitter, program: &IrProgram) {
 
     let mut local_decls = Vec::new();
     // ScratchAllocator locals
-    let scratch_i32_cap = 32usize;
-    let scratch_i64_cap = 16usize;
-    let scratch_f64_cap = 16usize;
+    // Generous fixed scratch caps — see functions.rs note (#417).
+    let scratch_i32_cap = 64usize;
+    let scratch_i64_cap = 48usize;
+    let scratch_f64_cap = 48usize;
     let scratch_i32_base = local_decls.len() as u32;
     for _ in 0..scratch_i32_cap { local_decls.push((1, ValType::I32)); }
     let scratch_i64_base = local_decls.len() as u32;
     for _ in 0..scratch_i64_cap { local_decls.push((1, ValType::I64)); }
     let scratch_f64_base = local_decls.len() as u32;
     for _ in 0..scratch_f64_cap { local_decls.push((1, ValType::F64)); }
-    let scratch_v128_cap = 4usize;
+    let scratch_v128_cap = 8usize;
     let scratch_v128_base = local_decls.len() as u32;
     for _ in 0..scratch_v128_cap { local_decls.push((1, ValType::V128)); }
 

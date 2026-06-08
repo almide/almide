@@ -21,8 +21,10 @@ impl Parser {
         if self.check(TokenType::DotDotDot) {
             return self.parse_spread_record(span, open);
         }
-        // Record literal: { field: value, ... }
-        if self.check(TokenType::Ident)
+        // Record literal: { field: value, ... } — the field name may be a
+        // soft-keyword (ok/err/some/none/todo), so accept those here too, else
+        // `{ ok: ... }` is mis-read as a block whose first stmt is an `ok(...)` ctor.
+        if (self.check(TokenType::Ident) || self.is_soft_keyword_name())
             && self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::Colon)
         {
             return self.parse_record_literal(span, open);
@@ -39,7 +41,7 @@ impl Parser {
             self.advance();
             self.skip_newlines();
             if self.check(TokenType::RBrace) { break; }
-            let field_name = self.expect_ident()?;
+            let field_name = self.expect_any_name()?;
             self.expect(TokenType::Colon)?;
             self.skip_newlines();
             let field_value = self.parse_expr()?;

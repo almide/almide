@@ -24,8 +24,12 @@ pub struct TypeEnv {
     pub can_call_effect: bool,
     /// Set of effect function names
     pub effect_fns: std::collections::HashSet<Sym>,
-    /// Variant constructor name -> (variant type name, case info)
-    pub constructors: std::collections::HashMap<Sym, (Sym, VariantCase)>,
+    /// Variant constructor name -> candidate (variant type name, case info) list.
+    /// Usually one entry; MORE than one when the same constructor name is declared
+    /// in multiple variant types (e.g. a local type and a dependency's) — an
+    /// ambiguous name. `lookup_ctor` returns the first; `ctor_candidate_count`
+    /// detects ambiguity (#413).
+    pub constructors: std::collections::HashMap<Sym, Vec<(Sym, VariantCase)>>,
     /// User-defined module names (for distinguishing from stdlib in module calls)
     pub user_modules: std::collections::HashSet<Sym>,
     /// The package's own module name (set when `register_module` is called with `is_self: true`).
@@ -291,6 +295,26 @@ impl TypeEnv {
             }
         }
         names
+    }
+
+    /// Resolve a bare variant-constructor name to its (type name, case). Returns
+    /// the FIRST registered candidate (deterministic). When the name is ambiguous
+    /// (`ctor_candidate_count > 1`) callers should report it; this fallback keeps
+    /// type checking from cascading.
+    pub fn lookup_ctor(&self, name: &Sym) -> Option<(Sym, VariantCase)> {
+        self.constructors.get(name).and_then(|cands| cands.first().cloned())
+    }
+
+    /// How many variant types declare this constructor name (1 = unambiguous,
+    /// >1 = ambiguous, e.g. a local type and a dependency share the name).
+    pub fn ctor_candidate_count(&self, name: &Sym) -> usize {
+        self.constructors.get(name).map_or(0, |c| c.len())
+    }
+
+    /// The variant type names that declare this constructor, for an ambiguity
+    /// diagnostic that lists `Type::Ctor` qualifications to disambiguate.
+    pub fn ctor_candidate_types(&self, name: &Sym) -> Vec<Sym> {
+        self.constructors.get(name).map_or_else(Vec::new, |c| c.iter().map(|(t, _)| *t).collect())
     }
 
     pub fn resolve_named(&self, ty: &Ty) -> Ty {

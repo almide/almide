@@ -58,3 +58,16 @@ test "value.stringify empty array" {
   let v = value.array([]);
   assert_eq(value.stringify(v), "[]")
 }
+
+test "value.keys" {
+  let o = value.object([("a", value.int(1)), ("b", value.int(2))]);
+  let ks = value.keys(o);
+  assert_eq(list.len(ks), 2);
+  assert_eq(list.contains(ks, "a"), true);
+  assert_eq(list.contains(ks, "b"), true)
+}
+
+test "value.keys empty object" {
+  let o = value.object([]);
+  assert_eq(list.len(value.keys(o)), 0)
+}
