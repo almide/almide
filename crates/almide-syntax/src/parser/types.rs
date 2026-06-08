@@ -196,7 +196,7 @@ impl Parser {
                 attrs.push(self.parse_attribute()?);
                 self.skip_newlines();
             }
-            let field_name = self.expect_ident()?;
+            let field_name = self.expect_any_name()?;
             let alias = self.parse_field_alias()?;
             self.expect(TokenType::Colon)?;
             let field_type = self.parse_type_expr()?;
@@ -223,7 +223,7 @@ impl Parser {
                 attrs.push(self.parse_attribute()?);
                 self.skip_newlines();
             }
-            let field_name = self.expect_ident()?;
+            let field_name = self.expect_any_name()?;
             let alias = self.parse_field_alias()?;
             self.expect(TokenType::Colon)?;
             let field_type = self.parse_type_expr()?;
