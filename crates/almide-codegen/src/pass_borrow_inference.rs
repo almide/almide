@@ -665,6 +665,12 @@ fn check_needs_ownership(expr: &IrExpr, var: VarId, needs: &mut bool) {
             check_needs_ownership(expr, var, needs);
         }
         IrExprKind::UnwrapOr { expr, fallback } => {
+            // Both the unwrapped value and the `??` fallback flow OUT as the result,
+            // so a param used as either ESCAPES and needs ownership — else the
+            // fallback arm renders as a borrowed `&str`/`&[T]` while the unwrapped
+            // arm is owned, and the lowered match's arms mismatch (#414). Mirrors
+            // the If/Match/Option-wrapping escaping-child handling above.
+            if is_var(expr, var) || is_var(fallback, var) { *needs = true; return; }
             check_needs_ownership(expr, var, needs);
             check_needs_ownership(fallback, var, needs);
         }
