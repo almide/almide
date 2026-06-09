@@ -150,7 +150,13 @@ jobs:
           restore-keys: macos-arm-cargo-${{ env.RUST_TOOLCHAIN }}-
 
       - name: Test almide-kernel on real ARM (NEON executes, diffed vs scalar)
-        run: cargo test --release --manifest-path crates/almide-kernel/Cargo.toml
+        # almide-kernel has no committed [workspace] (that would break `almide build`'s
+        # generated ML projects, which path-depend on it). Append one ephemerally so
+        # cargo can test the excluded crate standalone — harmless here, this job never
+        # runs `almide build`.
+        run: |
+          printf '\n[workspace]\n' >> crates/almide-kernel/Cargo.toml
+          cargo test --release --manifest-path crates/almide-kernel/Cargo.toml
 
   test-wasm:
     name: Test WASM
