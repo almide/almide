@@ -442,8 +442,18 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
 
 // ── Match arm rendering ──
 
-pub fn render_match_arm(ctx: &RenderContext, arm: &IrMatchArm, match_ty: &almide_lang::types::Ty) -> String {
-    let pattern = render_pattern(ctx, &arm.pattern);
+pub fn render_match_arm(ctx: &RenderContext, arm: &IrMatchArm, match_ty: &almide_lang::types::Ty, subject_ty: &almide_lang::types::Ty) -> String {
+    // #413: a top-level variant pattern belongs to the match SUBJECT's enum, so
+    // pass that enum's (mangled) name as a hint — it disambiguates a constructor
+    // name shared across packages, which the global ctor→enum map collapses.
+    let enum_hint = match subject_ty {
+        // Only when the subject is a known variant enum — never a struct/opaque
+        // type (whose patterns must not be qualified `Type::field`).
+        almide_lang::types::Ty::Named(n, _) if ctx.ann.ctor_to_enum.values().any(|e| e.as_str() == n.as_str())
+            => Some(n.as_str()),
+        _ => None,
+    };
+    let pattern = render_pattern_hinted(ctx, &arm.pattern, enum_hint);
     // err() in a match arm where the match type is NOT Result: early return.
     // This handles `let x: T = match ... { none => err("msg") }` in
     // functions returning Result — the err() doesn't contribute a T value,
@@ -470,6 +480,15 @@ pub fn arms_have_list_pattern(arms: &[IrMatchArm]) -> bool {
 }
 
 pub fn render_pattern(ctx: &RenderContext, pat: &IrPattern) -> String {
+    render_pattern_hinted(ctx, pat, None)
+}
+
+/// Like `render_pattern`, but `enum_hint` is the match subject's enum type name
+/// (mangled), used to qualify a TOP-LEVEL variant pattern. This disambiguates a
+/// constructor name shared across packages (#413): the pattern belongs to the
+/// subject's enum, not the (collapsed) global `ctor_to_enum` entry. Nested patterns
+/// recurse without a hint (fall back to `ctor_to_enum`).
+pub fn render_pattern_hinted(ctx: &RenderContext, pat: &IrPattern, enum_hint: Option<&str>) -> String {
     match pat {
         IrPattern::Wildcard => template_or(ctx, "pattern_wildcard", &[], "_"),
         IrPattern::Bind { var, .. } => ctx.var_name(*var).to_string(),
@@ -503,7 +522,10 @@ pub fn render_pattern(ctx: &RenderContext, pat: &IrPattern) -> String {
                 .unwrap_or_else(|| format!("Err(_)"))
         }
         IrPattern::Constructor { name, args } => {
-            let qualified = if let Some(enum_name) = ctx.ann.ctor_to_enum.get(name) {
+            // #413: prefer the subject's enum (hint) over the collapsing global map.
+            let enum_name = enum_hint.map(|s| s.to_string())
+                .or_else(|| ctx.ann.ctor_to_enum.get(name).map(|s| s.to_string()));
+            let qualified = if let Some(enum_name) = enum_name {
                 ctx.templates.render_with("ctor_qualify", None, &[], &[("enum_name", enum_name.as_str()), ("ctor_name", name.as_str())])
                     .unwrap_or_else(|| format!("{}::{}", enum_name, name))
             } else {
@@ -530,8 +552,10 @@ pub fn render_pattern(ctx: &RenderContext, pat: &IrPattern) -> String {
             }
         }
         IrPattern::RecordPattern { name, fields, rest } => {
-            // Qualify enum variant record patterns: Circle → Shape::Circle
-            let qualified_name = if let Some(enum_name) = ctx.ann.ctor_to_enum.get(name) {
+            // Qualify enum variant record patterns: Circle → Shape::Circle.
+            // #413: prefer the subject's enum (hint) over the collapsing global map.
+            let qualified_name = if let Some(enum_name) = enum_hint.map(|s| s.to_string())
+                .or_else(|| ctx.ann.ctor_to_enum.get(name).map(|s| s.to_string())) {
                 format!("{}::{}", enum_name, name)
             } else {
                 name.clone()

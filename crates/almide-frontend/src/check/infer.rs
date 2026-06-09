@@ -99,7 +99,7 @@ impl Checker {
                 if let Some(Ty::ConstParam { ty, .. }) = self.env.types.get(&sym(name)).cloned() {
                     return *ty;
                 }
-                if let Some((type_name, case)) = self.env.lookup_ctor(&sym(name)) {
+                if let Some((type_name, case)) = self.env.lookup_ctor_in(&sym(name), self.current_module_prefix.as_deref()) {
                     self.report_ambiguous_ctor(name);
                     match &case.payload {
                         VariantPayload::Tuple(tys) if !tys.is_empty() => {

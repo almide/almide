@@ -498,10 +498,14 @@ pub fn register_type_decl(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, 
         // Push (not overwrite) so a constructor name declared in multiple variant
         // types keeps ALL candidates — needed to detect ambiguity (#413) instead of
         // silently letting the last-registered type win.
+        // #413: record each candidate's OWNING MODULE so a shared ctor name can be
+        // disambiguated by the current module (`lookup_ctor_in`). type_name stays
+        // BARE here — other consumers expect that; `lookup_ctor_in` qualifies on demand.
+        let owner_mod = prefix.map(sym);
         for case in cases {
             let entry = env.constructors.entry(case.name).or_default();
-            if !entry.iter().any(|(t, _)| *t == sym(name)) {
-                entry.push((sym(name), case.clone()));
+            if !entry.iter().any(|(t, m, _)| *t == sym(name) && *m == owner_mod) {
+                entry.push((sym(name), owner_mod, case.clone()));
             }
         }
     }

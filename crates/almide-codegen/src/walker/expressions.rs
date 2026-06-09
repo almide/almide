@@ -247,7 +247,7 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
             // MatchSubjectPass nanopass — walker just renders what's in the IR.
             let subj = render_expr(ctx, subject);
             let arms_raw = arms.iter()
-                .map(|arm| render_match_arm(ctx, arm, &expr.ty))
+                .map(|arm| render_match_arm(ctx, arm, &expr.ty, &subject.ty))
                 .collect::<Vec<_>>()
                 .join("\n");
             let arms_str = indent_lines(&arms_raw, 4);
@@ -421,7 +421,7 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                             format!("almide_rt_{}_{}({})", mod_ident, func_ident, args_str)
                         })
                 }
-                _ => render_generic_call(ctx, target, args)
+                _ => render_generic_call(ctx, target, args, &expr.ty)
             }
         }
 
@@ -1074,7 +1074,7 @@ fn render_binop(ctx: &RenderContext, op: BinOp, left: &IrExpr, right: &IrExpr, _
 }
 
 /// Render a generic call expression (Named, Method, or Computed target).
-fn render_generic_call(ctx: &RenderContext, target: &CallTarget, args: &[IrExpr]) -> String {
+fn render_generic_call(ctx: &RenderContext, target: &CallTarget, args: &[IrExpr], result_ty: &almide_lang::types::Ty) -> String {
     let callee = match target {
         CallTarget::Named { name } => {
             // Invariant: NormalizeRuntimeCallsPass collapses every
@@ -1091,8 +1091,22 @@ fn render_generic_call(ctx: &RenderContext, target: &CallTarget, args: &[IrExpr]
                  (expected RuntimeCall — see pass_normalize_runtime_calls)",
                 name.as_str()
             );
-            if let Some(enum_name) = ctx.ann.ctor_to_enum.get(name.as_str()) {
-                return render_enum_constructor(ctx, name, enum_name, args);
+            if let Some(mapped) = ctx.ann.ctor_to_enum.get(name.as_str()) {
+                // `name` is a variant constructor. The global `ctor_to_enum` map
+                // collapses a constructor name shared across packages to the
+                // last-registered enum (#413). When the construction's RESOLVED
+                // type (`.ty`, disambiguated by the type checker) names a DIFFERENT
+                // but valid enum, prefer it; otherwise keep the mapped enum (no
+                // change for the common, non-colliding case — and for non-variant
+                // ctors like newtypes where `.ty` isn't a known enum).
+                let enum_name = match result_ty {
+                    almide_lang::types::Ty::Named(n, _)
+                        if n.as_str() != mapped.as_str()
+                           && ctx.ann.ctor_to_enum.values().any(|e| e.as_str() == n.as_str())
+                        => n.to_string(),
+                    _ => mapped.clone(),
+                };
+                return render_enum_constructor(ctx, name, &enum_name, args);
             }
             // Convention methods: "Type.method" → "Type_method" (free functions in all targets)
             if name.contains('.') {
