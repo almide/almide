@@ -14,6 +14,14 @@ type Wrapped: Codec = {
   accent: Option[varlib.Pigment],
 }
 
+test "cross-module type method called directly: mod.Type.method() (新①)" {
+  let p = varlib.Pigment { r: 1, g: 2, b: 3 }
+  match varlib.Pigment.decode(varlib.Pigment.encode(p)) {
+    ok(v) => assert_eq(v.b, 3),
+    _ => assert(false),
+  }
+}
+
 test "cross-module derived Codec roundtrip (direct + List + Option field) (#411-B, 新②)" {
   let w = Wrapped {
     id: 7,

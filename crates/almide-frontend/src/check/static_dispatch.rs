@@ -65,6 +65,22 @@ impl Checker {
             }
         }
 
+        // `module.Type.method(...)` — a convention/Codec method on a cross-module
+        // type, e.g. `shapes.Dot.encode(d)`. The object is `Member(Ident(mod), Type)`;
+        // the method is registered (by the Codec derive / an impl) under the bare key
+        // `Type.method`. Resolve it before UFCS infers `module` as a variable (E003).
+        if let ExprKind::Member { object: inner, field: type_name } = &object.kind {
+            if let ExprKind::Ident { name: module, .. } = &inner.kind {
+                if self.env.import_table.resolve(module).is_some() {
+                    let key = format!("{}.{}", type_name, field);
+                    if self.env.functions.contains_key(&sym(&key)) {
+                        self.env.import_table.mark_used(module);
+                        return Some(self.check_named_call(&key, arg_tys));
+                    }
+                }
+            }
+        }
+
         let module_name = match &object.kind {
             ExprKind::Ident { name, .. } => Some(name.as_str()),
             _ => None,

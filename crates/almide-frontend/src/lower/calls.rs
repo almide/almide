@@ -232,6 +232,22 @@ pub(super) fn lower_call_target(ctx: &mut LowerCtx, callee: &ast::Expr) -> CallT
             CallTarget::Named { name: *name }
         }
         ast::ExprKind::Member { object, field, .. } => {
+            // `module.Type.method(...)` — a cross-module type's convention/Codec
+            // method (`shapes.Dot.encode`). Resolve to the bare `Type.method` Named
+            // call; the module prefix is reattached at codegen (#411-B). Mirrors the
+            // checker's `resolve_static_member` (新①).
+            if let ast::ExprKind::Member { object: inner, field: type_name } = &object.kind {
+                if let ast::ExprKind::Ident { name: module, .. } = &inner.kind {
+                    if ctx.lookup_var(module).is_none()
+                        && ctx.env.import_table.resolve(module).is_some()
+                    {
+                        let key = sym(&format!("{}.{}", type_name, field));
+                        if ctx.env.functions.contains_key(&key) {
+                            return CallTarget::Named { name: key };
+                        }
+                    }
+                }
+            }
             // Check if this is a module call (e.g., string.trim, list.map)
             if let ast::ExprKind::Ident { name: module, .. } = &object.kind {
                 // Local variables take precedence over module names
