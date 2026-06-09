@@ -30,6 +30,17 @@ pub fn eliminate_dead_code(emitter: &mut WasmEmitter) -> usize {
         }
     }
 
+    // Exported user `pub fn`s are roots: the host (JS/WASI caller) invokes them
+    // directly, so they are reachable even when nothing inside the module — `main`
+    // included — calls them. Without this their bodies are stubbed to `unreachable`
+    // and the export traps on the first host call (#457). `user_exports` is
+    // populated before this pass (see emit_wasm/mod.rs).
+    for (_export_name, internal_name) in &emitter.user_exports {
+        if let Some(&idx) = emitter.func_map.get(internal_name) {
+            entry_points.insert(idx);
+        }
+    }
+
     // Also include __alloc as always-needed (called by many stubs indirectly)
     entry_points.insert(emitter.rt.alloc);
     // __heap_save / __heap_restore are JS-callable arena-cleanup helpers;
