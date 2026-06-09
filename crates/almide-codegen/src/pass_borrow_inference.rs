@@ -158,7 +158,23 @@ pub fn infer_borrow_signatures(program: &mut IrProgram) -> HashMap<String, Vec<P
                         .unwrap_or(false);
                     if !is_borrow_ref {
                         if let Some(b) = borrows.get_mut(idx) {
-                            if matches!(b, ParamBorrow::Ref | ParamBorrow::RefSlice | ParamBorrow::RefStr) {
+                            // A heap container an intrinsic mutates in place (Unit
+                            // return) must be taken by `&mut`. `List`/`String`/`Bytes`
+                            // are already Ref-family and promote cleanly; `Map`/`Set`
+                            // are mis-seeded `Own` by `intrinsic_borrow_mode_from_type_expr`,
+                            // so promote those too — else a `mut Map` user param that
+                            // forwards `&mut m` into `map.insert` can't borrow-check
+                            // (#436, E0596). Primitives are never these generics, so
+                            // they stay `Own`.
+                            let is_owned_map_or_set = matches!(b, ParamBorrow::Own)
+                                && matches!(
+                                    params.get(idx).map(|p| &p.ty),
+                                    Some(almide_lang::ast::TypeExpr::Generic { name, .. })
+                                        if matches!(name.as_str(), "Map" | "Set")
+                                );
+                            if matches!(b, ParamBorrow::Ref | ParamBorrow::RefSlice | ParamBorrow::RefStr)
+                                || is_owned_map_or_set
+                            {
                                 *b = ParamBorrow::RefMut;
                             }
                         }
@@ -447,6 +463,13 @@ fn is_heap_type(ty: &Ty) -> bool {
         Ty::String
         | Ty::Bytes
         | Ty::Applied(TypeConstructorId::List, _)
+        // Map/Set are heap collections too — without them a `mut Map`/`mut Set`
+        // parameter is forced to `Own` here (never reaching the borrow analysis),
+        // so an in-place `map.insert(m, …)` emits `&mut m` against a non-`mut`
+        // owned binding and fails to borrow-check (#436, E0596). With them the
+        // param is inferred Ref/RefMut/Own like a List.
+        | Ty::Applied(TypeConstructorId::Map, _)
+        | Ty::Applied(TypeConstructorId::Set, _)
         | Ty::Record { .. }
         | Ty::OpenRecord { .. }
     )
