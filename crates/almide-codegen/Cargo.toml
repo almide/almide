@@ -10,7 +10,7 @@ almide-base = { path = "../almide-base" }
 almide-lang = { path = "../almide-lang" }
 almide-ir = { path = "../almide-ir" }
 almide-egg-lab = { path = "../almide-egg-lab" }
-egg = "0.10"
+egg = "0.11"
 wasm-encoder = "0.225"
 wasmparser = "0.225"
 toml = "0.8"

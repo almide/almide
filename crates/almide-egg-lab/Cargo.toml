@@ -6,7 +6,7 @@ license = "MIT OR Apache-2.0"
 description = "Experimental crate: egg-based equality saturation over a minimal Almide IR subset"
 
 [dependencies]
-egg = "0.10"
+egg = "0.11"
 almide-ir = { path = "../almide-ir" }
 almide-lang = { path = "../almide-lang" }
 almide-base = { path = "../almide-base" }
