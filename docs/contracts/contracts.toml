@@ -776,3 +776,13 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/mut_map_param.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-062"
+title     = "The RawPtr / linear-memory bridge moves bytes byte-identically on both targets"
+statement = "`bytes.as_ptr` / `as_mut_ptr` return a RawPtr to a Bytes data region; `from_raw_ptr(ptr, len)` copies `len` bytes from a raw offset into a fresh Bytes; `copy_to_ptr(b, ptr, cap)` copies `min(len(b), cap)` bytes through the pointer and returns the count. A RawPtr is a real `*mut u8` on native and an i32 linear-memory offset on wasm — the pointer VALUE differs per target by nature and is never observed; only the bytes moved through it are, so stdout is byte-identical. These four intrinsics used to ICE in WASM emit (`[ICE] … no WASM runtime fn`); v0.26.12 turned that into a clean build error, and v0.26.15 implements the wasm bridge (offset arithmetic + `memory.copy`). `as_mut_ptr` is `@mutating` so its Bytes argument is a mutable borrow on native (the buffer must be RefMut to hand out a writable pointer)."
+since     = "0.26.15"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/bytes_rawptr.almd", class = "fixture" },
+]

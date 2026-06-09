@@ -1,0 +1,32 @@
+// @contract: C-062
+// Cross-target differential fixture: the RawPtr / linear-memory bridge
+// (`bytes.as_ptr` / `as_mut_ptr` / `from_raw_ptr` / `copy_to_ptr`, #440).
+//
+// A RawPtr is a real `*mut u8` on native and an i32 linear-memory offset on
+// wasm — the pointer VALUE differs per target by nature and is never printed.
+// Only the bytes moved through it are observed, so stdout is byte-identical.
+// Read side: as_ptr + from_raw_ptr copies a buffer. Write side: copy_to_ptr
+// writes through as_mut_ptr into a fresh buffer, with capacity clamping.
+
+fn row(b: Bytes) -> String =
+  int.to_string(bytes.read_u8(b, 0)) + "," +
+  int.to_string(bytes.read_u8(b, 1)) + "," +
+  int.to_string(bytes.read_u8(b, 2)) + "," +
+  int.to_string(bytes.read_u8(b, 3))
+
+fn main() -> Unit = {
+  let src = bytes.from_list([65, 66, 67, 68])
+  // read side: copy via a raw offset
+  let copy = bytes.from_raw_ptr(bytes.as_ptr(src), 4)
+  println("copy:" + row(copy))
+  // write side: copy_to_ptr through as_mut_ptr
+  var dst = bytes.new(4)
+  let n = bytes.copy_to_ptr(copy, bytes.as_mut_ptr(dst), 4)
+  println("n:" + int.to_string(n))
+  println("dst:" + row(dst))
+  // capacity clamp: only 2 of 4 bytes land
+  var small = bytes.new(4)
+  let m = bytes.copy_to_ptr(src, bytes.as_mut_ptr(small), 2)
+  println("m:" + int.to_string(m))
+  println("small01:" + int.to_string(bytes.read_u8(small, 0)) + "," + int.to_string(bytes.read_u8(small, 1)))
+}
