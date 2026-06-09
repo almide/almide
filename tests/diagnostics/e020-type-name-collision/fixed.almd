@@ -1,0 +1,5 @@
+// The fix: give the two types distinct names so the bare name is unique and
+// neither shadows the other through link + codegen.
+type AppConfig = { name: String }
+type DepConfig = { host: String, port: Int }
+fn main() -> Unit = println("ok")

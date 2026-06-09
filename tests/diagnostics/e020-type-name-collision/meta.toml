@@ -1,0 +1,3 @@
+expects_code = "E020"
+expects_error = "declared more than once"
+hint_substring = "Rename"
