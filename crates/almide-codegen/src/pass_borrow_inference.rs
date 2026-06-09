@@ -159,22 +159,15 @@ pub fn infer_borrow_signatures(program: &mut IrProgram) -> HashMap<String, Vec<P
                     if !is_borrow_ref {
                         if let Some(b) = borrows.get_mut(idx) {
                             // A heap container an intrinsic mutates in place (Unit
-                            // return) must be taken by `&mut`. `List`/`String`/`Bytes`
-                            // are already Ref-family and promote cleanly; `Map`/`Set`
-                            // are mis-seeded `Own` by `intrinsic_borrow_mode_from_type_expr`,
-                            // so promote those too — else a `mut Map` user param that
-                            // forwards `&mut m` into `map.insert` can't borrow-check
-                            // (#436, E0596). Primitives are never these generics, so
-                            // they stay `Own`.
-                            let is_owned_map_or_set = matches!(b, ParamBorrow::Own)
-                                && matches!(
-                                    params.get(idx).map(|p| &p.ty),
-                                    Some(almide_lang::ast::TypeExpr::Generic { name, .. })
-                                        if matches!(name.as_str(), "Map" | "Set")
-                                );
-                            if matches!(b, ParamBorrow::Ref | ParamBorrow::RefSlice | ParamBorrow::RefStr)
-                                || is_owned_map_or_set
-                            {
+                            // return) is taken by `&mut`. Every heap container
+                            // reaches here already Ref-family:
+                            // `intrinsic_borrow_mode_from_type_expr` seeds
+                            // `List`→RefSlice, `String`→RefStr, and
+                            // `Bytes`/`Map`/`Set`/records→Ref — so promoting the
+                            // Ref family to RefMut covers them all. Primitives are
+                            // seeded `Own` and stay `Own` (never mutated in place
+                            // through a reference).
+                            if matches!(b, ParamBorrow::Ref | ParamBorrow::RefSlice | ParamBorrow::RefStr) {
                                 *b = ParamBorrow::RefMut;
                             }
                         }

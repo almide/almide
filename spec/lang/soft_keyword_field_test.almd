@@ -1,0 +1,71 @@
+// soft_keyword_field_test — `ok`/`err`/`some`/`none`/`todo` are keywords only
+// in value/pattern position; everywhere a NAME is expected they are ordinary
+// field/member names. Regression for the #418 generalization, which left these
+// positions unconverted: the `peek_named_record` lookahead, the named- and
+// qualified-spread field loops, the record-pattern field, and the field-assign
+// statement (target `obj.ok = v`). Every name position now routes through the
+// single `is_name_token` predicate, so a soft keyword is accepted uniformly.
+
+type Flags = { ok: Bool, err: String, some: Int, none: Bool, todo: String }
+
+test "type decl with soft-keyword field names" {
+  let f = Flags { ok: true, err: "e", some: 1, none: false, todo: "later" };
+  assert_eq(f.ok, true);
+  assert_eq(f.err, "e");
+  assert_eq(f.some, 1);
+  assert_eq(f.none, false);
+  assert_eq(f.todo, "later")
+}
+
+test "named record with a soft-keyword FIRST field parses as a record" {
+  // peek_named_record must enter the record path on `{ ok: ...`, not read it
+  // as a block whose first statement is an `ok(...)` constructor.
+  let f = Flags { ok: false, err: "x", some: 2, none: true, todo: "t" };
+  assert_eq(f.ok, false);
+  assert_eq(f.some, 2)
+}
+
+test "anonymous record literal with soft-keyword fields" {
+  let r = { ok: true, err: "msg", some: 9 };
+  assert_eq(r.ok, true);
+  assert_eq(r.err, "msg");
+  assert_eq(r.some, 9)
+}
+
+test "named record spread updates a soft-keyword field" {
+  let base = Flags { ok: true, err: "a", some: 1, none: false, todo: "t" };
+  let next = Flags { ...base, ok: false, todo: "done" };
+  assert_eq(next.ok, false);
+  assert_eq(next.todo, "done");
+  assert_eq(next.some, 1)
+}
+
+test "anonymous spread updates a soft-keyword field" {
+  let base = { ok: true, some: 1 };
+  let next = { ...base, ok: false };
+  assert_eq(next.ok, false);
+  assert_eq(next.some, 1)
+}
+
+test "member access reads a soft-keyword field" {
+  let f = Flags { ok: true, err: "", some: 0, none: true, todo: "" };
+  let v = f.ok;
+  assert_eq(v, true)
+}
+
+test "field assignment targets a soft-keyword field" {
+  var f = Flags { ok: true, err: "", some: 0, none: false, todo: "" };
+  f.ok = false;
+  f.todo = "shipped";
+  assert_eq(f.ok, false);
+  assert_eq(f.todo, "shipped")
+}
+
+test "record pattern destructures a soft-keyword field" {
+  let f = Flags { ok: true, err: "boom", some: 7, none: false, todo: "x" };
+  let label = match f {
+    Flags { ok: o, err: e, .. } => if o then e else "no",
+    _ => "none",
+  };
+  assert_eq(label, "boom")
+}

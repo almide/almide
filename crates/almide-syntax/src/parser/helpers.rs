@@ -77,7 +77,10 @@ impl Parser {
         }
     }
 
-    /// Peek past optional newlines for `{ Ident :` pattern — named record.
+    /// Peek past optional newlines for `{ <name> :` — named record. `<name>` is
+    /// any token `expect_any_name` accepts (ident, TypeName, or a soft keyword),
+    /// so a `Foo { ok: … }` first field enters the record path instead of being
+    /// mis-read as a block. Also matches `{ ...spread }` and `{ }` (all-default).
     pub(crate) fn peek_named_record(&self) -> bool {
         let mut i = 0;
         while self.peek_at(i).map(|t| &t.token_type) == Some(&TokenType::Newline) { i += 1; }
@@ -85,8 +88,8 @@ impl Parser {
             && {
                 let mut j = i + 1;
                 while self.peek_at(j).map(|t| &t.token_type) == Some(&TokenType::Newline) { j += 1; }
-                // { ident: ... } or { ...spread } or { } (empty record with all defaults)
-                (self.peek_at(j).map(|t| &t.token_type) == Some(&TokenType::Ident)
+                // { name: ... } or { ...spread } or { } (empty record with all defaults)
+                (self.peek_at(j).map_or(false, |t| Self::is_name_token(&t.token_type))
                     && self.peek_at(j + 1).map(|t| &t.token_type) == Some(&TokenType::Colon))
                 || self.peek_at(j).map(|t| &t.token_type) == Some(&TokenType::DotDotDot)
                 || self.peek_at(j).map(|t| &t.token_type) == Some(&TokenType::RBrace)
@@ -232,19 +235,39 @@ impl Parser {
         ))
     }
 
-    /// True if the current token is a word that is a keyword only in
-    /// expression/pattern position but a valid field/member NAME here — the
-    /// Result/Option value constructors and `todo`. Its lexeme (`ok`, `err`, …)
-    /// is taken as the name. Lets `{ ok: Bool }`, `r.ok`, `Ack { ok: true }` parse.
-    pub(crate) fn is_soft_keyword_name(&self) -> bool {
+    /// The soft keywords: words the lexer tokenizes as value-constructor
+    /// keywords (`ok`/`err`/`some`/`none`) or the `todo` marker, but which are
+    /// valid NAMEs in field/member position (NOT binding position — a bound
+    /// soft-keyword local could never be read, since in value position the
+    /// lexeme is the constructor again). Single source of truth for that set —
+    /// `is_soft_keyword_name`, `is_name_token`, and the `peek_named_record`
+    /// lookahead all consult it, so adding a soft keyword in one place keeps
+    /// every name position in sync.
+    pub(crate) fn is_soft_keyword_token(tt: &TokenType) -> bool {
         matches!(
-            self.current().token_type,
+            tt,
             TokenType::Ok | TokenType::Err | TokenType::Some | TokenType::None | TokenType::Todo
         )
     }
 
+    /// The token kinds accepted in "any name" position (record/struct field,
+    /// member access, field assignment, record-pattern field): a plain
+    /// identifier, a `TypeName` (a capitalized field name is permitted), or a
+    /// soft keyword. `expect_any_name` advances exactly this set and
+    /// `peek_named_record` recognizes a record by the same set, so the lookahead
+    /// can never disagree with what the field loop will go on to accept.
+    pub(crate) fn is_name_token(tt: &TokenType) -> bool {
+        matches!(tt, TokenType::Ident | TokenType::TypeName) || Self::is_soft_keyword_token(tt)
+    }
+
+    /// True if the current token is a soft keyword used here as a NAME — lets
+    /// `{ ok: Bool }`, `r.ok`, `Ack { ok: true }` parse. See `is_soft_keyword_token`.
+    pub(crate) fn is_soft_keyword_name(&self) -> bool {
+        Self::is_soft_keyword_token(&self.current().token_type)
+    }
+
     pub(crate) fn expect_any_name(&mut self) -> Result<Sym, String> {
-        if self.check(TokenType::Ident) || self.check(TokenType::TypeName) || self.is_soft_keyword_name() {
+        if Self::is_name_token(&self.current().token_type) {
             return Ok(self.advance_and_get_sym());
         }
         let tok = self.current();

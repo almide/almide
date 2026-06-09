@@ -172,7 +172,7 @@ impl Parser {
                     self.skip_newlines();
                     break;
                 }
-                let field_name = self.expect_ident()?;
+                let field_name = self.expect_any_name()?;
                 if self.check(TokenType::Colon) {
                     self.advance();
                     let pattern = self.parse_pattern()?;

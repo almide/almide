@@ -256,7 +256,7 @@ impl Parser {
                             while self.check(TokenType::Comma) {
                                 self.advance(); self.skip_newlines();
                                 if self.check(TokenType::RBrace) { break; }
-                                let fname = self.expect_ident()?;
+                                let fname = self.expect_any_name()?;
                                 self.expect(TokenType::Colon)?;
                                 self.skip_newlines();
                                 let fval = self.parse_expr()?;

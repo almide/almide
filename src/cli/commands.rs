@@ -188,10 +188,23 @@ fn compile_and_run_wasm_test(test_file: &str, tmp_dir: &std::path::Path) -> Wasm
     let wasm_name = test_file.replace('/', "_").replace('.', "_") + ".wasm";
     let wasm_path = tmp_dir.join(&wasm_name);
 
-    let (mut program, source_text, _parse_errors) = parse_file(test_file);
+    let (mut program, source_text, parse_errors) = parse_file(test_file);
     if prof { marks.push(("parse", std::time::Instant::now())); }
     if source_text.lines().take(3).any(|line| line.contains("// wasm:skip")) {
         return skip("wasm:skip".to_string());
+    }
+    // A parse error leaves an error-recovered (partial) AST. Compiling and
+    // running that mangled module would report a PASS, so a broken file looked
+    // green on the WASM path (only the rust path surfaced it). It is a real
+    // failure — NOT a benign skip like `// wasm:skip` — so report it as Fail:
+    // `cmd_test_wasm` then counts it failed, and `cmd_test_fast` routes it to the
+    // authoritative native fallback, which prints the full diagnostics.
+    if parse_errors.iter().any(|d| d.level == diagnostic::Level::Error) {
+        let mut detail = String::new();
+        for d in parse_errors.iter().filter(|d| d.level == diagnostic::Level::Error).take(3) {
+            detail.push_str(&format!("  parse error: {}\n", d.message));
+        }
+        return WasmTestOutcome::Fail { file: test_file.to_string(), detail };
     }
 
     let dep_paths: Vec<(project::PkgId, std::path::PathBuf)> =
