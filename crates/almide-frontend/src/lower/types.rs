@@ -7,10 +7,17 @@ use crate::intern::{Sym, sym};
 use super::LowerCtx;
 use super::expressions::lower_expr;
 
-pub(super) fn lower_type_decl(ctx: &mut LowerCtx, name: &str, ty: &ast::TypeExpr, deriving: &Option<Vec<Sym>>, visibility: &ast::Visibility, generics: Option<&Vec<ast::GenericParam>>) -> IrTypeDecl {
+pub(super) fn lower_type_decl(ctx: &mut LowerCtx, name: &str, ty: &ast::TypeExpr, deriving: &Option<Vec<Sym>>, visibility: &ast::Visibility, generics: Option<&Vec<ast::GenericParam>>, module_prefix: Option<&str>) -> IrTypeDecl {
+    // #433: a user (non-stdlib) module's type is declared under its qualified
+    // canonical name `mod.Type`, matching how references resolve, so two packages'
+    // same-name types stay distinct through link + codegen.
+    let qualified_name = match module_prefix {
+        Some(m) if !almide_lang::stdlib_info::is_bundled_module(m) => format!("{}.{}", m, name),
+        _ => name.to_string(),
+    };
     // Use TypeEnv for field type resolution so aliases (TcpStream → Int)
     // are expanded at lowering time, not left as Ty::Named for codegen.
-    let resolve = |te: &ast::TypeExpr| resolve_type_expr_with_env(te, ctx.env);
+    let resolve = |te: &ast::TypeExpr| crate::canonicalize::resolve::resolve_type_expr_in(te, Some(&ctx.env.types), module_prefix);
     let kind = match ty {
         ast::TypeExpr::Record { fields } => {
             let fs = fields.iter().map(|f| {
@@ -35,7 +42,7 @@ pub(super) fn lower_type_decl(ctx: &mut LowerCtx, name: &str, ty: &ast::TypeExpr
         ast::Visibility::Mod => IrVisibility::Mod,
         ast::Visibility::Local => IrVisibility::Private,
     };
-    IrTypeDecl { name: sym(name), kind, deriving: deriving.as_ref().map(|d| d.iter().copied().collect()), generics: generics.cloned(), visibility: vis, doc: None, blank_lines_before: 0 }
+    IrTypeDecl { name: sym(&qualified_name), kind, deriving: deriving.as_ref().map(|d| d.iter().copied().collect()), generics: generics.cloned(), visibility: vis, doc: None, blank_lines_before: 0 }
 }
 
 fn lower_variant_case(ctx: &mut LowerCtx, case: &ast::VariantCase, _parent: &str) -> IrVariantDecl {

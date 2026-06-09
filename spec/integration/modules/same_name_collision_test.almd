@@ -1,0 +1,20 @@
+// #433: two packages declaring a same-NAME type with different structures now
+// coexist — per-package namespacing keeps them distinct through link + codegen,
+// byte-identical native ⇄ wasm. Before, the second was dropped/shadowed and a
+// function using it referenced the wrong struct (cryptic E0560/E0609).
+// Covers both a same-name RECORD (`Config`) and a same-name VARIANT (`State`).
+// (The orthogonal same-CONSTRUCTOR-name case across packages is tracked in #413.)
+import collqa
+import collqb
+import collva
+import collvb
+
+test "same-name record type across packages coexists" {
+  assert_eq(collqa.get_a(collqa.make()), 7)
+  assert_eq(collqb.get_label(collqb.make()), "z")
+}
+
+test "same-name variant type across packages coexists" {
+  assert_eq(collva.show(collva.start()), "a-active")
+  assert_eq(collvb.show(collvb.start()), "b-idle")
+}

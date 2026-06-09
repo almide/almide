@@ -25,7 +25,7 @@ pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &ast::Stmt) -> IrStmt {
             // record types with identical fields (e.g. `Dog` and `Cat`) collide
             // at codegen time because the value keeps its structural type.
             let val_ty = if let Some(te) = ty {
-                let declared = super::types::resolve_type_expr(te);
+                let declared = crate::canonicalize::resolve::resolve_type_expr_in(te, Some(&ctx.env.types), ctx.current_module.as_ref().map(|s| s.as_str()));
                 override_record_literal_ty(&mut ir_val, &declared, ctx.env);
                 declared
             } else {
@@ -37,7 +37,7 @@ pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &ast::Stmt) -> IrStmt {
         ast::Stmt::Var { name, ty, value, .. } => {
             let mut ir_val = lower_expr(ctx, value);
             let val_ty = if let Some(te) = ty {
-                let declared = super::types::resolve_type_expr(te);
+                let declared = crate::canonicalize::resolve::resolve_type_expr_in(te, Some(&ctx.env.types), ctx.current_module.as_ref().map(|s| s.as_str()));
                 override_record_literal_ty(&mut ir_val, &declared, ctx.env);
                 declared
             } else {
