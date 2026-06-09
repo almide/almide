@@ -582,9 +582,16 @@ fn fmt_expr(out: &mut String, expr: &Expr, depth: usize) {
             out.push_str(") => "); fmt_expr(out, body, depth);
         }
         ExprKind::TypeAscription { expr, ty } => {
+            // Parenthesize so the ascription re-parses in EVERY position, not just
+            // as a bare call argument: `([]: List[String])` is valid as a record-
+            // field value / `let` initializer, while the bare `[]: List[String]`
+            // there is a parse error (the `:` is unexpected). `(expr: Type)` parses
+            // anywhere an expression does, so this is safe + idempotent (#437).
+            out.push('(');
             fmt_expr(out, expr, depth);
             out.push_str(": ");
             fmt_type(out, ty, depth);
+            out.push(')');
         }
     }
 }
