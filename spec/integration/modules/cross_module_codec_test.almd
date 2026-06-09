@@ -11,19 +11,25 @@ type Wrapped: Codec = {
   id: Int,
   payload: varlib.Pigment,
   palette: List[varlib.Pigment],
+  accent: Option[varlib.Pigment],
 }
 
-test "cross-module derived Codec roundtrip (direct + List field) (#411-B)" {
+test "cross-module derived Codec roundtrip (direct + List + Option field) (#411-B, 新②)" {
   let w = Wrapped {
     id: 7,
     payload: varlib.Pigment { r: 1, g: 2, b: 3 },
     palette: [varlib.Pigment { r: 4, g: 5, b: 6 }, varlib.Pigment { r: 7, g: 8, b: 9 }],
+    accent: some(varlib.Pigment { r: 10, g: 20, b: 30 }),
   }
   match Wrapped.decode(Wrapped.encode(w)) {
     ok(v) => {
       assert_eq(v.id, 7)
       assert_eq(v.payload.g, 2)
       assert_eq(list.len(v.palette), 2)
+      match v.accent {
+        some(c) => assert_eq(c.g, 20),
+        none => assert(false),
+      }
     },
     _ => assert(false),
   }

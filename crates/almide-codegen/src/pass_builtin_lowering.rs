@@ -221,6 +221,52 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
                             }, ty, span, def_id: None };
                         }
                     }
+                    // __encode_option_T / __decode_option_T for a CUSTOM element
+                    // type: route through the generic option codec with a per-element
+                    // `T.encode`/`T.decode` fn. Primitives keep their existing
+                    // `almide_rt___{op}_option_<prim>` helper via the `__` arm below (新②).
+                    if name.starts_with("__encode_option_") || name.starts_with("__decode_option_") {
+                        let type_name = if name.starts_with("__encode_option_") {
+                            &name["__encode_option_".len()..]
+                        } else {
+                            &name["__decode_option_".len()..]
+                        };
+                        let primitives = ["string", "int", "float", "bool"];
+                        if !primitives.contains(&type_name) {
+                            let is_encode = name.starts_with("__encode");
+                            let codec_op = if is_encode { "encode" } else { "decode" };
+                            let codec_method = format!("{}.{}", type_name, codec_op);
+                            let func_ref = MODULE_METHOD_FNS.with(|c| {
+                                c.borrow().get(&codec_method)
+                                    .map(|m| format!("almide_rt_{}_{}_{}", m, type_name, codec_op))
+                            }).unwrap_or_else(|| format!("{}_{}", type_name, codec_op));
+                            let elem_ty = Ty::Named(type_name.into(), vec![]);
+                            let value_ty = Ty::Named("Value".into(), vec![]);
+                            use almide_lang::types::constructor::TypeConstructorId;
+                            let fn_ref_ty = if is_encode {
+                                Ty::Fn { params: vec![elem_ty], ret: Box::new(value_ty) }
+                            } else {
+                                Ty::Fn {
+                                    params: vec![value_ty],
+                                    ret: Box::new(Ty::Applied(TypeConstructorId::Result, vec![elem_ty, Ty::String])),
+                                }
+                            };
+                            let mut new_args = args;
+                            new_args.push(IrExpr {
+                                kind: IrExprKind::FnRef { name: func_ref.into() },
+                                ty: fn_ref_ty, span: None, def_id: None,
+                            });
+                            let rt_func = if is_encode {
+                                "almide_rt_value_option_encode"
+                            } else {
+                                "almide_rt_value_decode_option_custom"
+                            };
+                            return IrExpr { kind: IrExprKind::Call {
+                                target: CallTarget::Named { name: rt_func.into() },
+                                args: new_args, type_args,
+                            }, ty, span, def_id: None };
+                        }
+                    }
                     // Other __ prefixed → almide_rt_
                     if name.starts_with("__") {
                         return IrExpr { kind: IrExprKind::Call {
