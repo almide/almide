@@ -1,0 +1,24 @@
+// #437(a): an inline element-type annotation on an otherwise un-inferable empty
+// collection is accepted in a PARENTHESIZED expression — `(expr: Type)` — not
+// just as a bare call argument. This unblocks a record-field value and a `let`
+// initializer, where the bare `[]: T` form isn't available (the `:` would be a
+// parse error). Both targets parse it identically (shared parser).
+
+type Holder = { id: Int, tags: List[String], nums: List[Int] }
+
+test "paren type ascription on empty list in a record field" {
+  let h = Holder { id: 1, tags: ([]: List[String]), nums: ([]: List[Int]) }
+  assert_eq(h.id, 1)
+  assert_eq(list.len(h.tags), 0)
+  assert_eq(list.len(h.nums), 0)
+}
+
+test "paren type ascription in a let initializer" {
+  let xs = ([]: List[String])
+  assert_eq(list.len(xs), 0)
+}
+
+test "paren type ascription on empty map" {
+  let m = ([:]: Map[String, Int])
+  assert_eq(map.len(m), 0)
+}
