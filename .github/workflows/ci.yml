@@ -112,6 +112,24 @@ jobs:
           ALMIDE_BIN: /tmp/almide-bin/almide
         run: cargo test
 
+      - name: Generated runtime registry matches committed sources (regenerate and diff)
+        # crates/almide-codegen/src/generated/{rust_runtime,runtime_fn_modes}.rs
+        # are committed, but build.rs regenerates them from runtime/rs/src by
+        # embedding each module's source TEXT. A draft edited in runtime/rs/src
+        # but not committed can be baked into the generated file and committed on
+        # its own, silently desyncing the two (this is exactly how the #419
+        # codepoint draft leaked). Force a fresh regen (touch the generator so
+        # cargo re-runs the build script) and fail on any diff — in CI only
+        # committed sources exist, so a leaked draft cannot reproduce. Mirrors the
+        # "Contract README up to date" regenerate-and-diff gate.
+        run: |
+          touch crates/almide-codegen/buildscript/runtime_registry.rs
+          cargo build -p almide-codegen
+          git diff --exit-code -- \
+            crates/almide-codegen/src/generated/rust_runtime.rs \
+            crates/almide-codegen/src/generated/runtime_fn_modes.rs \
+            || { echo "::error::generated runtime registry is stale — a runtime/rs/src edit was not committed, or a generated file was hand-edited. Rebuild almide-codegen and commit crates/almide-codegen/src/generated/*.rs"; exit 1; }
+
       - name: Almide spec tests (Rust target)
         run: |
           ALMIDE=/tmp/almide-bin/almide
