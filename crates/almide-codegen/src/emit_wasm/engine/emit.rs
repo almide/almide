@@ -29,8 +29,8 @@ pub fn emit_op(op: &Op, f: &mut Function, reg: &LayoutRegistry) {
         Op::Const(c) => match c {
             Const::I32(v) => { f.instruction(&I32Const(*v)); }
             Const::I64(v) => { f.instruction(&I64Const(*v)); }
-            Const::F32(v) => { f.instruction(&F32Const(*v)); }
-            Const::F64(v) => { f.instruction(&F64Const(*v)); }
+            Const::F32(v) => { f.instruction(&F32Const((*v).into())); }
+            Const::F64(v) => { f.instruction(&F64Const((*v).into())); }
         },
         Op::Drop => { f.instruction(&Drop); }
 

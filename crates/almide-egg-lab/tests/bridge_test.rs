@@ -114,6 +114,7 @@ fn list_call(func: &str, args: Vec<IrExpr>, result_ty: Ty) -> IrExpr {
             target: CallTarget::Module {
                 module: sym("list"),
                 func: sym(func),
+                def_id: None,
             },
             args,
             type_args: vec![],
@@ -137,6 +138,7 @@ fn matrix_call(func: &str, args: Vec<IrExpr>) -> IrExpr {
             target: CallTarget::Module {
                 module: sym("matrix"),
                 func: sym(func),
+                def_id: None,
             },
             args,
             type_args: vec![],
@@ -698,7 +700,7 @@ fn block_lets(binds: Vec<(VarId, IrExpr)>, trailing: IrExpr) -> IrExpr {
                 ty: value.ty.clone(),
                 value,
             },
-            span: None, def_id: None,
+            span: None,
         })
         .collect();
     let trailing_ty = trailing.ty.clone();
