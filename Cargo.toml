@@ -23,17 +23,13 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 semver = "1"
 toml = "0.8"
+# Cross-platform advisory file lock (flock / LockFileEx) for the shared build
+# scratch dir — lets CI run the suite in parallel on every OS (see BuildDirLock).
+fs2 = "0.4"
 wasm-encoder = "0.225"
 lasso = { version = "0.7", features = ["multi-threaded"] }
 lsp-server = "0.7"
 lsp-types = "0.97"
-# Advisory cross-process file lock (flock) for the shared build scratch
-# dirs: serializes concurrent `almide run`/`build` invocations that share
-# /tmp/almide-run's single src/main.rs + target/. Already present in the
-# dependency tree transitively; used only under cfg(unix).
-[target.'cfg(unix)'.dependencies]
-libc = "0.2"
-
 
 [dev-dependencies]
 proptest = "1"
