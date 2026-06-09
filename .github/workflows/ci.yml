@@ -371,10 +371,10 @@ jobs:
         if: runner.os != 'Windows'
         run: curl https://wasmtime.dev/install.sh -sSf | bash && echo "$HOME/.wasmtime/bin" >> $GITHUB_PATH
 
-      # Keep --test-threads=1 here: this matrix includes windows-latest,
-      # where the build-scratch flock is a no-op (#[cfg(unix)]), so parallel
-      # `almide` subprocesses could still race the shared scratch dir.
-      - run: cargo test -- --test-threads=1
+      # Parallel on every OS: the build-scratch lock (BuildDirLock) is now
+      # cross-platform (flock / LockFileEx via fs2), so concurrent `almide`
+      # subprocesses no longer race the shared scratch dir on Windows.
+      - run: cargo test
 
       - uses: actions/upload-artifact@v4
         with:

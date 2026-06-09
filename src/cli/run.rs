@@ -13,23 +13,26 @@ use super::{hash64, cargo_build_generated_with_native, cargo_build_test_with_nat
 /// children. Those races corrupt the shared `main.rs`/generated binary and
 /// produce an executable built from the wrong source.
 ///
-/// An advisory `flock` on a lockfile in the project dir serializes that
-/// critical section across processes too. It is crash-safe: the kernel
-/// releases the lock when the holding process exits, so an aborted build
-/// never deadlocks the next one. The shared `target/` dep cache is
-/// preserved (builds serialize but reuse compiled deps).
-///
-/// Non-unix: a no-op (those platforms keep `--test-threads=1` in CI).
+/// An advisory exclusive lock on a lockfile in the project dir serializes that
+/// critical section across processes too — `flock(LOCK_EX)` on unix and
+/// `LockFileEx` on Windows, both via `fs2::FileExt::lock_exclusive`. It is
+/// crash-safe: the OS releases the lock when the holding process exits, so an
+/// aborted build never deadlocks the next one. The shared `target/` dep cache
+/// is preserved (builds serialize but reuse compiled deps). It covers every
+/// real host (unix + Windows), so CI runs the suite in parallel on all of them
+/// (no `--test-threads=1` carve-out for Windows). `wasm32` — where the compiler
+/// can run as a determinism harness but never spawns build subprocesses, and
+/// where `fs2` has no backing OS lock — is a no-op.
 pub(crate) struct BuildDirLock {
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     _file: std::fs::File,
 }
 
 impl BuildDirLock {
     pub(crate) fn acquire(project_dir: &std::path::Path) -> Result<Self, String> {
-        #[cfg(unix)]
+        #[cfg(any(unix, windows))]
         {
-            use std::os::unix::io::AsRawFd;
+            use fs2::FileExt;
             let lock_path = project_dir.join(".almide-build.lock");
             let file = std::fs::OpenOptions::new()
                 .create(true)
@@ -37,21 +40,13 @@ impl BuildDirLock {
                 .truncate(false)
                 .open(&lock_path)
                 .map_err(|e| format!("Failed to open build lock {}: {}", lock_path.display(), e))?;
-            // SAFETY: `fd` is a valid, open file descriptor owned by `file`,
-            // which outlives this call. `flock` only associates an advisory
-            // lock with the open file description; it does not mutate Rust
-            // state. The lock is released when `file` is dropped (close) or
+            // Blocking exclusive lock; released when `file` is dropped (close) or
             // the process exits.
-            let rc = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) };
-            if rc != 0 {
-                return Err(format!(
-                    "Failed to acquire build lock: {}",
-                    std::io::Error::last_os_error()
-                ));
-            }
+            file.lock_exclusive()
+                .map_err(|e| format!("Failed to acquire build lock: {}", e))?;
             Ok(BuildDirLock { _file: file })
         }
-        #[cfg(not(unix))]
+        #[cfg(not(any(unix, windows)))]
         {
             let _ = project_dir;
             Ok(BuildDirLock {})

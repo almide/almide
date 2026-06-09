@@ -22,7 +22,7 @@ checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
 
 [[package]]
 name = "almide"
-version = "0.26.5"
+version = "0.26.6"
 dependencies = [
  "almide-base",
  "almide-codegen",
@@ -33,9 +33,9 @@ dependencies = [
  "almide-optimize",
  "almide-tools",
  "clap",
+ "fs2",
  "insta",
  "lasso",
- "libc",
  "lsp-server",
  "lsp-types",
  "proptest",
@@ -438,6 +438,16 @@ name = "foldhash"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d9c4f5dac5e15c24eb999c26181a6ca40b39fe946cbe4c263c7209467bc83af2"
+
+[[package]]
+name = "fs2"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9564fc758e15025b46aa6643b1b77d047d1a56a1aea6e01002ac0c7026876213"
+dependencies = [
+ "libc",
+ "winapi",
+]
 
 [[package]]
 name = "futures-core"
