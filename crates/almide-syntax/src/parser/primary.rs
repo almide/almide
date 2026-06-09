@@ -272,7 +272,7 @@ impl Parser {
                     self.advance();
                     self.skip_newlines();
                     if self.check(TokenType::RBrace) { break; }
-                    let field_name = self.expect_ident()?;
+                    let field_name = self.expect_any_name()?;
                     self.expect(TokenType::Colon)?;
                     self.skip_newlines();
                     let field_value = self.parse_expr()?;

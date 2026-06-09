@@ -26,10 +26,13 @@ impl Parser {
             }
         }
 
-        // obj.field = value (field assignment)
+        // obj.field = value (field assignment). The field name may be any token
+        // `expect_any_name` accepts (ident, TypeName, or a soft keyword) so
+        // `obj.ok = v` routes here, exactly as `obj.ok` reads in expression
+        // position — see parse_field_assign_stmt / parse_postfix.
         if self.check(TokenType::Ident)
             && self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::Dot)
-            && self.peek_at(2).map(|t| matches!(t.token_type, TokenType::Ident)).unwrap_or(false)
+            && self.peek_at(2).map(|t| Self::is_name_token(&t.token_type)).unwrap_or(false)
             && self.peek_at(3).map(|t| &t.token_type) == Some(&TokenType::Eq)
             && self.peek_at(4).map(|t| &t.token_type) != Some(&TokenType::Eq)
         {
@@ -58,7 +61,12 @@ impl Parser {
             return Err(format!("'let rec' is not valid in Almide at line {}:{}", tok.line, tok.col));
         }
 
-        // Record destructuring: let { a, b } = expr
+        // Record destructuring: let { a, b } = expr. This form is shorthand
+        // only — each name becomes BOTH the field label and a usable local — so
+        // it stays `expect_ident`: a soft-keyword local (`let { ok } = …`) could
+        // be bound but never read (in value position `ok` is the constructor),
+        // so accepting it would only enable a dead binding. Soft keywords are
+        // names in label/member position (`{ ok: … }`, `.ok`), not as bindings.
         if self.check(TokenType::LBrace) {
             self.advance();
             let mut names = Vec::new();
@@ -201,7 +209,7 @@ impl Parser {
         let target = sym(&self.current().value);
         self.advance(); // ident
         self.advance(); // .
-        let field = self.expect_ident()?;
+        let field = self.expect_any_name()?;
         self.expect(TokenType::Eq)?;
         self.skip_newlines();
         let value = self.parse_expr()?;
