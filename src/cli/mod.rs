@@ -89,6 +89,7 @@ edition = "2021"
 
 [profile.dev]
 opt-level = 1
+overflow-checks = false
 
 [profile.release]
 opt-level = 3
@@ -108,6 +109,7 @@ webpki-roots = "0.26"
 
 [profile.dev]
 opt-level = 1
+overflow-checks = false
 
 [profile.release]
 opt-level = 3
@@ -136,6 +138,7 @@ openblas-src = { version = "0.10", features = ["static"] }
 
 [profile.dev]
 opt-level = 1
+overflow-checks = false
 
 [profile.release]
 opt-level = 3
@@ -275,6 +278,7 @@ path = "src/lib.rs"
 
 [profile.dev]
 opt-level = 1
+overflow-checks = false
 
 [profile.release]
 opt-level = 3
