@@ -14,6 +14,59 @@ use almide_base::intern::{Sym, sym};
 /// When provided (checker context), named types are looked up; when None (lowering),
 /// unresolved names become `Ty::Named`.
 pub fn resolve_type_expr(te: &ast::TypeExpr, known_types: Option<&HashMap<Sym, Ty>>) -> Ty {
+    resolve_type_expr_in(te, known_types, None)
+}
+
+/// Like `resolve_type_expr`, but aware of the module currently being resolved
+/// (`cur_mod`), so a USER module's reference to one of its own types is pinned to
+/// the qualified canonical name `mod.Type` instead of the bare name. This is what
+/// keeps two packages' same-name types distinct end-to-end (#433). Stdlib modules
+/// are exempt — their types stay bare to match the bare-named Rust runtime.
+pub fn resolve_type_expr_in(te: &ast::TypeExpr, known_types: Option<&HashMap<Sym, Ty>>, cur_mod: Option<&str>) -> Ty {
+    // Resolve a nominal name to its canonical (possibly module-qualified) `Ty::Named`.
+    let resolve_named = |other: &str| -> Option<Ty> {
+        let types = known_types?;
+        // A user module's bare reference to its own declared type → qualify it.
+        if let Some(m) = cur_mod {
+            if !other.contains('.') && !almide_lang::stdlib_info::is_bundled_module(m) {
+                let qual = format!("{}.{}", m, other);
+                if let Some(t) = types.get(&sym(&qual)) {
+                    if matches!(t, Ty::Record { .. } | Ty::Variant { .. }) {
+                        return Some(Ty::Named(sym(&qual), vec![]));
+                    }
+                }
+            }
+        }
+        // An already-qualified reference to a USER module's type → keep it qualified.
+        if let Some((m, _bare)) = other.rsplit_once('.') {
+            if !almide_lang::stdlib_info::is_bundled_module(m) {
+                if let Some(t) = types.get(&sym(other)) {
+                    if matches!(t, Ty::Record { .. } | Ty::Variant { .. }) {
+                        return Some(Ty::Named(sym(other), vec![]));
+                    }
+                }
+            }
+        }
+        // A bare reference to an IMPORTED user-module type (e.g. module `b` uses
+        // module `d`'s `Logger` as a bare `Logger` brought in by `import d`): pin
+        // it to the unique qualifying owner `X.Type` so it mangles to the same
+        // struct. Only when EXACTLY ONE user module declares that bare name —
+        // otherwise it's ambiguous and we leave it bare (a root-local type, which
+        // has no `X.Type` key, also falls through to bare).
+        if !other.contains('.') {
+            let mut owners = types.iter().filter(|(k, v)| {
+                k.as_str().rsplit_once('.').map_or(false, |(p, base)| {
+                    base == other && !almide_lang::stdlib_info::is_bundled_module(p)
+                }) && matches!(v, Ty::Record { .. } | Ty::Variant { .. })
+            });
+            if let Some((k, _)) = owners.next() {
+                if owners.next().is_none() {
+                    return Some(Ty::Named(*k, vec![]));
+                }
+            }
+        }
+        None
+    };
     match te {
         ast::TypeExpr::Simple { name } => match name.as_str() {
             "Int" => Ty::Int,
@@ -47,6 +100,12 @@ pub fn resolve_type_expr(te: &ast::TypeExpr, known_types: Option<&HashMap<Sym, T
             // with another nominal `Never` type, which doesn't exist.
             "Never" => Ty::Never,
             other => {
+                // #433: a user module's (qualified) reference to a namespaced
+                // type resolves to its canonical `mod.Type` name; falls through
+                // to the existing bare resolution for stdlib / local types.
+                if let Some(qualified) = resolve_named(other) {
+                    return qualified;
+                }
                 // - Generic type parameters (T, U, Self, ...) resolve via
                 //   known_types as `Ty::TypeVar`.
                 // - Record/Variant declarations must keep their nominal
@@ -90,7 +149,7 @@ pub fn resolve_type_expr(te: &ast::TypeExpr, known_types: Option<&HashMap<Sym, T
             }
         },
         ast::TypeExpr::Generic { name, args } => {
-            let ra: Vec<Ty> = args.iter().map(|a| resolve_type_expr(a, known_types)).collect();
+            let ra: Vec<Ty> = args.iter().map(|a| resolve_type_expr_in(a, known_types, cur_mod)).collect();
             match name.as_str() {
                 "List" => Ty::list(ra.first().cloned().unwrap_or(Ty::Unknown)),
                 "Option" => Ty::option(ra.first().cloned().unwrap_or(Ty::Unknown)),
@@ -104,26 +163,32 @@ pub fn resolve_type_expr(te: &ast::TypeExpr, known_types: Option<&HashMap<Sym, T
                 // `types/mod.rs` bridges bare `Matrix` ↔ `Matrix[Float]`.
                 "Matrix" => Ty::Applied(TypeConstructorId::Matrix, ra),
                 _ => {
-                    let resolved_name = name.as_str().rsplit_once('.').map(|(_, bare)| sym(bare)).unwrap_or(*name);
-                    Ty::Named(resolved_name, ra)
+                    // #433: qualify a user module's generic type to its canonical
+                    // `mod.Type` name; stdlib / local generics stay bare.
+                    if let Some(Ty::Named(qn, _)) = resolve_named(name.as_str()) {
+                        Ty::Named(qn, ra)
+                    } else {
+                        let resolved_name = name.as_str().rsplit_once('.').map(|(_, bare)| sym(bare)).unwrap_or(*name);
+                        Ty::Named(resolved_name, ra)
+                    }
                 },
             }
         },
         ast::TypeExpr::Record { fields } => Ty::Record {
-            fields: fields.iter().map(|f| (sym(&f.name), resolve_type_expr(&f.ty, known_types))).collect(),
+            fields: fields.iter().map(|f| (sym(&f.name), resolve_type_expr_in(&f.ty, known_types, cur_mod))).collect(),
         },
         ast::TypeExpr::OpenRecord { fields } => Ty::OpenRecord {
-            fields: fields.iter().map(|f| (sym(&f.name), resolve_type_expr(&f.ty, known_types))).collect(),
+            fields: fields.iter().map(|f| (sym(&f.name), resolve_type_expr_in(&f.ty, known_types, cur_mod))).collect(),
         },
         ast::TypeExpr::Fn { params, ret } => Ty::Fn {
-            params: params.iter().map(|p| resolve_type_expr(p, known_types)).collect(),
-            ret: Box::new(resolve_type_expr(ret, known_types)),
+            params: params.iter().map(|p| resolve_type_expr_in(p, known_types, cur_mod)).collect(),
+            ret: Box::new(resolve_type_expr_in(ret, known_types, cur_mod)),
         },
         ast::TypeExpr::Tuple { elements } => Ty::Tuple(
-            elements.iter().map(|e| resolve_type_expr(e, known_types)).collect(),
+            elements.iter().map(|e| resolve_type_expr_in(e, known_types, cur_mod)).collect(),
         ),
         ast::TypeExpr::Union { members } => Ty::union(
-            members.iter().map(|m| resolve_type_expr(m, known_types)).collect(),
+            members.iter().map(|m| resolve_type_expr_in(m, known_types, cur_mod)).collect(),
         ),
         ast::TypeExpr::ConstLit { value } => Ty::ConstValue { ty: Box::new(Ty::Int), value: *value },
         ast::TypeExpr::Variant { cases } => {
@@ -134,13 +199,13 @@ pub fn resolve_type_expr(te: &ast::TypeExpr, known_types: Option<&HashMap<Sym, T
                 ast::VariantCase::Tuple { name, fields } => VariantCase {
                     name: sym(name),
                     payload: VariantPayload::Tuple(
-                        fields.iter().map(|f| resolve_type_expr(f, known_types)).collect(),
+                        fields.iter().map(|f| resolve_type_expr_in(f, known_types, cur_mod)).collect(),
                     ),
                 },
                 ast::VariantCase::Record { name, fields } => VariantCase {
                     name: sym(name),
                     payload: VariantPayload::Record(
-                        fields.iter().map(|f| (sym(&f.name), resolve_type_expr(&f.ty, known_types))).collect(),
+                        fields.iter().map(|f| (sym(&f.name), resolve_type_expr_in(&f.ty, known_types, cur_mod))).collect(),
                     ),
                 },
             }).collect();

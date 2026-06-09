@@ -358,7 +358,17 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
     // Emit-time prefix: module_origin → "almide_rt_{origin}_{name}"
     // IR name stays clean; prefix is a rendering concern.
     if let Some(ref origin) = func.module_origin {
-        safe_name = format!("almide_rt_{}_{}", origin, safe_name);
+        // A qualified-method fn (e.g. a Codec `Type.encode` whose type is now the
+        // namespaced `mod.Type`) flattens to `mod_Type_method`; the emit prefix
+        // already adds `almide_rt_<origin>_`, so strip a leading `<origin>_` to
+        // avoid doubling the module (#433 × #411-B). Mirrors the call-site strip;
+        // gated on a dotted IR name so plain module fns are unaffected.
+        let base: String = if func.name.as_str().contains('.') {
+            safe_name.strip_prefix(&format!("{}_", origin)).unwrap_or(&safe_name).to_string()
+        } else {
+            safe_name.clone()
+        };
+        safe_name = format!("almide_rt_{}_{}", origin, base);
     }
     let safe_name = format!("{}{}", safe_name, fn_generics);
 

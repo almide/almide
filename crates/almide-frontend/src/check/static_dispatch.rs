@@ -249,7 +249,10 @@ impl Checker {
                                 }
                             }
                         }
-                        return Some(Ty::Named(type_name, generic_args));
+                        // #433: the binding/result takes the qualified `mod.Type`
+                        // (just confirmed to exist) so it mangles to the namespaced
+                        // enum, not the ambiguous bare name.
+                        return Some(Ty::Named(sym(&qualified), generic_args));
                     }
                 }
                 let key = format!("{}.{}", m, field);

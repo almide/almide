@@ -211,7 +211,17 @@ impl Checker {
                                     fs.iter().map(|(fname, fty)| (*fname, super::calls::subst_ty(fty, &subst))).collect(),
                                 _ => Vec::new(),
                             };
-                            (Ty::Named(type_name, generic_args), decl)
+                            // #433: a qualified record-variant `mod.Ctor { … }` takes
+                            // the namespaced `mod.Type` so it mangles to the right enum.
+                            let result_named = match n.as_str().rsplit_once('.') {
+                                Some((m, _)) => {
+                                    let rm = self.env.import_table.resolve(m).map(|s| s.to_string()).unwrap_or_else(|| m.to_string());
+                                    let q = format!("{}.{}", rm, type_name.as_str());
+                                    if self.env.types.contains_key(&sym(&q)) { sym(&q) } else { type_name }
+                                }
+                                None => type_name,
+                            };
+                            (Ty::Named(result_named, generic_args), decl)
                         } else {
                             // Named record type: instantiate its generics with
                             // fresh vars so the declared field types carry the
@@ -294,13 +304,17 @@ impl Checker {
                         if self.env.types.contains_key(&sym(&qualified)) {
                             self.type_map.insert(object.id, Ty::Unit);
                             let generic_args = self.instantiate_type_generics(type_name.as_str());
+                            // #433: return the qualified `mod.Type` (it exists and was
+                            // just confirmed) so the binding mangles to the namespaced
+                            // struct, not the ambiguous bare name.
+                            let qual_ty = sym(&qualified);
                             return match &case.payload {
-                                VariantPayload::Unit => Ty::Named(type_name, generic_args),
+                                VariantPayload::Unit => Ty::Named(qual_ty, generic_args),
                                 VariantPayload::Tuple(param_tys) => Ty::Fn {
                                     params: param_tys.clone(),
-                                    ret: Box::new(Ty::Named(type_name, generic_args)),
+                                    ret: Box::new(Ty::Named(qual_ty, generic_args)),
                                 },
-                                VariantPayload::Record(_) => Ty::Named(type_name, generic_args),
+                                VariantPayload::Record(_) => Ty::Named(qual_ty, generic_args),
                             };
                         }
                     }

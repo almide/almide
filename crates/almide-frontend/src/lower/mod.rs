@@ -53,6 +53,10 @@ pub struct LowerCtx<'a> {
     pub def_table: almide_ir::DefTable,
     /// Maps qualified name (e.g. "snaidhm.web.gpu.STORAGE") → DefId.
     pub def_map: HashMap<Sym, almide_ir::DefId>,
+    /// The module currently being lowered (its prefix), or None for the root
+    /// program. Used to pin a struct-literal constructor to its qualified
+    /// canonical name `mod.Type` (#433), mirroring `lower_type_decl`.
+    pub current_module: Option<Sym>,
 }
 
 impl<'a> LowerCtx<'a> {
@@ -70,6 +74,7 @@ impl<'a> LowerCtx<'a> {
             const_param_vars: HashMap::new(),
             def_table: env.def_table.clone(),
             def_map: env.def_map.iter().map(|(k, v)| (*k, *v)).collect(),
+            current_module: None,
         }
     }
 
@@ -212,6 +217,7 @@ pub fn lower_program(prog: &ast::Program, env: &TypeEnv, type_map: &TypeMap) -> 
 
 fn lower_program_with_prefix(prog: &ast::Program, env: &TypeEnv, type_map: &TypeMap, module_prefix: Option<&str>) -> IrProgram {
     let mut ctx = LowerCtx::new(env, type_map);
+    ctx.current_module = module_prefix.map(sym);
 
     // Register cross-package top-level lets that weren't in register_decls
     // (dependency packages populate env.top_lets during project fetch).
@@ -328,7 +334,7 @@ fn lower_program_with_prefix(prog: &ast::Program, env: &TypeEnv, type_map: &Type
                 functions.push(f);
             }
             ast::Decl::Type { name, ty, deriving, visibility, generics, .. } => {
-                let mut td = types::lower_type_decl(&mut ctx, name, ty, deriving, visibility, generics.as_ref());
+                let mut td = types::lower_type_decl(&mut ctx, name, ty, deriving, visibility, generics.as_ref(), module_prefix);
                 td.doc = doc;
                 td.blank_lines_before = blank_lines;
                 type_decls.push(td);
@@ -716,7 +722,7 @@ fn lower_fn(
     }
 
     for p in params {
-        let ty = resolve_type_expr(&p.ty);
+        let ty = crate::canonicalize::resolve::resolve_type_expr_in(&p.ty, Some(&ctx.env.types), module_prefix);
         let var = ctx.define_var(&p.name, ty.clone(), Mutability::Let, span.clone());
         let default = p.default.as_ref().map(|d| Box::new(lower_expr(ctx, d)));
         ir_params.push(IrParam {
