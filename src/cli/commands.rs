@@ -268,6 +268,12 @@ fn compile_and_run_wasm_test(test_file: &str, tmp_dir: &std::path::Path) -> Wasm
              can differ from native. fan.timeout is excluded from the cross-target equivalence guarantee."
         );
     }
+    // Native-only matrix ops (e.g. qwen3_block_q1_0_kv) have no WASM lowering;
+    // skip with a clear reason instead of reaching the emitter (whose panic would
+    // surface as a generic "WASM codegen panic" skip).
+    if let Some(op) = almide::codegen::program_uses_native_only_matrix_on_wasm(&ir_program) {
+        return skip(format!("matrix.{op} is native-only — no WASM lowering"));
+    }
     let bytes = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         match almide::codegen::codegen(&mut ir_program, almide::codegen::pass::Target::Wasm) {
             almide::codegen::CodegenOutput::Binary(b) => b,

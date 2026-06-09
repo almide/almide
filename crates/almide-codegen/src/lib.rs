@@ -191,6 +191,57 @@ pub fn program_uses_fan_timeout(program: &IrProgram) -> bool {
     false
 }
 
+/// Matrix ops with a native (Rust) intrinsic but no WASM lowering: no primitive
+/// decomposition (`@rewrite` desugar) and no hand-written wasm arm, so the wasm
+/// emitter cannot lower a call to them. Currently just `qwen3_block_q1_0_kv` — a
+/// packed-GGUF Qwen3 block (RoPE + GQA + KV-cache, 3-matrix tuple return) that
+/// only exists as a native fast path. Add an op here if you introduce another
+/// native-only matrix intrinsic; the CLI then rejects WASM builds that call it
+/// with a clear message instead of letting the emitter ICE.
+pub const NATIVE_ONLY_MATRIX_OPS: &[&str] = &["qwen3_block_q1_0_kv"];
+
+/// If the program calls a native-only matrix op (see [`NATIVE_ONLY_MATRIX_OPS`]),
+/// return its name. The CLI uses this to reject WASM builds at build time with a
+/// clear diagnostic rather than an emitter ICE.
+pub fn program_uses_native_only_matrix_on_wasm(program: &IrProgram) -> Option<&'static str> {
+    use almide_ir::visit::{IrVisitor, walk_expr, walk_stmt};
+    use almide_ir::{CallTarget, IrExprKind};
+    struct Scan {
+        found: Option<&'static str>,
+    }
+    impl IrVisitor for Scan {
+        fn visit_expr(&mut self, expr: &almide_ir::IrExpr) {
+            if self.found.is_some() {
+                return;
+            }
+            if let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, .. } = &expr.kind {
+                if module.as_str() == "matrix" {
+                    let f = func.as_str();
+                    if let Some(op) = NATIVE_ONLY_MATRIX_OPS.iter().copied().find(|o| *o == f) {
+                        self.found = Some(op);
+                        return;
+                    }
+                }
+            }
+            walk_expr(self, expr);
+        }
+        fn visit_stmt(&mut self, stmt: &almide_ir::IrStmt) {
+            if self.found.is_some() {
+                return;
+            }
+            walk_stmt(self, stmt);
+        }
+    }
+    let mut scan = Scan { found: None };
+    for func in &program.functions {
+        scan.visit_expr(&func.body);
+        if scan.found.is_some() {
+            return scan.found;
+        }
+    }
+    None
+}
+
 /// AlmidePerceusBelt: type-state verified program.
 ///
 /// Construction requires passing Perceus RC verification (Lean 4 certified).
