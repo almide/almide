@@ -553,11 +553,50 @@ impl Checker {
                 self.infer_expr(cond);
                 let then_ty = self.infer_expr(then);
                 let else_ty = self.infer_expr(else_);
+                // In effect fn bodies, auto-unwrap Result[T, E] → T per
+                // branch before unifying them, mirroring the match-arm rule
+                // (see ExprKind::Match above). Without this, an `if` whose
+                // one branch is a `match` on an effect-fn call (auto-unwrapped
+                // to T) and whose other branch is an explicit `ok(...)`
+                // (stays Result[T, E]) fails E001 — the asymmetry is a
+                // checker artefact, not a real type error: codegen's
+                // wrap_tail_in_ok normalizes both to Result form. Scoped to
+                // `auto_unwrap`, so pure-fn / test if/else are untouched.
+                // Auto-unwrap Result[T, E] → T on BOTH branches for the
+                // cross-branch COMPARISON only, then return the THEN branch's
+                // real (non-unwrapped) type as the if-expression's type.
+                //
+                // Two requirements pull in opposite directions and this split
+                // satisfies both:
+                //   • M1 (E001): an `if` whose one branch is a `match` on an
+                //     effect-fn call (auto-unwrapped to `T` inside the match)
+                //     and whose other branch is an explicit `ok(...)`
+                //     (`Result[T, E]`) must not error. Comparing both at the
+                //     unwrapped `T` level removes the spurious asymmetry.
+                //   • No-regress (`validate_positive`: `if .. then ok(n) else
+                //     err(..)`): the if's TYPE must stay `Result[T, E]` so the
+                //     WASM emitter sees the real value shape (the branches are
+                //     genuine Result constructors). Returning the un-unwrapped
+                //     `then_ty` preserves this; codegen's wrap_tail_in_ok then
+                //     normalizes every branch to Result form regardless.
+                // Scoped to `auto_unwrap`, so pure-fn / test if/else are
+                // untouched (they keep the strict same-type rule).
+                let cmp_unwrap = |t: &Ty, uf: &_| -> Ty {
+                    match resolve_ty(t, uf) {
+                        Ty::Applied(TypeConstructorId::Result, ref args) if args.len() == 2 => args[0].clone(),
+                        _ => t.clone(),
+                    }
+                };
+                let (cmp_then, cmp_else) = if self.env.auto_unwrap {
+                    (cmp_unwrap(&then_ty, &self.uf), cmp_unwrap(&else_ty, &self.uf))
+                } else {
+                    (then_ty.clone(), else_ty.clone())
+                };
                 // Specialize the Unit-leak `try:` snippet: if an arm is a
                 // bare assignment `x = ...` (returns Unit), we want to cite
                 // the actual variable name in the suggested rewrite.
                 let hint = if_arm_fix_hint(then, else_);
-                self.constrain_with_hint(then_ty.clone(), else_ty, "if branches", hint);
+                self.constrain_with_hint(cmp_then, cmp_else, "if branches", hint);
                 then_ty
             }
 

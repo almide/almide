@@ -1864,7 +1864,7 @@ fn assemble(emitter: &mut WasmEmitter) -> Vec<u8> {
     for &(_, vt, bits) in &emitter.top_let_init {
         let init = match vt {
             ValType::I64 => wasm_encoder::ConstExpr::i64_const(bits),
-            ValType::F64 => wasm_encoder::ConstExpr::f64_const(f64::from_bits(bits as u64)),
+            ValType::F64 => wasm_encoder::ConstExpr::f64_const(f64::from_bits(bits as u64).into()),
             ValType::I32 => wasm_encoder::ConstExpr::i32_const(bits as i32),
             _ => wasm_encoder::ConstExpr::i32_const(0),
         };

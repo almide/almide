@@ -34,13 +34,13 @@ jobs:
     name: Build (Linux)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
 
-      - uses: actions/cache@v4
+      - uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry
@@ -51,7 +51,7 @@ jobs:
 
       - run: cargo build --release
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: almide-linux
           path: target/release/almide
@@ -66,9 +66,9 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: almide-linux
           path: /tmp/almide-bin
@@ -152,13 +152,13 @@ jobs:
     # cannot see an excluded package). No `needs: build` — it tests only the kernel.
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
 
-      - uses: actions/cache@v4
+      - uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry
@@ -181,9 +181,9 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: almide-linux
           path: /tmp/almide-bin
@@ -192,7 +192,7 @@ jobs:
         run: chmod +x /tmp/almide-bin/almide
 
       - name: Cache wasmtime tarball
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: wasmtime-v42.0.1-x86_64-linux.tar.xz
           key: wasmtime-v42.0.1-x86_64-linux
@@ -236,21 +236,21 @@ jobs:
     if: github.server_url == 'https://github.com'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
           targets: wasm32-wasip1, wasm32-unknown-unknown
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 20
 
       - name: Install wasm-pack
         run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
 
-      - uses: actions/cache@v4
+      - uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry
@@ -261,7 +261,7 @@ jobs:
           restore-keys: wasmgen-${{ env.RUST_TOOLCHAIN }}-
 
       - name: Cache wasmtime tarball
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: wasmtime-v42.0.1-x86_64-linux.tar.xz
           key: wasmtime-v42.0.1-x86_64-linux
@@ -298,7 +298,7 @@ jobs:
     name: Lean Proofs (0 sorry)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       # Two complementary checks — both are required for the "proven" claim:
       # 1. grep for `sorry`: `lake build` only WARNS on sorry, so the grep is what
@@ -314,7 +314,7 @@ jobs:
           echo "✓ 0 sorry in Lean proofs"
 
       - name: Cache elan + Lean toolchain
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.elan
           key: elan-${{ runner.os }}-${{ hashFiles('crates/almide-perceus-belt/lean-toolchain') }}
@@ -355,9 +355,9 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: almide-linux
           path: /tmp/almide-bin
@@ -404,13 +404,13 @@ jobs:
             artifact: almide-windows
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
 
-      - uses: actions/cache@v4
+      - uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry
@@ -430,7 +430,7 @@ jobs:
       # subprocesses no longer race the shared scratch dir on Windows.
       - run: cargo test
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact }}
           path: target/release/almide${{ matrix.os == 'windows-latest' && '.exe' || '' }}
@@ -451,9 +451,9 @@ jobs:
             binary: almide-bin/almide.exe
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: ${{ matrix.artifact }}
           path: ${{ matrix.os == 'windows-latest' && 'almide-bin' || '/tmp/almide-bin' }}
