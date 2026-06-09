@@ -25,6 +25,11 @@ pub fn ty_to_valtype(ty: &Ty) -> Option<ValType> {
         Ty::Bool => Some(ValType::I32),
         Ty::String => Some(ValType::I32), // pointer to [len:i32][data:u8...]
         Ty::Bytes => Some(ValType::I32),  // pointer to [len:i32][data:u8...]
+        // A RawPtr on wasm32 is a linear-memory byte offset — i32, same width
+        // as a Bytes/String pointer. (Native uses a real `*mut u8`; the value
+        // differs per target by nature, so a RawPtr is never observed across the
+        // byte-identical gate — only the bytes it points at are. #440.)
+        Ty::RawPtr => Some(ValType::I32),
         Ty::Matrix => Some(ValType::I32), // pointer to heap-allocated matrix
         Ty::Unit | Ty::Never => None,
         // Second net behind the hard codegen-entry gate

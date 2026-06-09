@@ -56,6 +56,7 @@ fn append_u32_le(b: Bytes, val: Int) -> Unit = _
 fn append_u8(b: Bytes, val: Int) -> Unit = _
 
 @intrinsic("almide_rt_bytes_as_mut_ptr")
+@mutating
 fn as_mut_ptr(b: Bytes) -> RawPtr = _
 
 @intrinsic("almide_rt_bytes_as_ptr")
