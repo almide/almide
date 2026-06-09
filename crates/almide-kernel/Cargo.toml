@@ -1,0 +1,8 @@
+[package]
+name = "almide-kernel"
+version = "0.1.0"
+edition = "2021"
+description = "Verified SIMD numeric kernels for Almide — Rust ports of Wyve-proven kernels, differential-tested bitwise-exact"
+
+# Workspace member of Almide. Deliberately depends on nothing — no prelude
+# injection — so it also builds and tests standalone via the parent workspace.
