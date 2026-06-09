@@ -594,6 +594,14 @@ pub fn emit_runtime_crate() -> String {
         }
     }
     out.push_str(&rust_runtime_modules(&needed, ""));
+    // matrix.rs calls `almide_kernel::…`; embed the kernel as a crate-local module so
+    // the single-crate runtime rlib resolves it (no extern). Always present here — the
+    // shared rlib includes every std module, matrix among them.
+    if needed.contains("matrix") {
+        out.push('\n');
+        out.push_str(crate::generated::rust_runtime::ALMIDE_KERNEL_INLINE);
+        out.push('\n');
+    }
     out
 }
 
@@ -635,6 +643,14 @@ fn emit_source(program: &mut IrProgram, target: Target, config: &target::TargetC
             }
             resolve_runtime_deps(&mut needed);
             output.push_str(&rust_runtime_modules(&needed, &user_code));
+            // matrix.rs calls `almide_kernel::…`; when matrix is included, drop the
+            // embedded kernel in beside it — above the boundary, so it stays in the
+            // runtime preamble (the rlib split and the inline build both keep it).
+            if needed.contains("matrix") {
+                output.push('\n');
+                output.push_str(crate::generated::rust_runtime::ALMIDE_KERNEL_INLINE);
+                output.push('\n');
+            }
             // Boundary marker: everything above is the inlined runtime preamble,
             // everything below is user code. The rlib fast path (see CLI) splits
             // here to swap the preamble for `extern crate almide_rt`.
