@@ -18,28 +18,39 @@ use super::{hash64, cargo_build_generated_with_native, cargo_build_test_with_nat
 /// `LockFileEx` on Windows, both via `fs2::FileExt::lock_exclusive`. It is
 /// crash-safe: the OS releases the lock when the holding process exits, so an
 /// aborted build never deadlocks the next one. The shared `target/` dep cache
-/// is preserved (builds serialize but reuse compiled deps). Being
-/// cross-platform, CI can run the suite in parallel on every OS (no
-/// `--test-threads=1` carve-out for Windows).
+/// is preserved (builds serialize but reuse compiled deps). It covers every
+/// real host (unix + Windows), so CI runs the suite in parallel on all of them
+/// (no `--test-threads=1` carve-out for Windows). `wasm32` — where the compiler
+/// can run as a determinism harness but never spawns build subprocesses, and
+/// where `fs2` has no backing OS lock — is a no-op.
 pub(crate) struct BuildDirLock {
+    #[cfg(any(unix, windows))]
     _file: std::fs::File,
 }
 
 impl BuildDirLock {
     pub(crate) fn acquire(project_dir: &std::path::Path) -> Result<Self, String> {
-        use fs2::FileExt;
-        let lock_path = project_dir.join(".almide-build.lock");
-        let file = std::fs::OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(false)
-            .open(&lock_path)
-            .map_err(|e| format!("Failed to open build lock {}: {}", lock_path.display(), e))?;
-        // Blocking exclusive lock; released when `file` is dropped (close) or
-        // the process exits.
-        file.lock_exclusive()
-            .map_err(|e| format!("Failed to acquire build lock: {}", e))?;
-        Ok(BuildDirLock { _file: file })
+        #[cfg(any(unix, windows))]
+        {
+            use fs2::FileExt;
+            let lock_path = project_dir.join(".almide-build.lock");
+            let file = std::fs::OpenOptions::new()
+                .create(true)
+                .write(true)
+                .truncate(false)
+                .open(&lock_path)
+                .map_err(|e| format!("Failed to open build lock {}: {}", lock_path.display(), e))?;
+            // Blocking exclusive lock; released when `file` is dropped (close) or
+            // the process exits.
+            file.lock_exclusive()
+                .map_err(|e| format!("Failed to acquire build lock: {}", e))?;
+            Ok(BuildDirLock { _file: file })
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            let _ = project_dir;
+            Ok(BuildDirLock {})
+        }
     }
 }
 
