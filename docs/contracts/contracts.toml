@@ -765,3 +765,14 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/value_repr.almd", class = "fixture" },
 ]
+
+# ── A mut Map PARAMETER MUTATED IN PLACE BUILDS + PERSISTS, IDENTICAL ─
+[[contract]]
+id        = "C-061"
+title     = "A mut Map parameter mutated in place builds on both targets and the mutation persists, byte-identical"
+statement = "A `mut Map` function parameter mutated in place via `map.insert` is promoted to a mutable borrow (RefMut) — exactly like a `mut List` + `list.push` — so it BUILDS on native (previously `E0596`: `Map`/`Set` were not recognized as heap types in borrow inference, so the param was forced to an immutable owned binding and the in-place mutator's `&mut m` had no `mut` binding to borrow) and the mutation PERSISTS to the caller, byte-identically wasm. A read-then-write through the same `mut` param (`map.get_or` then `map.insert`) works because RefMut covers both reads and writes. This closes the `list.push` (compiled) vs `map.insert` (E0596) asymmetry — a build-success divergence where wasm built but native did not."
+since     = "0.26.9"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/mut_map_param.almd", class = "fixture" },
+]

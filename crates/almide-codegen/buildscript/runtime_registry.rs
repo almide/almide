@@ -58,6 +58,45 @@ pub fn generate(workspace_root: &Path, out_dir: &Path) {
     }
     rust_out.push_str("];\n");
 
+    // ── Embed the almide-kernel crate as an inlinable `mod almide_kernel` ──
+    // runtime/rs/src/matrix.rs calls `almide_kernel::…` for the SIMD hot paths, but
+    // the `almide test`/`almide build` fast paths compile the runtime as a single
+    // crate (rlib or inlined) with no `almide_kernel` extern — so matrix specs failed
+    // to resolve the crate. Embed the kernel source so emit_runtime_crate / emit_source
+    // can drop it in as a crate-local module wherever `matrix` is used; no extern, no
+    // rlib plumbing, and the cargo path gets it for free too.
+    //
+    // Kernel modules reference siblings via `crate::silu` etc.; wrapped one level deep
+    // under `mod almide_kernel`, that sibling path is `super::silu`, so rewrite
+    // `crate::` → `super::`. Test blocks are stripped — the runtime is built with
+    // `--test`, so the kernel's own `#[cfg(test)]` would otherwise run inside every spec.
+    let kernel_dir = workspace_root.join("crates/almide-kernel/src");
+    let kernel_inline = if kernel_dir.exists() {
+        let lib = fs::read_to_string(kernel_dir.join("lib.rs")).unwrap_or_default();
+        let mut mods: Vec<String> = lib
+            .lines()
+            .filter_map(|l| l.trim().strip_prefix("pub mod ").and_then(|s| s.strip_suffix(';')))
+            .map(|s| s.trim().to_string())
+            .collect();
+        mods.sort();
+        let mut inline = String::new();
+        inline.push_str("#[allow(dead_code, unused_imports, unused_variables, unused_parens, unused_mut, non_snake_case, clippy::all)]\nmod almide_kernel {\n");
+        for m in &mods {
+            if let Ok(src) = fs::read_to_string(kernel_dir.join(format!("{m}.rs"))) {
+                let body = strip_test_blocks(&src).replace("crate::", "super::");
+                inline.push_str(&format!("pub mod {m} {{\n{body}\n}}\n"));
+            }
+        }
+        inline.push_str("}\n");
+        println!("cargo:rerun-if-changed={}", kernel_dir.display());
+        inline
+    } else {
+        String::new()
+    };
+    rust_out.push_str("\n/// almide-kernel embedded as an inlinable `mod almide_kernel`, dropped into the\n");
+    rust_out.push_str("/// runtime source wherever the `matrix` module is used (see emit_runtime_crate).\n");
+    rust_out.push_str(&format!("pub const ALMIDE_KERNEL_INLINE: &str = {kernel_inline:?};\n"));
+
     fs::write(out_dir.join("rust_runtime.rs"), &rust_out).unwrap();
 
     // Auto-extract the runtime helpers whose LAST positional parameter is a generic
@@ -205,4 +244,34 @@ fn split_top_level(s: &str) -> Vec<&str> {
         parts.push(&s[start..]);
     }
     parts
+}
+
+/// Strip `#[cfg(test)] mod tests { … }` blocks. Mirror of the codegen-side stripper:
+/// line-based brace counting (per-line string braces like `"i={i}"` net to zero, so
+/// they don't desync the depth). Keeps the embedded kernel free of test code, which
+/// would otherwise run under the runtime's `--test` build inside every spec.
+fn strip_test_blocks(src: &str) -> String {
+    let mut out = String::new();
+    let mut depth = 0i32;
+    let mut in_test_mod = false;
+    for line in src.lines() {
+        let trimmed = line.trim();
+        if !in_test_mod && (trimmed.starts_with("#[cfg(test)]") || trimmed.starts_with("mod tests")) {
+            in_test_mod = true;
+            depth = 0;
+        }
+        if in_test_mod {
+            for ch in line.chars() {
+                if ch == '{' { depth += 1; }
+                if ch == '}' { depth -= 1; }
+            }
+            if depth <= 0 && line.contains('}') {
+                in_test_mod = false;
+            }
+            continue;
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    out
 }

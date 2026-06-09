@@ -1,0 +1,16 @@
+[package]
+name = "almide-kernel"
+version = "0.1.0"
+edition = "2021"
+description = "Verified SIMD numeric kernels for Almide — Rust ports of Wyve-proven kernels, differential-tested bitwise-exact"
+
+# almide-kernel is `exclude`d from the parent Almide workspace AND deliberately has
+# NO [workspace] table of its own:
+#  - exclude: as a member it would drag `almide build`'s generated project into the
+#    workspace, stripping its [profile.dev] (see PR #427).
+#  - no [workspace]: adding one makes cargo refuse to build the generated ML projects
+#    that path-depend on this crate (error: unresolved crate `almide_kernel`).
+# It builds fine as almide_rt's path dependency. To run its differential tests
+# standalone (e.g. on real ARM in CI to execute the NEON paths), the test-arm job
+# appends an ephemeral [workspace] at runtime — harmless there, since that job never
+# runs `almide build`. Zero-dep.

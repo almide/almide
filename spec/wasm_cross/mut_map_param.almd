@@ -1,0 +1,29 @@
+// @contract: C-061
+// A `mut Map` function parameter mutated in place via `map.insert` builds on
+// BOTH targets (native used to fail `E0596` — the param was forced to an
+// immutable owned binding because `Map` wasn't a recognized heap type for borrow
+// inference, so the in-place mutator never promoted it to a mutable borrow the
+// way `list.push` does) and the mutation persists, byte-identically wasm. Covers
+// a write-only mutator and a read-then-write one through the same `mut` param.
+
+fn put(mut m: Map[Int, Int], k: Int, v: Int) -> Unit = map.insert(m, k, v)
+
+fn bump(mut m: Map[String, Int], k: String) -> Unit =
+  map.insert(m, k, map.get_or(m, k, 0) + 1)
+
+fn main() -> Unit = {
+  var counts: Map[Int, Int] = [:]
+  put(counts, 1, 100)
+  put(counts, 2, 200)
+  put(counts, 1, 111)
+  println("c1=" + int.to_string(map.get_or(counts, 1, 0)))
+  println("c2=" + int.to_string(map.get_or(counts, 2, 0)))
+  println("len=" + int.to_string(map.len(counts)))
+
+  var freq: Map[String, Int] = [:]
+  bump(freq, "a")
+  bump(freq, "a")
+  bump(freq, "b")
+  println("a=" + int.to_string(map.get_or(freq, "a", 0)))
+  println("b=" + int.to_string(map.get_or(freq, "b", 0)))
+}
