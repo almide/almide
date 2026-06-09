@@ -846,7 +846,7 @@ impl Checker {
     // ── Type resolution ──
 
     pub fn resolve_type_expr(&self, te: &ast::TypeExpr) -> Ty {
-        crate::canonicalize::resolve::resolve_type_expr(te, Some(&self.env.types))
+        crate::canonicalize::resolve::resolve_type_expr_in(te, Some(&self.env.types), self.current_module_prefix.as_deref())
     }
 
     pub(crate) fn resolve_field_type(&mut self, ty: &Ty, field: &str) -> Ty {

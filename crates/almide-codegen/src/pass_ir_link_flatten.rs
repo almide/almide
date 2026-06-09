@@ -5,9 +5,10 @@
 // After this, program.modules is empty. Walker renders flat program.
 
 use almide_ir::*;
-use almide_base::intern::sym;
+use almide_base::intern::{sym, Sym};
+use almide_lang::types::Ty;
 use super::pass::{NanoPass, PassResult, Target};
-use std::collections::HashSet;
+use std::collections::{HashSet, HashMap};
 
 #[derive(Debug)]
 pub struct IrLinkFlattenPass;
@@ -63,6 +64,125 @@ impl NanoPass for IrLinkFlattenPass {
             }
         }
 
+        // #433: user-module types arrived under their qualified canonical name
+        // `mod.Type` (lowering pinned them so two packages' same-name types stay
+        // distinct). A `.` is not a valid Rust/WASM identifier, so flatten each to
+        // `almide_rt_mod_Type` and rewrite every reference — the type-side
+        // analogue of how functions carry a `module_origin` prefix.
+        mangle_qualified_type_names(&mut program);
+
         PassResult { program, changed: true }
     }
+}
+
+fn mangle_qualified_type_names(program: &mut IrProgram) {
+    let mut map: HashMap<String, Sym> = HashMap::new();
+    for td in &program.type_decls {
+        let n = td.name.as_str();
+        if n.contains('.') {
+            map.insert(n.to_string(), sym(&format!("almide_rt_{}", n.replace('.', "_"))));
+        }
+    }
+    if map.is_empty() {
+        return;
+    }
+
+    for td in &mut program.type_decls {
+        if let Some(nn) = map.get(td.name.as_str()) {
+            td.name = *nn;
+        }
+        rename_type_decl_kind(&mut td.kind, &map);
+    }
+    for f in &mut program.functions {
+        for p in &mut f.params {
+            p.ty = rename_ty(&p.ty, &map);
+        }
+        f.ret_ty = rename_ty(&f.ret_ty, &map);
+        let body = std::mem::replace(&mut f.body, IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None });
+        f.body = rename_expr(body, &map);
+    }
+    for tl in &mut program.top_lets {
+        tl.ty = rename_ty(&tl.ty, &map);
+        let v = std::mem::replace(&mut tl.value, IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None });
+        tl.value = rename_expr(v, &map);
+    }
+    for v in &mut program.var_table.entries {
+        v.ty = rename_ty(&v.ty, &map);
+    }
+    for d in &mut program.def_table.entries {
+        d.ty = rename_ty(&d.ty, &map);
+    }
+}
+
+fn rename_type_decl_kind(kind: &mut IrTypeDeclKind, map: &HashMap<String, Sym>) {
+    match kind {
+        IrTypeDeclKind::Record { fields } => {
+            for f in fields {
+                f.ty = rename_ty(&f.ty, map);
+            }
+        }
+        IrTypeDeclKind::Alias { target } => {
+            *target = rename_ty(target, map);
+        }
+        IrTypeDeclKind::Variant { cases, .. } => {
+            for c in cases {
+                match &mut c.kind {
+                    IrVariantKind::Unit => {}
+                    IrVariantKind::Tuple { fields } => {
+                        for t in fields {
+                            *t = rename_ty(t, map);
+                        }
+                    }
+                    IrVariantKind::Record { fields } => {
+                        for f in fields {
+                            f.ty = rename_ty(&f.ty, map);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Recursively rename `Ty::Named` / `Ty::Variant` syms via `map`.
+fn rename_ty(ty: &Ty, map: &HashMap<String, Sym>) -> Ty {
+    let t = ty.map_children(&|c| rename_ty(c, map));
+    match t {
+        Ty::Named(n, args) => match map.get(n.as_str()) {
+            Some(nn) => Ty::Named(*nn, args),
+            None => Ty::Named(n, args),
+        },
+        Ty::Variant { name, cases } => match map.get(name.as_str()) {
+            Some(nn) => Ty::Variant { name: *nn, cases },
+            None => Ty::Variant { name, cases },
+        },
+        other => other,
+    }
+}
+
+/// Recursively rewrite every `expr.ty` (and child exprs) through `rename_ty`,
+/// plus the type-bearing fields `map_children` does NOT reach: a `Bind`
+/// statement's declared type, and a struct `Record { … }` literal's ctor name
+/// (re-pinned from the expr's now-mangled struct type).
+fn rename_expr(e: IrExpr, map: &HashMap<String, Sym>) -> IrExpr {
+    let mut e = e.map_children(&mut |c| rename_expr(c, map));
+    e.ty = rename_ty(&e.ty, map);
+    match &mut e.kind {
+        IrExprKind::Block { stmts, .. } => {
+            for s in stmts.iter_mut() {
+                if let IrStmtKind::Bind { ty, .. } = &mut s.kind {
+                    *ty = rename_ty(ty, map);
+                }
+            }
+        }
+        IrExprKind::Record { name: Some(n), .. } => {
+            // A struct literal carries its (now-qualified) type name as the ctor
+            // (`mod.Type`, pinned by lowering); mangle it to the flat struct name.
+            if let Some(nn) = map.get(n.as_str()) {
+                *n = *nn;
+            }
+        }
+        _ => {}
+    }
+    e
 }

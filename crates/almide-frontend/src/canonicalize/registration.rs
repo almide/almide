@@ -21,6 +21,12 @@ fn resolve(env: &TypeEnv, te: &ast::TypeExpr) -> Ty {
     resolve_type_expr(te, Some(&env.types))
 }
 
+/// Like `resolve`, but pins a user module's own-type references to the qualified
+/// canonical name `mod.Type` (#433). `cur_mod` is the module being registered.
+fn resolve_in(env: &TypeEnv, te: &ast::TypeExpr, cur_mod: Option<&str>) -> Ty {
+    crate::canonicalize::resolve::resolve_type_expr_in(te, Some(&env.types), cur_mod)
+}
+
 /// Infer type from a literal expression (for top-level `let` without annotation).
 ///
 /// Used at registration time — before the full checker runs — so module
@@ -178,12 +184,12 @@ pub fn register_fn_sig(
             env.types.insert(*gn, Ty::TypeVar(*gn));
         }
     }
-    let ptys: Vec<(Sym, Ty)> = params.iter().map(|p| (sym(&p.name), resolve(env, &p.ty))).collect();
+    let ptys: Vec<(Sym, Ty)> = params.iter().map(|p| (sym(&p.name), resolve_in(env, &p.ty, prefix))).collect();
     let mut_params: Vec<usize> = params.iter().enumerate()
         .filter(|(_, p)| p.is_mut)
         .map(|(i, _)| i)
         .collect();
-    let ret = resolve(env, return_type);
+    let ret = resolve_in(env, return_type, prefix);
     for gn in &gnames { env.types.remove(gn); }
     let is_effect = effect.unwrap_or(false) || r#async.unwrap_or(false);
     let key = prefixed_key(prefix, name);
@@ -507,14 +513,21 @@ pub fn register_type_decl(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, 
     // are namespaced per package, surface the collision at the source so the user
     // renames one. Structurally-identical re-registration (the diamond case: same
     // package via two import paths) compares equal and is NOT flagged.
+    // #433: types are now namespaced per (user) package — `dep_a.Config` and
+    // `dep_b.Config` coexist as distinct qualified names. So a collision is only a
+    // real error when the SAME canonical key is re-declared with a different
+    // structure (a duplicate within one module/file), which we detect on the
+    // prefixed key. Structurally-identical re-registration (the diamond case) is
+    // equal and not flagged.
     if matches!(resolved, Ty::Record { .. } | Ty::OpenRecord { .. } | Ty::Variant { .. }) {
-        if let Some(existing) = env.types.get(&sym(name)) {
+        let canonical_key = prefixed_key(prefix, name);
+        if let Some(existing) = env.types.get(&sym(&canonical_key)) {
             if existing != &resolved
                 && matches!(existing, Ty::Record { .. } | Ty::OpenRecord { .. } | Ty::Variant { .. })
             {
                 diagnostics.push(err(
                     format!("type '{}' is declared more than once with different structures", name),
-                    format!("Two distinct types share the name '{}' (a duplicate in one file, or a local type colliding with a dependency's). Rename one so the name is unique — types are not yet namespaced per package (#433).", name),
+                    format!("Two distinct types share the name '{}' within the same module. Rename one so the name is unique.", name),
                     format!("type {}", name),
                 ).with_code("E020"));
             }

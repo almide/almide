@@ -43,11 +43,21 @@ thread_local! {
 /// functions carry `module_origin`; not-yet-merged ones live under `program.modules`.
 fn collect_module_method_fns(program: &IrProgram) -> HashMap<String, String> {
     let mut map = HashMap::new();
+    // Also key by the bare-type method name: a convention/Codec method fn whose
+    // type is now the namespaced `mod.Type` is named `mod.Type.method`, but a
+    // caller writing the unqualified `Type.method` must still resolve to the same
+    // `almide_rt_<origin>_Type_method` definition (#433 × #411-B).
+    let mut add = |map: &mut HashMap<String, String>, name: &str, origin: &str| {
+        if name.contains('.') {
+            map.insert(name.to_string(), origin.to_string());
+            if let Some(bare) = name.strip_prefix(&format!("{}.", origin)) {
+                map.insert(bare.to_string(), origin.to_string());
+            }
+        }
+    };
     for f in &program.functions {
         if let Some(origin) = &f.module_origin {
-            if f.name.as_str().contains('.') {
-                map.insert(f.name.to_string(), origin.clone());
-            }
+            add(&mut map, f.name.as_str(), origin);
         }
     }
     for m in &program.modules {
@@ -55,9 +65,7 @@ fn collect_module_method_fns(program: &IrProgram) -> HashMap<String, String> {
             .map(|v| v.to_string().replace('.', "_"))
             .unwrap_or_else(|| m.name.to_string().replace('.', "_"));
         for f in &m.functions {
-            if f.name.as_str().contains('.') {
-                map.insert(f.name.to_string(), ident.clone());
-            }
+            add(&mut map, f.name.as_str(), &ident);
         }
     }
     map
@@ -180,7 +188,7 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
                             let codec_method = format!("{}.{}", type_name, codec_op);
                             let func_ref = MODULE_METHOD_FNS.with(|c| {
                                 c.borrow().get(&codec_method)
-                                    .map(|m| format!("almide_rt_{}_{}_{}", m, type_name, codec_op))
+                                    .map(|m| format!("almide_rt_{}_{}_{}", m, type_name.rsplit('.').next().unwrap_or(type_name), codec_op))
                             }).unwrap_or_else(|| format!("{}_{}", type_name, codec_op));
                             // The per-element codec function reference has a
                             // precise signature — leaving it `Ty::Unknown` here
@@ -238,7 +246,7 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
                             let codec_method = format!("{}.{}", type_name, codec_op);
                             let func_ref = MODULE_METHOD_FNS.with(|c| {
                                 c.borrow().get(&codec_method)
-                                    .map(|m| format!("almide_rt_{}_{}_{}", m, type_name, codec_op))
+                                    .map(|m| format!("almide_rt_{}_{}_{}", m, type_name.rsplit('.').next().unwrap_or(type_name), codec_op))
                             }).unwrap_or_else(|| format!("{}_{}", type_name, codec_op));
                             let elem_ty = Ty::Named(type_name.into(), vec![]);
                             let value_ty = Ty::Named("Value".into(), vec![]);
@@ -280,7 +288,15 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
                     if name.contains('.') {
                         let flat = name.replace('.', "_");
                         let resolved = MODULE_METHOD_FNS.with(|c| {
-                            c.borrow().get(name.as_str()).map(|m| format!("almide_rt_{}_{}", m, flat))
+                            c.borrow().get(name.as_str()).map(|m| {
+                                // The method key may be qualified by the type's now-namespaced
+                                // module (`varlib.Pigment.encode`); the runtime fn is
+                                // `almide_rt_<origin>_<Type>_<method>`, so strip a leading
+                                // `<origin>.` before flattening to avoid doubling the module
+                                // (#433 × #411-B). A bare `Color.encode` is unaffected.
+                                let rest = name.as_str().strip_prefix(&format!("{}.", m)).unwrap_or(name.as_str());
+                                format!("almide_rt_{}_{}", m, rest.replace('.', "_"))
+                            })
                         }).unwrap_or(flat);
                         return IrExpr { kind: IrExprKind::Call {
                             target: CallTarget::Named { name: resolved.into() },

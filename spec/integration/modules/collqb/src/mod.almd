@@ -1,0 +1,3 @@
+type Config = { label: String }
+fn make() -> Config = Config { label: "z" }
+fn get_label(c: Config) -> String = c.label
