@@ -362,9 +362,9 @@ dependencies = [
 
 [[package]]
 name = "egg"
-version = "0.10.0"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "abb749745461743bb477fba3ef87c663d5965876155c676c9489cfe0963de5ab"
+checksum = "dd40cfd4196d7a8f882ace95d623d4d6734588e502b4e188675a7c2f55eb4fb4"
 dependencies = [
  "env_logger",
  "hashbrown 0.15.5",
@@ -374,7 +374,6 @@ dependencies = [
  "num-traits",
  "quanta",
  "rustc-hash",
- "saturating",
  "smallvec",
  "symbol_table",
  "symbolic_expressions",
@@ -907,12 +906,6 @@ dependencies = [
  "tempfile",
  "wait-timeout",
 ]
-
-[[package]]
-name = "saturating"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ece8e78b2f38ec51c51f5d475df0a7187ba5111b2a28bdc761ee05b075d40a71"
 
 [[package]]
 name = "scopeguard"
