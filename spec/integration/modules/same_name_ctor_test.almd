@@ -1,0 +1,13 @@
+// #413: two packages each declaring a variant with the SAME constructor name
+// (`Active`) now resolve correctly — a module's own `Active` is its own enum's
+// case, not the other package's. Before, the codegen's global ctor→enum map
+// collapsed the shared name to one enum, so `colca.start() = Active` mis-emitted
+// `colcb`'s `Phase::Active` (caught as E0308). Byte-identical native ⇄ wasm.
+import colca
+import colcb
+
+test "same-name constructor across packages: construction picks the right enum" {
+  // colca.start() constructs colca's Active; colcb.start() constructs colcb's Idle
+  assert_eq(colca.show(colca.start()), "ca-active")
+  assert_eq(colcb.show(colcb.start()), "cb-idle")
+}

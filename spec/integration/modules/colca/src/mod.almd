@@ -1,0 +1,3 @@
+type Status = Active | Done
+fn start() -> Status = Active
+fn show(s: Status) -> String = match s { Active => "ca-active", Done => "ca-done" }
