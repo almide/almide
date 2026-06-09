@@ -1,0 +1,9 @@
+// #433: two distinct types share the bare name `Config`. Type identity is by
+// bare name through link + codegen, so the second silently shadows the first
+// and a function using the shadowed type fails with a cryptic generated-Rust
+// E0560/E0609. The frontend E020 surfaces the collision at the SOURCE instead.
+// (The same shape arises cross-package: a local `Config` vs a dependency's.
+// Until types are namespaced per package, the fix is to rename one.)
+type Config = { name: String }
+type Config = { host: String, port: Int }
+fn main() -> Unit = println("ok")

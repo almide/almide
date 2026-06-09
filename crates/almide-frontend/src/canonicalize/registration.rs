@@ -499,6 +499,27 @@ pub fn register_type_decl(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, 
             }
         }
     }
+    // #433: a DIFFERENT structural type already holds this BARE name — two
+    // distinct types (a local type and a dependency's, or two sub-modules')
+    // sharing a name. Type identity is by bare name through link + codegen, so
+    // the second silently shadows the first and the function that used the
+    // shadowed type fails with a cryptic generated-Rust E0560/E0609. Until types
+    // are namespaced per package, surface the collision at the source so the user
+    // renames one. Structurally-identical re-registration (the diamond case: same
+    // package via two import paths) compares equal and is NOT flagged.
+    if matches!(resolved, Ty::Record { .. } | Ty::OpenRecord { .. } | Ty::Variant { .. }) {
+        if let Some(existing) = env.types.get(&sym(name)) {
+            if existing != &resolved
+                && matches!(existing, Ty::Record { .. } | Ty::OpenRecord { .. } | Ty::Variant { .. })
+            {
+                diagnostics.push(err(
+                    format!("type '{}' is declared more than once with different structures", name),
+                    format!("Two distinct types share the name '{}' (a duplicate in one file, or a local type colliding with a dependency's). Rename one so the name is unique — types are not yet namespaced per package (#433).", name),
+                    format!("type {}", name),
+                ).with_code("E020"));
+            }
+        }
+    }
     let key = prefixed_key(prefix, name);
     env.types.insert(sym(&key), resolved.clone());
     if prefix.is_some() {
