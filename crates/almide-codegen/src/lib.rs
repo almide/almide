@@ -59,7 +59,6 @@ pub mod pass_const_fold;
 pub mod pass_rust_lowering;
 pub mod pass_lambda_type_resolve;
 pub mod pass_concretize_types;
-pub mod wasm_support_gate;
 pub mod pass_resolve_calls;
 pub mod pass_closure_conversion;
 pub mod pass_mut_param_lowering;
@@ -315,10 +314,6 @@ pub fn codegen_with(program: &mut IrProgram, target: Target, options: &CodegenOp
     // Layer 3: Target-specific emit
     match target {
         Target::Wasm => {
-            // Refuse native-only intrinsics (RawPtr / linear-memory bridge) with
-            // a clean span-tagged build error instead of the downstream emit_wasm
-            // ICE (#440). WASM-only — these intrinsics are valid on native.
-            wasm_support_gate::assert_no_native_only_ptr(program);
             // AlmidePerceusBelt: a program reaches WASM emit only after passing
             // two type-state gates, in this order:
             //   Verified  — Perceus RC balance (Lean 4-certified check)
