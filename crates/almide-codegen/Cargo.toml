@@ -13,12 +13,12 @@ almide-egg-lab = { path = "../almide-egg-lab" }
 egg = "0.10"
 wasm-encoder = "0.225"
 wasmparser = "0.225"
-toml = "0.8"
+toml = "1.1"
 serde_json = "1"
 
 [dev-dependencies]
 proptest = "1"
 
 [build-dependencies]
-toml = "0.8"
+toml = "1.1"
 serde = { version = "1", features = ["derive"] }
