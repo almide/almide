@@ -44,7 +44,7 @@ macro_rules! wasm {
         wasm!(@emit $f, $($rest)*)
     };
     (@emit $f:expr, f64_const($v:expr); $($rest:tt)*) => {
-        $f.instruction(&wasm_encoder::Instruction::F64Const($v));
+        $f.instruction(&wasm_encoder::Instruction::F64Const(($v).into()));
         wasm!(@emit $f, $($rest)*)
     };
 
@@ -571,7 +571,7 @@ macro_rules! wasm {
         $f.instruction(&wasm_encoder::Instruction::F64ConvertI64U); wasm!(@emit $f, $($rest)*)
     };
     (@emit $f:expr, f64_const($v:expr); $($rest:tt)*) => {
-        $f.instruction(&wasm_encoder::Instruction::F64Const($v)); wasm!(@emit $f, $($rest)*)
+        $f.instruction(&wasm_encoder::Instruction::F64Const(($v).into())); wasm!(@emit $f, $($rest)*)
     };
     (@emit $f:expr, memory_size($mem:expr); $($rest:tt)*) => {
         $f.instruction(&wasm_encoder::Instruction::MemorySize($mem)); wasm!(@emit $f, $($rest)*)
