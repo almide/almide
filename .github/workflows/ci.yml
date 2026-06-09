@@ -122,6 +122,42 @@ jobs:
           ALMIDE=/tmp/almide-bin/almide
           $ALMIDE test examples/
 
+  test-arm:
+    name: Test ARM (NEON, Apple Silicon)
+    # almide-kernel's NEON kernels (silu/softmax/gelu/q1_0) cross-built on the x86
+    # runners but were never *executed* — build-cross only proves they compile.
+    # macos-14 is Apple Silicon, where NEON is the ARMv8 baseline, so the public
+    # dispatch entry runs the *_neon path and the crate's differential tests compare
+    # it against the scalar reference: a real correctness gate, not theatre.
+    # The crate is `exclude`d from the workspace and carries its own empty
+    # [workspace], so it is driven via --manifest-path (a root `-p almide-kernel`
+    # cannot see an excluded package). No `needs: build` — it tests only the kernel.
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            crates/almide-kernel/target
+          key: macos-arm-cargo-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('crates/almide-kernel/Cargo.toml') }}
+          restore-keys: macos-arm-cargo-${{ env.RUST_TOOLCHAIN }}-
+
+      - name: Test almide-kernel on real ARM (NEON executes, diffed vs scalar)
+        # almide-kernel has no committed [workspace] (that would break `almide build`'s
+        # generated ML projects, which path-depend on it). Append one ephemerally so
+        # cargo can test the excluded crate standalone — harmless here, this job never
+        # runs `almide build`.
+        run: |
+          printf '\n[workspace]\n' >> crates/almide-kernel/Cargo.toml
+          cargo test --release --manifest-path crates/almide-kernel/Cargo.toml
+
   test-wasm:
     name: Test WASM
     needs: build
