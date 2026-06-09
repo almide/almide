@@ -786,3 +786,14 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/bytes_rawptr.almd", class = "fixture" },
 ]
+
+# ── PARSE A glTF/JSON DOCUMENT + WALK ITS ARRAYS, BYTE-IDENTICAL ─
+[[contract]]
+id        = "C-063"
+title     = "Parsing a heterogeneous-nested glTF/JSON document and walking its arrays by element is byte-identical on both targets"
+statement = "`json.parse` of a glTF-style document (heterogeneous nested objects — accessors with float `min`/`max` arrays and `type` strings, materials with nested extensions, meshes with primitives), followed by `json.get_array` + `list.get_or` element access across `meshes`, every `accessor`'s nested `min`/`max` arrays, and `bufferViews`, produces byte-identical stdout native ⇄ wasm. Regression lock for #470, reported on a real ~10 MB VRM as a wasm-only element-access trap (`memory access out of bounds`) where `list.len` of a `get_array` result was correct but its backing disagreed; the reported flow no longer reproduces on 0.26.18+ (the host-buffer / RawPtr bridge it relied on was reworked in v0.26.15, C-062), and this fixture keeps the parse + array-element walk locked."
+since     = "0.26.19"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/json_gltf_walk.almd", class = "fixture" },
+]

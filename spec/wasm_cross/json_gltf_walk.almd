@@ -4,6 +4,7 @@
 // VRM as an element-access OOB on wasm where the list length was right but the
 // backing disagreed; this locks the parse + array-element walk byte-identical
 // native <-> wasm.
+// @contract: C-063
 import json
 
 fn count_floats(v: Value, key: String) -> Int = list.len(option.unwrap_or(json.get_array(v, key), []))
