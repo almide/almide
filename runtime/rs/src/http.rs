@@ -406,7 +406,7 @@ fn make_tls_stream(host: &str, stream: TcpStream) -> Result<StreamOwned<ClientCo
 
 // ── HTTP Server ──
 
-pub fn almide_http_serve(port: i64, handler: impl Fn(AlmideHttpRequest) -> Result<AlmideHttpResponse, String>) -> Result<(), String> {
+pub fn almide_http_serve(port: i64, handler: std::rc::Rc<dyn Fn(AlmideHttpRequest) -> Result<AlmideHttpResponse, String>>) -> Result<(), String> {
     let listener = TcpListener::bind(format!("0.0.0.0:{}", port))
         .map_err(|e| format!("bind failed: {}", e))?;
 
@@ -428,9 +428,9 @@ pub fn almide_http_serve(port: i64, handler: impl Fn(AlmideHttpRequest) -> Resul
 // `Result<Response, String>` contract (future error-in-handler support).
 pub fn almide_rt_http_serve(
     port: i64,
-    handler: impl Fn(AlmideHttpRequest) -> AlmideHttpResponse,
+    handler: std::rc::Rc<dyn Fn(AlmideHttpRequest) -> AlmideHttpResponse>,
 ) -> Result<(), String> {
-    almide_http_serve(port, move |req| Ok(handler(req)))
+    almide_http_serve(port, std::rc::Rc::new(move |req| Ok(handler(req))))
 }
 
 // ── Helpers ──
