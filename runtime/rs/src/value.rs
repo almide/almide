@@ -247,4 +247,22 @@ pub fn almide_rt_value_stringify(v: &Value) -> String {
     }
 }
 
+// `Value` participates in derived `Repr` and string interpolation like any
+// other type. A record/variant with a `Value` field generates both
+// `self.<field>.almide_repr()` (the `AlmideRepr` path) and `{}` (the `Display`
+// path used by the `<Type>_repr` free fn and `"${t}"` interpolation), so `Value`
+// must impl both — without either, such a type fails to compile (E0599 / E0277).
+// Both render the Value as its JSON text, identically, so the field reprs
+// consistently across every path — and byte-identically to wasm, which reprs a
+// `Value` through the same JSON serializer (see `emit_repr_value`).
+impl AlmideRepr for Value {
+    fn almide_repr(&self) -> String { almide_rt_value_stringify(self) }
+}
+
+impl std::fmt::Display for Value {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&almide_rt_value_stringify(self))
+    }
+}
+
 // json_parse and json_stringify moved to json.rs

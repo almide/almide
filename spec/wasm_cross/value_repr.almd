@@ -1,0 +1,37 @@
+// @contract: C-060
+// `Value` (the dynamic JSON-like type) reprs as its JSON text, byte-identically
+// on native and WASM — both as a bare `"${value}"` interpolation AND as a field
+// inside a `Repr`-deriving record (the `.repr()` AlmideRepr path and the `{}`
+// Display / interpolation path). Before this, a `Value` field failed to compile
+// natively (no `AlmideRepr` / `Display for Value`) and WASM emitted the
+// placeholder `Value {  }`; now both targets route through the SAME JSON
+// serializer (native `almide_rt_value_stringify` / WASM `__value_stringify`),
+// covering every value shape: null, bool, int, float, string (escaped), array,
+// object, and nesting.
+
+type Tool: Repr = { name: String, params: Value }
+
+fn main() -> Unit = {
+  let obj = value.object([
+    ("x", value.int(1)),
+    ("y", value.array([value.int(2), value.int(3)])),
+    ("ok", value.bool(true)),
+  ])
+  let t = Tool { name: "t", params: obj }
+  // A `Value` field inside a `Repr` record, via BOTH paths:
+  println("disp=${t}")          // Display / interpolation path
+  println("repr=" + t.repr())   // AlmideRepr path
+
+  // Bare `Value` across every `value_stringify` branch.
+  println("obj=${obj}")
+  println("arr=${value.array([value.int(1), value.str("a"), value.bool(false), value.null()])}")
+  println("int=${value.int(42)}")
+  println("neg=${value.int(0 - 7)}")
+  println("bool=${value.bool(false)}")
+  println("flt=${value.float(2.5)}")
+  println("fltint=${value.float(3.0)}")
+  println("str=${value.str("a\"b\nc\\d")}")
+  println("null=${value.null()}")
+  // Nested object holding an array of objects.
+  println("nest=${value.object([("a", value.array([value.object([("b", value.int(1))])]))])}")
+}

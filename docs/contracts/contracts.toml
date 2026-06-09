@@ -754,3 +754,14 @@ evidence  = [
   { path = "spec/wasm_cross/wide_function_body.almd", class = "fixture" },
   { path = "tests/compiler_stack_test.rs", name = "wide_function_body_compiles_in_small_stack", class = "fixture" },
 ]
+
+# ── A Value REPRS AS ITS JSON TEXT, BYTE-IDENTICAL NATIVE == WASM ─────
+[[contract]]
+id        = "C-060"
+title     = "A Value reprs as its JSON text byte-identically on native and WASM, bare and as a Repr-record field"
+statement = "A `Value` (the dynamic JSON-like type) renders to its JSON text — `null`, `true`/`false`, the integer's decimal, the float's Display form (`format!(\"{}\", f)`, which drops an integer-valued float's trailing `.0`), the JSON-escaped string, `[…]`, `{…}`, recursively — byte-identically on native and WASM, in EVERY repr path: a bare `\"${v}\"` interpolation, AND a `Value` field inside a `Repr`-deriving record/variant reached through both the `.repr()` (AlmideRepr) path and the `{}` (Display / interpolation) path. Before this, a `Value` field in a `Repr` type failed to COMPILE natively — `Value` impl'd neither `AlmideRepr` nor `Display`, so the derived `self.<field>.almide_repr()` and the `<Type>_repr` `{}` both errored (E0599 / E0277) — while WASM emitted the placeholder `Value {  }` (it treated `Value` as an empty record). Both targets now route through the SAME serializer (native `almide_rt_value_stringify`, WASM `__value_stringify`). The WASM float branch was additionally corrected to the native Display form via `__float_display` — it previously used the round-trip `float_to_string`, so an integer-valued float diverged (`3` native vs `3.0` WASM) — which also makes `value.stringify` / `json.stringify` of a float agree native == wasm."
+since     = "0.26.7"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/value_repr.almd", class = "fixture" },
+]

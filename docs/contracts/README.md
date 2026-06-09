@@ -24,7 +24,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 `fixture` < `fuzz` < `exhaustive` < `lean`. An **active** contract must carry
 ≥1 evidence of class ≥ `fixture`.
 
-59 contracts
+60 contracts
 
 | ID | Contract | Since | Status | Strongest Evidence | # Fixtures |
 |----|----------|-------|--------|--------------------|-----------:|
@@ -87,4 +87,5 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-057 | Assigning a Unit-returning in-place mutator's result is a checker error on both targets | 0.24.0 | active | fixture | 1 |
 | C-058 | An empty collection with an uninferable element type is a compile error on both targets, never silently defaulted | 0.24.0 | active | fixture | 1 |
 | C-059 | Compilation does not overflow the native stack on wide or deep input, identically on every host and build profile | 0.25.0 | active | fixture | 1 |
+| C-060 | A Value reprs as its JSON text byte-identically on native and WASM, bare and as a Repr-record field | 0.26.7 | active | fixture | 1 |
 
