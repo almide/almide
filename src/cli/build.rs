@@ -103,7 +103,15 @@ pub fn cmd_build(file: &str, output: Option<&str>, target: Option<&str>, release
         .unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
     match super::cargo_build_generated_with_native(&rs_code, &project_dir, use_release, native_deps, source_root) {
         Ok(bin_path) => {
-            // Copy the built binary to the desired output location
+            // Copy the built binary to the desired output location. Create the
+            // output's parent directory first — `-o build/app` must not fail
+            // just because `build/` doesn't exist yet (it's the natural place
+            // to put a binary, and every caller otherwise needs a manual mkdir).
+            if let Some(parent) = std::path::Path::new(&output).parent() {
+                if !parent.as_os_str().is_empty() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+            }
             if let Err(e) = std::fs::copy(&bin_path, &output) {
                 eprintln!("Failed to copy binary to {}: {}", output, e);
                 std::process::exit(1);
