@@ -1,0 +1,44 @@
+// #411-B: a derived `Codec` whose field types are defined in ANOTHER module must
+// link. The deriver emits a bare `Pigment.encode`/`Pigment.decode` call (the field
+// type carries no module), and flattening dropped the module prefix that the
+// definition `almide_rt_varlib_Pigment_encode` (module_origin) carries — so the
+// native build failed with `E0425: cannot find function Pigment_encode`. Covers the
+// direct field and the `List[T]` element path.
+
+import varlib
+
+type Wrapped: Codec = {
+  id: Int,
+  payload: varlib.Pigment,
+  palette: List[varlib.Pigment],
+  accent: Option[varlib.Pigment],
+}
+
+test "cross-module type method called directly: mod.Type.method() (新①)" {
+  let p = varlib.Pigment { r: 1, g: 2, b: 3 }
+  match varlib.Pigment.decode(varlib.Pigment.encode(p)) {
+    ok(v) => assert_eq(v.b, 3),
+    _ => assert(false),
+  }
+}
+
+test "cross-module derived Codec roundtrip (direct + List + Option field) (#411-B, 新②)" {
+  let w = Wrapped {
+    id: 7,
+    payload: varlib.Pigment { r: 1, g: 2, b: 3 },
+    palette: [varlib.Pigment { r: 4, g: 5, b: 6 }, varlib.Pigment { r: 7, g: 8, b: 9 }],
+    accent: some(varlib.Pigment { r: 10, g: 20, b: 30 }),
+  }
+  match Wrapped.decode(Wrapped.encode(w)) {
+    ok(v) => {
+      assert_eq(v.id, 7)
+      assert_eq(v.payload.g, 2)
+      assert_eq(list.len(v.palette), 2)
+      match v.accent {
+        some(c) => assert_eq(c.g, 20),
+        none => assert(false),
+      }
+    },
+    _ => assert(false),
+  }
+}

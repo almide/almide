@@ -75,6 +75,12 @@ pub fn almide_rt_value_decode_option<T, F: Fn(Value) -> Result<T, String>>(v: &V
         Err(_) => Ok(None),
     }
 }
+/// Owned-argument variant for derived `Option[CustomType]` decode. The codegen
+/// passes the object and key by value (like `almide_rt_value_decode_list`), so this
+/// wrapper borrows for the by-ref generic above (新②).
+pub fn almide_rt_value_decode_option_custom<T, F: Fn(Value) -> Result<T, String>>(v: Value, key: String, f: F) -> Result<Option<T>, String> {
+    almide_rt_value_decode_option(&v, &key, f)
+}
 pub fn almide_rt_value_decode_with_default<T: Clone, F: Fn(Value) -> Result<T, String>>(v: &Value, key: &str, default: T, f: F) -> Result<T, String> {
     match almide_rt_value_field(v, key) {
         Ok(Value::Null) => Ok(default),

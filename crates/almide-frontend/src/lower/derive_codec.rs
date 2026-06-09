@@ -58,6 +58,18 @@ pub(super) fn auto_derive_encode(vt: &mut VarTable, type_name: &str, type_ty: &T
 }
 
 /// Choose the right value constructor for a field type.
+/// Codec helper name for an `Option[T]` field. A custom element type keeps its
+/// NAME so `BuiltinLoweringPass` can route it through the generic option codec with
+/// a `T.encode`/`T.decode` per-element fn; primitives keep the suffix that names an
+/// existing `almide_rt___{op}_option_<prim>` helper. `decode_func_suffix` alone
+/// collapses every Named type to "value", for which no helper exists (新②).
+fn option_codec_fn(op: &str, inner: &Ty) -> String {
+    match inner {
+        Ty::Named(name, _) => format!("__{}_option_{}", op, name),
+        _ => format!("__{}_option_{}", op, decode_func_suffix(inner)),
+    }
+}
+
 fn encode_field_value(field_expr: &IrExpr, field_ty: &Ty, value_ty: &Ty) -> IrExpr {
     let (module, func) = match field_ty {
         Ty::String => ("value", "str"),
@@ -68,7 +80,7 @@ fn encode_field_value(field_expr: &IrExpr, field_ty: &Ty, value_ty: &Ty) -> IrEx
             let inner = &args[0];
             return IrExpr {
                 kind: IrExprKind::Call {
-                    target: CallTarget::Named { name: sym(&format!("__encode_option_{}", decode_func_suffix(inner))) },
+                    target: CallTarget::Named { name: sym(&option_codec_fn("encode", inner)) },
                     args: vec![field_expr.clone()],
                     type_args: vec![],
                 },
@@ -152,7 +164,7 @@ pub(super) fn auto_derive_decode(vt: &mut VarTable, type_name: &str, type_ty: &T
             IrExpr {
                 kind: IrExprKind::Try { expr: Box::new(IrExpr {
                     kind: IrExprKind::Call {
-                        target: CallTarget::Named { name: sym(&format!("__decode_option_{}", decode_func_suffix(&inner_ty))) },
+                        target: CallTarget::Named { name: sym(&option_codec_fn("decode", &inner_ty)) },
                         args: vec![
                             IrExpr { kind: IrExprKind::Var { id: var_v }, ty: value_ty.clone(), span: None, def_id: None },
                             IrExpr { kind: IrExprKind::LitStr { value: key_name(f) }, ty: Ty::String, span: None, def_id: None },
@@ -499,7 +511,7 @@ pub(super) fn auto_derive_variant_decode(vt: &mut VarTable, type_name: &str, typ
                         IrExpr {
                             kind: IrExprKind::Try { expr: Box::new(IrExpr {
                                 kind: IrExprKind::Call {
-                                    target: CallTarget::Named { name: sym(&format!("__decode_option_{}", decode_func_suffix(&inner_ty))) },
+                                    target: CallTarget::Named { name: sym(&option_codec_fn("decode", &inner_ty)) },
                                     args: vec![
                                         IrExpr { kind: IrExprKind::Var { id: var_payload }, ty: value_ty.clone(), span: None, def_id: None },
                                         IrExpr { kind: IrExprKind::LitStr { value: key.clone() }, ty: Ty::String, span: None, def_id: None },

@@ -1433,9 +1433,12 @@ impl FuncCompiler<'_> {
                         call(func_idx); local_set(decode_result);
                         local_get(decode_result); i32_load(0); i32_const(0); i32_eq;
                         if_i32;
-                          i32_const(8); call(self.emitter.rt.alloc); local_set(some_opt);
-                          local_get(some_opt); i32_const(1); i32_store(0);
-                          local_get(some_opt); local_get(decode_result); i32_load(4); i32_store(4);
+                          // Option Some = a block whose offset 0 IS the payload ptr
+                          // (no tag — matches the encode/primitive layout). Storing a
+                          // spurious tag here made the re-encode read `1` as the
+                          // payload pointer → garbage (新②).
+                          i32_const(4); call(self.emitter.rt.alloc); local_set(some_opt);
+                          local_get(some_opt); local_get(decode_result); i32_load(4); i32_store(0);
                           i32_const(8); call(self.emitter.rt.alloc); local_set(result);
                           local_get(result); i32_const(0); i32_store(0);
                           local_get(result); local_get(some_opt); i32_store(4);

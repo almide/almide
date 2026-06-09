@@ -1,0 +1,32 @@
+// 新②: a derived `Codec` with an `Option[CustomCodecType]` field. The deriver
+// collapsed every Named element to the suffix "value" (`__encode_option_value`),
+// for which no helper exists — so the build failed (native) / lost the value
+// (wasm). It now preserves the element type name and routes through the generic
+// option codec with a per-element `T.encode`/`T.decode` fn.
+
+type Color: Codec = { r: Int, g: Int, b: Int }
+type Holder: Codec = { accent: Option[Color], name: String }
+
+fn roundtrip(h: Holder) -> Result[Holder, String] = Holder.decode(Holder.encode(h))
+
+test "Option[custom Codec] Some round-trips" {
+  let h = Holder { accent: some(Color { r: 9, g: 8, b: 7 }), name: "x" }
+  match roundtrip(h) {
+    ok(v) => match v.accent {
+      some(c) => { assert_eq(c.g, 8); assert_eq(v.name, "x") },
+      none => assert(false),
+    },
+    err(_) => assert(false),
+  }
+}
+
+test "Option[custom Codec] None round-trips" {
+  let h = Holder { accent: none, name: "y" }
+  match roundtrip(h) {
+    ok(v) => match v.accent {
+      none => assert_eq(v.name, "y"),
+      some(_) => assert(false),
+    },
+    err(_) => assert(false),
+  }
+}

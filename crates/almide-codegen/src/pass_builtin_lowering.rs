@@ -23,6 +23,45 @@
 use almide_ir::*;
 use almide_lang::types::Ty;
 use super::pass::{NanoPass, PassResult, Target};
+use std::collections::HashMap;
+use std::cell::RefCell;
+
+thread_local! {
+    /// Maps the full IR name of a module-defined function (a derived method like
+    /// `Color.encode`) to its module prefix (`colors`). A cross-module reference
+    /// reaches this pass as a bare `CallTarget::Named { "Color.encode" }` (the field
+    /// type carries no module), and flattening it to `Color_encode` would dangle —
+    /// the definition is `almide_rt_colors_Color_encode` (module_origin). So when a
+    /// dotted Named method call resolves through this map it is emitted with the
+    /// matching module prefix (#411-B). In-module calls are already prefixed by the
+    /// caller's module before this pass, so they are not keyed here.
+    static MODULE_METHOD_FNS: RefCell<HashMap<String, String>> = RefCell::new(HashMap::new());
+}
+
+/// Collect every module-defined dotted function (`Color.encode`) → its module
+/// prefix, from whichever side of `IrLinkFlattenPass` we run on: merged root
+/// functions carry `module_origin`; not-yet-merged ones live under `program.modules`.
+fn collect_module_method_fns(program: &IrProgram) -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    for f in &program.functions {
+        if let Some(origin) = &f.module_origin {
+            if f.name.as_str().contains('.') {
+                map.insert(f.name.to_string(), origin.clone());
+            }
+        }
+    }
+    for m in &program.modules {
+        let ident = m.versioned_name
+            .map(|v| v.to_string().replace('.', "_"))
+            .unwrap_or_else(|| m.name.to_string().replace('.', "_"));
+        for f in &m.functions {
+            if f.name.as_str().contains('.') {
+                map.insert(f.name.to_string(), ident.clone());
+            }
+        }
+    }
+    map
+}
 
 #[derive(Debug)]
 pub struct BuiltinLoweringPass;
@@ -32,6 +71,8 @@ impl NanoPass for BuiltinLoweringPass {
     fn targets(&self) -> Option<Vec<Target>> { Some(vec![Target::Rust]) }
     fn depends_on(&self) -> Vec<&'static str> { vec!["ResultPropagation"] }
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
+        let method_fns = collect_module_method_fns(&program);
+        MODULE_METHOD_FNS.with(|c| *c.borrow_mut() = method_fns);
         for func in &mut program.functions {
             func.body = rewrite_expr(std::mem::take(&mut func.body));
         }
@@ -130,10 +171,17 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
                                 args, type_args,
                             }, ty, span, def_id: None };
                         } else {
-                            // Custom type: use generic encode/decode
+                            // Custom type: use generic encode/decode. A module-defined
+                            // element type carries its module prefix so the per-element
+                            // codec FnRef matches its definition (#411-B, the `List`
+                            // element case of the same cross-module fix below).
                             let is_encode = name.starts_with("__encode");
                             let codec_op = if is_encode { "encode" } else { "decode" };
-                            let func_ref = format!("{}_{}", type_name, codec_op);
+                            let codec_method = format!("{}.{}", type_name, codec_op);
+                            let func_ref = MODULE_METHOD_FNS.with(|c| {
+                                c.borrow().get(&codec_method)
+                                    .map(|m| format!("almide_rt_{}_{}_{}", m, type_name, codec_op))
+                            }).unwrap_or_else(|| format!("{}_{}", type_name, codec_op));
                             // The per-element codec function reference has a
                             // precise signature — leaving it `Ty::Unknown` here
                             // is exactly the latent unresolved-type that the
@@ -173,6 +221,52 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
                             }, ty, span, def_id: None };
                         }
                     }
+                    // __encode_option_T / __decode_option_T for a CUSTOM element
+                    // type: route through the generic option codec with a per-element
+                    // `T.encode`/`T.decode` fn. Primitives keep their existing
+                    // `almide_rt___{op}_option_<prim>` helper via the `__` arm below (新②).
+                    if name.starts_with("__encode_option_") || name.starts_with("__decode_option_") {
+                        let type_name = if name.starts_with("__encode_option_") {
+                            &name["__encode_option_".len()..]
+                        } else {
+                            &name["__decode_option_".len()..]
+                        };
+                        let primitives = ["string", "int", "float", "bool"];
+                        if !primitives.contains(&type_name) {
+                            let is_encode = name.starts_with("__encode");
+                            let codec_op = if is_encode { "encode" } else { "decode" };
+                            let codec_method = format!("{}.{}", type_name, codec_op);
+                            let func_ref = MODULE_METHOD_FNS.with(|c| {
+                                c.borrow().get(&codec_method)
+                                    .map(|m| format!("almide_rt_{}_{}_{}", m, type_name, codec_op))
+                            }).unwrap_or_else(|| format!("{}_{}", type_name, codec_op));
+                            let elem_ty = Ty::Named(type_name.into(), vec![]);
+                            let value_ty = Ty::Named("Value".into(), vec![]);
+                            use almide_lang::types::constructor::TypeConstructorId;
+                            let fn_ref_ty = if is_encode {
+                                Ty::Fn { params: vec![elem_ty], ret: Box::new(value_ty) }
+                            } else {
+                                Ty::Fn {
+                                    params: vec![value_ty],
+                                    ret: Box::new(Ty::Applied(TypeConstructorId::Result, vec![elem_ty, Ty::String])),
+                                }
+                            };
+                            let mut new_args = args;
+                            new_args.push(IrExpr {
+                                kind: IrExprKind::FnRef { name: func_ref.into() },
+                                ty: fn_ref_ty, span: None, def_id: None,
+                            });
+                            let rt_func = if is_encode {
+                                "almide_rt_value_option_encode"
+                            } else {
+                                "almide_rt_value_decode_option_custom"
+                            };
+                            return IrExpr { kind: IrExprKind::Call {
+                                target: CallTarget::Named { name: rt_func.into() },
+                                args: new_args, type_args,
+                            }, ty, span, def_id: None };
+                        }
+                    }
                     // Other __ prefixed → almide_rt_
                     if name.starts_with("__") {
                         return IrExpr { kind: IrExprKind::Call {
@@ -180,11 +274,16 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
                             args, type_args,
                         }, ty, span, def_id: None };
                     }
-                    // Type.method → Type_method
+                    // Type.method → Type_method. If the method belongs to a
+                    // module-defined type, carry the module prefix so the call
+                    // matches its `almide_rt_<module>_Type_method` definition (#411-B).
                     if name.contains('.') {
                         let flat = name.replace('.', "_");
+                        let resolved = MODULE_METHOD_FNS.with(|c| {
+                            c.borrow().get(name.as_str()).map(|m| format!("almide_rt_{}_{}", m, flat))
+                        }).unwrap_or(flat);
                         return IrExpr { kind: IrExprKind::Call {
-                            target: CallTarget::Named { name: flat.into() },
+                            target: CallTarget::Named { name: resolved.into() },
                             args, type_args,
                         }, ty, span, def_id: None };
                     }
