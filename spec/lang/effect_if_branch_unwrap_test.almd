@@ -1,0 +1,38 @@
+// effect_if_branch_unwrap_test — #438: inside an effect fn, an `if` whose one
+// branch auto-unwraps an effect-fn call (via `match`) to `T` and whose other
+// branch is an explicit `ok(...)` (`Result[T, E]`) used to fail E001 ("type
+// mismatch in if branches") — the two were compared as `T` vs `Result[T]`. The
+// auto-unwrap now applies per-branch before the comparison, mirroring the
+// match-arm rule. Also guards the no-regress case: `if .. then ok(n) else
+// err(..)` must still type (and run) as a `Result`.
+
+effect fn fetch(p: String) -> List[String] = ok(["a", "b"])
+
+effect fn handler(p: String) -> List[String] = {
+  if string.len(p) > 0 then {
+    match fetch(p) { ok(ls) => ls, err(e) => ["err"] }   // auto-unwrapped → List[String]
+  } else {
+    ok(["empty"])                                        // explicit Result[List, _]
+  }
+}
+
+effect fn validate(n: Int) -> Int = {
+  if n > 0 then ok(n) else err("negative")               // both Result — stays Result
+}
+
+test "effect-fn if branch mixes match-unwrap (T) and explicit ok (Result)" {
+  let got = match handler("hi") { ok(ls) => ls, err(e) => ["ERR"] };
+  assert_eq(got, ["a", "b"])
+}
+
+test "effect-fn if branch — else ok(...) path runs" {
+  let got = match handler("") { ok(ls) => ls, err(e) => ["ERR"] };
+  assert_eq(got, ["empty"])
+}
+
+test "effect-fn if then ok else err still types and runs as Result" {
+  let pos = match validate(5) { ok(n) => n, err(e) => 0 - 1 };
+  assert_eq(pos, 5);
+  let neg = match validate(0 - 1) { ok(n) => n, err(e) => 0 - 1 };
+  assert_eq(neg, 0 - 1)
+}
