@@ -51,7 +51,7 @@ jobs:
 
       - run: cargo build --release
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: almide-linux
           path: target/release/almide
@@ -430,7 +430,7 @@ jobs:
       # subprocesses no longer race the shared scratch dir on Windows.
       - run: cargo test
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact }}
           path: target/release/almide${{ matrix.os == 'windows-latest' && '.exe' || '' }}
