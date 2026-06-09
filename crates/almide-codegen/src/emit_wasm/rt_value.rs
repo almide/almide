@@ -160,7 +160,12 @@ fn compile_value_stringify(emitter: &mut WasmEmitter) {
 
     let concat = emitter.rt.concat_str;
     let itoa = emitter.rt.int_to_string;
-    let ftoa = emitter.rt.float_to_string;
+    // Floats render in native `format!("{}", f)` (Display) form — which drops the
+    // trailing `.0` of an integer-valued float — to match `almide_rt_value_stringify`
+    // (the native oracle) byte-for-byte. `float_to_string` (the round-trip form)
+    // keeps `3.0` and so diverged: `value.stringify` / a `Value` float repr now
+    // agree native == wasm.
+    let fdisp = emitter.rt.float_display;
     let stringify_fn = emitter.rt.value_stringify;
 
     // Locals: param 0 = v
@@ -199,7 +204,7 @@ fn compile_value_stringify(emitter: &mut WasmEmitter) {
     wasm!(f, {
         local_get(1); i32_const(3); i32_eq;
         if_empty;
-          local_get(0); f64_load(4); call(ftoa); return_;
+          local_get(0); f64_load(4); call(fdisp); return_;
         end;
     });
 

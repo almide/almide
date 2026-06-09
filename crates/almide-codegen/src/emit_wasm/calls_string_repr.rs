@@ -91,6 +91,16 @@ impl FuncCompiler<'_> {
                 let elems = elems.clone();
                 self.emit_repr_tuple(&elems);
             }
+            // ── `Value` (dynamic JSON-like) → its JSON text ──
+            // Byte-identical to native `AlmideRepr for Value` / `Display`, which
+            // both call `almide_rt_value_stringify`; `__value_stringify` mirrors
+            // that serializer. Must precede the named record/variant arms below,
+            // which would otherwise treat `Value` as an empty record and emit
+            // `Value {  }`. The field ptr is on the stack; `__value_stringify`
+            // consumes it and leaves the string ptr.
+            Ty::Named(n, _) if n.as_str() == "Value" => {
+                wasm!(self.func, { call(self.emitter.rt.value_stringify); });
+            }
             // ── Recursive named record/variant → per-type repr fn ──
             // A self/mutually-recursive named type must NOT inline-expand its type
             // graph (infinite at compile time); it routes through its reserved
