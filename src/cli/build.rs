@@ -323,6 +323,18 @@ pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool) -> Resul
         );
     }
 
+    // Native-only matrix ops (e.g. qwen3_block_q1_0_kv: a packed-GGUF block with
+    // no primitive decomposition) have no WASM lowering. Reject at build time with
+    // a clear message rather than letting the emitter ICE deep in codegen.
+    if let Some(op) = almide::codegen::program_uses_native_only_matrix_on_wasm(&ir_program) {
+        eprintln!(
+            "error: matrix.{op} is native-only (a packed-GGUF fast path with no WASM \
+             lowering) — not available on the WASM target. Use --target rust, or compose \
+             the block from the primitive matrix ops."
+        );
+        return Err(());
+    }
+
     // Codegen (nanopass pipeline + WASM binary emit). The Perceus RC gate
     // (`Verified::verify`) runs inside this path; `allow_unverified` selects
     // hard-error (default) vs the `--emit-unverified` waiver. It does not change
