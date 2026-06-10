@@ -36,6 +36,31 @@ fn resolve_in(env: &TypeEnv, te: &ast::TypeExpr, cur_mod: Option<&str>) -> Ty {
 /// as `LazyLock<_>` in generated Rust and `ConcretizeTypes` post-condition
 /// failures on WASM. Recurse structurally through record / list / tuple /
 /// map literals so the cross-module user sees the right type.
+/// Seed type for an UNANNOTATED top-let. `infer_literal_type` covers
+/// literals and anonymous records only; a NAMED constructor (`Cfg { … }`)
+/// fell to `Ty::Unknown`, and because every driver checks MAIN before the
+/// modules, main's inference read that stale Unknown for a cross-module
+/// `m.CFG` — a spread of it then carried Unknown into the AllTypesConcrete
+/// refusal (#502). Resolve the ctor name through the SAME #433 predicate an
+/// explicit `: Cfg` annotation uses, so both spellings seed identically.
+/// Generic decls (unresolved type params) deliberately stay Unknown — the
+/// ctor args are not inferable here and the later module-check writeback
+/// only corrects exact-Unknown seeds.
+pub fn infer_top_let_seed(env: &TypeEnv, prefix: Option<&str>, value: &ast::Expr) -> Ty {
+    match &value.kind {
+        ast::ExprKind::Paren { expr } => infer_top_let_seed(env, prefix, expr),
+        ast::ExprKind::Record { name: Some(n), .. } => {
+            let canonical = super::resolve::canonical_user_type_sym(n.as_str(), &env.types, prefix)
+                .unwrap_or_else(|| sym(n.as_str()));
+            match env.types.get(&canonical) {
+                Some(decl) if !decl.has_unresolved_deep() => Ty::Named(canonical, vec![]),
+                _ => Ty::Unknown,
+            }
+        }
+        _ => infer_literal_type(value),
+    }
+}
+
 pub fn infer_literal_type(expr: &ast::Expr) -> Ty {
     match &expr.kind {
         ast::ExprKind::Int { .. } => Ty::Int,
@@ -673,7 +698,8 @@ pub fn register_decls(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, decl
                 register_impl_decl(env, diagnostics, trait_, for_, methods);
             }
             ast::Decl::TopLet { name, ty, value, .. } => {
-                let rt = ty.as_ref().map(|te| resolve(env, te)).unwrap_or_else(|| infer_literal_type(value));
+                let rt = ty.as_ref().map(|te| resolve(env, te))
+                    .unwrap_or_else(|| infer_top_let_seed(env, prefix, value));
                 let key = prefixed_key(prefix, name);
                 env.top_lets.insert(sym(&key), rt.clone());
                 // Register in DefTable

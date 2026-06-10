@@ -324,7 +324,7 @@ effect fn main() -> Unit = {
 }
 "#,
             expected: "3",
-            status: Status::KnownBroken("native: a module fn's reassignment of its own non-Copy module var is lost when read cross-module (prints the initial len; ModuleRc replace vs read path desync) — see #501"),
+            status: Status::Works,
         },
         Cell {
             name: "var_toplet_through_closure",
@@ -347,7 +347,7 @@ effect fn main() -> Unit = {
 }
 "#,
             expected: "z",
-            status: Status::KnownBroken("checker leaves a cross-module spread base SpreadRecord ty=Unknown — refused by the AllTypesConcrete gate — see #502"),
+            status: Status::Works,
         },
         Cell {
             name: "tuple_toplet_destructure",

@@ -36,3 +36,19 @@ test "cross-module record top-let list and fn-returned record" {
   assert_eq(toplib.CFGS |> list.len, 2);
   assert_eq(toplib.mk().name, "via-fn")
 }
+
+test "cross-module spread from a record top-let base (#502)" {
+  let c = { ...toplib.CFG, name: "z" };
+  assert_eq(c.name, "z")
+}
+
+test "cross-module spread from a rebound top-let base (#502)" {
+  let x = toplib.CFG;
+  let c = { ...x, name: "y" };
+  assert_eq(c.name, "y")
+}
+
+test "cross-module spread from a fn-returned base (#502)" {
+  let c = { ...toplib.mk(), name: "w" };
+  assert_eq(c.name, "w")
+}
