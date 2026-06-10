@@ -246,6 +246,7 @@ impl Pipeline {
         // `ALMIDE_VERIFY_IR` used to gate this — removed in S2 flip
         // (v0.14.7-phase3.2); `expr.ty` is now trustworthy by contract.
         let hard_fail = cfg!(debug_assertions);
+        let _ = hard_fail; // escalation is unconditional now; the flag only gates whether verification RUNS
         // The inter-pass IR verifier + postcondition checks walk the entire
         // (merged) program after EVERY pass. That's a developer safety net —
         // it catches compiler bugs but does nothing for a correct build. In
@@ -307,9 +308,12 @@ impl Pipeline {
                     for e in &errors {
                         eprintln!("  {}", e);
                     }
-                    if hard_fail {
-                        panic!("IR verification failed after pass '{}'", pass_name);
-                    }
+                    // No warn-mode: a DETECTED violation is fatal in every
+                    // profile (release-parity §10 — the v0.25.0 lesson:
+                    // a warning's audience cannot fix a compiler bug).
+                    // Release cost is unchanged: the verifier itself stays
+                    // debug/opt-in (the measured ~1.2s/file walk).
+                    panic!("IR verification failed after pass '{}'", pass_name);
                 }
 
                 // Postcondition verification.
@@ -319,7 +323,7 @@ impl Pipeline {
                     for v in &violations {
                         eprintln!("[POSTCONDITION VIOLATION] {}", v);
                     }
-                    if !violations.is_empty() && hard_fail {
+                    if !violations.is_empty() {
                         panic!("Postcondition violation after pass '{}'", pass_name);
                     }
                 }
