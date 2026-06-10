@@ -1216,8 +1216,20 @@ impl Checker {
     /// constructor, are E021. Returns true when the node was rewritten.
     fn normalize_ctor_paren_call(&mut self, expr: &mut ast::Expr) -> bool {
         let ExprKind::Call { callee, args, named_args, .. } = &expr.kind else { return false };
-        let ExprKind::TypeName { name } = &callee.kind else { return false };
-        let n = *name;
+        // Both spellings of a constructor callee: bare/dotted `TypeName`, and
+        // the cross-module `m.Cfg(...)` form, which parses as a MEMBER access
+        // on the module ident — without this arm the paren-named normalization
+        // only covered the same-file spelling (caught by the §2 matrix gate).
+        let n = match &callee.kind {
+            ExprKind::TypeName { name } => *name,
+            ExprKind::Member { object, field }
+                if field.as_str().chars().next().map_or(false, |c| c.is_uppercase()) =>
+            {
+                let ExprKind::Ident { name: obj, .. } = &object.kind else { return false };
+                sym(&format!("{}.{}", obj, field))
+            }
+            _ => return false,
+        };
         let bare = n.as_str().rsplit_once('.').map(|(_, b)| sym(b)).unwrap_or(n);
         // Record-payload variant case? (ctor table is keyed by bare name)
         let ctor_payload_record = self.env.lookup_ctor_in(&bare, self.current_module_prefix.as_deref())
