@@ -353,6 +353,15 @@ impl FuncCompiler<'_> {
                       local_get(i); i32_const(es); i32_mul; i32_add;
                       local_get(val);
                 });
+                // The result owns n references to the SAME element block —
+                // without one inc per stored slot, a deep Dec of the result
+                // decs that single block n times (sentinel trap; surfaced via
+                // the for+concat-push → list.repeat rewrite). A fresh-arg
+                // call leaks exactly one count (no owner for the original
+                // ref) — the safe direction.
+                if crate::pass_perceus::is_heap_type(&elem_ty) {
+                    wasm!(self.func, { call(self.emitter.rt.rc_inc); });
+                }
                 self.emit_store_at(&elem_ty, 0);
                 wasm!(self.func, {
                       local_get(i); i32_const(1); i32_add; local_set(i);

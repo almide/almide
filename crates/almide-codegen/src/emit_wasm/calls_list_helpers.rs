@@ -407,7 +407,16 @@ impl FuncCompiler<'_> {
         match values::ty_to_valtype(ty) {
             Some(ValType::I64) => { wasm!(self.func, { i64_load(0); i64_store(0); }); }
             Some(ValType::F64) => { wasm!(self.func, { f64_load(0); f64_store(0); }); }
-            _ => { wasm!(self.func, { i32_load(0); call(self.emitter.rt.rc_inc); i32_store(0); }); }
+            // The inc is gated on HEAP-ness, not on "rides in i32": Int32/
+            // UInt32/Float32 are 4-byte SCALARS whose values can exceed
+            // heap_start — an unconditional rc_inc would write +1 into a
+            // fake header at an arbitrary address (live landmine under
+            // frees). Bool's data-section guard was masking this for the
+            // other 4-byte scalars only by luck of small values.
+            _ if crate::pass_perceus::is_heap_type(ty) => {
+                wasm!(self.func, { i32_load(0); call(self.emitter.rt.rc_inc); i32_store(0); });
+            }
+            _ => { wasm!(self.func, { i32_load(0); i32_store(0); }); }
         }
     }
 

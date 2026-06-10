@@ -945,6 +945,15 @@ fn compile_join(emitter: &mut WasmEmitter) {
         else_;
           // result = list[0]
           local_get(0); i32_const(list_data_off()); i32_add; i32_load(0); local_set(4);
+          // Singleton SHARE dup: for len==1 the loop never runs and the
+          // ELEMENT POINTER itself is returned — an alias into a list the
+          // caller still owns and will deep-Dec. Inc it (no-op for
+          // data-section strings; len>=2 results are fresh via concat, an
+          // unconditional inc would leak elem0 once per join).
+          local_get(2); i32_const(1); i32_eq;
+          if_empty;
+            local_get(4); call(emitter.rt.rc_inc); drop;
+          end;
           i32_const(1); local_set(3); // i=1
           block_empty; loop_empty;
             local_get(3); local_get(2); i32_ge_u; br_if(1);

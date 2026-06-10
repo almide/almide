@@ -679,7 +679,14 @@ pub(crate) fn is_heap_type(ty: &Ty) -> bool {
 /// access. Only the DIRECT-element accessors belong here; the Option-returning
 /// lookups surface their alias through a `match` arm instead (see the call site).
 fn is_alias_returning_runtime_call(symbol: &str) -> bool {
-    matches!(symbol, "almide_rt_list_get_or" | "almide_rt_map_get_or")
+    matches!(symbol,
+        "almide_rt_list_get_or" | "almide_rt_map_get_or"
+        // unwrap_or peels the payload pointer straight out of the box —
+        // identical to the IR UnwrapOr node classified below. Missing these
+        // freed the JSON root while a live alias pointed at it, then a later
+        // rc_inc RESURRECTED the freed block (silent corruption, json_gltf).
+        | "almide_rt_result_unwrap_or" | "almide_rt_option_unwrap_or"
+    )
 }
 
 pub(crate) fn yields_borrowed_alias(e: &IrExpr) -> bool {
@@ -739,6 +746,41 @@ pub(crate) fn yields_borrowed_alias(e: &IrExpr) -> bool {
 /// Block IR → FnBody chain → Perceus rules → FnBody → Block IR.
 fn insert_rc_ops(func: &mut IrFunction, var_table: &mut VarTable) -> bool {
     if func.is_test { return false; }
+
+    // Mechanism #6 — RETURN-ALIAS DUP: a function whose tail yields a
+    // borrowed alias (a param, a pattern-bound payload, a member load …)
+    // hands its caller a pointer the caller will own and Dec, while the
+    // aliased source keeps its own owner and Dec. The callee must return
+    // OWNED: bind the tail, Inc it, return the binding. Call results are
+    // (correctly) classified FRESH at bind sites, so this is the only place
+    // the missing +1 can be inserted. Mixed fresh/alias match arms take the
+    // Inc on whichever value is produced — a fresh arm then leaks one count
+    // (the safe direction). Data-section constants make the Inc a no-op.
+    if is_heap_type(&func.ret_ty) && yields_borrowed_alias(&func.body) {
+        let ret_ty = func.ret_ty.clone();
+        let dup_var = var_table.alloc(
+            almide_base::intern::sym("__ret_dup"),
+            ret_ty.clone(),
+            Mutability::Let,
+            None,
+        );
+        let body = std::mem::replace(&mut func.body, IrExpr {
+            kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None,
+        });
+        let span = body.span;
+        func.body = IrExpr {
+            kind: IrExprKind::Block {
+                stmts: vec![
+                    IrStmt { kind: IrStmtKind::Bind { var: dup_var, mutability: Mutability::Let, ty: ret_ty.clone(), value: body }, span },
+                    IrStmt { kind: IrStmtKind::RcInc { var: dup_var }, span: None },
+                ],
+                expr: Some(Box::new(IrExpr { kind: IrExprKind::Var { id: dup_var }, ty: ret_ty, span: None, def_id: None })),
+            },
+            ty: func.ret_ty.clone(),
+            span,
+            def_id: None,
+        };
+    }
 
     // Apply Perceus recursively to the entire function body
     perceus_expr(&mut func.body, var_table);

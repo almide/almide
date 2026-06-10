@@ -1178,6 +1178,50 @@ impl FuncCompiler<'_> {
                     i32_const(elem_size as i32);
                     call(self.emitter.rt.concat_list);
                 });
+                // SHARE dup: __concat_list bulk-copies BOTH inputs' element
+                // pointers into the fresh result while both inputs survive
+                // and keep their own scope-end (deep) Decs — without one inc
+                // per copied element, `xs = xs + [r]` frees the elements the
+                // new spine shares (cross_module_spread trap). rc_inc no-ops
+                // on data-section constants. Unresolved elem Ty falls through
+                // un-dup'd — unreachable for live code post-AllTypesConcrete.
+                let extract_elem_ty = |ty: &Ty| -> Option<Ty> {
+                    if let Ty::Applied(_, args) = ty {
+                        args.first().filter(|t| !t.is_unresolved()).cloned()
+                    } else { None }
+                };
+                let var_elem_ty = |expr: &IrExpr| -> Option<Ty> {
+                    if let almide_ir::IrExprKind::Var { id } = &expr.kind {
+                        extract_elem_ty(&self.var_table.get(*id).ty)
+                    } else { None }
+                };
+                let elem_ty = extract_elem_ty(&left.ty)
+                    .or_else(|| extract_elem_ty(&right.ty))
+                    .or_else(|| var_elem_ty(left))
+                    .or_else(|| var_elem_ty(right));
+                if elem_ty.map_or(false, |t| crate::pass_perceus::is_heap_type(&t)) {
+                    let res = self.scratch.alloc_i32();
+                    let idx = self.scratch.alloc_i32();
+                    let len = self.scratch.alloc_i32();
+                    let data_off = super::rt_string::list_data_off();
+                    wasm!(self.func, {
+                        local_set(res);
+                        local_get(res); i32_load(0); local_set(len);
+                        i32_const(0); local_set(idx);
+                        block_empty; loop_empty;
+                            local_get(idx); local_get(len); i32_ge_u; br_if(1);
+                            local_get(res); i32_const(data_off); i32_add;
+                            local_get(idx); i32_const(4); i32_mul; i32_add;
+                            i32_load(0); call(self.emitter.rt.rc_inc); drop;
+                            local_get(idx); i32_const(1); i32_add; local_set(idx);
+                            br(0);
+                        end; end;
+                        local_get(res);
+                    });
+                    self.scratch.free_i32(len);
+                    self.scratch.free_i32(idx);
+                    self.scratch.free_i32(res);
+                }
             }
 
             // ── Matrix operations (WASM stub — not yet optimized) ──

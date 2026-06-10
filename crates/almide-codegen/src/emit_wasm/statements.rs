@@ -831,11 +831,16 @@ impl FuncCompiler<'_> {
                     }
                 }
                 // ── Record: dec each heap-typed field ──
+                // Fields are walked in GIVEN (declaration) order — the same
+                // order construction (emit_record), member access
+                // (field_offset), and spread use. The original name-sorted
+                // walk computed WRONG offsets whenever alphabetical order
+                // diverged from declaration order with mixed field sizes,
+                // assembling fake pointers out of neighboring bytes
+                // (sized_int_record_fields trap) or silently leaking.
                 Ty::Record { fields } => {
-                    let mut sorted: Vec<_> = fields.iter().collect();
-                    sorted.sort_by(|a, b| a.0.cmp(&b.0));
                     let mut offset = 0u32;
-                    for (_, field_ty) in &sorted {
+                    for (_, field_ty) in fields {
                         if Self::is_heap_type(field_ty) {
                             let mut w = WasmBuilder::new(&mut self.func, &self.emitter.layout_reg);
                             w.get(local_idx).emit_load(offset, MemType::I32);

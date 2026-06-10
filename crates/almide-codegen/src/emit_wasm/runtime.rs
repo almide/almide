@@ -576,16 +576,29 @@ fn compile_rc_inc(emitter: &mut WasmEmitter) {
     let rc_ty = emitter.layout_reg.field(ALLOC_HEADER, alloc::RC).ty;
     let heap_start = HEAP_START_GLOBAL_IDX;
 
-    let mut f = Function::new([]);
+    let heap_ptr = emitter.heap_ptr_global;
+    let mut f = Function::new([(1, ValType::I32)]); // local 1: $rc
     {
         let w = &mut WasmBuilder::new(&mut f, &emitter.layout_reg);
         // Data-section constants have no header: pass through.
         w.get(0).gget(heap_start).lt_u();
         w.if_void(|w| { w.get(0).ret(); }, |_| {});
-        // *(ptr - rc_neg) += 1
+        // Dead-zone guard: after __heap_restore moved the frontier DOWN, a
+        // stale pointer at/above heap_ptr has no live header — touching it
+        // would corrupt whatever gets bump-allocated there next. Skip (the
+        // leak direction is the safe one).
+        w.get(0).gget(heap_ptr).ge_u();
+        w.if_void(|w| { w.get(0).ret(); }, |_| {});
+        // Resurrection tripwire: Inc of a FREED block (rc==0 sentinel) is
+        // always a compiler bug — without this trap it silently revives a
+        // block already on the free list and the next alloc hands out live
+        // memory (observed as silent value corruption, not a crash).
+        w.get(0).i32c(rc_neg).sub().emit_load(0, rc_ty).tee(1);
+        w.eqz();
+        w.if_void(|w| { w.unreachable_(); }, |_| {});
+        // *(ptr - rc_neg) = rc + 1
         w.get(0).i32c(rc_neg).sub();
-        w.get(0).i32c(rc_neg).sub().emit_load(0, rc_ty);
-        w.i32c(1).add();
+        w.get(1).i32c(1).add();
         w.emit_store(0, rc_ty);
         w.get(0); // return ptr
     }
@@ -616,11 +629,17 @@ fn compile_rc_dec(emitter: &mut WasmEmitter) {
     let hdr = emitter.layout_reg.header_size(ALLOC_HEADER) as i32;
     let heap_start = HEAP_START_GLOBAL_IDX;
     let free_list = emitter.free_list_global;
+    let heap_ptr_g = emitter.heap_ptr_global;
 
     let mut f = Function::new([(1, ValType::I32)]); // local 1: $rc
     {
         let w = &mut WasmBuilder::new(&mut f, &emitter.layout_reg);
         w.get(0).gget(heap_start).lt_u();
+        w.if_void(|w| { w.ret(); }, |_| {});
+        // Dead-zone guard (see compile_rc_inc): a stale pointer at/above the
+        // restored bump frontier has no header — freeing it would re-poison
+        // the just-reset free list. Skip = bounded leak.
+        w.get(0).gget(heap_ptr_g).ge_u();
         w.if_void(|w| { w.ret(); }, |_| {});
         // rc = *(ptr - rc_neg)
         w.get(0).i32c(rc_neg).sub().emit_load(0, rc_ty).tee(1);
@@ -715,6 +734,13 @@ fn compile_heap_restore(emitter: &mut WasmEmitter) {
     wasm!(f, {
         local_get(0);
         global_set(emitter.heap_ptr_global);
+        // Forget the free list wholesale: nodes above the restored frontier
+        // are dead (the walk's size-sanity tripwire traps on them); nodes
+        // below are merely un-remembered — optimization loss, never
+        // corruption. Unconditional: a no-op while frees are off, so the
+        // emitted bytes stay env-independent here.
+        i32_const(0);
+        global_set(emitter.free_list_global);
         end;
     });
     emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
