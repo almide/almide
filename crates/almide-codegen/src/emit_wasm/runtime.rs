@@ -462,11 +462,13 @@ fn compile_alloc(emitter: &mut WasmEmitter) {
             w.i32c(FREE_LIST_WALK_CAP);
             w.gt_u();
             w.if_void(|w| { w.unreachable_(); }, |_| {});
-            // cur + hdr + cur.size must lie within the bump frontier,
-            // else the header is garbage → trap at the poisoner.
-            w.get(4).i32c(hdr).add().get(4).emit_load(size_off, size_ty).add();
-            w.gget(heap_ptr).gt_u();
-            w.if_void(|w| { w.unreachable_(); }, |_| {});
+            // NOTE: a size-sanity bound (cur+hdr+size <= heap_ptr) was tried
+            // here and removed: it false-positived on legitimate freed nodes
+            // (first churn loop), and the corruption classes it aimed at are
+            // covered by the step cap above (cycles), the rc==0 sentinel in
+            // rc_dec (double-free), and the rc==0 trap in rc_inc
+            // (resurrection). Host-clobbered headers (the fs scratch class)
+            // are addressed by construction via pinned allocations.
             w.get(4).emit_load(size_off, size_ty); // cur.size
             w.get(0).ge_u();                     // >= request_size?
             w.if_void(|w| {
