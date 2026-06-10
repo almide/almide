@@ -803,7 +803,7 @@ evidence  = [
 id        = "C-064"
 title     = "The effect-fn Result auto-unwrap rule is identical across binding positions and type-directed, byte-identical on both targets"
 statement = "In an effect fn, a Result[T, E]-typed RHS auto-unwraps (auto-`?`) in every binding-shaped position — `let`, `var`, plain reassignment `x = effectCall()` (#485), and index assignment — unless the TARGET keeps the Result: an explicit `Result[..]` annotation (`let r: Result[Int, String] = step()`) or a Result-typed assign target stores the Result intact, while an UN-annotated bind of a `-> Result[..]`-declared effect fn still auto-unwraps. The full matrix prints byte-identical stdout and exits 0 on native ⇄ wasm."
-since     = "0.26.19"
+since     = "0.26.20"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/effect_assign_unwrap.almd", class = "fixture" },
