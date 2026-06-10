@@ -18,6 +18,35 @@ pub(super) enum CmpKind {
 }
 
 impl FuncCompiler<'_> {
+    /// Resolve a VarId to its wasm GLOBAL, the one rule shared by every
+    /// consumer (value read, closure capture): id-keyed first, then the
+    /// module_origin-reconstructed `ALMIDE_RT_<MOD>_<NAME>` key, then the
+    /// bare VarTable name. Lowering produces CLEAN names + module_origin
+    /// (the #486-era rework) — any consumer doing only one of these lookups
+    /// re-creates the #500 silent-zero class.
+    pub(super) fn lookup_global(&self, id: almide_ir::VarId) -> Option<(u32, ValType)> {
+        if let Some(&entry) = self.emitter.top_let_globals.get(&id.0) {
+            return Some(entry);
+        }
+        if (id.0 as usize) < self.var_table.len() {
+            let vi = self.var_table.get(id);
+            if let Some(origin) = vi.module_origin.as_deref() {
+                let key = format!(
+                    "ALMIDE_RT_{}_{}",
+                    origin.to_uppercase().replace('.', "_"),
+                    vi.name.as_str().to_uppercase(),
+                );
+                if let Some(&entry) = self.emitter.top_let_globals_by_name.get(&key) {
+                    return Some(entry);
+                }
+            }
+            if let Some(&entry) = self.emitter.top_let_globals_by_name.get(vi.name.as_str()) {
+                return Some(entry);
+            }
+        }
+        None
+    }
+
     /// Emit `expr` as a value that is about to be MOVE-STORED into a constructor
     /// or value-builder (a record field, list/tuple element, Option/Result
     /// payload, or a `value.str/array/object` box). These builders take the raw
@@ -102,11 +131,26 @@ impl FuncCompiler<'_> {
                         wasm!(self.func, { local_get(local_idx); });
                     }
                 } else if let Some(&(global_idx, _)) = {
-                    // Try name-based lookup FIRST: cross-module synthetic Vars
-                    // (ALMIDE_RT_<MOD>_<NAME>) must resolve by name because their
-                    // VarIds can collide with unrelated globals after unification.
-                    let name = if (id.0 as usize) < self.var_table.len() { self.var_table.get(*id).name.as_str() } else { "" };
-                    self.emitter.top_let_globals_by_name.get(name)
+                    // Name-based lookup FIRST: cross-module synthetic Vars
+                    // must resolve by name because their VarIds can collide
+                    // with unrelated globals after unification. Lowering
+                    // produces a CLEAN uppercase name + module_origin (the
+                    // #486-era rework) — the prefixed ALMIDE_RT_<MOD>_<NAME>
+                    // key must be reconstructed from module_origin here, or
+                    // a cross-module global read silently missed every key
+                    // and fell to the typed-zero fallback (#500).
+                    if (id.0 as usize) < self.var_table.len() {
+                        let vi = self.var_table.get(*id);
+                        let by_origin = vi.module_origin.as_deref().and_then(|origin| {
+                            let key = format!(
+                                "ALMIDE_RT_{}_{}",
+                                origin.to_uppercase().replace('.', "_"),
+                                vi.name.as_str().to_uppercase(),
+                            );
+                            self.emitter.top_let_globals_by_name.get(&key)
+                        });
+                        by_origin.or_else(|| self.emitter.top_let_globals_by_name.get(vi.name.as_str()))
+                    } else { None }
                 } {
                     wasm!(self.func, { global_get(global_idx); });
                 } else if let Some(&(global_idx, _)) = self.emitter.top_let_globals.get(&id.0) {
@@ -129,6 +173,20 @@ impl FuncCompiler<'_> {
                     if let Some(local_idx) = found {
                         wasm!(self.func, { local_get(local_idx); });
                     } else {
+                        // A module-origin var that reached this point missed
+                        // every global key — that is a compiler bug, and the
+                        // old typed-zero fallback turned it into SILENT WRONG
+                        // OUTPUT (a cross-module `var` read printed 0 / empty,
+                        // #500). Refuse loudly instead.
+                        if (id.0 as usize) < self.var_table.len() {
+                            let vi = self.var_table.get(*id);
+                            if vi.module_origin.is_some() {
+                                panic!(
+                                    "[ICE] cross-module global `{}` (origin {:?}) resolved to no wasm global —                                      storage registration and lookup disagree (#500 class)",
+                                    vi.name.as_str(), vi.module_origin
+                                );
+                            }
+                        }
                         // Truly not in scope — push typed zero
                         match values::ty_to_valtype(&expr.ty) {
                             Some(ValType::I64) => { wasm!(self.func, { i64_const(0); }); }

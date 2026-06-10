@@ -78,9 +78,25 @@ pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &ast::Stmt) -> IrStmt {
             }
         }
         ast::Stmt::FieldAssign { target, field, value, .. } => {
-            let var = ctx.lookup_var(target).unwrap_or(VarId(0));
             let ir_val = lower_expr(ctx, value);
-            IrStmtKind::FieldAssign { target: var, field: *field, value: ir_val }
+            match ctx.lookup_var(target) {
+                Some(var) => IrStmtKind::FieldAssign { target: var, field: *field, value: ir_val },
+                None => {
+                    // `m.x = v` where `m` is a MODULE alias, not a local: an
+                    // assignment to a cross-module top-let. Resolve through
+                    // the same rule the read path uses (one rule, one place)
+                    // — the old VarId(0) fallback rendered garbage like
+                    // `NUMS.nums = …` (rustc E0425, #505).
+                    let ty = ir_val.ty.clone();
+                    if let Some((var, _)) = crate::lower::expressions::module_top_let_var(
+                        ctx, sym(target), *field, &ty,
+                    ) {
+                        IrStmtKind::Assign { var, value: ir_val }
+                    } else {
+                        IrStmtKind::FieldAssign { target: VarId(0), field: *field, value: ir_val }
+                    }
+                }
+            }
         }
         ast::Stmt::Guard { cond, else_, .. } => {
             let ir_cond = lower_expr(ctx, cond);

@@ -528,13 +528,16 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
             }
         };
         for tl in &program.top_lets {
-            register(&mut ann, tl, ctx.var_table, None);
-        }
-        for module in &program.modules {
-            let mod_name = module.name.as_str();
-            for tl in &module.top_lets {
-                register(&mut ann, tl, ctx.var_table, Some(mod_name));
-            }
+            // Post-IrLinkFlatten, MODULE top-lets live here too — their
+            // module is recoverable only via VarInfo.module_origin. The old
+            // `for module in &program.modules` loop below this point was
+            // DEAD (modules are emptied before render; see the debug_assert
+            // further down), so the ALMIDE_RT_-prefixed storage key was
+            // never registered and a cross-module `var` use classified as
+            // Local → rendered the raw thread_local as a value (#500,
+            // native E0308 / wasm silent zero).
+            let origin = ctx.var_table.get(tl.var).module_origin.as_deref();
+            register(&mut ann, tl, ctx.var_table, origin);
         }
     }
     // Classify function-local `var` bindings:

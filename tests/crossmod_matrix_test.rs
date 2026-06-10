@@ -53,6 +53,26 @@ let N = 7
 fn mk() -> Cfg = Cfg { name: "via-fn" }
 
 effect fn estep(n: Int) -> Int = n + 1
+
+var count = 0
+
+var title = "init"
+
+var nums = [1, 2]
+
+let PAIR = ("a", 1)
+
+fn bump() -> Unit = {
+  count = count + 1
+}
+
+fn retitle(s: String) -> Unit = {
+  title = s
+}
+
+fn add_num(n: Int) -> Unit = {
+  nums = nums + [n]
+}
 "#;
 
 enum Status {
@@ -254,6 +274,101 @@ effect fn main() -> Unit = {
 effect fn main() -> Unit = println(int.to_string(string.len(m.SYSTEM)))
 "#,
             expected: "2",
+            status: Status::Works,
+        },
+        Cell {
+            name: "var_scalar_toplet_read",
+            main: r#"import self as m
+effect fn main() -> Unit = println(int.to_string(m.count))
+"#,
+            expected: "0",
+            status: Status::Works,
+        },
+        Cell {
+            name: "var_scalar_mutate_via_fn",
+            main: r#"import self as m
+effect fn main() -> Unit = {
+  m.bump()
+  m.bump()
+  println(int.to_string(m.count))
+}
+"#,
+            expected: "2",
+            status: Status::Works,
+        },
+        Cell {
+            name: "var_string_toplet_read",
+            main: r#"import self as m
+effect fn main() -> Unit = println(m.title)
+"#,
+            expected: "init",
+            status: Status::Works,
+        },
+        Cell {
+            name: "var_string_reassign_via_fn",
+            main: r#"import self as m
+effect fn main() -> Unit = {
+  m.retitle("x")
+  println(m.title)
+}
+"#,
+            expected: "x",
+            status: Status::Works,
+        },
+        Cell {
+            name: "var_list_inplace_via_fn",
+            main: r#"import self as m
+effect fn main() -> Unit = {
+  m.add_num(3)
+  println(int.to_string(list.len(m.nums)))
+}
+"#,
+            expected: "3",
+            status: Status::Works,
+        },
+        Cell {
+            name: "var_toplet_through_closure",
+            main: r#"import self as m
+effect fn main() -> Unit = {
+  m.bump()
+  let f = () => m.count
+  println(int.to_string(f()))
+}
+"#,
+            expected: "1",
+            status: Status::Works,
+        },
+        Cell {
+            name: "var_direct_crossmod_assign",
+            main: r#"import self as m
+effect fn main() -> Unit = {
+  m.nums = m.nums + [3]
+  println(int.to_string(list.len(m.nums)))
+}
+"#,
+            expected: "3",
+            status: Status::Works,
+        },
+        Cell {
+            name: "spread_from_toplet_base",
+            main: r#"import self as m
+effect fn main() -> Unit = {
+  let c = { ...m.CFG, name: "z" }
+  println(c.name)
+}
+"#,
+            expected: "z",
+            status: Status::Works,
+        },
+        Cell {
+            name: "tuple_toplet_destructure",
+            main: r#"import self as m
+effect fn main() -> Unit = {
+  let (s, n) = m.PAIR
+  println(s + int.to_string(n))
+}
+"#,
+            expected: "a1",
             status: Status::Works,
         },
         Cell {
