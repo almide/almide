@@ -23,7 +23,7 @@
 //! `matrix.mul_<dtype>(a, b)` where `a: (r, k)`, `b: (k, c)`, and
 //! `max(r, k, c) ≤ 8` becomes:
 //!
-//! ```rust
+//! ```text
 //! {
 //!     let __sa = &a; let __sb = &b;
 //!     let mut __sc: Vec<Vec<f32>> = Vec::with_capacity(r);

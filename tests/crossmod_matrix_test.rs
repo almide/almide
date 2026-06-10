@@ -339,6 +339,17 @@ effect fn main() -> Unit = {
             status: Status::Works,
         },
         Cell {
+            name: "var_direct_crossmod_assign",
+            main: r#"import self as m
+effect fn main() -> Unit = {
+  m.nums = m.nums + [3]
+  println(int.to_string(list.len(m.nums)))
+}
+"#,
+            expected: "3",
+            status: Status::KnownBroken("Assign lvalue routing has no module-origin arm for the member spelling — renders `NUMS.nums = …`, rustc E0425; design decision (accept vs reject) pending — see #505"),
+        },
+        Cell {
             name: "spread_from_toplet_base",
             main: r#"import self as m
 effect fn main() -> Unit = {
