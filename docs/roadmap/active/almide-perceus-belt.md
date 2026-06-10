@@ -143,3 +143,17 @@ Lean 4 で Perceus ルールの正しさを機械証明し、lean4-rust-backend 
 - Phase B: `Verified<FnBody>` 型が WASM emitter の入力に必須
 - Phase A: Lean 4 で `perceus_sound` 定理が証明済み
 - A + B: 証明済みロジックが型で強制される = AlmidePerceusBelt 完全体
+
+
+## Post-v0.27.0 proof-coverage gap (2026-06-11)
+
+The belt's Lean theorems certify the IR-level Inc/Dec balance. v0.27.0 made
+the runtime side REAL (free-list push/reuse, the rc==0 double-free sentinel,
+the rc_inc resurrection trap, region resets that clear the free list) — none
+of which is in the proof surface. Candidate next phase: model the allocator
+state machine (alloc/dec/reuse/reset) and prove the sentinel invariants
+("a block on the free list has rc=0", "reuse restores rc=1", "a region reset
+empties the list"), mirroring how ClosureRc.lean grew out of the closure-env
+work. Until then the churn + byte gates are the only guards on the runtime
+half, and emitter-level rc operations (stored-field dups, in-runtime incs)
+remain invisible to the IR verifier by construction.
