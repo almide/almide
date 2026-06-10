@@ -1,0 +1,11 @@
+type R = { name: String, n: Int }
+fn main() -> Unit = {
+  var sink = 0
+  var i = 0
+  while i < 2000000 {
+    let r = R { name: "x" + int.to_string(i % 10), n: i }
+    sink = sink + r.n % 7
+    i = i + 1
+  }
+  println(int.to_string(sink))
+}
