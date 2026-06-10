@@ -451,9 +451,15 @@ fn compile_alloc(emitter: &mut WasmEmitter) {
         w.i32c(0).set(5);                       // steps = 0
         w.block(|w| { w.loop_(|w| {
             w.get(4).eqz().br_if(1);            // cur == null → bump
-            // steps++; steps > heap_ptr >> 3 → cycle → trap
+            // steps++; steps > cap → cycle → trap. The cap is ABSOLUTE:
+            // a heap-derived bound (heap_ptr >> 3) lets a multi-hundred-MB
+            // heap walk tens of millions of steps PER ALLOC before tripping —
+            // a corrupted cycle then spins the host at 100% CPU for hours
+            // instead of trapping (observed killing the dev machine). No sane
+            // free list approaches a million nodes in this runtime.
+            const FREE_LIST_WALK_CAP: i32 = 1 << 20;
             w.get(5).i32c(1).add().tee(5);
-            w.gget(heap_ptr).i32c(3).shr_u();
+            w.i32c(FREE_LIST_WALK_CAP);
             w.gt_u();
             w.if_void(|w| { w.unreachable_(); }, |_| {});
             // cur + hdr + cur.size must lie within the bump frontier,
