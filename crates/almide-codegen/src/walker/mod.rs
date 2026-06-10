@@ -758,9 +758,15 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
 
     let mut parts = Vec::new();
 
-    // Anonymous record struct definitions (only if anon_records is populated)
+    // Anonymous record struct definitions (only if anon_records is populated).
+    // SORTED iteration: anon_records is a HashMap, and emitting in its raw
+    // iteration order made the generated Rust SOURCE nondeterministic
+    // run-to-run (three runs, three different bytes) — semantically neutral
+    // for rustc but fatal for reproducible builds and any byte-diff gate.
     if !ctx.ann.anon_records.is_empty() {
-        for (field_names, struct_name) in &ctx.ann.anon_records {
+        let mut sorted_anon: Vec<(&Vec<String>, &String)> = ctx.ann.anon_records.iter().collect();
+        sorted_anon.sort_by(|a, b| a.1.cmp(b.1));
+        for (field_names, struct_name) in sorted_anon {
             // A closure field can't be Debug/PartialEq, so such a struct derives
             // Clone only (the `has_fn_fields` struct_decl) and drops the
             // `Debug + PartialEq` generic bounds — derive(Clone) re-adds `T: Clone`
