@@ -211,3 +211,24 @@ currently leak per iteration, bounded), committed churn fixture family
 (per-structure 1M+ gates), Stage D PIN (fs scratch by-construction) + C-042
 unlock, flag-ON full bar ×3 consecutive, then default flip + C-041 revision +
 new reclamation contract + perf suite (Stage G).
+
+
+## Stage C finding (2026-06-11): the b8bbdfad M2 cannot be cherry-picked
+
+Re-landing flatten_exit_tail_blocks + the pass_tco managed-param protocol from
+b8bbdfad on top of the Round-3 accounting produced an OOB inside `__alloc`
+(free-list `next` poisoned) on the NEW acceptance shape
+`spec/churn/tco_loop_churn.almd` (loop-VARIANT TCO arg defeats LICM; the old
+probes were loop-invariant and silently hoisted). Pre-M2 the same shape is
+green (params leak per iteration — bounded, safe). Root cause class: the
+b8bbdfad pass_perceus diff was 93 lines of which flatten is ~80 — the
+remaining Dec-placement rules around loop exits were co-designed with the OLD
+alias accounting and conflict with Round-3's (alias-Inc hoisting, mechanism
+#6, scope-end rules). Partial ports of M2 are structurally unsound.
+
+DECISION: Stage C = a REDESIGN of per-iteration TCO reclamation against the
+Round-3 rules, gated on `scripts/check-frees-churn.sh` (tco_loop_churn is the
+acceptance test). Parked diff: /tmp/m2park (pass_tco.rs, pass_perceus.rs with
+the flatten port). Not a blocker for default-ON: TCO loops leak per iteration
+(the pre-existing behavior), correctness is unaffected, and non-TCO churn is
+already O(1) (record_churn).
