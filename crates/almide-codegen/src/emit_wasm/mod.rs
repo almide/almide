@@ -1660,12 +1660,20 @@ pub(crate) fn emit(program: &IrProgram) -> Vec<u8> {
     let bytes = assemble(&mut emitter);
 
     // Phase 4: Validate — mechanical guarantee of structural correctness.
-    #[cfg(debug_assertions)]
-    {
-        if let Err(e) = wasmparser::validate(&bytes) {
-            eprintln!("[WASM Engine] validation FAILED: {e}");
-            eprintln!("[WASM Engine] This is a compiler bug. The emitted WASM is structurally invalid.");
-        }
+    // ALWAYS-ON and FATAL (release-parity, completeness §10): this used to be
+    // debug-only and print-only, and an invalid module (a Unit tail var
+    // pushing a phantom value — caught by the §2 matrix gate) shipped through
+    // it for as long as the shape existed, runnable only because wasm-opt
+    // happened to repair it on machines that have binaryen installed. The
+    // wasmtime-facing artifact must never depend on an optional external
+    // sanitizer; validation costs milliseconds at these module sizes.
+    if let Err(e) = wasmparser::validate(&bytes) {
+        eprintln!("error: [COMPILER BUG] emitted WASM failed structural validation");
+        eprintln!("  {e}");
+        eprintln!("  The module would be rejected by any spec-compliant runtime. This is a");
+        eprintln!("  compiler bug, not an error in your program.");
+        eprintln!("  Please report this at https://github.com/almide/almide/issues");
+        std::process::exit(1);
     }
 
     // Phase 5: RC balance verification — mathematical double-free prevention.
