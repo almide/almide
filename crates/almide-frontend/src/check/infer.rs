@@ -227,8 +227,29 @@ impl Checker {
                             // fresh vars so the declared field types carry the
                             // SAME vars as the result type (so e.g. `List[T]`
                             // unifies across the field and the binding's ascription).
+                            //
+                            // #433: the constructed type's NAME must be the
+                            // canonical qualified `mod.Type`, like the variant
+                            // branch above and annotation resolution. This was
+                            // the one producer still leaking bare cross-module
+                            // names — a module's record top-let carried bare
+                            // `Cfg` into IrTopLet.ty, rendering an unmangled
+                            // static type on native (E0425) and missing the
+                            // qualified record_fields key on wasm (trap).
+                            let canon = match n.rsplit_once('.') {
+                                // `alias.Cfg { … }`: resolve the import alias to
+                                // the real module, keep qualified if registered.
+                                Some((m, base)) => {
+                                    let rm = self.env.import_table.resolve(m).map(|s| s.to_string()).unwrap_or_else(|| m.to_string());
+                                    let q = format!("{}.{}", rm, base);
+                                    if self.env.types.contains_key(&sym(&q)) { sym(&q) } else { sym(n) }
+                                }
+                                None => crate::canonicalize::resolve::canonical_user_type_sym(
+                                    n, &self.env.types, self.current_module_prefix.as_deref(),
+                                ).unwrap_or_else(|| sym(n)),
+                            };
                             let generic_args = self.instantiate_type_generics(n);
-                            let named = Ty::Named(sym(n), generic_args);
+                            let named = Ty::Named(canon, generic_args);
                             let decl = match self.env.resolve_named(&named) {
                                 Ty::Record { fields } | Ty::OpenRecord { fields } => fields,
                                 _ => Vec::new(),
