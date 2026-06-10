@@ -19,6 +19,13 @@ impl Checker {
     }
 
     fn infer_expr_inner(&mut self, expr: &mut ast::Expr) -> Ty {
+        // #488: a paren call on a record type or record-payload constructor is
+        // either NORMALIZED into the brace Record pipeline (all-named args) or
+        // rejected with E021 — it must never fall through the generic Call
+        // path, which has no field identity and silently dropped named args.
+        if matches!(&expr.kind, ExprKind::Call { .. }) && self.normalize_ctor_paren_call(expr) {
+            return self.infer_expr_inner(expr);
+        }
         match &mut expr.kind {
             ExprKind::Int { .. } => Ty::Int,
             ExprKind::Float { .. } => Ty::Float,
@@ -99,7 +106,7 @@ impl Checker {
                 if let Some(Ty::ConstParam { ty, .. }) = self.env.types.get(&sym(name)).cloned() {
                     return *ty;
                 }
-                if let Some((type_name, case)) = self.env.lookup_ctor(&sym(name)) {
+                if let Some((type_name, case)) = self.env.lookup_ctor_in(&sym(name), self.current_module_prefix.as_deref()) {
                     self.report_ambiguous_ctor(name);
                     match &case.payload {
                         VariantPayload::Tuple(tys) if !tys.is_empty() => {
@@ -195,8 +202,19 @@ impl Checker {
                     // and a bare NAMED RECORD type (`type WithList = { items:
                     // List[Int] }`, resolved from `env.types`). Both reduce to a
                     // `(field, declared_ty)` list with generics already substituted.
-                    let (result_ty, decl_fields): (Ty, Vec<(Sym, Ty)>) =
+                    let (result_ty, decl_fields, closed, defaults): (Ty, Vec<(Sym, Ty)>, bool, std::collections::HashSet<Sym>) =
                         if let Some((type_name, case)) = self.env.lookup_ctor(&ctor_sym) {
+                            // Brace construction of a NON-record case is a
+                            // category error (`Wrap { x: 1 }` on a tuple case):
+                            // reject here, or rustc/wasm explode downstream.
+                            if !matches!(case.payload, crate::types::VariantPayload::Record(_)) {
+                                self.emit(super::err(
+                                    format!("case '{}' does not take named fields", n),
+                                    format!("'{}' is a tuple or unit case — construct it positionally: `{}(...)`", n, n),
+                                    format!("record literal {}", n),
+                                ).with_code("E021"));
+                                return Ty::Unknown;
+                            }
                             let generic_args = self.instantiate_type_generics(type_name.as_str());
                             let subst: std::collections::HashMap<Sym, Ty> = if !generic_args.is_empty() {
                                 self.env.types.get(&type_name).cloned().map(|ty_def| {
@@ -211,20 +229,62 @@ impl Checker {
                                     fs.iter().map(|(fname, fty)| (*fname, super::calls::subst_ty(fty, &subst))).collect(),
                                 _ => Vec::new(),
                             };
-                            (Ty::Named(type_name, generic_args), decl)
+                            // #433: a qualified record-variant `mod.Ctor { … }` takes
+                            // the namespaced `mod.Type` so it mangles to the right enum.
+                            let result_named = match n.as_str().rsplit_once('.') {
+                                Some((m, _)) => {
+                                    let rm = self.env.import_table.resolve(m).map(|s| s.to_string()).unwrap_or_else(|| m.to_string());
+                                    let q = format!("{}.{}", rm, type_name.as_str());
+                                    if self.env.types.contains_key(&sym(&q)) { sym(&q) } else { type_name }
+                                }
+                                None => type_name,
+                            };
+                            let case_defaults = self.env.ctor_field_defaults.get(&ctor_sym).cloned().unwrap_or_default();
+                            (Ty::Named(result_named, generic_args), decl, true, case_defaults)
                         } else {
                             // Named record type: instantiate its generics with
                             // fresh vars so the declared field types carry the
                             // SAME vars as the result type (so e.g. `List[T]`
                             // unifies across the field and the binding's ascription).
-                            let generic_args = self.instantiate_type_generics(n);
-                            let named = Ty::Named(sym(n), generic_args);
-                            let decl = match self.env.resolve_named(&named) {
-                                Ty::Record { fields } | Ty::OpenRecord { fields } => fields,
-                                _ => Vec::new(),
+                            //
+                            // #433: the constructed type's NAME must be the
+                            // canonical qualified `mod.Type`, like the variant
+                            // branch above and annotation resolution. This was
+                            // the one producer still leaking bare cross-module
+                            // names — a module's record top-let carried bare
+                            // `Cfg` into IrTopLet.ty, rendering an unmangled
+                            // static type on native (E0425) and missing the
+                            // qualified record_fields key on wasm (trap).
+                            let canon = match n.rsplit_once('.') {
+                                // `alias.Cfg { … }`: resolve the import alias to
+                                // the real module, keep qualified if registered.
+                                Some((m, base)) => {
+                                    let rm = self.env.import_table.resolve(m).map(|s| s.to_string()).unwrap_or_else(|| m.to_string());
+                                    let q = format!("{}.{}", rm, base);
+                                    if self.env.types.contains_key(&sym(&q)) { sym(&q) } else { sym(n) }
+                                }
+                                None => crate::canonicalize::resolve::canonical_user_type_sym(
+                                    n, &self.env.types, self.current_module_prefix.as_deref(),
+                                ).unwrap_or_else(|| sym(n)),
                             };
-                            (named, decl)
+                            let generic_args = self.instantiate_type_generics(n);
+                            let named = Ty::Named(canon, generic_args);
+                            let (decl, closed) = match self.env.resolve_named(&named) {
+                                Ty::Record { fields } => (fields, true),
+                                Ty::OpenRecord { fields } => (fields, false),
+                                _ => (Vec::new(), false),
+                            };
+                            let defaults = self.env.record_field_defaults.get(&canon)
+                                .or_else(|| self.env.record_field_defaults.get(&sym(n)))
+                                .cloned().unwrap_or_default();
+                            (named, decl, closed, defaults)
                         };
+                    // #488: field-set validation — duplicates always; unknown
+                    // and missing-without-default for closed declarations.
+                    if closed || !decl_fields.is_empty() {
+                        let given = fields.clone();
+                        self.validate_record_fields(n.as_str(), &given, &decl_fields, closed, &defaults);
+                    }
                     for f in fields.iter() {
                         if let Some((_, ety)) = decl_fields.iter().find(|(fname, _)| fname.as_str() == f.name.as_str()) {
                             if let Some(vty) = self.type_map.get(&f.value.id).cloned() {
@@ -294,13 +354,17 @@ impl Checker {
                         if self.env.types.contains_key(&sym(&qualified)) {
                             self.type_map.insert(object.id, Ty::Unit);
                             let generic_args = self.instantiate_type_generics(type_name.as_str());
+                            // #433: return the qualified `mod.Type` (it exists and was
+                            // just confirmed) so the binding mangles to the namespaced
+                            // struct, not the ambiguous bare name.
+                            let qual_ty = sym(&qualified);
                             return match &case.payload {
-                                VariantPayload::Unit => Ty::Named(type_name, generic_args),
+                                VariantPayload::Unit => Ty::Named(qual_ty, generic_args),
                                 VariantPayload::Tuple(param_tys) => Ty::Fn {
                                     params: param_tys.clone(),
-                                    ret: Box::new(Ty::Named(type_name, generic_args)),
+                                    ret: Box::new(Ty::Named(qual_ty, generic_args)),
                                 },
-                                VariantPayload::Record(_) => Ty::Named(type_name, generic_args),
+                                VariantPayload::Record(_) => Ty::Named(qual_ty, generic_args),
                             };
                         }
                     }
@@ -553,11 +617,50 @@ impl Checker {
                 self.infer_expr(cond);
                 let then_ty = self.infer_expr(then);
                 let else_ty = self.infer_expr(else_);
+                // In effect fn bodies, auto-unwrap Result[T, E] → T per
+                // branch before unifying them, mirroring the match-arm rule
+                // (see ExprKind::Match above). Without this, an `if` whose
+                // one branch is a `match` on an effect-fn call (auto-unwrapped
+                // to T) and whose other branch is an explicit `ok(...)`
+                // (stays Result[T, E]) fails E001 — the asymmetry is a
+                // checker artefact, not a real type error: codegen's
+                // wrap_tail_in_ok normalizes both to Result form. Scoped to
+                // `auto_unwrap`, so pure-fn / test if/else are untouched.
+                // Auto-unwrap Result[T, E] → T on BOTH branches for the
+                // cross-branch COMPARISON only, then return the THEN branch's
+                // real (non-unwrapped) type as the if-expression's type.
+                //
+                // Two requirements pull in opposite directions and this split
+                // satisfies both:
+                //   • M1 (E001): an `if` whose one branch is a `match` on an
+                //     effect-fn call (auto-unwrapped to `T` inside the match)
+                //     and whose other branch is an explicit `ok(...)`
+                //     (`Result[T, E]`) must not error. Comparing both at the
+                //     unwrapped `T` level removes the spurious asymmetry.
+                //   • No-regress (`validate_positive`: `if .. then ok(n) else
+                //     err(..)`): the if's TYPE must stay `Result[T, E]` so the
+                //     WASM emitter sees the real value shape (the branches are
+                //     genuine Result constructors). Returning the un-unwrapped
+                //     `then_ty` preserves this; codegen's wrap_tail_in_ok then
+                //     normalizes every branch to Result form regardless.
+                // Scoped to `auto_unwrap`, so pure-fn / test if/else are
+                // untouched (they keep the strict same-type rule).
+                let cmp_unwrap = |t: &Ty, uf: &_| -> Ty {
+                    match resolve_ty(t, uf) {
+                        Ty::Applied(TypeConstructorId::Result, ref args) if args.len() == 2 => args[0].clone(),
+                        _ => t.clone(),
+                    }
+                };
+                let (cmp_then, cmp_else) = if self.env.auto_unwrap {
+                    (cmp_unwrap(&then_ty, &self.uf), cmp_unwrap(&else_ty, &self.uf))
+                } else {
+                    (then_ty.clone(), else_ty.clone())
+                };
                 // Specialize the Unit-leak `try:` snippet: if an arm is a
                 // bare assignment `x = ...` (returns Unit), we want to cite
                 // the actual variable name in the suggested rewrite.
                 let hint = if_arm_fix_hint(then, else_);
-                self.constrain_with_hint(then_ty.clone(), else_ty, "if branches", hint);
+                self.constrain_with_hint(cmp_then, cmp_else, "if branches", hint);
                 then_ty
             }
 
@@ -717,6 +820,13 @@ impl Checker {
                 self.env.push_scope();
                 // Lambda has its own return context — don't leak outer function's current_ret
                 let saved_ret = self.env.current_ret.take();
+                // A lambda is its own function: the enclosing effect fn's
+                // auto-`?` cannot propagate out of a closure body (the closure
+                // may escape), so an effect call inside a lambda yields the
+                // EXPLICIT Result — auto_unwrap is off, matching the lowering,
+                // which never inserts `?` inside Lambda bodies (#489).
+                let saved_auto_unwrap = self.env.auto_unwrap;
+                self.env.auto_unwrap = false;
                 self.env.lambda_depth += 1;
                 let param_tys: Vec<Ty> = params.iter().map(|p| {
                     let ty = p.ty.as_ref().map(|te| self.resolve_type_expr(te)).unwrap_or_else(|| self.fresh_var());
@@ -726,6 +836,7 @@ impl Checker {
                 }).collect();
                 let ret_ty = self.infer_expr(body);
                 self.env.lambda_depth -= 1;
+                self.env.auto_unwrap = saved_auto_unwrap;
                 self.env.current_ret = saved_ret;
                 self.env.pop_scope();
                 Ty::Fn { params: param_tys, ret: Box::new(ret_ty) }
@@ -1098,6 +1209,116 @@ impl Checker {
         });
     }
 
+    /// #488: classify a `TypeName(...)` call. All-named args on a record
+    /// type or record-payload variant case rewrite the node in place to the
+    /// brace `ExprKind::Record` form (one construction pipeline, both
+    /// spellings); positional args on those, or named args on a tuple
+    /// constructor, are E021. Returns true when the node was rewritten.
+    fn normalize_ctor_paren_call(&mut self, expr: &mut ast::Expr) -> bool {
+        let ExprKind::Call { callee, args, named_args, .. } = &expr.kind else { return false };
+        let ExprKind::TypeName { name } = &callee.kind else { return false };
+        let n = *name;
+        let bare = n.as_str().rsplit_once('.').map(|(_, b)| sym(b)).unwrap_or(n);
+        // Record-payload variant case? (ctor table is keyed by bare name)
+        let ctor_payload_record = self.env.lookup_ctor_in(&bare, self.current_module_prefix.as_deref())
+            .map(|(_, case)| matches!(case.payload, crate::types::VariantPayload::Record(_)));
+        // Record TYPE? (resolve through the same canonicalization annotations use)
+        let is_record_type = ctor_payload_record.is_none() && {
+            let key = match n.as_str().rsplit_once('.') {
+                Some(_) => sym(n.as_str()),
+                None => crate::canonicalize::resolve::canonical_user_type_sym(
+                    n.as_str(), &self.env.types, self.current_module_prefix.as_deref(),
+                ).unwrap_or(n),
+            };
+            matches!(self.env.resolve_named(&Ty::Named(key, vec![])), Ty::Record { .. } | Ty::OpenRecord { .. })
+        };
+        if ctor_payload_record == Some(true) || is_record_type {
+            if !args.is_empty() {
+                self.emit(super::err(
+                    format!("'{}' takes named fields, not positional arguments", n),
+                    format!("Name every field: `{}(field: value, ...)` or `{} {{ field: value, ... }}`", n, n),
+                    format!("constructor {}(...)", n),
+                ).with_code("E021"));
+                return false;
+            }
+            // Rewrite to the brace form in place; re-inference routes it
+            // through the Record arm (defaults, field validation, #433
+            // qualification, both backends' Record emission — for free).
+            let ExprKind::Call { named_args, .. } = std::mem::replace(&mut expr.kind, ExprKind::Unit) else { unreachable!() };
+            let fields = named_args.into_iter()
+                .map(|(fname, value)| ast::FieldInit { name: fname, value })
+                .collect();
+            expr.kind = ExprKind::Record { name: Some(n), fields };
+            return true;
+        }
+        if ctor_payload_record == Some(false) && !named_args.is_empty() {
+            self.emit(super::err(
+                format!("constructor '{}' takes positional arguments, not named ones", n),
+                format!("Drop the names: `{}(value, ...)`", n),
+                format!("constructor {}(...)", n),
+            ).with_code("E021"));
+        }
+        false
+    }
+
+    /// #488: validate a record construction's field set against the declared
+    /// fields: duplicates always; unknown + missing-without-default when the
+    /// declaration is CLOSED (a plain record or a record-payload case).
+    fn validate_record_fields(
+        &mut self,
+        type_label: &str,
+        given: &[ast::FieldInit],
+        decl_fields: &[(Sym, Ty)],
+        closed: bool,
+        defaults: &std::collections::HashSet<Sym>,
+    ) {
+        let mut seen: std::collections::HashSet<Sym> = std::collections::HashSet::new();
+        for f in given {
+            if !seen.insert(f.name) {
+                self.emit(super::err(
+                    format!("field '{}' given more than once in '{}' construction", f.name, type_label),
+                    "Remove the duplicate field",
+                    format!("record literal {}", type_label),
+                ).with_code("E021"));
+            }
+        }
+        if !closed { return; }
+        let available = || decl_fields.iter().map(|(d, _)| d.as_str()).collect::<Vec<_>>().join(", ");
+        for f in given {
+            if !decl_fields.iter().any(|(d, _)| *d == f.name) {
+                self.emit(super::err(
+                    format!("'{}' has no field '{}'", type_label, f.name),
+                    format!("Available fields: {}", available()),
+                    format!("record literal {}", type_label),
+                ).with_code("E021"));
+            }
+        }
+        for (d, _) in decl_fields {
+            if !given.iter().any(|f| f.name == *d) && !defaults.contains(d) {
+                self.emit(super::err(
+                    format!("missing field '{}' in '{}' construction", d, type_label),
+                    format!("Provide it: `{} {{ {}: ..., ... }}` (fields without defaults are required)", type_label, d),
+                    format!("record literal {}", type_label),
+                ).with_code("E021"));
+            }
+        }
+    }
+
+    /// The effect-fn auto-unwrap rule, shared by every binding-shaped
+    /// position (let / var / assign): a Result[T, E]-typed RHS unwraps to T
+    /// — the lowering inserts the matching `?` — unless the target itself
+    /// keeps the Result (declared Result annotation, Result-typed var, or a
+    /// usage-skip like `match x { ok/err }`). One function so the positions
+    /// can never diverge again (#485).
+    fn effect_unwrap_rhs(&self, t: Ty, target_keeps_result: bool) -> Ty {
+        if self.env.auto_unwrap && !target_keeps_result {
+            match t {
+                Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args.into_iter().next().unwrap(),
+                other => other,
+            }
+        } else { t }
+    }
+
     pub(crate) fn check_stmt(&mut self, stmt: &mut ast::Stmt) {
         match stmt {
             ast::Stmt::Let { name, ty, value, span } => {
@@ -1112,12 +1333,7 @@ impl Checker {
                     // unless this binding is later used as a `match x { ok(_) =>
                     // ..., err(_) => ... }` subject — in which case the user
                     // wants to inspect the Result directly.
-                    if self.env.auto_unwrap && !self.env.skip_auto_unwrap_for.contains(&sym(name)) {
-                        match t {
-                            Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args.into_iter().next().unwrap(),
-                            other => other,
-                        }
-                    } else { t }
+                    self.effect_unwrap_rhs(t, self.env.skip_auto_unwrap_for.contains(&sym(name)))
                 };
                 if let Some(s) = span {
                     self.env.var_decl_locs.insert(sym(name), (s.line, s.col));
@@ -1133,12 +1349,9 @@ impl Checker {
                     declared
                 } else {
                     let t = resolve_ty(&val_ty, &self.uf);
-                    if self.env.auto_unwrap {
-                        match t {
-                            Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args.into_iter().next().unwrap(),
-                            other => other,
-                        }
-                    } else { t }
+                    // Same rule as Let, including the usage-skip: a `var r =
+                    // effectCall()` later matched on ok/err keeps the Result.
+                    self.effect_unwrap_rhs(t, self.env.skip_auto_unwrap_for.contains(&sym(name)))
                 };
                 if let Some(s) = span {
                     self.env.var_decl_locs.insert(sym(name), (s.line, s.col));
@@ -1219,7 +1432,15 @@ impl Checker {
                         // element to `Int` (it is the source of truth, exactly as
                         // a typed `let` binding is). Without this, an empty literal
                         // assigned to a typed var stays undecidable (E018).
-                        self.constrain(var_ty.clone(), val_ty.clone(), format!("assign {}", name));
+                        //
+                        // #485: apply the same effect-fn auto-unwrap rule as
+                        // let/var first — `x = step(x)` with x: Int unwraps the
+                        // lifted Result[Int, E]; a Result-typed target keeps it.
+                        // Only substitute when the unwrap actually fires, so an
+                        // unresolved TypeVar RHS keeps flowing through inference.
+                        let unwrapped = self.effect_unwrap_rhs(val_resolved.clone(), var_resolved.is_result());
+                        let constrain_val = if unwrapped != val_resolved { unwrapped } else { val_ty.clone() };
+                        self.constrain(var_ty.clone(), constrain_val, format!("assign {}", name));
                     }
                 }
                 if self.env.lookup_var(name).is_some() && !self.env.mutable_vars.contains(&sym(name)) {
@@ -1298,6 +1519,18 @@ impl Checker {
                         .find(|c| c.name == bare_name)
                         .map(|c| match &c.payload {
                             VariantPayload::Tuple(tys) => tys.clone(),
+                            // #488: a paren pattern on a RECORD-payload case
+                            // (`SetEmotion(_)`) bound nothing on native (rustc
+                            // E0164) while wasm accepted it — reject with the
+                            // brace spelling, both targets agree at check time.
+                            VariantPayload::Record(_) => {
+                                self.emit(super::err(
+                                    format!("case '{}' has named fields — use a record pattern", name),
+                                    format!("Match it as `{} {{ .. }}` (or bind fields: `{} {{ field }}`)", name, name),
+                                    format!("pattern {}(...)", name),
+                                ).with_code("E021"));
+                                vec![]
+                            }
                             _ => vec![],
                         })
                         .unwrap_or_default(),

@@ -1,0 +1,18 @@
+
+// Cross-module top-lets WITHOUT annotations: the #486 / record-literal
+// canonicalization shapes. Annotations would mask both bugs (annotated
+// types resolve through the qualified path), so these stay bare.
+type Cfg = { name: String }
+
+let SYSTEM = "hi"
+
+let WORDS = ["a", "b"]
+
+let CFG = Cfg { name: "c" }
+
+let CFGS = [
+  Cfg { name: "a" },
+  Cfg { name: "b" }
+]
+
+fn mk() -> Cfg = Cfg { name: "via-fn" }

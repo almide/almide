@@ -249,7 +249,7 @@ evidence  = [
 [[contract]]
 id        = "C-017"
 title     = "Empty-pattern count / last_index_of follow native codepoint/byte semantics"
-statement = "`count` with the empty pattern returns the CODEPOINT count + 1 (`s.matches(\"\").count() == s.chars().count() + 1`); `last_index_of` with the empty pattern returns the BYTE length (`s.rfind(\"\") == Some(s.len())`). Both are byte-identical native == wasm, including multibyte subjects where codepoint-count and byte-length differ; wasm no longer short-circuits the empty pattern to 0."
+statement = "`count` with the empty pattern returns the CODEPOINT count + 1 (`s.matches(\"\").count() == s.chars().count() + 1`); `last_index_of` with the empty pattern returns the CODEPOINT count (the byte offset `s.rfind(\"\") == Some(s.len())` converted to the codepoint index, per the C-065 one-unit rule). Both are byte-identical native == wasm, including multibyte subjects where codepoint-count and byte-length differ; wasm no longer short-circuits the empty pattern to 0."
 since     = "0.24.0"
 status    = "active"
 evidence  = [
@@ -764,4 +764,58 @@ since     = "0.26.7"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/value_repr.almd", class = "fixture" },
+]
+
+# ── A mut Map PARAMETER MUTATED IN PLACE BUILDS + PERSISTS, IDENTICAL ─
+[[contract]]
+id        = "C-061"
+title     = "A mut Map parameter mutated in place builds on both targets and the mutation persists, byte-identical"
+statement = "A `mut Map` function parameter mutated in place via `map.insert` is promoted to a mutable borrow (RefMut) — exactly like a `mut List` + `list.push` — so it BUILDS on native (previously `E0596`: `Map`/`Set` were not recognized as heap types in borrow inference, so the param was forced to an immutable owned binding and the in-place mutator's `&mut m` had no `mut` binding to borrow) and the mutation PERSISTS to the caller, byte-identically wasm. A read-then-write through the same `mut` param (`map.get_or` then `map.insert`) works because RefMut covers both reads and writes. This closes the `list.push` (compiled) vs `map.insert` (E0596) asymmetry — a build-success divergence where wasm built but native did not."
+since     = "0.26.9"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/mut_map_param.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-062"
+title     = "The RawPtr / linear-memory bridge moves bytes byte-identically on both targets"
+statement = "`bytes.as_ptr` / `as_mut_ptr` return a RawPtr to a Bytes data region; `from_raw_ptr(ptr, len)` copies `len` bytes from a raw offset into a fresh Bytes; `copy_to_ptr(b, ptr, cap)` copies `min(len(b), cap)` bytes through the pointer and returns the count. A RawPtr is a real `*mut u8` on native and an i32 linear-memory offset on wasm — the pointer VALUE differs per target by nature and is never observed; only the bytes moved through it are, so stdout is byte-identical. These four intrinsics used to ICE in WASM emit (`[ICE] … no WASM runtime fn`); v0.26.12 turned that into a clean build error, and v0.26.15 implements the wasm bridge (offset arithmetic + `memory.copy`). `as_mut_ptr` is `@mutating` so its Bytes argument is a mutable borrow on native (the buffer must be RefMut to hand out a writable pointer)."
+since     = "0.26.15"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/bytes_rawptr.almd", class = "fixture" },
+]
+
+# ── PARSE A glTF/JSON DOCUMENT + WALK ITS ARRAYS, BYTE-IDENTICAL ─
+[[contract]]
+id        = "C-063"
+title     = "Parsing a heterogeneous-nested glTF/JSON document and walking its arrays by element is byte-identical on both targets"
+statement = "`json.parse` of a glTF-style document (heterogeneous nested objects — accessors with float `min`/`max` arrays and `type` strings, materials with nested extensions, meshes with primitives), followed by `json.get_array` + `list.get_or` element access across `meshes`, every `accessor`'s nested `min`/`max` arrays, and `bufferViews`, produces byte-identical stdout native ⇄ wasm. Regression lock for #470, reported on a real ~10 MB VRM as a wasm-only element-access trap (`memory access out of bounds`) where `list.len` of a `get_array` result was correct but its backing disagreed; the reported flow no longer reproduces on 0.26.18+ (the host-buffer / RawPtr bridge it relied on was reworked in v0.26.15, C-062), and this fixture keeps the parse + array-element walk locked."
+since     = "0.26.19"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/json_gltf_walk.almd", class = "fixture" },
+]
+
+# ── EFFECT-FN AUTO-UNWRAP IS BINDING-POSITION-UNIFORM, BYTE-IDENTICAL ─
+[[contract]]
+id        = "C-064"
+title     = "The effect-fn Result auto-unwrap rule is identical across binding positions and type-directed, byte-identical on both targets"
+statement = "In an effect fn, a Result[T, E]-typed RHS auto-unwraps (auto-`?`) in every binding-shaped position — `let`, `var`, plain reassignment `x = effectCall()` (#485), and index assignment — unless the TARGET keeps the Result: an explicit `Result[..]` annotation (`let r: Result[Int, String] = step()`) or a Result-typed assign target stores the Result intact, while an UN-annotated bind of a `-> Result[..]`-declared effect fn still auto-unwraps. The full matrix prints byte-identical stdout and exits 0 on native ⇄ wasm."
+since     = "0.26.20"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/effect_assign_unwrap.almd", class = "fixture" },
+]
+
+# ── STRING POSITION API SPEAKS ONE UNIT: CODEPOINTS ──────────────────
+[[contract]]
+id        = "C-065"
+title     = "The string position API is codepoint-indexed end-to-end on both targets"
+statement = "Every position/count in the `string` module speaks CODEPOINTS (#419): `len` returns the codepoint count, `index_of`/`last_index_of` return codepoint indices (the byte offsets of `str::find`/`rfind` converted via prefix codepoint count), `get` takes a codepoint index (negative or past-the-end -> none), and `slice` takes codepoint start/end clamped to [0, count] with the `end = i64::MAX` default degrading to the end of the string. Composition is therefore closed: `string.take(s, string.index_of(s, sub) ?? 0)` splits at the right place on multibyte input. Byte-identical native == wasm across ASCII, CJK, and mixed subjects."
+since     = "0.26.20"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/string_codepoint_index.almd", class = "fixture" },
 ]

@@ -1,0 +1,30 @@
+# Dependabot keeps dependencies current by opening PRs automatically.
+# Updates are intentionally ungrouped: one PR per dependency, so each lands
+# as its own reviewable change. See kpi/README.md for the velocity rationale.
+version: 2
+updates:
+  # Rust crates across the Cargo workspace
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "chore(deps)"
+    labels:
+      - "dependencies"
+      - "rust"
+
+  # GitHub Actions used by the CI / release workflows
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(ci)"
+    labels:
+      - "dependencies"
+      - "ci"

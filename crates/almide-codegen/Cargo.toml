@@ -10,15 +10,15 @@ almide-base = { path = "../almide-base" }
 almide-lang = { path = "../almide-lang" }
 almide-ir = { path = "../almide-ir" }
 almide-egg-lab = { path = "../almide-egg-lab" }
-egg = "0.10"
-wasm-encoder = "0.225"
-wasmparser = "0.225"
-toml = "0.8"
+egg = "0.11"
+wasm-encoder = "0.244"
+wasmparser = "0.244"
+toml = "1.1"
 serde_json = "1"
 
 [dev-dependencies]
 proptest = "1"
 
 [build-dependencies]
-toml = "0.8"
+toml = "1.1"
 serde = { version = "1", features = ["derive"] }

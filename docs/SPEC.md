@@ -516,6 +516,12 @@ connect(host: "localhost", secure: true)
 
 Named arguments after positional ones are allowed. Positional arguments after named ones are not.
 
+A call of a **record type** (or record-payload variant case) with all-named
+arguments is record construction: `Cfg(name: "x")` is normalized to
+`Cfg { name: "x" }` and validated identically (unknown / duplicate /
+missing-without-default fields are E021). Positional arguments on a record,
+and named arguments on a tuple constructor, are rejected (E021).
+
 ### 8.4 Predicate Functions
 
 Functions ending in `?` must return `Bool`:

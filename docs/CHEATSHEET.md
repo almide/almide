@@ -205,6 +205,9 @@ xs |> filter(_, (x) => x > 0)      // _ = placeholder for piped value
 ```
 { name: "alice", age: 30 }
 { ...base, name: "bob" }
+User { name: "alice" }     // named record construction (brace form)
+User(name: "alice")        // same thing — paren-NAMED is normalized to the brace form
+User("alice")              // WRONG: records take named fields, not positional (E021)
 ```
 
 ### List

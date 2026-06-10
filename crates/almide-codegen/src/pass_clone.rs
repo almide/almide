@@ -162,13 +162,16 @@ fn split_clone_ids(
         let name = almide_base::intern::resolve(info.name);
         if top_let_vars.contains(&id) || matches!(&info.ty, Ty::Fn { .. } | Ty::TypeVar(_))
             || name.starts_with("__cap_") || name.starts_with("__licm")
-            || name.starts_with("ALMIDE_RT_")
+            || info.module_origin.is_some()
         {
-            // `ALMIDE_RT_<MOD>_<NAME>` — synthetic cross-module Var whose
-            // target is a `LazyLock<T>`. `*lazy` attempts to move out of
-            // the deref; any consuming use must `.clone()` first. The
-            // fresh VarId misses the `top_let_vars` set, so match by
-            // name prefix.
+            // `module_origin` marks a module top-let Var (decl side set in
+            // lower/mod.rs, use side in lower/expressions.rs) whose Rust
+            // storage is a `static LazyLock<T>` rendered by the walker as
+            // `(*ALMIDE_RT_<MOD>_<NAME>)`. A static can never be moved
+            // from, so every consuming use must clone — the same `always`
+            // class as same-file `top_let_vars`. The use site allocates a
+            // fresh VarId with a clean name, so neither the set lookup nor
+            // any name prefix can catch it.
             always.insert(id);
         } else {
             let syn = syntactic.get(&id).copied().unwrap_or(0);

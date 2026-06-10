@@ -76,6 +76,35 @@ impl NanoPass for ResultPropagationPass {
             }
         }
 
+        // An `@intrinsic effect fn` (e.g. `http.serve`) compiles to a runtime
+        // fn that returns `Result<T, String>` at the boundary, even though its
+        // declared Almide ret is `T` and its IR call ty stays `T`. A bare tail
+        // call to one — `effect fn main() = { http.serve(...) }` — is already a
+        // `RuntimeCall` by this pass, so it is NOT in `lifted_fns` (those are the
+        // user fns whose signatures we lifted above) and `wrap_tail_in_ok` would
+        // wrongly `Ok(...)`-wrap it, double-wrapping the Result (#434, E0308).
+        // Collect their runtime symbols so the tail-wrap can recognize them.
+        let intrinsic_effect_syms: HashSet<String> = if wrap_non_result {
+            use almide_lang::ast::{AttrValue, Decl};
+            let mut set = HashSet::new();
+            for &mod_name in almide_lang::stdlib_info::BUNDLED_MODULES {
+                let Some(source) = almide_lang::stdlib_info::bundled_source(mod_name) else { continue };
+                let Some(parsed) = almide_lang::parse_cached(source) else { continue };
+                for decl in &parsed.decls {
+                    let Decl::Fn { effect, attrs, .. } = decl else { continue };
+                    if *effect != Some(true) { continue; }
+                    let Some(attr) = attrs.iter().find(|a| a.name.as_str() == "intrinsic") else { continue };
+                    let Some(first) = attr.args.first() else { continue };
+                    if let AttrValue::String { value: symbol } = &first.value {
+                        set.insert(symbol.to_string());
+                    }
+                }
+            }
+            set
+        } else {
+            HashSet::new()
+        };
+
         // ── Phase 2: Transform lifted function bodies ───────────────
         //
         // 1. resolve_err_types: fill Unknown in err() expressions using
@@ -86,7 +115,7 @@ impl NanoPass for ResultPropagationPass {
             if lifted_fns.contains_key(func.name.as_str()) {
                 let ok_ty = extract_ok_type(&func.ret_ty);
                 resolve_err_types(&mut func.body, &ok_ty);
-                func.body = wrap_tail_in_ok(std::mem::take(&mut func.body), &lifted_fns);
+                func.body = wrap_tail_in_ok(std::mem::take(&mut func.body), &lifted_fns, &intrinsic_effect_syms);
             }
         }
         for module in &mut program.modules {
@@ -94,7 +123,7 @@ impl NanoPass for ResultPropagationPass {
                 if lifted_fns.contains_key(func.name.as_str()) {
                     let ok_ty = extract_ok_type(&func.ret_ty);
                     resolve_err_types(&mut func.body, &ok_ty);
-                    func.body = wrap_tail_in_ok(std::mem::take(&mut func.body), &lifted_fns);
+                    func.body = wrap_tail_in_ok(std::mem::take(&mut func.body), &lifted_fns, &intrinsic_effect_syms);
                 }
             }
         }
@@ -180,7 +209,7 @@ fn resolve_err_types(body: &mut IrExpr, ok_ty: &Ty) {
 ///
 /// Recurses into branching structures (Block, If, Match) to find all
 /// exit paths. Guard-else bodies are divergent and never wrapped.
-fn wrap_tail_in_ok(expr: IrExpr, lifted: &HashMap<String, Ty>) -> IrExpr {
+fn wrap_tail_in_ok(expr: IrExpr, lifted: &HashMap<String, Ty>, intr: &HashSet<String>) -> IrExpr {
     let ty = expr.ty.clone();
     let span = expr.span;
     match expr.kind {
@@ -193,14 +222,14 @@ fn wrap_tail_in_ok(expr: IrExpr, lifted: &HashMap<String, Ty>) -> IrExpr {
                     IrStmtKind::Guard { cond, else_ } if !is_divergent(&else_) => IrStmt {
                         kind: IrStmtKind::Guard {
                             cond,
-                            else_: wrap_tail_in_ok(else_, lifted),
+                            else_: wrap_tail_in_ok(else_, lifted, intr),
                         },
                         span,
                     },
                     other => IrStmt { kind: other, span },
                 }
             }).collect();
-            let wrapped = wrap_tail_in_ok(*tail, lifted);
+            let wrapped = wrap_tail_in_ok(*tail, lifted, intr);
             IrExpr {
                 kind: IrExprKind::Block { stmts, expr: Some(Box::new(wrapped)) },
                 ty: Ty::result(ty, Ty::String), span, def_id: None,
@@ -209,8 +238,8 @@ fn wrap_tail_in_ok(expr: IrExpr, lifted: &HashMap<String, Ty>) -> IrExpr {
         IrExprKind::If { cond, then, else_ } => IrExpr {
             kind: IrExprKind::If {
                 cond,
-                then: Box::new(wrap_tail_in_ok(*then, lifted)),
-                else_: Box::new(wrap_tail_in_ok(*else_, lifted)),
+                then: Box::new(wrap_tail_in_ok(*then, lifted, intr)),
+                else_: Box::new(wrap_tail_in_ok(*else_, lifted, intr)),
             },
             ty: Ty::result(ty, Ty::String), span, def_id: None,
         },
@@ -219,13 +248,21 @@ fn wrap_tail_in_ok(expr: IrExpr, lifted: &HashMap<String, Ty>) -> IrExpr {
                 subject,
                 arms: arms.into_iter().map(|arm| IrMatchArm {
                     pattern: arm.pattern, guard: arm.guard,
-                    body: wrap_tail_in_ok(arm.body, lifted),
+                    body: wrap_tail_in_ok(arm.body, lifted, intr),
                 }).collect(),
             },
             ty: Ty::result(ty, Ty::String), span, def_id: None,
         },
         // Already Result — don't double-wrap
         IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. } => expr,
+        // A tail call to an `@intrinsic effect fn` (e.g. `http.serve`) is already
+        // a RuntimeCall whose runtime fn returns `Result<T, String>` — it IS the
+        // Result this lifted effect fn returns, so don't Ok-wrap it (that would
+        // double-wrap → E0308, #434). Correct the IR ty to Result so the
+        // surrounding Block/fn-ret types line up.
+        IrExprKind::RuntimeCall { ref symbol, .. } if intr.contains(symbol.as_str()) => {
+            IrExpr { ty: Ty::result(ty, Ty::String), ..expr }
+        }
         // Call to another lifted effect fn — already returns Result
         IrExprKind::Call { ref target, .. } => {
             let callee_name = match target {

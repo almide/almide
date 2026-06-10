@@ -249,7 +249,7 @@ impl<'a> WasmBuilder<'a> {
     // constants
     pub fn i32c(&mut self, v: i32) -> &mut Self { self.f.instruction(&Instruction::I32Const(v)); self }
     pub fn i64c(&mut self, v: i64) -> &mut Self { self.f.instruction(&Instruction::I64Const(v)); self }
-    pub fn f64c(&mut self, v: f64) -> &mut Self { self.f.instruction(&Instruction::F64Const(v)); self }
+    pub fn f64c(&mut self, v: f64) -> &mut Self { self.f.instruction(&Instruction::F64Const(v.into())); self }
 
     // i32 ops
     pub fn add(&mut self) -> &mut Self { self.f.instruction(&Instruction::I32Add); self }

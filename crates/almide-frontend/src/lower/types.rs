@@ -7,10 +7,17 @@ use crate::intern::{Sym, sym};
 use super::LowerCtx;
 use super::expressions::lower_expr;
 
-pub(super) fn lower_type_decl(ctx: &mut LowerCtx, name: &str, ty: &ast::TypeExpr, deriving: &Option<Vec<Sym>>, visibility: &ast::Visibility, generics: Option<&Vec<ast::GenericParam>>) -> IrTypeDecl {
+pub(super) fn lower_type_decl(ctx: &mut LowerCtx, name: &str, ty: &ast::TypeExpr, deriving: &Option<Vec<Sym>>, visibility: &ast::Visibility, generics: Option<&Vec<ast::GenericParam>>, module_prefix: Option<&str>) -> IrTypeDecl {
+    // #433: a user (non-stdlib) module's type is declared under its qualified
+    // canonical name `mod.Type`, matching how references resolve, so two packages'
+    // same-name types stay distinct through link + codegen.
+    let qualified_name = match module_prefix {
+        Some(m) if !almide_lang::stdlib_info::is_bundled_module(m) => format!("{}.{}", m, name),
+        _ => name.to_string(),
+    };
     // Use TypeEnv for field type resolution so aliases (TcpStream → Int)
     // are expanded at lowering time, not left as Ty::Named for codegen.
-    let resolve = |te: &ast::TypeExpr| resolve_type_expr_with_env(te, ctx.env);
+    let resolve = |te: &ast::TypeExpr| crate::canonicalize::resolve::resolve_type_expr_in(te, Some(&ctx.env.types), module_prefix);
     let kind = match ty {
         ast::TypeExpr::Record { fields } => {
             let fs = fields.iter().map(|f| {
@@ -21,7 +28,7 @@ pub(super) fn lower_type_decl(ctx: &mut LowerCtx, name: &str, ty: &ast::TypeExpr
         }
         ast::TypeExpr::Variant { cases } => {
             let is_generic = matches!(generics, Some(gs) if !gs.is_empty());
-            let cs = cases.iter().map(|c| lower_variant_case(ctx, c, name)).collect();
+            let cs = cases.iter().map(|c| lower_variant_case(ctx, c, name, module_prefix)).collect();
             IrTypeDeclKind::Variant {
                 cases: cs, is_generic,
                 boxed_args: std::collections::HashSet::new(),
@@ -35,20 +42,25 @@ pub(super) fn lower_type_decl(ctx: &mut LowerCtx, name: &str, ty: &ast::TypeExpr
         ast::Visibility::Mod => IrVisibility::Mod,
         ast::Visibility::Local => IrVisibility::Private,
     };
-    IrTypeDecl { name: sym(name), kind, deriving: deriving.as_ref().map(|d| d.iter().copied().collect()), generics: generics.cloned(), visibility: vis, doc: None, blank_lines_before: 0 }
+    IrTypeDecl { name: sym(&qualified_name), kind, deriving: deriving.as_ref().map(|d| d.iter().copied().collect()), generics: generics.cloned(), visibility: vis, doc: None, blank_lines_before: 0 }
 }
 
-fn lower_variant_case(ctx: &mut LowerCtx, case: &ast::VariantCase, _parent: &str) -> IrVariantDecl {
+fn lower_variant_case(ctx: &mut LowerCtx, case: &ast::VariantCase, _parent: &str, module_prefix: Option<&str>) -> IrVariantDecl {
+    // #484: payload types must resolve through the same env+prefix path as
+    // record fields and alias targets (lower_type_decl's `resolve` closure),
+    // so a cross-module payload like `m.Emotion` keeps its qualified canonical
+    // name and gets mangled alongside its declaration by IrLinkFlattenPass.
+    let resolve = |te: &ast::TypeExpr| crate::canonicalize::resolve::resolve_type_expr_in(te, Some(&ctx.env.types), module_prefix);
     match case {
         ast::VariantCase::Unit { name } => IrVariantDecl { name: *name, kind: IrVariantKind::Unit },
         ast::VariantCase::Tuple { name, fields } => {
-            let tys = fields.iter().map(|f| resolve_type_expr(f)).collect();
+            let tys = fields.iter().map(|f| resolve(f)).collect();
             IrVariantDecl { name: *name, kind: IrVariantKind::Tuple { fields: tys } }
         }
         ast::VariantCase::Record { name, fields } => {
             let fs = fields.iter().map(|f| {
                 let default = f.default.as_ref().map(|d| lower_expr(ctx, d));
-                IrFieldDecl { name: f.name, ty: resolve_type_expr(&f.ty), default, alias: f.alias, attrs: f.attrs.clone() }
+                IrFieldDecl { name: f.name, ty: resolve(&f.ty), default, alias: f.alias, attrs: f.attrs.clone() }
             }).collect();
             IrVariantDecl { name: *name, kind: IrVariantKind::Record { fields: fs } }
         }

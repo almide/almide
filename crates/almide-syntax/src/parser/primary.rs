@@ -193,6 +193,25 @@ impl Parser {
             return Ok(Expr::new(self.next_id(), span, ExprKind::Unit));
         }
         let first = self.parse_expr()?;
+        // Type ascription inside parens: `(expr: Type)` — e.g. `([]: List[String])`.
+        // The bare call-arg form `[]: T` is accepted as a call argument, but a
+        // record-field value (`{ tags: ([]: List[String]) }`) or a `let`
+        // initializer must parenthesize it; without this the `:` after the inner
+        // expr was an unexpected token ("Expected ')'"). Mirrors the call-arg
+        // ascription (`parser/expressions.rs`); `::` is excluded so a path token
+        // never trips it.
+        if self.check(TokenType::Colon)
+            && self.peek_at(1).map(|t| &t.token_type) != Some(&TokenType::Colon)
+        {
+            let asc_span = first.span;
+            self.advance(); // skip ':'
+            let ty = self.parse_type_expr()?;
+            self.expect_closing(TokenType::RParen, open.line, open.col, "type-ascribed expression")?;
+            return Ok(Expr::new(self.next_id(), asc_span, ExprKind::TypeAscription {
+                expr: Box::new(first),
+                ty,
+            }));
+        }
         if self.check(TokenType::Comma) {
             let mut elements = vec![first];
             while self.check(TokenType::Comma) {
@@ -253,7 +272,7 @@ impl Parser {
                     self.advance();
                     self.skip_newlines();
                     if self.check(TokenType::RBrace) { break; }
-                    let field_name = self.expect_ident()?;
+                    let field_name = self.expect_any_name()?;
                     self.expect(TokenType::Colon)?;
                     self.skip_newlines();
                     let field_value = self.parse_expr()?;

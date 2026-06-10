@@ -1,0 +1,19 @@
+// wasm:skip — http.serve is native-only (TCP listener), so this file is
+// compiled+run on the native target only.
+//
+// effect_intrinsic_tail_test — #434: a tail call to an `@intrinsic effect fn`
+// (http.serve, whose runtime fn returns `Result<T, String>`) inside an effect fn
+// used to be double-`Ok`-wrapped by the Result-propagation tail-wrap (E0308),
+// because intrinsic effect calls are `RuntimeCall`s not in the user-`lifted` set.
+// They are now recognized and left un-wrapped. http.serve blocks forever, so it
+// is never started here — `_serve_demo` exists only to keep that codegen path
+// compiling (it is emitted, not eliminated).
+import http
+
+effect fn _serve_demo() -> Unit = {
+  http.serve(8080, (req) => http.response(200, http.req_path(req)))
+}
+
+test "effect-fn tail call to an intrinsic effect fn compiles" {
+  assert_eq(1, 1)
+}

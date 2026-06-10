@@ -166,10 +166,30 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
         // ── Records ──
         ast::ExprKind::Record { name, fields, .. } => {
             let fs = fields.iter().map(|f| (f.name, lower_expr(ctx, &f.value))).collect();
-            // Strip a module prefix on a qualified record-variant name (`mod.Ctor`):
-            // the IR carries the bare ctor name (the expr's type already pins the
-            // module), so both backends resolve the variant by bare name + type (#412).
-            let ctor_name = (*name).map(|n| n.as_str().rsplit_once('.').map(|(_, b)| sym(b)).unwrap_or(n));
+            // Constructor name resolution:
+            //  - A struct (Record-type) literal is pinned to its qualified canonical
+            //    name `mod.Type` (#433) — bare `Config` in module M → `M.Config`, a
+            //    cross-module `dep.Config` stays qualified — so codegen names the
+            //    right (mangled) struct. (`is_struct` distinguishes it from a variant.)
+            //  - A variant constructor keeps the bare ctor name: the expr's type pins
+            //    the module and both backends resolve it by name + type (#412).
+            let ctor_name = (*name).map(|n| {
+                let s = n.as_str();
+                let is_struct = |key: &str| matches!(ctx.env.types.get(&sym(key)), Some(crate::types::Ty::Record { .. }));
+                if let Some((m, base)) = s.rsplit_once('.') {
+                    if !almide_lang::stdlib_info::is_bundled_module(m) && is_struct(s) {
+                        return n; // user-module struct: keep qualified for mangling
+                    }
+                    return sym(base); // stdlib / variant: strip (existing #412 behavior)
+                }
+                if let Some(m) = ctx.current_module {
+                    let qual = format!("{}.{}", m.as_str(), s);
+                    if is_struct(&qual) {
+                        return sym(&qual);
+                    }
+                }
+                n
+            });
             let mut rec = ctx.mk(IrExprKind::Record { name: ctor_name, fields: fs }, ty, span);
             // Narrow bare integer/float literals in sized fields to their
             // declared field type (`{ a: Int8 }` ← `a: 5` must emit `5i8`, not

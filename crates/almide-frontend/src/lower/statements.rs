@@ -25,25 +25,35 @@ pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &ast::Stmt) -> IrStmt {
             // record types with identical fields (e.g. `Dog` and `Cat`) collide
             // at codegen time because the value keeps its structural type.
             let val_ty = if let Some(te) = ty {
-                let declared = super::types::resolve_type_expr(te);
+                let declared = crate::canonicalize::resolve::resolve_type_expr_in(te, Some(&ctx.env.types), ctx.current_module.as_ref().map(|s| s.as_str()));
                 override_record_literal_ty(&mut ir_val, &declared, ctx.env);
                 declared
             } else {
                 ir_val.ty.clone()
             };
             let var = ctx.define_var(name, val_ty.clone(), Mutability::Let, span);
+            // #485: an EXPLICIT `Result[..]` annotation is the only signal
+            // that this binding keeps the Result (auto_try must not insert
+            // `?`). Un-annotated binds share the same Bind.ty shape when the
+            // callee itself declares `-> Result[..]`, so record the VarId.
+            if ty.is_some() && val_ty.is_result() {
+                ctx.annotated_result_vars.insert(var);
+            }
             IrStmtKind::Bind { var, mutability: Mutability::Let, ty: val_ty, value: ir_val }
         }
         ast::Stmt::Var { name, ty, value, .. } => {
             let mut ir_val = lower_expr(ctx, value);
             let val_ty = if let Some(te) = ty {
-                let declared = super::types::resolve_type_expr(te);
+                let declared = crate::canonicalize::resolve::resolve_type_expr_in(te, Some(&ctx.env.types), ctx.current_module.as_ref().map(|s| s.as_str()));
                 override_record_literal_ty(&mut ir_val, &declared, ctx.env);
                 declared
             } else {
                 ir_val.ty.clone()
             };
             let var = ctx.define_var(name, val_ty.clone(), Mutability::Var, span);
+            if ty.is_some() && val_ty.is_result() {
+                ctx.annotated_result_vars.insert(var);
+            }
             IrStmtKind::Bind { var, mutability: Mutability::Var, ty: val_ty, value: ir_val }
         }
         ast::Stmt::LetDestructure { pattern, value, .. } => {

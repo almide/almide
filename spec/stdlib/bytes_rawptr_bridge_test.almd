@@ -1,0 +1,27 @@
+// bytes_rawptr_bridge_test — #440: the RawPtr / linear-memory bridge works on
+// BOTH targets. A RawPtr is a real `*mut u8` on native and an i32 linear-memory
+// offset on wasm; the pointer VALUE differs by target (and is never observed
+// here), but the bytes it moves are observably identical, so these are
+// cross-target-clean.
+
+test "as_ptr + from_raw_ptr round-trips the bytes (read side)" {
+  let src = bytes.from_list([11, 22, 33, 44]);
+  let copy = bytes.from_raw_ptr(bytes.as_ptr(src), 4);
+  assert_eq([bytes.read_u8(copy, 0), bytes.read_u8(copy, 1), bytes.read_u8(copy, 2), bytes.read_u8(copy, 3)], [11, 22, 33, 44])
+}
+
+test "copy_to_ptr + as_mut_ptr writes through the pointer (write side)" {
+  var dst = bytes.new(4);
+  let src = bytes.from_list([7, 8, 9, 10]);
+  let n = bytes.copy_to_ptr(src, bytes.as_mut_ptr(dst), 4);
+  assert_eq(n, 4);
+  assert_eq([bytes.read_u8(dst, 0), bytes.read_u8(dst, 1), bytes.read_u8(dst, 2), bytes.read_u8(dst, 3)], [7, 8, 9, 10])
+}
+
+test "copy_to_ptr clamps to the destination capacity" {
+  var dst = bytes.new(2);
+  let src = bytes.from_list([1, 2, 3, 4]);
+  let n = bytes.copy_to_ptr(src, bytes.as_mut_ptr(dst), 2);
+  assert_eq(n, 2);
+  assert_eq([bytes.read_u8(dst, 0), bytes.read_u8(dst, 1)], [1, 2])
+}

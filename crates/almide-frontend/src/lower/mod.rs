@@ -53,6 +53,16 @@ pub struct LowerCtx<'a> {
     pub def_table: almide_ir::DefTable,
     /// Maps qualified name (e.g. "snaidhm.web.gpu.STORAGE") → DefId.
     pub def_map: HashMap<Sym, almide_ir::DefId>,
+    /// The module currently being lowered (its prefix), or None for the root
+    /// program. Used to pin a struct-literal constructor to its qualified
+    /// canonical name `mod.Type` (#433), mirroring `lower_type_decl`.
+    pub current_module: Option<Sym>,
+    /// Vars whose binding carried an EXPLICIT `Result[..]` annotation
+    /// (`let r: Result[Int, String] = step()`). auto_try keeps these as
+    /// Result instead of inserting `?`. Only the annotation distinguishes
+    /// them in the IR: an un-annotated `let v = boom()` where boom DECLARES
+    /// `-> Result[..]` has the identical Bind.ty but must auto-unwrap (#485).
+    pub annotated_result_vars: std::collections::HashSet<VarId>,
 }
 
 impl<'a> LowerCtx<'a> {
@@ -70,6 +80,8 @@ impl<'a> LowerCtx<'a> {
             const_param_vars: HashMap::new(),
             def_table: env.def_table.clone(),
             def_map: env.def_map.iter().map(|(k, v)| (*k, *v)).collect(),
+            current_module: None,
+            annotated_result_vars: std::collections::HashSet::new(),
         }
     }
 
@@ -212,6 +224,7 @@ pub fn lower_program(prog: &ast::Program, env: &TypeEnv, type_map: &TypeMap) -> 
 
 fn lower_program_with_prefix(prog: &ast::Program, env: &TypeEnv, type_map: &TypeMap, module_prefix: Option<&str>) -> IrProgram {
     let mut ctx = LowerCtx::new(env, type_map);
+    ctx.current_module = module_prefix.map(sym);
 
     // Register cross-package top-level lets that weren't in register_decls
     // (dependency packages populate env.top_lets during project fetch).
@@ -328,7 +341,7 @@ fn lower_program_with_prefix(prog: &ast::Program, env: &TypeEnv, type_map: &Type
                 functions.push(f);
             }
             ast::Decl::Type { name, ty, deriving, visibility, generics, .. } => {
-                let mut td = types::lower_type_decl(&mut ctx, name, ty, deriving, visibility, generics.as_ref());
+                let mut td = types::lower_type_decl(&mut ctx, name, ty, deriving, visibility, generics.as_ref(), module_prefix);
                 td.doc = doc;
                 td.blank_lines_before = blank_lines;
                 type_decls.push(td);
@@ -387,6 +400,7 @@ fn lower_program_with_prefix(prog: &ast::Program, env: &TypeEnv, type_map: &Type
         .map(|(name, _)| *name)
         .collect();
 
+    let annotated_result_vars = std::mem::take(&mut ctx.annotated_result_vars);
     let mut program = IrProgram { functions, top_lets, type_decls, var_table: ctx.var_table, def_table: ctx.def_table, modules: Vec::new(), type_registry: crate::types::TypeConstructorRegistry::new(), effect_fn_names, effect_map: Default::default(), codegen_annotations: Default::default(), used_stdlib_modules: Default::default() };
 
     // Register user-defined types in the type constructor registry (HKT foundation)
@@ -404,7 +418,7 @@ fn lower_program_with_prefix(prog: &ast::Program, env: &TypeEnv, type_map: &Type
     // Auto-? insertion: wrap Result-typed calls in Try nodes.
     // This bridges the gap between checker (auto_unwrap strips Result
     // from bindings) and IR (Call nodes carry Result types).
-    auto_try::insert_auto_try(&mut program);
+    auto_try::insert_auto_try(&mut program, &annotated_result_vars);
 
     // Collect stdlib modules used in root functions/top_lets.
     // ir_link extends this with modules from dependencies.
@@ -716,7 +730,7 @@ fn lower_fn(
     }
 
     for p in params {
-        let ty = resolve_type_expr(&p.ty);
+        let ty = crate::canonicalize::resolve::resolve_type_expr_in(&p.ty, Some(&ctx.env.types), module_prefix);
         let var = ctx.define_var(&p.name, ty.clone(), Mutability::Let, span.clone());
         let default = p.default.as_ref().map(|d| Box::new(lower_expr(ctx, d)));
         ir_params.push(IrParam {

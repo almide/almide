@@ -1,0 +1,38 @@
+// #486: a cross-module top-let of a non-Copy type consumed BY VALUE must
+// clone out of its LazyLock static instead of moving (E0507 before the fix).
+// Also pins the record-literal canonical-name fix: an UN-annotated record
+// top-let (`let CFG = Cfg { ... }`) used cross-module rendered an unmangled
+// static type on native (E0425) and trapped on wasm before the checker
+// qualified record construction types (#433 closure of the last producer).
+import toplib
+
+fn shout(s: String) -> String = s + "!"
+
+fn first(xs: List[String]) -> String = list.get(xs, 0) ?? "?"
+
+test "cross-module String top-let passed by value (#486)" {
+  assert_eq(shout(toplib.SYSTEM), "hi!")
+}
+
+test "cross-module List top-let passed by value (#486)" {
+  assert_eq(first(toplib.WORDS), "a")
+}
+
+test "cross-module top-let through bind and closure (#486)" {
+  let x = toplib.SYSTEM;
+  let f = (s: String) => s + "?";
+  assert_eq(f(x), "hi?")
+}
+
+test "cross-module top-let in borrow position stays clone-free" {
+  assert_eq(string.len(toplib.SYSTEM), 2)
+}
+
+test "cross-module un-annotated record top-let member access" {
+  assert_eq(toplib.CFG.name, "c")
+}
+
+test "cross-module record top-let list and fn-returned record" {
+  assert_eq(toplib.CFGS |> list.len, 2);
+  assert_eq(toplib.mk().name, "via-fn")
+}

@@ -128,7 +128,19 @@ impl Checker {
                         self.constrain(target_ty, arg_tys[0].clone(), format!("constructor {}()", name));
                     }
                     Ty::Named(sym(name), vec![])
-                } else { Ty::Named(sym(name), vec![]) }
+                } else {
+                    // #488: nothing claimed this TypeName call — not a variant
+                    // ctor, not an opaque alias, and the record paths were
+                    // intercepted before infer_call. Letting it through here is
+                    // how unvalidated constructions reached rustc/wasm; make
+                    // the unknown name a checker error instead.
+                    self.emit(super::err(
+                        format!("unknown type or constructor '{}' in call position", name),
+                        format!("No type, variant constructor, or opaque alias named '{}' is in scope. Check the spelling or add the missing import.", name),
+                        format!("call to {}()", name),
+                    ).with_code("E003"));
+                    Ty::Named(sym(name), vec![])
+                }
             }
             // Module call: string.trim(s), list.map(xs, f), etc.
             ExprKind::Member { object, field, .. } => {

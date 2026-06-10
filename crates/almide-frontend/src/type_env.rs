@@ -29,7 +29,7 @@ pub struct TypeEnv {
     /// in multiple variant types (e.g. a local type and a dependency's) — an
     /// ambiguous name. `lookup_ctor` returns the first; `ctor_candidate_count`
     /// detects ambiguity (#413).
-    pub constructors: std::collections::HashMap<Sym, Vec<(Sym, VariantCase)>>,
+    pub constructors: std::collections::HashMap<Sym, Vec<(Sym, Option<Sym>, VariantCase)>>,
     /// User-defined module names (for distinguishing from stdlib in module calls)
     pub user_modules: std::collections::HashSet<Sym>,
     /// The package's own module name (set when `register_module` is called with `is_self: true`).
@@ -66,6 +66,15 @@ pub struct TypeEnv {
     pub var_decl_locs: std::collections::HashMap<Sym, (usize, usize)>,
     /// Top-level `let` constants: name -> type
     pub top_lets: std::collections::HashMap<Sym, Ty>,
+    /// Record type key (same keys as `types`) -> field names that carry a
+    /// declared DEFAULT. Used by record-construction validation: a missing
+    /// field is an error only when it has no default (#488).
+    pub record_field_defaults: std::collections::HashMap<Sym, std::collections::HashSet<Sym>>,
+    /// Record-payload variant CASE name -> field names with a declared
+    /// default (`| Rect { color: String = "" }`). Keyed by bare ctor name;
+    /// same-name ctors across types union their sets (#413 corner — the
+    /// worst case is a suppressed missing-field error, never wrong code).
+    pub ctor_field_defaults: std::collections::HashMap<Sym, std::collections::HashSet<Sym>>,
     /// Types that implement the Eq protocol (via `deriving Eq`)
     pub eq_types: std::collections::HashSet<Sym>,
     /// Structural bounds for generic type parameters: TypeVar name → OpenRecord constraint
@@ -123,6 +132,8 @@ impl TypeEnv {
             self_module_name: None,
             import_table: ImportTable::new(),
             fn_visibility: std::collections::HashMap::new(),
+            record_field_defaults: std::collections::HashMap::new(),
+            ctor_field_defaults: std::collections::HashMap::new(),
 
             used_vars: std::collections::HashSet::new(),
             local_symbols: std::collections::HashSet::new(),
@@ -302,7 +313,27 @@ impl TypeEnv {
     /// (`ctor_candidate_count > 1`) callers should report it; this fallback keeps
     /// type checking from cascading.
     pub fn lookup_ctor(&self, name: &Sym) -> Option<(Sym, VariantCase)> {
-        self.constructors.get(name).and_then(|cands| cands.first().cloned())
+        self.constructors.get(name).and_then(|cands| cands.first().map(|(t, _m, c)| (*t, c.clone())))
+    }
+
+    /// Like `lookup_ctor`, but when the constructor name is ambiguous across
+    /// packages, prefer the candidate declared in `cur_mod` (#413) and return its
+    /// type name QUALIFIED with that owner (`mod.Type`) so the construction's `.ty`
+    /// is the namespaced enum. A module's own bare `Active` means *its* `Active`.
+    pub fn lookup_ctor_in(&self, name: &Sym, cur_mod: Option<&str>) -> Option<(Sym, VariantCase)> {
+        let cands = self.constructors.get(name)?;
+        let pick = cur_mod
+            .and_then(|m| cands.iter().find(|(_, owner, _)| owner.map_or(false, |o| o.as_str() == m)))
+            .or_else(|| cands.first())?;
+        let (t, owner, c) = pick;
+        // Qualify with the owner so the resolved `.ty` carries the namespaced enum
+        // (`mod.Type`) — unless already qualified or owned by stdlib.
+        let qual = match owner {
+            Some(o) if !t.as_str().contains('.') && !almide_lang::stdlib_info::is_bundled_module(o.as_str())
+                => sym(&format!("{}.{}", o.as_str(), t.as_str())),
+            _ => *t,
+        };
+        Some((qual, c.clone()))
     }
 
     /// How many variant types declare this constructor name (1 = unambiguous,
@@ -314,7 +345,7 @@ impl TypeEnv {
     /// The variant type names that declare this constructor, for an ambiguity
     /// diagnostic that lists `Type::Ctor` qualifications to disambiguate.
     pub fn ctor_candidate_types(&self, name: &Sym) -> Vec<Sym> {
-        self.constructors.get(name).map_or_else(Vec::new, |c| c.iter().map(|(t, _)| *t).collect())
+        self.constructors.get(name).map_or_else(Vec::new, |c| c.iter().map(|(t, _m, _c)| *t).collect())
     }
 
     pub fn resolve_named(&self, ty: &Ty) -> Ty {

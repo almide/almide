@@ -158,6 +158,15 @@ pub fn infer_borrow_signatures(program: &mut IrProgram) -> HashMap<String, Vec<P
                         .unwrap_or(false);
                     if !is_borrow_ref {
                         if let Some(b) = borrows.get_mut(idx) {
+                            // A heap container an intrinsic mutates in place (Unit
+                            // return) is taken by `&mut`. Every heap container
+                            // reaches here already Ref-family:
+                            // `intrinsic_borrow_mode_from_type_expr` seeds
+                            // `List`→RefSlice, `String`→RefStr, and
+                            // `Bytes`/`Map`/`Set`/records→Ref — so promoting the
+                            // Ref family to RefMut covers them all. Primitives are
+                            // seeded `Own` and stay `Own` (never mutated in place
+                            // through a reference).
                             if matches!(b, ParamBorrow::Ref | ParamBorrow::RefSlice | ParamBorrow::RefStr) {
                                 *b = ParamBorrow::RefMut;
                             }
@@ -447,6 +456,13 @@ fn is_heap_type(ty: &Ty) -> bool {
         Ty::String
         | Ty::Bytes
         | Ty::Applied(TypeConstructorId::List, _)
+        // Map/Set are heap collections too — without them a `mut Map`/`mut Set`
+        // parameter is forced to `Own` here (never reaching the borrow analysis),
+        // so an in-place `map.insert(m, …)` emits `&mut m` against a non-`mut`
+        // owned binding and fails to borrow-check (#436, E0596). With them the
+        // param is inferred Ref/RefMut/Own like a List.
+        | Ty::Applied(TypeConstructorId::Map, _)
+        | Ty::Applied(TypeConstructorId::Set, _)
         | Ty::Record { .. }
         | Ty::OpenRecord { .. }
     )

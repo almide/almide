@@ -21,6 +21,12 @@ fn resolve(env: &TypeEnv, te: &ast::TypeExpr) -> Ty {
     resolve_type_expr(te, Some(&env.types))
 }
 
+/// Like `resolve`, but pins a user module's own-type references to the qualified
+/// canonical name `mod.Type` (#433). `cur_mod` is the module being registered.
+fn resolve_in(env: &TypeEnv, te: &ast::TypeExpr, cur_mod: Option<&str>) -> Ty {
+    crate::canonicalize::resolve::resolve_type_expr_in(te, Some(&env.types), cur_mod)
+}
+
 /// Infer type from a literal expression (for top-level `let` without annotation).
 ///
 /// Used at registration time — before the full checker runs — so module
@@ -178,12 +184,12 @@ pub fn register_fn_sig(
             env.types.insert(*gn, Ty::TypeVar(*gn));
         }
     }
-    let ptys: Vec<(Sym, Ty)> = params.iter().map(|p| (sym(&p.name), resolve(env, &p.ty))).collect();
+    let ptys: Vec<(Sym, Ty)> = params.iter().map(|p| (sym(&p.name), resolve_in(env, &p.ty, prefix))).collect();
     let mut_params: Vec<usize> = params.iter().enumerate()
         .filter(|(_, p)| p.is_mut)
         .map(|(i, _)| i)
         .collect();
-    let ret = resolve(env, return_type);
+    let ret = resolve_in(env, return_type, prefix);
     for gn in &gnames { env.types.remove(gn); }
     let is_effect = effect.unwrap_or(false) || r#async.unwrap_or(false);
     let key = prefixed_key(prefix, name);
@@ -492,10 +498,14 @@ pub fn register_type_decl(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, 
         // Push (not overwrite) so a constructor name declared in multiple variant
         // types keeps ALL candidates — needed to detect ambiguity (#413) instead of
         // silently letting the last-registered type win.
+        // #413: record each candidate's OWNING MODULE so a shared ctor name can be
+        // disambiguated by the current module (`lookup_ctor_in`). type_name stays
+        // BARE here — other consumers expect that; `lookup_ctor_in` qualifies on demand.
+        let owner_mod = prefix.map(sym);
         for case in cases {
             let entry = env.constructors.entry(case.name).or_default();
-            if !entry.iter().any(|(t, _)| *t == sym(name)) {
-                entry.push((sym(name), case.clone()));
+            if !entry.iter().any(|(t, m, _)| *t == sym(name) && *m == owner_mod) {
+                entry.push((sym(name), owner_mod, case.clone()));
             }
         }
     }
@@ -507,20 +517,50 @@ pub fn register_type_decl(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, 
     // are namespaced per package, surface the collision at the source so the user
     // renames one. Structurally-identical re-registration (the diamond case: same
     // package via two import paths) compares equal and is NOT flagged.
+    // #433: types are now namespaced per (user) package — `dep_a.Config` and
+    // `dep_b.Config` coexist as distinct qualified names. So a collision is only a
+    // real error when the SAME canonical key is re-declared with a different
+    // structure (a duplicate within one module/file), which we detect on the
+    // prefixed key. Structurally-identical re-registration (the diamond case) is
+    // equal and not flagged.
     if matches!(resolved, Ty::Record { .. } | Ty::OpenRecord { .. } | Ty::Variant { .. }) {
-        if let Some(existing) = env.types.get(&sym(name)) {
+        let canonical_key = prefixed_key(prefix, name);
+        if let Some(existing) = env.types.get(&sym(&canonical_key)) {
             if existing != &resolved
                 && matches!(existing, Ty::Record { .. } | Ty::OpenRecord { .. } | Ty::Variant { .. })
             {
                 diagnostics.push(err(
                     format!("type '{}' is declared more than once with different structures", name),
-                    format!("Two distinct types share the name '{}' (a duplicate in one file, or a local type colliding with a dependency's). Rename one so the name is unique — types are not yet namespaced per package (#433).", name),
+                    format!("Two distinct types share the name '{}' within the same module. Rename one so the name is unique.", name),
                     format!("type {}", name),
                 ).with_code("E020"));
             }
         }
     }
     let key = prefixed_key(prefix, name);
+    // Field defaults, keyed like `types` (both keys when prefixed), so
+    // record-construction validation knows which fields may be omitted (#488).
+    if let ast::TypeExpr::Record { fields } | ast::TypeExpr::OpenRecord { fields } = ty {
+        let defaults: std::collections::HashSet<Sym> =
+            fields.iter().filter(|f| f.default.is_some()).map(|f| f.name).collect();
+        env.record_field_defaults.insert(sym(&key), defaults.clone());
+        if prefix.is_some() {
+            env.record_field_defaults.insert(sym(name), defaults);
+        }
+    }
+    // Record-payload variant cases carry field defaults too
+    // (`| Rect { color: String = "" }`) — harvest them from the AST, since
+    // the resolved `VariantPayload::Record` keeps only (name, ty).
+    if let ast::TypeExpr::Variant { cases } = ty {
+        for c in cases {
+            if let ast::VariantCase::Record { name: cname, fields } = c {
+                let defs: Vec<Sym> = fields.iter().filter(|f| f.default.is_some()).map(|f| f.name).collect();
+                if !defs.is_empty() {
+                    env.ctor_field_defaults.entry(*cname).or_default().extend(defs);
+                }
+            }
+        }
+    }
     env.types.insert(sym(&key), resolved.clone());
     if prefix.is_some() {
         env.types.insert(sym(name), resolved);

@@ -30,6 +30,17 @@ pub fn eliminate_dead_code(emitter: &mut WasmEmitter) -> usize {
         }
     }
 
+    // Exported user `pub fn`s are roots: the host (JS/WASI caller) invokes them
+    // directly, so they are reachable even when nothing inside the module — `main`
+    // included — calls them. Without this their bodies are stubbed to `unreachable`
+    // and the export traps on the first host call (#457). `user_exports` is
+    // populated before this pass (see emit_wasm/mod.rs).
+    for (_export_name, internal_name) in &emitter.user_exports {
+        if let Some(&idx) = emitter.func_map.get(internal_name) {
+            entry_points.insert(idx);
+        }
+    }
+
     // Also include __alloc as always-needed (called by many stubs indirectly)
     entry_points.insert(emitter.rt.alloc);
     // __heap_save / __heap_restore are JS-callable arena-cleanup helpers;
@@ -732,7 +743,7 @@ mod tests {
     #[test]
     fn call_after_f64_const() {
         let targets = calls_in(&[
-            Instruction::F64Const(3.14159),
+            Instruction::F64Const(3.14159_f64.into()),
             Instruction::Drop,
             Instruction::Call(66),
         ]);
@@ -773,7 +784,7 @@ mod tests {
         // Numeric constants
         f.instruction(&Instruction::I32Const(999));
         f.instruction(&Instruction::I64Const(0x7FFF_FFFF_FFFF));
-        f.instruction(&Instruction::F64Const(3.14));
+        f.instruction(&Instruction::F64Const(3.14_f64.into()));
         f.instruction(&Instruction::Drop);
         f.instruction(&Instruction::Drop);
         // Local/global access
@@ -977,7 +988,7 @@ mod tests {
         tf.instruction(&Instruction::Drop);
         tf.instruction(&Instruction::I64Const(0x7FFFFFFFFFFFFFFF));
         tf.instruction(&Instruction::Drop);
-        tf.instruction(&Instruction::F64Const(f64::MAX));
+        tf.instruction(&Instruction::F64Const(f64::MAX.into()));
         tf.instruction(&Instruction::Drop);
         // Local/global
         tf.instruction(&Instruction::LocalGet(0));

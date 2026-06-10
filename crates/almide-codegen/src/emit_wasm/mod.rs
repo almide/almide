@@ -164,6 +164,8 @@ pub struct StringRuntime {
     pub trim: u32,
     pub slice: u32,
     pub char_count: u32,
+    /// `__str_cp_of_byte(s, byte) -> i64`: codepoint index of byte offset `byte`.
+    pub cp_of_byte: u32,
     pub reverse: u32,
     pub repeat: u32,
     pub index_of: u32,
@@ -576,6 +578,7 @@ impl WasmEmitter {
                     is_whitespace: 0, is_unicode_ws: 0, utf8_classify: 0, is_upper: 0, is_lower: 0,
                     cmp: 0,
                     char_count: 0,
+                    cp_of_byte: 0,
                     run_length_encode: 0,
                     utf8_width: 0,
                     utf8_scalar: 0,
@@ -1626,13 +1629,11 @@ pub(crate) fn emit(program: &IrProgram) -> Vec<u8> {
     // order above (eq funcs reserved first, then repr funcs).
     compile_repr_funcs(&mut emitter, &program.var_table);
 
-    // Phase 2.5: Dead Code Elimination
-    let dce_count = dce::eliminate_dead_code(&mut emitter);
-
-    // Phase 2.6: Dead Data Elimination — remove unreferenced string constants
-    let _data_dce_bytes = dce::eliminate_dead_data(&mut emitter);
-
-    // Collect public user functions for WASM export (skip imports).
+    // Collect public user functions for WASM export (skip imports) BEFORE DCE.
+    // A host-driven export (`render_frame`, `on_pointer_*`, any JS-called `pub fn`)
+    // is often unreachable from `main`/`_start`; if DCE runs first it stubs the body
+    // to `unreachable`, and the export then traps on the first host call (#457). By
+    // populating `user_exports` here, DCE seeds these as roots and keeps their bodies.
     // @export(wasm, "symbol") overrides the export name; otherwise use fn name.
     for (func_enum_idx, func) in program.functions.iter().enumerate() {
         if extern_wasm_set.contains(&func_enum_idx) { continue; }
@@ -1647,6 +1648,12 @@ pub(crate) fn emit(program: &IrProgram) -> Vec<u8> {
             .unwrap_or_else(|| internal_name.clone());
         emitter.user_exports.push((export_name, internal_name));
     }
+
+    // Phase 2.5: Dead Code Elimination (exported `pub fn`s above are roots)
+    let dce_count = dce::eliminate_dead_code(&mut emitter);
+
+    // Phase 2.6: Dead Data Elimination — remove unreferenced string constants
+    let _data_dce_bytes = dce::eliminate_dead_data(&mut emitter);
 
     // Phase 3: Assemble (DCE already ran in Phase 2.5: {} functions eliminated)
     let _ = dce_count;
@@ -1864,7 +1871,7 @@ fn assemble(emitter: &mut WasmEmitter) -> Vec<u8> {
     for &(_, vt, bits) in &emitter.top_let_init {
         let init = match vt {
             ValType::I64 => wasm_encoder::ConstExpr::i64_const(bits),
-            ValType::F64 => wasm_encoder::ConstExpr::f64_const(f64::from_bits(bits as u64)),
+            ValType::F64 => wasm_encoder::ConstExpr::f64_const(f64::from_bits(bits as u64).into()),
             ValType::I32 => wasm_encoder::ConstExpr::i32_const(bits as i32),
             _ => wasm_encoder::ConstExpr::i32_const(0),
         };
