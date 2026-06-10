@@ -1,0 +1,36 @@
+
+// #488: paren-NAMED construction is normalized to the brace pipeline —
+// `Cfg(name: x)` ≡ `Cfg { name: x }` for records and record-payload variant
+// cases, with field-set validation and defaults shared by both spellings.
+type Cfg = { name: String, age: Int = 7 }
+
+type AllDefault = { host: String = "localhost", port: Int = 8080 }
+
+type Tag = | SetEmotion { name: String } | Other
+
+fn mk_paren() -> Cfg = Cfg(name: "p")
+
+fn mk_brace() -> Cfg = Cfg { name: "b" }
+
+fn mk_defaults() -> AllDefault = AllDefault()
+
+fn tag_name(t: Tag) -> String = match t {
+  SetEmotion { name } => name,
+  Other => "other",
+}
+
+test "paren-named record construction equals brace form" {
+  assert_eq(mk_paren().name, "p");
+  assert_eq(mk_brace().name, "b");
+  assert_eq(mk_paren().age, 7)
+}
+
+test "paren-empty construction fills defaults" {
+  assert_eq(mk_defaults().host, "localhost");
+  assert_eq(mk_defaults().port, 8080)
+}
+
+test "record-variant paren-named construction" {
+  let t = SetEmotion(name: "joy");
+  assert_eq(tag_name(t), "joy")
+}

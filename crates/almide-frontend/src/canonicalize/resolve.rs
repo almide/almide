@@ -17,6 +17,55 @@ pub fn resolve_type_expr(te: &ast::TypeExpr, known_types: Option<&HashMap<Sym, T
     resolve_type_expr_in(te, known_types, None)
 }
 
+/// Resolve a nominal type NAME to its canonical (possibly module-qualified)
+/// Sym, per the #433 rules. THE single place this qualification predicate
+/// lives — annotations (via `resolve_type_expr_in`) and the checker's record
+/// construction inference both call it, so the producers cannot diverge.
+///
+/// - A user module's bare reference to its own declared type → `mod.Type`.
+/// - An already-qualified reference to a USER module's type → kept qualified.
+/// - A bare reference to an IMPORTED user-module type (e.g. module `b` uses
+///   module `d`'s `Logger` as a bare `Logger` brought in by `import d`) →
+///   the unique owner's `X.Type` key, so it mangles to the same struct. Only
+///   when EXACTLY ONE user module declares that bare name — otherwise it is
+///   ambiguous and stays bare (a root-local type, which has no `X.Type` key,
+///   also falls through to bare).
+/// - Stdlib / local / unknown names → None (stay bare).
+pub fn canonical_user_type_sym(name: &str, types: &HashMap<Sym, Ty>, cur_mod: Option<&str>) -> Option<Sym> {
+    if let Some(m) = cur_mod {
+        if !name.contains('.') && !almide_lang::stdlib_info::is_bundled_module(m) {
+            let qual = format!("{}.{}", m, name);
+            if let Some(t) = types.get(&sym(&qual)) {
+                if matches!(t, Ty::Record { .. } | Ty::Variant { .. }) {
+                    return Some(sym(&qual));
+                }
+            }
+        }
+    }
+    if let Some((m, _bare)) = name.rsplit_once('.') {
+        if !almide_lang::stdlib_info::is_bundled_module(m) {
+            if let Some(t) = types.get(&sym(name)) {
+                if matches!(t, Ty::Record { .. } | Ty::Variant { .. }) {
+                    return Some(sym(name));
+                }
+            }
+        }
+    }
+    if !name.contains('.') {
+        let mut owners = types.iter().filter(|(k, v)| {
+            k.as_str().rsplit_once('.').map_or(false, |(p, base)| {
+                base == name && !almide_lang::stdlib_info::is_bundled_module(p)
+            }) && matches!(v, Ty::Record { .. } | Ty::Variant { .. })
+        });
+        if let Some((k, _)) = owners.next() {
+            if owners.next().is_none() {
+                return Some(*k);
+            }
+        }
+    }
+    None
+}
+
 /// Like `resolve_type_expr`, but aware of the module currently being resolved
 /// (`cur_mod`), so a USER module's reference to one of its own types is pinned to
 /// the qualified canonical name `mod.Type` instead of the bare name. This is what
@@ -25,47 +74,7 @@ pub fn resolve_type_expr(te: &ast::TypeExpr, known_types: Option<&HashMap<Sym, T
 pub fn resolve_type_expr_in(te: &ast::TypeExpr, known_types: Option<&HashMap<Sym, Ty>>, cur_mod: Option<&str>) -> Ty {
     // Resolve a nominal name to its canonical (possibly module-qualified) `Ty::Named`.
     let resolve_named = |other: &str| -> Option<Ty> {
-        let types = known_types?;
-        // A user module's bare reference to its own declared type → qualify it.
-        if let Some(m) = cur_mod {
-            if !other.contains('.') && !almide_lang::stdlib_info::is_bundled_module(m) {
-                let qual = format!("{}.{}", m, other);
-                if let Some(t) = types.get(&sym(&qual)) {
-                    if matches!(t, Ty::Record { .. } | Ty::Variant { .. }) {
-                        return Some(Ty::Named(sym(&qual), vec![]));
-                    }
-                }
-            }
-        }
-        // An already-qualified reference to a USER module's type → keep it qualified.
-        if let Some((m, _bare)) = other.rsplit_once('.') {
-            if !almide_lang::stdlib_info::is_bundled_module(m) {
-                if let Some(t) = types.get(&sym(other)) {
-                    if matches!(t, Ty::Record { .. } | Ty::Variant { .. }) {
-                        return Some(Ty::Named(sym(other), vec![]));
-                    }
-                }
-            }
-        }
-        // A bare reference to an IMPORTED user-module type (e.g. module `b` uses
-        // module `d`'s `Logger` as a bare `Logger` brought in by `import d`): pin
-        // it to the unique qualifying owner `X.Type` so it mangles to the same
-        // struct. Only when EXACTLY ONE user module declares that bare name —
-        // otherwise it's ambiguous and we leave it bare (a root-local type, which
-        // has no `X.Type` key, also falls through to bare).
-        if !other.contains('.') {
-            let mut owners = types.iter().filter(|(k, v)| {
-                k.as_str().rsplit_once('.').map_or(false, |(p, base)| {
-                    base == other && !almide_lang::stdlib_info::is_bundled_module(p)
-                }) && matches!(v, Ty::Record { .. } | Ty::Variant { .. })
-            });
-            if let Some((k, _)) = owners.next() {
-                if owners.next().is_none() {
-                    return Some(Ty::Named(*k, vec![]));
-                }
-            }
-        }
-        None
+        canonical_user_type_sym(other, known_types?, cur_mod).map(|s| Ty::Named(s, vec![]))
     };
     match te {
         ast::TypeExpr::Simple { name } => match name.as_str() {

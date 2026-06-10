@@ -1,0 +1,5 @@
+type Cfg = { name: String }
+
+fn mk() -> Cfg = Cfg("positional")
+
+fn main() -> Unit = println(mk().name)

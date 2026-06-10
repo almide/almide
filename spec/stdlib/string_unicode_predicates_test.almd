@@ -97,11 +97,14 @@ test "count with empty pattern is char count plus one" {
   assert_eq(string.count("a日b", ""), 4)      // 3 codepoints + 1
 }
 
-test "last_index_of with empty pattern is byte length" {
+test "last_index_of with empty pattern is codepoint count" {
+  // C-065: index_of/last_index_of return CODEPOINT indices; the empty
+  // pattern matches at the end, i.e. at index char_count (was byte length
+  // before the #419 one-unit fix).
   assert_eq(string.last_index_of("", ""), some(0));
   assert_eq(string.last_index_of("abc", ""), some(3));
-  assert_eq(string.last_index_of("日本", ""), some(6));   // 6 bytes
-  assert_eq(string.last_index_of("a日b", ""), some(5))    // 5 bytes
+  assert_eq(string.last_index_of("日本", ""), some(2));   // 2 codepoints
+  assert_eq(string.last_index_of("a日b", ""), some(3))    // 3 codepoints
 }
 
 test "count and last_index_of unaffected for non-empty pattern" {

@@ -164,6 +164,8 @@ pub struct StringRuntime {
     pub trim: u32,
     pub slice: u32,
     pub char_count: u32,
+    /// `__str_cp_of_byte(s, byte) -> i64`: codepoint index of byte offset `byte`.
+    pub cp_of_byte: u32,
     pub reverse: u32,
     pub repeat: u32,
     pub index_of: u32,
@@ -576,6 +578,7 @@ impl WasmEmitter {
                     is_whitespace: 0, is_unicode_ws: 0, utf8_classify: 0, is_upper: 0, is_lower: 0,
                     cmp: 0,
                     char_count: 0,
+                    cp_of_byte: 0,
                     run_length_encode: 0,
                     utf8_width: 0,
                     utf8_scalar: 0,

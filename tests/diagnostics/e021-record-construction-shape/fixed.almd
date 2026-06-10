@@ -1,0 +1,5 @@
+type Cfg = { name: String }
+
+fn mk() -> Cfg = Cfg(name: "named")
+
+fn main() -> Unit = println(mk().name)

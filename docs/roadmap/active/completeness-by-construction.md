@@ -1,0 +1,166 @@
+# Completeness by Construction
+
+> Perceus や Rust の borrow checker が持つ「機械的に完全性を担保する」性質を、
+> コンパイラの細部にまで宿らせる。規約 (convention) ではなく検証器 (verifier)、
+> 検証器よりも構造 (by construction) — 間違った状態を**表現できなく**する。
+
+Status: **Active** — 2026-06-10 起草。既存の防衛帯
+([correctness-guarantee-gaps](./correctness-guarantee-gaps.md) = codegen 連鎖、
+[determinism-belt](./determinism-belt.md) = 決定性、
+[certification-grade](./certification-grade.md) = 意味論の権威、
+[almide-perceus-belt](./almide-perceus-belt.md) = RC)を**フロントエンドの規則一貫性と
+名前同一性**へ拡張する。
+
+## 原則
+
+1. **One rule, one place.** 同じ意味規則 (型強制・名前修飾・unwrap) が N 箇所に
+   コピーされていれば、N-1 箇所はいずれ乖離する。規則は 1 つの関数に置き、
+   全構文位置がそれを呼ぶ。
+2. **Producers over consumers.** 間違った値 (bare name, target-blind wrap) を
+   下流でパッチするのではなく、生産者を 1 つに絞って正す。
+3. **Accept ⟹ correct, reject ⟹ actionable.** チェッカーが受理したプログラムは
+   両ターゲットで正しく動くか、`[COMPILER BUG]` で停止する。rustc エラーや
+   実行時 trap に「受理済みプログラム」が到達したら、それは設計上の穴。
+4. **Verifier first, then tighten the types.** まず検証ゲートで穴を観測可能にし、
+   ゼロを達成したら型 (newtype / type-state) で再発を表現不能にする。
+   (Verified→Canonical の前例どおり。)
+
+## 実証: 2026-06-10 の 1 セッションで踏んだ穴 (全て修正済み)
+
+この日 1 日で見つかった 7 件は、全てが「機械的保証の不在」に正確に対応する。
+どの保証機構が欠けていたかの実地サンプルとして残す。
+
+| バグ | クラス | 欠けていた機構 |
+|------|--------|----------------|
+| #484 variant payload が bare 名で emit (E0425) | 名前修飾の producer 漏れ | 修飾は resolver 1 箇所で (§1) + cross-module 形状マトリクス (§2) |
+| #485 `x = effectCall()` だけ unwrap されない (E001) | 規則の構文位置間乖離 | binding 強制の単一チョークポイント (§3) |
+| #486 cross-module top-let が LazyLock から move (E0507) | 表現変更時の旧述語残骸 (`starts_with("ALMIDE_RT_")` が dead 化) | storage-class 判定の単一化 (§4) + マトリクス (§2) |
+| record リテラル型が bare のまま IrTopLet.ty へ → native E0425 / **wasm 実行時 trap** | 名前修飾の最後の producer 漏れ | §1 + emit の silent-trap 禁止 (§5) |
+| paren 形 record 構築 `Cfg(name: x)` が args を黙って捨てる (チェッカー素通し) | 受理経路の無検証フォールスルー | TypeName 呼び出しの全数検証 (§6) |
+| `almide fmt` が型位置のみで使われた import を削除 | フォーマッタの意味保存が無保証 | fmt 意味保存ゲート (§7) |
+| record-variant の paren パターンが native E0164 / wasm 受理 | 同上 (§6 の片割れ) | §6 |
+
+教訓: #484/#486 は **12 リリース間** 誰にも気付かれなかった。spec コーパスに
+cross-module 形状がほぼ無かったから。コーパスが踏まない形状は存在しないのと同じ
+— だから形状を**生成**するゲート (§2) が要る。
+
+## フロンティア (優先順)
+
+### §1 QualifiedRef: 名前修飾を構築時に強制 — #433/#484 クラスの根絶
+- **不変条件**: 名前解決を過ぎた IR に bare な cross-module 型/関数名は存在しない。
+- **現状**: 修飾の述語は `canonical_user_type_sym` (canonicalize/resolve.rs) に
+  一本化済み (2026-06-10、record 構築の最後の漏れと同時に)。ただし「全 producer が
+  これを呼ぶ」ことは規約のままで、機械検証されていない。
+- **段階**: (a) pre-emit 検証器 `NameResolutionTotal` — IrProgram 全域の `Ty::Named` /
+  func_ref を走査し、modules に decl がある bare 名を `[COMPILER BUG]` で停止
+  (assert_types_concretized と同型)。(b) ゼロ達成後、resolver でしか構築できない
+  `QualifiedRef` newtype に置換し、`MODULE_METHOD_FNS` 等の per-pass 再導出を削除。
+- **prior art**: rustc DefId / GHC Name vs OccName。 effort: (a) days, (b) weeks。
+
+### §2 Cross-module 形状マトリクスゲート — 「rustc エラー = コンパイラバグ」の機械化
+- **不変条件**: 生成された形状マトリクス (定義サイト × 参照形状 × 型クラス ×
+  バインディング位置) の全セルが `--target rust` でコンパイルでき、wasm で trap しない。
+- **根拠**: #484/#486/N2/N3 は全てこのマトリクスのセル。1 日で 4 セルの空白を踏んだ。
+- **形**: `tests/crossmod_matrix_test.rs` — 小さな形状文法を多ファイル .almd
+  プロジェクトに展開し、native ビルド + wasmtime 実行をハードゲート化。
+  初期赤セルは @xt-allow 式のラチェットで管理し、単調減少のみ許す。
+- effort: week。**次の着手候補 #1。**
+
+### §3 Binding 強制の単一チョークポイント — #485 クラスの根絶
+- **不変条件**: `let x = e` が受理される ⟺ `x = e` が受理される (mutability を除く)。
+  effect-Result unwrap・coercion は全 binding 位置で同一。
+- **現状**: 半分達成 (2026-06-10) — checker は `effect_unwrap_rhs` 1 関数、lowering は
+  `coerce_to_target` 1 関数に集約。ただし checker↔lowering の 2 相が一致することは
+  fixture (C-064) で固定しただけで、メタモルフィックには検証していない。
+- **残り**: xtarget-fuzz の項生成器を流用し、受理プログラムの binding 形を相互
+  書き換えして受理等価性を assert するメタモルフィック CI。lambda 本体内の auto-?
+  欠落 (checker は auto_unwrap を維持、auto_try は Lambda を素通し — 既知の共有バグ)
+  もこのゲートが検出する。
+- **prior art**: EMI / metamorphic compiler testing。 effort: week。
+
+### §4 Top-let storage-class 決定表 — #486 クラスの根絶
+- **不変条件**: top-let の native ストレージ (const / LazyLock / ModuleCell / ModuleRc)
+  と参照様式 (move / clone / borrow) は、(型の Copy 性 × 同/異モジュール × 可変性 ×
+  使用様式) の**全域 match** で 1 回だけ決まり、emit はその属性を消費するだけ。
+- **現状**: 判定が pass_clone (always/eligible)、walker (lazy_top_let_names,
+  const_top_let_vars, var_storage_by_name)、lowering (module_origin) に分散。
+  #486 は分散ゆえの取りこぼしだった。
+- **形**: VarStorageClassification (v0.22) の前例に従い `TopLetStorage` 属性パスへ
+  集約。§2 のマトリクスがセルを fixture 化する。 effort: days。
+
+### §5 Silent-trap 禁止: emit の miss-arm を `[COMPILER BUG]` に
+- **不変条件**: emit_wasm のルックアップ失敗 (record_fields miss, func_map miss 等) は
+  コンパイル時エラーであり、`unreachable` 命令として実行時まで潜伏しない。
+- **根拠**: N3 の wasm trap は emit_member の field_offset miss が黙って
+  `unreachable` を emit した結果。resolved な型での miss は 100% コンパイラバグ。
+- **形**: emit_wasm/collections.rs:455 と calls.rs:368-370 の miss-arm を診断付き
+  停止に変更 (Unknown 型のフォールバック走査は維持)。release でも有効
+  (correctness-guarantee-gaps の release-parity 方針と同じ)。 effort: days。
+  **次の着手候補 #2。**
+
+### §6 コンストラクタ呼び出しの全数検証 — accept-then-explode の根絶
+- **不変条件**: `TypeName(...)` / `TypeName { ... }` は、(a) 検証済み構築に正規化
+  されるか、(b) actionable な E-code で拒否されるかの二択。チェッカーを素通りして
+  rustc / wasm trap に到達する経路は存在しない。
+- **現状の穴** (2026-06-10 実測): check/calls.rs:131 の無条件 `else` フォールスルー。
+  paren 形 record 構築は named args が**黙って捨てられ**、brace 形も
+  unknown/duplicate/missing-field 検証が無い (rustc E0560/E0063 リーク)。
+  record-payload variant の paren パターンは native/wasm で挙動が割れる。
+- **形**: (1) paren-NAMED 構築をチェッカーで brace パイプラインへ AST 正規化
+  (LLM の事前分布は `Cfg(name: x)` を多発する — MSR 上、受理が正しい)。
+  (2) positional-on-record は新 E-code で拒否 (フィールド並べ替えで意味が変わる
+  anti-MSR 形)。(3) Record arm に field-set 検証 (unknown/did-you-mean/duplicate/
+  missing-without-default) を追加 — brace 形と正規化後の paren 形が共有。
+  (4) calls.rs:131 のフォールスルーを診断に置換。(5) record-payload case の
+  paren パターンを `SetEmotion { .. }` ヒント付きで拒否。
+- effort: week。**次の着手候補 #3** (根本原因調査・修正設計は完了済み)。
+
+### §7 fmt 意味保存ゲート
+- **不変条件**: fmt は意味を変えない — 入力が型検査を通るなら出力も通る。
+- **根拠**: fmt が型位置のみで使われた import を「unused」と誤判定して削除していた
+  (2026-06-10 修正)。roundtrip ゲートは「再 parse 可能 + fixpoint」しか見ないので、
+  意味を変える整形は素通りする — 設計済みの盲点。
+- **形**: tests/fmt_test.rs に「全 spec ファイルについて fmt 出力を**チェッカーに
+  かける**」段を追加。checker green → fmt(green) も green。AST 構造比較より
+  正規化 (import 除去・pub 正規化) と両立しやすく、実装が薄い。 effort: days。
+  **次の着手候補 #4。**
+
+### §8 Stdlib 意味論マニフェスト — #419 クラスの根絶
+- **不変条件**: stdlib 関数の文書化された契約次元 (index の単位 codepoint/byte、
+  境界クランプ、エラー variant、Unicode 範囲) は stdlib 定義の構造化フィールドで
+  あり、ドキュメントはそこから生成され、次元ごとの property fixture が両ターゲットで
+  主張を検証する。
+- **根拠**: #419 — docs は `string.len` を「文字数」と明記、実装はバイト数。
+  `index_of`(byte) と `take/drop`(char) の単位混在は multibyte で黙って壊れる。
+  doc↔impl の一致を見る機械は今日まで存在しない。
+- **形**: 第 1 歩は #419 自体の修正 (len/index_of/last_index_of を codepoint に統一、
+  native+wasm 同時、multibyte spec/wasm_cross fixture + 契約)。第 2 歩で
+  stdlib/*.almd の @semantics 注釈 → 生成ドキュメント + 派生 property fixture
+  (runtime-registry regen ゲートと同じ regen-and-diff 形)。 effort: 第 1 歩 days、
+  第 2 歩 weeks。
+
+### §9 almide-interp 第三審を配線 — native=oracle の循環を切る
+- certification-grade CG-1 と同一 (詳細はそちら)。fuzzer の `Oracle` trait は
+  実装ゼロ、interp は消費者ゼロのまま — 2-way 投票は「両方同じに間違う」バグに
+  構造的に盲目。 effort: week。
+
+### §10 Release-parity: debug-only 検証器の常時化
+- wasmparser::validate は debug でも **非致死** (eprintln のみ)、per-pass
+  postcondition / MonoVerify / post-emit RC カウントは release で素通し。
+  v0.25.0 の「warn が 5 RC violation をリリースに通した」事故クラスの残り。
+  安価な検証 (validate は ms オーダー) から cfg を外す。 effort: days。
+
+## 着手順序 (provisional)
+
+1. §2 マトリクスゲート + §5 silent-trap 禁止 — 観測可能性を先に (verifier first)
+2. §6 コンストラクタ全数検証 — 設計済み、ユーザー直撃クラス
+3. §7 fmt 意味保存 + §8 第 1 歩 (#419) — 薄くて効く
+4. §1(a) NameResolutionTotal 検証器 → §4 決定表 → §3 メタモルフィック
+5. §1(b) QualifiedRef 型化、§9、§10 — 帯の恒久化
+
+## 進捗ログ
+
+- 2026-06-10: 起草。#484/#485/#486 + record-literal 修飾 + fmt import 削除を修正
+  (PR #487)。`canonical_user_type_sym` 一本化、`effect_unwrap_rhs` /
+  `coerce_to_target` チョークポイント化、C-064 契約。§6 の根本原因調査完了
+  (check/calls.rs:131 フォールスルー、lower/calls.rs:83-98 named-args 黙殺)。

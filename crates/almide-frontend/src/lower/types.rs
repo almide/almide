@@ -28,7 +28,7 @@ pub(super) fn lower_type_decl(ctx: &mut LowerCtx, name: &str, ty: &ast::TypeExpr
         }
         ast::TypeExpr::Variant { cases } => {
             let is_generic = matches!(generics, Some(gs) if !gs.is_empty());
-            let cs = cases.iter().map(|c| lower_variant_case(ctx, c, name)).collect();
+            let cs = cases.iter().map(|c| lower_variant_case(ctx, c, name, module_prefix)).collect();
             IrTypeDeclKind::Variant {
                 cases: cs, is_generic,
                 boxed_args: std::collections::HashSet::new(),
@@ -45,17 +45,22 @@ pub(super) fn lower_type_decl(ctx: &mut LowerCtx, name: &str, ty: &ast::TypeExpr
     IrTypeDecl { name: sym(&qualified_name), kind, deriving: deriving.as_ref().map(|d| d.iter().copied().collect()), generics: generics.cloned(), visibility: vis, doc: None, blank_lines_before: 0 }
 }
 
-fn lower_variant_case(ctx: &mut LowerCtx, case: &ast::VariantCase, _parent: &str) -> IrVariantDecl {
+fn lower_variant_case(ctx: &mut LowerCtx, case: &ast::VariantCase, _parent: &str, module_prefix: Option<&str>) -> IrVariantDecl {
+    // #484: payload types must resolve through the same env+prefix path as
+    // record fields and alias targets (lower_type_decl's `resolve` closure),
+    // so a cross-module payload like `m.Emotion` keeps its qualified canonical
+    // name and gets mangled alongside its declaration by IrLinkFlattenPass.
+    let resolve = |te: &ast::TypeExpr| crate::canonicalize::resolve::resolve_type_expr_in(te, Some(&ctx.env.types), module_prefix);
     match case {
         ast::VariantCase::Unit { name } => IrVariantDecl { name: *name, kind: IrVariantKind::Unit },
         ast::VariantCase::Tuple { name, fields } => {
-            let tys = fields.iter().map(|f| resolve_type_expr(f)).collect();
+            let tys = fields.iter().map(|f| resolve(f)).collect();
             IrVariantDecl { name: *name, kind: IrVariantKind::Tuple { fields: tys } }
         }
         ast::VariantCase::Record { name, fields } => {
             let fs = fields.iter().map(|f| {
                 let default = f.default.as_ref().map(|d| lower_expr(ctx, d));
-                IrFieldDecl { name: f.name, ty: resolve_type_expr(&f.ty), default, alias: f.alias, attrs: f.attrs.clone() }
+                IrFieldDecl { name: f.name, ty: resolve(&f.ty), default, alias: f.alias, attrs: f.attrs.clone() }
             }).collect();
             IrVariantDecl { name: *name, kind: IrVariantKind::Record { fields: fs } }
         }
