@@ -872,8 +872,9 @@ pub fn cmd_fmt(files: &[String], write_back: bool) {
 
     for file in files {
         let (mut program, _, _) = parse_file(file);
+        let source_text = std::fs::read_to_string(file).unwrap_or_default();
         // Auto-manage imports: add missing, remove unused
-        let import_changes = fmt::auto_imports(&mut program, &dep_names, &dep_submodules);
+        let import_changes = fmt::auto_imports(&mut program, &source_text, &dep_names, &dep_submodules);
         for msg in &import_changes {
             eprintln!("{}: {}", file, msg);
         }
