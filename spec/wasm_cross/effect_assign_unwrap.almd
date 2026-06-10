@@ -1,0 +1,32 @@
+
+// @contract: C-064
+// #485: the effect-fn auto-unwrap rule is identical across binding positions
+// (let / var / plain assign / index assign) and type-directed (a Result-typed
+// target keeps the Result). This matrix pins the rule byte-for-byte across
+// native and WASM, including the declared-Result distinction: an explicit
+// `Result[..]` ANNOTATION keeps the Result, while an un-annotated bind of a
+// `-> Result[..]`-declared effect fn still auto-unwraps.
+effect fn step(n: Int) -> Int = n + 1
+
+effect fn declared_result() -> Result[Int, String] = ok(7)
+
+effect fn main() -> Unit = {
+  var x = 0;
+  x = step(x);
+  println("assign=" + int.to_string(x));
+  var seq = 0;
+  while seq < 3 {
+    seq = step(seq);
+  };
+  println("loop=" + int.to_string(seq));
+  var r: Result[Int, String] = ok(0);
+  r = step(5);
+  println("result_target=" + int.to_string(r ?? -1));
+  let r2: Result[Int, String] = step(7);
+  println("annotated_let=" + int.to_string(r2 ?? -1));
+  var xs = [0, 0];
+  xs[0] = step(10);
+  println("index_assign=" + int.to_string(list.get(xs, 0) ?? -1));
+  let v = declared_result();
+  println("unannotated=" + int.to_string(v))
+}

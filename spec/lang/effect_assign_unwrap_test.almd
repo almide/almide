@@ -1,0 +1,70 @@
+
+// #485: in an effect fn, the auto-unwrap rule is identical across every
+// binding-shaped position — let, var, plain assign, index assign — and is
+// type-directed: a Result-typed TARGET keeps the Result, everything else
+// takes the auto-`?`.
+effect fn step(n: Int) -> Int = n + 1
+
+effect fn plain_assign() -> Int = {
+  var x = 0;
+  x = step(x);
+  x
+}
+
+effect fn loop_assign() -> Int = {
+  var seq = 0;
+  while seq < 3 {
+    seq = step(seq);
+  };
+  seq
+}
+
+effect fn result_target_keeps() -> Int = {
+  var r: Result[Int, String] = ok(0);
+  r = step(5);
+  r ?? -1
+}
+
+effect fn annotated_let_keeps() -> Int = {
+  let r: Result[Int, String] = step(7);
+  r ?? -1
+}
+
+effect fn index_assign_unwraps() -> Int = {
+  var xs = [0, 0];
+  xs[0] = step(10);
+  list.get(xs, 0) ?? -1
+}
+
+// An UN-annotated bind of a `-> Result[..]`-declared effect fn still
+// auto-unwraps (only an explicit annotation keeps the Result).
+effect fn declared_result() -> Result[Int, String] = ok(7)
+
+effect fn unannotated_unwraps() -> Int = {
+  let v = declared_result();
+  v
+}
+
+test "plain assign auto-unwraps the lifted Result (#485)" {
+  assert_eq(plain_assign() ?? -1, 1)
+}
+
+test "reconnect-loop assign shape (#485)" {
+  assert_eq(loop_assign() ?? -1, 3)
+}
+
+test "Result-typed assign target keeps the Result (#485)" {
+  assert_eq(result_target_keeps() ?? -1, 6)
+}
+
+test "annotated-Result let keeps the Result (#485)" {
+  assert_eq(annotated_let_keeps() ?? -1, 8)
+}
+
+test "index assign auto-unwraps (#485)" {
+  assert_eq(index_assign_unwraps() ?? -1, 11)
+}
+
+test "un-annotated bind of declared-Result effect fn unwraps (#485)" {
+  assert_eq(unannotated_unwraps() ?? -1, 7)
+}

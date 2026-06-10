@@ -1151,6 +1151,21 @@ impl Checker {
         });
     }
 
+    /// The effect-fn auto-unwrap rule, shared by every binding-shaped
+    /// position (let / var / assign): a Result[T, E]-typed RHS unwraps to T
+    /// — the lowering inserts the matching `?` — unless the target itself
+    /// keeps the Result (declared Result annotation, Result-typed var, or a
+    /// usage-skip like `match x { ok/err }`). One function so the positions
+    /// can never diverge again (#485).
+    fn effect_unwrap_rhs(&self, t: Ty, target_keeps_result: bool) -> Ty {
+        if self.env.auto_unwrap && !target_keeps_result {
+            match t {
+                Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args.into_iter().next().unwrap(),
+                other => other,
+            }
+        } else { t }
+    }
+
     pub(crate) fn check_stmt(&mut self, stmt: &mut ast::Stmt) {
         match stmt {
             ast::Stmt::Let { name, ty, value, span } => {
@@ -1165,12 +1180,7 @@ impl Checker {
                     // unless this binding is later used as a `match x { ok(_) =>
                     // ..., err(_) => ... }` subject — in which case the user
                     // wants to inspect the Result directly.
-                    if self.env.auto_unwrap && !self.env.skip_auto_unwrap_for.contains(&sym(name)) {
-                        match t {
-                            Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args.into_iter().next().unwrap(),
-                            other => other,
-                        }
-                    } else { t }
+                    self.effect_unwrap_rhs(t, self.env.skip_auto_unwrap_for.contains(&sym(name)))
                 };
                 if let Some(s) = span {
                     self.env.var_decl_locs.insert(sym(name), (s.line, s.col));
@@ -1186,12 +1196,9 @@ impl Checker {
                     declared
                 } else {
                     let t = resolve_ty(&val_ty, &self.uf);
-                    if self.env.auto_unwrap {
-                        match t {
-                            Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args.into_iter().next().unwrap(),
-                            other => other,
-                        }
-                    } else { t }
+                    // Same rule as Let, including the usage-skip: a `var r =
+                    // effectCall()` later matched on ok/err keeps the Result.
+                    self.effect_unwrap_rhs(t, self.env.skip_auto_unwrap_for.contains(&sym(name)))
                 };
                 if let Some(s) = span {
                     self.env.var_decl_locs.insert(sym(name), (s.line, s.col));
@@ -1272,7 +1279,15 @@ impl Checker {
                         // element to `Int` (it is the source of truth, exactly as
                         // a typed `let` binding is). Without this, an empty literal
                         // assigned to a typed var stays undecidable (E018).
-                        self.constrain(var_ty.clone(), val_ty.clone(), format!("assign {}", name));
+                        //
+                        // #485: apply the same effect-fn auto-unwrap rule as
+                        // let/var first — `x = step(x)` with x: Int unwraps the
+                        // lifted Result[Int, E]; a Result-typed target keeps it.
+                        // Only substitute when the unwrap actually fires, so an
+                        // unresolved TypeVar RHS keeps flowing through inference.
+                        let unwrapped = self.effect_unwrap_rhs(val_resolved.clone(), var_resolved.is_result());
+                        let constrain_val = if unwrapped != val_resolved { unwrapped } else { val_ty.clone() };
+                        self.constrain(var_ty.clone(), constrain_val, format!("assign {}", name));
                     }
                 }
                 if self.env.lookup_var(name).is_some() && !self.env.mutable_vars.contains(&sym(name)) {
