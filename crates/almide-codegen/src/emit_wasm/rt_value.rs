@@ -1135,9 +1135,10 @@ fn compile_json_get_path(emitter: &mut WasmEmitter) {
     wasm!(f, {
         local_get(2); i32_eqz;
         if_empty;
-          // Empty path → return some(value): alloc option box
+          // Empty path → return some(value): alloc option box.
+          // SHARE: the box holds a second reference to the input tree.
           i32_const(4); call(alloc); local_set(13);
-          local_get(13); local_get(0); i32_store(0);
+          local_get(13); local_get(0); call(emitter.rt.rc_inc); i32_store(0);
           local_get(13);
           return_;
         end;
@@ -1232,9 +1233,10 @@ fn compile_json_get_path(emitter: &mut WasmEmitter) {
     });
 
     // --- Return some(cur_val): alloc Option box ---
+    // SHARE: cur_val is an interior pointer into the surviving input tree.
     wasm!(f, {
         i32_const(4); call(alloc); local_set(13);
-        local_get(13); local_get(8); i32_store(0);
+        local_get(13); local_get(8); call(emitter.rt.rc_inc); i32_store(0);
         local_get(13);
         end;
     });
@@ -1482,17 +1484,19 @@ fn compile_json_set_path(emitter: &mut WasmEmitter) {
                 local_get(7); i32_load(8);
                 call(str_eq);
                 if_empty;
-                  // Replace value
+                  // Replace value — the kept KEY string is shared from the
+                  // old pair the source tree still owns: dup.
                   i32_const(8); call(alloc); local_set(17);
-                  local_get(17); local_get(13); i32_load(0); i32_store(0);
+                  local_get(17); local_get(13); i32_load(0); call(emitter.rt.rc_inc); i32_store(0);
                   local_get(17); local_get(9); i32_store(4);
                   local_get(15); i32_const(list_data_off()); i32_add;
                   local_get(12); i32_const(4); i32_mul; i32_add;
                   local_get(17); i32_store(0);
                 else_;
+                  // Unchanged pair: shared between old and new object — dup.
                   local_get(15); i32_const(list_data_off()); i32_add;
                   local_get(12); i32_const(4); i32_mul; i32_add;
-                  local_get(13); i32_store(0);
+                  local_get(13); call(emitter.rt.rc_inc); i32_store(0);
                 end;
                 local_get(12); i32_const(1); i32_add; local_set(12);
                 br(0);
@@ -1501,7 +1505,7 @@ fn compile_json_set_path(emitter: &mut WasmEmitter) {
               local_get(18); local_get(11); i32_gt_u;
               if_empty;
                 i32_const(8); call(alloc); local_set(17);
-                local_get(17); local_get(7); i32_load(8); i32_store(0);
+                local_get(17); local_get(7); i32_load(8); call(emitter.rt.rc_inc); i32_store(0);
                 local_get(17); local_get(9); i32_store(4);
                 local_get(15); i32_const(list_data_off()); i32_add;
                 local_get(11); i32_const(4); i32_mul; i32_add;
@@ -1518,7 +1522,7 @@ fn compile_json_set_path(emitter: &mut WasmEmitter) {
               i32_const(list_hdr() + 4); call(alloc); local_set(15); // pairs list: 1 slot
               local_get(15); i32_const(1); i32_store(0);
               i32_const(VALUE_BOX_SIZE); call(alloc); local_set(17); // pair [key][val]
-              local_get(17); local_get(7); i32_load(8); i32_store(0);
+              local_get(17); local_get(7); i32_load(8); call(emitter.rt.rc_inc); i32_store(0);
               local_get(17); local_get(9); i32_store(4);
               local_get(15); i32_const(list_data_off()); i32_add; local_get(17); i32_store(0);
               i32_const(VALUE_BOX_SIZE); call(alloc); local_set(9);
@@ -1538,7 +1542,7 @@ fn compile_json_set_path(emitter: &mut WasmEmitter) {
             // Non-array → no-op: cur_built = orig_val.
             local_get(14); i32_load(0); i32_const(VTAG_ARRAY); i32_ne;
             if_empty;
-              local_get(14); local_set(9);
+              local_get(14); call(emitter.rt.rc_inc); local_set(9);
             else_;
               local_get(14); i32_load(4); local_set(10); // old list
               local_get(10); i32_load(0); local_set(11); // len
@@ -1551,7 +1555,7 @@ fn compile_json_set_path(emitter: &mut WasmEmitter) {
               local_get(18); local_get(11); i32_ge_s;
               i32_or;
               if_empty;
-                local_get(14); local_set(9);
+                local_get(14); call(emitter.rt.rc_inc); local_set(9);
               else_;
                 // Clone list replacing at idx
                 i32_const(list_hdr()); local_get(11); i32_const(4); i32_mul; i32_add;
@@ -1565,9 +1569,10 @@ fn compile_json_set_path(emitter: &mut WasmEmitter) {
                   local_get(12); local_get(18); i32_eq;
                   if_i32; local_get(9);
                   else_;
+                    // Unchanged element: shared between old and new array — dup.
                     local_get(10); i32_const(list_data_off()); i32_add;
                     local_get(12); i32_const(4); i32_mul; i32_add;
-                    i32_load(0);
+                    i32_load(0); call(emitter.rt.rc_inc);
                   end;
                   i32_store(0);
                   local_get(12); i32_const(1); i32_add; local_set(12);
@@ -1668,7 +1673,7 @@ fn compile_json_remove_path(emitter: &mut WasmEmitter) {
           local_get(7); i32_const(1); i32_eq;
           if_empty;
             local_get(8); i32_load(0); i32_const(6); i32_ne;
-            if_empty; local_get(0); return_; end;
+            if_empty; local_get(0); call(emitter.rt.rc_inc); return_; end;
             local_get(8); i32_load(4); local_set(9);
             local_get(9); i32_load(0); local_set(10);
             i32_const(0); local_set(11);
@@ -1691,7 +1696,7 @@ fn compile_json_remove_path(emitter: &mut WasmEmitter) {
               br(0);
             end; end;
             local_get(13); i32_eqz;
-            if_empty; local_get(0); return_; end;
+            if_empty; local_get(0); call(emitter.rt.rc_inc); return_; end;
           end;
     });
 
@@ -1700,7 +1705,7 @@ fn compile_json_remove_path(emitter: &mut WasmEmitter) {
           local_get(7); i32_const(2); i32_eq;
           if_empty;
             local_get(8); i32_load(0); i32_const(VTAG_ARRAY); i32_ne;
-            if_empty; local_get(0); return_; end; // non-array → no-op (orig)
+            if_empty; local_get(0); call(emitter.rt.rc_inc); return_; end; // non-array → no-op (orig)
             local_get(8); i32_load(4); local_set(9);
             local_get(9); i32_load(0); local_set(10);
             local_get(6); i32_load(8); local_set(17);
@@ -1710,7 +1715,7 @@ fn compile_json_remove_path(emitter: &mut WasmEmitter) {
             local_get(17); i32_const(0); i32_lt_s;
             local_get(17); local_get(10); i32_ge_s;
             i32_or;
-            if_empty; local_get(0); return_; end; // OOB → no-op (orig)
+            if_empty; local_get(0); call(emitter.rt.rc_inc); return_; end; // OOB → no-op (orig)
             local_get(14); local_get(5); i32_const(1); i32_add; i32_const(4); i32_mul; i32_add;
             local_get(9); i32_const(list_data_off()); i32_add;
             local_get(17); i32_const(4); i32_mul; i32_add;
@@ -1739,7 +1744,7 @@ fn compile_json_remove_path(emitter: &mut WasmEmitter) {
         local_get(7); i32_const(1); i32_eq;
         if_empty;
           local_get(8); i32_load(0); i32_const(6); i32_ne;
-          if_empty; local_get(0); return_; end;
+          if_empty; local_get(0); call(emitter.rt.rc_inc); return_; end;
           local_get(8); i32_load(4); local_set(9);
           local_get(9); i32_load(0); local_set(10);
           // Alloc new list (worst case same size)
@@ -1757,9 +1762,10 @@ fn compile_json_remove_path(emitter: &mut WasmEmitter) {
             call(str_eq);
             i32_eqz;
             if_empty;
+              // Surviving pair: shared with the source object — dup.
               local_get(15); i32_const(list_data_off()); i32_add;
               local_get(18); i32_const(4); i32_mul; i32_add;
-              local_get(12); i32_store(0);
+              local_get(12); call(emitter.rt.rc_inc); i32_store(0);
               local_get(18); i32_const(1); i32_add; local_set(18);
             end;
             local_get(11); i32_const(1); i32_add; local_set(11);
@@ -1777,7 +1783,7 @@ fn compile_json_remove_path(emitter: &mut WasmEmitter) {
         local_get(7); i32_const(2); i32_eq;
         if_empty;
           local_get(8); i32_load(0); i32_const(VTAG_ARRAY); i32_ne;
-          if_empty; local_get(0); return_; end; // non-array → no-op (orig)
+          if_empty; local_get(0); call(emitter.rt.rc_inc); return_; end; // non-array → no-op (orig)
           local_get(8); i32_load(4); local_set(9);
           local_get(9); i32_load(0); local_set(10);
           local_get(6); i32_load(8); local_set(17);
@@ -1787,7 +1793,7 @@ fn compile_json_remove_path(emitter: &mut WasmEmitter) {
           local_get(17); i32_const(0); i32_lt_s;
           local_get(17); local_get(10); i32_ge_s;
           i32_or;
-          if_empty; local_get(0); return_; end; // OOB → no-op (orig)
+          if_empty; local_get(0); call(emitter.rt.rc_inc); return_; end; // OOB → no-op (orig)
           // Alloc new list (len - 1)
           local_get(10); i32_const(1); i32_sub; local_set(13);
           i32_const(list_hdr()); local_get(13); i32_const(4); i32_mul; i32_add;
@@ -1848,15 +1854,15 @@ fn compile_json_remove_path(emitter: &mut WasmEmitter) {
               call(str_eq);
               if_empty;
                 i32_const(8); call(alloc); local_set(13);
-                local_get(13); local_get(12); i32_load(0); i32_store(0);
+                local_get(13); local_get(12); i32_load(0); call(emitter.rt.rc_inc); i32_store(0);
                 local_get(13); local_get(16); i32_store(4);
                 local_get(15); i32_const(list_data_off()); i32_add;
                 local_get(11); i32_const(4); i32_mul; i32_add;
-                local_get(13); i32_store(0);
+                local_get(13); call(emitter.rt.rc_inc); i32_store(0);
               else_;
                 local_get(15); i32_const(list_data_off()); i32_add;
                 local_get(11); i32_const(4); i32_mul; i32_add;
-                local_get(12); i32_store(0);
+                local_get(12); call(emitter.rt.rc_inc); i32_store(0);
               end;
               local_get(11); i32_const(1); i32_add; local_set(11);
               br(0);
@@ -1895,9 +1901,10 @@ fn compile_json_remove_path(emitter: &mut WasmEmitter) {
                 local_get(11); local_get(17); i32_eq;
                 if_i32; local_get(16);
                 else_;
+                  // Unchanged element: shared between old and new array — dup.
                   local_get(9); i32_const(list_data_off()); i32_add;
                   local_get(11); i32_const(4); i32_mul; i32_add;
-                  i32_load(0);
+                  i32_load(0); call(emitter.rt.rc_inc);
                 end;
                 i32_store(0);
                 local_get(11); i32_const(1); i32_add; local_set(11);

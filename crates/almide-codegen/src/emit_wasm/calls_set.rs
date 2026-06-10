@@ -86,6 +86,8 @@ impl FuncCompiler<'_> {
                           local_get(s); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
                           local_get(s3); i32_const(es); i32_mul; i32_add;
                 });
+                // MOVE: from_list grows its OWN accumulator buffer and abandons the
+                // old one — the element references just relocate, no new owner.
                 self.emit_elem_copy(&elem_ty);
                 wasm!(self.func, {
                           local_get(s3); i32_const(1); i32_add; local_set(s3);
@@ -97,8 +99,13 @@ impl FuncCompiler<'_> {
                         local_get(xs); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
                         local_get(s1); i32_const(es); i32_mul; i32_add;
                 });
-                self.emit_elem_copy(&elem_ty);
+                self.emit_elem_copy_owned(&elem_ty);
                 wasm!(self.func, {
+                        // Free the abandoned old accumulator backing: its elements
+                        // were MOVE-copied into s2, so a PLAIN rc_dec reclaims just
+                        // this buffer (not the relocated elements). Without it every
+                        // grow leaks its previous buffer (O(n) churn per from_list).
+                        local_get(s); call(self.emitter.rt.rc_dec);
                         local_get(s2); local_set(s);
                       end;
                       local_get(s1); i32_const(1); i32_add; local_set(s1);
@@ -220,7 +227,10 @@ impl FuncCompiler<'_> {
                       br(0);
                     end; end;
                     local_get(s2);
-                    if_i32; local_get(s);
+                    // SHARE: dedup hit → the result IS the borrowed input set. Dup it
+                    // so the caller's scope-end Dec of both the input and the result
+                    // don't double-free the single heap set they now share.
+                    if_i32; local_get(s); call(self.emitter.rt.rc_inc);
                     else_;
                       i32_const(self.emitter.layout_reg.header_size(super::engine::layout::LIST) as i32); local_get(s); i32_load(0); i32_const(1); i32_add;
                       i32_const(es); i32_mul; i32_add;
@@ -234,7 +244,7 @@ impl FuncCompiler<'_> {
                         local_get(s); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
                         local_get(s2); i32_const(es); i32_mul; i32_add;
                 });
-                self.emit_elem_copy(&elem_ty);
+                self.emit_elem_copy_owned(&elem_ty);
                 wasm!(self.func, {
                         local_get(s2); i32_const(1); i32_add; local_set(s2);
                         br(0);
@@ -243,6 +253,13 @@ impl FuncCompiler<'_> {
                       local_get(s); i32_load(0); i32_const(es); i32_mul; i32_add;
                       local_get(val);
                 });
+                // SHARE: `val` (args[1]) is a borrowed element; the new set takes a
+                // new reference to it, so dup before storing (heap i32 only — rc_inc
+                // no-ops on scalars). This runs only on the not-found branch, so a
+                // deduplicated (already-present) element is never over-incremented.
+                if vt == ValType::I32 {
+                    wasm!(self.func, { call(self.emitter.rt.rc_inc); });
+                }
                 self.emit_store_at(&elem_ty, 0);
                 wasm!(self.func, { local_get(s1); end; });
                 self.scratch.free(val, vt);
@@ -281,7 +298,9 @@ impl FuncCompiler<'_> {
                       br(0);
                     end; end;
                     local_get(s1); i32_const(0); i32_lt_s;
-                    if_i32; local_get(s); // not found
+                    // SHARE: element absent → the result IS the borrowed input set;
+                    // dup so input and result don't double-free the shared heap set.
+                    if_i32; local_get(s); call(self.emitter.rt.rc_inc); // not found
                     else_;
                       // Store original set ptr
                       local_get(s); local_set(orig);
@@ -304,7 +323,7 @@ impl FuncCompiler<'_> {
                           local_get(orig); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
                           local_get(s3); i32_const(es); i32_mul; i32_add;
                 });
-                self.emit_elem_copy(&elem_ty);
+                self.emit_elem_copy_owned(&elem_ty);
                 wasm!(self.func, {
                           local_get(s); i32_const(1); i32_add; local_set(s);
                         end;
@@ -349,7 +368,7 @@ impl FuncCompiler<'_> {
                       local_get(a); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
                       local_get(i); i32_const(es); i32_mul; i32_add;
                 });
-                self.emit_elem_copy(&elem_ty);
+                self.emit_elem_copy_owned(&elem_ty);
                 wasm!(self.func, {
                       local_get(i); i32_const(1); i32_add; local_set(i);
                       br(0);
@@ -386,7 +405,7 @@ impl FuncCompiler<'_> {
                         local_get(b); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
                         local_get(i); i32_const(es); i32_mul; i32_add;
                 });
-                self.emit_elem_copy(&elem_ty);
+                self.emit_elem_copy_owned(&elem_ty);
                 wasm!(self.func, {
                         local_get(out_count); i32_const(1); i32_add; local_set(out_count);
                       end;
@@ -404,8 +423,11 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(a);
             }
             "to_list" => {
-                // Set has same layout as List — just return the ptr
+                // Set has same layout as List — return the ptr, but as a NEW owner:
+                // the resulting List and the source Set share one heap object, so dup
+                // its refcount (else both their scope-end Decs double-free it).
                 self.emit_expr(&args[0]);
+                wasm!(self.func, { call(self.emitter.rt.rc_inc); });
             }
             "intersection" => {
                 // intersection(a, b) → Set[A]: elements in both a and b.
@@ -464,7 +486,7 @@ impl FuncCompiler<'_> {
                         local_get(a); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
                         local_get(s2); i32_const(es); i32_mul; i32_add;
                 });
-                self.emit_elem_copy(&elem_ty);
+                self.emit_elem_copy_owned(&elem_ty);
                 wasm!(self.func, {
                         local_get(s1); i32_const(1); i32_add; local_set(s1);
                       end;
@@ -530,7 +552,7 @@ impl FuncCompiler<'_> {
                         local_get(a); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
                         local_get(s2); i32_const(es); i32_mul; i32_add;
                 });
-                self.emit_elem_copy(&elem_ty);
+                self.emit_elem_copy_owned(&elem_ty);
                 wasm!(self.func, {
                         local_get(s1); i32_const(1); i32_add; local_set(s1);
                       end;
@@ -603,7 +625,7 @@ impl FuncCompiler<'_> {
                         local_get(a); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
                         local_get(s2); i32_const(es); i32_mul; i32_add;
                 });
-                self.emit_elem_copy(&elem_ty);
+                self.emit_elem_copy_owned(&elem_ty);
                 wasm!(self.func, {
                         local_get(s1); i32_const(1); i32_add; local_set(s1);
                       end;
@@ -641,7 +663,7 @@ impl FuncCompiler<'_> {
                         local_get(b); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
                         local_get(s2); i32_const(es); i32_mul; i32_add;
                 });
-                self.emit_elem_copy(&elem_ty);
+                self.emit_elem_copy_owned(&elem_ty);
                 wasm!(self.func, {
                         local_get(s1); i32_const(1); i32_add; local_set(s1);
                       end;
@@ -844,6 +866,9 @@ impl FuncCompiler<'_> {
                 });
                 self.emit_elem_copy(&result_elem_ty);
                 wasm!(self.func, {
+                        // Free the abandoned old dedup accumulator (elements MOVE-copied
+                        // into j); plain rc_dec reclaims just this buffer.
+                        local_get(result); call(self.emitter.rt.rc_dec);
                         local_get(j); local_set(result);
                       end;
                       local_get(i); i32_const(1); i32_add; local_set(i);

@@ -53,7 +53,7 @@ impl FuncCompiler<'_> {
                         local_get(xs); i32_const(list_data_off); i32_add;
                         local_get(i); i32_const(es); i32_mul; i32_add;
                 });
-                self.emit_elem_copy(&elem_ty);
+                self.emit_elem_copy_owned(&elem_ty);
                 wasm!(self.func, {
                         local_get(tmp); local_set(result); br(2);
                       end;
@@ -251,7 +251,7 @@ impl FuncCompiler<'_> {
                       local_get(start); local_get(i); i32_add;
                       i32_const(es); i32_mul; i32_add;
                 });
-                self.emit_elem_copy(&elem_ty);
+                self.emit_elem_copy_owned(&elem_ty);
                 wasm!(self.func, {
                       local_get(i); i32_const(1); i32_add; local_set(i);
                       br(0);
@@ -300,7 +300,7 @@ impl FuncCompiler<'_> {
                       local_get(xs); i32_const(list_data_off); i32_add;
                       local_get(i); i32_const(es); i32_mul; i32_add;
                 });
-                self.emit_elem_copy(&elem_ty);
+                self.emit_elem_copy_owned(&elem_ty);
                 wasm!(self.func, {
                       local_get(i); i32_const(1); i32_add; local_set(i);
                       br(0);
@@ -353,6 +353,15 @@ impl FuncCompiler<'_> {
                       local_get(i); i32_const(es); i32_mul; i32_add;
                       local_get(val);
                 });
+                // The result owns n references to the SAME element block —
+                // without one inc per stored slot, a deep Dec of the result
+                // decs that single block n times (sentinel trap; surfaced via
+                // the for+concat-push → list.repeat rewrite). A fresh-arg
+                // call leaks exactly one count (no owner for the original
+                // ref) — the safe direction.
+                if crate::pass_perceus::is_heap_type(&elem_ty) {
+                    wasm!(self.func, { call(self.emitter.rt.rc_inc); });
+                }
                 self.emit_store_at(&elem_ty, 0);
                 wasm!(self.func, {
                       local_get(i); i32_const(1); i32_add; local_set(i);
@@ -644,7 +653,7 @@ impl FuncCompiler<'_> {
                       local_get(xs); i32_const(list_data_off); i32_add;
                       local_get(k); i32_const(es); i32_mul; i32_add;
                 });
-                self.emit_elem_copy(&elem_ty);
+                self.emit_elem_copy_owned(&elem_ty);
                 wasm!(self.func, {
                       local_get(k); i32_const(1); i32_add; local_set(k);
                       br(0);
@@ -764,7 +773,7 @@ impl FuncCompiler<'_> {
                         local_get(j); i32_add;
                         i32_const(es); i32_mul; i32_add;
                 });
-                self.emit_elem_copy(&elem_ty);
+                self.emit_elem_copy_owned(&elem_ty);
                 wasm!(self.func, {
                         local_get(j); i32_const(1); i32_add; local_set(j);
                         br(0);
@@ -843,7 +852,7 @@ impl FuncCompiler<'_> {
                         local_get(i); local_get(j); i32_add;
                         i32_const(es); i32_mul; i32_add;
                 });
-                self.emit_elem_copy(&elem_ty);
+                self.emit_elem_copy_owned(&elem_ty);
                 wasm!(self.func, {
                         local_get(j); i32_const(1); i32_add; local_set(j);
                         br(0);
@@ -892,7 +901,7 @@ impl FuncCompiler<'_> {
                       local_get(dst); i32_const(list_data_off); i32_add;
                       local_get(xs); i32_const(list_data_off); i32_add;
                 });
-                self.emit_elem_copy(&elem_ty);
+                self.emit_elem_copy_owned(&elem_ty); // SHARE: copy from borrowed xs into fresh dst
                 wasm!(self.func, {
                       i32_const(1); local_set(out_count); // out_count = 1
                       i32_const(1); local_set(i); // i = 1
@@ -921,7 +930,7 @@ impl FuncCompiler<'_> {
                           local_get(xs); i32_const(list_data_off); i32_add;
                           local_get(i); i32_const(es); i32_mul; i32_add;
                 });
-                self.emit_elem_copy(&elem_ty);
+                self.emit_elem_copy_owned(&elem_ty); // SHARE: copy from borrowed xs into fresh dst
                 wasm!(self.func, {
                           local_get(out_count); i32_const(1); i32_add; local_set(out_count);
                         end;
@@ -1013,7 +1022,10 @@ impl FuncCompiler<'_> {
                       local_get(xs); i32_const(list_data_off); i32_add;
                       local_get(i); i32_const(es); i32_mul; i32_add;
                 });
-                self.emit_elem_copy(&elem_ty);
+                // SHARE: copy the borrowed source elements into the fresh sorted
+                // result — dup so the result owns them (the in-place swaps below just
+                // rearrange these owned references; the source's Dec is balanced).
+                self.emit_elem_copy_owned(&elem_ty);
                 wasm!(self.func, {
                       local_get(i); i32_const(1); i32_add; local_set(i);
                       br(0);

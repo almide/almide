@@ -99,7 +99,7 @@ impl FuncCompiler<'_> {
                           local_get(eb); local_get(ei); i32_const(es as i32); i32_mul; i32_add;
                           i32_const(ks as i32); i32_add;
                 });
-                self.emit_elem_copy_sized(vs);
+                self.emit_elem_copy_sized(vs, false);
                 wasm!(self.func, {
                           local_get(vc); local_set(result); br(3);
                         end;
@@ -315,12 +315,12 @@ impl FuncCompiler<'_> {
                 });
                 self.emit_dict_fit_cap(n, cap);
                 self.emit_dict_alloc(nm, cap, es);
-                self.emit_dict_recap(m, old_cap, nm, cap, es, &key_ty);
+                self.emit_dict_recap(m, old_cap, nm, cap, es, &key_ty, Some((&key_ty, &val_ty)));
                 self.emit_dict_index_base(nm, cap);
                 wasm!(self.func, { local_set(ib); });
                 self.emit_dict_entries_base(nm, cap);
                 wasm!(self.func, { local_set(eb); });
-                self.emit_dict_put_entry(nm, cap, ib, eb, tmp, es, ks, vs, &key_ty);
+                self.emit_dict_put_entry(nm, cap, ib, eb, tmp, es, ks, vs, &key_ty, &val_ty);
                 wasm!(self.func, { local_get(nm); });
 
                 self.scratch.free_i32(eb);
@@ -372,7 +372,7 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, { local_set(ib); });
                 self.emit_dict_entries_base(m, cap);
                 wasm!(self.func, { local_set(eb); });
-                self.emit_dict_put_entry(m, cap, ib, eb, tmp, es, ks, vs, &key_ty);
+                self.emit_dict_put_entry(m, cap, ib, eb, tmp, es, ks, vs, &key_ty, &val_ty);
                 // Grow if the load factor is exceeded (only a new key can trip it).
                 wasm!(self.func, {
                     local_get(m); i32_load(0); i32_const(lm::LOAD_DEN as i32); i32_mul;
@@ -442,6 +442,27 @@ impl FuncCompiler<'_> {
                       if_empty;  // key != search key → keep (append densely)
                         local_get(eb_new); local_get(ne); i32_const(es as i32); i32_mul; i32_add;
                         local_get(entry); i32_const(es as i32); memory_copy;
+                });
+                // SHARE dup: the source dict survives `remove` and owns the
+                // kept entries — the survivor copy needs its own references.
+                {
+                    let kh = crate::pass_perceus::is_heap_type(&key_ty);
+                    let vh = crate::pass_perceus::is_heap_type(&self.map_val_ty(&args[0].ty));
+                    if kh {
+                        wasm!(self.func, {
+                        local_get(eb_new); local_get(ne); i32_const(es as i32); i32_mul; i32_add;
+                        i32_load(0); call(self.emitter.rt.rc_inc); drop;
+                        });
+                    }
+                    if vh {
+                        wasm!(self.func, {
+                        local_get(eb_new); local_get(ne); i32_const(es as i32); i32_mul; i32_add;
+                        i32_const(ks as i32); i32_add;
+                        i32_load(0); call(self.emitter.rt.rc_inc); drop;
+                        });
+                    }
+                }
+                wasm!(self.func, {
                         local_get(ne); i32_const(1); i32_add; local_set(ne);
                       end;
                       local_get(i); i32_const(1); i32_add; local_set(i); br(0);
@@ -507,7 +528,9 @@ impl FuncCompiler<'_> {
                             local_get(i); i32_const(ks as i32); i32_mul; i32_add;
                             local_get(eb); local_get(i); i32_const(es as i32); i32_mul; i32_add;
                         });
-                        self.emit_elem_copy_sized(ks);
+                        // SHARE: the dict survives and owns these keys.
+                        let dup = crate::pass_perceus::is_heap_type(&self.map_key_ty(&args[0].ty));
+                        self.emit_elem_copy_sized(ks, dup);
                     }
                     "values" => {
                         wasm!(self.func, {
@@ -516,7 +539,8 @@ impl FuncCompiler<'_> {
                             local_get(eb); local_get(i); i32_const(es as i32); i32_mul; i32_add;
                             i32_const(ks as i32); i32_add;
                         });
-                        self.emit_elem_copy_sized(vs);
+                        let dup = crate::pass_perceus::is_heap_type(&self.map_val_ty(&args[0].ty));
+                        self.emit_elem_copy_sized(vs, dup);
                     }
                     _ => {
                         wasm!(self.func, {
@@ -549,6 +573,7 @@ impl FuncCompiler<'_> {
                 // value is overwritten by b; b-only keys append after a's entries.
                 let (ks, vs) = self.map_kv_sizes(&args[0].ty);
                 let key_ty = self.map_key_ty(&args[0].ty);
+                let val_ty = self.map_val_ty(&args[0].ty);
                 let es = ks + vs;
                 let ma = self.scratch.alloc_i32();
                 let mb = self.scratch.alloc_i32();
@@ -576,7 +601,7 @@ impl FuncCompiler<'_> {
                 });
                 self.emit_dict_fit_cap(n, r_cap);
                 self.emit_dict_alloc(result, r_cap, es);
-                self.emit_dict_recap(ma, cap_a, result, r_cap, es, &key_ty);
+                self.emit_dict_recap(ma, cap_a, result, r_cap, es, &key_ty, Some((&key_ty, &val_ty)));
                 self.emit_dict_index_base(result, r_cap);
                 wasm!(self.func, { local_set(ib); });
                 self.emit_dict_entries_base(result, r_cap);
@@ -589,7 +614,8 @@ impl FuncCompiler<'_> {
                       local_get(j); local_get(len_b); i32_ge_u; br_if(1);
                       local_get(eb_b); local_get(j); i32_const(es as i32); i32_mul; i32_add; local_set(src);
                 });
-                self.emit_dict_put_entry(result, r_cap, ib, eb, src, es, ks, vs, &key_ty);
+                let val_ty = self.map_val_ty(&args[0].ty);
+                self.emit_dict_put_entry(result, r_cap, ib, eb, src, es, ks, vs, &key_ty, &val_ty);
                 wasm!(self.func, {
                       local_get(j); i32_const(1); i32_add; local_set(j); br(0);
                     end; end;
@@ -613,11 +639,12 @@ impl FuncCompiler<'_> {
                 // Build a COD from a List[(K,V)]: size for plen, then put each pair in
                 // order (duplicate keys → last value wins, position kept).
                 let pair_ty = self.resolve_list_elem(&args[0], None);
-                let (ks, vs, key_ty) = if let Ty::Tuple(elems) = &pair_ty {
+                let (ks, vs, key_ty, val_ty) = if let Ty::Tuple(elems) = &pair_ty {
                     (elems.first().map(|t| values::byte_size(t)).unwrap_or(4),
                      elems.get(1).map(|t| values::byte_size(t)).unwrap_or(4),
-                     elems.first().cloned().unwrap_or(Ty::String))
-                } else { (4u32, 4u32, Ty::String) };
+                     elems.first().cloned().unwrap_or(Ty::String),
+                     elems.get(1).cloned().unwrap_or(Ty::Int))
+                } else { (4u32, 4u32, Ty::String, Ty::Int) };
                 let es = ks + vs;
                 let pairs = self.scratch.alloc_i32();
                 let plen = self.scratch.alloc_i32();
@@ -647,7 +674,7 @@ impl FuncCompiler<'_> {
                       local_get(i); i32_const(4); i32_mul; i32_add;
                       i32_load(0); local_set(tp); // tp = pairs.data[i] = (K,V) tuple ptr
                 });
-                self.emit_dict_put_entry(result, cap, ib, eb, tp, es, ks, vs, &key_ty);
+                self.emit_dict_put_entry(result, cap, ib, eb, tp, es, ks, vs, &key_ty, &val_ty);
                 wasm!(self.func, {
                       local_get(i); i32_const(1); i32_add; local_set(i); br(0);
                     end; end;
@@ -893,6 +920,10 @@ impl FuncCompiler<'_> {
 
     // ── Map type helpers ──
 
+    pub(super) fn map_kv_sizes_from(&self, k: &Ty, v: &Ty) -> (u32, u32) {
+        (values::byte_size(k), values::byte_size(v))
+    }
+
     pub(super) fn map_kv_sizes(&self, ty: &Ty) -> (u32, u32) {
         if let Ty::Applied(_, args) = ty {
             (args.first().map(|t| values::byte_size(t)).unwrap_or(4),
@@ -986,9 +1017,14 @@ impl FuncCompiler<'_> {
     pub(super) fn key_valtype(key_ty: &Ty) -> ValType {
         match key_ty { Ty::Int => ValType::I64, _ => ValType::I32 }
     }
-    pub(super) fn emit_elem_copy_sized(&mut self, size: u32) {
+    pub(super) fn emit_elem_copy_sized(&mut self, size: u32, dup: bool) {
+        // `dup` = the 4-byte slot is a HEAP POINTER being SHARED (source
+        // survives) — the copy must own its own reference. Callers decide
+        // via is_heap_type on the actual K/V Ty; size alone cannot (Int32/
+        // Bool are 4-byte scalars).
         match size {
             8 => { wasm!(self.func, { i64_load(0); i64_store(0); }); }
+            4 if dup => { wasm!(self.func, { i32_load(0); call(self.emitter.rt.rc_inc); i32_store(0); }); }
             4 => { wasm!(self.func, { i32_load(0); i32_store(0); }); }
             _ => { wasm!(self.func, { i32_load(0); i32_store(0); }); }
         }
@@ -1107,7 +1143,7 @@ impl FuncCompiler<'_> {
     /// Copy `src`'s dense entries (src.len of them) into the freshly-alloced `dst`
     /// table, set dst.len = src.len, and rebuild dst's index. `dst` must already
     /// be `emit_dict_alloc`-ed at `dst_cap` (entries stride `es`, tags+index zeroed).
-    pub(super) fn emit_dict_recap(&mut self, src: u32, src_cap: u32, dst: u32, dst_cap: u32, es: u32, key_ty: &Ty) {
+    pub(super) fn emit_dict_recap(&mut self, src: u32, src_cap: u32, dst: u32, dst_cap: u32, es: u32, key_ty: &Ty, dup: Option<(&Ty, &Ty)>) {
         let len = self.scratch.alloc_i32();
         wasm!(self.func, { local_get(src); i32_load(0); local_set(len); });
         self.emit_dict_entries_base(dst, dst_cap); // memory_copy dest
@@ -1116,6 +1152,45 @@ impl FuncCompiler<'_> {
             local_get(len); i32_const(es as i32); i32_mul; memory_copy;
             local_get(dst); local_get(len); i32_store(0); // dst.len = src.len
         });
+        // SHARE vs MOVE: `dup = Some((K, V))` when the SOURCE dict survives
+        // (map.set / map.merge build a sibling) — every copied heap key/val
+        // pointer needs its own reference. `None` for grow (the old table is
+        // abandoned undecremented: a MOVE; dup would leak per grow).
+        if let Some((k_ty, v_ty)) = dup {
+            let kh = crate::pass_perceus::is_heap_type(k_ty);
+            let vh = crate::pass_perceus::is_heap_type(v_ty);
+            if kh || vh {
+                let (ks, _) = self.map_kv_sizes_from(k_ty, v_ty);
+                let di = self.scratch.alloc_i32();
+                let de = self.scratch.alloc_i32();
+                self.emit_dict_entries_base(dst, dst_cap);
+                wasm!(self.func, { local_set(de); i32_const(0); local_set(di); });
+                wasm!(self.func, {
+                    block_empty; loop_empty;
+                        local_get(di); local_get(len); i32_ge_u; br_if(1);
+                });
+                if kh {
+                    wasm!(self.func, {
+                        local_get(de); local_get(di); i32_const(es as i32); i32_mul; i32_add;
+                        i32_load(0); call(self.emitter.rt.rc_inc); drop;
+                    });
+                }
+                if vh {
+                    wasm!(self.func, {
+                        local_get(de); local_get(di); i32_const(es as i32); i32_mul; i32_add;
+                        i32_const(ks as i32); i32_add;
+                        i32_load(0); call(self.emitter.rt.rc_inc); drop;
+                    });
+                }
+                wasm!(self.func, {
+                        local_get(di); i32_const(1); i32_add; local_set(di);
+                        br(0);
+                    end; end;
+                });
+                self.scratch.free_i32(de);
+                self.scratch.free_i32(di);
+            }
+        }
         self.emit_dict_rebuild_index(dst, dst_cap, es, key_ty);
         self.scratch.free_i32(len);
     }
@@ -1128,7 +1203,7 @@ impl FuncCompiler<'_> {
         let nm = self.scratch.alloc_i32();
         wasm!(self.func, { local_get(cap); i32_const(lm::GROWTH_SHIFT as i32); i32_shl; local_set(nc); });
         self.emit_dict_alloc(nm, nc, es);
-        self.emit_dict_recap(map, cap, nm, nc, es, key_ty);
+        self.emit_dict_recap(map, cap, nm, nc, es, key_ty, None);
         wasm!(self.func, { local_get(nm); local_set(map); local_get(nc); local_set(cap); });
         self.scratch.free_i32(nm);
         self.scratch.free_i32(nc);
@@ -1139,7 +1214,7 @@ impl FuncCompiler<'_> {
     /// existing → overwrite its value in place (dense position kept); new → append
     /// at entries[len], write tags[slot]=h2, index[slot]=len+1, bump len. Assumes
     /// the caller has reserved capacity (no grow). `ib`/`eb` are the index/entries bases.
-    pub(super) fn emit_dict_put_entry(&mut self, map: u32, cap: u32, ib: u32, eb: u32, src: u32, es: u32, ks: u32, vs: u32, key_ty: &Ty) {
+    pub(super) fn emit_dict_put_entry(&mut self, map: u32, cap: u32, ib: u32, eb: u32, src: u32, es: u32, ks: u32, vs: u32, key_ty: &Ty, val_ty: &Ty) {
         use super::engine::layout::{SWISS_MAP, map as lm};
         let tags_off = self.emitter.layout_reg.fixed_offset(SWISS_MAP, lm::TAGS) as i32;
         let idx = self.scratch.alloc_i32();
@@ -1181,12 +1256,33 @@ impl FuncCompiler<'_> {
               local_get(map); local_get(ei); i32_const(1); i32_add; i32_store(0); // map.len = ei+1
               local_get(eb); local_get(ei); i32_const(es as i32); i32_mul; i32_add;
               local_get(src); i32_const(ks as i32); memory_copy;   // copy key bytes
+        });
+        // SHARE: a NEW heap key was just copied (by reference) from the borrowed
+        // source — dup it so the dict owns its own reference, else the source's
+        // scope-end Dec deep-frees the key the dict now holds (double-free). Only on
+        // the new-key path (an existing key keeps the reference it already owns).
+        if Self::is_heap_type(key_ty) {
+            wasm!(self.func, {
+              local_get(eb); local_get(ei); i32_const(es as i32); i32_mul; i32_add;
+              i32_load(0); call(self.emitter.rt.rc_inc); drop;
+            });
+        }
+        wasm!(self.func, {
             end;
             // Copy value bytes into entries[ei]+ks (both new and existing).
             local_get(eb); local_get(ei); i32_const(es as i32); i32_mul; i32_add; i32_const(ks as i32); i32_add;
             local_get(src); i32_const(ks as i32); i32_add;
             i32_const(vs as i32); memory_copy;
         });
+        // SHARE: the heap value was copied (by reference) from the borrowed source —
+        // dup it for the same reason. (Overwriting an existing heap value leaks the
+        // old one — a separate, non-crashing gap, not a double-free.)
+        if Self::is_heap_type(val_ty) {
+            wasm!(self.func, {
+              local_get(eb); local_get(ei); i32_const(es as i32); i32_mul; i32_add; i32_const(ks as i32); i32_add;
+              i32_load(0); call(self.emitter.rt.rc_inc); drop;
+            });
+        }
         self.scratch.free_i32(ei);
         self.scratch.free_i32(tg);
         self.scratch.free_i32(h2);
