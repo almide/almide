@@ -28,6 +28,7 @@ pub mod result;
 pub mod substitute;
 pub mod effect;
 pub mod annotations;
+pub mod top_let_storage;
 
 mod wasm_repr;
 
