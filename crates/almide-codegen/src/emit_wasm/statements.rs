@@ -768,17 +768,21 @@ impl FuncCompiler<'_> {
                     self.scratch.free_i32(elem);
                 }
                 // ── Option[HeapType]: if Some, dec payload ──
+                // The Option ABI is a NULLABLE box with the payload at offset 0
+                // and no tag (none = null ptr) — see every Option constructor
+                // and calls_option.rs is_some/unwrap. The tagged [TAG][PAYLOAD]
+                // shape that used to live here read 4 bytes PAST the 4-byte box
+                // and rc_dec'd neighbouring-allocation garbage; once that
+                // garbage exceeded the heap top it bypassed the header guard
+                // and trapped OOB (#470 — only surfaced on large heaps).
                 Ty::Applied(TypeConstructorId::Option, args) => {
                     if Self::is_heap_type(&args[0]) {
                         let mut w = WasmBuilder::new(&mut self.func, &self.emitter.layout_reg);
-                        w.get(local_idx).field_load(OPTION, tagged::TAG);
-                        w.if_void(|w| {
-                            w.get(local_idx).field_load(OPTION, tagged::PAYLOAD);
-                            w.if_void(
-                                |w| { w.get(local_idx).field_load(OPTION, tagged::PAYLOAD).call(rc_dec_fn); },
-                                |_| {},
-                            );
-                        }, |_| {});
+                        w.get(local_idx).emit_load(0, MemType::I32);
+                        w.if_void(
+                            |w| { w.get(local_idx).emit_load(0, MemType::I32).call(rc_dec_fn); },
+                            |_| {},
+                        );
                     }
                 }
                 // ── Result[T, E]: dec matching variant's payload ──
@@ -946,8 +950,17 @@ impl FuncCompiler<'_> {
                     | IrStmtKind::MapInsert { target: var, .. }
                     | IrStmtKind::IndexAssign { target: var, .. }
                     | IrStmtKind::FieldAssign { target: var, .. } => {
+                        // Escape check must be CONSERVATIVE: anything that is
+                        // not provably a scalar may point into the iteration
+                        // arena, and a heap_restore would free it while live.
+                        // `is_heap_type` is the wrong predicate here — it
+                        // misses nominal types (json.Value, user types, Bytes),
+                        // which is how a `var gltf = json.null(); while {...
+                        // gltf = parsed ...}` loop got its tree reclaimed and
+                        // overwritten by the next allocation (#470).
                         let ty = &self.var_table.get(*var).ty;
-                        if FuncCompiler::is_heap_type(ty) {
+                        let scalar = matches!(ty, Ty::Int | Ty::Float | Ty::Bool | Ty::Unit);
+                        if !scalar {
                             self.found = true;
                         }
                     }

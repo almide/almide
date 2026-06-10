@@ -436,3 +436,97 @@ fn walkdir(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
     results.sort();
     results
 }
+
+// ---- Semantic preservation (completeness §7) ----
+//
+// The roundtrip gate above asserts reparseability and a formatting fixpoint —
+// it is structurally BLIND to formatting that changes meaning while staying
+// parseable. Two real instances shipped: the unused-import scanner deleted
+// imports whose only uses were in TYPE position, and the record-type printer
+// dropped field DEFAULTS and serialization aliases. The unit pins below lock
+// those exact classes, and `fmt_output_typechecks_single_file_specs` makes
+// the general claim machine-checked: if a file type-checks, its formatted
+// output must type-check too.
+
+#[test]
+fn fmt_keeps_import_used_only_in_type_position() {
+    let out = roundtrip("import varlib\n\nfn h(p: varlib.Policy) -> Int = 1\n");
+    assert!(out.contains("import varlib"),
+        "an import whose only use is a TYPE position must survive formatting:\n{}", out);
+}
+
+#[test]
+fn fmt_keeps_import_used_only_in_type_decl_payload() {
+    let out = roundtrip("import varlib\n\ntype T = | A(varlib.Policy) | B\n");
+    assert!(out.contains("import varlib"),
+        "an import used only in a variant payload type must survive formatting:\n{}", out);
+}
+
+#[test]
+fn fmt_keeps_record_field_defaults_and_aliases() {
+    let out = roundtrip("type Cfg = { name: String = \"x\", n as \"num\": Int = 7 }\n");
+    assert!(out.contains("= \"x\""), "field default dropped:\n{}", out);
+    assert!(out.contains("= 7"), "field default dropped:\n{}", out);
+    assert!(out.contains("as \"num\""), "serialization alias dropped:\n{}", out);
+}
+
+#[test]
+fn fmt_keeps_variant_case_field_defaults() {
+    let out = roundtrip("type S = | Rect { w: Float, color: String = \"\" } | Dot\n");
+    assert!(out.contains("color: String = \"\""), "variant-case field default dropped:\n{}", out);
+}
+
+#[test]
+fn fmt_output_typechecks_single_file_specs() {
+    // Shells out to the freshly built binary: `almide fmt` a COPY of every
+    // single-file spec, then `almide check` the formatted copy. Multi-module
+    // corpora (spec/integration) need their sibling modules and are covered
+    // by the unit pins above instead.
+    let bin = {
+        if let Ok(b) = std::env::var("ALMIDE_BIN") { b } else {
+            let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target/release/almide");
+            if !p.exists() { return; } // debug-only invocation: covered in CI by the release run
+            p.to_str().unwrap().to_string()
+        }
+    };
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut files = walkdir(root.join("spec/lang").as_path());
+    files.extend(walkdir(root.join("spec/stdlib").as_path()));
+    files.extend(walkdir(root.join("spec/wasm_cross").as_path()));
+
+    let dir = tempfile::tempdir().unwrap();
+    let mut failures = Vec::new();
+    let mut tested = 0u32;
+    for path in files {
+        // Pre-condition: the ORIGINAL must check clean; files that do not
+        // (deliberate negative fixtures) are out of scope for this gate.
+        let orig_check = std::process::Command::new(&bin)
+            .args(["check", path.to_str().unwrap()])
+            .output().expect("almide check original");
+        if !orig_check.status.success() { continue; }
+
+        let copy = dir.path().join(path.file_name().unwrap());
+        std::fs::copy(&path, &copy).unwrap();
+        let fmt_out = std::process::Command::new(&bin)
+            .args(["fmt", copy.to_str().unwrap()])
+            .output().expect("almide fmt");
+        if !fmt_out.status.success() {
+            failures.push(format!("{}: fmt failed:\n{}", path.display(), String::from_utf8_lossy(&fmt_out.stderr)));
+            continue;
+        }
+        let check = std::process::Command::new(&bin)
+            .args(["check", copy.to_str().unwrap()])
+            .output().expect("almide check formatted");
+        if !check.status.success() {
+            failures.push(format!(
+                "{}: original checks clean but the FORMATTED output does not — fmt changed meaning:\n{}",
+                path.display(), String::from_utf8_lossy(&check.stdout)
+            ));
+        }
+        tested += 1;
+    }
+    assert!(failures.is_empty(),
+        "fmt semantic-preservation gate: {} of {} file(s) failed:\n\n{}",
+        failures.len(), tested, failures.join("\n\n"));
+    assert!(tested > 100, "gate coverage collapsed: only {} files tested", tested);
+}

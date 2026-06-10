@@ -67,7 +67,7 @@ pub fn cmd_fix(file: &str, dry_run: bool, json: bool) {
             (vec![], std::collections::HashMap::new())
         };
 
-    let import_messages = auto_imports(&mut program, &dep_names, &dep_submodules);
+    let import_messages = auto_imports(&mut program, &source_text, &dep_names, &dep_submodules);
     let has_import_changes = !import_messages.is_empty();
 
     // AST-level rewrite: `int.gt(a, b)` / `.lt` / `.eq` / `.neq` / `.le` /

@@ -509,57 +509,37 @@ fn compile_alloc(emitter: &mut WasmEmitter) {
 }
 
 fn compile_rc_inc(emitter: &mut WasmEmitter) {
-    use super::engine::{WasmBuilder, layout::*};
+    use super::engine::WasmBuilder;
     let type_idx = emitter.func_type_indices[&emitter.rt.rc_inc];
-    let rc_neg = emitter.layout_reg.alloc_header_neg_offset(alloc::RC) as i32;
-    let rc_ty = emitter.layout_reg.field(ALLOC_HEADER, alloc::RC).ty;
-    let heap_start = emitter.rt.heap_start_global;
 
+    // True no-op: return the pointer untouched. The WASM runtime is a
+    // bump-allocate-and-leak model (see HEAP_START_GLOBAL_IDX note): the old
+    // header-guard `ptr < global0(heap_ptr)` already returned early for every
+    // VALID heap pointer, so the increment below it could only ever execute on
+    // a GARBAGE pointer (e.g. a mis-shaped drop reading past a box, #470) —
+    // and then it WROTE +1 into not-yet-allocated heap or trapped OOB.
+    // Touching memory here is pure downside until real frees land.
     let mut f = Function::new([]);
     {
         let w = &mut WasmBuilder::new(&mut f, &emitter.layout_reg);
-        // Guard: data section ptrs have no header
-        w.get(0).gget(heap_start).lt_u();
-        w.if_void(|w| { w.get(0).ret(); }, |_| {});
-        // *(ptr - rc_neg) += 1
-        w.get(0).i32c(rc_neg).sub();
-        w.get(0).i32c(rc_neg).sub().emit_load(0, rc_ty);
-        w.i32c(1).add();
-        w.emit_store(0, rc_ty);
-        w.get(0); // return ptr
+        w.get(0);
     }
     f.instruction(&wasm_encoder::Instruction::End);
     emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
 }
 
 fn compile_rc_dec(emitter: &mut WasmEmitter) {
-    use super::engine::{WasmBuilder, layout::*};
     let type_idx = emitter.func_type_indices[&emitter.rt.rc_dec];
-    let rc_neg = emitter.layout_reg.alloc_header_neg_offset(alloc::RC) as i32;
-    let rc_ty = emitter.layout_reg.field(ALLOC_HEADER, alloc::RC).ty;
-    let hdr = emitter.layout_reg.header_size(ALLOC_HEADER) as i32;
-    let heap_start = emitter.rt.heap_start_global;
-    let free_list = emitter.free_list_global;
 
-    let mut f = Function::new([(1, ValType::I32)]); // local 1: $rc
-    {
-        let w = &mut WasmBuilder::new(&mut f, &emitter.layout_reg);
-        w.get(0).gget(heap_start).lt_u();
-        w.if_void(|w| { w.ret(); }, |_| {});
-        // rc = *(ptr - rc_neg)
-        w.get(0).i32c(rc_neg).sub().emit_load(0, rc_ty).tee(1);
-        w.i32c(1).gt_u();
-        w.if_void(|w| {
-            // rc > 1: decrement
-            w.get(0).i32c(rc_neg).sub();
-            w.get(1).i32c(1).sub();
-            w.emit_store(0, rc_ty);
-        }, |w| {
-            // rc <= 1: dead block. Push to free list for reuse.
-            w.get(0).gget(free_list).emit_store(0, MemType::I32);
-            w.get(0).i32c(hdr).sub().gset(free_list);
-        });
-    }
+    // True no-op (see compile_rc_inc). The old body's decrement/free-list push
+    // was unreachable for valid heap pointers (header guard) — it only ever
+    // ran on GARBAGE pointers, where it either trapped OOB ([ptr-4] past
+    // memory) or silently PUSHED the garbage block onto the free list,
+    // poisoning the next __alloc free-list walk (#470's second trap site).
+    // When real frees are activated, restore the decrement/push together with
+    // the heap_start guard fix and the Perceus aliasing prerequisites (see the
+    // wasm-frees roadmap).
+    let mut f = Function::new([]);
     f.instruction(&wasm_encoder::Instruction::End);
     emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
 }
