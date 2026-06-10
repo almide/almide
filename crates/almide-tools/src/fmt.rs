@@ -455,7 +455,7 @@ fn fmt_type(out: &mut String, ty: &TypeExpr, depth: usize) {
         TypeExpr::Record { fields } | TypeExpr::OpenRecord { fields } => {
             let open = matches!(ty, TypeExpr::OpenRecord { .. });
             out.push_str("{ ");
-            comma_sep(out, fields, |out, f| { w!(out, "{}: ", f.name); fmt_type(out, &f.ty, depth); });
+            comma_sep(out, fields, |out, f| fmt_field_type(out, f, depth));
             if open { if !fields.is_empty() { out.push_str(", "); } out.push_str(".. "); }
             else { out.push(' '); }
             out.push('}');
@@ -489,16 +489,26 @@ fn fmt_type(out: &mut String, ty: &TypeExpr, depth: usize) {
                     }
                     VariantCase::Record { name, fields } => {
                         w!(out, "{name} {{ ");
-                        comma_sep(out, fields, |out, f| {
-                            w!(out, "{}: ", f.name); fmt_type(out, &f.ty, depth);
-                            if let Some(ref d) = f.default { out.push_str(" = "); fmt_expr(out, d, depth); }
-                        });
+                        comma_sep(out, fields, |out, f| fmt_field_type(out, f, depth));
                         out.push_str(" }");
                     }
                 }
             }
         }
     }
+}
+
+
+/// One record-field declaration: `name [as "alias"]: Ty [= default]`.
+/// The formatter must NOT drop the default or the serialization alias —
+/// both are semantic (defaults make fields omissible; aliases name the
+/// wire key), and silently deleting them broke round-tripped sources.
+fn fmt_field_type(out: &mut String, f: &FieldType, depth: usize) {
+    w!(out, "{}", f.name);
+    if let Some(alias) = &f.alias { w!(out, " as \"{}\"", alias); }
+    out.push_str(": ");
+    fmt_type(out, &f.ty, depth);
+    if let Some(d) = &f.default { out.push_str(" = "); fmt_expr(out, d, depth); }
 }
 
 fn fmt_expr(out: &mut String, expr: &Expr, depth: usize) {
