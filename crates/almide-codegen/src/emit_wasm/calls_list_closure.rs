@@ -53,7 +53,7 @@ impl FuncCompiler<'_> {
                         local_get(xs); i32_const(list_data_off); i32_add;
                         local_get(i); i32_const(es); i32_mul; i32_add;
                 });
-                self.emit_elem_copy(&elem_ty);
+                self.emit_elem_copy_owned(&elem_ty);
                 wasm!(self.func, {
                         local_get(tmp); local_set(result); br(2);
                       end;
@@ -251,7 +251,7 @@ impl FuncCompiler<'_> {
                       local_get(start); local_get(i); i32_add;
                       i32_const(es); i32_mul; i32_add;
                 });
-                self.emit_elem_copy(&elem_ty);
+                self.emit_elem_copy_owned(&elem_ty);
                 wasm!(self.func, {
                       local_get(i); i32_const(1); i32_add; local_set(i);
                       br(0);
@@ -300,7 +300,7 @@ impl FuncCompiler<'_> {
                       local_get(xs); i32_const(list_data_off); i32_add;
                       local_get(i); i32_const(es); i32_mul; i32_add;
                 });
-                self.emit_elem_copy(&elem_ty);
+                self.emit_elem_copy_owned(&elem_ty);
                 wasm!(self.func, {
                       local_get(i); i32_const(1); i32_add; local_set(i);
                       br(0);
@@ -653,7 +653,7 @@ impl FuncCompiler<'_> {
                       local_get(xs); i32_const(list_data_off); i32_add;
                       local_get(k); i32_const(es); i32_mul; i32_add;
                 });
-                self.emit_elem_copy(&elem_ty);
+                self.emit_elem_copy_owned(&elem_ty);
                 wasm!(self.func, {
                       local_get(k); i32_const(1); i32_add; local_set(k);
                       br(0);
@@ -773,7 +773,7 @@ impl FuncCompiler<'_> {
                         local_get(j); i32_add;
                         i32_const(es); i32_mul; i32_add;
                 });
-                self.emit_elem_copy(&elem_ty);
+                self.emit_elem_copy_owned(&elem_ty);
                 wasm!(self.func, {
                         local_get(j); i32_const(1); i32_add; local_set(j);
                         br(0);
@@ -852,7 +852,7 @@ impl FuncCompiler<'_> {
                         local_get(i); local_get(j); i32_add;
                         i32_const(es); i32_mul; i32_add;
                 });
-                self.emit_elem_copy(&elem_ty);
+                self.emit_elem_copy_owned(&elem_ty);
                 wasm!(self.func, {
                         local_get(j); i32_const(1); i32_add; local_set(j);
                         br(0);

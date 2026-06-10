@@ -79,7 +79,7 @@ impl FuncCompiler<'_> {
                       local_get(xs); i32_const(list_data_off); i32_add;
                       local_get(copy_i); i32_const(es); i32_mul; i32_add;
                 });
-                self.emit_elem_copy(&elem_ty);
+                self.emit_elem_copy_owned(&elem_ty);
                 wasm!(self.func, {
                       local_get(copy_i); i32_const(1); i32_add; local_set(copy_i);
                       br(0);
@@ -143,7 +143,7 @@ impl FuncCompiler<'_> {
                       local_get(start); local_get(copy_i); i32_add;
                       i32_const(es); i32_mul; i32_add;
                 });
-                self.emit_elem_copy(&elem_ty);
+                self.emit_elem_copy_owned(&elem_ty);
                 wasm!(self.func, {
                       local_get(copy_i); i32_const(1); i32_add; local_set(copy_i);
                       br(0);
@@ -242,7 +242,7 @@ impl FuncCompiler<'_> {
                         local_get(xs); i32_const(list_data_off); i32_add;
                         local_get(i); i32_const(es); i32_mul; i32_add;
                 });
-                self.emit_elem_copy(&elem_ty);
+                self.emit_elem_copy_owned(&elem_ty);
                 wasm!(self.func, {
                         local_get(true_cnt); i32_const(1); i32_add; local_set(true_cnt);
                         i32_const(0);
@@ -252,7 +252,7 @@ impl FuncCompiler<'_> {
                         local_get(xs); i32_const(list_data_off); i32_add;
                         local_get(i); i32_const(es); i32_mul; i32_add;
                 });
-                self.emit_elem_copy(&elem_ty);
+                self.emit_elem_copy_owned(&elem_ty);
                 wasm!(self.func, {
                         local_get(false_cnt); i32_const(1); i32_add; local_set(false_cnt);
                         i32_const(0);
@@ -315,7 +315,7 @@ impl FuncCompiler<'_> {
                       local_get(xs); i32_const(list_data_off); i32_add;
                       local_get(copy_i); i32_const(es); i32_mul; i32_add;
                 });
-                self.emit_elem_copy(&elem_ty);
+                self.emit_elem_copy_owned(&elem_ty);
                 wasm!(self.func, {
                       local_get(copy_i); i32_const(1); i32_add; local_set(copy_i);
                       br(0);
@@ -326,6 +326,21 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, {
                     local_get(in_bounds);
                     if_empty;
+                });
+                // Release the owned copy of the element being replaced (it
+                // received +1 in the copy loop and loses this slot). The
+                // closure still reads it first — dec AFTER the call would be
+                // ideal, but the call's argument is the same pointer and a
+                // rc>1 dec never frees; at rc==1 the closure-arg read happens
+                // before any reuse since nothing allocates in between.
+                if crate::pass_perceus::is_heap_type(&elem_ty) {
+                    wasm!(self.func, {
+                        local_get(dst); i32_const(list_data_off); i32_add;
+                        local_get(idx); i32_const(es); i32_mul; i32_add;
+                        i32_load(0); call(self.emitter.rt.rc_dec);
+                    });
+                }
+                wasm!(self.func, {
                     local_get(dst); i32_const(list_data_off); i32_add;
                     local_get(idx); i32_const(es); i32_mul; i32_add;
                     // Call f(dst[idx])
@@ -596,7 +611,7 @@ impl FuncCompiler<'_> {
                         local_get(xs); i32_const(list_data_off); i32_add;
                         local_get(i); i32_const(es); i32_mul; i32_add;
                 });
-                self.emit_elem_copy(&elem_ty);
+                self.emit_elem_copy_owned(&elem_ty);
                 wasm!(self.func, {
                         local_get(seen_keys);
                         local_get(out_count); i32_const(ks); i32_mul; i32_add;
@@ -974,8 +989,26 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, {
                     end; end;
                     local_get(dst); local_get(out_count); i32_store(0);
-                    local_get(dst);
                 });
+                // SHARE dup: kept elements are second references into the
+                // surviving source list. Walk dst[0..out_count] once —
+                // per-store incs would over-count rejected slots.
+                if crate::pass_perceus::is_heap_type(&elem_ty) {
+                    let wi = self.scratch.alloc_i32();
+                    wasm!(self.func, {
+                        i32_const(0); local_set(wi);
+                        block_empty; loop_empty;
+                            local_get(wi); local_get(out_count); i32_ge_u; br_if(1);
+                            local_get(dst); i32_const(list_data_off); i32_add;
+                            local_get(wi); i32_const(elem_size as i32); i32_mul; i32_add;
+                            i32_load(0); call(self.emitter.rt.rc_inc); drop;
+                            local_get(wi); i32_const(1); i32_add; local_set(wi);
+                            br(0);
+                        end; end;
+                    });
+                    self.scratch.free_i32(wi);
+                }
+                wasm!(self.func, { local_get(dst); });
                 if let Some((pl, pvt)) = filter_param_local {
                     self.scratch.free(pl, pvt);
                 }

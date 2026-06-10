@@ -42,6 +42,18 @@ enum SortKind {
 }
 
 impl SortKind {
+    /// Whether the sorted elements are heap POINTERS the result list must
+    /// own (drives the post-build dup walk under real frees).
+    fn elems_are_heap(&self) -> bool {
+        match self {
+            SortKind::Int | SortKind::Float => false,
+            SortKind::String | SortKind::ListString => true,
+            SortKind::Ord(t) => crate::pass_perceus::is_heap_type(t),
+        }
+    }
+}
+
+impl SortKind {
     fn elem_size(&self) -> u32 {
         match self {
             SortKind::Int | SortKind::Float => 8,
@@ -770,6 +782,35 @@ impl FuncCompiler<'_> {
             local_get(dst);
         });
 
+        // 3.5 SHARE dup: every element pointer was copied from the SOURCE
+        // list exactly once across the four dst-build paths (len<2 memcpy,
+        // ascending memcpy, descending copy, merge-initial memcpy; the merge
+        // passes only permute within dst) and the source survives with its
+        // own deep Dec — one inc per element, or sorting a List[List[..]]
+        // frees the inner lists the result shares (list_total_order hang).
+        if kind.elems_are_heap() {
+            let di = self.scratch.alloc_i32();
+            let dl = self.scratch.alloc_i32();
+            let data_off = self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32;
+            wasm!(self.func, {
+                local_set(di); // borrow di as the result holder briefly
+                local_get(di); i32_load(0); local_set(dl);
+                local_get(di); local_set(dst);
+                i32_const(0); local_set(di);
+                block_empty; loop_empty;
+                    local_get(di); local_get(dl); i32_ge_u; br_if(1);
+                    local_get(dst); i32_const(data_off); i32_add;
+                    local_get(di); i32_const(4); i32_mul; i32_add;
+                    i32_load(0); call(self.emitter.rt.rc_inc); drop;
+                    local_get(di); i32_const(1); i32_add; local_set(di);
+                    br(0);
+                end; end;
+                local_get(dst);
+            });
+            self.scratch.free_i32(dl);
+            self.scratch.free_i32(di);
+        }
+
         // 4. Free scratch.
         self.scratch.free_i32(scan_done);
         self.scratch.free_i32(k);
@@ -979,6 +1020,10 @@ impl FuncCompiler<'_> {
             i32_add;
         });
         self.emit_load_at(&elem_ty, 0);
+        // SHARE: the fresh tuple holds a second reference to the element.
+        if crate::pass_perceus::is_heap_type(&elem_ty) {
+            wasm!(self.func, { call(self.emitter.rt.rc_inc); });
+        }
         self.emit_store_at(&elem_ty, 8); // store at tuple offset 8
 
         wasm!(self.func, {
