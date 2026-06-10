@@ -341,10 +341,12 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, { call(self.emitter.rt.json_get_path); });
             }
             "set_path" => {
-                // json.set_path(j, path, value) → Result[Value, String]
+                // json.set_path(j, path, value) → Result[Value, String].
+                // new_val is MOVE-stored into the rebuilt tree — stored-field
+                // contract so an alias argument carries its own reference.
                 self.emit_expr(&args[0]);
                 self.emit_expr(&args[1]);
-                self.emit_expr(&args[2]);
+                self.emit_stored_field(&args[2]);
                 wasm!(self.func, { call(self.emitter.rt.json_set_path); });
             }
             "remove_path" => {
@@ -397,9 +399,13 @@ impl FuncCompiler<'_> {
                 local_get(key);
                 call(self.emitter.rt.string.eq);
                 if_empty;
-                  // Found: some(value) — alloc Option box with value ptr
+                  // Found: some(value) — alloc Option box with value ptr.
+                  // SHARE: the boxed pointer is an interior reference into a
+                  // Value tree the caller still owns — dup it.
                   i32_const(4); call(self.emitter.rt.alloc); local_set(result);
-                  local_get(result); local_get(pair_ptr); i32_load(4); i32_store(0);
+                  local_get(result);
+                  local_get(pair_ptr); i32_load(4); call(self.emitter.rt.rc_inc);
+                  i32_store(0);
                   br(2);
                 end;
                 local_get(i); i32_const(1); i32_add; local_set(i);
@@ -430,10 +436,21 @@ impl FuncCompiler<'_> {
             local_set(v);
             local_get(v); i32_load(0); i32_const(expected_tag); i32_eq;
             if_i32;
-              // Correct tag: return ok(payload at offset 4)
+              // Correct tag: return ok(payload at offset 4). The STRING
+              // payload is an interior pointer into the surviving Value —
+              // dup it (scalar tags copy by value).
               i32_const(8); call(self.emitter.rt.alloc); local_set(result);
               local_get(result); i32_const(0); i32_store(0); // ok
-              local_get(result); local_get(v); i32_load(4); i32_store(4);
+              local_get(result);
+              local_get(v); i32_load(4);
+        });
+        if expected_tag == 4 || expected_tag == 5 {
+            // tags 4 (string) and 5 (array) carry POINTER payloads; bool
+            // shares the 4-byte size but is a scalar — key on the TAG.
+            wasm!(self.func, { call(self.emitter.rt.rc_inc); });
+        }
+        wasm!(self.func, {
+              i32_store(4);
               local_get(result);
             else_;
               // Wrong tag: return err("expected <type>")
@@ -555,9 +572,14 @@ impl FuncCompiler<'_> {
               local_get(option_box);
               local_get(found_val);
         });
-        // Copy payload from Value offset 4 to option box offset 0
+        // Copy payload from Value offset 4 to option box offset 0.
+        // get_string/get_array box an INTERIOR POINTER into the surviving
+        // Value tree → dup (SHARE). get_int/get_float are 8-byte scalars;
+        // get_bool is a 4-byte scalar — key on the FUNC, not the size.
+        let payload_is_ptr = matches!(func, "get_string" | "get_array");
         match payload_size {
             8 => { wasm!(self.func, { i64_load(4); i64_store(0); }); }
+            _ if payload_is_ptr => { wasm!(self.func, { i32_load(4); call(self.emitter.rt.rc_inc); i32_store(0); }); }
             _ => { wasm!(self.func, { i32_load(4); i32_store(0); }); }
         }
         wasm!(self.func, {

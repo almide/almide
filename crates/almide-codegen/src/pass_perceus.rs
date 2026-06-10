@@ -237,7 +237,34 @@ fn perceus_fnbody(fb: FnBody, var_table: &mut VarTable) -> FnBody {
                 // `let var = expr; rc_inc(var); <rest>` — the Inc lives in the
                 // VDecl body so it stays at the bind's chain level (verifier-
                 // counted) and runs once per loop iteration for in-loop binds.
-                let body = if alias_inc {
+                //
+                // ORDERING HAZARD: when `expr` is a BLOCK, its trailing temp
+                // Decs run while the block evaluates — BEFORE an after-VDecl
+                // Inc. If the tail aliases a temp's interior (unwrap_or of a
+                // parse temp), the temp's typed dec frees the payload first
+                // and the late Inc RESURRECTS a freed block (json_gltf trap).
+                // For a Block whose tail is a Var bound inside it, hoist the
+                // Inc INTO the block, right after that bind — before any Dec.
+                let mut expr = expr;
+                let mut inner_inc_done = false;
+                if alias_inc {
+                    if let IrExprKind::Block { stmts, expr: Some(tail) } = &mut expr.kind {
+                        if let IrExprKind::Var { id: tail_id } = &tail.kind {
+                            let tail_id = *tail_id;
+                            let bind_pos = stmts.iter().rposition(|st| matches!(
+                                &st.kind, IrStmtKind::Bind { var: bv, .. } if *bv == tail_id
+                            ));
+                            if let Some(pos) = bind_pos {
+                                stmts.insert(pos + 1, IrStmt {
+                                    kind: IrStmtKind::RcInc { var: tail_id },
+                                    span: None,
+                                });
+                                inner_inc_done = true;
+                            }
+                        }
+                    }
+                }
+                let body = if alias_inc && !inner_inc_done {
                     FnBody::Inc { var, body: Box::new(result) }
                 } else {
                     result
