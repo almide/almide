@@ -335,11 +335,10 @@ pub fn register_runtime_functions(emitter: &mut WasmEmitter) {
 ///
 /// NOTE: this is the CORRECT low bound. The legacy `emitter.rt.heap_start_global`
 /// field is only assigned (to this value) in `assemble`, AFTER `compile_runtime` —
-/// so at runtime-fn compile time it is still 0 (= the moving heap_ptr global). The
-/// rc_inc/rc_dec header guard therefore bakes `global.get 0`, which makes them
-/// no-ops for every heap pointer (a pure bump-allocate-and-leak model — sound, no
-/// frees). `compile_cow_check` deliberately uses THIS constant instead, so its
-/// data-section guard is correct independent of that legacy field.
+/// so at runtime-fn compile time it is still 0 (= the moving heap_ptr global).
+/// Every runtime guard that needs the TRUE heap floor (rc_inc/rc_dec since the
+/// frees flip, `compile_cow_check`) uses THIS constant instead of that legacy
+/// field.
 pub const HEAP_START_GLOBAL_IDX: u32 = 4;
 
 /// Compile all runtime function bodies.
@@ -537,16 +536,16 @@ fn compile_alloc(emitter: &mut WasmEmitter) {
     emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
 }
 
-/// Whether this emission activates real reference-count frees
-/// (`ALMIDE_WASM_FREES=1`). Env-conditional emission is DECLARED behavior:
-/// the host-determinism gates pin the environment, and the same env must
-/// always produce identical bytes. Unset/`0` keeps the bump-and-leak model
-/// (today's default); `1` emits the real rc bodies below — the true-Perceus
-/// activation flag, flipped to default-on once the quadruple bar is green
-/// (native corpus + wasm corpus + byte gate + churn; see
-/// docs/roadmap/active/wasm-frees-ownership-discipline.md).
+/// Whether this emission activates real reference-count frees — the DEFAULT
+/// since 0.27.0 (the true-Perceus flip: quadruple bar green ×3 — native
+/// corpus + wasm corpus both modes + byte gate + churn; see
+/// docs/roadmap/active/wasm-frees-ownership-discipline.md and contract
+/// C-066). `ALMIDE_WASM_FREES=0` is the opt-out escape hatch back to the
+/// bump-allocate-and-leak model. Env-conditional emission is DECLARED
+/// behavior: the host-determinism gates pin the environment, and the same
+/// env must always produce identical bytes.
 pub(super) fn wasm_frees_enabled() -> bool {
-    std::env::var_os("ALMIDE_WASM_FREES").is_some_and(|v| v != "0")
+    std::env::var_os("ALMIDE_WASM_FREES").is_none_or(|v| v != "0")
 }
 
 fn compile_rc_inc(emitter: &mut WasmEmitter) {
