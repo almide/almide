@@ -995,7 +995,11 @@ impl FuncCompiler<'_> {
                     let type_idx = self.emitter.register_type(closure_params, ret_types);
                     wasm!(self.func, { call_indirect(type_idx, 0); });
                 } else {
-                    wasm!(self.func, { unreachable; });
+                    panic!(
+                        "[ICE] emit_wasm: closure call through a non-Fn type `{:?}` — \
+                         the call signature cannot be built; resolve upstream",
+                        callee_fn_ty
+                    );
                 }
                 self.scratch.free_i32(scratch);
             }
@@ -1140,7 +1144,10 @@ impl FuncCompiler<'_> {
                     let type_idx = self.emitter.register_type(closure_params, ret_types);
                     wasm!(self.func, { return_call_indirect(type_idx, 0); });
                 } else {
-                    wasm!(self.func, { unreachable; });
+                    panic!(
+                        "[ICE] emit_wasm: tail closure call through a non-Fn type — \
+                         the call signature cannot be built; resolve upstream"
+                    );
                 }
                 self.scratch.free_i32(scratch);
             }
