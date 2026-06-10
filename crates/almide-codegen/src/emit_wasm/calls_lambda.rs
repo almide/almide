@@ -192,10 +192,13 @@ impl FuncCompiler<'_> {
                     // Perceus closure capture rc_inc is now handled by PerceusPass (IR-level RcInc)
                     wasm!(self.func, { local_get(local_idx); });
                     self.emit_store_at(ty, offset);
-                } else if let Some(&(global_idx, _)) = self.emitter.top_let_globals.get(&vid.0) {
-                    // A module-level `let`/`var` (e.g. `let BASE = 100`) captured by
-                    // the closure lives in a WASM global, not the function-local
-                    // var_map — load it from the global into the capture env.
+                } else if let Some((global_idx, _)) = self.lookup_global(*vid) {
+                    // A module-level `let`/`var` captured by the closure lives
+                    // in a WASM global, not the function-local var_map — load
+                    // it via the SHARED global lookup (id, then the
+                    // module_origin-prefixed key, then the bare name). The old
+                    // id-only lookup missed cross-module synthetic VarIds and
+                    // fell to the silent-zero arm below (#500).
                     wasm!(self.func, { global_get(global_idx); });
                     self.emit_store_at(ty, offset);
                 } else {
