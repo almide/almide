@@ -180,3 +180,34 @@ Separate, careful fix.
   the gate for 47h. Check `pgrep rustc` + kill stale PPID=1 rustc before timing the
   gate. A `perl -e 'alarm N'` wrapper around `cargo test` kills cargo but leaves
   the test binary detached/running — background the gate instead.
+
+
+## 2026-06-10/11 — third campaign: FULL DRAIN under the flag
+
+Branch `true-perceus`. The activation is now env-gated (`ALMIDE_WASM_FREES=1`
+at emit) with the **entire quadruple bar green under the flag**:
+native corpus 264/264 · wasm corpus (flag off) 264/264 · wasm corpus
+(flag ON) 264/264 · cargo byte gate (flag ON) 67/67 · 2M-iteration record
+churn correct + flat RSS (13.3 MB ≈ leak-mode baseline).
+
+All 14 frees-ON divergences drained (mechanism → fix):
+- record typed-drop glue sorted fields BY NAME vs declaration-order layout → de-sorted (2 lines)
+- heap_restore now resets the free list; rc_inc/rc_dec gained dead-zone guards (ptr ≥ heap_ptr)
+- double-free sentinel (rc=0 stamp → second dec traps) + rc_inc resurrection trap + absolute walk cap (1M steps)
+- string.join len==1 returned the element pointer raw → gated inc
+- tuple-payload variant ctor stores → emit_stored_field
+- mechanism #6: return-alias dup in insert_rc_ops (callee-side owned returns); unwrap_or runtime calls classified alias
+- **ordering fix**: a VDecl alias-Inc on a Block value now hoists INSIDE the block (after the tail bind, before temp decs) — the late Inc was resurrecting payloads freed by the temp's typed dec
+- emitter-level ownership retired under frees (is_single_use_var → false): in-place list reuse / raw rc_dec double-owned blocks vs IR decs
+- list family: 15 emit_elem_copy→owned + min/max + get-box + remove_at OOB inc + set/insert/push stored-field + sort post-build dup walk + filter post-loop dup + enumerate + update replaced-release; list.repeat per-slot inc (the for+concat-push → repeat rewrite exposed it)
+- concat: call-site SHARE dup walk over the fresh result's elements
+- map family: emit_elem_copy_sized(size, dup) + dict_recap dup Option<(K,V)> (set/merge=Some, grow=None) + remove survivor dup + update full-table dup with old-value capture-release and not-found input inc + map.map key inc
+- json/Value: value_get / get_typed(get_string|get_array) / as_type(tag 4|5) interior-pointer incs; set_path kept-key / unchanged-pair / path-key / no-op cur_built / unchanged-elem incs; remove_path 7 no-op alias returns + survivor sites; set_path new_val via stored-field
+- emit_elem_copy_owned gated on is_heap_type (Int32/UInt32/Float32 4-byte-scalar landmine defused)
+- free-list size-sanity bound removed (false-positived on legit freed nodes; cap+sentinel+resurrection traps cover the classes)
+
+REMAINING before default-ON: Stage C (TCO loop reclamation — M2 re-land; loops
+currently leak per iteration, bounded), committed churn fixture family
+(per-structure 1M+ gates), Stage D PIN (fs scratch by-construction) + C-042
+unlock, flag-ON full bar ×3 consecutive, then default flip + C-041 revision +
+new reclamation contract + perf suite (Stage G).
