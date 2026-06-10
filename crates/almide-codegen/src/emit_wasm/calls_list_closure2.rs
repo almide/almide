@@ -1543,6 +1543,16 @@ impl FuncCompiler<'_> {
     /// True for: single-use variables (use_count == 1) OR temporary expressions
     /// (Call results, RuntimeCall results) that are not bound to any variable.
     fn is_single_use_var(&self, expr: &IrExpr) -> bool {
+        // Under real frees (ALMIDE_WASM_FREES=1) the IR-level Perceus pass is
+        // the ONLY owner of ownership decisions: it Decs every heap VDecl at
+        // scope end, so an emitter-level in-place reuse or raw rc_dec here
+        // would create a SECOND owner of the same block — the double-free the
+        // sentinel now catches at teardown (caught by the byte gate on
+        // wasm_list_map). The reuse this disables is a micro-optimization;
+        // block recycling still happens through the free list. Re-enabling it
+        // as an IR-level move (visible to the verifier) is the tracked
+        // follow-up in wasm-frees-ownership-discipline.md.
+        if super::runtime::wasm_frees_enabled() { return false; }
         match &expr.kind {
             IrExprKind::Var { id } => self.var_table.get(*id).use_count == 1,
             // Temporary expression results: consumed exactly here, never aliased
