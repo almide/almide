@@ -44,6 +44,7 @@ use super::pass_resolve_calls::ResolveCallsPass;
 use super::pass_list_pattern::ListPatternLoweringPass;
 use super::pass_tail_call_mark::TailCallMarkPass;
 use super::pass_unify_var_tables::UnifyVarTablesPass;
+use super::pass_top_let_storage::TopLetStoragePass;
 use super::pass_ir_link_flatten::IrLinkFlattenPass;
 use super::template::TemplateSet;
 
@@ -157,6 +158,10 @@ fn build_pipeline(target: Target) -> Pipeline {
                 .add(NormalizeRuntimeCallsPass)
                 // Final: flatten modules into root (after UnifyVarTables)
                 .add(IrLinkFlattenPass)
+                // §4 Stage 1: compute the unified top-let storage attribute
+                // at pipeline end (VarIds final, modules flattened); the
+                // walker asserts every legacy predicate agrees with it.
+                .add(TopLetStoragePass)
         }
 
         Target::Wgsl => Pipeline::new()
@@ -241,6 +246,10 @@ fn build_pipeline(target: Target) -> Pipeline {
         // correlation is exact across modules. Runs late (after any pass that
         // could clone a lambda) and before Canonicalize. (Closure v2, P0.)
         .add(GlobalizeClosureIdsPass)
+        // §4 Stage 1: unified top-let storage attribute (pure analysis; the
+        // totality check converts an unresolvable module-global reference
+        // into a structured build refusal instead of a typed-zero global).
+        .add(TopLetStoragePass)
         // Canonicalize: terminal pass. Sort functions into content-derived order
         // so the emitted module is host-deterministic by construction. MUST be
         // last — `Canonical::certify` asserts its postcondition at the emit gate,

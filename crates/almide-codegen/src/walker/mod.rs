@@ -540,6 +540,85 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
             register(&mut ann, tl, ctx.var_table, origin);
         }
     }
+    // §4 Stage 1 — AGREEMENT VERIFIER: the unified TopLetStorage attribute
+    // (computed by TopLetStoragePass) must agree with every legacy predicate
+    // this walker just derived. A mismatch is the #486/#500 drift class
+    // caught at build time instead of as a silent miscompile. Stage 2 flips
+    // the consumers onto the attribute and deletes the legacy sets (and with
+    // them, this verifier's reason to exist).
+    {
+        use almide_ir::top_let_storage::TopLetStorage as Tls;
+        let mut errs: Vec<String> = Vec::new();
+        let mut derived_eager: Vec<String> = Vec::new();
+        for tl in &program.top_lets {
+            let vi = ctx.var_table.get(tl.var);
+            let derived_name = almide_ir::top_let_storage::static_name(vi);
+            let Some(info) = ann.globals.get(&tl.var) else {
+                errs.push(format!("`{}`: missing from ann.globals (pass not run?)", vi.name.as_str()));
+                continue;
+            };
+            if info.static_name != derived_name {
+                errs.push(format!(
+                    "`{}`: static name disagrees (attr `{}` vs walker `{}`)",
+                    vi.name.as_str(), info.static_name, derived_name
+                ));
+            }
+            if tl.mutable {
+                let legacy = ann.var_storage.get(&tl.var);
+                let agree = matches!(
+                    (legacy, info.storage),
+                    (Some(almide_ir::annotations::VarStorage::ModuleCell), Tls::Cell)
+                        | (Some(almide_ir::annotations::VarStorage::ModuleRc), Tls::RcRefCell)
+                );
+                if !agree {
+                    errs.push(format!(
+                        "`{}`: mutable storage disagrees (attr {:?} vs legacy {:?})",
+                        vi.name.as_str(), info.storage, legacy
+                    ));
+                }
+                // KNOWN legacy quirk, not checked: a MUTABLE Const-kind
+                // top-let also lands in const_top_let_vars (the pre-index
+                // ignores tl.mutable); harmless today only because the
+                // storage check runs first at every use site.
+            } else {
+                match info.storage {
+                    Tls::Const => {
+                        if !ann.const_top_let_vars.contains(&tl.var) {
+                            errs.push(format!("`{}`: attr Const but not in const_top_let_vars", vi.name.as_str()));
+                        }
+                    }
+                    Tls::Lazy { eager_force } => {
+                        if !ann.lazy_top_let_names.contains(&info.static_name) {
+                            errs.push(format!("`{}`: attr Lazy but `{}` not in lazy_top_let_names", vi.name.as_str(), info.static_name));
+                        }
+                        if eager_force {
+                            derived_eager.push(info.static_name.clone());
+                        }
+                    }
+                    other => {
+                        errs.push(format!("`{}`: immutable top-let classified {:?}", vi.name.as_str(), other));
+                    }
+                }
+            }
+        }
+        if derived_eager != ann.eager_force_top_lets {
+            errs.push(format!(
+                "eager-force order disagrees (attr {:?} vs walker {:?})",
+                derived_eager, ann.eager_force_top_lets
+            ));
+        }
+        if !errs.is_empty() {
+            eprintln!("error: [COMPILER BUG] top-let storage attribute disagrees with the legacy predicates");
+            for e in errs.iter().take(10) {
+                eprintln!("    - {}", e);
+            }
+            eprintln!("  One side changed without the other — exactly the drift class (#486/#500)");
+            eprintln!("  the §4 attribute exists to make impossible. Please report this at");
+            eprintln!("  https://github.com/almide/almide/issues");
+            std::process::exit(1);
+        }
+    }
+
     // Classify function-local `var` bindings:
     //   LocalMut (let mut T)  — not captured by closures, no RcCow overhead
     //   RcCow                 — captured by a lambda, needs COW semantics
