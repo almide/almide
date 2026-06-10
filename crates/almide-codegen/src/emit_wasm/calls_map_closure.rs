@@ -292,6 +292,14 @@ impl FuncCompiler<'_> {
                     local_get(it.i); i32_const(es_old as i32); i32_mul; i32_add;
                     i32_const(ks as i32); memory_copy;
                 });
+                // SHARE: the source dict survives and owns these keys.
+                if crate::pass_perceus::is_heap_type(&self.map_key_ty(&args[0].ty)) {
+                    wasm!(self.func, {
+                        local_get(new_eb);
+                        local_get(it.i); i32_const(es_new as i32); i32_mul; i32_add;
+                        i32_load(0); call(self.emitter.rt.rc_inc); drop;
+                    });
+                }
                 // dst = new_eb + i*es_new + ks (new val addr in the rebuilt table)
                 wasm!(self.func, {
                     local_get(new_eb);
@@ -434,9 +442,10 @@ impl FuncCompiler<'_> {
                       local_get(i); i32_const(1); i32_add; local_set(i);
                       br(0);
                     end; end;
-                    // If not found, return the original map unchanged.
+                    // If not found, return the original map unchanged —
+                    // SHARE: the result is a SECOND reference to the input.
                     local_get(found_idx); i32_const(0); i32_lt_s;
-                    if_i32; local_get(map_ptr);
+                    if_i32; local_get(map_ptr); call(self.emitter.rt.rc_inc);
                     else_;
                       // Byte-copy the whole COD table: header + cap*per_slot.
                       i32_const(map_hdr);
@@ -446,6 +455,46 @@ impl FuncCompiler<'_> {
                       local_get(new_map); local_get(map_ptr); local_get(total_size);
                       memory_copy;
                 });
+                // SHARE dup over the copied table: the source survives and
+                // owns every entry; the copy needs its own references. The
+                // updated slot's OLD value ref is released below before the
+                // closure result overwrites it.
+                {
+                    let kh = crate::pass_perceus::is_heap_type(&key_ty);
+                    let vh = crate::pass_perceus::is_heap_type(&val_ty);
+                    if kh || vh {
+                        let di = self.scratch.alloc_i32();
+                        let de = self.scratch.alloc_i32();
+                        let dlen = self.scratch.alloc_i32();
+                        wasm!(self.func, { local_get(new_map); i32_load(0); local_set(dlen); });
+                        self.emit_dict_entries_base(new_map, cap);
+                        wasm!(self.func, { local_set(de); i32_const(0); local_set(di);
+                            block_empty; loop_empty;
+                                local_get(di); local_get(dlen); i32_ge_u; br_if(1);
+                        });
+                        if kh {
+                            wasm!(self.func, {
+                                local_get(de); local_get(di); i32_const(entry as i32); i32_mul; i32_add;
+                                i32_load(0); call(self.emitter.rt.rc_inc); drop;
+                            });
+                        }
+                        if vh {
+                            wasm!(self.func, {
+                                local_get(de); local_get(di); i32_const(entry as i32); i32_mul; i32_add;
+                                i32_const(ks as i32); i32_add;
+                                i32_load(0); call(self.emitter.rt.rc_inc); drop;
+                            });
+                        }
+                        wasm!(self.func, {
+                                local_get(di); i32_const(1); i32_add; local_set(di);
+                                br(0);
+                            end; end;
+                        });
+                        self.scratch.free_i32(dlen);
+                        self.scratch.free_i32(de);
+                        self.scratch.free_i32(di);
+                    }
+                }
                 // valaddr = dense entries base(new_map, cap) + found_idx*entry + ks
                 self.emit_dict_entries_base(new_map, cap);
                 wasm!(self.func, {
@@ -456,9 +505,21 @@ impl FuncCompiler<'_> {
                       local_get(valaddr);              // load old val from same addr
                 });
                 self.emit_load_at(&val_ty, 0);
+                // Capture the OLD value before the overwrite so its dup'd
+                // reference (from the table walk above) can be released after
+                // the closure result replaces it.
+                let old_val = if crate::pass_perceus::is_heap_type(&val_ty) {
+                    let ov = self.scratch.alloc_i32();
+                    wasm!(self.func, { local_tee(ov); });
+                    Some(ov)
+                } else { None };
                 wasm!(self.func, { local_get(closure); i32_load(0); }); // table_idx
                 self.emit_closure_call(&val_ty, &val_ty);
                 self.emit_store_at(&val_ty, 0);
+                if let Some(ov) = old_val {
+                    wasm!(self.func, { local_get(ov); call(self.emitter.rt.rc_dec); });
+                    self.scratch.free_i32(ov);
+                }
                 wasm!(self.func, {
                       local_get(new_map);
                     end;
