@@ -19,6 +19,13 @@ impl Checker {
     }
 
     fn infer_expr_inner(&mut self, expr: &mut ast::Expr) -> Ty {
+        // #488: a paren call on a record type or record-payload constructor is
+        // either NORMALIZED into the brace Record pipeline (all-named args) or
+        // rejected with E021 — it must never fall through the generic Call
+        // path, which has no field identity and silently dropped named args.
+        if matches!(&expr.kind, ExprKind::Call { .. }) && self.normalize_ctor_paren_call(expr) {
+            return self.infer_expr_inner(expr);
+        }
         match &mut expr.kind {
             ExprKind::Int { .. } => Ty::Int,
             ExprKind::Float { .. } => Ty::Float,
@@ -195,8 +202,19 @@ impl Checker {
                     // and a bare NAMED RECORD type (`type WithList = { items:
                     // List[Int] }`, resolved from `env.types`). Both reduce to a
                     // `(field, declared_ty)` list with generics already substituted.
-                    let (result_ty, decl_fields): (Ty, Vec<(Sym, Ty)>) =
+                    let (result_ty, decl_fields, closed, defaults): (Ty, Vec<(Sym, Ty)>, bool, std::collections::HashSet<Sym>) =
                         if let Some((type_name, case)) = self.env.lookup_ctor(&ctor_sym) {
+                            // Brace construction of a NON-record case is a
+                            // category error (`Wrap { x: 1 }` on a tuple case):
+                            // reject here, or rustc/wasm explode downstream.
+                            if !matches!(case.payload, crate::types::VariantPayload::Record(_)) {
+                                self.emit(super::err(
+                                    format!("case '{}' does not take named fields", n),
+                                    format!("'{}' is a tuple or unit case — construct it positionally: `{}(...)`", n, n),
+                                    format!("record literal {}", n),
+                                ).with_code("E021"));
+                                return Ty::Unknown;
+                            }
                             let generic_args = self.instantiate_type_generics(type_name.as_str());
                             let subst: std::collections::HashMap<Sym, Ty> = if !generic_args.is_empty() {
                                 self.env.types.get(&type_name).cloned().map(|ty_def| {
@@ -221,7 +239,8 @@ impl Checker {
                                 }
                                 None => type_name,
                             };
-                            (Ty::Named(result_named, generic_args), decl)
+                            let case_defaults = self.env.ctor_field_defaults.get(&ctor_sym).cloned().unwrap_or_default();
+                            (Ty::Named(result_named, generic_args), decl, true, case_defaults)
                         } else {
                             // Named record type: instantiate its generics with
                             // fresh vars so the declared field types carry the
@@ -250,12 +269,22 @@ impl Checker {
                             };
                             let generic_args = self.instantiate_type_generics(n);
                             let named = Ty::Named(canon, generic_args);
-                            let decl = match self.env.resolve_named(&named) {
-                                Ty::Record { fields } | Ty::OpenRecord { fields } => fields,
-                                _ => Vec::new(),
+                            let (decl, closed) = match self.env.resolve_named(&named) {
+                                Ty::Record { fields } => (fields, true),
+                                Ty::OpenRecord { fields } => (fields, false),
+                                _ => (Vec::new(), false),
                             };
-                            (named, decl)
+                            let defaults = self.env.record_field_defaults.get(&canon)
+                                .or_else(|| self.env.record_field_defaults.get(&sym(n)))
+                                .cloned().unwrap_or_default();
+                            (named, decl, closed, defaults)
                         };
+                    // #488: field-set validation — duplicates always; unknown
+                    // and missing-without-default for closed declarations.
+                    if closed || !decl_fields.is_empty() {
+                        let given = fields.clone();
+                        self.validate_record_fields(n.as_str(), &given, &decl_fields, closed, &defaults);
+                    }
                     for f in fields.iter() {
                         if let Some((_, ety)) = decl_fields.iter().find(|(fname, _)| fname.as_str() == f.name.as_str()) {
                             if let Some(vty) = self.type_map.get(&f.value.id).cloned() {
@@ -1172,6 +1201,101 @@ impl Checker {
         });
     }
 
+    /// #488: classify a `TypeName(...)` call. All-named args on a record
+    /// type or record-payload variant case rewrite the node in place to the
+    /// brace `ExprKind::Record` form (one construction pipeline, both
+    /// spellings); positional args on those, or named args on a tuple
+    /// constructor, are E021. Returns true when the node was rewritten.
+    fn normalize_ctor_paren_call(&mut self, expr: &mut ast::Expr) -> bool {
+        let ExprKind::Call { callee, args, named_args, .. } = &expr.kind else { return false };
+        let ExprKind::TypeName { name } = &callee.kind else { return false };
+        let n = *name;
+        let bare = n.as_str().rsplit_once('.').map(|(_, b)| sym(b)).unwrap_or(n);
+        // Record-payload variant case? (ctor table is keyed by bare name)
+        let ctor_payload_record = self.env.lookup_ctor_in(&bare, self.current_module_prefix.as_deref())
+            .map(|(_, case)| matches!(case.payload, crate::types::VariantPayload::Record(_)));
+        // Record TYPE? (resolve through the same canonicalization annotations use)
+        let is_record_type = ctor_payload_record.is_none() && {
+            let key = match n.as_str().rsplit_once('.') {
+                Some(_) => sym(n.as_str()),
+                None => crate::canonicalize::resolve::canonical_user_type_sym(
+                    n.as_str(), &self.env.types, self.current_module_prefix.as_deref(),
+                ).unwrap_or(n),
+            };
+            matches!(self.env.resolve_named(&Ty::Named(key, vec![])), Ty::Record { .. } | Ty::OpenRecord { .. })
+        };
+        if ctor_payload_record == Some(true) || is_record_type {
+            if !args.is_empty() {
+                self.emit(super::err(
+                    format!("'{}' takes named fields, not positional arguments", n),
+                    format!("Name every field: `{}(field: value, ...)` or `{} {{ field: value, ... }}`", n, n),
+                    format!("constructor {}(...)", n),
+                ).with_code("E021"));
+                return false;
+            }
+            // Rewrite to the brace form in place; re-inference routes it
+            // through the Record arm (defaults, field validation, #433
+            // qualification, both backends' Record emission — for free).
+            let ExprKind::Call { named_args, .. } = std::mem::replace(&mut expr.kind, ExprKind::Unit) else { unreachable!() };
+            let fields = named_args.into_iter()
+                .map(|(fname, value)| ast::FieldInit { name: fname, value })
+                .collect();
+            expr.kind = ExprKind::Record { name: Some(n), fields };
+            return true;
+        }
+        if ctor_payload_record == Some(false) && !named_args.is_empty() {
+            self.emit(super::err(
+                format!("constructor '{}' takes positional arguments, not named ones", n),
+                format!("Drop the names: `{}(value, ...)`", n),
+                format!("constructor {}(...)", n),
+            ).with_code("E021"));
+        }
+        false
+    }
+
+    /// #488: validate a record construction's field set against the declared
+    /// fields: duplicates always; unknown + missing-without-default when the
+    /// declaration is CLOSED (a plain record or a record-payload case).
+    fn validate_record_fields(
+        &mut self,
+        type_label: &str,
+        given: &[ast::FieldInit],
+        decl_fields: &[(Sym, Ty)],
+        closed: bool,
+        defaults: &std::collections::HashSet<Sym>,
+    ) {
+        let mut seen: std::collections::HashSet<Sym> = std::collections::HashSet::new();
+        for f in given {
+            if !seen.insert(f.name) {
+                self.emit(super::err(
+                    format!("field '{}' given more than once in '{}' construction", f.name, type_label),
+                    "Remove the duplicate field",
+                    format!("record literal {}", type_label),
+                ).with_code("E021"));
+            }
+        }
+        if !closed { return; }
+        let available = || decl_fields.iter().map(|(d, _)| d.as_str()).collect::<Vec<_>>().join(", ");
+        for f in given {
+            if !decl_fields.iter().any(|(d, _)| *d == f.name) {
+                self.emit(super::err(
+                    format!("'{}' has no field '{}'", type_label, f.name),
+                    format!("Available fields: {}", available()),
+                    format!("record literal {}", type_label),
+                ).with_code("E021"));
+            }
+        }
+        for (d, _) in decl_fields {
+            if !given.iter().any(|f| f.name == *d) && !defaults.contains(d) {
+                self.emit(super::err(
+                    format!("missing field '{}' in '{}' construction", d, type_label),
+                    format!("Provide it: `{} {{ {}: ..., ... }}` (fields without defaults are required)", type_label, d),
+                    format!("record literal {}", type_label),
+                ).with_code("E021"));
+            }
+        }
+    }
+
     /// The effect-fn auto-unwrap rule, shared by every binding-shaped
     /// position (let / var / assign): a Result[T, E]-typed RHS unwraps to T
     /// — the lowering inserts the matching `?` — unless the target itself
@@ -1387,6 +1511,18 @@ impl Checker {
                         .find(|c| c.name == bare_name)
                         .map(|c| match &c.payload {
                             VariantPayload::Tuple(tys) => tys.clone(),
+                            // #488: a paren pattern on a RECORD-payload case
+                            // (`SetEmotion(_)`) bound nothing on native (rustc
+                            // E0164) while wasm accepted it — reject with the
+                            // brace spelling, both targets agree at check time.
+                            VariantPayload::Record(_) => {
+                                self.emit(super::err(
+                                    format!("case '{}' has named fields — use a record pattern", name),
+                                    format!("Match it as `{} {{ .. }}` (or bind fields: `{} {{ field }}`)", name, name),
+                                    format!("pattern {}(...)", name),
+                                ).with_code("E021"));
+                                vec![]
+                            }
                             _ => vec![],
                         })
                         .unwrap_or_default(),

@@ -66,6 +66,15 @@ pub struct TypeEnv {
     pub var_decl_locs: std::collections::HashMap<Sym, (usize, usize)>,
     /// Top-level `let` constants: name -> type
     pub top_lets: std::collections::HashMap<Sym, Ty>,
+    /// Record type key (same keys as `types`) -> field names that carry a
+    /// declared DEFAULT. Used by record-construction validation: a missing
+    /// field is an error only when it has no default (#488).
+    pub record_field_defaults: std::collections::HashMap<Sym, std::collections::HashSet<Sym>>,
+    /// Record-payload variant CASE name -> field names with a declared
+    /// default (`| Rect { color: String = "" }`). Keyed by bare ctor name;
+    /// same-name ctors across types union their sets (#413 corner — the
+    /// worst case is a suppressed missing-field error, never wrong code).
+    pub ctor_field_defaults: std::collections::HashMap<Sym, std::collections::HashSet<Sym>>,
     /// Types that implement the Eq protocol (via `deriving Eq`)
     pub eq_types: std::collections::HashSet<Sym>,
     /// Structural bounds for generic type parameters: TypeVar name → OpenRecord constraint
@@ -123,6 +132,8 @@ impl TypeEnv {
             self_module_name: None,
             import_table: ImportTable::new(),
             fn_visibility: std::collections::HashMap::new(),
+            record_field_defaults: std::collections::HashMap::new(),
+            ctor_field_defaults: std::collections::HashMap::new(),
 
             used_vars: std::collections::HashSet::new(),
             local_symbols: std::collections::HashSet::new(),
