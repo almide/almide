@@ -381,6 +381,15 @@ note = "string_codepoint.almd's string.take/drop/get convert char positions to b
 
 [[routine]]
 file = "rt_string.rs"
+routine = "compile_cp_of_byte"
+status = "verified"
+class = "fixture"
+oracle = "runtime/rs/src/string.rs::almide_rt_string_index_of (s[..b].chars().count() prefix conversion)"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "spec/wasm_cross/string_codepoint_index.almd exercises index_of/last_index_of codepoint conversion on multibyte input (C-065)."
+
+[[routine]]
+file = "rt_string.rs"
 routine = "compile_char_count"
 status = "verified"
 class = "fixture"

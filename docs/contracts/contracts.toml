@@ -249,7 +249,7 @@ evidence  = [
 [[contract]]
 id        = "C-017"
 title     = "Empty-pattern count / last_index_of follow native codepoint/byte semantics"
-statement = "`count` with the empty pattern returns the CODEPOINT count + 1 (`s.matches(\"\").count() == s.chars().count() + 1`); `last_index_of` with the empty pattern returns the BYTE length (`s.rfind(\"\") == Some(s.len())`). Both are byte-identical native == wasm, including multibyte subjects where codepoint-count and byte-length differ; wasm no longer short-circuits the empty pattern to 0."
+statement = "`count` with the empty pattern returns the CODEPOINT count + 1 (`s.matches(\"\").count() == s.chars().count() + 1`); `last_index_of` with the empty pattern returns the CODEPOINT count (the byte offset `s.rfind(\"\") == Some(s.len())` converted to the codepoint index, per the C-065 one-unit rule). Both are byte-identical native == wasm, including multibyte subjects where codepoint-count and byte-length differ; wasm no longer short-circuits the empty pattern to 0."
 since     = "0.24.0"
 status    = "active"
 evidence  = [
@@ -796,4 +796,26 @@ since     = "0.26.19"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/json_gltf_walk.almd", class = "fixture" },
+]
+
+# ── EFFECT-FN AUTO-UNWRAP IS BINDING-POSITION-UNIFORM, BYTE-IDENTICAL ─
+[[contract]]
+id        = "C-064"
+title     = "The effect-fn Result auto-unwrap rule is identical across binding positions and type-directed, byte-identical on both targets"
+statement = "In an effect fn, a Result[T, E]-typed RHS auto-unwraps (auto-`?`) in every binding-shaped position — `let`, `var`, plain reassignment `x = effectCall()` (#485), and index assignment — unless the TARGET keeps the Result: an explicit `Result[..]` annotation (`let r: Result[Int, String] = step()`) or a Result-typed assign target stores the Result intact, while an UN-annotated bind of a `-> Result[..]`-declared effect fn still auto-unwraps. The full matrix prints byte-identical stdout and exits 0 on native ⇄ wasm."
+since     = "0.26.20"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/effect_assign_unwrap.almd", class = "fixture" },
+]
+
+# ── STRING POSITION API SPEAKS ONE UNIT: CODEPOINTS ──────────────────
+[[contract]]
+id        = "C-065"
+title     = "The string position API is codepoint-indexed end-to-end on both targets"
+statement = "Every position/count in the `string` module speaks CODEPOINTS (#419): `len` returns the codepoint count, `index_of`/`last_index_of` return codepoint indices (the byte offsets of `str::find`/`rfind` converted via prefix codepoint count), `get` takes a codepoint index (negative or past-the-end -> none), and `slice` takes codepoint start/end clamped to [0, count] with the `end = i64::MAX` default degrading to the end of the string. Composition is therefore closed: `string.take(s, string.index_of(s, sub) ?? 0)` splits at the right place on multibyte input. Byte-identical native == wasm across ASCII, CJK, and mixed subjects."
+since     = "0.26.20"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/string_codepoint_index.almd", class = "fixture" },
 ]

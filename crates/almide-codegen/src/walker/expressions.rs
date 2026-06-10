@@ -246,6 +246,14 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
             // Match subject transforms (.as_str(), .as_deref()) are handled by
             // MatchSubjectPass nanopass — walker just renders what's in the IR.
             let subj = render_expr(ctx, subject);
+            // Rust's grammar forbids a bare struct literal in match-subject
+            // position ("struct literals are not allowed here") — a record/
+            // variant brace construction must be parenthesized (#490).
+            let subj = if matches!(&subject.kind, IrExprKind::Record { name: Some(_), .. } | IrExprKind::SpreadRecord { .. }) {
+                format!("({})", subj)
+            } else {
+                subj
+            };
             let arms_raw = arms.iter()
                 .map(|arm| render_match_arm(ctx, arm, &expr.ty, &subject.ty))
                 .collect::<Vec<_>>()

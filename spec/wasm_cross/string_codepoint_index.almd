@@ -1,0 +1,26 @@
+
+// @contract: C-065
+// #419: the string position API speaks ONE unit — codepoints — on both
+// targets. len / index_of / last_index_of / get / slice compose with
+// take / drop on multibyte input without byte/char mixing.
+effect fn main() -> Unit = {
+  let s = "あいうabc";
+  println("len=" + int.to_string(string.len(s)));
+  println("index_of_abc=" + int.to_string(string.index_of(s, "abc") ?? -1));
+  println("index_of_u=" + int.to_string(string.index_of(s, "う") ?? -1));
+  println("last_index_of_a=" + int.to_string(string.last_index_of(s, "あ") ?? -1));
+  println("index_of_missing=" + int.to_string(string.index_of(s, "z") ?? -1));
+  println("slice13=" + string.slice(s, 1, 3));
+  println("slice2=" + string.slice(s, 2));
+  println("slice_neg=" + string.slice(s, -2, 2));
+  println("get1=" + (string.get(s, 1) ?? "?"));
+  println("get4=" + (string.get(s, 4) ?? "?"));
+  println("get_neg=" + (string.get(s, -1) ?? "?"));
+  println("get_oob=" + (string.get(s, 99) ?? "?"));
+  println("compose=" + string.take(s, string.index_of(s, "abc") ?? 0));
+  println("ascii_index_of=" + int.to_string(string.index_of("hello", "ll") ?? -1));
+  println("ascii_len=" + int.to_string(string.len("hello")));
+  println("emoji_len=" + int.to_string(string.len("a😀b")));
+  println("emoji_index=" + int.to_string(string.index_of("a😀b", "b") ?? -1));
+  println("empty_last=" + int.to_string(string.last_index_of("あいう", "") ?? -1))
+}

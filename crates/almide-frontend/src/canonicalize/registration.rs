@@ -538,6 +538,29 @@ pub fn register_type_decl(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, 
         }
     }
     let key = prefixed_key(prefix, name);
+    // Field defaults, keyed like `types` (both keys when prefixed), so
+    // record-construction validation knows which fields may be omitted (#488).
+    if let ast::TypeExpr::Record { fields } | ast::TypeExpr::OpenRecord { fields } = ty {
+        let defaults: std::collections::HashSet<Sym> =
+            fields.iter().filter(|f| f.default.is_some()).map(|f| f.name).collect();
+        env.record_field_defaults.insert(sym(&key), defaults.clone());
+        if prefix.is_some() {
+            env.record_field_defaults.insert(sym(name), defaults);
+        }
+    }
+    // Record-payload variant cases carry field defaults too
+    // (`| Rect { color: String = "" }`) — harvest them from the AST, since
+    // the resolved `VariantPayload::Record` keeps only (name, ty).
+    if let ast::TypeExpr::Variant { cases } = ty {
+        for c in cases {
+            if let ast::VariantCase::Record { name: cname, fields } = c {
+                let defs: Vec<Sym> = fields.iter().filter(|f| f.default.is_some()).map(|f| f.name).collect();
+                if !defs.is_empty() {
+                    env.ctor_field_defaults.entry(*cname).or_default().extend(defs);
+                }
+            }
+        }
+    }
     env.types.insert(sym(&key), resolved.clone());
     if prefix.is_some() {
         env.types.insert(sym(name), resolved);
