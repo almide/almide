@@ -104,7 +104,7 @@ impl FuncCompiler<'_> {
                       local_get(xs); i32_const(list_data_off); i32_add;
                       local_get(i); i32_const(es); i32_mul; i32_add;
                 });
-                self.emit_elem_copy(&elem_ty);
+                self.emit_elem_copy_owned(&elem_ty);
                 wasm!(self.func, {
                       local_get(i); i32_const(1); i32_add; local_set(i);
                       br(0);
@@ -152,7 +152,7 @@ impl FuncCompiler<'_> {
                       local_get(start); local_get(i); i32_add;
                       i32_const(es); i32_mul; i32_add;
                 });
-                self.emit_elem_copy(&elem_ty);
+                self.emit_elem_copy_owned(&elem_ty);
                 wasm!(self.func, {
                       local_get(i); i32_const(1); i32_add; local_set(i);
                       br(0);
@@ -216,7 +216,7 @@ impl FuncCompiler<'_> {
                       local_get(start); local_get(len); i32_add;
                       i32_const(es); i32_mul; i32_add;
                 });
-                self.emit_elem_copy(&elem_ty);
+                self.emit_elem_copy_owned(&elem_ty);
                 wasm!(self.func, {
                       local_get(len); i32_const(1); i32_add; local_set(len);
                       br(0);
@@ -258,7 +258,7 @@ impl FuncCompiler<'_> {
                       i32_const(elem_size as i32); i32_mul; i32_add;
                 });
                 // Copy elem_size bytes
-                self.emit_elem_copy(&elem_ty);
+                self.emit_elem_copy_owned(&elem_ty);
                 wasm!(self.func, {
                       local_get(i); i32_const(1); i32_add; local_set(i);
                       br(0);
@@ -323,7 +323,7 @@ impl FuncCompiler<'_> {
                       local_get(result);
                       local_get(xs); i32_const(list_data_off); i32_add;
                 });
-                self.emit_elem_copy(&elem_ty);
+                self.emit_elem_copy_owned(&elem_ty);
                 wasm!(self.func, { local_get(result); end; });
                 self.scratch.free_i32(result);
                 self.scratch.free_i32(xs);
@@ -346,7 +346,7 @@ impl FuncCompiler<'_> {
                       local_get(xs); i32_load(0); i32_const(1); i32_sub;
                       i32_const(elem_size as i32); i32_mul; i32_add;
                 });
-                self.emit_elem_copy(&elem_ty);
+                self.emit_elem_copy_owned(&elem_ty);
                 wasm!(self.func, { local_get(result); end; });
                 self.scratch.free_i32(result);
                 self.scratch.free_i32(xs);
@@ -466,7 +466,7 @@ impl FuncCompiler<'_> {
                         local_get(inner); i32_const(list_data_off); i32_add;
                         local_get(j); i32_const(elem_size as i32); i32_mul; i32_add;
                 });
-                self.emit_elem_copy(&elem_ty);
+                self.emit_elem_copy_owned(&elem_ty);
                 wasm!(self.func, {
                         local_get(j); i32_const(1); i32_add; local_set(j);
                         br(0);
@@ -555,6 +555,13 @@ impl FuncCompiler<'_> {
                       i32_const(es); call(self.emitter.rt.alloc); local_set(out);
                       local_get(out); local_get(best);
                 });
+                // SHARE: the winner pointer aliases an element of a list the
+                // caller still owns; the some() box must own its own ref —
+                // a freed-then-reused winner is how a list's len became a
+                // free-list next pointer (the repr-loop wall-clock hang).
+                if crate::pass_perceus::is_heap_type(&elem_ty) {
+                    wasm!(self.func, { call(self.emitter.rt.rc_inc); });
+                }
                 self.emit_store_at(&elem_ty, 0);
                 wasm!(self.func, {
                       local_get(out);
@@ -608,7 +615,7 @@ impl FuncCompiler<'_> {
                         local_get(xs); i32_const(list_data_off); i32_add;
                         local_get(src_i); i32_const(elem_size as i32); i32_mul; i32_add;
                 });
-                self.emit_elem_copy(&elem_ty);
+                self.emit_elem_copy_owned(&elem_ty);
                 wasm!(self.func, {
                         local_get(dst_i); i32_const(1); i32_add; local_set(dst_i);
                         // Insert sep if not last
@@ -618,6 +625,11 @@ impl FuncCompiler<'_> {
                           local_get(dst_i); i32_const(elem_size as i32); i32_mul; i32_add;
                           local_get(sep);
                 });
+                // SHARE: the sep value's source survives; every stored slot
+                // needs its own reference.
+                if crate::pass_perceus::is_heap_type(&elem_ty) {
+                    wasm!(self.func, { call(self.emitter.rt.rc_inc); });
+                }
                 self.emit_elem_store(&elem_ty);
                 wasm!(self.func, {
                           local_get(dst_i); i32_const(1); i32_add; local_set(dst_i);
@@ -679,14 +691,14 @@ impl FuncCompiler<'_> {
                       local_get(xs); i32_const(list_data_off); i32_add;
                       local_get(i); i32_const(a_size as i32); i32_mul; i32_add;
                 });
-                self.emit_elem_copy(&a_ty);
+                self.emit_elem_copy_owned(&a_ty);
                 // Copy b: tuple[a_size] = ys[i]
                 wasm!(self.func, {
                       local_get(tup); i32_const(a_size as i32); i32_add;
                       local_get(ys); i32_const(list_data_off); i32_add;
                       local_get(i); i32_const(b_size as i32); i32_mul; i32_add;
                 });
-                self.emit_elem_copy(&b_ty);
+                self.emit_elem_copy_owned(&b_ty);
                 wasm!(self.func, {
                       // result[i] = tuple_ptr
                       local_get(dst); i32_const(list_data_off); i32_add;
@@ -727,8 +739,9 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, { local_set(idx); });
                 // Evaluate `val` EAGERLY (native passes it by value before the
                 // call), then store conditionally — so a side-effecting value
-                // expr runs whether or not the index is in bounds.
-                self.emit_expr(&args[2]);
+                // expr runs whether or not the index is in bounds. Stored-field
+                // contract: an alias value gets its own reference.
+                self.emit_stored_field(&args[2]);
                 wasm!(self.func, {
                     local_set(val);
                     // Alloc copy
@@ -744,7 +757,7 @@ impl FuncCompiler<'_> {
                       local_get(xs); i32_const(list_data_off); i32_add;
                       local_get(i); i32_const(es); i32_mul; i32_add;
                 });
-                self.emit_elem_copy(&elem_ty);
+                self.emit_elem_copy_owned(&elem_ty);
                 wasm!(self.func, {
                       local_get(i); i32_const(1); i32_add; local_set(i);
                       br(0);
@@ -752,6 +765,17 @@ impl FuncCompiler<'_> {
                     // Overwrite dst[idx] with val — only when in bounds.
                     local_get(in_bounds);
                     if_empty;
+                });
+                // Release the owned copy of the element being replaced (it
+                // received +1 in the copy loop above and loses this slot).
+                if crate::pass_perceus::is_heap_type(&elem_ty) {
+                    wasm!(self.func, {
+                      local_get(dst); i32_const(list_data_off); i32_add;
+                      local_get(idx); i32_const(es); i32_mul; i32_add;
+                      i32_load(0); call(self.emitter.rt.rc_dec);
+                    });
+                }
+                wasm!(self.func, {
                       local_get(dst); i32_const(list_data_off); i32_add;
                       local_get(idx); i32_const(es); i32_mul; i32_add;
                       local_get(val);
@@ -798,18 +822,18 @@ impl FuncCompiler<'_> {
                       local_get(xs); i32_const(list_data_off); i32_add;
                       local_get(i); i32_const(es); i32_mul; i32_add;
                 });
-                self.emit_elem_copy(&elem_ty);
+                self.emit_elem_copy_owned(&elem_ty);
                 wasm!(self.func, {
                       local_get(i); i32_const(1); i32_add; local_set(i);
                       br(0);
                     end; end;
                 });
-                // Insert val at idx
+                // Insert val at idx (stored-field: alias values dup)
                 wasm!(self.func, {
                     local_get(dst); i32_const(list_data_off); i32_add;
                     local_get(idx); i32_const(es); i32_mul; i32_add;
                 });
-                self.emit_expr(&args[2]);
+                self.emit_stored_field(&args[2]);
                 self.emit_elem_store(&elem_ty);
                 // Copy [idx..old_len)
                 wasm!(self.func, {
@@ -821,7 +845,7 @@ impl FuncCompiler<'_> {
                       local_get(xs); i32_const(list_data_off); i32_add;
                       local_get(i); i32_const(es); i32_mul; i32_add;
                 });
-                self.emit_elem_copy(&elem_ty);
+                self.emit_elem_copy_owned(&elem_ty);
                 wasm!(self.func, {
                       local_get(i); i32_const(1); i32_add; local_set(i);
                       br(0);
@@ -869,7 +893,7 @@ impl FuncCompiler<'_> {
                       local_get(xs); i32_const(list_data_off); i32_add;
                       local_get(i); i32_const(es); i32_mul; i32_add;
                 });
-                self.emit_elem_copy(&elem_ty);
+                self.emit_elem_copy_owned(&elem_ty);
                 wasm!(self.func, {
                       local_get(i); i32_const(1); i32_add; local_set(i);
                       br(0);
@@ -885,15 +909,18 @@ impl FuncCompiler<'_> {
                       local_get(xs); i32_const(list_data_off); i32_add;
                       local_get(i); i32_const(es); i32_mul; i32_add;
                 });
-                self.emit_elem_copy(&elem_ty);
+                self.emit_elem_copy_owned(&elem_ty);
                 wasm!(self.func, {
                       local_get(i); i32_const(1); i32_add; local_set(i);
                       br(0);
                     end; end;
                     local_get(dst);
                     else_;
-                    // i >= len → return the list unchanged
-                    local_get(xs);
+                    // i >= len → return the list unchanged. SHARE: the result
+                    // is a SECOND reference to xs (native returns a clone) —
+                    // without the inc the result temp's Dec freed xs's live
+                    // backing (list_count_index_truncation silent corruption).
+                    local_get(xs); call(self.emitter.rt.rc_inc);
                     end;
                 });
                 self.scratch.free_i32(i);
@@ -958,6 +985,12 @@ impl FuncCompiler<'_> {
                     i32_add;
                 });
                 self.emit_load_at(&elem_ty, 0); // load elem
+                // SHARE: the some-box holds a second reference to the element
+                // (the bind-level alias-Inc covers the LOCAL the caller binds;
+                // this covers the BOX, whose typed dec releases it).
+                if crate::pass_perceus::is_heap_type(&elem_ty) {
+                    wasm!(self.func, { call(self.emitter.rt.rc_inc); });
+                }
                 self.emit_store_at(&elem_ty, 0); // store at dst
                 wasm!(self.func, {
                     local_get(result); // return ptr
@@ -1093,8 +1126,10 @@ impl FuncCompiler<'_> {
                 let new_ptr = self.scratch.alloc_i32();
                 let val_scratch = self.scratch.alloc(vt);
 
-                // Evaluate value first (before reading xs, in case of side effects)
-                self.emit_expr(&args[1]);
+                // Evaluate value first (before reading xs, in case of side
+                // effects); stored-field contract — an alias value pushed
+                // into the list needs its own reference.
+                self.emit_stored_field(&args[1]);
                 wasm!(self.func, { local_set(val_scratch); });
 
                 // Read xs pointer, len, cap

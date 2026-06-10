@@ -1,0 +1,11 @@
+fn build(n: Int, acc: String) -> String =
+  if n == 0 then acc else build(n - 1, acc + "x")
+fn main() -> Unit = {
+  var i = 0
+  var sink = 0
+  while i < 200000 {
+    sink = sink + string.len(build(45 + i % 10, ""))
+    i = i + 1
+  }
+  println(int.to_string(sink))
+}

@@ -79,7 +79,7 @@ impl FuncCompiler<'_> {
                       local_get(xs); i32_const(list_data_off); i32_add;
                       local_get(copy_i); i32_const(es); i32_mul; i32_add;
                 });
-                self.emit_elem_copy(&elem_ty);
+                self.emit_elem_copy_owned(&elem_ty);
                 wasm!(self.func, {
                       local_get(copy_i); i32_const(1); i32_add; local_set(copy_i);
                       br(0);
@@ -143,7 +143,7 @@ impl FuncCompiler<'_> {
                       local_get(start); local_get(copy_i); i32_add;
                       i32_const(es); i32_mul; i32_add;
                 });
-                self.emit_elem_copy(&elem_ty);
+                self.emit_elem_copy_owned(&elem_ty);
                 wasm!(self.func, {
                       local_get(copy_i); i32_const(1); i32_add; local_set(copy_i);
                       br(0);
@@ -242,7 +242,7 @@ impl FuncCompiler<'_> {
                         local_get(xs); i32_const(list_data_off); i32_add;
                         local_get(i); i32_const(es); i32_mul; i32_add;
                 });
-                self.emit_elem_copy(&elem_ty);
+                self.emit_elem_copy_owned(&elem_ty);
                 wasm!(self.func, {
                         local_get(true_cnt); i32_const(1); i32_add; local_set(true_cnt);
                         i32_const(0);
@@ -252,7 +252,7 @@ impl FuncCompiler<'_> {
                         local_get(xs); i32_const(list_data_off); i32_add;
                         local_get(i); i32_const(es); i32_mul; i32_add;
                 });
-                self.emit_elem_copy(&elem_ty);
+                self.emit_elem_copy_owned(&elem_ty);
                 wasm!(self.func, {
                         local_get(false_cnt); i32_const(1); i32_add; local_set(false_cnt);
                         i32_const(0);
@@ -315,7 +315,7 @@ impl FuncCompiler<'_> {
                       local_get(xs); i32_const(list_data_off); i32_add;
                       local_get(copy_i); i32_const(es); i32_mul; i32_add;
                 });
-                self.emit_elem_copy(&elem_ty);
+                self.emit_elem_copy_owned(&elem_ty);
                 wasm!(self.func, {
                       local_get(copy_i); i32_const(1); i32_add; local_set(copy_i);
                       br(0);
@@ -326,6 +326,21 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, {
                     local_get(in_bounds);
                     if_empty;
+                });
+                // Release the owned copy of the element being replaced (it
+                // received +1 in the copy loop and loses this slot). The
+                // closure still reads it first — dec AFTER the call would be
+                // ideal, but the call's argument is the same pointer and a
+                // rc>1 dec never frees; at rc==1 the closure-arg read happens
+                // before any reuse since nothing allocates in between.
+                if crate::pass_perceus::is_heap_type(&elem_ty) {
+                    wasm!(self.func, {
+                        local_get(dst); i32_const(list_data_off); i32_add;
+                        local_get(idx); i32_const(es); i32_mul; i32_add;
+                        i32_load(0); call(self.emitter.rt.rc_dec);
+                    });
+                }
+                wasm!(self.func, {
                     local_get(dst); i32_const(list_data_off); i32_add;
                     local_get(idx); i32_const(es); i32_mul; i32_add;
                     // Call f(dst[idx])
@@ -596,7 +611,7 @@ impl FuncCompiler<'_> {
                         local_get(xs); i32_const(list_data_off); i32_add;
                         local_get(i); i32_const(es); i32_mul; i32_add;
                 });
-                self.emit_elem_copy(&elem_ty);
+                self.emit_elem_copy_owned(&elem_ty);
                 wasm!(self.func, {
                         local_get(seen_keys);
                         local_get(out_count); i32_const(ks); i32_mul; i32_add;
@@ -974,8 +989,26 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, {
                     end; end;
                     local_get(dst); local_get(out_count); i32_store(0);
-                    local_get(dst);
                 });
+                // SHARE dup: kept elements are second references into the
+                // surviving source list. Walk dst[0..out_count] once —
+                // per-store incs would over-count rejected slots.
+                if crate::pass_perceus::is_heap_type(&elem_ty) {
+                    let wi = self.scratch.alloc_i32();
+                    wasm!(self.func, {
+                        i32_const(0); local_set(wi);
+                        block_empty; loop_empty;
+                            local_get(wi); local_get(out_count); i32_ge_u; br_if(1);
+                            local_get(dst); i32_const(list_data_off); i32_add;
+                            local_get(wi); i32_const(elem_size as i32); i32_mul; i32_add;
+                            i32_load(0); call(self.emitter.rt.rc_inc); drop;
+                            local_get(wi); i32_const(1); i32_add; local_set(wi);
+                            br(0);
+                        end; end;
+                    });
+                    self.scratch.free_i32(wi);
+                }
+                wasm!(self.func, { local_get(dst); });
                 if let Some((pl, pvt)) = filter_param_local {
                     self.scratch.free(pl, pvt);
                 }
@@ -1043,7 +1076,10 @@ impl FuncCompiler<'_> {
                     wasm!(self.func, { local_set(list_ptr); });
                     let source_elem_ty = self.resolve_list_elem(source_expr, None);
                     let source_elem_size = values::byte_size(&source_elem_ty);
-                    self.emit_expr(&args[1]);
+                    // See the non-fused path: dup an alias accumulator seed so the
+                    // fold loop owns its reference and the caller's Dec of the seed
+                    // local cannot double-free the (empty-list) returned result.
+                    self.emit_stored_field(&args[1]);
                     wasm!(self.func, { local_set(acc); });
                     // Pointer-based iteration: ptr and end instead of idx
                     let ptr = self.scratch.alloc_i32();
@@ -1152,7 +1188,11 @@ impl FuncCompiler<'_> {
                 let end_ptr = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
                 wasm!(self.func, { local_set(list_ptr); });
-                self.emit_expr(&args[1]);
+                // The accumulator is MOVE-STORED into the fold loop and returned
+                // as the result (unchanged when the list is empty). Dup an alias
+                // seed so the loop owns its own reference and the caller's
+                // scope-end Dec of the seed local does not double-free the result.
+                self.emit_stored_field(&args[1]);
                 wasm!(self.func, { local_set(acc); });
                 if !is_inline_lambda {
                     self.emit_expr(&args[2]);
@@ -1536,6 +1576,16 @@ impl FuncCompiler<'_> {
     /// True for: single-use variables (use_count == 1) OR temporary expressions
     /// (Call results, RuntimeCall results) that are not bound to any variable.
     fn is_single_use_var(&self, expr: &IrExpr) -> bool {
+        // Under real frees (ALMIDE_WASM_FREES=1) the IR-level Perceus pass is
+        // the ONLY owner of ownership decisions: it Decs every heap VDecl at
+        // scope end, so an emitter-level in-place reuse or raw rc_dec here
+        // would create a SECOND owner of the same block — the double-free the
+        // sentinel now catches at teardown (caught by the byte gate on
+        // wasm_list_map). The reuse this disables is a micro-optimization;
+        // block recycling still happens through the free list. Re-enabling it
+        // as an IR-level move (visible to the verifier) is the tracked
+        // follow-up in wasm-frees-ownership-discipline.md.
+        if super::runtime::wasm_frees_enabled() { return false; }
         match &expr.kind {
             IrExprKind::Var { id } => self.var_table.get(*id).use_count == 1,
             // Temporary expression results: consumed exactly here, never aliased

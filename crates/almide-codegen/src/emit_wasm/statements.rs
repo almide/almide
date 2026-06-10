@@ -709,7 +709,10 @@ impl FuncCompiler<'_> {
     }
 
     pub(super) fn is_heap_type(ty: &Ty) -> bool {
-        matches!(ty, Ty::String | Ty::Applied(_, _) | Ty::Record { .. } | Ty::Unknown)
+        // `Ty::Named` (declared nominal record/variant) is a heap pointer — include
+        // it so a record FIELD that is itself a declared type is recursively dec'd
+        // by `emit_typed_rc_dec`. Mirrors pass_perceus::is_heap_type.
+        matches!(ty, Ty::String | Ty::Applied(_, _) | Ty::Record { .. } | Ty::Named(..) | Ty::Unknown)
     }
 
     /// Perceus Rule 3: type-specialized rc_dec.
@@ -718,6 +721,26 @@ impl FuncCompiler<'_> {
     pub(super) fn emit_typed_rc_dec(&mut self, ty: &Ty, local_idx: u32) {
         use almide_lang::types::TypeConstructorId;
         use super::engine::{WasmBuilder, layout::*};
+
+        // A declared nominal record/variant (`type P = {...}`) is `Ty::Named`;
+        // resolve it to its structural fields so the child-recursion below frees its
+        // heap fields. Without this, Named hits the `_ => false` (childless) arm and
+        // its String / nested-heap fields leak. An opaque alias with no registered
+        // fields (`type H = String`) resolves to none and falls through to a plain
+        // dec of the aliased heap block, which is correct.
+        if let Ty::Named(..) = ty {
+            let fields = self.extract_record_fields(ty);
+            if !fields.is_empty() {
+                let rec = Ty::Record {
+                    fields: fields.into_iter()
+                        .map(|(n, t)| (almide_base::intern::sym(n.as_str()), t))
+                        .collect(),
+                };
+                self.emit_typed_rc_dec(&rec, local_idx);
+                return;
+            }
+        }
+
         let rc_dec_fn = self.emitter.rt.rc_dec;
         let rc_neg = self.emitter.layout_reg.alloc_header_neg_offset(alloc::RC);
 
@@ -725,7 +748,8 @@ impl FuncCompiler<'_> {
         wasm!(self.func, { local_get(local_idx); if_empty; });
 
         let has_children = match ty {
-            Ty::Applied(TypeConstructorId::List, args) =>
+            Ty::Applied(TypeConstructorId::List, args)
+            | Ty::Applied(TypeConstructorId::Set, args) =>
                 args.first().map_or(false, |t| Self::is_heap_type(t)),
             Ty::Applied(TypeConstructorId::Option, args) =>
                 args.first().map_or(false, |t| Self::is_heap_type(t)),
@@ -735,6 +759,8 @@ impl FuncCompiler<'_> {
                 args.iter().any(|t| Self::is_heap_type(t)),
             Ty::Record { fields } =>
                 fields.iter().any(|(_, t)| Self::is_heap_type(t)),
+            Ty::Tuple(tys) =>
+                tys.iter().any(|t| Self::is_heap_type(t)),
             Ty::Fn { .. } => true,
             _ => false,
         };
@@ -749,8 +775,10 @@ impl FuncCompiler<'_> {
             }
 
             match ty {
-                // ── List[HeapType]: iterate elements, rc_dec each ──
-                Ty::Applied(TypeConstructorId::List, args) => {
+                // ── List/Set[HeapType]: iterate elements, rc_dec each. Set has the
+                // identical [len][elem0..] layout, so the List element-walk applies ──
+                Ty::Applied(TypeConstructorId::List, args)
+                | Ty::Applied(TypeConstructorId::Set, args) => {
                     let elem_size = super::values::byte_size(&args[0]);
                     let elem = self.scratch.alloc_i32();
                     let idx = self.scratch.alloc_i32();
@@ -803,11 +831,16 @@ impl FuncCompiler<'_> {
                     }
                 }
                 // ── Record: dec each heap-typed field ──
+                // Fields are walked in GIVEN (declaration) order — the same
+                // order construction (emit_record), member access
+                // (field_offset), and spread use. The original name-sorted
+                // walk computed WRONG offsets whenever alphabetical order
+                // diverged from declaration order with mixed field sizes,
+                // assembling fake pointers out of neighboring bytes
+                // (sized_int_record_fields trap) or silently leaking.
                 Ty::Record { fields } => {
-                    let mut sorted: Vec<_> = fields.iter().collect();
-                    sorted.sort_by(|a, b| a.0.cmp(&b.0));
                     let mut offset = 0u32;
-                    for (_, field_ty) in &sorted {
+                    for (_, field_ty) in fields {
                         if Self::is_heap_type(field_ty) {
                             let mut w = WasmBuilder::new(&mut self.func, &self.emitter.layout_reg);
                             w.get(local_idx).emit_load(offset, MemType::I32);
@@ -817,6 +850,21 @@ impl FuncCompiler<'_> {
                             );
                         }
                         offset += super::values::byte_size(field_ty);
+                    }
+                }
+                // ── Tuple: dec each heap-typed element (positional, no name sort) ──
+                Ty::Tuple(tys) => {
+                    let mut offset = 0u32;
+                    for elem_ty in tys {
+                        if Self::is_heap_type(elem_ty) {
+                            let mut w = WasmBuilder::new(&mut self.func, &self.emitter.layout_reg);
+                            w.get(local_idx).emit_load(offset, MemType::I32);
+                            w.if_void(
+                                |w| { w.get(local_idx).emit_load(offset, MemType::I32).call(rc_dec_fn); },
+                                |_| {},
+                            );
+                        }
+                        offset += super::values::byte_size(elem_ty);
                     }
                 }
                 // ── Map[K, V]: Swiss Table iteration, dec live entries ──

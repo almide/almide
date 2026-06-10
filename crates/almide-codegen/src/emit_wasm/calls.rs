@@ -326,11 +326,15 @@ impl FuncCompiler<'_> {
                                     i32_const(tag as i32);
                                     i32_store(0);
                                 });
-                                // Write args
+                                // Write args — through the stored-field
+                                // contract (fresh values move, alias values
+                                // dup), the same rule emit_record uses; a
+                                // bare emit_expr stored a payload the source
+                                // binding still owned and later Dec'd.
                                 let mut offset = 4u32;
                                 for arg in args {
                                     wasm!(self.func, { local_get(scratch); });
-                                    self.emit_expr(arg);
+                                    self.emit_stored_field(arg);
                                     self.emit_store_at(&arg.ty, offset);
                                     offset += values::byte_size(&arg.ty);
                                 }
@@ -995,7 +999,11 @@ impl FuncCompiler<'_> {
                     let type_idx = self.emitter.register_type(closure_params, ret_types);
                     wasm!(self.func, { call_indirect(type_idx, 0); });
                 } else {
-                    wasm!(self.func, { unreachable; });
+                    panic!(
+                        "[ICE] emit_wasm: closure call through a non-Fn type `{:?}` — \
+                         the call signature cannot be built; resolve upstream",
+                        callee_fn_ty
+                    );
                 }
                 self.scratch.free_i32(scratch);
             }
@@ -1140,7 +1148,10 @@ impl FuncCompiler<'_> {
                     let type_idx = self.emitter.register_type(closure_params, ret_types);
                     wasm!(self.func, { return_call_indirect(type_idx, 0); });
                 } else {
-                    wasm!(self.func, { unreachable; });
+                    panic!(
+                        "[ICE] emit_wasm: tail closure call through a non-Fn type — \
+                         the call signature cannot be built; resolve upstream"
+                    );
                 }
                 self.scratch.free_i32(scratch);
             }

@@ -536,7 +536,7 @@ evidence  = [
 [[contract]]
 id        = "C-041"
 title     = "Heap / RC primitives honour the Lean-certified Perceus discipline"
-statement = "alloc/realloc-growth, refcount inc/dec, string alloc, and the arena checkpoint primitives (heap_save/heap_restore) produce byte-identical observable results native == wasm under heavy churn — no leak, double-free, or realloc clobber. The IR-level Inc/Dec balance is certified by the `0 sorry` Lean Perceus belt; these fixtures are the executable counterpart. The opaque checkpoint value (0 native vs a real pointer wasm) is never printed."
+statement = "alloc/realloc-growth, refcount inc/dec, string alloc, and the arena checkpoint primitives (heap_save/heap_restore) produce byte-identical observable results native == wasm under heavy churn — no observable leak effect, double-free, or realloc clobber. Since 0.27.0 the wasm rc bodies are REAL by default (C-066): rc_dec frees to a reuse list, double-frees trap on a rc==0 sentinel, rc_inc of a freed block traps (resurrection), and heap_restore / the per-iteration loop region reset also clear the free list so allocator state never straddles a rolled-back frontier. The IR-level Inc/Dec balance is certified by the `0 sorry` Lean Perceus belt; these fixtures are the executable counterpart. The opaque checkpoint value (0 native vs a real pointer wasm) is never printed."
 since     = "0.24.0"
 status    = "active"
 evidence  = [
@@ -546,6 +546,18 @@ evidence  = [
   { path = "spec/wasm_cross/hof_closure_string_tail.almd", class = "fixture" },
   { path = "crates/almide-perceus-belt/AlmidePerceusBelt/Heap.lean", name = "perceus_fixes_heap", class = "lean" },
   { path = "crates/almide-perceus-belt/AlmidePerceusBelt/ClosureRc.lean", name = "closureScope_decs", class = "lean" },
+]
+
+[[contract]]
+id        = "C-066"
+title     = "WASM heap is reclaimed by default (true Perceus)"
+statement = "Since 0.27.0 the wasm target frees by default: construct-and-drop churn reuses freed blocks (free-list) and loop iterations whose heap values do not escape reclaim wholesale (region reset incl. the free list), so steady-state churn runs in O(1) memory instead of the pre-0.27 bump-allocate-and-leak model. Observable values stay byte-identical native == wasm under churn. `ALMIDE_WASM_FREES=0` is the opt-out back to the leak model (env-conditional emission is declared behavior under the host-determinism gates). Known bounded exceptions, tracked in docs/roadmap/active/wasm-frees-ownership-discipline.md: TCO self-call loops leak per iteration until the Stage C redesign lands, and a stored-field over-count leaks one reference per construct-from-temp outside reclaimed regions."
+since     = "0.27.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/rc_reclaim_churn.almd", class = "fixture" },
+  { path = "spec/churn/record_churn.almd", class = "by-construction" },
+  { path = "spec/churn/tco_loop_churn.almd", class = "by-construction" },
 ]
 
 # ── FILESYSTEM (WASI PREOPEN RESOLUTION) ─────────────────────────────

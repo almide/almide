@@ -793,9 +793,19 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(left);
                 self.scratch.free_i32(right);
             }
-            // TypeVar/Unknown: unresolved type — trap rather than silently compare as wrong type
+            // TypeVar/Unknown: unresolved type — dead-code residue from error
+            // recovery may reach here; live code is guarded by
+            // assert_types_concretized. Keep the trap for that case only.
             (ty, _) if ty.is_unresolved() => { wasm!(self.func, { unreachable; }); }
-            _ => { wasm!(self.func, { unreachable; }); }
+            (l, _) => {
+                // A RESOLVED type with no comparison emission is a
+                // compiler bug — fail the build (§5: no silent traps).
+                panic!(
+                    "[ICE] emit_wasm: no equality/comparison emission for type `{:?}` — \
+                     add an arm or reject upstream in the checker",
+                    l
+                );
+            }
         }
     }
 

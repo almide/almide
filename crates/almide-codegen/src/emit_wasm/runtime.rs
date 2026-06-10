@@ -335,11 +335,10 @@ pub fn register_runtime_functions(emitter: &mut WasmEmitter) {
 ///
 /// NOTE: this is the CORRECT low bound. The legacy `emitter.rt.heap_start_global`
 /// field is only assigned (to this value) in `assemble`, AFTER `compile_runtime` —
-/// so at runtime-fn compile time it is still 0 (= the moving heap_ptr global). The
-/// rc_inc/rc_dec header guard therefore bakes `global.get 0`, which makes them
-/// no-ops for every heap pointer (a pure bump-allocate-and-leak model — sound, no
-/// frees). `compile_cow_check` deliberately uses THIS constant instead, so its
-/// data-section guard is correct independent of that legacy field.
+/// so at runtime-fn compile time it is still 0 (= the moving heap_ptr global).
+/// Every runtime guard that needs the TRUE heap floor (rc_inc/rc_dec since the
+/// frees flip, `compile_cow_check`) uses THIS constant instead of that legacy
+/// field.
 pub const HEAP_START_GLOBAL_IDX: u32 = 4;
 
 /// Compile all runtime function bodies.
@@ -427,19 +426,48 @@ fn compile_alloc(emitter: &mut WasmEmitter) {
     let free_list = emitter.free_list_global;
     let heap_ptr = emitter.heap_ptr_global;
 
-    // locals: 0=request_size, 1=ptr, 2=grow_pages, 3=prev, 4=cur
+    // locals: 0=request_size, 1=ptr, 2=grow_pages, 3=prev, 4=cur, 5=steps
     let mut f = Function::new([
         (1, ValType::I32), (1, ValType::I32),
         (1, ValType::I32), (1, ValType::I32),
+        (1, ValType::I32),
     ]);
     {
         let w = &mut WasmBuilder::new(&mut f, &emitter.layout_reg);
 
         // --- Free list walk ---
+        // The walk carries two tripwires (free when the list is empty, i.e.
+        // whenever frees are off): a STEP BOUND that traps on a cycle (a
+        // double-free that slipped past the rc sentinel pushes a block twice
+        // and links the list to itself — without the bound this loop spins
+        // forever, the hang that forced the first activation revert), and a
+        // SIZE SANITY check that traps when a node's header was clobbered
+        // (e.g. a host-written buffer freed and overwritten — the fs scratch
+        // poison class). No free list can have more nodes than 8-byte blocks
+        // in the heap, so heap_ptr >> 3 bounds any acyclic walk.
         w.i32c(0).set(3);                       // prev = null
         w.gget(free_list).set(4);               // cur = free_list_head
+        w.i32c(0).set(5);                       // steps = 0
         w.block(|w| { w.loop_(|w| {
             w.get(4).eqz().br_if(1);            // cur == null → bump
+            // steps++; steps > cap → cycle → trap. The cap is ABSOLUTE:
+            // a heap-derived bound (heap_ptr >> 3) lets a multi-hundred-MB
+            // heap walk tens of millions of steps PER ALLOC before tripping —
+            // a corrupted cycle then spins the host at 100% CPU for hours
+            // instead of trapping (observed killing the dev machine). No sane
+            // free list approaches a million nodes in this runtime.
+            const FREE_LIST_WALK_CAP: i32 = 1 << 20;
+            w.get(5).i32c(1).add().tee(5);
+            w.i32c(FREE_LIST_WALK_CAP);
+            w.gt_u();
+            w.if_void(|w| { w.unreachable_(); }, |_| {});
+            // NOTE: a size-sanity bound (cur+hdr+size <= heap_ptr) was tried
+            // here and removed: it false-positived on legitimate freed nodes
+            // (first churn loop), and the corruption classes it aimed at are
+            // covered by the step cap above (cycles), the rc==0 sentinel in
+            // rc_dec (double-free), and the rc==0 trap in rc_inc
+            // (resurrection). Host-clobbered headers (the fs scratch class)
+            // are addressed by construction via pinned allocations.
             w.get(4).emit_load(size_off, size_ty); // cur.size
             w.get(0).ge_u();                     // >= request_size?
             w.if_void(|w| {
@@ -508,38 +536,133 @@ fn compile_alloc(emitter: &mut WasmEmitter) {
     emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
 }
 
+/// Whether this emission activates real reference-count frees — the DEFAULT
+/// since 0.27.0 (the true-Perceus flip: quadruple bar green ×3 — native
+/// corpus + wasm corpus both modes + byte gate + churn; see
+/// docs/roadmap/active/wasm-frees-ownership-discipline.md and contract
+/// C-066). `ALMIDE_WASM_FREES=0` is the opt-out escape hatch back to the
+/// bump-allocate-and-leak model. Env-conditional emission is DECLARED
+/// behavior: the host-determinism gates pin the environment, and the same
+/// env must always produce identical bytes.
+pub(super) fn wasm_frees_enabled() -> bool {
+    std::env::var_os("ALMIDE_WASM_FREES").is_none_or(|v| v != "0")
+}
+
 fn compile_rc_inc(emitter: &mut WasmEmitter) {
-    use super::engine::WasmBuilder;
+    use super::engine::{WasmBuilder, layout::*};
     let type_idx = emitter.func_type_indices[&emitter.rt.rc_inc];
 
-    // True no-op: return the pointer untouched. The WASM runtime is a
-    // bump-allocate-and-leak model (see HEAP_START_GLOBAL_IDX note): the old
-    // header-guard `ptr < global0(heap_ptr)` already returned early for every
-    // VALID heap pointer, so the increment below it could only ever execute on
-    // a GARBAGE pointer (e.g. a mis-shaped drop reading past a box, #470) —
-    // and then it WROTE +1 into not-yet-allocated heap or trapped OOB.
-    // Touching memory here is pure downside until real frees land.
-    let mut f = Function::new([]);
+    if !wasm_frees_enabled() {
+        // Bump-and-leak model (default): true no-op, return the pointer
+        // untouched. The old header-guard `ptr < global0(heap_ptr)` returned
+        // early for every VALID heap pointer, so an increment here could only
+        // ever execute on a GARBAGE pointer (#470) — touching memory is pure
+        // downside while frees are off.
+        let mut f = Function::new([]);
+        {
+            let w = &mut WasmBuilder::new(&mut f, &emitter.layout_reg);
+            w.get(0);
+        }
+        f.instruction(&wasm_encoder::Instruction::End);
+        emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+        return;
+    }
+
+    // ALMIDE_WASM_FREES=1: real reference counting. The guard uses the
+    // IMMUTABLE heap_start low bound (HEAP_START_GLOBAL_IDX) — the legacy
+    // `emitter.rt.heap_start_global` field is still 0 (= the moving heap_ptr)
+    // at compile_runtime time, which is exactly what baked the old body into
+    // a no-op for years.
+    let rc_neg = emitter.layout_reg.alloc_header_neg_offset(alloc::RC) as i32;
+    let rc_ty = emitter.layout_reg.field(ALLOC_HEADER, alloc::RC).ty;
+    let heap_start = HEAP_START_GLOBAL_IDX;
+
+    let heap_ptr = emitter.heap_ptr_global;
+    let mut f = Function::new([(1, ValType::I32)]); // local 1: $rc
     {
         let w = &mut WasmBuilder::new(&mut f, &emitter.layout_reg);
-        w.get(0);
+        // Data-section constants have no header: pass through.
+        w.get(0).gget(heap_start).lt_u();
+        w.if_void(|w| { w.get(0).ret(); }, |_| {});
+        // Dead-zone guard: after __heap_restore moved the frontier DOWN, a
+        // stale pointer at/above heap_ptr has no live header — touching it
+        // would corrupt whatever gets bump-allocated there next. Skip (the
+        // leak direction is the safe one).
+        w.get(0).gget(heap_ptr).ge_u();
+        w.if_void(|w| { w.get(0).ret(); }, |_| {});
+        // Resurrection tripwire: Inc of a FREED block (rc==0 sentinel) is
+        // always a compiler bug — without this trap it silently revives a
+        // block already on the free list and the next alloc hands out live
+        // memory (observed as silent value corruption, not a crash).
+        w.get(0).i32c(rc_neg).sub().emit_load(0, rc_ty).tee(1);
+        w.eqz();
+        w.if_void(|w| { w.unreachable_(); }, |_| {});
+        // *(ptr - rc_neg) = rc + 1
+        w.get(0).i32c(rc_neg).sub();
+        w.get(1).i32c(1).add();
+        w.emit_store(0, rc_ty);
+        w.get(0); // return ptr
     }
     f.instruction(&wasm_encoder::Instruction::End);
     emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
 }
 
 fn compile_rc_dec(emitter: &mut WasmEmitter) {
+    use super::engine::{WasmBuilder, layout::*};
     let type_idx = emitter.func_type_indices[&emitter.rt.rc_dec];
 
-    // True no-op (see compile_rc_inc). The old body's decrement/free-list push
-    // was unreachable for valid heap pointers (header guard) — it only ever
-    // ran on GARBAGE pointers, where it either trapped OOB ([ptr-4] past
-    // memory) or silently PUSHED the garbage block onto the free list,
-    // poisoning the next __alloc free-list walk (#470's second trap site).
-    // When real frees are activated, restore the decrement/push together with
-    // the heap_start guard fix and the Perceus aliasing prerequisites (see the
-    // wasm-frees roadmap).
-    let mut f = Function::new([]);
+    if !wasm_frees_enabled() {
+        // Bump-and-leak model (default): true no-op (see compile_rc_inc).
+        let mut f = Function::new([]);
+        f.instruction(&wasm_encoder::Instruction::End);
+        emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+        return;
+    }
+
+    // ALMIDE_WASM_FREES=1: real decrement + free-list push, with the
+    // DOUBLE-FREE SENTINEL: a freed block is stamped rc=0; a Dec that sees
+    // rc==0 traps `unreachable` LOUDLY instead of pushing the block onto the
+    // free list a second time — a second push forms a cycle that spins
+    // __alloc's walk forever (the silent hang that forced the first revert).
+    // __alloc restores rc=1 on reuse, so the sentinel only marks dead blocks.
+    let rc_neg = emitter.layout_reg.alloc_header_neg_offset(alloc::RC) as i32;
+    let rc_ty = emitter.layout_reg.field(ALLOC_HEADER, alloc::RC).ty;
+    let hdr = emitter.layout_reg.header_size(ALLOC_HEADER) as i32;
+    let heap_start = HEAP_START_GLOBAL_IDX;
+    let free_list = emitter.free_list_global;
+    let heap_ptr_g = emitter.heap_ptr_global;
+
+    let mut f = Function::new([(1, ValType::I32)]); // local 1: $rc
+    {
+        let w = &mut WasmBuilder::new(&mut f, &emitter.layout_reg);
+        w.get(0).gget(heap_start).lt_u();
+        w.if_void(|w| { w.ret(); }, |_| {});
+        // Dead-zone guard (see compile_rc_inc): a stale pointer at/above the
+        // restored bump frontier has no header — freeing it would re-poison
+        // the just-reset free list. Skip = bounded leak.
+        w.get(0).gget(heap_ptr_g).ge_u();
+        w.if_void(|w| { w.ret(); }, |_| {});
+        // rc = *(ptr - rc_neg)
+        w.get(0).i32c(rc_neg).sub().emit_load(0, rc_ty).tee(1);
+        w.i32c(1).gt_u();
+        w.if_void(|w| {
+            // rc > 1: decrement
+            w.get(0).i32c(rc_neg).sub();
+            w.get(1).i32c(1).sub();
+            w.emit_store(0, rc_ty);
+        }, |w| {
+            // rc <= 1: about to free. Sentinel: rc==0 = already freed → trap.
+            w.get(1).eqz();
+            w.if_void(|w| { w.unreachable_(); }, |_| {});
+            // Push to free list for reuse (next ptr lives at data[0]).
+            w.get(0).gget(free_list).emit_store(0, MemType::I32);
+            w.get(0).i32c(hdr).sub().gset(free_list);
+            // Stamp rc=0 (the sentinel).
+            w.get(0).i32c(rc_neg).sub();
+            w.i32c(0);
+            w.emit_store(0, rc_ty);
+        });
+    }
     f.instruction(&wasm_encoder::Instruction::End);
     emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
 }
@@ -612,6 +735,13 @@ fn compile_heap_restore(emitter: &mut WasmEmitter) {
     wasm!(f, {
         local_get(0);
         global_set(emitter.heap_ptr_global);
+        // Forget the free list wholesale: nodes above the restored frontier
+        // are dead (the walk's size-sanity tripwire traps on them); nodes
+        // below are merely un-remembered — optimization loss, never
+        // corruption. Unconditional: a no-op while frees are off, so the
+        // emitted bytes stay env-independent here.
+        i32_const(0);
+        global_set(emitter.free_list_global);
         end;
     });
     emitter.add_compiled(CompiledFunc::tracked(type_idx, f));

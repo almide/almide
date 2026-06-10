@@ -1686,11 +1686,10 @@ pub(crate) fn emit(program: &IrProgram) -> Vec<u8> {
     // This is a static, post-emit check — no runtime overhead, no function
     // index perturbation. Combined with PerceusVerifyPass (Lean 4 certified
     // IR-level balance) and Verified<'_> type-state gate, this closes the
-    // gap between IR verification and WASM emission.
-    #[cfg(debug_assertions)]
-    {
-        verify_rc_balance(program, &emitter);
-    }
+    // gap between IR verification and WASM emission. ALWAYS-ON (§10): it is
+    // a cheap per-function instruction count, and a violation in the
+    // double-free direction must stop a release build too.
+    verify_rc_balance(program, &emitter);
 
     bytes
 }
@@ -1700,7 +1699,6 @@ pub(crate) fn emit(program: &IrProgram) -> Vec<u8> {
 /// Counts call(rc_dec) in each compiled function's call_targets and compares
 /// with the IR-level RcDec count. Extra rc_dec calls (beyond typed child
 /// drops) indicate a compiler bug.
-#[cfg(debug_assertions)]
 fn verify_rc_balance(program: &IrProgram, emitter: &WasmEmitter) {
     use almide_ir::{IrStmtKind, IrExprKind};
     use almide_ir::visit::{IrVisitor, walk_expr, walk_stmt};
@@ -1744,13 +1742,17 @@ fn verify_rc_balance(program: &IrProgram, emitter: &WasmEmitter) {
                 // emit_typed_rc_dec generates child drops. But it should
                 // never have FEWER (that would be a leak, caught by
                 // PerceusVerifyPass). We log mismatches for debugging.
-                if wasm_dec_count > 0 || ir_dec_count > 0 {
-                    if wasm_dec_count < ir_dec_count {
-                        eprintln!(
-                            "[RC verify] WARNING: `{}` has {} IR RcDec but only {} WASM rc_dec calls (possible leak)",
-                            func_name, ir_dec_count, wasm_dec_count,
-                        );
-                    }
+                if wasm_dec_count < ir_dec_count {
+                    // The IR (Verified by PerceusVerifyPass) specifies the
+                    // balance; an emission that DROPS a Dec is a leak the
+                    // belt already certified against. No warn-mode (§10).
+                    eprintln!("error: [COMPILER BUG] WASM emission dropped RC decrements");
+                    eprintln!(
+                        "  `{}` has {} IR RcDec statement(s) but only {} emitted rc_dec call(s).",
+                        func_name, ir_dec_count, wasm_dec_count,
+                    );
+                    eprintln!("  Please report this at https://github.com/almide/almide/issues");
+                    std::process::exit(1);
                 }
             }
         }
