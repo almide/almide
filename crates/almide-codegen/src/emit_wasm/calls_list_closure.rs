@@ -892,7 +892,7 @@ impl FuncCompiler<'_> {
                       local_get(dst); i32_const(list_data_off); i32_add;
                       local_get(xs); i32_const(list_data_off); i32_add;
                 });
-                self.emit_elem_copy(&elem_ty);
+                self.emit_elem_copy_owned(&elem_ty); // SHARE: copy from borrowed xs into fresh dst
                 wasm!(self.func, {
                       i32_const(1); local_set(out_count); // out_count = 1
                       i32_const(1); local_set(i); // i = 1
@@ -921,7 +921,7 @@ impl FuncCompiler<'_> {
                           local_get(xs); i32_const(list_data_off); i32_add;
                           local_get(i); i32_const(es); i32_mul; i32_add;
                 });
-                self.emit_elem_copy(&elem_ty);
+                self.emit_elem_copy_owned(&elem_ty); // SHARE: copy from borrowed xs into fresh dst
                 wasm!(self.func, {
                           local_get(out_count); i32_const(1); i32_add; local_set(out_count);
                         end;
@@ -1013,7 +1013,10 @@ impl FuncCompiler<'_> {
                       local_get(xs); i32_const(list_data_off); i32_add;
                       local_get(i); i32_const(es); i32_mul; i32_add;
                 });
-                self.emit_elem_copy(&elem_ty);
+                // SHARE: copy the borrowed source elements into the fresh sorted
+                // result — dup so the result owns them (the in-place swaps below just
+                // rearrange these owned references; the source's Dec is balanced).
+                self.emit_elem_copy_owned(&elem_ty);
                 wasm!(self.func, {
                       local_get(i); i32_const(1); i32_add; local_set(i);
                       br(0);

@@ -320,7 +320,7 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, { local_set(ib); });
                 self.emit_dict_entries_base(nm, cap);
                 wasm!(self.func, { local_set(eb); });
-                self.emit_dict_put_entry(nm, cap, ib, eb, tmp, es, ks, vs, &key_ty);
+                self.emit_dict_put_entry(nm, cap, ib, eb, tmp, es, ks, vs, &key_ty, &val_ty);
                 wasm!(self.func, { local_get(nm); });
 
                 self.scratch.free_i32(eb);
@@ -372,7 +372,7 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, { local_set(ib); });
                 self.emit_dict_entries_base(m, cap);
                 wasm!(self.func, { local_set(eb); });
-                self.emit_dict_put_entry(m, cap, ib, eb, tmp, es, ks, vs, &key_ty);
+                self.emit_dict_put_entry(m, cap, ib, eb, tmp, es, ks, vs, &key_ty, &val_ty);
                 // Grow if the load factor is exceeded (only a new key can trip it).
                 wasm!(self.func, {
                     local_get(m); i32_load(0); i32_const(lm::LOAD_DEN as i32); i32_mul;
@@ -589,7 +589,8 @@ impl FuncCompiler<'_> {
                       local_get(j); local_get(len_b); i32_ge_u; br_if(1);
                       local_get(eb_b); local_get(j); i32_const(es as i32); i32_mul; i32_add; local_set(src);
                 });
-                self.emit_dict_put_entry(result, r_cap, ib, eb, src, es, ks, vs, &key_ty);
+                let val_ty = self.map_val_ty(&args[0].ty);
+                self.emit_dict_put_entry(result, r_cap, ib, eb, src, es, ks, vs, &key_ty, &val_ty);
                 wasm!(self.func, {
                       local_get(j); i32_const(1); i32_add; local_set(j); br(0);
                     end; end;
@@ -613,11 +614,12 @@ impl FuncCompiler<'_> {
                 // Build a COD from a List[(K,V)]: size for plen, then put each pair in
                 // order (duplicate keys → last value wins, position kept).
                 let pair_ty = self.resolve_list_elem(&args[0], None);
-                let (ks, vs, key_ty) = if let Ty::Tuple(elems) = &pair_ty {
+                let (ks, vs, key_ty, val_ty) = if let Ty::Tuple(elems) = &pair_ty {
                     (elems.first().map(|t| values::byte_size(t)).unwrap_or(4),
                      elems.get(1).map(|t| values::byte_size(t)).unwrap_or(4),
-                     elems.first().cloned().unwrap_or(Ty::String))
-                } else { (4u32, 4u32, Ty::String) };
+                     elems.first().cloned().unwrap_or(Ty::String),
+                     elems.get(1).cloned().unwrap_or(Ty::Int))
+                } else { (4u32, 4u32, Ty::String, Ty::Int) };
                 let es = ks + vs;
                 let pairs = self.scratch.alloc_i32();
                 let plen = self.scratch.alloc_i32();
@@ -647,7 +649,7 @@ impl FuncCompiler<'_> {
                       local_get(i); i32_const(4); i32_mul; i32_add;
                       i32_load(0); local_set(tp); // tp = pairs.data[i] = (K,V) tuple ptr
                 });
-                self.emit_dict_put_entry(result, cap, ib, eb, tp, es, ks, vs, &key_ty);
+                self.emit_dict_put_entry(result, cap, ib, eb, tp, es, ks, vs, &key_ty, &val_ty);
                 wasm!(self.func, {
                       local_get(i); i32_const(1); i32_add; local_set(i); br(0);
                     end; end;
@@ -1139,7 +1141,7 @@ impl FuncCompiler<'_> {
     /// existing → overwrite its value in place (dense position kept); new → append
     /// at entries[len], write tags[slot]=h2, index[slot]=len+1, bump len. Assumes
     /// the caller has reserved capacity (no grow). `ib`/`eb` are the index/entries bases.
-    pub(super) fn emit_dict_put_entry(&mut self, map: u32, cap: u32, ib: u32, eb: u32, src: u32, es: u32, ks: u32, vs: u32, key_ty: &Ty) {
+    pub(super) fn emit_dict_put_entry(&mut self, map: u32, cap: u32, ib: u32, eb: u32, src: u32, es: u32, ks: u32, vs: u32, key_ty: &Ty, val_ty: &Ty) {
         use super::engine::layout::{SWISS_MAP, map as lm};
         let tags_off = self.emitter.layout_reg.fixed_offset(SWISS_MAP, lm::TAGS) as i32;
         let idx = self.scratch.alloc_i32();
@@ -1181,12 +1183,33 @@ impl FuncCompiler<'_> {
               local_get(map); local_get(ei); i32_const(1); i32_add; i32_store(0); // map.len = ei+1
               local_get(eb); local_get(ei); i32_const(es as i32); i32_mul; i32_add;
               local_get(src); i32_const(ks as i32); memory_copy;   // copy key bytes
+        });
+        // SHARE: a NEW heap key was just copied (by reference) from the borrowed
+        // source — dup it so the dict owns its own reference, else the source's
+        // scope-end Dec deep-frees the key the dict now holds (double-free). Only on
+        // the new-key path (an existing key keeps the reference it already owns).
+        if Self::is_heap_type(key_ty) {
+            wasm!(self.func, {
+              local_get(eb); local_get(ei); i32_const(es as i32); i32_mul; i32_add;
+              i32_load(0); call(self.emitter.rt.rc_inc); drop;
+            });
+        }
+        wasm!(self.func, {
             end;
             // Copy value bytes into entries[ei]+ks (both new and existing).
             local_get(eb); local_get(ei); i32_const(es as i32); i32_mul; i32_add; i32_const(ks as i32); i32_add;
             local_get(src); i32_const(ks as i32); i32_add;
             i32_const(vs as i32); memory_copy;
         });
+        // SHARE: the heap value was copied (by reference) from the borrowed source —
+        // dup it for the same reason. (Overwriting an existing heap value leaks the
+        // old one — a separate, non-crashing gap, not a double-free.)
+        if Self::is_heap_type(val_ty) {
+            wasm!(self.func, {
+              local_get(eb); local_get(ei); i32_const(es as i32); i32_mul; i32_add; i32_const(ks as i32); i32_add;
+              i32_load(0); call(self.emitter.rt.rc_inc); drop;
+            });
+        }
         self.scratch.free_i32(ei);
         self.scratch.free_i32(tg);
         self.scratch.free_i32(h2);

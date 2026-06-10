@@ -225,7 +225,7 @@ impl FuncCompiler<'_> {
                     self.emit_call_indirect(ct, vec![ValType::I32]);
                 }
                 wasm!(self.func, { if_empty; }); // pred true → keep
-                self.emit_dict_put_entry(nm, cap, ib, eb_new, entry, es, ks, vs, &key_ty);
+                self.emit_dict_put_entry(nm, cap, ib, eb_new, entry, es, ks, vs, &key_ty, &val_ty);
                 wasm!(self.func, {
                       end; // pred-true if
                       local_get(i); i32_const(1); i32_add; local_set(i); br(0);

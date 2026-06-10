@@ -75,7 +75,7 @@ impl FuncCompiler<'_> {
                 // value.str(s: String) -> Value: alloc [tag=4][str_ptr]
                 let val = self.scratch.alloc_i32();
                 let ptr = self.scratch.alloc_i32();
-                self.emit_expr(&args[0]);
+                self.emit_stored_field(&args[0]);
                 wasm!(self.func, {
                     local_set(val);
                     i32_const(8); call(self.emitter.rt.alloc); local_set(ptr);
@@ -90,7 +90,7 @@ impl FuncCompiler<'_> {
                 // value.array(xs: List[Value]) -> Value: alloc [tag=5][list_ptr]
                 let val = self.scratch.alloc_i32();
                 let ptr = self.scratch.alloc_i32();
-                self.emit_expr(&args[0]);
+                self.emit_stored_field(&args[0]);
                 wasm!(self.func, {
                     local_set(val);
                     i32_const(8); call(self.emitter.rt.alloc); local_set(ptr);
@@ -105,7 +105,7 @@ impl FuncCompiler<'_> {
                 // value.object(pairs: List[(String, Value)]) -> Value: alloc [tag=6][list_ptr]
                 let val = self.scratch.alloc_i32();
                 let ptr = self.scratch.alloc_i32();
-                self.emit_expr(&args[0]);
+                self.emit_stored_field(&args[0]);
                 wasm!(self.func, {
                     local_set(val);
                     i32_const(8); call(self.emitter.rt.alloc); local_set(ptr);

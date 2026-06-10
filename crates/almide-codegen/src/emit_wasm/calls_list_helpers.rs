@@ -387,6 +387,30 @@ impl FuncCompiler<'_> {
         }
     }
 
+    /// Copy one element from [stack: dst_addr, src_addr], taking a NEW owning
+    /// reference to it (the SHARE case). Use this when the destination structure
+    /// will outlive a *still-live* source that retains its own reference to the
+    /// element (e.g. a collection op copying out of a borrowed argument): without
+    /// the extra reference, the source's scope-end `Dec` would deep-free the value
+    /// the destination now holds.
+    ///
+    /// For heap elements (the i32 pointer branch) this is `emit_elem_copy` plus a
+    /// stack-neutral `rc_inc` inserted between the load and the store — `rc_inc`
+    /// returns its pointer unchanged, and its `heap_start` guard makes it a runtime
+    /// no-op on data-section pointers and scalar i32 (Bool), so the i32 branch can
+    /// increment unconditionally. Int/Float (i64/f64) are scalars and copy exactly
+    /// as `emit_elem_copy` does.
+    ///
+    /// NOT for intra-structure MOVES (grow-and-abandon, where the source buffer is
+    /// discarded): incrementing there would leak one reference per grow.
+    pub(super) fn emit_elem_copy_owned(&mut self, ty: &Ty) {
+        match values::ty_to_valtype(ty) {
+            Some(ValType::I64) => { wasm!(self.func, { i64_load(0); i64_store(0); }); }
+            Some(ValType::F64) => { wasm!(self.func, { f64_load(0); f64_store(0); }); }
+            _ => { wasm!(self.func, { i32_load(0); call(self.emitter.rt.rc_inc); i32_store(0); }); }
+        }
+    }
+
     /// Store one element: [stack: dst_addr, value].
     pub(super) fn emit_elem_store(&mut self, ty: &Ty) {
         match values::ty_to_valtype(ty) {
@@ -857,7 +881,10 @@ impl FuncCompiler<'_> {
                 local_get(src); i32_const(self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32); i32_add;
                 local_get(i); i32_const(es); i32_mul; i32_add;
         });
-        self.emit_elem_copy(&elem_ty);
+        // SHARE: a unique element copied from the borrowed source list into the fresh
+        // result — dup it so the result owns its reference (else the source's
+        // scope-end Dec deep-frees the element the result now holds).
+        self.emit_elem_copy_owned(&elem_ty);
         wasm!(self.func, {
                 local_get(dst);
                 local_get(dst); i32_load(0); i32_const(1); i32_add;
