@@ -233,7 +233,12 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
             }
             let upper = ctx.global_static_name(*var);
             let value_s = render_expr(ctx, value);
-            match ctx.ann.get_var_storage(var, &target_s) {
+            // Storage lookup keys on the PREFIXED static name for module-
+            // origin vars (the name-keyed fallback deliberately refuses
+            // unprefixed names) — passing the bare IR name classified a
+            // cross-module global assign as Local and rendered a bare
+            // `COUNTER = …` (#505).
+            match ctx.ann.get_var_storage(var, &upper) {
                 VarStorage::ModuleCell => format!("{}.with(|c| c.set({}));", upper, value_s),
                 VarStorage::ModuleRc => format!("{}.with(|c| *c.borrow_mut() = std::rc::Rc::new(({}).into()));", upper, value_s),
                 VarStorage::RcCow => format!("{} = RcCow::new({});", target_s, value_s),

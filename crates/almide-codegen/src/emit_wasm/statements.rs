@@ -203,13 +203,11 @@ impl FuncCompiler<'_> {
                 let local_idx = match self.var_map.get(&var.0) {
                     Some(&idx) => idx,
                     None => {
-                        // Check if this is a module-level var (top_let global)
-                        let name = if (var.0 as usize) < self.var_table.len() {
-                            self.var_table.get(*var).name.as_str()
-                        } else { "" };
-                        if let Some(&(global_idx, _)) = self.emitter.top_let_globals_by_name.get(name)
-                            .or_else(|| self.emitter.top_let_globals.get(&var.0))
-                        {
+                        // Module-level var (top_let global) — resolve via the
+                        // SHARED lookup (id → module_origin-prefixed key →
+                        // bare name); the bare-name-only lookup missed
+                        // cross-module synthetic lvalues (#505).
+                        if let Some((global_idx, _)) = self.lookup_global(*var) {
                             self.emit_expr(value);
                             wasm!(self.func, { global_set(global_idx); });
                             return;

@@ -347,7 +347,7 @@ effect fn main() -> Unit = {
 }
 "#,
             expected: "3",
-            status: Status::KnownBroken("Assign lvalue routing has no module-origin arm for the member spelling — renders `NUMS.nums = …`, rustc E0425; design decision (accept vs reject) pending — see #505"),
+            status: Status::Works,
         },
         Cell {
             name: "spread_from_toplet_base",
