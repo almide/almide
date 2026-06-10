@@ -25,6 +25,7 @@
 pub mod annotations;
 pub mod generated;
 pub mod pass;
+pub mod verify_names;
 pub mod pass_auto_parallel;
 pub mod pass_borrow_inference;
 pub mod pass_box_deref;
@@ -343,6 +344,11 @@ pub fn codegen_with(program: &mut IrProgram, target: Target, options: &CodegenOp
     // playground target) — see almide_base::profile and the forbidden-impurities
     // CI gate.
     let pt = almide_base::profile::ProfileTimer::start(prof);
+
+    // NameResolutionTotal gate (completeness §1a): refuse bare type names
+    // whose only declaration is module-qualified — the #433/#484 class —
+    // while declarations are still in canonical (pre-mangle) state.
+    verify_names::assert_names_resolvable(program);
 
     // Layer 2: Run Nanopass pipeline (semantic rewrites — takes ownership, returns modified)
     let owned = std::mem::take(program);

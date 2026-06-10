@@ -226,8 +226,17 @@ pub fn validate_protocols(env: &TypeEnv, diagnostics: &mut Vec<Diagnostic>, deri
     }
 }
 
-pub fn register_derive_sigs(env: &mut TypeEnv, derives: &[Sym], type_name: &str) {
-    let type_ty = Ty::Named(sym(type_name), vec![]);
+pub fn register_derive_sigs(env: &mut TypeEnv, derives: &[Sym], type_name: &str, prefix: Option<&str>) {
+    // #433: the VALUE type in derived signatures must carry the canonical
+    // qualified name for a user module's type — `Pigment.decode`'s
+    // `Result[Pigment, String]` with a bare name leaked into callers' var
+    // tables (found by the NameResolutionTotal gate). The fn KEYS stay as
+    // they were (separate resolution system).
+    let canonical = match prefix {
+        Some(m) if !almide_lang::stdlib_info::is_bundled_module(m) => format!("{}.{}", m, type_name),
+        _ => type_name.to_string(),
+    };
+    let type_ty = Ty::Named(sym(&canonical), vec![]);
     let value_ty = Ty::Named(sym("Value"), vec![]);
     let empty_sb: HashMap<Sym, Ty> = HashMap::new();
     let empty_pb: HashMap<Sym, Vec<Sym>> = HashMap::new();
@@ -566,7 +575,7 @@ pub fn register_type_decl(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, 
         env.types.insert(sym(name), resolved);
     }
     if let Some(derives) = deriving {
-        register_derive_sigs(env, derives, name);
+        register_derive_sigs(env, derives, name, prefix);
     }
 }
 

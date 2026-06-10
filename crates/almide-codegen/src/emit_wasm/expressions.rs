@@ -60,6 +60,13 @@ impl FuncCompiler<'_> {
 
             // ── Variables ──
             IrExprKind::Var { id } => {
+                // A Unit-typed var has NO WASM representation (ty_to_valtype
+                // = None): loading its physical local would push a value the
+                // type system says does not exist. The §2 matrix gate caught
+                // exactly that — a Unit tail var inside result_ok left two
+                // values on the stack (invalid module); wasm-opt had been
+                // silently repairing it on machines that have it.
+                if matches!(expr.ty, Ty::Unit) { return; }
                 // DefId-based resolution (highest priority): direct cross-package global lookup
                 if let Some(def_id) = expr.def_id {
                     if let Some(&(global_idx, _)) = self.emitter.def_globals.get(&def_id.0) {
@@ -945,8 +952,13 @@ impl FuncCompiler<'_> {
             }
 
             // ── Unsupported ──
-            _ => {
-                wasm!(self.func, { unreachable; });
+            other => {
+                panic!(
+                    "[ICE] emit_wasm: no emission for IrExprKind::{:?} — \
+                     add an arm or lower it in a pass (completeness §5: a \
+                     silent runtime trap is never an acceptable fallback)",
+                    std::mem::discriminant(other)
+                );
             }
         }
     }

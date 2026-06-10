@@ -367,7 +367,11 @@ impl FuncCompiler<'_> {
                         if let Some(idx) = func_idx {
                             wasm!(self.func, { call(idx); });
                         } else {
-                            wasm!(self.func, { unreachable; });
+                            panic!(
+                                "[ICE] emit_wasm: call target `{}` not in func_map \
+                                 (tried bare and module-qualified) — resolve upstream",
+                                name.as_str()
+                            );
                         }
                     }
                 }

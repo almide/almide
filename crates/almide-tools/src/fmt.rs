@@ -52,7 +52,46 @@ fn comma_sep<T>(out: &mut String, items: &[T], f: impl Fn(&mut String, &T)) {
 /// `dep_names`: dependency names from almide.toml (empty if no project file).
 /// `dep_submodules`: map of short_name → full dotted path for dependency submodules.
 /// Returns messages describing changes made.
-pub fn auto_imports(program: &mut Program, dep_names: &[String], dep_submodules: &std::collections::HashMap<String, String>) -> Vec<String> {
+/// Token-level module-reference SUPERSET: every identifier immediately
+/// followed by `.` in the source. Total by construction — unlike the AST
+/// walk below, there is no traversal to grow holes in. Drives REMOVAL
+/// decisions only: a false KEEP (a local var that shadows a module name)
+/// is harmless, while a false REMOVE silently broke real programs twice
+/// (type-position-only imports; a match-subject `json.parse` missed by a
+/// wildcard arm). Additions keep using the precise AST walk.
+fn token_module_refs(source: &str) -> std::collections::HashMap<String, std::collections::HashSet<String>> {
+    use almide_lang::lexer::{Lexer, TokenType};
+    let tokens = Lexer::tokenize(source);
+    let mut refs: std::collections::HashMap<String, std::collections::HashSet<String>> = Default::default();
+    for w in tokens.windows(3) {
+        if matches!(w[0].token_type, TokenType::Ident | TokenType::TypeName)
+            && matches!(w[1].token_type, TokenType::Dot)
+        {
+            let fields = refs.entry(w[0].value.clone()).or_default();
+            if matches!(w[2].token_type, TokenType::Ident | TokenType::TypeName) {
+                fields.insert(w[2].value.clone());
+            }
+        }
+    }
+    refs
+}
+
+/// ADD-side precision gate: only auto-import a stdlib module when at least
+/// one `name.field` usage names a function that module actually DEFINES —
+/// a LOCAL variable that happens to share a stdlib module's name (`let path
+/// = ...; path.starts_with(..)`) must not get a spurious `import path`
+/// injected over it (which re-routes the call to the module and breaks the
+/// build). Verified against the bundled stdlib source; modules without
+/// bundled source stay on the old behavior.
+fn stdlib_module_defines_any(module: &str, fields: Option<&std::collections::HashSet<String>>) -> bool {
+    let Some(fields) = fields else { return false };
+    match almide_lang::stdlib_info::bundled_source(module) {
+        Some(src) => fields.iter().any(|f| src.contains(&format!("fn {}(", f))),
+        None => true,
+    }
+}
+
+pub fn auto_imports(program: &mut Program, source: &str, dep_names: &[String], dep_submodules: &std::collections::HashMap<String, String>) -> Vec<String> {
     use std::collections::HashSet;
     let mut messages = Vec::new();
 
@@ -70,6 +109,7 @@ pub fn auto_imports(program: &mut Program, dep_names: &[String], dep_submodules:
     for decl in &program.decls {
         collect_module_refs_decl(decl, &mut used);
     }
+    let token_refs = token_module_refs(source);
 
     // Also check auto-imported stdlib (Tier 1) — these don't need explicit import
     let auto_imported: HashSet<&str> = almide_lang::stdlib_info::AUTO_IMPORT_BUNDLED.iter().copied().collect();
@@ -85,6 +125,7 @@ pub fn auto_imports(program: &mut Program, dep_names: &[String], dep_submodules:
         if existing.contains(name.as_str()) { continue; }
         if auto_imported.contains(name.as_str()) || tier1.contains(name.as_str()) { continue; }
         if almide_lang::stdlib_info::is_any_stdlib(name) {
+            if !stdlib_module_defines_any(name, token_refs.get(name.as_str())) { continue; }
             to_add.push((name.clone(), vec![name.clone()]));
         } else if dep_set.contains(name.as_str()) {
             to_add.push((name.clone(), vec![name.clone()]));
@@ -102,7 +143,9 @@ pub fn auto_imports(program: &mut Program, dep_names: &[String], dep_submodules:
         messages.push(format!("Added `import {}`", display));
     }
 
-    // Remove unused imports (keep _ prefixed, self imports, and auto-imported)
+    // Remove unused imports (keep _ prefixed, self imports, and auto-imported).
+    // Removal consults the token-level SUPERSET, not the AST walk: deleting a
+    // live import destroys the program, so recall beats precision here.
     let before_len = program.imports.len();
     program.imports.retain(|d| match d {
         Decl::Import { path, alias, .. } => {
@@ -111,7 +154,7 @@ pub fn auto_imports(program: &mut Program, dep_names: &[String], dep_submodules:
                 .unwrap_or_else(|| path.last().map(|s| s.to_string()).unwrap_or_default());
             if name.starts_with('_') { return true; }
             if path.first().map(|s| s.as_str()) == Some("self") { return true; }
-            used.contains(&name)
+            used.contains(&name) || token_refs.contains_key(&name)
         }
         _ => true,
     });
@@ -393,9 +436,9 @@ fn fmt_decl(out: &mut String, decl: &Decl, depth: usize) {
             if let Some(d) = deriving { if !d.is_empty() { w!(out, ": {}", join_syms(d, ", ")); } }
             out.push_str(" = "); fmt_type(out, ty, depth);
         }
-        Decl::TopLet { name, ty, value, visibility, .. } => {
+        Decl::TopLet { name, ty, value, visibility, mutable, .. } => {
             out.push_str(&i); fmt_vis(out, visibility);
-            w!(out, "let {name}");
+            w!(out, "{} {name}", if *mutable { "var" } else { "let" });
             if let Some(te) = ty { out.push_str(": "); fmt_type(out, te, depth); }
             out.push_str(" = "); fmt_expr(out, value, depth);
         }
@@ -410,13 +453,40 @@ fn fmt_decl(out: &mut String, decl: &Decl, depth: usize) {
             maybe_generics(out, generics);
             out.push('(');
             comma_sep(out, params, |out, p| {
+                // `mut` is semantic (mutable-borrow param) — dropping it
+                // turned every in-place mutator call into E007.
+                if p.is_mut { out.push_str("mut "); }
                 w!(out, "{}: ", p.name); fmt_type(out, &p.ty, depth);
                 if let Some(ref d) = p.default { out.push_str(" = "); fmt_expr(out, d, depth); }
             });
             out.push_str(") -> "); fmt_type(out, return_type, depth);
             if let Some(b) = body { out.push_str(" = "); fmt_expr(out, b, depth); }
         }
-        Decl::Test { name, body, .. } => { w!(out, "{i}test \"{name}\" "); fmt_expr(out, body, depth); }
+        Decl::Test { name, body, where_clauses, .. } => {
+            // `where` clauses are the test's data — dropping them deleted
+            // the bindings the body reads (E003 after formatting).
+            w!(out, "{i}test \"{name}\"");
+            let cases: Vec<&TestWhere> = where_clauses.iter()
+                .filter(|wc| matches!(wc, TestWhere::Case { .. })).collect();
+            let binds: Vec<&TestWhere> = where_clauses.iter()
+                .filter(|wc| !matches!(wc, TestWhere::Case { .. })).collect();
+            for wc in &binds {
+                out.push('\n');
+                w!(out, "{i}  ");
+                fmt_test_where(out, wc, depth);
+            }
+            if !cases.is_empty() {
+                out.push_str(" where [\n");
+                for c in &cases {
+                    w!(out, "{i}  ");
+                    fmt_test_where(out, c, depth);
+                    out.push_str(",\n");
+                }
+                w!(out, "{i}]");
+            }
+            if !binds.is_empty() { out.push('\n'); w!(out, "{i}"); } else { out.push(' '); }
+            fmt_expr(out, body, depth);
+        }
         Decl::TestWhereDef { .. } => {} // test where defs don't need formatting (internal)
         Decl::Protocol { name, methods, .. } => {
             wln!(out, "{i}protocol {name} {{");
@@ -751,6 +821,40 @@ fn fmt_stmt(out: &mut String, stmt: &Stmt, depth: usize) {
         Stmt::Error { .. } => return,
     }
     out.push_str(";\n");
+}
+
+/// One test `where` clause, matching the parsed grammar:
+/// `where name = expr` / `where path.to = expr` /
+/// `where target(pats) => expr` / `"case" [name = expr, ...]` (inside `where [ ]`).
+fn fmt_test_where(out: &mut String, wc: &TestWhere, depth: usize) {
+    if !matches!(wc, TestWhere::Case { .. }) { out.push_str("where "); }
+    fmt_test_where_bare(out, wc, depth);
+}
+
+/// The clause WITHOUT the `where` keyword — the form used inside a case's
+/// `[...]` binding list (`"times 10" [double(x) => x * 10, input = 5]`).
+fn fmt_test_where_bare(out: &mut String, wc: &TestWhere, depth: usize) {
+    match wc {
+        TestWhere::Bind { name, value } => {
+            w!(out, "{} = ", name);
+            fmt_expr(out, value, depth);
+        }
+        TestWhere::Override { path, value } => {
+            w!(out, "{} = ", join_syms(path, "."));
+            fmt_expr(out, value, depth);
+        }
+        TestWhere::CallResponse { target, params, response } => {
+            w!(out, "{}(", join_syms(target, "."));
+            comma_sep(out, params, |out, p| fmt_pattern(out, p));
+            out.push_str(") => ");
+            fmt_expr(out, response, depth);
+        }
+        TestWhere::Case { name, bindings } => {
+            w!(out, "\"{}\" [", name);
+            comma_sep(out, bindings, |out, b| fmt_test_where_bare(out, b, depth));
+            out.push(']');
+        }
+    }
 }
 
 fn fmt_pattern(out: &mut String, pat: &Pattern) {

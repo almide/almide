@@ -30,8 +30,7 @@ impl FuncCompiler<'_> {
             });
             self.scratch.free_i32(scratch);
         } else {
-            eprintln!("WARNING: FnRef wrapper not found for '{}', using direct table entry", name);
-            wasm!(self.func, { unreachable; });
+            panic!("[ICE] emit_wasm: FnRef wrapper not found for `{}` — register it before emission", name);
         }
     }
 
@@ -155,9 +154,7 @@ impl FuncCompiler<'_> {
         let table_idx = match table_idx {
             Some(ti) => ti as i32,
             None => {
-                eprintln!("WARNING: ClosureCreate: lifted function '{}' not in table", name_str);
-                wasm!(self.func, { unreachable; });
-                return;
+                panic!("[ICE] emit_wasm: ClosureCreate target `{}` not in the function table — closure conversion / table registration skew", name_str);
             }
         };
 
