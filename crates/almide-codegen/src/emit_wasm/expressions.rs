@@ -261,6 +261,14 @@ impl FuncCompiler<'_> {
                 // heap memory (string/list/record/map construction or calls
                 // returning heap types). Pure-int loops like fib skip the
                 // save/restore entirely.
+                //
+                // Under real frees the restore must ALSO reset the free list
+                // (emitted below): the region invariant ("no heap value
+                // escapes the iteration") must cover ALLOCATOR STATE too.
+                // Rolling back only the bump pointer left freed nodes above
+                // the new frontier; the next iteration's bumps re-handed out
+                // addresses the free list still referenced — observed as a
+                // string's len field reading a free-list next pointer.
                 let iter_scope = !body.is_empty()
                     && !self.expr_writes_outer_heap(&loop_body_expr)
                     && self.expr_allocates_heap(&loop_body_expr);
@@ -297,9 +305,15 @@ impl FuncCompiler<'_> {
                     self.emit_stmt(stmt);
                 }
 
-                // Restore heap at iteration end
+                // Restore heap at iteration end. The free list is reset
+                // with it: every node on it points into the region being
+                // rolled back (nothing escaped — the iter_scope precondition),
+                // so forgetting them wholesale is the only sound option.
                 if let Some(sl) = iter_scope_local {
-                    wasm!(self.func, { local_get(sl); global_set(self.emitter.heap_ptr_global); });
+                    wasm!(self.func, {
+                        local_get(sl); global_set(self.emitter.heap_ptr_global);
+                        i32_const(0); global_set(self.emitter.free_list_global);
+                    });
                 }
 
                 // continue (jump to loop start)

@@ -232,3 +232,29 @@ acceptance test). Parked diff: /tmp/m2park (pass_tco.rs, pass_perceus.rs with
 the flatten port). Not a blocker for default-ON: TCO loops leak per iteration
 (the pre-existing behavior), correctness is unaffected, and non-TCO churn is
 already O(1) (record_churn).
+
+
+## 2026-06-11 — THE FLIP (v0.27.0): frees are the DEFAULT
+
+`wasm_frees_enabled()` defaults TRUE; `ALMIDE_WASM_FREES=0` is the opt-out
+escape hatch. Ceremony evidence:
+
+- Triple bar, hands-off tree, all green ×3: native 264/264 · wasm default
+  (frees) 264/264 · wasm opt-out 264/264 · byte gate 67/67 · churn gate
+  (record 2M + tco 200k) · cargo full suite 0 failures.
+- Stage G micro-perf: ON vs OFF within noise (string 0.022/0.021 s,
+  list 0.033/0.034 s, map 0.011/0.011 s — best of 3, wasmtime).
+- Contracts: C-041 revised, C-066 added (`spec/wasm_cross/rc_reclaim_churn.almd`).
+
+The flip surfaced and fixed one more class: the per-iteration LOOP REGION
+reset (iter_scope, the leak-era reclamation for non-escaping loop bodies)
+rolled back the bump pointer but not the FREE LIST — freed nodes landed above
+the restored frontier and the next iteration's bumps re-handed out addresses
+the list still referenced (observed as `string.len` reading a free-list next
+pointer; caught by the new C-066 fixture within minutes of writing it). The
+region reset now clears the free list too: the region invariant ("nothing
+escapes the iteration") must cover ALLOCATOR STATE, not just values. The
+reset STAYS enabled under frees — it also papers over the known stored-field
+over-count inside reclaimed loops (2M churn back to flat ~13 MB; with the
+reset disabled the over-count leaked ~61 MB over 2M iterations, which is the
+measured size of the remaining Koka-precision work, not a regression).
