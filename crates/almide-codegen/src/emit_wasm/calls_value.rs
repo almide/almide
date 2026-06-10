@@ -1649,8 +1649,12 @@ impl FuncCompiler<'_> {
                     end;
                 });
             }
-            _ => {
-                wasm!(self.func, { unreachable; });
+            other => {
+                panic!(
+                    "[ICE] emit_wasm: no WASM dispatch for `value.{}` — \
+                     add an arm in emit_value_call or resolve upstream",
+                    other
+                );
             }
         }
         wasm!(self.func, {

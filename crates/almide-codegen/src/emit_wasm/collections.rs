@@ -451,8 +451,19 @@ impl FuncCompiler<'_> {
         if let Some((field_offset, field_ty)) = values::field_offset(&fields, field) {
             let total_offset = tag_offset + field_offset;
             self.emit_load_at(&field_ty, total_offset);
-        } else {
+        } else if resolved_ty.is_unresolved() {
+            // Unknown-typed dead-code residue (error recovery) may reach here;
+            // live code is guarded by assert_types_concretized.
             wasm!(self.func, { unreachable; });
+        } else {
+            // A field lookup that misses on a RESOLVED type is a compiler bug
+            // (e.g. a bare-vs-qualified type-name skew) — fail the BUILD, do
+            // not bury a runtime trap (completeness §5: no silent traps).
+            panic!(
+                "[ICE] emit_wasm: no field `{}` on resolved type `{:?}` — \
+                 record_fields registry / type-name skew; fix the producer upstream",
+                field, resolved_ty
+            );
         }
     }
 

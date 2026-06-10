@@ -945,8 +945,13 @@ impl FuncCompiler<'_> {
             }
 
             // ── Unsupported ──
-            _ => {
-                wasm!(self.func, { unreachable; });
+            other => {
+                panic!(
+                    "[ICE] emit_wasm: no emission for IrExprKind::{:?} — \
+                     add an arm or lower it in a pass (completeness §5: a \
+                     silent runtime trap is never an acceptable fallback)",
+                    std::mem::discriminant(other)
+                );
             }
         }
     }
