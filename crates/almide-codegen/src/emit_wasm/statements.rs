@@ -950,8 +950,17 @@ impl FuncCompiler<'_> {
                     | IrStmtKind::MapInsert { target: var, .. }
                     | IrStmtKind::IndexAssign { target: var, .. }
                     | IrStmtKind::FieldAssign { target: var, .. } => {
+                        // Escape check must be CONSERVATIVE: anything that is
+                        // not provably a scalar may point into the iteration
+                        // arena, and a heap_restore would free it while live.
+                        // `is_heap_type` is the wrong predicate here — it
+                        // misses nominal types (json.Value, user types, Bytes),
+                        // which is how a `var gltf = json.null(); while {...
+                        // gltf = parsed ...}` loop got its tree reclaimed and
+                        // overwritten by the next allocation (#470).
                         let ty = &self.var_table.get(*var).ty;
-                        if FuncCompiler::is_heap_type(ty) {
+                        let scalar = matches!(ty, Ty::Int | Ty::Float | Ty::Bool | Ty::Unit);
+                        if !scalar {
                             self.found = true;
                         }
                     }
