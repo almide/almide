@@ -96,6 +96,11 @@ pub fn register(emitter: &mut WasmEmitter) {
     // for sizing; `char_count` walks the data section and skips UTF-8
     // continuation bytes (bytes whose top two bits are `10`).
     emitter.rt.string.char_count = emitter.register_func("__str_char_count", ty_i32_i64);
+    // cp_of_byte(s, byte) -> i64 : codepoint index of the byte offset `byte`
+    // (count of non-continuation bytes in data[0..min(byte, len)]). Converts
+    // the byte offset `find`/`rfind` produce into the CODEPOINT index the
+    // user-facing position API speaks (#419).
+    emitter.rt.string.cp_of_byte = emitter.register_func("__str_cp_of_byte", ty_i32x2_i64);
 
     // run_length_encode: (s) -> List[(String, Int)]. Byte-level runs (matches
     // the byte-based rest of this runtime; native is codepoint-based, so the
@@ -196,6 +201,7 @@ pub fn compile(emitter: &mut WasmEmitter) {
     super::rt_string_extra::compile_is_lower(emitter);
     super::rt_string_extra::compile_cmp(emitter);
     compile_char_count(emitter);
+    compile_cp_of_byte(emitter);
     compile_run_length_encode(emitter);
     compile_is_unicode_ws(emitter);
     compile_utf8_classify(emitter);
@@ -398,6 +404,41 @@ fn compile_char_count(emitter: &mut WasmEmitter) {
           br(0);
         end; end;
         local_get(3); i64_extend_i32_u;
+        end;
+    });
+    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+}
+
+/// `cp_of_byte(s, byte) -> i64`. Codepoint index of byte offset `byte`:
+/// counts non-continuation bytes in `data[0..min(byte, byte_len)]`. The
+/// inverse of `utf8_byte_of_cp` on boundaries; `find`/`rfind` byte results
+/// pass through here so `index_of`/`last_index_of` return codepoint indices.
+fn compile_cp_of_byte(emitter: &mut WasmEmitter) {
+    let type_idx = emitter.func_type_indices[&emitter.rt.string.cp_of_byte];
+    // Locals: 2=limit (bytes), 3=i (byte index), 4=count
+    let mut f = Function::new([(3, ValType::I32)]);
+    wasm!(f, {
+        // limit = min(byte, byte_len)
+        local_get(0); i32_load(0); local_set(2);
+        local_get(1); local_get(2); i32_lt_u;
+        if_empty;
+          local_get(1); local_set(2);
+        end;
+        i32_const(0); local_set(3);
+        i32_const(0); local_set(4);
+        block_empty; loop_empty;
+          local_get(3); local_get(2); i32_ge_u; br_if(1);
+          local_get(0); i32_const(string_data_off()); i32_add;
+          local_get(3); i32_add; i32_load8_u(0);
+          i32_const(0xC0); i32_and;
+          i32_const(0x80); i32_ne;
+          if_empty;
+            local_get(4); i32_const(1); i32_add; local_set(4);
+          end;
+          local_get(3); i32_const(1); i32_add; local_set(3);
+          br(0);
+        end; end;
+        local_get(4); i64_extend_i32_u;
         end;
     });
     emitter.add_compiled(CompiledFunc::tracked(type_idx, f));

@@ -60,7 +60,7 @@ string.ends_with("hello", "llo") // => true
 
 ### `string.slice(s: String, start: Int, end: Int) -> String`
 
-Extract a substring by start and optional end index.
+Extract a substring by codepoint start and optional end index.
 
 ```almd
 string.slice("hello", 1, 4) // => "ell"
@@ -116,10 +116,10 @@ string.replace("aabbcc", "bb", "XX") // => "aaXXcc"
 
 ### `string.get(s: String, i: Int) -> Option[String]`
 
-Get the character at a given index, or none if out of bounds.
+Get the character at a given codepoint index, or none if out of bounds.
 
 ```almd
-string.char_at("hello", 1) // => some("e")
+string.get("hello", 1) // => some("e")
 ```
 
 ### `string.lines(s: String) -> List[String]`
@@ -140,7 +140,7 @@ string.chars("abc") // => ["a", "b", "c"]
 
 ### `string.index_of(s: String, needle: String) -> Option[Int]`
 
-Find the first index of a substring, or none if not found.
+Find the first codepoint index of a substring, or none if not found.
 
 ```almd
 string.index_of("hello", "ll") // => some(2)
@@ -300,7 +300,7 @@ string.replace_first("aabaa", "a", "X") // => "Xabaa"
 
 ### `string.last_index_of(s: String, needle: String) -> Option[Int]`
 
-Find the last index of a substring, or none if not found.
+Find the last codepoint index of a substring, or none if not found.
 
 ```almd
 string.last_index_of("abcabc", "bc") // => some(4)

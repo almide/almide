@@ -35,9 +35,11 @@ impl FuncCompiler<'_> {
             "trim_end"   => Some(StdlibOp::Call1(rt.trim_end)),
             "reverse"    => Some(StdlibOp::Call1(rt.reverse)),
             "len" | "length" => {
-                // O(1): read byte-length header directly
+                // Codepoint count (#419) — the documented contract is "number
+                // of characters", and the whole position API speaks ONE unit.
+                // The O(1) byte length stays internal (header load).
                 self.emit_expr(&args[0]);
-                wasm!(self.func, { i32_load(0); i64_extend_i32_u; });
+                wasm!(self.func, { call(self.emitter.rt.string.char_count); });
                 return true;
             }
             "contains"   => Some(StdlibOp::Call2(rt.contains)),
@@ -101,36 +103,47 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(s0);
             }
             "get" => {
-                // get(s, i) → Option[String]. Maps to native `string.char_at`:
-                // `i` is a BYTE index; OOB → none, else snap `i` down to a char
-                // boundary and return the WHOLE codepoint starting there.
+                // get(s, i) → Option[String]: `i` is a CODEPOINT index (#419).
+                // Negative or ≥ char_count → none, else the whole codepoint.
                 let s = self.scratch.alloc_i32();
-                let i = self.scratch.alloc_i32();   // byte index (snapped)
-                let cp = self.scratch.alloc_i32();  // result string ptr / some box
+                let i = self.scratch.alloc_i32();   // cp index → byte offset → some box
+                let cp = self.scratch.alloc_i32();  // result string ptr
+                let i64v = self.scratch.alloc_i64();
                 self.emit_expr(&args[0]);
                 wasm!(self.func, { local_set(s); });
                 self.emit_expr(&args[1]);
                 wasm!(self.func, {
-                    i32_wrap_i64; local_set(i);
-                    // bounds check: i < 0 || i >= byte_len → none
-                    local_get(i); i32_const(0); i32_lt_s;
-                    local_get(i); local_get(s); i32_load(0); i32_ge_u;
-                    i32_or;
+                    local_set(i64v);
+                    local_get(i64v); i64_const(0); i64_lt_s;
                     if_i32;
                       i32_const(0); // none
                     else_;
-                      // snap i down to a char boundary
-                      local_get(s); local_get(i); call(self.emitter.rt.string.utf8_snap); local_set(i);
-                      // cp = slice(s, i, i + width(s, i))
-                      local_get(s); local_get(i);
-                      local_get(i); local_get(s); local_get(i); call(self.emitter.rt.string.utf8_width); i32_add;
-                      call(self.emitter.rt.string.slice); local_set(cp);
-                      // wrap in some: alloc ptr, store string ptr
-                      i32_const(4); call(self.emitter.rt.alloc); local_set(i);
-                      local_get(i); local_get(cp); i32_store(0);
-                      local_get(i);
+                      // saturate the cp index to i32::MAX; utf8_byte_of_cp maps
+                      // any count at/past the end to byte_len → none below.
+                      local_get(i64v); i64_const(0x7FFF_FFFF); i64_gt_s;
+                      if_i32;
+                        i32_const(0x7FFF_FFFF);
+                      else_;
+                        local_get(i64v); i32_wrap_i64;
+                      end;
+                      local_set(i);
+                      local_get(s); local_get(i); call(self.emitter.rt.string.utf8_byte_of_cp); local_set(i);
+                      local_get(i); local_get(s); i32_load(0); i32_ge_u;
+                      if_i32;
+                        i32_const(0); // none
+                      else_;
+                        // cp = slice(s, i, i + width(s, i))
+                        local_get(s); local_get(i);
+                        local_get(i); local_get(s); local_get(i); call(self.emitter.rt.string.utf8_width); i32_add;
+                        call(self.emitter.rt.string.slice); local_set(cp);
+                        // wrap in some: alloc ptr, store string ptr
+                        i32_const(4); call(self.emitter.rt.alloc); local_set(i);
+                        local_get(i); local_get(cp); i32_store(0);
+                        local_get(i);
+                      end;
                     end;
                 });
+                self.scratch.free_i64(i64v);
                 self.scratch.free_i32(cp);
                 self.scratch.free_i32(i);
                 self.scratch.free_i32(s);
@@ -152,72 +165,36 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, { call(self.emitter.rt.string.repeat); });
             }
             "slice" => {
-                // slice(s, start, end) — BYTE indices, clamped to [0, byte_len]
-                // and each SNAPPED DOWN to a char boundary so a multibyte
-                // codepoint is never split (matches native string.slice).
-                //
-                // When `end` comes from the `end: Int = i64::MAX` default
-                // injection, wrapping to i32 produces 0xFFFFFFFF (-1) which the
-                // runtime would read as a huge unsigned → trap. Clamping to the
-                // byte length degrades the sentinel to "to the end" safely.
+                // slice(s, start, end) — CODEPOINT indices (#419), clamped to
+                // [0, char_count]. `utf8_byte_of_cp` maps a count at/past the
+                // end to the byte length, so after the signed i64→i32
+                // saturation below the `end: Int = i64::MAX` default degrades
+                // to "to the end" and a negative index to 0 (native clamps
+                // SIGNED: `(start.max(0) as usize).min(count)`, C-054).
                 let s_ptr = self.scratch.alloc_i32();
-                let byte_len = self.scratch.alloc_i32();
                 let start_b = self.scratch.alloc_i32();
                 let end_b = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
-                wasm!(self.func, { local_set(s_ptr); local_get(s_ptr); i32_load(0); local_set(byte_len); });
-                // start = (start.max(0)).min(byte_len) on the i64 BEFORE
-                // narrowing (C-054) — native `string.slice` clamps SIGNED
-                // (`(start.max(0) as usize).min(len)`), so a NEGATIVE start maps
-                // to 0, not to byte_len. (This differs from `list.slice`, whose
-                // oracle is `start as usize` → unsigned.) The same SIGNED rule
-                // `end` below already uses; a start >= 2^32 saturates to byte_len
-                // instead of wrapping to a small in-range offset. Then snap down
-                // to a char boundary.
+                wasm!(self.func, { local_set(s_ptr); });
                 self.emit_expr(&args[1]);
-                self.emit_clamp_count_signed_i32(super::calls_list_helpers::ClampHi::LenLocal(byte_len));
+                self.emit_clamp_count_signed_i32(super::calls_list_helpers::ClampHi::Const(STRING_COUNT_HUGE));
                 wasm!(self.func, {
                     local_set(start_b);
                     local_get(s_ptr); local_get(start_b);
-                    call(self.emitter.rt.string.utf8_snap); local_set(start_b);
+                    call(self.emitter.rt.string.utf8_byte_of_cp); local_set(start_b);
                 });
-                // end — clamp the i64 value to [0, byte_len] BEFORE wrapping to i32, so the
-                // `end: Int = i64::MAX` default (and any end > byte_len) degrades to byte_len
-                // instead of wrapping to a bogus i32 (i64::MAX -> -1 -> clamp 0 -> empty).
                 if args.len() > 2 {
-                    let end64 = self.scratch.alloc_i64();
                     self.emit_expr(&args[2]);
+                    self.emit_clamp_count_signed_i32(super::calls_list_helpers::ClampHi::Const(STRING_COUNT_HUGE));
                     wasm!(self.func, {
-                        local_set(end64);
-                        local_get(end64); i64_const(0); i64_lt_s;                 // end < 0 ?
-                        if_i32;
-                            i32_const(0);
-                        else_;
-                            local_get(end64);
-                            local_get(s_ptr); i32_load(0); i64_extend_i32_u;       // byte_len as i64
-                            i64_gt_s;                                             // end > byte_len ?
-                            if_i32;
-                                local_get(s_ptr); i32_load(0);                    // -> byte_len
-                            else_;
-                                local_get(end64); i32_wrap_i64;                   // fits in i32
-                            end;
-                        end;
                         local_set(end_b);
+                        local_get(s_ptr); local_get(end_b);
+                        call(self.emitter.rt.string.utf8_byte_of_cp); local_set(end_b);
                     });
-                    self.scratch.free_i64(end64);
                 } else {
                     wasm!(self.func, { local_get(s_ptr); i32_load(0); local_set(end_b); });
                 }
                 wasm!(self.func, {
-                    // clamp negative → 0
-                    local_get(end_b); i32_const(0); i32_lt_s;
-                    if_empty; i32_const(0); local_set(end_b); end;
-                    // clamp > byte_len → byte_len
-                    local_get(end_b); local_get(s_ptr); i32_load(0); i32_gt_u;
-                    if_empty; local_get(s_ptr); i32_load(0); local_set(end_b); end;
-                    // snap down to char boundary
-                    local_get(s_ptr); local_get(end_b);
-                    call(self.emitter.rt.string.utf8_snap); local_set(end_b);
                     // start >= end → empty string (matches native; also guards
                     // __str_slice against an unsigned `end - start` underflow)
                     local_get(start_b); local_get(end_b); i32_ge_u;
@@ -229,14 +206,18 @@ impl FuncCompiler<'_> {
                     end;
                 });
                 self.scratch.free_i32(s_ptr);
-                self.scratch.free_i32(byte_len);
                 self.scratch.free_i32(start_b);
                 self.scratch.free_i32(end_b);
             }
             "index_of" => {
+                // The runtime returns a BYTE offset (str::find oracle); the
+                // user-facing index is the CODEPOINT index (#419), so convert
+                // through cp_of_byte before boxing the some(Int).
                 let s64 = self.scratch.alloc_i64();
                 let s32 = self.scratch.alloc_i32();
+                let s_ptr = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
+                wasm!(self.func, { local_set(s_ptr); local_get(s_ptr); });
                 self.emit_expr(&args[1]);
                 wasm!(self.func, {
                     call(self.emitter.rt.string.index_of);
@@ -245,18 +226,24 @@ impl FuncCompiler<'_> {
                     if_i32;
                       i32_const(0);
                     else_;
+                      local_get(s_ptr); local_get(s64); i32_wrap_i64;
+                      call(self.emitter.rt.string.cp_of_byte); local_set(s64);
                       i32_const(8); call(self.emitter.rt.alloc); local_set(s32);
                       local_get(s32); local_get(s64); i64_store(0);
                       local_get(s32);
                     end;
                 });
+                self.scratch.free_i32(s_ptr);
                 self.scratch.free_i32(s32);
                 self.scratch.free_i64(s64);
             }
             "last_index_of" => {
+                // Same byte→codepoint conversion as index_of (#419).
                 let s64 = self.scratch.alloc_i64();
                 let s32 = self.scratch.alloc_i32();
+                let s_ptr = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
+                wasm!(self.func, { local_set(s_ptr); local_get(s_ptr); });
                 self.emit_expr(&args[1]);
                 wasm!(self.func, {
                     call(self.emitter.rt.string.last_index_of);
@@ -265,11 +252,14 @@ impl FuncCompiler<'_> {
                     if_i32;
                       i32_const(0);
                     else_;
+                      local_get(s_ptr); local_get(s64); i32_wrap_i64;
+                      call(self.emitter.rt.string.cp_of_byte); local_set(s64);
                       i32_const(8); call(self.emitter.rt.alloc); local_set(s32);
                       local_get(s32); local_get(s64); i64_store(0);
                       local_get(s32);
                     end;
                 });
+                self.scratch.free_i32(s_ptr);
                 self.scratch.free_i32(s32);
                 self.scratch.free_i64(s64);
             }
