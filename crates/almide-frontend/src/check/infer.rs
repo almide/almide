@@ -820,6 +820,13 @@ impl Checker {
                 self.env.push_scope();
                 // Lambda has its own return context — don't leak outer function's current_ret
                 let saved_ret = self.env.current_ret.take();
+                // A lambda is its own function: the enclosing effect fn's
+                // auto-`?` cannot propagate out of a closure body (the closure
+                // may escape), so an effect call inside a lambda yields the
+                // EXPLICIT Result — auto_unwrap is off, matching the lowering,
+                // which never inserts `?` inside Lambda bodies (#489).
+                let saved_auto_unwrap = self.env.auto_unwrap;
+                self.env.auto_unwrap = false;
                 self.env.lambda_depth += 1;
                 let param_tys: Vec<Ty> = params.iter().map(|p| {
                     let ty = p.ty.as_ref().map(|te| self.resolve_type_expr(te)).unwrap_or_else(|| self.fresh_var());
@@ -829,6 +836,7 @@ impl Checker {
                 }).collect();
                 let ret_ty = self.infer_expr(body);
                 self.env.lambda_depth -= 1;
+                self.env.auto_unwrap = saved_auto_unwrap;
                 self.env.current_ret = saved_ret;
                 self.env.pop_scope();
                 Ty::Fn { params: param_tys, ret: Box::new(ret_ty) }
