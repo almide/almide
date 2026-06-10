@@ -24,11 +24,24 @@ impl NanoPass for RustLoweringPass {
         // (A) Box closures sitting in type-erased join slots as `Rc<dyn Fn>`.
         //     Single source of truth — see `box_closures_program` below.
         if box_closures_program(&mut program) { changed = true; }
-        // Shared-cell vars must NOT get the `xs = xs + [v]` → `xs.push(v)` rewrite:
-        // their binding is a `SharedMut`, so `xs.push(v)` renders as `xs.get().push(v)`
-        // — a push onto a discarded clone, losing the reassignment. Left as an Assign,
-        // the walker emits `xs.set(xs.get() + [v])` through the cell. (Closure v2 P6.)
-        let shared: HashSet<VarId> = program.codegen_annotations.shared_mut_vars.clone();
+        // Vars whose Assign must STAY an Assign — their lvalue is not a direct
+        // Rust place, so the `xs = xs + [v]` → `xs.push(v)` rewrite would push
+        // onto a DISCARDED CLONE and silently lose the write:
+        //   - shared cells (`SharedMut`): `xs.get().push(v)` (Closure v2 P6);
+        //   - mutable TOP-LETS (`ModuleRc`): the Method renderer falls through
+        //     to the module-var READ accessor `UPPER.with(|c| (**c.borrow())
+        //     .clone()).push(v)` (#501). Left as an Assign, the walker emits
+        //     the ModuleRc WRITE template, which is also alias-safe: the RHS
+        //     (including reads of the same var) evaluates BEFORE borrow_mut.
+        let mut shared: HashSet<VarId> = program.codegen_annotations.shared_mut_vars.clone();
+        for tl in &program.top_lets {
+            if tl.mutable { shared.insert(tl.var); }
+        }
+        for m in &program.modules {
+            for tl in &m.top_lets {
+                if tl.mutable { shared.insert(tl.var); }
+            }
+        }
         let IrProgram { functions, top_lets, modules, var_table, .. } = &mut program;
         for func in functions.iter_mut() {
             if rewrite_stmts_in_expr(&mut func.body, var_table, &shared) { changed = true; }

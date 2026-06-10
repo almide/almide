@@ -131,17 +131,26 @@ impl NanoPass for ConcretizeTypesPass {
         // Phase 1b: Propagate top_let types by name into VarTable entries
         // that are cross-module synthetic references (different VarId, same name).
         let mut top_let_types: std::collections::HashMap<String, Ty> = std::collections::HashMap::new();
+        // The use-site synthetic Var carries the SCREAMING_CASE const
+        // spelling (lower/expressions.rs `field.to_uppercase()`) while the
+        // definition keeps the source name — bridge BOTH spellings, or a
+        // lowercase module top-let never propagates (#502 fix C).
+        let mut insert_both = |name: String, ty: &Ty, map: &mut std::collections::HashMap<String, Ty>| {
+            let upper = name.to_uppercase();
+            if upper != name { map.entry(upper).or_insert_with(|| ty.clone()); }
+            map.insert(name, ty.clone());
+        };
         for tl in &program.top_lets {
             if !tl.ty.has_unresolved_deep() {
                 let name = prog_vt.get(tl.var).name.to_string();
-                top_let_types.insert(name, tl.ty.clone());
+                insert_both(name, &tl.ty, &mut top_let_types);
             }
         }
         for module in &program.modules {
             for tl in &module.top_lets {
                 if !tl.ty.has_unresolved_deep() {
                     let name = prog_vt.get(tl.var).name.to_string();
-                    top_let_types.insert(name, tl.ty.clone());
+                    insert_both(name, &tl.ty, &mut top_let_types);
                 }
             }
         }
@@ -1174,6 +1183,15 @@ fn resolve_node_ty(expr: &IrExpr, vt: &VarTable, symbols: &SymbolTable) -> Optio
             // firing for post-lowering shape.
             let target = CallTarget::Named { name: *symbol };
             resolve_call_ret_ty(&target, args, vt, symbols)
+        }
+        // A spread copies its base's record type — the checker's own rule
+        // (infer's SpreadRecord = base passthrough). Without this arm a
+        // cross-module spread base whose type lands late (module top-lets
+        // are checked AFTER main) bottomed out at `_ => None` and was
+        // refused by the AllTypesConcrete gate (#502).
+        IrExprKind::SpreadRecord { base, .. } => {
+            let base_ty = effective_ty(base, vt);
+            if !base_ty.has_unresolved_deep() { Some(base_ty) } else { None }
         }
         _ => None,
     }

@@ -10,6 +10,19 @@ fn set_label(s: String) -> Unit = {
   label = s
 }
 
+// #501: a single-element self-append INSIDE a module fn must keep its
+// Assign form — the push rewrite pushed onto a discarded clone of the
+// ModuleRc read accessor and silently lost the write.
+fn append_item(n: Int) -> Unit = {
+  items = items + [n]
+}
+
+// Pins the alias-safety of the Assign route: the RHS reads the same var
+// it assigns (evaluates before borrow_mut is taken).
+fn append_len() -> Unit = {
+  items = items + [list.len(items)]
+}
+
 test "module var Int read/write" {
   assert(counter == 0)
   bump()
@@ -48,4 +61,13 @@ test "module var direct assignment in test" {
   assert(counter == 100)
   counter = counter + 1
   assert(counter == 101)
+}
+
+test "module var append through fn keeps the write (#501)" {
+  items = [1, 2]
+  append_item(9)
+  assert(list.len(items) == 3)
+  append_len()
+  assert(list.len(items) == 4)
+  assert((list.get(items, 3) ?? -1) == 3)
 }
