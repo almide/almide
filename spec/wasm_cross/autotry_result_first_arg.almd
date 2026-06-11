@@ -1,0 +1,17 @@
+// @contract: C-068
+// #558: a callee whose FIRST parameter is Result/Option must NOT have that
+// arg auto-?'d — it consumes the Result itself. The exemption is derived from
+// SIGNATURES, generalizing the old hardcoded result/option module list to any
+// USER fn taking a Result first (and to error.message/testing.assert_ok). Two
+// proofs that need no bundled-module import (the determinism harness loads no
+// stdlib modules): a USER fn taking Result-first, and the result.unwrap_or
+// intrinsic. Before the fix, `take(inner(0), ..)` unwrapped the arg — native
+// E0308 build fail / wasm structural [COMPILER BUG].
+fn inner(x: Int) -> Result[Int, String] = if x > 0 then ok(x) else err("neg")
+fn take(r: Result[Int, String], label: String) -> String =
+  "${label}=${result.unwrap_or(r, -9)}"
+effect fn main() -> Unit = {
+  println(take(inner(5), "a"))
+  println(take(inner(0), "b"))
+  println("${result.unwrap_or(inner(0), -1)}")
+}

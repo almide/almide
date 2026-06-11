@@ -854,6 +854,7 @@ statement = "An effect-fn call in a CONSTRUCTION position — a record field, li
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/autotry_construction.almd", class = "fixture" },
+  { path = "spec/wasm_cross/autotry_result_first_arg.almd", class = "fixture" },
 ]
 
 [[contract]]

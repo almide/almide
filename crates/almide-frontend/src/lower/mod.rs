@@ -418,7 +418,18 @@ fn lower_program_with_prefix(prog: &ast::Program, env: &TypeEnv, type_map: &Type
     // Auto-? insertion: wrap Result-typed calls in Try nodes.
     // This bridges the gap between checker (auto_unwrap strips Result
     // from bindings) and IR (Call nodes carry Result types).
-    auto_try::insert_auto_try(&mut program, &annotated_result_vars);
+    // #558: callees whose FIRST parameter is Result/Option must NOT have that
+    // arg auto-?'d (it would unwrap the very value the callee consumes —
+    // `error.context(inner(), msg)`, `result.unwrap_or(r, d)`, …). Derive the
+    // set from the signature table instead of a hardcoded module-name list.
+    let first_arg_unwraps: std::collections::HashSet<almide_base::intern::Sym> = env.functions.iter()
+        .filter_map(|(k, sig)| {
+            let first_is_opt_result = sig.params.first()
+                .map_or(false, |(_, t)| t.is_result() || matches!(t, almide_lang::types::Ty::Applied(almide_lang::types::TypeConstructorId::Option, _)));
+            if first_is_opt_result { Some(*k) } else { None }
+        })
+        .collect();
+    auto_try::insert_auto_try(&mut program, &annotated_result_vars, &first_arg_unwraps);
 
     // Collect stdlib modules used in root functions/top_lets.
     // ir_link extends this with modules from dependencies.

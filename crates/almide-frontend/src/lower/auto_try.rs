@@ -11,6 +11,7 @@
 
 use std::collections::{HashMap, HashSet};
 use almide_ir::*;
+use almide_base::intern::sym;
 use almide_base::intern::Sym;
 use crate::types::{Ty, TypeConstructorId};
 
@@ -26,10 +27,13 @@ struct TryCtx<'a> {
     /// a `-> Result[..]`-declared effect fn has the same Bind.ty but takes
     /// the auto-`?` (#485).
     annotated_result_vars: &'a HashSet<VarId>,
+    /// #558: qualified fn keys (`module.func`) whose FIRST param is
+    /// Result/Option — that arg keeps its Result (no auto-?).
+    first_arg_unwraps: &'a HashSet<Sym>,
 }
 
 /// Insert auto-? (Try nodes) in all effect fn bodies of the program.
-pub fn insert_auto_try(program: &mut IrProgram, annotated_result_vars: &HashSet<VarId>) {
+pub fn insert_auto_try(program: &mut IrProgram, annotated_result_vars: &HashSet<VarId>, first_arg_unwraps: &HashSet<Sym>) {
     // Record decls (root + modules) so FieldAssign can resolve a Named
     // target type to its field types. Decl names are canonical (qualified
     // `mod.Type` for user-module types), matching Ty::Named on var types.
@@ -43,7 +47,7 @@ pub fn insert_auto_try(program: &mut IrProgram, annotated_result_vars: &HashSet<
     for func in functions.iter_mut() {
         if func.is_effect && !func.is_test {
             let returns_result = func.ret_ty.is_result();
-            let mut ctx = TryCtx { var_table, record_fields: &record_fields, annotated_result_vars };
+            let mut ctx = TryCtx { var_table, record_fields: &record_fields, annotated_result_vars, first_arg_unwraps };
             func.body = insert_try_body(std::mem::take(&mut func.body), returns_result, &mut ctx);
         }
     }
@@ -52,7 +56,7 @@ pub fn insert_auto_try(program: &mut IrProgram, annotated_result_vars: &HashSet<
         for func in functions.iter_mut() {
             if func.is_effect {
                 let returns_result = func.ret_ty.is_result();
-                let mut ctx = TryCtx { var_table, record_fields: &record_fields, annotated_result_vars };
+                let mut ctx = TryCtx { var_table, record_fields: &record_fields, annotated_result_vars, first_arg_unwraps };
                 func.body = insert_try_body(std::mem::take(&mut func.body), returns_result, &mut ctx);
             }
         }
@@ -299,9 +303,21 @@ fn insert_try(expr: IrExpr, in_match_subject: bool, ctx: &mut TryCtx) -> IrExpr 
             // becomes `result.unwrap_or((int.parse(s))?, d)`, unwrapping the Result
             // the callee needs (E0308 at build; passes check/test). The `true` flag
             // suppresses only the top-level wrap of that arg, like a match subject.
-            let skip_first = matches!(&target,
-                CallTarget::Module { module, .. }
-                    if module.as_str() == "result" || module.as_str() == "option");
+            // #558: skip the auto-? on arg 0 when the callee's FIRST param is
+            // Result/Option (derived from signatures), generalizing the old
+            // hardcoded result/option module list — error.context/message,
+            // testing.assert_ok and any user fn taking a Result first are now
+            // covered. result/option stay as a fallback for intrinsic keys.
+            let skip_first = match &target {
+                CallTarget::Module { module, func, .. } => {
+                    module.as_str() == "result" || module.as_str() == "option"
+                        || ctx.first_arg_unwraps.contains(&sym(&format!("{}.{}", module.as_str(), func.as_str())))
+                }
+                // A USER fn whose first param is Result/Option (e.g.
+                // `fn take(r: Result[..], ..)`) — its sig key is the bare name.
+                CallTarget::Named { name } => ctx.first_arg_unwraps.contains(name),
+                _ => false,
+            };
             IrExprKind::Call {
                 target,
                 args: args.into_iter().enumerate()
