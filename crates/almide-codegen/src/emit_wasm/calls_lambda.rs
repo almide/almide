@@ -114,13 +114,18 @@ impl FuncCompiler<'_> {
                     } else {
                         self.emit_store_at(ty, offset);
                     }
-                } else {
-                    match values::ty_to_valtype(ty) {
-                        Some(ValType::I64) => { wasm!(self.func, { i64_const(0); }); }
-                        Some(ValType::F64) => { wasm!(self.func, { f64_const(0.0); }); }
-                        _ => { wasm!(self.func, { i32_const(0); }); }
-                    }
+                } else if let Some((global_idx, _)) = self.lookup_global(*vid) {
+                    // Module-global capture: load through the SHARED lookup
+                    // (the #500-fix sibling this arm was missing — it stored
+                    // a silent typed ZERO into the env).
+                    wasm!(self.func, { global_get(global_idx); });
                     self.emit_store_at(ty, offset);
+                } else {
+                    panic!(
+                        "[ICE] lambda capture `{}` (VarId {}) resolved to neither local nor global (#522 class)",
+                        if (vid.0 as usize) < self.var_table.len() { self.var_table.get(*vid).name.as_str() } else { "?" },
+                        vid.0
+                    );
                 }
             }
 
@@ -202,15 +207,16 @@ impl FuncCompiler<'_> {
                     wasm!(self.func, { global_get(global_idx); });
                     self.emit_store_at(ty, offset);
                 } else {
-                    // This should not happen after closure conversion —
-                    // all captured vars should be in var_map (as locals or env-loaded params)
-                    eprintln!("WARNING: ClosureCreate capture var {} not in var_map", vid.0);
-                    match values::ty_to_valtype(ty) {
-                        Some(ValType::I64) => { wasm!(self.func, { i64_const(0); }); }
-                        Some(ValType::F64) => { wasm!(self.func, { f64_const(0.0); }); }
-                        _ => { wasm!(self.func, { i32_const(0); }); }
-                    }
-                    self.emit_store_at(ty, offset);
+                    // Post-#500 every legitimate storage class resolves
+                    // (locals via var_map, globals via lookup_global). A miss
+                    // here previously shipped a ZERO into the env behind a
+                    // stderr warning nobody gates on — the next #500-class
+                    // regression must be a build failure instead.
+                    panic!(
+                        "[ICE] ClosureCreate capture `{}` (VarId {}) resolved to neither local nor global (#522 class)",
+                        if (vid.0 as usize) < self.var_table.len() { self.var_table.get(*vid).name.as_str() } else { "?" },
+                        vid.0
+                    );
                 }
             }
 
