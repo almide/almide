@@ -21,8 +21,10 @@ pub enum Rung {
 /// The classified result of running the full ladder on one program.
 #[derive(Debug, Clone)]
 pub enum Outcome {
-    /// Passed every rung; native and WASM agreed byte-for-byte.
-    Clean,
+    /// Passed every rung; native and WASM agreed byte-for-byte. Carries
+    /// the native evidence so post-rungs (the metamorphic gate) can
+    /// compare variant behavior without re-running the original.
+    Clean { native: RunEvidence },
 
     /// `almide check` rejected the program. This is a *generator* bug
     /// (we promised well-typed-by-construction), not a compiler finding.
@@ -66,6 +68,9 @@ pub enum FindingKind {
     OutputDivergence,
     /// One side ran, the other failed to run though it built.
     RunFailureDivergence,
+    /// A binding-shape rewrite (let⟺var⟺assign) changed acceptance or
+    /// observable behavior (#515, completeness §3).
+    MetamorphicDivergence,
 }
 
 /// Captured observable behaviour of one execution.
@@ -223,7 +228,7 @@ pub fn run_ladder(
         }
     }
 
-    Outcome::Clean
+    Outcome::Clean { native: nat_ev }
 }
 
 /// fmt round-trip: `parse → fmt → parse → fmt` must be a fixed point.
