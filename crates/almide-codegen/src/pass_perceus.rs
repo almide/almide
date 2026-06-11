@@ -255,10 +255,23 @@ fn perceus_fnbody(fb: FnBody, var_table: &mut VarTable) -> FnBody {
                                 &st.kind, IrStmtKind::Bind { var: bv, .. } if *bv == tail_id
                             ));
                             if let Some(pos) = bind_pos {
-                                stmts.insert(pos + 1, IrStmt {
-                                    kind: IrStmtKind::RcInc { var: tail_id },
-                                    span: None,
-                                });
+                                // The +1 is owed only when the tail temp's
+                                // OWN VALUE aliases (the unwrap_or-of-a-temp
+                                // shape: the temp's Dec frees the payload
+                                // first, json_gltf). A FRESH tail value moved
+                                // out of the block owns itself — Inc'ing it
+                                // was a pure +1 leak per execution (16 B/iter
+                                // in TCO loops, measured).
+                                let tail_value_aliases = matches!(
+                                    &stmts[pos].kind,
+                                    IrStmtKind::Bind { value, .. } if yields_borrowed_alias(value)
+                                );
+                                if tail_value_aliases {
+                                    stmts.insert(pos + 1, IrStmt {
+                                        kind: IrStmtKind::RcInc { var: tail_id },
+                                        span: None,
+                                    });
+                                }
                                 inner_inc_done = true;
                             }
                         }
@@ -391,6 +404,18 @@ fn insert_decs_before_ret(fb: FnBody, heap_vars: &[VarId], ret_vars: &HashSet<Va
                     };
                     for var in vars_to_dec.iter().rev() {
                         res = FnBody::Dec { var: *var, body: Box::new(res) };
+                    }
+                    // Rule 1 applies HERE too: this hand-built VDecl bypasses
+                    // the ChainHead::VDecl arm, so a ret expr that ALIASES one
+                    // of the locals being Dec'd below (e.g. `if filled then
+                    // base + "…" else base` with `Dec base` following) needs
+                    // its own reference or the function returns a freed
+                    // pointer. This under-count was masked for years by the
+                    // chain-temp over-incs the alias-gated hoist removed
+                    // (caught by the byte gate as a resurrection trap,
+                    // default_fields_test).
+                    if is_heap_type(&ret_ty) && yields_borrowed_alias(&expr) {
+                        res = FnBody::Inc { var: ret_var, body: Box::new(res) };
                     }
                     FnBody::VDecl { var: ret_var, ty: ret_ty, mutability: Mutability::Let, expr, body: Box::new(res) }
                 } else {
@@ -716,6 +741,73 @@ fn is_alias_returning_runtime_call(symbol: &str) -> bool {
     )
 }
 
+/// Flatten loop-exit nesting so a `continue`/`break` becomes its enclosing
+/// block's own TAIL. Two shapes, applied post-order (innermost first):
+///   (a) Trailing discarded-exit statement — `Block{ …, Expr(X) ; tail: None }`
+///       where `X` always exits — is the no-value form TCO emits when the
+///       self-call is a discarded tail. Promote `X` to the block's tail.
+///   (b) Tail block ending in an exit — `Block{ A ; tail: Block{ B ; tail: exit }}`
+///       — hoist `B` up and make `exit` the outer tail.
+/// After this, `insert_decs_before_ret` sees `continue`/`break` as the terminal
+/// and emits each heap-local Dec as a same-level statement BEFORE it: reachable
+/// (no leak) and at the Bind's level (counted by the flat verifier).
+fn flatten_exit_tail_blocks(body: &mut IrExpr) {
+    struct Flattener;
+    impl IrMutVisitor for Flattener {
+        fn visit_expr_mut(&mut self, e: &mut IrExpr) {
+            walk_expr_mut(self, e); // children first (innermost nesting collapses first)
+            if let IrExprKind::Block { stmts, expr } = &mut e.kind {
+                // (a) Promote a trailing always-exit `Expr` statement to the tail.
+                #[allow(clippy::collapsible_if)]
+                if expr.is_none() {
+                    if let Some(IrStmtKind::Expr { expr: last }) = stmts.last().map(|s| &s.kind) {
+                        if expr_always_exits(last) {
+                            if let Some(IrStmt { kind: IrStmtKind::Expr { expr: x }, .. }) = stmts.pop() {
+                                *expr = Some(Box::new(x));
+                            }
+                        }
+                    }
+                }
+                // (b) Absorb a tail block that ends in a bare exit.
+                if let Some(tail) = expr {
+                    while tail_block_ends_in_exit(tail) {
+                        if let IrExprKind::Block { stmts: inner, expr: inner_tail } = &mut tail.kind {
+                            let mut hoisted = std::mem::take(inner);
+                            stmts.append(&mut hoisted);
+                            *tail = inner_tail.take().expect("checked by tail_block_ends_in_exit");
+                        } else {
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Flattener.visit_expr_mut(body);
+}
+
+/// True iff `t` is a `Block` whose own tail is a bare `continue`/`break`.
+fn tail_block_ends_in_exit(t: &IrExpr) -> bool {
+    matches!(&t.kind, IrExprKind::Block { expr: Some(inner), .. }
+        if matches!(inner.kind, IrExprKind::Continue | IrExprKind::Break))
+}
+
+/// Unconditionally exits the loop iteration (continue/break), possibly through a
+/// trailing block/if/match — but NOT through a nested loop.
+fn expr_always_exits(e: &IrExpr) -> bool {
+    match &e.kind {
+        IrExprKind::Continue | IrExprKind::Break => true,
+        IrExprKind::Block { stmts, expr } =>
+            expr.as_deref().is_some_and(expr_always_exits)
+                || stmts.iter().any(|s| matches!(&s.kind,
+                    IrStmtKind::Expr { expr } if expr_always_exits(expr))),
+        IrExprKind::If { then, else_, .. } => expr_always_exits(then) && expr_always_exits(else_),
+        IrExprKind::Match { arms, .. } =>
+            !arms.is_empty() && arms.iter().all(|a| expr_always_exits(&a.body)),
+        _ => false,
+    }
+}
+
 pub(crate) fn yields_borrowed_alias(e: &IrExpr) -> bool {
     use IrExprKind::*;
     match &e.kind {
@@ -745,6 +837,19 @@ pub(crate) fn yields_borrowed_alias(e: &IrExpr) -> bool {
         // listed here (dup'ing their fresh Option box would not help the payload).
         RuntimeCall { symbol, .. } => is_alias_returning_runtime_call(symbol.as_str()),
 
+        // The SAME accessors in their pre-StdlibLowering Call{Module} spelling.
+        // `?? default` can reach Perceus as `Call { option.unwrap_or }` — the
+        // RuntimeCall arm alone left that form classified FRESH, so the
+        // refined inner-hoist dropped a load-bearing Inc and the map-owned
+        // payload double-freed at teardown (map_insertion_order, group_by +
+        // `?? []` extraction).
+        Call { target: almide_ir::CallTarget::Module { module, func, .. }, .. } => {
+            matches!(
+                (module.as_str(), func.as_str()),
+                ("option" | "result", "unwrap_or") | ("list" | "map", "get_or")
+            )
+        }
+
         // ── Tail-yielding forms: alias iff any tail can alias ──
         Match { arms, .. } => arms.iter().any(|a| yields_borrowed_alias(&a.body)),
         If { then, else_, .. } =>
@@ -773,6 +878,13 @@ pub(crate) fn yields_borrowed_alias(e: &IrExpr) -> bool {
 /// Block IR → FnBody chain → Perceus rules → FnBody → Block IR.
 fn insert_rc_ops(func: &mut IrFunction, var_table: &mut VarTable) -> bool {
     if func.is_test { return false; }
+
+    // TCO loops emit the self-tail-call as a nested block ending in
+    // continue/break; without flattening, scope-end Decs land AFTER the
+    // nested exit — unreachable dead code (a leak per iteration) that the
+    // flat verifier cannot see. Flatten first so the exits become block
+    // tails and Decs are emitted same-level, reachable, and counted.
+    flatten_exit_tail_blocks(&mut func.body);
 
     // Mechanism #6 — RETURN-ALIAS DUP: a function whose tail yields a
     // borrowed alias (a param, a pattern-bound payload, a member load …)

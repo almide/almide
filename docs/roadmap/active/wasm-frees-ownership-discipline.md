@@ -258,3 +258,38 @@ reset STAYS enabled under frees — it also papers over the known stored-field
 over-count inside reclaimed loops (2M churn back to flat ~13 MB; with the
 reset disabled the over-count leaked ~61 MB over 2M iterations, which is the
 measured size of the remaining Koka-precision work, not a regression).
+
+
+## Stage C COMPLETE (2026-06-11): per-iteration TCO reclamation
+
+The b8bbdfad M2 re-landed CLEANLY — its old free-list corruption was never
+M2's fault: the per-iteration loop REGION reset rolled back the bump pointer
+without clearing the free list (fixed in the v0.27.0 flip), and M2's Decs
+were the first thing feeding that list inside region loops. Re-applied on
+the Round-3 accounting plus three refinements:
+
+1. `is_fresh_alloc` extended to ownership-yielding CALL args: user fns
+   return owned (mechanism #6) and alias-shaped temps get the bind-level Inc
+   after the TCO rewrite turns args into VDecls — so call-valued self-call
+   args are adoption-safe and their params are managed (the literal-only
+   test left `spin(n-1, string.take(acc + "x", 8))` unmanaged = unbounded).
+2. The inner-hoist alias-Inc fires only when the tail temp's OWN VALUE
+   aliases — a fresh tail moved out of its block owns itself, and the
+   unconditional +1 was a measured 16 B/iteration leak in TCO loops.
+3. That refinement removed a LOAD-BEARING over-inc and exposed the real
+   hole underneath (the archaeology's predicted class): `?? default` can
+   reach Perceus as `Call { option.unwrap_or }` — the alias classifier only
+   knew the RuntimeCall spelling, so the Call form was treated FRESH and a
+   map-owned payload double-freed at teardown (caught by the byte gate in
+   minutes, map_insertion_order). The Call{Module} spelling of
+   unwrap_or/get_or is now alias-classified.
+
+Measurements: 2M-deep constant-size TCO recursion 4.27 GB → **7.3 MB flat**
+(new gate fixture `spec/churn/tco_deep_recursion_churn.almd`); 200k
+loop-variant TCO churn green; full bar green (corpus ×3 modes, byte gate
+67/67, churn, cargo). KNOWN LIMIT, documented not fixed: a MONOTONICALLY
+GROWING accumulator (`acc + "x"` kept whole) still peaks at the sum — every
+freed block is one unit smaller than the next request, so first-fit can
+never reuse it. That is an allocator-policy frontier (capacity growth /
+size classes), not an ownership bug; C-066's bounded-exception list shrinks
+to the construct-from-temp over-count outside reclaimed regions.
