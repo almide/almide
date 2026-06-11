@@ -28,6 +28,13 @@ impl FuncCompiler<'_> {
         if let Some(&entry) = self.emitter.top_let_globals.get(&id.0) {
             return Some(entry);
         }
+        // §4 Stage 2: alias-resolve a synthetic cross-module use-site id to
+        // its declaration id — VarId-keyed, no name reconstruction.
+        if let Some(decl) = self.emitter.global_alias.get(&id.0) {
+            if let Some(&entry) = self.emitter.top_let_globals.get(decl) {
+                return Some(entry);
+            }
+        }
         if (id.0 as usize) < self.var_table.len() {
             let vi = self.var_table.get(id);
             if let Some(origin) = vi.module_origin.as_deref() {

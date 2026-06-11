@@ -328,7 +328,10 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
     // abortable lazy top-lets to force at startup (wasm-eager parity).
     let is_rust_plain_main_with_forces = matches!(ctx.target, Target::Rust)
         && func.name.as_str() == "main" && !func.is_effect && !func.is_test
-        && !ctx.ann.eager_force_top_lets.is_empty();
+        && ctx.ann.global_init_order.iter().any(|v| matches!(
+            ctx.ann.globals.get(v).map(|i| i.storage),
+            Some(almide_ir::top_let_storage::TopLetStorage::Lazy { eager_force: true })
+        ));
 
     // Sanitize function name: spaces/dots/hyphens → underscores.
     // Test blocks already carry `TEST_NAME_PREFIX` from lowering so they
@@ -386,8 +389,10 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
     // Both wrapper shapes first FORCE the abortable lazy top-lets in declaration
     // order, so an aborting initializer (integer `/`/`%`) fires at startup —
     // byte-identical to wasm's eager top-let evaluation in `_start`.
-    let force_lines: String = ctx.ann.eager_force_top_lets.iter()
-        .map(|name| format!("    std::sync::LazyLock::force(&{});\n", name))
+    let force_lines: String = ctx.ann.global_init_order.iter()
+        .filter_map(|v| ctx.ann.globals.get(v))
+        .filter(|i| matches!(i.storage, almide_ir::top_let_storage::TopLetStorage::Lazy { eager_force: true }))
+        .map(|i| format!("    std::sync::LazyLock::force(&{});\n", i.static_name))
         .collect();
     let fn_code = if is_rust_effect_main {
         format!("{}\n\nfn main() {{\n{}    if let Err(__almide_err) = __almide_main() {{\n        eprintln!(\"Error: {{}}\", __almide_err);\n        std::process::exit(1);\n    }}\n}}", fn_code, force_lines)
@@ -853,33 +858,32 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
         parts.push(rendered);
     }
 
-    // Top-level lets and vars
+    // Top-level lets and vars — §4 Stage 2: the declaration consumes the
+    // SAME GlobalInfo every reference site dispatches on (storage class and
+    // static name decided once, in the attribute pass). The former
+    // `lazy_vars` mid-emission write is gone — no reader remains.
     for tl in &program.top_lets {
-        let raw_name = ctx.var_table.get(tl.var).name.clone();
         let ty_str = render_type_fn(&ctx, &tl.ty);
         let val_str = render_expr_fn(&ctx, &tl.value);
-        if matches!(tl.kind, TopLetKind::Lazy) {
-            ctx.ann.lazy_vars.insert(tl.var);
-        }
-        // Emit-time prefix from module_origin
-        let var_info = ctx.var_table.get(tl.var);
-        let name_upper = if let Some(ref origin) = var_info.module_origin {
-            format!("ALMIDE_RT_{}_{}", origin.to_uppercase(), raw_name.as_str().to_uppercase())
-        } else {
-            raw_name.to_uppercase()
-        };
-        let name = raw_name;
-        let mut rendered = if tl.mutable && matches!(tl.ty, Ty::Int | Ty::Float | Ty::Bool) {
-            format!("thread_local! {{ static {}: std::cell::Cell<{}> = std::cell::Cell::new({}); }}", name_upper, ty_str, val_str)
-        } else if tl.mutable {
-            format!("thread_local! {{ static {}: std::cell::RefCell<std::rc::Rc<{}>> = std::cell::RefCell::new(std::rc::Rc::new({})); }}", name_upper, ty_str, val_str)
-        } else {
-            let construct = match tl.kind {
-                TopLetKind::Const => "top_let_const",
-                TopLetKind::Lazy => "top_let_lazy",
-            };
-            ctx.templates.render_with(construct, None, &[], &[("name", name_upper.as_str()), ("type", ty_str.as_str()), ("value", val_str.as_str())])
-                .unwrap_or_else(|| format!("const {} = {};", name, val_str))
+        let info = ctx.ann.globals.get(&tl.var).unwrap_or_else(|| panic!(
+            "[COMPILER BUG] top-let `{}` missing from the storage attribute",
+            ctx.var_table.get(tl.var).name.as_str()
+        ));
+        use almide_ir::top_let_storage::TopLetStorage as Tls;
+        let name_upper = info.static_name.as_str();
+        let mut rendered = match info.storage {
+            Tls::Cell =>
+                format!("thread_local! {{ static {}: std::cell::Cell<{}> = std::cell::Cell::new({}); }}", name_upper, ty_str, val_str),
+            Tls::RcRefCell =>
+                format!("thread_local! {{ static {}: std::cell::RefCell<std::rc::Rc<{}>> = std::cell::RefCell::new(std::rc::Rc::new({})); }}", name_upper, ty_str, val_str),
+            Tls::Const | Tls::Lazy { .. } => {
+                let construct = match info.storage {
+                    Tls::Const => "top_let_const",
+                    _ => "top_let_lazy",
+                };
+                ctx.templates.render_with(construct, None, &[], &[("name", name_upper), ("type", ty_str.as_str()), ("value", val_str.as_str())])
+                    .unwrap_or_else(|| format!("const {} = {};", name_upper, val_str))
+            }
         };
         if let Some(ref doc) = tl.doc {
             let doc_lines: String = doc.lines()
