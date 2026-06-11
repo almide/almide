@@ -33,7 +33,7 @@ impl FuncCompiler<'_> {
 
                 // Allocate fd_out (4 bytes) via bump allocator
                 wasm!(self.func, {
-                    i32_const(4); call(self.emitter.rt.alloc); local_set(fd_out_ptr);
+                    i32_const(4); call(self.emitter.rt.alloc_pinned); local_set(fd_out_ptr);
                 });
 
                 // path_open(resolved_fd, dirflags=0, path_ptr, path_len, oflags=0,
@@ -76,7 +76,7 @@ impl FuncCompiler<'_> {
 
                 // fd_filestat_get(fd, stat_buf) — stat_buf needs 64 bytes (allocator guarantees 8-byte alignment)
                 wasm!(self.func, {
-                    i32_const(64); call(self.emitter.rt.alloc); local_set(stat_buf);
+                    i32_const(64); call(self.emitter.rt.alloc_pinned); local_set(stat_buf);
                     local_get(opened_fd);
                     local_get(stat_buf);
                     call(self.emitter.rt.fd_filestat_get);
@@ -90,19 +90,19 @@ impl FuncCompiler<'_> {
 
                 // Allocate buffer for file data
                 wasm!(self.func, {
-                    local_get(file_size); call(self.emitter.rt.alloc); local_set(data_buf);
+                    local_get(file_size); call(self.emitter.rt.alloc_pinned); local_set(data_buf);
                 });
 
                 // Build iov struct: [buf_ptr:i32, buf_len:i32]
                 wasm!(self.func, {
-                    i32_const(8); call(self.emitter.rt.alloc); local_set(iov_ptr);
+                    i32_const(8); call(self.emitter.rt.alloc_pinned); local_set(iov_ptr);
                     local_get(iov_ptr); local_get(data_buf); i32_store(0);
                     local_get(iov_ptr); local_get(file_size); i32_store(4);
                 });
 
                 // nread_ptr
                 wasm!(self.func, {
-                    i32_const(4); call(self.emitter.rt.alloc); local_set(nread_ptr);
+                    i32_const(4); call(self.emitter.rt.alloc_pinned); local_set(nread_ptr);
                 });
 
                 // fd_read(fd, iov_ptr, 1, nread_ptr)
@@ -197,7 +197,7 @@ impl FuncCompiler<'_> {
 
                 // Allocate fd_out
                 wasm!(self.func, {
-                    i32_const(4); call(self.emitter.rt.alloc); local_set(fd_out_ptr);
+                    i32_const(4); call(self.emitter.rt.alloc_pinned); local_set(fd_out_ptr);
                 });
 
                 // path_open(resolved_fd, dirflags=0, path_ptr, path_len,
@@ -240,14 +240,14 @@ impl FuncCompiler<'_> {
 
                 // Build iov: [content_ptr+4, content_len]
                 wasm!(self.func, {
-                    i32_const(8); call(self.emitter.rt.alloc); local_set(iov_ptr);
+                    i32_const(8); call(self.emitter.rt.alloc_pinned); local_set(iov_ptr);
                     local_get(iov_ptr); local_get(content_str); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; i32_store(0);
                     local_get(iov_ptr); local_get(content_str); i32_load(0); i32_store(4);
                 });
 
                 // nwritten_ptr
                 wasm!(self.func, {
-                    i32_const(4); call(self.emitter.rt.alloc); local_set(nwritten_ptr);
+                    i32_const(4); call(self.emitter.rt.alloc_pinned); local_set(nwritten_ptr);
                 });
 
                 // fd_write(fd, iov_ptr, 1, nwritten_ptr)
@@ -302,7 +302,7 @@ impl FuncCompiler<'_> {
 
                 // Allocate 64-byte stat buffer (allocator guarantees 8-byte alignment)
                 wasm!(self.func, {
-                    i32_const(64); call(self.emitter.rt.alloc); local_set(stat_buf);
+                    i32_const(64); call(self.emitter.rt.alloc_pinned); local_set(stat_buf);
                 });
 
                 // path_filestat_get(resolved_fd, flags=0, path_ptr, path_len, stat_buf)
@@ -346,7 +346,7 @@ impl FuncCompiler<'_> {
                 self.emit_fs_resolve_path(path_str, path_ptr, path_len, resolved_fd);
 
                 wasm!(self.func, {
-                    i32_const(4); call(self.emitter.rt.alloc); local_set(fd_out_ptr);
+                    i32_const(4); call(self.emitter.rt.alloc_pinned); local_set(fd_out_ptr);
                 });
 
                 // path_open for reading
@@ -375,7 +375,7 @@ impl FuncCompiler<'_> {
                 // stat for file size
                 wasm!(self.func, {
                     local_get(fd_out_ptr); i32_load(0); local_set(opened_fd);
-                    i32_const(64); call(self.emitter.rt.alloc); local_set(stat_buf);
+                    i32_const(64); call(self.emitter.rt.alloc_pinned); local_set(stat_buf);
                     local_get(opened_fd); local_get(stat_buf);
                     call(self.emitter.rt.fd_filestat_get); drop;
                     local_get(stat_buf); i32_const(32); i32_add; i32_load(0); local_set(file_size);
@@ -383,11 +383,11 @@ impl FuncCompiler<'_> {
 
                 // Read raw bytes
                 wasm!(self.func, {
-                    local_get(file_size); call(self.emitter.rt.alloc); local_set(data_buf);
-                    i32_const(8); call(self.emitter.rt.alloc); local_set(iov_ptr);
+                    local_get(file_size); call(self.emitter.rt.alloc_pinned); local_set(data_buf);
+                    i32_const(8); call(self.emitter.rt.alloc_pinned); local_set(iov_ptr);
                     local_get(iov_ptr); local_get(data_buf); i32_store(0);
                     local_get(iov_ptr); local_get(file_size); i32_store(4);
-                    i32_const(4); call(self.emitter.rt.alloc); local_set(nread_ptr);
+                    i32_const(4); call(self.emitter.rt.alloc_pinned); local_set(nread_ptr);
                     local_get(opened_fd); local_get(iov_ptr); i32_const(1); local_get(nread_ptr);
                     call(self.emitter.rt.fd_read); drop;
                     local_get(opened_fd); call(self.emitter.rt.fd_close); drop;
@@ -468,7 +468,7 @@ impl FuncCompiler<'_> {
                 // Convert List[Int] (i64 elements) to byte buffer
                 wasm!(self.func, {
                     local_get(list_ptr); i32_load(0); local_set(count);
-                    local_get(count); call(self.emitter.rt.alloc); local_set(byte_buf);
+                    local_get(count); call(self.emitter.rt.alloc_pinned); local_set(byte_buf);
                     i32_const(0); local_set(counter);
                     block_empty; loop_empty;
                     local_get(counter); local_get(count); i32_ge_u; br_if(1);
@@ -483,7 +483,7 @@ impl FuncCompiler<'_> {
                 });
 
                 wasm!(self.func, {
-                    i32_const(4); call(self.emitter.rt.alloc); local_set(fd_out_ptr);
+                    i32_const(4); call(self.emitter.rt.alloc_pinned); local_set(fd_out_ptr);
                 });
 
                 // path_open for writing (O_CREAT|O_TRUNC=9)
@@ -511,10 +511,10 @@ impl FuncCompiler<'_> {
 
                 wasm!(self.func, {
                     local_get(fd_out_ptr); i32_load(0); local_set(opened_fd);
-                    i32_const(8); call(self.emitter.rt.alloc); local_set(iov_ptr);
+                    i32_const(8); call(self.emitter.rt.alloc_pinned); local_set(iov_ptr);
                     local_get(iov_ptr); local_get(byte_buf); i32_store(0);
                     local_get(iov_ptr); local_get(count); i32_store(4);
-                    i32_const(4); call(self.emitter.rt.alloc); local_set(nwritten_ptr);
+                    i32_const(4); call(self.emitter.rt.alloc_pinned); local_set(nwritten_ptr);
                     local_get(opened_fd); local_get(iov_ptr); i32_const(1); local_get(nwritten_ptr);
                     call(self.emitter.rt.fd_write); drop;
                     local_get(opened_fd); call(self.emitter.rt.fd_close); drop;
@@ -566,7 +566,7 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, { local_set(content_str); });
 
                 wasm!(self.func, {
-                    i32_const(4); call(self.emitter.rt.alloc); local_set(fd_out_ptr);
+                    i32_const(4); call(self.emitter.rt.alloc_pinned); local_set(fd_out_ptr);
                 });
 
                 // path_open: oflags=O_CREAT(1), rights=fd_write(64), fdflags=APPEND(1)
@@ -596,10 +596,10 @@ impl FuncCompiler<'_> {
 
                 wasm!(self.func, {
                     local_get(fd_out_ptr); i32_load(0); local_set(opened_fd);
-                    i32_const(8); call(self.emitter.rt.alloc); local_set(iov_ptr);
+                    i32_const(8); call(self.emitter.rt.alloc_pinned); local_set(iov_ptr);
                     local_get(iov_ptr); local_get(content_str); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add; i32_store(0);
                     local_get(iov_ptr); local_get(content_str); i32_load(0); i32_store(4);
-                    i32_const(4); call(self.emitter.rt.alloc); local_set(nwritten_ptr);
+                    i32_const(4); call(self.emitter.rt.alloc_pinned); local_set(nwritten_ptr);
                     local_get(opened_fd); local_get(iov_ptr); i32_const(1); local_get(nwritten_ptr);
                     call(self.emitter.rt.fd_write); drop;
                     local_get(opened_fd); call(self.emitter.rt.fd_close); drop;
@@ -768,7 +768,7 @@ impl FuncCompiler<'_> {
                 self.emit_fs_resolve_path(path_str, path_ptr, path_len, resolved_fd);
 
                 wasm!(self.func, {
-                    i32_const(4); call(self.emitter.rt.alloc); local_set(fd_out_ptr);
+                    i32_const(4); call(self.emitter.rt.alloc_pinned); local_set(fd_out_ptr);
                 });
 
                 // path_open for directory: dirflags=1(symlink follow), oflags=O_DIRECTORY(2)
@@ -804,8 +804,8 @@ impl FuncCompiler<'_> {
 
                 // Allocate readdir buffer (4KB) and bufused output
                 wasm!(self.func, {
-                    i32_const(4096); call(self.emitter.rt.alloc); local_set(dir_buf);
-                    i32_const(4); call(self.emitter.rt.alloc); local_set(bufused_ptr);
+                    i32_const(4096); call(self.emitter.rt.alloc_pinned); local_set(dir_buf);
+                    i32_const(4); call(self.emitter.rt.alloc_pinned); local_set(bufused_ptr);
                 });
 
                 // fd_readdir(fd, buf, buf_len, cookie=0, bufused_ptr)
@@ -972,7 +972,7 @@ impl FuncCompiler<'_> {
                 self.emit_fs_resolve_path(path_str, path_ptr, path_len, resolved_fd);
 
                 wasm!(self.func, {
-                    i32_const(64); call(self.emitter.rt.alloc); local_set(stat_buf);
+                    i32_const(64); call(self.emitter.rt.alloc_pinned); local_set(stat_buf);
                     // flags=0: do NOT follow symlinks
                     local_get(resolved_fd); i32_const(0);
                     local_get(path_ptr); local_get(path_len);
@@ -1025,7 +1025,7 @@ impl FuncCompiler<'_> {
                 self.emit_fs_resolve_path(dst_str, dst_ptr, dst_len, dst_resolved_fd);
 
                 wasm!(self.func, {
-                    i32_const(4); call(self.emitter.rt.alloc); local_set(fd_out_ptr);
+                    i32_const(4); call(self.emitter.rt.alloc_pinned); local_set(fd_out_ptr);
                 });
 
                 // Open source for reading
@@ -1054,15 +1054,15 @@ impl FuncCompiler<'_> {
                 // Read source content
                 wasm!(self.func, {
                     local_get(fd_out_ptr); i32_load(0); local_set(opened_fd);
-                    i32_const(64); call(self.emitter.rt.alloc); local_set(stat_buf);
+                    i32_const(64); call(self.emitter.rt.alloc_pinned); local_set(stat_buf);
                     local_get(opened_fd); local_get(stat_buf);
                     call(self.emitter.rt.fd_filestat_get); drop;
                     local_get(stat_buf); i32_const(32); i32_add; i32_load(0); local_set(file_size);
-                    local_get(file_size); call(self.emitter.rt.alloc); local_set(data_buf);
-                    i32_const(8); call(self.emitter.rt.alloc); local_set(iov_ptr);
+                    local_get(file_size); call(self.emitter.rt.alloc_pinned); local_set(data_buf);
+                    i32_const(8); call(self.emitter.rt.alloc_pinned); local_set(iov_ptr);
                     local_get(iov_ptr); local_get(data_buf); i32_store(0);
                     local_get(iov_ptr); local_get(file_size); i32_store(4);
-                    i32_const(4); call(self.emitter.rt.alloc); local_set(nrw_ptr);
+                    i32_const(4); call(self.emitter.rt.alloc_pinned); local_set(nrw_ptr);
                     local_get(opened_fd); local_get(iov_ptr); i32_const(1); local_get(nrw_ptr);
                     call(self.emitter.rt.fd_read); drop;
                     local_get(opened_fd); call(self.emitter.rt.fd_close); drop;
@@ -1324,7 +1324,7 @@ impl FuncCompiler<'_> {
                 self.emit_fs_resolve_path(path_str, path_ptr, path_len, resolved_fd);
 
                 wasm!(self.func, {
-                    i32_const(64); call(self.emitter.rt.alloc); local_set(stat_buf);
+                    i32_const(64); call(self.emitter.rt.alloc_pinned); local_set(stat_buf);
                     local_get(resolved_fd); i32_const(1);
                     local_get(path_ptr); local_get(path_len);
                     local_get(stat_buf);
@@ -1381,7 +1381,7 @@ impl FuncCompiler<'_> {
                 self.emit_fs_resolve_path(path_str, path_ptr, path_len, resolved_fd);
 
                 wasm!(self.func, {
-                    i32_const(64); call(self.emitter.rt.alloc); local_set(stat_buf);
+                    i32_const(64); call(self.emitter.rt.alloc_pinned); local_set(stat_buf);
                     local_get(resolved_fd); i32_const(1);
                     local_get(path_ptr); local_get(path_len);
                     local_get(stat_buf);
@@ -1437,7 +1437,7 @@ impl FuncCompiler<'_> {
                 self.emit_fs_resolve_path(path_str, path_ptr, path_len, resolved_fd);
 
                 wasm!(self.func, {
-                    i32_const(64); call(self.emitter.rt.alloc); local_set(stat_buf);
+                    i32_const(64); call(self.emitter.rt.alloc_pinned); local_set(stat_buf);
                     local_get(resolved_fd); i32_const(1);
                     local_get(path_ptr); local_get(path_len);
                     local_get(stat_buf);
@@ -1589,7 +1589,7 @@ impl FuncCompiler<'_> {
         self.emit_fs_resolve_path(path_str, path_ptr, path_len, resolved_fd);
 
         wasm!(self.func, {
-            i32_const(64); call(self.emitter.rt.alloc); local_set(stat_buf);
+            i32_const(64); call(self.emitter.rt.alloc_pinned); local_set(stat_buf);
             // flags=1 (follow symlinks) for is_dir/is_file
             local_get(resolved_fd); i32_const(1);
             local_get(path_ptr); local_get(path_len);
@@ -1666,7 +1666,7 @@ impl FuncCompiler<'_> {
         self.emit_fs_resolve_path(path_str, path_ptr, path_len, resolved_fd);
 
         wasm!(self.func, {
-            i32_const(4); call(self.emitter.rt.alloc); local_set(fd_out_ptr);
+            i32_const(4); call(self.emitter.rt.alloc_pinned); local_set(fd_out_ptr);
         });
 
         wasm!(self.func, {
@@ -1693,15 +1693,15 @@ impl FuncCompiler<'_> {
 
         wasm!(self.func, {
             local_get(fd_out_ptr); i32_load(0); local_set(opened_fd);
-            i32_const(64); call(self.emitter.rt.alloc); local_set(stat_buf);
+            i32_const(64); call(self.emitter.rt.alloc_pinned); local_set(stat_buf);
             local_get(opened_fd); local_get(stat_buf);
             call(self.emitter.rt.fd_filestat_get); drop;
             local_get(stat_buf); i32_const(32); i32_add; i32_load(0); local_set(file_size);
-            local_get(file_size); call(self.emitter.rt.alloc); local_set(data_buf);
-            i32_const(8); call(self.emitter.rt.alloc); local_set(iov_ptr); // iov struct [buf_ptr:i32, buf_len:i32]
+            local_get(file_size); call(self.emitter.rt.alloc_pinned); local_set(data_buf);
+            i32_const(8); call(self.emitter.rt.alloc_pinned); local_set(iov_ptr); // iov struct [buf_ptr:i32, buf_len:i32]
             local_get(iov_ptr); local_get(data_buf); i32_store(0);
             local_get(iov_ptr); local_get(file_size); i32_store(4);
-            i32_const(4); call(self.emitter.rt.alloc); local_set(nread_ptr);
+            i32_const(4); call(self.emitter.rt.alloc_pinned); local_set(nread_ptr);
             local_get(opened_fd); local_get(iov_ptr); i32_const(1); local_get(nread_ptr);
             call(self.emitter.rt.fd_read); drop;
             local_get(opened_fd); call(self.emitter.rt.fd_close); drop;
