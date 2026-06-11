@@ -809,3 +809,21 @@ fn nan_compare_is_false_not_abort() {
         "false false\n",
     );
 }
+
+// ── #561: huge ranges are fuel-bounded, never materialized ──
+
+#[test]
+fn huge_range_for_in_is_fuel_bounded_not_oom() {
+    // A 2-billion range with a SMALL fuel budget must terminate as
+    // FuelExhausted in O(fuel) steps and O(1) memory — the eager
+    // materialization used to allocate the whole range (tens of GB) and
+    // abort the process before the first fuel check.
+    let src = "fn main() -> Unit = {\n  var s = 0\n  for i in 0..2000000000 {\n    s = s + 1\n  }\n  println(\"${s}\")\n}";
+    let ir = lower(src);
+    let out = almide_interp::Interpreter::new(&ir).with_fuel(10_000).run_main();
+    assert!(
+        matches!(out.status, almide_interp::RunStatus::FuelExhausted),
+        "huge range must FuelExhaust, got {:?}",
+        out.status
+    );
+}

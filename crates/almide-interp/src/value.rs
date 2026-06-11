@@ -87,10 +87,19 @@ impl Value {
             Value::List(xs) => Some((**xs).clone()),
             Value::Set(xs) => Some((**xs).clone()),
             Value::Range { start, end, inclusive } => {
-                let mut out = Vec::new();
-                let mut i = *start;
+                // #561: defensive cap — for-in iterates ranges LAZILY
+                // (eval.rs::eval_for_in_range), so this materializing path is
+                // only reached by repr/eq of a Range, where a multi-billion
+                // range would OOM. Bound it; a range this large in a repr/eq
+                // position is degenerate and the interp (an abstaining oracle)
+                // need not be exact there.
+                const MAX_RANGE_MATERIALIZE: i64 = 16 * 1024 * 1024;
                 let last = if *inclusive { *end } else { *end - 1 };
-                while i <= last {
+                let count = (last - *start + 1).max(0).min(MAX_RANGE_MATERIALIZE);
+                let mut out = Vec::with_capacity(count as usize);
+                let mut i = *start;
+                let stop = *start + count;
+                while i < stop {
                     out.push(Value::Int(i));
                     i += 1;
                 }
