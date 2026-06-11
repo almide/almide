@@ -335,9 +335,9 @@ pub fn register_runtime_functions(emitter: &mut WasmEmitter) {
     // in releases for months and self-consistent enough to pass two-op
     // fixtures because __resolve_path read the table back through the SAME
     // stale index.
-    emitter.heap_ptr_global = 0;
-    emitter.preopen_table_global = 2;
-    emitter.preopen_count_global = 3;
+    emitter.heap_ptr_global = HEAP_PTR_GLOBAL_IDX;
+    emitter.preopen_table_global = PREOPEN_TABLE_GLOBAL_IDX;
+    emitter.preopen_count_global = PREOPEN_COUNT_GLOBAL_IDX;
 }
 
 /// Global index of the immutable `__heap_start` low-bound (see `next_global`
@@ -351,6 +351,15 @@ pub fn register_runtime_functions(emitter: &mut WasmEmitter) {
 /// Every runtime guard that needs the TRUE heap floor (rc_inc/rc_dec since the
 /// frees flip, `compile_cow_check`) uses THIS constant instead of that legacy
 /// field.
+/// THE wasm global index layout — the single source of truth. The emitted
+/// global section, the emitter struct initializers, and every runtime body
+/// derive from these. (The preopen pair was previously RE-DEFINED in three
+/// places; inserting FREE_LIST at index 1 updated two of them and the third
+/// wrote the preopen table pointer into the free-list head for months.)
+pub const HEAP_PTR_GLOBAL_IDX: u32 = 0;
+pub const FREE_LIST_GLOBAL_IDX: u32 = 1;
+pub const PREOPEN_TABLE_GLOBAL_IDX: u32 = 2;
+pub const PREOPEN_COUNT_GLOBAL_IDX: u32 = 3;
 pub const HEAP_START_GLOBAL_IDX: u32 = 4;
 
 /// Refcount sentinel for PINNED (immortal) blocks — host-written scratch the
