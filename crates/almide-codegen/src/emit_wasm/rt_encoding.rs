@@ -617,7 +617,7 @@ pub(super) fn compile_hex_decode(emitter: &mut WasmEmitter) {
         local_get(7);
         end;
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.hex_decode, type_idx, f));
 }
 
 fn emit_hex_char_to_nibble(f: &mut Function) {

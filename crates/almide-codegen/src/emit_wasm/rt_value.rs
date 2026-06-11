@@ -138,7 +138,7 @@ fn compile_json_escape_string(emitter: &mut WasmEmitter) {
     wasm!(f, { local_get(1); i32_const(cr_char as i32); i32_const(esc_cr as i32); call(replace); local_set(1); });
     wasm!(f, { local_get(1); end; });
 
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.json_escape_string, type_idx, f));
 }
 
 /// __value_stringify(v: i32) -> i32
@@ -295,7 +295,7 @@ fn compile_value_stringify(emitter: &mut WasmEmitter) {
     // Fallback
     wasm!(f, { i32_const(null_str as i32); end; });
 
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.value_stringify, type_idx, f));
 }
 
 /// __json_parse(s: i32) -> i32 (Result[Value, String])
@@ -325,7 +325,7 @@ fn compile_json_parse(emitter: &mut WasmEmitter) {
         end;
     });
 
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.json_parse, type_idx, f));
 
     compile_json_parse_at(emitter);
 }
@@ -1241,7 +1241,7 @@ fn compile_json_get_path(emitter: &mut WasmEmitter) {
         end;
     });
 
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.json_get_path, type_idx, f));
 }
 
 /// __json_set_path(value: i32, path: i32, new_val: i32) -> i32 (Result[Value, String])
@@ -1602,7 +1602,7 @@ fn compile_json_set_path(emitter: &mut WasmEmitter) {
         end;
     });
 
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.json_set_path, type_idx, f));
 }
 
 /// __json_remove_path(value: i32, path: i32) -> i32 (Value)
@@ -1929,5 +1929,5 @@ fn compile_json_remove_path(emitter: &mut WasmEmitter) {
         end;
     });
 
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.json_remove_path, type_idx, f));
 }

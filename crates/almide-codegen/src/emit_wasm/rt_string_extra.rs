@@ -33,7 +33,7 @@ pub(super) fn compile_replace_first(emitter: &mut WasmEmitter) {
         end;
         end;
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.string.replace_first, type_idx, f));
 }
 
 pub(super) fn compile_last_index_of(emitter: &mut WasmEmitter) {
@@ -69,7 +69,7 @@ pub(super) fn compile_last_index_of(emitter: &mut WasmEmitter) {
         end;
         end;
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.string.last_index_of, type_idx, f));
 }
 
 pub(super) fn compile_strip_prefix(emitter: &mut WasmEmitter) {
@@ -100,7 +100,7 @@ pub(super) fn compile_strip_prefix(emitter: &mut WasmEmitter) {
         end;
         end;
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.string.strip_prefix, type_idx, f));
 }
 
 pub(super) fn compile_strip_suffix(emitter: &mut WasmEmitter) {
@@ -130,7 +130,7 @@ pub(super) fn compile_strip_suffix(emitter: &mut WasmEmitter) {
         end;
         end;
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.string.strip_suffix, type_idx, f));
 }
 
 // ── Predicates ──
@@ -436,5 +436,5 @@ pub(super) fn compile_cmp(emitter: &mut WasmEmitter) {
     f.instruction(&LocalGet(1)).instruction(&I32Load(mem0));
     f.instruction(&I32Sub);
     f.instruction(&End);
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.string.cmp, type_idx, f));
 }

@@ -221,7 +221,7 @@ pub(super) fn compile_int_from_hex(emitter: &mut WasmEmitter) {
         end;
     });
 
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.int_from_hex, type_idx, f));
 }
 
 /// __float_parse(s: i32) -> i32
@@ -540,7 +540,7 @@ pub(super) fn compile_float_parse(emitter: &mut WasmEmitter) {
         end;
     });
 
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.float_parse, type_idx, f));
 }
 
 /// Push 1 if `data[i..end]` (i in `i_local`, end in `end_local`, base in
@@ -623,7 +623,7 @@ pub(super) fn compile_float_pow(emitter: &mut WasmEmitter) {
         local_get(0); local_get(1); call(libm_pow);
         end;
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.float_pow, type_idx, f));
 }
 
 /// __math_sin(x: f64) -> f64
@@ -676,7 +676,7 @@ pub(super) fn compile_math_sin(emitter: &mut WasmEmitter) {
         end;
         end;
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.math_sin, type_idx, f));
 }
 
 /// __math_cos(x: f64) -> f64
@@ -726,7 +726,7 @@ pub(super) fn compile_math_cos(emitter: &mut WasmEmitter) {
         end;
         end;
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.math_cos, type_idx, f));
 }
 
 /// __math_tan(x: f64) -> f64
@@ -757,7 +757,7 @@ pub(super) fn compile_math_tan(emitter: &mut WasmEmitter) {
         local_get(4); local_get(5); local_get(2); i32_const(1); i32_and; call(k_tan);
         end;
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.math_tan, type_idx, f));
 }
 
 /// __math_log(x: f64) -> f64 — natural logarithm.
@@ -774,7 +774,7 @@ pub(super) fn compile_math_log(emitter: &mut WasmEmitter) {
         local_get(0); call(libm_log);
         end;
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.math_log, type_idx, f));
 }
 
 /// __math_log10(x: f64) -> f64 — common logarithm.
@@ -789,7 +789,7 @@ pub(super) fn compile_math_log10(emitter: &mut WasmEmitter) {
         local_get(0); call(libm_log10);
         end;
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.math_log10, type_idx, f));
 }
 
 /// __math_log2(x: f64) -> f64 — binary logarithm.
@@ -803,7 +803,7 @@ pub(super) fn compile_math_log2(emitter: &mut WasmEmitter) {
         local_get(0); call(libm_log2);
         end;
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.math_log2, type_idx, f));
 }
 
 /// __math_exp(x: f64) -> f64 — e^x.
@@ -820,5 +820,5 @@ pub(super) fn compile_math_exp(emitter: &mut WasmEmitter) {
         local_get(0); call(libm_exp);
         end;
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.math_exp, type_idx, f));
 }

@@ -270,7 +270,7 @@ fn compile_utf8_width(emitter: &mut WasmEmitter) {
         end;
         end;
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.string.utf8_width, type_idx, f));
 }
 
 /// `utf8_scalar(s, byte_i) -> i64`. Decodes the Unicode scalar at data offset
@@ -317,7 +317,7 @@ fn compile_utf8_scalar(emitter: &mut WasmEmitter) {
         end;
         end;
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.string.utf8_scalar, type_idx, f));
 }
 
 /// `utf8_snap(s, byte_i) -> i32`. Rounds `byte_i` DOWN to the nearest UTF-8
@@ -346,7 +346,7 @@ fn compile_utf8_snap(emitter: &mut WasmEmitter) {
         local_get(3);
         end;
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.string.utf8_snap, type_idx, f));
 }
 
 /// `utf8_byte_of_cp(s, n) -> i32`. Walks `n` codepoints from the start and
@@ -374,7 +374,7 @@ fn compile_utf8_byte_of_cp(emitter: &mut WasmEmitter) {
         local_get(3);
         end;
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.string.utf8_byte_of_cp, type_idx, f));
 }
 
 /// Count UTF-8 code points in a string (pointer to `[len:i32][bytes...]`).
@@ -406,7 +406,7 @@ fn compile_char_count(emitter: &mut WasmEmitter) {
         local_get(3); i64_extend_i32_u;
         end;
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.string.char_count, type_idx, f));
 }
 
 /// `cp_of_byte(s, byte) -> i64`. Codepoint index of byte offset `byte`:
@@ -441,7 +441,7 @@ fn compile_cp_of_byte(emitter: &mut WasmEmitter) {
         local_get(4); i64_extend_i32_u;
         end;
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.string.cp_of_byte, type_idx, f));
 }
 
 // ── Core ──
@@ -475,7 +475,7 @@ fn compile_eq(emitter: &mut WasmEmitter) {
         end; end;
     });
     wasm!(f, { i32_const(0); end; });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.string.eq, type_idx, f));
 }
 
 fn compile_contains(emitter: &mut WasmEmitter) {
@@ -508,7 +508,7 @@ fn compile_contains(emitter: &mut WasmEmitter) {
         end; end;
         i32_const(0); end;
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.string.contains, type_idx, f));
 }
 
 /// The Unicode `White_Space` codepoint ranges, derived AT EMIT TIME from Rust
@@ -619,7 +619,7 @@ fn compile_is_unicode_ws(emitter: &mut WasmEmitter) {
         }
     }
     wasm!(f, { end; });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.string.is_unicode_ws, type_idx, f));
 }
 
 /// Emit a forward codepoint loop that advances `pos_local` past leading
@@ -687,7 +687,7 @@ fn compile_trim(emitter: &mut WasmEmitter) {
         call(emitter.rt.string.slice);
         end;
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.string.trim, type_idx, f));
 }
 
 // ── Slice / transform ──
@@ -709,7 +709,7 @@ fn compile_slice(emitter: &mut WasmEmitter) {
         end; end;
         local_get(3); end;
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.string.slice, type_idx, f));
 }
 
 /// reverse(s): reverse by CODEPOINT. Each codepoint's bytes are copied in
@@ -745,7 +745,7 @@ fn compile_reverse(emitter: &mut WasmEmitter) {
         end; end;
         local_get(2); end;
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.string.reverse, type_idx, f));
 }
 
 fn compile_repeat(emitter: &mut WasmEmitter) {
@@ -766,7 +766,7 @@ fn compile_repeat(emitter: &mut WasmEmitter) {
         end; end;
         local_get(3); end;
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.string.repeat, type_idx, f));
 }
 
 fn compile_index_of(emitter: &mut WasmEmitter) {
@@ -802,7 +802,7 @@ fn compile_index_of(emitter: &mut WasmEmitter) {
         end; end;
         i64_const(-1); end;
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.string.index_of, type_idx, f));
 }
 
 fn compile_replace(emitter: &mut WasmEmitter) {
@@ -829,7 +829,7 @@ fn compile_replace(emitter: &mut WasmEmitter) {
         end;
         end;
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.string.replace, type_idx, f));
 }
 
 /// Recursive split using index_of. Supports multi-char delimiter.
@@ -930,7 +930,7 @@ fn compile_split(emitter: &mut WasmEmitter) {
         end;
         end;
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.string.split, type_idx, f));
 }
 
 fn compile_join(emitter: &mut WasmEmitter) {
@@ -971,7 +971,7 @@ fn compile_join(emitter: &mut WasmEmitter) {
         end;
         end;
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.string.join, type_idx, f));
 }
 
 fn compile_count(emitter: &mut WasmEmitter) {
@@ -1003,7 +1003,7 @@ fn compile_count(emitter: &mut WasmEmitter) {
         end;
         end;
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.string.count, type_idx, f));
 }
 
 // ── Padding / trimming ──
@@ -1048,7 +1048,7 @@ fn compile_pad_start(emitter: &mut WasmEmitter) {
         end;
         end;
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.string.pad_start, type_idx, f));
 }
 
 /// pad_end(s, width, pad): like pad_start but appended.
@@ -1069,7 +1069,7 @@ fn compile_pad_end(emitter: &mut WasmEmitter) {
         end;
         end;
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.string.pad_end, type_idx, f));
 }
 
 fn compile_trim_start(emitter: &mut WasmEmitter) {
@@ -1088,7 +1088,7 @@ fn compile_trim_start(emitter: &mut WasmEmitter) {
         call(emitter.rt.string.slice);
         end;
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.string.trim_start, type_idx, f));
 }
 
 fn compile_trim_end(emitter: &mut WasmEmitter) {
@@ -1108,7 +1108,7 @@ fn compile_trim_end(emitter: &mut WasmEmitter) {
         call(emitter.rt.string.slice);
         end;
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.string.trim_end, type_idx, f));
 }
 
 // ── Case transform ──
@@ -1124,7 +1124,7 @@ fn compile_to_upper(emitter: &mut WasmEmitter) {
     let map = emitter.rt.string.str_case_map;
     let mut f = Function::new([]);
     wasm!(f, { local_get(0); i32_const(1); call(map); end; });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.string.to_upper, type_idx, f));
 }
 
 fn compile_to_lower(emitter: &mut WasmEmitter) {
@@ -1132,7 +1132,7 @@ fn compile_to_lower(emitter: &mut WasmEmitter) {
     let map = emitter.rt.string.str_case_map;
     let mut f = Function::new([]);
     wasm!(f, { local_get(0); i32_const(0); call(map); end; });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.string.to_lower, type_idx, f));
 }
 
 // ── Decompose ──
@@ -1175,7 +1175,7 @@ fn compile_chars(emitter: &mut WasmEmitter) {
         local_get(2); local_get(6); i32_store(0);                // result.len = j
         local_get(2); end;
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.string.chars, type_idx, f));
 }
 
 /// run_length_encode(s) -> List[(String, Int)].
@@ -1253,7 +1253,7 @@ fn compile_run_length_encode(emitter: &mut WasmEmitter) {
         end; end;
         local_get(5); end;
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.string.run_length_encode, type_idx, f));
 }
 
 fn compile_lines(emitter: &mut WasmEmitter) {
@@ -1275,7 +1275,7 @@ fn compile_lines(emitter: &mut WasmEmitter) {
         end;
         end;
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.string.lines, type_idx, f));
 }
 
 /// U+FFFD REPLACEMENT CHARACTER — `from_utf8_lossy` emits one per maximal invalid
@@ -1405,7 +1405,7 @@ fn compile_utf8_classify(emitter: &mut WasmEmitter) {
         i32_or;
         end;
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.string.utf8_classify, type_idx, f));
 }
 
 /// `from_bytes(list) -> String`: UTF-8-lossy decode of the byte list (each element
@@ -1481,7 +1481,7 @@ fn compile_from_bytes(emitter: &mut WasmEmitter) {
         end; end;
         local_get(OUT); end;
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.string.from_bytes, type_idx, f));
 }
 
 fn compile_to_bytes(emitter: &mut WasmEmitter) {
@@ -1503,7 +1503,7 @@ fn compile_to_bytes(emitter: &mut WasmEmitter) {
         end; end;
         local_get(2); end;
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.string.to_bytes, type_idx, f));
 }
 
 // ── Full-Unicode case folding ──
@@ -1552,7 +1552,7 @@ fn compile_utf8_emit_scalar(emitter: &mut WasmEmitter) {
         end;
         end;
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.string.utf8_emit_scalar, type_idx, f));
 }
 
 /// `__case_map_lookup(map_sel, scalar) -> i32`. Binary-search the UPPER(0)/LOWER(1)
@@ -1600,7 +1600,7 @@ fn compile_case_map_lookup(emitter: &mut WasmEmitter) {
     } else {
         wasm!(f, { i32_const(-1); end; });
     }
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.string.case_map_lookup, type_idx, f));
 }
 
 /// `__set_member(set_sel, scalar) -> i32`. 1 iff `scalar` is in the CASED(0) /
@@ -1642,7 +1642,7 @@ fn compile_set_member(emitter: &mut WasmEmitter) {
     } else {
         wasm!(f, { i32_const(0); end; });
     }
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.string.set_member, type_idx, f));
 }
 
 /// `__final_sigma(s, byte_off) -> i32`. The Unicode `Final_Sigma` rule for a Σ at
@@ -1713,7 +1713,7 @@ fn compile_final_sigma(emitter: &mut WasmEmitter) {
         if_i32; i32_const(0x03C2); else_; i32_const(0x03C3); end;
         end;
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.string.final_sigma, type_idx, f));
 }
 
 /// `__str_case_map(s, is_upper) -> i32`. The unified two-pass case driver, exact
@@ -1822,7 +1822,7 @@ fn compile_str_case_map(emitter: &mut WasmEmitter) {
         end; end;
         local_get(9); end;
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.string.str_case_map, type_idx, f));
 }
 
 /// `__str_capitalize(s) -> i32`. First scalar uppercased (`char::to_uppercase` —
@@ -1888,6 +1888,6 @@ fn compile_str_capitalize(emitter: &mut WasmEmitter) {
         memory_copy;
         local_get(9); end;
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.string.capitalize, type_idx, f));
 }
 

@@ -147,13 +147,27 @@ pub struct CompiledFunc {
     /// Patched raw body bytes (set by data section DCE). If Some, used
     /// instead of `func` during assembly to reflect compacted data offsets.
     pub patched_body: Option<Vec<u8>>,
+    /// The REGISTERED function index this body belongs to (#526). When set,
+    /// `add_compiled` asserts the body lands at exactly that position —
+    /// converting the "compile order mirrors registration order" CONVENTION
+    /// (held across ~157 runtime routines, where a same-signature swap binds
+    /// the wrong body to a name and validates cleanly) into an invariant.
+    pub expected_func_idx: Option<u32>,
 }
 
 impl CompiledFunc {
     /// Construct from a TrackedFunction. This is the ONLY constructor —
     /// enforces that call_targets is always populated.
     pub fn tracked(type_idx: u32, tf: TrackedFunction) -> Self {
-        Self { type_idx, func: tf.inner, call_targets: tf.call_targets, patched_body: None }
+        Self { type_idx, func: tf.inner, call_targets: tf.call_targets, patched_body: None, expected_func_idx: None }
+    }
+
+    /// `tracked` + the registered function index this body is FOR. Prefer
+    /// this in every compile_* that knows its `emitter.rt.*` slot.
+    pub fn tracked_for(func_idx: u32, type_idx: u32, tf: TrackedFunction) -> Self {
+        let mut c = Self::tracked(type_idx, tf);
+        c.expected_func_idx = Some(func_idx);
+        c
     }
 }
 
@@ -645,7 +659,7 @@ impl WasmEmitter {
             def_globals: HashMap::new(),
             top_let_globals_by_name: HashMap::new(),
             top_let_init: Vec::new(),
-            next_global: 5, // 0=heap_ptr, 1=free_list, 2=preopen_table, 3=preopen_count, 4=heap_start
+            next_global: runtime::HEAP_START_GLOBAL_IDX + 1, // fixed globals end at HEAP_START
             func_table: Vec::new(),
             func_to_table_idx: HashMap::new(),
             record_fields: BTreeMap::new(),
@@ -697,6 +711,16 @@ impl WasmEmitter {
 
     /// Add a compiled function body.
     pub fn add_compiled(&mut self, compiled: CompiledFunc) {
+        if let Some(expected) = compiled.expected_func_idx {
+            let landing = self.num_imports + self.compiled.len() as u32;
+            assert_eq!(
+                landing, expected,
+                "[ICE] compiled body for registered func {} landing at index {} — \
+                 registration and compile order diverged (#526); a same-signature \
+                 neighbor swap binds the wrong body to a name and validates cleanly",
+                expected, landing
+            );
+        }
         self.compiled.push(compiled);
     }
 
@@ -1891,7 +1915,19 @@ fn assemble(emitter: &mut WasmEmitter) -> Vec<u8> {
     );
     emitter.rt.heap_start_global = runtime::HEAP_START_GLOBAL_IDX;
 
-    // Top-level let globals
+    // Top-level let globals. POSITIONAL invariant (#526): the section
+    // ignores each entry's recorded index and emits by Vec order after the
+    // five fixed globals — assert the two agree, or one alloc site that
+    // bumped next_global without pushing here silently shifts EVERY later
+    // global (the preopen/free-list collision class).
+    for (i, &(recorded_idx, _, _)) in emitter.top_let_init.iter().enumerate() {
+        let landing = runtime::HEAP_START_GLOBAL_IDX + 1 + i as u32;
+        assert_eq!(
+            recorded_idx, landing,
+            "[ICE] top-let global recorded at index {} emitting at {} (#526)",
+            recorded_idx, landing
+        );
+    }
     for &(_, vt, bits) in &emitter.top_let_init {
         let init = match vt {
             ValType::I64 => wasm_encoder::ConstExpr::i64_const(bits),
