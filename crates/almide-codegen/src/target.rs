@@ -92,10 +92,10 @@ fn build_pipeline(target: Target) -> Pipeline {
                 // `resolve_call_lambdas` helper can't recognise the
                 // stdlib method any more, which leaves closure params
                 // as `TypeVar` and breaks `MatchSubject` on
-                // string-folding lambdas. A second
-                // `LambdaTypeResolvePass` invocation runs later for
-                // `Ty::Fn` wrapper refresh; this first one is purely
-                // about pre-rewrite information.
+                // string-folding lambdas. (#559: this is the SOLE
+                // LambdaTypeResolvePass in the Rust pipeline — the stale
+                // "a second invocation runs later" note was removed; the
+                // Wgsl/Wasm arms have their own single invocation.)
                 .add(LambdaTypeResolvePass)
                 .add(ConcretizeTypesPass)
                 // Hoist payload-nested string literals (`ok("x")`, `Word("hi")`)

@@ -160,6 +160,11 @@ pub struct StackBalancePass;
 impl NanoPass for StackBalancePass {
     fn name(&self) -> &str { "StackBalance" }
     fn targets(&self) -> Option<Vec<Target>> { Some(vec![Target::Wasm]) }
+    // #559: the StackBalance→Perceus ordering is load-bearing (Perceus RC
+    // insertion assumes a balanced stack); declared as a before-dep since
+    // Perceus does not name the reverse. Vacuous on the Rust arm where
+    // StackBalance does not run.
+    fn run_before(&self) -> Vec<&'static str> { vec!["Perceus"] }
 
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         let mut changed = false;

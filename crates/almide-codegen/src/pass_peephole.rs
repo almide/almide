@@ -14,7 +14,9 @@ pub struct PeepholePass;
 impl NanoPass for PeepholePass {
     fn name(&self) -> &str { "Peephole" }
     fn targets(&self) -> Option<Vec<Target>> { None } // all targets
-    fn depends_on(&self) -> Vec<&'static str> { vec![] }
+    // #559: now enforceable target-conditionally — CloneInsertion is Rust-only,
+    // so on the wasm arm (where it is absent) the edge is vacuous, not a panic.
+    fn depends_on(&self) -> Vec<&'static str> { vec!["CloneInsertion"] }
 
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         let mut v = Peephole { changed: false };
