@@ -793,10 +793,18 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(left);
                 self.scratch.free_i32(right);
             }
-            // TypeVar/Unknown: unresolved type — dead-code residue from error
-            // recovery may reach here; live code is guarded by
-            // assert_types_concretized. Keep the trap for that case only.
-            (ty, _) if ty.is_unresolved() => { wasm!(self.func, { unreachable; }); }
+            // TypeVar/Unknown (#517): the AllTypesConcrete hard gate refuses
+            // any build whose expression types are unresolved, and comparison
+            // operands ARE expressions — nothing live can reach this arm. The
+            // former runtime trap could bury a future gate hole as a silent
+            // late crash; fail the build instead.
+            (ty, _) if ty.is_unresolved() => {
+                panic!(
+                    "[ICE] emit_wasm: comparison on unresolved type `{:?}` reached emission — \
+                     the AllTypesConcrete gate should have refused this build (#517)",
+                    ty
+                );
+            }
             (l, _) => {
                 // A RESOLVED type with no comparison emission is a
                 // compiler bug — fail the build (§5: no silent traps).
