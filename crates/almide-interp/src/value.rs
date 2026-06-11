@@ -48,8 +48,8 @@ pub enum Value {
     List(Rc<Vec<Value>>),
     Tuple(Rc<Vec<Value>>),
     /// Insertion-ordered dense entries — matches the WASM compact-ordered-dict
-    /// and the native `AlmideMap`. Equality is order-sensitive exactly where
-    /// native is (i.e. it is structural over the ordered entry vec).
+    /// and the native `AlmideMap`. Equality is order-INDEPENDENT (matching
+    /// std HashMap and both backends, #556); iteration/repr preserve order.
     Map(Rc<Vec<(Value, Value)>>),
     /// Insertion-ordered, dedup-on-insert.
     Set(Rc<Vec<Value>>),
@@ -148,8 +148,20 @@ impl PartialEq for Value {
             (Str(a), Str(b)) => a == b,
             (List(a), List(b)) => a == b,
             (Tuple(a), Tuple(b)) => a == b,
-            (Map(a), Map(b)) => a == b,
-            (Set(a), Set(b)) => a == b,
+            // #556: Map/Set `==` is order-INDEPENDENT on both backends
+            // (runtime/rs/src/{map,set}.rs match std HashMap/HashSet); comparing
+            // the ordered entry vecs cast a FALSE clean vote as the third judge
+            // (`["a":1,"b":2] == ["b":2,"a":1]` → backends true, interp false).
+            (Map(a), Map(b)) => {
+                a.len() == b.len()
+                    && a.iter().all(|(k, v)| {
+                        b.iter().any(|(k2, v2)| k == k2 && v == v2)
+                    })
+            }
+            (Set(a), Set(b)) => {
+                a.len() == b.len()
+                    && a.iter().all(|x| b.iter().any(|y| x == y))
+            }
             (
                 Record { name: n1, fields: f1 },
                 Record { name: n2, fields: f2 },
