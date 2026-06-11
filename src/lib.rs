@@ -33,6 +33,9 @@ pub use almide_frontend::stdlib;
 pub use almide_optimize::optimize;
 pub use almide_optimize::mono;
 
+// Reference interpreter (the third cross-target judge).
+pub use almide_interp as interp;
+
 // ── Tools (almide-tools) ──
 pub use almide_tools::fmt;
 pub use almide_tools::interface;

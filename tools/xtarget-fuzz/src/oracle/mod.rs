@@ -13,9 +13,11 @@
 //! in parallel — slots in behind a clean trait ([`ReferenceOracle`]).
 //! This crate does NOT depend on it; the hook is `Option<&dyn ...>`.
 
+mod interp;
 mod ladder;
 mod runner;
 
+pub use interp::InterpOracle;
 pub use ladder::{run_ladder, Finding, FindingKind, Outcome, RunEvidence, Rung};
 pub use runner::Toolchain;
 
@@ -24,8 +26,8 @@ pub use runner::Toolchain;
 /// pinning *which* target diverged (today a divergence only tells us the
 /// two targets disagree, not which is correct).
 ///
-/// Left as a trait with no implementation on purpose: the interpreter is
-/// out of scope for this crate and lands separately.
+/// Implemented by `InterpOracle` (#516) over the `almide::interp`
+/// tree-walker; it abstains (returns `None`) on anything it cannot run.
 pub trait ReferenceOracle {
     /// Evaluate `source` and return its expected stdout, or `None` if
     /// the interpreter cannot evaluate this program (it then abstains).

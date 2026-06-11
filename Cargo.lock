@@ -28,6 +28,7 @@ dependencies = [
  "almide-codegen",
  "almide-dialect",
  "almide-frontend",
+ "almide-interp",
  "almide-ir",
  "almide-lang",
  "almide-optimize",

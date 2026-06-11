@@ -16,6 +16,7 @@ almide-ir = { path = "crates/almide-ir" }
 almide-codegen = { path = "crates/almide-codegen" }
 almide-tools = { path = "crates/almide-tools" }
 almide-optimize = { path = "crates/almide-optimize" }
+almide-interp = { path = "crates/almide-interp" }
 almide-frontend = { path = "crates/almide-frontend" }
 almide-dialect = { path = "crates/almide-dialect" }
 clap = { version = "4", features = ["derive"] }

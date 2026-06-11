@@ -242,6 +242,8 @@ fn worker_loop(
 ) {
     let file = work_dir.join("prog.almd");
     let wasm = work_dir.join("prog.wasm");
+    // The third judge (#516): per-worker, abstains on anything it can't run.
+    let reference = crate::oracle::InterpOracle::new();
 
     loop {
         if stop.load(Ordering::Relaxed) {
@@ -267,7 +269,7 @@ fn worker_loop(
         }
 
         stats.generated.fetch_add(1, Ordering::Relaxed);
-        let outcome = run_ladder(&tc, &gen.source, &file, &wasm, None);
+        let outcome = run_ladder(&tc, &gen.source, &file, &wasm, Some(&reference));
 
         match outcome {
             Outcome::Clean => {
@@ -337,13 +339,14 @@ fn cmd_replay(args: &[String]) {
     let wasm = work_dir.join("replay.wasm");
     let _ = std::fs::write(&file, &gen.source);
 
+    let reference = crate::oracle::InterpOracle::new();
     let tc = Toolchain {
         almide,
         wasmtime: resolve_wasmtime(),
         scratch: repo.join("tools/xtarget-fuzz/.scratch/replay-build"),
         timeout: Duration::from_secs(DEFAULT_TIMEOUT_SECS),
     };
-    let outcome = run_ladder(&tc, &gen.source, &file, &wasm, None);
+    let outcome = run_ladder(&tc, &gen.source, &file, &wasm, Some(&reference));
     eprintln!("\n=== ladder outcome ===");
     print_outcome(&outcome);
 }
