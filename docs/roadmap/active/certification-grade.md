@@ -61,6 +61,13 @@ Almide には Ferrocene より良い出発点がある: 実行可能な referenc
 1. **`almide-interp` を規範意味論に昇格** — 「3rd judge」から「THE spec」へ。
    まず gap audit: interp が評価できない言語機能・stdlib 関数の棚卸し
    (評価不能領域 = 仕様の穴として台帳化、ratchet で縮める)
+   - ✅ **台帳 + 両方向ゲート着地** (issue #564): `crates/almide-interp/interp-abstain-ledger.txt`
+     + `interp_cross_target_test.rs::interp_abstain_ledger` (バックエンド不要 = CI で
+     self-skip しない)。新規 abstain は台帳更新を強制、解消済みエントリの放置も fail —
+     台帳は縮む方向のみ。初回監査: **121 fixtures 中 評価可能 49 (40%) / 評価不能 72**。
+     内訳: 設計上の除外 ~18 (transcendental 6 / in-place 5 / fan 非決定 7) + **glue 未実装
+     ~54 (map.new, set.from_list, json.parse, string.take/slice, list.get_or, bytes.* …)** —
+     後者が「skip → 第三票」に変換できる伸びしろ
 2. **ALS の起草** — interp を executable semantics として参照する散文仕様。
    構成: 構文 / 静的意味論 (型・capability) / 動的意味論 (interp 参照) /
    観測等価性の定義 (stdout, stderr, exit code)。**53 契約の statement が節の種** —
