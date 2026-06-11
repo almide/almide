@@ -276,6 +276,12 @@ pub struct RuntimeFuncs {
     pub cow_check: u32,
     pub heap_save: u32,
     pub heap_restore: u32,
+    /// `__alloc_pinned(size)` — alloc whose block is stamped `PINNED_RC` so
+    /// rc ops can never free it: for HOST-WRITTEN scratch (WASI fs buffers)
+    /// whose data area a syscall may overwrite — a freed-then-reused such
+    /// block had its free-list `next` clobbered by the host (the C-042
+    /// poison class). Pinning makes fs scratch immortal BY CONSTRUCTION.
+    pub alloc_pinned: u32,
     /// Global index holding the heap start address (immutable).
     /// Pointers below this are in the data section and must NOT be rc_dec'd.
     pub heap_start_global: u32,
@@ -550,7 +556,7 @@ impl WasmEmitter {
             case_table_bytes: 0,
             rt: RuntimeFuncs {
                 fd_write: 0, alloc: 0, rc_inc: 0, rc_dec: 0, cow_check: 0,
-                heap_save: 0, heap_restore: 0, heap_start_global: 0,
+                heap_save: 0, heap_restore: 0, alloc_pinned: 0, heap_start_global: 0,
                 println_str: 0, println_int: 0,
                 int_to_string: 0, float_to_string: 0,
                 float_parse: 0, float_to_fixed: 0, float_pow: 0,
@@ -1865,7 +1871,7 @@ fn assemble(emitter: &mut WasmEmitter) -> Vec<u8> {
         },
         &wasm_encoder::ConstExpr::i32_const(0),
     );
-    // Global 2: preopen count (set by __init_preopen_dirs at startup)
+    // Global 3: preopen count (set by __init_preopen_dirs at startup)
     globals.global(
         GlobalType {
             val_type: ValType::I32,

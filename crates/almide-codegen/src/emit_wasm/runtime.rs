@@ -162,6 +162,10 @@ pub fn register_runtime_functions(emitter: &mut WasmEmitter) {
     let heap_restore_ty = emitter.register_type(vec![ValType::I32], vec![]);
     emitter.rt.heap_restore = emitter.register_func("__heap_restore", heap_restore_ty);
 
+    // __alloc_pinned(size: i32) -> i32 — alloc stamped PINNED_RC (immortal)
+    let alloc_pinned_ty = emitter.register_type(vec![ValType::I32], vec![ValType::I32]);
+    emitter.rt.alloc_pinned = emitter.register_func("__alloc_pinned", alloc_pinned_ty);
+
     // __println_str(ptr: i32) -> ()
     let println_ty = emitter.register_type(vec![ValType::I32], vec![]);
     emitter.rt.println_str = emitter.register_func("__println_str", println_ty);
@@ -320,12 +324,20 @@ pub fn register_runtime_functions(emitter: &mut WasmEmitter) {
     // driver). Registered right after rt_repr so the compile order below matches.
     super::rt_float_display::register(emitter);
 
-    // Global 0: __heap_ptr (memory 0 bump allocator)
+    // Global index layout — MUST match the emitted global section
+    // (0=heap_ptr, 1=free_list, 2=preopen_table, 3=preopen_count,
+    // 4=heap_start) and the struct initializers in mod.rs. This block held
+    // the PRE-FREES numbering (table=1, count=2) long after free_list took
+    // index 1: __init_preopen_dirs wrote the TABLE POINTER into the FREE
+    // LIST head, so for every fs-using program the (unconditional) __alloc
+    // walk treated the preopen table as a free node from boot — the entire
+    // C-042 "op-count ceiling" class (exists×2 OOB, multi-op traps), live
+    // in releases for months and self-consistent enough to pass two-op
+    // fixtures because __resolve_path read the table back through the SAME
+    // stale index.
     emitter.heap_ptr_global = 0;
-    // Global 1: __preopen_table (ptr to heap-allocated table of [fd, path_ptr, path_len] entries)
-    emitter.preopen_table_global = 1;
-    // Global 2: __preopen_count (number of preopened dirs)
-    emitter.preopen_count_global = 2;
+    emitter.preopen_table_global = 2;
+    emitter.preopen_count_global = 3;
 }
 
 /// Global index of the immutable `__heap_start` low-bound (see `next_global`
@@ -341,6 +353,12 @@ pub fn register_runtime_functions(emitter: &mut WasmEmitter) {
 /// field.
 pub const HEAP_START_GLOBAL_IDX: u32 = 4;
 
+/// Refcount sentinel for PINNED (immortal) blocks — host-written scratch the
+/// allocator must never reclaim. A full value, not a bit: unreachable by real
+/// counting, distinct from the freed sentinel 0, and both rc_inc and rc_dec
+/// early-out on it so it can never increment toward wrap or hit the free path.
+pub(super) const PINNED_RC: i32 = i32::MAX;
+
 /// Compile all runtime function bodies.
 pub fn compile_runtime(emitter: &mut WasmEmitter) {
     compile_alloc(emitter);
@@ -349,6 +367,7 @@ pub fn compile_runtime(emitter: &mut WasmEmitter) {
     compile_cow_check(emitter);
     compile_heap_save(emitter);
     compile_heap_restore(emitter);
+    compile_alloc_pinned(emitter);
     compile_println_str(emitter);
     compile_int_to_string(emitter);
     // float.to_string driver (Dragon4 shortest-decimal). Registered early, so
@@ -597,6 +616,10 @@ fn compile_rc_inc(emitter: &mut WasmEmitter) {
         w.get(0).i32c(rc_neg).sub().emit_load(0, rc_ty).tee(1);
         w.eqz();
         w.if_void(|w| { w.unreachable_(); }, |_| {});
+        // PINNED blocks are immortal: pass through untouched (a +1 would
+        // creep the sentinel toward wrap/unpin).
+        w.get(1).i32c(PINNED_RC).eq();
+        w.if_void(|w| { w.get(0).ret(); }, |_| {});
         // *(ptr - rc_neg) = rc + 1
         w.get(0).i32c(rc_neg).sub();
         w.get(1).i32c(1).add();
@@ -644,6 +667,10 @@ fn compile_rc_dec(emitter: &mut WasmEmitter) {
         w.if_void(|w| { w.ret(); }, |_| {});
         // rc = *(ptr - rc_neg)
         w.get(0).i32c(rc_neg).sub().emit_load(0, rc_ty).tee(1);
+        // PINNED blocks never free (host-written scratch; see __alloc_pinned).
+        w.i32c(PINNED_RC).eq();
+        w.if_void(|w| { w.ret(); }, |_| {});
+        w.get(1);
         w.i32c(1).gt_u();
         w.if_void(|w| {
             // rc > 1: decrement
@@ -744,6 +771,33 @@ fn compile_heap_restore(emitter: &mut WasmEmitter) {
         global_set(emitter.free_list_global);
         end;
     });
+    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+}
+
+/// `__alloc_pinned(size) -> ptr` — `__alloc` + stamp the rc header with
+/// `PINNED_RC`. Used for every buffer a WASI host call writes into
+/// (fd_out/stat/iov/nread/data scratch in the fs ops, the preopen tables):
+/// such a block on the FREE LIST gets its `next` field overwritten by the
+/// host (the field lives in the data area) → poisoned walk → OOB. Pinning
+/// removes the entire class by construction; the cost is a bounded,
+/// deliberate leak of small per-op scratch. Unconditional stamp — in
+/// leak-mode (`ALMIDE_WASM_FREES=0`) rc is inert anyway, and keeping the
+/// bytes env-independent here preserves the host-determinism story.
+fn compile_alloc_pinned(emitter: &mut WasmEmitter) {
+    use super::engine::{WasmBuilder, layout::*};
+    let type_idx = emitter.func_type_indices[&emitter.rt.alloc_pinned];
+    let rc_neg = emitter.layout_reg.alloc_header_neg_offset(alloc::RC) as i32;
+    let rc_ty = emitter.layout_reg.field(ALLOC_HEADER, alloc::RC).ty;
+    let mut f = Function::new([(1, ValType::I32)]); // local 1: $ptr
+    {
+        let w = &mut WasmBuilder::new(&mut f, &emitter.layout_reg);
+        w.get(0).call(emitter.rt.alloc).set(1);
+        w.get(1).i32c(rc_neg).sub();
+        w.i32c(PINNED_RC);
+        w.emit_store(0, rc_ty);
+        w.get(1);
+    }
+    f.instruction(&wasm_encoder::Instruction::End);
     emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
 }
 
@@ -1286,8 +1340,8 @@ fn compile_init_preopen_dirs(emitter: &mut WasmEmitter) {
 
     wasm!(f, {
         // Allocate prestat buf (8 bytes) and table (max 16 entries × 12 bytes = 192)
-        i32_const(8); call(emitter.rt.alloc); local_set(1);
-        i32_const(192); call(emitter.rt.alloc); local_set(5);
+        i32_const(8); call(emitter.rt.alloc_pinned); local_set(1);
+        i32_const(192); call(emitter.rt.alloc_pinned); local_set(5);
 
         // Start from fd=3 (first possible preopened dir)
         i32_const(3); local_set(0);
@@ -1308,7 +1362,7 @@ fn compile_init_preopen_dirs(emitter: &mut WasmEmitter) {
         local_get(1); i32_load(4); local_set(3);
 
         // Allocate path buffer and get dir name
-        local_get(3); i32_const(1); i32_add; call(emitter.rt.alloc); local_set(6);
+        local_get(3); i32_const(1); i32_add; call(emitter.rt.alloc_pinned); local_set(6);
         local_get(0); local_get(6); local_get(3);
         call(emitter.rt.fd_prestat_dir_name);
         drop;
@@ -1367,7 +1421,7 @@ fn compile_resolve_path(emitter: &mut WasmEmitter) {
 
     wasm!(f, {
         // Allocate result: [fd, rel_path_ptr, rel_path_len]
-        i32_const(12); call(emitter.rt.alloc); local_set(2);
+        i32_const(12); call(emitter.rt.alloc_pinned); local_set(2);
 
         // Default: fd=3, no prefix match
         i32_const(3); local_set(4);
