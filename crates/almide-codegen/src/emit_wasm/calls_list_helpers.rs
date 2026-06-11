@@ -390,6 +390,25 @@ impl FuncCompiler<'_> {
         self.scratch.free_i64(idx);
     }
 
+    /// Trap with the UNIFIED abort ("Error: index out of bounds\n" + exit 1)
+    /// unless `0 <= idx < len`, checking the FULL i64 so a >= 2^32 index can
+    /// never truncate into range (#554/C-072). `idx64_local` holds the i64
+    /// index; `ptr_local` points at the list/bytes header whose len is at
+    /// offset 0. Leaves the stack unchanged.
+    pub(super) fn emit_index_bound_guard(&mut self, idx64_local: u32, ptr_local: u32, oob_msg: i32, div_trap: u32) {
+        wasm!(self.func, {
+            // if (idx as u64) >= (len as u64) { abort }  — a negative i64 wraps
+            // to a huge u64 and is caught by the same compare.
+            local_get(idx64_local);
+            local_get(ptr_local); i32_load(0); i64_extend_i32_u;
+            i64_ge_u;
+            if_empty;
+              i32_const(oob_msg);
+              call(div_trap);
+            end;
+        });
+    }
+
     /// Copy one element from [stack: dst_addr, src_addr] based on type.
     pub(super) fn emit_elem_copy(&mut self, ty: &Ty) {
         match values::ty_to_valtype(ty) {

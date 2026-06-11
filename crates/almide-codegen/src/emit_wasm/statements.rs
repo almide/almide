@@ -478,31 +478,42 @@ impl FuncCompiler<'_> {
                 };
                 if has_ptr {
                     let data_off = self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA);
+                    // #554/C-072: the write path had NO bounds check — an OOB
+                    // `xs[i] = v` was a silent heap WRITE into adjacent
+                    // allocator memory (exit 0) while native panicked. Capture
+                    // the list pointer, GUARD the index on the full i64
+                    // (negative / >= 2^32 caught, no truncation), then store.
+                    let ptr_l = self.scratch.alloc_i32();
+                    wasm!(self.func, { local_set(ptr_l); });
+                    let oob_msg = self.emitter.intern_string("Error: index out of bounds\n") as i32;
+                    let div_trap = self.emitter.rt.div_trap;
+                    let idx64 = self.scratch.alloc_i64();
                     if let IrExprKind::LitInt { value: idx_val } = &index.kind {
-                        let offset = data_off + (*idx_val as u32) * elem_size;
-                        self.emit_expr(value);
-                        if is_bytes {
-                            wasm!(self.func, { i32_wrap_i64; i32_store8(offset); });
-                        } else {
-                            self.emit_store_at(&value.ty, offset);
-                        }
+                        wasm!(self.func, { i64_const(*idx_val); local_set(idx64); });
                     } else {
-                        wasm!(self.func, { i32_const(data_off as i32); i32_add; });
                         self.emit_expr(index);
                         if matches!(&index.ty, almide_lang::types::Ty::Int) {
-                            wasm!(self.func, { i32_wrap_i64; });
-                        }
-                        if elem_size > 1 {
-                            wasm!(self.func, { i32_const(elem_size as i32); i32_mul; });
-                        }
-                        wasm!(self.func, { i32_add; });
-                        self.emit_expr(value);
-                        if is_bytes {
-                            wasm!(self.func, { i32_wrap_i64; i32_store8(0); });
+                            wasm!(self.func, { local_set(idx64); });
                         } else {
-                            self.emit_store_at(&value.ty, 0);
+                            wasm!(self.func, { i64_extend_i32_s; local_set(idx64); });
                         }
                     }
+                    self.emit_index_bound_guard(idx64, ptr_l, oob_msg, div_trap);
+                    // addr = ptr + data_off + idx * elem_size
+                    wasm!(self.func, { local_get(ptr_l); i32_const(data_off as i32); i32_add;
+                                       local_get(idx64); i32_wrap_i64; });
+                    if elem_size > 1 {
+                        wasm!(self.func, { i32_const(elem_size as i32); i32_mul; });
+                    }
+                    wasm!(self.func, { i32_add; });
+                    self.emit_expr(value);
+                    if is_bytes {
+                        wasm!(self.func, { i32_wrap_i64; i32_store8(0); });
+                    } else {
+                        self.emit_store_at(&value.ty, 0);
+                    }
+                    self.scratch.free_i64(idx64);
+                    self.scratch.free_i32(ptr_l);
                 }
             }
             IrStmtKind::FieldAssign { target, field, value } => {

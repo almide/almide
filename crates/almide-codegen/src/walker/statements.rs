@@ -304,7 +304,7 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
             let cast_val = if is_bytes { format!("{} as u8", val_str) } else { val_str };
             // Shared-mut non-Copy var (`SharedMut`, P6): index through the cell.
             if ctx.ann.is_shared_mut(target) {
-                return format!("{}.borrow_mut()[{} as usize] = {};", target_str, idx_str, cast_val);
+                return format!("almide_index_set!({}.borrow_mut(), {}, {});", target_str, idx_str, cast_val);
             }
             // §4 Stage 2: globals dispatch on the attribute. A scalar Cell
             // global cannot be index-assigned — the legacy arm emitted a
@@ -313,16 +313,19 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
             if let Some(info) = ctx.ann.global(*target) {
                 use almide_ir::top_let_storage::TopLetStorage as Tls;
                 return match info.storage {
-                    Tls::RcRefCell => format!("{}.with(|c| std::rc::Rc::make_mut(&mut *c.borrow_mut())[{} as usize] = {});", info.static_name, idx_str, cast_val),
+                    Tls::RcRefCell => format!("{}.with(|c| almide_index_set!(std::rc::Rc::make_mut(&mut *c.borrow_mut()), {}, {}));", info.static_name, idx_str, cast_val),
                     other => unreachable!(
                         "[COMPILER BUG] index-assign to {:?} global `{}`",
                         other, info.static_name
                     ),
                 };
             }
+            // #554: bounds-checked store — a native OOB `xs[i] = v` aborts with
+            // the unified `Error: index out of bounds` + exit 1 (matching wasm
+            // and the div/mod contract) instead of a raw panic (exit 101).
             match ctx.ann.get_var_storage(target) {
-                VarStorage::RcCow => format!("{}.make_mut()[{} as usize] = {};", target_str, idx_str, cast_val),
-                _ => format!("{}[{} as usize] = {};", target_str, idx_str, cast_val),
+                VarStorage::RcCow => format!("almide_index_set!({}.make_mut(), {}, {});", target_str, idx_str, cast_val),
+                _ => format!("almide_index_set!({}, {}, {});", target_str, idx_str, cast_val),
             }
         }
         IrStmtKind::MapInsert { target, key, value } => {
