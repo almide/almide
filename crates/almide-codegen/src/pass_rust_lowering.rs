@@ -24,6 +24,13 @@ impl NanoPass for RustLoweringPass {
         // (A) Box closures sitting in type-erased join slots as `Rc<dyn Fn>`.
         //     Single source of truth — see `box_closures_program` below.
         if box_closures_program(&mut program) { changed = true; }
+        // (A2, #599) A race/any/settle thunk list bound to a `let` first reaches
+        // the call as a `Var`; box_closures_program boxed its elements as the
+        // uniform `Rc<dyn Fn>`, but race/any/settle need `Box<dyn Fn + Send +
+        // Sync>` (Rc is neither). Collect the VarIds used as a race/any/settle
+        // arg-0 and RE-TAG the matching bind's list elements to BoxSendSync —
+        // the var-indirection twin of the inline-list boxing.
+        if rebox_var_thunk_lists(&mut program) { changed = true; }
         // Vars whose Assign must STAY an Assign — their lvalue is not a direct
         // Rust place, so the `xs = xs + [v]` → `xs.push(v)` rewrite would push
         // onto a DISCARDED CLONE and silently lose the write:
@@ -150,6 +157,61 @@ fn fan_method(expr: &IrExpr) -> Option<String> {
 }
 
 /// Box every thunk in a `fan.race/any/settle` thunk-LIST argument.
+fn rebox_var_thunk_lists(program: &mut IrProgram) -> bool {
+    use almide_ir::visit::{IrVisitor, walk_expr};
+    use almide_ir::visit_mut::{IrMutVisitor, walk_stmt_mut};
+    use std::collections::HashSet;
+
+    fn fan_list_var(e: &IrExpr) -> Option<u32> {
+        let (func, args) = match &e.kind {
+            IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
+                if module.as_str() == "fan" => (func.as_str().to_string(), args),
+            IrExprKind::Call { target: CallTarget::Named { name }, args, .. }
+                if name.as_str().starts_with("almide_rt_fan_") =>
+                (name.as_str().trim_start_matches("almide_rt_fan_").to_string(), args),
+            _ => return None,
+        };
+        if matches!(func.as_str(), "race" | "any" | "settle") {
+            if let Some(IrExpr { kind: IrExprKind::Var { id }, .. }) = args.first() {
+                return Some(id.0);
+            }
+        }
+        None
+    }
+
+    struct Collect { vars: HashSet<u32> }
+    impl IrVisitor for Collect {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            if let Some(id) = fan_list_var(e) { self.vars.insert(id); }
+            walk_expr(self, e);
+        }
+    }
+    let mut c = Collect { vars: HashSet::new() };
+    for func in &program.functions { c.visit_expr(&func.body); }
+    for m in &program.modules { for func in &m.functions { c.visit_expr(&func.body); } }
+    if c.vars.is_empty() { return false; }
+
+    struct Rebox { vars: HashSet<u32>, changed: bool }
+    impl IrMutVisitor for Rebox {
+        fn visit_stmt_mut(&mut self, stmt: &mut IrStmt) {
+            if let IrStmtKind::Bind { var, value, .. } = &mut stmt.kind {
+                if self.vars.contains(&var.0) {
+                    if let IrExprKind::List { elements } = &mut value.kind {
+                        for el in elements.iter_mut() {
+                            self.changed |= box_fan_thunk(el, FnBox::BoxSendSync);
+                        }
+                    }
+                }
+            }
+            walk_stmt_mut(self, stmt);
+        }
+    }
+    let mut r = Rebox { vars: c.vars, changed: false };
+    for func in &mut program.functions { r.visit_expr_mut(&mut func.body); }
+    for m in &mut program.modules { for func in &mut m.functions { r.visit_expr_mut(&mut func.body); } }
+    r.changed
+}
+
 fn box_fan_thunk_list(arg: &mut IrExpr, to: FnBox) -> bool {
     if let IrExprKind::List { elements } = &mut arg.kind {
         let mut c = false;

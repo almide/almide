@@ -101,6 +101,7 @@ evidence  = [
   { path = "spec/wasm_cross/fan_deterministic.almd", class = "fixture" },
   { path = "spec/wasm_cross/fan_map_inline_lambda.almd", class = "fixture" },
   { path = "spec/wasm_cross/fan_pure_thunks.almd", class = "fixture" },
+  { path = "spec/wasm_cross/fan_var_thunk_list.almd", class = "fixture" },
 ]
 
 [[contract]]
