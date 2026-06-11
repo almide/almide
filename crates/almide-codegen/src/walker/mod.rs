@@ -328,7 +328,10 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
     // abortable lazy top-lets to force at startup (wasm-eager parity).
     let is_rust_plain_main_with_forces = matches!(ctx.target, Target::Rust)
         && func.name.as_str() == "main" && !func.is_effect && !func.is_test
-        && !ctx.ann.eager_force_top_lets.is_empty();
+        && ctx.ann.global_init_order.iter().any(|v| matches!(
+            ctx.ann.globals.get(v).map(|i| i.storage),
+            Some(almide_ir::top_let_storage::TopLetStorage::Lazy { eager_force: true })
+        ));
 
     // Sanitize function name: spaces/dots/hyphens → underscores.
     // Test blocks already carry `TEST_NAME_PREFIX` from lowering so they
@@ -386,8 +389,10 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
     // Both wrapper shapes first FORCE the abortable lazy top-lets in declaration
     // order, so an aborting initializer (integer `/`/`%`) fires at startup —
     // byte-identical to wasm's eager top-let evaluation in `_start`.
-    let force_lines: String = ctx.ann.eager_force_top_lets.iter()
-        .map(|name| format!("    std::sync::LazyLock::force(&{});\n", name))
+    let force_lines: String = ctx.ann.global_init_order.iter()
+        .filter_map(|v| ctx.ann.globals.get(v))
+        .filter(|i| matches!(i.storage, almide_ir::top_let_storage::TopLetStorage::Lazy { eager_force: true }))
+        .map(|i| format!("    std::sync::LazyLock::force(&{});\n", i.static_name))
         .collect();
     let fn_code = if is_rust_effect_main {
         format!("{}\n\nfn main() {{\n{}    if let Err(__almide_err) = __almide_main() {{\n        eprintln!(\"Error: {{}}\", __almide_err);\n        std::process::exit(1);\n    }}\n}}", fn_code, force_lines)
@@ -540,6 +545,85 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
             register(&mut ann, tl, ctx.var_table, origin);
         }
     }
+    // §4 Stage 1 — AGREEMENT VERIFIER: the unified TopLetStorage attribute
+    // (computed by TopLetStoragePass) must agree with every legacy predicate
+    // this walker just derived. A mismatch is the #486/#500 drift class
+    // caught at build time instead of as a silent miscompile. Stage 2 flips
+    // the consumers onto the attribute and deletes the legacy sets (and with
+    // them, this verifier's reason to exist).
+    {
+        use almide_ir::top_let_storage::TopLetStorage as Tls;
+        let mut errs: Vec<String> = Vec::new();
+        let mut derived_eager: Vec<String> = Vec::new();
+        for tl in &program.top_lets {
+            let vi = ctx.var_table.get(tl.var);
+            let derived_name = almide_ir::top_let_storage::static_name(vi);
+            let Some(info) = ann.globals.get(&tl.var) else {
+                errs.push(format!("`{}`: missing from ann.globals (pass not run?)", vi.name.as_str()));
+                continue;
+            };
+            if info.static_name != derived_name {
+                errs.push(format!(
+                    "`{}`: static name disagrees (attr `{}` vs walker `{}`)",
+                    vi.name.as_str(), info.static_name, derived_name
+                ));
+            }
+            if tl.mutable {
+                let legacy = ann.var_storage.get(&tl.var);
+                let agree = matches!(
+                    (legacy, info.storage),
+                    (Some(almide_ir::annotations::VarStorage::ModuleCell), Tls::Cell)
+                        | (Some(almide_ir::annotations::VarStorage::ModuleRc), Tls::RcRefCell)
+                );
+                if !agree {
+                    errs.push(format!(
+                        "`{}`: mutable storage disagrees (attr {:?} vs legacy {:?})",
+                        vi.name.as_str(), info.storage, legacy
+                    ));
+                }
+                // KNOWN legacy quirk, not checked: a MUTABLE Const-kind
+                // top-let also lands in const_top_let_vars (the pre-index
+                // ignores tl.mutable); harmless today only because the
+                // storage check runs first at every use site.
+            } else {
+                match info.storage {
+                    Tls::Const => {
+                        if !ann.const_top_let_vars.contains(&tl.var) {
+                            errs.push(format!("`{}`: attr Const but not in const_top_let_vars", vi.name.as_str()));
+                        }
+                    }
+                    Tls::Lazy { eager_force } => {
+                        if !ann.lazy_top_let_names.contains(&info.static_name) {
+                            errs.push(format!("`{}`: attr Lazy but `{}` not in lazy_top_let_names", vi.name.as_str(), info.static_name));
+                        }
+                        if eager_force {
+                            derived_eager.push(info.static_name.clone());
+                        }
+                    }
+                    other => {
+                        errs.push(format!("`{}`: immutable top-let classified {:?}", vi.name.as_str(), other));
+                    }
+                }
+            }
+        }
+        if derived_eager != ann.eager_force_top_lets {
+            errs.push(format!(
+                "eager-force order disagrees (attr {:?} vs walker {:?})",
+                derived_eager, ann.eager_force_top_lets
+            ));
+        }
+        if !errs.is_empty() {
+            eprintln!("error: [COMPILER BUG] top-let storage attribute disagrees with the legacy predicates");
+            for e in errs.iter().take(10) {
+                eprintln!("    - {}", e);
+            }
+            eprintln!("  One side changed without the other — exactly the drift class (#486/#500)");
+            eprintln!("  the §4 attribute exists to make impossible. Please report this at");
+            eprintln!("  https://github.com/almide/almide/issues");
+            std::process::exit(1);
+        }
+    }
+
     // Classify function-local `var` bindings:
     //   LocalMut (let mut T)  — not captured by closures, no RcCow overhead
     //   RcCow                 — captured by a lambda, needs COW semantics
@@ -679,9 +763,15 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
 
     let mut parts = Vec::new();
 
-    // Anonymous record struct definitions (only if anon_records is populated)
+    // Anonymous record struct definitions (only if anon_records is populated).
+    // SORTED iteration: anon_records is a HashMap, and emitting in its raw
+    // iteration order made the generated Rust SOURCE nondeterministic
+    // run-to-run (three runs, three different bytes) — semantically neutral
+    // for rustc but fatal for reproducible builds and any byte-diff gate.
     if !ctx.ann.anon_records.is_empty() {
-        for (field_names, struct_name) in &ctx.ann.anon_records {
+        let mut sorted_anon: Vec<(&Vec<String>, &String)> = ctx.ann.anon_records.iter().collect();
+        sorted_anon.sort_by(|a, b| a.1.cmp(b.1));
+        for (field_names, struct_name) in sorted_anon {
             // A closure field can't be Debug/PartialEq, so such a struct derives
             // Clone only (the `has_fn_fields` struct_decl) and drops the
             // `Debug + PartialEq` generic bounds — derive(Clone) re-adds `T: Clone`
@@ -768,33 +858,32 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
         parts.push(rendered);
     }
 
-    // Top-level lets and vars
+    // Top-level lets and vars — §4 Stage 2: the declaration consumes the
+    // SAME GlobalInfo every reference site dispatches on (storage class and
+    // static name decided once, in the attribute pass). The former
+    // `lazy_vars` mid-emission write is gone — no reader remains.
     for tl in &program.top_lets {
-        let raw_name = ctx.var_table.get(tl.var).name.clone();
         let ty_str = render_type_fn(&ctx, &tl.ty);
         let val_str = render_expr_fn(&ctx, &tl.value);
-        if matches!(tl.kind, TopLetKind::Lazy) {
-            ctx.ann.lazy_vars.insert(tl.var);
-        }
-        // Emit-time prefix from module_origin
-        let var_info = ctx.var_table.get(tl.var);
-        let name_upper = if let Some(ref origin) = var_info.module_origin {
-            format!("ALMIDE_RT_{}_{}", origin.to_uppercase(), raw_name.as_str().to_uppercase())
-        } else {
-            raw_name.to_uppercase()
-        };
-        let name = raw_name;
-        let mut rendered = if tl.mutable && matches!(tl.ty, Ty::Int | Ty::Float | Ty::Bool) {
-            format!("thread_local! {{ static {}: std::cell::Cell<{}> = std::cell::Cell::new({}); }}", name_upper, ty_str, val_str)
-        } else if tl.mutable {
-            format!("thread_local! {{ static {}: std::cell::RefCell<std::rc::Rc<{}>> = std::cell::RefCell::new(std::rc::Rc::new({})); }}", name_upper, ty_str, val_str)
-        } else {
-            let construct = match tl.kind {
-                TopLetKind::Const => "top_let_const",
-                TopLetKind::Lazy => "top_let_lazy",
-            };
-            ctx.templates.render_with(construct, None, &[], &[("name", name_upper.as_str()), ("type", ty_str.as_str()), ("value", val_str.as_str())])
-                .unwrap_or_else(|| format!("const {} = {};", name, val_str))
+        let info = ctx.ann.globals.get(&tl.var).unwrap_or_else(|| panic!(
+            "[COMPILER BUG] top-let `{}` missing from the storage attribute",
+            ctx.var_table.get(tl.var).name.as_str()
+        ));
+        use almide_ir::top_let_storage::TopLetStorage as Tls;
+        let name_upper = info.static_name.as_str();
+        let mut rendered = match info.storage {
+            Tls::Cell =>
+                format!("thread_local! {{ static {}: std::cell::Cell<{}> = std::cell::Cell::new({}); }}", name_upper, ty_str, val_str),
+            Tls::RcRefCell =>
+                format!("thread_local! {{ static {}: std::cell::RefCell<std::rc::Rc<{}>> = std::cell::RefCell::new(std::rc::Rc::new({})); }}", name_upper, ty_str, val_str),
+            Tls::Const | Tls::Lazy { .. } => {
+                let construct = match info.storage {
+                    Tls::Const => "top_let_const",
+                    _ => "top_let_lazy",
+                };
+                ctx.templates.render_with(construct, None, &[], &[("name", name_upper), ("type", ty_str.as_str()), ("value", val_str.as_str())])
+                    .unwrap_or_else(|| format!("const {} = {};", name_upper, val_str))
+            }
         };
         if let Some(ref doc) = tl.doc {
             let doc_lines: String = doc.lines()

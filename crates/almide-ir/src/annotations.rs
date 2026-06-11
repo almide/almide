@@ -46,6 +46,17 @@ pub struct CodegenAnnotations {
     /// Keyed by uppercased name for cross-module synthetic refs
     /// (ALMIDE_RT_<MOD>_<NAME>) that carry fresh VarIds.
     pub var_storage_by_name: HashMap<String, VarStorage>,
+    /// §4 Stage 1 — the unified top-let storage attribute, computed once by
+    /// `TopLetStoragePass` and asserted equal to every legacy predicate by
+    /// the walker-side agreement verifier. Stage 2 makes consumers read THIS
+    /// and deletes the legacy sets above.
+    pub globals: HashMap<VarId, crate::top_let_storage::GlobalInfo>,
+    /// Synthetic cross-module use-site VarId → declaration VarId.
+    pub global_alias: HashMap<VarId, VarId>,
+    /// ONE init/eager order (declaration order, root then modules) — the
+    /// vector both the native force loop and wasm `__init_globals` are
+    /// meant to consume in stage 2 (C-007 by construction).
+    pub global_init_order: Vec<VarId>,
     pub ctor_to_enum: HashMap<String, String>,
     pub anon_records: HashMap<Vec<String>, String>,
     /// Anon-record keys (sorted field names) whose struct has a closure (`Fn`)
@@ -123,6 +134,13 @@ impl CodegenAnnotations {
     /// copy-on-write at its mutation sites to preserve value semantics. (AliasCowPass.)
     pub fn needs_cow(&self, var: &VarId) -> bool {
         self.needs_cow.contains(var)
+    }
+
+    /// Alias-resolved global lookup — the ONLY way stage-2 consumers are
+    /// meant to ask "is this VarId a module global, and how is it stored?".
+    pub fn global(&self, id: VarId) -> Option<&crate::top_let_storage::GlobalInfo> {
+        let decl = self.global_alias.get(&id).copied().unwrap_or(id);
+        self.globals.get(&decl)
     }
 
     pub fn is_module_var(&self, var: &VarId, name: &str) -> bool {

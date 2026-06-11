@@ -164,38 +164,27 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
             if ctx.ann.is_shared_mut(id) {
                 return format!("{}.get()", raw_name);
             }
-            let var_info = ctx.var_table.get(*id);
-            // Emit-time prefix: module_origin → "ALMIDE_RT_{ORIGIN}_{NAME}".
-            // `upper` (the thread_local static name) is built from the RAW name via
-            // global_static_name — uppercasing the keyword-escaped `r#box` would
-            // give the invalid `R#BOX`.
-            let (name, upper) = if let Some(ref origin) = var_info.module_origin {
-                let prefixed = format!("ALMIDE_RT_{}_{}", origin.to_uppercase(), raw_name.to_uppercase());
-                (prefixed, ctx.global_static_name(*id))
-            } else {
-                (raw_name.clone(), ctx.global_static_name(*id))
-            };
-            let has_module = var_info.module_origin.is_some();
-            // Module-level mutable var: dispatch by storage type
-            match ctx.ann.get_var_storage(id, &name) {
-                VarStorage::ModuleCell => return format!("{}.with(|c| c.get())", upper),
-                VarStorage::ModuleRc => return format!("{}.with(|c| (**c.borrow()).clone())", upper),
-                _ => {}
+            // §4 Stage 2: a module global is decided by ONE alias-resolved
+            // lookup — storage class AND emitted name come from the same
+            // GlobalInfo the agreement verifier checks. This replaces the
+            // former five-predicate chain (storage-by-name, lazy_vars,
+            // lazy_top_let_names, const_top_let_vars, module_origin
+            // prefixing), whose per-use re-derivation was the #486/#500
+            // drift surface. It also removes the lazy_vars mid-emission
+            // ordering hazard: a Lazy global ALWAYS derefs, regardless of
+            // declaration/use render order.
+            if let Some(info) = ctx.ann.global(*id) {
+                use almide_ir::top_let_storage::TopLetStorage as Tls;
+                return match info.storage {
+                    Tls::Cell => format!("{}.with(|c| c.get())", info.static_name),
+                    Tls::RcRefCell => format!("{}.with(|c| (**c.borrow()).clone())", info.static_name),
+                    Tls::Lazy { .. } => ctx.templates
+                        .render_with("deref_lazy", None, &[], &[("name", info.static_name.as_str())])
+                        .unwrap_or_else(|| info.static_name.clone()),
+                    Tls::Const => info.static_name.clone(),
+                };
             }
-            // Lazy vars need deref. Cross-module vars with module_origin
-            // reference a static LazyLock — auto-deref if the top_let is Lazy.
-            let is_module_lazy = has_module
-                && ctx.ann.lazy_top_let_names.contains(&upper);
-            if ctx.ann.lazy_vars.contains(id) || is_module_lazy {
-                ctx.templates.render_with("deref_lazy", None, &[], &[("name", upper.as_str())])
-                    .unwrap_or_else(|| upper.clone())
-            } else if has_module || ctx.ann.const_top_let_vars.contains(id) {
-                // Const top_lets declare as `const NAME_UPPER` — a lowercase
-                // source binding must not emit its raw name (E0425).
-                upper
-            } else {
-                raw_name
-            }
+            raw_name
         }
         IrExprKind::FnRef { name } => name.to_string(),
 
@@ -682,11 +671,15 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
             // Spread requires an owned value. If base is a LazyLock deref
             // (module top_let), clone to get owned.
             if let IrExprKind::Var { id } = &base.kind {
-                let vi = ctx.var_table.get(*id);
-                if vi.module_origin.is_some() || ctx.ann.lazy_vars.contains(id) {
-                    if !base_str.ends_with(".clone()") {
-                        base_str = format!("{}.clone()", base_str);
-                    }
+                // §4 Stage 2: a Lazy global derefs a LazyLock and every
+                // cross-module use renders through an accessor — both need
+                // an owned clone for the spread. Attribute equivalent of the
+                // former (module_origin || lazy_vars) probe.
+                use almide_ir::top_let_storage::TopLetStorage as Tls;
+                let needs_clone = ctx.ann.global_alias.contains_key(id)
+                    || matches!(ctx.ann.global(*id).map(|i| i.storage), Some(Tls::Lazy { .. }));
+                if needs_clone && !base_str.ends_with(".clone()") {
+                    base_str = format!("{}.clone()", base_str);
                 }
             }
             let fields_str = fields.iter()
@@ -1401,9 +1394,10 @@ fn render_runtime_call(ctx: &RenderContext, symbol: &almide_base::intern::Sym, a
             if let IrExprKind::Borrow { expr: inner, .. } | IrExprKind::Clone { expr: inner } = &args[0].kind {
                 if let IrExprKind::Var { id } = &inner.kind {
                     let name = ctx.var_name(*id).to_string();
-                    let upper = ctx.global_static_name(*id);
-                    match ctx.ann.get_var_storage(id, &name) {
-                        VarStorage::ModuleRc => {
+                    // §4 Stage 2: a global target dispatches on the attribute.
+                    if let Some(info) = ctx.ann.global(*id) {
+                        use almide_ir::top_let_storage::TopLetStorage as Tls;
+                        if matches!(info.storage, Tls::RcRefCell) {
                             let rest_args = args[1..].iter().map(|a| render_expr(ctx, a))
                                 .collect::<Vec<_>>().join(", ");
                             let rc_mut = "std::rc::Rc::make_mut(&mut *c.borrow_mut())";
@@ -1412,8 +1406,10 @@ fn render_runtime_call(ctx: &RenderContext, symbol: &almide_base::intern::Sym, a
                             } else {
                                 format!("{}, {}", rc_mut, rest_args)
                             };
-                            return format!("{}.with(|c| {}({}))", upper, symbol.as_str(), call_args);
+                            return format!("{}.with(|c| {}({}))", info.static_name, symbol.as_str(), call_args);
                         }
+                    }
+                    match ctx.ann.get_var_storage(id, &name) {
                         VarStorage::RcCow => {
                             let rest_args = args[1..].iter().map(|a| render_expr(ctx, a))
                                 .collect::<Vec<_>>().join(", ");

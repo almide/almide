@@ -1,0 +1,12 @@
+// Stage C acceptance (deep case): a 2M-deep self-recursive TCO call with a
+// CONSTANT-size accumulator must run in O(1) memory — per-iteration managed-
+// param reclamation, not the loop-region arena (which cannot help inside a
+// single call). Pre-Stage-C this peaked at gigabytes (every intermediate
+// accumulator leaked); the bar is the wasmtime floor (~tens of MB).
+fn spin(n: Int, acc: String) -> String =
+  if n == 0 then acc
+  else spin(n - 1, string.take(acc + "x", 8))
+
+fn main() -> Unit = {
+  println(string.len(spin(2000000, "seed")) |> int.to_string)
+}

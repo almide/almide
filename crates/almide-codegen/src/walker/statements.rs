@@ -231,18 +231,27 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
             if ctx.ann.is_shared_mut(var) {
                 return format!("{}.set({});", target_s, render_expr(ctx, value));
             }
-            let upper = ctx.global_static_name(*var);
             let value_s = render_expr(ctx, value);
-            // Storage lookup keys on the PREFIXED static name for module-
-            // origin vars (the name-keyed fallback deliberately refuses
-            // unprefixed names) — passing the bare IR name classified a
-            // cross-module global assign as Local and rendered a bare
-            // `COUNTER = …` (#505).
-            match ctx.ann.get_var_storage(var, &upper) {
-                VarStorage::ModuleCell => format!("{}.with(|c| c.set({}));", upper, value_s),
-                VarStorage::ModuleRc => format!("{}.with(|c| *c.borrow_mut() = std::rc::Rc::new(({}).into()));", upper, value_s),
+            // §4 Stage 2: module globals dispatch on the alias-resolved
+            // attribute (one lookup owns storage AND the emitted name) —
+            // replaces the name-keyed get_var_storage probe whose prefixing
+            // subtleties produced #505. A Lazy/Const global in assign
+            // position is impossible (the checker rejects assignment to an
+            // immutable binding) — encoded as an ICE, not a silent arm.
+            if let Some(info) = ctx.ann.global(*var) {
+                use almide_ir::top_let_storage::TopLetStorage as Tls;
+                return match info.storage {
+                    Tls::Cell => format!("{}.with(|c| c.set({}));", info.static_name, value_s),
+                    Tls::RcRefCell => format!("{}.with(|c| *c.borrow_mut() = std::rc::Rc::new(({}).into()));", info.static_name, value_s),
+                    Tls::Const | Tls::Lazy { .. } => unreachable!(
+                        "[COMPILER BUG] assignment to immutable global `{}` reached codegen",
+                        info.static_name
+                    ),
+                };
+            }
+            match ctx.ann.get_var_storage(var, &target_s) {
                 VarStorage::RcCow => format!("{} = RcCow::new({});", target_s, value_s),
-                VarStorage::Local => ctx.templates.render_with("assignment", None, &[], &[("target", target_s.as_str()), ("value", value_s.as_str())])
+                _ => ctx.templates.render_with("assignment", None, &[], &[("target", target_s.as_str()), ("value", value_s.as_str())])
                     .unwrap_or_else(|| format!("_ = _;")),
             }
         }
@@ -297,11 +306,23 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
             if ctx.ann.is_shared_mut(target) {
                 return format!("{}.borrow_mut()[{} as usize] = {};", target_str, idx_str, cast_val);
             }
+            // §4 Stage 2: globals dispatch on the attribute. A scalar Cell
+            // global cannot be index-assigned — the legacy arm emitted a
+            // SILENT NO-OP `c.get();` for that impossible cell; it is now an
+            // ICE so any future routing hole fails the build instead.
+            if let Some(info) = ctx.ann.global(*target) {
+                use almide_ir::top_let_storage::TopLetStorage as Tls;
+                return match info.storage {
+                    Tls::RcRefCell => format!("{}.with(|c| std::rc::Rc::make_mut(&mut *c.borrow_mut())[{} as usize] = {});", info.static_name, idx_str, cast_val),
+                    other => unreachable!(
+                        "[COMPILER BUG] index-assign to {:?} global `{}`",
+                        other, info.static_name
+                    ),
+                };
+            }
             match ctx.ann.get_var_storage(target, &target_str) {
-                VarStorage::ModuleRc => format!("{}.with(|c| std::rc::Rc::make_mut(&mut *c.borrow_mut())[{} as usize] = {});", upper, idx_str, cast_val),
-                VarStorage::ModuleCell => format!("{}.with(|c| c.get());", upper),
                 VarStorage::RcCow => format!("{}.make_mut()[{} as usize] = {};", target_str, idx_str, cast_val),
-                VarStorage::Local => format!("{}[{} as usize] = {};", target_str, idx_str, cast_val),
+                _ => format!("{}[{} as usize] = {};", target_str, idx_str, cast_val),
             }
         }
         IrStmtKind::MapInsert { target, key, value } => {
@@ -313,10 +334,19 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
             if ctx.ann.is_shared_mut(target) {
                 return format!("{}.borrow_mut().insert({}, {});", target_str, key_str, val_str);
             }
+            if let Some(info) = ctx.ann.global(*target) {
+                use almide_ir::top_let_storage::TopLetStorage as Tls;
+                return match info.storage {
+                    Tls::RcRefCell => format!("{}.with(|c| std::rc::Rc::make_mut(&mut *c.borrow_mut()).insert({}, {}));", info.static_name, key_str, val_str),
+                    other => unreachable!(
+                        "[COMPILER BUG] map-insert into {:?} global `{}`",
+                        other, info.static_name
+                    ),
+                };
+            }
             match ctx.ann.get_var_storage(target, &target_str) {
-                VarStorage::ModuleRc => format!("{}.with(|c| std::rc::Rc::make_mut(&mut *c.borrow_mut()).insert({}, {}));", upper, key_str, val_str),
                 VarStorage::RcCow => format!("{}.make_mut().insert({}, {});", target_str, key_str, val_str),
-                VarStorage::ModuleCell | VarStorage::Local => ctx.templates.render_with("map_insert", None, &[], &[("target", target_str.as_str()), ("key", key_str.as_str()), ("value", val_str.as_str())])
+                _ => ctx.templates.render_with("map_insert", None, &[], &[("target", target_str.as_str()), ("key", key_str.as_str()), ("value", val_str.as_str())])
                     .unwrap_or_else(|| "map_set(...)".into()),
             }
         }
@@ -328,10 +358,19 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
             if ctx.ann.is_shared_mut(target) {
                 return format!("{}.borrow_mut().{} = {};", target_str, field, val_str);
             }
+            if let Some(info) = ctx.ann.global(*target) {
+                use almide_ir::top_let_storage::TopLetStorage as Tls;
+                return match info.storage {
+                    Tls::RcRefCell => format!("{}.with(|c| std::rc::Rc::make_mut(&mut *c.borrow_mut()).{} = {});", info.static_name, field, val_str),
+                    other => unreachable!(
+                        "[COMPILER BUG] field-assign to {:?} global `{}`",
+                        other, info.static_name
+                    ),
+                };
+            }
             match ctx.ann.get_var_storage(target, &target_str) {
-                VarStorage::ModuleRc => format!("{}.with(|c| std::rc::Rc::make_mut(&mut *c.borrow_mut()).{} = {});", upper, field, val_str),
                 VarStorage::RcCow => format!("{}.make_mut().{} = {};", target_str, field, val_str),
-                VarStorage::ModuleCell | VarStorage::Local => format!("{}.{} = {};", target_str, field, val_str),
+                _ => format!("{}.{} = {};", target_str, field, val_str),
             }
         }
         IrStmtKind::BindDestructure { pattern, value } => {
@@ -393,10 +432,16 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
             let upper = ctx.global_static_name(*target);
             let a_s = render_expr(ctx, a);
             let b_s = render_expr(ctx, b);
+            if let Some(info) = ctx.ann.global(*target) {
+                use almide_ir::top_let_storage::TopLetStorage as Tls;
+                return match info.storage {
+                    Tls::RcRefCell => format!("{}.with(|c| std::rc::Rc::make_mut(&mut *c.borrow_mut()).swap({} as usize, {} as usize));", info.static_name, a_s, b_s),
+                    other => unreachable!("[COMPILER BUG] list-swap on {:?} global `{}`", other, info.static_name),
+                };
+            }
             match ctx.ann.get_var_storage(target, &t) {
-                VarStorage::ModuleRc => format!("{}.with(|c| std::rc::Rc::make_mut(&mut *c.borrow_mut()).swap({} as usize, {} as usize));", upper, a_s, b_s),
                 VarStorage::RcCow => format!("{}.make_mut().swap({} as usize, {} as usize);", t, a_s, b_s),
-                VarStorage::ModuleCell | VarStorage::Local => ctx.templates.render_with("peep_swap", None, &[], &[("target", &t), ("a", &a_s), ("b", &b_s)])
+                _ => ctx.templates.render_with("peep_swap", None, &[], &[("target", &t), ("a", &a_s), ("b", &b_s)])
                     .unwrap_or_else(|| format!("{}.swap({}, {});", t, a_s, b_s)),
             }
         }
@@ -404,10 +449,16 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
             let t = ctx.var_name(*target).to_string();
             let upper = ctx.global_static_name(*target);
             let e = render_expr(ctx, end);
+            if let Some(info) = ctx.ann.global(*target) {
+                use almide_ir::top_let_storage::TopLetStorage as Tls;
+                return match info.storage {
+                    Tls::RcRefCell => format!("{}.with(|c| std::rc::Rc::make_mut(&mut *c.borrow_mut())[..={} as usize].reverse());", info.static_name, e),
+                    other => unreachable!("[COMPILER BUG] list-reverse on {:?} global `{}`", other, info.static_name),
+                };
+            }
             match ctx.ann.get_var_storage(target, &t) {
-                VarStorage::ModuleRc => format!("{}.with(|c| std::rc::Rc::make_mut(&mut *c.borrow_mut())[..={} as usize].reverse());", upper, e),
                 VarStorage::RcCow => format!("{}.make_mut()[..={} as usize].reverse();", t, e),
-                VarStorage::ModuleCell | VarStorage::Local => ctx.templates.render_with("peep_reverse", None, &[], &[("target", &t), ("end", &e)])
+                _ => ctx.templates.render_with("peep_reverse", None, &[], &[("target", &t), ("end", &e)])
                     .unwrap_or_else(|| format!("{}[..={} as usize].reverse();", t, e)),
             }
         }
@@ -415,10 +466,16 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
             let t = ctx.var_name(*target).to_string();
             let upper = ctx.global_static_name(*target);
             let e = render_expr(ctx, end);
+            if let Some(info) = ctx.ann.global(*target) {
+                use almide_ir::top_let_storage::TopLetStorage as Tls;
+                return match info.storage {
+                    Tls::RcRefCell => format!("{}.with(|c| std::rc::Rc::make_mut(&mut *c.borrow_mut())[..={} as usize].rotate_left(1));", info.static_name, e),
+                    other => unreachable!("[COMPILER BUG] list-rotate on {:?} global `{}`", other, info.static_name),
+                };
+            }
             match ctx.ann.get_var_storage(target, &t) {
-                VarStorage::ModuleRc => format!("{}.with(|c| std::rc::Rc::make_mut(&mut *c.borrow_mut())[..={} as usize].rotate_left(1));", upper, e),
                 VarStorage::RcCow => format!("{}.make_mut()[..={} as usize].rotate_left(1);", t, e),
-                VarStorage::ModuleCell | VarStorage::Local => ctx.templates.render_with("peep_rotate_left", None, &[], &[("target", &t), ("end", &e)])
+                _ => ctx.templates.render_with("peep_rotate_left", None, &[], &[("target", &t), ("end", &e)])
                     .unwrap_or_else(|| format!("{}[..={} as usize].rotate_left(1);", t, e)),
             }
         }
@@ -427,16 +484,25 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
             let s = ctx.var_name(*src).to_string();
             let upper_d = ctx.global_static_name(*dst);
             let n = render_expr(ctx, len);
+            // §4 Stage 2: both the dst write AND the src re-read dispatch on
+            // the attribute (the src probe was the 9th hand-rolled copy of
+            // the ModuleRc protocol).
+            let src_read = match ctx.ann.global(*src) {
+                Some(si) if matches!(si.storage, almide_ir::top_let_storage::TopLetStorage::RcRefCell) =>
+                    format!("{}.with(|c| c.borrow().clone())", si.static_name),
+                _ => s.clone(),
+            };
+            if let Some(info) = ctx.ann.global(*dst) {
+                use almide_ir::top_let_storage::TopLetStorage as Tls;
+                return match info.storage {
+                    Tls::RcRefCell => format!("{}.with(|c| std::rc::Rc::make_mut(&mut *c.borrow_mut())[..{n} as usize].copy_from_slice(&{src_read}[..{n} as usize]));", info.static_name, n=n, src_read=src_read),
+                    other => unreachable!("[COMPILER BUG] copy-slice into {:?} global `{}`", other, info.static_name),
+                };
+            }
             match ctx.ann.get_var_storage(dst, &d) {
-                VarStorage::ModuleRc => {
-                    let src_read = if matches!(ctx.ann.get_var_storage(src, &s), VarStorage::ModuleRc) {
-                        format!("{}.with(|c| c.borrow().clone())", ctx.global_static_name(*src))
-                    } else { s.clone() };
-                    format!("{}.with(|c| std::rc::Rc::make_mut(&mut *c.borrow_mut())[..{n} as usize].copy_from_slice(&{src_read}[..{n} as usize]));", upper_d, n=n, src_read=src_read)
-                }
-                VarStorage::RcCow => format!("{}.make_mut()[..{} as usize].copy_from_slice(&{}[..{} as usize]);", d, n, s, n),
-                VarStorage::ModuleCell | VarStorage::Local => ctx.templates.render_with("peep_copy_slice", None, &[], &[("dst", &d), ("src", &s), ("n", &n)])
-                    .unwrap_or_else(|| format!("{}[..{} as usize].copy_from_slice(&{}[..{} as usize]);", d, n, s, n)),
+                VarStorage::RcCow => format!("{}.make_mut()[..{} as usize].copy_from_slice(&{}[..{} as usize]);", d, n, src_read, n),
+                _ => ctx.templates.render_with("peep_copy_slice", None, &[], &[("dst", &d), ("src", &src_read), ("n", &n)])
+                    .unwrap_or_else(|| format!("{}[..{} as usize].copy_from_slice(&{}[..{} as usize]);", d, n, src_read, n)),
             }
         }
         IrStmtKind::Comment { text } => format!("// {}", text),
