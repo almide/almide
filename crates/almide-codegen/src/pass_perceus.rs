@@ -405,6 +405,18 @@ fn insert_decs_before_ret(fb: FnBody, heap_vars: &[VarId], ret_vars: &HashSet<Va
                     for var in vars_to_dec.iter().rev() {
                         res = FnBody::Dec { var: *var, body: Box::new(res) };
                     }
+                    // Rule 1 applies HERE too: this hand-built VDecl bypasses
+                    // the ChainHead::VDecl arm, so a ret expr that ALIASES one
+                    // of the locals being Dec'd below (e.g. `if filled then
+                    // base + "…" else base` with `Dec base` following) needs
+                    // its own reference or the function returns a freed
+                    // pointer. This under-count was masked for years by the
+                    // chain-temp over-incs the alias-gated hoist removed
+                    // (caught by the byte gate as a resurrection trap,
+                    // default_fields_test).
+                    if is_heap_type(&ret_ty) && yields_borrowed_alias(&expr) {
+                        res = FnBody::Inc { var: ret_var, body: Box::new(res) };
+                    }
                     FnBody::VDecl { var: ret_var, ty: ret_ty, mutability: Mutability::Let, expr, body: Box::new(res) }
                 } else {
                     // No lift needed — just insert Decs before Ret
