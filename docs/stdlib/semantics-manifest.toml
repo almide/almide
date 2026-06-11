@@ -1,0 +1,142 @@
+# Stdlib semantics manifest — §8 step 2 (#521).
+#
+# THE machine-checked record of semantic dimensions prose used to carry
+# alone (the #419 class: docs said characters, the implementation did bytes,
+# for years). Enforced by scripts/check-semantics-manifest.sh:
+#
+#   1. COVERAGE (signature-driven, no human list): every `string` fn whose
+#      signature mentions Int MUST have an entry here declaring its
+#      `index_unit`. A new Int-bearing fn cannot land without declaring its
+#      unit.
+#   2. PROBES: every entry carries an executable probe (multibyte input) +
+#      expected output. The script REGENERATES
+#      spec/stdlib/string_semantics_manifest_test.almd from these and fails
+#      on diff — doc and test can never drift apart, and the test failing
+#      means the IMPLEMENTATION drifted from the declared semantics.
+#
+# index_unit vocabulary:
+#   codepoint — positions/lengths count Unicode scalar values (C-065)
+#   byte      — positions/lengths count UTF-8 bytes (only where the NAME
+#               says bytes)
+#   scalar    — the Int is a Unicode scalar VALUE, not a position
+#   count     — the Int is an occurrence/repetition count, not a position
+#
+# Modules ratchet on: string is the founding module (the #419 home);
+# adding a module = extend COVERED_MODULES in the check script.
+
+[string]
+default_index_unit = "codepoint"
+
+[[string.fn]]
+name = "len"
+index_unit = "codepoint"
+probe = 'string.len("café7")'
+expect = "5"
+
+[[string.fn]]
+name = "length"
+index_unit = "codepoint"
+probe = 'string.length("café7")'
+expect = "5"
+
+[[string.fn]]
+name = "slice"
+index_unit = "codepoint"
+probe = 'string.slice("café7", 0, 4)'
+expect = "café"
+
+[[string.fn]]
+name = "pad_start"
+index_unit = "codepoint"
+probe = 'string.pad_start("é", 3, "x")'
+expect = "xxé"
+
+[[string.fn]]
+name = "pad_end"
+index_unit = "codepoint"
+probe = 'string.pad_end("é", 3, "x")'
+expect = "éxx"
+
+[[string.fn]]
+name = "to_bytes"
+index_unit = "byte"
+probe = 'list.len(string.to_bytes("é"))'
+expect = "2"
+
+[[string.fn]]
+name = "from_bytes"
+index_unit = "byte"
+probe = 'string.from_bytes([195, 169])'
+expect = "é"
+
+[[string.fn]]
+name = "get"
+index_unit = "codepoint"
+probe = 'string.get("café7", 3) ?? "?"'
+expect = "é"
+
+[[string.fn]]
+name = "index_of"
+index_unit = "codepoint"
+probe = 'string.index_of("café7", "7") ?? -1'
+expect = "4"
+
+[[string.fn]]
+name = "last_index_of"
+index_unit = "codepoint"
+probe = 'string.last_index_of("café7", "7") ?? -1'
+expect = "4"
+
+[[string.fn]]
+name = "repeat"
+index_unit = "count"
+probe = 'string.repeat("é", 2)'
+expect = "éé"
+
+[[string.fn]]
+name = "codepoint"
+index_unit = "scalar"
+probe = 'string.codepoint("é") ?? -1'
+expect = "233"
+
+[[string.fn]]
+name = "from_codepoint"
+index_unit = "scalar"
+probe = 'string.from_codepoint(233)'
+expect = "é"
+
+[[string.fn]]
+name = "count"
+index_unit = "count"
+probe = 'string.count("ééa", "é")'
+expect = "2"
+
+[[string.fn]]
+name = "take"
+index_unit = "codepoint"
+probe = 'string.take("café7", 4)'
+expect = "café"
+
+[[string.fn]]
+name = "take_end"
+index_unit = "codepoint"
+probe = 'string.take_end("café7", 2)'
+expect = "é7"
+
+[[string.fn]]
+name = "drop"
+index_unit = "codepoint"
+probe = 'string.drop("café7", 3)'
+expect = "é7"
+
+[[string.fn]]
+name = "drop_end"
+index_unit = "codepoint"
+probe = 'string.drop_end("café7", 2)'
+expect = "caf"
+
+[[string.fn]]
+name = "run_length_encode"
+index_unit = "count"
+probe = 'string.run_length_encode("ééa")'
+expect = """[("é", 2), ("a", 1)]"""
