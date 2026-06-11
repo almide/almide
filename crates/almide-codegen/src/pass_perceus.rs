@@ -254,24 +254,17 @@ fn perceus_fnbody(fb: FnBody, var_table: &mut VarTable) -> FnBody {
                             let bind_pos = stmts.iter().rposition(|st| matches!(
                                 &st.kind, IrStmtKind::Bind { var: bv, .. } if *bv == tail_id
                             ));
-                            if let Some(pos) = bind_pos {
-                                // The +1 is owed only when the tail temp's
-                                // OWN VALUE aliases (the unwrap_or-of-a-temp
-                                // shape: the temp's Dec frees the payload
-                                // first, json_gltf). A FRESH tail value moved
-                                // out of the block owns itself — Inc'ing it
-                                // was a pure +1 leak per execution (16 B/iter
-                                // in TCO loops, measured).
-                                let tail_value_aliases = matches!(
-                                    &stmts[pos].kind,
-                                    IrStmtKind::Bind { value, .. } if yields_borrowed_alias(value)
-                                );
-                                if tail_value_aliases {
-                                    stmts.insert(pos + 1, IrStmt {
-                                        kind: IrStmtKind::RcInc { var: tail_id },
-                                        span: None,
-                                    });
-                                }
+                            if let Some(_pos) = bind_pos {
+                                // The inner block was ALREADY processed by
+                                // perceus_expr: its own VDecl arm applied
+                                // Rule 1 to the tail bind (bind-adjacent,
+                                // before any trailing temp Dec — satisfying
+                                // the json_gltf ordering hazard this hoist
+                                // was built for). Inserting a second Inc here
+                                // DOUBLE-applied the rule: +1 leak per
+                                // execution (verified — two rc_incs on the
+                                // tail temp). All this arm must do is
+                                // suppress the LATE outer Inc.
                                 inner_inc_done = true;
                             }
                         }
@@ -296,7 +289,39 @@ fn perceus_fnbody(fb: FnBody, var_table: &mut VarTable) -> FnBody {
                 // Dec handles the final value. Intermediate old values leak by
                 // design in the current model (same as Koka's approach for var).
                 // TODO: proper old-value recovery requires COW or arena allocation.
-                FnBody::Assign { var, expr, body: Box::new(result) }
+                //
+                // Rule 1 applies to ASSIGN exactly as to VDecl: the var keeps
+                // its scope-end Dec, so an ALIAS-shaped RHS must acquire its
+                // own reference or that Dec under-counts the aliased value —
+                // `var c = fresh; c = list.get_or(xs, 0, d)` double-freed the
+                // shared element (rc==0 sentinel trap, verified repro). The
+                // VDecl arm had this rule from the start; this arm was the
+                // bypass.
+                //
+                // EXCEPTION — MOVE, not share: a bare-Var RHS whose source is
+                // a scope-Dec-EXEMPT temp (`__tco_*`, `__br_*`,
+                // `__perceus_*`: the same name classes the Ret/Nop dec
+                // insertion skips) DONATES its reference — those temps never
+                // get their own Dec, so the assign transfers ownership and an
+                // Inc here double-counts (+1 per TCO loop iteration,
+                // measured: deep churn 7 MB → 55 MB).
+                let ty = var_table.get(var).ty.clone();
+                let moved_from_exempt_temp = matches!(&expr.kind,
+                    IrExprKind::Var { id } if {
+                        let n = var_table.get(*id).name;
+                        let n = n.as_str();
+                        n.starts_with("__tco_") || n.starts_with("__br_")
+                            || n.starts_with("__perceus_")
+                    });
+                let alias_inc = is_heap_type(&ty)
+                    && yields_borrowed_alias(&expr)
+                    && !moved_from_exempt_temp;
+                let body = if alias_inc {
+                    FnBody::Inc { var, body: Box::new(result) }
+                } else {
+                    result
+                };
+                FnBody::Assign { var, expr, body: Box::new(body) }
             }
             ChainHead::Expr { mut expr } => {
                 perceus_expr(&mut expr, var_table);
@@ -907,11 +932,16 @@ fn insert_rc_ops(func: &mut IrFunction, var_table: &mut VarTable) -> bool {
             kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None,
         });
         let span = body.span;
+        // NOTE: no hand-built RcInc here — the Bind flows through the
+        // ChainHead::VDecl arm whose Rule 1 fires on the IDENTICAL predicate
+        // (is_heap && yields_borrowed_alias). The earlier explicit Inc
+        // DOUBLE-applied with it: +1 rc leak per call of every
+        // alias-returning function (verified by IR dump — two rc_incs on
+        // __ret_dup).
         func.body = IrExpr {
             kind: IrExprKind::Block {
                 stmts: vec![
                     IrStmt { kind: IrStmtKind::Bind { var: dup_var, mutability: Mutability::Let, ty: ret_ty.clone(), value: body }, span },
-                    IrStmt { kind: IrStmtKind::RcInc { var: dup_var }, span: None },
                 ],
                 expr: Some(Box::new(IrExpr { kind: IrExprKind::Var { id: dup_var }, ty: ret_ty, span: None, def_id: None })),
             },
