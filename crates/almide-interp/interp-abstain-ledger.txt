@@ -1,0 +1,84 @@
+# interp-abstain-ledger — fixtures of spec/wasm_cross/ the reference
+# interpreter cannot evaluate (its self-reported coverage gaps), i.e. the
+# current boundary of the executable spec. CG-1 gap audit; shrink to zero.
+#
+# Format: <fixture-stem>  <reason as last observed>  (first token is the key)
+# Gate:   interp_cross_target_test.rs::interp_abstain_ledger — fails on a
+#         new abstain missing here AND on a stale entry that now evaluates.
+# Regenerate (then review the diff!):
+#   ALMIDE_UPDATE_INTERP_LEDGER=1 cargo test -p almide-interp interp_abstain_ledger
+# Preferred alternative to adding an entry: widen the interp glue
+# (bridge.rs / hofs.rs / dispatch.rs — see crates/almide-interp/CLAUDE.md).
+
+alias_cow  out-of-interp-scope capability: in-place container mutation `list.pop` (mut receiver; interp args are by-value so the binding cannot be written back)
+assign_alias_rc  out-of-interp-scope capability: list.get_or
+bytes_f16  out-of-interp-scope capability: bytes.from_list
+bytes_rawptr  out-of-interp-scope capability: bytes.from_list
+compound_eq  out-of-interp-scope capability: list.index_of
+compound_repr_interp  out-of-interp-scope capability: set.from_list
+compound_repr_records_interp  out-of-interp-scope capability: set.from_list
+container_alias_return  out-of-interp-scope capability: list.get_or
+effect_tco  interp fuel/recursion budget exhausted
+empty_collection_annotated  out-of-interp-scope capability: set.new
+empty_collection_fold  out-of-interp-scope capability: map.new
+encoding_base64  out-of-interp-scope capability: bytes.from_string
+fan_any_allfail  out-of-interp-scope capability: fan.any
+fan_deterministic  out-of-interp-scope capability: fan.map
+fan_map_err  out-of-interp-scope capability: fan.map
+fan_map_inline_err  out-of-interp-scope capability: fan.map
+fan_map_inline_lambda  out-of-interp-scope capability: fan.map
+fan_pure_thunks  out-of-interp-scope capability: fan.race
+fan_race_err  out-of-interp-scope capability: fan.race
+fan_var_thunk_list  out-of-interp-scope capability: fan.race
+float_sign_minmax_ieee  out-of-interp-scope capability: transcendental `math.log2` (backends use vendored musl-libm; interp's platform libm diverges in the last ULP — no oracle match)
+fs_preopen_resolve  out-of-interp-scope capability: fs.write
+heap_arena  out-of-interp-scope capability: bytes.heap_save
+inplace_mutator_statement  out-of-interp-scope capability: in-place container mutation `list.push` (mut receiver; interp args are by-value so the binding cannot be written back)
+int8_div_overflow  out-of-interp-scope capability: int.from_int8
+int_from_hex  out-of-interp-scope capability: int.from_hex
+int_pow_negative_exponent  out-of-interp-scope capability: transcendental `math.pow` (backends use vendored musl-libm; interp's platform libm diverges in the last ULP — no oracle match)
+int_pow_overflow_wraps  out-of-interp-scope capability: transcendental `math.pow` (backends use vendored musl-libm; interp's platform libm diverges in the last ULP — no oracle match)
+int_rotate_nonpositive_width  out-of-interp-scope capability: int.rotate_right
+int_wrap_rotate_width  out-of-interp-scope capability: int.rotate_left
+json_gltf_walk  out-of-interp-scope capability: json.parse
+json_path_edges  out-of-interp-scope capability: json.parse
+json_value  out-of-interp-scope capability: json.parse
+list_comprehensive  out-of-interp-scope capability: list.repeat
+list_count_index_truncation  out-of-interp-scope capability: list.take
+list_insert_clamp  out-of-interp-scope capability: list.insert
+list_remove_at_oob  out-of-interp-scope capability: list.remove_at
+list_slice_oob  out-of-interp-scope capability: list.slice
+list_swap_oob  out-of-interp-scope capability: list.swap
+list_total_order  out-of-interp-scope capability: list.min/max on non-comparable elements
+list_with_capacity  out-of-interp-scope capability: list.with_capacity
+map_filter  out-of-interp-scope capability: map.new
+map_fold  out-of-interp-scope capability: map.new
+map_insertion_order  out-of-interp-scope capability: map.entries
+map_set_eq  out-of-interp-scope capability: map.new
+map_set_ops  out-of-interp-scope capability: map.from_list
+map_set_typechange  out-of-interp-scope capability: map.from_list
+map_wide_int_key  out-of-interp-scope capability: map.from_list
+math_explog  out-of-interp-scope capability: transcendental `math.exp` (backends use vendored musl-libm; interp's platform libm diverges in the last ULP — no oracle match)
+math_log_gamma  out-of-interp-scope capability: transcendental `math.fpow` (backends use vendored musl-libm; interp's platform libm diverges in the last ULP — no oracle match)
+memory_stress  out-of-interp-scope capability: in-place container mutation `list.push` (mut receiver; interp args are by-value so the binding cannot be written back)
+mut_map_param  out-of-interp-scope capability: in-place container mutation `map.insert` (mut receiver; interp args are by-value so the binding cannot be written back)
+option_result  out-of-interp-scope capability: option.to_list
+playground_default  out-of-interp-scope capability: string.drop
+rc_alloc_stress  out-of-interp-scope capability: in-place container mutation `list.push` (mut receiver; interp args are by-value so the binding cannot be written back)
+regex_engine  out-of-interp-scope capability: regex.is_match
+regex_fuzz_batch  out-of-interp-scope capability: regex.is_match
+set_insertion_order  out-of-interp-scope capability: set.from_list
+sized_numeric_literals  out-of-interp-scope capability: int.from_int8
+string_case_unicode  out-of-interp-scope capability: string.from_codepoint
+string_codepoint  out-of-interp-scope capability: string.take
+string_codepoint_index  out-of-interp-scope capability: string.slice
+string_count_truncation  out-of-interp-scope capability: string.take
+string_from_bytes  out-of-interp-scope capability: string.to_bytes
+string_ops  out-of-interp-scope capability: string.slice
+string_ops_drain  out-of-interp-scope capability: string.replace_first
+string_predicates  out-of-interp-scope capability: string.is_alpha
+string_rle  out-of-interp-scope capability: string.run_length_encode
+string_split_rle_codepoint  out-of-interp-scope capability: string.run_length_encode
+string_whitespace  out-of-interp-scope capability: string.from_codepoint
+trig_libm  out-of-interp-scope capability: transcendental `math.sin` (backends use vendored musl-libm; interp's platform libm diverges in the last ULP — no oracle match)
+value_repr  out-of-interp-scope capability: value.int
