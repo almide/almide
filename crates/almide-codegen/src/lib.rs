@@ -419,6 +419,13 @@ fn rust_runtime_prelude(for_crate: bool) -> String {
     // (`Error: <msg>\n` + exit 1) and to the WASM div/mod trap.
     s.push_str(&format!("{macro_attr}macro_rules! almide_div {{ ($a:expr, $b:expr) => {{{{ let (__a, __b) = ($a, $b); match __a.checked_div(__b) {{ Some(__v) => __v, None => {{ eprintln!(\"Error: {{}}\", if __b == 0 {{ \"division by zero\" }} else {{ \"integer overflow\" }}); std::process::exit(1); }} }} }}}}; }}\n"));
     s.push_str(&format!("{macro_attr}macro_rules! almide_mod {{ ($a:expr, $b:expr) => {{{{ let (__a, __b) = ($a, $b); match __a.checked_rem(__b) {{ Some(__v) => __v, None => {{ eprintln!(\"Error: {{}}\", if __b == 0 {{ \"division by zero\" }} else {{ \"integer overflow\" }}); std::process::exit(1); }} }} }}}}; }}\n"));
+    // almide_index!/almide_index_set!: bounds-checked `xs[i]` get/set that abort
+    // with the UNIFIED message (`Error: index out of bounds\n` + exit 1), so a
+    // native OOB index matches the wasm trap and the div/mod abort contract
+    // (#554/C-072) instead of a raw Rust panic (exit 101). i64 index is range-
+    // checked against len as usize; negative or >= len aborts.
+    s.push_str(&format!("{macro_attr}macro_rules! almide_index {{ ($xs:expr, $i:expr) => {{{{ let (__xs, __i) = (&$xs, $i as i64); if __i < 0 || (__i as u64) >= __xs.len() as u64 {{ eprintln!(\"Error: index out of bounds\"); std::process::exit(1); }} __xs[__i as usize].clone() }}}}; }}\n"));
+    s.push_str(&format!("{macro_attr}macro_rules! almide_index_set {{ ($xs:expr, $i:expr, $v:expr) => {{{{ let __i = $i as i64; if __i < 0 || (__i as u64) >= $xs.len() as u64 {{ eprintln!(\"Error: index out of bounds\"); std::process::exit(1); }} $xs[__i as usize] = $v; }}}}; }}\n"));
     // RcCow<T>: COW value type. Clone = Rc::clone (O(1)), mutation = Rc::make_mut (COW).
     // Inspired by Swift's value type semantics.
     s.push_str(&format!("{vis}struct RcCow<T>({vis}std::rc::Rc<T>);\n"));

@@ -286,30 +286,38 @@ impl FuncCompiler<'_> {
         let ptr = self.scratch.alloc_i32();
         wasm!(self.func, { local_set(ptr); });
 
-        // index → i32 local
+        // index → i32 local, BOUNDS-CHECKED on the FULL i64 first (#554/C-072).
+        // The prior code did `i32_wrap_i64` BEFORE the u32 compare, so an index
+        // >= 2^32 truncated to a small in-range value and silently read the
+        // WRONG element. Check the full i64 against len (zero-extended) so the
+        // high bits cannot be lost, and abort through the UNIFIED div_trap path
+        // ("Error: index out of bounds\n" + exit 1) instead of a bare
+        // `unreachable` trap — byte-identical to native's abort contract.
         let idx = self.scratch.alloc_i32();
+        let oob_msg = self.emitter.intern_string("Error: index out of bounds\n") as i32;
+        let div_trap = self.emitter.rt.div_trap;
         if let IrExprKind::LitInt { value } = &index.kind {
-            wasm!(self.func, { i32_const(*value as i32); local_set(idx); });
+            let v = *value;
+            // Constant index: the bound is dynamic (len), so still guard, but the
+            // index itself fits i32 once we know it is non-negative and < 2^31.
+            let idx64 = self.scratch.alloc_i64();
+            wasm!(self.func, { i64_const(v); local_set(idx64); });
+            self.emit_index_bound_guard(idx64, ptr, oob_msg, div_trap);
+            wasm!(self.func, { local_get(idx64); i32_wrap_i64; local_set(idx); });
+            self.scratch.free_i64(idx64);
         } else {
+            let idx64 = self.scratch.alloc_i64();
             self.emit_expr(index);
             if matches!(&index.ty, Ty::Int) {
-                wasm!(self.func, { i32_wrap_i64; });
+                wasm!(self.func, { local_set(idx64); });
+            } else {
+                // narrow-int index already i32 on the stack — widen to i64
+                wasm!(self.func, { i64_extend_i32_s; local_set(idx64); });
             }
-            wasm!(self.func, { local_set(idx); });
+            self.emit_index_bound_guard(idx64, ptr, oob_msg, div_trap);
+            wasm!(self.func, { local_get(idx64); i32_wrap_i64; local_set(idx); });
+            self.scratch.free_i64(idx64);
         }
-
-        // Bounds check: trap if (idx as u32) >= len (len at list/bytes offset 0).
-        // A negative idx wraps to a huge u32 and is also caught. Native panics on
-        // OOB; trapping here stops the WASM OOB read — the prior code computed the
-        // address with no check and returned garbage past the buffer (undefined
-        // behavior). (Exact panic message + exit-code parity with native is a
-        // separate runtime-panic-unification contract item.)
-        wasm!(self.func, {
-            local_get(idx);
-            local_get(ptr); i32_load(0);
-            i32_ge_u;
-            if_empty; unreachable; end;
-        });
 
         // addr = ptr + data_off + idx * elem_size
         wasm!(self.func, { local_get(ptr); i32_const(data_off as i32); i32_add; local_get(idx); });

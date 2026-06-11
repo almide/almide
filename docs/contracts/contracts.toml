@@ -837,3 +837,12 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/string_codepoint_index.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-067"
+title     = "The xs[i] index syntax aborts on out-of-bounds (read and write)"
+statement = "The index-operator path `xs[i]` (both read `xs[i]` and write `xs[i] = v`) is the ASSERT-in-bounds form: an out-of-bounds, negative, or >= 2^32 index ABORTS with the unified `Error: index out of bounds\n` + exit 1, byte-identical native == wasm — distinct from the stdlib `list.get`/`set` ops (C-054) which take native's no-op / default path. The check runs on the FULL i64 before the wasm i32 narrowing (so an index >= 2^32 can never truncate into range and read/write the wrong slot) and applies to the WRITE path too (previously wasm had no write-path bounds check — an OOB `xs[i] = v` was a silent heap write into adjacent allocator memory, exit 0; native panicked exit 101). Native routes through the `almide_index!`/`almide_index_set!` macros, wasm through `emit_index_bound_guard` + the unified `div_trap`, so neither a native panic (exit 101) nor a wasm `unreachable` trap (exit 134) is observable."
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/index_bounds.almd", class = "fixture" },
+]
