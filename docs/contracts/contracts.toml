@@ -94,12 +94,14 @@ evidence  = [
 [[contract]]
 id        = "C-004"
 title     = "fan.race / fan.any / fan.map / fan.settle are deterministic by list order"
-statement = "`fan.race` returns thunk[0]'s settled result in LIST ORDER (Ok or Err), NOT wall-clock fastest. `fan.any` tries thunks in list order and returns the first Ok. `fan.map` runs element fns sequentially in list order; `fan.settle` returns results in list order. All are byte-identical native == wasm. (race takes thunk[0] even on Err; any skips failures to find an Ok.)"
+statement = "`fan.race` returns thunk[0]'s settled result in LIST ORDER (Ok or Err), NOT wall-clock fastest. `fan.any` tries thunks in list order and returns the first Ok. `fan.map` runs element fns sequentially in list order; `fan.settle` returns results in list order. All are byte-identical native == wasm. (race takes thunk[0] even on Err; any skips failures to find an Ok.) EXCEPTION: fan.settle THUNK side-effect interleaving is wall-clock on native (real threads) and sequential on wasm — settle pins its RESULT list order only."
 since     = "0.24.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/fan_deterministic.almd", class = "fixture" },
   { path = "spec/wasm_cross/fan_map_inline_lambda.almd", class = "fixture" },
+  { path = "spec/wasm_cross/fan_pure_thunks.almd", class = "fixture" },
+  { path = "spec/wasm_cross/fan_var_thunk_list.almd", class = "fixture" },
 ]
 
 [[contract]]
@@ -113,6 +115,7 @@ evidence  = [
   { path = "spec/wasm_cross/fan_map_inline_err.almd", class = "fixture" },
   { path = "spec/wasm_cross/fan_any_allfail.almd", class = "fixture" },
   { path = "spec/wasm_cross/fan_race_err.almd", class = "fixture" },
+  { path = "spec/wasm_cross/option_none_unwrap_term.almd", class = "fixture" },
 ]
 
 [[contract]]
@@ -148,6 +151,7 @@ status    = "active"
 doc       = "C-008-009-010-repr.md"
 evidence  = [
   { path = "spec/wasm_cross/compound_repr_interp.almd", class = "fixture" },
+  { path = "spec/wasm_cross/repr_parity_pin.almd", class = "fixture" },
 ]
 
 [[contract]]
@@ -186,6 +190,7 @@ evidence  = [
   { path = "spec/wasm_cross/float_concrete.almd", class = "fixture" },
   { path = "spec/wasm_cross/num_edge_to_string.almd", class = "fixture" },
   { path = "spec/wasm_cross/int_float_ops.almd", class = "fixture" },
+  { path = "spec/wasm_cross/float_interp_forms.almd", class = "fixture" },
 ]
 
 [[contract]]
@@ -710,6 +715,7 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/list_count_index_truncation.almd", class = "fixture" },
   { path = "spec/wasm_cross/string_count_truncation.almd", class = "fixture" },
+  { path = "spec/wasm_cross/map_wide_int_key.almd", class = "fixture" },
 ]
 
 # ── FLOAT LIST ORDERING = IEEE-754 totalOrder (Cluster-B) ────────────
@@ -721,6 +727,7 @@ since     = "0.24.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/list_float_total_order.almd", class = "fixture" },
+  { path = "spec/wasm_cross/sort_by_call_count.almd", class = "fixture" },
 ]
 
 # ── list.product OVERFLOW WRAPS (Cluster-B) ──────────────────────────
@@ -832,4 +839,33 @@ since     = "0.26.20"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/string_codepoint_index.almd", class = "fixture" },
+  { path = "spec/wasm_cross/string_lines.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-067"
+title     = "The xs[i] index syntax aborts on out-of-bounds (read and write)"
+statement = "The index-operator path `xs[i]` (both read `xs[i]` and write `xs[i] = v`) is the ASSERT-in-bounds form: an out-of-bounds, negative, or >= 2^32 index ABORTS with the unified `Error: index out of bounds\n` + exit 1, byte-identical native == wasm — distinct from the stdlib `list.get`/`set` ops (C-054) which take native's no-op / default path. The check runs on the FULL i64 before the wasm i32 narrowing (so an index >= 2^32 can never truncate into range and read/write the wrong slot) and applies to the WRITE path too (previously wasm had no write-path bounds check — an OOB `xs[i] = v` was a silent heap write into adjacent allocator memory, exit 0; native panicked exit 101). Native routes through the `almide_index!`/`almide_index_set!` macros, wasm through `emit_index_bound_guard` + the unified `div_trap`, so neither a native panic (exit 101) nor a wasm `unreachable` trap (exit 134) is observable."
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/index_bounds.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-068"
+title     = "Auto-? is target-directed in construction positions"
+statement = "An effect-fn call in a CONSTRUCTION position — a record field, list element, tuple slot, or map value — whose declared TARGET type is `Result[T, E]` KEEPS its Result (the auto-inserted `?` is stripped), exactly like the binding-statement arms (let/assign/index-assign/field-assign). The implicit Result-lift of an effect call plus an unconditional unwrap previously produced invalid native Rust (E0308: a `?` against a Result-typed slot) while wasm RAN and stored a SILENTLY WRONG value (the unwrapped i64 0 instead of the Result). Now byte-identical native == wasm: the Result is preserved at every construction position."
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/autotry_construction.almd", class = "fixture" },
+  { path = "spec/wasm_cross/autotry_result_first_arg.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-069"
+title     = "Effect-fn tail self-recursion loop-converts to O(1) stack on both targets"
+statement = "A self-recursive `effect fn` whose recursive call is in tail position runs in O(1) native/wasm stack (loop-converted), identically to the non-effect equivalent — not O(n) frames that overflow at ~1e5 depth. The auto-? desugar moved into the frontend (cc70ebc4), so the tail self-call reaches TailCallOpt already wrapped as `Try{Call self}` (Rust arm) or `Ok(Try(Call self))` (wasm arm, where ResultPropagation precedes TCO); TCO sees through both wrappers — the `?` is subsumed by the loop (an Err can only originate at a base case) and the `Ok` propagation wrapper is tail-transparent for effect fns. The Err short-circuit at a base case still fires. Before the fix every implicitly-lifted recursive effect fn crashed at ~1e5 depth (native stack overflow exit, wasm call-stack-exhausted trap) while the identical non-effect fn was O(1)."
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/effect_tco.almd", class = "fixture" },
 ]

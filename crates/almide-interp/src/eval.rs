@@ -318,7 +318,13 @@ impl<'a> Interpreter<'a> {
                     Value::Result(Ok(inner)) => Flow::val(*inner),
                     Value::Result(Err(e)) => Flow::Return(Value::Result(Err(e))),
                     Value::Option(Some(inner)) => Flow::val(*inner),
-                    Value::Option(None) => Flow::Return(Value::Option(None)),
+                    // #556: `expr!` on a None propagates an Err whose message is
+                    // "none" on BOTH backends (the codegen lowers Option `!` to
+                    // `ok_or("none")?`). Returning a bare Option(None) made the
+                    // main-error path print the Rust-internal "called
+                    // Option::unwrap() on a None value" — a wrong third vote
+                    // against the native==wasm "Error: none".
+                    Value::Option(None) => Flow::Return(Value::Result(Err(Box::new(Value::str("none".to_string()))))),
                     other => Flow::val(other),
                 }
             }
@@ -518,14 +524,25 @@ impl<'a> Interpreter<'a> {
         scope: &Scope,
     ) -> Flow {
         let iter_v = val!(self.eval_expr(iterable, scope));
-        let items = match iter_v.as_iter_items() {
-            Some(items) => items,
-            None => {
-                return Flow::Abort(format!(
-                    "internal: for-in over non-iterable {}",
-                    iter_v.type_name()
-                ))
+        // #561: a Range iterates LAZILY — never materialized into a Vec. The
+        // eager materialization in `as_iter_items` allocated the entire range
+        // up front with no fuel accounting, so `for i in 0..2_000_000_000`
+        // OOM-ABORTED the process (uncatchable by the fuzzer oracle) before a
+        // single fuel check. Generating each value on demand keeps the loop
+        // fuel-bounded: it stops at `Flow::Fuel`, never allocating the range.
+        let items: Vec<Value> = match &iter_v {
+            Value::Range { start, end, inclusive } => {
+                return self.eval_for_in_range(var, var_tuple, *start, *end, *inclusive, body, scope);
             }
+            _ => match iter_v.as_iter_items() {
+                Some(items) => items,
+                None => {
+                    return Flow::Abort(format!(
+                        "internal: for-in over non-iterable {}",
+                        iter_v.type_name()
+                    ))
+                }
+            },
         };
         for item in items {
             if let Err(f) = self.step() {
@@ -557,6 +574,47 @@ impl<'a> Interpreter<'a> {
                     Err(other) => return other,
                 }
             }
+        }
+        Flow::val(Value::Unit)
+    }
+
+    /// #561: lazy `for i in start..end` — generates each Int on demand and
+    /// charges fuel per iteration, so an adversarially huge range terminates
+    /// as `Flow::Fuel` instead of materializing (and OOM-aborting) the whole
+    /// range. A tuple binder over a Range is shape-invalid (Ints aren't
+    /// tuples), matching the eager path's mismatch abort.
+    fn eval_for_in_range(
+        &mut self,
+        var: VarId,
+        var_tuple: Option<&[VarId]>,
+        start: i64,
+        end: i64,
+        inclusive: bool,
+        body: &[IrStmt],
+        scope: &Scope,
+    ) -> Flow {
+        let last = if inclusive { end } else { end - 1 };
+        let mut i = start;
+        while i <= last {
+            if let Err(f) = self.step() {
+                return f;
+            }
+            let frame = scope.child();
+            if var_tuple.is_some() {
+                return Flow::Abort(
+                    "internal: for-in tuple destructure shape mismatch".into(),
+                );
+            }
+            frame.bind(var, Value::Int(i));
+            for stmt in body {
+                match self.exec_stmt(stmt, &frame) {
+                    Ok(()) => {}
+                    Err(Flow::Break) => return Flow::val(Value::Unit),
+                    Err(Flow::Continue) => break,
+                    Err(other) => return other,
+                }
+            }
+            i += 1;
         }
         Flow::val(Value::Unit)
     }
@@ -984,11 +1042,12 @@ impl<'a> Interpreter<'a> {
                     };
                     Flow::val(Value::Bool(res))
                 }
-                None => Flow::Abort(format!(
-                    "internal: ordering {} vs {}",
-                    l.type_name(),
-                    r.type_name()
-                )),
+                // #556 F2: a None here is the NaN case (Float partial_cmp) —
+                // both backends return IEEE false for every NaN comparison
+                // (`<`/`>`/`<=`/`>=`), so the interp must too, NOT abort. A
+                // genuine type-mismatch ordering can't reach here: the checker
+                // rejects it, and codegen never emits cross-type compares.
+                None => Flow::val(Value::Bool(false)),
             },
 
             And | Or => unreachable!("short-circuited above"),

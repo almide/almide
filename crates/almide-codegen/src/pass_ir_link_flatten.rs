@@ -16,6 +16,8 @@ pub struct IrLinkFlattenPass;
 impl NanoPass for IrLinkFlattenPass {
     fn name(&self) -> &str { "IrLinkFlatten" }
     fn targets(&self) -> Option<Vec<Target>> { Some(vec![Target::Rust]) }
+    // #559: requires VarIds already unified by UnifyVarTables.
+    fn depends_on(&self) -> Vec<&'static str> { vec!["UnifyVarTables"] }
 
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         if program.modules.is_empty() {

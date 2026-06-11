@@ -13,6 +13,7 @@
 
 mod findings;
 mod generator;
+mod metamorph;
 mod minimize;
 mod oracle;
 mod rng;
@@ -242,6 +243,8 @@ fn worker_loop(
 ) {
     let file = work_dir.join("prog.almd");
     let wasm = work_dir.join("prog.wasm");
+    // The third judge (#516): per-worker, abstains on anything it can't run.
+    let reference = crate::oracle::InterpOracle::new();
 
     loop {
         if stop.load(Ordering::Relaxed) {
@@ -267,11 +270,34 @@ fn worker_loop(
         }
 
         stats.generated.fetch_add(1, Ordering::Relaxed);
-        let outcome = run_ladder(&tc, &gen.source, &file, &wasm, None);
+        let outcome = run_ladder(&tc, &gen.source, &file, &wasm, Some(&reference));
 
         match outcome {
-            Outcome::Clean => {
+            Outcome::Clean { native } => {
                 stats.clean.fetch_add(1, Ordering::Relaxed);
+                // Metamorphic rung (#515): binding-shape variants of clean
+                // SYNTHESIZED programs must be accepted and byte-identical.
+                if matches!(gen.origin, crate::generator::Origin::Synthesis) {
+                    if let Some(finding) =
+                        run_metamorphic(&tc, &gen.source, &native, &work_dir)
+                    {
+                        stats.findings.fetch_add(1, Ordering::Relaxed);
+                        let was_new = sink.record(
+                            cfg.seed,
+                            index,
+                            &gen.origin,
+                            &gen.source,
+                            &gen.source,
+                            &finding,
+                        );
+                        if was_new {
+                            eprintln!(
+                                "  ** FINDING [{:?}] seed={} index={} — {}",
+                                finding.kind, cfg.seed, index, finding.summary
+                            );
+                        }
+                    }
+                }
             }
             Outcome::GeneratorReject { .. } => {
                 stats.generator_rejects.fetch_add(1, Ordering::Relaxed);
@@ -301,6 +327,56 @@ fn worker_loop(
             }
         }
     }
+}
+
+/// The metamorphic rung (#515): check + run every binding-shape variant;
+/// acceptance or output deltas vs the clean original are findings.
+fn run_metamorphic(
+    tc: &Toolchain,
+    source: &str,
+    native: &oracle::RunEvidence,
+    work_dir: &Path,
+) -> Option<oracle::Finding> {
+    let vfile = work_dir.join("prog_metamorph.almd");
+    for (label, variant) in metamorph::binding_variants(source) {
+        if std::fs::write(&vfile, &variant).is_err() {
+            continue;
+        }
+        let chk = tc.check(&vfile);
+        if chk.timed_out {
+            continue; // wall-clock noise, not an acceptance verdict
+        }
+        if !chk.success() {
+            return Some(oracle::Finding {
+                rung: oracle::Rung::Check,
+                kind: oracle::FindingKind::MetamorphicDivergence,
+                summary: format!(
+                    "binding variant `{label}` REJECTED though the original was accepted"
+                ),
+                native: None,
+                wasm: None,
+            });
+        }
+        let run = tc.run_native(&vfile);
+        if run.timed_out || run.spawn_failed {
+            continue;
+        }
+        let v_stdout = String::from_utf8_lossy(&run.stdout).into_owned();
+        if v_stdout != native.stdout || run.exit_code != native.exit_code {
+            return Some(oracle::Finding {
+                rung: oracle::Rung::Run,
+                kind: oracle::FindingKind::MetamorphicDivergence,
+                summary: format!(
+                    "binding variant `{label}` diverged: stdout {:?} vs original {:?}",
+                    v_stdout.chars().take(60).collect::<String>(),
+                    native.stdout.chars().take(60).collect::<String>(),
+                ),
+                native: None,
+                wasm: None,
+            });
+        }
+    }
+    None
 }
 
 /// Per-program scratch dir for native cargo builds (isolated per worker
@@ -337,13 +413,14 @@ fn cmd_replay(args: &[String]) {
     let wasm = work_dir.join("replay.wasm");
     let _ = std::fs::write(&file, &gen.source);
 
+    let reference = crate::oracle::InterpOracle::new();
     let tc = Toolchain {
         almide,
         wasmtime: resolve_wasmtime(),
         scratch: repo.join("tools/xtarget-fuzz/.scratch/replay-build"),
         timeout: Duration::from_secs(DEFAULT_TIMEOUT_SECS),
     };
-    let outcome = run_ladder(&tc, &gen.source, &file, &wasm, None);
+    let outcome = run_ladder(&tc, &gen.source, &file, &wasm, Some(&reference));
     eprintln!("\n=== ladder outcome ===");
     print_outcome(&outcome);
 }
@@ -447,7 +524,7 @@ fn print_summary(stats: &Stats, sink: &FindingSink, elapsed: Duration, out_dir: 
 
 fn print_outcome(outcome: &Outcome) {
     match outcome {
-        Outcome::Clean => eprintln!("CLEAN — native and wasm agree"),
+        Outcome::Clean { .. } => eprintln!("CLEAN — native and wasm agree"),
         Outcome::GeneratorReject { diagnostics } => {
             eprintln!("GENERATOR REJECT (check failed):\n{diagnostics}")
         }

@@ -1,0 +1,13 @@
+// @contract: C-008
+// PR-3 queue item (#533): records / variants (tuple AND record payloads) /
+// tuples / containers-of-variants interpolate with identical repr on both
+// targets.
+type Shape = Circle(Float) | Rect { w: Int, h: Int }
+type P = { x: Int, name: String }
+fn main() -> Unit = {
+  println("${Circle(1.5)}")
+  println("${Rect { w: 3, h: 4 }}")
+  println("${P { x: 1, name: "a" }}")
+  println("${[Circle(2.0)]}")
+  println("${(1, "t", 2.5)}")
+}

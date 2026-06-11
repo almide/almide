@@ -10,13 +10,73 @@ use almide_ir::*;
 /// Strip Try nodes from inside Fan expressions and fan.* call arguments.
 pub fn strip_fan_auto_try(program: &mut IrProgram) {
     for func in &mut program.functions {
+        adapt_var_thunk_lists(&mut func.body);
         func.body = rewrite_expr(std::mem::take(&mut func.body), false);
     }
     for module in &mut program.modules {
         for func in &mut module.functions {
+            adapt_var_thunk_lists(&mut func.body);
             func.body = rewrite_expr(std::mem::take(&mut func.body), false);
         }
     }
+}
+
+/// #599: the Ok-adapter (`ok_adapt_thunk_list`) only descends into an INLINE
+/// `[...]` literal at the fan call site. When a race/any/settle thunk list is
+/// bound to a `let` first — `let ts = [...]; fan.race(ts)` — the call's arg is
+/// a `Var`, the adapter's `_ => arg` passthrough leaves the thunks as the
+/// uniform `Rc<dyn Fn>` repr, and the runtime bound (Send+Sync `Fn()->Result`
+/// native / Result-shaped indirect-call sig wasm) is never satisfied → native
+/// invalid-Rust ICE, wasm trap. A runtime re-wrap (list.map) cannot satisfy the
+/// native Send+Sync bound, so we adapt STRUCTURALLY at the BINDING: collect the
+/// VarIds used as a race/any/settle arg-0, then Ok-adapt the `List` value of
+/// every matching `let` bind (so it reaches the call already adapted).
+fn adapt_var_thunk_lists(body: &mut IrExpr) {
+    use almide_ir::visit::{IrVisitor, walk_expr};
+    use almide_ir::visit_mut::{IrMutVisitor, walk_stmt_mut};
+    use std::collections::HashSet;
+
+    struct Collect { vars: HashSet<u32> }
+    impl IrVisitor for Collect {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            let (is_fan_list, arg0) = match &e.kind {
+                IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
+                    if module.as_str() == "fan" && thunk_list_method(func.as_str()) => (true, args.first()),
+                IrExprKind::Call { target: CallTarget::Named { name }, args, .. }
+                    if name.as_str().starts_with("almide_rt_fan_")
+                        && thunk_list_method(name.as_str().trim_start_matches("almide_rt_fan_")) => (true, args.first()),
+                _ => (false, None),
+            };
+            if is_fan_list {
+                if let Some(IrExpr { kind: IrExprKind::Var { id }, .. }) = arg0 {
+                    self.vars.insert(id.0);
+                }
+            }
+            walk_expr(self, e);
+        }
+    }
+    let mut c = Collect { vars: HashSet::new() };
+    c.visit_expr(body);
+    if c.vars.is_empty() { return; }
+
+    struct Adapt { vars: HashSet<u32> }
+    impl IrMutVisitor for Adapt {
+        fn visit_stmt_mut(&mut self, stmt: &mut IrStmt) {
+            if let IrStmtKind::Bind { var, value, .. } = &mut stmt.kind {
+                if self.vars.contains(&var.0) && matches!(&value.kind, IrExprKind::List { .. }) {
+                    let taken = std::mem::replace(value, unit_placeholder());
+                    *value = ok_adapt_thunk_list(taken);
+                }
+            }
+            walk_stmt_mut(self, stmt);
+        }
+    }
+    let mut a = Adapt { vars: c.vars };
+    a.visit_expr_mut(body);
+}
+
+fn unit_placeholder() -> IrExpr {
+    IrExpr { kind: IrExprKind::Unit, ty: almide_lang::types::Ty::Unit, span: None, def_id: None }
 }
 
 // Note: fan.map/race/any come through as CallTarget::Module { module: "fan" }.
@@ -38,23 +98,35 @@ fn rewrite_expr(expr: IrExpr, inside_fan: bool) -> IrExpr {
 
         // Fan module calls (fan.map, fan.race, fan.any, etc.): strip Try from lambda args
         // Matches both Module { "fan" } (before StdlibLowering) and Named { "almide_rt_fan_*" } (after)
-        IrExprKind::Call { target: CallTarget::Module { ref module, .. }, .. }
+        IrExprKind::Call { target: CallTarget::Module { ref module, ref func, .. }, .. }
             if module == "fan" =>
         {
+            let adapt = thunk_list_method(func.as_str());
             let IrExprKind::Call { target, args, type_args } = expr.kind else { unreachable!() };
             IrExprKind::Call {
                 target,
-                args: args.into_iter().map(rewrite_fan_arg).collect(),
+                args: args.into_iter().enumerate()
+                    .map(|(i, a)| {
+                        let a = rewrite_fan_arg(a);
+                        if adapt && i == 0 { ok_adapt_thunk_list(a) } else { a }
+                    })
+                    .collect(),
                 type_args,
             }
         }
         IrExprKind::Call { target: CallTarget::Named { ref name }, .. }
             if name.starts_with("almide_rt_fan_") =>
         {
+            let adapt = thunk_list_method(name.as_str().trim_start_matches("almide_rt_fan_"));
             let IrExprKind::Call { target, args, type_args } = expr.kind else { unreachable!() };
             IrExprKind::Call {
                 target,
-                args: args.into_iter().map(rewrite_fan_arg).collect(),
+                args: args.into_iter().enumerate()
+                    .map(|(i, a)| {
+                        let a = rewrite_fan_arg(a);
+                        if adapt && i == 0 { ok_adapt_thunk_list(a) } else { a }
+                    })
+                    .collect(),
                 type_args,
             }
         }
@@ -223,5 +295,89 @@ fn rewrite_fan_arg(arg: IrExpr) -> IrExpr {
             ty, span, def_id: None,
         },
         _ => rewrite_expr(arg, false),
+    }
+}
+
+
+/// The fan APIs whose FIRST argument is a thunk LIST with a
+/// `Fn() -> Result[T, String]` runtime bound.
+fn thunk_list_method(name: &str) -> bool {
+    matches!(name, "race" | "any" | "settle")
+}
+
+/// #514: the race/any/settle runtimes (both targets) require thunks that
+/// return `Result[T, String]` — native's `Vec<impl Fn() -> Result<T,_>>`
+/// bound, wasm's `(env: i32) -> i32` indirect-call signature. A PURE thunk
+/// (`fn() -> Int`) satisfied the CHECKER but broke each backend in its own
+/// way: native emitted invalid Rust (E0271), wasm trapped with an indirect
+/// call type mismatch. Adapt once, here, for both: wrap every non-Result
+/// thunk so it returns `Ok(value)`.
+fn ok_adapt_thunk_list(arg: IrExpr) -> IrExpr {
+    let ty = arg.ty.clone();
+    let span = arg.span;
+    match arg.kind {
+        IrExprKind::List { elements } => IrExpr {
+            kind: IrExprKind::List {
+                elements: elements.into_iter().map(ok_adapt_thunk).collect(),
+            },
+            ty, span, def_id: None,
+        },
+        _ => IrExpr { kind: arg.kind, ty, span, def_id: arg.def_id },
+    }
+}
+
+fn ok_adapt_thunk(el: IrExpr) -> IrExpr {
+    use almide_lang::types::Ty;
+    let Ty::Fn { params, ret } = &el.ty else { return el };
+    if !params.is_empty() || ret.is_result() {
+        return el;
+    }
+    let span = el.span;
+    let ok_ty = Ty::result((**ret).clone(), Ty::String);
+    let fn_ty = Ty::Fn { params: vec![], ret: Box::new(ok_ty.clone()) };
+    match el.kind {
+        // A literal pure lambda: wrap its BODY — no new call frame needed.
+        IrExprKind::Lambda { params: ps, body, lambda_id } => IrExpr {
+            kind: IrExprKind::Lambda {
+                params: ps,
+                body: Box::new(IrExpr {
+                    ty: ok_ty,
+                    span: body.span,
+                    kind: IrExprKind::ResultOk { expr: body },
+                    def_id: None,
+                }),
+                lambda_id,
+            },
+            ty: fn_ty, span, def_id: None,
+        },
+        // A fn ref / stored closure value: synthesize `() => ok(el())`.
+        _ => {
+            let ret_ty = (**ret).clone();
+            let call = IrExpr {
+                kind: IrExprKind::Call {
+                    target: CallTarget::Computed { callee: Box::new(el) },
+                    args: vec![],
+                    type_args: vec![],
+                },
+                ty: ret_ty,
+                span,
+                def_id: None,
+            };
+            IrExpr {
+                kind: IrExprKind::Lambda {
+                    params: vec![],
+                    body: Box::new(IrExpr {
+                        ty: ok_ty,
+                        span,
+                        kind: IrExprKind::ResultOk { expr: Box::new(call) },
+                        def_id: None,
+                    }),
+                    lambda_id: None,
+                },
+                ty: fn_ty,
+                span,
+                def_id: None,
+            }
+        }
     }
 }

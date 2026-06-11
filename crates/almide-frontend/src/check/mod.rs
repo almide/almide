@@ -64,6 +64,13 @@ pub struct Checker {
     /// Argument spans for the current call. Set before `check_named_call_*`
     /// so E005 can point at the exact argument expression.
     pub(crate) arg_spans: Vec<Option<crate::ast::Span>>,
+    /// #558: named-arg reordering metadata for the current call —
+    /// `(named_start, names)` where `named_start` is the index in the
+    /// flattened positional args at which named args begin (their values were
+    /// appended in SOURCE order), and `names` is the parallel param-name list.
+    /// `check_named_call` uses this to validate each value against the param it
+    /// NAMES (lowering binds by name), not the positional slot it landed in.
+    pub(crate) named_arg_meta: Option<(usize, Vec<almide_base::intern::Sym>)>,
     pub(crate) constraints: Vec<Constraint>,
     pub(crate) uf: UnionFind,
     /// Module-name prefix active during `infer_module`. `None` for the
@@ -143,6 +150,7 @@ impl Checker {
             call_span_hint: None,
             last_mut_params: Vec::new(),
             arg_spans: Vec::new(),
+            named_arg_meta: None,
             constraints: Vec::new(), uf: UnionFind::new(),
             current_module_prefix: None,
             deferred_tuple_indices: Vec::new(),
@@ -940,11 +948,14 @@ impl Checker {
 impl Checker {
     /// Validate that all Map literal key types are hashable (post-solve).
     fn validate_map_key_types(&mut self) {
+        use std::collections::HashSet;
+        let mut reported: HashSet<String> = HashSet::new();
         let checks = std::mem::take(&mut self.deferred_map_key_checks);
         for (key_ty, span) in checks {
             let resolved = resolve_ty(&key_ty, &self.uf);
             if !self.env.is_hash(&resolved) {
                 let ty_name = Self::type_display_name(&resolved);
+                reported.insert(ty_name.clone());
                 let mut diag = err(
                     format!("type '{}' is not hashable — cannot be used as a Map key", ty_name),
                     "Map keys must be hashable. Use String, Int, Bool, or a record/variant with only hashable fields.".to_string(),
@@ -955,6 +966,39 @@ impl Checker {
                     diag.col = Some(s.col);
                 }
                 self.diagnostics.push(diag);
+            }
+        }
+        // #598: the deferred queue only catches map LITERALS. Sweep the SOLVED
+        // type map for EVERY Map[K, V] — so the stdlib builder API
+        // (map.new/map.set/from_list/insert) gets the same authoritative
+        // unhashable-key rejection the literal already gets, in the frontend
+        // (identical on both targets). Previously an unhashable Float key built
+        // via map.from_list passed `check`, then on wasm SILENTLY collapsed
+        // distinct keys (len 2 → 1) or produced a [COMPILER BUG] invalid module.
+        let map_keys: Vec<crate::types::Ty> = self.type_map.values()
+            .filter_map(|t| match t {
+                crate::types::Ty::Applied(almide_lang::types::TypeConstructorId::Map, args) if args.len() == 2 =>
+                    Some(args[0].clone()),
+                _ => None,
+            })
+            .collect();
+        for key_ty in map_keys {
+            let resolved = resolve_ty(&key_ty, &self.uf);
+            // Skip inference vars that never pinned down — that is the empty
+            // collection class, reported elsewhere; only fire on a CONCRETE
+            // unhashable key.
+            if matches!(resolved, crate::types::Ty::Unknown | crate::types::Ty::TypeVar(_)) {
+                continue;
+            }
+            if !self.env.is_hash(&resolved) {
+                let ty_name = Self::type_display_name(&resolved);
+                if reported.insert(ty_name.clone()) {
+                    self.diagnostics.push(err(
+                        format!("type '{}' is not hashable — cannot be used as a Map key", ty_name),
+                        "Map keys must be hashable. Use String, Int, Bool, or a record/variant with only hashable fields.".to_string(),
+                        "map key".to_string(),
+                    ));
+                }
             }
         }
     }

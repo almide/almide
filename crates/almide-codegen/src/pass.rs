@@ -83,10 +83,21 @@ pub trait NanoPass: std::fmt::Debug {
     /// Return `None` for all targets, or `Some(vec)` for specific ones.
     fn targets(&self) -> Option<Vec<Target>>;
 
-    /// Passes that must have executed before this one.
+    /// Passes that must have executed before this one (after-deps).
     /// Returns pass names (matching `NanoPass::name()`).
-    /// Default: no dependencies.
+    /// TARGET-CONDITIONAL: a dep is only enforced when that dep is itself in
+    /// THIS target's pipeline — so a wasm-arm pass may depend on a Rust-only
+    /// pass without panicking (the dep is simply absent and the edge is
+    /// vacuous). Default: no dependencies.
     fn depends_on(&self) -> Vec<&'static str> { vec![] }
+
+    /// Passes that must run AFTER this one (before-deps) — the converse of
+    /// `depends_on`, which the after-only mechanism could not express (#559).
+    /// Enforced TARGET-CONDITIONALLY: when a named successor runs, this pass
+    /// must already have executed. Use for "X must run before Y" invariants
+    /// (e.g. StackBalance before Perceus) where Y does not, or should not,
+    /// declare the reverse dependency. Default: none.
+    fn run_before(&self) -> Vec<&'static str> { vec![] }
 
     /// Postconditions: structural invariants guaranteed after this pass runs.
     /// Verified on every build. Debug builds panic on violation; release
@@ -255,6 +266,14 @@ impl Pipeline {
         // Run it only in debug (cargo test / CI) or when explicitly requested.
         let verify_ir = hard_fail || std::env::var_os("ALMIDE_VERIFY_IR").is_some();
 
+        // #559: the names of passes that WILL run in THIS target's pipeline.
+        // Dep edges are enforced ONLY against this set, so a wasm-arm pass can
+        // depend on a Rust-only pass (absent here) without panicking — the edge
+        // is vacuous, not violated.
+        let in_pipeline: std::collections::HashSet<&str> = self.passes.iter()
+            .filter(|p| p.targets().map_or(true, |ts| ts.contains(&target)))
+            .map(|p| p.name())
+            .collect();
         for pass in &self.passes {
             // Skip passes not relevant to this target
             if let Some(targets) = pass.targets() {
@@ -262,13 +281,27 @@ impl Pipeline {
                     continue;
                 }
             }
-            // Validate dependencies: every declared dep must have already executed
+            // After-deps: every declared dep PRESENT in this pipeline must
+            // already have executed (target-conditional, #559).
             for dep in pass.depends_on() {
-                if !executed.contains(&dep) {
+                if in_pipeline.contains(dep) && !executed.contains(&dep) {
                     panic!(
                         "Pass '{}' depends on '{}', but '{}' has not been executed. \
                          Check pipeline ordering.",
                         pass.name(), dep, dep
+                    );
+                }
+            }
+            // Before-deps: any PRESENT pass declaring `run_before(this)` must
+            // already have executed when `this` runs (#559).
+            let this_name = pass.name();
+            for other in &self.passes {
+                if !other.targets().map_or(true, |ts| ts.contains(&target)) { continue; }
+                if other.run_before().contains(&this_name) && !executed.contains(&other.name()) {
+                    panic!(
+                        "Pass '{}' declares run_before('{}'), but it has not executed \
+                         before '{}'. Check pipeline ordering.",
+                        other.name(), this_name, this_name
                     );
                 }
             }
@@ -330,6 +363,23 @@ impl Pipeline {
             }
 
             executed.push(pass_name);
+        }
+
+        // §10 release promotion (#532): one FINAL verification runs in EVERY
+        // profile. The per-pass walk above stays debug/opt-in (it dominates
+        // release codegen time, ~1.2s/file across ~20 passes), but the
+        // END-of-pipeline IR must verify before emission — one walk, ~60 ms,
+        // the same trade wasmparser::validate makes on the wasm side. A
+        // violation is a compiler bug and fails the build in release too.
+        if !verify_ir {
+            let errors = almide_ir::verify_program(&program);
+            if !errors.is_empty() {
+                eprintln!("[IR CHECK] {} error(s) at end of pipeline:", errors.len());
+                for e in &errors {
+                    eprintln!("  {}", e);
+                }
+                panic!("final IR verification failed (release gate, #532)");
+            }
         }
         program
     }

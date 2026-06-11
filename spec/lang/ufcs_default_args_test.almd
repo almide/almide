@@ -1,0 +1,21 @@
+// #558: a UFCS call `x.foo()` fills the free fn's default args, counting the
+// object as the first argument — `fn add(a, b = 10)` called `5.add()` becomes
+// `add(5, 10)`. Before this, the Method-target default-fill was skipped and
+// codegen emitted `add(5)` one arg short (invalid Rust / wasm stack underflow).
+fn add(a: Int, b: Int = 10) -> Int = a + b
+fn scale(x: Int, by: Int = 2, plus: Int = 1) -> Int = x * by + plus
+
+test "UFCS fills a single default" {
+  assert_eq(5.add(), 15)
+  assert_eq(5.add(20), 25)
+}
+
+test "UFCS fills multiple trailing defaults" {
+  assert_eq(3.scale(), 7)
+  assert_eq(3.scale(4), 13)
+  assert_eq(3.scale(4, 5), 17)
+}
+
+test "regular call still fills defaults" {
+  assert_eq(add(5), 15)
+}

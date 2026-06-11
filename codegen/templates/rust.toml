@@ -43,7 +43,7 @@ template = "almide_mod!({left}, {right})"
 template = "{expr}.{field}"
 
 [index_access]
-template = "{object}[{index} as usize]"
+template = "almide_index!({object}, {index})"
 
 [pipe_call]
 template = "{callee}({pipe_arg}, {args})"

@@ -447,6 +447,19 @@ impl Checker {
                     });
                     return ret.as_ref().clone();
                 }
+                // #558: `n(args)` where `n` is a NON-function local — the call
+                // position makes this an error. Previously this returned the
+                // var's own type unchecked, so the program passed `check` and
+                // then ICE'd in the wasm emitter (`call target not in func_map`)
+                // / leaked a raw rustc E0425 natively.
+                let rty = resolve_ty(&ty, &self.uf);
+                if !matches!(rty, Ty::Unknown | Ty::TypeVar(_)) {
+                    self.emit(super::err(
+                        format!("`{}` is not a function — it has type {}", name, rty.display()),
+                        format!("`{}` is a value; only functions and closures can be called", name),
+                        format!("call to {}()", name)).with_code("E002"));
+                    return Ty::Unknown;
+                }
                 return ty;
             }
             // Triple: (hint, clean fn-name fix for simple try:, rich multi-line snippet).
@@ -566,7 +579,48 @@ impl Checker {
                 bindings.insert(*gname, gty.clone());
             }
         }
-        let concrete_args: Vec<Ty> = arg_tys.iter().map(|a| resolve_ty(a, &self.uf)).collect();
+        let mut concrete_args: Vec<Ty> = arg_tys.iter().map(|a| resolve_ty(a, &self.uf)).collect();
+        // #558: realign named args to the parameter they NAME before validating
+        // (they were appended in source order). Reorder both the arg types and
+        // their spans so E005 points at the right expression. Slots a named call
+        // skips (relying on a default) are filled with the param's own type so
+        // the zip below validates them trivially.
+        // `aligned_raw[i] = Some(arg inference ty)` when param i was supplied
+        // (positional or named); `None` when it relies on a default. The
+        // constraint-propagation loop below uses this so back-propagation
+        // targets the right inference var, and default slots add no constraint.
+        let mut aligned_raw: Option<Vec<Option<Ty>>> = None;
+        if let Some((named_start, ref names)) = self.named_arg_meta {
+            if named_start <= concrete_args.len() {
+                let param_index: std::collections::HashMap<Sym, usize> =
+                    sig.params.iter().enumerate().map(|(i, (pn, _))| (*pn, i)).collect();
+                let mut aligned: Vec<Ty> = sig.params.iter().map(|(_, t)| t.clone()).collect();
+                let mut aligned_spans: Vec<Option<crate::ast::Span>> = vec![None; sig.params.len()];
+                let mut raw: Vec<Option<Ty>> = vec![None; sig.params.len()];
+                let mut ok = true;
+                for i in 0..named_start.min(aligned.len()) {
+                    aligned[i] = concrete_args[i].clone();
+                    aligned_spans[i] = self.arg_spans.get(i).copied().flatten();
+                    raw[i] = arg_tys.get(i).cloned();
+                }
+                for (k, nm) in names.iter().enumerate() {
+                    let src = named_start + k;
+                    match param_index.get(nm) {
+                        Some(&pi) if src < concrete_args.len() => {
+                            aligned[pi] = concrete_args[src].clone();
+                            aligned_spans[pi] = self.arg_spans.get(src).copied().flatten();
+                            raw[pi] = arg_tys.get(src).cloned();
+                        }
+                        _ => { ok = false; break; }
+                    }
+                }
+                if ok {
+                    concrete_args = aligned;
+                    self.arg_spans = aligned_spans;
+                    aligned_raw = Some(raw);
+                }
+            }
+        }
         let mut e005_fired: Vec<bool> = Vec::new();
         for (i, ((pname, pty), aty)) in sig.params.iter().zip(concrete_args.iter()).enumerate() {
             // Point caret at the exact argument expression for E005
@@ -600,11 +654,17 @@ impl Checker {
         }
         // Propagate resolved types back to inference variables
         // Skip constraint for args where E005 already fired (avoids duplicate E001)
-        for (i, ((_, pty), aty)) in sig.params.iter().zip(arg_tys.iter()).enumerate() {
+        for (i, (_, pty)) in sig.params.iter().enumerate() {
             if e005_fired.get(i).copied().unwrap_or(false) { continue; }
+            // The arg inference ty for param i — realigned for named calls; a
+            // None slot (default-filled) gets no constraint.
+            let aty = match &aligned_raw {
+                Some(raw) => match raw.get(i).and_then(|o| o.clone()) { Some(t) => t, None => continue },
+                None => match arg_tys.get(i) { Some(t) => t.clone(), None => continue },
+            };
             let expected = if bindings.is_empty() { pty.clone() } else { crate::types::substitute(pty, &bindings) };
             if expected != Ty::Unknown {
-                self.constrain(expected, aty.clone(), format!("call to {}()", name));
+                self.constrain(expected, aty, format!("call to {}()", name));
             }
         }
         // Instantiate unresolved generics with fresh vars

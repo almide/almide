@@ -530,3 +530,73 @@ fn fmt_output_typechecks_single_file_specs() {
         failures.len(), tested, failures.join("\n\n"));
     assert!(tested > 100, "gate coverage collapsed: only {} files tested", tested);
 }
+
+#[test]
+fn fmt_output_typechecks_multi_module_specs() {
+    // §7 residual (#532): the single-file gate above copies each file ALONE
+    // into a temp dir, so multi-module corpora were excluded (their sibling
+    // modules would be missing). This gate copies the WHOLE spec/integration
+    // tree, formats EVERY .almd in the copy, then re-checks each file with
+    // its (also formatted) siblings present — fmt must preserve meaning
+    // across module boundaries too (imports, cross-module types, aliases).
+    let bin = {
+        if let Ok(b) = std::env::var("ALMIDE_BIN") { b } else {
+            let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target/release/almide");
+            if !p.exists() { return; } // debug-only invocation: covered in CI by the release run
+            p.to_str().unwrap().to_string()
+        }
+    };
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let src_root = root.join("spec/integration");
+    let files = walkdir(src_root.as_path());
+
+    // Copy the entire tree so every sibling/module is present in the copy.
+    let dir = tempfile::tempdir().unwrap();
+    let dst_root = dir.path().join("integration");
+    for path in &files {
+        let rel = path.strip_prefix(&src_root).unwrap();
+        let dst = dst_root.join(rel);
+        std::fs::create_dir_all(dst.parent().unwrap()).unwrap();
+        std::fs::copy(path, &dst).unwrap();
+    }
+
+    let mut failures = Vec::new();
+    let mut tested = 0u32;
+    // Precompute which ORIGINALS check clean (negative fixtures are out of
+    // scope), then format every copy, then re-check the clean set.
+    let mut clean: Vec<std::path::PathBuf> = Vec::new();
+    for path in &files {
+        let ok = std::process::Command::new(&bin)
+            .args(["check", path.to_str().unwrap()])
+            .output().expect("almide check original").status.success();
+        if ok { clean.push(path.clone()); }
+    }
+    for path in &files {
+        let rel = path.strip_prefix(&src_root).unwrap();
+        let copy = dst_root.join(rel);
+        let fmt_out = std::process::Command::new(&bin)
+            .args(["fmt", copy.to_str().unwrap()])
+            .output().expect("almide fmt");
+        if !fmt_out.status.success() && clean.contains(path) {
+            failures.push(format!("{}: fmt failed:\n{}", path.display(), String::from_utf8_lossy(&fmt_out.stderr)));
+        }
+    }
+    for path in &clean {
+        let rel = path.strip_prefix(&src_root).unwrap();
+        let copy = dst_root.join(rel);
+        let check = std::process::Command::new(&bin)
+            .args(["check", copy.to_str().unwrap()])
+            .output().expect("almide check formatted");
+        if !check.status.success() {
+            failures.push(format!(
+                "{}: original checks clean but the FORMATTED multi-module copy does not — fmt changed meaning:\n{}",
+                path.display(), String::from_utf8_lossy(&check.stdout)
+            ));
+        }
+        tested += 1;
+    }
+    assert!(failures.is_empty(),
+        "fmt multi-module semantic-preservation gate: {} of {} file(s) failed:\n\n{}",
+        failures.len(), tested, failures.join("\n\n"));
+    assert!(tested > 10, "gate coverage collapsed: only {} files tested", tested);
+}
