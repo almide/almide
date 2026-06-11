@@ -787,3 +787,25 @@ fn main() -> Unit = {
     // 3000 * 3001 / 2 = 4_501_500
     expect_out(src, "4501500\n");
 }
+
+// ── #556: Map/Set order-independent ==, NaN-compare IEEE false ──
+
+#[test]
+fn map_eq_order_independent() {
+    expect_out(
+        &main_print(r#"  println("${["a": 1, "b": 2] == ["b": 2, "a": 1]}")"#),
+        "true\n",
+    );
+}
+
+// NOTE: Set `==` order-independence is fixed in value.rs alongside Map, but
+// `set.from_list` is not yet bridged in the interp (F5 latent — the fix takes
+// effect when the bridge is widened), so no runtime test here.
+
+#[test]
+fn nan_compare_is_false_not_abort() {
+    expect_out(
+        &main_print("  let nan = 0.0 / 0.0\n  println(\"${nan < 1.0} ${nan >= 1.0}\")"),
+        "false false\n",
+    );
+}

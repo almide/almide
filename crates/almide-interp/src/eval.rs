@@ -318,7 +318,13 @@ impl<'a> Interpreter<'a> {
                     Value::Result(Ok(inner)) => Flow::val(*inner),
                     Value::Result(Err(e)) => Flow::Return(Value::Result(Err(e))),
                     Value::Option(Some(inner)) => Flow::val(*inner),
-                    Value::Option(None) => Flow::Return(Value::Option(None)),
+                    // #556: `expr!` on a None propagates an Err whose message is
+                    // "none" on BOTH backends (the codegen lowers Option `!` to
+                    // `ok_or("none")?`). Returning a bare Option(None) made the
+                    // main-error path print the Rust-internal "called
+                    // Option::unwrap() on a None value" — a wrong third vote
+                    // against the native==wasm "Error: none".
+                    Value::Option(None) => Flow::Return(Value::Result(Err(Box::new(Value::str("none".to_string()))))),
                     other => Flow::val(other),
                 }
             }
@@ -984,11 +990,12 @@ impl<'a> Interpreter<'a> {
                     };
                     Flow::val(Value::Bool(res))
                 }
-                None => Flow::Abort(format!(
-                    "internal: ordering {} vs {}",
-                    l.type_name(),
-                    r.type_name()
-                )),
+                // #556 F2: a None here is the NaN case (Float partial_cmp) —
+                // both backends return IEEE false for every NaN comparison
+                // (`<`/`>`/`<=`/`>=`), so the interp must too, NOT abort. A
+                // genuine type-mismatch ordering can't reach here: the checker
+                // rejects it, and codegen never emits cross-type compares.
+                None => Flow::val(Value::Bool(false)),
             },
 
             And | Or => unreachable!("short-circuited above"),
