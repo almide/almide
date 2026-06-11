@@ -394,11 +394,14 @@ fn cargo_build_generated_with_native(
     std::fs::write(project_dir.join("Cargo.toml"), &cargo_toml)
         .map_err(|e| format!("failed to write Cargo.toml: {}", e))?;
 
-    let mut final_code = if uses_matrix {
-        replace_matrix_runtime(rs_code)
-    } else {
-        rs_code.to_string()
-    };
+    // LOCAL WORKAROUND (do not merge as-is): the burn splice's marker
+    // (`pub type AlmideMatrix = Vec<Vec<f64>>`) went stale when the matrix
+    // runtime moved to the flat struct — it now matches the embedded
+    // almide-kernel bridge alias instead and splices the enum runtime into
+    // the wrong scope. The flat runtime + flat kernels compile standalone
+    // (the test path already uses them), so skip the splice entirely.
+    let mut final_code = rs_code.to_string();
+    let _ = uses_matrix;
 
     inject_native_modules(&mut final_code, source_root, &src_dir)?;
     // Inject native modules + native-deps from dependency packages

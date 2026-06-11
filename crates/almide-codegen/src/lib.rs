@@ -346,9 +346,15 @@ pub fn codegen_with(program: &mut IrProgram, target: Target, options: &CodegenOp
     // CI gate.
     let pt = almide_base::profile::ProfileTimer::start(prof);
 
-    // NameResolutionTotal gate (completeness §1a): refuse bare type names
-    // whose only declaration is module-qualified — the #433/#484 class —
-    // while declarations are still in canonical (pre-mangle) state.
+    // NameResolutionTotal (completeness §1a), two steps while declarations
+    // are still in canonical (pre-mangle) state:
+    // 1. repair — rewrite unambiguous bare type references (lambda params,
+    //    alias-qualified annotations, …) to their canonical qualified name,
+    //    the state producers were supposed to pin (#433 family);
+    // 2. gate — refuse whatever is still bare-with-qualified-decl (genuinely
+    //    ambiguous), turning the silent E0425/wasm-trap class into a
+    //    structured compiler-bug report.
+    verify_names::repair_bare_type_names(program);
     verify_names::assert_names_resolvable(program);
 
     // Layer 2: Run Nanopass pipeline (semantic rewrites — takes ownership, returns modified)

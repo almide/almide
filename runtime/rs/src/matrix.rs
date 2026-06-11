@@ -29,6 +29,26 @@ impl AlmideMatrix {
     }
 }
 
+// Almide-literal repr for compound string interpolation and assert_eq
+// diffs: nested-list form `[[1, 2], [3, 4]]`, byte-identical to the old
+// Vec<Vec<f64>> blanket impls (and the wasm walk).
+impl AlmideRepr for AlmideMatrix {
+    fn almide_repr(&self) -> String {
+        let mut o = String::from("[");
+        for (i, row) in self.iter().enumerate() {
+            if i > 0 { o.push_str(", "); }
+            o.push('[');
+            for (j, v) in row.iter().enumerate() {
+                if j > 0 { o.push_str(", "); }
+                o.push_str(&format!("{}", v));
+            }
+            o.push(']');
+        }
+        o.push(']');
+        o
+    }
+}
+
 impl std::ops::Index<usize> for AlmideMatrix {
     type Output = [f64];
     #[inline]
