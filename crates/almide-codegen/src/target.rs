@@ -29,7 +29,7 @@ use super::pass_licm::LICMPass;
 use super::pass_peephole::PeepholePass;
 use super::pass_anf::AnfPass;
 use super::pass_stack_balance::StackBalancePass;
-use super::pass_perceus::{PerceusPass, PerceusOptPass, PerceusVerifyPass};
+use super::pass_perceus::{PerceusPass, PerceusVerifyPass};
 use super::pass_alias_cow::AliasCowPass;
 use super::pass_canonicalize::CanonicalizePass;
 use super::pass_globalize_closure_ids::GlobalizeClosureIdsPass;
@@ -232,9 +232,6 @@ fn build_pipeline(target: Target) -> Pipeline {
         // Perceus: insert RcInc/RcDec nodes based on types.
         // Runs after ANF (all heap allocs are VDecls) and closure conversion.
         .add(PerceusPass)
-        // Perceus optimization: eliminate redundant Inc/Dec pairs.
-        // Theorem: immutable single-use aliases have identity Inc/Dec.
-        .add(PerceusOptPass)
         // Perceus verification: check Inc/Dec balance for every heap variable.
         // Reports warnings for potential leaks or double-frees.
         .add(PerceusVerifyPass)
