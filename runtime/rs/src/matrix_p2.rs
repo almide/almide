@@ -556,3 +556,201 @@ pub fn almide_rt_matrix_qwen3_block_q1_0_kv(
     let h_out = almide_rt_matrix_add(&x_attn, &ffn_out);
     (h_out, k_full_kv, v_full_kv)
 }
+
+
+// ── f32 bytes-resident path (L2-2): weights stay in the source GGUF buffer ──
+//
+// Mirror of the Q1_0 path for plain f32 tensors: no decoded AlmideMatrix is
+// ever materialised for weights, so the model record (and its per-call deep
+// clones — measured at ~13 GB per generated token) disappears entirely.
+
+/// `y = x @ Wᵀ` where W is f32 row-major (out, in) still sitting in the
+/// source byte buffer at `w_offset`.
+pub fn almide_rt_matrix_linear_f32_row_no_bias(
+    x: &AlmideMatrix,
+    w_bytes: &Vec<u8>,
+    w_offset: i64,
+    w_rows: i64,
+    w_cols: i64,
+) -> AlmideMatrix {
+    let x_rows = x.rows;
+    let n_in = w_cols.max(0) as usize;
+    let out_cols = w_rows.max(0) as usize;
+    let off = w_offset.max(0) as usize;
+    if x_rows == 0 || out_cols == 0 || n_in == 0 {
+        return mk(x_rows, out_cols, vec![0.0f64; x_rows * out_cols]);
+    }
+    let mut out = vec![0.0f64; x_rows * out_cols];
+    // Fast path: reinterpret the (4-byte-aligned, little-endian) weight bytes
+    // as &[f32] so the inner dot auto-vectorizes (cvtps2pd + fma), and split
+    // the output row across threads — GEMV is embarrassingly parallel over
+    // output elements. Falls back to per-element decode when misaligned.
+    let w_all = &w_bytes[off..off + out_cols * n_in * 4];
+    let (head, w_f32, _) = unsafe { w_all.align_to::<f32>() };
+    if head.is_empty() && w_f32.len() == out_cols * n_in {
+        use rayon::prelude::*;
+        for i in 0..x_rows {
+            let xi = &x.data[i * n_in..(i + 1) * n_in];
+            out[i * out_cols..(i + 1) * out_cols]
+                .par_iter_mut()
+                .enumerate()
+                .for_each(|(j, o)| {
+                    let wj = &w_f32[j * n_in..(j + 1) * n_in];
+                    let mut acc = 0.0f64;
+                    for k in 0..n_in {
+                        acc += xi[k] * wj[k] as f64;
+                    }
+                    *o = acc;
+                });
+        }
+    } else {
+        for j in 0..out_cols {
+            let row_off = off + j * n_in * 4;
+            let wj = &w_bytes[row_off..row_off + n_in * 4];
+            for i in 0..x_rows {
+                let xi = &x.data[i * n_in..(i + 1) * n_in];
+                let mut acc = 0.0f64;
+                for (k, c) in wj.chunks_exact(4).enumerate() {
+                    acc += xi[k] * f32::from_le_bytes([c[0], c[1], c[2], c[3]]) as f64;
+                }
+                out[i * out_cols + j] = acc;
+            }
+        }
+    }
+    mk(x_rows, out_cols, out)
+}
+
+/// Gather rows from an f32 tensor still in the source byte buffer
+/// (embedding lookup without decoding the 600 MB table).
+pub fn almide_rt_matrix_select_rows_f32(
+    data: &Vec<u8>,
+    offset: i64,
+    cols: i64,
+    row_ids: &[i64],
+) -> AlmideMatrix {
+    let c = cols.max(0) as usize;
+    let off = offset.max(0) as usize;
+    let mut out = Vec::<f64>::with_capacity(row_ids.len() * c);
+    for &rid in row_ids {
+        let base = off + (rid.max(0) as usize) * c * 4;
+        for ch in data[base..base + c * 4].chunks_exact(4) {
+            out.push(f32::from_le_bytes([ch[0], ch[1], ch[2], ch[3]]) as f64);
+        }
+    }
+    mk(row_ids.len(), c, out)
+}
+
+/// NeoX / HF-convention RoPE: rotates pairs (j, j+half) within each head,
+/// angle = (start_pos + row) * theta^(-2j/head_dim). With this variant the
+/// loader-side weight-row permutation (NeoX → interleaved) is unnecessary —
+/// weights are consumed exactly as stored.
+pub fn almide_rt_matrix_rope_rotate_neox_at(
+    x: &AlmideMatrix,
+    n_heads: i64,
+    head_dim: i64,
+    theta_base: f64,
+    start_pos: i64,
+) -> AlmideMatrix {
+    let rows = x.len();
+    let cols = if rows == 0 { 0 } else { x[0].len() };
+    let n_heads_u = n_heads.max(0) as usize;
+    let head_dim_u = head_dim.max(0) as usize;
+    let start = start_pos.max(0) as usize;
+    let half = head_dim_u / 2;
+    let mut inv_freqs = Vec::<f64>::with_capacity(half);
+    for j in 0..half {
+        let exp = (2 * j) as f64 / head_dim_u as f64;
+        inv_freqs.push(1.0 / theta_base.powf(exp));
+    }
+    let mut out = Vec::<Vec<f64>>::with_capacity(rows);
+    for p in 0..rows {
+        let pos_f = (start + p) as f64;
+        let row = &x[p];
+        let mut new_row = vec![0.0f64; cols];
+        for h in 0..n_heads_u {
+            let head_start = h * head_dim_u;
+            for j in 0..half {
+                let j0 = head_start + j;
+                let j1 = head_start + half + j;
+                let x0 = row[j0];
+                let x1 = row[j1];
+                let angle = pos_f * inv_freqs[j];
+                let (s, c) = angle.sin_cos();
+                new_row[j0] = x0 * c - x1 * s;
+                new_row[j1] = x0 * s + x1 * c;
+            }
+        }
+        out.push(new_row);
+    }
+    out.into_iter().collect()
+}
+
+/// One Qwen3 decoder layer over f32 weights resident in the source buffer.
+/// Mirror of `qwen3_block_q1_0_kv` with two fixes for real Qwen3 checkpoints:
+/// hidden_size is taken from `h` (Qwen3-0.6B has hidden 1024 ≠ n_heads*head_dim
+/// = 2048), and RoPE uses the NeoX convention so weights need no permutation.
+/// Handles both prefill (multi-row h, causal mask) and decode (single row) —
+/// the masked-MHA offset rule `j > (sk - sq) + i` covers both.
+pub fn almide_rt_matrix_qwen3_block_f32_kv(
+    h: &AlmideMatrix,
+    k_cache: &AlmideMatrix,
+    v_cache: &AlmideMatrix,
+    w: &Vec<u8>,
+    gamma_offs: &[i64],   // [attn_norm, q_norm, k_norm, ffn_norm]
+    weight_offs: &[i64],  // [q, k, v, o, gate, up, down]
+    start_pos: i64,
+    n_q_heads: i64,
+    n_kv_heads: i64,
+    head_dim: i64,
+    ffn_hidden: i64,
+    rope_theta: f64,
+    eps: f64,
+) -> (AlmideMatrix, AlmideMatrix, AlmideMatrix) {
+    let hidden = if h.rows > 0 { h.cols } else { 0 };
+    let q_hidden = (n_q_heads * head_dim) as usize;
+    let kv_hidden = (n_kv_heads * head_dim) as usize;
+    let n_rep = n_q_heads / n_kv_heads;
+
+    let gamma_attn = load_f32_to_f64(w, gamma_offs[0].max(0) as usize, hidden);
+    let gamma_q = load_f32_to_f64(w, gamma_offs[1].max(0) as usize, head_dim.max(0) as usize);
+    let gamma_k = load_f32_to_f64(w, gamma_offs[2].max(0) as usize, head_dim.max(0) as usize);
+    let gamma_ffn = load_f32_to_f64(w, gamma_offs[3].max(0) as usize, hidden);
+
+    let h_normed = almide_rt_matrix_rms_norm_rows(h, &gamma_attn, eps);
+
+    let q_proj = almide_rt_matrix_linear_f32_row_no_bias(
+        &h_normed, w, weight_offs[0], q_hidden as i64, hidden as i64);
+    let k_proj = almide_rt_matrix_linear_f32_row_no_bias(
+        &h_normed, w, weight_offs[1], kv_hidden as i64, hidden as i64);
+    let v_proj = almide_rt_matrix_linear_f32_row_no_bias(
+        &h_normed, w, weight_offs[2], kv_hidden as i64, hidden as i64);
+
+    let q_normed = per_head_rms_norm(&q_proj, &gamma_q, n_q_heads, eps);
+    let k_normed = per_head_rms_norm(&k_proj, &gamma_k, n_kv_heads, eps);
+
+    let q_rot = almide_rt_matrix_rope_rotate_neox_at(&q_normed, n_q_heads, head_dim, rope_theta, start_pos);
+    let k_rot = almide_rt_matrix_rope_rotate_neox_at(&k_normed, n_kv_heads, head_dim, rope_theta, start_pos);
+
+    let k_full_kv = if k_cache.rows == 0 { k_rot } else { almide_rt_matrix_append_rows(k_cache, &k_rot) };
+    let v_full_kv = if v_cache.rows == 0 { v_proj } else { almide_rt_matrix_append_rows(v_cache, &v_proj) };
+
+    let k_full = repeat_kv(&k_full_kv, n_kv_heads, n_rep);
+    let v_full = repeat_kv(&v_full_kv, n_kv_heads, n_rep);
+
+    let attn_out = almide_rt_matrix_masked_multi_head_attention(&q_rot, &k_full, &v_full, n_q_heads);
+    let attn_proj = almide_rt_matrix_linear_f32_row_no_bias(
+        &attn_out, w, weight_offs[3], hidden as i64, q_hidden as i64);
+    let x_attn = almide_rt_matrix_add(h, &attn_proj);
+
+    let h2 = almide_rt_matrix_rms_norm_rows(&x_attn, &gamma_ffn, eps);
+    let gate = almide_rt_matrix_linear_f32_row_no_bias(
+        &h2, w, weight_offs[4], ffn_hidden, hidden as i64);
+    let up = almide_rt_matrix_linear_f32_row_no_bias(
+        &h2, w, weight_offs[5], ffn_hidden, hidden as i64);
+    let gated = almide_rt_matrix_silu_mul(&gate, &up);
+    let ffn_out = almide_rt_matrix_linear_f32_row_no_bias(
+        &gated, w, weight_offs[6], hidden as i64, ffn_hidden);
+
+    let h_out = almide_rt_matrix_add(&x_attn, &ffn_out);
+    (h_out, k_full_kv, v_full_kv)
+}
