@@ -715,6 +715,7 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/list_count_index_truncation.almd", class = "fixture" },
   { path = "spec/wasm_cross/string_count_truncation.almd", class = "fixture" },
+  { path = "spec/wasm_cross/map_wide_int_key.almd", class = "fixture" },
 ]
 
 # ── FLOAT LIST ORDERING = IEEE-754 totalOrder (Cluster-B) ────────────

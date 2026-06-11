@@ -732,7 +732,10 @@ impl FuncCompiler<'_> {
         use super::engine::layout::{STRING, string as ls};
         let str_data_off = self.emitter.layout_reg.fixed_offset(STRING, ls::DATA) as i32;
         match key_ty {
-            Ty::Int => {
+            // #600: wide ints share the i64 key hash (the value is already i64
+            // on the stack); the get_or/from_list paths call emit_hash_key with
+            // the raw key_ty, so Int64/UInt64 must hash here exactly like Int.
+            Ty::Int | Ty::Int64 | Ty::UInt64 => {
                 let tmp = self.scratch.alloc_i64();
                 wasm!(self.func, {
                     local_tee(tmp);
@@ -937,20 +940,23 @@ impl FuncCompiler<'_> {
         if let Ty::Applied(_, args) = ty { args.first().cloned().unwrap_or(Ty::String) } else { Ty::String }
     }
     pub(super) fn emit_key_load(&mut self, key_ty: &Ty, offset: u32) {
+        // #600: wide ints (Int64/UInt64) share the 8-byte i64 key slot with Int —
+        // emit_hash_key already hashes them via the i64 path, so the access width
+        // must match or the wasm validator trips (expected i32, found i64).
         match key_ty {
-            Ty::Int => { wasm!(self.func, { i64_load(offset); }); }
+            Ty::Int | Ty::Int64 | Ty::UInt64 => { wasm!(self.func, { i64_load(offset); }); }
             _ => { wasm!(self.func, { i32_load(offset); }); }
         }
     }
     pub(super) fn emit_key_store(&mut self, key_ty: &Ty, offset: u32) {
         match key_ty {
-            Ty::Int => { wasm!(self.func, { i64_store(offset); }); }
+            Ty::Int | Ty::Int64 | Ty::UInt64 => { wasm!(self.func, { i64_store(offset); }); }
             _ => { wasm!(self.func, { i32_store(offset); }); }
         }
     }
     pub(super) fn emit_key_eq(&mut self, key_ty: &Ty) {
         match key_ty {
-            Ty::Int => { wasm!(self.func, { i64_eq; }); }
+            Ty::Int | Ty::Int64 | Ty::UInt64 => { wasm!(self.func, { i64_eq; }); }
             Ty::String => { wasm!(self.func, { call(self.emitter.rt.string.eq); }); }
             // Tuple keys, and records/Named-records with a heap POINTER field
             // (String / nested list), need STRUCTURAL equality — `mem_eq` would
@@ -1009,13 +1015,13 @@ impl FuncCompiler<'_> {
         }
     }
     pub(super) fn emit_search_key_store(&mut self, key_ty: &Ty, s32: u32, s64: u32) {
-        match key_ty { Ty::Int => { wasm!(self.func, { local_set(s64); }); } _ => { wasm!(self.func, { local_set(s32); }); } }
+        match key_ty { Ty::Int | Ty::Int64 | Ty::UInt64 => { wasm!(self.func, { local_set(s64); }); } _ => { wasm!(self.func, { local_set(s32); }); } }
     }
     pub(super) fn emit_search_key_load(&mut self, key_ty: &Ty, s32: u32, s64: u32) {
-        match key_ty { Ty::Int => { wasm!(self.func, { local_get(s64); }); } _ => { wasm!(self.func, { local_get(s32); }); } }
+        match key_ty { Ty::Int | Ty::Int64 | Ty::UInt64 => { wasm!(self.func, { local_get(s64); }); } _ => { wasm!(self.func, { local_get(s32); }); } }
     }
     pub(super) fn key_valtype(key_ty: &Ty) -> ValType {
-        match key_ty { Ty::Int => ValType::I64, _ => ValType::I32 }
+        match key_ty { Ty::Int | Ty::Int64 | Ty::UInt64 => ValType::I64, _ => ValType::I32 }
     }
     pub(super) fn emit_elem_copy_sized(&mut self, size: u32, dup: bool) {
         // `dup` = the 4-byte slot is a HEAP POINTER being SHARED (source

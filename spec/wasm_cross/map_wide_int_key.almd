@@ -1,0 +1,18 @@
+// @contract: C-054
+// #600: a Map with a wide hashable scalar key (Int64/UInt64 — 8-byte) builds
+// and runs byte-identical native == wasm. Before the fix, the wasm key-access
+// helpers special-cased only Ty::Int for the i64 path and routed Int64/UInt64
+// keys through i32 ops despite their 8-byte slot, so `map.set(map.new(), k, v)`
+// with an Int64 key crashed the emitter at structural validation
+// ("expected i32, found i64"). (Float keys are unhashable and rejected at
+// check — #598 — so only the hashable wide ints reach codegen here.)
+fn main() -> Unit = {
+  let a: Int64 = 5
+  let b: Int64 = 9000000000000
+  let m = map.from_list([(a, 10), (b, 20)])
+  println("len=${int.to_string(map.len(m))}")
+  println("a=${int.to_string(map.get_or(m, a, -1))} b=${int.to_string(map.get_or(m, b, -1))}")
+  let u: UInt64 = 18000000000000000000
+  let mu = map.set(map.new(), u, 7)
+  println("u=${int.to_string(map.get_or(mu, u, -1))}")
+}
