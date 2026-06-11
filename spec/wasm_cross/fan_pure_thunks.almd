@@ -4,11 +4,16 @@
 // adapter ONCE for both backends. Before that, native emitted invalid Rust
 // (E0271 against the runtime's Fn() -> Result bound) and wasm trapped with
 // an indirect call type mismatch — each backend broken in its own way on a
-// shape the checker accepts. Side-effect ORDER is part of the pin: race
-// evaluates ONLY fns[0] (deterministic, not wall-clock), settle runs all
-// in list order, any skips failures in list order.
+// shape the checker accepts. Side-effect ORDER is pinned for race (only
+// fns[0] is evaluated — deterministic, not wall-clock) and any (sequential
+// in list order). It is NOT pinned for settle: native runs settle thunks
+// on REAL THREADS, so their print interleaving is wall-clock (caught as a
+// 1-in-N gate flake: native printed B,A under load). Settle's RESULT list
+// order is deterministic and IS pinned; its thunks here are silent.
 fn thunk_a() -> Int = { println("A"); 1 }
 fn thunk_b() -> Int = { println("B"); 2 }
+fn quiet_a() -> Int = 1
+fn quiet_b() -> Int = 2
 fn try_c() -> Result[Int, String] = { println("C"); err("c") }
 fn try_d() -> Result[Int, String] = { println("D"); ok(4) }
 
@@ -17,6 +22,6 @@ effect fn main() -> Unit = {
   println("race=${r}")
   let a = fan.any([try_c, try_d])
   println("any=${a}")
-  let s = fan.settle([thunk_a, thunk_b])
+  let s = fan.settle([quiet_a, quiet_b])
   println("settle=${s}")
 }
