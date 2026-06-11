@@ -249,7 +249,7 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
                     ),
                 };
             }
-            match ctx.ann.get_var_storage(var, &target_s) {
+            match ctx.ann.get_var_storage(var) {
                 VarStorage::RcCow => format!("{} = RcCow::new({});", target_s, value_s),
                 _ => ctx.templates.render_with("assignment", None, &[], &[("target", target_s.as_str()), ("value", value_s.as_str())])
                     .unwrap_or_else(|| format!("_ = _;")),
@@ -320,7 +320,7 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
                     ),
                 };
             }
-            match ctx.ann.get_var_storage(target, &target_str) {
+            match ctx.ann.get_var_storage(target) {
                 VarStorage::RcCow => format!("{}.make_mut()[{} as usize] = {};", target_str, idx_str, cast_val),
                 _ => format!("{}[{} as usize] = {};", target_str, idx_str, cast_val),
             }
@@ -344,7 +344,7 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
                     ),
                 };
             }
-            match ctx.ann.get_var_storage(target, &target_str) {
+            match ctx.ann.get_var_storage(target) {
                 VarStorage::RcCow => format!("{}.make_mut().insert({}, {});", target_str, key_str, val_str),
                 _ => ctx.templates.render_with("map_insert", None, &[], &[("target", target_str.as_str()), ("key", key_str.as_str()), ("value", val_str.as_str())])
                     .unwrap_or_else(|| "map_set(...)".into()),
@@ -368,7 +368,7 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
                     ),
                 };
             }
-            match ctx.ann.get_var_storage(target, &target_str) {
+            match ctx.ann.get_var_storage(target) {
                 VarStorage::RcCow => format!("{}.make_mut().{} = {};", target_str, field, val_str),
                 _ => format!("{}.{} = {};", target_str, field, val_str),
             }
@@ -439,7 +439,7 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
                     other => unreachable!("[COMPILER BUG] list-swap on {:?} global `{}`", other, info.static_name),
                 };
             }
-            match ctx.ann.get_var_storage(target, &t) {
+            match ctx.ann.get_var_storage(target) {
                 VarStorage::RcCow => format!("{}.make_mut().swap({} as usize, {} as usize);", t, a_s, b_s),
                 _ => ctx.templates.render_with("peep_swap", None, &[], &[("target", &t), ("a", &a_s), ("b", &b_s)])
                     .unwrap_or_else(|| format!("{}.swap({}, {});", t, a_s, b_s)),
@@ -456,7 +456,7 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
                     other => unreachable!("[COMPILER BUG] list-reverse on {:?} global `{}`", other, info.static_name),
                 };
             }
-            match ctx.ann.get_var_storage(target, &t) {
+            match ctx.ann.get_var_storage(target) {
                 VarStorage::RcCow => format!("{}.make_mut()[..={} as usize].reverse();", t, e),
                 _ => ctx.templates.render_with("peep_reverse", None, &[], &[("target", &t), ("end", &e)])
                     .unwrap_or_else(|| format!("{}[..={} as usize].reverse();", t, e)),
@@ -473,7 +473,7 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
                     other => unreachable!("[COMPILER BUG] list-rotate on {:?} global `{}`", other, info.static_name),
                 };
             }
-            match ctx.ann.get_var_storage(target, &t) {
+            match ctx.ann.get_var_storage(target) {
                 VarStorage::RcCow => format!("{}.make_mut()[..={} as usize].rotate_left(1);", t, e),
                 _ => ctx.templates.render_with("peep_rotate_left", None, &[], &[("target", &t), ("end", &e)])
                     .unwrap_or_else(|| format!("{}[..={} as usize].rotate_left(1);", t, e)),
@@ -499,7 +499,7 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
                     other => unreachable!("[COMPILER BUG] copy-slice into {:?} global `{}`", other, info.static_name),
                 };
             }
-            match ctx.ann.get_var_storage(dst, &d) {
+            match ctx.ann.get_var_storage(dst) {
                 VarStorage::RcCow => format!("{}.make_mut()[..{} as usize].copy_from_slice(&{}[..{} as usize]);", d, n, src_read, n),
                 _ => ctx.templates.render_with("peep_copy_slice", None, &[], &[("dst", &d), ("src", &src_read), ("n", &n)])
                     .unwrap_or_else(|| format!("{}[..{} as usize].copy_from_slice(&{}[..{} as usize]);", d, n, src_read, n)),

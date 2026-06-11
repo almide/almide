@@ -254,24 +254,17 @@ fn perceus_fnbody(fb: FnBody, var_table: &mut VarTable) -> FnBody {
                             let bind_pos = stmts.iter().rposition(|st| matches!(
                                 &st.kind, IrStmtKind::Bind { var: bv, .. } if *bv == tail_id
                             ));
-                            if let Some(pos) = bind_pos {
-                                // The +1 is owed only when the tail temp's
-                                // OWN VALUE aliases (the unwrap_or-of-a-temp
-                                // shape: the temp's Dec frees the payload
-                                // first, json_gltf). A FRESH tail value moved
-                                // out of the block owns itself — Inc'ing it
-                                // was a pure +1 leak per execution (16 B/iter
-                                // in TCO loops, measured).
-                                let tail_value_aliases = matches!(
-                                    &stmts[pos].kind,
-                                    IrStmtKind::Bind { value, .. } if yields_borrowed_alias(value)
-                                );
-                                if tail_value_aliases {
-                                    stmts.insert(pos + 1, IrStmt {
-                                        kind: IrStmtKind::RcInc { var: tail_id },
-                                        span: None,
-                                    });
-                                }
+                            if let Some(_pos) = bind_pos {
+                                // The inner block was ALREADY processed by
+                                // perceus_expr: its own VDecl arm applied
+                                // Rule 1 to the tail bind (bind-adjacent,
+                                // before any trailing temp Dec — satisfying
+                                // the json_gltf ordering hazard this hoist
+                                // was built for). Inserting a second Inc here
+                                // DOUBLE-applied the rule: +1 leak per
+                                // execution (verified — two rc_incs on the
+                                // tail temp). All this arm must do is
+                                // suppress the LATE outer Inc.
                                 inner_inc_done = true;
                             }
                         }
@@ -296,7 +289,39 @@ fn perceus_fnbody(fb: FnBody, var_table: &mut VarTable) -> FnBody {
                 // Dec handles the final value. Intermediate old values leak by
                 // design in the current model (same as Koka's approach for var).
                 // TODO: proper old-value recovery requires COW or arena allocation.
-                FnBody::Assign { var, expr, body: Box::new(result) }
+                //
+                // Rule 1 applies to ASSIGN exactly as to VDecl: the var keeps
+                // its scope-end Dec, so an ALIAS-shaped RHS must acquire its
+                // own reference or that Dec under-counts the aliased value —
+                // `var c = fresh; c = list.get_or(xs, 0, d)` double-freed the
+                // shared element (rc==0 sentinel trap, verified repro). The
+                // VDecl arm had this rule from the start; this arm was the
+                // bypass.
+                //
+                // EXCEPTION — MOVE, not share: a bare-Var RHS whose source is
+                // a scope-Dec-EXEMPT temp (`__tco_*`, `__br_*`,
+                // `__perceus_*`: the same name classes the Ret/Nop dec
+                // insertion skips) DONATES its reference — those temps never
+                // get their own Dec, so the assign transfers ownership and an
+                // Inc here double-counts (+1 per TCO loop iteration,
+                // measured: deep churn 7 MB → 55 MB).
+                let ty = var_table.get(var).ty.clone();
+                let moved_from_exempt_temp = matches!(&expr.kind,
+                    IrExprKind::Var { id } if {
+                        let n = var_table.get(*id).name;
+                        let n = n.as_str();
+                        n.starts_with("__tco_") || n.starts_with("__br_")
+                            || n.starts_with("__perceus_")
+                    });
+                let alias_inc = is_heap_type(&ty)
+                    && yields_borrowed_alias(&expr)
+                    && !moved_from_exempt_temp;
+                let body = if alias_inc {
+                    FnBody::Inc { var, body: Box::new(result) }
+                } else {
+                    result
+                };
+                FnBody::Assign { var, expr, body: Box::new(body) }
             }
             ChainHead::Expr { mut expr } => {
                 perceus_expr(&mut expr, var_table);
@@ -367,7 +392,16 @@ fn insert_decs_before_ret(fb: FnBody, heap_vars: &[VarId], ret_vars: &HashSet<Va
     // remainder), and the Dec-insertion logic runs at the terminal (`Ret`/`Nop`).
     let (heads, terminal) = split_chain(fb);
     let mut result = match terminal {
-        FnBody::Ret { expr } => {
+        FnBody::Ret { mut expr } => {
+            // F2 (#527): the RET EXPRESSION's interior gets the FULL rule
+            // set. Until now the terminal was returned untouched and nothing
+            // ever perceus_expr'd it — a tail-position Match/If/Block
+            // subtree (the dominant fn shape `fn f() { stmts; match … }`)
+            // received ZERO rc processing: no Rule-1 incs, no capture incs,
+            // no temp decs. Leak-direction, but it disabled reclamation
+            // across the most common code shape and masked the lift's
+            // ordering hazard below.
+            perceus_expr(&mut expr, var_table);
             // Variables used inside the return expression (but not AS the return value)
             // need tail lift: let __ret = expr; Dec(vars); Ret(__ret)
             let vars_to_dec: Vec<VarId> = heap_vars.iter()
@@ -414,7 +448,17 @@ fn insert_decs_before_ret(fb: FnBody, heap_vars: &[VarId], ret_vars: &HashSet<Va
                     // chain-temp over-incs the alias-gated hoist removed
                     // (caught by the byte gate as a resurrection trap,
                     // default_fields_test).
-                    if is_heap_type(&ret_ty) && yields_borrowed_alias(&expr) {
+                    //
+                    // SUPPRESSION (same rule as the VDecl arm's hoist): with
+                    // F2 processing the expr's interior, a Block whose tail
+                    // var was bound inside already received the inner
+                    // Rule-1 Inc — a second one here would double-apply.
+                    let inner_already_inc = matches!(&expr.kind,
+                        IrExprKind::Block { stmts, expr: Some(tail) }
+                            if matches!(&tail.kind, IrExprKind::Var { id }
+                                if stmts.iter().any(|st| matches!(&st.kind,
+                                    IrStmtKind::Bind { var: bv, .. } if bv == id))));
+                    if is_heap_type(&ret_ty) && yields_borrowed_alias(&expr) && !inner_already_inc {
                         res = FnBody::Inc { var: ret_var, body: Box::new(res) };
                     }
                     FnBody::VDecl { var: ret_var, ty: ret_ty, mutability: Mutability::Let, expr, body: Box::new(res) }
@@ -483,140 +527,13 @@ impl NanoPass for PerceusPass {
     }
 }
 
-/// Perceus RC elimination: remove redundant Inc/Dec pairs.
-///
-/// Theorem (Inc-Dec Cancellation):
-///   If RcInc(x) was inserted for Bind(b, Var(x)) and b is immutable
-///   with use_count ≤ 1, then RcInc(x) and RcDec(b) cancel.
-///
-/// Proof: RcInc adds +1 to RC(x). RcDec(b) subtracts -1 from RC(x)
-///   (b aliases x). Since b is single-use and immutable, no other
-///   reference changes occur during b's lifetime. The pair is identity. □
-#[derive(Debug)]
-pub struct PerceusOptPass;
-
-impl NanoPass for PerceusOptPass {
-    fn name(&self) -> &str { "PerceusOpt" }
-    fn targets(&self) -> Option<Vec<Target>> { Some(vec![Target::Wasm]) }
-
-    fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
-        let mut changed = false;
-        for func in &mut program.functions {
-            if eliminate_redundant_rc(func, &program.var_table) { changed = true; }
-        }
-        for module in &mut program.modules {
-            for func in &mut module.functions {
-                if eliminate_redundant_rc(func, &program.var_table) { changed = true; }
-            }
-        }
-        PassResult { program, changed }
-    }
-}
-
-/// Eliminate redundant RcInc/RcDec pairs in a function (all nested blocks).
-fn eliminate_redundant_rc(func: &mut IrFunction, var_table: &VarTable) -> bool {
-    eliminate_in_expr(&mut func.body, var_table)
-}
-
-fn eliminate_in_expr(expr: &mut IrExpr, var_table: &VarTable) -> bool {
-    let mut v = EliminateRc { var_table, changed: false };
-    v.visit_expr_mut(expr);
-    v.changed
-}
-
-/// Removes redundant RcInc/RcDec pairs from every block, riding the exhaustive
-/// IrMutVisitor walk so nested blocks inside any node kind (loop bodies, call
-/// args, …) are scanned too. Eliminating a redundant pair is always valid, so the
-/// now-total recursion can only find MORE pairs.
-struct EliminateRc<'a> {
-    var_table: &'a VarTable,
-    changed: bool,
-}
-
-impl IrMutVisitor for EliminateRc<'_> {
-    fn visit_expr_mut(&mut self, expr: &mut IrExpr) {
-        if let IrExprKind::Block { stmts, .. } = &mut expr.kind {
-            if eliminate_in_block(stmts, self.var_table) { self.changed = true; }
-        }
-        walk_expr_mut(self, expr); // recurse all children (incl. previously-dropped kinds)
-    }
-}
-
-/// Scan a block for eliminable Inc/Dec pairs.
-///
-/// Pattern: RcInc(x) immediately before Bind(b, Var(x))
-///          + RcDec(b) later in the block
-///   where b is immutable and use_count(b) ≤ 1
-///
-/// → Remove both RcInc(x) and RcDec(b).
-fn eliminate_in_block(stmts: &mut Vec<IrStmt>, var_table: &VarTable) -> bool {
-    let mut to_remove: HashSet<usize> = HashSet::new();
-
-    // Pass 1: find RcInc(x) + Bind(b, Var(x)) pairs where b is single-use immutable
-    let mut inc_targets: HashMap<usize, (VarId, VarId)> = HashMap::new(); // stmt_idx → (x, b)
-    let mut i = 0;
-    while i + 1 < stmts.len() {
-        if let IrStmtKind::RcInc { var: x } = &stmts[i].kind {
-            if let IrStmtKind::Bind { var: b, value, .. } = &stmts[i + 1].kind {
-                let is_alias = match &value.kind {
-                    IrExprKind::Var { id } => *id == *x,
-                    IrExprKind::Clone { expr } => matches!(&expr.kind, IrExprKind::Var { id } if *id == *x),
-                    IrExprKind::Deref { expr } => matches!(&expr.kind, IrExprKind::Var { id } if *id == *x),
-                    _ => false,
-                };
-                if is_alias {
-                    let info = var_table.get(*b);
-                    let is_immutable = !matches!(info.mutability, Mutability::Var);
-                    if is_immutable {
-                        inc_targets.insert(i, (*x, *b));
-                    }
-                }
-            }
-        }
-        i += 1;
-    }
-
-    // Pass 2: compute last-use index for each variable in this block
-    let mut last_use_idx: HashMap<VarId, usize> = HashMap::new();
-    for (j, stmt) in stmts.iter().enumerate() {
-        let mut refs = HashSet::new();
-        collect_var_refs_stmt(stmt, &mut refs);
-        for var in refs {
-            last_use_idx.insert(var, j);
-        }
-    }
-
-    // Pass 3: for each eliminable pair, verify lifetime and find RcDec(b)
-    for (&inc_idx, &(x, b)) in &inc_targets {
-        // Lifetime check: last_use(x) >= last_use(b)
-        // If b outlives x, we can't eliminate (x would be freed while b is live)
-        let x_last = last_use_idx.get(&x).copied().unwrap_or(0);
-        let b_last = last_use_idx.get(&b).copied().unwrap_or(0);
-        if x_last < b_last { continue; } // b outlives x → unsafe to eliminate
-
-        for (j, stmt) in stmts.iter().enumerate() {
-            if j <= inc_idx { continue; }
-            if let IrStmtKind::RcDec { var } = &stmt.kind {
-                if *var == b {
-                    to_remove.insert(inc_idx);  // remove RcInc(x)
-                    to_remove.insert(j);         // remove RcDec(b)
-                    break;
-                }
-            }
-        }
-    }
-
-    if to_remove.is_empty() { return false; }
-
-    // Apply removals (reverse order to preserve indices)
-    let mut indices: Vec<usize> = to_remove.into_iter().collect();
-    indices.sort_unstable_by(|a, b| b.cmp(a));
-    for idx in indices {
-        stmts.remove(idx);
-    }
-
-    true
-}
+// ── PerceusOptPass: RETIRED (2026-06-11, #527 F6) ───────────────────────
+// The Inc/Dec pair-elimination targeted the PRE-Round-3 "Inc-BEFORE-bind"
+// convention. Under the current Inc-AFTER-bind rules its pattern never
+// matched (probed: zero firings across the full corpus), and a match would
+// have MISATTRIBUTED a Rule-1 protective Inc — removing it plus the
+// binding's Dec opens a transient use-after-free window. Deleted rather
+// than rewritten: there is no remaining shape for it to optimize.
 
 /// Perceus verification: check that RC operations are correctly balanced.
 ///
@@ -907,11 +824,16 @@ fn insert_rc_ops(func: &mut IrFunction, var_table: &mut VarTable) -> bool {
             kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None,
         });
         let span = body.span;
+        // NOTE: no hand-built RcInc here — the Bind flows through the
+        // ChainHead::VDecl arm whose Rule 1 fires on the IDENTICAL predicate
+        // (is_heap && yields_borrowed_alias). The earlier explicit Inc
+        // DOUBLE-applied with it: +1 rc leak per call of every
+        // alias-returning function (verified by IR dump — two rc_incs on
+        // __ret_dup).
         func.body = IrExpr {
             kind: IrExprKind::Block {
                 stmts: vec![
                     IrStmt { kind: IrStmtKind::Bind { var: dup_var, mutability: Mutability::Let, ty: ret_ty.clone(), value: body }, span },
-                    IrStmt { kind: IrStmtKind::RcInc { var: dup_var }, span: None },
                 ],
                 expr: Some(Box::new(IrExpr { kind: IrExprKind::Var { id: dup_var }, ty: ret_ty, span: None, def_id: None })),
             },

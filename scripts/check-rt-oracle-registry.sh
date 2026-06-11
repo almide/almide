@@ -48,6 +48,7 @@ mod.rs::compile_init_globals
 mod.rs::compile_test_runner
 mod.rs::compile_main_runner
 runtime.rs::compile_runtime
+runtime.rs::compile_alloc_pinned
 rt_dragon.rs::compile_driver
 rt_dragon.rs::compile_helpers
 rt_dec2flt.rs::compile_helpers

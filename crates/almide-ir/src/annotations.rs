@@ -11,41 +11,22 @@ pub enum VarStorage {
     Local,
     /// Local `var` of non-Copy type → `RcCow<T>` (Swift-style COW).
     RcCow,
-    /// Module-level `var` of Copy type → `thread_local! { Cell<T> }`.
-    ModuleCell,
-    /// Module-level `var` of non-Copy type → `thread_local! { RefCell<Rc<T>> }`.
-    ModuleRc,
 }
+// Module-global storage (Cell / RcRefCell / Const / Lazy) lives in
+// `top_let_storage::TopLetStorage` since §4 — VarStorage is LOCALS-ONLY.
 
 /// Annotations populated by Nanopass passes, read by the walker.
 #[derive(Debug, Clone, Default)]
 pub struct CodegenAnnotations {
-    pub lazy_vars: HashSet<VarId>,
-    /// Uppercased names of module-level `top_lets` whose kind is `Lazy`
-    /// (e.g. `ALMIDE_RT_UTIL_CATEGORY_ORDER`). Synthetic cross-module
-    /// Vars reference these by name but carry a fresh VarId, so
-    /// `lazy_vars` misses them. The walker checks this set before
-    /// emitting `(*NAME)` — scalar `Const` top_lets (plain `const
-    /// NAME: i64 = 42;`) must NOT be dereferenced.
-    pub lazy_top_let_names: HashSet<String>,
-    /// Uppercased names of `Lazy` top_lets whose initializer can ABORT (today:
-    /// contains an integer `/` or `%`, which abort on a zero divisor / MIN÷-1).
-    /// `fn main` forces these in DECLARATION ORDER before running, so an aborting
-    /// initializer fires at startup — matching wasm, which evaluates every top-let
-    /// eagerly in `_start`. Pure lazies stay lazy (timing is unobservable for them).
-    pub eager_force_top_lets: Vec<String>,
-    /// VarIds of `Const`-kind top_lets. Their declarations render as
-    /// `const NAME_UPPER: T = ...;`, so every reference must also render the
-    /// uppercased name — a lowercase source binding (`let zero = 0`) would
-    /// otherwise emit `zero` against `const ZERO` (E0425, native-only failure
-    /// while wasm builds: a cross-target divergence).
-    pub const_top_let_vars: HashSet<VarId>,
     /// Unified variable storage classification.
     /// Keyed by VarId for local vars (RcCow) and module vars with known ids.
     pub var_storage: HashMap<VarId, VarStorage>,
-    /// Keyed by uppercased name for cross-module synthetic refs
-    /// (ALMIDE_RT_<MOD>_<NAME>) that carry fresh VarIds.
-    pub var_storage_by_name: HashMap<String, VarStorage>,
+    /// Temps that must ALWAYS clone on use (CaptureClone's `__cap_*` clone
+    /// bindings, LICM's `__licm_*` hoists) — marked by the PRODUCING pass via
+    /// a VarId snapshot, replacing the name-prefix tests in CloneInsertion
+    /// (the #486-class fragility: a rename scheme change silently broke
+    /// classification with no gate).
+    pub always_clone_vars: HashSet<VarId>,
     /// §4 Stage 1 — the unified top-let storage attribute, computed once by
     /// `TopLetStoragePass` and asserted equal to every legacy predicate by
     /// the walker-side agreement verifier. Stage 2 makes consumers read THIS
@@ -99,25 +80,8 @@ pub struct CodegenAnnotations {
 impl CodegenAnnotations {
     /// Look up the storage mode for a variable. Checks VarId first (precise),
     /// then falls back to uppercased name for cross-module synthetic refs only.
-    ///
-    /// A genuine global is always referenced by its real VarId (registered at
-    /// classification time), so the VarId lookup hits. The by-name fallback is a
-    /// safety net for cross-module synthetic refs, whose names are
-    /// `ALMIDE_RT_`-prefixed and therefore collision-free. It must NOT match a
-    /// bare name like `N`: a local that merely shares the name with a user global
-    /// (e.g. a stdlib fn's `n` parameter when the program has a global `n`) would
-    /// otherwise be misclassified as the global and read through its thread_local.
-    pub fn get_var_storage(&self, var: &VarId, name: &str) -> VarStorage {
-        if let Some(s) = self.var_storage.get(var) {
-            return *s;
-        }
-        let upper = name.to_uppercase();
-        if upper.starts_with("ALMIDE_RT_") {
-            if let Some(s) = self.var_storage_by_name.get(&upper) {
-                return *s;
-            }
-        }
-        VarStorage::Local
+    pub fn get_var_storage(&self, var: &VarId) -> VarStorage {
+        self.var_storage.get(var).copied().unwrap_or(VarStorage::Local)
     }
 
     pub fn is_rc_cow(&self, var: &VarId) -> bool {
@@ -141,9 +105,5 @@ impl CodegenAnnotations {
     pub fn global(&self, id: VarId) -> Option<&crate::top_let_storage::GlobalInfo> {
         let decl = self.global_alias.get(&id).copied().unwrap_or(id);
         self.globals.get(&decl)
-    }
-
-    pub fn is_module_var(&self, var: &VarId, name: &str) -> bool {
-        matches!(self.get_var_storage(var, name), VarStorage::ModuleCell | VarStorage::ModuleRc)
     }
 }

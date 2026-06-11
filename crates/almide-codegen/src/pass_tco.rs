@@ -1115,10 +1115,21 @@ fn emit_tail_call_replacement(
 ) -> IrExpr {
     let mut stmts: Vec<IrStmt> = Vec::new();
 
+    // F5 (#527): an IDENTITY CARRY — argument i is the bare Var of param i —
+    // is a semantic no-op; emitting the temp anyway gave the temp bind a
+    // Rule-1 alias-Inc with no Dec anywhere (the temp is Dec-exempt by name,
+    // an unmanaged param has no per-iteration Dec): +1 rc per iteration, an
+    // immortal param block and rc creep toward wrap on long loops. Skip both
+    // the bind and the assign for those positions.
+    let identity_carry: Vec<bool> = args.iter().enumerate().map(|(i, arg)| {
+        matches!(&arg.kind, IrExprKind::Var { id } if *id == params[i].0)
+    }).collect();
+
     // Bind temporaries to argument expressions.
     // Strip Borrow from arg unless this param position is kept-borrowed
     // (e.g. Bytes borrow preserved across iterations).
     for (i, arg) in args.into_iter().enumerate() {
+        if identity_carry[i] { continue; }
         let (tmp_var, tmp_ty) = &temps[i];
         let keep = TCO_BORROWED_PARAMS.with(|s| s.borrow().contains(&i));
         let unwrapped = if keep { arg } else { strip_borrow(arg) };
@@ -1143,8 +1154,10 @@ fn emit_tail_call_replacement(
         stmts.push(IrStmt { kind: IrStmtKind::RcDec { var: *p }, span: None });
     }
 
-    // Assign params from temporaries
+    // Assign params from temporaries (identity carries skipped — the param
+    // already holds its value).
     for (i, (param_var, _)) in params.iter().enumerate() {
+        if identity_carry[i] { continue; }
         let (tmp_var, tmp_ty) = &temps[i];
         stmts.push(IrStmt {
             kind: IrStmtKind::Assign {

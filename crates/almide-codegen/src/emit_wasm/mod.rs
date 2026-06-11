@@ -147,13 +147,27 @@ pub struct CompiledFunc {
     /// Patched raw body bytes (set by data section DCE). If Some, used
     /// instead of `func` during assembly to reflect compacted data offsets.
     pub patched_body: Option<Vec<u8>>,
+    /// The REGISTERED function index this body belongs to (#526). When set,
+    /// `add_compiled` asserts the body lands at exactly that position —
+    /// converting the "compile order mirrors registration order" CONVENTION
+    /// (held across ~157 runtime routines, where a same-signature swap binds
+    /// the wrong body to a name and validates cleanly) into an invariant.
+    pub expected_func_idx: Option<u32>,
 }
 
 impl CompiledFunc {
     /// Construct from a TrackedFunction. This is the ONLY constructor —
     /// enforces that call_targets is always populated.
     pub fn tracked(type_idx: u32, tf: TrackedFunction) -> Self {
-        Self { type_idx, func: tf.inner, call_targets: tf.call_targets, patched_body: None }
+        Self { type_idx, func: tf.inner, call_targets: tf.call_targets, patched_body: None, expected_func_idx: None }
+    }
+
+    /// `tracked` + the registered function index this body is FOR. Prefer
+    /// this in every compile_* that knows its `emitter.rt.*` slot.
+    pub fn tracked_for(func_idx: u32, type_idx: u32, tf: TrackedFunction) -> Self {
+        let mut c = Self::tracked(type_idx, tf);
+        c.expected_func_idx = Some(func_idx);
+        c
     }
 }
 
@@ -276,6 +290,12 @@ pub struct RuntimeFuncs {
     pub cow_check: u32,
     pub heap_save: u32,
     pub heap_restore: u32,
+    /// `__alloc_pinned(size)` — alloc whose block is stamped `PINNED_RC` so
+    /// rc ops can never free it: for HOST-WRITTEN scratch (WASI fs buffers)
+    /// whose data area a syscall may overwrite — a freed-then-reused such
+    /// block had its free-list `next` clobbered by the host (the C-042
+    /// poison class). Pinning makes fs scratch immortal BY CONSTRUCTION.
+    pub alloc_pinned: u32,
     /// Global index holding the heap start address (immutable).
     /// Pointers below this are in the data section and must NOT be rc_dec'd.
     pub heap_start_global: u32,
@@ -550,7 +570,7 @@ impl WasmEmitter {
             case_table_bytes: 0,
             rt: RuntimeFuncs {
                 fd_write: 0, alloc: 0, rc_inc: 0, rc_dec: 0, cow_check: 0,
-                heap_save: 0, heap_restore: 0, heap_start_global: 0,
+                heap_save: 0, heap_restore: 0, alloc_pinned: 0, heap_start_global: 0,
                 println_str: 0, println_int: 0,
                 int_to_string: 0, float_to_string: 0,
                 float_parse: 0, float_to_fixed: 0, float_pow: 0,
@@ -631,15 +651,15 @@ impl WasmEmitter {
                 repr_str: 0,
                 float_display: 0,
             },
-            heap_ptr_global: 0,
-            free_list_global: 1,
-            preopen_table_global: 2,
-            preopen_count_global: 3,
+            heap_ptr_global: runtime::HEAP_PTR_GLOBAL_IDX,
+            free_list_global: runtime::FREE_LIST_GLOBAL_IDX,
+            preopen_table_global: runtime::PREOPEN_TABLE_GLOBAL_IDX,
+            preopen_count_global: runtime::PREOPEN_COUNT_GLOBAL_IDX,
             top_let_globals: HashMap::new(),
             def_globals: HashMap::new(),
             top_let_globals_by_name: HashMap::new(),
             top_let_init: Vec::new(),
-            next_global: 5, // 0=heap_ptr, 1=free_list, 2=preopen_table, 3=preopen_count, 4=heap_start
+            next_global: runtime::HEAP_START_GLOBAL_IDX + 1, // fixed globals end at HEAP_START
             func_table: Vec::new(),
             func_to_table_idx: HashMap::new(),
             record_fields: BTreeMap::new(),
@@ -690,7 +710,30 @@ impl WasmEmitter {
     }
 
     /// Add a compiled function body.
+    /// THE ctor-field lookup (#525): a registration MISS is a compiler bug
+    /// (the registration↔lookup name-skew class — cross-module/mangled ctor
+    /// names), not an empty layout. `unwrap_or_default` at the call sites
+    /// conflated None with Some(empty): every pattern bind silently read
+    /// zero-initialized locals, record map-keys never matched, repr printed
+    /// empty. Registered-but-empty stays legal (unit-ish payloads).
+    pub fn fields_of(&self, ctor: &str) -> Vec<(String, almide_lang::types::Ty)> {
+        self.record_fields.get(ctor).cloned().unwrap_or_else(|| panic!(
+            "[ICE] constructor `{}` has no registered field layout (#525 class)",
+            ctor
+        ))
+    }
+
     pub fn add_compiled(&mut self, compiled: CompiledFunc) {
+        if let Some(expected) = compiled.expected_func_idx {
+            let landing = self.num_imports + self.compiled.len() as u32;
+            assert_eq!(
+                landing, expected,
+                "[ICE] compiled body for registered func {} landing at index {} — \
+                 registration and compile order diverged (#526); a same-signature \
+                 neighbor swap binds the wrong body to a name and validates cleanly",
+                expected, landing
+            );
+        }
         self.compiled.push(compiled);
     }
 
@@ -868,8 +911,16 @@ impl FuncCompiler<'_> {
             }
         } else if let Some(&local_idx) = self.var_map.get(&id) {
             wasm!(self.func, { local_get(new_ptr); local_set(local_idx); });
-        } else if let Some(&(global_idx, _)) = self.emitter.top_let_globals.get(&id) {
+        } else if let Some((global_idx, _)) = self.lookup_global(almide_ir::VarId(id)) {
             wasm!(self.func, { local_get(new_ptr); global_set(global_idx); });
+        } else {
+            // #525 (A6): silently SKIPPING the write-back leaves the var
+            // holding a stale pre-realloc pointer — this fn's own doc calls
+            // that "silently wrong". Refuse loudly instead.
+            panic!(
+                "[ICE] mutator write-back target VarId {} resolved to neither local nor global (#525)",
+                id
+            );
         }
     }
 
@@ -1865,7 +1916,7 @@ fn assemble(emitter: &mut WasmEmitter) -> Vec<u8> {
         },
         &wasm_encoder::ConstExpr::i32_const(0),
     );
-    // Global 2: preopen count (set by __init_preopen_dirs at startup)
+    // Global 3: preopen count (set by __init_preopen_dirs at startup)
     globals.global(
         GlobalType {
             val_type: ValType::I32,
@@ -1885,7 +1936,19 @@ fn assemble(emitter: &mut WasmEmitter) -> Vec<u8> {
     );
     emitter.rt.heap_start_global = runtime::HEAP_START_GLOBAL_IDX;
 
-    // Top-level let globals
+    // Top-level let globals. POSITIONAL invariant (#526): the section
+    // ignores each entry's recorded index and emits by Vec order after the
+    // five fixed globals — assert the two agree, or one alloc site that
+    // bumped next_global without pushing here silently shifts EVERY later
+    // global (the preopen/free-list collision class).
+    for (i, &(recorded_idx, _, _)) in emitter.top_let_init.iter().enumerate() {
+        let landing = runtime::HEAP_START_GLOBAL_IDX + 1 + i as u32;
+        assert_eq!(
+            recorded_idx, landing,
+            "[ICE] top-let global recorded at index {} emitting at {} (#526)",
+            recorded_idx, landing
+        );
+    }
     for &(_, vt, bits) in &emitter.top_let_init {
         let init = match vt {
             ValType::I64 => wasm_encoder::ConstExpr::i64_const(bits),
@@ -1995,6 +2058,20 @@ fn assemble(emitter: &mut WasmEmitter) -> Vec<u8> {
 /// Compile the __init_globals function.
 #[allow(dead_code)] // Will be activated when top-let WASM codegen is wired up
 fn compile_init_globals(emitter: &mut WasmEmitter, program: &IrProgram) {
+    // C-007 by construction (§4 stage 3): this function's emission order
+    // (root top-lets, then per-module) must BE `global_init_order` — the
+    // same vector the native main wrapper derives its eager forces from.
+    // Asserted rather than re-derived: a future reorder of either side
+    // becomes a build failure, not an eager-vs-init cross-target drift.
+    {
+        let emitted: Vec<almide_ir::VarId> = program.top_lets.iter().map(|tl| tl.var)
+            .chain(program.modules.iter().flat_map(|m| m.top_lets.iter().map(|tl| tl.var)))
+            .collect();
+        assert_eq!(
+            emitted, program.codegen_annotations.global_init_order,
+            "[COMPILER BUG] __init_globals emission order diverged from global_init_order (C-007)"
+        );
+    }
     let void_type = emitter.register_type(vec![], vec![]);
 
     let mut local_decls = Vec::new();
@@ -2611,7 +2688,12 @@ fn compile_repr_funcs(emitter: &mut WasmEmitter, var_table: &almide_ir::VarTable
         // this is the whole point of keying by instantiation. The dispatch base
         // name is the type's own name (`Tree`), not the mangled key.
         let ty = emitter.repr_func_tys.get(mangled).cloned()
-            .unwrap_or_else(|| almide_lang::types::Ty::Named(almide_base::intern::sym(mangled), Vec::new()));
+            .unwrap_or_else(|| panic!(
+                "[ICE] repr dispatch for `{}` has no registered instantiation — \
+                 fabricating a Named from the MANGLED key silently printed an \
+                 empty repr (#525)",
+                mangled
+            ));
         let base_name = match &ty {
             almide_lang::types::Ty::Named(n, _) => n.to_string(),
             _ => mangled.clone(),

@@ -126,15 +126,17 @@ impl FuncCompiler<'_> {
         // Tuple destructure (for list of tuples)
         if let Some(tuple_vars) = var_tuple {
             if let Ty::Tuple(elem_types) = &elem_ty {
+                // #524: offset advance unconditional (a missing local must
+                // not shift every later field's load).
                 let mut field_offset = 0u32;
                 for (i, &tv) in tuple_vars.iter().enumerate() {
+                    let ft = elem_types.get(i).cloned().unwrap_or(Ty::Int);
                     if let Some(&local_idx) = self.var_map.get(&tv.0) {
-                        let ft = elem_types.get(i).cloned().unwrap_or(Ty::Int);
                         wasm!(self.func, { local_get(loop_var); });
                         self.emit_load_at(&ft, field_offset);
                         wasm!(self.func, { local_set(local_idx); });
-                        field_offset += values::byte_size(&ft);
                     }
+                    field_offset += values::byte_size(&ft);
                 }
             }
         }
@@ -499,7 +501,7 @@ impl FuncCompiler<'_> {
                     let ctor_guard = self.depth_push();
 
                     // Resolve constructor field types from variant info + subject type_args
-                    let ctor_fields = self.emitter.record_fields.get(ctor_name).cloned().unwrap_or_default();
+                    let ctor_fields = self.emitter.fields_of(ctor_name);
                     let subject_type_args: &[Ty] = match subject_ty {
                         Ty::Named(_, args) if !args.is_empty() => args,
                         Ty::Applied(_, args) if !args.is_empty() => args,
@@ -701,7 +703,7 @@ impl FuncCompiler<'_> {
                     let rec_guard = self.depth_push();
 
                     // Bind fields: load each field from subject + tag_offset + field_offset
-                    let case_fields = self.emitter.record_fields.get(ctor_name).cloned().unwrap_or_default();
+                    let case_fields = self.emitter.fields_of(ctor_name);
                     for pf in pat_fields {
                         if let Some((foff, fty)) = values::field_offset(&case_fields, &pf.name) {
                             let total_offset = 4 + foff; // 4 = tag size
@@ -1104,7 +1106,7 @@ impl FuncCompiler<'_> {
                     let ctor_guard = self.depth_push();
 
                     // Bind constructor fields with type param substitution
-                    let ctor_fields = self.emitter.record_fields.get(ctor_name.as_str()).cloned().unwrap_or_default();
+                    let ctor_fields = self.emitter.fields_of(ctor_name.as_str());
                     let type_args: &[Ty] = match inner_ty {
                         Ty::Named(_, args) if !args.is_empty() => args,
                         Ty::Applied(_, args) if !args.is_empty() => args,
@@ -1302,7 +1304,7 @@ impl FuncCompiler<'_> {
                     self.func.instruction(&Instruction::If(bt));
                     let ctor_guard = self.depth_push();
                     // Bind named fields from the variant's record layout
-                    let case_fields = self.emitter.record_fields.get(ctor_name.as_str()).cloned().unwrap_or_default();
+                    let case_fields = self.emitter.fields_of(ctor_name.as_str());
                     for pf in pat_fields {
                         if let Some((foff, fty)) = values::field_offset(&case_fields, &pf.name) {
                             let total_offset = 4 + foff; // 4 = tag size

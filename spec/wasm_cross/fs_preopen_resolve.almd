@@ -31,16 +31,13 @@
 // order-independent across the gate's fixtures; `fs.write` uses O_CREAT|O_TRUNC,
 // so any prior/concurrent content is overwritten with the same constant bytes.
 //
-// ── OP-COUNT CEILING (do NOT add a third fs op) ──
-// The wasm fs runtime has a PRE-EXISTING, separate trap: a fixed scratch buffer
-// that a WASI host call (path_filestat_get / fd_read) writes into is later
-// reclaimed onto the bump-allocator free list with a poisoned `next` field, so a
-// THIRD fs op (or heavy allocation after an fs op) sends __alloc's free-list walk
-// out of bounds (exit 134). This fixture deliberately stays at TWO fs ops with
-// only a trailing println, which is in the stable zone (verified byte-identical &
-// stable across repeated runs and across two launch cwds). Adding a third fs op
-// here will reintroduce the trap and is NOT what these two routines are about —
-// see the rt-oracle-registry notes for compile_init_preopen_dirs.
+// ── Former OP-COUNT CEILING: LIFTED (Stage D, pinned scratch) ──
+// Every buffer a WASI host call writes into (fd_out/stat/iov/nread/data
+// scratch, the preopen tables) is now allocated via `__alloc_pinned` and
+// stamped `PINNED_RC` — such a block can never reach the free list, so the
+// host can never clobber a free-list `next` field (the class that imposed
+// the old two-op ceiling). The op count below is deliberately ABOVE the old
+// ceiling, plus interleaved allocation churn, to pin the lift.
 
 import fs
 
@@ -52,4 +49,21 @@ effect fn main() -> Unit = {
   // land on the identical host file.
   let readback = fs.read_text("/tmp/./almide_xt_fs_preopen_resolve.txt")!
   println(readback)
+  // Beyond the old ceiling: more fs ops with allocation churn in between —
+  // pre-Stage-D this shape trapped inside __alloc (poisoned free list).
+  let exists1 = fs.exists(path)
+  println(if exists1 then "exists" else "missing")
+  var i = 0
+  var sink = 0
+  while i < 200 {
+    let s = "chunk" + int.to_string(i % 10)
+    sink = sink + string.len(s)
+    i = i + 1
+  }
+  println(int.to_string(sink))
+  let again = fs.read_text(path)!
+  println(again)
+  let _ = fs.write(path, "PREOPEN-ROUND-2")!
+  let final_read = fs.read_text("/tmp/./almide_xt_fs_preopen_resolve.txt")!
+  println(final_read)
 }

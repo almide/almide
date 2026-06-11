@@ -2830,11 +2830,11 @@ impl FuncCompiler<'_> {
         self.emit_typed_append_store(new_buf, old_len, val_i64, val_f64, size_bytes, is_float, /*be=*/ true);
         wasm!(self.func, { end; });
 
-        if let almide_ir::IrExprKind::Var { id } = &buf_expr.kind {
-            if let Some(&local_idx) = self.var_map.get(&id.0) {
-                wasm!(self.func, { local_get(new_buf); local_set(local_idx); });
-            }
-        }
+        // #525 (A8): route through the SHARED write-back — the hand-rolled
+        // var_map-only form silently lost the realloc'd buffer for a
+        // module-global Bytes var and stored the buffer pointer OVER a
+        // shared-cell capture's cell pointer (the Closure-v2 P6 corruption).
+        self.emit_mutator_writeback(buf_expr, new_buf);
 
         self.scratch.free_f64(val_f64);
         self.scratch.free_i64(val_i64);

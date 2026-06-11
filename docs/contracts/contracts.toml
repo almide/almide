@@ -556,6 +556,8 @@ since     = "0.27.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/rc_reclaim_churn.almd", class = "fixture" },
+  { path = "spec/wasm_cross/assign_alias_rc.almd", class = "fixture" },
+  { path = "spec/wasm_cross/container_alias_return.almd", class = "fixture" },
   { path = "spec/churn/record_churn.almd", class = "by-construction" },
   { path = "spec/churn/tco_loop_churn.almd", class = "by-construction" },
 ]

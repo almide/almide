@@ -68,6 +68,14 @@ pub fn byte_size(ty: &Ty) -> u32 {
         Ty::Bytes => 4,  // i32 pointer
         Ty::Matrix => 4, // i32 pointer
         Ty::Unit => 0,
+        // i32 pointer for all heap types. Unknown leaking through a
+        // NON-gated channel (VarTable entries, pattern types) silently
+        // sizes as 4 — an Int slot then strides wrong. Loud in debug,
+        // symmetric with ty_to_valtype's Unknown debug_assert (#525).
+        Ty::Unknown => {
+            debug_assert!(false, "[ICE-debug] byte_size(Ty::Unknown) — unresolved type sized as a pointer (#525)");
+            4
+        }
         _ => 4,          // i32 pointer for all heap types
     }
 }

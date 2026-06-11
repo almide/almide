@@ -23,6 +23,10 @@ impl NanoPass for LICMPass {
     fn targets(&self) -> Option<Vec<Target>> { None }
 
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
+        // Every VarId this pass allocates is a `__licm_*` hoist binding (one
+        // alloc site); snapshot + mark, replacing the name-prefix test in
+        // CloneInsertion.
+        let vt_start = program.var_table.len();
         // Build mutation map from IR (no source re-parsing)
         let mutation_map = build_mutation_map(&program);
         // Analyze purity: user functions (fixpoint) + stdlib modules (IR attrs)
@@ -53,6 +57,9 @@ impl NanoPass for LICMPass {
                     changed = true;
                 }
             }
+        }
+        for i in vt_start..program.var_table.len() {
+            program.codegen_annotations.always_clone_vars.insert(VarId(i as u32));
         }
         PassResult { program, changed }
     }

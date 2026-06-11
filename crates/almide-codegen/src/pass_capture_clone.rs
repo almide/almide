@@ -31,6 +31,10 @@ impl NanoPass for CaptureClonePass {
     }
 
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
+        // Every VarId this pass allocates is a `__cap_*` clone binding (one
+        // alloc site); snapshot the table length and mark the new ids in
+        // `always_clone_vars` afterwards — id-keyed, rename-proof.
+        let vt_start = program.var_table.len();
         // Pre-analysis (Closure v2, P3): a Copy-type `var` local (Int/Float/Bool)
         // captured by a closure must become a shared `Rc<Cell<T>>` — a `move`
         // closure would capture a *copy* and silently drop the mutation. Compute
@@ -72,6 +76,9 @@ impl NanoPass for CaptureClonePass {
             m.borrow_mut().clear();
         });
         PARAM_BORROWS.with(|m| m.borrow_mut().clear());
+        for i in vt_start..program.var_table.len() {
+            program.codegen_annotations.always_clone_vars.insert(VarId(i as u32));
+        }
         PassResult { program, changed }
     }
 }

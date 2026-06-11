@@ -287,7 +287,7 @@ fn compile_compile(emitter: &mut WasmEmitter) {
         local_get(0); i32_const(0); call(parse_alts);
         end;
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.regex.compile, type_idx, f));
 }
 
 // ─── __rx_parse_alts(pat, in_group) -> alts_ptr ───
@@ -367,7 +367,7 @@ fn compile_parse_alts(emitter: &mut WasmEmitter) {
     });
     wasm!(f, { end; end; }); // end loop, block
     wasm!(f, { local_get(3); end; });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.regex.parse_alts, type_idx, f));
 }
 
 // ─── __rx_parse_piece(pat) -> piece_ptr ───
@@ -416,7 +416,7 @@ fn compile_parse_piece(emitter: &mut WasmEmitter) {
         local_get(1);
         end;
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.regex.parse_piece, type_idx, f));
 }
 
 // ─── __rx_parse_atom(pat) -> piece_ptr ───
@@ -517,7 +517,7 @@ fn compile_parse_atom(emitter: &mut WasmEmitter) {
         local_get(1);
         end;
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.regex.parse_atom, type_idx, f));
 }
 
 // ─── __rx_parse_escape(pat, piece_ptr) -> () ───
@@ -596,7 +596,7 @@ fn compile_parse_escape(emitter: &mut WasmEmitter) {
         global_get(parse_pos); local_get(5); i32_add; global_set(parse_pos);
         end;
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.regex.parse_escape, type_idx, f));
 }
 
 /// Allocate `nranges` contiguous Range pairs and write a CLASS node into the
@@ -785,7 +785,7 @@ fn compile_parse_class(emitter: &mut WasmEmitter) {
         local_get(1); i32_const(RX_PIECE_Z_OFF); i32_add; local_get(3); i32_store(0);
         end;
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.regex.parse_class, type_idx, f));
 }
 
 /// Push a const range pair onto the contiguous ranges array (bump arena one
@@ -868,7 +868,7 @@ fn compile_node_matches(emitter: &mut WasmEmitter) {
         i32_const(0);
         end;
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.regex.node_matches, type_idx, f));
 }
 
 // ─── __rx_match_one(piece_ptr, text, p, caps, ncap) -> bytes_consumed | -1 ───
@@ -925,7 +925,7 @@ fn compile_match_one(emitter: &mut WasmEmitter) {
         end;
     });
     wasm!(f, { i32_const(RX_NO_MATCH); end; });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.regex.match_one, type_idx, f));
 }
 
 // ─── __rx_match_rep(piece, text, p, caps, ncap, count) -> end | -1 ───
@@ -993,7 +993,7 @@ fn compile_match_rep(emitter: &mut WasmEmitter) {
         i32_const(RX_NO_MATCH);
         end;
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.regex.match_rep, type_idx, f));
 }
 
 // ─── __rx_match_seq(piece, text, p, caps, ncap) -> end | -1 ───
@@ -1041,7 +1041,7 @@ fn compile_match_seq(emitter: &mut WasmEmitter) {
         call(match_rep);
         end;
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.regex.match_seq, type_idx, f));
 }
 
 // ─── __rx_match_alts(alts, text, p, caps, ncap) -> end | -1 ───
@@ -1081,7 +1081,7 @@ fn compile_match_alts(emitter: &mut WasmEmitter) {
         i32_const(RX_NO_MATCH);
         end;
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.regex.match_alts, type_idx, f));
 }
 
 // ─── __rx_find_at(alts, text, start, caps, ncap) -> end | -1 ───
@@ -1124,7 +1124,7 @@ fn compile_find_at(emitter: &mut WasmEmitter) {
         i32_const(RX_NO_MATCH);
         end;
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.regex.find_at, type_idx, f));
 }
 
 // ════════════════════════════════════════════════════════════════════════

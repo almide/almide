@@ -293,3 +293,22 @@ freed block is one unit smaller than the next request, so first-fit can
 never reuse it. That is an allocator-policy frontier (capacity growth /
 size classes), not an ownership bug; C-066's bounded-exception list shrinks
 to the construct-from-temp over-count outside reclaimed regions.
+
+
+## Stage D COMPLETE (2026-06-11): fs scratch pinned + the REAL C-042 root
+
+Setting up the PIN exposed that the multi-op fs trap's true root was never
+the free-list-lifetime story alone: `register_runtime` still carried the
+PRE-FREES global numbering (`preopen_table_global = 1`, count = 2) after
+free_list took index 1 — **`__init_preopen_dirs` wrote the preopen TABLE
+POINTER into the FREE LIST head** at boot, so `__alloc`'s (unconditional)
+walk treated the table as a free node for EVERY fs-using program, in every
+release for months. Self-consistent enough to survive the 2-op fixture
+because `__resolve_path` read the table back through the same stale index.
+`fs.exists` ×2 reproduced it on v0.26.21 in pure leak mode.
+
+Landed: the index fix (one constant pair) + `__alloc_pinned`/`PINNED_RC`
+(every host-written WASI buffer — fd_out/stat/iov/nread/data scratch, the
+preopen tables, the resolve result — is immortal BY CONSTRUCTION; rc_inc and
+rc_dec early-out on the sentinel) + the C-007 init-order assert. The C-042
+fixture now runs 6 fs ops with interleaved allocation churn, byte-identical.
