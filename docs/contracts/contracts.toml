@@ -846,3 +846,12 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/index_bounds.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-068"
+title     = "Auto-? is target-directed in construction positions"
+statement = "An effect-fn call in a CONSTRUCTION position — a record field, list element, tuple slot, or map value — whose declared TARGET type is `Result[T, E]` KEEPS its Result (the auto-inserted `?` is stripped), exactly like the binding-statement arms (let/assign/index-assign/field-assign). The implicit Result-lift of an effect call plus an unconditional unwrap previously produced invalid native Rust (E0308: a `?` against a Result-typed slot) while wasm RAN and stored a SILENTLY WRONG value (the unwrapped i64 0 instead of the Result). Now byte-identical native == wasm: the Result is preserved at every construction position."
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/autotry_construction.almd", class = "fixture" },
+]
