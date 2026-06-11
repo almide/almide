@@ -392,7 +392,16 @@ fn insert_decs_before_ret(fb: FnBody, heap_vars: &[VarId], ret_vars: &HashSet<Va
     // remainder), and the Dec-insertion logic runs at the terminal (`Ret`/`Nop`).
     let (heads, terminal) = split_chain(fb);
     let mut result = match terminal {
-        FnBody::Ret { expr } => {
+        FnBody::Ret { mut expr } => {
+            // F2 (#527): the RET EXPRESSION's interior gets the FULL rule
+            // set. Until now the terminal was returned untouched and nothing
+            // ever perceus_expr'd it — a tail-position Match/If/Block
+            // subtree (the dominant fn shape `fn f() { stmts; match … }`)
+            // received ZERO rc processing: no Rule-1 incs, no capture incs,
+            // no temp decs. Leak-direction, but it disabled reclamation
+            // across the most common code shape and masked the lift's
+            // ordering hazard below.
+            perceus_expr(&mut expr, var_table);
             // Variables used inside the return expression (but not AS the return value)
             // need tail lift: let __ret = expr; Dec(vars); Ret(__ret)
             let vars_to_dec: Vec<VarId> = heap_vars.iter()
@@ -439,7 +448,17 @@ fn insert_decs_before_ret(fb: FnBody, heap_vars: &[VarId], ret_vars: &HashSet<Va
                     // chain-temp over-incs the alias-gated hoist removed
                     // (caught by the byte gate as a resurrection trap,
                     // default_fields_test).
-                    if is_heap_type(&ret_ty) && yields_borrowed_alias(&expr) {
+                    //
+                    // SUPPRESSION (same rule as the VDecl arm's hoist): with
+                    // F2 processing the expr's interior, a Block whose tail
+                    // var was bound inside already received the inner
+                    // Rule-1 Inc — a second one here would double-apply.
+                    let inner_already_inc = matches!(&expr.kind,
+                        IrExprKind::Block { stmts, expr: Some(tail) }
+                            if matches!(&tail.kind, IrExprKind::Var { id }
+                                if stmts.iter().any(|st| matches!(&st.kind,
+                                    IrStmtKind::Bind { var: bv, .. } if bv == id))));
+                    if is_heap_type(&ret_ty) && yields_borrowed_alias(&expr) && !inner_already_inc {
                         res = FnBody::Inc { var: ret_var, body: Box::new(res) };
                     }
                     FnBody::VDecl { var: ret_var, ty: ret_ty, mutability: Mutability::Let, expr, body: Box::new(res) }
