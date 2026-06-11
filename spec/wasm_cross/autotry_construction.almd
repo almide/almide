@@ -1,0 +1,18 @@
+// @contract: C-068
+// #555: effect calls in CONSTRUCTION positions (record field, list element,
+// tuple slot) whose TARGET type is Result must KEEP their Result — the
+// auto-? unwrap is target-directed there, exactly like the binding statement
+// arms. Before this, `Holder { r: step() }` and
+// `[step(), step()]: List[Result[..]]` lifted an effect call to Result then
+// auto-unwrapped it: native built invalid Rust (E0308), wasm RAN and printed
+// a SILENTLY WRONG value (42 -> 0). Now both keep the Result, byte-identical.
+type Holder = { r: Result[Int, String] }
+effect fn step() -> Int = 42
+effect fn main() -> Unit = {
+  let h = Holder { r: step() }
+  let rs: List[Result[Int, String]] = [step(), step()]
+  let t: (Result[Int, String], Int) = (step(), 9)
+  println("field ${h.r ?? -1}")
+  println("list ${rs |> list.map((r) => r ?? -1)}")
+  println("tuple ${t.0 ?? -1} ${t.1}")
+}

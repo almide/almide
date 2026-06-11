@@ -313,13 +313,44 @@ fn insert_try(expr: IrExpr, in_match_subject: bool, ctx: &mut TryCtx) -> IrExpr 
         IrExprKind::Lambda { params, body, lambda_id } => IrExprKind::Lambda {
             params, body, lambda_id,
         },
-        IrExprKind::List { elements } => IrExprKind::List {
-            elements: elements.into_iter().map(|e| insert_try(e, false, ctx)).collect(),
-        },
-        IrExprKind::Record { name, fields } => IrExprKind::Record {
-            name,
-            fields: fields.into_iter().map(|(k, v)| (k, insert_try(v, false, ctx))).collect(),
-        },
+        // #555: construction positions are TARGET-DIRECTED like the statement
+        // arms — a Result-typed element/field must KEEP its Result (strip the
+        // auto-`?`), not unwrap it. The unconditional wrap here made
+        // `[step(), step()]: List[Result[..]]` and `Holder { r: step() }` lift
+        // an effect call to Result and then auto-unwrap it, so native built
+        // invalid Rust (E0308) while wasm ran and silently corrupted the value.
+        IrExprKind::List { elements } => {
+            let elem_is_result = match &ty {
+                Ty::Applied(c, args) if *c == TypeConstructorId::List && args.len() == 1 => args[0].is_result(),
+                _ => false,
+            };
+            IrExprKind::List {
+                elements: elements.into_iter()
+                    .map(|e| coerce_to_target(insert_try(e, false, ctx), elem_is_result))
+                    .collect(),
+            }
+        }
+        IrExprKind::Record { name, fields } => {
+            let field_tys: HashMap<Sym, bool> = match &ty {
+                Ty::Record { fields: fs } | Ty::OpenRecord { fields: fs } =>
+                    fs.iter().map(|(n, t)| (*n, t.is_result())).collect(),
+                Ty::Named(tn, _) => ctx.record_fields.get(tn)
+                    .map(|fs| fs.iter().map(|(n, t)| (*n, t.is_result())).collect())
+                    .unwrap_or_default(),
+                _ => name.as_ref().and_then(|n| ctx.record_fields.get(n))
+                    .map(|fs| fs.iter().map(|(n, t)| (*n, t.is_result())).collect())
+                    .unwrap_or_default(),
+            };
+            IrExprKind::Record {
+                name,
+                fields: fields.into_iter()
+                    .map(|(k, v)| {
+                        let tgt = field_tys.get(&k).copied().unwrap_or(false);
+                        (k, coerce_to_target(insert_try(v, false, ctx), tgt))
+                    })
+                    .collect(),
+            }
+        }
         IrExprKind::OptionSome { expr: inner } => IrExprKind::OptionSome {
             expr: Box::new(insert_try(*inner, false, ctx)),
         },
@@ -355,9 +386,19 @@ fn insert_try(expr: IrExpr, in_match_subject: bool, ctx: &mut TryCtx) -> IrExpr 
         IrExprKind::Fan { exprs } => IrExprKind::Fan {
             exprs: exprs.into_iter().map(|e| insert_try(e, false, ctx)).collect(),
         },
-        IrExprKind::Tuple { elements } => IrExprKind::Tuple {
-            elements: elements.into_iter().map(|e| insert_try(e, false, ctx)).collect(),
-        },
+        IrExprKind::Tuple { elements } => {
+            // #555: per-position target-directed coercion (Result-typed tuple
+            // slot keeps its Result).
+            let elem_results: Vec<bool> = match &ty {
+                Ty::Tuple(tys) => tys.iter().map(|t| t.is_result()).collect(),
+                _ => Vec::new(),
+            };
+            IrExprKind::Tuple {
+                elements: elements.into_iter().enumerate()
+                    .map(|(i, e)| coerce_to_target(insert_try(e, false, ctx), elem_results.get(i).copied().unwrap_or(false)))
+                    .collect(),
+            }
+        }
         IrExprKind::SpreadRecord { base, fields } => IrExprKind::SpreadRecord {
             base: Box::new(insert_try(*base, false, ctx)),
             fields: fields.into_iter().map(|(k, v)| (k, insert_try(v, false, ctx))).collect(),
@@ -376,9 +417,18 @@ fn insert_try(expr: IrExpr, in_match_subject: bool, ctx: &mut TryCtx) -> IrExpr 
         IrExprKind::Deref { expr } => IrExprKind::Deref {
             expr: Box::new(insert_try(*expr, false, ctx)),
         },
-        IrExprKind::MapLiteral { entries } => IrExprKind::MapLiteral {
-            entries: entries.into_iter().map(|(k, v)| (insert_try(k, false, ctx), insert_try(v, false, ctx))).collect(),
-        },
+        IrExprKind::MapLiteral { entries } => {
+            // #555: a Result-typed map VALUE keeps its Result.
+            let val_is_result = match &ty {
+                Ty::Applied(c, args) if *c == TypeConstructorId::Map && args.len() == 2 => args[1].is_result(),
+                _ => false,
+            };
+            IrExprKind::MapLiteral {
+                entries: entries.into_iter()
+                    .map(|(k, v)| (insert_try(k, false, ctx), coerce_to_target(insert_try(v, false, ctx), val_is_result)))
+                    .collect(),
+            }
+        }
         IrExprKind::Unwrap { expr: inner } => IrExprKind::Unwrap {
             expr: Box::new(insert_try(*inner, true, ctx)),
         },
