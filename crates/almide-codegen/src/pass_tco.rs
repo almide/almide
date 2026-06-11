@@ -418,7 +418,7 @@ fn is_tco_candidate(func: &IrFunction) -> bool {
     if !can_default_init(&func.ret_ty) {
         return false;
     }
-    let (has_any, all_in_tail) = all_self_calls_in_tail_pos(&func.body, &func.name);
+    let (has_any, all_in_tail) = all_self_calls_in_tail_pos(&func.body, &func.name, func.is_effect);
     has_any && all_in_tail
 }
 
@@ -435,7 +435,7 @@ fn is_tco_candidate(func: &IrFunction) -> bool {
 /// - Subject of Match
 /// - Inside BinOp, UnOp, or any compound expression
 /// - Block.stmts (only Block.expr can be tail)
-fn all_self_calls_in_tail_pos(expr: &IrExpr, fn_name: &str) -> (bool, bool) {
+fn all_self_calls_in_tail_pos(expr: &IrExpr, fn_name: &str, is_effect: bool) -> (bool, bool) {
     match &expr.kind {
         // Direct self-call in tail position
         IrExprKind::Call { target: CallTarget::Named { name }, .. } if name == fn_name => {
@@ -448,8 +448,8 @@ fn all_self_calls_in_tail_pos(expr: &IrExpr, fn_name: &str) -> (bool, bool) {
             if cond_has && !cond_all {
                 return (true, false);
             }
-            let (then_has, then_all) = all_self_calls_in_tail_pos(then, fn_name);
-            let (else_has, else_all) = all_self_calls_in_tail_pos(else_, fn_name);
+            let (then_has, then_all) = all_self_calls_in_tail_pos(then, fn_name, is_effect);
+            let (else_has, else_all) = all_self_calls_in_tail_pos(else_, fn_name, is_effect);
             let has = cond_has || then_has || else_has;
             let all = (!cond_has || cond_all) && (!then_has || then_all) && (!else_has || else_all);
             (has, all)
@@ -462,7 +462,7 @@ fn all_self_calls_in_tail_pos(expr: &IrExpr, fn_name: &str) -> (bool, bool) {
                 return (true, false);
             }
             let (has, all) = arms.iter().fold((subj_has, !subj_has || subj_all), |(has, all), arm| {
-                let (arm_has, arm_all) = all_self_calls_in_tail_pos(&arm.body, fn_name);
+                let (arm_has, arm_all) = all_self_calls_in_tail_pos(&arm.body, fn_name, is_effect);
                 let (g_has, g_all) = arm.guard.as_ref().map_or((false, true), |g| scan_non_tail(g, fn_name));
                 (has || arm_has || g_has, all && (!arm_has || arm_all) && (!g_has || g_all))
             });
@@ -477,10 +477,35 @@ fn all_self_calls_in_tail_pos(expr: &IrExpr, fn_name: &str) -> (bool, bool) {
                 (has || s_has, all && (!s_has || s_all))
             });
             let (has, all) = expr.as_ref().map_or((has, all), |tail| {
-                let (t_has, t_all) = all_self_calls_in_tail_pos(tail, fn_name);
+                let (t_has, t_all) = all_self_calls_in_tail_pos(tail, fn_name, is_effect);
                 (has || t_has, all && (!t_has || t_all))
             });
             (has, all)
+        }
+
+        // #557: `expr!` / `expr?` wrapping a tail self-call. Since auto-? moved
+        // into the frontend (cc70ebc4), an effect fn's tail self-call reaches
+        // TCO already wrapped as `Try{Call self}` on every arm — without this
+        // arm `is_tco_candidate` returned false and the loop conversion was
+        // lost, so every implicitly-lifted recursive `effect fn` ran O(n) stack
+        // and crashed on BOTH targets. A `?` on a tail self-call is still a tail
+        // call: Ok continues the recursion, Err short-circuits (and in loop form
+        // the only Err sources are base cases, so the `?` is subsumed).
+        IrExprKind::Try { expr: inner } | IrExprKind::Unwrap { expr: inner } => {
+            match &inner.kind {
+                IrExprKind::Call { target: CallTarget::Named { name }, .. } if name == fn_name => (true, true),
+                _ => scan_non_tail(inner, fn_name),
+            }
+        }
+
+        // #557: on the WASM arm ResultPropagation runs BEFORE TCO, so an effect
+        // fn's tail is already `Ok(<tail>)`. Treat the Ok wrapper as
+        // tail-transparent for effect fns (it is the propagation wrapper, not a
+        // user value) so `Ok(Try(Call self))` / `Ok(0)` are seen in tail
+        // position. For non-effect fns Ok is a real construction and stays
+        // opaque.
+        IrExprKind::ResultOk { expr: inner } if is_effect => {
+            all_self_calls_in_tail_pos(inner, fn_name, is_effect)
         }
 
         // Anything else: scan for non-tail self-calls.
@@ -504,7 +529,6 @@ fn all_self_calls_in_tail_pos(expr: &IrExpr, fn_name: &str) -> (bool, bool) {
         | IrExprKind::StringInterp { .. }
         | IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. }
         | IrExprKind::OptionSome { .. } | IrExprKind::OptionNone
-        | IrExprKind::Try { .. } | IrExprKind::Unwrap { .. }
         | IrExprKind::UnwrapOr { .. } | IrExprKind::ToOption { .. }
         | IrExprKind::OptionalChain { .. } | IrExprKind::Await { .. }
         | IrExprKind::Clone { .. } | IrExprKind::Deref { .. }
@@ -998,9 +1022,26 @@ fn rewrite_tail_expr(
             emit_tail_call_replacement(args, params, temps, result_var, dec_params)
         }
 
-        // Effect fn: unwrap ok(expr) in tail position — assign the inner value
+        // #557: `(self-call)?` / `(self-call)!` — a frontend auto-? wrapping a
+        // tail self-call loop-converts IDENTICALLY to the bare self-call (the
+        // `?` is subsumed by the loop; an Err can only originate at a base
+        // case, never the recursion).
+        IrExprKind::Try { expr: inner } | IrExprKind::Unwrap { expr: inner }
+            if matches!(&inner.kind, IrExprKind::Call { target: CallTarget::Named { name }, .. } if name == fn_name) =>
+        {
+            match inner.kind {
+                IrExprKind::Call { args, .. } => emit_tail_call_replacement(args, params, temps, result_var, dec_params),
+                _ => unreachable!("guard guarantees a self-call"),
+            }
+        }
+
+        // Effect fn: the Ok(..) propagation wrapper is tail-transparent —
+        // RECURSE into it so `Ok(Try(Call self))` reaches the tail-call arm and
+        // `Ok(0)` reaches the base-case arm (#557). Previously this eagerly
+        // emitted the whole inner as a base case, so a wasm-arm
+        // `Ok(Try(Call self))` was mis-emitted as a base value (no loop).
         IrExprKind::ResultOk { expr: inner } if is_effect => {
-            emit_base_case(*inner, result_var, dec_params)
+            rewrite_tail_expr(*inner, fn_name, params, temps, result_var, is_effect, dec_params)
         }
 
         // If: recurse into both branches

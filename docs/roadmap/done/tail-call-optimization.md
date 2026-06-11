@@ -51,7 +51,7 @@ Key details:
 
 1. **Tail position analysis**: Walk IR to identify tail-position calls
 2. **Codegen transform**: Emit loop wrapper + continue pattern for detected functions
-3. **Effect fn support**: TCO with `Result` return type (tail call in Ok path)
+3. **Effect fn support**: TCO through the frontend auto-? wrapper — a tail `Try{Call self}` (Rust arm) / `Ok(Try(Call self))` (wasm arm) loop-converts; the `?` is subsumed and the Ok propagation wrapper is tail-transparent (#557, C-069). Both the implicit `-> T` lift and the explicit `-> Result[T, E]` spelling are covered.
 
 ## Phase
 
