@@ -1995,6 +1995,20 @@ fn assemble(emitter: &mut WasmEmitter) -> Vec<u8> {
 /// Compile the __init_globals function.
 #[allow(dead_code)] // Will be activated when top-let WASM codegen is wired up
 fn compile_init_globals(emitter: &mut WasmEmitter, program: &IrProgram) {
+    // C-007 by construction (§4 stage 3): this function's emission order
+    // (root top-lets, then per-module) must BE `global_init_order` — the
+    // same vector the native main wrapper derives its eager forces from.
+    // Asserted rather than re-derived: a future reorder of either side
+    // becomes a build failure, not an eager-vs-init cross-target drift.
+    {
+        let emitted: Vec<almide_ir::VarId> = program.top_lets.iter().map(|tl| tl.var)
+            .chain(program.modules.iter().flat_map(|m| m.top_lets.iter().map(|tl| tl.var)))
+            .collect();
+        assert_eq!(
+            emitted, program.codegen_annotations.global_init_order,
+            "[COMPILER BUG] __init_globals emission order diverged from global_init_order (C-007)"
+        );
+    }
     let void_type = emitter.register_type(vec![], vec![]);
 
     let mut local_decls = Vec::new();
