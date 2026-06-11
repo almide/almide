@@ -64,6 +64,13 @@ pub struct Checker {
     /// Argument spans for the current call. Set before `check_named_call_*`
     /// so E005 can point at the exact argument expression.
     pub(crate) arg_spans: Vec<Option<crate::ast::Span>>,
+    /// #558: named-arg reordering metadata for the current call —
+    /// `(named_start, names)` where `named_start` is the index in the
+    /// flattened positional args at which named args begin (their values were
+    /// appended in SOURCE order), and `names` is the parallel param-name list.
+    /// `check_named_call` uses this to validate each value against the param it
+    /// NAMES (lowering binds by name), not the positional slot it landed in.
+    pub(crate) named_arg_meta: Option<(usize, Vec<almide_base::intern::Sym>)>,
     pub(crate) constraints: Vec<Constraint>,
     pub(crate) uf: UnionFind,
     /// Module-name prefix active during `infer_module`. `None` for the
@@ -143,6 +150,7 @@ impl Checker {
             call_span_hint: None,
             last_mut_params: Vec::new(),
             arg_spans: Vec::new(),
+            named_arg_meta: None,
             constraints: Vec::new(), uf: UnionFind::new(),
             current_module_prefix: None,
             deferred_tuple_indices: Vec::new(),

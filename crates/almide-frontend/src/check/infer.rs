@@ -1035,7 +1035,12 @@ impl Checker {
         args.extend(std::mem::take(named_args).into_iter().map(|(_, e)| e));
         let resolved_type_args: Option<Vec<crate::types::Ty>> = type_args.as_ref().map(|tas|
             tas.iter().map(|te| self.resolve_type_expr(te)).collect());
+        // #558: hand the named-arg shape to check_named_call so it validates
+        // by NAME (matching lowering), not by the appended positional slot.
+        self.named_arg_meta = if named_names.is_empty() { None }
+            else { Some((named_start, named_names.clone())) };
         let ret = self.check_call_with_type_args(callee, args, resolved_type_args.as_deref());
+        self.named_arg_meta = None;
         // Restore named args
         let named_exprs: Vec<ast::Expr> = args.drain(named_start..).collect();
         *named_args = named_names.into_iter().zip(named_exprs).collect();
