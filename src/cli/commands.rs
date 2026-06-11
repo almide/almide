@@ -295,7 +295,21 @@ fn compile_and_run_wasm_test(test_file: &str, tmp_dir: &std::path::Path) -> Wasm
     }));
     let bytes = match bytes {
         Ok(b) => b,
-        Err(_) => return skip("WASM codegen panic".to_string()),
+        // #609 mechanism: a WASM codegen PANIC on a program that type-checks is
+        // a compiler bug (an ICE / [COMPILER BUG]), NOT a benign `// wasm:skip`.
+        // Treating it as a Skip let a wasm-only crash hide behind the native
+        // fallback (`almide test` reported PASS). Report it as a Fail so
+        // `cmd_test_wasm` counts it failed and `cmd_test_fast` surfaces it as a
+        // cross-target divergence even when native passes.
+        Err(e) => {
+            let msg = e.downcast_ref::<String>().map(|s| s.as_str())
+                .or_else(|| e.downcast_ref::<&str>().copied())
+                .unwrap_or("WASM codegen panic");
+            return WasmTestOutcome::Fail {
+                file: test_file.to_string(),
+                detail: format!("  WASM codegen panic: {}\n", msg.lines().next().unwrap_or(msg)),
+            };
+        }
     };
     if prof {
         marks.push(("codegen", std::time::Instant::now()));
@@ -493,10 +507,17 @@ pub fn cmd_test_fast(file: &str, no_check: bool, run_filter: Option<&str>) {
 
     let mut wasm_pass = 0usize;
     let mut fallback: Vec<String> = Vec::new();
+    // #609 mechanism: a wasm FAIL (codegen panic / parse error / output
+    // divergence) is a cross-target BUG, distinct from a benign Skip
+    // (`// wasm:skip`, native-only matrix, unsupported feature). Track Fails so
+    // they surface as failures even when the native fallback passes — otherwise
+    // a wasm-only crash on a type-checking program hides behind native.
+    let mut wasm_fails: Vec<(String, String)> = Vec::new();
     for o in wasm_outcomes {
         match o {
             WasmTestOutcome::Pass { .. } => wasm_pass += 1,
-            WasmTestOutcome::Fail { file, .. } | WasmTestOutcome::Skip { file, .. } => fallback.push(file),
+            WasmTestOutcome::Fail { file, detail } => { wasm_fails.push((file.clone(), detail)); fallback.push(file); }
+            WasmTestOutcome::Skip { file, .. } => fallback.push(file),
         }
     }
 
@@ -539,12 +560,23 @@ pub fn cmd_test_fast(file: &str, no_check: bool, run_filter: Option<&str>) {
     };
 
     let mut failed = 0;
+    let native_failed: std::collections::HashSet<&str> =
+        native_results.iter().filter(|(_, c)| *c != 0).map(|(f, _)| f.as_str()).collect();
     for (file, code) in &native_results {
         if *code != 0 { eprintln!("FAILED: {}", file); failed += 1; }
     }
-    eprintln!("\n{} via WASM, {} via native fallback, {} failed (of {} files)",
-        wasm_pass, fallback.len().saturating_sub(failed), failed, test_files.len());
-    if failed > 0 {
+    // Surface wasm-only failures (native passed but wasm crashed/diverged) —
+    // the cross-target bug class that used to hide behind native fallback.
+    let mut wasm_only = 0;
+    for (file, detail) in &wasm_fails {
+        if !native_failed.contains(file.as_str()) {
+            eprintln!("WASM-FAILED (native passed, cross-target bug): {}\n{}", file, detail);
+            wasm_only += 1;
+        }
+    }
+    eprintln!("\n{} via WASM, {} via native fallback, {} failed, {} wasm-only-failed (of {} files)",
+        wasm_pass, fallback.len().saturating_sub(failed).saturating_sub(wasm_only), failed, wasm_only, test_files.len());
+    if failed > 0 || wasm_only > 0 {
         std::process::exit(1);
     }
     eprintln!("All {} test file(s) passed", test_files.len());
