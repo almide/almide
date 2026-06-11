@@ -1409,7 +1409,7 @@ fn render_runtime_call(ctx: &RenderContext, symbol: &almide_base::intern::Sym, a
                             return format!("{}.with(|c| {}({}))", info.static_name, symbol.as_str(), call_args);
                         }
                     }
-                    match ctx.ann.get_var_storage(id, &name) {
+                    match ctx.ann.get_var_storage(id) {
                         VarStorage::RcCow => {
                             let rest_args = args[1..].iter().map(|a| render_expr(ctx, a))
                                 .collect::<Vec<_>>().join(", ");
