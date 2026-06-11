@@ -107,6 +107,25 @@ pub(super) fn lower_call(ctx: &mut LowerCtx, callee: &ast::Expr, args: &[ast::Ex
         }
     }
 
+    // #558: UFCS default-arg fill. A bare `x.foo()` lowers to a `Method`
+    // target whose object the EMITTER prepends as arg 0 — but the Named
+    // branches above never fire, so a free fn with defaults (`fn foo(a, b=10)`
+    // called `x.foo()`) reached codegen one arg short (invalid Rust / wasm
+    // stack underflow). When the method names a known free fn with defaults,
+    // fill them here, counting the (not-yet-prepended) object as arg 0.
+    if let CallTarget::Method { method, .. } = &target {
+        if !method.as_str().contains('.') {
+            if let Some(defaults) = ctx.fn_defaults.get(method).cloned() {
+                // provided = object (1) + explicit positional args
+                let provided = 1 + ir_args.len();
+                ir_args.extend(
+                    defaults.iter().skip(provided)
+                        .filter_map(|d| d.as_ref().map(|expr| lower_expr(ctx, expr)))
+                );
+            }
+        }
+    }
+
     // Stage 1b: retype Int/Float literal args that flow into sized
     // numeric params (`Int32`, `UInt8`, `Float32`, ...). Mirrors the
     // let-binding coercion in `statements.rs::override_record_literal_ty`
