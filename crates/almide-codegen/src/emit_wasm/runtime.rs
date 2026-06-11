@@ -561,7 +561,7 @@ fn compile_alloc(emitter: &mut WasmEmitter) {
         w.get(1).i32c(hdr).add();
     }
     f.instruction(&wasm_encoder::Instruction::End);
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.alloc, type_idx, f));
 }
 
 /// Whether this emission activates real reference-count frees — the DEFAULT
@@ -592,7 +592,7 @@ fn compile_rc_inc(emitter: &mut WasmEmitter) {
             w.get(0);
         }
         f.instruction(&wasm_encoder::Instruction::End);
-        emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+        emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.rc_inc, type_idx, f));
         return;
     }
 
@@ -636,7 +636,7 @@ fn compile_rc_inc(emitter: &mut WasmEmitter) {
         w.get(0); // return ptr
     }
     f.instruction(&wasm_encoder::Instruction::End);
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.rc_inc, type_idx, f));
 }
 
 fn compile_rc_dec(emitter: &mut WasmEmitter) {
@@ -647,7 +647,7 @@ fn compile_rc_dec(emitter: &mut WasmEmitter) {
         // Bump-and-leak model (default): true no-op (see compile_rc_inc).
         let mut f = Function::new([]);
         f.instruction(&wasm_encoder::Instruction::End);
-        emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+        emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.rc_dec, type_idx, f));
         return;
     }
 
@@ -700,7 +700,7 @@ fn compile_rc_dec(emitter: &mut WasmEmitter) {
         });
     }
     f.instruction(&wasm_encoder::Instruction::End);
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.rc_dec, type_idx, f));
 }
 
 /// __cow_check(ptr) -> ptr. See registration comment in `register_runtime`.
@@ -744,7 +744,7 @@ fn compile_cow_check(emitter: &mut WasmEmitter) {
         w.get(2); // return the fresh clone
     }
     f.instruction(&wasm_encoder::Instruction::End);
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.cow_check, type_idx, f));
 }
 
 // __heap_save() -> i32
@@ -756,7 +756,7 @@ fn compile_heap_save(emitter: &mut WasmEmitter) {
     let mut f = Function::new([]);
     f.instruction(&wasm_encoder::Instruction::GlobalGet(emitter.heap_ptr_global));
     f.instruction(&wasm_encoder::Instruction::End);
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.heap_save, type_idx, f));
 }
 
 // __heap_restore(ptr: i32) -> ()
@@ -780,7 +780,7 @@ fn compile_heap_restore(emitter: &mut WasmEmitter) {
         global_set(emitter.free_list_global);
         end;
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.heap_restore, type_idx, f));
 }
 
 /// `__alloc_pinned(size) -> ptr` — `__alloc` + stamp the rc header with
@@ -807,7 +807,7 @@ fn compile_alloc_pinned(emitter: &mut WasmEmitter) {
         w.get(1);
     }
     f.instruction(&wasm_encoder::Instruction::End);
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.alloc_pinned, type_idx, f));
 }
 
 /// __println_str(ptr: i32)
@@ -859,7 +859,7 @@ fn compile_println_str(emitter: &mut WasmEmitter) {
         end;
     });
 
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.println_str, type_idx, f));
 }
 
 /// __int_to_string(n: i64) -> i32
@@ -1045,7 +1045,7 @@ fn compile_int_to_string(emitter: &mut WasmEmitter) {
     // return $result
     wasm!(f, { local_get(6); end; });
 
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.int_to_string, type_idx, f));
 }
 
 /// __println_int(n: i64)
@@ -1061,7 +1061,7 @@ fn compile_println_int(emitter: &mut WasmEmitter) {
         end;
     });
 
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.println_int, type_idx, f));
 }
 
 /// __concat_str(left: i32, right: i32) -> i32
@@ -1140,7 +1140,7 @@ fn compile_concat_str(emitter: &mut WasmEmitter) {
     });
 
     wasm!(f, { local_get(5); end; });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.concat_str, type_idx, f));
 }
 
 /// __string_alloc(data_len: i32) -> ptr
@@ -1171,7 +1171,7 @@ fn compile_string_alloc(emitter: &mut WasmEmitter) {
         w.get(1);
     }
     f.instruction(&wasm_encoder::Instruction::End);
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.string_alloc, type_idx, f));
 }
 
 /// __div_trap(msg_ptr: i32)
@@ -1229,7 +1229,7 @@ fn compile_div_trap(emitter: &mut WasmEmitter) {
         call(proc_exit);
         end;
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.div_trap, type_idx, f));
 }
 
 /// Capacity-aware string append: if left has room, append in-place; else grow 2x.
@@ -1287,7 +1287,7 @@ fn compile_string_append(emitter: &mut WasmEmitter) {
         end;
     });
     wasm!(f, { end; });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.string_append, type_idx, f));
 }
 
 /// Emit a byte-by-byte copy loop: dst[dst_off+i] = src[src_off+i], 0..len
@@ -1400,7 +1400,7 @@ fn compile_init_preopen_dirs(emitter: &mut WasmEmitter) {
         end;
     });
 
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.init_preopen_dirs, type_idx, f));
 }
 
 /// __resolve_path(path_ptr: i32, path_len: i32) → i32 (result_ptr)
@@ -1545,7 +1545,7 @@ fn compile_resolve_path(emitter: &mut WasmEmitter) {
         end;
     });
 
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.resolve_path, type_idx, f));
 }
 
 
@@ -1621,5 +1621,5 @@ pub(super) fn compile_bytes_f16_to_f64(emitter: &mut WasmEmitter) {
         end;
         end;  // close function body
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.bytes_f16_to_f64, type_idx, f));
 }

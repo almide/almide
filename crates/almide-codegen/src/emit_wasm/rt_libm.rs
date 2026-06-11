@@ -257,7 +257,7 @@ fn compile_floor(emitter: &mut WasmEmitter) {
         end;
         end;
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.libm.floor, type_idx, f));
 }
 
 // ──────────────────────── __libm_scalbn ───────────────────────
@@ -313,7 +313,7 @@ fn compile_scalbn(emitter: &mut WasmEmitter) {
         f64_mul;
         end;
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.libm.scalbn, type_idx, f));
 }
 
 // ───────────── kernel coefficients (libm k_sin/k_cos/k_tan) ────
@@ -382,7 +382,7 @@ fn compile_k_sin(emitter: &mut WasmEmitter) {
         end;
         end;
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.libm.k_sin, type_idx, f));
 }
 
 // ───────────────────────── __libm_k_cos ───────────────────────
@@ -409,7 +409,7 @@ fn compile_k_cos(emitter: &mut WasmEmitter) {
         f64_add;
         end;
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.libm.k_cos, type_idx, f));
 }
 
 // ───────────────────────── __libm_k_tan ───────────────────────
@@ -518,7 +518,7 @@ fn compile_k_tan(emitter: &mut WasmEmitter) {
         f64_add;
         end;
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.libm.k_tan, type_idx, f));
 }
 
 // ───────────── rem_pio2 medium-case + small-case helpers ───────
@@ -788,7 +788,7 @@ fn compile_rem_pio2(emitter: &mut WasmEmitter) {
     });
     emit_store_y(&mut f);
     wasm!(f, { local_get(RP_N); end; });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.libm.rem_pio2, type_idx, f));
 }
 
 // ───────────────────── __libm_rem_pio2_large ──────────────────
@@ -926,7 +926,7 @@ fn compile_rem_pio2_large(emitter: &mut WasmEmitter) {
     emit_rpl_recompute_and_finalize(
         &mut f, scalbn, floor, ipio2, pio2, x1p24_bits, x1p_24_bits,
     );
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.libm.rem_pio2_large, type_idx, f));
 }
 
 /// Emit the 'recompute loop + finalization tail of `rem_pio2_large` into `f`.
@@ -1323,7 +1323,7 @@ fn compile_exp(emitter: &mut WasmEmitter) {
         end;
         end;
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.libm.exp, type_idx, f));
 }
 
 // ── shared log reduction (e_log.c kernel; log2/log10 reuse it) ──
@@ -1447,7 +1447,7 @@ fn compile_log(emitter: &mut WasmEmitter) {
         local_get(LG_K); f64_convert_i32_s; f64_const(LOG_LN2_HI); f64_mul; f64_add;
         end;
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.libm.log, type_idx, f));
 }
 
 // log2/log10 extra-precision tail locals (after r at index 9).
@@ -1488,7 +1488,7 @@ fn compile_log2(emitter: &mut WasmEmitter) {
         local_get(LG_VL); local_get(LG_VH); f64_add;
         end;
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.libm.log2, type_idx, f));
 }
 
 const IVLN10HI: f64 = 4.34294481878168880939e-01; /* 0x3fdbcb7b, 0x15200000 */
@@ -1524,7 +1524,7 @@ fn compile_log10(emitter: &mut WasmEmitter) {
         local_get(LG_VL); local_get(LG_VH); f64_add;
         end;
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.libm.log10, type_idx, f));
 }
 
 // ── pow constants (e_pow.c) ──
@@ -2039,5 +2039,5 @@ fn compile_pow(emitter: &mut WasmEmitter) {
         end;
     });
 
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.libm.pow, type_idx, f));
 }

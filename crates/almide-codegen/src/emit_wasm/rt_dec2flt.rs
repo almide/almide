@@ -165,7 +165,7 @@ fn compile_bn_add_small(emitter: &mut WasmEmitter) {
         end;
         end;
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.decfloat.bn_add_small, type_idx, f));
 }
 
 /// `__bn_bit_len(p) -> i32`: significant bit count (0 for a zero bignum).
@@ -194,7 +194,7 @@ fn compile_bn_bit_len(emitter: &mut WasmEmitter) {
         i32_const(0);
         end;
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.decfloat.bn_bit_len, type_idx, f));
 }
 
 /// `__dec2flt(neg, sig_ptr, exp10) -> f64`. Clinger AlgorithmM.
@@ -421,5 +421,5 @@ fn compile_dec2flt(emitter: &mut WasmEmitter) {
         end;
     });
 
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.decfloat.dec2flt, type_idx, f));
 }

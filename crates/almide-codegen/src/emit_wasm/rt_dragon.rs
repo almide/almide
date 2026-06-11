@@ -133,7 +133,7 @@ fn compile_norm(emitter: &mut WasmEmitter) {
         local_get(0); local_get(1); i32_store(0);
         end;
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.dragon.norm, type_idx, f));
 }
 
 /// __dragon_mul_small(p, m): p *= m (m treated as u32).
@@ -178,7 +178,7 @@ fn compile_mul_small(emitter: &mut WasmEmitter) {
         local_get(0); local_get(2); i32_store(0);
         end;
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.dragon.mul_small, type_idx, f));
 }
 
 /// __dragon_cmp(a, b) -> i32: -1 if a<b, 0 if eq, 1 if a>b. Assumes normalized.
@@ -216,7 +216,7 @@ fn compile_cmp(emitter: &mut WasmEmitter) {
         i32_const(0);
         end;
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.dragon.cmp, type_idx, f));
 }
 
 /// __dragon_add(dst, src): dst += src.
@@ -266,7 +266,7 @@ fn compile_add(emitter: &mut WasmEmitter) {
         local_get(0); local_get(4); i32_store(0);
         end;
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.dragon.add, type_idx, f));
 }
 
 /// __dragon_sub(dst, src): dst -= src. Requires dst >= src. Normalizes result.
@@ -307,7 +307,7 @@ fn compile_sub(emitter: &mut WasmEmitter) {
         local_get(0); call(emitter.rt.dragon.norm);
         end;
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.dragon.sub, type_idx, f));
 }
 
 /// __dragon_shl(p, bits): p <<= bits.
@@ -374,7 +374,7 @@ fn compile_shl(emitter: &mut WasmEmitter) {
         local_get(0); call(emitter.rt.dragon.norm);
         end;
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.dragon.shl, type_idx, f));
 }
 
 /// __dragon_copy(dst, src): dst = src (len + limbs).
@@ -396,7 +396,7 @@ fn compile_copy(emitter: &mut WasmEmitter) {
         end; end;
         end;
     });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.dragon.copy, type_idx, f));
 }
 
 // ───────────────────────── driver ─────────────────────────
@@ -933,7 +933,7 @@ fn compile_float_to_string(emitter: &mut WasmEmitter) {
     });
 
     wasm!(f, { local_get(18); end; });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.float_to_string, type_idx, f));
 }
 
 // ───────────────────────── float.to_fixed ─────────────────────────
@@ -1355,7 +1355,7 @@ pub(super) fn compile_float_to_fixed(emitter: &mut WasmEmitter) {
     });
 
     wasm!(f, { local_get(RESULT); end; });
-    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.float_to_fixed, type_idx, f));
 }
 
 /// Set bignum at (base+off) to the i64 value in `loc` (two u32 limbs). Standalone
