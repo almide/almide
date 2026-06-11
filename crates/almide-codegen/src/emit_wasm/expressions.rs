@@ -169,11 +169,16 @@ impl FuncCompiler<'_> {
                     let found = if !name.is_empty() {
                         let target_vt = values::ty_to_valtype(&expr.ty);
                         // Find var_map entry with matching name, prefer matching WASM type
+                        // Deterministic selection (#524): prefer a valtype
+                        // match, tie-break by SMALLEST VarId — the former
+                        // bare max_by_key over HashMap iteration made the
+                        // chosen local (and thus the emitted bytes) depend
+                        // on hash order, violating host-determinism.
                         self.var_map.iter()
                             .filter(|(vid, _)| (**vid as usize) < self.var_table.len() && self.var_table.get(almide_ir::VarId(**vid)).name == name)
-                            .max_by_key(|(vid, _)| {
+                            .min_by_key(|(vid, _)| {
                                 let vid_vt = values::ty_to_valtype(&self.var_table.get(almide_ir::VarId(**vid)).ty);
-                                if vid_vt == target_vt { 1u8 } else { 0u8 }
+                                (if vid_vt == target_vt { 0u8 } else { 1u8 }, **vid)
                             })
                             .map(|(_, lidx)| *lidx)
                     } else { None };

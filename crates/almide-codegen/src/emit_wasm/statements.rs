@@ -19,12 +19,10 @@ impl FuncCompiler<'_> {
             wasm!(self.func, { local_get(local_idx); });
             return true;
         }
-        let name = if (var.0 as usize) < self.var_table.len() {
-            self.var_table.get(*var).name.as_str()
-        } else { "" };
-        if let Some(&(global_idx, _)) = self.emitter.top_let_globals_by_name.get(name)
-            .or_else(|| self.emitter.top_let_globals.get(&var.0))
-        {
+        // §522 class kill: ONE global resolution (id → alias → origin-key →
+        // bare name) shared with the value-read arm. The old bare-name-FIRST
+        // probe could bind a same-named WRONG global silently.
+        if let Some((global_idx, _)) = self.lookup_global(*var) {
             wasm!(self.func, { global_get(global_idx); });
             return true;
         }
@@ -335,6 +333,26 @@ impl FuncCompiler<'_> {
                         call(self.emitter.rt.rc_inc);
                         drop;
                     });
+                } else if let Some((global_idx, _)) = self.lookup_global(*var) {
+                    // Module-global target: emit the Inc through the global.
+                    // Previously BOTH the Inc and the Dec on a global were
+                    // silently dropped — balanced only by mutual omission.
+                    wasm!(self.func, {
+                        global_get(global_idx);
+                        call(self.emitter.rt.rc_inc);
+                        drop;
+                    });
+                } else {
+                    // #523: a Perceus-mandated Inc the emitter cannot resolve
+                    // was previously DROPPED IN SILENCE — an under-count no
+                    // gate could see (the IR belt verifies the IR, not the
+                    // emission), which under default-ON frees is the
+                    // double-free class. Refuse loudly.
+                    panic!(
+                        "[ICE] RcInc target `{}` (VarId {}) resolved to neither local nor global (#523)",
+                        if (var.0 as usize) < self.var_table.len() { self.var_table.get(*var).name.as_str() } else { "?" },
+                        var.0
+                    );
                 }
             }
             IrStmtKind::RcDec { var } => {
@@ -352,6 +370,24 @@ impl FuncCompiler<'_> {
                         let ty = &self.var_table.get(*var).ty;
                         self.emit_typed_rc_dec(ty, local_idx);
                     }
+                } else if let Some((global_idx, _)) = self.lookup_global(*var) {
+                    // Module-global target: run the typed dec through a
+                    // scratch local loaded from the global (symmetric with
+                    // the Inc arm above).
+                    let tmp = self.scratch.alloc_i32();
+                    wasm!(self.func, { global_get(global_idx); local_set(tmp); });
+                    let ty = self.var_table.get(*var).ty.clone();
+                    self.emit_typed_rc_dec(&ty, tmp);
+                    self.scratch.free_i32(tmp);
+                } else {
+                    // #523 twin: a dropped Dec is "only" a leak, but the
+                    // asymmetry with a dropped Inc makes the books unreadable
+                    // — same loud refusal.
+                    panic!(
+                        "[ICE] RcDec target `{}` (VarId {}) resolved to neither local nor global (#523)",
+                        if (var.0 as usize) < self.var_table.len() { self.var_table.get(*var).name.as_str() } else { "?" },
+                        var.0
+                    );
                 }
             }
             IrStmtKind::Comment { .. } => {
@@ -370,20 +406,22 @@ impl FuncCompiler<'_> {
                             tys.clone()
                         } else { vec![] };
 
+                        // #524: the offset advance is UNCONDITIONAL — the
+                        // former placement inside the bind's `if let` meant
+                        // one missing local corrupted every SUBSEQUENT
+                        // element's load offset (active corruption, not just
+                        // a skipped bind).
                         let mut offset = 0u32;
                         for (i, elem_pat) in elements.iter().enumerate() {
+                            let elem_ty = elem_types.get(i).cloned().unwrap_or(almide_lang::types::Ty::Int);
                             if let almide_ir::IrPattern::Bind { var, .. } = elem_pat {
                                 if let Some(&local_idx) = self.var_map.get(&var.0) {
-                                    let elem_ty = elem_types.get(i).cloned().unwrap_or(almide_lang::types::Ty::Int);
                                     wasm!(self.func, { local_get(scratch); });
                                     self.emit_load_at(&elem_ty, offset);
                                     wasm!(self.func, { local_set(local_idx); });
-                                    offset += super::values::byte_size(&elem_ty);
                                 }
-                            } else if let almide_ir::IrPattern::Wildcard = elem_pat {
-                                let elem_ty = elem_types.get(i).cloned().unwrap_or(almide_lang::types::Ty::Int);
-                                offset += super::values::byte_size(&elem_ty);
                             }
+                            offset += super::values::byte_size(&elem_ty);
                         }
                     }
                     almide_ir::IrPattern::RecordPattern { fields: pat_fields, .. } => {
@@ -424,18 +462,19 @@ impl FuncCompiler<'_> {
                         wasm!(self.func, { i32_load(0); });
                     }
                     true
+                } else if let Some((global_idx, _)) = self.lookup_global(*target) {
+                    wasm!(self.func, { global_get(global_idx); });
+                    true
                 } else {
-                    let name = if (target.0 as usize) < self.var_table.len() {
-                        self.var_table.get(*target).name.as_str()
-                    } else { "" };
-                    if let Some(&(global_idx, _)) = self.emitter.top_let_globals_by_name.get(name)
-                        .or_else(|| self.emitter.top_let_globals.get(&target.0))
-                    {
-                        wasm!(self.func, { global_get(global_idx); });
-                        true
-                    } else {
-                        false
-                    }
+                    // Dropping a MUTATION on the floor is the silent-wrong
+                    // class (#522) — refuse loudly. Locals are pre-scanned
+                    // and globals resolve via lookup_global; anything else
+                    // is a compiler bug.
+                    panic!(
+                        "[ICE] index-assign target `{}` (VarId {}) resolved to neither local nor global (#522 class)",
+                        if (target.0 as usize) < self.var_table.len() { self.var_table.get(*target).name.as_str() } else { "?" },
+                        target.0
+                    );
                 };
                 if has_ptr {
                     let data_off = self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA);
@@ -671,11 +710,15 @@ impl FuncCompiler<'_> {
                 // Resolve target: local or global
                 let has_local = self.var_map.get(&target.0).copied();
                 let global_idx = if has_local.is_none() {
-                    let name = if (target.0 as usize) < self.var_table.len() {
-                        self.var_table.get(*target).name.as_str()
-                    } else { "" };
-                    self.emitter.top_let_globals_by_name.get(name).map(|&(g, _)| g)
-                        .or_else(|| self.emitter.top_let_globals.get(&target.0).map(|&(g, _)| g))
+                    let g = self.lookup_global(*target).map(|(g, _)| g);
+                    if g.is_none() {
+                        panic!(
+                            "[ICE] map-insert target `{}` (VarId {}) resolved to neither local nor global (#522 class)",
+                            if (target.0 as usize) < self.var_table.len() { self.var_table.get(*target).name.as_str() } else { "?" },
+                            target.0
+                        );
+                    }
+                    g
                 } else { None };
                 if has_local.is_some() || global_idx.is_some() {
                     let set_args = vec![

@@ -126,15 +126,17 @@ impl FuncCompiler<'_> {
         // Tuple destructure (for list of tuples)
         if let Some(tuple_vars) = var_tuple {
             if let Ty::Tuple(elem_types) = &elem_ty {
+                // #524: offset advance unconditional (a missing local must
+                // not shift every later field's load).
                 let mut field_offset = 0u32;
                 for (i, &tv) in tuple_vars.iter().enumerate() {
+                    let ft = elem_types.get(i).cloned().unwrap_or(Ty::Int);
                     if let Some(&local_idx) = self.var_map.get(&tv.0) {
-                        let ft = elem_types.get(i).cloned().unwrap_or(Ty::Int);
                         wasm!(self.func, { local_get(loop_var); });
                         self.emit_load_at(&ft, field_offset);
                         wasm!(self.func, { local_set(local_idx); });
-                        field_offset += values::byte_size(&ft);
                     }
+                    field_offset += values::byte_size(&ft);
                 }
             }
         }
