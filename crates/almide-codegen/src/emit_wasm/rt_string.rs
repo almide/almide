@@ -1257,23 +1257,62 @@ fn compile_run_length_encode(emitter: &mut WasmEmitter) {
 }
 
 fn compile_lines(emitter: &mut WasmEmitter) {
+    // #601: true `str::lines()` — NOT split-on-\n. Two semantics split must
+    // not have: (1) a final line terminator does NOT yield a trailing empty
+    // line ("a\nb\n" -> [a, b], not [a, b, ""]); (2) a "\r\n" line drops the
+    // trailing "\r". Byte-scan loop mirroring the native oracle
+    // `runtime/rs/src/string.rs::almide_rt_string_lines = s.lines()`.
     let type_idx = emitter.func_type_indices[&emitter.rt.string.lines];
-    let mut f = Function::new([(1, ValType::I32)]);
-    // If input string is empty, return empty list (alloc HEADER_SIZE bytes, len=0)
+    // locals: 1=blen 2=result 3=cur 4=i 5=slot 6=line_end
+    let mut f = Function::new([(6, ValType::I32)]);
+    let dat = string_data_off() as i32;
     wasm!(f, {
-        local_get(0); i32_load(0); i32_eqz;
-        if_i32;
-          i32_const(list_hdr()); call(emitter.rt.alloc); local_set(1);
-          local_get(1); i32_const(0); i32_store(0);
-          local_get(1);
-        else_;
-          i32_const(1); call(emitter.rt.string_alloc); local_set(1);
-          local_get(1); i32_const(1); i32_store(0);
-          local_get(1); i32_const(1); i32_store(string_cap_off() as u32, 0);
-          local_get(1); i32_const(10); i32_store8(string_data_off() as u32);
-          local_get(0); local_get(1); call(emitter.rt.string.split);
+        local_get(0); i32_load(0); local_set(1); // blen
+        // (empty input falls through naturally: the loop body never runs, the
+        // trailing-line guard is false, and result.len stays 0 -> empty list.)
+        // result: header + (blen + 1) slots (upper bound on the line count).
+        i32_const(list_hdr()); local_get(1); i32_const(1); i32_add; i32_const(4); i32_mul; i32_add;
+        call(emitter.rt.alloc); local_set(2);
+        i32_const(0); local_set(3); // cur
+        i32_const(0); local_set(4); // i
+        i32_const(0); local_set(5); // slot
+        block_empty; loop_empty;
+          local_get(4); local_get(1); i32_ge_u; br_if(1); // i >= blen -> done scanning
+          // if byte[i] == '\n'
+          local_get(0); i32_const(dat); i32_add; local_get(4); i32_add; i32_load8_u(0);
+          i32_const(10); i32_eq;
+          if_empty;
+            // line_end = i; strip a trailing '\r' (byte[i-1] == 13 when i > cur)
+            local_get(4); local_set(6);
+            local_get(4); local_get(3); i32_gt_u;
+            if_empty;
+              local_get(0); i32_const(dat); i32_add; local_get(4); i32_const(1); i32_sub; i32_add; i32_load8_u(0);
+              i32_const(13); i32_eq;
+              if_empty;
+                local_get(4); i32_const(1); i32_sub; local_set(6);
+              end;
+            end;
+            // slot[slot] = slice(s, cur, line_end)
+            local_get(2); i32_const(list_data_off()); i32_add; local_get(5); i32_const(4); i32_mul; i32_add;
+            local_get(0); local_get(3); local_get(6); call(emitter.rt.string.slice);
+            i32_store(0);
+            local_get(5); i32_const(1); i32_add; local_set(5); // slot++
+            local_get(4); i32_const(1); i32_add; local_set(3); // cur = i + 1
+          end;
+          local_get(4); i32_const(1); i32_add; local_set(4); // i++
+          br(0);
+        end; end;
+        // trailing non-empty line (input did NOT end at a '\n')
+        local_get(3); local_get(1); i32_lt_u;
+        if_empty;
+          local_get(2); i32_const(list_data_off()); i32_add; local_get(5); i32_const(4); i32_mul; i32_add;
+          local_get(0); local_get(3); local_get(1); call(emitter.rt.string.slice);
+          i32_store(0);
+          local_get(5); i32_const(1); i32_add; local_set(5);
         end;
-        end;
+        local_get(2); local_get(5); i32_store(0); // result.len = slot
+        local_get(2);
+        end; // close the function body
     });
     emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.string.lines, type_idx, f));
 }

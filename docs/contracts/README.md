@@ -92,7 +92,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-062 | The RawPtr / linear-memory bridge moves bytes byte-identically on both targets | 0.26.15 | active | fixture | 1 |
 | C-063 | Parsing a heterogeneous-nested glTF/JSON document and walking its arrays by element is byte-identical on both targets | 0.26.19 | active | fixture | 1 |
 | C-064 | The effect-fn Result auto-unwrap rule is identical across binding positions and type-directed, byte-identical on both targets | 0.26.20 | active | fixture | 1 |
-| C-065 | The string position API is codepoint-indexed end-to-end on both targets | 0.26.20 | active | fixture | 1 |
+| C-065 | The string position API is codepoint-indexed end-to-end on both targets | 0.26.20 | active | fixture | 2 |
 | C-066 | WASM heap is reclaimed by default (true Perceus) | 0.27.0 | active | fixture | 3 |
 | C-067 | The xs[i] index syntax aborts on out-of-bounds (read and write) |  | active | fixture | 1 |
 | C-068 | Auto-? is target-directed in construction positions |  | active | fixture | 2 |

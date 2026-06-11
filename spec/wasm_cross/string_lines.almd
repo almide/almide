@@ -1,0 +1,16 @@
+// @contract: C-065
+// #601: string.lines is true str::lines() — a final line terminator does NOT
+// yield a trailing empty line, and a "\r\n" line drops the trailing "\r" —
+// byte-identical native == wasm. The wasm impl was naive split-on-\n (a
+// spurious trailing empty line + retained \r), masked under an inadequate
+// "verified" fixture that only tested the no-trailing-newline subset.
+fn show(s: String) -> String =
+  "${int.to_string(list.len(string.lines(s)))}:${list.join(string.lines(s), "|")}"
+fn main() -> Unit = {
+  println(show("a\nb\n"))
+  println(show("a\nb"))
+  println(show("\n"))
+  println(show("\n\n"))
+  println(show("a\r\nb\r\nc"))
+  println(show(""))
+}
