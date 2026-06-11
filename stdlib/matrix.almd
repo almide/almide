@@ -113,6 +113,45 @@ fn qwen3_block_q1_0_kv(
   eps: Float,
 ) -> (Matrix, Matrix, Matrix) = _
 
+// ── f32 bytes-resident path (L2-2) ──
+// Weights are consumed straight from the source GGUF buffer — no decoded
+// Matrix, no model record, no per-call deep clones.
+
+// y = x @ W^T with W f32 row-major (out, in) at `w_offset` in `w_bytes`.
+@intrinsic("almide_rt_matrix_linear_f32_row_no_bias")
+fn linear_f32_row_no_bias(x: Matrix, w_bytes: Bytes, w_offset: Int, w_rows: Int, w_cols: Int) -> Matrix = _
+
+// Gather rows from an f32 tensor still in the byte buffer (embedding lookup).
+@intrinsic("almide_rt_matrix_select_rows_f32")
+fn select_rows_f32(data: Bytes, offset: Int, cols: Int, row_ids: List[Int]) -> Matrix = _
+
+// NeoX/HF-convention RoPE: rotates (x[j], x[j+half]) pairs. Use with weights
+// in their stored order — no permutation needed (unlike rope_rotate_at).
+@intrinsic("almide_rt_matrix_rope_rotate_neox_at")
+fn rope_rotate_neox_at(x: Matrix, n_heads: Int, head_dim: Int, theta_base: Float, start_pos: Int) -> Matrix = _
+
+// One Qwen3 decoder layer over f32 weights in the source buffer. Mirror of
+// qwen3_block_q1_0_kv with hidden taken from `h` and NeoX RoPE. Handles both
+// prefill (multi-row, causal) and single-row decode.
+// `gamma_offs`: [attn_norm, q_norm, k_norm, ffn_norm] f32 byte offsets.
+// `weight_offs`: [q, k, v, o, gate, up, down] f32 byte offsets.
+@intrinsic("almide_rt_matrix_qwen3_block_f32_kv")
+fn qwen3_block_f32_kv(
+  h: Matrix,
+  k_cache: Matrix,
+  v_cache: Matrix,
+  w: Bytes,
+  gamma_offs: List[Int],
+  weight_offs: List[Int],
+  start_pos: Int,
+  n_q_heads: Int,
+  n_kv_heads: Int,
+  head_dim: Int,
+  ffn_hidden: Int,
+  rope_theta: Float,
+  eps: Float,
+) -> (Matrix, Matrix, Matrix) = _
+
 @intrinsic("almide_rt_matrix_to_lists")
 fn to_lists(m: Matrix) -> List[List[Float]] = _
 
