@@ -331,6 +331,23 @@ impl Pipeline {
 
             executed.push(pass_name);
         }
+
+        // §10 release promotion (#532): one FINAL verification runs in EVERY
+        // profile. The per-pass walk above stays debug/opt-in (it dominates
+        // release codegen time, ~1.2s/file across ~20 passes), but the
+        // END-of-pipeline IR must verify before emission — one walk, ~60 ms,
+        // the same trade wasmparser::validate makes on the wasm side. A
+        // violation is a compiler bug and fails the build in release too.
+        if !verify_ir {
+            let errors = almide_ir::verify_program(&program);
+            if !errors.is_empty() {
+                eprintln!("[IR CHECK] {} error(s) at end of pipeline:", errors.len());
+                for e in &errors {
+                    eprintln!("  {}", e);
+                }
+                panic!("final IR verification failed (release gate, #532)");
+            }
+        }
         program
     }
 }
