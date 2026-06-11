@@ -814,7 +814,7 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
             // (no clone). Copy shared-mut vars stay on the `Cell` `.get()` path below.
             if let IrExprKind::Var { id } = &inner.kind {
                 if ctx.ann.is_shared_mut(id)
-                    && !matches!(ctx.var_table.get(*id).ty, Ty::Int | Ty::Float | Ty::Bool)
+                    && !almide_ir::top_let_storage::capture_copy_cell(&ctx.var_table.get(*id).ty)
                 {
                     let var_name = ctx.var_name(*id).to_string();
                     return if *mutable {

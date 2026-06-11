@@ -21,7 +21,7 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
                 // Copy scalars use `Rc<Cell<T>>` (P3); non-Copy values use `SharedMut`
                 // (`Rc<RefCell<T>>`, P6). A `__cap_*` capture rename is an `Rc::clone`
                 // of the original for either kind, so the closure shares the SAME cell.
-                let is_copy = matches!(ty, Ty::Int | Ty::Float | Ty::Bool);
+                let is_copy = almide_ir::top_let_storage::capture_copy_cell(ty);
                 let fresh_cell = |ctx: &RenderContext| if is_copy {
                     format!("std::rc::Rc::new(std::cell::Cell::new({}))", render_expr(ctx, value))
                 } else {
