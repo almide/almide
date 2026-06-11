@@ -128,6 +128,29 @@ impl Checker {
                         //     (e.g. `(x) => x * 10` / `(x) => some(...)`) is ill-typed and is
                         //     now reported at check time, instead of silently lowering to
                         //     invalid Rust (E0308: expected Result, found Int/Option).
+                        // #547: a PURE mapper (`(x) => x * 10`) is rejected by
+                        // design, but pushing that through the generic constraint
+                        // produced a garbled expected/actual pair (the param slot
+                        // rendered as Result). When the callback's return type is
+                        // already resolved to a concrete non-Result, state the
+                        // ACTUAL RULE directly instead.
+                        if let Ty::Fn { ret, .. } = resolve_ty(&arg_tys[1], &self.uf) {
+                            let cb_ret = resolve_ty(&ret, &self.uf);
+                            let concrete_non_result = !cb_ret.is_result()
+                                && !matches!(cb_ret, Ty::Unknown | Ty::TypeVar(_));
+                            if concrete_non_result {
+                                self.emit(super::err(
+                                    format!(
+                                        "fan.map callback must return Result but returns {}",
+                                        cb_ret.display()
+                                    ),
+                                    "Wrap the value: `(x) => ok(x * 10)` — fan.map mappers are \
+                                     effectful by contract (race/any/settle thunks auto-wrap, \
+                                     map mappers do not)",
+                                    "fan.map callback".to_string()));
+                                return Some(Ty::Unknown);
+                            }
+                        }
                         let result_elem = self.fresh_var();
                         let callback_ret = Ty::result(result_elem.clone(), Ty::String);
                         self.constrain(arg_tys[1].clone(),

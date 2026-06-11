@@ -24,6 +24,9 @@ impl Checker {
                         "if branches" | "if arm" => "Both branches of `if/then/else` must have the same type",
                         _ => "Fix the expression type or change the expected type",
                     };
+                    let base = if c.context == "fan.map callback" {
+                        "Return ok(value) / err(reason) from the mapper"
+                    } else { base };
                     let hint = Self::hint_with_conversion(base, &exp, &act);
                     // Context-specific try: snippet for the "Unit leak" failure
                     // mode — a statement (assignment / lone `let`) slips into a
@@ -38,9 +41,21 @@ impl Checker {
                     if c.span.is_some() {
                         self.current_span = c.span;
                     }
-                    let mut diag = err(
-                        format!("type mismatch in {}: expected {} but got {}", c.context, exp.display(), act.display()),
-                        hint, c.context.clone()).with_code("E001");
+                    // #547: post-unify rendering is CONTAMINATED for rule-
+                    // bearing constraints (pass 1 partially binds vars even on
+                    // failure, so both sides print with each other's pieces —
+                    // the fan.map case showed `expected fn(Result[..]) -> ..`
+                    // where the param is Int). A constraint that ENCODES a
+                    // language rule states the rule instead of the pair.
+                    let msg = if c.context == "fan.map callback" {
+                        "fan.map callback must return Result[T, String] — \
+                         wrap the value: `(x) => ok(x * 10)`. (race/any/settle \
+                         thunks auto-wrap pure values; map mappers are \
+                         effectful by contract and do not.)".to_string()
+                    } else {
+                        format!("type mismatch in {}: expected {} but got {}", c.context, exp.display(), act.display())
+                    };
+                    let mut diag = err(msg, hint, c.context.clone()).with_code("E001");
                     if let Some(snippet) = try_snippet {
                         diag = diag.with_try(snippet);
                     }
