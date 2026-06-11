@@ -324,6 +324,21 @@ fn main() -> Unit = {
   println(int.to_string(list.len(ls)) + " " + ls[2])
 }
 "#);
+    // #601: the cases where naive split-on-\n diverges from str::lines() —
+    // a trailing terminator must NOT add an empty final line, and \r\n drops
+    // the \r. (The case above is the coincidental-equal subset that masked
+    // the divergence under a green "verified" badge.)
+    assert_cross_target(r#"
+fn show(s: String) -> String = "${int.to_string(list.len(string.lines(s)))}:${list.join(string.lines(s), "|")}"
+fn main() -> Unit = {
+  println(show("a\nb\n"))
+  println(show("a\nb"))
+  println(show("\n"))
+  println(show("\n\n"))
+  println(show("a\r\nb\r\nc"))
+  println(show(""))
+}
+"#);
 }
 
 #[test]

@@ -839,6 +839,7 @@ since     = "0.26.20"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/string_codepoint_index.almd", class = "fixture" },
+  { path = "spec/wasm_cross/string_lines.almd", class = "fixture" },
 ]
 
 [[contract]]
