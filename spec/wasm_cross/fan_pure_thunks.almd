@@ -1,0 +1,22 @@
+// @contract: C-004
+// #514: race/any/settle thunk lists accept PURE thunks (`fn() -> T`), not
+// only effect thunks — FanLowering wraps each non-Result thunk in an Ok
+// adapter ONCE for both backends. Before that, native emitted invalid Rust
+// (E0271 against the runtime's Fn() -> Result bound) and wasm trapped with
+// an indirect call type mismatch — each backend broken in its own way on a
+// shape the checker accepts. Side-effect ORDER is part of the pin: race
+// evaluates ONLY fns[0] (deterministic, not wall-clock), settle runs all
+// in list order, any skips failures in list order.
+fn thunk_a() -> Int = { println("A"); 1 }
+fn thunk_b() -> Int = { println("B"); 2 }
+fn try_c() -> Result[Int, String] = { println("C"); err("c") }
+fn try_d() -> Result[Int, String] = { println("D"); ok(4) }
+
+effect fn main() -> Unit = {
+  let r = fan.race([thunk_a, thunk_b])
+  println("race=${r}")
+  let a = fan.any([try_c, try_d])
+  println("any=${a}")
+  let s = fan.settle([thunk_a, thunk_b])
+  println("settle=${s}")
+}

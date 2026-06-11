@@ -38,23 +38,35 @@ fn rewrite_expr(expr: IrExpr, inside_fan: bool) -> IrExpr {
 
         // Fan module calls (fan.map, fan.race, fan.any, etc.): strip Try from lambda args
         // Matches both Module { "fan" } (before StdlibLowering) and Named { "almide_rt_fan_*" } (after)
-        IrExprKind::Call { target: CallTarget::Module { ref module, .. }, .. }
+        IrExprKind::Call { target: CallTarget::Module { ref module, ref func, .. }, .. }
             if module == "fan" =>
         {
+            let adapt = thunk_list_method(func.as_str());
             let IrExprKind::Call { target, args, type_args } = expr.kind else { unreachable!() };
             IrExprKind::Call {
                 target,
-                args: args.into_iter().map(rewrite_fan_arg).collect(),
+                args: args.into_iter().enumerate()
+                    .map(|(i, a)| {
+                        let a = rewrite_fan_arg(a);
+                        if adapt && i == 0 { ok_adapt_thunk_list(a) } else { a }
+                    })
+                    .collect(),
                 type_args,
             }
         }
         IrExprKind::Call { target: CallTarget::Named { ref name }, .. }
             if name.starts_with("almide_rt_fan_") =>
         {
+            let adapt = thunk_list_method(name.as_str().trim_start_matches("almide_rt_fan_"));
             let IrExprKind::Call { target, args, type_args } = expr.kind else { unreachable!() };
             IrExprKind::Call {
                 target,
-                args: args.into_iter().map(rewrite_fan_arg).collect(),
+                args: args.into_iter().enumerate()
+                    .map(|(i, a)| {
+                        let a = rewrite_fan_arg(a);
+                        if adapt && i == 0 { ok_adapt_thunk_list(a) } else { a }
+                    })
+                    .collect(),
                 type_args,
             }
         }
@@ -223,5 +235,89 @@ fn rewrite_fan_arg(arg: IrExpr) -> IrExpr {
             ty, span, def_id: None,
         },
         _ => rewrite_expr(arg, false),
+    }
+}
+
+
+/// The fan APIs whose FIRST argument is a thunk LIST with a
+/// `Fn() -> Result[T, String]` runtime bound.
+fn thunk_list_method(name: &str) -> bool {
+    matches!(name, "race" | "any" | "settle")
+}
+
+/// #514: the race/any/settle runtimes (both targets) require thunks that
+/// return `Result[T, String]` — native's `Vec<impl Fn() -> Result<T,_>>`
+/// bound, wasm's `(env: i32) -> i32` indirect-call signature. A PURE thunk
+/// (`fn() -> Int`) satisfied the CHECKER but broke each backend in its own
+/// way: native emitted invalid Rust (E0271), wasm trapped with an indirect
+/// call type mismatch. Adapt once, here, for both: wrap every non-Result
+/// thunk so it returns `Ok(value)`.
+fn ok_adapt_thunk_list(arg: IrExpr) -> IrExpr {
+    let ty = arg.ty.clone();
+    let span = arg.span;
+    match arg.kind {
+        IrExprKind::List { elements } => IrExpr {
+            kind: IrExprKind::List {
+                elements: elements.into_iter().map(ok_adapt_thunk).collect(),
+            },
+            ty, span, def_id: None,
+        },
+        _ => IrExpr { kind: arg.kind, ty, span, def_id: arg.def_id },
+    }
+}
+
+fn ok_adapt_thunk(el: IrExpr) -> IrExpr {
+    use almide_lang::types::Ty;
+    let Ty::Fn { params, ret } = &el.ty else { return el };
+    if !params.is_empty() || ret.is_result() {
+        return el;
+    }
+    let span = el.span;
+    let ok_ty = Ty::result((**ret).clone(), Ty::String);
+    let fn_ty = Ty::Fn { params: vec![], ret: Box::new(ok_ty.clone()) };
+    match el.kind {
+        // A literal pure lambda: wrap its BODY — no new call frame needed.
+        IrExprKind::Lambda { params: ps, body, lambda_id } => IrExpr {
+            kind: IrExprKind::Lambda {
+                params: ps,
+                body: Box::new(IrExpr {
+                    ty: ok_ty,
+                    span: body.span,
+                    kind: IrExprKind::ResultOk { expr: body },
+                    def_id: None,
+                }),
+                lambda_id,
+            },
+            ty: fn_ty, span, def_id: None,
+        },
+        // A fn ref / stored closure value: synthesize `() => ok(el())`.
+        _ => {
+            let ret_ty = (**ret).clone();
+            let call = IrExpr {
+                kind: IrExprKind::Call {
+                    target: CallTarget::Computed { callee: Box::new(el) },
+                    args: vec![],
+                    type_args: vec![],
+                },
+                ty: ret_ty,
+                span,
+                def_id: None,
+            };
+            IrExpr {
+                kind: IrExprKind::Lambda {
+                    params: vec![],
+                    body: Box::new(IrExpr {
+                        ty: ok_ty,
+                        span,
+                        kind: IrExprKind::ResultOk { expr: Box::new(call) },
+                        def_id: None,
+                    }),
+                    lambda_id: None,
+                },
+                ty: fn_ty,
+                span,
+                def_id: None,
+            }
+        }
     }
 }
