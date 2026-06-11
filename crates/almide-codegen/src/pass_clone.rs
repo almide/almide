@@ -30,7 +30,8 @@ impl NanoPass for CloneInsertionPass {
         // Compute syntactic counts (no loop/lambda bumps) for remaining tracking
         let syntactic = compute_syntactic_counts_program(&program);
 
-        let (always, eligible) = split_clone_ids(&program.var_table, &top_let_vars, &syntactic);
+        let always_marks = program.codegen_annotations.always_clone_vars.clone();
+        let (always, eligible) = split_clone_ids(&program.var_table, &top_let_vars, &syntactic, &always_marks);
         let mut remaining = build_remaining(&eligible, &syntactic);
 
         for func in &mut program.functions {
@@ -47,7 +48,7 @@ impl NanoPass for CloneInsertionPass {
         for module in modules.iter_mut() {
             let module_top_lets: HashSet<VarId> = module.top_lets.iter().map(|tl| tl.var).collect();
             let module_syntactic = compute_syntactic_counts_module(module);
-            let (m_always, m_eligible) = split_clone_ids(var_table, &module_top_lets, &module_syntactic);
+            let (m_always, m_eligible) = split_clone_ids(var_table, &module_top_lets, &module_syntactic, &always_marks);
             let mut m_remaining = build_remaining(&m_eligible, &module_syntactic);
 
             for func in module.functions.iter_mut() {
@@ -150,6 +151,7 @@ fn split_clone_ids(
     vt: &VarTable,
     top_let_vars: &HashSet<VarId>,
     syntactic: &HashMap<VarId, u32>,
+    always_clone_marks: &HashSet<VarId>,
 ) -> (HashSet<VarId>, HashSet<VarId>) {
     let mut always = HashSet::new();
     let mut eligible = HashSet::new();
@@ -161,7 +163,7 @@ fn split_clone_ids(
 
         let name = almide_base::intern::resolve(info.name);
         if top_let_vars.contains(&id) || matches!(&info.ty, Ty::Fn { .. } | Ty::TypeVar(_))
-            || name.starts_with("__cap_") || name.starts_with("__licm")
+            || always_clone_marks.contains(&id)
             || info.module_origin.is_some()
         {
             // `module_origin` marks a module top-let Var (decl side set in
