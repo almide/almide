@@ -201,7 +201,11 @@ fn bool_fn(func: &str, args: &[Value]) -> Option<Flow> {
 
 fn string_fn(func: &str, args: &[Value]) -> Option<Flow> {
     let f = match func {
-        "len" | "length" => Flow::val(Value::Int(as_str(args.first())?.len() as i64)),
+        // CODEPOINT unit (#419, C-065): string.len/index_of count chars, not
+        // bytes, on BOTH targets — the interp lagging this was the third
+        // judge's FIRST catch (fuzz 3-way: both targets agreed, interp voted
+        // bytes).
+        "len" | "length" => Flow::val(Value::Int(as_str(args.first())?.chars().count() as i64)),
         "char_count" => Flow::val(Value::Int(as_str(args.first())?.chars().count() as i64)),
         "is_empty" => Flow::val(Value::Bool(as_str(args.first())?.is_empty())),
         "to_upper" => Flow::val(Value::str(as_str(args.first())?.to_uppercase())),
@@ -231,18 +235,22 @@ fn string_fn(func: &str, args: &[Value]) -> Option<Flow> {
         "count" => Flow::val(Value::Int(
             as_str(args.first())?.matches(as_str(args.get(1))?).count() as i64,
         )),
-        // index_of returns Option[Int] of the BYTE offset (matches the runtime:
-        // both targets return byte offsets, confirmed in memory).
-        "index_of" => Flow::val(Value::Option(
-            as_str(args.first())?
-                .find(as_str(args.get(1))?)
-                .map(|i| Box::new(Value::Int(i as i64))),
-        )),
-        "last_index_of" => Flow::val(Value::Option(
-            as_str(args.first())?
-                .rfind(as_str(args.get(1))?)
-                .map(|i| Box::new(Value::Int(i as i64))),
-        )),
+        // index_of returns Option[Int] of the CODEPOINT index (#419 unified
+        // the unit; the old byte-offset comment predated that change).
+        "index_of" => {
+            let s = as_str(args.first())?;
+            Flow::val(Value::Option(
+                s.find(as_str(args.get(1))?)
+                    .map(|b| Box::new(Value::Int(s[..b].chars().count() as i64))),
+            ))
+        }
+        "last_index_of" => {
+            let s = as_str(args.first())?;
+            Flow::val(Value::Option(
+                s.rfind(as_str(args.get(1))?)
+                    .map(|b| Box::new(Value::Int(s[..b].chars().count() as i64))),
+            ))
+        }
         "split" => {
             let s = as_str(args.first())?;
             let sep = as_str(args.get(1))?;
