@@ -519,7 +519,9 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
         impl almide_ir::visit::IrVisitor for VarBindCollector {
             fn visit_stmt(&mut self, stmt: &IrStmt) {
                 if let IrStmtKind::Bind { var, mutability: almide_ir::Mutability::Var, ty, .. } = &stmt.kind {
-                    if !matches!(ty, Ty::Int | Ty::Float | Ty::Bool | Ty::Unit | Ty::Unknown) {
+                    // §4 stage 2c (#531): derived from THE copy-ness
+                    // classifier (projection table in top_let_storage).
+                    if !almide_ir::top_let_storage::rccow_copyish(ty) {
                         self.vars.insert(var.0);
                     }
                 }

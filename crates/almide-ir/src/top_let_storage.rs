@@ -43,6 +43,67 @@ pub fn copy_class(ty: &Ty) -> CopyClass {
     }
 }
 
+// ── Copy-ness projections (§4 stage 2c, #531) ───────────────────────────
+//
+// ONE classifier, FOUR named projections. The four historic predicates
+// (walker storage rule, pass_clone's needs_clone, the RcCow eligibility
+// test, capture-clone's shared-cell test) were free-standing `matches!`
+// lists that agreed only by coincidence; they now live HERE, side by side,
+// and every edge-cell difference is explicit and intentional:
+//
+//   projection         Int/Float/Bool  sized-numeric  Unit/RawPtr  Unknown  numeric-tuple
+//   storage Cell       yes             no             n/a          no       no
+//   clone_free         yes             yes            yes          yes      yes
+//   rccow_copyish      yes             no             Unit only    yes      no
+//   capture_copy_cell  yes             no             no           no       no
+//
+// The conservative cells (sized numerics outside clone_free's column) are
+// candidates for future REVIEWED widening — widening any of them changes
+// generated storage and must come with its own fixture + byte-diff review.
+
+/// pass_clone projection: types whose values move without a `.clone()` on
+/// the Rust target (Copy or trivially-rebuildable). The exact complement of
+/// the historic `needs_clone`.
+pub fn clone_free(ty: &Ty) -> bool {
+    match ty {
+        Ty::String | Ty::Applied(_, _)
+        | Ty::Record { .. } | Ty::OpenRecord { .. }
+        | Ty::Named(_, _) | Ty::Matrix | Ty::Bytes
+        | Ty::Variant { .. } | Ty::Fn { .. }
+        | Ty::TypeVar(_) => false,
+        Ty::Tuple(elements) => elements.iter().all(clone_free),
+        _ => true,
+    }
+}
+
+/// RcCow-eligibility projection: a mutable LOCAL of one of these types
+/// stays a plain `let mut` (no COW wrapper) even when captured.
+pub fn rccow_copyish(ty: &Ty) -> bool {
+    matches!(ty, Ty::Int | Ty::Float | Ty::Bool | Ty::Unit | Ty::Unknown)
+}
+
+/// Capture clone-wrap projection (pass_capture_clone): heap values captured
+/// by a lambda get a `__cap` clone. Differs from `clone_free` in ONE cell —
+/// tuples are NOT clone-wrapped here regardless of their elements (the
+/// capture path moves tuples whole); widening that cell is a reviewed
+/// future delta.
+pub fn capture_clone_wrap(ty: &Ty) -> bool {
+    matches!(ty,
+        Ty::String | Ty::Applied(_, _)
+        | Ty::Record { .. } | Ty::OpenRecord { .. }
+        | Ty::Named(_, _) | Ty::Matrix | Ty::Bytes
+        | Ty::Variant { .. } | Ty::Fn { .. }
+        | Ty::TypeVar(_)
+    )
+}
+
+/// Capture-cell projection: a `var` local of one of these types captured by
+/// a closure becomes an `Rc<Cell<T>>` shared cell (Closure v2 P3); non-Copy
+/// captures take the SharedMut heap-cell path (P6) instead.
+pub fn capture_copy_cell(ty: &Ty) -> bool {
+    copy_class(ty) == CopyClass::Scalar
+}
+
 /// The storage class of one top-let on the native target. WASM stores every
 /// top-let as one mutable global; this enum still drives its init-order and
 /// const-evaluability decisions.

@@ -706,11 +706,7 @@ fn replace_vars_stmt(stmt: &mut IrStmt, renames: &std::collections::HashMap<VarI
 }
 
 fn needs_clone_type(ty: &Ty) -> bool {
-    matches!(ty,
-        Ty::String | Ty::Applied(_, _) |
-        Ty::Record { .. } | Ty::OpenRecord { .. } |
-        Ty::Named(_, _) | Ty::Matrix | Ty::Bytes |
-        Ty::Variant { .. } | Ty::Fn { .. } |
-        Ty::TypeVar(_)
-    )
+    // §4 stage 2c (#531): derived from THE copy-ness classifier — see the
+    // projection table in almide_ir::top_let_storage (note the tuple cell).
+    almide_ir::top_let_storage::capture_clone_wrap(ty)
 }
