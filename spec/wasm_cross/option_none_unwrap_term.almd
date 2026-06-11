@@ -1,0 +1,9 @@
+// @contract: C-005
+// §13 item (#533): unwrapping a None with `!` terminates IDENTICALLY on both
+// targets — same exit code, same stderr shape (the unified main-error exit),
+// no silent continuation and no wasm-only trap formatting.
+effect fn main() -> Unit = {
+  let xs: List[Int] = []
+  let r = list.get(xs, 5)!
+  println("after=${r}")
+}

@@ -94,7 +94,7 @@ evidence  = [
 [[contract]]
 id        = "C-004"
 title     = "fan.race / fan.any / fan.map / fan.settle are deterministic by list order"
-statement = "`fan.race` returns thunk[0]'s settled result in LIST ORDER (Ok or Err), NOT wall-clock fastest. `fan.any` tries thunks in list order and returns the first Ok. `fan.map` runs element fns sequentially in list order; `fan.settle` returns results in list order. All are byte-identical native == wasm. (race takes thunk[0] even on Err; any skips failures to find an Ok.)"
+statement = "`fan.race` returns thunk[0]'s settled result in LIST ORDER (Ok or Err), NOT wall-clock fastest. `fan.any` tries thunks in list order and returns the first Ok. `fan.map` runs element fns sequentially in list order; `fan.settle` returns results in list order. All are byte-identical native == wasm. (race takes thunk[0] even on Err; any skips failures to find an Ok.) EXCEPTION: fan.settle THUNK side-effect interleaving is wall-clock on native (real threads) and sequential on wasm — settle pins its RESULT list order only."
 since     = "0.24.0"
 status    = "active"
 evidence  = [
@@ -114,6 +114,7 @@ evidence  = [
   { path = "spec/wasm_cross/fan_map_inline_err.almd", class = "fixture" },
   { path = "spec/wasm_cross/fan_any_allfail.almd", class = "fixture" },
   { path = "spec/wasm_cross/fan_race_err.almd", class = "fixture" },
+  { path = "spec/wasm_cross/option_none_unwrap_term.almd", class = "fixture" },
 ]
 
 [[contract]]
@@ -149,6 +150,7 @@ status    = "active"
 doc       = "C-008-009-010-repr.md"
 evidence  = [
   { path = "spec/wasm_cross/compound_repr_interp.almd", class = "fixture" },
+  { path = "spec/wasm_cross/repr_parity_pin.almd", class = "fixture" },
 ]
 
 [[contract]]
@@ -187,6 +189,7 @@ evidence  = [
   { path = "spec/wasm_cross/float_concrete.almd", class = "fixture" },
   { path = "spec/wasm_cross/num_edge_to_string.almd", class = "fixture" },
   { path = "spec/wasm_cross/int_float_ops.almd", class = "fixture" },
+  { path = "spec/wasm_cross/float_interp_forms.almd", class = "fixture" },
 ]
 
 [[contract]]
