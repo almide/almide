@@ -135,7 +135,30 @@ effect fn example() -> Result[Unit, String] = {
 }
 ```
 
-Test: `spec/lang/fan_test.almd`, `spec/lang/fan_race_test.almd`, `spec/lang/fan_map_test.almd`
+### Determinism contract (C-004)
+
+`fan` の並行 API は**決定的核**を契約として持つ(native ⇄ wasm byte-identical、
+契約台帳 C-004、fixture: `spec/wasm_cross/fan_deterministic.almd`,
+`spec/wasm_cross/fan_pure_thunks.almd`):
+
+- `fan.race(thunks)` — **thunk[0] の settled 結果**(リスト順決定、wall-clock ではない)。
+  thunk[0] **のみ**が評価される: 副作用順序も決定的。
+  (Go の select が仕様で RANDOM を要求するのと対照的な設計選択。)
+- `fan.any(thunks)` — リスト順に逐次試行し最初の Ok。副作用順序も決定的。
+- `fan.settle(thunks)` — **結果リストの順序のみ**を契約する。native は実スレッドで
+  実行するため thunk 内副作用の交互順は wall-clock(契約外)。wasm は逐次。
+- `fan.timeout` — wall-clock 例外として契約済み(N=1、cross-target 等価性の対象外)。
+
+### Thunk typing
+
+`race` / `any` / `settle` の thunk は純粋(`fn() -> T`)でも effect
+(`fn() -> Result[T, String]`)でもよい — 非 Result thunk は FanLowering が
+両ターゲット共通で `Ok` アダプタに包む(v0.27.3+、#514)。
+**`fan.map` だけは mapper が明示的に Result を返す必要がある**
+(`(x) => ok(x * 10)`)— mapper の戻り型推論は thunk と違い困難なため、
+純粋 mapper は check 時に拒否される(意図的な非対称、診断改善は #547)。
+
+Test: `spec/lang/fan_test.almd`, `spec/lang/fan_race_test.almd`, `spec/lang/fan_map_test.almd`, `spec/wasm_cross/fan_pure_thunks.almd`
 
 ## 6. `test` Blocks
 

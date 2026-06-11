@@ -48,9 +48,14 @@ effect fn の外で `!` を使うとコンパイルエラー。
 | `Result[T, E]` | `T` | `match expr { Ok(v) => v, Err(_) => fallback }` |
 | `Option[T]` | `T` | `match expr { Some(v) => v, None => fallback }` |
 
-**型判定ルール**: `inner.ty` が `Option[T]` なら Option テンプレート、それ以外は Result テンプレート。
+**型判定ルール**: チェッカーが型主導で確定する — `Option[T]` なら Option、
+`Result[T, E]` なら Result、**それ以外の型はコンパイルエラー**
+(`operator '??' requires Option or Result type but got Int` の形で拒否)。
+v0.26.20 の unwrap 規則統一(#485/#489)で checker と lowering が単一規則を共有する。
 
-**⚠ 既知の問題**: 型が `Unknown` のとき Result 扱いになる。型推論が失敗すると壊れる。
+旧記述の「`Unknown` のとき Result 扱いになる」は死んだ: `Ty::Unknown` が
+codegen に到達するビルドは AllTypesConcrete ゲートが拒否するため、
+テンプレート選択が Unknown を見ることは構造的にない(#534 矛盾バーンダウン)。
 
 ## 3. effect fn
 
@@ -156,10 +161,13 @@ guard condition else { diverge_expr }
 2. `Never` 型（`process.exit()`, `panic()` 等）
 3. `Unit`（ループ制御: break/continue に変換）
 
-### ⚠ 現状の問題
+### 解決履歴
 
 - `process.exit()` の戻り値型が `-> !` (never) になったことで guard else での使用は修正済み
-- ただし Almide の型システムに Never 型が存在しないため、型チェッカーレベルでの保証はない
+- `Ty::Never` は v0.10.3 で型システムに実装済み(本ファイル末尾の表どおり)。
+  Never はどの型にも代入可能で、guard else / if then / match arm の腕として
+  型チェッカーが正しく受理する — 「型システムに Never が無い」という旧記述は
+  実装前の文章の残骸であり、削除した(#534 矛盾バーンダウン)。
 
 ## 7. テストで確認済みの動作
 
