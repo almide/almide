@@ -22,7 +22,7 @@ impl NanoPass for ResultPropagationPass {
     }
 
     fn run(&self, mut program: IrProgram, target: Target) -> PassResult {
-        // Result wrapping is Rust/WASM-only. TS uses ResultErasurePass.
+        // Result wrapping is Rust/WASM-only. (The TS target and its ResultErasurePass were removed.)
         let wrap_non_result = matches!(target, Target::Rust | Target::Wasm);
 
         // `@inline_rust` / `@wasm_intrinsic` / `@intrinsic` fns dispatch
