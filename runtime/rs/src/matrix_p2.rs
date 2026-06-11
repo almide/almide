@@ -589,18 +589,27 @@ pub fn almide_rt_matrix_linear_f32_row_no_bias(
     let (head, w_f32, _) = unsafe { w_all.align_to::<f32>() };
     if head.is_empty() && w_f32.len() == out_cols * n_in {
         use rayon::prelude::*;
+        // Chunked parallelism: one task per ~64 output elements (≈64·n_in
+        // MACs ≈ 30–130 µs). Per-ELEMENT tasks measured ~50% of samples in
+        // condvar parking — the dot is only ~0.5 µs, below rayon's dispatch
+        // overhead.
+        const CHUNK: usize = 64;
         for i in 0..x_rows {
             let xi = &x.data[i * n_in..(i + 1) * n_in];
             out[i * out_cols..(i + 1) * out_cols]
-                .par_iter_mut()
+                .par_chunks_mut(CHUNK)
                 .enumerate()
-                .for_each(|(j, o)| {
-                    let wj = &w_f32[j * n_in..(j + 1) * n_in];
-                    let mut acc = 0.0f64;
-                    for k in 0..n_in {
-                        acc += xi[k] * wj[k] as f64;
+                .for_each(|(ci, oc)| {
+                    let j0 = ci * CHUNK;
+                    for (dj, o) in oc.iter_mut().enumerate() {
+                        let j = j0 + dj;
+                        let wj = &w_f32[j * n_in..(j + 1) * n_in];
+                        let mut acc = 0.0f64;
+                        for k in 0..n_in {
+                            acc += xi[k] * wj[k] as f64;
+                        }
+                        *o = acc;
                     }
-                    *o = acc;
                 });
         }
     } else {
