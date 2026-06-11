@@ -501,7 +501,7 @@ impl FuncCompiler<'_> {
                     let ctor_guard = self.depth_push();
 
                     // Resolve constructor field types from variant info + subject type_args
-                    let ctor_fields = self.emitter.record_fields.get(ctor_name).cloned().unwrap_or_default();
+                    let ctor_fields = self.emitter.fields_of(ctor_name);
                     let subject_type_args: &[Ty] = match subject_ty {
                         Ty::Named(_, args) if !args.is_empty() => args,
                         Ty::Applied(_, args) if !args.is_empty() => args,
@@ -703,7 +703,7 @@ impl FuncCompiler<'_> {
                     let rec_guard = self.depth_push();
 
                     // Bind fields: load each field from subject + tag_offset + field_offset
-                    let case_fields = self.emitter.record_fields.get(ctor_name).cloned().unwrap_or_default();
+                    let case_fields = self.emitter.fields_of(ctor_name);
                     for pf in pat_fields {
                         if let Some((foff, fty)) = values::field_offset(&case_fields, &pf.name) {
                             let total_offset = 4 + foff; // 4 = tag size
@@ -1106,7 +1106,7 @@ impl FuncCompiler<'_> {
                     let ctor_guard = self.depth_push();
 
                     // Bind constructor fields with type param substitution
-                    let ctor_fields = self.emitter.record_fields.get(ctor_name.as_str()).cloned().unwrap_or_default();
+                    let ctor_fields = self.emitter.fields_of(ctor_name.as_str());
                     let type_args: &[Ty] = match inner_ty {
                         Ty::Named(_, args) if !args.is_empty() => args,
                         Ty::Applied(_, args) if !args.is_empty() => args,
@@ -1304,7 +1304,7 @@ impl FuncCompiler<'_> {
                     self.func.instruction(&Instruction::If(bt));
                     let ctor_guard = self.depth_push();
                     // Bind named fields from the variant's record layout
-                    let case_fields = self.emitter.record_fields.get(ctor_name.as_str()).cloned().unwrap_or_default();
+                    let case_fields = self.emitter.fields_of(ctor_name.as_str());
                     for pf in pat_fields {
                         if let Some((foff, fty)) = values::field_offset(&case_fields, &pf.name) {
                             let total_offset = 4 + foff; // 4 = tag size

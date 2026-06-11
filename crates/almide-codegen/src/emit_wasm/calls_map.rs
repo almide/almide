@@ -989,7 +989,7 @@ impl FuncCompiler<'_> {
         if let Ty::Record { fields } = key_ty {
             fields.iter().map(|(n, t)| (n.to_string(), t.clone())).collect::<Vec<_>>()
         } else if let Ty::Named(name, _) = key_ty {
-            self.emitter.record_fields.get(name.as_str()).cloned().unwrap_or_default()
+            self.emitter.fields_of(name.as_str())
         } else if let Some(fs) = self.emitter.record_fields.get("") {
             fs.clone()
         } else {

@@ -710,6 +710,19 @@ impl WasmEmitter {
     }
 
     /// Add a compiled function body.
+    /// THE ctor-field lookup (#525): a registration MISS is a compiler bug
+    /// (the registration↔lookup name-skew class — cross-module/mangled ctor
+    /// names), not an empty layout. `unwrap_or_default` at the call sites
+    /// conflated None with Some(empty): every pattern bind silently read
+    /// zero-initialized locals, record map-keys never matched, repr printed
+    /// empty. Registered-but-empty stays legal (unit-ish payloads).
+    pub fn fields_of(&self, ctor: &str) -> Vec<(String, almide_lang::types::Ty)> {
+        self.record_fields.get(ctor).cloned().unwrap_or_else(|| panic!(
+            "[ICE] constructor `{}` has no registered field layout (#525 class)",
+            ctor
+        ))
+    }
+
     pub fn add_compiled(&mut self, compiled: CompiledFunc) {
         if let Some(expected) = compiled.expected_func_idx {
             let landing = self.num_imports + self.compiled.len() as u32;
@@ -898,8 +911,16 @@ impl FuncCompiler<'_> {
             }
         } else if let Some(&local_idx) = self.var_map.get(&id) {
             wasm!(self.func, { local_get(new_ptr); local_set(local_idx); });
-        } else if let Some(&(global_idx, _)) = self.emitter.top_let_globals.get(&id) {
+        } else if let Some((global_idx, _)) = self.lookup_global(almide_ir::VarId(id)) {
             wasm!(self.func, { local_get(new_ptr); global_set(global_idx); });
+        } else {
+            // #525 (A6): silently SKIPPING the write-back leaves the var
+            // holding a stale pre-realloc pointer — this fn's own doc calls
+            // that "silently wrong". Refuse loudly instead.
+            panic!(
+                "[ICE] mutator write-back target VarId {} resolved to neither local nor global (#525)",
+                id
+            );
         }
     }
 
@@ -2667,7 +2688,12 @@ fn compile_repr_funcs(emitter: &mut WasmEmitter, var_table: &almide_ir::VarTable
         // this is the whole point of keying by instantiation. The dispatch base
         // name is the type's own name (`Tree`), not the mangled key.
         let ty = emitter.repr_func_tys.get(mangled).cloned()
-            .unwrap_or_else(|| almide_lang::types::Ty::Named(almide_base::intern::sym(mangled), Vec::new()));
+            .unwrap_or_else(|| panic!(
+                "[ICE] repr dispatch for `{}` has no registered instantiation — \
+                 fabricating a Named from the MANGLED key silently printed an \
+                 empty repr (#525)",
+                mangled
+            ));
         let base_name = match &ty {
             almide_lang::types::Ty::Named(n, _) => n.to_string(),
             _ => mangled.clone(),
