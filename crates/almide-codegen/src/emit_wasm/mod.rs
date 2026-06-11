@@ -480,6 +480,11 @@ pub struct WasmEmitter {
     // alias is preserved (value semantics). Empty for non-aliasing programs → the
     // direct mutation path is byte-identical to before.
     pub needs_cow: HashSet<u32>,
+    /// §4 Stage 2: synthetic cross-module use-site VarId → declaration VarId
+    /// (from `codegen_annotations.global_alias`). The PRIMARY resolution for
+    /// module globals — the name-key reconstruction below it is the soak-era
+    /// fallback.
+    pub global_alias: HashMap<u32, u32>,
     // Deep-equality functions per variant type: type_name → func_idx
     pub eq_funcs: HashMap<String, u32>,
     // Almide-literal repr functions per NAMED record/variant type: type_name →
@@ -646,6 +651,7 @@ impl WasmEmitter {
             effect_fns: HashSet::new(),
             mutable_captures: HashSet::new(),
             needs_cow: HashSet::new(),
+            global_alias: HashMap::new(),
             eq_funcs: HashMap::new(),
             repr_funcs: BTreeMap::new(),
             repr_func_tys: BTreeMap::new(),
@@ -910,6 +916,8 @@ pub(crate) fn emit(program: &IrProgram) -> Vec<u8> {
     // Copy the COW-target var set (AliasCowPass) onto the emitter as bare u32s,
     // mirroring `mutable_captures`. Read at every in-place mutation emit site.
     emitter.needs_cow = program.codegen_annotations.needs_cow.iter().map(|v| v.0).collect();
+    emitter.global_alias = program.codegen_annotations.global_alias.iter()
+        .map(|(k, v)| (k.0, v.0)).collect();
 
     // Phase 0: Collect `@intrinsic(symbol)` → (module, fn_name) from every
     // bundled stdlib source so the `RuntimeCall` fallback path can route
