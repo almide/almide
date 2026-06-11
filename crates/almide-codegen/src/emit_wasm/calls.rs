@@ -709,6 +709,18 @@ impl FuncCompiler<'_> {
                         self.emit_call(&target, args, _ret_ty);
                     }
                     _ => {
+                        // #609: a synthesized codec helper for a DEPENDENCY-module
+                        // element type — `__decode_list_varlib.Pigment` — gets
+                        // SPLIT on the dot into module=`__decode_list_varlib`,
+                        // func=`Pigment`. Reassemble and route to the value-codec
+                        // dispatch (the Named arm does this for same-module types).
+                        let full = format!("{}.{}", module.as_str(), func.as_str());
+                        if full.starts_with("__encode_option_") || full.starts_with("__decode_option_")
+                            || full.starts_with("__decode_default_") || full.starts_with("__encode_list_")
+                            || full.starts_with("__decode_list_") {
+                            self.emit_codec_helper(&full, args);
+                            return;
+                        }
                         // Try user module function: almide_rt_{module}_{func}
                         let mod_ident = module.as_str().replace('.', "_");
                         let func_ident = func.as_str().replace('.', "_");
@@ -723,9 +735,30 @@ impl FuncCompiler<'_> {
                                 for arg in args { self.emit_expr(arg); }
                                 wasm!(self.func, { call(func_idx); });
                             } else {
+                                // Cross-module Type.method (#609): a Codec/convention
+                                // method on a type defined in a DEPENDENCY module
+                                // is registered as `almide_rt_{owning}_{Type}_{method}`,
+                                // but the call arrives with module = the TYPE name
+                                // (`Pigment`), so the prefix lookup builds
+                                // `almide_rt_Pigment_decode` and misses. The native
+                                // arm resolves this via MODULE_METHOD_FNS (a
+                                // Rust-only pass); for wasm, find the unique
+                                // func_map key ending in `_{Type}_{method}` under
+                                // the `almide_rt_` namespace.
+                                let suffix = format!("_{}_{}", mod_ident, func_ident);
+                                let mut matches: Vec<u32> = self.emitter.func_map.iter()
+                                    .filter(|(k, _)| k.starts_with("almide_rt_") && k.ends_with(&suffix))
+                                    .map(|(_, &v)| v)
+                                    .collect();
+                                matches.sort_unstable();
+                                matches.dedup();
                                 // Last resort: bare func name (for cross-module calls where
                                 // module name differs from canonical)
                                 if let Some(&func_idx) = self.emitter.func_map.get(func.as_str()) {
+                                    for arg in args { self.emit_expr(arg); }
+                                    wasm!(self.func, { call(func_idx); });
+                                } else if matches.len() == 1 {
+                                    let func_idx = matches[0];
                                     for arg in args { self.emit_expr(arg); }
                                     wasm!(self.func, { call(func_idx); });
                                 } else {

@@ -33,6 +33,8 @@ const MOD_ALMD: &str = r#"type Emotion = Happy | Sad
 
 type Cfg = { name: String }
 
+type Pigment: Codec = { r: Int, g: Int, b: Int }
+
 let SYSTEM = "hi"
 
 let WORDS = ["a", "b"]
@@ -99,6 +101,27 @@ fn describe(t: Tag) -> String = match t { PolicyTag(_) => "tag", Empty => "empty
 effect fn main() -> Unit = println(describe(PolicyTag(m.Happy)))
 "#,
             expected: "tag",
+            status: Status::Works,
+        },
+        // #609: a derived Codec method on a type defined in ANOTHER module
+        // (`m.Pigment.encode/decode`) ICE'd the WASM emitter (it built the
+        // runtime name from the TYPE name, not the owning module) while native
+        // worked — and `almide test` hid it behind the native fallback. This
+        // cell is the both-target regression lock; it covers the scalar method
+        // AND the synthesized `__decode_list_<mod>.<Type>` helper.
+        Cell {
+            name: "cross_module_codec_roundtrip",
+            main: r#"import self as m
+type Bundle: Codec = { lead: m.Pigment, palette: List[m.Pigment] }
+effect fn main() -> Unit = {
+  let p = m.Pigment { r: 1, g: 2, b: 3 }
+  let one = match m.Pigment.decode(m.Pigment.encode(p)) { ok(v) => v.b, _ => -1 }
+  let bd = Bundle { lead: p, palette: [m.Pigment { r: 4, g: 5, b: 6 }, m.Pigment { r: 7, g: 8, b: 9 }] }
+  let lst = match Bundle.decode(Bundle.encode(bd)) { ok(v) => list.len(v.palette), _ => -1 }
+  println(int.to_string(one) + " " + int.to_string(lst))
+}
+"#,
+            expected: "3 2",
             status: Status::Works,
         },
         Cell {
