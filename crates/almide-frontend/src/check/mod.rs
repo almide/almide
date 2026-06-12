@@ -71,6 +71,12 @@ pub struct Checker {
     /// `check_named_call` uses this to validate each value against the param it
     /// NAMES (lowering binds by name), not the positional slot it landed in.
     pub(crate) named_arg_meta: Option<(usize, Vec<almide_base::intern::Sym>)>,
+    /// Expected-type hint for the NEXT lambda argument's parameters (#653).
+    /// Set by `check_call_with_type_args` immediately before inferring a lambda
+    /// arg whose call-parameter slot is a `Fn`; consumed (taken) by the
+    /// `ExprKind::Lambda` inference arm to type unannotated params from the
+    /// expected element type instead of a fresh var. `None` everywhere else.
+    pub(crate) lambda_arg_hint: Option<Vec<crate::types::Ty>>,
     pub(crate) constraints: Vec<Constraint>,
     pub(crate) uf: UnionFind,
     /// Module-name prefix active during `infer_module`. `None` for the
@@ -225,6 +231,7 @@ impl Checker {
             last_mut_params: Vec::new(),
             arg_spans: Vec::new(),
             named_arg_meta: None,
+            lambda_arg_hint: None,
             constraints: Vec::new(), uf: UnionFind::new(),
             current_module_prefix: None,
             deferred_tuple_indices: Vec::new(),
