@@ -171,6 +171,7 @@ let root_i = float.to_int(root_f)    // truncating
 | E021 | Invalid record construction/pattern shape (positional args on a record, unknown/duplicate/missing field, paren pattern on a record case) | Records take named fields: `Cfg(name: x)` or `Cfg { name: x }`; match record cases as `Case { .. }` |
 | E022 | `!` (unwrap-propagate) outside an effect fn body or test block | Mark the enclosing fn `effect fn`, or use `??` for a fallback value (`!` inside a lambda can't propagate) |
 | E023 | Derived `Codec`/`Ord`/`Hash` not satisfied by a field type | Add `: P` to the offending field type (every field of a `: P` type must itself be `P`) — or hand-write `Type.encode`/`decode` for Codec |
+| E024 | Integer literal out of range for its type (would silently fold to 0) | Use a literal within the type's range; for large magnitudes use `UInt64` (or `Float`, lossy); `-9223372036854775808` (i64::MIN) is valid |
 | E420 | Function visibility violation (callee is private) | Make the callee public, or add a public shim |
 
 A rustc 4-digit code (`error[E0XXX]`) leaking through always indicates
