@@ -470,7 +470,19 @@ impl Checker {
                         format!("call to {}()", name)).with_code("E002"));
                     return Ty::Unknown;
                 }
-                return ty;
+                // #623: `f` is an as-yet-unresolved inference var being CALLED — so
+                // it MUST be a function. Constrain it to `(arg_tys) -> ?ret` and
+                // return `?ret`, not `f`'s own type. Returning `ty` typed the call
+                // result as f's CLOSURE type (e.g. `(f) => f(10)` in a `list.map`
+                // lambda became `((Int)->Int) -> ((Int)->Int)` instead of
+                // `((Int)->Int) -> Int`), so codegen emitted a closure body that
+                // returns a closure where it returns the call result (invalid Rust
+                // / wrong wasm). `?ret` is resolved from context — e.g. the element
+                // type `(Int)->Int` flowing in from `list.map` pins `?ret = Int`.
+                let ret = self.fresh_var();
+                let fn_ty = Ty::Fn { params: arg_tys.to_vec(), ret: Box::new(ret.clone()) };
+                self.constrain(fn_ty, ty, format!("call to {}()", name));
+                return ret;
             }
             // Triple: (hint, clean fn-name fix for simple try:, rich multi-line snippet).
             // `rich_snippet` overrides `fix_name` when present — used for hallucinations

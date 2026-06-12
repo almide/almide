@@ -24,7 +24,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 `fixture` < `fuzz` < `exhaustive` < `lean`. An **active** contract must carry
 ≥1 evidence of class ≥ `fixture`.
 
-81 contracts
+82 contracts
 
 | ID | Contract | Since | Status | Strongest Evidence | # Fixtures |
 |----|----------|-------|--------|--------------------|-----------:|
@@ -109,4 +109,5 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-079 | Variant cases with distinct anonymous-record payloads are target-stable |  | active | fixture | 1 |
 | C-080 | Empty map.from_list / set.from_list resolves its element from the result type |  | active | fixture | 1 |
 | C-081 | Generic fn in an inferred-param lambda resolves its type parameter |  | active | fixture | 1 |
+| C-082 | Calling a closure-typed lambda parameter yields the call result, not the closure |  | active | fixture | 1 |
 
