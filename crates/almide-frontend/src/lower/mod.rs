@@ -391,7 +391,15 @@ fn lower_program_with_prefix(prog: &ast::Program, env: &TypeEnv, type_map: &Type
     }
 
     // Auto-derive: generate convention functions for types that declare deriving but lack custom impl
-    let auto_derived = generate_auto_derives(&mut ctx, &type_decls, &functions);
+    let mut auto_derived = generate_auto_derives(&mut ctx, &type_decls, &functions);
+    // Stamp every generated convention fn with a synthetic `@derived` marker.
+    // This is the authoritative signal that a function is compiler-generated:
+    // downstream passes (e.g. borrow inference, #647) must not name-match
+    // `encode`/`decode`/`eq`/... to recognise derives — the generator is the
+    // single source of truth, so it records the fact structurally here.
+    for f in &mut auto_derived {
+        f.attrs.push(ast::Attribute { name: sym("derived"), args: vec![], span: None });
+    }
     functions.extend(auto_derived);
 
     // Collect effect fn names from TypeEnv (user-defined + stdlib)

@@ -1,0 +1,28 @@
+// @contract: C-087
+// JSON number and \uXXXX string decoding must be byte-identical across targets.
+// The WASM json parser previously: emitted a literal 'u'+hex for \uXXXX (#651),
+// dropped the -0.0 sign (#663), and rounded exponent-form numbers off by a ULP
+// (#667). It now decodes \u (BMP + surrogate pairs) to UTF-8 and hands every
+// float token to the SAME correctly-rounded parser float.parse uses (__dec2flt).
+// The native oracle's BMP-only \u decoder gained surrogate-pair joining to match.
+import json
+
+fn main() -> Unit = {
+  // #651: \uXXXX BMP escapes (1/2/3-byte UTF-8) and an astral surrogate pair.
+  println(json.get_string(json.parse("{\"k\":\"\\u0041\\u00e9\\u3042\"}") ?? json.null(), "k") ?? "MISS")
+  println(json.get_string(json.parse("{\"k\":\"\\uD83D\\uDE00\"}") ?? json.null(), "k") ?? "MISS")
+  println(json.get_string(json.parse("{\"k\":\"a\\u0062c\"}") ?? json.null(), "k") ?? "MISS")
+
+  // #663: -0.0 keeps its sign bit through parse → stringify.
+  println(json.stringify(json.parse("-0.0") ?? json.null()))
+
+  // #667: exponent-form numbers are correctly rounded (not off by a ULP).
+  println(json.stringify(json.parse("2.5e-3") ?? json.null()))
+  println(json.stringify(json.parse("1.5e10") ?? json.null()))
+  println(json.stringify(json.parse("6.022e23") ?? json.null()))
+  println(json.stringify(json.parse("123.456") ?? json.null()))
+
+  // Integers stay exact (the int path is unchanged).
+  println(json.stringify(json.parse("42") ?? json.null()))
+  println(json.stringify(json.parse("-9223372036854775808") ?? json.null()))
+}

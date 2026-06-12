@@ -31,6 +31,15 @@
 //! and the skip count is printed; there is no hardcoded skip-list to drift out
 //! of date.
 //!
+//! The skip SET is additionally audited by `interp_abstain_ledger` (below)
+//! against the committed `interp-abstain-ledger.txt`. The ledger does NOT
+//! drive skipping (skips stay self-reported, per the rule above); it makes
+//! coverage shrinkage a reviewed decision instead of a silent drift: a fixture
+//! abstaining without a ledger entry fails, and a ledger entry whose fixture
+//! no longer abstains fails (the ledger may only shrink toward zero). This is
+//! the CG-1 gap-audit ratchet — the evaluable boundary of the executable spec,
+//! as a file.
+//!
 //! Requires the workspace `almide` binary (built `--release`) for the native /
 //! WASM legs and `wasmtime` for the WASM run. If either is absent the test
 //! self-skips cleanly (matching the existing wasm_runtime harness behaviour),
@@ -58,8 +67,7 @@ fn almide_bin() -> String {
     }
     // CARGO_MANIFEST_DIR here is crates/almide-interp; the workspace target dir
     // is two levels up.
-    let cargo_bin = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../target/release/almide");
+    let cargo_bin = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/release/almide");
     if cargo_bin.exists() {
         return cargo_bin.to_str().unwrap().to_string();
     }
@@ -93,7 +101,12 @@ fn run_native_capture(source: &str) -> (i32, String, String) {
         // unique per-invocation dir gives this build its own scratch, removing
         // the race so the third judge is deterministic.
         .env("TMPDIR", dir.path())
-        .args(["build", src_path.to_str().unwrap(), "-o", bin_path.to_str().unwrap()])
+        .args([
+            "build",
+            src_path.to_str().unwrap(),
+            "-o",
+            bin_path.to_str().unwrap(),
+        ])
         .output()
         .expect("failed to build native");
     if !build.status.success() {
@@ -103,7 +116,9 @@ fn run_native_capture(source: &str) -> (i32, String, String) {
             String::from_utf8_lossy(&build.stderr).trim().to_string(),
         );
     }
-    let out = Command::new(&bin_path).output().expect("failed to run native binary");
+    let out = Command::new(&bin_path)
+        .output()
+        .expect("failed to run native binary");
     (
         out.status.code().unwrap_or(-1),
         String::from_utf8_lossy(&out.stdout).trim().to_string(),
@@ -124,7 +139,14 @@ fn run_wasm_capture(source: &str) -> Option<(i32, String, String)> {
         // rustc into the output dir, but pinning TMPDIR keeps any incidental
         // temp use off the shared dir too.
         .env("TMPDIR", dir.path())
-        .args(["build", src_path.to_str().unwrap(), "--target", "wasm", "-o", wasm_path.to_str().unwrap()])
+        .args([
+            "build",
+            src_path.to_str().unwrap(),
+            "--target",
+            "wasm",
+            "-o",
+            wasm_path.to_str().unwrap(),
+        ])
         .output()
         .expect("failed to build wasm");
     assert!(
@@ -256,7 +278,10 @@ fn interp_cross_target_spec() {
 
     let dir = spec_dir();
     if !dir.exists() {
-        eprintln!("interp_cross_target_spec: {} missing — skipping", dir.display());
+        eprintln!(
+            "interp_cross_target_spec: {} missing — skipping",
+            dir.display()
+        );
         return;
     }
 
@@ -368,7 +393,9 @@ fn interp_cross_target_spec() {
         eprintln!("    - {n}: {r}");
     }
     if !backend_split.is_empty() {
-        eprintln!("\n  Backend splits (native!=wasm; owned by wasm_cross gate, interp tie-break logged):");
+        eprintln!(
+            "\n  Backend splits (native!=wasm; owned by wasm_cross gate, interp tie-break logged):"
+        );
         for s in &backend_split {
             eprintln!("    ~ {s}");
         }
@@ -386,5 +413,154 @@ fn interp_cross_target_spec() {
             both_backends_wrong.len(),
             both_backends_wrong.join("\n\n")
         );
+    }
+}
+
+// ── The abstain ledger gate (CG-1 gap audit) ──
+
+/// The committed inventory of fixtures the interpreter cannot evaluate.
+fn ledger_path() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("interp-abstain-ledger.txt")
+}
+
+/// Coverage audit for the executable spec: runs ONLY the interp leg over the
+/// cross-target corpus (no almide binary, no wasmtime — this gate never
+/// self-skips on CI) and holds the observed abstain set equal to the committed
+/// ledger, in both directions:
+///
+///   - a fixture the interp cannot evaluate but absent from the ledger FAILS —
+///     coverage shrinkage must be a reviewed ledger edit in the same PR, never
+///     a silent drift (the documented weakness this gate exists to close);
+///   - a ledger entry whose fixture now evaluates (or was renamed/removed)
+///     FAILS — stale entries hide progress; the ledger may only shrink.
+///
+/// The ledger never decides WHAT is skipped (skips stay interp-self-reported);
+/// it only audits the set. Regenerate after a deliberate change with
+/// `ALMIDE_UPDATE_INTERP_LEDGER=1` and review the diff.
+#[test]
+fn interp_abstain_ledger() {
+    let dir = spec_dir();
+    if !dir.exists() {
+        eprintln!(
+            "interp_abstain_ledger: {} missing — skipping",
+            dir.display()
+        );
+        return;
+    }
+    let mut entries: Vec<_> = std::fs::read_dir(&dir)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().extension().map(|x| x == "almd").unwrap_or(false))
+        .collect();
+    entries.sort_by_key(|e| e.path());
+    if entries.is_empty() {
+        eprintln!("interp_abstain_ledger: corpus empty — skipping");
+        return;
+    }
+
+    let total = entries.len();
+    // fixture stem → first-line reason, in corpus order
+    let mut observed: Vec<(String, String)> = Vec::new();
+    for entry in &entries {
+        let path = entry.path();
+        let name = path.file_stem().unwrap().to_str().unwrap().to_string();
+        let source = std::fs::read_to_string(&path).unwrap();
+        if let InterpLeg::Skip(reason) = run_interp_capture(&source) {
+            observed.push((name, reason.replace('\n', " ")));
+        }
+    }
+
+    if std::env::var("ALMIDE_UPDATE_INTERP_LEDGER").is_ok() {
+        let mut out = String::from(
+            "# interp-abstain-ledger — fixtures of spec/wasm_cross/ the reference\n\
+             # interpreter cannot evaluate (its self-reported coverage gaps), i.e. the\n\
+             # current boundary of the executable spec. CG-1 gap audit; shrink to zero.\n\
+             #\n\
+             # Format: <fixture-stem>  <reason as last observed>  (first token is the key)\n\
+             # Gate:   interp_cross_target_test.rs::interp_abstain_ledger — fails on a\n\
+             #         new abstain missing here AND on a stale entry that now evaluates.\n\
+             # Regenerate (then review the diff!):\n\
+             #   ALMIDE_UPDATE_INTERP_LEDGER=1 cargo test -p almide-interp interp_abstain_ledger\n\
+             # Preferred alternative to adding an entry: widen the interp glue\n\
+             # (bridge.rs / hofs.rs / dispatch.rs — see crates/almide-interp/CLAUDE.md).\n\n",
+        );
+        for (n, r) in &observed {
+            out.push_str(&format!("{n}  {r}\n"));
+        }
+        std::fs::write(ledger_path(), out).unwrap();
+        eprintln!(
+            "interp_abstain_ledger: regenerated with {} abstain(s) of {} fixtures — review the diff",
+            observed.len(),
+            total
+        );
+        return;
+    }
+
+    let ledger_text = std::fs::read_to_string(ledger_path()).unwrap_or_else(|_| {
+        panic!(
+            "interp-abstain-ledger.txt missing at {} — seed it with \
+             ALMIDE_UPDATE_INTERP_LEDGER=1 cargo test -p almide-interp interp_abstain_ledger",
+            ledger_path().display()
+        )
+    });
+    let ledger: std::collections::BTreeSet<String> = ledger_text
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .filter_map(|l| l.split_whitespace().next().map(str::to_string))
+        .collect();
+    let observed_set: std::collections::BTreeSet<String> =
+        observed.iter().map(|(n, _)| n.clone()).collect();
+
+    let new_abstains: Vec<&(String, String)> = observed
+        .iter()
+        .filter(|(n, _)| !ledger.contains(n))
+        .collect();
+    let stale: Vec<&String> = ledger
+        .iter()
+        .filter(|n| !observed_set.contains(*n))
+        .collect();
+
+    eprintln!(
+        "\ninterp_abstain_ledger (executable-spec coverage): {} fixtures | {} evaluated | {} abstained (ledgered)",
+        total,
+        total - observed.len(),
+        observed.len()
+    );
+
+    let mut failures = String::new();
+    if !new_abstains.is_empty() {
+        failures.push_str(&format!(
+            "\nUNLEDGERED ABSTAIN(S) — the interpreter cannot evaluate {} fixture(s) not \
+             recorded in interp-abstain-ledger.txt:\n",
+            new_abstains.len()
+        ));
+        for (n, r) in &new_abstains {
+            failures.push_str(&format!("    - {n}: {r}\n"));
+        }
+        failures.push_str(
+            "  Preferred fix: widen the interp glue so the fixture evaluates \
+             (bridge.rs / hofs.rs / dispatch.rs — see crates/almide-interp/CLAUDE.md).\n  \
+             Otherwise: record the abstention in the ledger IN THIS SAME PR \
+             (ALMIDE_UPDATE_INTERP_LEDGER=1 regenerates) — shrinking the executable \
+             spec's coverage is a reviewed decision, never a silent drift.\n",
+        );
+    }
+    if !stale.is_empty() {
+        failures.push_str(&format!(
+            "\nSTALE LEDGER ENTRY(IES) — {} ledgered fixture(s) no longer abstain \
+             (now evaluated, renamed, or removed):\n",
+            stale.len()
+        ));
+        for n in &stale {
+            failures.push_str(&format!("    - {n}\n"));
+        }
+        failures.push_str(
+            "  Remove the entries (ALMIDE_UPDATE_INTERP_LEDGER=1 regenerates) — \
+             the ledger may only shrink toward zero.\n",
+        );
+    }
+    if !failures.is_empty() {
+        panic!("{failures}");
     }
 }

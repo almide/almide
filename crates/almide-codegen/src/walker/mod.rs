@@ -14,6 +14,7 @@ mod types;
 
 // Re-exports for external consumers
 pub use helpers::ty_contains_name;
+pub use helpers::ty_contains_any_recursive;
 pub use types::render_type;
 pub use expressions::render_expr;
 pub use statements::{render_stmt, render_pattern};
@@ -29,6 +30,24 @@ use expressions::render_expr as render_expr_fn;
 use statements::render_stmt as render_stmt_fn;
 use helpers::{terminate_stmt, indent_lines};
 use declarations::{render_type_decl, collect_named_records, collect_anon_records, collect_record_field_counts};
+
+/// Is `name` a Rust keyword (strict, reserved, or weak) that must be raw-escaped
+/// (`r#name`) when used as an identifier? Single source of truth for every
+/// emission site — a var name, a fn parameter, a fn DEFINITION, and a fn CALL
+/// site — so a user fn named `box`/`move`/`dyn`/… escapes identically on both
+/// sides of the call (#659). An incomplete per-site list previously let the
+/// definition or the call slip through unescaped, producing invalid Rust.
+pub(crate) fn is_rust_keyword(name: &str) -> bool {
+    matches!(name,
+        "as" | "async" | "await" | "break" | "const" | "continue" | "crate"
+        | "dyn" | "else" | "enum" | "extern" | "false" | "fn" | "for" | "if"
+        | "impl" | "in" | "let" | "loop" | "match" | "mod" | "move" | "mut"
+        | "pub" | "ref" | "return" | "self" | "Self" | "static" | "struct"
+        | "super" | "trait" | "true" | "type" | "unsafe" | "use" | "where" | "while"
+        | "abstract" | "become" | "box" | "do" | "final" | "macro" | "override"
+        | "priv" | "try" | "typeof" | "unsized" | "virtual" | "yield"
+    )
+}
 
 /// Render context: carries the variable table, target, and annotations.
 /// The walker NEVER checks types — all codegen decisions come from annotations.
@@ -62,11 +81,17 @@ pub struct RenderContext<'a> {
     /// set, so a value with the impl renders to its literal form while opaque
     /// `Named` references (e.g. runtime newtypes) stay on the Display path.
     pub repr_named_types: std::collections::HashSet<almide_base::intern::Sym>,
+    /// Error type `E` of the enclosing fn's declared return `Result[_, E]`,
+    /// or `None` if the fn does not return a `Result`. The `!` (Unwrap)
+    /// renderer compares a propagated source error against this: when they
+    /// match, `?` propagates directly with no `map_err` coercion (so a custom
+    /// variant error type is preserved rather than stringified via Debug).
+    pub fn_err_ty: Option<almide_lang::types::Ty>,
 }
 
 impl<'a> RenderContext<'a> {
     pub fn new(templates: &'a TemplateSet, var_table: &'a VarTable) -> Self {
-        Self { templates, var_table, indent: 0, target: Target::Rust, auto_unwrap: false, is_test: false, ann: CodegenAnnotations::default(), type_aliases: std::collections::HashMap::new(), generic_types: std::collections::HashSet::new(), minimal_generic_bounds: false, repr_c: false, ref_params: std::collections::HashSet::new(), ref_mut_params: std::collections::HashSet::new(), repr_named_types: std::collections::HashSet::new() }
+        Self { templates, var_table, indent: 0, target: Target::Rust, auto_unwrap: false, is_test: false, ann: CodegenAnnotations::default(), type_aliases: std::collections::HashMap::new(), generic_types: std::collections::HashSet::new(), minimal_generic_bounds: false, repr_c: false, ref_params: std::collections::HashSet::new(), ref_mut_params: std::collections::HashSet::new(), repr_named_types: std::collections::HashSet::new(), fn_err_ty: None }
     }
 
     pub fn with_target(mut self, target: Target) -> Self {
@@ -83,17 +108,7 @@ impl<'a> RenderContext<'a> {
 
     pub(crate) fn var_name(&self, id: VarId) -> String {
         let name = &self.var_table.get(id).name;
-        let kw = [
-            // Rust keywords
-            "as", "async", "await", "break", "const", "continue", "crate",
-            "dyn", "else", "enum", "extern", "false", "fn", "for", "if",
-            "impl", "in", "let", "loop", "match", "mod", "move", "mut",
-            "pub", "ref", "return", "self", "Self", "static", "struct",
-            "super", "trait", "true", "type", "unsafe", "use", "where", "while",
-            "abstract", "become", "box", "do", "final", "macro", "override",
-            "priv", "try", "typeof", "unsized", "virtual", "yield",
-        ];
-        if kw.contains(&name.as_str()) {
+        if is_rust_keyword(name.as_str()) {
             self.templates.render_with("keyword_escape", None, &[], &[("name", name.as_str())])
                 .unwrap_or_else(|| name.to_string())
         } else {
@@ -138,6 +153,20 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
         }
     }
 
+    // Error type that the enclosing fn's `?`/auto-? propagates into. A fn
+    // declared `Result[_, E]` propagates into `E`; an effect fn declared with
+    // a non-Result type is auto-wrapped to `Result<_, String>`, so it
+    // propagates into `String`. A plain fn with no Result return propagates
+    // into nothing (None). The Unwrap renderer uses this to skip the Debug
+    // `map_err` coercion when the source error type already matches.
+    let fn_err_ty = if let Some((_, err_ty)) = func.ret_ty.inner2() {
+        Some(err_ty.clone())
+    } else if func.is_effect && !func.is_test {
+        Some(almide_lang::types::Ty::String)
+    } else {
+        None
+    };
+
     // Set effect fn context for auto-? insertion
     let fn_ctx = RenderContext {
         templates: ctx.templates,
@@ -154,6 +183,7 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
         ref_params,
         ref_mut_params,
         repr_named_types: ctx.repr_named_types.clone(),
+        fn_err_ty,
     };
 
     // Dispatch-only fns (body is Hole): `@inline_rust` / `@intrinsic`
@@ -349,12 +379,9 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
         .replace('|', "_pipe_").replace('&', "_amp_").replace('%', "_mod_");
     // Strip any remaining non-ASCII characters (e.g., →, ★, etc.)
     safe_name = safe_name.chars().map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' }).collect();
-    // Escape target-specific keywords via template
-    let target_keywords = ["while", "for", "if", "else", "match", "loop", "break", "continue",
-        "return", "fn", "let", "mut", "use", "mod", "pub", "struct", "enum", "impl", "trait",
-        "type", "where", "as", "in", "ref", "self", "super", "crate", "const", "static",
-        "unsafe", "async", "await", "dyn", "move", "true", "false", "try", "yield"];
-    if target_keywords.contains(&safe_name.as_str()) {
+    // Escape a Rust-keyword fn name (`box` → `r#box`) via the shared predicate so
+    // the DEFINITION matches the CALL site exactly (#659).
+    if is_rust_keyword(safe_name.as_str()) {
         safe_name = ctx.templates.render_with("keyword_escape", None, &[], &[("name", safe_name.as_str())])
             .unwrap_or(safe_name);
     }
@@ -482,6 +509,7 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
         .cloned()
         .collect();
     ann.eq_blocked_types = super::walker::declarations::compute_eq_blocked_types(&all_type_decls);
+    ann.phantom_param_structs = super::walker::declarations::compute_phantom_param_structs(&all_type_decls);
     // §4 endgame: the legacy pre-index (lazy_top_let_names /
     // eager_force_top_lets / const_top_let_vars) and the mutable-storage
     // register block are GONE — every consumer reads the TopLetStorage
@@ -602,6 +630,7 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
         ref_params: std::collections::HashSet::new(),
         ref_mut_params: std::collections::HashSet::new(),
         repr_named_types,
+        fn_err_ty: None,
     };
     for td in &program.type_decls {
         if let IrTypeDeclKind::Variant { cases, .. } = &td.kind {

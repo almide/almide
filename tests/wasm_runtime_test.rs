@@ -649,6 +649,84 @@ fn wasm_cross_module_lambda_without_local_decoy() {
     ]);
 }
 
+const MOD_PKG_TOML: &str = "[package]\nname = \"modtest\"\nversion = \"0.1.0\"\n\n[targets]\nwasm = true\n";
+
+#[test]
+fn wasm_cross_module_producer_side_variant_ctor() {
+    // #631: a producer fn INSIDE the submodule that owns a variant constructs
+    // it via the BARE constructor (`Circle(r)`) and returns it. The ctor-call
+    // expression's `.ty` must be pinned to the OWNER-qualified `shape.Shape`,
+    // or the #433 name-pinning guard aborts BOTH targets at codegen even though
+    // `check` passed. Expected `48` on both (Circle(4) → 4*4*3).
+    assert_cross_target_project(&[
+        ("almide.toml", MOD_PKG_TOML),
+        (
+            "src/shape.almd",
+            "type Shape = Circle(Int) | Square(Int)\n\
+             fn make_circle(r: Int) -> Shape = Circle(r)\n\
+             fn area(s: Shape) -> Int = match s {\n\
+             \x20 Circle(r) => r * r * 3,\n\
+             \x20 Square(w) => w * w,\n\
+             }\n",
+        ),
+        (
+            "main.almd",
+            "import self.shape\n\
+             fn main() -> Unit = {\n\
+             \x20 let c = shape.make_circle(4)\n\
+             \x20 println(int.to_string(shape.area(c)))\n\
+             }\n",
+        ),
+    ]);
+}
+
+#[test]
+fn wasm_cross_module_global_init_order_direct() {
+    // #632: an importing module's top-let reads an imported module's heap
+    // global DIRECTLY. On wasm the eager init order must place `cfg.APP_NAME`
+    // before `GREETING`, or the read hits a still-zero string header. Expected
+    // `modg` on both (was 8 NUL bytes on wasm).
+    assert_cross_target_project(&[
+        ("almide.toml", MOD_PKG_TOML),
+        ("src/cfg.almd", "let APP_NAME = \"modg\"\n"),
+        (
+            "main.almd",
+            "import self.cfg\n\
+             let GREETING = cfg.APP_NAME\n\
+             fn main() -> Unit = {\n\
+             \x20 println(GREETING)\n\
+             }\n",
+        ),
+    ]);
+}
+
+#[test]
+fn wasm_cross_module_global_init_order_through_call() {
+    // #632 (interprocedural): the importing top-let reads the imported global
+    // only THROUGH a function call (`cfg.banner()` interpolates `APP_NAME`) and
+    // a List heap global via `list.len(cfg.ITEMS)`. The init order must still
+    // place the cfg globals first. Expected `modg ok` / `3` on both.
+    assert_cross_target_project(&[
+        ("almide.toml", MOD_PKG_TOML),
+        (
+            "src/cfg.almd",
+            "let APP_NAME = \"modg\"\n\
+             let ITEMS = [10, 20, 30]\n\
+             fn banner() -> String = \"${APP_NAME} ok\"\n",
+        ),
+        (
+            "main.almd",
+            "import self.cfg\n\
+             let BANNER = cfg.banner()\n\
+             let FIRST = list.len(cfg.ITEMS)\n\
+             fn main() -> Unit = {\n\
+             \x20 println(BANNER)\n\
+             \x20 println(int.to_string(FIRST))\n\
+             }\n",
+        ),
+    ]);
+}
+
 /// Like `assert_cross_target`, but for programs whose `main` is an `effect fn`.
 /// Such a main returns `Result[Unit, _]`, and wasmtime's `_start` prints the
 /// wrapped return value (a heap pointer) as a trailing line. Compare only the
@@ -1399,4 +1477,45 @@ fn successful_main_exits_zero_both_targets() {
         assert_eq!(wc, 0, "an Ok main must exit 0 on wasm");
         assert_eq!(wout, "7");
     }
+}
+
+/// #644: an unreachable `local fn` that references a native-only matrix intrinsic
+/// must NOT break the WASM build. The reachability prune drops the dead body
+/// (and the CLI native-only pre-check, sharing the same reachability, ignores it)
+/// so the build succeeds instead of ICEing/refusing. `local` is required because
+/// Almide functions are PUBLIC by default — an exported root that is never pruned.
+#[test]
+fn dead_local_native_only_intrinsic_does_not_break_wasm_build() {
+    let bin = almide_bin();
+    if Command::new(&bin).arg("--version").output().is_err() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("dead.almd");
+    std::fs::write(
+        &src,
+        "local fn dead(h: Matrix, w: Bytes, g: List[Int]) -> Matrix = {\n  \
+           let (out, _a, _b) = matrix.qwen3_block_q1_0_kv(h, h, h, w, g, g, 0, 4, 2, 8, 16, 10000.0, 0.00001)\n  \
+           out\n}\n\
+         fn main() -> Unit = println(\"ok\")\n",
+    )
+    .unwrap();
+    let out_wasm = dir.path().join("dead.wasm");
+    let r = Command::new(&bin)
+        .args([
+            "build",
+            src.to_str().unwrap(),
+            "--target",
+            "wasm",
+            "-o",
+            out_wasm.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        r.status.success() && out_wasm.exists(),
+        "WASM build of a program with a dead native-only intrinsic should succeed (#644).\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&r.stdout),
+        String::from_utf8_lossy(&r.stderr)
+    );
 }

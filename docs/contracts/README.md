@@ -24,7 +24,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 `fixture` < `fuzz` < `exhaustive` < `lean`. An **active** contract must carry
 ≥1 evidence of class ≥ `fixture`.
 
-69 contracts
+96 contracts
 
 | ID | Contract | Since | Status | Strongest Evidence | # Fixtures |
 |----|----------|-------|--------|--------------------|-----------:|
@@ -97,4 +97,31 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-067 | The xs[i] index syntax aborts on out-of-bounds (read and write) |  | active | fixture | 1 |
 | C-068 | Auto-? is target-directed in construction positions |  | active | fixture | 2 |
 | C-069 | Effect-fn tail self-recursion loop-converts to O(1) stack on both targets |  | active | fixture | 1 |
+| C-070 | Nested constructor patterns match and bind identically on both targets |  | active | fixture | 1 |
+| C-071 | Single-part interpolation RC balance |  | active | fixture | 1 |
+| C-072 | Inferred named-record repr parity |  | active | fixture | 1 |
+| C-073 | Tuple pattern testing a variant constructor |  | active | fixture | 1 |
+| C-074 | Iterative split/replace on large inputs |  | active | fixture | 1 |
+| C-075 | lowmisc round-5 cluster: borrowed-param owning binding, effect-Option auto-try strip, matching-error ! passthrough |  | active | fixture | 1 |
+| C-076 | Producer-side in-module variant construction is target-stable |  | active | fixture | 1 |
+| C-077 | Cross-module heap-global init order is dependency-respecting |  | active | fixture | 1 |
+| C-078 | Phantom record generic param is stripped on the Rust target |  | active | fixture | 1 |
+| C-079 | Variant cases with distinct anonymous-record payloads are target-stable |  | active | fixture | 1 |
+| C-080 | Empty map.from_list / set.from_list resolves its element from the result type |  | active | fixture | 1 |
+| C-081 | Generic fn in an inferred-param lambda resolves its type parameter |  | active | fixture | 1 |
+| C-082 | Calling a closure-typed lambda parameter yields the call result, not the closure |  | active | fixture | 1 |
+| C-083 | A negated i64::MIN literal is representable, not folded to zero |  | active | fixture | 1 |
+| C-084 | Codec/value decode error messages are byte-identical across targets |  | active | fixture | 1 |
+| C-085 | Float decode widens an integral JSON number to f64 |  | active | fixture | 1 |
+| C-086 | Pass-through stdlib combinators give their result its own reference |  | active | fixture | 1 |
+| C-087 | JSON number and \\u string decoding are byte-identical across targets |  | active | fixture | 1 |
+| C-088 | A Rust-keyword function name compiles on both targets |  | active | fixture | 1 |
+| C-089 | A default parameter referencing an earlier parameter is filled with its argument |  | active | fixture | 1 |
+| C-090 | bytes.from_list on a List[Int] parameter compiles on both targets |  | active | fixture | 1 |
+| C-091 | A nested sub-pattern in let-destructuring binds every leaf |  | active | fixture | 1 |
+| C-092 | A generic record field is sized by its instantiated type at construction |  | active | fixture | 1 |
+| C-093 | Mutually-recursive variant types compile on both targets |  | active | fixture | 1 |
+| C-094 | A protocol-method UFCS call on an inferred lambda param resolves the element type |  | active | fixture | 1 |
+| C-095 | json.stringify_pretty is byte-identical indented output across targets |  | active | fixture | 1 |
+| C-096 | process.args works on WASM and matches native |  | active | fixture | 1 |
 

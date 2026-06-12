@@ -1,0 +1,19 @@
+// @contract: C-089
+// A default parameter value that references an EARLIER parameter must be filled
+// with that parameter's actual argument, byte-identical native == wasm. Defaults
+// are inlined at the call site, so emitting the callee-local name (`rect(4, w)`)
+// referenced a binding that does not exist there — rustc E0425. Lowering now
+// substitutes each earlier parameter with its argument before lowering the
+// default. #664.
+
+fn rect(w: Int, h: Int = w) -> Int = w * h
+fn pad(s: String, fill: String = s) -> String = s + fill
+fn scale(base: Int, factor: Int = 2, total: Int = base) -> Int = base * factor + total
+
+fn main() -> Unit = {
+  println(int.to_string(rect(4)))        // h defaults to w=4 → 16
+  println(int.to_string(rect(4, 5)))     // explicit h=5 → 20
+  println(pad("ab"))                      // fill defaults to s → "abab"
+  println(int.to_string(scale(10)))      // factor=2, total=base=10 → 30
+  println(int.to_string(scale(10, 3)))   // factor=3, total=base=10 → 40
+}

@@ -31,6 +31,20 @@ pub fn ty_contains_name(ty: &Ty, name: &str) -> bool {
     })
 }
 
+/// Does `ty` reference ANY type in `recursive` (a set of names that participate
+/// in a recursion cycle)? Generalizes `ty_contains_name` from direct
+/// self-recursion to MUTUAL recursion (`type A = A(B); type B = B(A)`), where a
+/// field references a *different* cycle member rather than the enclosing type's
+/// own name — without an indirection there, native rustc rejects the pair as
+/// infinitely sized (E0072) (#656). Over-inclusion only adds a harmless extra Box.
+pub fn ty_contains_any_recursive(ty: &Ty, recursive: &std::collections::HashSet<String>) -> bool {
+    ty.any_child_recursive(&|t| match t {
+        Ty::Named(n, _) => recursive.contains(n.as_str()),
+        Ty::Variant { name: vn, .. } => recursive.contains(vn.as_str()),
+        _ => false,
+    })
+}
+
 /// Check if an expression tree contains break or continue (for IIFE avoidance)
 pub fn contains_loop_control(expr: &IrExpr) -> bool {
     match &expr.kind {

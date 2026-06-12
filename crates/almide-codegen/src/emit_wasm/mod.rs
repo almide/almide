@@ -68,6 +68,7 @@ pub mod statements;
 mod functions;
 pub mod scratch;
 mod dce;
+pub(crate) mod reachability;
 
 use std::collections::HashMap;
 // BTreeMap for record_fields / variant_info: their iteration order reaches
@@ -168,6 +169,19 @@ impl CompiledFunc {
         let mut c = Self::tracked(type_idx, tf);
         c.expected_func_idx = Some(func_idx);
         c
+    }
+
+    /// A minimal trapping body for `type_idx`: `unreachable; end`. Valid for ANY
+    /// signature (`unreachable` is stack-polymorphic). Used by the #644
+    /// reachability prune to occupy the slot of an unreachable function whose
+    /// real body would panic the emitter (native-only intrinsic), and matched by
+    /// the post-compile DCE stub shape. `call_targets` is empty so DCE sees no
+    /// outgoing edges from it.
+    pub fn trap_stub(type_idx: u32) -> Self {
+        let mut tf = TrackedFunction::new([]);
+        tf.instruction(&wasm_encoder::Instruction::Unreachable);
+        tf.instruction(&wasm_encoder::Instruction::End);
+        Self::tracked(type_idx, tf)
     }
 }
 
@@ -345,6 +359,7 @@ pub struct RuntimeFuncs {
     pub hex_decode: u32,
     pub string: StringRuntime,
     pub value_stringify: u32,
+    pub json_stringify_pretty: u32,
     pub json_escape_string: u32,
     pub json_parse: u32,
     pub json_parse_at: u32,
@@ -368,6 +383,10 @@ pub struct RuntimeFuncs {
     pub fd_readdir: u32,
     pub fd_prestat_get: u32,
     pub fd_prestat_dir_name: u32,
+    /// args_sizes_get(argc_ptr, argv_buf_size_ptr) -> errno — WASI argv discovery (process.args).
+    pub args_sizes_get: u32,
+    /// args_get(argv_ptr, argv_buf_ptr) -> errno — fills the pointer array + NUL-terminated arg strings.
+    pub args_get: u32,
     /// __resolve_path(path_ptr, path_len) → (fd, rel_path_ptr, rel_path_len)
     /// Resolves absolute/relative paths against preopened directories.
     pub resolve_path: u32,
@@ -480,6 +499,12 @@ pub struct WasmEmitter {
 
     // Type info: record/variant name → field list (for field offset computation)
     pub record_fields: BTreeMap<String, Vec<(String, almide_lang::types::Ty)>>,
+    // Declared RECORD types keyed by their SORTED field-name set → type name.
+    // Mirrors the native walker's `named_records` (declarations.rs): a record
+    // LITERAL inferred without annotation keeps its structural `Ty::Record`, but
+    // its repr must adopt the declared nominal type's name + declaration field
+    // order to stay byte-identical with native (#627). Excludes variant cases.
+    pub named_records: BTreeMap<Vec<String>, String>,
     // Variant info: variant type name → list of (case_name, tag, fields)
     pub variant_info: BTreeMap<String, Vec<VariantCase>>,
     // Default field values: (type_name, field_name) → default IR expr
@@ -620,6 +645,7 @@ impl WasmEmitter {
                     capitalize: 0,
                 },
                 value_stringify: 0,
+                json_stringify_pretty: 0,
                 json_escape_string: 0,
                 json_parse: 0,
                 json_parse_at: 0,
@@ -643,6 +669,8 @@ impl WasmEmitter {
                 fd_readdir: 0,
                 fd_prestat_get: 0,
                 fd_prestat_dir_name: 0,
+                args_sizes_get: 0,
+                args_get: 0,
                 resolve_path: 0,
                 init_preopen_dirs: 0,
                 dragon: rt_dragon::DragonRuntime::default(),
@@ -663,6 +691,7 @@ impl WasmEmitter {
             func_table: Vec::new(),
             func_to_table_idx: HashMap::new(),
             record_fields: BTreeMap::new(),
+            named_records: BTreeMap::new(),
             variant_info: BTreeMap::new(),
             default_fields: HashMap::new(),
             lambdas: Vec::new(),
@@ -1193,6 +1222,28 @@ pub(crate) fn emit(program: &IrProgram) -> Vec<u8> {
         type_idx: fd_readdir_type_idx,
     });
 
+    // Import args_sizes_get: (argc_ptr: i32, argv_buf_size_ptr: i32) -> errno
+    let args_sizes_get_type_idx = emitter.register_type(
+        vec![ValType::I32, ValType::I32],
+        vec![ValType::I32],
+    );
+    emitter.imports.push(ImportInfo {
+        module: "wasi_snapshot_preview1".to_string(),
+        name: "args_sizes_get".to_string(),
+        type_idx: args_sizes_get_type_idx,
+    });
+
+    // Import args_get: (argv_ptr: i32, argv_buf_ptr: i32) -> errno
+    let args_get_type_idx = emitter.register_type(
+        vec![ValType::I32, ValType::I32],
+        vec![ValType::I32],
+    );
+    emitter.imports.push(ImportInfo {
+        module: "wasi_snapshot_preview1".to_string(),
+        name: "args_get".to_string(),
+        type_idx: args_get_type_idx,
+    });
+
     // Step 1b: @extern(wasm, ...) imports — must be registered before any
     // defined functions so import indices are contiguous at the start.
     // Scan both program.functions and module functions.
@@ -1275,6 +1326,11 @@ pub(crate) fn emit(program: &IrProgram) -> Vec<u8> {
                 let field_list: Vec<(String, almide_lang::types::Ty)> = fields.iter()
                     .map(|f| (f.name.to_string(), f.ty.clone()))
                     .collect();
+                // Index by sorted field-name set so a structural record literal
+                // can recover its declared nominal name (mirrors native, #627).
+                let mut sorted_names: Vec<String> = fields.iter().map(|f| f.name.to_string()).collect();
+                sorted_names.sort();
+                emitter.named_records.insert(sorted_names, td.name.to_string());
                 emitter.record_fields.insert(td.name.to_string(), field_list);
             }
             almide_ir::IrTypeDeclKind::Variant { cases, .. } => {
@@ -1604,10 +1660,36 @@ pub(crate) fn emit(program: &IrProgram) -> Vec<u8> {
         None
     };
 
+    // Phase 1.9: Reachability prune (#644). Compute which user/module function
+    // bodies the entry surface can actually reach, BEFORE any body (or the
+    // lambdas inside it) is scanned/compiled. The post-compile
+    // `dce::eliminate_dead_code` cannot help here: an unreachable body that
+    // references a native-only intrinsic (e.g. a matrix Q8 op with no WASM
+    // runtime) PANICS the emitter while *compiling* it, long before DCE runs. So
+    // unreachable bodies are emitted as `unreachable` stubs instead of compiled —
+    // they can never be called, and the native target already drops them (the
+    // Rust linker discards the dead fn). Roots: `main`, every exported `pub fn`,
+    // every test (the test runner calls them), and every fn named by a top-level
+    // `let` initializer (run by `__init_globals`). The set OVER-approximates
+    // reachability (see reachability.rs), so a body is stubbed only when truly
+    // unreachable. Computed before `pre_scan_closures` so that pass can skip the
+    // lambdas of dead functions too (their bodies can equally hit a native-only
+    // intrinsic) while keeping the lambda-table index aligned with
+    // `compile_lambda_bodies` (both consult the SAME set, same iteration order).
+    // Shared with the CLI native-only-op pre-check (lib.rs) so both agree which
+    // bodies are dead — an unreachable native-only intrinsic must neither ICE the
+    // emit nor fail the pre-check (#644).
+    let reachable_fns = reachability::reachable_fn_names(program);
+    // True iff a function registered under `keys` is reachable (any spelling).
+    let is_reachable = |keys: &[String]| keys.iter().any(|k| reachable_fns.contains(k));
+
     // Pre-scan for lambdas and FnRefs — only these need element table entries.
     // (Previously all user functions were added unconditionally, bloating the
     // element table and preventing DCE from eliminating unused functions.)
-    closures::pre_scan_closures(program, &mut emitter);
+    // Lambdas of unreachable functions (#644) get no table slot / body —
+    // `compile_lambda_bodies` applies the identical reachable-fn filter to keep
+    // the `emitter.lambdas[i]` ↔ body index alignment (Closure v2 P0).
+    closures::pre_scan_closures(program, &mut emitter, &reachable_fns);
 
     // Pre-register variant deep-equality functions (must be before compilation starts)
     register_variant_eq_funcs(&mut emitter);
@@ -1629,10 +1711,17 @@ pub(crate) fn emit(program: &IrProgram) -> Vec<u8> {
             continue;
         }
         let type_idx = user_meta[user_idx];
-        // Pass init_globals_idx to main function so top-level lets get initialized
-        let is_main = func.name == "main" && !func.is_test;
-        let init_idx = if is_main { init_globals_idx } else { None };
-        let compiled = functions::compile_function_with_init(&mut emitter, func, &program.var_table, type_idx, init_idx);
+        // #644: unreachable top-level fns are emitted as trapping stubs — their
+        // real body may reference a native-only intrinsic that would panic emit.
+        // `main`/tests/exports are roots, so they are always reachable here.
+        let compiled = if is_reachable(&reachability::registered_keys(None, func.name.as_str())) {
+            // Pass init_globals_idx to main function so top-level lets get initialized
+            let is_main = func.name == "main" && !func.is_test;
+            let init_idx = if is_main { init_globals_idx } else { None };
+            functions::compile_function_with_init(&mut emitter, func, &program.var_table, type_idx, init_idx)
+        } else {
+            CompiledFunc::trap_stub(type_idx)
+        };
         emitter.add_compiled(compiled);
         user_idx += 1;
     }
@@ -1643,7 +1732,15 @@ pub(crate) fn emit(program: &IrProgram) -> Vec<u8> {
         let module = &program.modules[mi];
         let func = &module.functions[fi];
         let mod_name = module.name.to_string();
-        let compiled = functions::compile_module_function(&mut emitter, func, &program.var_table, type_idx, &mod_name);
+        // #644: a merely-imported module's unused fns (e.g. tensor loaders that
+        // call native-only matrix intrinsics) are stubbed when unreachable, so
+        // importing such a module no longer forces WASM-compiling code the entry
+        // never runs — the exact import-graph trap from the issue.
+        let compiled = if is_reachable(&reachability::registered_keys(Some(&mod_name), func.name.as_str())) {
+            functions::compile_module_function(&mut emitter, func, &program.var_table, type_idx, &mod_name)
+        } else {
+            CompiledFunc::trap_stub(type_idx)
+        };
         emitter.add_compiled(compiled);
     }
 
@@ -1678,7 +1775,7 @@ pub(crate) fn emit(program: &IrProgram) -> Vec<u8> {
     }
 
     // Lambda bodies and FnRef wrappers
-    closures::compile_lambda_bodies(program, &mut emitter);
+    closures::compile_lambda_bodies(program, &mut emitter, &reachable_fns);
 
     // Compile variant deep-equality functions (bodies, after all user code)
     compile_variant_eq_funcs(&mut emitter, &program.var_table);
@@ -2058,18 +2155,26 @@ fn assemble(emitter: &mut WasmEmitter) -> Vec<u8> {
 /// Compile the __init_globals function.
 #[allow(dead_code)] // Will be activated when top-let WASM codegen is wired up
 fn compile_init_globals(emitter: &mut WasmEmitter, program: &IrProgram) {
-    // C-007 by construction (§4 stage 3): this function's emission order
-    // (root top-lets, then per-module) must BE `global_init_order` — the
-    // same vector the native main wrapper derives its eager forces from.
-    // Asserted rather than re-derived: a future reorder of either side
-    // becomes a build failure, not an eager-vs-init cross-target drift.
+    // C-007 by construction (§4 stage 3): this function evaluates every
+    // top-let initializer EXACTLY in `global_init_order` — the same vector the
+    // native main wrapper derives its eager forces from. The order is
+    // dependency-respecting (#632): an imported module's heap global is
+    // initialized before any importing top-let reads it. We index the
+    // initializers by VarId (root + every module flatten into
+    // `program.var_table` via UnifyVarTablesPass) and emit in that one order,
+    // so a reorder of either side stays a single source of truth, not an
+    // eager-vs-init cross-target drift.
+    let init_exprs: HashMap<u32, &almide_ir::IrExpr> = program.top_lets.iter()
+        .map(|tl| (tl.var.0, &tl.value))
+        .chain(program.modules.iter().flat_map(|m| m.top_lets.iter().map(|tl| (tl.var.0, &tl.value))))
+        .collect();
     {
-        let emitted: Vec<almide_ir::VarId> = program.top_lets.iter().map(|tl| tl.var)
-            .chain(program.modules.iter().flat_map(|m| m.top_lets.iter().map(|tl| tl.var)))
-            .collect();
-        assert_eq!(
-            emitted, program.codegen_annotations.global_init_order,
-            "[COMPILER BUG] __init_globals emission order diverged from global_init_order (C-007)"
+        // Every decl in the order must have a known initializer, and the order
+        // must cover exactly the declared top-lets — else the emission would
+        // silently skip or double-init a global.
+        debug_assert_eq!(
+            program.codegen_annotations.global_init_order.len(), init_exprs.len(),
+            "[COMPILER BUG] global_init_order does not cover the declared top-lets (C-007)"
         );
     }
     let void_type = emitter.register_type(vec![], vec![]);
@@ -2102,57 +2207,31 @@ fn compile_init_globals(emitter: &mut WasmEmitter, program: &IrProgram) {
             depth: 0,
             loop_stack: Vec::new(),
             scratch: scratch_alloc,
+            // UnifyVarTablesPass flattens every module top-let VarId into the
+            // root var_table, so one table resolves both root and module decls.
             var_table: &program.var_table,
             stub_ret_ty: Ty::Unit,
             current_module_name: None,
         };
 
-        for tl in &program.top_lets {
-            compiler.emit_expr(&tl.value);
-            if let Some(&(global_idx, _)) = compiler.emitter.top_let_globals.get(&tl.var.0) {
+        // Emit each initializer in dependency-respecting `global_init_order`
+        // (#632), so an imported module's heap global is set before any
+        // importing top-let reads it.
+        for &decl in &program.codegen_annotations.global_init_order {
+            let Some(&value) = init_exprs.get(&decl.0) else { continue };
+            compiler.emit_expr(value);
+            if let Some(&(global_idx, _)) = compiler.emitter.top_let_globals.get(&decl.0) {
                 compiler.func.instruction(&wasm_encoder::Instruction::GlobalSet(global_idx));
+            } else if let Some(&(global_idx, _)) = compiler.emitter.top_let_globals_by_name
+                .get(program.var_table.get(decl).name.as_str())
+            {
+                compiler.func.instruction(&wasm_encoder::Instruction::GlobalSet(global_idx));
+            } else {
+                compiler.func.instruction(&wasm_encoder::Instruction::Drop);
             }
         }
-        // Also initialize cross-module top_lets via name lookup (their VarIds
-        // belong to per-module var_tables, so id-keyed top_let_globals can't
-        // resolve them; we use the prefixed name set up at registration time).
         compiler.func
     };
-    // Append module top_let initializers to the same function body. Each
-    // module needs its own var_table for the FuncCompiler ctx, so we re-build
-    // a compiler per module and append instructions.
-    let mut compiled_func = compiled_func;
-    for module in &program.modules {
-        if module.top_lets.is_empty() { continue; }
-        let mut scratch_alloc = scratch::ScratchAllocator::new();
-        scratch_alloc.set_bases_with_capacity(scratch_i32_base, scratch_i32_cap, scratch_i64_base, scratch_i64_cap, scratch_f64_base, scratch_f64_cap);
-        scratch_alloc.set_v128_base(scratch_v128_base);
-        let mut mc = FuncCompiler {
-            emitter: &mut *emitter,
-            func: compiled_func,
-            var_map: HashMap::new(),
-            depth: 0,
-            loop_stack: Vec::new(),
-            scratch: scratch_alloc,
-            var_table: &program.var_table,
-            stub_ret_ty: Ty::Unit,
-            current_module_name: None,
-        };
-        for tl in &module.top_lets {
-            mc.emit_expr(&tl.value);
-            // Module top-let VarIds now index into `program.var_table`
-            // thanks to `UnifyVarTablesPass`, so the id-keyed map is
-            // the primary lookup; the name-keyed mirror is a backup.
-            if let Some(&(global_idx, _)) = mc.emitter.top_let_globals.get(&tl.var.0) {
-                mc.func.instruction(&wasm_encoder::Instruction::GlobalSet(global_idx));
-            } else if let Some(&(global_idx, _)) = mc.emitter.top_let_globals_by_name.get(program.var_table.get(tl.var).name.as_str()) {
-                mc.func.instruction(&wasm_encoder::Instruction::GlobalSet(global_idx));
-            } else {
-                mc.func.instruction(&wasm_encoder::Instruction::Drop);
-            }
-        }
-        compiled_func = mc.func;
-    }
     let compiled_func = {
         let mut f = compiled_func;
         f.instruction(&wasm_encoder::Instruction::End);

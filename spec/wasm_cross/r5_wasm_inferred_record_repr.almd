@@ -1,0 +1,43 @@
+// @contract: C-072
+// Cross-target repr of a NAMED record inferred without an annotation (#627).
+//
+// A record literal with no type annotation keeps its structural `Ty::Record` in
+// the IR. Native's checker resolves that structural shape to the unique declared
+// record type by sorted field-name set and reprs it nominally — `Rec { … }` in
+// DECLARATION field order. WASM used to treat it as anonymous: no type-name
+// prefix and ALPHABETICAL field order, diverging two ways.
+//
+// The fix mirrors native: WASM indexes declared records by their sorted
+// field-name set (`named_records`) and, on a match, renders the type name +
+// declaration order while still loading each field VALUE from its real layout
+// offset (so a literal written out of declaration order reads correct values).
+// A truly anonymous record (no matching declared type) stays prefix-less and
+// sorted, identical on both targets.
+
+type Rec   = { zeta: Int, alpha: Int, mid: Int }
+type Point = { x: Int, y: Int }
+
+fn main() -> Unit = {
+  // Inferred, literal in declaration order.
+  let a = { zeta: 1, alpha: 2, mid: 3 }
+  println("${a}")
+
+  // Inferred, literal written OUT of declaration order: values must stay correct.
+  let b = { alpha: 2, mid: 3, zeta: 1 }
+  println("${b}")
+
+  // Explicit annotation (already matched): keep parity.
+  let c: Rec = { zeta: 7, alpha: 8, mid: 9 }
+  println("${c}")
+
+  // Inside a list.
+  println("${[a]}")
+
+  // A different declared record type.
+  let p = { y: 20, x: 10 }
+  println("${p}")
+
+  // Truly anonymous (no declared type with these fields): prefix-less + sorted.
+  let anon = { foo: 1, bar: 2 }
+  println("${anon}")
+}

@@ -5,13 +5,16 @@ use almide_ir::*;
 use almide_lang::types::Ty;
 use super::RenderContext;
 use super::types::render_type;
-use super::helpers::{template_or, ty_contains_name, render_type_field_fn};
+use super::helpers::{template_or, render_type_field_fn};
 
 pub fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
     let decl_attrs: Vec<&str> = if ctx.repr_c { vec!["repr_c"] } else { vec![] };
 
     // Build generics string e.g. "<T>" or "<T, U>"
-    let generics_str = if let Some(generics) = &td.generics {
+    let generics_str = if ctx.ann.phantom_param_structs.contains(td.name.as_str()) {
+        // All params phantom (#621): drop them so Rust doesn't reject E0392.
+        String::new()
+    } else if let Some(generics) = &td.generics {
         if generics.is_empty() {
             String::new()
         } else {
@@ -74,7 +77,9 @@ pub fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
                             // Closure payloads (direct or nested in a container) use
                             // Rc<dyn Fn> — same as a struct field.
                             let rendered = render_type_field_fn(ctx, t);
-                            if is_recursive && ty_contains_name(t, &td.name) { format!("std::boxed::Box<{}>", rendered) } else { rendered }
+                            // Box a field referencing ANY cycle member (mutual recursion), not
+                            // just the enclosing type's own name (#656).
+                            if is_recursive && super::ty_contains_any_recursive(t, &ctx.ann.recursive_enums) { format!("std::boxed::Box<{}>", rendered) } else { rendered }
                         }).collect();
                         let fields_str = types.join(", ");
                         // Named params via fn_param template (respects JS/TS)
@@ -95,7 +100,7 @@ pub fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
                         let fields_str = fields.iter()
                             .map(|f| {
                                 let rendered = render_type_field_fn(ctx, &f.ty);
-                                let boxed = if ctx.ann.recursive_enums.contains(&*td.name) && ty_contains_name(&f.ty, &td.name) {
+                                let boxed = if ctx.ann.recursive_enums.contains(&*td.name) && super::ty_contains_any_recursive(&f.ty, &ctx.ann.recursive_enums) {
                                     format!("std::boxed::Box<{}>", rendered)
                                 } else {
                                     rendered
@@ -213,7 +218,10 @@ fn render_repr_impl(ctx: &RenderContext, td: &IrTypeDecl) -> Option<String> {
     // reprs compose; rendering them through the same template keeps the impl
     // bounds in lock-step with the type decl (Rust requires the impl to satisfy
     // every bound the type definition declares).
-    let (impl_generics, target_args) = match td.generics.as_ref().filter(|g| !g.is_empty()) {
+    // A fully-phantom record (#621) has its generics stripped from the struct,
+    // so its impl must be ungenerified too (`impl AlmideRepr for Tagged`).
+    let phantom = ctx.ann.phantom_param_structs.contains(td.name.as_str());
+    let (impl_generics, target_args) = match td.generics.as_ref().filter(|g| !g.is_empty() && !phantom) {
         Some(generics) => {
             let impl_bounds = generics.iter().map(|g| {
                 // The type DEFINITION declares each param via `generic_bound`
@@ -340,6 +348,15 @@ pub fn collect_anon_records(program: &IrProgram, named: &HashMap<Vec<String>, St
     let named_set: HashSet<Vec<String>> = named.keys().cloned().collect();
     let mut seen: HashSet<Vec<String>> = HashSet::new();
 
+    // Collect from TYPE DECLARATIONS — a variant case payload or record field
+    // whose type is an anonymous record (e.g. `| Square({ s: Int })`) may NEVER
+    // be constructed in the program, so it is reachable only here; without this
+    // its struct goes unregistered and `render_type` falls back to emitting the
+    // bare field name as a type → `Square(s)` → rustc E0425 (#628).
+    for td in program.type_decls.iter().chain(program.modules.iter().flat_map(|m| m.type_decls.iter())) {
+        collect_anon_from_type_decl(td, &named_set, &mut seen);
+    }
+
     // Collect from all types AND expressions in the program
     for func in &program.functions {
         for p in &func.params { collect_anon_from_ty(&p.ty, &named_set, &mut seen); }
@@ -371,6 +388,30 @@ pub fn collect_anon_records(program: &IrProgram, named: &HashMap<Vec<String>, St
         map.insert(key, name);
     }
     map
+}
+
+/// Descend a type declaration's field / variant-payload types, registering any
+/// anonymous record reachable only from the declaration (never constructed).
+fn collect_anon_from_type_decl(td: &IrTypeDecl, named: &HashSet<Vec<String>>, seen: &mut HashSet<Vec<String>>) {
+    match &td.kind {
+        IrTypeDeclKind::Record { fields } => {
+            for f in fields { collect_anon_from_ty(&f.ty, named, seen); }
+        }
+        IrTypeDeclKind::Variant { cases, .. } => {
+            for c in cases {
+                match &c.kind {
+                    IrVariantKind::Unit => {}
+                    IrVariantKind::Tuple { fields } => {
+                        for t in fields { collect_anon_from_ty(t, named, seen); }
+                    }
+                    IrVariantKind::Record { fields } => {
+                        for f in fields { collect_anon_from_ty(&f.ty, named, seen); }
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
 }
 
 fn collect_anon_from_expr(expr: &IrExpr, named: &HashSet<Vec<String>>, seen: &mut HashSet<Vec<String>>) {
@@ -541,6 +582,42 @@ pub(super) fn compute_eq_blocked_types(type_decls: &[IrTypeDecl]) -> HashSet<Str
         if !changed { break }
     }
     blocked
+}
+
+/// True when `name` (a generic param) appears anywhere in `ty`, as either a
+/// `TypeVar` or a `Named` reference (lowering may leave either spelling).
+fn ty_mentions_param(ty: &Ty, name: &str) -> bool {
+    match ty {
+        Ty::TypeVar(n) => n.as_str() == name,
+        Ty::Named(n, args) => n.as_str() == name || args.iter().any(|a| ty_mentions_param(a, name)),
+        Ty::Applied(_, args) => args.iter().any(|a| ty_mentions_param(a, name)),
+        Ty::Tuple(elems) => elems.iter().any(|e| ty_mentions_param(e, name)),
+        Ty::Fn { params, ret } => params.iter().any(|p| ty_mentions_param(p, name)) || ty_mentions_param(ret, name),
+        Ty::Record { fields } | Ty::OpenRecord { fields } => fields.iter().any(|(_, t)| ty_mentions_param(t, name)),
+        _ => false,
+    }
+}
+
+/// Record types declaring generic params NONE of which are referenced by any
+/// field — Rust's `error[E0392]` rejects such an unused param, so we strip the
+/// generics from the emitted struct and from every reference to it (#621).
+/// Only fully-phantom records qualify: a partly-used param list still needs its
+/// (used) params, so it is left alone here.
+pub(super) fn compute_phantom_param_structs(type_decls: &[IrTypeDecl]) -> HashSet<String> {
+    let mut out = HashSet::new();
+    for td in type_decls {
+        let Some(generics) = &td.generics else { continue };
+        if generics.is_empty() { continue }
+        let IrTypeDeclKind::Record { fields } = &td.kind else { continue };
+        let any_used = generics.iter().any(|g| {
+            let pname = g.name.as_str();
+            fields.iter().any(|f| ty_mentions_param(&f.ty, pname))
+        });
+        if !any_used {
+            out.insert(td.name.to_string());
+        }
+    }
+    out
 }
 
 thread_local! {

@@ -232,11 +232,36 @@ pub fn program_uses_native_only_matrix_on_wasm(program: &IrProgram) -> Option<&'
             walk_stmt(self, stmt);
         }
     }
+    // Only REACHABLE bodies can block the build: an unreachable native-only op
+    // (e.g. in an imported module's unused fn) is pruned by the WASM emitter, so it
+    // must not fail the build. Uses the SAME reachability the emitter prunes by, so
+    // the pre-check and the emit agree (#644).
+    let reachable = emit_wasm::reachability::reachable_fn_names(program);
+    let is_reachable = |module: Option<&str>, name: &str| {
+        emit_wasm::reachability::registered_keys(module, name)
+            .iter()
+            .any(|k| reachable.contains(k))
+    };
     let mut scan = Scan { found: None };
     for func in &program.functions {
+        if !is_reachable(None, func.name.as_str()) {
+            continue;
+        }
         scan.visit_expr(&func.body);
         if scan.found.is_some() {
             return scan.found;
+        }
+    }
+    for m in &program.modules {
+        let mname = m.name.to_string();
+        for func in &m.functions {
+            if !is_reachable(Some(&mname), func.name.as_str()) {
+                continue;
+            }
+            scan.visit_expr(&func.body);
+            if scan.found.is_some() {
+                return scan.found;
+            }
         }
     }
     None

@@ -1,0 +1,7 @@
+// Annotating the binding pins the error type, so or_else resolves to a concrete
+// Result[Int, String] and the program compiles + runs on both targets.
+fn main() -> Unit = {
+  let r0: Result[Int, String] = ok(7)
+  let r: Result[Int, String] = result.or_else(r0, (e) => ok(0))
+  println("done")
+}

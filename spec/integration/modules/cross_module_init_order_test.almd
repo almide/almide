@@ -1,0 +1,23 @@
+// #632: an importing module's top-let reads an imported module's heap global —
+// directly (`letlib.GREETING`) AND through a function call
+// (`letlib.welcome()`, which reads `letlib.GREETING` internally). The imported
+// module's globals must be initialized BEFORE these top-lets. On wasm the eager
+// init order previously ran the importing top-lets first, reading still-zero
+// heap headers (empty string / list len 0); native (lazy) was correct.
+import letlib
+
+let DIRECT = letlib.GREETING
+let VIA_FN = letlib.welcome()
+let NUM_COUNT = list.len(letlib.NUMBERS)
+
+test "cross-module top-let direct heap-global read at init (#632)" {
+  assert_eq(DIRECT, "hello")
+}
+
+test "cross-module top-let read through a fn call at init (#632)" {
+  assert_eq(VIA_FN, "hello world")
+}
+
+test "cross-module top-let List heap-global read at init (#632)" {
+  assert_eq(NUM_COUNT, 3)
+}

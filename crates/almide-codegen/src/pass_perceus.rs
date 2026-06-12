@@ -767,6 +767,20 @@ pub(crate) fn yields_borrowed_alias(e: &IrExpr) -> bool {
             )
         }
 
+        // ── Degenerate single-part interpolation: aliases its only part ──
+        // The WASM emitter short-circuits a 1-part `"${e}"` and returns `e`'s
+        // pointer directly (no fresh alloc — `emit_string_interp`). When that
+        // part is a heap String alias (`"${s}"` for a bound `s`), the result
+        // shares `s`'s reference, so the binding needs its own +1 or its
+        // scope-end Dec double-frees `s`'s buffer at teardown (#622). A literal
+        // part, or a non-String part (Int/Bool/Float → a fresh `__int_to_string`
+        // etc.), is genuinely fresh and stays classified below.
+        StringInterp { parts } if parts.len() == 1 => {
+            matches!(&parts[0],
+                IrStringPart::Expr { expr }
+                    if expr.ty == Ty::String && yields_borrowed_alias(expr))
+        }
+
         // ── Tail-yielding forms: alias iff any tail can alias ──
         Match { arms, .. } => arms.iter().any(|a| yields_borrowed_alias(&a.body)),
         If { then, else_, .. } =>

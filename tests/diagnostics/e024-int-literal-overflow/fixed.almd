@@ -1,0 +1,8 @@
+// The fix: use a literal within the type's range, or a wider/unsigned type for
+// a larger magnitude. `UInt64` reaches 18446744073709551615; the negated
+// `i64::MIN` magnitude is valid as a signed value.
+fn main() -> Unit = {
+  let big: UInt64 = 9223372036854775808
+  let lo: Int = -9223372036854775808
+  println("${uint64.to_string(big)} ${int.to_string(lo)}")
+}

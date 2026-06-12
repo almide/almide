@@ -1,0 +1,30 @@
+// @contract: C-084
+// Codec/value decode error messages must be byte-identical across targets. The
+// WASM emitter hard-coded lowercase type names ("expected float", "key not
+// found") while the native oracle (runtime/rs/src/value.rs) uses the Value
+// variant names and an interpolated field name ("expected Float", "missing
+// field 'y'"). #657.
+import json
+
+type Point: Codec = { x: Int, y: Float }
+
+fn main() -> Unit = {
+  // Missing required field 'y' → "missing field 'y'" (field name interpolated).
+  let missing = json.parse("{\"x\": 1}") ?? json.null()
+  println(match Point.decode(missing) { ok(_) => "ok", err(e) => e })
+
+  // Wrong type: x is a string where an Int is required → "expected Int".
+  let wrong = json.parse("{\"x\": \"nope\", \"y\": 2.0}") ?? json.null()
+  println(match Point.decode(wrong) { ok(_) => "ok", err(e) => e })
+
+  // Decoding a non-object → "expected Object".
+  let notobj = json.parse("42") ?? json.null()
+  println(match Point.decode(notobj) { ok(_) => "ok", err(e) => e })
+
+  // Direct value.as_* type-mismatch errors mirror the native variant names.
+  let s = json.parse("\"hi\"") ?? json.null()
+  println(match value.as_int(s) { ok(_) => "ok", err(e) => e })
+  println(match value.as_bool(s) { ok(_) => "ok", err(e) => e })
+  let n = json.parse("5") ?? json.null()
+  println(match value.as_string(n) { ok(_) => "ok", err(e) => e })
+}

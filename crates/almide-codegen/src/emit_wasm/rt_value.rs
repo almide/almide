@@ -91,6 +91,10 @@ pub(super) fn register(emitter: &mut WasmEmitter) {
     // Register at end to avoid shifting existing function indices
     let esc_ty = emitter.register_type(vec![ValType::I32], vec![ValType::I32]);
     emitter.rt.json_escape_string = emitter.register_func("__json_escape_string", esc_ty);
+
+    // __json_stringify_pretty(v: i32, depth: i32) -> i32 (String ptr)
+    let pretty_ty = emitter.register_type(vec![ValType::I32, ValType::I32], vec![ValType::I32]);
+    emitter.rt.json_stringify_pretty = emitter.register_func("__json_stringify_pretty", pretty_ty);
 }
 
 /// Compile all runtime function bodies.
@@ -101,6 +105,9 @@ pub(super) fn compile(emitter: &mut WasmEmitter) {
     compile_json_set_path(emitter);
     compile_json_remove_path(emitter);
     compile_json_escape_string(emitter);
+    // MUST be compiled in the same order it was registered (last) — the emitter
+    // matches compiled bodies to registered func indices positionally (#526).
+    compile_json_stringify_pretty(emitter);
 }
 
 /// __json_escape_string(str_ptr: i32) -> i32
@@ -298,6 +305,146 @@ fn compile_value_stringify(emitter: &mut WasmEmitter) {
     emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.value_stringify, type_idx, f));
 }
 
+/// __json_stringify_pretty(v: i32, depth: i32) -> i32 (String ptr)
+///
+/// Mirrors native runtime/rs/src/json.rs `stringify_value(v, depth)`:
+///   2-space indent per depth level; arrays render
+///   `[\n{ind1}elem,\n...{ind}]`, objects `{\n{ind1}"k": v,\n...{ind}}`,
+///   empty containers collapse to `[]`/`{}`, and ALL scalars (null/bool/int/
+///   float/string) delegate to __value_stringify so escape/number formatting
+///   is byte-identical with the compact path (and with native's common case).
+fn compile_json_stringify_pretty(emitter: &mut WasmEmitter) {
+    let type_idx = emitter.func_type_indices[&emitter.rt.json_stringify_pretty];
+
+    let two_sp = emitter.intern_string("  ");
+    let nl_str = emitter.intern_string("\n");
+    let comma_nl = emitter.intern_string(",\n");
+    let open_bracket = emitter.intern_string("[");
+    let close_bracket = emitter.intern_string("]");
+    let open_brace = emitter.intern_string("{");
+    let close_brace = emitter.intern_string("}");
+    let quote_str = emitter.intern_string("\"");
+    let colon_sp = emitter.intern_string(": ");
+    let empty_arr_str = emitter.intern_string("[]");
+    let empty_obj_str = emitter.intern_string("{}");
+
+    let concat = emitter.rt.concat_str;
+    let repeat = emitter.rt.string.repeat;
+    let stringify_fn = emitter.rt.value_stringify;
+    let pretty_fn = emitter.rt.json_stringify_pretty;
+    let escape_fn = emitter.rt.json_escape_string;
+
+    // Locals (params 0=v, 1=depth):
+    //   2=tag, 3=result(acc), 4=ind, 5=ind1, 6=list_ptr, 7=len, 8=i,
+    //   9=elem_str/tuple_ptr, 10=tmp
+    let mut f = Function::new([(9, ValType::I32)]);
+
+    // Load tag.
+    wasm!(f, { local_get(0); i32_load(0); local_set(2); });
+
+    // Scalars (tag <= 4): delegate to __value_stringify (byte-identical to
+    // compact; native pretty also emits the same scalar text).
+    wasm!(f, {
+        local_get(2); i32_const(5); i32_lt_u;
+        if_empty;
+          local_get(0); call(stringify_fn); return_;
+        end;
+    });
+
+    // Build indentation strings: ind = "  ".repeat(depth), ind1 = "  ".repeat(depth+1).
+    wasm!(f, {
+        i32_const(two_sp as i32); local_get(1); call(repeat); local_set(4);
+        i32_const(two_sp as i32); local_get(1); i32_const(1); i32_add; call(repeat); local_set(5);
+    });
+
+    // Tag 5: array.
+    wasm!(f, {
+        local_get(2); i32_const(5); i32_eq;
+        if_empty;
+          local_get(0); i32_load(4); local_set(6);
+          local_get(6); i32_load(0); local_set(7);
+          local_get(7); i32_eqz;
+          if_empty; i32_const(empty_arr_str as i32); return_; end;
+          // result = "[\n"
+          i32_const(open_bracket as i32); i32_const(nl_str as i32); call(concat); local_set(3);
+          i32_const(0); local_set(8);
+    });
+    wasm!(f, {
+          block_empty; loop_empty;
+            local_get(8); local_get(7); i32_ge_u; br_if(1);
+            // separator before all but the first element
+            local_get(8); i32_const(0); i32_gt_u;
+            if_empty;
+              local_get(3); i32_const(comma_nl as i32); call(concat); local_set(3);
+            end;
+            // result += ind1
+            local_get(3); local_get(5); call(concat); local_set(3);
+            // result += pretty(elem, depth+1)
+            local_get(6); i32_const(list_data_off()); i32_add;
+            local_get(8); i32_const(4); i32_mul; i32_add;
+            i32_load(0);
+            local_get(1); i32_const(1); i32_add;
+            call(pretty_fn); local_set(9);
+            local_get(3); local_get(9); call(concat); local_set(3);
+            local_get(8); i32_const(1); i32_add; local_set(8);
+            br(0);
+          end; end;
+          // result += "\n" + ind + "]"
+          local_get(3); i32_const(nl_str as i32); call(concat); local_set(3);
+          local_get(3); local_get(4); call(concat); local_set(3);
+          local_get(3); i32_const(close_bracket as i32); call(concat); return_;
+        end;
+    });
+
+    // Tag 6: object.
+    wasm!(f, {
+        local_get(2); i32_const(6); i32_eq;
+        if_empty;
+          local_get(0); i32_load(4); local_set(6);
+          local_get(6); i32_load(0); local_set(7);
+          local_get(7); i32_eqz;
+          if_empty; i32_const(empty_obj_str as i32); return_; end;
+          i32_const(open_brace as i32); i32_const(nl_str as i32); call(concat); local_set(3);
+          i32_const(0); local_set(8);
+    });
+    wasm!(f, {
+          block_empty; loop_empty;
+            local_get(8); local_get(7); i32_ge_u; br_if(1);
+            // load tuple ptr [key_str_ptr][value_ptr]
+            local_get(6); i32_const(list_data_off()); i32_add;
+            local_get(8); i32_const(4); i32_mul; i32_add;
+            i32_load(0); local_set(9);
+            local_get(8); i32_const(0); i32_gt_u;
+            if_empty;
+              local_get(3); i32_const(comma_nl as i32); call(concat); local_set(3);
+            end;
+            // result += ind1
+            local_get(3); local_get(5); call(concat); local_set(3);
+            // result += "\"" + escape(key) + "\"" + ": "
+            local_get(3); i32_const(quote_str as i32); call(concat);
+            local_get(9); i32_load(0); call(escape_fn); call(concat);
+            i32_const(quote_str as i32); call(concat);
+            i32_const(colon_sp as i32); call(concat); local_set(3);
+            // result += pretty(value, depth+1)
+            local_get(9); i32_load(4);
+            local_get(1); i32_const(1); i32_add;
+            call(pretty_fn); local_set(10);
+            local_get(3); local_get(10); call(concat); local_set(3);
+            local_get(8); i32_const(1); i32_add; local_set(8);
+            br(0);
+          end; end;
+          local_get(3); i32_const(nl_str as i32); call(concat); local_set(3);
+          local_get(3); local_get(4); call(concat); local_set(3);
+          local_get(3); i32_const(close_brace as i32); call(concat); return_;
+        end;
+    });
+
+    // Fallback (unreachable for valid Value tags): delegate to compact.
+    wasm!(f, { local_get(0); call(stringify_fn); end; });
+
+    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
+}
+
 /// __json_parse(s: i32) -> i32 (Result[Value, String])
 fn compile_json_parse(emitter: &mut WasmEmitter) {
     let parse_at_fn = emitter.rt.json_parse_at;
@@ -339,6 +486,10 @@ fn compile_json_parse_at(emitter: &mut WasmEmitter) {
     let string_alloc = emitter.rt.string_alloc;
     let _concat = emitter.rt.concat_str;
     let _str_eq = emitter.rt.string.eq;
+    // The number parser hands a float token to the SAME correctly-rounded parser
+    // float.parse uses (__dec2flt), via a slice of the source (#663 / #667).
+    let str_slice = emitter.rt.string.slice;
+    let float_parse = emitter.rt.float_parse;
 
     let err_msg = emitter.intern_string("unexpected character in JSON");
     let err_eof = emitter.intern_string("unexpected end of input");
@@ -466,7 +617,7 @@ fn compile_json_parse_at(emitter: &mut WasmEmitter) {
     emit_parse_string(&mut f, alloc, string_alloc);
 
     // ── Number ──
-    emit_parse_number(&mut f, alloc);
+    emit_parse_number(&mut f, alloc, str_slice, float_parse);
 
     // ── Array ──
     emit_parse_array(&mut f, alloc, parse_at_fn);
@@ -579,6 +730,103 @@ fn emit_skip_ws(f: &mut Function) {
     });
 }
 
+/// Decode 4 hex digits at `[str_ptr + data + start(5) + read_off(8) + off0 .. +4)`
+/// into `target` (an i32 local). Uppercase and lowercase A–F both decode. Used
+/// for `\uXXXX` escapes and their low-surrogate continuation (#651). Local 11 is
+/// scratch.
+fn emit_parse_hex4(f: &mut Function, off0: i32, target: u32) {
+    wasm!(f, { i32_const(0); local_set(target); });
+    for k in off0..off0 + 4 {
+        wasm!(f, {
+            local_get(0); i32_const(string_data_off()); i32_add; local_get(5); i32_add; local_get(8); i32_add; i32_const(k); i32_add;
+            i32_load8_u(0); local_set(11);
+            // digit = byte < ':' ? byte - '0' : (byte | 0x20) - ('a' - 10)
+            local_get(11); i32_const(58); i32_lt_u;
+            if_i32;
+              local_get(11); i32_const(48); i32_sub;
+            else_;
+              local_get(11); i32_const(32); i32_or; i32_const(87); i32_sub;
+            end;
+            local_get(target); i32_const(4); i32_shl; i32_add; local_set(target);
+        });
+    }
+}
+
+/// Emit `out[write_off(9)] = (cp(10) >> shift & mask) | high; write_off += 1`.
+/// One UTF-8 byte derived from codepoint local 10. For a continuation byte:
+/// `high=0x80, mask=0x3F`; for a lead byte the high prefix and a wider mask. The
+/// 1-byte (ASCII) case uses `shift=0, mask=0x7F, high=0`. `out` base is local 6.
+fn emit_utf8_byte(f: &mut Function, shift: i32, mask: i32, high: i32) {
+    wasm!(f, {
+        local_get(6); i32_const(string_data_off()); i32_add; local_get(9); i32_add;
+        local_get(10); i32_const(shift); i32_shr_u; i32_const(mask); i32_and; i32_const(high); i32_or;
+        i32_store8(0);
+        local_get(9); i32_const(1); i32_add; local_set(9);
+    });
+}
+
+/// `\uXXXX` (plus a high+low surrogate pair) → UTF-8 bytes, then continue the
+/// copy loop. Assumes the escape char is in local 4, read_off (8) points at the
+/// `u`, and we are nested inside `loop → backslash-if` so `br(2)` re-enters the
+/// loop — bypassing the single-byte write that handles the simple escapes. The
+/// simple-escape rewrites that follow this call run only when the char is not
+/// `u`. Mirrors serde_json's `\u` decoding. #651.
+fn emit_unicode_escape_branch(f: &mut Function) {
+    wasm!(f, {
+        local_get(4); i32_const(117); i32_eq; // 'u'
+        if_empty;
+    });
+    // codepoint (local 10) from the 4 hex following the `u`.
+    emit_parse_hex4(f, 1, 10);
+    wasm!(f, { local_get(8); i32_const(5); i32_add; local_set(8); }); // consumed `u` + 4 hex
+    // Surrogate pair: a high surrogate (D800..DBFF) immediately followed by a
+    // "\uYYYY" low surrogate (DC00..DFFF) forms one astral codepoint.
+    wasm!(f, {
+        local_get(10); i32_const(0xD800); i32_ge_u;
+        local_get(10); i32_const(0xDBFF); i32_le_u;
+        i32_and;
+        if_empty;
+          local_get(0); i32_const(string_data_off()); i32_add; local_get(5); i32_add; local_get(8); i32_add; i32_load8_u(0); i32_const(92); i32_eq;
+          local_get(0); i32_const(string_data_off()); i32_add; local_get(5); i32_add; local_get(8); i32_add; i32_const(1); i32_add; i32_load8_u(0); i32_const(117); i32_eq;
+          i32_and;
+          if_empty;
+    });
+    emit_parse_hex4(f, 2, 14); // low surrogate → local 14
+    wasm!(f, {
+            local_get(14); i32_const(0xDC00); i32_ge_u;
+            local_get(14); i32_const(0xDFFF); i32_le_u;
+            i32_and;
+            if_empty;
+              local_get(10); i32_const(0xD800); i32_sub; i32_const(10); i32_shl;
+              local_get(14); i32_const(0xDC00); i32_sub; i32_add;
+              i32_const(0x10000); i32_add; local_set(10);
+              local_get(8); i32_const(6); i32_add; local_set(8); // consumed "\uYYYY"
+            end;
+          end;
+        end;
+    });
+    // UTF-8 encode cp(10): 1 byte (<0x80), 2 (<0x800), 3 (<0x10000), else 4.
+    wasm!(f, { local_get(10); i32_const(0x80); i32_lt_u; if_empty; });
+    emit_utf8_byte(f, 0, 0x7F, 0x00);
+    wasm!(f, { else_; local_get(10); i32_const(0x800); i32_lt_u; if_empty; });
+    emit_utf8_byte(f, 6, 0x1F, 0xC0);
+    emit_utf8_byte(f, 0, 0x3F, 0x80);
+    wasm!(f, { else_; local_get(10); i32_const(0x10000); i32_lt_u; if_empty; });
+    emit_utf8_byte(f, 12, 0x0F, 0xE0);
+    emit_utf8_byte(f, 6, 0x3F, 0x80);
+    emit_utf8_byte(f, 0, 0x3F, 0x80);
+    wasm!(f, { else_; });
+    emit_utf8_byte(f, 18, 0x07, 0xF0);
+    emit_utf8_byte(f, 12, 0x3F, 0x80);
+    emit_utf8_byte(f, 6, 0x3F, 0x80);
+    emit_utf8_byte(f, 0, 0x3F, 0x80);
+    wasm!(f, {
+            end; end; end; // close the <0x80 / <0x800 / <0x10000 chain
+        br(2);             // continue the copy loop; read_off already advanced
+        end;               // close the `u`-if
+    });
+}
+
 /// Parse JSON string starting at current pos (ch=='"').
 /// Uses locals: 0=str_ptr, 1=pos, 2=result_ptr, 3=str_len, 4=ch, 5=start, 6=value_ptr, 7=tmp, 9=count
 fn emit_parse_string(f: &mut Function, alloc: u32, string_alloc: u32) {
@@ -629,6 +877,11 @@ fn emit_parse_string(f: &mut Function, alloc: u32, string_alloc: u32) {
               // load next byte
               local_get(0); i32_const(string_data_off()); i32_add; local_get(5); i32_add; local_get(8); i32_add;
               i32_load8_u(0); local_set(4);
+    });
+    // \uXXXX decodes to UTF-8 and continues the loop (multi-byte); the simple
+    // single-byte escapes below run only when the char is not `u`. #651.
+    emit_unicode_escape_branch(f);
+    wasm!(f, {
               // Decode escape: overwrite local 4 in-place via if/else chain.
               // Decoded values (8,9,10,12,13) and idempotent ones (34,47,92) don't
               // collide with the source codes for other escapes (110,116,114,98,102),
@@ -666,7 +919,7 @@ fn emit_parse_string(f: &mut Function, alloc: u32, string_alloc: u32) {
 
 /// Parse JSON number. Uses: 0=str_ptr, 1=pos, 2=result_ptr, 3=str_len, 4=ch,
 /// 5=start, 6=value_ptr, 11=sign, 12=num_val(i64), 13=divisor(f64)
-fn emit_parse_number(f: &mut Function, alloc: u32) {
+fn emit_parse_number(f: &mut Function, alloc: u32, str_slice: u32, float_parse: u32) {
     // Check if number
     wasm!(f, {
         local_get(4); i32_const(45); i32_eq;
@@ -674,6 +927,9 @@ fn emit_parse_number(f: &mut Function, alloc: u32) {
         local_get(4); i32_const(57); i32_le_u;
         i32_and; i32_or;
         if_empty;
+          // Save the token start (incl. a leading '-') so a float token can be
+          // re-parsed by the correctly-rounded float.parse (#663 / #667).
+          local_get(1); local_set(5);
           i32_const(1); local_set(11);
           i64_const(0); local_set(12);
           local_get(4); i32_const(45); i32_eq;
@@ -723,21 +979,19 @@ fn emit_parse_number(f: &mut Function, alloc: u32) {
                 br(0);
               end; end;
     });
-    // Build float Value (with optional exponent)
-    wasm!(f, {
-              // Compute base float: sign * digits / divisor
-              local_get(11); i64_extend_i32_s; local_get(12); i64_mul;
-              f64_convert_i64_s; local_get(13); f64_div;
-    });
-    // Handle exponent (e/E) for float
+    // Build float Value. The number token [start, pos) is handed to the SAME
+    // correctly-rounded parser float.parse uses (__dec2flt) instead of an ad-hoc
+    // `digits/divisor * 10^exp` that dropped the -0.0 sign (#663) and rounded
+    // exponent forms off by a ULP (#667). emit_parse_exponent only advances pos
+    // past the e/E digits here; its ad-hoc multiplier is dropped.
     emit_parse_exponent(f);
     wasm!(f, {
-              // Store float Value
-              f64_mul; // base * 10^exp (exponent pushed by emit_parse_exponent)
-              local_set(13); // reuse local 13 for final float
+              drop;
+              local_get(0); local_get(5); local_get(1); call(str_slice);
+              call(float_parse); local_set(7); // Result[Float, String] ptr; valid JSON ⇒ ok
               i32_const(12); call(alloc); local_set(6);
               local_get(6); i32_const(3); i32_store(0);
-              local_get(6); local_get(13); f64_store(4);
+              local_get(6); local_get(7); f64_load(4); f64_store(4);
               local_get(2); local_get(6); i32_store(0);
               local_get(2); local_get(1); i32_store(4);
               local_get(2); i32_const(0); i32_store(8);
@@ -756,17 +1010,17 @@ fn emit_parse_number(f: &mut Function, alloc: u32) {
             local_get(4); i32_const(69); i32_eq;  // 'E'
             i32_or;
             if_empty;
-              // Has exponent: convert to float
-              local_get(11); i64_extend_i32_s; local_get(12); i64_mul;
-              f64_convert_i64_s;
+              // Integer mantissa with an exponent suffix → a float. Re-parse the
+              // whole token with the correctly-rounded float.parse (#667).
     });
     emit_parse_exponent(f);
     wasm!(f, {
-              f64_mul;
-              local_set(13);
+              drop;
+              local_get(0); local_get(5); local_get(1); call(str_slice);
+              call(float_parse); local_set(7);
               i32_const(12); call(alloc); local_set(6);
               local_get(6); i32_const(3); i32_store(0);
-              local_get(6); local_get(13); f64_store(4);
+              local_get(6); local_get(7); f64_load(4); f64_store(4);
               local_get(2); local_get(6); i32_store(0);
               local_get(2); local_get(1); i32_store(4);
               local_get(2); i32_const(0); i32_store(8);

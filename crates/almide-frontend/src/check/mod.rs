@@ -71,6 +71,12 @@ pub struct Checker {
     /// `check_named_call` uses this to validate each value against the param it
     /// NAMES (lowering binds by name), not the positional slot it landed in.
     pub(crate) named_arg_meta: Option<(usize, Vec<almide_base::intern::Sym>)>,
+    /// Expected-type hint for the NEXT lambda argument's parameters (#653).
+    /// Set by `check_call_with_type_args` immediately before inferring a lambda
+    /// arg whose call-parameter slot is a `Fn`; consumed (taken) by the
+    /// `ExprKind::Lambda` inference arm to type unannotated params from the
+    /// expected element type instead of a fresh var. `None` everywhere else.
+    pub(crate) lambda_arg_hint: Option<Vec<crate::types::Ty>>,
     pub(crate) constraints: Vec<Constraint>,
     pub(crate) uf: UnionFind,
     /// Module-name prefix active during `infer_module`. `None` for the
@@ -103,6 +109,93 @@ pub struct Checker {
     /// element type cannot be inferred and it is a compile error (E018) — the
     /// Rust/Swift rule, never silently defaulted. See `docs/contracts` C-058.
     pub(crate) deferred_empty_collection_checks: Vec<EmptyCollectionSite>,
+    /// Integer literals whose magnitude exceeds `i64::MAX`, re-checked post-solve
+    /// against their CONTEXT so the range is type-aware (#626). A bare literal in
+    /// a default `Int` (i64) context that overflows would otherwise SILENTLY fold
+    /// to 0 on both targets (`lower` + both codegens parse with `.unwrap_or(0)`).
+    /// Two valid forms are exempted at registration time, not here: a literal
+    /// bound to / annotated as a wider type (`let u: UInt64 = …`) and the negated
+    /// `i64::MIN` magnitude (`-9223372036854775808`).
+    pub(crate) deferred_int_overflow_checks: Vec<IntOverflowSite>,
+    /// Un-annotated value bindings / discarded expression statements whose
+    /// inferred type must be fully decidable. Each entry carries the binding's
+    /// value `Ty` (with inference vars intact), an optional binding name (for the
+    /// diagnostic's wording / fix), and the span. Validated post-solve by
+    /// [`Checker::validate_unresolved_binding_types`]: if the resolved type still
+    /// holds an unbound `?`-prefixed inference var ANYWHERE after the whole
+    /// program is solved, that slot was never pinned by context (e.g. the error
+    /// type of `result.or_else(r0, (e) => ok(0))`, only reachable through the
+    /// un-exercised `err` branch). That is a compile error (E025) — the same
+    /// Rust/Swift rule E018 enforces for empty collections, never silently
+    /// defaulted. Without it the value passed `check` and then tripped the
+    /// ConcretizeTypes COMPILER-BUG gate on BOTH targets (#662).
+    pub(crate) deferred_unresolved_binding_checks: Vec<UnresolvedBindingSite>,
+}
+
+/// An integer literal that does not fit `i64`, pending a post-solve range check.
+#[derive(Debug, Clone)]
+pub(crate) struct IntOverflowSite {
+    /// The literal's `ExprId` — used to drop the site if a wider annotation
+    /// later exempts it (the value of `let u: UInt64 = …`).
+    pub expr_id: crate::ast::ExprId,
+    /// Raw lexed text (underscores / radix prefix intact).
+    pub raw: String,
+    /// True when the literal is the operand of a unary minus, so its negation
+    /// (down to `i64::MIN`) is the value that must fit — `2^63` is then valid.
+    pub negated: bool,
+    /// The declared type the literal is bound/annotated to, when it is the direct
+    /// value of `let x: T = …` / `var x: T = …`. `None` ⇒ a default `Int` (i64)
+    /// context. A wider `T` (e.g. `UInt64`) makes a >i64 literal valid.
+    pub context_ty: Option<Ty>,
+    pub span: Option<crate::ast::Span>,
+}
+
+/// True when a bare (non-negative) integer literal does not fit in `i64`.
+/// Mirrors the radix parsing in lowering so the check and the eventual value
+/// agree. A malformed token the lexer would not produce is treated as
+/// non-overflowing (not our error to report).
+pub(crate) fn int_literal_overflows_i64(raw: &str) -> bool {
+    let clean = raw.replace('_', "");
+    let (radix, digits) = if let Some(r) = clean.strip_prefix("0x").or_else(|| clean.strip_prefix("0X")) { (16, r) }
+        else if let Some(r) = clean.strip_prefix("0b").or_else(|| clean.strip_prefix("0B")) { (2, r) }
+        else if let Some(r) = clean.strip_prefix("0o").or_else(|| clean.strip_prefix("0O")) { (8, r) }
+        else { (10, clean.as_str()) };
+    match i64::from_str_radix(digits, radix) {
+        Ok(_) => false,
+        Err(e) => matches!(e.kind(), std::num::IntErrorKind::PosOverflow | std::num::IntErrorKind::NegOverflow),
+    }
+}
+
+/// True when `raw`'s magnitude fits the given type's range. For a SIGNED type
+/// the magnitude bound is `MAX` (or `MAX+1` when `negated`, reaching `MIN`); for
+/// an unsigned type it is the unsigned `MAX`. Non-integer types return false
+/// (the literal does not belong there — left for the normal type checker).
+pub(crate) fn int_literal_fits_type(raw: &str, ty: &Ty, negated: bool) -> bool {
+    let clean = raw.replace('_', "");
+    let (radix, digits) = if let Some(r) = clean.strip_prefix("0x").or_else(|| clean.strip_prefix("0X")) { (16, r) }
+        else if let Some(r) = clean.strip_prefix("0b").or_else(|| clean.strip_prefix("0B")) { (2, r) }
+        else if let Some(r) = clean.strip_prefix("0o").or_else(|| clean.strip_prefix("0O")) { (8, r) }
+        else { (10, clean.as_str()) };
+    let Ok(mag) = u128::from_str_radix(digits, radix) else { return true };
+    // (signed, bit-width) for each integer type; None for non-integer.
+    let limits: Option<(bool, u32)> = match ty {
+        Ty::Int | Ty::Int64 => Some((true, 64)),
+        Ty::Int8 => Some((true, 8)), Ty::Int16 => Some((true, 16)), Ty::Int32 => Some((true, 32)),
+        Ty::UInt8 => Some((false, 8)), Ty::UInt16 => Some((false, 16)),
+        Ty::UInt32 => Some((false, 32)), Ty::UInt64 => Some((false, 64)),
+        _ => None,
+    };
+    match limits {
+        None => true, // not an integer context — not our diagnostic
+        Some((signed, bits)) => {
+            let max: u128 = if signed {
+                if negated { 1u128 << (bits - 1) } else { (1u128 << (bits - 1)) - 1 }
+            } else {
+                (1u128 << bits) - 1
+            };
+            mag <= max
+        }
+    }
 }
 
 /// The construct that produced an empty collection whose element type the
@@ -123,6 +216,21 @@ pub(crate) enum EmptyCollectionKind {
     /// The iterable of a `for _ in []` loop (an empty list literal in iterable
     /// position). Distinguished so the hint can suggest annotating the iterable.
     ForInEmpty,
+}
+
+/// One un-annotated binding / discarded expression to re-check after constraint
+/// solving for an undecidable (never-pinned) inference var (#662).
+#[derive(Debug, Clone)]
+pub(crate) struct UnresolvedBindingSite {
+    /// The binding's / expression's value type, with inference vars intact.
+    /// Resolved against the union-find post-solve; an unbound `?N` survivor means
+    /// the type was never pinned by context.
+    pub ty: Ty,
+    /// The binding name (`let`/`var`), or `None` for a discarded expression
+    /// statement. Drives the diagnostic's primary fix (annotate the binding).
+    pub name: Option<String>,
+    /// Source span of the offending expression.
+    pub span: Option<crate::ast::Span>,
 }
 
 /// One empty-collection producer to re-check after constraint solving.
@@ -151,12 +259,15 @@ impl Checker {
             last_mut_params: Vec::new(),
             arg_spans: Vec::new(),
             named_arg_meta: None,
+            lambda_arg_hint: None,
             constraints: Vec::new(), uf: UnionFind::new(),
             current_module_prefix: None,
             deferred_tuple_indices: Vec::new(),
             deferred_field_accesses: Vec::new(),
             deferred_map_key_checks: Vec::new(),
             deferred_empty_collection_checks: Vec::new(),
+            deferred_int_overflow_checks: Vec::new(),
+            deferred_unresolved_binding_checks: Vec::new(),
         }
     }
 
@@ -318,6 +429,8 @@ impl Checker {
         resolve_type_map(&mut self.type_map, &self.uf);
         self.validate_map_key_types();
         self.validate_empty_collection_elements();
+        self.validate_int_overflow_literals();
+        self.validate_unresolved_binding_types();
         // Unused import warnings
         for imp in &program.imports {
             let (path, alias, span) = match imp {
@@ -474,6 +587,8 @@ impl Checker {
         resolve_type_map(&mut self.type_map, &self.uf);
         self.validate_map_key_types();
         self.validate_empty_collection_elements();
+        self.validate_int_overflow_literals();
+        self.validate_unresolved_binding_types();
         self.current_module_prefix = saved_prefix;
 
         // Restore
@@ -1014,6 +1129,47 @@ impl Checker {
     /// the element is never read. Each `?A` that survived the whole-program solve
     /// (against `self.uf`) had no inference source; a populated/annotated form
     /// would have unified it the normal way and resolved clean here.
+    /// Post-solve range check for int literals that overflow `i64` (#626). The
+    /// effective type is the binding's declared type if one was recorded, else
+    /// the literal's resolved type, else a default `Int` (i64). A literal that
+    /// does not fit that type's range — and is not the negated `i64::MIN`
+    /// magnitude — would silently fold to 0 in codegen, so it is rejected (E024).
+    fn validate_int_overflow_literals(&mut self) {
+        let checks = std::mem::take(&mut self.deferred_int_overflow_checks);
+        for site in checks {
+            // Effective type: explicit binding annotation, else the literal's
+            // own resolved type, else default Int.
+            let eff = site.context_ty.clone()
+                .map(|t| resolve_ty(&t, &self.uf))
+                .or_else(|| self.type_map.get(&site.expr_id).map(|t| resolve_ty(t, &self.uf)))
+                .unwrap_or(Ty::Int);
+            // Only a concrete integer context decides this; an unresolved/var or
+            // non-integer effective type is left to the normal checker.
+            let eff = match eff {
+                Ty::Int | Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64
+                | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64 => eff,
+                _ => Ty::Int, // fall back to the default Int context
+            };
+            if int_literal_fits_type(&site.raw, &eff, site.negated) { continue; }
+            let mut diag = err(
+                format!("integer literal '{}' is out of range for {}", site.raw, eff.display()),
+                format!(
+                    "{} would silently fold to 0 here; use a literal within the type's range, \
+                     or model larger magnitudes as Float (lossy) or a parsed string",
+                    eff.display(),
+                ),
+                format!("integer literal {}", site.raw),
+            ).with_code("E024");
+            if let Some(s) = site.span {
+                diag.file = self.source_file.clone();
+                diag.line = Some(s.line);
+                diag.col = Some(s.col);
+                if s.end_col > s.col { diag.end_col = Some(s.end_col); }
+            }
+            self.diagnostics.push(diag);
+        }
+    }
+
     fn validate_empty_collection_elements(&mut self) {
         let checks = std::mem::take(&mut self.deferred_empty_collection_checks);
         for site in checks {
@@ -1067,6 +1223,77 @@ impl Checker {
                 hint,
                 format!("{} with no element-type context", what),
             ).with_code("E018").with_try(try_fix);
+            if let Some(s) = site.span {
+                diag.file = self.source_file.clone();
+                diag.line = Some(s.line);
+                diag.col = Some(s.col);
+                if s.end_col > s.col { diag.end_col = Some(s.end_col); }
+            }
+            self.diagnostics.push(diag);
+        }
+    }
+
+    /// Post-solve: reject an un-annotated binding / discarded expression whose
+    /// type still carries an unbound `?`-prefixed inference var anywhere in its
+    /// tree. Such a var had NO inference source for the whole program (a phantom
+    /// slot only reachable through an un-exercised branch — e.g. the error type
+    /// of `result.or_else(r0, (e) => ok(0))`). Firing here, in the frontend,
+    /// makes the error identical on BOTH targets and gives a `type annotation
+    /// needed` diagnostic (cf. Rust E0282 / the sibling empty-collection E018)
+    /// instead of the cryptic ConcretizeTypes COMPILER-BUG gate ICE (#662). A
+    /// fully-decidable program leaves every binding type concrete, so this only
+    /// fires on the genuinely-undecidable case; sites are deduped so a binding
+    /// reused N times yields one error.
+    fn validate_unresolved_binding_types(&mut self) {
+        let checks = std::mem::take(&mut self.deferred_unresolved_binding_checks);
+        let mut reported: std::collections::HashSet<(Option<u32>, Option<u32>)> = std::collections::HashSet::new();
+        for site in checks {
+            let resolved = resolve_ty(&site.ty, &self.uf);
+            // A WHOLLY-Unknown binding type is error-recovery (a prior error was
+            // already reported) or a structure the checker leaves Unknown but
+            // codegen resolves (e.g. a cross-module variant `match` whose arms are
+            // concrete). Neither is a genuinely-undecidable SLOT, so skip it — only
+            // fire when a CONCRETE outer type carries an undecidable inner slot
+            // (`Result[Int, ?]`, never pinned). Without this guard E025 false-fired
+            // on valid cross-module variant matches.
+            if matches!(resolved, Ty::Unknown) { continue; }
+            // An unbound `?`-prefixed inference var (`fresh_var` the solver never
+            // bound) anywhere in the tree is undecidable. A BARE `TypeVar` (`T`,
+            // no `?`) is a rigid generic param — concrete in its scope — so it
+            // must NOT trigger this (mirrors `has_unconstrained_element`).
+            let undecidable = resolved.any_child_recursive(&|t: &Ty| match t {
+                Ty::Unknown => true,
+                Ty::TypeVar(n) => n.as_str().starts_with('?'),
+                _ => false,
+            });
+            if !undecidable { continue; }
+            let key = (site.span.map(|s| s.line as u32), site.span.map(|s| s.col as u32));
+            if !reported.insert(key) { continue; }
+            let what = match &site.name {
+                Some(n) => format!("binding '{}'", n),
+                None => "this expression".to_string(),
+            };
+            let fix = match &site.name {
+                Some(n) => format!(
+                    "Annotate the binding with the full type, e.g. `let {}: Result[Int, String] = ...`. \
+                     An unconstrained slot (such as the error type of a value that is always `ok(...)`, \
+                     reachable only through an un-exercised branch) cannot be inferred and is never \
+                     silently defaulted (Almide follows Rust/Swift; cf. Rust E0282).",
+                    n,
+                ),
+                None => "Bind the expression to an explicitly-typed `let`, e.g. \
+                     `let r: Result[Int, String] = ...`, so the unconstrained slot is pinned. \
+                     An unconstrained type slot cannot be inferred and is never silently defaulted \
+                     (Almide follows Rust/Swift; cf. Rust E0282).".to_string(),
+            };
+            let mut diag = err(
+                format!("cannot infer a concrete type for {} (type {})", what, resolved.display()),
+                fix,
+                format!("{} with an unconstrained type", what),
+            ).with_code("E025");
+            if let Some(n) = &site.name {
+                diag = diag.with_try(format!("let {}: Result[Int, String] = ...", n));
+            }
             if let Some(s) = site.span {
                 diag.file = self.source_file.clone();
                 diag.line = Some(s.line);

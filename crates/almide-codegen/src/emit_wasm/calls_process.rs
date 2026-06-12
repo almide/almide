@@ -268,6 +268,111 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(capacity);
                 self.scratch.free_i32(buf);
             }
+            "args" => {
+                // process.args() -> List[String]
+                // Mirror native almide_rt_process_args = std::env::args().collect()
+                // (argv[0] = program path, then any program args). Uses WASI
+                // args_sizes_get / args_get; builds the same List[String] layout
+                // as stdin_lines above: [count:i32][strptr0:i32][strptr1:i32]...
+                let argc_ptr = self.scratch.alloc_i32();
+                let bufsize_ptr = self.scratch.alloc_i32();
+                let argc = self.scratch.alloc_i32();
+                let buf_size = self.scratch.alloc_i32();
+                let argv_ptr = self.scratch.alloc_i32();
+                let argv_buf = self.scratch.alloc_i32();
+                let result = self.scratch.alloc_i32();
+                let i = self.scratch.alloc_i32();
+                let cstr_ptr = self.scratch.alloc_i32();
+                let str_len = self.scratch.alloc_i32();
+                let str_ptr = self.scratch.alloc_i32();
+                let copy_i = self.scratch.alloc_i32();
+
+                // --- Phase 1: discover argc + total argv buffer size ---
+                wasm!(self.func, {
+                    i32_const(4); call(self.emitter.rt.alloc); local_set(argc_ptr);
+                    i32_const(4); call(self.emitter.rt.alloc); local_set(bufsize_ptr);
+                    local_get(argc_ptr);
+                    local_get(bufsize_ptr);
+                    call(self.emitter.rt.args_sizes_get);
+                    drop; // discard errno
+                    local_get(argc_ptr); i32_load(0); local_set(argc);
+                    local_get(bufsize_ptr); i32_load(0); local_set(buf_size);
+                });
+
+                // --- Phase 2: alloc the pointer array + the string buffer, fill them ---
+                // argv_ptr: argc i32 pointers. argv_buf: buf_size NUL-terminated bytes.
+                // Guard zero-size allocs with a minimum of 4 bytes so alloc never
+                // returns a degenerate pointer (argc is always >= 1 in practice, but
+                // stay defensive).
+                wasm!(self.func, {
+                    // argv_ptr: argc i32 pointers (+4 guard so a zero argc never
+                    // yields a degenerate alloc).
+                    local_get(argc); i32_const(4); i32_mul; i32_const(4); i32_add;
+                    call(self.emitter.rt.alloc); local_set(argv_ptr);
+                    local_get(buf_size); i32_const(4); i32_add;
+                    call(self.emitter.rt.alloc); local_set(argv_buf);
+                    local_get(argv_ptr);
+                    local_get(argv_buf);
+                    call(self.emitter.rt.args_get);
+                    drop; // discard errno
+                });
+
+                // --- Phase 3: build List[String] = [count][strptr0][strptr1]... ---
+                wasm!(self.func, {
+                    local_get(argc); i32_const(4); i32_mul; i32_const(4); i32_add;
+                    call(self.emitter.rt.alloc); local_set(result);
+                    local_get(result); local_get(argc); i32_store(0);
+                    i32_const(0); local_set(i);
+                    block_empty; loop_empty;
+                      local_get(i); local_get(argc); i32_ge_u; br_if(1);
+                      // cstr_ptr = argv_ptr[i]
+                      local_get(argv_ptr); local_get(i); i32_const(4); i32_mul; i32_add;
+                      i32_load(0); local_set(cstr_ptr);
+                      // str_len = strlen(cstr_ptr): scan to NUL
+                      i32_const(0); local_set(str_len);
+                      block_empty; loop_empty;
+                        local_get(cstr_ptr); local_get(str_len); i32_add; i32_load8_u(0);
+                        i32_eqz; br_if(1);
+                        local_get(str_len); i32_const(1); i32_add; local_set(str_len);
+                        br(0);
+                      end; end;
+                      // alloc Almide string [len:i32][bytes...]
+                      local_get(str_len); i32_const(4); i32_add;
+                      call(self.emitter.rt.alloc); local_set(str_ptr);
+                      local_get(str_ptr); local_get(str_len); i32_store(0);
+                      // copy str_len bytes from cstr_ptr into str_ptr+4
+                      i32_const(0); local_set(copy_i);
+                      block_empty; loop_empty;
+                        local_get(copy_i); local_get(str_len); i32_ge_u; br_if(1);
+                        local_get(str_ptr); i32_const(4); i32_add; local_get(copy_i); i32_add;
+                        local_get(cstr_ptr); local_get(copy_i); i32_add; i32_load8_u(0);
+                        i32_store8(0);
+                        local_get(copy_i); i32_const(1); i32_add; local_set(copy_i);
+                        br(0);
+                      end; end;
+                      // result[4 + i*4] = str_ptr
+                      local_get(result); i32_const(4); i32_add;
+                      local_get(i); i32_const(4); i32_mul; i32_add;
+                      local_get(str_ptr); i32_store(0);
+                      local_get(i); i32_const(1); i32_add; local_set(i);
+                      br(0);
+                    end; end;
+                    local_get(result);
+                });
+
+                self.scratch.free_i32(copy_i);
+                self.scratch.free_i32(str_ptr);
+                self.scratch.free_i32(str_len);
+                self.scratch.free_i32(cstr_ptr);
+                self.scratch.free_i32(i);
+                self.scratch.free_i32(result);
+                self.scratch.free_i32(argv_buf);
+                self.scratch.free_i32(argv_ptr);
+                self.scratch.free_i32(buf_size);
+                self.scratch.free_i32(argc);
+                self.scratch.free_i32(bufsize_ptr);
+                self.scratch.free_i32(argc_ptr);
+            }
             _ => panic!(
                 "[ICE] emit_wasm: no WASM dispatch for `process.{}` — \
                  add an arm in emit_process_call or resolve upstream",

@@ -162,8 +162,12 @@ impl FuncCompiler<'_> {
                     if_i32;
                       i32_const(0);
                     else_;
+                      // SHARE: the inner Option is borrowed out of the outer box;
+                      // it must own a +1 or the let-bound result double-frees it
+                      // against the outer's payload Dec (#666). No-op when inner=0.
                       local_get(s);
                       i32_load(0); // inner Option ptr
+                      call(self.emitter.rt.rc_inc);
                     end;
                 });
                 self.scratch.free_i32(s);
@@ -194,10 +198,14 @@ impl FuncCompiler<'_> {
                     local_get(closure); i32_load(0); // table_idx
                 });
                 self.emit_closure_call(&inner_ty, &Ty::Bool);
-                // Result is Bool(i32): if true return opt, else 0
+                // Result is Bool(i32): if true return opt, else 0.
+                // SHARE: the pred-true path hands back the INPUT box itself, so it
+                // must own a +1 (like list.get's some-box) — else the let-bound
+                // result and the input alias the same cell and both scope-end Decs
+                // double-free it (#666). rc_inc is a no-op on the none(0) branch.
                 wasm!(self.func, {
                       if_i32;
-                        local_get(opt);
+                        local_get(opt); call(self.emitter.rt.rc_inc);
                       else_;
                         i32_const(0);
                       end;
@@ -274,7 +282,9 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, {
                     call_indirect(ti, 0);
                     else_;
-                      local_get(opt);
+                      // SHARE: the some path returns the INPUT box — own a +1 so the
+                      // let-bound result doesn't double-free it with the input (#666).
+                      local_get(opt); call(self.emitter.rt.rc_inc);
                     end;
                 });
                 self.scratch.free_i32(closure);
@@ -463,7 +473,9 @@ impl FuncCompiler<'_> {
                 self.emit_result_branch_err(result);
                 wasm!(self.func, {
                     if_i32;
-                      local_get(result); // return err as-is
+                      // SHARE: err path returns the INPUT box — own a +1 so the
+                      // let-bound result doesn't double-free it with the input (#666).
+                      local_get(result); call(self.emitter.rt.rc_inc); // return err as-is
                     else_;
                 });
                 let out_ty = self.fn_ret_ty(&args[1].ty);
@@ -499,7 +511,9 @@ impl FuncCompiler<'_> {
                 self.emit_result_branch_ok(result);
                 wasm!(self.func, {
                     if_i32;
-                      local_get(result); // return ok as-is
+                      // SHARE: ok path returns the INPUT box — own a +1 so the
+                      // let-bound result doesn't double-free it with the input (#666).
+                      local_get(result); call(self.emitter.rt.rc_inc); // return ok as-is
                     else_;
                 });
                 let out_ty = self.fn_ret_ty(&args[1].ty);
@@ -532,7 +546,9 @@ impl FuncCompiler<'_> {
                 self.emit_result_branch_err(result);
                 wasm!(self.func, {
                     if_i32;
-                      local_get(result); // return err as-is
+                      // SHARE: err path returns the INPUT box — own a +1 so the
+                      // let-bound result doesn't double-free it with the input (#666).
+                      local_get(result); call(self.emitter.rt.rc_inc); // return err as-is
                     else_;
                       local_get(closure); i32_load(4); // env
                 });

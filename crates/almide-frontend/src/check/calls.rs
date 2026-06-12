@@ -46,8 +46,83 @@ impl Checker {
         }
     }
 
+    /// Resolve the callee of a call to its function signature, for the two
+    /// shapes that can name a higher-order function with a `Fn`-typed parameter:
+    /// a bare `Ident` (user fn / selectively-imported stdlib fn) or
+    /// `module.field` (`list.map`, an aliased import, or a user `module.fn`).
+    /// Returns the signature so the eager-arg pass can pin an inferred lambda
+    /// param to the element type BEFORE the lambda body is checked. Returns
+    /// `None` for anything else (the call then infers args bottom-up as before).
+    fn lookup_call_sig(&self, callee: &ast::Expr) -> Option<crate::types::FnSig> {
+        match &callee.kind {
+            ExprKind::Ident { name, .. } => {
+                self.env.functions.get(&sym(name)).cloned()
+            }
+            ExprKind::Member { object, field, .. } => {
+                let module = match &object.kind {
+                    ExprKind::Ident { name, .. } => name.as_str(),
+                    _ => return None,
+                };
+                // Honor import aliases (e.g. `gpu` -> `snaidhm.web.gpu`).
+                let canonical = self.env.import_table.resolve(module)
+                    .map(|s| s.as_str().to_string())
+                    .unwrap_or_else(|| module.to_string());
+                let key = format!("{}.{}", canonical, field);
+                self.env.functions.get(&sym(&key)).cloned()
+                    .or_else(|| crate::stdlib::lookup_sig(&canonical, field))
+            }
+            _ => None,
+        }
+    }
+
     pub(crate) fn check_call_with_type_args(&mut self, callee: &mut ast::Expr, args: &mut [ast::Expr], type_args: Option<&[Ty]>) -> Ty {
-        let arg_tys: Vec<Ty> = args.iter_mut().map(|a| self.infer_expr(a)).collect();
+        // Expected-type-directed argument inference (#653). The default is
+        // strictly-left-to-right bottom-up inference of every argument. The one
+        // place that breaks down is an INFERRED lambda param passed to a
+        // higher-order function inside a generic body: `list.map(xs, (e) =>
+        // e.name())` where `xs: List[T]`, `T: Labelled`. Inferred bottom-up,
+        // `e` is a fresh var, so `e.name()` cannot see the protocol bound and
+        // collapses `e` into a closure type (`Fn() -> String`) -- the later
+        // `(T)->U` constraint can no longer undo that, yielding a spurious
+        // native E0308. Fix: resolve the callee's signature up front; as we
+        // infer args left-to-right we unify each non-lambda arg against its
+        // declared param to learn the generic bindings (`A := T`), then, just
+        // before inferring a lambda arg whose param slot is a `Fn`, pin the
+        // lambda's (unannotated) params to the substituted expected element
+        // type (`T`, carrying the bound). The lambda body then resolves
+        // `e.name()` via the protocol path. Calls without a `Fn`-param sig are
+        // unaffected -- they take the plain bottom-up path below.
+        let call_sig = self.lookup_call_sig(callee);
+        let arg_tys: Vec<Ty> = {
+            let mut bindings: HashMap<Sym, Ty> = HashMap::new();
+            let mut tys: Vec<Ty> = Vec::with_capacity(args.len());
+            for (i, a) in args.iter_mut().enumerate() {
+                // Pin an unannotated lambda's params to the expected element
+                // types substituted with bindings learned from earlier args.
+                let pinned = if matches!(&a.kind, ExprKind::Lambda { .. }) {
+                    call_sig.as_ref()
+                        .and_then(|sig| sig.params.get(i))
+                        .map(|(_, pty)| crate::types::substitute(pty, &bindings))
+                        .and_then(|pty| match pty {
+                            Ty::Fn { params, .. } => Some(params),
+                            _ => None,
+                        })
+                } else { None };
+                let prev_hint = self.lambda_arg_hint.take();
+                self.lambda_arg_hint = pinned;
+                let aty = self.infer_expr(a);
+                self.lambda_arg_hint = prev_hint;
+                // Accumulate generic bindings from this arg so later lambda
+                // params can be pinned. Lambdas contribute nothing new here.
+                if let Some(sig) = &call_sig {
+                    if let Some((_, pty)) = sig.params.get(i) {
+                        crate::types::unify(pty, &resolve_ty(&aty, &self.uf), &mut bindings);
+                    }
+                }
+                tys.push(aty);
+            }
+            tys
+        };
         let callee_span_snapshot = callee.span;
         match &mut callee.kind {
             ExprKind::Ident { name, .. } => {
@@ -64,7 +139,17 @@ impl Checker {
                 ret
             }
             ExprKind::TypeName { name, .. } => {
-                if let Some((type_name, case)) = self.env.lookup_ctor(&sym(name)) {
+                // #631: pin the constructed value's `.ty` to the OWNER-qualified
+                // type name (`mod.Type`) via the module-aware lookup, exactly as
+                // the bare-value ctor path (infer.rs) and `lookup_ctor_in` for
+                // record ctors already do. A bare `lookup_ctor` here left the call
+                // expression's type bare `Type` even when the only declaration is
+                // `mod.Type`, so a producer fn INSIDE its owning submodule that
+                // constructs the variant tripped the #433 name-pinning guard at
+                // codegen (both targets aborted after `check` said clean).
+                if let Some((type_name, case)) =
+                    self.env.lookup_ctor_in(&sym(name), self.current_module_prefix.as_deref())
+                {
                     self.report_ambiguous_ctor(name);
                     self.check_constructor_args(name, &case, &arg_tys);
                     // Instantiate parent type's generics with fresh inference vars
@@ -460,7 +545,19 @@ impl Checker {
                         format!("call to {}()", name)).with_code("E002"));
                     return Ty::Unknown;
                 }
-                return ty;
+                // #623: `f` is an as-yet-unresolved inference var being CALLED — so
+                // it MUST be a function. Constrain it to `(arg_tys) -> ?ret` and
+                // return `?ret`, not `f`'s own type. Returning `ty` typed the call
+                // result as f's CLOSURE type (e.g. `(f) => f(10)` in a `list.map`
+                // lambda became `((Int)->Int) -> ((Int)->Int)` instead of
+                // `((Int)->Int) -> Int`), so codegen emitted a closure body that
+                // returns a closure where it returns the call result (invalid Rust
+                // / wrong wasm). `?ret` is resolved from context — e.g. the element
+                // type `(Int)->Int` flowing in from `list.map` pins `?ret = Int`.
+                let ret = self.fresh_var();
+                let fn_ty = Ty::Fn { params: arg_tys.to_vec(), ret: Box::new(ret.clone()) };
+                self.constrain(fn_ty, ty, format!("call to {}()", name));
+                return ret;
             }
             // Triple: (hint, clean fn-name fix for simple try:, rich multi-line snippet).
             // `rich_snippet` overrides `fix_name` when present — used for hallucinations
@@ -633,6 +730,19 @@ impl Checker {
             e005_fired.push(fired);
         }
         self.arg_spans.clear();
+        // #620: a generic param that NO argument pinned (because the arg was an
+        // unresolved inference var — e.g. `unbox(b)` where `b` is a `list.map`
+        // lambda's not-yet-resolved element) leaves its name UNBOUND in
+        // `bindings`. The back-prop below would then `substitute` the param type
+        // to its LITERAL generic name (`Box[TypeVar("T")]`) and leak it into the
+        // union-find, where it can never be solved to the concrete type that
+        // flows in later (from `list.map`'s collection). Bind each such generic
+        // to a FRESH inference var (shared by the back-prop AND the return type),
+        // so the relation becomes solvable. Generics an argument DID pin keep
+        // their concrete binding; a concrete call is unaffected.
+        for g in &sig.generics {
+            bindings.entry(*g).or_insert_with(|| self.fresh_var());
+        }
         // Verify protocol bounds on generic type parameters
         for (tv_name, proto_names) in &sig.protocol_bounds {
             if let Some(concrete_ty) = bindings.get(tv_name) {

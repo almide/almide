@@ -13,6 +13,18 @@ impl Checker {
         if let Some(span) = expr.span {
             self.current_span = Some(span);
         }
+        // #626: register a candidate for any int literal that overflows i64. The
+        // actual range error is decided post-solve against context (a wider
+        // annotation or unary negation may make it valid) — see
+        // `validate_int_overflow_literals`. Registering here (not in the Int arm)
+        // keeps `expr.id` / `expr.span` in scope.
+        if let ExprKind::Int { raw, .. } = &expr.kind {
+            if super::int_literal_overflows_i64(raw) {
+                self.deferred_int_overflow_checks.push(super::IntOverflowSite {
+                    expr_id: expr.id, raw: raw.clone(), negated: false, context_ty: None, span: expr.span,
+                });
+            }
+        }
         let ity = self.infer_expr_inner(expr);
         self.type_map.insert(expr.id, ity.clone());
         ity
@@ -203,7 +215,12 @@ impl Checker {
                     // List[Int] }`, resolved from `env.types`). Both reduce to a
                     // `(field, declared_ty)` list with generics already substituted.
                     let (result_ty, decl_fields, closed, defaults): (Ty, Vec<(Sym, Ty)>, bool, std::collections::HashSet<Sym>) =
-                        if let Some((type_name, case)) = self.env.lookup_ctor(&ctor_sym) {
+                        // #631: module-aware lookup so a BARE record-variant ctor
+                        // used INSIDE its owning submodule (`Circle { radius: r }`)
+                        // pins `type_name` to the owner-qualified `mod.Shape`,
+                        // matching the tuple-ctor path. Without this the bare result
+                        // type tripped the #433 name-pinning guard at codegen.
+                        if let Some((type_name, case)) = self.env.lookup_ctor_in(&ctor_sym, self.current_module_prefix.as_deref()) {
                             // Brace construction of a NON-record case is a
                             // category error (`Wrap { x: 1 }` on a tuple case):
                             // reject here, or rustc/wasm explode downstream.
@@ -586,6 +603,28 @@ impl Checker {
                         }
                         // Unify left/right types so TypeVars in none/err/constructors get resolved
                         self.unify_infer(&lt, &rt);
+                        // Ordering (< <= > >=) is defined ONLY on scalar orderable
+                        // types. On a compound operand (Tuple/Option/Result/List/
+                        // Map/Set/Record/custom) the checker used to pass while
+                        // codegen diverged: native silently relied on Rust's derive
+                        // (and FAILED on records, E0369) and WASM ICEd
+                        // (equality.rs no-comparison arm). Reject uniformly so check
+                        // matches codegen on both targets; equality (== !=) still
+                        // works (deep structural). #652
+                        if matches!(op.as_str(), "<" | ">" | "<=" | ">=") {
+                            let lc = resolve_ty(&lt, &self.uf);
+                            let orderable = matches!(lc,
+                                Ty::Int | Ty::Float | Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64
+                                | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64
+                                | Ty::Float32 | Ty::Float64 | Ty::String | Ty::Bool
+                                | Ty::Unknown | Ty::TypeVar(_) | Ty::Never);
+                            if !orderable {
+                                self.emit(super::err(
+                                    format!("operator '{}' is not defined for {} — ordering applies to Int, Float, String, and Bool", op, lc.display()),
+                                    "Compare scalar fields explicitly, or use list.sort / list.min / list.max for ordered collections",
+                                    format!("operator {}", op)));
+                            }
+                        }
                         Ty::Bool
                     }
                     "and" | "or" => {
@@ -609,7 +648,18 @@ impl Checker {
             }
 
             ExprKind::Unary { op, operand, .. } => {
+                let is_neg_lit = op.as_str() == "-" && matches!(&operand.kind, ExprKind::Int { .. });
+                let oid = operand.id;
                 let t = self.infer_expr(operand);
+                // #626: `-<int literal>` lets the negation reach i64::MIN, whose
+                // magnitude (2^63) overflows a bare positive literal but is a
+                // valid i64. Mark the candidate (registered while inferring the
+                // operand) so its post-solve range check uses the signed MIN bound.
+                if is_neg_lit {
+                    if let Some(site) = self.deferred_int_overflow_checks.iter_mut().find(|s| s.expr_id == oid) {
+                        site.negated = true;
+                    }
+                }
                 match op.as_str() { "not" => Ty::Bool, _ => t }
             }
 
@@ -828,8 +878,18 @@ impl Checker {
                 let saved_auto_unwrap = self.env.auto_unwrap;
                 self.env.auto_unwrap = false;
                 self.env.lambda_depth += 1;
-                let param_tys: Vec<Ty> = params.iter().map(|p| {
-                    let ty = p.ty.as_ref().map(|te| self.resolve_type_expr(te)).unwrap_or_else(|| self.fresh_var());
+                // Expected-type hint from the enclosing call (#653): when this
+                // lambda is an argument whose parameter slot is a `Fn`, the
+                // caller pins each UNANNOTATED param to the expected element
+                // type (e.g. `T` carrying a protocol bound) so the body resolves
+                // method calls on the param via the protocol path instead of
+                // collapsing it into a closure type. An explicit annotation on
+                // the param always wins; the hint only fills inferred slots.
+                let param_hint = self.lambda_arg_hint.take();
+                let param_tys: Vec<Ty> = params.iter().enumerate().map(|(i, p)| {
+                    let ty = p.ty.as_ref().map(|te| self.resolve_type_expr(te))
+                        .or_else(|| param_hint.as_ref().and_then(|h| h.get(i).cloned()))
+                        .unwrap_or_else(|| self.fresh_var());
                     let concrete = resolve_ty(&ty, &self.uf);
                     self.env.define_var(&p.name, concrete);
                     ty
@@ -890,6 +950,7 @@ impl Checker {
             ExprKind::Unwrap { expr: inner, .. } => {
                 let t = self.infer_expr(inner);
                 let resolved = resolve_ty(&t, &self.uf);
+                self.check_unwrap_propagation_context();
                 if let Some(inner_ty) = resolved.option_inner().or_else(|| resolved.result_ok_ty()) {
                     inner_ty
                 } else if matches!(&resolved, Ty::Unknown | Ty::TypeVar(_)) {
@@ -1047,6 +1108,34 @@ impl Checker {
         ret
     }
 
+    /// `expr!` propagates the unwrapped error: lowering renders it as `?`
+    /// (effect fn body) or `.unwrap()` (test block). In any other context the
+    /// generated `?` lands in a function/closure that does not return Result,
+    /// which is invalid Rust and a wasm build failure — yet the type checker
+    /// previously accepted it (the `Result/Option → T` rule alone). Error
+    /// propagation is possible exactly where `auto_unwrap` is live (an effect
+    /// fn body, outside any lambda) or inside a `test` block; reject everywhere
+    /// else at type-check time so the failure is a clear diagnostic, not a
+    /// codegen ICE (#608).
+    fn check_unwrap_propagation_context(&mut self) {
+        if self.env.auto_unwrap || self.env.in_test_block {
+            return;
+        }
+        // Inside a lambda within an effect fn the call site *looks* effectful,
+        // but `?` cannot propagate out of the closure (#489) — point there
+        // specifically; otherwise the fn just needs to be `effect fn`.
+        let hint = if self.env.can_call_effect && self.env.lambda_depth > 0 {
+            "`!` cannot propagate an error out of a lambda; use `??` for a fallback value or move the call out of the closure"
+        } else {
+            "Mark the enclosing function as `effect fn`, or use `??` to provide a fallback value"
+        };
+        self.emit(super::err(
+            "operator '!' propagates errors and is only valid inside an `effect fn` body or a `test` block".to_string(),
+            hint,
+            "operator !",
+        ).with_code("E022"));
+    }
+
     fn infer_pipe(&mut self, left: &mut Box<ast::Expr>, right: &mut Box<ast::Expr>) -> Ty {
         // Unwrap postfix operators (??, !, ?) on the RHS so the pipe targets the inner Call.
         // e.g. `xs |> list.find(pred) ?? fallback` → pipe into list.find, then apply ??
@@ -1064,6 +1153,7 @@ impl Checker {
             }
             ExprKind::Unwrap { expr: inner, .. } => {
                 let inner_ty = self.infer_pipe(left, inner);
+                self.check_unwrap_propagation_context();
                 // Annotate the inner expression with its resolved type so the lowering
                 // can construct the correct IR type (e.g., Result[List[T], List[E]] for
                 // result.collect rather than hardcoding Result[T, String]).
@@ -1336,12 +1426,31 @@ impl Checker {
         } else { t }
     }
 
+    /// Pin the declared type onto an int-overflow candidate when the literal is
+    /// the DIRECT value of an annotated binding (`let x: T = 5…` or `= -5…`), so
+    /// a wider `T` (e.g. `UInt64`) makes a >i64 literal valid post-solve (#626).
+    fn record_int_literal_context(&mut self, value: &ast::Expr, declared: &Ty) {
+        let lit_id = match &value.kind {
+            ExprKind::Int { .. } => Some(value.id),
+            ExprKind::Unary { op, operand, .. } if op.as_str() == "-"
+                && matches!(&operand.kind, ExprKind::Int { .. }) => Some(operand.id),
+            ExprKind::Paren { expr } if matches!(&expr.kind, ExprKind::Int { .. }) => Some(expr.id),
+            _ => None,
+        };
+        if let Some(id) = lit_id {
+            if let Some(site) = self.deferred_int_overflow_checks.iter_mut().find(|s| s.expr_id == id) {
+                site.context_ty = Some(declared.clone());
+            }
+        }
+    }
+
     pub(crate) fn check_stmt(&mut self, stmt: &mut ast::Stmt) {
         match stmt {
             ast::Stmt::Let { name, ty, value, span } => {
                 let val_ty = self.infer_expr(value);
                 let final_ty = if let Some(te) = ty {
                     let declared = self.resolve_type_expr(te);
+                    self.record_int_literal_context(value, &declared);
                     self.constrain(declared.clone(), val_ty, format!("let {}", name));
                     declared
                 } else {
@@ -1350,7 +1459,14 @@ impl Checker {
                     // unless this binding is later used as a `match x { ok(_) =>
                     // ..., err(_) => ... }` subject — in which case the user
                     // wants to inspect the Result directly.
-                    self.effect_unwrap_rhs(t, self.env.skip_auto_unwrap_for.contains(&sym(name)))
+                    let unwrapped = self.effect_unwrap_rhs(t, self.env.skip_auto_unwrap_for.contains(&sym(name)));
+                    // #662: an un-annotated binding whose value type carries an
+                    // unconstrained phantom slot (only an un-exercised branch
+                    // could pin it) is undecidable — re-check post-solve.
+                    self.deferred_unresolved_binding_checks.push(super::UnresolvedBindingSite {
+                        ty: unwrapped.clone(), name: Some(name.to_string()), span: value.span,
+                    });
+                    unwrapped
                 };
                 if let Some(s) = span {
                     self.env.var_decl_locs.insert(sym(name), (s.line, s.col));
@@ -1362,13 +1478,19 @@ impl Checker {
                 let val_ty = self.infer_expr(value);
                 let final_ty = if let Some(te) = ty {
                     let declared = self.resolve_type_expr(te);
+                    self.record_int_literal_context(value, &declared);
                     self.constrain(declared.clone(), val_ty, format!("let {}", name));
                     declared
                 } else {
                     let t = resolve_ty(&val_ty, &self.uf);
                     // Same rule as Let, including the usage-skip: a `var r =
                     // effectCall()` later matched on ok/err keeps the Result.
-                    self.effect_unwrap_rhs(t, self.env.skip_auto_unwrap_for.contains(&sym(name)))
+                    let unwrapped = self.effect_unwrap_rhs(t, self.env.skip_auto_unwrap_for.contains(&sym(name)));
+                    // #662: same undecidable-phantom-slot re-check as Let.
+                    self.deferred_unresolved_binding_checks.push(super::UnresolvedBindingSite {
+                        ty: unwrapped.clone(), name: Some(name.to_string()), span: value.span,
+                    });
+                    unwrapped
                 };
                 if let Some(s) = span {
                     self.env.var_decl_locs.insert(sym(name), (s.line, s.col));
@@ -1516,7 +1638,15 @@ impl Checker {
             }
             ast::Stmt::FieldAssign { value, .. } => { self.infer_expr(value); }
             ast::Stmt::Guard { cond, else_, .. } => { self.infer_expr(cond); self.infer_expr(else_); }
-            ast::Stmt::Expr { expr, .. } => { self.infer_expr(expr); }
+            ast::Stmt::Expr { expr, .. } => {
+                let t = self.infer_expr(expr);
+                // #662: a discarded expression statement whose type carries an
+                // unconstrained phantom slot (e.g. a bare `result.or_else(r0,
+                // (e) => ok(0))`) is undecidable — re-check post-solve.
+                self.deferred_unresolved_binding_checks.push(super::UnresolvedBindingSite {
+                    ty: resolve_ty(&t, &self.uf), name: None, span: expr.span,
+                });
+            }
             ast::Stmt::Comment { .. } | ast::Stmt::Error { .. } => {}
         }
     }

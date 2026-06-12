@@ -1,0 +1,17 @@
+// @contract: C-081
+// #620: a generic fn called inside a list.map lambda whose param type is left
+// to be inferred from the collection element. The lambda param's generic flowed
+// in only via list.map's (A)->B slot AFTER the body committed unbox's generic T,
+// and `unify_call_arg` does not bind a generic from a TypeVar argument — so T
+// leaked into the union-find as its LITERAL name and never resolved (native
+// [COMPILER BUG] / wasm refused). Now each unbound generic is fresh-instantiated
+// before the back-prop, so T = Box's element = Int resolves. native == wasm.
+type Box[T] = | B(T)
+fn unbox[T](b: Box[T]) -> T = match b { B(x) => x }
+fn main() -> Unit = {
+  let xs: List[Box[Int]] = [B(1), B(2), B(3)]
+  let ys = xs |> list.map((b) => unbox(b))
+  let ss: List[Box[String]] = [B("a"), B("b")]
+  let zs = ss |> list.map((b) => unbox(b))
+  println("${int.to_string(list.len(ys))} ${list.join(zs, ",")}")
+}

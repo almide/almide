@@ -1,0 +1,8 @@
+// A `: Codec` type whose field type `Raw` does not itself derive Codec.
+// The derived `Wrap.encode` calls `Raw.encode`, which does not exist — the
+// checker used to accept this and codegen then failed ("invalid Rust") on
+// native and the wasm build. E023 rejects it structurally. (#611)
+// (Ord and Hash share the same field-recursive requirement.)
+type Raw = { x: Int }
+type Wrap: Codec = { item: Raw }
+fn main() -> Unit = println("unreachable")

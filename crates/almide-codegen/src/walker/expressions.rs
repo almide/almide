@@ -728,7 +728,17 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
                 let when_type = if inner.ty.is_option() { Some("Option") } else { None };
                 let err_coerce_attr = if !inner.ty.is_option() {
                     if let Some((_, err_ty)) = inner.ty.inner2() {
-                        if matches!(err_ty, Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 && matches!(args[0], Ty::String)) {
+                        // When the source error type already matches the
+                        // enclosing fn's propagated error type, `?` carries it
+                        // through unchanged — no coercion. This preserves a
+                        // custom variant error (e.g. `Result[_, AppErr]` !-ed
+                        // inside a fn that also returns `Result[_, AppErr]`)
+                        // instead of stringifying it via Debug (which would
+                        // need `From<String>` and fail to compile). #630
+                        let matches_fn_err = ctx.fn_err_ty.as_ref() == Some(err_ty);
+                        if matches_fn_err {
+                            None
+                        } else if matches!(err_ty, Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 && matches!(args[0], Ty::String)) {
                             Some("map_err_join")
                         } else if !matches!(err_ty, Ty::String) {
                             Some("map_err_debug")
@@ -1112,6 +1122,12 @@ fn render_generic_call(ctx: &RenderContext, target: &CallTarget, args: &[IrExpr]
             // Convention methods: "Type.method" → "Type_method" (free functions in all targets)
             if name.contains('.') {
                 name.replace('.', "_")
+            } else if super::is_rust_keyword(name.as_str()) {
+                // A user fn named `box`/`move`/`dyn`/… is raw-escaped at its
+                // definition; the call site must match or rustc rejects `box(…)`
+                // as a reserved keyword (#659).
+                ctx.templates.render_with("keyword_escape", None, &[], &[("name", name.as_str())])
+                    .unwrap_or_else(|| name.to_string())
             } else {
                 name.to_string()
             }

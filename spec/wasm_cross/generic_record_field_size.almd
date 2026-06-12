@@ -1,0 +1,25 @@
+// @contract: C-092
+// A generic record field must be sized by its INSTANTIATED type at construction,
+// byte-identical native == wasm. The WASM record emit allocated from the DECLARED
+// field list, so a generic field (`value: T`) used the unresolved param's size
+// (4 bytes); a trailing concrete heap field (`label: String`) then wrote past the
+// under-allocated block and read back empty, corrupting both the record and any
+// spread of it. Construction now uses the concrete (substituted) field layout. #650.
+
+type Box[T] = { value: T, label: String }
+type Pair[A, B] = { first: A, second: B, tag: String }
+
+fn main() -> Unit = {
+  let b = Box { value: 7, label: "old" }       // value: Int (8 bytes) precedes label
+  let b2 = Box { ...b, value: 8 }
+  println("b2=${b2.value} b.label=${b.label} b2.label=${b2.label}")
+
+  let bs = Box { value: "hello", label: "L" }   // value: String (4 bytes)
+  println("${bs.value} ${bs.label}")
+
+  let p = Pair { first: 100, second: "hi", tag: "T" } // two generics + trailing concrete
+  println("${p.first} ${p.second} ${p.tag}")
+
+  let p2 = Pair { ...p, first: 200 }
+  println("${p2.first} ${p2.second} ${p2.tag}")
+}

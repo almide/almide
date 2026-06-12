@@ -1242,3 +1242,64 @@ fn unambiguous_constructor_is_not_flagged() {
          fn main() -> Unit = { println(int.to_string(cmd(Stop))) }"
     );
 }
+
+// ── #652: ordering operators reject compound operands (check ⇄ codegen parity) ──
+
+#[test]
+fn ordering_on_tuple_rejected() {
+    let errs = errors("fn main() -> Unit = println(if (1, 2) < (1, 3) then \"lt\" else \"ge\")");
+    assert!(errs.iter().any(|e| e.contains("not defined for")),
+        "tuple `<` should be rejected, got: {:?}", errs);
+}
+
+#[test]
+fn ordering_on_record_rejected() {
+    let errs = errors(
+        "type P = { x: Int, y: Int }\n\
+         fn main() -> Unit = { let a: P = { x: 1, y: 2 }\n let b: P = { x: 1, y: 3 }\n println(if a > b then \"y\" else \"n\") }"
+    );
+    assert!(errs.iter().any(|e| e.contains("not defined for")),
+        "record `>` should be rejected, got: {:?}", errs);
+}
+
+#[test]
+fn ordering_on_list_rejected() {
+    let errs = errors("fn main() -> Unit = println(if [1, 2] <= [1, 3] then \"a\" else \"b\")");
+    assert!(errs.iter().any(|e| e.contains("not defined for")),
+        "list `<=` should be rejected, got: {:?}", errs);
+}
+
+#[test]
+fn ordering_on_scalars_still_accepted() {
+    // Int / Float / String / Bool ordering must keep working — no false positives.
+    for src in [
+        "fn main() -> Unit = println(if 1 < 2 then \"a\" else \"b\")",
+        "fn main() -> Unit = println(if 1.5 >= 2.0 then \"a\" else \"b\")",
+        "fn main() -> Unit = println(if \"a\" < \"b\" then \"a\" else \"b\")",
+        "fn main() -> Unit = println(if false < true then \"a\" else \"b\")",
+    ] {
+        let errs = errors(src);
+        assert!(!errs.iter().any(|e| e.contains("not defined for")),
+            "scalar ordering should be accepted: {} -> {:?}", src, errs);
+    }
+}
+
+// ── #662: undecidable (unconstrained) type slot is rejected (E025), not ICE'd ──
+
+#[test]
+fn check_e025_unconstrained_error_type() {
+    let errs = errors(
+        "fn main() -> Unit = {\n  let r0: Result[Int, String] = ok(7)\n  let r = result.or_else(r0, (e) => ok(0))\n  println(\"done\")\n}"
+    );
+    assert!(errs.iter().any(|e| e.contains("cannot infer a concrete type")),
+        "expected E025 unconstrained-type error, got: {:?}", errs);
+}
+
+#[test]
+fn check_e025_annotated_ok() {
+    let errs = errors(
+        "fn main() -> Unit = {\n  let r0: Result[Int, String] = ok(7)\n  let r: Result[Int, String] = result.or_else(r0, (e) => ok(0))\n  println(\"done\")\n}"
+    );
+    assert!(!errs.iter().any(|e| e.contains("cannot infer a concrete type")),
+        "annotated binding should resolve cleanly, got: {:?}", errs);
+}

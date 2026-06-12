@@ -1,0 +1,16 @@
+// @contract: C-083
+// The i64::MIN magnitude (9223372036854775808) overflows a signed parse, so a
+// negated int literal must fold the minus sign INTO the parse rather than
+// negating an already-overflowed (and clamped) magnitude. #660.
+
+fn main() -> Unit = {
+  let lo: Int = -9223372036854775808
+  let hi: Int = 9223372036854775807
+  println(int.to_string(lo))
+  println(int.to_string(hi))
+  // lo is a real i64::MIN, not 0 — adding 1 stays in range.
+  println(int.to_string(lo + 1))
+  // underscored and hex forms of the same boundary.
+  let lo2: Int = -9_223_372_036_854_775_808
+  println(int.to_string(lo2))
+}

@@ -40,3 +40,24 @@ test "cross-module variant as default value" {
   }
   assert_eq(n, 99)
 }
+
+test "producer-side bare variant ctor inside owning module (#631)" {
+  // varlib.make_wrap constructs Wrap(n) via the BARE ctor INSIDE varlib; before
+  // the fix the ctor-call's type stayed bare `Wrapper` and the #433 guard
+  // aborted codegen on both targets even though check passed.
+  let w = varlib.make_wrap(7)
+  let n = match w {
+    varlib.Wrap(x) => x,
+    varlib.Empty => 0,
+  }
+  assert_eq(n, 7)
+}
+
+test "producer-side bare record-variant ctor inside owning module (#631)" {
+  let c = varlib.make_circle(5)
+  let r = match c {
+    varlib.Circle { radius } => radius,
+    varlib.Dot => 0,
+  }
+  assert_eq(r, 5)
+}

@@ -131,7 +131,8 @@ impl FuncCompiler<'_> {
             }
             "as_string" => {
                 // value.as_string(v: Value) -> Result[String, String]
-                self.emit_value_as_type(args, 4, "string");
+                // Error variant name mirrors the native Value::Str oracle (#657).
+                self.emit_value_as_type(args, 4, "Str");
             }
             "as_int" => {
                 // value.as_int(v: Value) -> Result[Int, String]
@@ -139,7 +140,7 @@ impl FuncCompiler<'_> {
             }
             "as_bool" => {
                 // value.as_bool(v: Value) -> Result[Bool, String]
-                self.emit_value_as_type(args, 1, "bool");
+                self.emit_value_as_type(args, 1, "Bool");
             }
             "to_camel_case" => {
                 self.emit_value_key_transform(args, true);
@@ -171,13 +172,23 @@ impl FuncCompiler<'_> {
                       local_get(result); local_get(v); f64_load(4); f64_store(4);
                       local_get(result);
                     else_;
+                      // #658: a JSON integer is a valid Float — widen Int→f64 so
+                      // Codec roundtrips stay total (mirrors native as_float).
+                      local_get(v); i32_load(0); i32_const(2); i32_eq;
+                      if_i32;
+                        i32_const(12); call(self.emitter.rt.alloc); local_set(result);
+                        local_get(result); i32_const(0); i32_store(0); // ok
+                        local_get(result); local_get(v); i64_load(4); f64_convert_i64_s; f64_store(4);
+                        local_get(result);
+                      else_;
                 });
-                let err_msg = self.emitter.intern_string("expected float");
+                let err_msg = self.emitter.intern_string("expected Float");
                 wasm!(self.func, {
                       i32_const(8); call(self.emitter.rt.alloc); local_set(result);
                       local_get(result); i32_const(1); i32_store(0);
                       local_get(result); i32_const(err_msg as i32); i32_store(4);
                       local_get(result);
+                      end;
                     end;
                 });
                 self.scratch.free_i32(result);
@@ -199,7 +210,7 @@ impl FuncCompiler<'_> {
                       local_get(result);
                     else_;
                 });
-                let err_msg = self.emitter.intern_string("expected array");
+                let err_msg = self.emitter.intern_string("expected Array");
                 wasm!(self.func, {
                       i32_const(8); call(self.emitter.rt.alloc); local_set(result);
                       local_get(result); i32_const(1); i32_store(0);
@@ -274,12 +285,15 @@ impl FuncCompiler<'_> {
                 self.emit_json_keys(args);
             }
             "stringify_pretty" => {
-                // stringify then add newlines after { and , for basic pretty-printing
-                self.emit_value_call("stringify", args);
-                // Replace "," with ",\n" using string.replace runtime
-                // Simpler: just concat "\n" at start to ensure test passes
-                let nl = self.emitter.intern_string("\n");
-                wasm!(self.func, { i32_const(nl as i32); call(self.emitter.rt.concat_str); });
+                // Real recursive pretty-printer mirroring the native oracle
+                // (runtime/rs/src/json.rs stringify_value): 2-space indent per
+                // depth, starting at depth 0. No trailing newline — println adds
+                // exactly one, matching native.
+                self.emit_expr(&args[0]);
+                wasm!(self.func, {
+                    i32_const(0);
+                    call(self.emitter.rt.json_stringify_pretty);
+                });
             }
             // ── JsonPath constructors ──
             "root" => {
@@ -486,7 +500,7 @@ impl FuncCompiler<'_> {
               local_get(result);
             else_;
         });
-        let err_msg = self.emitter.intern_string("expected int");
+        let err_msg = self.emitter.intern_string("expected Int");
         wasm!(self.func, {
               i32_const(8); call(self.emitter.rt.alloc); local_set(result);
               local_get(result); i32_const(1); i32_store(0); // err
@@ -613,6 +627,9 @@ impl FuncCompiler<'_> {
             "as_float" => 8,
             _ => 4,
         };
+        // #658: json.as_float widens a JSON Int to Float, matching the native
+        // almide_json_as_float oracle (a JSON number is type-agnostic).
+        let coerce_int = func == "as_float";
         let v = self.scratch.alloc_i32();
         let option_box = self.scratch.alloc_i32();
         self.emit_expr(&args[0]);
@@ -632,7 +649,22 @@ impl FuncCompiler<'_> {
         wasm!(self.func, {
               local_get(option_box);
             else_;
-              i32_const(0); // none
+        });
+        if coerce_int {
+            wasm!(self.func, {
+              local_get(v); i32_load(0); i32_const(2); i32_eq;
+              if_i32;
+                i32_const(8); call(self.emitter.rt.alloc); local_set(option_box);
+                local_get(option_box); local_get(v); i64_load(4); f64_convert_i64_s; f64_store(0);
+                local_get(option_box);
+              else_;
+                i32_const(0); // none
+              end;
+            });
+        } else {
+            wasm!(self.func, { i32_const(0); }); // none
+        }
+        wasm!(self.func, {
             end;
         });
         self.scratch.free_i32(option_box);
@@ -706,7 +738,7 @@ impl FuncCompiler<'_> {
             local_get(v); i32_load(0); i32_const(6); i32_ne;
             if_i32;
         });
-        let err_msg = self.emitter.intern_string("expected object");
+        let err_msg = self.emitter.intern_string("expected Object");
         wasm!(self.func, {
               i32_const(8); call(self.emitter.rt.alloc); local_set(result);
               local_get(result); i32_const(1); i32_store(0);
@@ -737,11 +769,19 @@ impl FuncCompiler<'_> {
               local_get(result); i32_eqz;
               if_empty;
         });
-        let nf_msg = self.emitter.intern_string("key not found");
+        // Mirror the native oracle's `format!("missing field '{}'", key)` exactly
+        // (runtime/rs/src/value.rs::almide_rt_value_field) so Codec decode errors
+        // are byte-identical across targets (#657). The key is a runtime string,
+        // so build the message with two __concat_str calls.
+        let mf_prefix = self.emitter.intern_string("missing field '");
+        let mf_suffix = self.emitter.intern_string("'");
         wasm!(self.func, {
                 i32_const(8); call(self.emitter.rt.alloc); local_set(result);
                 local_get(result); i32_const(1); i32_store(0);
-                local_get(result); i32_const(nf_msg as i32); i32_store(4);
+                local_get(result);
+                  i32_const(mf_prefix as i32); local_get(key); call(self.emitter.rt.concat_str);
+                  i32_const(mf_suffix as i32); call(self.emitter.rt.concat_str);
+                i32_store(4);
               end;
               local_get(result);
             end;
@@ -1301,7 +1341,7 @@ impl FuncCompiler<'_> {
             local_get(v); i32_load(0); i32_const(6); i32_ne;
             if_i32;
         });
-        let err_msg = self.emitter.intern_string("expected object");
+        let err_msg = self.emitter.intern_string("expected Object");
         wasm!(self.func, {
               i32_const(8); call(self.emitter.rt.alloc); local_set(result);
               local_get(result); i32_const(1); i32_store(0); // err
@@ -1363,7 +1403,7 @@ impl FuncCompiler<'_> {
                     local_get(found); i32_load(0); i32_const(4); i32_ne;
                     if_i32;
                 });
-                let type_err = self.emitter.intern_string("expected string");
+                let type_err = self.emitter.intern_string("expected Str");
                 wasm!(self.func, {
                         i32_const(8); call(self.emitter.rt.alloc); local_set(result);
                         local_get(result); i32_const(1); i32_store(0);
@@ -1385,7 +1425,7 @@ impl FuncCompiler<'_> {
                     local_get(found); i32_load(0); i32_const(2); i32_ne;
                     if_i32;
                 });
-                let type_err = self.emitter.intern_string("expected int");
+                let type_err = self.emitter.intern_string("expected Int");
                 wasm!(self.func, {
                         i32_const(8); call(self.emitter.rt.alloc); local_set(result);
                         local_get(result); i32_const(1); i32_store(0);
@@ -1402,23 +1442,32 @@ impl FuncCompiler<'_> {
                 });
             }
             "float" => {
+                // #658: accept both Float (tag 3) and Int (tag 2, widened to f64).
+                let type_err = self.emitter.intern_string("expected Float");
                 wasm!(self.func, {
-                    local_get(found); i32_load(0); i32_const(3); i32_ne;
+                    local_get(found); i32_load(0); i32_const(3); i32_eq;
                     if_i32;
-                });
-                let type_err = self.emitter.intern_string("expected float");
-                wasm!(self.func, {
-                        i32_const(8); call(self.emitter.rt.alloc); local_set(result);
-                        local_get(result); i32_const(1); i32_store(0);
-                        local_get(result); i32_const(type_err as i32); i32_store(4);
-                        local_get(result);
-                    else_;
                         i32_const(8); call(self.emitter.rt.alloc); local_set(some_opt);
                         local_get(some_opt); local_get(found); f64_load(4); f64_store(0);
                         i32_const(8); call(self.emitter.rt.alloc); local_set(result);
                         local_get(result); i32_const(0); i32_store(0);
                         local_get(result); local_get(some_opt); i32_store(4);
                         local_get(result);
+                    else_;
+                      local_get(found); i32_load(0); i32_const(2); i32_eq;
+                      if_i32;
+                        i32_const(8); call(self.emitter.rt.alloc); local_set(some_opt);
+                        local_get(some_opt); local_get(found); i64_load(4); f64_convert_i64_s; f64_store(0);
+                        i32_const(8); call(self.emitter.rt.alloc); local_set(result);
+                        local_get(result); i32_const(0); i32_store(0);
+                        local_get(result); local_get(some_opt); i32_store(4);
+                        local_get(result);
+                      else_;
+                        i32_const(8); call(self.emitter.rt.alloc); local_set(result);
+                        local_get(result); i32_const(1); i32_store(0);
+                        local_get(result); i32_const(type_err as i32); i32_store(4);
+                        local_get(result);
+                      end;
                     end;
                 });
             }
@@ -1427,7 +1476,7 @@ impl FuncCompiler<'_> {
                     local_get(found); i32_load(0); i32_const(1); i32_ne;
                     if_i32;
                 });
-                let type_err = self.emitter.intern_string("expected bool");
+                let type_err = self.emitter.intern_string("expected Bool");
                 wasm!(self.func, {
                         i32_const(8); call(self.emitter.rt.alloc); local_set(result);
                         local_get(result); i32_const(1); i32_store(0);
@@ -1520,7 +1569,7 @@ impl FuncCompiler<'_> {
             local_get(v); i32_load(0); i32_const(6); i32_ne;
             if_i32;
         });
-        let err_msg = self.emitter.intern_string("expected object");
+        let err_msg = self.emitter.intern_string("expected Object");
         wasm!(self.func, {
               i32_const(8); call(self.emitter.rt.alloc); local_set(result);
               local_get(result); i32_const(1); i32_store(0);
@@ -1600,7 +1649,7 @@ impl FuncCompiler<'_> {
                     local_get(found); i32_load(0); i32_const(4); i32_ne;
                     if_i32;
                 });
-                let te = self.emitter.intern_string("expected string");
+                let te = self.emitter.intern_string("expected Str");
                 wasm!(self.func, {
                         i32_const(8); call(self.emitter.rt.alloc); local_set(result);
                         local_get(result); i32_const(1); i32_store(0);
@@ -1619,7 +1668,7 @@ impl FuncCompiler<'_> {
                     local_get(found); i32_load(0); i32_const(2); i32_ne;
                     if_i32;
                 });
-                let te = self.emitter.intern_string("expected int");
+                let te = self.emitter.intern_string("expected Int");
                 wasm!(self.func, {
                         i32_const(8); call(self.emitter.rt.alloc); local_set(result);
                         local_get(result); i32_const(1); i32_store(0);
@@ -1634,21 +1683,28 @@ impl FuncCompiler<'_> {
                 });
             }
             "float" => {
+                // #658: widen a JSON Int (tag 2) to Float, like native as_float.
+                let te = self.emitter.intern_string("expected Float");
                 wasm!(self.func, {
-                    local_get(found); i32_load(0); i32_const(3); i32_ne;
+                    local_get(found); i32_load(0); i32_const(3); i32_eq;
                     if_i32;
-                });
-                let te = self.emitter.intern_string("expected float");
-                wasm!(self.func, {
-                        i32_const(8); call(self.emitter.rt.alloc); local_set(result);
-                        local_get(result); i32_const(1); i32_store(0);
-                        local_get(result); i32_const(te as i32); i32_store(4);
-                        local_get(result);
-                    else_;
                         i32_const(12); call(self.emitter.rt.alloc); local_set(result);
                         local_get(result); i32_const(0); i32_store(0);
                         local_get(result); local_get(found); f64_load(4); f64_store(4);
                         local_get(result);
+                    else_;
+                      local_get(found); i32_load(0); i32_const(2); i32_eq;
+                      if_i32;
+                        i32_const(12); call(self.emitter.rt.alloc); local_set(result);
+                        local_get(result); i32_const(0); i32_store(0);
+                        local_get(result); local_get(found); i64_load(4); f64_convert_i64_s; f64_store(4);
+                        local_get(result);
+                      else_;
+                        i32_const(8); call(self.emitter.rt.alloc); local_set(result);
+                        local_get(result); i32_const(1); i32_store(0);
+                        local_get(result); i32_const(te as i32); i32_store(4);
+                        local_get(result);
+                      end;
                     end;
                 });
             }
@@ -1657,7 +1713,7 @@ impl FuncCompiler<'_> {
                     local_get(found); i32_load(0); i32_const(1); i32_ne;
                     if_i32;
                 });
-                let te = self.emitter.intern_string("expected bool");
+                let te = self.emitter.intern_string("expected Bool");
                 wasm!(self.func, {
                         i32_const(8); call(self.emitter.rt.alloc); local_set(result);
                         local_get(result); i32_const(1); i32_store(0);
@@ -1824,7 +1880,7 @@ impl FuncCompiler<'_> {
             local_get(v); i32_load(0); i32_const(5); i32_ne;
             if_i32;
         });
-        let err_msg = self.emitter.intern_string("expected array");
+        let err_msg = self.emitter.intern_string("expected Array");
         let elem_size: u32 = match suffix {
             "int" | "float" => 8, _ => 4,
         };
