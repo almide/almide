@@ -1,0 +1,40 @@
+// @contract: C-093
+// Mutually-recursive variant types (a cycle spanning two or more types) compile
+// and run byte-identical native == wasm. The native enum emit boxed a field only
+// when it named the ENCLOSING type, so a mutual cycle (`type A = A(B); type B =
+// B(A)`) emitted both enums without indirection — rustc rejects that as infinite
+// size (E0072). Recursion detection is now cycle-based (reachability), and the
+// Box/deref/annotation sites box any field that references a cycle member. #656.
+
+type A = | A(B)
+type B = | BLeaf | BWrap(A)
+
+fn depth(a: A) -> Int = match a {
+  A(b) => match b {
+    BLeaf => 0,
+    BWrap(inner) => 1 + depth(inner),
+  },
+}
+
+// A three-type cycle X -> Y -> Z -> X exercises a longer reachability path.
+type X = | X(Y)
+type Y = | Y(Z)
+type Z = | ZEnd | ZBack(X)
+
+fn zdepth(x: X) -> Int = match x {
+  X(y) => match y {
+    Y(z) => match z {
+      ZEnd => 0,
+      ZBack(inner) => 1 + zdepth(inner),
+    },
+  },
+}
+
+fn main() -> Unit = {
+  let v = A(BWrap(A(BWrap(A(BLeaf)))))
+  println(int.to_string(depth(v)))
+  match v { A(_) => println("ok") }
+
+  let w = X(Y(ZBack(X(Y(ZEnd)))))
+  println(int.to_string(zdepth(w)))
+}

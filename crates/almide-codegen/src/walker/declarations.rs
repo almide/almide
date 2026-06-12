@@ -5,7 +5,7 @@ use almide_ir::*;
 use almide_lang::types::Ty;
 use super::RenderContext;
 use super::types::render_type;
-use super::helpers::{template_or, ty_contains_name, render_type_field_fn};
+use super::helpers::{template_or, render_type_field_fn};
 
 pub fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
     let decl_attrs: Vec<&str> = if ctx.repr_c { vec!["repr_c"] } else { vec![] };
@@ -77,7 +77,9 @@ pub fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
                             // Closure payloads (direct or nested in a container) use
                             // Rc<dyn Fn> — same as a struct field.
                             let rendered = render_type_field_fn(ctx, t);
-                            if is_recursive && ty_contains_name(t, &td.name) { format!("std::boxed::Box<{}>", rendered) } else { rendered }
+                            // Box a field referencing ANY cycle member (mutual recursion), not
+                            // just the enclosing type's own name (#656).
+                            if is_recursive && super::ty_contains_any_recursive(t, &ctx.ann.recursive_enums) { format!("std::boxed::Box<{}>", rendered) } else { rendered }
                         }).collect();
                         let fields_str = types.join(", ");
                         // Named params via fn_param template (respects JS/TS)
@@ -98,7 +100,7 @@ pub fn render_type_decl(ctx: &RenderContext, td: &IrTypeDecl) -> String {
                         let fields_str = fields.iter()
                             .map(|f| {
                                 let rendered = render_type_field_fn(ctx, &f.ty);
-                                let boxed = if ctx.ann.recursive_enums.contains(&*td.name) && ty_contains_name(&f.ty, &td.name) {
+                                let boxed = if ctx.ann.recursive_enums.contains(&*td.name) && super::ty_contains_any_recursive(&f.ty, &ctx.ann.recursive_enums) {
                                     format!("std::boxed::Box<{}>", rendered)
                                 } else {
                                     rendered

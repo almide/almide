@@ -14,6 +14,7 @@ mod types;
 
 // Re-exports for external consumers
 pub use helpers::ty_contains_name;
+pub use helpers::ty_contains_any_recursive;
 pub use types::render_type;
 pub use expressions::render_expr;
 pub use statements::{render_stmt, render_pattern};

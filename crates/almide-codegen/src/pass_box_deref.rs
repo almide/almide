@@ -3,7 +3,7 @@
 //! When a recursive enum has Box'd fields (e.g., Node(Box<Tree>, Box<Tree>)),
 //! variables bound in match patterns from those fields need *deref when used.
 
-use std::collections::HashSet;
+use std::collections::{HashSet, HashMap};
 use almide_ir::*;
 use almide_lang::types::Ty;
 use super::pass::{NanoPass, PassResult, Target};
@@ -42,24 +42,25 @@ impl NanoPass for BoxDerefPass {
         // Step 3: Populate codegen annotations
         program.codegen_annotations.recursive_enums = recursive.clone();
 
-        // Build boxed_fields: for each recursive enum, find which variant fields reference the enum
+        // Build boxed_fields: for each recursive enum, find which variant fields
+        // reference ANY cycle member (mutual recursion, not only self) (#656).
+        let rec_ref = &recursive;
         program.codegen_annotations.boxed_fields = program.type_decls.iter()
             .chain(program.modules.iter().flat_map(|m| m.type_decls.iter()))
-            .filter(|td| recursive.contains(&*td.name))
+            .filter(|td| rec_ref.contains(&*td.name))
             .filter_map(|td| match &td.kind {
-                IrTypeDeclKind::Variant { cases, .. } => Some((td, cases)),
+                IrTypeDeclKind::Variant { cases, .. } => Some(cases),
                 _ => None,
             })
-            .flat_map(|(td, cases)| {
+            .flat_map(|cases| {
                 cases.iter().flat_map(move |c| {
-                    let name = &td.name;
                     match &c.kind {
                         IrVariantKind::Record { fields } => fields.iter()
-                            .filter(|f| walker::ty_contains_name(&f.ty, name))
+                            .filter(|f| walker::ty_contains_any_recursive(&f.ty, rec_ref))
                             .map(|f| (c.name.to_string(), f.name.to_string()))
                             .collect::<Vec<_>>(),
                         IrVariantKind::Tuple { fields } => fields.iter().enumerate()
-                            .filter(|(_, t)| walker::ty_contains_name(t, name))
+                            .filter(|(_, t)| walker::ty_contains_any_recursive(t, rec_ref))
                             .map(|(i, _)| (c.name.to_string(), format!("{}", i)))
                             .collect::<Vec<_>>(),
                         _ => vec![],
@@ -110,17 +111,54 @@ impl NanoPass for BoxDerefPass {
 }
 
 /// Find recursive enums from a set of type declarations.
+/// Collect every Named/Variant type name appearing anywhere inside `ty`.
+fn collect_type_names(ty: &Ty, out: &mut HashSet<String>) {
+    let names = std::cell::RefCell::new(out);
+    ty.any_child_recursive(&|t| {
+        match t {
+            Ty::Named(n, _) => { names.borrow_mut().insert(n.to_string()); }
+            Ty::Variant { name, .. } => { names.borrow_mut().insert(name.to_string()); }
+            _ => {}
+        }
+        false // visit every child, never short-circuit
+    });
+}
+
+/// A variant type needs a Box indirection iff it participates in a recursion
+/// CYCLE — it can reach itself by following variant-field type references. This
+/// catches mutual recursion (`type A = A(B); type B = B(A)`), not only direct
+/// self-recursion, so neither member is emitted as an infinitely-sized native
+/// enum (E0072) (#656).
 fn find_recursive_enums<'a>(type_decls: impl Iterator<Item = &'a IrTypeDecl>) -> HashSet<String> {
-    let mut recursive = HashSet::new();
+    // Reference graph: type name → names it mentions in any variant field type.
+    let mut graph: HashMap<String, HashSet<String>> = HashMap::new();
     for td in type_decls {
         if let IrTypeDeclKind::Variant { cases, .. } = &td.kind {
-            let is_recursive = cases.iter().any(|case| match &case.kind {
-                IrVariantKind::Tuple { fields } => fields.iter().any(|f| ty_contains_name(f, &td.name)),
-                IrVariantKind::Record { fields } => fields.iter().any(|f| ty_contains_name(&f.ty, &td.name)),
-                _ => false,
-            });
-            if is_recursive {
-                recursive.insert(td.name.to_string());
+            let mut refs = HashSet::new();
+            for case in cases {
+                match &case.kind {
+                    IrVariantKind::Tuple { fields } => {
+                        for f in fields { collect_type_names(f, &mut refs); }
+                    }
+                    IrVariantKind::Record { fields } => {
+                        for f in fields { collect_type_names(&f.ty, &mut refs); }
+                    }
+                    _ => {}
+                }
+            }
+            graph.insert(td.name.to_string(), refs);
+        }
+    }
+    // A type is recursive iff it can reach itself through ≥1 edge.
+    let mut recursive = HashSet::new();
+    for start in graph.keys().cloned().collect::<Vec<_>>() {
+        let mut stack: Vec<String> = graph[&start].iter().cloned().collect();
+        let mut visited: HashSet<String> = HashSet::new();
+        while let Some(n) = stack.pop() {
+            if n == start { recursive.insert(start.clone()); break; }
+            if !visited.insert(n.clone()) { continue; }
+            if let Some(next) = graph.get(&n) {
+                stack.extend(next.iter().cloned());
             }
         }
     }
@@ -357,7 +395,7 @@ impl IrVisitor for DerefCollector<'_> {
                 if self.recursive_enums.contains(ename.as_str()) {
                     let td = self.type_decls.iter().find(|td| *ename == td.name);
                     for arm in arms {
-                        collect_deref_from_pattern(&arm.pattern, ename, td, self.name_to_var, self.deref_vars);
+                        collect_deref_from_pattern(&arm.pattern, self.recursive_enums, td, self.name_to_var, self.deref_vars);
                     }
                 }
             }
@@ -377,12 +415,14 @@ fn find_variant_case<'a>(td: Option<&'a IrTypeDecl>, ctor_name: &str) -> Option<
     cases.iter().find(|c| c.name == ctor_name).map(|c| &c.kind)
 }
 
-fn collect_deref_from_pattern(pattern: &IrPattern, enum_name: &str, td: Option<&IrTypeDecl>, name_to_var: &std::collections::HashMap<String, Vec<VarId>>, deref_vars: &mut HashSet<VarId>) {
+fn collect_deref_from_pattern(pattern: &IrPattern, recursive: &HashSet<String>, td: Option<&IrTypeDecl>, name_to_var: &std::collections::HashMap<String, Vec<VarId>>, deref_vars: &mut HashSet<VarId>) {
     match pattern {
         IrPattern::Constructor { name, args } => {
             let Some(IrVariantKind::Tuple { fields }) = find_variant_case(td, name) else { return };
+            // A field bound here is Box'd iff it references ANY cycle member, so
+            // the deref must use the SAME predicate as the Box-rendering site (#656).
             args.iter().enumerate()
-                .filter(|(i, _)| fields.get(*i).map_or(false, |ft| ty_contains_name(ft, enum_name)))
+                .filter(|(i, _)| fields.get(*i).map_or(false, |ft| walker::ty_contains_any_recursive(ft, recursive)))
                 .for_each(|(_, arg)| collect_bind_vars(arg, deref_vars));
         }
         IrPattern::RecordPattern { name, fields, .. } => {
@@ -390,7 +430,7 @@ fn collect_deref_from_pattern(pattern: &IrPattern, enum_name: &str, td: Option<&
             for field_pat in fields {
                 let is_recursive = case_fields.iter()
                     .find(|f| f.name == field_pat.name)
-                    .map_or(false, |f| ty_contains_name(&f.ty, enum_name));
+                    .map_or(false, |f| walker::ty_contains_any_recursive(&f.ty, recursive));
                 if !is_recursive { continue; }
 
                 if let Some(ref p) = field_pat.pattern {
@@ -414,15 +454,5 @@ fn collect_bind_vars(pattern: &IrPattern, deref_vars: &mut HashSet<VarId>) {
             for a in args { collect_bind_vars(a, deref_vars); }
         }
         _ => {}
-    }
-}
-
-fn ty_contains_name(ty: &Ty, name: &str) -> bool {
-    match ty {
-        Ty::Named(n, args) => n == name || args.iter().any(|a| ty_contains_name(a, name)),
-        Ty::Variant { name: vn, .. } => vn == name,
-        Ty::Applied(_, args) => args.iter().any(|a| ty_contains_name(a, name)),
-        Ty::Tuple(elems) => elems.iter().any(|e| ty_contains_name(e, name)),
-        _ => false,
     }
 }
