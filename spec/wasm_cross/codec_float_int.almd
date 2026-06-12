@@ -1,0 +1,29 @@
+// @contract: C-085
+// A JSON number carries no int/float distinction, so an integer literal is a
+// valid Float. value.as_float / json.as_float / Codec Float-field decode all
+// widen Int -> f64 (matching the native oracle and serde), keeping Codec
+// roundtrips total when a Float value happens to be integral. #658.
+import json
+
+type Ratio: Codec = { num: Float, opt: Option[Float], scaled: Float = 1.5, label: String }
+
+fn main() -> Unit = {
+  // num / opt / scaled all supplied as integer JSON numbers — widen to Float.
+  let v = json.parse("{\"num\": 3, \"opt\": 4, \"scaled\": 5, \"label\": \"x\"}") ?? json.null()
+  println(match Ratio.decode(v) {
+    ok(r) => float.to_string(r.num) + " " + float.to_string(r.opt ?? -1.0) + " " + float.to_string(r.scaled),
+    err(e) => e,
+  })
+
+  // 'scaled' absent → default 1.5; 'opt' absent → None; num is integral.
+  let v2 = json.parse("{\"num\": 8, \"label\": \"y\"}") ?? json.null()
+  println(match Ratio.decode(v2) {
+    ok(r) => float.to_string(r.num) + " " + float.to_string(r.scaled),
+    err(e) => e,
+  })
+
+  // Direct value.as_float and json.as_float widen an Int too.
+  let n = json.parse("7") ?? json.null()
+  println(float.to_string(value.as_float(n) ?? -1.0))
+  println(float.to_string(json.as_float(n) ?? -1.0))
+}
