@@ -11,7 +11,10 @@ pub fn almide_rt_bytes_slice(b: &Vec<u8>, start: i64, end: i64) -> Vec<u8> {
     let e = (end as usize).min(b.len());
     if s >= e { Vec::new() } else { b[s..e].to_vec() }
 }
-pub fn almide_rt_bytes_from_list(xs: &Vec<i64>) -> Vec<u8> { xs.iter().map(|&x| x as u8).collect() }
+// Takes a slice (not `&Vec`) so a `List[Int]` function PARAMETER — emitted as
+// `&[i64]` — passes directly, while a local `Vec<i64>` still deref-coerces. The
+// `&Vec` form rejected the param with E0308 (#665).
+pub fn almide_rt_bytes_from_list(xs: &[i64]) -> Vec<u8> { xs.iter().map(|&x| x as u8).collect() }
 pub fn almide_rt_bytes_to_list(b: &Vec<u8>) -> Vec<i64> { b.iter().map(|&x| x as i64).collect() }
 pub fn almide_rt_bytes_concat(a: &Vec<u8>, b: &Vec<u8>) -> Vec<u8> { let mut r = a.clone(); r.extend_from_slice(b); r }
 pub fn almide_rt_bytes_repeat(b: &Vec<u8>, n: i64) -> Vec<u8> { b.repeat(n.max(0) as usize) }

@@ -3,7 +3,7 @@
 use almide_lang::ast;
 use almide_ir::*;
 use crate::types::{Ty, TypeConstructorId};
-use almide_base::intern::sym;
+use almide_base::intern::{sym, Sym};
 use super::LowerCtx;
 use super::expressions::lower_expr;
 use super::types::resolve_type_expr;
@@ -97,13 +97,38 @@ pub(super) fn lower_call(ctx: &mut LowerCtx, callee: &ast::Expr, args: &[ast::Ex
         }));
     }
 
-    // Default args: fill in remaining defaults (for calls without named args)
+    // Default args: fill in remaining defaults (for calls without named args).
+    // A default value that references an EARLIER parameter (`fn rect(w, h: Int =
+    // w)`) must be filled with that parameter's actual argument — the callee-local
+    // name does not exist at the call site (rustc E0425) (#664). Build a
+    // param→value map from the provided args and each already-filled default, then
+    // substitute before lowering. Guarded on a 1:1 arg/param alignment so prepended
+    // const-type-args / UFCS objects don't desync the mapping.
     if let (true, CallTarget::Named { name }) = (named_args.is_empty(), &target) {
         if let Some(defaults) = ctx.fn_defaults.get(name).cloned() {
-            ir_args.extend(
-                defaults.iter().skip(ir_args.len())
-                    .filter_map(|d| d.as_ref().map(|expr| lower_expr(ctx, expr)))
-            );
+            let param_names: Vec<Sym> = ctx.env.functions.get(name)
+                .map(|sig| sig.params.iter().map(|(n, _)| almide_base::intern::sym(&n.to_string())).collect())
+                .unwrap_or_default();
+            let n_provided = ir_args.len();
+            let aligned = n_provided == args.len() && !param_names.is_empty();
+            let mut param_values: std::collections::HashMap<Sym, ast::Expr> = std::collections::HashMap::new();
+            if aligned {
+                for (j, arg) in args.iter().enumerate() {
+                    if let Some(pn) = param_names.get(j) { param_values.insert(*pn, arg.clone()); }
+                }
+            }
+            for j in n_provided..defaults.len() {
+                if let Some(default_expr) = defaults.get(j).and_then(|d| d.as_ref()) {
+                    if aligned {
+                        let mut d = default_expr.clone();
+                        substitute_call_params(&mut d, &param_values);
+                        if let Some(pn) = param_names.get(j) { param_values.insert(*pn, d.clone()); }
+                        ir_args.push(lower_expr(ctx, &d));
+                    } else {
+                        ir_args.push(lower_expr(ctx, default_expr));
+                    }
+                }
+            }
         }
     }
 
@@ -450,4 +475,23 @@ pub(super) fn lower_call_target(ctx: &mut LowerCtx, callee: &ast::Expr) -> CallT
             CallTarget::Computed { callee: Box::new(ir_callee) }
         }
     }
+}
+
+/// Replace each `Ident { name }` that names a call parameter with the AST of the
+/// value bound to that parameter, used to fill a default value that references an
+/// earlier parameter (`fn rect(w, h: Int = w)`) with the actual argument instead
+/// of the callee-local name, which is out of scope at the call site (E0425) (#664).
+/// A self-referential argument (`rect(w)` passing a caller-local `w` for param
+/// `w`) is left untouched: that name already resolves correctly at the call site,
+/// and replacing it would re-enter this pre-order visitor forever.
+fn substitute_call_params(expr: &mut ast::Expr, param_values: &std::collections::HashMap<Sym, ast::Expr>) {
+    ast::visit_expr_mut(expr, &mut |e| {
+        if let ast::ExprKind::Ident { name } = &e.kind {
+            if let Some(repl) = param_values.get(name) {
+                if !matches!(&repl.kind, ast::ExprKind::Ident { name: rn } if rn == name) {
+                    *e = repl.clone();
+                }
+            }
+        }
+    });
 }

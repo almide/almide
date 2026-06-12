@@ -30,6 +30,24 @@ use statements::render_stmt as render_stmt_fn;
 use helpers::{terminate_stmt, indent_lines};
 use declarations::{render_type_decl, collect_named_records, collect_anon_records, collect_record_field_counts};
 
+/// Is `name` a Rust keyword (strict, reserved, or weak) that must be raw-escaped
+/// (`r#name`) when used as an identifier? Single source of truth for every
+/// emission site — a var name, a fn parameter, a fn DEFINITION, and a fn CALL
+/// site — so a user fn named `box`/`move`/`dyn`/… escapes identically on both
+/// sides of the call (#659). An incomplete per-site list previously let the
+/// definition or the call slip through unescaped, producing invalid Rust.
+pub(crate) fn is_rust_keyword(name: &str) -> bool {
+    matches!(name,
+        "as" | "async" | "await" | "break" | "const" | "continue" | "crate"
+        | "dyn" | "else" | "enum" | "extern" | "false" | "fn" | "for" | "if"
+        | "impl" | "in" | "let" | "loop" | "match" | "mod" | "move" | "mut"
+        | "pub" | "ref" | "return" | "self" | "Self" | "static" | "struct"
+        | "super" | "trait" | "true" | "type" | "unsafe" | "use" | "where" | "while"
+        | "abstract" | "become" | "box" | "do" | "final" | "macro" | "override"
+        | "priv" | "try" | "typeof" | "unsized" | "virtual" | "yield"
+    )
+}
+
 /// Render context: carries the variable table, target, and annotations.
 /// The walker NEVER checks types — all codegen decisions come from annotations.
 pub struct RenderContext<'a> {
@@ -89,17 +107,7 @@ impl<'a> RenderContext<'a> {
 
     pub(crate) fn var_name(&self, id: VarId) -> String {
         let name = &self.var_table.get(id).name;
-        let kw = [
-            // Rust keywords
-            "as", "async", "await", "break", "const", "continue", "crate",
-            "dyn", "else", "enum", "extern", "false", "fn", "for", "if",
-            "impl", "in", "let", "loop", "match", "mod", "move", "mut",
-            "pub", "ref", "return", "self", "Self", "static", "struct",
-            "super", "trait", "true", "type", "unsafe", "use", "where", "while",
-            "abstract", "become", "box", "do", "final", "macro", "override",
-            "priv", "try", "typeof", "unsized", "virtual", "yield",
-        ];
-        if kw.contains(&name.as_str()) {
+        if is_rust_keyword(name.as_str()) {
             self.templates.render_with("keyword_escape", None, &[], &[("name", name.as_str())])
                 .unwrap_or_else(|| name.to_string())
         } else {
@@ -370,12 +378,9 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
         .replace('|', "_pipe_").replace('&', "_amp_").replace('%', "_mod_");
     // Strip any remaining non-ASCII characters (e.g., →, ★, etc.)
     safe_name = safe_name.chars().map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' }).collect();
-    // Escape target-specific keywords via template
-    let target_keywords = ["while", "for", "if", "else", "match", "loop", "break", "continue",
-        "return", "fn", "let", "mut", "use", "mod", "pub", "struct", "enum", "impl", "trait",
-        "type", "where", "as", "in", "ref", "self", "super", "crate", "const", "static",
-        "unsafe", "async", "await", "dyn", "move", "true", "false", "try", "yield"];
-    if target_keywords.contains(&safe_name.as_str()) {
+    // Escape a Rust-keyword fn name (`box` → `r#box`) via the shared predicate so
+    // the DEFINITION matches the CALL site exactly (#659).
+    if is_rust_keyword(safe_name.as_str()) {
         safe_name = ctx.templates.render_with("keyword_escape", None, &[], &[("name", safe_name.as_str())])
             .unwrap_or(safe_name);
     }
