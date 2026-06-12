@@ -1076,3 +1076,12 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/generic_record_field_size.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-093"
+title     = "Mutually-recursive variant types compile on both targets"
+statement = "Variant types forming a recursion cycle across two or more types (type A = A(B); type B = B(A)) compile and run byte-identical native == wasm. The native enum emit boxed a variant field only when it named the ENCLOSING type, so a mutual cycle emitted both enums without indirection and rustc rejected them as infinitely sized (E0072). Recursion detection is now cycle-based (a type that can reach itself through variant-field references), and the Box-rendering, pattern-deref, and boxed-fields-annotation sites all box a field that references ANY cycle member."
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/mutual_recursive_types.almd", class = "fixture" },
+]
