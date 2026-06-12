@@ -42,7 +42,11 @@ pub fn almide_rt_value_as_int(v: &Value) -> Result<i64, String> {
     match v { Value::Int(n) => Ok(*n), _ => Err("expected Int".to_string()) }
 }
 pub fn almide_rt_value_as_float(v: &Value) -> Result<f64, String> {
-    match v { Value::Float(f) => Ok(*f), _ => Err("expected Float".to_string()) }
+    // A JSON number has no int/float distinction, so an integer literal is a
+    // valid Float — widen it (mirrors json.as_float/get_float, value.rs siblings,
+    // and serde's f64 deserializer). Keeps Codec roundtrips total for Float
+    // fields whose value happens to be integral (#658).
+    match v { Value::Float(f) => Ok(*f), Value::Int(n) => Ok(*n as f64), _ => Err("expected Float".to_string()) }
 }
 pub fn almide_rt_value_as_bool(v: &Value) -> Result<bool, String> {
     match v { Value::Bool(b) => Ok(*b), _ => Err("expected Bool".to_string()) }
