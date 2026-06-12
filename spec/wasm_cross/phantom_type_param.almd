@@ -1,0 +1,15 @@
+// @contract: C-078
+// #621: a record type whose generic param is PHANTOM (declared but used by no
+// field) compiles + runs byte-identical native == wasm. Rust rejects an unused
+// type param (error[E0392]); native codegen previously emitted
+// `struct Tagged<T> { raw: i64 }` verbatim → invalid Rust, while wasm (which
+// erases types) was fine. The Rust target now strips the phantom param from the
+// struct and from every reference to it; the param carries no runtime data so
+// `Tagged[String]` and `Tagged[Int]` share one representation.
+type Tagged[T] = { raw: Int }
+fn unwrap_tag(t: Tagged[String]) -> Int = t.raw
+fn main() -> Unit = {
+  let a: Tagged[String] = { raw: 7 }
+  let b: Tagged[Int] = { raw: 9 }
+  println("${int.to_string(a.raw)} ${int.to_string(b.raw)} ${int.to_string(unwrap_tag(a))}")
+}

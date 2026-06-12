@@ -89,8 +89,15 @@ pub fn render_type(ctx: &RenderContext, ty: &Ty) -> String {
                 let bare = name.rsplit('.').next().unwrap_or(name);
                 bare.to_string()
             } else {
-                let args_str = args.iter().map(|a| render_type(ctx, a)).collect::<Vec<_>>().join(", ");
                 let bare = name.rsplit('.').next().unwrap_or(name);
+                // A fully-phantom record's struct is emitted WITHOUT generics
+                // (#621), so a reference must drop its type args too.
+                if ctx.ann.phantom_param_structs.contains(name.as_str())
+                    || ctx.ann.phantom_param_structs.contains(bare)
+                {
+                    return bare.to_string();
+                }
+                let args_str = args.iter().map(|a| render_type(ctx, a)).collect::<Vec<_>>().join(", ");
                 format!("{}<{}>", bare, args_str)
             }
         }
