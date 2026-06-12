@@ -815,7 +815,7 @@ fn quantize_row_q8(xi: &[f64]) -> (Vec<f32>, Vec<i8>) {
 }
 
 #[inline]
-fn q8_0_row_dot_q8(x_scales: &[f32], x_q: &[i8], row: &[u8]) -> f64 {
+fn q8_0_row_dot_q8_scalar(x_scales: &[f32], x_q: &[i8], row: &[u8]) -> f64 {
     let mut acc = 0.0f64;
     for (b, blk) in row.chunks_exact(Q8_BLOCK_BYTES).enumerate() {
         let d_w = fp16_bits_to_f32(u16::from_le_bytes([blk[0], blk[1]]));
@@ -828,6 +828,55 @@ fn q8_0_row_dot_q8(x_scales: &[f32], x_q: &[i8], row: &[u8]) -> f64 {
         acc += (d_w * x_scales[b]) as f64 * s as f64;
     }
     acc
+}
+
+// Explicit AVX2 i8×i8 dot (llama.cpp's vec_dot recipe): LLVM's autovec of
+// the scalar i8→i32 widening loop measured SLOWER than the f32 path, so
+// the bandwidth win of Q8_0 never landed. maddubs needs one unsigned
+// operand: |x| on one side, x's sign transferred onto w on the other —
+// products are exact i16 (|q|≤127 ⇒ pairwise sum ≤ 32258 < i16::MAX) and
+// the block sum is exact i32, so this is BIT-IDENTICAL to the scalar path.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn q8_0_row_dot_q8_avx2(x_scales: &[f32], x_q: &[i8], row: &[u8]) -> f64 {
+    use std::arch::x86_64::*;
+    let n_blocks = row.len() / Q8_BLOCK_BYTES;
+    let mut acc = 0.0f64;
+    for b in 0..n_blocks {
+        let blk = row.as_ptr().add(b * Q8_BLOCK_BYTES);
+        let d_w = fp16_bits_to_f32(u16::from_le_bytes([*blk, *blk.add(1)]));
+        let w = _mm256_loadu_si256(blk.add(2) as *const __m256i);
+        let x = _mm256_loadu_si256(x_q.as_ptr().add(b * Q8_BLOCK) as *const __m256i);
+        let ax = _mm256_sign_epi8(x, x); // |x| (unsigned operand)
+        let sw = _mm256_sign_epi8(w, x); // w with x's sign folded in
+        let p16 = _mm256_maddubs_epi16(ax, sw); // 16 × i16 pairwise products
+        let p32 = _mm256_madd_epi16(p16, _mm256_set1_epi16(1)); // 8 × i32
+        let hi = _mm256_extracti128_si256(p32, 1);
+        let lo = _mm256_castsi256_si128(p32);
+        let s4 = _mm_add_epi32(hi, lo);
+        let s2 = _mm_add_epi32(s4, _mm_shuffle_epi32(s4, 0b0000_1110));
+        let s1 = _mm_add_epi32(s2, _mm_shuffle_epi32(s2, 0b0000_0001));
+        let s = _mm_cvtsi128_si32(s1);
+        acc += (d_w * *x_scales.get_unchecked(b)) as f64 * s as f64;
+    }
+    acc
+}
+
+#[cfg(target_arch = "x86_64")]
+fn q8_avx2_available() -> bool {
+    static AVX2: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *AVX2.get_or_init(|| std::is_x86_feature_detected!("avx2"))
+}
+
+#[inline]
+fn q8_0_row_dot_q8(x_scales: &[f32], x_q: &[i8], row: &[u8]) -> f64 {
+    #[cfg(target_arch = "x86_64")]
+    {
+        if q8_avx2_available() {
+            return unsafe { q8_0_row_dot_q8_avx2(x_scales, x_q, row) };
+        }
+    }
+    q8_0_row_dot_q8_scalar(x_scales, x_q, row)
 }
 
 /// `y = x @ Wᵀ` with W in Q8_0 blocks at `w_offset` (row-major out × in).
