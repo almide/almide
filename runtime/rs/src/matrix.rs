@@ -1161,10 +1161,8 @@ pub fn almide_rt_matrix_qwen3_block_q1_0_kv(
     let k_full_kv = almide_rt_matrix_append_rows(k_cache, &k_rot);
     let v_full_kv = almide_rt_matrix_append_rows(v_cache, &v_proj);
 
-    let k_full = repeat_kv(&k_full_kv, n_kv_heads, n_rep);
-    let v_full = repeat_kv(&v_full_kv, n_kv_heads, n_rep);
-
-    let attn_out = almide_rt_matrix_masked_multi_head_attention(&q_rot, &k_full, &v_full, n_q_heads);
+    let _ = n_rep;
+    let attn_out = mha_gqa_core(&q_rot, &k_full_kv, &v_full_kv, n_q_heads, n_kv_heads);
     let attn_proj = almide_rt_matrix_linear_q1_0_row_no_bias(
         &attn_out, w, weight_offs[3], hidden as i64, hidden as i64);
     let x_attn = almide_rt_matrix_add(h, &attn_proj);
@@ -1385,10 +1383,8 @@ pub fn almide_rt_matrix_qwen3_block_f32_kv(
     let k_full_kv = if k_cache.rows == 0 { k_rot } else { almide_rt_matrix_append_rows(k_cache, &k_rot) };
     let v_full_kv = if v_cache.rows == 0 { v_proj } else { almide_rt_matrix_append_rows(v_cache, &v_proj) };
 
-    let k_full = repeat_kv(&k_full_kv, n_kv_heads, n_rep);
-    let v_full = repeat_kv(&v_full_kv, n_kv_heads, n_rep);
-
-    let attn_out = almide_rt_matrix_masked_multi_head_attention(&q_rot, &k_full, &v_full, n_q_heads);
+    let _ = n_rep;
+    let attn_out = mha_gqa_core(&q_rot, &k_full_kv, &v_full_kv, n_q_heads, n_kv_heads);
     let attn_proj = almide_rt_matrix_linear_f32_row_no_bias(
         &attn_out, w, weight_offs[3], hidden as i64, q_hidden as i64);
     let x_attn = almide_rt_matrix_add(h, &attn_proj);
@@ -1413,6 +1409,72 @@ pub fn almide_rt_matrix_qwen3_block_f32_kv(
 // occupies (cols/32) * 34 bytes. The f32 path measured at the DRAM
 // bandwidth floor (2.4 GB weights/token), so the win here is bandwidth,
 // not FLOPs.
+
+// GQA attention without materializing the expanded K/V: query head h
+// reads kv head h / (n_q / n_kv) directly via column offsets. The old path
+// (repeat_kv -> masked MHA) copied the whole KV cache twice per layer per
+// token (~56 MB/token at seq 64). Causal rule matches mha_core:
+// j > (sk - sq) + i is masked.
+fn mha_gqa_core(
+    q: &AlmideMatrix,
+    k: &AlmideMatrix,
+    v: &AlmideMatrix,
+    n_q_heads: i64,
+    n_kv_heads: i64,
+) -> AlmideMatrix {
+    let n_q = n_q_heads.max(1) as usize;
+    let n_kv = n_kv_heads.max(1) as usize;
+    if q.is_empty() {
+        return vec![].into();
+    }
+    let sq = q.len();
+    let sk = k.len();
+    let dq = q[0].len();
+    let dh = dq / n_q;
+    let group = n_q / n_kv;
+    let scale = (dh as f64).sqrt().recip();
+
+    let mut out = vec![vec![0.0f64; dq]; sq];
+    let mut scores = vec![0.0f64; sk];
+    for h in 0..n_q {
+        let qc = h * dh;
+        let kc = (h / group) * dh;
+        for i in 0..sq {
+            let visible = (sk - sq) + i + 1; // causal horizon for this row
+            let qrow = &q[i][qc..qc + dh];
+            for j in 0..visible {
+                let krow = &k[j][kc..kc + dh];
+                let mut s = 0.0f64;
+                for d in 0..dh {
+                    s += qrow[d] * krow[d];
+                }
+                scores[j] = s * scale;
+            }
+            // softmax over the visible prefix
+            let mut max = f64::NEG_INFINITY;
+            for &x in &scores[..visible] {
+                if x > max {
+                    max = x;
+                }
+            }
+            let mut sum = 0.0f64;
+            for x in scores[..visible].iter_mut() {
+                *x = (*x - max).exp();
+                sum += *x;
+            }
+            let inv = 1.0 / sum;
+            let orow = &mut out[i][qc..qc + dh];
+            for j in 0..visible {
+                let w = scores[j] * inv;
+                let vrow = &v[j][kc..kc + dh];
+                for d in 0..dh {
+                    orow[d] += w * vrow[d];
+                }
+            }
+        }
+    }
+    out.into_iter().collect()
+}
 
 const Q8_BLOCK: usize = 32;
 const Q8_BLOCK_BYTES: usize = 34;
@@ -1461,35 +1523,61 @@ fn q8_0_row_dot_q8_scalar(x_scales: &[f32], x_q: &[i8], row: &[u8]) -> f64 {
 // products are exact i16 (|q|≤127 ⇒ pairwise sum ≤ 32258 < i16::MAX) and
 // the block sum is exact i32, so this is BIT-IDENTICAL to the scalar path.
 #[cfg(target_arch = "x86_64")]
-#[target_feature(enable = "avx2")]
+#[target_feature(enable = "avx2,fma")]
 unsafe fn q8_0_row_dot_q8_avx2(x_scales: &[f32], x_q: &[i8], row: &[u8]) -> f64 {
     use std::arch::x86_64::*;
-    let n_blocks = row.len() / Q8_BLOCK_BYTES;
-    let mut acc = 0.0f64;
-    for b in 0..n_blocks {
-        let blk = row.as_ptr().add(b * Q8_BLOCK_BYTES);
-        let d_w = fp16_bits_to_f32(u16::from_le_bytes([*blk, *blk.add(1)]));
+    // llama.cpp-style accumulation: the per-block i32 sum (exact — max
+    // 32·127² < 2^24) converts to f32 lanes and folds into VECTOR f32
+    // accumulators via FMA; the horizontal reduction happens ONCE per row.
+    // The previous per-block hsum chain (5 reduction ops per 32 values)
+    // plus a single serial FMA dependency chain left the kernel
+    // latency-bound. Four accumulators hide the 4-5 cycle FMA latency.
+    #[inline(always)]
+    unsafe fn block_p32(x_q: &[i8], row_ptr: *const u8, b: usize) -> std::arch::x86_64::__m256i {
+        let blk = row_ptr.add(b * Q8_BLOCK_BYTES);
         let w = _mm256_loadu_si256(blk.add(2) as *const __m256i);
         let x = _mm256_loadu_si256(x_q.as_ptr().add(b * Q8_BLOCK) as *const __m256i);
-        let ax = _mm256_sign_epi8(x, x); // |x| (unsigned operand)
-        let sw = _mm256_sign_epi8(w, x); // w with x's sign folded in
-        let p16 = _mm256_maddubs_epi16(ax, sw); // 16 × i16 pairwise products
-        let p32 = _mm256_madd_epi16(p16, _mm256_set1_epi16(1)); // 8 × i32
-        let hi = _mm256_extracti128_si256(p32, 1);
-        let lo = _mm256_castsi256_si128(p32);
-        let s4 = _mm_add_epi32(hi, lo);
-        let s2 = _mm_add_epi32(s4, _mm_shuffle_epi32(s4, 0b0000_1110));
-        let s1 = _mm_add_epi32(s2, _mm_shuffle_epi32(s2, 0b0000_0001));
-        let s = _mm_cvtsi128_si32(s1);
-        acc += (d_w * *x_scales.get_unchecked(b)) as f64 * s as f64;
+        let ax = _mm256_sign_epi8(x, x);
+        let sw = _mm256_sign_epi8(w, x);
+        _mm256_madd_epi16(_mm256_maddubs_epi16(ax, sw), _mm256_set1_epi16(1))
     }
-    acc
+    #[inline(always)]
+    unsafe fn block_scale(x_scales: &[f32], row_ptr: *const u8, b: usize) -> std::arch::x86_64::__m256 {
+        let blk = row_ptr.add(b * Q8_BLOCK_BYTES);
+        let d_w = fp16_bits_to_f32(u16::from_le_bytes([*blk, *blk.add(1)]));
+        _mm256_set1_ps(d_w * *x_scales.get_unchecked(b))
+    }
+    let n_blocks = row.len() / Q8_BLOCK_BYTES;
+    let rp = row.as_ptr();
+    let mut acc0 = _mm256_setzero_ps();
+    let mut acc1 = _mm256_setzero_ps();
+    let mut acc2 = _mm256_setzero_ps();
+    let mut acc3 = _mm256_setzero_ps();
+    let mut b = 0;
+    while b + 4 <= n_blocks {
+        acc0 = _mm256_fmadd_ps(_mm256_cvtepi32_ps(block_p32(x_q, rp, b)), block_scale(x_scales, rp, b), acc0);
+        acc1 = _mm256_fmadd_ps(_mm256_cvtepi32_ps(block_p32(x_q, rp, b + 1)), block_scale(x_scales, rp, b + 1), acc1);
+        acc2 = _mm256_fmadd_ps(_mm256_cvtepi32_ps(block_p32(x_q, rp, b + 2)), block_scale(x_scales, rp, b + 2), acc2);
+        acc3 = _mm256_fmadd_ps(_mm256_cvtepi32_ps(block_p32(x_q, rp, b + 3)), block_scale(x_scales, rp, b + 3), acc3);
+        b += 4;
+    }
+    while b < n_blocks {
+        acc0 = _mm256_fmadd_ps(_mm256_cvtepi32_ps(block_p32(x_q, rp, b)), block_scale(x_scales, rp, b), acc0);
+        b += 1;
+    }
+    let acc = _mm256_add_ps(_mm256_add_ps(acc0, acc1), _mm256_add_ps(acc2, acc3));
+    let hi = _mm256_extractf128_ps(acc, 1);
+    let lo = _mm256_castps256_ps128(acc);
+    let s4 = _mm_add_ps(hi, lo);
+    let s2 = _mm_add_ps(s4, _mm_movehl_ps(s4, s4));
+    let s1 = _mm_add_ss(s2, _mm_shuffle_ps(s2, s2, 0b0000_0001));
+    _mm_cvtss_f32(s1) as f64
 }
 
 #[cfg(target_arch = "x86_64")]
 fn q8_avx2_available() -> bool {
     static AVX2: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *AVX2.get_or_init(|| std::is_x86_feature_detected!("avx2"))
+    *AVX2.get_or_init(|| std::is_x86_feature_detected!("avx2") && std::is_x86_feature_detected!("fma"))
 }
 
 #[inline]
@@ -1518,14 +1606,33 @@ pub fn almide_rt_matrix_linear_q8_0_row_no_bias(
     if x_rows == 0 || out_cols == 0 || n_in == 0 || n_in % Q8_BLOCK != 0 {
         return mk(x_rows, out_cols, vec![0.0f64; x_rows * out_cols]);
     }
+    let xq = quantize_rows_q8(x);
+    linear_q8_0_pre(&xq, x_rows, n_in, w_bytes, off, out_cols)
+}
+
+// Per-row Q8 quantization of a whole activation matrix — hoistable so one
+// quantization feeds several projections (q/k/v share the same normed input).
+pub(crate) fn quantize_rows_q8(x: &AlmideMatrix) -> Vec<(Vec<f32>, Vec<i8>)> {
+    let n_in = x.cols;
+    (0..x.rows)
+        .map(|i| quantize_row_q8(&x.data[i * n_in..(i + 1) * n_in]))
+        .collect()
+}
+
+pub(crate) fn linear_q8_0_pre(
+    xq: &[(Vec<f32>, Vec<i8>)],
+    x_rows: usize,
+    n_in: usize,
+    w_bytes: &[u8],
+    off: usize,
+    out_cols: usize,
+) -> AlmideMatrix {
     let row_bytes = n_in / Q8_BLOCK * Q8_BLOCK_BYTES;
     let w_all = &w_bytes[off..off + out_cols * row_bytes];
     let mut out = vec![0.0f64; x_rows * out_cols];
-    for i in 0..x_rows {
-        let xi = &x.data[i * n_in..(i + 1) * n_in];
-        let (x_scales, x_q) = quantize_row_q8(xi);
+    for (i, (x_scales, x_q)) in xq.iter().enumerate() {
         par_out_rows(&mut out[i * out_cols..(i + 1) * out_cols], |j, o| {
-            *o = q8_0_row_dot_q8(&x_scales, &x_q, &w_all[j * row_bytes..(j + 1) * row_bytes]);
+            *o = q8_0_row_dot_q8(x_scales, x_q, &w_all[j * row_bytes..(j + 1) * row_bytes]);
         });
     }
     mk(x_rows, out_cols, out)
@@ -1586,12 +1693,11 @@ pub fn almide_rt_matrix_qwen3_block_q8_0_kv(
 
     let h_normed = almide_rt_matrix_rms_norm_rows(h, &gamma_attn, eps);
 
-    let q_proj = almide_rt_matrix_linear_q8_0_row_no_bias(
-        &h_normed, w, weight_offs[0], q_hidden as i64, hidden as i64);
-    let k_proj = almide_rt_matrix_linear_q8_0_row_no_bias(
-        &h_normed, w, weight_offs[1], kv_hidden as i64, hidden as i64);
-    let v_proj = almide_rt_matrix_linear_q8_0_row_no_bias(
-        &h_normed, w, weight_offs[2], kv_hidden as i64, hidden as i64);
+    let hq = quantize_rows_q8(&h_normed);
+    let rows = h_normed.rows;
+    let q_proj = linear_q8_0_pre(&hq, rows, hidden, w, weight_offs[0].max(0) as usize, q_hidden);
+    let k_proj = linear_q8_0_pre(&hq, rows, hidden, w, weight_offs[1].max(0) as usize, kv_hidden);
+    let v_proj = linear_q8_0_pre(&hq, rows, hidden, w, weight_offs[2].max(0) as usize, kv_hidden);
 
     let q_normed = per_head_rms_norm(&q_proj, &gamma_q, n_q_heads, eps);
     let k_normed = per_head_rms_norm(&k_proj, &gamma_k, n_kv_heads, eps);
@@ -1602,19 +1708,16 @@ pub fn almide_rt_matrix_qwen3_block_q8_0_kv(
     let k_full_kv = if k_cache.rows == 0 { k_rot } else { almide_rt_matrix_append_rows(k_cache, &k_rot) };
     let v_full_kv = if v_cache.rows == 0 { v_proj } else { almide_rt_matrix_append_rows(v_cache, &v_proj) };
 
-    let k_full = repeat_kv(&k_full_kv, n_kv_heads, n_rep);
-    let v_full = repeat_kv(&v_full_kv, n_kv_heads, n_rep);
-
-    let attn_out = almide_rt_matrix_masked_multi_head_attention(&q_rot, &k_full, &v_full, n_q_heads);
+    let _ = n_rep;
+    let attn_out = mha_gqa_core(&q_rot, &k_full_kv, &v_full_kv, n_q_heads, n_kv_heads);
     let attn_proj = almide_rt_matrix_linear_q8_0_row_no_bias(
         &attn_out, w, weight_offs[3], hidden as i64, q_hidden as i64);
     let x_attn = almide_rt_matrix_add(h, &attn_proj);
 
     let h2 = almide_rt_matrix_rms_norm_rows(&x_attn, &gamma_ffn, eps);
-    let gate = almide_rt_matrix_linear_q8_0_row_no_bias(
-        &h2, w, weight_offs[4], ffn_hidden, hidden as i64);
-    let up = almide_rt_matrix_linear_q8_0_row_no_bias(
-        &h2, w, weight_offs[5], ffn_hidden, hidden as i64);
+    let h2q = quantize_rows_q8(&h2);
+    let gate = linear_q8_0_pre(&h2q, h2.rows, hidden, w, weight_offs[4].max(0) as usize, ffn_hidden.max(0) as usize);
+    let up = linear_q8_0_pre(&h2q, h2.rows, hidden, w, weight_offs[5].max(0) as usize, ffn_hidden.max(0) as usize);
     let gated = almide_rt_matrix_silu_mul(&gate, &up);
     let ffn_out = almide_rt_matrix_linear_q8_0_row_no_bias(
         &gated, w, weight_offs[6], hidden as i64, ffn_hidden);
