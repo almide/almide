@@ -1058,3 +1058,21 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/bytes_from_list_param.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-091"
+title     = "A nested sub-pattern in let-destructuring binds every leaf"
+statement = "A let-destructuring pattern containing a nested tuple (or record) sub-pattern binds every leaf, byte-identical native == wasm. The WASM emit handled only a flat Bind element and skipped nested sub-patterns — their leaves stayed zeroed; it now recurses, loading each sub-aggregate pointer and binding through it, mirroring the local pre-scan that already allocated those leaf locals."
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/nested_tuple_destructure.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-092"
+title     = "A generic record field is sized by its instantiated type at construction"
+statement = "A generic record field is allocated and laid out by its instantiated type, byte-identical native == wasm. The WASM record emit sized the block from the DECLARED field list, so a generic field (value: T) used the unresolved param's default size (4 bytes); a trailing concrete heap field then wrote past the under-allocated block and read back empty, corrupting both the record and any spread of it. Construction now derives size and field order from the concrete (generic-substituted) layout of the result type."
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/generic_record_field_size.almd", class = "fixture" },
+]

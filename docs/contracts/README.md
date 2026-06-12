@@ -24,7 +24,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 `fixture` < `fuzz` < `exhaustive` < `lean`. An **active** contract must carry
 ≥1 evidence of class ≥ `fixture`.
 
-90 contracts
+92 contracts
 
 | ID | Contract | Since | Status | Strongest Evidence | # Fixtures |
 |----|----------|-------|--------|--------------------|-----------:|
@@ -118,4 +118,6 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-088 | A Rust-keyword function name compiles on both targets |  | active | fixture | 1 |
 | C-089 | A default parameter referencing an earlier parameter is filled with its argument |  | active | fixture | 1 |
 | C-090 | bytes.from_list on a List[Int] parameter compiles on both targets |  | active | fixture | 1 |
+| C-091 | A nested sub-pattern in let-destructuring binds every leaf |  | active | fixture | 1 |
+| C-092 | A generic record field is sized by its instantiated type at construction |  | active | fixture | 1 |
 

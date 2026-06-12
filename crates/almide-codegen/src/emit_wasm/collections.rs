@@ -13,6 +13,13 @@ impl FuncCompiler<'_> {
         let tag = self.resolve_variant_tag(name, result_ty);
         let tag_size: u32 = if tag.is_some() { 4 } else { 0 };
 
+        // Concrete field layout: generic params substituted from result_ty's type
+        // args, so a generic field (`value: T` with T = Int) is sized by its
+        // INSTANTIATED type. The declared field list keeps the unresolved param
+        // (byte_size 4), which under-allocates the record and makes a trailing
+        // field's write run PAST the block — read back as empty/garbage (#650).
+        let concrete_record_fields = self.extract_record_fields(result_ty);
+
         // Compute total size from type definition (includes defaults)
         let type_field_size: u32 = if let Some(ctor_name) = name {
             let mut size = 0u32;
@@ -25,7 +32,9 @@ impl FuncCompiler<'_> {
                 }
             }
             if size == 0 {
-                if let Some(rf) = self.emitter.record_fields.get(ctor_name) {
+                if !concrete_record_fields.is_empty() {
+                    size = concrete_record_fields.iter().map(|(_, ty)| values::byte_size(ty)).sum();
+                } else if let Some(rf) = self.emitter.record_fields.get(ctor_name) {
                     size = rf.iter().map(|(_, ty)| values::byte_size(ty)).sum();
                 }
             }
@@ -76,7 +85,12 @@ impl FuncCompiler<'_> {
                 }
             }
             if found.is_empty() {
-                if let Some(rf) = self.emitter.record_fields.get(ctor_name) {
+                // Prefer the CONCRETE layout so the fallback field types (used when
+                // an explicit field expr is unresolved) and the field ORDER carry
+                // the instantiated generic sizes (#650).
+                if !concrete_record_fields.is_empty() {
+                    found = concrete_record_fields.clone();
+                } else if let Some(rf) = self.emitter.record_fields.get(ctor_name) {
                     found = rf.clone();
                 }
             }
