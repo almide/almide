@@ -968,3 +968,12 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/empty_from_list_mono.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-081"
+title     = "Generic fn in an inferred-param lambda resolves its type parameter"
+statement = "A generic function called inside a `list.map` (or similar HOF) lambda whose parameter type is inferred from the collection element compiles and runs byte-identical native == wasm. The generic's type parameter, which flows in only via the HOF's `(A)->B` slot after the lambda body is inferred, is fresh-instantiated before back-propagation instead of leaking its literal name into the union-find, so it resolves to the concrete element type. Verified at two instantiations (Int and String element types)."
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/generic_fn_in_inferred_lambda.almd", class = "fixture" },
+]

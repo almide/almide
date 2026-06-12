@@ -643,6 +643,19 @@ impl Checker {
             e005_fired.push(fired);
         }
         self.arg_spans.clear();
+        // #620: a generic param that NO argument pinned (because the arg was an
+        // unresolved inference var — e.g. `unbox(b)` where `b` is a `list.map`
+        // lambda's not-yet-resolved element) leaves its name UNBOUND in
+        // `bindings`. The back-prop below would then `substitute` the param type
+        // to its LITERAL generic name (`Box[TypeVar("T")]`) and leak it into the
+        // union-find, where it can never be solved to the concrete type that
+        // flows in later (from `list.map`'s collection). Bind each such generic
+        // to a FRESH inference var (shared by the back-prop AND the return type),
+        // so the relation becomes solvable. Generics an argument DID pin keep
+        // their concrete binding; a concrete call is unaffected.
+        for g in &sig.generics {
+            bindings.entry(*g).or_insert_with(|| self.fresh_var());
+        }
         // Verify protocol bounds on generic type parameters
         for (tv_name, proto_names) in &sig.protocol_bounds {
             if let Some(concrete_ty) = bindings.get(tv_name) {
