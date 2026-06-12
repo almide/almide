@@ -1,0 +1,50 @@
+// @contract: C-086
+// Stdlib combinators that pass an INPUT cell straight through (option.filter
+// some-arm, option.or_else some-arm, option.flatten, result.map_err ok-arm,
+// result.map err-arm, result.flat_map err-arm) must hand the let-bound result
+// its OWN reference. The WASM emitter previously returned the input box borrowed
+// (no rc_inc), so the result and the input aliased one cell and both scope-end
+// Decs double-freed it: a __rc_dec trap, or — through a longer chain — a SILENT
+// wrong value read from the freed cell. Each pass-through path now SHAREs (+1),
+// exactly like list.get's some-box. #666 / #643.
+
+fn main() -> Unit = {
+  // option.filter — some path returns the input cell.
+  let f = option.filter(some(30), (x) => x > 25)
+  println(match f { some(v) => "f ${int.to_string(v)}", none => "f none" })
+
+  // option.or_else — some path returns the input cell.
+  let oe = option.or_else(some(31), () => some(99))
+  println(match oe { some(v) => "oe ${int.to_string(v)}", none => "oe none" })
+
+  // option.flatten — returns the inner cell borrowed out of the outer.
+  let fl: Option[Option[Int]] = some(some(32))
+  println(match option.flatten(fl) { some(v) => "fl ${int.to_string(v)}", none => "fl none" })
+
+  // result.map_err ok-arm + result.map err-arm + result.flat_map err-arm.
+  let me_: Result[Int, String] = ok(33)
+  println(match result.map_err(me_, (e) => "E:" + e) { ok(v) => "me ${int.to_string(v)}", err(e) => "me ${e}" })
+  let rm: Result[Int, String] = err("boom")
+  println(match result.map(rm, (x) => x + 1) { ok(v) => "rm ${int.to_string(v)}", err(e) => "rm ${e}" })
+  let fm: Result[Int, String] = err("bang")
+  println(match result.flat_map(fm, (x) => ok(x + 1)) { ok(v) => "fm ${int.to_string(v)}", err(e) => "fm ${e}" })
+
+  // The chain that previously read a freed cell silently (wasm "some 4").
+  let chain = list.find([4, 5, 6], (x) => x > 3)
+    |> option.map((x) => x + 27)
+    |> option.filter((x) => x > 25)
+    |> option.flat_map((x) => some(x))
+  println(match chain { some(v) => "chain ${int.to_string(v)}", none => "chain none" })
+
+  // #643: OOB-defaulted lookahead in a loop with a following allocation.
+  let cs = ["a", " "]
+  var out: List[String] = []
+  var i = 0
+  while i < 2 {
+    let nx = list.get(cs, i + 1) ?? ""
+    if nx == "x" then { list.push(out, "p") }
+    else { list.push(out, list.slice(cs, i, i + 1) |> list.join("")) }
+    i = i + 1
+  }
+  println(out |> list.join(","))
+}
