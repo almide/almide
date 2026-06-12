@@ -1,0 +1,15 @@
+// @contract: C-097
+// `+` on a type parameter T lowers to the default AddInt (lowering can't pick
+// the overload without a concrete operand type). When the generic instantiates
+// to String or List, monomorphization must re-dispatch AddInt → ConcatStr /
+// ConcatList — mirroring lowering's own `+` type dispatch. Before the fix the
+// String/List specializations kept AddInt and the IR-verify gate (#532)
+// panicked on the non-Int operands (#558). Int stays AddInt. Verified
+// byte-identical native == wasm.
+fn dup[T](x: T) -> T = x + x
+
+effect fn main() -> () = {
+  println(dup("ab"))
+  println(int.to_string(dup(3)))
+  println(dup([1, 2]) |> list.map((n) => int.to_string(n)) |> list.join(","))
+}

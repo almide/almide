@@ -184,6 +184,29 @@ fn rename_expr(e: IrExpr, map: &HashMap<String, Sym>) -> IrExpr {
                 *n = *nn;
             }
         }
+        // Lambda params, closure captures, call type-args, and boxing casts
+        // carry Tys OUTSIDE expr.ty — the walker renders them verbatim into
+        // Rust closure signatures and `as Rc<dyn Fn>` casts, so a missed rename
+        // here surfaces as E0425 on the unmangled name (#681: a linked module's
+        // record flowing through a fold lambda's `(acc, l)` params).
+        IrExprKind::Lambda { params, .. } => {
+            for (_, ty) in params.iter_mut() {
+                *ty = rename_ty(ty, map);
+            }
+        }
+        IrExprKind::ClosureCreate { captures, .. } => {
+            for (_, ty) in captures.iter_mut() {
+                *ty = rename_ty(ty, map);
+            }
+        }
+        IrExprKind::Call { type_args, .. } => {
+            for ty in type_args.iter_mut() {
+                *ty = rename_ty(ty, map);
+            }
+        }
+        IrExprKind::RcWrap { cast_ty: Some(ty), .. } => {
+            **ty = rename_ty(ty, map);
+        }
         _ => {}
     }
     e

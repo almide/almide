@@ -1107,8 +1107,26 @@ evidence  = [
 [[contract]]
 id        = "C-096"
 title     = "process.args works on WASM and matches native"
-statement = "process.args() runs on the WASM target (previously an emit ICE) and agrees with native. It maps to std::env::args() — argv[0] (the program path) followed by program args — built on WASM from the WASI args_sizes_get / args_get imports into the same List[String] layout native produces. Verified byte-identical native == wasm on the argument COUNT (argv[0] differs between a native temp binary and a wasm module path, so the fixture prints only the length)."
+statement = "process.args() runs on the WASM target (previously an emit ICE) and agrees with native. It maps to std::env::args() — argv[0] (the program path) followed by program args — built on WASM from the WASI args_sizes_get / args_get imports into the same List[String] layout native produces. The result List and each inner String are framed with the canonical 8-byte [len][cap][data] header (a 4-byte header made every element/byte read at the wrong offset — #645). Verified byte-identical native == wasm on the argument COUNT and on an argv[0]-independent content invariant (string.len of element 0 is non-zero), which reads the list at index 0 and walks element 0's UTF-8 data, exercising both the list and string header."
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/process_args.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-097"
+title     = "generic + on a type parameter concatenates strings/lists identically across targets"
+statement = "A `+` whose operand is a type parameter T lowers to the default AddInt; when T instantiates to String or List, monomorphization re-dispatches it to ConcatStr / ConcatList (mirroring lowering's own type dispatch). A `fn dup[T](x: T) -> T = x + x` therefore concatenates for String and List and adds for Int, byte-identical native == wasm. A genuinely non-concatenable instantiation (e.g. a record) stays AddInt and is still rejected by the IR-verify gate."
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/generic_concat.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-098"
+title     = "cross-module derived Codec methods dispatch on WASM and match native"
+statement = "A derived Codec method whose subject or element type is defined in another module (mod.Type.encode/decode, direct field, List[mod.Type], Option[mod.Type]) now dispatches on the WASM target instead of an emit ICE, and roundtrips byte-identically to native. The call site carries only Type.method (the subject type has no module) while the fn is registered under its module_origin-qualified name mod.Type.method; the WASM dispatcher resolves it by a unique func_map suffix match, and a __decode_list_mod.Type codec helper is routed before the dotted-name split that used to mis-parse the embedded dot. Native is unaffected (the #411-B BuiltinLoweringPass already flattens the name, but it is Rust-only)."
+status    = "active"
+evidence  = [
+  { path = "tests/crossmod_matrix_test.rs", name = "crossmod_shape_matrix", class = "fixture" },
 ]

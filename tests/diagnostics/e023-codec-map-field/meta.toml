@@ -1,0 +1,3 @@
+expects_code = "E023"
+expects_error = "cannot encode"
+hint_substring = "List[(K, V)]"

@@ -404,6 +404,27 @@ fn leaf_satisfies(env: &TypeEnv, leaf: Sym, proto: &str) -> bool {
     false
 }
 
+/// The Codec derive serializes a field by structural recursion over
+/// String/Int/Float/Bool/Option/List/Named — it has NO Map or Set arm, so a
+/// `Map[K,V]` / `Set[T]` field silently falls through to the `Value`-as-String
+/// fallback: invalid Rust natively (E0614/E0308) and wrong/silent on wasm
+/// (#655). Detect such a container anywhere in the field type (under
+/// List/Option/Result/Tuple/anon-record). A `Map`/`Set` reached only through a
+/// NAMED type is that type's own concern (its `: Codec` is checked by the leaf
+/// rule), so we stop at `Ty::Named`.
+fn codec_unsupported_container(ty: &Ty) -> Option<&'static str> {
+    use almide_lang::types::TypeConstructorId as TC;
+    match ty {
+        Ty::Applied(TC::Map, _) => Some("Map"),
+        Ty::Applied(TC::Set, _) => Some("Set"),
+        Ty::Applied(_, args) => args.iter().find_map(|a| codec_unsupported_container(a)),
+        Ty::Tuple(elems) => elems.iter().find_map(|e| codec_unsupported_container(e)),
+        Ty::Record { fields } | Ty::OpenRecord { fields } =>
+            fields.iter().find_map(|(_, t)| codec_unsupported_container(t)),
+        _ => None,
+    }
+}
+
 /// A type that derives a field-recursive protocol (Codec/Ord/Hash) requires
 /// every field type to ALSO satisfy it — otherwise the derive emits a call to a
 /// non-existent `Field.encode` (Codec) or a Rust `#[derive(Ord/Hash)]` over a
@@ -423,6 +444,22 @@ fn validate_derive_field_support(env: &TypeEnv, diagnostics: &mut Vec<Diagnostic
             let p = proto.as_str();
             if !FIELD_RECURSIVE_PROTOCOLS.contains(&p) { continue; }
             for (field_name, field_ty) in &slots {
+                // #655: the Codec derive has no Map/Set arm — reject such a
+                // field here rather than emitting invalid Rust / silent-wrong
+                // wasm. Same E023 family (a field that cannot satisfy Codec).
+                if p == "Codec" {
+                    if let Some(container) = codec_unsupported_container(field_ty) {
+                        if reported.insert((*type_name, *proto, sym(container))) {
+                            diagnostics.push(err(
+                                format!("type '{}' derives 'Codec' but field '{}' has a '{}' type, which the Codec derive cannot encode",
+                                    type_name, field_name, container),
+                                format!("The Codec derive serializes a {} as a String, which is wrong. Use a List[(K, V)] field (or List[T] for a Set), or implement encode/decode manually.",
+                                    container),
+                                format!("type {} : Codec", type_name),
+                            ).with_code("E023"));
+                        }
+                    }
+                }
                 let mut leaves = Vec::new();
                 collect_leaf_nominals(field_ty, &mut leaves);
                 for leaf in leaves {

@@ -1,0 +1,24 @@
+// #681: a LINKED module's own record type, flowing through a `list.fold`
+// accumulator lambda, used to reach codegen as a bare `Loc` and trip the
+// NameResolutionTotal gate ([COMPILER BUG] unresolvable bare type name) —
+// even though `list.fold` with a record accumulator is the most idiomatic
+// shape in the book. The link renamer missed three Ty positions that live
+// outside `expr.ty`: the fn signature, the fold lambda's `(acc, l)` param
+// types, and the lambda-lowered locals. Fine as the ENTRY module, broken once
+// imported. Blocked nn/qwen_loader (TensorLoc + list.fold) on stock v0.27.5.
+//
+// The fix repairs unambiguous bare type refs to their canonical qualified name
+// at codegen entry and extends the link mangle to Lambda/ClosureCreate/Call
+// type-args/RcWrap. This fixture just has to BUILD AND RUN (both targets) —
+// if the gate fires again it fails to compile.
+
+import loclib
+
+test "cross-module record through a fold-accumulator lambda builds and runs (#681)" {
+  let locs = [
+    loclib.Loc { name: "a", found: true },
+    loclib.Loc { name: "b", found: true },
+  ]
+  assert_eq(loclib.pick(locs, "b").name, "b")
+  assert_eq(loclib.pick(locs, "missing").name, "")
+}
