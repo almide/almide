@@ -340,6 +340,15 @@ pub fn collect_anon_records(program: &IrProgram, named: &HashMap<Vec<String>, St
     let named_set: HashSet<Vec<String>> = named.keys().cloned().collect();
     let mut seen: HashSet<Vec<String>> = HashSet::new();
 
+    // Collect from TYPE DECLARATIONS — a variant case payload or record field
+    // whose type is an anonymous record (e.g. `| Square({ s: Int })`) may NEVER
+    // be constructed in the program, so it is reachable only here; without this
+    // its struct goes unregistered and `render_type` falls back to emitting the
+    // bare field name as a type → `Square(s)` → rustc E0425 (#628).
+    for td in program.type_decls.iter().chain(program.modules.iter().flat_map(|m| m.type_decls.iter())) {
+        collect_anon_from_type_decl(td, &named_set, &mut seen);
+    }
+
     // Collect from all types AND expressions in the program
     for func in &program.functions {
         for p in &func.params { collect_anon_from_ty(&p.ty, &named_set, &mut seen); }
@@ -371,6 +380,30 @@ pub fn collect_anon_records(program: &IrProgram, named: &HashMap<Vec<String>, St
         map.insert(key, name);
     }
     map
+}
+
+/// Descend a type declaration's field / variant-payload types, registering any
+/// anonymous record reachable only from the declaration (never constructed).
+fn collect_anon_from_type_decl(td: &IrTypeDecl, named: &HashSet<Vec<String>>, seen: &mut HashSet<Vec<String>>) {
+    match &td.kind {
+        IrTypeDeclKind::Record { fields } => {
+            for f in fields { collect_anon_from_ty(&f.ty, named, seen); }
+        }
+        IrTypeDeclKind::Variant { cases, .. } => {
+            for c in cases {
+                match &c.kind {
+                    IrVariantKind::Unit => {}
+                    IrVariantKind::Tuple { fields } => {
+                        for t in fields { collect_anon_from_ty(t, named, seen); }
+                    }
+                    IrVariantKind::Record { fields } => {
+                        for f in fields { collect_anon_from_ty(&f.ty, named, seen); }
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
 }
 
 fn collect_anon_from_expr(expr: &IrExpr, named: &HashSet<Vec<String>>, seen: &mut HashSet<Vec<String>>) {

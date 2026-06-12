@@ -1,0 +1,21 @@
+// @contract: C-079
+// #628: a variant with >=2 cases carrying ANONYMOUS-RECORD payloads of DIFFERENT
+// field-name sets. A payload anon record that is never constructed (only present
+// in the type decl) was not registered, so native codegen emitted the bare field
+// name as a type (`Square(s)`) -> rustc E0425; wasm (type-erased) was fine. The
+// anon-record collector now scans variant/record payload types in declarations.
+type Shape =
+  | Circle({ r: Int })
+  | Square({ s: Int })
+  | Rect({ w: Int, h: Int })
+fn area(sh: Shape) -> Int = match sh {
+  Circle(c) => c.r * c.r * 3,
+  Square(c) => c.s * c.s,
+  Rect(c) => c.w * c.h,
+}
+fn main() -> Unit = {
+  println(int.to_string(area(Circle({ r: 2 }))))
+  println(int.to_string(area(Square({ s: 5 }))))
+  println(int.to_string(area(Rect({ w: 3, h: 4 }))))
+  println("${Square({ s: 9 })}")
+}

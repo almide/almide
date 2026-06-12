@@ -24,7 +24,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 `fixture` < `fuzz` < `exhaustive` < `lean`. An **active** contract must carry
 ≥1 evidence of class ≥ `fixture`.
 
-77 contracts
+78 contracts
 
 | ID | Contract | Since | Status | Strongest Evidence | # Fixtures |
 |----|----------|-------|--------|--------------------|-----------:|
@@ -105,4 +105,5 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-075 | lowmisc round-5 cluster: borrowed-param owning binding, effect-Option auto-try strip, matching-error ! passthrough |  | active | fixture | 1 |
 | C-076 | Producer-side in-module variant construction is target-stable |  | active | fixture | 1 |
 | C-077 | Cross-module heap-global init order is dependency-respecting |  | active | fixture | 1 |
+| C-079 | Variant cases with distinct anonymous-record payloads are target-stable |  | active | fixture | 1 |
 

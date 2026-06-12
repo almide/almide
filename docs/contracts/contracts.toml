@@ -941,3 +941,12 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/r5_mod_global_init_order.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-079"
+title     = "Variant cases with distinct anonymous-record payloads are target-stable"
+statement = "A variant whose cases carry anonymous-record payloads with different field-name sets compiles and runs byte-identical native == wasm, including for a payload type that appears only in the declaration (never constructed). The anonymous-record collector scans declaration field/payload types, so every payload lowers to its generated struct (`AlmdRec_<fields>`) instead of native falling back to the bare field name as a type (rustc E0425)."
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/anon_record_variant_payloads.almd", class = "fixture" },
+]
