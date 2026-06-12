@@ -1,0 +1,15 @@
+// @contract: C-082
+// #623: calling a lambda parameter that is itself a closure — `(f) => f(10)` in
+// a list.map over a List[(Int)->Int]. When `f`'s type is an unresolved inference
+// var at the call site, the body was typed as f's OWN closure type, not the call
+// RESULT, so list.map's result became List[(Int)->Int] and codegen emitted a
+// closure body returning a closure (native invalid Rust E0271 / wrong wasm). The
+// call now constrains f to `(args)->?ret` and returns `?ret` (resolved to Int
+// from the element type). native == wasm.
+fn main() -> Unit = {
+  let fns: List[(Int) -> Int] = [(x: Int) => x + 1, (x: Int) => x * 2]
+  let applied = list.map(fns, (f) => f(10))
+  let strs: List[(String) -> String] = [(s: String) => s + "!"]
+  let greeted = list.map(strs, (g) => g("hi"))
+  println("${int.to_string(applied[0])} ${int.to_string(applied[1])} ${greeted[0]}")
+}

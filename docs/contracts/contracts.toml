@@ -977,3 +977,12 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/generic_fn_in_inferred_lambda.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-082"
+title     = "Calling a closure-typed lambda parameter yields the call result, not the closure"
+statement = "A lambda whose body CALLS one of its parameters — `(f) => f(10)` over a `List[(Int)->Int]` via `list.map` — compiles and runs byte-identical native == wasm. When the called parameter's type is an unresolved inference var at the call site, the call constrains it to `(args)->?ret` and yields `?ret` (resolved from context), not the parameter's own closure type — so the HOF result is `List[?ret]`, not a list of closures. Verified for Int and String closure element types."
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/call_closure_lambda_param.almd", class = "fixture" },
+]
