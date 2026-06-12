@@ -14,9 +14,23 @@ use super::{CompiledFunc, FuncCompiler, LambdaInfo, WasmEmitter};
 use super::values;
 use super::statements;
 
+/// #644: true iff a function (top-level when `module` is None, else a module fn)
+/// is reachable from the entry surface. Mirrors the gate in `emit_wasm::emit`,
+/// using the SAME `registered_keys` spellings so the closure scanners and the
+/// body-compile loops agree on exactly which functions are live.
+fn fn_reachable(reachable: &HashSet<String>, module: Option<&str>, fname: &str) -> bool {
+    super::reachability::registered_keys(module, fname)
+        .iter()
+        .any(|k| reachable.contains(k))
+}
+
 /// Walk all function bodies to find Lambda and FnRef nodes.
 /// Register lambda functions and FnRef wrappers in the emitter.
-pub(super) fn pre_scan_closures(program: &IrProgram, emitter: &mut WasmEmitter) {
+pub(super) fn pre_scan_closures(
+    program: &IrProgram,
+    emitter: &mut WasmEmitter,
+    reachable_fns: &HashSet<String>,
+) {
     // Collect all lambdas (in tree-walk order)
     let mut lambda_exprs: Vec<(Vec<(VarId, almide_lang::types::Ty)>, IrExpr, Vec<u32>, Option<u32>)> = Vec::new();
     let mut fn_ref_set: HashSet<String> = HashSet::new();
@@ -33,6 +47,10 @@ pub(super) fn pre_scan_closures(program: &IrProgram, emitter: &mut WasmEmitter) 
     }
 
     for func in &program.functions {
+        // #644: a dead function's lambdas are dead too — skip them so their
+        // bodies (which may hit a native-only intrinsic) are never compiled.
+        // `compile_lambda_bodies` applies the identical filter → index alignment.
+        if !fn_reachable(reachable_fns, None, func.name.as_str()) { continue; }
         let scope_vars: HashSet<u32> = func.params.iter().map(|p| p.var.0).collect();
         scan_closures(&func.body, scope_vars, &mut mutable_vars, &mut lambda_exprs, &mut fn_ref_set);
     }
@@ -44,7 +62,9 @@ pub(super) fn pre_scan_closures(program: &IrProgram, emitter: &mut WasmEmitter) 
     // IDENTICAL to compile_lambda_bodies so the positional index aligns.
     // (Closure v2, P0.)
     for module in &program.modules {
+        let mod_name = module.name.to_string();
         for func in &module.functions {
+            if !fn_reachable(reachable_fns, Some(&mod_name), func.name.as_str()) { continue; }
             let scope_vars: HashSet<u32> = func.params.iter().map(|p| p.var.0).collect();
             scan_closures(&func.body, scope_vars, &mut mutable_vars, &mut lambda_exprs, &mut fn_ref_set);
         }
@@ -140,10 +160,13 @@ pub(super) fn pre_scan_closures(program: &IrProgram, emitter: &mut WasmEmitter) 
     // the table so call_indirect can dispatch them.
     let mut closure_create_set: HashSet<String> = HashSet::new();
     for func in &program.functions {
+        if !fn_reachable(reachable_fns, None, func.name.as_str()) { continue; }
         collect_closure_creates(&func.body, &mut closure_create_set);
     }
     for module in &program.modules {
+        let mod_name = module.name.to_string();
         for func in &module.functions {
+            if !fn_reachable(reachable_fns, Some(&mod_name), func.name.as_str()) { continue; }
             collect_closure_creates(&func.body, &mut closure_create_set);
         }
     }
@@ -167,13 +190,20 @@ pub(super) fn pre_scan_closures(program: &IrProgram, emitter: &mut WasmEmitter) 
 }
 
 /// Compile lambda bodies and FnRef wrappers.
-pub(super) fn compile_lambda_bodies(program: &IrProgram, emitter: &mut WasmEmitter) {
+pub(super) fn compile_lambda_bodies(
+    program: &IrProgram,
+    emitter: &mut WasmEmitter,
+    reachable_fns: &HashSet<String>,
+) {
     // Re-scan to get lambda bodies (in same order as pre-scan)
     let mut lambda_exprs: Vec<(Vec<(VarId, almide_lang::types::Ty)>, IrExpr, Vec<u32>, Option<u32>)> = Vec::new();
     let mut fn_ref_set: HashSet<String> = HashSet::new();
     let mut mutable_vars: HashSet<u32> = HashSet::new();
 
     for func in &program.functions {
+        // #644: identical reachable-fn filter to pre_scan_closures — dead
+        // functions contribute no lambdas, so emitter.lambdas[i] stays aligned.
+        if !fn_reachable(reachable_fns, None, func.name.as_str()) { continue; }
         let scope_vars: HashSet<u32> = func.params.iter().map(|p| p.var.0).collect();
         scan_closures(&func.body, scope_vars, &mut mutable_vars, &mut lambda_exprs, &mut fn_ref_set);
     }
@@ -181,7 +211,9 @@ pub(super) fn compile_lambda_bodies(program: &IrProgram, emitter: &mut WasmEmitt
     // modules) so emitter.lambdas[i] lines up with the pre-scan registration.
     // (Closure v2, P0.)
     for module in &program.modules {
+        let mod_name = module.name.to_string();
         for func in &module.functions {
+            if !fn_reachable(reachable_fns, Some(&mod_name), func.name.as_str()) { continue; }
             let scope_vars: HashSet<u32> = func.params.iter().map(|p| p.var.0).collect();
             scan_closures(&func.body, scope_vars, &mut mutable_vars, &mut lambda_exprs, &mut fn_ref_set);
         }

@@ -68,6 +68,7 @@ pub mod statements;
 mod functions;
 pub mod scratch;
 mod dce;
+pub(crate) mod reachability;
 
 use std::collections::HashMap;
 // BTreeMap for record_fields / variant_info: their iteration order reaches
@@ -168,6 +169,19 @@ impl CompiledFunc {
         let mut c = Self::tracked(type_idx, tf);
         c.expected_func_idx = Some(func_idx);
         c
+    }
+
+    /// A minimal trapping body for `type_idx`: `unreachable; end`. Valid for ANY
+    /// signature (`unreachable` is stack-polymorphic). Used by the #644
+    /// reachability prune to occupy the slot of an unreachable function whose
+    /// real body would panic the emitter (native-only intrinsic), and matched by
+    /// the post-compile DCE stub shape. `call_targets` is empty so DCE sees no
+    /// outgoing edges from it.
+    pub fn trap_stub(type_idx: u32) -> Self {
+        let mut tf = TrackedFunction::new([]);
+        tf.instruction(&wasm_encoder::Instruction::Unreachable);
+        tf.instruction(&wasm_encoder::Instruction::End);
+        Self::tracked(type_idx, tf)
     }
 }
 
@@ -1616,10 +1630,36 @@ pub(crate) fn emit(program: &IrProgram) -> Vec<u8> {
         None
     };
 
+    // Phase 1.9: Reachability prune (#644). Compute which user/module function
+    // bodies the entry surface can actually reach, BEFORE any body (or the
+    // lambdas inside it) is scanned/compiled. The post-compile
+    // `dce::eliminate_dead_code` cannot help here: an unreachable body that
+    // references a native-only intrinsic (e.g. a matrix Q8 op with no WASM
+    // runtime) PANICS the emitter while *compiling* it, long before DCE runs. So
+    // unreachable bodies are emitted as `unreachable` stubs instead of compiled —
+    // they can never be called, and the native target already drops them (the
+    // Rust linker discards the dead fn). Roots: `main`, every exported `pub fn`,
+    // every test (the test runner calls them), and every fn named by a top-level
+    // `let` initializer (run by `__init_globals`). The set OVER-approximates
+    // reachability (see reachability.rs), so a body is stubbed only when truly
+    // unreachable. Computed before `pre_scan_closures` so that pass can skip the
+    // lambdas of dead functions too (their bodies can equally hit a native-only
+    // intrinsic) while keeping the lambda-table index aligned with
+    // `compile_lambda_bodies` (both consult the SAME set, same iteration order).
+    // Shared with the CLI native-only-op pre-check (lib.rs) so both agree which
+    // bodies are dead — an unreachable native-only intrinsic must neither ICE the
+    // emit nor fail the pre-check (#644).
+    let reachable_fns = reachability::reachable_fn_names(program);
+    // True iff a function registered under `keys` is reachable (any spelling).
+    let is_reachable = |keys: &[String]| keys.iter().any(|k| reachable_fns.contains(k));
+
     // Pre-scan for lambdas and FnRefs — only these need element table entries.
     // (Previously all user functions were added unconditionally, bloating the
     // element table and preventing DCE from eliminating unused functions.)
-    closures::pre_scan_closures(program, &mut emitter);
+    // Lambdas of unreachable functions (#644) get no table slot / body —
+    // `compile_lambda_bodies` applies the identical reachable-fn filter to keep
+    // the `emitter.lambdas[i]` ↔ body index alignment (Closure v2 P0).
+    closures::pre_scan_closures(program, &mut emitter, &reachable_fns);
 
     // Pre-register variant deep-equality functions (must be before compilation starts)
     register_variant_eq_funcs(&mut emitter);
@@ -1641,10 +1681,17 @@ pub(crate) fn emit(program: &IrProgram) -> Vec<u8> {
             continue;
         }
         let type_idx = user_meta[user_idx];
-        // Pass init_globals_idx to main function so top-level lets get initialized
-        let is_main = func.name == "main" && !func.is_test;
-        let init_idx = if is_main { init_globals_idx } else { None };
-        let compiled = functions::compile_function_with_init(&mut emitter, func, &program.var_table, type_idx, init_idx);
+        // #644: unreachable top-level fns are emitted as trapping stubs — their
+        // real body may reference a native-only intrinsic that would panic emit.
+        // `main`/tests/exports are roots, so they are always reachable here.
+        let compiled = if is_reachable(&reachability::registered_keys(None, func.name.as_str())) {
+            // Pass init_globals_idx to main function so top-level lets get initialized
+            let is_main = func.name == "main" && !func.is_test;
+            let init_idx = if is_main { init_globals_idx } else { None };
+            functions::compile_function_with_init(&mut emitter, func, &program.var_table, type_idx, init_idx)
+        } else {
+            CompiledFunc::trap_stub(type_idx)
+        };
         emitter.add_compiled(compiled);
         user_idx += 1;
     }
@@ -1655,7 +1702,15 @@ pub(crate) fn emit(program: &IrProgram) -> Vec<u8> {
         let module = &program.modules[mi];
         let func = &module.functions[fi];
         let mod_name = module.name.to_string();
-        let compiled = functions::compile_module_function(&mut emitter, func, &program.var_table, type_idx, &mod_name);
+        // #644: a merely-imported module's unused fns (e.g. tensor loaders that
+        // call native-only matrix intrinsics) are stubbed when unreachable, so
+        // importing such a module no longer forces WASM-compiling code the entry
+        // never runs — the exact import-graph trap from the issue.
+        let compiled = if is_reachable(&reachability::registered_keys(Some(&mod_name), func.name.as_str())) {
+            functions::compile_module_function(&mut emitter, func, &program.var_table, type_idx, &mod_name)
+        } else {
+            CompiledFunc::trap_stub(type_idx)
+        };
         emitter.add_compiled(compiled);
     }
 
@@ -1690,7 +1745,7 @@ pub(crate) fn emit(program: &IrProgram) -> Vec<u8> {
     }
 
     // Lambda bodies and FnRef wrappers
-    closures::compile_lambda_bodies(program, &mut emitter);
+    closures::compile_lambda_bodies(program, &mut emitter, &reachable_fns);
 
     // Compile variant deep-equality functions (bodies, after all user code)
     compile_variant_eq_funcs(&mut emitter, &program.var_table);

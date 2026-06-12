@@ -1478,3 +1478,44 @@ fn successful_main_exits_zero_both_targets() {
         assert_eq!(wout, "7");
     }
 }
+
+/// #644: an unreachable `local fn` that references a native-only matrix intrinsic
+/// must NOT break the WASM build. The reachability prune drops the dead body
+/// (and the CLI native-only pre-check, sharing the same reachability, ignores it)
+/// so the build succeeds instead of ICEing/refusing. `local` is required because
+/// Almide functions are PUBLIC by default — an exported root that is never pruned.
+#[test]
+fn dead_local_native_only_intrinsic_does_not_break_wasm_build() {
+    let bin = almide_bin();
+    if Command::new(&bin).arg("--version").output().is_err() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("dead.almd");
+    std::fs::write(
+        &src,
+        "local fn dead(h: Matrix, w: Bytes, g: List[Int]) -> Matrix = {\n  \
+           let (out, _a, _b) = matrix.qwen3_block_q1_0_kv(h, h, h, w, g, g, 0, 4, 2, 8, 16, 10000.0, 0.00001)\n  \
+           out\n}\n\
+         fn main() -> Unit = println(\"ok\")\n",
+    )
+    .unwrap();
+    let out_wasm = dir.path().join("dead.wasm");
+    let r = Command::new(&bin)
+        .args([
+            "build",
+            src.to_str().unwrap(),
+            "--target",
+            "wasm",
+            "-o",
+            out_wasm.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        r.status.success() && out_wasm.exists(),
+        "WASM build of a program with a dead native-only intrinsic should succeed (#644).\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&r.stdout),
+        String::from_utf8_lossy(&r.stderr)
+    );
+}
