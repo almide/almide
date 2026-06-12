@@ -890,6 +890,7 @@ impl Checker {
             ExprKind::Unwrap { expr: inner, .. } => {
                 let t = self.infer_expr(inner);
                 let resolved = resolve_ty(&t, &self.uf);
+                self.check_unwrap_propagation_context();
                 if let Some(inner_ty) = resolved.option_inner().or_else(|| resolved.result_ok_ty()) {
                     inner_ty
                 } else if matches!(&resolved, Ty::Unknown | Ty::TypeVar(_)) {
@@ -1047,6 +1048,34 @@ impl Checker {
         ret
     }
 
+    /// `expr!` propagates the unwrapped error: lowering renders it as `?`
+    /// (effect fn body) or `.unwrap()` (test block). In any other context the
+    /// generated `?` lands in a function/closure that does not return Result,
+    /// which is invalid Rust and a wasm build failure — yet the type checker
+    /// previously accepted it (the `Result/Option → T` rule alone). Error
+    /// propagation is possible exactly where `auto_unwrap` is live (an effect
+    /// fn body, outside any lambda) or inside a `test` block; reject everywhere
+    /// else at type-check time so the failure is a clear diagnostic, not a
+    /// codegen ICE (#608).
+    fn check_unwrap_propagation_context(&mut self) {
+        if self.env.auto_unwrap || self.env.in_test_block {
+            return;
+        }
+        // Inside a lambda within an effect fn the call site *looks* effectful,
+        // but `?` cannot propagate out of the closure (#489) — point there
+        // specifically; otherwise the fn just needs to be `effect fn`.
+        let hint = if self.env.can_call_effect && self.env.lambda_depth > 0 {
+            "`!` cannot propagate an error out of a lambda; use `??` for a fallback value or move the call out of the closure"
+        } else {
+            "Mark the enclosing function as `effect fn`, or use `??` to provide a fallback value"
+        };
+        self.emit(super::err(
+            "operator '!' propagates errors and is only valid inside an `effect fn` body or a `test` block".to_string(),
+            hint,
+            "operator !",
+        ).with_code("E022"));
+    }
+
     fn infer_pipe(&mut self, left: &mut Box<ast::Expr>, right: &mut Box<ast::Expr>) -> Ty {
         // Unwrap postfix operators (??, !, ?) on the RHS so the pipe targets the inner Call.
         // e.g. `xs |> list.find(pred) ?? fallback` → pipe into list.find, then apply ??
@@ -1064,6 +1093,7 @@ impl Checker {
             }
             ExprKind::Unwrap { expr: inner, .. } => {
                 let inner_ty = self.infer_pipe(left, inner);
+                self.check_unwrap_propagation_context();
                 // Annotate the inner expression with its resolved type so the lowering
                 // can construct the correct IR type (e.g., Result[List[T], List[E]] for
                 // result.collect rather than hardcoding Result[T, String]).
