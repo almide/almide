@@ -1154,6 +1154,15 @@ note = "spec/wasm_cross/json_value.almd round-trips parse→stringify; output by
 
 [[routine]]
 file = "rt_value.rs"
+routine = "compile_json_stringify_pretty"
+status = "verified"
+class = "fixture"
+oracle = "runtime/rs/src/json.rs::stringify_value (json.stringify_pretty) — depth-indented recursive pretty-printer: 2-space indent per depth, one element/member per line, inline [] / {} for empties"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "spec/wasm_cross/json_stringify_pretty.almd pretty-prints a nested object (arrays, nested object, empty array/object, bool, float); output bytes must match native (#661)."
+
+[[routine]]
+file = "rt_value.rs"
 routine = "compile_json_parse"
 status = "verified"
 class = "fixture"
