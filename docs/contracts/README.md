@@ -24,7 +24,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 `fixture` < `fuzz` < `exhaustive` < `lean`. An **active** contract must carry
 ≥1 evidence of class ≥ `fixture`.
 
-78 contracts
+79 contracts
 
 | ID | Contract | Since | Status | Strongest Evidence | # Fixtures |
 |----|----------|-------|--------|--------------------|-----------:|
@@ -106,4 +106,5 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-076 | Producer-side in-module variant construction is target-stable |  | active | fixture | 1 |
 | C-077 | Cross-module heap-global init order is dependency-respecting |  | active | fixture | 1 |
 | C-078 | Phantom record generic param is stripped on the Rust target |  | active | fixture | 1 |
+| C-079 | Variant cases with distinct anonymous-record payloads are target-stable |  | active | fixture | 1 |
 
