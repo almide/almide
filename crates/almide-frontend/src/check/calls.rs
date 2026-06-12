@@ -46,8 +46,83 @@ impl Checker {
         }
     }
 
+    /// Resolve the callee of a call to its function signature, for the two
+    /// shapes that can name a higher-order function with a `Fn`-typed parameter:
+    /// a bare `Ident` (user fn / selectively-imported stdlib fn) or
+    /// `module.field` (`list.map`, an aliased import, or a user `module.fn`).
+    /// Returns the signature so the eager-arg pass can pin an inferred lambda
+    /// param to the element type BEFORE the lambda body is checked. Returns
+    /// `None` for anything else (the call then infers args bottom-up as before).
+    fn lookup_call_sig(&self, callee: &ast::Expr) -> Option<crate::types::FnSig> {
+        match &callee.kind {
+            ExprKind::Ident { name, .. } => {
+                self.env.functions.get(&sym(name)).cloned()
+            }
+            ExprKind::Member { object, field, .. } => {
+                let module = match &object.kind {
+                    ExprKind::Ident { name, .. } => name.as_str(),
+                    _ => return None,
+                };
+                // Honor import aliases (e.g. `gpu` -> `snaidhm.web.gpu`).
+                let canonical = self.env.import_table.resolve(module)
+                    .map(|s| s.as_str().to_string())
+                    .unwrap_or_else(|| module.to_string());
+                let key = format!("{}.{}", canonical, field);
+                self.env.functions.get(&sym(&key)).cloned()
+                    .or_else(|| crate::stdlib::lookup_sig(&canonical, field))
+            }
+            _ => None,
+        }
+    }
+
     pub(crate) fn check_call_with_type_args(&mut self, callee: &mut ast::Expr, args: &mut [ast::Expr], type_args: Option<&[Ty]>) -> Ty {
-        let arg_tys: Vec<Ty> = args.iter_mut().map(|a| self.infer_expr(a)).collect();
+        // Expected-type-directed argument inference (#653). The default is
+        // strictly-left-to-right bottom-up inference of every argument. The one
+        // place that breaks down is an INFERRED lambda param passed to a
+        // higher-order function inside a generic body: `list.map(xs, (e) =>
+        // e.name())` where `xs: List[T]`, `T: Labelled`. Inferred bottom-up,
+        // `e` is a fresh var, so `e.name()` cannot see the protocol bound and
+        // collapses `e` into a closure type (`Fn() -> String`) -- the later
+        // `(T)->U` constraint can no longer undo that, yielding a spurious
+        // native E0308. Fix: resolve the callee's signature up front; as we
+        // infer args left-to-right we unify each non-lambda arg against its
+        // declared param to learn the generic bindings (`A := T`), then, just
+        // before inferring a lambda arg whose param slot is a `Fn`, pin the
+        // lambda's (unannotated) params to the substituted expected element
+        // type (`T`, carrying the bound). The lambda body then resolves
+        // `e.name()` via the protocol path. Calls without a `Fn`-param sig are
+        // unaffected -- they take the plain bottom-up path below.
+        let call_sig = self.lookup_call_sig(callee);
+        let arg_tys: Vec<Ty> = {
+            let mut bindings: HashMap<Sym, Ty> = HashMap::new();
+            let mut tys: Vec<Ty> = Vec::with_capacity(args.len());
+            for (i, a) in args.iter_mut().enumerate() {
+                // Pin an unannotated lambda's params to the expected element
+                // types substituted with bindings learned from earlier args.
+                let pinned = if matches!(&a.kind, ExprKind::Lambda { .. }) {
+                    call_sig.as_ref()
+                        .and_then(|sig| sig.params.get(i))
+                        .map(|(_, pty)| crate::types::substitute(pty, &bindings))
+                        .and_then(|pty| match pty {
+                            Ty::Fn { params, .. } => Some(params),
+                            _ => None,
+                        })
+                } else { None };
+                let prev_hint = self.lambda_arg_hint.take();
+                self.lambda_arg_hint = pinned;
+                let aty = self.infer_expr(a);
+                self.lambda_arg_hint = prev_hint;
+                // Accumulate generic bindings from this arg so later lambda
+                // params can be pinned. Lambdas contribute nothing new here.
+                if let Some(sig) = &call_sig {
+                    if let Some((_, pty)) = sig.params.get(i) {
+                        crate::types::unify(pty, &resolve_ty(&aty, &self.uf), &mut bindings);
+                    }
+                }
+                tys.push(aty);
+            }
+            tys
+        };
         let callee_span_snapshot = callee.span;
         match &mut callee.kind {
             ExprKind::Ident { name, .. } => {

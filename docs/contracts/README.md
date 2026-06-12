@@ -24,7 +24,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 `fixture` < `fuzz` < `exhaustive` < `lean`. An **active** contract must carry
 ≥1 evidence of class ≥ `fixture`.
 
-93 contracts
+94 contracts
 
 | ID | Contract | Since | Status | Strongest Evidence | # Fixtures |
 |----|----------|-------|--------|--------------------|-----------:|
@@ -121,4 +121,5 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-091 | A nested sub-pattern in let-destructuring binds every leaf |  | active | fixture | 1 |
 | C-092 | A generic record field is sized by its instantiated type at construction |  | active | fixture | 1 |
 | C-093 | Mutually-recursive variant types compile on both targets |  | active | fixture | 1 |
+| C-094 | A protocol-method UFCS call on an inferred lambda param resolves the element type |  | active | fixture | 1 |
 

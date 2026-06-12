@@ -1085,3 +1085,12 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/mutual_recursive_types.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-094"
+title     = "A protocol-method UFCS call on an inferred lambda param resolves the element type"
+statement = "A higher-order call whose lambda argument has an UNANNOTATED parameter used as a protocol-method receiver (`list.map(xs, (e) => e.name())` where `xs: List[T]`, `T: Labelled`) compiles and runs byte-identical native == wasm. The checker resolves the callee signature up front and pins the lambda's inferred param to the expected element type (carrying its protocol bound) before inferring the body, so `e.name()` resolves via the protocol path instead of collapsing `e` into a closure type (which native rendered as `Rc<dyn Fn() -> String>`, rustc E0308). Verified for a stdlib HOF and a user-defined HOF."
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/protocol_ufcs_inferred_lambda.almd", class = "fixture" },
+]

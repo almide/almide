@@ -878,8 +878,18 @@ impl Checker {
                 let saved_auto_unwrap = self.env.auto_unwrap;
                 self.env.auto_unwrap = false;
                 self.env.lambda_depth += 1;
-                let param_tys: Vec<Ty> = params.iter().map(|p| {
-                    let ty = p.ty.as_ref().map(|te| self.resolve_type_expr(te)).unwrap_or_else(|| self.fresh_var());
+                // Expected-type hint from the enclosing call (#653): when this
+                // lambda is an argument whose parameter slot is a `Fn`, the
+                // caller pins each UNANNOTATED param to the expected element
+                // type (e.g. `T` carrying a protocol bound) so the body resolves
+                // method calls on the param via the protocol path instead of
+                // collapsing it into a closure type. An explicit annotation on
+                // the param always wins; the hint only fills inferred slots.
+                let param_hint = self.lambda_arg_hint.take();
+                let param_tys: Vec<Ty> = params.iter().enumerate().map(|(i, p)| {
+                    let ty = p.ty.as_ref().map(|te| self.resolve_type_expr(te))
+                        .or_else(|| param_hint.as_ref().and_then(|h| h.get(i).cloned()))
+                        .unwrap_or_else(|| self.fresh_var());
                     let concrete = resolve_ty(&ty, &self.uf);
                     self.env.define_var(&p.name, concrete);
                     ty
