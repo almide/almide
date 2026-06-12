@@ -819,11 +819,7 @@ pub fn almide_rt_matrix_rope_rotate_at(
     let head_dim_u = head_dim.max(0) as usize;
     let start = start_pos.max(0) as usize;
     let half = head_dim_u / 2;
-    let mut inv_freqs = Vec::<f64>::with_capacity(half);
-    for i in 0..half {
-        let exp = (2 * i) as f64 / head_dim_u as f64;
-        inv_freqs.push(1.0 / theta_base.powf(exp));
-    }
+    let inv_freqs = rope_inv_freqs(head_dim_u, theta_base);
     let mut out = Vec::<Vec<f64>>::with_capacity(rows);
     for p in 0..rows {
         let pos_f = (start + p) as f64;
@@ -1306,11 +1302,7 @@ pub fn almide_rt_matrix_rope_rotate_neox_at(
     let head_dim_u = head_dim.max(0) as usize;
     let start = start_pos.max(0) as usize;
     let half = head_dim_u / 2;
-    let mut inv_freqs = Vec::<f64>::with_capacity(half);
-    for j in 0..half {
-        let exp = (2 * j) as f64 / head_dim_u as f64;
-        inv_freqs.push(1.0 / theta_base.powf(exp));
-    }
+    let inv_freqs = rope_inv_freqs(head_dim_u, theta_base);
     let mut out = Vec::<Vec<f64>>::with_capacity(rows);
     for p in 0..rows {
         let pos_f = (start + p) as f64;
@@ -1410,6 +1402,32 @@ pub fn almide_rt_matrix_qwen3_block_f32_kv(
 // bandwidth floor (2.4 GB weights/token), so the win here is bandwidth,
 // not FLOPs.
 
+// RoPE inverse frequencies depend only on (head_dim, theta) — computing
+// them per call costs head_dim/2 powf's per projection per layer. Cached
+// per thread (the table is tiny and the keys are a handful of configs).
+fn rope_inv_freqs(head_dim: usize, theta_base: f64) -> std::rc::Rc<Vec<f64>> {
+    use std::cell::RefCell;
+    thread_local! {
+        static CACHE: RefCell<Vec<((usize, u64), std::rc::Rc<Vec<f64>>)>> = RefCell::new(Vec::new());
+    }
+    let key = (head_dim, theta_base.to_bits());
+    CACHE.with(|c| {
+        let mut c = c.borrow_mut();
+        if let Some((_, v)) = c.iter().find(|(k, _)| *k == key) {
+            return v.clone();
+        }
+        let half = head_dim / 2;
+        let mut inv = Vec::with_capacity(half);
+        for i in 0..half {
+            let exp = (2 * i) as f64 / head_dim as f64;
+            inv.push(1.0 / theta_base.powf(exp));
+        }
+        let rc = std::rc::Rc::new(inv);
+        c.push((key, rc.clone()));
+        rc
+    })
+}
+
 // GQA attention without materializing the expanded K/V: query head h
 // reads kv head h / (n_q / n_kv) directly via column offsets. The old path
 // (repeat_kv -> masked MHA) copied the whole KV cache twice per layer per
@@ -1444,9 +1462,22 @@ fn mha_gqa_core(
             let qrow = &q[i][qc..qc + dh];
             for j in 0..visible {
                 let krow = &k[j][kc..kc + dh];
-                let mut s = 0.0f64;
-                for d in 0..dh {
+                // 4 independent partial sums: FP addition is not
+                // reassociable, so a single accumulator pins LLVM to a
+                // serial chain — this form vectorizes.
+                let (mut s0, mut s1, mut s2, mut s3) = (0.0f64, 0.0f64, 0.0f64, 0.0f64);
+                let mut d = 0;
+                while d + 4 <= dh {
+                    s0 += qrow[d] * krow[d];
+                    s1 += qrow[d + 1] * krow[d + 1];
+                    s2 += qrow[d + 2] * krow[d + 2];
+                    s3 += qrow[d + 3] * krow[d + 3];
+                    d += 4;
+                }
+                let mut s = (s0 + s1) + (s2 + s3);
+                while d < dh {
                     s += qrow[d] * krow[d];
+                    d += 1;
                 }
                 scores[j] = s * scale;
             }
@@ -1619,6 +1650,48 @@ pub(crate) fn quantize_rows_q8(x: &AlmideMatrix) -> Vec<(Vec<f32>, Vec<i8>)> {
         .collect()
 }
 
+// Several projections of the SAME activation in ONE parallel region:
+// fork-join overhead measured high relative to the small per-projection
+// GEMVs (q/k/v are 2048+1024+1024 rows). `offs` = (byte offset, out_cols).
+pub(crate) fn linear_q8_0_multi(
+    xq: &[(Vec<f32>, Vec<i8>)],
+    x_rows: usize,
+    n_in: usize,
+    w_bytes: &[u8],
+    offs: &[(usize, usize)],
+) -> Vec<AlmideMatrix> {
+    let row_bytes = n_in / Q8_BLOCK * Q8_BLOCK_BYTES;
+    let total: usize = offs.iter().map(|&(_, c)| c).sum();
+    let mut flat = vec![0.0f64; x_rows * total];
+    for (i, (x_scales, x_q)) in xq.iter().enumerate() {
+        par_out_rows(&mut flat[i * total..(i + 1) * total], |j, o| {
+            // map the fused output index to (projection, local row)
+            let mut j_local = j;
+            for &(off, cols) in offs {
+                if j_local < cols {
+                    let w_all = &w_bytes[off..off + cols * row_bytes];
+                    *o = q8_0_row_dot_q8(x_scales, x_q, &w_all[j_local * row_bytes..(j_local + 1) * row_bytes]);
+                    return;
+                }
+                j_local -= cols;
+            }
+        });
+    }
+    // split the fused buffer back into one matrix per projection
+    let mut outs = Vec::with_capacity(offs.len());
+    let mut col0 = 0usize;
+    for &(_, cols) in offs {
+        let mut data = Vec::with_capacity(x_rows * cols);
+        for i in 0..x_rows {
+            let base = i * total + col0;
+            data.extend_from_slice(&flat[base..base + cols]);
+        }
+        outs.push(mk(x_rows, cols, data));
+        col0 += cols;
+    }
+    outs
+}
+
 pub(crate) fn linear_q8_0_pre(
     xq: &[(Vec<f32>, Vec<i8>)],
     x_rows: usize,
@@ -1695,9 +1768,14 @@ pub fn almide_rt_matrix_qwen3_block_q8_0_kv(
 
     let hq = quantize_rows_q8(&h_normed);
     let rows = h_normed.rows;
-    let q_proj = linear_q8_0_pre(&hq, rows, hidden, w, weight_offs[0].max(0) as usize, q_hidden);
-    let k_proj = linear_q8_0_pre(&hq, rows, hidden, w, weight_offs[1].max(0) as usize, kv_hidden);
-    let v_proj = linear_q8_0_pre(&hq, rows, hidden, w, weight_offs[2].max(0) as usize, kv_hidden);
+    let mut qkv = linear_q8_0_multi(&hq, rows, hidden, w, &[
+        (weight_offs[0].max(0) as usize, q_hidden),
+        (weight_offs[1].max(0) as usize, kv_hidden),
+        (weight_offs[2].max(0) as usize, kv_hidden),
+    ]);
+    let v_proj = qkv.pop().unwrap();
+    let k_proj = qkv.pop().unwrap();
+    let q_proj = qkv.pop().unwrap();
 
     let q_normed = per_head_rms_norm(&q_proj, &gamma_q, n_q_heads, eps);
     let k_normed = per_head_rms_norm(&k_proj, &gamma_k, n_kv_heads, eps);
@@ -1716,8 +1794,12 @@ pub fn almide_rt_matrix_qwen3_block_q8_0_kv(
 
     let h2 = almide_rt_matrix_rms_norm_rows(&x_attn, &gamma_ffn, eps);
     let h2q = quantize_rows_q8(&h2);
-    let gate = linear_q8_0_pre(&h2q, h2.rows, hidden, w, weight_offs[4].max(0) as usize, ffn_hidden.max(0) as usize);
-    let up = linear_q8_0_pre(&h2q, h2.rows, hidden, w, weight_offs[5].max(0) as usize, ffn_hidden.max(0) as usize);
+    let mut gu = linear_q8_0_multi(&h2q, h2.rows, hidden, w, &[
+        (weight_offs[4].max(0) as usize, ffn_hidden.max(0) as usize),
+        (weight_offs[5].max(0) as usize, ffn_hidden.max(0) as usize),
+    ]);
+    let up = gu.pop().unwrap();
+    let gate = gu.pop().unwrap();
     let gated = almide_rt_matrix_silu_mul(&gate, &up);
     let ffn_out = almide_rt_matrix_linear_q8_0_row_no_bias(
         &gated, w, weight_offs[6], hidden as i64, ffn_hidden);
