@@ -13,6 +13,18 @@ impl Checker {
         if let Some(span) = expr.span {
             self.current_span = Some(span);
         }
+        // #626: register a candidate for any int literal that overflows i64. The
+        // actual range error is decided post-solve against context (a wider
+        // annotation or unary negation may make it valid) — see
+        // `validate_int_overflow_literals`. Registering here (not in the Int arm)
+        // keeps `expr.id` / `expr.span` in scope.
+        if let ExprKind::Int { raw, .. } = &expr.kind {
+            if super::int_literal_overflows_i64(raw) {
+                self.deferred_int_overflow_checks.push(super::IntOverflowSite {
+                    expr_id: expr.id, raw: raw.clone(), negated: false, context_ty: None, span: expr.span,
+                });
+            }
+        }
         let ity = self.infer_expr_inner(expr);
         self.type_map.insert(expr.id, ity.clone());
         ity
@@ -614,7 +626,18 @@ impl Checker {
             }
 
             ExprKind::Unary { op, operand, .. } => {
+                let is_neg_lit = op.as_str() == "-" && matches!(&operand.kind, ExprKind::Int { .. });
+                let oid = operand.id;
                 let t = self.infer_expr(operand);
+                // #626: `-<int literal>` lets the negation reach i64::MIN, whose
+                // magnitude (2^63) overflows a bare positive literal but is a
+                // valid i64. Mark the candidate (registered while inferring the
+                // operand) so its post-solve range check uses the signed MIN bound.
+                if is_neg_lit {
+                    if let Some(site) = self.deferred_int_overflow_checks.iter_mut().find(|s| s.expr_id == oid) {
+                        site.negated = true;
+                    }
+                }
                 match op.as_str() { "not" => Ty::Bool, _ => t }
             }
 
@@ -1371,12 +1394,31 @@ impl Checker {
         } else { t }
     }
 
+    /// Pin the declared type onto an int-overflow candidate when the literal is
+    /// the DIRECT value of an annotated binding (`let x: T = 5…` or `= -5…`), so
+    /// a wider `T` (e.g. `UInt64`) makes a >i64 literal valid post-solve (#626).
+    fn record_int_literal_context(&mut self, value: &ast::Expr, declared: &Ty) {
+        let lit_id = match &value.kind {
+            ExprKind::Int { .. } => Some(value.id),
+            ExprKind::Unary { op, operand, .. } if op.as_str() == "-"
+                && matches!(&operand.kind, ExprKind::Int { .. }) => Some(operand.id),
+            ExprKind::Paren { expr } if matches!(&expr.kind, ExprKind::Int { .. }) => Some(expr.id),
+            _ => None,
+        };
+        if let Some(id) = lit_id {
+            if let Some(site) = self.deferred_int_overflow_checks.iter_mut().find(|s| s.expr_id == id) {
+                site.context_ty = Some(declared.clone());
+            }
+        }
+    }
+
     pub(crate) fn check_stmt(&mut self, stmt: &mut ast::Stmt) {
         match stmt {
             ast::Stmt::Let { name, ty, value, span } => {
                 let val_ty = self.infer_expr(value);
                 let final_ty = if let Some(te) = ty {
                     let declared = self.resolve_type_expr(te);
+                    self.record_int_literal_context(value, &declared);
                     self.constrain(declared.clone(), val_ty, format!("let {}", name));
                     declared
                 } else {
@@ -1397,6 +1439,7 @@ impl Checker {
                 let val_ty = self.infer_expr(value);
                 let final_ty = if let Some(te) = ty {
                     let declared = self.resolve_type_expr(te);
+                    self.record_int_literal_context(value, &declared);
                     self.constrain(declared.clone(), val_ty, format!("let {}", name));
                     declared
                 } else {

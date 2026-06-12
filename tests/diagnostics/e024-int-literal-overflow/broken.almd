@@ -1,0 +1,4 @@
+// An integer literal whose magnitude exceeds i64::MAX in a default Int (i64)
+// context. Lowering and both codegens parse with `.unwrap_or(0)`, so without
+// E024 this would SILENTLY fold to 0 on both targets — no diagnostic. (#626)
+fn main() -> Unit = println(int.to_string(9223372036854775808))

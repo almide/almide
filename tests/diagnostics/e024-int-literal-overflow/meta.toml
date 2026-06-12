@@ -1,0 +1,3 @@
+expects_code = "E024"
+expects_error = "out of range"
+hint_substring = "fold to 0"
