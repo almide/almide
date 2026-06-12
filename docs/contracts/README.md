@@ -24,7 +24,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 `fixture` < `fuzz` < `exhaustive` < `lean`. An **active** contract must carry
 ≥1 evidence of class ≥ `fixture`.
 
-79 contracts
+80 contracts
 
 | ID | Contract | Since | Status | Strongest Evidence | # Fixtures |
 |----|----------|-------|--------|--------------------|-----------:|
@@ -107,4 +107,5 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-077 | Cross-module heap-global init order is dependency-respecting |  | active | fixture | 1 |
 | C-078 | Phantom record generic param is stripped on the Rust target |  | active | fixture | 1 |
 | C-079 | Variant cases with distinct anonymous-record payloads are target-stable |  | active | fixture | 1 |
+| C-080 | Empty map.from_list / set.from_list resolves its element from the result type |  | active | fixture | 1 |
 

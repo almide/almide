@@ -770,6 +770,65 @@ struct Concretizer<'a> {
     enclosing_ret: &'a Ty,
 }
 
+impl<'a> Concretizer<'a> {
+    /// Resolve the empty-list argument element type of `map.from_list(arg)` /
+    /// `set.from_list(arg)` from the expected Map/Set type `ret`, pinning the
+    /// arg expression, any Borrow/Clone/Deref wrappers, and the ANF-temp's
+    /// VarTable entry — the element only flows through the generic return, so
+    /// the checker can leave it `List[(?K,?V)]` past the WASM gate (#625).
+    fn pin_from_list_arg_elem(&mut self, ret: &Ty, value: &mut IrExpr) {
+        use almide_lang::types::constructor::TypeConstructorId as TCI;
+        if ret.has_unresolved_deep() { return; }
+        // `map.from_list` canonicalizes to `map.from_entries`, and by the WASM
+        // emit passes it is a `RuntimeCall` (`almide_rt_map_from_entries`), not a
+        // `Module` call — match both forms for each module (set keeps `from_list`).
+        let from_list_kind = |module: &str, func: &str| -> (bool, bool) {
+            let fl = func == "from_list" || func == "from_entries";
+            (module == "map" && fl, module == "set" && fl)
+        };
+        let (is_map, is_set) = match &value.kind {
+            IrExprKind::Call { target: CallTarget::Module { module, func, .. }, .. } =>
+                from_list_kind(module.as_str(), func.as_str()),
+            IrExprKind::RuntimeCall { symbol, .. } => {
+                let s = symbol.as_str();
+                (s.contains("map_from_entries") || s.contains("map_from_list"),
+                 s.contains("set_from_entries") || s.contains("set_from_list"))
+            }
+            _ => return,
+        };
+        let elem = if is_map {
+            match ret { Ty::Applied(TCI::Map, kv) if kv.len() == 2 => Ty::Tuple(vec![kv[0].clone(), kv[1].clone()]), _ => return }
+        } else if is_set {
+            match ret { Ty::Applied(TCI::Set, e) if e.len() == 1 => e[0].clone(), _ => return }
+        } else { return };
+        let list_ty = Ty::Applied(TCI::List, vec![elem]);
+        let args = match &mut value.kind {
+            IrExprKind::Call { args, .. } | IrExprKind::RuntimeCall { args, .. } => args,
+            _ => return,
+        };
+        {
+            if args.len() != 1 || !args[0].ty.has_unresolved_deep() { return; }
+            propagate_expected_ty(&mut args[0], &list_ty);
+            // Walk through wrappers to the Var, pinning each ty and the VarTable.
+            let mut node = &mut args[0];
+            loop {
+                if node.ty.has_unresolved_deep() { node.ty = list_ty.clone(); }
+                match &mut node.kind {
+                    IrExprKind::Borrow { expr, .. } | IrExprKind::Clone { expr } | IrExprKind::Deref { expr } => node = expr,
+                    IrExprKind::Var { id } => {
+                        let i = id.0 as usize;
+                        if i < self.vt.entries.len() && self.vt.entries[i].ty.has_unresolved_deep() {
+                            self.vt.entries[i].ty = list_ty.clone();
+                        }
+                        break;
+                    }
+                    _ => break,
+                }
+            }
+        }
+    }
+}
+
 impl<'a> IrMutVisitor for Concretizer<'a> {
     fn visit_expr_mut(&mut self, expr: &mut IrExpr) {
         // Custom Match handling: propagate subject ty into pattern bindings
@@ -854,6 +913,22 @@ impl<'a> IrMutVisitor for Concretizer<'a> {
                 }
             }
         }
+        // #625: `map.from_list([])` / `set.from_list([])` — the empty-list
+        // argument's element type is determined ONLY by the call's return
+        // (`Map[K,V]` ← `List[(K,V)]`, `Set[E]` ← `List[E]`). The checker can
+        // leave that arg `List[(?K,?V)]` (the K,V flow only through the generic
+        // signature's return, not through any literal element), which would slip
+        // past this gate on native but be refused by the WASM concretization
+        // gate. Derive the arg element from the resolved return type here.
+        // #625: `map.from_list([])` / `set.from_list([])` where the call is NOT
+        // the direct value of an annotated binding — derive the empty arg's
+        // element from the call's own (resolved) return type. The annotated-bind
+        // case is handled more reliably in `visit_stmt_mut`.
+        {
+            let ret_ty = expr.ty.clone();
+            self.pin_from_list_arg_elem(&ret_ty, expr);
+        }
+
         // Record literal construction: push the declared field types from
         // the registered type down into field value expressions whose own
         // inference left them unresolved (typically `Applied(List,
@@ -945,6 +1020,13 @@ impl<'a> IrMutVisitor for Concretizer<'a> {
                     self.vt.entries[var.0 as usize].ty = value.ty.clone();
                 }
             }
+            // #625: `let m: Map[K,V] = map.from_list(arg)` / `set.from_list`.
+            // The arg's element type flows ONLY through the generic call's
+            // return, so the checker can leave it `List[(?K,?V)]`. The BIND's
+            // declared type is the reliable source (the call's own ty may not
+            // be resolved on every pass), so derive the arg element from it and
+            // pin the arg (and its ANF-temp VarTable entry) before the gate.
+            self.pin_from_list_arg_elem(ty, value);
         }
         // Destructuring let: `let (k, v) = pair`, `let some(x) = opt`, … The
         // checker can leave the bound pattern vars `Unknown` when the subject's

@@ -1,0 +1,16 @@
+// @contract: C-080
+// #625: `map.from_list([])` / `set.from_list([])` with an annotated result type.
+// The empty-list argument's element type flows ONLY through the generic call's
+// return (Map[K,V] <- List[(K,V)], Set[E] <- List[E]); the checker can leave it
+// List[(?K,?V)] / List[?E], which native tolerates but the WASM concretization
+// gate refuses. ConcretizeTypes now derives the arg element from the call's
+// resolved Map/Set type (matching both the Module-call and the lowered
+// RuntimeCall forms). Both targets build and run byte-identical.
+fn main() -> Unit = {
+  let m: Map[String, Int] = map.from_list([])
+  let s: Set[Int] = set.from_list([])
+  let m2: Map[Int, String] = map.from_list([(1, "a"), (2, "b")])
+  println(int.to_string(map.len(m)))
+  println(int.to_string(set.len(s)))
+  println(int.to_string(map.len(m2)))
+}

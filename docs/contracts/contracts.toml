@@ -959,3 +959,12 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/anon_record_variant_payloads.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-080"
+title     = "Empty map.from_list / set.from_list resolves its element from the result type"
+statement = "`map.from_list([])` / `set.from_list([])` with an annotated result type compiles and runs byte-identical native == wasm. The empty-list argument's element type flows only through the generic call's return (Map[K,V] from List[(K,V)], Set[E] from List[E]); the checker can leave it an unresolved List slot, which native tolerates but the WASM concretization gate refuses. ConcretizeTypes derives the argument element from the call's resolved Map/Set type — matching both the Module-call and the lowered RuntimeCall (`almide_rt_map_from_entries`) forms — pinning the empty list (and its ANF temp) before the gate."
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/empty_from_list_mono.almd", class = "fixture" },
+]
