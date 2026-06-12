@@ -305,6 +305,9 @@ codegen-units = 1
         .map_err(|e| format!("failed to write lib.rs: {}", e))?;
 
     let mut cmd = std::process::Command::new("cargo");
+    // almide_par: enables the rayon-backed parallel runtime paths (the raw
+    // rustc test harness has no rayon crate and compiles the serial side).
+    cmd.env("RUSTFLAGS", format!("{} --cfg almide_par", std::env::var("RUSTFLAGS").unwrap_or_default()));
     cmd.arg("build").current_dir(project_dir).arg("--quiet");
     if release { cmd.arg("--release"); }
     let output = cmd.output().map_err(|e| format!("failed to run cargo: {}", e))?;
@@ -427,6 +430,9 @@ fn cargo_build_generated_with_native(
         .map_err(|e| format!("failed to write main.rs: {}", e))?;
 
     let mut cmd = std::process::Command::new("cargo");
+    // almide_par: enables the rayon-backed parallel runtime paths (the raw
+    // rustc test harness has no rayon crate and compiles the serial side).
+    cmd.env("RUSTFLAGS", format!("{} --cfg almide_par", std::env::var("RUSTFLAGS").unwrap_or_default()));
     cmd.arg("build").current_dir(project_dir);
     if release {
         cmd.arg("--release");
@@ -659,6 +665,9 @@ fn cargo_build_test_with_native(
 
     // Use `cargo test --no-run` to build the test binary without running it
     let mut cmd = std::process::Command::new("cargo");
+    // almide_par: enables the rayon-backed parallel runtime paths (the raw
+    // rustc test harness has no rayon crate and compiles the serial side).
+    cmd.env("RUSTFLAGS", format!("{} --cfg almide_par", std::env::var("RUSTFLAGS").unwrap_or_default()));
     cmd.arg("test").arg("--no-run").arg("--quiet").arg("--message-format=json")
         .current_dir(project_dir);
 
