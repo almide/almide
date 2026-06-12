@@ -1,0 +1,9 @@
+// #662: `result.or_else`'s error type is reachable only through the un-exercised
+// `err` branch; the lambda always returns `ok(0)`, so it is never pinned. `check`
+// used to pass and the ConcretizeTypes gate then ICE'd on both targets. It is now
+// a clean E025 "cannot infer a concrete type" (type annotation needed).
+fn main() -> Unit = {
+  let r0: Result[Int, String] = ok(7)
+  let r = result.or_else(r0, (e) => ok(0))
+  println("done")
+}

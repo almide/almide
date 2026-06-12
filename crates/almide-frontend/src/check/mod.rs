@@ -117,6 +117,19 @@ pub struct Checker {
     /// bound to / annotated as a wider type (`let u: UInt64 = …`) and the negated
     /// `i64::MIN` magnitude (`-9223372036854775808`).
     pub(crate) deferred_int_overflow_checks: Vec<IntOverflowSite>,
+    /// Un-annotated value bindings / discarded expression statements whose
+    /// inferred type must be fully decidable. Each entry carries the binding's
+    /// value `Ty` (with inference vars intact), an optional binding name (for the
+    /// diagnostic's wording / fix), and the span. Validated post-solve by
+    /// [`Checker::validate_unresolved_binding_types`]: if the resolved type still
+    /// holds an unbound `?`-prefixed inference var ANYWHERE after the whole
+    /// program is solved, that slot was never pinned by context (e.g. the error
+    /// type of `result.or_else(r0, (e) => ok(0))`, only reachable through the
+    /// un-exercised `err` branch). That is a compile error (E025) — the same
+    /// Rust/Swift rule E018 enforces for empty collections, never silently
+    /// defaulted. Without it the value passed `check` and then tripped the
+    /// ConcretizeTypes COMPILER-BUG gate on BOTH targets (#662).
+    pub(crate) deferred_unresolved_binding_checks: Vec<UnresolvedBindingSite>,
 }
 
 /// An integer literal that does not fit `i64`, pending a post-solve range check.
@@ -205,6 +218,21 @@ pub(crate) enum EmptyCollectionKind {
     ForInEmpty,
 }
 
+/// One un-annotated binding / discarded expression to re-check after constraint
+/// solving for an undecidable (never-pinned) inference var (#662).
+#[derive(Debug, Clone)]
+pub(crate) struct UnresolvedBindingSite {
+    /// The binding's / expression's value type, with inference vars intact.
+    /// Resolved against the union-find post-solve; an unbound `?N` survivor means
+    /// the type was never pinned by context.
+    pub ty: Ty,
+    /// The binding name (`let`/`var`), or `None` for a discarded expression
+    /// statement. Drives the diagnostic's primary fix (annotate the binding).
+    pub name: Option<String>,
+    /// Source span of the offending expression.
+    pub span: Option<crate::ast::Span>,
+}
+
 /// One empty-collection producer to re-check after constraint solving.
 #[derive(Debug, Clone)]
 pub(crate) struct EmptyCollectionSite {
@@ -239,6 +267,7 @@ impl Checker {
             deferred_map_key_checks: Vec::new(),
             deferred_empty_collection_checks: Vec::new(),
             deferred_int_overflow_checks: Vec::new(),
+            deferred_unresolved_binding_checks: Vec::new(),
         }
     }
 
@@ -401,6 +430,7 @@ impl Checker {
         self.validate_map_key_types();
         self.validate_empty_collection_elements();
         self.validate_int_overflow_literals();
+        self.validate_unresolved_binding_types();
         // Unused import warnings
         for imp in &program.imports {
             let (path, alias, span) = match imp {
@@ -558,6 +588,7 @@ impl Checker {
         self.validate_map_key_types();
         self.validate_empty_collection_elements();
         self.validate_int_overflow_literals();
+        self.validate_unresolved_binding_types();
         self.current_module_prefix = saved_prefix;
 
         // Restore
@@ -1192,6 +1223,77 @@ impl Checker {
                 hint,
                 format!("{} with no element-type context", what),
             ).with_code("E018").with_try(try_fix);
+            if let Some(s) = site.span {
+                diag.file = self.source_file.clone();
+                diag.line = Some(s.line);
+                diag.col = Some(s.col);
+                if s.end_col > s.col { diag.end_col = Some(s.end_col); }
+            }
+            self.diagnostics.push(diag);
+        }
+    }
+
+    /// Post-solve: reject an un-annotated binding / discarded expression whose
+    /// type still carries an unbound `?`-prefixed inference var anywhere in its
+    /// tree. Such a var had NO inference source for the whole program (a phantom
+    /// slot only reachable through an un-exercised branch — e.g. the error type
+    /// of `result.or_else(r0, (e) => ok(0))`). Firing here, in the frontend,
+    /// makes the error identical on BOTH targets and gives a `type annotation
+    /// needed` diagnostic (cf. Rust E0282 / the sibling empty-collection E018)
+    /// instead of the cryptic ConcretizeTypes COMPILER-BUG gate ICE (#662). A
+    /// fully-decidable program leaves every binding type concrete, so this only
+    /// fires on the genuinely-undecidable case; sites are deduped so a binding
+    /// reused N times yields one error.
+    fn validate_unresolved_binding_types(&mut self) {
+        let checks = std::mem::take(&mut self.deferred_unresolved_binding_checks);
+        let mut reported: std::collections::HashSet<(Option<u32>, Option<u32>)> = std::collections::HashSet::new();
+        for site in checks {
+            let resolved = resolve_ty(&site.ty, &self.uf);
+            // A WHOLLY-Unknown binding type is error-recovery (a prior error was
+            // already reported) or a structure the checker leaves Unknown but
+            // codegen resolves (e.g. a cross-module variant `match` whose arms are
+            // concrete). Neither is a genuinely-undecidable SLOT, so skip it — only
+            // fire when a CONCRETE outer type carries an undecidable inner slot
+            // (`Result[Int, ?]`, never pinned). Without this guard E025 false-fired
+            // on valid cross-module variant matches.
+            if matches!(resolved, Ty::Unknown) { continue; }
+            // An unbound `?`-prefixed inference var (`fresh_var` the solver never
+            // bound) anywhere in the tree is undecidable. A BARE `TypeVar` (`T`,
+            // no `?`) is a rigid generic param — concrete in its scope — so it
+            // must NOT trigger this (mirrors `has_unconstrained_element`).
+            let undecidable = resolved.any_child_recursive(&|t: &Ty| match t {
+                Ty::Unknown => true,
+                Ty::TypeVar(n) => n.as_str().starts_with('?'),
+                _ => false,
+            });
+            if !undecidable { continue; }
+            let key = (site.span.map(|s| s.line as u32), site.span.map(|s| s.col as u32));
+            if !reported.insert(key) { continue; }
+            let what = match &site.name {
+                Some(n) => format!("binding '{}'", n),
+                None => "this expression".to_string(),
+            };
+            let fix = match &site.name {
+                Some(n) => format!(
+                    "Annotate the binding with the full type, e.g. `let {}: Result[Int, String] = ...`. \
+                     An unconstrained slot (such as the error type of a value that is always `ok(...)`, \
+                     reachable only through an un-exercised branch) cannot be inferred and is never \
+                     silently defaulted (Almide follows Rust/Swift; cf. Rust E0282).",
+                    n,
+                ),
+                None => "Bind the expression to an explicitly-typed `let`, e.g. \
+                     `let r: Result[Int, String] = ...`, so the unconstrained slot is pinned. \
+                     An unconstrained type slot cannot be inferred and is never silently defaulted \
+                     (Almide follows Rust/Swift; cf. Rust E0282).".to_string(),
+            };
+            let mut diag = err(
+                format!("cannot infer a concrete type for {} (type {})", what, resolved.display()),
+                fix,
+                format!("{} with an unconstrained type", what),
+            ).with_code("E025");
+            if let Some(n) = &site.name {
+                diag = diag.with_try(format!("let {}: Result[Int, String] = ...", n));
+            }
             if let Some(s) = site.span {
                 diag.file = self.source_file.clone();
                 diag.line = Some(s.line);
