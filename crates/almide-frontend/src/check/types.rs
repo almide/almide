@@ -88,7 +88,12 @@ impl UnionFind {
     /// Uses path halving (every other node points to grandparent) for amortized
     /// near-constant time without requiring &mut self.
     pub fn find(&self, mut id: u32) -> u32 {
-        while self.parent[id as usize] != id {
+        // An id past the end of THIS UnionFind was never registered here, so it is
+        // its own representative (a free singleton). This happens when a TyVarId
+        // leaks in from an outer scope after a fresh UnionFind is swapped in for
+        // module/nested inference — returning `id` instead of indexing keeps the
+        // checker total instead of panicking (#653).
+        while (id as usize) < self.parent.len() && self.parent[id as usize] != id {
             id = self.parent[id as usize];
         }
         id
@@ -101,6 +106,9 @@ impl UnionFind {
         let ra = self.find(a);
         let rb = self.find(b);
         if ra == rb { return; }
+        // A root past the end is a foreign/leaked id (see `find`) — this
+        // UnionFind owns no slot for it, so there is nothing to merge (#653).
+        if (ra as usize) >= self.parent.len() || (rb as usize) >= self.parent.len() { return; }
         let (winner, loser) = if self.rank[ra as usize] >= self.rank[rb as usize] { (ra, rb) } else { (rb, ra) };
         self.parent[loser as usize] = winner;
         if self.rank[winner as usize] == self.rank[loser as usize] {
@@ -117,6 +125,9 @@ impl UnionFind {
     /// returns the existing binding for the caller to unify structurally.
     pub fn bind(&mut self, id: u32, ty: Ty) -> Option<Ty> {
         let root = self.find(id);
+        // A foreign/leaked root (past this UnionFind's slots) cannot be bound here
+        // (#653); drop the binding rather than panic — it belongs to another scope.
+        if (root as usize) >= self.bound.len() { return None; }
         let existing = self.bound[root as usize].take();
         self.bound[root as usize] = Some(ty);
         existing
@@ -125,7 +136,7 @@ impl UnionFind {
     /// Get the concrete type bound to `id`'s root, if any.
     pub fn resolve(&self, id: u32) -> Option<&Ty> {
         let root = self.find(id);
-        self.bound[root as usize].as_ref()
+        self.bound.get(root as usize).and_then(|b| b.as_ref())
     }
 
     /// Check whether `var` occurs anywhere inside `ty` (infinite type prevention).
