@@ -31,6 +31,22 @@ fn mk_program(functions: Vec<IrFunction>, var_table: VarTable) -> IrProgram {
     IrProgram { functions, var_table, ..Default::default() }
 }
 
+fn mk_record_decl(name: &str, fields: &[(&str, Ty)]) -> IrTypeDecl {
+    IrTypeDecl {
+        name: sym(name),
+        kind: IrTypeDeclKind::Record {
+            fields: fields.iter().map(|(fname, fty)| IrFieldDecl {
+                name: sym(fname), ty: fty.clone(), default: None, alias: None, attrs: vec![],
+            }).collect(),
+        },
+        deriving: None,
+        generics: None,
+        visibility: IrVisibility::Public,
+        doc: None,
+        blank_lines_before: 0,
+    }
+}
+
 fn run_pass<P: NanoPass>(pass: &P, program: IrProgram, target: Target) -> IrProgram {
     pass.run(program, target).program
 }
@@ -381,6 +397,62 @@ mod borrow_insertion {
 
         assert_eq!(result.functions[0].params[0].borrow, ParamBorrow::Own,
             "Int param should remain Own");
+    }
+
+    #[test]
+    fn record_param_reffed_when_only_field_read() {
+        // type Tok = { kind: String, value: Int }
+        // fn score(t: Tok) -> Int = t.value
+        // The record param is only field-read, never consumed → &Tok (Ref).
+        // Locks the #647 perf win: record-typed leaf readers borrow instead of
+        // deep-cloning the whole record on every call.
+        let mut vt = VarTable::new();
+        let tok = Ty::Named(sym("Tok"), vec![]);
+        let p = mk_param(&mut vt, "t", tok.clone());
+        let var_id = p.var;
+        let body = mk_expr(IrExprKind::Member {
+            object: Box::new(mk_expr(IrExprKind::Var { id: var_id }, tok.clone())),
+            field: sym("value"),
+        }, Ty::Int);
+        let func = mk_fn("score", vec![p], Ty::Int, body, false);
+
+        let mut program = mk_program(vec![func], vt);
+        program.type_decls = vec![mk_record_decl("Tok", &[("kind", Ty::String), ("value", Ty::Int)])];
+        let result = run_pass(&BorrowInsertionPass, program, Target::Rust);
+
+        assert_eq!(result.functions[0].params[0].borrow, ParamBorrow::Ref,
+            "Record param only field-read should borrow as &Tok (#647), got {:?}",
+            result.functions[0].params[0].borrow);
+    }
+
+    #[test]
+    fn derived_fn_record_param_stays_own() {
+        // @derived fn encode(p: Tok) -> Int = p.value
+        // Auto-derived convention fns are excluded from borrow inference: their
+        // call sites (often cross-module, where the borrow signature can't be
+        // looked up) pass OWNED values, so a Ref param would mismatch (E0308).
+        // Identification is structural — the `@derived` attribute the generator
+        // stamps — NOT the method name. So a derived fn that field-reads a record
+        // must keep Own even though plain inference would make it Ref (see
+        // record_param_reffed_when_only_field_read).
+        let mut vt = VarTable::new();
+        let tok = Ty::Named(sym("Tok"), vec![]);
+        let p = mk_param(&mut vt, "p", tok.clone());
+        let var_id = p.var;
+        let body = mk_expr(IrExprKind::Member {
+            object: Box::new(mk_expr(IrExprKind::Var { id: var_id }, tok.clone())),
+            field: sym("value"),
+        }, Ty::Int);
+        let mut func = mk_fn("encode", vec![p], Ty::Int, body, false);
+        func.attrs.push(almide::ast::Attribute { name: sym("derived"), args: vec![], span: None });
+
+        let mut program = mk_program(vec![func], vt);
+        program.type_decls = vec![mk_record_decl("Tok", &[("kind", Ty::String), ("value", Ty::Int)])];
+        let result = run_pass(&BorrowInsertionPass, program, Target::Rust);
+
+        assert_eq!(result.functions[0].params[0].borrow, ParamBorrow::Own,
+            "@derived fn param must stay Own (excluded from borrow inference), got {:?}",
+            result.functions[0].params[0].borrow);
     }
 }
 
