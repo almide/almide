@@ -1,0 +1,3 @@
+expects_code = "E022"
+expects_error = "operator '!'"
+hint_substring = "effect fn"

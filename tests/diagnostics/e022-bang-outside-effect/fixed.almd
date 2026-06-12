@@ -1,0 +1,4 @@
+// The fix: mark the function `effect fn` so `!` can propagate the error,
+// or use `??` to supply a fallback. Either compiles cleanly.
+effect fn parse_or_die(s: String) -> Int = int.parse(s)!
+fn parse_or_zero(s: String) -> Int = int.parse(s) ?? 0

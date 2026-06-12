@@ -1,0 +1,6 @@
+// `!` propagates the unwrapped error, which lowering renders as `?`.
+// In a pure fn (no Result return) that `?` is invalid Rust — and previously
+// the checker accepted it, so the failure surfaced only as a codegen ICE
+// ("codegen produced invalid Rust") on native and a wasm build failure.
+// E022 now rejects it at type-check time. (#608)
+fn parse_or_die(s: String) -> Int = int.parse(s)!
