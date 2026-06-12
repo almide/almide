@@ -1,0 +1,35 @@
+// @contract: C-070
+// #607: a NESTED pattern as the argument of a user-defined constructor pattern
+// (Wrap(A(n)), Box(Some(n)), Held(Circle { r })) is matched + bound identically
+// native == wasm. The wasm match backend's ctor-arm binding loop only handled
+// top-level Bind/Literal, so a nested ctor/Some/None/record arg got NO inner
+// discriminant test and bound garbage (0) — it silently took the wrong arm
+// (exit 0). Now the discriminant tests recurse into the arm guard and binding
+// recurses through the nested payloads.
+type Inner = A(Int) | B(Int)
+type Outer = Wrap(Inner)
+fn pick(o: Outer) -> String = match o {
+  Wrap(A(n)) => "A:" + int.to_string(n),
+  Wrap(B(n)) => "B:" + int.to_string(n),
+}
+
+type Hold = Box(Option[Int])
+fn opt(h: Hold) -> Int = match h { Box(Some(n)) => n, Box(None) => -1 }
+
+type Sh =
+  | Circle { r: Int }
+  | Square { s: Int }
+type HS = Held(Sh)
+fn area(h: HS) -> Int = match h {
+  Held(Circle { r }) => r,
+  Held(Square { s }) => s * 100,
+}
+
+fn main() -> Unit = {
+  println(pick(Wrap(A(7))))
+  println(pick(Wrap(B(9))))
+  println(int.to_string(opt(Box(Some(8)))))
+  println(int.to_string(opt(Box(None))))
+  println(int.to_string(area(Held(Circle { r: 3 }))))
+  println(int.to_string(area(Held(Square { s: 4 }))))
+}

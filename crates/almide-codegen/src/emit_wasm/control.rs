@@ -529,8 +529,13 @@ impl FuncCompiler<'_> {
                     } else { vec![] };
                     let gnames_refs: Vec<&str> = all_gnames.iter().map(|s| s.as_str()).collect();
 
-                    // Check if any args are Literal patterns (need value checks)
-                    let has_literal_args = args.iter().any(|p| matches!(p, IrPattern::Literal { .. }));
+                    // #607: any arg that needs a discriminant test — a literal OR
+                    // a NESTED constructor/Some/None (the inner tag must gate the
+                    // arm or wasm matches the wrong nested case silently).
+                    let has_literal_args = args.iter().any(|p| matches!(p,
+                        IrPattern::Literal { .. } | IrPattern::Constructor { .. }
+                        | IrPattern::Some { .. } | IrPattern::None
+                        | IrPattern::RecordPattern { .. }));
 
                     // Resolve field types
                     let resolved_fields: Vec<Ty> = (0..args.len()).map(|arg_idx| {
@@ -548,19 +553,11 @@ impl FuncCompiler<'_> {
                         let mut field_offset = 4u32;
                         let mut cond_count = 0;
                         for (arg_idx, arg_pat) in args.iter().enumerate() {
-                            let field_ty = &resolved_fields[arg_idx];
-                            if let IrPattern::Literal { expr: lit_expr } = arg_pat {
-                                wasm!(self.func, { local_get(scratch); });
-                                self.emit_load_at(field_ty, field_offset);
-                                self.emit_expr(lit_expr);
-                                match field_ty {
-                                    Ty::Int => { wasm!(self.func, { i64_eq; }); }
-                                    Ty::String => { wasm!(self.func, { call(self.emitter.rt.string.eq); }); }
-                                    _ => { wasm!(self.func, { i32_eq; }); }
-                                }
-                                cond_count += 1;
-                            }
-                            field_offset += values::byte_size(field_ty);
+                            let field_ty = resolved_fields[arg_idx].clone();
+                            // #607: recursive discriminant tests (literal + nested
+                            // ctor tag + Some/None) instead of only top-level literals.
+                            cond_count += self.emit_arg_tests(scratch, field_offset, &field_ty, arg_pat);
+                            field_offset += values::byte_size(&field_ty);
                         }
                         for _ in 1..cond_count {
                             wasm!(self.func, { i32_and; });
@@ -570,22 +567,17 @@ impl FuncCompiler<'_> {
                         Some(self.depth_push())
                     } else { None };
 
-                    // Bind constructor args (tuple payload fields)
+                    // Bind constructor args (recursively — #607). The flat loop
+                    // bound only top-level `Bind`; a nested ctor/Some/record arg's
+                    // inner Binds were SILENTLY DROPPED (bound 0). bind_arg walks
+                    // through nested payloads. (The discriminant tests for those
+                    // nested patterns were emitted in the guard above for non-last
+                    // arms; the last arm is exhaustive so it only binds.)
                     let mut field_offset = 4u32; // skip tag
                     for (arg_idx, arg_pat) in args.iter().enumerate() {
-                        let field_ty = &resolved_fields[arg_idx];
-
-                        if let IrPattern::Bind { var, ty: pat_ty } = arg_pat {
-                            if let Some(&local_idx) = self.var_map.get(&var.0) {
-                                let load_ty = if pat_ty.is_unresolved()
-                                    || matches!(pat_ty, Ty::Named(n, a) if a.is_empty() && n.len() <= 2)
-                                { field_ty } else { pat_ty };
-                                wasm!(self.func, { local_get(scratch); });
-                                self.emit_load_at(load_ty, field_offset);
-                                wasm!(self.func, { local_set(local_idx); });
-                            }
-                        }
-                        field_offset += values::byte_size(field_ty);
+                        let field_ty = resolved_fields[arg_idx].clone();
+                        self.bind_arg(scratch, field_offset, &field_ty, arg_pat);
+                        field_offset += values::byte_size(&field_ty);
                     }
 
                     // Handle guard on constructor
@@ -1008,6 +1000,142 @@ impl FuncCompiler<'_> {
     /// `container_scratch` is the outer pointer (Option ptr or Result ptr).
     /// `inner_offset` is the offset to load the inner value (0 for Option, 4 for Result).
     /// Returns true if body was emitted (for conditional inner patterns like Constructor).
+    /// #607: emit the DISCRIMINANT tests for one constructor-arg pattern at
+    /// `field_offset` inside the ctor pointed to by `ctor_local`, recursively.
+    /// Pushes one i32 bool per test and returns the count. The flat arm-binding
+    /// loop only handled `Bind`/`Literal`; a nested `Constructor`/`Some`/`None`/
+    /// `Ok`/`Err` arg got NO inner discriminant test, so wasm matched the wrong
+    /// arm (silent-wrong, exit 0). `RecordPattern`/`Tuple`/`Bind`/`Wildcard`
+    /// need no test (a record always matches its ctor; binds are unconditional).
+    fn emit_arg_tests(&mut self, ctor_local: u32, field_offset: u32, field_ty: &Ty, pat: &IrPattern) -> u32 {
+        match pat {
+            IrPattern::Literal { expr } => {
+                wasm!(self.func, { local_get(ctor_local); });
+                self.emit_load_at(field_ty, field_offset);
+                self.emit_expr(expr);
+                self.emit_eq_typed(field_ty);
+                1
+            }
+            IrPattern::Constructor { name, args } => {
+                let inner = self.scratch.alloc_i32();
+                wasm!(self.func, { local_get(ctor_local); i32_load(field_offset); local_set(inner); });
+                let mut count = 0;
+                if let Some(tag) = self.find_variant_tag_by_ctor(name, field_ty) {
+                    wasm!(self.func, { local_get(inner); i32_load(0); i32_const(tag as i32); i32_eq; });
+                    count += 1;
+                }
+                let inner_fields = self.emitter.fields_of(name);
+                let mut off = 4u32;
+                for (i, ap) in args.iter().enumerate() {
+                    let aty = inner_fields.get(i).map(|(_, t)| t.clone()).unwrap_or(Ty::Int);
+                    count += self.emit_arg_tests(inner, off, &aty, ap);
+                    off += values::byte_size(&aty);
+                }
+                self.scratch.free_i32(inner);
+                count
+            }
+            IrPattern::Some { .. } => {
+                wasm!(self.func, { local_get(ctor_local); i32_load(field_offset); i32_const(0); i32_ne; });
+                1
+            }
+            IrPattern::None => {
+                wasm!(self.func, { local_get(ctor_local); i32_load(field_offset); i32_eqz; });
+                1
+            }
+            // A variant-RECORD ctor arg (`Held(Circle { r })`) — the inner
+            // `RecordPattern` carries the variant ctor NAME, so its tag must be
+            // tested (Circle vs Square) exactly like a tuple-payload ctor.
+            IrPattern::RecordPattern { name, .. } => {
+                if let Some(tag) = self.find_variant_tag_by_ctor(name, field_ty) {
+                    wasm!(self.func, { local_get(ctor_local); i32_load(field_offset); i32_load(0); i32_const(tag as i32); i32_eq; });
+                    1
+                } else { 0 }
+            }
+            _ => 0,
+        }
+    }
+
+    /// #607: bind every `Bind` var reachable through a constructor-arg pattern at
+    /// `field_offset` inside `ctor_local`, recursing through nested ctor / Some /
+    /// record payloads. The discriminant tests are emitted separately (in the
+    /// arm guard); this only loads + binds, so it runs inside the matched branch.
+    fn bind_arg(&mut self, ctor_local: u32, field_offset: u32, field_ty: &Ty, pat: &IrPattern) {
+        match pat {
+            IrPattern::Bind { var, ty: pat_ty } => {
+                if let Some(&local_idx) = self.var_map.get(&var.0) {
+                    let load_ty = if pat_ty.is_unresolved()
+                        || matches!(pat_ty, Ty::Named(n, a) if a.is_empty() && n.len() <= 2)
+                    { field_ty } else { pat_ty };
+                    wasm!(self.func, { local_get(ctor_local); });
+                    self.emit_load_at(load_ty, field_offset);
+                    wasm!(self.func, { local_set(local_idx); });
+                }
+            }
+            IrPattern::Constructor { name, args } => {
+                let inner = self.scratch.alloc_i32();
+                wasm!(self.func, { local_get(ctor_local); i32_load(field_offset); local_set(inner); });
+                let inner_fields = self.emitter.fields_of(name);
+                let mut off = 4u32;
+                for (i, ap) in args.iter().enumerate() {
+                    let aty = inner_fields.get(i).map(|(_, t)| t.clone()).unwrap_or(Ty::Int);
+                    self.bind_arg(inner, off, &aty, ap);
+                    off += values::byte_size(&aty);
+                }
+                self.scratch.free_i32(inner);
+            }
+            IrPattern::Some { inner: inner_pat } => {
+                // Some payload is at offset 0 of the inner pointer.
+                let inner = self.scratch.alloc_i32();
+                wasm!(self.func, { local_get(ctor_local); i32_load(field_offset); local_set(inner); });
+                let payload_ty = match field_ty {
+                    Ty::Applied(_, a) => a.first().cloned().unwrap_or(Ty::Int),
+                    _ => Ty::Int,
+                };
+                self.bind_arg(inner, 0, &payload_ty, inner_pat);
+                self.scratch.free_i32(inner);
+            }
+            IrPattern::RecordPattern { name, fields: pat_fields, .. } => {
+                // The record value is a pointer at field_offset. For a
+                // variant-RECORD ctor (named) the fields sit AFTER the 4-byte
+                // tag; resolve the ctor's fields for the offsets (mirrors the
+                // top-level RecordPattern arm).
+                let rec = self.scratch.alloc_i32();
+                wasm!(self.func, { local_get(ctor_local); i32_load(field_offset); local_set(rec); });
+                let is_variant = self.find_variant_tag_by_ctor(name, field_ty).is_some();
+                let tag_off = if is_variant { 4u32 } else { 0u32 };
+                let rec_fields = if is_variant {
+                    self.emitter.fields_of(name)
+                } else {
+                    self.extract_record_fields(field_ty)
+                };
+                for pf in pat_fields {
+                    if let Some((off, fty)) = super::values::field_offset(&rec_fields, &pf.name) {
+                        let total = tag_off + off;
+                        match &pf.pattern {
+                            Some(IrPattern::Bind { var, .. }) => {
+                                if let Some(&local_idx) = self.var_map.get(&var.0) {
+                                    wasm!(self.func, { local_get(rec); });
+                                    self.emit_load_at(&fty, total);
+                                    wasm!(self.func, { local_set(local_idx); });
+                                }
+                            }
+                            Some(inner_pat) => self.bind_arg(rec, total, &fty, inner_pat),
+                            None => {
+                                if let Some(&local_idx) = self.find_var_by_field(&pf.name, &rec_fields) {
+                                    wasm!(self.func, { local_get(rec); });
+                                    self.emit_load_at(&fty, total);
+                                    wasm!(self.func, { local_set(local_idx); });
+                                }
+                            }
+                        }
+                    }
+                }
+                self.scratch.free_i32(rec);
+            }
+            _ => {}
+        }
+    }
+
     fn emit_inner_pattern_and_body(
         &mut self,
         inner: &IrPattern,
