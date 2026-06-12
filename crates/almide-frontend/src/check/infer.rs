@@ -603,6 +603,28 @@ impl Checker {
                         }
                         // Unify left/right types so TypeVars in none/err/constructors get resolved
                         self.unify_infer(&lt, &rt);
+                        // Ordering (< <= > >=) is defined ONLY on scalar orderable
+                        // types. On a compound operand (Tuple/Option/Result/List/
+                        // Map/Set/Record/custom) the checker used to pass while
+                        // codegen diverged: native silently relied on Rust's derive
+                        // (and FAILED on records, E0369) and WASM ICEd
+                        // (equality.rs no-comparison arm). Reject uniformly so check
+                        // matches codegen on both targets; equality (== !=) still
+                        // works (deep structural). #652
+                        if matches!(op.as_str(), "<" | ">" | "<=" | ">=") {
+                            let lc = resolve_ty(&lt, &self.uf);
+                            let orderable = matches!(lc,
+                                Ty::Int | Ty::Float | Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64
+                                | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64
+                                | Ty::Float32 | Ty::Float64 | Ty::String | Ty::Bool
+                                | Ty::Unknown | Ty::TypeVar(_) | Ty::Never);
+                            if !orderable {
+                                self.emit(super::err(
+                                    format!("operator '{}' is not defined for {} — ordering applies to Int, Float, String, and Bool", op, lc.display()),
+                                    "Compare scalar fields explicitly, or use list.sort / list.min / list.max for ordered collections",
+                                    format!("operator {}", op)));
+                            }
+                        }
                         Ty::Bool
                     }
                     "and" | "or" => {
