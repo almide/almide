@@ -1,0 +1,5 @@
+// #655: the derived Codec serializer has no Map/Set arm, so a `Map[K,V]` field
+// silently fell through to a `Value`-as-String fallback — invalid Rust natively
+// (E0614/E0308) and wrong/silent on wasm. The checker now rejects it with E023.
+type Config: Codec = { name: String, settings: Map[String, Int] }
+fn main() -> Unit = println("unreachable")

@@ -1,0 +1,5 @@
+// The suggested fix: model the entries as a List of a Codec record, which the
+// derive encodes element-by-element.
+type Entry: Codec = { key: String, value: Int }
+type Config: Codec = { name: String, settings: List[Entry] }
+fn main() -> Unit = println("ok")
