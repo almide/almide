@@ -368,6 +368,17 @@ fn remap_pattern_varids(pattern: &mut IrPattern, remap: &HashMap<VarId, VarId>) 
 fn repair_binop_for_types(op: BinOp, left_ty: &Ty, right_ty: &Ty) -> BinOp {
     let is_float = |t: &Ty| matches!(t, Ty::Float | Ty::Float32);
     let float_pair = is_float(left_ty) || is_float(right_ty);
+    // `+` on a TypeVar lowered to the default `AddInt` (lower/expressions.rs):
+    // when the generic instantiates to String/List, re-dispatch to the
+    // overloaded concat — mirroring lowering's own type dispatch. Without this
+    // a `fn dup(x: T) -> T = x + x` specialized at String/List kept `AddInt`
+    // and the IR-verify gate (#532) panicked on the non-Int operands (#558).
+    // A genuinely non-concatenable instantiation (e.g. a record) stays `AddInt`
+    // and is correctly still rejected by that gate.
+    let is_str = |t: &Ty| matches!(t, Ty::String);
+    let is_list = |t: &Ty| matches!(t, Ty::Applied(almide_lang::types::TypeConstructorId::List, _));
+    let str_pair = is_str(left_ty) || is_str(right_ty);
+    let list_pair = is_list(left_ty) || is_list(right_ty);
     match op {
         BinOp::AddInt if float_pair => BinOp::AddFloat,
         BinOp::SubInt if float_pair => BinOp::SubFloat,
@@ -375,6 +386,8 @@ fn repair_binop_for_types(op: BinOp, left_ty: &Ty, right_ty: &Ty) -> BinOp {
         BinOp::DivInt if float_pair => BinOp::DivFloat,
         BinOp::ModInt if float_pair => BinOp::ModFloat,
         BinOp::PowInt if float_pair => BinOp::PowFloat,
+        BinOp::AddInt if str_pair => BinOp::ConcatStr,
+        BinOp::AddInt if list_pair => BinOp::ConcatList,
         other => other,
     }
 }

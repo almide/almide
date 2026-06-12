@@ -73,6 +73,8 @@ fn retitle(s: String) -> Unit = {
 fn add_num(n: Int) -> Unit = {
   nums = nums + [n]
 }
+
+type Pigment: Codec = { r: Int, g: Int, b: Int }
 "#;
 
 enum Status {
@@ -381,6 +383,32 @@ effect fn main() -> Unit = {
 }
 "#,
             expected: "hi!",
+            status: Status::Works,
+        },
+        // #609 / C-098: a derived Codec whose subject + element types live in
+        // ANOTHER module. The call site carries only `Type.method` (no module);
+        // the WASM dispatcher used to ICE on the unflattened dotted name and on
+        // the `__decode_list_m.Pigment` helper name. Covers direct / List / Option
+        // fields. `almide test` masked this via native fallback — this gate runs
+        // the wasm leg explicitly and asserts byte-identical.
+        Cell {
+            name: "cross_module_derived_codec_roundtrip",
+            main: r#"import self as m
+type Wrapped: Codec = {
+  id: Int,
+  payload: m.Pigment,
+  palette: List[m.Pigment],
+  accent: Option[m.Pigment],
+}
+effect fn main() -> Unit = {
+  let w = Wrapped { id: 1, payload: m.Pigment { r: 1, g: 2, b: 3 }, palette: [m.Pigment { r: 4, g: 5, b: 6 }], accent: some(m.Pigment { r: 7, g: 8, b: 9 }) }
+  match Wrapped.decode(Wrapped.encode(w)) {
+    ok(v) => println("b=" + int.to_string(v.payload.b)),
+    err(e) => println("err: " + e),
+  }
+}
+"#,
+            expected: "b=3",
             status: Status::Works,
         },
     ]

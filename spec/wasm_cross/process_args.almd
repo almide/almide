@@ -4,11 +4,22 @@
 // followed by program args — built on WASM from WASI args_sizes_get / args_get.
 // The cross-target harness runs both legs with NO extra program args, so argv =
 // [program] on both => length 1; argv[0] (a temp binary path vs the wasm module
-// path) DIFFERS between legs, so this fixture prints only the COUNT, never an
-// element, to stay byte-identical. #645
+// path) DIFFERS between legs, so this fixture never prints an element verbatim.
+//
+// It DOES assert an argv[0]-independent invariant that exercises the heap layout
+// the bug (#645) got wrong: the result List and each inner String were framed
+// with a 4-byte header instead of the canonical 8-byte [len][cap][data], so
+// consumers read elements/bytes at the wrong offset. `list.len` reads len@0
+// (layout-invariant — which is why argc was always right and masked the bug),
+// but `string.len(list.get(args, 0))` reads the list at index 0 (catches the
+// LIST header) and walks element[0]'s UTF-8 DATA (catches the STRING header).
+// argv[0] is always a non-empty program path on both legs, so the boolean is
+// byte-identical. #645
 import process
 
 effect fn main() -> () = {
   let args = process.args()
+  let first = list.get(args, 0) ?? ""
   println(int.to_string(list.len(args)))
+  println(if string.len(first) > 0 then "argv0-nonempty" else "argv0-empty")
 }

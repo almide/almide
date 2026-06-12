@@ -73,6 +73,26 @@ impl FuncCompiler<'_> {
         false
     }
 
+    /// Resolve a `Type.method` call whose function was registered under its
+    /// module_origin-qualified name `mod.Type.method` (#433 namespacing). The
+    /// call site lost the owning-module prefix because the subject type carries
+    /// no module, so suffix-match `func_map` for a UNIQUE key ending in
+    /// `.Type.method` — that is the function. Returns None on no match OR on
+    /// ambiguity (≥2 candidates), so the caller still ICEs rather than guessing
+    /// (#609). The Rust target never reaches here: BuiltinLoweringPass already
+    /// flattens `Type.method` to the prefixed name, but it is Rust-only.
+    fn resolve_module_method(&self, module: &str, func: &str) -> Option<u32> {
+        let needle = format!(".{}.{}", module, func);
+        let mut hit: Option<u32> = None;
+        for (k, &idx) in self.emitter.func_map.iter() {
+            if k.ends_with(&needle) {
+                if hit.is_some() { return None; } // ambiguous — do not guess
+                hit = Some(idx);
+            }
+        }
+        hit
+    }
+
     pub(super) fn emit_call(&mut self, target: &CallTarget, args: &[IrExpr], _ret_ty: &Ty) {
         // Set return type context for stub calls
         self.stub_ret_ty = _ret_ty.clone();
@@ -281,6 +301,16 @@ impl FuncCompiler<'_> {
                         self.emit_value_tagged_variant(args);
                     }
                     _ => {
+                        // Codec helper functions — MUST run before the dotted-name
+                        // split below: a module-qualified element type makes the
+                        // helper name `__decode_list_varlib.Pigment`, and splitting
+                        // on the dot inside `varlib.Pigment` would mis-route it to a
+                        // bogus Module call and panic (#609). The `__`-prefix is
+                        // unambiguous, so route to the codec helper first.
+                        if name.starts_with("__encode_option_") || name.starts_with("__decode_option_") || name.starts_with("__decode_default_") || name.starts_with("__encode_list_") || name.starts_with("__decode_list_") {
+                            self.emit_codec_helper(name, args);
+                            return;
+                        }
                         // Module-qualified call: list.fold, map.set, etc.
                         if let Some(dot) = name.find('.') {
                             let module = &name[..dot];
@@ -342,11 +372,6 @@ impl FuncCompiler<'_> {
                                 self.scratch.free_i32(scratch);
                                 return;
                             }
-                        }
-                        // Codec helper functions
-                        if name.starts_with("__encode_option_") || name.starts_with("__decode_option_") || name.starts_with("__decode_default_") || name.starts_with("__encode_list_") || name.starts_with("__decode_list_") {
-                            self.emit_codec_helper(name, args);
-                            return;
                         }
                         // User-defined function call
                         for arg in args {
@@ -726,6 +751,16 @@ impl FuncCompiler<'_> {
                                 // Last resort: bare func name (for cross-module calls where
                                 // module name differs from canonical)
                                 if let Some(&func_idx) = self.emitter.func_map.get(func.as_str()) {
+                                    for arg in args { self.emit_expr(arg); }
+                                    wasm!(self.func, { call(func_idx); });
+                                } else if let Some(func_idx) = self.resolve_module_method(module.as_str(), func.as_str()) {
+                                    // Cross-module derived Codec method (#609): the
+                                    // call site carries only `Type.method` (the
+                                    // subject type has no module), but the fn is
+                                    // registered under its module_origin-qualified
+                                    // name `mod.Type.method` (#433 namespacing). A
+                                    // unique func_map key ending in `.Type.method`
+                                    // is that function.
                                     for arg in args { self.emit_expr(arg); }
                                     wasm!(self.func, { call(func_idx); });
                                 } else {

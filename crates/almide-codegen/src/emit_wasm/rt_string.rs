@@ -10,7 +10,7 @@ use super::TrackedFunction as Function;
 // come from the single source of truth (engine::layout).
 use super::engine::layout::{STRING, LIST, string as ls, list as ll};
 use std::sync::LazyLock;
-static LAYOUT_CONSTS: LazyLock<(i32, i32, i32, i32, i32)> = LazyLock::new(|| {
+static LAYOUT_CONSTS: LazyLock<(i32, i32, i32, i32, i32, i32)> = LazyLock::new(|| {
     let r = super::engine::LayoutRegistry::new();
     (
         r.fixed_offset(STRING, ls::DATA) as i32,   // string_data_off()
@@ -18,6 +18,7 @@ static LAYOUT_CONSTS: LazyLock<(i32, i32, i32, i32, i32)> = LazyLock::new(|| {
         r.fixed_offset(STRING, ls::CAP) as i32,     // string_cap_off()
         r.fixed_offset(LIST, ll::DATA) as i32,      // DATA_OFFSET (list)
         r.header_size(LIST) as i32,                  // HEADER_SIZE (list)
+        r.fixed_offset(LIST, ll::CAP) as i32,       // list_cap_off()
     )
 });
 pub(super) fn string_data_off() -> i32 { LAYOUT_CONSTS.0 }
@@ -25,6 +26,7 @@ pub(super) fn string_hdr() -> i32 { LAYOUT_CONSTS.1 }
 pub(super) fn string_cap_off() -> i32 { LAYOUT_CONSTS.2 }
 pub(super) fn list_data_off() -> i32 { LAYOUT_CONSTS.3 }
 pub(super) fn list_hdr() -> i32 { LAYOUT_CONSTS.4 }
+pub(super) fn list_cap_off() -> i32 { LAYOUT_CONSTS.5 }
 
 /// Register all string runtime function signatures.
 pub fn register(emitter: &mut WasmEmitter) {

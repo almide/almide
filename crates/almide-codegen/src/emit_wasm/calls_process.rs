@@ -4,6 +4,11 @@ use super::FuncCompiler;
 use almide_ir::IrExpr;
 use almide_lang::types::Ty;
 use super::values;
+// Canonical heap layout offsets ([len@0][cap@4][data@8]) — process.args /
+// stdin_lines build List[String] + the inner Strings and MUST frame them with
+// the same 8-byte header the consumers (list.get / string.len / emit_member)
+// read with, or every element/byte is read at the wrong offset (#645).
+use super::rt_string::{string_hdr, string_data_off, string_cap_off, list_hdr, list_data_off, list_cap_off};
 use wasm_encoder::Instruction;
 
 impl FuncCompiler<'_> {
@@ -127,15 +132,16 @@ impl FuncCompiler<'_> {
                 // Found '\n': build string from line_start..scan_i
                 wasm!(self.func, {
                         local_get(scan_i); local_get(line_start); i32_sub; local_set(line_len);
-                        // Allocate Almide string
-                        local_get(line_len); i32_const(4); i32_add;
+                        // Allocate Almide string [len][cap][bytes...]
+                        local_get(line_len); i32_const(string_hdr()); i32_add;
                         call(self.emitter.rt.alloc); local_set(line_ptr);
                         local_get(line_ptr); local_get(line_len); i32_store(0);
+                        local_get(line_ptr); i32_const(string_cap_off()); i32_add; local_get(line_len); i32_store(0); // cap = len
                         // Copy line data
                         i32_const(0); local_set(copy_i);
                         block_empty; loop_empty;
                           local_get(copy_i); local_get(line_len); i32_ge_u; br_if(1);
-                          local_get(line_ptr); i32_const(4); i32_add; local_get(copy_i); i32_add;
+                          local_get(line_ptr); i32_const(string_data_off()); i32_add; local_get(copy_i); i32_add;
                           local_get(buf); local_get(line_start); i32_add; local_get(copy_i); i32_add;
                           i32_load8_u(0);
                           i32_store8(0);
@@ -188,13 +194,14 @@ impl FuncCompiler<'_> {
                     local_get(line_start); local_get(len); i32_lt_u;
                     if_empty;
                       local_get(len); local_get(line_start); i32_sub; local_set(line_len);
-                      local_get(line_len); i32_const(4); i32_add;
+                      local_get(line_len); i32_const(string_hdr()); i32_add;
                       call(self.emitter.rt.alloc); local_set(line_ptr);
                       local_get(line_ptr); local_get(line_len); i32_store(0);
+                      local_get(line_ptr); i32_const(string_cap_off()); i32_add; local_get(line_len); i32_store(0); // cap = len
                       i32_const(0); local_set(copy_i);
                       block_empty; loop_empty;
                         local_get(copy_i); local_get(line_len); i32_ge_u; br_if(1);
-                        local_get(line_ptr); i32_const(4); i32_add; local_get(copy_i); i32_add;
+                        local_get(line_ptr); i32_const(string_data_off()); i32_add; local_get(copy_i); i32_add;
                         local_get(buf); local_get(line_start); i32_add; local_get(copy_i); i32_add;
                         i32_load8_u(0);
                         i32_store8(0);
@@ -229,17 +236,18 @@ impl FuncCompiler<'_> {
                     end; // end if line_start < len
                 });
 
-                // Build final Almide List: [count:i32][elem0:i32][elem1:i32]...
+                // Build final Almide List: [len:i32][cap:i32][elem0:i32][elem1:i32]...
                 // elem_size = 4 (i32 pointer)
                 wasm!(self.func, {
-                    local_get(list_count); i32_const(4); i32_mul; i32_const(4); i32_add;
+                    local_get(list_count); i32_const(4); i32_mul; i32_const(list_hdr()); i32_add;
                     call(self.emitter.rt.alloc); local_set(result);
                     local_get(result); local_get(list_count); i32_store(0);
-                    // Copy list_ptr[0..list_count] to result+4
+                    local_get(result); i32_const(list_cap_off()); i32_add; local_get(list_count); i32_store(0); // cap = len
+                    // Copy list_ptr[0..list_count] to result+data_off
                     i32_const(0); local_set(copy_i);
                     block_empty; loop_empty;
                       local_get(copy_i); local_get(list_count); i32_ge_u; br_if(1);
-                      local_get(result); i32_const(4); i32_add;
+                      local_get(result); i32_const(list_data_off()); i32_add;
                       local_get(copy_i); i32_const(4); i32_mul; i32_add;
                       local_get(list_ptr); local_get(copy_i); i32_const(4); i32_mul; i32_add;
                       i32_load(0);
@@ -317,11 +325,12 @@ impl FuncCompiler<'_> {
                     drop; // discard errno
                 });
 
-                // --- Phase 3: build List[String] = [count][strptr0][strptr1]... ---
+                // --- Phase 3: build List[String] = [len][cap][strptr0][strptr1]... ---
                 wasm!(self.func, {
-                    local_get(argc); i32_const(4); i32_mul; i32_const(4); i32_add;
+                    local_get(argc); i32_const(4); i32_mul; i32_const(list_hdr()); i32_add;
                     call(self.emitter.rt.alloc); local_set(result);
                     local_get(result); local_get(argc); i32_store(0);
+                    local_get(result); i32_const(list_cap_off()); i32_add; local_get(argc); i32_store(0); // cap = len
                     i32_const(0); local_set(i);
                     block_empty; loop_empty;
                       local_get(i); local_get(argc); i32_ge_u; br_if(1);
@@ -336,22 +345,23 @@ impl FuncCompiler<'_> {
                         local_get(str_len); i32_const(1); i32_add; local_set(str_len);
                         br(0);
                       end; end;
-                      // alloc Almide string [len:i32][bytes...]
-                      local_get(str_len); i32_const(4); i32_add;
+                      // alloc Almide string [len][cap][bytes...]
+                      local_get(str_len); i32_const(string_hdr()); i32_add;
                       call(self.emitter.rt.alloc); local_set(str_ptr);
                       local_get(str_ptr); local_get(str_len); i32_store(0);
-                      // copy str_len bytes from cstr_ptr into str_ptr+4
+                      local_get(str_ptr); i32_const(string_cap_off()); i32_add; local_get(str_len); i32_store(0); // cap = len
+                      // copy str_len bytes from cstr_ptr into str_ptr+data_off
                       i32_const(0); local_set(copy_i);
                       block_empty; loop_empty;
                         local_get(copy_i); local_get(str_len); i32_ge_u; br_if(1);
-                        local_get(str_ptr); i32_const(4); i32_add; local_get(copy_i); i32_add;
+                        local_get(str_ptr); i32_const(string_data_off()); i32_add; local_get(copy_i); i32_add;
                         local_get(cstr_ptr); local_get(copy_i); i32_add; i32_load8_u(0);
                         i32_store8(0);
                         local_get(copy_i); i32_const(1); i32_add; local_set(copy_i);
                         br(0);
                       end; end;
-                      // result[4 + i*4] = str_ptr
-                      local_get(result); i32_const(4); i32_add;
+                      // result[data_off + i*4] = str_ptr
+                      local_get(result); i32_const(list_data_off()); i32_add;
                       local_get(i); i32_const(4); i32_mul; i32_add;
                       local_get(str_ptr); i32_store(0);
                       local_get(i); i32_const(1); i32_add; local_set(i);
