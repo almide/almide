@@ -15,3 +15,11 @@ fn parse_tag(s: String) -> Option[String] =
 // Test: function reference used within the same module (intra-module)
 fn tag_count(items: List[String]) -> Int =
   items |> list.filter_map(parse_tag) |> list.len
+
+// #631: a PRODUCER fn inside the owning module constructs the variant via the
+// BARE constructor and returns it. The ctor-call result type must be pinned to
+// the owner-qualified `varlib.Wrapper` / `varlib.Shape`, or the #433 name-pin
+// guard aborts codegen on BOTH targets even though `check` passed.
+fn make_wrap(n: Int) -> Wrapper = Wrap(n)
+
+fn make_circle(r: Int) -> Shape = Circle { radius: r }

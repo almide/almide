@@ -16,7 +16,7 @@
 
 use std::collections::HashMap;
 use almide_ir::*;
-use almide_ir::top_let_storage::{build_global_tables, top_let_inputs, GlobalInfo};
+use almide_ir::top_let_storage::{build_global_tables, dependency_init_order, top_let_inputs, GlobalInfo};
 use crate::pass::{NanoPass, PassResult, Target};
 
 #[derive(Debug)]
@@ -29,19 +29,22 @@ impl NanoPass for TopLetStoragePass {
 
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         let mut inputs: Vec<(bool, TopLetKind, VarId, bool)> = Vec::new();
-        let mut init_order: Vec<VarId> = Vec::new();
         for tl in &program.top_lets {
             inputs.push(top_let_inputs(tl));
-            init_order.push(tl.var);
         }
         for m in &program.modules {
             for tl in &m.top_lets {
                 inputs.push(top_let_inputs(tl));
-                init_order.push(tl.var);
             }
         }
 
         let (globals, alias, offenders) = build_global_tables(&inputs, &program.var_table);
+
+        // #632: re-order so an imported module's heap global is initialized
+        // before any importing top-let reads it (directly or through a function
+        // it calls). WASM evaluates initializers eagerly in this order; native
+        // forces abortable lazies in it (C-007).
+        let init_order: Vec<VarId> = dependency_init_order(&program, &alias);
 
         if !offenders.is_empty() {
             let mut msg = String::new();

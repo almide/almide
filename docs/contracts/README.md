@@ -24,7 +24,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 `fixture` < `fuzz` < `exhaustive` < `lean`. An **active** contract must carry
 ≥1 evidence of class ≥ `fixture`.
 
-70 contracts
+77 contracts
 
 | ID | Contract | Since | Status | Strongest Evidence | # Fixtures |
 |----|----------|-------|--------|--------------------|-----------:|
@@ -98,4 +98,11 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-068 | Auto-? is target-directed in construction positions |  | active | fixture | 2 |
 | C-069 | Effect-fn tail self-recursion loop-converts to O(1) stack on both targets |  | active | fixture | 1 |
 | C-070 | Nested constructor patterns match and bind identically on both targets |  | active | fixture | 1 |
+| C-071 | Single-part interpolation RC balance |  | active | fixture | 1 |
+| C-072 | Inferred named-record repr parity |  | active | fixture | 1 |
+| C-073 | Tuple pattern testing a variant constructor |  | active | fixture | 1 |
+| C-074 | Iterative split/replace on large inputs |  | active | fixture | 1 |
+| C-075 | lowmisc round-5 cluster: borrowed-param owning binding, effect-Option auto-try strip, matching-error ! passthrough |  | active | fixture | 1 |
+| C-076 | Producer-side in-module variant construction is target-stable |  | active | fixture | 1 |
+| C-077 | Cross-module heap-global init order is dependency-respecting |  | active | fixture | 1 |
 

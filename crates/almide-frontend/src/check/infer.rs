@@ -203,7 +203,12 @@ impl Checker {
                     // List[Int] }`, resolved from `env.types`). Both reduce to a
                     // `(field, declared_ty)` list with generics already substituted.
                     let (result_ty, decl_fields, closed, defaults): (Ty, Vec<(Sym, Ty)>, bool, std::collections::HashSet<Sym>) =
-                        if let Some((type_name, case)) = self.env.lookup_ctor(&ctor_sym) {
+                        // #631: module-aware lookup so a BARE record-variant ctor
+                        // used INSIDE its owning submodule (`Circle { radius: r }`)
+                        // pins `type_name` to the owner-qualified `mod.Shape`,
+                        // matching the tuple-ctor path. Without this the bare result
+                        // type tripped the #433 name-pinning guard at codegen.
+                        if let Some((type_name, case)) = self.env.lookup_ctor_in(&ctor_sym, self.current_module_prefix.as_deref()) {
                             // Brace construction of a NON-record case is a
                             // category error (`Wrap { x: 1 }` on a tuple case):
                             // reject here, or rustc/wasm explode downstream.

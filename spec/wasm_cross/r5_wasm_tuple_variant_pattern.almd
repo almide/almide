@@ -1,0 +1,40 @@
+// @contract: C-073
+// Cross-target tuple pattern that tests a variant constructor (#633).
+//
+// `match (a, b) { (Red, _) => … }` puts a variant Constructor pattern in a tuple
+// element of a non-last arm. The WASM tuple-pattern condition builder handled
+// Some/None but had NO arm for Constructor, so it emitted an `If` with NOTHING
+// on the stack → "expected i32 but nothing on stack" structural-validation
+// abort; no .wasm was produced. Native compiled and ran correctly.
+//
+// The fix loads the variant element pointer's tag and compares it to the
+// constructor's tag (a condition operand), and binds any payload binders of a
+// variant element from its `[tag][field…]` layout. This pins nullary variants in
+// either tuple position, both positions, and a payload-carrying variant, all
+// native == WASM.
+
+type Color = | Red | Green
+type Shape = | Empty | Full(Int)
+
+fn classify(a: Color, b: Color) -> String =
+  match (a, b) {
+    (Red, _)       => "red-first",
+    (_, Red)       => "red-second",
+    (Green, Green) => "both-green",
+  }
+
+fn payload(s: Shape) -> String =
+  match (s, 0) {
+    (Full(x), _) => "full-" + int.to_string(x),
+    (Empty, _)   => "empty",
+  }
+
+fn main() -> Unit = {
+  println(classify(Red, Green))    // red-first
+  println(classify(Green, Red))    // red-second
+  println(classify(Green, Green))  // both-green
+  println(payload(Full(42)))       // full-42
+  println(payload(Empty))          // empty
+  // Both nullary positions literal in a non-last arm.
+  println(match (Red, Green) { (Red, Green) => "rg", _ => "x" })
+}

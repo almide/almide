@@ -180,6 +180,204 @@ pub fn init_can_abort(expr: &IrExpr) -> bool {
     f.found
 }
 
+use std::collections::HashSet;
+use crate::{CallTarget, IrFunction, IrProgram};
+
+/// Per-expression scan: the global top-let VarIds an expression reads DIRECTLY
+/// (resolved through `alias`) and the callees it invokes by identity. Callees
+/// are keyed so the interprocedural read-set can be folded in (`#632`: a
+/// top-let initializer that *calls* `cfg.banner()` transitively reads
+/// `cfg.APP_NAME`, with no direct `Var` to it).
+fn scan_reads_and_calls(
+    expr: &IrExpr,
+    alias: &HashMap<VarId, VarId>,
+    decls: &HashSet<VarId>,
+) -> (Vec<VarId>, Vec<FnKey>) {
+    use crate::visit::{IrVisitor, walk_expr};
+    struct Collector<'a> {
+        alias: &'a HashMap<VarId, VarId>,
+        decls: &'a HashSet<VarId>,
+        reads: Vec<VarId>,
+        calls: Vec<FnKey>,
+    }
+    impl IrVisitor for Collector<'_> {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            match &e.kind {
+                IrExprKind::Var { id } => {
+                    let decl = self.alias.get(id).copied().unwrap_or(*id);
+                    if self.decls.contains(&decl) && !self.reads.contains(&decl) {
+                        self.reads.push(decl);
+                    }
+                }
+                IrExprKind::Call { target, .. } => {
+                    if let Some(k) = fn_key_of_target(target) {
+                        if !self.calls.contains(&k) { self.calls.push(k); }
+                    }
+                }
+                _ => {}
+            }
+            walk_expr(self, e);
+        }
+    }
+    let mut c = Collector { alias, decls, reads: Vec::new(), calls: Vec::new() };
+    c.visit_expr(expr);
+    (c.reads, c.calls)
+}
+
+/// Identity of a callable user function: its bare name (free fn / variant ctor)
+/// or `module::func`. Stdlib calls resolve to no user `IrFunction`, so they
+/// contribute no globals and are simply absent from the function index.
+type FnKey = String;
+
+fn fn_key_of_target(target: &CallTarget) -> Option<FnKey> {
+    match target {
+        CallTarget::Named { name } => Some(name.as_str().to_string()),
+        CallTarget::Module { module, func, .. } =>
+            Some(format!("{}::{}", module.as_str(), func.as_str())),
+        // Method/Computed callees are not name-resolved here; a global read
+        // reached only through such a callee falls back to the module-level
+        // safety net in `dependency_init_order`.
+        CallTarget::Method { .. } | CallTarget::Computed { .. } => None,
+    }
+}
+
+fn fn_key_of_function(f: &IrFunction) -> FnKey {
+    match &f.module_origin {
+        Some(m) => format!("{}::{}", m, f.name.as_str()),
+        None => f.name.as_str().to_string(),
+    }
+}
+
+/// #632: dependency-respecting global init order. WASM evaluates top-let
+/// initializers EAGERLY in `global_init_order`; native forces abortable lazies
+/// in that same order (C-007). When an importing module's top-let reads an
+/// imported module's heap global — directly OR through a function it calls —
+/// that global must be initialized FIRST, or the wasm read hits a still-zero
+/// header (null ptr + zero len). The legacy order (root top-lets, then
+/// per-module) put a root let BEFORE the submodule global it depends on, so the
+/// cross-module read miscompiled on wasm only.
+///
+/// Dependencies are computed interprocedurally: a top-let depends on every
+/// global its initializer reads directly, PLUS every global transitively read
+/// by the user functions it calls. As a safety net for reads reachable only
+/// through un-named callees (method/computed/stdlib HOFs), a root top-let also
+/// depends on every module global, and a module top-let on every global of a
+/// module it (transitively) references — submodules are dependencies of their
+/// importer by construction, so this can never invert a real ordering.
+///
+/// We stable-topo-sort the legacy declaration order so every top-let comes
+/// after the globals it depends on; ties keep the original (root-then-module)
+/// sequence for host-arch determinism. A dependency cycle (no legal source
+/// program produces one across distinct globals) degrades gracefully to the
+/// legacy order.
+pub fn dependency_init_order(
+    program: &IrProgram,
+    alias: &HashMap<VarId, VarId>,
+) -> Vec<VarId> {
+    // 1. The legacy emission order: (decl VarId, owning module, &initializer).
+    //    None module = root.
+    let mut decl_order: Vec<(VarId, Option<&str>, &IrExpr)> = Vec::new();
+    for tl in &program.top_lets {
+        decl_order.push((tl.var, None, &tl.value));
+    }
+    for m in &program.modules {
+        for tl in &m.top_lets {
+            decl_order.push((tl.var, Some(m.name.as_str()), &tl.value));
+        }
+    }
+    let decls: HashSet<VarId> = decl_order.iter().map(|(v, _, _)| *v).collect();
+
+    // 2. Index every user function by identity, with the globals it reads
+    //    directly and the callees it invokes.
+    let mut fn_reads: HashMap<FnKey, Vec<VarId>> = HashMap::new();
+    let mut fn_calls: HashMap<FnKey, Vec<FnKey>> = HashMap::new();
+    let mut index_fn = |f: &IrFunction| {
+        let (reads, calls) = scan_reads_and_calls(&f.body, alias, &decls);
+        let key = fn_key_of_function(f);
+        fn_reads.entry(key.clone()).or_default().extend(reads);
+        fn_calls.entry(key).or_default().extend(calls);
+    };
+    for f in &program.functions { index_fn(f); }
+    for m in &program.modules {
+        for f in &m.functions { index_fn(f); }
+    }
+
+    // 3. Transitive global read-set per function (fixpoint over the call graph;
+    //    cycle-safe via the visited set).
+    fn fn_global_reads(
+        key: &FnKey,
+        fn_reads: &HashMap<FnKey, Vec<VarId>>,
+        fn_calls: &HashMap<FnKey, Vec<FnKey>>,
+        seen: &mut HashSet<FnKey>,
+        out: &mut Vec<VarId>,
+    ) {
+        if !seen.insert(key.clone()) { return; }
+        if let Some(rs) = fn_reads.get(key) {
+            for &r in rs { if !out.contains(&r) { out.push(r); } }
+        }
+        if let Some(cs) = fn_calls.get(key) {
+            for c in cs { fn_global_reads(c, fn_reads, fn_calls, seen, out); }
+        }
+    }
+
+    // 4. Module → its top-let global decls (for the coarse safety net).
+    let mut module_globals: HashMap<&str, Vec<VarId>> = HashMap::new();
+    for &(v, m, _) in &decl_order {
+        if let Some(mn) = m { module_globals.entry(mn).or_default().push(v); }
+    }
+
+    // 5. Per-top-let dependency set.
+    let mut deps: HashMap<VarId, Vec<VarId>> = HashMap::new();
+    for &(v, owner, expr) in &decl_order {
+        let (direct, calls) = scan_reads_and_calls(expr, alias, &decls);
+        let mut dep: Vec<VarId> = direct;
+        // Interprocedural: globals read through every callee.
+        for c in &calls {
+            let mut seen = HashSet::new();
+            let mut reads = Vec::new();
+            fn_global_reads(c, &fn_reads, &fn_calls, &mut seen, &mut reads);
+            for r in reads { if !dep.contains(&r) { dep.push(r); } }
+        }
+        // Safety net: a root top-let depends on every module global; this is
+        // sound because submodules are always dependencies of the root (the
+        // root imports them, never vice versa). Catches reads reachable only
+        // through method/computed/stdlib-HOF callees that step 2 can't name.
+        if owner.is_none() {
+            for (_, gs) in &module_globals {
+                for &g in gs { if !dep.contains(&g) { dep.push(g); } }
+            }
+        }
+        dep.retain(|d| *d != v);
+        deps.insert(v, dep);
+    }
+
+    // 6. Stable topological emit: walk the legacy order; before emitting a
+    //    node, emit its not-yet-emitted dependencies (depth-first). `on_stack`
+    //    breaks cycles by emitting the node anyway in its legacy slot.
+    let mut emitted: Vec<VarId> = Vec::with_capacity(decl_order.len());
+    let mut done: HashSet<VarId> = HashSet::new();
+    let mut on_stack: HashSet<VarId> = HashSet::new();
+    fn visit(
+        v: VarId,
+        deps: &HashMap<VarId, Vec<VarId>>,
+        done: &mut HashSet<VarId>,
+        on_stack: &mut HashSet<VarId>,
+        emitted: &mut Vec<VarId>,
+    ) {
+        if done.contains(&v) || on_stack.contains(&v) { return; }
+        on_stack.insert(v);
+        if let Some(ds) = deps.get(&v) {
+            for &d in ds { visit(d, deps, done, on_stack, emitted); }
+        }
+        on_stack.remove(&v);
+        if done.insert(v) { emitted.push(v); }
+    }
+    for &(v, _, _) in &decl_order {
+        visit(v, &deps, &mut done, &mut on_stack, &mut emitted);
+    }
+    emitted
+}
+
 /// Alias-resolution key: (normalized module origin, UPPERCASE name). The
 /// use-site synthetic Var carries the SCREAMING_CASE spelling and a
 /// dot-normalized origin; the declaration keeps the source name and the
@@ -226,4 +424,101 @@ pub fn build_global_tables(
 /// Convenience: extract the classification inputs from an `IrTopLet`.
 pub fn top_let_inputs(tl: &IrTopLet) -> (bool, TopLetKind, VarId, bool) {
     (tl.mutable, tl.kind, tl.var, init_can_abort(&tl.value))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{CallTarget, IrExpr, IrExprKind, IrFunction, IrModule, IrProgram, IrTopLet,
+        IrVisibility, TopLetKind, VarTable};
+    use almide_base::intern::sym;
+
+    fn var(id: u32) -> IrExpr {
+        IrExpr { kind: IrExprKind::Var { id: VarId(id) }, ty: Ty::String, span: None, def_id: None }
+    }
+    fn lit() -> IrExpr {
+        IrExpr { kind: IrExprKind::LitStr { value: "x".into() }, ty: Ty::String, span: None, def_id: None }
+    }
+    fn call_mod(module: &str, func: &str) -> IrExpr {
+        IrExpr {
+            kind: IrExprKind::Call {
+                target: CallTarget::Module { module: sym(module), func: sym(func), def_id: None },
+                args: vec![],
+                type_args: vec![],
+            },
+            ty: Ty::String, span: None, def_id: None,
+        }
+    }
+    fn tl(var_id: u32, value: IrExpr) -> IrTopLet {
+        IrTopLet { var: VarId(var_id), ty: Ty::String, value, kind: TopLetKind::Lazy,
+            mutable: false, doc: None, blank_lines_before: 0, def_id: None }
+    }
+    fn module_fn(name: &str, module: &str, body: IrExpr) -> IrFunction {
+        IrFunction {
+            name: sym(name), params: vec![], ret_ty: Ty::String, body,
+            is_effect: false, is_async: false, is_test: false,
+            generics: None, extern_attrs: vec![], export_attrs: vec![], attrs: vec![],
+            visibility: IrVisibility::Public, doc: None, blank_lines_before: 0, def_id: None,
+            mutated_params: vec![], module_origin: Some(module.to_string()),
+        }
+    }
+    fn empty_module(name: &str) -> IrModule {
+        IrModule { name: sym(name), versioned_name: None, type_decls: vec![],
+            functions: vec![], top_lets: vec![], var_table: VarTable::new(),
+            exports: vec![], imports: vec![] }
+    }
+
+    /// Root top-let (declared FIRST) reads a module global DIRECTLY through an
+    /// aliased use-site VarId; the module global must be ordered first.
+    #[test]
+    fn direct_cross_module_read_reorders_module_first() {
+        let mut program = IrProgram::default();
+        // root: let GREETING(0) = APP_NAME(2)  where var2 aliases cfg's decl var1
+        program.top_lets.push(tl(0, var(2)));
+        let mut cfg = empty_module("cfg");
+        cfg.top_lets.push(tl(1, lit())); // cfg: let APP_NAME(1) = "x"
+        program.modules.push(cfg);
+        // alias: use-site var2 → declaration var1
+        let mut alias: HashMap<VarId, VarId> = HashMap::new();
+        alias.insert(VarId(2), VarId(1));
+
+        let order = dependency_init_order(&program, &alias);
+        let p0 = order.iter().position(|v| *v == VarId(1)).unwrap();
+        let p1 = order.iter().position(|v| *v == VarId(0)).unwrap();
+        assert!(p0 < p1, "cfg.APP_NAME (var1) must init before root GREETING (var0): {:?}", order);
+    }
+
+    /// Root top-let reads the module global ONLY through a function call; the
+    /// interprocedural read-set must still pull the module global earlier.
+    #[test]
+    fn interprocedural_read_reorders_module_first() {
+        let mut program = IrProgram::default();
+        // root: let BANNER(0) = cfg::banner()   (no direct Var to the global)
+        program.top_lets.push(tl(0, call_mod("cfg", "banner")));
+        let mut cfg = empty_module("cfg");
+        cfg.top_lets.push(tl(1, lit()));                    // cfg: let APP_NAME(1)
+        cfg.functions.push(module_fn("banner", "cfg", var(1))); // banner reads var1
+        program.modules.push(cfg);
+
+        let order = dependency_init_order(&program, &HashMap::new());
+        let p_global = order.iter().position(|v| *v == VarId(1)).unwrap();
+        let p_banner = order.iter().position(|v| *v == VarId(0)).unwrap();
+        assert!(p_global < p_banner,
+            "cfg.APP_NAME (var1) read via cfg::banner() must init before BANNER (var0): {:?}", order);
+    }
+
+    /// No cross dependency → the legacy (root-then-module) order is preserved.
+    #[test]
+    fn independent_globals_keep_legacy_order() {
+        let mut program = IrProgram::default();
+        program.top_lets.push(tl(0, lit()));
+        let mut cfg = empty_module("cfg");
+        cfg.top_lets.push(tl(1, lit()));
+        program.modules.push(cfg);
+        let order = dependency_init_order(&program, &HashMap::new());
+        // Root let (var0) has no dep; its safety net depends on the module
+        // global (var1), so var1 still comes first. Both are present exactly once.
+        assert_eq!(order.len(), 2);
+        assert!(order.contains(&VarId(0)) && order.contains(&VarId(1)));
+    }
 }

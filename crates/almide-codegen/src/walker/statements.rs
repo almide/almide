@@ -9,6 +9,36 @@ use super::types::render_type;
 use super::expressions::render_expr;
 use super::helpers::{template_or, terminate_stmt, ty_has_named_typevar, erase_named_typevars, erase_fn_types};
 
+/// When a binding's initializer reads a fn param that is emitted as a Rust
+/// reference (`&str`, `&[T]`, `&AlmideMap<..>`, `&T`), the binding's declared
+/// type is the OWNED form (`String`, `Vec<T>`, `AlmideMap<..>`, `T`), so the
+/// borrow must be converted to an owned value. The right method depends on the
+/// value type: a `&str` owns via `.to_string()`, a `&[T]` slice via `.to_vec()`
+/// (`.clone()` on a slice yields another `&[T]`, not `Vec<T>`), and every other
+/// borrowed type (`&AlmideMap`, `&T`) owns via `.clone()`. Returns the bare
+/// owning expression (e.g. `l.to_vec()`) when the value reads a borrowed param,
+/// or `None` when no conversion is needed. A `Clone{Var}` initializer is
+/// rendered from the bare var so we never stack `l.clone().to_vec()`. #624
+fn borrowed_param_owning_value(ctx: &RenderContext, value: &IrExpr) -> Option<String> {
+    let (var_id, val_ty) = match &value.kind {
+        IrExprKind::Var { id } => (*id, &value.ty),
+        IrExprKind::Clone { expr: inner } => match &inner.kind {
+            IrExprKind::Var { id } => (*id, &inner.ty),
+            _ => return None,
+        },
+        _ => return None,
+    };
+    if !ctx.ref_params.contains(&var_id) {
+        return None;
+    }
+    let conv = match val_ty {
+        Ty::String => "to_string",
+        Ty::Applied(TypeConstructorId::List, _) => "to_vec",
+        _ => "clone",
+    };
+    Some(format!("{}.{}()", ctx.var_name(var_id), conv))
+}
+
 /// Check if an expression references a specific variable (any depth).
 pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
     match &stmt.kind {
@@ -202,17 +232,13 @@ pub fn render_stmt(ctx: &RenderContext, stmt: &IrStmt) -> String {
                 return ctx.templates.render_with("var_binding", None, &[], &[("name", name_s.as_str()), ("type", val_type.as_str()), ("value", val_value.as_str())])
                     .unwrap_or_else(|| if name_s == "_" { format!("let {}: {} = {};", name_s, val_type, val_value) } else { format!("let mut {}: {} = {};", name_s, val_type, val_value) });
             }
-            // Non-RcCow var binding: if value comes from a borrowed param, clone it
-            let value_s = if matches!(mutability, Mutability::Var) && !ctx.ann.is_rc_cow(var) {
-                let needs_clone = match &value.kind {
-                    IrExprKind::Var { id } => ctx.ref_params.contains(id),
-                    IrExprKind::Clone { expr: inner } => match &inner.kind {
-                        IrExprKind::Var { id } => ctx.ref_params.contains(id),
-                        _ => false,
-                    },
-                    _ => false,
-                };
-                if needs_clone { format!("{}.clone()", value_s) } else { value_s }
+            // Non-RcCow binding whose initializer reads a borrowed param: the
+            // binding's type is the OWNED form, so convert the borrow to an
+            // owned value (slice→`.to_vec()`, `&str`→`.to_string()`, else
+            // `.clone()`). Applies to both `let` and `var` — a slice cloned as
+            // `.clone()` would stay a `&[T]` and mismatch `Vec<T>` (#624).
+            let value_s = if !ctx.ann.is_rc_cow(var) {
+                borrowed_param_owning_value(ctx, value).unwrap_or(value_s)
             } else { value_s };
             let is_wildcard = name_s == "_";
             let construct = match mutability {

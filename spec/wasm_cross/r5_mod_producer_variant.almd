@@ -1,0 +1,27 @@
+// @contract: C-076
+// #631 regression guard (single-file slice). A producer fn constructs a variant
+// via the BARE constructor and RETURNS it; a consumer matches on the result.
+// The construction expression's `.ty` is pinned to the variant's canonical type
+// name. In a SUBMODULE that owns the variant, that name is `mod.Shape`, and a
+// bare-typed construction tripped the #433 name-pinning guard at codegen on both
+// targets (the real #631 trigger, gated by the project-based cross-target test
+// `wasm_cross_module_producer_side_variant_ctor` in tests/wasm_runtime_test.rs).
+// The single-file wasm_cross gate cannot host module projects, so this fixture
+// locks the producer-side construction + match repr in single-file form.
+
+type Shape = Circle(Int) | Square(Int)
+
+fn make_circle(r: Int) -> Shape = Circle(r)
+fn make_square(w: Int) -> Shape = Square(w)
+
+fn area(s: Shape) -> Int = match s {
+  Circle(r) => r * r * 3,
+  Square(w) => w * w,
+}
+
+fn main() -> Unit = {
+  let c = make_circle(4)
+  let s = make_square(5)
+  println("circle=${int.to_string(area(c))}")
+  println("square=${int.to_string(area(s))}")
+}

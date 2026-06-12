@@ -805,130 +805,205 @@ fn compile_index_of(emitter: &mut WasmEmitter) {
     emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.string.index_of, type_idx, f));
 }
 
+/// Iterative replace via a count-then-build forward scan. Mirrors the native
+/// oracle `s.replace(from, to)`. De-recursed (#634): the old recursion was one
+/// frame per occurrence (and INFINITE on an empty `from`, since `index_of`
+/// returns 0 forever), exhausting the wasm call stack. An empty `from` inserts
+/// `to` at every codepoint boundary: `"abc".replace("","X") == "XaXbXcX"`.
 fn compile_replace(emitter: &mut WasmEmitter) {
     let type_idx = emitter.func_type_indices[&emitter.rt.string.replace];
+    // params: 0=s, 1=from, 2=to
+    // locals: 3=blen, 4=fl(from len), 5=tl(to len), 6=i(scan), 7=cnt,
+    //         8=result, 9=out(write off), 10=width
     let mut f = Function::new([
-        (1, ValType::I64), (1, ValType::I32), (1, ValType::I32),
+        (1, ValType::I32), (1, ValType::I32), (1, ValType::I32),
+        (1, ValType::I32), (1, ValType::I32), (1, ValType::I32),
         (1, ValType::I32), (1, ValType::I32),
     ]);
+    let dat = string_data_off();
     wasm!(f, {
-        local_get(0); local_get(1); call(emitter.rt.string.index_of); local_set(3);
-        local_get(3); i64_const(-1); i64_eq;
-        if_i32; local_get(0);
-        else_;
-          local_get(3); i32_wrap_i64; local_set(4);
-          local_get(1); i32_load(0); local_set(5);
-          local_get(0); i32_const(0); local_get(4);
-          call(emitter.rt.string.slice); local_set(6);
-          local_get(0); local_get(4); local_get(5); i32_add; local_get(0); i32_load(0);
-          call(emitter.rt.string.slice); local_set(7);
-          local_get(7); local_get(1); local_get(2);
-          call(emitter.rt.string.replace); local_set(7);
-          local_get(6); local_get(2); call(emitter.rt.concat_str);
-          local_get(7); call(emitter.rt.concat_str);
+        local_get(0); i32_load(0); local_set(3); // blen
+        local_get(1); i32_load(0); local_set(4); // fl
+        local_get(2); i32_load(0); local_set(5); // tl
+        // Empty `from`: insert `to` before every codepoint plus one at the end.
+        // result_len = blen + (char_count + 1) * tl. Count codepoints first.
+        local_get(4); i32_eqz;
+        if_empty;
+          // cnt = codepoint count (scan widths)
+          i32_const(0); local_set(6); // i = 0 (byte offset)
+          i32_const(0); local_set(7); // cnt = 0 (codepoints)
+          block_empty; loop_empty;
+            local_get(6); local_get(3); i32_ge_u; br_if(1);
+            local_get(0); local_get(6); call(emitter.rt.string.utf8_width);
+            local_get(6); i32_add; local_set(6);
+            local_get(7); i32_const(1); i32_add; local_set(7);
+            br(0);
+          end; end;
+          // result = string_alloc(blen + (cnt + 1) * tl)
+          local_get(3); local_get(7); i32_const(1); i32_add; local_get(5); i32_mul; i32_add;
+          call(emitter.rt.string_alloc); local_set(8);
+          i32_const(0); local_set(9); // out = 0
+          // leading `to`: result[out..] = to
+          local_get(8); i32_const(dat); i32_add; local_get(9); i32_add;
+          local_get(2); i32_const(dat); i32_add; local_get(5); memory_copy;
+          local_get(9); local_get(5); i32_add; local_set(9);
+          i32_const(0); local_set(6); // i = 0
+          block_empty; loop_empty;
+            local_get(6); local_get(3); i32_ge_u; br_if(1);
+            local_get(0); local_get(6); call(emitter.rt.string.utf8_width); local_set(10); // width
+            // copy one codepoint: result[out..] = s[i .. i+width]
+            local_get(8); i32_const(dat); i32_add; local_get(9); i32_add;
+            local_get(0); i32_const(dat); i32_add; local_get(6); i32_add;
+            local_get(10); memory_copy;
+            local_get(9); local_get(10); i32_add; local_set(9); // out += width
+            local_get(6); local_get(10); i32_add; local_set(6); // i += width
+            // `to` after this codepoint
+            local_get(8); i32_const(dat); i32_add; local_get(9); i32_add;
+            local_get(2); i32_const(dat); i32_add; local_get(5); memory_copy;
+            local_get(9); local_get(5); i32_add; local_set(9);
+            br(0);
+          end; end;
+          local_get(8); return_;
         end;
-        end;
+        // Non-empty `from`. Pass 1: count occurrences.
+        i32_const(0); local_set(6); // i = 0
+        i32_const(0); local_set(7); // cnt = 0
+        block_empty; loop_empty;
+          local_get(6); local_get(4); i32_add; local_get(3); i32_gt_u; br_if(1);
+          local_get(0); i32_const(dat); i32_add; local_get(6); i32_add;
+          local_get(1); i32_const(dat); i32_add;
+          local_get(4); call(emitter.rt.mem_eq);
+          if_empty;
+            local_get(7); i32_const(1); i32_add; local_set(7); // cnt += 1
+            local_get(6); local_get(4); i32_add; local_set(6); // i += fl
+          else_;
+            local_get(6); i32_const(1); i32_add; local_set(6); // i += 1
+          end;
+          br(0);
+        end; end;
+        // No occurrences → return s unchanged.
+        local_get(7); i32_eqz;
+        if_empty; local_get(0); return_; end;
+        // result = string_alloc(blen + cnt * (tl - fl))
+        local_get(3); local_get(7); local_get(5); local_get(4); i32_sub; i32_mul; i32_add;
+        call(emitter.rt.string_alloc); local_set(8);
+        // Pass 2: build result.
+        i32_const(0); local_set(6); // i = 0 (read off into s)
+        i32_const(0); local_set(9); // out = 0 (write off into result)
+        block_empty; loop_empty;
+          local_get(6); local_get(3); i32_ge_u; br_if(1);
+          // match at i (only when a full `from` still fits)?
+          local_get(6); local_get(4); i32_add; local_get(3); i32_le_u;
+          if_empty;
+            local_get(0); i32_const(dat); i32_add; local_get(6); i32_add;
+            local_get(1); i32_const(dat); i32_add;
+            local_get(4); call(emitter.rt.mem_eq);
+            if_empty;
+              // copy `to`, advance i by fl, out by tl
+              local_get(8); i32_const(dat); i32_add; local_get(9); i32_add;
+              local_get(2); i32_const(dat); i32_add; local_get(5); memory_copy;
+              local_get(9); local_get(5); i32_add; local_set(9);
+              local_get(6); local_get(4); i32_add; local_set(6);
+              br(2); // continue outer loop
+            end;
+          end;
+          // copy one byte verbatim
+          local_get(8); i32_const(dat); i32_add; local_get(9); i32_add;
+          local_get(0); i32_const(dat); i32_add; local_get(6); i32_add;
+          i32_load8_u(0); i32_store8(0);
+          local_get(9); i32_const(1); i32_add; local_set(9);
+          local_get(6); i32_const(1); i32_add; local_set(6);
+          br(0);
+        end; end;
+        local_get(8); end;
     });
     emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.string.replace, type_idx, f));
 }
 
-/// Recursive split using index_of. Supports multi-char delimiter.
-/// Strategy: find first delimiter → [before] ++ split(rest, delim)
-/// Base case: no delimiter found → [s]
+/// Iterative split using a single forward byte-scan. Supports multi-char
+/// delimiters. Mirrors the native oracle `s.split(sep)` (a non-empty `sep`
+/// yields one segment per gap between matches, including a trailing empty
+/// segment when `s` ends with `sep`). De-recursed (#634): the old recursion
+/// was one frame per segment and exhausted the wasm call stack at ~4700
+/// segments — same precedent as `compile_lines`'s byte-scan rewrite.
 fn compile_split(emitter: &mut WasmEmitter) {
     let type_idx = emitter.func_type_indices[&emitter.rt.string.split];
     // params: 0=s, 1=delim
-    // locals: 2=idx(i64), 3=d_len, 4=before, 5=rest, 6=rest_list, 7=result
-    //   empty-delim branch reuses: 8=blen, 9=in_off, 10=width, 11=slot(j)
+    // locals: 2=d_len, 3=blen, 4=seg_start, 5=i(scan), 6=slot, 7=result
+    //   empty-delim branch reuses: 8=in_off, 9=width
     let mut f = Function::new([
-        (1, ValType::I64), (1, ValType::I32), (1, ValType::I32),
         (1, ValType::I32), (1, ValType::I32), (1, ValType::I32),
-        (4, ValType::I32),
+        (1, ValType::I32), (1, ValType::I32), (1, ValType::I32),
+        (2, ValType::I32),
     ]);
     wasm!(f, {
-        local_get(1); i32_load(0); local_set(3); // d_len
+        local_get(1); i32_load(0); local_set(2); // d_len
+        local_get(0); i32_load(0); local_set(3); // blen
         // Empty delimiter: split per CODEPOINT with a leading + trailing empty
         // string — native `s.split("")` yields ["", c0, c1, …, ""] (and ["", ""]
-        // for ""). The old branch returned [s] (no split), diverging on every
-        // call (Cluster-2 finding #2). Slots = char_count + 2.
-        local_get(3); i32_eqz;
+        // for ""). Slots = char_count + 2.
+        local_get(2); i32_eqz;
         if_empty;
-          local_get(0); i32_load(0); local_set(8);                 // blen = *s
           // result list: [len = char_count + 2][slot ptrs…]. Worst case (all
           // ASCII) char_count == blen, so blen + 2 slots is always enough.
-          i32_const(list_hdr()); local_get(8); i32_const(2); i32_add; i32_const(4); i32_mul; i32_add;
+          i32_const(list_hdr()); local_get(3); i32_const(2); i32_add; i32_const(4); i32_mul; i32_add;
           call(emitter.rt.alloc); local_set(7);
           // slot[0] = "" (leading empty)
           local_get(7); i32_const(list_data_off()); i32_add;
           i32_const(0); call(emitter.rt.string_alloc); i32_store(0);
-          i32_const(0); local_set(9);                              // in_off = 0
-          i32_const(1); local_set(11);                             // slot = 1 (after leading "")
+          i32_const(0); local_set(8);                              // in_off = 0
+          i32_const(1); local_set(6);                              // slot = 1 (after leading "")
           block_empty; loop_empty;
-            local_get(9); local_get(8); i32_ge_u; br_if(1);
-            local_get(0); local_get(9); call(emitter.rt.string.utf8_width); local_set(10); // width
+            local_get(8); local_get(3); i32_ge_u; br_if(1);
+            local_get(0); local_get(8); call(emitter.rt.string.utf8_width); local_set(9); // width
             // slot[slot] = slice(s, in_off, in_off + width)  (one codepoint)
-            local_get(7); i32_const(list_data_off()); i32_add; local_get(11); i32_const(4); i32_mul; i32_add;
-            local_get(0); local_get(9); local_get(9); local_get(10); i32_add;
+            local_get(7); i32_const(list_data_off()); i32_add; local_get(6); i32_const(4); i32_mul; i32_add;
+            local_get(0); local_get(8); local_get(8); local_get(9); i32_add;
             call(emitter.rt.string.slice); i32_store(0);
-            local_get(9); local_get(10); i32_add; local_set(9);    // in_off += width
-            local_get(11); i32_const(1); i32_add; local_set(11);   // slot += 1
+            local_get(8); local_get(9); i32_add; local_set(8);     // in_off += width
+            local_get(6); i32_const(1); i32_add; local_set(6);     // slot += 1
             br(0);
           end; end;
           // slot[slot] = "" (trailing empty)
-          local_get(7); i32_const(list_data_off()); i32_add; local_get(11); i32_const(4); i32_mul; i32_add;
+          local_get(7); i32_const(list_data_off()); i32_add; local_get(6); i32_const(4); i32_mul; i32_add;
           i32_const(0); call(emitter.rt.string_alloc); i32_store(0);
           // result.len = slot + 1  (== char_count + 2)
-          local_get(7); local_get(11); i32_const(1); i32_add; i32_store(0);
+          local_get(7); local_get(6); i32_const(1); i32_add; i32_store(0);
           local_get(7); return_;
         end;
-        local_get(0); local_get(1); call(emitter.rt.string.index_of); local_set(2);
-        local_get(2); i64_const(-1); i64_eq;
-        if_i32;
-          // No match: return [s]
-          i32_const(12); call(emitter.rt.alloc); local_set(7);
-          local_get(7); i32_const(1); i32_store(0);
-          local_get(7); local_get(0); i32_store(8);
-          local_get(7);
-        else_;
-          // before = slice(s, 0, idx)
-          local_get(0); i32_const(0); local_get(2); i32_wrap_i64;
-          call(emitter.rt.string.slice); local_set(4);
-          // rest = slice(s, idx + d_len, s_len)
-          local_get(0);
-          local_get(2); i32_wrap_i64; local_get(3); i32_add;
-          local_get(0); i32_load(0);
-          call(emitter.rt.string.slice); local_set(5);
-          // rest_list = split(rest, delim) — recursive
-          local_get(5); local_get(1);
-          call(emitter.rt.string.split); local_set(6);
-          // result = [before] ++ rest_list
-          // Alloc: HEADER_SIZE + (1 + rest_list.len) * 4
-          i32_const(list_hdr());
-          local_get(6); i32_load(0); i32_const(1); i32_add;
-          i32_const(4); i32_mul; i32_add;
-          call(emitter.rt.alloc); local_set(7);
-          local_get(7);
-          local_get(6); i32_load(0); i32_const(1); i32_add;
-          i32_store(0); // result.len
-          // result[0] = before
-          local_get(7); local_get(4); i32_store(8);
-    });
-    // Copy rest_list elements to result[1..]
-    wasm!(f, {
-          i32_const(0); local_set(3); // reuse as i
-          block_empty; loop_empty;
-            local_get(3); local_get(6); i32_load(0); i32_ge_u; br_if(1);
-            local_get(7); i32_const(12); i32_add; // &result[1] = data_offset(8) + 1*4
-            local_get(3); i32_const(4); i32_mul; i32_add;
-            local_get(6); i32_const(list_data_off()); i32_add;
-            local_get(3); i32_const(4); i32_mul; i32_add;
-            i32_load(0); i32_store(0);
-            local_get(3); i32_const(1); i32_add; local_set(3);
-            br(0);
-          end; end;
-          local_get(7);
-        end;
-        end;
+        // Non-empty delimiter. A delimiter of length d_len>=1 can match at most
+        // blen times, so blen + 1 segments is the upper bound on the slot count.
+        i32_const(list_hdr()); local_get(3); i32_const(1); i32_add; i32_const(4); i32_mul; i32_add;
+        call(emitter.rt.alloc); local_set(7);
+        i32_const(0); local_set(4); // seg_start = 0
+        i32_const(0); local_set(5); // i = 0 (scan position)
+        i32_const(0); local_set(6); // slot = 0
+        block_empty; loop_empty;
+          // stop scanning once a full delimiter can no longer fit: i > blen - d_len.
+          local_get(5); local_get(2); i32_add; local_get(3); i32_gt_u; br_if(1);
+          // if mem_eq(s_data + i, delim_data, d_len)
+          local_get(0); i32_const(string_data_off()); i32_add; local_get(5); i32_add;
+          local_get(1); i32_const(string_data_off()); i32_add;
+          local_get(2);
+          call(emitter.rt.mem_eq);
+          if_empty;
+            // emit segment slice(s, seg_start, i)
+            local_get(7); i32_const(list_data_off()); i32_add; local_get(6); i32_const(4); i32_mul; i32_add;
+            local_get(0); local_get(4); local_get(5); call(emitter.rt.string.slice); i32_store(0);
+            local_get(6); i32_const(1); i32_add; local_set(6);     // slot += 1
+            local_get(5); local_get(2); i32_add; local_set(5);     // i += d_len
+            local_get(5); local_set(4);                            // seg_start = i
+          else_;
+            local_get(5); i32_const(1); i32_add; local_set(5);     // i += 1
+          end;
+          br(0);
+        end; end;
+        // trailing segment slice(s, seg_start, blen)
+        local_get(7); i32_const(list_data_off()); i32_add; local_get(6); i32_const(4); i32_mul; i32_add;
+        local_get(0); local_get(4); local_get(3); call(emitter.rt.string.slice); i32_store(0);
+        local_get(6); i32_const(1); i32_add; local_set(6);         // slot += 1
+        local_get(7); local_get(6); i32_store(0);                  // result.len = slot
+        local_get(7); end;
     });
     emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.string.split, type_idx, f));
 }
