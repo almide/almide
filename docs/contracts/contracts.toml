@@ -941,3 +941,12 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/r5_mod_global_init_order.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-078"
+title     = "Phantom record generic param is stripped on the Rust target"
+statement = "A record type with a generic param used by no field (a phantom param) compiles and runs byte-identical native == wasm. Rust forbids an unused type param (error[E0392]), so the Rust struct and every reference to it are emitted without generics; the param carries no runtime data (codegen erases types), so distinct instantiations share one representation — matching wasm, which already erases type params."
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/phantom_type_param.almd", class = "fixture" },
+]

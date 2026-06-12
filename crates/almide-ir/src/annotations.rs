@@ -56,6 +56,14 @@ pub struct CodegenAnnotations {
     /// derive `PartialEq` (a field transitively blocks equality — e.g.
     /// contains a Matrix or a function pointer).
     pub eq_blocked_types: HashSet<String>,
+    /// Record types ALL of whose generic params are phantom (declared but used
+    /// by no field). Rust rejects an unused type param (`error[E0392]`), so the
+    /// Rust struct is emitted WITHOUT generics and every `Ty::Named` reference to
+    /// it drops its type args — the params carry no runtime data (codegen erases
+    /// types), so `Tagged[String]` and `Tagged[Int]` share one representation,
+    /// matching the wasm target which already erases them (#621). Construction
+    /// and patterns are unaffected (struct literals carry no type args).
+    pub phantom_param_structs: HashSet<String>,
     /// `Mutability::Var` locals that are captured-and-mutated by a closure. On the
     /// Rust target these are lowered to a shared `Rc<Cell<T>>` / `Rc<RefCell<T>>`
     /// cell (declaration, every read/write, and the closure capture go through the

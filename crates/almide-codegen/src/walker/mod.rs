@@ -503,6 +503,7 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
         .cloned()
         .collect();
     ann.eq_blocked_types = super::walker::declarations::compute_eq_blocked_types(&all_type_decls);
+    ann.phantom_param_structs = super::walker::declarations::compute_phantom_param_structs(&all_type_decls);
     // §4 endgame: the legacy pre-index (lazy_top_let_names /
     // eager_force_top_lets / const_top_let_vars) and the mutable-storage
     // register block are GONE — every consumer reads the TopLetStorage
