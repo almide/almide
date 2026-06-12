@@ -1,0 +1,21 @@
+// @contract: C-091
+// A let-destructuring pattern with a NESTED tuple (or record) sub-pattern must
+// bind every leaf, byte-identical native == wasm. The WASM emit only handled a
+// flat `Bind` element and skipped nested sub-patterns, leaving their leaves
+// zeroed; it now recurses (loading the sub-aggregate pointer) exactly like the
+// local pre-scan. #654.
+
+fn main() -> Unit = {
+  let (a, (b, c)) = (1, (2, 3))
+  println("${a} ${b} ${c}")
+
+  let ((x, y), z) = ((4, 5), 6)
+  println("${x} ${y} ${z}")
+
+  let (p, (q, (r, s))) = (7, (8, (9, 10)))
+  println("${p} ${q} ${r} ${s}")
+
+  // nested tuple holding a heap value
+  let (n, (txt, m)) = (11, ("hi", 12))
+  println("${n} ${txt} ${m}")
+}

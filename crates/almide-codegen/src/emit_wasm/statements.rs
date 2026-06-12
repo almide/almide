@@ -398,49 +398,10 @@ impl FuncCompiler<'_> {
                 self.emit_expr(value);
                 let scratch = self.scratch.alloc_i32();
                 wasm!(self.func, { local_set(scratch); });
-
-                // Destructure pattern
-                match pattern {
-                    almide_ir::IrPattern::Tuple { elements } => {
-                        let elem_types = if let almide_lang::types::Ty::Tuple(tys) = &value.ty {
-                            tys.clone()
-                        } else { vec![] };
-
-                        // #524: the offset advance is UNCONDITIONAL — the
-                        // former placement inside the bind's `if let` meant
-                        // one missing local corrupted every SUBSEQUENT
-                        // element's load offset (active corruption, not just
-                        // a skipped bind).
-                        let mut offset = 0u32;
-                        for (i, elem_pat) in elements.iter().enumerate() {
-                            let elem_ty = elem_types.get(i).cloned().unwrap_or(almide_lang::types::Ty::Int);
-                            if let almide_ir::IrPattern::Bind { var, .. } = elem_pat {
-                                if let Some(&local_idx) = self.var_map.get(&var.0) {
-                                    wasm!(self.func, { local_get(scratch); });
-                                    self.emit_load_at(&elem_ty, offset);
-                                    wasm!(self.func, { local_set(local_idx); });
-                                }
-                            }
-                            offset += super::values::byte_size(&elem_ty);
-                        }
-                    }
-                    almide_ir::IrPattern::RecordPattern { fields: pat_fields, .. } => {
-                        // Record destructure: load each field from record ptr at its offset.
-                        // Field order and types come from the value's type.
-                        let record_fields = self.extract_record_fields(&value.ty);
-                        for pf in pat_fields {
-                            if let Some((offset, field_ty)) = super::values::field_offset(&record_fields, &pf.name) {
-                                // find_var_by_field searches var_map by name
-                                if let Some(&local_idx) = self.find_var_by_field(&pf.name, &record_fields) {
-                                    wasm!(self.func, { local_get(scratch); });
-                                    self.emit_load_at(&field_ty, offset);
-                                    wasm!(self.func, { local_set(local_idx); });
-                                }
-                            }
-                        }
-                    }
-                    _ => {}
-                }
+                // Recursive so a NESTED sub-pattern (`let (a, (b, c)) = …`) binds
+                // its leaves instead of leaving them zeroed (#654); mirrors the
+                // local pre-scan in `scan_destructure_pattern`.
+                self.emit_bind_destructure(pattern, scratch, &value.ty);
                 self.scratch.free_i32(scratch);
             }
 
@@ -1186,6 +1147,71 @@ pub fn collect_locals(
     let mut binds = Vec::new();
     scan_expr(body, &mut binds, var_table, record_fields, variant_info);
     LocalScanResult { binds }
+}
+
+impl FuncCompiler<'_> {
+    /// Bind every leaf of a let-destructure pattern, recursing into nested
+    /// tuple/record sub-patterns. `base_local` holds the aggregate pointer for a
+    /// Tuple/RecordPattern, or the scalar/pointer value for a `Bind`. Mirrors
+    /// `scan_destructure_pattern` (which pre-allocates the leaf locals); without
+    /// the recursion a nested sub-pattern left its leaves zeroed (#654).
+    fn emit_bind_destructure(&mut self, pattern: &almide_ir::IrPattern, base_local: u32, base_ty: &Ty) {
+        match pattern {
+            almide_ir::IrPattern::Bind { var, .. } => {
+                if let Some(&local_idx) = self.var_map.get(&var.0) {
+                    wasm!(self.func, { local_get(base_local); local_set(local_idx); });
+                }
+            }
+            almide_ir::IrPattern::Tuple { elements } => {
+                let elem_types = if let Ty::Tuple(tys) = base_ty { tys.clone() } else { vec![] };
+                let mut offset = 0u32;
+                for (i, elem_pat) in elements.iter().enumerate() {
+                    let elem_ty = elem_types.get(i).cloned().unwrap_or(Ty::Int);
+                    self.emit_destructure_elem(elem_pat, base_local, offset, &elem_ty);
+                    offset += super::values::byte_size(&elem_ty);
+                }
+            }
+            almide_ir::IrPattern::RecordPattern { fields, .. } => {
+                let record_fields = self.extract_record_fields(base_ty);
+                for pf in fields {
+                    if let Some((offset, field_ty)) = super::values::field_offset(&record_fields, &pf.name) {
+                        if let Some(sub) = &pf.pattern {
+                            self.emit_destructure_elem(sub, base_local, offset, &field_ty);
+                        } else if let Some(&local_idx) = self.find_var_by_field(&pf.name, &record_fields) {
+                            wasm!(self.func, { local_get(base_local); });
+                            self.emit_load_at(&field_ty, offset);
+                            wasm!(self.func, { local_set(local_idx); });
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Bind a sub-pattern living at `offset` from `base_local`. A leaf `Bind`
+    /// loads the scalar/pointer directly; a nested aggregate loads its pointer
+    /// and recurses with it as the new base.
+    fn emit_destructure_elem(&mut self, pat: &almide_ir::IrPattern, base_local: u32, offset: u32, elem_ty: &Ty) {
+        match pat {
+            almide_ir::IrPattern::Bind { var, .. } => {
+                if let Some(&local_idx) = self.var_map.get(&var.0) {
+                    wasm!(self.func, { local_get(base_local); });
+                    self.emit_load_at(elem_ty, offset);
+                    wasm!(self.func, { local_set(local_idx); });
+                }
+            }
+            almide_ir::IrPattern::Tuple { .. } | almide_ir::IrPattern::RecordPattern { .. } => {
+                let sub = self.scratch.alloc_i32();
+                wasm!(self.func, { local_get(base_local); });
+                self.emit_load_at(elem_ty, offset);
+                wasm!(self.func, { local_set(sub); });
+                self.emit_bind_destructure(pat, sub, elem_ty);
+                self.scratch.free_i32(sub);
+            }
+            _ => {}
+        }
+    }
 }
 
 // ── LocalScanner: IrVisitor-based local variable collector ──────────
