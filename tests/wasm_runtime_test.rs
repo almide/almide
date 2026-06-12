@@ -649,6 +649,84 @@ fn wasm_cross_module_lambda_without_local_decoy() {
     ]);
 }
 
+const MOD_PKG_TOML: &str = "[package]\nname = \"modtest\"\nversion = \"0.1.0\"\n\n[targets]\nwasm = true\n";
+
+#[test]
+fn wasm_cross_module_producer_side_variant_ctor() {
+    // #631: a producer fn INSIDE the submodule that owns a variant constructs
+    // it via the BARE constructor (`Circle(r)`) and returns it. The ctor-call
+    // expression's `.ty` must be pinned to the OWNER-qualified `shape.Shape`,
+    // or the #433 name-pinning guard aborts BOTH targets at codegen even though
+    // `check` passed. Expected `48` on both (Circle(4) → 4*4*3).
+    assert_cross_target_project(&[
+        ("almide.toml", MOD_PKG_TOML),
+        (
+            "src/shape.almd",
+            "type Shape = Circle(Int) | Square(Int)\n\
+             fn make_circle(r: Int) -> Shape = Circle(r)\n\
+             fn area(s: Shape) -> Int = match s {\n\
+             \x20 Circle(r) => r * r * 3,\n\
+             \x20 Square(w) => w * w,\n\
+             }\n",
+        ),
+        (
+            "main.almd",
+            "import self.shape\n\
+             fn main() -> Unit = {\n\
+             \x20 let c = shape.make_circle(4)\n\
+             \x20 println(int.to_string(shape.area(c)))\n\
+             }\n",
+        ),
+    ]);
+}
+
+#[test]
+fn wasm_cross_module_global_init_order_direct() {
+    // #632: an importing module's top-let reads an imported module's heap
+    // global DIRECTLY. On wasm the eager init order must place `cfg.APP_NAME`
+    // before `GREETING`, or the read hits a still-zero string header. Expected
+    // `modg` on both (was 8 NUL bytes on wasm).
+    assert_cross_target_project(&[
+        ("almide.toml", MOD_PKG_TOML),
+        ("src/cfg.almd", "let APP_NAME = \"modg\"\n"),
+        (
+            "main.almd",
+            "import self.cfg\n\
+             let GREETING = cfg.APP_NAME\n\
+             fn main() -> Unit = {\n\
+             \x20 println(GREETING)\n\
+             }\n",
+        ),
+    ]);
+}
+
+#[test]
+fn wasm_cross_module_global_init_order_through_call() {
+    // #632 (interprocedural): the importing top-let reads the imported global
+    // only THROUGH a function call (`cfg.banner()` interpolates `APP_NAME`) and
+    // a List heap global via `list.len(cfg.ITEMS)`. The init order must still
+    // place the cfg globals first. Expected `modg ok` / `3` on both.
+    assert_cross_target_project(&[
+        ("almide.toml", MOD_PKG_TOML),
+        (
+            "src/cfg.almd",
+            "let APP_NAME = \"modg\"\n\
+             let ITEMS = [10, 20, 30]\n\
+             fn banner() -> String = \"${APP_NAME} ok\"\n",
+        ),
+        (
+            "main.almd",
+            "import self.cfg\n\
+             let BANNER = cfg.banner()\n\
+             let FIRST = list.len(cfg.ITEMS)\n\
+             fn main() -> Unit = {\n\
+             \x20 println(BANNER)\n\
+             \x20 println(int.to_string(FIRST))\n\
+             }\n",
+        ),
+    ]);
+}
+
 /// Like `assert_cross_target`, but for programs whose `main` is an `effect fn`.
 /// Such a main returns `Result[Unit, _]`, and wasmtime's `_start` prints the
 /// wrapped return value (a heap pointer) as a trailing line. Compare only the

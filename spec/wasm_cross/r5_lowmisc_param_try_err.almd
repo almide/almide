@@ -1,0 +1,59 @@
+// @contract: C-075
+// Round-5 hole-hunt lowmisc cluster — three checker/lowering fixes that each
+// made native emit invalid Rust (or silently fold the wrong value on wasm)
+// while the other target diverged. All three must now run byte-identically.
+//
+// #624: binding a List/Map PARAM (rendered as a Rust borrow `&[T]` / `&Map`)
+//       to a local must convert to the OWNED type — `.to_vec()` for a slice,
+//       `.clone()` for a map — not an annotation-only `let tmp: Vec<_> = l;`.
+// #629: an effect-fn `Option[T]` result bound to a `let` then consumed by `??`
+//       is an OPTION-fallback: the effect-`Result` auto-? must strip first,
+//       leaving `Option[T]` for `??` (was kept a `Result`, breaking both).
+// #630: `!` propagation inside a fn whose declared error type already matches
+//       the source error must NOT stringify via Debug `map_err` — `?` carries
+//       the custom variant through unchanged.
+
+type AppErr = | Bad(Int)
+
+// #624 List param → local
+fn id_list(l: List[Int]) -> List[Int] = {
+  let tmp = l
+  tmp
+}
+
+// #624 Map param → local
+fn count_map(m: Map[String, Int]) -> Int = {
+  let tmp = m
+  map.len(tmp)
+}
+
+// #629 effect-fn Option bound, consumed by ??
+effect fn lookup(k: String) -> Option[Int] =
+  if k == "a" then some(42) else none
+
+// #630 custom-error ! propagation (source err == fn err == AppErr)
+effect fn fetch(id: Int) -> Result[String, AppErr] = ok("item")
+
+effect fn fetch_two(a: Int) -> Result[String, AppErr] = {
+  let x = fetch(a)!
+  ok(x)
+}
+
+effect fn main() -> Unit = {
+  // #624
+  println("list=${id_list([7, 8])}")
+  let m = map.from_list([("a", 1), ("b", 2)])
+  println("map_len=" + int.to_string(count_map(m)))
+
+  // #629 — none ?? 999 = 999, some(42) ?? 999 = 42
+  let miss = lookup("missing")
+  println("miss=" + int.to_string(miss ?? 999))
+  let hit = lookup("a")
+  println("hit=" + int.to_string(hit ?? 999))
+
+  // #630
+  match fetch_two(2) {
+    ok(v) => println("fetch=" + v),
+    err(Bad(n)) => println("bad=" + int.to_string(n)),
+  }
+}

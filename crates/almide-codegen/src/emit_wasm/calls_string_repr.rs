@@ -143,14 +143,36 @@ impl FuncCompiler<'_> {
                 };
                 self.emit_repr_record(type_name.as_deref(), &fields);
             }
-            // ── Anonymous records → inline literal walk (no type name) ──
-            // Structurally finite (an anon record cannot reference itself), so
-            // inline expansion is safe. Fields render in SORTED name order to
-            // match the native synthesized struct (`AlmdRec_*` field order is the
-            // sorted field-name list); see `emit_repr_record`.
+            // ── Structural records → inline literal walk ──
+            // A record literal inferred WITHOUT an annotation keeps its structural
+            // `Ty::Record`, but if its field set matches a DECLARED record type the
+            // native checker promotes it to that nominal type — so the repr must
+            // adopt the type name + its DECLARATION field order (#627). We recover
+            // that name by the sorted field-name set (mirrors the native walker's
+            // `named_records` lookup). No match → a truly anonymous record, which
+            // native renders prefix-less in SORTED name order (`AlmdRec_*`).
             Ty::Record { .. } | Ty::OpenRecord { .. } => {
+                // `fields` is the value's ACTUAL in-memory LAYOUT (the literal's
+                // structural field order); field VALUES load from its offsets. If
+                // the field-set matches a declared record type, native promotes the
+                // repr to that nominal type — `TypeName { … }` rendered in the
+                // type's DECLARATION order (#627). The render order is decoupled
+                // from the layout, so a literal written out of declaration order
+                // still loads correct values. No match → truly anonymous: no
+                // prefix, rendered in SORTED name order.
                 let fields = self.extract_record_fields(ty);
-                self.emit_repr_record(None, &fields);
+                let mut sorted_names: Vec<String> =
+                    fields.iter().map(|(n, _)| n.to_string()).collect();
+                sorted_names.sort();
+                if let Some(type_name) = self.emitter.named_records.get(&sorted_names).cloned() {
+                    let decl_order: Vec<String> = self.emitter.record_fields
+                        .get(&type_name)
+                        .map(|fl| fl.iter().map(|(n, _)| n.to_string()).collect())
+                        .unwrap_or_default();
+                    self.emit_repr_record_ordered(Some(&type_name), &fields, Some(&decl_order));
+                } else {
+                    self.emit_repr_record(None, &fields);
+                }
             }
             // Anything else has no repr (the walker only routes backed shapes
             // here); leave the value as-is.
@@ -414,6 +436,22 @@ impl FuncCompiler<'_> {
     /// each field is still loaded from its real layout offset (source order), so
     /// reordering the render does not misalign reads.
     pub(super) fn emit_repr_record(&mut self, type_name: Option<&str>, fields: &[(String, Ty)]) {
+        self.emit_repr_record_ordered(type_name, fields, None);
+    }
+
+    /// Like [`emit_repr_record`], but the RENDER order is decoupled from the
+    /// in-memory LAYOUT. `fields` is always the value's real layout (offsets are
+    /// read from it, source order). `render_order`, when given, lists field names
+    /// in the order to print them (a declared type's declaration order, #627) —
+    /// independent of how the literal was written. `None` keeps the default:
+    /// layout order for a named record, sorted name order for an anonymous one
+    /// (matching native's `AlmdRec_*` struct).
+    pub(super) fn emit_repr_record_ordered(
+        &mut self,
+        type_name: Option<&str>,
+        fields: &[(String, Ty)],
+        render_order: Option<&[String]>,
+    ) {
         let open = match type_name {
             Some(n) => format!("{} {{ ", n),
             None => "{ ".to_string(),
@@ -421,16 +459,20 @@ impl FuncCompiler<'_> {
         let open_s = self.emitter.intern_string(&open) as i32;
         let close_s = self.emitter.intern_string(" }") as i32;
 
-        // Pair each field with its absolute layout offset (in declaration order),
-        // then choose the render order: named → declaration order; anonymous →
-        // sorted by field name (matches the native anon struct's field order).
+        // Pair each field with its absolute LAYOUT offset (source order), then
+        // choose the render order. Values always load from the true offset, so
+        // reordering the render never misaligns reads.
         let mut placed: Vec<(usize, u32)> = Vec::with_capacity(fields.len());
         let mut offset = 0u32;
         for (idx, (_, fty)) in fields.iter().enumerate() {
             placed.push((idx, offset));
             offset += values::byte_size(fty);
         }
-        if type_name.is_none() {
+        if let Some(order) = render_order {
+            placed.sort_by_key(|&(idx, _)| {
+                order.iter().position(|n| n == &fields[idx].0).unwrap_or(usize::MAX)
+            });
+        } else if type_name.is_none() {
             placed.sort_by(|&(a, _), &(b, _)| fields[a].0.cmp(&fields[b].0));
         }
 

@@ -878,3 +878,66 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/nested_ctor_pattern.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-071"
+title     = "Single-part interpolation RC balance"
+statement = "A degenerate one-part interpolation `\"${e}\"` that the WASM emitter short-circuits to return `e`'s pointer directly does not double-free `e`'s heap buffer at teardown: when `e` is a heap-String alias the binding acquires its own reference, so native and WASM both produce the value and exit 0 (no 'unreachable' trap). Literal, non-String, surrounded, and multi-fragment interpolations stay genuinely fresh."
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/r5_wasm_interp_alias_rc.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-072"
+title     = "Inferred named-record repr parity"
+statement = "A record literal inferred without a type annotation reprs identically on native and WASM: when its field set matches a declared record type, both print `TypeName { ... }` in the type's DECLARATION field order with correct values even when the literal is written out of declaration order; a truly anonymous record prints prefix-less in sorted field-name order on both targets."
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/r5_wasm_inferred_record_repr.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-073"
+title     = "Tuple pattern testing a variant constructor"
+statement = "A tuple match arm that tests a variant constructor in any element position (nullary in pos 1/2 or both, or a payload-carrying constructor whose binder is captured) compiles and runs byte-identically on native and WASM; the WASM module passes structural validation (no 'expected i32 but nothing on stack')."
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/r5_wasm_tuple_variant_pattern.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-074"
+title     = "Iterative split/replace on large inputs"
+statement = "string.split and string.replace produce byte-identical results on native and WASM for large inputs (5000+ segments, 6000+ occurrences) and exit 0 with no 'call stack exhausted' trap; an empty `from` pattern inserts the replacement at every codepoint boundary (Rust `str::replace` parity)."
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/r5_wasm_split_replace_iterative.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-075"
+title     = "lowmisc round-5 cluster: borrowed-param owning binding, effect-Option auto-try strip, matching-error ! passthrough"
+statement = "Binding a borrow-rendered param (List &[T] / Map &AlmideMap) to a local converts to the owned type; an effect-fn Option[T] bound to a let and consumed by ?? strips the effect Result first leaving Option[T]; and `!` propagation whose source error type equals the enclosing fn's declared error type carries the custom variant error through `?` unchanged (no Debug stringify). All three compile and run byte-identically on native Rust and wasm32: stdout 'list=[7, 8]' / 'map_len=2' / 'miss=999' / 'hit=42' / 'fetch=item', exit 0."
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/r5_lowmisc_param_try_err.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-076"
+title     = "Producer-side in-module variant construction is target-stable"
+statement = "A producer function declared inside the submodule that owns a variant type, constructing the variant via the bare constructor (tuple `Circle(r)` or record-variant `Circle { radius: r }`) and returning it, compiles and runs byte-identically on native Rust and wasm32 (stdout, stderr, exit). The construction expression's type is pinned to the owner-qualified `mod.Type`, so the #433 name-pinning verifier never fires on a valid in-module construction."
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/r5_mod_producer_variant.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-077"
+title     = "Cross-module heap-global init order is dependency-respecting"
+statement = "An importing module's top-level let that reads an imported module's heap global (string/list/etc.), directly or through a function call, observes the imported global already initialized on both native Rust and wasm32 (byte-identical stdout, stderr, exit). WASM eager top-let init runs in a dependency-respecting order computed interprocedurally; native's lazy/forced init agrees (C-007)."
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/r5_mod_global_init_order.almd", class = "fixture" },
+]

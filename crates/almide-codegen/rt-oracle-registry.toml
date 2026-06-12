@@ -476,7 +476,7 @@ status = "verified"
 class = "fixture"
 oracle = "runtime/rs/src/string.rs::almide_rt_string_replace (str::replace)"
 test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
-note = "spec/wasm_cross/string_ops.almd uses string.replace."
+note = "spec/wasm_cross/string_ops.almd uses string.replace; r5_wasm_split_replace_iterative.almd (#634) pins the de-recursed loop on large inputs (6000 occurrences) and the empty-`from` codepoint-boundary insertion."
 
 [[routine]]
 file = "rt_string.rs"
@@ -485,7 +485,7 @@ status = "verified"
 class = "fixture"
 oracle = "runtime/rs/src/string.rs::almide_rt_string_split (str::split)"
 test = "tests/wasm_runtime_test.rs::wasm_string_split"
-note = "wasm_string_split + wasm_string_split_empty (now also asserts the empty-delimiter CODEPOINT split, leading/trailing empties) differential tests; spec/wasm_cross/string_split_rle_codepoint.almd (C-050) pins the empty-delimiter path; string_ops.almd also drives it."
+note = "wasm_string_split + wasm_string_split_empty (now also asserts the empty-delimiter CODEPOINT split, leading/trailing empties) differential tests; spec/wasm_cross/string_split_rle_codepoint.almd (C-050) pins the empty-delimiter path; string_ops.almd also drives it; r5_wasm_split_replace_iterative.almd (#634) pins the de-recursed forward-scan loop on 5000+ segments."
 
 [[routine]]
 file = "rt_string.rs"

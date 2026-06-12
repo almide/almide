@@ -62,11 +62,17 @@ pub struct RenderContext<'a> {
     /// set, so a value with the impl renders to its literal form while opaque
     /// `Named` references (e.g. runtime newtypes) stay on the Display path.
     pub repr_named_types: std::collections::HashSet<almide_base::intern::Sym>,
+    /// Error type `E` of the enclosing fn's declared return `Result[_, E]`,
+    /// or `None` if the fn does not return a `Result`. The `!` (Unwrap)
+    /// renderer compares a propagated source error against this: when they
+    /// match, `?` propagates directly with no `map_err` coercion (so a custom
+    /// variant error type is preserved rather than stringified via Debug).
+    pub fn_err_ty: Option<almide_lang::types::Ty>,
 }
 
 impl<'a> RenderContext<'a> {
     pub fn new(templates: &'a TemplateSet, var_table: &'a VarTable) -> Self {
-        Self { templates, var_table, indent: 0, target: Target::Rust, auto_unwrap: false, is_test: false, ann: CodegenAnnotations::default(), type_aliases: std::collections::HashMap::new(), generic_types: std::collections::HashSet::new(), minimal_generic_bounds: false, repr_c: false, ref_params: std::collections::HashSet::new(), ref_mut_params: std::collections::HashSet::new(), repr_named_types: std::collections::HashSet::new() }
+        Self { templates, var_table, indent: 0, target: Target::Rust, auto_unwrap: false, is_test: false, ann: CodegenAnnotations::default(), type_aliases: std::collections::HashMap::new(), generic_types: std::collections::HashSet::new(), minimal_generic_bounds: false, repr_c: false, ref_params: std::collections::HashSet::new(), ref_mut_params: std::collections::HashSet::new(), repr_named_types: std::collections::HashSet::new(), fn_err_ty: None }
     }
 
     pub fn with_target(mut self, target: Target) -> Self {
@@ -138,6 +144,20 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
         }
     }
 
+    // Error type that the enclosing fn's `?`/auto-? propagates into. A fn
+    // declared `Result[_, E]` propagates into `E`; an effect fn declared with
+    // a non-Result type is auto-wrapped to `Result<_, String>`, so it
+    // propagates into `String`. A plain fn with no Result return propagates
+    // into nothing (None). The Unwrap renderer uses this to skip the Debug
+    // `map_err` coercion when the source error type already matches.
+    let fn_err_ty = if let Some((_, err_ty)) = func.ret_ty.inner2() {
+        Some(err_ty.clone())
+    } else if func.is_effect && !func.is_test {
+        Some(almide_lang::types::Ty::String)
+    } else {
+        None
+    };
+
     // Set effect fn context for auto-? insertion
     let fn_ctx = RenderContext {
         templates: ctx.templates,
@@ -154,6 +174,7 @@ pub fn render_function(ctx: &RenderContext, func: &IrFunction) -> String {
         ref_params,
         ref_mut_params,
         repr_named_types: ctx.repr_named_types.clone(),
+        fn_err_ty,
     };
 
     // Dispatch-only fns (body is Hole): `@inline_rust` / `@intrinsic`
@@ -602,6 +623,7 @@ pub fn render_program(ctx: &RenderContext, program: &IrProgram) -> String {
         ref_params: std::collections::HashSet::new(),
         ref_mut_params: std::collections::HashSet::new(),
         repr_named_types,
+        fn_err_ty: None,
     };
     for td in &program.type_decls {
         if let IrTypeDeclKind::Variant { cases, .. } = &td.kind {

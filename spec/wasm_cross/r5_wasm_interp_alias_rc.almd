@@ -1,0 +1,48 @@
+// @contract: C-071
+// Cross-target RC balance for a degenerate single-part interpolation (#622).
+//
+// `"${s}"` with NOTHING but a single interpolated expression is short-circuited
+// by the WASM emitter to return `s`'s pointer directly (no fresh alloc). When
+// `s` is a freshly heap-allocated runtime String bound to a `let`, the result
+// ALIASES `s`. Without an RC +1 on that alias, `s`'s scope-end Dec and the
+// println-argument Dec both reclaim the same buffer → free-list poisoning →
+// `unreachable` trap at teardown (exit 134) on WASM only; native was clean.
+//
+// The fix classifies a 1-part `StringInterp` over a heap-String alias as
+// borrowed in `yields_borrowed_alias` (Perceus), so the bind acquires its own
+// reference. A literal-bound string, a surrounding-text interpolation, a
+// multi-fragment interpolation, and a non-String part are all genuinely fresh
+// and stay balanced — this fixture pins every shape, native == WASM, clean exit.
+
+fn main() -> Unit = {
+  // Freshly-allocated String, let-bound, consumed ONLY by a bare `"${s}"`.
+  let upper = string.to_upper("abc")
+  println("${upper}")
+
+  // list.join of >=2 elements is also a fresh alloc.
+  let joined = ["1", "2", "3"] |> list.join(",")
+  println("${joined}")
+
+  // replace produces a fresh alloc too.
+  let rep = string.replace("a-b-c", "-", "+")
+  println("${rep}")
+
+  // Surrounding text → fresh concat (was already clean): must stay clean.
+  let mid = string.to_upper("xy")
+  println("x${mid}y")
+
+  // Two fragments of the same alias → fresh concat (already clean).
+  let dup = string.to_upper("zz")
+  println("${dup}-${dup}")
+
+  // Literal-bound string alias: data-section constant, Inc is a no-op.
+  let lit = "hello"
+  println("${lit}")
+
+  // Non-String single part: a fresh `int.to_string`, genuinely fresh.
+  let n = 42
+  println("${n}")
+
+  // The alias must still be usable AFTER the interpolation (no premature free).
+  println(upper)
+}

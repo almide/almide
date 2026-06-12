@@ -1,0 +1,37 @@
+// @contract: C-074
+// Cross-target string.split / string.replace on large inputs (#634).
+//
+// The WASM runtime for `split` and `replace` recursed once per segment /
+// occurrence (and INFINITELY on an empty `from`, since index_of("") == 0
+// forever). Past a few thousand segments the wasm call stack was exhausted —
+// "call stack exhausted" trap (exit 134), no stdout. Native delegates to Rust
+// std (iterative), so it was correct. Both were de-recursed to forward byte-scan
+// loops (same precedent as `compile_lines`), so the runtime is now O(n) stack-
+// flat and matches the native oracle exactly.
+//
+// The inputs here are deliberately large enough to have trapped before:
+//   split  : "a," * 5000  → 5001 segments
+//   replace: "a," * 6000  → 6000 occurrences of ","
+//   empty-from replace inserts `to` at every codepoint boundary.
+
+fn main() -> Unit = {
+  // split: 5000 "a," → first segment "a", total 5001 parts.
+  let s = string.repeat("a,", 5000)
+  let parts = string.split(s, ",")
+  println(parts |> list.first ?? "none")        // a
+  println(int.to_string(list.len(parts)))        // 5001
+
+  // replace: 6000 "," → ";", length preserved.
+  let big = string.repeat("a,", 6000)
+  let r = string.replace(big, ",", ";")
+  println(int.to_string(string.len(r)))          // 12000
+
+  // Empty-pattern replace inserts at every char boundary (Rust parity).
+  println(string.replace("abc", "", "X"))        // XaXbXcX
+  println(string.replace("", "", "Z"))           // Z
+
+  // A few small semantics, just to keep the oracle honest.
+  println(string.split("a,,b", ",") |> list.join("|"))   // a||b
+  println(string.split("", ",") |> list.join("|"))       // (one empty segment)
+  println(string.replace("abcabc", "abc", "X"))          // XX
+}

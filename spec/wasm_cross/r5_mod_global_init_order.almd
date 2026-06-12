@@ -1,0 +1,28 @@
+// @contract: C-077
+// #632 regression guard (single-file slice of the cross-module bug). WASM
+// evaluates top-let initializers EAGERLY in `global_init_order`; the order is
+// now dependency-respecting, computed INTERPROCEDURALLY. Here `BANNER` is
+// declared FIRST yet its initializer calls `make_banner()`, which reads the
+// `APP_NAME` heap global declared LATER. Before the fix the eager init ran in
+// declaration order, so wasm read the still-zero string header and printed an
+// empty `APP_NAME` (` ready`); native (lazy) was correct. The dependency sort
+// must now initialize `APP_NAME` before `BANNER` on BOTH targets.
+//
+// The owning-module form (`import self.cfg; let GREETING = cfg.APP_NAME`) is
+// the true #632 trigger and is gated by the project-based cross-target test
+// `wasm_cross_module_global_init_order_*` in tests/wasm_runtime_test.rs; the
+// single-file wasm_cross gate cannot host module projects, so this fixture
+// locks the same `__init_globals` ordering machinery in single-file form.
+
+fn make_banner() -> String = "${APP_NAME} ready"
+
+let BANNER = make_banner()
+let APP_NAME = "modg"
+let ITEMS = [10, 20, 30]
+let FIRST = list.len(ITEMS)
+
+fn main() -> Unit = {
+  println(BANNER)
+  println(APP_NAME)
+  println("first-of=${int.to_string(FIRST)}")
+}

@@ -880,12 +880,38 @@ impl FuncCompiler<'_> {
                                     wasm!(self.func, { i32_eqz; });
                                     cond_count += 1;
                                 }
+                                IrPattern::Constructor { name: ctor_name, .. } => {
+                                    // Variant element: the tuple slot holds a pointer to
+                                    // `[tag:i32][payload…]`. Match by loading that tag and
+                                    // comparing it to the constructor's. (#633: this arm was
+                                    // missing, so a Constructor element contributed no
+                                    // condition operand → the `If` had nothing on the stack.)
+                                    if let Some(tag_val) = self.find_variant_tag_by_ctor(ctor_name, &ft) {
+                                        wasm!(self.func, {
+                                            local_get(scratch);
+                                            i32_load(offset);
+                                            i32_load(0);
+                                            i32_const(tag_val as i32);
+                                            i32_eq;
+                                        });
+                                        cond_count += 1;
+                                    }
+                                }
                                 _ => {}
                             }
                             offset += values::byte_size(&ft);
                         }
                         for _ in 1..cond_count {
                             wasm!(self.func, { i32_and; });
+                        }
+                        // Defensive: if no element produced a condition operand (e.g.
+                        // a Constructor whose element type couldn't be resolved to a
+                        // variant), the `If` would have nothing on the stack. Push a
+                        // constant `true` so the module stays well-formed — the arm
+                        // then matches unconditionally (the safe direction, and the
+                        // bind loop below still runs).
+                        if cond_count == 0 {
+                            wasm!(self.func, { i32_const(1); });
                         }
                         let bt = values::block_type(result_ty);
                         self.func.instruction(&Instruction::If(bt));
@@ -918,6 +944,31 @@ impl FuncCompiler<'_> {
                                             wasm!(self.func, { local_set(local_idx); });
                                             self.scratch.free_i32(opt_scratch);
                                         }
+                                    }
+                                }
+                                IrPattern::Constructor { name: ctor_name, args } => {
+                                    // Bind any payload binders of a variant element. The
+                                    // element slot holds a pointer to `[tag][field0]…`;
+                                    // payload fields start at byte 4. (#633)
+                                    if !args.is_empty() {
+                                        let ctor_fields = self.emitter.fields_of(ctor_name);
+                                        let var_scratch = self.scratch.alloc_i32();
+                                        wasm!(self.func, { local_get(scratch); i32_load(offset2); local_set(var_scratch); });
+                                        let mut field_offset = 4u32; // skip tag
+                                        for (arg_idx, arg_pat) in args.iter().enumerate() {
+                                            let field_ty = ctor_fields.get(arg_idx)
+                                                .map(|(_, fty)| fty.clone())
+                                                .unwrap_or(Ty::Int);
+                                            if let IrPattern::Bind { var, .. } = arg_pat {
+                                                if let Some(&local_idx) = self.var_map.get(&var.0) {
+                                                    wasm!(self.func, { local_get(var_scratch); });
+                                                    self.emit_load_at(&field_ty, field_offset);
+                                                    wasm!(self.func, { local_set(local_idx); });
+                                                }
+                                            }
+                                            field_offset += values::byte_size(&field_ty);
+                                        }
+                                        self.scratch.free_i32(var_scratch);
                                     }
                                 }
                                 _ => {}

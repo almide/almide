@@ -64,7 +64,17 @@ impl Checker {
                 ret
             }
             ExprKind::TypeName { name, .. } => {
-                if let Some((type_name, case)) = self.env.lookup_ctor(&sym(name)) {
+                // #631: pin the constructed value's `.ty` to the OWNER-qualified
+                // type name (`mod.Type`) via the module-aware lookup, exactly as
+                // the bare-value ctor path (infer.rs) and `lookup_ctor_in` for
+                // record ctors already do. A bare `lookup_ctor` here left the call
+                // expression's type bare `Type` even when the only declaration is
+                // `mod.Type`, so a producer fn INSIDE its owning submodule that
+                // constructs the variant tripped the #433 name-pinning guard at
+                // codegen (both targets aborted after `check` said clean).
+                if let Some((type_name, case)) =
+                    self.env.lookup_ctor_in(&sym(name), self.current_module_prefix.as_deref())
+                {
                     self.report_ambiguous_ctor(name);
                     self.check_constructor_args(name, &case, &arg_tys);
                     // Instantiate parent type's generics with fresh inference vars

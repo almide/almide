@@ -200,8 +200,20 @@ fn insert_try_body(expr: IrExpr, fn_returns_result: bool, ctx: &mut TryCtx) -> I
 }
 
 fn insert_try_stmt_with_skip(stmt: IrStmt, skip: &HashSet<u32>, ctx: &mut TryCtx) -> IrStmt {
-    if let IrStmtKind::Bind { var, .. } = &stmt.kind {
-        if skip.contains(&var.0) {
+    if let IrStmtKind::Bind { var, value, .. } = &stmt.kind {
+        // A binding consumed by `??` / `== ok(v)` / `match { ok/err }` is kept a
+        // Result so that usage type-checks — BUT only when the binding's value
+        // is genuinely Result-fronted at that consumer. An effect fn that
+        // returns `Option[T]` is lifted to `Result[Option[T], String]`; binding
+        // it and consuming with `??` is an OPTION-fallback, so the auto-? MUST
+        // strip the effect `Result`, leaving `Option[T]` for `??`. Keeping the
+        // `Result` there made native emit invalid Rust and wasm read the wrong
+        // value (#629). So only honor the skip when the value's effect-Result
+        // OK type is itself a Result (a real Result-fallback) or the binding is
+        // an explicitly annotated Result (handled by `annotated_result_vars`).
+        if skip.contains(&var.0)
+            && (ctx.annotated_result_vars.contains(var) || value_ok_is_result(value))
+        {
             if let IrStmtKind::Bind { var, mutability, ty, value } = stmt.kind {
                 let new_value = insert_try(value, false, ctx);
                 let unwrapped = strip_top_try(new_value);
@@ -213,6 +225,18 @@ fn insert_try_stmt_with_skip(stmt: IrStmt, skip: &HashSet<u32>, ctx: &mut TryCtx
         }
     }
     insert_try_stmt(stmt, ctx)
+}
+
+/// True when the value is an effect-lifted `Result[OK, _]` whose OK type is
+/// itself a `Result` — i.e. a binding whose user-facing value really is a
+/// Result that a `??` / `== ok` / Result-`match` consumer must keep. An
+/// `Option`-fronted (or scalar) OK type means the consumer operates on the
+/// auto-?'d inner value, so the skip must not apply. #629
+fn value_ok_is_result(value: &IrExpr) -> bool {
+    match &value.ty {
+        Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[0].is_result(),
+        _ => false,
+    }
 }
 
 /// Strip one inserted top-level Try, restoring the Result-typed value.

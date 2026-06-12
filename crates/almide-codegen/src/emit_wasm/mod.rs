@@ -480,6 +480,12 @@ pub struct WasmEmitter {
 
     // Type info: record/variant name → field list (for field offset computation)
     pub record_fields: BTreeMap<String, Vec<(String, almide_lang::types::Ty)>>,
+    // Declared RECORD types keyed by their SORTED field-name set → type name.
+    // Mirrors the native walker's `named_records` (declarations.rs): a record
+    // LITERAL inferred without annotation keeps its structural `Ty::Record`, but
+    // its repr must adopt the declared nominal type's name + declaration field
+    // order to stay byte-identical with native (#627). Excludes variant cases.
+    pub named_records: BTreeMap<Vec<String>, String>,
     // Variant info: variant type name → list of (case_name, tag, fields)
     pub variant_info: BTreeMap<String, Vec<VariantCase>>,
     // Default field values: (type_name, field_name) → default IR expr
@@ -663,6 +669,7 @@ impl WasmEmitter {
             func_table: Vec::new(),
             func_to_table_idx: HashMap::new(),
             record_fields: BTreeMap::new(),
+            named_records: BTreeMap::new(),
             variant_info: BTreeMap::new(),
             default_fields: HashMap::new(),
             lambdas: Vec::new(),
@@ -1275,6 +1282,11 @@ pub(crate) fn emit(program: &IrProgram) -> Vec<u8> {
                 let field_list: Vec<(String, almide_lang::types::Ty)> = fields.iter()
                     .map(|f| (f.name.to_string(), f.ty.clone()))
                     .collect();
+                // Index by sorted field-name set so a structural record literal
+                // can recover its declared nominal name (mirrors native, #627).
+                let mut sorted_names: Vec<String> = fields.iter().map(|f| f.name.to_string()).collect();
+                sorted_names.sort();
+                emitter.named_records.insert(sorted_names, td.name.to_string());
                 emitter.record_fields.insert(td.name.to_string(), field_list);
             }
             almide_ir::IrTypeDeclKind::Variant { cases, .. } => {
@@ -2058,18 +2070,26 @@ fn assemble(emitter: &mut WasmEmitter) -> Vec<u8> {
 /// Compile the __init_globals function.
 #[allow(dead_code)] // Will be activated when top-let WASM codegen is wired up
 fn compile_init_globals(emitter: &mut WasmEmitter, program: &IrProgram) {
-    // C-007 by construction (§4 stage 3): this function's emission order
-    // (root top-lets, then per-module) must BE `global_init_order` — the
-    // same vector the native main wrapper derives its eager forces from.
-    // Asserted rather than re-derived: a future reorder of either side
-    // becomes a build failure, not an eager-vs-init cross-target drift.
+    // C-007 by construction (§4 stage 3): this function evaluates every
+    // top-let initializer EXACTLY in `global_init_order` — the same vector the
+    // native main wrapper derives its eager forces from. The order is
+    // dependency-respecting (#632): an imported module's heap global is
+    // initialized before any importing top-let reads it. We index the
+    // initializers by VarId (root + every module flatten into
+    // `program.var_table` via UnifyVarTablesPass) and emit in that one order,
+    // so a reorder of either side stays a single source of truth, not an
+    // eager-vs-init cross-target drift.
+    let init_exprs: HashMap<u32, &almide_ir::IrExpr> = program.top_lets.iter()
+        .map(|tl| (tl.var.0, &tl.value))
+        .chain(program.modules.iter().flat_map(|m| m.top_lets.iter().map(|tl| (tl.var.0, &tl.value))))
+        .collect();
     {
-        let emitted: Vec<almide_ir::VarId> = program.top_lets.iter().map(|tl| tl.var)
-            .chain(program.modules.iter().flat_map(|m| m.top_lets.iter().map(|tl| tl.var)))
-            .collect();
-        assert_eq!(
-            emitted, program.codegen_annotations.global_init_order,
-            "[COMPILER BUG] __init_globals emission order diverged from global_init_order (C-007)"
+        // Every decl in the order must have a known initializer, and the order
+        // must cover exactly the declared top-lets — else the emission would
+        // silently skip or double-init a global.
+        debug_assert_eq!(
+            program.codegen_annotations.global_init_order.len(), init_exprs.len(),
+            "[COMPILER BUG] global_init_order does not cover the declared top-lets (C-007)"
         );
     }
     let void_type = emitter.register_type(vec![], vec![]);
@@ -2102,57 +2122,31 @@ fn compile_init_globals(emitter: &mut WasmEmitter, program: &IrProgram) {
             depth: 0,
             loop_stack: Vec::new(),
             scratch: scratch_alloc,
+            // UnifyVarTablesPass flattens every module top-let VarId into the
+            // root var_table, so one table resolves both root and module decls.
             var_table: &program.var_table,
             stub_ret_ty: Ty::Unit,
             current_module_name: None,
         };
 
-        for tl in &program.top_lets {
-            compiler.emit_expr(&tl.value);
-            if let Some(&(global_idx, _)) = compiler.emitter.top_let_globals.get(&tl.var.0) {
+        // Emit each initializer in dependency-respecting `global_init_order`
+        // (#632), so an imported module's heap global is set before any
+        // importing top-let reads it.
+        for &decl in &program.codegen_annotations.global_init_order {
+            let Some(&value) = init_exprs.get(&decl.0) else { continue };
+            compiler.emit_expr(value);
+            if let Some(&(global_idx, _)) = compiler.emitter.top_let_globals.get(&decl.0) {
                 compiler.func.instruction(&wasm_encoder::Instruction::GlobalSet(global_idx));
+            } else if let Some(&(global_idx, _)) = compiler.emitter.top_let_globals_by_name
+                .get(program.var_table.get(decl).name.as_str())
+            {
+                compiler.func.instruction(&wasm_encoder::Instruction::GlobalSet(global_idx));
+            } else {
+                compiler.func.instruction(&wasm_encoder::Instruction::Drop);
             }
         }
-        // Also initialize cross-module top_lets via name lookup (their VarIds
-        // belong to per-module var_tables, so id-keyed top_let_globals can't
-        // resolve them; we use the prefixed name set up at registration time).
         compiler.func
     };
-    // Append module top_let initializers to the same function body. Each
-    // module needs its own var_table for the FuncCompiler ctx, so we re-build
-    // a compiler per module and append instructions.
-    let mut compiled_func = compiled_func;
-    for module in &program.modules {
-        if module.top_lets.is_empty() { continue; }
-        let mut scratch_alloc = scratch::ScratchAllocator::new();
-        scratch_alloc.set_bases_with_capacity(scratch_i32_base, scratch_i32_cap, scratch_i64_base, scratch_i64_cap, scratch_f64_base, scratch_f64_cap);
-        scratch_alloc.set_v128_base(scratch_v128_base);
-        let mut mc = FuncCompiler {
-            emitter: &mut *emitter,
-            func: compiled_func,
-            var_map: HashMap::new(),
-            depth: 0,
-            loop_stack: Vec::new(),
-            scratch: scratch_alloc,
-            var_table: &program.var_table,
-            stub_ret_ty: Ty::Unit,
-            current_module_name: None,
-        };
-        for tl in &module.top_lets {
-            mc.emit_expr(&tl.value);
-            // Module top-let VarIds now index into `program.var_table`
-            // thanks to `UnifyVarTablesPass`, so the id-keyed map is
-            // the primary lookup; the name-keyed mirror is a backup.
-            if let Some(&(global_idx, _)) = mc.emitter.top_let_globals.get(&tl.var.0) {
-                mc.func.instruction(&wasm_encoder::Instruction::GlobalSet(global_idx));
-            } else if let Some(&(global_idx, _)) = mc.emitter.top_let_globals_by_name.get(program.var_table.get(tl.var).name.as_str()) {
-                mc.func.instruction(&wasm_encoder::Instruction::GlobalSet(global_idx));
-            } else {
-                mc.func.instruction(&wasm_encoder::Instruction::Drop);
-            }
-        }
-        compiled_func = mc.func;
-    }
     let compiled_func = {
         let mut f = compiled_func;
         f.instruction(&wasm_encoder::Instruction::End);
