@@ -37,17 +37,36 @@ pub fn almide_rt_json_parse(text: &str) -> Result<Value, String> {
                     Some('\\') => s.push('\\'),
                     Some('/') => s.push('/'),
                     Some('u') => {
-                        // Parse 4 hex digits as a Unicode code point.
-                        // Handles BMP only (no surrogate pair pairing) — adequate
-                        // for the JSON values almide producers emit; advanced
-                        // surrogate pair joining can land in a follow-up.
+                        // Parse 4 hex digits as a UTF-16 code unit. A high
+                        // surrogate (D800..=DBFF) immediately followed by a
+                        // "\uYYYY" low surrogate (DC00..=DFFF) joins into one
+                        // astral code point, matching serde_json and the WASM
+                        // json parser. #651.
                         let hex: String = (1..=4)
                             .filter_map(|i| chars.get(*pos + i).copied())
                             .collect();
                         *pos += 4;
                         if hex.len() == 4 {
-                            if let Ok(cp) = u32::from_str_radix(&hex, 16) {
-                                if let Some(ch) = char::from_u32(cp) {
+                            if let Ok(unit) = u32::from_str_radix(&hex, 16) {
+                                if (0xD800..=0xDBFF).contains(&unit)
+                                    && chars.get(*pos + 1) == Some(&'\\')
+                                    && chars.get(*pos + 2) == Some(&'u')
+                                {
+                                    let lo: String = (3..=6)
+                                        .filter_map(|i| chars.get(*pos + i).copied())
+                                        .collect();
+                                    if let Ok(low) = u32::from_str_radix(&lo, 16) {
+                                        if (0xDC00..=0xDFFF).contains(&low) {
+                                            let cp = 0x10000
+                                                + ((unit - 0xD800) << 10)
+                                                + (low - 0xDC00);
+                                            if let Some(ch) = char::from_u32(cp) {
+                                                s.push(ch);
+                                            }
+                                            *pos += 6; // consumed "\uYYYY"
+                                        }
+                                    }
+                                } else if let Some(ch) = char::from_u32(unit) {
                                     s.push(ch);
                                 }
                             }

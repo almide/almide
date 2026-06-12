@@ -1022,3 +1022,12 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/alias_combinator_rc.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-087"
+title     = "JSON number and \\u string decoding are byte-identical across targets"
+statement = "json.parse decodes \\uXXXX escapes (BMP 1/2/3-byte UTF-8 plus high+low surrogate pairs to astral code points) and numbers identically on both backends. The WASM parser hands every float token to the same correctly-rounded parser float.parse uses (__dec2flt) instead of an ad-hoc digits/divisor * 10^exp, fixing the dropped -0.0 sign (#663) and the one-ULP exponent error (#667); its \\u decoder UTF-8-encodes the code point (#651). The native oracle's BMP-only \\u decoder gained the same surrogate-pair joining so emoji and other astral escapes round-trip. Integers keep their exact i64 path."
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/json_number_unicode.almd", class = "fixture" },
+]
