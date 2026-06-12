@@ -1,0 +1,4 @@
+// The fix: every field of a `: Codec` type must itself be `: Codec`.
+type Raw: Codec = { x: Int }
+type Wrap: Codec = { item: Raw }
+fn main() -> Unit = println("ok")

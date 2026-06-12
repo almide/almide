@@ -9,7 +9,7 @@ use almide_lang::ast;
 use almide_base::diagnostic::Diagnostic;
 use almide_base::intern::{Sym, sym};
 use almide_lang::types::TypeConstructorId;
-use crate::types::{Ty, TypeEnv, FnSig, ProtocolDef, ProtocolMethodSig};
+use crate::types::{Ty, TypeEnv, FnSig, ProtocolDef, ProtocolMethodSig, VariantPayload};
 use super::resolve::resolve_type_expr;
 
 fn err(msg: impl Into<String>, hint: impl Into<String>, ctx: impl Into<String>) -> Diagnostic {
@@ -329,6 +329,118 @@ pub fn register_protocol_decl(env: &mut TypeEnv, name: &str, generics: &Option<V
         generics: gnames,
         methods: method_sigs,
     });
+}
+
+/// Protocols whose auto-derive RECURSES INTO EACH FIELD'S TYPE: deriving them
+/// on a struct/variant emits per-field work that requires the field type to
+/// ALSO satisfy the protocol. `Codec` calls `Field.encode` / `Field.decode`;
+/// `Ord`/`Hash` lower to a Rust `#[derive(Ord/Hash)]` that needs the field's
+/// Rust type to impl it. `Eq`/`Repr` are excluded — every generated struct
+/// gets `PartialEq` + a repr path unconditionally, so a field need not declare
+/// them (gating those would be a false positive).
+const FIELD_RECURSIVE_PROTOCOLS: &[&str] = &["Codec", "Ord", "Hash"];
+
+/// The field-type slots a structural type exposes to its derive: record fields,
+/// and every variant case's payload (tuple positions / record fields).
+fn type_field_slots(ty: &Ty) -> Vec<(String, Ty)> {
+    match ty {
+        Ty::Record { fields } | Ty::OpenRecord { fields } =>
+            fields.iter().map(|(n, t)| (n.to_string(), t.clone())).collect(),
+        Ty::Variant { cases, .. } => {
+            let mut out = Vec::new();
+            for c in cases {
+                match &c.payload {
+                    VariantPayload::Unit => {}
+                    VariantPayload::Tuple(ts) => for (i, t) in ts.iter().enumerate() {
+                        out.push((format!("{}.{}", c.name, i), t.clone()));
+                    },
+                    VariantPayload::Record(fs) => for (n, t) in fs {
+                        out.push((n.to_string(), t.clone()));
+                    },
+                }
+            }
+            out
+        }
+        _ => Vec::new(),
+    }
+}
+
+/// The nominal leaf types a derive must recurse into for one field type,
+/// descending through the standard containers (List/Option/Set/Map/Result via
+/// `Applied`, tuples, nested anon records). A `List[Pigment]` field under a
+/// `: Codec` type requires `Pigment` to be Codec, so the leaf is `Pigment`.
+fn collect_leaf_nominals(ty: &Ty, out: &mut Vec<Sym>) {
+    match ty {
+        Ty::Named(n, args) => {
+            out.push(*n);
+            for a in args { collect_leaf_nominals(a, out); }
+        }
+        Ty::Variant { name, .. } => out.push(*name),
+        Ty::Applied(_, args) => for a in args { collect_leaf_nominals(a, out); },
+        Ty::Tuple(elems) => for e in elems { collect_leaf_nominals(e, out); },
+        Ty::Record { fields } | Ty::OpenRecord { fields } =>
+            for (_, t) in fields { collect_leaf_nominals(t, out); },
+        _ => {}
+    }
+}
+
+/// Does user type `leaf` satisfy protocol `proto`? Keyed leniently: `type_protocols`
+/// is interned bare, but a cross-module field type may carry a qualified
+/// `mod.Type` name — accept either spelling. For `Codec`, a hand-written
+/// `Type.encode`/`Type.decode` pair (without a `: Codec` declaration) also
+/// satisfies the requirement, since the derive only needs those functions to exist.
+fn leaf_satisfies(env: &TypeEnv, leaf: Sym, proto: &str) -> bool {
+    let bare = leaf.as_str().rsplit('.').next().unwrap_or(leaf.as_str());
+    let declares = |name: &str| env.type_protocols.get(&sym(name))
+        .map_or(false, |s| s.contains(&sym(proto)));
+    if declares(leaf.as_str()) || declares(bare) {
+        return true;
+    }
+    if proto == "Codec" {
+        let has = |m: &str| env.functions.contains_key(&sym(&format!("{}.{}", leaf, m)))
+            || env.functions.contains_key(&sym(&format!("{}.{}", bare, m)));
+        return has("encode") && has("decode");
+    }
+    false
+}
+
+/// A type that derives a field-recursive protocol (Codec/Ord/Hash) requires
+/// every field type to ALSO satisfy it — otherwise the derive emits a call to a
+/// non-existent `Field.encode` (Codec) or a Rust `#[derive(Ord/Hash)]` over a
+/// field whose Rust type lacks the impl, both of which the checker previously
+/// accepted and codegen then rejected as "invalid Rust" (#611). This validates
+/// the requirement structurally, at the checker, independent of target.
+fn validate_derive_field_support(env: &TypeEnv, diagnostics: &mut Vec<Diagnostic>) {
+    let pairs: Vec<(Sym, Vec<Sym>)> = env.type_protocols.iter()
+        .map(|(ty, protos)| (*ty, protos.iter().copied().collect()))
+        .collect();
+    let mut reported: std::collections::HashSet<(Sym, Sym, Sym)> = std::collections::HashSet::new();
+    for (type_name, protocols) in &pairs {
+        let Some(ty) = env.types.get(type_name) else { continue };
+        let slots = type_field_slots(ty);
+        if slots.is_empty() { continue; }
+        for proto in protocols {
+            let p = proto.as_str();
+            if !FIELD_RECURSIVE_PROTOCOLS.contains(&p) { continue; }
+            for (field_name, field_ty) in &slots {
+                let mut leaves = Vec::new();
+                collect_leaf_nominals(field_ty, &mut leaves);
+                for leaf in leaves {
+                    if leaf == *type_name { continue; }          // self-reference is fine
+                    if !env.types.contains_key(&leaf) { continue; } // not a user nominal → native support
+                    if leaf_satisfies(env, leaf, p) { continue; }
+                    if !reported.insert((*type_name, *proto, leaf)) { continue; }
+                    diagnostics.push(err(
+                        format!("type '{}' derives '{}' but field '{}' has type '{}', which does not derive '{}'",
+                            type_name, p, field_name, leaf, p),
+                        format!("Add `: {}` to the declaration of type '{}' (every field of a `: {}` type must itself be `{}`)",
+                            p, leaf, p, p),
+                        format!("type {} : {}", type_name, p),
+                    ).with_code("E023"));
+                }
+            }
+        }
+    }
 }
 
 /// Validate that types declaring `: ProtocolName` have all required convention methods.
@@ -712,4 +824,5 @@ pub fn register_decls(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, decl
         }
     }
     validate_protocol_impls(env, diagnostics);
+    validate_derive_field_support(env, diagnostics);
 }
