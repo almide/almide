@@ -156,6 +156,15 @@ fn build_cargo_toml(base_toml: &str, native_deps: &[crate::project::NativeDep]) 
     let mut toml = base_toml.to_string();
     let mut extra_deps = String::new();
     for dep in native_deps {
+        // The base template may already carry this crate (e.g. rayon in the
+        // ML profile) — a second key is a Cargo hard error.
+        let already = toml.lines().any(|l| {
+            l.trim_start().strip_prefix(&dep.name)
+                .is_some_and(|rest| rest.trim_start().starts_with('='))
+        });
+        if already {
+            continue;
+        }
         let dep_line = if dep.spec.starts_with('{') {
             format!("{} = {}\n", dep.name, dep.spec)
         } else {

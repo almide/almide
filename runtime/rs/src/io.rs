@@ -13,7 +13,12 @@ pub fn almide_rt_io_flush() {
     STDOUT_BUF.with(|buf| { let _ = buf.borrow_mut().flush(); });
 }
 
-pub fn almide_rt_io_print(s: &str) { print!("{}", s); }
+// print is for interactive output (prompts, streaming tokens) — flush so
+// the text appears immediately even when stdout is block-buffered.
+pub fn almide_rt_io_print(s: &str) {
+    print!("{}", s);
+    let _ = std::io::stdout().flush();
+}
 
 pub fn almide_rt_io_read_line() -> String {
     let mut buf = String::new();
