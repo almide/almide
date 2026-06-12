@@ -24,7 +24,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 `fixture` < `fuzz` < `exhaustive` < `lean`. An **active** contract must carry
 ≥1 evidence of class ≥ `fixture`.
 
-95 contracts
+96 contracts
 
 | ID | Contract | Since | Status | Strongest Evidence | # Fixtures |
 |----|----------|-------|--------|--------------------|-----------:|
@@ -123,4 +123,5 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-093 | Mutually-recursive variant types compile on both targets |  | active | fixture | 1 |
 | C-094 | A protocol-method UFCS call on an inferred lambda param resolves the element type |  | active | fixture | 1 |
 | C-095 | json.stringify_pretty is byte-identical indented output across targets |  | active | fixture | 1 |
+| C-096 | process.args works on WASM and matches native |  | active | fixture | 1 |
 
