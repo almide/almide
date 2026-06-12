@@ -26,8 +26,11 @@ pub fn render_type(ctx: &RenderContext, ty: &Ty) -> String {
         Ty::String => template_or(ctx, "type_string", &[], "String"),
         Ty::Bool => template_or(ctx, "type_bool", &[], "bool"),
         Ty::Unit => template_or(ctx, "type_unit", &[], "()"),
-        Ty::Bytes => template_or(ctx, "type_bytes", &[], "Vec<u8>"),
-        Ty::Matrix => template_or(ctx, "type_matrix", &[], "AlmideMatrix"),
+        // RcCow-backed value types (L2-3): copies are O(1) Rc bumps, writes
+        // go through DerefMut → make_mut (copy-on-write). A 5 GB model record
+        // measured ~13 GB of deep clones per generated LLM token before this.
+        Ty::Bytes => template_or(ctx, "type_bytes", &[], "RcCow<Vec<u8>>"),
+        Ty::Matrix => template_or(ctx, "type_matrix", &[], "RcCow<AlmideMatrix>"),
         // Matrix[T] parametric form (Sized Numeric Types arc P4 kickoff):
         // runtime representation stays `AlmideMatrix` (a tagged enum that
         // dispatches to SmallF32 / Vec<Vec<f64>> backends). The `T`

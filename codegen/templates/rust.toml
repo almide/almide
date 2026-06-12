@@ -236,10 +236,10 @@ template = "bool"
 template = "()"
 
 [type_bytes]
-template = "Vec<u8>"
+template = "RcCow<Vec<u8>>"
 
 [type_matrix]
-template = "AlmideMatrix"
+template = "RcCow<AlmideMatrix>"
 
 [matrix_mul]
 template = "almide_rt_matrix_mul(&{left}, &{right})"

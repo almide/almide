@@ -403,7 +403,14 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         }
 
         // ── Pre-resolved runtime call (from @intrinsic / NormalizeRuntimeCalls) ──
-        IrExprKind::RuntimeCall { symbol, args } => render_runtime_call(ctx, symbol, args),
+        IrExprKind::RuntimeCall { symbol, args } => {
+            let raw = render_runtime_call(ctx, symbol, args);
+            if rccow_wrap_applies(symbol.as_str()) {
+                wrap_rccow_result(&expr.ty, raw)
+            } else {
+                raw
+            }
+        }
 
         // ── Calls ──
         IrExprKind::Call { target, args, .. } | IrExprKind::TailCall { target, args } => {
@@ -1370,6 +1377,63 @@ fn coerce_to_owned_string(rendered: &str, expr: &IrExpr) -> String {
 }
 
 // ── Extracted sub-functions (reduce render_expr complexity) ──
+
+/// Only TRUE runtime intrinsics from the modules that CONSTRUCT Matrix /
+/// Bytes values return them raw and need the RcCow adapter. Everything else
+/// must pass through untouched:
+/// - user module fns also carry the `almide_rt_` prefix (module mangling)
+///   but their signatures render via render_type and already speak RcCow;
+/// - generic container intrinsics (`almide_rt_list_*`, `map`, `option`, …)
+///   are type-parametric — the Matrix values flowing through them are
+///   already wrapped, and wrapping the generic result double-wraps.
+pub(crate) fn rccow_wrap_applies(symbol: &str) -> bool {
+    // The exact stdlib modules with `-> Bytes` / `-> Matrix` (incl. Result/
+    // Option/List containers) in their signatures — verified by grepping
+    // stdlib/*.almd. Keep this in sync when a new module starts producing
+    // Matrix/Bytes values.
+    const PRODUCER_MODULES: &[&str] = &["matrix_", "bytes_", "fs_", "base64_", "hex_", "net_", "zlib_"];
+    symbol
+        .strip_prefix("almide_rt_")
+        .is_some_and(|rest| PRODUCER_MODULES.iter().any(|m| rest.starts_with(m)))
+}
+
+/// Runtime fns produce RAW `AlmideMatrix` / `Vec<u8>` (the runtime crate
+/// knows nothing about RcCow); the surrounding generated code types Matrix
+/// and Bytes as `RcCow<…>`. Adapt at the call boundary, structurally:
+/// direct values wrap in `RcCow::new`, `List[Matrix]` wraps elementwise,
+/// and tuples wrap the Matrix/Bytes components.
+pub(crate) fn wrap_rccow_result(ty: &Ty, raw: String) -> String {
+    fn is_cow(ty: &Ty) -> bool {
+        matches!(ty, Ty::Matrix | Ty::Bytes)
+    }
+    match ty {
+        Ty::Matrix | Ty::Bytes => format!("RcCow::new({})", raw),
+        Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 && is_cow(&args[0]) => {
+            format!("({}).into_iter().map(RcCow::new).collect::<Vec<_>>()", raw)
+        }
+        Ty::Applied(TypeConstructorId::Option, args) if args.len() == 1 && is_cow(&args[0]) => {
+            format!("({}).map(RcCow::new)", raw)
+        }
+        Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 && is_cow(&args[0]) => {
+            format!("({}).map(RcCow::new)", raw)
+        }
+        Ty::Tuple(parts) if parts.iter().any(is_cow) => {
+            let names: Vec<String> = (0..parts.len()).map(|i| format!("__rc{}", i)).collect();
+            let wrapped: Vec<String> = parts
+                .iter()
+                .zip(&names)
+                .map(|(t, n)| if is_cow(t) { format!("RcCow::new({})", n) } else { n.clone() })
+                .collect();
+            format!(
+                "{{ let ({}) = {}; ({}) }}",
+                names.join(", "),
+                raw,
+                wrapped.join(", ")
+            )
+        }
+        _ => raw,
+    }
+}
 
 fn render_runtime_call(ctx: &RenderContext, symbol: &almide_base::intern::Sym, args: &[IrExpr]) -> String {
     // Inline numeric casts

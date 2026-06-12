@@ -419,14 +419,20 @@ pub fn almide_rt_matrix_split_cols_even(m: &AlmideMatrix, n: i64) -> Vec<AlmideM
     }).collect()
 }
 
-pub fn almide_rt_matrix_concat_cols_many(matrices: &[AlmideMatrix]) -> AlmideMatrix {
+// Generic over Borrow so the caller may hold plain matrices or the
+// generated code's RcCow-wrapped ones (RcCow gets a Borrow impl in the
+// generated prelude; plain AlmideMatrix uses std's blanket Borrow<T> for T).
+pub fn almide_rt_matrix_concat_cols_many<M: std::borrow::Borrow<AlmideMatrix>>(matrices: &[M]) -> AlmideMatrix {
     if matrices.is_empty() { return vec![].into(); }
-    let rows = matrices[0].len();
+    let rows = matrices[0].borrow().len();
     if rows == 0 { return vec![vec![]].into(); }
-    let total_cols: usize = matrices.iter().map(|m| if m.is_empty() { 0 } else { m[0].len() }).sum();
+    let total_cols: usize = matrices.iter()
+        .map(|m| { let m = m.borrow(); if m.is_empty() { 0 } else { m[0].len() } })
+        .sum();
     (0..rows).map(|r| {
         let mut row = Vec::with_capacity(total_cols);
-        for m in matrices {
+        for mb in matrices {
+        let m: &AlmideMatrix = mb.borrow();
             if r < m.len() {
                 row.extend_from_slice(&m[r]);
             }

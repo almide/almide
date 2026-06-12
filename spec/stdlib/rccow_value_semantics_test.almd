@@ -1,0 +1,52 @@
+// Value-semantics regression for the RcCow-backed Matrix / Bytes mapping.
+//
+// Matrix and Bytes render as RcCow<…> on the Rust target: copies are O(1)
+// Rc bumps and writes go through make_mut (copy-on-write). These tests pin
+// the OBSERVABLE contract — a shared value never sees another binding's
+// mutation — so future codegen changes can't silently turn value semantics
+// into reference semantics.
+
+type MatBox = { m: Matrix, tag: Int }
+
+fn first_cell(m: Matrix) -> Float =
+  matrix.get(m, 0, 0)
+
+test "bytes: mutating one binding never leaks into a shared copy" {
+  var a = bytes.from_list([1, 2, 3])
+  let b = a
+  bytes.set_at(a, 0, 99)
+  assert_eq(bytes.get_or(a, 0, -1), 99, "the mutated binding sees the write")
+  assert_eq(bytes.get_or(b, 0, -1), 1, "the shared copy must NOT see it")
+}
+
+test "bytes: push after sharing grows only the pushed binding" {
+  var a = bytes.from_list([7])
+  let b = a
+  bytes.push(a, 8)
+  assert_eq(bytes.len(a), 2)
+  assert_eq(bytes.len(b), 1, "shared copy keeps its length")
+}
+
+test "matrix: shared through records and lists stays equal and independent" {
+  let m = matrix.from_lists([[1.0, 2.0], [3.0, 4.0]])
+  let box1 = { m: m, tag: 1 }
+  let box2 = { m: m, tag: 2 }
+  let stash = [m, m, m]
+  // All shares observe the same value…
+  assert_eq(first_cell(box1.m), 1.0)
+  assert_eq(first_cell(box2.m), 1.0)
+  assert_eq(list.len(stash), 3)
+  // …and a derived value never aliases its source.
+  let t = matrix.transpose(m)
+  assert_eq(matrix.get(t, 0, 1), 3.0)
+  assert_eq(first_cell(m), 1.0, "source unchanged by deriving")
+}
+
+test "matrix: function boundaries preserve the value" {
+  let m = matrix.from_lists([[5.0]])
+  // Crossing a user-fn boundary (an Rc bump now) must not change equality
+  // or repr behaviour.
+  assert_eq(first_cell(m), 5.0)
+  let l = matrix.to_lists(m)
+  assert_eq(list.get(l, 0) ?? [], [5.0])
+}
