@@ -24,7 +24,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 `fixture` < `fuzz` < `exhaustive` < `lean`. An **active** contract must carry
 ≥1 evidence of class ≥ `fixture`.
 
-94 contracts
+95 contracts
 
 | ID | Contract | Since | Status | Strongest Evidence | # Fixtures |
 |----|----------|-------|--------|--------------------|-----------:|
@@ -122,4 +122,5 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-092 | A generic record field is sized by its instantiated type at construction |  | active | fixture | 1 |
 | C-093 | Mutually-recursive variant types compile on both targets |  | active | fixture | 1 |
 | C-094 | A protocol-method UFCS call on an inferred lambda param resolves the element type |  | active | fixture | 1 |
+| C-095 | json.stringify_pretty is byte-identical indented output across targets |  | active | fixture | 1 |
 

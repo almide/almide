@@ -1094,3 +1094,12 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/protocol_ufcs_inferred_lambda.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-095"
+title     = "json.stringify_pretty is byte-identical indented output across targets"
+statement = "json.stringify_pretty produces the same indented JSON on both backends. The WASM arm was a stub (compact output plus a stray newline); it now has a real recursive pretty-printer (__json_stringify_pretty) mirroring the native oracle (json.rs stringify_value): two-space indent per depth, one array element / object member per line, comma-then-newline separators, and inline [] / {} for empty containers. Scalars match the compact form. Verified byte-identical native == wasm over a nested object/array document, a top-level array, and a top-level scalar."
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/json_stringify_pretty.almd", class = "fixture" },
+]

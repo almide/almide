@@ -91,6 +91,10 @@ pub(super) fn register(emitter: &mut WasmEmitter) {
     // Register at end to avoid shifting existing function indices
     let esc_ty = emitter.register_type(vec![ValType::I32], vec![ValType::I32]);
     emitter.rt.json_escape_string = emitter.register_func("__json_escape_string", esc_ty);
+
+    // __json_stringify_pretty(v: i32, depth: i32) -> i32 (String ptr)
+    let pretty_ty = emitter.register_type(vec![ValType::I32, ValType::I32], vec![ValType::I32]);
+    emitter.rt.json_stringify_pretty = emitter.register_func("__json_stringify_pretty", pretty_ty);
 }
 
 /// Compile all runtime function bodies.
@@ -101,6 +105,9 @@ pub(super) fn compile(emitter: &mut WasmEmitter) {
     compile_json_set_path(emitter);
     compile_json_remove_path(emitter);
     compile_json_escape_string(emitter);
+    // MUST be compiled in the same order it was registered (last) — the emitter
+    // matches compiled bodies to registered func indices positionally (#526).
+    compile_json_stringify_pretty(emitter);
 }
 
 /// __json_escape_string(str_ptr: i32) -> i32
@@ -296,6 +303,146 @@ fn compile_value_stringify(emitter: &mut WasmEmitter) {
     wasm!(f, { i32_const(null_str as i32); end; });
 
     emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.value_stringify, type_idx, f));
+}
+
+/// __json_stringify_pretty(v: i32, depth: i32) -> i32 (String ptr)
+///
+/// Mirrors native runtime/rs/src/json.rs `stringify_value(v, depth)`:
+///   2-space indent per depth level; arrays render
+///   `[\n{ind1}elem,\n...{ind}]`, objects `{\n{ind1}"k": v,\n...{ind}}`,
+///   empty containers collapse to `[]`/`{}`, and ALL scalars (null/bool/int/
+///   float/string) delegate to __value_stringify so escape/number formatting
+///   is byte-identical with the compact path (and with native's common case).
+fn compile_json_stringify_pretty(emitter: &mut WasmEmitter) {
+    let type_idx = emitter.func_type_indices[&emitter.rt.json_stringify_pretty];
+
+    let two_sp = emitter.intern_string("  ");
+    let nl_str = emitter.intern_string("\n");
+    let comma_nl = emitter.intern_string(",\n");
+    let open_bracket = emitter.intern_string("[");
+    let close_bracket = emitter.intern_string("]");
+    let open_brace = emitter.intern_string("{");
+    let close_brace = emitter.intern_string("}");
+    let quote_str = emitter.intern_string("\"");
+    let colon_sp = emitter.intern_string(": ");
+    let empty_arr_str = emitter.intern_string("[]");
+    let empty_obj_str = emitter.intern_string("{}");
+
+    let concat = emitter.rt.concat_str;
+    let repeat = emitter.rt.string.repeat;
+    let stringify_fn = emitter.rt.value_stringify;
+    let pretty_fn = emitter.rt.json_stringify_pretty;
+    let escape_fn = emitter.rt.json_escape_string;
+
+    // Locals (params 0=v, 1=depth):
+    //   2=tag, 3=result(acc), 4=ind, 5=ind1, 6=list_ptr, 7=len, 8=i,
+    //   9=elem_str/tuple_ptr, 10=tmp
+    let mut f = Function::new([(9, ValType::I32)]);
+
+    // Load tag.
+    wasm!(f, { local_get(0); i32_load(0); local_set(2); });
+
+    // Scalars (tag <= 4): delegate to __value_stringify (byte-identical to
+    // compact; native pretty also emits the same scalar text).
+    wasm!(f, {
+        local_get(2); i32_const(5); i32_lt_u;
+        if_empty;
+          local_get(0); call(stringify_fn); return_;
+        end;
+    });
+
+    // Build indentation strings: ind = "  ".repeat(depth), ind1 = "  ".repeat(depth+1).
+    wasm!(f, {
+        i32_const(two_sp as i32); local_get(1); call(repeat); local_set(4);
+        i32_const(two_sp as i32); local_get(1); i32_const(1); i32_add; call(repeat); local_set(5);
+    });
+
+    // Tag 5: array.
+    wasm!(f, {
+        local_get(2); i32_const(5); i32_eq;
+        if_empty;
+          local_get(0); i32_load(4); local_set(6);
+          local_get(6); i32_load(0); local_set(7);
+          local_get(7); i32_eqz;
+          if_empty; i32_const(empty_arr_str as i32); return_; end;
+          // result = "[\n"
+          i32_const(open_bracket as i32); i32_const(nl_str as i32); call(concat); local_set(3);
+          i32_const(0); local_set(8);
+    });
+    wasm!(f, {
+          block_empty; loop_empty;
+            local_get(8); local_get(7); i32_ge_u; br_if(1);
+            // separator before all but the first element
+            local_get(8); i32_const(0); i32_gt_u;
+            if_empty;
+              local_get(3); i32_const(comma_nl as i32); call(concat); local_set(3);
+            end;
+            // result += ind1
+            local_get(3); local_get(5); call(concat); local_set(3);
+            // result += pretty(elem, depth+1)
+            local_get(6); i32_const(list_data_off()); i32_add;
+            local_get(8); i32_const(4); i32_mul; i32_add;
+            i32_load(0);
+            local_get(1); i32_const(1); i32_add;
+            call(pretty_fn); local_set(9);
+            local_get(3); local_get(9); call(concat); local_set(3);
+            local_get(8); i32_const(1); i32_add; local_set(8);
+            br(0);
+          end; end;
+          // result += "\n" + ind + "]"
+          local_get(3); i32_const(nl_str as i32); call(concat); local_set(3);
+          local_get(3); local_get(4); call(concat); local_set(3);
+          local_get(3); i32_const(close_bracket as i32); call(concat); return_;
+        end;
+    });
+
+    // Tag 6: object.
+    wasm!(f, {
+        local_get(2); i32_const(6); i32_eq;
+        if_empty;
+          local_get(0); i32_load(4); local_set(6);
+          local_get(6); i32_load(0); local_set(7);
+          local_get(7); i32_eqz;
+          if_empty; i32_const(empty_obj_str as i32); return_; end;
+          i32_const(open_brace as i32); i32_const(nl_str as i32); call(concat); local_set(3);
+          i32_const(0); local_set(8);
+    });
+    wasm!(f, {
+          block_empty; loop_empty;
+            local_get(8); local_get(7); i32_ge_u; br_if(1);
+            // load tuple ptr [key_str_ptr][value_ptr]
+            local_get(6); i32_const(list_data_off()); i32_add;
+            local_get(8); i32_const(4); i32_mul; i32_add;
+            i32_load(0); local_set(9);
+            local_get(8); i32_const(0); i32_gt_u;
+            if_empty;
+              local_get(3); i32_const(comma_nl as i32); call(concat); local_set(3);
+            end;
+            // result += ind1
+            local_get(3); local_get(5); call(concat); local_set(3);
+            // result += "\"" + escape(key) + "\"" + ": "
+            local_get(3); i32_const(quote_str as i32); call(concat);
+            local_get(9); i32_load(0); call(escape_fn); call(concat);
+            i32_const(quote_str as i32); call(concat);
+            i32_const(colon_sp as i32); call(concat); local_set(3);
+            // result += pretty(value, depth+1)
+            local_get(9); i32_load(4);
+            local_get(1); i32_const(1); i32_add;
+            call(pretty_fn); local_set(10);
+            local_get(3); local_get(10); call(concat); local_set(3);
+            local_get(8); i32_const(1); i32_add; local_set(8);
+            br(0);
+          end; end;
+          local_get(3); i32_const(nl_str as i32); call(concat); local_set(3);
+          local_get(3); local_get(4); call(concat); local_set(3);
+          local_get(3); i32_const(close_brace as i32); call(concat); return_;
+        end;
+    });
+
+    // Fallback (unreachable for valid Value tags): delegate to compact.
+    wasm!(f, { local_get(0); call(stringify_fn); end; });
+
+    emitter.add_compiled(CompiledFunc::tracked(type_idx, f));
 }
 
 /// __json_parse(s: i32) -> i32 (Result[Value, String])

@@ -285,12 +285,15 @@ impl FuncCompiler<'_> {
                 self.emit_json_keys(args);
             }
             "stringify_pretty" => {
-                // stringify then add newlines after { and , for basic pretty-printing
-                self.emit_value_call("stringify", args);
-                // Replace "," with ",\n" using string.replace runtime
-                // Simpler: just concat "\n" at start to ensure test passes
-                let nl = self.emitter.intern_string("\n");
-                wasm!(self.func, { i32_const(nl as i32); call(self.emitter.rt.concat_str); });
+                // Real recursive pretty-printer mirroring the native oracle
+                // (runtime/rs/src/json.rs stringify_value): 2-space indent per
+                // depth, starting at depth 0. No trailing newline — println adds
+                // exactly one, matching native.
+                self.emit_expr(&args[0]);
+                wasm!(self.func, {
+                    i32_const(0);
+                    call(self.emitter.rt.json_stringify_pretty);
+                });
             }
             // ── JsonPath constructors ──
             "root" => {
