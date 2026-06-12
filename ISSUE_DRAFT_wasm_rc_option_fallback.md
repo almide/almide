@@ -1,3 +1,5 @@
+> Filed as https://github.com/almide/almide/issues/643
+
 # [wasm] heap corruption: `String ?? ""` fallback in a loop + later allocation → rc_dec trap / garbage pointers
 
 **Severity**: cross-target contract violation (native ⇄ wasm divergence, C-class: same program, correct output on native, memory corruption on wasm).
