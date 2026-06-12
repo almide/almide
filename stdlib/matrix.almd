@@ -152,6 +152,33 @@ fn qwen3_block_f32_kv(
   eps: Float,
 ) -> (Matrix, Matrix, Matrix) = _
 
+// ── Q8_0 bytes-resident path: 4x less DRAM traffic than f32 ──
+
+@intrinsic("almide_rt_matrix_linear_q8_0_row_no_bias")
+fn linear_q8_0_row_no_bias(x: Matrix, w_bytes: Bytes, w_offset: Int, w_rows: Int, w_cols: Int) -> Matrix = _
+
+@intrinsic("almide_rt_matrix_select_rows_q8_0_dq")
+fn select_rows_q8_0_dq(data: Bytes, offset: Int, cols: Int, row_ids: List[Int]) -> Matrix = _
+
+// Qwen3 layer over Q8_0 weights (norm gammas stay f32). Same contract as
+// qwen3_block_f32_kv.
+@intrinsic("almide_rt_matrix_qwen3_block_q8_0_kv")
+fn qwen3_block_q8_0_kv(
+  h: Matrix,
+  k_cache: Matrix,
+  v_cache: Matrix,
+  w: Bytes,
+  gamma_offs: List[Int],
+  weight_offs: List[Int],
+  start_pos: Int,
+  n_q_heads: Int,
+  n_kv_heads: Int,
+  head_dim: Int,
+  ffn_hidden: Int,
+  rope_theta: Float,
+  eps: Float,
+) -> (Matrix, Matrix, Matrix) = _
+
 @intrinsic("almide_rt_matrix_to_lists")
 fn to_lists(m: Matrix) -> List[List[Float]] = _
 
