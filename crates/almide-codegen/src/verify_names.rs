@@ -111,6 +111,26 @@ impl TyChecker<'_> {
 impl IrVisitor for TyChecker<'_> {
     fn visit_expr(&mut self, expr: &IrExpr) {
         self.check_ty(&expr.ty);
+        // Ty positions outside expr.ty — the same set repair/mangle rewrite.
+        match &expr.kind {
+            IrExprKind::Lambda { params, .. } => {
+                for (_, ty) in params {
+                    self.check_ty(ty);
+                }
+            }
+            IrExprKind::ClosureCreate { captures, .. } => {
+                for (_, ty) in captures {
+                    self.check_ty(ty);
+                }
+            }
+            IrExprKind::Call { type_args, .. } => {
+                for ty in type_args {
+                    self.check_ty(ty);
+                }
+            }
+            IrExprKind::RcWrap { cast_ty: Some(ty), .. } => self.check_ty(ty),
+            _ => {}
+        }
         walk_expr(self, expr);
     }
     fn visit_stmt(&mut self, stmt: &IrStmt) {
@@ -179,6 +199,178 @@ pub fn collect_unresolvable_names(program: &IrProgram) -> Vec<UnresolvableName> 
         }
     }
     chk.offenders
+}
+
+// ── Repair: complete unambiguous bare references ──
+//
+// Producers (checker/lowering) are supposed to pin canonical qualified
+// names, but several positions still leak bare ones — lambda param types,
+// alias-qualified annotations (`q.Cfg` with `import m as q`), and generic
+// instantiations. When a bare base name has EXACTLY ONE qualified
+// declaration and no bare twin, it can only mean that declaration, so we
+// rewrite it to the canonical qualified name before the gate runs. The
+// gate then only fires on genuinely ambiguous references. This is a
+// consumer-side completion, not a producer fix — the verifier still
+// machine-checks the end state either way.
+
+fn build_repair_map(decls: &DeclIndex) -> std::collections::HashMap<Sym, Sym> {
+    let mut map = std::collections::HashMap::new();
+    for (base, owners) in &decls.qualified {
+        if owners.len() == 1 && !decls.bare.contains(&almide_base::intern::sym(base)) {
+            map.insert(
+                almide_base::intern::sym(base),
+                almide_base::intern::sym(&owners[0]),
+            );
+        }
+    }
+    map
+}
+
+fn repair_ty(ty: &Ty, map: &std::collections::HashMap<Sym, Sym>) -> Ty {
+    let t = ty.map_children(&|c| repair_ty(c, map));
+    match t {
+        Ty::Named(n, args) => match map.get(&n) {
+            Some(q) => Ty::Named(*q, args),
+            None => Ty::Named(n, args),
+        },
+        Ty::Variant { name, cases } => match map.get(&name) {
+            Some(q) => Ty::Variant { name: *q, cases },
+            None => Ty::Variant { name, cases },
+        },
+        other => other,
+    }
+}
+
+fn repair_expr(e: IrExpr, map: &std::collections::HashMap<Sym, Sym>) -> IrExpr {
+    let mut e = e.map_children(&mut |c| repair_expr(c, map));
+    e.ty = repair_ty(&e.ty, map);
+    match &mut e.kind {
+        IrExprKind::Block { stmts, .. } => {
+            for s in stmts.iter_mut() {
+                if let IrStmtKind::Bind { ty, .. } = &mut s.kind {
+                    *ty = repair_ty(ty, map);
+                }
+            }
+        }
+        // Record literals carry their type name as the ctor; a bare ctor
+        // would render a bare (post-mangle nonexistent) struct name.
+        IrExprKind::Record { name: Some(n), .. } => {
+            if let Some(q) = map.get(n) {
+                *n = *q;
+            }
+        }
+        // Lambda params / closure captures / call type-args / boxing casts
+        // carry Tys outside expr.ty.
+        IrExprKind::Lambda { params, .. } => {
+            for (_, ty) in params.iter_mut() {
+                *ty = repair_ty(ty, map);
+            }
+        }
+        IrExprKind::ClosureCreate { captures, .. } => {
+            for (_, ty) in captures.iter_mut() {
+                *ty = repair_ty(ty, map);
+            }
+        }
+        IrExprKind::Call { type_args, .. } => {
+            for ty in type_args.iter_mut() {
+                *ty = repair_ty(ty, map);
+            }
+        }
+        IrExprKind::RcWrap { cast_ty: Some(ty), .. } => {
+            **ty = repair_ty(ty, map);
+        }
+        _ => {}
+    }
+    e
+}
+
+fn repair_fn(f: &mut IrFunction, map: &std::collections::HashMap<Sym, Sym>) {
+    for p in &mut f.params {
+        p.ty = repair_ty(&p.ty, map);
+    }
+    f.ret_ty = repair_ty(&f.ret_ty, map);
+    let body = std::mem::replace(
+        &mut f.body,
+        IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None },
+    );
+    f.body = repair_expr(body, map);
+}
+
+fn repair_decl_kind(kind: &mut IrTypeDeclKind, map: &std::collections::HashMap<Sym, Sym>) {
+    match kind {
+        IrTypeDeclKind::Record { fields } => {
+            for f in fields {
+                f.ty = repair_ty(&f.ty, map);
+            }
+        }
+        IrTypeDeclKind::Alias { target } => *target = repair_ty(target, map),
+        IrTypeDeclKind::Variant { cases, .. } => {
+            for c in cases {
+                match &mut c.kind {
+                    IrVariantKind::Unit => {}
+                    IrVariantKind::Tuple { fields } => {
+                        for t in fields {
+                            *t = repair_ty(t, map);
+                        }
+                    }
+                    IrVariantKind::Record { fields } => {
+                        for f in fields {
+                            f.ty = repair_ty(&f.ty, map);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Rewrite every unambiguous bare type reference to its canonical qualified
+/// name, in place. Runs at codegen entry, before `assert_names_resolvable`.
+pub fn repair_bare_type_names(program: &mut IrProgram) {
+    let decls = index_decls(program);
+    let map = build_repair_map(&decls);
+    if map.is_empty() {
+        return;
+    }
+    for td in &mut program.type_decls {
+        repair_decl_kind(&mut td.kind, &map);
+    }
+    for f in &mut program.functions {
+        repair_fn(f, &map);
+    }
+    for tl in &mut program.top_lets {
+        tl.ty = repair_ty(&tl.ty, &map);
+        let v = std::mem::replace(
+            &mut tl.value,
+            IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None },
+        );
+        tl.value = repair_expr(v, &map);
+    }
+    for v in &mut program.var_table.entries {
+        v.ty = repair_ty(&v.ty, &map);
+    }
+    for d in &mut program.def_table.entries {
+        d.ty = repair_ty(&d.ty, &map);
+    }
+    for m in &mut program.modules {
+        for td in &mut m.type_decls {
+            repair_decl_kind(&mut td.kind, &map);
+        }
+        for f in &mut m.functions {
+            repair_fn(f, &map);
+        }
+        for tl in &mut m.top_lets {
+            tl.ty = repair_ty(&tl.ty, &map);
+            let v = std::mem::replace(
+                &mut tl.value,
+                IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None },
+            );
+            tl.value = repair_expr(v, &map);
+        }
+        for v in &mut m.var_table.entries {
+            v.ty = repair_ty(&v.ty, &map);
+        }
+    }
 }
 
 /// HARD codegen-entry gate (both targets, debug AND release). A bare type
@@ -275,5 +467,90 @@ mod tests {
         );
         assert_eq!(collect_unresolvable_names(&program).len(), 1,
             "List[Cfg] must be scanned through the container");
+    }
+
+    #[test]
+    fn repair_completes_unambiguous_bare_ref() {
+        let mut program = IrProgram::default();
+        program.modules.push(module_with_decl("m.Cfg"));
+        program.var_table.alloc(sym("v"), named("Cfg"), Mutability::Let, None);
+        repair_bare_type_names(&mut program);
+        assert_eq!(program.var_table.entries[0].ty, named("m.Cfg"),
+            "bare `Cfg` with a unique qualified owner is completed to `m.Cfg`");
+        assert!(collect_unresolvable_names(&program).is_empty(),
+            "the gate passes after repair");
+    }
+
+    #[test]
+    fn repair_leaves_ambiguous_bare_ref_for_the_gate() {
+        let mut program = IrProgram::default();
+        program.modules.push(module_with_decl("m.Cfg"));
+        program.modules.push(module_with_decl("n.Cfg"));
+        program.var_table.alloc(sym("v"), named("Cfg"), Mutability::Let, None);
+        repair_bare_type_names(&mut program);
+        assert_eq!(program.var_table.entries[0].ty, named("Cfg"),
+            "two qualified owners — repair must not guess");
+        assert_eq!(collect_unresolvable_names(&program).len(), 1,
+            "ambiguous bare ref is still rejected by the gate");
+    }
+
+    #[test]
+    fn repair_respects_bare_decl_shadowing() {
+        let mut program = IrProgram::default();
+        program.type_decls.push(IrTypeDecl {
+            name: sym("Cfg"),
+            kind: IrTypeDeclKind::Record { fields: vec![] },
+            deriving: None, generics: None,
+            visibility: IrVisibility::Public,
+            doc: None, blank_lines_before: 0,
+        });
+        program.modules.push(module_with_decl("m.Cfg"));
+        program.var_table.alloc(sym("v"), named("Cfg"), Mutability::Let, None);
+        repair_bare_type_names(&mut program);
+        assert_eq!(program.var_table.entries[0].ty, named("Cfg"),
+            "a root-level bare decl owns the bare reference — no rewrite");
+    }
+
+    #[test]
+    fn repair_reaches_lambda_params_inside_module_fns() {
+        let mut program = IrProgram::default();
+        let mut m = module_with_decl("m.Cfg");
+        let lambda = IrExpr {
+            kind: IrExprKind::Lambda {
+                params: vec![(VarId(0), named("Cfg"))],
+                body: Box::new(IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None }),
+                lambda_id: None,
+            },
+            ty: Ty::Fn { params: vec![named("Cfg")], ret: Box::new(Ty::Unit) },
+            span: None,
+            def_id: None,
+        };
+        m.functions.push(IrFunction {
+            name: sym("m.user"),
+            params: vec![],
+            ret_ty: Ty::Unit,
+            body: lambda,
+            is_effect: false,
+            is_async: false,
+            is_test: false,
+            generics: None,
+            extern_attrs: vec![],
+            export_attrs: vec![],
+            attrs: vec![],
+            visibility: IrVisibility::Public,
+            doc: None,
+            blank_lines_before: 0,
+            def_id: None,
+            mutated_params: vec![],
+            module_origin: Some("m".to_string()),
+        });
+        program.modules.push(m);
+        repair_bare_type_names(&mut program);
+        let f = &program.modules[0].functions[0];
+        if let IrExprKind::Lambda { params, .. } = &f.body.kind {
+            assert_eq!(params[0].1, named("m.Cfg"), "lambda param ty must be completed");
+        } else {
+            panic!("expected lambda body");
+        }
     }
 }

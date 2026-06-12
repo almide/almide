@@ -1,0 +1,11 @@
+// Linked module for the #681 regression (cross_module_fold_lambda_test.almd).
+// `Loc` is THIS module's own record; `pick` runs it through a `list.fold`
+// accumulator lambda — the exact shape (fn signature + fold lambda params +
+// the lowered `acc`/`l` locals) whose bare `Loc` references the link renamer
+// used to miss, so codegen's NameResolutionTotal gate fired ([COMPILER BUG]).
+type Loc = { name: String, found: Bool }
+
+fn missing() -> Loc = { name: "", found: false }
+
+fn pick(locs: List[Loc], name: String) -> Loc =
+  locs |> list.fold(missing(), (acc, l) => if l.name == name then l else acc)
