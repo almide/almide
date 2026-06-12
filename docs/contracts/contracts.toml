@@ -1103,3 +1103,12 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/json_stringify_pretty.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-096"
+title     = "process.args works on WASM and matches native"
+statement = "process.args() runs on the WASM target (previously an emit ICE) and agrees with native. It maps to std::env::args() — argv[0] (the program path) followed by program args — built on WASM from the WASI args_sizes_get / args_get imports into the same List[String] layout native produces. Verified byte-identical native == wasm on the argument COUNT (argv[0] differs between a native temp binary and a wasm module path, so the fixture prints only the length)."
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/process_args.almd", class = "fixture" },
+]

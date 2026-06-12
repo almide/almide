@@ -383,6 +383,10 @@ pub struct RuntimeFuncs {
     pub fd_readdir: u32,
     pub fd_prestat_get: u32,
     pub fd_prestat_dir_name: u32,
+    /// args_sizes_get(argc_ptr, argv_buf_size_ptr) -> errno — WASI argv discovery (process.args).
+    pub args_sizes_get: u32,
+    /// args_get(argv_ptr, argv_buf_ptr) -> errno — fills the pointer array + NUL-terminated arg strings.
+    pub args_get: u32,
     /// __resolve_path(path_ptr, path_len) → (fd, rel_path_ptr, rel_path_len)
     /// Resolves absolute/relative paths against preopened directories.
     pub resolve_path: u32,
@@ -665,6 +669,8 @@ impl WasmEmitter {
                 fd_readdir: 0,
                 fd_prestat_get: 0,
                 fd_prestat_dir_name: 0,
+                args_sizes_get: 0,
+                args_get: 0,
                 resolve_path: 0,
                 init_preopen_dirs: 0,
                 dragon: rt_dragon::DragonRuntime::default(),
@@ -1214,6 +1220,28 @@ pub(crate) fn emit(program: &IrProgram) -> Vec<u8> {
         module: "wasi_snapshot_preview1".to_string(),
         name: "fd_readdir".to_string(),
         type_idx: fd_readdir_type_idx,
+    });
+
+    // Import args_sizes_get: (argc_ptr: i32, argv_buf_size_ptr: i32) -> errno
+    let args_sizes_get_type_idx = emitter.register_type(
+        vec![ValType::I32, ValType::I32],
+        vec![ValType::I32],
+    );
+    emitter.imports.push(ImportInfo {
+        module: "wasi_snapshot_preview1".to_string(),
+        name: "args_sizes_get".to_string(),
+        type_idx: args_sizes_get_type_idx,
+    });
+
+    // Import args_get: (argv_ptr: i32, argv_buf_ptr: i32) -> errno
+    let args_get_type_idx = emitter.register_type(
+        vec![ValType::I32, ValType::I32],
+        vec![ValType::I32],
+    );
+    emitter.imports.push(ImportInfo {
+        module: "wasi_snapshot_preview1".to_string(),
+        name: "args_get".to_string(),
+        type_idx: args_get_type_idx,
     });
 
     // Step 1b: @extern(wasm, ...) imports — must be registered before any

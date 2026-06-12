@@ -1,0 +1,14 @@
+// @contract: C-096
+// process.args() must work on the WASM target (was an emit ICE) and agree with
+// native. It maps to the native std::env::args() — argv[0] (the program path)
+// followed by program args — built on WASM from WASI args_sizes_get / args_get.
+// The cross-target harness runs both legs with NO extra program args, so argv =
+// [program] on both => length 1; argv[0] (a temp binary path vs the wasm module
+// path) DIFFERS between legs, so this fixture prints only the COUNT, never an
+// element, to stay byte-identical. #645
+import process
+
+effect fn main() -> () = {
+  let args = process.args()
+  println(int.to_string(list.len(args)))
+}
