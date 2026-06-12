@@ -169,6 +169,7 @@ let root_i = float.to_int(root_f)    // truncating
 | E019 | Ambiguous variant constructor (same ctor name in two or more types) | Rename the constructor in one of the types so the name is unique (a qualified `Type.Ctor` is not yet supported) |
 | E020 | Two distinct types share one name with different structures | Rename one of the colliding types |
 | E021 | Invalid record construction/pattern shape (positional args on a record, unknown/duplicate/missing field, paren pattern on a record case) | Records take named fields: `Cfg(name: x)` or `Cfg { name: x }`; match record cases as `Case { .. }` |
+| E022 | `!` (unwrap-propagate) outside an effect fn body or test block | Mark the enclosing fn `effect fn`, or use `??` for a fallback value (`!` inside a lambda can't propagate) |
 | E420 | Function visibility violation (callee is private) | Make the callee public, or add a public shim |
 
 A rustc 4-digit code (`error[E0XXX]`) leaking through always indicates
