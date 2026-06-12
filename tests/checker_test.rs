@@ -1283,3 +1283,23 @@ fn ordering_on_scalars_still_accepted() {
             "scalar ordering should be accepted: {} -> {:?}", src, errs);
     }
 }
+
+// ── #662: undecidable (unconstrained) type slot is rejected (E025), not ICE'd ──
+
+#[test]
+fn check_e025_unconstrained_error_type() {
+    let errs = errors(
+        "fn main() -> Unit = {\n  let r0: Result[Int, String] = ok(7)\n  let r = result.or_else(r0, (e) => ok(0))\n  println(\"done\")\n}"
+    );
+    assert!(errs.iter().any(|e| e.contains("cannot infer a concrete type")),
+        "expected E025 unconstrained-type error, got: {:?}", errs);
+}
+
+#[test]
+fn check_e025_annotated_ok() {
+    let errs = errors(
+        "fn main() -> Unit = {\n  let r0: Result[Int, String] = ok(7)\n  let r: Result[Int, String] = result.or_else(r0, (e) => ok(0))\n  println(\"done\")\n}"
+    );
+    assert!(!errs.iter().any(|e| e.contains("cannot infer a concrete type")),
+        "annotated binding should resolve cleanly, got: {:?}", errs);
+}

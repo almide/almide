@@ -1459,7 +1459,14 @@ impl Checker {
                     // unless this binding is later used as a `match x { ok(_) =>
                     // ..., err(_) => ... }` subject — in which case the user
                     // wants to inspect the Result directly.
-                    self.effect_unwrap_rhs(t, self.env.skip_auto_unwrap_for.contains(&sym(name)))
+                    let unwrapped = self.effect_unwrap_rhs(t, self.env.skip_auto_unwrap_for.contains(&sym(name)));
+                    // #662: an un-annotated binding whose value type carries an
+                    // unconstrained phantom slot (only an un-exercised branch
+                    // could pin it) is undecidable — re-check post-solve.
+                    self.deferred_unresolved_binding_checks.push(super::UnresolvedBindingSite {
+                        ty: unwrapped.clone(), name: Some(name.to_string()), span: value.span,
+                    });
+                    unwrapped
                 };
                 if let Some(s) = span {
                     self.env.var_decl_locs.insert(sym(name), (s.line, s.col));
@@ -1478,7 +1485,12 @@ impl Checker {
                     let t = resolve_ty(&val_ty, &self.uf);
                     // Same rule as Let, including the usage-skip: a `var r =
                     // effectCall()` later matched on ok/err keeps the Result.
-                    self.effect_unwrap_rhs(t, self.env.skip_auto_unwrap_for.contains(&sym(name)))
+                    let unwrapped = self.effect_unwrap_rhs(t, self.env.skip_auto_unwrap_for.contains(&sym(name)));
+                    // #662: same undecidable-phantom-slot re-check as Let.
+                    self.deferred_unresolved_binding_checks.push(super::UnresolvedBindingSite {
+                        ty: unwrapped.clone(), name: Some(name.to_string()), span: value.span,
+                    });
+                    unwrapped
                 };
                 if let Some(s) = span {
                     self.env.var_decl_locs.insert(sym(name), (s.line, s.col));
@@ -1626,7 +1638,15 @@ impl Checker {
             }
             ast::Stmt::FieldAssign { value, .. } => { self.infer_expr(value); }
             ast::Stmt::Guard { cond, else_, .. } => { self.infer_expr(cond); self.infer_expr(else_); }
-            ast::Stmt::Expr { expr, .. } => { self.infer_expr(expr); }
+            ast::Stmt::Expr { expr, .. } => {
+                let t = self.infer_expr(expr);
+                // #662: a discarded expression statement whose type carries an
+                // unconstrained phantom slot (e.g. a bare `result.or_else(r0,
+                // (e) => ok(0))`) is undecidable — re-check post-solve.
+                self.deferred_unresolved_binding_checks.push(super::UnresolvedBindingSite {
+                    ty: resolve_ty(&t, &self.uf), name: None, span: expr.span,
+                });
+            }
             ast::Stmt::Comment { .. } | ast::Stmt::Error { .. } => {}
         }
     }
