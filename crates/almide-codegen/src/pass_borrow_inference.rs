@@ -56,6 +56,18 @@ thread_local! {
     // keep `data: &Vec<u8>` instead of collapsing to `Vec<u8>` on the first
     // pass and never recovering.
     static CURRENT_FN: RefCell<Option<String>> = RefCell::new(None);
+    // Names of user-declared RECORD types (`type Tok = { … }`). A param of such a
+    // type is `Ty::Named("Tok")` (not a structural `Ty::Record`), so without this
+    // set `is_heap_type`/`intrinsic_borrow_mode` treat it as Own and every reader
+    // deep-clones the whole record. Records get borrow inference like structural
+    // records; user VARIANTs stay Own (conservative — variant borrowing is not
+    // generalized here). #647
+    static RECORD_NAMES: RefCell<std::collections::HashSet<String>> = RefCell::new(std::collections::HashSet::new());
+}
+
+/// Is `name` a user-declared record type (eligible for record borrow inference)?
+fn is_record_type_name(name: &str) -> bool {
+    RECORD_NAMES.with(|r| r.borrow().contains(name))
 }
 
 fn lookup_user_borrows(callee: &str) -> Option<Vec<ParamBorrow>> {
@@ -82,6 +94,23 @@ fn lookup_user_borrows(callee: &str) -> Option<Vec<ParamBorrow>> {
 /// safety.
 pub fn infer_borrow_signatures(program: &mut IrProgram) -> HashMap<String, Vec<ParamBorrow>> {
     let mut sigs: HashMap<String, Vec<ParamBorrow>> = HashMap::new();
+
+    // Record the names of every user-declared RECORD type so a `t: Tok` param
+    // (`Ty::Named`) is borrow-inferred like a structural record instead of being
+    // deep-cloned at every read (#647).
+    RECORD_NAMES.with(|r| {
+        let mut set = r.borrow_mut();
+        set.clear();
+        let mut collect = |decls: &[IrTypeDecl]| {
+            for td in decls {
+                if matches!(td.kind, IrTypeDeclKind::Record { .. }) {
+                    set.insert(td.name.to_string());
+                }
+            }
+        };
+        collect(&program.type_decls);
+        for m in &program.modules { collect(&m.type_decls); }
+    });
 
     // Seed `sigs` with `@intrinsic` fns from every bundled stdlib
     // module — including ones that weren't lowered into
@@ -202,7 +231,7 @@ pub fn infer_borrow_signatures(program: &mut IrProgram) -> HashMap<String, Vec<P
 
         MOD_SCOPE.with(|m| *m.borrow_mut() = None);
         for func in &mut program.functions {
-            if func.is_test || is_derive_fn(&func.name) || is_monomorphized(&func.name) || func.generics.as_ref().map_or(false, |g| !g.is_empty()) { continue; }
+            if func.is_test || is_derive_fn(func) || is_monomorphized(&func.name) || func.generics.as_ref().map_or(false, |g| !g.is_empty()) { continue; }
             let borrows = infer_function_borrows(func);
             // Always record the signature (including all-Own) so that the
             // fixed-point iteration can distinguish "known to be Own" from
@@ -219,7 +248,7 @@ pub fn infer_borrow_signatures(program: &mut IrProgram) -> HashMap<String, Vec<P
             let mod_name = module.name.to_string();
             MOD_SCOPE.with(|m| *m.borrow_mut() = Some(mod_name.clone()));
             for func in &mut module.functions {
-                if func.is_test || is_derive_fn(&func.name) || is_monomorphized(&func.name) || func.generics.as_ref().map_or(false, |g| !g.is_empty()) { continue; }
+                if func.is_test || is_derive_fn(func) || is_monomorphized(&func.name) || func.generics.as_ref().map_or(false, |g| !g.is_empty()) { continue; }
                 let borrows = infer_function_borrows(func);
                 sigs.insert(format!("{}::{}", mod_name, func.name), borrows.clone());
                 // `ResolveCallsPass` rewrites bundled-Almide calls to
@@ -339,9 +368,19 @@ fn infer_function_borrows(func: &IrFunction) -> Vec<ParamBorrow> {
     }).collect()
 }
 
-fn is_derive_fn(name: &str) -> bool {
-    name.contains("_encode") || name.contains("_decode") || name.contains("_eq")
-        || name.contains("_display") || name.contains("_to_string") || name.contains("_from_")
+fn is_derive_fn(func: &IrFunction) -> bool {
+    // Auto-derived convention methods are excluded from borrow inference — they
+    // are a generated API surface whose call sites (often cross-module, where the
+    // borrow signature can't be looked up) pass owned values, so a Ref param would
+    // mismatch (E0308). Once record borrow inference is enabled (#647), a
+    // record-typed derived `encode(p: Pigment)` would otherwise become `&Pigment`
+    // and break those owned-arg call sites.
+    //
+    // Identification is structural, NOT name-based: `lower/mod.rs` stamps every
+    // generated convention fn with a synthetic `@derived` attribute at the single
+    // point it produces them. The generator is the source of truth — we never
+    // guess from the method name (`encode`/`eq`/...), which a user could also use.
+    func.attrs.iter().any(|a| a.name.as_str() == "derived")
 }
 
 fn is_monomorphized(name: &str) -> bool {
@@ -428,6 +467,10 @@ fn intrinsic_borrow_mode(ty: &Ty) -> ParamBorrow {
         | Ty::Applied(TypeConstructorId::Set, _)
             => ParamBorrow::Ref,
 
+        // A user-declared RECORD type (`t: Tok` → `Ty::Named("Tok")`) borrows like
+        // a structural record (#647). Non-record Named types fall through to Own.
+        Ty::Named(n, _) if is_record_type_name(n.as_str()) => ParamBorrow::Ref,
+
         // Option / Result → Own. `.unwrap_or` / `.map` consume the
         // container, and the walker renders `.is_some()` /
         // `.is_none()` via `Fn(Option<T>) -> bool` signatures that
@@ -465,7 +508,7 @@ fn is_heap_type(ty: &Ty) -> bool {
         | Ty::Applied(TypeConstructorId::Set, _)
         | Ty::Record { .. }
         | Ty::OpenRecord { .. }
-    )
+    ) || matches!(ty, Ty::Named(n, _) if is_record_type_name(n.as_str()))
 }
 
 /// Check if a parameter variable needs ownership.
@@ -538,8 +581,19 @@ fn check_needs_ownership(expr: &IrExpr, var: VarId, needs: &mut bool) {
             if let CallTarget::Named { name } = target {
                 if let Some(borrows) = lookup_user_borrows(name.as_str()) {
                     for (i, arg) in args.iter().enumerate() {
+                        // The callee borrows slot `i` (Ref/RefSlice/RefStr)
+                        // → forwarding a heap-typed var into it does NOT
+                        // consume the var, so the outer param can stay
+                        // borrowed. Previously gated to `Ty::Bytes` only;
+                        // generalized to every heap type (records, lists,
+                        // strings) so the natural `vocab_id(t, ..)` /
+                        // `merge_rank(t, ..)` factoring no longer clones the
+                        // whole record per call (#647). Downstream rendering
+                        // is type-agnostic: walker/mod.rs:264 emits `&T`,
+                        // ref_params (walker/mod.rs:146) + the `&t`→`t`
+                        // collapse (walker/expressions.rs:847) already work.
                         let borrowed = borrows.get(i).map_or(false, |b| !matches!(b, ParamBorrow::Own))
-                            && matches!(arg.ty, Ty::Bytes);
+                            && is_heap_type(&arg.ty);
                         if !borrowed && is_var(arg, var) { *needs = true; return; }
                     }
                     for arg in args { check_needs_ownership(arg, var, needs); }
