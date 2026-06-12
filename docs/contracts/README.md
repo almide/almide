@@ -24,7 +24,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 `fixture` < `fuzz` < `exhaustive` < `lean`. An **active** contract must carry
 ≥1 evidence of class ≥ `fixture`.
 
-87 contracts
+90 contracts
 
 | ID | Contract | Since | Status | Strongest Evidence | # Fixtures |
 |----|----------|-------|--------|--------------------|-----------:|
@@ -115,4 +115,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-085 | Float decode widens an integral JSON number to f64 |  | active | fixture | 1 |
 | C-086 | Pass-through stdlib combinators give their result its own reference |  | active | fixture | 1 |
 | C-087 | JSON number and \\u string decoding are byte-identical across targets |  | active | fixture | 1 |
+| C-088 | A Rust-keyword function name compiles on both targets |  | active | fixture | 1 |
+| C-089 | A default parameter referencing an earlier parameter is filled with its argument |  | active | fixture | 1 |
+| C-090 | bytes.from_list on a List[Int] parameter compiles on both targets |  | active | fixture | 1 |
 

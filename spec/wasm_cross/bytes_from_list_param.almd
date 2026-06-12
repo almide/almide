@@ -1,0 +1,18 @@
+// @contract: C-090
+// bytes.from_list applied to a List[Int] function PARAMETER must compile and run
+// byte-identical native == wasm. A List[Int] param is emitted as `&[i64]`, but
+// the native runtime took `&Vec<i64>` → rustc E0308. The runtime now takes a
+// slice (`&[i64]`), which the param passes directly and a local `Vec<i64>` still
+// deref-coerces into. #665.
+import bytes
+
+fn build(xs: List[Int]) -> Int = {
+  let b = bytes.from_list(xs)
+  bytes.len(b)
+}
+
+fn main() -> Unit = {
+  println(int.to_string(build([1, 2, 3])))            // param case
+  let nums = [10, 20, 30, 40]
+  println(int.to_string(bytes.len(bytes.from_list(nums)))) // local case
+}

@@ -1031,3 +1031,30 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/json_number_unicode.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-088"
+title     = "A Rust-keyword function name compiles on both targets"
+statement = "A user function whose name is a Rust keyword (box, move, dyn, unsafe, …) compiles and runs byte-identical native == wasm. The Rust emitter raw-escapes the name (box → r#box) at BOTH its definition and every call site, driven by one shared keyword predicate (is_rust_keyword) — an incomplete per-site list previously left the definition or the call unescaped, producing invalid Rust. WASM identifiers have no keyword conflict."
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/reserved_keyword_fn.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-089"
+title     = "A default parameter referencing an earlier parameter is filled with its argument"
+statement = "A default parameter value that references an earlier parameter (fn rect(w, h: Int = w)) compiles and runs byte-identical native == wasm. Defaults are inlined at the call site, so emitting the callee-local parameter name referenced a binding absent there (rustc E0425); lowering now substitutes each earlier parameter with its actual argument (chaining through earlier-filled defaults) before lowering the default expression."
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/default_param_ref.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-090"
+title     = "bytes.from_list on a List[Int] parameter compiles on both targets"
+statement = "bytes.from_list applied to a List[Int] function parameter compiles and runs byte-identical native == wasm. A List[Int] parameter renders as &[i64], which the native runtime rejected when it took &Vec<i64> (rustc E0308). The runtime now takes a slice &[i64] — the parameter passes directly and a local Vec<i64> still deref-coerces."
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/bytes_from_list_param.almd", class = "fixture" },
+]
