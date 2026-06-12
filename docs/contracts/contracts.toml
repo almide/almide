@@ -986,3 +986,39 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/call_closure_lambda_param.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-083"
+title     = "A negated i64::MIN literal is representable, not folded to zero"
+statement = "The literal `-9223372036854775808` (and its underscored/hex forms) compiles to a real `i64::MIN` and runs byte-identical native == wasm. The magnitude 9223372036854775808 overflows a signed `i64` parse, which previously clamped to 0 so the unary minus produced 0; lowering now folds the leading minus INTO the integer-literal parse (`-<digits>`) for decimal, hex, octal, and binary, so the whole negative value is parsed in range."
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/i64_min_literal.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-084"
+title     = "Codec/value decode error messages are byte-identical across targets"
+statement = "value.as_* type mismatches and Codec decode failures produce the SAME error string on both backends. The WASM emitter mirrors the native oracle (runtime/rs/src/value.rs): type errors name the Value variant (`expected Float`, `expected Int`, `expected Str`, `expected Bool`, `expected Object`, `expected Array`) and a missing required field interpolates its name (`missing field '<key>'`, built at runtime via __concat_str), replacing the prior lowercase / `key not found` placeholders."
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/codec_decode_errors.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-085"
+title     = "Float decode widens an integral JSON number to f64"
+statement = "Because a JSON number has no int/float distinction, value.as_float, json.as_float, and Codec Float-field decode (required, Option, and defaulted) all accept an integer JSON value and widen it to f64 — matching the native oracle (which already coerces in json.as_float/get_float and now in value.as_float) and serde. This keeps Codec roundtrips total when a Float value serializes without a decimal point. Verified byte-identical native == wasm for required, Option, and defaulted Float fields plus direct value.as_float / json.as_float."
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/codec_float_int.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-086"
+title     = "Pass-through stdlib combinators give their result its own reference"
+statement = "Combinators that return an INPUT cell unchanged — option.filter (some), option.or_else (some), option.flatten, result.map_err (ok), result.map (err), result.flat_map (err) — SHARE a +1 onto the returned cell on the pass-through path (like list.get's some-box), so the let-bound result owns its own reference. Without it the result and the input aliased one cell and both scope-end Decs double-freed it: a __rc_dec trap, or a SILENT wrong value read from the freed cell through a longer combinator chain. Verified byte-identical native == wasm across all six combinators, a four-stage find|>map|>filter|>flat_map chain, and an OOB-defaulted loop lookahead (list.get(xs, i+1) ?? default)."
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/alias_combinator_rc.almd", class = "fixture" },
+]

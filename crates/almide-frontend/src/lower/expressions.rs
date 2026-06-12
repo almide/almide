@@ -288,6 +288,27 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
             ctx.mk(IrExprKind::BinOp { op: bin_op, left: Box::new(l), right: Box::new(r) }, ty, span)
         }
         ast::ExprKind::Unary { op, operand, .. } => {
+            // #660: fold a unary minus into an int-literal parse so `i64::MIN`
+            // (`-9223372036854775808`) is representable. Lowering the operand
+            // first parses the bare magnitude `9223372036854775808`, which
+            // overflows `i64` → `unwrap_or(0)`, and negating 0 yields 0.
+            if op.as_str() == "-" {
+                if let ast::ExprKind::Int { raw, .. } = &operand.kind {
+                    let clean = raw.replace('_', "");
+                    let parsed = if let Some(h) = clean.strip_prefix("0x").or_else(|| clean.strip_prefix("0X")) {
+                        i64::from_str_radix(&format!("-{}", h), 16)
+                    } else if let Some(b) = clean.strip_prefix("0b").or_else(|| clean.strip_prefix("0B")) {
+                        i64::from_str_radix(&format!("-{}", b), 2)
+                    } else if let Some(o) = clean.strip_prefix("0o").or_else(|| clean.strip_prefix("0O")) {
+                        i64::from_str_radix(&format!("-{}", o), 8)
+                    } else {
+                        format!("-{}", clean).parse::<i64>()
+                    };
+                    if let Ok(value) = parsed {
+                        return ctx.mk(IrExprKind::LitInt { value }, ty.clone(), span);
+                    }
+                }
+            }
             let o = lower_expr(ctx, operand);
             let un_op = match (op.as_str(), &o.ty) {
                 ("not", _) => UnOp::Not,
