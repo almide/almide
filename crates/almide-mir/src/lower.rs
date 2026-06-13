@@ -285,8 +285,26 @@ impl LowerCtx {
                     self.ops.push(Op::Alloc { dst, repr, init });
                     Ok(Some(dst))
                 }
+                // A function-call result returned directly (`fn f() = g(xs)`): the
+                // callee's heap result is a FRESH OWNED value (its return-mode
+                // signature), moved out — NOT added to live_heap_handles. Cert:
+                // CallFn-result + move-out, identical to the already-verified
+                // `var x = g(xs); x`, so the gate covers it by the same evidence
+                // (the runtime correspondence is exact — the callee returns rc 1).
+                IrExprKind::Call { target: CallTarget::Named { name }, args, .. } => {
+                    let lowered = self.lower_call_args(args)?;
+                    let dst = self.fresh_value();
+                    let repr = repr_of(&tail.ty)?;
+                    self.ops.push(Op::CallFn {
+                        dst: Some(dst),
+                        name: name.as_str().to_string(),
+                        args: lowered,
+                        result: Some(repr),
+                    });
+                    Ok(Some(dst))
+                }
                 other => Err(LowerError::Unsupported(format!(
-                    "heap move-out from {} (only a bound var or fresh literal) not in this brick",
+                    "heap move-out from {} (only a bound var, fresh literal, or call) not in this brick",
                     kind_name(other)
                 ))),
             };
