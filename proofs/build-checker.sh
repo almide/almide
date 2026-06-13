@@ -22,8 +22,9 @@ echo "== run the proven checker on real certificates (one object per line) =="
 printf 'ID\nIIDD\n' > /tmp/balanced.cert     # two balanced objects → ACCEPT
 printf 'IIDD\nIDD\n' > /tmp/double_free.cert  # 2nd object double-frees → REJECT
 printf 'ID\nIID\n'  > /tmp/leak.cert          # 2nd object leaks → REJECT
-printf 'IR\nIADR\n' > /tmp/perceus.cert       # perceus: reuse-release + alias/drop/reuse → ACCEPT
-printf 'R\n'        > /tmp/reuse_uaf.cert      # reuse with nothing owned → REJECT
+printf 'IR\nIADR\n' > /tmp/perceus.cert       # perceus: reuse-release on a UNIQUE object (rc=1) → ACCEPT
+printf 'R\n'        > /tmp/reuse_uaf.cert      # reuse with nothing owned (rc=0) → REJECT
+printf 'IARD\n'    > /tmp/shared_reuse.cert    # reuse of a SHARED object (rc=2): balances but unsound → REJECT
 printf 'IIDD\n'    > /tmp/stack.cert          # operand-STACK balance (push push pop pop) ≡ the same fold → ACCEPT
 printf 'IDD\n'     > /tmp/stack_uflow.cert     # operand-stack UNDERFLOW (pop below empty) → REJECT
 
@@ -37,6 +38,7 @@ run /tmp/double_free.cert 1
 run /tmp/leak.cert 1
 run /tmp/perceus.cert 0
 run /tmp/reuse_uaf.cert 1
+run /tmp/shared_reuse.cert 1
 run /tmp/stack.cert 0
 run /tmp/stack_uflow.cert 1
 

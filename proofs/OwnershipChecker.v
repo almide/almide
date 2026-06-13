@@ -34,11 +34,16 @@ Open Scope Z_scope.
    v0's {Inc,Dec} is the DEGENERATE case (Alias≡Inc, MoveOut≡Dec at the balance
    fold), so this strictly generalizes brick 1 with ZERO new proof obligations —
    the soundness proofs reason about the run's Z result, not the constructors.
-     Reuse   = −1 REUSE-eligible release (the PERCEUS mode): a release the
-               compiler proved acts on a UNIQUELY-owned object, so the freed
-               block may be reused IN PLACE. Folds like Dec (−1); the separate
-               constructor records the uniqueness obligation (checked by a
-               membership-subset section: r-objects ⊆ proven-unique).
+     Reuse   = REUSE-eligible release (the PERCEUS mode): a release the compiler
+               proved acts on a UNIQUELY-owned object, so the freed block may be
+               reused IN PLACE. The uniqueness OBLIGATION is discharged by the
+               FOLD, not a separate subset section: a Reuse is valid iff rc = 1 at
+               that point (the checker's own count), so it derives uniqueness
+               WITHOUT trusting the compiler's analysis. (A subset section would
+               have had to trust a compiler-asserted "proven-unique" set — an
+               inference the checker cannot re-derive; the fold already knows rc,
+               so the guard is both simpler and strictly sound. A Reuse at rc > 1
+               = SHARED = unsound, and FAULTS — see `check_reuse_sound`.)
    (Borrow b≡+0, the closure-env mode, is the remaining letter.) *)
 Inductive Op : Type :=
   | Inc : Op
@@ -51,8 +56,10 @@ Inductive Op : Type :=
    A refcount, or a FAULT (`None`) when a −1 op hits rc = 0: that is a
    double-free / use-after-free — releasing a reference that does not exist.
    Alias folds like Inc (+1), MoveOut like Dec (−1): the balance is about the
-   DELTAS, which is exactly why adding the ground-fact constructors costs no new
-   proof. *)
+   DELTAS, which is exactly why adding those ground-fact constructors costs no new
+   proof. Reuse is the ONE exception: besides its −1 it carries a UNIQUENESS guard
+   (valid only at rc = 1), so it faults on a SHARED object — the reuse-soundness
+   obligation, checked by the same fold (`check_reuse_sound`). *)
 Fixpoint exec (ops : list Op) (rc : Z) : option Z :=
   match ops with
   | [] => Some rc
@@ -60,7 +67,12 @@ Fixpoint exec (ops : list Op) (rc : Z) : option Z :=
   | Alias :: rest => exec rest (rc + 1)
   | Dec :: rest => if rc <=? 0 then None else exec rest (rc - 1)
   | MoveOut :: rest => if rc <=? 0 then None else exec rest (rc - 1)
-  | Reuse :: rest => if rc <=? 0 then None else exec rest (rc - 1)
+  (* Reuse is REUSE-eligible: the compiler asserts the block is UNIQUELY owned
+     (rc = 1) so it may be repurposed IN PLACE. The checker does NOT trust that
+     assertion — it derives uniqueness from its OWN fold: a Reuse is valid iff
+     rc = 1 at this point (then it goes to 0). A Reuse at rc > 1 (a SHARED object)
+     would corrupt the aliasing owner — it FAULTS; rc <= 0 is the usual underflow. *)
+  | Reuse :: rest => if Z.eqb rc 1 then exec rest 0 else None
   end.
 
 Definition run (ops : list Op) : option Z := exec ops 0.
@@ -208,8 +220,81 @@ Proof. reflexivity. Qed.
 Example cert_move_out_underflow_rejects : check_cert "m"%string = false. (* move-out with nothing owned = use-after-move *)
 Proof. reflexivity. Qed.
 
-(* perceus mode: a reuse-release `r` folds like a plain release — alloc, reuse. *)
+(* perceus mode: a reuse-release `r` on a UNIQUE object (rc = 1) — alloc, reuse. *)
 Example cert_reuse_balanced : check_cert "ir"%string = true.
+Proof. reflexivity. Qed.
+
+(* ─── REUSE SOUNDNESS (the perceus uniqueness obligation, A1 "+reuse健全性") ───
+   A `Reuse` event asserts the block is UNIQUELY owned so it can be repurposed in
+   place. `reuses_unique` is the decidable property "every Reuse in the run acts
+   at rc = 1" — exactly what makes in-place reuse safe (no aliasing owner to
+   corrupt). It mirrors `exec` but only watches the Reuse sites. *)
+Fixpoint reuses_unique (ops : list Op) (rc : Z) : bool :=
+  match ops with
+  | [] => true
+  | Inc :: rest => reuses_unique rest (rc + 1)
+  | Alias :: rest => reuses_unique rest (rc + 1)
+  | Dec :: rest => if rc <=? 0 then true else reuses_unique rest (rc - 1)
+  | MoveOut :: rest => if rc <=? 0 then true else reuses_unique rest (rc - 1)
+  | Reuse :: rest => if Z.eqb rc 1 then reuses_unique rest 0 else false
+  end.
+
+(* The bridge: a run that does NOT fault has every Reuse at rc = 1. This holds
+   because `exec`'s Reuse arm FAULTS unless rc = 1 — so a non-faulting run cannot
+   contain a shared reuse. (Pure proof-reuse of the tightened fold; no new axiom.) *)
+Lemma exec_ok_reuses_unique :
+  forall ops rc, exec ops rc <> None -> reuses_unique ops rc = true.
+Proof.
+  induction ops as [| o rest IH]; intros rc H.
+  - reflexivity.
+  - destruct o; simpl in *.
+    + apply IH. exact H.
+    + apply IH. exact H.
+    + destruct (rc <=? 0) eqn:E. { exfalso. apply H. reflexivity. } apply IH. exact H.
+    + destruct (rc <=? 0) eqn:E. { exfalso. apply H. reflexivity. } apply IH. exact H.
+    + destruct (Z.eqb rc 1) eqn:E. { apply IH. exact H. } exfalso. apply H. reflexivity.
+Qed.
+
+(* REUSE SOUNDNESS: an accepted certificate has every Reuse acting on a UNIQUELY
+   owned object — so the compiler's in-place-reuse decision is safe, re-derived by
+   the checker's own fold, never trusting the compiler's uniqueness analysis. *)
+Theorem check_reuse_sound :
+  forall ops, check ops = true -> reuses_unique ops 0 = true.
+Proof.
+  intros ops H. apply exec_ok_reuses_unique.
+  unfold check, run in H. destruct (exec ops 0) eqn:E.
+  - intro Hcon. discriminate Hcon.
+  - discriminate H.
+Qed.
+
+(* Lifted to a whole-function / certificate: every object's reuses are sound. *)
+Theorem check_all_reuse_sound :
+  forall objs, check_all objs = true ->
+    forall ops, In ops objs -> reuses_unique ops 0 = true.
+Proof.
+  intros objs H ops Hin. unfold check_all in H. rewrite forallb_forall in H.
+  apply check_reuse_sound. apply H. exact Hin.
+Qed.
+
+Theorem check_cert_reuse_sound :
+  forall s, check_cert s = true ->
+    forall ops, In ops (parse s) -> reuses_unique ops 0 = true.
+Proof.
+  intros s H. unfold check_cert in H. apply check_all_reuse_sound. exact H.
+Qed.
+
+(* THE CLOSED HOLE (non-vacuous). `iard` = alloc, ALIAS (rc 1→2), REUSE (rc 2),
+   release — it BALANCES to 0, so the bare RC-balance checker ACCEPTED it. But it
+   reuses a SHARED object in place (an aliasing bug). The uniqueness fold now
+   REJECTS it: a reuse at rc = 2 ≠ 1 faults. This is the gate that makes the
+   shared-reuse class non-recurring. *)
+Example cert_shared_reuse_rejects : check_cert "iard"%string = false.
+Proof. reflexivity. Qed.
+
+Example reuses_unique_ir : reuses_unique [Inc; Reuse] 0 = true.
+Proof. reflexivity. Qed.
+
+Example reuses_shared_iard_not_unique : reuses_unique [Inc; Alias; Reuse; Dec] 0 = false.
 Proof. reflexivity. Qed.
 
 (* AXIOM AUDIT (the "Print Assumptions ⊆ standard" gate). Soundness must rest on
@@ -218,4 +303,7 @@ Proof. reflexivity. Qed.
 Print Assumptions check_sound.
 Print Assumptions check_all_sound.
 Print Assumptions check_cert_sound.
+Print Assumptions check_reuse_sound.
+Print Assumptions check_all_reuse_sound.
+Print Assumptions check_cert_reuse_sound.
 

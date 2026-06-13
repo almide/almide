@@ -189,11 +189,19 @@ because they are about the run's `Z` result). v0 certificates remain valid.
      witness level by `check_sound`'s `no_leak`) is now bound to real freed
      MEMORY — the property the eager-copy renderer cannot achieve (it emits no
      release) and a release-emitting renderer realizes. The extracted checker
-     handles `r` end-to-end (`build-checker.sh` perceus demo). proof spine = 15
-     theorems axiom-clean. REMAINING (4b): the reuse-uniqueness subset section
-     (`r-objects ⊆ proven-unique-at-drop` — perceus reuse SOUNDNESS, via the
-     Subset law) and the real-RC renderer that emits `rc_dec`/reuse + its
-     translation validation.
+     handles `r` end-to-end (`build-checker.sh` perceus demo). **DONE (4b) reuse
+     SOUNDNESS — `check_reuse_sound`**: instead of a subset section (which would
+     trust a compiler-asserted "proven-unique" SET — an inference the checker
+     cannot re-derive), uniqueness is discharged by the FOLD: `exec`'s `Reuse` arm
+     is tightened to valid-iff-`rc = 1`, so a Reuse of a SHARED object (rc > 1)
+     FAULTS. The checker derives uniqueness from its OWN count — simpler and
+     strictly sound. `RuntimeModel.step_mem`/`Termination.fuel_exec` are kept in
+     lockstep (`rt_reuse`); the closed hole `iard` (a BALANCED cert that reuses a
+     shared object) now REJECTs at both the Coq (`cert_shared_reuse_rejects`) and
+     extracted-checker (`build-checker.sh shared_reuse.cert`) levels. proof spine =
+     **21 theorems axiom-clean**. The real-RC renderer that emits `rc_dec`/reuse +
+     its translation validation: `rc_dec` DONE (A1.1b); physical reuse (free-list)
+     + `rc_inc` sharing are the remaining renderer slices (A1.2 / A1.3).
 5. **full mode: `b` (closure-env borrow) + branch resource-state agreement** →
    control-flow + closures.
 

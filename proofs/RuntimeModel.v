@@ -38,10 +38,18 @@ Definition rt_dec (m : Mem) (base : Z) : option Mem :=
   if read_rc m base <=? 0 then None
   else Some (upd m (base + RC_OFFSET) (read_rc m base - 1)).
 
+(* REUSE-release: valid ONLY on a UNIQUELY-owned cell (rc = 1) — reusing a SHARED
+   cell in place would corrupt the aliasing owner, so it FAULTS. On rc = 1 it
+   brings the cell to 0 (the block is repurposed). Mirrors exec's tightened Reuse,
+   so the memory machine stays in lockstep with the abstract semantics. *)
+Definition rt_reuse (m : Mem) (base : Z) : option Mem :=
+  if Z.eqb (read_rc m base) 1 then Some (upd m (base + RC_OFFSET) 0) else None.
+
 Definition step_mem (o : Op) (m : Mem) (base : Z) : option Mem :=
   match o with
   | Inc | Alias => Some (rt_inc m base)
-  | Dec | MoveOut | Reuse => rt_dec m base
+  | Dec | MoveOut => rt_dec m base
+  | Reuse => rt_reuse m base
   end.
 
 Fixpoint mrun (ops : list Op) (m : Mem) (base : Z) : option Mem :=
@@ -88,10 +96,12 @@ Proof.
       * reflexivity.
       * pose proof (IH (upd m (base + RC_OFFSET) (read_rc m base - 1)) base) as IH2.
         rewrite (read_upd_same m base (read_rc m base - 1)) in IH2. exact IH2.
-    + (* Reuse *) unfold rt_dec. destruct (read_rc m base <=? 0) eqn:E.
-      * reflexivity.
-      * pose proof (IH (upd m (base + RC_OFFSET) (read_rc m base - 1)) base) as IH2.
-        rewrite (read_upd_same m base (read_rc m base - 1)) in IH2. exact IH2.
+    + (* Reuse *) unfold rt_reuse. destruct (Z.eqb (read_rc m base) 1) eqn:E.
+      * (* rc = 1: cell → 0; abstract exec → exec rest 0 *)
+        pose proof (IH (upd m (base + RC_OFFSET) 0) base) as IH2.
+        rewrite (read_upd_same m base 0) in IH2. exact IH2.
+      * (* rc <> 1: both fault (shared reuse / underflow) *)
+        reflexivity.
 Qed.
 
 (* COROLLARY: an accepted certificate (the abstract run ends balanced from rc 0)

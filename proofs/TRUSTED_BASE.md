@@ -48,7 +48,9 @@ axioms). Verified by `proofs/check.sh`:
 | `check_sound` | OwnershipChecker.v | Closed under the global context |
 | `check_all_sound` | OwnershipChecker.v | Closed under the global context |
 | `check_cert_sound` | OwnershipChecker.v | Closed under the global context |
+| `check_reuse_sound` | OwnershipChecker.v | Closed under the global context |
 | `eager_copy_refines_safety` | ALS.v | Closed under the global context |
+| `mrun_tracks_exec` | RuntimeModel.v | Closed under the global context |
 
 ## Known limitations (what is NOT yet proven — recorded, not hidden)
 
@@ -56,11 +58,13 @@ The receipt's claims are scoped to exactly this:
 
 - **The flight-grade property SET is complete on the value-semantics subset**:
   RC balance (memory safety), name totality, capability bound (incl. transitive),
-  type-concretization, memory-model leak-freedom, byte-binding table, operand-stack
-  balance, and termination of the loop-free fragment — all kernel-checked and
-  axiom-clean. What remains is DEPTH (the byte-binding ISA layer / a real-RC
-  renderer) and BREADTH (lowering beyond the subset: control flow, closures,
-  stdlib) — not new properties on the subset.
+  type-concretization, memory-model leak-freedom, reuse soundness (a `Reuse` acts
+  only on a UNIQUELY-owned object — no aliased in-place reuse), byte-binding table,
+  operand-stack balance, and termination of the loop-free fragment — all
+  kernel-checked and axiom-clean (21 theorems). What remains is DEPTH (the
+  byte-binding ISA layer / the physical-reclamation half of the real-RC renderer)
+  and BREADTH (lowering beyond the subset: control flow, closures, stdlib) — not
+  new properties on the subset.
 - **The wasm renderer is in the RC regime (A1.1b): it emits a release per drop.**
   A `Drop` now renders as `call $rc_dec`, decrementing the refcount cell (laid at
   heap offset 0 by the A1.1a relayout = `RuntimeModel.RC_OFFSET`) to 0 — so the
