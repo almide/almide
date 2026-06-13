@@ -14,7 +14,7 @@
 //! `verify_ownership(f)` accepts (same invariant); the unit tests pin that
 //! correspondence, and `proofs/gate.sh` runs the actual proven binary on it.
 
-use crate::{CallArg, MirFunction, Op, ValueId};
+use crate::{CallArg, Capability, MirFunction, Op, ValueId};
 use std::collections::BTreeMap;
 
 /// The name-totality witness (proofs/NameTotality.v, the 2nd flight-grade
@@ -79,6 +79,45 @@ pub fn name_witness(func: &MirFunction) -> NameWitness {
         used.push(r);
     }
     NameWitness { defined, used }
+}
+
+/// The capability-bound witness (proofs/CapabilityBound.v, the 4th flight-grade
+/// property): the DECLARED capability allowlist (the function's effect
+/// signature) and the USED capabilities (those its body's runtime calls reach).
+/// The kernel-proven `check_caps` accepts iff `used ⊆ allowed` — i.e. the
+/// function reaches no host effect it did not declare (the sandbox promise).
+pub struct CapWitness {
+    pub allowed: Vec<Capability>,
+    pub used: Vec<Capability>,
+}
+
+/// Collect the (declared, used) capabilities of a function. Used capabilities
+/// are derived from the runtime calls in the body via [`crate::RtFn::capability`]
+/// (the single, exhaustive mapping). NOTE: capabilities reached transitively
+/// through [`Op::CallFn`] (user/runtime callees) are a later brick — this
+/// witness covers a function's DIRECT host effects.
+pub fn cap_witness(func: &MirFunction) -> CapWitness {
+    let mut used: Vec<Capability> = Vec::new();
+    for op in &func.ops {
+        if let Op::Call { func: rt, .. } = op {
+            if let Some(cap) = rt.capability() {
+                used.push(cap);
+            }
+        }
+    }
+    CapWitness { allowed: func.declared_caps.clone(), used }
+}
+
+/// Serialize the capability witness in the format `proofs/CapabilityBound.v`'s
+/// `check_caps_cert` parses: `<allowed ids>|<used ids>` (space-separated
+/// registry ids, via [`Capability::id`]). The proven checker accepts iff
+/// `used ⊆ allowed` (no undeclared host effect).
+pub fn cap_witness_string(func: &MirFunction) -> String {
+    let w = cap_witness(func);
+    let ids = |v: &[Capability]| {
+        v.iter().map(|c| c.id().to_string()).collect::<Vec<_>>().join(" ")
+    };
+    format!("{}|{}", ids(&w.allowed), ids(&w.used))
 }
 
 /// Per-object refcount-event accumulator, preserving object creation order.
@@ -159,7 +198,10 @@ pub fn ownership_certificate(func: &MirFunction) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{verify_ownership, Init, MirFunction, MirParam, Op, Repr, ValueId, PLACEHOLDER_LAYOUT};
+    use crate::{
+        verify_ownership, CallArg, Capability, Init, MirFunction, MirParam, Op, Repr, RtFn,
+        ValueId, PLACEHOLDER_LAYOUT,
+    };
 
     fn heap() -> Repr {
         Repr::Ptr { layout: PLACEHOLDER_LAYOUT }
@@ -316,6 +358,47 @@ mod tests {
     }
 
     #[test]
+    fn cap_witness_derives_used_from_runtime_calls() {
+        // The 4th property: used capabilities come from the body's runtime calls
+        // (PrintInt reaches Stdout); pure heap ops reach none. The witness checks
+        // them against the declared bound.
+        let print = func(vec![
+            Op::Const { dst: ValueId(0) },
+            Op::Call { dst: None, func: RtFn::PrintInt, args: vec![CallArg::Scalar(ValueId(0))] },
+        ]);
+        assert_eq!(cap_witness(&print).used, vec![Capability::Stdout]);
+
+        // A pure heap op (no host effect) leaves the used set empty.
+        let pure = func(vec![
+            Op::Alloc { dst: ValueId(0), repr: heap(), init: Init::Opaque },
+            Op::MakeUnique { v: ValueId(0) },
+            Op::Call {
+                dst: Some(ValueId(0)),
+                func: RtFn::ListPush,
+                args: vec![CallArg::Handle(ValueId(0)), CallArg::Imm(1)],
+            },
+            Op::Drop { v: ValueId(0) },
+        ]);
+        assert!(cap_witness(&pure).used.is_empty());
+    }
+
+    #[test]
+    fn cap_witness_string_matches_the_coq_parser_format() {
+        // declares Stdout, prints → `0|0`  (allowed ⊇ used → checker accepts).
+        let mut declared = func(vec![
+            Op::Const { dst: ValueId(0) },
+            Op::Call { dst: None, func: RtFn::PrintInt, args: vec![CallArg::Scalar(ValueId(0))] },
+        ]);
+        declared.declared_caps = vec![Capability::Stdout];
+        assert_eq!(cap_witness_string(&declared), "0|0");
+
+        // declares nothing, prints → `|0`  (used ⊄ allowed → checker rejects).
+        let mut undeclared = declared.clone();
+        undeclared.declared_caps = vec![];
+        assert_eq!(cap_witness_string(&undeclared), "|0");
+    }
+
+    #[test]
     fn heap_param_owned_and_returned_balances() {
         // fn(p: heap) -> p : param arrives owned (+1), returned = moved out (−1).
         let p = ValueId(0);
@@ -324,6 +407,7 @@ mod tests {
             params: vec![MirParam { value: p, repr: heap() }],
             ops: vec![],
             ret: Some(p),
+            ..Default::default()
         };
         assert_eq!(ownership_certificate(&f), "id\n");
         assert_eq!(verify_ownership(&f), Ok(()));

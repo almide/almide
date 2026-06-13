@@ -7,8 +7,8 @@
 //!   emit_cert <scenario> [ownership|names]   (property defaults to ownership)
 
 use almide_mir::{
-    certificate::{name_witness_string, ownership_certificate},
-    Init, MirFunction, Op, Repr, ValueId, PLACEHOLDER_LAYOUT,
+    certificate::{cap_witness_string, name_witness_string, ownership_certificate},
+    CallArg, Capability, Init, MirFunction, Op, Repr, RtFn, ValueId, PLACEHOLDER_LAYOUT,
 };
 
 fn heap() -> Repr {
@@ -48,8 +48,33 @@ fn scenario(which: &str) -> MirFunction {
             ],
             ..Default::default()
         },
+        // prints a scalar (reaches Stdout) AND declares Stdout → within bound,
+        // the capability checker must accept.
+        "sandboxed" => MirFunction {
+            name: "f".into(),
+            ops: vec![
+                Op::Const { dst: a },
+                Op::Call { dst: None, func: RtFn::PrintInt, args: vec![CallArg::Scalar(a)] },
+            ],
+            declared_caps: vec![Capability::Stdout],
+            ..Default::default()
+        },
+        // prints a scalar (reaches Stdout) but declares NOTHING → an undeclared
+        // host effect, the capability checker must reject.
+        "undeclared" => MirFunction {
+            name: "f".into(),
+            ops: vec![
+                Op::Const { dst: a },
+                Op::Call { dst: None, func: RtFn::PrintInt, args: vec![CallArg::Scalar(a)] },
+            ],
+            declared_caps: vec![], // declares no capability
+            ..Default::default()
+        },
         other => {
-            eprintln!("unknown scenario: {other} (try: balanced | leak | dangling)");
+            eprintln!(
+                "unknown scenario: {other} \
+                 (try: balanced | leak | dangling | sandboxed | undeclared)"
+            );
             std::process::exit(2);
         }
     }
@@ -62,8 +87,9 @@ fn main() {
     match property.as_str() {
         "ownership" => print!("{}", ownership_certificate(&f)),
         "names" => print!("{}", name_witness_string(&f)),
+        "caps" => print!("{}", cap_witness_string(&f)),
         other => {
-            eprintln!("unknown property: {other} (try: ownership | names)");
+            eprintln!("unknown property: {other} (try: ownership | names | caps)");
             std::process::exit(2);
         }
     }

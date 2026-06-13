@@ -9,8 +9,10 @@ cd "$(dirname "$0")"
 COQC="${COQC:-$(command -v coqc)}"
 
 echo "== compile + extract the proven checker =="
+"$COQC" -Q . AlmideTrust Subset.v >/dev/null
 "$COQC" -Q . AlmideTrust OwnershipChecker.v >/dev/null
 "$COQC" -Q . AlmideTrust NameTotality.v >/dev/null
+"$COQC" -Q . AlmideTrust CapabilityBound.v >/dev/null
 "$COQC" -Q . AlmideTrust Extract.v >/dev/null
 
 echo "== link the runnable checker (extracted check_cert, parser internalized) =="

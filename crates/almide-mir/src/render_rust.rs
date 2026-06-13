@@ -221,6 +221,7 @@ mod tests {
                 b: ValueId(1),
             }],
             ret: Some(ValueId(2)),
+            ..Default::default()
         };
         let main = MirFunction {
             name: "main".into(),
@@ -234,6 +235,7 @@ mod tests {
                 Op::Call { dst: None, func: RtFn::PrintInt, args: vec![CallArg::Scalar(ValueId(0))] },
             ],
             ret: None,
+            ..Default::default()
         };
         MirProgram { functions: vec![add, main] }
     }

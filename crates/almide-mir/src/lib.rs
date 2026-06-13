@@ -205,6 +205,44 @@ pub enum RtFn {
     PrintInt,
 }
 
+impl RtFn {
+    /// The host [`Capability`] this runtime function reaches, if any. Pure heap
+    /// ops touch no host effect; the print ops reach [`Capability::Stdout`]. This
+    /// is the SINGLE mapping the capability witness derives "used capabilities"
+    /// from — exhaustive, so a new effectful runtime fn cannot silently escape
+    /// the sandbox accounting.
+    pub const fn capability(self) -> Option<Capability> {
+        match self {
+            RtFn::ListSet | RtFn::ListPush => None,
+            RtFn::PrintList | RtFn::PrintInt => Some(Capability::Stdout),
+        }
+    }
+}
+
+/// A host CAPABILITY a function may reach — the unit of the sandbox promise
+/// (the 4th flight-grade property, proofs/CapabilityBound.v: a program reaches
+/// ONLY the capabilities it declares). A VALUE OBJECT, not a raw id: you write
+/// `Capability::Stdout`, never `0`. The stable registry id the proven checker
+/// compares is recovered via [`Capability::id`], so the "Stdout = 0" mapping
+/// lives in exactly ONE place and MUST match the Coq capability registry. The
+/// set is closed and grows only as the runtime gains host effects (fs, net, …).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash, PartialOrd, Ord)]
+pub enum Capability {
+    /// Writing to standard output (the only host effect the current MIR subset
+    /// reaches, via [`RtFn::PrintInt`] / [`RtFn::PrintList`]).
+    Stdout,
+}
+
+impl Capability {
+    /// The stable registry id — the ONLY place a `Capability` becomes a number.
+    /// MUST agree with proofs/CapabilityBound.v's registry (Stdout = 0).
+    pub const fn id(self) -> u32 {
+        match self {
+            Capability::Stdout => 0,
+        }
+    }
+}
+
 /// An argument to a runtime [`Op::Call`] / user [`Op::CallFn`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CallArg {
@@ -236,6 +274,11 @@ pub struct MirFunction {
     pub params: Vec<MirParam>,
     pub ops: Vec<Op>,
     pub ret: Option<ValueId>,
+    /// The host [`Capability`]s this function is PERMITTED to reach (its effect
+    /// signature, lowered). The capability witness checks the capabilities the
+    /// body actually uses against this declared bound — accept ⟹ no undeclared
+    /// host effect (proofs/CapabilityBound.v). Empty = a pure/sandboxed function.
+    pub declared_caps: Vec<Capability>,
 }
 
 /// A whole MIR program.

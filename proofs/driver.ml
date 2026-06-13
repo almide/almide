@@ -12,7 +12,7 @@ let read_file path =
 
 let () =
   if Array.length Sys.argv < 3 then (
-    prerr_endline "usage: checker <ownership|names> <witness-file>";
+    prerr_endline "usage: checker <ownership|names|caps> <witness-file>";
     exit 2);
   let mode = Sys.argv.(1) in
   let bytes = read_file Sys.argv.(2) in
@@ -20,8 +20,9 @@ let () =
     match mode with
     | "ownership" -> Checker.check_cert bytes
     | "names" -> Checker.check_names_cert bytes
+    | "caps" -> Checker.check_caps_cert bytes
     | m ->
-      prerr_endline ("unknown property: " ^ m ^ " (try: ownership | names)");
+      prerr_endline ("unknown property: " ^ m ^ " (try: ownership | names | caps)");
       exit 2
   in
   if accepted then (print_endline "ACCEPT"; exit 0)

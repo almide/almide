@@ -1,4 +1,5 @@
 -Q . AlmideTrust
+Subset.v
 OwnershipChecker.v
 ALS.v
 NameTotality.v

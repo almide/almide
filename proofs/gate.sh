@@ -5,6 +5,7 @@
 # emitted bytes — by the Coq soundness theorems:
 #   ownership  →  check_all_sound        (no double-free, no leak)
 #   names      →  check_names_cert_sound (no dangling MIR reference)
+#   caps       →  check_caps_cert_sound  (no undeclared host capability)
 # The compiler may be buggy; if its witness is wrong, the proven checker rejects.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -35,7 +36,11 @@ echo "-- property: names (no dangling MIR reference) --"
 run balanced names 0
 run dangling names 1
 
+echo "-- property: caps (no undeclared host capability) --"
+run sandboxed  caps 0
+run undeclared caps 1
+
 echo
 echo "GATE OK: the untrusted compiler's per-build witnesses were re-verified by"
-echo "the kernel-proven checker on TWO properties (ownership + name totality),"
-echo "each accept ⟹ the property holds, by the Coq soundness theorems."
+echo "the kernel-proven checker on THREE properties (ownership + name totality +"
+echo "capability bound), each accept ⟹ the property holds, by the Coq theorems."
