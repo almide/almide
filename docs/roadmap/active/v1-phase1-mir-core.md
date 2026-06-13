@@ -155,12 +155,34 @@ Call ...
 | **4. capture+MakeUnique 統一** | detect_shared_mut/detect_mutated_captures → 1分析。needs_cow + clone-at-mutation → 1 MakeUnique(Cell/RefCell Repr 区別) | 中(縁・2検出器 drift) | value-等価 + host-determinism(BTreeSet 順序) | finding #4 の縁を明示ノード化 |
 | **5. Rust レンダラ MIR 化** | Rust 側も MIR 消費に切替。両レンダラ dumb 完成 | 中 | 全 corpus byte/value 一致 | §7 の「次に Rust レンダラを切替」 |
 
-**全段共通の検証ゲート**(§8.1-③が必須化):
-- **value-等価(byte gate)が load-bearing**。leak/RC-balance だけでは**不足** — AliasCow 回帰は RC バランスのまま wrong-output(alias_cow.rs で実証)。Perceus-belt 式 RC 検証器だけ積んでも value 破壊を通す。
-- **`new MIR-wasm == old emit_wasm`** を `wasm_cross_target_spec`(tests/wasm_runtime_test.rs:471, 両ターゲットで (exit,stdout,stderr) triple 比較)で。移行中は**凍結した旧 emit_wasm**を基準に broader corpus を replay。`@xt-allow` ratchet は down-only。
+### 5.1 検証 oracle の二層構造(完全性の核心 — 必読)
+
+**unify は差分テストが頼る独立性そのものを手放す**。byte gate(native↔wasm 一致)が効くのは2つの**独立した**実装が偶然一致しにくいから。v1 では両レンダラが**1つの MIR から**出る → **Core→MIR の決定が間違うと全ターゲットが同一に間違い、native↔wasm 一致ゲートはそこで盲目**になる(両方 agree する)。これは仮説でなく Phase 0 alias_cow(§8.1-③)で実証済み: 「MakeUnique を省くと両イディオムが**同一に** `a` を破壊し RC はバランスのまま」= 共有決定バグは差分テストに不可視。
+
+→ 完全性は byte gate だけには**絶対に乗らない**。還元ステップごとに、**検証対象から独立な oracle** を置く:
+
+| ステップ | 保つ性質 | 独立 oracle | byte gate で覆える? |
+|---|---|---|---|
+| **Core→MIR(決定)** | source 意味を保存 | **意味法則の property test + 翻訳検証(#570)** | ❌ **覆えない(本最前線)** |
+| MIR→wasm | MIR 小ステップに忠実 | interp 一致 + wasm-spec 忠実性証明 | △(移行中は旧 emit が独立版) |
+| MIR→Rust | MIR 小ステップに忠実 | 移行中=旧 emit 差分、移行後=interp | △ |
+
+**2行目の oracle(Core→MIR 正しさ)は本 Phase の load-bearing な新規作業**。byte gate / interp は renderer 忠実性用で、Core→MIR バグには無力。具体策:
+- **意味法則の property test**(fixture でなく**法則**を proptest 化): 値意味論「`b=a; mutate(b)` で `a` 不変」、所有権不変量(dup/drop バランス、drop 後 use-after-free 無し、Consume 後の元 var 不参照)を**ソースレベルの真**として性質検査。第2実装を要さず共有決定バグを**上から**捕まえる。
+- **interp は renderer バグは捕るが Core→MIR バグは捕らない**(間違った MIR を忠実に実行すれば間違った結果に**一致**する)。だから interp は MIR→target 用、Core→MIR には property+proof が要る。
+- **翻訳検証証明(#570)**: Core→MIR の所有権決定が意味を保存する証明。Perceus 健全性の Lean は既に core にある → MIR 小ステップに対し述べ直す(Phase 2 で本格化、Phase 1 では property test で先行)。
+
+### 5.2 renderer 忠実性ゲート(byte gate 群 — 既存資産)
+
+- **value-等価(byte gate)が load-bearing**(renderer 層で)。leak/RC-balance だけでは**不足** — AliasCow 回帰は RC バランスのまま wrong-output(alias_cow.rs で実証)。Perceus-belt 式 RC 検証器だけ積んでも value 破壊を通す。
+- **`new MIR-wasm == old emit_wasm`** を `wasm_cross_target_spec`(tests/wasm_runtime_test.rs:471, 両ターゲットで (exit,stdout,stderr) triple 比較)で。移行中は**凍結した旧 emit_wasm**を基準に broader corpus を replay(旧 emit が**独立版**として機能するのは移行中だけ — §5.3)。`@xt-allow` ratchet は down-only。
 - **host-determinism**(check-host-determinism.sh): MIR パスが drop/cow 順序に HashMap 反復を入れると value gate は通るが host gate が割れる。BTreeSet 順序を維持。
 - **heisenbug 対策**: corpus replay は必要だが歴史的に不十分(§643)。targeted drop-order fixture を併用。
 - **同一 `ALMIDE_WASM_FREES`** を新旧両方で(leak body と RC body を比べて phantom divergence を出さない)。
+
+### 5.3 退役順序の不変条件(危険な落とし穴)
+
+親 §6 は「忠実性が立ったら byte gate を退役」と書くが、**順序が命**: 差分 oracle(旧 emit との差分 / native↔wasm 一致)を消してよいのは、**上位の独立 oracle(interp + property laws + wasm-spec 忠実性)が先に置き換わった後だけ**。さもないと退役の瞬間に Core→MIR 決定バグへの盲点が口を開く。**「差分を消すなら、その前に上位の独立 oracle を立てる」**を移行の硬性不変条件とする。
 
 ---
 
@@ -180,6 +202,7 @@ Call ...
 | R10 | mutable_captures は plain rc_dec(cell ptr を object として walk すると garbage decref → wasm trap) | statements.rs:360-368 | MIR が「cell, drop plain」事実を持つ |
 | R11 | 段2-5 の cutover 中、旧 emit_typed_rc_dec と新 MIR Drop が共存 → is_heap_type 2コピーが live に drift | statements.rs:724 | cutover を fixture 単位で原子的に。両経路 byte 一致を常時 assert |
 | R12 | 1つの極性ミスが corpus に fan-out(検証テール = §7 最大コスト) | — | 段ごとに corpus 全 re-green。賭けは段2で早期判定 |
+| **R13** | **unify が差分独立性を消す → Core→MIR 決定バグが全ターゲットを同一に間違わせ、native↔wasm 一致ゲートが盲目に**(alias_cow §8.1-③ がカナリア) | §5.1 | **property-law oracle(値意味論/所有権不変量)を第一級ゲートに**。退役順序の不変条件(§5.3)。byte gate は renderer 忠実性専用と割切る |
 
 ---
 
@@ -189,8 +212,10 @@ Call ...
 2. emit_typed_rc_dec が削除され、wasm drop が平坦 Drop ノードの1行レンダリングになる。
 3. 座標①〜⑤の重複実装が単一事実に統合される。
 4. 全 corpus(native↔wasm)が **value-等価**で緑、host-determinism 緑、`@xt-allow` が増えていない。
-5. `PerceusVerify`(Lean 認証)が新 MIR Dup/Drop ノードに対して有効なまま(flight-grade Lean 資産が detach しない)。
-6. §643 / #591 / #610 が**構造的に**(単発修正でなく)解消され、回帰 fixture で固定。
+5. **Core→MIR 決定の property-law oracle が緑**(値意味論/所有権不変量を proptest 化、§5.1)— byte gate が覆えない共有決定バグを上から捕まえる第一級ゲートとして稼働。
+6. `PerceusVerify`(Lean 認証)が新 MIR Dup/Drop ノードに対して有効なまま(flight-grade Lean 資産が detach しない)。
+7. §643 / #591 / #610 が**構造的に**(単発修正でなく)解消され、回帰 fixture で固定。
+8. 差分 oracle(旧 emit 差分 / byte gate)は**まだ退役しない** — 退役は上位独立 oracle(interp 規範化 + property laws + wasm-spec 忠実性)が置き換わる Phase 2 以降、§5.3 の不変条件下でのみ。
 
 → 達成で Phase 2(MIR 形式化・interp を規範・Lean を MIR 意味論へ)へ。未達なら §8 の不合格分岐(正準形見直し / Rust 明示 Rc 許容 / 資格化専用割り切り)を**段2の早期 falsify で安く**選べる。
 
