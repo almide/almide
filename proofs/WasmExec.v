@@ -20,7 +20,7 @@
    Local 0 = the `$p` parameter; memarg offset is honoured (0 here). *)
 
 From AlmideTrust Require Import RuntimeModel WasmEncode.
-From Stdlib Require Import ZArith List.
+From Stdlib Require Import ZArith List Lia.
 Import ListNotations.
 Open Scope Z_scope.
 
@@ -307,6 +307,26 @@ Proof.
   intros p m H. cbn -[Z.add upd Z.sub]. rewrite H. reflexivity.
 Qed.
 
+Lemma read_upd_other : forall m a v b, b <> a -> upd m a v b = m b.
+Proof. intros m a v b H. unfold upd. apply Z.eqb_neq in H. rewrite H. reflexivity. Qed.
+
+(* LEAK-FREEDOM on the FULL rc_dec bytes: releasing a uniquely-owned cell (rc = 1)
+   leaves the rc cell at 0 — the block is FREED — when run on the renderer's real
+   `$rc_dec` bytes. (The free-list push that follows stores to the block's len field
+   and `$freelist`, not the rc cell, so the cell stays 0.) This is the "ends at 0"
+   leak-freedom half, realized on the actual bytes. *)
+Theorem rc_dec_bytes_frees_when_one :
+  forall p m, 0 <= p -> m (p + 0 + 0) = 1 ->
+    exists m', run_g 200 rc_dec_bytes (init_loc p) [] m = Some m'
+               /\ m' (p + 0 + 0) = 0.
+Proof.
+  intros p m Hp H. cbn -[Z.add upd]. rewrite H. cbn -[Z.add upd].
+  eexists. split; [ reflexivity | ].
+  rewrite read_upd_other by (unfold FREELIST_ADDR; lia).
+  rewrite read_upd_other by lia.
+  unfold upd. rewrite Z.eqb_refl. reflexivity.
+Qed.
+
 Print Assumptions rc_inc_bytes_execute_to_rt_inc.
 Print Assumptions trap_bytes_trap_on_zero.
 Print Assumptions trap_bytes_pass_on_nonzero.
@@ -314,3 +334,4 @@ Print Assumptions general_if_runs_body_when_true.
 Print Assumptions general_if_skips_body_when_false.
 Print Assumptions global_set_then_get_roundtrips.
 Print Assumptions rc_dec_bytes_trap_on_zero.
+Print Assumptions rc_dec_bytes_frees_when_one.

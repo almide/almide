@@ -56,6 +56,7 @@ axioms). Verified by `proofs/check.sh`:
 | `rc_inc_bytes_encode_the_instruction_tree` | WasmEncode.v | Closed under the global context |
 | `rc_inc_bytes_execute_to_rt_inc` | WasmExec.v | Closed under the global context |
 | `rc_dec_bytes_trap_on_zero` | WasmExec.v | Closed under the global context |
+| `rc_dec_bytes_frees_when_one` | WasmExec.v | Closed under the global context |
 | `make_unique_yields_unique` | CowSafety.v | Closed under the global context |
 
 ## Known limitations (what is NOT yet proven — recorded, not hidden)
@@ -73,10 +74,10 @@ The receipt's claims are scoped to exactly this:
   `$rc_inc` instruction-trees realizing `rt_dec` / `rt_inc` (`WasmRcDec`) + the
   rc_inc instruction tree encoding to the REAL wasm bytes (`WasmEncode`, grounded
   against wat2wasm) + those real bytes EXECUTING to `rt_inc` on a wasm stack
-  machine + the FULL `$rc_dec` bytes' SAFETY (a double-free traps) executed on the
-  renderer's real bytes by a general interpreter (`WasmExec`), operand-stack
-  balance, and termination of the loop-free fragment — all kernel-checked and
-  axiom-clean (36 audited theorems). What remains is DEPTH (the byte-binding ISA layer; and
+  machine + the FULL `$rc_dec` bytes' SAFETY — no double-free AND leak-freedom —
+  executed on the renderer's real bytes by a general interpreter (`WasmExec`),
+  operand-stack balance, and termination of the loop-free fragment — all
+  kernel-checked and axiom-clean (37 audited theorems). What remains is DEPTH (the byte-binding ISA layer; and
   the RENDERER realizing the free-list/`rc_inc` — its safety MODEL is now proven,
   so that slice REFINES a proof rather than adding trusted runtime) and BREADTH
   (lowering beyond the subset: control flow, closures, stdlib) — not new properties
@@ -157,14 +158,16 @@ The receipt's claims are scoped to exactly this:
   global as a reserved cell, round-trip proven) and INDEXED locals + `local.set`
   (a locals env, for the `$rc` temp). With that, the FULL `$rc_dec` bytes — free-list
   included, with `global.get`/`set` — are GROUNDED against wat2wasm
-  (check-wasm-bytes.sh) and the rc_dec SAFETY is EXECUTED-PROVEN on those real bytes:
-  `WasmExec.rc_dec_bytes_trap_on_zero` — a double-free (releasing an already-0 cell)
-  TRAPS via the trap `if`, run on the renderer's ACTUAL `$rc_dec` byte sequence by
-  the general interpreter. Per the trust model ("we protect SAFETY, not functional
-  correctness"), this is the rc_dec byte-binding that matters; the free-list push's
-  functional correctness (rc 1→0 ⇒ the block joins the list) is not a safety
-  property. NOT yet done: the rest of the module; and that this small inspectable
-  interpreter matches the FULL wasm spec / ISA (the residual — WasmCert-Coq).
+  (check-wasm-bytes.sh) and BOTH rc_dec SAFETY properties are EXECUTED-PROVEN on
+  those real bytes by the general interpreter: `rc_dec_bytes_trap_on_zero` (NO
+  double-free — releasing an already-0 cell TRAPS) AND `rc_dec_bytes_frees_when_one`
+  (LEAK-FREEDOM — a valid release leaves the rc cell at 0, the block freed), run on
+  the renderer's ACTUAL `$rc_dec` byte sequence. Per the trust model ("we protect
+  SAFETY, not functional correctness"), these two are the rc_dec byte-binding that
+  matters; the free-list push's ORGANIZATION (which list the freed block joins) is
+  functional, not a safety property. NOT yet done: the rest of the module (the
+  functional list-op runtime); and that this small inspectable interpreter matches
+  the FULL wasm spec / ISA (the residual — WasmCert-Coq).
 - **One real `.almd` now flows end-to-end** (`proofs/fixtures/return_list.almd`
   → the actual frontend → MIR → proven checker, for ownership + names — weekly
   indicator ① 0→1). The lowering covers only the value-semantics subset (heap
