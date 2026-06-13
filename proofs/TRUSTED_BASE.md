@@ -165,9 +165,16 @@ The receipt's claims are scoped to exactly this:
   the renderer's ACTUAL `$rc_dec` byte sequence. Per the trust model ("we protect
   SAFETY, not functional correctness"), these two are the rc_dec byte-binding that
   matters; the free-list push's ORGANIZATION (which list the freed block joins) is
-  functional, not a safety property. NOT yet done: the rest of the module (the
-  functional list-op runtime); and that this small inspectable interpreter matches
-  the FULL wasm spec / ISA (the residual — WasmCert-Coq).
+  functional, not a safety property. The interpreter's EXECUTION is GROUNDED both
+  ways now: the bytes against wat2wasm, AND the execution against the production
+  engine — a wasmtime differential test (`rc_cell_values_match_the_interpreter_on_-
+  wasmtime`) confirms the REAL engine computes the same rc cell values run_g predicts
+  (rc_inc 1→2, rc_dec 1→0). So the residual shrinks from "trust run_g = the wasm
+  spec" to "wat2wasm/wasmtime = the spec" — production tools at the same trust level
+  as the rest of the toolchain. NOT yet done: the functional list-op runtime (the
+  bootstrap-runtime debt, to be SELF-HOSTED in Almide through the proven path, #30,
+  not hand-bound); and a full in-Coq WasmCert-Coq ISA that would close the
+  interpreter↔spec residual entirely (vs. grounding it against wat2wasm/wasmtime).
 - **One real `.almd` now flows end-to-end** (`proofs/fixtures/return_list.almd`
   → the actual frontend → MIR → proven checker, for ownership + names — weekly
   indicator ① 0→1). The lowering covers only the value-semantics subset (heap

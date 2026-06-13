@@ -733,6 +733,41 @@ mod tests {
         }
     }
 
+    #[test]
+    fn rc_cell_values_match_the_interpreter_on_wasmtime() {
+        // `WasmExec.run_g` PROVES (in Coq, on the grounded bytes): `$rc_inc` takes
+        // the rc cell +1 (rt_inc), and a valid `$rc_dec` takes it 1→0 (leak-freedom).
+        // Confirm the PRODUCTION engine (wasmtime) computes the same cell values on
+        // the renderer's actual `$rc_inc`/`$rc_dec` — grounding the interpreter model
+        // against the real engine, so the WasmExec residual shrinks from "trust run_g
+        // matches the wasm spec" to "wasmtime matches the spec" (a trusted engine, the
+        // same trust level as the wat2wasm byte grounding). `$list_new` inits rc to 1.
+        let inc = format!(
+            "{}{}",
+            preamble(),
+            "  (func $main (local $b i32)\n\
+             \u{20}   (local.set $b (call $list_new (i32.const 0) (i32.const 1)))\n\
+             \u{20}   (call $rc_inc (local.get $b))\n\
+             \u{20}   (call $print_int (i64.extend_i32_s (i32.load (local.get $b)))))\n\
+             \u{20} (func (export \"_start\") (call $main))\n)\n"
+        );
+        if let Some(out) = build_and_run("rcinc_cell", &inc) {
+            assert_eq!(out, "2", "rc_inc: cell 1→2 (rt_inc) — wasmtime must match run_g");
+        }
+        let dec = format!(
+            "{}{}",
+            preamble(),
+            "  (func $main (local $b i32)\n\
+             \u{20}   (local.set $b (call $list_new (i32.const 0) (i32.const 1)))\n\
+             \u{20}   (call $rc_dec (local.get $b))\n\
+             \u{20}   (call $print_int (i64.extend_i32_s (i32.load (local.get $b)))))\n\
+             \u{20} (func (export \"_start\") (call $main))\n)\n"
+        );
+        if let Some(out) = build_and_run("rcdec_cell", &dec) {
+            assert_eq!(out, "0", "rc_dec: cell 1→0 (leak-freedom) — wasmtime must match run_g");
+        }
+    }
+
     fn value_semantics_mir() -> MirFunction {
         // var a = [1,2,3]; var b = a; a[0] = 9; print a; print b
         let (a, b) = (ValueId(0), ValueId(1));
