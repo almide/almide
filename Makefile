@@ -2,7 +2,7 @@ VERSION := $(shell grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/'
 INSTALL_DIR := $(HOME)/.local/almide
 BIN := target/release/almide
 
-.PHONY: build install test test-wasm test-ts check clean fmt release parity cross-target cheatsheet stdlib-docs verify-trust
+.PHONY: build install test test-wasm test-ts check clean fmt release parity cross-target cheatsheet stdlib-docs verify-trust receipt
 
 ## Build
 
@@ -78,6 +78,9 @@ verify-trust:
 	proofs/check.sh
 	proofs/gate.sh
 	cargo test -p almide-mir
+
+receipt:
+	proofs/receipt.sh
 
 fmt:
 	cargo fmt --check 2>/dev/null || true
