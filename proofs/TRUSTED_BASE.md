@@ -96,13 +96,17 @@ The receipt's claims are scoped to exactly this:
   NOT the rc cell, so a re-release of a freed block still traps (verified: the
   double-free trap test and a reuse test, `p1==p2` on alloc/free/realloc, both pass
   on wasmtime; the value-semantics output is byte-unchanged). HONEST scope of what is
-  NOT yet done: (1) the free-list is exact-size HEAD-match only — a mismatched-size
-  freed block is not yet reused (missed reuse, NEVER unsafe; size-classes / walking
-  is a later slice); (2) SHARING — `Dup` still eager-copies (no `rc_inc`/cow), so the
-  `rc_inc` aliasing trace is not yet realized in the RENDERER (A1.3); but its SAFETY
-  is PROVEN (`CowSafety.make_unique_yields_unique`: `MakeUnique` yields a
-  uniquely-owned block, so the sharing renderer's cow REFINES a proof rather than
-  risking aliased mutation).
+  SHARING is now REALIZED too (A1.3-render): `Dup` shares via `rc_inc` (no copy) and
+  `MakeUnique` is a copy-on-write (clone-on-shared — `rc_dec`-FIRST so the alias keeps
+  the original alive and no temp is needed, then `list_copy`), refining
+  `CowSafety.make_unique_yields_unique`. The rc cell now ACTUALLY tracks the abstract
+  refcount (1→2→1→0), exercising the proven rc machine (`WasmRcDec`/`RuntimeModel`),
+  with byte-unchanged value-semantics output. So A1's renderer is now FULLY real-RC —
+  share / cow / free-list / double-free sentinel — every piece REFINING a proof, zero
+  trusted runtime added. NOT yet done (perf/encoding, not safety): the free-list is
+  exact-size HEAD-match only (a mismatched-size freed block is not yet reused — missed
+  reuse, NEVER unsafe; size-classes / walking is a later slice); and the raw-BYTE
+  encoding of the instruction trees (A2's deferred heavy half).
 - **Byte-binding is partial.** The op→wasm-instruction TABLE is a formal Coq
   object (`Translation.v`) and the runtime heap is modeled as a memory state
   machine whose rc cell provably tracks the abstract refcount

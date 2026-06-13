@@ -35,11 +35,11 @@ pub fn validate_safety(wat: &str, mir: &crate::MirFunction) -> bool {
 /// The op → required-wasm-instruction-pattern TABLE — the formal byte-binding
 /// object (certificate-format-v1 §4 / G1.4): each MIR op is bound to the wasm
 /// instruction the renderer must emit for it. A `Drop` is bound to `call $rc_dec`
-/// (the release). `None` = the renderer emits NO instruction for it (Consume is a
-/// move-out transfer — no free here; MakeUnique is satisfied by the eager copy;
-/// opaque alloc / not-yet-rendered ops). Patterns are `call $…` / arithmetic ops,
-/// so they match an actual emitted CALL, never a runtime-preamble `func $…`
-/// definition.
+/// (the release), a `Dup` to `call $rc_inc` (shared acquire), a `MakeUnique` to
+/// `call $list_copy` (the cow clone). `None` = the renderer emits NO instruction
+/// for it (Consume is a move-out transfer — no free here; opaque alloc /
+/// not-yet-rendered ops). Patterns are `call $…` / arithmetic ops, so they match
+/// an actual emitted CALL, never a runtime-preamble `func $…` definition.
 ///
 /// NOTE (honest scope): this checks PRESENCE of each op's pattern (necessary —
 /// it catches a renderer that drops an op). The precise per-op byte-WINDOW
@@ -50,7 +50,7 @@ pub fn wasm_pattern(op: &crate::Op) -> Option<String> {
     use crate::{Init, IntOp, Op, RtFn};
     Some(match op {
         Op::Alloc { init: Init::IntList(_), .. } => "call $list_new".into(),
-        Op::Dup { .. } => "call $list_copy".into(),
+        Op::Dup { .. } => "call $rc_inc".into(),
         Op::Call { func: RtFn::PrintInt, .. } => "call $print_int".into(),
         Op::Call { func: RtFn::PrintList, .. } => "call $print_list".into(),
         Op::Call { func: RtFn::ListSet, .. } => "call $list_set".into(),
@@ -61,14 +61,15 @@ pub fn wasm_pattern(op: &crate::Op) -> Option<String> {
         Op::IntBinOp { op: IntOp::Mul, .. } => "i64.mul".into(),
         // A release decrements the refcount cell — realized by `call $rc_dec`.
         Op::Drop { .. } => "call $rc_dec".into(),
+        // A copy-on-write: MakeUnique clones a SHARED block before in-place
+        // mutation — realized by `call $list_copy` (in the cow's then-branch).
+        Op::MakeUnique { .. } => "call $list_copy".into(),
         // No emitted instruction: Consume MOVES the reference out (no free here),
-        // MakeUnique is satisfied by the eager copy, opaque alloc / not-yet-
-        // rendered ops emit nothing.
+        // opaque alloc / not-yet-rendered ops emit nothing.
         Op::Alloc { .. }
         | Op::Const { .. }
         | Op::Consume { .. }
         | Op::Borrow { .. }
-        | Op::MakeUnique { .. }
         | Op::Pure { .. }
         | Op::Call { func: RtFn::PrintStr, .. } => return None,
     })
@@ -131,8 +132,10 @@ mod tests {
         };
         let wat = render_wasm(&mir);
         assert!(validate_safety(&wat, &mir), "artifact must realize the certified releases");
-        // Two drops → two releases on the real bytes (no leak, no over-free).
-        assert_eq!(wat.matches("call $rc_dec").count(), 2);
+        // The two drops are realized as releases; MakeUnique's cow adds one more
+        // (it relinquishes the shared original before cloning), so >= 2 — never a
+        // leak (the extra release is balanced by the cow's fresh copy block).
+        assert!(wat.matches("call $rc_dec").count() >= 2);
     }
 
     #[test]

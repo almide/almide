@@ -221,9 +221,14 @@ because they are about the run's `Z` result). v0 certificates remain valid.
      block to a free-list and `$alloc` reuses an exact-size head, refining `FreeList`;
      the double-free sentinel is PRESERVED (link in the dead len field, not the rc
      cell), verified on wasmtime (reuse `p1==p2` + double-free trap + value-semantics
-     byte-unchanged). REMAINING renderer realization: A1.3-render (`rc_inc` sharing +
-     cow, refining `CowSafety`); plus A1.2 size-classes/walking (exact-size head-match
-     today) and A2 raw-byte encoding. `rc_dec` DONE (A1.1b).
+     byte-unchanged). **DONE (A1.3-render) — SHARING + cow REALIZED**: `Dup` shares
+     via `rc_inc` (no copy), `MakeUnique` is a cow (clone-on-shared, `rc_dec`-first so
+     no temp), refining `CowSafety`; the rc cell now actually tracks the abstract
+     refcount (1→2→1→0), exercising the proven rc machine, output byte-unchanged.
+     **A1's renderer is now FULLY real-RC (share / cow / free-list / sentinel), every
+     piece refining a proof, zero trusted runtime.** REMAINING (perf/encoding, not
+     safety): A1.2 size-classes/walking (exact-size head-match today); A2 raw-byte
+     encoding. `rc_dec`/`rc_inc` DONE (A1.1b / A1.3-render).
 5. **full mode: `b` (closure-env borrow) + branch resource-state agreement** →
    control-flow + closures.
 

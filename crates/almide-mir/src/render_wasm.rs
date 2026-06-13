@@ -268,10 +268,12 @@ fn render_op(op: &Op, label_off: &BTreeMap<String, (u32, u32)>) -> String {
             }
             s
         }
-        // The single ownership decision: an alias is a fresh COPY (eager COW),
-        // matching the Rust renderer's `.clone()`.
+        // An alias SHARES the object and bumps its refcount (A1.3-render): dst and
+        // src become two handles to the SAME block, rc += 1 — matching the cert's
+        // Alias = +1 and exercising the proven rc machine on a shared cell (whereas
+        // eager-copy kept every cell at 1). In-place mutation is guarded by cow.
         Op::Dup { dst, src } => format!(
-            "    (local.set {d} (call $list_copy (local.get {s})))\n",
+            "    (local.set {d} (local.get {s}))\n    (call $rc_inc (local.get {s}))\n",
             d = local(*dst),
             s = local(*src)
         ),
@@ -302,11 +304,19 @@ fn render_op(op: &Op, label_off: &BTreeMap<String, (u32, u32)>) -> String {
         // use-after-free sentinel. This is the byte the perceus V binds each
         // witness drop to (the leak-freedom realization on the artifact).
         Op::Drop { v } => format!("    (call $rc_dec (local.get {}))\n", local(*v)),
+        // COPY-ON-WRITE before an in-place mutation (A1.3-render, refining
+        // CowSafety.v): if the block is SHARED (rc > 1), clone it so the mutation
+        // touches no alias. The `rc_dec` runs FIRST (rc 2→1 — the alias keeps the
+        // original alive, so no temp is needed), then `list_copy` reads the
+        // still-live original into a fresh uniquely-owned block. rc == 1 → no-op.
+        Op::MakeUnique { v } => format!(
+            "    (if (i32.gt_s (i32.load (i32.add (local.get {v}) (i32.const {rc}))) (i32.const 1))\n      (then\n        (call $rc_dec (local.get {v}))\n        (local.set {v} (call $list_copy (local.get {v})))))\n",
+            v = local(*v),
+            rc = LIST_RC_OFFSET
+        ),
         // Still no-ops: Consume MOVES the reference out (the receiver releases it
-        // later — no dec at THIS site); MakeUnique is satisfied by the eager Dup
-        // copy (the handle is already unique); Const/Borrow/Pure touch no refcount.
+        // later — no dec at THIS site); Const/Borrow/Pure touch no refcount.
         Op::Consume { .. }
-        | Op::MakeUnique { .. }
         | Op::Borrow { .. }
         | Op::Const { .. }
         | Op::Pure { .. } => String::new(),
@@ -415,6 +425,13 @@ fn preamble() -> String {
       (then
         (i32.store (i32.add (local.get $p) (i32.const {LIST_LEN_OFFSET})) (global.get $freelist))
         (global.set $freelist (local.get $p)))))
+
+  ;; acquire one reference (RuntimeModel.v's rt_inc): the shared-Dup primitive
+  ;; (A1.3-render). Realizes WasmRcDec.rc_inc_prog — proven to compute rt_inc.
+  (func $rc_inc (param $p i32)
+    (i32.store (i32.add (local.get $p) (i32.const {LIST_RC_OFFSET}))
+               (i32.add (i32.load (i32.add (local.get $p) (i32.const {LIST_RC_OFFSET})))
+                        (i32.const 1))))
 
   (func $elem_addr (param $list i32) (param $idx i32) (result i32)
     (i32.add (i32.add (local.get $list) (i32.const {LIST_HEADER}))
@@ -593,7 +610,7 @@ mod tests {
     /// discipline, so the convergence guard accounts it SEPARATELY from the
     /// open-stdlib ratchet (§4.1): the trust spine's own core is not "another
     /// stdlib routine." The ratchet on the open surface stays exactly as strict.
-    const RC_PRIMITIVE_FNS: &[&str] = &["$rc_dec"];
+    const RC_PRIMITIVE_FNS: &[&str] = &["$rc_dec", "$rc_inc"];
 
     #[test]
     fn handwritten_wasm_runtime_does_not_grow() {
