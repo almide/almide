@@ -139,6 +139,10 @@ dependencies = [
 [[package]]
 name = "almide-mir"
 version = "0.1.0"
+dependencies = [
+ "almide-ir",
+ "almide-lang",
+]
 
 [[package]]
 name = "almide-optimize"

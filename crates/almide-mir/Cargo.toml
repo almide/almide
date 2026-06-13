@@ -5,7 +5,10 @@ edition = "2021"
 license = "MIT OR Apache-2.0"
 description = "Almide v1 Middle IR — the single source of truth for ownership and layout"
 
-# Greenfield v1 seed: no dependencies yet. The Core-IR→MIR lowering (a later
-# brick) will add a dep on the existing frontend IR as a temporary feeder; the
-# MIR data model + ownership verifier here are self-contained and auditable.
+# Greenfield v1: the MIR data model + ownership verifier (lib.rs) are
+# self-contained and auditable. The Core-IR→MIR lowering (lower.rs) consumes the
+# EXISTING frontend IR as a TEMPORARY feeder (the v1 risk-first build order, §6)
+# — these deps go away once the frontend is greenfielded.
 [dependencies]
+almide-ir = { path = "../almide-ir" }
+almide-lang = { path = "../almide-lang" }

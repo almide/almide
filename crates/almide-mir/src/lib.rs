@@ -25,6 +25,8 @@
 
 #![forbid(unsafe_code)]
 
+pub mod lower;
+
 use std::collections::BTreeMap;
 
 // ───────────────────────────── Layout / Repr ──────────────────────────────
@@ -32,12 +34,20 @@ use std::collections::BTreeMap;
 /// Scalar widths in bytes (the LAYOUT facts that today live scattered across
 /// `emit_wasm/values.rs::byte_size`; here they are named, not raw literals).
 pub mod width {
-    /// `Int` is a 64-bit integer.
-    pub const INT: u16 = 8;
-    /// `Float` is an IEEE-754 double.
-    pub const FLOAT: u16 = 8;
-    /// `Bool` occupies a 32-bit slot (wasm has no narrower value type on the
-    /// stack; native is one byte but the ABI slot is what the Repr records).
+    /// 8-bit integer (`Int8`/`UInt8`).
+    pub const I8: u16 = 1;
+    /// 16-bit integer (`Int16`/`UInt16`).
+    pub const I16: u16 = 2;
+    /// 32-bit integer (`Int32`/`UInt32`).
+    pub const I32: u16 = 4;
+    /// 64-bit integer — the canonical `Int`.
+    pub const I64: u16 = 8;
+    /// 32-bit IEEE-754 float (`Float32`).
+    pub const F32: u16 = 4;
+    /// 64-bit IEEE-754 float — the canonical `Float`.
+    pub const F64: u16 = 8;
+    /// `Bool` occupies a 32-bit ABI slot (wasm has no narrower stack value
+    /// type; native is one byte but the ABI slot is what the Repr records).
     pub const BOOL: u16 = 4;
 }
 
@@ -48,7 +58,8 @@ pub mod width {
 /// participate in ownership accounting.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum Repr {
-    /// A `Copy` scalar of `width` bytes (Int/Float/Bool/narrow ints).
+    /// A `Copy` scalar of `width` bytes (Int/Float/Bool/narrow ints), see
+    /// [`width`] for the named byte counts.
     Scalar { width: u16 },
     /// A reference-counted heap pointer to a value laid out by `layout`.
     Ptr { layout: LayoutId },
@@ -396,6 +407,6 @@ mod tests {
     fn repr_heap_predicate() {
         assert!(heap().is_heap());
         assert!(Repr::Boxed { layout: LayoutId(0) }.is_heap());
-        assert!(!Repr::Scalar { width: width::INT }.is_heap());
+        assert!(!Repr::Scalar { width: width::I64 }.is_heap());
     }
 }
