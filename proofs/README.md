@@ -22,21 +22,24 @@ compiler with qualified use in safety-critical settings).
 
 ## Status
 
-- **brick 1 (here): `OwnershipChecker.v`** — the RC-balance / memory-safety
-  checker `K` over the MIR ownership op sequence, and its soundness theorem
-  `check_sound : check ops = true → no_double_free ops ∧ no_leak ops`. The
-  irreducible single-object core; `0 sorry`/`Qed`.
+- **brick 1 (here): `OwnershipChecker.v` — KERNEL-VERIFIED.** The RC-balance /
+  memory-safety checker `K` over the MIR ownership op sequence, and its soundness
+  theorem `check_sound : check ops = true → no_double_free ops ∧ no_leak ops`.
+  The irreducible single-object core. Verified three ways (Rocq 9.1.1):
+  - kernel-checked (`coqc`), `Qed`, `0` admits;
+  - **axiom-clean** — `Print Assumptions check_sound` = *Closed under the global
+    context* (no extra axioms; the "Print Assumptions ⊆ standard" gate);
+  - **independently re-checked** by `coqchk` (the De Bruijn criterion).
 
-## Build
+## Verify (the third-party `make verify`)
 
 ```
 cd proofs
-coq_makefile -f _CoqProject -o Makefile   # or: rocq makefile
-make
+./check.sh        # coqc (+ axiom audit) then coqchk
 ```
 
-(Rocq/Coq provides `coqc`/`rocq`. Toolchain version is pinned in the axiom
-ledger — a later brick.)
+Rocq/Coq provides `coqc`/`coqchk`. Toolchain pin + axiom ledger is a later
+brick (config management, §7 of the tier-1 stack).
 
 ## Roadmap (the tier-1 stack, in critical-path order)
 

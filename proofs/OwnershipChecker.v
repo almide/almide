@@ -14,9 +14,9 @@
    properties, CertiCoq+CompCert extraction of the checker to machine code, and
    the translation validator V (model ⊒ wasm bytes). *)
 
-Require Import List.
+From Stdlib Require Import List.
 Import ListNotations.
-Require Import ZArith.
+From Stdlib Require Import ZArith.
 Open Scope Z_scope.
 
 (* The MIR ownership ops on a single reference-counted object. Inc = the +1 of
@@ -82,3 +82,9 @@ Proof. reflexivity. Qed.
 
 Example rejects_leak : check [Inc; Inc; Dec] = false.
 Proof. reflexivity. Qed.
+
+(* AXIOM AUDIT (the "Print Assumptions ⊆ standard" gate). Soundness must rest on
+   nothing but the Coq kernel — no admits, no extra axioms. Expected output:
+   "Closed under the global context". *)
+Print Assumptions check_sound.
+
