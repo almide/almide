@@ -201,11 +201,17 @@ impl Streams {
 pub fn ownership_certificate(func: &MirFunction) -> String {
     let mut s = Streams::new();
 
-    // Heap params arrive OWNED (a +1 the caller transferred).
+    // Heap params are BORROWED (the v1 calling convention): the CALLER owns the
+    // reference and releases it, so a param contributes NO `i` event — that `+1`
+    // would be SYNTHETIC, unbacked by any runtime `Alloc`/`rc_inc` (the gate-blind
+    // use-after-free class). We still register the object identity (`of`) so that
+    // a body which releases (`Drop`/`Consume`) or returns a borrowed param WITHOUT
+    // first acquiring its own reference (a `Dup`) emits a `d`/`m` at rc 0 — which
+    // the proven checker FAULTS (REJECT), exactly the double-free that owning the
+    // caller's reference would cause. A `Dup` of the param emits the real `a`.
     for p in &func.params {
         if p.repr.is_heap() {
             s.of.insert(p.value, p.value);
-            s.event(p.value, 'i');
         }
     }
 
@@ -498,19 +504,114 @@ mod tests {
         assert_eq!(transitive_cap_witness_string(&main, &program), "|0");
     }
 
-    #[test]
-    fn heap_param_owned_and_returned_balances() {
-        // fn(p: heap) -> p : param arrives owned (+1), returned = moved out (−1).
-        let p = ValueId(0);
-        let f = MirFunction {
-            name: "id".into(),
-            params: vec![MirParam { value: p, repr: heap() }],
-            ops: vec![],
-            ret: Some(p),
+    // ── borrow-by-default calling convention (heap params) ──
+    // A heap param is BORROWED: the caller owns the reference. So a param emits
+    // NO `i` (no synthetic +1), and a body that releases/returns it WITHOUT first
+    // acquiring its own reference (a `Dup`) is correctly REJECTED. The cert and
+    // `verify_ownership` must agree on every case below.
+
+    fn param_fn(name: &str, ops: Vec<Op>, ret: Option<ValueId>) -> MirFunction {
+        MirFunction {
+            name: name.into(),
+            params: vec![MirParam { value: ValueId(0), repr: heap() }],
+            ops,
+            ret,
             ..Default::default()
-        };
-        // param fresh-owned (i), returned = move-out (m).
-        assert_eq!(ownership_certificate(&f), "im\n");
+        }
+    }
+
+    #[test]
+    fn borrow_only_param_has_no_ownership_event() {
+        // fn(p) { borrow p } — the param is read, never owned: empty cert, accepts.
+        let f = param_fn("borrow_only", vec![Op::Borrow { v: ValueId(0) }], None);
+        assert_eq!(ownership_certificate(&f), "");
         assert_eq!(verify_ownership(&f), Ok(()));
+    }
+
+    #[test]
+    fn returning_a_borrowed_param_directly_is_rejected() {
+        // fn(p) -> p : returning the borrowed reference without acquiring our own
+        // hands the caller a SECOND owner of its own reference = a double-free.
+        // Cert is `m` at rc 0 (no preceding `i`) → the proven checker faults.
+        let f = param_fn("return_param", vec![], Some(ValueId(0)));
+        assert_eq!(ownership_certificate(&f), "m\n");
+        assert!(verify_ownership(&f).is_err());
+    }
+
+    #[test]
+    fn acquiring_then_returning_a_param_balances() {
+        // fn(p) { let q = dup p; q } — the CORRECT way to return a param: acquire
+        // our own reference (`a`) then move it out (`m`). Cert `am` balances.
+        let f = param_fn(
+            "acquire_return",
+            vec![Op::Dup { dst: ValueId(1), src: ValueId(0) }],
+            Some(ValueId(1)),
+        );
+        assert_eq!(ownership_certificate(&f), "am\n");
+        assert_eq!(verify_ownership(&f), Ok(()));
+    }
+
+    #[test]
+    fn releasing_a_borrowed_param_is_rejected() {
+        // fn(p) { drop p } — releasing a reference we do not own. Cert `d` at
+        // rc 0 → faulted; verify reports the double-free.
+        let f = param_fn("drop_borrow", vec![Op::Drop { v: ValueId(0) }], None);
+        assert_eq!(ownership_certificate(&f), "d\n");
+        assert!(verify_ownership(&f).is_err());
+    }
+
+    #[test]
+    fn passing_a_borrowed_param_to_a_call_is_accepted() {
+        // fn(p) { g(p) } — borrowing the param into a call (no refcount change):
+        // no cert event for the param, accepts.
+        let f = param_fn(
+            "forward",
+            vec![Op::CallFn {
+                dst: None,
+                name: "g".into(),
+                args: vec![CallArg::Handle(ValueId(0))],
+                result: None,
+            }],
+            None,
+        );
+        assert_eq!(ownership_certificate(&f), "");
+        assert_eq!(verify_ownership(&f), Ok(()));
+    }
+
+    #[test]
+    fn every_plus_one_event_is_backed_by_a_real_op() {
+        // The NON-RECURRING soundness gate. Borrow-by-default holds iff EVERY `+1`
+        // in the certificate is backed by a real runtime op: an `i` by an `Alloc`
+        // or a heap-result call, an `a` by a `Dup`. A param can NEVER inject an
+        // unbacked `+1` (the gate-blind use-after-free class). If a future brick
+        // ever emits a param `i` again, this equality breaks and the gate fails.
+        fn backed(f: &MirFunction) -> bool {
+            let cert = ownership_certificate(f);
+            let i = cert.chars().filter(|c| *c == 'i').count();
+            let a = cert.chars().filter(|c| *c == 'a').count();
+            let allocs = f.ops.iter().filter(|o| matches!(o, Op::Alloc { .. })).count();
+            let heap_results = f
+                .ops
+                .iter()
+                .filter(|o| match o {
+                    Op::Call { dst: Some(_), result: Some(r), .. }
+                    | Op::CallFn { dst: Some(_), result: Some(r), .. } => r.is_heap(),
+                    _ => false,
+                })
+                .count();
+            let dups = f.ops.iter().filter(|o| matches!(o, Op::Dup { .. })).count();
+            i == allocs + heap_results && a == dups
+        }
+        for seed in 0u64..500 {
+            let f = gen_wellformed(seed);
+            assert!(backed(&f), "seed {seed} has an unbacked +1\nops: {:?}", f.ops);
+        }
+        // Param-bearing functions: the borrowed param injects no `i`/`a`.
+        assert!(backed(&param_fn("b", vec![Op::Borrow { v: ValueId(0) }], None)));
+        assert!(backed(&param_fn(
+            "ar",
+            vec![Op::Dup { dst: ValueId(1), src: ValueId(0) }],
+            Some(ValueId(1)),
+        )));
     }
 }

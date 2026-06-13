@@ -34,10 +34,36 @@ use almide_frontend::lower::lower_program;
 use almide_lang::lexer::Lexer;
 use almide_lang::parser::Parser;
 use almide_mir::certificate::{cap_witness_string, name_witness_string, ownership_certificate};
+use almide_mir::{MirFunction, Op};
 use almide_optimize::{mono, optimize};
 use std::collections::BTreeMap;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
+
+/// The NON-RECURRING soundness gate for the borrow-by-default calling convention:
+/// EVERY `+1` event in the ownership certificate must be BACKED by a real runtime
+/// op — an `i` by an `Alloc` or a heap-result call, an `a` by a `Dup`. A heap
+/// parameter must therefore inject NO `+1` (an owned-param `+1` would be synthetic,
+/// unbacked by any runtime `Alloc`/`rc_inc` — the gate-blind use-after-free class).
+/// If a future lowering re-introduces an unbacked param `+1`, this equality breaks
+/// and the corpus gate fails — making the class structurally impossible to ship.
+fn plus_one_events_backed(mir: &MirFunction) -> bool {
+    let cert = ownership_certificate(mir);
+    let i = cert.chars().filter(|c| *c == 'i').count();
+    let a = cert.chars().filter(|c| *c == 'a').count();
+    let allocs = mir.ops.iter().filter(|o| matches!(o, Op::Alloc { .. })).count();
+    let heap_results = mir
+        .ops
+        .iter()
+        .filter(|o| match o {
+            Op::Call { dst: Some(_), result: Some(r), .. }
+            | Op::CallFn { dst: Some(_), result: Some(r), .. } => r.is_heap(),
+            _ => false,
+        })
+        .count();
+    let dups = mir.ops.iter().filter(|o| matches!(o, Op::Dup { .. })).count();
+    i == allocs + heap_results && a == dups
+}
 
 /// Outcome of driving one `.almd` source through the frontend to linked IR.
 enum FrontendOutcome {
@@ -108,6 +134,9 @@ struct Tally {
     in_profile: usize,
     unsupported: BTreeMap<String, usize>,
     lower_panics: Vec<String>,
+    /// Functions whose certificate has an UNBACKED `+1` (the borrow-by-default
+    /// soundness gate). Must stay empty — a non-empty list is a wall breach.
+    cert_backing_breaches: Vec<String>,
 }
 
 /// Recursively collect `.almd` files under a path (file or directory).
@@ -188,6 +217,12 @@ fn main() {
             match lowered {
                 Ok(Ok(mir)) => {
                     t.in_profile += 1;
+                    // The borrow-by-default soundness gate: every `+1` event must
+                    // be backed by a real runtime op (no synthetic param `+1`).
+                    if !plus_one_events_backed(&mir) {
+                        t.cert_backing_breaches
+                            .push(format!("{}::{}", file.display(), func.name.as_str()));
+                    }
                     // Collect all three witnesses for the PCC re-check. Ownership
                     // is one heap object per line; concatenating across functions
                     // keeps each object independently checkable. Names and caps
@@ -246,19 +281,39 @@ fn main() {
     for p in &t.lower_panics {
         eprintln!("      PANIC {p}");
     }
+    eprintln!(
+        "  unbacked +1 (BUG)    : {}  <- borrow-by-default backing gate",
+        t.cert_backing_breaches.len()
+    );
+    for p in &t.cert_backing_breaches {
+        eprintln!("      UNBACKED {p}");
+    }
 
-    if t.lower_panics.is_empty() {
+    let total_breaches = t.lower_panics.len() + t.cert_backing_breaches.len();
+    if total_breaches == 0 {
         eprintln!(
             "WALL OK: lower_function was TOTAL over {} corpus functions \
-             (Ok or explicit Unsupported, zero panics, zero silent miscompiles).",
+             (Ok or explicit Unsupported, zero panics, zero silent miscompiles), \
+             and every in-profile certificate `+1` is backed by a real runtime op \
+             (no synthetic param ownership — the borrow-by-default gate).",
             t.functions
         );
     } else {
-        eprintln!(
-            "WALL BREACH: lower_function panicked on {} function(s) — must return \
-             Ok or Unsupported, never panic.",
-            t.lower_panics.len()
-        );
+        if !t.lower_panics.is_empty() {
+            eprintln!(
+                "WALL BREACH: lower_function panicked on {} function(s) — must return \
+                 Ok or Unsupported, never panic.",
+                t.lower_panics.len()
+            );
+        }
+        if !t.cert_backing_breaches.is_empty() {
+            eprintln!(
+                "WALL BREACH: {} function(s) emitted an UNBACKED certificate `+1` — \
+                 a param or op injected ownership no runtime op performs \
+                 (the gate-blind use-after-free class).",
+                t.cert_backing_breaches.len()
+            );
+        }
         std::process::exit(1);
     }
 }

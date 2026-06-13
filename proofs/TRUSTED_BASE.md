@@ -108,15 +108,28 @@ The receipt's claims are scoped to exactly this:
   verification = the definition of parity" in its honest first form: it does NOT
   yet claim the *completion definition* (the proven profile accepting the full
   corpus), it establishes the *mechanism* that measures progress toward it and
-  proves the boundary is a wall, not a hole. **Today's honest coverage: 238/4195
+  proves the boundary is a wall, not a hole. **Today's honest coverage: 271/4195
   functions in-profile** (the value-semantics subset, incl. expression-bodied
-  functions, direct heap-literal returns, and direct named-call-result returns);
-  the rest are walled with a per-feature `Unsupported` histogram that names the
-  next surface to admit (largest buckets: nested `call argument Call`, `heap bind
-  from Call` — both gated behind the parameter calling-convention decision). Coverage is REPORTED, never gated on a
-  brittle exact count — only the two soundness invariants are hard, plus an
-  anti-collapse floor (≥1 in-profile witness must reach the checker, so a silent
-  coverage collapse to zero fails the gate).
+  functions, direct heap-literal returns, direct named-call-result returns, and
+  functions taking **borrowed heap parameters**); the rest are walled with a
+  per-feature `Unsupported` histogram that names the next surface to admit
+  (largest buckets: nested `call argument Call`, `heap bind from Call` — a call
+  used as an argument/bind value, the next lowering brick). **Heap parameters use
+  a BORROW-BY-DEFAULT calling convention** (the caller owns the reference; a param
+  contributes no owned `+1` to the certificate). This is the only convention sound
+  under the current runtime: an owned-param `+1` would be SYNTHETIC — unbacked by
+  any runtime `Alloc`/`rc_inc` — the gate-blind use-after-free class. Returning or
+  releasing a borrowed param without first acquiring its own reference (a `Dup`)
+  is explicitly walled (`returning a borrowed param directly`), and its
+  certificate would be a release at rc 0 which the proven checker faults. A
+  **non-recurring backing gate** (in `corpus-wall.sh`, mirrored by a unit test)
+  asserts every certificate `+1` is backed by a real `Alloc`/`Dup`/heap-result —
+  so re-introducing a synthetic param ownership is structurally impossible to
+  ship. Note: the proven Coq checker is UNCHANGED by this brick (only the cert
+  *emission* dropped the unbacked param `i`), so the checker-size invariant holds.
+  Coverage is REPORTED, never gated on a brittle exact count — only the soundness
+  invariants are hard, plus an anti-collapse floor (≥1 in-profile witness must
+  reach the checker, so a silent coverage collapse to zero fails the gate).
 - **Index-bounds memory safety — a found-and-walled hole.** The ownership checker
   proves the RC properties but does NOT check list-index bounds; the renderer's
   `$list_set`/`$list_get`/`$elem_addr` did no bounds check either, so an

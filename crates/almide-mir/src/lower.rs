@@ -18,10 +18,10 @@
 //! Anything outside the subset (control flow, calls, …) returns
 //! [`LowerError::Unsupported`] — never a silent drop (flight-grade totality).
 
-use crate::{CallArg, Init, MirFunction, Op, Repr, RtFn, ValueId, PLACEHOLDER_LAYOUT};
-use almide_ir::{CallTarget, IrExpr, IrExprKind, IrFunction, IrStmt, IrStmtKind, VarId};
+use crate::{CallArg, Init, MirFunction, MirParam, Op, Repr, RtFn, ValueId, PLACEHOLDER_LAYOUT};
+use almide_ir::{CallTarget, IrExpr, IrExprKind, IrFunction, IrParam, IrStmt, IrStmtKind, VarId};
 use almide_lang::types::Ty;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// A lowering could not proceed because the input is outside this brick's
 /// subset (or violates a precondition such as concrete types). Carrying the
@@ -88,40 +88,26 @@ pub fn repr_of(ty: &Ty) -> Result<Repr, LowerError> {
     Ok(Repr::Scalar { width: w })
 }
 
-/// Lower one function to MIR.
+/// Lower one function to MIR. Parameters are seeded first (the v1 borrow-by-
+/// default calling convention — see [`LowerCtx::bind_params`]), then the body.
 pub fn lower_function(func: &IrFunction) -> Result<MirFunction, LowerError> {
-    lower_body(&func.body, func.name.as_str())
+    let mut ctx = LowerCtx::default();
+    let params = ctx.bind_params(&func.params)?;
+    let ret = ctx.lower_body_into(&func.body)?;
+    Ok(MirFunction {
+        name: func.name.as_str().to_string(),
+        params,
+        ops: ctx.ops,
+        ret,
+        ..Default::default()
+    })
 }
 
-/// Lower a function body expression to MIR (the testable core; `lower_function`
-/// is the thin wrapper over a whole [`IrFunction`]).
+/// Lower a function body expression to MIR (the param-free testable core;
+/// `lower_function` is the wrapper that seeds parameters first).
 pub fn lower_body(body: &IrExpr, name: &str) -> Result<MirFunction, LowerError> {
     let mut ctx = LowerCtx::default();
-    // An expression-bodied function (`fn f() = expr`) is the SAME value-semantics
-    // subset as a block body — it is just an empty statement list whose tail IS
-    // the expression. The tail lowering walls anything outside the subset, so
-    // wrapping here never weakens the boundary (control-flow / call bodies still
-    // become an explicit Unsupported in `lower_tail`).
-    let (stmts, tail): (&[IrStmt], Option<&IrExpr>) = match &body.kind {
-        IrExprKind::Block { stmts, expr } => (stmts, expr.as_deref()),
-        _ => (&[], Some(body)),
-    };
-
-    for stmt in stmts {
-        ctx.lower_stmt(stmt)?;
-    }
-
-    // The tail expression is the function's return value. A HEAP tail is MOVED
-    // OUT to the caller (a −1 at the boundary, recorded as `ret`) and so is NOT
-    // dropped at scope end; a scalar tail carries no ownership; a Unit/absent
-    // tail is a Unit-returning body.
-    let ret = ctx.lower_tail(tail)?;
-
-    // Scope end: release every still-live heap handle (the moved-out return is
-    // already removed). Aliases share a ValueId, so one Drop per HANDLE balances
-    // the Alloc(+1) and each aliasing Dup(+1).
-    ctx.emit_scope_end_drops();
-
+    let ret = ctx.lower_body_into(body)?;
     Ok(MirFunction { name: name.to_string(), ops: ctx.ops, ret, ..Default::default() })
 }
 
@@ -132,6 +118,11 @@ struct LowerCtx {
     value_of: HashMap<VarId, ValueId>,
     /// Heap handles in binding order, for scope-end drops (one Drop per handle).
     live_heap_handles: Vec<ValueId>,
+    /// The MIR values that are BORROWED heap parameters (the v1 calling
+    /// convention): the caller owns the reference. A direct move-out/return or
+    /// in-place mutation of one needs an explicit acquire (`Dup`) the body does
+    /// not perform, so it is walled — never lowered to an unbacked cert event.
+    param_values: HashSet<ValueId>,
     next_value: u32,
 }
 
@@ -142,12 +133,69 @@ impl LowerCtx {
         id
     }
 
+    /// Seed the parameters: each param's VarId maps to a fresh MIR value (so uses
+    /// in the body resolve) and becomes a [`MirParam`] carrying its [`Repr`] (so
+    /// the name-totality witness counts it as DEFINED — every param use must have
+    /// a defining param). A HEAP param is BORROWED (the caller owns the reference
+    /// — it contributes no owned `+1` to the ownership certificate; the cert and
+    /// verifier guard on `repr.is_heap()`) and is recorded in `param_values` so a
+    /// later move-out/mutation of a bare borrowed param is walled, not faked. A
+    /// scalar param carries no ownership but is still a defined value.
+    fn bind_params(&mut self, params: &[IrParam]) -> Result<Vec<MirParam>, LowerError> {
+        let mut out = Vec::new();
+        for p in params {
+            let v = self.fresh_value();
+            self.value_of.insert(p.var, v);
+            let repr = repr_of(&p.ty)?; // Ptr (heap) / Scalar; Unsupported if Unknown or non-value
+            if repr.is_heap() {
+                self.param_values.insert(v);
+            }
+            out.push(MirParam { value: v, repr });
+        }
+        Ok(out)
+    }
+
+    /// Lower a function body (statements + tail + scope-end drops) into `self` —
+    /// the shared core of `lower_function` (params pre-seeded) and `lower_body`.
+    ///
+    /// An expression-bodied function (`fn f() = expr`) is the SAME value-semantics
+    /// subset as a block body — just an empty statement list whose tail IS the
+    /// expression. The tail lowering walls anything outside the subset, so the
+    /// wrapping never weakens the boundary (control-flow / unsupported tails still
+    /// become an explicit `Unsupported`).
+    fn lower_body_into(&mut self, body: &IrExpr) -> Result<Option<ValueId>, LowerError> {
+        let (stmts, tail): (&[IrStmt], Option<&IrExpr>) = match &body.kind {
+            IrExprKind::Block { stmts, expr } => (stmts, expr.as_deref()),
+            _ => (&[], Some(body)),
+        };
+        for stmt in stmts {
+            self.lower_stmt(stmt)?;
+        }
+        // The tail expression is the function's return value. A HEAP tail is MOVED
+        // OUT to the caller (recorded as `ret`, not dropped at scope end); a scalar
+        // tail carries no ownership; a Unit/absent tail is a Unit-returning body.
+        let ret = self.lower_tail(tail)?;
+        // Scope end: release every still-live heap handle (the moved-out return is
+        // already removed). Aliases share a ValueId, so one Drop per HANDLE
+        // balances the Alloc(+1) and each aliasing Dup(+1).
+        self.emit_scope_end_drops();
+        Ok(ret)
+    }
+
     fn lower_stmt(&mut self, stmt: &IrStmt) -> Result<(), LowerError> {
         match &stmt.kind {
             IrStmtKind::Bind { var, ty, value, .. } => self.lower_bind(*var, ty, value),
             IrStmtKind::IndexAssign { target, .. } => {
                 // Copy-on-write: the write must land on a uniquely-owned buffer.
                 let v = self.value_for(*target)?;
+                if self.param_values.contains(&v) {
+                    // Mutating a borrowed param (the caller's data) is outside the
+                    // borrow-by-default first brick — it needs the move-mode /
+                    // unique-acquire calling convention. Wall it (totality).
+                    return Err(LowerError::Unsupported(
+                        "in-place mutation of a borrowed param not in this brick".into(),
+                    ));
+                }
                 self.ops.push(Op::MakeUnique { v });
                 Ok(())
             }
@@ -263,6 +311,16 @@ impl LowerCtx {
             return match &tail.kind {
                 IrExprKind::Var { id } => {
                     let v = self.value_for(*id)?;
+                    if self.param_values.contains(&v) {
+                        // Returning a BORROWED param directly would move out a
+                        // reference we do not own (the caller's) — a double-free.
+                        // The sound form is `let q = p; q` (an alias `Dup` first),
+                        // which lowers fine. Wall the bare-param return (totality);
+                        // the cert would otherwise be `m` at rc 0 → checker fault.
+                        return Err(LowerError::Unsupported(
+                            "returning a borrowed param directly (needs an explicit acquire) not in this brick".into(),
+                        ));
+                    }
                     self.live_heap_handles.retain(|h| *h != v); // moved out, not dropped
                     Ok(Some(v))
                 }

@@ -31,7 +31,7 @@ pub mod render_rust;
 pub mod render_wasm;
 pub mod translation_validation;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 // ───────────────────────────── Layout / Repr ──────────────────────────────
 
@@ -270,8 +270,13 @@ pub enum CallArg {
 }
 
 /// A function parameter: a value the caller supplies, with its [`Repr`]. A heap
-/// param is OWNED by the function (the caller transferred a reference); a scalar
-/// param carries no ownership. (Borrow-mode params are a later refinement.)
+/// param is BORROWED (the v1 calling convention): the CALLER retains ownership
+/// and releases it; the callee gets a live handle but no owned reference. So a
+/// param contributes NO `+1` to the ownership certificate — an owned-param `+1`
+/// would be synthetic (no runtime `Alloc`/`rc_inc` backs it), the gate-blind
+/// use-after-free class. A body that needs to consume or return a param must
+/// first `Dup` it (acquire its own reference). A scalar param carries no
+/// ownership. (Per-param move-mode signatures are a later refinement.)
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MirParam {
     pub value: ValueId,
@@ -341,16 +346,25 @@ pub fn verify_ownership(func: &MirFunction) -> Result<(), Vec<Violation>> {
     // also tracked LIVE/dead, so a use of a handle after its own drop/consume is
     // caught even when the object lives on through a sibling handle.
     let mut object_of: BTreeMap<ValueId, ValueId> = BTreeMap::new();
-    let mut rc: BTreeMap<ValueId, i64> = BTreeMap::new(); // keyed by object
+    let mut rc: BTreeMap<ValueId, i64> = BTreeMap::new(); // keyed by object — OUR (callee's) owned refs
     let mut dead: BTreeMap<ValueId, bool> = BTreeMap::new(); // keyed by handle
     let mut violations: Vec<Violation> = Vec::new();
 
-    // Heap params arrive OWNED (the caller transferred a reference).
+    // Heap params are BORROWED by default (the v1 calling convention): the CALLER
+    // owns the reference and releases it at its own scope end; the callee gets a
+    // LIVE handle but holds NO owned reference of its own (its rc starts at 0).
+    // This is the exact dual of the certificate omitting the param's `i` event —
+    // an owned-param `+1` would be SYNTHETIC (no `Alloc`/`rc_inc` backs it), the
+    // gate-blind use-after-free class. A body that wants to consume or return a
+    // param must first `Dup` it (acquire its own ref); a release with rc 0 (the
+    // `borrowed` object, never `Dup`'d) fails — exactly the cert's `d`/`m` at
+    // rc 0, which the proven checker faults.
+    let mut borrowed: BTreeSet<ValueId> = BTreeSet::new();
     for p in &func.params {
         if p.repr.is_heap() {
             object_of.insert(p.value, p.value);
-            rc.insert(p.value, 1);
             dead.insert(p.value, false);
+            borrowed.insert(p.value);
         }
     }
 
@@ -366,24 +380,26 @@ pub fn verify_ownership(func: &MirFunction) -> Result<(), Vec<Violation>> {
                 // A scalar — no ownership accounting.
             }
             Op::Dup { dst, src } => {
-                if let Some(o) = live_object(&object_of, &rc, &dead, *src) {
-                    *rc.get_mut(&o).expect("object has a refcount") += 1;
+                if let Some(o) = live_object(&object_of, &rc, &dead, &borrowed, *src) {
+                    // Acquire OUR own reference. A `Dup` of a borrowed param has no
+                    // prior rc entry (we owned none) — start it at 0, then +1.
+                    *rc.entry(o).or_insert(0) += 1;
                     object_of.insert(*dst, o);
                     dead.insert(*dst, false);
                 } else {
                     violations.push(violation(i, *src, ViolationKind::UseAfterFree));
                 }
             }
-            Op::Drop { v } => match release(&object_of, &mut rc, &mut dead, *v) {
+            Op::Drop { v } => match release(&object_of, &mut rc, &mut dead, &borrowed, *v) {
                 Ok(()) => {}
                 Err(()) => violations.push(violation(i, *v, ViolationKind::DoubleFree)),
             },
-            Op::Consume { v } => match release(&object_of, &mut rc, &mut dead, *v) {
+            Op::Consume { v } => match release(&object_of, &mut rc, &mut dead, &borrowed, *v) {
                 Ok(()) => {}
                 Err(()) => violations.push(violation(i, *v, ViolationKind::UseAfterMove)),
             },
             Op::Borrow { v } | Op::MakeUnique { v } => {
-                if live_object(&object_of, &rc, &dead, *v).is_none() {
+                if live_object(&object_of, &rc, &dead, &borrowed, *v).is_none() {
                     violations.push(violation(i, *v, ViolationKind::UseAfterFree));
                 }
             }
@@ -392,7 +408,7 @@ pub fn verify_ownership(func: &MirFunction) -> Result<(), Vec<Violation>> {
                     // Only heap handles are accountable; scalar uses are absent
                     // from `object_of` and correctly skipped.
                     if object_of.contains_key(v)
-                        && live_object(&object_of, &rc, &dead, *v).is_none()
+                        && live_object(&object_of, &rc, &dead, &borrowed, *v).is_none()
                     {
                         violations.push(violation(i, *v, ViolationKind::UseAfterFree));
                     }
@@ -406,7 +422,7 @@ pub fn verify_ownership(func: &MirFunction) -> Result<(), Vec<Violation>> {
             Op::Call { args, dst, result, .. } | Op::CallFn { args, dst, result, .. } => {
                 for a in args {
                     if let CallArg::Handle(v) = a {
-                        if live_object(&object_of, &rc, &dead, *v).is_none() {
+                        if live_object(&object_of, &rc, &dead, &borrowed, *v).is_none() {
                             violations.push(violation(i, *v, ViolationKind::UseAfterFree));
                         }
                     }
@@ -424,10 +440,17 @@ pub fn verify_ownership(func: &MirFunction) -> Result<(), Vec<Violation>> {
         }
     }
 
-    // A heap return value is MOVED OUT to the caller (not a leak).
+    // A heap return value is MOVED OUT to the caller. It must be a reference WE
+    // own (an `Alloc`/call-result, or a `Dup` we acquired): releasing it transfers
+    // our reference out. Returning a BORROWED param we never acquired (rc 0) would
+    // give the caller a SECOND owner of the caller's own reference — a double-free.
+    // `release` fails there (rc 0) and we record it, the dual of the cert's `m` at
+    // rc 0 which the proven checker faults.
     if let Some(r) = func.ret {
-        if object_of.contains_key(&r) {
-            let _ = release(&object_of, &mut rc, &mut dead, r);
+        if object_of.contains_key(&r)
+            && release(&object_of, &mut rc, &mut dead, &borrowed, r).is_err()
+        {
+            violations.push(violation(func.ops.len(), r, ViolationKind::UseAfterMove));
         }
     }
 
@@ -449,20 +472,24 @@ fn violation(op_index: usize, value: ValueId, kind: ViolationKind) -> Violation 
     Violation { op_index, value, kind }
 }
 
-/// The object a handle denotes, iff the handle is live (not yet dropped) and its
-/// object still has at least one owner. `None` means the handle is dead/unknown
-/// or its object is freed.
+/// The object a handle denotes, iff the handle is live. A handle is live when it
+/// is not yet dropped AND either WE hold a reference to its object (rc ≥ 1) OR
+/// the object is a `borrowed` param the CALLER keeps alive for the call's
+/// duration (a borrow is always valid against the caller's reference, even when
+/// our own count is 0). `None` = dead/unknown handle, or a non-borrowed object
+/// whose references have all left.
 fn live_object(
     object_of: &BTreeMap<ValueId, ValueId>,
     rc: &BTreeMap<ValueId, i64>,
     dead: &BTreeMap<ValueId, bool>,
+    borrowed: &BTreeSet<ValueId>,
     v: ValueId,
 ) -> Option<ValueId> {
     if dead.get(&v).copied().unwrap_or(true) {
         return None; // unknown handle or already dropped/consumed
     }
     let o = *object_of.get(&v)?;
-    if rc.get(&o).copied().unwrap_or(0) >= 1 {
+    if borrowed.contains(&o) || rc.get(&o).copied().unwrap_or(0) >= 1 {
         Some(o)
     } else {
         None
@@ -470,21 +497,24 @@ fn live_object(
 }
 
 /// Release one reference held by handle `v` (drop or consume): mark the handle
-/// dead and decrement its object's refcount. `Err(())` if `v` is not a live
-/// handle (a double-release).
+/// dead and decrement OUR object's refcount. `Err(())` if `v` is not live, OR if
+/// we hold no reference of our own to release (rc 0 — e.g. a `borrowed` param we
+/// never `Dup`'d): freeing a reference we do not own is a double-free against the
+/// caller, so it is rejected rather than silently underflowed.
 fn release(
     object_of: &BTreeMap<ValueId, ValueId>,
     rc: &mut BTreeMap<ValueId, i64>,
     dead: &mut BTreeMap<ValueId, bool>,
+    borrowed: &BTreeSet<ValueId>,
     v: ValueId,
 ) -> Result<(), ()> {
-    match live_object(object_of, rc, dead, v) {
-        Some(o) => {
-            *rc.get_mut(&o).expect("live object has a refcount") -= 1;
+    match live_object(object_of, rc, dead, borrowed, v) {
+        Some(o) if rc.get(&o).copied().unwrap_or(0) >= 1 => {
+            *rc.get_mut(&o).expect("a held reference has a refcount") -= 1;
             dead.insert(v, true);
             Ok(())
         }
-        None => Err(()),
+        _ => Err(()),
     }
 }
 
