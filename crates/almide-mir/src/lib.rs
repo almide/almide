@@ -86,6 +86,10 @@ impl Repr {
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash, PartialOrd, Ord)]
 pub struct LayoutId(pub u32);
 
+/// The layout id every heap value carries until the layout pass assigns real
+/// ids (a later brick). Named so a `LayoutId(0)` is never a bare magic number.
+pub const PLACEHOLDER_LAYOUT: LayoutId = LayoutId(0);
+
 /// An SSA-like MIR value (a local). Identity is the id; its [`Repr`] is fixed
 /// at definition and never re-decided downstream.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash, PartialOrd, Ord)]
@@ -150,6 +154,23 @@ pub enum Op {
     /// renderer never re-implements a runtime operation inline — that is the
     /// discipline that keeps the hand-written wasm surface tiny.
     Call { dst: Option<ValueId>, func: RtFn, args: Vec<CallArg> },
+
+    /// Call a USER/runtime MIR function by name (the mechanism that lets the
+    /// runtime be self-hosted: a runtime fn is just a [`MirFunction`] called
+    /// here). `dst` binds the (possibly heap) result.
+    CallFn { dst: Option<ValueId>, name: String, args: Vec<CallArg> },
+
+    /// `dst = a <op> b` on scalars (no ownership) — the arithmetic runtime
+    /// functions need.
+    IntBinOp { dst: ValueId, op: IntOp, a: ValueId, b: ValueId },
+}
+
+/// A scalar integer binary operation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IntOp {
+    Add,
+    Sub,
+    Mul,
 }
 
 /// A runtime function the MIR can call. An enum (not a string) so the renderer
@@ -163,24 +184,41 @@ pub enum RtFn {
     ListPush,
     /// `println` a list as `label=e0,e1,…`.
     PrintList,
+    /// `println` a scalar integer.
+    PrintInt,
 }
 
-/// An argument to a runtime [`Op::Call`].
+/// An argument to a runtime [`Op::Call`] / user [`Op::CallFn`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CallArg {
     /// A heap handle (borrowed by the call — live-checked, refcount unchanged).
     Handle(ValueId),
+    /// A scalar value (a `ValueId` of scalar Repr — no ownership).
+    Scalar(ValueId),
     /// An immediate integer (index / value).
     Imm(i64),
     /// An immediate string (a print label).
     Label(String),
 }
 
-/// A MIR function body: a flat, ownership-explicit op sequence.
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// A function parameter: a value the caller supplies, with its [`Repr`]. A heap
+/// param is OWNED by the function (the caller transferred a reference); a scalar
+/// param carries no ownership. (Borrow-mode params are a later refinement.)
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MirParam {
+    pub value: ValueId,
+    pub repr: Repr,
+}
+
+/// A MIR function: params, a flat ownership-explicit op sequence, and an
+/// optional returned value (moved out — a [`Op::Consume`] of `ret` is implied at
+/// the boundary).
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct MirFunction {
     pub name: String,
+    pub params: Vec<MirParam>,
     pub ops: Vec<Op>,
+    pub ret: Option<ValueId>,
 }
 
 /// A whole MIR program.
@@ -234,6 +272,15 @@ pub fn verify_ownership(func: &MirFunction) -> Result<(), Vec<Violation>> {
     let mut dead: BTreeMap<ValueId, bool> = BTreeMap::new(); // keyed by handle
     let mut violations: Vec<Violation> = Vec::new();
 
+    // Heap params arrive OWNED (the caller transferred a reference).
+    for p in &func.params {
+        if p.repr.is_heap() {
+            object_of.insert(p.value, p.value);
+            rc.insert(p.value, 1);
+            dead.insert(p.value, false);
+        }
+    }
+
     for (i, op) in func.ops.iter().enumerate() {
         match op {
             Op::Alloc { dst, repr, .. } => {
@@ -278,9 +325,12 @@ pub fn verify_ownership(func: &MirFunction) -> Result<(), Vec<Violation>> {
                     }
                 }
             }
-            // A runtime call BORROWS its heap-handle args (live-checked, no
-            // refcount change). Immediate/label args carry no ownership.
-            Op::Call { args, .. } => {
+            // A runtime/user call BORROWS its heap-handle args (live-checked, no
+            // refcount change). Immediate/label args carry no ownership. (A
+            // heap-RETURNING call's `dst` ownership is a later refinement — the
+            // self-host runtime fns exercised here return scalars or rebind an
+            // already-owned arg.)
+            Op::Call { args, .. } | Op::CallFn { args, .. } => {
                 for a in args {
                     if let CallArg::Handle(v) = a {
                         if live_object(&object_of, &rc, &dead, *v).is_none() {
@@ -289,6 +339,15 @@ pub fn verify_ownership(func: &MirFunction) -> Result<(), Vec<Violation>> {
                     }
                 }
             }
+            // Scalar arithmetic — no ownership.
+            Op::IntBinOp { .. } => {}
+        }
+    }
+
+    // A heap return value is MOVED OUT to the caller (not a leak).
+    if let Some(r) = func.ret {
+        if object_of.contains_key(&r) {
+            let _ = release(&object_of, &mut rc, &mut dead, r);
         }
     }
 
@@ -368,7 +427,7 @@ mod tests {
         Repr::Ptr { layout: LayoutId(0) }
     }
     fn func(ops: Vec<Op>) -> MirFunction {
-        MirFunction { name: "shape".into(), ops }
+        MirFunction { name: "shape".into(), ops, ..Default::default() }
     }
 
     // Shape 2 — list_get_643: a per-iteration heap temp `t` is alloc'd and

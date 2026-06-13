@@ -20,9 +20,43 @@
 //! aliased binding is unchanged by a mutation through its sibling) — by
 //! construction, because the one `Dup` decision became a `.clone()`.
 
-use crate::{CallArg, Init, MirFunction, Op, Repr, RtFn, ValueId};
+use crate::{CallArg, Init, IntOp, MirFunction, MirProgram, Op, Repr, RtFn, ValueId};
 
-/// Render a MIR function to a runnable Rust `fn main()` source string.
+/// Render a whole MIR program (its functions + `main`) to a runnable Rust source.
+pub fn render_rust_program(prog: &MirProgram) -> String {
+    prog.functions.iter().map(render_rust_fn).collect::<Vec<_>>().join("\n")
+}
+
+/// Render one MIR function with its real signature (params, return). A function
+/// named `main` with no params/return is the entry point.
+pub fn render_rust_fn(func: &MirFunction) -> String {
+    let reprs = value_reprs(func);
+    let params = func
+        .params
+        .iter()
+        .map(|p| format!("{}: {}", var(p.value), rust_ty(p.repr)))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let ret_sig = match func.ret {
+        Some(r) => format!(" -> {}", rust_ty(reprs.get(&r).copied().unwrap_or(SCALAR))),
+        None => String::new(),
+    };
+    let mut body = String::new();
+    for op in &func.ops {
+        if let Some(line) = render_op(op) {
+            body.push_str("    ");
+            body.push_str(&line);
+            body.push('\n');
+        }
+    }
+    if let Some(r) = func.ret {
+        body.push_str(&format!("    {}\n", var(r))); // tail = the moved-out return
+    }
+    format!("fn {}({params}){ret_sig} {{\n{body}}}\n", func.name)
+}
+
+/// Render a single function as a `fn main()` program (compat for the
+/// no-param/no-return value-semantics tests).
 pub fn render_rust(func: &MirFunction) -> String {
     let mut body = String::new();
     for op in &func.ops {
@@ -33,6 +67,45 @@ pub fn render_rust(func: &MirFunction) -> String {
         }
     }
     format!("fn main() {{\n{body}}}\n")
+}
+
+/// The canonical scalar repr (i64) for inferred scalar results.
+const SCALAR: Repr = Repr::Scalar { width: crate::width::I64 };
+
+fn rust_ty(repr: Repr) -> &'static str {
+    if repr.is_heap() {
+        "Vec<i64>"
+    } else {
+        "i64"
+    }
+}
+
+/// Infer each value's Repr within a function (params + op results) so types can
+/// be rendered. Heap from Alloc/Dup; scalar from Const/IntBinOp/CallFn.
+fn value_reprs(func: &MirFunction) -> std::collections::BTreeMap<ValueId, Repr> {
+    let mut m = std::collections::BTreeMap::new();
+    for p in &func.params {
+        m.insert(p.value, p.repr);
+    }
+    for op in &func.ops {
+        match op {
+            Op::Alloc { dst, repr, .. } => {
+                m.insert(*dst, *repr);
+            }
+            Op::Dup { dst, src } => {
+                let r = m.get(src).copied().unwrap_or(Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT });
+                m.insert(*dst, r);
+            }
+            Op::Const { dst } | Op::IntBinOp { dst, .. } => {
+                m.insert(*dst, SCALAR);
+            }
+            Op::CallFn { dst: Some(d), .. } => {
+                m.insert(*d, SCALAR); // demo: scalar-returning; heap returns are a later refinement
+            }
+            _ => {}
+        }
+    }
+    m
 }
 
 fn var(v: ValueId) -> String {
@@ -71,6 +144,29 @@ fn render_op(op: &Op) -> Option<String> {
         // Runtime calls are spelled as the idiomatic Rust operation (the bootstrap
         // runtime; ultimately these are calls to self-hosted Almide functions).
         Op::Call { func, args, .. } => Some(render_call(func, args)),
+        Op::IntBinOp { dst, op, a, b } => {
+            let o = match op {
+                IntOp::Add => "+",
+                IntOp::Sub => "-",
+                IntOp::Mul => "*",
+            };
+            Some(format!("let {}: i64 = {} {o} {};", var(*dst), var(*a), var(*b)))
+        }
+        Op::CallFn { dst, name, args } => {
+            let a = args.iter().map(render_arg).collect::<Vec<_>>().join(", ");
+            Some(match dst {
+                Some(d) => format!("let {} = {name}({a});", var(*d)),
+                None => format!("{name}({a});"),
+            })
+        }
+    }
+}
+
+fn render_arg(arg: &CallArg) -> String {
+    match arg {
+        CallArg::Handle(v) | CallArg::Scalar(v) => var(*v),
+        CallArg::Imm(n) => n.to_string(),
+        CallArg::Label(l) => format!("{l:?}"),
     }
 }
 
@@ -87,6 +183,9 @@ fn render_call(func: &RtFn, args: &[CallArg]) -> String {
             label,
             var(*v)
         ),
+        (RtFn::PrintInt, [CallArg::Scalar(v)]) => {
+            format!("println!(\"{{}}\", {});", var(*v))
+        }
         _ => panic!("malformed runtime call {func:?} with args {args:?}"),
     }
 }
@@ -94,11 +193,59 @@ fn render_call(func: &RtFn, args: &[CallArg]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{verify_ownership, LayoutId};
+    use crate::{verify_ownership, width, LayoutId, MirParam, MirProgram};
     use std::process::Command;
 
     fn heap() -> Repr {
         Repr::Ptr { layout: LayoutId(0) }
+    }
+
+    fn scalar() -> Repr {
+        Repr::Scalar { width: width::I64 }
+    }
+
+    /// A program with a user function: `fn add(a,b)=a+b` and a `main` that calls
+    /// it and prints the result. The runtime is, in the end, written this way —
+    /// as Almide functions lowered to MIR and called via `CallFn`.
+    fn add_program() -> MirProgram {
+        let add = MirFunction {
+            name: "add".into(),
+            params: vec![
+                MirParam { value: ValueId(0), repr: scalar() },
+                MirParam { value: ValueId(1), repr: scalar() },
+            ],
+            ops: vec![Op::IntBinOp {
+                dst: ValueId(2),
+                op: IntOp::Add,
+                a: ValueId(0),
+                b: ValueId(1),
+            }],
+            ret: Some(ValueId(2)),
+        };
+        let main = MirFunction {
+            name: "main".into(),
+            params: vec![],
+            ops: vec![
+                Op::CallFn {
+                    dst: Some(ValueId(0)),
+                    name: "add".into(),
+                    args: vec![CallArg::Imm(2), CallArg::Imm(3)],
+                },
+                Op::Call { dst: None, func: RtFn::PrintInt, args: vec![CallArg::Scalar(ValueId(0))] },
+            ],
+            ret: None,
+        };
+        MirProgram { functions: vec![add, main] }
+    }
+
+    #[test]
+    fn function_call_lowers_and_runs_on_rust() {
+        let prog = add_program();
+        for f in &prog.functions {
+            assert_eq!(verify_ownership(f), Ok(()), "{} verifies", f.name);
+        }
+        let out = compile_and_run("fncall", &render_rust_program(&prog));
+        assert_eq!(out, "5");
     }
 
     /// Compile a Rust source string and run it; return trimmed stdout. `label`
@@ -146,6 +293,7 @@ mod tests {
                 Op::Drop { v: b },
                 Op::Drop { v: a },
             ],
+            ..Default::default()
         };
         // The MIR is ownership-balanced by construction…
         assert_eq!(verify_ownership(&mir), Ok(()));
@@ -176,6 +324,7 @@ mod tests {
                 Op::Drop { v: b },
                 Op::Drop { v: a },
             ],
+            ..Default::default()
         };
         assert_eq!(verify_ownership(&mir), Ok(()));
         let out = compile_and_run("push", &render_rust(&mir));

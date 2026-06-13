@@ -18,7 +18,7 @@
 //! Anything outside the subset (control flow, calls, …) returns
 //! [`LowerError::Unsupported`] — never a silent drop (flight-grade totality).
 
-use crate::{Init, LayoutId, MirFunction, Op, Repr, ValueId};
+use crate::{Init, MirFunction, Op, Repr, ValueId, PLACEHOLDER_LAYOUT};
 use almide_ir::{IrExpr, IrExprKind, IrFunction, IrStmt, IrStmtKind, VarId};
 use almide_lang::types::Ty;
 use std::collections::HashMap;
@@ -90,10 +90,6 @@ pub fn repr_of(ty: &Ty) -> Result<Repr, LowerError> {
     Ok(Repr::Scalar { width: w })
 }
 
-/// The layout registry is not built yet (a later brick); heap values carry this
-/// placeholder until then. Named so it is never mistaken for a real id.
-const PLACEHOLDER_LAYOUT: LayoutId = LayoutId(0);
-
 /// Lower one function to MIR.
 pub fn lower_function(func: &IrFunction) -> Result<MirFunction, LowerError> {
     lower_body(&func.body, func.name.as_str())
@@ -131,7 +127,7 @@ pub fn lower_body(body: &IrExpr, name: &str) -> Result<MirFunction, LowerError> 
     // Drop per HANDLE balances the Alloc(+1) and each aliasing Dup(+1).
     ctx.emit_scope_end_drops();
 
-    Ok(MirFunction { name: name.to_string(), ops: ctx.ops })
+    Ok(MirFunction { name: name.to_string(), ops: ctx.ops, ..Default::default() })
 }
 
 #[derive(Default)]
@@ -392,6 +388,7 @@ mod tests {
                 Op::Drop { v: ValueId(0) },
                 Op::Drop { v: ValueId(0) }, // second drop with no Dup → double free
             ],
+            ..Default::default()
         };
         let errs = verify_ownership(&broken).unwrap_err();
         assert!(errs.iter().any(|e| e.kind == ViolationKind::DoubleFree));

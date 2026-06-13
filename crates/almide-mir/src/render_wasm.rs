@@ -23,8 +23,8 @@
 //! (`Push`/`IndexSet`/`Print` become `Call`s to self-hosted runtime functions).
 //! Convergence rule: never add another hand-written WAT runtime routine.
 
-use crate::{CallArg, Init, MirFunction, Op, RtFn, ValueId};
-use std::collections::BTreeMap;
+use crate::{CallArg, Init, IntOp, MirFunction, MirProgram, Op, Repr, RtFn, ValueId};
+use std::collections::{BTreeMap, BTreeSet};
 
 // Fixed low-memory addresses (named — no raw literals in the emitted WAT logic).
 const NWRITTEN_ADDR: u32 = 0; // i32 scratch for fd_write's bytes-written out-param
@@ -34,10 +34,19 @@ const LABELS_ADDR: u32 = 64; // print labels (the data section)
 const SCRATCH_ADDR: u32 = 512; // the line build buffer
 const HEAP_BASE: u32 = 8192; // bump allocator start
 
-// List layout / growth.
-const LIST_HEADER: u32 = 8; // [len:i32][cap:i32]
+// Field sizes / offsets (derived so the relationships show — no bare literals).
+const I32_SIZE: u32 = 4; // a wasm i32 field is 4 bytes
+const LIST_LEN_OFFSET: u32 = 0; // list = [len:i32 @0][cap:i32 @4][data @8]
+const LIST_CAP_OFFSET: u32 = LIST_LEN_OFFSET + I32_SIZE;
+const LIST_HEADER: u32 = LIST_CAP_OFFSET + I32_SIZE; // len + cap
 const ELEM_SIZE: u32 = 8; // i64 elements
 const PUSH_HEADROOM: u32 = 8; // spare cap so demo pushes never realloc
+const IOVEC_LEN_OFFSET: u32 = I32_SIZE; // iovec = [buf:i32 @0][len:i32 @4]
+
+// WASI fd_write parameters / numeric base.
+const STDOUT_FD: u32 = 1;
+const IOVS_COUNT: u32 = 1; // one iovec per write
+const DECIMAL_BASE: i64 = 10;
 
 /// ASCII bytes the formatter writes.
 const ASCII_ZERO: u32 = 48;
@@ -99,6 +108,119 @@ pub fn render_wasm(func: &MirFunction) -> String {
     )
 }
 
+/// Render a whole MIR program (functions + `_start` → `main`) to a WAT module.
+pub fn render_wasm_program(prog: &MirProgram) -> String {
+    // Labels (the data section) are module-level — collect across all functions.
+    let mut label_off: BTreeMap<String, (u32, u32)> = BTreeMap::new();
+    let mut data = String::new();
+    let mut cursor = LABELS_ADDR;
+    for func in &prog.functions {
+        for op in &func.ops {
+            if let Op::Call { args, .. } = op {
+                for a in args {
+                    if let CallArg::Label(label) = a {
+                        if !label_off.contains_key(label) {
+                            let len = label.len() as u32;
+                            label_off.insert(label.clone(), (cursor, len));
+                            data.push_str(&format!("  (data (i32.const {cursor}) {:?})\n", label));
+                            cursor += len;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    let funcs =
+        prog.functions.iter().map(|f| render_wasm_fn(f, &label_off)).collect::<String>();
+    format!(
+        "{preamble}{data}{funcs}  (func (export \"_start\") (call $main))\n)\n",
+        preamble = preamble(),
+    )
+}
+
+/// Render one MIR function with its signature (params, locals, result).
+pub fn render_wasm_fn(func: &MirFunction, label_off: &BTreeMap<String, (u32, u32)>) -> String {
+    let reprs = value_reprs_wasm(func);
+    let params = func
+        .params
+        .iter()
+        .map(|p| format!("(param {} {})", local(p.value), wasm_ty(p.repr)))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let result = func
+        .ret
+        .map(|r| format!(" (result {})", wasm_ty(reprs.get(&r).copied().unwrap_or(SCALAR_REPR))))
+        .unwrap_or_default();
+    // locals = values defined in the body that are not params (first-def order).
+    let mut seen: BTreeSet<ValueId> = func.params.iter().map(|p| p.value).collect();
+    let mut locals = Vec::new();
+    for op in &func.ops {
+        if let Some(d) = defined_value(op) {
+            if seen.insert(d) {
+                let ty = wasm_ty(reprs.get(&d).copied().unwrap_or(SCALAR_REPR));
+                locals.push(format!("(local {} {ty})", local(d)));
+            }
+        }
+    }
+    let locals_decl = locals.join(" ");
+    let mut body = String::new();
+    for op in &func.ops {
+        body.push_str(&render_op(op, label_off));
+    }
+    let tail = func.ret.map(|r| format!("    (local.get {})\n", local(r))).unwrap_or_default();
+    format!("  (func ${} {params}{result} {locals_decl}\n{body}{tail}  )\n", func.name)
+}
+
+const SCALAR_REPR: Repr = Repr::Scalar { width: crate::width::I64 };
+
+fn wasm_ty(repr: Repr) -> &'static str {
+    if repr.is_heap() {
+        "i32"
+    } else {
+        "i64"
+    }
+}
+
+/// The value an op defines (binds), if any.
+fn defined_value(op: &Op) -> Option<ValueId> {
+    match op {
+        Op::Alloc { dst, .. }
+        | Op::Dup { dst, .. }
+        | Op::Const { dst }
+        | Op::IntBinOp { dst, .. }
+        | Op::Pure { dst, .. } => Some(*dst),
+        Op::CallFn { dst, .. } | Op::Call { dst, .. } => *dst,
+        _ => None,
+    }
+}
+
+/// Infer each value's Repr (params + op results) for local/param/result typing.
+fn value_reprs_wasm(func: &MirFunction) -> BTreeMap<ValueId, Repr> {
+    let mut m = BTreeMap::new();
+    for p in &func.params {
+        m.insert(p.value, p.repr);
+    }
+    for op in &func.ops {
+        match op {
+            Op::Alloc { dst, repr, .. } => {
+                m.insert(*dst, *repr);
+            }
+            Op::Dup { dst, src } => {
+                let r = m.get(src).copied().unwrap_or(Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT });
+                m.insert(*dst, r);
+            }
+            Op::Const { dst } | Op::IntBinOp { dst, .. } => {
+                m.insert(*dst, SCALAR_REPR);
+            }
+            Op::CallFn { dst: Some(d), .. } => {
+                m.insert(*d, SCALAR_REPR);
+            }
+            _ => {}
+        }
+    }
+    m
+}
+
 fn local(v: ValueId) -> String {
     format!("$v{}", v.0)
 }
@@ -133,6 +255,26 @@ fn render_op(op: &Op, label_off: &BTreeMap<String, (u32, u32)>) -> String {
         ),
         // A runtime call → a wasm `call` of the (bootstrap) runtime function.
         Op::Call { dst, func, args } => render_call(*dst, func, args, label_off),
+        Op::IntBinOp { dst, op, a, b } => {
+            let o = match op {
+                IntOp::Add => "i64.add",
+                IntOp::Sub => "i64.sub",
+                IntOp::Mul => "i64.mul",
+            };
+            format!(
+                "    (local.set {d} ({o} (local.get {a}) (local.get {b})))\n",
+                d = local(*dst),
+                a = local(*a),
+                b = local(*b)
+            )
+        }
+        Op::CallFn { dst, name, args } => {
+            let argstr = args.iter().map(render_arg_wasm).collect::<Vec<_>>().join(" ");
+            match dst {
+                Some(d) => format!("    (local.set {} (call ${name} {argstr}))\n", local(*d)),
+                None => format!("    (call ${name} {argstr})\n"),
+            }
+        }
         // No wasm needed: Drop/Consume are no-ops in the eager-copy model (no RC),
         // MakeUnique already done by the Dup copy, Const/Borrow/Pure are not used
         // by the value-semantics subset's observable path.
@@ -142,6 +284,14 @@ fn render_op(op: &Op, label_off: &BTreeMap<String, (u32, u32)>) -> String {
         | Op::Borrow { .. }
         | Op::Const { .. }
         | Op::Pure { .. } => String::new(),
+    }
+}
+
+fn render_arg_wasm(arg: &CallArg) -> String {
+    match arg {
+        CallArg::Handle(v) | CallArg::Scalar(v) => format!("(local.get {})", local(*v)),
+        CallArg::Imm(n) => format!("(i64.const {n})"),
+        CallArg::Label(l) => panic!("label arg {l:?} not valid for a user call"),
     }
 }
 
@@ -172,6 +322,9 @@ fn render_call(
                 v = local(*v)
             )
         }
+        (RtFn::PrintInt, [CallArg::Scalar(v)]) => {
+            format!("    (call $print_int (local.get {}))\n", local(*v))
+        }
         _ => panic!("malformed runtime call {func:?} with args {args:?}"),
     }
 }
@@ -197,7 +350,7 @@ fn preamble() -> String {
     (local.set $p (call $alloc (i32.add (i32.const {LIST_HEADER})
                                         (i32.mul (local.get $cap) (i32.const {ELEM_SIZE})))))
     (i32.store (local.get $p) (local.get $len))
-    (i32.store (i32.add (local.get $p) (i32.const 4)) (local.get $cap))
+    (i32.store (i32.add (local.get $p) (i32.const {LIST_CAP_OFFSET})) (local.get $cap))
     (local.get $p))
 
   (func $elem_addr (param $list i32) (param $idx i32) (result i32)
@@ -215,7 +368,7 @@ fn preamble() -> String {
   (func $list_copy (param $src i32) (result i32)
     (local $len i32) (local $cap i32) (local $dst i32) (local $i i32)
     (local.set $len (i32.load (local.get $src)))
-    (local.set $cap (i32.load (i32.add (local.get $src) (i32.const 4))))
+    (local.set $cap (i32.load (i32.add (local.get $src) (i32.const {LIST_CAP_OFFSET}))))
     (local.set $dst (call $list_new (local.get $len) (local.get $cap)))
     (local.set $i (i32.const 0))
     (block $done (loop $loop
@@ -245,9 +398,9 @@ fn preamble() -> String {
       (br_if $ddone (i64.eqz (local.get $v)))
       (i32.store8 (i32.add (i32.const {ITOA_TMP_ADDR}) (local.get $n))
                   (i32.add (i32.const {ASCII_ZERO})
-                           (i32.wrap_i64 (i64.rem_u (local.get $v) (i64.const 10)))))
+                           (i32.wrap_i64 (i64.rem_u (local.get $v) (i64.const {DECIMAL_BASE})))))
       (local.set $n (i32.add (local.get $n) (i32.const 1)))
-      (local.set $v (i64.div_u (local.get $v) (i64.const 10)))
+      (local.set $v (i64.div_u (local.get $v) (i64.const {DECIMAL_BASE})))
       (br $dloop)))
     (block $cdone (loop $cloop
       (br_if $cdone (i32.eqz (local.get $n)))
@@ -287,10 +440,22 @@ fn preamble() -> String {
     (i32.store8 (local.get $cur) (i32.const {ASCII_NEWLINE}))
     (local.set $cur (i32.add (local.get $cur) (i32.const 1)))
     (i32.store (i32.const {IOVEC_ADDR}) (i32.const {SCRATCH_ADDR}))
-    (i32.store (i32.add (i32.const {IOVEC_ADDR}) (i32.const 4))
+    (i32.store (i32.add (i32.const {IOVEC_ADDR}) (i32.const {IOVEC_LEN_OFFSET}))
                (i32.sub (local.get $cur) (i32.const {SCRATCH_ADDR})))
-    (drop (call $fd_write (i32.const 1) (i32.const {IOVEC_ADDR})
-                          (i32.const 1) (i32.const {NWRITTEN_ADDR}))))
+    (drop (call $fd_write (i32.const {STDOUT_FD}) (i32.const {IOVEC_ADDR})
+                          (i32.const {IOVS_COUNT}) (i32.const {NWRITTEN_ADDR}))))
+
+  ;; print a scalar integer followed by a newline
+  (func $print_int (param $v i64)
+    (local $cur i32)
+    (local.set $cur (call $itoa_append (i32.const {SCRATCH_ADDR}) (local.get $v)))
+    (i32.store8 (local.get $cur) (i32.const {ASCII_NEWLINE}))
+    (local.set $cur (i32.add (local.get $cur) (i32.const 1)))
+    (i32.store (i32.const {IOVEC_ADDR}) (i32.const {SCRATCH_ADDR}))
+    (i32.store (i32.add (i32.const {IOVEC_ADDR}) (i32.const {IOVEC_LEN_OFFSET}))
+               (i32.sub (local.get $cur) (i32.const {SCRATCH_ADDR})))
+    (drop (call $fd_write (i32.const {STDOUT_FD}) (i32.const {IOVEC_ADDR})
+                          (i32.const {IOVS_COUNT}) (i32.const {NWRITTEN_ADDR}))))
 
 "#
     )
@@ -299,11 +464,54 @@ fn preamble() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{verify_ownership, LayoutId, Repr};
+    use crate::{verify_ownership, width, LayoutId, MirParam, MirProgram};
     use std::process::Command;
 
     fn heap() -> Repr {
         Repr::Ptr { layout: LayoutId(0) }
+    }
+
+    /// Same program as the Rust-side test: `fn add(a,b)=a+b` + a `main` calling
+    /// it. Both targets must print the same `5` — the dual-renderer thesis for
+    /// USER FUNCTIONS (the mechanism that lets the runtime be self-hosted).
+    fn add_program() -> MirProgram {
+        let scalar = Repr::Scalar { width: width::I64 };
+        let add = MirFunction {
+            name: "add".into(),
+            params: vec![
+                MirParam { value: ValueId(0), repr: scalar },
+                MirParam { value: ValueId(1), repr: scalar },
+            ],
+            ops: vec![Op::IntBinOp {
+                dst: ValueId(2),
+                op: IntOp::Add,
+                a: ValueId(0),
+                b: ValueId(1),
+            }],
+            ret: Some(ValueId(2)),
+        };
+        let main = MirFunction {
+            name: "main".into(),
+            params: vec![],
+            ops: vec![
+                Op::CallFn {
+                    dst: Some(ValueId(0)),
+                    name: "add".into(),
+                    args: vec![CallArg::Imm(2), CallArg::Imm(3)],
+                },
+                Op::Call { dst: None, func: RtFn::PrintInt, args: vec![CallArg::Scalar(ValueId(0))] },
+            ],
+            ret: None,
+        };
+        MirProgram { functions: vec![add, main] }
+    }
+
+    #[test]
+    fn function_call_lowers_and_runs_on_wasm() {
+        let prog = add_program();
+        if let Some(out) = build_and_run("fncall", &render_wasm_program(&prog)) {
+            assert_eq!(out, "5");
+        }
     }
 
     fn build_and_run(label: &str, wat: &str) -> Option<String> {
@@ -343,6 +551,7 @@ mod tests {
                 Op::Drop { v: b },
                 Op::Drop { v: a },
             ],
+            ..Default::default()
         }
     }
 
@@ -379,6 +588,7 @@ mod tests {
                 Op::Drop { v: b },
                 Op::Drop { v: a },
             ],
+            ..Default::default()
         };
         assert_eq!(verify_ownership(&mir), Ok(()));
         if let Some(out) = build_and_run("push", &render_wasm(&mir)) {
