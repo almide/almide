@@ -24,6 +24,14 @@ ROOT="$(cd .. && pwd)"
 
 CORPUS="${1:-$ROOT/spec}"
 
+# The stdlib purity drift gate (brick #47): a stdlib `Module` call lowers into
+# the subset only when its callee is provably PURE; this gate fails if a pure
+# module ever gains a host effect (the accept-but-unsafe class). Run it FIRST —
+# the corpus sweep below trusts `purity::is_pure`, so its registry must be sound.
+echo "== stdlib purity drift gate (admit-set ⊆ keyword-pure, all modules classified) =="
+bash "$ROOT/proofs/check-stdlib-purity-registry.sh"
+echo
+
 echo "== build the corpus classifier (real frontend → MIR lowering) =="
 # Pre-existing workspace warnings are not this gate's concern — silence them so
 # the honest wall report below is the only thing on screen.

@@ -27,6 +27,7 @@
 
 pub mod certificate;
 pub mod lower;
+pub mod purity;
 pub mod render_rust;
 pub mod render_wasm;
 pub mod translation_validation;

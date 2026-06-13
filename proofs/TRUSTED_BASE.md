@@ -108,13 +108,29 @@ The receipt's claims are scoped to exactly this:
   verification = the definition of parity" in its honest first form: it does NOT
   yet claim the *completion definition* (the proven profile accepting the full
   corpus), it establishes the *mechanism* that measures progress toward it and
-  proves the boundary is a wall, not a hole. **Today's honest coverage: 271/4195
+  proves the boundary is a wall, not a hole. **Today's honest coverage: 278/4195
   functions in-profile** (the value-semantics subset, incl. expression-bodied
-  functions, direct heap-literal returns, direct named-call-result returns, and
-  functions taking **borrowed heap parameters**); the rest are walled with a
-  per-feature `Unsupported` histogram that names the next surface to admit
-  (largest buckets: nested `call argument Call`, `heap bind from Call` — a call
-  used as an argument/bind value, the next lowering brick). **Heap parameters use
+  functions, direct heap-literal returns, direct named-call-result returns,
+  functions taking **borrowed heap parameters**, and **first-order pure stdlib
+  `Module` calls** in bind/tail position); the rest are walled with a per-feature
+  `Unsupported` histogram that names the next surface to admit (largest buckets
+  now name exact stdlib functions: `list.map`/`filter`/`fold` with a closure
+  argument — the higher-order brick — and call-as-argument materialization).
+  **Stdlib `Module` calls use a PURE-ONLY admission**: a `<module>.<func>` call
+  lowers to an `Op::CallFn` only when first-order (no closure argument) AND the
+  callee is provably PURE (reaches no host capability). This is forced by
+  capability soundness: the proven checker derives `used` capabilities only from
+  `Op::Call`'s typed `RtFn`, so a `CallFn` to an effectful stdlib name would
+  silently omit its capability from `used` = accept-but-unsafe. Pure callees reach
+  the empty capability set, which the empty `used` witness faithfully represents;
+  effectful (`fs`/`http`/`net`/`io`/`env`/`process`/`random`/`zlib` via the
+  `effect fn` keyword) and impure-plain (`datetime`/`args`/`mem`/`testing` — host
+  reach WITHOUT the keyword) and higher-order calls are WALLED, never lowered. The
+  purity registry (`crates/almide-mir/src/purity.rs::PURE_MODULES`) lives entirely
+  in the untrusted emitter; a **drift gate** (`proofs/check-stdlib-purity-registry.sh`,
+  in `corpus-wall.sh`) re-derives the effectful set from `stdlib/*.almd` and fails
+  if any admitted module ever gains an `effect fn`, or if a stdlib module is left
+  unclassified — so a pure→effectful drift cannot silently ship. **Heap parameters use
   a BORROW-BY-DEFAULT calling convention** (the caller owns the reference; a param
   contributes no owned `+1` to the certificate). This is the only convention sound
   under the current runtime: an owned-param `+1` would be SYNTHETIC — unbacked by

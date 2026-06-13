@@ -18,6 +18,7 @@
 //! Anything outside the subset (control flow, calls, …) returns
 //! [`LowerError::Unsupported`] — never a silent drop (flight-grade totality).
 
+use crate::purity;
 use crate::{CallArg, Init, MirFunction, MirParam, Op, Repr, RtFn, ValueId, PLACEHOLDER_LAYOUT};
 use almide_ir::{CallTarget, IrExpr, IrExprKind, IrFunction, IrParam, IrStmt, IrStmtKind, VarId};
 use almide_lang::types::Ty;
@@ -266,6 +267,17 @@ impl LowerCtx {
                 self.live_heap_handles.push(dst);
                 Ok(())
             }
+            // `var x = string.trim(s)` — a stdlib MODULE call returning a heap
+            // value. Admitted only when first-order + pure (else walled); the
+            // fresh owned result is bound and dropped at scope end, exactly like
+            // the `Named` case above.
+            IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } => {
+                let dst =
+                    self.lower_pure_module_value_call(module.as_str(), func.as_str(), args, ty)?;
+                self.value_of.insert(var, dst);
+                self.live_heap_handles.push(dst);
+                Ok(())
+            }
             IrExprKind::Call { target, .. } => Err(LowerError::Unsupported(format!(
                 "heap bind from Call[{}] not in this brick",
                 call_target_kind(target)
@@ -275,6 +287,50 @@ impl LowerCtx {
                 kind_name(other)
             ))),
         }
+    }
+
+    /// Lower a stdlib `Module` call (`<module>.<func>(args)`) in a VALUE position
+    /// (bind or tail) to an `Op::CallFn` named `"<module>.<func>"`, IFF it is
+    /// admissible. Two gates, in order:
+    /// 1. FIRST-ORDER — no argument is a closure/function (`is_higher_order`): the
+    ///    stdlib callee would invoke user code whose capabilities/ownership are
+    ///    unmodelled in this slice.
+    /// 2. PURE — the callee reaches no host capability ([`purity::is_pure`]): an
+    ///    effectful call lowered as a bare `Op::CallFn` would silently omit its
+    ///    capability from the witness `used` set (the checker derives caps only
+    ///    from `Op::Call`), i.e. accept-but-unsafe. Walling it keeps `used`
+    ///    complete by construction (no certificate is emitted at all).
+    /// When both pass it lowers exactly like the verified `Named`-call arm: a heap
+    /// result is a FRESH OWNED value (the return-mode signature), a scalar result
+    /// carries no ownership. The caller decides bind (push to live handles) vs tail
+    /// (move out). Returns the result's [`ValueId`].
+    fn lower_pure_module_value_call(
+        &mut self,
+        module: &str,
+        func: &str,
+        args: &[IrExpr],
+        result_ty: &Ty,
+    ) -> Result<ValueId, LowerError> {
+        if is_higher_order(args) {
+            return Err(LowerError::Unsupported(format!(
+                "Module call {module}.{func} with a function-typed argument (closure capabilities unmodelled) not in this brick"
+            )));
+        }
+        if !purity::is_pure(module, func) {
+            return Err(LowerError::Unsupported(format!(
+                "effectful/impure stdlib Module call {module}.{func} needs a declared capability not in this brick"
+            )));
+        }
+        let lowered = self.lower_call_args(args)?;
+        let dst = self.fresh_value();
+        let repr = repr_of(result_ty)?;
+        self.ops.push(Op::CallFn {
+            dst: Some(dst),
+            name: format!("{module}.{func}"),
+            args: lowered,
+            result: Some(repr),
+        });
+        Ok(dst)
     }
 
     fn value_for(&self, var: VarId) -> Result<ValueId, LowerError> {
@@ -363,6 +419,19 @@ impl LowerCtx {
                         args: lowered,
                         result: Some(repr),
                     });
+                    Ok(Some(dst))
+                }
+                // `fn f() = string.trim(s)` — a stdlib MODULE call result returned
+                // directly. Admitted only when first-order + pure; the fresh owned
+                // result is moved out (NOT added to live_heap_handles), like the
+                // `Named` case above.
+                IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } => {
+                    let dst = self.lower_pure_module_value_call(
+                        module.as_str(),
+                        func.as_str(),
+                        args,
+                        &tail.ty,
+                    )?;
                     Ok(Some(dst))
                 }
                 other => Err(LowerError::Unsupported(format!(
@@ -513,6 +582,26 @@ fn stmt_kind_name(k: &IrStmtKind) -> &'static str {
         IrStmtKind::ListRotateLeft { .. } => "ListRotateLeft",
         IrStmtKind::ListCopySlice { .. } => "ListCopySlice",
     }
+}
+
+/// True if any argument is a FUNCTION-typed value (a closure / lambda / fn-ref).
+/// A stdlib call with such an argument invokes USER code, so its effective
+/// capabilities are its-own ∪ the closure's — unmodelled in the pure-only Module
+/// slice — and a captured-heap closure carries ownership this brick does not
+/// track. Such calls are walled. The TYPE test catches every form (a lambda
+/// literal, a fn-ref, OR a variable of function type) under the AllTypesConcrete
+/// precondition; the kind test is a belt-and-suspenders for any arg whose type
+/// was not concretized.
+fn is_higher_order(args: &[IrExpr]) -> bool {
+    args.iter().any(|a| {
+        matches!(a.ty, Ty::Fn { .. })
+            || matches!(
+                a.kind,
+                IrExprKind::Lambda { .. }
+                    | IrExprKind::ClosureCreate { .. }
+                    | IrExprKind::FnRef { .. }
+            )
+    })
 }
 
 /// The kind of a call's resolved target — used to make a walled `Call`'s reason
@@ -686,5 +775,105 @@ mod tests {
         };
         let errs = verify_ownership(&broken).unwrap_err();
         assert!(errs.iter().any(|e| e.kind == ViolationKind::DoubleFree));
+    }
+
+    // ── stdlib Module-call lowering (brick #47) ──
+
+    fn module_call(module: &str, func: &str, args: Vec<IrExpr>, ty: Ty) -> IrExpr {
+        use almide_lang::intern::sym;
+        ir_expr(
+            IrExprKind::Call {
+                target: CallTarget::Module { module: sym(module), func: sym(func), def_id: None },
+                args,
+                type_args: vec![],
+            },
+            ty,
+        )
+    }
+
+    #[test]
+    fn is_higher_order_detects_function_typed_args() {
+        let fn_ty = Ty::Fn { params: vec![Ty::Int], ret: Box::new(Ty::Int) };
+        let plain = ir_expr(IrExprKind::Var { id: VarId(0) }, Ty::String);
+        let closure = ir_expr(IrExprKind::Var { id: VarId(1) }, fn_ty);
+        assert!(!is_higher_order(std::slice::from_ref(&plain)));
+        assert!(is_higher_order(&[plain, closure]));
+    }
+
+    #[test]
+    fn pure_first_order_module_call_lowers() {
+        // var s = "x"; var t = string.trim(s)  — first-order + pure → admitted.
+        let b = body(vec![
+            bind(0, Ty::String, ir_expr(IrExprKind::LitStr { value: "x".into() }, Ty::String)),
+            bind(
+                1,
+                Ty::String,
+                module_call(
+                    "string",
+                    "trim",
+                    vec![ir_expr(IrExprKind::Var { id: VarId(0) }, Ty::String)],
+                    Ty::String,
+                ),
+            ),
+        ]);
+        let mir = lower_body(&b, "main").expect("pure first-order Module call lowers");
+        assert!(
+            mir.ops.iter().any(|o| matches!(o, Op::CallFn { name, .. } if name == "string.trim")),
+            "expected an Op::CallFn named string.trim, got {:?}",
+            mir.ops
+        );
+        // A fresh owned heap result, balanced by a scope-end drop.
+        assert_eq!(verify_ownership(&mir), Ok(()));
+    }
+
+    #[test]
+    fn higher_order_module_call_is_walled() {
+        // var ys = list.map(xs, f)  with f : (Int) -> Int  → walled (closure arg).
+        let fn_ty = Ty::Fn { params: vec![Ty::Int], ret: Box::new(Ty::Int) };
+        let b = body(vec![
+            bind(0, list_int(), ir_expr(IrExprKind::List { elements: vec![] }, list_int())),
+            bind(
+                1,
+                list_int(),
+                module_call(
+                    "list",
+                    "map",
+                    vec![
+                        ir_expr(IrExprKind::Var { id: VarId(0) }, list_int()),
+                        ir_expr(IrExprKind::Var { id: VarId(2) }, fn_ty),
+                    ],
+                    list_int(),
+                ),
+            ),
+        ]);
+        match lower_body(&b, "main") {
+            Err(LowerError::Unsupported(m)) => {
+                assert!(m.contains("function-typed argument"), "got: {m}")
+            }
+            other => panic!("expected a higher-order wall, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn effectful_module_call_is_walled() {
+        // var x = fs.read_text(p)  → walled (fs is effectful; its capability cannot
+        // yet be charged into the witness, so admitting it would be accept-but-unsafe).
+        let b = body(vec![
+            bind(0, Ty::String, ir_expr(IrExprKind::LitStr { value: "p".into() }, Ty::String)),
+            bind(
+                1,
+                Ty::String,
+                module_call(
+                    "fs",
+                    "read_text",
+                    vec![ir_expr(IrExprKind::Var { id: VarId(0) }, Ty::String)],
+                    Ty::String,
+                ),
+            ),
+        ]);
+        match lower_body(&b, "main") {
+            Err(LowerError::Unsupported(m)) => assert!(m.contains("effectful/impure"), "got: {m}"),
+            other => panic!("expected an effectful wall, got {other:?}"),
+        }
     }
 }
