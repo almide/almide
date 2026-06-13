@@ -54,7 +54,7 @@ fn scenario(which: &str) -> MirFunction {
             name: "f".into(),
             ops: vec![
                 Op::Const { dst: a },
-                Op::Call { dst: None, func: RtFn::PrintInt, args: vec![CallArg::Scalar(a)] },
+                Op::Call { dst: None, func: RtFn::PrintInt, args: vec![CallArg::Scalar(a)] , result: None },
             ],
             declared_caps: vec![Capability::Stdout],
             ..Default::default()
@@ -65,7 +65,7 @@ fn scenario(which: &str) -> MirFunction {
             name: "f".into(),
             ops: vec![
                 Op::Const { dst: a },
-                Op::Call { dst: None, func: RtFn::PrintInt, args: vec![CallArg::Scalar(a)] },
+                Op::Call { dst: None, func: RtFn::PrintInt, args: vec![CallArg::Scalar(a)] , result: None },
             ],
             declared_caps: vec![], // declares no capability
             ..Default::default()

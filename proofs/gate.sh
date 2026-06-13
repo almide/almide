@@ -90,6 +90,8 @@ run_src print_str.almd   main  caps      1
 # the callee; the compiler folds reachability, the checker does the subset.
 run_src      transitive_caps.almd main caps  0
 run_src_mode transitive_caps.almd main tcaps caps 1
+run_src      two_functions.almd  main ownership 0
+run_src      two_functions.almd  main names     0
 
 echo
 echo "GATE OK: the kernel-proven checker re-verified per-build witnesses on THREE"

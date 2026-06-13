@@ -152,7 +152,7 @@ fn render_op(op: &Op) -> Option<String> {
             };
             Some(format!("let {}: i64 = {} {o} {};", var(*dst), var(*a), var(*b)))
         }
-        Op::CallFn { dst, name, args } => {
+        Op::CallFn { dst, name, args, .. } => {
             let a = args.iter().map(render_arg).collect::<Vec<_>>().join(", ");
             Some(match dst {
                 Some(d) => format!("let {} = {name}({a});", var(*d)),
@@ -231,8 +231,8 @@ mod tests {
                     dst: Some(ValueId(0)),
                     name: "add".into(),
                     args: vec![CallArg::Imm(2), CallArg::Imm(3)],
-                },
-                Op::Call { dst: None, func: RtFn::PrintInt, args: vec![CallArg::Scalar(ValueId(0))] },
+                result: None },
+                Op::Call { dst: None, func: RtFn::PrintInt, args: vec![CallArg::Scalar(ValueId(0))] , result: None },
             ],
             ret: None,
             ..Default::default()
@@ -289,9 +289,9 @@ mod tests {
                     dst: None,
                     func: RtFn::ListSet,
                     args: vec![CallArg::Handle(a), CallArg::Imm(0), CallArg::Imm(9)],
-                },
-                Op::Call { dst: None, func: RtFn::PrintList, args: vec![CallArg::Handle(a), CallArg::Label("a".into())] },
-                Op::Call { dst: None, func: RtFn::PrintList, args: vec![CallArg::Handle(b), CallArg::Label("b".into())] },
+                result: None },
+                Op::Call { dst: None, func: RtFn::PrintList, args: vec![CallArg::Handle(a), CallArg::Label("a".into())] , result: None },
+                Op::Call { dst: None, func: RtFn::PrintList, args: vec![CallArg::Handle(b), CallArg::Label("b".into())] , result: None },
                 Op::Drop { v: b },
                 Op::Drop { v: a },
             ],
@@ -320,9 +320,9 @@ mod tests {
                     dst: Some(a),
                     func: RtFn::ListPush,
                     args: vec![CallArg::Handle(a), CallArg::Imm(2)],
-                },
-                Op::Call { dst: None, func: RtFn::PrintList, args: vec![CallArg::Handle(a), CallArg::Label("a".into())] },
-                Op::Call { dst: None, func: RtFn::PrintList, args: vec![CallArg::Handle(b), CallArg::Label("b".into())] },
+                result: None },
+                Op::Call { dst: None, func: RtFn::PrintList, args: vec![CallArg::Handle(a), CallArg::Label("a".into())] , result: None },
+                Op::Call { dst: None, func: RtFn::PrintList, args: vec![CallArg::Handle(b), CallArg::Label("b".into())] , result: None },
                 Op::Drop { v: b },
                 Op::Drop { v: a },
             ],

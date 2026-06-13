@@ -233,7 +233,18 @@ pub fn ownership_certificate(func: &MirFunction) -> String {
                 let o = s.object_of(*v);
                 s.event(o, 'm');
             }
-            // No refcount change: Borrow/MakeUnique/Const/Pure/Call/CallFn/IntBinOp.
+            // A call that returns a FRESH OWNED heap value (the callee allocated
+            // it and moved it out to us — the return-mode signature read at the
+            // call site, callee not opened) is a +1, like Alloc.
+            Op::Call { dst: Some(d), result: Some(r), .. }
+            | Op::CallFn { dst: Some(d), result: Some(r), .. }
+                if r.is_heap() =>
+            {
+                s.of.insert(*d, *d);
+                s.event(*d, 'i');
+            }
+            // No refcount change: Borrow/MakeUnique/Const/Pure/IntBinOp, and a
+            // call with a void/scalar result (its heap-handle args are borrowed).
             _ => {}
         }
     }
@@ -425,7 +436,7 @@ mod tests {
         // them against the declared bound.
         let print = func(vec![
             Op::Const { dst: ValueId(0) },
-            Op::Call { dst: None, func: RtFn::PrintInt, args: vec![CallArg::Scalar(ValueId(0))] },
+            Op::Call { dst: None, func: RtFn::PrintInt, args: vec![CallArg::Scalar(ValueId(0))] , result: None },
         ]);
         assert_eq!(cap_witness(&print).used, vec![Capability::Stdout]);
 
@@ -437,7 +448,7 @@ mod tests {
                 dst: Some(ValueId(0)),
                 func: RtFn::ListPush,
                 args: vec![CallArg::Handle(ValueId(0)), CallArg::Imm(1)],
-            },
+            result: None },
             Op::Drop { v: ValueId(0) },
         ]);
         assert!(cap_witness(&pure).used.is_empty());
@@ -448,7 +459,7 @@ mod tests {
         // declares Stdout, prints → `0|0`  (allowed ⊇ used → checker accepts).
         let mut declared = func(vec![
             Op::Const { dst: ValueId(0) },
-            Op::Call { dst: None, func: RtFn::PrintInt, args: vec![CallArg::Scalar(ValueId(0))] },
+            Op::Call { dst: None, func: RtFn::PrintInt, args: vec![CallArg::Scalar(ValueId(0))] , result: None },
         ]);
         declared.declared_caps = vec![Capability::Stdout];
         assert_eq!(cap_witness_string(&declared), "0|0");
@@ -465,15 +476,15 @@ mod tests {
         // main → beep (prints, reaches Stdout). main has NO direct effect.
         let mut beep = func(vec![
             Op::Const { dst: ValueId(0) },
-            Op::Call { dst: None, func: RtFn::PrintInt, args: vec![CallArg::Scalar(ValueId(0))] },
+            Op::Call { dst: None, func: RtFn::PrintInt, args: vec![CallArg::Scalar(ValueId(0))] , result: None },
         ]);
         beep.name = "beep".into();
-        let mut main = func(vec![Op::CallFn { dst: None, name: "beep".into(), args: vec![] }]);
+        let mut main = func(vec![Op::CallFn { dst: None, name: "beep".into(), args: vec![] , result: None }]);
         main.name = "main".into();
         // A cycle main→loop→main must not diverge.
-        let mut looper = func(vec![Op::CallFn { dst: None, name: "main".into(), args: vec![] }]);
+        let mut looper = func(vec![Op::CallFn { dst: None, name: "main".into(), args: vec![] , result: None }]);
         looper.name = "loop".into();
-        main.ops.push(Op::CallFn { dst: None, name: "loop".into(), args: vec![] });
+        main.ops.push(Op::CallFn { dst: None, name: "loop".into(), args: vec![] , result: None });
 
         let mut program: BTreeMap<String, MirFunction> = BTreeMap::new();
         for f in [beep, main.clone(), looper] {

@@ -170,12 +170,16 @@ pub enum Op {
     /// hand-written one, ultimately Almide compiled through this same path). A
     /// renderer never re-implements a runtime operation inline — that is the
     /// discipline that keeps the hand-written wasm surface tiny.
-    Call { dst: Option<ValueId>, func: RtFn, args: Vec<CallArg> },
+    Call { dst: Option<ValueId>, func: RtFn, args: Vec<CallArg>, result: Option<Repr> },
 
     /// Call a USER/runtime MIR function by name (the mechanism that lets the
     /// runtime be self-hosted: a runtime fn is just a [`MirFunction`] called
-    /// here). `dst` binds the (possibly heap) result.
-    CallFn { dst: Option<ValueId>, name: String, args: Vec<CallArg> },
+    /// here). `dst` binds the result; `result` is its [`Repr`] — `Some(heap)`
+    /// marks a FRESH OWNED heap value (the callee allocated it and moved it out
+    /// to the caller, who now owns it: a +1, like [`Op::Alloc`]). This is the
+    /// callee's RETURN-mode signature, read at the call site WITHOUT opening the
+    /// callee (the compositionality lever for ownership).
+    CallFn { dst: Option<ValueId>, name: String, args: Vec<CallArg>, result: Option<Repr> },
 
     /// `dst = a <op> b` on scalars (no ownership) — the arithmetic runtime
     /// functions need.
@@ -395,16 +399,23 @@ pub fn verify_ownership(func: &MirFunction) -> Result<(), Vec<Violation>> {
                 }
             }
             // A runtime/user call BORROWS its heap-handle args (live-checked, no
-            // refcount change). Immediate/label args carry no ownership. (A
-            // heap-RETURNING call's `dst` ownership is a later refinement — the
-            // self-host runtime fns exercised here return scalars or rebind an
-            // already-owned arg.)
-            Op::Call { args, .. } | Op::CallFn { args, .. } => {
+            // refcount change). Immediate/label args carry no ownership. A call
+            // whose `result` is a heap repr returns a FRESH OWNED value (the
+            // callee allocated and moved it out — the return-mode signature): the
+            // `dst` becomes a new owned object, like Alloc.
+            Op::Call { args, dst, result, .. } | Op::CallFn { args, dst, result, .. } => {
                 for a in args {
                     if let CallArg::Handle(v) = a {
                         if live_object(&object_of, &rc, &dead, *v).is_none() {
                             violations.push(violation(i, *v, ViolationKind::UseAfterFree));
                         }
+                    }
+                }
+                if let (Some(d), Some(r)) = (dst, result) {
+                    if r.is_heap() {
+                        object_of.insert(*d, *d);
+                        rc.insert(*d, 1);
+                        dead.insert(*d, false);
                     }
                 }
             }

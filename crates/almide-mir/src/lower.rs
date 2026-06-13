@@ -155,6 +155,9 @@ impl LowerCtx {
             // Non-call expr statements stay Unsupported (the lower_effect_call
             // guard rejects them — flight-grade totality).
             IrStmtKind::Expr { expr } => self.lower_effect_call(expr),
+            // A source comment carries no ownership — skip it (it is not a
+            // "silent drop": Comment is a no-op by definition, not an unhandled op).
+            IrStmtKind::Comment { .. } => Ok(()),
             other => Err(LowerError::Unsupported(format!(
                 "statement {} not in the value-semantics subset",
                 stmt_kind_name(other)
@@ -195,6 +198,23 @@ impl LowerCtx {
                 let init = alloc_init(value);
                 self.value_of.insert(var, dst);
                 self.ops.push(Op::Alloc { dst, repr, init });
+                self.live_heap_handles.push(dst);
+                Ok(())
+            }
+            // `var x = f(...)` — a USER call returning a heap value. The result is
+            // a FRESH OWNED heap value (the callee's return-mode signature, read
+            // from the bind's heap type — the checker need not open the callee).
+            IrExprKind::Call { target: CallTarget::Named { name }, args, .. } => {
+                let lowered = self.lower_call_args(args)?;
+                let dst = self.fresh_value();
+                let repr = repr_of(ty)?;
+                self.value_of.insert(var, dst);
+                self.ops.push(Op::CallFn {
+                    dst: Some(dst),
+                    name: name.as_str().to_string(),
+                    args: lowered,
+                    result: Some(repr),
+                });
                 self.live_heap_handles.push(dst);
                 Ok(())
             }
@@ -300,7 +320,7 @@ impl LowerCtx {
                         dst: None,
                         func: RtFn::PrintStr,
                         args: vec![CallArg::Handle(v)],
-                    });
+                    result: None });
                     Ok(())
                 }
                 other => Err(LowerError::Unsupported(format!(
@@ -320,7 +340,7 @@ impl LowerCtx {
                     dst: None,
                     name: callee.to_string(),
                     args: lowered,
-                });
+                result: None });
                 Ok(())
             }
         }

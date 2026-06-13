@@ -254,7 +254,7 @@ fn render_op(op: &Op, label_off: &BTreeMap<String, (u32, u32)>) -> String {
             s = local(*src)
         ),
         // A runtime call → a wasm `call` of the (bootstrap) runtime function.
-        Op::Call { dst, func, args } => render_call(*dst, func, args, label_off),
+        Op::Call { dst, func, args, .. } => render_call(*dst, func, args, label_off),
         Op::IntBinOp { dst, op, a, b } => {
             let o = match op {
                 IntOp::Add => "i64.add",
@@ -268,7 +268,7 @@ fn render_op(op: &Op, label_off: &BTreeMap<String, (u32, u32)>) -> String {
                 b = local(*b)
             )
         }
-        Op::CallFn { dst, name, args } => {
+        Op::CallFn { dst, name, args, .. } => {
             let argstr = args.iter().map(render_arg_wasm).collect::<Vec<_>>().join(" ");
             match dst {
                 Some(d) => format!("    (local.set {} (call ${name} {argstr}))\n", local(*d)),
@@ -499,8 +499,8 @@ mod tests {
                     dst: Some(ValueId(0)),
                     name: "add".into(),
                     args: vec![CallArg::Imm(2), CallArg::Imm(3)],
-                },
-                Op::Call { dst: None, func: RtFn::PrintInt, args: vec![CallArg::Scalar(ValueId(0))] },
+                result: None },
+                Op::Call { dst: None, func: RtFn::PrintInt, args: vec![CallArg::Scalar(ValueId(0))] , result: None },
             ],
             ret: None,
             ..Default::default()
@@ -566,9 +566,9 @@ mod tests {
                     dst: None,
                     func: RtFn::ListSet,
                     args: vec![CallArg::Handle(a), CallArg::Imm(0), CallArg::Imm(9)],
-                },
-                Op::Call { dst: None, func: RtFn::PrintList, args: vec![CallArg::Handle(a), CallArg::Label("a".into())] },
-                Op::Call { dst: None, func: RtFn::PrintList, args: vec![CallArg::Handle(b), CallArg::Label("b".into())] },
+                result: None },
+                Op::Call { dst: None, func: RtFn::PrintList, args: vec![CallArg::Handle(a), CallArg::Label("a".into())] , result: None },
+                Op::Call { dst: None, func: RtFn::PrintList, args: vec![CallArg::Handle(b), CallArg::Label("b".into())] , result: None },
                 Op::Drop { v: b },
                 Op::Drop { v: a },
             ],
@@ -603,9 +603,9 @@ mod tests {
                     dst: Some(a),
                     func: RtFn::ListPush,
                     args: vec![CallArg::Handle(a), CallArg::Imm(2)],
-                },
-                Op::Call { dst: None, func: RtFn::PrintList, args: vec![CallArg::Handle(a), CallArg::Label("a".into())] },
-                Op::Call { dst: None, func: RtFn::PrintList, args: vec![CallArg::Handle(b), CallArg::Label("b".into())] },
+                result: None },
+                Op::Call { dst: None, func: RtFn::PrintList, args: vec![CallArg::Handle(a), CallArg::Label("a".into())] , result: None },
+                Op::Call { dst: None, func: RtFn::PrintList, args: vec![CallArg::Handle(b), CallArg::Label("b".into())] , result: None },
                 Op::Drop { v: b },
                 Op::Drop { v: a },
             ],

@@ -1,0 +1,13 @@
+// A REAL 2-function program demonstrating the RETURN-MODE signature (ownership
+// compositionality): `main` calls `helper`, which returns a fresh heap list.
+// main's accounting of the result (a fresh OWNED value, then moved out as the
+// return) is driven by the callee's return signature — read at the CALL SITE,
+// the callee never opened. Ownership witness `im` (call-result acquire + move-out).
+fn helper() -> List[Int] = {
+  var a = [1, 2, 3]
+  a
+}
+fn main() -> List[Int] = {
+  var x = helper()
+  x
+}

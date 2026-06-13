@@ -120,7 +120,7 @@ mod tests {
             ops: vec![
                 Op::Alloc { dst: a, repr: heap(), init: Init::IntList(vec![1, 2, 3]) },
                 Op::Const { dst: n },
-                Op::Call { dst: None, func: RtFn::PrintInt, args: vec![CallArg::Scalar(n)] },
+                Op::Call { dst: None, func: RtFn::PrintInt, args: vec![CallArg::Scalar(n)] , result: None },
                 Op::Drop { v: a },
             ],
             ..Default::default()
