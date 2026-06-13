@@ -434,6 +434,16 @@ fn preamble() -> String {
                         (i32.const 1))))
 
   (func $elem_addr (param $list i32) (param $idx i32) (result i32)
+    ;; SAFETY WALL: an out-of-range index would compute an address OUTSIDE the
+    ;; block (idx < 0 below it, idx >= cap beyond it) and a $list_set there would
+    ;; corrupt memory — the ownership checker accepts (it tracks RC, not bounds),
+    ;; so this would be accept-but-unsafe. Trap instead, so OOB is a WALL (a
+    ;; controlled halt), never silent corruption (the index-bounds memory-safety
+    ;; gate; cap is the block's allocated slot count).
+    (if (i32.or (i32.lt_s (local.get $idx) (i32.const 0))
+                (i32.ge_s (local.get $idx)
+                          (i32.load (i32.add (local.get $list) (i32.const {LIST_CAP_OFFSET})))))
+      (then (unreachable)))
     (i32.add (i32.add (local.get $list) (i32.const {LIST_HEADER}))
              (i32.mul (local.get $idx) (i32.const {ELEM_SIZE}))))
 
@@ -765,6 +775,37 @@ mod tests {
         );
         if let Some(out) = build_and_run("rcdec_cell", &dec) {
             assert_eq!(out, "0", "rc_dec: cell 1→0 (leak-freedom) — wasmtime must match run_g");
+        }
+    }
+
+    #[test]
+    fn out_of_bounds_index_traps() {
+        // The index-bounds memory-safety WALL: a `$list_set` with idx >= cap would
+        // write OUTSIDE the block and corrupt memory (and the ownership checker —
+        // which tracks RC, not bounds — would ACCEPT it). `$elem_addr` now traps
+        // instead, so OOB is a controlled halt, never silent corruption.
+        let oob = format!(
+            "{}{}",
+            preamble(),
+            "  (func $main (local $b i32)\n\
+             \u{20}   (local.set $b (call $list_new (i32.const 0) (i32.const 1)))\n\
+             \u{20}   (call $list_set (local.get $b) (i32.const 5) (i64.const 9)))\n\
+             \u{20} (func (export \"_start\") (call $main))\n)\n"
+        );
+        if let Some(success) = run_status("oob_idx", &oob) {
+            assert!(!success, "an out-of-bounds index must TRAP (the bounds wall), not corrupt memory");
+        }
+        // An in-bounds index (0 <= idx < cap) must NOT trap.
+        let ok = format!(
+            "{}{}",
+            preamble(),
+            "  (func $main (local $b i32)\n\
+             \u{20}   (local.set $b (call $list_new (i32.const 0) (i32.const 1)))\n\
+             \u{20}   (call $list_set (local.get $b) (i32.const 0) (i64.const 9)))\n\
+             \u{20} (func (export \"_start\") (call $main))\n)\n"
+        );
+        if let Some(success) = run_status("inbounds_idx", &ok) {
+            assert!(success, "an in-bounds index must not trap");
         }
     }
 
