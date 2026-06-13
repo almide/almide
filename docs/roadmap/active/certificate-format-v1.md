@@ -216,9 +216,14 @@ because they are about the run's `Z` result). v0 certificates remain valid.
      block, so an in-place mutation of it corrupts no alias (the aliased-mutation
      class cannot occur); the sharing renderer's cow REFINES this. proof spine =
      **27 theorems axiom-clean** — A1's SAFETY classes (leak / double-free / reuse-
-     soundness / reuse-after-free / aliased-mutation) are now ALL proven. REMAINING is
-     renderer REALIZATION: A1.2-render (emit the free-list, refining `FreeList`),
-     A1.3-render (`rc_inc` sharing + cow, refining `CowSafety`); `rc_dec` DONE (A1.1b).
+     soundness / reuse-after-free / aliased-mutation) are now ALL proven. **DONE
+     (A1.2-render) — physical reclamation REALIZED**: `$rc_dec` at rc→0 returns the
+     block to a free-list and `$alloc` reuses an exact-size head, refining `FreeList`;
+     the double-free sentinel is PRESERVED (link in the dead len field, not the rc
+     cell), verified on wasmtime (reuse `p1==p2` + double-free trap + value-semantics
+     byte-unchanged). REMAINING renderer realization: A1.3-render (`rc_inc` sharing +
+     cow, refining `CowSafety`); plus A1.2 size-classes/walking (exact-size head-match
+     today) and A2 raw-byte encoding. `rc_dec` DONE (A1.1b).
 5. **full mode: `b` (closure-env borrow) + branch resource-state agreement** →
    control-flow + closures.
 

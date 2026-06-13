@@ -88,16 +88,21 @@ The receipt's claims are scoped to exactly this:
   the REAL bytes; and the `$rc_dec` runtime SENTINEL traps a double-free at run
   (`unreachable` on an already-0 cell — verified firing on wasmtime). So `C-SAFE`'s
   no-double-free AND cell-level leak-freedom are now claimable for the EMITTED
-  artifact, not just the model. HONEST scope of what is NOT yet done: (1) PHYSICAL
-  reclamation — the RENDERER has no free-list yet, so freed bytes are not reused
-  and bump memory still grows under churn; but the SAFETY of free-list reuse is now
-  PROVEN at the model level (`FreeList.alloc_not_live`: a valid allocation never
-  returns a currently-LIVE block — no reuse-after-free), so the renderer slice that
-  emits the free-list (A1.2) REFINES that proof rather than adding trusted runtime;
-  (2) SHARING — `Dup` still eager-copies (no `rc_inc`/cow), so the `rc_inc` aliasing
-  trace is not yet realized in the RENDERER (A1.3); but its SAFETY is now PROVEN
-  (`CowSafety.make_unique_yields_unique`: `MakeUnique` yields a uniquely-owned block,
-  so the sharing renderer's cow REFINES a proof rather than risking aliased mutation).
+  artifact, not just the model. PHYSICAL reclamation is now REALIZED (A1.2-render):
+  `$rc_dec` at rc→0 returns the block to a free-list and `$alloc` reuses an
+  exact-size head, REFINING the proven `FreeList.v` model (`alloc_not_live`: a valid
+  allocation never returns a currently-LIVE block — no reuse-after-free). The
+  double-free sentinel is PRESERVED — the free-list link lives in the dead LEN field,
+  NOT the rc cell, so a re-release of a freed block still traps (verified: the
+  double-free trap test and a reuse test, `p1==p2` on alloc/free/realloc, both pass
+  on wasmtime; the value-semantics output is byte-unchanged). HONEST scope of what is
+  NOT yet done: (1) the free-list is exact-size HEAD-match only — a mismatched-size
+  freed block is not yet reused (missed reuse, NEVER unsafe; size-classes / walking
+  is a later slice); (2) SHARING — `Dup` still eager-copies (no `rc_inc`/cow), so the
+  `rc_inc` aliasing trace is not yet realized in the RENDERER (A1.3); but its SAFETY
+  is PROVEN (`CowSafety.make_unique_yields_unique`: `MakeUnique` yields a
+  uniquely-owned block, so the sharing renderer's cow REFINES a proof rather than
+  risking aliased mutation).
 - **Byte-binding is partial.** The op→wasm-instruction TABLE is a formal Coq
   object (`Translation.v`) and the runtime heap is modeled as a memory state
   machine whose rc cell provably tracks the abstract refcount

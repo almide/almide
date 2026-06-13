@@ -364,9 +364,29 @@ fn preamble() -> String {
     (func $fd_write (param i32 i32 i32 i32) (result i32)))
   (memory (export "memory") 1)
   (global $bump (mut i32) (i32.const {HEAP_BASE}))
+  ;; the free-list head (0 = empty) — physical reclamation (A1.2-render), the
+  ;; realization of proofs/FreeList.v. A freed block is pushed here; $alloc reuses
+  ;; the head when it is EXACTLY the requested size. The link is stored in the dead
+  ;; LEN field (offset 4), NOT the rc cell (offset 0), so the rc cell stays 0 and
+  ;; the $rc_dec double-free sentinel still fires on a re-release of a freed block.
+  (global $freelist (mut i32) (i32.const 0))
 
   (func $alloc (param $n i32) (result i32)
     (local $p i32)
+    ;; reuse the free-list head iff it is exactly n bytes (FreeList.alloc: a valid
+    ;; allocation is the fresh frontier OR a block currently on the free-list).
+    (if (i32.ne (global.get $freelist) (i32.const 0))
+      (then
+        (local.set $p (global.get $freelist))
+        (if (i32.eq (i32.add (i32.const {LIST_HEADER})
+                             (i32.mul (i32.load (i32.add (local.get $p) (i32.const {LIST_CAP_OFFSET})))
+                                      (i32.const {ELEM_SIZE})))
+                    (local.get $n))
+          (then
+            (global.set $freelist
+              (i32.load (i32.add (local.get $p) (i32.const {LIST_LEN_OFFSET}))))
+            (return (local.get $p))))))
+    ;; else bump the frontier (a genuinely fresh block)
     (local.set $p (global.get $bump))
     (global.set $bump (i32.add (local.get $p) (local.get $n)))
     (local.get $p))
@@ -382,13 +402,19 @@ fn preamble() -> String {
 
   ;; release one reference (RuntimeModel.v's rt_dec): trap if the cell is already
   ;; 0 (double-free / use-after-free sentinel), else decrement. At 0 the block is
-  ;; logically freed; physical reuse (a free-list) is a later slice (A1.2).
+  ;; FREED — returned to the free-list for physical reuse (A1.2-render, refining
+  ;; FreeList.v). The link goes in the dead LEN field; the rc cell stays 0 so a
+  ;; re-release of the freed block still hits the sentinel above.
   (func $rc_dec (param $p i32)
     (local $rc i32)
     (local.set $rc (i32.load (i32.add (local.get $p) (i32.const {LIST_RC_OFFSET}))))
     (if (i32.eqz (local.get $rc)) (then (unreachable)))
-    (i32.store (i32.add (local.get $p) (i32.const {LIST_RC_OFFSET}))
-               (i32.sub (local.get $rc) (i32.const 1))))
+    (local.set $rc (i32.sub (local.get $rc) (i32.const 1)))
+    (i32.store (i32.add (local.get $p) (i32.const {LIST_RC_OFFSET})) (local.get $rc))
+    (if (i32.eqz (local.get $rc))
+      (then
+        (i32.store (i32.add (local.get $p) (i32.const {LIST_LEN_OFFSET})) (global.get $freelist))
+        (global.set $freelist (local.get $p)))))
 
   (func $elem_addr (param $list i32) (param $idx i32) (result i32)
     (i32.add (i32.add (local.get $list) (i32.const {LIST_HEADER}))
@@ -660,6 +686,33 @@ mod tests {
         );
         if let Some(success) = run_status("singlefree", &single) {
             assert!(success, "a single legitimate free must NOT trap");
+        }
+    }
+
+    #[test]
+    fn freelist_reuses_a_freed_block() {
+        // A1.2-render: alloc p1, free p1 (-> the free-list), then alloc p2 of the
+        // SAME size. p2 must REUSE p1's freed block (FreeList.alloc reusing a
+        // free-list block), so memory is bounded under churn — AND the reused block
+        // must be correctly USABLE (re-initialized by list_new, writable, readable).
+        // Prints `1` (p1 == p2, reuse happened) then `2` (p2[1] read back) — if the
+        // reused block were corrupted the read-back would be wrong.
+        let wat = format!(
+            "{}{}",
+            preamble(),
+            "  (func $main (local $p1 i32) (local $p2 i32)\n\
+             \u{20}   (local.set $p1 (call $list_new (i32.const 3) (i32.const 3)))\n\
+             \u{20}   (call $rc_dec (local.get $p1))\n\
+             \u{20}   (local.set $p2 (call $list_new (i32.const 3) (i32.const 3)))\n\
+             \u{20}   (call $list_set (local.get $p2) (i32.const 0) (i64.const 1))\n\
+             \u{20}   (call $list_set (local.get $p2) (i32.const 1) (i64.const 2))\n\
+             \u{20}   (call $list_set (local.get $p2) (i32.const 2) (i64.const 3))\n\
+             \u{20}   (call $print_int (i64.extend_i32_s (i32.eq (local.get $p1) (local.get $p2))))\n\
+             \u{20}   (call $print_int (call $list_get (local.get $p2) (i32.const 1))))\n\
+             \u{20} (func (export \"_start\") (call $main))\n)\n"
+        );
+        if let Some(out) = build_and_run("reuse", &wat) {
+            assert_eq!(out, "1\n2", "second alloc must REUSE the freed block AND be usable");
         }
     }
 
