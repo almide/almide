@@ -27,6 +27,7 @@
 
 pub mod lower;
 pub mod render_rust;
+pub mod render_wasm;
 
 use std::collections::BTreeMap;
 
