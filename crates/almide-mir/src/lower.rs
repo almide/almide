@@ -530,6 +530,30 @@ impl LowerCtx {
                 IrExprKind::Var { id } if is_heap_ty(&a.ty) => CallArg::Handle(self.value_for(*id)?),
                 IrExprKind::Var { id } => CallArg::Scalar(self.value_for(*id)?),
                 IrExprKind::LitInt { value } => CallArg::Imm(*value),
+                // A fresh HEAP literal argument (`f("x")`, `f([1, 2, 3])`):
+                // materialized into an owned temp via `Alloc`, borrowed into the
+                // call, dropped at scope end — cert `i` (alloc) + `d` (drop), both
+                // backed, identical to the verified fresh-heap bind.
+                IrExprKind::LitStr { .. }
+                | IrExprKind::List { .. }
+                | IrExprKind::MapLiteral { .. }
+                | IrExprKind::EmptyMap
+                | IrExprKind::Record { .. }
+                | IrExprKind::Tuple { .. }
+                | IrExprKind::StringInterp { .. } => {
+                    let dst = self.fresh_value();
+                    let repr = repr_of(&a.ty)?;
+                    let init = alloc_init(a);
+                    self.ops.push(Op::Alloc { dst, repr, init });
+                    self.materialized_call_arg(dst, repr)
+                }
+                // A scalar literal argument (`f(3.14)`, `f(true)`): a fresh `Const`,
+                // passed by value (no ownership). `LitInt` is already an `Imm` above.
+                IrExprKind::LitFloat { .. } | IrExprKind::LitBool { .. } => {
+                    let dst = self.fresh_value();
+                    self.ops.push(Op::Const { dst });
+                    CallArg::Scalar(dst)
+                }
                 // A Named user-call result, materialized into an owned temp.
                 IrExprKind::Call { target: CallTarget::Named { name }, args: inner, .. } => {
                     let inner_args = self.lower_call_args(inner)?;
@@ -955,6 +979,30 @@ mod tests {
         assert_eq!(callfns, vec!["inner", "outer"], "inner materialized before outer");
         // The materialized temp + the outer result are both balanced (each `i`
         // matched by a scope-end `d`).
+        assert_eq!(verify_ownership(&mir), Ok(()));
+    }
+
+    #[test]
+    fn literal_call_arg_materializes_and_drops() {
+        use almide_lang::intern::sym;
+        // f("hello")  — the string literal argument is materialized via `Alloc`,
+        // borrowed into the call, and dropped at scope end (cert `i` + `d`).
+        let call = ir_expr(
+            IrExprKind::Call {
+                target: CallTarget::Named { name: sym("f") },
+                args: vec![ir_expr(IrExprKind::LitStr { value: "hello".into() }, Ty::String)],
+                type_args: vec![],
+            },
+            Ty::Unit,
+        );
+        let b = body(vec![stmt(IrStmtKind::Expr { expr: call })]);
+        let mir = lower_body(&b, "main").expect("literal call arg lowers");
+        assert!(
+            mir.ops.iter().any(|o| matches!(o, Op::Alloc { .. })),
+            "the literal is materialized via Alloc: {:?}",
+            mir.ops
+        );
+        assert!(mir.ops.iter().any(|o| matches!(o, Op::CallFn { name, .. } if name == "f")));
         assert_eq!(verify_ownership(&mir), Ok(()));
     }
 }
