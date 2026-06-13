@@ -79,6 +79,27 @@ pub fn validate_translation(wat: &str, mir: &crate::MirFunction) -> bool {
         && mir.ops.iter().all(|op| wasm_pattern(op).is_none_or(|p| wat.contains(&p)))
 }
 
+/// The DROP ops — each FREES one reference; its realization in the emitted bytes
+/// is a `call $rc_dec`. (A `Consume`/move-out TRANSFERS its reference — no free
+/// at this site, the receiver frees later — so it is not counted here.)
+fn drop_count(mir: &crate::MirFunction) -> usize {
+    mir.ops.iter().filter(|op| matches!(op, crate::Op::Drop { .. })).count()
+}
+
+/// PERCEUS-mode V — the binding that begins CLOSING the leak-freedom seam: the
+/// emitted wasm must REALIZE each witness drop with a `call $rc_dec`, so the
+/// binary actually FREES. The eager-copy renderer FAILS this (it has drops in
+/// the witness but emits no `rc_dec`), so this V FLAGS the leaking binary: the
+/// seam that was open ("the leak-freedom proof is about a model the emitter does
+/// not realize") is now DETECTABLE per build. The real-RC renderer that emits the
+/// `rc_dec` is the producer this rule specifies (the next slice); its memory
+/// effect is already proven to free (`RuntimeModel.balanced_cert_frees_in_memory`).
+pub fn validate_translation_perceus(wat: &str, mir: &crate::MirFunction) -> bool {
+    let positives = mir.ops.iter().all(|op| wasm_pattern(op).is_none_or(|p| wat.contains(&p)));
+    let rc_decs = wat.matches("call $rc_dec").count();
+    positives && rc_decs >= drop_count(mir)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -133,6 +154,37 @@ mod tests {
         // an unrealized op — stronger than the bare Dec-free scan).
         let stripped = wat.replace("call $print_int", "nop");
         assert!(!validate_translation(&stripped, &mir), "an unrealized op must fail V");
+    }
+
+    #[test]
+    fn perceus_v_detects_the_eager_leak() {
+        // The seam-closure first slice: the perceus-mode V binds each witness DROP
+        // to a `call $rc_dec` byte — so it CATCHES that the eager binary leaks.
+        let (a, b) = (ValueId(0), ValueId(1));
+        let mir = MirFunction {
+            name: "main".into(),
+            ops: vec![
+                Op::Alloc { dst: a, repr: heap(), init: Init::IntList(vec![1, 2, 3]) },
+                Op::Dup { dst: b, src: a },
+                Op::Drop { v: b },
+                Op::Drop { v: a },
+            ],
+            ..Default::default()
+        };
+        let wat = render_wasm(&mir);
+        // The eager renderer is SAFE (Dec-free, no double-free) ...
+        assert!(validate_translation(&wat, &mir));
+        // ... but it LEAKS: 2 drops in the witness, 0 `rc_dec` in the bytes. The
+        // perceus V flags it — the open leak-freedom seam is now detectable.
+        assert!(
+            !validate_translation_perceus(&wat, &mir),
+            "the eager binary leaks; perceus V must flag the unrealized drops"
+        );
+        // A real-RC artifact (an `rc_dec` per drop) realizes the releases → passes.
+        let real_rc = format!(
+            "{wat}\n    (call $rc_dec (local.get 0))\n    (call $rc_dec (local.get 1))"
+        );
+        assert!(validate_translation_perceus(&real_rc, &mir));
     }
 
     #[test]

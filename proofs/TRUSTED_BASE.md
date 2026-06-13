@@ -69,7 +69,13 @@ The receipt's claims are scoped to exactly this:
   realized by a release-emitting (perceus / real-RC) renderer, NOT by the current
   eager-copy one. So `C-SAFE`'s no-double-free is claimable for the eager-copy
   artifact today; leak-freedom is proven of the MODEL and awaits the real-RC
-  renderer to realize it on the artifact.
+  renderer to realize it on the artifact. SEAM-CLOSURE (first slice):
+  `validate_translation_perceus` now BINDS each witness drop to a `call $rc_dec`
+  byte — so the eager binary's leak is DETECTABLE per build (it has drops in the
+  witness but no `rc_dec` in the bytes; the perceus V flags it). The remaining
+  producer — the real-RC renderer that EMITS the `rc_dec` (refcount header +
+  free-list, so the binary actually frees) — is the next slice; its memory effect
+  is already proven to free (`balanced_cert_frees_in_memory`).
 - **Byte-binding is partial.** The op→wasm-instruction TABLE is a formal Coq
   object (`Translation.v`) and the runtime heap is modeled as a memory state
   machine whose rc cell provably tracks the abstract refcount
