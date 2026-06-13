@@ -28,7 +28,25 @@ echo "== kernel check (coqc) + axiom audit (Print Assumptions) =="
 
 echo
 echo "== independent re-check (coqchk — De Bruijn criterion) =="
-"$COQCHK" -Q . AlmideTrust AlmideTrust.Subset AlmideTrust.OwnershipChecker AlmideTrust.ALS AlmideTrust.Translation AlmideTrust.RuntimeModel AlmideTrust.NameTotality AlmideTrust.TypeConcretization AlmideTrust.CapabilityBound AlmideTrust.StackBalance AlmideTrust.Termination AlmideTrust.FreeList AlmideTrust.WasmRcDec AlmideTrust.WasmEncode AlmideTrust.WasmExec AlmideTrust.CowSafety
+COQCHK_OUT="$("$COQCHK" -Q . AlmideTrust AlmideTrust.Subset AlmideTrust.OwnershipChecker AlmideTrust.ALS AlmideTrust.Translation AlmideTrust.RuntimeModel AlmideTrust.NameTotality AlmideTrust.TypeConcretization AlmideTrust.CapabilityBound AlmideTrust.StackBalance AlmideTrust.Termination AlmideTrust.FreeList AlmideTrust.WasmRcDec AlmideTrust.WasmEncode AlmideTrust.WasmExec AlmideTrust.CowSafety 2>&1)"
+echo "$COQCHK_OUT"
+
+echo
+echo "== claim-drift gate (#34, indicator ⑤): TRUSTED_BASE axiom ledger ⊆ kernel-checked =="
+# Every theorem the axiom ledger CLAIMS is "Closed under the global context" must
+# be a constant the kernel re-checker (coqchk) actually verified — so a public
+# claim can never drift past what is proven. Ledger rows: | `name` | File.v | … |.
+CHECKED="$(printf '%s\n' "$COQCHK_OUT" | grep -oE 'cst:AlmideTrust\.[A-Za-z0-9]+\.[A-Za-z0-9_]+' | sed 's/^.*\.//' | sort -u)"
+CLAIMED="$(grep -oE '^\| `[A-Za-z0-9_]+`' TRUSTED_BASE.md | tr -d '|` ' | sort -u)"
+drift=0
+for t in $CLAIMED; do
+  if printf '%s\n' "$CHECKED" | grep -qx "$t"; then
+    echo "  ok   $t"
+  else
+    echo "  FAIL $t — claimed in the axiom ledger but NOT kernel-checked (claim drift)"; drift=1
+  fi
+done
+[ "$drift" = 0 ] && echo "CLAIMS OK: every axiom-ledger theorem is kernel-checked (public claims ⊆ proven)." || exit 1
 
 echo
 echo "== A2 byte-binding grounding (wat2wasm cross-check; SKIP if wabt absent) =="

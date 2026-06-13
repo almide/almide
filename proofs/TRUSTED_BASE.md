@@ -41,7 +41,11 @@ These four are trusted by necessity; everything else is proven against them:
 
 Every theorem rests on **nothing but the kernel** — `Print Assumptions` reports
 *Closed under the global context* for all of them (no `Admitted`, no extra
-axioms). Verified by `proofs/check.sh`:
+axioms). Verified by `proofs/check.sh`. The table itself is **claim-drift-gated**
+(`check.sh`'s claim-drift gate, #34 / indicator ⑤): every theorem named below is
+mechanically confirmed to be a constant the kernel re-checker (`coqchk`) actually
+verified, so a public claim in this ledger can never drift past what is proven (a
+fabricated row fails the gate). The table is a representative sample of the spine:
 
 | theorem | file | assumptions |
 |---|---|---|
