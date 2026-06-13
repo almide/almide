@@ -46,6 +46,16 @@ Fixpoint run (bytes : list Z) (p : Z) (st : list Z) (m : Mem) : option Mem :=
         match rest, st with
         | _al :: off :: r, v :: addr :: s => run r p s (upd m (addr + off) v)
         | _, _ => None end
+      else if Z.eqb op 69 then                                    (* 0x45 i32.eqz *)
+        match st with a :: s => run rest p ((if Z.eqb a 0 then 1 else 0) :: s) m | _ => None end
+      else if Z.eqb op 4 then  (* 0x04 if — the double-free TRAP pattern only:
+                                  `if (void) (then unreachable) end`. cond<>0 runs
+                                  the unreachable (None); cond=0 skips to after end. *)
+        match rest, st with
+        | 64 :: 0 :: 11 :: r, cond :: s =>
+            if Z.eqb cond 0 then run r p s m else None
+        | _, _ => None
+        end
       else None
   end.
 
@@ -71,4 +81,32 @@ Proof.
   unfold rt_inc. rewrite read_upd_same. unfold read_rc. rewrite H. reflexivity.
 Qed.
 
+(* ─── the DOUBLE-FREE TRAP, on real bytes (control flow) ───
+   The bytes for `(i32.eqz (i32.load (local.get $p)))  (if (then unreachable))`:
+   load the cell, and TRAP iff it is 0. (Its opcodes 0x45/0x04/0x40/0x00/0x0b are
+   grounded by check-wasm-bytes.sh against wat2wasm's rc_dec disassembly.) This
+   shows the byte interpreter executes the safety-critical double-free TRAP, not
+   only straight-line code. *)
+Definition trap_if_zero_bytes : list Z :=
+  [32;0;  40;2;0;  69;  4;64;0;11;  11].
+
+(* TRAP direction: a cell holding 0 (an already-freed block) traps — the
+   double-free sentinel, executed on the real bytes. *)
+Theorem trap_bytes_trap_on_zero :
+  forall p m, m (p + 0) = 0 -> run trap_if_zero_bytes p [] m = None.
+Proof.
+  intros p m H. unfold trap_if_zero_bytes. cbn -[Z.add]. rewrite H. reflexivity.
+Qed.
+
+(* NO-TRAP direction: a live cell (nonzero) does NOT trap — the sentinel fires
+   only on an already-freed cell, never on a valid release. *)
+Theorem trap_bytes_pass_on_nonzero :
+  forall p m, m (p + 0) <> 0 -> run trap_if_zero_bytes p [] m = Some m.
+Proof.
+  intros p m H. unfold trap_if_zero_bytes. cbn -[Z.add].
+  apply Z.eqb_neq in H. rewrite H. reflexivity.
+Qed.
+
 Print Assumptions rc_inc_bytes_execute_to_rt_inc.
+Print Assumptions trap_bytes_trap_on_zero.
+Print Assumptions trap_bytes_pass_on_nonzero.

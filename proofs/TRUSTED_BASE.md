@@ -72,8 +72,9 @@ The receipt's claims are scoped to exactly this:
   `$rc_inc` instruction-trees realizing `rt_dec` / `rt_inc` (`WasmRcDec`) + the
   rc_inc instruction tree encoding to the REAL wasm bytes (`WasmEncode`, grounded
   against wat2wasm) + those real bytes EXECUTING to `rt_inc` on a wasm stack
-  machine (`WasmExec`), operand-stack balance, and termination of the loop-free
-  fragment — all kernel-checked and axiom-clean (30 theorems). What remains is DEPTH (the byte-binding ISA layer; and
+  machine — incl. the double-free trap control flow — (`WasmExec`), operand-stack
+  balance, and termination of the loop-free fragment — all kernel-checked and
+  axiom-clean (32 theorems). What remains is DEPTH (the byte-binding ISA layer; and
   the RENDERER realizing the free-list/`rc_inc` — its safety MODEL is now proven,
   so that slice REFINES a proof rather than adding trusted runtime) and BREADTH
   (lowering beyond the subset: control flow, closures, stdlib) — not new properties
@@ -135,10 +136,15 @@ The receipt's claims are scoped to exactly this:
   the real rc_inc bytes and the memory effect is EXACTLY `rt_inc` — so the bytes,
   EXECUTED, compute the abstract acquire (not merely encode an instruction that
   would). So `rc_inc` is bound END TO END: instruction tree ↔ real bytes ↔
-  execution ↔ rt_inc, the trust chain reaching the ACTUAL wasm bytes. NOT yet done:
-  the same chain for `rc_dec` (control flow + the free-list push) and the rest of
-  the module; and that this small inspectable interpreter matches the FULL wasm
-  spec / ISA (the residual — WasmCert-Coq).
+  execution ↔ rt_inc, the trust chain reaching the ACTUAL wasm bytes. The
+  interpreter also EXECUTES the double-free TRAP control flow
+  (`WasmExec.trap_bytes_trap_on_zero` / `_pass_on_nonzero`: the bytes for
+  `(if (i32.eqz cell) (then unreachable))` trap IFF the cell is 0 — the sentinel,
+  on real grounded bytes), so it handles both straight-line code AND the
+  safety-critical trap. NOT yet done: the FULL `rc_dec` end-to-end (its free-list
+  adds a second, GENERAL `if` + global ops — general structured control flow) and
+  the rest of the module; and that this small inspectable interpreter matches the
+  FULL wasm spec / ISA (the residual — WasmCert-Coq).
 - **One real `.almd` now flows end-to-end** (`proofs/fixtures/return_list.almd`
   → the actual frontend → MIR → proven checker, for ownership + names — weekly
   indicator ① 0→1). The lowering covers only the value-semantics subset (heap
