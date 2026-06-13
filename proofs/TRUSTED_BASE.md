@@ -52,6 +52,7 @@ axioms). Verified by `proofs/check.sh`:
 | `eager_copy_refines_safety` | ALS.v | Closed under the global context |
 | `mrun_tracks_exec` | RuntimeModel.v | Closed under the global context |
 | `alloc_not_live` | FreeList.v | Closed under the global context |
+| `rc_dec_prog_realizes_rt_dec` | WasmRcDec.v | Closed under the global context |
 
 ## Known limitations (what is NOT yet proven — recorded, not hidden)
 
@@ -62,9 +63,10 @@ The receipt's claims are scoped to exactly this:
   type-concretization, memory-model leak-freedom, reuse soundness (a `Reuse` acts
   only on a UNIQUELY-owned object — no aliased in-place reuse), free-list
   reuse-safety (a valid allocation never returns a currently-LIVE block — no
-  reuse-after-free, `FreeList.alloc_not_live`), byte-binding table, operand-stack
-  balance, and termination of the loop-free fragment — all kernel-checked and
-  axiom-clean (24 theorems). What remains is DEPTH (the byte-binding ISA layer; and
+  reuse-after-free, `FreeList.alloc_not_live`), byte-binding table + the `$rc_dec`
+  instruction-tree realizing `rt_dec` (`WasmRcDec`), operand-stack balance, and
+  termination of the loop-free fragment — all kernel-checked and axiom-clean
+  (25 theorems). What remains is DEPTH (the byte-binding ISA layer; and
   the RENDERER realizing the free-list/`rc_inc` — its safety MODEL is now proven,
   so that slice REFINES a proof rather than adding trusted runtime) and BREADTH
   (lowering beyond the subset: control flow, closures, stdlib) — not new properties
@@ -98,11 +100,16 @@ The receipt's claims are scoped to exactly this:
   that each op's pattern is emitted (a drop's is `call $rc_dec`) and
   `validate_translation_perceus` that one release is emitted per drop. The model's
   `RC_OFFSET = 0` now COINCIDES with the renderer's physical rc-cell offset (the
-  A1.1a relayout) and `call $rc_dec` writes that cell — model and bytes agree on
-  WHERE the cell lives and WHAT the release does. NOT yet done: the WasmCert-Coq
-  ISA layer binding the memory machine to the actual wasm bytes (that `call
-  $rc_dec` executes PRECISELY the cell write — today modeled and sentinel-guarded
-  at runtime, but not yet ISA-proven) — the last mile of the bytes-refine-ALS chain.
+  A1.1a relayout) and `call $rc_dec` writes that cell. **A2 first slice DONE
+  (instruction-tree level), `WasmRcDec.rc_dec_prog_realizes_rt_dec`**: the EXACT
+  `$rc_dec` instruction tree the renderer emits (modeled as data, with a small
+  operational semantics for the load/add/sub/store/trap fragment) provably computes
+  `RuntimeModel.rt_dec` — same trap (cell 0), same decrement. So the abstract
+  release the leak/no-double-free proofs use is what the emitted INSTRUCTIONS
+  compute, not a token. NOT yet done: the raw-BYTE encoding (instruction-tree ↔
+  bytes — the assembler / a full WasmCert-Coq ISA); the SEMANTICS of the release
+  is now proven at the instruction level, the remaining gap is purely the byte
+  encoding of those instructions.
 - **One real `.almd` now flows end-to-end** (`proofs/fixtures/return_list.almd`
   → the actual frontend → MIR → proven checker, for ownership + names — weekly
   indicator ① 0→1). The lowering covers only the value-semantics subset (heap

@@ -205,9 +205,14 @@ because they are about the run's `Z` result). v0 certificates remain valid.
      currently-LIVE block (no reuse-after-free); INV-preservation across alloc/free
      lifts it to whole runs. This RESOLVES the A1.2 fork toward PROVE: the renderer
      slice that emits the physical free-list REFINES this model rather than adding
-     trusted runtime. proof spine = **24 theorems axiom-clean**. REMAINING renderer
-     slices: A1.2-render (emit the free-list, refining `FreeList`), A1.3 (`rc_inc`
-     sharing + cow); `rc_dec` already DONE (A1.1b).
+     trusted runtime. **DONE (A2 first slice) — `WasmRcDec.rc_dec_prog_realizes_rt_dec`**:
+     the EXACT `$rc_dec` instruction tree the renderer emits, modeled as data with a
+     small op-semantics (load/add/sub/store/trap over RuntimeModel's `Mem`), provably
+     computes `rt_dec` — same trap, same decrement; so the release's SEMANTICS is now
+     proven at the instruction-tree level (the remaining A2 gap is purely the raw-byte
+     ENCODING — assembler / full WasmCert-Coq ISA). proof spine = **25 theorems
+     axiom-clean**. REMAINING renderer slices: A1.2-render (emit the free-list,
+     refining `FreeList`), A1.3 (`rc_inc` sharing + cow); `rc_dec` already DONE (A1.1b).
 5. **full mode: `b` (closure-env borrow) + branch resource-state agreement** →
    control-flow + closures.
 

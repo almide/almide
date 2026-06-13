@@ -10,3 +10,4 @@ CapabilityBound.v
 StackBalance.v
 Termination.v
 FreeList.v
+WasmRcDec.v
