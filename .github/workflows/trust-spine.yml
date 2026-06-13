@@ -75,10 +75,10 @@ jobs:
           path: ~/.opam
           key: opam-${{ runner.os }}-ocaml${{ env.OCAML_VERSION }}-rocq9-${{ env.OPAM_CACHE_VERSION }}
 
-      - name: Install opam
+      - name: Install opam + wabt (wat2wasm for the A2 byte-binding grounding)
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends opam
+          sudo apt-get install -y --no-install-recommends opam wabt
 
       - name: Build opam switch + Rocq (cache miss only)
         if: steps.opam-cache.outputs.cache-hit != 'true'

@@ -53,6 +53,7 @@ axioms). Verified by `proofs/check.sh`:
 | `mrun_tracks_exec` | RuntimeModel.v | Closed under the global context |
 | `alloc_not_live` | FreeList.v | Closed under the global context |
 | `rc_dec_prog_realizes_rt_dec` | WasmRcDec.v | Closed under the global context |
+| `rc_inc_bytes_encode_the_instruction_tree` | WasmEncode.v | Closed under the global context |
 | `make_unique_yields_unique` | CowSafety.v | Closed under the global context |
 
 ## Known limitations (what is NOT yet proven — recorded, not hidden)
@@ -67,9 +68,10 @@ The receipt's claims are scoped to exactly this:
   reuse-after-free, `FreeList.alloc_not_live`), copy-on-write alias-safety
   (`MakeUnique` yields a uniquely-owned block — no aliased in-place mutation,
   `CowSafety.make_unique_yields_unique`), byte-binding table + the `$rc_dec` /
-  `$rc_inc` instruction-trees realizing `rt_dec` / `rt_inc` (`WasmRcDec`),
-  operand-stack balance, and termination of the loop-free fragment — all
-  kernel-checked and axiom-clean (28 theorems). What remains is DEPTH (the byte-binding ISA layer; and
+  `$rc_inc` instruction-trees realizing `rt_dec` / `rt_inc` (`WasmRcDec`) + the
+  rc_inc instruction tree encoding to the REAL wasm bytes (`WasmEncode`, grounded
+  against wat2wasm), operand-stack balance, and termination of the loop-free
+  fragment — all kernel-checked and axiom-clean (29 theorems). What remains is DEPTH (the byte-binding ISA layer; and
   the RENDERER realizing the free-list/`rc_inc` — its safety MODEL is now proven,
   so that slice REFINES a proof rather than adding trusted runtime) and BREADTH
   (lowering beyond the subset: control flow, closures, stdlib) — not new properties
@@ -120,10 +122,17 @@ The receipt's claims are scoped to exactly this:
   operational semantics for the load/add/sub/store/trap fragment) provably computes
   `RuntimeModel.rt_dec` — same trap (cell 0), same decrement. So the abstract
   release the leak/no-double-free proofs use is what the emitted INSTRUCTIONS
-  compute, not a token. NOT yet done: the raw-BYTE encoding (instruction-tree ↔
-  bytes — the assembler / a full WasmCert-Coq ISA); the SEMANTICS of the release
-  is now proven at the instruction level, the remaining gap is purely the byte
-  encoding of those instructions.
+  compute, not a token. The byte ENCODING is now bound too (A2 byte slice,
+  `WasmEncode.rc_inc_bytes_encode_the_instruction_tree`): a Coq wasm-binary encoder
+  produces EXACTLY the bytes `wat2wasm` emits for the renderer's `$rc_inc`, GROUNDED
+  per build by `proofs/check-wasm-bytes.sh` (re-assemble, compare — so the opcode
+  constants are the real wasm bytes, not a guess: non-circular). Composed with
+  `rc_inc_prog_realizes_rt_inc`, the emitted BYTES encode an instruction tree that
+  computes `rt_inc`. NOT yet done: the byte binding for `rc_dec` (its WasmRcDec
+  model stores the decrement directly while the renderer uses a `local.set`
+  intermediate — align them) and the rest of the module; and a wasm ENGINE's
+  spec-conformant EXECUTION of those bytes (a verified interpreter / full
+  WasmCert-Coq — the residual trusted piece, like the kernel and hardware).
 - **One real `.almd` now flows end-to-end** (`proofs/fixtures/return_list.almd`
   → the actual frontend → MIR → proven checker, for ownership + names — weekly
   indicator ① 0→1). The lowering covers only the value-semantics subset (heap
