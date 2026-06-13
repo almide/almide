@@ -11,10 +11,11 @@ COQCHK="${COQCHK:-$(command -v coqchk)}"
 
 echo "== kernel check (coqc) + axiom audit (Print Assumptions) =="
 "$COQC" -Q . AlmideTrust OwnershipChecker.v
+"$COQC" -Q . AlmideTrust ALS.v
 
 echo
 echo "== independent re-check (coqchk — De Bruijn criterion) =="
-"$COQCHK" -Q . AlmideTrust AlmideTrust.OwnershipChecker
+"$COQCHK" -Q . AlmideTrust AlmideTrust.OwnershipChecker AlmideTrust.ALS
 
 echo
 echo "PROOF SPINE OK: kernel-checked, axiom-clean (Closed under the global"
