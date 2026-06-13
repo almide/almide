@@ -211,8 +211,14 @@ because they are about the run's `Z` result). v0 certificates remain valid.
      computes `rt_dec` — same trap, same decrement; so the release's SEMANTICS is now
      proven at the instruction-tree level (the remaining A2 gap is purely the raw-byte
      ENCODING — assembler / full WasmCert-Coq ISA). proof spine = **25 theorems
-     axiom-clean**. REMAINING renderer slices: A1.2-render (emit the free-list,
-     refining `FreeList`), A1.3 (`rc_inc` sharing + cow); `rc_dec` already DONE (A1.1b).
+     axiom-clean**. **DONE (A1.3 cow safety) — `CowSafety.make_unique_yields_unique`**:
+     the clone-on-shared discipline is modeled and proven to yield a UNIQUELY-owned
+     block, so an in-place mutation of it corrupts no alias (the aliased-mutation
+     class cannot occur); the sharing renderer's cow REFINES this. proof spine =
+     **27 theorems axiom-clean** — A1's SAFETY classes (leak / double-free / reuse-
+     soundness / reuse-after-free / aliased-mutation) are now ALL proven. REMAINING is
+     renderer REALIZATION: A1.2-render (emit the free-list, refining `FreeList`),
+     A1.3-render (`rc_inc` sharing + cow, refining `CowSafety`); `rc_dec` DONE (A1.1b).
 5. **full mode: `b` (closure-env borrow) + branch resource-state agreement** →
    control-flow + closures.
 

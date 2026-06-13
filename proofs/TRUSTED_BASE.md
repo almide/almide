@@ -53,6 +53,7 @@ axioms). Verified by `proofs/check.sh`:
 | `mrun_tracks_exec` | RuntimeModel.v | Closed under the global context |
 | `alloc_not_live` | FreeList.v | Closed under the global context |
 | `rc_dec_prog_realizes_rt_dec` | WasmRcDec.v | Closed under the global context |
+| `make_unique_yields_unique` | CowSafety.v | Closed under the global context |
 
 ## Known limitations (what is NOT yet proven — recorded, not hidden)
 
@@ -63,10 +64,12 @@ The receipt's claims are scoped to exactly this:
   type-concretization, memory-model leak-freedom, reuse soundness (a `Reuse` acts
   only on a UNIQUELY-owned object — no aliased in-place reuse), free-list
   reuse-safety (a valid allocation never returns a currently-LIVE block — no
-  reuse-after-free, `FreeList.alloc_not_live`), byte-binding table + the `$rc_dec`
+  reuse-after-free, `FreeList.alloc_not_live`), copy-on-write alias-safety
+  (`MakeUnique` yields a uniquely-owned block — no aliased in-place mutation,
+  `CowSafety.make_unique_yields_unique`), byte-binding table + the `$rc_dec`
   instruction-tree realizing `rt_dec` (`WasmRcDec`), operand-stack balance, and
   termination of the loop-free fragment — all kernel-checked and axiom-clean
-  (25 theorems). What remains is DEPTH (the byte-binding ISA layer; and
+  (27 theorems). What remains is DEPTH (the byte-binding ISA layer; and
   the RENDERER realizing the free-list/`rc_inc` — its safety MODEL is now proven,
   so that slice REFINES a proof rather than adding trusted runtime) and BREADTH
   (lowering beyond the subset: control flow, closures, stdlib) — not new properties
@@ -92,7 +95,9 @@ The receipt's claims are scoped to exactly this:
   returns a currently-LIVE block — no reuse-after-free), so the renderer slice that
   emits the free-list (A1.2) REFINES that proof rather than adding trusted runtime;
   (2) SHARING — `Dup` still eager-copies (no `rc_inc`/cow), so the `rc_inc` aliasing
-  trace is not yet realized (A1.3, a memory-efficiency slice, not a safety gap).
+  trace is not yet realized in the RENDERER (A1.3); but its SAFETY is now PROVEN
+  (`CowSafety.make_unique_yields_unique`: `MakeUnique` yields a uniquely-owned block,
+  so the sharing renderer's cow REFINES a proof rather than risking aliased mutation).
 - **Byte-binding is partial.** The op→wasm-instruction TABLE is a formal Coq
   object (`Translation.v`) and the runtime heap is modeled as a memory state
   machine whose rc cell provably tracks the abstract refcount

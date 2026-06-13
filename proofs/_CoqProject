@@ -11,3 +11,4 @@ StackBalance.v
 Termination.v
 FreeList.v
 WasmRcDec.v
+CowSafety.v
