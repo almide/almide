@@ -188,11 +188,22 @@ Fixpoint split_block (fuel depth : nat) (bytes acc : list Z) : option (list Z * 
       end
   end.
 
-(* GENERAL wasm interpreter (fuel-bounded): straight-line ops PLUS general
-   structured `if … end` — the then-body runs when the condition is nonzero and
-   is SKIPPED (via split_block) otherwise. Generalizes `run`'s fixed trap pattern
-   to ANY void block body. `[]` / `end` = block complete. (Void blocks here are
-   stack-neutral, so the post-body stack is the pre-body stack.) *)
+(* The `$freelist` global, modeled as a RESERVED memory cell (an address the heap
+   never allocates). Honest modeling choice: wasm globals are a separate space;
+   abstracting the single $freelist global to a reserved cell preserves its VALUE
+   semantics (a mutable word) — which is all the rc_dec free-list push needs. *)
+Definition FREELIST_ADDR : Z := -1.
+
+(* GENERAL wasm interpreter (fuel-bounded): straight-line ops + global.get/set
+   PLUS general structured `if … end` — the then-body runs when the condition is
+   nonzero and is SKIPPED (via split_block) otherwise. Generalizes `run`'s fixed
+   trap pattern to ANY void block body. `[]` / `end` = block complete. (Void
+   blocks here are stack-neutral, so the post-body stack is the pre-body stack.)
+   HONEST scope: locals are modeled as the single param `p` (`local.get _ → p`);
+   `local.set` and INDEXED locals (the `$rc` temp `rc_dec` uses) are the next
+   piece — they turn `p` into a locals environment. This slice proves the general
+   `if` executor + globals + the immediate-aware splitter, the machinery `rc_dec`'s
+   free-list `if` needs. *)
 Fixpoint run_g (fuel : nat) (bytes : list Z) (p : Z) (st : list Z) (m : Mem) : option Mem :=
   match fuel with
   | O => None
@@ -217,6 +228,11 @@ Fixpoint run_g (fuel : nat) (bytes : list Z) (p : Z) (st : list Z) (m : Mem) : o
             | _, _ => None end
           else if Z.eqb op 69 then
             match st with a :: s => run_g f rest p ((if Z.eqb a 0 then 1 else 0) :: s) m | _ => None end
+          else if Z.eqb op 35 then         (* 0x23 global.get idx — the $freelist
+                                              global, modeled as a reserved cell *)
+            match rest with _i :: r => run_g f r p (m FREELIST_ADDR :: st) m | _ => None end
+          else if Z.eqb op 36 then         (* 0x24 global.set idx *)
+            match rest, st with _i :: r, v :: s => run_g f r p s (upd m FREELIST_ADDR v) | _, _ => None end
           else if Z.eqb op 4 then          (* GENERAL if *)
             match rest with
             | _bt :: r =>
@@ -250,8 +266,23 @@ Theorem general_if_skips_body_when_false :
   forall p m, run_g 50 (cond_store_bytes 0) p [] m = Some m.
 Proof. intros p m. reflexivity. Qed.
 
+(* GLOBAL round-trip: `global.set $freelist 42 ; … ; (i32.store 8 (global.get
+   $freelist))` lands 42 at address 8 — the global is set and read back through
+   the reserved cell. This is the last interpreter primitive the rc_dec free-list
+   push needs (it does `global.set $freelist`). *)
+Definition global_roundtrip_bytes : list Z :=
+  [65;42;  36;0;  65;8;  35;0;  54;2;0;  11].
+
+Theorem global_set_then_get_roundtrips :
+  forall p m, match run_g 50 global_roundtrip_bytes p [] m with
+              | Some m' => m' 8 = 42
+              | None => False
+              end.
+Proof. intros p m. reflexivity. Qed.
+
 Print Assumptions rc_inc_bytes_execute_to_rt_inc.
 Print Assumptions trap_bytes_trap_on_zero.
 Print Assumptions trap_bytes_pass_on_nonzero.
 Print Assumptions general_if_runs_body_when_true.
 Print Assumptions general_if_skips_body_when_false.
+Print Assumptions global_set_then_get_roundtrips.

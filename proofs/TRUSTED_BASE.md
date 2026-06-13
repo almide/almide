@@ -151,8 +151,10 @@ The receipt's claims are scoped to exactly this:
   (`WasmExec.run_g` + `split_block`): a fuel-bounded interpreter that runs a general
   structured `if … end` — the then-body EXECUTES when the condition is nonzero and
   is SKIPPED otherwise (proven on `if (cond) (then store 0:=42)` — body runs / is
-  skipped), beyond the fixed trap pattern. NOT yet done: global state (`global.get`/
-  `set`, a reserved cell) + model alignment to bind the FULL `rc_dec` (free-list)
+  skipped), beyond the fixed trap pattern; PLUS `global.get`/`set` (the `$freelist`
+  global modeled as a reserved cell, set-then-get round-trip proven). NOT yet done:
+  INDEXED locals + `local.set` (the `$rc` temp — turns the single-param `p` into a
+  locals environment) + model alignment to bind the FULL `rc_dec` (free-list)
   end-to-end on `run_g`; the rest of the module; and that this small inspectable
   interpreter matches the FULL wasm spec / ISA (the residual — WasmCert-Coq).
 - **One real `.almd` now flows end-to-end** (`proofs/fixtures/return_list.almd`
