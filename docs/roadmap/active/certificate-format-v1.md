@@ -144,11 +144,17 @@ because they are about the run's `Z` result). v0 certificates remain valid.
      flows through the PCC chain (ownership `id` ACCEPT), and its **capability
      witness comes from real source** (`used=[Stdout]`) — undeclared, so the cap
      bound REJECTS it (`|0`): the sandbox promise catching a real host effect.
-   - **2b: user-function call signatures + per-call-site subset rule** (pending):
-     each function carries a SIGNATURE (param move/borrow modes, return mode,
-     declared caps); a call site is checked against the signature by the subset
-     rule — the checker never opens the callee. Unblocks heap-param programs and
-     manifest-declared caps (the ACCEPT case).
+   - **2b: per-call-site capability subset rule.** ✅ **SHIPPED.** `lower.rs`
+     lowers a user call `beep()` → `Op::CallFn`; the compiler folds each callee's
+     reachable caps into the caller (`reachable_caps`, transitive over the call
+     graph), and the proven `check_caps_cert` re-verifies `reachable ⊆ declared`
+     — so `main`, with NO direct effect, is REJECTED for a Stdout it reaches only
+     THROUGH `beep` (the `tcaps` witness `|0`). The checker never opens the
+     callee; it does only the subset (Subset.v lever, zero new Coq). Closes the
+     direct-only caps gap. Honest scope: the compiler's reachability fold is
+     trusted per-build (verifying it per-edge, and an unknown callee = conservative
+     reject, are the hardenings); ownership param-modes (move/borrow signatures
+     for heap args) + manifest-declared caps (the ACCEPT case) remain (2c).
 3. **Byte-binding section + op→wasm pattern table** (per-build matcher; the
    runtime memory-model refinement library is the heavy parallel track).
 4. **perceus mode: `r` + the reuse-uniqueness subset section** → leak-freedom on
