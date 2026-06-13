@@ -155,8 +155,18 @@ because they are about the run's `Z` result). v0 certificates remain valid.
      trusted per-build (verifying it per-edge, and an unknown callee = conservative
      reject, are the hardenings); ownership param-modes (move/borrow signatures
      for heap args) + manifest-declared caps (the ACCEPT case) remain (2c).
-3. **Byte-binding section + op→wasm pattern table** (per-build matcher; the
-   runtime memory-model refinement library is the heavy parallel track).
+3. **Byte-binding: op→wasm pattern table.**
+   - **3a: the table + per-build matcher.** ✅ **SHIPPED.** `proofs/Translation.v`
+     formalizes the op→wasm-instruction table as a Coq object (the formal
+     byte-binding `R(M,w)` — closes G1.1/G1.3/G1.4) and proves the eager-mode
+     safety instance (reusing ALS); `translation_validation.rs::validate_translation`
+     re-verifies, per build on the real WAT, that EVERY op's pattern is present
+     AND no `rc_dec` — a strict strengthening of the bare Dec-free scan (it
+     catches a renderer that drops an op). Honest scope: PRESENCE check (not the
+     precise per-op byte-window bijection); the SEMANTIC realization (the runtime
+     memory machine: `call $rc_dec` mutates the free-list as the abstract −1) is
+     the once-built WasmCert-Coq library — **G1.2, the single hardest deferred
+     piece** (3b).
 4. **perceus mode: `r` + the reuse-uniqueness subset section** → leak-freedom on
    the real-RC renderer.
 5. **full mode: `b` (closure-env borrow) + branch resource-state agreement** →

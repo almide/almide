@@ -2,6 +2,7 @@
 Subset.v
 OwnershipChecker.v
 ALS.v
+Translation.v
 NameTotality.v
 TypeConcretization.v
 CapabilityBound.v
