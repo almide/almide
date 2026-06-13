@@ -51,6 +51,7 @@ axioms). Verified by `proofs/check.sh`:
 | `check_reuse_sound` | OwnershipChecker.v | Closed under the global context |
 | `eager_copy_refines_safety` | ALS.v | Closed under the global context |
 | `mrun_tracks_exec` | RuntimeModel.v | Closed under the global context |
+| `alloc_not_live` | FreeList.v | Closed under the global context |
 
 ## Known limitations (what is NOT yet proven — recorded, not hidden)
 
@@ -59,12 +60,15 @@ The receipt's claims are scoped to exactly this:
 - **The flight-grade property SET is complete on the value-semantics subset**:
   RC balance (memory safety), name totality, capability bound (incl. transitive),
   type-concretization, memory-model leak-freedom, reuse soundness (a `Reuse` acts
-  only on a UNIQUELY-owned object — no aliased in-place reuse), byte-binding table,
-  operand-stack balance, and termination of the loop-free fragment — all
-  kernel-checked and axiom-clean (21 theorems). What remains is DEPTH (the
-  byte-binding ISA layer / the physical-reclamation half of the real-RC renderer)
-  and BREADTH (lowering beyond the subset: control flow, closures, stdlib) — not
-  new properties on the subset.
+  only on a UNIQUELY-owned object — no aliased in-place reuse), free-list
+  reuse-safety (a valid allocation never returns a currently-LIVE block — no
+  reuse-after-free, `FreeList.alloc_not_live`), byte-binding table, operand-stack
+  balance, and termination of the loop-free fragment — all kernel-checked and
+  axiom-clean (24 theorems). What remains is DEPTH (the byte-binding ISA layer; and
+  the RENDERER realizing the free-list/`rc_inc` — its safety MODEL is now proven,
+  so that slice REFINES a proof rather than adding trusted runtime) and BREADTH
+  (lowering beyond the subset: control flow, closures, stdlib) — not new properties
+  on the subset.
 - **The wasm renderer is in the RC regime (A1.1b): it emits a release per drop.**
   A `Drop` now renders as `call $rc_dec`, decrementing the refcount cell (laid at
   heap offset 0 by the A1.1a relayout = `RuntimeModel.RC_OFFSET`) to 0 — so the
@@ -80,11 +84,13 @@ The receipt's claims are scoped to exactly this:
   (`unreachable` on an already-0 cell — verified firing on wasmtime). So `C-SAFE`'s
   no-double-free AND cell-level leak-freedom are now claimable for the EMITTED
   artifact, not just the model. HONEST scope of what is NOT yet done: (1) PHYSICAL
-  reclamation — there is no free-list yet, so a freed cell's bytes are not reused
-  and bump memory still grows under churn (A1.2; the proven property is the
-  cell-level free, not bounded physical memory); (2) SHARING — `Dup` still
-  eager-copies (no `rc_inc`/cow), so the `rc_inc` aliasing trace is not yet
-  realized (A1.3, a memory-efficiency slice, not a safety gap).
+  reclamation — the RENDERER has no free-list yet, so freed bytes are not reused
+  and bump memory still grows under churn; but the SAFETY of free-list reuse is now
+  PROVEN at the model level (`FreeList.alloc_not_live`: a valid allocation never
+  returns a currently-LIVE block — no reuse-after-free), so the renderer slice that
+  emits the free-list (A1.2) REFINES that proof rather than adding trusted runtime;
+  (2) SHARING — `Dup` still eager-copies (no `rc_inc`/cow), so the `rc_inc` aliasing
+  trace is not yet realized (A1.3, a memory-efficiency slice, not a safety gap).
 - **Byte-binding is partial.** The op→wasm-instruction TABLE is a formal Coq
   object (`Translation.v`) and the runtime heap is modeled as a memory state
   machine whose rc cell provably tracks the abstract refcount

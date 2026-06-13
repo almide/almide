@@ -198,10 +198,16 @@ because they are about the run's `Z` result). v0 certificates remain valid.
      strictly sound. `RuntimeModel.step_mem`/`Termination.fuel_exec` are kept in
      lockstep (`rt_reuse`); the closed hole `iard` (a BALANCED cert that reuses a
      shared object) now REJECTs at both the Coq (`cert_shared_reuse_rejects`) and
-     extracted-checker (`build-checker.sh shared_reuse.cert`) levels. proof spine =
-     **21 theorems axiom-clean**. The real-RC renderer that emits `rc_dec`/reuse +
-     its translation validation: `rc_dec` DONE (A1.1b); physical reuse (free-list)
-     + `rc_inc` sharing are the remaining renderer slices (A1.2 / A1.3).
+     extracted-checker (`build-checker.sh shared_reuse.cert`) levels. **DONE (A1.2
+     proof foundation) — `FreeList.alloc_not_live`**: the free-list allocator is
+     modeled (bump + free-set + ghost live-set) and proven REUSE-SAFE — a valid
+     allocation (the fresh frontier, or a block on the free-list) NEVER returns a
+     currently-LIVE block (no reuse-after-free); INV-preservation across alloc/free
+     lifts it to whole runs. This RESOLVES the A1.2 fork toward PROVE: the renderer
+     slice that emits the physical free-list REFINES this model rather than adding
+     trusted runtime. proof spine = **24 theorems axiom-clean**. REMAINING renderer
+     slices: A1.2-render (emit the free-list, refining `FreeList`), A1.3 (`rc_inc`
+     sharing + cow); `rc_dec` already DONE (A1.1b).
 5. **full mode: `b` (closure-env borrow) + branch resource-state agreement** →
    control-flow + closures.
 
