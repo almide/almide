@@ -266,6 +266,10 @@ impl LowerCtx {
                 self.live_heap_handles.push(dst);
                 Ok(())
             }
+            IrExprKind::Call { target, .. } => Err(LowerError::Unsupported(format!(
+                "heap bind from Call[{}] not in this brick",
+                call_target_kind(target)
+            ))),
             other => Err(LowerError::Unsupported(format!(
                 "heap bind from {} not in this brick",
                 kind_name(other)
@@ -452,6 +456,10 @@ impl LowerCtx {
                 }
                 IrExprKind::Var { id } => Ok(CallArg::Scalar(self.value_for(*id)?)),
                 IrExprKind::LitInt { value } => Ok(CallArg::Imm(*value)),
+                IrExprKind::Call { target, .. } => Err(LowerError::Unsupported(format!(
+                    "call argument Call[{}] not in this brick",
+                    call_target_kind(target)
+                ))),
                 other => Err(LowerError::Unsupported(format!(
                     "call argument {} not in this brick",
                     kind_name(other)
@@ -504,6 +512,19 @@ fn stmt_kind_name(k: &IrStmtKind) -> &'static str {
         IrStmtKind::ListReverse { .. } => "ListReverse",
         IrStmtKind::ListRotateLeft { .. } => "ListRotateLeft",
         IrStmtKind::ListCopySlice { .. } => "ListCopySlice",
+    }
+}
+
+/// The kind of a call's resolved target — used to make a walled `Call`'s reason
+/// precise (the histogram then names which call SHAPE to admit next: a free
+/// `Named` call vs a stdlib `Module` dispatch vs an unresolved `Method` vs a
+/// `Computed` callee), so the coverage roadmap is evidence-based, not guessed.
+fn call_target_kind(t: &CallTarget) -> &'static str {
+    match t {
+        CallTarget::Named { .. } => "Named",
+        CallTarget::Module { .. } => "Module",
+        CallTarget::Method { .. } => "Method",
+        CallTarget::Computed { .. } => "Computed",
     }
 }
 
