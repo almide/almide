@@ -514,6 +514,25 @@ mod tests {
         }
     }
 
+    /// The hand-written WAT runtime is the BOOTSTRAP debt (§4.1). This guard
+    /// makes the "never grow" rule MECHANICAL (not a comment): the count may only
+    /// ratchet DOWN as the runtime self-hosts into Almide. If you added a
+    /// hand-written WAT routine and this fails — STOP: write it in Almide and
+    /// call it via `CallFn` instead. v0's wasm emitter rotted because nothing
+    /// kept its hand-written surface small; this is that forcing function.
+    #[test]
+    fn handwritten_wasm_runtime_does_not_grow() {
+        // Ratchet DOWN only. Lower it (never raise it) when a routine self-hosts.
+        const BOOTSTRAP_RUNTIME_FN_BASELINE: usize = 11;
+        let count = preamble().matches("\n  (func $").count();
+        assert!(
+            count <= BOOTSTRAP_RUNTIME_FN_BASELINE,
+            "hand-written WAT runtime grew to {count} funcs (baseline \
+             {BOOTSTRAP_RUNTIME_FN_BASELINE}); §4.1 forbids growing it — self-host \
+             the new routine in Almide and call it via CallFn"
+        );
+    }
+
     fn build_and_run(label: &str, wat: &str) -> Option<String> {
         let dir = std::env::temp_dir().join(format!("almide_mir_wasm_{label}"));
         std::fs::create_dir_all(&dir).unwrap();
