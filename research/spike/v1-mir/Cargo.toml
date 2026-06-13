@@ -1,0 +1,11 @@
+[package]
+name = "v1-mir-spike"
+version = "0.0.0"
+edition = "2021"
+
+[[bin]]
+name = "v1-mir-spike"
+path = "src/main.rs"
+
+# Standalone de-risking spike — NOT part of the workspace build/CI.
+[workspace]
