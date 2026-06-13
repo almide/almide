@@ -170,6 +170,45 @@ pub fn transitive_cap_witness_string(
     format!("{}|{}", ids(&func.declared_caps), ids(&reachable))
 }
 
+/// Conservative transitive capability-reachability — the SOUND basis for a
+/// corpus capability gate across `Op::CallFn` edges. A function's empty (direct)
+/// capability witness is a sound claim of effect-freedom ONLY if this returns
+/// `false`: the direct witness alone misses what a CALLEE reaches, and
+/// [`reachable_caps`] treats an unknown callee as contributing ∅ — unsound for an
+/// effectful one (its honest-scope caveat). This closes that hole conservatively.
+///
+/// Returns `true` if `name` reaches a host capability DIRECTLY (it has an
+/// `Op::Call` whose `RtFn` bears one) or through ANY `Op::CallFn` callee that is
+/// not provably effect-free. A callee NOT in `program` is provably free only when
+/// `is_known_free(callee)` — the CALLER supplies that policy (e.g. variant
+/// constructors, known effect-free builtins, purity-gated stdlib `Module` calls).
+/// Any other unknown callee (a walled or cross-file user function whose effects
+/// are unseen) is treated as reaching a capability — the conservative direction,
+/// so a gate built on this NEVER over-accepts. `visited` breaks cycles.
+pub fn reaches_capability_or_unknown(
+    name: &str,
+    program: &BTreeMap<String, MirFunction>,
+    is_known_free: &dyn Fn(&str) -> bool,
+    visited: &mut std::collections::BTreeSet<String>,
+) -> bool {
+    if !visited.insert(name.to_string()) {
+        return false; // cycle / diamond: already accounted on the stack
+    }
+    let func = match program.get(name) {
+        Some(f) => f,
+        None => return !is_known_free(name),
+    };
+    if !cap_witness(func).used.is_empty() {
+        return true; // a direct host effect (today: Stdout via an RtFn `Op::Call`)
+    }
+    func.ops.iter().any(|op| match op {
+        Op::CallFn { name: callee, .. } => {
+            reaches_capability_or_unknown(callee, program, is_known_free, visited)
+        }
+        _ => false,
+    })
+}
+
 /// Per-object refcount-event accumulator, preserving object creation order.
 struct Streams {
     of: BTreeMap<ValueId, ValueId>, // handle → object representative
@@ -576,6 +615,62 @@ mod tests {
         );
         assert_eq!(ownership_certificate(&f), "");
         assert_eq!(verify_ownership(&f), Ok(()));
+    }
+
+    // ── conservative transitive capability reachability (brick #49) ──
+
+    #[test]
+    fn transitive_capability_through_callfn_is_caught() {
+        use std::collections::{BTreeMap, BTreeSet};
+        // main → beep; beep prints (PrintInt → Stdout). main has NO direct cap but
+        // reaches one transitively — the fold MUST flag it (the direct witness wouldn't).
+        let mut beep = func(vec![
+            Op::Const { dst: ValueId(0) },
+            Op::Call { dst: None, func: RtFn::PrintInt, args: vec![CallArg::Scalar(ValueId(0))], result: None },
+        ]);
+        beep.name = "beep".into();
+        let mut main = func(vec![Op::CallFn { dst: None, name: "beep".into(), args: vec![], result: None }]);
+        main.name = "main".into();
+        let mut program: BTreeMap<String, MirFunction> = BTreeMap::new();
+        for f in [beep, main] {
+            program.insert(f.name.clone(), f);
+        }
+        let none_free = |_: &str| false;
+        let mut v = BTreeSet::new();
+        assert!(reaches_capability_or_unknown("main", &program, &none_free, &mut v));
+    }
+
+    #[test]
+    fn unknown_callee_is_conservatively_tainted_unless_freed_by_policy() {
+        use std::collections::{BTreeMap, BTreeSet};
+        // f → helper, helper NOT in the program: tainted by default, free iff the policy says so.
+        let mut f = func(vec![Op::CallFn { dst: None, name: "helper".into(), args: vec![], result: None }]);
+        f.name = "f".into();
+        let mut program: BTreeMap<String, MirFunction> = BTreeMap::new();
+        program.insert("f".to_string(), f);
+        let none_free = |_: &str| false;
+        let mut v1 = BTreeSet::new();
+        assert!(reaches_capability_or_unknown("f", &program, &none_free, &mut v1));
+        let helper_free = |n: &str| n == "helper";
+        let mut v2 = BTreeSet::new();
+        assert!(!reaches_capability_or_unknown("f", &program, &helper_free, &mut v2));
+    }
+
+    #[test]
+    fn pure_chain_and_cycle_are_effect_free() {
+        use std::collections::{BTreeMap, BTreeSet};
+        // a → b → a, both pure (no caps, no unknown callees): effect-free, terminates.
+        let mut a = func(vec![Op::CallFn { dst: None, name: "b".into(), args: vec![], result: None }]);
+        a.name = "a".into();
+        let mut b = func(vec![Op::CallFn { dst: None, name: "a".into(), args: vec![], result: None }]);
+        b.name = "b".into();
+        let mut program: BTreeMap<String, MirFunction> = BTreeMap::new();
+        for x in [a, b] {
+            program.insert(x.name.clone(), x);
+        }
+        let none_free = |_: &str| false;
+        let mut v = BTreeSet::new();
+        assert!(!reaches_capability_or_unknown("a", &program, &none_free, &mut v));
     }
 
     #[test]

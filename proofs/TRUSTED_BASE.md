@@ -130,7 +130,21 @@ The receipt's claims are scoped to exactly this:
   in the untrusted emitter; a **drift gate** (`proofs/check-stdlib-purity-registry.sh`,
   in `corpus-wall.sh`) re-derives the effectful set from `stdlib/*.almd` and fails
   if any admitted module ever gains an `effect fn`, or if a stdlib module is left
-  unclassified — so a pure→effectful drift cannot silently ship. **Heap parameters use
+  unclassified — so a pure→effectful drift cannot silently ship. **The capability
+  property is checked TRANSITIVELY and honestly SCOPED to Stdout.** A function's
+  empty capability witness is only emitted (claimed caps-safe) when a conservative
+  fold (`certificate::reaches_capability_or_unknown`) proves it reaches no Stdout
+  across every `Op::CallFn` edge: an in-profile callee is folded; a pure stdlib
+  `Module` call, a variant constructor, or a known Stdout-free builtin
+  (`assert*`/`eprintln`/`panic`/`to_string` — these reach stderr/abort, NOT
+  Stdout) is free; ANY other unknown callee (a walled or cross-file user function)
+  TAINTS, so the function is reported `caps-unverified` (275/278 verified, 3
+  unverified) rather than falsely accepted. This closes the direct-witness hole
+  (`reachable_caps`'s honest-scope: an unknown callee contributed ∅). HONEST
+  SCOPE: only `Capability::Stdout` is modeled, so the property is "no undeclared
+  **Stdout** effect"; stderr, abort, fs, net are real host effects not yet named
+  (a wider `Capability` set + frontend-lowered `declared_caps` is a later brick).
+  **Heap parameters use
   a BORROW-BY-DEFAULT calling convention** (the caller owns the reference; a param
   contributes no owned `+1` to the certificate). This is the only convention sound
   under the current runtime: an owned-param `+1` would be SYNTHETIC — unbacked by

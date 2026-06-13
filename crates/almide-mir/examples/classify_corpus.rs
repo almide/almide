@@ -33,12 +33,25 @@ use almide_frontend::ir_link;
 use almide_frontend::lower::lower_program;
 use almide_lang::lexer::Lexer;
 use almide_lang::parser::Parser;
-use almide_mir::certificate::{cap_witness_string, name_witness_string, ownership_certificate};
+use almide_ir::IrTypeDeclKind;
+use almide_mir::certificate::{
+    cap_witness_string, name_witness_string, ownership_certificate, reaches_capability_or_unknown,
+};
 use almide_mir::{MirFunction, Op};
 use almide_optimize::{mono, optimize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
+
+/// Builtin free functions that reach STDERR / process-abort but NOT the modeled
+/// `Stdout` capability (`assert*` print a diff to stderr then panic; `eprintln`
+/// is stderr; `panic` aborts; `to_string` is pure). They are Stdout-free, so a
+/// call to one cannot make a caller reach Stdout. NOTE: this is sound for the
+/// CURRENT one-capability (Stdout-only) vocabulary — stderr/abort are real host
+/// effects the model does not yet name (a wider Capability set is a later brick),
+/// so the honest property is "no undeclared STDOUT effect", not "no host effect".
+const KNOWN_STDOUT_FREE_BUILTINS: &[&str] =
+    &["assert", "assert_eq", "assert_ne", "eprintln", "panic", "to_string"];
 
 /// The NON-RECURRING soundness gate for the borrow-by-default calling convention:
 /// EVERY `+1` event in the ownership certificate must be BACKED by a real runtime
@@ -137,6 +150,14 @@ struct Tally {
     /// Functions whose certificate has an UNBACKED `+1` (the borrow-by-default
     /// soundness gate). Must stay empty — a non-empty list is a wall breach.
     cert_backing_breaches: Vec<String>,
+    /// In-profile functions whose Stdout-freedom is provable transitively (every
+    /// `Op::CallFn` callee is Stdout-free): their empty capability witness is
+    /// emitted for the proven checker. accept ⟹ no undeclared Stdout effect.
+    caps_verified: usize,
+    /// In-profile functions that call an UNANALYZABLE callee (a walled or
+    /// cross-file user function), so their Stdout-freedom cannot be proven; their
+    /// witness is NOT emitted (honest: not falsely claimed caps-safe).
+    caps_unverified: usize,
 }
 
 /// Recursively collect `.almd` files under a path (file or directory).
@@ -211,6 +232,24 @@ fn main() {
             }
         };
 
+        // Variant constructors of this program are PURE data builders (no host
+        // effect), so a `CallFn` to one is Stdout-free — collected for the
+        // capability soundness fold below.
+        let ctors: HashSet<String> = ir
+            .type_decls
+            .iter()
+            .flat_map(|td| match &td.kind {
+                IrTypeDeclKind::Variant { cases, .. } => {
+                    cases.iter().map(|c| c.name.as_str().to_string()).collect::<Vec<_>>()
+                }
+                _ => Vec::new(),
+            })
+            .collect();
+
+        // Pass 1: lower every function; emit the LOCAL witnesses (ownership, names)
+        // and collect the in-profile MIRs (the capability fold needs the whole
+        // file's in-profile set before it can judge any one function's callees).
+        let mut file_mirs: Vec<(String, MirFunction)> = Vec::new();
         for func in &ir.functions {
             t.functions += 1;
             let lowered = catch_unwind(AssertUnwindSafe(|| almide_mir::lower::lower_function(func)));
@@ -223,15 +262,12 @@ fn main() {
                         t.cert_backing_breaches
                             .push(format!("{}::{}", file.display(), func.name.as_str()));
                     }
-                    // Collect all three witnesses for the PCC re-check. Ownership
-                    // is one heap object per line; concatenating across functions
-                    // keeps each object independently checkable. Names and caps
-                    // are one line per function (the checker is set-membership).
+                    // Ownership is one heap object per line; names are one line per
+                    // function. Both are LOCAL properties — no transitivity.
                     ownership_stream.push_str(&ownership_certificate(&mir));
                     names_stream.push_str(&name_witness_string(&mir));
                     names_stream.push('\n');
-                    caps_stream.push_str(&cap_witness_string(&mir));
-                    caps_stream.push('\n');
+                    file_mirs.push((func.name.as_str().to_string(), mir));
                 }
                 Ok(Err(almide_mir::lower::LowerError::Unsupported(reason))) => {
                     *t.unsupported.entry(reason_key(&reason)).or_insert(0) += 1;
@@ -241,6 +277,30 @@ fn main() {
                     t.lower_panics
                         .push(format!("{}::{}", file.display(), func.name.as_str()));
                 }
+            }
+        }
+
+        // Pass 2 (capability SOUNDNESS): a function's empty capability witness is a
+        // sound claim of Stdout-freedom ONLY if it reaches no Stdout TRANSITIVELY —
+        // the direct witness alone misses what a callee reaches. Emit the witness
+        // only for functions provably Stdout-free across `Op::CallFn` edges; the
+        // rest are NOT claimed caps-safe (honest scope), never falsely accepted.
+        let in_profile_map: BTreeMap<String, MirFunction> = file_mirs.iter().cloned().collect();
+        // The conservative free-callee policy: a callee not in the in-profile map
+        // is Stdout-free only if it is a pure stdlib `Module` call (a dotted name,
+        // purity-gated at lowering), a variant constructor, or a known Stdout-free
+        // builtin. Everything else (walled / cross-file user fns) is tainted.
+        let is_known_free = |n: &str| {
+            n.contains('.') || ctors.contains(n) || KNOWN_STDOUT_FREE_BUILTINS.contains(&n)
+        };
+        for (name, mir) in &file_mirs {
+            let mut visited = BTreeSet::new();
+            if reaches_capability_or_unknown(name, &in_profile_map, &is_known_free, &mut visited) {
+                t.caps_unverified += 1;
+            } else {
+                caps_stream.push_str(&cap_witness_string(mir));
+                caps_stream.push('\n');
+                t.caps_verified += 1;
             }
         }
     }
@@ -284,6 +344,14 @@ fn main() {
     eprintln!(
         "  unbacked +1 (BUG)    : {}  <- borrow-by-default backing gate",
         t.cert_backing_breaches.len()
+    );
+    eprintln!(
+        "  caps-verified        : {}  <- provably reach no Stdout (transitive); witness emitted",
+        t.caps_verified
+    );
+    eprintln!(
+        "  caps-unverified      : {}  <- call an unanalyzable callee; not claimed caps-safe (honest scope)",
+        t.caps_unverified
     );
     for p in &t.cert_backing_breaches {
         eprintln!("      UNBACKED {p}");

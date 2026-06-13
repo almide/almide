@@ -114,7 +114,13 @@ check_per_function() { # property cert-file human-meaning
   echo "  [$prop] $n function witness(es) ($meaning): ACCEPT (exit 0)"
 }
 check_per_function names "$OUTDIR/names.cert" "no dangling MIR reference"
-check_per_function caps  "$OUTDIR/caps.cert"  "no undeclared host effect"
+# Caps: only the witnesses of functions PROVABLY Stdout-free TRANSITIVELY are
+# emitted (the classifier's conservative `reaches_capability_or_unknown` fold —
+# a function calling an unanalyzable callee is reported caps-unverified, never
+# claimed safe). The modeled capability is Stdout only, so the honest property is
+# "no undeclared STDOUT effect" (stderr / abort / fs / net are real host effects
+# not yet named — a wider Capability set is a later brick).
+check_per_function caps  "$OUTDIR/caps.cert"  "no undeclared Stdout effect, transitive"
 
 cleanup
 echo
