@@ -120,6 +120,56 @@ pub fn cap_witness_string(func: &MirFunction) -> String {
     format!("{}|{}", ids(&w.allowed), ids(&w.used))
 }
 
+/// The capabilities a function reaches TRANSITIVELY: its direct caps (its own
+/// runtime calls) plus those of every function it calls via [`Op::CallFn`], to a
+/// fixpoint. `program` maps a function name to its MIR; `visited` breaks cycles.
+/// This is the COMPILER-side reachability fold — the proven checker re-verifies
+/// the result by the per-call-site subset rule (`check_caps`), so a program is
+/// rejected for a capability a CALLEE reaches even with no direct effect.
+///
+/// NOTE (honest scope): a callee NOT in `program` (out of the lowering subset)
+/// contributes no caps here — sound only when every reachable function lowers;
+/// treating an unknown callee as reaching ANY capability (conservative reject)
+/// is the hardening that makes it sound in general.
+pub fn reachable_caps(
+    name: &str,
+    program: &BTreeMap<String, MirFunction>,
+    visited: &mut std::collections::BTreeSet<String>,
+) -> Vec<Capability> {
+    let mut caps: Vec<Capability> = Vec::new();
+    if !visited.insert(name.to_string()) {
+        return caps; // already folded in (cycle / diamond)
+    }
+    let func = match program.get(name) {
+        Some(f) => f,
+        None => return caps,
+    };
+    caps.extend(cap_witness(func).used); // direct caps
+    for op in &func.ops {
+        if let Op::CallFn { name: callee, .. } = op {
+            caps.extend(reachable_caps(callee, program, visited));
+        }
+    }
+    caps
+}
+
+/// The TRANSITIVE capability witness for a caller: `<declared ids>|<reachable
+/// ids>` (reachable = direct ∪ all callees' caps, transitively). The proven
+/// `check_caps_cert` accepts iff `reachable ⊆ declared` — the per-call-site
+/// subset rule applied across the call graph, with the checker doing only the
+/// subset (the compiler did the reachability fold).
+pub fn transitive_cap_witness_string(
+    func: &MirFunction,
+    program: &BTreeMap<String, MirFunction>,
+) -> String {
+    let mut visited = std::collections::BTreeSet::new();
+    let reachable = reachable_caps(func.name.as_str(), program, &mut visited);
+    let ids = |v: &[Capability]| {
+        v.iter().map(|c| c.id().to_string()).collect::<Vec<_>>().join(" ")
+    };
+    format!("{}|{}", ids(&func.declared_caps), ids(&reachable))
+}
+
 /// Per-object refcount-event accumulator, preserving object creation order.
 struct Streams {
     of: BTreeMap<ValueId, ValueId>, // handle → object representative
@@ -407,6 +457,34 @@ mod tests {
         let mut undeclared = declared.clone();
         undeclared.declared_caps = vec![];
         assert_eq!(cap_witness_string(&undeclared), "|0");
+    }
+
+    #[test]
+    fn reachable_caps_folds_transitively_and_survives_cycles() {
+        use std::collections::{BTreeMap, BTreeSet};
+        // main → beep (prints, reaches Stdout). main has NO direct effect.
+        let mut beep = func(vec![
+            Op::Const { dst: ValueId(0) },
+            Op::Call { dst: None, func: RtFn::PrintInt, args: vec![CallArg::Scalar(ValueId(0))] },
+        ]);
+        beep.name = "beep".into();
+        let mut main = func(vec![Op::CallFn { dst: None, name: "beep".into(), args: vec![] }]);
+        main.name = "main".into();
+        // A cycle main→loop→main must not diverge.
+        let mut looper = func(vec![Op::CallFn { dst: None, name: "main".into(), args: vec![] }]);
+        looper.name = "loop".into();
+        main.ops.push(Op::CallFn { dst: None, name: "loop".into(), args: vec![] });
+
+        let mut program: BTreeMap<String, MirFunction> = BTreeMap::new();
+        for f in [beep, main.clone(), looper] {
+            program.insert(f.name.clone(), f);
+        }
+        let mut seen = BTreeSet::new();
+        let reach = reachable_caps("main", &program, &mut seen);
+        // main reaches Stdout ONLY transitively (via beep) — the per-call-site fold.
+        assert!(reach.contains(&Capability::Stdout));
+        // And the transitive witness rejects (declared empty, reachable Stdout).
+        assert_eq!(transitive_cap_witness_string(&main, &program), "|0");
     }
 
     #[test]

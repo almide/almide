@@ -44,15 +44,21 @@ emit_src() { # fixture function property
   (cd "$ROOT" && cargo run -q -p almide-mir --example emit_cert_from_source \
     -- "proofs/fixtures/$1" "$2" "$3");
 }
-run_src() { # fixture function property expected_exit
+run_src() { # fixture function emit-property expected_exit  (checker mode == emit-property)
+  run_src_mode "$1" "$2" "$3" "$3" "$4"
+}
+# The transitive-cap witness (`tcaps`) is a declared|reachable subset, so it is
+# re-verified by the SAME proven subset checker as `caps` — emit property and
+# checker MODE differ, hence this variant.
+run_src_mode() { # fixture function emit-property checker-mode expected_exit
   emit_src "$1" "$2" "$3" > /tmp/real.witness
   set +e
-  "$ROOT/proofs/checker" "$3" /tmp/real.witness >/tmp/gate.out 2>&1; local rc=$?
+  "$ROOT/proofs/checker" "$4" /tmp/real.witness >/tmp/gate.out 2>&1; local rc=$?
   set -e
-  if [ "$rc" -eq "$4" ]; then
+  if [ "$rc" -eq "$5" ]; then
     echo "ok   [$3] $1::$2 (real source): witness '$(cat /tmp/real.witness | tr '\n' '|')' -> $(cat /tmp/gate.out)"
   else
-    echo "FAIL [$3] $1::$2 (real source): got exit $rc want $4 ($(cat /tmp/gate.out))"; exit 1
+    echo "FAIL [$3] $1::$2 (real source): got exit $rc want $5 ($(cat /tmp/gate.out))"; exit 1
   fi
 }
 
@@ -77,6 +83,13 @@ run_src return_list.almd build names     0
 # — undeclared, so the cap bound REJECTS it (the sandbox promise on real code).
 run_src print_str.almd   main  ownership 0
 run_src print_str.almd   main  caps      1
+# Compositional (per-call-site) capability: `main` calls `beep` which reaches
+# Stdout. main's DIRECT caps are empty (caps → ACCEPT, blind to the callee), but
+# the TRANSITIVE witness accounts for the callee at the call site (tcaps,
+# re-verified by the proven subset checker) → REJECT. The checker never opens
+# the callee; the compiler folds reachability, the checker does the subset.
+run_src      transitive_caps.almd main caps  0
+run_src_mode transitive_caps.almd main tcaps caps 1
 
 echo
 echo "GATE OK: the kernel-proven checker re-verified per-build witnesses on THREE"

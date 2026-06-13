@@ -308,10 +308,41 @@ impl LowerCtx {
                     kind_name(other)
                 ))),
             },
-            (other, _) => Err(LowerError::Unsupported(format!(
-                "effect call `{other}` not in this brick"
-            ))),
+            // A USER function call (Unit result, e.g. `beep()`) → Op::CallFn. The
+            // call BORROWS its heap-handle args (no refcount change here). The
+            // callee's capabilities are accounted for at the CALL SITE against
+            // its signature (the per-call-site subset rule), so a program is
+            // rejected for a capability a CALLEE reaches — transitively — even
+            // with no direct effect (closes the direct-only caps gap).
+            (callee, call_args) => {
+                let lowered = self.lower_call_args(call_args)?;
+                self.ops.push(Op::CallFn {
+                    dst: None,
+                    name: callee.to_string(),
+                    args: lowered,
+                });
+                Ok(())
+            }
         }
+    }
+
+    /// Lower call arguments to [`CallArg`]s: a heap var is BORROWED (`Handle`), a
+    /// scalar var is a `Scalar`, an int literal is an `Imm`. Anything else is an
+    /// explicit `Unsupported` (totality).
+    fn lower_call_args(&self, args: &[IrExpr]) -> Result<Vec<CallArg>, LowerError> {
+        args.iter()
+            .map(|a| match &a.kind {
+                IrExprKind::Var { id } if is_heap_ty(&a.ty) => {
+                    Ok(CallArg::Handle(self.value_for(*id)?))
+                }
+                IrExprKind::Var { id } => Ok(CallArg::Scalar(self.value_for(*id)?)),
+                IrExprKind::LitInt { value } => Ok(CallArg::Imm(*value)),
+                other => Err(LowerError::Unsupported(format!(
+                    "call argument {} not in this brick",
+                    kind_name(other)
+                ))),
+            })
+            .collect()
     }
 
     fn emit_scope_end_drops(&mut self) {

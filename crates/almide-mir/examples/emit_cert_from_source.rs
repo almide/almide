@@ -18,8 +18,11 @@ use almide_frontend::ir_link;
 use almide_frontend::lower::lower_program;
 use almide_lang::lexer::Lexer;
 use almide_lang::parser::Parser;
-use almide_mir::certificate::{cap_witness_string, name_witness_string, ownership_certificate};
+use almide_mir::certificate::{
+    cap_witness_string, name_witness_string, ownership_certificate, transitive_cap_witness_string,
+};
 use almide_optimize::{mono, optimize};
+use std::collections::BTreeMap;
 
 fn die(msg: String) -> ! {
     eprintln!("{msg}");
@@ -91,6 +94,19 @@ fn main() {
         "ownership" => print!("{}", ownership_certificate(&mir)),
         "names" => print!("{}", name_witness_string(&mir)),
         "caps" => print!("{}", cap_witness_string(&mir)),
-        other => die(format!("unknown property: {other} (try: ownership | names | caps)")),
+        // Transitive capability witness: needs the WHOLE program, so a callee's
+        // reachable caps are accounted at the call site (per-call-site rule).
+        "tcaps" => {
+            let mut program: BTreeMap<String, almide_mir::MirFunction> = BTreeMap::new();
+            for f in &ir.functions {
+                if let Ok(m) = almide_mir::lower::lower_function(f) {
+                    program.insert(f.name.as_str().to_string(), m);
+                }
+            }
+            print!("{}", transitive_cap_witness_string(&mir, &program));
+        }
+        other => {
+            die(format!("unknown property: {other} (try: ownership | names | caps | tcaps)"))
+        }
     }
 }
