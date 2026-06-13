@@ -24,6 +24,8 @@ printf 'IIDD\nIDD\n' > /tmp/double_free.cert  # 2nd object double-frees → REJE
 printf 'ID\nIID\n'  > /tmp/leak.cert          # 2nd object leaks → REJECT
 printf 'IR\nIADR\n' > /tmp/perceus.cert       # perceus: reuse-release + alias/drop/reuse → ACCEPT
 printf 'R\n'        > /tmp/reuse_uaf.cert      # reuse with nothing owned → REJECT
+printf 'IIDD\n'    > /tmp/stack.cert          # operand-STACK balance (push push pop pop) ≡ the same fold → ACCEPT
+printf 'IDD\n'     > /tmp/stack_uflow.cert     # operand-stack UNDERFLOW (pop below empty) → REJECT
 
 run() { # path expected_exit
   set +e; ./checker ownership "$1" >/tmp/checker.out 2>&1; local rc=$?; set -e
@@ -35,6 +37,8 @@ run /tmp/double_free.cert 1
 run /tmp/leak.cert 1
 run /tmp/perceus.cert 0
 run /tmp/reuse_uaf.cert 1
+run /tmp/stack.cert 0
+run /tmp/stack_uflow.cert 1
 
 echo
 echo "CHECKER OK: the kernel-proven check accepts the balanced certificate and"

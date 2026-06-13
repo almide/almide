@@ -54,8 +54,13 @@ axioms). Verified by `proofs/check.sh`:
 
 The receipt's claims are scoped to exactly this:
 
-- **One property** so far: memory safety / RC balance. Stack balance, name
-  totality, capability bound, type-concretize, termination are later bricks.
+- **The flight-grade property SET is complete on the value-semantics subset**:
+  RC balance (memory safety), name totality, capability bound (incl. transitive),
+  type-concretization, memory-model leak-freedom, byte-binding table, operand-stack
+  balance, and termination of the loop-free fragment — all kernel-checked and
+  axiom-clean. What remains is DEPTH (the byte-binding ISA layer / a real-RC
+  renderer) and BREADTH (lowering beyond the subset: control flow, closures,
+  stdlib) — not new properties on the subset.
 - **The current wasm renderer is eager-copy**: proven memory-SAFE
   (`eager_copy_refines_safety` — it emits no `__rc_dec`, so it cannot
   double-free) but it **leaks** (it emits no release). Leak-freedom is now PROVEN

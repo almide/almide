@@ -7,3 +7,5 @@ RuntimeModel.v
 NameTotality.v
 TypeConcretization.v
 CapabilityBound.v
+StackBalance.v
+Termination.v
