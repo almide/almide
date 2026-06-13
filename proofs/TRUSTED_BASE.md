@@ -108,11 +108,12 @@ The receipt's claims are scoped to exactly this:
   verification = the definition of parity" in its honest first form: it does NOT
   yet claim the *completion definition* (the proven profile accepting the full
   corpus), it establishes the *mechanism* that measures progress toward it and
-  proves the boundary is a wall, not a hole. **Today's honest coverage: 119/4195
-  functions in-profile** (the value-semantics subset); the rest are walled with a
+  proves the boundary is a wall, not a hole. **Today's honest coverage: 234/4195
+  functions in-profile** (the value-semantics subset, incl. expression-bodied
+  functions and direct heap-literal returns); the rest are walled with a
   per-feature `Unsupported` histogram that names the next surface to admit
-  (largest buckets: nested `call argument Call`, expression-bodied `function body
-  is not a Block`, `heap bind from Call`). Coverage is REPORTED, never gated on a
+  (largest buckets: nested `call argument Call`, `heap bind from Call`, `heap
+  move-out from Call`). Coverage is REPORTED, never gated on a
   brittle exact count — only the two soundness invariants are hard, plus an
   anti-collapse floor (≥1 in-profile witness must reach the checker, so a silent
   coverage collapse to zero fails the gate).
