@@ -20,21 +20,40 @@ From Stdlib Require Import ZArith.
 From Stdlib Require Import String Ascii.
 Open Scope Z_scope.
 
-(* The MIR ownership ops on a single reference-counted object. Inc = the +1 of
-   Alloc/Dup; Dec = the −1 of Drop/Consume. (Multi-object + Borrow/MakeUnique are
-   later refinements; this is the irreducible RC-balance core.) *)
+(* The MIR ownership ops on a single reference-counted object — certificate
+   format v1's ownership ALPHABET. Each op carries a SIGNED DELTA the checker
+   folds; the DISTINCT constructors record a ground fact the untrusted compiler
+   already decided (so the checker never re-derives it):
+     Inc     = +1 FRESH acquire   (Alloc / fresh Dup / owned Call-result).
+     Alias   = +1 ALIAS acquire   (a binding that incs an existing SHARED ref —
+                                   the share-vs-move ground fact, G2.1). Folds
+                                   like Inc; the separate constructor is the fact.
+     Dec     = −1 plain release   (Drop).
+     MoveOut = −1 MOVE-OUT        (Consume — ref transferred to a container /
+                                   return / consuming callee). Folds like Dec.
+   v0's {Inc,Dec} is the DEGENERATE case (Alias≡Inc, MoveOut≡Dec at the balance
+   fold), so this strictly generalizes brick 1 with ZERO new proof obligations —
+   the soundness proofs reason about the run's Z result, not the constructors.
+   (Borrow b≡+0 and Reuse r≡−1-with-a-uniqueness-obligation are later modes.) *)
 Inductive Op : Type :=
   | Inc : Op
-  | Dec : Op.
+  | Alias : Op
+  | Dec : Op
+  | MoveOut : Op.
 
 (* OPERATIONAL SEMANTICS (the ALS side — "what actually happens").
-   A refcount, or a FAULT (`None`) when a Dec hits rc = 0: that is a double-free
-   / use-after-free — releasing a reference that does not exist. *)
+   A refcount, or a FAULT (`None`) when a −1 op hits rc = 0: that is a
+   double-free / use-after-free — releasing a reference that does not exist.
+   Alias folds like Inc (+1), MoveOut like Dec (−1): the balance is about the
+   DELTAS, which is exactly why adding the ground-fact constructors costs no new
+   proof. *)
 Fixpoint exec (ops : list Op) (rc : Z) : option Z :=
   match ops with
   | [] => Some rc
   | Inc :: rest => exec rest (rc + 1)
+  | Alias :: rest => exec rest (rc + 1)
   | Dec :: rest => if rc <=? 0 then None else exec rest (rc - 1)
+  | MoveOut :: rest => if rc <=? 0 then None else exec rest (rc - 1)
   end.
 
 Definition run (ops : list Op) : option Z := exec ops 0.
@@ -112,14 +131,19 @@ Proof. reflexivity. Qed.
    The byte→op tokenizer used to live in the OCaml driver, OUTSIDE the trusted
    base (a known-limitation). Here it is a proven Gallina function: the WHOLE
    "bytes ⟶ accept/reject" pipeline is now kernel-checked, shrinking the trusted
-   base to just file I/O. Certificate format v0: one object per newline; within a
-   line `i`/`I` = +1, `d`/`D` = −1, anything else (whitespace included) skipped. *)
+   base to just file I/O. Certificate format v1: one object per newline; within a
+   line the ownership alphabet is `i`/`I` = fresh +1, `a`/`A` = alias +1,
+   `d`/`D` = release −1, `m`/`M` = move-out −1; anything else (whitespace
+   included) skipped. (`a`/`m` carry the share-vs-move ground fact; they fold
+   like `i`/`d`, so v0 certificates remain valid — i/d is the degenerate case.) *)
 
 Definition newline : ascii := ascii_of_nat 10.
 
 Definition parse_byte (a : ascii) : option Op :=
   if orb (Ascii.eqb a "i"%char) (Ascii.eqb a "I"%char) then Some Inc
+  else if orb (Ascii.eqb a "a"%char) (Ascii.eqb a "A"%char) then Some Alias
   else if orb (Ascii.eqb a "d"%char) (Ascii.eqb a "D"%char) then Some Dec
+  else if orb (Ascii.eqb a "m"%char) (Ascii.eqb a "M"%char) then Some MoveOut
   else None.
 
 (* Fold the byte string into per-line op streams; flush the final line at end. *)
@@ -159,6 +183,20 @@ Proof. reflexivity. Qed.
 Definition cert_two_objs : string :=
   String "i"%char (String "d"%char (String newline (String "i"%char (String "d"%char EmptyString)))).
 Example cert_two_objs_accepts : check_cert cert_two_objs = true.
+Proof. reflexivity. Qed.
+
+(* format-v1 alphabet: alias (`a`) and move-out (`m`) fold like inc/dec, so the
+   share-vs-move ground fact rides along without changing the balance verdict. *)
+Example accepts_alias_then_move : check [Inc; Alias; Dec; MoveOut] = true.
+Proof. reflexivity. Qed.
+
+Example cert_move_out_accepts : check_cert "im"%string = true.   (* alloc, move-out (the return_list witness) *)
+Proof. reflexivity. Qed.
+
+Example cert_alias_balanced : check_cert "iadd"%string = true.   (* alloc, alias, two releases *)
+Proof. reflexivity. Qed.
+
+Example cert_move_out_underflow_rejects : check_cert "m"%string = false. (* move-out with nothing owned = use-after-move *)
 Proof. reflexivity. Qed.
 
 (* AXIOM AUDIT (the "Print Assumptions ⊆ standard" gate). Soundness must rest on

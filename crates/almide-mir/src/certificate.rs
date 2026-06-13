@@ -166,24 +166,33 @@ pub fn ownership_certificate(func: &MirFunction) -> String {
                 s.event(*dst, 'i');
             }
             Op::Dup { dst, src } => {
+                // ALIAS acquire (+1): a new handle on an existing shared object.
+                // `a` (not `i`) records the share-vs-move ground fact (format v1).
                 let o = s.object_of(*src);
                 s.of.insert(*dst, o);
-                s.event(o, 'i');
+                s.event(o, 'a');
             }
-            Op::Drop { v } | Op::Consume { v } => {
+            // Plain release (−1).
+            Op::Drop { v } => {
                 let o = s.object_of(*v);
                 s.event(o, 'd');
+            }
+            // MOVE-OUT (−1): the reference is transferred out (into a container /
+            // a consuming callee). `m` distinguishes move from a plain drop.
+            Op::Consume { v } => {
+                let o = s.object_of(*v);
+                s.event(o, 'm');
             }
             // No refcount change: Borrow/MakeUnique/Const/Pure/Call/CallFn/IntBinOp.
             _ => {}
         }
     }
 
-    // A heap return is MOVED OUT to the caller (a −1).
+    // A heap return is MOVED OUT to the caller (a −1) — a move, hence `m`.
     if let Some(r) = func.ret {
         if s.of.contains_key(&r) {
             let o = s.object_of(r);
-            s.event(o, 'd');
+            s.event(o, 'm');
         }
     }
 
@@ -220,7 +229,8 @@ mod tests {
             Op::Drop { v: a },
             Op::Drop { v: b },
         ]);
-        assert_eq!(ownership_certificate(&f), "iidd\n");
+        // Alloc(i), Dup→alias(a), Drop(d), Drop(d): the alias acquire is `a`.
+        assert_eq!(ownership_certificate(&f), "iadd\n");
         assert_eq!(verify_ownership(&f), Ok(())); // checker would accept ⟺ this
     }
 
@@ -261,10 +271,11 @@ mod tests {
             let mut rc: i64 = 0;
             for c in line.chars() {
                 match c {
-                    'i' => rc += 1,
-                    'd' => {
+                    // format v1: i/a = +1 (fresh/alias), d/m = −1 (release/move-out).
+                    'i' | 'a' => rc += 1,
+                    'd' | 'm' => {
                         if rc == 0 {
-                            return false; // double-free
+                            return false; // double-free / use-after-move
                         }
                         rc -= 1;
                     }
@@ -409,7 +420,8 @@ mod tests {
             ret: Some(p),
             ..Default::default()
         };
-        assert_eq!(ownership_certificate(&f), "id\n");
+        // param fresh-owned (i), returned = move-out (m).
+        assert_eq!(ownership_certificate(&f), "im\n");
         assert_eq!(verify_ownership(&f), Ok(()));
     }
 }
