@@ -141,10 +141,16 @@ The receipt's claims are scoped to exactly this:
   (`WasmExec.trap_bytes_trap_on_zero` / `_pass_on_nonzero`: the bytes for
   `(if (i32.eqz cell) (then unreachable))` trap IFF the cell is 0 — the sentinel,
   on real grounded bytes), so it handles both straight-line code AND the
-  safety-critical trap. NOT yet done: the FULL `rc_dec` end-to-end (its free-list
-  adds a second, GENERAL `if` + global ops — general structured control flow) and
-  the rest of the module; and that this small inspectable interpreter matches the
-  FULL wasm spec / ISA (the residual — WasmCert-Coq).
+  safety-critical trap. The FOUNDATION for GENERAL structured control flow is also
+  built (`WasmExec.skip_block` + `imm_len`): an immediate-aware structure finder
+  that locates a block's matching `end` WITHOUT being fooled by immediates that
+  collide with opcodes (`i32.const 4` = `41 04` where 0x04 is `if`; `i32.const 11`
+  = `41 0b` where 0x0b is `end`) — proven on those exact collision cases. This
+  shows general control flow needs only a small per-opcode immediate-length table,
+  NOT a full WasmCert-Coq parser. NOT yet done: WIRING `skip_block` into a general
+  `if` executor (a run-block layer) + global state to bind the FULL `rc_dec`
+  (free-list) end-to-end; the rest of the module; and that this small inspectable
+  interpreter matches the FULL wasm spec / ISA (the residual — WasmCert-Coq).
 - **One real `.almd` now flows end-to-end** (`proofs/fixtures/return_list.almd`
   → the actual frontend → MIR → proven checker, for ownership + names — weekly
   indicator ① 0→1). The lowering covers only the value-semantics subset (heap

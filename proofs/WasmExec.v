@@ -107,6 +107,63 @@ Proof.
   apply Z.eqb_neq in H. rewrite H. reflexivity.
 Qed.
 
+(* ─── structure finding (the foundation for GENERAL control flow) ───
+   To execute a general `if … end`, the interpreter must find the MATCHING end —
+   which a naive byte scan gets WRONG because an immediate can collide with an
+   opcode byte (e.g. `i32.const 4` = `41 04`, and 0x04 is the `if` opcode; or
+   `i32.const 11` = `41 0b`, and 0x0b is `end`). The fix is small: a per-opcode
+   IMMEDIATE-LENGTH table, so the scanner skips each instruction's immediates
+   rather than misreading them. (This is NOT a full WasmCert-Coq ISA — just an
+   immediate-length table for the dozen opcodes the renderer emits.) *)
+Definition imm_len (op : Z) : nat :=
+  if Z.eqb op 32 then 1        (* 0x20 local.get idx *)
+  else if Z.eqb op 33 then 1   (* 0x21 local.set idx *)
+  else if Z.eqb op 65 then 1   (* 0x41 i32.const v *)
+  else if Z.eqb op 35 then 1   (* 0x23 global.get idx *)
+  else if Z.eqb op 36 then 1   (* 0x24 global.set idx *)
+  else if Z.eqb op 40 then 2   (* 0x28 i32.load memarg *)
+  else if Z.eqb op 54 then 2   (* 0x36 i32.store memarg *)
+  else 0.                      (* add/sub/eqz/unreachable: no immediate *)
+
+Definition take_imm (n : nat) (l : list Z) : option (list Z) :=
+  if Nat.leb n (length l) then Some (skipn n l) else None.
+
+(* Find the matching `end` of the current block, returning the bytes AFTER it.
+   Skips each instruction's immediates (so const-4 / const-11 do not fool it);
+   tracks block depth on nested `if`/`end`. Fuel-bounded by the byte length. *)
+Fixpoint skip_block (fuel : nat) (depth : nat) (bytes : list Z) : option (list Z) :=
+  match fuel with
+  | O => None
+  | S f =>
+      match bytes with
+      | [] => None
+      | op :: rest =>
+          if Z.eqb op 11 then                    (* end *)
+            match depth with O => Some rest | S d => skip_block f d rest end
+          else if Z.eqb op 4 then                (* if: +1 depth, skip blocktype *)
+            match rest with _bt :: r => skip_block f (S depth) r | _ => None end
+          else
+            match take_imm (imm_len op) rest with
+            | Some r => skip_block f depth r
+            | None => None
+            end
+      end
+  end.
+
+(* THE COLLISION-RESISTANCE FACT: the body `i32.const 4 ; i32.const 11` contains
+   the bytes 0x04 (`if`) and 0x0b (`end`) AS IMMEDIATES — a naive scan would stop
+   at the 0x0b. `skip_block` correctly skips both and finds the REAL matching end,
+   returning the tail. This is exactly the case I had wrongly called "needs a full
+   parser": it needs only the immediate-length table above. *)
+Example skip_block_not_fooled_by_immediates :
+  skip_block 10 0 [65;4; 65;11; 11; 99] = Some [99].
+Proof. reflexivity. Qed.
+
+(* And a NESTED if inside the block is matched at the right depth. *)
+Example skip_block_handles_nesting :
+  skip_block 10 0 [4;64; 0; 11; 11; 99] = Some [99].
+Proof. reflexivity. Qed.
+
 Print Assumptions rc_inc_bytes_execute_to_rt_inc.
 Print Assumptions trap_bytes_trap_on_zero.
 Print Assumptions trap_bytes_pass_on_nonzero.
