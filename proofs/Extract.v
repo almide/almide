@@ -13,4 +13,4 @@ Extract Inductive bool => "bool" [ "true" "false" ].
 Extract Inductive list => "list" [ "[]" "(::)" ].
 
 Set Extraction Output Directory ".".
-Extraction "checker.ml" check.
+Extraction "checker.ml" check check_all.

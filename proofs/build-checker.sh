@@ -15,10 +15,10 @@ echo "== compile + extract the proven checker =="
 echo "== link the runnable checker (extracted check + tokenizer) =="
 ocamlopt -w -a checker.mli checker.ml driver.ml -o checker
 
-echo "== run the proven checker on real certificates =="
-printf 'IIDD\n' > /tmp/balanced.cert       # +1 +1 -1 -1  → balanced
-printf 'IDD\n'  > /tmp/double_free.cert     # +1 -1 -1     → double-free
-printf 'IID\n'  > /tmp/leak.cert            # +1 +1 -1     → leak
+echo "== run the proven checker on real certificates (one object per line) =="
+printf 'ID\nIIDD\n' > /tmp/balanced.cert     # two balanced objects → ACCEPT
+printf 'IIDD\nIDD\n' > /tmp/double_free.cert  # 2nd object double-frees → REJECT
+printf 'ID\nIID\n'  > /tmp/leak.cert          # 2nd object leaks → REJECT
 
 run() { # path expected_exit
   set +e; ./checker "$1" >/tmp/checker.out 2>&1; local rc=$?; set -e

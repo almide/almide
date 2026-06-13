@@ -83,8 +83,33 @@ Proof. reflexivity. Qed.
 Example rejects_leak : check [Inc; Inc; Dec] = false.
 Proof. reflexivity. Qed.
 
+(* MULTI-OBJECT. The real MIR has MANY reference-counted objects; `verify_ownership`
+   accounts each separately. A whole-function certificate is therefore one
+   Inc/Dec stream PER object. `check_all` accepts iff every object is balanced. *)
+Definition check_all (objs : list (list Op)) : bool := forallb check objs.
+
+(* SOUNDNESS lifts to every object: accepting the function certificate means
+   EVERY object is free of double-free and leak. *)
+Theorem check_all_sound :
+  forall objs, check_all objs = true ->
+    forall ops, In ops objs -> no_double_free ops /\ no_leak ops.
+Proof.
+  intros objs H ops Hin.
+  unfold check_all in H. rewrite forallb_forall in H.
+  apply check_sound. apply H. exact Hin.
+Qed.
+
+Example accepts_two_balanced_objects :
+  check_all [[Inc; Dec]; [Inc; Inc; Dec; Dec]] = true.
+Proof. reflexivity. Qed.
+
+Example rejects_if_any_object_faulty :
+  check_all [[Inc; Dec]; [Inc; Dec; Dec]] = false.
+Proof. reflexivity. Qed.
+
 (* AXIOM AUDIT (the "Print Assumptions ⊆ standard" gate). Soundness must rest on
    nothing but the Coq kernel — no admits, no extra axioms. Expected output:
    "Closed under the global context". *)
 Print Assumptions check_sound.
+Print Assumptions check_all_sound.
 
