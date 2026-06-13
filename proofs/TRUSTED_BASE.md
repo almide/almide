@@ -8,10 +8,19 @@ is the honest counterpart to the receipt's `C-PROVEN` claim.
 
 | component | version | role |
 |---|---|---|
-| Rocq / Coq | **9.1.1** | kernel + `coqchk` independent re-check |
+| Rocq / Coq | **9.1.1** | kernel + `coqchk` independent re-check (canonical, local source build) |
 | OCaml | **5.4.1** | extraction target (until CertiCoq) |
 
 Reproduce every claim: `make verify-trust` (or `proofs/check.sh` + `proofs/gate.sh`).
+
+**CI cross-version note (honest).** The `Trust Spine` GitHub Actions workflow
+re-derives the whole spine on opam's latest Rocq 9.x — currently **9.2** (opam
+has no 9.1.1; the canonical pin above is a local source build). The proofs are
+kernel-checked and **axiom-clean on BOTH 9.1.1 and 9.2** — a cross-version
+re-derivation, not a single-version artifact (a strength, not a gap). Rocq 9.2
+ships only the `rocq` driver, so CI provides `coqc`/`coqchk` as thin shims over
+`rocq compile` / `rocq check` (the latter IS the Rocq Proof Checker — the
+independent De Bruijn re-check is genuine).
 
 ## The irreducible base (cannot be discharged by proof — "消えない底")
 
