@@ -14,8 +14,63 @@
 //! `verify_ownership(f)` accepts (same invariant); the unit tests pin that
 //! correspondence, and `proofs/gate.sh` runs the actual proven binary on it.
 
-use crate::{MirFunction, Op, ValueId};
+use crate::{CallArg, MirFunction, Op, ValueId};
 use std::collections::BTreeMap;
+
+/// The name-totality witness (proofs/NameTotality.v, the 2nd flight-grade
+/// property): the DEFINED value ids (params + op results) and the USED value ids
+/// (operands/args). The kernel-proven `check_names` accepts iff `used ⊆ defined`
+/// — i.e. no dangling MIR reference (a use of an undefined value = undefined
+/// behavior). Emitted like the ownership certificate, for the proven checker.
+pub struct NameWitness {
+    pub defined: Vec<ValueId>,
+    pub used: Vec<ValueId>,
+}
+
+/// Collect the (defined, used) value ids of a function for name-totality.
+/// Duplicates are harmless — the proven checker is set-membership.
+pub fn name_witness(func: &MirFunction) -> NameWitness {
+    let mut defined: Vec<ValueId> = func.params.iter().map(|p| p.value).collect();
+    let mut used: Vec<ValueId> = Vec::new();
+    let mut record_args = |args: &[CallArg], used: &mut Vec<ValueId>| {
+        for a in args {
+            if let CallArg::Handle(v) | CallArg::Scalar(v) = a {
+                used.push(*v);
+            }
+        }
+    };
+    for op in &func.ops {
+        match op {
+            Op::Alloc { dst, .. } | Op::Const { dst } => defined.push(*dst),
+            Op::Dup { dst, src } => {
+                defined.push(*dst);
+                used.push(*src);
+            }
+            Op::Drop { v } | Op::Consume { v } | Op::Borrow { v } | Op::MakeUnique { v } => {
+                used.push(*v)
+            }
+            Op::Pure { dst, uses } => {
+                defined.push(*dst);
+                used.extend(uses.iter().copied());
+            }
+            Op::IntBinOp { dst, a, b, .. } => {
+                defined.push(*dst);
+                used.push(*a);
+                used.push(*b);
+            }
+            Op::Call { dst, args, .. } | Op::CallFn { dst, args, .. } => {
+                if let Some(d) = dst {
+                    defined.push(*d);
+                }
+                record_args(args, &mut used);
+            }
+        }
+    }
+    if let Some(r) = func.ret {
+        used.push(r);
+    }
+    NameWitness { defined, used }
+}
 
 /// Per-object refcount-event accumulator, preserving object creation order.
 struct Streams {
@@ -230,6 +285,24 @@ mod tests {
                 "seed {seed}: certificate says {cert_ok}, verify_ownership says {verify_ok}\nops: {:?}",
                 f.ops
             );
+        }
+    }
+
+    #[test]
+    fn name_witness_total_for_wellformed_mirs() {
+        // The 2nd property: every used value id is defined (no dangling MIR
+        // reference). For well-formed MIRs the witness satisfies the proven
+        // `check_names` (used ⊆ defined). Pinned over the random corpus.
+        for seed in 0u64..500 {
+            let f = gen_wellformed(seed);
+            let w = name_witness(&f);
+            for u in &w.used {
+                assert!(
+                    w.defined.contains(u),
+                    "seed {seed}: used {u:?} is not defined (dangling)\nops: {:?}",
+                    f.ops
+                );
+            }
         }
     }
 
