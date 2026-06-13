@@ -691,6 +691,9 @@ fn call_target_kind(t: &CallTarget) -> &'static str {
 }
 
 fn kind_name(k: &IrExprKind) -> &'static str {
+    // Named precisely so the corpus-wall `<other>` buckets break down into the
+    // exact expression forms still to admit (an evidence-based roadmap, the same
+    // discipline as `call_target_kind`). Unnamed kinds remain `<other>`.
     match k {
         IrExprKind::LitInt { .. } => "LitInt",
         IrExprKind::LitFloat { .. } => "LitFloat",
@@ -704,6 +707,28 @@ fn kind_name(k: &IrExprKind) -> &'static str {
         IrExprKind::Block { .. } => "Block",
         IrExprKind::Call { .. } => "Call",
         IrExprKind::RuntimeCall { .. } => "RuntimeCall",
+        IrExprKind::BinOp { .. } => "BinOp",
+        IrExprKind::UnOp { .. } => "UnOp",
+        IrExprKind::If { .. } => "If",
+        IrExprKind::Match { .. } => "Match",
+        IrExprKind::Member { .. } => "Member",
+        IrExprKind::TupleIndex { .. } => "TupleIndex",
+        IrExprKind::IndexAccess { .. } => "IndexAccess",
+        IrExprKind::MapAccess { .. } => "MapAccess",
+        IrExprKind::Range { .. } => "Range",
+        IrExprKind::MapLiteral { .. } => "MapLiteral",
+        IrExprKind::EmptyMap => "EmptyMap",
+        IrExprKind::StringInterp { .. } => "StringInterp",
+        IrExprKind::Lambda { .. } => "Lambda",
+        IrExprKind::ClosureCreate { .. } => "ClosureCreate",
+        IrExprKind::FnRef { .. } => "FnRef",
+        IrExprKind::ResultOk { .. } => "ResultOk",
+        IrExprKind::ResultErr { .. } => "ResultErr",
+        IrExprKind::OptionSome { .. } => "OptionSome",
+        IrExprKind::OptionNone => "OptionNone",
+        IrExprKind::Try { .. } => "Try",
+        IrExprKind::Unwrap { .. } => "Unwrap",
+        IrExprKind::UnwrapOr { .. } => "UnwrapOr",
         _ => "<other>",
     }
 }
