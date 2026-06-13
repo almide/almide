@@ -86,6 +86,28 @@ The receipt's claims are scoped to exactly this:
   so that slice REFINES a proof rather than adding trusted runtime) and BREADTH
   (lowering beyond the subset: control flow, closures, stdlib) — not new properties
   on the subset.
+- **The MIR-lowering WALL is empirically verified over the WHOLE v0 corpus**
+  (`proofs/corpus-wall.sh`, in `make verify-trust` → CI). The entire v0 spec
+  corpus (465 `.almd` files, 4195 functions reaching MIR) is driven through the
+  REAL frontend → `lower_function`, and two soundness invariants are asserted on
+  real source, not just hand-built MIR: (1) **the wall** — `lower_function` is
+  TOTAL over the corpus: every function is `Ok` (in-profile) or an explicit
+  `Unsupported` (walled); **zero panics, zero silent miscompiles** (a program
+  outside the value-semantics subset is rejected with a reason, never quietly
+  mislowered); (2) **accept ⟹ safe** — the kernel-proven checker re-verifies the
+  ownership witness of EVERY in-profile function in one pass and ACCEPTs
+  (accept ⟹ RC-safe, by `check_sound`). This is the step-4 "continuous corpus
+  verification = the definition of parity" in its honest first form: it does NOT
+  yet claim the *completion definition* (the proven profile accepting the full
+  corpus), it establishes the *mechanism* that measures progress toward it and
+  proves the boundary is a wall, not a hole. **Today's honest coverage: 119/4195
+  functions in-profile** (the value-semantics subset); the rest are walled with a
+  per-feature `Unsupported` histogram that names the next surface to admit
+  (largest buckets: nested `call argument Call`, expression-bodied `function body
+  is not a Block`, `heap bind from Call`). Coverage is REPORTED, never gated on a
+  brittle exact count — only the two soundness invariants are hard, plus an
+  anti-collapse floor (≥1 in-profile witness must reach the checker, so a silent
+  coverage collapse to zero fails the gate).
 - **Index-bounds memory safety — a found-and-walled hole.** The ownership checker
   proves the RC properties but does NOT check list-index bounds; the renderer's
   `$list_set`/`$list_get`/`$elem_addr` did no bounds check either, so an

@@ -77,6 +77,7 @@ check:
 verify-trust:
 	proofs/check.sh
 	proofs/gate.sh
+	proofs/corpus-wall.sh
 	cargo test -p almide-mir
 
 receipt:
