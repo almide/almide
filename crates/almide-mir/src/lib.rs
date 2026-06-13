@@ -29,6 +29,7 @@ pub mod certificate;
 pub mod lower;
 pub mod render_rust;
 pub mod render_wasm;
+pub mod translation_validation;
 
 use std::collections::BTreeMap;
 
