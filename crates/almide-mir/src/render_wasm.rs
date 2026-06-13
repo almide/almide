@@ -11,6 +11,17 @@
 //! dual-renderer thesis end to end first.
 //!
 //! Heap list layout in linear memory: `[len: i32 @0][cap: i32 @4][data: i64 @8…]`.
+//!
+//! ⚠ BOOTSTRAP SHORTCUT — DO NOT GROW (see §4.1 of the architecture doc). The
+//! hand-written WAT runtime below (`$list_copy`/`$itoa_append`/`$print_list`)
+//! and the computation baked into the `Push`/`IndexSet`/`Print` MIR ops are the
+//! EXACT trap that made v0's wasm emitter a nightmare (a large hand-written wasm
+//! surface dual-maintained with native). They exist only to prove the
+//! dual-renderer path RUNS. The ideal form shrinks the hand-written wasm to a
+//! tiny, total, decision-free, spec-provable MIR-PRIMITIVE mapping, and moves
+//! all of list/string/format/RC into Almide compiled through this same path
+//! (`Push`/`IndexSet`/`Print` become `Call`s to self-hosted runtime functions).
+//! Convergence rule: never add another hand-written WAT runtime routine.
 
 use crate::{Init, MirFunction, Op, ValueId};
 use std::collections::BTreeMap;
