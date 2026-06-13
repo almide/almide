@@ -23,7 +23,7 @@
 //! (`Push`/`IndexSet`/`Print` become `Call`s to self-hosted runtime functions).
 //! Convergence rule: never add another hand-written WAT runtime routine.
 
-use crate::{Init, MirFunction, Op, ValueId};
+use crate::{CallArg, Init, MirFunction, Op, RtFn, ValueId};
 use std::collections::BTreeMap;
 
 // Fixed low-memory addresses (named — no raw literals in the emitted WAT logic).
@@ -65,15 +65,16 @@ pub fn render_wasm(func: &MirFunction) -> String {
     let mut data = String::new();
     let mut cursor = LABELS_ADDR;
     for op in &func.ops {
-        if let Op::Print { label, .. } = op {
-            if !label_off.contains_key(label) {
-                let len = label.len() as u32;
-                label_off.insert(label.clone(), (cursor, len));
-                data.push_str(&format!(
-                    "  (data (i32.const {cursor}) {:?})\n",
-                    label
-                ));
-                cursor += len;
+        if let Op::Call { args, .. } = op {
+            for a in args {
+                if let CallArg::Label(label) = a {
+                    if !label_off.contains_key(label) {
+                        let len = label.len() as u32;
+                        label_off.insert(label.clone(), (cursor, len));
+                        data.push_str(&format!("  (data (i32.const {cursor}) {:?})\n", label));
+                        cursor += len;
+                    }
+                }
             }
         }
     }
@@ -130,21 +131,8 @@ fn render_op(op: &Op, label_off: &BTreeMap<String, (u32, u32)>) -> String {
             d = local(*dst),
             s = local(*src)
         ),
-        Op::IndexSet { target, index, value } => format!(
-            "    (call $list_set (local.get {t}) (i32.const {index}) (i64.const {value}))\n",
-            t = local(*target)
-        ),
-        Op::Push { target, value } => format!(
-            "    (local.set {t} (call $list_push (local.get {t}) (i64.const {value})))\n",
-            t = local(*target)
-        ),
-        Op::Print { value, label } => {
-            let (off, len) = label_off[label];
-            format!(
-                "    (call $print_list (local.get {v}) (i32.const {off}) (i32.const {len}))\n",
-                v = local(*value)
-            )
-        }
+        // A runtime call → a wasm `call` of the (bootstrap) runtime function.
+        Op::Call { dst, func, args } => render_call(*dst, func, args, label_off),
         // No wasm needed: Drop/Consume are no-ops in the eager-copy model (no RC),
         // MakeUnique already done by the Dup copy, Const/Borrow/Pure are not used
         // by the value-semantics subset's observable path.
@@ -154,6 +142,37 @@ fn render_op(op: &Op, label_off: &BTreeMap<String, (u32, u32)>) -> String {
         | Op::Borrow { .. }
         | Op::Const { .. }
         | Op::Pure { .. } => String::new(),
+    }
+}
+
+fn render_call(
+    dst: Option<ValueId>,
+    func: &RtFn,
+    args: &[CallArg],
+    label_off: &BTreeMap<String, (u32, u32)>,
+) -> String {
+    match (func, args) {
+        (RtFn::ListSet, [CallArg::Handle(t), CallArg::Imm(idx), CallArg::Imm(val)]) => format!(
+            "    (call $list_set (local.get {t}) (i32.const {idx}) (i64.const {val}))\n",
+            t = local(*t)
+        ),
+        (RtFn::ListPush, [CallArg::Handle(t), CallArg::Imm(val)]) => {
+            // push may move the buffer → rebind the handle local (dst == target).
+            let target = dst.unwrap_or(*t);
+            format!(
+                "    (local.set {d} (call $list_push (local.get {t}) (i64.const {val})))\n",
+                d = local(target),
+                t = local(*t)
+            )
+        }
+        (RtFn::PrintList, [CallArg::Handle(v), CallArg::Label(label)]) => {
+            let (off, len) = label_off[label];
+            format!(
+                "    (call $print_list (local.get {v}) (i32.const {off}) (i32.const {len}))\n",
+                v = local(*v)
+            )
+        }
+        _ => panic!("malformed runtime call {func:?} with args {args:?}"),
     }
 }
 
@@ -314,9 +333,13 @@ mod tests {
                 Op::Alloc { dst: a, repr: heap(), init: Init::IntList(vec![1, 2, 3]) },
                 Op::Dup { dst: b, src: a },
                 Op::MakeUnique { v: a },
-                Op::IndexSet { target: a, index: 0, value: 9 },
-                Op::Print { value: a, label: "a".into() },
-                Op::Print { value: b, label: "b".into() },
+                Op::Call {
+                    dst: None,
+                    func: RtFn::ListSet,
+                    args: vec![CallArg::Handle(a), CallArg::Imm(0), CallArg::Imm(9)],
+                },
+                Op::Call { dst: None, func: RtFn::PrintList, args: vec![CallArg::Handle(a), CallArg::Label("a".into())] },
+                Op::Call { dst: None, func: RtFn::PrintList, args: vec![CallArg::Handle(b), CallArg::Label("b".into())] },
                 Op::Drop { v: b },
                 Op::Drop { v: a },
             ],
@@ -346,9 +369,13 @@ mod tests {
                 Op::Alloc { dst: a, repr: heap(), init: Init::IntList(vec![1]) },
                 Op::Dup { dst: b, src: a },
                 Op::MakeUnique { v: a },
-                Op::Push { target: a, value: 2 },
-                Op::Print { value: a, label: "a".into() },
-                Op::Print { value: b, label: "b".into() },
+                Op::Call {
+                    dst: Some(a),
+                    func: RtFn::ListPush,
+                    args: vec![CallArg::Handle(a), CallArg::Imm(2)],
+                },
+                Op::Call { dst: None, func: RtFn::PrintList, args: vec![CallArg::Handle(a), CallArg::Label("a".into())] },
+                Op::Call { dst: None, func: RtFn::PrintList, args: vec![CallArg::Handle(b), CallArg::Label("b".into())] },
                 Op::Drop { v: b },
                 Op::Drop { v: a },
             ],

@@ -142,15 +142,38 @@ pub enum Op {
     /// [`Op::Alloc`]. Keeps the op set total without a catch-all.
     Pure { dst: ValueId, uses: Vec<ValueId> },
 
-    // ── value-semantics computation (the subset the renderers run) ──
-    /// `target[index] = value` in place — after a [`Op::MakeUnique`]. Borrows
-    /// `target` (no ownership change).
-    IndexSet { target: ValueId, index: usize, value: i64 },
-    /// push `value` onto `target` in place — after a [`Op::MakeUnique`].
-    /// Borrows `target`.
-    Push { target: ValueId, value: i64 },
-    /// Observe a heap binding (`println` of its value). Borrows `value`.
-    Print { value: ValueId, label: String },
+    /// Call a (self-hosted) RUNTIME function — the boundary between the tiny MIR
+    /// PRIMITIVE set (alloc/load/store/Dup/Drop/…) the renderers hand-map, and
+    /// everything else, which is a runtime function (§4.1). The renderers emit a
+    /// call; the function's BODY is provided by the runtime (today a bootstrap
+    /// hand-written one, ultimately Almide compiled through this same path). A
+    /// renderer never re-implements a runtime operation inline — that is the
+    /// discipline that keeps the hand-written wasm surface tiny.
+    Call { dst: Option<ValueId>, func: RtFn, args: Vec<CallArg> },
+}
+
+/// A runtime function the MIR can call. An enum (not a string) so the renderer
+/// mapping is TOTAL and the runtime surface is a closed, auditable set.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RtFn {
+    /// `list[index] = value` in place (after a [`Op::MakeUnique`]).
+    ListSet,
+    /// push a value onto a list in place (after a [`Op::MakeUnique`]); the
+    /// result is rebound to `dst` (the buffer may move).
+    ListPush,
+    /// `println` a list as `label=e0,e1,…`.
+    PrintList,
+}
+
+/// An argument to a runtime [`Op::Call`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CallArg {
+    /// A heap handle (borrowed by the call — live-checked, refcount unchanged).
+    Handle(ValueId),
+    /// An immediate integer (index / value).
+    Imm(i64),
+    /// An immediate string (a print label).
+    Label(String),
 }
 
 /// A MIR function body: a flat, ownership-explicit op sequence.
@@ -255,16 +278,15 @@ pub fn verify_ownership(func: &MirFunction) -> Result<(), Vec<Violation>> {
                     }
                 }
             }
-            // The value-semantics computation ops borrow their target/value (the
-            // handle stays live, the refcount is unchanged).
-            Op::IndexSet { target, .. } | Op::Push { target, .. } => {
-                if live_object(&object_of, &rc, &dead, *target).is_none() {
-                    violations.push(violation(i, *target, ViolationKind::UseAfterFree));
-                }
-            }
-            Op::Print { value, .. } => {
-                if live_object(&object_of, &rc, &dead, *value).is_none() {
-                    violations.push(violation(i, *value, ViolationKind::UseAfterFree));
+            // A runtime call BORROWS its heap-handle args (live-checked, no
+            // refcount change). Immediate/label args carry no ownership.
+            Op::Call { args, .. } => {
+                for a in args {
+                    if let CallArg::Handle(v) = a {
+                        if live_object(&object_of, &rc, &dead, *v).is_none() {
+                            violations.push(violation(i, *v, ViolationKind::UseAfterFree));
+                        }
+                    }
                 }
             }
         }

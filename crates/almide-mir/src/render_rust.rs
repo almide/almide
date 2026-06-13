@@ -20,7 +20,7 @@
 //! aliased binding is unchanged by a mutation through its sibling) — by
 //! construction, because the one `Dup` decision became a `.clone()`.
 
-use crate::{Init, MirFunction, Op, Repr, ValueId};
+use crate::{CallArg, Init, MirFunction, Op, Repr, RtFn, ValueId};
 
 /// Render a MIR function to a runnable Rust `fn main()` source string.
 pub fn render_rust(func: &MirFunction) -> String {
@@ -68,15 +68,26 @@ fn render_op(op: &Op) -> Option<String> {
         // this handle a uniquely-owned buffer (the COW spelling).
         Op::MakeUnique { .. } => None,
         Op::Pure { dst, .. } => Some(format!("let {}: i64 = 0;", var(*dst))),
-        Op::IndexSet { target, index, value } => {
-            Some(format!("{}[{index}] = {value};", var(*target)))
+        // Runtime calls are spelled as the idiomatic Rust operation (the bootstrap
+        // runtime; ultimately these are calls to self-hosted Almide functions).
+        Op::Call { func, args, .. } => Some(render_call(func, args)),
+    }
+}
+
+fn render_call(func: &RtFn, args: &[CallArg]) -> String {
+    match (func, args) {
+        (RtFn::ListSet, [CallArg::Handle(t), CallArg::Imm(idx), CallArg::Imm(val)]) => {
+            format!("{}[{idx}] = {val};", var(*t))
         }
-        Op::Push { target, value } => Some(format!("{}.push({value});", var(*target))),
-        Op::Print { value, label } => Some(format!(
+        (RtFn::ListPush, [CallArg::Handle(t), CallArg::Imm(val)]) => {
+            format!("{}.push({val});", var(*t))
+        }
+        (RtFn::PrintList, [CallArg::Handle(v), CallArg::Label(label)]) => format!(
             "println!(\"{{}}={{}}\", {:?}, {}.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(\",\"));",
             label,
-            var(*value)
-        )),
+            var(*v)
+        ),
+        _ => panic!("malformed runtime call {func:?} with args {args:?}"),
     }
 }
 
@@ -125,9 +136,13 @@ mod tests {
                 Op::Alloc { dst: a, repr: heap(), init: Init::IntList(vec![1, 2, 3]) },
                 Op::Dup { dst: b, src: a }, // alias = clone (eager COW)
                 Op::MakeUnique { v: a },    // no-op in idiomatic Rust
-                Op::IndexSet { target: a, index: 0, value: 9 },
-                Op::Print { value: a, label: "a".into() },
-                Op::Print { value: b, label: "b".into() },
+                Op::Call {
+                    dst: None,
+                    func: RtFn::ListSet,
+                    args: vec![CallArg::Handle(a), CallArg::Imm(0), CallArg::Imm(9)],
+                },
+                Op::Call { dst: None, func: RtFn::PrintList, args: vec![CallArg::Handle(a), CallArg::Label("a".into())] },
+                Op::Call { dst: None, func: RtFn::PrintList, args: vec![CallArg::Handle(b), CallArg::Label("b".into())] },
                 Op::Drop { v: b },
                 Op::Drop { v: a },
             ],
@@ -151,9 +166,13 @@ mod tests {
                 Op::Alloc { dst: a, repr: heap(), init: Init::IntList(vec![1]) },
                 Op::Dup { dst: b, src: a },
                 Op::MakeUnique { v: a },
-                Op::Push { target: a, value: 2 },
-                Op::Print { value: a, label: "a".into() },
-                Op::Print { value: b, label: "b".into() },
+                Op::Call {
+                    dst: Some(a),
+                    func: RtFn::ListPush,
+                    args: vec![CallArg::Handle(a), CallArg::Imm(2)],
+                },
+                Op::Call { dst: None, func: RtFn::PrintList, args: vec![CallArg::Handle(a), CallArg::Label("a".into())] },
+                Op::Call { dst: None, func: RtFn::PrintList, args: vec![CallArg::Handle(b), CallArg::Label("b".into())] },
                 Op::Drop { v: b },
                 Op::Drop { v: a },
             ],
