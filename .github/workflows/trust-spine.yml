@@ -1,0 +1,89 @@
+name: Trust Spine (v1)
+
+# Enforce the v1 flight-grade trust spine in CI (weekly indicator ②):
+#   - the Rocq/Coq proof spine compiles, is independently re-checked (coqchk),
+#     and is axiom-clean (Print Assumptions = "Closed under the global context");
+#   - the kernel-proven checker is extracted and re-verifies the per-build
+#     witnesses (the PCC gate), INCLUDING a real .almd taken through the frontend;
+#   - almide-mir's own tests pass.
+# This is `make verify-trust` run on a clean machine — the third-party "make
+# verify". A red run blocks the claim; the trust spine can no longer silently
+# regress.
+
+on:
+  push:
+    branches: [v1-trust-ci, v1-mir-design]
+    paths:
+      - 'proofs/**'
+      - 'crates/almide-mir/**'
+      - 'Makefile'
+      - '.github/workflows/trust-spine.yml'
+  pull_request:
+    branches: [v1-mir-design]
+    paths:
+      - 'proofs/**'
+      - 'crates/almide-mir/**'
+      - 'Makefile'
+      - '.github/workflows/trust-spine.yml'
+  workflow_dispatch:
+
+# A burst of pushes to the same ref re-runs the heavy Rocq build; cancel the
+# superseded run (the rate-limit lesson from ci.yml).
+concurrency:
+  group: trust-spine-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  trust-spine:
+    # Skip on the Codeberg/Forgejo mirror (no ocaml/setup-ocaml there); GitHub
+    # Actions is the capable CI.
+    if: github.server_url == 'https://github.com'
+    name: Coq proofs + axiom audit + PCC gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      # Rust: pinned to the version the trust spine is developed against, so the
+      # CI re-derivation matches the local one (TRUSTED_BASE.md reproducibility).
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.95.0"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # almide-mir's example pulls in the frontend (dev-dep); cache it.
+          workspaces: "."
+
+      # OCaml + opam, matching the local TRUSTED_BASE pin (OCaml 5.4.1). The
+      # opam switch is cached by the action, so only the first run pays the
+      # Rocq build cost.
+      - name: Set up OCaml + opam
+        uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: "5.4.1"
+
+      - name: Install Rocq 9.1.1 (the proof toolchain)
+        run: opam install -y rocq-prover.9.1.1
+
+      # One informative diagnostic step: print every binary the rest of the job
+      # depends on, so a missing coqc/coqchk shim is visible at a glance.
+      - name: Toolchain diagnostic
+        run: |
+          eval $(opam env)
+          echo "rocq:    $(command -v rocq || echo MISSING)"
+          echo "coqc:    $(command -v coqc || echo MISSING)"
+          echo "coqchk:  $(command -v coqchk || echo MISSING)"
+          echo "ocamlopt:$(command -v ocamlopt || echo MISSING)"
+          coqc --version || true
+          coqchk --version || true
+          ocamlopt --version || true
+          cargo --version
+
+      - name: make verify-trust (proof spine + axiom audit + PCC gate + tests)
+        run: |
+          eval $(opam env)
+          make verify-trust
+
+      - name: make receipt (the honest claim bundle)
+        run: |
+          eval $(opam env)
+          make receipt
