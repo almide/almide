@@ -1,12 +1,19 @@
 #!/usr/bin/env bash
-# END-TO-END FLIGHT-GRADE GATE (critical-path brick 3): the UNTRUSTED compiler
+# WITNESS-VERIFICATION GATE (critical-path brick 3): the UNTRUSTED producer
 # (almide-mir) emits a per-build witness for each flight-grade property; the
-# KERNEL-PROVEN checker re-verifies it. accept ⟹ the property holds on the
-# emitted bytes — by the Coq soundness theorems:
-#   ownership  →  check_all_sound        (no double-free, no leak)
+# KERNEL-PROVEN checker re-verifies it. accept ⟹ the property holds OF THE
+# WITNESSED MIR — by the Coq soundness theorems:
+#   ownership  →  check_all_sound        (RC-balanced: no double-free, no leak)
 #   names      →  check_names_cert_sound (no dangling MIR reference)
 #   caps       →  check_caps_cert_sound  (no undeclared host capability)
-# The compiler may be buggy; if its witness is wrong, the proven checker rejects.
+# The producer may be buggy; if its witness is wrong, the proven checker rejects.
+#
+# SCOPE (honest — see proofs/TRUSTED_BASE.md): the witnesses here are projected
+# from REPRESENTATIVE MIR shapes (examples/emit_cert.rs), NOT yet from a real
+# .almd → MIR compile (the lowering is not wired to this gate, #29). And the
+# witness ⟹ emitted-wasm-bytes link is the §3 renderer contract (trusted), NOT
+# the proven checker. So this gate certifies the checker + witness-projection
+# round-trip — it does not yet gate the safety of any compiled program.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
