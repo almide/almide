@@ -97,14 +97,14 @@ pub fn lower_function(func: &IrFunction) -> Result<MirFunction, LowerError> {
 /// is the thin wrapper over a whole [`IrFunction`]).
 pub fn lower_body(body: &IrExpr, name: &str) -> Result<MirFunction, LowerError> {
     let mut ctx = LowerCtx::default();
-    let (stmts, tail) = match &body.kind {
+    // An expression-bodied function (`fn f() = expr`) is the SAME value-semantics
+    // subset as a block body — it is just an empty statement list whose tail IS
+    // the expression. The tail lowering walls anything outside the subset, so
+    // wrapping here never weakens the boundary (control-flow / call bodies still
+    // become an explicit Unsupported in `lower_tail`).
+    let (stmts, tail): (&[IrStmt], Option<&IrExpr>) = match &body.kind {
         IrExprKind::Block { stmts, expr } => (stmts, expr.as_deref()),
-        other => {
-            return Err(LowerError::Unsupported(format!(
-                "function body is not a Block: {}",
-                kind_name(other)
-            )))
-        }
+        _ => (&[], Some(body)),
     };
 
     for stmt in stmts {
@@ -266,8 +266,27 @@ impl LowerCtx {
                     self.live_heap_handles.retain(|h| *h != v); // moved out, not dropped
                     Ok(Some(v))
                 }
+                // A fresh heap literal returned directly (`fn f() = [1, 2, 3]`):
+                // allocate it and move it out. It is NOT added to
+                // `live_heap_handles`, so it is the return value (consumed at the
+                // boundary) and never also dropped. Cert: alloc(i) + move-out(m) =
+                // balanced — and the runtime correspondence is exact (a real
+                // Alloc, a real move-out), so the gate fully covers it.
+                IrExprKind::List { .. }
+                | IrExprKind::MapLiteral { .. }
+                | IrExprKind::EmptyMap
+                | IrExprKind::Record { .. }
+                | IrExprKind::Tuple { .. }
+                | IrExprKind::LitStr { .. }
+                | IrExprKind::StringInterp { .. } => {
+                    let dst = self.fresh_value();
+                    let repr = repr_of(&tail.ty)?;
+                    let init = alloc_init(tail);
+                    self.ops.push(Op::Alloc { dst, repr, init });
+                    Ok(Some(dst))
+                }
                 other => Err(LowerError::Unsupported(format!(
-                    "heap move-out from {} (only a bound var) not in this brick",
+                    "heap move-out from {} (only a bound var or fresh literal) not in this brick",
                     kind_name(other)
                 ))),
             };
