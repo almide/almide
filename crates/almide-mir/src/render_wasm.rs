@@ -76,6 +76,13 @@ const ASCII_EQUALS: u32 = 61;
 const ASCII_COMMA: u32 = 44;
 const ASCII_NEWLINE: u32 = 10;
 
+/// The line buffer for printing lives in `[SCRATCH_ADDR, HEAP_BASE)`; one element
+/// appends at most a separator comma plus the digits of a u64 (≤ 20). The print
+/// loop traps if appending the next element would cross `HEAP_BASE` (the buffer
+/// end), so a very long list cannot overflow the line buffer into the heap.
+const MAX_I64_DIGITS: u32 = 20; // a u64 is at most 20 decimal digits
+const MAX_ELEM_PRINT_BYTES: u32 = 1 + MAX_I64_DIGITS; // comma + digits
+
 /// Render a MIR function to a runnable WAT module string.
 pub fn render_wasm(func: &MirFunction) -> String {
     // Heap handles (Alloc/Dup dsts) become i32 list-pointer locals.
@@ -521,6 +528,12 @@ fn preamble() -> String {
     (local.set $i (i32.const 0))
     (block $eldone (loop $elloop
       (br_if $eldone (i32.ge_s (local.get $i) (local.get $len)))
+      ;; SAFETY WALL: appending an element writes up to a comma + 20 digits; if
+      ;; that would cross HEAP_BASE (the line buffer's end), trap rather than
+      ;; overflow the buffer into the heap (the print-buffer-overflow gate).
+      (if (i32.gt_u (i32.add (local.get $cur) (i32.const {MAX_ELEM_PRINT_BYTES}))
+                    (i32.const {HEAP_BASE}))
+        (then (unreachable)))
       (if (i32.gt_s (local.get $i) (i32.const 0))
         (then
           (i32.store8 (local.get $cur) (i32.const {ASCII_COMMA}))

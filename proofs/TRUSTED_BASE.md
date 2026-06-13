@@ -91,8 +91,12 @@ The receipt's claims are scoped to exactly this:
   on `idx < 0 ∨ idx ≥ cap`, so every element access is bounds-checked and OOB is a
   controlled halt, never corruption (verified on wasmtime: OOB traps, in-bounds does
   not; the value-semantics output is byte-unchanged — all real accesses are
-  in-bounds). The deeper fix — the checker REJECTING OOB statically (a wall at check
-  time, not run time) — is a later brick; today the runtime trap is the wall.
+  in-bounds). The SAME audit closed a second unbounded-write gap: `$print_list`
+  built the output line in a fixed buffer `[SCRATCH_ADDR, HEAP_BASE)` with no bound,
+  so a very long list would overflow the line into the heap — it now traps before
+  appending an element that would cross `HEAP_BASE` (the print-buffer wall). The
+  deeper fix — the checker REJECTING OOB statically (a wall at check time, not run
+  time) — is a later brick; today the runtime trap is the wall.
 - **The wasm renderer is in the RC regime (A1.1b): it emits a release per drop.**
   A `Drop` now renders as `call $rc_dec`, decrementing the refcount cell (laid at
   heap offset 0 by the A1.1a relayout = `RuntimeModel.RC_OFFSET`) to 0 — so the
