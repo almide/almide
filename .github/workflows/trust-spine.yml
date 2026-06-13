@@ -18,7 +18,7 @@ name: Trust Spine (v1)
 
 on:
   push:
-    branches: [v1-trust-ci, v1-mir-design]
+    branches: [v1-mir-design]
     paths:
       - 'proofs/**'
       - 'crates/almide-mir/**'
