@@ -1,42 +1,44 @@
 //! Translation validation V — the auditor's "you proved a MODEL; does the REAL
 //! wasm artifact correspond?" answered per build (tier-1 layer 6).
 //!
-//! The proof `proofs/ALS.v::eager_copy_refines_safety` establishes: an ownership
-//! RC trace with NO decrement can never double-free. V makes that proof's
-//! PRECONDITION a checked fact about the EMITTED artifact: it scans the actual
-//! emitted wasm and confirms it contains no refcount-decrement op. So the C-SAFE
-//! safety core (no double-free / use-after-free) holds for the REAL bytes — not
-//! merely for a model — and it is re-established on every build.
+//! The renderer is now in the RC regime (A1.1b): a `Drop` emits `call $rc_dec`,
+//! so the SAFETY basis is `proofs/RuntimeModel.v::balanced_cert_no_memory_fault`
+//! — an ACCEPTED (balanced) certificate has no double-free in the memory machine
+//! — together with `balanced_cert_frees_in_memory` — its cell ends FREED (rc 0).
+//! V makes that proof's PRECONDITION a checked fact about the EMITTED artifact:
+//! the bytes realize EXACTLY the certified release trace (one `rc_dec` per witness
+//! drop, and every op's instruction present). So the C-SAFE safety core holds for
+//! the REAL bytes — not merely for a model — re-established on every build, with
+//! the `$rc_dec` runtime sentinel (it traps on an already-0 cell) as the
+//! defense-in-depth backstop.
 //!
-//! Scope (honest, per `proofs/TRUSTED_BASE.md`): the eager-copy renderer is
-//! Dec-free, so this V is satisfied today and certifies no-double-free. It does
-//! NOT yet certify leak-freedom (eager-copy leaks) nor the full RC-trace
-//! correspondence (emitted `rc_inc`/`rc_dec` == the certificate) — those arrive
-//! with the real-RC renderer. V is also the GATE that keeps it honest: if a
-//! future renderer emits a decrement without a matching certified trace, this
-//! check fails rather than silently certifying an unproven artifact.
+//! Scope (honest, per `proofs/TRUSTED_BASE.md`): V binds the RELEASES (drops ↔
+//! `rc_dec`) and each op's pattern. It does NOT yet certify the SHARING trace
+//! (`rc_inc` for aliases — the renderer still eager-copies, A1.3) nor PHYSICAL
+//! reclamation (a free-list, A1.2); neither is a safety gap. V is also the GATE
+//! that keeps it honest: a renderer that frees FEWER times than the certificate
+//! authorizes (a leak), or emits an un-patterned op, fails V rather than silently
+//! certifying an unproven artifact.
 
-/// The proven precondition, checked on the real artifact: does the emitted wasm
-/// avoid every refcount decrement? If so, `eager_copy_refines_safety` applies
-/// and the artifact cannot double-free.
-pub fn artifact_is_dec_free(wat: &str) -> bool {
-    !wat.contains("rc_dec")
-}
-
-/// V for the C-SAFE safety core: validate that the emitted artifact refines the
-/// no-double-free property the proof guarantees. (Today this is exactly the
-/// Dec-free check; it is named separately so the call sites read as "validate
-/// safety", and so future renderers extend it without changing callers.)
-pub fn validate_safety(wat: &str) -> bool {
-    artifact_is_dec_free(wat)
+/// V for the C-SAFE safety core, RC regime: validate that the emitted artifact
+/// realizes EXACTLY the certified release trace — every op's instruction present
+/// AND one `call $rc_dec` per witness drop. If so, the accepted (balanced)
+/// certificate's `balanced_cert_no_memory_fault` (no double-free) and
+/// `balanced_cert_frees_in_memory` (the cell ends at 0) transfer to the real
+/// bytes. (The `$rc_dec` sentinel — trap on an already-0 cell — is the runtime
+/// backstop.) This IS `validate_translation_perceus`; it is named separately so
+/// call sites read as "validate safety."
+pub fn validate_safety(wat: &str, mir: &crate::MirFunction) -> bool {
+    validate_translation_perceus(wat, mir)
 }
 
 /// The op → required-wasm-instruction-pattern TABLE — the formal byte-binding
 /// object (certificate-format-v1 §4 / G1.4): each MIR op is bound to the wasm
-/// instruction the renderer must emit for it. `None` = the eager-copy renderer
-/// emits NO instruction (Drop/Consume/MakeUnique/… are no-ops — the very source
-/// of the Dec-free safety property). Patterns are `call $…` / arithmetic ops, so
-/// they match an actual emitted CALL, never a runtime-preamble `func $…`
+/// instruction the renderer must emit for it. A `Drop` is bound to `call $rc_dec`
+/// (the release). `None` = the renderer emits NO instruction for it (Consume is a
+/// move-out transfer — no free here; MakeUnique is satisfied by the eager copy;
+/// opaque alloc / not-yet-rendered ops). Patterns are `call $…` / arithmetic ops,
+/// so they match an actual emitted CALL, never a runtime-preamble `func $…`
 /// definition.
 ///
 /// NOTE (honest scope): this checks PRESENCE of each op's pattern (necessary —
@@ -57,10 +59,13 @@ pub fn wasm_pattern(op: &crate::Op) -> Option<String> {
         Op::IntBinOp { op: IntOp::Add, .. } => "i64.add".into(),
         Op::IntBinOp { op: IntOp::Sub, .. } => "i64.sub".into(),
         Op::IntBinOp { op: IntOp::Mul, .. } => "i64.mul".into(),
-        // No emitted instruction (eager no-ops, opaque alloc, not-yet-rendered ops).
+        // A release decrements the refcount cell — realized by `call $rc_dec`.
+        Op::Drop { .. } => "call $rc_dec".into(),
+        // No emitted instruction: Consume MOVES the reference out (no free here),
+        // MakeUnique is satisfied by the eager copy, opaque alloc / not-yet-
+        // rendered ops emit nothing.
         Op::Alloc { .. }
         | Op::Const { .. }
-        | Op::Drop { .. }
         | Op::Consume { .. }
         | Op::Borrow { .. }
         | Op::MakeUnique { .. }
@@ -69,14 +74,12 @@ pub fn wasm_pattern(op: &crate::Op) -> Option<String> {
     })
 }
 
-/// V, table-driven: the emitted wasm REALIZES the MIR iff (1) every op's required
-/// instruction pattern is present, and (2) no refcount-decrement appears (the
-/// eager-mode safety precondition `eager_copy_refines_safety`). This is `R(M,w)`
-/// for the eager fragment — a strict strengthening of `validate_safety` from
-/// "no rc_dec" to "each op realized AND no rc_dec".
+/// V, table-driven: the emitted wasm REALIZES each MIR op iff every op's required
+/// instruction pattern is present (a `Drop`'s pattern is `call $rc_dec`). This is
+/// the PRESENCE half of `R(M,w)`; `validate_translation_perceus` adds the leak-
+/// freedom COUNT (one release per drop, not one for many).
 pub fn validate_translation(wat: &str, mir: &crate::MirFunction) -> bool {
-    validate_safety(wat)
-        && mir.ops.iter().all(|op| wasm_pattern(op).is_none_or(|p| wat.contains(&p)))
+    mir.ops.iter().all(|op| wasm_pattern(op).is_none_or(|p| wat.contains(&p)))
 }
 
 /// The DROP ops — each FREES one reference; its realization in the emitted bytes
@@ -86,14 +89,13 @@ fn drop_count(mir: &crate::MirFunction) -> usize {
     mir.ops.iter().filter(|op| matches!(op, crate::Op::Drop { .. })).count()
 }
 
-/// PERCEUS-mode V — the binding that begins CLOSING the leak-freedom seam: the
-/// emitted wasm must REALIZE each witness drop with a `call $rc_dec`, so the
-/// binary actually FREES. The eager-copy renderer FAILS this (it has drops in
-/// the witness but emits no `rc_dec`), so this V FLAGS the leaking binary: the
-/// seam that was open ("the leak-freedom proof is about a model the emitter does
-/// not realize") is now DETECTABLE per build. The real-RC renderer that emits the
-/// `rc_dec` is the producer this rule specifies (the next slice); its memory
-/// effect is already proven to free (`RuntimeModel.balanced_cert_frees_in_memory`).
+/// PERCEUS-mode V — the renderer's leak-freedom + safety gate (the PRODUCTION
+/// side of the seam, A1.1b): the emitted wasm must REALIZE each op AND match each
+/// witness drop with a `call $rc_dec`, so the binary actually FREES (cell → 0,
+/// `RuntimeModel.balanced_cert_frees_in_memory`) and frees no FEWER times than the
+/// certificate authorizes. The renderer now SATISFIES this (one `rc_dec` per
+/// drop); a renderer that emitted one `rc_dec` for several drops (a leak), or
+/// dropped an op, FAILS here. The `$rc_dec` sentinel traps a double-free at run.
 pub fn validate_translation_perceus(wat: &str, mir: &crate::MirFunction) -> bool {
     let positives = mir.ops.iter().all(|op| wasm_pattern(op).is_none_or(|p| wat.contains(&p)));
     let rc_decs = wat.matches("call $rc_dec").count();
@@ -111,10 +113,10 @@ mod tests {
     }
 
     #[test]
-    fn emitted_wasm_passes_safety_validation() {
-        // The real emitted artifact for a value-semantics program is Dec-free, so
-        // by ALS.eager_copy_refines_safety it cannot double-free — V certifies
-        // the C-SAFE safety core on the ACTUAL bytes.
+    fn emitted_wasm_realizes_the_release_trace() {
+        // The RC-regime safety gate: the emitted bytes realize EXACTLY the
+        // certified release trace — one `rc_dec` per drop — so the accepted cert's
+        // balanced_cert_no_memory_fault / _frees_in_memory transfer to the artifact.
         let (a, b) = (ValueId(0), ValueId(1));
         let mir = MirFunction {
             name: "main".into(),
@@ -128,7 +130,9 @@ mod tests {
             ..Default::default()
         };
         let wat = render_wasm(&mir);
-        assert!(validate_safety(&wat), "emitted artifact must be Dec-free (safety core)");
+        assert!(validate_safety(&wat, &mir), "artifact must realize the certified releases");
+        // Two drops → two releases on the real bytes (no leak, no over-free).
+        assert_eq!(wat.matches("call $rc_dec").count(), 2);
     }
 
     #[test]
@@ -147,19 +151,21 @@ mod tests {
             ..Default::default()
         };
         let wat = render_wasm(&mir);
-        // Each op's table pattern is present AND the artifact is Dec-free.
+        // Each op's table pattern is present (incl. `call $rc_dec` for the drop).
         assert!(validate_translation(&wat, &mir));
         assert!(wat.contains("call $list_new") && wat.contains("call $print_int"));
+        assert!(wat.contains("call $rc_dec"), "the drop is realized as a release");
         // Non-vacuous: a renderer that DROPPED the print fails V (the table catches
-        // an unrealized op — stronger than the bare Dec-free scan).
+        // an unrealized op).
         let stripped = wat.replace("call $print_int", "nop");
         assert!(!validate_translation(&stripped, &mir), "an unrealized op must fail V");
     }
 
     #[test]
-    fn perceus_v_detects_the_eager_leak() {
-        // The seam-closure first slice: the perceus-mode V binds each witness DROP
-        // to a `call $rc_dec` byte — so it CATCHES that the eager binary leaks.
+    fn perceus_v_passes_on_realized_releases_and_flags_a_leak() {
+        // A1.1b production side: the renderer is no longer eager — it emits a
+        // release per drop, so its output PASSES perceus V. The gate still CATCHES
+        // a leaking artifact: strip the releases and V flags the drops-without-dec.
         let (a, b) = (ValueId(0), ValueId(1));
         let mir = MirFunction {
             name: "main".into(),
@@ -172,26 +178,38 @@ mod tests {
             ..Default::default()
         };
         let wat = render_wasm(&mir);
-        // The eager renderer is SAFE (Dec-free, no double-free) ...
-        assert!(validate_translation(&wat, &mir));
-        // ... but it LEAKS: 2 drops in the witness, 0 `rc_dec` in the bytes. The
-        // perceus V flags it — the open leak-freedom seam is now detectable.
+        // The real renderer output realizes both releases → passes (safe + freed).
+        assert!(validate_translation_perceus(&wat, &mir));
+        // A hypothetical leaking renderer (releases stripped) → V flags it.
+        let leaked = wat.replace("call $rc_dec", "nop");
         assert!(
-            !validate_translation_perceus(&wat, &mir),
-            "the eager binary leaks; perceus V must flag the unrealized drops"
+            !validate_translation_perceus(&leaked, &mir),
+            "an artifact that drops in the witness but frees fewer times must fail V"
         );
-        // A real-RC artifact (an `rc_dec` per drop) realizes the releases → passes.
-        let real_rc = format!(
-            "{wat}\n    (call $rc_dec (local.get 0))\n    (call $rc_dec (local.get 1))"
-        );
-        assert!(validate_translation_perceus(&real_rc, &mir));
     }
 
     #[test]
-    fn a_decrement_would_fail_validation() {
-        // The gate is non-vacuous: an artifact that decrements without a certified
-        // trace is rejected, not silently certified.
-        assert!(!validate_safety("(func $f (call $rc_dec (local.get 0)))"));
-        assert!(validate_safety("(func $f (call $rc_inc (local.get 0)))"));
+    fn under_freeing_fails_validation() {
+        // In the RC regime a decrement is EXPECTED; the gate is non-vacuous the
+        // other way — an artifact that frees FEWER times than the certificate's
+        // drops (a leak) is rejected, not silently certified.
+        let (a, b) = (ValueId(0), ValueId(1));
+        let mir = MirFunction {
+            name: "main".into(),
+            ops: vec![
+                Op::Alloc { dst: a, repr: heap(), init: Init::IntList(vec![1]) },
+                Op::Dup { dst: b, src: a },
+                Op::Drop { v: b },
+                Op::Drop { v: a },
+            ],
+            ..Default::default()
+        };
+        let wat = render_wasm(&mir);
+        // Two drops but only one release in the bytes → leak → fail.
+        let under = wat.replacen("call $rc_dec", "nop", 1);
+        assert!(
+            !validate_translation_perceus(&under, &mir),
+            "under-freeing (a leak) must fail V"
+        );
     }
 }

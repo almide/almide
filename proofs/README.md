@@ -33,12 +33,13 @@ compiler with qualified use in safety-critical settings).
 
 - **brick 4 start: `ALS.v` — ALS-as-normative + first honest translation-validation.**
   `exec` is named the NORMATIVE ownership semantics; `eager_copy_refines_safety`
-  proves what the CURRENT eager-copy wasm renderer refines TODAY — it emits no
-  `__rc_dec`, so it cannot double-free (the C-SAFE safety core holds for the real
-  artifact) — and `dec_free_leaks` records honestly what it does NOT yet satisfy
-  (leak-freedom; deferred to the real-RC renderer). Kernel-checked, axiom-clean,
-  coqchk-confirmed. (Full V = emitted wasm BYTES ⊒ ALS needs a wasm model in
-  Coq — a later brick.)
+  proves that an increment-only (eager) trace cannot double-free, and
+  `dec_free_leaks` records that such a trace does NOT free (it emits no release).
+  The wasm renderer has since moved to the RC regime (A1.1b: `Drop → call
+  $rc_dec`), realizing cell-level leak-freedom (`balanced_cert_frees_in_memory`)
+  with safety basis `balanced_cert_no_memory_fault`; the eager theorems remain the
+  dual-oracle baseline. Kernel-checked, axiom-clean, coqchk-confirmed. (Full V =
+  emitted wasm BYTES ⊒ ALS needs a wasm model in Coq — a later brick.)
 
 - **brick 2: the proven checker RUNS on real bytes.** `Extract.v` extracts
   the kernel-proven `check` to OCaml; `driver.ml` + `build-checker.sh` link it

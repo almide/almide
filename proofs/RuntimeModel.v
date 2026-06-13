@@ -108,9 +108,10 @@ Qed.
 
 (* LEAK-FREEDOM, at the memory level. An accepted certificate (balanced from
    rc 0) leaves the runtime cell at 0 — the object's last reference is released,
-   so the cell is FREED, not leaked. This is the property the eager-copy renderer
-   does NOT achieve (it emits no release, so its memory leaks); a release-emitting
-   (perceus / real-RC) renderer realizes exactly this. The witness's "ends at 0"
+   so the cell is FREED, not leaked. The RC-regime wasm renderer (A1.1b) realizes
+   exactly this: a `Drop` emits `call $rc_dec`, bringing the cell to 0. (The eager
+   fragment did NOT — it emitted no release; eager_copy_refines_safety remains the
+   dual-oracle baseline.) The witness's "ends at 0"
    (the leak-free half of `check`) is thereby bound to real freed memory. *)
 Corollary balanced_cert_frees_in_memory :
   forall ops m base m',

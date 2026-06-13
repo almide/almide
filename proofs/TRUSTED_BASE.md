@@ -61,38 +61,38 @@ The receipt's claims are scoped to exactly this:
   axiom-clean. What remains is DEPTH (the byte-binding ISA layer / a real-RC
   renderer) and BREADTH (lowering beyond the subset: control flow, closures,
   stdlib) — not new properties on the subset.
-- **The current wasm renderer is eager-copy**: proven memory-SAFE
-  (`eager_copy_refines_safety` — it emits no `__rc_dec`, so it cannot
-  double-free) but it **leaks** (it emits no release). Leak-freedom is now PROVEN
-  at the memory-model level — `RuntimeModel.balanced_cert_frees_in_memory`: an
-  accepted certificate leaves the runtime cell FREED (rc 0). That property is
-  realized by a release-emitting (perceus / real-RC) renderer, NOT by the current
-  eager-copy one. So `C-SAFE`'s no-double-free is claimable for the eager-copy
-  artifact today; leak-freedom is proven of the MODEL and awaits the real-RC
-  renderer to realize it on the artifact. SEAM-CLOSURE (first slice):
-  `validate_translation_perceus` now BINDS each witness drop to a `call $rc_dec`
-  byte — so the eager binary's leak is DETECTABLE per build (it has drops in the
-  witness but no `rc_dec` in the bytes; the perceus V flags it). The remaining
-  producer — the real-RC renderer that EMITS the `rc_dec` (refcount header +
-  free-list, so the binary actually frees) — is the next slice; its memory effect
-  is already proven to free (`balanced_cert_frees_in_memory`). PRODUCER, slice 1
-  (A1.1a, relayout): the refcount HEADER half is now laid — the wasm renderer
-  places the rc cell PHYSICALLY at heap offset 0 (= `RuntimeModel.RC_OFFSET`),
-  initialized to 1 (the `Alloc` +1), so the model's `read_rc m base` cell has a
-  concrete byte home. This is observable-INVARIANT and stays Dec-free (no `rc_dec`
-  emitted yet), so the `eager_copy_refines_safety` regime is fully preserved;
-  emitting the decrement (`Drop → call $rc_dec`, which transitions the safety
-  basis to `balanced_cert_no_memory_fault`) and the free-list are the next slices.
+- **The wasm renderer is in the RC regime (A1.1b): it emits a release per drop.**
+  A `Drop` now renders as `call $rc_dec`, decrementing the refcount cell (laid at
+  heap offset 0 by the A1.1a relayout = `RuntimeModel.RC_OFFSET`) to 0 — so the
+  binary actually FREES at the cell level. The safety basis moved accordingly:
+  no longer `eager_copy_refines_safety` (the artifact is no longer Dec-free) but
+  `RuntimeModel.balanced_cert_no_memory_fault` — an accepted (balanced)
+  certificate has no double-free in the memory machine — together with
+  `balanced_cert_frees_in_memory` — its cell ends FREED (rc 0). Both are already
+  kernel-proven and axiom-clean (this slice is pure proof-REUSE: no `.v` changed).
+  The per-build `validate_translation_perceus` V binds each witness drop to a
+  `call $rc_dec` byte (one release per drop, no fewer), so the proof transfers to
+  the REAL bytes; and the `$rc_dec` runtime SENTINEL traps a double-free at run
+  (`unreachable` on an already-0 cell — verified firing on wasmtime). So `C-SAFE`'s
+  no-double-free AND cell-level leak-freedom are now claimable for the EMITTED
+  artifact, not just the model. HONEST scope of what is NOT yet done: (1) PHYSICAL
+  reclamation — there is no free-list yet, so a freed cell's bytes are not reused
+  and bump memory still grows under churn (A1.2; the proven property is the
+  cell-level free, not bounded physical memory); (2) SHARING — `Dup` still
+  eager-copies (no `rc_inc`/cow), so the `rc_inc` aliasing trace is not yet
+  realized (A1.3, a memory-efficiency slice, not a safety gap).
 - **Byte-binding is partial.** The op→wasm-instruction TABLE is a formal Coq
   object (`Translation.v`) and the runtime heap is modeled as a memory state
   machine whose rc cell provably tracks the abstract refcount
   (`RuntimeModel.mrun_tracks_exec`); `validate_translation` re-checks per build
-  that each op's pattern is emitted and the bytes are Dec-free. The model's
+  that each op's pattern is emitted (a drop's is `call $rc_dec`) and
+  `validate_translation_perceus` that one release is emitted per drop. The model's
   `RC_OFFSET = 0` now COINCIDES with the renderer's physical rc-cell offset (the
-  A1.1a relayout) — model and bytes agree on WHERE the cell lives. NOT yet done:
-  the WasmCert-Coq ISA layer binding the memory machine to the actual wasm bytes
-  (that `call $rc_dec` executes precisely the cell write) — the last mile of the
-  bytes-refine-ALS chain.
+  A1.1a relayout) and `call $rc_dec` writes that cell — model and bytes agree on
+  WHERE the cell lives and WHAT the release does. NOT yet done: the WasmCert-Coq
+  ISA layer binding the memory machine to the actual wasm bytes (that `call
+  $rc_dec` executes PRECISELY the cell write — today modeled and sentinel-guarded
+  at runtime, but not yet ISA-proven) — the last mile of the bytes-refine-ALS chain.
 - **One real `.almd` now flows end-to-end** (`proofs/fixtures/return_list.almd`
   → the actual frontend → MIR → proven checker, for ownership + names — weekly
   indicator ① 0→1). The lowering covers only the value-semantics subset (heap
