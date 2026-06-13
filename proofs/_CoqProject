@@ -3,3 +3,4 @@ OwnershipChecker.v
 ALS.v
 NameTotality.v
 TypeConcretization.v
+CapabilityBound.v

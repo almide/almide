@@ -22,7 +22,7 @@ Trusted base & known-limitations: proofs/TRUSTED_BASE.md.
 
 | claim | meaning | status | evidence | scope (honest) |
 |---|---|---|---|---|
-| C-PROVEN | the checkers' soundness rests only on the Coq kernel | ${PROOF} | proofs/check.sh: 6 theorems (RC balance + name totality + type concretization), \`Print Assumptions\` = Closed under the global context, coqchk re-checked | full (for the proven theorems) |
+| C-PROVEN | the checkers' soundness rests only on the Coq kernel | ${PROOF} | proofs/check.sh: 7 theorems (RC balance + name totality + type concretization + capability bound), \`Print Assumptions\` = Closed under the global context, coqchk re-checked | full (for the proven theorems) |
 | C-SAFE   | no double-free / use-after-free; no dangling reference | ${GATE} / ${VTEST} | (1) the ownership certificate is re-verified by the kernel-proven \`check_cert\` (gate.sh) + the EMITTED wasm is per-build validated Dec-free → safe by \`eager_copy_refines_safety\` (V); (2) name totality \`check_names_sound\` — every used MIR value is defined | **ownership fragment, eager-copy**; leak-freedom NOT yet (eager-copy leaks) |
 | C-FAITHFUL | the emitted artifact refines the ALS model | partial | \`eager_copy_refines_safety\` (ALS.v) + V on real bytes | safety core only; full V (emitted bytes ⊒ ALS value semantics) is the brick-4 body |
 | C-REPRO  | byte-reproducible across hosts | inherited | the v0 wasm_cross byte gate + check-host-determinism.sh (dual oracle) | the differential oracle until v1 parity |
