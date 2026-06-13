@@ -221,11 +221,33 @@ Call ...
 
 ---
 
-## 8. 次の一手(実装着手時)
+## 8. 実装状況と次の一手
 
-段1(Repr-on-values)が最小リスク・最大前提。着手は:
-1. `AllTypesConcrete` 前倒し + compile-order 非対称解消(§4)の PoC — これ単体で挙動不変・byte 一致を確認。
-2. MIR 値モデル(`Repr` enum + LayoutId)を almide-ir に追加、mono 後に Repr を stamp。
-3. 段2 の専用 compound-drop fixture(Map-entry/closure-env/nested-Named)を**先に** spec/wasm_cross に追加(赤を見てから直す)。
+### 8.0 段0(完了): 意味法則 property-law oracle ✅
 
-実装は別セッション/ワークフローで。本設計のレビュー後に着手。
+§5.1 の独立 oracle を**手術前に**敷設・検証・コミット済み(`tests/semantic_laws_test.rs`)。
+generator が値意味論の正解を plain Rust で独立計算し、同じ操作の Almide を native+wasm で実行、
+**両方が独立モデルと一致するか**を検査(`native==expected AND wasm==expected` — `native==wasm`
+より strictly stronger で unify 後も生きる)。モデル自体の正しさは alias_cow(C-033)既知形で
+実コンパイラと突き合わせて self-check。現コンパイラに対し 32+ ケース・3テスト全緑。`ALMIDE_SEMLAW_CASES`
+で深掘り可。これが段1以降の全所有権変更を上から監視する網。
+
+### 8.1 段1(Repr-on-values)の grounding(実測)
+
+- **`Repr` の種は既存**: `crates/almide-ir/src/wasm_repr.rs` の `WasmRepr{I32/I64/F64/Void}` が
+  mono の ABI 互換判定に使われている。ただし**粗い4分類で layout を持たない** — §2.1 の
+  `Repr{Scalar{width}/Ptr{LayoutId}/Boxed{LayoutId}}` は richer。
+- **Repr は crate 跨ぎ**: enum 本体(scalar width)は almide-ir に置けるが、`LayoutId` が指す
+  `LayoutRegistry`(`emit_wasm/engine/layout.rs:77`)と box 性(`pass_box_deref.rs:132
+  find_recursive_enums)は codegen 側。→ 段1 は almide-ir(Repr 型)+ codegen(layout 解決・
+  stamp)に跨る一体変更。LayoutRegistry の所属(codegen→共有クレートへ昇格?)が最初の設計判断。
+- **再設計衝突なし**: `codegen-ideal-form.md` は **done 済**(commit 8ea2d234、crates/CLAUDE.md の
+  active/ 参照は stale)。var-table/dispatch 統一も done。MIR 作業は既存統一の上に乗る。
+
+### 8.2 段1 の着手手順
+
+1. `AllTypesConcrete` 前倒し + compile-order 非対称解消(§4)の PoC — 挙動不変・byte 一致を確認。
+2. MIR 値モデル(`Repr` enum + LayoutId)を追加、mono 後に Repr を stamp。`WasmRepr` を吸収。
+3. 段2 の専用 compound-drop fixture(Map-entry/closure-env/nested-Named)を**先に** spec/wasm_cross に追加。
+
+段1 は almide-ir+codegen 跨ぎの一体実装(複数セッション)。段0 の網が緑を保つことを各増分で確認。
