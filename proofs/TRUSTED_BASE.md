@@ -108,11 +108,13 @@ The receipt's claims are scoped to exactly this:
   verification = the definition of parity" in its honest first form: it does NOT
   yet claim the *completion definition* (the proven profile accepting the full
   corpus), it establishes the *mechanism* that measures progress toward it and
-  proves the boundary is a wall, not a hole. **Today's honest coverage: 278/4195
+  proves the boundary is a wall, not a hole. **Today's honest coverage: 459/4195
   functions in-profile** (the value-semantics subset, incl. expression-bodied
   functions, direct heap-literal returns, direct named-call-result returns,
-  functions taking **borrowed heap parameters**, and **first-order pure stdlib
-  `Module` calls** in bind/tail position); the rest are walled with a per-feature
+  functions taking **borrowed heap parameters**, **first-order pure stdlib
+  `Module` calls**, and **nested CALL arguments** — `f(g(x))` / `assert_eq(g(x),
+  …)` materialized into an owned temp, borrowed into the outer call, dropped at
+  scope end); the rest are walled with a per-feature
   `Unsupported` histogram that names the next surface to admit (largest buckets
   now name exact stdlib functions: `list.map`/`filter`/`fold` with a closure
   argument — the higher-order brick — and call-as-argument materialization).
@@ -138,7 +140,7 @@ The receipt's claims are scoped to exactly this:
   `Module` call, a variant constructor, or a known Stdout-free builtin
   (`assert*`/`eprintln`/`panic`/`to_string` — these reach stderr/abort, NOT
   Stdout) is free; ANY other unknown callee (a walled or cross-file user function)
-  TAINTS, so the function is reported `caps-unverified` (275/278 verified, 3
+  TAINTS, so the function is reported `caps-unverified` (398/459 verified, 61
   unverified) rather than falsely accepted. This closes the direct-witness hole
   (`reachable_caps`'s honest-scope: an unknown callee contributed ∅). HONEST
   SCOPE: only `Capability::Stdout` is modeled, so the property is "no undeclared

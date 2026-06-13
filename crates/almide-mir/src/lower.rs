@@ -514,27 +514,76 @@ impl LowerCtx {
         }
     }
 
-    /// Lower call arguments to [`CallArg`]s: a heap var is BORROWED (`Handle`), a
-    /// scalar var is a `Scalar`, an int literal is an `Imm`. Anything else is an
-    /// explicit `Unsupported` (totality).
-    fn lower_call_args(&self, args: &[IrExpr]) -> Result<Vec<CallArg>, LowerError> {
-        args.iter()
-            .map(|a| match &a.kind {
-                IrExprKind::Var { id } if is_heap_ty(&a.ty) => {
-                    Ok(CallArg::Handle(self.value_for(*id)?))
+    /// Lower call arguments to [`CallArg`]s. A heap var is BORROWED (`Handle`), a
+    /// scalar var is a `Scalar`, an int literal is an `Imm`. A nested CALL argument
+    /// (`f(g(x))` / `f(string.trim(s))`) is MATERIALIZED: the inner call's result
+    /// is computed into a fresh OWNED temp, then BORROWED into the outer call and
+    /// dropped at scope end — cert `i` (call-result) + `d` (drop), both backed by
+    /// real ops; the temp's capabilities are folded transitively by the corpus gate
+    /// (an effectful callee taints the caller honestly). The inner call must itself
+    /// be admissible: a `Named` user call, or a first-order pure stdlib `Module`
+    /// call. Anything else is an explicit `Unsupported` (totality).
+    fn lower_call_args(&mut self, args: &[IrExpr]) -> Result<Vec<CallArg>, LowerError> {
+        let mut out = Vec::with_capacity(args.len());
+        for a in args {
+            let arg = match &a.kind {
+                IrExprKind::Var { id } if is_heap_ty(&a.ty) => CallArg::Handle(self.value_for(*id)?),
+                IrExprKind::Var { id } => CallArg::Scalar(self.value_for(*id)?),
+                IrExprKind::LitInt { value } => CallArg::Imm(*value),
+                // A Named user-call result, materialized into an owned temp.
+                IrExprKind::Call { target: CallTarget::Named { name }, args: inner, .. } => {
+                    let inner_args = self.lower_call_args(inner)?;
+                    let dst = self.fresh_value();
+                    let repr = repr_of(&a.ty)?;
+                    self.ops.push(Op::CallFn {
+                        dst: Some(dst),
+                        name: name.as_str().to_string(),
+                        args: inner_args,
+                        result: Some(repr),
+                    });
+                    self.materialized_call_arg(dst, repr)
                 }
-                IrExprKind::Var { id } => Ok(CallArg::Scalar(self.value_for(*id)?)),
-                IrExprKind::LitInt { value } => Ok(CallArg::Imm(*value)),
-                IrExprKind::Call { target, .. } => Err(LowerError::Unsupported(format!(
-                    "call argument Call[{}] not in this brick",
-                    call_target_kind(target)
-                ))),
-                other => Err(LowerError::Unsupported(format!(
-                    "call argument {} not in this brick",
-                    kind_name(other)
-                ))),
-            })
-            .collect()
+                // A first-order pure stdlib Module-call result, materialized (the
+                // purity + higher-order gates live in `lower_pure_module_value_call`).
+                IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args: inner, .. } => {
+                    let dst = self.lower_pure_module_value_call(
+                        module.as_str(),
+                        func.as_str(),
+                        inner,
+                        &a.ty,
+                    )?;
+                    let repr = repr_of(&a.ty)?;
+                    self.materialized_call_arg(dst, repr)
+                }
+                IrExprKind::Call { target, .. } => {
+                    return Err(LowerError::Unsupported(format!(
+                        "call argument Call[{}] not in this brick",
+                        call_target_kind(target)
+                    )))
+                }
+                other => {
+                    return Err(LowerError::Unsupported(format!(
+                        "call argument {} not in this brick",
+                        kind_name(other)
+                    )))
+                }
+            };
+            out.push(arg);
+        }
+        Ok(out)
+    }
+
+    /// Register a freshly-materialized call-result temp used as a call argument: a
+    /// HEAP temp is BORROWED into the call (`Handle`) and added to the scope-end
+    /// drop set (it is owned by THIS scope, not moved out, so it is released after
+    /// the call returns); a scalar temp is passed by value.
+    fn materialized_call_arg(&mut self, dst: ValueId, repr: Repr) -> CallArg {
+        if repr.is_heap() {
+            self.live_heap_handles.push(dst);
+            CallArg::Handle(dst)
+        } else {
+            CallArg::Scalar(dst)
+        }
     }
 
     fn emit_scope_end_drops(&mut self) {
@@ -875,5 +924,37 @@ mod tests {
             Err(LowerError::Unsupported(m)) => assert!(m.contains("effectful/impure"), "got: {m}"),
             other => panic!("expected an effectful wall, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn nested_call_arg_materializes_into_owned_temp() {
+        use almide_lang::intern::sym;
+        // var x = outer(inner())  — inner()'s heap result is materialized into an
+        // owned temp, borrowed into outer, and dropped at scope end; outer's result
+        // is bound and dropped. Two CallFns emitted, in evaluation order.
+        let named = |n: &str, args: Vec<IrExpr>| {
+            ir_expr(
+                IrExprKind::Call {
+                    target: CallTarget::Named { name: sym(n) },
+                    args,
+                    type_args: vec![],
+                },
+                list_int(),
+            )
+        };
+        let b = body(vec![bind(0, list_int(), named("outer", vec![named("inner", vec![])]))]);
+        let mir = lower_body(&b, "main").expect("nested call arg lowers");
+        let callfns: Vec<&str> = mir
+            .ops
+            .iter()
+            .filter_map(|o| match o {
+                Op::CallFn { name, .. } => Some(name.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(callfns, vec!["inner", "outer"], "inner materialized before outer");
+        // The materialized temp + the outer result are both balanced (each `i`
+        // matched by a scope-end `d`).
+        assert_eq!(verify_ownership(&mir), Ok(()));
     }
 }
