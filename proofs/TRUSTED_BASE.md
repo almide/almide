@@ -75,13 +75,22 @@ The receipt's claims are scoped to exactly this:
   witness but no `rc_dec` in the bytes; the perceus V flags it). The remaining
   producer — the real-RC renderer that EMITS the `rc_dec` (refcount header +
   free-list, so the binary actually frees) — is the next slice; its memory effect
-  is already proven to free (`balanced_cert_frees_in_memory`).
+  is already proven to free (`balanced_cert_frees_in_memory`). PRODUCER, slice 1
+  (A1.1a, relayout): the refcount HEADER half is now laid — the wasm renderer
+  places the rc cell PHYSICALLY at heap offset 0 (= `RuntimeModel.RC_OFFSET`),
+  initialized to 1 (the `Alloc` +1), so the model's `read_rc m base` cell has a
+  concrete byte home. This is observable-INVARIANT and stays Dec-free (no `rc_dec`
+  emitted yet), so the `eager_copy_refines_safety` regime is fully preserved;
+  emitting the decrement (`Drop → call $rc_dec`, which transitions the safety
+  basis to `balanced_cert_no_memory_fault`) and the free-list are the next slices.
 - **Byte-binding is partial.** The op→wasm-instruction TABLE is a formal Coq
   object (`Translation.v`) and the runtime heap is modeled as a memory state
   machine whose rc cell provably tracks the abstract refcount
   (`RuntimeModel.mrun_tracks_exec`); `validate_translation` re-checks per build
-  that each op's pattern is emitted and the bytes are Dec-free. NOT yet done: the
-  WasmCert-Coq ISA layer binding the memory machine to the actual wasm bytes
+  that each op's pattern is emitted and the bytes are Dec-free. The model's
+  `RC_OFFSET = 0` now COINCIDES with the renderer's physical rc-cell offset (the
+  A1.1a relayout) — model and bytes agree on WHERE the cell lives. NOT yet done:
+  the WasmCert-Coq ISA layer binding the memory machine to the actual wasm bytes
   (that `call $rc_dec` executes precisely the cell write) — the last mile of the
   bytes-refine-ALS chain.
 - **One real `.almd` now flows end-to-end** (`proofs/fixtures/return_list.almd`

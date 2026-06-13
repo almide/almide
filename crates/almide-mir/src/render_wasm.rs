@@ -10,7 +10,14 @@
 //! the handle unique). The richer RC model is a later brick; this proves the
 //! dual-renderer thesis end to end first.
 //!
-//! Heap list layout in linear memory: `[len: i32 @0][cap: i32 @4][data: i64 @8…]`.
+//! Heap list layout in linear memory:
+//! `[rc: i32 @0][len: i32 @4][cap: i32 @8][data: i64 @12…]`. The `rc` cell at
+//! offset 0 is the PHYSICAL realization of `proofs/RuntimeModel.v`'s refcount
+//! cell (`read_rc m base` at `RC_OFFSET = 0`): the model that proves leak-freedom
+//! now has a concrete byte home. It is initialized to 1 at allocation; the
+//! release path that decrements it (`Drop → call $rc_dec`) is the NEXT brick —
+//! today the renderer is still eager-copy/Dec-free (no `rc_dec` emitted), so the
+//! `eager_copy_refines_safety` safety regime is fully preserved.
 //!
 //! ⚠ BOOTSTRAP SHORTCUT — DO NOT GROW (see §4.1 of the architecture doc). The
 //! hand-written WAT runtime below (`$list_copy`/`$itoa_append`/`$print_list`)
@@ -35,11 +42,16 @@ const SCRATCH_ADDR: u32 = 512; // the line build buffer
 const HEAP_BASE: u32 = 8192; // bump allocator start
 
 // Field sizes / offsets (derived so the relationships show — no bare literals).
+// list = [rc:i32 @0][len:i32 @4][cap:i32 @8][data:i64 @12…].
 const I32_SIZE: u32 = 4; // a wasm i32 field is 4 bytes
-const LIST_LEN_OFFSET: u32 = 0; // list = [len:i32 @0][cap:i32 @4][data @8]
+const LIST_RC_OFFSET: u32 = 0; // the refcount cell — RuntimeModel.v's RC_OFFSET = 0
+const LIST_LEN_OFFSET: u32 = LIST_RC_OFFSET + I32_SIZE;
 const LIST_CAP_OFFSET: u32 = LIST_LEN_OFFSET + I32_SIZE;
-const LIST_HEADER: u32 = LIST_CAP_OFFSET + I32_SIZE; // len + cap
+const LIST_HEADER: u32 = LIST_CAP_OFFSET + I32_SIZE; // rc + len + cap
 const ELEM_SIZE: u32 = 8; // i64 elements
+// A freshly allocated heap block has exactly one owner — the `Alloc`'s +1, the
+// initial value of the cell RuntimeModel.v's `exec` starts the fold from.
+const RC_INITIAL: i32 = 1;
 const PUSH_HEADROOM: u32 = 8; // spare cap so demo pushes never realloc
 const IOVEC_LEN_OFFSET: u32 = I32_SIZE; // iovec = [buf:i32 @0][len:i32 @4]
 
@@ -349,7 +361,8 @@ fn preamble() -> String {
     (local $p i32)
     (local.set $p (call $alloc (i32.add (i32.const {LIST_HEADER})
                                         (i32.mul (local.get $cap) (i32.const {ELEM_SIZE})))))
-    (i32.store (local.get $p) (local.get $len))
+    (i32.store (i32.add (local.get $p) (i32.const {LIST_RC_OFFSET})) (i32.const {RC_INITIAL}))
+    (i32.store (i32.add (local.get $p) (i32.const {LIST_LEN_OFFSET})) (local.get $len))
     (i32.store (i32.add (local.get $p) (i32.const {LIST_CAP_OFFSET})) (local.get $cap))
     (local.get $p))
 
@@ -363,11 +376,12 @@ fn preamble() -> String {
   (func $list_get (param $list i32) (param $idx i32) (result i64)
     (i64.load (call $elem_addr (local.get $list) (local.get $idx))))
 
-  (func $list_len (param $list i32) (result i32) (i32.load (local.get $list)))
+  (func $list_len (param $list i32) (result i32)
+    (i32.load (i32.add (local.get $list) (i32.const {LIST_LEN_OFFSET}))))
 
   (func $list_copy (param $src i32) (result i32)
     (local $len i32) (local $cap i32) (local $dst i32) (local $i i32)
-    (local.set $len (i32.load (local.get $src)))
+    (local.set $len (i32.load (i32.add (local.get $src) (i32.const {LIST_LEN_OFFSET}))))
     (local.set $cap (i32.load (i32.add (local.get $src) (i32.const {LIST_CAP_OFFSET}))))
     (local.set $dst (call $list_new (local.get $len) (local.get $cap)))
     (local.set $i (i32.const 0))
@@ -381,9 +395,10 @@ fn preamble() -> String {
 
   (func $list_push (param $list i32) (param $val i64) (result i32)
     (local $len i32)
-    (local.set $len (i32.load (local.get $list)))
+    (local.set $len (i32.load (i32.add (local.get $list) (i32.const {LIST_LEN_OFFSET}))))
     (call $list_set (local.get $list) (local.get $len) (local.get $val))
-    (i32.store (local.get $list) (i32.add (local.get $len) (i32.const 1)))
+    (i32.store (i32.add (local.get $list) (i32.const {LIST_LEN_OFFSET}))
+               (i32.add (local.get $len) (i32.const 1)))
     (local.get $list))
 
   ;; append the decimal digits of a non-negative i64 at $cur; return new cursor
@@ -574,6 +589,34 @@ mod tests {
             ],
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn alloc_initializes_the_rc_cell_at_offset_zero() {
+        // A1.1a: the heap block now carries a refcount cell at offset 0 — the
+        // physical home of RuntimeModel.v's `read_rc m base` (RC_OFFSET = 0),
+        // initialized to 1 (the `Alloc` +1 the proof's `exec` folds from). The
+        // release path that decrements it is the next brick; today the renderer
+        // is still Dec-free, so this is purely the foundation relayout.
+        let wat = preamble();
+        // `$list_new` writes rc = 1 at the rc offset, then len/cap at the shifted
+        // offsets — proving the cell exists and is initialized (non-vacuous).
+        assert!(
+            wat.contains(&format!(
+                "(i32.store (i32.add (local.get $p) (i32.const {LIST_RC_OFFSET})) (i32.const {RC_INITIAL}))"
+            )),
+            "list_new must initialize the rc cell to 1 at RC_OFFSET"
+        );
+        // The relayout shifted len off offset 0 (where rc now lives): the header
+        // is rc + len + cap = 12 bytes, and offsets are derived, not bare.
+        assert_eq!(LIST_RC_OFFSET, 0);
+        assert_eq!(LIST_LEN_OFFSET, 4);
+        assert_eq!(LIST_CAP_OFFSET, 8);
+        assert_eq!(LIST_HEADER, 12);
+        // The foundation is laid WITHOUT entering the RC regime: no decrement is
+        // emitted yet, so the `eager_copy_refines_safety` Dec-free property still
+        // holds for the artifact (validate_safety stays satisfied).
+        assert!(!wat.contains("rc_dec"), "no release emitted yet — still Dec-free (A1.1b is next)");
     }
 
     #[test]
