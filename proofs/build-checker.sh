@@ -22,6 +22,8 @@ echo "== run the proven checker on real certificates (one object per line) =="
 printf 'ID\nIIDD\n' > /tmp/balanced.cert     # two balanced objects → ACCEPT
 printf 'IIDD\nIDD\n' > /tmp/double_free.cert  # 2nd object double-frees → REJECT
 printf 'ID\nIID\n'  > /tmp/leak.cert          # 2nd object leaks → REJECT
+printf 'IR\nIADR\n' > /tmp/perceus.cert       # perceus: reuse-release + alias/drop/reuse → ACCEPT
+printf 'R\n'        > /tmp/reuse_uaf.cert      # reuse with nothing owned → REJECT
 
 run() { # path expected_exit
   set +e; ./checker ownership "$1" >/tmp/checker.out 2>&1; local rc=$?; set -e
@@ -31,6 +33,8 @@ run() { # path expected_exit
 run /tmp/balanced.cert 0
 run /tmp/double_free.cert 1
 run /tmp/leak.cert 1
+run /tmp/perceus.cert 0
+run /tmp/reuse_uaf.cert 1
 
 echo
 echo "CHECKER OK: the kernel-proven check accepts the balanced certificate and"

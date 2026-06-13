@@ -31,10 +31,11 @@ Definition wasm_pattern (o : Op) : string :=
   | Alias   => "call $list_copy"  (* an alias is an eager COPY *)
   | Dec     => ""                 (* eager: release emits no instruction *)
   | MoveOut => ""                 (* eager: move is a pointer pass, no instruction *)
+  | Reuse   => ""                 (* eager: no reuse; the perceus renderer emits rc_dec/reuse *)
   end.
 
 Definition is_release (o : Op) : bool :=
-  match o with Dec | MoveOut => true | _ => false end.
+  match o with Dec | MoveOut | Reuse => true | _ => false end.
 
 (* The byte-binding fact that makes the eager artifact Dec-free: every release
    event maps to the EMPTY pattern, so an increment-only witness's bytes contain

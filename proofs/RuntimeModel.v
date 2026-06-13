@@ -41,7 +41,7 @@ Definition rt_dec (m : Mem) (base : Z) : option Mem :=
 Definition step_mem (o : Op) (m : Mem) (base : Z) : option Mem :=
   match o with
   | Inc | Alias => Some (rt_inc m base)
-  | Dec | MoveOut => rt_dec m base
+  | Dec | MoveOut | Reuse => rt_dec m base
   end.
 
 Fixpoint mrun (ops : list Op) (m : Mem) (base : Z) : option Mem :=
@@ -88,6 +88,10 @@ Proof.
       * reflexivity.
       * pose proof (IH (upd m (base + RC_OFFSET) (read_rc m base - 1)) base) as IH2.
         rewrite (read_upd_same m base (read_rc m base - 1)) in IH2. exact IH2.
+    + (* Reuse *) unfold rt_dec. destruct (read_rc m base <=? 0) eqn:E.
+      * reflexivity.
+      * pose proof (IH (upd m (base + RC_OFFSET) (read_rc m base - 1)) base) as IH2.
+        rewrite (read_upd_same m base (read_rc m base - 1)) in IH2. exact IH2.
 Qed.
 
 (* COROLLARY: an accepted certificate (the abstract run ends balanced from rc 0)
@@ -102,5 +106,25 @@ Proof.
   unfold check, run in Hchk. rewrite <- Href in Hchk. discriminate.
 Qed.
 
+(* LEAK-FREEDOM, at the memory level. An accepted certificate (balanced from
+   rc 0) leaves the runtime cell at 0 — the object's last reference is released,
+   so the cell is FREED, not leaked. This is the property the eager-copy renderer
+   does NOT achieve (it emits no release, so its memory leaks); a release-emitting
+   (perceus / real-RC) renderer realizes exactly this. The witness's "ends at 0"
+   (the leak-free half of `check`) is thereby bound to real freed memory. *)
+Corollary balanced_cert_frees_in_memory :
+  forall ops m base m',
+    read_rc m base = 0 -> check ops = true -> mrun ops m base = Some m' ->
+    read_rc m' base = 0.
+Proof.
+  intros ops m base m' Hrc Hchk Hsome.
+  apply check_sound in Hchk. destruct Hchk as [_ Hnoleak].
+  unfold no_leak, run in Hnoleak.
+  pose proof (mrun_tracks_exec ops m base) as Href.
+  rewrite Hsome, Hrc in Href. cbn in Href.
+  rewrite Hnoleak in Href. injection Href as Href'. exact Href'.
+Qed.
+
 Print Assumptions mrun_tracks_exec.
 Print Assumptions balanced_cert_no_memory_fault.
+Print Assumptions balanced_cert_frees_in_memory.

@@ -34,12 +34,18 @@ Open Scope Z_scope.
    v0's {Inc,Dec} is the DEGENERATE case (Alias≡Inc, MoveOut≡Dec at the balance
    fold), so this strictly generalizes brick 1 with ZERO new proof obligations —
    the soundness proofs reason about the run's Z result, not the constructors.
-   (Borrow b≡+0 and Reuse r≡−1-with-a-uniqueness-obligation are later modes.) *)
+     Reuse   = −1 REUSE-eligible release (the PERCEUS mode): a release the
+               compiler proved acts on a UNIQUELY-owned object, so the freed
+               block may be reused IN PLACE. Folds like Dec (−1); the separate
+               constructor records the uniqueness obligation (checked by a
+               membership-subset section: r-objects ⊆ proven-unique).
+   (Borrow b≡+0, the closure-env mode, is the remaining letter.) *)
 Inductive Op : Type :=
   | Inc : Op
   | Alias : Op
   | Dec : Op
-  | MoveOut : Op.
+  | MoveOut : Op
+  | Reuse : Op.
 
 (* OPERATIONAL SEMANTICS (the ALS side — "what actually happens").
    A refcount, or a FAULT (`None`) when a −1 op hits rc = 0: that is a
@@ -54,6 +60,7 @@ Fixpoint exec (ops : list Op) (rc : Z) : option Z :=
   | Alias :: rest => exec rest (rc + 1)
   | Dec :: rest => if rc <=? 0 then None else exec rest (rc - 1)
   | MoveOut :: rest => if rc <=? 0 then None else exec rest (rc - 1)
+  | Reuse :: rest => if rc <=? 0 then None else exec rest (rc - 1)
   end.
 
 Definition run (ops : list Op) : option Z := exec ops 0.
@@ -133,9 +140,10 @@ Proof. reflexivity. Qed.
    "bytes ⟶ accept/reject" pipeline is now kernel-checked, shrinking the trusted
    base to just file I/O. Certificate format v1: one object per newline; within a
    line the ownership alphabet is `i`/`I` = fresh +1, `a`/`A` = alias +1,
-   `d`/`D` = release −1, `m`/`M` = move-out −1; anything else (whitespace
-   included) skipped. (`a`/`m` carry the share-vs-move ground fact; they fold
-   like `i`/`d`, so v0 certificates remain valid — i/d is the degenerate case.) *)
+   `d`/`D` = release −1, `m`/`M` = move-out −1, `r`/`R` = reuse-release −1
+   (perceus mode); anything else (whitespace included) skipped. (`a`/`m`/`r`
+   carry ground facts — share-vs-move, reuse-uniqueness — but fold like `i`/`d`,
+   so v0 certificates remain valid: i/d is the degenerate case.) *)
 
 Definition newline : ascii := ascii_of_nat 10.
 
@@ -144,6 +152,7 @@ Definition parse_byte (a : ascii) : option Op :=
   else if orb (Ascii.eqb a "a"%char) (Ascii.eqb a "A"%char) then Some Alias
   else if orb (Ascii.eqb a "d"%char) (Ascii.eqb a "D"%char) then Some Dec
   else if orb (Ascii.eqb a "m"%char) (Ascii.eqb a "M"%char) then Some MoveOut
+  else if orb (Ascii.eqb a "r"%char) (Ascii.eqb a "R"%char) then Some Reuse
   else None.
 
 (* Fold the byte string into per-line op streams; flush the final line at end. *)
@@ -197,6 +206,10 @@ Example cert_alias_balanced : check_cert "iadd"%string = true.   (* alloc, alias
 Proof. reflexivity. Qed.
 
 Example cert_move_out_underflow_rejects : check_cert "m"%string = false. (* move-out with nothing owned = use-after-move *)
+Proof. reflexivity. Qed.
+
+(* perceus mode: a reuse-release `r` folds like a plain release — alloc, reuse. *)
+Example cert_reuse_balanced : check_cert "ir"%string = true.
 Proof. reflexivity. Qed.
 
 (* AXIOM AUDIT (the "Print Assumptions ⊆ standard" gate). Soundness must rest on

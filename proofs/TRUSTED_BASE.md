@@ -58,13 +58,21 @@ The receipt's claims are scoped to exactly this:
   totality, capability bound, type-concretize, termination are later bricks.
 - **The current wasm renderer is eager-copy**: proven memory-SAFE
   (`eager_copy_refines_safety` — it emits no `__rc_dec`, so it cannot
-  double-free) but it **leaks** (no `no_leak`). Leak-freedom needs the real-RC
-  renderer. So `C-SAFE` is claimable for the eager-copy artifact today; not yet
-  leak-freedom.
-- **V is not yet on real wasm BYTES.** The certificate certifies the MIR
-  ownership ops; the wasm is a faithful render of the same MIR (§3 renderer
-  contract). A per-build translation validator that the emitted wasm bytes
-  refine the ALS is the main body of brick 4.
+  double-free) but it **leaks** (it emits no release). Leak-freedom is now PROVEN
+  at the memory-model level — `RuntimeModel.balanced_cert_frees_in_memory`: an
+  accepted certificate leaves the runtime cell FREED (rc 0). That property is
+  realized by a release-emitting (perceus / real-RC) renderer, NOT by the current
+  eager-copy one. So `C-SAFE`'s no-double-free is claimable for the eager-copy
+  artifact today; leak-freedom is proven of the MODEL and awaits the real-RC
+  renderer to realize it on the artifact.
+- **Byte-binding is partial.** The op→wasm-instruction TABLE is a formal Coq
+  object (`Translation.v`) and the runtime heap is modeled as a memory state
+  machine whose rc cell provably tracks the abstract refcount
+  (`RuntimeModel.mrun_tracks_exec`); `validate_translation` re-checks per build
+  that each op's pattern is emitted and the bytes are Dec-free. NOT yet done: the
+  WasmCert-Coq ISA layer binding the memory machine to the actual wasm bytes
+  (that `call $rc_dec` executes precisely the cell write) — the last mile of the
+  bytes-refine-ALS chain.
 - **One real `.almd` now flows end-to-end** (`proofs/fixtures/return_list.almd`
   → the actual frontend → MIR → proven checker, for ownership + names — weekly
   indicator ① 0→1). The lowering covers only the value-semantics subset (heap

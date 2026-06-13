@@ -179,8 +179,21 @@ because they are about the run's `Z` result). v0 certificates remain valid.
      coqchk-verified). REMAINING (3c): bind this memory machine to the actual wasm
      BYTES — that the wasm `call $rc_dec` INSTRUCTION executes precisely these cell
      writes — the WasmCert-Coq ISA layer, the last mile of G1.2.
-4. **perceus mode: `r` + the reuse-uniqueness subset section** → leak-freedom on
-   the real-RC renderer.
+4. **perceus mode (`r`) + leak-freedom.**
+   - **4a: the `r` event + memory-level leak-freedom.** ✅ **SHIPPED.**
+     `OwnershipChecker.v` gains `Reuse` (`r`) — a reuse-eligible release (perceus
+     mode), folding like `−1` so `check_sound` is reused VERBATIM (zero new proof,
+     like `a`/`m`); `RuntimeModel.v` proves `balanced_cert_frees_in_memory`: an
+     accepted certificate leaves the runtime cell at **0 — FREED, not leaked**.
+     So leak-freedom (the "ends-at-0" half of `check`, already proven at the
+     witness level by `check_sound`'s `no_leak`) is now bound to real freed
+     MEMORY — the property the eager-copy renderer cannot achieve (it emits no
+     release) and a release-emitting renderer realizes. The extracted checker
+     handles `r` end-to-end (`build-checker.sh` perceus demo). proof spine = 15
+     theorems axiom-clean. REMAINING (4b): the reuse-uniqueness subset section
+     (`r-objects ⊆ proven-unique-at-drop` — perceus reuse SOUNDNESS, via the
+     Subset law) and the real-RC renderer that emits `rc_dec`/reuse + its
+     translation validation.
 5. **full mode: `b` (closure-env borrow) + branch resource-state agreement** →
    control-flow + closures.
 
