@@ -33,24 +33,32 @@ use std::collections::BTreeMap;
 
 // ───────────────────────────── Layout / Repr ──────────────────────────────
 
-/// Scalar widths in bytes (the LAYOUT facts that today live scattered across
-/// `emit_wasm/values.rs::byte_size`; here they are named, not raw literals).
-pub mod width {
-    /// 8-bit integer (`Int8`/`UInt8`).
-    pub const I8: u16 = 1;
-    /// 16-bit integer (`Int16`/`UInt16`).
-    pub const I16: u16 = 2;
-    /// 32-bit integer (`Int32`/`UInt32`).
-    pub const I32: u16 = 4;
-    /// 64-bit integer — the canonical `Int`.
-    pub const I64: u16 = 8;
-    /// 32-bit IEEE-754 float (`Float32`).
-    pub const F32: u16 = 4;
-    /// 64-bit IEEE-754 float — the canonical `Float`.
-    pub const F64: u16 = 8;
-    /// `Bool` occupies a 32-bit ABI slot (wasm has no narrower stack value
-    /// type; native is one byte but the ABI slot is what the Repr records).
-    pub const BOOL: u16 = 4;
+/// A scalar's byte width — a VALUE OBJECT, not a raw number. Magic widths are
+/// structurally impossible: you write `ScalarWidth::Word`, never `4`. The byte
+/// count is recovered via [`ScalarWidth::bytes`] where layout needs it (so the
+/// relationship "Word = 4 bytes" lives in exactly one place).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
+pub enum ScalarWidth {
+    /// 1 byte (`Int8`/`UInt8`).
+    Byte,
+    /// 2 bytes (`Int16`/`UInt16`).
+    Half,
+    /// 4 bytes (`Int32`/`UInt32`/`Float32`, and `Bool`'s ABI slot).
+    Word,
+    /// 8 bytes (`Int`/`Int64`/`UInt64`/`Float`/`Float64`).
+    Double,
+}
+
+impl ScalarWidth {
+    /// The byte count — the ONLY place a `ScalarWidth` becomes a number.
+    pub const fn bytes(self) -> u8 {
+        match self {
+            ScalarWidth::Byte => 1,
+            ScalarWidth::Half => 2,
+            ScalarWidth::Word => 4,
+            ScalarWidth::Double => 8,
+        }
+    }
 }
 
 /// A value's runtime representation — the LAYOUT decision (§2.1), decided once.
@@ -60,9 +68,8 @@ pub mod width {
 /// participate in ownership accounting.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum Repr {
-    /// A `Copy` scalar of `width` bytes (Int/Float/Bool/narrow ints), see
-    /// [`width`] for the named byte counts.
-    Scalar { width: u16 },
+    /// A `Copy` scalar (Int/Float/Bool/narrow ints) of a named [`ScalarWidth`].
+    Scalar { width: ScalarWidth },
     /// A reference-counted heap pointer to a value laid out by `layout`.
     Ptr { layout: LayoutId },
     /// Like [`Repr::Ptr`] but BOXED for a recursive type. Renders as `Box<T>`
@@ -81,14 +88,22 @@ impl Repr {
 }
 
 /// A handle into the layout registry (header size, field offsets, tag
-/// placement, element stride). The registry is built by the layout pass; MIR
-/// values only carry the id, so a future layout change touches ONE place.
+/// placement, element stride). The inner id is PRIVATE so a bare `LayoutId(0)`
+/// cannot be written anywhere — heap values get [`PLACEHOLDER_LAYOUT`] or a
+/// registry-issued id (a later brick), never an ad-hoc number.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash, PartialOrd, Ord)]
-pub struct LayoutId(pub u32);
+pub struct LayoutId(u32);
+
+impl LayoutId {
+    /// Construct a layout id (only the layout registry should call this).
+    pub(crate) const fn new(id: u32) -> Self {
+        LayoutId(id)
+    }
+}
 
 /// The layout id every heap value carries until the layout pass assigns real
-/// ids (a later brick). Named so a `LayoutId(0)` is never a bare magic number.
-pub const PLACEHOLDER_LAYOUT: LayoutId = LayoutId(0);
+/// ids (a later brick) — the single sanctioned placeholder.
+pub const PLACEHOLDER_LAYOUT: LayoutId = LayoutId::new(0);
 
 /// An SSA-like MIR value (a local). Identity is the id; its [`Repr`] is fixed
 /// at definition and never re-decided downstream.
@@ -424,7 +439,7 @@ mod tests {
         ValueId(n)
     }
     fn heap() -> Repr {
-        Repr::Ptr { layout: LayoutId(0) }
+        Repr::Ptr { layout: PLACEHOLDER_LAYOUT }
     }
     fn func(ops: Vec<Op>) -> MirFunction {
         MirFunction { name: "shape".into(), ops, ..Default::default() }
@@ -575,7 +590,7 @@ mod tests {
     #[test]
     fn repr_heap_predicate() {
         assert!(heap().is_heap());
-        assert!(Repr::Boxed { layout: LayoutId(0) }.is_heap());
-        assert!(!Repr::Scalar { width: width::I64 }.is_heap());
+        assert!(Repr::Boxed { layout: PLACEHOLDER_LAYOUT }.is_heap());
+        assert!(!Repr::Scalar { width: ScalarWidth::Double }.is_heap());
     }
 }

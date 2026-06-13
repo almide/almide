@@ -171,7 +171,7 @@ pub fn render_wasm_fn(func: &MirFunction, label_off: &BTreeMap<String, (u32, u32
     format!("  (func ${} {params}{result} {locals_decl}\n{body}{tail}  )\n", func.name)
 }
 
-const SCALAR_REPR: Repr = Repr::Scalar { width: crate::width::I64 };
+const SCALAR_REPR: Repr = Repr::Scalar { width: crate::ScalarWidth::Double };
 
 fn wasm_ty(repr: Repr) -> &'static str {
     if repr.is_heap() {
@@ -464,18 +464,18 @@ fn preamble() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{verify_ownership, width, LayoutId, MirParam, MirProgram};
+    use crate::{verify_ownership, MirParam, MirProgram, ScalarWidth, PLACEHOLDER_LAYOUT};
     use std::process::Command;
 
     fn heap() -> Repr {
-        Repr::Ptr { layout: LayoutId(0) }
+        Repr::Ptr { layout: PLACEHOLDER_LAYOUT }
     }
 
     /// Same program as the Rust-side test: `fn add(a,b)=a+b` + a `main` calling
     /// it. Both targets must print the same `5` — the dual-renderer thesis for
     /// USER FUNCTIONS (the mechanism that lets the runtime be self-hosted).
     fn add_program() -> MirProgram {
-        let scalar = Repr::Scalar { width: width::I64 };
+        let scalar = Repr::Scalar { width: ScalarWidth::Double };
         let add = MirFunction {
             name: "add".into(),
             params: vec![

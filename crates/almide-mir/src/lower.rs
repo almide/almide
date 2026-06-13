@@ -71,15 +71,13 @@ pub fn repr_of(ty: &Ty) -> Result<Repr, LowerError> {
     if is_heap_ty(ty) {
         return Ok(Repr::Ptr { layout: PLACEHOLDER_LAYOUT });
     }
-    use crate::width;
+    use crate::ScalarWidth;
     let w = match ty {
-        Ty::Int | Ty::Int64 | Ty::UInt64 => width::I64,
-        Ty::Int32 | Ty::UInt32 => width::I32,
-        Ty::Int16 | Ty::UInt16 => width::I16,
-        Ty::Int8 | Ty::UInt8 => width::I8,
-        Ty::Float | Ty::Float64 => width::F64,
-        Ty::Float32 => width::F32,
-        Ty::Bool => width::BOOL,
+        Ty::Int | Ty::Int64 | Ty::UInt64 | Ty::Float | Ty::Float64 => ScalarWidth::Double,
+        Ty::Int32 | Ty::UInt32 | Ty::Float32 => ScalarWidth::Word,
+        Ty::Int16 | Ty::UInt16 => ScalarWidth::Half,
+        Ty::Int8 | Ty::UInt8 => ScalarWidth::Byte,
+        Ty::Bool => ScalarWidth::Word, // Bool ABI slot is 4 bytes
         // Unit/Never/RawPtr/Const* are not values that get a scalar slot here.
         other => {
             return Err(LowerError::Unsupported(format!(

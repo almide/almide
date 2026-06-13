@@ -70,7 +70,7 @@ pub fn render_rust(func: &MirFunction) -> String {
 }
 
 /// The canonical scalar repr (i64) for inferred scalar results.
-const SCALAR: Repr = Repr::Scalar { width: crate::width::I64 };
+const SCALAR: Repr = Repr::Scalar { width: crate::ScalarWidth::Double };
 
 fn rust_ty(repr: Repr) -> &'static str {
     if repr.is_heap() {
@@ -193,15 +193,15 @@ fn render_call(func: &RtFn, args: &[CallArg]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{verify_ownership, width, LayoutId, MirParam, MirProgram};
+    use crate::{verify_ownership, MirParam, MirProgram, ScalarWidth, PLACEHOLDER_LAYOUT};
     use std::process::Command;
 
     fn heap() -> Repr {
-        Repr::Ptr { layout: LayoutId(0) }
+        Repr::Ptr { layout: PLACEHOLDER_LAYOUT }
     }
 
     fn scalar() -> Repr {
-        Repr::Scalar { width: width::I64 }
+        Repr::Scalar { width: ScalarWidth::Double }
     }
 
     /// A program with a user function: `fn add(a,b)=a+b` and a `main` that calls
