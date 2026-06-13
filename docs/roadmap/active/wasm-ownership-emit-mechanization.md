@@ -78,28 +78,48 @@ rc_dec nx                       // scope-end
   (double-free より安全)」と明言 — **つまり double-free は設計違反**で、
   どこかで余分な dec が混入している。
 
-未確定 (要 NON-allocating runtime トレース): どのブロックが rc==0 まで
-落ちて再 dec されるかは静的に確定できなかった。box の +1 が leak するなら
-double-free ではなく leak になるはずで、ledger と実挙動が一致しない。
+### 確定 — 非割り当てトレーサで根本機構を特定 (2026-06-13)
 
-**決定的な観測 — HEISENBUG**: `__rc_dec` の double-free sentinel を
-`unreachable` から「ポインタ出力 + return (再 push をスキップ)」に置換すると、
-r643 / f 両方が **正しい出力で exit 0**、二重解放マーカーが**一度も出ない**。
-原因は計装に使った `__println_int` 自体が `__alloc` する (i64→文字列 +
-iovec) ため、**print がヒープの再利用パターンを変えて corruption をマスク**
-すること。つまりこの二重解放は **アロケータの free→reuse タイミングに依存**
-し、観測 (割り当てを挟む) が挙動を変える種類のバグ。具体的には list.get の
-some-box (要素を `rc_inc`) が free され、直後の `list.slice|>list.join` の
-`__alloc` がその block を再利用する経路と、box / element の dec タイミングが
-噛み合った時にのみ発火する。
+最初の計装 (`__println_int`) は **それ自体が `__alloc` する** ため free→reuse
+パターンを変え corruption をマスクした (HEISENBUG)。これを **固定低位メモリ
+[16..36) に生バイトを `fd_write(stderr)` で書く非割り当てトレーサ** に置換し、
+`__alloc` の返却 ptr+size と `__rc_dec` の free/double-free を観測したところ、
+r643 の全タイムラインが取れた:
 
-→ 安全な単発修正には **(a) 割り当てを伴わない runtime トレーサ** (違反
-ポインタを固定 global に書く、または rc-count を native↔wasm で比較する
-差分ハーネス) で「余分な dec」を1個に特定する、もしくは **(b) 上記
-`emit_extract_owned` への集約 + `list.get` の some-box +1 と UnwrapOr の
-alias-inc の二重カウント関係を設計レベルで一本化する** 必要がある。推測
-パッチは新たな leak/regression を生むリスクが高いため**未マージ**。#643 は
-本 roadmap の §1 として OPEN 継続。
+```
+ALLOC 4184/16(cs list) 4208/8(out 空) 4224/4(Some box) 4240/12(slice) ...
+FREE 4240(slice) ALLOC 4264/40 ALLOC 4224/12  ← 4224 は #2 で size4・未 free
+FREE 4224 ... FREE 4264 FREE 4184 DOUBLE-FREE 4264 → trap
+```
+
+**根本機構**: `out` の要素スロットは `ptr + LIST_DATA_OFFSET(8)` から始まる。
+容量 0 の `out`(4208, size8) の data[0] は **隣接する Some box(4224)の
+ヘッダ(4216)と重なる**。`list.get(cs,i) ?? d` の Some box は **dec されず
+leak**(UnwrapOr の inner 中間式に temp-dec が付かない)し、そのヘッダ(size=4)
+が **size≥12 に上書き**される。すると `__alloc` の free-list の size チェック
+(`cur.size >= request`)をすり抜け、**生きた undersize ブロック(4224)を払い
+出す** → バッファオーバーフロー + 後続の rc_dec で二重解放(rc==0 sentinel)。
+= 「ループ内の反復ヒープ temp(Some box / slice / join)の leak が隣接ブロック
+のヘッダを破損し、`__alloc` が生きた小さいブロックを再配布する」クラス。
+
+### スケール依存 — 試した get_or 融合は不十分 + 回帰
+
+`list.get(xs,i) ?? d` を `list.get_or(xs,i,d)`(Some box を作らない)へ融合
+すると **len2 の報告 repro は両ターゲット byte 一致**になるが:
+
+- **len≥3 で再分岐 / len6 で trap** — slice/join temp 経由の同クラス破損が残る
+  (Some box は1インスタンスに過ぎない)。
+- `spec/wasm_cross/alias_combinator_rc` が **byte gate で divergence/trap** —
+  get_or の rc 経路は get→unwrap と異なり、既存の alias RC を壊す。
+
+→ よって **融合は #643 の fix ではない**(撤回済み)。真の修正は emit 層の
+所有権機械化: (1) UnwrapOr/getter が確保した Option box を確実に dec する
+(または box を作らない経路に統一)、(2) 反復ヒープ temp(slice/join 結果)の
+rc を per-iteration で正しく解放、(3) `__alloc` の free-list reuse に
+`cur.rc == 0` 不変条件を足し「生きたブロックの再配布」を防御(silent 破損を
+clean trap に変える hardening)。+ `spec/churn/` に「ループ×反復ヒープ temp」
+churn fixture を追加。推測パッチは新たな leak/regression を生むため**未マージ**、
+#643 は本 roadmap §1 として OPEN 継続。
 
 ## 関連: #591 error.context の OK パスが main の戻り値を汚染 (still OPEN)
 
