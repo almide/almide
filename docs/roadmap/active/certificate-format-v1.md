@@ -165,8 +165,20 @@ because they are about the run's `Z` result). v0 certificates remain valid.
      catches a renderer that drops an op). Honest scope: PRESENCE check (not the
      precise per-op byte-window bijection); the SEMANTIC realization (the runtime
      memory machine: `call $rc_dec` mutates the free-list as the abstract −1) is
-     the once-built WasmCert-Coq library — **G1.2, the single hardest deferred
+     the runtime-memory-model + WasmCert-Coq library — **G1.2, the single hardest
      piece** (3b).
+   - **3b: runtime memory model (the abstract-memory half).** ✅ **SHIPPED.**
+     `proofs/RuntimeModel.v` models the runtime heap as a linear-memory state
+     machine — an object's refcount lives in a CELL at `base + RC_OFFSET`,
+     `rt_inc`/`rt_dec` are concrete memory writes — and proves `mrun_tracks_exec`:
+     the cell evolves EXACTLY as the abstract refcount (`OwnershipChecker.exec`),
+     faulting precisely together. Corollary `balanced_cert_no_memory_fault`: an
+     accepted certificate (balanced from rc 0) is realized by a machine that
+     NEVER double-frees in memory. So the abstract Dec is no longer a free-floating
+     token — it is bound to a concrete memory operation (both theorems axiom-clean,
+     coqchk-verified). REMAINING (3c): bind this memory machine to the actual wasm
+     BYTES — that the wasm `call $rc_dec` INSTRUCTION executes precisely these cell
+     writes — the WasmCert-Coq ISA layer, the last mile of G1.2.
 4. **perceus mode: `r` + the reuse-uniqueness subset section** → leak-freedom on
    the real-RC renderer.
 5. **full mode: `b` (closure-env borrow) + branch resource-state agreement** →
