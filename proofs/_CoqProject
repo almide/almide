@@ -12,4 +12,5 @@ Termination.v
 FreeList.v
 WasmRcDec.v
 WasmEncode.v
+WasmExec.v
 CowSafety.v

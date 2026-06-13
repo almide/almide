@@ -54,6 +54,7 @@ axioms). Verified by `proofs/check.sh`:
 | `alloc_not_live` | FreeList.v | Closed under the global context |
 | `rc_dec_prog_realizes_rt_dec` | WasmRcDec.v | Closed under the global context |
 | `rc_inc_bytes_encode_the_instruction_tree` | WasmEncode.v | Closed under the global context |
+| `rc_inc_bytes_execute_to_rt_inc` | WasmExec.v | Closed under the global context |
 | `make_unique_yields_unique` | CowSafety.v | Closed under the global context |
 
 ## Known limitations (what is NOT yet proven — recorded, not hidden)
@@ -70,8 +71,9 @@ The receipt's claims are scoped to exactly this:
   `CowSafety.make_unique_yields_unique`), byte-binding table + the `$rc_dec` /
   `$rc_inc` instruction-trees realizing `rt_dec` / `rt_inc` (`WasmRcDec`) + the
   rc_inc instruction tree encoding to the REAL wasm bytes (`WasmEncode`, grounded
-  against wat2wasm), operand-stack balance, and termination of the loop-free
-  fragment — all kernel-checked and axiom-clean (29 theorems). What remains is DEPTH (the byte-binding ISA layer; and
+  against wat2wasm) + those real bytes EXECUTING to `rt_inc` on a wasm stack
+  machine (`WasmExec`), operand-stack balance, and termination of the loop-free
+  fragment — all kernel-checked and axiom-clean (30 theorems). What remains is DEPTH (the byte-binding ISA layer; and
   the RENDERER realizing the free-list/`rc_inc` — its safety MODEL is now proven,
   so that slice REFINES a proof rather than adding trusted runtime) and BREADTH
   (lowering beyond the subset: control flow, closures, stdlib) — not new properties
@@ -128,11 +130,15 @@ The receipt's claims are scoped to exactly this:
   per build by `proofs/check-wasm-bytes.sh` (re-assemble, compare — so the opcode
   constants are the real wasm bytes, not a guess: non-circular). Composed with
   `rc_inc_prog_realizes_rt_inc`, the emitted BYTES encode an instruction tree that
-  computes `rt_inc`. NOT yet done: the byte binding for `rc_dec` (its WasmRcDec
-  model stores the decrement directly while the renderer uses a `local.set`
-  intermediate — align them) and the rest of the module; and a wasm ENGINE's
-  spec-conformant EXECUTION of those bytes (a verified interpreter / full
-  WasmCert-Coq — the residual trusted piece, like the kernel and hardware).
+  computes `rt_inc`. And the EXECUTION is now bound too
+  (`WasmExec.rc_inc_bytes_execute_to_rt_inc`): a minimal wasm STACK MACHINE runs
+  the real rc_inc bytes and the memory effect is EXACTLY `rt_inc` — so the bytes,
+  EXECUTED, compute the abstract acquire (not merely encode an instruction that
+  would). So `rc_inc` is bound END TO END: instruction tree ↔ real bytes ↔
+  execution ↔ rt_inc, the trust chain reaching the ACTUAL wasm bytes. NOT yet done:
+  the same chain for `rc_dec` (control flow + the free-list push) and the rest of
+  the module; and that this small inspectable interpreter matches the FULL wasm
+  spec / ISA (the residual — WasmCert-Coq).
 - **One real `.almd` now flows end-to-end** (`proofs/fixtures/return_list.almd`
   → the actual frontend → MIR → proven checker, for ownership + names — weekly
   indicator ① 0→1). The lowering covers only the value-semantics subset (heap
