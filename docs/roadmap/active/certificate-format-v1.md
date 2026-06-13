@@ -138,8 +138,17 @@ because they are about the run's `Z` result). v0 certificates remain valid.
    (move-out) are ground facts; `exec` is a 4-arm fold; `eager_copy_refines_safety`
    generalized from "Dec-free" to "increment-only" (MoveOut is also a −1).
    `return_list.almd` witness `id → im`. proof spine + gate + 31 tests + CI green.
-2. **Call signatures + per-call-site subset rule** → real programs with calls
-   lower; caps come from real source (the print effect). (Was task #38.)
+2. **Calls.**
+   - **2a: effect calls.** ✅ **SHIPPED.** `lower.rs` lowers `println(s)` → an
+     `Op::Call{PrintStr}` that BORROWS the live string; a real printing program
+     flows through the PCC chain (ownership `id` ACCEPT), and its **capability
+     witness comes from real source** (`used=[Stdout]`) — undeclared, so the cap
+     bound REJECTS it (`|0`): the sandbox promise catching a real host effect.
+   - **2b: user-function call signatures + per-call-site subset rule** (pending):
+     each function carries a SIGNATURE (param move/borrow modes, return mode,
+     declared caps); a call site is checked against the signature by the subset
+     rule — the checker never opens the callee. Unblocks heap-param programs and
+     manifest-declared caps (the ACCEPT case).
 3. **Byte-binding section + op→wasm pattern table** (per-build matcher; the
    runtime memory-model refinement library is the heavy parallel track).
 4. **perceus mode: `r` + the reuse-uniqueness subset section** → leak-freedom on
