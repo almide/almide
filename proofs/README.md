@@ -62,11 +62,11 @@ cd proofs
 The trusted base is recorded so the rest may be called "proven":
 - The **kernel** (Coq/Rocq) and **OCaml extraction** are trusted (CertiCoq +
   CompCert will close the extraction hole, brick 6).
-- The **tokenizer** in `driver.ml` (~10 lines, certificate bytes → op list) is
-  the one piece OUTSIDE the proof. It must be internalized into Coq (parse +
-  check, soundness over the byte stream) for full DO-330 qualification.
-- The model is single-object RC; multi-object + the other properties are later
-  bricks.
+- ~~The tokenizer in `driver.ml`~~ — **INTERNALIZED into Coq** (`parse` +
+  `check_cert`, proven by `check_cert_sound`): the whole *bytes ⟶ accept/reject*
+  pipeline is now kernel-checked. The trusted glue is reduced to file I/O only.
+- The model is single-object RC; multi-object ✅ (`check_all`); the other
+  properties (stack balance, name totality, …) are later bricks.
 
 Rocq/Coq provides `coqc`/`coqchk`. Toolchain pin + axiom ledger is a later
 brick (config management, §7 of the tier-1 stack).

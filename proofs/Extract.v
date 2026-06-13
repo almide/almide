@@ -1,16 +1,15 @@
-(* Extract the KERNEL-PROVEN ownership checker to OCaml, so the very function
-   `check` whose soundness is proven in OwnershipChecker.v RUNS on real
-   certificate files. This is the proof-carrying-code chain made operational:
-   the trusted artifact is the EXTRACTED `check` (carrying its Coq proof); the
-   only untrusted glue is the ~10-line tokenizer in driver.ml (recorded in
-   known-limitations, to be internalized into Coq for full qualification). *)
+(* Extract the KERNEL-PROVEN checker to OCaml. With the tokenizer now INSIDE the
+   proof (`check_cert` parses bytes AND checks), the whole "certificate bytes ⟶
+   accept/reject" pipeline is the extracted proven function `check_cert`. The
+   driver only reads the file — the untrusted glue shrinks to I/O. *)
 
 From AlmideTrust Require Import OwnershipChecker.
 From Stdlib Require Import Extraction.
+From Stdlib Require Import ExtrOcamlBasic ExtrOcamlNativeString.
 
 Extraction Language OCaml.
 Extract Inductive bool => "bool" [ "true" "false" ].
 Extract Inductive list => "list" [ "[]" "(::)" ].
 
 Set Extraction Output Directory ".".
-Extraction "checker.ml" check check_all.
+Extraction "checker.ml" check_cert.

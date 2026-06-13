@@ -12,7 +12,7 @@ echo "== compile + extract the proven checker =="
 "$COQC" -Q . AlmideTrust OwnershipChecker.v >/dev/null
 "$COQC" -Q . AlmideTrust Extract.v >/dev/null
 
-echo "== link the runnable checker (extracted check + tokenizer) =="
+echo "== link the runnable checker (extracted check_cert, parser internalized) =="
 ocamlopt -w -a checker.mli checker.ml driver.ml -o checker
 
 echo "== run the proven checker on real certificates (one object per line) =="

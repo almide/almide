@@ -17,6 +17,7 @@
 From Stdlib Require Import List.
 Import ListNotations.
 From Stdlib Require Import ZArith.
+From Stdlib Require Import String Ascii.
 Open Scope Z_scope.
 
 (* The MIR ownership ops on a single reference-counted object. Inc = the +1 of
@@ -107,9 +108,63 @@ Example rejects_if_any_object_faulty :
   check_all [[Inc; Dec]; [Inc; Dec; Dec]] = false.
 Proof. reflexivity. Qed.
 
+(* ─── certificate parsing, INTERNALIZED INTO COQ ───
+   The byte→op tokenizer used to live in the OCaml driver, OUTSIDE the trusted
+   base (a known-limitation). Here it is a proven Gallina function: the WHOLE
+   "bytes ⟶ accept/reject" pipeline is now kernel-checked, shrinking the trusted
+   base to just file I/O. Certificate format v0: one object per newline; within a
+   line `i`/`I` = +1, `d`/`D` = −1, anything else (whitespace included) skipped. *)
+
+Definition newline : ascii := ascii_of_nat 10.
+
+Definition parse_byte (a : ascii) : option Op :=
+  if orb (Ascii.eqb a "i"%char) (Ascii.eqb a "I"%char) then Some Inc
+  else if orb (Ascii.eqb a "d"%char) (Ascii.eqb a "D"%char) then Some Dec
+  else None.
+
+(* Fold the byte string into per-line op streams; flush the final line at end. *)
+Fixpoint parse_go (s : string) (cur : list Op) : list (list Op) :=
+  match s with
+  | EmptyString => [rev cur]
+  | String b rest =>
+      if Ascii.eqb b newline then rev cur :: parse_go rest []
+      else match parse_byte b with
+           | Some op => parse_go rest (op :: cur)
+           | None => parse_go rest cur
+           end
+  end.
+
+Definition parse (s : string) : list (list Op) := parse_go s [].
+
+(* The full proven checker over raw certificate bytes. *)
+Definition check_cert (s : string) : bool := check_all (parse s).
+
+(* SOUNDNESS over bytes: accepting the certificate bytes guarantees every object
+   parsed from them is free of double-free and leak. The tokenizer is now inside
+   the proof. *)
+Theorem check_cert_sound :
+  forall s, check_cert s = true ->
+    forall ops, In ops (parse s) -> no_double_free ops /\ no_leak ops.
+Proof.
+  intros s H. unfold check_cert in H. apply check_all_sound. exact H.
+Qed.
+
+Example cert_balanced_accepts : check_cert "iidd"%string = true.
+Proof. reflexivity. Qed.
+
+Example cert_double_free_rejects : check_cert "idd"%string = false.
+Proof. reflexivity. Qed.
+
+(* a two-object certificate (newline-separated) — exercises line splitting *)
+Definition cert_two_objs : string :=
+  String "i"%char (String "d"%char (String newline (String "i"%char (String "d"%char EmptyString)))).
+Example cert_two_objs_accepts : check_cert cert_two_objs = true.
+Proof. reflexivity. Qed.
+
 (* AXIOM AUDIT (the "Print Assumptions ⊆ standard" gate). Soundness must rest on
    nothing but the Coq kernel — no admits, no extra axioms. Expected output:
    "Closed under the global context". *)
 Print Assumptions check_sound.
 Print Assumptions check_all_sound.
+Print Assumptions check_cert_sound.
 
