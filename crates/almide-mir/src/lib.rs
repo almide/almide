@@ -203,6 +203,15 @@ pub enum RtFn {
     PrintList,
     /// `println` a scalar integer.
     PrintInt,
+    /// `println` a heap string (the value-semantics subset's string print). A
+    /// WITNESS-LEVEL primitive today: it carries the ownership (borrows the
+    /// string handle) and capability ([`Capability::Stdout`]) facts the proven
+    /// checker re-verifies, but the renderers do NOT lower it yet — strings are
+    /// `Init::Opaque` skeletons in this subset (no content bytes), so a faithful
+    /// `print_str` render awaits the string-content lowering brick. Until then a
+    /// renderer asked to emit it refuses LOUDLY (the catch-all panic), never
+    /// silently — the flight-grade totality rule.
+    PrintStr,
 }
 
 impl RtFn {
@@ -214,7 +223,7 @@ impl RtFn {
     pub const fn capability(self) -> Option<Capability> {
         match self {
             RtFn::ListSet | RtFn::ListPush => None,
-            RtFn::PrintList | RtFn::PrintInt => Some(Capability::Stdout),
+            RtFn::PrintList | RtFn::PrintInt | RtFn::PrintStr => Some(Capability::Stdout),
         }
     }
 }

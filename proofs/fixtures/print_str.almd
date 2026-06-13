@@ -1,0 +1,10 @@
+// A REAL .almd program with an EFFECT CALL (println), so the capability witness
+// is derived from real source: the print reaches Stdout. The string `s` is a
+// LIVE heap value (borrowed by the print, dropped at scope end) — its ownership
+// witness `id` is re-verified by the proven checker. Because `main` declares NO
+// capability, the cap witness `|0` is REJECTED: the sandbox promise catches an
+// undeclared host effect in real source.
+fn main() -> Unit = {
+  var s = "hello"
+  println(s)
+}

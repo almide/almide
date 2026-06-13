@@ -18,8 +18,8 @@
 //! Anything outside the subset (control flow, calls, …) returns
 //! [`LowerError::Unsupported`] — never a silent drop (flight-grade totality).
 
-use crate::{Init, MirFunction, Op, Repr, ValueId, PLACEHOLDER_LAYOUT};
-use almide_ir::{IrExpr, IrExprKind, IrFunction, IrStmt, IrStmtKind, VarId};
+use crate::{CallArg, Init, MirFunction, Op, Repr, RtFn, ValueId, PLACEHOLDER_LAYOUT};
+use almide_ir::{CallTarget, IrExpr, IrExprKind, IrFunction, IrStmt, IrStmtKind, VarId};
 use almide_lang::types::Ty;
 use std::collections::HashMap;
 
@@ -151,6 +151,10 @@ impl LowerCtx {
                 self.ops.push(Op::MakeUnique { v });
                 Ok(())
             }
+            // A bare expression statement that is an EFFECT call (`println(s)`).
+            // Non-call expr statements stay Unsupported (the lower_effect_call
+            // guard rejects them — flight-grade totality).
+            IrStmtKind::Expr { expr } => self.lower_effect_call(expr),
             other => Err(LowerError::Unsupported(format!(
                 "statement {} not in the value-semantics subset",
                 stmt_kind_name(other)
@@ -223,9 +227,14 @@ impl LowerCtx {
         if matches!(tail.ty, Ty::Unit) {
             return match &tail.kind {
                 IrExprKind::Unit => Ok(None),
-                // An effect-call tail (e.g. `println(...)`) is a later brick.
+                // A Unit-typed call tail is an EFFECT call (e.g. `println(s)`):
+                // lower it as a statement-effect, no return value.
+                IrExprKind::Call { .. } => {
+                    self.lower_effect_call(tail)?;
+                    Ok(None)
+                }
                 other => Err(LowerError::Unsupported(format!(
-                    "Unit-typed tail {} (effect tail) not in this brick",
+                    "Unit-typed tail {} not in this brick",
                     kind_name(other)
                 ))),
             };
@@ -254,6 +263,53 @@ impl LowerCtx {
             other => Err(LowerError::Unsupported(format!(
                 "scalar tail {} not in this brick",
                 kind_name(other)
+            ))),
+        }
+    }
+
+    /// Lower an EFFECT call (a Unit-typed `Call`) to a runtime [`Op::Call`].
+    /// Today the recognized set is `println(s)` for a heap string → [`RtFn::PrintStr`],
+    /// which BORROWS the string handle (no refcount change; the value stays live
+    /// and is dropped at scope end) and reaches [`crate::Capability::Stdout`] (so a
+    /// real printing program's capability witness is derived from real source).
+    /// Anything outside the set is an explicit `Unsupported` (totality).
+    fn lower_effect_call(&mut self, call: &IrExpr) -> Result<(), LowerError> {
+        let (target, args) = match &call.kind {
+            IrExprKind::Call { target, args, .. } => (target, args),
+            other => {
+                return Err(LowerError::Unsupported(format!(
+                    "effect statement {} is not a call",
+                    kind_name(other)
+                )))
+            }
+        };
+        let name = match target {
+            CallTarget::Named { name } => name.as_str(),
+            _ => {
+                return Err(LowerError::Unsupported(
+                    "only Named effect calls in this brick".into(),
+                ))
+            }
+        };
+        match (name, args.as_slice()) {
+            // println(s) — s a bound heap string: borrow it for a Stdout write.
+            ("println", [arg]) if is_heap_ty(&arg.ty) => match &arg.kind {
+                IrExprKind::Var { id } => {
+                    let v = self.value_for(*id)?;
+                    self.ops.push(Op::Call {
+                        dst: None,
+                        func: RtFn::PrintStr,
+                        args: vec![CallArg::Handle(v)],
+                    });
+                    Ok(())
+                }
+                other => Err(LowerError::Unsupported(format!(
+                    "println of {} (only a bound heap var) not in this brick",
+                    kind_name(other)
+                ))),
+            },
+            (other, _) => Err(LowerError::Unsupported(format!(
+                "effect call `{other}` not in this brick"
             ))),
         }
     }

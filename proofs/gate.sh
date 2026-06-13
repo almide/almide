@@ -72,6 +72,11 @@ run undeclared caps 1
 echo "-- REAL .almd → frontend → MIR → proven checker (weekly indicator ①: 0→1) --"
 run_src return_list.almd build ownership 0
 run_src return_list.almd build names     0
+# A real program with an EFFECT CALL: ownership of the live string is verified,
+# and the capability witness comes from REAL SOURCE (the println reaches Stdout)
+# — undeclared, so the cap bound REJECTS it (the sandbox promise on real code).
+run_src print_str.almd   main  ownership 0
+run_src print_str.almd   main  caps      1
 
 echo
 echo "GATE OK: the kernel-proven checker re-verified per-build witnesses on THREE"
