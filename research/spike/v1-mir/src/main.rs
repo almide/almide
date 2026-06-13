@@ -16,11 +16,14 @@
 //! The "buggy" rendering reproduces that imbalance to make the win concrete.
 //!
 //! Run: `cargo run` in research/spike/v1-mir/ (standalone; not in the workspace).
+//! This file is shape #2; the full 5-shape gate runs via `./run-gate.sh`.
 //!
-//! Status: shape #2 (`list.get(xs,i) ?? d`, the #643 core) PASSES the gate.
-//! Remaining shapes to harden the gate: alias-return, boxed pattern (#610),
-//! closure capture, AliasCow (the last two are the real test of whether
-//! Perceus-RC and Rust move/borrow truly share one canonical form).
+//! Status: DECISION GATE PASSED — 5/5 shapes, 0 conditional, 0 fail, 0 escape
+//! hatch (2026-06-13, rustc 1.95.0). This file is shape #2 (`list.get(xs,i) ??
+//! d`, the #643 core); shapes #1/#3/#4/#5 (alias-return, boxed pattern #610,
+//! closure capture, AliasCow) live in `shapes/` and re-run via `./run-gate.sh`.
+//! Full record + the 4 canonical-form refinements: see `GATE.md`. RC and Rust
+//! move/borrow share ONE canonical form (Perceus); proceed to Phase 1.
 
 #![allow(dead_code, unused_variables)]
 
