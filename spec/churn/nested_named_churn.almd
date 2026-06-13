@@ -1,0 +1,23 @@
+// Compound-drop churn — a named record nesting a List of heap Strings.
+//
+// Every iteration constructs `Bag { tags: List[String], n: Int }` whose `tags`
+// field owns a heap list of heap strings, then drops it at scope end. Dropping
+// the record must recurse: drop the `tags` list, and for each element drop the
+// String — the nested-Named recursive drop schedule emit_typed_rc_dec re-walks
+// from the type today (emit_wasm/statements.rs). v1 stage 2 flattens it into MIR
+// Drop nodes. This pins the nested record→list→string drop in isolation:
+// byte-identical native == wasm, no double-free, flat RSS under churn.
+//
+// No `?? ` (UnwrapOr) — kept distinct from the open #643 some-box shape.
+type Bag = { tags: List[String], n: Int }
+
+fn main() -> Unit = {
+  var sink = 0
+  var i = 0
+  while i < 200000 {
+    let b = Bag { tags: ["t" + int.to_string(i % 10), "u" + int.to_string(i % 7)], n: i }
+    sink = sink + list.len(b.tags) + b.n % 5
+    i = i + 1
+  }
+  println(int.to_string(sink))
+}
