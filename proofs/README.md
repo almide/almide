@@ -31,12 +31,33 @@ compiler with qualified use in safety-critical settings).
     context* (no extra axioms; the "Print Assumptions ⊆ standard" gate);
   - **independently re-checked** by `coqchk` (the De Bruijn criterion).
 
+- **brick 2 (here): the proven checker RUNS on real bytes.** `Extract.v` extracts
+  the kernel-proven `check` to OCaml; `driver.ml` + `build-checker.sh` link it
+  into a `checker` binary that validates **certificate format v0** (a
+  Metamath-simple token stream: `i`/`I` = an ownership +1, `d`/`D` = a −1,
+  whitespace ignored). `./build-checker.sh` accepts a balanced certificate and
+  rejects double-free / leak. This is the proof-carrying-code chain made
+  operational — the proof stops being "about a model" and becomes "a running
+  binary that carries its soundness proof and judges real output".
+
 ## Verify (the third-party `make verify`)
 
 ```
 cd proofs
-./check.sh        # coqc (+ axiom audit) then coqchk
+./check.sh           # coqc (+ axiom audit) then coqchk — the proof
+./build-checker.sh   # extract → link → run the proven checker on certificates
 ```
+
+## Known limitations (the honest base — config-management §7)
+
+The trusted base is recorded so the rest may be called "proven":
+- The **kernel** (Coq/Rocq) and **OCaml extraction** are trusted (CertiCoq +
+  CompCert will close the extraction hole, brick 6).
+- The **tokenizer** in `driver.ml` (~10 lines, certificate bytes → op list) is
+  the one piece OUTSIDE the proof. It must be internalized into Coq (parse +
+  check, soundness over the byte stream) for full DO-330 qualification.
+- The model is single-object RC; multi-object + the other properties are later
+  bricks.
 
 Rocq/Coq provides `coqc`/`coqchk`. Toolchain pin + axiom ledger is a later
 brick (config management, §7 of the tier-1 stack).
