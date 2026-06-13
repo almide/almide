@@ -164,6 +164,94 @@ Example skip_block_handles_nesting :
   skip_block 10 0 [4;64; 0; 11; 11; 99] = Some [99].
 Proof. reflexivity. Qed.
 
+(* `split_block` returns BOTH the block BODY (before the matching end) and the
+   bytes AFTER it — what a general `if` executor needs (run the body, then go on). *)
+Fixpoint split_block (fuel depth : nat) (bytes acc : list Z) : option (list Z * list Z) :=
+  match fuel with
+  | O => None
+  | S f =>
+      match bytes with
+      | [] => None
+      | op :: rest =>
+          if Z.eqb op 11 then
+            match depth with
+            | O => Some (rev acc, rest)
+            | S d => split_block f d rest (op :: acc)
+            end
+          else if Z.eqb op 4 then
+            match rest with bt :: r => split_block f (S depth) r (bt :: op :: acc) | _ => None end
+          else
+            let n := imm_len op in
+            if Nat.leb n (length rest)
+            then split_block f depth (skipn n rest) (rev (firstn n rest) ++ op :: acc)
+            else None
+      end
+  end.
+
+(* GENERAL wasm interpreter (fuel-bounded): straight-line ops PLUS general
+   structured `if … end` — the then-body runs when the condition is nonzero and
+   is SKIPPED (via split_block) otherwise. Generalizes `run`'s fixed trap pattern
+   to ANY void block body. `[]` / `end` = block complete. (Void blocks here are
+   stack-neutral, so the post-body stack is the pre-body stack.) *)
+Fixpoint run_g (fuel : nat) (bytes : list Z) (p : Z) (st : list Z) (m : Mem) : option Mem :=
+  match fuel with
+  | O => None
+  | S f =>
+      match bytes with
+      | [] => Some m
+      | op :: rest =>
+          if Z.eqb op 11 then Some m
+          else if Z.eqb op 32 then
+            match rest with _i :: r => run_g f r p (p :: st) m | _ => None end
+          else if Z.eqb op 65 then
+            match rest with v :: r => run_g f r p (v :: st) m | _ => None end
+          else if Z.eqb op 106 then
+            match st with b :: a :: s => run_g f rest p ((a + b) :: s) m | _ => None end
+          else if Z.eqb op 40 then
+            match rest, st with
+            | _al :: off :: r, addr :: s => run_g f r p (m (addr + off) :: s) m
+            | _, _ => None end
+          else if Z.eqb op 54 then
+            match rest, st with
+            | _al :: off :: r, v :: addr :: s => run_g f r p s (upd m (addr + off) v)
+            | _, _ => None end
+          else if Z.eqb op 69 then
+            match st with a :: s => run_g f rest p ((if Z.eqb a 0 then 1 else 0) :: s) m | _ => None end
+          else if Z.eqb op 4 then          (* GENERAL if *)
+            match rest with
+            | _bt :: r =>
+                match split_block (length r) 0 r [] with
+                | Some (body, after) =>
+                    match st with
+                    | cond :: s =>
+                        if Z.eqb cond 0 then run_g f after p s m
+                        else match run_g f body p s m with
+                             | Some m' => run_g f after p s m'
+                             | None => None end
+                    | _ => None end
+                | None => None end
+            | _ => None end
+          else None
+      end
+  end.
+
+(* The GENERAL structured-if EXECUTOR runs a non-trivial then-body. `if (cond)
+   (then (i32.store 0 := 42))`: when cond is nonzero the store HAPPENS (cell 0 =
+   42); when cond is 0 the body is SKIPPED (memory unchanged). This is beyond the
+   fixed trap pattern — the body executes, found via the immediate-aware splitter. *)
+Definition cond_store_bytes (c : Z) : list Z :=
+  [65;c;  4;64;  65;0; 65;42; 54;2;0;  11;  11].
+
+Theorem general_if_runs_body_when_true :
+  forall p m, run_g 50 (cond_store_bytes 1) p [] m = Some (upd m 0 42).
+Proof. intros p m. reflexivity. Qed.
+
+Theorem general_if_skips_body_when_false :
+  forall p m, run_g 50 (cond_store_bytes 0) p [] m = Some m.
+Proof. intros p m. reflexivity. Qed.
+
 Print Assumptions rc_inc_bytes_execute_to_rt_inc.
 Print Assumptions trap_bytes_trap_on_zero.
 Print Assumptions trap_bytes_pass_on_nonzero.
+Print Assumptions general_if_runs_body_when_true.
+Print Assumptions general_if_skips_body_when_false.

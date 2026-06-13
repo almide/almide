@@ -147,9 +147,13 @@ The receipt's claims are scoped to exactly this:
   collide with opcodes (`i32.const 4` = `41 04` where 0x04 is `if`; `i32.const 11`
   = `41 0b` where 0x0b is `end`) — proven on those exact collision cases. This
   shows general control flow needs only a small per-opcode immediate-length table,
-  NOT a full WasmCert-Coq parser. NOT yet done: WIRING `skip_block` into a general
-  `if` executor (a run-block layer) + global state to bind the FULL `rc_dec`
-  (free-list) end-to-end; the rest of the module; and that this small inspectable
+  NOT a full WasmCert-Coq parser. And it is now WIRED into a general `if` EXECUTOR
+  (`WasmExec.run_g` + `split_block`): a fuel-bounded interpreter that runs a general
+  structured `if … end` — the then-body EXECUTES when the condition is nonzero and
+  is SKIPPED otherwise (proven on `if (cond) (then store 0:=42)` — body runs / is
+  skipped), beyond the fixed trap pattern. NOT yet done: global state (`global.get`/
+  `set`, a reserved cell) + model alignment to bind the FULL `rc_dec` (free-list)
+  end-to-end on `run_g`; the rest of the module; and that this small inspectable
   interpreter matches the FULL wasm spec / ISA (the residual — WasmCert-Coq).
 - **One real `.almd` now flows end-to-end** (`proofs/fixtures/return_list.almd`
   → the actual frontend → MIR → proven checker, for ownership + names — weekly
