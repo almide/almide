@@ -1,0 +1,172 @@
+# Almide v1: MIR を唯一の真とする単一意味論アーキテクチャ
+
+Status: active — 設計(design-first)。実装は Phase 0 スパイクのレビュー後。
+Owner: compiler
+Supersedes / subsumes: #529 (WasmIR), #643/#591/#610 (cross-target emit drift の class),
+  および wasm-ownership-emit-mechanization.md の提案部
+Relates: flight-grade #563–#586, trust-layer
+
+---
+
+## 0. なぜ v1 か — 病巣は「意味論の実装が2つある」こと
+
+今の Almide は高 IR から **独立した lowering が2本** ある:
+
+- `walker/` → 慣用的 Rust(native)。所有権を Rust に委譲。
+- `emit_wasm/` → 手書き wasm(~136 ランタイムルーチン + emit 層で inc/dec を手置き)。
+
+native が「オラクル」なのは Rust という成熟・検証済みの所有権/メモリ系に**委譲**しているから。wasm はそれを**手で再実装**している。cross-target バグの ~72% はこの「wasm が native オラクルから drift」で、#643/#591/#610 はその ownership/memory 版。
+
+巨大な検証群(byte gate / rt-oracle registry / churn / interp 3rd judge / Lean)は**すべて「2実装の drift を後から検出する」装置**。これには2つの原理的限界がある:
+
+1. **「構築による正しさ(by construction)」に原理的に届かない。** 2つの手書き実装を永遠に同期する約束だから、上限は「網羅的検出による正しさ」。完全性ロードマップが「ちまちま潰す」になるのはこのため。
+2. **検出自体に穴がある。** #643 がその証拠 — 観測(`__println_int`)が `__alloc` を呼んでヒープ再利用を摂動し corruption をマスクする heisenbug で、byte gate も `almide test` も取りこぼした。
+
+→ **v1 の目的は「検出による正しさ」から「構築による正しさ」へ移ること。** そのために意味論の実装を **1つ** にする。
+
+---
+
+## 1. v1 アーキテクチャ
+
+```
+.almd
+  → Core IR            型付き・脱糖・ターゲット中立(今の高 IR を整理したもの)
+  → MIR                所有権(Perceus)と レイアウトを明示。小ステップ意味論を持つ。 ← 唯一の真
+      ├ → wasm         主経路・検証済み・主権的(MIR は wasm 整合 → ほぼ自明に下る)
+      └ → Rust         perf と Ferrocene 資格化の踏み台(MIR を Rust idiom に描くだけ)
+  runtime              Almide 自身で書き、同じ Core→MIR→target を通る(self-host)
+```
+
+**不変条件(v1 の憲法):**
+
+> **所有権とレイアウトの決定は MIR で1回だけ行う。レンダラ(Rust/wasm)は決定を再現するだけで、絶対に再決定しない。**
+
+この一文が #643 のクラスを構造的に不可能にする。今の #643 は「emit_wasm が所有権を手置きして MIR(に相当する解析)から drift した」ことが原因 — レンダラが再決定したから起きた。憲法はそれを禁ずる。
+
+---
+
+## 2. MIR の設計(中核)
+
+### 2.1 明示するもの
+
+1. **Repr(値表現)**: 各値が `Scalar{width}` / `Ptr{layout}` / `Boxed{layout}` のどれか。フィールドオフセット、variant のタグ配置、recursive 型の box 化 — 今 layout registry と box_deref が散在して決めているものを、MIR の**性質**にする。
+2. **所有権操作**: Perceus の `dup`(inc) と `drop`(dec) を値に対し明示。使用点ごとに **consume(move) / borrow / dup** を区別。
+3. **アロケーション/構築**: alloc + フィールド store を明示ノードに。
+
+### 2.2 正準モデル = Perceus(これが鍵)
+
+**Perceus の RC は、より一般的なモデルである。affine/move は「カウントが静的に 1 と分かる RC」の特殊形にすぎない。** だから MIR を Perceus 所有権(明示 dup/drop/borrow + 明示 Repr)で持てば、両ターゲットは**機械的な翻訳**になる:
+
+| MIR(Perceus) | wasm レンダラ | Rust レンダラ |
+|---|---|---|
+| `dup v` | `__rc_inc(v)` | `v.clone()` |
+| 最後の consume | ポインタを渡す | move(所有権移動) |
+| `borrow v` | ポインタを渡す | `&v` / `&mut v` |
+| `drop v`(以後未使用) | `__rc_dec(v)` | スコープ末で Drop |
+| 別名可変 + 変更(AliasCow) | COW(`__cow_check`) | 変更前に `.clone()` |
+| closure capture | capture を dup | move-closure に clone-in |
+
+つまり今 **別々のパス**がやっていること — `pass_perceus`(wasm の inc/dec)、`pass_clone`/CloneInsertion(Rust の clone)、`pass_borrow_inference`(Rust の &)、`pass_capture_clone`、`pass_box_deref` — は**同じ所有権事実の別表現**。v1 はそれを **1つの Core→MIR パスが1回決め**、両レンダラが上表で描くだけにする。
+
+**Lean 資産との整合**: Perceus 健全性・ClosureRc の証明は既にある。それらを MIR の小ステップ意味論に対して述べ直せば、「言語の所有権 = 形式的に証明された Perceus」が **両ターゲットに**効く(今は wasm 側だけ)。
+
+### 2.3 形式の錨
+
+MIR に小ステップ操作的意味論を与える(自分の IR だから出来る)。これを **wasm 形式仕様(機械検証済み)に整合**させる: MIR→wasm の忠実性は wasm spec に対して証明可能。Rust には完全な形式意味論が無いので、Rust レンダラの忠実性は**翻訳検証 + 移行中の byte gate**で担保する(下記 Phase)。
+
+---
+
+## 3. 忠実なレンダラの契約
+
+レンダラ R が **忠実** とは、任意の MIR プログラム P について、R(P) の観測挙動が MIR の意味論 ⟦P⟧ と一致すること。具体規則:
+
+- **レンダラは所有権/レイアウトを決定しない。** MIR の `dup/drop/borrow/Repr` を idiom に変換するだけ。再導出したら**バグ**(= #643 の再来を禁ずる lint/assert として実装)。
+- wasm レンダラ: 忠実性を wasm spec に対して証明する(長期)。
+- Rust レンダラ: 忠実性を翻訳検証で validate。移行中は既存 byte gate が「新 MIR-wasm == 旧 emit_wasm」を保証するオラクル。
+
+---
+
+## 4. self-host runtime
+
+`runtime/rs`(native)と emit_wasm の ~136 routine(wasm)の二重実装が、ownership 以外の drift(~72%の本体: `string.lines`/regex/libm/json…)の源。v1 では **ランタイムを Almide で書く** → 同じ Core→MIR→target を通って全ターゲットへ。drift クラスごと消滅し、dogfooding にもなる(`research/selfhost/` の方向)。alloc/RC の最小プリミティブだけ MIR 組み込み、残りは Almide。ブートストラップは段階的に(Phase 3)。
+
+---
+
+## 5. flight-grade が v1 から「落ちてくる」
+
+| flight-grade 目標 | v1 での実現 |
+|---|---|
+| #529 WasmIR(構築による構造不変条件) | **MIR そのもの** |
+| #563 ALS / #530 規範仕様 / #564 interp を規範に | **MIR の小ステップ意味論 = 規範。interp = それを実行する参照** |
+| #570 per-build 翻訳検証証明書(検証済 checker) | Core→MIR と MIR→target の**各1本**を検証。形式仕様付き MIR なら checker が書ける |
+| #572 可読 Rust の行レベル追跡 | 単一パイプラインの provenance(.almd→Core→MIR→Rust) |
+| #573 Ferrocene / #574 KCG 資格化パッケージ | **仕様された MIR →(仕様された)Rust** = 資格化できる code generator の形。Rust→機械は Ferrocene |
+| #575 DO-333 形式クレジット / #576 Lean を runtime へ | Perceus 健全性を MIR 意味論に対し証明。runtime は Almide コード=検証済パイプラインを通る |
+| #567 Critical subset / #568 静的メモリ / #569 WCET | **MIR の部分言語/性質**として定義。単一の仕様された lowering は WCET 解析が桁違いに容易 |
+
+今の構造は flight-grade を**別の登山**にしているが、v1 は **flight-grade を設計から落とす**。
+
+---
+
+## 6. 収束しながら削除(書き直しではない)
+
+文字通りの 0 からの書き直しはしない(270 fixture = 苦労して得た edge-case 知識の結晶、second-system risk)。**0 からの設計を「終状態」とし、既存コンパイラを足場兼オラクルにして収束する。**
+
+**移行オラクル**: 既存の byte gate + 270 corpus は「新 MIR から描いた wasm が旧挙動と一致するか」の**完璧な回帰オラクル**。一致を確認しながら旧実装を剥がし、最後にオラクルごと削除する。interp(3rd judge)は既に「IR を実行する参照」で、MIR-as-truth の**前倒し資産**。
+
+**削除リスト(v1 終状態で消えるもの = 2実装選択から来た負債):**
+
+- emit_wasm の emit 層所有権(手置き inc/dec) → MIR の dup/drop に置換
+- `pass_perceus`/`pass_clone`/`pass_borrow_inference`/`pass_capture_clone`/`pass_box_deref` → **1本の Core→MIR 所有権+レイアウトパス**に統合
+- byte-identity gate(wasm_cross) → レンダラ忠実性が確立したら不要(移行オラクルとして使い切って退役)
+- rt-oracle registry + churn(drift 検出として) → ランタイム単一化で不要
+- `runtime/rs` ↔ emit_wasm routine の二重保守 → 単一 self-host ランタイム
+
+→ **コードは純減する。** v1 は「機能を足す」のではなく「負債を畳んで正しさを構築に変える」。
+
+---
+
+## 7. Phase 計画
+
+- **Phase 0 — スパイク(1–2週、§8)**: 所有権が厄介な少数形で「単一 MIR → 両レンダラが構築で一致」を実証し、決定ゲート(RC と borrow が1つの正準形に乗るか)を通す。
+- **Phase 1 — MIR コア + 二レンダラ(本体)**: 全言語に拡張。wasm を MIR から描く(emit_wasm の layout/runtime 知識を dumb レンダラに転用)。既存 byte gate + 270 corpus を移行オラクルに旧挙動一致を確認しつつ、旧 emit 所有権・二重所有権パスを削除。次に Rust レンダラを MIR 消費に切替。
+- **Phase 2 — MIR 形式化 + interp を規範に**: 小ステップ意味論、interp = 参照(#563/#564)。Perceus 健全性を Lean で MIR に対し証明。
+- **Phase 3 — runtime を self-host**: ランタイムを Almide で書き MIR 経由で全ターゲットへ。rt-oracle/churn-as-drift を削除。
+- **Phase 4 — flight-grade 成果物**: Critical subset(#567)、静的メモリ(#568)、WCET(#569)を MIR 性質として。per-build 翻訳検証証明書(#570)。KCG パッケージ(#574)。
+
+**規模感(正直)**: スパイク+Phase 1 で最初の四半期(賭けの検証)、v1 完成形まで**年級**。その間 feature/issue 作業はほぼ凍結。最大コストは**検証テール**(所有権変更ごとに全 corpus が再 green 化を要する)。
+
+---
+
+## 8. Phase 0 スパイク仕様(まずここ)
+
+**目的**: §2.2 の中核テーゼ — 「Perceus を正準とすれば、単一の所有権決定から両ターゲットが構築で一致する」 — を、所有権が一番厄介な形で殺すか証明する。
+
+**対象 5 形**(現状 cross-target で割れている/割れ得るもの):
+
+1. **alias 返却** — `fn first(o: Option[String]) = match o { some(s) => s, none => "" }`(返り値が引数の内部を借りる)
+2. **`list.get(xs, i) ?? d`**(#643 の Some-box leak の核)
+3. **boxed variant の nested pattern** — `match t { Node(Leaf(a), Leaf(b)) => a + b, ... }`(#610)
+4. **closure capture** — 可変キャプチャ + 戻り値クロージャ
+5. **別名可変 + 変更**(AliasCow) — `var b = a; mutate(b)` で `a` が不変
+
+**最小 MIR(スパイク範囲)**: `Repr ∈ {Scalar(w), Ptr(layout), Boxed(layout)}`、ノード `Alloc/Store/Load/Dup/Drop/Borrow/Consume/Call`、関数境界の所有権(各パラメータ own/borrow)。
+
+**単一パス**: Core→MIR の Perceus ベース所有権解決 1本(既存 `pass_perceus` を出発点に、Rust 側決定も同じ事実から導けるよう一般化)。
+
+**二レンダラ**: MIR→Rust(§2.2 右列)と MIR→wasm(§2.2 中列)の薄い実装。**所有権を再決定しない**ことを assert。
+
+**忠実性チェック**: 5形を両ターゲットでビルド・実行し、(a) 観測一致、(b) #643 が消える、(c) レンダラが MIR の dup/drop 数をそのまま出している(再決定なし)。
+
+**決定ゲート(合否基準)**:
+- **合格** → RC と borrow が1つの正準形(Perceus)に綺麗に乗る。Phase 1 へ。
+- **不合格(例: 5形のどれかで Rust レンダラが idiomatic move/borrow に翻訳できず、明示 Rc を吐く羽目になり「可読 Rust(#572)」を壊す)** → その事実を明文化し、(i) 正準形を見直す、(ii) Rust 側は明示 Rc を許容し可読性をトレードする、(iii) Rust レンダラを資格化専用と割り切る、のどれを取るか再設計。**安く撤退できる。**
+
+---
+
+## 9. 却下した代替案
+
+- **検出を強化し続ける(現状維持+)**: by-construction に原理的に届かず、検出に穴(#643 heisenbug)。エントロピーとの戦い。
+- **Rust を唯一の真にし wasm を rustc ターゲットに**: 形式仕様の無い Rust 意味論の上に建てることになり、DO-333/Lean の土台にならない。主権も失う。(最初の検討で出たが、形式検証の北極星に反するため却下。)
+- **wasm を唯一の真にし Rust を完全に捨てる**: Ferrocene 資格化の近道と native perf/成熟度を失う。→ 「MIR を真・Rust は踏み台レンダラ」に修正(§1)。
+- **文字通り 0 から書き直す**: 270 fixture の知識喪失、second-system risk。→ 「終状態を北極星に収束 + 削除」に修正(§6)。
