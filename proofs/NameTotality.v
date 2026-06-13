@@ -13,6 +13,7 @@
 From Stdlib Require Import List.
 Import ListNotations.
 From Stdlib Require Import Arith.
+From Stdlib Require Import String Ascii.
 
 (* A name-totality witness: the defined names and the used names. *)
 Record NameWitness := { defined : list nat; used : list nat }.
@@ -47,4 +48,48 @@ Example rejects_dangling :
   check_names {| defined := [1; 2]; used := [1; 5] |} = false.
 Proof. reflexivity. Qed.
 
+(* ─── witness parsing, INTERNALIZED INTO COQ (end-to-end like check_cert) ───
+   Witness format: the DEFINED ids, then `|`, then the USED ids — each a
+   whitespace-separated list of decimal nats. The parser is total; its output is
+   whatever the checker validates (parse correctness is the cert-faithfulness,
+   tested compiler-side). The whole "bytes ⟶ accept/reject" is kernel-checked. *)
+
+Definition is_digit (a : ascii) : bool :=
+  andb (Nat.leb 48 (nat_of_ascii a)) (Nat.leb (nat_of_ascii a) 57).
+Definition digit (a : ascii) : nat := nat_of_ascii a - 48.
+Definition is_bar (a : ascii) : bool := Nat.eqb (nat_of_ascii a) 124. (* '|' *)
+
+Fixpoint pnats (s : string) (cur : option nat) (acc : list nat) : list nat :=
+  match s with
+  | EmptyString => match cur with Some n => acc ++ [n] | None => acc end
+  | String a r =>
+      if is_digit a
+      then pnats r (Some (match cur with Some n => n * 10 + digit a | None => digit a end)) acc
+      else match cur with Some n => pnats r None (acc ++ [n]) | None => pnats r None acc end
+  end.
+
+Fixpoint split_bar (s : string) (left : string) : string * string :=
+  match s with
+  | EmptyString => (left, EmptyString)
+  | String a r => if is_bar a then (left, r) else split_bar r (left ++ String a EmptyString)
+  end.
+
+Definition parse_name_witness (s : string) : NameWitness :=
+  let (ld, lu) := split_bar s EmptyString in
+  {| defined := pnats ld None []; used := pnats lu None [] |}.
+
+Definition check_names_cert (s : string) : bool := check_names (parse_name_witness s).
+
+Theorem check_names_cert_sound :
+  forall s, check_names_cert s = true -> no_dangling (parse_name_witness s).
+Proof.
+  intros s H. unfold check_names_cert in H. apply check_names_sound. exact H.
+Qed.
+
+Example cert_resolved : check_names_cert "1 2 3|1 3" = true.
+Proof. reflexivity. Qed.
+Example cert_dangling : check_names_cert "1 2|1 5" = false.
+Proof. reflexivity. Qed.
+
 Print Assumptions check_names_sound.
+Print Assumptions check_names_cert_sound.

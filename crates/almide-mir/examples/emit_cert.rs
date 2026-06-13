@@ -1,20 +1,25 @@
-//! Emit an ownership certificate (format v0) for a named MIR scenario to stdout.
-//! Stands in for "the compiler emits a certificate per build" — `proofs/gate.sh`
-//! pipes this into the KERNEL-PROVEN checker, which re-verifies memory safety.
+//! Emit a per-build witness for a named MIR scenario to stdout, for one of the
+//! flight-grade properties. Stands in for "the compiler emits a certificate per
+//! build" — `proofs/gate.sh` pipes this into the KERNEL-PROVEN checker, which
+//! re-verifies the property (ownership = no double-free/leak, names = no
+//! dangling MIR reference) on the actual emitted bytes.
+//!
+//!   emit_cert <scenario> [ownership|names]   (property defaults to ownership)
 
 use almide_mir::{
-    certificate::ownership_certificate, Init, MirFunction, Op, Repr, ValueId, PLACEHOLDER_LAYOUT,
+    certificate::{name_witness_string, ownership_certificate},
+    Init, MirFunction, Op, Repr, ValueId, PLACEHOLDER_LAYOUT,
 };
 
 fn heap() -> Repr {
     Repr::Ptr { layout: PLACEHOLDER_LAYOUT }
 }
 
-fn main() {
-    let which = std::env::args().nth(1).unwrap_or_else(|| "balanced".to_string());
+fn scenario(which: &str) -> MirFunction {
     let (a, b) = (ValueId(0), ValueId(1));
-    let f = match which.as_str() {
-        // var a = ...; var b = a (alias); drop a; drop b  → one balanced object.
+    match which {
+        // var a = ...; var b = a (alias); drop a; drop b  → one balanced object,
+        // and every used id is defined → ACCEPT under both properties.
         "balanced" => MirFunction {
             name: "f".into(),
             ops: vec![
@@ -25,16 +30,41 @@ fn main() {
             ],
             ..Default::default()
         },
-        // allocate and never release → a leak (the checker must reject).
+        // allocate and never release → a leak (ownership checker must reject).
         "leak" => MirFunction {
             name: "f".into(),
             ops: vec![Op::Alloc { dst: a, repr: heap(), init: Init::Opaque }],
             ..Default::default()
         },
+        // drop a value id that was never defined → a dangling MIR reference
+        // (the name-totality checker must reject). Ownership-wise it is also
+        // unbalanced, but this scenario exists to exercise the NAME gate.
+        "dangling" => MirFunction {
+            name: "f".into(),
+            ops: vec![
+                Op::Alloc { dst: a, repr: heap(), init: Init::Opaque },
+                Op::Drop { v: a },
+                Op::Drop { v: ValueId(9) }, // 9 is never defined
+            ],
+            ..Default::default()
+        },
         other => {
-            eprintln!("unknown scenario: {other} (try: balanced | leak)");
+            eprintln!("unknown scenario: {other} (try: balanced | leak | dangling)");
             std::process::exit(2);
         }
-    };
-    print!("{}", ownership_certificate(&f));
+    }
+}
+
+fn main() {
+    let which = std::env::args().nth(1).unwrap_or_else(|| "balanced".to_string());
+    let property = std::env::args().nth(2).unwrap_or_else(|| "ownership".to_string());
+    let f = scenario(&which);
+    match property.as_str() {
+        "ownership" => print!("{}", ownership_certificate(&f)),
+        "names" => print!("{}", name_witness_string(&f)),
+        other => {
+            eprintln!("unknown property: {other} (try: ownership | names)");
+            std::process::exit(2);
+        }
+    }
 }

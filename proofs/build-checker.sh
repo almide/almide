@@ -10,6 +10,7 @@ COQC="${COQC:-$(command -v coqc)}"
 
 echo "== compile + extract the proven checker =="
 "$COQC" -Q . AlmideTrust OwnershipChecker.v >/dev/null
+"$COQC" -Q . AlmideTrust NameTotality.v >/dev/null
 "$COQC" -Q . AlmideTrust Extract.v >/dev/null
 
 echo "== link the runnable checker (extracted check_cert, parser internalized) =="
@@ -21,7 +22,7 @@ printf 'IIDD\nIDD\n' > /tmp/double_free.cert  # 2nd object double-frees → REJE
 printf 'ID\nIID\n'  > /tmp/leak.cert          # 2nd object leaks → REJECT
 
 run() { # path expected_exit
-  set +e; ./checker "$1" >/tmp/checker.out 2>&1; local rc=$?; set -e
+  set +e; ./checker ownership "$1" >/tmp/checker.out 2>&1; local rc=$?; set -e
   if [ "$rc" -eq "$2" ]; then echo "ok   $(basename "$1"): $(cat /tmp/checker.out) (exit $rc)";
   else echo "FAIL $(basename "$1"): got exit $rc want $2 ($(cat /tmp/checker.out))"; exit 1; fi
 }

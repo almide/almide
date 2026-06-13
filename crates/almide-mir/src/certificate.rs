@@ -27,12 +27,21 @@ pub struct NameWitness {
     pub used: Vec<ValueId>,
 }
 
+/// Serialize the name-totality witness in the format `proofs/NameTotality.v`'s
+/// `check_names_cert` parses: `<defined ids>|<used ids>` (space-separated nats).
+/// The proven checker accepts iff `used ⊆ defined` (no dangling reference).
+pub fn name_witness_string(func: &MirFunction) -> String {
+    let w = name_witness(func);
+    let ids = |v: &[ValueId]| v.iter().map(|x| x.0.to_string()).collect::<Vec<_>>().join(" ");
+    format!("{}|{}", ids(&w.defined), ids(&w.used))
+}
+
 /// Collect the (defined, used) value ids of a function for name-totality.
 /// Duplicates are harmless — the proven checker is set-membership.
 pub fn name_witness(func: &MirFunction) -> NameWitness {
     let mut defined: Vec<ValueId> = func.params.iter().map(|p| p.value).collect();
     let mut used: Vec<ValueId> = Vec::new();
-    let mut record_args = |args: &[CallArg], used: &mut Vec<ValueId>| {
+    let record_args = |args: &[CallArg], used: &mut Vec<ValueId>| {
         for a in args {
             if let CallArg::Handle(v) | CallArg::Scalar(v) = a {
                 used.push(*v);
