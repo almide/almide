@@ -1,0 +1,11 @@
+[package]
+name = "almide-mir"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Almide v1 Middle IR — the single source of truth for ownership and layout"
+
+# Greenfield v1 seed: no dependencies yet. The Core-IR→MIR lowering (a later
+# brick) will add a dep on the existing frontend IR as a temporary feeder; the
+# MIR data model + ownership verifier here are self-contained and auditable.
+[dependencies]

@@ -1,0 +1,401 @@
+//! almide-mir — the Almide v1 Middle IR: the single source of truth for
+//! ownership and layout.
+//!
+//! See docs/roadmap/active/v1-mir-architecture.md.
+//!
+//! # Constitution (§1)
+//! Ownership and layout are decided ONCE, here. Renderers (Rust, wasm) only
+//! translate the decision; they NEVER re-decide it. A renderer that recomputes
+//! `dup`/`drop`/`borrow`/`Repr`/`MakeUnique` is a bug (the #643 class).
+//!
+//! # Flight-grade (§5)
+//! This crate is the #529 WasmIR vehicle. The ownership model below is the
+//! normative semantics (#563/#564); [`verify_ownership`] is the EXECUTABLE form
+//! of the ownership invariant destined for Lean certification (#575/#576). To
+//! stay auditable for DO-178C / DO-333 qualification this crate is:
+//!   - `unsafe`-free (`#![forbid(unsafe_code)]`),
+//!   - TOTAL — every `match` is exhaustive with no silent catch-all (a dropped
+//!     case is a verification hole, the codegen-traversal-totality lesson),
+//!   - free of unnamed magic numbers (scalar widths are named constants).
+//!
+//! This first brick is the data model + the ownership verifier. The
+//! Core-IR→MIR lowering and the two renderers are subsequent bricks; they are
+//! built fresh and judged against the existing compiler + the semantic-law
+//! oracle (the v1 dual-oracle, §6).
+
+#![forbid(unsafe_code)]
+
+use std::collections::BTreeMap;
+
+// ───────────────────────────── Layout / Repr ──────────────────────────────
+
+/// Scalar widths in bytes (the LAYOUT facts that today live scattered across
+/// `emit_wasm/values.rs::byte_size`; here they are named, not raw literals).
+pub mod width {
+    /// `Int` is a 64-bit integer.
+    pub const INT: u16 = 8;
+    /// `Float` is an IEEE-754 double.
+    pub const FLOAT: u16 = 8;
+    /// `Bool` occupies a 32-bit slot (wasm has no narrower value type on the
+    /// stack; native is one byte but the ABI slot is what the Repr records).
+    pub const BOOL: u16 = 4;
+}
+
+/// A value's runtime representation — the LAYOUT decision (§2.1), decided once.
+///
+/// `Scalar` values are `Copy` and carry no refcount (no `dup`/`drop`).
+/// `Ptr`/`Boxed` values are reference-counted heap pointers; only these
+/// participate in ownership accounting.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
+pub enum Repr {
+    /// A `Copy` scalar of `width` bytes (Int/Float/Bool/narrow ints).
+    Scalar { width: u16 },
+    /// A reference-counted heap pointer to a value laid out by `layout`.
+    Ptr { layout: LayoutId },
+    /// Like [`Repr::Ptr`] but BOXED for a recursive type. Renders as `Box<T>`
+    /// on Rust and a bare pointer on wasm; reading THROUGH the box is a
+    /// [`Op::Borrow`], never a consume (the #610 / gate shape-3 decision).
+    Boxed { layout: LayoutId },
+}
+
+impl Repr {
+    /// Heap-managed values carry a refcount and need `dup`/`drop`; scalars do
+    /// not. This single predicate replaces the duplicated `is_heap_type`
+    /// (pass_perceus + emit_wasm/statements, hand-copied today).
+    pub fn is_heap(self) -> bool {
+        matches!(self, Repr::Ptr { .. } | Repr::Boxed { .. })
+    }
+}
+
+/// A handle into the layout registry (header size, field offsets, tag
+/// placement, element stride). The registry is built by the layout pass; MIR
+/// values only carry the id, so a future layout change touches ONE place.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash, PartialOrd, Ord)]
+pub struct LayoutId(pub u32);
+
+/// An SSA-like MIR value (a local). Identity is the id; its [`Repr`] is fixed
+/// at definition and never re-decided downstream.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash, PartialOrd, Ord)]
+pub struct ValueId(pub u32);
+
+// ──────────────────────────── Ownership nodes ─────────────────────────────
+
+/// One MIR statement. Ownership is EXPLICIT: a heap value's refcount is changed
+/// only by [`Op::Alloc`]/[`Op::Dup`] (+1) and [`Op::Drop`]/[`Op::Consume`]
+/// (−1). The renderers SPELL these (`__rc_inc`/`.clone()`, `__rc_dec`/scope
+/// drop, ptr-transfer/move); they never compute where they go.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Op {
+    /// `dst = alloc(repr)` — a fresh owned heap value with refcount 1. The only
+    /// +1 besides [`Op::Dup`]. `repr` must be a heap repr.
+    Alloc { dst: ValueId, repr: Repr },
+    /// `dst = <scalar>` — a `Copy` value (no refcount, no ownership).
+    Const { dst: ValueId },
+    /// `dup v` — acquire one additional owned reference (+1). The single
+    /// decision for "this binding aliases a still-live value" (Rust `.clone()`,
+    /// wasm `__rc_inc`).
+    Dup { v: ValueId },
+    /// `drop v` — release one owned reference (−1); at 0 the value is freed
+    /// (Rust scope-end drop, wasm `__rc_dec`).
+    Drop { v: ValueId },
+    /// `consume v` — transfer v's reference OUT (into a container, a return, or
+    /// a callee that takes ownership). v is dead here; the reference lives on
+    /// elsewhere. Renders as a move (Rust) / ptr-transfer with no inc (wasm).
+    Consume { v: ValueId },
+    /// `borrow v` — read v without changing its refcount (Rust `&v`, wasm a
+    /// pointer load). Reading through a [`Repr::Boxed`] is this, not a consume.
+    Borrow { v: ValueId },
+    /// `make_unique v` — ensure v is uniquely owned before an in-place
+    /// mutation (clone-on-shared). Renders as `.clone()`-on-alias (Rust) /
+    /// `__cow_check` (wasm). The AliasCow / gate shape-5 decision.
+    MakeUnique { v: ValueId },
+    /// `dst = pure(uses…)` — a computation that BORROWS its inputs and defines
+    /// a scalar `dst` (e.g. `list.len`). Heap results are produced by
+    /// [`Op::Alloc`]. Keeps the op set total without a catch-all.
+    Pure { dst: ValueId, uses: Vec<ValueId> },
+}
+
+/// A MIR function body: a flat, ownership-explicit op sequence.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MirFunction {
+    pub name: String,
+    pub ops: Vec<Op>,
+}
+
+/// A whole MIR program.
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct MirProgram {
+    pub functions: Vec<MirFunction>,
+}
+
+// ─────────────────────────── Ownership verifier ───────────────────────────
+//
+// The executable ownership invariant (#575/#576). A symbolic refcount
+// interpretation over the ops: every heap value's owner count must return to 0
+// (every reference dropped or moved out), never go negative (double-free), and
+// never be used after it reaches 0 / is moved (use-after-free / -move).
+
+/// What an ownership violation is.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ViolationKind {
+    /// A `drop` of a value whose owner count is already 0.
+    DoubleFree,
+    /// A `dup`/`borrow`/`make_unique`/`pure`-use of a freed value.
+    UseAfterFree,
+    /// A `consume` of a value already moved out (count 0).
+    UseAfterMove,
+    /// A heap value still owned (count > 0) at function end.
+    Leak,
+}
+
+/// A located ownership violation.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Violation {
+    /// Index into `func.ops`; equals `ops.len()` for an end-of-function leak.
+    pub op_index: usize,
+    pub value: ValueId,
+    pub kind: ViolationKind,
+}
+
+/// Verify the ownership invariant for one function.
+///
+/// Returns `Ok(())` if the MIR is balanced (the by-construction guarantee the
+/// renderers rely on), or every violation found (deterministic order). This is
+/// the MIR-level analogue of the Perceus belt's IR check, but it is the SINGLE
+/// source — there is no second hand-written copy in a renderer to drift from.
+pub fn verify_ownership(func: &MirFunction) -> Result<(), Vec<Violation>> {
+    // Owner count per heap value. Presence in the map == "is a known heap
+    // value"; a value never inserted is a scalar (Const / Pure result) and is
+    // ignored by ownership accounting.
+    let mut owners: BTreeMap<ValueId, i64> = BTreeMap::new();
+    let mut violations: Vec<Violation> = Vec::new();
+
+    for (i, op) in func.ops.iter().enumerate() {
+        match op {
+            Op::Alloc { dst, repr } => {
+                // Alloc defines a fresh heap value with one owner.
+                debug_assert!(repr.is_heap(), "Alloc of a non-heap repr is malformed MIR");
+                owners.insert(*dst, 1);
+            }
+            Op::Const { dst: _ } => {
+                // A scalar — no ownership accounting.
+            }
+            Op::Dup { v } => match owners.get_mut(v) {
+                Some(c) if *c >= 1 => *c += 1,
+                _ => violations.push(violation(i, *v, ViolationKind::UseAfterFree)),
+            },
+            Op::Drop { v } => match owners.get_mut(v) {
+                Some(c) if *c >= 1 => *c -= 1,
+                _ => violations.push(violation(i, *v, ViolationKind::DoubleFree)),
+            },
+            Op::Consume { v } => match owners.get_mut(v) {
+                Some(c) if *c >= 1 => *c -= 1, // reference moved out of this function
+                _ => violations.push(violation(i, *v, ViolationKind::UseAfterMove)),
+            },
+            Op::Borrow { v } | Op::MakeUnique { v } => {
+                if !is_live(&owners, *v) {
+                    violations.push(violation(i, *v, ViolationKind::UseAfterFree));
+                }
+            }
+            Op::Pure { dst: _, uses } => {
+                for v in uses {
+                    // Only heap values are accountable; scalar uses are absent
+                    // from `owners` and correctly skipped.
+                    if owners.contains_key(v) && !is_live(&owners, *v) {
+                        violations.push(violation(i, *v, ViolationKind::UseAfterFree));
+                    }
+                }
+            }
+        }
+    }
+
+    // Leak check: every heap reference must have left (dropped or moved).
+    for (v, c) in &owners {
+        if *c > 0 {
+            violations.push(violation(func.ops.len(), *v, ViolationKind::Leak));
+        }
+    }
+
+    if violations.is_empty() {
+        Ok(())
+    } else {
+        Err(violations)
+    }
+}
+
+fn violation(op_index: usize, value: ValueId, kind: ViolationKind) -> Violation {
+    Violation { op_index, value, kind }
+}
+
+/// A heap value is live iff it is known (was alloc'd) and still has an owner.
+fn is_live(owners: &BTreeMap<ValueId, i64>, v: ValueId) -> bool {
+    owners.get(&v).copied().unwrap_or(0) >= 1
+}
+
+// ──────────────────────────────── tests ───────────────────────────────────
+//
+// The Phase 0 decision gate (research/spike/v1-mir/) proved, in a standalone
+// spike, that one ownership decision per shape renders faithfully to both
+// idioms. Here those five shapes are encoded as REAL MIR and checked by the
+// REAL verifier: the balanced skeleton verifies clean, and a renderer-style
+// "re-decision" (a dropped Drop, a deep free, a consume-on-call) is caught.
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn v(n: u32) -> ValueId {
+        ValueId(n)
+    }
+    fn heap() -> Repr {
+        Repr::Ptr { layout: LayoutId(0) }
+    }
+    fn func(ops: Vec<Op>) -> MirFunction {
+        MirFunction { name: "shape".into(), ops }
+    }
+
+    // Shape 2 — list_get_643: a per-iteration heap temp `t` is alloc'd and
+    // consumed (pushed into `out`); the alias `nx` is dup'd and dropped at
+    // scope end. The leak of a per-iteration temp is exactly #643's class.
+    fn shape_643() -> MirFunction {
+        let (nx, t) = (v(0), v(1));
+        func(vec![
+            Op::Alloc { dst: nx, repr: heap() }, // nx acquires its own ref (alias-inc)
+            Op::Alloc { dst: t, repr: heap() },  // the slice|>join temp
+            Op::Consume { v: t },                // pushed into `out` (moved)
+            Op::Borrow { v: nx },                // used
+            Op::Drop { v: nx },                  // scope end
+        ])
+    }
+
+    // Shape 1 — alias_return: move the payload OUT (consume), free the shell
+    // ONLY. A renderer that deep-frees the returned payload double-frees.
+    fn shape_alias_return() -> MirFunction {
+        let (payload, shell) = (v(0), v(1));
+        func(vec![
+            Op::Alloc { dst: payload, repr: heap() },
+            Op::Alloc { dst: shell, repr: heap() },
+            Op::Consume { v: payload }, // transferred to the caller (returned)
+            Op::Drop { v: shell },      // free the Option shell only
+        ])
+    }
+
+    // Shape 3 — boxed_pattern_610: read through the box is a Borrow (no
+    // dup/drop of the child); the Leaf payload is a Scalar. One Drop of the node.
+    fn shape_boxed_pattern() -> MirFunction {
+        let (node, a) = (v(0), v(1));
+        func(vec![
+            Op::Alloc { dst: node, repr: heap() },
+            Op::Const { dst: a },         // scalar leaf payload (Borrow-through-box copy)
+            Op::Borrow { v: node },       // the nested read
+            Op::Pure { dst: v(2), uses: vec![a, node] }, // e.g. a + node-tag use
+            Op::Drop { v: node },         // scope end
+        ])
+    }
+
+    // Shape 4 — closure_capture: capture = dup into env; each call borrows;
+    // env-drop and the original drop release the two refs. Read-only, callable
+    // twice (Fn).
+    fn shape_closure_capture() -> MirFunction {
+        let x = v(0);
+        func(vec![
+            Op::Alloc { dst: x, repr: heap() },
+            Op::Dup { v: x },    // capture into the closure env
+            Op::Borrow { v: x }, // call 1
+            Op::Borrow { v: x }, // call 2
+            Op::Drop { v: x },   // closure/env drop
+            Op::Drop { v: x },   // original drop
+        ])
+    }
+
+    // Shape 5 — alias_cow: alias by dup, MakeUnique before the in-place mutate,
+    // both refs dropped. (The AliasCow *value* bug is wrong-output with the
+    // refcount BALANCED — caught by the semantic-law oracle, finding #3 — so the
+    // ownership skeleton here is, correctly, balanced.)
+    fn shape_alias_cow() -> MirFunction {
+        let a = v(0);
+        func(vec![
+            Op::Alloc { dst: a, repr: heap() },
+            Op::Dup { v: a },        // b aliases a (now shared, count 2)
+            Op::MakeUnique { v: a }, // clone-on-shared before mutating
+            Op::Drop { v: a },       // a
+            Op::Drop { v: a },       // b
+        ])
+    }
+
+    #[test]
+    fn all_five_gate_shapes_verify_balanced() {
+        for f in [
+            shape_643(),
+            shape_alias_return(),
+            shape_boxed_pattern(),
+            shape_closure_capture(),
+            shape_alias_cow(),
+        ] {
+            assert_eq!(verify_ownership(&f), Ok(()), "shape `{}` must verify clean", f.name);
+        }
+    }
+
+    #[test]
+    fn dropped_drop_is_caught_as_leak() {
+        // #643 with the per-iteration alias Drop omitted (the renderer-side leak).
+        let mut f = shape_643();
+        f.ops.retain(|op| !matches!(op, Op::Drop { .. }));
+        let errs = verify_ownership(&f).unwrap_err();
+        assert!(errs.iter().any(|e| e.kind == ViolationKind::Leak && e.value == ValueId(0)));
+    }
+
+    #[test]
+    fn deep_free_of_a_moved_payload_is_caught() {
+        // alias_return where the renderer ALSO frees the returned payload.
+        let mut f = shape_alias_return();
+        f.ops.push(Op::Drop { v: ValueId(0) }); // drop after consume
+        let errs = verify_ownership(&f).unwrap_err();
+        assert!(errs.iter().any(|e| e.kind == ViolationKind::DoubleFree && e.value == ValueId(0)));
+    }
+
+    #[test]
+    fn capture_consumed_on_call_double_frees() {
+        // closure_capture mis-modeled: a call CONSUMES the capture, so the 2nd
+        // call + teardown over-release.
+        let x = ValueId(0);
+        let f = func(vec![
+            Op::Alloc { dst: x, repr: heap() },
+            Op::Dup { v: x },
+            Op::Consume { v: x }, // call 1 wrongly consumes
+            Op::Consume { v: x }, // call 2 — already 1 → 0
+            Op::Drop { v: x },    // teardown — now below 0
+        ]);
+        let errs = verify_ownership(&f).unwrap_err();
+        assert!(errs.iter().any(|e| e.kind == ViolationKind::DoubleFree));
+    }
+
+    #[test]
+    fn use_after_free_is_caught() {
+        let x = ValueId(0);
+        let f = func(vec![
+            Op::Alloc { dst: x, repr: heap() },
+            Op::Drop { v: x },   // freed
+            Op::Borrow { v: x }, // used after free
+        ]);
+        let errs = verify_ownership(&f).unwrap_err();
+        assert!(errs.iter().any(|e| e.kind == ViolationKind::UseAfterFree));
+    }
+
+    #[test]
+    fn scalars_need_no_ownership() {
+        // A Const used by a Pure must not be flagged (no refcount on scalars).
+        let f = func(vec![
+            Op::Const { dst: ValueId(0) },
+            Op::Pure { dst: ValueId(1), uses: vec![ValueId(0)] },
+        ]);
+        assert_eq!(verify_ownership(&f), Ok(()));
+    }
+
+    #[test]
+    fn repr_heap_predicate() {
+        assert!(heap().is_heap());
+        assert!(Repr::Boxed { layout: LayoutId(0) }.is_heap());
+        assert!(!Repr::Scalar { width: width::INT }.is_heap());
+    }
+}
