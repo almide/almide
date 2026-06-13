@@ -2,7 +2,7 @@ VERSION := $(shell grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/'
 INSTALL_DIR := $(HOME)/.local/almide
 BIN := target/release/almide
 
-.PHONY: build install test test-wasm test-ts check clean fmt release parity cross-target cheatsheet stdlib-docs
+.PHONY: build install test test-wasm test-ts check clean fmt release parity cross-target cheatsheet stdlib-docs verify-trust
 
 ## Build
 
@@ -69,6 +69,15 @@ stdlib-docs:
 
 check:
 	cargo check
+
+## Verify the v1 flight-grade trust chain (the third-party "make verify"):
+## the Coq proof + independent re-check + axiom audit, then the proof-carrying
+## gate (untrusted compiler emits an ownership certificate, the kernel-proven
+## checker re-verifies it), then the MIR core + verifier tests. Requires Rocq/Coq.
+verify-trust:
+	proofs/check.sh
+	proofs/gate.sh
+	cargo test -p almide-mir
 
 fmt:
 	cargo fmt --check 2>/dev/null || true
