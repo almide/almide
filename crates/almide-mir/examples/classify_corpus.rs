@@ -11,9 +11,14 @@
 //! it holds on real source, not just on hand-built MIR.
 //!
 //! Output split:
-//!  - STDOUT: the ownership witness of every IN-PROFILE function, one heap object
-//!    per line — a `.cert` stream the kernel-proven checker re-verifies in one
-//!    pass (accept ⟹ every in-profile program is RC-safe, over the real corpus).
+//!  - `--out DIR`: the witnesses of every IN-PROFILE function for ALL THREE
+//!    proven properties, written as `.cert` files the kernel-proven checker
+//!    re-verifies in one pass each:
+//!      ownership.cert — one heap object per line (accept ⟹ no double-free/leak)
+//!      names.cert     — one `defined|used` line per function (⟹ no dangling ref)
+//!      caps.cert      — one `allowed|used` line per function (⟹ no undeclared
+//!                       host effect)
+//!    So accept ⟹ the FULL proven property set holds over the real corpus.
 //!  - STDERR: the honest coverage report — files scanned, frontend-rejected,
 //!    functions reaching MIR, in-profile count, and an Unsupported-reason
 //!    histogram (so coverage growth is measurable per language feature).
@@ -28,7 +33,7 @@ use almide_frontend::ir_link;
 use almide_frontend::lower::lower_program;
 use almide_lang::lexer::Lexer;
 use almide_lang::parser::Parser;
-use almide_mir::certificate::ownership_certificate;
+use almide_mir::certificate::{cap_witness_string, name_witness_string, ownership_certificate};
 use almide_optimize::{mono, optimize};
 use std::collections::BTreeMap;
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -122,23 +127,39 @@ fn collect_almd(path: &Path, out: &mut Vec<PathBuf>) {
 }
 
 fn main() {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    if args.is_empty() {
-        eprintln!("usage: classify_corpus <file.almd | dir> ...");
+    // Parse `--out DIR` (where the three witness `.cert` files are written); the
+    // remaining args are corpus paths (files or dirs).
+    let mut out_dir: Option<PathBuf> = None;
+    let mut paths: Vec<String> = Vec::new();
+    let mut it = std::env::args().skip(1);
+    while let Some(a) = it.next() {
+        if a == "--out" {
+            out_dir = it.next().map(PathBuf::from);
+        } else {
+            paths.push(a);
+        }
+    }
+    if paths.is_empty() || out_dir.is_none() {
+        eprintln!("usage: classify_corpus --out DIR <file.almd | dir> ...");
         std::process::exit(2);
     }
+    let out_dir = out_dir.unwrap();
 
     // The sweep catches panics deliberately; silence the default hook so a
     // walled-off panic does not spray a backtrace over the honest report.
     std::panic::set_hook(Box::new(|_| {}));
 
     let mut files = Vec::new();
-    for a in &args {
+    for a in &paths {
         collect_almd(Path::new(a), &mut files);
     }
 
     let mut t = Tally::default();
-    let mut cert_stream = String::new();
+    // One witness stream per proven property. ownership = one heap object per
+    // line; names/caps = one `<superset>|<subset>` line per in-profile function.
+    let mut ownership_stream = String::new();
+    let mut names_stream = String::new();
+    let mut caps_stream = String::new();
 
     for file in &files {
         t.files += 1;
@@ -167,11 +188,15 @@ fn main() {
             match lowered {
                 Ok(Ok(mir)) => {
                     t.in_profile += 1;
-                    // Collect the ownership witness for the PCC re-check. One
-                    // heap object per line; concatenating across functions keeps
-                    // each object independently checkable.
-                    let cert = ownership_certificate(&mir);
-                    cert_stream.push_str(&cert);
+                    // Collect all three witnesses for the PCC re-check. Ownership
+                    // is one heap object per line; concatenating across functions
+                    // keeps each object independently checkable. Names and caps
+                    // are one line per function (the checker is set-membership).
+                    ownership_stream.push_str(&ownership_certificate(&mir));
+                    names_stream.push_str(&name_witness_string(&mir));
+                    names_stream.push('\n');
+                    caps_stream.push_str(&cap_witness_string(&mir));
+                    caps_stream.push('\n');
                 }
                 Ok(Err(almide_mir::lower::LowerError::Unsupported(reason))) => {
                     *t.unsupported.entry(reason_key(&reason)).or_insert(0) += 1;
@@ -188,9 +213,19 @@ fn main() {
     // Restore a sane hook before we print (catch window is over).
     let _ = std::panic::take_hook();
 
-    // STDOUT: the cert stream for the proven checker (may be empty if no
-    // in-profile function emits a heap object — trivially accepted).
-    print!("{cert_stream}");
+    // Write the three witness streams for the proven checker. ownership may be
+    // empty if no in-profile function emits a heap object (trivially accepted);
+    // names/caps have one line per in-profile function.
+    let write = |name: &str, body: &str| {
+        let p = out_dir.join(name);
+        if let Err(e) = std::fs::write(&p, body) {
+            eprintln!("cannot write {}: {e}", p.display());
+            std::process::exit(2);
+        }
+    };
+    write("ownership.cert", &ownership_stream);
+    write("names.cert", &names_stream);
+    write("caps.cert", &caps_stream);
 
     // STDERR: the honest coverage report.
     eprintln!("== v0-corpus MIR-lowering wall report ==");

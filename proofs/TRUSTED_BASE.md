@@ -94,9 +94,17 @@ The receipt's claims are scoped to exactly this:
   TOTAL over the corpus: every function is `Ok` (in-profile) or an explicit
   `Unsupported` (walled); **zero panics, zero silent miscompiles** (a program
   outside the value-semantics subset is rejected with a reason, never quietly
-  mislowered); (2) **accept ⟹ safe** — the kernel-proven checker re-verifies the
-  ownership witness of EVERY in-profile function in one pass and ACCEPTs
-  (accept ⟹ RC-safe, by `check_sound`). This is the step-4 "continuous corpus
+  mislowered); (2) **accept ⟹ safe on ALL THREE proven properties** — the
+  kernel-proven checker re-verifies EVERY in-profile function's witness and
+  ACCEPTs for ownership (no double-free/leak, `check_sound`), name totality (no
+  dangling MIR reference, `check_names_cert_sound`), and capability bound (no
+  undeclared host effect, `check_caps_cert_sound`). Witness granularity differs
+  by property and the gate respects it: the ownership checker FOLDS over heap
+  objects (one fold over the whole stream), while the name/capability checkers
+  parse a SINGLE `<superset>|<subset>` witness, so those are re-verified one
+  function at a time (a batched file would wrongly fold every function's ids into
+  one superset — surfaced and encoded while building this gate). This is the
+  step-4 "continuous corpus
   verification = the definition of parity" in its honest first form: it does NOT
   yet claim the *completion definition* (the proven profile accepting the full
   corpus), it establishes the *mechanism* that measures progress toward it and

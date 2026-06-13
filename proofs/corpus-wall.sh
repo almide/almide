@@ -30,10 +30,11 @@ echo "== build the corpus classifier (real frontend → MIR lowering) =="
 (cd "$ROOT" && cargo build -q -p almide-mir --example classify_corpus) 2>/dev/null
 
 echo "== sweep the v0 corpus: $CORPUS =="
-CERTS="$(mktemp)"; REPORT="$(mktemp)"
+OUTDIR="$(mktemp -d)"; REPORT="$(mktemp)"
+cleanup() { rm -rf "$OUTDIR" "$REPORT"; }
 set +e
-(cd "$ROOT" && cargo run -q -p almide-mir --example classify_corpus -- "$CORPUS") \
-  >"$CERTS" 2>"$REPORT"
+(cd "$ROOT" && cargo run -q -p almide-mir --example classify_corpus -- --out "$OUTDIR" "$CORPUS") \
+  2>"$REPORT"
 WALL_RC=$?
 set -e
 # Show only the harness report (from its marker), dropping any cargo build noise.
@@ -41,40 +42,76 @@ sed -n '/== v0-corpus MIR-lowering wall report ==/,$p' "$REPORT"
 
 if [ "$WALL_RC" -ne 0 ]; then
   echo "WALL GATE FAIL: lower_function breached totality (panicked) on a corpus function." >&2
-  rm -f "$CERTS" "$REPORT"
-  exit 1
+  cleanup; exit 1
 fi
 
 # Anti-collapse floor: at least one in-profile program must reach the checker, so
 # the PCC chain is genuinely exercised (a corpus where NOTHING lowers would pass
 # the wall vacuously — that silent coverage collapse must fail the gate).
-if [ ! -s "$CERTS" ]; then
+if [ ! -s "$OUTDIR/ownership.cert" ]; then
   echo "WALL GATE FAIL: no in-profile heap object reached the checker (coverage collapsed to 0)." >&2
-  rm -f "$CERTS" "$REPORT"
-  exit 1
+  cleanup; exit 1
 fi
 
 echo
 echo "== build the kernel-proven checker (from the Coq proof) =="
 ./build-checker.sh >/dev/null
 
-echo "== PCC chain: the proven checker re-verifies EVERY in-profile witness =="
-IN_PROFILE_OBJS=$(wc -l < "$CERTS" | tr -d ' ')
-set +e
-./checker ownership "$CERTS" >/tmp/corpus-wall.checker.out 2>&1
-CHECK_RC=$?
-set -e
-echo "checker over $IN_PROFILE_OBJS in-profile heap object(s): $(cat /tmp/corpus-wall.checker.out) (exit $CHECK_RC)"
+# accept ⟹ safe for the FULL proven property set over real corpus programs: the
+# kernel-proven checker re-verifies EVERY in-profile witness in each of its three
+# modes (ownership = no double-free/leak; names = no dangling MIR ref; caps = no
+# undeclared host effect).
+#
+# WITNESS GRANULARITY (a structural fact this 3-property extension surfaced): the
+# ownership checker (`check_cert`) FOLDS over heap objects — one per line — so the
+# whole ownership.cert is verified in ONE pass. But the name/capability checkers
+# (`check_names_cert` / `check_caps_cert`) parse the WHOLE input as a SINGLE
+# `<superset>|<subset>` witness (no line split) — each is a per-FUNCTION property.
+# So names/caps are verified one function (one line) at a time; a batched file
+# would wrongly fold every function's ids into one superset. accept on every line
+# ⟹ the property holds of every in-profile function.
+echo "== PCC chain: the proven checker re-verifies EVERY in-profile witness (3 properties) =="
 
-if [ "$CHECK_RC" -ne 0 ]; then
-  echo "WALL GATE FAIL: the proven checker REJECTED an in-profile witness (accept ⟹ safe violated)." >&2
-  rm -f "$CERTS" "$REPORT"
-  exit 1
+# Ownership: a single fold over all heap objects (the checker splits by line).
+OWN_N=$(wc -l < "$OUTDIR/ownership.cert" | tr -d ' ')
+set +e
+./checker ownership "$OUTDIR/ownership.cert" >/tmp/corpus-wall.checker.out 2>&1
+OWN_RC=$?
+set -e
+echo "  [ownership] $OWN_N heap object(s) (no double-free / no leak): $(cat /tmp/corpus-wall.checker.out) (exit $OWN_RC)"
+if [ "$OWN_RC" -ne 0 ]; then
+  echo "WALL GATE FAIL: proven checker REJECTED an in-profile [ownership] witness (accept ⟹ safe violated)." >&2
+  cleanup; exit 1
 fi
 
-rm -f "$CERTS" "$REPORT"
+# Names / caps: one proven-checker invocation per function (per witness line).
+check_per_function() { # property cert-file human-meaning
+  local prop="$1" cert="$2" meaning="$3"
+  local n=0 line one
+  one="$(mktemp)"
+  while IFS= read -r line; do
+    n=$((n + 1))
+    printf '%s\n' "$line" > "$one"
+    set +e
+    ./checker "$prop" "$one" >/dev/null 2>&1
+    local rc=$?
+    set -e
+    if [ "$rc" -ne 0 ]; then
+      echo "  [$prop] FUNCTION $n REJECTS: witness '$line'"
+      echo "WALL GATE FAIL: proven checker REJECTED an in-profile [$prop] witness (accept ⟹ safe violated)." >&2
+      rm -f "$one"; cleanup; exit 1
+    fi
+  done < "$cert"
+  rm -f "$one"
+  echo "  [$prop] $n function witness(es) ($meaning): ACCEPT (exit 0)"
+}
+check_per_function names "$OUTDIR/names.cert" "no dangling MIR reference"
+check_per_function caps  "$OUTDIR/caps.cert"  "no undeclared host effect"
+
+cleanup
 echo
 echo "CORPUS WALL OK: over the whole v0 corpus, lower_function is total (wall holds,"
 echo "zero silent miscompiles) AND the kernel-proven checker accepts every in-profile"
-echo "ownership witness (accept ⟹ RC-safe on real corpus programs). Coverage is"
-echo "reported above; the Unsupported histogram is the per-feature roadmap."
+echo "witness on ALL THREE proven properties (accept ⟹ ownership ∧ name-totality ∧"
+echo "capability-bound, on real corpus programs). Coverage is reported above; the"
+echo "Unsupported histogram is the per-feature roadmap."
