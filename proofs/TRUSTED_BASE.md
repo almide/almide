@@ -66,10 +66,10 @@ The receipt's claims are scoped to exactly this:
   reuse-safety (a valid allocation never returns a currently-LIVE block — no
   reuse-after-free, `FreeList.alloc_not_live`), copy-on-write alias-safety
   (`MakeUnique` yields a uniquely-owned block — no aliased in-place mutation,
-  `CowSafety.make_unique_yields_unique`), byte-binding table + the `$rc_dec`
-  instruction-tree realizing `rt_dec` (`WasmRcDec`), operand-stack balance, and
-  termination of the loop-free fragment — all kernel-checked and axiom-clean
-  (27 theorems). What remains is DEPTH (the byte-binding ISA layer; and
+  `CowSafety.make_unique_yields_unique`), byte-binding table + the `$rc_dec` /
+  `$rc_inc` instruction-trees realizing `rt_dec` / `rt_inc` (`WasmRcDec`),
+  operand-stack balance, and termination of the loop-free fragment — all
+  kernel-checked and axiom-clean (28 theorems). What remains is DEPTH (the byte-binding ISA layer; and
   the RENDERER realizing the free-list/`rc_inc` — its safety MODEL is now proven,
   so that slice REFINES a proof rather than adding trusted runtime) and BREADTH
   (lowering beyond the subset: control flow, closures, stdlib) — not new properties

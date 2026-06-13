@@ -105,6 +105,25 @@ Proof.
     rewrite Hleb. cbn [run]. reflexivity.
 Qed.
 
+(* The COUNTERPART: the `$rc_inc` body the sharing renderer (A1.3) will emit:
+     i32.store (i32.add (local.get $p) (i32.const RC_OFFSET))
+               (i32.add (i32.load (i32.add (local.get $p) (i32.const RC_OFFSET)))
+                        (i32.const 1))
+   It has no trap (an acquire never faults). Binding it now (before A1.3 emits it)
+   completes the rc-primitive instruction pair: both `rt_inc` and `rt_dec` are
+   realized by the exact instruction trees the renderer emits. *)
+Definition rc_inc_prog : list stmt :=
+  [ Store (Add Ptr (Const RC_OFFSET))
+          (Add (Load (Add Ptr (Const RC_OFFSET))) (Const 1)) ].
+
+Theorem rc_inc_prog_realizes_rt_inc :
+  forall p m,
+    run rc_inc_prog p {| tmpv := 0; cmem := m |} = Some {| tmpv := 0; cmem := rt_inc m p |}.
+Proof.
+  intros p m. unfold rc_inc_prog, run, step, rt_inc, read_rc. cbn [eval tmpv cmem].
+  reflexivity.
+Qed.
+
 (* Non-vacuous, the safety-relevant direction: releasing a cell that is already
    0 (a would-be double-free) TRAPS — exactly `unreachable`, no silent wrap. *)
 Example rc_dec_traps_on_zero :
@@ -128,3 +147,4 @@ Qed.
 
 (* AXIOM AUDIT — soundness rests on the kernel alone. *)
 Print Assumptions rc_dec_prog_realizes_rt_dec.
+Print Assumptions rc_inc_prog_realizes_rt_inc.
