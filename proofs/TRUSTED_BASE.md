@@ -56,8 +56,12 @@ The receipt's claims are scoped to exactly this:
   ownership ops; the wasm is a faithful render of the same MIR (§3 renderer
   contract). A per-build translation validator that the emitted wasm bytes
   refine the ALS is the main body of brick 4.
-- **The certificate is emitted for representative MIR shapes**, not yet from a
-  real `.almd` end-to-end compile (blocked on the full lowering, #29).
+- **One real `.almd` now flows end-to-end** (`proofs/fixtures/return_list.almd`
+  → the actual frontend → MIR → proven checker, for ownership + names — weekly
+  indicator ① 0→1). The lowering covers only the value-semantics subset (heap
+  literals, alias, index-assign copy-on-write, scalar/heap-move-out return — NO
+  calls or control flow yet, #29), so the broader reject cases and the
+  capability witness are still REPRESENTATIVE MIR shapes (emit_cert.rs).
 - **Extraction is trusted** (item 2 above) until CertiCoq/CompCert.
 - **Single independent checker.** Diversity (≥2 independent checkers) is brick 6.
 

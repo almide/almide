@@ -97,19 +97,8 @@ pub fn lower_function(func: &IrFunction) -> Result<MirFunction, LowerError> {
 /// is the thin wrapper over a whole [`IrFunction`]).
 pub fn lower_body(body: &IrExpr, name: &str) -> Result<MirFunction, LowerError> {
     let mut ctx = LowerCtx::default();
-    let stmts = match &body.kind {
-        IrExprKind::Block { stmts, expr } => {
-            // The subset is Unit-returning (the tail is Unit / absent); a heap
-            // tail value would be a move-out (Consume), handled in a later brick.
-            if let Some(tail) = expr {
-                if is_heap_ty(&tail.ty) {
-                    return Err(LowerError::Unsupported(
-                        "heap-typed tail value (move-out) not in this brick".into(),
-                    ));
-                }
-            }
-            stmts
-        }
+    let (stmts, tail) = match &body.kind {
+        IrExprKind::Block { stmts, expr } => (stmts, expr.as_deref()),
         other => {
             return Err(LowerError::Unsupported(format!(
                 "function body is not a Block: {}",
@@ -121,11 +110,19 @@ pub fn lower_body(body: &IrExpr, name: &str) -> Result<MirFunction, LowerError> 
     for stmt in stmts {
         ctx.lower_stmt(stmt)?;
     }
-    // Scope end: release every live heap handle. Aliases share a ValueId, so one
-    // Drop per HANDLE balances the Alloc(+1) and each aliasing Dup(+1).
+
+    // The tail expression is the function's return value. A HEAP tail is MOVED
+    // OUT to the caller (a −1 at the boundary, recorded as `ret`) and so is NOT
+    // dropped at scope end; a scalar tail carries no ownership; a Unit/absent
+    // tail is a Unit-returning body.
+    let ret = ctx.lower_tail(tail)?;
+
+    // Scope end: release every still-live heap handle (the moved-out return is
+    // already removed). Aliases share a ValueId, so one Drop per HANDLE balances
+    // the Alloc(+1) and each aliasing Dup(+1).
     ctx.emit_scope_end_drops();
 
-    Ok(MirFunction { name: name.to_string(), ops: ctx.ops, ..Default::default() })
+    Ok(MirFunction { name: name.to_string(), ops: ctx.ops, ret, ..Default::default() })
 }
 
 #[derive(Default)]
@@ -209,6 +206,56 @@ impl LowerCtx {
             .get(&var)
             .copied()
             .ok_or_else(|| LowerError::Unsupported(format!("use of unbound var {var:?}")))
+    }
+
+    /// Lower the body's tail expression to the function's return value.
+    /// - heap `Var` tail → MOVE-OUT: the handle is consumed at the boundary
+    ///   (returned as `ret`, removed from the live set so it is not also dropped).
+    /// - scalar `Var` tail → returned by value (no ownership; `ret` names it).
+    /// - scalar literal tail → a fresh `Const`, returned by value.
+    /// - `Unit` / absent → a Unit-returning body (no return value).
+    /// Anything else is an explicit `Unsupported` (flight-grade totality).
+    fn lower_tail(&mut self, tail: Option<&IrExpr>) -> Result<Option<ValueId>, LowerError> {
+        let tail = match tail {
+            Some(t) => t,
+            None => return Ok(None),
+        };
+        if matches!(tail.ty, Ty::Unit) {
+            return match &tail.kind {
+                IrExprKind::Unit => Ok(None),
+                // An effect-call tail (e.g. `println(...)`) is a later brick.
+                other => Err(LowerError::Unsupported(format!(
+                    "Unit-typed tail {} (effect tail) not in this brick",
+                    kind_name(other)
+                ))),
+            };
+        }
+        if is_heap_ty(&tail.ty) {
+            return match &tail.kind {
+                IrExprKind::Var { id } => {
+                    let v = self.value_for(*id)?;
+                    self.live_heap_handles.retain(|h| *h != v); // moved out, not dropped
+                    Ok(Some(v))
+                }
+                other => Err(LowerError::Unsupported(format!(
+                    "heap move-out from {} (only a bound var) not in this brick",
+                    kind_name(other)
+                ))),
+            };
+        }
+        // Scalar return value (Copy — no ownership accounting).
+        match &tail.kind {
+            IrExprKind::Var { id } => Ok(Some(self.value_for(*id)?)),
+            IrExprKind::LitInt { .. } | IrExprKind::LitBool { .. } | IrExprKind::LitFloat { .. } => {
+                let dst = self.fresh_value();
+                self.ops.push(Op::Const { dst });
+                Ok(Some(dst))
+            }
+            other => Err(LowerError::Unsupported(format!(
+                "scalar tail {} not in this brick",
+                kind_name(other)
+            ))),
+        }
     }
 
     fn emit_scope_end_drops(&mut self) {
@@ -328,6 +375,32 @@ mod tests {
         assert_eq!(drops, 2, "two handles (a, b) → two scope-end drops");
 
         // The single ownership decision must be balanced by construction.
+        assert_eq!(verify_ownership(&mir), Ok(()));
+    }
+
+    #[test]
+    fn heap_return_is_a_balanced_move_out() {
+        // fn build() -> List[Int] = { var a = [1,2,3]; a }
+        // The tail `a` is a heap move-out: Alloc(+1), returned/consumed(−1), and
+        // NOT dropped at scope end. Ownership witness `id` → balanced.
+        let tail = ir_expr(IrExprKind::Var { id: VarId(0) }, list_int());
+        let b = ir_expr(
+            IrExprKind::Block {
+                stmts: vec![bind(
+                    0,
+                    list_int(),
+                    ir_expr(IrExprKind::List { elements: vec![] }, list_int()),
+                )],
+                expr: Some(Box::new(tail)),
+            },
+            list_int(),
+        );
+        let mir = lower_body(&b, "build").expect("lowers");
+        assert!(matches!(mir.ops[0], Op::Alloc { dst: ValueId(0), .. }));
+        // moved out, so NO scope-end Drop of the returned handle.
+        assert!(!mir.ops.iter().any(|o| matches!(o, Op::Drop { .. })));
+        assert_eq!(mir.ret, Some(ValueId(0)));
+        // The move-out balances the Alloc — the verifier accepts.
         assert_eq!(verify_ownership(&mir), Ok(()));
     }
 

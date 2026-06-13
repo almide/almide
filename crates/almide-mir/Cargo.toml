@@ -12,3 +12,12 @@ description = "Almide v1 Middle IR — the single source of truth for ownership 
 [dependencies]
 almide-ir = { path = "../almide-ir" }
 almide-lang = { path = "../almide-lang" }
+
+# Dev-only: the `emit_cert_from_source` example drives a REAL .almd through the
+# existing frontend pipeline (parse → check → lower → optimize → mono → ir_link)
+# to obtain linked IR, then lowers THAT to MIR and emits a witness — the G1
+# end-to-end PCC path (a real program, not a hand-built MIR). Kept dev-only so
+# the library's dependency surface stays almide-ir + almide-lang.
+[dev-dependencies]
+almide-frontend = { path = "../almide-frontend" }
+almide-optimize = { path = "../almide-optimize" }
