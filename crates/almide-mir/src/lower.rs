@@ -176,13 +176,15 @@ impl LowerCtx {
             return Ok(());
         }
         match &value.kind {
-            // Alias: `var b = a` — b denotes the SAME heap object as a, acquiring
-            // its own owned reference (the single fresh-vs-alias decision).
+            // Alias: `var b = a` — b is a NEW handle denoting the SAME heap
+            // object as a, acquiring its own owned reference (the single
+            // fresh-vs-alias decision).
             IrExprKind::Var { id } => {
                 let src = self.value_for(*id)?;
-                self.value_of.insert(var, src);
-                self.ops.push(Op::Dup { v: src });
-                self.live_heap_handles.push(src);
+                let dst = self.fresh_value();
+                self.value_of.insert(var, dst);
+                self.ops.push(Op::Dup { dst, src });
+                self.live_heap_handles.push(dst);
                 Ok(())
             }
             // A fresh heap value (literal container / string).
@@ -304,9 +306,9 @@ mod tests {
         ]);
         let mir = lower_body(&b, "main").expect("lowers");
 
-        // Expect: Alloc(a), Dup(a as b alias), MakeUnique(a), Drop, Drop.
+        // Expect: Alloc(a=V0), Dup(b=V1 from V0), MakeUnique(a=V0), Drop, Drop.
         assert!(matches!(mir.ops[0], Op::Alloc { dst: ValueId(0), .. }));
-        assert!(matches!(mir.ops[1], Op::Dup { v: ValueId(0) }));
+        assert!(matches!(mir.ops[1], Op::Dup { dst: ValueId(1), src: ValueId(0) }));
         assert!(matches!(mir.ops[2], Op::MakeUnique { v: ValueId(0) }));
         let drops = mir.ops.iter().filter(|o| matches!(o, Op::Drop { .. })).count();
         assert_eq!(drops, 2, "two handles (a, b) → two scope-end drops");

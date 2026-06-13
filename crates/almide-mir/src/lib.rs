@@ -102,10 +102,13 @@ pub enum Op {
     Alloc { dst: ValueId, repr: Repr },
     /// `dst = <scalar>` — a `Copy` value (no refcount, no ownership).
     Const { dst: ValueId },
-    /// `dup v` — acquire one additional owned reference (+1). The single
-    /// decision for "this binding aliases a still-live value" (Rust `.clone()`,
-    /// wasm `__rc_inc`).
-    Dup { v: ValueId },
+    /// `dst = dup src` — `dst` is a NEW handle (a distinct variable) denoting
+    /// the SAME heap OBJECT as `src`, acquiring one additional owned reference
+    /// (+1 on the object). The single decision for "this binding aliases a
+    /// still-live value" (Rust `let dst = src.clone()`, wasm `__rc_inc`).
+    /// Handle ≠ object: `src` and `dst` are distinct [`ValueId`]s (so a renderer
+    /// can name two variables) that share one refcounted object.
+    Dup { dst: ValueId, src: ValueId },
     /// `drop v` — release one owned reference (−1); at 0 the value is freed
     /// (Rust scope-end drop, wasm `__rc_dec`).
     Drop { v: ValueId },
@@ -175,44 +178,55 @@ pub struct Violation {
 /// the MIR-level analogue of the Perceus belt's IR check, but it is the SINGLE
 /// source — there is no second hand-written copy in a renderer to drift from.
 pub fn verify_ownership(func: &MirFunction) -> Result<(), Vec<Violation>> {
-    // Owner count per heap value. Presence in the map == "is a known heap
-    // value"; a value never inserted is a scalar (Const / Pure result) and is
-    // ignored by ownership accounting.
-    let mut owners: BTreeMap<ValueId, i64> = BTreeMap::new();
+    // Handle ≠ object. Each known heap HANDLE (ValueId) maps to its OBJECT (the
+    // `Alloc`'d representative ValueId); the refcount is per OBJECT. A handle is
+    // also tracked LIVE/dead, so a use of a handle after its own drop/consume is
+    // caught even when the object lives on through a sibling handle.
+    let mut object_of: BTreeMap<ValueId, ValueId> = BTreeMap::new();
+    let mut rc: BTreeMap<ValueId, i64> = BTreeMap::new(); // keyed by object
+    let mut dead: BTreeMap<ValueId, bool> = BTreeMap::new(); // keyed by handle
     let mut violations: Vec<Violation> = Vec::new();
 
     for (i, op) in func.ops.iter().enumerate() {
         match op {
             Op::Alloc { dst, repr } => {
-                // Alloc defines a fresh heap value with one owner.
                 debug_assert!(repr.is_heap(), "Alloc of a non-heap repr is malformed MIR");
-                owners.insert(*dst, 1);
+                object_of.insert(*dst, *dst);
+                rc.insert(*dst, 1);
+                dead.insert(*dst, false);
             }
             Op::Const { dst: _ } => {
                 // A scalar — no ownership accounting.
             }
-            Op::Dup { v } => match owners.get_mut(v) {
-                Some(c) if *c >= 1 => *c += 1,
-                _ => violations.push(violation(i, *v, ViolationKind::UseAfterFree)),
+            Op::Dup { dst, src } => {
+                if let Some(o) = live_object(&object_of, &rc, &dead, *src) {
+                    *rc.get_mut(&o).expect("object has a refcount") += 1;
+                    object_of.insert(*dst, o);
+                    dead.insert(*dst, false);
+                } else {
+                    violations.push(violation(i, *src, ViolationKind::UseAfterFree));
+                }
+            }
+            Op::Drop { v } => match release(&object_of, &mut rc, &mut dead, *v) {
+                Ok(()) => {}
+                Err(()) => violations.push(violation(i, *v, ViolationKind::DoubleFree)),
             },
-            Op::Drop { v } => match owners.get_mut(v) {
-                Some(c) if *c >= 1 => *c -= 1,
-                _ => violations.push(violation(i, *v, ViolationKind::DoubleFree)),
-            },
-            Op::Consume { v } => match owners.get_mut(v) {
-                Some(c) if *c >= 1 => *c -= 1, // reference moved out of this function
-                _ => violations.push(violation(i, *v, ViolationKind::UseAfterMove)),
+            Op::Consume { v } => match release(&object_of, &mut rc, &mut dead, *v) {
+                Ok(()) => {}
+                Err(()) => violations.push(violation(i, *v, ViolationKind::UseAfterMove)),
             },
             Op::Borrow { v } | Op::MakeUnique { v } => {
-                if !is_live(&owners, *v) {
+                if live_object(&object_of, &rc, &dead, *v).is_none() {
                     violations.push(violation(i, *v, ViolationKind::UseAfterFree));
                 }
             }
             Op::Pure { dst: _, uses } => {
                 for v in uses {
-                    // Only heap values are accountable; scalar uses are absent
-                    // from `owners` and correctly skipped.
-                    if owners.contains_key(v) && !is_live(&owners, *v) {
+                    // Only heap handles are accountable; scalar uses are absent
+                    // from `object_of` and correctly skipped.
+                    if object_of.contains_key(v)
+                        && live_object(&object_of, &rc, &dead, *v).is_none()
+                    {
                         violations.push(violation(i, *v, ViolationKind::UseAfterFree));
                     }
                 }
@@ -220,10 +234,10 @@ pub fn verify_ownership(func: &MirFunction) -> Result<(), Vec<Violation>> {
         }
     }
 
-    // Leak check: every heap reference must have left (dropped or moved).
-    for (v, c) in &owners {
+    // Leak check: every object's references must have left (dropped or moved).
+    for (o, c) in &rc {
         if *c > 0 {
-            violations.push(violation(func.ops.len(), *v, ViolationKind::Leak));
+            violations.push(violation(func.ops.len(), *o, ViolationKind::Leak));
         }
     }
 
@@ -238,9 +252,43 @@ fn violation(op_index: usize, value: ValueId, kind: ViolationKind) -> Violation 
     Violation { op_index, value, kind }
 }
 
-/// A heap value is live iff it is known (was alloc'd) and still has an owner.
-fn is_live(owners: &BTreeMap<ValueId, i64>, v: ValueId) -> bool {
-    owners.get(&v).copied().unwrap_or(0) >= 1
+/// The object a handle denotes, iff the handle is live (not yet dropped) and its
+/// object still has at least one owner. `None` means the handle is dead/unknown
+/// or its object is freed.
+fn live_object(
+    object_of: &BTreeMap<ValueId, ValueId>,
+    rc: &BTreeMap<ValueId, i64>,
+    dead: &BTreeMap<ValueId, bool>,
+    v: ValueId,
+) -> Option<ValueId> {
+    if dead.get(&v).copied().unwrap_or(true) {
+        return None; // unknown handle or already dropped/consumed
+    }
+    let o = *object_of.get(&v)?;
+    if rc.get(&o).copied().unwrap_or(0) >= 1 {
+        Some(o)
+    } else {
+        None
+    }
+}
+
+/// Release one reference held by handle `v` (drop or consume): mark the handle
+/// dead and decrement its object's refcount. `Err(())` if `v` is not a live
+/// handle (a double-release).
+fn release(
+    object_of: &BTreeMap<ValueId, ValueId>,
+    rc: &mut BTreeMap<ValueId, i64>,
+    dead: &mut BTreeMap<ValueId, bool>,
+    v: ValueId,
+) -> Result<(), ()> {
+    match live_object(object_of, rc, dead, v) {
+        Some(o) => {
+            *rc.get_mut(&o).expect("live object has a refcount") -= 1;
+            dead.insert(v, true);
+            Ok(())
+        }
+        None => Err(()),
+    }
 }
 
 // ──────────────────────────────── tests ───────────────────────────────────
@@ -304,33 +352,34 @@ mod tests {
         ])
     }
 
-    // Shape 4 — closure_capture: capture = dup into env; each call borrows;
-    // env-drop and the original drop release the two refs. Read-only, callable
-    // twice (Fn).
+    // Shape 4 — closure_capture: capture = dup into env (a new handle `env`
+    // sharing x's object); each call borrows the env handle; env-drop and the
+    // original drop release the two refs. Read-only, callable twice (Fn).
     fn shape_closure_capture() -> MirFunction {
-        let x = v(0);
+        let (x, env) = (v(0), v(1));
         func(vec![
             Op::Alloc { dst: x, repr: heap() },
-            Op::Dup { v: x },    // capture into the closure env
-            Op::Borrow { v: x }, // call 1
-            Op::Borrow { v: x }, // call 2
-            Op::Drop { v: x },   // closure/env drop
-            Op::Drop { v: x },   // original drop
+            Op::Dup { dst: env, src: x }, // capture into the closure env
+            Op::Borrow { v: env },        // call 1
+            Op::Borrow { v: env },        // call 2
+            Op::Drop { v: env },          // closure/env drop
+            Op::Drop { v: x },            // original drop
         ])
     }
 
-    // Shape 5 — alias_cow: alias by dup, MakeUnique before the in-place mutate,
-    // both refs dropped. (The AliasCow *value* bug is wrong-output with the
-    // refcount BALANCED — caught by the semantic-law oracle, finding #3 — so the
-    // ownership skeleton here is, correctly, balanced.)
+    // Shape 5 — alias_cow: `b` aliases `a` (a new handle sharing a's object),
+    // MakeUnique before the in-place mutate, both handles dropped. (The AliasCow
+    // *value* bug is wrong-output with the refcount BALANCED — caught by the
+    // semantic-law oracle, finding #3 — so the ownership skeleton here is,
+    // correctly, balanced.)
     fn shape_alias_cow() -> MirFunction {
-        let a = v(0);
+        let (a, b) = (v(0), v(1));
         func(vec![
             Op::Alloc { dst: a, repr: heap() },
-            Op::Dup { v: a },        // b aliases a (now shared, count 2)
-            Op::MakeUnique { v: a }, // clone-on-shared before mutating
-            Op::Drop { v: a },       // a
-            Op::Drop { v: a },       // b
+            Op::Dup { dst: b, src: a }, // b aliases a (object now shared, rc 2)
+            Op::MakeUnique { v: a },    // clone-on-shared before mutating
+            Op::Drop { v: a },          // a
+            Op::Drop { v: b },          // b
         ])
     }
 
@@ -366,19 +415,22 @@ mod tests {
     }
 
     #[test]
-    fn capture_consumed_on_call_double_frees() {
-        // closure_capture mis-modeled: a call CONSUMES the capture, so the 2nd
-        // call + teardown over-release.
-        let x = ValueId(0);
+    fn capture_consumed_on_call_over_releases() {
+        // closure_capture mis-modeled: a call CONSUMES the env capture handle,
+        // so the 2nd call uses an already-moved handle (the re-decision is caught
+        // — UseAfterMove here; the point is it does not pass silently).
+        let (x, env) = (ValueId(0), ValueId(1));
         let f = func(vec![
             Op::Alloc { dst: x, repr: heap() },
-            Op::Dup { v: x },
-            Op::Consume { v: x }, // call 1 wrongly consumes
-            Op::Consume { v: x }, // call 2 — already 1 → 0
-            Op::Drop { v: x },    // teardown — now below 0
+            Op::Dup { dst: env, src: x },
+            Op::Consume { v: env }, // call 1 wrongly consumes the capture
+            Op::Consume { v: env }, // call 2 — env already moved
+            Op::Drop { v: x },
         ]);
         let errs = verify_ownership(&f).unwrap_err();
-        assert!(errs.iter().any(|e| e.kind == ViolationKind::DoubleFree));
+        assert!(errs
+            .iter()
+            .any(|e| matches!(e.kind, ViolationKind::UseAfterMove | ViolationKind::DoubleFree)));
     }
 
     #[test]
