@@ -91,15 +91,27 @@ pub struct ValueId(pub u32);
 
 // ──────────────────────────── Ownership nodes ─────────────────────────────
 
+/// How a freshly [`Op::Alloc`]'d value is initialized — the COMPUTATION the
+/// ownership skeleton carries. The value-semantics subset only needs integer
+/// lists; richer initializers arrive with later bricks.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Init {
+    /// No concrete initializer — an ownership-only skeleton (not renderable to a
+    /// running program; used by the ownership-shape tests).
+    Opaque,
+    /// A `List[Int]` literal.
+    IntList(Vec<i64>),
+}
+
 /// One MIR statement. Ownership is EXPLICIT: a heap value's refcount is changed
 /// only by [`Op::Alloc`]/[`Op::Dup`] (+1) and [`Op::Drop`]/[`Op::Consume`]
 /// (−1). The renderers SPELL these (`__rc_inc`/`.clone()`, `__rc_dec`/scope
 /// drop, ptr-transfer/move); they never compute where they go.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Op {
-    /// `dst = alloc(repr)` — a fresh owned heap value with refcount 1. The only
-    /// +1 besides [`Op::Dup`]. `repr` must be a heap repr.
-    Alloc { dst: ValueId, repr: Repr },
+    /// `dst = alloc(repr, init)` — a fresh owned heap value with refcount 1. The
+    /// only +1 besides [`Op::Dup`]. `repr` must be a heap repr.
+    Alloc { dst: ValueId, repr: Repr, init: Init },
     /// `dst = <scalar>` — a `Copy` value (no refcount, no ownership).
     Const { dst: ValueId },
     /// `dst = dup src` — `dst` is a NEW handle (a distinct variable) denoting
@@ -189,7 +201,7 @@ pub fn verify_ownership(func: &MirFunction) -> Result<(), Vec<Violation>> {
 
     for (i, op) in func.ops.iter().enumerate() {
         match op {
-            Op::Alloc { dst, repr } => {
+            Op::Alloc { dst, repr, .. } => {
                 debug_assert!(repr.is_heap(), "Alloc of a non-heap repr is malformed MIR");
                 object_of.insert(*dst, *dst);
                 rc.insert(*dst, 1);
@@ -319,8 +331,8 @@ mod tests {
     fn shape_643() -> MirFunction {
         let (nx, t) = (v(0), v(1));
         func(vec![
-            Op::Alloc { dst: nx, repr: heap() }, // nx acquires its own ref (alias-inc)
-            Op::Alloc { dst: t, repr: heap() },  // the slice|>join temp
+            Op::Alloc { dst: nx, repr: heap(), init: Init::Opaque }, // nx acquires its own ref (alias-inc)
+            Op::Alloc { dst: t, repr: heap(), init: Init::Opaque },  // the slice|>join temp
             Op::Consume { v: t },                // pushed into `out` (moved)
             Op::Borrow { v: nx },                // used
             Op::Drop { v: nx },                  // scope end
@@ -332,8 +344,8 @@ mod tests {
     fn shape_alias_return() -> MirFunction {
         let (payload, shell) = (v(0), v(1));
         func(vec![
-            Op::Alloc { dst: payload, repr: heap() },
-            Op::Alloc { dst: shell, repr: heap() },
+            Op::Alloc { dst: payload, repr: heap(), init: Init::Opaque },
+            Op::Alloc { dst: shell, repr: heap(), init: Init::Opaque },
             Op::Consume { v: payload }, // transferred to the caller (returned)
             Op::Drop { v: shell },      // free the Option shell only
         ])
@@ -344,7 +356,7 @@ mod tests {
     fn shape_boxed_pattern() -> MirFunction {
         let (node, a) = (v(0), v(1));
         func(vec![
-            Op::Alloc { dst: node, repr: heap() },
+            Op::Alloc { dst: node, repr: heap(), init: Init::Opaque },
             Op::Const { dst: a },         // scalar leaf payload (Borrow-through-box copy)
             Op::Borrow { v: node },       // the nested read
             Op::Pure { dst: v(2), uses: vec![a, node] }, // e.g. a + node-tag use
@@ -358,7 +370,7 @@ mod tests {
     fn shape_closure_capture() -> MirFunction {
         let (x, env) = (v(0), v(1));
         func(vec![
-            Op::Alloc { dst: x, repr: heap() },
+            Op::Alloc { dst: x, repr: heap(), init: Init::Opaque },
             Op::Dup { dst: env, src: x }, // capture into the closure env
             Op::Borrow { v: env },        // call 1
             Op::Borrow { v: env },        // call 2
@@ -375,7 +387,7 @@ mod tests {
     fn shape_alias_cow() -> MirFunction {
         let (a, b) = (v(0), v(1));
         func(vec![
-            Op::Alloc { dst: a, repr: heap() },
+            Op::Alloc { dst: a, repr: heap(), init: Init::Opaque },
             Op::Dup { dst: b, src: a }, // b aliases a (object now shared, rc 2)
             Op::MakeUnique { v: a },    // clone-on-shared before mutating
             Op::Drop { v: a },          // a
@@ -421,7 +433,7 @@ mod tests {
         // — UseAfterMove here; the point is it does not pass silently).
         let (x, env) = (ValueId(0), ValueId(1));
         let f = func(vec![
-            Op::Alloc { dst: x, repr: heap() },
+            Op::Alloc { dst: x, repr: heap(), init: Init::Opaque },
             Op::Dup { dst: env, src: x },
             Op::Consume { v: env }, // call 1 wrongly consumes the capture
             Op::Consume { v: env }, // call 2 — env already moved
@@ -437,7 +449,7 @@ mod tests {
     fn use_after_free_is_caught() {
         let x = ValueId(0);
         let f = func(vec![
-            Op::Alloc { dst: x, repr: heap() },
+            Op::Alloc { dst: x, repr: heap(), init: Init::Opaque },
             Op::Drop { v: x },   // freed
             Op::Borrow { v: x }, // used after free
         ]);

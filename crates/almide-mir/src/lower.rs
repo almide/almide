@@ -18,7 +18,7 @@
 //! Anything outside the subset (control flow, calls, …) returns
 //! [`LowerError::Unsupported`] — never a silent drop (flight-grade totality).
 
-use crate::{LayoutId, MirFunction, Op, Repr, ValueId};
+use crate::{Init, LayoutId, MirFunction, Op, Repr, ValueId};
 use almide_ir::{IrExpr, IrExprKind, IrFunction, IrStmt, IrStmtKind, VarId};
 use almide_lang::types::Ty;
 use std::collections::HashMap;
@@ -197,8 +197,9 @@ impl LowerCtx {
             | IrExprKind::StringInterp { .. } => {
                 let dst = self.fresh_value();
                 let repr = repr_of(ty)?;
+                let init = alloc_init(value);
                 self.value_of.insert(var, dst);
-                self.ops.push(Op::Alloc { dst, repr });
+                self.ops.push(Op::Alloc { dst, repr, init });
                 self.live_heap_handles.push(dst);
                 Ok(())
             }
@@ -222,6 +223,25 @@ impl LowerCtx {
             self.ops.push(Op::Drop { v: *v });
         }
     }
+}
+
+/// Extract a concrete initializer from a fresh-heap bind value. A `List[Int]`
+/// literal yields [`Init::IntList`]; everything else is [`Init::Opaque`] (the
+/// computation is carried by a later brick).
+fn alloc_init(value: &IrExpr) -> Init {
+    if let IrExprKind::List { elements } = &value.kind {
+        let ints: Option<Vec<i64>> = elements
+            .iter()
+            .map(|e| match &e.kind {
+                IrExprKind::LitInt { value } => Some(*value),
+                _ => None,
+            })
+            .collect();
+        if let Some(ints) = ints {
+            return Init::IntList(ints);
+        }
+    }
+    Init::Opaque
 }
 
 fn stmt_kind_name(k: &IrStmtKind) -> &'static str {
@@ -368,7 +388,7 @@ mod tests {
         let broken = MirFunction {
             name: "broken".into(),
             ops: vec![
-                Op::Alloc { dst: ValueId(0), repr: Repr::Ptr { layout: PLACEHOLDER_LAYOUT } },
+                Op::Alloc { dst: ValueId(0), repr: Repr::Ptr { layout: PLACEHOLDER_LAYOUT }, init: Init::Opaque },
                 Op::Drop { v: ValueId(0) },
                 Op::Drop { v: ValueId(0) }, // second drop with no Dup → double free
             ],
