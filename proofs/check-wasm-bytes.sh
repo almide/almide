@@ -54,6 +54,26 @@ check_op "2101"     "local.set (0x21)"
 check_op "45044000" "i32.eqz; if void; unreachable (0x45 0x04 0x40 0x00)"
 check_op "41016b"   "i32.const 1; i32.sub (0x41 .. 0x6b)"
 
+# --- the FULL rc_dec (free-list incl global.get/set) == WasmExec.rc_dec_bytes ---
+cat > "$tmp/rc_dec_full.wat" <<'EOF'
+(module (memory 1) (global $freelist (mut i32) (i32.const 0))
+  (func $rc_dec (param $p i32) (local $rc i32)
+    (local.set $rc (i32.load (i32.add (local.get $p) (i32.const 0))))
+    (if (i32.eqz (local.get $rc)) (then (unreachable)))
+    (local.set $rc (i32.sub (local.get $rc) (i32.const 1)))
+    (i32.store (i32.add (local.get $p) (i32.const 0)) (local.get $rc))
+    (if (i32.eqz (local.get $rc))
+      (then (i32.store (i32.add (local.get $p) (i32.const 4)) (global.get $freelist))
+            (global.set $freelist (local.get $p))))))
+EOF
+wat2wasm "$tmp/rc_dec_full.wat" -o "$tmp/rc_dec_full.wasm"
+RC_DEC_BODY="200041006a28020021012001450440000b200141016b2101200041006a20013602002001450440200041046a2300360200200024000b0b"
+if [[ "$(hex "$tmp/rc_dec_full.wasm")" == *"$RC_DEC_BODY"* ]]; then
+  echo "ok   full rc_dec body bytes match WasmExec.rc_dec_bytes (incl global.get/set 0x23/0x24)"
+else
+  echo "FAIL full rc_dec: assembler bytes do not match WasmExec.rc_dec_bytes"; exit 1
+fi
+
 echo
 echo "WASM-BYTES OK: WasmEncode.v's opcode constants and rc_inc_bytes are grounded"
 echo "in the real assembler (wat2wasm) — the byte-binding proof is non-circular."

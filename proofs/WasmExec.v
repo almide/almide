@@ -194,17 +194,18 @@ Fixpoint split_block (fuel depth : nat) (bytes acc : list Z) : option (list Z * 
    semantics (a mutable word) — which is all the rc_dec free-list push needs. *)
 Definition FREELIST_ADDR : Z := -1.
 
-(* GENERAL wasm interpreter (fuel-bounded): straight-line ops + global.get/set
-   PLUS general structured `if … end` — the then-body runs when the condition is
-   nonzero and is SKIPPED (via split_block) otherwise. Generalizes `run`'s fixed
-   trap pattern to ANY void block body. `[]` / `end` = block complete. (Void
-   blocks here are stack-neutral, so the post-body stack is the pre-body stack.)
-   HONEST scope: locals are modeled as the single param `p` (`local.get _ → p`);
-   `local.set` and INDEXED locals (the `$rc` temp `rc_dec` uses) are the next
-   piece — they turn `p` into a locals environment. This slice proves the general
-   `if` executor + globals + the immediate-aware splitter, the machinery `rc_dec`'s
-   free-list `if` needs. *)
-Fixpoint run_g (fuel : nat) (bytes : list Z) (p : Z) (st : list Z) (m : Mem) : option Mem :=
+(* GENERAL wasm interpreter (fuel-bounded). Straight-line ops + INDEXED locals
+   (`local.get`/`local.set` over a locals env `loc : Z -> Z`, e.g. local 0 = $p,
+   local 1 = $rc) + `i32.sub` + global.get/set PLUS general structured `if … end`
+   — the then-body runs when the condition is nonzero and is SKIPPED (via
+   split_block) otherwise. `[]` / `end` = block complete. (Void blocks here are
+   stack-neutral, so the post-body stack is the pre-body stack.) This is the full
+   machinery the renderer's `$rc_dec` needs: its `$rc` temp, the trap `if`, and
+   the free-list `if` + `global.set`. *)
+Definition set_local (loc : Z -> Z) (i v : Z) : Z -> Z :=
+  fun x => if Z.eqb x i then v else loc x.
+
+Fixpoint run_g (fuel : nat) (bytes : list Z) (loc : Z -> Z) (st : list Z) (m : Mem) : option Mem :=
   match fuel with
   | O => None
   | S f =>
@@ -212,37 +213,40 @@ Fixpoint run_g (fuel : nat) (bytes : list Z) (p : Z) (st : list Z) (m : Mem) : o
       | [] => Some m
       | op :: rest =>
           if Z.eqb op 11 then Some m
-          else if Z.eqb op 32 then
-            match rest with _i :: r => run_g f r p (p :: st) m | _ => None end
-          else if Z.eqb op 65 then
-            match rest with v :: r => run_g f r p (v :: st) m | _ => None end
-          else if Z.eqb op 106 then
-            match st with b :: a :: s => run_g f rest p ((a + b) :: s) m | _ => None end
-          else if Z.eqb op 40 then
+          else if Z.eqb op 32 then                                  (* local.get i *)
+            match rest with i :: r => run_g f r loc (loc i :: st) m | _ => None end
+          else if Z.eqb op 33 then                                  (* local.set i *)
+            match rest, st with i :: r, v :: s => run_g f r (set_local loc i v) s m | _, _ => None end
+          else if Z.eqb op 65 then                                  (* i32.const v *)
+            match rest with v :: r => run_g f r loc (v :: st) m | _ => None end
+          else if Z.eqb op 106 then                                 (* i32.add *)
+            match st with b :: a :: s => run_g f rest loc ((a + b) :: s) m | _ => None end
+          else if Z.eqb op 107 then                                 (* i32.sub *)
+            match st with b :: a :: s => run_g f rest loc ((a - b) :: s) m | _ => None end
+          else if Z.eqb op 40 then                                  (* i32.load *)
             match rest, st with
-            | _al :: off :: r, addr :: s => run_g f r p (m (addr + off) :: s) m
+            | _al :: off :: r, addr :: s => run_g f r loc (m (addr + off) :: s) m
             | _, _ => None end
-          else if Z.eqb op 54 then
+          else if Z.eqb op 54 then                                  (* i32.store *)
             match rest, st with
-            | _al :: off :: r, v :: addr :: s => run_g f r p s (upd m (addr + off) v)
+            | _al :: off :: r, v :: addr :: s => run_g f r loc s (upd m (addr + off) v)
             | _, _ => None end
-          else if Z.eqb op 69 then
-            match st with a :: s => run_g f rest p ((if Z.eqb a 0 then 1 else 0) :: s) m | _ => None end
-          else if Z.eqb op 35 then         (* 0x23 global.get idx — the $freelist
-                                              global, modeled as a reserved cell *)
-            match rest with _i :: r => run_g f r p (m FREELIST_ADDR :: st) m | _ => None end
-          else if Z.eqb op 36 then         (* 0x24 global.set idx *)
-            match rest, st with _i :: r, v :: s => run_g f r p s (upd m FREELIST_ADDR v) | _, _ => None end
-          else if Z.eqb op 4 then          (* GENERAL if *)
+          else if Z.eqb op 69 then                                  (* i32.eqz *)
+            match st with a :: s => run_g f rest loc ((if Z.eqb a 0 then 1 else 0) :: s) m | _ => None end
+          else if Z.eqb op 35 then                                  (* global.get (reserved cell) *)
+            match rest with _i :: r => run_g f r loc (m FREELIST_ADDR :: st) m | _ => None end
+          else if Z.eqb op 36 then                                  (* global.set *)
+            match rest, st with _i :: r, v :: s => run_g f r loc s (upd m FREELIST_ADDR v) | _, _ => None end
+          else if Z.eqb op 4 then                                   (* GENERAL if *)
             match rest with
             | _bt :: r =>
                 match split_block (length r) 0 r [] with
                 | Some (body, after) =>
                     match st with
                     | cond :: s =>
-                        if Z.eqb cond 0 then run_g f after p s m
-                        else match run_g f body p s m with
-                             | Some m' => run_g f after p s m'
+                        if Z.eqb cond 0 then run_g f after loc s m
+                        else match run_g f body loc s m with
+                             | Some m' => run_g f after loc s m'
                              | None => None end
                     | _ => None end
                 | None => None end
@@ -259,12 +263,12 @@ Definition cond_store_bytes (c : Z) : list Z :=
   [65;c;  4;64;  65;0; 65;42; 54;2;0;  11;  11].
 
 Theorem general_if_runs_body_when_true :
-  forall p m, run_g 50 (cond_store_bytes 1) p [] m = Some (upd m 0 42).
-Proof. intros p m. reflexivity. Qed.
+  forall m, run_g 50 (cond_store_bytes 1) (fun _ => 0) [] m = Some (upd m 0 42).
+Proof. intros m. reflexivity. Qed.
 
 Theorem general_if_skips_body_when_false :
-  forall p m, run_g 50 (cond_store_bytes 0) p [] m = Some m.
-Proof. intros p m. reflexivity. Qed.
+  forall m, run_g 50 (cond_store_bytes 0) (fun _ => 0) [] m = Some m.
+Proof. intros m. reflexivity. Qed.
 
 (* GLOBAL round-trip: `global.set $freelist 42 ; … ; (i32.store 8 (global.get
    $freelist))` lands 42 at address 8 — the global is set and read back through
@@ -274,11 +278,34 @@ Definition global_roundtrip_bytes : list Z :=
   [65;42;  36;0;  65;8;  35;0;  54;2;0;  11].
 
 Theorem global_set_then_get_roundtrips :
-  forall p m, match run_g 50 global_roundtrip_bytes p [] m with
+  forall m, match run_g 50 global_roundtrip_bytes (fun _ => 0) [] m with
               | Some m' => m' 8 = 42
               | None => False
               end.
-Proof. intros p m. reflexivity. Qed.
+Proof. intros m. reflexivity. Qed.
+
+(* ─── the FULL `$rc_dec` bytes, executed end to end ───
+   The renderer's complete `$rc_dec` body as bytes (grounded by check-wasm-bytes.sh
+   against wat2wasm's `$rc_dec` disassembly): load the rc cell into $rc; trap `if`
+   ($rc = 0 ⇒ unreachable); $rc := $rc − 1; store it back; free-list `if`
+   ($rc = 0 ⇒ store the old head into the block's len field and set $freelist). *)
+Definition rc_dec_bytes : list Z :=
+  [32;0; 65;0; 106; 40;2;0; 33;1; 32;1; 69; 4;64; 0; 11;
+   32;1; 65;1; 107; 33;1; 32;0; 65;0; 106; 32;1; 54;2;0;
+   32;1; 69; 4;64; 32;0; 65;4; 106; 35;0; 54;2;0; 32;0; 36;0; 11;
+   11].
+
+(* Initial locals: local 0 = $p (the block pointer), local 1 = $rc (set before use). *)
+Definition init_loc (p : Z) : Z -> Z := fun i => if Z.eqb i 0 then p else 0.
+
+(* SAFETY on the FULL rc_dec bytes: releasing an already-0 cell (a double-free)
+   TRAPS — run_g reaches the `unreachable` in the trap `if` and returns None. This
+   is the double-free sentinel, executed on the renderer's real `$rc_dec` bytes. *)
+Theorem rc_dec_bytes_trap_on_zero :
+  forall p m, m (p + 0 + 0) = 0 -> run_g 200 rc_dec_bytes (init_loc p) [] m = None.
+Proof.
+  intros p m H. cbn -[Z.add upd Z.sub]. rewrite H. reflexivity.
+Qed.
 
 Print Assumptions rc_inc_bytes_execute_to_rt_inc.
 Print Assumptions trap_bytes_trap_on_zero.
@@ -286,3 +313,4 @@ Print Assumptions trap_bytes_pass_on_nonzero.
 Print Assumptions general_if_runs_body_when_true.
 Print Assumptions general_if_skips_body_when_false.
 Print Assumptions global_set_then_get_roundtrips.
+Print Assumptions rc_dec_bytes_trap_on_zero.
