@@ -26,6 +26,7 @@
 #![forbid(unsafe_code)]
 
 pub mod lower;
+pub mod render_rust;
 
 use std::collections::BTreeMap;
 
@@ -139,6 +140,16 @@ pub enum Op {
     /// a scalar `dst` (e.g. `list.len`). Heap results are produced by
     /// [`Op::Alloc`]. Keeps the op set total without a catch-all.
     Pure { dst: ValueId, uses: Vec<ValueId> },
+
+    // ── value-semantics computation (the subset the renderers run) ──
+    /// `target[index] = value` in place — after a [`Op::MakeUnique`]. Borrows
+    /// `target` (no ownership change).
+    IndexSet { target: ValueId, index: usize, value: i64 },
+    /// push `value` onto `target` in place — after a [`Op::MakeUnique`].
+    /// Borrows `target`.
+    Push { target: ValueId, value: i64 },
+    /// Observe a heap binding (`println` of its value). Borrows `value`.
+    Print { value: ValueId, label: String },
 }
 
 /// A MIR function body: a flat, ownership-explicit op sequence.
@@ -241,6 +252,18 @@ pub fn verify_ownership(func: &MirFunction) -> Result<(), Vec<Violation>> {
                     {
                         violations.push(violation(i, *v, ViolationKind::UseAfterFree));
                     }
+                }
+            }
+            // The value-semantics computation ops borrow their target/value (the
+            // handle stays live, the refcount is unchanged).
+            Op::IndexSet { target, .. } | Op::Push { target, .. } => {
+                if live_object(&object_of, &rc, &dead, *target).is_none() {
+                    violations.push(violation(i, *target, ViolationKind::UseAfterFree));
+                }
+            }
+            Op::Print { value, .. } => {
+                if live_object(&object_of, &rc, &dead, *value).is_none() {
+                    violations.push(violation(i, *value, ViolationKind::UseAfterFree));
                 }
             }
         }
