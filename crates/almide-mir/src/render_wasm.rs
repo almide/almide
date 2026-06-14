@@ -932,6 +932,40 @@ mod tests {
         }
     }
 
+    /// THE OBSERVABILITY KEYSTONE (sub-slice 2+3): `println("hello")` from SOURCE runs
+    /// through v1's SELF-HOSTED print_str — written in ALMIDE over the `prim` floor
+    /// (prim.handle/load32/store*/fd_write → Op::Prim, mapped from the bundled `prim`
+    /// module), compiled through v1's own lower→MIR→render pipeline — and prints
+    /// "hello", byte-matching v0's native println. NO hand-written WAT growth (the
+    /// discipline). The self-host runtime vision, realized for print.
+    #[test]
+    fn selfhosted_print_str_from_source_prints() {
+        let src = "fn print_str(s: String) -> Unit = {\n  \
+            let h = prim.handle(s)\n  \
+            let len = prim.load32(h + 4)\n  \
+            let data = h + 12\n  \
+            prim.store32(8, data)\n  \
+            prim.store32(12, len)\n  \
+            prim.store8(512, 10)\n  \
+            prim.store32(16, 512)\n  \
+            prim.store32(20, 1)\n  \
+            let _w = prim.fd_write(1, 8, 2, 0)\n\
+            }\n\
+            fn main() -> Unit = println(\"hello\")\n";
+        let prog = lower_source(src);
+        // print_str lowered to real prim-floor ops (not the deferred Const).
+        let ps = prog.functions.iter().find(|f| f.name == "print_str").expect("print_str lowered");
+        assert!(
+            ps.ops.iter().any(|op| matches!(op, Op::Prim { kind: PrimKind::FdWrite, .. })),
+            "print_str must reach Op::Prim FdWrite from source, got {:?}",
+            ps.ops
+        );
+        // End-to-end: it prints "hello" (matching v0's native println).
+        if let Some(out) = build_and_run("selfhost_println", &render_wasm_program(&prog)) {
+            assert_eq!(out, "hello");
+        }
+    }
+
     /// The hand-written WAT runtime is the BOOTSTRAP debt (§4.1). This guard
     /// makes the "never grow" rule MECHANICAL (not a comment): the count may only
     /// ratchet DOWN as the runtime self-hosts into Almide. If you added a

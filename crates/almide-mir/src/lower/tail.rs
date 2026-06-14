@@ -269,7 +269,10 @@ impl LowerCtx {
             // recursively-lowered operands), so a fn `add(a, b) = a + b` returns the
             // sum — not the deferred-Const zero. Outside the int-arith subset (Div/
             // Mod/cmp/logic/Float) it rolls back and falls through to the Const below.
-            IrExprKind::BinOp { .. } => {
+            // A scalar Int Add/Sub/Mul OR a scalar prim-floor call (`= prim.load32(a)`)
+            // computes a real value via lower_scalar_value (IntBinOp / Op::Prim);
+            // outside the subset it rolls back to the deferred Const + elided marker.
+            IrExprKind::BinOp { .. } | IrExprKind::RuntimeCall { .. } => {
                 let mark = self.ops.len();
                 if let Some(dst) = self.lower_scalar_value(tail) {
                     return Ok(Some(dst));

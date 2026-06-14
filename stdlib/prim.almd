@@ -1,0 +1,33 @@
+// prim — the PRIMITIVE FLOOR: raw memory access + the fd_write host call, the
+// minimal trusted surface the self-hosted runtime (print/string/list/…) is written
+// over. The bodies are v1 MIR PRIMITIVE OPS, mapped by module name in the v1
+// lowering — never hand-written wasm. This is the §4.1 "~20-op provable floor".
+//
+// UNSAFE: addresses are unchecked and the MIR is i64-uniform (the i32 wasm memory
+// boundary wraps at the op). For runtime/stdlib authors only.
+//
+// (The @intrinsic symbol is a v0-codegen placeholder; v1 recognizes these by the
+// `prim` module name, not the symbol, and emits Op::Prim.)
+
+// Reinterpret a heap handle (a String/List pointer) as an Int address — the bridge
+// that lets all address math be ordinary Int arithmetic.
+@intrinsic("almide_rt_prim_handle")
+fn handle(ptr: String) -> Int = _
+
+// Load 4 bytes at `addr`, zero-extended to Int.
+@intrinsic("almide_rt_prim_load32")
+fn load32(addr: Int) -> Int = _
+
+// Store the low 4 bytes of `val` at `addr`.
+@intrinsic("almide_rt_prim_store32")
+fn store32(addr: Int, val: Int) -> Unit = _
+
+// Store the low byte of `val` at `addr`.
+@intrinsic("almide_rt_prim_store8")
+fn store8(addr: Int, val: Int) -> Unit = _
+
+// The fd_write WASI host call — the only sandbox exit (reaches Stdout). Returns the
+// errno. `iov` points at an iovec array of `count` {ptr,len} pairs; `nw` receives
+// the bytes written.
+@intrinsic("almide_rt_prim_fd_write")
+fn fd_write(fd: Int, iov: Int, count: Int, nw: Int) -> Int = _

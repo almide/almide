@@ -46,6 +46,13 @@ impl LowerCtx {
         args: &[IrExpr],
         result_ty: &Ty,
     ) -> Result<ValueId, LowerError> {
+        // The primitive floor: `prim.load32(a)` / `prim.handle(s)` / `prim.fd_write(…)`
+        // map to an Op::Prim, not a real CallFn (the v1 self-host floor).
+        if module == "prim" {
+            return self
+                .lower_prim_call(func, args)?
+                .ok_or_else(|| LowerError::Unsupported(format!("prim.{func} yields no value here")));
+        }
         let lowered = self.lower_pure_module_call_args(module, func, args)?;
         let dst = self.fresh_value();
         let repr = repr_of(result_ty)?;
@@ -117,6 +124,11 @@ impl LowerCtx {
         args: &[IrExpr],
         result_ty: &Ty,
     ) -> Result<(), LowerError> {
+        // A prim-floor STATEMENT (`prim.store32(a, v)`) → Op::Prim (Unit, no result).
+        if module == "prim" {
+            self.lower_prim_call(func, args)?;
+            return Ok(());
+        }
         let lowered = self.lower_pure_module_call_args(module, func, args)?;
         if is_heap_ty(result_ty) {
             let dst = self.fresh_value();
@@ -209,6 +221,15 @@ impl LowerCtx {
     /// real printing program's capability witness is derived from real source).
     /// Anything outside the set is an explicit `Unsupported` (totality).
     pub(crate) fn lower_effect_call(&mut self, call: &IrExpr) -> Result<(), LowerError> {
+        // A primitive-floor STATEMENT (`prim.store32(...)` / a discarded `prim.*`):
+        // `@intrinsic` lowers it to a `RuntimeCall`; map the `almide_rt_prim_*` symbol
+        // to an `Op::Prim` (a store is Unit, so the dst is None — nothing to discard).
+        if let IrExprKind::RuntimeCall { symbol, args } = &call.kind {
+            if let Some(func) = symbol.as_str().strip_prefix("almide_rt_prim_") {
+                self.lower_prim_call(func, args)?;
+                return Ok(());
+            }
+        }
         let (target, args) = match &call.kind {
             IrExprKind::Call { target, args, .. } => (target, args),
             other => {
@@ -551,8 +572,47 @@ impl LowerCtx {
                 self.ops.push(Op::IntBinOp { dst, op: iop, a, b });
                 Some(dst)
             }
+            // A scalar-result PRIMITIVE-FLOOR call (`prim.handle`/`prim.load32`/
+            // `prim.fd_write`) — `@intrinsic` lowers it to a `RuntimeCall`; we map the
+            // `almide_rt_prim_*` symbol to an [`Op::Prim`] (NOT the deferred Const a
+            // generic RuntimeCall gets). The self-host floor reaching executable code.
+            IrExprKind::RuntimeCall { symbol, args } => {
+                let func = symbol.as_str().strip_prefix("almide_rt_prim_")?;
+                self.lower_prim_call(func, args).ok().flatten()
+            }
             _ => None,
         }
+    }
+
+    /// Lower a `prim.*` PRIMITIVE-FLOOR call to an [`Op::Prim`] — the v1 self-host
+    /// floor (raw memory + the fd_write host call), mapped by name, NOT a real
+    /// `CallFn`/runtime symbol. Each arg lowers to a ValueId via
+    /// [`Self::lower_scalar_value`] (a handle var / int literal / int-arith). Returns
+    /// the result `dst` (load / fd_write / handle) or `None` (a store is Unit).
+    pub(crate) fn lower_prim_call(
+        &mut self,
+        func: &str,
+        args: &[IrExpr],
+    ) -> Result<Option<ValueId>, LowerError> {
+        use crate::PrimKind;
+        let kind = match func {
+            "handle" => PrimKind::Handle,
+            "load32" => PrimKind::Load { width: 4 },
+            "store32" => PrimKind::Store { width: 4 },
+            "store8" => PrimKind::Store { width: 1 },
+            "fd_write" => PrimKind::FdWrite,
+            _ => return Err(LowerError::Unsupported(format!("unknown primitive prim.{func}"))),
+        };
+        let mut lowered = Vec::with_capacity(args.len());
+        for a in args {
+            let v = self.lower_scalar_value(a).ok_or_else(|| {
+                LowerError::Unsupported(format!("prim.{func} argument is not a lowerable scalar/handle"))
+            })?;
+            lowered.push(v);
+        }
+        let dst = if matches!(kind, PrimKind::Store { .. }) { None } else { Some(self.fresh_value()) };
+        self.ops.push(Op::Prim { kind, dst, args: lowered });
+        Ok(dst)
     }
 
     /// Register a freshly-materialized call-result temp used as a call argument: a
