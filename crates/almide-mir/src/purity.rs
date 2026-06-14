@@ -50,9 +50,9 @@
 /// name here ever declares an `effect fn`.
 pub const PURE_MODULES: &[&str] = &[
     "base64", "bytes", "error", "float", "float32", "hex", "html", "int", "int16",
-    "int32", "int8", "json", "list", "map", "math", "matrix", "option", "path",
-    "regex", "result", "set", "string", "uint16", "uint32", "uint64", "uint8",
-    "value",
+    "int32", "int8", "int_to_string", "json", "list", "map", "math", "matrix",
+    "option", "path", "regex", "result", "set", "string", "uint16", "uint32",
+    "uint64", "uint8", "value",
 ];
 
 /// Is `module` a provably-pure stdlib data module (reaches no host capability)?

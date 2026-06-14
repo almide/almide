@@ -1,0 +1,36 @@
+// int_to_string — the SELF-HOSTED `int.to_string` for v1, written in ALMIDE over the
+// `prim` primitive floor (raw memory + the runtime-sized owned allocation
+// `prim.alloc_str`). The v1 lowering maps the `int.to_string(n)` stdlib call to a
+// `(call $int_to_string ...)`; this is that callee's BODY — compiled through v1's own
+// lower→MIR→render pipeline, NO hand-written wasm (the §4.1 discipline). The v1
+// runtime linker auto-includes this (with its helpers) when a program calls it.
+//
+// It allocates a String of exactly the digit count via `prim.alloc_str` (an owned
+// rc=1 block, cert `i`), fills the decimal bytes via `prim.store8`, and returns it
+// (moved out, freed by the caller). NON-NEGATIVE for now; signed is a refinement.
+
+// Count the decimal digits of `n` (n >= 0), accumulator-style so the recursion is a
+// tail call (no `acc + count(...)` arithmetic over a call).
+fn __itos_count_digits(n: Int, acc: Int) -> Int =
+  if n < 10 then acc + 1
+  else __itos_count_digits(n / 10, acc + 1)
+
+// Write the decimal bytes of `n` (n >= 0) starting at byte address `pos`, most
+// significant first (the recursion writes the high digits before the low one).
+// Returns the address just past the last byte written.
+fn __itos_fill(n: Int, pos: Int) -> Int =
+  if n < 10 then {
+    prim.store8(pos, 48 + n)   // '0' = 48
+    pos + 1
+  } else {
+    let p = __itos_fill(n / 10, pos)
+    prim.store8(p, 48 + (n % 10))
+    p + 1
+  }
+
+fn int_to_string(n: Int) -> String = {
+  let len = __itos_count_digits(n, 0)
+  let buf = prim.alloc_str(len)              // owned rc=1 String, `len` bytes
+  let _end = __itos_fill(n, prim.handle(buf) + 12)  // data starts at handle + LIST_HEADER(12)
+  buf
+}

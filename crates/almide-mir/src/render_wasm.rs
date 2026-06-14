@@ -899,6 +899,23 @@ mod tests {
         }
         let mut functions: Vec<MirFunction> =
             ir.functions.iter().filter_map(|f| crate::lower::lower_function(f, &globals).ok()).collect();
+        // Auto-link the self-hosted `int.to_string` when it is CALLED but not defined (it
+        // pulls in its __itos_* helpers from the same file). The impl fn is named
+        // `int_to_string` (Almide names can't hold a dot) and RENAMED to the call name
+        // `int.to_string` so `(call $int.to_string)` resolves AND the caps gate still reads
+        // the call as a known-pure stdlib `module.func` (no caps-coverage regression).
+        // Conditional — unlike print_str — so non-converting programs are not bloated.
+        if calls_fn(&functions, "int.to_string")
+            && !functions.iter().any(|f| f.name == "int.to_string")
+        {
+            let mut rt = lower_source(include_str!("../../../stdlib/int_to_string.almd"));
+            for f in rt.functions.iter_mut() {
+                if f.name == "int_to_string" {
+                    f.name = "int.to_string".to_string();
+                }
+            }
+            functions.extend(rt.functions);
+        }
         // Auto-link the self-hosted print_str runtime (the v1 linker step) so a plain
         // `println(…)` program — which lowers to a PrintStr → `(call $print_str)` —
         // resolves, matching how render_program links it. Skip if already defined.
@@ -907,6 +924,13 @@ mod tests {
             functions.extend(rt.functions);
         }
         MirProgram { functions }
+    }
+
+    /// Does any function CALL `name` (a `CallFn` to it)? Drives conditional auto-linking.
+    fn calls_fn(functions: &[MirFunction], name: &str) -> bool {
+        functions.iter().any(|f| {
+            f.ops.iter().any(|op| matches!(op, Op::CallFn { name: n, .. } if n == name))
+        })
     }
 
     /// A scalar-result user call (`let _r = add(2, 3)`) lowered from REAL source is an
@@ -1332,6 +1356,24 @@ mod tests {
             assert_eq!(out.lines().count(), 1000, "every iteration must print (no OOM)");
             assert_eq!(out.lines().next(), Some("0"));
             assert_eq!(out.lines().last(), Some("999"));
+        }
+    }
+
+    #[test]
+    fn bundled_int_to_string_works_without_user_impl() {
+        // The v0-parity target: `int.to_string(n)` is a BUILT-IN — the program writes NO
+        // to_str. The v1 linker auto-includes the self-hosted int_to_string (+ its helpers)
+        // from stdlib/int_to_string.almd. The Stop-hook's example program prints 0..9.
+        let src = "fn main() -> Unit = {\n  \
+            var i = 0\n  \
+            while i < 10 {\n    println(int.to_string(i))\n    i = i + 1\n  } }\n";
+        let prog = lower_source(src);
+        assert!(
+            prog.functions.iter().any(|f| f.name == "int.to_string"),
+            "int.to_string must be auto-linked"
+        );
+        if let Some(out) = build_and_run("bundled_itos", &render_wasm_program(&prog)) {
+            assert_eq!(out, "0\n1\n2\n3\n4\n5\n6\n7\n8\n9");
         }
     }
 
