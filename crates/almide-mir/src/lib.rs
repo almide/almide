@@ -125,6 +125,10 @@ pub enum Init {
     Opaque,
     /// A `List[Int]` literal.
     IntList(Vec<i64>),
+    /// A string literal's UTF-8 bytes — real DATA the EXECUTION render needs to
+    /// reproduce the value (the ownership cert is unaffected: an `Alloc` is one `i`
+    /// regardless of content). The un-defer of string data, the first ③ slice.
+    Str(String),
 }
 
 /// One MIR statement. Ownership is EXPLICIT: a heap value's refcount is changed

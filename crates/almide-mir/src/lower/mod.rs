@@ -488,6 +488,9 @@ pub(crate) fn find_var_ty(stmts: &[IrStmt], var: VarId) -> Option<Ty> {
 /// literal yields [`Init::IntList`]; everything else is [`Init::Opaque`] (the
 /// computation is carried by a later brick).
 pub(crate) fn alloc_init(value: &IrExpr) -> Init {
+    if let IrExprKind::LitStr { value } = &value.kind {
+        return Init::Str(value.clone());
+    }
     if let IrExprKind::List { elements } = &value.kind {
         let ints: Option<Vec<i64>> = elements
             .iter()

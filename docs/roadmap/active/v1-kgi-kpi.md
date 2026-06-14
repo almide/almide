@@ -93,6 +93,30 @@
   call `$double`・算術・制御フロー)は出すが、RUNTIME は仮足場(preamble の手書き WAT:
   `$print_list`/`$print_int`/list_copy/itoa のみ。`$print_str`/`$int.to_string` 等は無し)。
 
+  **第二スライス実測(2026-06-14): HEAP 値の実プログラムが v1 実行 path を通って v0 と
+  byte 一致(print 無し・規律遵守)**。3 本 ―― `fn greeting()->String="hi"; main{let _g=
+  greeting()}` / List 戻り call / String chained call ―― が **v1(lower→MIR→render_wasm→
+  wasm→wasmtime)で exit 0・出力一致**。2 修正(両方 render 内、手書き WAT 不増):
+  ① **`Init::Str` un-defer**(lib.rs に `Init::Str(String)` 追加、alloc_init が LitStr に
+  実バイトを載せる。所有権 cert は不変 ―― Alloc は内容に依らず `i` 一個)。
+  ② **call-result-repr 修正**(`value_reprs_wasm` が CallFn の `result` Repr を読む。
+  String/List 戻り call は Ptr=i32 ハンドルで、scalar i64 既定だと `$alloc` の i32 と型不整合)。
+  回帰テスト `heap_returning_call_types_result_as_i32_handle`(end-to-end build_and_run)新設。
+  corpus-wall(in-profile 4083・3 性質 ACCEPT)・gate・cargo test 93/0 全 green。
+
+  **print = self-host を実証で確認(規律の壁)**: 唯一の実 print 経路は `println→PrintStr`
+  (`lower/calls.rs`)で `$print_str` を要求。手で preamble に `$print_str` を足すと
+  `println("hello")` は走り v0 と byte 一致した **が** discipline test
+  (`handwritten_wasm_runtime_does_not_grow`、baseline 11)が即停止 ―― **まさに v0 の罠**で、
+  test message も「self-host the new routine in Almide and call it via CallFn」。なので
+  `$print_str` ルーチンは revert、`PrintStr→(call $print_str)` arm は残す(将来の self-hosted
+  print への正しい CallFn 配線)。`$print_int`/`$print_list` は実ソースに producer 無し
+  (テスト fixture 専用)= 仮足場の print は実プログラムから死んでいる。**print の前進 = Phase 3
+  self-host**(低レベル Almide subset: メモリ/host-call プリミティブ + Almide で print_str)。
+  **③ の次スライス候補(順): (a) scalar 値の実行 ―― `add(2,3)` の literal 引数が
+  `CallArg::Imm` に lower されない & scalar call の `result=None` で未使用時 drop 漏れ(lowering
+  gap、render は CallArg::Imm を既に扱える)。(b) print = self-host(骨太、Phase 3)。**
+
   **⚠ 設計の核 ―― v0-reuse は v0 の罠(v1-mir-architecture.md §4・⚠注を参照)。正は
   SELF-HOST RUNTIME**: ランタイムを **Almide で書き**、同じ Core→MIR→target を通して
   v1 が自己コンパイルする(dogfooding、rt-oracle/drift クラス消滅)。

@@ -124,6 +124,14 @@ fn render_op(op: &Op) -> Option<String> {
                         elems.iter().map(|n| n.to_string()).collect::<Vec<_>>().join(", ");
                     format!("vec![{items}]")
                 }
+                // A string literal's UTF-8 bytes (the wasm string is a byte block; the
+                // native String render is a later refinement — this keeps the type a
+                // `Vec<i64>` and reproduces the real DATA as bytes).
+                Init::Str(s) => {
+                    let items =
+                        s.as_bytes().iter().map(|b| b.to_string()).collect::<Vec<_>>().join(", ");
+                    format!("vec![{items}]")
+                }
                 Init::Opaque => "Vec::new()".to_string(),
             };
             Some(format!("let mut {}: Vec<i64> = {init_expr};", var(*dst)))

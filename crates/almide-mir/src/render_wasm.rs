@@ -161,6 +161,8 @@ pub fn render_wasm_program(prog: &MirProgram) -> String {
     }
     let funcs =
         prog.functions.iter().map(|f| render_wasm_fn(f, &label_off)).collect::<String>();
+    // `main` is `Unit` (v0 rejects a non-`Unit` main — it must implement
+    // `Termination`), so `_start` discards nothing: a void `(call $main)` matches.
     format!(
         "{preamble}{data}{funcs}  (func (export \"_start\") (call $main))\n)\n",
         preamble = preamble(),
@@ -241,8 +243,12 @@ fn value_reprs_wasm(func: &MirFunction) -> BTreeMap<ValueId, Repr> {
             Op::Const { dst } | Op::IntBinOp { dst, .. } => {
                 m.insert(*dst, SCALAR_REPR);
             }
-            Op::CallFn { dst: Some(d), .. } => {
-                m.insert(*d, SCALAR_REPR);
+            // A call's result repr is the callee's RETURN repr, carried on the op
+            // (`result`) — the same field the ownership analysis reads to know a call
+            // hands back a heap object. A String/List-returning call is a Ptr (i32),
+            // NOT a scalar; typing it i64 mismatched `$alloc`'s i32 handle.
+            Op::CallFn { dst: Some(d), result, .. } => {
+                m.insert(*d, result.unwrap_or(SCALAR_REPR));
             }
             _ => {}
         }
@@ -256,10 +262,33 @@ fn local(v: ValueId) -> String {
 
 fn render_op(op: &Op, label_off: &BTreeMap<String, (u32, u32)>) -> String {
     match op {
+        // A STRING literal — a heap block `[rc][len][cap][utf8 bytes...]` (same header
+        // as a list; len/cap are BYTE counts). $alloc the block, set the header, store
+        // each byte. Real DATA reproduced from the MIR (the un-defer, ③ exec slice).
+        Op::Alloc { dst, init: Init::Str(string), .. } => {
+            let bytes = string.as_bytes();
+            let blen = bytes.len() as u32;
+            let mut s = format!(
+                "    (local.set {d} (call $alloc (i32.const {total})))\n\
+                 \x20   (i32.store (i32.add (local.get {d}) (i32.const {LIST_RC_OFFSET})) (i32.const {RC_INITIAL}))\n\
+                 \x20   (i32.store (i32.add (local.get {d}) (i32.const {LIST_LEN_OFFSET})) (i32.const {blen}))\n\
+                 \x20   (i32.store (i32.add (local.get {d}) (i32.const {LIST_CAP_OFFSET})) (i32.const {blen}))\n",
+                d = local(*dst),
+                total = LIST_HEADER + blen,
+            );
+            for (i, b) in bytes.iter().enumerate() {
+                let off = LIST_HEADER + i as u32;
+                s.push_str(&format!(
+                    "    (i32.store8 (i32.add (local.get {d}) (i32.const {off})) (i32.const {b}))\n",
+                    d = local(*dst),
+                ));
+            }
+            s
+        }
         Op::Alloc { dst, init, .. } => {
             let elems: &[i64] = match init {
                 Init::IntList(e) => e,
-                Init::Opaque => &[],
+                Init::Opaque | Init::Str(_) => &[],
             };
             let len = elems.len() as u32;
             let cap = len + PUSH_HEADROOM;
@@ -367,6 +396,9 @@ fn render_call(
         }
         (RtFn::PrintInt, [CallArg::Scalar(v)]) => {
             format!("    (call $print_int (local.get {}))\n", local(*v))
+        }
+        (RtFn::PrintStr, [CallArg::Handle(v)]) => {
+            format!("    (call $print_str (local.get {}))\n", local(*v))
         }
         _ => panic!("malformed runtime call {func:?} with args {args:?}"),
     }
@@ -618,6 +650,56 @@ mod tests {
         let prog = add_program();
         if let Some(out) = build_and_run("fncall", &render_wasm_program(&prog)) {
             assert_eq!(out, "5");
+        }
+    }
+
+    /// A HEAP-returning user call (`fn mk() -> String = "hi"`): the result is a Ptr
+    /// (an i32 `$alloc` handle), so the caller's local must be typed i32 — NOT the
+    /// scalar i64 default. Regression for `value_reprs_wasm` reading the call op's
+    /// `result` repr; typing it i64 made `local.set` reject `$mk`'s i32 handle. Also
+    /// pins the `Init::Str` un-defer: the literal's bytes are materialized.
+    fn heap_call_program() -> MirProgram {
+        let mk = MirFunction {
+            name: "mk".into(),
+            params: vec![],
+            ops: vec![Op::Alloc { dst: ValueId(0), repr: heap(), init: Init::Str("hi".into()) }],
+            ret: Some(ValueId(0)),
+            ..Default::default()
+        };
+        let main = MirFunction {
+            name: "main".into(),
+            params: vec![],
+            ops: vec![
+                Op::CallFn {
+                    dst: Some(ValueId(0)),
+                    name: "mk".into(),
+                    args: vec![],
+                    result: Some(heap()),
+                },
+                // The returned object (rc 1) is released here — ownership-balanced.
+                Op::Drop { v: ValueId(0) },
+            ],
+            ret: None,
+            ..Default::default()
+        };
+        MirProgram { functions: vec![mk, main] }
+    }
+
+    #[test]
+    fn heap_returning_call_types_result_as_i32_handle() {
+        let prog = heap_call_program();
+        let wat = render_wasm_program(&prog);
+        // The fix: the call-result local is an i32 handle, never the scalar i64.
+        assert!(wat.contains("(local $v0 i32)"), "call-result local must be i32:\n{wat}");
+        assert!(!wat.contains("(local $v0 i64)"), "call-result local must NOT be i64:\n{wat}");
+        // The Init::Str un-defer materialized the literal's bytes: 'h'=104, 'i'=105.
+        assert!(
+            wat.contains("(i32.const 104)") && wat.contains("(i32.const 105)"),
+            "Init::Str bytes not materialized:\n{wat}"
+        );
+        // End-to-end: validates, runs clean (exit 0, no output) where wasmtime exists.
+        if let Some(out) = build_and_run("heapcall", &wat) {
+            assert_eq!(out, "");
         }
     }
 
