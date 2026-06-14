@@ -1117,11 +1117,12 @@
     }
 
     #[test]
-    fn unwrap_over_a_live_heap_local_walls() {
+    fn unwrap_over_a_live_heap_local_lowers() {
         // var opt = []; var x = opt!  — `opt` is a LIVE owned heap local when the `!`
-        // early-returns. On wasm the Err path skips opt's free = a LEAK (accept-but-unsafe
-        // were it deferred). Must WALL. (UnwrapOr / ToOption / OptionalChain do NOT early
-        // return and are unaffected.)
+        // early-returns. This used to WALL (the v0 wasm Err path leaked `opt`); the v0
+        // codegen now frees live heap locals before the Err `return_`
+        // (emit_wasm::emit_early_return_decs), so the deferred-continue cert is faithful
+        // on both targets and this LOWERS, balanced.
         let unwrap = ir_expr(
             IrExprKind::Unwrap {
                 expr: Box::new(ir_expr(IrExprKind::Var { id: VarId(0) }, list_int())),
@@ -1132,10 +1133,8 @@
             bind(0, list_int(), ir_expr(IrExprKind::List { elements: vec![] }, list_int())),
             bind(1, list_int(), unwrap),
         ]);
-        match lower_body(&b, "main") {
-            Err(LowerError::Unsupported(m)) => assert!(m.contains("early-return"), "got: {m}"),
-            other => panic!("expected an early-return-leak wall, got {other:?}"),
-        }
+        let mir = lower_body(&b, "main").expect("unwrap over a live heap local now lowers (v0 leak fixed)");
+        assert_eq!(verify_ownership(&mir), Ok(()));
     }
 
     #[test]

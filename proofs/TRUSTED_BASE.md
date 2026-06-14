@@ -108,8 +108,8 @@ The receipt's claims are scoped to exactly this:
   verification = the definition of parity" in its honest first form: it does NOT
   yet claim the *completion definition* (the proven profile accepting the full
   corpus), it establishes the *mechanism* that measures progress toward it and
-  proves the boundary is a wall, not a hole. **Today's honest coverage: 4024/4195
-  functions in-profile (96%) for ownership+names (caps-VERIFIED is the lower, parity-binding 3479 — see caps note)** (the value-semantics subset,
+  proves the boundary is a wall, not a hole. **Today's honest coverage: 4083/4195
+  functions in-profile (97%) for ownership+names (caps-VERIFIED is the lower, parity-binding 3528 — see caps note)** (the value-semantics subset,
   plus **`Range` values, CLOSURE values, and unresolvable `Method`/`Computed`-target calls** (`f(0..n)`,
   `var g = (x) => …`, `obj.method()`, `(g)()` — a `Range` and a CLOSURE value (a fresh heap env) are fresh values; an unresolvable callee
   (dispatch / closure value not known here) is modeled as a DEFERRED fresh value (a
@@ -120,22 +120,23 @@ The receipt's claims are scoped to exactly this:
   unwrapped/defaulted/mapped result, deferred like every Opaque; the operand's
   calls are captured. Almide has NO `try`/`catch`: `e ?? d` (unwrap-or-default),
   `e?` AS `ToOption` (`Result → Option`) and `e?.f` (optional chaining) are TOTAL
-  value maps with NO control flow — always safe to defer. But **`e!` (`Unwrap`) and
-  the effect-fn auto-`?` (`Try`) EARLY-RETURN `Err`**, and that early return is NOT
-  freely deferrable: on **wasm** the Err path is a bare `return_` that jumps PAST the
-  function's scope-end heap frees (the Perceus rc_decs sit only at the terminal `Ret`;
-  `flatten_exit_tail_blocks` replays them only for TAIL-position `break`/`continue`,
-  not `Try`/`Unwrap`/`Fan`), so a heap local LIVE at the early return LEAKS — a v0
-  WASM codegen leak (Rust is leak-free: `e!`→`?`→scope-exit `Drop`). The
-  deferred-continue cert is balanced (the checker proves it no_leak), so certifying
-  that shape would be **accept-but-unsafe**. CLOSED: the v1 lowering now WALLS a
-  `Try`/`Unwrap` whenever an owned heap local is live (`expr_has_early_return` +
-  `!live_heap_handles.is_empty()`) — same discipline as `break`. With no live heap
-  handle there is no Drop to skip, so it is admitted (deferred). KNOWN-LIMITATION:
-  the underlying v0 wasm leak itself is not yet fixed (the ideal fix replays the
-  scope frees before the Err `return_`, extending `flatten_exit_tail_blocks` to
-  `Try`/`Unwrap`/`Fan` — a Perceus-pass change, perceus-belt follow-up); until then
-  the v1 spine honestly WALLS the leaky shape rather than certifying it), plus
+  value maps with NO control flow — always safe to defer. **`e!` (`Unwrap`) and the
+  effect-fn auto-`?` (`Try`) EARLY-RETURN `Err`**, and that early return was a v0 WASM
+  codegen LEAK: the Err path is a bare `return_` that jumps PAST the function's
+  scope-end heap frees (the Perceus rc_decs sat only at the terminal `Ret`), so a heap
+  local live at the early return leaked (Rust was always leak-free: `e!`→`?`→scope-exit
+  `Drop`). A deferred-continue cert is balanced (the checker proves it no_leak), so
+  certifying that shape would have been **accept-but-unsafe**. **FIXED** (the underlying
+  v0 bug, not merely walled): the wasm emitter now frees the heap locals LIVE at each
+  `Try`/`Unwrap`/`Fan` Err-path `return_` before it propagates — `emit_early_return_decs`
+  reads Perceus's own rc_dec liveness (a running owned-heap set, push on heap Bind / pop
+  on RcDec, excluding env-borrows + donate-only `__*` temps; the returned Err ptr is a
+  scratch temp, never freed). Empirically verified leak-free (a 100k-iteration ×100KB
+  err-loop completes instead of OOM-ing) AND double-free-free (the whole 260-file wasm
+  corpus + the cross-target byte gate stay green). So the early-return shape now LOWERS
+  on both targets, faithful — the move/consume model never moves a user heap local
+  without a Dec (alias-by-RcInc, verified), so the running set is the exact live set.
+  See docs/roadmap/active/v0-unwrap-early-return-leak.md), plus
   **destructuring patterns** (a `match` arm's `Some(x)`/`Ok(v)`/`Foo(a,b)` and a
   `let Foo{..}=`/`let (a,b)=` bind their payloads CONTAINER-GRAIN — a heap binding
   aliases the whole subject (`Op::Dup`, reusing the proven `a` event; element/payload-
@@ -228,7 +229,7 @@ The receipt's claims are scoped to exactly this:
   `Module` call, a variant constructor, or a known Stdout-free builtin
   (`assert*`/`eprintln`/`panic`/`to_string` — these reach stderr/abort, NOT
   Stdout) is free; ANY other unknown callee (a walled or cross-file user function)
-  TAINTS, so the function is reported `caps-unverified` (3479/4024 verified, 545
+  TAINTS, so the function is reported `caps-unverified` (3528/4083 verified, 555
   unverified) rather than falsely accepted. **The gate verifies the REAL
   capability-bound property `reachable ⊆ declared`** (exactly what
   `proofs/CapabilityBound.v` proves), not a degenerate "reaches no capability at

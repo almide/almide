@@ -108,6 +108,18 @@ impl FuncCompiler<'_> {
                         wasm!(self.func, { local_set(local_idx); });
                     }
                 }
+                // EARLY-RETURN LEAK FIX: now that `var` is bound (after its value — so a
+                // Try/Unwrap INSIDE the value did not yet see it), track it as an owned
+                // heap local so a later Try/Unwrap/Fan early-return frees it (see
+                // emit_early_return_decs). Exclude env-borrows (the closure env owns them)
+                // and donate-only `__*` temps (they never get their own dec → decing one
+                // would free a donated ref). It will be removed on its Perceus RcDec.
+                if Self::is_heap_type(effective_ty)
+                    && !matches!(value.kind, IrExprKind::EnvLoad { .. })
+                    && !is_donate_temp(self.var_table.get(*var).name.as_str())
+                {
+                    self.live_heap.push(*var);
+                }
             }
 
             IrStmtKind::Assign { var, value } => {
@@ -389,6 +401,10 @@ impl FuncCompiler<'_> {
                         var.0
                     );
                 }
+                // EARLY-RETURN LEAK FIX: this heap local is now dropped — it is no longer
+                // live, so a Try/Unwrap/Fan early-return AFTER this point must not free it
+                // again (the retain is a no-op for vars never tracked, e.g. globals).
+                self.live_heap.retain(|v| *v != *var);
             }
             IrStmtKind::Comment { .. } => {
                 // No-op in WASM
@@ -726,6 +742,26 @@ impl FuncCompiler<'_> {
         // it so a record FIELD that is itself a declared type is recursively dec'd
         // by `emit_typed_rc_dec`. Mirrors pass_perceus::is_heap_type.
         matches!(ty, Ty::String | Ty::Applied(_, _) | Ty::Record { .. } | Ty::Named(..) | Ty::Unknown)
+    }
+
+    /// EARLY-RETURN LEAK FIX: free every heap local currently live (`live_heap`), for a
+    /// `Try`/`Unwrap`/`Fan` Err-path `return_`. The bare `return_` jumps PAST the Perceus
+    /// terminal rc_decs, so without this the live heap locals leak on the Err path. LIFO
+    /// (scope-teardown) order for deterministic bytes. Mirrors the RcDec handler per var
+    /// (a captured shared cell gets a PLAIN rc_dec; everything else a typed rc_dec). The
+    /// returned Err ptr is a scratch temp, not a tracked VarId, so it is never freed here.
+    pub(super) fn emit_early_return_decs(&mut self) {
+        let live: Vec<almide_ir::VarId> = self.live_heap.iter().rev().copied().collect();
+        for var in live {
+            if let Some(&local_idx) = self.var_map.get(&var.0) {
+                if self.emitter.mutable_captures.contains(&var.0) {
+                    wasm!(self.func, { local_get(local_idx); call(self.emitter.rt.rc_dec); });
+                } else {
+                    let ty = self.var_table.get(var).ty.clone();
+                    self.emit_typed_rc_dec(&ty, local_idx);
+                }
+            }
+        }
     }
 
     /// Perceus Rule 3: type-specialized rc_dec.
@@ -1531,4 +1567,14 @@ fn collect_stmt_var_refs(stmt: &IrStmt, refs: &mut std::collections::HashSet<Var
         fn visit_stmt(&mut self, stmt: &IrStmt) { walk_stmt(self, stmt); }
     }
     VarCollector { refs }.visit_stmt(stmt);
+}
+
+/// EARLY-RETURN LEAK FIX: a `__tco_`/`__br_`/`__perceus_` temp DONATES its reference
+/// (it never gets its own scope-end dec — see pass_perceus.rs:309-315/414-418), so it
+/// must NOT be tracked as an owned heap local: decing one on an early-return would free
+/// a donated ref (double-free). The prefix set is the union of the move-exempt and
+/// terminal-dec-skip families, conservatively broad (excluding extra never double-frees;
+/// the worst case is a bounded leak of a transient temp).
+pub(super) fn is_donate_temp(name: &str) -> bool {
+    name.starts_with("__tco_") || name.starts_with("__br_") || name.starts_with("__perceus_")
 }

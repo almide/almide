@@ -712,7 +712,13 @@ impl FuncCompiler<'_> {
                         wasm!(self.func, {
                             local_set(scratch);
                             local_get(scratch); i32_load(0); i32_const(0); i32_ne;
-                            if_empty; local_get(scratch); return_; end;
+                            if_empty;
+                        });
+                        // EARLY-RETURN LEAK FIX: free live heap locals before the bare
+                        // `return_` (skips the terminal rc_decs) — else they leak on wasm.
+                        self.emit_early_return_decs();
+                        wasm!(self.func, {
+                            local_get(scratch); return_; end;
                             local_get(scratch);
                         });
                         self.emit_load_at(&expr.ty, 4);
@@ -746,7 +752,16 @@ impl FuncCompiler<'_> {
                             wasm!(self.func, {
                                 local_set(res_scratch);
                                 local_get(res_scratch); i32_load(0); i32_const(0); i32_ne;
-                                if_empty; local_get(res_scratch); return_; end;
+                                if_empty;
+                            });
+                            // EARLY-RETURN LEAK FIX: free live heap locals before the bare
+                            // `return_` (skips the terminal rc_decs). NOTE: the partially-
+                            // built `tuple_scratch` still leaks on this path — a separate,
+                            // pre-existing Fan-multi scratch leak (partial init can't be
+                            // typed-dec'd); this change does not regress it.
+                            self.emit_early_return_decs();
+                            wasm!(self.func, {
+                                local_get(res_scratch); return_; end;
                                 local_get(tuple_scratch);
                                 local_get(res_scratch);
                             });
@@ -781,6 +796,11 @@ impl FuncCompiler<'_> {
                     i32_const(0);
                     i32_ne;
                     if_empty;
+                });
+                // EARLY-RETURN LEAK FIX: free the heap locals live here before the bare
+                // `return_` (which skips the Perceus terminal rc_decs) — else they leak.
+                self.emit_early_return_decs();
+                wasm!(self.func, {
                     // Err: return the Result ptr
                     local_get(scratch);
                     return_;
@@ -809,6 +829,11 @@ impl FuncCompiler<'_> {
                         local_get(scratch);
                         i32_eqz;
                         if_empty;
+                    });
+                    // EARLY-RETURN LEAK FIX: free live heap locals on the None err path
+                    // before building+returning err("none") — else they leak on wasm.
+                    self.emit_early_return_decs();
+                    wasm!(self.func, {
                         // None → return `err("none")` so the unwrap propagates a real
                         // Err Result, matching native's `.ok_or("none")?`. (Previously
                         // returned a null ptr `0`, which the caller mis-read as `Ok`
@@ -841,6 +866,11 @@ impl FuncCompiler<'_> {
                         i32_const(0);
                         i32_ne;
                         if_empty;
+                    });
+                    // EARLY-RETURN LEAK FIX: free live heap locals before the bare
+                    // `return_` (skips the terminal rc_decs) — else they leak on wasm.
+                    self.emit_early_return_decs();
+                    wasm!(self.func, {
                         // Err path: propagate the Result pointer (early return)
                         local_get(scratch);
                         return_;

@@ -352,6 +352,7 @@ pub(super) fn compile_lambda_bodies(
                 var_table: &program.var_table,
                 stub_ret_ty: Ty::Unit,
                 current_module_name: None,
+                live_heap: Vec::new(),
             };
             compiler.emit_expr(body);
             compiler.func.instruction(&wasm_encoder::Instruction::End);

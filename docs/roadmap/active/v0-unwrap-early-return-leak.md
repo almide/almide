@@ -1,6 +1,6 @@
 # v0 wasm codegen: Try/Unwrap/Fan early-return heap leak
 
-**Status**: designed, NOT implemented (dedicated-session work — RC-critical).
+**Status**: IMPLEMENTED + verified (emitter-side `emit_early_return_decs`); v1 wall LIFTED, -59 recovered (in-profile 4083). Leak-free (100k-err-loop completes) + double-free-free (260-file wasm corpus green).
 **Discovered**: 2026-06-14, by the v1 trust-spine adversarial-verify workflow
 (`wf_54ac302a`), while sweeping the `(あ)` small-lowering-gap tier.
 **Severity**: MEDIUM — a LEAK, never a use-after-free / double-free. wasm linear
@@ -113,6 +113,68 @@ This is drift-FREE (the live set is Perceus's, not the emitter's) and surgical
 5. **Re-run the v1 trust-spine** and LIFT the `live_heap_handles` Unwrap/Try wall
    (`expr_has_early_return` guard in lower_stmt/lower_tail) — corpus-wall should
    return to in-profile ≈ 4081 with all 3 properties still ACCEPT.
+
+## VERIFIED algorithm (workflow wf_dbf7590c, 6 agents)
+
+The adversarial-verify workflow RESOLVED the catastrophic risk and pinned the exact
+algorithm:
+
+- **NO double-free from moves.** The Perceus model is *alias-by-RcInc,
+  move-nothing-user*: a heap local handed into a list/record/tuple/concat/call is
+  SHARED via an `RcInc` on the donated pointer while the source KEEPS its own
+  terminal Dec (emit-side "SHARE dup", expressions.rs:1265-1308). No user heap
+  VDecl is ever consumed mid-function without a matching `FnBody::Dec`
+  (`collect_heap_vdecls` lists every heap VDecl; `insert_decs_before_ret` gives
+  each one terminal Dec). So `vdecld-minus-decd` keeps a *still-owned* local in
+  `live` — which is exactly the set to dec on the err path. The `collect_moved_out_vars`
+  verifier (pass_perceus.rs:880-910) recognizes only bare-Var block-tail and
+  for-in-iterable as "moved", and BOTH are leak-DIAGNOSTIC exemptions, not Dec
+  removals. ⟹ the worst-case failure of this whole fix is a *missed* dec (LEAK),
+  never a double-free — a SAFE direction.
+
+- **The live set MUST union across the enclosing chain-stack.** Every Block,
+  `while`/`for-in` body, and `if`/`match` arm body is its OWN `FnBody` chain
+  (`block_to_fnbody`), invisible to an outer chain's `collect_heap_vdecls`. An early
+  `return_` exits the WHOLE function, so the live set at a node = the UNION, over
+  every enclosing chain from the node outward to the function root, of
+  (heap VDecls bound BEFORE the node in that chain) − (heap `Dec`s before it).
+  A single FLAT walk LEAKS outer-scope and per-iteration locals (two HIGH-severity
+  refute holes confirmed this — both LEAKs, not corruption). Compute it INSIDE
+  pass_perceus during the same recursion that processes nested chains, threading the
+  enclosing live set into each nested-chain walk.
+
+- **Exclusions (mirror the existing predicates EXACTLY, or risk double-free):**
+  (1) `__tco_`/`__br_`/`__perceus_*` temps — same prefix test as
+  insert_decs_before_ret:414-418 and the Assign move-exempt:309-315 (they donate
+  their ref and never get a Dec, so decing them = use-after-free).
+  (2) `EnvLoad`-bound borrow locals — same `!matches!(expr.kind, EnvLoad{..})` guard
+  as collect_heap_vdecls:358 (the closure env owns them).
+  (3) the IN-FLIGHT bind — a Try/Unwrap inside `let n = …!`'s initializer must NOT
+  include `n` (it is bound only after its expr evaluates).
+  Dedup by VarId.
+
+- **The returned Err value is a `ScratchAllocator` temp (raw wasm local, no VarId),
+  never a member of the live set** → the result ptr is never double-dec'd.
+
+- **Delivery**: field-on-node (`early_return_decs: Vec<VarId>` on Unwrap/Try/Fan)
+  costs ~13 OR-pattern arms + 15 constructors but the live set travels WITH the node
+  (no keying). Side-table keyed by per-function pre-order node index is 1 struct but
+  is sound ONLY if NO pass between Perceus and emit reorders/adds/removes a
+  Try/Unwrap/Fan node (a keying mismatch could grab a wrong set → double-free). Pick
+  per Perceus's pass position: if Perceus is the LAST IR pass before emit, the
+  side-table index is stable and cheaper; otherwise prefer the field for safety.
+
+- **Emit** (expressions.rs ~706/770/798, the three early-`return_` sites): for each
+  (VarId v) in the live set, resolve v → (local L, ty T) via var_map + var_table
+  (exactly the RcDec handler statements.rs:358-392), emit `local_get(L);
+  emit_typed_rc_dec(&T, L)` BEFORE `local_get(scratch); return_`. Must not clobber
+  `scratch`.
+
+- **Test the nesting explicitly** (the flat-walk holes prove fixture #1 is
+  insufficient): an Unwrap inside a `while`/`for` body AND inside an `if` arm, each
+  with an OUTER-scope heap local live across it, asserting the outer local IS dec'd
+  on the Err path (alloc/free balance). The flat function-top-level fixture passes
+  even with the buggy per-chain set.
 
 ## Why not now
 

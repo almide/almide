@@ -150,6 +150,7 @@ fn compile_function_inner(
         var_table: _var_table,
         stub_ret_ty: almide_lang::types::Ty::Unit,
         current_module_name: module_name,
+        live_heap: Vec::new(),
     };
 
     if let Some(init_idx) = init_globals_idx {

@@ -228,18 +228,10 @@ impl LowerCtx {
     }
 
     pub(crate) fn lower_stmt(&mut self, stmt: &IrStmt) -> Result<(), LowerError> {
-        // EARLY-RETURN LEAK GUARD: a `Try`/`Unwrap` (`?`/`!`) `return Err` on failure,
-        // and on wasm that Err path is a bare `return_` that jumps PAST the function's
-        // scope-end heap frees (the Perceus rc_decs sit only at the terminal Ret). So if
-        // this statement early-returns while an owned heap local is LIVE, the live local
-        // LEAKS on wasm (Rust is safe — `?` runs scope-exit Drop). The deferred-continue
-        // cert is balanced and would be accept-but-unsafe. Wall it; with NO live heap
-        // handle there is no Drop to skip = no leak, so it is admitted.
-        if !self.live_heap_handles.is_empty() && stmt_has_early_return(stmt) {
-            return Err(LowerError::Unsupported(
-                "Try/Unwrap early-return with a live heap local (the wasm Err path would skip its free = a leak) not in this brick".into(),
-            ));
-        }
+        // (The Try/Unwrap early-return-over-a-live-heap-local wall is LIFTED: the v0 wasm
+        // codegen now frees the live heap locals before the Err-path `return_`
+        // [emit_wasm: emit_early_return_decs], so the deferred-continue cert is faithful
+        // on both targets — no leak. See docs/roadmap/active/v0-unwrap-early-return-leak.md.)
         match &stmt.kind {
             IrStmtKind::Bind { var, ty, value, .. } => self.lower_bind(*var, ty, value),
             // `x = value` — reassignment.
@@ -432,53 +424,6 @@ mod tail;
 mod control;
 mod calls;
 
-
-/// Does an expression EARLY-RETURN — contain a `Try` (effect-fn auto-`?` propagation)
-/// or `Unwrap` (`!`), both of which `return Err(e)` on failure — within THIS function's
-/// scope (NOT descending into a nested `Lambda`/`ClosureCreate`, which early-returns in
-/// its OWN scope)? On wasm the Err path is a bare `return_` (emit_wasm/expressions.rs)
-/// that jumps PAST the function's scope-end heap frees (the Perceus rc_decs sit only at
-/// the terminal `Ret`), so any heap local LIVE at that point LEAKS. `ToOption` (`?` =
-/// Result→Option), `UnwrapOr` (`??`) and `OptionalChain` (`?.`) are TOTAL maps — no
-/// early return, never a leak — so they are deliberately excluded.
-pub(crate) fn expr_has_early_return(e: &IrExpr) -> bool {
-    use almide_ir::visit::{walk_expr, IrVisitor};
-    struct Scan {
-        found: bool,
-    }
-    impl IrVisitor for Scan {
-        fn visit_expr(&mut self, e: &IrExpr) {
-            match &e.kind {
-                IrExprKind::Try { .. } | IrExprKind::Unwrap { .. } => self.found = true,
-                // A nested closure early-returns in its OWN scope — do not descend.
-                IrExprKind::Lambda { .. } | IrExprKind::ClosureCreate { .. } => {}
-                _ => walk_expr(self, e),
-            }
-        }
-    }
-    let mut s = Scan { found: false };
-    s.visit_expr(e);
-    s.found
-}
-
-/// Does a statement evaluate an early-returning `Try`/`Unwrap` (see
-/// [`expr_has_early_return`])? Scans every expression the statement evaluates.
-pub(crate) fn stmt_has_early_return(stmt: &IrStmt) -> bool {
-    use almide_ir::visit::IrVisitor;
-    struct Scan {
-        found: bool,
-    }
-    impl IrVisitor for Scan {
-        fn visit_expr(&mut self, e: &IrExpr) {
-            if expr_has_early_return(e) {
-                self.found = true;
-            }
-        }
-    }
-    let mut s = Scan { found: false };
-    s.visit_stmt(stmt);
-    s.found
-}
 
 /// Does a statement list contain a `break`/`continue` that targets THIS loop — i.e.
 /// not nested inside another loop (which captures its own)? Used to wall a loop body

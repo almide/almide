@@ -883,6 +883,14 @@ pub struct FuncCompiler<'a> {
     pub stub_ret_ty: Ty,
     // Module name of the function being compiled (for intra-module call resolution)
     pub current_module_name: Option<String>,
+    /// EARLY-RETURN LEAK FIX: the running set of OWNED heap locals — pushed on a heap
+    /// `Bind`, removed on its Perceus `RcDec` (so this mirrors Perceus's own liveness as
+    /// the body is emitted, in scope-nested order). A `Try`/`Unwrap`/`Fan` Err-path
+    /// `return_` jumps PAST the Perceus terminal rc_decs, so it first frees these (the
+    /// ones live at that point) — else they leak on wasm (Rust `?` runs Drop). Excludes
+    /// env-borrows + donate-only `__*` temps; the returned Err ptr is a scratch temp, not
+    /// a member. See emit_early_return_decs + docs/roadmap/active/v0-unwrap-early-return-leak.md.
+    pub live_heap: Vec<almide_ir::VarId>,
 }
 
 impl FuncCompiler<'_> {
@@ -2212,6 +2220,7 @@ fn compile_init_globals(emitter: &mut WasmEmitter, program: &IrProgram) {
             var_table: &program.var_table,
             stub_ret_ty: Ty::Unit,
             current_module_name: None,
+                live_heap: Vec::new(),
         };
 
         // Emit each initializer in dependency-respecting `global_init_order`
@@ -2431,6 +2440,7 @@ fn compile_variant_eq_funcs(emitter: &mut WasmEmitter, var_table: &almide_ir::Va
                 var_table,
                 stub_ret_ty: almide_lang::types::Ty::Unit,
                 current_module_name: None,
+                live_heap: Vec::new(),
             };
 
             // Compare tags
@@ -2790,6 +2800,7 @@ fn compile_repr_funcs(emitter: &mut WasmEmitter, var_table: &almide_ir::VarTable
                 var_table,
                 stub_ret_ty: almide_lang::types::Ty::Unit,
                 current_module_name: None,
+                live_heap: Vec::new(),
             };
 
             // Push the value pointer (param 0); the walk consumes it from the
