@@ -1220,6 +1220,45 @@ mod tests {
     }
 
     #[test]
+    fn heap_result_if_with_a_call_arm_executes() {
+        // `if c then shout() else "no"` — a CALL arm returns a fresh owned String
+        // (CallFn-with-heap-result = cert i), moved out by the arm's Consume (cert m), the
+        // same "im" balance as a literal arm. pick(true)=shout()="HEY", pick(false)="no".
+        let src = "fn shout() -> String = \"HEY\"\n\
+            fn pick(c: Bool) -> String = if c then shout() else \"no\"\n\
+            fn main() -> Unit = {\n  \
+            println(pick(true))\n  println(pick(false)) }\n";
+        let prog = lower_source(src);
+        let f = prog.functions.iter().find(|f| f.name == "pick").unwrap();
+        assert!(
+            f.ops.iter().any(|op| matches!(op, Op::IfThen { .. }))
+                && f.ops.iter().any(|op| matches!(op, Op::CallFn { .. })),
+            "call-arm heap-result if must lower to IfThen + CallFn, got {:?}",
+            f.ops
+        );
+        if let Some(out) = build_and_run("heap_if_call_arm", &render_wasm_program(&prog)) {
+            assert_eq!(out, "HEY\nno");
+        }
+    }
+
+    #[test]
+    fn heap_result_if_call_arm_materializes_its_arg_per_arm() {
+        // SOUNDNESS: `echo("hi")` materializes the "hi" arg into a heap temp. It is freed
+        // WITHIN the arm (per-arm Drop), not at function scope — so when c is false and this
+        // arm never runs, there is no Drop of an uninitialized local (no garbage rc_dec
+        // trap). pick2(true)=echo("hi")="ok"; pick2(false)="no" (the materializing arm not
+        // taken, runs clean).
+        let src = "fn echo(s: String) -> String = \"ok\"\n\
+            fn pick2(c: Bool) -> String = if c then echo(\"hi\") else \"no\"\n\
+            fn main() -> Unit = {\n  \
+            println(pick2(true))\n  println(pick2(false)) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("heap_if_mat_arg", &render_wasm_program(&prog)) {
+            assert_eq!(out, "ok\nno");
+        }
+    }
+
+    #[test]
     fn match_unit_executes_only_matched_arm() {
         // A Unit `match` over Int literal patterns (+ a `_` catch-all) desugars to a
         // nested `if n == lit then … else …` and EXECUTES: only the matched arm's

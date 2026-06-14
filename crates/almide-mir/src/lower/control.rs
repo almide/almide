@@ -3,7 +3,7 @@
 use super::*;
 use crate::{CallArg, IntOp, Op, ValueId};
 use almide_ir::{
-    IrExpr, IrExprKind, IrMatchArm, IrPattern, IrStmt, VarId,
+    CallTarget, IrExpr, IrExprKind, IrMatchArm, IrPattern, IrStmt, VarId,
 };
 use almide_lang::types::Ty;
 
@@ -502,11 +502,14 @@ impl LowerCtx {
             return None;
         }
         // The whole attempt rolls back as a unit: the recursion below truncates nothing,
-        // so the OUTERMOST call restores the op stream on any out-of-subset arm.
+        // so the OUTERMOST call restores the op stream AND the live-handle set on any
+        // out-of-subset arm (a call arm may have materialized + tracked a temp).
         let ops_mark = self.ops.len();
+        let lhh_mark = self.live_heap_handles.len();
         let result = self.lower_heap_result_if_inner(cond, then, else_, result_ty);
         if result.is_none() {
             self.ops.truncate(ops_mark);
+            self.live_heap_handles.truncate(lhh_mark);
         }
         result
     }
@@ -543,6 +546,31 @@ impl LowerCtx {
             }
             IrExprKind::If { cond, then, else_ } => {
                 self.lower_heap_result_if_inner(cond, then, else_, result_ty)
+            }
+            // A direct user-call arm (`if c then f(x) else "d"`): the callee returns a
+            // FRESH owned heap value (CallFn-with-heap-result = cert `i`), moved out by the
+            // arm's `Consume` (cert `m`) — the same `"im"` balance as a literal arm. Any
+            // heap arg the call MATERIALIZES (a heap-literal/fresh-value arg) is dropped
+            // WITHIN the arm (`drop_arm_locals`), NOT at function scope: a per-arm temp
+            // freed at function scope would `Drop` an uninitialized local when the OTHER arm
+            // ran (garbage rc_dec → trap). Per-arm, the temp is freed only if this arm
+            // executes — the same per-iteration-balance discipline the loops use.
+            IrExprKind::Call { target: CallTarget::Named { name }, args, .. } => {
+                let repr = repr_of(result_ty).ok()?;
+                let arm_mark = self.live_heap_handles.len();
+                let lowered = self.lower_call_args(args).ok()?;
+                let obj = self.fresh_value();
+                self.ops.push(Op::CallFn {
+                    dst: Some(obj),
+                    name: name.as_str().to_string(),
+                    args: lowered,
+                    result: Some(repr),
+                });
+                self.ops.push(Op::Consume { v: obj });
+                // Free materialized arg temps inside the arm (obj is moved out, never in
+                // `live_heap_handles`, so it is not among them).
+                self.drop_arm_locals(arm_mark);
+                Some(obj)
             }
             _ => None,
         }
