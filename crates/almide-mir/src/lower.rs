@@ -259,6 +259,17 @@ impl LowerCtx {
                 self.live_heap_handles.push(dst);
                 Ok(())
             }
+            // `var v = r.x` / `xs[i]` — a HEAP extraction: alias the container
+            // (`Op::Dup`), bound here and dropped at scope end (cert `a` + `d`).
+            IrExprKind::Member { .. }
+            | IrExprKind::IndexAccess { .. }
+            | IrExprKind::MapAccess { .. }
+            | IrExprKind::TupleIndex { .. } => {
+                let dst = self.lower_heap_extraction(value)?;
+                self.value_of.insert(var, dst);
+                self.live_heap_handles.push(dst);
+                Ok(())
+            }
             // `var x = f(...)` — a USER call returning a heap value. The result is
             // a FRESH OWNED heap value (the callee's return-mode signature, read
             // from the bind's heap type — the checker need not open the callee).
@@ -339,6 +350,46 @@ impl LowerCtx {
             args: lowered,
             result: Some(repr),
         });
+        Ok(dst)
+    }
+
+    /// Lower a HEAP field/element/tuple/map EXTRACTION (`r.x`, `xs[i]`, `t.0`,
+    /// `m[k]` with a heap result) to an ALIAS of the CONTAINER: `Op::Dup{dst,
+    /// src: <container value>}`. The extracted value is modeled as a SECOND HANDLE
+    /// on the whole container — the v1 container-grain field access. This is sound:
+    /// aliasing the container keeps it (and thus its field) alive for the value's
+    /// whole lifetime — a conservative lifetime WIDENING that can never shorten a
+    /// lifetime, so never a use-after-free; and it reuses the proven `a`/`Op::Dup`
+    /// event, so the Coq checker and the `#a == #Dup` backing gate are UNCHANGED.
+    ///
+    /// HONEST SCOPE (value-content, NOT safety): `dst` denotes "a reference to the
+    /// CONTAINER", not "the field's value" — field-PRECISE aliasing (the value's
+    /// own object identity) needs the not-yet-existent layout brick (offsets +
+    /// per-field heap-ness) and is deferred, exactly like every heap value's
+    /// `Init::Opaque` content. Reading/mutating through `dst` as if it were the
+    /// field is the deferred-functional gap, not a memory-safety hole.
+    ///
+    /// Admitted ONLY when the container is itself a TRACKED heap value (a bound
+    /// var) — a nested extraction (`a.b.c`) has no single `src` to `Dup` and stays
+    /// walled (totality). The caller decides placement (bind / move-out / borrow).
+    fn lower_heap_extraction(&mut self, expr: &IrExpr) -> Result<ValueId, LowerError> {
+        let container = extraction_container(expr).ok_or_else(|| {
+            LowerError::Unsupported(format!(
+                "{} is not a field/element extraction",
+                kind_name(&expr.kind)
+            ))
+        })?;
+        let src = match &container.kind {
+            IrExprKind::Var { id } if is_heap_ty(&container.ty) => self.value_for(*id)?,
+            other => {
+                return Err(LowerError::Unsupported(format!(
+                    "heap extraction whose container is {} (not a tracked heap var) not in this brick",
+                    kind_name(other)
+                )))
+            }
+        };
+        let dst = self.fresh_value();
+        self.ops.push(Op::Dup { dst, src });
         Ok(dst)
     }
 
@@ -447,6 +498,15 @@ impl LowerCtx {
                         args,
                         &tail.ty,
                     )?;
+                    Ok(Some(dst))
+                }
+                // `fn f(r) = r.x` — a HEAP extraction returned directly: alias the
+                // container (`Op::Dup`) and move it out (cert `a` + `m`).
+                IrExprKind::Member { .. }
+                | IrExprKind::IndexAccess { .. }
+                | IrExprKind::MapAccess { .. }
+                | IrExprKind::TupleIndex { .. } => {
+                    let dst = self.lower_heap_extraction(tail)?;
                     Ok(Some(dst))
                 }
                 other => Err(LowerError::Unsupported(format!(
@@ -604,23 +664,24 @@ impl LowerCtx {
                     }
                 }
                 // A field/element/tuple EXTRACTION argument. A SCALAR result is an
-                // unambiguous COPY → `Const`. A HEAP result is an ALIAS/share (the
-                // v0 codegen reads a stored field as an alias) that needs a
-                // layout-aware field-access op with `Dup` semantics — walled until
-                // that brick (treating it as a fresh `Alloc` would double-count rc).
+                // unambiguous COPY → `Const`. A HEAP result is an ALIAS/share of
+                // the container → `Op::Dup` of the container value (the container-
+                // grain field access), borrowed into the call and dropped at scope
+                // end. (A nested-container extraction stays walled inside
+                // `lower_heap_extraction`.)
                 IrExprKind::Member { .. }
                 | IrExprKind::IndexAccess { .. }
                 | IrExprKind::MapAccess { .. }
                 | IrExprKind::TupleIndex { .. } => {
                     if is_heap_ty(&a.ty) {
-                        return Err(LowerError::Unsupported(format!(
-                            "call argument heap {} (extraction is an alias/share — needs a field-access op) not in this brick",
-                            kind_name(&a.kind)
-                        )));
+                        let dst = self.lower_heap_extraction(a)?;
+                        let repr = repr_of(&a.ty)?;
+                        self.materialized_call_arg(dst, repr)
+                    } else {
+                        let dst = self.fresh_value();
+                        self.ops.push(Op::Const { dst });
+                        CallArg::Scalar(dst)
                     }
-                    let dst = self.fresh_value();
-                    self.ops.push(Op::Const { dst });
-                    CallArg::Scalar(dst)
                 }
                 // A Named user-call result, materialized into an owned temp.
                 IrExprKind::Call { target: CallTarget::Named { name }, args: inner, .. } => {
@@ -722,6 +783,19 @@ fn stmt_kind_name(k: &IrStmtKind) -> &'static str {
         IrStmtKind::ListReverse { .. } => "ListReverse",
         IrStmtKind::ListRotateLeft { .. } => "ListRotateLeft",
         IrStmtKind::ListCopySlice { .. } => "ListCopySlice",
+    }
+}
+
+/// The CONTAINER expression of a field/element/tuple/map extraction, if `expr`
+/// is one — the source whose object the extracted value aliases (the
+/// container-grain field access, see [`LowerCtx::lower_heap_extraction`]).
+fn extraction_container(expr: &IrExpr) -> Option<&IrExpr> {
+    match &expr.kind {
+        IrExprKind::Member { object, .. }
+        | IrExprKind::IndexAccess { object, .. }
+        | IrExprKind::TupleIndex { object, .. }
+        | IrExprKind::MapAccess { object, .. } => Some(object),
+        _ => None,
     }
 }
 
@@ -1153,43 +1227,68 @@ mod tests {
     }
 
     #[test]
-    fn scalar_extraction_is_const_heap_extraction_walls() {
+    fn scalar_extraction_is_const_heap_extraction_aliases_container() {
+        use almide_lang::intern::sym;
+        let idx = |obj: IrExpr, ty: Ty| {
+            ir_expr(
+                IrExprKind::IndexAccess {
+                    object: Box::new(obj),
+                    index: Box::new(ir_expr(IrExprKind::LitInt { value: 0 }, Ty::Int)),
+                },
+                ty,
+            )
+        };
+        let c = || ir_expr(IrExprKind::Var { id: VarId(0) }, list_int());
+
         // fn f() = xs[i]  with a SCALAR element type → a `Const` copy (no ownership).
-        let scalar_idx = ir_expr(
-            IrExprKind::IndexAccess {
-                object: Box::new(ir_expr(IrExprKind::Var { id: VarId(0) }, list_int())),
-                index: Box::new(ir_expr(IrExprKind::LitInt { value: 0 }, Ty::Int)),
-            },
-            Ty::Int,
-        );
+        let scalar = idx(c(), Ty::Int);
         let mir = lower_body(
-            &ir_expr(IrExprKind::Block { stmts: vec![], expr: Some(Box::new(scalar_idx)) }, Ty::Int),
+            &ir_expr(IrExprKind::Block { stmts: vec![], expr: Some(Box::new(scalar)) }, Ty::Int),
             "main",
         )
         .expect("scalar extraction lowers");
         assert!(mir.ops.iter().any(|o| matches!(o, Op::Const { .. })), "scalar extraction is Const: {:?}", mir.ops);
         assert_eq!(verify_ownership(&mir), Ok(()));
 
-        // A HEAP extraction (element type String) is an alias/share — walled until
-        // the field-access op exists (treating it as fresh would double-count rc).
-        let heap_idx = ir_expr(
-            IrExprKind::IndexAccess {
-                object: Box::new(ir_expr(IrExprKind::Var { id: VarId(0) }, list_int())),
-                index: Box::new(ir_expr(IrExprKind::LitInt { value: 0 }, Ty::Int)),
-            },
-            Ty::String,
-        );
-        let arg_call = ir_expr(
+        // var xs = [..]; f(xs[0])  with a HEAP element → ALIAS the container (Op::Dup),
+        // borrowed into the call and dropped at scope end (cert `a` + `d`).
+        let heap_call = ir_expr(
             IrExprKind::Call {
-                target: CallTarget::Named { name: almide_lang::intern::sym("f") },
-                args: vec![heap_idx],
+                target: CallTarget::Named { name: sym("f") },
+                args: vec![idx(c(), Ty::String)],
                 type_args: vec![],
             },
             Ty::Unit,
         );
-        match lower_body(&body(vec![stmt(IrStmtKind::Expr { expr: arg_call })]), "main") {
-            Err(LowerError::Unsupported(m)) => assert!(m.contains("alias/share"), "got: {m}"),
-            other => panic!("expected a heap-extraction wall, got {other:?}"),
+        let b = body(vec![
+            bind(0, list_int(), ir_expr(IrExprKind::List { elements: vec![] }, list_int())),
+            stmt(IrStmtKind::Expr { expr: heap_call }),
+        ]);
+        let mir2 = lower_body(&b, "main").expect("heap extraction aliases the container");
+        assert!(mir2.ops.iter().any(|o| matches!(o, Op::Dup { .. })), "heap extraction is a container Dup: {:?}", mir2.ops);
+        assert_eq!(verify_ownership(&mir2), Ok(()));
+
+        // A NESTED-container extraction (the immediate container is itself an
+        // extraction, not a tracked var) stays walled — there is no `src` to Dup.
+        let nested = ir_expr(
+            IrExprKind::Member { object: Box::new(idx(c(), list_int())), field: sym("x") },
+            Ty::String,
+        );
+        let nested_call = ir_expr(
+            IrExprKind::Call {
+                target: CallTarget::Named { name: sym("g") },
+                args: vec![nested],
+                type_args: vec![],
+            },
+            Ty::Unit,
+        );
+        let b2 = body(vec![
+            bind(0, list_int(), ir_expr(IrExprKind::List { elements: vec![] }, list_int())),
+            stmt(IrStmtKind::Expr { expr: nested_call }),
+        ]);
+        match lower_body(&b2, "main") {
+            Err(LowerError::Unsupported(m)) => assert!(m.contains("not a tracked heap var"), "got: {m}"),
+            other => panic!("expected a nested-container wall, got {other:?}"),
         }
     }
 }
