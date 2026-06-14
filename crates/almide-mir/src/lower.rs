@@ -20,7 +20,9 @@
 
 use crate::purity;
 use crate::{CallArg, Init, MirFunction, MirParam, Op, Repr, RtFn, ValueId, PLACEHOLDER_LAYOUT};
-use almide_ir::{CallTarget, IrExpr, IrExprKind, IrFunction, IrParam, IrStmt, IrStmtKind, VarId};
+use almide_ir::{
+    CallTarget, IrExpr, IrExprKind, IrFunction, IrParam, IrPattern, IrStmt, IrStmtKind, VarId,
+};
 use almide_lang::types::Ty;
 use std::collections::{HashMap, HashSet};
 
@@ -195,6 +197,10 @@ impl LowerCtx {
             // overwrites `value_of[x]`, so it borrows the still-live old handle —
             // never a use-after-free.
             IrStmtKind::Assign { var, value } => self.lower_bind(*var, &value.ty, value),
+            // `let (a, b) = (x, y)` — a TUPLE destructuring bind.
+            IrStmtKind::BindDestructure { pattern, value } => {
+                self.lower_destructure(pattern, value)
+            }
             IrStmtKind::IndexAssign { target, .. } => {
                 // Copy-on-write: the write must land on a uniquely-owned buffer.
                 let v = self.value_for(*target)?;
@@ -400,6 +406,82 @@ impl LowerCtx {
         let dst = self.fresh_value();
         self.ops.push(Op::Dup { dst, src });
         Ok(dst)
+    }
+
+    /// `let (a, b) = …` — a TUPLE destructuring bind. Two sound shapes:
+    ///
+    /// 1. From a tuple LITERAL `(x, y)` of the same arity — lowered COMPONENT-WISE
+    ///    as ordinary binds (`lower_bind` reused: a `Var` is an alias `Dup`, a
+    ///    literal an `Alloc`/`Const`, a call a real `CallFn` whose caps are
+    ///    captured, NOT elided). The tuple is never materialized.
+    /// 2. From a tracked heap VAR `t` — each HEAP component aliases the WHOLE
+    ///    container `t` (an `Op::Dup`, the container-grain field access of the
+    ///    field-access op), each SCALAR component is a `Const` copy. Aliasing the
+    ///    container keeps it alive for each component's lifetime (a conservative
+    ///    lifetime widening, never a UAF); component-PRECISE identity (`a == t.0`)
+    ///    is deferred to the layout brick.
+    ///
+    /// A `Wildcard` component is ignored. Anything else — a non-tuple/nested/
+    /// constructor/record pattern, or a value that is neither a matching tuple
+    /// literal nor a tracked heap var — stays an explicit `Unsupported` (totality).
+    fn lower_destructure(&mut self, pattern: &IrPattern, value: &IrExpr) -> Result<(), LowerError> {
+        let pats = match pattern {
+            IrPattern::Tuple { elements } => elements,
+            _ => {
+                return Err(LowerError::Unsupported(
+                    "destructure of a non-tuple pattern not in this brick".into(),
+                ))
+            }
+        };
+        // Shape 1: component-wise from a same-arity tuple literal.
+        if let IrExprKind::Tuple { elements: vals } = &value.kind {
+            if pats.len() == vals.len() {
+                for (p, v) in pats.iter().zip(vals) {
+                    match p {
+                        IrPattern::Bind { var, ty } => self.lower_bind(*var, ty, v)?,
+                        IrPattern::Wildcard => {}
+                        _ => {
+                            return Err(LowerError::Unsupported(
+                                "destructure sub-pattern (only a bound var or `_`) not in this brick"
+                                    .into(),
+                            ))
+                        }
+                    }
+                }
+                return Ok(());
+            }
+        }
+        // Shape 2: alias the whole container `t` per heap component.
+        if let IrExprKind::Var { id } = &value.kind {
+            if is_heap_ty(&value.ty) {
+                let container = self.value_for(*id)?;
+                for p in pats {
+                    match p {
+                        IrPattern::Wildcard => {}
+                        IrPattern::Bind { var, ty } => {
+                            let dst = self.fresh_value();
+                            if is_heap_ty(ty) {
+                                self.ops.push(Op::Dup { dst, src: container });
+                                self.live_heap_handles.push(dst);
+                            } else {
+                                self.ops.push(Op::Const { dst });
+                            }
+                            self.value_of.insert(*var, dst);
+                        }
+                        _ => {
+                            return Err(LowerError::Unsupported(
+                                "destructure sub-pattern (only a bound var or `_`) not in this brick"
+                                    .into(),
+                            ))
+                        }
+                    }
+                }
+                return Ok(());
+            }
+        }
+        Err(LowerError::Unsupported(
+            "destructure (only a tuple literal or a tracked heap var) not in this brick".into(),
+        ))
     }
 
     fn value_for(&self, var: VarId) -> Result<ValueId, LowerError> {
@@ -1338,5 +1420,57 @@ mod tests {
         ]);
         let mir2 = lower_body(&b2, "main").expect("reassign reading old x lowers");
         assert_eq!(verify_ownership(&mir2), Ok(()), "no UAF reading old x: {:?}", mir2.ops);
+    }
+
+    #[test]
+    fn tuple_destructure_aliases_components() {
+        let heap_binds = || {
+            IrPattern::Tuple {
+                elements: vec![
+                    IrPattern::Bind { var: VarId(2), ty: list_int() },
+                    IrPattern::Bind { var: VarId(3), ty: list_int() },
+                ],
+            }
+        };
+        // var x; var y; let (a, b) = (x, y)  — component-wise: a aliases x, b aliases y.
+        let tup_lit = ir_expr(
+            IrExprKind::Tuple {
+                elements: vec![
+                    ir_expr(IrExprKind::Var { id: VarId(0) }, list_int()),
+                    ir_expr(IrExprKind::Var { id: VarId(1) }, list_int()),
+                ],
+            },
+            list_int(),
+        );
+        let b = body(vec![
+            bind(0, list_int(), ir_expr(IrExprKind::List { elements: vec![] }, list_int())),
+            bind(1, list_int(), ir_expr(IrExprKind::List { elements: vec![] }, list_int())),
+            stmt(IrStmtKind::BindDestructure { pattern: heap_binds(), value: tup_lit }),
+        ]);
+        let mir = lower_body(&b, "main").expect("tuple-literal destructure lowers");
+        assert_eq!(
+            mir.ops.iter().filter(|o| matches!(o, Op::Dup { .. })).count(),
+            2,
+            "a aliases x, b aliases y: {:?}",
+            mir.ops
+        );
+        assert_eq!(verify_ownership(&mir), Ok(()));
+
+        // var t; let (a, b) = t  — each heap component aliases the container t.
+        let b2 = body(vec![
+            bind(0, list_int(), ir_expr(IrExprKind::List { elements: vec![] }, list_int())),
+            stmt(IrStmtKind::BindDestructure {
+                pattern: heap_binds(),
+                value: ir_expr(IrExprKind::Var { id: VarId(0) }, list_int()),
+            }),
+        ]);
+        let mir2 = lower_body(&b2, "main").expect("container-var destructure lowers");
+        assert_eq!(
+            mir2.ops.iter().filter(|o| matches!(o, Op::Dup { .. })).count(),
+            2,
+            "both components alias t: {:?}",
+            mir2.ops
+        );
+        assert_eq!(verify_ownership(&mir2), Ok(()));
     }
 }
