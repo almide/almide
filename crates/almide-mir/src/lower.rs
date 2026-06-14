@@ -418,13 +418,38 @@ impl LowerCtx {
         args: &[IrExpr],
         result_ty: &Ty,
     ) -> Result<ValueId, LowerError> {
+        let lowered = self.lower_pure_module_call_args(module, func, args)?;
+        let dst = self.fresh_value();
+        let repr = repr_of(result_ty)?;
+        self.ops.push(Op::CallFn {
+            dst: Some(dst),
+            name: format!("{module}.{func}"),
+            args: lowered,
+            result: Some(repr),
+        });
+        Ok(dst)
+    }
+
+    /// Admission + closure-capability capture shared by a stdlib `Module` call in any
+    /// position (value or effect). Requires PURITY (the combinator's OWN caps must be
+    /// ∅ — an effectful call would omit its capability, accept-but-unsafe). Captures
+    /// each closure ARGUMENT's capabilities while DEFERRING its value and BORROWING
+    /// its captures: a `Lambda` body's calls become effect markers, a `ClosureCreate`/
+    /// `FnRef` named callee a marker; an OPAQUE function value (unanalyzable caps) is
+    /// walled. Returns the lowered REGULAR (non-closure) args. The pure combinator
+    /// invokes-and-discards the closure, so its captures never escape — see
+    /// [`Self::lower_pure_module_value_call`].
+    fn lower_pure_module_call_args(
+        &mut self,
+        module: &str,
+        func: &str,
+        args: &[IrExpr],
+    ) -> Result<Vec<CallArg>, LowerError> {
         if !purity::is_pure(module, func) {
             return Err(LowerError::Unsupported(format!(
                 "effectful/impure stdlib Module call {module}.{func} needs a declared capability not in this brick"
             )));
         }
-        // Capture each closure argument's capabilities; collect the rest for normal
-        // lowering. An opaque function value (unanalyzable caps) walls the whole call.
         let mut regular: Vec<IrExpr> = Vec::new();
         for a in args {
             match &a.kind {
@@ -449,16 +474,41 @@ impl LowerCtx {
                 _ => regular.push(a.clone()),
             }
         }
-        let lowered = self.lower_call_args(&regular)?;
-        let dst = self.fresh_value();
-        let repr = repr_of(result_ty)?;
-        self.ops.push(Op::CallFn {
-            dst: Some(dst),
-            name: format!("{module}.{func}"),
-            args: lowered,
-            result: Some(repr),
-        });
-        Ok(dst)
+        self.lower_call_args(&regular)
+    }
+
+    /// Lower a pure `Module` COMBINATOR applied for its EFFECT (`list.each(xs, f)` in
+    /// statement position) — the side effect is the CLOSURE's, captured by
+    /// [`Self::lower_pure_module_call_args`]. A Unit/scalar result carries no
+    /// ownership; a (rarely) discarded HEAP result is allocated and dropped at scope
+    /// end (value semantics — never leaked).
+    fn lower_effect_module_call(
+        &mut self,
+        module: &str,
+        func: &str,
+        args: &[IrExpr],
+        result_ty: &Ty,
+    ) -> Result<(), LowerError> {
+        let lowered = self.lower_pure_module_call_args(module, func, args)?;
+        if is_heap_ty(result_ty) {
+            let dst = self.fresh_value();
+            let repr = repr_of(result_ty)?;
+            self.ops.push(Op::CallFn {
+                dst: Some(dst),
+                name: format!("{module}.{func}"),
+                args: lowered,
+                result: Some(repr),
+            });
+            self.live_heap_handles.push(dst);
+        } else {
+            self.ops.push(Op::CallFn {
+                dst: None,
+                name: format!("{module}.{func}"),
+                args: lowered,
+                result: None,
+            });
+        }
+        Ok(())
     }
 
     /// Lower a HEAP field/element/tuple/map EXTRACTION (`r.x`, `xs[i]`, `t.0`,
@@ -847,9 +897,24 @@ impl LowerCtx {
         };
         let name = match target {
             CallTarget::Named { name } => name.as_str(),
-            _ => {
+            // A pure Module COMBINATOR applied for side effects (`list.each(xs, f)`):
+            // the effect is the CLOSURE's. Capture the closure's capabilities, borrow
+            // the regular args, and emit the Unit-result call — exactly the value-
+            // position higher-order handling, minus the result. An effectful/impure
+            // Module call reaches a host capability of its OWN that the model cannot
+            // yet name, so it stays walled (`purity::is_pure` gates inside).
+            CallTarget::Module { module, func, .. } => {
+                return self.lower_effect_module_call(module.as_str(), func.as_str(), args, &call.ty)
+            }
+            CallTarget::Method { method, .. } => {
+                return Err(LowerError::Unsupported(format!(
+                    "effect Method call .{} (unresolved dispatch) not in this brick",
+                    method.as_str()
+                )))
+            }
+            CallTarget::Computed { .. } => {
                 return Err(LowerError::Unsupported(
-                    "only Named effect calls in this brick".into(),
+                    "effect Computed call (closure-value callee) not in this brick".into(),
                 ))
             }
         };
@@ -1779,6 +1844,50 @@ mod tests {
         assert!(
             mir.ops.iter().any(|o| matches!(o, Op::CallFn { dst: Some(_), name, .. } if name == "list.map")),
             "the HOF result is a fresh owned value",
+        );
+        assert_eq!(verify_ownership(&mir), Ok(()));
+    }
+
+    #[test]
+    fn effect_position_pure_combinator_captures_closure_caps() {
+        use almide_lang::intern::sym;
+        // list.each(xs, (x) => f(x))  as a STATEMENT — the side effect is the
+        // closure's: `f` is captured as a marker, the Unit-result HOF carries no
+        // ownership. (An effectful Module effect call still walls via the purity gate.)
+        let lambda = ir_expr(
+            IrExprKind::Lambda {
+                params: vec![(VarId(3), Ty::Int)],
+                body: Box::new(ir_expr(
+                    IrExprKind::Call {
+                        target: CallTarget::Named { name: sym("f") },
+                        args: vec![ir_expr(IrExprKind::Var { id: VarId(3) }, Ty::Int)],
+                        type_args: vec![],
+                    },
+                    Ty::Unit,
+                )),
+                lambda_id: None,
+            },
+            Ty::Fn { params: vec![Ty::Int], ret: Box::new(Ty::Unit) },
+        );
+        let each = module_call(
+            "list",
+            "each",
+            vec![ir_expr(IrExprKind::Var { id: VarId(0) }, list_int()), lambda],
+            Ty::Unit,
+        );
+        let b = body(vec![
+            bind(0, list_int(), ir_expr(IrExprKind::List { elements: vec![] }, list_int())),
+            stmt(IrStmtKind::Expr { expr: each }),
+        ]);
+        let mir = lower_body(&b, "main").expect("effect-position combinator lowers");
+        assert!(
+            mir.ops.iter().any(|o| matches!(o, Op::CallFn { dst: None, name, .. } if name == "f")),
+            "closure body call captured as a marker: {:?}",
+            mir.ops
+        );
+        assert!(
+            mir.ops.iter().any(|o| matches!(o, Op::CallFn { name, .. } if name == "list.each")),
+            "the Unit-result combinator is emitted",
         );
         assert_eq!(verify_ownership(&mir), Ok(()));
     }
