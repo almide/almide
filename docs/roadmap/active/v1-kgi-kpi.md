@@ -70,15 +70,21 @@
   証明済みへ。WasmCert-Coq import + ランタイム heap refinement 証明 + per-build V'。
 - **Gap 2**: frees / leak-freedom / reuse ―― 精密所有権モデル(Perceus per-edge)を
   MIR に。証明書形式の a/m/r 文字がその ground-fact 化の入口。
-- **Gap 3**(= ③ 実行パリティ、次の本命): 言語面被覆 + 実プログラム被覆 ―― **ボトル
-  ネックは lower ではなく RENDER**。`lower_function`(検証)は call/制御フロー/closure
-  を deferred-lower して **97.3%** 通すが、`render_wasm`/`render_rust`(実行)はまだ
-  **subset・call なし**。だから実プログラムは **検証は通るが走らない**(最初の call で
-  render が未対応)。③ = **render を lower に追いつかせる**:
-  **call(即時・入口) → 制御フロー → closure → nested heap**。各段を二重オラクル
-  (v0 コーパスとの byte 一致 / translation_validation.rs #570)で被覆テスト。
-  実プログラム被覆 1(3 行 fixture)→ 実プログラム N 本がこの軸の進捗計。
-  GTM 解錠条件(= v1 が実プログラムを走らせて v0 と一致)。
+- **Gap 3**(= ③ 実行パリティ、次の本命) ―― **2026-06-14 実測でスコープ訂正**:
+  検証鎖(frontend → MIR → 証明検査器)は **call も制御フローも既に通る**(実測 ACCEPT:
+  `helper()`呼出 `im` / `if-then-else` `im` / `match Option` `ad|im` / `for`累積 `ad`、
+  かつ gate.sh に two_functions/transitive_caps が既在)。`render_wasm`/`render_rust`
+  も MIR op(CallFn 含む)を扱い、V(translation_validation #570)は **pattern 検査**で
+  op→wasm 命令の存在を確認する。**stale だった「subset・call なし」は検証側には当て
+  はまらない** ―― 検証側は call/制御フロー programs の **所有権**を(call は cert 上
+  deferred/elided のまま)検証できている。
+  **したがって ③ の真のフロンティアは「v1 が実プログラムを faithful に EXECUTE して
+  v0 と byte 一致」**: 今 V は走らせず pattern 照合のみ、実行は v0(二重オラクルの
+  reference、receipt C-REPRO「until v1 parity」)。lower は cert のため call を defer
+  するので、**実行には call を un-defer(忠実呼出 + 実結果)する EXECUTION path が要る**。
+  ③ = **v1 実行 path を建てて v0 とパリティ**(faithful call → 制御フロー実行 → closure →
+  nested heap)、各段を v0 byte 一致で被覆テスト。実プログラム被覆(端まで=実行して v0
+  一致)が進捗計。**GTM 解錠条件**。検証側が先行している分、ここは「実行を建てる」新軸。
 
 ---
 
@@ -111,11 +117,18 @@
   早期 return リーククラスを根治して壁を撤去・−59 回収。性質被覆は **4/8 据置**
   (リーク修正は emit 層であって証明ではない)。**実プログラム被覆は 1 のまま**
   (render を実プログラムまで前進させる ③ は未着手)。
-- **読み**: **量の軸(lower 被覆)はほぼ天井**。残りは骨太の新軸 2 つ ―― **③ render
-  catch-up**(lower は call 含め 97.3% 通すが render_wasm/render_rust は subset・call
-  なしで後ろ。実プログラムは検証は通るが走らない → render を lower に追いつかせる、
-  call から)と **④ MSR**(柱 A・未測定)。どちらも fresh session で集中して建てる。
-  守りを 1 つも落とさずこの 2 軸を伸ばせるかが次の勝負。
+- **③ スコープ実測訂正(同日)**: 検証鎖は **call も制御フローも既に ACCEPT**
+  (`helper()` `im` / `if` `im` / `match` `ad|im` / `for` `ad`、gate に two_functions/
+  transitive_caps 既在)。stale だった「render は subset・call なし」は検証側に当て
+  はまらない ―― 検証側(検査器 + render pattern + V)は先行している。**③ の真の
+  フロンティアは「v1 が実プログラムを faithful に EXECUTE して v0 と byte 一致」**
+  (今 V は走らせず pattern 照合のみ、実行は v0 が reference=二重オラクル until parity。
+  lower は cert のため call を defer するので、実行には call を un-defer する EXECUTION
+  path が新たに要る)。詳細は Gap 3 節を更新済み。
+- **読み**: **量の軸(lower 被覆)はほぼ天井**。残りは骨太の新軸 2 つ ―― **③ v1 実行
+  path を建てて v0 とパリティ**(検証側は先行、実行を建てる新軸)と **④ MSR**(柱 A・
+  未測定)。どちらも fresh session で集中して建てる。守りを 1 つも落とさずこの 2 軸を
+  伸ばせるかが次の勝負。
 
 ### 2026-06-13 — 基準点
 - **守る系**: 全 green(検査器小 / TB 宣言済み / 公理純 / CI green・クロスバージョン
