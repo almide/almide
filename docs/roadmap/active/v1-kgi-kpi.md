@@ -89,18 +89,26 @@
   **第一スライス実測(2026-06-14): EXECUTION 入口の道具を建てて 1 本走らせた**:
   `crates/almide-mir/examples/render_program.rs`(.almd → 全関数 lower → MirProgram →
   `render_wasm_program` → 完全 wat module、EXECUTION 側の emit_cert_from_source 相当)を
-  新設(production/検証コードは無改変=安全)。実測の核心 ―― **render は op の構造
-  (user 関数 call `$double`・算術・制御フロー)は出すが、RUNTIME が v0 に大きく後ろ**:
-  `render_call` に PrintStr 等のアームが無く panic、preamble(runtime)も `$print_list`/
-  `$print_int` のみで `$print_str`/`$int.to_string` 等が無い。pure Module call(int.to_string)
-  は lower で faithful `CallFn $int.to_string` になるが、その runtime routine が render 側に
-  存在しない。**⟹ ③ の支配的作業は「render の RUNTIME を v0 と parity に」。設計の核 =
-  v0 の `emit_wasm/rt_*` を REUSE するか再実装するか(賢いのは REUSE)**。
-  PUNCH-LIST(順): (1) `render_call` の全 RtFn アーム + 欠落 runtime routine(= v0 rt_*
-  reuse 設計)、(2) faithful Module/Computed call の実行(deferred を un-defer)、
-  (3) 制御フロー実行 → closure → nested heap。各段 v0 byte 一致で。
-  ※ この RUNTIME-reuse 設計判断は骨太 ―― 疲労下で詰め込まず、fresh session で
-  (必要なら検証ワークフローで de-risk してから)建てる。
+  新設(production/検証コードは無改変=安全)。実測 ―― render は op の構造(user 関数
+  call `$double`・算術・制御フロー)は出すが、RUNTIME は仮足場(preamble の手書き WAT:
+  `$print_list`/`$print_int`/list_copy/itoa のみ。`$print_str`/`$int.to_string` 等は無し)。
+
+  **⚠ 設計の核 ―― v0-reuse は v0 の罠(v1-mir-architecture.md §4・⚠注を参照)。正は
+  SELF-HOST RUNTIME**: ランタイムを **Almide で書き**、同じ Core→MIR→target を通して
+  v1 が自己コンパイルする(dogfooding、rt-oracle/drift クラス消滅)。
+  **alloc/RC の最小プリミティブだけ MIR に残し、Push/IndexSet/Print/string/list/json/…
+  は self-host runtime fn への Call にする**(op に焼かない)。
+  現状 render_wasm.rs の手書き WAT(list_copy/itoa/print を op に焼いた仮足場)は「v0 の罠
+  そのもの」=「走る」を示す仮足場であり、**手書き WAT を増やさないことが規律**。収束は
+  (a)焼いた op を runtime fn の Call に置換 → (b)MIR op をプリミティブへ縮小 →
+  (c)runtime を Almide 化(Phase 3、v1-mir-architecture.md §4 / #575/#576)。
+
+  PUNCH-LIST(順): (1) MIR op 集合をプリミティブ(alloc/RC + 不可分)へ定義、Push/Print 等
+  を runtime fn Call に置換、(2) 最小 stdlib を **Almide で書く**(`research/selfhost/` の
+  方向)→ render_program で program+runtime を v1 コンパイル → v0 と byte 一致、
+  (3) faithful Module/Computed call の実行 → 制御フロー → closure → nested heap。
+  ※ self-host 設計は骨太 ―― 疲労下で詰め込まず、fresh session で(検証ワークフローで
+  de-risk してから)建てる。「stdlib 全部動く」= self-host runtime を建てること(まだ)。
 
 ---
 
