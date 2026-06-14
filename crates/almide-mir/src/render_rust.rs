@@ -135,7 +135,9 @@ fn render_op(op: &Op) -> Option<String> {
                         s.as_bytes().iter().map(|b| b.to_string()).collect::<Vec<_>>().join(", ");
                     format!("vec![{items}]")
                 }
-                Init::Opaque => "Vec::new()".to_string(),
+                // A runtime-sized String is wasm-only (native uses v0 codegen); an empty
+                // placeholder keeps the type a Vec<i64>.
+                Init::Opaque | Init::DynStr { .. } => "Vec::new()".to_string(),
             };
             Some(format!("let mut {}: Vec<i64> = {init_expr};", var(*dst)))
         }

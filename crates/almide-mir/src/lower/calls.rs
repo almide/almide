@@ -613,6 +613,15 @@ impl LowerCtx {
                 let func = symbol.as_str().strip_prefix("almide_rt_prim_")?;
                 self.lower_prim_call(func, args).ok().flatten()
             }
+            // The same prim floor reached as a MODULE call (`prim.handle(buf)`) in a value
+            // position — e.g. an address operand `prim.handle(buf) + LIST_HEADER`. prim
+            // calls are pure scalar/handle ops (no ownership), so this is the narrow,
+            // sound subset (NOT the general scalar-call-in-operand admission).
+            IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
+                if module.as_str() == "prim" =>
+            {
+                self.lower_prim_call(func.as_str(), args).ok().flatten()
+            }
             _ => None,
         }
     }
@@ -628,6 +637,21 @@ impl LowerCtx {
         args: &[IrExpr],
     ) -> Result<Option<ValueId>, LowerError> {
         use crate::PrimKind;
+        // `prim.alloc_str(byte_len)` allocates a runtime-sized OWNED String — an `Op::Alloc`
+        // (cert `i`, a fresh owned object), NOT a scalar prim. The caller fills its bytes
+        // via `prim.store8`; the result is moved out / dropped like any heap value.
+        if func == "alloc_str" {
+            let len_v = self.lower_scalar_value(&args[0]).ok_or_else(|| {
+                LowerError::Unsupported("prim.alloc_str length is not a lowerable scalar".into())
+            })?;
+            let dst = self.fresh_value();
+            self.ops.push(Op::Alloc {
+                dst,
+                repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT },
+                init: crate::Init::DynStr { len: len_v },
+            });
+            return Ok(Some(dst));
+        }
         let kind = match func {
             "handle" => PrimKind::Handle,
             "load32" => PrimKind::Load { width: 4 },

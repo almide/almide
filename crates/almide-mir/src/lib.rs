@@ -129,6 +129,12 @@ pub enum Init {
     /// reproduce the value (the ownership cert is unaffected: an `Alloc` is one `i`
     /// regardless of content). The un-defer of string data, the first ③ slice.
     Str(String),
+    /// A DYNAMICALLY-sized, runtime-allocated String of `len` bytes (a ValueId) — an
+    /// OWNED, rc=1, empty-data block the caller fills via `prim.store8`. The ownership
+    /// cert is the SAME one `i` as any `Alloc` (init-agnostic), so NO checker change: it
+    /// is a fresh owned object, moved out / dropped like a literal. This is the primitive
+    /// the self-hosted `int.to_string` (and string-builders) allocate their result with.
+    DynStr { len: ValueId },
 }
 
 /// One MIR statement. Ownership is EXPLICIT: a heap value's refcount is changed

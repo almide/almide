@@ -382,10 +382,32 @@ fn render_op(op: &Op, label_off: &BTreeMap<String, (u32, u32)>) -> String {
             }
             s
         }
+        // A runtime-sized OWNED String of `len` bytes: round the byte length up to
+        // ELEM_SIZE (list-compatible so the free-list reuses it), $alloc, set rc=1 + the
+        // byte len + the element cap. The data is left UNINITIALIZED for the caller to fill
+        // via `prim.store8` (the self-host `int.to_string` builder). Cert: one `Alloc` = i,
+        // init-agnostic — a fresh owned object, no checker change.
+        Op::Alloc { dst, init: Init::DynStr { len }, .. } => {
+            let wlen = format!("(i32.wrap_i64 (local.get {}))", local(*len));
+            // round byte len up to ELEM_SIZE: (len + ELEM_SIZE-1) & ~(ELEM_SIZE-1)
+            let rounded = format!(
+                "(i32.and (i32.add {wlen} (i32.const {add})) (i32.const {mask}))",
+                add = ELEM_SIZE - 1,
+                mask = -(ELEM_SIZE as i32),
+            );
+            format!(
+                "    (local.set {d} (call $alloc (i32.add (i32.const {LIST_HEADER}) {rounded})))\n\
+                 \x20   (i32.store (i32.add (local.get {d}) (i32.const {LIST_RC_OFFSET})) (i32.const {RC_INITIAL}))\n\
+                 \x20   (i32.store (i32.add (local.get {d}) (i32.const {LIST_LEN_OFFSET})) {wlen})\n\
+                 \x20   (i32.store (i32.add (local.get {d}) (i32.const {LIST_CAP_OFFSET})) (i32.shr_u {rounded} (i32.const {shift})))\n",
+                d = local(*dst),
+                shift = ELEM_SIZE.trailing_zeros(),
+            )
+        }
         Op::Alloc { dst, init, .. } => {
             let elems: &[i64] = match init {
                 Init::IntList(e) => e,
-                Init::Opaque | Init::Str(_) => &[],
+                Init::Opaque | Init::Str(_) | Init::DynStr { .. } => &[],
             };
             let len = elems.len() as u32;
             let cap = len + PUSH_HEADROOM;
@@ -1255,6 +1277,61 @@ mod tests {
         let prog = lower_source(src);
         if let Some(out) = build_and_run("heap_if_mat_arg", &render_wasm_program(&prog)) {
             assert_eq!(out, "ok\nno");
+        }
+    }
+
+    #[test]
+    fn dynamic_string_alloc_builds_and_returns_a_decimal() {
+        // The stdlib-self-host foundation: a String built at RUNTIME via prim.alloc_str
+        // (Op::Alloc{DynStr} = an owned rc=1 block, cert i) + filled with decimal digits
+        // via prim.store8, then RETURNED (move-out m) and printed. to_str(12345)="12345",
+        // byte-matching v0's int.to_string. The owned dynamic String is freed by the caller.
+        let src = "fn count_digits(n: Int, acc: Int) -> Int = if n < 10 then acc + 1 else count_digits(n / 10, acc + 1)\n\
+            fn fill(n: Int, pos: Int) -> Int =\n  \
+            if n < 10 then { prim.store8(pos, 48 + n)\n    pos + 1 }\n  \
+            else { let p = fill(n / 10, pos)\n    prim.store8(p, 48 + (n % 10))\n    p + 1 }\n\
+            fn to_str(n: Int) -> String = {\n  \
+            let len = count_digits(n, 0)\n  \
+            let buf = prim.alloc_str(len)\n  \
+            let _e = fill(n, prim.handle(buf) + 12)\n  \
+            buf }\n\
+            fn main() -> Unit = println(to_str(12345))\n";
+        let prog = lower_source(src);
+        let f = prog.functions.iter().find(|f| f.name == "to_str").unwrap();
+        assert!(
+            f.ops.iter().any(|op| matches!(op, Op::Alloc { init: Init::DynStr { .. }, .. })),
+            "to_str must allocate a DynStr, got {:?}",
+            f.ops
+        );
+        if let Some(out) = build_and_run("dyn_str", &render_wasm_program(&prog)) {
+            assert_eq!(out, "12345");
+        }
+    }
+
+    #[test]
+    fn dynamic_string_in_a_loop_is_reclaimed() {
+        // SOUNDNESS: a DynStr (runtime-allocated owned String) built + dropped every
+        // iteration must be reclaimed (free-list reuse) — 1000 iterations allocating a
+        // fresh String would OOM the single page if leaked, or trap the $rc_dec sentinel if
+        // double-freed. Completing all 1000 lines proves the owned dynamic String is freed
+        // exactly once per iteration and the block reused.
+        let src = "fn count_digits(n: Int, acc: Int) -> Int = if n < 10 then acc + 1 else count_digits(n / 10, acc + 1)\n\
+            fn fill(n: Int, pos: Int) -> Int =\n  \
+            if n < 10 then { prim.store8(pos, 48 + n)\n    pos + 1 }\n  \
+            else { let p = fill(n / 10, pos)\n    prim.store8(p, 48 + (n % 10))\n    p + 1 }\n\
+            fn to_str(n: Int) -> String = {\n  \
+            let len = count_digits(n, 0)\n  \
+            let buf = prim.alloc_str(len)\n  \
+            let _e = fill(n, prim.handle(buf) + 12)\n  \
+            buf }\n\
+            fn main() -> Unit = {\n  \
+            var i = 0\n  \
+            while i < 1000 {\n    println(to_str(i))\n    i = i + 1\n  } }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("dyn_str_loop", &render_wasm_program(&prog)) {
+            assert_eq!(out.lines().count(), 1000, "every iteration must print (no OOM)");
+            assert_eq!(out.lines().next(), Some("0"));
+            assert_eq!(out.lines().last(), Some("999"));
         }
     }
 

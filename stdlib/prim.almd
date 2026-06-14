@@ -26,6 +26,12 @@ fn store32(addr: Int, val: Int) -> Unit = _
 @intrinsic("almide_rt_prim_store8")
 fn store8(addr: Int, val: Int) -> Unit = _
 
+// Allocate a runtime-sized OWNED String of `byte_len` bytes (rc=1, length set, data
+// uninitialized). The string builders (int.to_string, concat) fill the bytes via
+// `store8` and return it — an owned heap value, moved out / dropped like any String.
+@intrinsic("almide_rt_prim_alloc_str")
+fn alloc_str(byte_len: Int) -> String = _
+
 // The fd_write WASI host call — the only sandbox exit (reaches Stdout). Returns the
 // errno. `iov` points at an iovec array of `count` {ptr,len} pairs; `nw` receives
 // the bytes written.
