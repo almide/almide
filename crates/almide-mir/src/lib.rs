@@ -140,8 +140,15 @@ pub enum Op {
     /// `dst = alloc(repr, init)` — a fresh owned heap value with refcount 1. The
     /// only +1 besides [`Op::Dup`]. `repr` must be a heap repr.
     Alloc { dst: ValueId, repr: Repr, init: Init },
-    /// `dst = <scalar>` — a `Copy` value (no refcount, no ownership).
+    /// `dst = <scalar>` — a `Copy` value whose CONTENT is DEFERRED (a placeholder;
+    /// no refcount, no ownership). Renders to nothing — the local stays the wasm
+    /// zero default. Used where the scalar value is not yet computed by lowering.
     Const { dst: ValueId },
+    /// `dst = <int literal>` — a materialized integer constant (`Copy`, no
+    /// ownership). The value-carrying counterpart of [`Op::Const`]: renders to
+    /// `(local.set $dst (i64.const value))`. Lets a self-hosted runtime fn compute
+    /// real addresses/lengths (the scalar-value foundation for the prim floor).
+    ConstInt { dst: ValueId, value: i64 },
     /// `dst = dup src` — `dst` is a NEW handle (a distinct variable) denoting
     /// the SAME heap OBJECT as `src`, acquiring one additional owned reference
     /// (+1 on the object). The single decision for "this binding aliases a
@@ -381,7 +388,7 @@ pub fn verify_ownership(func: &MirFunction) -> Result<(), Vec<Violation>> {
                 rc.insert(*dst, 1);
                 dead.insert(*dst, false);
             }
-            Op::Const { dst: _ } => {
+            Op::Const { dst: _ } | Op::ConstInt { .. } => {
                 // A scalar — no ownership accounting.
             }
             Op::Dup { dst, src } => {

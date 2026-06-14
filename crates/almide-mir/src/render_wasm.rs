@@ -218,6 +218,7 @@ fn defined_value(op: &Op) -> Option<ValueId> {
         Op::Alloc { dst, .. }
         | Op::Dup { dst, .. }
         | Op::Const { dst }
+        | Op::ConstInt { dst, .. }
         | Op::IntBinOp { dst, .. }
         | Op::Pure { dst, .. } => Some(*dst),
         Op::CallFn { dst, .. } | Op::Call { dst, .. } => *dst,
@@ -240,7 +241,7 @@ fn value_reprs_wasm(func: &MirFunction) -> BTreeMap<ValueId, Repr> {
                 let r = m.get(src).copied().unwrap_or(Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT });
                 m.insert(*dst, r);
             }
-            Op::Const { dst } | Op::IntBinOp { dst, .. } => {
+            Op::Const { dst } | Op::ConstInt { dst, .. } | Op::IntBinOp { dst, .. } => {
                 m.insert(*dst, SCALAR_REPR);
             }
             // A call's result repr is the callee's RETURN repr, carried on the op
@@ -352,6 +353,11 @@ fn render_op(op: &Op, label_off: &BTreeMap<String, (u32, u32)>) -> String {
         ),
         // Still no-ops: Consume MOVES the reference out (the receiver releases it
         // later — no dec at THIS site); Const/Borrow/Pure touch no refcount.
+        // A materialized integer constant: set the local to the immediate. (A
+        // deferred `Const` renders to nothing — the local keeps the zero default.)
+        Op::ConstInt { dst, value } => {
+            format!("    (local.set {} (i64.const {value}))\n", local(*dst))
+        }
         Op::Consume { .. }
         | Op::Borrow { .. }
         | Op::Const { .. }
@@ -774,6 +780,28 @@ mod tests {
         );
         // End-to-end: renders to a valid module that runs cleanly (where wasmtime is present).
         if let Some(out) = build_and_run("scalar_user_call", &render_wasm_program(&prog)) {
+            assert_eq!(out, "");
+        }
+    }
+
+    /// An `Int` literal in value position materializes its REAL value (`Op::ConstInt`
+    /// → `(local.set $dst (i64.const v))`), not the deferred-`Const` zero — the
+    /// scalar-value foundation that lets a self-hosted runtime fn compute real
+    /// addresses/lengths. Regression: lowering emits ConstInt, render emits the const.
+    #[test]
+    fn int_literal_materializes_its_value() {
+        let prog = lower_source(
+            "fn answer() -> Int = 42\nfn main() -> Unit = { let _a = answer() }\n",
+        );
+        let answer = prog.functions.iter().find(|f| f.name == "answer").expect("answer lowered");
+        assert!(
+            answer.ops.iter().any(|op| matches!(op, Op::ConstInt { value: 42, .. })),
+            "answer must materialize 42 via ConstInt, got {:?}",
+            answer.ops
+        );
+        let wat = render_wasm_program(&prog);
+        assert!(wat.contains("(i64.const 42)"), "render must emit the constant:\n{wat}");
+        if let Some(out) = build_and_run("int_literal", &wat) {
             assert_eq!(out, "");
         }
     }

@@ -256,8 +256,16 @@ impl LowerCtx {
                 self.record_elided_calls(tail);
                 Ok(Some(dst))
             }
-            IrExprKind::LitInt { .. }
-            | IrExprKind::LitBool { .. }
+            // An INT literal materializes to a real value (the scalar-value
+            // foundation): `ConstInt` renders `(i64.const v)`, so a fn returning a
+            // literal returns the right value, not the deferred-`Const` zero. This is
+            // what lets a self-hosted runtime fn compute real offsets/lengths.
+            IrExprKind::LitInt { value } => {
+                let dst = self.fresh_value();
+                self.ops.push(Op::ConstInt { dst, value: *value });
+                Ok(Some(dst))
+            }
+            IrExprKind::LitBool { .. }
             | IrExprKind::LitFloat { .. }
             | IrExprKind::BinOp { .. }
             | IrExprKind::UnOp { .. }

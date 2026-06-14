@@ -90,7 +90,8 @@
             ir_expr(IrExprKind::LitInt { value: 5 }, Ty::Int),
         )]);
         let mir = lower_body(&b, "main").expect("lowers");
-        assert_eq!(mir.ops, vec![Op::Const { dst: ValueId(0) }]);
+        // An int literal materializes its real value (ConstInt) — still no ownership.
+        assert_eq!(mir.ops, vec![Op::ConstInt { dst: ValueId(0), value: 5 }]);
         assert_eq!(verify_ownership(&mir), Ok(()));
     }
 

@@ -22,6 +22,14 @@ impl LowerCtx {
                 self.value_of.insert(var, dst);
                 return Ok(());
             }
+            // An INT literal carries its real value (`ConstInt` → `(i64.const v)`),
+            // the scalar-value foundation; other scalars stay the deferred `Const`.
+            if let IrExprKind::LitInt { value } = &value.kind {
+                let dst = self.fresh_value();
+                self.value_of.insert(var, dst);
+                self.ops.push(Op::ConstInt { dst, value: *value });
+                return Ok(());
+            }
             let dst = self.fresh_value();
             self.value_of.insert(var, dst);
             self.ops.push(Op::Const { dst });

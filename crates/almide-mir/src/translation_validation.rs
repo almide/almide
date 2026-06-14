@@ -56,6 +56,7 @@ pub fn wasm_pattern(op: &crate::Op) -> Option<String> {
         Op::Call { func: RtFn::ListSet, .. } => "call $list_set".into(),
         Op::Call { func: RtFn::ListPush, .. } => "call $list_push".into(),
         Op::CallFn { name, .. } => format!("call ${name}"),
+        Op::ConstInt { .. } => "i64.const".into(),
         Op::IntBinOp { op: IntOp::Add, .. } => "i64.add".into(),
         Op::IntBinOp { op: IntOp::Sub, .. } => "i64.sub".into(),
         Op::IntBinOp { op: IntOp::Mul, .. } => "i64.mul".into(),

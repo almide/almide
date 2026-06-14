@@ -96,7 +96,7 @@ fn value_reprs(func: &MirFunction) -> std::collections::BTreeMap<ValueId, Repr> 
                 let r = m.get(src).copied().unwrap_or(Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT });
                 m.insert(*dst, r);
             }
-            Op::Const { dst } | Op::IntBinOp { dst, .. } => {
+            Op::Const { dst } | Op::ConstInt { dst, .. } | Op::IntBinOp { dst, .. } => {
                 m.insert(*dst, SCALAR);
             }
             Op::CallFn { dst: Some(d), .. } => {
@@ -137,6 +137,7 @@ fn render_op(op: &Op) -> Option<String> {
             Some(format!("let mut {}: Vec<i64> = {init_expr};", var(*dst)))
         }
         Op::Const { dst } => Some(format!("let {}: i64 = 0;", var(*dst))),
+        Op::ConstInt { dst, value } => Some(format!("let {}: i64 = {value};", var(*dst))),
         // The single ownership decision: an alias is a fresh owned handle whose
         // value is a clone — eager copy-on-write, so the sibling is independent.
         Op::Dup { dst, src } => {

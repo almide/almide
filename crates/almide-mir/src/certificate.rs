@@ -50,7 +50,9 @@ pub fn name_witness(func: &MirFunction) -> NameWitness {
     };
     for op in &func.ops {
         match op {
-            Op::Alloc { dst, .. } | Op::Const { dst } => defined.push(*dst),
+            Op::Alloc { dst, .. } | Op::Const { dst } | Op::ConstInt { dst, .. } => {
+                defined.push(*dst)
+            }
             Op::Dup { dst, src } => {
                 defined.push(*dst);
                 used.push(*src);
