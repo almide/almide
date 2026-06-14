@@ -167,12 +167,14 @@ impl LowerCtx {
     /// iteration: a HEAP element ALIASES the whole container (`Op::Dup`, container-
     /// grain like field extraction — it keeps the container alive for the iteration,
     /// dropped at its end; element-precise identity needs the layout brick), a SCALAR
-    /// element is a `Const`. WALLED: a `break`/`continue` (the early-exit path would
-    /// skip the frame's drops = a leak). A HEAP reassignment (the accumulator,
-    /// `acc = acc + [x]`) is DEFERRED, not walled: the `in_frame` discipline keeps `acc`
-    /// pinned to its still-live handle across iterations (memory-safe; the accumulation
-    /// is deferred like every `Opaque`). A scalar reassignment (`i = i + 1`) is a Copy
-    /// `Const`, harmless, admitted.
+    /// element is a `Const`. A `break`/`continue` is a no-op admitted ONLY over a
+    /// SCALAR-only frame (`wall_break_over_heap_frame`); over a heap frame it is WALLED
+    /// (a real early exit would skip a per-iteration heap Drop = a wasm leak). A HEAP
+    /// reassignment (the accumulator, `acc = acc + [x]`) is DEFERRED, not walled: the
+    /// `in_frame` discipline keeps `acc` pinned to its still-live handle across
+    /// iterations (memory-safe; the accumulation is deferred like every `Opaque`) and it
+    /// is not a frame handle. A scalar reassignment (`i = i + 1`) is a Copy `Const`,
+    /// harmless, admitted.
     pub(crate) fn lower_for_in(
         &mut self,
         var: VarId,
@@ -194,7 +196,6 @@ impl LowerCtx {
             self.record_elided_calls(iterable);
             None
         };
-        self.guard_loop_body(body, "for-in")?;
         let mark = self.live_heap_handles.len();
         let vars: Vec<VarId> = match var_tuple {
             Some(vs) => vs.clone(),
@@ -228,6 +229,7 @@ impl LowerCtx {
             self.lower_stmt(stmt)?;
         }
         self.in_frame -= 1;
+        self.wall_break_over_heap_frame(body, "for-in", mark)?;
         self.drop_arm_locals(mark);
         Ok(())
     }
@@ -235,11 +237,10 @@ impl LowerCtx {
     /// Lower a `while cond { body }` like a `for-in` body — a PER-ITERATION SCOPE
     /// FRAME makes one modeled iteration balanced, sound for any N. The condition is
     /// evaluated each iteration (its caps captured); the body's locals are dropped at
-    /// iteration end. Same as `for-in`: `break`/`continue` walled, a heap reassignment
-    /// (accumulator) deferred by the `in_frame` discipline.
+    /// iteration end. Same as `for-in`: a `break`/`continue` over a HEAP frame is walled
+    /// (post-lowering), a heap reassignment (accumulator) deferred by `in_frame`.
     pub(crate) fn lower_while(&mut self, cond: &IrExpr, body: &[IrStmt]) -> Result<(), LowerError> {
         self.record_elided_calls(cond);
-        self.guard_loop_body(body, "while")?;
         let mark = self.live_heap_handles.len();
         // A heap reassignment in the body is DEFERRED (the `in_frame` discipline) — the
         // accumulator keeps its still-live handle across iterations. Memory-safe.
@@ -248,18 +249,29 @@ impl LowerCtx {
             self.lower_stmt(stmt)?;
         }
         self.in_frame -= 1;
+        self.wall_break_over_heap_frame(body, "while", mark)?;
         self.drop_arm_locals(mark);
         Ok(())
     }
 
-    /// Shared loop-body admission: a `break`/`continue` is walled — its early-exit path
-    /// would skip the per-iteration frame's drops (a leak). A HEAP reassignment (the
-    /// accumulator) is NOT walled: it is deferred by the `in_frame` discipline so the
-    /// var keeps its still-live handle across iterations (memory-safe).
-    pub(crate) fn guard_loop_body(&self, body: &[IrStmt], what: &str) -> Result<(), LowerError> {
-        if body_breaks_or_continues(body) {
+    /// Post-lowering loop-body admission for `break`/`continue`. The early exit is
+    /// lowered as a no-op (the cert models the loop completing, frame Drops intact),
+    /// which is leak-safe ONLY when the per-iteration frame holds NO heap handle a real
+    /// early exit could skip — `live_heap_handles` holds only heap handles, so a frame
+    /// that grew past `mark` (a heap loop variable's `Op::Dup`, a heap body local, or a
+    /// materialized temp) holds one. At runtime the v0 wasm backend frees AFTER the break
+    /// branch target, so such a frame would LEAK; KEEP WALLING it. A scalar-only frame
+    /// (scalar loop variable, no heap local; the heap accumulator is deferred, not a
+    /// frame handle) has no Drop to skip and is admitted with the break/continue no-op.
+    pub(crate) fn wall_break_over_heap_frame(
+        &self,
+        body: &[IrStmt],
+        what: &str,
+        mark: usize,
+    ) -> Result<(), LowerError> {
+        if self.live_heap_handles.len() > mark && body_breaks_or_continues(body) {
             return Err(LowerError::Unsupported(format!(
-                "{what} body with break/continue (early exit would skip per-iteration drops) not in this brick"
+                "{what} body with break/continue over a heap frame (early exit would skip a per-iteration heap drop = a wasm leak) not in this brick"
             )));
         }
         Ok(())

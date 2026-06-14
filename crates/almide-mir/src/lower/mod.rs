@@ -307,6 +307,15 @@ impl LowerCtx {
                     }
                     Ok(())
                 }
+                // `break` / `continue` — a Unit-typed, value-less, label-less early exit
+                // (Almide has no `break x`, no labels, no `return`). It adds NO ownership
+                // op: the cert models the loop running to completion, with the
+                // per-iteration frame's Drops intact. This is leak-safe ONLY when the
+                // frame holds no heap handle a real early exit could skip — the loop
+                // lowerers enforce that with a post-lowering frame check (a heap-frame
+                // loop with break/continue is WALLED, because the v0 wasm backend frees
+                // AFTER the break branch target and would leak).
+                IrExprKind::Break | IrExprKind::Continue => Ok(()),
                 _ => self.lower_effect_call(expr),
             },
             // A source comment carries no ownership — skip it (it is not a

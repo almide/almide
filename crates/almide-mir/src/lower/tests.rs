@@ -588,9 +588,10 @@
     }
 
     #[test]
-    fn loop_with_break_is_walled() {
-        // while c { break }  — the early-exit path would skip the per-iteration frame's
-        // drops (a leak). Must WALL.
+    fn scalar_frame_break_is_admitted_as_noop() {
+        // while c { break }  — the per-iteration frame holds NO heap handle, so there is
+        // no Drop a real early exit could skip = no leak on either target. The break is a
+        // no-op; the loop lowers balanced.
         let w = ir_expr(
             IrExprKind::While {
                 cond: Box::new(bool_var()),
@@ -599,10 +600,96 @@
             Ty::Unit,
         );
         let b = body(vec![stmt(IrStmtKind::Expr { expr: w })]);
+        let mir = lower_body(&b, "main").expect("a scalar-frame break is admitted (no leak possible)");
+        assert_eq!(verify_ownership(&mir), Ok(()));
+    }
+
+    #[test]
+    fn heap_frame_break_is_walled() {
+        // var xs = []; for s in xs { if c then { break } else { } }  — the loop variable
+        // `s` is a String (heap element → Op::Dup, a per-iteration FRAME handle). A real
+        // break skips its Drop, and the v0 wasm backend frees AFTER the break target = a
+        // LEAK. This shape (control_flow_test.almd:329) must KEEP WALLING.
+        let brk = unit_block(vec![stmt(IrStmtKind::Expr { expr: ir_expr(IrExprKind::Break, Ty::Unit) })]);
+        let body_if = stmt(IrStmtKind::Expr { expr: iff(brk, unit_block(vec![]), Ty::Unit) });
+        let forin = ir_expr(
+            IrExprKind::ForIn {
+                var: VarId(1),
+                var_tuple: None,
+                iterable: Box::new(ir_expr(IrExprKind::Var { id: VarId(0) }, list_int())),
+                body: vec![body_if],
+            },
+            Ty::Unit,
+        );
+        // Bind VarId(1) to String somewhere so find_var_ty sees a heap element.
+        let use_s = stmt(IrStmtKind::Expr {
+            expr: ir_expr(
+                IrExprKind::Call {
+                    target: CallTarget::Named { name: almide_lang::intern::sym("use") },
+                    args: vec![ir_expr(IrExprKind::Var { id: VarId(1) }, Ty::String)],
+                    type_args: vec![],
+                },
+                Ty::Unit,
+            ),
+        });
+        let forin = match forin.kind {
+            IrExprKind::ForIn { var, var_tuple, iterable, mut body } => {
+                body.push(use_s);
+                ir_expr(IrExprKind::ForIn { var, var_tuple, iterable, body }, Ty::Unit)
+            }
+            _ => unreachable!(),
+        };
+        let b = body(vec![
+            bind(0, list_int(), ir_expr(IrExprKind::List { elements: vec![] }, list_int())),
+            stmt(IrStmtKind::Expr { expr: forin }),
+        ]);
         match lower_body(&b, "main") {
-            Err(LowerError::Unsupported(r)) => assert!(r.contains("break/continue"), "got: {r}"),
-            other => panic!("expected a break/continue wall, got {other:?}"),
+            Err(LowerError::Unsupported(r)) => assert!(r.contains("heap frame"), "got: {r}"),
+            other => panic!("expected a heap-frame break wall, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn scalar_loop_with_heap_accumulator_and_break_lowers() {
+        // var acc = []; for i in 0..n { if c then { break } else { } ; acc = acc + [i] }
+        // The loop variable `i` is scalar (Const, NOT a frame handle) and the heap
+        // accumulator is DEFERRED via in_frame (also not a frame handle), so the frame is
+        // empty of heap handles → the break is admitted (no leak). The common pattern.
+        let brk = unit_block(vec![stmt(IrStmtKind::Expr { expr: ir_expr(IrExprKind::Break, Ty::Unit) })]);
+        let body_if = stmt(IrStmtKind::Expr { expr: iff(brk, unit_block(vec![]), Ty::Unit) });
+        let acc_plus = stmt(IrStmtKind::Assign {
+            var: VarId(0),
+            value: ir_expr(
+                IrExprKind::BinOp {
+                    op: almide_ir::BinOp::ConcatList,
+                    left: Box::new(ir_expr(IrExprKind::Var { id: VarId(0) }, list_int())),
+                    right: Box::new(ir_expr(IrExprKind::List { elements: vec![] }, list_int())),
+                },
+                list_int(),
+            ),
+        });
+        let forin = ir_expr(
+            IrExprKind::ForIn {
+                var: VarId(1),
+                var_tuple: None,
+                iterable: Box::new(ir_expr(
+                    IrExprKind::Range {
+                        start: Box::new(ir_expr(IrExprKind::LitInt { value: 0 }, Ty::Int)),
+                        end: Box::new(ir_expr(IrExprKind::LitInt { value: 5 }, Ty::Int)),
+                        inclusive: false,
+                    },
+                    Ty::Int,
+                )),
+                body: vec![body_if, acc_plus],
+            },
+            Ty::Unit,
+        );
+        let b = body(vec![
+            bind(0, list_int(), ir_expr(IrExprKind::List { elements: vec![] }, list_int())),
+            stmt(IrStmtKind::Expr { expr: forin }),
+        ]);
+        let mir = lower_body(&b, "main").expect("scalar loop + heap accumulator + break lowers");
+        assert_eq!(verify_ownership(&mir), Ok(()));
     }
 
     #[test]
