@@ -248,7 +248,9 @@ impl LowerCtx {
             | IrExprKind::ResultOk { .. }
             | IrExprKind::ResultErr { .. }
             | IrExprKind::OptionSome { .. }
-            | IrExprKind::OptionNone => {
+            | IrExprKind::OptionNone
+            | IrExprKind::BinOp { .. }
+            | IrExprKind::UnOp { .. } => {
                 let dst = self.fresh_value();
                 let repr = repr_of(ty)?;
                 let init = alloc_init(value);
@@ -407,7 +409,9 @@ impl LowerCtx {
                 | IrExprKind::ResultOk { .. }
                 | IrExprKind::ResultErr { .. }
                 | IrExprKind::OptionSome { .. }
-                | IrExprKind::OptionNone => {
+                | IrExprKind::OptionNone
+                | IrExprKind::BinOp { .. }
+                | IrExprKind::UnOp { .. } => {
                     let dst = self.fresh_value();
                     let repr = repr_of(&tail.ty)?;
                     let init = alloc_init(tail);
@@ -451,10 +455,16 @@ impl LowerCtx {
                 ))),
             };
         }
-        // Scalar return value (Copy — no ownership accounting).
+        // Scalar return value (Copy — no ownership accounting). A scalar `BinOp`/
+        // `UnOp` is a FRESH computed scalar (arithmetic / comparison / logic), so it
+        // is a `Const` like a literal — its operands carry their own ownership.
         match &tail.kind {
             IrExprKind::Var { id } => Ok(Some(self.value_for(*id)?)),
-            IrExprKind::LitInt { .. } | IrExprKind::LitBool { .. } | IrExprKind::LitFloat { .. } => {
+            IrExprKind::LitInt { .. }
+            | IrExprKind::LitBool { .. }
+            | IrExprKind::LitFloat { .. }
+            | IrExprKind::BinOp { .. }
+            | IrExprKind::UnOp { .. } => {
                 let dst = self.fresh_value();
                 self.ops.push(Op::Const { dst });
                 Ok(Some(dst))
@@ -568,6 +578,21 @@ impl LowerCtx {
                     let dst = self.fresh_value();
                     self.ops.push(Op::Const { dst });
                     CallArg::Scalar(dst)
+                }
+                // A fresh BinOp/UnOp result as an argument (`f(a + b)`, `f(-n)`): a
+                // heap result (string concat) is materialized via `Alloc`, borrowed
+                // and dropped; a scalar result is a `Const`. Operands carry their own
+                // ownership (value semantics — the result is fresh, never an alias).
+                IrExprKind::BinOp { .. } | IrExprKind::UnOp { .. } => {
+                    let dst = self.fresh_value();
+                    if is_heap_ty(&a.ty) {
+                        let repr = repr_of(&a.ty)?;
+                        self.ops.push(Op::Alloc { dst, repr, init: Init::Opaque });
+                        self.materialized_call_arg(dst, repr)
+                    } else {
+                        self.ops.push(Op::Const { dst });
+                        CallArg::Scalar(dst)
+                    }
                 }
                 // A Named user-call result, materialized into an owned temp.
                 IrExprKind::Call { target: CallTarget::Named { name }, args: inner, .. } => {
@@ -1066,5 +1091,36 @@ mod tests {
             mir.ops
         );
         assert_eq!(verify_ownership(&mir), Ok(()));
+    }
+
+    #[test]
+    fn binop_value_materializes_scalar_const_and_heap_alloc() {
+        use almide_ir::BinOp;
+        use almide_lang::intern::sym;
+        let binop = |op, ty, l: IrExpr, r: IrExpr| {
+            ir_expr(IrExprKind::BinOp { op, left: Box::new(l), right: Box::new(r) }, ty)
+        };
+        let v = |id| ir_expr(IrExprKind::Var { id: VarId(id) }, Ty::Int);
+        // f(a + b)  — a scalar BinOp argument is a fresh `Const` (no ownership).
+        let scalar = ir_expr(
+            IrExprKind::Call {
+                target: CallTarget::Named { name: sym("f") },
+                args: vec![binop(BinOp::AddInt, Ty::Int, v(0), v(1))],
+                type_args: vec![],
+            },
+            Ty::Unit,
+        );
+        let mir = lower_body(&body(vec![stmt(IrStmtKind::Expr { expr: scalar })]), "main")
+            .expect("scalar BinOp arg lowers");
+        assert!(mir.ops.iter().any(|o| matches!(o, Op::Const { .. })), "scalar BinOp is Const: {:?}", mir.ops);
+        assert_eq!(verify_ownership(&mir), Ok(()));
+
+        // var s = a ++ b  — a heap (string-concat) BinOp is a fresh `Alloc`, dropped.
+        let sv = |id| ir_expr(IrExprKind::Var { id: VarId(id) }, Ty::String);
+        let concat = binop(BinOp::ConcatStr, Ty::String, sv(0), sv(1));
+        let mir2 = lower_body(&body(vec![bind(2, Ty::String, concat)]), "main")
+            .expect("heap concat bind lowers");
+        assert!(matches!(mir2.ops[0], Op::Alloc { .. }), "heap BinOp is Alloc: {:?}", mir2.ops);
+        assert_eq!(verify_ownership(&mir2), Ok(()));
     }
 }

@@ -108,17 +108,20 @@ The receipt's claims are scoped to exactly this:
   verification = the definition of parity" in its honest first form: it does NOT
   yet claim the *completion definition* (the proven profile accepting the full
   corpus), it establishes the *mechanism* that measures progress toward it and
-  proves the boundary is a wall, not a hole. **Today's honest coverage: 1937/4195
-  functions in-profile** (the value-semantics subset, incl. expression-bodied
-  functions, direct heap-literal returns, direct named-call-result returns,
-  functions taking **borrowed heap parameters**, **first-order pure stdlib
-  `Module` calls**, **nested CALL arguments** — `f(g(x))` / `assert_eq(g(x), …)`
-  materialized into an owned temp, borrowed into the outer call, dropped at scope
-  end — **literal CALL arguments** — `f("x")` / `f([1,2,3])` / `f(3.14)`, a heap
-  literal materialized via `Alloc` or a scalar literal as a `Const` — and
-  **Option·Result constructors** — `Some(x)` / `Ok(e)` / `None` / `Err(e)`, heap
-  variants materialized exactly like a container literal, value-semantics copy);
-  the rest are walled with a per-feature
+  proves the boundary is a wall, not a hole. **Today's honest coverage: 2332/4195
+  functions in-profile (over HALF the corpus)** (the value-semantics subset, incl.
+  expression-bodied functions, direct heap-literal returns, direct
+  named-call-result returns, functions taking **borrowed heap parameters**,
+  **first-order pure stdlib `Module` calls**, **nested CALL arguments** —
+  `f(g(x))` / `assert_eq(g(x), …)` materialized into an owned temp, borrowed into
+  the outer call, dropped at scope end — **literal CALL arguments** — `f("x")` /
+  `f([1,2,3])` / `f(3.14)`, a heap literal via `Alloc` or a scalar literal as a
+  `Const` — **Option·Result constructors** — `Some(x)` / `Ok(e)` / `None` /
+  `Err(e)`, heap variants materialized like a container literal — and **BinOp /
+  UnOp** — `a+b` / `s1++s2` / `-n`, a FRESH computed value (heap concat via
+  `Alloc`, scalar arithmetic/logic as a `Const`; operands carry their own
+  ownership, value-semantics so the result is never an alias)); the rest are
+  walled with a per-feature
   `Unsupported` histogram that names the next surface to admit (largest buckets
   now name exact stdlib functions: `list.map`/`filter`/`fold` with a closure
   argument — the higher-order brick — and call-as-argument materialization).
@@ -144,7 +147,7 @@ The receipt's claims are scoped to exactly this:
   `Module` call, a variant constructor, or a known Stdout-free builtin
   (`assert*`/`eprintln`/`panic`/`to_string` — these reach stderr/abort, NOT
   Stdout) is free; ANY other unknown callee (a walled or cross-file user function)
-  TAINTS, so the function is reported `caps-unverified` (1613/1937 verified, 324
+  TAINTS, so the function is reported `caps-unverified` (2068/2332 verified, 264
   unverified) rather than falsely accepted. This closes the direct-witness hole
   (`reachable_caps`'s honest-scope: an unknown callee contributed ∅). HONEST
   SCOPE: only `Capability::Stdout` is modeled, so the property is "no undeclared
