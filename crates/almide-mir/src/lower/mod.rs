@@ -263,6 +263,17 @@ impl LowerCtx {
             // A source comment carries no ownership — skip it (it is not a
             // "silent drop": Comment is a no-op by definition, not an unhandled op).
             IrStmtKind::Comment { .. } => Ok(()),
+            // `guard cond else { body }` — a CONDITIONAL early exit. The guard adds NO
+            // ownership: the model takes the always-CONTINUE path (success), which is
+            // self-consistent and memory-safe; the failure path's early exit and the
+            // `else` body's effects are DEFERRED, like every Opaque (the guard's job is
+            // functional, not a safety property). Capture the caps of any call in the
+            // condition or the else body so a printing/effectful guard taints honestly.
+            IrStmtKind::Guard { cond, else_ } => {
+                self.record_elided_calls(cond);
+                self.record_elided_calls(else_);
+                Ok(())
+            }
             other => Err(LowerError::Unsupported(format!(
                 "statement {} not in the value-semantics subset",
                 stmt_kind_name(other)
