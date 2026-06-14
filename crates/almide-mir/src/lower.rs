@@ -201,19 +201,10 @@ impl LowerCtx {
             IrStmtKind::BindDestructure { pattern, value } => {
                 self.lower_destructure(pattern, value)
             }
-            IrStmtKind::IndexAssign { target, .. } => {
-                // Copy-on-write: the write must land on a uniquely-owned buffer.
-                let v = self.value_for(*target)?;
-                if self.param_values.contains(&v) {
-                    // Mutating a borrowed param (the caller's data) is outside the
-                    // borrow-by-default first brick — it needs the move-mode /
-                    // unique-acquire calling convention. Wall it (totality).
-                    return Err(LowerError::Unsupported(
-                        "in-place mutation of a borrowed param not in this brick".into(),
-                    ));
-                }
-                self.ops.push(Op::MakeUnique { v });
-                Ok(())
+            // In-place mutation of a place: `xs[i] = v` and `r.field = v` both
+            // require the buffer to be UNIQUELY owned (copy-on-write) → `MakeUnique`.
+            IrStmtKind::IndexAssign { target, .. } | IrStmtKind::FieldAssign { target, .. } => {
+                self.lower_place_mutation(*target)
             }
             // A bare expression statement that is an EFFECT call (`println(s)`).
             // Non-call expr statements stay Unsupported (the lower_effect_call
@@ -227,6 +218,23 @@ impl LowerCtx {
                 stmt_kind_name(other)
             ))),
         }
+    }
+
+    /// In-place mutation of a place (`xs[i] = v` / `r.field = v`): the write must
+    /// land on a UNIQUELY-owned buffer, so emit `Op::MakeUnique` (copy-on-write if
+    /// the buffer is shared). The written value is copied (value semantics; its
+    /// content is deferred, and any call in it is caps-tainted by the elided-call
+    /// gate, not silently dropped). A borrowed-param target is walled — mutating
+    /// the caller's data needs the move-mode calling convention.
+    fn lower_place_mutation(&mut self, target: VarId) -> Result<(), LowerError> {
+        let v = self.value_for(target)?;
+        if self.param_values.contains(&v) {
+            return Err(LowerError::Unsupported(
+                "in-place mutation of a borrowed param not in this brick".into(),
+            ));
+        }
+        self.ops.push(Op::MakeUnique { v });
+        Ok(())
     }
 
     fn lower_bind(&mut self, var: VarId, ty: &Ty, value: &IrExpr) -> Result<(), LowerError> {

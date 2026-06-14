@@ -108,10 +108,10 @@ The receipt's claims are scoped to exactly this:
   verification = the definition of parity" in its honest first form: it does NOT
   yet claim the *completion definition* (the proven profile accepting the full
   corpus), it establishes the *mechanism* that measures progress toward it and
-  proves the boundary is a wall, not a hole. **Today's honest coverage: 2490/4195
+  proves the boundary is a wall, not a hole. **Today's honest coverage: 2497/4195
   functions in-profile (59%, over HALF the corpus)** (the value-semantics subset,
   plus **tuple destructuring** (`let (a,b) = (x,y)` component-wise, or `(a,b) = t`
-  aliasing the container per component) and **reassignment** — `x = v` rebinds `x`; the old binding rides to scope-end
+  aliasing the container per component), **field/element assignment** (xs[i]=v / r.field=v → MakeUnique copy-on-write), and **reassignment** — `x = v` rebinds `x`; the old binding rides to scope-end
   and is dropped exactly once (a conservative lifetime extension, never a
   double-free); a read of the old `x` inside `v` borrows the still-live old
   handle (lowered before the rebind), never a UAF. Also incl.
@@ -161,7 +161,7 @@ The receipt's claims are scoped to exactly this:
   `Module` call, a variant constructor, or a known Stdout-free builtin
   (`assert*`/`eprintln`/`panic`/`to_string` — these reach stderr/abort, NOT
   Stdout) is free; ANY other unknown callee (a walled or cross-file user function)
-  TAINTS, so the function is reported `caps-unverified` (1798/2490 verified, 692
+  TAINTS, so the function is reported `caps-unverified` (1805/2497 verified, 692
   unverified) rather than falsely accepted. **A call ELIDED by Opaque lowering**
   (a list element, ctor payload, or BinOp operand — absent from `func.ops`) is a
   second caps blind spot the fold cannot see: a function whose source has MORE
