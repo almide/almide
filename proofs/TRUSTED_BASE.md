@@ -108,8 +108,12 @@ The receipt's claims are scoped to exactly this:
   verification = the definition of parity" in its honest first form: it does NOT
   yet claim the *completion definition* (the proven profile accepting the full
   corpus), it establishes the *mechanism* that measures progress toward it and
-  proves the boundary is a wall, not a hole. **Today's honest coverage: 2462/4195
+  proves the boundary is a wall, not a hole. **Today's honest coverage: 2481/4195
   functions in-profile (59%, over HALF the corpus)** (the value-semantics subset,
+  plus **reassignment** — `x = v` rebinds `x`; the old binding rides to scope-end
+  and is dropped exactly once (a conservative lifetime extension, never a
+  double-free); a read of the old `x` inside `v` borrows the still-live old
+  handle (lowered before the rebind), never a UAF. Also incl.
   plus **field/element extraction** — `xs[i]` / `r.field` / `t.0` / `m[k]`: a
   scalar result is an unambiguous copy → `Const`; a HEAP result ALIASES the
   CONTAINER via the existing `Op::Dup` (the v1 container-grain field access) — the
@@ -156,7 +160,7 @@ The receipt's claims are scoped to exactly this:
   `Module` call, a variant constructor, or a known Stdout-free builtin
   (`assert*`/`eprintln`/`panic`/`to_string` — these reach stderr/abort, NOT
   Stdout) is free; ANY other unknown callee (a walled or cross-file user function)
-  TAINTS, so the function is reported `caps-unverified` (2195/2462 verified, 267
+  TAINTS, so the function is reported `caps-unverified` (2215/2481 verified, 266
   unverified) rather than falsely accepted. This closes the direct-witness hole
   (`reachable_caps`'s honest-scope: an unknown callee contributed ∅). HONEST
   SCOPE: only `Capability::Stdout` is modeled, so the property is "no undeclared

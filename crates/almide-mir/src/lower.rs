@@ -186,6 +186,15 @@ impl LowerCtx {
     fn lower_stmt(&mut self, stmt: &IrStmt) -> Result<(), LowerError> {
         match &stmt.kind {
             IrStmtKind::Bind { var, ty, value, .. } => self.lower_bind(*var, ty, value),
+            // `x = value` — reassignment. REBIND `x` to the new value (reusing
+            // `lower_bind`). The OLD binding's handle stays in `live_heap_handles`
+            // and is dropped at scope end — a conservative lifetime EXTENSION
+            // (memory-safe, never a double-free: the old object is dropped exactly
+            // once, at scope end, instead of at the reassignment). A read of the
+            // old `x` inside `value` (e.g. `x = f(x)`) lowers BEFORE the rebind
+            // overwrites `value_of[x]`, so it borrows the still-live old handle —
+            // never a use-after-free.
+            IrStmtKind::Assign { var, value } => self.lower_bind(*var, &value.ty, value),
             IrStmtKind::IndexAssign { target, .. } => {
                 // Copy-on-write: the write must land on a uniquely-owned buffer.
                 let v = self.value_for(*target)?;
@@ -1290,5 +1299,44 @@ mod tests {
             Err(LowerError::Unsupported(m)) => assert!(m.contains("not a tracked heap var"), "got: {m}"),
             other => panic!("expected a nested-container wall, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn reassignment_rebinds_and_old_rides_to_scope_end() {
+        use almide_lang::intern::sym;
+        // var x = [..]; x = [..]  — old + new both allocated, both dropped (the old
+        // rides to scope-end, dropped exactly once; never a double-free).
+        let b = body(vec![
+            bind(0, list_int(), ir_expr(IrExprKind::List { elements: vec![] }, list_int())),
+            stmt(IrStmtKind::Assign {
+                var: VarId(0),
+                value: ir_expr(IrExprKind::List { elements: vec![] }, list_int()),
+            }),
+        ]);
+        let mir = lower_body(&b, "main").expect("reassignment lowers");
+        let allocs = mir.ops.iter().filter(|o| matches!(o, Op::Alloc { .. })).count();
+        let drops = mir.ops.iter().filter(|o| matches!(o, Op::Drop { .. })).count();
+        assert_eq!(allocs, 2, "old + new both allocated: {:?}", mir.ops);
+        assert_eq!(drops, 2, "old + new both dropped: {:?}", mir.ops);
+        assert_eq!(verify_ownership(&mir), Ok(()));
+
+        // var x = [..]; x = f(x)  — reading the old x in the new value borrows the
+        // still-live old handle (the read lowers before the rebind), NOT a UAF.
+        let b2 = body(vec![
+            bind(0, list_int(), ir_expr(IrExprKind::List { elements: vec![] }, list_int())),
+            stmt(IrStmtKind::Assign {
+                var: VarId(0),
+                value: ir_expr(
+                    IrExprKind::Call {
+                        target: CallTarget::Named { name: sym("f") },
+                        args: vec![ir_expr(IrExprKind::Var { id: VarId(0) }, list_int())],
+                        type_args: vec![],
+                    },
+                    list_int(),
+                ),
+            }),
+        ]);
+        let mir2 = lower_body(&b2, "main").expect("reassign reading old x lowers");
+        assert_eq!(verify_ownership(&mir2), Ok(()), "no UAF reading old x: {:?}", mir2.ops);
     }
 }
