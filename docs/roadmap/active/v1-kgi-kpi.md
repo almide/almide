@@ -86,6 +86,22 @@
   nested heap)、各段を v0 byte 一致で被覆テスト。実プログラム被覆(端まで=実行して v0
   一致)が進捗計。**GTM 解錠条件**。検証側が先行している分、ここは「実行を建てる」新軸。
 
+  **第一スライス実測(2026-06-14): EXECUTION 入口の道具を建てて 1 本走らせた**:
+  `crates/almide-mir/examples/render_program.rs`(.almd → 全関数 lower → MirProgram →
+  `render_wasm_program` → 完全 wat module、EXECUTION 側の emit_cert_from_source 相当)を
+  新設(production/検証コードは無改変=安全)。実測の核心 ―― **render は op の構造
+  (user 関数 call `$double`・算術・制御フロー)は出すが、RUNTIME が v0 に大きく後ろ**:
+  `render_call` に PrintStr 等のアームが無く panic、preamble(runtime)も `$print_list`/
+  `$print_int` のみで `$print_str`/`$int.to_string` 等が無い。pure Module call(int.to_string)
+  は lower で faithful `CallFn $int.to_string` になるが、その runtime routine が render 側に
+  存在しない。**⟹ ③ の支配的作業は「render の RUNTIME を v0 と parity に」。設計の核 =
+  v0 の `emit_wasm/rt_*` を REUSE するか再実装するか(賢いのは REUSE)**。
+  PUNCH-LIST(順): (1) `render_call` の全 RtFn アーム + 欠落 runtime routine(= v0 rt_*
+  reuse 設計)、(2) faithful Module/Computed call の実行(deferred を un-defer)、
+  (3) 制御フロー実行 → closure → nested heap。各段 v0 byte 一致で。
+  ※ この RUNTIME-reuse 設計判断は骨太 ―― 疲労下で詰め込まず、fresh session で
+  (必要なら検証ワークフローで de-risk してから)建てる。
+
 ---
 
 ## KGI と KPI の関係(運用ルール = この 1 行)
