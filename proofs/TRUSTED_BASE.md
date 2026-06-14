@@ -108,9 +108,15 @@ The receipt's claims are scoped to exactly this:
   verification = the definition of parity" in its honest first form: it does NOT
   yet claim the *completion definition* (the proven profile accepting the full
   corpus), it establishes the *mechanism* that measures progress toward it and
-  proves the boundary is a wall, not a hole. **Today's honest coverage: 2757/4195
-  functions in-profile (66%) for ownership+names (caps-VERIFIED is the lower, parity-binding 2321 — see caps note)** (the value-semantics subset,
-  plus **`if`/`match` control flow** (statement / scalar- / Unit- / HEAP-tail and
+  proves the boundary is a wall, not a hole. **Today's honest coverage: 2852/4195
+  functions in-profile (68%) for ownership+names (caps-VERIFIED is the lower, parity-binding 2417 — see caps note)** (the value-semantics subset,
+  plus **`for`/`while` loops** (a PER-ITERATION scope frame makes one modeled
+  iteration internally balanced ⟹ N runtime iterations are leak-free for any N, NO
+  loop op; a heap iterable is borrowed or materialized via `lower_call_args`, the
+  loop variable aliases the container per iteration (`Op::Dup`, container-grain) or
+  is a scalar `Const`; `break`/`continue` and a heap reassignment of a pre-loop var
+  are WALLED, a scalar reassignment `i = i+1` is admitted), plus **`if`/`match`
+  control flow** (statement / scalar- / Unit- / HEAP-tail and
   heap-bind position — arms LINEARIZED into the flat op stream with a per-arm scope
   frame, NO branch op: each arm internally balanced + vacuous on the other path; the
   result is one merged slot the caller emits — discarded (Unit/statement), a `Const`
@@ -168,7 +174,7 @@ The receipt's claims are scoped to exactly this:
   `Module` call, a variant constructor, or a known Stdout-free builtin
   (`assert*`/`eprintln`/`panic`/`to_string` — these reach stderr/abort, NOT
   Stdout) is free; ANY other unknown callee (a walled or cross-file user function)
-  TAINTS, so the function is reported `caps-unverified` (2321/2757 verified, 436
+  TAINTS, so the function is reported `caps-unverified` (2417/2852 verified, 435
   unverified) rather than falsely accepted. **The gate verifies the REAL
   capability-bound property `reachable ⊆ declared`** (exactly what
   `proofs/CapabilityBound.v` proves), not a degenerate "reaches no capability at

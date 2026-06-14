@@ -234,6 +234,10 @@ impl LowerCtx {
             // lower_effect_call guard rejects them — flight-grade totality).
             IrStmtKind::Expr { expr } => match &expr.kind {
                 IrExprKind::If { .. } | IrExprKind::Match { .. } => self.lower_branch(expr),
+                IrExprKind::ForIn { var, var_tuple, iterable, body } => {
+                    self.lower_for_in(*var, var_tuple, iterable, body)
+                }
+                IrExprKind::While { cond, body } => self.lower_while(cond, body),
                 _ => self.lower_effect_call(expr),
             },
             // A source comment carries no ownership — skip it (it is not a
@@ -634,6 +638,15 @@ impl LowerCtx {
                     self.lower_branch(tail)?;
                     Ok(None)
                 }
+                // A Unit-typed `for`/`while` tail is a per-iteration-framed loop.
+                IrExprKind::ForIn { var, var_tuple, iterable, body } => {
+                    self.lower_for_in(*var, var_tuple, iterable, body)?;
+                    Ok(None)
+                }
+                IrExprKind::While { cond, body } => {
+                    self.lower_while(cond, body)?;
+                    Ok(None)
+                }
                 other => Err(LowerError::Unsupported(format!(
                     "Unit-typed tail {} not in this brick",
                     kind_name(other)
@@ -937,14 +950,15 @@ impl LowerCtx {
             IrExprKind::Block { stmts, expr } => (stmts, expr.as_deref()),
             _ => (&[], Some(body)),
         };
-        // An ASSIGN (reassignment) of a variable inside the arm would rebind its
-        // `value_of` PATH-DEPENDENTLY: a post-branch read then dereferences a handle
-        // this arm dropped (a UAF the flat fold cannot see). Wall any arm with a
-        // top-level Assign (a nested one is re-checked when its control flow recurses;
-        // arm-local reassignment is rare, so walling it is mere incompleteness).
-        if stmts.iter().any(|s| matches!(s.kind, IrStmtKind::Assign { .. })) {
+        // A HEAP reassignment inside the arm would rebind a var's `value_of`
+        // PATH-DEPENDENTLY: a post-branch read then dereferences a handle this arm
+        // dropped (a UAF the flat fold cannot see). Wall a top-level heap Assign (a
+        // nested one is re-checked when its control flow recurses). A SCALAR reassign
+        // is harmless — it rebinds to a Copy `Const` (no handle to dangle), so it is
+        // admitted (e.g. a loop counter inside a branch).
+        if stmts.iter().any(stmt_is_heap_reassign) {
             return Err(LowerError::Unsupported(
-                "branch arm reassigns a variable (path-dependent rebind) not in this control-flow slice".into(),
+                "branch arm reassigns a heap variable (path-dependent rebind) not in this control-flow slice".into(),
             ));
         }
         let mark = self.live_heap_handles.len();
@@ -977,6 +991,110 @@ impl LowerCtx {
         for v in self.live_heap_handles.split_off(mark).into_iter().rev() {
             self.ops.push(Op::Drop { v });
         }
+    }
+
+    /// Lower a `for v in iterable { body }` by modeling ONE iteration with a
+    /// PER-ITERATION SCOPE FRAME. Each iteration is internally balanced (its loop
+    /// variable + body locals are all dropped at iteration end), so N runtime
+    /// iterations are N balanced episodes — no cross-iteration leak or double-free,
+    /// and the flat cert (one iteration) is sound for any N (including 0: every op is
+    /// in a balanced frame). NO loop op — the iteration discipline lives entirely in
+    /// the lowering, the checker stays a flat fold.
+    ///
+    /// The ITERABLE is evaluated once: a heap iterable is lowered by `lower_call_args`
+    /// — an already-tracked `Var` is BORROWED, a FRESH heap value (a call/literal
+    /// result) is MATERIALIZED into an owned temp released at the OUTER scope; a scalar
+    /// iterable (a `Range`) carries no ownership. The LOOP VARIABLE binds one element per
+    /// iteration: a HEAP element ALIASES the whole container (`Op::Dup`, container-
+    /// grain like field extraction — it keeps the container alive for the iteration,
+    /// dropped at its end; element-precise identity needs the layout brick), a SCALAR
+    /// element is a `Const`. WALLED: a `break`/`continue` (the early-exit path would
+    /// skip the frame's drops = a leak), and a HEAP reassignment of a pre-loop var (an
+    /// iteration-dependent rebind → UAF). A scalar reassignment (`i = i + 1`) is a
+    /// Copy `Const`, harmless, admitted.
+    fn lower_for_in(
+        &mut self,
+        var: VarId,
+        var_tuple: &Option<Vec<VarId>>,
+        iterable: &IrExpr,
+        body: &[IrStmt],
+    ) -> Result<(), LowerError> {
+        // The iterable is evaluated ONCE before the loop. A heap iterable goes through
+        // `lower_call_args` — an already-tracked `Var` is borrowed (no new ownership),
+        // a fresh heap value is materialized into an owned temp dropped at the OUTER
+        // scope (its caps captured by the lowering). A scalar iterable (a `Range`)
+        // carries no ownership; capture any call in it for caps.
+        let container: Option<ValueId> = if is_heap_ty(&iterable.ty) {
+            match self.lower_call_args(std::slice::from_ref(iterable))?.into_iter().next() {
+                Some(CallArg::Handle(v)) => Some(v),
+                _ => None,
+            }
+        } else {
+            self.record_elided_calls(iterable);
+            None
+        };
+        self.guard_loop_body(body, "for-in")?;
+        let mark = self.live_heap_handles.len();
+        let vars: Vec<VarId> = match var_tuple {
+            Some(vs) => vs.clone(),
+            None => vec![var],
+        };
+        for v in vars {
+            // A heap element aliases the whole container; a scalar element is a Const.
+            let elem_heap = find_var_ty(body, v).map(|t| is_heap_ty(&t)).unwrap_or(false);
+            if elem_heap {
+                let src = container.ok_or_else(|| {
+                    LowerError::Unsupported(
+                        "for-in heap loop variable over a non-container iterable not in this brick".into(),
+                    )
+                })?;
+                let dst = self.fresh_value();
+                self.ops.push(Op::Dup { dst, src });
+                self.value_of.insert(v, dst);
+                self.live_heap_handles.push(dst);
+            } else {
+                let dst = self.fresh_value();
+                self.ops.push(Op::Const { dst });
+                self.value_of.insert(v, dst);
+            }
+        }
+        for stmt in body {
+            self.lower_stmt(stmt)?;
+        }
+        self.drop_arm_locals(mark);
+        Ok(())
+    }
+
+    /// Lower a `while cond { body }` like a `for-in` body — a PER-ITERATION SCOPE
+    /// FRAME makes one modeled iteration balanced, sound for any N. The condition is
+    /// evaluated each iteration (its caps captured); the body's locals are dropped at
+    /// iteration end. Same WALLS as `for-in` (`break`/`continue`, heap reassignment).
+    fn lower_while(&mut self, cond: &IrExpr, body: &[IrStmt]) -> Result<(), LowerError> {
+        self.record_elided_calls(cond);
+        self.guard_loop_body(body, "while")?;
+        let mark = self.live_heap_handles.len();
+        for stmt in body {
+            self.lower_stmt(stmt)?;
+        }
+        self.drop_arm_locals(mark);
+        Ok(())
+    }
+
+    /// Shared loop-body admission: a `break`/`continue` (the early-exit path would
+    /// skip the per-iteration frame's drops = a leak) and a HEAP reassignment of a
+    /// pre-loop variable (an iteration-dependent `value_of` rebind → UAF) are walled.
+    fn guard_loop_body(&self, body: &[IrStmt], what: &str) -> Result<(), LowerError> {
+        if body_breaks_or_continues(body) {
+            return Err(LowerError::Unsupported(format!(
+                "{what} body with break/continue (early exit would skip per-iteration drops) not in this brick"
+            )));
+        }
+        if body.iter().any(stmt_is_heap_reassign) {
+            return Err(LowerError::Unsupported(format!(
+                "{what} body reassigns a heap variable (iteration-dependent rebind) not in this brick"
+            )));
+        }
+        Ok(())
     }
 
     /// Lower call arguments to [`CallArg`]s. A heap var is BORROWED (`Handle`), a
@@ -1126,6 +1244,73 @@ impl LowerCtx {
             self.ops.push(Op::Drop { v: *v });
         }
     }
+}
+
+/// Is a statement a HEAP reassignment (`x = <heap value>`)? Such a rebind inside a
+/// branch arm or loop body changes a var's `value_of` in a path/iteration-dependent
+/// way the flat fold cannot see (→ UAF), so it is walled. A SCALAR reassignment is a
+/// Copy `Const` with no handle to dangle, so it is NOT flagged (admitted).
+fn stmt_is_heap_reassign(s: &IrStmt) -> bool {
+    matches!(&s.kind, IrStmtKind::Assign { value, .. } if is_heap_ty(&value.ty))
+}
+
+/// Does a statement list contain a `break`/`continue` that targets THIS loop — i.e.
+/// not nested inside another loop (which captures its own)? Used to wall a loop body
+/// whose early-exit path would skip the per-iteration frame's drops (a leak).
+fn body_breaks_or_continues(stmts: &[IrStmt]) -> bool {
+    use almide_ir::visit::{walk_expr, IrVisitor};
+    struct Scan {
+        found: bool,
+    }
+    impl IrVisitor for Scan {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            match &e.kind {
+                IrExprKind::Break | IrExprKind::Continue => self.found = true,
+                // A nested loop captures its OWN break/continue — do not descend.
+                IrExprKind::ForIn { .. } | IrExprKind::While { .. } => {}
+                _ => walk_expr(self, e),
+            }
+        }
+    }
+    let mut s = Scan { found: false };
+    for stmt in stmts {
+        s.visit_stmt(stmt);
+    }
+    s.found
+}
+
+/// Find the type a variable is USED at in a body (its first reference's `ty`) — for
+/// a `for-in` loop variable, this is its element type (the `ForIn` node carries no
+/// explicit element type). `None` if the variable is unused (then its heap-ness does
+/// not matter — nothing references it to manage).
+fn find_var_ty(stmts: &[IrStmt], var: VarId) -> Option<Ty> {
+    use almide_ir::visit::{walk_expr, IrVisitor};
+    struct Find {
+        var: VarId,
+        ty: Option<Ty>,
+    }
+    impl IrVisitor for Find {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            if self.ty.is_some() {
+                return;
+            }
+            if let IrExprKind::Var { id } = &e.kind {
+                if *id == self.var {
+                    self.ty = Some(e.ty.clone());
+                    return;
+                }
+            }
+            walk_expr(self, e);
+        }
+    }
+    let mut f = Find { var, ty: None };
+    for stmt in stmts {
+        if f.ty.is_some() {
+            break;
+        }
+        f.visit_stmt(stmt);
+    }
+    f.ty
 }
 
 /// Does a `match` pattern BIND no value — i.e. only inspect tags/shape, never
@@ -1280,6 +1465,13 @@ fn kind_name(k: &IrExprKind) -> &'static str {
         IrExprKind::Try { .. } => "Try",
         IrExprKind::Unwrap { .. } => "Unwrap",
         IrExprKind::UnwrapOr { .. } => "UnwrapOr",
+        IrExprKind::ForIn { .. } => "ForIn",
+        IrExprKind::While { .. } => "While",
+        IrExprKind::Fan { .. } => "Fan",
+        IrExprKind::Break => "Break",
+        IrExprKind::Continue => "Continue",
+        IrExprKind::TailCall { .. } => "TailCall",
+        IrExprKind::IterChain { .. } => "IterChain",
         _ => "<other>",
     }
 }
@@ -1658,6 +1850,105 @@ mod tests {
             IrExprKind::If { cond: Box::new(bool_var()), then: Box::new(then), else_: Box::new(els) },
             ty,
         )
+    }
+
+    #[test]
+    fn for_in_heap_element_aliases_container_per_iteration() {
+        use almide_lang::intern::sym;
+        // var xs = []; for s in xs { println(s) }  — the heap loop var `s` aliases the
+        // whole container `xs` (Op::Dup) for the iteration and is dropped at iteration
+        // end; the println borrows it. Per-iteration frame balanced.
+        let prn_s = stmt(IrStmtKind::Expr {
+            expr: ir_expr(
+                IrExprKind::Call {
+                    target: CallTarget::Named { name: sym("println") },
+                    args: vec![ir_expr(IrExprKind::Var { id: VarId(1) }, Ty::String)],
+                    type_args: vec![],
+                },
+                Ty::Unit,
+            ),
+        });
+        let forin = ir_expr(
+            IrExprKind::ForIn {
+                var: VarId(1),
+                var_tuple: None,
+                iterable: Box::new(ir_expr(IrExprKind::Var { id: VarId(0) }, list_int())),
+                body: vec![prn_s],
+            },
+            Ty::Unit,
+        );
+        let b = body(vec![
+            bind(0, list_int(), ir_expr(IrExprKind::List { elements: vec![] }, list_int())),
+            stmt(IrStmtKind::Expr { expr: forin }),
+        ]);
+        let mir = lower_body(&b, "main").expect("for-in lowers");
+        assert!(
+            mir.ops.iter().any(|o| matches!(o, Op::Dup { src: ValueId(0), .. })),
+            "loop var aliases the container: {:?}",
+            mir.ops
+        );
+        assert_eq!(verify_ownership(&mir), Ok(()), "per-iteration frame balanced");
+    }
+
+    #[test]
+    fn while_with_scalar_counter_reassign_lowers() {
+        // var i = 0; while c { i = 5 }  — a SCALAR reassign is a Copy `Const` (no
+        // handle), admitted; the body has no heap, so the loop lowers balanced.
+        let inc = stmt(IrStmtKind::Assign {
+            var: VarId(0),
+            value: ir_expr(IrExprKind::LitInt { value: 5 }, Ty::Int),
+        });
+        let w = ir_expr(
+            IrExprKind::While { cond: Box::new(bool_var()), body: vec![inc] },
+            Ty::Unit,
+        );
+        let b = body(vec![
+            bind(0, Ty::Int, ir_expr(IrExprKind::LitInt { value: 0 }, Ty::Int)),
+            stmt(IrStmtKind::Expr { expr: w }),
+        ]);
+        let mir = lower_body(&b, "main").expect("while with scalar reassign lowers");
+        assert_eq!(verify_ownership(&mir), Ok(()));
+    }
+
+    #[test]
+    fn loop_with_break_is_walled() {
+        // while c { break }  — the early-exit path would skip the per-iteration frame's
+        // drops (a leak). Must WALL.
+        let w = ir_expr(
+            IrExprKind::While {
+                cond: Box::new(bool_var()),
+                body: vec![stmt(IrStmtKind::Expr { expr: ir_expr(IrExprKind::Break, Ty::Unit) })],
+            },
+            Ty::Unit,
+        );
+        let b = body(vec![stmt(IrStmtKind::Expr { expr: w })]);
+        match lower_body(&b, "main") {
+            Err(LowerError::Unsupported(r)) => assert!(r.contains("break/continue"), "got: {r}"),
+            other => panic!("expected a break/continue wall, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn loop_body_heap_reassign_is_walled() {
+        // var acc = []; while c { acc = [] }  — a HEAP reassign of a pre-loop var is an
+        // iteration-dependent value_of rebind (→ UAF). Must WALL. (A scalar reassign
+        // would be admitted — see `while_with_scalar_counter_reassign_lowers`.)
+        let reassign = stmt(IrStmtKind::Assign {
+            var: VarId(0),
+            value: ir_expr(IrExprKind::List { elements: vec![] }, list_int()),
+        });
+        let w = ir_expr(
+            IrExprKind::While { cond: Box::new(bool_var()), body: vec![reassign] },
+            Ty::Unit,
+        );
+        let b = body(vec![
+            bind(0, list_int(), ir_expr(IrExprKind::List { elements: vec![] }, list_int())),
+            stmt(IrStmtKind::Expr { expr: w }),
+        ]);
+        match lower_body(&b, "main") {
+            Err(LowerError::Unsupported(r)) => assert!(r.contains("reassigns a heap"), "got: {r}"),
+            other => panic!("expected a heap-reassign wall, got {other:?}"),
+        }
     }
 
     #[test]
