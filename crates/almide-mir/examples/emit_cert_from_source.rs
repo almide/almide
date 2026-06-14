@@ -73,6 +73,20 @@ fn main() {
         .unwrap_or_else(|e| die(format!("cannot read {path}: {e}")));
     let ir = source_to_ir(&source);
 
+    // Top-level `let` globals (VarId -> declared Ty), union of program- and
+    // module-level top_lets — the declared set the lowering uses to admit a global
+    // reference instead of walling it.
+    let mut globals: std::collections::HashMap<almide_ir::VarId, almide_lang::types::Ty> =
+        std::collections::HashMap::new();
+    for tl in &ir.top_lets {
+        globals.insert(tl.var, tl.ty.clone());
+    }
+    for m in &ir.modules {
+        for tl in &m.top_lets {
+            globals.insert(tl.var, tl.ty.clone());
+        }
+    }
+
     let func = ir
         .functions
         .iter()
@@ -87,7 +101,7 @@ fn main() {
 
     // The single ownership+layout DECISION: real linked IR → MIR. Outside the
     // value-semantics subset this is an explicit Unsupported (honest boundary).
-    let mir = almide_mir::lower::lower_function(func)
+    let mir = almide_mir::lower::lower_function(func, &globals)
         .unwrap_or_else(|e| die(format!("lowering `{func_name}` is out of subset: {e:?}")));
 
     match property.as_str() {
@@ -99,7 +113,7 @@ fn main() {
         "tcaps" => {
             let mut program: BTreeMap<String, almide_mir::MirFunction> = BTreeMap::new();
             for f in &ir.functions {
-                if let Ok(m) = almide_mir::lower::lower_function(f) {
+                if let Ok(m) = almide_mir::lower::lower_function(f, &globals) {
                     program.insert(f.name.as_str().to_string(), m);
                 }
             }

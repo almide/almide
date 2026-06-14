@@ -286,8 +286,8 @@ impl LowerCtx {
         let mut out = Vec::with_capacity(args.len());
         for a in args {
             let arg = match &a.kind {
-                IrExprKind::Var { id } if is_heap_ty(&a.ty) => CallArg::Handle(self.value_for(*id)?),
-                IrExprKind::Var { id } => CallArg::Scalar(self.value_for(*id)?),
+                IrExprKind::Var { id } if is_heap_ty(&a.ty) => CallArg::Handle(self.value_or_global(*id)?),
+                IrExprKind::Var { id } => CallArg::Scalar(self.value_or_global(*id)?),
                 IrExprKind::LitInt { value } => CallArg::Imm(*value),
                 // A fresh HEAP literal argument (`f("x")`, `f([1, 2, 3])`):
                 // materialized into an owned temp via `Alloc`, borrowed into the

@@ -36,7 +36,7 @@ impl LowerCtx {
             ))
         })?;
         let src = match &container.kind {
-            IrExprKind::Var { id } if is_heap_ty(&container.ty) => self.value_for(*id)?,
+            IrExprKind::Var { id } if is_heap_ty(&container.ty) => self.value_or_global(*id)?,
             other => {
                 return Err(LowerError::Unsupported(format!(
                     "heap extraction whose container is {} (not a tracked heap var) not in this brick",
@@ -103,7 +103,7 @@ impl LowerCtx {
         if is_heap_ty(&tail.ty) {
             return match &tail.kind {
                 IrExprKind::Var { id } => {
-                    let v = self.value_for(*id)?;
+                    let v = self.value_or_global(*id)?;
                     if self.param_values.contains(&v) {
                         // Returning a BORROWED param directly would move out a
                         // reference we do not own (the caller's) — a double-free. AUTO-
@@ -239,7 +239,7 @@ impl LowerCtx {
         // `UnOp` is a FRESH computed scalar (arithmetic / comparison / logic), so it
         // is a `Const` like a literal — its operands carry their own ownership.
         match &tail.kind {
-            IrExprKind::Var { id } => Ok(Some(self.value_for(*id)?)),
+            IrExprKind::Var { id } => Ok(Some(self.value_or_global(*id)?)),
             IrExprKind::LitInt { .. }
             | IrExprKind::LitBool { .. }
             | IrExprKind::LitFloat { .. }

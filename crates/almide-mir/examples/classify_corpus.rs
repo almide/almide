@@ -288,9 +288,24 @@ fn main() {
         // their capability witness is incompletely captured, so the caps fold below
         // conservatively taints them (and their callers).
         let mut elided_call_fns: HashSet<String> = HashSet::new();
+        // The module's top-level `let` globals (VarId -> declared Ty): a function that
+        // references one resolves to no function-local binding, so the lowering needs
+        // this DECLARED set to admit the reference (`value_or_global`) instead of
+        // walling it. Union of program- and module-level top_lets.
+        let mut globals: std::collections::HashMap<almide_ir::VarId, almide_lang::types::Ty> =
+            std::collections::HashMap::new();
+        for tl in &ir.top_lets {
+            globals.insert(tl.var, tl.ty.clone());
+        }
+        for m in &ir.modules {
+            for tl in &m.top_lets {
+                globals.insert(tl.var, tl.ty.clone());
+            }
+        }
         for func in &ir.functions {
             t.functions += 1;
-            let lowered = catch_unwind(AssertUnwindSafe(|| almide_mir::lower::lower_function(func)));
+            let lowered =
+                catch_unwind(AssertUnwindSafe(|| almide_mir::lower::lower_function(func, &globals)));
             match lowered {
                 Ok(Ok(mir)) => {
                     t.in_profile += 1;

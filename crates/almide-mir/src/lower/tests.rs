@@ -512,6 +512,62 @@
     }
 
     #[test]
+    fn global_reference_is_admitted_scalar_const_and_heap_alloc() {
+        use almide_lang::intern::sym;
+        // A function references two top-level `let` globals it never binds locally: a
+        // SCALAR global (Int) and a HEAP global (List). value_or_global admits each from
+        // the DECLARED global set — scalar as a Copy `Const`, heap as a fresh owned
+        // `Alloc{Opaque}` dropped at scope end (an owned copy, memory-safe by construction).
+        let mut globals = HashMap::new();
+        globals.insert(VarId(7), Ty::Int);
+        globals.insert(VarId(8), list_int());
+        let call = ir_expr(
+            IrExprKind::Call {
+                target: CallTarget::Named { name: sym("f") },
+                args: vec![
+                    ir_expr(IrExprKind::Var { id: VarId(7) }, Ty::Int),
+                    ir_expr(IrExprKind::Var { id: VarId(8) }, list_int()),
+                ],
+                type_args: vec![],
+            },
+            Ty::Unit,
+        );
+        let b = body(vec![stmt(IrStmtKind::Expr { expr: call })]);
+        let mir = lower_body_with_globals(&b, "main", globals).expect("global refs admitted");
+        assert!(
+            mir.ops.iter().any(|o| matches!(o, Op::Const { .. })),
+            "scalar global is a Const: {:?}",
+            mir.ops
+        );
+        assert!(
+            mir.ops.iter().any(|o| matches!(o, Op::Alloc { init: Init::Opaque, .. })),
+            "heap global is an owned Alloc Opaque: {:?}",
+            mir.ops
+        );
+        assert_eq!(verify_ownership(&mir), Ok(()), "heap-global copy is balanced (alloc + scope-end drop)");
+    }
+
+    #[test]
+    fn unbound_non_global_var_still_walls() {
+        use almide_lang::intern::sym;
+        // The DISCIPLINE: a value_of miss that is NOT in the declared global set is a
+        // genuine lowering gap and must still WALL — never silently absorbed as a "global".
+        let call = ir_expr(
+            IrExprKind::Call {
+                target: CallTarget::Named { name: sym("f") },
+                args: vec![ir_expr(IrExprKind::Var { id: VarId(99) }, Ty::Int)],
+                type_args: vec![],
+            },
+            Ty::Unit,
+        );
+        let b = body(vec![stmt(IrStmtKind::Expr { expr: call })]);
+        match lower_body_with_globals(&b, "main", HashMap::new()) {
+            Err(LowerError::Unsupported(m)) => assert!(m.contains("unbound var"), "got: {m}"),
+            other => panic!("expected an unbound-var wall (a real gap), got {other:?}"),
+        }
+    }
+
+    #[test]
     fn while_with_scalar_counter_reassign_lowers() {
         // var i = 0; while c { i = 5 }  — a SCALAR reassign is a Copy `Const` (no
         // handle), admitted; the body has no heap, so the loop lowers balanced.

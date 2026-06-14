@@ -92,8 +92,11 @@ pub fn repr_of(ty: &Ty) -> Result<Repr, LowerError> {
 
 /// Lower one function to MIR. Parameters are seeded first (the v1 borrow-by-
 /// default calling convention — see [`LowerCtx::bind_params`]), then the body.
-pub fn lower_function(func: &IrFunction) -> Result<MirFunction, LowerError> {
-    let mut ctx = LowerCtx::default();
+pub fn lower_function(
+    func: &IrFunction,
+    globals: &HashMap<VarId, Ty>,
+) -> Result<MirFunction, LowerError> {
+    let mut ctx = LowerCtx { globals: globals.clone(), ..Default::default() };
     let params = ctx.bind_params(&func.params)?;
     let ret = ctx.lower_body_into(&func.body)?;
     // The function's EFFECT SIGNATURE → its declared capability bound. The v1 model
@@ -125,6 +128,20 @@ pub fn lower_body(body: &IrExpr, name: &str) -> Result<MirFunction, LowerError> 
     Ok(MirFunction { name: name.to_string(), ops: ctx.ops, ret, ..Default::default() })
 }
 
+/// Like [`lower_body`] but seeds the declared GLOBAL set (top-level `let`s) so a
+/// reference to one is admitted by `value_or_global` instead of walled. Test/diagnostic
+/// entry — `lower_function` builds the same context for real programs.
+#[cfg(test)]
+pub(crate) fn lower_body_with_globals(
+    body: &IrExpr,
+    name: &str,
+    globals: HashMap<VarId, Ty>,
+) -> Result<MirFunction, LowerError> {
+    let mut ctx = LowerCtx { globals, ..Default::default() };
+    let ret = ctx.lower_body_into(body)?;
+    Ok(MirFunction { name: name.to_string(), ops: ctx.ops, ret, ..Default::default() })
+}
+
 #[derive(Default)]
 pub(crate) struct LowerCtx {
     ops: Vec<Op>,
@@ -145,6 +162,13 @@ pub(crate) struct LowerCtx {
     /// flat fold cannot see). Inside a frame such a reassignment is DEFERRED: the var
     /// keeps its still-live handle and the new value is carried like every `Opaque`.
     in_frame: u32,
+    /// The module's top-level `let` bindings (VarId → declared Ty). A reference to one
+    /// of these resolves to no FUNCTION-local `value_of` entry; this DECLARED set lets
+    /// `value_or_global` distinguish a legitimate global reference (materialize a fresh
+    /// external value) from a genuine lowering gap (a local that should have been bound
+    /// — still WALLED). Confirming against the declared set, not merely a `value_of`
+    /// miss, is what keeps the boundary a wall instead of a silent hole.
+    globals: HashMap<VarId, Ty>,
 }
 
 impl LowerCtx {
@@ -328,6 +352,40 @@ impl LowerCtx {
             .get(&var)
             .copied()
             .ok_or_else(|| LowerError::Unsupported(format!("use of unbound var {var:?}")))
+    }
+
+    /// Resolve a value-position variable reference, admitting a reference to a
+    /// module-level `let` GLOBAL. A function-local var is in `value_of`. A miss is a
+    /// global IFF it is in the DECLARED global set (`self.globals`) — the frontend
+    /// guarantees every non-global reference is bound by a preceding local form, so a
+    /// miss that is NOT a declared global is a genuine lowering gap and stays WALLED.
+    ///
+    /// A confirmed global is bound ONCE (cached in `value_of`, so repeated references
+    /// reuse the one handle) as a fresh EXTERNAL value: a scalar global is a Copy
+    /// `Const`; a heap global is a fresh owned `Alloc{Opaque}` dropped at scope end —
+    /// we model an owned COPY rather than an alias of the module's object, which is
+    /// memory-safe by construction (alloc once / drop once, the real global untouched)
+    /// and its content deferred like every `Opaque`. Referencing a global does NOT
+    /// re-run its initializer, so this adds no call/cap obligation.
+    pub(crate) fn value_or_global(&mut self, var: VarId) -> Result<ValueId, LowerError> {
+        if let Some(&v) = self.value_of.get(&var) {
+            return Ok(v);
+        }
+        let ty = self
+            .globals
+            .get(&var)
+            .cloned()
+            .ok_or_else(|| LowerError::Unsupported(format!("use of unbound var {var:?}")))?;
+        let dst = self.fresh_value();
+        if is_heap_ty(&ty) {
+            let repr = repr_of(&ty)?;
+            self.ops.push(Op::Alloc { dst, repr, init: Init::Opaque });
+            self.live_heap_handles.push(dst);
+        } else {
+            self.ops.push(Op::Const { dst });
+        }
+        self.value_of.insert(var, dst);
+        Ok(dst)
     }
 
     pub(crate) fn emit_scope_end_drops(&mut self) {
