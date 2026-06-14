@@ -130,7 +130,12 @@ impl LowerCtx {
                 | IrExprKind::Unwrap { .. }
                 | IrExprKind::UnwrapOr { .. }
                 | IrExprKind::ToOption { .. }
-                | IrExprKind::OptionalChain { .. } => {
+                | IrExprKind::OptionalChain { .. }
+                // A CLOSURE value returned (`fn mk() = (x) => …`) is a fresh heap env;
+                // a RANGE is a fresh value — both `Alloc{Opaque}`, moved out.
+                | IrExprKind::Lambda { .. }
+                | IrExprKind::ClosureCreate { .. }
+                | IrExprKind::Range { .. } => {
                     let dst = self.fresh_value();
                     let repr = repr_of(&tail.ty)?;
                     let init = alloc_init(tail);

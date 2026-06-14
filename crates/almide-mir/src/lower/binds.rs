@@ -60,7 +60,14 @@ impl LowerCtx {
             | IrExprKind::Unwrap { .. }
             | IrExprKind::UnwrapOr { .. }
             | IrExprKind::ToOption { .. }
-            | IrExprKind::OptionalChain { .. } => {
+            | IrExprKind::OptionalChain { .. }
+            // A CLOSURE value (`var f = (x) => …`) is a fresh heap env, and a RANGE is
+            // a fresh value — both `Alloc{Opaque}`. The closure is NOT invoked here, so
+            // its body's calls are elided ⇒ the gate taints the function caps-unverified
+            // honestly (the closure's invocation capabilities are unknown).
+            | IrExprKind::Lambda { .. }
+            | IrExprKind::ClosureCreate { .. }
+            | IrExprKind::Range { .. } => {
                 let dst = self.fresh_value();
                 let repr = repr_of(ty)?;
                 let init = alloc_init(value);

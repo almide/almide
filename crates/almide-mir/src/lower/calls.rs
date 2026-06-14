@@ -303,7 +303,13 @@ impl LowerCtx {
                 | IrExprKind::ResultOk { .. }
                 | IrExprKind::ResultErr { .. }
                 | IrExprKind::OptionSome { .. }
-                | IrExprKind::OptionNone => {
+                | IrExprKind::OptionNone
+                // A CLOSURE value argument (`register((x) => …)`): a fresh heap env,
+                // materialized + borrowed into the call. The callee borrows it per the
+                // borrow-by-default convention; its body's calls are elided ⇒ the gate
+                // taints the function caps-unverified (invocation caps unknown).
+                | IrExprKind::Lambda { .. }
+                | IrExprKind::ClosureCreate { .. } => {
                     let dst = self.fresh_value();
                     let repr = repr_of(&a.ty)?;
                     let init = alloc_init(a);
