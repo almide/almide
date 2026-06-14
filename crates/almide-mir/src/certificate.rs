@@ -81,6 +81,17 @@ pub fn name_witness(func: &MirFunction) -> NameWitness {
                 }
                 record_args(args, &mut used);
             }
+            // The if-condition is USED; the result `dst` is DEFINED; the arm values are
+            // USED. (The arm OPS, flat between the markers, define/use as usual.)
+            Op::IfThen { cond, dst } => {
+                used.push(*cond);
+                if let Some(d) = dst {
+                    defined.push(*d);
+                }
+            }
+            Op::Else { val } | Op::EndIf { val } => {
+                used.extend(val.iter().copied());
+            }
         }
     }
     if let Some(r) = func.ret {

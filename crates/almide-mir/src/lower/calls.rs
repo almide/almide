@@ -380,15 +380,27 @@ impl LowerCtx {
                 | IrExprKind::RuntimeCall { .. }
                 | IrExprKind::If { .. }
                 | IrExprKind::Match { .. } => {
-                    let dst = self.fresh_value();
-                    self.record_elided_calls(a);
                     if is_heap_ty(&a.ty) {
+                        let dst = self.fresh_value();
+                        self.record_elided_calls(a);
                         let repr = repr_of(&a.ty)?;
                         self.ops.push(Op::Alloc { dst, repr, init: Init::Opaque });
                         self.materialized_call_arg(dst, repr)
                     } else {
-                        self.ops.push(Op::Const { dst });
-                        CallArg::Scalar(dst)
+                        // A scalar Int arithmetic / comparison / prim arg computes its
+                        // REAL value (`f(n / 10)` → IntBinOp); outside that subset it
+                        // rolls back to the deferred Const + elided caps marker.
+                        let mark = self.ops.len();
+                        match self.lower_scalar_value(a) {
+                            Some(v) => CallArg::Scalar(v),
+                            None => {
+                                self.ops.truncate(mark);
+                                let dst = self.fresh_value();
+                                self.record_elided_calls(a);
+                                self.ops.push(Op::Const { dst });
+                                CallArg::Scalar(dst)
+                            }
+                        }
                     }
                 }
                 // A field/element/tuple EXTRACTION argument. A SCALAR result is an

@@ -84,6 +84,9 @@ pub fn wasm_pattern(op: &crate::Op) -> Option<String> {
         // gates); its faithfulness is the §4.1 wasm-spec proof obligation, not a
         // pattern check here.
         | Op::Prim { .. }
+        | Op::IfThen { .. }
+        | Op::Else { .. }
+        | Op::EndIf { .. }
         | Op::Call { func: RtFn::PrintStr, .. } => return None,
     })
 }

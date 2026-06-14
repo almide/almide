@@ -144,6 +144,66 @@ impl LowerCtx {
         Ok(())
     }
 
+    /// Try to lower a SCALAR `if cond then … else …` to EXECUTABLE control flow
+    /// (`IfThen`/`Else`/`EndIf` markers — only the taken arm runs), returning the
+    /// result `dst`. Scalar result ONLY (a heap-result `if` needs the arms' heap
+    /// values merged per-arm, the linearization path). Each arm is PER-ARM-BALANCED
+    /// (its heap temps dropped WITHIN the arm via `drop_arm_locals`, emitted inside the
+    /// wasm `then`/`else`), so executing exactly one arm is memory-safe. The cert sees
+    /// the arm ops FLAT between the markers — the same sound linearization it proves.
+    /// Returns `None` (rolled back) when not in this subset — the caller then defers.
+    pub(crate) fn try_lower_scalar_if(
+        &mut self,
+        cond: &IrExpr,
+        then: &IrExpr,
+        else_: &IrExpr,
+        result_ty: &Ty,
+    ) -> Option<ValueId> {
+        if is_heap_ty(result_ty) {
+            return None;
+        }
+        let ops_mark = self.ops.len();
+        let lhh_mark = self.live_heap_handles.len();
+        let dst = self.fresh_value();
+        if let Some(cond_v) = self.lower_scalar_value(cond) {
+            self.ops.push(Op::IfThen { cond: cond_v, dst: Some(dst) });
+            if let Some(then_val) = self.lower_scalar_arm(then) {
+                self.ops.push(Op::Else { val: Some(then_val) });
+                if let Some(else_val) = self.lower_scalar_arm(else_) {
+                    self.ops.push(Op::EndIf { val: Some(else_val) });
+                    return Some(dst);
+                }
+            }
+        }
+        // Not in the scalar-if subset — roll back every op/handle the attempt pushed.
+        self.ops.truncate(ops_mark);
+        self.live_heap_handles.truncate(lhh_mark);
+        None
+    }
+
+    /// Lower ONE scalar `if` arm (a block's statements + a scalar tail value) with a
+    /// per-arm scope frame: the heap temps the arm allocates are dropped WITHIN the arm
+    /// (so taken-arm-only execution stays balanced). Returns the tail's scalar value.
+    fn lower_scalar_arm(&mut self, arm: &IrExpr) -> Option<ValueId> {
+        let (stmts, tail): (&[IrStmt], Option<&IrExpr>) = match &arm.kind {
+            IrExprKind::Block { stmts, expr } => (stmts, expr.as_deref()),
+            _ => (&[], Some(arm)),
+        };
+        let lhh_mark = self.live_heap_handles.len();
+        self.in_frame += 1;
+        for stmt in stmts {
+            if self.lower_stmt(stmt).is_err() {
+                self.in_frame -= 1;
+                return None;
+            }
+        }
+        let val = tail
+            .and_then(|t| self.lower_scalar_value(t).or_else(|| self.try_lower_scalar_call(t, &t.ty)));
+        self.in_frame -= 1;
+        self.drop_arm_locals(lhh_mark);
+        val
+    }
+
     /// Drop every heap handle the current scope frame added beyond `mark` (LIFO),
     /// restoring `live_heap_handles` to its pre-frame length — the per-arm teardown.
     pub(crate) fn drop_arm_locals(&mut self, mark: usize) {

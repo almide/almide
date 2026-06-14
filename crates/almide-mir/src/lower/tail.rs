@@ -312,11 +312,22 @@ impl LowerCtx {
                 self.record_elided_calls(tail);
                 Ok(Some(dst))
             }
-            // A scalar-result `if`/`match` tail: LINEARIZE the arms (their effects /
-            // arm-local ownership lowered, per-arm balanced) and emit ONE `Const` as
-            // the merged scalar result — both arms cross by the SAME no-event pattern
-            // (a Copy scalar), so nothing per-arm escapes the branch.
-            IrExprKind::If { .. } | IrExprKind::Match { .. } => {
+            // A scalar `if` tail EXECUTES (only the taken arm runs) via try_lower_scalar_if
+            // — the IfThen/Else/EndIf markers — when the cond + both arms are in the
+            // scalar subset; otherwise it falls back to the deferred linearize + Const.
+            IrExprKind::If { cond, then, else_ } => {
+                if let Some(dst) = self.try_lower_scalar_if(cond, then, else_, &tail.ty) {
+                    return Ok(Some(dst));
+                }
+                self.lower_branch(tail)?;
+                let dst = self.fresh_value();
+                self.ops.push(Op::Const { dst });
+                Ok(Some(dst))
+            }
+            // A scalar-result `match` tail: LINEARIZE the arms (their effects / arm-local
+            // ownership lowered, per-arm balanced) and emit ONE `Const` as the merged
+            // scalar result (structured `match` execution is a later step).
+            IrExprKind::Match { .. } => {
                 self.lower_branch(tail)?;
                 let dst = self.fresh_value();
                 self.ops.push(Op::Const { dst });

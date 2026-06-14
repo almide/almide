@@ -207,6 +207,20 @@ pub enum Op {
     /// none and a handle arg is BORROWED (read, no refcount change).
     /// [`PrimKind::FdWrite`] reaches [`Capability::Stdout`] (the only sandbox exit).
     Prim { kind: PrimKind, dst: Option<ValueId>, args: Vec<ValueId> },
+
+    /// Structured control flow as FLAT MARKERS. `IfThen` begins an `if` on a Bool
+    /// scalar `cond` (i64 0/1); the ops up to [`Op::Else`] are the THEN arm, the ops
+    /// up to [`Op::EndIf`] are the ELSE arm. Only the TAKEN arm executes (the render
+    /// emits a wasm `if`/`else`), but BOTH arms are PER-ARM-BALANCED by the lowering,
+    /// so the cert processes the arm ops FLAT — the same sound linearization it already
+    /// proves; the markers themselves carry no ownership. A scalar result `dst` is
+    /// bound from `then_val` / `else_val` (the arm values left on the wasm stack).
+    IfThen { cond: ValueId, dst: Option<ValueId> },
+    /// Separates the THEN arm from the ELSE arm; `val` is the THEN arm's result value
+    /// (left on the wasm stack) for a scalar `if`.
+    Else { val: Option<ValueId> },
+    /// Closes the `if`; `val` is the ELSE arm's result value for a scalar `if`.
+    EndIf { val: Option<ValueId> },
 }
 
 /// The closed set of primitive-floor operations (the trusted, wasm-spec-faithful
@@ -488,7 +502,9 @@ pub fn verify_ownership(func: &MirFunction) -> Result<(), Vec<Violation>> {
             // Scalar arithmetic — no ownership.
             // A scalar arithmetic op and a primitive-floor op carry no ownership: a
             // scalar result is Copy and a `Prim` handle arg is BORROWED (read only).
-            Op::IntBinOp { .. } | Op::Prim { .. } => {}
+            // The if-markers carry no ownership either — the arm OPS (flat between the
+            // markers) are processed normally, per-arm-balanced by the lowering.
+            Op::IntBinOp { .. } | Op::Prim { .. } | Op::IfThen { .. } | Op::Else { .. } | Op::EndIf { .. } => {}
         }
     }
 

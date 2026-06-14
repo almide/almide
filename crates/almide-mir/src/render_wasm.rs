@@ -195,8 +195,36 @@ pub fn render_wasm_fn(func: &MirFunction, label_off: &BTreeMap<String, (u32, u32
     }
     let locals_decl = locals.join(" ");
     let mut body = String::new();
+    // The if-markers (IfThen/Else/EndIf) render to a NESTED wasm `if`/`else` — a
+    // stateful reconstruction of the flat marker stream. A scalar `if` is an
+    // expression `(local.set $dst (if (result i64) cond (then …val) (else …val)))`;
+    // each arm leaves its value on the stack. Only the taken arm executes.
+    let mut if_stack: Vec<Option<ValueId>> = Vec::new(); // the result dst per open if
+    let arm_val = |v: &Option<ValueId>| {
+        v.map(|v| format!("      (local.get {})\n", local(v))).unwrap_or_default()
+    };
     for op in &func.ops {
-        body.push_str(&render_op(op, label_off));
+        match op {
+            Op::IfThen { cond, dst } => {
+                if_stack.push(*dst);
+                let res = if dst.is_some() { " (result i64)" } else { "" };
+                let set = dst.map(|d| format!("(local.set {} ", local(d))).unwrap_or_default();
+                body.push_str(&format!(
+                    "    {set}(if{res} (i64.ne (local.get {c}) (i64.const 0))\n      (then\n",
+                    c = local(*cond),
+                ));
+            }
+            Op::Else { val } => {
+                body.push_str(&format!("{}      )\n      (else\n", arm_val(val)));
+            }
+            Op::EndIf { val } => {
+                let dst = if_stack.pop().expect("EndIf without IfThen");
+                // close: else-arm value, `)` else, `)` if, and `)` local.set if scalar.
+                let close = if dst.is_some() { "))\n" } else { ")\n" };
+                body.push_str(&format!("{}      ){close}", arm_val(val)));
+            }
+            _ => body.push_str(&render_op(op, label_off)),
+        }
     }
     let tail = func.ret.map(|r| format!("    (local.get {})\n", local(r))).unwrap_or_default();
     format!("  (func ${} {params}{result} {locals_decl}\n{body}{tail}  )\n", func.name)
@@ -223,6 +251,7 @@ fn defined_value(op: &Op) -> Option<ValueId> {
         | Op::Pure { dst, .. } => Some(*dst),
         Op::CallFn { dst, .. } | Op::Call { dst, .. } => *dst,
         Op::Prim { dst, .. } => *dst,
+        Op::IfThen { dst, .. } => *dst,
         _ => None,
     }
 }
@@ -247,6 +276,10 @@ fn value_reprs_wasm(func: &MirFunction) -> BTreeMap<ValueId, Repr> {
             }
             // A prim result (a load, fd_write errno, or handle→address) is a scalar i64.
             Op::Prim { dst: Some(dst), .. } => {
+                m.insert(*dst, SCALAR_REPR);
+            }
+            // A scalar `if` result is i64 (heap-result ifs are a later step).
+            Op::IfThen { dst: Some(dst), .. } => {
                 m.insert(*dst, SCALAR_REPR);
             }
             // A call's result repr is the callee's RETURN repr, carried on the op
@@ -394,7 +427,12 @@ fn render_op(op: &Op, label_off: &BTreeMap<String, (u32, u32)>) -> String {
         Op::Consume { .. }
         | Op::Borrow { .. }
         | Op::Const { .. }
-        | Op::Pure { .. } => String::new(),
+        | Op::Pure { .. }
+        // The if-markers are rendered STATEFULLY by render_wasm_fn (the flat→nested
+        // wasm `if`/`else`); render_op never sees them in practice.
+        | Op::IfThen { .. }
+        | Op::Else { .. }
+        | Op::EndIf { .. } => String::new(),
     }
 }
 
@@ -995,6 +1033,37 @@ mod tests {
         // build_and_run trims the trailing newline; the MIDDLE newline must remain.
         if let Some(out) = build_and_run("plain_println", &render_wasm_program(&prog)) {
             assert_eq!(out, "line one\nline two");
+        }
+    }
+
+    /// CONTROL-FLOW EXECUTION + print_int: a recursive itoa (`put_int`) over a SCALAR
+    /// `if` — lowered to IfThen/Else/EndIf so ONLY THE TAKEN ARM runs (Div/Mod +
+    /// recursion + prim) — prints an integer's decimal digits, byte-matching v0's
+    /// `println(int.to_string(12345))`. Proves the `if` EXECUTES (not the old
+    /// linearize-both-arms-and-defer), the keystone for control flow + numbers.
+    #[test]
+    fn scalar_if_executes_print_int() {
+        let src = "fn put_int(n: Int, pos: Int) -> Int =\n  \
+            if n < 10 then { prim.store8(pos, 48 + n)\n    \
+            pos + 1 } else { let p = put_int(n / 10, pos)\n    \
+            prim.store8(p, 48 + (n % 10))\n    \
+            p + 1 }\n\
+            fn write_int(n: Int) -> Unit = { let endp = put_int(n, 512)\n  \
+            prim.store8(endp, 10)\n  \
+            prim.store32(8, 512)\n  \
+            prim.store32(12, endp - 512 + 1)\n  \
+            let _w = prim.fd_write(1, 8, 1, 0) }\n\
+            fn main() -> Unit = write_int(12345)\n";
+        let prog = lower_source(src);
+        let put = prog.functions.iter().find(|f| f.name == "put_int").expect("put_int lowered");
+        // The `if` is EXECUTABLE control flow (IfThen marker), not the deferred Const.
+        assert!(
+            put.ops.iter().any(|op| matches!(op, Op::IfThen { .. })),
+            "put_int's if must lower to IfThen (executable), got {:?}",
+            put.ops
+        );
+        if let Some(out) = build_and_run("print_int", &render_wasm_program(&prog)) {
+            assert_eq!(out, "12345");
         }
     }
 

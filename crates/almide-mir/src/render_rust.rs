@@ -145,6 +145,9 @@ fn render_op(op: &Op) -> Option<String> {
         // prim op never appears in a native MIR. Stub to keep the match total.
         Op::Prim { dst: Some(d), .. } => Some(format!("let {}: i64 = 0;", var(*d))),
         Op::Prim { dst: None, .. } => None,
+        // The wasm-structured if-markers are not used in the native render (native
+        // uses idiomatic Rust control flow via v0 codegen, not the v1 marker stream).
+        Op::IfThen { .. } | Op::Else { .. } | Op::EndIf { .. } => None,
         // The single ownership decision: an alias is a fresh owned handle whose
         // value is a clone — eager copy-on-write, so the sibling is independent.
         Op::Dup { dst, src } => {
