@@ -356,6 +356,21 @@ impl LowerCtx {
                 "heap bind from Call[{}] not in this brick",
                 call_target_kind(target)
             ))),
+            // `var x = if c then … else …` — a heap-result branch. LINEARIZE the arms
+            // (each per-arm balanced, its value deferred), then bind `x` to ONE fresh
+            // `Alloc{Opaque}` — the merged result slot. Memory-safe by construction
+            // (the arms balance; the result is a clean fresh alloc dropped at scope
+            // end); which arm's value it equals is functional, deferred like every
+            // `Opaque`. The same WALLS as statement position still apply per arm.
+            IrExprKind::If { .. } | IrExprKind::Match { .. } => {
+                self.lower_branch(value)?;
+                let dst = self.fresh_value();
+                let repr = repr_of(ty)?;
+                self.value_of.insert(var, dst);
+                self.ops.push(Op::Alloc { dst, repr, init: Init::Opaque });
+                self.live_heap_handles.push(dst);
+                Ok(())
+            }
             other => Err(LowerError::Unsupported(format!(
                 "heap bind from {} not in this brick",
                 kind_name(other)
@@ -708,6 +723,17 @@ impl LowerCtx {
                     let dst = self.lower_heap_extraction(tail)?;
                     Ok(Some(dst))
                 }
+                // `fn f() = if c then … else …` — a heap-result branch RETURNED.
+                // LINEARIZE the arms (per-arm balanced, values deferred) and move out
+                // ONE fresh `Alloc{Opaque}` — the merged result slot, NOT added to
+                // live_heap_handles (it is the return value). See `lower_branch`.
+                IrExprKind::If { .. } | IrExprKind::Match { .. } => {
+                    self.lower_branch(tail)?;
+                    let dst = self.fresh_value();
+                    let repr = repr_of(&tail.ty)?;
+                    self.ops.push(Op::Alloc { dst, repr, init: Init::Opaque });
+                    Ok(Some(dst))
+                }
                 other => Err(LowerError::Unsupported(format!(
                     "heap move-out from {} (only a bound var, fresh literal, or call) not in this brick",
                     kind_name(other)
@@ -825,11 +851,16 @@ impl LowerCtx {
     /// on EVERY path — the arm that allocates it runs its balanced `i…d`; on the
     /// other path it is simply never allocated (its `i…d` is vacuous). A handle that
     /// READS a pre-branch object (`var w = z`) is a balanced `a…d` PAIR inside the
-    /// arm, removable on the other path, so the shared object stays balanced too. The
-    /// branch RESULT crosses by a no-new-event pattern only — DISCARDED (statement /
-    /// Unit position) or a SCALAR the caller emits as one `Const`; a fresh HEAP result
-    /// (a result phi needing a merge slot) is WALLED. So no per-arm `i`/`a` escapes
-    /// the branch and the flat cert is sound on both paths.
+    /// arm, removable on the other path, so the shared object stays balanced too. No
+    /// arm value ESCAPES the branch: the RESULT is emitted by the CALLER as ONE
+    /// merged slot — DISCARDED (statement / Unit position), a `Const` (scalar), or a
+    /// fresh `Alloc{Opaque}` (heap). So no per-arm `i`/`a` crosses the branch and the
+    /// flat cert is sound on both paths. The fresh-`Opaque` heap result is the same
+    /// value-CONTENT deferral as every other heap value (which arm's value it equals
+    /// is functional, not a safety property — `守るのは安全性であって機能の正しさで
+    /// はない`); it is memory-safe BY CONSTRUCTION (a clean fresh alloc), so it needs
+    /// no result-phi merge and bypasses no soundness check (a borrowed-param arm
+    /// result is simply not moved out — the function returns the fresh `Opaque`).
     ///
     /// CAPS: both arms are lowered, so the witness captures the UNION of their
     /// capabilities — a conservative over-approximation (the path actually taken
@@ -840,8 +871,8 @@ impl LowerCtx {
     /// WALLED (each an explicit `Unsupported`, never a silent miscompile): a fresh
     /// heap SUBJECT (eliding its `Alloc` would be an accept-but-unsafe leak), a
     /// payload-BINDING `match` pattern (extracting a field needs the layout brick), a
-    /// `match` arm GUARD, a heap-result arm (result phi), and an arm that REASSIGNS a
-    /// variable (a path-dependent `value_of` rebind the flat fold cannot see → UAF).
+    /// `match` arm GUARD, and an arm that REASSIGNS a variable (a path-dependent
+    /// `value_of` rebind the flat fold cannot see → UAF).
     fn lower_branch(&mut self, expr: &IrExpr) -> Result<(), LowerError> {
         let arms: Vec<&IrExpr> = match &expr.kind {
             IrExprKind::If { cond, then, else_ } => {
@@ -921,16 +952,13 @@ impl LowerCtx {
             self.lower_stmt(stmt)?;
         }
         if let Some(tail) = tail {
-            // A heap arm result would have to be phi-merged across arms into one slot
-            // (a result-slot brick) — wall it. A Unit-call tail is an EFFECT
-            // (`println`) lowered so its Stdout reaches the witness; a nested branch
-            // recurses; any other scalar/Unit tail is a pure value whose calls we
-            // capture (its scalar value, if any, is the caller's single `Const`).
-            if is_heap_ty(&tail.ty) {
-                return Err(LowerError::Unsupported(
-                    "branch arm yields a heap value (result phi needs a result slot) not in this control-flow slice".into(),
-                ));
-            }
+            // The arm's tail VALUE never escapes the arm — the branch RESULT is one
+            // fresh `Alloc{Opaque}` the CALLER emits (a heap result) or a `Const` (a
+            // scalar). So a Unit-call tail is lowered as an EFFECT (`println`, so its
+            // Stdout reaches the witness); a nested branch recurses (its own arms get
+            // per-arm frames); ANY OTHER tail — scalar or HEAP — is a deferred value
+            // whose calls we capture as effect markers (its content, like every
+            // `Opaque`, is carried by the merged result, not modelled per-arm).
             match &tail.kind {
                 IrExprKind::Call { .. } if matches!(tail.ty, Ty::Unit) => {
                     self.lower_effect_call(tail)?
@@ -1692,6 +1720,54 @@ mod tests {
         );
         let mir = lower_body(&b, "f").expect("scalar if tail lowers");
         assert!(matches!(mir.ops.last(), Some(Op::Const { .. })), "merged scalar result is a Const");
+        assert_eq!(verify_ownership(&mir), Ok(()));
+    }
+
+    #[test]
+    fn heap_result_if_yields_one_fresh_opaque_merged_slot() {
+        use almide_lang::intern::sym;
+        // fn f() = if c then make() else [9]  — a HEAP-result branch. Arms are
+        // linearized (each per-arm balanced; the make() call's caps captured, its
+        // value deferred), and the result is ONE fresh `Alloc{Opaque}` MOVED OUT (the
+        // merged slot) — never per-arm phi-merged. Balanced + moved out by the cert.
+        let then = ir_expr(
+            IrExprKind::Call {
+                target: CallTarget::Named { name: sym("make") },
+                args: vec![],
+                type_args: vec![],
+            },
+            list_int(),
+        );
+        let els = ir_expr(IrExprKind::List { elements: vec![] }, list_int());
+        let b = ir_expr(
+            IrExprKind::Block { stmts: vec![], expr: Some(Box::new(iff(then, els, list_int()))) },
+            list_int(),
+        );
+        let mir = lower_body(&b, "f").expect("heap if tail lowers");
+        // The make() call's caps are captured as an effect marker (deferred value).
+        assert!(
+            mir.ops.iter().any(|o| matches!(o, Op::CallFn { dst: None, name, .. } if name == "make")),
+            "the arm call's caps are captured: {:?}",
+            mir.ops
+        );
+        // The merged result is the LAST op: a fresh Opaque Alloc, MOVED OUT (returned,
+        // so NOT dropped at scope end).
+        assert!(matches!(mir.ops.last(), Some(Op::Alloc { init: Init::Opaque, .. })));
+        assert!(mir.ret.is_some(), "the fresh merged result is the return value");
+        assert!(!mir.ops.iter().any(|o| matches!(o, Op::Drop { .. })), "moved out, not dropped");
+        assert_eq!(verify_ownership(&mir), Ok(()), "fresh result + balanced arms");
+    }
+
+    #[test]
+    fn heap_result_if_bind_drops_the_merged_slot_at_scope_end() {
+        // var x = if c then [1] else [2]  (Unit body) — the merged fresh Opaque is
+        // BOUND and dropped at scope end (cert i + d, balanced).
+        let then = ir_expr(IrExprKind::List { elements: vec![] }, list_int());
+        let els = ir_expr(IrExprKind::List { elements: vec![] }, list_int());
+        let b = body(vec![bind(0, list_int(), iff(then, els, list_int()))]);
+        let mir = lower_body(&b, "main").expect("heap if bind lowers");
+        assert!(mir.ops.iter().any(|o| matches!(o, Op::Alloc { init: Init::Opaque, .. })));
+        assert!(mir.ops.iter().any(|o| matches!(o, Op::Drop { .. })), "bound slot dropped at scope end");
         assert_eq!(verify_ownership(&mir), Ok(()));
     }
 
