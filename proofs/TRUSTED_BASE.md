@@ -117,12 +117,15 @@ The receipt's claims are scoped to exactly this:
   method/computed call itself ELIDED, so the `ir_calls > mir_calls` gate taints the
   function caps-unverified — honest, the callee's capabilities are unknown), plus
   **error operators** (`e!`/`e?`/`e ?? d`/`e?.field` yield a FRESH value — the
-  unwrapped/defaulted/chained result, deferred like every Opaque; the operand's
-  calls are captured. KNOWN-LIMITATION: the EARLY-RETURN of `e!`/`e?` is DEFERRED —
-  the model takes the always-continue path, which is self-consistent (each handle
-  still drops exactly once on either runtime exit, so no double-free/leak/UAF) and
-  thus memory-SAFE; error PROPAGATION is functional, not a safety property, so it is
-  deferred like every Opaque content), plus
+  unwrapped/defaulted/mapped result, deferred like every Opaque; the operand's
+  calls are captured. NOTE: Almide has NO `try`/`catch` — `e?` is `Result → Option`,
+  `e ?? d` is unwrap-or-default, `e?.f` is optional chaining, all TOTAL value maps
+  with no control flow; only `e!` (`Unwrap`, effect-fn) PROPAGATES an error.
+  KNOWN-LIMITATION: that error-PROPAGATION of `e!` is DEFERRED — the model takes the
+  always-continue path, which is self-consistent (each handle still drops exactly
+  once on either runtime exit, so no double-free/leak/UAF) and thus memory-SAFE;
+  error propagation is functional, not a safety property, so it is deferred like
+  every Opaque content), plus
   **destructuring patterns** (a `match` arm's `Some(x)`/`Ok(v)`/`Foo(a,b)` and a
   `let Foo{..}=`/`let (a,b)=` bind their payloads CONTAINER-GRAIN — a heap binding
   aliases the whole subject (`Op::Dup`, reusing the proven `a` event; element/payload-
