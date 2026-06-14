@@ -165,6 +165,8 @@ fn render_op(op: &Op) -> Option<String> {
                 IntOp::Add => "+",
                 IntOp::Sub => "-",
                 IntOp::Mul => "*",
+                IntOp::Div => "/",
+                IntOp::Mod => "%",
             };
             Some(format!("let {}: i64 = {} {o} {};", var(*dst), var(*a), var(*b)))
         }

@@ -326,6 +326,8 @@ fn render_op(op: &Op, label_off: &BTreeMap<String, (u32, u32)>) -> String {
                 IntOp::Add => "i64.add",
                 IntOp::Sub => "i64.sub",
                 IntOp::Mul => "i64.mul",
+                IntOp::Div => "i64.div_s",
+                IntOp::Mod => "i64.rem_s",
             };
             format!(
                 "    (local.set {d} ({o} (local.get {a}) (local.get {b})))\n",

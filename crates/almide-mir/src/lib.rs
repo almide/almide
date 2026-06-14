@@ -231,6 +231,10 @@ pub enum IntOp {
     Add,
     Sub,
     Mul,
+    /// Signed division — traps on divide-by-zero (matching v0's checked `DivInt`).
+    Div,
+    /// Signed remainder — traps on divide-by-zero (matching v0's checked `ModInt`).
+    Mod,
 }
 
 /// A runtime function the MIR can call. An enum (not a string) so the renderer

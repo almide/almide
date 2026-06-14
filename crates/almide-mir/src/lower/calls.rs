@@ -562,8 +562,10 @@ impl LowerCtx {
                     BinOp::AddInt => crate::IntOp::Add,
                     BinOp::SubInt => crate::IntOp::Sub,
                     BinOp::MulInt => crate::IntOp::Mul,
-                    // Div/Mod/Pow, comparisons, logic, Float, concat: not in the
-                    // int-arith subset (IntOp = Add/Sub/Mul) — defer.
+                    BinOp::DivInt => crate::IntOp::Div,
+                    BinOp::ModInt => crate::IntOp::Mod,
+                    // Pow, comparisons, logic, Float, concat: not in the int-arith
+                    // subset (IntOp = Add/Sub/Mul/Div/Mod) — defer.
                     _ => return None,
                 };
                 let a = self.lower_scalar_value(left)?;
