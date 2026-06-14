@@ -1,9 +1,20 @@
 # v1 heap-result `if`/`match` execution — design (DE-RISKED: no Coq change)
 
-Status: **designed + de-risked, NOT yet implemented.** This is the first of the two
-remaining v0-parity execution slices (the other = stdlib self-host). It is
-soundness-core (it touches the ownership *certificate generation*), so it must be
-implemented with corpus-wall + an adversarial soundness pass, not rushed.
+Status: **`if` with literal arms IMPLEMENTED (commit 126921e6), adversarially
+verified SOUND.** `fn label(c) -> String = if c then "yes" else "no"` now executes
+byte-matching v0. The design below proved exactly right — NO Coq change, the
+existing checker accepts the per-arm `"im"` certificate unchanged. Three
+independent adversarial audits found no accept-but-unsafe gap. corpus-wall:
+ownership 13121→13129, all three properties ACCEPT.
+
+REMAINING under this slice: heap-result `match` (desugar via `desugar_match_to_if`),
+and non-literal arms (direct calls — step 1 below). A SEPARATE pre-existing bug the
+audit surfaced: the wasm `$alloc` free-list reuse formula uses `LIST_HEADER +
+cap*ELEM_SIZE` but String blocks size as `LIST_HEADER + bytes`, so freed String
+blocks are never reused → a String-allocating LOOP OOMs (fail-stop, not an rc-leak;
+frees happen, the ownership claim holds — it is the FreeList.v bounded-churn
+property that is false for Strings). Fix: key the free-list on the block's real
+byte-size, not `cap*ELEM`.
 
 ## The problem
 
