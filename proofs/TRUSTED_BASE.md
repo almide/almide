@@ -108,8 +108,8 @@ The receipt's claims are scoped to exactly this:
   verification = the definition of parity" in its honest first form: it does NOT
   yet claim the *completion definition* (the proven profile accepting the full
   corpus), it establishes the *mechanism* that measures progress toward it and
-  proves the boundary is a wall, not a hole. **Today's honest coverage: 3223/4195
-  functions in-profile (77%) for ownership+names (caps-VERIFIED is the lower, parity-binding 2739 — see caps note)** (the value-semantics subset,
+  proves the boundary is a wall, not a hole. **Today's honest coverage: 3235/4195
+  functions in-profile (77%) for ownership+names (caps-VERIFIED is the lower, parity-binding 2754 — see caps note)** (the value-semantics subset,
   plus **higher-order pure combinators** (`list.map`/`filter`/`fold`/… with a
   closure, in VALUE or EFFECT/statement position — a pure combinator INVOKES the
   closure during the call and discards it, so it never escapes; the closure
@@ -130,8 +130,10 @@ The receipt's claims are scoped to exactly this:
   frame, NO branch op: each arm internally balanced + vacuous on the other path; the
   result is one merged slot the caller emits — discarded (Unit/statement), a `Const`
   (scalar), or a fresh `Alloc{Opaque}` (heap, memory-safe by construction, its value
-  CONTENT deferred like every Opaque); a fresh heap subject, a payload-binding
-  pattern, an arm guard, and an arm that reassigns a variable are WALLED), plus
+  CONTENT deferred like every Opaque); a heap `match` subject is MATERIALIZED (a
+  fresh value into an owned temp dropped at scope end, a tracked var borrowed); a
+  payload-binding pattern, an arm guard, and an arm that reassigns a HEAP variable
+  are WALLED), plus
   **tuple destructuring** (`let (a,b) = (x,y)` component-wise, or `(a,b) = t`
   aliasing the container per component), **field/element assignment** (xs[i]=v / r.field=v → MakeUnique copy-on-write), **println of any heap arg** (`println("x")`/`f()`/`a++b` materialized + borrowed — reaches Stdout so caps-unverified, honest), and **reassignment** — `x = v` rebinds `x`; the old binding rides to scope-end
   and is dropped exactly once (a conservative lifetime extension, never a
@@ -183,7 +185,7 @@ The receipt's claims are scoped to exactly this:
   `Module` call, a variant constructor, or a known Stdout-free builtin
   (`assert*`/`eprintln`/`panic`/`to_string` — these reach stderr/abort, NOT
   Stdout) is free; ANY other unknown callee (a walled or cross-file user function)
-  TAINTS, so the function is reported `caps-unverified` (2739/3223 verified, 484
+  TAINTS, so the function is reported `caps-unverified` (2754/3235 verified, 481
   unverified) rather than falsely accepted. **The gate verifies the REAL
   capability-bound property `reachable ⊆ declared`** (exactly what
   `proofs/CapabilityBound.v` proves), not a degenerate "reaches no capability at

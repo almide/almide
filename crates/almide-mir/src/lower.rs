@@ -981,8 +981,9 @@ impl LowerCtx {
     /// scalar branch instead (dropping the arms) would MISS an arm's `println` =
     /// caps-unsound, so the arms MUST be lowered even for a scalar result.
     ///
-    /// WALLED (each an explicit `Unsupported`, never a silent miscompile): a fresh
-    /// heap SUBJECT (eliding its `Alloc` would be an accept-but-unsafe leak), a
+    /// A heap `match` SUBJECT is materialized (a fresh value into an owned temp dropped
+    /// at the outer scope, a tracked var borrowed) so its `Alloc` is never elided.
+    /// WALLED (each an explicit `Unsupported`, never a silent miscompile): a
     /// payload-BINDING `match` pattern (extracting a field needs the layout brick), a
     /// `match` arm GUARD, and an arm that REASSIGNS a variable (a path-dependent
     /// `value_of` rebind the flat fold cannot see → UAF).
@@ -995,19 +996,17 @@ impl LowerCtx {
                 vec![then, else_]
             }
             IrExprKind::Match { subject, arms } => {
-                // The subject is inspected once. Only a SCALAR or an already-tracked
-                // heap var (borrowed, dropped at the OUTER scope) is admitted: a fresh
-                // heap subject (a call/literal result) would need materialize-and-drop
-                // — eliding it would leave its `Alloc` unmodelled = accept-but-unsafe
-                // leak. A `Var` is borrowed for the inspection (no ownership change).
-                if is_heap_ty(&subject.ty)
-                    && !matches!(subject.kind, IrExprKind::Var { .. })
-                {
-                    return Err(LowerError::Unsupported(
-                        "match on a fresh heap subject (needs materialize-and-drop) not in this control-flow slice".into(),
-                    ));
+                // The subject is inspected once. A heap subject goes through
+                // `lower_call_args` — an already-tracked `Var` is BORROWED, a FRESH
+                // heap value (a call/literal result) is MATERIALIZED into an owned temp
+                // dropped at the OUTER scope (never leaked — eliding its `Alloc` would
+                // be accept-but-unsafe). A scalar subject carries no ownership; capture
+                // any call in it for caps.
+                if is_heap_ty(&subject.ty) {
+                    self.lower_call_args(std::slice::from_ref(subject))?;
+                } else {
+                    self.record_elided_calls(subject);
                 }
-                self.record_elided_calls(subject);
                 let mut bodies = Vec::with_capacity(arms.len());
                 for arm in arms {
                     // A pattern that BINDS any value extracts a payload/field/element
@@ -2310,10 +2309,11 @@ mod tests {
     }
 
     #[test]
-    fn match_on_a_fresh_heap_subject_is_walled() {
+    fn match_on_a_fresh_heap_subject_is_materialized_and_dropped() {
         use almide_lang::intern::sym;
-        // match make() { _ => () }  — a fresh heap subject would need materialize-and-
-        // drop; eliding its Alloc would be an accept-but-unsafe leak. Must WALL.
+        // match make() { _ => () }  — the fresh heap subject is MATERIALIZED into an
+        // owned temp (CallFn `make`) dropped at scope end (never leaked); the arms
+        // inspect it. Balanced.
         let subject = ir_expr(
             IrExprKind::Call {
                 target: CallTarget::Named { name: sym("make") },
@@ -2332,10 +2332,14 @@ mod tests {
             Ty::Unit,
         );
         let b = body(vec![stmt(IrStmtKind::Expr { expr: m })]);
-        match lower_body(&b, "main") {
-            Err(LowerError::Unsupported(r)) => assert!(r.contains("fresh heap subject"), "got: {r}"),
-            other => panic!("expected a fresh-heap-subject wall, got {other:?}"),
-        }
+        let mir = lower_body(&b, "main").expect("fresh heap subject is materialized");
+        assert!(
+            mir.ops.iter().any(|o| matches!(o, Op::CallFn { dst: Some(_), name, .. } if name == "make")),
+            "the subject is materialized into an owned temp: {:?}",
+            mir.ops
+        );
+        assert!(mir.ops.iter().any(|o| matches!(o, Op::Drop { .. })), "the subject temp is dropped");
+        assert_eq!(verify_ownership(&mir), Ok(()));
     }
 
     #[test]
