@@ -488,7 +488,9 @@ impl LowerCtx {
     /// caller — the untaken arm never allocates (no leak). FIRST version: both arms are
     /// direct string LITERALS (the common `if c then "a" else "b"`); other arm kinds fall
     /// back to today's sound Opaque form. Returns the result `dst`, or `None` (rolled
-    /// back) when out of subset.
+    /// back) when out of subset. Arms may be string LITERALS or a NESTED heap-result `if`
+    /// (the else-if chain a desugared `match` produces — `match n { 0 => "a", _ => "b" }`),
+    /// recursively. Other arm kinds fall back to today's sound Opaque form.
     pub(crate) fn try_lower_heap_result_if(
         &mut self,
         cond: &IrExpr,
@@ -499,35 +501,51 @@ impl LowerCtx {
         if !is_heap_ty(result_ty) {
             return None;
         }
-        let (IrExprKind::LitStr { value: then_s }, IrExprKind::LitStr { value: else_s }) =
-            (&then.kind, &else_.kind)
-        else {
-            return None;
-        };
-        let repr = repr_of(result_ty).ok()?;
+        // The whole attempt rolls back as a unit: the recursion below truncates nothing,
+        // so the OUTERMOST call restores the op stream on any out-of-subset arm.
         let ops_mark = self.ops.len();
-        let cond_v = match self.lower_scalar_value(cond) {
-            Some(v) => v,
-            None => {
-                self.ops.truncate(ops_mark);
-                return None;
-            }
-        };
+        let result = self.lower_heap_result_if_inner(cond, then, else_, result_ty);
+        if result.is_none() {
+            self.ops.truncate(ops_mark);
+        }
+        result
+    }
+
+    fn lower_heap_result_if_inner(
+        &mut self,
+        cond: &IrExpr,
+        then: &IrExpr,
+        else_: &IrExpr,
+        result_ty: &Ty,
+    ) -> Option<ValueId> {
+        let cond_v = self.lower_scalar_value(cond)?;
         let dst = self.fresh_value();
         self.ops.push(Op::IfThen { cond: cond_v, dst: Some(dst) });
-        // THEN arm: allocate the literal and MOVE IT OUT (`Consume` = the per-arm move-out
-        // that balances the arm's Alloc). It is NOT added to `live_heap_handles` (it is
-        // moved out as the result, not dropped at scope end).
-        let then_obj = self.fresh_value();
-        self.ops.push(Op::Alloc { dst: then_obj, repr, init: Init::Str(then_s.clone()) });
-        self.ops.push(Op::Consume { v: then_obj });
+        let then_obj = self.lower_heap_result_arm(then, result_ty)?;
         self.ops.push(Op::Else { val: Some(then_obj) });
-        // ELSE arm: same.
-        let else_obj = self.fresh_value();
-        self.ops.push(Op::Alloc { dst: else_obj, repr, init: Init::Str(else_s.clone()) });
-        self.ops.push(Op::Consume { v: else_obj });
+        let else_obj = self.lower_heap_result_arm(else_, result_ty)?;
         self.ops.push(Op::EndIf { val: Some(else_obj) });
         Some(dst)
+    }
+
+    /// Lower ONE arm of a heap-result `if` to the value the arm leaves on the wasm stack.
+    /// A string LITERAL is `Alloc{Str}` + `Consume` (the per-arm `"im"` move-out balance —
+    /// NOT added to `live_heap_handles`, it is moved out as the result). A NESTED `if` (a
+    /// desugared `match`'s else-if) recurses, its result dst being this arm's value.
+    fn lower_heap_result_arm(&mut self, arm: &IrExpr, result_ty: &Ty) -> Option<ValueId> {
+        match &arm.kind {
+            IrExprKind::LitStr { value } => {
+                let repr = repr_of(result_ty).ok()?;
+                let obj = self.fresh_value();
+                self.ops.push(Op::Alloc { dst: obj, repr, init: Init::Str(value.clone()) });
+                self.ops.push(Op::Consume { v: obj });
+                Some(obj)
+            }
+            IrExprKind::If { cond, then, else_ } => {
+                self.lower_heap_result_if_inner(cond, then, else_, result_ty)
+            }
+            _ => None,
+        }
     }
 
     /// Try to lower `for i in start..end { body }` over a SCALAR Int index as a REAL loop

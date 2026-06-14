@@ -1199,6 +1199,27 @@ mod tests {
     }
 
     #[test]
+    fn heap_result_match_returns_the_matched_arm_string() {
+        // A String-returning `match` over Int literals desugars to a NESTED heap-result
+        // `if` and RUNS only the matched arm (each arm Alloc+Consume = "im"). name(0)=zero,
+        // name(1)=one, name(7)=other, byte-matching v0.
+        let src = "fn name(n: Int) -> String = match n {\n  \
+            0 => \"zero\",\n  1 => \"one\",\n  _ => \"other\",\n  }\n\
+            fn main() -> Unit = {\n  \
+            println(name(0))\n  println(name(1))\n  println(name(7)) }\n";
+        let prog = lower_source(src);
+        let f = prog.functions.iter().find(|f| f.name == "name").unwrap();
+        assert!(
+            f.ops.iter().any(|op| matches!(op, Op::IfThen { .. })),
+            "heap-result match must lower to nested IfThen (executable), got {:?}",
+            f.ops
+        );
+        if let Some(out) = build_and_run("heap_result_match", &render_wasm_program(&prog)) {
+            assert_eq!(out, "zero\none\nother");
+        }
+    }
+
+    #[test]
     fn match_unit_executes_only_matched_arm() {
         // A Unit `match` over Int literal patterns (+ a `_` catch-all) desugars to a
         // nested `if n == lit then … else …` and EXECUTES: only the matched arm's

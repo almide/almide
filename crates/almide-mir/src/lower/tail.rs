@@ -243,7 +243,19 @@ impl LowerCtx {
                     self.ops.push(Op::Alloc { dst, repr, init: Init::Opaque });
                     Ok(Some(dst))
                 }
-                IrExprKind::Match { .. } => {
+                // A heap-result `match` over Int literal patterns with string-literal arms
+                // EXECUTES: desugar to a nested heap-result `if` and run only the matched
+                // arm; otherwise LINEARIZE to one deferred `Alloc{Opaque}`.
+                IrExprKind::Match { subject, arms } => {
+                    if let Some(if_expr) = self.desugar_match_to_if(subject, arms, &tail.ty) {
+                        if let IrExprKind::If { cond, then, else_ } = &if_expr.kind {
+                            if let Some(dst) =
+                                self.try_lower_heap_result_if(cond, then, else_, &tail.ty)
+                            {
+                                return Ok(Some(dst));
+                            }
+                        }
+                    }
                     self.lower_branch(tail)?;
                     let dst = self.fresh_value();
                     let repr = repr_of(&tail.ty)?;
