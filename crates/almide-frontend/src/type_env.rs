@@ -75,6 +75,13 @@ pub struct TypeEnv {
     /// same-name ctors across types union their sets (#413 corner — the
     /// worst case is a suppressed missing-field error, never wrong code).
     pub ctor_field_defaults: std::collections::HashMap<Sym, std::collections::HashSet<Sym>>,
+    /// Bare type names that are currently a dual-registration of a PREFIXED
+    /// (dependency / submodule) type — i.e. `env.types["Persona"]` mirrors
+    /// `env.types["fizz_persona.Persona"]` for unqualified access. A LOCAL type
+    /// (main program, no prefix) with the same name is allowed to shadow this
+    /// bare alias instead of colliding with it (#433): unqualified use resolves
+    /// to the local type, the dependency's stays reachable via its qualified key.
+    pub prefixed_bare_aliases: std::collections::HashSet<Sym>,
     /// Types that implement the Eq protocol (via `deriving Eq`)
     pub eq_types: std::collections::HashSet<Sym>,
     /// Structural bounds for generic type parameters: TypeVar name → OpenRecord constraint
@@ -145,6 +152,7 @@ impl TypeEnv {
             param_vars: std::collections::HashSet::new(),
             var_decl_locs: std::collections::HashMap::new(),
             top_lets: std::collections::HashMap::new(),
+            prefixed_bare_aliases: std::collections::HashSet::new(),
             eq_types: std::collections::HashSet::new(),
             structural_bounds: std::collections::HashMap::new(),
             generic_protocol_bounds: std::collections::HashMap::new(),

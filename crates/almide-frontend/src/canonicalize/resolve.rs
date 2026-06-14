@@ -52,6 +52,27 @@ pub fn canonical_user_type_sym(name: &str, types: &HashMap<Sym, Ty>, cur_mod: Op
         }
     }
     if !name.contains('.') {
+        // A LOCAL (main-program, unprefixed) type registered under the bare name
+        // shadows a dependency's same-name type for unqualified use (#433). Prefer
+        // the bare entry when it is structurally DISTINCT from every qualified
+        // `<pkg>.name` owner — i.e. it is a genuine local type, not merely the
+        // dependency's bare alias (which mirrors its qualified entry exactly).
+        // Only for the main program (`cur_mod` is None); a user module's own types
+        // are already qualified and handled by the first block above.
+        if cur_mod.is_none() {
+            if let Some(bare) = types.get(&sym(name)) {
+                if matches!(bare, Ty::Record { .. } | Ty::Variant { .. }) {
+                    let is_alias_of_a_qualified = types.iter().any(|(k, v)| {
+                        k.as_str().rsplit_once('.').map_or(false, |(p, base)| {
+                            base == name && !almide_lang::stdlib_info::is_bundled_module(p)
+                        }) && v == bare
+                    });
+                    if !is_alias_of_a_qualified {
+                        return Some(sym(name));
+                    }
+                }
+            }
+        }
         let mut owners = types.iter().filter(|(k, v)| {
             k.as_str().rsplit_once('.').map_or(false, |(p, base)| {
                 base == name && !almide_lang::stdlib_info::is_bundled_module(p)
