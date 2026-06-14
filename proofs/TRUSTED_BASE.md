@@ -108,9 +108,16 @@ The receipt's claims are scoped to exactly this:
   verification = the definition of parity" in its honest first form: it does NOT
   yet claim the *completion definition* (the proven profile accepting the full
   corpus), it establishes the *mechanism* that measures progress toward it and
-  proves the boundary is a wall, not a hole. **Today's honest coverage: 3483/4195
-  functions in-profile (83%) for ownership+names (caps-VERIFIED is the lower, parity-binding 3049 — see caps note)** (the value-semantics subset,
-  plus **destructuring patterns** (a `match` arm's `Some(x)`/`Ok(v)`/`Foo(a,b)` and a
+  proves the boundary is a wall, not a hole. **Today's honest coverage: 3618/4195
+  functions in-profile (86%) for ownership+names (caps-VERIFIED is the lower, parity-binding 3142 — see caps note)** (the value-semantics subset,
+  plus **error operators** (`e!`/`e?`/`e ?? d`/`e?.field` yield a FRESH value — the
+  unwrapped/defaulted/chained result, deferred like every Opaque; the operand's
+  calls are captured. KNOWN-LIMITATION: the EARLY-RETURN of `e!`/`e?` is DEFERRED —
+  the model takes the always-continue path, which is self-consistent (each handle
+  still drops exactly once on either runtime exit, so no double-free/leak/UAF) and
+  thus memory-SAFE; error PROPAGATION is functional, not a safety property, so it is
+  deferred like every Opaque content), plus
+  **destructuring patterns** (a `match` arm's `Some(x)`/`Ok(v)`/`Foo(a,b)` and a
   `let Foo{..}=`/`let (a,b)=` bind their payloads CONTAINER-GRAIN — a heap binding
   aliases the whole subject (`Op::Dup`, reusing the proven `a` event; element/payload-
   PRECISE identity needs the layout brick, deferred like every Opaque), a scalar
@@ -190,7 +197,7 @@ The receipt's claims are scoped to exactly this:
   `Module` call, a variant constructor, or a known Stdout-free builtin
   (`assert*`/`eprintln`/`panic`/`to_string` — these reach stderr/abort, NOT
   Stdout) is free; ANY other unknown callee (a walled or cross-file user function)
-  TAINTS, so the function is reported `caps-unverified` (3049/3483 verified, 434
+  TAINTS, so the function is reported `caps-unverified` (3142/3618 verified, 476
   unverified) rather than falsely accepted. **The gate verifies the REAL
   capability-bound property `reachable ⊆ declared`** (exactly what
   `proofs/CapabilityBound.v` proves), not a degenerate "reaches no capability at

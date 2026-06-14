@@ -295,6 +295,12 @@ impl LowerCtx {
             // variant). Constructors lower like a container literal: a fresh
             // `Alloc` (value-semantics — the payload is copied, not consumed), the
             // proven-sound convention the corpus already verifies for List/Record.
+            // An ERROR OPERATOR (`e!`/`e?`/`e ?? d`/`e?.f`) likewise yields a FRESH
+            // value (the unwrapped/defaulted/chained result, deferred like every
+            // Opaque); its operand's calls are captured by `record_elided_calls`. The
+            // EARLY-RETURN of `Try`/`Unwrap` is deferred (the always-continue path is
+            // self-consistent — each handle still drops exactly once, so memory-safe;
+            // error PROPAGATION is functional, not a safety property).
             IrExprKind::List { .. }
             | IrExprKind::MapLiteral { .. }
             | IrExprKind::EmptyMap
@@ -307,7 +313,12 @@ impl LowerCtx {
             | IrExprKind::OptionSome { .. }
             | IrExprKind::OptionNone
             | IrExprKind::BinOp { .. }
-            | IrExprKind::UnOp { .. } => {
+            | IrExprKind::UnOp { .. }
+            | IrExprKind::Try { .. }
+            | IrExprKind::Unwrap { .. }
+            | IrExprKind::UnwrapOr { .. }
+            | IrExprKind::ToOption { .. }
+            | IrExprKind::OptionalChain { .. } => {
                 let dst = self.fresh_value();
                 let repr = repr_of(ty)?;
                 let init = alloc_init(value);
@@ -753,7 +764,12 @@ impl LowerCtx {
                 | IrExprKind::OptionSome { .. }
                 | IrExprKind::OptionNone
                 | IrExprKind::BinOp { .. }
-                | IrExprKind::UnOp { .. } => {
+                | IrExprKind::UnOp { .. }
+                | IrExprKind::Try { .. }
+                | IrExprKind::Unwrap { .. }
+                | IrExprKind::UnwrapOr { .. }
+                | IrExprKind::ToOption { .. }
+                | IrExprKind::OptionalChain { .. } => {
                     let dst = self.fresh_value();
                     let repr = repr_of(&tail.ty)?;
                     let init = alloc_init(tail);
@@ -836,7 +852,14 @@ impl LowerCtx {
             | IrExprKind::Member { .. }
             | IrExprKind::IndexAccess { .. }
             | IrExprKind::MapAccess { .. }
-            | IrExprKind::TupleIndex { .. } => {
+            | IrExprKind::TupleIndex { .. }
+            // A SCALAR error-operator result (`x!`/`x ?? d`/`x?.f` yielding a scalar) is
+            // likewise a fresh `Const`; the operator's value + early-return are deferred.
+            | IrExprKind::Try { .. }
+            | IrExprKind::Unwrap { .. }
+            | IrExprKind::UnwrapOr { .. }
+            | IrExprKind::ToOption { .. }
+            | IrExprKind::OptionalChain { .. } => {
                 let dst = self.fresh_value();
                 self.ops.push(Op::Const { dst });
                 self.record_elided_calls(tail);
@@ -1293,11 +1316,18 @@ impl LowerCtx {
                     self.ops.push(Op::Const { dst });
                     CallArg::Scalar(dst)
                 }
-                // A fresh BinOp/UnOp result as an argument (`f(a + b)`, `f(-n)`): a
-                // heap result (string concat) is materialized via `Alloc`, borrowed
-                // and dropped; a scalar result is a `Const`. Operands carry their own
-                // ownership (value semantics — the result is fresh, never an alias).
-                IrExprKind::BinOp { .. } | IrExprKind::UnOp { .. } => {
+                // A fresh BinOp/UnOp result as an argument (`f(a + b)`, `f(-n)`), or an
+                // ERROR OPERATOR result (`f(x!)`, `f(x ?? d)`, `f(x?.field)`): a fresh
+                // computed value — a heap result is materialized via `Alloc` (borrowed
+                // and dropped), a scalar result is a `Const`. Operands carry their own
+                // ownership; the operator's value (and any early-return) is deferred.
+                IrExprKind::BinOp { .. }
+                | IrExprKind::UnOp { .. }
+                | IrExprKind::Try { .. }
+                | IrExprKind::Unwrap { .. }
+                | IrExprKind::UnwrapOr { .. }
+                | IrExprKind::ToOption { .. }
+                | IrExprKind::OptionalChain { .. } => {
                     let dst = self.fresh_value();
                     self.record_elided_calls(a);
                     if is_heap_ty(&a.ty) {
@@ -2397,6 +2427,35 @@ mod tests {
             mir.ops
         );
         assert_eq!(verify_ownership(&mir), Ok(()));
+    }
+
+    #[test]
+    fn error_operators_yield_a_fresh_value() {
+        // var opt = []; var x = opt!  and  fn g() = opt ?? []  — an error operator
+        // yields a FRESH value (Opaque heap here), the operand deferred and the
+        // early-return of `!`/`?` deferred (always-continue is balanced). Both lower.
+        let unwrap = ir_expr(
+            IrExprKind::Unwrap {
+                expr: Box::new(ir_expr(IrExprKind::Var { id: VarId(0) }, list_int())),
+            },
+            list_int(),
+        );
+        let unwrap_or = ir_expr(
+            IrExprKind::UnwrapOr {
+                expr: Box::new(ir_expr(IrExprKind::Var { id: VarId(0) }, list_int())),
+                fallback: Box::new(ir_expr(IrExprKind::List { elements: vec![] }, list_int())),
+            },
+            list_int(),
+        );
+        let b = body(vec![
+            bind(0, list_int(), ir_expr(IrExprKind::List { elements: vec![] }, list_int())),
+            bind(1, list_int(), unwrap),
+            bind(2, list_int(), unwrap_or),
+        ]);
+        let mir = lower_body(&b, "main").expect("error operators lower");
+        let opaque = mir.ops.iter().filter(|o| matches!(o, Op::Alloc { init: Init::Opaque, .. })).count();
+        assert_eq!(opaque, 2, "each of the two error operators is a fresh Opaque: {:?}", mir.ops);
+        assert_eq!(verify_ownership(&mir), Ok(()), "fresh results balanced by scope-end drops");
     }
 
     #[test]
