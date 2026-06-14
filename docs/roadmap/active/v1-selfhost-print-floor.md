@@ -89,8 +89,76 @@ fn print_str(s: String) -> Unit = {
 }
 ```
 
-(Exact prim surface — whether offsets are immediate args vs an explicit
-`prim.add` — is settled in the implementing slice; the floor is load/store/hostcall.)
+## Settled implementation design (2026-06-14)
+
+**FOUNDATION DONE** (commits 74cc1fff `Op::ConstInt`, 7d82f628 `IntBinOp` emission):
+int literals materialize (`fn f() -> Int = 42` → `(i64.const 42)`) and int
+arithmetic computes (`a + b` → `i64.add`). `lower_scalar_value` (lower/calls.rs)
+recursively lowers Var/LitInt/Int-Add·Sub·Mul, rollback→defer outside the subset.
+corpus-wall cert-neutral (scalars carry no ownership). This is exactly what
+print_str's `h + 4` / `h + 12` address math + the literal addresses need.
+
+**SOURCE MECHANISM = PATH A** (a `prim` bundled stdlib module — chosen over reusing
+`@intrinsic`, which lowers to `RuntimeCall` that v1 DEFERS to Opaque). Stdlib
+modules are bundled `.almd` whose signatures `bundled_sigs.rs` extracts; a
+`prim.X(..)` call type-checks and lowers to `IrExprKind::Call{Module{"prim", X}}`
+reaching v1 lowering UNCHANGED. Steps: (a) add `stdlib/prim.almd` declaring the
+prim fns (body `= _`); (b) register `prim` in the bundled-module list
+(almide-lang `stdlib_info`); (c) in `lower/calls.rs` intercept `module == "prim"`
+(before the purity gate in `lower_pure_module_value_call` / a sibling) and map each
+`func` to a MIR prim op.
+
+**MIR PRIM OPS** (new, inline-rendered → preamble `(func $` count unchanged →
+discipline PASSES; a CLOSED set accounted as the floor, like RC_PRIMITIVE_FNS). The
+MIR is i64-uniform; the i32 wasm memory boundary wraps/extends at the op:
+
+| prim fn (Almide) | MIR op | wasm render |
+|---|---|---|
+| `prim.handle(s: String) -> Int` | `PrimHandle{dst,src}` | `(i64.extend_i32_u (local.get $src))` — heap handle (i32) → i64 address |
+| `prim.load32(addr: Int) -> Int` | `PrimLoad{dst,addr,width:4}` | `(i64.extend_i32_u (i32.load (i32.wrap_i64 (local.get $addr))))` |
+| `prim.store32(addr: Int, val: Int)` | `PrimStore{addr,val,width:4}` | `(i32.store (i32.wrap_i64 …addr) (i32.wrap_i64 …val))` |
+| `prim.store8(addr: Int, val: Int)` | `PrimStore{…,width:1}` | `(i32.store8 …)` |
+| `prim.fd_write(fd,iov,count,nw: Int) -> Int` | `PrimFdWrite{dst,…}` | `(i64.extend_i32_u (call $fd_write (i32.wrap_i64 …)×4))` — carries `Capability::Stdout` |
+
+Cert: PrimHandle/Load/Store are no-ops for ownership (scalars), define their `dst` /
+use operands for the name witness. **PrimFdWrite carries `Capability::Stdout`** — the
+caps fold must map it to Stdout (like `RtFn::PrintStr`) so print_str (and its callers)
+are correctly required to declare Stdout. The ops use i64 ValueIds throughout (the
+scalar model); `prim.handle` is the String→Int bridge so all address math is `Int`
+`IntBinOp` (no String+Int type error).
+
+**print_str.almd** (uses the foundation `h + 4` / `h + 12` + literal addresses;
+addresses match the existing preamble layout: NWRITTEN=0, IOVEC=8, SCRATCH=512):
+```almide
+fn print_str(s: String) -> Unit = {
+  let h = prim.handle(s)            // i64 address of the [rc][len][cap][bytes] block
+  let len = prim.load32(h + 4)      // header len
+  let data = h + 12                 // byte start
+  prim.store32(8, data)             // iovec[0] = { data, len }
+  prim.store32(12, len)
+  prim.store8(512, 10)              // "\n" at scratch
+  prim.store32(16, 512)             // iovec[1] = { 512, 1 }
+  prim.store32(20, 1)
+  prim.fd_write(1, 8, 2, 0)         // fd_write(stdout, iovec@8, count 2, nwritten@0)
+}
+```
+
+**LINKAGE** (open detail to settle in-slice): render_program lowers the single
+source's `ir.functions`; a bundled `prim`/print_str module is auto-imported for
+TYPING but its BODY may not be lowered into `ir.functions`. So print_str's body
+must be included — either by concatenating `stdlib/print_str.almd` into the
+compiled source, or by having the linker include the bundled print_str fn body
+when `PrintStr` is reached. The PrintStr CallFn → `(call $print_str)` wiring exists.
+
+**SUB-SLICES**: (1) the MIR prim ops + render + a HAND-BUILT-MIR `print_str` test
+that actually prints "hi" on wasmtime (proves the ops+render in isolation, no
+frontend); (2) the `prim` module + the lower/calls.rs intercept (source → ops);
+(3) print_str.almd + linkage → `println("hello")` byte-matches v0; discipline test
+PASSES (self-hosted, no preamble growth); corpus-wall/gate/cargo test green.
+
+**GOAL (set 2026-06-14): "v1 が v0 と同じように動くまで"** — this floor + print is the
+keystone; after it, scalar/control-flow/data all become e2e v0-verifiable, then the
+stdlib self-hosts via the same floor.
 
 ## Decomposition (campaign order toward "all v0 features")
 
