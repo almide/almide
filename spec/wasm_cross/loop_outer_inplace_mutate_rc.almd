@@ -1,0 +1,40 @@
+
+// @contract: C-066
+// #643: an in-place stdlib mutator (`list.push`, `string.push`, `map.insert`)
+// applied to a binding declared OUTSIDE the loop reallocates that binding's
+// heap backing in the per-iteration arena, yet the binding escapes the
+// iteration. The iter-scope heap_restore must NOT reclaim that backing: it is
+// reachable after the loop. Before the fix, `expr_writes_outer_heap` only
+// scanned assignment STATEMENTS and missed the mutator CALL, so the reclamation
+// rolled the frontier back over `out`'s reallocated backing; the next
+// allocation reused its address and a spurious second __rc_dec at teardown hit
+// the rc==0 sentinel (an `unreachable` trap on wasm — exit 134 — while native
+// printed the correct value). The trigger needs the in-loop allocations that an
+// OOB-defaulted lookahead (`list.get(xs, i+1) ?? ""`) and the slice/join temps
+// supply, so the freed-then-reused address lands on a live block. Byte-identical
+// native == wasm, exit 0, no trap.
+effect fn main() -> Unit = {
+  // 1. list.push onto a loop-outer var, with the list.get ?? lookahead that
+  //    shapes the heap layout into the colliding case.
+  let cs = ["a", " "];
+  var out: List[String] = [];
+  var i = 0;
+  while i < 2 {
+    let nx = list.get(cs, i + 1) ?? "";
+    if nx == "x" then { list.push(out, "p") } else {
+      list.push(out, list.slice(cs, i, i + 1) |> list.join(""))
+    };
+    i = i + 1;
+  };
+  println(out |> list.join(","));
+  // 2. string.push onto a loop-outer var (a different in-place mutator on the
+  //    same escape path).
+  var acc: String = "";
+  var j = 0;
+  while j < 3 {
+    let piece = list.get(cs, j) ?? "z";
+    string.push(acc, piece);
+    j = j + 1;
+  };
+  println(acc)
+}

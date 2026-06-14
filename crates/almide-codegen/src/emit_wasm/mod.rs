@@ -12,6 +12,7 @@
 //!   [49..N)     String literal data ([len:i32][data:u8...] per string)
 //!   [N..)       Heap (bump allocator, grows upward)
 
+use crate::emit_wasm::engine::{Imm32, Local};
 #[macro_use]
 mod wasm_macro;
 
@@ -92,6 +93,17 @@ const SCRATCH_ITOA: u32 = 16;
 /// String pool base address. Must be above ASCII range (0-127) so that
 /// data section DCE can distinguish string offsets from character codes.
 const NEWLINE_OFFSET: u32 = 4096;
+
+// IOV (iovec) scratch layout used by WASI fd_write in compile_main_runner.
+// Mirrors the identically-named constants in runtime.rs (which are module-private).
+/// Byte offset of the `len` field inside one iovec record (4 bytes past `buf`).
+const IOV_LEN_OFF: i32 = 4;
+/// Byte offset at which fd_write writes its `nwritten` result (just past one iovec).
+const NWRITTEN_OFF: i32 = 8;
+
+// WASI file-descriptor numbers.
+/// Standard error file descriptor (fd 2), used to write the unhandled-error message.
+const FD_STDERR: i32 = 2;
 
 /// Wrapper around `wasm_encoder::Function` that automatically records
 /// `call` targets as instructions are emitted. Used by `FuncCompiler`
@@ -936,12 +948,12 @@ impl FuncCompiler<'_> {
         };
         if self.emitter.mutable_captures.contains(&id) {
             if let Some(&local_idx) = self.var_map.get(&id) {
-                wasm!(self.func, { local_get(local_idx); local_get(new_ptr); i32_store(0); });
+                wasm!(self.func, { local_get(Local(local_idx)); local_get(Local(new_ptr)); i32_store(0); });
             }
         } else if let Some(&local_idx) = self.var_map.get(&id) {
-            wasm!(self.func, { local_get(new_ptr); local_set(local_idx); });
+            wasm!(self.func, { local_get(Local(new_ptr)); local_set(Local(local_idx)); });
         } else if let Some((global_idx, _)) = self.lookup_global(almide_ir::VarId(id)) {
-            wasm!(self.func, { local_get(new_ptr); global_set(global_idx); });
+            wasm!(self.func, { local_get(Local(new_ptr)); global_set(global_idx); });
         } else {
             // #525 (A6): silently SKIPPING the write-back leaves the var
             // holding a stale pre-realloc pointer — this fn's own doc calls
@@ -969,7 +981,7 @@ impl FuncCompiler<'_> {
         if self.emitter.mutable_captures.contains(&id) { return; }
         let Some(&local_idx) = self.var_map.get(&id) else { return };
         let cow_check = self.emitter.rt.cow_check;
-        wasm!(self.func, { local_get(local_idx); call(cow_check); local_set(local_idx); });
+        wasm!(self.func, { local_get(Local(local_idx)); call(cow_check); local_set(Local(local_idx)); });
     }
 }
 
@@ -2254,7 +2266,7 @@ fn compile_test_runner(emitter: &mut WasmEmitter, tests: &[(u32, String)], init_
     for (func_idx, test_name) in tests {
         // Print test name
         let name_str = emitter.intern_string(&format!("test: {} ... ", test_name));
-        f.instruction(&wasm_encoder::Instruction::I32Const(name_str as i32));
+        wasm!(f, { i32_const(Imm32(name_str as i32)); });
         f.instruction(&wasm_encoder::Instruction::Call(emitter.rt.println_str));
 
         // Call the test function (it will trap on assert_eq failure)
@@ -2262,7 +2274,7 @@ fn compile_test_runner(emitter: &mut WasmEmitter, tests: &[(u32, String)], init_
 
         // If we get here, test passed
         let pass_str = emitter.intern_string("ok");
-        f.instruction(&wasm_encoder::Instruction::I32Const(pass_str as i32));
+        wasm!(f, { i32_const(Imm32(pass_str as i32)); });
         f.instruction(&wasm_encoder::Instruction::Call(emitter.rt.println_str));
     }
 
@@ -2327,15 +2339,15 @@ fn compile_main_runner(emitter: &mut WasmEmitter, main_idx: u32, drop_count: usi
     f.instruction(&Ins::I32Const(data_off));
     f.instruction(&Ins::I32Add);
     f.instruction(&Ins::I32Store(m(0)));
-    f.instruction(&Ins::I32Const(4));
+    f.instruction(&Ins::I32Const(IOV_LEN_OFF));
     f.instruction(&Ins::LocalGet(1));
     f.instruction(&Ins::I32Load(m(0)));
     f.instruction(&Ins::I32Store(m(0)));
-    //   fd_write(fd=2 stderr, iovs=0, iovs_len=1, nwritten=8)
-    f.instruction(&Ins::I32Const(2));
+    //   fd_write(fd=2 stderr, iovs=0, iovs_len=1, nwritten=NWRITTEN_OFF)
+    f.instruction(&Ins::I32Const(FD_STDERR));
     f.instruction(&Ins::I32Const(0));
     f.instruction(&Ins::I32Const(1));
-    f.instruction(&Ins::I32Const(8));
+    f.instruction(&Ins::I32Const(NWRITTEN_OFF));
     f.instruction(&Ins::Call(fd_write));
     f.instruction(&Ins::Drop);
     f.instruction(&Ins::I32Const(1));
@@ -2435,21 +2447,21 @@ fn compile_variant_eq_funcs(emitter: &mut WasmEmitter, var_table: &almide_ir::Va
 
             // Compare tags
             wasm!(compiler.func, {
-                local_get(0); i32_load(0);
-                local_get(1); i32_load(0);
+                local_get(Local(0)); i32_load(0);
+                local_get(Local(1)); i32_load(0);
                 i32_ne;
-                if_empty; i32_const(0); return_; end;
+                if_empty; i32_const(Imm32(0)); return_; end;
             });
 
             // Branch on tag for each case
             let non_empty: Vec<_> = cases.iter().filter(|c| !c.fields.is_empty()).collect();
             if non_empty.is_empty() {
-                wasm!(compiler.func, { i32_const(1); });
+                wasm!(compiler.func, { i32_const(Imm32(1)); });
             } else {
                 for case in &non_empty {
                     wasm!(compiler.func, {
-                        local_get(0); i32_load(0);
-                        i32_const(case.tag as i32);
+                        local_get(Local(0)); i32_load(0);
+                        i32_const(Imm32(case.tag as i32));
                         i32_eq;
                         if_i32;
                     });
@@ -2457,9 +2469,9 @@ fn compile_variant_eq_funcs(emitter: &mut WasmEmitter, var_table: &almide_ir::Va
                     let mut offset = 4u32;
                     for (fi, (_, field_ty)) in case.fields.iter().enumerate() {
                         let field_size = values::byte_size(field_ty);
-                        wasm!(compiler.func, { local_get(0); });
+                        wasm!(compiler.func, { local_get(Local(0)); });
                         compiler.emit_load_at(field_ty, offset);
-                        wasm!(compiler.func, { local_get(1); });
+                        wasm!(compiler.func, { local_get(Local(1)); });
                         compiler.emit_load_at(field_ty, offset);
                         let ft = field_ty.clone();
                         compiler.emit_eq_typed(&ft);
@@ -2470,7 +2482,7 @@ fn compile_variant_eq_funcs(emitter: &mut WasmEmitter, var_table: &almide_ir::Va
                     }
                     wasm!(compiler.func, { else_; });
                 }
-                wasm!(compiler.func, { i32_const(1); }); // default: unit case → equal
+                wasm!(compiler.func, { i32_const(Imm32(1)); }); // default: unit case → equal
                 for _ in 0..non_empty.len() {
                     wasm!(compiler.func, { end; });
                 }
@@ -2794,7 +2806,7 @@ fn compile_repr_funcs(emitter: &mut WasmEmitter, var_table: &almide_ir::VarTable
 
             // Push the value pointer (param 0); the walk consumes it from the
             // stack and leaves the result string pointer (the return value).
-            wasm!(compiler.func, { local_get(0); });
+            wasm!(compiler.func, { local_get(Local(0)); });
             if is_variant {
                 compiler.emit_repr_variant(&ty);
             } else {

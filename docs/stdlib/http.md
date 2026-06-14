@@ -108,10 +108,20 @@ let auth = http.req_header(req, "Authorization")
 
 ### `http.query_params(req: Request) -> Map[String, String]`
 
-Get all query parameters from a request as a map
+Get all query parameters from a request as a map. Values are percent-decoded
+(`%XX` → byte, `+` → space), so `?q=%E7%8C%AB` yields `{"q": "猫"}`.
 
 ```almd
 let params = http.query_params(req) // {"page": "1", "q": "test"}
+```
+
+### `http.url_decode(s: String) -> String`
+
+Percent-decode a URL component (`%XX` → byte, `+` → space). `query_params`
+already decodes its values; use this for manually-extracted query/form text.
+
+```almd
+let q = http.url_decode("%E7%8C%AB") // "猫"
 ```
 
 ### `http.get(url: String) -> Result[String, String]`
@@ -160,4 +170,23 @@ Send a custom HTTP request with method, URL, body, and headers
 
 ```almd
 let resp = http.request("PUT", url, body, headers)
+```
+
+### `http.get_bytes(url: String) -> Result[Bytes, String]`
+
+Send an HTTP GET and return the raw response body as `Bytes` (no UTF-8
+conversion), so binary payloads such as images or TTS audio survive intact.
+The `String` client corrupts non-UTF-8 bodies.
+
+```almd
+let audio = http.get_bytes("https://tts.example.com/say.mp3")!
+fs.write_bytes_raw("say.mp3", audio)!
+```
+
+### `http.request_bytes(method: String, url: String, body: String, headers: Map[String, String]) -> Result[Bytes, String]`
+
+Like `http.request` but returns the raw response body as `Bytes`.
+
+```almd
+let blob = http.request_bytes("POST", url, body, headers)!
 ```

@@ -3,12 +3,27 @@
 //! Utility functions used by both calls_list.rs and calls_list_closure.rs:
 //! list_elem_ty, emit_elem_copy, emit_elem_store.
 
+use crate::emit_wasm::engine::{Imm32, Imm64, Local};
 use super::{FuncCompiler, WasmEmitter};
 use super::values;
 use almide_ir::IrExpr;
 use almide_lang::types::Ty;
 use wasm_encoder::{Function, Instruction, ValType};
 use super::engine::layout::{LIST, list as ll};
+
+/// Named WASM immediate constants for list helper codegen.
+mod imm {
+    // ── byte widths ────────────────────────────────────────────────────
+    /// Byte size of an i32 / pointer (stride in a list-of-pointers array).
+    pub(super) const I32_BYTES: i32 = 4;
+
+    // ── sort constants ─────────────────────────────────────────────────
+    /// Minimum list length that requires sorting (len < 2 → already sorted/trivial).
+    pub(super) const SORT_MIN_LEN: i32 = 2;
+    /// Merge sort doubling factor: each pass doubles the merge width (`width * 2`).
+    pub(super) const MERGE_STRIDE: i32 = 2;
+}
+use imm::*;
 
 /// Upper bound for `emit_clamp_count_to_i32` — the value a too-large `Int`
 /// count saturates to (mirrors native's `min(n, len)` / capacity-ceiling).
@@ -281,14 +296,14 @@ impl FuncCompiler<'_> {
     /// byte-budget cap, or `chunk`/`windows`'s `i32::MAX` "huge" sentinel).
     pub(super) fn emit_clamp_count_to_i32(&mut self, hi: ClampHi) {
         let count = self.scratch.alloc_i64();
-        wasm!(self.func, { local_set(count); });
+        wasm!(self.func, { local_set(Local(count)); });
         // min_u(count, hi): `[count, hi, count <_u hi]` selects `count` when it
         // fits and `hi` otherwise. The comparison is UNSIGNED so a negative i64
         // (huge as u64) saturates to `hi` — matching native's `n as usize`.
         // `hi` is non-negative; widening it via `i64_extend_i32_u` is lossless.
-        wasm!(self.func, { local_get(count); });
+        wasm!(self.func, { local_get(Local(count)); });
         self.emit_push_clamp_hi_i64(&hi);
-        wasm!(self.func, { local_get(count); });
+        wasm!(self.func, { local_get(Local(count)); });
         self.emit_push_clamp_hi_i64(&hi);
         wasm!(self.func, {
             i64_lt_u; select;
@@ -316,18 +331,18 @@ impl FuncCompiler<'_> {
     pub(super) fn emit_clamp_count_signed_i32(&mut self, hi: ClampHi) {
         let idx = self.scratch.alloc_i64();
         wasm!(self.func, {
-            local_set(idx);
+            local_set(Local(idx));
             // lo-clamp: max(idx, 0). `[idx, 0, idx >= 0]` selects `idx` when
             // non-negative and `0` for a negative i64 (matches `idx.max(0)`).
-            local_get(idx); i64_const(0);
-              local_get(idx); i64_const(0); i64_ge_s; select;
-            local_set(idx);
+            local_get(Local(idx)); i64_const(Imm64(0));
+              local_get(Local(idx)); i64_const(Imm64(0)); i64_ge_s; select;
+            local_set(Local(idx));
         });
         // hi-clamp: min(idx, hi). `idx` is now non-negative, so signed and
         // unsigned compare agree; `i64_le_s` is fine.
-        wasm!(self.func, { local_get(idx); });
+        wasm!(self.func, { local_get(Local(idx)); });
         self.emit_push_clamp_hi_i64(&hi);
-        wasm!(self.func, { local_get(idx); });
+        wasm!(self.func, { local_get(Local(idx)); });
         self.emit_push_clamp_hi_i64(&hi);
         wasm!(self.func, {
             i64_le_s; select;
@@ -339,8 +354,8 @@ impl FuncCompiler<'_> {
     /// Push the clamp ceiling as an i64 (non-negative).
     fn emit_push_clamp_hi_i64(&mut self, hi: &ClampHi) {
         match *hi {
-            ClampHi::LenLocal(idx) => { wasm!(self.func, { local_get(idx); i64_extend_i32_u; }); }
-            ClampHi::Const(n) => { wasm!(self.func, { i64_const(n); }); }
+            ClampHi::LenLocal(idx) => { wasm!(self.func, { local_get(Local(idx)); i64_extend_i32_u; }); }
+            ClampHi::Const(n) => { wasm!(self.func, { i64_const(Imm64(n)); }); }
         }
     }
 
@@ -355,10 +370,10 @@ impl FuncCompiler<'_> {
     pub(super) fn emit_clamp_index_to_len_i32(&mut self, len_local: u32) {
         let idx = self.scratch.alloc_i64();
         wasm!(self.func, {
-            local_set(idx);
-            local_get(idx);
-            local_get(len_local); i64_extend_i32_u;
-              local_get(idx); local_get(len_local); i64_extend_i32_u; i64_lt_u; select;
+            local_set(Local(idx));
+            local_get(Local(idx));
+            local_get(Local(len_local)); i64_extend_i32_u;
+              local_get(Local(idx)); local_get(Local(len_local)); i64_extend_i32_u; i64_lt_u; select;
             i32_wrap_i64;
         });
         self.scratch.free_i64(idx);
@@ -377,14 +392,14 @@ impl FuncCompiler<'_> {
     pub(super) fn emit_checked_index_i32(&mut self, len_local: u32, in_bounds_local: u32) {
         let idx = self.scratch.alloc_i64();
         wasm!(self.func, {
-            local_set(idx);
+            local_set(Local(idx));
             // in_bounds = idx_u < len_u  (on the full i64, no truncation)
-            local_get(idx); local_get(len_local); i64_extend_i32_u; i64_lt_u;
-            local_set(in_bounds_local);
+            local_get(Local(idx)); local_get(Local(len_local)); i64_extend_i32_u; i64_lt_u;
+            local_set(Local(in_bounds_local));
             // saturated idx = min_u(idx, len) so addressing never goes OOB
-            local_get(idx);
-            local_get(len_local); i64_extend_i32_u;
-              local_get(idx); local_get(len_local); i64_extend_i32_u; i64_lt_u; select;
+            local_get(Local(idx));
+            local_get(Local(len_local)); i64_extend_i32_u;
+              local_get(Local(idx)); local_get(Local(len_local)); i64_extend_i32_u; i64_lt_u; select;
             i32_wrap_i64;
         });
         self.scratch.free_i64(idx);
@@ -399,11 +414,11 @@ impl FuncCompiler<'_> {
         wasm!(self.func, {
             // if (idx as u64) >= (len as u64) { abort }  — a negative i64 wraps
             // to a huge u64 and is caught by the same compare.
-            local_get(idx64_local);
-            local_get(ptr_local); i32_load(0); i64_extend_i32_u;
+            local_get(Local(idx64_local));
+            local_get(Local(ptr_local)); i32_load(0); i64_extend_i32_u;
             i64_ge_u;
             if_empty;
-              i32_const(oob_msg);
+              i32_const(Imm32(oob_msg));
               call(div_trap);
             end;
         });
@@ -515,18 +530,18 @@ impl FuncCompiler<'_> {
             // C-055.
             SortKind::Float => {
                 self.emit_ord_cmp3(&Ty::Float);
-                wasm!(self.func, { i32_const(0); i32_le_s; });
+                wasm!(self.func, { i32_const(Imm32(0)); i32_le_s; });
             }
             SortKind::String => {
-                wasm!(self.func, { call(self.emitter.rt.string.cmp); i32_const(0); i32_le_s; });
+                wasm!(self.func, { call(self.emitter.rt.string.cmp); i32_const(Imm32(0)); i32_le_s; });
             }
             SortKind::ListString => {
-                wasm!(self.func, { call(self.emitter.rt.list_list_str_cmp); i32_const(0); i32_le_s; });
+                wasm!(self.func, { call(self.emitter.rt.list_list_str_cmp); i32_const(Imm32(0)); i32_le_s; });
             }
             SortKind::Ord(ty) => {
                 let ty = ty.clone();
                 self.emit_ord_cmp3(&ty);
-                wasm!(self.func, { i32_const(0); i32_le_s; });
+                wasm!(self.func, { i32_const(Imm32(0)); i32_le_s; });
             }
         }
     }
@@ -600,12 +615,12 @@ impl FuncCompiler<'_> {
         // 1. Alloc dst + pre-scan source for asc/desc detection.
         self.emit_expr(&args[0]);
         wasm!(self.func, {
-            local_set(xs_ptr);
-            local_get(xs_ptr); i32_load(0); local_set(len);
+            local_set(Local(xs_ptr));
+            local_get(Local(xs_ptr)); i32_load(0); local_set(Local(len));
             // alloc dst
-            i32_const(self.emitter.layout_reg.header_size(LIST) as i32); local_get(len); i32_const(es as i32); i32_mul; i32_add;
-            call(self.emitter.rt.alloc); local_set(dst);
-            local_get(dst); local_get(len); i32_store(0);
+            i32_const(Imm32(self.emitter.layout_reg.header_size(LIST) as i32)); local_get(Local(len)); i32_const(Imm32(es as i32)); i32_mul; i32_add;
+            call(self.emitter.rt.alloc); local_set(Local(dst));
+            local_get(Local(dst)); local_get(Local(len)); i32_store(0);
         });
 
         // 2. Pre-scan SOURCE (xs_ptr) for asc/desc before copying.
@@ -613,31 +628,31 @@ impl FuncCompiler<'_> {
         let is_desc = self.scratch.alloc_i32();
         let scan_done = self.scratch.alloc_i32();
         wasm!(self.func, {
-            local_get(len); i32_const(2); i32_lt_u;
+            local_get(Local(len)); i32_const(Imm32(SORT_MIN_LEN)); i32_lt_u;
             if_empty;
               // len < 2: nothing to sort, but still copy the 0/1 source elements
               // to dst. The sort-proper path (scan_done==0) copies src→dst, but
               // this short-circuit skipped it — so dst's data stayed the zeroed
               // alloc and a singleton sort returned a zeroed element.
-              local_get(dst); i32_const(self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32); i32_add;
-              local_get(xs_ptr); i32_const(self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32); i32_add;
-              local_get(len); i32_const(es as i32); i32_mul;
+              local_get(Local(dst)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32)); i32_add;
+              local_get(Local(xs_ptr)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32)); i32_add;
+              local_get(Local(len)); i32_const(Imm32(es as i32)); i32_mul;
               memory_copy;
-              i32_const(1); local_set(scan_done);
+              i32_const(Imm32(1)); local_set(Local(scan_done));
             else_;
-              i32_const(1); local_set(is_asc);
-              i32_const(1); local_set(is_desc);
-              i32_const(0); local_set(i);
+              i32_const(Imm32(1)); local_set(Local(is_asc));
+              i32_const(Imm32(1)); local_set(Local(is_desc));
+              i32_const(Imm32(0)); local_set(Local(i));
               block_empty; loop_empty;
-                local_get(i); local_get(len); i32_const(1); i32_sub; i32_ge_u; br_if(1);
+                local_get(Local(i)); local_get(Local(len)); i32_const(Imm32(1)); i32_sub; i32_ge_u; br_if(1);
                 // Load xs[i] and xs[i+1]
-                local_get(xs_ptr); i32_const(self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32); i32_add;
-                local_get(i); i32_const(es as i32); i32_mul; i32_add;
+                local_get(Local(xs_ptr)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32)); i32_add;
+                local_get(Local(i)); i32_const(Imm32(es as i32)); i32_mul; i32_add;
         });
         kind.emit_load(&mut self.func); // xs[i]
         wasm!(self.func, {
-                local_get(xs_ptr); i32_const(self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32); i32_add;
-                local_get(i); i32_const(1); i32_add; i32_const(es as i32); i32_mul; i32_add;
+                local_get(Local(xs_ptr)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32)); i32_add;
+                local_get(Local(i)); i32_const(Imm32(1)); i32_add; i32_const(Imm32(es as i32)); i32_mul; i32_add;
         });
         kind.emit_load(&mut self.func); // xs[i+1]
         // Check: if dst[i] > dst[i+1] → not ascending
@@ -647,55 +662,55 @@ impl FuncCompiler<'_> {
         self.emit_sort_le_cmp(&kind); // dst[i] <= dst[i+1]
         wasm!(self.func, {
                 i32_eqz;
-                if_empty; i32_const(0); local_set(is_asc); end;
+                if_empty; i32_const(Imm32(0)); local_set(Local(is_asc)); end;
                 // Check descending: xs[i] >= xs[i+1]
-                local_get(xs_ptr); i32_const(self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32); i32_add;
-                local_get(i); i32_const(1); i32_add; i32_const(es as i32); i32_mul; i32_add;
+                local_get(Local(xs_ptr)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32)); i32_add;
+                local_get(Local(i)); i32_const(Imm32(1)); i32_add; i32_const(Imm32(es as i32)); i32_mul; i32_add;
         });
         kind.emit_load(&mut self.func); // xs[i+1]
         wasm!(self.func, {
-                local_get(xs_ptr); i32_const(self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32); i32_add;
-                local_get(i); i32_const(es as i32); i32_mul; i32_add;
+                local_get(Local(xs_ptr)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32)); i32_add;
+                local_get(Local(i)); i32_const(Imm32(es as i32)); i32_mul; i32_add;
         });
         kind.emit_load(&mut self.func); // xs[i]
         self.emit_sort_le_cmp(&kind); // dst[i+1] <= dst[i]
         wasm!(self.func, {
                 i32_eqz;
-                if_empty; i32_const(0); local_set(is_desc); end;
+                if_empty; i32_const(Imm32(0)); local_set(Local(is_desc)); end;
                 // Early exit if neither
-                local_get(is_asc); local_get(is_desc); i32_or; i32_eqz;
+                local_get(Local(is_asc)); local_get(Local(is_desc)); i32_or; i32_eqz;
                 br_if(1); // break scan loop
-                local_get(i); i32_const(1); i32_add; local_set(i); br(0);
+                local_get(Local(i)); i32_const(Imm32(1)); i32_add; local_set(Local(i)); br(0);
               end; end;
               // Determine result
-              local_get(is_asc);
+              local_get(Local(is_asc));
               if_empty;
                 // Already sorted: just bulk copy
-                local_get(dst); i32_const(self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32); i32_add;
-                local_get(xs_ptr); i32_const(self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32); i32_add;
-                local_get(len); i32_const(es as i32); i32_mul;
+                local_get(Local(dst)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32)); i32_add;
+                local_get(Local(xs_ptr)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32)); i32_add;
+                local_get(Local(len)); i32_const(Imm32(es as i32)); i32_mul;
                 memory_copy;
-                i32_const(1); local_set(scan_done);
+                i32_const(Imm32(1)); local_set(Local(scan_done));
               else_;
-                local_get(is_desc);
+                local_get(Local(is_desc));
                 if_empty;
                   // Reverse copy: dst[i] = src[len-1-i] (1 pass, no swap)
-                  i32_const(0); local_set(i);
+                  i32_const(Imm32(0)); local_set(Local(i));
                   block_empty; loop_empty;
-                    local_get(i); local_get(len); i32_ge_u; br_if(1);
-                    local_get(dst); i32_const(self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32); i32_add;
-                    local_get(i); i32_const(es as i32); i32_mul; i32_add;
-                    local_get(xs_ptr); i32_const(self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32); i32_add;
-                    local_get(len); i32_const(1); i32_sub; local_get(i); i32_sub;
-                    i32_const(es as i32); i32_mul; i32_add;
+                    local_get(Local(i)); local_get(Local(len)); i32_ge_u; br_if(1);
+                    local_get(Local(dst)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32)); i32_add;
+                    local_get(Local(i)); i32_const(Imm32(es as i32)); i32_mul; i32_add;
+                    local_get(Local(xs_ptr)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32)); i32_add;
+                    local_get(Local(len)); i32_const(Imm32(1)); i32_sub; local_get(Local(i)); i32_sub;
+                    i32_const(Imm32(es as i32)); i32_mul; i32_add;
         });
         kind.emit_copy_one(&mut self.func);
         wasm!(self.func, {
-                    local_get(i); i32_const(1); i32_add; local_set(i); br(0);
+                    local_get(Local(i)); i32_const(Imm32(1)); i32_add; local_set(Local(i)); br(0);
                   end; end;
-                  i32_const(1); local_set(scan_done);
+                  i32_const(Imm32(1)); local_set(Local(scan_done));
                 else_;
-                  i32_const(0); local_set(scan_done);
+                  i32_const(Imm32(0)); local_set(Local(scan_done));
                 end;
               end;
             end;
@@ -705,100 +720,100 @@ impl FuncCompiler<'_> {
 
         // 3. Bottom-up merge sort (only if scan_done == 0).
         wasm!(self.func, {
-            local_get(scan_done); i32_eqz;
+            local_get(Local(scan_done)); i32_eqz;
             if_empty;
             // Copy source to dst + alloc tmp for merge
-            local_get(dst); i32_const(self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32); i32_add;
-            local_get(xs_ptr); i32_const(self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32); i32_add;
-            local_get(len); i32_const(es as i32); i32_mul;
+            local_get(Local(dst)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32)); i32_add;
+            local_get(Local(xs_ptr)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32)); i32_add;
+            local_get(Local(len)); i32_const(Imm32(es as i32)); i32_mul;
             memory_copy;
-            local_get(len); i32_const(es as i32); i32_mul;
-            call(self.emitter.rt.alloc); local_set(tmp);
-            i32_const(1); local_set(width);
+            local_get(Local(len)); i32_const(Imm32(es as i32)); i32_mul;
+            call(self.emitter.rt.alloc); local_set(Local(tmp));
+            i32_const(Imm32(1)); local_set(Local(width));
             block_empty; loop_empty;
-              local_get(width); local_get(len); i32_ge_u; br_if(1);
+              local_get(Local(width)); local_get(Local(len)); i32_ge_u; br_if(1);
               // for i = 0; i < len; i += width*2
-              i32_const(0); local_set(i);
+              i32_const(Imm32(0)); local_set(Local(i));
               block_empty; loop_empty;
-                local_get(i); local_get(len); i32_ge_u; br_if(1);
+                local_get(Local(i)); local_get(Local(len)); i32_ge_u; br_if(1);
                 // left = i, mid = min(i+width, len), right = min(i+2*width, len)
-                local_get(i); local_set(left);
-                local_get(i); local_get(width); i32_add; local_set(mid);
-                local_get(mid); local_get(len); i32_gt_u;
-                if_empty; local_get(len); local_set(mid); end;
-                local_get(i); local_get(width); i32_const(2); i32_mul; i32_add; local_set(right);
-                local_get(right); local_get(len); i32_gt_u;
-                if_empty; local_get(len); local_set(right); end;
+                local_get(Local(i)); local_set(Local(left));
+                local_get(Local(i)); local_get(Local(width)); i32_add; local_set(Local(mid));
+                local_get(Local(mid)); local_get(Local(len)); i32_gt_u;
+                if_empty; local_get(Local(len)); local_set(Local(mid)); end;
+                local_get(Local(i)); local_get(Local(width)); i32_const(Imm32(MERGE_STRIDE)); i32_mul; i32_add; local_set(Local(right));
+                local_get(Local(right)); local_get(Local(len)); i32_gt_u;
+                if_empty; local_get(Local(len)); local_set(Local(right)); end;
                 // merge dst[left..mid] and dst[mid..right] into tmp[left..right]
-                local_get(left); local_set(li);
-                local_get(mid); local_set(ri);
-                local_get(left); local_set(k);
+                local_get(Local(left)); local_set(Local(li));
+                local_get(Local(mid)); local_set(Local(ri));
+                local_get(Local(left)); local_set(Local(k));
                 block_empty; loop_empty;
-                  local_get(k); local_get(right); i32_ge_u; br_if(1);
+                  local_get(Local(k)); local_get(Local(right)); i32_ge_u; br_if(1);
                   // if li < mid && (ri >= right || dst[li] <= dst[ri])
-                  local_get(li); local_get(mid); i32_lt_u;
+                  local_get(Local(li)); local_get(Local(mid)); i32_lt_u;
                   if_i32;
-                    local_get(ri); local_get(right); i32_ge_u;
+                    local_get(Local(ri)); local_get(Local(right)); i32_ge_u;
                     if_i32;
-                      i32_const(1); // ri exhausted, use left
+                      i32_const(Imm32(1)); // ri exhausted, use left
                     else_;
                       // compare dst[li] <= dst[ri]
-                      local_get(dst); i32_const(self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32); i32_add; local_get(li); i32_const(es as i32); i32_mul; i32_add;
+                      local_get(Local(dst)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32)); i32_add; local_get(Local(li)); i32_const(Imm32(es as i32)); i32_mul; i32_add;
         });
         kind.emit_load(&mut self.func); // load dst[li]
         wasm!(self.func, {
-                      local_get(dst); i32_const(self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32); i32_add; local_get(ri); i32_const(es as i32); i32_mul; i32_add;
+                      local_get(Local(dst)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32)); i32_add; local_get(Local(ri)); i32_const(Imm32(es as i32)); i32_mul; i32_add;
         });
         kind.emit_load(&mut self.func); // load dst[ri]
         self.emit_sort_le_cmp(&kind); // dst[li] <= dst[ri]
         wasm!(self.func, {
                     end;
                   else_;
-                    i32_const(0); // li exhausted, use right
+                    i32_const(Imm32(0)); // li exhausted, use right
                   end;
                   // if result: copy from left (li), else copy from right (ri)
                   if_empty;
                     // tmp[k] = dst[li]; li++
-                    local_get(tmp); local_get(k); i32_const(es as i32); i32_mul; i32_add;
-                    local_get(dst); i32_const(self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32); i32_add; local_get(li); i32_const(es as i32); i32_mul; i32_add;
+                    local_get(Local(tmp)); local_get(Local(k)); i32_const(Imm32(es as i32)); i32_mul; i32_add;
+                    local_get(Local(dst)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32)); i32_add; local_get(Local(li)); i32_const(Imm32(es as i32)); i32_mul; i32_add;
         });
         kind.emit_copy_one(&mut self.func);
         wasm!(self.func, {
-                    local_get(li); i32_const(1); i32_add; local_set(li);
+                    local_get(Local(li)); i32_const(Imm32(1)); i32_add; local_set(Local(li));
                   else_;
                     // tmp[k] = dst[ri]; ri++
-                    local_get(tmp); local_get(k); i32_const(es as i32); i32_mul; i32_add;
-                    local_get(dst); i32_const(self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32); i32_add; local_get(ri); i32_const(es as i32); i32_mul; i32_add;
+                    local_get(Local(tmp)); local_get(Local(k)); i32_const(Imm32(es as i32)); i32_mul; i32_add;
+                    local_get(Local(dst)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32)); i32_add; local_get(Local(ri)); i32_const(Imm32(es as i32)); i32_mul; i32_add;
         });
         kind.emit_copy_one(&mut self.func);
         wasm!(self.func, {
-                    local_get(ri); i32_const(1); i32_add; local_set(ri);
+                    local_get(Local(ri)); i32_const(Imm32(1)); i32_add; local_set(Local(ri));
                   end;
-                  local_get(k); i32_const(1); i32_add; local_set(k);
+                  local_get(Local(k)); i32_const(Imm32(1)); i32_add; local_set(Local(k));
                   br(0);
                 end; end;
                 // copy tmp[left..right] back to dst[left..right]
-                local_get(left); local_set(k);
+                local_get(Local(left)); local_set(Local(k));
                 block_empty; loop_empty;
-                  local_get(k); local_get(right); i32_ge_u; br_if(1);
-                  local_get(dst); i32_const(self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32); i32_add; local_get(k); i32_const(es as i32); i32_mul; i32_add;
-                  local_get(tmp); local_get(k); i32_const(es as i32); i32_mul; i32_add;
+                  local_get(Local(k)); local_get(Local(right)); i32_ge_u; br_if(1);
+                  local_get(Local(dst)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32)); i32_add; local_get(Local(k)); i32_const(Imm32(es as i32)); i32_mul; i32_add;
+                  local_get(Local(tmp)); local_get(Local(k)); i32_const(Imm32(es as i32)); i32_mul; i32_add;
         });
         kind.emit_copy_one(&mut self.func);
         wasm!(self.func, {
-                  local_get(k); i32_const(1); i32_add; local_set(k);
+                  local_get(Local(k)); i32_const(Imm32(1)); i32_add; local_set(Local(k));
                   br(0);
                 end; end;
                 // i += width * 2
-                local_get(i); local_get(width); i32_const(2); i32_mul; i32_add; local_set(i);
+                local_get(Local(i)); local_get(Local(width)); i32_const(Imm32(MERGE_STRIDE)); i32_mul; i32_add; local_set(Local(i));
                 br(0);
               end; end;
               // width *= 2
-              local_get(width); i32_const(2); i32_mul; local_set(width);
+              local_get(Local(width)); i32_const(Imm32(MERGE_STRIDE)); i32_mul; local_set(Local(width));
               br(0);
             end; end;
             end; // end if scan_done == 0
-            local_get(dst);
+            local_get(Local(dst));
         });
 
         // 3.5 SHARE dup: every element pointer was copied from the SOURCE
@@ -812,19 +827,19 @@ impl FuncCompiler<'_> {
             let dl = self.scratch.alloc_i32();
             let data_off = self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32;
             wasm!(self.func, {
-                local_set(di); // borrow di as the result holder briefly
-                local_get(di); i32_load(0); local_set(dl);
-                local_get(di); local_set(dst);
-                i32_const(0); local_set(di);
+                local_set(Local(di)); // borrow di as the result holder briefly
+                local_get(Local(di)); i32_load(0); local_set(Local(dl));
+                local_get(Local(di)); local_set(Local(dst));
+                i32_const(Imm32(0)); local_set(Local(di));
                 block_empty; loop_empty;
-                    local_get(di); local_get(dl); i32_ge_u; br_if(1);
-                    local_get(dst); i32_const(data_off); i32_add;
-                    local_get(di); i32_const(4); i32_mul; i32_add;
+                    local_get(Local(di)); local_get(Local(dl)); i32_ge_u; br_if(1);
+                    local_get(Local(dst)); i32_const(Imm32(data_off)); i32_add;
+                    local_get(Local(di)); i32_const(Imm32(I32_BYTES)); i32_mul; i32_add;
                     i32_load(0); call(self.emitter.rt.rc_inc); drop;
-                    local_get(di); i32_const(1); i32_add; local_set(di);
+                    local_get(Local(di)); i32_const(Imm32(1)); i32_add; local_set(Local(di));
                     br(0);
                 end; end;
-                local_get(dst);
+                local_get(Local(dst));
             });
             self.scratch.free_i32(dl);
             self.scratch.free_i32(di);
@@ -864,33 +879,33 @@ impl FuncCompiler<'_> {
         let search_val = self.scratch.alloc(search_vt);
 
         self.emit_expr(&args[0]);
-        wasm!(self.func, { local_set(xs_ptr); });
+        wasm!(self.func, { local_set(Local(xs_ptr)); });
         self.emit_expr(&args[1]);
-        wasm!(self.func, { local_set(search_val); });
+        wasm!(self.func, { local_set(Local(search_val)); });
         wasm!(self.func, {
-            i32_const(0); local_set(i); // i
-            i32_const(0); local_set(result); // result (default: none)
+            i32_const(Imm32(0)); local_set(Local(i)); // i
+            i32_const(Imm32(0)); local_set(Local(result)); // result (default: none)
             block_empty; loop_empty;
-              local_get(i);
-              local_get(xs_ptr); i32_load(0); // len
+              local_get(Local(i));
+              local_get(Local(xs_ptr)); i32_load(0); // len
               i32_ge_u; br_if(1);
-              local_get(xs_ptr); i32_const(self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32); i32_add;
-              local_get(i); i32_const(elem_size as i32); i32_mul; i32_add;
+              local_get(Local(xs_ptr)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32)); i32_add;
+              local_get(Local(i)); i32_const(Imm32(elem_size as i32)); i32_mul; i32_add;
         });
         self.emit_load_at(&elem_ty, 0);
-        wasm!(self.func, { local_get(search_val); });
+        wasm!(self.func, { local_get(Local(search_val)); });
         self.emit_eq_typed(&elem_ty);
         wasm!(self.func, {
               if_empty;
                 // Found: store some(i) and break
-                i32_const(self.emitter.layout_reg.header_size(LIST) as i32); call(self.emitter.rt.alloc); local_set(found_ptr);
-                local_get(found_ptr); local_get(i); i64_extend_i32_u; i64_store(0);
-                local_get(found_ptr); local_set(result); br(2);
+                i32_const(Imm32(self.emitter.layout_reg.header_size(LIST) as i32)); call(self.emitter.rt.alloc); local_set(Local(found_ptr));
+                local_get(Local(found_ptr)); local_get(Local(i)); i64_extend_i32_u; i64_store(0);
+                local_get(Local(found_ptr)); local_set(Local(result)); br(2);
               end;
-              local_get(i); i32_const(1); i32_add; local_set(i);
+              local_get(Local(i)); i32_const(Imm32(1)); i32_add; local_set(Local(i));
               br(0);
             end; end;
-            local_get(result); // result (none if not found)
+            local_get(Local(result)); // result (none if not found)
         });
 
         self.scratch.free(search_val, search_vt);
@@ -913,56 +928,56 @@ impl FuncCompiler<'_> {
 
         self.emit_expr(&args[0]);
         wasm!(self.func, {
-            local_set(src);
-            local_get(src); i32_load(0); local_set(src_len); // src_len
-            i32_const(self.emitter.layout_reg.header_size(LIST) as i32); local_get(src_len); i32_const(es); i32_mul; i32_add;
-            call(self.emitter.rt.alloc); local_set(dst); // dst
-            local_get(dst); i32_const(0); i32_store(0);
-            i32_const(0); local_set(i); // i
+            local_set(Local(src));
+            local_get(Local(src)); i32_load(0); local_set(Local(src_len)); // src_len
+            i32_const(Imm32(self.emitter.layout_reg.header_size(LIST) as i32)); local_get(Local(src_len)); i32_const(Imm32(es)); i32_mul; i32_add;
+            call(self.emitter.rt.alloc); local_set(Local(dst)); // dst
+            local_get(Local(dst)); i32_const(Imm32(0)); i32_store(0);
+            i32_const(Imm32(0)); local_set(Local(i)); // i
             block_empty; loop_empty;
-              local_get(i); local_get(src_len); i32_ge_u; br_if(1);
+              local_get(Local(i)); local_get(Local(src_len)); i32_ge_u; br_if(1);
               // Check if src[i] already in dst
-              i32_const(0); local_set(j); // j
-              i32_const(0); local_set(found); // found
+              i32_const(Imm32(0)); local_set(Local(j)); // j
+              i32_const(Imm32(0)); local_set(Local(found)); // found
               block_empty; loop_empty;
-                local_get(j); local_get(dst); i32_load(0); i32_ge_u; br_if(1);
-                local_get(src); i32_const(self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32); i32_add;
-                local_get(i); i32_const(es); i32_mul; i32_add;
+                local_get(Local(j)); local_get(Local(dst)); i32_load(0); i32_ge_u; br_if(1);
+                local_get(Local(src)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32)); i32_add;
+                local_get(Local(i)); i32_const(Imm32(es)); i32_mul; i32_add;
         });
         self.emit_load_at(&elem_ty, 0);
         wasm!(self.func, {
-                local_get(dst); i32_const(self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32); i32_add;
-                local_get(j); i32_const(es); i32_mul; i32_add;
+                local_get(Local(dst)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32)); i32_add;
+                local_get(Local(j)); i32_const(Imm32(es)); i32_mul; i32_add;
         });
         self.emit_load_at(&elem_ty, 0);
         // Structural eq: collapse all value-equal elements (String + compound),
         // matching native unique-by-`==`, not by pointer identity.
         self.emit_eq_typed(&elem_ty);
         wasm!(self.func, {
-                if_empty; i32_const(1); local_set(found); br(2); end;
-                local_get(j); i32_const(1); i32_add; local_set(j);
+                if_empty; i32_const(Imm32(1)); local_set(Local(found)); br(2); end;
+                local_get(Local(j)); i32_const(Imm32(1)); i32_add; local_set(Local(j));
                 br(0);
               end; end;
-              local_get(found); i32_eqz;
+              local_get(Local(found)); i32_eqz;
               if_empty;
-                local_get(dst); i32_const(self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32); i32_add;
-                local_get(dst); i32_load(0); i32_const(es); i32_mul; i32_add;
-                local_get(src); i32_const(self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32); i32_add;
-                local_get(i); i32_const(es); i32_mul; i32_add;
+                local_get(Local(dst)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32)); i32_add;
+                local_get(Local(dst)); i32_load(0); i32_const(Imm32(es)); i32_mul; i32_add;
+                local_get(Local(src)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32)); i32_add;
+                local_get(Local(i)); i32_const(Imm32(es)); i32_mul; i32_add;
         });
         // SHARE: a unique element copied from the borrowed source list into the fresh
         // result — dup it so the result owns its reference (else the source's
         // scope-end Dec deep-frees the element the result now holds).
         self.emit_elem_copy_owned(&elem_ty);
         wasm!(self.func, {
-                local_get(dst);
-                local_get(dst); i32_load(0); i32_const(1); i32_add;
+                local_get(Local(dst));
+                local_get(Local(dst)); i32_load(0); i32_const(Imm32(1)); i32_add;
                 i32_store(0);
               end;
-              local_get(i); i32_const(1); i32_add; local_set(i);
+              local_get(Local(i)); i32_const(Imm32(1)); i32_add; local_set(Local(i));
               br(0);
             end; end;
-            local_get(dst);
+            local_get(Local(dst));
         });
 
         self.scratch.free_i32(found);
@@ -988,53 +1003,53 @@ impl FuncCompiler<'_> {
         // Store src
         self.emit_expr(&args[0]);
         wasm!(self.func, {
-            local_set(src_ptr);
+            local_set(Local(src_ptr));
             // len
-            local_get(src_ptr);
+            local_get(Local(src_ptr));
             i32_load(0);
-            local_set(len_local);
+            local_set(Local(len_local));
             // Alloc dst: [len] + len * ptr_size(4)
-            i32_const(self.emitter.layout_reg.header_size(LIST) as i32);
-            local_get(len_local);
-            i32_const(4); // each entry is a tuple ptr (i32)
+            i32_const(Imm32(self.emitter.layout_reg.header_size(LIST) as i32));
+            local_get(Local(len_local));
+            i32_const(Imm32(I32_BYTES)); // each entry is a tuple ptr (i32)
             i32_mul;
             i32_add;
             call(self.emitter.rt.alloc);
-            local_set(dst_ptr);
+            local_set(Local(dst_ptr));
             // Store len in dst
-            local_get(dst_ptr);
-            local_get(len_local);
+            local_get(Local(dst_ptr));
+            local_get(Local(len_local));
             i32_store(0);
             // Loop: create tuples
-            i32_const(0);
-            local_set(idx_local);
+            i32_const(Imm32(0));
+            local_set(Local(idx_local));
             block_empty;
             loop_empty;
         });
         let depth_guard = self.depth_push_n(2);
 
         wasm!(self.func, {
-            local_get(idx_local);
-            local_get(len_local);
+            local_get(Local(idx_local));
+            local_get(Local(len_local));
             i32_ge_u;
             br_if(1);
             // Alloc tuple: [index:i64][element]
-            i32_const(tuple_size as i32);
+            i32_const(Imm32(tuple_size as i32));
             call(self.emitter.rt.alloc);
-            local_set(tuple_ptr); // tuple_ptr
+            local_set(Local(tuple_ptr)); // tuple_ptr
             // tuple.index = idx (as i64)
-            local_get(tuple_ptr);
-            local_get(idx_local);
+            local_get(Local(tuple_ptr));
+            local_get(Local(idx_local));
             i64_extend_i32_u;
             i64_store(0);
             // tuple.element = src[idx]
-            local_get(tuple_ptr);
+            local_get(Local(tuple_ptr));
             // Load src element
-            local_get(src_ptr);
-            i32_const(self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32);
+            local_get(Local(src_ptr));
+            i32_const(Imm32(self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32));
             i32_add;
-            local_get(idx_local);
-            i32_const(elem_size as i32);
+            local_get(Local(idx_local));
+            i32_const(Imm32(elem_size as i32));
             i32_mul;
             i32_add;
         });
@@ -1047,20 +1062,20 @@ impl FuncCompiler<'_> {
 
         wasm!(self.func, {
             // dst[idx] = tuple_ptr
-            local_get(dst_ptr);
-            i32_const(self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32);
+            local_get(Local(dst_ptr));
+            i32_const(Imm32(self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32));
             i32_add;
-            local_get(idx_local);
-            i32_const(4); // tuple ptrs are i32
+            local_get(Local(idx_local));
+            i32_const(Imm32(I32_BYTES)); // tuple ptrs are i32
             i32_mul;
             i32_add;
-            local_get(tuple_ptr);
+            local_get(Local(tuple_ptr));
             i32_store(0);
             // idx++
-            local_get(idx_local);
-            i32_const(1);
+            local_get(Local(idx_local));
+            i32_const(Imm32(1));
             i32_add;
-            local_set(idx_local);
+            local_set(Local(idx_local));
             br(0);
         });
 
@@ -1069,7 +1084,7 @@ impl FuncCompiler<'_> {
             end;
             end;
             // Return dst
-            local_get(dst_ptr);
+            local_get(Local(dst_ptr));
         });
 
         self.scratch.free_i32(tuple_ptr);

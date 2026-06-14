@@ -556,13 +556,14 @@ evidence  = [
 [[contract]]
 id        = "C-066"
 title     = "WASM heap is reclaimed by default (true Perceus)"
-statement = "Since 0.27.0 the wasm target frees by default: construct-and-drop churn reuses freed blocks (free-list) and loop iterations whose heap values do not escape reclaim wholesale (region reset incl. the free list), so steady-state churn runs in O(1) memory instead of the pre-0.27 bump-allocate-and-leak model. Observable values stay byte-identical native == wasm under churn. `ALMIDE_WASM_FREES=0` is the opt-out back to the leak model (env-conditional emission is declared behavior under the host-determinism gates). Known bounded exceptions, tracked in docs/roadmap/active/wasm-frees-ownership-discipline.md: TCO self-call loops leak per iteration until the Stage C redesign lands, and a stored-field over-count leaks one reference per construct-from-temp outside reclaimed regions."
+statement = "Since 0.27.0 the wasm target frees by default: construct-and-drop churn reuses freed blocks (free-list) and loop iterations whose heap values do not escape reclaim wholesale (region reset incl. the free list), so steady-state churn runs in O(1) memory instead of the pre-0.27 bump-allocate-and-leak model. The escape test counts an in-place stdlib mutator (`list.push`/`string.push`/`map.insert`) on a binding declared OUTSIDE the loop as an escape — its reallocated backing lives in the iteration arena but is reachable after the loop, so the region reset must not roll the frontier back over it (#643: the scan formerly inspected assignment STATEMENTS only and missed the mutator CALL, producing a spurious double-free trap at teardown). Observable values stay byte-identical native == wasm under churn. `ALMIDE_WASM_FREES=0` is the opt-out back to the leak model (env-conditional emission is declared behavior under the host-determinism gates). Known bounded exceptions, tracked in docs/roadmap/active/wasm-frees-ownership-discipline.md: TCO self-call loops leak per iteration until the Stage C redesign lands, and a stored-field over-count leaks one reference per construct-from-temp outside reclaimed regions."
 since     = "0.27.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/rc_reclaim_churn.almd", class = "fixture" },
   { path = "spec/wasm_cross/assign_alias_rc.almd", class = "fixture" },
   { path = "spec/wasm_cross/container_alias_return.almd", class = "fixture" },
+  { path = "spec/wasm_cross/loop_outer_inplace_mutate_rc.almd", class = "fixture" },
   { path = "spec/churn/record_churn.almd", class = "by-construction" },
   { path = "spec/churn/tco_loop_churn.almd", class = "by-construction" },
 ]
