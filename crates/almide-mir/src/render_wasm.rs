@@ -357,13 +357,21 @@ fn render_op(op: &Op, label_off: &BTreeMap<String, (u32, u32)>) -> String {
         Op::Alloc { dst, init: Init::Str(string), .. } => {
             let bytes = string.as_bytes();
             let blen = bytes.len() as u32;
+            // A String block is sized LIST-COMPATIBLY so the free-list reuses it: `cap` is
+            // the ELEMENT count `ceil(blen / ELEM_SIZE)` (rounded up so the bytes fit), and
+            // the allocation is `LIST_HEADER + cap*ELEM_SIZE` — exactly what the `$alloc`
+            // reuse check recomputes from `cap`. `len` stays the BYTE length (what print
+            // reads). Storing `cap = blen` (a byte count) made the reuse formula
+            // `LIST_HEADER + blen*ELEM_SIZE` overshoot the real size, so freed String
+            // blocks were never reclaimed and a String-allocating loop leaked → OOM.
+            let cap_elems = blen.div_ceil(ELEM_SIZE);
+            let total = LIST_HEADER + cap_elems * ELEM_SIZE;
             let mut s = format!(
                 "    (local.set {d} (call $alloc (i32.const {total})))\n\
                  \x20   (i32.store (i32.add (local.get {d}) (i32.const {LIST_RC_OFFSET})) (i32.const {RC_INITIAL}))\n\
                  \x20   (i32.store (i32.add (local.get {d}) (i32.const {LIST_LEN_OFFSET})) (i32.const {blen}))\n\
-                 \x20   (i32.store (i32.add (local.get {d}) (i32.const {LIST_CAP_OFFSET})) (i32.const {blen}))\n",
+                 \x20   (i32.store (i32.add (local.get {d}) (i32.const {LIST_CAP_OFFSET})) (i32.const {cap_elems}))\n",
                 d = local(*dst),
-                total = LIST_HEADER + blen,
             );
             for (i, b) in bytes.iter().enumerate() {
                 let off = LIST_HEADER + i as u32;
@@ -1170,6 +1178,23 @@ mod tests {
         );
         if let Some(out) = build_and_run("heap_result_if", &render_wasm_program(&prog)) {
             assert_eq!(out, "yes\nno");
+        }
+    }
+
+    #[test]
+    fn string_allocating_loop_reuses_freed_blocks() {
+        // A loop that allocates a String literal every iteration must run in BOUNDED
+        // memory — each iteration's string is freed (rc_dec) and the free-list REUSES it.
+        // 5000 iterations × a 20-byte block would overrun the single 64 KiB page (~2900
+        // allocs) if freed String blocks were not reclaimed; before the list-compatible
+        // String sizing fix that OOM-trapped. Completing all 5000 lines proves reuse.
+        let src = "fn main() -> Unit = {\n  \
+            var i = 0\n  \
+            while i < 5000 {\n    println(\"x\")\n    i = i + 1\n  } }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("str_loop", &render_wasm_program(&prog)) {
+            assert_eq!(out.lines().count(), 5000, "every iteration must print (no OOM)");
+            assert!(out.lines().all(|l| l == "x"));
         }
     }
 
