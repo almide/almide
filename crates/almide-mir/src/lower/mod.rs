@@ -162,6 +162,14 @@ pub(crate) struct LowerCtx {
     /// flat fold cannot see). Inside a frame such a reassignment is DEFERRED: the var
     /// keeps its still-live handle and the new value is carried like every `Opaque`.
     in_frame: u32,
+    /// Depth of enclosing SCALAR-STATE loops being lowered with real markers
+    /// (`LoopStart`/`LoopBreakUnless`/`LoopEnd`). When > 0, a scalar `Assign` reassigns
+    /// the var's STABLE local via [`Op::SetLocal`] (the loop-carried state) instead of
+    /// rebinding `value_of` to a fresh value (which a loop back-edge could not see), and a
+    /// HEAP reassignment ERRORS — that aborts the scalar-loop attempt so `lower_while`
+    /// falls back to its sound model-one-iteration form (a heap accumulator is deferred,
+    /// not run, exactly as before).
+    scalar_loop_depth: u32,
     /// The module's top-level `let` bindings (VarId → declared Ty). A reference to one
     /// of these resolves to no FUNCTION-local `value_of` entry; this DECLARED set lets
     /// `value_or_global` distinguish a legitimate global reference (materialize a fresh
@@ -254,6 +262,26 @@ impl LowerCtx {
             // SCALAR reassignment (`i = i + 1`) rebinds to a Copy `Const` with no handle
             // to dangle, so it is admitted unchanged (e.g. a loop counter).
             IrStmtKind::Assign { var, value } => {
+                // Inside a scalar-marker loop, a reassignment mutates the var's STABLE
+                // local (the loop-carried state) — `SetLocal`, not a fresh rebind. A heap
+                // reassignment cannot run this way (the accumulator would need real heap
+                // merge): ERROR to abort the attempt → `lower_while` falls back to its
+                // sound model-one-iteration form.
+                if self.scalar_loop_depth > 0 {
+                    if is_heap_ty(&value.ty) {
+                        return Err(LowerError::Unsupported(
+                            "heap reassignment in a scalar loop body".into(),
+                        ));
+                    }
+                    let local = *self.value_of.get(var).ok_or_else(|| {
+                        LowerError::Unsupported("scalar loop reassigns an unbound var".into())
+                    })?;
+                    let src = self.lower_scalar_value(value).ok_or_else(|| {
+                        LowerError::Unsupported("non-scalar value in a scalar loop reassignment".into())
+                    })?;
+                    self.ops.push(Op::SetLocal { local, src });
+                    return Ok(());
+                }
                 if self.in_frame > 0 && is_heap_ty(&value.ty) {
                     self.record_elided_calls(value);
                     Ok(())

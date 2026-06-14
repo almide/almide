@@ -406,7 +406,77 @@ impl LowerCtx {
     /// evaluated each iteration (its caps captured); the body's locals are dropped at
     /// iteration end. Same as `for-in`: a `break`/`continue` over a HEAP frame is walled
     /// (post-lowering), a heap reassignment (accumulator) deferred by `in_frame`.
+    /// Try to lower `while cond { body }` as a REAL scalar-state loop that EXECUTES N
+    /// times (the `LoopStart`/`LoopBreakUnless`/`LoopEnd` markers), reassigning scalar
+    /// loop-carried state via [`Op::SetLocal`]. Restricted to the sound + runnable subset:
+    /// an Int/Bool cond, NO `break`/`continue` (a no-op early-exit would be wrong inside a
+    /// real loop), and a body with NO heap reassignment (the `scalar_loop_depth` Assign
+    /// rule errors on one) and NO net heap handle escaping the per-iteration frame. The
+    /// cond ops sit INSIDE the loop (re-evaluated each iteration); per-iteration heap (a
+    /// string literal in `println`) is dropped before the back-edge. SOUNDNESS by REUSE:
+    /// the markers are no-ops in verify_ownership and the body is a per-iteration-balanced
+    /// frame — the cert verifies ONE balanced iteration, sound for any N (the existing
+    /// model-one-iteration argument), the markers only make wasm actually run it N times.
+    /// Returns false (and rolls back) when out of subset; `lower_while` then falls back.
+    pub(crate) fn try_lower_scalar_while(&mut self, cond: &IrExpr, body: &[IrStmt]) -> bool {
+        if !matches!(cond.ty, Ty::Int | Ty::Bool) || body_breaks_or_continues(body) {
+            return false;
+        }
+        let ops_mark = self.ops.len();
+        let lhh_mark = self.live_heap_handles.len();
+        let value_of_snapshot = self.value_of.clone();
+
+        self.ops.push(Op::LoopStart);
+        let cond_v = match self.lower_scalar_value(cond) {
+            Some(v) => v,
+            None => {
+                self.rollback_scalar_loop(ops_mark, lhh_mark, value_of_snapshot);
+                return false;
+            }
+        };
+        self.ops.push(Op::LoopBreakUnless { cond: cond_v });
+
+        let body_mark = self.live_heap_handles.len();
+        self.in_frame += 1;
+        self.scalar_loop_depth += 1;
+        let mut ok = true;
+        for stmt in body {
+            if self.lower_stmt(stmt).is_err() {
+                ok = false;
+                break;
+            }
+        }
+        self.scalar_loop_depth -= 1;
+        self.in_frame -= 1;
+
+        if !ok {
+            self.rollback_scalar_loop(ops_mark, lhh_mark, value_of_snapshot);
+            return false;
+        }
+        // Per-iteration heap (a string literal in a body `println`) is released before the
+        // back-edge, INSIDE the loop, so each iteration is balanced.
+        self.drop_arm_locals(body_mark);
+        self.ops.push(Op::LoopEnd);
+        true
+    }
+
+    fn rollback_scalar_loop(
+        &mut self,
+        ops_mark: usize,
+        lhh_mark: usize,
+        value_of_snapshot: std::collections::HashMap<almide_ir::VarId, ValueId>,
+    ) {
+        self.ops.truncate(ops_mark);
+        self.live_heap_handles.truncate(lhh_mark);
+        self.value_of = value_of_snapshot;
+    }
+
     pub(crate) fn lower_while(&mut self, cond: &IrExpr, body: &[IrStmt]) -> Result<(), LowerError> {
+        // First try to EXECUTE it as a real scalar-state loop; on any out-of-subset
+        // feature this rolls back cleanly and we keep the model-one-iteration form below.
+        if self.try_lower_scalar_while(cond, body) {
+            return Ok(());
+        }
         self.record_elided_calls(cond);
         let mark = self.live_heap_handles.len();
         // A heap reassignment in the body is DEFERRED (the `in_frame` discipline) — the

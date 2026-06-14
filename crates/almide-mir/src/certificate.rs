@@ -92,6 +92,15 @@ pub fn name_witness(func: &MirFunction) -> NameWitness {
             Op::Else { val } | Op::EndIf { val } => {
                 used.extend(val.iter().copied());
             }
+            // Loop markers: the break cond is USED. `LoopStart`/`LoopEnd` bind nothing.
+            Op::LoopBreakUnless { cond } => used.push(*cond),
+            Op::LoopStart | Op::LoopEnd => {}
+            // A scalar reassignment USES the source value and the target local (already
+            // defined by its `var` bind — re-written, not newly defined).
+            Op::SetLocal { local, src } => {
+                used.push(*local);
+                used.push(*src);
+            }
         }
     }
     if let Some(r) = func.ret {

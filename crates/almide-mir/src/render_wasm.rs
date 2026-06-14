@@ -203,8 +203,32 @@ pub fn render_wasm_fn(func: &MirFunction, label_off: &BTreeMap<String, (u32, u32
     let arm_val = |v: &Option<ValueId>| {
         v.map(|v| format!("      (local.get {})\n", local(v))).unwrap_or_default()
     };
+    // The loop-markers (LoopStart/LoopBreakUnless/LoopEnd) reconstruct the standard
+    // wasm while shape `(block $brk (loop $cont … (br_if $brk (eqz cond)) … (br $cont)))`.
+    // A unique id per loop keeps nested loops' labels distinct; the stack tracks which
+    // open loop a break/back-edge closes.
+    let mut loop_ctr: u32 = 0;
+    let mut loop_stack: Vec<u32> = Vec::new();
     for op in &func.ops {
         match op {
+            Op::LoopStart => {
+                let id = loop_ctr;
+                loop_ctr += 1;
+                loop_stack.push(id);
+                body.push_str(&format!("    (block $brk{id}\n    (loop $cont{id}\n"));
+            }
+            Op::LoopBreakUnless { cond } => {
+                let id = *loop_stack.last().expect("LoopBreakUnless outside a loop");
+                body.push_str(&format!(
+                    "    (br_if $brk{id} (i64.eqz (local.get {})))\n",
+                    local(*cond)
+                ));
+            }
+            Op::LoopEnd => {
+                let id = loop_stack.pop().expect("LoopEnd without LoopStart");
+                // unconditional back-edge to the loop top, then close `loop` and `block`.
+                body.push_str(&format!("    (br $cont{id})\n    ))\n"));
+            }
             Op::IfThen { cond, dst } => {
                 if_stack.push(*dst);
                 let res = if dst.is_some() { " (result i64)" } else { "" };
@@ -424,15 +448,23 @@ fn render_op(op: &Op, label_off: &BTreeMap<String, (u32, u32)>) -> String {
                 None => format!("    {body}\n"),
             }
         }
+        // A scalar reassignment of a stable local — the loop-carried state. Reads `src`,
+        // writes the var's own local (reusing the same wasm local is legal: read then set).
+        Op::SetLocal { local: l, src } => {
+            format!("    (local.set {} (local.get {}))\n", local(*l), local(*src))
+        }
         Op::Consume { .. }
         | Op::Borrow { .. }
         | Op::Const { .. }
         | Op::Pure { .. }
-        // The if-markers are rendered STATEFULLY by render_wasm_fn (the flat→nested
-        // wasm `if`/`else`); render_op never sees them in practice.
+        // The if- and loop-markers are rendered STATEFULLY by render_wasm_fn (the
+        // flat→nested wasm `if`/`else` and `block`/`loop`); render_op never sees them.
         | Op::IfThen { .. }
         | Op::Else { .. }
-        | Op::EndIf { .. } => String::new(),
+        | Op::EndIf { .. }
+        | Op::LoopStart
+        | Op::LoopBreakUnless { .. }
+        | Op::LoopEnd => String::new(),
     }
 }
 
@@ -1109,6 +1141,79 @@ mod tests {
         let prog = lower_source(src);
         if let Some(out) = build_and_run("match_unit", &render_wasm_program(&prog)) {
             assert_eq!(out, "zero\none\nother");
+        }
+    }
+
+    #[test]
+    fn scalar_while_loop_runs_n_times() {
+        // A real `while i < n { … i = i + 1 }` EXECUTES N iterations (LoopStart/
+        // LoopBreakUnless/LoopEnd markers + SetLocal carry the counter) — count_to(4)
+        // prints 0..3, byte-matching v0. The string-free body keeps it scalar-state.
+        let src = "fn put_int(n: Int, pos: Int) -> Int =\n  \
+            if n < 10 then { prim.store8(pos, 48 + n)\n    pos + 1 }\n  \
+            else { let p = put_int(n / 10, pos)\n    prim.store8(p, 48 + (n % 10))\n    p + 1 }\n\
+            fn write_int(n: Int) -> Unit = { let endp = put_int(n, 512)\n  \
+            prim.store8(endp, 10)\n  prim.store32(8, 512)\n  \
+            prim.store32(12, endp - 512 + 1)\n  let _w = prim.fd_write(1, 8, 1, 0) }\n\
+            fn count_to(n: Int) -> Unit = {\n  \
+            var i = 0\n  \
+            while i < n {\n    write_int(i)\n    i = i + 1\n  } }\n\
+            fn main() -> Unit = count_to(4)\n";
+        let prog = lower_source(src);
+        // The loop must lower to REAL markers (executes), not the deferred one-iteration form.
+        let count_fn = prog.functions.iter().find(|f| f.name == "count_to").unwrap();
+        assert!(
+            count_fn.ops.iter().any(|op| matches!(op, Op::LoopStart)),
+            "count_to's while must lower to LoopStart (executable), got {:?}",
+            count_fn.ops
+        );
+        if let Some(out) = build_and_run("scalar_while", &render_wasm_program(&prog)) {
+            assert_eq!(out, "0\n1\n2\n3");
+        }
+    }
+
+    #[test]
+    fn while_loop_accumulates_via_counter() {
+        // The loop-carried scalar state truly accumulates: sum 1+2+3+4+5 = 15, computed
+        // in the loop and printed once after it. Verifies SetLocal threads `total`/`i`
+        // across iterations (not a single modelled iteration).
+        let src = "fn put_int(n: Int, pos: Int) -> Int =\n  \
+            if n < 10 then { prim.store8(pos, 48 + n)\n    pos + 1 }\n  \
+            else { let p = put_int(n / 10, pos)\n    prim.store8(p, 48 + (n % 10))\n    p + 1 }\n\
+            fn write_int(n: Int) -> Unit = { let endp = put_int(n, 512)\n  \
+            prim.store8(endp, 10)\n  prim.store32(8, 512)\n  \
+            prim.store32(12, endp - 512 + 1)\n  let _w = prim.fd_write(1, 8, 1, 0) }\n\
+            fn sum_to(n: Int) -> Unit = {\n  \
+            var i = 1\n  var total = 0\n  \
+            while i <= n {\n    total = total + i\n    i = i + 1\n  }\n  \
+            write_int(total) }\n\
+            fn main() -> Unit = sum_to(5)\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("while_sum", &render_wasm_program(&prog)) {
+            assert_eq!(out, "15");
+        }
+    }
+
+    #[test]
+    fn nested_while_loops_use_distinct_labels() {
+        // Two nested loops exercise the per-loop label ids ($brk0/$cont0 vs $brk1/$cont1)
+        // and the inner counter reset each outer iteration. grid(2,3) walks r*3+c = 0..5.
+        let src = "fn put_int(n: Int, pos: Int) -> Int =\n  \
+            if n < 10 then { prim.store8(pos, 48 + n)\n    pos + 1 }\n  \
+            else { let p = put_int(n / 10, pos)\n    prim.store8(p, 48 + (n % 10))\n    p + 1 }\n\
+            fn write_int(n: Int) -> Unit = { let endp = put_int(n, 512)\n  \
+            prim.store8(endp, 10)\n  prim.store32(8, 512)\n  \
+            prim.store32(12, endp - 512 + 1)\n  let _w = prim.fd_write(1, 8, 1, 0) }\n\
+            fn grid(rows: Int, cols: Int) -> Unit = {\n  \
+            var r = 0\n  \
+            while r < rows {\n    \
+            var c = 0\n    \
+            while c < cols {\n      write_int(r * cols + c)\n      c = c + 1\n    }\n    \
+            r = r + 1\n  } }\n\
+            fn main() -> Unit = grid(2, 3)\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("nested_while", &render_wasm_program(&prog)) {
+            assert_eq!(out, "0\n1\n2\n3\n4\n5");
         }
     }
 

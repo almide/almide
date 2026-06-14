@@ -221,6 +221,25 @@ pub enum Op {
     Else { val: Option<ValueId> },
     /// Closes the `if`; `val` is the ELSE arm's result value for a scalar `if`.
     EndIf { val: Option<ValueId> },
+
+    /// A loop as FLAT MARKERS (scalar-state loops). `LoopStart` opens a wasm
+    /// `(block (loop`; the cond is evaluated INSIDE the loop and [`Op::LoopBreakUnless`]
+    /// exits when it is false (a `br_if` of the outer block on `i64.eqz cond`); the body
+    /// ops follow; [`Op::LoopEnd`] closes with a back-edge (`br` the loop). The markers
+    /// carry NO ownership and the body ops are PER-ITERATION-BALANCED by the lowering, so
+    /// the cert verifies ONE balanced iteration — sound for ANY N runtime iterations (each
+    /// is the same balanced episode, exactly the existing model-one-iteration argument).
+    /// Restricted to scalar state: a mutable loop var is a stable i64 local reassigned via
+    /// [`Op::SetLocal`].
+    LoopStart,
+    /// Inside a loop: exit when the Bool scalar `cond` (i64 0/1) is false.
+    LoopBreakUnless { cond: ValueId },
+    /// Closes the loop with a back-edge to its top.
+    LoopEnd,
+    /// Reassign a mutable SCALAR local: `local := src` (a stable i64 wasm local re-written
+    /// — the loop-carried state). No ownership (scalar copy); `local` was already defined
+    /// by its `var` bind, `src` is the freshly computed value.
+    SetLocal { local: ValueId, src: ValueId },
 }
 
 /// The closed set of primitive-floor operations (the trusted, wasm-spec-faithful
@@ -504,7 +523,18 @@ pub fn verify_ownership(func: &MirFunction) -> Result<(), Vec<Violation>> {
             // scalar result is Copy and a `Prim` handle arg is BORROWED (read only).
             // The if-markers carry no ownership either — the arm OPS (flat between the
             // markers) are processed normally, per-arm-balanced by the lowering.
-            Op::IntBinOp { .. } | Op::Prim { .. } | Op::IfThen { .. } | Op::Else { .. } | Op::EndIf { .. } => {}
+            Op::IntBinOp { .. }
+            | Op::Prim { .. }
+            | Op::IfThen { .. }
+            | Op::Else { .. }
+            | Op::EndIf { .. }
+            // Loop markers carry no ownership; the body ops between them are
+            // per-iteration-balanced (verified flat, one iteration). `SetLocal` is a
+            // scalar copy into a stable local — no heap, no ownership.
+            | Op::LoopStart
+            | Op::LoopBreakUnless { .. }
+            | Op::LoopEnd
+            | Op::SetLocal { .. } => {}
         }
     }
 

@@ -87,6 +87,12 @@ pub fn wasm_pattern(op: &crate::Op) -> Option<String> {
         | Op::IfThen { .. }
         | Op::Else { .. }
         | Op::EndIf { .. }
+        // Loop markers + scalar reassignment are exec-slice control flow, not corpus V
+        // gate ops (like the if-markers above): no per-op pattern claim here.
+        | Op::LoopStart
+        | Op::LoopBreakUnless { .. }
+        | Op::LoopEnd
+        | Op::SetLocal { .. }
         | Op::Call { func: RtFn::PrintStr, .. } => return None,
     })
 }
