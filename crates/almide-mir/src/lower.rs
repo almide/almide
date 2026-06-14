@@ -228,10 +228,14 @@ impl LowerCtx {
                 self.record_elided_calls(value);
                 Ok(())
             }
-            // A bare expression statement that is an EFFECT call (`println(s)`).
-            // Non-call expr statements stay Unsupported (the lower_effect_call
-            // guard rejects them — flight-grade totality).
-            IrStmtKind::Expr { expr } => self.lower_effect_call(expr),
+            // A bare expression statement: an `if`/`match` in statement position is
+            // LINEARIZED (control flow), an EFFECT call (`println(s)`) is lowered as a
+            // runtime effect. Other non-call expr statements stay Unsupported (the
+            // lower_effect_call guard rejects them — flight-grade totality).
+            IrStmtKind::Expr { expr } => match &expr.kind {
+                IrExprKind::If { .. } | IrExprKind::Match { .. } => self.lower_branch(expr),
+                _ => self.lower_effect_call(expr),
+            },
             // A source comment carries no ownership — skip it (it is not a
             // "silent drop": Comment is a no-op by definition, not an unhandled op).
             IrStmtKind::Comment { .. } => Ok(()),
@@ -610,6 +614,11 @@ impl LowerCtx {
                     self.lower_effect_call(tail)?;
                     Ok(None)
                 }
+                // A Unit-typed `if`/`match` tail is LINEARIZED control flow.
+                IrExprKind::If { .. } | IrExprKind::Match { .. } => {
+                    self.lower_branch(tail)?;
+                    Ok(None)
+                }
                 other => Err(LowerError::Unsupported(format!(
                     "Unit-typed tail {} not in this brick",
                     kind_name(other)
@@ -729,6 +738,16 @@ impl LowerCtx {
                 self.record_elided_calls(tail);
                 Ok(Some(dst))
             }
+            // A scalar-result `if`/`match` tail: LINEARIZE the arms (their effects /
+            // arm-local ownership lowered, per-arm balanced) and emit ONE `Const` as
+            // the merged scalar result — both arms cross by the SAME no-event pattern
+            // (a Copy scalar), so nothing per-arm escapes the branch.
+            IrExprKind::If { .. } | IrExprKind::Match { .. } => {
+                self.lower_branch(tail)?;
+                let dst = self.fresh_value();
+                self.ops.push(Op::Const { dst });
+                Ok(Some(dst))
+            }
             other => Err(LowerError::Unsupported(format!(
                 "scalar tail {} not in this brick",
                 kind_name(other)
@@ -789,6 +808,146 @@ impl LowerCtx {
                 result: None });
                 Ok(())
             }
+        }
+    }
+
+    /// Lower an `if`/`match` in STATEMENT or scalar-/Unit-TAIL position by
+    /// LINEARIZING its arms into the flat op stream — NO `Branch` op. A branch op
+    /// would force the certificate fold (and `exec`/`verify`) to RECURSE a control-
+    /// flow graph; the v1 checker must stay a flat fold (the certificate-format-v1
+    /// tripwire: the instant the checker walks a CFG, the shape is broken). So the
+    /// branch discipline lives ENTIRELY here in the untrusted lowering, and the cert
+    /// the checker sees is a flat sequence.
+    ///
+    /// SOUNDNESS over a runtime where only ONE arm executes: each arm is lowered with
+    /// a PER-ARM SCOPE FRAME ([`Self::lower_branch_arm`]) so every heap object it
+    /// allocates is balanced WITHIN the arm (`i…d`). Such an object is therefore safe
+    /// on EVERY path — the arm that allocates it runs its balanced `i…d`; on the
+    /// other path it is simply never allocated (its `i…d` is vacuous). A handle that
+    /// READS a pre-branch object (`var w = z`) is a balanced `a…d` PAIR inside the
+    /// arm, removable on the other path, so the shared object stays balanced too. The
+    /// branch RESULT crosses by a no-new-event pattern only — DISCARDED (statement /
+    /// Unit position) or a SCALAR the caller emits as one `Const`; a fresh HEAP result
+    /// (a result phi needing a merge slot) is WALLED. So no per-arm `i`/`a` escapes
+    /// the branch and the flat cert is sound on both paths.
+    ///
+    /// CAPS: both arms are lowered, so the witness captures the UNION of their
+    /// capabilities — a conservative over-approximation (the path actually taken
+    /// reaches a SUBSET), hence `actual ⊆ union ⊆ declared` stays sound. Const-ing a
+    /// scalar branch instead (dropping the arms) would MISS an arm's `println` =
+    /// caps-unsound, so the arms MUST be lowered even for a scalar result.
+    ///
+    /// WALLED (each an explicit `Unsupported`, never a silent miscompile): a fresh
+    /// heap SUBJECT (eliding its `Alloc` would be an accept-but-unsafe leak), a
+    /// payload-BINDING `match` pattern (extracting a field needs the layout brick), a
+    /// `match` arm GUARD, a heap-result arm (result phi), and an arm that REASSIGNS a
+    /// variable (a path-dependent `value_of` rebind the flat fold cannot see → UAF).
+    fn lower_branch(&mut self, expr: &IrExpr) -> Result<(), LowerError> {
+        let arms: Vec<&IrExpr> = match &expr.kind {
+            IrExprKind::If { cond, then, else_ } => {
+                // The condition is evaluated ONCE before the branch — it is scalar
+                // (Bool), so no ownership, but capture the caps of any call in it.
+                self.record_elided_calls(cond);
+                vec![then, else_]
+            }
+            IrExprKind::Match { subject, arms } => {
+                // The subject is inspected once. Only a SCALAR or an already-tracked
+                // heap var (borrowed, dropped at the OUTER scope) is admitted: a fresh
+                // heap subject (a call/literal result) would need materialize-and-drop
+                // — eliding it would leave its `Alloc` unmodelled = accept-but-unsafe
+                // leak. A `Var` is borrowed for the inspection (no ownership change).
+                if is_heap_ty(&subject.ty)
+                    && !matches!(subject.kind, IrExprKind::Var { .. })
+                {
+                    return Err(LowerError::Unsupported(
+                        "match on a fresh heap subject (needs materialize-and-drop) not in this control-flow slice".into(),
+                    ));
+                }
+                self.record_elided_calls(subject);
+                let mut bodies = Vec::with_capacity(arms.len());
+                for arm in arms {
+                    // A pattern that BINDS any value extracts a payload/field/element
+                    // — its object identity needs the layout brick (#54). A guard is a
+                    // deferred heap-touching sub-computation. Both are walled.
+                    if !pattern_binds_nothing(&arm.pattern) {
+                        return Err(LowerError::Unsupported(
+                            "match arm pattern binds a value (needs the layout brick) not in this control-flow slice".into(),
+                        ));
+                    }
+                    if arm.guard.is_some() {
+                        return Err(LowerError::Unsupported(
+                            "match arm guard not in this control-flow slice".into(),
+                        ));
+                    }
+                    bodies.push(&arm.body);
+                }
+                bodies
+            }
+            other => {
+                return Err(LowerError::Unsupported(format!(
+                    "lower_branch on a non-branch {}",
+                    kind_name(other)
+                )))
+            }
+        };
+        for body in arms {
+            self.lower_branch_arm(body)?;
+        }
+        Ok(())
+    }
+
+    /// Lower ONE branch arm into the flat op stream with a PER-ARM SCOPE FRAME:
+    /// snapshot the live-handle count, lower the arm, then DROP every handle the arm
+    /// added (so the arm is internally balanced, and vacuous when the other arm runs).
+    /// The arm's result is DISCARDED (Unit/statement) or a SCALAR the caller merges
+    /// into one `Const`; a heap result is walled. See [`Self::lower_branch`].
+    fn lower_branch_arm(&mut self, body: &IrExpr) -> Result<(), LowerError> {
+        let (stmts, tail): (&[IrStmt], Option<&IrExpr>) = match &body.kind {
+            IrExprKind::Block { stmts, expr } => (stmts, expr.as_deref()),
+            _ => (&[], Some(body)),
+        };
+        // An ASSIGN (reassignment) of a variable inside the arm would rebind its
+        // `value_of` PATH-DEPENDENTLY: a post-branch read then dereferences a handle
+        // this arm dropped (a UAF the flat fold cannot see). Wall any arm with a
+        // top-level Assign (a nested one is re-checked when its control flow recurses;
+        // arm-local reassignment is rare, so walling it is mere incompleteness).
+        if stmts.iter().any(|s| matches!(s.kind, IrStmtKind::Assign { .. })) {
+            return Err(LowerError::Unsupported(
+                "branch arm reassigns a variable (path-dependent rebind) not in this control-flow slice".into(),
+            ));
+        }
+        let mark = self.live_heap_handles.len();
+        for stmt in stmts {
+            self.lower_stmt(stmt)?;
+        }
+        if let Some(tail) = tail {
+            // A heap arm result would have to be phi-merged across arms into one slot
+            // (a result-slot brick) — wall it. A Unit-call tail is an EFFECT
+            // (`println`) lowered so its Stdout reaches the witness; a nested branch
+            // recurses; any other scalar/Unit tail is a pure value whose calls we
+            // capture (its scalar value, if any, is the caller's single `Const`).
+            if is_heap_ty(&tail.ty) {
+                return Err(LowerError::Unsupported(
+                    "branch arm yields a heap value (result phi needs a result slot) not in this control-flow slice".into(),
+                ));
+            }
+            match &tail.kind {
+                IrExprKind::Call { .. } if matches!(tail.ty, Ty::Unit) => {
+                    self.lower_effect_call(tail)?
+                }
+                IrExprKind::If { .. } | IrExprKind::Match { .. } => self.lower_branch(tail)?,
+                _ => self.record_elided_calls(tail),
+            }
+        }
+        self.drop_arm_locals(mark);
+        Ok(())
+    }
+
+    /// Drop every heap handle the current scope frame added beyond `mark` (LIFO),
+    /// restoring `live_heap_handles` to its pre-frame length — the per-arm teardown.
+    fn drop_arm_locals(&mut self, mark: usize) {
+        for v in self.live_heap_handles.split_off(mark).into_iter().rev() {
+            self.ops.push(Op::Drop { v });
         }
     }
 
@@ -937,6 +1096,34 @@ impl LowerCtx {
         // Reverse binding order (LIFO scope teardown).
         for v in self.live_heap_handles.iter().rev() {
             self.ops.push(Op::Drop { v: *v });
+        }
+    }
+}
+
+/// Does a `match` pattern BIND no value — i.e. only inspect tags/shape, never
+/// extract a payload/field/element into a variable? A binding pattern needs the
+/// layout brick (#54) to know WHERE the bound value lives (offset + heap-ness), so
+/// the control-flow slice admits only non-binding patterns: a `Wildcard`, a literal
+/// match, `None`, or a constructor/tuple/record/list whose sub-patterns ALL bind
+/// nothing (`Some(_)`, `Ok(0)`, `(_, _)`). A `Bind` (even scalar — its position in
+/// the subject is unknown without layout) makes the whole pattern binding.
+fn pattern_binds_nothing(pat: &IrPattern) -> bool {
+    match pat {
+        IrPattern::Wildcard | IrPattern::Literal { .. } | IrPattern::None => true,
+        IrPattern::Bind { .. } => false,
+        IrPattern::Some { inner } | IrPattern::Ok { inner } | IrPattern::Err { inner } => {
+            pattern_binds_nothing(inner)
+        }
+        IrPattern::Constructor { args, .. } => args.iter().all(pattern_binds_nothing),
+        IrPattern::Tuple { elements } | IrPattern::List { elements } => {
+            elements.iter().all(pattern_binds_nothing)
+        }
+        IrPattern::RecordPattern { fields, .. } => {
+            // A field with `pattern: None` is the shorthand `{ name }` — it BINDS the
+            // field to `name`, so it is NOT a non-binding pattern.
+            fields
+                .iter()
+                .all(|f| f.pattern.as_ref().is_some_and(pattern_binds_nothing))
         }
     }
 }
@@ -1430,6 +1617,161 @@ mod tests {
             !mir2.ops.iter().any(|o| matches!(o, Op::CallFn { dst: None, .. })),
             "a higher-order call is not recorded as a marker"
         );
+    }
+
+    fn bool_var() -> IrExpr {
+        ir_expr(IrExprKind::Var { id: VarId(5) }, Ty::Bool)
+    }
+    fn unit_block(stmts: Vec<IrStmt>) -> IrExpr {
+        ir_expr(IrExprKind::Block { stmts, expr: None }, Ty::Unit)
+    }
+    fn iff(then: IrExpr, els: IrExpr, ty: Ty) -> IrExpr {
+        ir_expr(
+            IrExprKind::If { cond: Box::new(bool_var()), then: Box::new(then), else_: Box::new(els) },
+            ty,
+        )
+    }
+
+    #[test]
+    fn unit_if_with_effect_arms_linearizes_balanced() {
+        use almide_lang::intern::sym;
+        // if c then println("a") else println("b")  — each arm is a Unit effect call;
+        // its string arg is materialized into an arm-local temp and dropped by the
+        // per-arm frame. BOTH printlns lower (caps union); ownership balanced.
+        let prn = |s: &str| {
+            ir_expr(
+                IrExprKind::Call {
+                    target: CallTarget::Named { name: sym("println") },
+                    args: vec![ir_expr(IrExprKind::LitStr { value: s.into() }, Ty::String)],
+                    type_args: vec![],
+                },
+                Ty::Unit,
+            )
+        };
+        let b = body(vec![stmt(IrStmtKind::Expr { expr: iff(prn("a"), prn("b"), Ty::Unit) })]);
+        let mir = lower_body(&b, "main").expect("unit if lowers");
+        let prints = mir.ops.iter().filter(|o| matches!(o, Op::Call { .. })).count();
+        assert_eq!(prints, 2, "both arms' println are lowered (caps union, not Const-skipped)");
+        assert_eq!(verify_ownership(&mir), Ok(()));
+        let allocs = mir.ops.iter().filter(|o| matches!(o, Op::Alloc { .. })).count();
+        let drops = mir.ops.iter().filter(|o| matches!(o, Op::Drop { .. })).count();
+        assert_eq!(allocs, drops, "every arm-local alloc has its per-arm drop (balanced)");
+    }
+
+    #[test]
+    fn if_arm_local_alloc_is_dropped_within_the_arm() {
+        // if c then { var w = [1,2,3] } else { }  — w is an arm-local heap value,
+        // dropped by the per-arm frame (vacuous on the else path). Cert balanced.
+        let then = unit_block(vec![bind(
+            0,
+            list_int(),
+            ir_expr(IrExprKind::List { elements: vec![] }, list_int()),
+        )]);
+        let b = body(vec![stmt(IrStmtKind::Expr {
+            expr: iff(then, unit_block(vec![]), Ty::Unit),
+        })]);
+        let mir = lower_body(&b, "main").expect("lowers");
+        assert!(mir.ops.iter().any(|o| matches!(o, Op::Alloc { .. })), "arm-local alloc");
+        assert!(mir.ops.iter().any(|o| matches!(o, Op::Drop { .. })), "arm-local drop");
+        assert_eq!(verify_ownership(&mir), Ok(()), "arm balanced by construction");
+    }
+
+    #[test]
+    fn scalar_if_tail_linearizes_arms_and_const_merges() {
+        // fn f() = if c then 1 else 2  — arms lowered (for caps), result is ONE Const.
+        let b = ir_expr(
+            IrExprKind::Block {
+                stmts: vec![],
+                expr: Some(Box::new(iff(
+                    ir_expr(IrExprKind::LitInt { value: 1 }, Ty::Int),
+                    ir_expr(IrExprKind::LitInt { value: 2 }, Ty::Int),
+                    Ty::Int,
+                ))),
+            },
+            Ty::Int,
+        );
+        let mir = lower_body(&b, "f").expect("scalar if tail lowers");
+        assert!(matches!(mir.ops.last(), Some(Op::Const { .. })), "merged scalar result is a Const");
+        assert_eq!(verify_ownership(&mir), Ok(()));
+    }
+
+    #[test]
+    fn branch_arm_reassigning_a_variable_is_walled() {
+        // var z = []; if c then { z = [9] } else { }  — the arm reassigns pre-branch z
+        // (a path-dependent value_of rebind → UAF the flat fold can't see). Must WALL.
+        let then = unit_block(vec![stmt(IrStmtKind::Assign {
+            var: VarId(0),
+            value: ir_expr(IrExprKind::List { elements: vec![] }, list_int()),
+        })]);
+        let b = body(vec![
+            bind(0, list_int(), ir_expr(IrExprKind::List { elements: vec![] }, list_int())),
+            stmt(IrStmtKind::Expr { expr: iff(then, unit_block(vec![]), Ty::Unit) }),
+        ]);
+        match lower_body(&b, "main") {
+            Err(LowerError::Unsupported(r)) => assert!(r.contains("reassigns"), "got: {r}"),
+            other => panic!("expected a reassign wall, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn match_arm_binding_pattern_is_walled() {
+        // match n { x => () }  — a Bind pattern extracts a value whose position needs
+        // the layout brick (#54). Must WALL (no silent miscompile).
+        let arm = almide_ir::IrMatchArm {
+            pattern: IrPattern::Bind { var: VarId(1), ty: Ty::Int },
+            guard: None,
+            body: ir_expr(IrExprKind::Unit, Ty::Unit),
+        };
+        let m = ir_expr(
+            IrExprKind::Match {
+                subject: Box::new(ir_expr(IrExprKind::Var { id: VarId(0) }, Ty::Int)),
+                arms: vec![arm],
+            },
+            Ty::Unit,
+        );
+        let b = body(vec![
+            bind(0, Ty::Int, ir_expr(IrExprKind::LitInt { value: 3 }, Ty::Int)),
+            stmt(IrStmtKind::Expr { expr: m }),
+        ]);
+        match lower_body(&b, "main") {
+            Err(LowerError::Unsupported(r)) => assert!(r.contains("binds a value"), "got: {r}"),
+            other => panic!("expected a pattern-binding wall, got {other:?}"),
+        }
+        // A NON-binding pattern (Some(_) / None / _) is admitted by the gate.
+        assert!(pattern_binds_nothing(&IrPattern::Wildcard));
+        assert!(pattern_binds_nothing(&IrPattern::Some { inner: Box::new(IrPattern::Wildcard) }));
+        assert!(!pattern_binds_nothing(&IrPattern::Some {
+            inner: Box::new(IrPattern::Bind { var: VarId(1), ty: Ty::Int })
+        }));
+    }
+
+    #[test]
+    fn match_on_a_fresh_heap_subject_is_walled() {
+        use almide_lang::intern::sym;
+        // match make() { _ => () }  — a fresh heap subject would need materialize-and-
+        // drop; eliding its Alloc would be an accept-but-unsafe leak. Must WALL.
+        let subject = ir_expr(
+            IrExprKind::Call {
+                target: CallTarget::Named { name: sym("make") },
+                args: vec![],
+                type_args: vec![],
+            },
+            list_int(),
+        );
+        let arm = almide_ir::IrMatchArm {
+            pattern: IrPattern::Wildcard,
+            guard: None,
+            body: ir_expr(IrExprKind::Unit, Ty::Unit),
+        };
+        let m = ir_expr(
+            IrExprKind::Match { subject: Box::new(subject), arms: vec![arm] },
+            Ty::Unit,
+        );
+        let b = body(vec![stmt(IrStmtKind::Expr { expr: m })]);
+        match lower_body(&b, "main") {
+            Err(LowerError::Unsupported(r)) => assert!(r.contains("fresh heap subject"), "got: {r}"),
+            other => panic!("expected a fresh-heap-subject wall, got {other:?}"),
+        }
     }
 
     #[test]
