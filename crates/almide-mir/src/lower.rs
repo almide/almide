@@ -383,20 +383,34 @@ impl LowerCtx {
     }
 
     /// Lower a stdlib `Module` call (`<module>.<func>(args)`) in a VALUE position
-    /// (bind or tail) to an `Op::CallFn` named `"<module>.<func>"`, IFF it is
-    /// admissible. Two gates, in order:
-    /// 1. FIRST-ORDER — no argument is a closure/function (`is_higher_order`): the
-    ///    stdlib callee would invoke user code whose capabilities/ownership are
-    ///    unmodelled in this slice.
-    /// 2. PURE — the callee reaches no host capability ([`purity::is_pure`]): an
-    ///    effectful call lowered as a bare `Op::CallFn` would silently omit its
-    ///    capability from the witness `used` set (the checker derives caps only
-    ///    from `Op::Call`), i.e. accept-but-unsafe. Walling it keeps `used`
-    ///    complete by construction (no certificate is emitted at all).
-    /// When both pass it lowers exactly like the verified `Named`-call arm: a heap
-    /// result is a FRESH OWNED value (the return-mode signature), a scalar result
-    /// carries no ownership. The caller decides bind (push to live handles) vs tail
-    /// (move out). Returns the result's [`ValueId`].
+    /// (bind or tail) to an `Op::CallFn` named `"<module>.<func>"`, IFF admissible.
+    ///
+    /// THE GATE: PURE — the callee reaches no host capability of its OWN
+    /// ([`purity::is_pure`]). An effectful call lowered as a bare `Op::CallFn` would
+    /// silently omit its capability from `used` (the checker derives caps only from
+    /// `Op::Call`/the transitive fold over named callees), i.e. accept-but-unsafe.
+    /// Walling it keeps `used` complete by construction. (A pure combinator's dotted
+    /// name is treated as Stdout-free by the fold — sound because it IS pure; the
+    /// capabilities come from the CLOSURE it applies, captured below.)
+    ///
+    /// HIGHER-ORDER closures are admitted (a pure combinator — `list.map`/`filter`/
+    /// `fold` … — INVOKES the closure during the call and DISCARDS it: it never
+    /// escapes, so the closure's captures cannot outlive the scope). Each closure
+    /// ARGUMENT is handled by its capability, its value DEFERRED:
+    /// - a `Lambda` — its body's calls are recorded as effect markers
+    ///   ([`Self::record_elided_calls`]), so a printing closure taints HONESTLY and a
+    ///   nested higher-order call inside the body is left elided (the `mir <= ir`
+    ///   gate then taints — never a FALSE caps-verified);
+    /// - a `ClosureCreate`/`FnRef` — its named callee is recorded as a marker so the
+    ///   fold reaches its capabilities;
+    /// - an OPAQUE function value (a `Fn`-typed `Var`/expr whose callee is unknown
+    ///   here) is WALLED — its capabilities are unanalyzable, so admitting it would
+    ///   be accept-but-unsafe. The closure's captures are BORROWED (the env is not
+    ///   materialized → the rendered code owns nothing extra → memory-safe).
+    ///
+    /// Non-closure args are lowered normally. A heap result is a FRESH OWNED value
+    /// (the return-mode signature), a scalar result carries no ownership. The caller
+    /// decides bind (push to live handles) vs tail (move out). Returns the result.
     fn lower_pure_module_value_call(
         &mut self,
         module: &str,
@@ -404,17 +418,38 @@ impl LowerCtx {
         args: &[IrExpr],
         result_ty: &Ty,
     ) -> Result<ValueId, LowerError> {
-        if is_higher_order(args) {
-            return Err(LowerError::Unsupported(format!(
-                "Module call {module}.{func} with a function-typed argument (closure capabilities unmodelled) not in this brick"
-            )));
-        }
         if !purity::is_pure(module, func) {
             return Err(LowerError::Unsupported(format!(
                 "effectful/impure stdlib Module call {module}.{func} needs a declared capability not in this brick"
             )));
         }
-        let lowered = self.lower_call_args(args)?;
+        // Capture each closure argument's capabilities; collect the rest for normal
+        // lowering. An opaque function value (unanalyzable caps) walls the whole call.
+        let mut regular: Vec<IrExpr> = Vec::new();
+        for a in args {
+            match &a.kind {
+                IrExprKind::Lambda { body, .. } => self.record_elided_calls(body),
+                IrExprKind::ClosureCreate { func_name, .. } => self.ops.push(Op::CallFn {
+                    dst: None,
+                    name: func_name.as_str().to_string(),
+                    args: Vec::new(),
+                    result: None,
+                }),
+                IrExprKind::FnRef { name } => self.ops.push(Op::CallFn {
+                    dst: None,
+                    name: name.as_str().to_string(),
+                    args: Vec::new(),
+                    result: None,
+                }),
+                _ if matches!(a.ty, Ty::Fn { .. }) => {
+                    return Err(LowerError::Unsupported(format!(
+                        "Module call {module}.{func} with an opaque function-value argument (capabilities unanalyzable) not in this brick"
+                    )))
+                }
+                _ => regular.push(a.clone()),
+            }
+        }
+        let lowered = self.lower_call_args(&regular)?;
         let dst = self.fresh_value();
         let repr = repr_of(result_ty)?;
         self.ops.push(Op::CallFn {
@@ -1668,8 +1703,11 @@ mod tests {
     }
 
     #[test]
-    fn higher_order_module_call_is_walled() {
-        // var ys = list.map(xs, f)  with f : (Int) -> Int  → walled (closure arg).
+    fn higher_order_module_call_with_opaque_fn_value_is_walled() {
+        // var ys = list.map(xs, f)  with f : (Int) -> Int an OPAQUE function value —
+        // its capabilities are unanalyzable here, so it is walled (admitting it would
+        // be accept-but-unsafe). (An analyzable Lambda closure IS admitted — see
+        // `higher_order_module_call_with_lambda_captures_closure_caps`.)
         let fn_ty = Ty::Fn { params: vec![Ty::Int], ret: Box::new(Ty::Int) };
         let b = body(vec![
             bind(0, list_int(), ir_expr(IrExprKind::List { elements: vec![] }, list_int())),
@@ -1689,10 +1727,60 @@ mod tests {
         ]);
         match lower_body(&b, "main") {
             Err(LowerError::Unsupported(m)) => {
-                assert!(m.contains("function-typed argument"), "got: {m}")
+                assert!(m.contains("opaque function-value"), "got: {m}")
             }
-            other => panic!("expected a higher-order wall, got {other:?}"),
+            other => panic!("expected an opaque-function-value wall, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn higher_order_module_call_with_lambda_captures_closure_caps() {
+        use almide_lang::intern::sym;
+        // var ys = list.map(xs, (x) => f(x))  — a higher-order PURE combinator with an
+        // analyzable Lambda closure is ADMITTED: the closure body's call `f` is
+        // captured as an effect marker (so its caps reach the witness), the closure is
+        // deferred (no env materialized), and the result is a fresh owned list.
+        let lambda = ir_expr(
+            IrExprKind::Lambda {
+                params: vec![(VarId(3), Ty::Int)],
+                body: Box::new(ir_expr(
+                    IrExprKind::Call {
+                        target: CallTarget::Named { name: sym("f") },
+                        args: vec![ir_expr(IrExprKind::Var { id: VarId(3) }, Ty::Int)],
+                        type_args: vec![],
+                    },
+                    Ty::Int,
+                )),
+                lambda_id: None,
+            },
+            Ty::Fn { params: vec![Ty::Int], ret: Box::new(Ty::Int) },
+        );
+        let b = body(vec![
+            bind(0, list_int(), ir_expr(IrExprKind::List { elements: vec![] }, list_int())),
+            bind(
+                1,
+                list_int(),
+                module_call(
+                    "list",
+                    "map",
+                    vec![ir_expr(IrExprKind::Var { id: VarId(0) }, list_int()), lambda],
+                    list_int(),
+                ),
+            ),
+        ]);
+        let mir = lower_body(&b, "main").expect("higher-order pure combinator with a lambda lowers");
+        // The closure body's call `f` is captured as a marker; the HOF result is a
+        // fresh owned list (CallFn `list.map`).
+        assert!(
+            mir.ops.iter().any(|o| matches!(o, Op::CallFn { dst: None, name, .. } if name == "f")),
+            "closure body call captured as a marker: {:?}",
+            mir.ops
+        );
+        assert!(
+            mir.ops.iter().any(|o| matches!(o, Op::CallFn { dst: Some(_), name, .. } if name == "list.map")),
+            "the HOF result is a fresh owned value",
+        );
+        assert_eq!(verify_ownership(&mir), Ok(()));
     }
 
     #[test]
