@@ -1218,6 +1218,53 @@ mod tests {
     }
 
     #[test]
+    fn for_in_exclusive_range_executes_each_step() {
+        // `for i in 0..n` desugars to the while machinery and RUNS each step: the index
+        // is a fresh, mutable local stepped by 1, the end snapshot once. print_range(4)
+        // prints 0,1,2,3 (exclusive), byte-matching v0.
+        let src = "fn put_int(n: Int, pos: Int) -> Int =\n  \
+            if n < 10 then { prim.store8(pos, 48 + n)\n    pos + 1 }\n  \
+            else { let p = put_int(n / 10, pos)\n    prim.store8(p, 48 + (n % 10))\n    p + 1 }\n\
+            fn write_int(n: Int) -> Unit = { let endp = put_int(n, 512)\n  \
+            prim.store8(endp, 10)\n  prim.store32(8, 512)\n  \
+            prim.store32(12, endp - 512 + 1)\n  let _w = prim.fd_write(1, 8, 1, 0) }\n\
+            fn print_range(n: Int) -> Unit = {\n  \
+            for i in 0..n {\n    write_int(i)\n  } }\n\
+            fn main() -> Unit = print_range(4)\n";
+        let prog = lower_source(src);
+        let f = prog.functions.iter().find(|f| f.name == "print_range").unwrap();
+        assert!(
+            f.ops.iter().any(|op| matches!(op, Op::LoopStart)),
+            "for-in must lower to LoopStart (executable), got {:?}",
+            f.ops
+        );
+        if let Some(out) = build_and_run("for_range", &render_wasm_program(&prog)) {
+            assert_eq!(out, "0\n1\n2\n3");
+        }
+    }
+
+    #[test]
+    fn for_in_inclusive_range_includes_end() {
+        // `for i in 1..=n` is INCLUSIVE (i <= n): sum_range(5) accumulates 1+2+3+4+5 = 15,
+        // proving the index threads through and the inclusive bound includes `n`.
+        let src = "fn put_int(n: Int, pos: Int) -> Int =\n  \
+            if n < 10 then { prim.store8(pos, 48 + n)\n    pos + 1 }\n  \
+            else { let p = put_int(n / 10, pos)\n    prim.store8(p, 48 + (n % 10))\n    p + 1 }\n\
+            fn write_int(n: Int) -> Unit = { let endp = put_int(n, 512)\n  \
+            prim.store8(endp, 10)\n  prim.store32(8, 512)\n  \
+            prim.store32(12, endp - 512 + 1)\n  let _w = prim.fd_write(1, 8, 1, 0) }\n\
+            fn sum_range(n: Int) -> Unit = {\n  \
+            var total = 0\n  \
+            for i in 1..=n {\n    total = total + i\n  }\n  \
+            write_int(total) }\n\
+            fn main() -> Unit = sum_range(5)\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("for_incl", &render_wasm_program(&prog)) {
+            assert_eq!(out, "15");
+        }
+    }
+
+    #[test]
     fn match_scalar_value_selects_matched_arm() {
         // A scalar-result `match` over Int literals computes the matched arm's value
         // (here printed via the self-hosted itoa). pick(1) selects the `1 => 200` arm.

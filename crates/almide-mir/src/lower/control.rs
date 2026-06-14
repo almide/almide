@@ -1,7 +1,7 @@
 //! `LowerCtx` methods: control (extracted from lower/mod.rs).
 
 use super::*;
-use crate::{CallArg, Op, ValueId};
+use crate::{CallArg, IntOp, Op, ValueId};
 use almide_ir::{
     IrExpr, IrExprKind, IrMatchArm, IrPattern, IrStmt, VarId,
 };
@@ -349,6 +349,11 @@ impl LowerCtx {
         iterable: &IrExpr,
         body: &[IrStmt],
     ) -> Result<(), LowerError> {
+        // First try to EXECUTE a scalar `for i in start..end` as a real loop; out of that
+        // subset it rolls back and we keep the model-one-iteration form below.
+        if self.try_lower_scalar_for_range(var, var_tuple, iterable, body) {
+            return Ok(());
+        }
         // The iterable is evaluated ONCE before the loop. A heap iterable goes through
         // `lower_call_args` — an already-tracked `Var` is borrowed (no new ownership),
         // a fresh heap value is materialized into an owned temp dropped at the OUTER
@@ -469,6 +474,89 @@ impl LowerCtx {
         self.ops.truncate(ops_mark);
         self.live_heap_handles.truncate(lhh_mark);
         self.value_of = value_of_snapshot;
+    }
+
+    /// Try to lower `for i in start..end { body }` over a SCALAR Int index as a REAL loop
+    /// that EXECUTES every step — desugaring the range to the same while machinery
+    /// (`LoopStart`/`LoopBreakUnless`/`LoopEnd` + `SetLocal`). The index is its own stable
+    /// local initialized to `start` and incremented by 1 each iteration; `end` is snapshot
+    /// ONCE before the loop (v0 builds the range once). Restricted to the runnable subset:
+    /// a LITERAL `start` (so the index local is a fresh, distinct `ConstInt` — safe to
+    /// mutate, never aliasing a caller value), a scalar-lowerable `end`, an Int loop var
+    /// (no tuple), no `break`/`continue`, and a heap-reassign-free body (the
+    /// `scalar_loop_depth` rule errors otherwise). Returns false (rolled back) when out of
+    /// subset; `lower_for_in` then falls back to its sound model-one-iteration form.
+    pub(crate) fn try_lower_scalar_for_range(
+        &mut self,
+        var: VarId,
+        var_tuple: &Option<Vec<VarId>>,
+        iterable: &IrExpr,
+        body: &[IrStmt],
+    ) -> bool {
+        let IrExprKind::Range { start, end, inclusive } = &iterable.kind else {
+            return false;
+        };
+        if var_tuple.is_some()
+            || body_breaks_or_continues(body)
+            || !matches!(find_var_ty(body, var), Some(Ty::Int))
+            || !matches!(start.kind, IrExprKind::LitInt { .. })
+        {
+            return false;
+        }
+        let ops_mark = self.ops.len();
+        let lhh_mark = self.live_heap_handles.len();
+        let value_of_snapshot = self.value_of.clone();
+
+        // Snapshot `end` once; init the index local `i = start` (a fresh ConstInt — a
+        // distinct, mutable local, never aliasing a caller value). `one` for the step.
+        let end_v = match self.lower_scalar_value(end) {
+            Some(v) => v,
+            None => {
+                self.rollback_scalar_loop(ops_mark, lhh_mark, value_of_snapshot);
+                return false;
+            }
+        };
+        if self.lower_bind(var, &Ty::Int, start).is_err() {
+            self.rollback_scalar_loop(ops_mark, lhh_mark, value_of_snapshot);
+            return false;
+        }
+        let Some(&i_v) = self.value_of.get(&var) else {
+            self.rollback_scalar_loop(ops_mark, lhh_mark, value_of_snapshot);
+            return false;
+        };
+        let one_v = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: one_v, value: 1 });
+
+        self.ops.push(Op::LoopStart);
+        // The bound test, re-read each iteration: `i < end` (exclusive) / `i <= end` (incl).
+        let cond_v = self.fresh_value();
+        let cmp = if *inclusive { IntOp::Le } else { IntOp::Lt };
+        self.ops.push(Op::IntBinOp { dst: cond_v, op: cmp, a: i_v, b: end_v });
+        self.ops.push(Op::LoopBreakUnless { cond: cond_v });
+
+        let body_mark = self.live_heap_handles.len();
+        self.in_frame += 1;
+        self.scalar_loop_depth += 1;
+        let mut ok = true;
+        for stmt in body {
+            if self.lower_stmt(stmt).is_err() {
+                ok = false;
+                break;
+            }
+        }
+        self.scalar_loop_depth -= 1;
+        self.in_frame -= 1;
+        if !ok {
+            self.rollback_scalar_loop(ops_mark, lhh_mark, value_of_snapshot);
+            return false;
+        }
+        self.drop_arm_locals(body_mark);
+        // The implicit step `i = i + 1`, then the back-edge.
+        let next_v = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst: next_v, op: IntOp::Add, a: i_v, b: one_v });
+        self.ops.push(Op::SetLocal { local: i_v, src: next_v });
+        self.ops.push(Op::LoopEnd);
+        true
     }
 
     pub(crate) fn lower_while(&mut self, cond: &IrExpr, body: &[IrStmt]) -> Result<(), LowerError> {
