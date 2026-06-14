@@ -989,10 +989,11 @@
         assert_eq!(verify_ownership(&mir2), Ok(()));
 
         // A NESTED-container extraction (the immediate container is itself an
-        // extraction, not a tracked var) stays walled — there is no `src` to Dup.
+        // extraction, not a tracked var) has no `src` to Dup, so it falls back to a
+        // DEFERRED fresh `Alloc{Opaque}` — never walled, always memory-safe.
         let nested = ir_expr(
             IrExprKind::Member { object: Box::new(idx(c(), list_int())), field: sym("x") },
-            Ty::String,
+            list_int(),
         );
         let nested_call = ir_expr(
             IrExprKind::Call {
@@ -1006,10 +1007,13 @@
             bind(0, list_int(), ir_expr(IrExprKind::List { elements: vec![] }, list_int())),
             stmt(IrStmtKind::Expr { expr: nested_call }),
         ]);
-        match lower_body(&b2, "main") {
-            Err(LowerError::Unsupported(m)) => assert!(m.contains("not a tracked heap var"), "got: {m}"),
-            other => panic!("expected a nested-container wall, got {other:?}"),
-        }
+        let mir3 = lower_body(&b2, "main").expect("nested extraction falls back to a deferred fresh value");
+        assert!(
+            mir3.ops.iter().any(|o| matches!(o, Op::Alloc { init: Init::Opaque, .. })),
+            "the nested extraction is a deferred fresh Opaque: {:?}",
+            mir3.ops
+        );
+        assert_eq!(verify_ownership(&mir3), Ok(()));
     }
 
     #[test]

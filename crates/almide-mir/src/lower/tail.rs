@@ -147,7 +147,8 @@ impl LowerCtx {
                 // a RANGE is a fresh value — both `Alloc{Opaque}`, moved out.
                 | IrExprKind::Lambda { .. }
                 | IrExprKind::ClosureCreate { .. }
-                | IrExprKind::Range { .. } => {
+                | IrExprKind::Range { .. }
+                | IrExprKind::RuntimeCall { .. } => {
                     let dst = self.fresh_value();
                     let repr = repr_of(&tail.ty)?;
                     let init = alloc_init(tail);
@@ -187,12 +188,23 @@ impl LowerCtx {
                     Ok(Some(dst))
                 }
                 // `fn f(r) = r.x` — a HEAP extraction returned directly: alias the
-                // container (`Op::Dup`) and move it out (cert `a` + `m`).
+                // container (`Op::Dup`) and move it out (cert `a` + `m`). A non-var
+                // container (`f().x`, nested) falls back to a deferred fresh Opaque,
+                // moved out — never walled.
                 IrExprKind::Member { .. }
                 | IrExprKind::IndexAccess { .. }
                 | IrExprKind::MapAccess { .. }
                 | IrExprKind::TupleIndex { .. } => {
-                    let dst = self.lower_heap_extraction(tail)?;
+                    let dst = match self.lower_heap_extraction(tail) {
+                        Ok(dst) => dst,
+                        Err(_) => {
+                            let dst = self.fresh_value();
+                            let repr = repr_of(&tail.ty)?;
+                            self.ops.push(Op::Alloc { dst, repr, init: Init::Opaque });
+                            self.record_elided_calls(tail);
+                            dst
+                        }
+                    };
                     Ok(Some(dst))
                 }
                 // `fn f() = if c then … else …` — a heap-result branch RETURNED.

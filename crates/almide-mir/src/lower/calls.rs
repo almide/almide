@@ -337,8 +337,14 @@ impl LowerCtx {
                 | IrExprKind::UnwrapOr { .. }
                 | IrExprKind::ToOption { .. }
                 | IrExprKind::OptionalChain { .. }
-                // A RANGE argument (`f(0..n)`) is a fresh value of the same shape.
-                | IrExprKind::Range { .. } => {
+                // A RANGE (`f(0..n)`), a RUNTIME CALL, or an `if`/`match` ARGUMENT is a
+                // fresh value of the same shape — a deferred `Alloc{Opaque}`/`Const`,
+                // its calls (incl. the branch arms' calls) captured by
+                // `record_elided_calls`; the arms' values/effects are deferred.
+                | IrExprKind::Range { .. }
+                | IrExprKind::RuntimeCall { .. }
+                | IrExprKind::If { .. }
+                | IrExprKind::Match { .. } => {
                     let dst = self.fresh_value();
                     self.record_elided_calls(a);
                     if is_heap_ty(&a.ty) {
@@ -361,8 +367,17 @@ impl LowerCtx {
                 | IrExprKind::MapAccess { .. }
                 | IrExprKind::TupleIndex { .. } => {
                     if is_heap_ty(&a.ty) {
-                        let dst = self.lower_heap_extraction(a)?;
                         let repr = repr_of(&a.ty)?;
+                        let dst = match self.lower_heap_extraction(a) {
+                            Ok(dst) => dst,
+                            // A non-var container (`f().x`) → deferred fresh Opaque.
+                            Err(_) => {
+                                let dst = self.fresh_value();
+                                self.ops.push(Op::Alloc { dst, repr, init: Init::Opaque });
+                                self.record_elided_calls(a);
+                                dst
+                            }
+                        };
                         self.materialized_call_arg(dst, repr)
                     } else {
                         // A SCALAR extraction is a `Const` copy — its container

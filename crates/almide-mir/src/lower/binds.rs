@@ -71,7 +71,10 @@ impl LowerCtx {
             // honestly (the closure's invocation capabilities are unknown).
             | IrExprKind::Lambda { .. }
             | IrExprKind::ClosureCreate { .. }
-            | IrExprKind::Range { .. } => {
+            | IrExprKind::Range { .. }
+            // A RUNTIME CALL result is a fresh value (its call is elided ⇒ the gate
+            // taints the function honestly, like Method/Computed).
+            | IrExprKind::RuntimeCall { .. } => {
                 let dst = self.fresh_value();
                 let repr = repr_of(ty)?;
                 let init = alloc_init(value);
@@ -82,12 +85,25 @@ impl LowerCtx {
                 Ok(())
             }
             // `var v = r.x` / `xs[i]` — a HEAP extraction: alias the container
-            // (`Op::Dup`), bound here and dropped at scope end (cert `a` + `d`).
+            // (`Op::Dup`), bound here and dropped at scope end (cert `a` + `d`). When
+            // the container is NOT a tracked var (`f().x`, nested `a.b.c`), there is no
+            // single `src` to `Dup`, so fall back to a deferred fresh `Alloc{Opaque}`
+            // (the extracted value deferred, its container's calls captured) — never a
+            // wall (totality), always memory-safe (a clean fresh alloc).
             IrExprKind::Member { .. }
             | IrExprKind::IndexAccess { .. }
             | IrExprKind::MapAccess { .. }
             | IrExprKind::TupleIndex { .. } => {
-                let dst = self.lower_heap_extraction(value)?;
+                let dst = match self.lower_heap_extraction(value) {
+                    Ok(dst) => dst,
+                    Err(_) => {
+                        let dst = self.fresh_value();
+                        let repr = repr_of(ty)?;
+                        self.ops.push(Op::Alloc { dst, repr, init: Init::Opaque });
+                        self.record_elided_calls(value);
+                        dst
+                    }
+                };
                 self.value_of.insert(var, dst);
                 self.live_heap_handles.push(dst);
                 Ok(())
