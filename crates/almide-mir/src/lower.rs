@@ -97,12 +97,24 @@ pub fn lower_function(func: &IrFunction) -> Result<MirFunction, LowerError> {
     let mut ctx = LowerCtx::default();
     let params = ctx.bind_params(&func.params)?;
     let ret = ctx.lower_body_into(&func.body)?;
+    // The function's EFFECT SIGNATURE → its declared capability bound. The v1 model
+    // has one capability (Stdout); an `effect fn` declares it may reach the host, so
+    // it admits the only modeled cap. A pure `fn` declares ∅ — so if it reached
+    // Stdout (forbidden by the effect system) the proven `used ⊆ declared` checker
+    // would REJECT it. The capability gate verifies `reachable ⊆ declared`, not just
+    // "reaches nothing" — so an effectful function is now caps-VERIFIED against its
+    // own declared bound, not merely excluded.
+    let declared_caps = if func.is_effect {
+        vec![crate::Capability::Stdout]
+    } else {
+        Vec::new()
+    };
     Ok(MirFunction {
         name: func.name.as_str().to_string(),
         params,
         ops: ctx.ops,
         ret,
-        ..Default::default()
+        declared_caps,
     })
 }
 

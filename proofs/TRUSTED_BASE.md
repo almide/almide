@@ -161,8 +161,23 @@ The receipt's claims are scoped to exactly this:
   `Module` call, a variant constructor, or a known Stdout-free builtin
   (`assert*`/`eprintln`/`panic`/`to_string` — these reach stderr/abort, NOT
   Stdout) is free; ANY other unknown callee (a walled or cross-file user function)
-  TAINTS, so the function is reported `caps-unverified` (1805/2602 verified, 797
-  unverified) rather than falsely accepted. **A call ELIDED by Opaque lowering**
+  TAINTS, so the function is reported `caps-unverified` (1810/2602 verified, 792
+  unverified) rather than falsely accepted. **The gate verifies the REAL
+  capability-bound property `reachable ⊆ declared`** (exactly what
+  `proofs/CapabilityBound.v` proves), not a degenerate "reaches no capability at
+  all". `lower_function` lowers each function's effect signature into a
+  `declared_caps` bound — an `effect fn` declares `{Stdout}` (the one modeled
+  cap), a pure `fn` declares ∅ — and the classifier folds the transitive
+  *reachable* cap set (`certificate::reachable_caps_or_tainted`, returning `None`
+  on any taint and `Some(set)` only when every edge is analyzable), then emits
+  `<declared>|<reachable>` for the proven `check_caps_cert` to re-verify
+  `reachable ⊆ declared`. So an effectful function is VERIFIED AGAINST ITS OWN
+  declared bound (a printing `effect fn` is accepted because it declared the
+  Stdout it uses), not merely excluded for touching a capability. A function that
+  reaches a capability it did NOT declare — e.g. a non-`effect fn` that prints,
+  since the frontend `is_effect` flag does not cover every Stdout reach — fails
+  `reachable ⊆ declared` and is conservatively caps-unverified, never falsely
+  accepted. **A call ELIDED by Opaque lowering**
   (a list element, ctor payload, or BinOp operand — absent from `func.ops`) is a
   second caps blind spot the fold cannot see: a function whose source has MORE
   call nodes than its MIR (`count_ir_calls` > MIR call-ops), or any transitive

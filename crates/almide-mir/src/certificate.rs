@@ -220,6 +220,45 @@ pub fn reaches_capability_or_unknown(
     })
 }
 
+/// The transitive reachable capabilities of `name`, or `None` if its `Op::CallFn`
+/// closure hits an UNANALYZABLE callee — an unknown/cross-file callee (not in
+/// `program` and not `is_known_free`) or one with an ELIDED call (`is_elided`)
+/// whose effects are absent from its MIR. A `None` function cannot be capability-
+/// verified (its reachable set is incomplete, so a hidden effect could exceed any
+/// declared bound). A `Some(set)` function's effects are FULLY known: the gate
+/// then emits `<declared>|<set>` and the proven `check_caps_cert` verifies
+/// `set ⊆ declared` — so an EFFECTFUL function is verified against its OWN declared
+/// capability bound, not merely excluded for touching a capability. This is the
+/// set-valued counterpart of [`reaches_capability_or_unknown`].
+pub fn reachable_caps_or_tainted(
+    name: &str,
+    program: &BTreeMap<String, MirFunction>,
+    is_known_free: &dyn Fn(&str) -> bool,
+    is_elided: &dyn Fn(&str) -> bool,
+    visited: &mut std::collections::BTreeSet<String>,
+) -> Option<Vec<Capability>> {
+    if !visited.insert(name.to_string()) {
+        return Some(Vec::new()); // cycle / diamond: already folded on the stack
+    }
+    let func = match program.get(name) {
+        Some(f) => f,
+        None => return if is_known_free(name) { Some(Vec::new()) } else { None },
+    };
+    if is_elided(name) {
+        return None; // an elided call hides effects from this fold — unanalyzable
+    }
+    let mut caps = cap_witness(func).used;
+    for op in &func.ops {
+        if let Op::CallFn { name: callee, .. } = op {
+            match reachable_caps_or_tainted(callee, program, is_known_free, is_elided, visited) {
+                Some(c) => caps.extend(c),
+                None => return None,
+            }
+        }
+    }
+    Some(caps)
+}
+
 /// Per-object refcount-event accumulator, preserving object creation order.
 struct Streams {
     of: BTreeMap<ValueId, ValueId>, // handle → object representative
@@ -709,6 +748,41 @@ mod tests {
         let not_elided = |_: &str| false;
         let mut v = BTreeSet::new();
         assert!(!reaches_capability_or_unknown("a", &program, &none_free, &not_elided, &mut v));
+    }
+
+    #[test]
+    fn reachable_caps_returns_the_set_or_taints() {
+        use std::collections::{BTreeMap, BTreeSet};
+        let none_free = |_: &str| false;
+        let not_elided = |_: &str| false;
+        // main → beep (prints Stdout): reachable = {Stdout}, FULLY known.
+        let mut beep = func(vec![
+            Op::Const { dst: ValueId(0) },
+            Op::Call { dst: None, func: RtFn::PrintInt, args: vec![CallArg::Scalar(ValueId(0))], result: None },
+        ]);
+        beep.name = "beep".into();
+        let mut main = func(vec![Op::CallFn { dst: None, name: "beep".into(), args: vec![], result: None }]);
+        main.name = "main".into();
+        let mut program: BTreeMap<String, MirFunction> = BTreeMap::new();
+        for f in [beep, main] {
+            program.insert(f.name.clone(), f);
+        }
+        let mut v = BTreeSet::new();
+        assert_eq!(
+            reachable_caps_or_tainted("main", &program, &none_free, &not_elided, &mut v),
+            Some(vec![Capability::Stdout])
+        );
+        // An unknown callee → None (incomplete reachable set, cannot verify).
+        let mut f = func(vec![Op::CallFn { dst: None, name: "x".into(), args: vec![], result: None }]);
+        f.name = "f".into();
+        let mut p2: BTreeMap<String, MirFunction> = BTreeMap::new();
+        p2.insert("f".to_string(), f);
+        let mut v2 = BTreeSet::new();
+        assert_eq!(reachable_caps_or_tainted("f", &p2, &none_free, &not_elided, &mut v2), None);
+        // An elided callee → None.
+        let elided = |n: &str| n == "f";
+        let mut v3 = BTreeSet::new();
+        assert_eq!(reachable_caps_or_tainted("f", &p2, &none_free, &elided, &mut v3), None);
     }
 
     #[test]

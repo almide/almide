@@ -35,9 +35,9 @@ use almide_lang::lexer::Lexer;
 use almide_lang::parser::Parser;
 use almide_ir::IrTypeDeclKind;
 use almide_mir::certificate::{
-    cap_witness_string, name_witness_string, ownership_certificate, reaches_capability_or_unknown,
+    name_witness_string, ownership_certificate, reachable_caps_or_tainted,
 };
-use almide_mir::{MirFunction, Op};
+use almide_mir::{Capability, MirFunction, Op};
 use almide_optimize::{mono, optimize};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -337,15 +337,36 @@ fn main() {
             n.contains('.') || ctors.contains(n) || KNOWN_STDOUT_FREE_BUILTINS.contains(&n)
         };
         let is_elided = |n: &str| elided_call_fns.contains(n);
+        let cap_ids =
+            |c: &[Capability]| c.iter().map(|x| x.id().to_string()).collect::<Vec<_>>().join(" ");
         for (name, mir) in &file_mirs {
             let mut visited = BTreeSet::new();
-            if reaches_capability_or_unknown(name, &in_profile_map, &is_known_free, &is_elided, &mut visited)
+            match reachable_caps_or_tainted(name, &in_profile_map, &is_known_free, &is_elided, &mut visited)
             {
-                t.caps_unverified += 1;
-            } else {
-                caps_stream.push_str(&cap_witness_string(mir));
-                caps_stream.push('\n');
-                t.caps_verified += 1;
+                // Unanalyzable (an unknown/cross-file or elided callee hides effects).
+                None => t.caps_unverified += 1,
+                // Fully-known reachable set. Caps-VERIFIED iff it is within the
+                // DECLARED bound (`reachable ⊆ declared`): then emit the
+                // `<declared>|<reachable>` witness for the proven `check_caps_cert` to
+                // re-verify. A function reaching a capability it did NOT declare (e.g.
+                // a non-`effect fn` that prints — `is_effect` does not capture every
+                // Stdout reach) is conservatively caps-UNVERIFIED — it has an
+                // undeclared effect, honestly not claimed safe (emitting it would
+                // (correctly) fault the proven subset checker and fail the gate).
+                Some(reachable) => {
+                    let declared: std::collections::BTreeSet<u32> =
+                        mir.declared_caps.iter().map(|c| c.id()).collect();
+                    if reachable.iter().all(|c| declared.contains(&c.id())) {
+                        caps_stream.push_str(&format!(
+                            "{}|{}\n",
+                            cap_ids(&mir.declared_caps),
+                            cap_ids(&reachable)
+                        ));
+                        t.caps_verified += 1;
+                    } else {
+                        t.caps_unverified += 1;
+                    }
+                }
             }
         }
     }
