@@ -322,19 +322,22 @@ fn render_op(op: &Op, label_off: &BTreeMap<String, (u32, u32)>) -> String {
         // A runtime call → a wasm `call` of the (bootstrap) runtime function.
         Op::Call { dst, func, args, .. } => render_call(*dst, func, args, label_off),
         Op::IntBinOp { dst, op, a, b } => {
-            let o = match op {
-                IntOp::Add => "i64.add",
-                IntOp::Sub => "i64.sub",
-                IntOp::Mul => "i64.mul",
-                IntOp::Div => "i64.div_s",
-                IntOp::Mod => "i64.rem_s",
+            let args = format!("(local.get {}) (local.get {})", local(*a), local(*b));
+            // A comparison yields an i32 0/1 → zero-extend to the i64 scalar model.
+            let expr = match op {
+                IntOp::Add => format!("(i64.add {args})"),
+                IntOp::Sub => format!("(i64.sub {args})"),
+                IntOp::Mul => format!("(i64.mul {args})"),
+                IntOp::Div => format!("(i64.div_s {args})"),
+                IntOp::Mod => format!("(i64.rem_s {args})"),
+                IntOp::Lt => format!("(i64.extend_i32_u (i64.lt_s {args}))"),
+                IntOp::Le => format!("(i64.extend_i32_u (i64.le_s {args}))"),
+                IntOp::Gt => format!("(i64.extend_i32_u (i64.gt_s {args}))"),
+                IntOp::Ge => format!("(i64.extend_i32_u (i64.ge_s {args}))"),
+                IntOp::Eq => format!("(i64.extend_i32_u (i64.eq {args}))"),
+                IntOp::Ne => format!("(i64.extend_i32_u (i64.ne {args}))"),
             };
-            format!(
-                "    (local.set {d} ({o} (local.get {a}) (local.get {b})))\n",
-                d = local(*dst),
-                a = local(*a),
-                b = local(*b)
-            )
+            format!("    (local.set {d} {expr})\n", d = local(*dst))
         }
         Op::CallFn { dst, name, args, .. } => {
             let argstr = args.iter().map(render_arg_wasm).collect::<Vec<_>>().join(" ");

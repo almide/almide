@@ -161,14 +161,22 @@ fn render_op(op: &Op) -> Option<String> {
         // runtime; ultimately these are calls to self-hosted Almide functions).
         Op::Call { func, args, .. } => Some(render_call(func, args)),
         Op::IntBinOp { dst, op, a, b } => {
-            let o = match op {
-                IntOp::Add => "+",
-                IntOp::Sub => "-",
-                IntOp::Mul => "*",
-                IntOp::Div => "/",
-                IntOp::Mod => "%",
+            let (a, b, d) = (var(*a), var(*b), var(*dst));
+            // A comparison yields a `bool` → cast to the i64 scalar model (0/1).
+            let rhs = match op {
+                IntOp::Add => format!("{a} + {b}"),
+                IntOp::Sub => format!("{a} - {b}"),
+                IntOp::Mul => format!("{a} * {b}"),
+                IntOp::Div => format!("{a} / {b}"),
+                IntOp::Mod => format!("{a} % {b}"),
+                IntOp::Lt => format!("({a} < {b}) as i64"),
+                IntOp::Le => format!("({a} <= {b}) as i64"),
+                IntOp::Gt => format!("({a} > {b}) as i64"),
+                IntOp::Ge => format!("({a} >= {b}) as i64"),
+                IntOp::Eq => format!("({a} == {b}) as i64"),
+                IntOp::Ne => format!("({a} != {b}) as i64"),
             };
-            Some(format!("let {}: i64 = {} {o} {};", var(*dst), var(*a), var(*b)))
+            Some(format!("let {d}: i64 = {rhs};"))
         }
         Op::CallFn { dst, name, args, .. } => {
             let a = args.iter().map(render_arg).collect::<Vec<_>>().join(", ");

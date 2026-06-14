@@ -564,8 +564,15 @@ impl LowerCtx {
                     BinOp::MulInt => crate::IntOp::Mul,
                     BinOp::DivInt => crate::IntOp::Div,
                     BinOp::ModInt => crate::IntOp::Mod,
-                    // Pow, comparisons, logic, Float, concat: not in the int-arith
-                    // subset (IntOp = Add/Sub/Mul/Div/Mod) — defer.
+                    // Comparisons (the `if` condition) — INT operands only (a Float/
+                    // String compare needs a different op). Gate on the operand type.
+                    BinOp::Lt if matches!(left.ty, Ty::Int) => crate::IntOp::Lt,
+                    BinOp::Lte if matches!(left.ty, Ty::Int) => crate::IntOp::Le,
+                    BinOp::Gt if matches!(left.ty, Ty::Int) => crate::IntOp::Gt,
+                    BinOp::Gte if matches!(left.ty, Ty::Int) => crate::IntOp::Ge,
+                    BinOp::Eq if matches!(left.ty, Ty::Int) => crate::IntOp::Eq,
+                    BinOp::Neq if matches!(left.ty, Ty::Int) => crate::IntOp::Ne,
+                    // Pow, Float, logic, concat, non-Int compares: defer.
                     _ => return None,
                 };
                 let a = self.lower_scalar_value(left)?;

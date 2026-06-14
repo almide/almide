@@ -235,6 +235,13 @@ pub enum IntOp {
     Div,
     /// Signed remainder — traps on divide-by-zero (matching v0's checked `ModInt`).
     Mod,
+    // Comparisons: produce a Bool scalar (i64 0/1) — the `if` condition. Signed.
+    Lt,
+    Le,
+    Gt,
+    Ge,
+    Eq,
+    Ne,
 }
 
 /// A runtime function the MIR can call. An enum (not a string) so the renderer
