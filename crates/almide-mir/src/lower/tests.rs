@@ -2,6 +2,7 @@
 #![allow(clippy::all)]
 
     use super::*;
+    use almide_ir::*;
     use crate::{verify_ownership, ViolationKind};
     use almide_lang::types::constructor::TypeConstructorId;
 

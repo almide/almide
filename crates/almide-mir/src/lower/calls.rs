@@ -1,0 +1,423 @@
+//! `LowerCtx` methods: calls (extracted from lower/mod.rs).
+
+use super::*;
+use crate::purity;
+use crate::{CallArg, Init, Op, Repr, RtFn, ValueId};
+use almide_ir::{
+    CallTarget, IrExpr, IrExprKind,
+};
+use almide_lang::types::Ty;
+
+impl LowerCtx {
+
+    /// Lower a stdlib `Module` call (`<module>.<func>(args)`) in a VALUE position
+    /// (bind or tail) to an `Op::CallFn` named `"<module>.<func>"`, IFF admissible.
+    ///
+    /// THE GATE: PURE — the callee reaches no host capability of its OWN
+    /// ([`purity::is_pure`]). An effectful call lowered as a bare `Op::CallFn` would
+    /// silently omit its capability from `used` (the checker derives caps only from
+    /// `Op::Call`/the transitive fold over named callees), i.e. accept-but-unsafe.
+    /// Walling it keeps `used` complete by construction. (A pure combinator's dotted
+    /// name is treated as Stdout-free by the fold — sound because it IS pure; the
+    /// capabilities come from the CLOSURE it applies, captured below.)
+    ///
+    /// HIGHER-ORDER closures are admitted (a pure combinator — `list.map`/`filter`/
+    /// `fold` … — INVOKES the closure during the call and DISCARDS it: it never
+    /// escapes, so the closure's captures cannot outlive the scope). Each closure
+    /// ARGUMENT is handled by its capability, its value DEFERRED:
+    /// - a `Lambda` — its body's calls are recorded as effect markers
+    ///   ([`Self::record_elided_calls`]), so a printing closure taints HONESTLY and a
+    ///   nested higher-order call inside the body is left elided (the `mir <= ir`
+    ///   gate then taints — never a FALSE caps-verified);
+    /// - a `ClosureCreate`/`FnRef` — its named callee is recorded as a marker so the
+    ///   fold reaches its capabilities;
+    /// - an OPAQUE function value (a `Fn`-typed `Var`/expr whose callee is unknown
+    ///   here) is WALLED — its capabilities are unanalyzable, so admitting it would
+    ///   be accept-but-unsafe. The closure's captures are BORROWED (the env is not
+    ///   materialized → the rendered code owns nothing extra → memory-safe).
+    ///
+    /// Non-closure args are lowered normally. A heap result is a FRESH OWNED value
+    /// (the return-mode signature), a scalar result carries no ownership. The caller
+    /// decides bind (push to live handles) vs tail (move out). Returns the result.
+    pub(crate) fn lower_pure_module_value_call(
+        &mut self,
+        module: &str,
+        func: &str,
+        args: &[IrExpr],
+        result_ty: &Ty,
+    ) -> Result<ValueId, LowerError> {
+        let lowered = self.lower_pure_module_call_args(module, func, args)?;
+        let dst = self.fresh_value();
+        let repr = repr_of(result_ty)?;
+        self.ops.push(Op::CallFn {
+            dst: Some(dst),
+            name: format!("{module}.{func}"),
+            args: lowered,
+            result: Some(repr),
+        });
+        Ok(dst)
+    }
+
+    /// Admission + closure-capability capture shared by a stdlib `Module` call in any
+    /// position (value or effect). Requires PURITY (the combinator's OWN caps must be
+    /// ∅ — an effectful call would omit its capability, accept-but-unsafe). Captures
+    /// each closure ARGUMENT's capabilities while DEFERRING its value and BORROWING
+    /// its captures: a `Lambda` body's calls become effect markers, a `ClosureCreate`/
+    /// `FnRef` named callee a marker; an OPAQUE function value (unanalyzable caps) is
+    /// walled. Returns the lowered REGULAR (non-closure) args. The pure combinator
+    /// invokes-and-discards the closure, so its captures never escape — see
+    /// [`Self::lower_pure_module_value_call`].
+    pub(crate) fn lower_pure_module_call_args(
+        &mut self,
+        module: &str,
+        func: &str,
+        args: &[IrExpr],
+    ) -> Result<Vec<CallArg>, LowerError> {
+        if !purity::is_pure(module, func) {
+            return Err(LowerError::Unsupported(format!(
+                "effectful/impure stdlib Module call {module}.{func} needs a declared capability not in this brick"
+            )));
+        }
+        let mut regular: Vec<IrExpr> = Vec::new();
+        for a in args {
+            match &a.kind {
+                IrExprKind::Lambda { body, .. } => self.record_elided_calls(body),
+                IrExprKind::ClosureCreate { func_name, .. } => self.ops.push(Op::CallFn {
+                    dst: None,
+                    name: func_name.as_str().to_string(),
+                    args: Vec::new(),
+                    result: None,
+                }),
+                IrExprKind::FnRef { name } => self.ops.push(Op::CallFn {
+                    dst: None,
+                    name: name.as_str().to_string(),
+                    args: Vec::new(),
+                    result: None,
+                }),
+                _ if matches!(a.ty, Ty::Fn { .. }) => {
+                    return Err(LowerError::Unsupported(format!(
+                        "Module call {module}.{func} with an opaque function-value argument (capabilities unanalyzable) not in this brick"
+                    )))
+                }
+                _ => regular.push(a.clone()),
+            }
+        }
+        self.lower_call_args(&regular)
+    }
+
+    /// Lower a pure `Module` COMBINATOR applied for its EFFECT (`list.each(xs, f)` in
+    /// statement position) — the side effect is the CLOSURE's, captured by
+    /// [`Self::lower_pure_module_call_args`]. A Unit/scalar result carries no
+    /// ownership; a (rarely) discarded HEAP result is allocated and dropped at scope
+    /// end (value semantics — never leaked).
+    pub(crate) fn lower_effect_module_call(
+        &mut self,
+        module: &str,
+        func: &str,
+        args: &[IrExpr],
+        result_ty: &Ty,
+    ) -> Result<(), LowerError> {
+        let lowered = self.lower_pure_module_call_args(module, func, args)?;
+        if is_heap_ty(result_ty) {
+            let dst = self.fresh_value();
+            let repr = repr_of(result_ty)?;
+            self.ops.push(Op::CallFn {
+                dst: Some(dst),
+                name: format!("{module}.{func}"),
+                args: lowered,
+                result: Some(repr),
+            });
+            self.live_heap_handles.push(dst);
+        } else {
+            self.ops.push(Op::CallFn {
+                dst: None,
+                name: format!("{module}.{func}"),
+                args: lowered,
+                result: None,
+            });
+        }
+        Ok(())
+    }
+
+    /// Make the CALLS hidden inside a value whose CONTENT is deferred to
+    /// `Init::Opaque` / `Const` VISIBLE to the transitive capability fold. An
+    /// Opaque/Const value lowers NONE of its sub-expressions, so a call buried in a
+    /// list element, constructor payload, operand, or scalar value (`[f()]`,
+    /// `Some(g(x))`, `a ++ h()`, `var n = list.len(xs)`) vanishes from the MIR —
+    /// invisible to the caps fold over `Op::CallFn` edges, forcing the corpus gate
+    /// to conservatively TAINT the whole function. This appends a bare EFFECT MARKER
+    /// `Op::CallFn { dst: None, args: [], result: None }` per such call: the
+    /// existing handlers already treat a result-less, dst-less call as a PURE EFFECT
+    /// — `ownership_certificate` emits no event (no `+1`/drop), `name_witness`
+    /// references nothing (no dangling ref), the `+1`-backing gate ignores it — yet
+    /// `reachable_caps_or_tainted` matches it by NAME and folds the callee
+    /// transitively. So the EFFECT becomes analyzable while the value CONTENT stays
+    /// deferred: the same Opaque deferral, now extended to the capability axis.
+    ///
+    /// Only calls whose capabilities the fold models SOUNDLY are recorded: a
+    /// first-order `Named` call (the fold opens an in-profile callee or honestly
+    /// taints an unknown one) and a first-order PURE `Module` call (a dotted name
+    /// the gate treats as Stdout-free — sound because it IS pure). A higher-order
+    /// call (unmodelled closure caps), an effectful/impure `Module` call (its dotted
+    /// name would be WRONGLY treated as free), and a `Method`/`Computed` target are
+    /// SKIPPED — left elided, so the `ir_calls > mir_calls` gate keeps the function
+    /// tainted (no FALSE de-taint). This never errors and never walls — it only adds
+    /// effect markers, so it can never turn an in-profile function `Unsupported`.
+    ///
+    /// SOUNDNESS BACKSTOP: a marker is recorded ONLY at a wholesale-elided position
+    /// (the caller emits one `Opaque`/`Const` op for the whole `value`, lowering
+    /// none of its sub-calls), so the MIR call-op count can only rise TOWARD the
+    /// IR's, never past it. The corpus gate asserts `mir_calls <= ir_calls` — a
+    /// double-count (the one way a marker could mask a real elision and FALSELY
+    /// de-taint a function) then fails the gate, structurally impossible to ship.
+    pub(crate) fn record_elided_calls(&mut self, value: &IrExpr) {
+        use almide_ir::visit::{walk_expr, IrVisitor};
+        struct Collector {
+            names: Vec<String>,
+        }
+        impl IrVisitor for Collector {
+            fn visit_expr(&mut self, e: &IrExpr) {
+                if let IrExprKind::Call { target, args, .. } = &e.kind {
+                    if !is_higher_order(args) {
+                        match target {
+                            CallTarget::Named { name } => {
+                                self.names.push(name.as_str().to_string())
+                            }
+                            CallTarget::Module { module, func, .. }
+                                if purity::is_pure(module.as_str(), func.as_str()) =>
+                            {
+                                self.names.push(format!("{}.{}", module.as_str(), func.as_str()))
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                walk_expr(self, e);
+            }
+        }
+        let mut c = Collector { names: Vec::new() };
+        c.visit_expr(value);
+        for name in c.names {
+            self.ops.push(Op::CallFn { dst: None, name, args: Vec::new(), result: None });
+        }
+    }
+
+    /// Lower an EFFECT call (a Unit-typed `Call`) to a runtime [`Op::Call`].
+    /// Today the recognized set is `println(s)` for a heap string → [`RtFn::PrintStr`],
+    /// which BORROWS the string handle (no refcount change; the value stays live
+    /// and is dropped at scope end) and reaches [`crate::Capability::Stdout`] (so a
+    /// real printing program's capability witness is derived from real source).
+    /// Anything outside the set is an explicit `Unsupported` (totality).
+    pub(crate) fn lower_effect_call(&mut self, call: &IrExpr) -> Result<(), LowerError> {
+        let (target, args) = match &call.kind {
+            IrExprKind::Call { target, args, .. } => (target, args),
+            other => {
+                return Err(LowerError::Unsupported(format!(
+                    "effect statement {} is not a call",
+                    kind_name(other)
+                )))
+            }
+        };
+        let name = match target {
+            CallTarget::Named { name } => name.as_str(),
+            // A pure Module COMBINATOR applied for side effects (`list.each(xs, f)`):
+            // the effect is the CLOSURE's. Capture the closure's capabilities, borrow
+            // the regular args, and emit the Unit-result call — exactly the value-
+            // position higher-order handling, minus the result. An effectful/impure
+            // Module call reaches a host capability of its OWN that the model cannot
+            // yet name, so it stays walled (`purity::is_pure` gates inside).
+            CallTarget::Module { module, func, .. } => {
+                return self.lower_effect_module_call(module.as_str(), func.as_str(), args, &call.ty)
+            }
+            CallTarget::Method { method, .. } => {
+                return Err(LowerError::Unsupported(format!(
+                    "effect Method call .{} (unresolved dispatch) not in this brick",
+                    method.as_str()
+                )))
+            }
+            CallTarget::Computed { .. } => {
+                return Err(LowerError::Unsupported(
+                    "effect Computed call (closure-value callee) not in this brick".into(),
+                ))
+            }
+        };
+        match (name, args.as_slice()) {
+            // println(s) — the heap-string argument is BORROWED for a Stdout write.
+            // A non-var arg (a literal `println("x")`, a concat `println(a ++ b)`,
+            // an interpolation `println("${x}")`, or a call result `println(f())`)
+            // is materialized into an owned temp by `lower_call_args` (the same
+            // arg machinery as a normal call), then borrowed; the temp is dropped
+            // at scope end. The Stdout effect makes the function caps-unverified
+            // (it reaches Stdout, which `declared_caps` is empty for) — honest, not
+            // claimed caps-safe.
+            ("println", [arg]) if is_heap_ty(&arg.ty) => {
+                let lowered = self.lower_call_args(std::slice::from_ref(arg))?;
+                self.ops.push(Op::Call { dst: None, func: RtFn::PrintStr, args: lowered, result: None });
+                Ok(())
+            }
+            // A USER function call (Unit result, e.g. `beep()`) → Op::CallFn. The
+            // call BORROWS its heap-handle args (no refcount change here). The
+            // callee's capabilities are accounted for at the CALL SITE against
+            // its signature (the per-call-site subset rule), so a program is
+            // rejected for a capability a CALLEE reaches — transitively — even
+            // with no direct effect (closes the direct-only caps gap).
+            (callee, call_args) => {
+                let lowered = self.lower_call_args(call_args)?;
+                self.ops.push(Op::CallFn {
+                    dst: None,
+                    name: callee.to_string(),
+                    args: lowered,
+                result: None });
+                Ok(())
+            }
+        }
+    }
+
+    /// Lower call arguments to [`CallArg`]s. A heap var is BORROWED (`Handle`), a
+    /// scalar var is a `Scalar`, an int literal is an `Imm`. A nested CALL argument
+    /// (`f(g(x))` / `f(string.trim(s))`) is MATERIALIZED: the inner call's result
+    /// is computed into a fresh OWNED temp, then BORROWED into the outer call and
+    /// dropped at scope end — cert `i` (call-result) + `d` (drop), both backed by
+    /// real ops; the temp's capabilities are folded transitively by the corpus gate
+    /// (an effectful callee taints the caller honestly). The inner call must itself
+    /// be admissible: a `Named` user call, or a first-order pure stdlib `Module`
+    /// call. Anything else is an explicit `Unsupported` (totality).
+    pub(crate) fn lower_call_args(&mut self, args: &[IrExpr]) -> Result<Vec<CallArg>, LowerError> {
+        let mut out = Vec::with_capacity(args.len());
+        for a in args {
+            let arg = match &a.kind {
+                IrExprKind::Var { id } if is_heap_ty(&a.ty) => CallArg::Handle(self.value_for(*id)?),
+                IrExprKind::Var { id } => CallArg::Scalar(self.value_for(*id)?),
+                IrExprKind::LitInt { value } => CallArg::Imm(*value),
+                // A fresh HEAP literal argument (`f("x")`, `f([1, 2, 3])`):
+                // materialized into an owned temp via `Alloc`, borrowed into the
+                // call, dropped at scope end — cert `i` (alloc) + `d` (drop), both
+                // backed, identical to the verified fresh-heap bind.
+                IrExprKind::LitStr { .. }
+                | IrExprKind::List { .. }
+                | IrExprKind::MapLiteral { .. }
+                | IrExprKind::EmptyMap
+                | IrExprKind::Record { .. }
+                | IrExprKind::Tuple { .. }
+                | IrExprKind::StringInterp { .. }
+                | IrExprKind::ResultOk { .. }
+                | IrExprKind::ResultErr { .. }
+                | IrExprKind::OptionSome { .. }
+                | IrExprKind::OptionNone => {
+                    let dst = self.fresh_value();
+                    let repr = repr_of(&a.ty)?;
+                    let init = alloc_init(a);
+                    self.ops.push(Op::Alloc { dst, repr, init });
+                    self.record_elided_calls(a);
+                    self.materialized_call_arg(dst, repr)
+                }
+                // A scalar literal argument (`f(3.14)`, `f(true)`): a fresh `Const`,
+                // passed by value (no ownership). `LitInt` is already an `Imm` above.
+                IrExprKind::LitFloat { .. } | IrExprKind::LitBool { .. } => {
+                    let dst = self.fresh_value();
+                    self.ops.push(Op::Const { dst });
+                    CallArg::Scalar(dst)
+                }
+                // A fresh BinOp/UnOp result as an argument (`f(a + b)`, `f(-n)`), or an
+                // ERROR OPERATOR result (`f(x!)`, `f(x ?? d)`, `f(x?.field)`): a fresh
+                // computed value — a heap result is materialized via `Alloc` (borrowed
+                // and dropped), a scalar result is a `Const`. Operands carry their own
+                // ownership; the operator's value (and any early-return) is deferred.
+                IrExprKind::BinOp { .. }
+                | IrExprKind::UnOp { .. }
+                | IrExprKind::Try { .. }
+                | IrExprKind::Unwrap { .. }
+                | IrExprKind::UnwrapOr { .. }
+                | IrExprKind::ToOption { .. }
+                | IrExprKind::OptionalChain { .. } => {
+                    let dst = self.fresh_value();
+                    self.record_elided_calls(a);
+                    if is_heap_ty(&a.ty) {
+                        let repr = repr_of(&a.ty)?;
+                        self.ops.push(Op::Alloc { dst, repr, init: Init::Opaque });
+                        self.materialized_call_arg(dst, repr)
+                    } else {
+                        self.ops.push(Op::Const { dst });
+                        CallArg::Scalar(dst)
+                    }
+                }
+                // A field/element/tuple EXTRACTION argument. A SCALAR result is an
+                // unambiguous COPY → `Const`. A HEAP result is an ALIAS/share of
+                // the container → `Op::Dup` of the container value (the container-
+                // grain field access), borrowed into the call and dropped at scope
+                // end. (A nested-container extraction stays walled inside
+                // `lower_heap_extraction`.)
+                IrExprKind::Member { .. }
+                | IrExprKind::IndexAccess { .. }
+                | IrExprKind::MapAccess { .. }
+                | IrExprKind::TupleIndex { .. } => {
+                    if is_heap_ty(&a.ty) {
+                        let dst = self.lower_heap_extraction(a)?;
+                        let repr = repr_of(&a.ty)?;
+                        self.materialized_call_arg(dst, repr)
+                    } else {
+                        // A SCALAR extraction is a `Const` copy — its container
+                        // (which may itself be a call, `g().field`) is elided; record
+                        // any call so the caps fold sees it.
+                        let dst = self.fresh_value();
+                        self.ops.push(Op::Const { dst });
+                        self.record_elided_calls(a);
+                        CallArg::Scalar(dst)
+                    }
+                }
+                // A Named user-call result, materialized into an owned temp.
+                IrExprKind::Call { target: CallTarget::Named { name }, args: inner, .. } => {
+                    let inner_args = self.lower_call_args(inner)?;
+                    let dst = self.fresh_value();
+                    let repr = repr_of(&a.ty)?;
+                    self.ops.push(Op::CallFn {
+                        dst: Some(dst),
+                        name: name.as_str().to_string(),
+                        args: inner_args,
+                        result: Some(repr),
+                    });
+                    self.materialized_call_arg(dst, repr)
+                }
+                // A first-order pure stdlib Module-call result, materialized (the
+                // purity + higher-order gates live in `lower_pure_module_value_call`).
+                IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args: inner, .. } => {
+                    let dst = self.lower_pure_module_value_call(
+                        module.as_str(),
+                        func.as_str(),
+                        inner,
+                        &a.ty,
+                    )?;
+                    let repr = repr_of(&a.ty)?;
+                    self.materialized_call_arg(dst, repr)
+                }
+                IrExprKind::Call { target, .. } => {
+                    return Err(LowerError::Unsupported(format!(
+                        "call argument Call[{}] not in this brick",
+                        call_target_kind(target)
+                    )))
+                }
+                other => {
+                    return Err(LowerError::Unsupported(format!(
+                        "call argument {} not in this brick",
+                        kind_name(other)
+                    )))
+                }
+            };
+            out.push(arg);
+        }
+        Ok(out)
+    }
+
+    /// Register a freshly-materialized call-result temp used as a call argument: a
+    /// HEAP temp is BORROWED into the call (`Handle`) and added to the scope-end
+    /// drop set (it is owned by THIS scope, not moved out, so it is released after
+    /// the call returns); a scalar temp is passed by value.
+    pub(crate) fn materialized_call_arg(&mut self, dst: ValueId, repr: Repr) -> CallArg {
+        if repr.is_heap() {
+            self.live_heap_handles.push(dst);
+            CallArg::Handle(dst)
+        } else {
+            CallArg::Scalar(dst)
+        }
+    }
+}
