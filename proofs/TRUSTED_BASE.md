@@ -108,8 +108,8 @@ The receipt's claims are scoped to exactly this:
   verification = the definition of parity" in its honest first form: it does NOT
   yet claim the *completion definition* (the proven profile accepting the full
   corpus), it establishes the *mechanism* that measures progress toward it and
-  proves the boundary is a wall, not a hole. **Today's honest coverage: 3850/4195
-  functions in-profile (92%) for ownership+names (caps-VERIFIED is the lower, parity-binding 3220 — see caps note)** (the value-semantics subset,
+  proves the boundary is a wall, not a hole. **Today's honest coverage: 3903/4195
+  functions in-profile (93%) for ownership+names (caps-VERIFIED is the lower, parity-binding 3272 — see caps note)** (the value-semantics subset,
   plus **`Range` values, CLOSURE values, and unresolvable `Method`/`Computed`-target calls** (`f(0..n)`,
   `var g = (x) => …`, `obj.method()`, `(g)()` — a `Range` and a CLOSURE value (a fresh heap env) are fresh values; an unresolvable callee
   (dispatch / closure value not known here) is modeled as a DEFERRED fresh value (a
@@ -203,7 +203,7 @@ The receipt's claims are scoped to exactly this:
   `Module` call, a variant constructor, or a known Stdout-free builtin
   (`assert*`/`eprintln`/`panic`/`to_string` — these reach stderr/abort, NOT
   Stdout) is free; ANY other unknown callee (a walled or cross-file user function)
-  TAINTS, so the function is reported `caps-unverified` (3220/3850 verified, 630
+  TAINTS, so the function is reported `caps-unverified` (3272/3903 verified, 631
   unverified) rather than falsely accepted. **The gate verifies the REAL
   capability-bound property `reachable ⊆ declared`** (exactly what
   `proofs/CapabilityBound.v` proves), not a degenerate "reaches no capability at

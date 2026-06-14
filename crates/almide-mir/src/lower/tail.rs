@@ -61,6 +61,16 @@ impl LowerCtx {
             Some(t) => t,
             None => return Ok(None),
         };
+        // A BLOCK tail (`fn f() = { stmts; e }`, or a nested block in tail position):
+        // lower its statements (their heap locals ride to the ENCLOSING scope's end —
+        // a conservative lifetime extension, dropped exactly once, never a double-free)
+        // and recurse on its own tail, which is the value. Any kind of result.
+        if let IrExprKind::Block { stmts, expr } = &tail.kind {
+            for s in stmts {
+                self.lower_stmt(s)?;
+            }
+            return self.lower_tail(expr.as_deref());
+        }
         if matches!(tail.ty, Ty::Unit) {
             return match &tail.kind {
                 IrExprKind::Unit => Ok(None),
@@ -96,13 +106,14 @@ impl LowerCtx {
                     let v = self.value_for(*id)?;
                     if self.param_values.contains(&v) {
                         // Returning a BORROWED param directly would move out a
-                        // reference we do not own (the caller's) — a double-free.
-                        // The sound form is `let q = p; q` (an alias `Dup` first),
-                        // which lowers fine. Wall the bare-param return (totality);
-                        // the cert would otherwise be `m` at rc 0 → checker fault.
-                        return Err(LowerError::Unsupported(
-                            "returning a borrowed param directly (needs an explicit acquire) not in this brick".into(),
-                        ));
+                        // reference we do not own (the caller's) — a double-free. AUTO-
+                        // ACQUIRE one first: `Op::Dup` (cert `a`) then move out the new
+                        // handle (cert `m`) — exactly `let q = p; q`. The returned `am`
+                        // is an OWNED reference (rc incremented), independent of the
+                        // caller's, so no double-free; the proven checker accepts it.
+                        let dst = self.fresh_value();
+                        self.ops.push(Op::Dup { dst, src: v });
+                        return Ok(Some(dst)); // moved out, NOT added to live_heap_handles
                     }
                     self.live_heap_handles.retain(|h| *h != v); // moved out, not dropped
                     Ok(Some(v))
