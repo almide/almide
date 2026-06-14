@@ -806,6 +806,29 @@ mod tests {
         }
     }
 
+    /// Scalar `Int` arithmetic COMPUTES (`fn add(a, b) = a + b` → `IntBinOp{Add}`,
+    /// rendered `i64.add` over the param locals) — not the deferred-Const zero. With
+    /// the literal-materialization above, this is the foundation a self-hosted runtime
+    /// fn needs to compute real addresses (`s + LIST_HEADER`). The add_program test
+    /// already proves `i64.add` returns the right value end-to-end.
+    #[test]
+    fn scalar_arithmetic_computes_via_intbinop() {
+        let prog = lower_source(
+            "fn add(a: Int, b: Int) -> Int = a + b\nfn main() -> Unit = { let _r = add(2, 3) }\n",
+        );
+        let add = prog.functions.iter().find(|f| f.name == "add").expect("add lowered");
+        assert!(
+            add.ops.iter().any(|op| matches!(op, Op::IntBinOp { op: IntOp::Add, .. })),
+            "add must compute a+b via IntBinOp, got {:?}",
+            add.ops
+        );
+        let wat = render_wasm_program(&prog);
+        assert!(wat.contains("(i64.add"), "render must emit i64.add:\n{wat}");
+        if let Some(out) = build_and_run("scalar_arith", &wat) {
+            assert_eq!(out, "");
+        }
+    }
+
     /// The hand-written WAT runtime is the BOOTSTRAP debt (§4.1). This guard
     /// makes the "never grow" rule MECHANICAL (not a comment): the count may only
     /// ratchet DOWN as the runtime self-hosts into Almide. If you added a

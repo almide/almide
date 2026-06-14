@@ -30,6 +30,16 @@ impl LowerCtx {
                 self.ops.push(Op::ConstInt { dst, value: *value });
                 return Ok(());
             }
+            // A scalar Int Add/Sub/Mul computes its real value (IntBinOp); outside the
+            // int-arith subset it rolls back and stays the deferred `Const`.
+            if let IrExprKind::BinOp { .. } = &value.kind {
+                let mark = self.ops.len();
+                if let Some(dst) = self.lower_scalar_value(value) {
+                    self.value_of.insert(var, dst);
+                    return Ok(());
+                }
+                self.ops.truncate(mark);
+            }
             let dst = self.fresh_value();
             self.value_of.insert(var, dst);
             self.ops.push(Op::Const { dst });

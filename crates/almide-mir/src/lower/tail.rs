@@ -265,9 +265,23 @@ impl LowerCtx {
                 self.ops.push(Op::ConstInt { dst, value: *value });
                 Ok(Some(dst))
             }
+            // A scalar Int Add/Sub/Mul computes its REAL value (IntBinOp over
+            // recursively-lowered operands), so a fn `add(a, b) = a + b` returns the
+            // sum — not the deferred-Const zero. Outside the int-arith subset (Div/
+            // Mod/cmp/logic/Float) it rolls back and falls through to the Const below.
+            IrExprKind::BinOp { .. } => {
+                let mark = self.ops.len();
+                if let Some(dst) = self.lower_scalar_value(tail) {
+                    return Ok(Some(dst));
+                }
+                self.ops.truncate(mark);
+                let dst = self.fresh_value();
+                self.ops.push(Op::Const { dst });
+                self.record_elided_calls(tail);
+                Ok(Some(dst))
+            }
             IrExprKind::LitBool { .. }
             | IrExprKind::LitFloat { .. }
-            | IrExprKind::BinOp { .. }
             | IrExprKind::UnOp { .. }
             // A SCALAR field/element/tuple extraction is an unambiguous COPY (a
             // scalar is never reference-counted), so it is a `Const` — its

@@ -518,6 +518,43 @@ impl LowerCtx {
         }
     }
 
+    /// Lower a SCALAR `Int` expression to a `ValueId` holding its REAL value (the
+    /// scalar-value foundation): a Var/param, an `Int` literal (`ConstInt`), or an
+    /// `Int` Add/Sub/Mul (`IntBinOp` over recursively-lowered operands). Returns
+    /// `None` for anything outside this subset (Div/Mod/Pow, comparisons, logic,
+    /// Float, calls, …) — the caller then DEFERS the value (`Const`). It pushes only
+    /// `ConstInt`/`IntBinOp` (never a heap handle / ownership event), so a caller can
+    /// roll back a partial attempt by truncating `self.ops`. The cert is unaffected:
+    /// `IntBinOp`/`ConstInt` are no-ops for ownership and already define their `dst` /
+    /// use their operands for the name witness.
+    pub(crate) fn lower_scalar_value(&mut self, expr: &IrExpr) -> Option<ValueId> {
+        use almide_ir::BinOp;
+        match &expr.kind {
+            IrExprKind::Var { id } => self.value_or_global(*id).ok(),
+            IrExprKind::LitInt { value } => {
+                let dst = self.fresh_value();
+                self.ops.push(Op::ConstInt { dst, value: *value });
+                Some(dst)
+            }
+            IrExprKind::BinOp { op, left, right } => {
+                let iop = match op {
+                    BinOp::AddInt => crate::IntOp::Add,
+                    BinOp::SubInt => crate::IntOp::Sub,
+                    BinOp::MulInt => crate::IntOp::Mul,
+                    // Div/Mod/Pow, comparisons, logic, Float, concat: not in the
+                    // int-arith subset (IntOp = Add/Sub/Mul) — defer.
+                    _ => return None,
+                };
+                let a = self.lower_scalar_value(left)?;
+                let b = self.lower_scalar_value(right)?;
+                let dst = self.fresh_value();
+                self.ops.push(Op::IntBinOp { dst, op: iop, a, b });
+                Some(dst)
+            }
+            _ => None,
+        }
+    }
+
     /// Register a freshly-materialized call-result temp used as a call argument: a
     /// HEAP temp is BORROWED into the call (`Handle`) and added to the scope-end
     /// drop set (it is owned by THIS scope, not moved out, so it is released after
