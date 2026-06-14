@@ -1037,6 +1037,27 @@ impl FuncCompiler<'_> {
             }
             fn visit_expr(&mut self, expr: &IrExpr) {
                 if self.found { return; }
+                // In-place stdlib mutators (`list.push`, `map.insert`,
+                // `string.push`, bytes builders) reallocate `args[0]`'s heap
+                // backing through its shared pointer. When the mutated binding
+                // is declared OUTSIDE the loop, that fresh backing is allocated
+                // in the iteration arena yet escapes it — a heap_restore then
+                // reclaims a live object and the next allocation reuses its
+                // address (a spurious double-free at teardown, #643). These are
+                // CALLS, not assignment statements, so the stmt scan above
+                // misses them; mirror its conservative non-scalar test here.
+                if let IrExprKind::RuntimeCall { symbol, args } = &expr.kind {
+                    if crate::pass_closure_conversion::is_inplace_mutator(symbol.as_str()) {
+                        if let Some(IrExprKind::Var { id }) = args.first().map(|a| &a.kind) {
+                            let ty = &self.var_table.get(*id).ty;
+                            let scalar = matches!(ty, Ty::Int | Ty::Float | Ty::Bool | Ty::Unit);
+                            if !scalar {
+                                self.found = true;
+                                return;
+                            }
+                        }
+                    }
+                }
                 walk_expr(self, expr);
             }
         }
