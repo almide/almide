@@ -22,6 +22,7 @@
 //!   __libm_floor, __libm_scalbn, __libm_rem_pio2_large, __libm_rem_pio2,
 //!   __libm_k_sin, __libm_k_cos, __libm_k_tan, __math_sin, __math_cos, __math_tan.
 
+use crate::emit_wasm::engine::{Imm32, Imm64, Local};
 use super::{CompiledFunc, WasmEmitter};
 use wasm_encoder::ValType;
 use super::TrackedFunction as Function;
@@ -316,38 +317,38 @@ fn compile_floor(emitter: &mut WasmEmitter) {
     // param 0=f64 x. locals: 1=i64 ui, 2=i32 e, 3=i64 m
     let mut f = Function::new([(1, ValType::I64), (1, ValType::I32), (1, ValType::I64)]);
     wasm!(f, {
-        local_get(0); i64_reinterpret_f64; local_set(1);              // ui = x.to_bits()
+        local_get(Local(0)); i64_reinterpret_f64; local_set(Local(1));              // ui = x.to_bits()
         // e = ((ui >> 52) & 0x7ff) - 0x3ff
-        local_get(1); i64_const(F64_MANTISSA_BITS); i64_shr_u; i64_const(F64_EXP_MASK); i64_and;
-        i32_wrap_i64; i32_const(F64_EXP_BIAS); i32_sub; local_set(2);
+        local_get(Local(1)); i64_const(Imm64(F64_MANTISSA_BITS)); i64_shr_u; i64_const(Imm64(F64_EXP_MASK)); i64_and;
+        i32_wrap_i64; i32_const(Imm32(F64_EXP_BIAS)); i32_sub; local_set(Local(2));
         // if e >= 52 { return x }
-        local_get(2); i32_const(F64_MANTISSA_BITS_I32); i32_ge_s;
-        if_empty; local_get(0); return_; end;
+        local_get(Local(2)); i32_const(Imm32(F64_MANTISSA_BITS_I32)); i32_ge_s;
+        if_empty; local_get(Local(0)); return_; end;
         // if e >= 0
-        local_get(2); i32_const(0); i32_ge_s;
+        local_get(Local(2)); i32_const(Imm32(0)); i32_ge_s;
         if_f64;
             // m = 0x000f_ffff_ffff_ffff >> e
-            i64_const(F64_MANTISSA_MASK); local_get(2); i64_extend_i32_s; i64_shr_u; local_set(3);
+            i64_const(Imm64(F64_MANTISSA_MASK)); local_get(Local(2)); i64_extend_i32_s; i64_shr_u; local_set(Local(3));
             // if ui & m == 0 { return x }
-            local_get(1); local_get(3); i64_and; i64_eqz;
-            if_empty; local_get(0); return_; end;
+            local_get(Local(1)); local_get(Local(3)); i64_and; i64_eqz;
+            if_empty; local_get(Local(0)); return_; end;
             // if (ui >> 63) != 0 { ui += m }
-            local_get(1); i64_const(F64_SIGN_BIT); i64_shr_u; i64_eqz;
+            local_get(Local(1)); i64_const(Imm64(F64_SIGN_BIT)); i64_shr_u; i64_eqz;
             if_empty; else_;
-                local_get(1); local_get(3); i64_add; local_set(1);
+                local_get(Local(1)); local_get(Local(3)); i64_add; local_set(Local(1));
             end;
             // ui &= !m
-            local_get(1); local_get(3); i64_const(-1); i64_xor; i64_and; local_set(1);
-            local_get(1); f64_reinterpret_i64;
+            local_get(Local(1)); local_get(Local(3)); i64_const(Imm64(-1)); i64_xor; i64_and; local_set(Local(1));
+            local_get(Local(1)); f64_reinterpret_i64;
         else_;
             // |x| < 1
             // if (ui >> 63) == 0 { 0.0 } else if (ui << 1) != 0 { -1.0 } else { x }
-            local_get(1); i64_const(F64_SIGN_BIT); i64_shr_u; i64_eqz;
+            local_get(Local(1)); i64_const(Imm64(F64_SIGN_BIT)); i64_shr_u; i64_eqz;
             if_f64;
                 f64_const(0.0);
             else_;
-                local_get(1); i64_const(1); i64_shl; i64_eqz;
-                if_f64; local_get(0); else_; f64_const(-1.0); end;
+                local_get(Local(1)); i64_const(Imm64(1)); i64_shl; i64_eqz;
+                if_f64; local_get(Local(0)); else_; f64_const(-1.0); end;
             end;
         end;
         end;
@@ -365,45 +366,45 @@ fn compile_scalbn(emitter: &mut WasmEmitter) {
     let mut f = Function::new([(3, ValType::F64)]);
     // f_exp_max = 2^1023 = bits (1023<<1)<<52 = 2046<<52
     wasm!(f, {
-        i64_const((2046i64) << 52); f64_reinterpret_i64; local_set(2);
-        i64_const(1i64 << 52); f64_reinterpret_i64; local_set(3);     // f_exp_min = 2^-1022
+        i64_const(Imm64((2046i64) << 52)); f64_reinterpret_i64; local_set(Local(2));
+        i64_const(Imm64(1i64 << 52)); f64_reinterpret_i64; local_set(Local(3));     // f_exp_min = 2^-1022
         // mul = f_exp_min * 2^53 ; 2^53 bits = (53+1023)<<52 = 1076<<52
-        local_get(3); i64_const((1076i64) << 52); f64_reinterpret_i64; f64_mul; local_set(4);
+        local_get(Local(3)); i64_const(Imm64((1076i64) << 52)); f64_reinterpret_i64; f64_mul; local_set(Local(4));
     });
     // if n > 1023
     wasm!(f, {
-        local_get(1); i32_const(F64_EXP_BIAS); i32_gt_s;
+        local_get(Local(1)); i32_const(Imm32(F64_EXP_BIAS)); i32_gt_s;
         if_empty;
-            local_get(0); local_get(2); f64_mul; local_set(0);
-            local_get(1); i32_const(F64_EXP_BIAS); i32_sub; local_set(1);
-            local_get(1); i32_const(F64_EXP_BIAS); i32_gt_s;
+            local_get(Local(0)); local_get(Local(2)); f64_mul; local_set(Local(0));
+            local_get(Local(1)); i32_const(Imm32(F64_EXP_BIAS)); i32_sub; local_set(Local(1));
+            local_get(Local(1)); i32_const(Imm32(F64_EXP_BIAS)); i32_gt_s;
             if_empty;
-                local_get(0); local_get(2); f64_mul; local_set(0);
-                local_get(1); i32_const(F64_EXP_BIAS); i32_sub; local_set(1);
-                local_get(1); i32_const(F64_EXP_BIAS); i32_gt_s;
-                if_empty; i32_const(F64_EXP_BIAS); local_set(1); end;
+                local_get(Local(0)); local_get(Local(2)); f64_mul; local_set(Local(0));
+                local_get(Local(1)); i32_const(Imm32(F64_EXP_BIAS)); i32_sub; local_set(Local(1));
+                local_get(Local(1)); i32_const(Imm32(F64_EXP_BIAS)); i32_gt_s;
+                if_empty; i32_const(Imm32(F64_EXP_BIAS)); local_set(Local(1)); end;
             end;
         else_;
             // if n < -1022
-            local_get(1); i32_const(F64_MIN_EXP); i32_lt_s;
+            local_get(Local(1)); i32_const(Imm32(F64_MIN_EXP)); i32_lt_s;
             if_empty;
                 // add = -(-1022) - 53 = 1022 - 53 = 969
-                local_get(0); local_get(4); f64_mul; local_set(0);
-                local_get(1); i32_const(SCALBN_SUBNORM_STEP); i32_add; local_set(1);
-                local_get(1); i32_const(F64_MIN_EXP); i32_lt_s;
+                local_get(Local(0)); local_get(Local(4)); f64_mul; local_set(Local(0));
+                local_get(Local(1)); i32_const(Imm32(SCALBN_SUBNORM_STEP)); i32_add; local_set(Local(1));
+                local_get(Local(1)); i32_const(Imm32(F64_MIN_EXP)); i32_lt_s;
                 if_empty;
-                    local_get(0); local_get(4); f64_mul; local_set(0);
-                    local_get(1); i32_const(SCALBN_SUBNORM_STEP); i32_add; local_set(1);
-                    local_get(1); i32_const(F64_MIN_EXP); i32_lt_s;
-                    if_empty; i32_const(F64_MIN_EXP); local_set(1); end;
+                    local_get(Local(0)); local_get(Local(4)); f64_mul; local_set(Local(0));
+                    local_get(Local(1)); i32_const(Imm32(SCALBN_SUBNORM_STEP)); i32_add; local_set(Local(1));
+                    local_get(Local(1)); i32_const(Imm32(F64_MIN_EXP)); i32_lt_s;
+                    if_empty; i32_const(Imm32(F64_MIN_EXP)); local_set(Local(1)); end;
                 end;
             end;
         end;
     });
     // scale = bits((1023 + n) << 52) ; return x * scale
     wasm!(f, {
-        local_get(0);
-        i32_const(F64_EXP_BIAS); local_get(1); i32_add; i64_extend_i32_s; i64_const(F64_MANTISSA_BITS); i64_shl;
+        local_get(Local(0));
+        i32_const(Imm32(F64_EXP_BIAS)); local_get(Local(1)); i32_add; i64_extend_i32_s; i64_const(Imm64(F64_MANTISSA_BITS)); i64_shl;
         f64_reinterpret_i64;
         f64_mul;
         end;
@@ -451,28 +452,28 @@ fn compile_k_sin(emitter: &mut WasmEmitter) {
     // params: 0=x, 1=y, 2=iy. locals: 3=z, 4=w, 5=r, 6=v
     let mut f = Function::new([(4, ValType::F64)]);
     wasm!(f, {
-        local_get(0); local_get(0); f64_mul; local_set(3);           // z = x*x
-        local_get(3); local_get(3); f64_mul; local_set(4);           // w = z*z
+        local_get(Local(0)); local_get(Local(0)); f64_mul; local_set(Local(3));           // z = x*x
+        local_get(Local(3)); local_get(Local(3)); f64_mul; local_set(Local(4));           // w = z*z
         // r = S2 + z*(S3 + z*S4) + z*w*(S5 + z*S6)
         f64_const(S2);
-        local_get(3); f64_const(S3); local_get(3); f64_const(S4); f64_mul; f64_add; f64_mul;
+        local_get(Local(3)); f64_const(S3); local_get(Local(3)); f64_const(S4); f64_mul; f64_add; f64_mul;
         f64_add;
-        local_get(3); local_get(4); f64_mul; f64_const(S5); local_get(3); f64_const(S6); f64_mul; f64_add; f64_mul;
-        f64_add; local_set(5);
-        local_get(3); local_get(0); f64_mul; local_set(6);           // v = z*x
+        local_get(Local(3)); local_get(Local(4)); f64_mul; f64_const(S5); local_get(Local(3)); f64_const(S6); f64_mul; f64_add; f64_mul;
+        f64_add; local_set(Local(5));
+        local_get(Local(3)); local_get(Local(0)); f64_mul; local_set(Local(6));           // v = z*x
         // if iy == 0
-        local_get(2); i32_eqz;
+        local_get(Local(2)); i32_eqz;
         if_f64;
             // x + v*(S1 + z*r)
-            local_get(0);
-            local_get(6); f64_const(S1); local_get(3); local_get(5); f64_mul; f64_add; f64_mul;
+            local_get(Local(0));
+            local_get(Local(6)); f64_const(S1); local_get(Local(3)); local_get(Local(5)); f64_mul; f64_add; f64_mul;
             f64_add;
         else_;
             // x - ((z*(0.5*y - v*r) - y) - v*S1)
-            local_get(0);
-            local_get(3); f64_const(0.5); local_get(1); f64_mul; local_get(6); local_get(5); f64_mul; f64_sub; f64_mul;
-            local_get(1); f64_sub;
-            local_get(6); f64_const(S1); f64_mul; f64_sub;
+            local_get(Local(0));
+            local_get(Local(3)); f64_const(0.5); local_get(Local(1)); f64_mul; local_get(Local(6)); local_get(Local(5)); f64_mul; f64_sub; f64_mul;
+            local_get(Local(1)); f64_sub;
+            local_get(Local(6)); f64_const(S1); f64_mul; f64_sub;
             f64_sub;
         end;
         end;
@@ -488,18 +489,18 @@ fn compile_k_cos(emitter: &mut WasmEmitter) {
     // params: 0=x, 1=y. locals: 2=z, 3=w(z*z then reused as 1-hz), 4=r, 5=hz, 6=w2(=1-hz)
     let mut f = Function::new([(5, ValType::F64)]);
     wasm!(f, {
-        local_get(0); local_get(0); f64_mul; local_set(2);           // z = x*x
-        local_get(2); local_get(2); f64_mul; local_set(3);           // w = z*z
+        local_get(Local(0)); local_get(Local(0)); f64_mul; local_set(Local(2));           // z = x*x
+        local_get(Local(2)); local_get(Local(2)); f64_mul; local_set(Local(3));           // w = z*z
         // r = z*(C1 + z*(C2 + z*C3)) + w*w*(C4 + z*(C5 + z*C6))
-        local_get(2); f64_const(C1); local_get(2); f64_const(C2); local_get(2); f64_const(C3); f64_mul; f64_add; f64_mul; f64_add; f64_mul;
-        local_get(3); local_get(3); f64_mul; f64_const(C4); local_get(2); f64_const(C5); local_get(2); f64_const(C6); f64_mul; f64_add; f64_mul; f64_add; f64_mul;
-        f64_add; local_set(4);
-        local_get(2); f64_const(0.5); f64_mul; local_set(5);         // hz = 0.5*z
-        f64_const(1.0); local_get(5); f64_sub; local_set(6);         // w2 = 1 - hz
+        local_get(Local(2)); f64_const(C1); local_get(Local(2)); f64_const(C2); local_get(Local(2)); f64_const(C3); f64_mul; f64_add; f64_mul; f64_add; f64_mul;
+        local_get(Local(3)); local_get(Local(3)); f64_mul; f64_const(C4); local_get(Local(2)); f64_const(C5); local_get(Local(2)); f64_const(C6); f64_mul; f64_add; f64_mul; f64_add; f64_mul;
+        f64_add; local_set(Local(4));
+        local_get(Local(2)); f64_const(0.5); f64_mul; local_set(Local(5));         // hz = 0.5*z
+        f64_const(1.0); local_get(Local(5)); f64_sub; local_set(Local(6));         // w2 = 1 - hz
         // return w2 + (((1 - w2) - hz) + (z*r - x*y))
-        local_get(6);
-        f64_const(1.0); local_get(6); f64_sub; local_get(5); f64_sub;
-        local_get(2); local_get(4); f64_mul; local_get(0); local_get(1); f64_mul; f64_sub;
+        local_get(Local(6));
+        f64_const(1.0); local_get(Local(6)); f64_sub; local_get(Local(5)); f64_sub;
+        local_get(Local(2)); local_get(Local(4)); f64_mul; local_get(Local(0)); local_get(Local(1)); f64_mul; f64_sub;
         f64_add;
         f64_add;
         end;
@@ -521,94 +522,94 @@ fn compile_k_tan(emitter: &mut WasmEmitter) {
     const HX: u32 = 12; const BIG: u32 = 13; const SIGN: u32 = 14;
     wasm!(f, {
         // hx = (to_bits(x) >> 32) as u32
-        local_get(X); i64_reinterpret_f64; i64_const(HI_SHIFT); i64_shr_u; i32_wrap_i64; local_set(HX);
+        local_get(Local(X)); i64_reinterpret_f64; i64_const(Imm64(HI_SHIFT)); i64_shr_u; i32_wrap_i64; local_set(Local(HX));
         // big = (hx & 0x7fffffff) >= 0x3FE59428
-        local_get(HX); i32_const(F64_ABS_MASK_HI); i32_and; i32_const(KTAN_BIG_HI); i32_ge_u; local_set(BIG);
+        local_get(Local(HX)); i32_const(Imm32(F64_ABS_MASK_HI)); i32_and; i32_const(Imm32(KTAN_BIG_HI)); i32_ge_u; local_set(Local(BIG));
         // sign = hx >> 31  (logical)
-        local_get(HX); i32_const(I32_SIGN_BIT); i32_shr_u; local_set(SIGN);
+        local_get(Local(HX)); i32_const(Imm32(I32_SIGN_BIT)); i32_shr_u; local_set(Local(SIGN));
         // if big { if sign { x=-x; y=-y } x=(PIO4-x)+(PIO4_LO-y); y=0 }
-        local_get(BIG);
+        local_get(Local(BIG));
         if_empty;
-            local_get(SIGN);
+            local_get(Local(SIGN));
             if_empty;
-                local_get(X); f64_neg; local_set(X);
-                local_get(Y); f64_neg; local_set(Y);
+                local_get(Local(X)); f64_neg; local_set(Local(X));
+                local_get(Local(Y)); f64_neg; local_set(Local(Y));
             end;
-            f64_const(PIO4); local_get(X); f64_sub;
-            f64_const(PIO4_LO); local_get(Y); f64_sub;
-            f64_add; local_set(X);
-            f64_const(0.0); local_set(Y);
+            f64_const(PIO4); local_get(Local(X)); f64_sub;
+            f64_const(PIO4_LO); local_get(Local(Y)); f64_sub;
+            f64_add; local_set(Local(X));
+            f64_const(0.0); local_set(Local(Y));
         end;
         // z = x*x; w = z*z
-        local_get(X); local_get(X); f64_mul; local_set(Z);
-        local_get(Z); local_get(Z); f64_mul; local_set(W);
+        local_get(Local(X)); local_get(Local(X)); f64_mul; local_set(Local(Z));
+        local_get(Local(Z)); local_get(Local(Z)); f64_mul; local_set(Local(W));
         // r = T1 + w*(T3 + w*(T5 + w*(T7 + w*(T9 + w*T11))))
         f64_const(T1);
-        local_get(W); f64_const(T3);
-        local_get(W); f64_const(T5);
-        local_get(W); f64_const(T7);
-        local_get(W); f64_const(T9);
-        local_get(W); f64_const(T11); f64_mul; f64_add;
+        local_get(Local(W)); f64_const(T3);
+        local_get(Local(W)); f64_const(T5);
+        local_get(Local(W)); f64_const(T7);
+        local_get(Local(W)); f64_const(T9);
+        local_get(Local(W)); f64_const(T11); f64_mul; f64_add;
         f64_mul; f64_add;
         f64_mul; f64_add;
         f64_mul; f64_add;
-        f64_mul; f64_add; local_set(R);
+        f64_mul; f64_add; local_set(Local(R));
         // v = z*(T2 + w*(T4 + w*(T6 + w*(T8 + w*(T10 + w*T12)))))
-        local_get(Z);
+        local_get(Local(Z));
         f64_const(T2);
-        local_get(W); f64_const(T4);
-        local_get(W); f64_const(T6);
-        local_get(W); f64_const(T8);
-        local_get(W); f64_const(T10);
-        local_get(W); f64_const(T12); f64_mul; f64_add;
+        local_get(Local(W)); f64_const(T4);
+        local_get(Local(W)); f64_const(T6);
+        local_get(Local(W)); f64_const(T8);
+        local_get(Local(W)); f64_const(T10);
+        local_get(Local(W)); f64_const(T12); f64_mul; f64_add;
         f64_mul; f64_add;
         f64_mul; f64_add;
         f64_mul; f64_add;
         f64_mul; f64_add;
-        f64_mul; local_set(V);
+        f64_mul; local_set(Local(V));
         // s = z*x
-        local_get(Z); local_get(X); f64_mul; local_set(S);
+        local_get(Local(Z)); local_get(Local(X)); f64_mul; local_set(Local(S));
         // r = y + z*(s*(r+v) + y) + s*T0
-        local_get(Y);
-        local_get(Z); local_get(S); local_get(R); local_get(V); f64_add; f64_mul; local_get(Y); f64_add; f64_mul;
+        local_get(Local(Y));
+        local_get(Local(Z)); local_get(Local(S)); local_get(Local(R)); local_get(Local(V)); f64_add; f64_mul; local_get(Local(Y)); f64_add; f64_mul;
         f64_add;
-        local_get(S); f64_const(T0); f64_mul;
-        f64_add; local_set(R);
+        local_get(Local(S)); f64_const(T0); f64_mul;
+        f64_add; local_set(Local(R));
         // w = x + r
-        local_get(X); local_get(R); f64_add; local_set(W);
+        local_get(Local(X)); local_get(Local(R)); f64_add; local_set(Local(W));
         // if big { ... return ±v }
-        local_get(BIG);
+        local_get(Local(BIG));
         if_empty;
             // s = 1 - 2*odd
-            f64_const(1.0); f64_const(2.0); local_get(ODD); f64_convert_i32_s; f64_mul; f64_sub; local_set(S);
+            f64_const(1.0); f64_const(2.0); local_get(Local(ODD)); f64_convert_i32_s; f64_mul; f64_sub; local_set(Local(S));
             // v = s - 2*(x + (r - w*w/(w+s)))
-            local_get(S);
+            local_get(Local(S));
             f64_const(2.0);
-            local_get(X);
-            local_get(R); local_get(W); local_get(W); f64_mul; local_get(W); local_get(S); f64_add; f64_div; f64_sub;
+            local_get(Local(X));
+            local_get(Local(R)); local_get(Local(W)); local_get(Local(W)); f64_mul; local_get(Local(W)); local_get(Local(S)); f64_add; f64_div; f64_sub;
             f64_add;
             f64_mul;
-            f64_sub; local_set(V);
+            f64_sub; local_set(Local(V));
             // return sign ? -v : v
-            local_get(SIGN);
-            if_f64; local_get(V); f64_neg; else_; local_get(V); end;
+            local_get(Local(SIGN));
+            if_f64; local_get(Local(V)); f64_neg; else_; local_get(Local(V)); end;
             return_;
         end;
         // if odd == 0 { return w }
-        local_get(ODD); i32_eqz;
-        if_empty; local_get(W); return_; end;
+        local_get(Local(ODD)); i32_eqz;
+        if_empty; local_get(Local(W)); return_; end;
         // w0 = zero_low_word(w)
-        local_get(W); i64_reinterpret_f64; i64_const(LOW_WORD_MASK); i64_and; f64_reinterpret_i64; local_set(W0); // !0xFFFFFFFF == 0xFFFFFFFF00000000 = LOW_WORD_MASK
+        local_get(Local(W)); i64_reinterpret_f64; i64_const(Imm64(LOW_WORD_MASK)); i64_and; f64_reinterpret_i64; local_set(Local(W0)); // !0xFFFFFFFF == 0xFFFFFFFF00000000 = LOW_WORD_MASK
         // v = r - (w0 - x)
-        local_get(R); local_get(W0); local_get(X); f64_sub; f64_sub; local_set(V);
+        local_get(Local(R)); local_get(Local(W0)); local_get(Local(X)); f64_sub; f64_sub; local_set(Local(V));
         // a = -1.0 / w
-        f64_const(-1.0); local_get(W); f64_div; local_set(A);
+        f64_const(-1.0); local_get(Local(W)); f64_div; local_set(Local(A));
         // a0 = zero_low_word(a)
-        local_get(A); i64_reinterpret_f64; i64_const(LOW_WORD_MASK); i64_and; f64_reinterpret_i64; local_set(A0);
+        local_get(Local(A)); i64_reinterpret_f64; i64_const(Imm64(LOW_WORD_MASK)); i64_and; f64_reinterpret_i64; local_set(Local(A0));
         // return a0 + a*(1 + a0*w0 + a0*v)
-        local_get(A0);
-        local_get(A);
-        f64_const(1.0); local_get(A0); local_get(W0); f64_mul; f64_add; local_get(A0); local_get(V); f64_mul; f64_add;
+        local_get(Local(A0));
+        local_get(Local(A));
+        f64_const(1.0); local_get(Local(A0)); local_get(Local(W0)); f64_mul; f64_add; local_get(Local(A0)); local_get(Local(V)); f64_mul; f64_add;
         f64_mul;
         f64_add;
         end;
@@ -657,46 +658,46 @@ const RP_I: u32 = 19;       // i32 loop i
 fn emit_medium(f: &mut Function) {
     wasm!(f, {
         // f_n = (x*INV_PIO2 + TO_INT) - TO_INT
-        local_get(RP_X); f64_const(INV_PIO2); f64_mul; f64_const(TO_INT); f64_add;
-        f64_const(TO_INT); f64_sub; local_set(RP_FN);
+        local_get(Local(RP_X)); f64_const(INV_PIO2); f64_mul; f64_const(TO_INT); f64_add;
+        f64_const(TO_INT); f64_sub; local_set(Local(RP_FN));
         // n = f_n as i32
-        local_get(RP_FN); i64_trunc_f64_s; i32_wrap_i64; local_set(RP_N);
+        local_get(Local(RP_FN)); i64_trunc_f64_s; i32_wrap_i64; local_set(Local(RP_N));
         // r = x - f_n*PIO2_1
-        local_get(RP_X); local_get(RP_FN); f64_const(PIO2_1); f64_mul; f64_sub; local_set(RP_R);
+        local_get(Local(RP_X)); local_get(Local(RP_FN)); f64_const(PIO2_1); f64_mul; f64_sub; local_set(Local(RP_R));
         // w = f_n*PIO2_1T
-        local_get(RP_FN); f64_const(PIO2_1T); f64_mul; local_set(RP_W);
+        local_get(Local(RP_FN)); f64_const(PIO2_1T); f64_mul; local_set(Local(RP_W));
         // y0 = r - w
-        local_get(RP_R); local_get(RP_W); f64_sub; local_set(RP_Y0);
+        local_get(Local(RP_R)); local_get(Local(RP_W)); f64_sub; local_set(Local(RP_Y0));
         // ey = (to_bits(y0) >> 52) & 0x7ff ; ex = ix >> 20
-        local_get(RP_Y0); i64_reinterpret_f64; i64_const(F64_MANTISSA_BITS); i64_shr_u; i32_wrap_i64; i32_const(F64_EXP_MASK_I32); i32_and; local_set(RP_EY);
-        local_get(RP_IX); i32_const(F64_EXP_SHIFT); i32_shr_u; local_set(RP_EX);
+        local_get(Local(RP_Y0)); i64_reinterpret_f64; i64_const(Imm64(F64_MANTISSA_BITS)); i64_shr_u; i32_wrap_i64; i32_const(Imm32(F64_EXP_MASK_I32)); i32_and; local_set(Local(RP_EY));
+        local_get(Local(RP_IX)); i32_const(Imm32(F64_EXP_SHIFT)); i32_shr_u; local_set(Local(RP_EX));
         // if ex - ey > 16
-        local_get(RP_EX); local_get(RP_EY); i32_sub; i32_const(MEDIUM_EX_EY_THRESH_1); i32_gt_s;
+        local_get(Local(RP_EX)); local_get(Local(RP_EY)); i32_sub; i32_const(Imm32(MEDIUM_EX_EY_THRESH_1)); i32_gt_s;
         if_empty;
             // t = r; w = f_n*PIO2_2; r = t - w; w = f_n*PIO2_2T - ((t - r) - w); y0 = r - w
-            local_get(RP_R); local_set(RP_T);
-            local_get(RP_FN); f64_const(PIO2_2); f64_mul; local_set(RP_W);
-            local_get(RP_T); local_get(RP_W); f64_sub; local_set(RP_R);
-            local_get(RP_FN); f64_const(PIO2_2T); f64_mul;
-            local_get(RP_T); local_get(RP_R); f64_sub; local_get(RP_W); f64_sub;
-            f64_sub; local_set(RP_W);
-            local_get(RP_R); local_get(RP_W); f64_sub; local_set(RP_Y0);
+            local_get(Local(RP_R)); local_set(Local(RP_T));
+            local_get(Local(RP_FN)); f64_const(PIO2_2); f64_mul; local_set(Local(RP_W));
+            local_get(Local(RP_T)); local_get(Local(RP_W)); f64_sub; local_set(Local(RP_R));
+            local_get(Local(RP_FN)); f64_const(PIO2_2T); f64_mul;
+            local_get(Local(RP_T)); local_get(Local(RP_R)); f64_sub; local_get(Local(RP_W)); f64_sub;
+            f64_sub; local_set(Local(RP_W));
+            local_get(Local(RP_R)); local_get(Local(RP_W)); f64_sub; local_set(Local(RP_Y0));
             // ey = (to_bits(y0) >> 52) & 0x7ff
-            local_get(RP_Y0); i64_reinterpret_f64; i64_const(F64_MANTISSA_BITS); i64_shr_u; i32_wrap_i64; i32_const(F64_EXP_MASK_I32); i32_and; local_set(RP_EY);
+            local_get(Local(RP_Y0)); i64_reinterpret_f64; i64_const(Imm64(F64_MANTISSA_BITS)); i64_shr_u; i32_wrap_i64; i32_const(Imm32(F64_EXP_MASK_I32)); i32_and; local_set(Local(RP_EY));
             // if ex - ey > 49
-            local_get(RP_EX); local_get(RP_EY); i32_sub; i32_const(MEDIUM_EX_EY_THRESH_2); i32_gt_s;
+            local_get(Local(RP_EX)); local_get(Local(RP_EY)); i32_sub; i32_const(Imm32(MEDIUM_EX_EY_THRESH_2)); i32_gt_s;
             if_empty;
-                local_get(RP_R); local_set(RP_T);
-                local_get(RP_FN); f64_const(PIO2_3); f64_mul; local_set(RP_W);
-                local_get(RP_T); local_get(RP_W); f64_sub; local_set(RP_R);
-                local_get(RP_FN); f64_const(PIO2_3T); f64_mul;
-                local_get(RP_T); local_get(RP_R); f64_sub; local_get(RP_W); f64_sub;
-                f64_sub; local_set(RP_W);
-                local_get(RP_R); local_get(RP_W); f64_sub; local_set(RP_Y0);
+                local_get(Local(RP_R)); local_set(Local(RP_T));
+                local_get(Local(RP_FN)); f64_const(PIO2_3); f64_mul; local_set(Local(RP_W));
+                local_get(Local(RP_T)); local_get(Local(RP_W)); f64_sub; local_set(Local(RP_R));
+                local_get(Local(RP_FN)); f64_const(PIO2_3T); f64_mul;
+                local_get(Local(RP_T)); local_get(Local(RP_R)); f64_sub; local_get(Local(RP_W)); f64_sub;
+                f64_sub; local_set(Local(RP_W));
+                local_get(Local(RP_R)); local_get(Local(RP_W)); f64_sub; local_set(Local(RP_Y0));
             end;
         end;
         // y1 = (r - y0) - w
-        local_get(RP_R); local_get(RP_Y0); f64_sub; local_get(RP_W); f64_sub; local_set(RP_Y1);
+        local_get(Local(RP_R)); local_get(Local(RP_Y0)); f64_sub; local_get(Local(RP_W)); f64_sub; local_set(Local(RP_Y1));
     });
     emit_store_y(f);
 }
@@ -704,8 +705,8 @@ fn emit_medium(f: &mut Function) {
 /// Store RP_Y0 / RP_Y1 to y_ptr[0], y_ptr[1].
 fn emit_store_y(f: &mut Function) {
     wasm!(f, {
-        local_get(RP_YP); local_get(RP_Y0); f64_store(0);
-        local_get(RP_YP); local_get(RP_Y1); f64_store(8);
+        local_get(Local(RP_YP)); local_get(Local(RP_Y0)); f64_store(0);
+        local_get(Local(RP_YP)); local_get(Local(RP_Y1)); f64_store(8);
     });
 }
 
@@ -716,18 +717,18 @@ fn emit_store_y(f: &mut Function) {
 fn emit_small(f: &mut Function, k: i32) {
     let kf = k as f64;
     wasm!(f, {
-        local_get(RP_SIGN); i32_eqz;
+        local_get(Local(RP_SIGN)); i32_eqz;
         if_empty;
             // positive
-            local_get(RP_X); f64_const(kf); f64_const(PIO2_1); f64_mul; f64_sub; local_set(RP_Z);
-            local_get(RP_Z); f64_const(kf); f64_const(PIO2_1T); f64_mul; f64_sub; local_set(RP_Y0);
-            local_get(RP_Z); local_get(RP_Y0); f64_sub; f64_const(kf); f64_const(PIO2_1T); f64_mul; f64_sub; local_set(RP_Y1);
-            i32_const(k); local_set(RP_N);
+            local_get(Local(RP_X)); f64_const(kf); f64_const(PIO2_1); f64_mul; f64_sub; local_set(Local(RP_Z));
+            local_get(Local(RP_Z)); f64_const(kf); f64_const(PIO2_1T); f64_mul; f64_sub; local_set(Local(RP_Y0));
+            local_get(Local(RP_Z)); local_get(Local(RP_Y0)); f64_sub; f64_const(kf); f64_const(PIO2_1T); f64_mul; f64_sub; local_set(Local(RP_Y1));
+            i32_const(Imm32(k)); local_set(Local(RP_N));
         else_;
-            local_get(RP_X); f64_const(kf); f64_const(PIO2_1); f64_mul; f64_add; local_set(RP_Z);
-            local_get(RP_Z); f64_const(kf); f64_const(PIO2_1T); f64_mul; f64_add; local_set(RP_Y0);
-            local_get(RP_Z); local_get(RP_Y0); f64_sub; f64_const(kf); f64_const(PIO2_1T); f64_mul; f64_add; local_set(RP_Y1);
-            i32_const(-k); local_set(RP_N);
+            local_get(Local(RP_X)); f64_const(kf); f64_const(PIO2_1); f64_mul; f64_add; local_set(Local(RP_Z));
+            local_get(Local(RP_Z)); f64_const(kf); f64_const(PIO2_1T); f64_mul; f64_add; local_set(Local(RP_Y0));
+            local_get(Local(RP_Z)); local_get(Local(RP_Y0)); f64_sub; f64_const(kf); f64_const(PIO2_1T); f64_mul; f64_add; local_set(Local(RP_Y1));
+            i32_const(Imm32(-k)); local_set(Local(RP_N));
         end;
     });
     emit_store_y(f);
@@ -765,124 +766,124 @@ fn compile_rem_pio2(emitter: &mut WasmEmitter) {
     ]);
     wasm!(f, {
         // sign = (to_bits(x) >> 63) as i32
-        local_get(RP_X); i64_reinterpret_f64; i64_const(F64_SIGN_BIT); i64_shr_u; i32_wrap_i64; local_set(RP_SIGN);
+        local_get(Local(RP_X)); i64_reinterpret_f64; i64_const(Imm64(F64_SIGN_BIT)); i64_shr_u; i32_wrap_i64; local_set(Local(RP_SIGN));
         // ix = (to_bits(x) >> 32) as u32 & 0x7fffffff
-        local_get(RP_X); i64_reinterpret_f64; i64_const(HI_SHIFT); i64_shr_u; i32_wrap_i64; i32_const(F64_ABS_MASK_HI); i32_and; local_set(RP_IX);
+        local_get(Local(RP_X)); i64_reinterpret_f64; i64_const(Imm64(HI_SHIFT)); i64_shr_u; i32_wrap_i64; i32_const(Imm32(F64_ABS_MASK_HI)); i32_and; local_set(Local(RP_IX));
     });
 
     // if ix <= 0x400f6a7a  (|x| ~<= 5pi/4)
-    wasm!(f, { local_get(RP_IX); i32_const(RP2_5PI4_HI); i32_le_u; if_empty; });
+    wasm!(f, { local_get(Local(RP_IX)); i32_const(Imm32(RP2_5PI4_HI)); i32_le_u; if_empty; });
     // if (ix & 0xfffff) == 0x921fb { medium; return n }
-    wasm!(f, { local_get(RP_IX); i32_const(RP2_FRAC_MASK); i32_and; i32_const(RP2_PI_FRAC); i32_eq; if_empty; });
+    wasm!(f, { local_get(Local(RP_IX)); i32_const(Imm32(RP2_FRAC_MASK)); i32_and; i32_const(Imm32(RP2_PI_FRAC)); i32_eq; if_empty; });
     emit_medium(&mut f);
-    wasm!(f, { local_get(RP_N); return_; });
+    wasm!(f, { local_get(Local(RP_N)); return_; });
     wasm!(f, { end; }); // end the 0x921fb if
     // if ix <= 0x4002d97c { small(1) } else { small(2) }
-    wasm!(f, { local_get(RP_IX); i32_const(RP2_3PI4_HI); i32_le_u; if_empty; });
+    wasm!(f, { local_get(Local(RP_IX)); i32_const(Imm32(RP2_3PI4_HI)); i32_le_u; if_empty; });
     emit_small(&mut f, 1);
-    wasm!(f, { local_get(RP_N); return_; });
+    wasm!(f, { local_get(Local(RP_N)); return_; });
     wasm!(f, { else_; });
     emit_small(&mut f, 2);
-    wasm!(f, { local_get(RP_N); return_; });
+    wasm!(f, { local_get(Local(RP_N)); return_; });
     wasm!(f, { end; });   // end 3pi/4 split
     wasm!(f, { end; });   // end 5pi/4 outer
 
     // if ix <= 0x401c463b  (|x| ~<= 9pi/4)
-    wasm!(f, { local_get(RP_IX); i32_const(RP2_9PI4_HI); i32_le_u; if_empty; });
+    wasm!(f, { local_get(Local(RP_IX)); i32_const(Imm32(RP2_9PI4_HI)); i32_le_u; if_empty; });
         // if ix <= 0x4015fdbc (|x| ~<= 7pi/4)
-        wasm!(f, { local_get(RP_IX); i32_const(RP2_7PI4_HI); i32_le_u; if_empty; });
+        wasm!(f, { local_get(Local(RP_IX)); i32_const(Imm32(RP2_7PI4_HI)); i32_le_u; if_empty; });
             // if ix == 0x4012d97c { medium }
-            wasm!(f, { local_get(RP_IX); i32_const(RP2_2PI_HI); i32_eq; if_empty; });
+            wasm!(f, { local_get(Local(RP_IX)); i32_const(Imm32(RP2_2PI_HI)); i32_eq; if_empty; });
             emit_medium(&mut f);
-            wasm!(f, { local_get(RP_N); return_; });
+            wasm!(f, { local_get(Local(RP_N)); return_; });
             wasm!(f, { end; });
             emit_small(&mut f, 3);
-            wasm!(f, { local_get(RP_N); return_; });
+            wasm!(f, { local_get(Local(RP_N)); return_; });
         wasm!(f, { else_; });
             // if ix == 0x401921fb { medium }
-            wasm!(f, { local_get(RP_IX); i32_const(RP2_3PI2_HI); i32_eq; if_empty; });
+            wasm!(f, { local_get(Local(RP_IX)); i32_const(Imm32(RP2_3PI2_HI)); i32_eq; if_empty; });
             emit_medium(&mut f);
-            wasm!(f, { local_get(RP_N); return_; });
+            wasm!(f, { local_get(Local(RP_N)); return_; });
             wasm!(f, { end; });
             emit_small(&mut f, 4);
-            wasm!(f, { local_get(RP_N); return_; });
+            wasm!(f, { local_get(Local(RP_N)); return_; });
         wasm!(f, { end; }); // end 7pi/4 split
     wasm!(f, { end; }); // end 9pi/4 outer
 
     // if ix < 0x413921fb { medium }
-    wasm!(f, { local_get(RP_IX); i32_const(RP2_LARGE_HI); i32_lt_u; if_empty; });
+    wasm!(f, { local_get(Local(RP_IX)); i32_const(Imm32(RP2_LARGE_HI)); i32_lt_u; if_empty; });
     emit_medium(&mut f);
-    wasm!(f, { local_get(RP_N); return_; });
+    wasm!(f, { local_get(Local(RP_N)); return_; });
     wasm!(f, { end; });
 
     // if ix >= 0x7ff00000 { y0 = x - x; y1 = y0; return 0 }
-    wasm!(f, { local_get(RP_IX); i32_const(F64_INF_NAN_HI); i32_ge_u; if_empty;
-        local_get(RP_X); local_get(RP_X); f64_sub; local_set(RP_Y0);
-        local_get(RP_Y0); local_set(RP_Y1);
+    wasm!(f, { local_get(Local(RP_IX)); i32_const(Imm32(F64_INF_NAN_HI)); i32_ge_u; if_empty;
+        local_get(Local(RP_X)); local_get(Local(RP_X)); f64_sub; local_set(Local(RP_Y0));
+        local_get(Local(RP_Y0)); local_set(Local(RP_Y1));
     });
     emit_store_y(&mut f);
-    wasm!(f, { i32_const(0); return_; end; });
+    wasm!(f, { i32_const(Imm32(0)); return_; end; });
 
     // ── large path ──
     // alloc tx(24) + ty(24). RP_TXP = tx, RP_TYP = ty.
     wasm!(f, {
-        i32_const(TX_BYTES + TY_BYTES); call(alloc); local_set(RP_TXP);
-        local_get(RP_TXP); i32_const(TX_BYTES); i32_add; local_set(RP_TYP);
+        i32_const(Imm32(TX_BYTES + TY_BYTES)); call(alloc); local_set(Local(RP_TXP));
+        local_get(Local(RP_TXP)); i32_const(Imm32(TX_BYTES)); i32_add; local_set(Local(RP_TYP));
         // ui = to_bits(x); ui &= (!1) >> 12; ui |= (0x3ff+23) << 52; z = from_bits(ui)
-        local_get(RP_X); i64_reinterpret_f64;
-        i64_const(-1); i64_const(1); i64_const(-1); i64_xor; i64_and; // (!1)
-        i64_const(RPL_NORM_STRIP); i64_shr_u;
+        local_get(Local(RP_X)); i64_reinterpret_f64;
+        i64_const(Imm64(-1)); i64_const(Imm64(1)); i64_const(Imm64(-1)); i64_xor; i64_and; // (!1)
+        i64_const(Imm64(RPL_NORM_STRIP)); i64_shr_u;
         i64_and;
-        i64_const(RPL_EXPO_BIAS); i64_const(F64_MANTISSA_BITS); i64_shl; i64_or;
-        local_set(RP_UI);
-        local_get(RP_UI); f64_reinterpret_i64; local_set(RP_Z);
+        i64_const(Imm64(RPL_EXPO_BIAS)); i64_const(Imm64(F64_MANTISSA_BITS)); i64_shl; i64_or;
+        local_set(Local(RP_UI));
+        local_get(Local(RP_UI)); f64_reinterpret_i64; local_set(Local(RP_Z));
         // for i in 0..2 { tx[i] = z as i32 as f64; z = (z - tx[i]) * 2^24 }
-        i32_const(0); local_set(RP_I);
+        i32_const(Imm32(0)); local_set(Local(RP_I));
         block_empty; loop_empty;
-            local_get(RP_I); i32_const(TX_SPLIT_COUNT); i32_ge_s; br_if(1);
+            local_get(Local(RP_I)); i32_const(Imm32(TX_SPLIT_COUNT)); i32_ge_s; br_if(1);
             // tx[i] = (z as i32) as f64
-            local_get(RP_TXP); local_get(RP_I); i32_const(F64_BYTES); i32_mul; i32_add;
-            local_get(RP_Z); i64_trunc_f64_s; i32_wrap_i64; f64_convert_i32_s;
+            local_get(Local(RP_TXP)); local_get(Local(RP_I)); i32_const(Imm32(F64_BYTES)); i32_mul; i32_add;
+            local_get(Local(RP_Z)); i64_trunc_f64_s; i32_wrap_i64; f64_convert_i32_s;
             f64_store(0);
             // z = (z - tx[i]) * 2^24
-            local_get(RP_Z);
-            local_get(RP_TXP); local_get(RP_I); i32_const(F64_BYTES); i32_mul; i32_add; f64_load(0);
+            local_get(Local(RP_Z));
+            local_get(Local(RP_TXP)); local_get(Local(RP_I)); i32_const(Imm32(F64_BYTES)); i32_mul; i32_add; f64_load(0);
             f64_sub;
-            i64_const(x1p24_bits); f64_reinterpret_i64; f64_mul; local_set(RP_Z);
-            local_get(RP_I); i32_const(1); i32_add; local_set(RP_I);
+            i64_const(Imm64(x1p24_bits)); f64_reinterpret_i64; f64_mul; local_set(Local(RP_Z));
+            local_get(Local(RP_I)); i32_const(Imm32(1)); i32_add; local_set(Local(RP_I));
             br(0);
         end; end;
         // tx[2] = z
-        local_get(RP_TXP); i32_const(TX_LAST_OFFSET); i32_add; local_get(RP_Z); f64_store(0);
+        local_get(Local(RP_TXP)); i32_const(Imm32(TX_LAST_OFFSET)); i32_add; local_get(Local(RP_Z)); f64_store(0);
         // i = 2; while i != 0 && tx[i] == 0 { i -= 1 }
-        i32_const(TX_SPLIT_COUNT); local_set(RP_I);
+        i32_const(Imm32(TX_SPLIT_COUNT)); local_set(Local(RP_I));
         block_empty; loop_empty;
-            local_get(RP_I); i32_eqz; br_if(1);
-            local_get(RP_TXP); local_get(RP_I); i32_const(F64_BYTES); i32_mul; i32_add; f64_load(0);
+            local_get(Local(RP_I)); i32_eqz; br_if(1);
+            local_get(Local(RP_TXP)); local_get(Local(RP_I)); i32_const(Imm32(F64_BYTES)); i32_mul; i32_add; f64_load(0);
             f64_const(0.0); f64_ne; br_if(1);
-            local_get(RP_I); i32_const(1); i32_sub; local_set(RP_I);
+            local_get(Local(RP_I)); i32_const(Imm32(1)); i32_sub; local_set(Local(RP_I));
             br(0);
         end; end;
         // jx = i  (nx-1 form); n = rem_pio2_large(tx, i+1, ty, (ix>>20)-(0x3ff+23), 1)
-        local_get(RP_TXP);
-        local_get(RP_I); i32_const(1); i32_add;        // nx = i+1
-        local_get(RP_TYP);
-        local_get(RP_IX); i32_const(F64_EXP_SHIFT); i32_shr_s; i32_const(0x3ff + 23); i32_sub; // e0
-        i32_const(1);                                   // prec
-        call(rpl); local_set(RP_N);
+        local_get(Local(RP_TXP));
+        local_get(Local(RP_I)); i32_const(Imm32(1)); i32_add;        // nx = i+1
+        local_get(Local(RP_TYP));
+        local_get(Local(RP_IX)); i32_const(Imm32(F64_EXP_SHIFT)); i32_shr_s; i32_const(Imm32(0x3ff + 23)); i32_sub; // e0
+        i32_const(Imm32(1));                                   // prec
+        call(rpl); local_set(Local(RP_N));
         // y0 = ty[0]; y1 = ty[1]
-        local_get(RP_TYP); f64_load(0); local_set(RP_Y0);
-        local_get(RP_TYP); f64_load(8); local_set(RP_Y1);
+        local_get(Local(RP_TYP)); f64_load(0); local_set(Local(RP_Y0));
+        local_get(Local(RP_TYP)); f64_load(8); local_set(Local(RP_Y1));
         // if sign != 0 { n = -n; y0 = -y0; y1 = -y1 }
-        local_get(RP_SIGN);
+        local_get(Local(RP_SIGN));
         if_empty;
-            i32_const(0); local_get(RP_N); i32_sub; local_set(RP_N);
-            local_get(RP_Y0); f64_neg; local_set(RP_Y0);
-            local_get(RP_Y1); f64_neg; local_set(RP_Y1);
+            i32_const(Imm32(0)); local_get(Local(RP_N)); i32_sub; local_set(Local(RP_N));
+            local_get(Local(RP_Y0)); f64_neg; local_set(Local(RP_Y0));
+            local_get(Local(RP_Y1)); f64_neg; local_set(Local(RP_Y1));
         end;
     });
     emit_store_y(&mut f);
-    wasm!(f, { local_get(RP_N); end; });
+    wasm!(f, { local_get(Local(RP_N)); end; });
     emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.libm.rem_pio2, type_idx, f));
 }
 
@@ -940,83 +941,83 @@ fn compile_rem_pio2_large(emitter: &mut WasmEmitter) {
     // Helper closures to compute element addresses are inlined as wasm sequences.
     // Allocate scratch + zero it (f/q/fq/iq start at 0 in Rust).
     wasm!(f, {
-        i32_const(SCRATCH_BYTES); call(alloc); local_set(SCR);
-        local_get(SCR); i32_const(IQ_OFF); i32_add; local_set(IQ);
-        local_get(SCR); i32_const(F_OFF); i32_add; local_set(FA);
-        local_get(SCR); i32_const(Q_OFF); i32_add; local_set(QA);
-        local_get(SCR); i32_const(FQ_OFF); i32_add; local_set(FQA);
+        i32_const(Imm32(SCRATCH_BYTES)); call(alloc); local_set(Local(SCR));
+        local_get(Local(SCR)); i32_const(Imm32(IQ_OFF)); i32_add; local_set(Local(IQ));
+        local_get(Local(SCR)); i32_const(Imm32(F_OFF)); i32_add; local_set(Local(FA));
+        local_get(Local(SCR)); i32_const(Imm32(Q_OFF)); i32_add; local_set(Local(QA));
+        local_get(Local(SCR)); i32_const(Imm32(FQ_OFF)); i32_add; local_set(Local(FQA));
         // memory.fill(SCR, 0, SCRATCH_BYTES)
-        local_get(SCR); i32_const(0); i32_const(SCRATCH_BYTES); memory_fill;
+        local_get(Local(SCR)); i32_const(Imm32(0)); i32_const(Imm32(SCRATCH_BYTES)); memory_fill;
     });
 
     // jk = INIT_JK[prec]; jp = jk  (prec is always 1 for trig → 4; emit the table read)
     wasm!(f, {
         // INIT_JK is a compile-time const; read via select chain on prec (0..3)
         // jk = match prec {0=>3,1=>4,2=>4,_=>6}
-        local_get(PREC); i32_const(0); i32_eq; if_i32; i32_const(IPIO2_E0_ADJUST); else_;
-          local_get(PREC); i32_const(PREC_DOUBLE_MAX); i32_le_u; if_i32; i32_const(JK_DOUBLE); else_; i32_const(JK_EXTENDED); end;
+        local_get(Local(PREC)); i32_const(Imm32(0)); i32_eq; if_i32; i32_const(Imm32(IPIO2_E0_ADJUST)); else_;
+          local_get(Local(PREC)); i32_const(Imm32(PREC_DOUBLE_MAX)); i32_le_u; if_i32; i32_const(Imm32(JK_DOUBLE)); else_; i32_const(Imm32(JK_EXTENDED)); end;
         end;
-        local_set(JK);
-        local_get(JK); local_set(JP);
+        local_set(Local(JK));
+        local_get(Local(JK)); local_set(Local(JP));
         // jx = nx - 1
-        local_get(NX); i32_const(1); i32_sub; local_set(JX);
+        local_get(Local(NX)); i32_const(Imm32(1)); i32_sub; local_set(Local(JX));
         // jv = (e0 - 3) / 24 ; if jv < 0 { jv = 0 }
-        local_get(E0); i32_const(IPIO2_E0_ADJUST); i32_sub; i32_const(IPIO2_CHUNK_BITS); i32_div_s; local_set(JV);
-        local_get(JV); i32_const(0); i32_lt_s; if_empty; i32_const(0); local_set(JV); end;
+        local_get(Local(E0)); i32_const(Imm32(IPIO2_E0_ADJUST)); i32_sub; i32_const(Imm32(IPIO2_CHUNK_BITS)); i32_div_s; local_set(Local(JV));
+        local_get(Local(JV)); i32_const(Imm32(0)); i32_lt_s; if_empty; i32_const(Imm32(0)); local_set(Local(JV)); end;
         // q0 = e0 - 24*(jv+1)
-        local_get(E0); i32_const(IPIO2_CHUNK_BITS); local_get(JV); i32_const(1); i32_add; i32_mul; i32_sub; local_set(Q0);
+        local_get(Local(E0)); i32_const(Imm32(IPIO2_CHUNK_BITS)); local_get(Local(JV)); i32_const(Imm32(1)); i32_add; i32_mul; i32_sub; local_set(Local(Q0));
     });
 
     // set up f[0..=jx+jk]: j = jv - jx ; for i in 0..=m { f[i] = j<0?0:IPIO2[j]; j++ }
     // use JTMP as j, M as m, II as i
     wasm!(f, {
-        local_get(JV); local_get(JX); i32_sub; local_set(JTMP); // j
-        local_get(JX); local_get(JK); i32_add; local_set(M);
-        i32_const(0); local_set(II);
+        local_get(Local(JV)); local_get(Local(JX)); i32_sub; local_set(Local(JTMP)); // j
+        local_get(Local(JX)); local_get(Local(JK)); i32_add; local_set(Local(M));
+        i32_const(Imm32(0)); local_set(Local(II));
         block_empty; loop_empty;
-            local_get(II); local_get(M); i32_gt_s; br_if(1);
+            local_get(Local(II)); local_get(Local(M)); i32_gt_s; br_if(1);
             // f[i] address
-            local_get(FA); local_get(II); i32_const(F64_BYTES); i32_mul; i32_add;
+            local_get(Local(FA)); local_get(Local(II)); i32_const(Imm32(F64_BYTES)); i32_mul; i32_add;
             // value = j<0 ? 0.0 : IPIO2[j] as f64
-            local_get(JTMP); i32_const(0); i32_lt_s;
+            local_get(Local(JTMP)); i32_const(Imm32(0)); i32_lt_s;
             if_f64;
                 f64_const(0.0);
             else_;
                 // IPIO2[j] : i32 at ipio2 + j*4
-                i32_const(ipio2); local_get(JTMP); i32_const(I32_BYTES); i32_mul; i32_add; i32_load(0);
+                i32_const(Imm32(ipio2)); local_get(Local(JTMP)); i32_const(Imm32(I32_BYTES)); i32_mul; i32_add; i32_load(0);
                 f64_convert_i32_s;
             end;
             f64_store(0);
-            local_get(JTMP); i32_const(1); i32_add; local_set(JTMP);
-            local_get(II); i32_const(1); i32_add; local_set(II);
+            local_get(Local(JTMP)); i32_const(Imm32(1)); i32_add; local_set(Local(JTMP));
+            local_get(Local(II)); i32_const(Imm32(1)); i32_add; local_set(Local(II));
             br(0);
         end; end;
     });
 
     // compute q[0..=jk]: for i { fw=0; for j in 0..=jx { fw += x[j]*f[jx+i-j] } ; q[i]=fw }
     wasm!(f, {
-        i32_const(0); local_set(II);
+        i32_const(Imm32(0)); local_set(Local(II));
         block_empty; loop_empty;
-            local_get(II); local_get(JK); i32_gt_s; br_if(1);
-            f64_const(0.0); local_set(FW);
-            i32_const(0); local_set(JJ);
+            local_get(Local(II)); local_get(Local(JK)); i32_gt_s; br_if(1);
+            f64_const(0.0); local_set(Local(FW));
+            i32_const(Imm32(0)); local_set(Local(JJ));
             block_empty; loop_empty;
-                local_get(JJ); local_get(JX); i32_gt_s; br_if(1);
-                local_get(FW);
+                local_get(Local(JJ)); local_get(Local(JX)); i32_gt_s; br_if(1);
+                local_get(Local(FW));
                 // x[j]
-                local_get(XP); local_get(JJ); i32_const(F64_BYTES); i32_mul; i32_add; f64_load(0);
+                local_get(Local(XP)); local_get(Local(JJ)); i32_const(Imm32(F64_BYTES)); i32_mul; i32_add; f64_load(0);
                 // f[jx+i-j]
-                local_get(FA); local_get(JX); local_get(II); i32_add; local_get(JJ); i32_sub; i32_const(F64_BYTES); i32_mul; i32_add; f64_load(0);
-                f64_mul; f64_add; local_set(FW);
-                local_get(JJ); i32_const(1); i32_add; local_set(JJ);
+                local_get(Local(FA)); local_get(Local(JX)); local_get(Local(II)); i32_add; local_get(Local(JJ)); i32_sub; i32_const(Imm32(F64_BYTES)); i32_mul; i32_add; f64_load(0);
+                f64_mul; f64_add; local_set(Local(FW));
+                local_get(Local(JJ)); i32_const(Imm32(1)); i32_add; local_set(Local(JJ));
                 br(0);
             end; end;
-            local_get(QA); local_get(II); i32_const(F64_BYTES); i32_mul; i32_add; local_get(FW); f64_store(0);
-            local_get(II); i32_const(1); i32_add; local_set(II);
+            local_get(Local(QA)); local_get(Local(II)); i32_const(Imm32(F64_BYTES)); i32_mul; i32_add; local_get(Local(FW)); f64_store(0);
+            local_get(Local(II)); i32_const(Imm32(1)); i32_add; local_set(Local(II));
             br(0);
         end; end;
         // jz = jk
-        local_get(JK); local_set(JZ);
+        local_get(Local(JK)); local_set(Local(JZ));
     });
     emit_rpl_recompute_and_finalize(
         &mut f, scalbn, floor, ipio2, pio2, x1p24_bits, x1p_24_bits,
@@ -1048,136 +1049,136 @@ fn emit_rpl_recompute_and_finalize(
     // ── 'recompute loop ── block(exit) wraps loop(restart).
     wasm!(f, {
         block_empty; loop_empty;
-        i32_const(0); local_set(II);
-        local_get(QA); local_get(JZ); i32_const(F64_BYTES); i32_mul; i32_add; f64_load(0); local_set(Z);
-        local_get(JZ); local_set(JJ);
+        i32_const(Imm32(0)); local_set(Local(II));
+        local_get(Local(QA)); local_get(Local(JZ)); i32_const(Imm32(F64_BYTES)); i32_mul; i32_add; f64_load(0); local_set(Local(Z));
+        local_get(Local(JZ)); local_set(Local(JJ));
         block_empty; loop_empty;
-            local_get(JJ); i32_const(1); i32_lt_s; br_if(1);
-            i64_const(x1p_24_bits); f64_reinterpret_i64; local_get(Z); f64_mul; i64_trunc_f64_s; i32_wrap_i64; f64_convert_i32_s; local_set(FW);
-            local_get(IQ); local_get(II); i32_const(I32_BYTES); i32_mul; i32_add;
-            local_get(Z); i64_const(x1p24_bits); f64_reinterpret_i64; local_get(FW); f64_mul; f64_sub; i64_trunc_f64_s; i32_wrap_i64;
+            local_get(Local(JJ)); i32_const(Imm32(1)); i32_lt_s; br_if(1);
+            i64_const(Imm64(x1p_24_bits)); f64_reinterpret_i64; local_get(Local(Z)); f64_mul; i64_trunc_f64_s; i32_wrap_i64; f64_convert_i32_s; local_set(Local(FW));
+            local_get(Local(IQ)); local_get(Local(II)); i32_const(Imm32(I32_BYTES)); i32_mul; i32_add;
+            local_get(Local(Z)); i64_const(Imm64(x1p24_bits)); f64_reinterpret_i64; local_get(Local(FW)); f64_mul; f64_sub; i64_trunc_f64_s; i32_wrap_i64;
             i32_store(0);
-            local_get(QA); local_get(JJ); i32_const(1); i32_sub; i32_const(F64_BYTES); i32_mul; i32_add; f64_load(0); local_get(FW); f64_add; local_set(Z);
-            local_get(II); i32_const(1); i32_add; local_set(II);
-            local_get(JJ); i32_const(1); i32_sub; local_set(JJ);
+            local_get(Local(QA)); local_get(Local(JJ)); i32_const(Imm32(1)); i32_sub; i32_const(Imm32(F64_BYTES)); i32_mul; i32_add; f64_load(0); local_get(Local(FW)); f64_add; local_set(Local(Z));
+            local_get(Local(II)); i32_const(Imm32(1)); i32_add; local_set(Local(II));
+            local_get(Local(JJ)); i32_const(Imm32(1)); i32_sub; local_set(Local(JJ));
             br(0);
         end; end;
 
         // z = scalbn(z, q0); z -= 8*floor(z*0.125); n = z as i32; z -= n as f64
-        local_get(Z); local_get(Q0); call(scalbn); local_set(Z);
-        local_get(Z);
-        f64_const(8.0); local_get(Z); f64_const(0.125); f64_mul; call(floor); f64_mul;
-        f64_sub; local_set(Z);
-        local_get(Z); i64_trunc_f64_s; i32_wrap_i64; local_set(N);
-        local_get(Z); local_get(N); f64_convert_i32_s; f64_sub; local_set(Z);
-        i32_const(0); local_set(IH);
-        local_get(Q0); i32_const(0); i32_gt_s;
+        local_get(Local(Z)); local_get(Local(Q0)); call(scalbn); local_set(Local(Z));
+        local_get(Local(Z));
+        f64_const(8.0); local_get(Local(Z)); f64_const(0.125); f64_mul; call(floor); f64_mul;
+        f64_sub; local_set(Local(Z));
+        local_get(Local(Z)); i64_trunc_f64_s; i32_wrap_i64; local_set(Local(N));
+        local_get(Local(Z)); local_get(Local(N)); f64_convert_i32_s; f64_sub; local_set(Local(Z));
+        i32_const(Imm32(0)); local_set(Local(IH));
+        local_get(Local(Q0)); i32_const(Imm32(0)); i32_gt_s;
         if_empty;
-            local_get(IQ); local_get(JZ); i32_const(1); i32_sub; i32_const(I32_BYTES); i32_mul; i32_add; i32_load(0);
-            i32_const(IPIO2_CHUNK_BITS); local_get(Q0); i32_sub; i32_shr_s; local_set(II);
-            local_get(N); local_get(II); i32_add; local_set(N);
-            local_get(IQ); local_get(JZ); i32_const(1); i32_sub; i32_const(I32_BYTES); i32_mul; i32_add; local_tee(TMP1);
-            local_get(TMP1); i32_load(0);
-            local_get(II); i32_const(IPIO2_CHUNK_BITS); local_get(Q0); i32_sub; i32_shl; i32_sub;
+            local_get(Local(IQ)); local_get(Local(JZ)); i32_const(Imm32(1)); i32_sub; i32_const(Imm32(I32_BYTES)); i32_mul; i32_add; i32_load(0);
+            i32_const(Imm32(IPIO2_CHUNK_BITS)); local_get(Local(Q0)); i32_sub; i32_shr_s; local_set(Local(II));
+            local_get(Local(N)); local_get(Local(II)); i32_add; local_set(Local(N));
+            local_get(Local(IQ)); local_get(Local(JZ)); i32_const(Imm32(1)); i32_sub; i32_const(Imm32(I32_BYTES)); i32_mul; i32_add; local_tee(Local(TMP1));
+            local_get(Local(TMP1)); i32_load(0);
+            local_get(Local(II)); i32_const(Imm32(IPIO2_CHUNK_BITS)); local_get(Local(Q0)); i32_sub; i32_shl; i32_sub;
             i32_store(0);
-            local_get(IQ); local_get(JZ); i32_const(1); i32_sub; i32_const(I32_BYTES); i32_mul; i32_add; i32_load(0);
-            i32_const(IPIO2_CHUNK_M1); local_get(Q0); i32_sub; i32_shr_s; local_set(IH);
+            local_get(Local(IQ)); local_get(Local(JZ)); i32_const(Imm32(1)); i32_sub; i32_const(Imm32(I32_BYTES)); i32_mul; i32_add; i32_load(0);
+            i32_const(Imm32(IPIO2_CHUNK_M1)); local_get(Local(Q0)); i32_sub; i32_shr_s; local_set(Local(IH));
         else_;
-            local_get(Q0); i32_eqz;
+            local_get(Local(Q0)); i32_eqz;
             if_empty;
-                local_get(IQ); local_get(JZ); i32_const(1); i32_sub; i32_const(I32_BYTES); i32_mul; i32_add; i32_load(0);
-                i32_const(IPIO2_CHUNK_M1); i32_shr_s; local_set(IH);
+                local_get(Local(IQ)); local_get(Local(JZ)); i32_const(Imm32(1)); i32_sub; i32_const(Imm32(I32_BYTES)); i32_mul; i32_add; i32_load(0);
+                i32_const(Imm32(IPIO2_CHUNK_M1)); i32_shr_s; local_set(Local(IH));
             else_;
-                local_get(Z); f64_const(0.5); f64_ge; if_empty; i32_const(IH_HALFWAY); local_set(IH); end;
+                local_get(Local(Z)); f64_const(0.5); f64_ge; if_empty; i32_const(Imm32(IH_HALFWAY)); local_set(Local(IH)); end;
             end;
         end;
 
-        local_get(IH); i32_const(0); i32_gt_s;
+        local_get(Local(IH)); i32_const(Imm32(0)); i32_gt_s;
         if_empty;
-            local_get(N); i32_const(1); i32_add; local_set(N);
-            i32_const(0); local_set(CARRY);
-            i32_const(0); local_set(II);
+            local_get(Local(N)); i32_const(Imm32(1)); i32_add; local_set(Local(N));
+            i32_const(Imm32(0)); local_set(Local(CARRY));
+            i32_const(Imm32(0)); local_set(Local(II));
             block_empty; loop_empty;
-                local_get(II); local_get(JZ); i32_ge_s; br_if(1);
-                local_get(IQ); local_get(II); i32_const(I32_BYTES); i32_mul; i32_add; i32_load(0); local_set(JJ);
-                local_get(CARRY); i32_eqz;
+                local_get(Local(II)); local_get(Local(JZ)); i32_ge_s; br_if(1);
+                local_get(Local(IQ)); local_get(Local(II)); i32_const(Imm32(I32_BYTES)); i32_mul; i32_add; i32_load(0); local_set(Local(JJ));
+                local_get(Local(CARRY)); i32_eqz;
                 if_empty;
-                    local_get(JJ); i32_eqz;
+                    local_get(Local(JJ)); i32_eqz;
                     if_empty; else_;
-                        i32_const(1); local_set(CARRY);
-                        local_get(IQ); local_get(II); i32_const(I32_BYTES); i32_mul; i32_add; i32_const(IPIO2_CARRY_BASE); local_get(JJ); i32_sub; i32_store(0);
+                        i32_const(Imm32(1)); local_set(Local(CARRY));
+                        local_get(Local(IQ)); local_get(Local(II)); i32_const(Imm32(I32_BYTES)); i32_mul; i32_add; i32_const(Imm32(IPIO2_CARRY_BASE)); local_get(Local(JJ)); i32_sub; i32_store(0);
                     end;
                 else_;
-                    local_get(IQ); local_get(II); i32_const(I32_BYTES); i32_mul; i32_add; i32_const(IPIO2_24BIT_MASK); local_get(JJ); i32_sub; i32_store(0);
+                    local_get(Local(IQ)); local_get(Local(II)); i32_const(Imm32(I32_BYTES)); i32_mul; i32_add; i32_const(Imm32(IPIO2_24BIT_MASK)); local_get(Local(JJ)); i32_sub; i32_store(0);
                 end;
-                local_get(II); i32_const(1); i32_add; local_set(II);
+                local_get(Local(II)); i32_const(Imm32(1)); i32_add; local_set(Local(II));
                 br(0);
             end; end;
-            local_get(Q0); i32_const(0); i32_gt_s;
+            local_get(Local(Q0)); i32_const(Imm32(0)); i32_gt_s;
             if_empty;
-                local_get(Q0); i32_const(1); i32_eq;
+                local_get(Local(Q0)); i32_const(Imm32(1)); i32_eq;
                 if_empty;
-                    local_get(IQ); local_get(JZ); i32_const(1); i32_sub; i32_const(I32_BYTES); i32_mul; i32_add; local_tee(TMP1);
-                    local_get(TMP1); i32_load(0); i32_const(IPIO2_23BIT_MASK); i32_and; i32_store(0);
+                    local_get(Local(IQ)); local_get(Local(JZ)); i32_const(Imm32(1)); i32_sub; i32_const(Imm32(I32_BYTES)); i32_mul; i32_add; local_tee(Local(TMP1));
+                    local_get(Local(TMP1)); i32_load(0); i32_const(Imm32(IPIO2_23BIT_MASK)); i32_and; i32_store(0);
                 else_;
-                    local_get(Q0); i32_const(IH_HALFWAY); i32_eq;
+                    local_get(Local(Q0)); i32_const(Imm32(IH_HALFWAY)); i32_eq;
                     if_empty;
-                        local_get(IQ); local_get(JZ); i32_const(1); i32_sub; i32_const(I32_BYTES); i32_mul; i32_add; local_tee(TMP1);
-                        local_get(TMP1); i32_load(0); i32_const(IPIO2_22BIT_MASK); i32_and; i32_store(0);
+                        local_get(Local(IQ)); local_get(Local(JZ)); i32_const(Imm32(1)); i32_sub; i32_const(Imm32(I32_BYTES)); i32_mul; i32_add; local_tee(Local(TMP1));
+                        local_get(Local(TMP1)); i32_load(0); i32_const(Imm32(IPIO2_22BIT_MASK)); i32_and; i32_store(0);
                     end;
                 end;
             end;
-            local_get(IH); i32_const(IH_HALFWAY); i32_eq;
+            local_get(Local(IH)); i32_const(Imm32(IH_HALFWAY)); i32_eq;
             if_empty;
-                f64_const(1.0); local_get(Z); f64_sub; local_set(Z);
-                local_get(CARRY); i32_eqz;
+                f64_const(1.0); local_get(Local(Z)); f64_sub; local_set(Local(Z));
+                local_get(Local(CARRY)); i32_eqz;
                 if_empty; else_;
-                    local_get(Z); f64_const(1.0); local_get(Q0); call(scalbn); f64_sub; local_set(Z);
+                    local_get(Local(Z)); f64_const(1.0); local_get(Local(Q0)); call(scalbn); f64_sub; local_set(Local(Z));
                 end;
             end;
         end;
 
-        local_get(Z); f64_const(0.0); f64_eq;
+        local_get(Local(Z)); f64_const(0.0); f64_eq;
         if_empty;
-            i32_const(0); local_set(JJ);
-            local_get(JZ); i32_const(1); i32_sub; local_set(II);
+            i32_const(Imm32(0)); local_set(Local(JJ));
+            local_get(Local(JZ)); i32_const(Imm32(1)); i32_sub; local_set(Local(II));
             block_empty; loop_empty;
-                local_get(II); local_get(JK); i32_lt_s; br_if(1);
-                local_get(JJ); local_get(IQ); local_get(II); i32_const(I32_BYTES); i32_mul; i32_add; i32_load(0); i32_or; local_set(JJ);
-                local_get(II); i32_const(1); i32_sub; local_set(II);
+                local_get(Local(II)); local_get(Local(JK)); i32_lt_s; br_if(1);
+                local_get(Local(JJ)); local_get(Local(IQ)); local_get(Local(II)); i32_const(Imm32(I32_BYTES)); i32_mul; i32_add; i32_load(0); i32_or; local_set(Local(JJ));
+                local_get(Local(II)); i32_const(Imm32(1)); i32_sub; local_set(Local(II));
                 br(0);
             end; end;
-            local_get(JJ); i32_eqz;
+            local_get(Local(JJ)); i32_eqz;
             if_empty;
-                i32_const(1); local_set(KK);
+                i32_const(Imm32(1)); local_set(Local(KK));
                 block_empty; loop_empty;
-                    local_get(IQ); local_get(JK); local_get(KK); i32_sub; i32_const(I32_BYTES); i32_mul; i32_add; i32_load(0);
+                    local_get(Local(IQ)); local_get(Local(JK)); local_get(Local(KK)); i32_sub; i32_const(Imm32(I32_BYTES)); i32_mul; i32_add; i32_load(0);
                     br_if(1);
-                    local_get(KK); i32_const(1); i32_add; local_set(KK);
+                    local_get(Local(KK)); i32_const(Imm32(1)); i32_add; local_set(Local(KK));
                     br(0);
                 end; end;
-                local_get(JZ); i32_const(1); i32_add; local_set(II);
+                local_get(Local(JZ)); i32_const(Imm32(1)); i32_add; local_set(Local(II));
                 block_empty; loop_empty;
-                    local_get(II); local_get(JZ); local_get(KK); i32_add; i32_gt_s; br_if(1);
-                    local_get(FA); local_get(JX); local_get(II); i32_add; i32_const(F64_BYTES); i32_mul; i32_add;
-                    i32_const(ipio2); local_get(JV); local_get(II); i32_add; i32_const(I32_BYTES); i32_mul; i32_add; i32_load(0); f64_convert_i32_s;
+                    local_get(Local(II)); local_get(Local(JZ)); local_get(Local(KK)); i32_add; i32_gt_s; br_if(1);
+                    local_get(Local(FA)); local_get(Local(JX)); local_get(Local(II)); i32_add; i32_const(Imm32(F64_BYTES)); i32_mul; i32_add;
+                    i32_const(Imm32(ipio2)); local_get(Local(JV)); local_get(Local(II)); i32_add; i32_const(Imm32(I32_BYTES)); i32_mul; i32_add; i32_load(0); f64_convert_i32_s;
                     f64_store(0);
-                    f64_const(0.0); local_set(FW);
-                    i32_const(0); local_set(JJ);
+                    f64_const(0.0); local_set(Local(FW));
+                    i32_const(Imm32(0)); local_set(Local(JJ));
                     block_empty; loop_empty;
-                        local_get(JJ); local_get(JX); i32_gt_s; br_if(1);
-                        local_get(FW);
-                        local_get(XP); local_get(JJ); i32_const(F64_BYTES); i32_mul; i32_add; f64_load(0);
-                        local_get(FA); local_get(JX); local_get(II); i32_add; local_get(JJ); i32_sub; i32_const(F64_BYTES); i32_mul; i32_add; f64_load(0);
-                        f64_mul; f64_add; local_set(FW);
-                        local_get(JJ); i32_const(1); i32_add; local_set(JJ);
+                        local_get(Local(JJ)); local_get(Local(JX)); i32_gt_s; br_if(1);
+                        local_get(Local(FW));
+                        local_get(Local(XP)); local_get(Local(JJ)); i32_const(Imm32(F64_BYTES)); i32_mul; i32_add; f64_load(0);
+                        local_get(Local(FA)); local_get(Local(JX)); local_get(Local(II)); i32_add; local_get(Local(JJ)); i32_sub; i32_const(Imm32(F64_BYTES)); i32_mul; i32_add; f64_load(0);
+                        f64_mul; f64_add; local_set(Local(FW));
+                        local_get(Local(JJ)); i32_const(Imm32(1)); i32_add; local_set(Local(JJ));
                         br(0);
                     end; end;
-                    local_get(QA); local_get(II); i32_const(F64_BYTES); i32_mul; i32_add; local_get(FW); f64_store(0);
-                    local_get(II); i32_const(1); i32_add; local_set(II);
+                    local_get(Local(QA)); local_get(Local(II)); i32_const(Imm32(F64_BYTES)); i32_mul; i32_add; local_get(Local(FW)); f64_store(0);
+                    local_get(Local(II)); i32_const(Imm32(1)); i32_add; local_set(Local(II));
                     br(0);
                 end; end;
-                local_get(JZ); local_get(KK); i32_add; local_set(JZ);
+                local_get(Local(JZ)); local_get(Local(KK)); i32_add; local_set(Local(JZ));
                 // continue 'recompute: branch to the main loop header. Depth 0 = the
                 // inner `if j==0`, 1 = the outer `if z==0`, 2 = the 'recompute loop.
                 // (`if` blocks DO count as branch-target labels — a `br(1)` here would
@@ -1192,95 +1193,95 @@ fn emit_rpl_recompute_and_finalize(
 
     // ── chop off zero terms / break z into 24-bit ──
     wasm!(f, {
-        local_get(Z); f64_const(0.0); f64_eq;
+        local_get(Local(Z)); f64_const(0.0); f64_eq;
         if_empty;
-            local_get(JZ); i32_const(1); i32_sub; local_set(JZ);
-            local_get(Q0); i32_const(IPIO2_CHUNK_BITS); i32_sub; local_set(Q0);
+            local_get(Local(JZ)); i32_const(Imm32(1)); i32_sub; local_set(Local(JZ));
+            local_get(Local(Q0)); i32_const(Imm32(IPIO2_CHUNK_BITS)); i32_sub; local_set(Local(Q0));
             block_empty; loop_empty;
-                local_get(IQ); local_get(JZ); i32_const(I32_BYTES); i32_mul; i32_add; i32_load(0); br_if(1);
-                local_get(JZ); i32_const(1); i32_sub; local_set(JZ);
-                local_get(Q0); i32_const(IPIO2_CHUNK_BITS); i32_sub; local_set(Q0);
+                local_get(Local(IQ)); local_get(Local(JZ)); i32_const(Imm32(I32_BYTES)); i32_mul; i32_add; i32_load(0); br_if(1);
+                local_get(Local(JZ)); i32_const(Imm32(1)); i32_sub; local_set(Local(JZ));
+                local_get(Local(Q0)); i32_const(Imm32(IPIO2_CHUNK_BITS)); i32_sub; local_set(Local(Q0));
                 br(0);
             end; end;
         else_;
-            local_get(Z); i32_const(0); local_get(Q0); i32_sub; call(scalbn); local_set(Z);
-            local_get(Z); i64_const(x1p24_bits); f64_reinterpret_i64; f64_ge;
+            local_get(Local(Z)); i32_const(Imm32(0)); local_get(Local(Q0)); i32_sub; call(scalbn); local_set(Local(Z));
+            local_get(Local(Z)); i64_const(Imm64(x1p24_bits)); f64_reinterpret_i64; f64_ge;
             if_empty;
-                i64_const(x1p_24_bits); f64_reinterpret_i64; local_get(Z); f64_mul; i64_trunc_f64_s; i32_wrap_i64; f64_convert_i32_s; local_set(FW);
-                local_get(IQ); local_get(JZ); i32_const(I32_BYTES); i32_mul; i32_add;
-                local_get(Z); i64_const(x1p24_bits); f64_reinterpret_i64; local_get(FW); f64_mul; f64_sub; i64_trunc_f64_s; i32_wrap_i64; i32_store(0);
-                local_get(JZ); i32_const(1); i32_add; local_set(JZ);
-                local_get(Q0); i32_const(IPIO2_CHUNK_BITS); i32_add; local_set(Q0);
-                local_get(IQ); local_get(JZ); i32_const(I32_BYTES); i32_mul; i32_add; local_get(FW); i64_trunc_f64_s; i32_wrap_i64; i32_store(0);
+                i64_const(Imm64(x1p_24_bits)); f64_reinterpret_i64; local_get(Local(Z)); f64_mul; i64_trunc_f64_s; i32_wrap_i64; f64_convert_i32_s; local_set(Local(FW));
+                local_get(Local(IQ)); local_get(Local(JZ)); i32_const(Imm32(I32_BYTES)); i32_mul; i32_add;
+                local_get(Local(Z)); i64_const(Imm64(x1p24_bits)); f64_reinterpret_i64; local_get(Local(FW)); f64_mul; f64_sub; i64_trunc_f64_s; i32_wrap_i64; i32_store(0);
+                local_get(Local(JZ)); i32_const(Imm32(1)); i32_add; local_set(Local(JZ));
+                local_get(Local(Q0)); i32_const(Imm32(IPIO2_CHUNK_BITS)); i32_add; local_set(Local(Q0));
+                local_get(Local(IQ)); local_get(Local(JZ)); i32_const(Imm32(I32_BYTES)); i32_mul; i32_add; local_get(Local(FW)); i64_trunc_f64_s; i32_wrap_i64; i32_store(0);
             else_;
-                local_get(IQ); local_get(JZ); i32_const(I32_BYTES); i32_mul; i32_add; local_get(Z); i64_trunc_f64_s; i32_wrap_i64; i32_store(0);
+                local_get(Local(IQ)); local_get(Local(JZ)); i32_const(Imm32(I32_BYTES)); i32_mul; i32_add; local_get(Local(Z)); i64_trunc_f64_s; i32_wrap_i64; i32_store(0);
             end;
         end;
     });
 
     // ── convert integer "bit" chunk to f64 ──
     wasm!(f, {
-        f64_const(1.0); local_get(Q0); call(scalbn); local_set(FW);
-        local_get(JZ); local_set(II);
+        f64_const(1.0); local_get(Local(Q0)); call(scalbn); local_set(Local(FW));
+        local_get(Local(JZ)); local_set(Local(II));
         block_empty; loop_empty;
-            local_get(II); i32_const(0); i32_lt_s; br_if(1);
-            local_get(QA); local_get(II); i32_const(F64_BYTES); i32_mul; i32_add;
-            local_get(FW); local_get(IQ); local_get(II); i32_const(I32_BYTES); i32_mul; i32_add; i32_load(0); f64_convert_i32_s; f64_mul;
+            local_get(Local(II)); i32_const(Imm32(0)); i32_lt_s; br_if(1);
+            local_get(Local(QA)); local_get(Local(II)); i32_const(Imm32(F64_BYTES)); i32_mul; i32_add;
+            local_get(Local(FW)); local_get(Local(IQ)); local_get(Local(II)); i32_const(Imm32(I32_BYTES)); i32_mul; i32_add; i32_load(0); f64_convert_i32_s; f64_mul;
             f64_store(0);
-            local_get(FW); i64_const(x1p_24_bits); f64_reinterpret_i64; f64_mul; local_set(FW);
-            local_get(II); i32_const(1); i32_sub; local_set(II);
+            local_get(Local(FW)); i64_const(Imm64(x1p_24_bits)); f64_reinterpret_i64; f64_mul; local_set(Local(FW));
+            local_get(Local(II)); i32_const(Imm32(1)); i32_sub; local_set(Local(II));
             br(0);
         end; end;
     });
 
     // ── PIO2[0..=jp]*q[jz..0] → fq ──
     wasm!(f, {
-        local_get(JZ); local_set(II);
+        local_get(Local(JZ)); local_set(Local(II));
         block_empty; loop_empty;
-            local_get(II); i32_const(0); i32_lt_s; br_if(1);
-            f64_const(0.0); local_set(FW);
-            i32_const(0); local_set(KK);
+            local_get(Local(II)); i32_const(Imm32(0)); i32_lt_s; br_if(1);
+            f64_const(0.0); local_set(Local(FW));
+            i32_const(Imm32(0)); local_set(Local(KK));
             block_empty; loop_empty;
-                local_get(KK); local_get(JP); i32_gt_s; br_if(1);
-                local_get(KK); local_get(JZ); local_get(II); i32_sub; i32_gt_s; br_if(1);
-                local_get(FW);
-                i32_const(pio2); local_get(KK); i32_const(F64_BYTES); i32_mul; i32_add; f64_load(0);
-                local_get(QA); local_get(II); local_get(KK); i32_add; i32_const(F64_BYTES); i32_mul; i32_add; f64_load(0);
-                f64_mul; f64_add; local_set(FW);
-                local_get(KK); i32_const(1); i32_add; local_set(KK);
+                local_get(Local(KK)); local_get(Local(JP)); i32_gt_s; br_if(1);
+                local_get(Local(KK)); local_get(Local(JZ)); local_get(Local(II)); i32_sub; i32_gt_s; br_if(1);
+                local_get(Local(FW));
+                i32_const(Imm32(pio2)); local_get(Local(KK)); i32_const(Imm32(F64_BYTES)); i32_mul; i32_add; f64_load(0);
+                local_get(Local(QA)); local_get(Local(II)); local_get(Local(KK)); i32_add; i32_const(Imm32(F64_BYTES)); i32_mul; i32_add; f64_load(0);
+                f64_mul; f64_add; local_set(Local(FW));
+                local_get(Local(KK)); i32_const(Imm32(1)); i32_add; local_set(Local(KK));
                 br(0);
             end; end;
-            local_get(FQA); local_get(JZ); local_get(II); i32_sub; i32_const(F64_BYTES); i32_mul; i32_add; local_get(FW); f64_store(0);
-            local_get(II); i32_const(1); i32_sub; local_set(II);
+            local_get(Local(FQA)); local_get(Local(JZ)); local_get(Local(II)); i32_sub; i32_const(Imm32(F64_BYTES)); i32_mul; i32_add; local_get(Local(FW)); f64_store(0);
+            local_get(Local(II)); i32_const(Imm32(1)); i32_sub; local_set(Local(II));
             br(0);
         end; end;
     });
 
     // ── compress fq[] into y[] (prec 1: y[0],y[1]) ──
     wasm!(f, {
-        f64_const(0.0); local_set(FW);
-        local_get(JZ); local_set(II);
+        f64_const(0.0); local_set(Local(FW));
+        local_get(Local(JZ)); local_set(Local(II));
         block_empty; loop_empty;
-            local_get(II); i32_const(0); i32_lt_s; br_if(1);
-            local_get(FW); local_get(FQA); local_get(II); i32_const(F64_BYTES); i32_mul; i32_add; f64_load(0); f64_add; local_set(FW);
-            local_get(II); i32_const(1); i32_sub; local_set(II);
+            local_get(Local(II)); i32_const(Imm32(0)); i32_lt_s; br_if(1);
+            local_get(Local(FW)); local_get(Local(FQA)); local_get(Local(II)); i32_const(Imm32(F64_BYTES)); i32_mul; i32_add; f64_load(0); f64_add; local_set(Local(FW));
+            local_get(Local(II)); i32_const(Imm32(1)); i32_sub; local_set(Local(II));
             br(0);
         end; end;
-        local_get(YP);
-        local_get(IH); i32_eqz; if_f64; local_get(FW); else_; local_get(FW); f64_neg; end;
+        local_get(Local(YP));
+        local_get(Local(IH)); i32_eqz; if_f64; local_get(Local(FW)); else_; local_get(Local(FW)); f64_neg; end;
         f64_store(0);
-        local_get(FQA); f64_load(0); local_get(FW); f64_sub; local_set(FW);
-        i32_const(1); local_set(II);
+        local_get(Local(FQA)); f64_load(0); local_get(Local(FW)); f64_sub; local_set(Local(FW));
+        i32_const(Imm32(1)); local_set(Local(II));
         block_empty; loop_empty;
-            local_get(II); local_get(JZ); i32_gt_s; br_if(1);
-            local_get(FW); local_get(FQA); local_get(II); i32_const(F64_BYTES); i32_mul; i32_add; f64_load(0); f64_add; local_set(FW);
-            local_get(II); i32_const(1); i32_add; local_set(II);
+            local_get(Local(II)); local_get(Local(JZ)); i32_gt_s; br_if(1);
+            local_get(Local(FW)); local_get(Local(FQA)); local_get(Local(II)); i32_const(Imm32(F64_BYTES)); i32_mul; i32_add; f64_load(0); f64_add; local_set(Local(FW));
+            local_get(Local(II)); i32_const(Imm32(1)); i32_add; local_set(Local(II));
             br(0);
         end; end;
-        local_get(YP);
-        local_get(IH); i32_eqz; if_f64; local_get(FW); else_; local_get(FW); f64_neg; end;
+        local_get(Local(YP));
+        local_get(Local(IH)); i32_eqz; if_f64; local_get(Local(FW)); else_; local_get(Local(FW)); f64_neg; end;
         f64_store(8);
-        local_get(N); i32_const(REM_PIO2_N_MASK); i32_and;
+        local_get(Local(N)); i32_const(Imm32(REM_PIO2_N_MASK)); i32_and;
         end;
     });
 }
@@ -1331,90 +1332,90 @@ fn compile_exp(emitter: &mut WasmEmitter) {
     let mut f = Function::new([(3, ValType::I32), (5, ValType::F64)]);
     wasm!(f, {
         // hx = (to_bits(x) >> 32); sign = hx >> 31; hx &= 0x7fffffff
-        local_get(X); i64_reinterpret_f64; i64_const(HI_SHIFT); i64_shr_u; i32_wrap_i64; local_set(HX);
-        local_get(HX); i32_const(I32_SIGN_BIT); i32_shr_u; local_set(SIGN);
-        local_get(HX); i32_const(F64_ABS_MASK_HI); i32_and; local_set(HX);
+        local_get(Local(X)); i64_reinterpret_f64; i64_const(Imm64(HI_SHIFT)); i64_shr_u; i32_wrap_i64; local_set(Local(HX));
+        local_get(Local(HX)); i32_const(Imm32(I32_SIGN_BIT)); i32_shr_u; local_set(Local(SIGN));
+        local_get(Local(HX)); i32_const(Imm32(F64_ABS_MASK_HI)); i32_and; local_set(Local(HX));
 
         // special cases: if hx >= 0x4086232b
-        local_get(HX); i32_const(EXP_OVERFLOW_HI); i32_ge_u;
+        local_get(Local(HX)); i32_const(Imm32(EXP_OVERFLOW_HI)); i32_ge_u;
         if_empty;
             // if x.is_nan() return x  (x != x)
-            local_get(X); local_get(X); f64_ne;
-            if_empty; local_get(X); return_; end;
+            local_get(Local(X)); local_get(Local(X)); f64_ne;
+            if_empty; local_get(Local(X)); return_; end;
             // if x > 709.782712893383973096 { x *= 2^1023; return x }  (overflow)
-            local_get(X); f64_const(709.782712893383973096); f64_gt;
+            local_get(Local(X)); f64_const(709.782712893383973096); f64_gt;
             if_empty;
-                local_get(X); f64_const(x1p1023); f64_mul; return_;
+                local_get(Local(X)); f64_const(x1p1023); f64_mul; return_;
             end;
             // if x < -708.39641853226410622 { force_eval(-2^-149/x); if x < -745.13321910194110842 return 0 }
-            local_get(X); f64_const(-708.39641853226410622); f64_lt;
+            local_get(Local(X)); f64_const(-708.39641853226410622); f64_lt;
             if_empty;
                 // unobservable underflow-flag computation; drop the f32 result.
-                f64_const(x1p_149); f64_neg; local_get(X); f64_div; f32_demote_f64; drop;
-                local_get(X); f64_const(-745.13321910194110842); f64_lt;
+                f64_const(x1p_149); f64_neg; local_get(Local(X)); f64_div; f32_demote_f64; drop;
+                local_get(Local(X)); f64_const(-745.13321910194110842); f64_lt;
                 if_empty; f64_const(0.0); return_; end;
             end;
         end;
 
         // argument reduction
-        local_get(HX); i32_const(EXP_HALF_LN2_HI); i32_gt_u;
+        local_get(Local(HX)); i32_const(Imm32(EXP_HALF_LN2_HI)); i32_gt_u;
         if_empty;
             // |x| > 0.5 ln2
-            local_get(HX); i32_const(EXP_LN2_SMALL_HI); i32_ge_u;
+            local_get(Local(HX)); i32_const(Imm32(EXP_LN2_SMALL_HI)); i32_ge_u;
             if_empty;
                 // k = (INVLN2*x + HALF[sign]) as i32   (HALF = [0.5, -0.5])
-                local_get(X); f64_const(EXP_INVLN2); f64_mul;
-                local_get(SIGN); if_f64; f64_const(-0.5); else_; f64_const(0.5); end;
-                f64_add; i32_trunc_f64_s; local_set(K);
+                local_get(Local(X)); f64_const(EXP_INVLN2); f64_mul;
+                local_get(Local(SIGN)); if_f64; f64_const(-0.5); else_; f64_const(0.5); end;
+                f64_add; i32_trunc_f64_s; local_set(Local(K));
             else_;
                 // k = 1 - sign - sign
-                i32_const(1); local_get(SIGN); i32_sub; local_get(SIGN); i32_sub; local_set(K);
+                i32_const(Imm32(1)); local_get(Local(SIGN)); i32_sub; local_get(Local(SIGN)); i32_sub; local_set(Local(K));
             end;
             // hi = x - k*LN2HI; lo = k*LN2LO; x = hi - lo
-            local_get(X); local_get(K); f64_convert_i32_s; f64_const(EXP_LN2HI); f64_mul; f64_sub; local_set(HI);
-            local_get(K); f64_convert_i32_s; f64_const(EXP_LN2LO); f64_mul; local_set(LO);
-            local_get(HI); local_get(LO); f64_sub; local_set(X);
+            local_get(Local(X)); local_get(Local(K)); f64_convert_i32_s; f64_const(EXP_LN2HI); f64_mul; f64_sub; local_set(Local(HI));
+            local_get(Local(K)); f64_convert_i32_s; f64_const(EXP_LN2LO); f64_mul; local_set(Local(LO));
+            local_get(Local(HI)); local_get(Local(LO)); f64_sub; local_set(Local(X));
         else_;
-            local_get(HX); i32_const(EXP_TINY_HI); i32_gt_u;
+            local_get(Local(HX)); i32_const(Imm32(EXP_TINY_HI)); i32_gt_u;
             if_empty;
                 // |x| > 2^-28: k=0; hi=x; lo=0
-                i32_const(0); local_set(K);
-                local_get(X); local_set(HI);
-                f64_const(0.0); local_set(LO);
+                i32_const(Imm32(0)); local_set(Local(K));
+                local_get(Local(X)); local_set(Local(HI));
+                f64_const(0.0); local_set(Local(LO));
             else_;
                 // inexact if x!=0; return 1 + x
-                f64_const(x1p1023); local_get(X); f64_add; drop;
-                f64_const(1.0); local_get(X); f64_add; return_;
+                f64_const(x1p1023); local_get(Local(X)); f64_add; drop;
+                f64_const(1.0); local_get(Local(X)); f64_add; return_;
             end;
         end;
 
         // primary range: xx = x*x;
-        local_get(X); local_get(X); f64_mul; local_set(XX);
+        local_get(Local(X)); local_get(Local(X)); f64_mul; local_set(Local(XX));
         // c = x - xx*(P1 + xx*(P2 + xx*(P3 + xx*(P4 + xx*P5))))
-        local_get(X);
-        local_get(XX);
+        local_get(Local(X));
+        local_get(Local(XX));
         f64_const(EXP_P1);
-        local_get(XX); f64_const(EXP_P2);
-        local_get(XX); f64_const(EXP_P3);
-        local_get(XX); f64_const(EXP_P4);
-        local_get(XX); f64_const(EXP_P5); f64_mul; f64_add;
+        local_get(Local(XX)); f64_const(EXP_P2);
+        local_get(Local(XX)); f64_const(EXP_P3);
+        local_get(Local(XX)); f64_const(EXP_P4);
+        local_get(Local(XX)); f64_const(EXP_P5); f64_mul; f64_add;
         f64_mul; f64_add;
         f64_mul; f64_add;
         f64_mul; f64_add;
         f64_mul;
-        f64_sub; local_set(C);
+        f64_sub; local_set(Local(C));
         // y = 1 + (x*c/(2-c) - lo + hi)
         f64_const(1.0);
-        local_get(X); local_get(C); f64_mul; f64_const(2.0); local_get(C); f64_sub; f64_div;
-        local_get(LO); f64_sub;
-        local_get(HI); f64_add;
-        f64_add; local_set(Y);
+        local_get(Local(X)); local_get(Local(C)); f64_mul; f64_const(2.0); local_get(Local(C)); f64_sub; f64_div;
+        local_get(Local(LO)); f64_sub;
+        local_get(Local(HI)); f64_add;
+        f64_add; local_set(Local(Y));
         // if k==0 { y } else { scalbn(y, k) }
-        local_get(K); i32_eqz;
+        local_get(Local(K)); i32_eqz;
         if_f64;
-            local_get(Y);
+            local_get(Local(Y));
         else_;
-            local_get(Y); local_get(K); call(scalbn);
+            local_get(Local(Y)); local_get(Local(K)); call(scalbn);
         end;
         end;
     });
@@ -1455,74 +1456,74 @@ fn emit_log_reduce(f: &mut Function) {
     let x1p54 = f64::from_bits(0x4350000000000000); // 2^54
     wasm!(f, {
         // ui = to_bits(x); hx = ui >> 32; k = 0
-        local_get(LG_X); i64_reinterpret_f64; local_set(LG_UI);
-        local_get(LG_UI); i64_const(HI_SHIFT); i64_shr_u; i32_wrap_i64; local_set(LG_HX);
-        i32_const(0); local_set(LG_K);
+        local_get(Local(LG_X)); i64_reinterpret_f64; local_set(Local(LG_UI));
+        local_get(Local(LG_UI)); i64_const(Imm64(HI_SHIFT)); i64_shr_u; i32_wrap_i64; local_set(Local(LG_HX));
+        i32_const(Imm32(0)); local_set(Local(LG_K));
         // if hx < 0x00100000 || (hx >> 31) != 0
-        local_get(LG_HX); i32_const(F64_EXP_ONE_HI); i32_lt_u;
-        local_get(LG_HX); i32_const(I32_SIGN_BIT); i32_shr_u; i32_const(0); i32_ne;
+        local_get(Local(LG_HX)); i32_const(Imm32(F64_EXP_ONE_HI)); i32_lt_u;
+        local_get(Local(LG_HX)); i32_const(Imm32(I32_SIGN_BIT)); i32_shr_u; i32_const(Imm32(0)); i32_ne;
         i32_or;
         if_empty;
             // if (ui << 1) == 0 { return -1/(x*x) }   log(+-0) = -inf
-            local_get(LG_UI); i64_const(1); i64_shl; i64_eqz;
+            local_get(Local(LG_UI)); i64_const(Imm64(1)); i64_shl; i64_eqz;
             if_empty;
-                f64_const(-1.0); local_get(LG_X); local_get(LG_X); f64_mul; f64_div; return_;
+                f64_const(-1.0); local_get(Local(LG_X)); local_get(Local(LG_X)); f64_mul; f64_div; return_;
             end;
             // if (hx >> 31) != 0 { return (x-x)/0 }   log(-#) = NaN
-            local_get(LG_HX); i32_const(I32_SIGN_BIT); i32_shr_u; i32_const(0); i32_ne;
+            local_get(Local(LG_HX)); i32_const(Imm32(I32_SIGN_BIT)); i32_shr_u; i32_const(Imm32(0)); i32_ne;
             if_empty;
-                local_get(LG_X); local_get(LG_X); f64_sub; f64_const(0.0); f64_div; return_;
+                local_get(Local(LG_X)); local_get(Local(LG_X)); f64_sub; f64_const(0.0); f64_div; return_;
             end;
             // subnormal: k -= 54; x *= 2^54; ui = to_bits(x); hx = ui >> 32
-            local_get(LG_K); i32_const(LOG_SUBNORM_SCALE); i32_sub; local_set(LG_K);
-            local_get(LG_X); f64_const(x1p54); f64_mul; local_set(LG_X);
-            local_get(LG_X); i64_reinterpret_f64; local_set(LG_UI);
-            local_get(LG_UI); i64_const(HI_SHIFT); i64_shr_u; i32_wrap_i64; local_set(LG_HX);
+            local_get(Local(LG_K)); i32_const(Imm32(LOG_SUBNORM_SCALE)); i32_sub; local_set(Local(LG_K));
+            local_get(Local(LG_X)); f64_const(x1p54); f64_mul; local_set(Local(LG_X));
+            local_get(Local(LG_X)); i64_reinterpret_f64; local_set(Local(LG_UI));
+            local_get(Local(LG_UI)); i64_const(Imm64(HI_SHIFT)); i64_shr_u; i32_wrap_i64; local_set(Local(LG_HX));
         else_;
             // else if hx >= 0x7ff00000 { return x }
-            local_get(LG_HX); i32_const(F64_INF_NAN_HI); i32_ge_u;
-            if_empty; local_get(LG_X); return_; end;
+            local_get(Local(LG_HX)); i32_const(Imm32(F64_INF_NAN_HI)); i32_ge_u;
+            if_empty; local_get(Local(LG_X)); return_; end;
             // else if hx == 0x3ff00000 && (ui << 32) == 0 { return 0 }
-            local_get(LG_HX); i32_const(F64_ONE_HI); i32_eq;
-            local_get(LG_UI); i64_const(HI_SHIFT); i64_shl; i64_eqz;
+            local_get(Local(LG_HX)); i32_const(Imm32(F64_ONE_HI)); i32_eq;
+            local_get(Local(LG_UI)); i64_const(Imm64(HI_SHIFT)); i64_shl; i64_eqz;
             i32_and;
             if_empty; f64_const(0.0); return_; end;
         end;
 
         // reduce x into [sqrt(2)/2, sqrt(2)]
         // hx += 0x3ff00000 - 0x3fe6a09e
-        local_get(LG_HX); i32_const(0x3ff00000 - 0x3fe6a09e); i32_add; local_set(LG_HX);
+        local_get(Local(LG_HX)); i32_const(Imm32(0x3ff00000 - 0x3fe6a09e)); i32_add; local_set(Local(LG_HX));
         // k += (hx >> 20) - 0x3ff
-        local_get(LG_K); local_get(LG_HX); i32_const(F64_EXP_SHIFT); i32_shr_u; i32_const(F64_EXP_BIAS); i32_sub; i32_add; local_set(LG_K);
+        local_get(Local(LG_K)); local_get(Local(LG_HX)); i32_const(Imm32(F64_EXP_SHIFT)); i32_shr_u; i32_const(Imm32(F64_EXP_BIAS)); i32_sub; i32_add; local_set(Local(LG_K));
         // hx = (hx & 0x000fffff) + 0x3fe6a09e
-        local_get(LG_HX); i32_const(F64_MANTISSA_HI_MASK); i32_and; i32_const(LOG_SQRT2_HI); i32_add; local_set(LG_HX);
+        local_get(Local(LG_HX)); i32_const(Imm32(F64_MANTISSA_HI_MASK)); i32_and; i32_const(Imm32(LOG_SQRT2_HI)); i32_add; local_set(Local(LG_HX));
         // ui = (hx << 32) | (ui & 0xffffffff); x = from_bits(ui)
-        local_get(LG_HX); i64_extend_i32_u; i64_const(HI_SHIFT); i64_shl;
-        local_get(LG_UI); i64_const(LOW_WORD_BITS); i64_and;
-        i64_or; local_set(LG_UI);
-        local_get(LG_UI); f64_reinterpret_i64; local_set(LG_X);
+        local_get(Local(LG_HX)); i64_extend_i32_u; i64_const(Imm64(HI_SHIFT)); i64_shl;
+        local_get(Local(LG_UI)); i64_const(Imm64(LOW_WORD_BITS)); i64_and;
+        i64_or; local_set(Local(LG_UI));
+        local_get(Local(LG_UI)); f64_reinterpret_i64; local_set(Local(LG_X));
 
         // f = x - 1; hfsq = 0.5*f*f; s = f/(2+f); z = s*s; w = z*z
-        local_get(LG_X); f64_const(1.0); f64_sub; local_set(LG_F);
-        f64_const(0.5); local_get(LG_F); f64_mul; local_get(LG_F); f64_mul; local_set(LG_HFSQ);
-        local_get(LG_F); f64_const(2.0); local_get(LG_F); f64_add; f64_div; local_set(LG_S);
-        local_get(LG_S); local_get(LG_S); f64_mul; local_set(LG_Z);
-        local_get(LG_Z); local_get(LG_Z); f64_mul; local_set(LG_W);
+        local_get(Local(LG_X)); f64_const(1.0); f64_sub; local_set(Local(LG_F));
+        f64_const(0.5); local_get(Local(LG_F)); f64_mul; local_get(Local(LG_F)); f64_mul; local_set(Local(LG_HFSQ));
+        local_get(Local(LG_F)); f64_const(2.0); local_get(Local(LG_F)); f64_add; f64_div; local_set(Local(LG_S));
+        local_get(Local(LG_S)); local_get(Local(LG_S)); f64_mul; local_set(Local(LG_Z));
+        local_get(Local(LG_Z)); local_get(Local(LG_Z)); f64_mul; local_set(Local(LG_W));
         // t1 = w*(LG2 + w*(LG4 + w*LG6)); t2 = z*(LG1 + w*(LG3 + w*(LG5 + w*LG7))); r = t2 + t1
         // compute r directly: r = t2 + t1
-        local_get(LG_Z); f64_const(LG1);
-        local_get(LG_W); f64_const(LG3);
-        local_get(LG_W); f64_const(LG5);
-        local_get(LG_W); f64_const(LG7); f64_mul; f64_add;
+        local_get(Local(LG_Z)); f64_const(LG1);
+        local_get(Local(LG_W)); f64_const(LG3);
+        local_get(Local(LG_W)); f64_const(LG5);
+        local_get(Local(LG_W)); f64_const(LG7); f64_mul; f64_add;
         f64_mul; f64_add;
         f64_mul; f64_add;
         f64_mul;                                  // t2
-        local_get(LG_W); f64_const(LG2);
-        local_get(LG_W); f64_const(LG4);
-        local_get(LG_W); f64_const(LG6); f64_mul; f64_add;
+        local_get(Local(LG_W)); f64_const(LG2);
+        local_get(Local(LG_W)); f64_const(LG4);
+        local_get(Local(LG_W)); f64_const(LG6); f64_mul; f64_add;
         f64_mul; f64_add;
         f64_mul;                                  // t1
-        f64_add; local_set(LG_R);
+        f64_add; local_set(Local(LG_R));
     });
 }
 
@@ -1535,11 +1536,11 @@ fn compile_log(emitter: &mut WasmEmitter) {
     emit_log_reduce(&mut f);
     wasm!(f, {
         // dk = k; return s*(hfsq+r) + dk*LN2_LO - hfsq + f + dk*LN2_HI
-        local_get(LG_S); local_get(LG_HFSQ); local_get(LG_R); f64_add; f64_mul;
-        local_get(LG_K); f64_convert_i32_s; f64_const(LOG_LN2_LO); f64_mul; f64_add;
-        local_get(LG_HFSQ); f64_sub;
-        local_get(LG_F); f64_add;
-        local_get(LG_K); f64_convert_i32_s; f64_const(LOG_LN2_HI); f64_mul; f64_add;
+        local_get(Local(LG_S)); local_get(Local(LG_HFSQ)); local_get(Local(LG_R)); f64_add; f64_mul;
+        local_get(Local(LG_K)); f64_convert_i32_s; f64_const(LOG_LN2_LO); f64_mul; f64_add;
+        local_get(Local(LG_HFSQ)); f64_sub;
+        local_get(Local(LG_F)); f64_add;
+        local_get(Local(LG_K)); f64_convert_i32_s; f64_const(LOG_LN2_HI); f64_mul; f64_add;
         end;
     });
     emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.libm.log, type_idx, f));
@@ -1564,23 +1565,23 @@ fn compile_log2(emitter: &mut WasmEmitter) {
     emit_log_reduce(&mut f);
     wasm!(f, {
         // hi = f - hfsq; ui = to_bits(hi) & 0xFFFFFFFF00000000; hi = from_bits(ui)
-        local_get(LG_F); local_get(LG_HFSQ); f64_sub; local_set(LG_HI);
-        local_get(LG_HI); i64_reinterpret_f64; i64_const(LOW_WORD_MASK); i64_and; f64_reinterpret_i64; local_set(LG_HI);
+        local_get(Local(LG_F)); local_get(Local(LG_HFSQ)); f64_sub; local_set(Local(LG_HI));
+        local_get(Local(LG_HI)); i64_reinterpret_f64; i64_const(Imm64(LOW_WORD_MASK)); i64_and; f64_reinterpret_i64; local_set(Local(LG_HI));
         // lo = f - hi - hfsq + s*(hfsq + r)
-        local_get(LG_F); local_get(LG_HI); f64_sub; local_get(LG_HFSQ); f64_sub;
-        local_get(LG_S); local_get(LG_HFSQ); local_get(LG_R); f64_add; f64_mul;
-        f64_add; local_set(LG_LO);
+        local_get(Local(LG_F)); local_get(Local(LG_HI)); f64_sub; local_get(Local(LG_HFSQ)); f64_sub;
+        local_get(Local(LG_S)); local_get(Local(LG_HFSQ)); local_get(Local(LG_R)); f64_add; f64_mul;
+        f64_add; local_set(Local(LG_LO));
         // val_hi = hi*IVLN2HI; val_lo = (lo+hi)*IVLN2LO + lo*IVLN2HI
-        local_get(LG_HI); f64_const(IVLN2HI); f64_mul; local_set(LG_VH);
-        local_get(LG_LO); local_get(LG_HI); f64_add; f64_const(IVLN2LO); f64_mul;
-        local_get(LG_LO); f64_const(IVLN2HI); f64_mul; f64_add; local_set(LG_VL);
+        local_get(Local(LG_HI)); f64_const(IVLN2HI); f64_mul; local_set(Local(LG_VH));
+        local_get(Local(LG_LO)); local_get(Local(LG_HI)); f64_add; f64_const(IVLN2LO); f64_mul;
+        local_get(Local(LG_LO)); f64_const(IVLN2HI); f64_mul; f64_add; local_set(Local(LG_VL));
         // y = k; w = y + val_hi; val_lo += (y - w) + val_hi; val_hi = w
-        local_get(LG_K); f64_convert_i32_s; local_set(LG_Y);
-        local_get(LG_Y); local_get(LG_VH); f64_add; local_set(LG_W);
-        local_get(LG_VL); local_get(LG_Y); local_get(LG_W); f64_sub; local_get(LG_VH); f64_add; f64_add; local_set(LG_VL);
-        local_get(LG_W); local_set(LG_VH);
+        local_get(Local(LG_K)); f64_convert_i32_s; local_set(Local(LG_Y));
+        local_get(Local(LG_Y)); local_get(Local(LG_VH)); f64_add; local_set(Local(LG_W));
+        local_get(Local(LG_VL)); local_get(Local(LG_Y)); local_get(Local(LG_W)); f64_sub; local_get(Local(LG_VH)); f64_add; f64_add; local_set(Local(LG_VL));
+        local_get(Local(LG_W)); local_set(Local(LG_VH));
         // return val_lo + val_hi
-        local_get(LG_VL); local_get(LG_VH); f64_add;
+        local_get(Local(LG_VL)); local_get(Local(LG_VH)); f64_add;
         end;
     });
     emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.libm.log2, type_idx, f));
@@ -1599,24 +1600,24 @@ fn compile_log10(emitter: &mut WasmEmitter) {
     emit_log_reduce(&mut f);
     wasm!(f, {
         // hi = f - hfsq; zero low word
-        local_get(LG_F); local_get(LG_HFSQ); f64_sub; local_set(LG_HI);
-        local_get(LG_HI); i64_reinterpret_f64; i64_const(LOW_WORD_MASK); i64_and; f64_reinterpret_i64; local_set(LG_HI);
+        local_get(Local(LG_F)); local_get(Local(LG_HFSQ)); f64_sub; local_set(Local(LG_HI));
+        local_get(Local(LG_HI)); i64_reinterpret_f64; i64_const(Imm64(LOW_WORD_MASK)); i64_and; f64_reinterpret_i64; local_set(Local(LG_HI));
         // lo = f - hi - hfsq + s*(hfsq + r)
-        local_get(LG_F); local_get(LG_HI); f64_sub; local_get(LG_HFSQ); f64_sub;
-        local_get(LG_S); local_get(LG_HFSQ); local_get(LG_R); f64_add; f64_mul;
-        f64_add; local_set(LG_LO);
+        local_get(Local(LG_F)); local_get(Local(LG_HI)); f64_sub; local_get(Local(LG_HFSQ)); f64_sub;
+        local_get(Local(LG_S)); local_get(Local(LG_HFSQ)); local_get(Local(LG_R)); f64_add; f64_mul;
+        f64_add; local_set(Local(LG_LO));
         // val_hi = hi*IVLN10HI; dk = k; y = dk*LOG10_2HI
-        local_get(LG_HI); f64_const(IVLN10HI); f64_mul; local_set(LG_VH);
-        local_get(LG_K); f64_convert_i32_s; f64_const(LOG10_2HI); f64_mul; local_set(LG_Y);
+        local_get(Local(LG_HI)); f64_const(IVLN10HI); f64_mul; local_set(Local(LG_VH));
+        local_get(Local(LG_K)); f64_convert_i32_s; f64_const(LOG10_2HI); f64_mul; local_set(Local(LG_Y));
         // val_lo = dk*LOG10_2LO + (lo+hi)*IVLN10LO + lo*IVLN10HI
-        local_get(LG_K); f64_convert_i32_s; f64_const(LOG10_2LO); f64_mul;
-        local_get(LG_LO); local_get(LG_HI); f64_add; f64_const(IVLN10LO); f64_mul; f64_add;
-        local_get(LG_LO); f64_const(IVLN10HI); f64_mul; f64_add; local_set(LG_VL);
+        local_get(Local(LG_K)); f64_convert_i32_s; f64_const(LOG10_2LO); f64_mul;
+        local_get(Local(LG_LO)); local_get(Local(LG_HI)); f64_add; f64_const(IVLN10LO); f64_mul; f64_add;
+        local_get(Local(LG_LO)); f64_const(IVLN10HI); f64_mul; f64_add; local_set(Local(LG_VL));
         // w = y + val_hi; val_lo += (y - w) + val_hi; val_hi = w
-        local_get(LG_Y); local_get(LG_VH); f64_add; local_set(LG_W);
-        local_get(LG_VL); local_get(LG_Y); local_get(LG_W); f64_sub; local_get(LG_VH); f64_add; f64_add; local_set(LG_VL);
-        local_get(LG_W); local_set(LG_VH);
-        local_get(LG_VL); local_get(LG_VH); f64_add;
+        local_get(Local(LG_Y)); local_get(Local(LG_VH)); f64_add; local_set(Local(LG_W));
+        local_get(Local(LG_VL)); local_get(Local(LG_Y)); local_get(Local(LG_W)); f64_sub; local_get(Local(LG_VH)); f64_add; f64_add; local_set(Local(LG_VL));
+        local_get(Local(LG_W)); local_set(Local(LG_VH));
+        local_get(Local(LG_VL)); local_get(Local(LG_VH)); f64_add;
         end;
     });
     emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.libm.log10, type_idx, f));
@@ -1669,15 +1670,15 @@ const PW_T: u32 = 34;
 
 /// Push `with_set_low_word(<f64 on stack>, 0)` (zero the low 32-bit word).
 fn emit_zero_low_word(f: &mut Function) {
-    wasm!(f, { i64_reinterpret_f64; i64_const(LOW_WORD_MASK); i64_and; f64_reinterpret_i64; });
+    wasm!(f, { i64_reinterpret_f64; i64_const(Imm64(LOW_WORD_MASK)); i64_and; f64_reinterpret_i64; });
 }
 /// Push `get_high_word(<f64 on stack>)` as i32.
 fn emit_high_word(f: &mut Function) {
-    wasm!(f, { i64_reinterpret_f64; i64_const(HI_SHIFT); i64_shr_u; i32_wrap_i64; });
+    wasm!(f, { i64_reinterpret_f64; i64_const(Imm64(HI_SHIFT)); i64_shr_u; i32_wrap_i64; });
 }
 /// Push `with_set_high_word(0.0, <i32 hi on stack>)`  = from_bits((hi as u64)<<32).
 fn emit_from_high_word(f: &mut Function) {
-    wasm!(f, { i64_extend_i32_u; i64_const(HI_SHIFT); i64_shl; f64_reinterpret_i64; });
+    wasm!(f, { i64_extend_i32_u; i64_const(Imm64(HI_SHIFT)); i64_shl; f64_reinterpret_i64; });
 }
 
 // ───────────────────────────── __libm_pow ──────────────────────────────
@@ -1694,56 +1695,56 @@ fn compile_pow(emitter: &mut WasmEmitter) {
 
     wasm!(f, {
         // hx = (to_bits(x) >> 32) as i32; lx = to_bits(x) as u32
-        local_get(PW_X); i64_reinterpret_f64; i64_const(HI_SHIFT); i64_shr_u; i32_wrap_i64; local_set(PW_HX);
-        local_get(PW_X); i64_reinterpret_f64; i32_wrap_i64; local_set(PW_LX);
-        local_get(PW_Y); i64_reinterpret_f64; i64_const(HI_SHIFT); i64_shr_u; i32_wrap_i64; local_set(PW_HY);
-        local_get(PW_Y); i64_reinterpret_f64; i32_wrap_i64; local_set(PW_LY);
+        local_get(Local(PW_X)); i64_reinterpret_f64; i64_const(Imm64(HI_SHIFT)); i64_shr_u; i32_wrap_i64; local_set(Local(PW_HX));
+        local_get(Local(PW_X)); i64_reinterpret_f64; i32_wrap_i64; local_set(Local(PW_LX));
+        local_get(Local(PW_Y)); i64_reinterpret_f64; i64_const(Imm64(HI_SHIFT)); i64_shr_u; i32_wrap_i64; local_set(Local(PW_HY));
+        local_get(Local(PW_Y)); i64_reinterpret_f64; i32_wrap_i64; local_set(Local(PW_LY));
         // ix = hx & 0x7fffffff; iy = hy & 0x7fffffff
-        local_get(PW_HX); i32_const(F64_ABS_MASK_HI); i32_and; local_set(PW_IX);
-        local_get(PW_HY); i32_const(F64_ABS_MASK_HI); i32_and; local_set(PW_IY);
+        local_get(Local(PW_HX)); i32_const(Imm32(F64_ABS_MASK_HI)); i32_and; local_set(Local(PW_IX));
+        local_get(Local(PW_HY)); i32_const(Imm32(F64_ABS_MASK_HI)); i32_and; local_set(Local(PW_IY));
 
         // x**0 = 1 (even if x is NaN): if (iy | ly) == 0 return 1
-        local_get(PW_IY); local_get(PW_LY); i32_or; i32_eqz;
+        local_get(Local(PW_IY)); local_get(Local(PW_LY)); i32_or; i32_eqz;
         if_empty; f64_const(1.0); return_; end;
         // 1**y = 1: if hx == 0x3ff00000 && lx == 0 return 1
-        local_get(PW_HX); i32_const(F64_ONE_HI); i32_eq; local_get(PW_LX); i32_eqz; i32_and;
+        local_get(Local(PW_HX)); i32_const(Imm32(F64_ONE_HI)); i32_eq; local_get(Local(PW_LX)); i32_eqz; i32_and;
         if_empty; f64_const(1.0); return_; end;
         // NaN if either arg is NaN:
         //   ix > 0x7ff00000 || (ix==0x7ff00000 && lx!=0) || iy > 0x7ff00000 || (iy==0x7ff00000 && ly!=0)
-        local_get(PW_IX); i32_const(F64_INF_NAN_HI); i32_gt_s;
-        local_get(PW_IX); i32_const(F64_INF_NAN_HI); i32_eq; local_get(PW_LX); i32_const(0); i32_ne; i32_and; i32_or;
-        local_get(PW_IY); i32_const(F64_INF_NAN_HI); i32_gt_s; i32_or;
-        local_get(PW_IY); i32_const(F64_INF_NAN_HI); i32_eq; local_get(PW_LY); i32_const(0); i32_ne; i32_and; i32_or;
-        if_empty; local_get(PW_X); local_get(PW_Y); f64_add; return_; end;
+        local_get(Local(PW_IX)); i32_const(Imm32(F64_INF_NAN_HI)); i32_gt_s;
+        local_get(Local(PW_IX)); i32_const(Imm32(F64_INF_NAN_HI)); i32_eq; local_get(Local(PW_LX)); i32_const(Imm32(0)); i32_ne; i32_and; i32_or;
+        local_get(Local(PW_IY)); i32_const(Imm32(F64_INF_NAN_HI)); i32_gt_s; i32_or;
+        local_get(Local(PW_IY)); i32_const(Imm32(F64_INF_NAN_HI)); i32_eq; local_get(Local(PW_LY)); i32_const(Imm32(0)); i32_ne; i32_and; i32_or;
+        if_empty; local_get(Local(PW_X)); local_get(Local(PW_Y)); f64_add; return_; end;
 
         // yisint: 0 not int, 1 odd int, 2 even int (only matters when x < 0)
-        i32_const(0); local_set(PW_YISINT);
-        local_get(PW_HX); i32_const(0); i32_lt_s;
+        i32_const(Imm32(0)); local_set(Local(PW_YISINT));
+        local_get(Local(PW_HX)); i32_const(Imm32(0)); i32_lt_s;
         if_empty;
-            local_get(PW_IY); i32_const(POW_YINT_LARGE_HI); i32_ge_s;
+            local_get(Local(PW_IY)); i32_const(Imm32(POW_YINT_LARGE_HI)); i32_ge_s;
             if_empty;
-                i32_const(YISINT_EVEN); local_set(PW_YISINT); // even integer y
+                i32_const(Imm32(YISINT_EVEN)); local_set(Local(PW_YISINT)); // even integer y
             else_;
-                local_get(PW_IY); i32_const(F64_ONE_HI); i32_ge_s;
+                local_get(Local(PW_IY)); i32_const(Imm32(F64_ONE_HI)); i32_ge_s;
                 if_empty;
                     // k = (iy >> 20) - 0x3ff
-                    local_get(PW_IY); i32_const(F64_EXP_SHIFT); i32_shr_s; i32_const(F64_EXP_BIAS); i32_sub; local_set(PW_K);
-                    local_get(PW_K); i32_const(F64_EXP_SHIFT); i32_gt_s;
+                    local_get(Local(PW_IY)); i32_const(Imm32(F64_EXP_SHIFT)); i32_shr_s; i32_const(Imm32(F64_EXP_BIAS)); i32_sub; local_set(Local(PW_K));
+                    local_get(Local(PW_K)); i32_const(Imm32(F64_EXP_SHIFT)); i32_gt_s;
                     if_empty;
                         // j = (ly >> (52 - k)) ; if (j << (52-k)) == ly { yisint = 2 - (j&1) }
-                        local_get(PW_LY); i32_const(F64_MANTISSA_BITS_I32); local_get(PW_K); i32_sub; i32_shr_u; local_set(PW_J);
-                        local_get(PW_J); i32_const(F64_MANTISSA_BITS_I32); local_get(PW_K); i32_sub; i32_shl; local_get(PW_LY); i32_eq;
+                        local_get(Local(PW_LY)); i32_const(Imm32(F64_MANTISSA_BITS_I32)); local_get(Local(PW_K)); i32_sub; i32_shr_u; local_set(Local(PW_J));
+                        local_get(Local(PW_J)); i32_const(Imm32(F64_MANTISSA_BITS_I32)); local_get(Local(PW_K)); i32_sub; i32_shl; local_get(Local(PW_LY)); i32_eq;
                         if_empty;
-                            i32_const(YISINT_EVEN); local_get(PW_J); i32_const(1); i32_and; i32_sub; local_set(PW_YISINT);
+                            i32_const(Imm32(YISINT_EVEN)); local_get(Local(PW_J)); i32_const(Imm32(1)); i32_and; i32_sub; local_set(Local(PW_YISINT));
                         end;
                     else_;
-                        local_get(PW_LY); i32_eqz;
+                        local_get(Local(PW_LY)); i32_eqz;
                         if_empty;
                             // j = iy >> (20 - k); if (j << (20-k)) == iy { yisint = 2 - (j&1) }
-                            local_get(PW_IY); i32_const(F64_EXP_SHIFT); local_get(PW_K); i32_sub; i32_shr_s; local_set(PW_J);
-                            local_get(PW_J); i32_const(F64_EXP_SHIFT); local_get(PW_K); i32_sub; i32_shl; local_get(PW_IY); i32_eq;
+                            local_get(Local(PW_IY)); i32_const(Imm32(F64_EXP_SHIFT)); local_get(Local(PW_K)); i32_sub; i32_shr_s; local_set(Local(PW_J));
+                            local_get(Local(PW_J)); i32_const(Imm32(F64_EXP_SHIFT)); local_get(Local(PW_K)); i32_sub; i32_shl; local_get(Local(PW_IY)); i32_eq;
                             if_empty;
-                                i32_const(YISINT_EVEN); local_get(PW_J); i32_const(1); i32_and; i32_sub; local_set(PW_YISINT);
+                                i32_const(Imm32(YISINT_EVEN)); local_get(Local(PW_J)); i32_const(Imm32(1)); i32_and; i32_sub; local_set(Local(PW_YISINT));
                             end;
                         end;
                     end;
@@ -1752,385 +1753,385 @@ fn compile_pow(emitter: &mut WasmEmitter) {
         end;
 
         // special value of y: if ly == 0
-        local_get(PW_LY); i32_eqz;
+        local_get(Local(PW_LY)); i32_eqz;
         if_empty;
             // y is +-inf
-            local_get(PW_IY); i32_const(F64_INF_NAN_HI); i32_eq;
+            local_get(Local(PW_IY)); i32_const(Imm32(F64_INF_NAN_HI)); i32_eq;
             if_empty;
                 // if ((ix - 0x3ff00000) | lx) == 0  -> (-1)**+-inf = 1
-                local_get(PW_IX); i32_const(F64_ONE_HI); i32_sub; local_get(PW_LX); i32_or; i32_eqz;
+                local_get(Local(PW_IX)); i32_const(Imm32(F64_ONE_HI)); i32_sub; local_get(Local(PW_LX)); i32_or; i32_eqz;
                 if_f64;
                     f64_const(1.0);
                 else_;
                     // elif ix >= 0x3ff00000  -> (|x|>1)**+-inf = inf,0
-                    local_get(PW_IX); i32_const(F64_ONE_HI); i32_ge_s;
+                    local_get(Local(PW_IX)); i32_const(Imm32(F64_ONE_HI)); i32_ge_s;
                     if_f64;
-                        local_get(PW_HY); i32_const(0); i32_ge_s; if_f64; local_get(PW_Y); else_; f64_const(0.0); end;
+                        local_get(Local(PW_HY)); i32_const(Imm32(0)); i32_ge_s; if_f64; local_get(Local(PW_Y)); else_; f64_const(0.0); end;
                     else_;
                         // (|x|<1)**+-inf = 0,inf
-                        local_get(PW_HY); i32_const(0); i32_ge_s; if_f64; f64_const(0.0); else_; local_get(PW_Y); f64_neg; end;
+                        local_get(Local(PW_HY)); i32_const(Imm32(0)); i32_ge_s; if_f64; f64_const(0.0); else_; local_get(Local(PW_Y)); f64_neg; end;
                     end;
                 end;
                 return_;
             end;
             // y is +-1
-            local_get(PW_IY); i32_const(F64_ONE_HI); i32_eq;
+            local_get(Local(PW_IY)); i32_const(Imm32(F64_ONE_HI)); i32_eq;
             if_empty;
-                local_get(PW_HY); i32_const(0); i32_ge_s;
-                if_f64; local_get(PW_X); else_; f64_const(1.0); local_get(PW_X); f64_div; end;
+                local_get(Local(PW_HY)); i32_const(Imm32(0)); i32_ge_s;
+                if_f64; local_get(Local(PW_X)); else_; f64_const(1.0); local_get(Local(PW_X)); f64_div; end;
                 return_;
             end;
             // y is 2
-            local_get(PW_HY); i32_const(POW_TWO_HI); i32_eq;
-            if_empty; local_get(PW_X); local_get(PW_X); f64_mul; return_; end;
+            local_get(Local(PW_HY)); i32_const(Imm32(POW_TWO_HI)); i32_eq;
+            if_empty; local_get(Local(PW_X)); local_get(Local(PW_X)); f64_mul; return_; end;
             // y is 0.5 and x >= +0
-            local_get(PW_HY); i32_const(F64_HALF_HI); i32_eq;
+            local_get(Local(PW_HY)); i32_const(Imm32(F64_HALF_HI)); i32_eq;
             if_empty;
-                local_get(PW_HX); i32_const(0); i32_ge_s;
-                if_empty; local_get(PW_X); f64_sqrt; return_; end;
+                local_get(Local(PW_HX)); i32_const(Imm32(0)); i32_ge_s;
+                if_empty; local_get(Local(PW_X)); f64_sqrt; return_; end;
             end;
         end;
 
         // ax = |x|
-        local_get(PW_X); f64_abs; local_set(PW_AX);
+        local_get(Local(PW_X)); f64_abs; local_set(Local(PW_AX));
         // special value of x: if lx == 0
-        local_get(PW_LX); i32_eqz;
+        local_get(Local(PW_LX)); i32_eqz;
         if_empty;
             // x is +-0,+-inf,+-1
-            local_get(PW_IX); i32_const(F64_INF_NAN_HI); i32_eq;
-            local_get(PW_IX); i32_eqz; i32_or;
-            local_get(PW_IX); i32_const(F64_ONE_HI); i32_eq; i32_or;
+            local_get(Local(PW_IX)); i32_const(Imm32(F64_INF_NAN_HI)); i32_eq;
+            local_get(Local(PW_IX)); i32_eqz; i32_or;
+            local_get(Local(PW_IX)); i32_const(Imm32(F64_ONE_HI)); i32_eq; i32_or;
             if_empty;
                 // z = ax
-                local_get(PW_AX); local_set(PW_Z);
+                local_get(Local(PW_AX)); local_set(Local(PW_Z));
                 // if hy < 0 { z = 1/z }
-                local_get(PW_HY); i32_const(0); i32_lt_s;
-                if_empty; f64_const(1.0); local_get(PW_Z); f64_div; local_set(PW_Z); end;
+                local_get(Local(PW_HY)); i32_const(Imm32(0)); i32_lt_s;
+                if_empty; f64_const(1.0); local_get(Local(PW_Z)); f64_div; local_set(Local(PW_Z)); end;
                 // if hx < 0
-                local_get(PW_HX); i32_const(0); i32_lt_s;
+                local_get(Local(PW_HX)); i32_const(Imm32(0)); i32_lt_s;
                 if_empty;
                     // if ((ix-0x3ff00000)|yisint)==0 { z = (z-z)/(z-z) }  (-1)**non-int = NaN
-                    local_get(PW_IX); i32_const(F64_ONE_HI); i32_sub; local_get(PW_YISINT); i32_or; i32_eqz;
+                    local_get(Local(PW_IX)); i32_const(Imm32(F64_ONE_HI)); i32_sub; local_get(Local(PW_YISINT)); i32_or; i32_eqz;
                     if_empty;
-                        local_get(PW_Z); local_get(PW_Z); f64_sub; local_get(PW_Z); local_get(PW_Z); f64_sub; f64_div; local_set(PW_Z);
+                        local_get(Local(PW_Z)); local_get(Local(PW_Z)); f64_sub; local_get(Local(PW_Z)); local_get(Local(PW_Z)); f64_sub; f64_div; local_set(Local(PW_Z));
                     else_;
                         // elif yisint == 1 { z = -z }
-                        local_get(PW_YISINT); i32_const(1); i32_eq;
-                        if_empty; local_get(PW_Z); f64_neg; local_set(PW_Z); end;
+                        local_get(Local(PW_YISINT)); i32_const(Imm32(1)); i32_eq;
+                        if_empty; local_get(Local(PW_Z)); f64_neg; local_set(Local(PW_Z)); end;
                     end;
                 end;
-                local_get(PW_Z); return_;
+                local_get(Local(PW_Z)); return_;
             end;
         end;
 
         // s = sign of result
-        f64_const(1.0); local_set(PW_S);
-        local_get(PW_HX); i32_const(0); i32_lt_s;
+        f64_const(1.0); local_set(Local(PW_S));
+        local_get(Local(PW_HX)); i32_const(Imm32(0)); i32_lt_s;
         if_empty;
-            local_get(PW_YISINT); i32_eqz;
+            local_get(Local(PW_YISINT)); i32_eqz;
             if_empty;
                 // (x<0)**(non-int) = NaN
-                local_get(PW_X); local_get(PW_X); f64_sub; local_get(PW_X); local_get(PW_X); f64_sub; f64_div; return_;
+                local_get(Local(PW_X)); local_get(Local(PW_X)); f64_sub; local_get(Local(PW_X)); local_get(Local(PW_X)); f64_sub; f64_div; return_;
             end;
-            local_get(PW_YISINT); i32_const(1); i32_eq;
-            if_empty; f64_const(-1.0); local_set(PW_S); end;
+            local_get(Local(PW_YISINT)); i32_const(Imm32(1)); i32_eq;
+            if_empty; f64_const(-1.0); local_set(Local(PW_S)); end;
         end;
 
         // |y| is HUGE: if iy > 0x41e00000
-        local_get(PW_IY); i32_const(POW_HUGE_EXP_HI); i32_gt_s;
+        local_get(Local(PW_IY)); i32_const(Imm32(POW_HUGE_EXP_HI)); i32_gt_s;
         if_empty;
             // if iy > 0x43f00000  (|y| > 2^64, must o/uflow)
-            local_get(PW_IY); i32_const(POW_HUGE64_EXP_HI); i32_gt_s;
+            local_get(Local(PW_IY)); i32_const(Imm32(POW_HUGE64_EXP_HI)); i32_gt_s;
             if_empty;
                 // if ix <= 0x3fefffff { return hy<0 ? HUGE*HUGE : TINY*TINY }
-                local_get(PW_IX); i32_const(POW_BELOW_ONE_HI); i32_le_s;
+                local_get(Local(PW_IX)); i32_const(Imm32(POW_BELOW_ONE_HI)); i32_le_s;
                 if_empty;
-                    local_get(PW_HY); i32_const(0); i32_lt_s;
+                    local_get(Local(PW_HY)); i32_const(Imm32(0)); i32_lt_s;
                     if_f64; f64_const(POW_HUGE); f64_const(POW_HUGE); f64_mul; else_; f64_const(POW_TINY); f64_const(POW_TINY); f64_mul; end;
                     return_;
                 end;
                 // if ix >= 0x3ff00000 { return hy>0 ? HUGE*HUGE : TINY*TINY }
-                local_get(PW_IX); i32_const(F64_ONE_HI); i32_ge_s;
+                local_get(Local(PW_IX)); i32_const(Imm32(F64_ONE_HI)); i32_ge_s;
                 if_empty;
-                    local_get(PW_HY); i32_const(0); i32_gt_s;
+                    local_get(Local(PW_HY)); i32_const(Imm32(0)); i32_gt_s;
                     if_f64; f64_const(POW_HUGE); f64_const(POW_HUGE); f64_mul; else_; f64_const(POW_TINY); f64_const(POW_TINY); f64_mul; end;
                     return_;
                 end;
             end;
             // over/underflow if x not close to one
-            local_get(PW_IX); i32_const(POW_BELOW_ONE_HI); i32_lt_s;
+            local_get(Local(PW_IX)); i32_const(Imm32(POW_BELOW_ONE_HI)); i32_lt_s;
             if_empty;
-                local_get(PW_HY); i32_const(0); i32_lt_s;
-                if_f64; local_get(PW_S); f64_const(POW_HUGE); f64_mul; f64_const(POW_HUGE); f64_mul; else_; local_get(PW_S); f64_const(POW_TINY); f64_mul; f64_const(POW_TINY); f64_mul; end;
+                local_get(Local(PW_HY)); i32_const(Imm32(0)); i32_lt_s;
+                if_f64; local_get(Local(PW_S)); f64_const(POW_HUGE); f64_mul; f64_const(POW_HUGE); f64_mul; else_; local_get(Local(PW_S)); f64_const(POW_TINY); f64_mul; f64_const(POW_TINY); f64_mul; end;
                 return_;
             end;
-            local_get(PW_IX); i32_const(F64_ONE_HI); i32_gt_s;
+            local_get(Local(PW_IX)); i32_const(Imm32(F64_ONE_HI)); i32_gt_s;
             if_empty;
-                local_get(PW_HY); i32_const(0); i32_gt_s;
-                if_f64; local_get(PW_S); f64_const(POW_HUGE); f64_mul; f64_const(POW_HUGE); f64_mul; else_; local_get(PW_S); f64_const(POW_TINY); f64_mul; f64_const(POW_TINY); f64_mul; end;
+                local_get(Local(PW_HY)); i32_const(Imm32(0)); i32_gt_s;
+                if_f64; local_get(Local(PW_S)); f64_const(POW_HUGE); f64_mul; f64_const(POW_HUGE); f64_mul; else_; local_get(Local(PW_S)); f64_const(POW_TINY); f64_mul; f64_const(POW_TINY); f64_mul; end;
                 return_;
             end;
             // |1-x| is TINY <= 2^-20: log(x) by x-x^2/2+x^3/3-x^4/4
             // t = ax - 1
-            local_get(PW_AX); f64_const(1.0); f64_sub; local_set(PW_T);
+            local_get(Local(PW_AX)); f64_const(1.0); f64_sub; local_set(Local(PW_T));
             // w = (t*t)*(0.5 - t*(1/3 - t*0.25))
-            local_get(PW_T); local_get(PW_T); f64_mul;
-            f64_const(0.5); local_get(PW_T); f64_const(POW_ONE_THIRD); local_get(PW_T); f64_const(0.25); f64_mul; f64_sub; f64_mul; f64_sub;
-            f64_mul; local_set(PW_W);
+            local_get(Local(PW_T)); local_get(Local(PW_T)); f64_mul;
+            f64_const(0.5); local_get(Local(PW_T)); f64_const(POW_ONE_THIRD); local_get(Local(PW_T)); f64_const(0.25); f64_mul; f64_sub; f64_mul; f64_sub;
+            f64_mul; local_set(Local(PW_W));
             // u = IVLN2_H * t
-            local_get(PW_T); f64_const(POW_IVLN2_H); f64_mul; local_set(PW_U);
+            local_get(Local(PW_T)); f64_const(POW_IVLN2_H); f64_mul; local_set(Local(PW_U));
             // v = t*IVLN2_L - w*IVLN2
-            local_get(PW_T); f64_const(POW_IVLN2_L); f64_mul; local_get(PW_W); f64_const(POW_IVLN2); f64_mul; f64_sub; local_set(PW_V);
+            local_get(Local(PW_T)); f64_const(POW_IVLN2_L); f64_mul; local_get(Local(PW_W)); f64_const(POW_IVLN2); f64_mul; f64_sub; local_set(Local(PW_V));
             // t1 = with_set_low_word(u+v, 0); t2 = v - (t1 - u)
-            local_get(PW_U); local_get(PW_V); f64_add;
+            local_get(Local(PW_U)); local_get(Local(PW_V)); f64_add;
         });
         emit_zero_low_word(&mut f);
         wasm!(f, {
-            local_set(PW_T1);
-            local_get(PW_V); local_get(PW_T1); local_get(PW_U); f64_sub; f64_sub; local_set(PW_T2);
+            local_set(Local(PW_T1));
+            local_get(Local(PW_V)); local_get(Local(PW_T1)); local_get(Local(PW_U)); f64_sub; f64_sub; local_set(Local(PW_T2));
         });
 
     // ── else: main log path (|y| not HUGE) ──
     wasm!(f, {
         else_;
             // n = 0
-            i32_const(0); local_set(PW_N);
+            i32_const(Imm32(0)); local_set(Local(PW_N));
             // if ix < 0x00100000 { ax *= 2^53; n -= 53; ix = get_high_word(ax) }
-            local_get(PW_IX); i32_const(F64_EXP_ONE_HI); i32_lt_s;
+            local_get(Local(PW_IX)); i32_const(Imm32(F64_EXP_ONE_HI)); i32_lt_s;
             if_empty;
-                local_get(PW_AX); f64_const(POW_TWO53); f64_mul; local_set(PW_AX);
-                local_get(PW_N); i32_const(POW_SUBNORM_SCALE); i32_sub; local_set(PW_N);
-                local_get(PW_AX);
+                local_get(Local(PW_AX)); f64_const(POW_TWO53); f64_mul; local_set(Local(PW_AX));
+                local_get(Local(PW_N)); i32_const(Imm32(POW_SUBNORM_SCALE)); i32_sub; local_set(Local(PW_N));
+                local_get(Local(PW_AX));
     });
     emit_high_word(&mut f);
     wasm!(f, {
-                local_set(PW_IX);
+                local_set(Local(PW_IX));
             end;
             // n += (ix >> 20) - 0x3ff; j = ix & 0x000fffff
-            local_get(PW_N); local_get(PW_IX); i32_const(F64_EXP_SHIFT); i32_shr_s; i32_const(F64_EXP_BIAS); i32_sub; i32_add; local_set(PW_N);
-            local_get(PW_IX); i32_const(F64_MANTISSA_HI_MASK); i32_and; local_set(PW_J);
+            local_get(Local(PW_N)); local_get(Local(PW_IX)); i32_const(Imm32(F64_EXP_SHIFT)); i32_shr_s; i32_const(Imm32(F64_EXP_BIAS)); i32_sub; i32_add; local_set(Local(PW_N));
+            local_get(Local(PW_IX)); i32_const(Imm32(F64_MANTISSA_HI_MASK)); i32_and; local_set(Local(PW_J));
             // ix = j | 0x3ff00000
-            local_get(PW_J); i32_const(F64_ONE_HI); i32_or; local_set(PW_IX);
+            local_get(Local(PW_J)); i32_const(Imm32(F64_ONE_HI)); i32_or; local_set(Local(PW_IX));
             // determine interval kk:  j<=0x3988E -> 0; j<0xBB67A -> 1; else { 0; n++; ix-=0x00100000 }
-            local_get(PW_J); i32_const(POW_KK0_THRESH); i32_le_s;
+            local_get(Local(PW_J)); i32_const(Imm32(POW_KK0_THRESH)); i32_le_s;
             if_empty;
-                i32_const(0); local_set(PW_KK);
+                i32_const(Imm32(0)); local_set(Local(PW_KK));
             else_;
-                local_get(PW_J); i32_const(POW_KK1_THRESH); i32_lt_s;
+                local_get(Local(PW_J)); i32_const(Imm32(POW_KK1_THRESH)); i32_lt_s;
                 if_empty;
-                    i32_const(1); local_set(PW_KK);
+                    i32_const(Imm32(1)); local_set(Local(PW_KK));
                 else_;
-                    i32_const(0); local_set(PW_KK);
-                    local_get(PW_N); i32_const(1); i32_add; local_set(PW_N);
-                    local_get(PW_IX); i32_const(F64_EXP_ONE_HI); i32_sub; local_set(PW_IX);
+                    i32_const(Imm32(0)); local_set(Local(PW_KK));
+                    local_get(Local(PW_N)); i32_const(Imm32(1)); i32_add; local_set(Local(PW_N));
+                    local_get(Local(PW_IX)); i32_const(Imm32(F64_EXP_ONE_HI)); i32_sub; local_set(Local(PW_IX));
                 end;
             end;
             // ax = with_set_high_word(ax, ix)
-            local_get(PW_AX); i64_reinterpret_f64; i64_const(LOW_WORD_BITS); i64_and;
-            local_get(PW_IX); i64_extend_i32_u; i64_const(HI_SHIFT); i64_shl;
-            i64_or; f64_reinterpret_i64; local_set(PW_AX);
+            local_get(Local(PW_AX)); i64_reinterpret_f64; i64_const(Imm64(LOW_WORD_BITS)); i64_and;
+            local_get(Local(PW_IX)); i64_extend_i32_u; i64_const(Imm64(HI_SHIFT)); i64_shl;
+            i64_or; f64_reinterpret_i64; local_set(Local(PW_AX));
 
             // bp[kk]: kk==0 -> 1.0 ; kk==1 -> 1.5
             // u = ax - bp[kk]; v = 1/(ax + bp[kk]); ss = u*v; s_h = with_set_low_word(ss,0)
-            local_get(PW_AX); local_get(PW_KK); if_f64; f64_const(1.5); else_; f64_const(1.0); end; f64_sub; local_set(PW_U);
-            f64_const(1.0); local_get(PW_AX); local_get(PW_KK); if_f64; f64_const(1.5); else_; f64_const(1.0); end; f64_add; f64_div; local_set(PW_V);
-            local_get(PW_U); local_get(PW_V); f64_mul; local_set(PW_SS);
-            local_get(PW_SS);
+            local_get(Local(PW_AX)); local_get(Local(PW_KK)); if_f64; f64_const(1.5); else_; f64_const(1.0); end; f64_sub; local_set(Local(PW_U));
+            f64_const(1.0); local_get(Local(PW_AX)); local_get(Local(PW_KK)); if_f64; f64_const(1.5); else_; f64_const(1.0); end; f64_add; f64_div; local_set(Local(PW_V));
+            local_get(Local(PW_U)); local_get(Local(PW_V)); f64_mul; local_set(Local(PW_SS));
+            local_get(Local(PW_SS));
     });
     emit_zero_low_word(&mut f);
     wasm!(f, {
-            local_set(PW_S_H);
+            local_set(Local(PW_S_H));
             // t_h = with_set_high_word(0.0, ((ix>>1)|0x20000000) + 0x00080000 + (kk<<18))
-            local_get(PW_IX); i32_const(1); i32_shr_u; i32_const(POW_T_H_BASE); i32_or;
-            i32_const(POW_T_H_HALF); i32_add;
-            local_get(PW_KK); i32_const(POW_KK_BIT_SHIFT); i32_shl; i32_add;
+            local_get(Local(PW_IX)); i32_const(Imm32(1)); i32_shr_u; i32_const(Imm32(POW_T_H_BASE)); i32_or;
+            i32_const(Imm32(POW_T_H_HALF)); i32_add;
+            local_get(Local(PW_KK)); i32_const(Imm32(POW_KK_BIT_SHIFT)); i32_shl; i32_add;
     });
     emit_from_high_word(&mut f);
     wasm!(f, {
-            local_set(PW_T_H);
+            local_set(Local(PW_T_H));
             // t_l = ax - (t_h - bp[kk])
-            local_get(PW_AX); local_get(PW_T_H); local_get(PW_KK); if_f64; f64_const(1.5); else_; f64_const(1.0); end; f64_sub; f64_sub; local_set(PW_T_L);
+            local_get(Local(PW_AX)); local_get(Local(PW_T_H)); local_get(Local(PW_KK)); if_f64; f64_const(1.5); else_; f64_const(1.0); end; f64_sub; f64_sub; local_set(Local(PW_T_L));
             // s_l = v*((u - s_h*t_h) - s_h*t_l)
-            local_get(PW_V);
-            local_get(PW_U); local_get(PW_S_H); local_get(PW_T_H); f64_mul; f64_sub;
-            local_get(PW_S_H); local_get(PW_T_L); f64_mul; f64_sub;
-            f64_mul; local_set(PW_S_L);
+            local_get(Local(PW_V));
+            local_get(Local(PW_U)); local_get(Local(PW_S_H)); local_get(Local(PW_T_H)); f64_mul; f64_sub;
+            local_get(Local(PW_S_H)); local_get(Local(PW_T_L)); f64_mul; f64_sub;
+            f64_mul; local_set(Local(PW_S_L));
 
             // s2 = ss*ss; r = s2*s2*(L1+s2*(L2+s2*(L3+s2*(L4+s2*(L5+s2*L6)))))
-            local_get(PW_SS); local_get(PW_SS); f64_mul; local_set(PW_S2);
-            local_get(PW_S2); local_get(PW_S2); f64_mul;
+            local_get(Local(PW_SS)); local_get(Local(PW_SS)); f64_mul; local_set(Local(PW_S2));
+            local_get(Local(PW_S2)); local_get(Local(PW_S2)); f64_mul;
             f64_const(POW_L1);
-            local_get(PW_S2); f64_const(POW_L2);
-            local_get(PW_S2); f64_const(POW_L3);
-            local_get(PW_S2); f64_const(POW_L4);
-            local_get(PW_S2); f64_const(POW_L5);
-            local_get(PW_S2); f64_const(POW_L6); f64_mul; f64_add;
+            local_get(Local(PW_S2)); f64_const(POW_L2);
+            local_get(Local(PW_S2)); f64_const(POW_L3);
+            local_get(Local(PW_S2)); f64_const(POW_L4);
+            local_get(Local(PW_S2)); f64_const(POW_L5);
+            local_get(Local(PW_S2)); f64_const(POW_L6); f64_mul; f64_add;
             f64_mul; f64_add;
             f64_mul; f64_add;
             f64_mul; f64_add;
             f64_mul; f64_add;
-            f64_mul; local_set(PW_R);
+            f64_mul; local_set(Local(PW_R));
             // r += s_l*(s_h + ss)
-            local_get(PW_R); local_get(PW_S_L); local_get(PW_S_H); local_get(PW_SS); f64_add; f64_mul; f64_add; local_set(PW_R);
+            local_get(Local(PW_R)); local_get(Local(PW_S_L)); local_get(Local(PW_S_H)); local_get(Local(PW_SS)); f64_add; f64_mul; f64_add; local_set(Local(PW_R));
             // s2 = s_h*s_h
-            local_get(PW_S_H); local_get(PW_S_H); f64_mul; local_set(PW_S2);
+            local_get(Local(PW_S_H)); local_get(Local(PW_S_H)); f64_mul; local_set(Local(PW_S2));
             // t_h = with_set_low_word(3 + s2 + r, 0)
-            f64_const(3.0); local_get(PW_S2); f64_add; local_get(PW_R); f64_add;
+            f64_const(3.0); local_get(Local(PW_S2)); f64_add; local_get(Local(PW_R)); f64_add;
     });
     emit_zero_low_word(&mut f);
     wasm!(f, {
-            local_set(PW_T_H);
+            local_set(Local(PW_T_H));
             // t_l = r - ((t_h - 3) - s2)
-            local_get(PW_R); local_get(PW_T_H); f64_const(3.0); f64_sub; local_get(PW_S2); f64_sub; f64_sub; local_set(PW_T_L);
+            local_get(Local(PW_R)); local_get(Local(PW_T_H)); f64_const(3.0); f64_sub; local_get(Local(PW_S2)); f64_sub; f64_sub; local_set(Local(PW_T_L));
             // u = s_h*t_h; v = s_l*t_h + t_l*ss
-            local_get(PW_S_H); local_get(PW_T_H); f64_mul; local_set(PW_U);
-            local_get(PW_S_L); local_get(PW_T_H); f64_mul; local_get(PW_T_L); local_get(PW_SS); f64_mul; f64_add; local_set(PW_V);
+            local_get(Local(PW_S_H)); local_get(Local(PW_T_H)); f64_mul; local_set(Local(PW_U));
+            local_get(Local(PW_S_L)); local_get(Local(PW_T_H)); f64_mul; local_get(Local(PW_T_L)); local_get(Local(PW_SS)); f64_mul; f64_add; local_set(Local(PW_V));
             // p_h = with_set_low_word(u+v, 0); p_l = v - (p_h - u)
-            local_get(PW_U); local_get(PW_V); f64_add;
+            local_get(Local(PW_U)); local_get(Local(PW_V)); f64_add;
     });
     emit_zero_low_word(&mut f);
     wasm!(f, {
-            local_set(PW_P_H);
-            local_get(PW_V); local_get(PW_P_H); local_get(PW_U); f64_sub; f64_sub; local_set(PW_P_L);
+            local_set(Local(PW_P_H));
+            local_get(Local(PW_V)); local_get(Local(PW_P_H)); local_get(Local(PW_U)); f64_sub; f64_sub; local_set(Local(PW_P_L));
             // z_h = CP_H*p_h; z_l = CP_L*p_h + p_l*CP + dp_l[kk]
-            f64_const(POW_CP_H); local_get(PW_P_H); f64_mul; local_set(PW_Z_H);
-            f64_const(POW_CP_L); local_get(PW_P_H); f64_mul;
-            local_get(PW_P_L); f64_const(POW_CP); f64_mul; f64_add;
-            local_get(PW_KK); if_f64; f64_const(POW_DP_L1); else_; f64_const(0.0); end; f64_add;
-            local_set(PW_Z_L);
+            f64_const(POW_CP_H); local_get(Local(PW_P_H)); f64_mul; local_set(Local(PW_Z_H));
+            f64_const(POW_CP_L); local_get(Local(PW_P_H)); f64_mul;
+            local_get(Local(PW_P_L)); f64_const(POW_CP); f64_mul; f64_add;
+            local_get(Local(PW_KK)); if_f64; f64_const(POW_DP_L1); else_; f64_const(0.0); end; f64_add;
+            local_set(Local(PW_Z_L));
             // t = n; t1 = with_set_low_word((z_h+z_l)+dp_h[kk]+t, 0)
-            local_get(PW_N); f64_convert_i32_s; local_set(PW_T);
-            local_get(PW_Z_H); local_get(PW_Z_L); f64_add;
-            local_get(PW_KK); if_f64; f64_const(POW_DP_H1); else_; f64_const(0.0); end; f64_add;
-            local_get(PW_T); f64_add;
+            local_get(Local(PW_N)); f64_convert_i32_s; local_set(Local(PW_T));
+            local_get(Local(PW_Z_H)); local_get(Local(PW_Z_L)); f64_add;
+            local_get(Local(PW_KK)); if_f64; f64_const(POW_DP_H1); else_; f64_const(0.0); end; f64_add;
+            local_get(Local(PW_T)); f64_add;
     });
     emit_zero_low_word(&mut f);
     wasm!(f, {
-            local_set(PW_T1);
+            local_set(Local(PW_T1));
             // t2 = z_l - (((t1 - t) - dp_h[kk]) - z_h)
-            local_get(PW_Z_L);
-            local_get(PW_T1); local_get(PW_T); f64_sub;
-            local_get(PW_KK); if_f64; f64_const(POW_DP_H1); else_; f64_const(0.0); end; f64_sub;
-            local_get(PW_Z_H); f64_sub;
-            f64_sub; local_set(PW_T2);
+            local_get(Local(PW_Z_L));
+            local_get(Local(PW_T1)); local_get(Local(PW_T)); f64_sub;
+            local_get(Local(PW_KK)); if_f64; f64_const(POW_DP_H1); else_; f64_const(0.0); end; f64_sub;
+            local_get(Local(PW_Z_H)); f64_sub;
+            f64_sub; local_set(Local(PW_T2));
         end; // end of HUGE if/else
     });
 
     // ── combine: (y1+y2)*(t1+t2), overflow/underflow, 2**(p_h+p_l) ──
     wasm!(f, {
         // y1 = with_set_low_word(y, 0)
-        local_get(PW_Y);
+        local_get(Local(PW_Y));
     });
     emit_zero_low_word(&mut f);
     wasm!(f, {
-        local_set(PW_Y1);
+        local_set(Local(PW_Y1));
         // p_l = (y - y1)*t1 + y*t2 ; p_h = y1*t1 ; z = p_l + p_h
-        local_get(PW_Y); local_get(PW_Y1); f64_sub; local_get(PW_T1); f64_mul;
-        local_get(PW_Y); local_get(PW_T2); f64_mul; f64_add; local_set(PW_P_L);
-        local_get(PW_Y1); local_get(PW_T1); f64_mul; local_set(PW_P_H);
-        local_get(PW_P_L); local_get(PW_P_H); f64_add; local_set(PW_Z);
+        local_get(Local(PW_Y)); local_get(Local(PW_Y1)); f64_sub; local_get(Local(PW_T1)); f64_mul;
+        local_get(Local(PW_Y)); local_get(Local(PW_T2)); f64_mul; f64_add; local_set(Local(PW_P_L));
+        local_get(Local(PW_Y1)); local_get(Local(PW_T1)); f64_mul; local_set(Local(PW_P_H));
+        local_get(Local(PW_P_L)); local_get(Local(PW_P_H)); f64_add; local_set(Local(PW_Z));
         // j = (z.bits >> 32) as i32 ; i = z.bits as i32
-        local_get(PW_Z); i64_reinterpret_f64; i64_const(HI_SHIFT); i64_shr_u; i32_wrap_i64; local_set(PW_J);
-        local_get(PW_Z); i64_reinterpret_f64; i32_wrap_i64; local_set(PW_I);
+        local_get(Local(PW_Z)); i64_reinterpret_f64; i64_const(Imm64(HI_SHIFT)); i64_shr_u; i32_wrap_i64; local_set(Local(PW_J));
+        local_get(Local(PW_Z)); i64_reinterpret_f64; i32_wrap_i64; local_set(Local(PW_I));
 
         // if j >= 0x40900000  (z >= 1024)
-        local_get(PW_J); i32_const(POW_Z_OVERFLOW_HI); i32_ge_s;
+        local_get(Local(PW_J)); i32_const(Imm32(POW_Z_OVERFLOW_HI)); i32_ge_s;
         if_empty;
             // if (j - 0x40900000) | i != 0  (z > 1024) -> overflow
-            local_get(PW_J); i32_const(POW_Z_OVERFLOW_HI); i32_sub; local_get(PW_I); i32_or; i32_const(0); i32_ne;
-            if_empty; local_get(PW_S); f64_const(POW_HUGE); f64_mul; f64_const(POW_HUGE); f64_mul; return_; end;
+            local_get(Local(PW_J)); i32_const(Imm32(POW_Z_OVERFLOW_HI)); i32_sub; local_get(Local(PW_I)); i32_or; i32_const(Imm32(0)); i32_ne;
+            if_empty; local_get(Local(PW_S)); f64_const(POW_HUGE); f64_mul; f64_const(POW_HUGE); f64_mul; return_; end;
             // if p_l + OVT > z - p_h -> overflow
-            local_get(PW_P_L); f64_const(POW_OVT); f64_add; local_get(PW_Z); local_get(PW_P_H); f64_sub; f64_gt;
-            if_empty; local_get(PW_S); f64_const(POW_HUGE); f64_mul; f64_const(POW_HUGE); f64_mul; return_; end;
+            local_get(Local(PW_P_L)); f64_const(POW_OVT); f64_add; local_get(Local(PW_Z)); local_get(Local(PW_P_H)); f64_sub; f64_gt;
+            if_empty; local_get(Local(PW_S)); f64_const(POW_HUGE); f64_mul; f64_const(POW_HUGE); f64_mul; return_; end;
         else_;
             // else if (j & 0x7fffffff) >= 0x4090cc00  (z <= -1075)
-            local_get(PW_J); i32_const(F64_ABS_MASK_HI); i32_and; i32_const(POW_Z_UNDERFLOW_HI); i32_ge_s;
+            local_get(Local(PW_J)); i32_const(Imm32(F64_ABS_MASK_HI)); i32_and; i32_const(Imm32(POW_Z_UNDERFLOW_HI)); i32_ge_s;
             if_empty;
                 // if (((j as u32) - 0xc090cc00) | (i as u32)) != 0  (z < -1075) -> underflow
-                local_get(PW_J); i32_const(POW_Z_UNDERFLOW_NEG); i32_sub; local_get(PW_I); i32_or; i32_const(0); i32_ne;
-                if_empty; local_get(PW_S); f64_const(POW_TINY); f64_mul; f64_const(POW_TINY); f64_mul; return_; end;
+                local_get(Local(PW_J)); i32_const(Imm32(POW_Z_UNDERFLOW_NEG)); i32_sub; local_get(Local(PW_I)); i32_or; i32_const(Imm32(0)); i32_ne;
+                if_empty; local_get(Local(PW_S)); f64_const(POW_TINY); f64_mul; f64_const(POW_TINY); f64_mul; return_; end;
                 // if p_l <= z - p_h -> underflow
-                local_get(PW_P_L); local_get(PW_Z); local_get(PW_P_H); f64_sub; f64_le;
-                if_empty; local_get(PW_S); f64_const(POW_TINY); f64_mul; f64_const(POW_TINY); f64_mul; return_; end;
+                local_get(Local(PW_P_L)); local_get(Local(PW_Z)); local_get(Local(PW_P_H)); f64_sub; f64_le;
+                if_empty; local_get(Local(PW_S)); f64_const(POW_TINY); f64_mul; f64_const(POW_TINY); f64_mul; return_; end;
             end;
         end;
 
         // compute 2**(p_h+p_l): i = j & 0x7fffffff; k = (i>>20) - 0x3ff; n = 0
-        local_get(PW_J); i32_const(F64_ABS_MASK_HI); i32_and; local_set(PW_I);
-        local_get(PW_I); i32_const(F64_EXP_SHIFT); i32_shr_s; i32_const(F64_EXP_BIAS); i32_sub; local_set(PW_K);
-        i32_const(0); local_set(PW_N);
+        local_get(Local(PW_J)); i32_const(Imm32(F64_ABS_MASK_HI)); i32_and; local_set(Local(PW_I));
+        local_get(Local(PW_I)); i32_const(Imm32(F64_EXP_SHIFT)); i32_shr_s; i32_const(Imm32(F64_EXP_BIAS)); i32_sub; local_set(Local(PW_K));
+        i32_const(Imm32(0)); local_set(Local(PW_N));
         // if i > 0x3fe00000  (|z| > 0.5)
-        local_get(PW_I); i32_const(F64_HALF_HI); i32_gt_s;
+        local_get(Local(PW_I)); i32_const(Imm32(F64_HALF_HI)); i32_gt_s;
         if_empty;
             // n = j + (0x00100000 >> (k+1))
-            local_get(PW_J); i32_const(F64_EXP_ONE_HI); local_get(PW_K); i32_const(1); i32_add; i32_shr_s; i32_add; local_set(PW_N);
+            local_get(Local(PW_J)); i32_const(Imm32(F64_EXP_ONE_HI)); local_get(Local(PW_K)); i32_const(Imm32(1)); i32_add; i32_shr_s; i32_add; local_set(Local(PW_N));
             // k = ((n & 0x7fffffff) >> 20) - 0x3ff
-            local_get(PW_N); i32_const(F64_ABS_MASK_HI); i32_and; i32_const(F64_EXP_SHIFT); i32_shr_s; i32_const(F64_EXP_BIAS); i32_sub; local_set(PW_K);
+            local_get(Local(PW_N)); i32_const(Imm32(F64_ABS_MASK_HI)); i32_and; i32_const(Imm32(F64_EXP_SHIFT)); i32_shr_s; i32_const(Imm32(F64_EXP_BIAS)); i32_sub; local_set(Local(PW_K));
             // t = with_set_high_word(0.0, (n & !(0x000fffff >> k)))
-            local_get(PW_N); i32_const(F64_MANTISSA_HI_MASK); local_get(PW_K); i32_shr_s; i32_const(-1); i32_xor; i32_and;
+            local_get(Local(PW_N)); i32_const(Imm32(F64_MANTISSA_HI_MASK)); local_get(Local(PW_K)); i32_shr_s; i32_const(Imm32(-1)); i32_xor; i32_and;
     });
     emit_from_high_word(&mut f);
     wasm!(f, {
-            local_set(PW_T);
+            local_set(Local(PW_T));
             // n = ((n & 0x000fffff) | 0x00100000) >> (20 - k)
-            local_get(PW_N); i32_const(F64_MANTISSA_HI_MASK); i32_and; i32_const(F64_EXP_ONE_HI); i32_or; i32_const(F64_EXP_SHIFT); local_get(PW_K); i32_sub; i32_shr_s; local_set(PW_N);
+            local_get(Local(PW_N)); i32_const(Imm32(F64_MANTISSA_HI_MASK)); i32_and; i32_const(Imm32(F64_EXP_ONE_HI)); i32_or; i32_const(Imm32(F64_EXP_SHIFT)); local_get(Local(PW_K)); i32_sub; i32_shr_s; local_set(Local(PW_N));
             // if j < 0 { n = -n }
-            local_get(PW_J); i32_const(0); i32_lt_s;
-            if_empty; i32_const(0); local_get(PW_N); i32_sub; local_set(PW_N); end;
+            local_get(Local(PW_J)); i32_const(Imm32(0)); i32_lt_s;
+            if_empty; i32_const(Imm32(0)); local_get(Local(PW_N)); i32_sub; local_set(Local(PW_N)); end;
             // p_h -= t
-            local_get(PW_P_H); local_get(PW_T); f64_sub; local_set(PW_P_H);
+            local_get(Local(PW_P_H)); local_get(Local(PW_T)); f64_sub; local_set(Local(PW_P_H));
         end;
 
         // t = with_set_low_word(p_l + p_h, 0)
-        local_get(PW_P_L); local_get(PW_P_H); f64_add;
+        local_get(Local(PW_P_L)); local_get(Local(PW_P_H)); f64_add;
     });
     emit_zero_low_word(&mut f);
     wasm!(f, {
-        local_set(PW_T);
+        local_set(Local(PW_T));
         // u = t*LG2_H; v = (p_l - (t - p_h))*LG2 + t*LG2_L
-        local_get(PW_T); f64_const(POW_LG2_H); f64_mul; local_set(PW_U);
-        local_get(PW_P_L); local_get(PW_T); local_get(PW_P_H); f64_sub; f64_sub; f64_const(POW_LG2); f64_mul;
-        local_get(PW_T); f64_const(POW_LG2_L); f64_mul; f64_add; local_set(PW_V);
+        local_get(Local(PW_T)); f64_const(POW_LG2_H); f64_mul; local_set(Local(PW_U));
+        local_get(Local(PW_P_L)); local_get(Local(PW_T)); local_get(Local(PW_P_H)); f64_sub; f64_sub; f64_const(POW_LG2); f64_mul;
+        local_get(Local(PW_T)); f64_const(POW_LG2_L); f64_mul; f64_add; local_set(Local(PW_V));
         // z = u + v; w = v - (z - u); t = z*z
-        local_get(PW_U); local_get(PW_V); f64_add; local_set(PW_Z);
-        local_get(PW_V); local_get(PW_Z); local_get(PW_U); f64_sub; f64_sub; local_set(PW_W);
-        local_get(PW_Z); local_get(PW_Z); f64_mul; local_set(PW_T);
+        local_get(Local(PW_U)); local_get(Local(PW_V)); f64_add; local_set(Local(PW_Z));
+        local_get(Local(PW_V)); local_get(Local(PW_Z)); local_get(Local(PW_U)); f64_sub; f64_sub; local_set(Local(PW_W));
+        local_get(Local(PW_Z)); local_get(Local(PW_Z)); f64_mul; local_set(Local(PW_T));
         // t1 = z - t*(P1 + t*(P2 + t*(P3 + t*(P4 + t*P5))))
-        local_get(PW_Z);
-        local_get(PW_T);
+        local_get(Local(PW_Z));
+        local_get(Local(PW_T));
         f64_const(POW_P1);
-        local_get(PW_T); f64_const(POW_P2);
-        local_get(PW_T); f64_const(POW_P3);
-        local_get(PW_T); f64_const(POW_P4);
-        local_get(PW_T); f64_const(POW_P5); f64_mul; f64_add;
+        local_get(Local(PW_T)); f64_const(POW_P2);
+        local_get(Local(PW_T)); f64_const(POW_P3);
+        local_get(Local(PW_T)); f64_const(POW_P4);
+        local_get(Local(PW_T)); f64_const(POW_P5); f64_mul; f64_add;
         f64_mul; f64_add;
         f64_mul; f64_add;
         f64_mul; f64_add;
         f64_mul;
-        f64_sub; local_set(PW_T1);
+        f64_sub; local_set(Local(PW_T1));
         // r = (z*t1)/(t1 - 2) - (w + z*w)
-        local_get(PW_Z); local_get(PW_T1); f64_mul; local_get(PW_T1); f64_const(2.0); f64_sub; f64_div;
-        local_get(PW_W); local_get(PW_Z); local_get(PW_W); f64_mul; f64_add;
-        f64_sub; local_set(PW_R);
+        local_get(Local(PW_Z)); local_get(Local(PW_T1)); f64_mul; local_get(Local(PW_T1)); f64_const(2.0); f64_sub; f64_div;
+        local_get(Local(PW_W)); local_get(Local(PW_Z)); local_get(Local(PW_W)); f64_mul; f64_add;
+        f64_sub; local_set(Local(PW_R));
         // z = 1 - (r - z)
-        f64_const(1.0); local_get(PW_R); local_get(PW_Z); f64_sub; f64_sub; local_set(PW_Z);
+        f64_const(1.0); local_get(Local(PW_R)); local_get(Local(PW_Z)); f64_sub; f64_sub; local_set(Local(PW_Z));
         // j = get_high_word(z); j += n << 20
-        local_get(PW_Z);
+        local_get(Local(PW_Z));
     });
     emit_high_word(&mut f);
     wasm!(f, {
-        local_get(PW_N); i32_const(F64_EXP_SHIFT); i32_shl; i32_add; local_set(PW_J);
+        local_get(Local(PW_N)); i32_const(Imm32(F64_EXP_SHIFT)); i32_shl; i32_add; local_set(Local(PW_J));
         // if (j >> 20) <= 0 { z = scalbn(z, n) } else { z = with_set_high_word(z, j) }
-        local_get(PW_J); i32_const(F64_EXP_SHIFT); i32_shr_s; i32_const(0); i32_le_s;
+        local_get(Local(PW_J)); i32_const(Imm32(F64_EXP_SHIFT)); i32_shr_s; i32_const(Imm32(0)); i32_le_s;
         if_empty;
-            local_get(PW_Z); local_get(PW_N); call(scalbn); local_set(PW_Z);
+            local_get(Local(PW_Z)); local_get(Local(PW_N)); call(scalbn); local_set(Local(PW_Z));
         else_;
-            local_get(PW_Z); i64_reinterpret_f64; i64_const(LOW_WORD_BITS); i64_and;
-            local_get(PW_J); i64_extend_i32_u; i64_const(HI_SHIFT); i64_shl;
-            i64_or; f64_reinterpret_i64; local_set(PW_Z);
+            local_get(Local(PW_Z)); i64_reinterpret_f64; i64_const(Imm64(LOW_WORD_BITS)); i64_and;
+            local_get(Local(PW_J)); i64_extend_i32_u; i64_const(Imm64(HI_SHIFT)); i64_shl;
+            i64_or; f64_reinterpret_i64; local_set(Local(PW_Z));
         end;
         // return s * z
-        local_get(PW_S); local_get(PW_Z); f64_mul;
+        local_get(Local(PW_S)); local_get(Local(PW_Z)); f64_mul;
         end;
     });
 

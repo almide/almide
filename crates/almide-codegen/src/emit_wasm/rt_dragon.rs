@@ -23,6 +23,7 @@
 //! buffer. No `i64_trunc` of the value is ever performed, so arbitrary
 //! magnitude is handled without traps.
 
+use crate::emit_wasm::engine::{Imm32, Imm64, Local};
 use super::{CompiledFunc, WasmEmitter};
 use super::rt_string::{string_data_off, string_hdr, string_cap_off};
 use wasm_encoder::ValType;
@@ -163,19 +164,19 @@ fn compile_norm(emitter: &mut WasmEmitter) {
     // param 0 = p ; local 1 = len
     let mut f = Function::new([(1, ValType::I32)]);
     wasm!(f, {
-        local_get(0); i32_load(0); local_set(1);
+        local_get(Local(0)); i32_load(0); local_set(Local(1));
         block_empty; loop_empty;
           // while len > 1 && limb[len-1] == 0 { len-- }
-          local_get(1); i32_const(1); i32_le_u; br_if(1);
+          local_get(Local(1)); i32_const(Imm32(1)); i32_le_u; br_if(1);
           // limb[len-1] at p + BN_HDR + (len-1)*4
-          local_get(0); i32_const(BN_HDR as i32); i32_add;
-          local_get(1); i32_const(1); i32_sub; i32_const(LIMB_BYTES); i32_mul; i32_add;
+          local_get(Local(0)); i32_const(Imm32(BN_HDR as i32)); i32_add;
+          local_get(Local(1)); i32_const(Imm32(1)); i32_sub; i32_const(Imm32(LIMB_BYTES)); i32_mul; i32_add;
           i32_load(0);
           br_if(1); // nonzero -> stop
-          local_get(1); i32_const(1); i32_sub; local_set(1);
+          local_get(Local(1)); i32_const(Imm32(1)); i32_sub; local_set(Local(1));
           br(0);
         end; end;
-        local_get(0); local_get(1); i32_store(0);
+        local_get(Local(0)); local_get(Local(1)); i32_store(0);
         end;
     });
     emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.dragon.norm, type_idx, f));
@@ -189,38 +190,38 @@ fn compile_mul_small(emitter: &mut WasmEmitter) {
         (1, ValType::I32), (1, ValType::I32), (1, ValType::I64), (1, ValType::I64),
     ]);
     wasm!(f, {
-        local_get(0); i32_load(0); local_set(2);
-        i32_const(0); local_set(3);
-        i64_const(0); local_set(4);
+        local_get(Local(0)); i32_load(0); local_set(Local(2));
+        i32_const(Imm32(0)); local_set(Local(3));
+        i64_const(Imm64(0)); local_set(Local(4));
         block_empty; loop_empty;
-          local_get(3); local_get(2); i32_ge_u; br_if(1);
+          local_get(Local(3)); local_get(Local(2)); i32_ge_u; br_if(1);
           // prod = limb[i] * m + carry
-          local_get(0); i32_const(BN_HDR as i32); i32_add; local_get(3); i32_const(LIMB_BYTES); i32_mul; i32_add;
+          local_get(Local(0)); i32_const(Imm32(BN_HDR as i32)); i32_add; local_get(Local(3)); i32_const(Imm32(LIMB_BYTES)); i32_mul; i32_add;
           i32_load(0); i64_extend_i32_u;
-          local_get(1); i64_extend_i32_u;
+          local_get(Local(1)); i64_extend_i32_u;
           i64_mul;
-          local_get(4); i64_add;
-          local_set(5);
+          local_get(Local(4)); i64_add;
+          local_set(Local(5));
           // limb[i] = prod & 0xFFFFFFFF
-          local_get(0); i32_const(BN_HDR as i32); i32_add; local_get(3); i32_const(LIMB_BYTES); i32_mul; i32_add;
-          local_get(5); i32_wrap_i64;
+          local_get(Local(0)); i32_const(Imm32(BN_HDR as i32)); i32_add; local_get(Local(3)); i32_const(Imm32(LIMB_BYTES)); i32_mul; i32_add;
+          local_get(Local(5)); i32_wrap_i64;
           i32_store(0);
           // carry = prod >> 32
-          local_get(5); i64_const(LIMB_BITS_I64); i64_shr_u; local_set(4);
-          local_get(3); i32_const(1); i32_add; local_set(3);
+          local_get(Local(5)); i64_const(Imm64(LIMB_BITS_I64)); i64_shr_u; local_set(Local(4));
+          local_get(Local(3)); i32_const(Imm32(1)); i32_add; local_set(Local(3));
           br(0);
         end; end;
         // emit remaining carry limbs
         block_empty; loop_empty;
-          local_get(4); i64_eqz; br_if(1);
-          local_get(0); i32_const(BN_HDR as i32); i32_add; local_get(2); i32_const(LIMB_BYTES); i32_mul; i32_add;
-          local_get(4); i32_wrap_i64;
+          local_get(Local(4)); i64_eqz; br_if(1);
+          local_get(Local(0)); i32_const(Imm32(BN_HDR as i32)); i32_add; local_get(Local(2)); i32_const(Imm32(LIMB_BYTES)); i32_mul; i32_add;
+          local_get(Local(4)); i32_wrap_i64;
           i32_store(0);
-          local_get(2); i32_const(1); i32_add; local_set(2);
-          local_get(4); i64_const(LIMB_BITS_I64); i64_shr_u; local_set(4);
+          local_get(Local(2)); i32_const(Imm32(1)); i32_add; local_set(Local(2));
+          local_get(Local(4)); i64_const(Imm64(LIMB_BITS_I64)); i64_shr_u; local_set(Local(4));
           br(0);
         end; end;
-        local_get(0); local_get(2); i32_store(0);
+        local_get(Local(0)); local_get(Local(2)); i32_store(0);
         end;
     });
     emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.dragon.mul_small, type_idx, f));
@@ -234,31 +235,31 @@ fn compile_cmp(emitter: &mut WasmEmitter) {
         (1, ValType::I32), (1, ValType::I32), (1, ValType::I32), (1, ValType::I32), (1, ValType::I32),
     ]);
     wasm!(f, {
-        local_get(0); i32_load(0); local_set(2);
-        local_get(1); i32_load(0); local_set(3);
+        local_get(Local(0)); i32_load(0); local_set(Local(2));
+        local_get(Local(1)); i32_load(0); local_set(Local(3));
         // different lengths -> longer is larger
-        local_get(2); local_get(3); i32_ne;
+        local_get(Local(2)); local_get(Local(3)); i32_ne;
         if_empty;
-          local_get(2); local_get(3); i32_lt_u;
-          if_i32; i32_const(-1); else_; i32_const(1); end;
+          local_get(Local(2)); local_get(Local(3)); i32_lt_u;
+          if_i32; i32_const(Imm32(-1)); else_; i32_const(Imm32(1)); end;
           return_;
         end;
         // equal lengths: compare from MSD down
-        local_get(2); local_set(4); // i = len
+        local_get(Local(2)); local_set(Local(4)); // i = len
         block_empty; loop_empty;
-          local_get(4); i32_eqz; br_if(1);
-          local_get(4); i32_const(1); i32_sub; local_set(4);
-          local_get(0); i32_const(BN_HDR as i32); i32_add; local_get(4); i32_const(LIMB_BYTES); i32_mul; i32_add; i32_load(0); local_set(5);
-          local_get(1); i32_const(BN_HDR as i32); i32_add; local_get(4); i32_const(LIMB_BYTES); i32_mul; i32_add; i32_load(0); local_set(6);
-          local_get(5); local_get(6); i32_ne;
+          local_get(Local(4)); i32_eqz; br_if(1);
+          local_get(Local(4)); i32_const(Imm32(1)); i32_sub; local_set(Local(4));
+          local_get(Local(0)); i32_const(Imm32(BN_HDR as i32)); i32_add; local_get(Local(4)); i32_const(Imm32(LIMB_BYTES)); i32_mul; i32_add; i32_load(0); local_set(Local(5));
+          local_get(Local(1)); i32_const(Imm32(BN_HDR as i32)); i32_add; local_get(Local(4)); i32_const(Imm32(LIMB_BYTES)); i32_mul; i32_add; i32_load(0); local_set(Local(6));
+          local_get(Local(5)); local_get(Local(6)); i32_ne;
           if_empty;
-            local_get(5); local_get(6); i32_lt_u;
-            if_i32; i32_const(-1); else_; i32_const(1); end;
+            local_get(Local(5)); local_get(Local(6)); i32_lt_u;
+            if_i32; i32_const(Imm32(-1)); else_; i32_const(Imm32(1)); end;
             return_;
           end;
           br(0);
         end; end;
-        i32_const(0);
+        i32_const(Imm32(0));
         end;
     });
     emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.dragon.cmp, type_idx, f));
@@ -273,42 +274,42 @@ fn compile_add(emitter: &mut WasmEmitter) {
         (1, ValType::I64), (1, ValType::I64),
     ]);
     wasm!(f, {
-        local_get(0); i32_load(0); local_set(2);
-        local_get(1); i32_load(0); local_set(3);
+        local_get(Local(0)); i32_load(0); local_set(Local(2));
+        local_get(Local(1)); i32_load(0); local_set(Local(3));
         // n = max(ld, ls)
-        local_get(2); local_get(3); i32_ge_u;
-        if_i32; local_get(2); else_; local_get(3); end;
-        local_set(4);
-        i32_const(0); local_set(5);
-        i64_const(0); local_set(6);
+        local_get(Local(2)); local_get(Local(3)); i32_ge_u;
+        if_i32; local_get(Local(2)); else_; local_get(Local(3)); end;
+        local_set(Local(4));
+        i32_const(Imm32(0)); local_set(Local(5));
+        i64_const(Imm64(0)); local_set(Local(6));
         block_empty; loop_empty;
-          local_get(5); local_get(4); i32_ge_u; br_if(1);
+          local_get(Local(5)); local_get(Local(4)); i32_ge_u; br_if(1);
           // a = (i < ld) ? dst.limb[i] : 0
-          local_get(5); local_get(2); i32_lt_u;
+          local_get(Local(5)); local_get(Local(2)); i32_lt_u;
           if_i64;
-            local_get(0); i32_const(BN_HDR as i32); i32_add; local_get(5); i32_const(LIMB_BYTES); i32_mul; i32_add; i32_load(0); i64_extend_i32_u;
-          else_; i64_const(0); end;
+            local_get(Local(0)); i32_const(Imm32(BN_HDR as i32)); i32_add; local_get(Local(5)); i32_const(Imm32(LIMB_BYTES)); i32_mul; i32_add; i32_load(0); i64_extend_i32_u;
+          else_; i64_const(Imm64(0)); end;
           // b = (i < ls) ? src.limb[i] : 0
-          local_get(5); local_get(3); i32_lt_u;
+          local_get(Local(5)); local_get(Local(3)); i32_lt_u;
           if_i64;
-            local_get(1); i32_const(BN_HDR as i32); i32_add; local_get(5); i32_const(LIMB_BYTES); i32_mul; i32_add; i32_load(0); i64_extend_i32_u;
-          else_; i64_const(0); end;
-          i64_add; local_get(6); i64_add; local_set(7);
+            local_get(Local(1)); i32_const(Imm32(BN_HDR as i32)); i32_add; local_get(Local(5)); i32_const(Imm32(LIMB_BYTES)); i32_mul; i32_add; i32_load(0); i64_extend_i32_u;
+          else_; i64_const(Imm64(0)); end;
+          i64_add; local_get(Local(6)); i64_add; local_set(Local(7));
           // dst.limb[i] = sum & 0xFFFFFFFF
-          local_get(0); i32_const(BN_HDR as i32); i32_add; local_get(5); i32_const(LIMB_BYTES); i32_mul; i32_add;
-          local_get(7); i32_wrap_i64; i32_store(0);
-          local_get(7); i64_const(LIMB_BITS_I64); i64_shr_u; local_set(6);
-          local_get(5); i32_const(1); i32_add; local_set(5);
+          local_get(Local(0)); i32_const(Imm32(BN_HDR as i32)); i32_add; local_get(Local(5)); i32_const(Imm32(LIMB_BYTES)); i32_mul; i32_add;
+          local_get(Local(7)); i32_wrap_i64; i32_store(0);
+          local_get(Local(7)); i64_const(Imm64(LIMB_BITS_I64)); i64_shr_u; local_set(Local(6));
+          local_get(Local(5)); i32_const(Imm32(1)); i32_add; local_set(Local(5));
           br(0);
         end; end;
         // final carry
-        local_get(6); i64_eqz; i32_eqz;
+        local_get(Local(6)); i64_eqz; i32_eqz;
         if_empty;
-          local_get(0); i32_const(BN_HDR as i32); i32_add; local_get(4); i32_const(LIMB_BYTES); i32_mul; i32_add;
-          local_get(6); i32_wrap_i64; i32_store(0);
-          local_get(4); i32_const(1); i32_add; local_set(4);
+          local_get(Local(0)); i32_const(Imm32(BN_HDR as i32)); i32_add; local_get(Local(4)); i32_const(Imm32(LIMB_BYTES)); i32_mul; i32_add;
+          local_get(Local(6)); i32_wrap_i64; i32_store(0);
+          local_get(Local(4)); i32_const(Imm32(1)); i32_add; local_set(Local(4));
         end;
-        local_get(0); local_get(4); i32_store(0);
+        local_get(Local(0)); local_get(Local(4)); i32_store(0);
         end;
     });
     emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.dragon.add, type_idx, f));
@@ -323,33 +324,33 @@ fn compile_sub(emitter: &mut WasmEmitter) {
         (1, ValType::I64), (1, ValType::I64),
     ]);
     wasm!(f, {
-        local_get(0); i32_load(0); local_set(2);
-        local_get(1); i32_load(0); local_set(3);
-        i32_const(0); local_set(4);
-        i64_const(0); local_set(5);
+        local_get(Local(0)); i32_load(0); local_set(Local(2));
+        local_get(Local(1)); i32_load(0); local_set(Local(3));
+        i32_const(Imm32(0)); local_set(Local(4));
+        i64_const(Imm64(0)); local_set(Local(5));
         block_empty; loop_empty;
-          local_get(4); local_get(2); i32_ge_u; br_if(1);
+          local_get(Local(4)); local_get(Local(2)); i32_ge_u; br_if(1);
           // diff = dst.limb[i] - (i<ls? src.limb[i] : 0) - borrow
-          local_get(0); i32_const(BN_HDR as i32); i32_add; local_get(4); i32_const(LIMB_BYTES); i32_mul; i32_add; i32_load(0); i64_extend_i32_u;
-          local_get(4); local_get(3); i32_lt_u;
+          local_get(Local(0)); i32_const(Imm32(BN_HDR as i32)); i32_add; local_get(Local(4)); i32_const(Imm32(LIMB_BYTES)); i32_mul; i32_add; i32_load(0); i64_extend_i32_u;
+          local_get(Local(4)); local_get(Local(3)); i32_lt_u;
           if_i64;
-            local_get(1); i32_const(BN_HDR as i32); i32_add; local_get(4); i32_const(LIMB_BYTES); i32_mul; i32_add; i32_load(0); i64_extend_i32_u;
-          else_; i64_const(0); end;
-          i64_sub; local_get(5); i64_sub; local_set(6);
+            local_get(Local(1)); i32_const(Imm32(BN_HDR as i32)); i32_add; local_get(Local(4)); i32_const(Imm32(LIMB_BYTES)); i32_mul; i32_add; i32_load(0); i64_extend_i32_u;
+          else_; i64_const(Imm64(0)); end;
+          i64_sub; local_get(Local(5)); i64_sub; local_set(Local(6));
           // if diff < 0 (high bit set since we extended u32): diff += 2^32, borrow=1
-          local_get(6); i64_const(0); i64_lt_s;
+          local_get(Local(6)); i64_const(Imm64(0)); i64_lt_s;
           if_empty;
-            local_get(6); i64_const(CARRY_WRAP); i64_add; local_set(6);
-            i64_const(1); local_set(5);
+            local_get(Local(6)); i64_const(Imm64(CARRY_WRAP)); i64_add; local_set(Local(6));
+            i64_const(Imm64(1)); local_set(Local(5));
           else_;
-            i64_const(0); local_set(5);
+            i64_const(Imm64(0)); local_set(Local(5));
           end;
-          local_get(0); i32_const(BN_HDR as i32); i32_add; local_get(4); i32_const(LIMB_BYTES); i32_mul; i32_add;
-          local_get(6); i32_wrap_i64; i32_store(0);
-          local_get(4); i32_const(1); i32_add; local_set(4);
+          local_get(Local(0)); i32_const(Imm32(BN_HDR as i32)); i32_add; local_get(Local(4)); i32_const(Imm32(LIMB_BYTES)); i32_mul; i32_add;
+          local_get(Local(6)); i32_wrap_i64; i32_store(0);
+          local_get(Local(4)); i32_const(Imm32(1)); i32_add; local_set(Local(4));
           br(0);
         end; end;
-        local_get(0); call(emitter.rt.dragon.norm);
+        local_get(Local(0)); call(emitter.rt.dragon.norm);
         end;
     });
     emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.dragon.sub, type_idx, f));
@@ -364,59 +365,59 @@ fn compile_shl(emitter: &mut WasmEmitter) {
         (1, ValType::I32), (1, ValType::I32), (1, ValType::I32),
     ]);
     wasm!(f, {
-        local_get(0); i32_load(0); local_set(2);
-        local_get(1); i32_const(LIMB_BITS_I32); i32_div_u; local_set(3); // limb_shift
-        local_get(1); i32_const(LIMB_BITS_I32); i32_rem_u; local_set(4); // bit_shift
+        local_get(Local(0)); i32_load(0); local_set(Local(2));
+        local_get(Local(1)); i32_const(Imm32(LIMB_BITS_I32)); i32_div_u; local_set(Local(3)); // limb_shift
+        local_get(Local(1)); i32_const(Imm32(LIMB_BITS_I32)); i32_rem_u; local_set(Local(4)); // bit_shift
         // limb shift: move limbs up by limb_shift, zero the low ones
-        local_get(3); i32_eqz; i32_eqz;
+        local_get(Local(3)); i32_eqz; i32_eqz;
         if_empty;
           // i = len; while i>0 { i--; limb[i+ls] = limb[i] }
-          local_get(2); local_set(5);
+          local_get(Local(2)); local_set(Local(5));
           block_empty; loop_empty;
-            local_get(5); i32_eqz; br_if(1);
-            local_get(5); i32_const(1); i32_sub; local_set(5);
-            local_get(0); i32_const(BN_HDR as i32); i32_add; local_get(5); local_get(3); i32_add; i32_const(LIMB_BYTES); i32_mul; i32_add;
-            local_get(0); i32_const(BN_HDR as i32); i32_add; local_get(5); i32_const(LIMB_BYTES); i32_mul; i32_add; i32_load(0);
+            local_get(Local(5)); i32_eqz; br_if(1);
+            local_get(Local(5)); i32_const(Imm32(1)); i32_sub; local_set(Local(5));
+            local_get(Local(0)); i32_const(Imm32(BN_HDR as i32)); i32_add; local_get(Local(5)); local_get(Local(3)); i32_add; i32_const(Imm32(LIMB_BYTES)); i32_mul; i32_add;
+            local_get(Local(0)); i32_const(Imm32(BN_HDR as i32)); i32_add; local_get(Local(5)); i32_const(Imm32(LIMB_BYTES)); i32_mul; i32_add; i32_load(0);
             i32_store(0);
             br(0);
           end; end;
           // zero low limb_shift limbs
-          i32_const(0); local_set(5);
+          i32_const(Imm32(0)); local_set(Local(5));
           block_empty; loop_empty;
-            local_get(5); local_get(3); i32_ge_u; br_if(1);
-            local_get(0); i32_const(BN_HDR as i32); i32_add; local_get(5); i32_const(LIMB_BYTES); i32_mul; i32_add;
-            i32_const(0); i32_store(0);
-            local_get(5); i32_const(1); i32_add; local_set(5);
+            local_get(Local(5)); local_get(Local(3)); i32_ge_u; br_if(1);
+            local_get(Local(0)); i32_const(Imm32(BN_HDR as i32)); i32_add; local_get(Local(5)); i32_const(Imm32(LIMB_BYTES)); i32_mul; i32_add;
+            i32_const(Imm32(0)); i32_store(0);
+            local_get(Local(5)); i32_const(Imm32(1)); i32_add; local_set(Local(5));
             br(0);
           end; end;
-          local_get(2); local_get(3); i32_add; local_set(2);
+          local_get(Local(2)); local_get(Local(3)); i32_add; local_set(Local(2));
         end;
         // bit shift within limbs
-        local_get(4); i32_eqz; i32_eqz;
+        local_get(Local(4)); i32_eqz; i32_eqz;
         if_empty;
-          i32_const(0); local_set(6); // carry
-          local_get(3); local_set(5); // i = limb_shift
+          i32_const(Imm32(0)); local_set(Local(6)); // carry
+          local_get(Local(3)); local_set(Local(5)); // i = limb_shift
           block_empty; loop_empty;
-            local_get(5); local_get(2); i32_ge_u; br_if(1);
-            local_get(0); i32_const(BN_HDR as i32); i32_add; local_get(5); i32_const(LIMB_BYTES); i32_mul; i32_add; i32_load(0); local_set(7);
+            local_get(Local(5)); local_get(Local(2)); i32_ge_u; br_if(1);
+            local_get(Local(0)); i32_const(Imm32(BN_HDR as i32)); i32_add; local_get(Local(5)); i32_const(Imm32(LIMB_BYTES)); i32_mul; i32_add; i32_load(0); local_set(Local(7));
             // limb[i] = (v << bit_shift) | carry
-            local_get(0); i32_const(BN_HDR as i32); i32_add; local_get(5); i32_const(LIMB_BYTES); i32_mul; i32_add;
-            local_get(7); local_get(4); i32_shl; local_get(6); i32_or;
+            local_get(Local(0)); i32_const(Imm32(BN_HDR as i32)); i32_add; local_get(Local(5)); i32_const(Imm32(LIMB_BYTES)); i32_mul; i32_add;
+            local_get(Local(7)); local_get(Local(4)); i32_shl; local_get(Local(6)); i32_or;
             i32_store(0);
             // carry = v >> (32 - bit_shift)
-            local_get(7); i32_const(LIMB_BITS_I32); local_get(4); i32_sub; i32_shr_u; local_set(6);
-            local_get(5); i32_const(1); i32_add; local_set(5);
+            local_get(Local(7)); i32_const(Imm32(LIMB_BITS_I32)); local_get(Local(4)); i32_sub; i32_shr_u; local_set(Local(6));
+            local_get(Local(5)); i32_const(Imm32(1)); i32_add; local_set(Local(5));
             br(0);
           end; end;
-          local_get(6); i32_eqz; i32_eqz;
+          local_get(Local(6)); i32_eqz; i32_eqz;
           if_empty;
-            local_get(0); i32_const(BN_HDR as i32); i32_add; local_get(2); i32_const(LIMB_BYTES); i32_mul; i32_add;
-            local_get(6); i32_store(0);
-            local_get(2); i32_const(1); i32_add; local_set(2);
+            local_get(Local(0)); i32_const(Imm32(BN_HDR as i32)); i32_add; local_get(Local(2)); i32_const(Imm32(LIMB_BYTES)); i32_mul; i32_add;
+            local_get(Local(6)); i32_store(0);
+            local_get(Local(2)); i32_const(Imm32(1)); i32_add; local_set(Local(2));
           end;
         end;
-        local_get(0); local_get(2); i32_store(0);
-        local_get(0); call(emitter.rt.dragon.norm);
+        local_get(Local(0)); local_get(Local(2)); i32_store(0);
+        local_get(Local(0)); call(emitter.rt.dragon.norm);
         end;
     });
     emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.dragon.shl, type_idx, f));
@@ -428,15 +429,15 @@ fn compile_copy(emitter: &mut WasmEmitter) {
     // params: 0=dst, 1=src | local 2=len, 3=i
     let mut f = Function::new([(1, ValType::I32), (1, ValType::I32)]);
     wasm!(f, {
-        local_get(1); i32_load(0); local_set(2);
-        local_get(0); local_get(2); i32_store(0);
-        i32_const(0); local_set(3);
+        local_get(Local(1)); i32_load(0); local_set(Local(2));
+        local_get(Local(0)); local_get(Local(2)); i32_store(0);
+        i32_const(Imm32(0)); local_set(Local(3));
         block_empty; loop_empty;
-          local_get(3); local_get(2); i32_ge_u; br_if(1);
-          local_get(0); i32_const(BN_HDR as i32); i32_add; local_get(3); i32_const(LIMB_BYTES); i32_mul; i32_add;
-          local_get(1); i32_const(BN_HDR as i32); i32_add; local_get(3); i32_const(LIMB_BYTES); i32_mul; i32_add; i32_load(0);
+          local_get(Local(3)); local_get(Local(2)); i32_ge_u; br_if(1);
+          local_get(Local(0)); i32_const(Imm32(BN_HDR as i32)); i32_add; local_get(Local(3)); i32_const(Imm32(LIMB_BYTES)); i32_mul; i32_add;
+          local_get(Local(1)); i32_const(Imm32(BN_HDR as i32)); i32_add; local_get(Local(3)); i32_const(Imm32(LIMB_BYTES)); i32_mul; i32_add; i32_load(0);
           i32_store(0);
-          local_get(3); i32_const(1); i32_add; local_set(3);
+          local_get(Local(3)); i32_const(Imm32(1)); i32_add; local_set(Local(3));
           br(0);
         end; end;
         end;
@@ -508,7 +509,7 @@ fn compile_float_to_string(emitter: &mut WasmEmitter) {
     // ── Special cases: NaN / inf / zero ──
     // bits = reinterpret(x); exp field; mant field.
     wasm!(f, {
-        local_get(0); i64_reinterpret_f64; local_set(2);
+        local_get(Local(0)); i64_reinterpret_f64; local_set(Local(2));
     });
     // NaN: exp==0x7FF && mant!=0  → "NaN"
     let s_nan = emitter.intern_string("NaN");
@@ -518,66 +519,66 @@ fn compile_float_to_string(emitter: &mut WasmEmitter) {
     let s_nzero = emitter.intern_string("-0.0");
     wasm!(f, {
         // exp = (bits >> 52) & 0x7FF
-        local_get(2); i64_const(F64_MANTISSA_BITS); i64_shr_u; i32_wrap_i64; i32_const(F64_EXP_MASK); i32_and; local_set(3);
+        local_get(Local(2)); i64_const(Imm64(F64_MANTISSA_BITS)); i64_shr_u; i32_wrap_i64; i32_const(Imm32(F64_EXP_MASK)); i32_and; local_set(Local(3));
         // raw_mant = bits & 0xF_FFFF_FFFF_FFFF
-        local_get(2); i64_const(F64_MANT_MASK); i64_and; local_set(4);
+        local_get(Local(2)); i64_const(Imm64(F64_MANT_MASK)); i64_and; local_set(Local(4));
         // if exp == 0x7FF: NaN or inf
-        local_get(3); i32_const(F64_EXP_MASK); i32_eq;
+        local_get(Local(3)); i32_const(Imm32(F64_EXP_MASK)); i32_eq;
         if_empty;
-          local_get(4); i64_eqz; i32_eqz;
+          local_get(Local(4)); i64_eqz; i32_eqz;
           if_empty;
-            i32_const(s_nan as i32); return_;
+            i32_const(Imm32(s_nan as i32)); return_;
           end;
           // inf: sign bit
-          local_get(2); i64_const(0); i64_lt_s;
-          if_i32; i32_const(s_ninf as i32); else_; i32_const(s_inf as i32); end;
+          local_get(Local(2)); i64_const(Imm64(0)); i64_lt_s;
+          if_i32; i32_const(Imm32(s_ninf as i32)); else_; i32_const(Imm32(s_inf as i32)); end;
           return_;
         end;
     });
     // zero: x == 0.0 (covers +0 and -0). Sign from bit 63.
     wasm!(f, {
-        local_get(0); f64_const(0.0); f64_eq;
+        local_get(Local(0)); f64_const(0.0); f64_eq;
         if_empty;
-          local_get(2); i64_const(0); i64_lt_s;
-          if_i32; i32_const(s_nzero as i32); else_; i32_const(s_zero as i32); end;
+          local_get(Local(2)); i64_const(Imm64(0)); i64_lt_s;
+          if_i32; i32_const(Imm32(s_nzero as i32)); else_; i32_const(Imm32(s_zero as i32)); end;
           return_;
         end;
     });
 
     // neg = sign bit
     wasm!(f, {
-        local_get(2); i64_const(0); i64_lt_s; local_set(11);
+        local_get(Local(2)); i64_const(Imm64(0)); i64_lt_s; local_set(Local(11));
     });
 
     // Work with |x|: clear sign bit.
     wasm!(f, {
-        local_get(2); i64_const(F64_ABS_MASK); i64_and; local_set(2);
+        local_get(Local(2)); i64_const(Imm64(F64_ABS_MASK)); i64_and; local_set(Local(2));
         // re-extract exp/mant from |bits| (exp/mant already sign-independent, but recompute mant cleanly)
-        local_get(2); i64_const(F64_MANTISSA_BITS); i64_shr_u; i32_wrap_i64; i32_const(F64_EXP_MASK); i32_and; local_set(3);
-        local_get(2); i64_const(F64_MANT_MASK); i64_and; local_set(4);
+        local_get(Local(2)); i64_const(Imm64(F64_MANTISSA_BITS)); i64_shr_u; i32_wrap_i64; i32_const(Imm32(F64_EXP_MASK)); i32_and; local_set(Local(3));
+        local_get(Local(2)); i64_const(Imm64(F64_MANT_MASK)); i64_and; local_set(Local(4));
     });
 
     // Decompose: if exp==0 (subnormal): f=raw_mant, e=-1074
     //            else:                  f=raw_mant + 2^52, e=exp-1075
     wasm!(f, {
-        local_get(3); i32_eqz;
+        local_get(Local(3)); i32_eqz;
         if_empty;
-          local_get(4); local_set(5);
-          i32_const(F64_SUBNORMAL_EXP); local_set(6);
+          local_get(Local(4)); local_set(Local(5));
+          i32_const(Imm32(F64_SUBNORMAL_EXP)); local_set(Local(6));
         else_;
-          local_get(4); i64_const(F64_IMPLICIT_BIT); i64_add; local_set(5);
-          local_get(3); i32_const(F64_EXP_BIAS_OFFSET); i32_sub; local_set(6);
+          local_get(Local(4)); i64_const(Imm64(F64_IMPLICIT_BIT)); i64_add; local_set(Local(5));
+          local_get(Local(3)); i32_const(Imm32(F64_EXP_BIAS_OFFSET)); i32_sub; local_set(Local(6));
         end;
         // even = (f & 1) == 0
-        local_get(5); i64_const(1); i64_and; i64_eqz; local_set(8);
+        local_get(Local(5)); i64_const(Imm64(1)); i64_and; i64_eqz; local_set(Local(8));
         // low_bnd = raw_mant == 0 && exp > 1
-        local_get(4); i64_eqz; local_get(3); i32_const(1); i32_gt_s; i32_and; local_set(9);
+        local_get(Local(4)); i64_eqz; local_get(Local(3)); i32_const(Imm32(1)); i32_gt_s; i32_and; local_set(Local(9));
     });
 
     // Allocate scratch block.
     wasm!(f, {
-        i32_const(SCRATCH_BYTES as i32); call(emitter.rt.alloc); local_set(1);
-        local_get(1); i32_const(OFF_DIGITS as i32); i32_add; local_set(20);
+        i32_const(Imm32(SCRATCH_BYTES as i32)); call(emitter.rt.alloc); local_set(Local(1));
+        local_get(Local(1)); i32_const(Imm32(OFF_DIGITS as i32)); i32_add; local_set(Local(20));
     });
 
     // ── Initialize R, S, MP, MM as bignums set to f and 1 ──
@@ -588,7 +589,7 @@ fn compile_float_to_string(emitter: &mut WasmEmitter) {
     if true {
         // e >= 0 branch vs e < 0 branch
         wasm!(f, {
-            local_get(6); i32_const(0); i32_ge_s;
+            local_get(Local(6)); i32_const(Imm32(0)); i32_ge_s;
             if_empty;
         });
         // R = f << (e+1); S = 2; MP = 2^e; MM = 2^e
@@ -613,7 +614,7 @@ fn compile_float_to_string(emitter: &mut WasmEmitter) {
     }
     // low boundary: MP <<= 1; R <<= 1; S <<= 1
     wasm!(f, {
-        local_get(9);
+        local_get(Local(9));
         if_empty;
     });
     dr.shl_const(&mut f, OFF_MP, 1);
@@ -626,40 +627,40 @@ fn compile_float_to_string(emitter: &mut WasmEmitter) {
     // The fixup loops below correct any off-by-one in this estimate, so its
     // only requirement is to be close — exactness is not needed.
     wasm!(f, {
-        local_get(5); f64_convert_i64_u;
+        local_get(Local(5)); f64_convert_i64_u;
         call(emitter.rt.math_log10);
-        local_get(6); f64_convert_i32_s; f64_const(LOG10_2); f64_mul;
+        local_get(Local(6)); f64_convert_i32_s; f64_const(LOG10_2); f64_mul;
         f64_add;
         f64_ceil;
         // k = (i32) ceil(approx). k is in [-324, 309]; trunc-toward-zero is safe.
     });
     f.instruction(&wasm_encoder::Instruction::I32TruncF64S);
-    wasm!(f, { local_set(7); });
+    wasm!(f, { local_set(Local(7)); });
 
     // ── Scale: if k>=0 S *= 10^k else R,MP,MM *= 10^(-k) ──
     // loop k times
     wasm!(f, {
-        local_get(7); i32_const(0); i32_ge_s;
+        local_get(Local(7)); i32_const(Imm32(0)); i32_ge_s;
         if_empty;
-          i32_const(0); local_set(16);
+          i32_const(Imm32(0)); local_set(Local(16));
           block_empty; loop_empty;
-            local_get(16); local_get(7); i32_ge_s; br_if(1);
+            local_get(Local(16)); local_get(Local(7)); i32_ge_s; br_if(1);
     });
     dr.mul10(&mut f, OFF_S);
     wasm!(f, {
-            local_get(16); i32_const(1); i32_add; local_set(16);
+            local_get(Local(16)); i32_const(Imm32(1)); i32_add; local_set(Local(16));
             br(0);
           end; end;
         else_;
-          i32_const(0); local_set(16);
+          i32_const(Imm32(0)); local_set(Local(16));
           block_empty; loop_empty;
-            local_get(16); i32_const(0); local_get(7); i32_sub; i32_ge_s; br_if(1);
+            local_get(Local(16)); i32_const(Imm32(0)); local_get(Local(7)); i32_sub; i32_ge_s; br_if(1);
     });
     dr.mul10(&mut f, OFF_R);
     dr.mul10(&mut f, OFF_MP);
     dr.mul10(&mut f, OFF_MM);
     wasm!(f, {
-            local_get(16); i32_const(1); i32_add; local_set(16);
+            local_get(Local(16)); i32_const(Imm32(1)); i32_add; local_set(Local(16));
             br(0);
           end; end;
         end;
@@ -680,7 +681,7 @@ fn compile_float_to_string(emitter: &mut WasmEmitter) {
     });
     dr.mul10(&mut f, OFF_S);
     wasm!(f, {
-        local_get(7); i32_const(1); i32_add; local_set(7);
+        local_get(Local(7)); i32_const(Imm32(1)); i32_add; local_set(Local(7));
         br(0);
         end; end;
     });
@@ -703,14 +704,14 @@ fn compile_float_to_string(emitter: &mut WasmEmitter) {
     dr.mul10(&mut f, OFF_MP);
     dr.mul10(&mut f, OFF_MM);
     wasm!(f, {
-        local_get(7); i32_const(1); i32_sub; local_set(7);
+        local_get(Local(7)); i32_const(Imm32(1)); i32_sub; local_set(Local(7));
         br(0);
         end; end;
     });
 
     // ── Digit generation loop ──
     wasm!(f, {
-        i32_const(0); local_set(10); // dlen = 0
+        i32_const(Imm32(0)); local_set(Local(10)); // dlen = 0
         block_empty; loop_empty;     // [outer block (1)] [loop (0)]
     });
     dr.mul10(&mut f, OFF_R);
@@ -718,37 +719,37 @@ fn compile_float_to_string(emitter: &mut WasmEmitter) {
     dr.mul10(&mut f, OFF_MM);
     // d = 0; while cmp(R,S) >= 0 { R -= S; d++ }
     wasm!(f, {
-        i32_const(0); local_set(12);
+        i32_const(Imm32(0)); local_set(Local(12));
         block_empty; loop_empty;
     });
     dr.cmp(&mut f, OFF_R, OFF_S);
     wasm!(f, {
-          i32_const(0); i32_lt_s; br_if(1); // c < 0 -> stop
+          i32_const(Imm32(0)); i32_lt_s; br_if(1); // c < 0 -> stop
     });
     dr.sub(&mut f, OFF_R, OFF_S);
     wasm!(f, {
-          local_get(12); i32_const(1); i32_add; local_set(12);
+          local_get(Local(12)); i32_const(Imm32(1)); i32_add; local_set(Local(12));
           br(0);
         end; end;
     });
     // low_t = even ? cmp(R,MM)<=0 : cmp(R,MM)<0
     dr.cmp_set(&mut f, OFF_R, OFF_MM);
     dr.pred_le_lt(&mut f);
-    wasm!(f, { local_set(13); });
+    wasm!(f, { local_set(Local(13)); });
     // high_t = even ? cmp(R+MP,S)>=0 : cmp(R+MP,S)>0
     dr.copy(&mut f, OFF_TMP, OFF_R);
     dr.add(&mut f, OFF_TMP, OFF_MP);
     dr.cmp_set(&mut f, OFF_TMP, OFF_S);
     dr.pred_ge_gt(&mut f);
-    wasm!(f, { local_set(14); });
+    wasm!(f, { local_set(Local(14)); });
     // if !low_t && !high_t: emit d, continue
     wasm!(f, {
-        local_get(13); i32_eqz; local_get(14); i32_eqz; i32_and;
+        local_get(Local(13)); i32_eqz; local_get(Local(14)); i32_eqz; i32_and;
         if_empty;
           // digits[dlen] = '0'+d ; dlen++
-          local_get(20); local_get(10); i32_add;
-          local_get(12); i32_const(ASCII_ZERO); i32_add; i32_store8(0);
-          local_get(10); i32_const(1); i32_add; local_set(10);
+          local_get(Local(20)); local_get(Local(10)); i32_add;
+          local_get(Local(12)); i32_const(Imm32(ASCII_ZERO)); i32_add; i32_store8(0);
+          local_get(Local(10)); i32_const(Imm32(1)); i32_add; local_set(Local(10));
           br(1); // continue outer loop
         end;
     });
@@ -757,13 +758,13 @@ fn compile_float_to_string(emitter: &mut WasmEmitter) {
     // elif high_t && !low_t: round_up=1
     // else: round_up = (2R cmp S) >= 0
     wasm!(f, {
-        local_get(13); local_get(14); i32_eqz; i32_and;
+        local_get(Local(13)); local_get(Local(14)); i32_eqz; i32_and;
         if_empty;
-          i32_const(0); local_set(15);
+          i32_const(Imm32(0)); local_set(Local(15));
         else_;
-          local_get(14); local_get(13); i32_eqz; i32_and;
+          local_get(Local(14)); local_get(Local(13)); i32_eqz; i32_and;
           if_empty;
-            i32_const(1); local_set(15);
+            i32_const(Imm32(1)); local_set(Local(15));
           else_;
     });
     // 2R cmp S
@@ -771,51 +772,51 @@ fn compile_float_to_string(emitter: &mut WasmEmitter) {
     dr.shl_const(&mut f, OFF_TMP, 1);
     dr.cmp(&mut f, OFF_TMP, OFF_S);
     wasm!(f, {
-            i32_const(0); i32_ge_s; local_set(15);
+            i32_const(Imm32(0)); i32_ge_s; local_set(Local(15));
           end;
         end;
     });
     // digits[dlen] = '0'+d ; dlen++
     wasm!(f, {
-        local_get(20); local_get(10); i32_add;
-        local_get(12); i32_const(ASCII_ZERO); i32_add; i32_store8(0);
-        local_get(10); i32_const(1); i32_add; local_set(10);
+        local_get(Local(20)); local_get(Local(10)); i32_add;
+        local_get(Local(12)); i32_const(Imm32(ASCII_ZERO)); i32_add; i32_store8(0);
+        local_get(Local(10)); i32_const(Imm32(1)); i32_add; local_set(Local(10));
     });
     // if round_up: propagate carry from the last digit
     wasm!(f, {
-        local_get(15);
+        local_get(Local(15));
         if_empty;
           // i = dlen
-          local_get(10); local_set(22);
+          local_get(Local(10)); local_set(Local(22));
           block_empty; loop_empty;
             // if i == 0: prepend '1', k++, break
-            local_get(22); i32_eqz;
+            local_get(Local(22)); i32_eqz;
             if_empty;
               // shift digits right by 1: memmove digits[0..dlen] -> digits[1..dlen+1]
     });
     // memory.copy(dst=dp+1, src=dp, len=dlen)
     wasm!(f, {
-              local_get(20); i32_const(1); i32_add;
-              local_get(20);
-              local_get(10);
+              local_get(Local(20)); i32_const(Imm32(1)); i32_add;
+              local_get(Local(20));
+              local_get(Local(10));
               memory_copy;
-              local_get(20); i32_const(ASCII_ONE); i32_store8(0); // '1'
-              local_get(10); i32_const(1); i32_add; local_set(10);
-              local_get(7); i32_const(1); i32_add; local_set(7);
+              local_get(Local(20)); i32_const(Imm32(ASCII_ONE)); i32_store8(0); // '1'
+              local_get(Local(10)); i32_const(Imm32(1)); i32_add; local_set(Local(10));
+              local_get(Local(7)); i32_const(Imm32(1)); i32_add; local_set(Local(7));
               br(2); // break carry loop
             end;
             // i--
-            local_get(22); i32_const(1); i32_sub; local_set(22);
+            local_get(Local(22)); i32_const(Imm32(1)); i32_sub; local_set(Local(22));
             // if digits[i] == '9': set '0', continue loop; else digits[i]++, break.
             // Depths from inside this if/else: if-block=0, loop=1, block=2.
-            local_get(20); local_get(22); i32_add; i32_load8_u(0);
-            i32_const(ASCII_NINE); i32_eq; // '9'
+            local_get(Local(20)); local_get(Local(22)); i32_add; i32_load8_u(0);
+            i32_const(Imm32(ASCII_NINE)); i32_eq; // '9'
             if_empty;
-              local_get(20); local_get(22); i32_add; i32_const(ASCII_ZERO); i32_store8(0);
+              local_get(Local(20)); local_get(Local(22)); i32_add; i32_const(Imm32(ASCII_ZERO)); i32_store8(0);
               br(1); // continue carry loop
             else_;
-              local_get(20); local_get(22); i32_add;
-              local_get(20); local_get(22); i32_add; i32_load8_u(0); i32_const(1); i32_add;
+              local_get(Local(20)); local_get(Local(22)); i32_add;
+              local_get(Local(20)); local_get(Local(22)); i32_add; i32_load8_u(0); i32_const(Imm32(1)); i32_add;
               i32_store8(0);
               br(2); // break carry loop
             end;
@@ -838,146 +839,146 @@ fn compile_float_to_string(emitter: &mut WasmEmitter) {
     // result buffer: string header then data. We compute total data len, alloc,
     // then write characters sequentially using a cursor.
     wasm!(f, {
-        local_get(10); local_set(21); // m = dlen (alias)
+        local_get(Local(10)); local_set(Local(21)); // m = dlen (alias)
     });
 
     // Compute out_len into local 19.
     wasm!(f, {
         // start with neg
-        local_get(11);
+        local_get(Local(11));
         // + branch
-        local_get(7); i32_const(0); i32_le_s;
+        local_get(Local(7)); i32_const(Imm32(0)); i32_le_s;
         if_i32;
           // 2 + (-k) + m
-          i32_const(ZERO_DOT_LEN); i32_const(0); local_get(7); i32_sub; i32_add; local_get(21); i32_add;
+          i32_const(Imm32(ZERO_DOT_LEN)); i32_const(Imm32(0)); local_get(Local(7)); i32_sub; i32_add; local_get(Local(21)); i32_add;
         else_;
-          local_get(7); local_get(21); i32_ge_s;
+          local_get(Local(7)); local_get(Local(21)); i32_ge_s;
           if_i32;
             // m + (k-m) + 2  == k + 2
-            local_get(7); i32_const(ZERO_DOT_LEN); i32_add;
+            local_get(Local(7)); i32_const(Imm32(ZERO_DOT_LEN)); i32_add;
           else_;
             // m + 1
-            local_get(21); i32_const(1); i32_add;
+            local_get(Local(21)); i32_const(Imm32(1)); i32_add;
           end;
         end;
         i32_add;
-        local_set(19);
+        local_set(Local(19));
     });
 
     // Alloc string: header + out_len, set len & cap.
     wasm!(f, {
-        local_get(19); i32_const(string_hdr() as i32); i32_add;
-        call(emitter.rt.alloc); local_set(18);
-        local_get(18); local_get(19); i32_store(0);
-        local_get(18); local_get(19); i32_store(string_cap_off() as u32, 0);
+        local_get(Local(19)); i32_const(Imm32(string_hdr() as i32)); i32_add;
+        call(emitter.rt.alloc); local_set(Local(18));
+        local_get(Local(18)); local_get(Local(19)); i32_store(0);
+        local_get(Local(18)); local_get(Local(19)); i32_store(string_cap_off() as u32, 0);
     });
 
     // Write characters. Use local 16 as write cursor (byte offset from data start),
     // local 22 as a scratch index.
     wasm!(f, {
-        i32_const(0); local_set(16); // cursor
+        i32_const(Imm32(0)); local_set(Local(16)); // cursor
         // sign
-        local_get(11);
+        local_get(Local(11));
         if_empty;
-          local_get(18); i32_const(string_data_off() as i32); i32_add; local_get(16); i32_add;
-          i32_const(ASCII_MINUS); i32_store8(0); // '-'
-          local_get(16); i32_const(1); i32_add; local_set(16);
+          local_get(Local(18)); i32_const(Imm32(string_data_off() as i32)); i32_add; local_get(Local(16)); i32_add;
+          i32_const(Imm32(ASCII_MINUS)); i32_store8(0); // '-'
+          local_get(Local(16)); i32_const(Imm32(1)); i32_add; local_set(Local(16));
         end;
     });
 
     // Branch on k.
     wasm!(f, {
-        local_get(7); i32_const(0); i32_le_s;
+        local_get(Local(7)); i32_const(Imm32(0)); i32_le_s;
         if_empty;
           // "0." then (-k) zeros then digits
-          local_get(18); i32_const(string_data_off() as i32); i32_add; local_get(16); i32_add;
-          i32_const(ASCII_ZERO); i32_store8(0); // '0'
-          local_get(16); i32_const(1); i32_add; local_set(16);
-          local_get(18); i32_const(string_data_off() as i32); i32_add; local_get(16); i32_add;
-          i32_const(ASCII_DOT); i32_store8(0); // '.'
-          local_get(16); i32_const(1); i32_add; local_set(16);
+          local_get(Local(18)); i32_const(Imm32(string_data_off() as i32)); i32_add; local_get(Local(16)); i32_add;
+          i32_const(Imm32(ASCII_ZERO)); i32_store8(0); // '0'
+          local_get(Local(16)); i32_const(Imm32(1)); i32_add; local_set(Local(16));
+          local_get(Local(18)); i32_const(Imm32(string_data_off() as i32)); i32_add; local_get(Local(16)); i32_add;
+          i32_const(Imm32(ASCII_DOT)); i32_store8(0); // '.'
+          local_get(Local(16)); i32_const(Imm32(1)); i32_add; local_set(Local(16));
           // (-k) zeros
-          i32_const(0); local_set(22);
+          i32_const(Imm32(0)); local_set(Local(22));
           block_empty; loop_empty;
-            local_get(22); i32_const(0); local_get(7); i32_sub; i32_ge_s; br_if(1);
-            local_get(18); i32_const(string_data_off() as i32); i32_add; local_get(16); i32_add;
-            i32_const(ASCII_ZERO); i32_store8(0);
-            local_get(16); i32_const(1); i32_add; local_set(16);
-            local_get(22); i32_const(1); i32_add; local_set(22);
+            local_get(Local(22)); i32_const(Imm32(0)); local_get(Local(7)); i32_sub; i32_ge_s; br_if(1);
+            local_get(Local(18)); i32_const(Imm32(string_data_off() as i32)); i32_add; local_get(Local(16)); i32_add;
+            i32_const(Imm32(ASCII_ZERO)); i32_store8(0);
+            local_get(Local(16)); i32_const(Imm32(1)); i32_add; local_set(Local(16));
+            local_get(Local(22)); i32_const(Imm32(1)); i32_add; local_set(Local(22));
             br(0);
           end; end;
           // digits
-          i32_const(0); local_set(22);
+          i32_const(Imm32(0)); local_set(Local(22));
           block_empty; loop_empty;
-            local_get(22); local_get(21); i32_ge_s; br_if(1);
-            local_get(18); i32_const(string_data_off() as i32); i32_add; local_get(16); i32_add;
-            local_get(20); local_get(22); i32_add; i32_load8_u(0);
+            local_get(Local(22)); local_get(Local(21)); i32_ge_s; br_if(1);
+            local_get(Local(18)); i32_const(Imm32(string_data_off() as i32)); i32_add; local_get(Local(16)); i32_add;
+            local_get(Local(20)); local_get(Local(22)); i32_add; i32_load8_u(0);
             i32_store8(0);
-            local_get(16); i32_const(1); i32_add; local_set(16);
-            local_get(22); i32_const(1); i32_add; local_set(22);
+            local_get(Local(16)); i32_const(Imm32(1)); i32_add; local_set(Local(16));
+            local_get(Local(22)); i32_const(Imm32(1)); i32_add; local_set(Local(22));
             br(0);
           end; end;
         else_;
-          local_get(7); local_get(21); i32_ge_s;
+          local_get(Local(7)); local_get(Local(21)); i32_ge_s;
           if_empty;
             // digits then (k-m) zeros then ".0"
-            i32_const(0); local_set(22);
+            i32_const(Imm32(0)); local_set(Local(22));
             block_empty; loop_empty;
-              local_get(22); local_get(21); i32_ge_s; br_if(1);
-              local_get(18); i32_const(string_data_off() as i32); i32_add; local_get(16); i32_add;
-              local_get(20); local_get(22); i32_add; i32_load8_u(0);
+              local_get(Local(22)); local_get(Local(21)); i32_ge_s; br_if(1);
+              local_get(Local(18)); i32_const(Imm32(string_data_off() as i32)); i32_add; local_get(Local(16)); i32_add;
+              local_get(Local(20)); local_get(Local(22)); i32_add; i32_load8_u(0);
               i32_store8(0);
-              local_get(16); i32_const(1); i32_add; local_set(16);
-              local_get(22); i32_const(1); i32_add; local_set(22);
+              local_get(Local(16)); i32_const(Imm32(1)); i32_add; local_set(Local(16));
+              local_get(Local(22)); i32_const(Imm32(1)); i32_add; local_set(Local(22));
               br(0);
             end; end;
             // (k - m) zeros
-            i32_const(0); local_set(22);
+            i32_const(Imm32(0)); local_set(Local(22));
             block_empty; loop_empty;
-              local_get(22); local_get(7); local_get(21); i32_sub; i32_ge_s; br_if(1);
-              local_get(18); i32_const(string_data_off() as i32); i32_add; local_get(16); i32_add;
-              i32_const(ASCII_ZERO); i32_store8(0);
-              local_get(16); i32_const(1); i32_add; local_set(16);
-              local_get(22); i32_const(1); i32_add; local_set(22);
+              local_get(Local(22)); local_get(Local(7)); local_get(Local(21)); i32_sub; i32_ge_s; br_if(1);
+              local_get(Local(18)); i32_const(Imm32(string_data_off() as i32)); i32_add; local_get(Local(16)); i32_add;
+              i32_const(Imm32(ASCII_ZERO)); i32_store8(0);
+              local_get(Local(16)); i32_const(Imm32(1)); i32_add; local_set(Local(16));
+              local_get(Local(22)); i32_const(Imm32(1)); i32_add; local_set(Local(22));
               br(0);
             end; end;
             // ".0"
-            local_get(18); i32_const(string_data_off() as i32); i32_add; local_get(16); i32_add;
-            i32_const(ASCII_DOT); i32_store8(0);
-            local_get(16); i32_const(1); i32_add; local_set(16);
-            local_get(18); i32_const(string_data_off() as i32); i32_add; local_get(16); i32_add;
-            i32_const(ASCII_ZERO); i32_store8(0);
-            local_get(16); i32_const(1); i32_add; local_set(16);
+            local_get(Local(18)); i32_const(Imm32(string_data_off() as i32)); i32_add; local_get(Local(16)); i32_add;
+            i32_const(Imm32(ASCII_DOT)); i32_store8(0);
+            local_get(Local(16)); i32_const(Imm32(1)); i32_add; local_set(Local(16));
+            local_get(Local(18)); i32_const(Imm32(string_data_off() as i32)); i32_add; local_get(Local(16)); i32_add;
+            i32_const(Imm32(ASCII_ZERO)); i32_store8(0);
+            local_get(Local(16)); i32_const(Imm32(1)); i32_add; local_set(Local(16));
           else_;
             // digits[0..k] "." digits[k..m]
-            i32_const(0); local_set(22);
+            i32_const(Imm32(0)); local_set(Local(22));
             block_empty; loop_empty;
-              local_get(22); local_get(7); i32_ge_s; br_if(1);
-              local_get(18); i32_const(string_data_off() as i32); i32_add; local_get(16); i32_add;
-              local_get(20); local_get(22); i32_add; i32_load8_u(0);
+              local_get(Local(22)); local_get(Local(7)); i32_ge_s; br_if(1);
+              local_get(Local(18)); i32_const(Imm32(string_data_off() as i32)); i32_add; local_get(Local(16)); i32_add;
+              local_get(Local(20)); local_get(Local(22)); i32_add; i32_load8_u(0);
               i32_store8(0);
-              local_get(16); i32_const(1); i32_add; local_set(16);
-              local_get(22); i32_const(1); i32_add; local_set(22);
+              local_get(Local(16)); i32_const(Imm32(1)); i32_add; local_set(Local(16));
+              local_get(Local(22)); i32_const(Imm32(1)); i32_add; local_set(Local(22));
               br(0);
             end; end;
-            local_get(18); i32_const(string_data_off() as i32); i32_add; local_get(16); i32_add;
-            i32_const(ASCII_DOT); i32_store8(0);
-            local_get(16); i32_const(1); i32_add; local_set(16);
+            local_get(Local(18)); i32_const(Imm32(string_data_off() as i32)); i32_add; local_get(Local(16)); i32_add;
+            i32_const(Imm32(ASCII_DOT)); i32_store8(0);
+            local_get(Local(16)); i32_const(Imm32(1)); i32_add; local_set(Local(16));
             // digits[k..m]  (continue from local 22 = k)
             block_empty; loop_empty;
-              local_get(22); local_get(21); i32_ge_s; br_if(1);
-              local_get(18); i32_const(string_data_off() as i32); i32_add; local_get(16); i32_add;
-              local_get(20); local_get(22); i32_add; i32_load8_u(0);
+              local_get(Local(22)); local_get(Local(21)); i32_ge_s; br_if(1);
+              local_get(Local(18)); i32_const(Imm32(string_data_off() as i32)); i32_add; local_get(Local(16)); i32_add;
+              local_get(Local(20)); local_get(Local(22)); i32_add; i32_load8_u(0);
               i32_store8(0);
-              local_get(16); i32_const(1); i32_add; local_set(16);
-              local_get(22); i32_const(1); i32_add; local_set(22);
+              local_get(Local(16)); i32_const(Imm32(1)); i32_add; local_set(Local(16));
+              local_get(Local(22)); i32_const(Imm32(1)); i32_add; local_set(Local(22));
               br(0);
             end; end;
           end;
         end;
     });
 
-    wasm!(f, { local_get(18); end; });
+    wasm!(f, { local_get(Local(18)); end; });
     emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.float_to_string, type_idx, f));
 }
 
@@ -1064,54 +1065,54 @@ pub(super) fn compile_float_to_fixed(emitter: &mut WasmEmitter) {
 
     // bits = reinterpret(f); n = clamp(decimals, 0, ..)
     wasm!(f, {
-        local_get(0); i64_reinterpret_f64; local_set(BITS);
-        local_get(1); i32_wrap_i64; local_set(N);
-        local_get(N); i32_const(0); i32_lt_s; if_empty; i32_const(0); local_set(N); end;
+        local_get(Local(0)); i64_reinterpret_f64; local_set(Local(BITS));
+        local_get(Local(1)); i32_wrap_i64; local_set(Local(N));
+        local_get(Local(N)); i32_const(Imm32(0)); i32_lt_s; if_empty; i32_const(Imm32(0)); local_set(Local(N)); end;
     });
 
     // NaN / inf special cases (raw exp == 0x7FF).
     wasm!(f, {
-        local_get(BITS); i64_const(F64_MANTISSA_BITS); i64_shr_u; i32_wrap_i64; i32_const(F64_EXP_MASK); i32_and; local_set(RAW_EXP);
-        local_get(BITS); i64_const(F64_MANT_MASK); i64_and; local_set(RAW_MANT);
-        local_get(RAW_EXP); i32_const(F64_EXP_MASK); i32_eq;
+        local_get(Local(BITS)); i64_const(Imm64(F64_MANTISSA_BITS)); i64_shr_u; i32_wrap_i64; i32_const(Imm32(F64_EXP_MASK)); i32_and; local_set(Local(RAW_EXP));
+        local_get(Local(BITS)); i64_const(Imm64(F64_MANT_MASK)); i64_and; local_set(Local(RAW_MANT));
+        local_get(Local(RAW_EXP)); i32_const(Imm32(F64_EXP_MASK)); i32_eq;
         if_empty;
-            local_get(RAW_MANT); i64_eqz; i32_eqz;
-            if_empty; i32_const(s_nan as i32); return_; end;
-            local_get(BITS); i64_const(0); i64_lt_s;
-            if_i32; i32_const(s_ninf as i32); else_; i32_const(s_inf as i32); end;
+            local_get(Local(RAW_MANT)); i64_eqz; i32_eqz;
+            if_empty; i32_const(Imm32(s_nan as i32)); return_; end;
+            local_get(Local(BITS)); i64_const(Imm64(0)); i64_lt_s;
+            if_i32; i32_const(Imm32(s_ninf as i32)); else_; i32_const(Imm32(s_inf as i32)); end;
             return_;
         end;
     });
 
     // neg = sign bit; work with |f| bits.
     wasm!(f, {
-        local_get(BITS); i64_const(0); i64_lt_s; local_set(NEG);
-        local_get(BITS); i64_const(F64_ABS_MASK); i64_and; local_set(BITS);
-        local_get(BITS); i64_const(F64_MANTISSA_BITS); i64_shr_u; i32_wrap_i64; i32_const(F64_EXP_MASK); i32_and; local_set(RAW_EXP);
-        local_get(BITS); i64_const(F64_MANT_MASK); i64_and; local_set(RAW_MANT);
+        local_get(Local(BITS)); i64_const(Imm64(0)); i64_lt_s; local_set(Local(NEG));
+        local_get(Local(BITS)); i64_const(Imm64(F64_ABS_MASK)); i64_and; local_set(Local(BITS));
+        local_get(Local(BITS)); i64_const(Imm64(F64_MANTISSA_BITS)); i64_shr_u; i32_wrap_i64; i32_const(Imm32(F64_EXP_MASK)); i32_and; local_set(Local(RAW_EXP));
+        local_get(Local(BITS)); i64_const(Imm64(F64_MANT_MASK)); i64_and; local_set(Local(RAW_MANT));
     });
 
     // Decompose: subnormal (raw_exp==0): mant=raw_mant, e=-1074; else mant=raw_mant+2^52, e=raw_exp-1075.
     wasm!(f, {
-        local_get(RAW_EXP); i32_eqz;
+        local_get(Local(RAW_EXP)); i32_eqz;
         if_empty;
-            local_get(RAW_MANT); local_set(MANT);
-            i32_const(F64_SUBNORMAL_EXP); local_set(E);
+            local_get(Local(RAW_MANT)); local_set(Local(MANT));
+            i32_const(Imm32(F64_SUBNORMAL_EXP)); local_set(Local(E));
         else_;
-            local_get(RAW_MANT); i64_const(F64_IMPLICIT_BIT); i64_add; local_set(MANT);
-            local_get(RAW_EXP); i32_const(F64_EXP_BIAS_OFFSET); i32_sub; local_set(E);
+            local_get(Local(RAW_MANT)); i64_const(Imm64(F64_IMPLICIT_BIT)); i64_add; local_set(Local(MANT));
+            local_get(Local(RAW_EXP)); i32_const(Imm32(F64_EXP_BIAS_OFFSET)); i32_sub; local_set(Local(E));
         end;
     });
 
     // Allocate the Dragon4 scratch block (we use only R, S, TMP).
     wasm!(f, {
-        i32_const(SCRATCH_BYTES as i32); call(emitter.rt.alloc); local_set(BASE);
+        i32_const(Imm32(SCRATCH_BYTES as i32)); call(emitter.rt.alloc); local_set(Local(BASE));
         // Digit buffer: up to ~310 integer digits + n fraction digits + slack (for a
         // round-up carry that prepends one leading digit). The generation loop stops
         // producing significant digits once R hits 0, so n only sizes the buffer.
-        i32_const(MAX_INT_DIGITS); local_get(N); i32_add; i32_const(DIGIT_BUF_SLACK); i32_add; call(emitter.rt.alloc); local_set(DP);
-        i32_const(0); local_set(DLEN);
-        i32_const(0); local_set(K);
+        i32_const(Imm32(MAX_INT_DIGITS)); local_get(Local(N)); i32_add; i32_const(Imm32(DIGIT_BUF_SLACK)); i32_add; call(emitter.rt.alloc); local_set(Local(DP));
+        i32_const(Imm32(0)); local_set(Local(DLEN));
+        i32_const(Imm32(0)); local_set(Local(K));
     });
     // base must be in local 1 for DragonRefs.ptr; alias via a copy is impossible
     // (ptr() hardcodes local_get(1)). So we keep base in BASE and patch ptr via a
@@ -1124,43 +1125,43 @@ pub(super) fn compile_float_to_fixed(emitter: &mut WasmEmitter) {
     set_bn_u64(&mut f, BASE, OFF_R, MANT);
     set_bn_small(&mut f, BASE, OFF_S, 1);
     wasm!(f, {
-        local_get(E); i32_const(0); i32_ge_s;
+        local_get(Local(E)); i32_const(Imm32(0)); i32_ge_s;
         if_empty;
             // e >= 0: R <<= e ; S = 1
-            local_get(BASE); i32_const(OFF_R as i32); i32_add; local_get(E); call(dr.shl);
+            local_get(Local(BASE)); i32_const(Imm32(OFF_R as i32)); i32_add; local_get(Local(E)); call(dr.shl);
         else_;
             // e < 0: S <<= (-e)
-            local_get(BASE); i32_const(OFF_S as i32); i32_add; i32_const(0); local_get(E); i32_sub; call(dr.shl);
+            local_get(Local(BASE)); i32_const(Imm32(OFF_S as i32)); i32_add; i32_const(Imm32(0)); local_get(Local(E)); i32_sub; call(dr.shl);
         end;
     });
 
     // ── Position: scale so value/10^k ∈ [0.1, 1), tracking k ──
     // if value == 0 (mant == 0): k stays 0, R stays 0 → all digits zero.
     wasm!(f, {
-        local_get(MANT); i64_eqz; i32_eqz;
+        local_get(Local(MANT)); i64_eqz; i32_eqz;
         if_empty;
             // value >= 1 ?  cmp(R, S) >= 0
-            local_get(BASE); i32_const(OFF_R as i32); i32_add; local_get(BASE); i32_const(OFF_S as i32); i32_add; call(dr.cmp);
-            i32_const(0); i32_ge_s;
+            local_get(Local(BASE)); i32_const(Imm32(OFF_R as i32)); i32_add; local_get(Local(BASE)); i32_const(Imm32(OFF_S as i32)); i32_add; call(dr.cmp);
+            i32_const(Imm32(0)); i32_ge_s;
             if_empty;
                 // while cmp(R, S) >= 0 { S *= 10; k++ }
                 block_empty; loop_empty;
-                    local_get(BASE); i32_const(OFF_R as i32); i32_add; local_get(BASE); i32_const(OFF_S as i32); i32_add; call(dr.cmp);
-                    i32_const(0); i32_lt_s; br_if(1);
-                    local_get(BASE); i32_const(OFF_S as i32); i32_add; i32_const(DECIMAL_BASE); call(dr.mul_small);
-                    local_get(K); i32_const(1); i32_add; local_set(K);
+                    local_get(Local(BASE)); i32_const(Imm32(OFF_R as i32)); i32_add; local_get(Local(BASE)); i32_const(Imm32(OFF_S as i32)); i32_add; call(dr.cmp);
+                    i32_const(Imm32(0)); i32_lt_s; br_if(1);
+                    local_get(Local(BASE)); i32_const(Imm32(OFF_S as i32)); i32_add; i32_const(Imm32(DECIMAL_BASE)); call(dr.mul_small);
+                    local_get(Local(K)); i32_const(Imm32(1)); i32_add; local_set(Local(K));
                     br(0);
                 end; end;
             else_;
                 // while cmp(R*10, S) < 0 { R *= 10; k-- }
                 block_empty; loop_empty;
                     // TMP = R; TMP *= 10; cmp(TMP, S) >= 0 → stop
-                    local_get(BASE); i32_const(OFF_TMP as i32); i32_add; local_get(BASE); i32_const(OFF_R as i32); i32_add; call(dr.copy);
-                    local_get(BASE); i32_const(OFF_TMP as i32); i32_add; i32_const(DECIMAL_BASE); call(dr.mul_small);
-                    local_get(BASE); i32_const(OFF_TMP as i32); i32_add; local_get(BASE); i32_const(OFF_S as i32); i32_add; call(dr.cmp);
-                    i32_const(0); i32_ge_s; br_if(1);
-                    local_get(BASE); i32_const(OFF_R as i32); i32_add; i32_const(DECIMAL_BASE); call(dr.mul_small);
-                    local_get(K); i32_const(1); i32_sub; local_set(K);
+                    local_get(Local(BASE)); i32_const(Imm32(OFF_TMP as i32)); i32_add; local_get(Local(BASE)); i32_const(Imm32(OFF_R as i32)); i32_add; call(dr.copy);
+                    local_get(Local(BASE)); i32_const(Imm32(OFF_TMP as i32)); i32_add; i32_const(Imm32(DECIMAL_BASE)); call(dr.mul_small);
+                    local_get(Local(BASE)); i32_const(Imm32(OFF_TMP as i32)); i32_add; local_get(Local(BASE)); i32_const(Imm32(OFF_S as i32)); i32_add; call(dr.cmp);
+                    i32_const(Imm32(0)); i32_ge_s; br_if(1);
+                    local_get(Local(BASE)); i32_const(Imm32(OFF_R as i32)); i32_add; i32_const(Imm32(DECIMAL_BASE)); call(dr.mul_small);
+                    local_get(Local(K)); i32_const(Imm32(1)); i32_sub; local_set(Local(K));
                     br(0);
                 end; end;
             end;
@@ -1175,12 +1176,12 @@ pub(super) fn compile_float_to_fixed(emitter: &mut WasmEmitter) {
     //   start = max(-k,0)    leading-zero slots before the first significant digit
     //                        (only when k<=0; = total - max(cnt,0)).
     wasm!(f, {
-        local_get(K); local_get(N); i32_add; local_set(CNT);
-        local_get(K); i32_const(0); i32_gt_s; if_i32; local_get(K); else_; i32_const(0); end;
-        local_get(N); i32_add; local_set(TOTAL);
-        i32_const(0); local_get(K); i32_sub; i32_const(0); i32_gt_s;
-        if_i32; i32_const(0); local_get(K); i32_sub; else_; i32_const(0); end;
-        local_set(START);
+        local_get(Local(K)); local_get(Local(N)); i32_add; local_set(Local(CNT));
+        local_get(Local(K)); i32_const(Imm32(0)); i32_gt_s; if_i32; local_get(Local(K)); else_; i32_const(Imm32(0)); end;
+        local_get(Local(N)); i32_add; local_set(Local(TOTAL));
+        i32_const(Imm32(0)); local_get(Local(K)); i32_sub; i32_const(Imm32(0)); i32_gt_s;
+        if_i32; i32_const(Imm32(0)); local_get(Local(K)); i32_sub; else_; i32_const(Imm32(0)); end;
+        local_set(Local(START));
     });
 
     // ── Generate `total` digit slots ──
@@ -1188,39 +1189,39 @@ pub(super) fn compile_float_to_fixed(emitter: &mut WasmEmitter) {
     //   R != 0        : R*=10; d = floor(R/S) via repeated subtraction; R -= d*S
     //   R == 0        : the exact expansion has ended → digit 0 (no bignum work)
     wasm!(f, {
-        i32_const(0); local_set(DLEN);
-        i32_const(0); local_set(I);
+        i32_const(Imm32(0)); local_set(Local(DLEN));
+        i32_const(Imm32(0)); local_set(Local(I));
         block_empty; loop_empty;
-            local_get(I); local_get(TOTAL); i32_ge_s; br_if(1);
-            local_get(I); local_get(START); i32_lt_s;
+            local_get(Local(I)); local_get(Local(TOTAL)); i32_ge_s; br_if(1);
+            local_get(Local(I)); local_get(Local(START)); i32_lt_s;
             if_empty;
                 // leading-zero slot (only when k <= 0): digit is 0, no bignum work.
-                i32_const(0); local_set(D);
+                i32_const(Imm32(0)); local_set(Local(D));
             else_;
                 // Once R has been driven to 0, the EXACT expansion has ended and every
                 // remaining digit is 0 — skip the bignum work. R is zero iff its len is
                 // 1 and limb0 is 0. (This replaces a digit-count cap: it is exact and
                 // bounds the work to the real expansion regardless of how large N is.)
-                local_get(BASE); i32_const(OFF_R as i32); i32_add; i32_load(0); i32_const(1); i32_eq;
-                local_get(BASE); i32_const((OFF_R + BN_HDR) as i32); i32_add; i32_load(0); i32_eqz;
+                local_get(Local(BASE)); i32_const(Imm32(OFF_R as i32)); i32_add; i32_load(0); i32_const(Imm32(1)); i32_eq;
+                local_get(Local(BASE)); i32_const(Imm32((OFF_R + BN_HDR) as i32)); i32_add; i32_load(0); i32_eqz;
                 i32_and;
                 if_empty;
-                    i32_const(0); local_set(D);
+                    i32_const(Imm32(0)); local_set(Local(D));
                 else_;
-                    local_get(BASE); i32_const(OFF_R as i32); i32_add; i32_const(DECIMAL_BASE); call(dr.mul_small);
-                    i32_const(0); local_set(D);
+                    local_get(Local(BASE)); i32_const(Imm32(OFF_R as i32)); i32_add; i32_const(Imm32(DECIMAL_BASE)); call(dr.mul_small);
+                    i32_const(Imm32(0)); local_set(Local(D));
                     block_empty; loop_empty;
-                        local_get(BASE); i32_const(OFF_R as i32); i32_add; local_get(BASE); i32_const(OFF_S as i32); i32_add; call(dr.cmp);
-                        i32_const(0); i32_lt_s; br_if(1);
-                        local_get(BASE); i32_const(OFF_R as i32); i32_add; local_get(BASE); i32_const(OFF_S as i32); i32_add; call(dr.sub);
-                        local_get(D); i32_const(1); i32_add; local_set(D);
+                        local_get(Local(BASE)); i32_const(Imm32(OFF_R as i32)); i32_add; local_get(Local(BASE)); i32_const(Imm32(OFF_S as i32)); i32_add; call(dr.cmp);
+                        i32_const(Imm32(0)); i32_lt_s; br_if(1);
+                        local_get(Local(BASE)); i32_const(Imm32(OFF_R as i32)); i32_add; local_get(Local(BASE)); i32_const(Imm32(OFF_S as i32)); i32_add; call(dr.sub);
+                        local_get(Local(D)); i32_const(Imm32(1)); i32_add; local_set(Local(D));
                         br(0);
                     end; end;
                 end;
             end;
-            local_get(DP); local_get(DLEN); i32_add; local_get(D); i32_const(ASCII_ZERO); i32_add; i32_store8(0);
-            local_get(DLEN); i32_const(1); i32_add; local_set(DLEN);
-            local_get(I); i32_const(1); i32_add; local_set(I);
+            local_get(Local(DP)); local_get(Local(DLEN)); i32_add; local_get(Local(D)); i32_const(Imm32(ASCII_ZERO)); i32_add; i32_store8(0);
+            local_get(Local(DLEN)); i32_const(Imm32(1)); i32_add; local_set(Local(DLEN));
+            local_get(Local(I)); i32_const(Imm32(1)); i32_add; local_set(Local(I));
             br(0);
         end; end;
     });
@@ -1231,38 +1232,38 @@ pub(super) fn compile_float_to_fixed(emitter: &mut WasmEmitter) {
     // comparison is taken at position -n. (When cnt > 0, R is already the residue
     // below -n and -cnt <= 0, so no scaling.) Tie breaks to even via the last slot.
     wasm!(f, {
-        local_get(CNT); i32_const(0); i32_lt_s;
+        local_get(Local(CNT)); i32_const(Imm32(0)); i32_lt_s;
         if_empty;
             // S *= 10, (-cnt) times.
-            i32_const(0); local_set(I);
+            i32_const(Imm32(0)); local_set(Local(I));
             block_empty; loop_empty;
-                local_get(I); i32_const(0); local_get(CNT); i32_sub; i32_ge_s; br_if(1);
-                local_get(BASE); i32_const(OFF_S as i32); i32_add; i32_const(DECIMAL_BASE); call(dr.mul_small);
-                local_get(I); i32_const(1); i32_add; local_set(I);
+                local_get(Local(I)); i32_const(Imm32(0)); local_get(Local(CNT)); i32_sub; i32_ge_s; br_if(1);
+                local_get(Local(BASE)); i32_const(Imm32(OFF_S as i32)); i32_add; i32_const(Imm32(DECIMAL_BASE)); call(dr.mul_small);
+                local_get(Local(I)); i32_const(Imm32(1)); i32_add; local_set(Local(I));
                 br(0);
             end; end;
         end;
         // TMP = 2R; cmp(TMP, S).
-        local_get(BASE); i32_const(OFF_TMP as i32); i32_add; local_get(BASE); i32_const(OFF_R as i32); i32_add; call(dr.copy);
-        local_get(BASE); i32_const(OFF_TMP as i32); i32_add; i32_const(1); call(dr.shl);
-        local_get(BASE); i32_const(OFF_TMP as i32); i32_add; local_get(BASE); i32_const(OFF_S as i32); i32_add; call(dr.cmp);
-        local_set(D);
-        i32_const(0); local_set(ROUND);
-        local_get(D); i32_const(0); i32_gt_s;
+        local_get(Local(BASE)); i32_const(Imm32(OFF_TMP as i32)); i32_add; local_get(Local(BASE)); i32_const(Imm32(OFF_R as i32)); i32_add; call(dr.copy);
+        local_get(Local(BASE)); i32_const(Imm32(OFF_TMP as i32)); i32_add; i32_const(Imm32(1)); call(dr.shl);
+        local_get(Local(BASE)); i32_const(Imm32(OFF_TMP as i32)); i32_add; local_get(Local(BASE)); i32_const(Imm32(OFF_S as i32)); i32_add; call(dr.cmp);
+        local_set(Local(D));
+        i32_const(Imm32(0)); local_set(Local(ROUND));
+        local_get(Local(D)); i32_const(Imm32(0)); i32_gt_s;
         if_empty;
-            i32_const(1); local_set(ROUND);                  // 2R > S → up
+            i32_const(Imm32(1)); local_set(Local(ROUND));                  // 2R > S → up
         else_;
-            local_get(D); i32_eqz;
+            local_get(Local(D)); i32_eqz;
             if_empty;
                 // exact half: round to even — up iff the last slot's digit is odd.
                 // (total >= n >= 0; when total == 0, n == 0 and k <= 0, the units digit
                 // is the implicit '0' → even → keep.)
-                local_get(TOTAL); i32_eqz;
+                local_get(Local(TOTAL)); i32_eqz;
                 if_empty;
-                    i32_const(0); local_set(ROUND);
+                    i32_const(Imm32(0)); local_set(Local(ROUND));
                 else_;
-                    local_get(DP); local_get(TOTAL); i32_const(1); i32_sub; i32_add; i32_load8_u(0);
-                    i32_const(1); i32_and; local_set(ROUND);
+                    local_get(Local(DP)); local_get(Local(TOTAL)); i32_const(Imm32(1)); i32_sub; i32_add; i32_load8_u(0);
+                    i32_const(Imm32(1)); i32_and; local_set(Local(ROUND));
                 end;
             end;
         end;
@@ -1270,28 +1271,28 @@ pub(super) fn compile_float_to_fixed(emitter: &mut WasmEmitter) {
 
     // ── Apply round-up carry over digits[0..total]; overflow prepends '1', k++. ──
     wasm!(f, {
-        local_get(ROUND);
+        local_get(Local(ROUND));
         if_empty;
-            local_get(TOTAL); local_set(I);
+            local_get(Local(TOTAL)); local_set(Local(I));
             block_empty; loop_empty;
-                local_get(I); i32_eqz;
+                local_get(Local(I)); i32_eqz;
                 if_empty;
                     // carry out of the most-significant slot: shift right by 1, set
                     // digits[0]='1', total++, k++ (a new leading integer digit).
-                    local_get(DP); i32_const(1); i32_add; local_get(DP); local_get(TOTAL); memory_copy;
-                    local_get(DP); i32_const(ASCII_ONE); i32_store8(0);
-                    local_get(TOTAL); i32_const(1); i32_add; local_set(TOTAL);
-                    local_get(K); i32_const(1); i32_add; local_set(K);
+                    local_get(Local(DP)); i32_const(Imm32(1)); i32_add; local_get(Local(DP)); local_get(Local(TOTAL)); memory_copy;
+                    local_get(Local(DP)); i32_const(Imm32(ASCII_ONE)); i32_store8(0);
+                    local_get(Local(TOTAL)); i32_const(Imm32(1)); i32_add; local_set(Local(TOTAL));
+                    local_get(Local(K)); i32_const(Imm32(1)); i32_add; local_set(Local(K));
                     br(2);
                 end;
-                local_get(I); i32_const(1); i32_sub; local_set(I);
-                local_get(DP); local_get(I); i32_add; i32_load8_u(0); i32_const(ASCII_NINE); i32_eq;
+                local_get(Local(I)); i32_const(Imm32(1)); i32_sub; local_set(Local(I));
+                local_get(Local(DP)); local_get(Local(I)); i32_add; i32_load8_u(0); i32_const(Imm32(ASCII_NINE)); i32_eq;
                 if_empty;
-                    local_get(DP); local_get(I); i32_add; i32_const(ASCII_ZERO); i32_store8(0);
+                    local_get(Local(DP)); local_get(Local(I)); i32_add; i32_const(Imm32(ASCII_ZERO)); i32_store8(0);
                     br(1);
                 else_;
-                    local_get(DP); local_get(I); i32_add;
-                    local_get(DP); local_get(I); i32_add; i32_load8_u(0); i32_const(1); i32_add;
+                    local_get(Local(DP)); local_get(Local(I)); i32_add;
+                    local_get(Local(DP)); local_get(Local(I)); i32_add; i32_load8_u(0); i32_const(Imm32(1)); i32_add;
                     i32_store8(0);
                     br(2);
                 end;
@@ -1309,97 +1310,97 @@ pub(super) fn compile_float_to_fixed(emitter: &mut WasmEmitter) {
     // Note dlen == (k>0 ? k : 0) + n after carry handling.
     wasm!(f, {
         // out_len = neg + body
-        local_get(NEG);
-        local_get(K); i32_const(0); i32_le_s;
+        local_get(Local(NEG));
+        local_get(Local(K)); i32_const(Imm32(0)); i32_le_s;
         if_i32;
             // 2 ("0.") + (-k) + (k+n) == 2 + n ; but if n==0 then k<=0 means value<1 rounded:
             // Rust prints "0" with no point when n==0 and value<1 (e.g. 0.5@0="0").
-            local_get(N); i32_eqz;
+            local_get(Local(N)); i32_eqz;
             if_i32;
-                i32_const(1);                 // just "0"
+                i32_const(Imm32(1));                 // just "0"
             else_;
-                i32_const(ZERO_DOT_LEN); local_get(N); i32_add;   // "0." + n frac
+                i32_const(Imm32(ZERO_DOT_LEN)); local_get(Local(N)); i32_add;   // "0." + n frac
             end;
         else_;
-            local_get(N); i32_eqz;
+            local_get(Local(N)); i32_eqz;
             if_i32;
-                local_get(K);                 // k integer digits
+                local_get(Local(K));                 // k integer digits
             else_;
-                local_get(K); i32_const(1); i32_add; local_get(N); i32_add;  // k + "." + n
+                local_get(Local(K)); i32_const(Imm32(1)); i32_add; local_get(Local(N)); i32_add;  // k + "." + n
             end;
         end;
-        i32_add; local_set(OUT_LEN);
+        i32_add; local_set(Local(OUT_LEN));
     });
 
     // alloc string [len][cap][data...]
     wasm!(f, {
-        local_get(OUT_LEN); i32_const(string_hdr() as i32); i32_add;
-        call(emitter.rt.alloc); local_set(RESULT);
-        local_get(RESULT); local_get(OUT_LEN); i32_store(0);
-        local_get(RESULT); local_get(OUT_LEN); i32_store(string_cap_off() as u32, 0);
-        i32_const(0); local_set(CURSOR);
+        local_get(Local(OUT_LEN)); i32_const(Imm32(string_hdr() as i32)); i32_add;
+        call(emitter.rt.alloc); local_set(Local(RESULT));
+        local_get(Local(RESULT)); local_get(Local(OUT_LEN)); i32_store(0);
+        local_get(Local(RESULT)); local_get(Local(OUT_LEN)); i32_store(string_cap_off() as u32, 0);
+        i32_const(Imm32(0)); local_set(Local(CURSOR));
         // sign
-        local_get(NEG);
+        local_get(Local(NEG));
         if_empty;
-            local_get(RESULT); i32_const(string_data_off() as i32); i32_add; local_get(CURSOR); i32_add; i32_const(ASCII_MINUS); i32_store8(0);
-            local_get(CURSOR); i32_const(1); i32_add; local_set(CURSOR);
+            local_get(Local(RESULT)); i32_const(Imm32(string_data_off() as i32)); i32_add; local_get(Local(CURSOR)); i32_add; i32_const(Imm32(ASCII_MINUS)); i32_store8(0);
+            local_get(Local(CURSOR)); i32_const(Imm32(1)); i32_add; local_set(Local(CURSOR));
         end;
     });
 
     // branch on k
     wasm!(f, {
-        local_get(K); i32_const(0); i32_le_s;
+        local_get(Local(K)); i32_const(Imm32(0)); i32_le_s;
         if_empty;
             // value < 1 (after rounding). If n == 0 → just "0".
-            local_get(RESULT); i32_const(string_data_off() as i32); i32_add; local_get(CURSOR); i32_add; i32_const(ASCII_ZERO); i32_store8(0);
-            local_get(CURSOR); i32_const(1); i32_add; local_set(CURSOR);
-            local_get(N); i32_eqz;
+            local_get(Local(RESULT)); i32_const(Imm32(string_data_off() as i32)); i32_add; local_get(Local(CURSOR)); i32_add; i32_const(Imm32(ASCII_ZERO)); i32_store8(0);
+            local_get(Local(CURSOR)); i32_const(Imm32(1)); i32_add; local_set(Local(CURSOR));
+            local_get(Local(N)); i32_eqz;
             if_empty;
                 // done: just "0"
             else_;
                 // '.' then all `total`(==n) fraction digits — the leading zeros are
                 // already materialized in the buffer, so this is a straight copy.
-                local_get(RESULT); i32_const(string_data_off() as i32); i32_add; local_get(CURSOR); i32_add; i32_const(ASCII_DOT); i32_store8(0);
-                local_get(CURSOR); i32_const(1); i32_add; local_set(CURSOR);
-                i32_const(0); local_set(I);
+                local_get(Local(RESULT)); i32_const(Imm32(string_data_off() as i32)); i32_add; local_get(Local(CURSOR)); i32_add; i32_const(Imm32(ASCII_DOT)); i32_store8(0);
+                local_get(Local(CURSOR)); i32_const(Imm32(1)); i32_add; local_set(Local(CURSOR));
+                i32_const(Imm32(0)); local_set(Local(I));
                 block_empty; loop_empty;
-                    local_get(I); local_get(TOTAL); i32_ge_s; br_if(1);
-                    local_get(RESULT); i32_const(string_data_off() as i32); i32_add; local_get(CURSOR); i32_add;
-                    local_get(DP); local_get(I); i32_add; i32_load8_u(0); i32_store8(0);
-                    local_get(CURSOR); i32_const(1); i32_add; local_set(CURSOR);
-                    local_get(I); i32_const(1); i32_add; local_set(I);
+                    local_get(Local(I)); local_get(Local(TOTAL)); i32_ge_s; br_if(1);
+                    local_get(Local(RESULT)); i32_const(Imm32(string_data_off() as i32)); i32_add; local_get(Local(CURSOR)); i32_add;
+                    local_get(Local(DP)); local_get(Local(I)); i32_add; i32_load8_u(0); i32_store8(0);
+                    local_get(Local(CURSOR)); i32_const(Imm32(1)); i32_add; local_set(Local(CURSOR));
+                    local_get(Local(I)); i32_const(Imm32(1)); i32_add; local_set(Local(I));
                     br(0);
                 end; end;
             end;
         else_;
             // value >= 1: k integer digits = digits[0..k], then (n>0) "." + digits[k..k+n]
-            i32_const(0); local_set(I);
+            i32_const(Imm32(0)); local_set(Local(I));
             block_empty; loop_empty;
-                local_get(I); local_get(K); i32_ge_s; br_if(1);
-                local_get(RESULT); i32_const(string_data_off() as i32); i32_add; local_get(CURSOR); i32_add;
-                local_get(DP); local_get(I); i32_add; i32_load8_u(0); i32_store8(0);
-                local_get(CURSOR); i32_const(1); i32_add; local_set(CURSOR);
-                local_get(I); i32_const(1); i32_add; local_set(I);
+                local_get(Local(I)); local_get(Local(K)); i32_ge_s; br_if(1);
+                local_get(Local(RESULT)); i32_const(Imm32(string_data_off() as i32)); i32_add; local_get(Local(CURSOR)); i32_add;
+                local_get(Local(DP)); local_get(Local(I)); i32_add; i32_load8_u(0); i32_store8(0);
+                local_get(Local(CURSOR)); i32_const(Imm32(1)); i32_add; local_set(Local(CURSOR));
+                local_get(Local(I)); i32_const(Imm32(1)); i32_add; local_set(Local(I));
                 br(0);
             end; end;
-            local_get(N); i32_eqz;
+            local_get(Local(N)); i32_eqz;
             if_empty; else_;
-                local_get(RESULT); i32_const(string_data_off() as i32); i32_add; local_get(CURSOR); i32_add; i32_const(ASCII_DOT); i32_store8(0);
-                local_get(CURSOR); i32_const(1); i32_add; local_set(CURSOR);
+                local_get(Local(RESULT)); i32_const(Imm32(string_data_off() as i32)); i32_add; local_get(Local(CURSOR)); i32_add; i32_const(Imm32(ASCII_DOT)); i32_store8(0);
+                local_get(Local(CURSOR)); i32_const(Imm32(1)); i32_add; local_set(Local(CURSOR));
                 // digits[k .. total]  (I continues from k)
                 block_empty; loop_empty;
-                    local_get(I); local_get(TOTAL); i32_ge_s; br_if(1);
-                    local_get(RESULT); i32_const(string_data_off() as i32); i32_add; local_get(CURSOR); i32_add;
-                    local_get(DP); local_get(I); i32_add; i32_load8_u(0); i32_store8(0);
-                    local_get(CURSOR); i32_const(1); i32_add; local_set(CURSOR);
-                    local_get(I); i32_const(1); i32_add; local_set(I);
+                    local_get(Local(I)); local_get(Local(TOTAL)); i32_ge_s; br_if(1);
+                    local_get(Local(RESULT)); i32_const(Imm32(string_data_off() as i32)); i32_add; local_get(Local(CURSOR)); i32_add;
+                    local_get(Local(DP)); local_get(Local(I)); i32_add; i32_load8_u(0); i32_store8(0);
+                    local_get(Local(CURSOR)); i32_const(Imm32(1)); i32_add; local_set(Local(CURSOR));
+                    local_get(Local(I)); i32_const(Imm32(1)); i32_add; local_set(Local(I));
                     br(0);
                 end; end;
             end;
         end;
     });
 
-    wasm!(f, { local_get(RESULT); end; });
+    wasm!(f, { local_get(Local(RESULT)); end; });
     emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.float_to_fixed, type_idx, f));
 }
 
@@ -1408,18 +1409,18 @@ pub(super) fn compile_float_to_fixed(emitter: &mut WasmEmitter) {
 /// OTHER than 1 (to_fixed keeps it in BASE because local 1 is its `decimals` param).
 fn set_bn_u64(f: &mut Function, base: u32, off: u32, loc: u32) {
     wasm!(f, {
-        local_get(base); i32_const((off + BN_HDR) as i32); i32_add; local_get(loc); i32_wrap_i64; i32_store(0);
-        local_get(base); i32_const((off + BN_HDR + 4) as i32); i32_add; local_get(loc); i64_const(LIMB_BITS_I64); i64_shr_u; i32_wrap_i64; i32_store(0);
-        local_get(base); i32_const(off as i32); i32_add;
-        local_get(loc); i64_const(LIMB_BITS_I64); i64_shr_u; i64_eqz; if_i32; i32_const(1); else_; i32_const(BN_TWO_LIMBS); end;
+        local_get(Local(base)); i32_const(Imm32((off + BN_HDR) as i32)); i32_add; local_get(Local(loc)); i32_wrap_i64; i32_store(0);
+        local_get(Local(base)); i32_const(Imm32((off + BN_HDR + 4) as i32)); i32_add; local_get(Local(loc)); i64_const(Imm64(LIMB_BITS_I64)); i64_shr_u; i32_wrap_i64; i32_store(0);
+        local_get(Local(base)); i32_const(Imm32(off as i32)); i32_add;
+        local_get(Local(loc)); i64_const(Imm64(LIMB_BITS_I64)); i64_shr_u; i64_eqz; if_i32; i32_const(Imm32(1)); else_; i32_const(Imm32(BN_TWO_LIMBS)); end;
         i32_store(0);
     });
 }
 /// Set bignum at (base+off) to a small u32 constant (1 limb).
 fn set_bn_small(f: &mut Function, base: u32, off: u32, v: u32) {
     wasm!(f, {
-        local_get(base); i32_const(off as i32); i32_add; i32_const(1); i32_store(0);
-        local_get(base); i32_const((off + BN_HDR) as i32); i32_add; i32_const(v as i32); i32_store(0);
+        local_get(Local(base)); i32_const(Imm32(off as i32)); i32_add; i32_const(Imm32(1)); i32_store(0);
+        local_get(Local(base)); i32_const(Imm32((off + BN_HDR) as i32)); i32_add; i32_const(Imm32(v as i32)); i32_store(0);
     });
 }
 
@@ -1446,30 +1447,30 @@ impl DragonRefs {
     }
     // base ptr is in local 1; absolute ptr of bignum at offset `off` = base + off.
     fn ptr(&self, f: &mut Function, off: u32) {
-        wasm!(f, { local_get(1); i32_const(off as i32); i32_add; });
+        wasm!(f, { local_get(Local(1)); i32_const(Imm32(off as i32)); i32_add; });
     }
     /// bignum[off] = the i64 in local `loc` (split into two u32 limbs).
     fn set_u64(&self, f: &mut Function, off: u32, loc: u32) {
         // len: if hi != 0 -> 2 else 1
         wasm!(f, {
             // limb0 = (val & 0xFFFFFFFF)
-            local_get(1); i32_const((off + BN_HDR) as i32); i32_add;
-            local_get(loc); i32_wrap_i64; i32_store(0);
+            local_get(Local(1)); i32_const(Imm32((off + BN_HDR) as i32)); i32_add;
+            local_get(Local(loc)); i32_wrap_i64; i32_store(0);
             // limb1 = (val >> 32)
-            local_get(1); i32_const((off + BN_HDR + 4) as i32); i32_add;
-            local_get(loc); i64_const(LIMB_BITS_I64); i64_shr_u; i32_wrap_i64; i32_store(0);
+            local_get(Local(1)); i32_const(Imm32((off + BN_HDR + 4) as i32)); i32_add;
+            local_get(Local(loc)); i64_const(Imm64(LIMB_BITS_I64)); i64_shr_u; i32_wrap_i64; i32_store(0);
             // len = (hi != 0) ? 2 : 1
-            local_get(1); i32_const(off as i32); i32_add;
-            local_get(loc); i64_const(LIMB_BITS_I64); i64_shr_u; i64_eqz;
-            if_i32; i32_const(1); else_; i32_const(BN_TWO_LIMBS); end;
+            local_get(Local(1)); i32_const(Imm32(off as i32)); i32_add;
+            local_get(Local(loc)); i64_const(Imm64(LIMB_BITS_I64)); i64_shr_u; i64_eqz;
+            if_i32; i32_const(Imm32(1)); else_; i32_const(Imm32(BN_TWO_LIMBS)); end;
             i32_store(0);
         });
     }
     /// bignum[off] = small constant (1 limb).
     fn set_small(&self, f: &mut Function, off: u32, v: u32) {
         wasm!(f, {
-            local_get(1); i32_const(off as i32); i32_add; i32_const(1); i32_store(0); // len = 1
-            local_get(1); i32_const((off + BN_HDR) as i32); i32_add; i32_const(v as i32); i32_store(0);
+            local_get(Local(1)); i32_const(Imm32(off as i32)); i32_add; i32_const(Imm32(1)); i32_store(0); // len = 1
+            local_get(Local(1)); i32_const(Imm32((off + BN_HDR) as i32)); i32_add; i32_const(Imm32(v as i32)); i32_store(0);
         });
     }
     fn copy(&self, f: &mut Function, dst: u32, src: u32) {
@@ -1491,15 +1492,15 @@ impl DragonRefs {
     /// cmp(a, b) and store the -1/0/1 result into local 23 (`cmp_tmp`).
     fn cmp_set(&self, f: &mut Function, a: u32, b: u32) {
         self.cmp(f, a, b);
-        wasm!(f, { local_set(23); });
+        wasm!(f, { local_set(Local(23)); });
     }
     /// Push the boolean `even ? (cmp_tmp >= 0) : (cmp_tmp > 0)`.
     /// (Used where the rounding interval is closed for even mantissas: the
     /// "upper" predicate.)  = (c > 0) | (even & (c == 0)).
     fn pred_ge_gt(&self, f: &mut Function) {
         wasm!(f, {
-            local_get(23); i32_const(0); i32_gt_s;
-            local_get(8); local_get(23); i32_eqz; i32_and;
+            local_get(Local(23)); i32_const(Imm32(0)); i32_gt_s;
+            local_get(Local(8)); local_get(Local(23)); i32_eqz; i32_and;
             i32_or;
         });
     }
@@ -1507,34 +1508,34 @@ impl DragonRefs {
     /// (The "lower" predicate.)  = (c < 0) | (even & (c == 0)).
     fn pred_le_lt(&self, f: &mut Function) {
         wasm!(f, {
-            local_get(23); i32_const(0); i32_lt_s;
-            local_get(8); local_get(23); i32_eqz; i32_and;
+            local_get(Local(23)); i32_const(Imm32(0)); i32_lt_s;
+            local_get(Local(8)); local_get(Local(23)); i32_eqz; i32_and;
             i32_or;
         });
     }
     fn mul10(&self, f: &mut Function, off: u32) {
         self.ptr(f, off);
-        wasm!(f, { i32_const(DECIMAL_BASE); call(self.mul_small); });
+        wasm!(f, { i32_const(Imm32(DECIMAL_BASE)); call(self.mul_small); });
     }
     /// shl by a constant bit count.
     fn shl_const(&self, f: &mut Function, off: u32, bits: u32) {
         self.ptr(f, off);
-        wasm!(f, { i32_const(bits as i32); call(self.shl); });
+        wasm!(f, { i32_const(Imm32(bits as i32)); call(self.shl); });
     }
     /// shl by the value in local `loc` (an i32).
     fn shl_local(&self, f: &mut Function, off: u32, loc: u32) {
         self.ptr(f, off);
-        wasm!(f, { local_get(loc); call(self.shl); });
+        wasm!(f, { local_get(Local(loc)); call(self.shl); });
     }
     /// shl by (local + imm).
     fn shl_imm_local(&self, f: &mut Function, off: u32, loc: u32, imm: i32) {
         self.ptr(f, off);
-        wasm!(f, { local_get(loc); i32_const(imm); i32_add; call(self.shl); });
+        wasm!(f, { local_get(Local(loc)); i32_const(Imm32(imm)); i32_add; call(self.shl); });
     }
     /// shl by (1 - local).
     fn shl_one_minus_e(&self, f: &mut Function, off: u32, loc: u32) {
         self.ptr(f, off);
-        wasm!(f, { i32_const(1); local_get(loc); i32_sub; call(self.shl); });
+        wasm!(f, { i32_const(Imm32(1)); local_get(Local(loc)); i32_sub; call(self.shl); });
     }
 }
 

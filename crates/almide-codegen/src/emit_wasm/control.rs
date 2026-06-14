@@ -1,5 +1,6 @@
 //! Control flow emission — for-in loops and match expressions.
 
+use crate::emit_wasm::engine::{Imm32, Imm64, Local};
 use almide_ir::{IrExpr, IrExprKind, IrMatchArm, IrPattern, IrStmt};
 use almide_lang::types::Ty;
 use wasm_encoder::{Instruction, ValType};
@@ -17,7 +18,7 @@ impl FuncCompiler<'_> {
 
                 // Initialize loop variable to start
                 self.emit_expr(start);
-                wasm!(self.func, { local_set(loop_var); });
+                wasm!(self.func, { local_set(Local(loop_var)); });
 
                 // block $break { loop $loop { check; block $continue { body }; i++; br $loop } }
                 wasm!(self.func, { block_empty; });
@@ -27,7 +28,7 @@ impl FuncCompiler<'_> {
                 let loop_guard = self.depth_push();
 
                 // Break condition
-                wasm!(self.func, { local_get(loop_var); });
+                wasm!(self.func, { local_get(Local(loop_var)); });
                 self.emit_expr(end);
                 if *inclusive {
                     wasm!(self.func, { i64_gt_s; });
@@ -53,10 +54,10 @@ impl FuncCompiler<'_> {
 
                 // Increment: var += 1 (always runs, even after continue)
                 wasm!(self.func, {
-                    local_get(loop_var);
-                    i64_const(1);
+                    local_get(Local(loop_var));
+                    i64_const(Imm64(1));
                     i64_add;
-                    local_set(loop_var);
+                    local_set(Local(loop_var));
                 });
 
                 // Loop back
@@ -93,8 +94,8 @@ impl FuncCompiler<'_> {
         let entry_size = values::byte_size(&elem_ty);
 
         self.emit_expr(iterable);
-        wasm!(self.func, { local_set(list_scratch); });
-        wasm!(self.func, { i32_const(0); local_set(idx_scratch); });
+        wasm!(self.func, { local_set(Local(list_scratch)); });
+        wasm!(self.func, { i32_const(Imm32(0)); local_set(Local(idx_scratch)); });
 
         // block $break { loop $loop { ... } }
         wasm!(self.func, { block_empty; });
@@ -104,24 +105,24 @@ impl FuncCompiler<'_> {
 
         // Break if idx >= len
         wasm!(self.func, {
-            local_get(idx_scratch);
-            local_get(list_scratch); i32_load(0);
+            local_get(Local(idx_scratch));
+            local_get(Local(list_scratch)); i32_load(0);
             i32_ge_u;
             br_if(self.depth - break_guard.saved() - 1);
         });
 
         // Load element from data[idx]
         wasm!(self.func, {
-            local_get(list_scratch);
-            i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32);
+            local_get(Local(list_scratch));
+            i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32));
             i32_add;
-            local_get(idx_scratch);
-            i32_const(entry_size as i32);
+            local_get(Local(idx_scratch));
+            i32_const(Imm32(entry_size as i32));
             i32_mul;
             i32_add;
         });
         self.emit_load_at(&elem_ty, 0);
-        wasm!(self.func, { local_set(loop_var); });
+        wasm!(self.func, { local_set(Local(loop_var)); });
 
         // Tuple destructure (for list of tuples)
         if let Some(tuple_vars) = var_tuple {
@@ -132,9 +133,9 @@ impl FuncCompiler<'_> {
                 for (i, &tv) in tuple_vars.iter().enumerate() {
                     let ft = elem_types.get(i).cloned().unwrap_or(Ty::Int);
                     if let Some(&local_idx) = self.var_map.get(&tv.0) {
-                        wasm!(self.func, { local_get(loop_var); });
+                        wasm!(self.func, { local_get(Local(loop_var)); });
                         self.emit_load_at(&ft, field_offset);
-                        wasm!(self.func, { local_set(local_idx); });
+                        wasm!(self.func, { local_set(Local(local_idx)); });
                     }
                     field_offset += values::byte_size(&ft);
                 }
@@ -154,7 +155,7 @@ impl FuncCompiler<'_> {
 
         // idx++; br $loop
         wasm!(self.func, {
-            local_get(idx_scratch); i32_const(1); i32_add; local_set(idx_scratch);
+            local_get(Local(idx_scratch)); i32_const(Imm32(1)); i32_add; local_set(Local(idx_scratch));
         });
         wasm!(self.func, { br(self.depth - loop_guard.saved() - 1); });
 
@@ -191,12 +192,12 @@ impl FuncCompiler<'_> {
 
         self.emit_expr(iterable);
         wasm!(self.func, {
-            local_set(m);
-            local_get(m); i32_load(0); local_set(len);
-            local_get(m); i32_load(map_cap_off); local_set(cap);
+            local_set(Local(m));
+            local_get(Local(m)); i32_load(0); local_set(Local(len));
+            local_get(Local(m)); i32_load(map_cap_off); local_set(Local(cap));
         });
         self.emit_dict_entries_base(m, cap);
-        wasm!(self.func, { local_set(eb); i32_const(0); local_set(idx); });
+        wasm!(self.func, { local_set(Local(eb)); i32_const(Imm32(0)); local_set(Local(idx)); });
 
         // block $break { loop $loop { ... } }
         wasm!(self.func, { block_empty; });
@@ -206,7 +207,7 @@ impl FuncCompiler<'_> {
 
         // Break if idx >= len (dense entries are all occupied — no tag skip)
         wasm!(self.func, {
-            local_get(idx); local_get(len); i32_ge_u;
+            local_get(Local(idx)); local_get(Local(len)); i32_ge_u;
             br_if(self.depth - break_guard.saved() - 1);
         });
 
@@ -215,21 +216,21 @@ impl FuncCompiler<'_> {
             // Load key
             if let Some(&k_local) = tuple_vars.first().and_then(|tv| self.var_map.get(&tv.0)) {
                 wasm!(self.func, {
-                    local_get(eb);
-                    local_get(idx); i32_const(entry_size as i32); i32_mul; i32_add;
+                    local_get(Local(eb));
+                    local_get(Local(idx)); i32_const(Imm32(entry_size as i32)); i32_mul; i32_add;
                 });
                 self.emit_load_at(&key_ty, 0);
-                wasm!(self.func, { local_set(k_local); });
+                wasm!(self.func, { local_set(Local(k_local)); });
             }
 
             // Load value
             if let Some(&v_local) = tuple_vars.get(1).and_then(|tv| self.var_map.get(&tv.0)) {
                 wasm!(self.func, {
-                    local_get(eb);
-                    local_get(idx); i32_const(entry_size as i32); i32_mul; i32_add;
+                    local_get(Local(eb));
+                    local_get(Local(idx)); i32_const(Imm32(entry_size as i32)); i32_mul; i32_add;
                 });
                 self.emit_load_at(&val_ty, key_size);
-                wasm!(self.func, { local_set(v_local); });
+                wasm!(self.func, { local_set(Local(v_local)); });
             }
         }
 
@@ -246,7 +247,7 @@ impl FuncCompiler<'_> {
 
         // idx++; br $loop
         wasm!(self.func, {
-            local_get(idx); i32_const(1); i32_add; local_set(idx);
+            local_get(Local(idx)); i32_const(Imm32(1)); i32_add; local_set(Local(idx));
         });
         wasm!(self.func, { br(self.depth - loop_guard.saved() - 1); });
 
@@ -346,7 +347,7 @@ impl FuncCompiler<'_> {
             self.scratch.alloc_i32()
         };
 
-        wasm!(self.func, { local_set(scratch); });
+        wasm!(self.func, { local_set(Local(scratch)); });
 
         self.emit_match_arms(arms, scratch, &subject_ty, result_ty, 0);
 
@@ -426,8 +427,8 @@ impl FuncCompiler<'_> {
                     // Only bind if types match, or var type is Unknown (trust subject)
                     if var_vt == subj_vt || matches!(var_ty, Ty::Unknown) {
                         wasm!(self.func, {
-                            local_get(scratch);
-                            local_set(local_idx);
+                            local_get(Local(scratch));
+                            local_set(Local(local_idx));
                         });
                     }
                 }
@@ -454,7 +455,7 @@ impl FuncCompiler<'_> {
             // Literal: compare subject to literal, if-else
             IrPattern::Literal { expr: lit_expr } => {
                 // Push subject
-                wasm!(self.func, { local_get(scratch); });
+                wasm!(self.func, { local_get(Local(scratch)); });
                 // Push literal
                 self.emit_expr(lit_expr);
                 // Compare
@@ -490,9 +491,9 @@ impl FuncCompiler<'_> {
                 let tag_result = self.find_variant_tag_by_ctor(ctor_name, subject_ty);
                 if let Some(tag_val) = tag_result {
                     wasm!(self.func, {
-                        local_get(scratch);
+                        local_get(Local(scratch));
                         i32_load(0);
-                        i32_const(tag_val as i32);
+                        i32_const(Imm32(tag_val as i32));
                         i32_eq;
                     });
 
@@ -624,8 +625,8 @@ impl FuncCompiler<'_> {
             IrPattern::Some { inner } => {
                 // some(x) is a non-null pointer. Check ptr != 0, then bind inner.
                 wasm!(self.func, {
-                    local_get(scratch);
-                    i32_const(0);
+                    local_get(Local(scratch));
+                    i32_const(Imm32(0));
                     i32_ne;
                 });
                 let bt = values::block_type(result_ty);
@@ -659,7 +660,7 @@ impl FuncCompiler<'_> {
             IrPattern::None => {
                 // None is represented as i32 0
                 wasm!(self.func, {
-                    local_get(scratch);
+                    local_get(Local(scratch));
                     i32_eqz;
                 });
                 let bt = values::block_type(result_ty);
@@ -684,9 +685,9 @@ impl FuncCompiler<'_> {
                 if let Some(tag_val) = tag {
                     // Load tag from subject pointer
                     wasm!(self.func, {
-                        local_get(scratch);
+                        local_get(Local(scratch));
                         i32_load(0);
-                        i32_const(tag_val as i32);
+                        i32_const(Imm32(tag_val as i32));
                         i32_eq;
                     });
 
@@ -706,9 +707,9 @@ impl FuncCompiler<'_> {
                                 self.find_var_by_field(&pf.name, &case_fields).copied()
                             };
                             if let Some(idx) = local_idx {
-                                wasm!(self.func, { local_get(scratch); });
+                                wasm!(self.func, { local_get(Local(scratch)); });
                                 self.emit_load_at(&fty, total_offset);
-                                wasm!(self.func, { local_set(idx); });
+                                wasm!(self.func, { local_set(Local(idx)); });
                             }
                         }
                     }
@@ -739,9 +740,9 @@ impl FuncCompiler<'_> {
                                 self.find_var_by_field(&pf.name, &case_fields).copied()
                             };
                             if let Some(idx) = local_idx {
-                                wasm!(self.func, { local_get(scratch); });
+                                wasm!(self.func, { local_get(Local(scratch)); });
                                 self.emit_load_at(&fty, foff);
-                                wasm!(self.func, { local_set(idx); });
+                                wasm!(self.func, { local_set(Local(idx)); });
                             }
                         }
                     }
@@ -754,7 +755,7 @@ impl FuncCompiler<'_> {
             IrPattern::Ok { inner } => {
                 // Result ok = tag 0. Check tag, then bind value.
                 wasm!(self.func, {
-                    local_get(scratch);
+                    local_get(Local(scratch));
                     i32_load(0);
                     i32_eqz;
                 });
@@ -784,9 +785,9 @@ impl FuncCompiler<'_> {
             // Err(e) pattern (Result)
             IrPattern::Err { inner } => {
                 wasm!(self.func, {
-                    local_get(scratch);
+                    local_get(Local(scratch));
                     i32_load(0);
-                    i32_const(0);
+                    i32_const(Imm32(0));
                     i32_ne;
                 });
                 let bt = values::block_type(result_ty);
@@ -829,7 +830,7 @@ impl FuncCompiler<'_> {
                         for (i, elem_pat) in elements.iter().enumerate() {
                             let ft = elem_types.get(i).cloned().unwrap_or(Ty::Int);
                             if let IrPattern::Literal { expr: lit_expr } = elem_pat {
-                                wasm!(self.func, { local_get(scratch); });
+                                wasm!(self.func, { local_get(Local(scratch)); });
                                 self.emit_load_at(&ft, offset);
                                 self.emit_expr(lit_expr);
                                 match &ft {
@@ -869,13 +870,13 @@ impl FuncCompiler<'_> {
                             match elem_pat {
                                 IrPattern::Some { .. } => {
                                     // Option: check ptr != 0
-                                    wasm!(self.func, { local_get(scratch); });
+                                    wasm!(self.func, { local_get(Local(scratch)); });
                                     self.emit_load_at(&ft, offset);
-                                    wasm!(self.func, { i32_const(0); i32_ne; });
+                                    wasm!(self.func, { i32_const(Imm32(0)); i32_ne; });
                                     cond_count += 1;
                                 }
                                 IrPattern::None => {
-                                    wasm!(self.func, { local_get(scratch); });
+                                    wasm!(self.func, { local_get(Local(scratch)); });
                                     self.emit_load_at(&ft, offset);
                                     wasm!(self.func, { i32_eqz; });
                                     cond_count += 1;
@@ -888,10 +889,10 @@ impl FuncCompiler<'_> {
                                     // condition operand → the `If` had nothing on the stack.)
                                     if let Some(tag_val) = self.find_variant_tag_by_ctor(ctor_name, &ft) {
                                         wasm!(self.func, {
-                                            local_get(scratch);
+                                            local_get(Local(scratch));
                                             i32_load(offset);
                                             i32_load(0);
-                                            i32_const(tag_val as i32);
+                                            i32_const(Imm32(tag_val as i32));
                                             i32_eq;
                                         });
                                         cond_count += 1;
@@ -911,7 +912,7 @@ impl FuncCompiler<'_> {
                         // then matches unconditionally (the safe direction, and the
                         // bind loop below still runs).
                         if cond_count == 0 {
-                            wasm!(self.func, { i32_const(1); });
+                            wasm!(self.func, { i32_const(Imm32(1)); });
                         }
                         let bt = values::block_type(result_ty);
                         self.func.instruction(&Instruction::If(bt));
@@ -924,9 +925,9 @@ impl FuncCompiler<'_> {
                             match elem_pat {
                                 IrPattern::Bind { var, .. } => {
                                     if let Some(&local_idx) = self.var_map.get(&var.0) {
-                                        wasm!(self.func, { local_get(scratch); });
+                                        wasm!(self.func, { local_get(Local(scratch)); });
                                         self.emit_load_at(&ft, offset2);
-                                        wasm!(self.func, { local_set(local_idx); });
+                                        wasm!(self.func, { local_set(Local(local_idx)); });
                                     }
                                 }
                                 IrPattern::Some { inner } => {
@@ -938,10 +939,10 @@ impl FuncCompiler<'_> {
                                             } else { Ty::Int };
                                             // Load option ptr from tuple
                                             let opt_scratch = self.scratch.alloc_i32();
-                                            wasm!(self.func, { local_get(scratch); i32_load(offset2); local_set(opt_scratch); });
-                                            wasm!(self.func, { local_get(opt_scratch); });
+                                            wasm!(self.func, { local_get(Local(scratch)); i32_load(offset2); local_set(Local(opt_scratch)); });
+                                            wasm!(self.func, { local_get(Local(opt_scratch)); });
                                             self.emit_load_at(&inner_ty, 0);
-                                            wasm!(self.func, { local_set(local_idx); });
+                                            wasm!(self.func, { local_set(Local(local_idx)); });
                                             self.scratch.free_i32(opt_scratch);
                                         }
                                     }
@@ -953,7 +954,7 @@ impl FuncCompiler<'_> {
                                     if !args.is_empty() {
                                         let ctor_fields = self.emitter.fields_of(ctor_name);
                                         let var_scratch = self.scratch.alloc_i32();
-                                        wasm!(self.func, { local_get(scratch); i32_load(offset2); local_set(var_scratch); });
+                                        wasm!(self.func, { local_get(Local(scratch)); i32_load(offset2); local_set(Local(var_scratch)); });
                                         let mut field_offset = 4u32; // skip tag
                                         for (arg_idx, arg_pat) in args.iter().enumerate() {
                                             let field_ty = ctor_fields.get(arg_idx)
@@ -961,9 +962,9 @@ impl FuncCompiler<'_> {
                                                 .unwrap_or(Ty::Int);
                                             if let IrPattern::Bind { var, .. } = arg_pat {
                                                 if let Some(&local_idx) = self.var_map.get(&var.0) {
-                                                    wasm!(self.func, { local_get(var_scratch); });
+                                                    wasm!(self.func, { local_get(Local(var_scratch)); });
                                                     self.emit_load_at(&field_ty, field_offset);
-                                                    wasm!(self.func, { local_set(local_idx); });
+                                                    wasm!(self.func, { local_set(Local(local_idx)); });
                                                 }
                                             }
                                             field_offset += values::byte_size(&field_ty);
@@ -995,9 +996,9 @@ impl FuncCompiler<'_> {
                         let ft = elem_types.get(i).cloned().unwrap_or(Ty::Int);
                         if let IrPattern::Bind { var, .. } = elem_pat {
                             if let Some(&local_idx) = self.var_map.get(&var.0) {
-                                wasm!(self.func, { local_get(scratch); });
+                                wasm!(self.func, { local_get(Local(scratch)); });
                                 self.emit_load_at(&ft, offset);
-                                wasm!(self.func, { local_set(local_idx); });
+                                wasm!(self.func, { local_set(Local(local_idx)); });
                             }
                         }
                         offset += values::byte_size(&ft);
@@ -1061,7 +1062,7 @@ impl FuncCompiler<'_> {
     fn emit_arg_tests(&mut self, ctor_local: u32, field_offset: u32, field_ty: &Ty, pat: &IrPattern) -> u32 {
         match pat {
             IrPattern::Literal { expr } => {
-                wasm!(self.func, { local_get(ctor_local); });
+                wasm!(self.func, { local_get(Local(ctor_local)); });
                 self.emit_load_at(field_ty, field_offset);
                 self.emit_expr(expr);
                 self.emit_eq_typed(field_ty);
@@ -1069,10 +1070,10 @@ impl FuncCompiler<'_> {
             }
             IrPattern::Constructor { name, args } => {
                 let inner = self.scratch.alloc_i32();
-                wasm!(self.func, { local_get(ctor_local); i32_load(field_offset); local_set(inner); });
+                wasm!(self.func, { local_get(Local(ctor_local)); i32_load(field_offset); local_set(Local(inner)); });
                 let mut count = 0;
                 if let Some(tag) = self.find_variant_tag_by_ctor(name, field_ty) {
-                    wasm!(self.func, { local_get(inner); i32_load(0); i32_const(tag as i32); i32_eq; });
+                    wasm!(self.func, { local_get(Local(inner)); i32_load(0); i32_const(Imm32(tag as i32)); i32_eq; });
                     count += 1;
                 }
                 let inner_fields = self.emitter.fields_of(name);
@@ -1086,11 +1087,11 @@ impl FuncCompiler<'_> {
                 count
             }
             IrPattern::Some { .. } => {
-                wasm!(self.func, { local_get(ctor_local); i32_load(field_offset); i32_const(0); i32_ne; });
+                wasm!(self.func, { local_get(Local(ctor_local)); i32_load(field_offset); i32_const(Imm32(0)); i32_ne; });
                 1
             }
             IrPattern::None => {
-                wasm!(self.func, { local_get(ctor_local); i32_load(field_offset); i32_eqz; });
+                wasm!(self.func, { local_get(Local(ctor_local)); i32_load(field_offset); i32_eqz; });
                 1
             }
             // A variant-RECORD ctor arg (`Held(Circle { r })`) — the inner
@@ -1098,7 +1099,7 @@ impl FuncCompiler<'_> {
             // tested (Circle vs Square) exactly like a tuple-payload ctor.
             IrPattern::RecordPattern { name, .. } => {
                 if let Some(tag) = self.find_variant_tag_by_ctor(name, field_ty) {
-                    wasm!(self.func, { local_get(ctor_local); i32_load(field_offset); i32_load(0); i32_const(tag as i32); i32_eq; });
+                    wasm!(self.func, { local_get(Local(ctor_local)); i32_load(field_offset); i32_load(0); i32_const(Imm32(tag as i32)); i32_eq; });
                     1
                 } else { 0 }
             }
@@ -1117,14 +1118,14 @@ impl FuncCompiler<'_> {
                     let load_ty = if pat_ty.is_unresolved()
                         || matches!(pat_ty, Ty::Named(n, a) if a.is_empty() && n.len() <= 2)
                     { field_ty } else { pat_ty };
-                    wasm!(self.func, { local_get(ctor_local); });
+                    wasm!(self.func, { local_get(Local(ctor_local)); });
                     self.emit_load_at(load_ty, field_offset);
-                    wasm!(self.func, { local_set(local_idx); });
+                    wasm!(self.func, { local_set(Local(local_idx)); });
                 }
             }
             IrPattern::Constructor { name, args } => {
                 let inner = self.scratch.alloc_i32();
-                wasm!(self.func, { local_get(ctor_local); i32_load(field_offset); local_set(inner); });
+                wasm!(self.func, { local_get(Local(ctor_local)); i32_load(field_offset); local_set(Local(inner)); });
                 let inner_fields = self.emitter.fields_of(name);
                 let mut off = 4u32;
                 for (i, ap) in args.iter().enumerate() {
@@ -1137,7 +1138,7 @@ impl FuncCompiler<'_> {
             IrPattern::Some { inner: inner_pat } => {
                 // Some payload is at offset 0 of the inner pointer.
                 let inner = self.scratch.alloc_i32();
-                wasm!(self.func, { local_get(ctor_local); i32_load(field_offset); local_set(inner); });
+                wasm!(self.func, { local_get(Local(ctor_local)); i32_load(field_offset); local_set(Local(inner)); });
                 let payload_ty = match field_ty {
                     Ty::Applied(_, a) => a.first().cloned().unwrap_or(Ty::Int),
                     _ => Ty::Int,
@@ -1151,7 +1152,7 @@ impl FuncCompiler<'_> {
                 // tag; resolve the ctor's fields for the offsets (mirrors the
                 // top-level RecordPattern arm).
                 let rec = self.scratch.alloc_i32();
-                wasm!(self.func, { local_get(ctor_local); i32_load(field_offset); local_set(rec); });
+                wasm!(self.func, { local_get(Local(ctor_local)); i32_load(field_offset); local_set(Local(rec)); });
                 let is_variant = self.find_variant_tag_by_ctor(name, field_ty).is_some();
                 let tag_off = if is_variant { 4u32 } else { 0u32 };
                 let rec_fields = if is_variant {
@@ -1165,17 +1166,17 @@ impl FuncCompiler<'_> {
                         match &pf.pattern {
                             Some(IrPattern::Bind { var, .. }) => {
                                 if let Some(&local_idx) = self.var_map.get(&var.0) {
-                                    wasm!(self.func, { local_get(rec); });
+                                    wasm!(self.func, { local_get(Local(rec)); });
                                     self.emit_load_at(&fty, total);
-                                    wasm!(self.func, { local_set(local_idx); });
+                                    wasm!(self.func, { local_set(Local(local_idx)); });
                                 }
                             }
                             Some(inner_pat) => self.bind_arg(rec, total, &fty, inner_pat),
                             None => {
                                 if let Some(&local_idx) = self.find_var_by_field(&pf.name, &rec_fields) {
-                                    wasm!(self.func, { local_get(rec); });
+                                    wasm!(self.func, { local_get(Local(rec)); });
                                     self.emit_load_at(&fty, total);
-                                    wasm!(self.func, { local_set(local_idx); });
+                                    wasm!(self.func, { local_set(Local(local_idx)); });
                                 }
                             }
                         }
@@ -1204,9 +1205,9 @@ impl FuncCompiler<'_> {
         match inner {
             IrPattern::Bind { var, .. } => {
                 if let Some(&local_idx) = self.var_map.get(&var.0) {
-                    wasm!(self.func, { local_get(container_scratch); });
+                    wasm!(self.func, { local_get(Local(container_scratch)); });
                     self.emit_load_at(inner_ty, inner_offset);
-                    wasm!(self.func, { local_set(local_idx); });
+                    wasm!(self.func, { local_set(Local(local_idx)); });
                 }
                 false // caller emits body
             }
@@ -1223,7 +1224,7 @@ impl FuncCompiler<'_> {
             // the literal with the shared type-directed equality, then emit the
             // body only on a match.
             IrPattern::Literal { expr: lit_expr } => {
-                wasm!(self.func, { local_get(container_scratch); });
+                wasm!(self.func, { local_get(Local(container_scratch)); });
                 self.emit_load_at(inner_ty, inner_offset);
                 self.emit_expr(lit_expr);
                 let inner_ty_c = inner_ty.clone();
@@ -1243,9 +1244,9 @@ impl FuncCompiler<'_> {
                 // Inner value is a tuple pointer
                 let inner_scratch = self.scratch.alloc_i32();
                 wasm!(self.func, {
-                    local_get(container_scratch);
+                    local_get(Local(container_scratch));
                     i32_load(inner_offset);
-                    local_set(inner_scratch);
+                    local_set(Local(inner_scratch));
                 });
                 if let Ty::Tuple(elem_types) = inner_ty {
                     let mut offset = 0u32;
@@ -1253,9 +1254,9 @@ impl FuncCompiler<'_> {
                         let ety = elem_types.get(i).cloned().unwrap_or(Ty::Int);
                         if let IrPattern::Bind { var, .. } = elem_pat {
                             if let Some(&local_idx) = self.var_map.get(&var.0) {
-                                wasm!(self.func, { local_get(inner_scratch); });
+                                wasm!(self.func, { local_get(Local(inner_scratch)); });
                                 self.emit_load_at(&ety, offset);
-                                wasm!(self.func, { local_set(local_idx); });
+                                wasm!(self.func, { local_set(Local(local_idx)); });
                             }
                         }
                         offset += values::byte_size(&ety);
@@ -1268,16 +1269,16 @@ impl FuncCompiler<'_> {
                 // Inner value is a variant pointer — need conditional tag check
                 let inner_scratch = self.scratch.alloc_i32();
                 wasm!(self.func, {
-                    local_get(container_scratch);
+                    local_get(Local(container_scratch));
                     i32_load(inner_offset);
-                    local_set(inner_scratch);
+                    local_set(Local(inner_scratch));
                 });
                 let tag = self.find_variant_tag_by_ctor(ctor_name, inner_ty);
                 if let Some(tag_val) = tag {
                     wasm!(self.func, {
-                        local_get(inner_scratch);
+                        local_get(Local(inner_scratch));
                         i32_load(0);
-                        i32_const(tag_val as i32);
+                        i32_const(Imm32(tag_val as i32));
                         i32_eq;
                     });
                     let bt = values::block_type(result_ty);
@@ -1317,9 +1318,9 @@ impl FuncCompiler<'_> {
                                 let load_ty = if pat_ty.is_unresolved()
                                     || matches!(pat_ty, Ty::Named(n, a) if a.is_empty() && n.len() <= 2)
                                 { &field_ty } else { pat_ty };
-                                wasm!(self.func, { local_get(inner_scratch); });
+                                wasm!(self.func, { local_get(Local(inner_scratch)); });
                                 self.emit_load_at(load_ty, field_offset);
-                                wasm!(self.func, { local_set(local_idx); });
+                                wasm!(self.func, { local_set(Local(local_idx)); });
                             }
                         }
                         field_offset += values::byte_size(&field_ty);
@@ -1343,13 +1344,13 @@ impl FuncCompiler<'_> {
                 // Nested Some: load inner ptr, check non-null
                 let inner_scratch = self.scratch.alloc_i32();
                 wasm!(self.func, {
-                    local_get(container_scratch);
+                    local_get(Local(container_scratch));
                     i32_load(inner_offset);
-                    local_set(inner_scratch);
+                    local_set(Local(inner_scratch));
                 });
                 wasm!(self.func, {
-                    local_get(inner_scratch);
-                    i32_const(0);
+                    local_get(Local(inner_scratch));
+                    i32_const(Imm32(0));
                     i32_ne;
                 });
                 let nested_ty = if let Ty::Applied(_, args) = inner_ty {
@@ -1377,11 +1378,11 @@ impl FuncCompiler<'_> {
                 // Nested None: check inner ptr == 0
                 let inner_scratch = self.scratch.alloc_i32();
                 wasm!(self.func, {
-                    local_get(container_scratch);
+                    local_get(Local(container_scratch));
                     i32_load(inner_offset);
-                    local_set(inner_scratch);
+                    local_set(Local(inner_scratch));
                 });
-                wasm!(self.func, { local_get(inner_scratch); i32_eqz; });
+                wasm!(self.func, { local_get(Local(inner_scratch)); i32_eqz; });
                 let bt = values::block_type(result_ty);
                 self.func.instruction(&Instruction::If(bt));
                 let none_guard = self.depth_push();
@@ -1398,12 +1399,12 @@ impl FuncCompiler<'_> {
                 // Nested Ok: load inner, check tag == 0
                 let inner_scratch = self.scratch.alloc_i32();
                 wasm!(self.func, {
-                    local_get(container_scratch);
+                    local_get(Local(container_scratch));
                     i32_load(inner_offset);
-                    local_set(inner_scratch);
+                    local_set(Local(inner_scratch));
                 });
                 wasm!(self.func, {
-                    local_get(inner_scratch);
+                    local_get(Local(inner_scratch));
                     i32_load(0);
                     i32_eqz;
                 });
@@ -1432,14 +1433,14 @@ impl FuncCompiler<'_> {
                 // Nested Err: load inner, check tag != 0
                 let inner_scratch = self.scratch.alloc_i32();
                 wasm!(self.func, {
-                    local_get(container_scratch);
+                    local_get(Local(container_scratch));
                     i32_load(inner_offset);
-                    local_set(inner_scratch);
+                    local_set(Local(inner_scratch));
                 });
                 wasm!(self.func, {
-                    local_get(inner_scratch);
+                    local_get(Local(inner_scratch));
                     i32_load(0);
-                    i32_const(0);
+                    i32_const(Imm32(0));
                     i32_ne;
                 });
                 let nested_ty = if let Ty::Applied(_, args) = inner_ty {
@@ -1467,16 +1468,16 @@ impl FuncCompiler<'_> {
                 // Inner variant with record payload (e.g., ok(Parsed { value, rest }))
                 let inner_scratch = self.scratch.alloc_i32();
                 wasm!(self.func, {
-                    local_get(container_scratch);
+                    local_get(Local(container_scratch));
                     i32_load(inner_offset);
-                    local_set(inner_scratch);
+                    local_set(Local(inner_scratch));
                 });
                 let tag = self.find_variant_tag_by_ctor(ctor_name, inner_ty);
                 if let Some(tag_val) = tag {
                     wasm!(self.func, {
-                        local_get(inner_scratch);
+                        local_get(Local(inner_scratch));
                         i32_load(0);
-                        i32_const(tag_val as i32);
+                        i32_const(Imm32(tag_val as i32));
                         i32_eq;
                     });
                     let bt = values::block_type(result_ty);
@@ -1493,9 +1494,9 @@ impl FuncCompiler<'_> {
                                 self.find_var_by_field(&pf.name, &case_fields).copied()
                             };
                             if let Some(idx) = local_idx {
-                                wasm!(self.func, { local_get(inner_scratch); });
+                                wasm!(self.func, { local_get(Local(inner_scratch)); });
                                 self.emit_load_at(&fty, total_offset);
-                                wasm!(self.func, { local_set(idx); });
+                                wasm!(self.func, { local_set(Local(idx)); });
                             }
                         }
                     }
@@ -1516,9 +1517,9 @@ impl FuncCompiler<'_> {
                                 self.find_var_by_field(&pf.name, &record_fields).copied()
                             };
                             if let Some(idx) = local_idx {
-                                wasm!(self.func, { local_get(inner_scratch); });
+                                wasm!(self.func, { local_get(Local(inner_scratch)); });
                                 self.emit_load_at(&fty, inner_offset + foff);
-                                wasm!(self.func, { local_set(idx); });
+                                wasm!(self.func, { local_set(Local(idx)); });
                             }
                         }
                     }

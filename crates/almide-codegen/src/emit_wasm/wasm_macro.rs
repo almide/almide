@@ -1,13 +1,17 @@
 //! Macro for concise WASM instruction emission.
 //!
+//! Numeric operands are type-enforced ValueObjects: immediate constants take
+//! `Imm32`/`Imm64`, local indices take `Local` — a bare integer won't compile.
+//! Memory offsets (load/store), branch depths, and call indices stay raw.
+//!
 //! Usage (FuncCompiler — pass `self.func`):
 //! ```ignore
 //! wasm!(self.func, {
-//!     i32_const(4);
-//!     i32_load(0);
+//!     i32_const(Imm32(4));
+//!     i32_load(0);          // offset, raw
 //!     i32_add;
-//!     local_get(0);
-//!     i64_store(4);
+//!     local_get(Local(0));
+//!     i64_store(4);         // offset, raw
 //!     call(some_idx);
 //!     br_if(1);
 //!     block_empty;
@@ -20,7 +24,7 @@
 //! ```ignore
 //! wasm!(f, {
 //!     global_get(heap_ptr);
-//!     local_set(1);
+//!     local_set(Local(1));
 //! });
 //! ```
 
@@ -34,13 +38,13 @@ macro_rules! wasm {
     // Terminal
     (@emit $f:expr,) => {};
 
-    // ── Const ──
+    // ── Const ── ($v is an Imm32/Imm64 ValueObject — a bare int won't compile)
     (@emit $f:expr, i32_const($v:expr); $($rest:tt)*) => {
-        $f.instruction(&wasm_encoder::Instruction::I32Const($v));
+        $f.instruction(&wasm_encoder::Instruction::I32Const(($v).val()));
         wasm!(@emit $f, $($rest)*)
     };
     (@emit $f:expr, i64_const($v:expr); $($rest:tt)*) => {
-        $f.instruction(&wasm_encoder::Instruction::I64Const($v));
+        $f.instruction(&wasm_encoder::Instruction::I64Const(($v).val()));
         wasm!(@emit $f, $($rest)*)
     };
     (@emit $f:expr, f64_const($v:expr); $($rest:tt)*) => {
@@ -48,17 +52,17 @@ macro_rules! wasm {
         wasm!(@emit $f, $($rest)*)
     };
 
-    // ── Variables ──
+    // ── Variables ── ($v is a Local ValueObject — a bare int won't compile)
     (@emit $f:expr, local_get($v:expr); $($rest:tt)*) => {
-        $f.instruction(&wasm_encoder::Instruction::LocalGet($v));
+        $f.instruction(&wasm_encoder::Instruction::LocalGet(($v).idx()));
         wasm!(@emit $f, $($rest)*)
     };
     (@emit $f:expr, local_set($v:expr); $($rest:tt)*) => {
-        $f.instruction(&wasm_encoder::Instruction::LocalSet($v));
+        $f.instruction(&wasm_encoder::Instruction::LocalSet(($v).idx()));
         wasm!(@emit $f, $($rest)*)
     };
     (@emit $f:expr, local_tee($v:expr); $($rest:tt)*) => {
-        $f.instruction(&wasm_encoder::Instruction::LocalTee($v));
+        $f.instruction(&wasm_encoder::Instruction::LocalTee(($v).idx()));
         wasm!(@emit $f, $($rest)*)
     };
     (@emit $f:expr, global_get($v:expr); $($rest:tt)*) => {

@@ -2,6 +2,7 @@
 //!
 //! All `("string", _)` method call handlers live here.
 
+use crate::emit_wasm::engine::{Imm32, Imm64, Local};
 use super::FuncCompiler;
 use almide_ir::{IrExpr, IrStringPart};
 use almide_lang::types::Ty;
@@ -109,18 +110,18 @@ impl FuncCompiler<'_> {
                 let s0 = self.scratch.alloc_i32();
                 let s1 = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
-                wasm!(self.func, { local_set(s0); });
+                wasm!(self.func, { local_set(Local(s0)); });
                 self.emit_expr(&args[1]);
                 wasm!(self.func, {
-                    local_set(s1);
-                    local_get(s1); i32_load(0); // prefix.len
-                    local_get(s0); i32_load(0); // s.len
+                    local_set(Local(s1));
+                    local_get(Local(s1)); i32_load(0); // prefix.len
+                    local_get(Local(s0)); i32_load(0); // s.len
                     i32_gt_u;
-                    if_i32; i32_const(0);
+                    if_i32; i32_const(Imm32(0));
                     else_;
-                      local_get(s0); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add;
-                      local_get(s1); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add;
-                      local_get(s1); i32_load(0);
+                      local_get(Local(s0)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32)); i32_add;
+                      local_get(Local(s1)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32)); i32_add;
+                      local_get(Local(s1)); i32_load(0);
                       call(self.emitter.rt.mem_eq);
                     end;
                 });
@@ -131,20 +132,20 @@ impl FuncCompiler<'_> {
                 let s0 = self.scratch.alloc_i32();
                 let s1 = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
-                wasm!(self.func, { local_set(s0); });
+                wasm!(self.func, { local_set(Local(s0)); });
                 self.emit_expr(&args[1]);
                 wasm!(self.func, {
-                    local_set(s1);
-                    local_get(s1); i32_load(0);
-                    local_get(s0); i32_load(0);
+                    local_set(Local(s1));
+                    local_get(Local(s1)); i32_load(0);
+                    local_get(Local(s0)); i32_load(0);
                     i32_gt_u;
-                    if_i32; i32_const(0);
+                    if_i32; i32_const(Imm32(0));
                     else_;
-                      local_get(s0); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add;
-                      local_get(s0); i32_load(0); i32_add;
-                      local_get(s1); i32_load(0); i32_sub;
-                      local_get(s1); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32); i32_add;
-                      local_get(s1); i32_load(0);
+                      local_get(Local(s0)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32)); i32_add;
+                      local_get(Local(s0)); i32_load(0); i32_add;
+                      local_get(Local(s1)); i32_load(0); i32_sub;
+                      local_get(Local(s1)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32)); i32_add;
+                      local_get(Local(s1)); i32_load(0);
                       call(self.emitter.rt.mem_eq);
                     end;
                 });
@@ -159,36 +160,36 @@ impl FuncCompiler<'_> {
                 let cp = self.scratch.alloc_i32();  // result string ptr
                 let i64v = self.scratch.alloc_i64();
                 self.emit_expr(&args[0]);
-                wasm!(self.func, { local_set(s); });
+                wasm!(self.func, { local_set(Local(s)); });
                 self.emit_expr(&args[1]);
                 wasm!(self.func, {
-                    local_set(i64v);
-                    local_get(i64v); i64_const(0); i64_lt_s;
+                    local_set(Local(i64v));
+                    local_get(Local(i64v)); i64_const(Imm64(0)); i64_lt_s;
                     if_i32;
-                      i32_const(0); // none
+                      i32_const(Imm32(0)); // none
                     else_;
                       // saturate the cp index to i32::MAX; utf8_byte_of_cp maps
                       // any count at/past the end to byte_len → none below.
-                      local_get(i64v); i64_const(CP_SAT_CEIL_I64); i64_gt_s;
+                      local_get(Local(i64v)); i64_const(Imm64(CP_SAT_CEIL_I64)); i64_gt_s;
                       if_i32;
-                        i32_const(CP_SAT_CEIL_I32);
+                        i32_const(Imm32(CP_SAT_CEIL_I32));
                       else_;
-                        local_get(i64v); i32_wrap_i64;
+                        local_get(Local(i64v)); i32_wrap_i64;
                       end;
-                      local_set(i);
-                      local_get(s); local_get(i); call(self.emitter.rt.string.utf8_byte_of_cp); local_set(i);
-                      local_get(i); local_get(s); i32_load(0); i32_ge_u;
+                      local_set(Local(i));
+                      local_get(Local(s)); local_get(Local(i)); call(self.emitter.rt.string.utf8_byte_of_cp); local_set(Local(i));
+                      local_get(Local(i)); local_get(Local(s)); i32_load(0); i32_ge_u;
                       if_i32;
-                        i32_const(0); // none
+                        i32_const(Imm32(0)); // none
                       else_;
                         // cp = slice(s, i, i + width(s, i))
-                        local_get(s); local_get(i);
-                        local_get(i); local_get(s); local_get(i); call(self.emitter.rt.string.utf8_width); i32_add;
-                        call(self.emitter.rt.string.slice); local_set(cp);
+                        local_get(Local(s)); local_get(Local(i));
+                        local_get(Local(i)); local_get(Local(s)); local_get(Local(i)); call(self.emitter.rt.string.utf8_width); i32_add;
+                        call(self.emitter.rt.string.slice); local_set(Local(cp));
                         // wrap in some: alloc ptr, store string ptr
-                        i32_const(OPTION_PTR_BOX_BYTES); call(self.emitter.rt.alloc); local_set(i);
-                        local_get(i); local_get(cp); i32_store(0);
-                        local_get(i);
+                        i32_const(Imm32(OPTION_PTR_BOX_BYTES)); call(self.emitter.rt.alloc); local_set(Local(i));
+                        local_get(Local(i)); local_get(Local(cp)); i32_store(0);
+                        local_get(Local(i));
                       end;
                     end;
                 });
@@ -224,33 +225,33 @@ impl FuncCompiler<'_> {
                 let start_b = self.scratch.alloc_i32();
                 let end_b = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
-                wasm!(self.func, { local_set(s_ptr); });
+                wasm!(self.func, { local_set(Local(s_ptr)); });
                 self.emit_expr(&args[1]);
                 self.emit_clamp_count_signed_i32(super::calls_list_helpers::ClampHi::Const(STRING_COUNT_HUGE));
                 wasm!(self.func, {
-                    local_set(start_b);
-                    local_get(s_ptr); local_get(start_b);
-                    call(self.emitter.rt.string.utf8_byte_of_cp); local_set(start_b);
+                    local_set(Local(start_b));
+                    local_get(Local(s_ptr)); local_get(Local(start_b));
+                    call(self.emitter.rt.string.utf8_byte_of_cp); local_set(Local(start_b));
                 });
                 if args.len() > 2 {
                     self.emit_expr(&args[2]);
                     self.emit_clamp_count_signed_i32(super::calls_list_helpers::ClampHi::Const(STRING_COUNT_HUGE));
                     wasm!(self.func, {
-                        local_set(end_b);
-                        local_get(s_ptr); local_get(end_b);
-                        call(self.emitter.rt.string.utf8_byte_of_cp); local_set(end_b);
+                        local_set(Local(end_b));
+                        local_get(Local(s_ptr)); local_get(Local(end_b));
+                        call(self.emitter.rt.string.utf8_byte_of_cp); local_set(Local(end_b));
                     });
                 } else {
-                    wasm!(self.func, { local_get(s_ptr); i32_load(0); local_set(end_b); });
+                    wasm!(self.func, { local_get(Local(s_ptr)); i32_load(0); local_set(Local(end_b)); });
                 }
                 wasm!(self.func, {
                     // start >= end → empty string (matches native; also guards
                     // __str_slice against an unsigned `end - start` underflow)
-                    local_get(start_b); local_get(end_b); i32_ge_u;
+                    local_get(Local(start_b)); local_get(Local(end_b)); i32_ge_u;
                     if_i32;
-                        i32_const(0); call(self.emitter.rt.string_alloc);
+                        i32_const(Imm32(0)); call(self.emitter.rt.string_alloc);
                     else_;
-                        local_get(s_ptr); local_get(start_b); local_get(end_b);
+                        local_get(Local(s_ptr)); local_get(Local(start_b)); local_get(Local(end_b));
                         call(self.emitter.rt.string.slice);
                     end;
                 });
@@ -266,20 +267,20 @@ impl FuncCompiler<'_> {
                 let s32 = self.scratch.alloc_i32();
                 let s_ptr = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
-                wasm!(self.func, { local_set(s_ptr); local_get(s_ptr); });
+                wasm!(self.func, { local_set(Local(s_ptr)); local_get(Local(s_ptr)); });
                 self.emit_expr(&args[1]);
                 wasm!(self.func, {
                     call(self.emitter.rt.string.index_of);
-                    local_set(s64);
-                    local_get(s64); i64_const(-1i64 as i64); i64_eq;
+                    local_set(Local(s64));
+                    local_get(Local(s64)); i64_const(Imm64(-1i64 as i64)); i64_eq;
                     if_i32;
-                      i32_const(0);
+                      i32_const(Imm32(0));
                     else_;
-                      local_get(s_ptr); local_get(s64); i32_wrap_i64;
-                      call(self.emitter.rt.string.cp_of_byte); local_set(s64);
-                      i32_const(OPTION_INT_BOX_BYTES); call(self.emitter.rt.alloc); local_set(s32);
-                      local_get(s32); local_get(s64); i64_store(0);
-                      local_get(s32);
+                      local_get(Local(s_ptr)); local_get(Local(s64)); i32_wrap_i64;
+                      call(self.emitter.rt.string.cp_of_byte); local_set(Local(s64));
+                      i32_const(Imm32(OPTION_INT_BOX_BYTES)); call(self.emitter.rt.alloc); local_set(Local(s32));
+                      local_get(Local(s32)); local_get(Local(s64)); i64_store(0);
+                      local_get(Local(s32));
                     end;
                 });
                 self.scratch.free_i32(s_ptr);
@@ -292,20 +293,20 @@ impl FuncCompiler<'_> {
                 let s32 = self.scratch.alloc_i32();
                 let s_ptr = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
-                wasm!(self.func, { local_set(s_ptr); local_get(s_ptr); });
+                wasm!(self.func, { local_set(Local(s_ptr)); local_get(Local(s_ptr)); });
                 self.emit_expr(&args[1]);
                 wasm!(self.func, {
                     call(self.emitter.rt.string.last_index_of);
-                    local_set(s64);
-                    local_get(s64); i64_const(-1i64 as i64); i64_eq;
+                    local_set(Local(s64));
+                    local_get(Local(s64)); i64_const(Imm64(-1i64 as i64)); i64_eq;
                     if_i32;
-                      i32_const(0);
+                      i32_const(Imm32(0));
                     else_;
-                      local_get(s_ptr); local_get(s64); i32_wrap_i64;
-                      call(self.emitter.rt.string.cp_of_byte); local_set(s64);
-                      i32_const(OPTION_INT_BOX_BYTES); call(self.emitter.rt.alloc); local_set(s32);
-                      local_get(s32); local_get(s64); i64_store(0);
-                      local_get(s32);
+                      local_get(Local(s_ptr)); local_get(Local(s64)); i32_wrap_i64;
+                      call(self.emitter.rt.string.cp_of_byte); local_set(Local(s64));
+                      i32_const(Imm32(OPTION_INT_BOX_BYTES)); call(self.emitter.rt.alloc); local_set(Local(s32));
+                      local_get(Local(s32)); local_get(Local(s64)); i64_store(0);
+                      local_get(Local(s32));
                     end;
                 });
                 self.scratch.free_i32(s_ptr);
@@ -403,15 +404,15 @@ impl FuncCompiler<'_> {
                 let some = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
                 wasm!(self.func, {
-                    local_set(s);
-                    local_get(s); i32_load(0); i32_eqz;
-                    if_i32; i32_const(0);
+                    local_set(Local(s));
+                    local_get(Local(s)); i32_load(0); i32_eqz;
+                    if_i32; i32_const(Imm32(0));
                     else_;
-                      i32_const(OPTION_INT_BOX_BYTES); call(self.emitter.rt.alloc); local_set(some);
-                      local_get(some);
-                      local_get(s); i32_const(0); call(self.emitter.rt.string.utf8_scalar);
+                      i32_const(Imm32(OPTION_INT_BOX_BYTES)); call(self.emitter.rt.alloc); local_set(Local(some));
+                      local_get(Local(some));
+                      local_get(Local(s)); i32_const(Imm32(0)); call(self.emitter.rt.string.utf8_scalar);
                       i64_store(0);
-                      local_get(some);
+                      local_get(Local(some));
                     end;
                 });
                 self.scratch.free_i32(some);
@@ -426,65 +427,65 @@ impl FuncCompiler<'_> {
                 let data = self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32 as u32;
                 self.emit_expr(&args[0]);
                 wasm!(self.func, {
-                    i32_wrap_i64; local_set(cp);
+                    i32_wrap_i64; local_set(Local(cp));
                     // invalid? cp < 0 || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)
-                    local_get(cp); i32_const(0); i32_lt_s;
-                    local_get(cp); i32_const(UNICODE_MAX_SCALAR); i32_gt_s; i32_or;
-                    local_get(cp); i32_const(UNICODE_SURR_LO); i32_ge_s;
-                    local_get(cp); i32_const(UNICODE_SURR_HI); i32_le_s; i32_and; i32_or;
+                    local_get(Local(cp)); i32_const(Imm32(0)); i32_lt_s;
+                    local_get(Local(cp)); i32_const(Imm32(UNICODE_MAX_SCALAR)); i32_gt_s; i32_or;
+                    local_get(Local(cp)); i32_const(Imm32(UNICODE_SURR_LO)); i32_ge_s;
+                    local_get(Local(cp)); i32_const(Imm32(UNICODE_SURR_HI)); i32_le_s; i32_and; i32_or;
                     if_i32;
                       // invalid → empty string
-                      i32_const(0); call(self.emitter.rt.string_alloc);
+                      i32_const(Imm32(0)); call(self.emitter.rt.string_alloc);
                     else_;
-                      local_get(cp); i32_const(UTF8_1B_LIMIT); i32_lt_s;
+                      local_get(Local(cp)); i32_const(Imm32(UTF8_1B_LIMIT)); i32_lt_s;
                       if_i32;
                         // 1 byte
-                        i32_const(1); call(self.emitter.rt.string_alloc); local_set(r);
-                        local_get(r); local_get(cp); i32_store8(data);
-                        local_get(r);
+                        i32_const(Imm32(1)); call(self.emitter.rt.string_alloc); local_set(Local(r));
+                        local_get(Local(r)); local_get(Local(cp)); i32_store8(data);
+                        local_get(Local(r));
                       else_;
-                        local_get(cp); i32_const(UTF8_2B_LIMIT); i32_lt_s;
+                        local_get(Local(cp)); i32_const(Imm32(UTF8_2B_LIMIT)); i32_lt_s;
                         if_i32;
                           // 2 bytes
-                          i32_const(UTF8_2B_LEN); call(self.emitter.rt.string_alloc); local_set(r);
-                          local_get(r);
-                          i32_const(UTF8_2B_LEAD); local_get(cp); i32_const(UTF8_SHIFT_6); i32_shr_u; i32_or;
+                          i32_const(Imm32(UTF8_2B_LEN)); call(self.emitter.rt.string_alloc); local_set(Local(r));
+                          local_get(Local(r));
+                          i32_const(Imm32(UTF8_2B_LEAD)); local_get(Local(cp)); i32_const(Imm32(UTF8_SHIFT_6)); i32_shr_u; i32_or;
                           i32_store8(data);
-                          local_get(r);
-                          i32_const(UTF8_CONT_PREFIX); local_get(cp); i32_const(UTF8_PAYLOAD_MASK); i32_and; i32_or;
+                          local_get(Local(r));
+                          i32_const(Imm32(UTF8_CONT_PREFIX)); local_get(Local(cp)); i32_const(Imm32(UTF8_PAYLOAD_MASK)); i32_and; i32_or;
                           i32_store8(data + 1);
-                          local_get(r);
+                          local_get(Local(r));
                         else_;
-                          local_get(cp); i32_const(UTF8_3B_LIMIT); i32_lt_s;
+                          local_get(Local(cp)); i32_const(Imm32(UTF8_3B_LIMIT)); i32_lt_s;
                           if_i32;
                             // 3 bytes
-                            i32_const(UTF8_3B_LEN); call(self.emitter.rt.string_alloc); local_set(r);
-                            local_get(r);
-                            i32_const(UTF8_3B_LEAD); local_get(cp); i32_const(UTF8_SHIFT_12); i32_shr_u; i32_or;
+                            i32_const(Imm32(UTF8_3B_LEN)); call(self.emitter.rt.string_alloc); local_set(Local(r));
+                            local_get(Local(r));
+                            i32_const(Imm32(UTF8_3B_LEAD)); local_get(Local(cp)); i32_const(Imm32(UTF8_SHIFT_12)); i32_shr_u; i32_or;
                             i32_store8(data);
-                            local_get(r);
-                            i32_const(UTF8_CONT_PREFIX); local_get(cp); i32_const(UTF8_SHIFT_6); i32_shr_u; i32_const(UTF8_PAYLOAD_MASK); i32_and; i32_or;
+                            local_get(Local(r));
+                            i32_const(Imm32(UTF8_CONT_PREFIX)); local_get(Local(cp)); i32_const(Imm32(UTF8_SHIFT_6)); i32_shr_u; i32_const(Imm32(UTF8_PAYLOAD_MASK)); i32_and; i32_or;
                             i32_store8(data + 1);
-                            local_get(r);
-                            i32_const(UTF8_CONT_PREFIX); local_get(cp); i32_const(UTF8_PAYLOAD_MASK); i32_and; i32_or;
+                            local_get(Local(r));
+                            i32_const(Imm32(UTF8_CONT_PREFIX)); local_get(Local(cp)); i32_const(Imm32(UTF8_PAYLOAD_MASK)); i32_and; i32_or;
                             i32_store8(data + 2);
-                            local_get(r);
+                            local_get(Local(r));
                           else_;
                             // 4 bytes
-                            i32_const(UTF8_4B_LEN); call(self.emitter.rt.string_alloc); local_set(r);
-                            local_get(r);
-                            i32_const(UTF8_4B_LEAD); local_get(cp); i32_const(UTF8_SHIFT_18); i32_shr_u; i32_or;
+                            i32_const(Imm32(UTF8_4B_LEN)); call(self.emitter.rt.string_alloc); local_set(Local(r));
+                            local_get(Local(r));
+                            i32_const(Imm32(UTF8_4B_LEAD)); local_get(Local(cp)); i32_const(Imm32(UTF8_SHIFT_18)); i32_shr_u; i32_or;
                             i32_store8(data);
-                            local_get(r);
-                            i32_const(UTF8_CONT_PREFIX); local_get(cp); i32_const(UTF8_SHIFT_12); i32_shr_u; i32_const(UTF8_PAYLOAD_MASK); i32_and; i32_or;
+                            local_get(Local(r));
+                            i32_const(Imm32(UTF8_CONT_PREFIX)); local_get(Local(cp)); i32_const(Imm32(UTF8_SHIFT_12)); i32_shr_u; i32_const(Imm32(UTF8_PAYLOAD_MASK)); i32_and; i32_or;
                             i32_store8(data + 1);
-                            local_get(r);
-                            i32_const(UTF8_CONT_PREFIX); local_get(cp); i32_const(UTF8_SHIFT_6); i32_shr_u; i32_const(UTF8_PAYLOAD_MASK); i32_and; i32_or;
+                            local_get(Local(r));
+                            i32_const(Imm32(UTF8_CONT_PREFIX)); local_get(Local(cp)); i32_const(Imm32(UTF8_SHIFT_6)); i32_shr_u; i32_const(Imm32(UTF8_PAYLOAD_MASK)); i32_and; i32_or;
                             i32_store8(data + 2);
-                            local_get(r);
-                            i32_const(UTF8_CONT_PREFIX); local_get(cp); i32_const(UTF8_PAYLOAD_MASK); i32_and; i32_or;
+                            local_get(Local(r));
+                            i32_const(Imm32(UTF8_CONT_PREFIX)); local_get(Local(cp)); i32_const(Imm32(UTF8_PAYLOAD_MASK)); i32_and; i32_or;
                             i32_store8(data + 3);
-                            local_get(r);
+                            local_get(Local(r));
                           end;
                         end;
                       end;
@@ -516,18 +517,18 @@ impl FuncCompiler<'_> {
                 let some = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
                 wasm!(self.func, {
-                    local_set(s);
-                    local_get(s); i32_load(0); i32_eqz; // empty?
-                    if_i32; i32_const(0); // none
+                    local_set(Local(s));
+                    local_get(Local(s)); i32_load(0); i32_eqz; // empty?
+                    if_i32; i32_const(Imm32(0)); // none
                     else_;
                       // cp = slice(s, 0, width(s, 0))
-                      local_get(s); i32_const(0);
-                      local_get(s); i32_const(0); call(self.emitter.rt.string.utf8_width);
-                      call(self.emitter.rt.string.slice); local_set(cp);
+                      local_get(Local(s)); i32_const(Imm32(0));
+                      local_get(Local(s)); i32_const(Imm32(0)); call(self.emitter.rt.string.utf8_width);
+                      call(self.emitter.rt.string.slice); local_set(Local(cp));
                       // wrap in some
-                      i32_const(OPTION_PTR_BOX_BYTES); call(self.emitter.rt.alloc); local_set(some);
-                      local_get(some); local_get(cp); i32_store(0);
-                      local_get(some);
+                      i32_const(Imm32(OPTION_PTR_BOX_BYTES)); call(self.emitter.rt.alloc); local_set(Local(some));
+                      local_get(Local(some)); local_get(Local(cp)); i32_store(0);
+                      local_get(Local(some));
                     end;
                 });
                 self.scratch.free_i32(some);
@@ -541,22 +542,22 @@ impl FuncCompiler<'_> {
                 let cp = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
                 wasm!(self.func, {
-                    local_set(s);
-                    local_get(s); i32_load(0); i32_eqz;
-                    if_i32; i32_const(0);
+                    local_set(Local(s));
+                    local_get(Local(s)); i32_load(0); i32_eqz;
+                    if_i32; i32_const(Imm32(0));
                     else_;
                       // start = byte_of_cp(s, char_count(s) - 1)
-                      local_get(s);
-                      local_get(s); call(self.emitter.rt.string.char_count); i32_wrap_i64;
-                      i32_const(1); i32_sub;
-                      call(self.emitter.rt.string.utf8_byte_of_cp); local_set(start);
+                      local_get(Local(s));
+                      local_get(Local(s)); call(self.emitter.rt.string.char_count); i32_wrap_i64;
+                      i32_const(Imm32(1)); i32_sub;
+                      call(self.emitter.rt.string.utf8_byte_of_cp); local_set(Local(start));
                       // cp = slice(s, start, byte_len)
-                      local_get(s); local_get(start); local_get(s); i32_load(0);
-                      call(self.emitter.rt.string.slice); local_set(cp);
+                      local_get(Local(s)); local_get(Local(start)); local_get(Local(s)); i32_load(0);
+                      call(self.emitter.rt.string.slice); local_set(Local(cp));
                       // wrap in some
-                      i32_const(OPTION_PTR_BOX_BYTES); call(self.emitter.rt.alloc); local_set(start);
-                      local_get(start); local_get(cp); i32_store(0);
-                      local_get(start);
+                      i32_const(Imm32(OPTION_PTR_BOX_BYTES)); call(self.emitter.rt.alloc); local_set(Local(start));
+                      local_get(Local(start)); local_get(Local(cp)); i32_store(0);
+                      local_get(Local(start));
                     end;
                 });
                 self.scratch.free_i32(cp);
@@ -571,7 +572,7 @@ impl FuncCompiler<'_> {
                 let n = self.scratch.alloc_i32();
                 let cp = self.scratch.alloc_i32(); // count - n
                 self.emit_expr(&args[0]);
-                wasm!(self.func, { local_set(s); });
+                wasm!(self.func, { local_set(Local(s)); });
                 self.emit_expr(&args[1]);
                 // Unsigned saturate the i64 COUNT (C-054): native take_end uses
                 // `n as usize >= count → start 0` (whole string). A negative `n`
@@ -581,16 +582,16 @@ impl FuncCompiler<'_> {
                 // `2^32`/`2^32+k` (they wrap to small non-negative counts).
                 self.emit_clamp_count_to_i32(super::calls_list_helpers::ClampHi::Const(STRING_COUNT_HUGE));
                 wasm!(self.func, {
-                    local_set(n);
+                    local_set(Local(n));
                     // cp = char_count(s) - n
-                    local_get(s); call(self.emitter.rt.string.char_count); i32_wrap_i64;
-                    local_get(n); i32_sub; local_set(cp);
+                    local_get(Local(s)); call(self.emitter.rt.string.char_count); i32_wrap_i64;
+                    local_get(Local(n)); i32_sub; local_set(Local(cp));
                     // start_byte = byte_of_cp(s, max(0, cp))
-                    local_get(cp); i32_const(0); i32_lt_s;
-                    if_empty; i32_const(0); local_set(cp); end;
-                    local_get(s);
-                    local_get(s); local_get(cp); call(self.emitter.rt.string.utf8_byte_of_cp);
-                    local_get(s); i32_load(0);
+                    local_get(Local(cp)); i32_const(Imm32(0)); i32_lt_s;
+                    if_empty; i32_const(Imm32(0)); local_set(Local(cp)); end;
+                    local_get(Local(s));
+                    local_get(Local(s)); local_get(Local(cp)); call(self.emitter.rt.string.utf8_byte_of_cp);
+                    local_get(Local(s)); i32_load(0);
                     call(self.emitter.rt.string.slice);
                 });
                 self.scratch.free_i32(cp);
@@ -604,7 +605,7 @@ impl FuncCompiler<'_> {
                 let n = self.scratch.alloc_i32();
                 let cp = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
-                wasm!(self.func, { local_set(s); });
+                wasm!(self.func, { local_set(Local(s)); });
                 self.emit_expr(&args[1]);
                 // Unsigned saturate the i64 COUNT (C-054): native drop_end uses
                 // `n as usize >= count → end 0` (empty). A negative `n` OR any
@@ -612,13 +613,13 @@ impl FuncCompiler<'_> {
                 // sentinel here, so `cp = count - n` underflows to <0 → end 0.
                 self.emit_clamp_count_to_i32(super::calls_list_helpers::ClampHi::Const(STRING_COUNT_HUGE));
                 wasm!(self.func, {
-                    local_set(n);
-                    local_get(s); call(self.emitter.rt.string.char_count); i32_wrap_i64;
-                    local_get(n); i32_sub; local_set(cp); // cp = count - n
-                    local_get(cp); i32_const(0); i32_lt_s;
-                    if_empty; i32_const(0); local_set(cp); end;
-                    local_get(s); i32_const(0);
-                    local_get(s); local_get(cp); call(self.emitter.rt.string.utf8_byte_of_cp);
+                    local_set(Local(n));
+                    local_get(Local(s)); call(self.emitter.rt.string.char_count); i32_wrap_i64;
+                    local_get(Local(n)); i32_sub; local_set(Local(cp)); // cp = count - n
+                    local_get(Local(cp)); i32_const(Imm32(0)); i32_lt_s;
+                    if_empty; i32_const(Imm32(0)); local_set(Local(cp)); end;
+                    local_get(Local(s)); i32_const(Imm32(0));
+                    local_get(Local(s)); local_get(Local(cp)); call(self.emitter.rt.string.utf8_byte_of_cp);
                     call(self.emitter.rt.string.slice);
                 });
                 self.scratch.free_i32(cp);
@@ -631,7 +632,7 @@ impl FuncCompiler<'_> {
                 let s = self.scratch.alloc_i32();
                 let n = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
-                wasm!(self.func, { local_set(s); });
+                wasm!(self.func, { local_set(Local(s)); });
                 self.emit_expr(&args[1]);
                 // Saturate the i64 codepoint COUNT to [0, i32::MAX] BEFORE the
                 // wrap (C-054). Native `take(n as usize)` is UNSIGNED, so a
@@ -644,9 +645,9 @@ impl FuncCompiler<'_> {
                 // clamps to byte_len → whole string.
                 self.emit_clamp_count_to_i32(super::calls_list_helpers::ClampHi::Const(STRING_COUNT_HUGE));
                 wasm!(self.func, {
-                    local_set(n);
-                    local_get(s); i32_const(0);
-                    local_get(s); local_get(n); call(self.emitter.rt.string.utf8_byte_of_cp);
+                    local_set(Local(n));
+                    local_get(Local(s)); i32_const(Imm32(0));
+                    local_get(Local(s)); local_get(Local(n)); call(self.emitter.rt.string.utf8_byte_of_cp);
                     call(self.emitter.rt.string.slice);
                 });
                 self.scratch.free_i32(n);
@@ -658,7 +659,7 @@ impl FuncCompiler<'_> {
                 let s = self.scratch.alloc_i32();
                 let n = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
-                wasm!(self.func, { local_set(s); });
+                wasm!(self.func, { local_set(Local(s)); });
                 self.emit_expr(&args[1]);
                 // Unsigned saturate the i64 COUNT (C-054): native
                 // `drop(n as usize)` treats a negative `n` and any `n >= 2^32`
@@ -666,10 +667,10 @@ impl FuncCompiler<'_> {
                 // sentinel; `byte_of_cp` then clamps the start to byte_len.
                 self.emit_clamp_count_to_i32(super::calls_list_helpers::ClampHi::Const(STRING_COUNT_HUGE));
                 wasm!(self.func, {
-                    local_set(n);
-                    local_get(s);
-                    local_get(s); local_get(n); call(self.emitter.rt.string.utf8_byte_of_cp);
-                    local_get(s); i32_load(0);
+                    local_set(Local(n));
+                    local_get(Local(s));
+                    local_get(Local(s)); local_get(Local(n)); call(self.emitter.rt.string.utf8_byte_of_cp);
+                    local_get(Local(s)); i32_load(0);
                     call(self.emitter.rt.string.slice);
                 });
                 self.scratch.free_i32(n);
@@ -693,7 +694,7 @@ impl FuncCompiler<'_> {
                 self.emit_expr(&args[1]);
                 wasm!(self.func, {
                     call(self.emitter.rt.string_append);
-                    local_set(new_ptr);
+                    local_set(Local(new_ptr));
                 });
                 // Write the (possibly reallocated) string ptr back into the
                 // local / global / mutable-capture cell.
@@ -706,7 +707,7 @@ impl FuncCompiler<'_> {
                 // writeback is needed — the pointer is unchanged. Mirrors
                 // `list.clear`.
                 self.emit_expr(&args[0]);
-                wasm!(self.func, { i32_const(0); i32_store(0); });
+                wasm!(self.func, { i32_const(Imm32(0)); i32_store(0); });
             }
             _ => return false,
         }
@@ -739,7 +740,7 @@ impl FuncCompiler<'_> {
 
         if parts.is_empty() {
             let empty = self.emitter.intern_string("");
-            wasm!(self.func, { i32_const(empty as i32); });
+            wasm!(self.func, { i32_const(Imm32(empty as i32)); });
             return;
         }
 
@@ -754,46 +755,46 @@ impl FuncCompiler<'_> {
         for part in parts {
             self.emit_string_part(part);
             let local = self.scratch.alloc_i32();
-            wasm!(self.func, { local_set(local); });
+            wasm!(self.func, { local_set(Local(local)); });
             part_locals.push(local);
         }
 
         // Stage 2: total_len = sum(load(part) for each part).
         // String header layout: mem0[ptr + 0] = byte length.
         let total_len_local = self.scratch.alloc_i32();
-        wasm!(self.func, { i32_const(0); local_set(total_len_local); });
+        wasm!(self.func, { i32_const(Imm32(0)); local_set(Local(total_len_local)); });
         for &p in &part_locals {
             wasm!(self.func, {
-                local_get(total_len_local);
-                local_get(p);
+                local_get(Local(total_len_local));
+                local_get(Local(p));
                 i32_load(0);
                 i32_add;
-                local_set(total_len_local);
+                local_set(Local(total_len_local));
             });
         }
 
         // Stage 3: alloc result = [len:i32][cap:i32][data...] with one heap bump.
         let result_local = self.scratch.alloc_i32();
         wasm!(self.func, {
-            local_get(total_len_local);
-            i32_const(self.emitter.layout_reg.header_size(super::engine::layout::STRING) as i32);
+            local_get(Local(total_len_local));
+            i32_const(Imm32(self.emitter.layout_reg.header_size(super::engine::layout::STRING) as i32));
             i32_add;
         });
         let alloc_fn = self.emitter.rt.alloc;
         wasm!(self.func, {
             call(alloc_fn);
-            local_set(result_local);
+            local_set(Local(result_local));
         });
         // Write length prefix.
         wasm!(self.func, {
-            local_get(result_local);
-            local_get(total_len_local);
+            local_get(Local(result_local));
+            local_get(Local(total_len_local));
             i32_store(0);
         });
         // Write capacity = total_len.
         wasm!(self.func, {
-            local_get(result_local);
-            local_get(total_len_local);
+            local_get(Local(result_local));
+            local_get(Local(total_len_local));
             i32_store(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::CAP) as i32 as u32);
         });
 
@@ -801,33 +802,33 @@ impl FuncCompiler<'_> {
         // dst starts at result + self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32 and advances by each part's length.
         let dst_local = self.scratch.alloc_i32();
         wasm!(self.func, {
-            local_get(result_local);
-            i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32);
+            local_get(Local(result_local));
+            i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32));
             i32_add;
-            local_set(dst_local);
+            local_set(Local(dst_local));
         });
         for &p in &part_locals {
             wasm!(self.func, {
                 // memory.copy(dst, src=part+self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32, len=mem0[part])
-                local_get(dst_local);
-                local_get(p);
-                i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32);
+                local_get(Local(dst_local));
+                local_get(Local(p));
+                i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32));
                 i32_add;
-                local_get(p);
+                local_get(Local(p));
                 i32_load(0);
                 memory_copy(0, 0);
                 // dst += part length
-                local_get(dst_local);
-                local_get(p);
+                local_get(Local(dst_local));
+                local_get(Local(p));
                 i32_load(0);
                 i32_add;
-                local_set(dst_local);
+                local_set(Local(dst_local));
             });
         }
 
         // Leave the result pointer on the stack as the interp value, then
         // release the scratch locals.
-        wasm!(self.func, { local_get(result_local); });
+        wasm!(self.func, { local_get(Local(result_local)); });
         for p in part_locals {
             self.scratch.free_i32(p);
         }
@@ -841,7 +842,7 @@ impl FuncCompiler<'_> {
         match part {
             IrStringPart::Lit { value } => {
                 let offset = self.emitter.intern_string(value);
-                wasm!(self.func, { i32_const(offset as i32); });
+                wasm!(self.func, { i32_const(Imm32(offset as i32)); });
             }
             IrStringPart::Expr { expr } => {
                 match &expr.ty {
@@ -856,9 +857,9 @@ impl FuncCompiler<'_> {
                         let f = self.emitter.intern_string("false");
                         wasm!(self.func, {
                             if_i32;
-                            i32_const(t as i32);
+                            i32_const(Imm32(t as i32));
                             else_;
-                            i32_const(f as i32);
+                            i32_const(Imm32(f as i32));
                             end;
                         });
                     }
