@@ -74,11 +74,12 @@ impl LowerCtx {
                     None
                 };
                 for arm in arms {
-                    // A guard is a deferred heap-touching sub-computation — walled.
-                    if arm.guard.is_some() {
-                        return Err(LowerError::Unsupported(
-                            "match arm guard not in this control-flow slice".into(),
-                        ));
+                    // An arm GUARD is a scalar Bool sub-condition. The arms are
+                    // LINEARIZED regardless of the guard, so it adds no ownership — just
+                    // capture the caps of any call inside it; the guard's conditional
+                    // truth (and any heap touch within it) is deferred like every Opaque.
+                    if let Some(guard) = &arm.guard {
+                        self.record_elided_calls(guard);
                     }
                     self.lower_branch_arm(Some((&arm.pattern, subject_value)), &arm.body)?;
                 }

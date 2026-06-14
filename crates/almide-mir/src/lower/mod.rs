@@ -237,6 +237,27 @@ impl LowerCtx {
                     self.lower_for_in(*var, var_tuple, iterable, body)
                 }
                 IrExprKind::While { cond, body } => self.lower_while(cond, body),
+                // A BLOCK expression statement (`{ stmts; e }` for its effect): lower
+                // its statements (locals ride to the enclosing scope), then its tail —
+                // a Unit effect call, a nested branch, or a deferred value whose calls
+                // we capture (its value is discarded in statement position).
+                IrExprKind::Block { stmts, expr: tail } => {
+                    for s in stmts {
+                        self.lower_stmt(s)?;
+                    }
+                    if let Some(t) = tail {
+                        match &t.kind {
+                            IrExprKind::Call { .. } if matches!(t.ty, Ty::Unit) => {
+                                self.lower_effect_call(t)?
+                            }
+                            IrExprKind::If { .. } | IrExprKind::Match { .. } => {
+                                self.lower_branch(t)?
+                            }
+                            _ => self.record_elided_calls(t),
+                        }
+                    }
+                    Ok(())
+                }
                 _ => self.lower_effect_call(expr),
             },
             // A source comment carries no ownership — skip it (it is not a
