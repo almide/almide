@@ -506,6 +506,13 @@ pub(crate) fn kind_name(k: &IrExprKind) -> &'static str {
         IrExprKind::Continue => "Continue",
         IrExprKind::TailCall { .. } => "TailCall",
         IrExprKind::IterChain { .. } => "IterChain",
+        IrExprKind::Await { .. } => "Await",
+        IrExprKind::Clone { .. } => "Clone",
+        IrExprKind::Deref { .. } => "Deref",
+        IrExprKind::Borrow { .. } => "Borrow",
+        IrExprKind::ToVec { .. } => "ToVec",
+        IrExprKind::BoxNew { .. } => "BoxNew",
+        IrExprKind::SpreadRecord { .. } => "SpreadRecord",
         _ => "<other>",
     }
 }

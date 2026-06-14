@@ -47,6 +47,7 @@ impl LowerCtx {
             | IrExprKind::MapLiteral { .. }
             | IrExprKind::EmptyMap
             | IrExprKind::Record { .. }
+            | IrExprKind::SpreadRecord { .. }
             | IrExprKind::Tuple { .. }
             | IrExprKind::LitStr { .. }
             | IrExprKind::StringInterp { .. }
