@@ -165,6 +165,17 @@ impl LowerCtx {
                 self.live_heap_handles.push(dst);
                 Ok(())
             }
+            // `var x = { stmts; tail }` — a heap BLOCK value. Lower the block's
+            // statements (their locals ride to the enclosing scope and are dropped at
+            // scope end), then bind `x` to the block's heap TAIL via `lower_bind` (a var
+            // alias / fresh literal / call result / nested branch — all proven shapes).
+            // A tail-less block is never heap-typed, so it falls through to the wall.
+            IrExprKind::Block { stmts, expr: Some(tail) } => {
+                for s in stmts {
+                    self.lower_stmt(s)?;
+                }
+                self.lower_bind(var, ty, tail)
+            }
             other => Err(LowerError::Unsupported(format!(
                 "heap bind from {} not in this brick",
                 kind_name(other)
@@ -200,9 +211,14 @@ impl LowerCtx {
                     match p {
                         IrPattern::Bind { var, ty } => self.lower_bind(*var, ty, v)?,
                         IrPattern::Wildcard => {}
+                        // A NESTED tuple sub-pattern `(b, c)` binds against the
+                        // corresponding element value `v` — recurse (the same two sound
+                        // shapes: a same-arity tuple literal binds component-wise, a
+                        // tracked heap var aliases the container).
+                        IrPattern::Tuple { .. } => self.lower_destructure(p, v)?,
                         _ => {
                             return Err(LowerError::Unsupported(
-                                "destructure sub-pattern (only a bound var or `_`) not in this brick"
+                                "destructure sub-pattern (only a bound var, `_`, or nested tuple) not in this brick"
                                     .into(),
                             ))
                         }

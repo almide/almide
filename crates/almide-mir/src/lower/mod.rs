@@ -276,6 +276,16 @@ impl LowerCtx {
                 self.record_elided_calls(value);
                 Ok(())
             }
+            // `m[k] = v` — map insertion/update, in-place on the buffer. Like
+            // `IndexAssign` it requires the map to be UNIQUELY owned (copy-on-write) →
+            // `MakeUnique`. The key and value are deferred — record their calls so the
+            // caps fold is not blind to their effects.
+            IrStmtKind::MapInsert { target, key, value } => {
+                self.lower_place_mutation(*target)?;
+                self.record_elided_calls(key);
+                self.record_elided_calls(value);
+                Ok(())
+            }
             // A bare expression statement: an `if`/`match` in statement position is
             // LINEARIZED (control flow), an EFFECT call (`println(s)`) is lowered as a
             // runtime effect. Other non-call expr statements stay Unsupported (the

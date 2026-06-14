@@ -512,6 +512,72 @@
     }
 
     #[test]
+    fn heap_bind_from_block_lowers() {
+        // var x = { var a = [1]; a }  — a heap BLOCK value: lower the block's stmts, then
+        // bind x to the heap tail (here the block-local `a`, aliased via Dup). Balanced.
+        let blk = ir_expr(
+            IrExprKind::Block {
+                stmts: vec![bind(1, list_int(), ir_expr(IrExprKind::List { elements: vec![] }, list_int()))],
+                expr: Some(Box::new(ir_expr(IrExprKind::Var { id: VarId(1) }, list_int()))),
+            },
+            list_int(),
+        );
+        let b = body(vec![bind(0, list_int(), blk)]);
+        let mir = lower_body(&b, "main").expect("heap bind from a block lowers");
+        assert_eq!(verify_ownership(&mir), Ok(()));
+    }
+
+    #[test]
+    fn map_insert_is_a_place_mutation() {
+        // var m = []; m[k] = v  — map insertion is in-place: MakeUnique (copy-on-write).
+        let mi = stmt(IrStmtKind::MapInsert {
+            target: VarId(0),
+            key: ir_expr(IrExprKind::LitStr { value: "b".into() }, Ty::String),
+            value: ir_expr(IrExprKind::LitInt { value: 2 }, Ty::Int),
+        });
+        let b = body(vec![
+            bind(0, list_int(), ir_expr(IrExprKind::List { elements: vec![] }, list_int())),
+            mi,
+        ]);
+        let mir = lower_body(&b, "main").expect("map insert lowers");
+        assert!(mir.ops.iter().any(|o| matches!(o, Op::MakeUnique { .. })), "map insert is MakeUnique: {:?}", mir.ops);
+        assert_eq!(verify_ownership(&mir), Ok(()));
+    }
+
+    #[test]
+    fn nested_tuple_destructure_recurses() {
+        // let (a, (b, c)) = (1, (2, "x"))  — the nested sub-pattern (b, c) binds against
+        // the nested tuple literal (2, "x") component-wise (recursion). String leaf = heap.
+        let inner_pat = IrPattern::Tuple {
+            elements: vec![
+                IrPattern::Bind { var: VarId(1), ty: Ty::Int },
+                IrPattern::Bind { var: VarId(2), ty: Ty::String },
+            ],
+        };
+        let pat = IrPattern::Tuple {
+            elements: vec![IrPattern::Bind { var: VarId(0), ty: Ty::Int }, inner_pat],
+        };
+        let inner_val = ir_expr(
+            IrExprKind::Tuple {
+                elements: vec![
+                    ir_expr(IrExprKind::LitInt { value: 2 }, Ty::Int),
+                    ir_expr(IrExprKind::LitStr { value: "x".into() }, Ty::String),
+                ],
+            },
+            Ty::Unit,
+        );
+        let val = ir_expr(
+            IrExprKind::Tuple {
+                elements: vec![ir_expr(IrExprKind::LitInt { value: 1 }, Ty::Int), inner_val],
+            },
+            Ty::Unit,
+        );
+        let b = body(vec![stmt(IrStmtKind::BindDestructure { pattern: pat, value: val })]);
+        let mir = lower_body(&b, "main").expect("nested tuple destructure lowers");
+        assert_eq!(verify_ownership(&mir), Ok(()));
+    }
+
+    #[test]
     fn global_reference_is_admitted_scalar_const_and_heap_alloc() {
         use almide_lang::intern::sym;
         // A function references two top-level `let` globals it never binds locally: a
