@@ -766,8 +766,15 @@ mod tests {
                 globals.insert(tl.var, tl.ty.clone());
             }
         }
-        let functions =
+        let mut functions: Vec<MirFunction> =
             ir.functions.iter().filter_map(|f| crate::lower::lower_function(f, &globals).ok()).collect();
+        // Auto-link the self-hosted print_str runtime (the v1 linker step) so a plain
+        // `println(…)` program — which lowers to a PrintStr → `(call $print_str)` —
+        // resolves, matching how render_program links it. Skip if already defined.
+        if !functions.iter().any(|f| f.name == "print_str") {
+            let rt = lower_source(include_str!("../../../stdlib/print_str.almd"));
+            functions.extend(rt.functions);
+        }
         MirProgram { functions }
     }
 
@@ -963,6 +970,26 @@ mod tests {
         // End-to-end: it prints "hello" (matching v0's native println).
         if let Some(out) = build_and_run("selfhost_println", &render_wasm_program(&prog)) {
             assert_eq!(out, "hello");
+        }
+    }
+
+    /// SEAMLESS v1=v0: a PLAIN `println` program — byte-identical to what runs on v0,
+    /// with NO print_str defined — works on v1 because the self-hosted print_str
+    /// runtime is AUTO-LINKED (the v1 linker step). Two printlns include the newline
+    /// between them (print_str writes string + "\n" via two single-iovec fd_writes).
+    #[test]
+    fn plain_println_auto_links_and_prints() {
+        let prog = lower_source(
+            "fn main() -> Unit = {\n  println(\"line one\")\n  println(\"line two\")\n}\n",
+        );
+        // print_str was auto-linked (the source did not define it).
+        assert!(
+            prog.functions.iter().any(|f| f.name == "print_str"),
+            "the self-hosted print_str must be auto-linked"
+        );
+        // build_and_run trims the trailing newline; the MIDDLE newline must remain.
+        if let Some(out) = build_and_run("plain_println", &render_wasm_program(&prog)) {
+            assert_eq!(out, "line one\nline two");
         }
     }
 

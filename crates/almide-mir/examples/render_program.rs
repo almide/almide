@@ -87,5 +87,19 @@ fn main() {
         }
     }
 
+    // Auto-link the self-hosted runtime: `println(s)` lowers to a `PrintStr` call
+    // rendered as `(call $print_str ...)`, so a program that prints needs the
+    // Almide-written `print_str` (compiled through this same pipeline). Include the
+    // bundled runtime unless the program already defines it — the v1 runtime-linking
+    // step (the self-host vision: no hand-written wasm for print).
+    if !functions.iter().any(|f| f.name == "print_str") {
+        let rt = source_to_ir(include_str!("../../../stdlib/print_str.almd"));
+        for f in &rt.functions {
+            if let Ok(mir) = almide_mir::lower::lower_function(f, &globals) {
+                functions.push(mir);
+            }
+        }
+    }
+
     print!("{}", render_wasm_program(&MirProgram { functions }));
 }

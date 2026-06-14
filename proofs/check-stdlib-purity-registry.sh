@@ -45,6 +45,7 @@ declare -A IMPURE_PLAIN=(
   [testing]="assert_* print failures / abort the process — Stdout + process effect"
   [datetime]="now()/monotonic_ns() read the wall clock — a nondeterministic host source"
   [prim]="the v1 primitive floor — raw memory load/store + the fd_write host call (unsafe, reaches Stdout). v1 intercepts prim.* to Op::Prim BEFORE the purity gate, and Op::Prim{FdWrite} carries Capability::Stdout in cap_witness, so caps stay counted; this entry just keeps the registry complete (prim is never admitted as pure)."
+  [print_str]="the self-hosted println implementation (v1 runtime) — writes to stdout via prim.fd_write, so it reaches Stdout. Not a user-facing module; auto-linked when a program prints."
 )
 
 # (A) Extract PURE_MODULES from the Rust const (the single source of the admit-set).
