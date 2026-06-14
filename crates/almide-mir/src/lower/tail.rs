@@ -83,13 +83,26 @@ impl LowerCtx {
                     Ok(None)
                 }
                 // A Unit `if` tail EXECUTES (only the taken arm's effects run) when the
-                // cond is a scalar; else it linearizes. `match` stays linearized.
+                // cond is a scalar; else it linearizes.
                 IrExprKind::If { cond, then, else_ }
                     if self.try_lower_unit_if(cond, then, else_) =>
                 {
                     Ok(None)
                 }
-                IrExprKind::If { .. } | IrExprKind::Match { .. } => {
+                // A Unit `match` tail over Int literal patterns EXECUTES: desugar to a
+                // nested if and run only the matched arm; non-literal patterns linearize.
+                IrExprKind::Match { subject, arms } => {
+                    if let Some(if_expr) = self.desugar_match_to_if(subject, arms, &Ty::Unit) {
+                        if let IrExprKind::If { cond, then, else_ } = &if_expr.kind {
+                            if self.try_lower_unit_if(cond, then, else_) {
+                                return Ok(None);
+                            }
+                        }
+                    }
+                    self.lower_branch(tail)?;
+                    Ok(None)
+                }
+                IrExprKind::If { .. } => {
                     self.lower_branch(tail)?;
                     Ok(None)
                 }
@@ -330,10 +343,18 @@ impl LowerCtx {
                 self.ops.push(Op::Const { dst });
                 Ok(Some(dst))
             }
-            // A scalar-result `match` tail: LINEARIZE the arms (their effects / arm-local
-            // ownership lowered, per-arm balanced) and emit ONE `Const` as the merged
-            // scalar result (structured `match` execution is a later step).
-            IrExprKind::Match { .. } => {
+            // A scalar-result `match` over INT literal patterns EXECUTES: desugar to a
+            // nested `if subject == lit then arm else …` and lower it via the scalar-if
+            // machinery (only the matched arm runs). Non-literal patterns / guards / a
+            // non-scalar subject fall back to the deferred linearize + merged `Const`.
+            IrExprKind::Match { subject, arms } => {
+                if let Some(if_expr) = self.desugar_match_to_if(subject, arms, &tail.ty) {
+                    if let IrExprKind::If { cond, then, else_ } = &if_expr.kind {
+                        if let Some(dst) = self.try_lower_scalar_if(cond, then, else_, &tail.ty) {
+                            return Ok(Some(dst));
+                        }
+                    }
+                }
                 self.lower_branch(tail)?;
                 let dst = self.fresh_value();
                 self.ops.push(Op::Const { dst });

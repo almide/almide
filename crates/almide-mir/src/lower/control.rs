@@ -3,7 +3,7 @@
 use super::*;
 use crate::{CallArg, Op, ValueId};
 use almide_ir::{
-    IrExpr, IrExprKind, IrPattern, IrStmt, VarId,
+    IrExpr, IrExprKind, IrMatchArm, IrPattern, IrStmt, VarId,
 };
 use almide_lang::types::Ty;
 
@@ -186,6 +186,64 @@ impl LowerCtx {
         None
     }
 
+    /// Desugar a `match subj { lit => body, …, _ => body }` over INT LITERAL patterns
+    /// (+ a trailing wildcard/bind catch-all, no guards) to a nested `if subj == lit
+    /// then body else …` IrExpr — so it EXECUTES via the if machinery (only the matched
+    /// arm runs). `subj` is cloned into each `==`; a Var resolves to the same ValueId
+    /// (no re-eval), and a non-scalar-lowerable subject makes the cond fail → the caller
+    /// falls back to linearization. Returns `None` for non-literal patterns / guards /
+    /// a non-exhaustive literal list (the linearization handles those).
+    pub(crate) fn desugar_match_to_if(
+        &self,
+        subject: &IrExpr,
+        arms: &[IrMatchArm],
+        result_ty: &Ty,
+    ) -> Option<IrExpr> {
+        if arms.is_empty() || arms.iter().any(|a| a.guard.is_some()) {
+            return None;
+        }
+        self.build_match_chain(subject, arms, result_ty)
+    }
+
+    fn build_match_chain(
+        &self,
+        subject: &IrExpr,
+        arms: &[IrMatchArm],
+        result_ty: &Ty,
+    ) -> Option<IrExpr> {
+        let (first, rest) = arms.split_first()?;
+        match &first.pattern {
+            // A catch-all: its body is the value, no further test.
+            IrPattern::Wildcard | IrPattern::Bind { .. } => Some(first.body.clone()),
+            IrPattern::Literal { expr } => {
+                // A literal-only tail with no catch-all is not exhaustive over Int — defer.
+                let else_branch = self.build_match_chain(subject, rest, result_ty)?;
+                let cond = IrExpr {
+                    kind: IrExprKind::BinOp {
+                        op: almide_ir::BinOp::Eq,
+                        left: Box::new(subject.clone()),
+                        right: Box::new(expr.clone()),
+                    },
+                    ty: Ty::Bool,
+                    span: None,
+                    def_id: None,
+                };
+                Some(IrExpr {
+                    kind: IrExprKind::If {
+                        cond: Box::new(cond),
+                        then: Box::new(first.body.clone()),
+                        else_: Box::new(else_branch),
+                    },
+                    ty: result_ty.clone(),
+                    span: None,
+                    def_id: None,
+                })
+            }
+            // Constructor / Tuple / Some·Ok·Err / record / list patterns: defer.
+            _ => None,
+        }
+    }
+
     /// Try to lower a UNIT (effect) `if cond then … else …` to EXECUTABLE control flow
     /// — only the taken arm's EFFECTS run (the old linearization ran BOTH, mismatching
     /// v0). Each arm goes through `lower_branch_arm` (its Unit-call tail is an effect,
@@ -231,8 +289,23 @@ impl LowerCtx {
                 return None;
             }
         }
-        let val = tail
-            .and_then(|t| self.lower_scalar_value(t).or_else(|| self.try_lower_scalar_call(t, &t.ty)));
+        // A nested `if`/`match` tail (an else-if chain — what a desugared `match`
+        // produces) EXECUTES recursively via the scalar-if machinery; otherwise the
+        // tail is a scalar value or a scalar call.
+        let val = tail.and_then(|t| match &t.kind {
+            IrExprKind::If { cond, then, else_ } => {
+                self.try_lower_scalar_if(cond, then, else_, &t.ty)
+            }
+            IrExprKind::Match { subject, arms } => self
+                .desugar_match_to_if(subject, arms, &t.ty)
+                .and_then(|if_expr| match &if_expr.kind {
+                    IrExprKind::If { cond, then, else_ } => {
+                        self.try_lower_scalar_if(cond, then, else_, &t.ty)
+                    }
+                    _ => None,
+                }),
+            _ => self.lower_scalar_value(t).or_else(|| self.try_lower_scalar_call(t, &t.ty)),
+        });
         self.in_frame -= 1;
         self.drop_arm_locals(lhh_mark);
         val

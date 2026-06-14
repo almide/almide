@@ -1094,6 +1094,43 @@ mod tests {
         }
     }
 
+    #[test]
+    fn match_unit_executes_only_matched_arm() {
+        // A Unit `match` over Int literal patterns (+ a `_` catch-all) desugars to a
+        // nested `if n == lit then … else …` and EXECUTES: only the matched arm's
+        // println runs — byte-identical to v0's match.
+        let src = "fn classify(n: Int) -> Unit = match n {\n  \
+            0 => println(\"zero\"),\n  \
+            1 => println(\"one\"),\n  \
+            _ => println(\"other\"),\n  \
+            }\n\
+            fn main() -> Unit = {\n  \
+            classify(0)\n  classify(1)\n  classify(7) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("match_unit", &render_wasm_program(&prog)) {
+            assert_eq!(out, "zero\none\nother");
+        }
+    }
+
+    #[test]
+    fn match_scalar_value_selects_matched_arm() {
+        // A scalar-result `match` over Int literals computes the matched arm's value
+        // (here printed via the self-hosted itoa). pick(1) selects the `1 => 200` arm.
+        let src = "fn put_int(n: Int, pos: Int) -> Int =\n  \
+            if n < 10 then { prim.store8(pos, 48 + n)\n    pos + 1 }\n  \
+            else { let p = put_int(n / 10, pos)\n    prim.store8(p, 48 + (n % 10))\n    p + 1 }\n\
+            fn write_int(n: Int) -> Unit = { let endp = put_int(n, 512)\n  \
+            prim.store8(endp, 10)\n  prim.store32(8, 512)\n  \
+            prim.store32(12, endp - 512 + 1)\n  let _w = prim.fd_write(1, 8, 1, 0) }\n\
+            fn pick(n: Int) -> Int = match n {\n  \
+            0 => 100,\n  1 => 200,\n  _ => 999,\n  }\n\
+            fn main() -> Unit = write_int(pick(1))\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("match_scalar", &render_wasm_program(&prog)) {
+            assert_eq!(out, "200");
+        }
+    }
+
     /// The hand-written WAT runtime is the BOOTSTRAP debt (§4.1). This guard
     /// makes the "never grow" rule MECHANICAL (not a comment): the count may only
     /// ratchet DOWN as the runtime self-hosts into Almide. If you added a

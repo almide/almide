@@ -302,7 +302,21 @@ impl LowerCtx {
                 {
                     Ok(())
                 }
-                IrExprKind::If { .. } | IrExprKind::Match { .. } => self.lower_branch(expr),
+                // A Unit `match` over INT literal patterns EXECUTES: desugar to a nested
+                // `if subject == lit then arm else …` and run it via try_lower_unit_if
+                // (only the matched arm's effects run). Non-literal patterns / guards / a
+                // non-scalar subject fall back to the linearization below.
+                IrExprKind::Match { subject, arms } => {
+                    if let Some(if_expr) = self.desugar_match_to_if(subject, arms, &Ty::Unit) {
+                        if let IrExprKind::If { cond, then, else_ } = &if_expr.kind {
+                            if self.try_lower_unit_if(cond, then, else_) {
+                                return Ok(());
+                            }
+                        }
+                    }
+                    self.lower_branch(expr)
+                }
+                IrExprKind::If { .. } => self.lower_branch(expr),
                 IrExprKind::ForIn { var, var_tuple, iterable, body } => {
                     self.lower_for_in(*var, var_tuple, iterable, body)
                 }
