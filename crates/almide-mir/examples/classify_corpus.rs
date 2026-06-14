@@ -64,8 +64,16 @@ fn count_ir_calls(body: &almide_ir::IrExpr) -> usize {
     }
     impl almide_ir::visit::IrVisitor for CallCounter {
         fn visit_expr(&mut self, e: &almide_ir::IrExpr) {
-            use almide_ir::IrExprKind::{Call, RuntimeCall, TailCall};
-            if matches!(e.kind, Call { .. } | RuntimeCall { .. } | TailCall { .. }) {
+            use almide_ir::IrExprKind::{Call, ClosureCreate, FnRef, RuntimeCall, TailCall};
+            // A direct call is one ir_call. A FnRef / ClosureCreate passed to a pure
+            // HOF is invoked by it — `lower_pure_module_call_args` emits ONE `Op::CallFn`
+            // marker per such arg (a mir_call) to capture the closure's caps. Count those
+            // function-reference nodes too, so a marker always has a matching ir_call and
+            // `mir_calls <= ir_calls` holds BY CONSTRUCTION — not by the frontend happening
+            // to eta-expand bare function-values to `Lambda` (which keeps them absent from
+            // MIR input today). Without this, a FnRef over-count could cancel a Computed/
+            // Method elision under-count, hiding a taint and falsely caps-verifying a fn.
+            if matches!(e.kind, Call { .. } | RuntimeCall { .. } | TailCall { .. } | FnRef { .. } | ClosureCreate { .. }) {
                 self.n += 1;
             }
             almide_ir::visit::walk_expr(self, e);

@@ -512,6 +512,32 @@
     }
 
     #[test]
+    fn computed_effect_call_is_deferred_and_tainted() {
+        // var g = (x) => …; (g)()  — a Computed effect call (closure-VALUE callee) in
+        // statement position. Deferred like a Computed value call: no nameable CallFn is
+        // emitted (the call is elided), so it lowers (memory-safe, no ownership op for a
+        // Unit result) and the ir_calls>mir_calls gate taints it caps-unverified.
+        let g_ref = ir_expr(IrExprKind::Var { id: VarId(0) }, Ty::Unit);
+        let computed = ir_expr(
+            IrExprKind::Call {
+                target: CallTarget::Computed { callee: Box::new(g_ref) },
+                args: vec![],
+                type_args: vec![],
+            },
+            Ty::Unit,
+        );
+        let b = body(vec![stmt(IrStmtKind::Expr { expr: computed })]);
+        let mir = lower_body(&b, "main").expect("a Computed effect call is deferred, not walled");
+        // No nameable CallFn for the computed callee (it is elided → caps taint).
+        assert!(
+            !mir.ops.iter().any(|o| matches!(o, Op::CallFn { .. } | Op::Call { .. })),
+            "the computed call is elided (no marker): {:?}",
+            mir.ops
+        );
+        assert_eq!(verify_ownership(&mir), Ok(()));
+    }
+
+    #[test]
     fn heap_bind_from_block_lowers() {
         // var x = { var a = [1]; a }  — a heap BLOCK value: lower the block's stmts, then
         // bind x to the heap tail (here the block-local `a`, aliased via Dup). Balanced.

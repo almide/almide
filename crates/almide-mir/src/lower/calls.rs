@@ -235,10 +235,24 @@ impl LowerCtx {
                     method.as_str()
                 )))
             }
+            // A Computed effect call `(g)()` — the callee is a closure VALUE we cannot
+            // name. DEFER it exactly like a Computed VALUE call: the callee's and args'
+            // analyzable sub-calls are captured (`record_elided_calls`), the Computed
+            // call itself is ELIDED (no nameable `CallFn`). Since `count_ir_calls` counts
+            // the Computed `Call` node but the lowering emits no marker for it,
+            // `ir_calls > mir_calls` TAINTS the function caps-unverified — honest (the
+            // closure's invocation capabilities are unknown), never falsely caps-verified.
+            // A discarded HEAP result is a fresh `Alloc{Opaque}` dropped at scope end;
+            // a Unit/scalar result carries no ownership.
             CallTarget::Computed { .. } => {
-                return Err(LowerError::Unsupported(
-                    "effect Computed call (closure-value callee) not in this brick".into(),
-                ))
+                self.record_elided_calls(call);
+                if is_heap_ty(&call.ty) {
+                    let dst = self.fresh_value();
+                    let repr = repr_of(&call.ty)?;
+                    self.ops.push(Op::Alloc { dst, repr, init: Init::Opaque });
+                    self.live_heap_handles.push(dst);
+                }
+                return Ok(());
             }
         };
         match (name, args.as_slice()) {
