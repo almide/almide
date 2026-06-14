@@ -192,3 +192,45 @@ stdlib self-hosts via the same floor.
   by the scalar-value + prim work; corpus-wall ownership/names/caps ACCEPT counts
   must not move except as a verified recovery.
 - The self-host print_str is a normal `MirFunction` — no new hand-written WAT.
+
+## DONE so far (2026-06-14)
+
+Keystone realized: a PLAIN `println("…")` (v0-identical source) byte-matches v0 via
+an auto-linked Almide-written `print_str` over the prim floor (commits 915fe2ee →
+b2896c87). Scalar-value foundation complete: `ConstInt`, `IntBinOp` Add/Sub/Mul/Div/Mod.
+prim floor: `Op::Prim{Handle/Load/Store/FdWrite}`. print_str writes string+"\n" via
+TWO single-iovec fd_writes (a 2-element iovec is not gathered by wasmtime).
+
+## NEXT: control-flow execution → print_int (the campaign's next architectural slice)
+
+This is SOUNDNESS-CRITICAL (it touches verify_ownership / the cert) and the corpus
+does NOT exercise it (only the runtime will), so it needs DEDICATED adversarial
+verification (like the scalar-call slice), best done with fresh focus.
+
+**Why**: `if/match` are currently LINEARIZED (both arms lowered into the flat op list,
+value deferred to `Const`/`Opaque`) — sound for the cert but it does NOT EXECUTE (both
+arms' effects would run). `print_int` (recursive itoa) needs a real branch: only the
+taken arm runs.
+
+**Design** (scalar first; heap-result if is a later step):
+- `Op::If { cond: ValueId, then_body: Vec<Op>, then_val: Option<ValueId>, else_body:
+  Vec<Op>, else_val: Option<ValueId>, dst: Option<ValueId> }` — NESTED op bodies.
+- Comparison `IntOp`s `Lt/Le/Gt/Ge/Eq/Ne` for the cond (gate on `left.ty == Ty::Int`),
+  rendered `(i64.extend_i32_u (i64.lt_s …))` (i64 cmp → i32 0/1 → i64).
+- Lowering: adapt `lower_branch` to EMIT `Op::If` with PER-ARM-BALANCED arms (keep the
+  existing linearization's per-arm drop discipline — that invariant is what makes
+  "run one arm" sound) + the arm values.
+- Cert: `verify_ownership` / `name_witness` / `cap_witness` recurse into both arms
+  SEQUENTIALLY — the SAME logic the corpus already proves for linearization, now on
+  structured arms (soundness by reuse; the per-arm-balance invariant from the lowering
+  is the load-bearing premise — adversarially verify it).
+- Render: `(local.set $dst (if (result i64) (i32.wrap_i64? — cond is i64 0/1, use
+  (i32.eqz (i32.eqz (i32.wrap_i64 cond))) or (i64.ne cond 0)) (then <then_body>
+  (local.get $then_val)) (else <else_body> (local.get $else_val))))`.
+- `defined_value`/`value_reprs`: `Op::If` dst → its repr. V: recurse or skip.
+- THEN `stdlib/print_int.almd`: recursive `put_int(n, pos)` — `if n < 10 then {store8;
+  pos+1} else { let p = put_int(n/10, pos); store8(p, '0'+n%10); p+1 }` — over prim +
+  Div/Mod[done] + If[this] + recursion[done]. Wire `int.to_string`/PrintInt → it.
+
+After print_int: control-flow + numbers are observable → verify the whole scalar/branch
+surface e2e vs v0; then string/list/map/json self-host on the same floor.
