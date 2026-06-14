@@ -2,6 +2,70 @@
 //!
 //! All `__str_*` runtime function registration and compilation lives here.
 
+// ── WASM immediate constants ──
+// UTF-8 byte classification boundaries (lead-byte ranges and continuation mask).
+// These mirror the Rust-level CONT_MASK/CONT_TAG consts defined later in the file,
+// but as i32 for use in WASM i32_const() immediates.
+const UTF8_CONT_TAG_IMM: i32  = 0x80; // 1000_0000: continuation byte tag / ASCII upper bound
+const UTF8_CONT_MASK_IMM: i32 = 0xC0; // 1100_0000: mask to isolate top-2 bits of any byte
+const UTF8_3B_LEAD_MIN: i32   = 0xE0; // 1110_0000: minimum value of a 3-byte sequence lead byte
+const UTF8_4B_LEAD_MIN: i32   = 0xF0; // 1111_0000: minimum value of a 4-byte sequence lead byte
+// Widths of UTF-8 multi-byte sequences.
+const UTF8_W2: i32 = 2; // 2-byte sequence width
+const UTF8_W3: i32 = 3; // 3-byte sequence width
+const UTF8_W4: i32 = 4; // 4-byte sequence width
+// Data-bit masks for lead bytes (strip the fixed lead bits, keep payload).
+const UTF8_2B_DATA_MASK: i32 = 0x1F; // 0001_1111: 5 data bits from a 2-byte lead
+const UTF8_3B_DATA_MASK: i32 = 0x0F; // 0000_1111: 4 data bits from a 3-byte lead
+const UTF8_4B_DATA_MASK: i32 = 0x07; // 0000_0111: 3 data bits from a 4-byte lead
+const UTF8_CONT_DATA_MASK: i32 = 0x3F; // 0011_1111: 6 data bits from a continuation byte
+// Bit-shift amounts for UTF-8 scalar decoding/encoding.
+const UTF8_CONT_BITS: i64 = 6; // bits of data carried by each continuation byte (i64 for i64_shl)
+const UTF8_W2_LEAD_SHIFT: i32 = 6;  // shift right to isolate lead bits of a 2-byte sequence
+const UTF8_W3_LEAD_SHIFT: i32 = 12; // shift right to isolate lead bits of a 3-byte sequence
+const UTF8_W4_LEAD_SHIFT: i32 = 18; // shift right to isolate lead bits of a 4-byte sequence
+// UTF-8 encoding thresholds: scalar >= these values need ≥3 / ≥4 bytes.
+const UTF8_3B_MIN_SCALAR: i32 = 0x800;   // 2048
+const UTF8_4B_MIN_SCALAR: i32 = 0x10000; // 65536
+// Tags ORed into the lead byte during encoding (same values as the *_LEAD_MIN thresholds).
+const UTF8_2B_LEAD_TAG: i32 = 0xC0; // == UTF8_CONT_MASK_IMM
+const UTF8_3B_LEAD_TAG: i32 = 0xE0; // == UTF8_3B_LEAD_MIN
+const UTF8_4B_LEAD_TAG: i32 = 0xF0; // == UTF8_4B_LEAD_MIN
+// Binary-search: key array uses 4-byte (i32) entries; index * 4 == index << 2.
+const KEY_ENTRY_SHIFT: i32 = 2; // log2(4): index → byte-offset left-shift for i32 key arrays
+// I32 pointer slot size in list data (each list element is a 4-byte i32 pointer).
+const LIST_SLOT_BYTES: i32 = 4;
+// I64 element slot size used by to_bytes (each byte stored as a full i64 value).
+const LIST_I64_SLOT_BYTES: i32 = 8;
+// Byte size of a (String, Int) tuple allocated by run_length_encode: i32 ptr @0 + i64 @4.
+const RLE_TUPLE_BYTES: i32 = 12;
+// ASCII character values used in case-folding logic.
+const ASCII_LOWER_A: i32 = 0x61; // 'a'
+const ASCII_LOWER_Z: i32 = 0x7A; // 'z'
+const ASCII_UPPER_A: i32 = 0x41; // 'A'
+const ASCII_UPPER_Z: i32 = 0x5A; // 'Z'
+const ASCII_CASE_DELTA: i32 = 32; // difference between 'A' and 'a' (uppercase ↔ lowercase)
+// Line-break byte values used by compile_lines.
+const ASCII_LF: i32 = 10; // '\n'
+const ASCII_CR: i32 = 13; // '\r'
+// Greek sigma codepoints (Final_Sigma rule in lowercasing).
+const SIGMA_UPPER: i32 = 0x03A3; // Σ
+const SIGMA_LOWER: i32 = 0x03C3; // σ
+const SIGMA_FINAL: i32 = 0x03C2; // ς
+// Internal sentinel used in compile_str_capitalize: means "ASCII byte, identity-mapped".
+const ASCII_ID_SENTINEL: i32 = -2;
+// Encoded result of `classify_packed(1, 1)` for single-byte valid sequences, used in
+// compile_utf8_classify. Computed from the classify_packed fn but written explicitly
+// here as a named const so the WASM immediate is self-describing.
+// classify_packed(consumed=1, valid=1) = (1 << 1) | 1 = 3.
+const CLASSIFY_ASCII: i32 = classify_packed(1, 1); // 3
+// classify_packed(consumed=1, valid=0) = (1 << 1) | 0 = 2.
+const CLASSIFY_INVALID_LEAD: i32 = classify_packed(1, 0); // 2
+// Lowercase Σ produces 2 UTF-8 bytes (ς/σ are U+03C2/U+03C3, both 2 bytes).
+const SIGMA_LOWER_UTF8_LEN: i32 = 2;
+// Extra slots allocated when split(""): one leading "" + one trailing "".
+const SPLIT_EMPTY_DELIM_EXTRA_SLOTS: i32 = 2;
+
 use super::{CompiledFunc, WasmEmitter};
 use wasm_encoder::{ValType};
 use super::TrackedFunction as Function;
@@ -246,17 +310,17 @@ fn compile_utf8_width(emitter: &mut WasmEmitter) {
         local_get(0); i32_const(string_data_off()); i32_add; local_get(1); i32_add;
         i32_load8_u(0); local_set(3);
         // width by lead-byte class
-        local_get(3); i32_const(0x80); i32_lt_u;
+        local_get(3); i32_const(UTF8_CONT_TAG_IMM); i32_lt_u;
         if_i32; i32_const(1);
         else_;
-          local_get(3); i32_const(0xF0); i32_ge_u;
-          if_i32; i32_const(4);
+          local_get(3); i32_const(UTF8_4B_LEAD_MIN); i32_ge_u;
+          if_i32; i32_const(UTF8_W4);
           else_;
-            local_get(3); i32_const(0xE0); i32_ge_u;
-            if_i32; i32_const(3);
+            local_get(3); i32_const(UTF8_3B_LEAD_MIN); i32_ge_u;
+            if_i32; i32_const(UTF8_W3);
             else_;
-              local_get(3); i32_const(0xC0); i32_ge_u;
-              if_i32; i32_const(2);
+              local_get(3); i32_const(UTF8_CONT_MASK_IMM); i32_ge_u;
+              if_i32; i32_const(UTF8_W2);
               else_; i32_const(1); // continuation byte as lead → 1
               end;
             end;
@@ -296,11 +360,11 @@ fn compile_utf8_scalar(emitter: &mut WasmEmitter) {
           local_get(3); i64_extend_i32_u;
         else_;
           // mask lead bits: 2→0x1F, 3→0x0F, 4→0x07
-          local_get(2); i32_const(2); i32_eq;
-          if_i32; i32_const(0x1F);
+          local_get(2); i32_const(UTF8_W2); i32_eq;
+          if_i32; i32_const(UTF8_2B_DATA_MASK);
           else_;
-            local_get(2); i32_const(3); i32_eq;
-            if_i32; i32_const(0x0F); else_; i32_const(0x07); end;
+            local_get(2); i32_const(UTF8_W3); i32_eq;
+            if_i32; i32_const(UTF8_3B_DATA_MASK); else_; i32_const(UTF8_4B_DATA_MASK); end;
           end;
           local_get(3); i32_and; i64_extend_i32_u; local_set(4); // scalar = b0 & mask
           // fold in (width-1) continuation bytes
@@ -309,8 +373,8 @@ fn compile_utf8_scalar(emitter: &mut WasmEmitter) {
             local_get(5); local_get(2); i32_ge_u; br_if(1);
             local_get(0); i32_const(string_data_off()); i32_add;
             local_get(1); i32_add; local_get(5); i32_add;
-            i32_load8_u(0); i32_const(0x3F); i32_and; local_set(6); // cont = byte & 0x3F
-            local_get(4); i64_const(6); i64_shl;
+            i32_load8_u(0); i32_const(UTF8_CONT_DATA_MASK); i32_and; local_set(6); // cont = byte & 0x3F
+            local_get(4); i64_const(UTF8_CONT_BITS); i64_shl;
             local_get(6); i64_extend_i32_u; i64_or; local_set(4);   // scalar = (scalar<<6) | cont
             local_get(5); i32_const(1); i32_add; local_set(5);
             br(0);
@@ -341,7 +405,7 @@ fn compile_utf8_snap(emitter: &mut WasmEmitter) {
           local_get(3); i32_eqz; br_if(1);
           local_get(3); local_get(2); i32_ge_u; br_if(1);       // i == blen is a boundary
           local_get(0); i32_const(string_data_off()); i32_add; local_get(3); i32_add; i32_load8_u(0);
-          i32_const(0xC0); i32_and; i32_const(0x80); i32_ne; br_if(1); // not continuation → boundary
+          i32_const(UTF8_CONT_MASK_IMM); i32_and; i32_const(UTF8_CONT_TAG_IMM); i32_ne; br_if(1); // not continuation → boundary
           local_get(3); i32_const(1); i32_sub; local_set(3);
           br(0);
         end; end;
@@ -397,8 +461,8 @@ fn compile_char_count(emitter: &mut WasmEmitter) {
           local_get(0); i32_const(string_data_off()); i32_add;
           local_get(2); i32_add; i32_load8_u(0);
           // if (byte & 0xC0) != 0x80 then count++
-          i32_const(0xC0); i32_and;
-          i32_const(0x80); i32_ne;
+          i32_const(UTF8_CONT_MASK_IMM); i32_and;
+          i32_const(UTF8_CONT_TAG_IMM); i32_ne;
           if_empty;
             local_get(3); i32_const(1); i32_add; local_set(3);
           end;
@@ -432,8 +496,8 @@ fn compile_cp_of_byte(emitter: &mut WasmEmitter) {
           local_get(3); local_get(2); i32_ge_u; br_if(1);
           local_get(0); i32_const(string_data_off()); i32_add;
           local_get(3); i32_add; i32_load8_u(0);
-          i32_const(0xC0); i32_and;
-          i32_const(0x80); i32_ne;
+          i32_const(UTF8_CONT_MASK_IMM); i32_and;
+          i32_const(UTF8_CONT_TAG_IMM); i32_ne;
           if_empty;
             local_get(4); i32_const(1); i32_add; local_set(4);
           end;
@@ -657,7 +721,7 @@ pub(super) fn emit_trim_backward(f: &mut Function, emitter: &WasmEmitter, end_lo
           local_get(end_local); i32_const(1); i32_sub; local_set(q_local);
           block_empty; loop_empty;
             local_get(0); i32_const(do_); i32_add; local_get(q_local); i32_add; i32_load8_u(0);
-            i32_const(0xC0); i32_and; i32_const(0x80); i32_ne; br_if(1);   // lead byte → stop
+            i32_const(UTF8_CONT_MASK_IMM); i32_and; i32_const(UTF8_CONT_TAG_IMM); i32_ne; br_if(1);   // lead byte → stop
             local_get(q_local); i32_eqz; br_if(1);
             local_get(q_local); i32_const(1); i32_sub; local_set(q_local);
             br(0);
@@ -948,7 +1012,7 @@ fn compile_split(emitter: &mut WasmEmitter) {
         if_empty;
           // result list: [len = char_count + 2][slot ptrs…]. Worst case (all
           // ASCII) char_count == blen, so blen + 2 slots is always enough.
-          i32_const(list_hdr()); local_get(3); i32_const(2); i32_add; i32_const(4); i32_mul; i32_add;
+          i32_const(list_hdr()); local_get(3); i32_const(SPLIT_EMPTY_DELIM_EXTRA_SLOTS); i32_add; i32_const(LIST_SLOT_BYTES); i32_mul; i32_add;
           call(emitter.rt.alloc); local_set(7);
           // slot[0] = "" (leading empty)
           local_get(7); i32_const(list_data_off()); i32_add;
@@ -959,7 +1023,7 @@ fn compile_split(emitter: &mut WasmEmitter) {
             local_get(8); local_get(3); i32_ge_u; br_if(1);
             local_get(0); local_get(8); call(emitter.rt.string.utf8_width); local_set(9); // width
             // slot[slot] = slice(s, in_off, in_off + width)  (one codepoint)
-            local_get(7); i32_const(list_data_off()); i32_add; local_get(6); i32_const(4); i32_mul; i32_add;
+            local_get(7); i32_const(list_data_off()); i32_add; local_get(6); i32_const(LIST_SLOT_BYTES); i32_mul; i32_add;
             local_get(0); local_get(8); local_get(8); local_get(9); i32_add;
             call(emitter.rt.string.slice); i32_store(0);
             local_get(8); local_get(9); i32_add; local_set(8);     // in_off += width
@@ -967,7 +1031,7 @@ fn compile_split(emitter: &mut WasmEmitter) {
             br(0);
           end; end;
           // slot[slot] = "" (trailing empty)
-          local_get(7); i32_const(list_data_off()); i32_add; local_get(6); i32_const(4); i32_mul; i32_add;
+          local_get(7); i32_const(list_data_off()); i32_add; local_get(6); i32_const(LIST_SLOT_BYTES); i32_mul; i32_add;
           i32_const(0); call(emitter.rt.string_alloc); i32_store(0);
           // result.len = slot + 1  (== char_count + 2)
           local_get(7); local_get(6); i32_const(1); i32_add; i32_store(0);
@@ -975,7 +1039,7 @@ fn compile_split(emitter: &mut WasmEmitter) {
         end;
         // Non-empty delimiter. A delimiter of length d_len>=1 can match at most
         // blen times, so blen + 1 segments is the upper bound on the slot count.
-        i32_const(list_hdr()); local_get(3); i32_const(1); i32_add; i32_const(4); i32_mul; i32_add;
+        i32_const(list_hdr()); local_get(3); i32_const(1); i32_add; i32_const(LIST_SLOT_BYTES); i32_mul; i32_add;
         call(emitter.rt.alloc); local_set(7);
         i32_const(0); local_set(4); // seg_start = 0
         i32_const(0); local_set(5); // i = 0 (scan position)
@@ -990,7 +1054,7 @@ fn compile_split(emitter: &mut WasmEmitter) {
           call(emitter.rt.mem_eq);
           if_empty;
             // emit segment slice(s, seg_start, i)
-            local_get(7); i32_const(list_data_off()); i32_add; local_get(6); i32_const(4); i32_mul; i32_add;
+            local_get(7); i32_const(list_data_off()); i32_add; local_get(6); i32_const(LIST_SLOT_BYTES); i32_mul; i32_add;
             local_get(0); local_get(4); local_get(5); call(emitter.rt.string.slice); i32_store(0);
             local_get(6); i32_const(1); i32_add; local_set(6);     // slot += 1
             local_get(5); local_get(2); i32_add; local_set(5);     // i += d_len
@@ -1001,7 +1065,7 @@ fn compile_split(emitter: &mut WasmEmitter) {
           br(0);
         end; end;
         // trailing segment slice(s, seg_start, blen)
-        local_get(7); i32_const(list_data_off()); i32_add; local_get(6); i32_const(4); i32_mul; i32_add;
+        local_get(7); i32_const(list_data_off()); i32_add; local_get(6); i32_const(LIST_SLOT_BYTES); i32_mul; i32_add;
         local_get(0); local_get(4); local_get(3); call(emitter.rt.string.slice); i32_store(0);
         local_get(6); i32_const(1); i32_add; local_set(6);         // slot += 1
         local_get(7); local_get(6); i32_store(0);                  // result.len = slot
@@ -1039,7 +1103,7 @@ fn compile_join(emitter: &mut WasmEmitter) {
             // result = concat(result, list[i])
             local_get(4);
             local_get(0); i32_const(list_data_off()); i32_add;
-            local_get(3); i32_const(4); i32_mul; i32_add; i32_load(0);
+            local_get(3); i32_const(LIST_SLOT_BYTES); i32_mul; i32_add; i32_load(0);
             call(emitter.rt.concat_str); local_set(4);
             local_get(3); i32_const(1); i32_add; local_set(3);
             br(0);
@@ -1224,7 +1288,7 @@ fn compile_chars(emitter: &mut WasmEmitter) {
     wasm!(f, {
         local_get(0); i32_load(0); local_set(1);                 // blen
         // worst-case slots = blen (all-ASCII); fewer codepoints just leave gaps
-        i32_const(list_hdr()); local_get(1); i32_const(4); i32_mul; i32_add;
+        i32_const(list_hdr()); local_get(1); i32_const(LIST_SLOT_BYTES); i32_mul; i32_add;
         call(emitter.rt.alloc); local_set(2);
         i32_const(0); local_set(3);                              // in_off = 0
         i32_const(0); local_set(6);                              // j = 0 (codepoint index)
@@ -1243,7 +1307,7 @@ fn compile_chars(emitter: &mut WasmEmitter) {
             br(0);
           end; end;
           // result.data[j] = str
-          local_get(2); i32_const(list_data_off()); i32_add; local_get(6); i32_const(4); i32_mul; i32_add;
+          local_get(2); i32_const(list_data_off()); i32_add; local_get(6); i32_const(LIST_SLOT_BYTES); i32_mul; i32_add;
           local_get(4); i32_store(0);
           local_get(3); local_get(5); i32_add; local_set(3);     // in_off += width
           local_get(6); i32_const(1); i32_add; local_set(6);     // j += 1
@@ -1294,7 +1358,7 @@ fn compile_run_length_encode(emitter: &mut WasmEmitter) {
           br(0);
         end; end;
         // ── Allocate the result list: [len=nr][nr * ptr] ──
-        i32_const(list_hdr()); local_get(2); i32_const(4); i32_mul; i32_add;
+        i32_const(list_hdr()); local_get(2); i32_const(LIST_SLOT_BYTES); i32_mul; i32_add;
         call(emitter.rt.alloc); local_set(5);
         local_get(5); local_get(2); i32_store(0);
         // ── Pass 2: emit one (codepoint-string, count) tuple per run ──
@@ -1319,11 +1383,11 @@ fn compile_run_length_encode(emitter: &mut WasmEmitter) {
           local_get(0); local_get(10); local_get(10); local_get(11); i32_add;
           call(emitter.rt.string.slice); local_set(8);
           // tup = [strp @0][cnt:i64 @4]
-          i32_const(12); call(emitter.rt.alloc); local_set(9);
+          i32_const(RLE_TUPLE_BYTES); call(emitter.rt.alloc); local_set(9);
           local_get(9); local_get(8); i32_store(0);
           local_get(9); local_get(7); i64_extend_i32_u; i64_store(4);
           // result.data[j] = tup
-          local_get(5); i32_const(list_data_off()); i32_add; local_get(6); i32_const(4); i32_mul; i32_add;
+          local_get(5); i32_const(list_data_off()); i32_add; local_get(6); i32_const(LIST_SLOT_BYTES); i32_mul; i32_add;
           local_get(9); i32_store(0);
           local_get(6); i32_const(1); i32_add; local_set(6);     // j += 1
           br(0);
@@ -1348,7 +1412,7 @@ fn compile_lines(emitter: &mut WasmEmitter) {
         // (empty input falls through naturally: the loop body never runs, the
         // trailing-line guard is false, and result.len stays 0 -> empty list.)
         // result: header + (blen + 1) slots (upper bound on the line count).
-        i32_const(list_hdr()); local_get(1); i32_const(1); i32_add; i32_const(4); i32_mul; i32_add;
+        i32_const(list_hdr()); local_get(1); i32_const(1); i32_add; i32_const(LIST_SLOT_BYTES); i32_mul; i32_add;
         call(emitter.rt.alloc); local_set(2);
         i32_const(0); local_set(3); // cur
         i32_const(0); local_set(4); // i
@@ -1357,20 +1421,20 @@ fn compile_lines(emitter: &mut WasmEmitter) {
           local_get(4); local_get(1); i32_ge_u; br_if(1); // i >= blen -> done scanning
           // if byte[i] == '\n'
           local_get(0); i32_const(dat); i32_add; local_get(4); i32_add; i32_load8_u(0);
-          i32_const(10); i32_eq;
+          i32_const(ASCII_LF); i32_eq;
           if_empty;
             // line_end = i; strip a trailing '\r' (byte[i-1] == 13 when i > cur)
             local_get(4); local_set(6);
             local_get(4); local_get(3); i32_gt_u;
             if_empty;
               local_get(0); i32_const(dat); i32_add; local_get(4); i32_const(1); i32_sub; i32_add; i32_load8_u(0);
-              i32_const(13); i32_eq;
+              i32_const(ASCII_CR); i32_eq;
               if_empty;
                 local_get(4); i32_const(1); i32_sub; local_set(6);
               end;
             end;
             // slot[slot] = slice(s, cur, line_end)
-            local_get(2); i32_const(list_data_off()); i32_add; local_get(5); i32_const(4); i32_mul; i32_add;
+            local_get(2); i32_const(list_data_off()); i32_add; local_get(5); i32_const(LIST_SLOT_BYTES); i32_mul; i32_add;
             local_get(0); local_get(3); local_get(6); call(emitter.rt.string.slice);
             i32_store(0);
             local_get(5); i32_const(1); i32_add; local_set(5); // slot++
@@ -1382,7 +1446,7 @@ fn compile_lines(emitter: &mut WasmEmitter) {
         // trailing non-empty line (input did NOT end at a '\n')
         local_get(3); local_get(1); i32_lt_u;
         if_empty;
-          local_get(2); i32_const(list_data_off()); i32_add; local_get(5); i32_const(4); i32_mul; i32_add;
+          local_get(2); i32_const(list_data_off()); i32_add; local_get(5); i32_const(LIST_SLOT_BYTES); i32_mul; i32_add;
           local_get(0); local_get(3); local_get(1); call(emitter.rt.string.slice);
           i32_store(0);
           local_get(5); i32_const(1); i32_add; local_set(5);
@@ -1477,7 +1541,7 @@ fn compile_utf8_classify(emitter: &mut WasmEmitter) {
     wasm!(f, {
         local_get(BUF); local_get(I); i32_add; i32_load8_u(0); local_set(B0);
         local_get(B0); i32_const(ASCII_MAX); i32_le_u;
-        if_empty; i32_const(classify_packed(1, 1)); return_; end;   // ASCII: 1 byte, valid
+        if_empty; i32_const(CLASSIFY_ASCII); return_; end;   // ASCII: 1 byte, valid
         i32_const(0); local_set(WIDTH);
     });
     // Lead-byte width + 2nd-byte range, generated from the derived groups.
@@ -1494,7 +1558,7 @@ fn compile_utf8_classify(emitter: &mut WasmEmitter) {
     }
     wasm!(f, {
         local_get(WIDTH); i32_eqz;
-        if_empty; i32_const(classify_packed(1, 0)); return_; end;   // invalid lead: 1-byte subpart
+        if_empty; i32_const(CLASSIFY_INVALID_LEAD); return_; end;   // invalid lead: 1-byte subpart
         // Validate continuation bytes: 2nd in [lo2,hi2]; 3rd/4th are plain continuations.
         // On the first failure the maximal subpart ends, so `consumed < width`.
         i32_const(1); local_set(CONSUMED);
@@ -1554,7 +1618,7 @@ fn compile_from_bytes(emitter: &mut WasmEmitter) {
         block_empty; loop_empty;
           local_get(I); local_get(N); i32_ge_u; br_if(1);
           local_get(BUF); local_get(I); i32_add;
-          local_get(LIST); i32_const(list_data_off()); i32_add; local_get(I); i32_const(8); i32_mul; i32_add;
+          local_get(LIST); i32_const(list_data_off()); i32_add; local_get(I); i32_const(LIST_I64_SLOT_BYTES); i32_mul; i32_add;
           i64_load(0); i32_wrap_i64; i32_store8(0);
           local_get(I); i32_const(1); i32_add; local_set(I);
           br(0);
@@ -1605,13 +1669,13 @@ fn compile_to_bytes(emitter: &mut WasmEmitter) {
     let mut f = Function::new([(1, ValType::I32), (1, ValType::I32), (1, ValType::I32)]);
     wasm!(f, {
         local_get(0); i32_load(0); local_set(1);
-        i32_const(list_hdr()); local_get(1); i32_const(8); i32_mul; i32_add;
+        i32_const(list_hdr()); local_get(1); i32_const(LIST_I64_SLOT_BYTES); i32_mul; i32_add;
         call(emitter.rt.alloc); local_set(2);
         local_get(2); local_get(1); i32_store(0);
         i32_const(0); local_set(3);
         block_empty; loop_empty;
           local_get(3); local_get(1); i32_ge_u; br_if(1);
-          local_get(2); i32_const(list_data_off()); i32_add; local_get(3); i32_const(8); i32_mul; i32_add;
+          local_get(2); i32_const(list_data_off()); i32_add; local_get(3); i32_const(LIST_I64_SLOT_BYTES); i32_mul; i32_add;
           local_get(0); i32_const(string_data_off()); i32_add; local_get(3); i32_add;
           i32_load8_u(0); i64_extend_i32_u; i64_store(0);
           local_get(3); i32_const(1); i32_add; local_set(3);
@@ -1640,29 +1704,29 @@ fn compile_utf8_emit_scalar(emitter: &mut WasmEmitter) {
     let mut f = Function::new([(1, ValType::I32)]);
     wasm!(f, {
         local_get(0); i32_const(string_data_off()); i32_add; local_get(1); i32_add; local_set(3);
-        local_get(2); i32_const(0x80); i32_lt_u;
+        local_get(2); i32_const(UTF8_CONT_TAG_IMM); i32_lt_u;
         if_i32;
           local_get(3); local_get(2); i32_store8(0);
           local_get(1); i32_const(1); i32_add;
         else_;
-          local_get(2); i32_const(0x800); i32_lt_u;
+          local_get(2); i32_const(UTF8_3B_MIN_SCALAR); i32_lt_u;
           if_i32;
-            local_get(3); local_get(2); i32_const(6); i32_shr_u; i32_const(0xC0); i32_or; i32_store8(0);
-            local_get(3); local_get(2); i32_const(0x3F); i32_and; i32_const(0x80); i32_or; i32_store8(1);
-            local_get(1); i32_const(2); i32_add;
+            local_get(3); local_get(2); i32_const(UTF8_W2_LEAD_SHIFT); i32_shr_u; i32_const(UTF8_2B_LEAD_TAG); i32_or; i32_store8(0);
+            local_get(3); local_get(2); i32_const(UTF8_CONT_DATA_MASK); i32_and; i32_const(UTF8_CONT_TAG_IMM); i32_or; i32_store8(1);
+            local_get(1); i32_const(UTF8_W2); i32_add;
           else_;
-            local_get(2); i32_const(0x10000); i32_lt_u;
+            local_get(2); i32_const(UTF8_4B_MIN_SCALAR); i32_lt_u;
             if_i32;
-              local_get(3); local_get(2); i32_const(12); i32_shr_u; i32_const(0xE0); i32_or; i32_store8(0);
-              local_get(3); local_get(2); i32_const(6); i32_shr_u; i32_const(0x3F); i32_and; i32_const(0x80); i32_or; i32_store8(1);
-              local_get(3); local_get(2); i32_const(0x3F); i32_and; i32_const(0x80); i32_or; i32_store8(2);
-              local_get(1); i32_const(3); i32_add;
+              local_get(3); local_get(2); i32_const(UTF8_W3_LEAD_SHIFT); i32_shr_u; i32_const(UTF8_3B_LEAD_TAG); i32_or; i32_store8(0);
+              local_get(3); local_get(2); i32_const(UTF8_W2_LEAD_SHIFT); i32_shr_u; i32_const(UTF8_CONT_DATA_MASK); i32_and; i32_const(UTF8_CONT_TAG_IMM); i32_or; i32_store8(1);
+              local_get(3); local_get(2); i32_const(UTF8_CONT_DATA_MASK); i32_and; i32_const(UTF8_CONT_TAG_IMM); i32_or; i32_store8(2);
+              local_get(1); i32_const(UTF8_W3); i32_add;
             else_;
-              local_get(3); local_get(2); i32_const(18); i32_shr_u; i32_const(0xF0); i32_or; i32_store8(0);
-              local_get(3); local_get(2); i32_const(12); i32_shr_u; i32_const(0x3F); i32_and; i32_const(0x80); i32_or; i32_store8(1);
-              local_get(3); local_get(2); i32_const(6); i32_shr_u; i32_const(0x3F); i32_and; i32_const(0x80); i32_or; i32_store8(2);
-              local_get(3); local_get(2); i32_const(0x3F); i32_and; i32_const(0x80); i32_or; i32_store8(3);
-              local_get(1); i32_const(4); i32_add;
+              local_get(3); local_get(2); i32_const(UTF8_W4_LEAD_SHIFT); i32_shr_u; i32_const(UTF8_4B_LEAD_TAG); i32_or; i32_store8(0);
+              local_get(3); local_get(2); i32_const(UTF8_W3_LEAD_SHIFT); i32_shr_u; i32_const(UTF8_CONT_DATA_MASK); i32_and; i32_const(UTF8_CONT_TAG_IMM); i32_or; i32_store8(1);
+              local_get(3); local_get(2); i32_const(UTF8_W2_LEAD_SHIFT); i32_shr_u; i32_const(UTF8_CONT_DATA_MASK); i32_and; i32_const(UTF8_CONT_TAG_IMM); i32_or; i32_store8(2);
+              local_get(3); local_get(2); i32_const(UTF8_CONT_DATA_MASK); i32_and; i32_const(UTF8_CONT_TAG_IMM); i32_or; i32_store8(3);
+              local_get(1); i32_const(UTF8_W4); i32_add;
             end;
           end;
         end;
@@ -1697,10 +1761,10 @@ fn compile_case_map_lookup(emitter: &mut WasmEmitter) {
               local_get(5); local_get(6); i32_ge_u;
               if_empty; i32_const(-1); return_; end;
               local_get(5); local_get(6); i32_add; i32_const(1); i32_shr_u; local_set(7);
-              local_get(2); local_get(7); i32_const(2); i32_shl; i32_add; i32_load(0); local_set(8);
+              local_get(2); local_get(7); i32_const(KEY_ENTRY_SHIFT); i32_shl; i32_add; i32_load(0); local_set(8);
               local_get(8); local_get(1); i32_eq;
               if_empty;
-                local_get(4); local_get(7); i32_const(2); i32_shl; i32_add; i32_load(0); return_;
+                local_get(4); local_get(7); i32_const(KEY_ENTRY_SHIFT); i32_shl; i32_add; i32_load(0); return_;
               end;
               local_get(8); local_get(1); i32_lt_u;
               if_empty;
@@ -1741,7 +1805,7 @@ fn compile_set_member(emitter: &mut WasmEmitter) {
               local_get(4); local_get(5); i32_ge_u;
               if_empty; i32_const(0); return_; end;
               local_get(4); local_get(5); i32_add; i32_const(1); i32_shr_u; local_set(6);
-              local_get(2); local_get(6); i32_const(2); i32_shl; i32_add; i32_load(0); local_set(7);
+              local_get(2); local_get(6); i32_const(KEY_ENTRY_SHIFT); i32_shl; i32_add; i32_load(0); local_set(7);
               local_get(7); local_get(1); i32_eq;
               if_empty; i32_const(1); return_; end;
               local_get(7); local_get(1); i32_lt_u;
@@ -1794,7 +1858,7 @@ fn compile_final_sigma(emitter: &mut WasmEmitter) {
           block_empty; loop_empty;
             local_get(6); i32_eqz; br_if(1);                   // q == 0 → stop
             local_get(0); i32_const(do_); i32_add; local_get(6); i32_add; i32_load8_u(0);
-            i32_const(0xC0); i32_and; i32_const(0x80); i32_eq; // continuation byte?
+            i32_const(UTF8_CONT_MASK_IMM); i32_and; i32_const(UTF8_CONT_TAG_IMM); i32_eq; // continuation byte?
             i32_eqz; br_if(1);                                 // not continuation → stop (lead byte)
             local_get(6); i32_const(1); i32_sub; local_set(6);
             br(0);
@@ -1826,7 +1890,7 @@ fn compile_final_sigma(emitter: &mut WasmEmitter) {
           br(0);
         end; end;
         local_get(3); local_get(4); i32_eqz; i32_and;
-        if_i32; i32_const(0x03C2); else_; i32_const(0x03C3); end;
+        if_i32; i32_const(SIGMA_FINAL); else_; i32_const(SIGMA_LOWER); end;
         end;
     });
     emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.string.final_sigma, type_idx, f));
@@ -1859,16 +1923,16 @@ fn compile_str_case_map(emitter: &mut WasmEmitter) {
         block_empty; loop_empty;
           local_get(4); local_get(2); i32_ge_u; br_if(1);
           local_get(0); i32_const(do_); i32_add; local_get(4); i32_add; i32_load8_u(0); local_set(5);
-          local_get(5); i32_const(0x80); i32_lt_u;
+          local_get(5); i32_const(UTF8_CONT_TAG_IMM); i32_lt_u;
           if_empty;
             local_get(3); i32_const(1); i32_add; local_set(3);
             local_get(4); i32_const(1); i32_add; local_set(4);
           else_;
             local_get(0); local_get(4); call(uw); local_set(6);
             local_get(0); local_get(4); call(us); i32_wrap_i64; local_set(7);
-            local_get(1); i32_eqz; local_get(7); i32_const(0x03A3); i32_eq; i32_and;
+            local_get(1); i32_eqz; local_get(7); i32_const(SIGMA_UPPER); i32_eq; i32_and;
             if_empty;
-              local_get(3); i32_const(2); i32_add; local_set(3);
+              local_get(3); i32_const(SIGMA_LOWER_UTF8_LEN); i32_add; local_set(3);
             else_;
               local_get(13); local_get(7); call(lk); local_set(8);
               local_get(8); i32_const(-1); i32_eq;
@@ -1892,15 +1956,15 @@ fn compile_str_case_map(emitter: &mut WasmEmitter) {
         block_empty; loop_empty;
           local_get(4); local_get(2); i32_ge_u; br_if(1);
           local_get(0); i32_const(do_); i32_add; local_get(4); i32_add; i32_load8_u(0); local_set(5);
-          local_get(5); i32_const(0x80); i32_lt_u;
+          local_get(5); i32_const(UTF8_CONT_TAG_IMM); i32_lt_u;
           if_empty;
             local_get(1);
             if_i32;
-              local_get(5); i32_const(0x61); i32_ge_u; local_get(5); i32_const(0x7A); i32_le_u; i32_and;
-              if_i32; local_get(5); i32_const(32); i32_sub; else_; local_get(5); end;
+              local_get(5); i32_const(ASCII_LOWER_A); i32_ge_u; local_get(5); i32_const(ASCII_LOWER_Z); i32_le_u; i32_and;
+              if_i32; local_get(5); i32_const(ASCII_CASE_DELTA); i32_sub; else_; local_get(5); end;
             else_;
-              local_get(5); i32_const(0x41); i32_ge_u; local_get(5); i32_const(0x5A); i32_le_u; i32_and;
-              if_i32; local_get(5); i32_const(32); i32_add; else_; local_get(5); end;
+              local_get(5); i32_const(ASCII_UPPER_A); i32_ge_u; local_get(5); i32_const(ASCII_UPPER_Z); i32_le_u; i32_and;
+              if_i32; local_get(5); i32_const(ASCII_CASE_DELTA); i32_add; else_; local_get(5); end;
             end;
             local_set(12);
             local_get(9); i32_const(do_); i32_add; local_get(10); i32_add; local_get(12); i32_store8(0);
@@ -1909,7 +1973,7 @@ fn compile_str_case_map(emitter: &mut WasmEmitter) {
           else_;
             local_get(0); local_get(4); call(uw); local_set(6);
             local_get(0); local_get(4); call(us); i32_wrap_i64; local_set(7);
-            local_get(1); i32_eqz; local_get(7); i32_const(0x03A3); i32_eq; i32_and;
+            local_get(1); i32_eqz; local_get(7); i32_const(SIGMA_UPPER); i32_eq; i32_and;
             if_empty;
               local_get(9); local_get(10);
               local_get(0); local_get(4); call(fsig);
@@ -1961,13 +2025,13 @@ fn compile_str_capitalize(emitter: &mut WasmEmitter) {
         local_get(2); i32_eqz; if_empty; local_get(0); return_; end;
         local_get(0); i32_const(do_); i32_add; i32_load8_u(0); local_set(5);
         local_get(0); i32_const(0); call(uw); local_set(3);
-        local_get(5); i32_const(0x80); i32_lt_u;
+        local_get(5); i32_const(UTF8_CONT_TAG_IMM); i32_lt_u;
         if_empty;
           i32_const(1); local_set(7);
-          local_get(5); i32_const(0x61); i32_ge_u; local_get(5); i32_const(0x7A); i32_le_u; i32_and;
-          if_i32; local_get(5); i32_const(32); i32_sub; else_; local_get(5); end;
+          local_get(5); i32_const(ASCII_LOWER_A); i32_ge_u; local_get(5); i32_const(ASCII_LOWER_Z); i32_le_u; i32_and;
+          if_i32; local_get(5); i32_const(ASCII_CASE_DELTA); i32_sub; else_; local_get(5); end;
           local_set(10);
-          i32_const(-2); local_set(6);
+          i32_const(ASCII_ID_SENTINEL); local_set(6);
         else_;
           local_get(0); i32_const(0); call(us); i32_wrap_i64; local_set(4);
           i32_const(0); local_get(4); call(lk); local_set(6);
@@ -1980,7 +2044,7 @@ fn compile_str_capitalize(emitter: &mut WasmEmitter) {
         local_get(9); local_get(8); i32_store(0);
         local_get(9); local_get(8); i32_store(capo, 0);
         // head
-        local_get(6); i32_const(-2); i32_eq;
+        local_get(6); i32_const(ASCII_ID_SENTINEL); i32_eq;
         if_empty;
           local_get(9); i32_const(do_); i32_add; local_get(10); i32_store8(0);
         else_;

@@ -10,6 +10,20 @@ use almide_ir::IrExpr;
 use almide_lang::types::Ty;
 use wasm_encoder::ValType;
 
+/// Named WASM immediate constants for list-closure call codegen.
+mod imm {
+    // ── byte widths ────────────────────────────────────────────────────
+    /// Byte size of an i32 / pointer (stride in a list-of-pointers array).
+    pub const I32_BYTES: i32 = 4;
+    /// Byte size of an i64 element (size to alloc for a boxed Int value).
+    pub const I64_BYTES: i32 = 8;
+
+    // ── sort guard ─────────────────────────────────────────────────────
+    /// Minimum list length that requires sorting (len < 2 → already sorted).
+    pub const SORT_MIN_LEN: i32 = 2;
+}
+use imm::*;
+
 impl FuncCompiler<'_> {
     /// Dispatch a list stdlib closure-based call. Returns true if handled.
     pub(super) fn emit_list_closure_call(&mut self, method: &str, args: &[IrExpr]) -> bool {
@@ -95,7 +109,7 @@ impl FuncCompiler<'_> {
                 self.emit_closure_call(&elem_ty, &Ty::Bool);
                 wasm!(self.func, {
                       if_empty;
-                        i32_const(8); call(self.emitter.rt.alloc); local_set(tmp);
+                        i32_const(I64_BYTES); call(self.emitter.rt.alloc); local_set(tmp);
                         local_get(tmp); local_get(i); i64_extend_i32_u; i64_store(0);
                         local_get(tmp); local_set(result); br(2);
                       end;
@@ -459,7 +473,7 @@ impl FuncCompiler<'_> {
                     local_set(closure);
                     local_get(xs); i32_load(0); local_set(len);
                     // Alloc temp list-of-lists: [len][ptr0][ptr1]...
-                    i32_const(list_hdr); local_get(len); i32_const(4); i32_mul; i32_add;
+                    i32_const(list_hdr); local_get(len); i32_const(I32_BYTES); i32_mul; i32_add;
                     call(self.emitter.rt.alloc); local_set(lol);
                     local_get(lol); local_get(len); i32_store(0);
                     i32_const(0); local_set(i);
@@ -467,7 +481,7 @@ impl FuncCompiler<'_> {
                       local_get(i); local_get(len); i32_ge_u; br_if(1);
                       // Call f(xs[i]) → List[B]
                       local_get(lol); i32_const(list_data_off); i32_add;
-                      local_get(i); i32_const(4); i32_mul; i32_add; // dst addr for result ptr
+                      local_get(i); i32_const(I32_BYTES); i32_mul; i32_add; // dst addr for result ptr
                       local_get(closure); i32_load(4); // env
                       local_get(xs); i32_const(list_data_off); i32_add;
                       local_get(i); i32_const(es); i32_mul; i32_add;
@@ -491,7 +505,7 @@ impl FuncCompiler<'_> {
                       local_get(i); local_get(lol); i32_load(0); i32_ge_u; br_if(1);
                       local_get(total);
                       local_get(lol); i32_const(list_data_off); i32_add;
-                      local_get(i); i32_const(4); i32_mul; i32_add;
+                      local_get(i); i32_const(I32_BYTES); i32_mul; i32_add;
                       i32_load(0); i32_load(0);
                       i32_add; local_set(total);
                       local_get(i); i32_const(1); i32_add; local_set(i);
@@ -509,7 +523,7 @@ impl FuncCompiler<'_> {
                     block_empty; loop_empty;
                       local_get(i); local_get(lol); i32_load(0); i32_ge_u; br_if(1);
                       local_get(lol); i32_const(list_data_off); i32_add;
-                      local_get(i); i32_const(4); i32_mul; i32_add;
+                      local_get(i); i32_const(I32_BYTES); i32_mul; i32_add;
                       i32_load(0); local_set(inner);
                       i32_const(0); local_set(j);
                       block_empty; loop_empty;
@@ -747,7 +761,7 @@ impl FuncCompiler<'_> {
                     end;
                     local_set(num_chunks);
                     // Alloc outer: 4 + num_chunks * 4 (list of ptrs)
-                    i32_const(list_hdr); local_get(num_chunks); i32_const(4); i32_mul; i32_add;
+                    i32_const(list_hdr); local_get(num_chunks); i32_const(I32_BYTES); i32_mul; i32_add;
                     call(self.emitter.rt.alloc); local_set(outer);
                     local_get(outer); local_get(num_chunks); i32_store(0);
                     i32_const(0); local_set(i);
@@ -780,7 +794,7 @@ impl FuncCompiler<'_> {
                       end; end;
                       // outer[i] = inner_ptr
                       local_get(outer); i32_const(list_data_off); i32_add;
-                      local_get(i); i32_const(4); i32_mul; i32_add;
+                      local_get(i); i32_const(I32_BYTES); i32_mul; i32_add;
                       local_get(inner); i32_store(0);
                       local_get(i); i32_const(1); i32_add; local_set(i);
                       br(0);
@@ -832,7 +846,7 @@ impl FuncCompiler<'_> {
                     end;
                     local_set(num_win);
                     // Alloc outer: 4 + num_win * 4
-                    i32_const(list_hdr); local_get(num_win); i32_const(4); i32_mul; i32_add;
+                    i32_const(list_hdr); local_get(num_win); i32_const(I32_BYTES); i32_mul; i32_add;
                     call(self.emitter.rt.alloc); local_set(outer);
                     local_get(outer); local_get(num_win); i32_store(0);
                     i32_const(0); local_set(i);
@@ -859,7 +873,7 @@ impl FuncCompiler<'_> {
                       end; end;
                       // outer[i] = inner_ptr
                       local_get(outer); i32_const(list_data_off); i32_add;
-                      local_get(i); i32_const(4); i32_mul; i32_add;
+                      local_get(i); i32_const(I32_BYTES); i32_mul; i32_add;
                       local_get(inner); i32_store(0);
                       local_get(i); i32_const(1); i32_add; local_set(i);
                       br(0);
@@ -1078,7 +1092,7 @@ impl FuncCompiler<'_> {
                 // the loop into an infinite memory-walker.
                 wasm!(self.func, {
                     block_empty;
-                      local_get(len); i32_const(2); i32_lt_u; br_if(0);
+                      local_get(len); i32_const(SORT_MIN_LEN); i32_lt_u; br_if(0);
                     i32_const(0); local_set(i); // i (outer)
                     block_empty; loop_empty;
                       local_get(i); local_get(len); i32_const(1); i32_sub; i32_ge_u; br_if(1);

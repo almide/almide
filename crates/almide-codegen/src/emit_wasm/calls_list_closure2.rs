@@ -3,6 +3,15 @@
 //! Functions: take_while, drop_while, count, partition, update, scan, zip_with,
 //! unique_by, group_by, shuffle, filter, fold, map, and the emit_list_map helper.
 
+// ── Named constants for WASM immediates ───────────────────────────────────────
+/// Minimum load-factor denominator for group_by map capacity: cap >= len * 2.
+const MAP_CAP_FACTOR: i32 = 2;
+/// Log₂ of the SIMD batch size (8 i64 elements → shift right by 3 = divide by 8).
+const SIMD_ELEMS_LOG2: i32 = 3;
+/// Byte stride of one SIMD batch: 8 i64 elements × 8 bytes each = 64 bytes.
+const SIMD_BATCH_BYTES: i32 = 64;
+// ─────────────────────────────────────────────────────────────────────────────
+
 use super::FuncCompiler;
 use super::values;
 use almide_ir::{BinOp, IrExpr, IrExprKind};
@@ -713,7 +722,7 @@ impl FuncCompiler<'_> {
                     // cap = next power of 2 >= max(len * 2, INITIAL_CAP)
                     i32_const(lm::INITIAL_CAP as i32); local_set(cap_local);
                     block_empty; loop_empty;
-                      local_get(cap_local); local_get(len); i32_const(2); i32_mul; i32_ge_u; br_if(1);
+                      local_get(cap_local); local_get(len); i32_const(MAP_CAP_FACTOR); i32_mul; i32_ge_u; br_if(1);
                       local_get(cap_local); i32_const(1); i32_shl; local_set(cap_local);
                       br(0);
                     end; end;
@@ -1449,8 +1458,8 @@ impl FuncCompiler<'_> {
             // simd_end = src_ptr + (len / 8) * 64  (round down to multiple of 8)
             wasm!(self.func, {
                 local_get(src_ptr);
-                local_get(len_local); i32_const(3); i32_shr_u; // len / 8
-                i32_const(64); i32_mul;
+                local_get(len_local); i32_const(SIMD_ELEMS_LOG2); i32_shr_u; // len / 8
+                i32_const(SIMD_BATCH_BYTES); i32_mul;
                 i32_add; local_set(simd_end);
             });
             if let Some(sv) = simd_vec {
@@ -1494,8 +1503,8 @@ impl FuncCompiler<'_> {
             emit_simd_op(self, 32, simd_vec);
             emit_simd_op(self, 48, simd_vec);
             wasm!(self.func, {
-                  local_get(src_ptr); i32_const(64); i32_add; local_set(src_ptr);
-                  local_get(dst_ptr); i32_const(64); i32_add; local_set(dst_ptr);
+                  local_get(src_ptr); i32_const(SIMD_BATCH_BYTES); i32_add; local_set(src_ptr);
+                  local_get(dst_ptr); i32_const(SIMD_BATCH_BYTES); i32_add; local_set(dst_ptr);
                   br(0);
                 end; end;
             });

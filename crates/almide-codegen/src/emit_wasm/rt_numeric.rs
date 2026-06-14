@@ -6,6 +6,67 @@ use super::{CompiledFunc, WasmEmitter};
 use wasm_encoder::{Instruction, ValType};
 use super::TrackedFunction as Function;
 
+// ---------------------------------------------------------------------------
+// Named immediates — every raw literal in a constant-emitting call goes here.
+// ---------------------------------------------------------------------------
+mod imm {
+    // Result/allocation sizes
+    /// Bytes for a Result[T, E] heap cell: [tag:i32=4][value/err:i64=8].
+    pub(super) const RESULT_ALLOC_BYTES: i32 = 12;
+    /// Bytes for the rem_pio2 two-f64 output buffer [y0:f64=8][y1:f64=8].
+    pub(super) const REM_PIO2_OUT_BYTES: i32 = 16;
+
+    // Hex prefix
+    /// Number of bytes in the "0x" prefix that from_str_radix strips.
+    pub(super) const HEX_PREFIX_LEN: i32 = 2;
+
+    // ASCII character codes
+    pub(super) const ASCII_PLUS: i32  = 43;   // '+'
+    pub(super) const ASCII_MINUS: i32 = 45;   // '-'
+    pub(super) const ASCII_DOT: i32   = 46;   // '.'
+    pub(super) const ASCII_ZERO: i32  = 48;   // '0'
+    pub(super) const ASCII_NINE: i32  = 57;   // '9'
+    pub(super) const ASCII_UPPER_E: i32 = 69; // 'E'
+    pub(super) const ASCII_UPPER_A: i32 = 65; // 'A'
+    pub(super) const ASCII_UPPER_F: i32 = 70; // 'F'
+    pub(super) const ASCII_LOWER_A: i32 = 97; // 'a'
+    pub(super) const ASCII_LOWER_E: i32 = 101; // 'e'
+    pub(super) const ASCII_LOWER_F: i32 = 102; // 'f'
+    pub(super) const ASCII_LOWER_X: i32 = 120; // 'x' (in "0x" prefix)
+    /// Subtract from a lowercase hex letter ('a'..'f') to get its digit value (10..15).
+    pub(super) const ASCII_LOWER_A_HEX_OFFSET: i32 = 87; // 'a' - 10
+    /// Subtract from an uppercase hex letter ('A'..'F') to get its digit value (10..15).
+    pub(super) const ASCII_UPPER_A_HEX_OFFSET: i32 = 55; // 'A' - 10
+    /// OR-mask to ASCII-lowercase a byte: 'A' | 0x20 == 'a'.
+    pub(super) const ASCII_LOWERCASE_MASK: i32 = 0x20;
+
+    // IEEE-754 / f64 bit-level constants
+    /// Right-shift count to extract the high 32-bit word from an i64 reinterpretation of f64.
+    pub(super) const F64_HIGH_WORD_SHIFT: i64 = 32;
+    /// Mask to clear the sign bit in the high 32-bit word of f64 (|x| extraction).
+    pub(super) const F64_ABS_HIGH_WORD_MASK: i32 = 0x7fff_ffff;
+    /// High-word value when f64 is ±infinity (exponent all-ones, mantissa zero).
+    pub(super) const F64_INF_HIGH_WORD: i32 = 0x7ff0_0000;
+    /// f64 sign bit (set to negate via i64_or).
+    pub(super) const F64_SIGN_BIT: i64 = 0x8000_0000_0000_0000_u64 as i64;
+
+    // libm small/tiny argument thresholds (high-word of |x|, hex)
+    /// π/4 ≈ 0x3fe921fb: upper bound of the "small argument" fast path for sin/cos/tan.
+    pub(super) const LIBM_SMALL_ARG: i32   = 0x3fe9_21fb;
+    /// sin tiny-arg threshold (below → return x): |x| < 2^{-26}.
+    pub(super) const LIBM_SIN_TINY_ARG: i32 = 0x3e50_0000;
+    /// cos tiny-arg threshold (below → return 1): different exponent from sin.
+    pub(super) const LIBM_COS_TINY_ARG: i32 = 0x3e46_a09e;
+    /// tan tiny-arg threshold (below → return x): |x| < 2^{-27.5}.
+    pub(super) const LIBM_TAN_TINY_ARG: i32 = 0x3e40_0000;
+
+    // Trig quadrant dispatch (n & 3 == ?)
+    /// Bitmask to extract the 2-bit quadrant from rem_pio2's integer result.
+    pub(super) const QUAD_MASK: i32 = 3;
+    /// Quadrant index 2: negate the primary kernel output (-sin or -cos).
+    pub(super) const QUAD_NEG: i32 = 2;
+}
+
 /// __int_from_hex(s: i32) -> i32
 ///
 /// Byte-for-byte mirror of the native oracle (runtime/rs/src/int.rs):
@@ -55,7 +116,7 @@ pub(super) fn compile_int_from_hex(emitter: &mut WasmEmitter) {
     // Emit an `err(<interned string>)` return: alloc [tag=1][str_ptr] and return.
     let emit_err = |f: &mut Function, err_str: u32| {
         wasm!(f, {
-            i32_const(12); call(alloc); local_set(6);
+            i32_const(imm::RESULT_ALLOC_BYTES); call(alloc); local_set(6);
             local_get(6); i32_const(1); i32_store(0);
             local_get(6); i32_const(err_str as i32); i32_store(4);
             local_get(6);
@@ -84,19 +145,19 @@ pub(super) fn compile_int_from_hex(emitter: &mut WasmEmitter) {
     wasm!(f, {
         block_empty; loop_empty;
           // need at least 2 chars remaining
-          local_get(3); local_get(2); i32_sub; i32_const(2); i32_lt_s; br_if(1);
+          local_get(3); local_get(2); i32_sub; i32_const(imm::HEX_PREFIX_LEN); i32_lt_s; br_if(1);
     });
     load_byte(&mut f, 2, 5);
     wasm!(f, {
-          local_get(5); i32_const(48); i32_ne; br_if(1);   // s[i] != '0'
+          local_get(5); i32_const(imm::ASCII_ZERO); i32_ne; br_if(1);   // s[i] != '0'
     });
     // s[i+1] == 'x' (lowercase only)
     wasm!(f, { i32_const(0); local_set(5); }); // reuse byte; compute s[i+1]
     wasm!(f, {
           local_get(0); i32_const(data_off); i32_add; local_get(2); i32_add; i32_const(1); i32_add;
           i32_load8_u(0); local_set(5);
-          local_get(5); i32_const(120); i32_ne; br_if(1);   // s[i+1] != 'x'
-          local_get(2); i32_const(2); i32_add; local_set(2); // i += 2
+          local_get(5); i32_const(imm::ASCII_LOWER_X); i32_ne; br_if(1);   // s[i+1] != 'x'
+          local_get(2); i32_const(imm::HEX_PREFIX_LEN); i32_add; local_set(2); // i += 2
           br(0);
         end; end;
     });
@@ -110,12 +171,12 @@ pub(super) fn compile_int_from_hex(emitter: &mut WasmEmitter) {
     wasm!(f, { i32_const(0); local_set(4); }); // is_neg = 0
     load_byte(&mut f, 2, 5);
     wasm!(f, {
-        local_get(5); i32_const(45); i32_eq; // '-'
+        local_get(5); i32_const(imm::ASCII_MINUS); i32_eq; // '-'
         if_empty;
           i32_const(1); local_set(4);
           local_get(2); i32_const(1); i32_add; local_set(2);
         else_;
-          local_get(5); i32_const(43); i32_eq; // '+'
+          local_get(5); i32_const(imm::ASCII_PLUS); i32_eq; // '+'
           if_empty;
             local_get(2); i32_const(1); i32_add; local_set(2);
           end;
@@ -144,20 +205,20 @@ pub(super) fn compile_int_from_hex(emitter: &mut WasmEmitter) {
     // Classify hex digit: '0'-'9' → 0-9, 'a'-'f' → 10-15, 'A'-'F' → 10-15, else -1.
     wasm!(f, {
         i32_const(-1); local_set(8);
-        local_get(5); i32_const(48); i32_ge_u;
-        local_get(5); i32_const(57); i32_le_u; i32_and;
+        local_get(5); i32_const(imm::ASCII_ZERO); i32_ge_u;
+        local_get(5); i32_const(imm::ASCII_NINE); i32_le_u; i32_and;
         if_empty;
-          local_get(5); i32_const(48); i32_sub; local_set(8);
+          local_get(5); i32_const(imm::ASCII_ZERO); i32_sub; local_set(8);
         else_;
-          local_get(5); i32_const(97); i32_ge_u;
-          local_get(5); i32_const(102); i32_le_u; i32_and;
+          local_get(5); i32_const(imm::ASCII_LOWER_A); i32_ge_u;
+          local_get(5); i32_const(imm::ASCII_LOWER_F); i32_le_u; i32_and;
           if_empty;
-            local_get(5); i32_const(87); i32_sub; local_set(8); // 'a'-87 = 10
+            local_get(5); i32_const(imm::ASCII_LOWER_A_HEX_OFFSET); i32_sub; local_set(8); // 'a'-87 = 10
           else_;
-            local_get(5); i32_const(65); i32_ge_u;
-            local_get(5); i32_const(70); i32_le_u; i32_and;
+            local_get(5); i32_const(imm::ASCII_UPPER_A); i32_ge_u;
+            local_get(5); i32_const(imm::ASCII_UPPER_F); i32_le_u; i32_and;
             if_empty;
-              local_get(5); i32_const(55); i32_sub; local_set(8); // 'A'-55 = 10
+              local_get(5); i32_const(imm::ASCII_UPPER_A_HEX_OFFSET); i32_sub; local_set(8); // 'A'-55 = 10
             end;
           end;
         end;
@@ -214,7 +275,7 @@ pub(super) fn compile_int_from_hex(emitter: &mut WasmEmitter) {
 
     // Return ok(value): alloc [tag=0][value:i64]
     wasm!(f, {
-        i32_const(12); call(alloc); local_set(6);
+        i32_const(imm::RESULT_ALLOC_BYTES); call(alloc); local_set(6);
         local_get(6); i32_const(0); i32_store(0);
         local_get(6); local_get(7); i64_store(4);
         local_get(6);
@@ -338,12 +399,12 @@ pub(super) fn compile_float_parse(emitter: &mut WasmEmitter) {
     // Optional leading sign at data[i].
     wasm!(f, {
         local_get(11); local_get(2); i32_add; i32_load8_u(0); local_set(5);
-        local_get(5); i32_const(45); i32_eq;   // '-'
+        local_get(5); i32_const(imm::ASCII_MINUS); i32_eq;   // '-'
         if_empty;
           i32_const(1); local_set(4);
           local_get(2); i32_const(1); i32_add; local_set(2);
         else_;
-          local_get(5); i32_const(43); i32_eq; // '+'
+          local_get(5); i32_const(imm::ASCII_PLUS); i32_eq; // '+'
           if_empty;
             local_get(2); i32_const(1); i32_add; local_set(2);
           end;
@@ -384,7 +445,7 @@ pub(super) fn compile_float_parse(emitter: &mut WasmEmitter) {
           local_get(11); local_get(2); i32_add; i32_load8_u(0); local_set(5);
 
           // '.' -> set has_dot (err on second dot)
-          local_get(5); i32_const(46); i32_eq;
+          local_get(5); i32_const(imm::ASCII_DOT); i32_eq;
           if_empty;
             local_get(8); if_empty;
     });
@@ -397,8 +458,8 @@ pub(super) fn compile_float_parse(emitter: &mut WasmEmitter) {
           end;
 
           // 'e' / 'E' -> exponent: mark and break out of mantissa loop
-          local_get(5); i32_const(101); i32_eq;   // 'e'
-          local_get(5); i32_const(69); i32_eq;     // 'E'
+          local_get(5); i32_const(imm::ASCII_LOWER_E); i32_eq;   // 'e'
+          local_get(5); i32_const(imm::ASCII_UPPER_E); i32_eq;   // 'E'
           i32_or;
           if_empty;
             i32_const(1); local_set(16);
@@ -407,8 +468,8 @@ pub(super) fn compile_float_parse(emitter: &mut WasmEmitter) {
           end;
 
           // digit '0'..'9' ?
-          local_get(5); i32_const(48); i32_lt_u;
-          local_get(5); i32_const(57); i32_gt_u;
+          local_get(5); i32_const(imm::ASCII_ZERO); i32_lt_u;
+          local_get(5); i32_const(imm::ASCII_NINE); i32_gt_u;
           i32_or;
           if_empty;
     });
@@ -418,7 +479,7 @@ pub(super) fn compile_float_parse(emitter: &mut WasmEmitter) {
 
           local_get(9); i32_const(1); i32_add; local_set(9);   // digit_count++ (all digits)
           // started |= (digit != 0) — leading zeros carry no significance.
-          local_get(19); local_get(5); i32_const(48); i32_ne; i32_or; local_set(19);
+          local_get(19); local_get(5); i32_const(imm::ASCII_ZERO); i32_ne; i32_or; local_set(19);
           local_get(19); i32_eqz;
           if_empty;
             // Leading zero: it only advances the fractional scale (frac_count),
@@ -433,11 +494,11 @@ pub(super) fn compile_float_parse(emitter: &mut WasmEmitter) {
             local_get(20); i32_const(super::rt_dec2flt::SIG_DIGIT_CAP); i32_lt_u;
             if_empty;
               local_get(17); i32_const(super::rt_dec2flt::DECIMAL_BASE); call(mul_small);
-              local_get(17); local_get(5); i32_const(48); i32_sub; call(bn_add_small);
+              local_get(17); local_get(5); i32_const(imm::ASCII_ZERO); i32_sub; call(bn_add_small);
               local_get(20); i32_const(1); i32_add; local_set(20);   // sig_digits++
               local_get(8); if_empty; local_get(18); i32_const(1); i32_add; local_set(18); end;
             else_;
-              local_get(21); local_get(5); i32_const(48); i32_ne; i32_or; local_set(21);
+              local_get(21); local_get(5); i32_const(imm::ASCII_ZERO); i32_ne; i32_or; local_set(21);
             end;
           end;
 
@@ -467,12 +528,12 @@ pub(super) fn compile_float_parse(emitter: &mut WasmEmitter) {
     wasm!(f, {
           end;
           local_get(11); local_get(2); i32_add; i32_load8_u(0); local_set(5);
-          local_get(5); i32_const(45); i32_eq;   // '-'
+          local_get(5); i32_const(imm::ASCII_MINUS); i32_eq;   // '-'
           if_empty;
             i32_const(1); local_set(12);
             local_get(2); i32_const(1); i32_add; local_set(2);
           else_;
-            local_get(5); i32_const(43); i32_eq; // '+'
+            local_get(5); i32_const(imm::ASCII_PLUS); i32_eq; // '+'
             if_empty;
               local_get(2); i32_const(1); i32_add; local_set(2);
             end;
@@ -482,8 +543,8 @@ pub(super) fn compile_float_parse(emitter: &mut WasmEmitter) {
           block_empty; loop_empty;
             local_get(2); local_get(10); i32_ge_u; br_if(1);
             local_get(11); local_get(2); i32_add; i32_load8_u(0); local_set(5);
-            local_get(5); i32_const(48); i32_lt_u;
-            local_get(5); i32_const(57); i32_gt_u;
+            local_get(5); i32_const(imm::ASCII_ZERO); i32_lt_u;
+            local_get(5); i32_const(imm::ASCII_NINE); i32_gt_u;
             i32_or;
             if_empty;
     });
@@ -494,8 +555,8 @@ pub(super) fn compile_float_parse(emitter: &mut WasmEmitter) {
             // huge exponent can't wrap the i32 accumulator (see clamp definition).
             local_get(13); i32_const(exp_magnitude_clamp); i32_lt_u;
             if_empty;
-              local_get(13); i32_const(10); i32_mul;
-              local_get(5); i32_const(48); i32_sub; i32_add; local_set(13);
+              local_get(13); i32_const(super::rt_dec2flt::DECIMAL_BASE); i32_mul;
+              local_get(5); i32_const(imm::ASCII_ZERO); i32_sub; i32_add; local_set(13);
             end;
             local_get(14); i32_const(1); i32_add; local_set(14);
             local_get(2); i32_const(1); i32_add; local_set(2);
@@ -533,7 +594,7 @@ pub(super) fn compile_float_parse(emitter: &mut WasmEmitter) {
         local_set(14);
         local_get(4); local_get(17); local_get(14); local_get(21); call(dec2flt); local_set(3);
         // Return ok(result): alloc 12 bytes [tag=0][f64]
-        i32_const(12); call(emitter.rt.alloc); local_set(6);
+        i32_const(imm::RESULT_ALLOC_BYTES); call(emitter.rt.alloc); local_set(6);
         local_get(6); i32_const(0); i32_store(0);
         local_get(6); local_get(3); f64_store(4);
         local_get(6);
@@ -558,7 +619,7 @@ fn emit_kw_match(f: &mut Function, kw: &[u8], i_local: u32, end_local: u32, base
         wasm!(f, {
             local_get(base_local); local_get(i_local); i32_add;
             i32_const(k as i32); i32_add; i32_load8_u(0);
-            i32_const(0x20); i32_or;            // ASCII lowercase
+            i32_const(imm::ASCII_LOWERCASE_MASK); i32_or;  // ASCII lowercase
             i32_const(lower); i32_eq;
             i32_and;
         });
@@ -568,7 +629,7 @@ fn emit_kw_match(f: &mut Function, kw: &[u8], i_local: u32, end_local: u32, base
 /// Emit the err return for float_parse: alloc [tag=1][str_ptr] and return.
 fn emit_float_parse_err(f: &mut Function, emitter: &WasmEmitter, err_str: u32) {
     wasm!(f, {
-        i32_const(12); call(emitter.rt.alloc); local_set(6);
+        i32_const(imm::RESULT_ALLOC_BYTES); call(emitter.rt.alloc); local_set(6);
         local_get(6); i32_const(1); i32_store(0);          // tag = 1 (err)
         local_get(6); i32_const(err_str as i32); i32_store(4); // err string
         local_get(6);
@@ -582,13 +643,13 @@ fn emit_float_parse_err(f: &mut Function, emitter: &WasmEmitter, err_str: u32) {
 fn emit_float_parse_ok_special(f: &mut Function, emitter: &WasmEmitter, value: f64) {
     let pos_bits = (value.to_bits() & 0x7FFF_FFFF_FFFF_FFFF) as i64; // magnitude bits
     wasm!(f, {
-        i32_const(12); call(emitter.rt.alloc); local_set(6);
+        i32_const(imm::RESULT_ALLOC_BYTES); call(emitter.rt.alloc); local_set(6);
         local_get(6); i32_const(0); i32_store(0);          // tag = 0 (ok)
         local_get(6);
         i64_const(pos_bits);
         local_get(4);
         if_i64;
-          i64_const(0x8000000000000000_u64 as i64);
+          i64_const(imm::F64_SIGN_BIT);
         else_;
           i64_const(0);
         end;
@@ -641,32 +702,32 @@ pub(super) fn compile_math_sin(emitter: &mut WasmEmitter) {
     let mut f = Function::new([(2, ValType::I32), (1, ValType::I32), (2, ValType::F64)]);
     wasm!(f, {
         // ix = (to_bits(x) >> 32) & 0x7fffffff
-        local_get(0); i64_reinterpret_f64; i64_const(32); i64_shr_u; i32_wrap_i64; i32_const(0x7fffffff); i32_and; local_set(1);
+        local_get(0); i64_reinterpret_f64; i64_const(imm::F64_HIGH_WORD_SHIFT); i64_shr_u; i32_wrap_i64; i32_const(imm::F64_ABS_HIGH_WORD_MASK); i32_and; local_set(1);
         // if ix <= 0x3fe921fb { if ix < 0x3e500000 { return x } return k_sin(x,0,0) }
-        local_get(1); i32_const(0x3fe921fb); i32_le_u;
+        local_get(1); i32_const(imm::LIBM_SMALL_ARG); i32_le_u;
         if_empty;
-            local_get(1); i32_const(0x3e500000); i32_lt_u;
+            local_get(1); i32_const(imm::LIBM_SIN_TINY_ARG); i32_lt_u;
             if_empty; local_get(0); return_; end;
             local_get(0); f64_const(0.0); i32_const(0); call(k_sin); return_;
         end;
         // if ix >= 0x7ff00000 { return x - x }
-        local_get(1); i32_const(0x7ff00000); i32_ge_u;
+        local_get(1); i32_const(imm::F64_INF_HIGH_WORD); i32_ge_u;
         if_empty; local_get(0); local_get(0); f64_sub; return_; end;
         // n = rem_pio2(x, yp); y0=y[0]; y1=y[1]
-        i32_const(16); call(alloc); local_set(3);
+        i32_const(imm::REM_PIO2_OUT_BYTES); call(alloc); local_set(3);
         local_get(0); local_get(3); call(rem_pio2); local_set(2);
         local_get(3); f64_load(0); local_set(4);
         local_get(3); f64_load(8); local_set(5);
         // match n & 3 { 0=>k_sin(y0,y1,1) 1=>k_cos(y0,y1) 2=>-k_sin(y0,y1,1) _=>-k_cos(y0,y1) }
-        local_get(2); i32_const(3); i32_and; i32_const(0); i32_eq;
+        local_get(2); i32_const(imm::QUAD_MASK); i32_and; i32_const(0); i32_eq;
         if_f64;
             local_get(4); local_get(5); i32_const(1); call(k_sin);
         else_;
-            local_get(2); i32_const(3); i32_and; i32_const(1); i32_eq;
+            local_get(2); i32_const(imm::QUAD_MASK); i32_and; i32_const(1); i32_eq;
             if_f64;
                 local_get(4); local_get(5); call(k_cos);
             else_;
-                local_get(2); i32_const(3); i32_and; i32_const(2); i32_eq;
+                local_get(2); i32_const(imm::QUAD_MASK); i32_and; i32_const(imm::QUAD_NEG); i32_eq;
                 if_f64;
                     local_get(4); local_get(5); i32_const(1); call(k_sin); f64_neg;
                 else_;
@@ -690,33 +751,33 @@ pub(super) fn compile_math_cos(emitter: &mut WasmEmitter) {
     // params: 0=x. locals: 1=i32 ix, 2=i32 n, 3=i32 yp, 4=f64 y0, 5=f64 y1
     let mut f = Function::new([(2, ValType::I32), (1, ValType::I32), (2, ValType::F64)]);
     wasm!(f, {
-        local_get(0); i64_reinterpret_f64; i64_const(32); i64_shr_u; i32_wrap_i64; i32_const(0x7fffffff); i32_and; local_set(1);
+        local_get(0); i64_reinterpret_f64; i64_const(imm::F64_HIGH_WORD_SHIFT); i64_shr_u; i32_wrap_i64; i32_const(imm::F64_ABS_HIGH_WORD_MASK); i32_and; local_set(1);
         // if ix <= 0x3fe921fb { if ix < 0x3e46a09e { if (x as i32)==0 { return 1.0 } } return k_cos(x,0) }
-        local_get(1); i32_const(0x3fe921fb); i32_le_u;
+        local_get(1); i32_const(imm::LIBM_SMALL_ARG); i32_le_u;
         if_empty;
-            local_get(1); i32_const(0x3e46a09e); i32_lt_u;
+            local_get(1); i32_const(imm::LIBM_COS_TINY_ARG); i32_lt_u;
             if_empty;
                 local_get(0); i32_trunc_f64_s; i32_eqz;
                 if_empty; f64_const(1.0); return_; end;
             end;
             local_get(0); f64_const(0.0); call(k_cos); return_;
         end;
-        local_get(1); i32_const(0x7ff00000); i32_ge_u;
+        local_get(1); i32_const(imm::F64_INF_HIGH_WORD); i32_ge_u;
         if_empty; local_get(0); local_get(0); f64_sub; return_; end;
-        i32_const(16); call(alloc); local_set(3);
+        i32_const(imm::REM_PIO2_OUT_BYTES); call(alloc); local_set(3);
         local_get(0); local_get(3); call(rem_pio2); local_set(2);
         local_get(3); f64_load(0); local_set(4);
         local_get(3); f64_load(8); local_set(5);
         // match n & 3 { 0=>k_cos 1=>-k_sin 2=>-k_cos _=>k_sin }
-        local_get(2); i32_const(3); i32_and; i32_const(0); i32_eq;
+        local_get(2); i32_const(imm::QUAD_MASK); i32_and; i32_const(0); i32_eq;
         if_f64;
             local_get(4); local_get(5); call(k_cos);
         else_;
-            local_get(2); i32_const(3); i32_and; i32_const(1); i32_eq;
+            local_get(2); i32_const(imm::QUAD_MASK); i32_and; i32_const(1); i32_eq;
             if_f64;
                 local_get(4); local_get(5); i32_const(1); call(k_sin); f64_neg;
             else_;
-                local_get(2); i32_const(3); i32_and; i32_const(2); i32_eq;
+                local_get(2); i32_const(imm::QUAD_MASK); i32_and; i32_const(imm::QUAD_NEG); i32_eq;
                 if_f64;
                     local_get(4); local_get(5); call(k_cos); f64_neg;
                 else_;
@@ -739,17 +800,17 @@ pub(super) fn compile_math_tan(emitter: &mut WasmEmitter) {
     // params: 0=x. locals: 1=i32 ix, 2=i32 n, 3=i32 yp, 4=f64 y0, 5=f64 y1
     let mut f = Function::new([(2, ValType::I32), (1, ValType::I32), (2, ValType::F64)]);
     wasm!(f, {
-        local_get(0); i64_reinterpret_f64; i64_const(32); i64_shr_u; i32_wrap_i64; i32_const(0x7fffffff); i32_and; local_set(1);
+        local_get(0); i64_reinterpret_f64; i64_const(imm::F64_HIGH_WORD_SHIFT); i64_shr_u; i32_wrap_i64; i32_const(imm::F64_ABS_HIGH_WORD_MASK); i32_and; local_set(1);
         // if ix <= 0x3fe921fb { if ix < 0x3e400000 { return x } return k_tan(x,0,0) }
-        local_get(1); i32_const(0x3fe921fb); i32_le_u;
+        local_get(1); i32_const(imm::LIBM_SMALL_ARG); i32_le_u;
         if_empty;
-            local_get(1); i32_const(0x3e400000); i32_lt_u;
+            local_get(1); i32_const(imm::LIBM_TAN_TINY_ARG); i32_lt_u;
             if_empty; local_get(0); return_; end;
             local_get(0); f64_const(0.0); i32_const(0); call(k_tan); return_;
         end;
-        local_get(1); i32_const(0x7ff00000); i32_ge_u;
+        local_get(1); i32_const(imm::F64_INF_HIGH_WORD); i32_ge_u;
         if_empty; local_get(0); local_get(0); f64_sub; return_; end;
-        i32_const(16); call(alloc); local_set(3);
+        i32_const(imm::REM_PIO2_OUT_BYTES); call(alloc); local_set(3);
         local_get(0); local_get(3); call(rem_pio2); local_set(2);
         local_get(3); f64_load(0); local_set(4);
         local_get(3); f64_load(8); local_set(5);

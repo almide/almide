@@ -10,6 +10,20 @@ use almide_lang::types::Ty;
 use wasm_encoder::{Function, Instruction, ValType};
 use super::engine::layout::{LIST, list as ll};
 
+/// Named WASM immediate constants for list helper codegen.
+mod imm {
+    // ── byte widths ────────────────────────────────────────────────────
+    /// Byte size of an i32 / pointer (stride in a list-of-pointers array).
+    pub(super) const I32_BYTES: i32 = 4;
+
+    // ── sort constants ─────────────────────────────────────────────────
+    /// Minimum list length that requires sorting (len < 2 → already sorted/trivial).
+    pub(super) const SORT_MIN_LEN: i32 = 2;
+    /// Merge sort doubling factor: each pass doubles the merge width (`width * 2`).
+    pub(super) const MERGE_STRIDE: i32 = 2;
+}
+use imm::*;
+
 /// Upper bound for `emit_clamp_count_to_i32` — the value a too-large `Int`
 /// count saturates to (mirrors native's `min(n, len)` / capacity-ceiling).
 #[derive(Clone, Copy)]
@@ -613,7 +627,7 @@ impl FuncCompiler<'_> {
         let is_desc = self.scratch.alloc_i32();
         let scan_done = self.scratch.alloc_i32();
         wasm!(self.func, {
-            local_get(len); i32_const(2); i32_lt_u;
+            local_get(len); i32_const(SORT_MIN_LEN); i32_lt_u;
             if_empty;
               // len < 2: nothing to sort, but still copy the 0/1 source elements
               // to dst. The sort-proper path (scan_done==0) copies src→dst, but
@@ -726,7 +740,7 @@ impl FuncCompiler<'_> {
                 local_get(i); local_get(width); i32_add; local_set(mid);
                 local_get(mid); local_get(len); i32_gt_u;
                 if_empty; local_get(len); local_set(mid); end;
-                local_get(i); local_get(width); i32_const(2); i32_mul; i32_add; local_set(right);
+                local_get(i); local_get(width); i32_const(MERGE_STRIDE); i32_mul; i32_add; local_set(right);
                 local_get(right); local_get(len); i32_gt_u;
                 if_empty; local_get(len); local_set(right); end;
                 // merge dst[left..mid] and dst[mid..right] into tmp[left..right]
@@ -790,11 +804,11 @@ impl FuncCompiler<'_> {
                   br(0);
                 end; end;
                 // i += width * 2
-                local_get(i); local_get(width); i32_const(2); i32_mul; i32_add; local_set(i);
+                local_get(i); local_get(width); i32_const(MERGE_STRIDE); i32_mul; i32_add; local_set(i);
                 br(0);
               end; end;
               // width *= 2
-              local_get(width); i32_const(2); i32_mul; local_set(width);
+              local_get(width); i32_const(MERGE_STRIDE); i32_mul; local_set(width);
               br(0);
             end; end;
             end; // end if scan_done == 0
@@ -819,7 +833,7 @@ impl FuncCompiler<'_> {
                 block_empty; loop_empty;
                     local_get(di); local_get(dl); i32_ge_u; br_if(1);
                     local_get(dst); i32_const(data_off); i32_add;
-                    local_get(di); i32_const(4); i32_mul; i32_add;
+                    local_get(di); i32_const(I32_BYTES); i32_mul; i32_add;
                     i32_load(0); call(self.emitter.rt.rc_inc); drop;
                     local_get(di); i32_const(1); i32_add; local_set(di);
                     br(0);
@@ -996,7 +1010,7 @@ impl FuncCompiler<'_> {
             // Alloc dst: [len] + len * ptr_size(4)
             i32_const(self.emitter.layout_reg.header_size(LIST) as i32);
             local_get(len_local);
-            i32_const(4); // each entry is a tuple ptr (i32)
+            i32_const(I32_BYTES); // each entry is a tuple ptr (i32)
             i32_mul;
             i32_add;
             call(self.emitter.rt.alloc);
@@ -1051,7 +1065,7 @@ impl FuncCompiler<'_> {
             i32_const(self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32);
             i32_add;
             local_get(idx_local);
-            i32_const(4); // tuple ptrs are i32
+            i32_const(I32_BYTES); // tuple ptrs are i32
             i32_mul;
             i32_add;
             local_get(tuple_ptr);

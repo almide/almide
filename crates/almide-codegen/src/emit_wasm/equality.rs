@@ -5,6 +5,10 @@
 use std::collections::HashMap;
 use std::collections::BTreeMap;
 
+// Named constants for raw WASM immediate values used in this module.
+/// Position of the sign bit in an i64 (used by the f64 total-order key transform).
+const I64_SIGN_BIT_POS: i64 = 63;
+
 use super::FuncCompiler;
 use super::VariantCase;
 use super::values;
@@ -981,7 +985,7 @@ impl FuncCompiler<'_> {
             i64_reinterpret_f64; local_set(bits);
             local_get(bits);
             // mask = (bits >>_s 63) >>_u 1
-            local_get(bits); i64_const(63); i64_shr_s; i64_const(1); i64_shr_u;
+            local_get(bits); i64_const(I64_SIGN_BIT_POS); i64_shr_s; i64_const(1); i64_shr_u;
             i64_xor;
         });
         self.scratch.free_i64(bits);

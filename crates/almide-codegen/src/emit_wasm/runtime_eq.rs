@@ -7,6 +7,30 @@ use super::{CompiledFunc, WasmEmitter};
 use wasm_encoder::{ValType};
 use super::TrackedFunction as Function;
 
+// ── Named immediates ──────────────────────────────────────────────────────────
+
+/// Byte size of a 32-bit (i32) value / pointer on the heap.
+const I32_BYTES: i32 = 4;
+
+/// Total bytes allocated for a Result heap cell: [tag:i32][value:i64|str_ptr:i32],
+/// sized to hold the widest payload (an i64 ok-value at offset 4).
+const RESULT_HEAP_BYTES: i32 = 12;
+
+/// ASCII code of '-' (minus / hyphen).
+const ASCII_MINUS: i32 = 45;
+
+/// ASCII code of '+' (plus).
+const ASCII_PLUS: i32 = 43;
+
+/// ASCII code of '0' (digit zero — lower bound of the decimal digit range).
+const ASCII_ZERO: i32 = 48;
+
+/// ASCII code of '9' (digit nine — upper bound of the decimal digit range).
+const ASCII_NINE: i32 = 57;
+
+/// Decimal base used in the integer parse accumulator loop.
+const DECIMAL_BASE: i64 = 10;
+
 pub(super) fn compile_option_eq_i64(emitter: &mut WasmEmitter) {
     let type_idx = emitter.func_type_indices[&emitter.rt.option_eq_i64];
     let mut f = Function::new([]);
@@ -300,9 +324,9 @@ pub(super) fn compile_list_list_str_cmp(emitter: &mut WasmEmitter) {
         block_empty; loop_empty;
           local_get(5); local_get(4); i32_ge_u; br_if(1);
           local_get(0); i32_const(emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
-          local_get(5); i32_const(4); i32_mul; i32_add; i32_load(0);
+          local_get(5); i32_const(I32_BYTES); i32_mul; i32_add; i32_load(0);
           local_get(1); i32_const(emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
-          local_get(5); i32_const(4); i32_mul; i32_add; i32_load(0);
+          local_get(5); i32_const(I32_BYTES); i32_mul; i32_add; i32_load(0);
           call(str_cmp); local_set(6);
           local_get(6); i32_const(0); i32_ne;
           if_empty; local_get(6); return_; end;
@@ -452,7 +476,7 @@ pub(super) fn compile_int_parse(emitter: &mut WasmEmitter) {
     // Emit an `err(<interned string>)` return: alloc [tag=1][str_ptr] and return.
     let emit_err = |f: &mut Function, err_str: u32| {
         wasm!(f, {
-            i32_const(12);
+            i32_const(RESULT_HEAP_BYTES);
             call(alloc);
             local_set(6);
             local_get(6); i32_const(1); i32_store(0);              // tag = 1 (err)
@@ -493,12 +517,12 @@ pub(super) fn compile_int_parse(emitter: &mut WasmEmitter) {
     wasm!(f, { i32_const(0); local_set(4); }); // is_neg = 0
     load_byte(&mut f, 2, 5);
     wasm!(f, {
-        local_get(5); i32_const(45); i32_eq; // '-'
+        local_get(5); i32_const(ASCII_MINUS); i32_eq; // '-'
         if_empty;
           i32_const(1); local_set(4);
           local_get(2); i32_const(1); i32_add; local_set(2);
         else_;
-          local_get(5); i32_const(43); i32_eq; // '+'
+          local_get(5); i32_const(ASCII_PLUS); i32_eq; // '+'
           if_empty;
             local_get(2); i32_const(1); i32_add; local_set(2);
           end;
@@ -538,8 +562,8 @@ pub(super) fn compile_int_parse(emitter: &mut WasmEmitter) {
 
     // Non-digit → "invalid digit found in string"
     wasm!(f, {
-        local_get(5); i32_const(48); i32_lt_u; // < '0'
-        local_get(5); i32_const(57); i32_gt_u; // > '9'
+        local_get(5); i32_const(ASCII_ZERO); i32_lt_u; // < '0'
+        local_get(5); i32_const(ASCII_NINE); i32_gt_u; // > '9'
         i32_or;
         if_empty;
     });
@@ -548,14 +572,14 @@ pub(super) fn compile_int_parse(emitter: &mut WasmEmitter) {
 
     // d = (byte - '0') as i64  →  tmp
     wasm!(f, {
-        local_get(5); i32_const(48); i32_sub;
+        local_get(5); i32_const(ASCII_ZERO); i32_sub;
         i64_extend_i32_u; local_set(10);
     });
 
     // ── Overflow step 1: if acc > limit/10 → overflow (acc*10 already exceeds limit) ──
     // Unsigned `a > b` ≡ !(b >= a), expressed via i64_ge_u + i32_eqz.
     wasm!(f, {
-        local_get(9); i64_const(10); i64_div_u; // limit/10
+        local_get(9); i64_const(DECIMAL_BASE); i64_div_u; // limit/10
         local_get(7);                            // acc
         i64_ge_u;                                // (limit/10) >= acc  ≡  acc <= limit/10
         i32_eqz;                                 // → acc > limit/10
@@ -569,7 +593,7 @@ pub(super) fn compile_int_parse(emitter: &mut WasmEmitter) {
 
     // acc = acc * 10  (safe: acc <= limit/10, so acc*10 <= limit < u64::MAX)
     wasm!(f, {
-        local_get(7); i64_const(10); i64_mul; local_set(7);
+        local_get(7); i64_const(DECIMAL_BASE); i64_mul; local_set(7);
     });
 
     // ── Overflow step 2: if acc > limit - d → overflow (adding d would exceed) ──
@@ -610,7 +634,7 @@ pub(super) fn compile_int_parse(emitter: &mut WasmEmitter) {
 
     // Return ok(value): alloc [tag=0][value:i64]
     wasm!(f, {
-        i32_const(12); call(alloc); local_set(6);
+        i32_const(RESULT_HEAP_BYTES); call(alloc); local_set(6);
         local_get(6); i32_const(0); i32_store(0); // tag = 0 (ok)
         local_get(6); local_get(7); i64_store(4); // value
         local_get(6);

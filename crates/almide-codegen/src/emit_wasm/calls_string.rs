@@ -17,6 +17,55 @@ use almide_lang::types::Ty;
 /// is explicit instead of a bare `2147483647` literal.
 const STRING_COUNT_HUGE: i64 = i32::MAX as i64;
 
+// ── Named immediates ────────────────────────────────────────────────────────
+
+/// Saturated codepoint index ceiling as i64 (for `i64_gt_s` guard in `get`).
+/// Same semantic as STRING_COUNT_HUGE; typed i64 to match the i64_const opcode.
+const CP_SAT_CEIL_I64: i64 = 0x7FFF_FFFF;
+/// Saturated codepoint index ceiling as i32 (the wrapped value after `i32_wrap_i64`).
+const CP_SAT_CEIL_I32: i32 = 0x7FFF_FFFF;
+
+/// Heap allocation size for an `Option[String]` / `some(ptr)` box: one i32 pointer.
+const OPTION_PTR_BOX_BYTES: i32 = 4;
+/// Heap allocation size for an `Option[Int]` / `some(Int)` box: one i64 value.
+const OPTION_INT_BOX_BYTES: i32 = 8;
+
+// UTF-8 encoding constants used in `from_codepoint`.
+/// Max valid Unicode scalar value (U+10FFFF).
+const UNICODE_MAX_SCALAR: i32 = 0x10FFFF;
+/// First Unicode surrogate code point (low surrogate range start; invalid in UTF-8).
+const UNICODE_SURR_LO: i32 = 0xD800;
+/// Last Unicode surrogate code point (high surrogate range end; invalid in UTF-8).
+const UNICODE_SURR_HI: i32 = 0xDFFF;
+/// Codepoints strictly below this are encoded as 1 UTF-8 byte (ASCII range < 128).
+const UTF8_1B_LIMIT: i32 = 0x80;
+/// Codepoints strictly below this are encoded as at most 2 UTF-8 bytes (< 2048).
+const UTF8_2B_LIMIT: i32 = 0x800;
+/// Codepoints strictly below this are encoded as at most 3 UTF-8 bytes (< 65536).
+const UTF8_3B_LIMIT: i32 = 0x10000;
+/// Lead byte mask for 2-byte UTF-8 sequences: 110xxxxx.
+const UTF8_2B_LEAD: i32 = 0xC0;
+/// Lead byte mask for 3-byte UTF-8 sequences: 1110xxxx.
+const UTF8_3B_LEAD: i32 = 0xE0;
+/// Lead byte mask for 4-byte UTF-8 sequences: 11110xxx.
+const UTF8_4B_LEAD: i32 = 0xF0;
+/// Continuation byte OR-in prefix for UTF-8 non-lead bytes: 10xxxxxx.
+const UTF8_CONT_PREFIX: i32 = 0x80;
+/// Mask extracting the 6-bit payload from a UTF-8 continuation byte position.
+const UTF8_PAYLOAD_MASK: i32 = 0x3F;
+/// Right-shift to reach the 2nd UTF-8 payload group (bits 6–11).
+const UTF8_SHIFT_6: i32 = 6;
+/// Right-shift to reach the 3rd UTF-8 payload group (bits 12–17).
+const UTF8_SHIFT_12: i32 = 12;
+/// Right-shift to reach the 4th UTF-8 payload group (bits 18–20).
+const UTF8_SHIFT_18: i32 = 18;
+/// Byte length of a 2-byte UTF-8 sequence (used as alloc size for string_alloc).
+const UTF8_2B_LEN: i32 = 2;
+/// Byte length of a 3-byte UTF-8 sequence (used as alloc size for string_alloc).
+const UTF8_3B_LEN: i32 = 3;
+/// Byte length of a 4-byte UTF-8 sequence (used as alloc size for string_alloc).
+const UTF8_4B_LEN: i32 = 4;
+
 impl FuncCompiler<'_> {
     /// Dispatch a string stdlib method call. Returns true if handled.
     pub(super) fn emit_string_call(
@@ -120,9 +169,9 @@ impl FuncCompiler<'_> {
                     else_;
                       // saturate the cp index to i32::MAX; utf8_byte_of_cp maps
                       // any count at/past the end to byte_len → none below.
-                      local_get(i64v); i64_const(0x7FFF_FFFF); i64_gt_s;
+                      local_get(i64v); i64_const(CP_SAT_CEIL_I64); i64_gt_s;
                       if_i32;
-                        i32_const(0x7FFF_FFFF);
+                        i32_const(CP_SAT_CEIL_I32);
                       else_;
                         local_get(i64v); i32_wrap_i64;
                       end;
@@ -137,7 +186,7 @@ impl FuncCompiler<'_> {
                         local_get(i); local_get(s); local_get(i); call(self.emitter.rt.string.utf8_width); i32_add;
                         call(self.emitter.rt.string.slice); local_set(cp);
                         // wrap in some: alloc ptr, store string ptr
-                        i32_const(4); call(self.emitter.rt.alloc); local_set(i);
+                        i32_const(OPTION_PTR_BOX_BYTES); call(self.emitter.rt.alloc); local_set(i);
                         local_get(i); local_get(cp); i32_store(0);
                         local_get(i);
                       end;
@@ -228,7 +277,7 @@ impl FuncCompiler<'_> {
                     else_;
                       local_get(s_ptr); local_get(s64); i32_wrap_i64;
                       call(self.emitter.rt.string.cp_of_byte); local_set(s64);
-                      i32_const(8); call(self.emitter.rt.alloc); local_set(s32);
+                      i32_const(OPTION_INT_BOX_BYTES); call(self.emitter.rt.alloc); local_set(s32);
                       local_get(s32); local_get(s64); i64_store(0);
                       local_get(s32);
                     end;
@@ -254,7 +303,7 @@ impl FuncCompiler<'_> {
                     else_;
                       local_get(s_ptr); local_get(s64); i32_wrap_i64;
                       call(self.emitter.rt.string.cp_of_byte); local_set(s64);
-                      i32_const(8); call(self.emitter.rt.alloc); local_set(s32);
+                      i32_const(OPTION_INT_BOX_BYTES); call(self.emitter.rt.alloc); local_set(s32);
                       local_get(s32); local_get(s64); i64_store(0);
                       local_get(s32);
                     end;
@@ -358,7 +407,7 @@ impl FuncCompiler<'_> {
                     local_get(s); i32_load(0); i32_eqz;
                     if_i32; i32_const(0);
                     else_;
-                      i32_const(8); call(self.emitter.rt.alloc); local_set(some);
+                      i32_const(OPTION_INT_BOX_BYTES); call(self.emitter.rt.alloc); local_set(some);
                       local_get(some);
                       local_get(s); i32_const(0); call(self.emitter.rt.string.utf8_scalar);
                       i64_store(0);
@@ -380,60 +429,60 @@ impl FuncCompiler<'_> {
                     i32_wrap_i64; local_set(cp);
                     // invalid? cp < 0 || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)
                     local_get(cp); i32_const(0); i32_lt_s;
-                    local_get(cp); i32_const(0x10FFFF); i32_gt_s; i32_or;
-                    local_get(cp); i32_const(0xD800); i32_ge_s;
-                    local_get(cp); i32_const(0xDFFF); i32_le_s; i32_and; i32_or;
+                    local_get(cp); i32_const(UNICODE_MAX_SCALAR); i32_gt_s; i32_or;
+                    local_get(cp); i32_const(UNICODE_SURR_LO); i32_ge_s;
+                    local_get(cp); i32_const(UNICODE_SURR_HI); i32_le_s; i32_and; i32_or;
                     if_i32;
                       // invalid → empty string
                       i32_const(0); call(self.emitter.rt.string_alloc);
                     else_;
-                      local_get(cp); i32_const(0x80); i32_lt_s;
+                      local_get(cp); i32_const(UTF8_1B_LIMIT); i32_lt_s;
                       if_i32;
                         // 1 byte
                         i32_const(1); call(self.emitter.rt.string_alloc); local_set(r);
                         local_get(r); local_get(cp); i32_store8(data);
                         local_get(r);
                       else_;
-                        local_get(cp); i32_const(0x800); i32_lt_s;
+                        local_get(cp); i32_const(UTF8_2B_LIMIT); i32_lt_s;
                         if_i32;
                           // 2 bytes
-                          i32_const(2); call(self.emitter.rt.string_alloc); local_set(r);
+                          i32_const(UTF8_2B_LEN); call(self.emitter.rt.string_alloc); local_set(r);
                           local_get(r);
-                          i32_const(0xC0); local_get(cp); i32_const(6); i32_shr_u; i32_or;
+                          i32_const(UTF8_2B_LEAD); local_get(cp); i32_const(UTF8_SHIFT_6); i32_shr_u; i32_or;
                           i32_store8(data);
                           local_get(r);
-                          i32_const(0x80); local_get(cp); i32_const(0x3F); i32_and; i32_or;
+                          i32_const(UTF8_CONT_PREFIX); local_get(cp); i32_const(UTF8_PAYLOAD_MASK); i32_and; i32_or;
                           i32_store8(data + 1);
                           local_get(r);
                         else_;
-                          local_get(cp); i32_const(0x10000); i32_lt_s;
+                          local_get(cp); i32_const(UTF8_3B_LIMIT); i32_lt_s;
                           if_i32;
                             // 3 bytes
-                            i32_const(3); call(self.emitter.rt.string_alloc); local_set(r);
+                            i32_const(UTF8_3B_LEN); call(self.emitter.rt.string_alloc); local_set(r);
                             local_get(r);
-                            i32_const(0xE0); local_get(cp); i32_const(12); i32_shr_u; i32_or;
+                            i32_const(UTF8_3B_LEAD); local_get(cp); i32_const(UTF8_SHIFT_12); i32_shr_u; i32_or;
                             i32_store8(data);
                             local_get(r);
-                            i32_const(0x80); local_get(cp); i32_const(6); i32_shr_u; i32_const(0x3F); i32_and; i32_or;
+                            i32_const(UTF8_CONT_PREFIX); local_get(cp); i32_const(UTF8_SHIFT_6); i32_shr_u; i32_const(UTF8_PAYLOAD_MASK); i32_and; i32_or;
                             i32_store8(data + 1);
                             local_get(r);
-                            i32_const(0x80); local_get(cp); i32_const(0x3F); i32_and; i32_or;
+                            i32_const(UTF8_CONT_PREFIX); local_get(cp); i32_const(UTF8_PAYLOAD_MASK); i32_and; i32_or;
                             i32_store8(data + 2);
                             local_get(r);
                           else_;
                             // 4 bytes
-                            i32_const(4); call(self.emitter.rt.string_alloc); local_set(r);
+                            i32_const(UTF8_4B_LEN); call(self.emitter.rt.string_alloc); local_set(r);
                             local_get(r);
-                            i32_const(0xF0); local_get(cp); i32_const(18); i32_shr_u; i32_or;
+                            i32_const(UTF8_4B_LEAD); local_get(cp); i32_const(UTF8_SHIFT_18); i32_shr_u; i32_or;
                             i32_store8(data);
                             local_get(r);
-                            i32_const(0x80); local_get(cp); i32_const(12); i32_shr_u; i32_const(0x3F); i32_and; i32_or;
+                            i32_const(UTF8_CONT_PREFIX); local_get(cp); i32_const(UTF8_SHIFT_12); i32_shr_u; i32_const(UTF8_PAYLOAD_MASK); i32_and; i32_or;
                             i32_store8(data + 1);
                             local_get(r);
-                            i32_const(0x80); local_get(cp); i32_const(6); i32_shr_u; i32_const(0x3F); i32_and; i32_or;
+                            i32_const(UTF8_CONT_PREFIX); local_get(cp); i32_const(UTF8_SHIFT_6); i32_shr_u; i32_const(UTF8_PAYLOAD_MASK); i32_and; i32_or;
                             i32_store8(data + 2);
                             local_get(r);
-                            i32_const(0x80); local_get(cp); i32_const(0x3F); i32_and; i32_or;
+                            i32_const(UTF8_CONT_PREFIX); local_get(cp); i32_const(UTF8_PAYLOAD_MASK); i32_and; i32_or;
                             i32_store8(data + 3);
                             local_get(r);
                           end;
@@ -476,7 +525,7 @@ impl FuncCompiler<'_> {
                       local_get(s); i32_const(0); call(self.emitter.rt.string.utf8_width);
                       call(self.emitter.rt.string.slice); local_set(cp);
                       // wrap in some
-                      i32_const(4); call(self.emitter.rt.alloc); local_set(some);
+                      i32_const(OPTION_PTR_BOX_BYTES); call(self.emitter.rt.alloc); local_set(some);
                       local_get(some); local_get(cp); i32_store(0);
                       local_get(some);
                     end;
@@ -505,7 +554,7 @@ impl FuncCompiler<'_> {
                       local_get(s); local_get(start); local_get(s); i32_load(0);
                       call(self.emitter.rt.string.slice); local_set(cp);
                       // wrap in some
-                      i32_const(4); call(self.emitter.rt.alloc); local_set(start);
+                      i32_const(OPTION_PTR_BOX_BYTES); call(self.emitter.rt.alloc); local_set(start);
                       local_get(start); local_get(cp); i32_store(0);
                       local_get(start);
                     end;

@@ -93,6 +93,17 @@ const SCRATCH_ITOA: u32 = 16;
 /// data section DCE can distinguish string offsets from character codes.
 const NEWLINE_OFFSET: u32 = 4096;
 
+// IOV (iovec) scratch layout used by WASI fd_write in compile_main_runner.
+// Mirrors the identically-named constants in runtime.rs (which are module-private).
+/// Byte offset of the `len` field inside one iovec record (4 bytes past `buf`).
+const IOV_LEN_OFF: i32 = 4;
+/// Byte offset at which fd_write writes its `nwritten` result (just past one iovec).
+const NWRITTEN_OFF: i32 = 8;
+
+// WASI file-descriptor numbers.
+/// Standard error file descriptor (fd 2), used to write the unhandled-error message.
+const FD_STDERR: i32 = 2;
+
 /// Wrapper around `wasm_encoder::Function` that automatically records
 /// `call` targets as instructions are emitted. Used by `FuncCompiler`
 /// so DCE gets a type-safe call graph without bytecode scanning.
@@ -2327,15 +2338,15 @@ fn compile_main_runner(emitter: &mut WasmEmitter, main_idx: u32, drop_count: usi
     f.instruction(&Ins::I32Const(data_off));
     f.instruction(&Ins::I32Add);
     f.instruction(&Ins::I32Store(m(0)));
-    f.instruction(&Ins::I32Const(4));
+    f.instruction(&Ins::I32Const(IOV_LEN_OFF));
     f.instruction(&Ins::LocalGet(1));
     f.instruction(&Ins::I32Load(m(0)));
     f.instruction(&Ins::I32Store(m(0)));
-    //   fd_write(fd=2 stderr, iovs=0, iovs_len=1, nwritten=8)
-    f.instruction(&Ins::I32Const(2));
+    //   fd_write(fd=2 stderr, iovs=0, iovs_len=1, nwritten=NWRITTEN_OFF)
+    f.instruction(&Ins::I32Const(FD_STDERR));
     f.instruction(&Ins::I32Const(0));
     f.instruction(&Ins::I32Const(1));
-    f.instruction(&Ins::I32Const(8));
+    f.instruction(&Ins::I32Const(NWRITTEN_OFF));
     f.instruction(&Ins::Call(fd_write));
     f.instruction(&Ins::Drop);
     f.instruction(&Ins::I32Const(1));

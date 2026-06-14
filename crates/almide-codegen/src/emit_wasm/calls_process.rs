@@ -11,6 +11,33 @@ use super::values;
 use super::rt_string::{string_hdr, string_data_off, string_cap_off, list_hdr, list_data_off, list_cap_off};
 use wasm_encoder::Instruction;
 
+/// Named WASM immediate constants for process-call codegen.
+mod imm {
+    // ── byte widths ────────────────────────────────────────────────────────
+    /// Byte size of an i32 / pointer (pointer stride in List[String] element
+    /// arrays and size of a single i32 out-parameter allocation).
+    pub const I32_BYTES: i32 = 4;
+    /// Byte size of a WASI iovec_t struct ([buf_ptr: i32, buf_len: i32] = 2×4).
+    pub const IOV_BYTES: i32 = 8;
+
+    // ── initial capacities ─────────────────────────────────────────────────
+    /// Initial byte capacity of the stdin read buffer before any growth.
+    pub const STDIN_BUF_INIT_CAP: i32 = 4096;
+    /// Growth threshold: when fewer than this many bytes remain free in the
+    /// read buffer, double the capacity before the next fd_read call.
+    pub const STDIN_BUF_GROW_THRESHOLD: i32 = 4096;
+    /// Initial element capacity of the line-pointer array while scanning
+    /// stdin for newlines.
+    pub const INIT_LINE_LIST_CAP: i32 = 64;
+    /// Multiplicative growth factor applied to buffer / list capacities.
+    pub const CAPACITY_DOUBLE: i32 = 2;
+
+    // ── character codes ────────────────────────────────────────────────────
+    /// ASCII code for the newline character '\n' (0x0A).
+    pub const ASCII_NEWLINE: i32 = 10;
+}
+use imm::*;
+
 impl FuncCompiler<'_> {
     /// process module: exit, stdin_lines
     pub(super) fn emit_process_call(&mut self, func: &str, args: &[IrExpr]) {
@@ -49,11 +76,11 @@ impl FuncCompiler<'_> {
 
                 // --- Phase 1: read all stdin ---
                 wasm!(self.func, {
-                    i32_const(4096); call(self.emitter.rt.alloc); local_set(buf);
-                    i32_const(4096); local_set(capacity);
+                    i32_const(STDIN_BUF_INIT_CAP); call(self.emitter.rt.alloc); local_set(buf);
+                    i32_const(STDIN_BUF_INIT_CAP); local_set(capacity);
                     i32_const(0); local_set(len);
-                    i32_const(8); call(self.emitter.rt.alloc); local_set(iov_ptr);
-                    i32_const(4); call(self.emitter.rt.alloc); local_set(nread_ptr);
+                    i32_const(IOV_BYTES); call(self.emitter.rt.alloc); local_set(iov_ptr);
+                    i32_const(I32_BYTES); call(self.emitter.rt.alloc); local_set(nread_ptr);
                 });
 
                 wasm!(self.func, {
@@ -63,9 +90,9 @@ impl FuncCompiler<'_> {
                 // Grow if needed
                 wasm!(self.func, {
                     local_get(capacity); local_get(len); i32_sub;
-                    i32_const(4096); i32_lt_u;
+                    i32_const(STDIN_BUF_GROW_THRESHOLD); i32_lt_u;
                     if_empty;
-                      local_get(capacity); i32_const(2); i32_mul; local_set(capacity);
+                      local_get(capacity); i32_const(CAPACITY_DOUBLE); i32_mul; local_set(capacity);
                       local_get(capacity); call(self.emitter.rt.alloc); local_set(new_buf);
                       i32_const(0); local_set(copy_i);
                       block_empty; loop_empty;
@@ -106,9 +133,9 @@ impl FuncCompiler<'_> {
                 // Each elem is a ptr to Almide String [len:i32][data:u8...]
                 // We'll build with a growable array of i32 pointers.
                 wasm!(self.func, {
-                    // Initial list capacity: 64 elements (i32 ptrs)
-                    i32_const(64); local_set(list_cap);
-                    local_get(list_cap); i32_const(4); i32_mul;
+                    // Initial list capacity: INIT_LINE_LIST_CAP elements (i32 ptrs)
+                    i32_const(INIT_LINE_LIST_CAP); local_set(list_cap);
+                    local_get(list_cap); i32_const(I32_BYTES); i32_mul;
                     call(self.emitter.rt.alloc); local_set(list_ptr);
                     i32_const(0); local_set(list_count);
                     i32_const(0); local_set(scan_i);
@@ -125,7 +152,7 @@ impl FuncCompiler<'_> {
                 // Check if buf[scan_i] == '\n'
                 wasm!(self.func, {
                       local_get(buf); local_get(scan_i); i32_add; i32_load8_u(0);
-                      i32_const(10); i32_eq;
+                      i32_const(ASCII_NEWLINE); i32_eq;
                       if_empty;
                 });
 
@@ -154,15 +181,15 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, {
                         local_get(list_count); local_get(list_cap); i32_ge_u;
                         if_empty;
-                          local_get(list_cap); i32_const(2); i32_mul; local_set(list_cap);
-                          local_get(list_cap); i32_const(4); i32_mul;
+                          local_get(list_cap); i32_const(CAPACITY_DOUBLE); i32_mul; local_set(list_cap);
+                          local_get(list_cap); i32_const(I32_BYTES); i32_mul;
                           call(self.emitter.rt.alloc); local_set(new_list);
                           // Copy old list ptrs
                           i32_const(0); local_set(copy_i);
                           block_empty; loop_empty;
                             local_get(copy_i); local_get(list_count); i32_ge_u; br_if(1);
-                            local_get(new_list); local_get(copy_i); i32_const(4); i32_mul; i32_add;
-                            local_get(list_ptr); local_get(copy_i); i32_const(4); i32_mul; i32_add;
+                            local_get(new_list); local_get(copy_i); i32_const(I32_BYTES); i32_mul; i32_add;
+                            local_get(list_ptr); local_get(copy_i); i32_const(I32_BYTES); i32_mul; i32_add;
                             i32_load(0);
                             i32_store(0);
                             local_get(copy_i); i32_const(1); i32_add; local_set(copy_i);
@@ -174,7 +201,7 @@ impl FuncCompiler<'_> {
 
                 // Append line_ptr to list
                 wasm!(self.func, {
-                        local_get(list_ptr); local_get(list_count); i32_const(4); i32_mul; i32_add;
+                        local_get(list_ptr); local_get(list_count); i32_const(I32_BYTES); i32_mul; i32_add;
                         local_get(line_ptr); i32_store(0);
                         local_get(list_count); i32_const(1); i32_add; local_set(list_count);
                         // line_start = scan_i + 1
@@ -214,14 +241,14 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, {
                       local_get(list_count); local_get(list_cap); i32_ge_u;
                       if_empty;
-                        local_get(list_cap); i32_const(2); i32_mul; local_set(list_cap);
-                        local_get(list_cap); i32_const(4); i32_mul;
+                        local_get(list_cap); i32_const(CAPACITY_DOUBLE); i32_mul; local_set(list_cap);
+                        local_get(list_cap); i32_const(I32_BYTES); i32_mul;
                         call(self.emitter.rt.alloc); local_set(new_list);
                         i32_const(0); local_set(copy_i);
                         block_empty; loop_empty;
                           local_get(copy_i); local_get(list_count); i32_ge_u; br_if(1);
-                          local_get(new_list); local_get(copy_i); i32_const(4); i32_mul; i32_add;
-                          local_get(list_ptr); local_get(copy_i); i32_const(4); i32_mul; i32_add;
+                          local_get(new_list); local_get(copy_i); i32_const(I32_BYTES); i32_mul; i32_add;
+                          local_get(list_ptr); local_get(copy_i); i32_const(I32_BYTES); i32_mul; i32_add;
                           i32_load(0);
                           i32_store(0);
                           local_get(copy_i); i32_const(1); i32_add; local_set(copy_i);
@@ -230,16 +257,16 @@ impl FuncCompiler<'_> {
                         local_get(new_list); local_set(list_ptr);
                       end;
                       // Append last line
-                      local_get(list_ptr); local_get(list_count); i32_const(4); i32_mul; i32_add;
+                      local_get(list_ptr); local_get(list_count); i32_const(I32_BYTES); i32_mul; i32_add;
                       local_get(line_ptr); i32_store(0);
                       local_get(list_count); i32_const(1); i32_add; local_set(list_count);
                     end; // end if line_start < len
                 });
 
                 // Build final Almide List: [len:i32][cap:i32][elem0:i32][elem1:i32]...
-                // elem_size = 4 (i32 pointer)
+                // elem_size = I32_BYTES (i32 pointer)
                 wasm!(self.func, {
-                    local_get(list_count); i32_const(4); i32_mul; i32_const(list_hdr()); i32_add;
+                    local_get(list_count); i32_const(I32_BYTES); i32_mul; i32_const(list_hdr()); i32_add;
                     call(self.emitter.rt.alloc); local_set(result);
                     local_get(result); local_get(list_count); i32_store(0);
                     local_get(result); i32_const(list_cap_off()); i32_add; local_get(list_count); i32_store(0); // cap = len
@@ -248,8 +275,8 @@ impl FuncCompiler<'_> {
                     block_empty; loop_empty;
                       local_get(copy_i); local_get(list_count); i32_ge_u; br_if(1);
                       local_get(result); i32_const(list_data_off()); i32_add;
-                      local_get(copy_i); i32_const(4); i32_mul; i32_add;
-                      local_get(list_ptr); local_get(copy_i); i32_const(4); i32_mul; i32_add;
+                      local_get(copy_i); i32_const(I32_BYTES); i32_mul; i32_add;
+                      local_get(list_ptr); local_get(copy_i); i32_const(I32_BYTES); i32_mul; i32_add;
                       i32_load(0);
                       i32_store(0);
                       local_get(copy_i); i32_const(1); i32_add; local_set(copy_i);
@@ -297,8 +324,8 @@ impl FuncCompiler<'_> {
 
                 // --- Phase 1: discover argc + total argv buffer size ---
                 wasm!(self.func, {
-                    i32_const(4); call(self.emitter.rt.alloc); local_set(argc_ptr);
-                    i32_const(4); call(self.emitter.rt.alloc); local_set(bufsize_ptr);
+                    i32_const(I32_BYTES); call(self.emitter.rt.alloc); local_set(argc_ptr);
+                    i32_const(I32_BYTES); call(self.emitter.rt.alloc); local_set(bufsize_ptr);
                     local_get(argc_ptr);
                     local_get(bufsize_ptr);
                     call(self.emitter.rt.args_sizes_get);
@@ -313,11 +340,11 @@ impl FuncCompiler<'_> {
                 // returns a degenerate pointer (argc is always >= 1 in practice, but
                 // stay defensive).
                 wasm!(self.func, {
-                    // argv_ptr: argc i32 pointers (+4 guard so a zero argc never
+                    // argv_ptr: argc i32 pointers (+I32_BYTES guard so a zero argc never
                     // yields a degenerate alloc).
-                    local_get(argc); i32_const(4); i32_mul; i32_const(4); i32_add;
+                    local_get(argc); i32_const(I32_BYTES); i32_mul; i32_const(I32_BYTES); i32_add;
                     call(self.emitter.rt.alloc); local_set(argv_ptr);
-                    local_get(buf_size); i32_const(4); i32_add;
+                    local_get(buf_size); i32_const(I32_BYTES); i32_add;
                     call(self.emitter.rt.alloc); local_set(argv_buf);
                     local_get(argv_ptr);
                     local_get(argv_buf);
@@ -327,7 +354,7 @@ impl FuncCompiler<'_> {
 
                 // --- Phase 3: build List[String] = [len][cap][strptr0][strptr1]... ---
                 wasm!(self.func, {
-                    local_get(argc); i32_const(4); i32_mul; i32_const(list_hdr()); i32_add;
+                    local_get(argc); i32_const(I32_BYTES); i32_mul; i32_const(list_hdr()); i32_add;
                     call(self.emitter.rt.alloc); local_set(result);
                     local_get(result); local_get(argc); i32_store(0);
                     local_get(result); i32_const(list_cap_off()); i32_add; local_get(argc); i32_store(0); // cap = len
@@ -335,7 +362,7 @@ impl FuncCompiler<'_> {
                     block_empty; loop_empty;
                       local_get(i); local_get(argc); i32_ge_u; br_if(1);
                       // cstr_ptr = argv_ptr[i]
-                      local_get(argv_ptr); local_get(i); i32_const(4); i32_mul; i32_add;
+                      local_get(argv_ptr); local_get(i); i32_const(I32_BYTES); i32_mul; i32_add;
                       i32_load(0); local_set(cstr_ptr);
                       // str_len = strlen(cstr_ptr): scan to NUL
                       i32_const(0); local_set(str_len);
@@ -360,9 +387,9 @@ impl FuncCompiler<'_> {
                         local_get(copy_i); i32_const(1); i32_add; local_set(copy_i);
                         br(0);
                       end; end;
-                      // result[data_off + i*4] = str_ptr
+                      // result[data_off + i*I32_BYTES] = str_ptr
                       local_get(result); i32_const(list_data_off()); i32_add;
-                      local_get(i); i32_const(4); i32_mul; i32_add;
+                      local_get(i); i32_const(I32_BYTES); i32_mul; i32_add;
                       local_get(str_ptr); i32_store(0);
                       local_get(i); i32_const(1); i32_add; local_set(i);
                       br(0);

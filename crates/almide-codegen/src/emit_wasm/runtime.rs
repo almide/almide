@@ -8,6 +8,78 @@ use super::rt_string::{string_data_off, string_hdr, string_cap_off, list_data_of
 use wasm_encoder::{ValType};
 use super::TrackedFunction as Function;
 
+// ---------------------------------------------------------------------------
+// Named immediate constants — every non-obvious literal that appears as an
+// argument to a WASM const-emit call is named here.  The grouping follows the
+// subsystem that owns the meaning; sharing a numeric value across subsystems is
+// intentional only when the field/role is truly the same.
+// ---------------------------------------------------------------------------
+
+// WASM memory-page arithmetic (used in the bump-allocator grow check).
+/// WASM page size in bytes minus one; used to round a byte address up to the
+/// next page boundary: `(addr + PAGE_SIZE_MINUS_1) >> PAGE_SHIFT`.
+const WASM_PAGE_SIZE_MINUS_1: i64 = 65535;
+/// Log₂ of the WASM page size (65536 = 2¹⁶); right-shifting by this converts
+/// a byte count to a page count.
+const WASM_PAGE_SHIFT: i64 = 16;
+
+// IOV (iovec) scratch layout used by WASI fd_write calls.
+// The scratch area at address 0 holds one iovec: [buf:i32@0][len:i32@4],
+// and the fd_write nwritten output is written at byte 8.
+/// Byte offset of the `len` field inside one iovec record (4 bytes past `buf`).
+const IOV_LEN_OFF: i32 = 4;
+/// Byte offset at which fd_write writes its `nwritten` result (just past one iovec).
+const NWRITTEN_OFF: i32 = 8;
+
+// WASI file-descriptor numbers.
+/// First preopened directory fd assigned by the WASI host (fds 0–2 are stdio).
+const WASI_FIRST_PREOPEN_FD: i32 = 3;
+
+// Preopened-directory table layout.
+/// Size in bytes of one entry in the preopen table: [fd:i32, path_ptr:i32, path_len:i32].
+const PREOPEN_ENTRY_SIZE: i32 = 12;
+/// Maximum number of preopened directory entries we scan and record.
+const PREOPEN_MAX_ENTRIES: i32 = 16;
+/// Total byte size of the preallocated preopen table (PREOPEN_MAX_ENTRIES × PREOPEN_ENTRY_SIZE).
+const PREOPEN_TABLE_SIZE: i32 = 192; // 16 × 12
+/// Size in bytes of the WASI prestat_t buffer used in fd_prestat_get calls.
+const PRESTAT_BUF_SIZE: i32 = 8;
+
+// ASCII character codes (used in itoa and path resolution).
+/// ASCII code for the digit '0'; used to convert a decimal digit (0..9) to a character.
+const ASCII_ZERO: i32 = 48;
+/// ASCII code for the minus sign '-'; written as the sign byte in negative integers.
+const ASCII_MINUS: i32 = 45;
+/// ASCII code for the forward slash '/'; used to detect and strip absolute path prefixes.
+const ASCII_SLASH: i32 = 47;
+/// ASCII code for the period '.'; used to detect the WASI "." preopened directory.
+const ASCII_DOT: i32 = 46;
+
+// Integer-to-decimal conversion.
+/// Decimal radix; used for both the remainder and the division in the itoa digit loop.
+const DECIMAL_BASE: i64 = 10;
+
+// String capacity growth factor.
+/// Multiplier applied to the current capacity when a string buffer must be grown.
+const STRING_GROW_FACTOR: i32 = 2;
+
+// IEEE-754 half-precision (f16) bit-field constants.
+/// Bit position of the sign bit in a 16-bit f16 word (bit 15).
+const F16_SIGN_SHIFT: i32 = 15;
+/// Bit position of the low exponent bit in a 16-bit f16 word (bits 14..10).
+const F16_EXP_SHIFT: i32 = 10;
+/// The 5-bit exponent field value that signals NaN or infinity in f16.
+const F16_EXP_ALL_ONES: i32 = 31;
+/// 10-bit mantissa mask for f16 (0x3FF = 1023).
+const F16_MANTISSA_MASK: i32 = 1023;
+/// Bias adjustment to convert an f16 biased exponent (bias 15) to an f64 biased
+/// exponent (bias 1023): 1023 − 15 = 1008.  Applied as `exp_f16 + F16_TO_F64_EXP_BIAS_ADJ`
+/// before shifting into the f64 exponent field.
+const F16_TO_F64_EXP_BIAS_ADJ: i32 = 1008;
+/// Number of mantissa bits in an IEEE-754 double (f64); the biased exponent is placed
+/// at bit 52 of the 64-bit representation.
+const F64_MANTISSA_BITS: i64 = 52;
+
 /// Register WASI host imports only. Must be called before any register_func.
 /// After this, callers may register additional imports (e.g. @extern(wasm))
 /// before calling `register_runtime_functions`.
@@ -551,9 +623,9 @@ fn compile_alloc(emitter: &mut WasmEmitter) {
         // Grow memory if needed
         w.gget(heap_ptr);
         w.raw(wasm_encoder::Instruction::I64ExtendI32U);
-        w.raw(wasm_encoder::Instruction::I64Const(65535));
+        w.raw(wasm_encoder::Instruction::I64Const(WASM_PAGE_SIZE_MINUS_1));
         w.raw(wasm_encoder::Instruction::I64Add);
-        w.raw(wasm_encoder::Instruction::I64Const(16));
+        w.raw(wasm_encoder::Instruction::I64Const(WASM_PAGE_SHIFT));
         w.raw(wasm_encoder::Instruction::I64ShrU);
         w.raw(wasm_encoder::Instruction::I32WrapI64);
         w.memory_size().sub().tee(2);
@@ -841,17 +913,17 @@ fn compile_println_str(emitter: &mut WasmEmitter) {
     });
     // iov[0].len = *ptr  (load length)
     wasm!(f, {
-        i32_const(4);
+        i32_const(IOV_LEN_OFF);
         local_get(0);
         i32_load(0);
         i32_store(0);
     });
-    // fd_write(stdout=1, iovs=0, iovs_len=1, nwritten=8)
+    // fd_write(stdout=1, iovs=0, iovs_len=1, nwritten=NWRITTEN_OFF)
     wasm!(f, {
         i32_const(1);
         i32_const(0);
         i32_const(1);
-        i32_const(8);
+        i32_const(NWRITTEN_OFF);
         call(emitter.rt.fd_write);
         drop;
     });
@@ -861,13 +933,13 @@ fn compile_println_str(emitter: &mut WasmEmitter) {
         i32_const(0);
         i32_const(NEWLINE_OFFSET as i32);
         i32_store(0);
-        i32_const(4);
+        i32_const(IOV_LEN_OFF);
         i32_const(1);
         i32_store(0);
         i32_const(1);
         i32_const(0);
         i32_const(1);
-        i32_const(8);
+        i32_const(NWRITTEN_OFF);
         call(emitter.rt.fd_write);
         drop;
         end;
@@ -925,7 +997,7 @@ fn compile_int_to_string(emitter: &mut WasmEmitter) {
         i64_eqz;
         if_empty;
         local_get(1);
-        i32_const(48);
+        i32_const(ASCII_ZERO);
         i32_store8(0);
         local_get(1);
         i32_const(1);
@@ -944,14 +1016,14 @@ fn compile_int_to_string(emitter: &mut WasmEmitter) {
     // mem[$pos] = ($abs_n % 10) + '0'
     wasm!(f, { local_get(1); });
     f.instruction(&wasm_encoder::Instruction::LocalGet(3));
-    f.instruction(&wasm_encoder::Instruction::I64Const(10));
+    f.instruction(&wasm_encoder::Instruction::I64Const(DECIMAL_BASE));
     // UNSIGNED rem: `abs_n = 0 - n` produces the correct unsigned magnitude bits
     // even for i64::MIN (0x8000…0 = 2^63), but a SIGNED rem would read those bits
     // as negative and emit bytes below '0'. Unsigned keeps MIN's digits correct.
     f.instruction(&wasm_encoder::Instruction::I64RemU);
     wasm!(f, {
         i32_wrap_i64;
-        i32_const(48);
+        i32_const(ASCII_ZERO);
         i32_add;
         i32_store8(0);
     });
@@ -965,7 +1037,7 @@ fn compile_int_to_string(emitter: &mut WasmEmitter) {
     // $abs_n /= 10  (UNSIGNED — see the rem note above; keeps i64::MIN correct)
     wasm!(f, {
         local_get(3);
-        i64_const(10);
+        i64_const(DECIMAL_BASE);
         i64_div_u;
         local_set(3);
         br(0);
@@ -979,7 +1051,7 @@ fn compile_int_to_string(emitter: &mut WasmEmitter) {
         local_get(2);
         if_empty;
         local_get(1);
-        i32_const(45);
+        i32_const(ASCII_MINUS);
         i32_store8(0);
         local_get(1);
         i32_const(1);
@@ -1279,7 +1351,7 @@ fn compile_string_append(emitter: &mut WasmEmitter) {
           local_get(0);  // return left (same pointer)
         else_;
           // Grow: alloc new buffer with cap = max(left_cap*2, new_len)
-          local_get(5); i32_const(2); i32_mul; local_set(5); // cap *= 2
+          local_get(5); i32_const(STRING_GROW_FACTOR); i32_mul; local_set(5); // cap *= 2
           local_get(5); local_get(4); i32_lt_u;
           if_empty; local_get(4); local_set(5); end;          // cap = max(cap*2, new_len)
           // Alloc
@@ -1362,12 +1434,12 @@ fn compile_init_preopen_dirs(emitter: &mut WasmEmitter) {
     ]);
 
     wasm!(f, {
-        // Allocate prestat buf (8 bytes) and table (max 16 entries × 12 bytes = 192)
-        i32_const(8); call(emitter.rt.alloc_pinned); local_set(1);
-        i32_const(192); call(emitter.rt.alloc_pinned); local_set(5);
+        // Allocate prestat buf (PRESTAT_BUF_SIZE bytes) and table (PREOPEN_TABLE_SIZE bytes)
+        i32_const(PRESTAT_BUF_SIZE); call(emitter.rt.alloc_pinned); local_set(1);
+        i32_const(PREOPEN_TABLE_SIZE); call(emitter.rt.alloc_pinned); local_set(5);
 
-        // Start from fd=3 (first possible preopened dir)
-        i32_const(3); local_set(0);
+        // Start from fd=WASI_FIRST_PREOPEN_FD (first possible preopened dir)
+        i32_const(WASI_FIRST_PREOPEN_FD); local_set(0);
         i32_const(0); local_set(4);
 
         // Loop: try fd_prestat_get for each fd until it fails
@@ -1391,19 +1463,19 @@ fn compile_init_preopen_dirs(emitter: &mut WasmEmitter) {
         drop;
 
         // Store entry in table: [fd, path_ptr, path_len]
-        local_get(5); local_get(4); i32_const(12); i32_mul; i32_add;
+        local_get(5); local_get(4); i32_const(PREOPEN_ENTRY_SIZE); i32_mul; i32_add;
         local_get(0); i32_store(0);
-        local_get(5); local_get(4); i32_const(12); i32_mul; i32_add;
+        local_get(5); local_get(4); i32_const(PREOPEN_ENTRY_SIZE); i32_mul; i32_add;
         local_get(6); i32_store(4);
-        local_get(5); local_get(4); i32_const(12); i32_mul; i32_add;
+        local_get(5); local_get(4); i32_const(PREOPEN_ENTRY_SIZE); i32_mul; i32_add;
         local_get(3); i32_store(8);
 
         // count++, fd++
         local_get(4); i32_const(1); i32_add; local_set(4);
         local_get(0); i32_const(1); i32_add; local_set(0);
 
-        // Max 16 entries
-        local_get(4); i32_const(16); i32_ge_u; br_if(1);
+        // Max PREOPEN_MAX_ENTRIES entries
+        local_get(4); i32_const(PREOPEN_MAX_ENTRIES); i32_ge_u; br_if(1);
         br(0);
         end; end;
 
@@ -1444,10 +1516,10 @@ fn compile_resolve_path(emitter: &mut WasmEmitter) {
 
     wasm!(f, {
         // Allocate result: [fd, rel_path_ptr, rel_path_len]
-        i32_const(12); call(emitter.rt.alloc_pinned); local_set(2);
+        i32_const(PREOPEN_ENTRY_SIZE); call(emitter.rt.alloc_pinned); local_set(2);
 
-        // Default: fd=3, no prefix match
-        i32_const(3); local_set(4);
+        // Default: fd=WASI_FIRST_PREOPEN_FD, no prefix match
+        i32_const(WASI_FIRST_PREOPEN_FD); local_set(4);
         i32_const(0); local_set(5);
 
         // Loop over preopened dirs to find longest prefix match
@@ -1457,7 +1529,7 @@ fn compile_resolve_path(emitter: &mut WasmEmitter) {
 
         // Load entry [fd, path_ptr, path_len]
         global_get(emitter.preopen_table_global);
-        local_get(3); i32_const(12); i32_mul; i32_add;
+        local_get(3); i32_const(PREOPEN_ENTRY_SIZE); i32_mul; i32_add;
         local_set(6);
         local_get(6); i32_load(0); local_set(7);
         local_get(6); i32_load(4); local_set(8);
@@ -1507,7 +1579,7 @@ fn compile_resolve_path(emitter: &mut WasmEmitter) {
           local_get(1); local_get(5); i32_sub; i32_const(0); i32_gt_u;
           if_empty;
             local_get(0); local_get(5); i32_add; i32_load8_u(0);
-            i32_const(47); i32_eq;
+            i32_const(ASCII_SLASH); i32_eq;
             if_empty;
               local_get(2); local_get(0); local_get(5); i32_add; i32_const(1); i32_add; i32_store(4);
               local_get(2); local_get(1); local_get(5); i32_sub; i32_const(1); i32_sub; i32_store(8);
@@ -1522,25 +1594,25 @@ fn compile_resolve_path(emitter: &mut WasmEmitter) {
           end;
         else_;
           // No prefix match. For relative paths, find "." preopened dir. For absolute, strip '/'.
-          local_get(0); i32_load8_u(0); i32_const(47); i32_eq;
+          local_get(0); i32_load8_u(0); i32_const(ASCII_SLASH); i32_eq;
           if_empty;
-            // Absolute path with no match: strip '/' and use fd=3
-            local_get(2); i32_const(3); i32_store(0);
+            // Absolute path with no match: strip '/' and use WASI_FIRST_PREOPEN_FD
+            local_get(2); i32_const(WASI_FIRST_PREOPEN_FD); i32_store(0);
             local_get(2); local_get(0); i32_const(1); i32_add; i32_store(4);
             local_get(2); local_get(1); i32_const(1); i32_sub; i32_store(8);
           else_;
-            // Relative path: find "." in preopened dirs, fallback to fd=3
-            local_get(2); i32_const(3); i32_store(0); // default fd=3
+            // Relative path: find "." in preopened dirs, fallback to WASI_FIRST_PREOPEN_FD
+            local_get(2); i32_const(WASI_FIRST_PREOPEN_FD); i32_store(0); // default fd
             i32_const(0); local_set(3);
             block_empty; loop_empty;
             local_get(3); global_get(emitter.preopen_count_global); i32_ge_u; br_if(1);
             global_get(emitter.preopen_table_global);
-            local_get(3); i32_const(12); i32_mul; i32_add;
+            local_get(3); i32_const(PREOPEN_ENTRY_SIZE); i32_mul; i32_add;
             local_set(6);
             // Check if entry path is "." (len==1 && byte[0]=='.')
             local_get(6); i32_load(8); i32_const(1); i32_eq;
             if_empty;
-              local_get(6); i32_load(4); i32_load8_u(0); i32_const(46); i32_eq;
+              local_get(6); i32_load(4); i32_load8_u(0); i32_const(ASCII_DOT); i32_eq;
               if_empty;
                 local_get(2); local_get(6); i32_load(0); i32_store(0); // use this fd
                 br(3); // break out of search loop
@@ -1582,12 +1654,12 @@ pub(super) fn compile_bytes_f16_to_f64(emitter: &mut WasmEmitter) {
         (2, ValType::F64), // locals 5..=6 f64: sign_f, result
     ]);
     wasm!(f, {
-        // sign = bits >> 15
-        local_get(0); i32_const(15); i32_shr_u; local_set(1);
-        // exp = (bits >> 10) & 0x1f
-        local_get(0); i32_const(10); i32_shr_u; i32_const(31); i32_and; local_set(2);
-        // mant = bits & 0x3ff
-        local_get(0); i32_const(1023); i32_and; local_set(3);
+        // sign = bits >> F16_SIGN_SHIFT
+        local_get(0); i32_const(F16_SIGN_SHIFT); i32_shr_u; local_set(1);
+        // exp = (bits >> F16_EXP_SHIFT) & F16_EXP_ALL_ONES
+        local_get(0); i32_const(F16_EXP_SHIFT); i32_shr_u; i32_const(F16_EXP_ALL_ONES); i32_and; local_set(2);
+        // mant = bits & F16_MANTISSA_MASK
+        local_get(0); i32_const(F16_MANTISSA_MASK); i32_and; local_set(3);
         // sign_f = sign ? -1.0 : 1.0
         local_get(1);
         if_f64; f64_const(-1.0);
@@ -1604,7 +1676,7 @@ pub(super) fn compile_bytes_f16_to_f64(emitter: &mut WasmEmitter) {
             f64_const(5.960464477539063e-8); // 2^-24
             f64_mul;
         else_;
-            local_get(2); i32_const(31); i32_eq;
+            local_get(2); i32_const(F16_EXP_ALL_ONES); i32_eq;
             if_f64;
                 // exp all-ones: mant==0 → ±inf (sign-preserving), mant!=0 → NaN.
                 // Mirrors native f16_bits_to_f64 (runtime/rs/src/bytes.rs): the
@@ -1618,8 +1690,8 @@ pub(super) fn compile_bytes_f16_to_f64(emitter: &mut WasmEmitter) {
             else_;
                 // normal: sign_f * (1 + mant/1024) * 2^(exp-15)
                 // 2^(exp-15) computed as f64 bit pattern:
-                //   f64 exponent bias = 1023, so exp_f64 = exp - 15 + 1023 = exp + 1008
-                //   bits = (exp_f64) << 52
+                //   f64 exponent bias = 1023, so exp_f64 = exp - 15 + 1023 = exp + F16_TO_F64_EXP_BIAS_ADJ
+                //   bits = (exp_f64) << F64_MANTISSA_BITS
                 local_get(5);
                 f64_const(1.0);
                 local_get(3); f64_convert_i32_u;
@@ -1627,8 +1699,8 @@ pub(super) fn compile_bytes_f16_to_f64(emitter: &mut WasmEmitter) {
                 f64_add;
                 f64_mul;
                 // Multiply by 2^(exp - 15): construct that power via i64 bit tricks.
-                local_get(2); i32_const(1008); i32_add; i64_extend_i32_u;
-                i64_const(52); i64_shl;
+                local_get(2); i32_const(F16_TO_F64_EXP_BIAS_ADJ); i32_add; i64_extend_i32_u;
+                i64_const(F64_MANTISSA_BITS); i64_shl;
                 f64_reinterpret_i64;
                 f64_mul;
             end;

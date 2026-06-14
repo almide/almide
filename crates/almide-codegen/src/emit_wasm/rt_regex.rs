@@ -144,6 +144,8 @@ const RX_ARENA_SLACK_WORDS: i32 = 512;
 /// Fraction of the arena handed to the node graph; the rest is the save stack.
 /// Nodes are bounded by O(pattern); the save stack by O(depth × ncap).
 const RX_ARENA_NODE_SHIFT: i32 = 1; // node region = arena/2, save region = arena/2
+/// Bytes consumed by a two-character escape sequence (`\` + escape char).
+const RX_ESCAPE_LEN: i32 = 2;
 
 /// Regex-related runtime function indices.
 #[derive(Default, Clone)]
@@ -697,7 +699,7 @@ fn compile_parse_class(emitter: &mut WasmEmitter) {
         i32_and;
         if_empty;
             local_get(0); i32_const(data_off); i32_add; global_get(parse_pos); i32_const(1); i32_add; i32_add; i32_load8_u(0); local_set(7);
-            global_get(parse_pos); i32_const(2); i32_add; global_set(parse_pos);
+            global_get(parse_pos); i32_const(RX_ESCAPE_LEN); i32_add; global_set(parse_pos);
     });
     // Each `\X` sub-branch sits inside its own `if(escape)` → `if(\X)`; the loop
     // is two structured-control levels out, so `br(2)` continues the class loop.

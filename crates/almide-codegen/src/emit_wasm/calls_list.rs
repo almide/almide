@@ -6,6 +6,23 @@ use almide_ir::IrExpr;
 use almide_lang::types::Ty;
 use wasm_encoder::ValType;
 
+// Named immediates used in WASM instruction arguments.
+// The byte-identity gate enforces that replacing these names with their
+// literal values produces bit-for-bit identical output.
+mod imm {
+    /// Byte width of an i32 / pointer value on the WASM heap (4 bytes).
+    pub(super) const I32_BYTES: i32 = 4;
+    /// Byte width of an i64 / Int value on the WASM heap (8 bytes).
+    pub(super) const I64_BYTES: i32 = 8;
+    /// Factor by which `intersperse` expands the element count before subtracting
+    /// the trailing separator: new_len = 2 * len - 1.
+    pub(super) const INTERSPERSE_LEN_FACTOR: i32 = 2;
+    /// Minimum element capacity allocated in the `push` slow path when the list
+    /// has no pre-reserved capacity: max(cap * 2, len + 1, PUSH_MIN_INIT_CAP).
+    pub(super) const PUSH_MIN_INIT_CAP: i32 = 8;
+}
+use imm::*;
+
 impl FuncCompiler<'_> {
     /// Dispatch a list stdlib method call (non-closure). Returns true if handled.
     pub(super) fn emit_list_call(&mut self, method: &str, args: &[IrExpr]) -> bool {
@@ -286,14 +303,14 @@ impl FuncCompiler<'_> {
                     local_get(len); i32_const(0); i32_lt_s;
                     if_empty; i32_const(0); local_set(len); end; // clamp to 0
                     // alloc
-                    i32_const(list_hdr); local_get(len); i32_const(8); i32_mul; i32_add;
+                    i32_const(list_hdr); local_get(len); i32_const(I64_BYTES); i32_mul; i32_add;
                     call(self.emitter.rt.alloc); local_set(dst);
                     local_get(dst); local_get(len); i32_store(0); // dst.len
                     i32_const(0); local_set(i);
                     block_empty; loop_empty;
                       local_get(i); local_get(len); i32_ge_u; br_if(1);
                       local_get(dst); i32_const(list_data_off); i32_add;
-                      local_get(i); i32_const(8); i32_mul; i32_add;
+                      local_get(i); i32_const(I64_BYTES); i32_mul; i32_add;
                       local_get(start_val); local_get(i); i32_add;
                       i64_extend_i32_s;
                       i64_store(0);
@@ -369,7 +386,7 @@ impl FuncCompiler<'_> {
                       local_get(i); local_get(xs); i32_load(0); i32_ge_u; br_if(1);
                       local_get(acc);
                       local_get(xs); i32_const(list_data_off); i32_add;
-                      local_get(i); i32_const(8); i32_mul; i32_add;
+                      local_get(i); i32_const(I64_BYTES); i32_mul; i32_add;
                       i64_load(0);
                       i64_add; local_set(acc);
                       local_get(i); i32_const(1); i32_add; local_set(i);
@@ -394,7 +411,7 @@ impl FuncCompiler<'_> {
                       local_get(i); local_get(xs); i32_load(0); i32_ge_u; br_if(1);
                       local_get(acc);
                       local_get(xs); i32_const(list_data_off); i32_add;
-                      local_get(i); i32_const(8); i32_mul; i32_add;
+                      local_get(i); i32_const(I64_BYTES); i32_mul; i32_add;
                       i64_load(0);
                       i64_mul; local_set(acc);
                       local_get(i); i32_const(1); i32_add; local_set(i);
@@ -434,7 +451,7 @@ impl FuncCompiler<'_> {
                       local_get(i); local_get(xss); i32_load(0); i32_ge_u; br_if(1);
                       local_get(total);
                       local_get(xss); i32_const(list_data_off); i32_add;
-                      local_get(i); i32_const(4); i32_mul; i32_add; // &xss[i]
+                      local_get(i); i32_const(I32_BYTES); i32_mul; i32_add; // &xss[i]
                       i32_load(0); // inner list ptr
                       i32_load(0); // inner list len
                       i32_add; local_set(total);
@@ -452,7 +469,7 @@ impl FuncCompiler<'_> {
                       local_get(i); local_get(xss); i32_load(0); i32_ge_u; br_if(1);
                       // inner = xss[i]
                       local_get(xss); i32_const(list_data_off); i32_add;
-                      local_get(i); i32_const(4); i32_mul; i32_add;
+                      local_get(i); i32_const(I32_BYTES); i32_mul; i32_add;
                       i32_load(0); local_set(inner);
                       // Copy inner elements
                       i32_const(0); local_set(j);
@@ -600,7 +617,7 @@ impl FuncCompiler<'_> {
                       local_get(dst); i32_const(0); i32_store(0);
                       local_get(dst);
                     else_;
-                      local_get(len); i32_const(2); i32_mul; i32_const(1); i32_sub; local_set(new_len);
+                      local_get(len); i32_const(INTERSPERSE_LEN_FACTOR); i32_mul; i32_const(1); i32_sub; local_set(new_len);
                       i32_const(list_hdr); local_get(new_len); i32_const(elem_size as i32); i32_mul; i32_add;
                       call(self.emitter.rt.alloc); local_set(dst);
                       local_get(dst); local_get(new_len); i32_store(0);
@@ -678,7 +695,7 @@ impl FuncCompiler<'_> {
                     end;
                     local_set(len);
                     // Alloc result: list of ptrs to tuples
-                    i32_const(list_hdr); local_get(len); i32_const(4); i32_mul; i32_add;
+                    i32_const(list_hdr); local_get(len); i32_const(I32_BYTES); i32_mul; i32_add;
                     call(self.emitter.rt.alloc); local_set(dst);
                     local_get(dst); local_get(len); i32_store(0);
                     i32_const(0); local_set(i);
@@ -702,7 +719,7 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, {
                       // result[i] = tuple_ptr
                       local_get(dst); i32_const(list_data_off); i32_add;
-                      local_get(i); i32_const(4); i32_mul; i32_add;
+                      local_get(i); i32_const(I32_BYTES); i32_mul; i32_add;
                       local_get(tup); i32_store(0);
                       local_get(i); i32_const(1); i32_add; local_set(i);
                       br(0);
@@ -1171,14 +1188,14 @@ impl FuncCompiler<'_> {
                 // cap=0 is common (lists created without explicit cap), so
                 // we MUST ensure new_cap >= len+1 to avoid buffer overflow.
                 wasm!(self.func, {
-                    // cap_local = max(cap * 2, 8)
+                    // cap_local = max(cap * 2, PUSH_MIN_INIT_CAP)
                     local_get(cap_local); i32_const(1); i32_shl;
-                    i32_const(8);
+                    i32_const(PUSH_MIN_INIT_CAP);
                     i32_gt_u;
                     if_i32;
                       local_get(cap_local); i32_const(1); i32_shl;
                     else_;
-                      i32_const(8);
+                      i32_const(PUSH_MIN_INIT_CAP);
                     end;
                     local_set(cap_local);
                     // cap_local = max(cap_local, len + 1)

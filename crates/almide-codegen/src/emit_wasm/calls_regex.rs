@@ -24,6 +24,8 @@ use almide_ir::IrExpr;
 const RX_CAP_BYTES: i32 = 8;
 /// Bytes per list/buffer pointer slot.
 const PTR_BYTES: i32 = 4;
+/// Extra segment slots in the split buffer: trailing segment + one for boundary.
+const SPLIT_SEG_OVERHEAD: i32 = 2;
 
 impl FuncCompiler<'_> {
     /// Dispatch a `regex.*` module call.
@@ -147,7 +149,7 @@ impl FuncCompiler<'_> {
                 local_get(text); local_get(match_start); local_get(end_pos);
                 call(self.emitter.rt.string.slice);
                 local_set(str_ptr);
-                i32_const(4); call(self.emitter.rt.alloc); local_set(opt_ptr);
+                i32_const(PTR_BYTES); call(self.emitter.rt.alloc); local_set(opt_ptr);
                 local_get(opt_ptr); local_get(str_ptr); i32_store(0);
                 local_get(opt_ptr);
             end;
@@ -449,7 +451,7 @@ impl FuncCompiler<'_> {
         wasm!(self.func, {
             local_get(text); i32_load(0); local_set(text_len);
             // upper bound on segments: text_len+2
-            local_get(text_len); i32_const(2); i32_add; i32_const(PTR_BYTES); i32_mul;
+            local_get(text_len); i32_const(SPLIT_SEG_OVERHEAD); i32_add; i32_const(PTR_BYTES); i32_mul;
             call(self.emitter.rt.alloc); local_set(buf);
             i32_const(0); local_set(count);
             i32_const(0); local_set(pos);
@@ -607,7 +609,7 @@ impl FuncCompiler<'_> {
                         br(0);
                     end; end;
                     // wrap in Option some
-                    i32_const(4); call(self.emitter.rt.alloc); local_set(opt_ptr);
+                    i32_const(PTR_BYTES); call(self.emitter.rt.alloc); local_set(opt_ptr);
                     local_get(opt_ptr); local_get(list_ptr); i32_store(0);
                     local_get(opt_ptr);
                 end;

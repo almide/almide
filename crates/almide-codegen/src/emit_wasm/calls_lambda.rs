@@ -7,6 +7,10 @@ use wasm_encoder::ValType;
 use super::FuncCompiler;
 use super::values;
 
+// Named constants for WASM immediate values used in closure layout.
+/// Byte size of a closure struct: [table_idx: i32][env_ptr: i32] = 4 + 4 bytes.
+const CLOSURE_BYTES: i32 = 8;
+
 impl FuncCompiler<'_> {
     /// Emit a FnRef as a closure: allocate [wrapper_table_idx, 0] on heap.
     pub(super) fn emit_fn_ref_closure(&mut self, name: &str) {
@@ -14,7 +18,7 @@ impl FuncCompiler<'_> {
             // Allocate closure: [table_idx: i32][env_ptr: i32] = 8 bytes
             let scratch = self.scratch.alloc_i32();
             wasm!(self.func, {
-                i32_const(8);
+                i32_const(CLOSURE_BYTES);
                 call(self.emitter.rt.alloc);
                 local_set(scratch);
                 // Store table_idx
@@ -79,7 +83,7 @@ impl FuncCompiler<'_> {
         if captures.is_empty() {
             // No captures: allocate closure [table_idx, 0]
             wasm!(self.func, {
-                i32_const(8);
+                i32_const(CLOSURE_BYTES);
                 call(self.emitter.rt.alloc);
                 local_set(scratch);
                 local_get(scratch);
@@ -132,7 +136,7 @@ impl FuncCompiler<'_> {
             // Allocate closure: [table_idx, env_ptr]
             let closure_scratch = self.scratch.alloc_i32();
             wasm!(self.func, {
-                i32_const(8);
+                i32_const(CLOSURE_BYTES);
                 call(self.emitter.rt.alloc);
                 local_set(closure_scratch);
                 local_get(closure_scratch);
@@ -168,7 +172,7 @@ impl FuncCompiler<'_> {
         if captures.is_empty() {
             // No captures: closure = [table_idx, 0]
             wasm!(self.func, {
-                i32_const(8);
+                i32_const(CLOSURE_BYTES);
                 call(self.emitter.rt.alloc);
                 local_set(scratch);
                 local_get(scratch);
@@ -223,7 +227,7 @@ impl FuncCompiler<'_> {
             // Allocate closure pair [table_idx, env_ptr]
             let closure_scratch = self.scratch.alloc_i32();
             wasm!(self.func, {
-                i32_const(8);
+                i32_const(CLOSURE_BYTES);
                 call(self.emitter.rt.alloc);
                 local_set(closure_scratch);
                 local_get(closure_scratch);

@@ -3,6 +3,12 @@
 //! Split from rt_string.rs for file size. These are all standalone compile_* functions
 //! called from `compile()` in rt_string.rs.
 
+// ── Named constants ──────────────────────────────────────────────────────────
+/// Byte width of an i32 / WASM pointer (used when allocating a single-pointer
+/// Option wrapper via `alloc`).
+const I32_BYTES: i32 = 4;
+// ─────────────────────────────────────────────────────────────────────────────
+
 use super::{CompiledFunc, WasmEmitter};
 use wasm_encoder::{ValType};
 use super::TrackedFunction as Function;
@@ -90,7 +96,7 @@ pub(super) fn compile_strip_prefix(emitter: &mut WasmEmitter) {
             // some(slice): wrap string ptr in Option (alloc 4 bytes, store ptr)
             local_get(0); local_get(3); local_get(2);
             call(emitter.rt.string.slice); local_set(4);
-            i32_const(4); call(emitter.rt.alloc);
+            i32_const(I32_BYTES); call(emitter.rt.alloc);
             local_tee(3); // reuse local 3
             local_get(4); i32_store(0);
             local_get(3);
@@ -120,7 +126,7 @@ pub(super) fn compile_strip_suffix(emitter: &mut WasmEmitter) {
           if_i32;
             local_get(0); i32_const(0); local_get(2); local_get(3); i32_sub;
             call(emitter.rt.string.slice); local_set(4);
-            i32_const(4); call(emitter.rt.alloc);
+            i32_const(I32_BYTES); call(emitter.rt.alloc);
             local_tee(3);
             local_get(4); i32_store(0);
             local_get(3);

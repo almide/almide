@@ -1,5 +1,10 @@
 //! IrStmt → WASM instruction emission + local variable pre-scanning.
 
+// ── Named constants for WASM immediate operands ─────────────────────────────
+/// Minimum string buffer capacity used in the inline grow path:
+/// `new_cap = max(cap * 2, STRING_MIN_GROW_CAP)`.
+const STRING_MIN_GROW_CAP: i32 = 16;
+
 use std::collections::HashMap;
 
 use almide_ir::{IrExpr, IrExprKind, IrStmt, IrStmtKind, VarId};
@@ -148,8 +153,8 @@ impl FuncCompiler<'_> {
                                             else_;
                                               // Inline grow: new_cap = max(cap*2, 16)
                                               local_get(cap_l); i32_const(1); i32_shl; local_tee(cap_l);
-                                              i32_const(16); i32_lt_u;
-                                              if_empty; i32_const(16); local_set(cap_l); end;
+                                              i32_const(STRING_MIN_GROW_CAP); i32_lt_u;
+                                              if_empty; i32_const(STRING_MIN_GROW_CAP); local_set(cap_l); end;
                                               // Alloc new buffer
                                               local_get(cap_l);
                                               i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32);

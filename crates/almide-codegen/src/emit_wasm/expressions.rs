@@ -9,6 +9,33 @@ use super::values;
 use super::wasm_macro::wasm;
 use crate::pass_closure_conversion::is_inplace_mutator;
 
+// ── Named immediates used in WASM instruction arguments ──────────────────────
+// Every const below is the EXACT value it replaces; the byte-identity gate
+// enforces that substituting the name back to its literal produces bit-for-bit
+// identical output.
+mod imm {
+    /// Byte size of the boxed `Err(String)` allocation emitted by `!` (unwrap)
+    /// when propagating `None` as an error: `[tag:i32 @ 0][String ptr:i32 @ 4]`.
+    pub(super) const ERR_STRING_BOX_BYTES: i32 = 8;
+
+    /// Byte width of the list header: `[len:i32][cap:i32]` = 8 bytes.
+    /// Used when manually computing a list allocation size (e.g. Range→List).
+    pub(super) const LIST_HDR_BYTES: i32 = 8;
+
+    /// Byte stride per `Int` element (i64, 8 bytes) in a `List[Int]` body.
+    /// Used in Range→List materialization to size the alloc and stride the fill loop.
+    pub(super) const INT_ELEM_BYTES: i32 = 8;
+
+    /// Byte width of an i32 / heap pointer value (4 bytes).
+    /// Used as the element stride when iterating over `List[HeapType]` pointer slots.
+    pub(super) const I32_BYTES: i32 = 4;
+
+    /// Minimum byte capacity of a string buffer after the slow-growth path doubles
+    /// from zero: `max(cap * 2, STRING_GROW_MIN_CAP)`.
+    pub(super) const STRING_GROW_MIN_CAP: i32 = 16;
+}
+use imm::*;
+
 #[derive(Clone, Copy)]
 pub(super) enum CmpKind {
     Lt,
@@ -813,7 +840,7 @@ impl FuncCompiler<'_> {
                         // Err Result, matching native's `.ok_or("none")?`. (Previously
                         // returned a null ptr `0`, which the caller mis-read as `Ok`
                         // tag → silent success / exit 0 on wasm.)
-                        i32_const(8);          // [tag:i32@0][String ptr@4]
+                        i32_const(ERR_STRING_BOX_BYTES); // [tag:i32@0][String ptr@4]
                         call(alloc);
                         local_set(err_ptr);
                         local_get(err_ptr);
@@ -1023,8 +1050,8 @@ impl FuncCompiler<'_> {
                       i32_const(0);
                     end;
                     local_set(len);
-                    // alloc: 8 + len * 8 (header: [len:i32][cap:i32])
-                    i32_const(8); local_get(len); i32_const(8); i32_mul; i32_add;
+                    // alloc: LIST_HDR_BYTES + len * INT_ELEM_BYTES (header: [len:i32][cap:i32])
+                    i32_const(LIST_HDR_BYTES); local_get(len); i32_const(INT_ELEM_BYTES); i32_mul; i32_add;
                     call(self.emitter.rt.alloc); local_set(dst);
                     local_get(dst); local_get(len); i32_store(0);
                     local_get(dst); local_get(len); i32_store(4); // cap = len
@@ -1033,7 +1060,7 @@ impl FuncCompiler<'_> {
                     block_empty; loop_empty;
                       local_get(i); local_get(len); i32_ge_u; br_if(1);
                       local_get(dst); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
-                      local_get(i); i32_const(8); i32_mul; i32_add;
+                      local_get(i); i32_const(INT_ELEM_BYTES); i32_mul; i32_add;
                       // value = start + i
                       local_get(s); local_get(i); i64_extend_i32_u; i64_add;
                       i64_store(0);
@@ -1295,7 +1322,7 @@ impl FuncCompiler<'_> {
                         block_empty; loop_empty;
                             local_get(idx); local_get(len); i32_ge_u; br_if(1);
                             local_get(res); i32_const(data_off); i32_add;
-                            local_get(idx); i32_const(4); i32_mul; i32_add;
+                            local_get(idx); i32_const(I32_BYTES); i32_mul; i32_add;
                             i32_load(0); call(self.emitter.rt.rc_inc); drop;
                             local_get(idx); i32_const(1); i32_add; local_set(idx);
                             br(0);
@@ -1769,10 +1796,10 @@ impl FuncCompiler<'_> {
             else_;
               // Slow: write len back, grow, reload s/cap
               local_get(s); local_get(len); i32_store(0);
-              // new_cap = max(cap*2, 16)
+              // new_cap = max(cap*2, STRING_GROW_MIN_CAP)
               local_get(cap); i32_const(1); i32_shl; local_tee(cap);
-              i32_const(16); i32_lt_u;
-              if_empty; i32_const(16); local_set(cap); end;
+              i32_const(STRING_GROW_MIN_CAP); i32_lt_u;
+              if_empty; i32_const(STRING_GROW_MIN_CAP); local_set(cap); end;
               // Alloc
               local_get(cap);
               i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32);

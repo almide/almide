@@ -609,6 +609,27 @@ mod tests {
     use super::*;
     use wasm_encoder::Instruction;
 
+    // ── Named constants for test immediates ──────────────────────────
+    /// Byte count used in 8-byte memory copy/fill test fixtures.
+    const MEM_OP_BYTES_8: i32 = 8;
+    /// Byte count used in 4-byte memory copy/fill test fixtures.
+    const MEM_OP_BYTES_4: i32 = 4;
+    /// Byte count used in 16-byte memory copy/fill test fixtures.
+    const MEM_OP_BYTES_16: i32 = 16;
+    /// Arbitrary sentinel i32 constant that is obviously not a call index,
+    /// used to verify the scanner stays in sync through numeric constants.
+    const TEST_CONST_999: i32 = 999;
+    /// Recognisable "no calls" test constant pushed as an i32.const operand.
+    const TEST_CONST_42: i32 = 42;
+    /// Second addend in the arithmetic instruction coverage test (1 + 2).
+    const TEST_ADDEND: i32 = 2;
+    /// Large i64 value (48-bit max) used to stress the i64.const LEB128 scanner.
+    const TEST_I64_LARGE: i64 = 0x7FFF_FFFF_FFFF;
+    /// i32 maximum value; used as a wide constant in instruction-family coverage.
+    const I32_MAX_VAL: i32 = 0x7FFF_FFFF;
+    /// i64 maximum value; used as a wide constant in instruction-family coverage.
+    const I64_MAX_VAL: i64 = 0x7FFF_FFFF_FFFF_FFFF;
+
     /// Build a Function with given instructions and extract its call targets.
     fn calls_in(instrs: &[Instruction]) -> Vec<u32> {
         let mut f = Function::new([]);
@@ -649,7 +670,7 @@ mod tests {
         let targets = calls_in(&[
             Instruction::I32Const(0),
             Instruction::I32Const(0),
-            Instruction::I32Const(8),
+            Instruction::I32Const(MEM_OP_BYTES_8),
             Instruction::MemoryCopy { src_mem: 0, dst_mem: 0 },
             Instruction::Call(99),
         ]);
@@ -661,7 +682,7 @@ mod tests {
         let targets = calls_in(&[
             Instruction::I32Const(0),
             Instruction::I32Const(0),
-            Instruction::I32Const(8),
+            Instruction::I32Const(MEM_OP_BYTES_8),
             Instruction::MemoryFill(0),
             Instruction::Call(77),
         ]);
@@ -674,12 +695,12 @@ mod tests {
             Instruction::Call(10),
             Instruction::I32Const(0),
             Instruction::I32Const(0),
-            Instruction::I32Const(4),
+            Instruction::I32Const(MEM_OP_BYTES_4),
             Instruction::MemoryCopy { src_mem: 0, dst_mem: 0 },
             Instruction::Call(20),
             Instruction::I32Const(0),
             Instruction::I32Const(0),
-            Instruction::I32Const(4),
+            Instruction::I32Const(MEM_OP_BYTES_4),
             Instruction::MemoryFill(0),
             Instruction::Call(30),
         ]);
@@ -694,7 +715,7 @@ mod tests {
         for _ in 0..10 {
             instrs.push(Instruction::I32Const(0));
             instrs.push(Instruction::I32Const(0));
-            instrs.push(Instruction::I32Const(16));
+            instrs.push(Instruction::I32Const(MEM_OP_BYTES_16));
             instrs.push(Instruction::MemoryCopy { src_mem: 0, dst_mem: 0 });
         }
         instrs.push(Instruction::Call(55));
@@ -733,7 +754,7 @@ mod tests {
     #[test]
     fn call_after_i64_const() {
         let targets = calls_in(&[
-            Instruction::I64Const(0x7FFF_FFFF_FFFF),
+            Instruction::I64Const(TEST_I64_LARGE),
             Instruction::Drop,
             Instruction::Call(88),
         ]);
@@ -782,8 +803,8 @@ mod tests {
     fn exhaustive_instruction_coverage() {
         let mut f = Function::new([(1, wasm_encoder::ValType::I32)]);
         // Numeric constants
-        f.instruction(&Instruction::I32Const(999));
-        f.instruction(&Instruction::I64Const(0x7FFF_FFFF_FFFF));
+        f.instruction(&Instruction::I32Const(TEST_CONST_999));
+        f.instruction(&Instruction::I64Const(TEST_I64_LARGE));
         f.instruction(&Instruction::F64Const(3.14_f64.into()));
         f.instruction(&Instruction::Drop);
         f.instruction(&Instruction::Drop);
@@ -806,11 +827,11 @@ mod tests {
         // 0xFC prefix: bulk memory
         f.instruction(&Instruction::I32Const(0));
         f.instruction(&Instruction::I32Const(0));
-        f.instruction(&Instruction::I32Const(4));
+        f.instruction(&Instruction::I32Const(MEM_OP_BYTES_4));
         f.instruction(&Instruction::MemoryCopy { src_mem: 0, dst_mem: 0 });
         f.instruction(&Instruction::I32Const(0));
         f.instruction(&Instruction::I32Const(0));
-        f.instruction(&Instruction::I32Const(4));
+        f.instruction(&Instruction::I32Const(MEM_OP_BYTES_4));
         f.instruction(&Instruction::MemoryFill(0));
         // Control flow: block, br, br_if, if
         f.instruction(&Instruction::Block(wasm_encoder::BlockType::Empty));
@@ -931,7 +952,7 @@ mod tests {
     #[test]
     fn cross_validate_no_calls() {
         let mut tf = TrackedFunction::new([]);
-        tf.instruction(&Instruction::I32Const(42));
+        tf.instruction(&Instruction::I32Const(TEST_CONST_42));
         tf.instruction(&Instruction::Drop);
         tf.instruction(&Instruction::End);
         assert_tracked_matches_wasmparser(&tf);
@@ -942,12 +963,12 @@ mod tests {
         let mut tf = TrackedFunction::new([]);
         tf.instruction(&Instruction::I32Const(0));
         tf.instruction(&Instruction::I32Const(0));
-        tf.instruction(&Instruction::I32Const(8));
+        tf.instruction(&Instruction::I32Const(MEM_OP_BYTES_8));
         tf.instruction(&Instruction::MemoryCopy { src_mem: 0, dst_mem: 0 });
         tf.instruction(&Instruction::Call(99));
         tf.instruction(&Instruction::I32Const(0));
         tf.instruction(&Instruction::I32Const(0));
-        tf.instruction(&Instruction::I32Const(4));
+        tf.instruction(&Instruction::I32Const(MEM_OP_BYTES_4));
         tf.instruction(&Instruction::MemoryFill(0));
         tf.instruction(&Instruction::Call(100));
         tf.instruction(&Instruction::End);
@@ -984,9 +1005,9 @@ mod tests {
     fn cross_validate_all_instruction_families() {
         let mut tf = TrackedFunction::new([(1, wasm_encoder::ValType::I32)]);
         // Constants
-        tf.instruction(&Instruction::I32Const(0x7FFFFFFF));
+        tf.instruction(&Instruction::I32Const(I32_MAX_VAL));
         tf.instruction(&Instruction::Drop);
-        tf.instruction(&Instruction::I64Const(0x7FFFFFFFFFFFFFFF));
+        tf.instruction(&Instruction::I64Const(I64_MAX_VAL));
         tf.instruction(&Instruction::Drop);
         tf.instruction(&Instruction::F64Const(f64::MAX.into()));
         tf.instruction(&Instruction::Drop);
@@ -1012,18 +1033,18 @@ mod tests {
         // Bulk memory (0xFC)
         tf.instruction(&Instruction::I32Const(0));
         tf.instruction(&Instruction::I32Const(0));
-        tf.instruction(&Instruction::I32Const(16));
+        tf.instruction(&Instruction::I32Const(MEM_OP_BYTES_16));
         tf.instruction(&Instruction::MemoryCopy { src_mem: 0, dst_mem: 0 });
         tf.instruction(&Instruction::I32Const(0));
         tf.instruction(&Instruction::I32Const(0));
-        tf.instruction(&Instruction::I32Const(16));
+        tf.instruction(&Instruction::I32Const(MEM_OP_BYTES_16));
         tf.instruction(&Instruction::MemoryFill(0));
         // br_table
         tf.instruction(&Instruction::I32Const(0));
         tf.instruction(&Instruction::BrTable(std::borrow::Cow::Borrowed(&[0, 0, 0]), 0));
         // Numeric ops
         tf.instruction(&Instruction::I32Const(1));
-        tf.instruction(&Instruction::I32Const(2));
+        tf.instruction(&Instruction::I32Const(TEST_ADDEND));
         tf.instruction(&Instruction::I32Add);
         tf.instruction(&Instruction::Drop);
         // Call — THE target we must find
@@ -1043,7 +1064,7 @@ mod tests {
             tf.instruction(&Instruction::Call(i));
             tf.instruction(&Instruction::I32Const(0));
             tf.instruction(&Instruction::I32Const(0));
-            tf.instruction(&Instruction::I32Const(4));
+            tf.instruction(&Instruction::I32Const(MEM_OP_BYTES_4));
             tf.instruction(&Instruction::MemoryCopy { src_mem: 0, dst_mem: 0 });
         }
         tf.instruction(&Instruction::End);

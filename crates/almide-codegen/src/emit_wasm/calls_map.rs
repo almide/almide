@@ -12,6 +12,19 @@ use almide_ir::IrExpr;
 use almide_lang::types::Ty;
 use wasm_encoder::ValType;
 
+// ── Named immediates — every raw constant in this file is listed here. ──
+// Hashing constants (FNV-1a 32-bit and Fibonacci/Knuth i64 mix):
+/// FNV-1a 32-bit offset basis (initial hash accumulator value).
+const FNV1A_OFFSET_BASIS: i32 = 0x811C9DC5u32 as i32;
+/// FNV-1a 32-bit prime (multiplicative step).
+const FNV1A_PRIME: i32 = 0x01000193u32 as i32;
+/// Fibonacci/Knuth multiplicative hash multiplier for i64 keys (fold high↔low).
+const HASH_MIX_MUL: i64 = 0x9E3779B97F4A7C15u64 as i64;
+/// Shift amount to fold the high 32 bits of an i64 into the low 32 bits.
+const I64_HALF_BITS: i64 = 32;
+/// Byte size of an i32 (pointer) — stride for tuple-pointer arrays in list data.
+const PTR_SIZE: i32 = 4;
+
 impl FuncCompiler<'_> {
     pub(super) fn emit_map_call(&mut self, method: &str, args: &[IrExpr]) -> bool {
         use super::engine::layout::{SWISS_MAP, LIST, map as lm, list as ll};
@@ -671,7 +684,7 @@ impl FuncCompiler<'_> {
                     block_empty; loop_empty;
                       local_get(i); local_get(plen); i32_ge_u; br_if(1);
                       local_get(pairs); i32_const(list_data_off); i32_add;
-                      local_get(i); i32_const(4); i32_mul; i32_add;
+                      local_get(i); i32_const(PTR_SIZE); i32_mul; i32_add;
                       i32_load(0); local_set(tp); // tp = pairs.data[i] = (K,V) tuple ptr
                 });
                 self.emit_dict_put_entry(result, cap, ib, eb, tp, es, ks, vs, &key_ty, &val_ty);
@@ -739,10 +752,10 @@ impl FuncCompiler<'_> {
                 let tmp = self.scratch.alloc_i64();
                 wasm!(self.func, {
                     local_tee(tmp);
-                    i64_const(32); i64_shr_u;
+                    i64_const(I64_HALF_BITS); i64_shr_u;
                     local_get(tmp); i64_xor;
-                    i64_const(0x9E3779B97F4A7C15u64 as i64); i64_mul;
-                    i64_const(32); i64_shr_u;
+                    i64_const(HASH_MIX_MUL); i64_mul;
+                    i64_const(I64_HALF_BITS); i64_shr_u;
                     i32_wrap_i64;
                 });
                 self.scratch.free_i64(tmp);
@@ -754,7 +767,7 @@ impl FuncCompiler<'_> {
                 let si = self.scratch.alloc_i32();
                 wasm!(self.func, {
                     local_set(s);
-                    i32_const(0x811C9DC5u32 as i32); local_set(h);
+                    i32_const(FNV1A_OFFSET_BASIS); local_set(h);
                     local_get(s); i32_load(0); local_set(slen);
                     i32_const(0); local_set(si);
                     block_empty; loop_empty;
@@ -763,7 +776,7 @@ impl FuncCompiler<'_> {
                       local_get(s); i32_const(str_data_off); i32_add;
                       local_get(si); i32_add; i32_load8_u(0);
                       i32_xor;
-                      i32_const(0x01000193u32 as i32); i32_mul;
+                      i32_const(FNV1A_PRIME); i32_mul;
                       local_set(h);
                       local_get(si); i32_const(1); i32_add; local_set(si);
                       br(0);
@@ -808,14 +821,14 @@ impl FuncCompiler<'_> {
                         let h = self.scratch.alloc_i32();
                         wasm!(self.func, {
                             local_set(ptr);
-                            i32_const(0x811C9DC5u32 as i32); local_set(h);
+                            i32_const(FNV1A_OFFSET_BASIS); local_set(h);
                         });
                         for b in 0..size {
                             wasm!(self.func, {
                                 local_get(h);
                                 local_get(ptr); i32_load8_u(b);
                                 i32_xor;
-                                i32_const(0x01000193u32 as i32); i32_mul;
+                                i32_const(FNV1A_PRIME); i32_mul;
                                 local_set(h);
                             });
                         }
@@ -867,7 +880,7 @@ impl FuncCompiler<'_> {
         let h = self.scratch.alloc_i32();
         wasm!(self.func, {
             local_set(ptr);
-            i32_const(0x811C9DC5u32 as i32); local_set(h);
+            i32_const(FNV1A_OFFSET_BASIS); local_set(h);
         });
         let mut offset = 0u32;
         for (_, fty) in fields {
@@ -879,7 +892,7 @@ impl FuncCompiler<'_> {
             self.emit_hash_value(fty);
             wasm!(self.func, {
                 local_get(h); i32_xor;
-                i32_const(0x01000193u32 as i32); i32_mul;
+                i32_const(FNV1A_PRIME); i32_mul;
                 local_set(h);
             });
             offset += values::byte_size(fty);
@@ -904,7 +917,7 @@ impl FuncCompiler<'_> {
                 let tmp = self.scratch.alloc_i64();
                 wasm!(self.func, {
                     i64_reinterpret_f64; local_tee(tmp);
-                    i64_const(32); i64_shr_u; local_get(tmp); i64_xor;
+                    i64_const(I64_HALF_BITS); i64_shr_u; local_get(tmp); i64_xor;
                     i32_wrap_i64;
                 });
                 self.scratch.free_i64(tmp);

@@ -6,6 +6,16 @@ use almide_ir::IrExpr;
 use almide_lang::types::Ty;
 use wasm_encoder::ValType;
 
+// ── Immediate constants ──────────────────────────────────────────────────────
+/// Byte width of an i32 / pointer on the WASM heap (used as element stride and
+/// single-pointer allocation size).
+const I32_BYTES: i32 = 4;
+/// Byte size of two consecutive i32 fields (e.g. [tag:i32, ptr:i32] or
+/// [ptr_a:i32, ptr_b:i32]).
+const TWO_I32_BYTES: i32 = 8;
+/// Byte offset of the value payload inside a Result box ([tag:i32][payload…]).
+const RESULT_PAYLOAD_OFFSET: i32 = 4;
+
 impl FuncCompiler<'_> {
     /// Dispatch an option stdlib method call. Returns true if handled.
     pub(super) fn emit_option_call(&mut self, method: &str, args: &[IrExpr]) -> bool {
@@ -405,7 +415,7 @@ impl FuncCompiler<'_> {
                 self.emit_store_at(&b_ty, a_size as u32);
                 // Wrap tuple in Some: alloc ptr-size, store tuple ptr
                 wasm!(self.func, {
-                    i32_const(4); call(self.emitter.rt.alloc);
+                    i32_const(I32_BYTES); call(self.emitter.rt.alloc);
                     local_set(s_some);
                     local_get(s_some);
                     local_get(s_tuple);
@@ -670,7 +680,7 @@ impl FuncCompiler<'_> {
                     block_empty; loop_empty;
                       local_get(i); local_get(len); i32_ge_u; br_if(1);
                       local_get(rs); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
-                      local_get(i); i32_const(4); i32_mul; i32_add;
+                      local_get(i); i32_const(I32_BYTES); i32_mul; i32_add;
                       i32_load(0); local_set(elem);
                 });
                 self.emit_result_sort_into_lists(
@@ -683,7 +693,7 @@ impl FuncCompiler<'_> {
                     end; end;
                     local_get(ok_list); local_get(ok_cnt); i32_store(0);
                     local_get(err_list); local_get(err_cnt); i32_store(0);
-                    i32_const(8); call(self.emitter.rt.alloc); local_set(out);
+                    i32_const(TWO_I32_BYTES); call(self.emitter.rt.alloc); local_set(out);
                     local_get(err_cnt); i32_eqz;
                     if_empty;
                       local_get(out); i32_const(0); i32_store(0);
@@ -737,7 +747,7 @@ impl FuncCompiler<'_> {
                     block_empty; loop_empty;
                       local_get(i); local_get(len); i32_ge_u; br_if(1);
                       local_get(rs); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
-                      local_get(i); i32_const(4); i32_mul; i32_add;
+                      local_get(i); i32_const(I32_BYTES); i32_mul; i32_add;
                       i32_load(0); local_set(elem);
                 });
                 self.emit_result_sort_into_lists(
@@ -750,7 +760,7 @@ impl FuncCompiler<'_> {
                     end; end;
                     local_get(ok_list); local_get(ok_cnt); i32_store(0);
                     local_get(err_list); local_get(err_cnt); i32_store(0);
-                    i32_const(8); call(self.emitter.rt.alloc); local_set(tuple_ptr);
+                    i32_const(TWO_I32_BYTES); call(self.emitter.rt.alloc); local_set(tuple_ptr);
                     local_get(tuple_ptr); local_get(ok_list); i32_store(0);
                     local_get(tuple_ptr); local_get(err_list); i32_store(4);
                     local_get(tuple_ptr);
@@ -832,7 +842,7 @@ impl FuncCompiler<'_> {
                     end; end;
                     local_get(ok_list); local_get(ok_cnt); i32_store(0);
                     local_get(err_list); local_get(err_cnt); i32_store(0);
-                    i32_const(8); call(self.emitter.rt.alloc); local_set(out);
+                    i32_const(TWO_I32_BYTES); call(self.emitter.rt.alloc); local_set(out);
                     local_get(err_cnt); i32_eqz;
                     if_empty;
                       local_get(out); i32_const(0); i32_store(0);
@@ -929,7 +939,7 @@ impl FuncCompiler<'_> {
             if_empty; // tag==0 → ok
               local_get(ok_list); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
               local_get(ok_cnt); i32_const(ok_size); i32_mul; i32_add;
-              local_get(elem); i32_const(4); i32_add; // Result payload at +4
+              local_get(elem); i32_const(RESULT_PAYLOAD_OFFSET); i32_add; // Result payload at +4
         });
         self.emit_elem_copy(ok_ty);
         wasm!(self.func, {
@@ -937,7 +947,7 @@ impl FuncCompiler<'_> {
             else_;
               local_get(err_list); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
               local_get(err_cnt); i32_const(err_size); i32_mul; i32_add;
-              local_get(elem); i32_const(4); i32_add; // Result payload at +4
+              local_get(elem); i32_const(RESULT_PAYLOAD_OFFSET); i32_add; // Result payload at +4
         });
         self.emit_elem_copy(err_ty);
         wasm!(self.func, {

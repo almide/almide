@@ -5,6 +5,32 @@ use almide_ir::IrExpr;
 use almide_lang::types::Ty;
 use wasm_encoder::Instruction;
 
+// ── Named immediates ─────────────────────────────────────────────────────────
+/// Number of bits in an i64 register.
+const I64_BITS: i64 = 64;
+/// Highest bit index in an i64 (= I64_BITS - 1); used in `63 - clz(n)`.
+const I64_MAX_BIT_IDX: i64 = 63;
+/// Number of bytes in an i64; also the byte_swap loop iteration count.
+const I64_BYTES: i64 = 8;
+/// Base for hexadecimal numeral system.
+const HEX_BASE: i64 = 16;
+/// Mask retaining the low 32 bits of an i64 (u32 range).
+const U32_MASK: i64 = 0xFFFF_FFFF;
+/// Mask retaining the low 8 bits of an i64/i32 (one byte).
+const LOW_BYTE_MASK_I64: i64 = 0xFF;
+/// ASCII code point for '0' (i32); used for digit '0'–'9' in hex output.
+const ASCII_ZERO: i32 = 48;
+/// Offset from a hex digit value (10..=15) to its lowercase ASCII letter
+/// ('a'=97, 97-10=87). Used in `to_hex` for letters a–f.
+const HEX_LETTER_OFFSET: i32 = 87;
+/// Decimal base; used to distinguish digit digits (< 10) from letter digits (>= 10).
+const DECIMAL_BASE: i32 = 10;
+/// Max bytes needed for an i64 hex string (16 hex digits + headroom = 20).
+const HEX_BUF_BYTES: i32 = 20;
+/// Loop start index for `factorial`: multiply from 2 upward.
+const FACTORIAL_START: i64 = 2;
+// ─────────────────────────────────────────────────────────────────────────────
+
 /// Bit width at and above which a `bits`-wide mask saturates to "all ones".
 /// `int.wrap_*` / `int.rotate_*` model an N-bit register; for `bits >= 64` the
 /// register is the full i64, so the mask is `u64::MAX`. This mirrors the native
@@ -344,11 +370,11 @@ impl FuncCompiler<'_> {
             }
             "to_u32" => {
                 self.emit_expr(&args[0]);
-                wasm!(self.func, { i64_const(0xFFFFFFFF); i64_and; });
+                wasm!(self.func, { i64_const(U32_MASK); i64_and; });
             }
             "to_u8" => {
                 self.emit_expr(&args[0]);
-                wasm!(self.func, { i64_const(0xFF); i64_and; });
+                wasm!(self.func, { i64_const(LOW_BYTE_MASK_I64); i64_and; });
             }
             "count_leading_zeros" => {
                 self.emit_expr(&args[0]);
@@ -373,7 +399,7 @@ impl FuncCompiler<'_> {
                     i64_const(0); local_set(dst);
                     i64_const(0); local_set(i);
                     block_empty; loop_empty;
-                        local_get(i); i64_const(64); i64_ge_s; br_if(1);
+                        local_get(i); i64_const(I64_BITS); i64_ge_s; br_if(1);
                         // dst = (dst << 1) | (src & 1)
                         local_get(dst); i64_const(1); i64_shl;
                         local_get(src); i64_const(1); i64_and;
@@ -400,13 +426,13 @@ impl FuncCompiler<'_> {
                     i64_const(0); local_set(dst);
                     i64_const(0); local_set(i);
                     block_empty; loop_empty;
-                        local_get(i); i64_const(8); i64_ge_s; br_if(1);
+                        local_get(i); i64_const(I64_BYTES); i64_ge_s; br_if(1);
                         // dst = (dst << 8) | (src & 0xFF)
-                        local_get(dst); i64_const(8); i64_shl;
-                        local_get(src); i64_const(0xFF); i64_and;
+                        local_get(dst); i64_const(I64_BYTES); i64_shl;
+                        local_get(src); i64_const(LOW_BYTE_MASK_I64); i64_and;
                         i64_or; local_set(dst);
                         // src >>= 8
-                        local_get(src); i64_const(8); i64_shr_u; local_set(src);
+                        local_get(src); i64_const(I64_BYTES); i64_shr_u; local_set(src);
                         local_get(i); i64_const(1); i64_add; local_set(i);
                         br(0);
                     end; end;
@@ -426,7 +452,7 @@ impl FuncCompiler<'_> {
                     if_i64;
                         i64_const(0);
                     else_;
-                        i64_const(64); local_get(n); i64_clz; i64_sub;
+                        i64_const(I64_BITS); local_get(n); i64_clz; i64_sub;
                     end;
                 });
                 self.scratch.free_i64(n);
@@ -441,7 +467,7 @@ impl FuncCompiler<'_> {
                     if_i64;
                         i64_const(-1);
                     else_;
-                        i64_const(63); local_get(n); i64_clz; i64_sub;
+                        i64_const(I64_MAX_BIT_IDX); local_get(n); i64_clz; i64_sub;
                     end;
                 });
                 self.scratch.free_i64(n);
@@ -456,7 +482,7 @@ impl FuncCompiler<'_> {
                     if_i64;
                         i64_const(0);
                     else_;
-                        i64_const(64);
+                        i64_const(I64_BITS);
                         local_get(n); i64_const(1); i64_sub; i64_clz;
                         i64_sub;
                     end;
@@ -474,7 +500,7 @@ impl FuncCompiler<'_> {
                         i64_const(1);
                     else_;
                         i64_const(1);
-                        i64_const(64);
+                        i64_const(I64_BITS);
                         local_get(n); i64_const(1); i64_sub; i64_clz;
                         i64_sub;
                         i64_shl;
@@ -493,7 +519,7 @@ impl FuncCompiler<'_> {
                         i64_const(0);
                     else_;
                         i64_const(1);
-                        i64_const(63); local_get(n); i64_clz; i64_sub;
+                        i64_const(I64_MAX_BIT_IDX); local_get(n); i64_clz; i64_sub;
                         i64_shl;
                     end;
                 });
@@ -539,26 +565,26 @@ impl FuncCompiler<'_> {
                       i32_const(1); call(self.emitter.rt.string_alloc); local_set(buf);
                       local_get(buf); i32_const(1); i32_store(0);
                       local_get(buf); i32_const(1); i32_store(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::CAP) as i32 as u32, 0);
-                      local_get(buf); i32_const(48); i32_store8(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32 as u32);
+                      local_get(buf); i32_const(ASCII_ZERO); i32_store8(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32 as u32);
                       local_get(buf);
                     else_;
                       // Alloc temp buffer for reversed digits
-                      i32_const(20); call(self.emitter.rt.alloc); local_set(buf); // buf
+                      i32_const(HEX_BUF_BYTES); call(self.emitter.rt.alloc); local_set(buf); // buf
                       i32_const(0); local_set(count); // count
                 });
                 wasm!(self.func, {
                       block_empty; loop_empty;
                         local_get(n64); i64_eqz; br_if(1);
-                        local_get(n64); i64_const(16); i64_rem_u; i32_wrap_i64;
+                        local_get(n64); i64_const(HEX_BASE); i64_rem_u; i32_wrap_i64;
                         local_set(digit); // digit
-                        local_get(digit); i32_const(10); i32_lt_u;
-                        if_i32; local_get(digit); i32_const(48); i32_add;
-                        else_; local_get(digit); i32_const(87); i32_add; end;
+                        local_get(digit); i32_const(DECIMAL_BASE); i32_lt_u;
+                        if_i32; local_get(digit); i32_const(ASCII_ZERO); i32_add;
+                        else_; local_get(digit); i32_const(HEX_LETTER_OFFSET); i32_add; end;
                         local_set(digit); // char
                         local_get(buf); local_get(count); i32_add;
                         local_get(digit); i32_store8(0);
                         local_get(count); i32_const(1); i32_add; local_set(count);
-                        local_get(n64); i64_const(16); i64_div_u; local_set(n64);
+                        local_get(n64); i64_const(HEX_BASE); i64_div_u; local_set(n64);
                         br(0);
                       end; end;
                 });
@@ -854,7 +880,7 @@ impl FuncCompiler<'_> {
                 wasm!(self.func, {
                     local_set(n); // n
                     i64_const(1); local_set(result); // result
-                    i64_const(2); local_set(i); // i
+                    i64_const(FACTORIAL_START); local_set(i); // i
                     block_empty; loop_empty;
                       local_get(i); local_get(n); i64_gt_s; br_if(1);
                       local_get(result); local_get(i); i64_mul; local_set(result);

@@ -7,6 +7,10 @@ use super::values;
 use almide_ir::IrExpr;
 use wasm_encoder::ValType;
 
+// ── Named constants ──────────────────────────────────────────────────────────
+/// Byte width of an i32 / WASM pointer (used to size a one-pointer Some-box).
+const I32_BYTES: i32 = 4;
+
 impl FuncCompiler<'_> {
     pub(super) fn emit_map_closure_call(&mut self, method: &str, args: &[IrExpr]) -> bool {
         match method {
@@ -372,7 +376,7 @@ impl FuncCompiler<'_> {
                         // Alloc the (key, val) tuple (one contiguous block) and wrap in Some.
                         i32_const(entry as i32); call(self.emitter.rt.alloc); local_set(tuple_ptr);
                         local_get(tuple_ptr); local_get(ent); i32_const(entry as i32); memory_copy;
-                        i32_const(4); call(self.emitter.rt.alloc); local_set(result);
+                        i32_const(I32_BYTES); call(self.emitter.rt.alloc); local_set(result);
                         local_get(result); local_get(tuple_ptr); i32_store(0);
                         br(2); // break out of loop
                       end;

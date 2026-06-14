@@ -7,6 +7,29 @@ use almide_lang::types::Ty;
 use super::values;
 use wasm_encoder::Instruction;
 
+// ── scratch-memory layout for fd_write / fd_read iov + nwritten ──────────────
+// Linear memory scratch area:
+//   [0..4)  iov[0].buf  (i32 pointer)
+//   [4..8)  iov[0].len  (i32 byte count)
+//   [8..12) nwritten    (i32 output from fd_write / nread from fd_read)
+const IOV_LEN_ADDR:   i32 = 4;   // byte offset of iov[0].len in scratch
+const NWRITTEN_ADDR:  i32 = 8;   // byte offset of nwritten/nread result
+
+// ── allocation sizes ──────────────────────────────────────────────────────────
+const IOV_SIZE:   i32 = 8;   // bytes for one iov entry (buf:i32 + len:i32)
+const I32_SIZE:   i32 = 4;   // bytes for a single i32 (nread/nwritten output cell)
+
+// ── per-element size in List[Int] (each element is an i64) ───────────────────
+const I64_BYTES:  i32 = 8;   // byte width of one i64 list element
+
+// ── buffer management ─────────────────────────────────────────────────────────
+const BUF_GROW_FACTOR:    i32 = 2;    // factor by which we double on realloc
+const READ_LINE_INIT_CAP: i32 = 256;  // initial capacity for read_line accumulation buffer
+const READ_ALL_CHUNK_SIZE: i32 = 4096; // chunk size (and initial capacity) for read_all
+
+// ── character codes ───────────────────────────────────────────────────────────
+const ASCII_NEWLINE: i32 = 10; // '\n'
+
 impl FuncCompiler<'_> {
     pub(super) fn emit_io_call(&mut self, func: &str, args: &[IrExpr]) {
         match func {
@@ -22,11 +45,11 @@ impl FuncCompiler<'_> {
                     local_get(s); i32_const(string_data_off()); i32_add;
                     i32_store(0);
                     // iov[0].len = *s (load length)
-                    i32_const(4);
+                    i32_const(IOV_LEN_ADDR);
                     local_get(s); i32_load(0);
                     i32_store(0);
                     // fd_write(stdout=1, iovs=0, iovs_len=1, nwritten=8)
-                    i32_const(1); i32_const(0); i32_const(1); i32_const(8);
+                    i32_const(1); i32_const(0); i32_const(1); i32_const(NWRITTEN_ADDR);
                     call(self.emitter.rt.fd_write);
                     drop;
                 });
@@ -50,12 +73,12 @@ impl FuncCompiler<'_> {
 
                 // Initial capacity = 256
                 wasm!(self.func, {
-                    i32_const(256); call(self.emitter.rt.alloc); local_set(buf);
-                    i32_const(256); local_set(capacity);
+                    i32_const(READ_LINE_INIT_CAP); call(self.emitter.rt.alloc); local_set(buf);
+                    i32_const(READ_LINE_INIT_CAP); local_set(capacity);
                     i32_const(0); local_set(len);
                     // Allocate iov (8 bytes) and nread (4 bytes) and byte_buf (1 byte)
-                    i32_const(8); call(self.emitter.rt.alloc); local_set(iov_ptr);
-                    i32_const(4); call(self.emitter.rt.alloc); local_set(nread_ptr);
+                    i32_const(IOV_SIZE); call(self.emitter.rt.alloc); local_set(iov_ptr);
+                    i32_const(I32_SIZE); call(self.emitter.rt.alloc); local_set(nread_ptr);
                     i32_const(1); call(self.emitter.rt.alloc); local_set(byte_buf);
                 });
 
@@ -69,7 +92,7 @@ impl FuncCompiler<'_> {
                     local_get(len); local_get(capacity); i32_ge_u;
                     if_empty;
                       // Double capacity
-                      local_get(capacity); i32_const(2); i32_mul; local_set(capacity);
+                      local_get(capacity); i32_const(BUF_GROW_FACTOR); i32_mul; local_set(capacity);
                       local_get(capacity); call(self.emitter.rt.alloc); local_set(new_buf);
                       // Copy old data
                       i32_const(0); local_set(copy_i);
@@ -108,7 +131,7 @@ impl FuncCompiler<'_> {
                 // Load byte, check for '\n'
                 wasm!(self.func, {
                     local_get(byte_buf); i32_load8_u(0); local_set(byte_val);
-                    local_get(byte_val); i32_const(10); i32_eq; // '\n'
+                    local_get(byte_val); i32_const(ASCII_NEWLINE); i32_eq; // '\n'
                     br_if(1); // break outer block (don't include '\n' in result)
                 });
 
@@ -169,11 +192,11 @@ impl FuncCompiler<'_> {
 
                 // Initial capacity = 4096
                 wasm!(self.func, {
-                    i32_const(4096); call(self.emitter.rt.alloc); local_set(buf);
-                    i32_const(4096); local_set(capacity);
+                    i32_const(READ_ALL_CHUNK_SIZE); call(self.emitter.rt.alloc); local_set(buf);
+                    i32_const(READ_ALL_CHUNK_SIZE); local_set(capacity);
                     i32_const(0); local_set(len);
-                    i32_const(8); call(self.emitter.rt.alloc); local_set(iov_ptr);
-                    i32_const(4); call(self.emitter.rt.alloc); local_set(nread_ptr);
+                    i32_const(IOV_SIZE); call(self.emitter.rt.alloc); local_set(iov_ptr);
+                    i32_const(I32_SIZE); call(self.emitter.rt.alloc); local_set(nread_ptr);
                 });
 
                 // Read loop
@@ -184,10 +207,10 @@ impl FuncCompiler<'_> {
                 // Ensure we have room for at least 4096 bytes
                 wasm!(self.func, {
                     local_get(capacity); local_get(len); i32_sub;
-                    i32_const(4096); i32_lt_u;
+                    i32_const(READ_ALL_CHUNK_SIZE); i32_lt_u;
                     if_empty;
                       // Double capacity
-                      local_get(capacity); i32_const(2); i32_mul; local_set(capacity);
+                      local_get(capacity); i32_const(BUF_GROW_FACTOR); i32_mul; local_set(capacity);
                       local_get(capacity); call(self.emitter.rt.alloc); local_set(new_buf);
                       // Copy old data
                       i32_const(0); local_set(copy_i);
@@ -265,8 +288,8 @@ impl FuncCompiler<'_> {
 
                 wasm!(self.func, {
                     i32_const(1); call(self.emitter.rt.alloc); local_set(byte_buf);
-                    i32_const(8); call(self.emitter.rt.alloc); local_set(iov_ptr);
-                    i32_const(4); call(self.emitter.rt.alloc); local_set(nread_ptr);
+                    i32_const(IOV_SIZE); call(self.emitter.rt.alloc); local_set(iov_ptr);
+                    i32_const(I32_SIZE); call(self.emitter.rt.alloc); local_set(nread_ptr);
                     // iov: buf = byte_buf, len = 1
                     local_get(iov_ptr); local_get(byte_buf); i32_store(0);
                     local_get(iov_ptr); i32_const(1); i32_store(4);
@@ -305,8 +328,8 @@ impl FuncCompiler<'_> {
                     i32_wrap_i64; local_set(n);
                     // Allocate raw read buffer of n bytes
                     local_get(n); call(self.emitter.rt.alloc); local_set(raw_buf);
-                    i32_const(8); call(self.emitter.rt.alloc); local_set(iov_ptr);
-                    i32_const(4); call(self.emitter.rt.alloc); local_set(nread_ptr);
+                    i32_const(IOV_SIZE); call(self.emitter.rt.alloc); local_set(iov_ptr);
+                    i32_const(I32_SIZE); call(self.emitter.rt.alloc); local_set(nread_ptr);
                     i32_const(0); local_set(total);
                 });
 
@@ -332,8 +355,8 @@ impl FuncCompiler<'_> {
 
                 // Build List[Int]: [total:i32][i64 * total]
                 wasm!(self.func, {
-                    // Allocate: self.emitter.layout_reg.header_size(super::engine::layout::LIST) as i32 + total * 8
-                    local_get(total); i32_const(8); i32_mul; i32_const(self.emitter.layout_reg.header_size(super::engine::layout::LIST) as i32); i32_add;
+                    // Allocate: self.emitter.layout_reg.header_size(super::engine::layout::LIST) as i32 + total * I64_BYTES
+                    local_get(total); i32_const(I64_BYTES); i32_mul; i32_const(self.emitter.layout_reg.header_size(super::engine::layout::LIST) as i32); i32_add;
                     call(self.emitter.rt.alloc); local_set(list_ptr);
                     local_get(list_ptr); local_get(total); i32_store(0);
                     // Copy bytes → i64 elements
@@ -341,7 +364,7 @@ impl FuncCompiler<'_> {
                     block_empty; loop_empty;
                       local_get(i); local_get(total); i32_ge_u; br_if(1);
                       local_get(list_ptr); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
-                      local_get(i); i32_const(8); i32_mul; i32_add;
+                      local_get(i); i32_const(I64_BYTES); i32_mul; i32_add;
                       local_get(raw_buf); local_get(i); i32_add; i32_load8_u(0); i64_extend_i32_u;
                       i64_store(0);
                       local_get(i); i32_const(1); i32_add; local_set(i);
@@ -370,10 +393,10 @@ impl FuncCompiler<'_> {
                         i32_const(0);
                         local_get(s); i32_const(string_data_off()); i32_add;
                         i32_store(0);
-                        i32_const(4);
+                        i32_const(IOV_LEN_ADDR);
                         local_get(s); i32_load(0);
                         i32_store(0);
-                        i32_const(1); i32_const(0); i32_const(1); i32_const(8);
+                        i32_const(1); i32_const(0); i32_const(1); i32_const(NWRITTEN_ADDR);
                         call(self.emitter.rt.fd_write);
                         drop;
                     });
@@ -394,15 +417,15 @@ impl FuncCompiler<'_> {
                           local_get(i); local_get(len); i32_ge_u; br_if(1);
                           local_get(tmp_buf); local_get(i); i32_add;
                           local_get(list_ptr); i32_const(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32); i32_add;
-                          local_get(i); i32_const(8); i32_mul; i32_add;
+                          local_get(i); i32_const(I64_BYTES); i32_mul; i32_add;
                           i64_load(0); i32_wrap_i64;
                           i32_store8(0);
                           local_get(i); i32_const(1); i32_add; local_set(i);
                           br(0);
                         end; end;
                         i32_const(0); local_get(tmp_buf); i32_store(0);
-                        i32_const(4); local_get(len); i32_store(0);
-                        i32_const(1); i32_const(0); i32_const(1); i32_const(8);
+                        i32_const(IOV_LEN_ADDR); local_get(len); i32_store(0);
+                        i32_const(1); i32_const(0); i32_const(1); i32_const(NWRITTEN_ADDR);
                         call(self.emitter.rt.fd_write);
                         drop;
                     });
