@@ -569,6 +569,16 @@ fn render_call(
     }
 }
 
+/// The self-hosted stdlib runtime registry: `(call name, impl fn name, Almide source)`.
+/// The v1 linker auto-includes an entry when its `call name` is invoked but undefined,
+/// renaming the impl fn (Almide names can't hold a dot) to the call name — so
+/// `(call $module.func)` resolves AND the caps gate reads it as a known-pure stdlib
+/// `module.func`. The single source of truth for the stdlib self-host campaign (§4.1:
+/// the runtime self-hosts into Almide; the trusted floor stays the prim ops + checker).
+pub fn self_host_runtime() -> &'static [(&'static str, &'static str, &'static str)] {
+    &[("int.to_string", "int_to_string", include_str!("../../../stdlib/int_to_string.almd"))]
+}
+
 /// The fixed WAT runtime: WASI import, memory, bump allocator, list ops, integer
 /// formatting, and line printing. Addresses are the named constants above.
 fn preamble() -> String {
@@ -899,22 +909,21 @@ mod tests {
         }
         let mut functions: Vec<MirFunction> =
             ir.functions.iter().filter_map(|f| crate::lower::lower_function(f, &globals).ok()).collect();
-        // Auto-link the self-hosted `int.to_string` when it is CALLED but not defined (it
-        // pulls in its __itos_* helpers from the same file). The impl fn is named
-        // `int_to_string` (Almide names can't hold a dot) and RENAMED to the call name
-        // `int.to_string` so `(call $int.to_string)` resolves AND the caps gate still reads
-        // the call as a known-pure stdlib `module.func` (no caps-coverage regression).
-        // Conditional — unlike print_str — so non-converting programs are not bloated.
-        if calls_fn(&functions, "int.to_string")
-            && !functions.iter().any(|f| f.name == "int.to_string")
-        {
-            let mut rt = lower_source(include_str!("../../../stdlib/int_to_string.almd"));
-            for f in rt.functions.iter_mut() {
-                if f.name == "int_to_string" {
-                    f.name = "int.to_string".to_string();
+        // Auto-link the self-hosted stdlib runtime: for each registry entry CALLED but not
+        // defined, lower its Almide source and rename the impl fn to the call name (so
+        // `(call $module.func)` resolves AND the caps gate reads it as a known-pure stdlib
+        // `module.func` — no caps-coverage regression). Conditional, so non-using programs
+        // are not bloated by builders + helpers.
+        for (call_name, impl_fn, source) in self_host_runtime() {
+            if calls_fn(&functions, call_name) && !functions.iter().any(|f| &f.name == call_name) {
+                let mut rt = lower_source(source);
+                for f in rt.functions.iter_mut() {
+                    if &f.name == impl_fn {
+                        f.name = call_name.to_string();
+                    }
                 }
+                functions.extend(rt.functions);
             }
-            functions.extend(rt.functions);
         }
         // Auto-link the self-hosted print_str runtime (the v1 linker step) so a plain
         // `println(…)` program — which lowers to a PrintStr → `(call $print_str)` —

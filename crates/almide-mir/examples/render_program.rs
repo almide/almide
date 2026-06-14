@@ -87,20 +87,21 @@ fn main() {
         }
     }
 
-    // Auto-link the self-hosted `int.to_string` (+ its __itos_* helpers) when a program
-    // calls it but does not define it — the v1 runtime-linking step for stdlib builders.
-    // The impl fn `int_to_string` is renamed to the call name `int.to_string`.
-    let needs_itos = functions.iter().any(|f| {
-        f.ops.iter().any(|op| matches!(op, almide_mir::Op::CallFn { name, .. } if name == "int.to_string"))
-    });
-    if needs_itos && !functions.iter().any(|f| f.name == "int.to_string") {
-        let rt = source_to_ir(include_str!("../../../stdlib/int_to_string.almd"));
-        for f in &rt.functions {
-            if let Ok(mut mir) = almide_mir::lower::lower_function(f, &globals) {
-                if mir.name == "int_to_string" {
-                    mir.name = "int.to_string".to_string();
+    // Auto-link the self-hosted stdlib runtime (the registry — int.to_string, string.concat,
+    // …) when an entry is called but not defined, renaming its impl fn to the call name.
+    for (call_name, impl_fn, source) in almide_mir::render_wasm::self_host_runtime() {
+        let called = functions.iter().any(|f| {
+            f.ops.iter().any(|op| matches!(op, almide_mir::Op::CallFn { name, .. } if name == call_name))
+        });
+        if called && !functions.iter().any(|f| &f.name == call_name) {
+            let rt = source_to_ir(source);
+            for f in &rt.functions {
+                if let Ok(mut mir) = almide_mir::lower::lower_function(f, &globals) {
+                    if &mir.name == impl_fn {
+                        mir.name = call_name.to_string();
+                    }
+                    functions.push(mir);
                 }
-                functions.push(mir);
             }
         }
     }

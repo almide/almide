@@ -14,6 +14,10 @@
 @intrinsic("almide_rt_prim_handle")
 fn handle(ptr: String) -> Int = _
 
+// Load 1 byte at `addr`, zero-extended to Int.
+@intrinsic("almide_rt_prim_load8")
+fn load8(addr: Int) -> Int = _
+
 // Load 4 bytes at `addr`, zero-extended to Int.
 @intrinsic("almide_rt_prim_load32")
 fn load32(addr: Int) -> Int = _

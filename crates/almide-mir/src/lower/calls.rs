@@ -654,6 +654,7 @@ impl LowerCtx {
         }
         let kind = match func {
             "handle" => PrimKind::Handle,
+            "load8" => PrimKind::Load { width: 1 },
             "load32" => PrimKind::Load { width: 4 },
             "store32" => PrimKind::Store { width: 4 },
             "store8" => PrimKind::Store { width: 1 },
