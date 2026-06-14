@@ -185,10 +185,18 @@ pub fn transitive_cap_witness_string(
 /// Any other unknown callee (a walled or cross-file user function whose effects
 /// are unseen) is treated as reaching a capability — the conservative direction,
 /// so a gate built on this NEVER over-accepts. `visited` breaks cycles.
+///
+/// `is_elided(name)` reports a function whose source had MORE call nodes than its
+/// MIR has call-ops — i.e. a call ELIDED by Opaque lowering (a list element, a
+/// ctor payload, a BinOp operand). An elided call's effects are absent from
+/// `func.ops`, so this fold cannot see them; such a function (and so any caller)
+/// is conservatively TAINTED — its capability witness is incompletely captured
+/// and must not be claimed safe.
 pub fn reaches_capability_or_unknown(
     name: &str,
     program: &BTreeMap<String, MirFunction>,
     is_known_free: &dyn Fn(&str) -> bool,
+    is_elided: &dyn Fn(&str) -> bool,
     visited: &mut std::collections::BTreeSet<String>,
 ) -> bool {
     if !visited.insert(name.to_string()) {
@@ -198,12 +206,15 @@ pub fn reaches_capability_or_unknown(
         Some(f) => f,
         None => return !is_known_free(name),
     };
+    if is_elided(name) {
+        return true; // an elided call hides effects from this fold — conservatively tainted
+    }
     if !cap_witness(func).used.is_empty() {
         return true; // a direct host effect (today: Stdout via an RtFn `Op::Call`)
     }
     func.ops.iter().any(|op| match op {
         Op::CallFn { name: callee, .. } => {
-            reaches_capability_or_unknown(callee, program, is_known_free, visited)
+            reaches_capability_or_unknown(callee, program, is_known_free, is_elided, visited)
         }
         _ => false,
     })
@@ -636,8 +647,33 @@ mod tests {
             program.insert(f.name.clone(), f);
         }
         let none_free = |_: &str| false;
+        let not_elided = |_: &str| false;
         let mut v = BTreeSet::new();
-        assert!(reaches_capability_or_unknown("main", &program, &none_free, &mut v));
+        assert!(reaches_capability_or_unknown("main", &program, &none_free, &not_elided, &mut v));
+    }
+
+    #[test]
+    fn an_elided_call_taints_the_function_and_its_callers() {
+        use std::collections::{BTreeMap, BTreeSet};
+        // main → helper; helper has NO direct cap and NO CallFn, but it ELIDED a
+        // call (its source had a call the MIR dropped to Opaque) — so its caps are
+        // incompletely captured. main must be tainted transitively.
+        let mut helper = func(vec![Op::Const { dst: ValueId(0) }]); // looks pure, but elided
+        helper.name = "helper".into();
+        let mut main = func(vec![Op::CallFn { dst: None, name: "helper".into(), args: vec![], result: None }]);
+        main.name = "main".into();
+        let mut program: BTreeMap<String, MirFunction> = BTreeMap::new();
+        for f in [helper, main] {
+            program.insert(f.name.clone(), f);
+        }
+        let none_free = |_: &str| false;
+        let elided_helper = |n: &str| n == "helper";
+        let mut v = BTreeSet::new();
+        assert!(reaches_capability_or_unknown("main", &program, &none_free, &elided_helper, &mut v));
+        // Without the elision, the same pure chain is effect-free.
+        let not_elided = |_: &str| false;
+        let mut v2 = BTreeSet::new();
+        assert!(!reaches_capability_or_unknown("main", &program, &none_free, &not_elided, &mut v2));
     }
 
     #[test]
@@ -649,11 +685,12 @@ mod tests {
         let mut program: BTreeMap<String, MirFunction> = BTreeMap::new();
         program.insert("f".to_string(), f);
         let none_free = |_: &str| false;
+        let not_elided = |_: &str| false;
         let mut v1 = BTreeSet::new();
-        assert!(reaches_capability_or_unknown("f", &program, &none_free, &mut v1));
+        assert!(reaches_capability_or_unknown("f", &program, &none_free, &not_elided, &mut v1));
         let helper_free = |n: &str| n == "helper";
         let mut v2 = BTreeSet::new();
-        assert!(!reaches_capability_or_unknown("f", &program, &helper_free, &mut v2));
+        assert!(!reaches_capability_or_unknown("f", &program, &helper_free, &not_elided, &mut v2));
     }
 
     #[test]
@@ -669,8 +706,9 @@ mod tests {
             program.insert(x.name.clone(), x);
         }
         let none_free = |_: &str| false;
+        let not_elided = |_: &str| false;
         let mut v = BTreeSet::new();
-        assert!(!reaches_capability_or_unknown("a", &program, &none_free, &mut v));
+        assert!(!reaches_capability_or_unknown("a", &program, &none_free, &not_elided, &mut v));
     }
 
     #[test]

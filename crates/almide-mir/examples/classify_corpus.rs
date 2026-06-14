@@ -53,6 +53,29 @@ use std::path::{Path, PathBuf};
 const KNOWN_STDOUT_FREE_BUILTINS: &[&str] =
     &["assert", "assert_eq", "assert_ne", "eprintln", "panic", "to_string"];
 
+/// Count call nodes (Call / RuntimeCall / TailCall) in an IR expression tree —
+/// the SOURCE's call count. Compared to the MIR's call-op count to detect a call
+/// ELIDED by Opaque lowering (a list element, ctor payload, BinOp operand): such
+/// a call's effects are absent from the MIR, a caps blind spot the transitive
+/// fold cannot see, so its function is conservatively tainted (not caps-verified).
+fn count_ir_calls(body: &almide_ir::IrExpr) -> usize {
+    struct CallCounter {
+        n: usize,
+    }
+    impl almide_ir::visit::IrVisitor for CallCounter {
+        fn visit_expr(&mut self, e: &almide_ir::IrExpr) {
+            use almide_ir::IrExprKind::{Call, RuntimeCall, TailCall};
+            if matches!(e.kind, Call { .. } | RuntimeCall { .. } | TailCall { .. }) {
+                self.n += 1;
+            }
+            almide_ir::visit::walk_expr(self, e);
+        }
+    }
+    let mut cc = CallCounter { n: 0 };
+    almide_ir::visit::walk_expr(&mut cc, body);
+    cc.n
+}
+
 /// The NON-RECURRING soundness gate for the borrow-by-default calling convention:
 /// EVERY `+1` event in the ownership certificate must be BACKED by a real runtime
 /// op — an `i` by an `Alloc` or a heap-result call, an `a` by a `Dup`. A heap
@@ -250,6 +273,10 @@ fn main() {
         // and collect the in-profile MIRs (the capability fold needs the whole
         // file's in-profile set before it can judge any one function's callees).
         let mut file_mirs: Vec<(String, MirFunction)> = Vec::new();
+        // In-profile functions whose source had a call ELIDED by Opaque lowering —
+        // their capability witness is incompletely captured, so the caps fold below
+        // conservatively taints them (and their callers).
+        let mut elided_call_fns: HashSet<String> = HashSet::new();
         for func in &ir.functions {
             t.functions += 1;
             let lowered = catch_unwind(AssertUnwindSafe(|| almide_mir::lower::lower_function(func)));
@@ -261,6 +288,22 @@ fn main() {
                     if !plus_one_events_backed(&mir) {
                         t.cert_backing_breaches
                             .push(format!("{}::{}", file.display(), func.name.as_str()));
+                    }
+                    // CAPS SOUNDNESS: count the source's call nodes. A call ELIDED by
+                    // Opaque lowering (a list element, ctor payload, BinOp operand,
+                    // …) is absent from func.ops, so the transitive caps fold over
+                    // CallFn edges cannot see its effects — if it reached Stdout the
+                    // function would be falsely caps-verified. A function (or any of
+                    // its transitive callees) with MORE IR calls than MIR call-ops is
+                    // therefore conservatively TAINTED below (not claimed caps-safe).
+                    let ir_calls = count_ir_calls(&func.body);
+                    let mir_calls = mir
+                        .ops
+                        .iter()
+                        .filter(|o| matches!(o, Op::Call { .. } | Op::CallFn { .. }))
+                        .count();
+                    if ir_calls > mir_calls {
+                        elided_call_fns.insert(func.name.as_str().to_string());
                     }
                     // Ownership is one heap object per line; names are one line per
                     // function. Both are LOCAL properties — no transitivity.
@@ -293,9 +336,11 @@ fn main() {
         let is_known_free = |n: &str| {
             n.contains('.') || ctors.contains(n) || KNOWN_STDOUT_FREE_BUILTINS.contains(&n)
         };
+        let is_elided = |n: &str| elided_call_fns.contains(n);
         for (name, mir) in &file_mirs {
             let mut visited = BTreeSet::new();
-            if reaches_capability_or_unknown(name, &in_profile_map, &is_known_free, &mut visited) {
+            if reaches_capability_or_unknown(name, &in_profile_map, &is_known_free, &is_elided, &mut visited)
+            {
                 t.caps_unverified += 1;
             } else {
                 caps_stream.push_str(&cap_witness_string(mir));

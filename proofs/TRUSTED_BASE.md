@@ -160,8 +160,14 @@ The receipt's claims are scoped to exactly this:
   `Module` call, a variant constructor, or a known Stdout-free builtin
   (`assert*`/`eprintln`/`panic`/`to_string` — these reach stderr/abort, NOT
   Stdout) is free; ANY other unknown callee (a walled or cross-file user function)
-  TAINTS, so the function is reported `caps-unverified` (2215/2481 verified, 266
-  unverified) rather than falsely accepted. This closes the direct-witness hole
+  TAINTS, so the function is reported `caps-unverified` (1790/2481 verified, 691
+  unverified) rather than falsely accepted. **A call ELIDED by Opaque lowering**
+  (a list element, ctor payload, or BinOp operand — absent from `func.ops`) is a
+  second caps blind spot the fold cannot see: a function whose source has MORE
+  call nodes than its MIR (`count_ir_calls` > MIR call-ops), or any transitive
+  caller of one, is conservatively TAINTED (not claimed caps-safe) until the
+  elided call is materialized — so the caps-verified count is HONEST, never
+  over-claimed. This closes the direct-witness hole
   (`reachable_caps`'s honest-scope: an unknown callee contributed ∅). HONEST
   SCOPE: only `Capability::Stdout` is modeled, so the property is "no undeclared
   **Stdout** effect"; stderr, abort, fs, net are real host effects not yet named
