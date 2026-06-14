@@ -234,14 +234,21 @@ impl LowerCtx {
                 self.live_heap_handles.push(dst);
                 Ok(())
             }
-            // A fresh heap value (literal container / string).
+            // A fresh heap value (literal container / string / Option·Result
+            // variant). Constructors lower like a container literal: a fresh
+            // `Alloc` (value-semantics — the payload is copied, not consumed), the
+            // proven-sound convention the corpus already verifies for List/Record.
             IrExprKind::List { .. }
             | IrExprKind::MapLiteral { .. }
             | IrExprKind::EmptyMap
             | IrExprKind::Record { .. }
             | IrExprKind::Tuple { .. }
             | IrExprKind::LitStr { .. }
-            | IrExprKind::StringInterp { .. } => {
+            | IrExprKind::StringInterp { .. }
+            | IrExprKind::ResultOk { .. }
+            | IrExprKind::ResultErr { .. }
+            | IrExprKind::OptionSome { .. }
+            | IrExprKind::OptionNone => {
                 let dst = self.fresh_value();
                 let repr = repr_of(ty)?;
                 let init = alloc_init(value);
@@ -396,7 +403,11 @@ impl LowerCtx {
                 | IrExprKind::Record { .. }
                 | IrExprKind::Tuple { .. }
                 | IrExprKind::LitStr { .. }
-                | IrExprKind::StringInterp { .. } => {
+                | IrExprKind::StringInterp { .. }
+                | IrExprKind::ResultOk { .. }
+                | IrExprKind::ResultErr { .. }
+                | IrExprKind::OptionSome { .. }
+                | IrExprKind::OptionNone => {
                     let dst = self.fresh_value();
                     let repr = repr_of(&tail.ty)?;
                     let init = alloc_init(tail);
@@ -540,7 +551,11 @@ impl LowerCtx {
                 | IrExprKind::EmptyMap
                 | IrExprKind::Record { .. }
                 | IrExprKind::Tuple { .. }
-                | IrExprKind::StringInterp { .. } => {
+                | IrExprKind::StringInterp { .. }
+                | IrExprKind::ResultOk { .. }
+                | IrExprKind::ResultErr { .. }
+                | IrExprKind::OptionSome { .. }
+                | IrExprKind::OptionNone => {
                     let dst = self.fresh_value();
                     let repr = repr_of(&a.ty)?;
                     let init = alloc_init(a);
@@ -1028,6 +1043,28 @@ mod tests {
             mir.ops
         );
         assert!(mir.ops.iter().any(|o| matches!(o, Op::CallFn { name, .. } if name == "f")));
+        assert_eq!(verify_ownership(&mir), Ok(()));
+    }
+
+    #[test]
+    fn option_result_constructor_lowers_like_a_literal() {
+        // var x = Some("hi")  — a heap Option variant is materialized via `Alloc`
+        // (value semantics: the payload is copied, the shell owned + dropped),
+        // exactly like a container literal. `list_int()` stands in as a heap type;
+        // the lowering keys on the expression KIND + `is_heap_ty`, not the payload.
+        let some = ir_expr(
+            IrExprKind::OptionSome {
+                expr: Box::new(ir_expr(IrExprKind::LitStr { value: "hi".into() }, Ty::String)),
+            },
+            list_int(),
+        );
+        let b = body(vec![bind(0, list_int(), some)]);
+        let mir = lower_body(&b, "main").expect("Option constructor lowers");
+        assert!(
+            matches!(mir.ops[0], Op::Alloc { .. }),
+            "the constructor is materialized via Alloc: {:?}",
+            mir.ops
+        );
         assert_eq!(verify_ownership(&mir), Ok(()));
     }
 }
