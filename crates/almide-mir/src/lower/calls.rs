@@ -461,6 +461,63 @@ impl LowerCtx {
         Ok(out)
     }
 
+    /// Try to lower a SCALAR-result call to a REAL executable `CallFn` (arguments
+    /// materialized via [`Self::lower_call_args`], the scalar result bound to a fresh
+    /// `dst`), returning `Some(dst)`. Mirrors the heap Named/pure-`Module` call
+    /// lowering MINUS the live-heap-handle — a scalar result carries no ownership
+    /// (`Repr::Scalar` is not heap), so it is bound but never dropped.
+    ///
+    /// Returns `None` for a non-call value, an unresolvable `Method`/`Computed`
+    /// callee, or a call whose args / module-purity are not resolvably executable —
+    /// the caller then DEFERS it (a `Const` + an elided-caps marker), exactly as
+    /// before. A partial-then-failed lowering rolls back its pushed ops/handles, so
+    /// the deferred path starts clean. This can NEVER turn an in-profile function
+    /// `Unsupported` (the deferral is always available) — the in-profile set and the
+    /// caps fold are preserved: a real `CallFn` replaces the elided marker 1:1 (same
+    /// callee NAME, so `reachable_caps` is unchanged; same op count, so the
+    /// `mir_calls <= ir_calls` gate cannot falsely de-taint).
+    pub(crate) fn try_lower_scalar_call(&mut self, value: &IrExpr, ty: &Ty) -> Option<ValueId> {
+        let ops_mark = self.ops.len();
+        let lhh_mark = self.live_heap_handles.len();
+        match &value.kind {
+            // A scalar `Named` user call (`fn f() = g()`, `let n = add(2, 3)`).
+            IrExprKind::Call { target: CallTarget::Named { name }, args, .. } => {
+                let repr = repr_of(ty).ok()?;
+                match self.lower_call_args(args) {
+                    Ok(lowered) => {
+                        let dst = self.fresh_value();
+                        self.ops.push(Op::CallFn {
+                            dst: Some(dst),
+                            name: name.as_str().to_string(),
+                            args: lowered,
+                            result: Some(repr),
+                        });
+                        Some(dst)
+                    }
+                    Err(_) => {
+                        self.ops.truncate(ops_mark);
+                        self.live_heap_handles.truncate(lhh_mark);
+                        None
+                    }
+                }
+            }
+            // A scalar first-order PURE `Module` call (`let n = string.len(s)`): the
+            // purity / higher-order gate is inside `lower_pure_module_value_call`; an
+            // impure/HO/unsupported call errors → roll back and defer (no new wall).
+            IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } => {
+                match self.lower_pure_module_value_call(module.as_str(), func.as_str(), args, ty) {
+                    Ok(dst) => Some(dst),
+                    Err(_) => {
+                        self.ops.truncate(ops_mark);
+                        self.live_heap_handles.truncate(lhh_mark);
+                        None
+                    }
+                }
+            }
+            _ => None,
+        }
+    }
+
     /// Register a freshly-materialized call-result temp used as a call argument: a
     /// HEAP temp is BORROWED into the call (`Handle`) and added to the scope-end
     /// drop set (it is owned by THIS scope, not moved out, so it is released after

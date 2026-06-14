@@ -113,9 +113,25 @@
   print への正しい CallFn 配線)。`$print_int`/`$print_list` は実ソースに producer 無し
   (テスト fixture 専用)= 仮足場の print は実プログラムから死んでいる。**print の前進 = Phase 3
   self-host**(低レベル Almide subset: メモリ/host-call プリミティブ + Almide で print_str)。
-  **③ の次スライス候補(順): (a) scalar 値の実行 ―― `add(2,3)` の literal 引数が
-  `CallArg::Imm` に lower されない & scalar call の `result=None` で未使用時 drop 漏れ(lowering
-  gap、render は CallArg::Imm を既に扱える)。(b) print = self-host(骨太、Phase 3)。**
+  **③ の次スライス候補(順): (a) scalar 呼出の実行 → 第三スライスで DONE(下記)。(a') scalar 値計算
+  (算術/リテラル)―― `Op::Const` 値運搬 + `IntBinOp`(IntOp は Add/Sub/Mul のみ、Div/Mod/比較は要拡張)。
+  print が無い今 end-to-end で観測不能 ⇒ PrintInt unit テストでのみ検証可、Op enum 12箇所変更で invasive。
+  (b) print = self-host(骨太、Phase 3)。**
+
+  **第三スライス実測(2026-06-14): SCALAR 呼出が v1 実行 path を通って v0 と一致 + 検証被覆も向上**。
+  `try_lower_scalar_call`(lower/calls.rs)新設 ―― scalar-result の Named / pure-Module 呼出を実
+  `CallFn{dst:Some, args:lower_call_args, result:Some(scalar)}` に lower(heap 呼出 binds.rs:114 を
+  heap-push 抜きでミラー)、bind/tail/失敗時は **ロールバック→defer**(Const + elided marker)で totality
+  保持(新規 wall ゼロ、in-profile 4083 不変)。battery 4本(`add(2,3)` literal 引数 / 未使用 scalar 結果 /
+  入れ子 `g(f())` / scalar+heap 混在 `mix(5,"hi")`)が **v1 で valid wat → wasmtime → v0 と exit/出力一致**
+  (print 無し ⇒ 値は未観測だが構造が走る)。**副次効果: 検証被覆 UP** ―― 延期呼出の実体化で
+  caps 3528→**3582**(+54 関数 TAINTED→VERIFIED)、ownership 13007→**13153**(+146、heap 引数の Alloc+Drop バランス)。
+  **3エージェント敵対的検証 SOUND**(brick #56 系の健全な caps 回収 ―― 不健全 flip ゼロ、2関数は de-taint で
+  真の Stdout 到達を露出し正しく未検証維持、name 1:1 保存で caps 集合不変、double-count gate 0、proven-checker
+  backstop)。回帰テスト `scalar_user_call_lowers_to_executable_callfn`(from-source lowering、cargo test 94/0)。
+  **残: module scalar 呼出は `$string.len` 未定義で実行ダングリング(= heap module 呼出と同じ self-host ギャップ、
+  検証は改善)。corpus-wall.sh caps step に既存ハーネス flake(3582 連続 checker spawn の OS-OOM/shared-scratch、
+  決定的再チェックで 0-reject ―― 将来 batch/in-process 化)。**
 
   **⚠ 設計の核 ―― v0-reuse は v0 の罠(v1-mir-architecture.md §4・⚠注を参照)。正は
   SELF-HOST RUNTIME**: ランタイムを **Almide で書き**、同じ Core→MIR→target を通して

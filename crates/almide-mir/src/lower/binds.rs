@@ -11,10 +11,17 @@ impl LowerCtx {
 
     pub(crate) fn lower_bind(&mut self, var: VarId, ty: &Ty, value: &IrExpr) -> Result<(), LowerError> {
         if !is_heap_ty(ty) {
-            // Scalar binding: define a Copy value, no ownership accounting. The
-            // value's CONTENT is deferred (a single `Const`), so any call inside it
-            // (`var n = list.len(xs)`) is elided — record those calls as effect
-            // markers so the capability fold still sees their effects.
+            // Scalar binding: a Copy value, no ownership accounting. A RESOLVABLE
+            // scalar call (`let n = add(2, 3)`, `let m = string.len(s)`) is lowered to
+            // a real executable `CallFn` (args materialized, the scalar result bound)
+            // so it RUNS. Any other scalar value — arithmetic, a literal, an
+            // unresolvable Method/Computed call — keeps the deferred `Const` + elided-
+            // caps marker: its CONTENT is carried by a later brick, its calls still
+            // folded for capabilities (`var n = obj.m()` elided ⇒ honest caps taint).
+            if let Some(dst) = self.try_lower_scalar_call(value, ty) {
+                self.value_of.insert(var, dst);
+                return Ok(());
+            }
             let dst = self.fresh_value();
             self.value_of.insert(var, dst);
             self.ops.push(Op::Const { dst });

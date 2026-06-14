@@ -703,6 +703,81 @@ mod tests {
         }
     }
 
+    /// Lower real `.almd` SOURCE to a `MirProgram` through the existing frontend
+    /// feeder (the same cut point as `examples/render_program.rs`) — for end-to-end
+    /// tests over REAL lowering rather than hand-built MIR. Dev-only deps.
+    fn lower_source(src: &str) -> MirProgram {
+        use almide_frontend::check::Checker;
+        use almide_frontend::lower::lower_program;
+        use almide_frontend::{canonicalize, ir_link};
+        use almide_lang::lexer::Lexer;
+        use almide_lang::parser::Parser;
+        use almide_optimize::{mono, optimize};
+        let tokens = Lexer::tokenize(src);
+        let mut prog = Parser::new(tokens).parse().expect("parse");
+        let canon = canonicalize::canonicalize_program(&prog, std::iter::empty());
+        let mut checker = Checker::from_env(canon.env);
+        let _ = checker.infer_program(&mut prog);
+        let mut ir = lower_program(&prog, &checker.env, &checker.type_map);
+        optimize::optimize_program(&mut ir);
+        mono::monomorphize(&mut ir);
+        ir_link::ir_link(&mut ir);
+        let mut globals: std::collections::HashMap<almide_ir::VarId, almide_lang::types::Ty> =
+            std::collections::HashMap::new();
+        for tl in &ir.top_lets {
+            globals.insert(tl.var, tl.ty.clone());
+        }
+        for m in &ir.modules {
+            for tl in &m.top_lets {
+                globals.insert(tl.var, tl.ty.clone());
+            }
+        }
+        let functions =
+            ir.functions.iter().filter_map(|f| crate::lower::lower_function(f, &globals).ok()).collect();
+        MirProgram { functions }
+    }
+
+    /// A scalar-result user call (`let _r = add(2, 3)`) lowered from REAL source is an
+    /// EXECUTABLE `CallFn` — immediate args + a bound scalar result — not the pre-
+    /// execution `Const` + empty elided marker. Regression for `try_lower_scalar_call`
+    /// (the scalar-call execution slice). The swap is adversarially-verified SOUND: the
+    /// real CallFn replaces the marker 1:1 (same callee NAME → caps fold unchanged) and
+    /// a scalar result registers no ownership object.
+    #[test]
+    fn scalar_user_call_lowers_to_executable_callfn() {
+        let prog = lower_source(
+            "fn add(a: Int, b: Int) -> Int = a + b\nfn main() -> Unit = { let _r = add(2, 3) }\n",
+        );
+        let main = prog.functions.iter().find(|f| f.name == "main").expect("main lowered");
+        // A real CallFn to `add`: a bound result repr + both literal args as immediates.
+        let (args, result) = main
+            .ops
+            .iter()
+            .find_map(|op| match op {
+                Op::CallFn { dst: Some(_), name, args, result } if name == "add" => {
+                    Some((args.clone(), *result))
+                }
+                _ => None,
+            })
+            .expect("a real CallFn to add with a bound dst");
+        assert!(result.is_some(), "the scalar call result repr must be set");
+        assert!(
+            args.iter().any(|a| matches!(a, CallArg::Imm(2)))
+                && args.iter().any(|a| matches!(a, CallArg::Imm(3))),
+            "both literal args must be immediates, got {args:?}"
+        );
+        // ...and NOT also an empty elided marker for add (the call is real, not elided).
+        assert!(
+            !main.ops.iter().any(|op| matches!(op,
+                Op::CallFn { dst: None, name, args, .. } if name == "add" && args.is_empty())),
+            "add must not also appear as an empty elided caps marker"
+        );
+        // End-to-end: renders to a valid module that runs cleanly (where wasmtime is present).
+        if let Some(out) = build_and_run("scalar_user_call", &render_wasm_program(&prog)) {
+            assert_eq!(out, "");
+        }
+    }
+
     /// The hand-written WAT runtime is the BOOTSTRAP debt (§4.1). This guard
     /// makes the "never grow" rule MECHANICAL (not a comment): the count may only
     /// ratchet DOWN as the runtime self-hosts into Almide. If you added a

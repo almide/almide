@@ -242,6 +242,20 @@ impl LowerCtx {
         // is a `Const` like a literal — its operands carry their own ownership.
         match &tail.kind {
             IrExprKind::Var { id } => Ok(Some(self.value_or_global(*id)?)),
+            // A scalar-result resolvable CALL tail (`fn f() = g()`, `= add(2, 3)`,
+            // `= string.len(s)`): a real executable `CallFn` (args materialized, the
+            // scalar result returned). An unresolvable Method/Computed callee (or an
+            // unsupported arg) falls through to the deferred `Const` + elided-caps
+            // marker below — the call is captured for caps, its value deferred.
+            IrExprKind::Call { .. } => {
+                if let Some(dst) = self.try_lower_scalar_call(tail, &tail.ty) {
+                    return Ok(Some(dst));
+                }
+                let dst = self.fresh_value();
+                self.ops.push(Op::Const { dst });
+                self.record_elided_calls(tail);
+                Ok(Some(dst))
+            }
             IrExprKind::LitInt { .. }
             | IrExprKind::LitBool { .. }
             | IrExprKind::LitFloat { .. }
@@ -263,11 +277,10 @@ impl LowerCtx {
             | IrExprKind::UnwrapOr { .. }
             | IrExprKind::ToOption { .. }
             | IrExprKind::OptionalChain { .. }
-            // A scalar-result CALL (`fn f() = g()` / `o.m()` / `(h)()`) or RANGE
-            // returned: a fresh `Const` (no ownership). `record_elided_calls` captures
-            // the analyzable callees' caps; an unresolvable Method/Computed call is
-            // elided ⇒ the gate taints the function honestly.
-            | IrExprKind::Call { .. }
+            // A RANGE returned: a fresh `Const` (no ownership); any analyzable callee
+            // inside it is captured for caps by `record_elided_calls`. (A scalar-result
+            // CALL is handled by its own arm above — a real executable `CallFn` when
+            // resolvable, else the same deferred `Const` + elided marker.)
             | IrExprKind::Range { .. } => {
                 let dst = self.fresh_value();
                 self.ops.push(Op::Const { dst });
