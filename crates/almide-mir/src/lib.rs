@@ -196,6 +196,33 @@ pub enum Op {
     /// `dst = a <op> b` on scalars (no ownership) — the arithmetic runtime
     /// functions need.
     IntBinOp { dst: ValueId, op: IntOp, a: ValueId, b: ValueId },
+
+    /// A PRIMITIVE FLOOR op — raw memory / host access the self-hosted runtime needs,
+    /// below the language (`prim.load32`/`prim.store32`/`prim.fd_write`/…). The
+    /// renderers hand-map it INLINE (no preamble `(func …)`), and it is a CLOSED set
+    /// accounted as the trusted floor (like the RC primitives), small/total enough to
+    /// prove faithful to the wasm spec. The MIR is i64-uniform; the i32 wasm memory
+    /// boundary wraps/extends at the op. `args` are scalar/handle inputs; `dst` binds
+    /// a scalar result (loads, fd_write, handle→address). No ownership: scalars carry
+    /// none and a handle arg is BORROWED (read, no refcount change).
+    /// [`PrimKind::FdWrite`] reaches [`Capability::Stdout`] (the only sandbox exit).
+    Prim { kind: PrimKind, dst: Option<ValueId>, args: Vec<ValueId> },
+}
+
+/// The closed set of primitive-floor operations (the trusted, wasm-spec-faithful
+/// surface the self-hosted runtime is written over).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PrimKind {
+    /// Reinterpret a heap handle (i32 pointer) as an i64 address value — the
+    /// String/List→Int bridge so all address math is `Int` `IntBinOp`.
+    Handle,
+    /// Load `width` bytes (1/4/8) at a computed i64 address, zero-extended to i64.
+    Load { width: u8 },
+    /// Store the low `width` bytes (1/4/8) of an i64 value at a computed i64 address.
+    Store { width: u8 },
+    /// The `fd_write` WASI host call — `args = [fd, iov, count, nwritten]`, dst = the
+    /// i64 errno. The ONLY sandbox exit; carries [`Capability::Stdout`].
+    FdWrite,
 }
 
 /// A scalar integer binary operation.
@@ -448,7 +475,9 @@ pub fn verify_ownership(func: &MirFunction) -> Result<(), Vec<Violation>> {
                 }
             }
             // Scalar arithmetic — no ownership.
-            Op::IntBinOp { .. } => {}
+            // A scalar arithmetic op and a primitive-floor op carry no ownership: a
+            // scalar result is Copy and a `Prim` handle arg is BORROWED (read only).
+            Op::IntBinOp { .. } | Op::Prim { .. } => {}
         }
     }
 

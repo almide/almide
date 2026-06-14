@@ -69,6 +69,12 @@ pub fn name_witness(func: &MirFunction) -> NameWitness {
                 used.push(*a);
                 used.push(*b);
             }
+            Op::Prim { dst, args, .. } => {
+                if let Some(d) = dst {
+                    defined.push(*d);
+                }
+                used.extend(args.iter().copied());
+            }
             Op::Call { dst, args, .. } | Op::CallFn { dst, args, .. } => {
                 if let Some(d) = dst {
                     defined.push(*d);
@@ -105,6 +111,12 @@ pub fn cap_witness(func: &MirFunction) -> CapWitness {
             if let Some(cap) = rt.capability() {
                 used.push(cap);
             }
+        }
+        // The `fd_write` primitive is the host-effect floor op — it reaches Stdout, so
+        // a self-hosted runtime fn using it (print_str) must declare Stdout, exactly
+        // like a `PrintStr` runtime call (this keeps the sandbox accounting complete).
+        if let Op::Prim { kind: crate::PrimKind::FdWrite, .. } = op {
+            used.push(Capability::Stdout);
         }
     }
     CapWitness { allowed: func.declared_caps.clone(), used }

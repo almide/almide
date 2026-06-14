@@ -72,6 +72,10 @@ pub fn wasm_pattern(op: &crate::Op) -> Option<String> {
         | Op::Consume { .. }
         | Op::Borrow { .. }
         | Op::Pure { .. }
+        // The prim floor is the trusted hand-mapped surface (not in the corpus V
+        // gates); its faithfulness is the §4.1 wasm-spec proof obligation, not a
+        // pattern check here.
+        | Op::Prim { .. }
         | Op::Call { func: RtFn::PrintStr, .. } => return None,
     })
 }

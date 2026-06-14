@@ -99,6 +99,9 @@ fn value_reprs(func: &MirFunction) -> std::collections::BTreeMap<ValueId, Repr> 
             Op::Const { dst } | Op::ConstInt { dst, .. } | Op::IntBinOp { dst, .. } => {
                 m.insert(*dst, SCALAR);
             }
+            Op::Prim { dst: Some(dst), .. } => {
+                m.insert(*dst, SCALAR);
+            }
             Op::CallFn { dst: Some(d), .. } => {
                 m.insert(*d, SCALAR); // demo: scalar-returning; heap returns are a later refinement
             }
@@ -138,6 +141,10 @@ fn render_op(op: &Op) -> Option<String> {
         }
         Op::Const { dst } => Some(format!("let {}: i64 = 0;", var(*dst))),
         Op::ConstInt { dst, value } => Some(format!("let {}: i64 = {value};", var(*dst))),
+        // The prim floor is the WASM self-host surface; native uses v0's runtime, so a
+        // prim op never appears in a native MIR. Stub to keep the match total.
+        Op::Prim { dst: Some(d), .. } => Some(format!("let {}: i64 = 0;", var(*d))),
+        Op::Prim { dst: None, .. } => None,
         // The single ownership decision: an alias is a fresh owned handle whose
         // value is a clone — eager copy-on-write, so the sibling is independent.
         Op::Dup { dst, src } => {

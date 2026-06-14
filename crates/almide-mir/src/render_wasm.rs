@@ -40,7 +40,7 @@
 //! from the open-stdlib ratchet the rule guards (the trust spine's own core, not
 //! "another stdlib routine"). The ratchet on the open surface stays as strict.
 
-use crate::{CallArg, Init, IntOp, MirFunction, MirProgram, Op, Repr, RtFn, ValueId};
+use crate::{CallArg, Init, IntOp, MirFunction, MirProgram, Op, PrimKind, Repr, RtFn, ValueId};
 use std::collections::{BTreeMap, BTreeSet};
 
 // Fixed low-memory addresses (named — no raw literals in the emitted WAT logic).
@@ -222,6 +222,7 @@ fn defined_value(op: &Op) -> Option<ValueId> {
         | Op::IntBinOp { dst, .. }
         | Op::Pure { dst, .. } => Some(*dst),
         Op::CallFn { dst, .. } | Op::Call { dst, .. } => *dst,
+        Op::Prim { dst, .. } => *dst,
         _ => None,
     }
 }
@@ -242,6 +243,10 @@ fn value_reprs_wasm(func: &MirFunction) -> BTreeMap<ValueId, Repr> {
                 m.insert(*dst, r);
             }
             Op::Const { dst } | Op::ConstInt { dst, .. } | Op::IntBinOp { dst, .. } => {
+                m.insert(*dst, SCALAR_REPR);
+            }
+            // A prim result (a load, fd_write errno, or handle→address) is a scalar i64.
+            Op::Prim { dst: Some(dst), .. } => {
                 m.insert(*dst, SCALAR_REPR);
             }
             // A call's result repr is the callee's RETURN repr, carried on the op
@@ -357,6 +362,29 @@ fn render_op(op: &Op, label_off: &BTreeMap<String, (u32, u32)>) -> String {
         // deferred `Const` renders to nothing — the local keeps the zero default.)
         Op::ConstInt { dst, value } => {
             format!("    (local.set {} (i64.const {value}))\n", local(*dst))
+        }
+        // A primitive-floor op, hand-mapped INLINE (no preamble func). The MIR is
+        // i64-uniform; wrap to i32 at the wasm memory boundary, zero-extend a loaded /
+        // returned i32 back to i64. This is the whole trusted floor for raw memory +
+        // the fd_write host call — everything else (print_str) is Almide over it.
+        Op::Prim { kind, dst, args } => {
+            let w = |i: usize| format!("(i32.wrap_i64 (local.get {}))", local(args[i]));
+            let body = match kind {
+                PrimKind::Handle => format!("(i64.extend_i32_u (local.get {}))", local(args[0])),
+                PrimKind::Load { width: 1 } => format!("(i64.extend_i32_u (i32.load8_u {}))", w(0)),
+                PrimKind::Load { width: 4 } => format!("(i64.extend_i32_u (i32.load {}))", w(0)),
+                PrimKind::Load { .. } => format!("(i64.load {})", w(0)),
+                PrimKind::Store { width: 1 } => format!("(i32.store8 {} {})", w(0), w(1)),
+                PrimKind::Store { width: 4 } => format!("(i32.store {} {})", w(0), w(1)),
+                PrimKind::Store { .. } => format!("(i64.store {} (local.get {}))", w(0), local(args[1])),
+                PrimKind::FdWrite => {
+                    format!("(i64.extend_i32_u (call $fd_write {} {} {} {}))", w(0), w(1), w(2), w(3))
+                }
+            };
+            match dst {
+                Some(d) => format!("    (local.set {} {body})\n", local(*d)),
+                None => format!("    {body}\n"),
+            }
         }
         Op::Consume { .. }
         | Op::Borrow { .. }
@@ -826,6 +854,81 @@ mod tests {
         assert!(wat.contains("(i64.add"), "render must emit i64.add:\n{wat}");
         if let Some(out) = build_and_run("scalar_arith", &wat) {
             assert_eq!(out, "");
+        }
+    }
+
+    /// THE PRIM-FLOOR PROOF (sub-slice 1): a hand-built `print_str` MirFunction —
+    /// written ENTIRELY over the prim floor (handle / load / store / fd_write) + the
+    /// scalar-value foundation (ConstInt / IntBinOp) — reads a heap String's bytes and
+    /// writes them + a newline to stdout via a 2-element iovec `fd_write`. main allocs
+    /// "hi" and calls it. This proves the prim ops render to valid wasm and ACTUALLY
+    /// PRINT, with NO new preamble runtime func (the discipline) — the whole mechanism
+    /// for self-hosted print, validated in isolation before the frontend `prim` module.
+    #[test]
+    fn prim_floor_print_str_prints() {
+        // print_str(s: String): writes the string's bytes + "\n" to stdout.
+        let print_str = MirFunction {
+            name: "print_str".into(),
+            params: vec![MirParam { value: ValueId(0), repr: heap() }],
+            ops: vec![
+                // h = prim.handle(s)  — the block's i64 address
+                Op::Prim { kind: PrimKind::Handle, dst: Some(ValueId(1)), args: vec![ValueId(0)] },
+                // len = prim.load32(h + 4)   (LIST_LEN_OFFSET)
+                Op::ConstInt { dst: ValueId(2), value: 4 },
+                Op::IntBinOp { dst: ValueId(3), op: IntOp::Add, a: ValueId(1), b: ValueId(2) },
+                Op::Prim { kind: PrimKind::Load { width: 4 }, dst: Some(ValueId(4)), args: vec![ValueId(3)] },
+                // data = h + 12   (LIST_HEADER)
+                Op::ConstInt { dst: ValueId(5), value: 12 },
+                Op::IntBinOp { dst: ValueId(6), op: IntOp::Add, a: ValueId(1), b: ValueId(5) },
+                // iovec[0] = { ptr=data @ 8, len @ 12 }
+                Op::ConstInt { dst: ValueId(7), value: 8 },
+                Op::Prim { kind: PrimKind::Store { width: 4 }, dst: None, args: vec![ValueId(7), ValueId(6)] },
+                Op::ConstInt { dst: ValueId(8), value: 12 },
+                Op::Prim { kind: PrimKind::Store { width: 4 }, dst: None, args: vec![ValueId(8), ValueId(4)] },
+                // "\n" (10) at scratch 512; iovec[1] = { ptr=512 @ 16, len=1 @ 20 }
+                Op::ConstInt { dst: ValueId(9), value: 512 },
+                Op::ConstInt { dst: ValueId(10), value: 10 },
+                Op::Prim { kind: PrimKind::Store { width: 1 }, dst: None, args: vec![ValueId(9), ValueId(10)] },
+                Op::ConstInt { dst: ValueId(11), value: 16 },
+                Op::ConstInt { dst: ValueId(12), value: 512 },
+                Op::Prim { kind: PrimKind::Store { width: 4 }, dst: None, args: vec![ValueId(11), ValueId(12)] },
+                Op::ConstInt { dst: ValueId(13), value: 20 },
+                Op::ConstInt { dst: ValueId(14), value: 1 },
+                Op::Prim { kind: PrimKind::Store { width: 4 }, dst: None, args: vec![ValueId(13), ValueId(14)] },
+                // fd_write(stdout=1, iovec@8, count=2, nwritten@0)
+                Op::ConstInt { dst: ValueId(15), value: 1 },
+                Op::ConstInt { dst: ValueId(16), value: 8 },
+                Op::ConstInt { dst: ValueId(17), value: 2 },
+                Op::ConstInt { dst: ValueId(18), value: 0 },
+                Op::Prim {
+                    kind: PrimKind::FdWrite,
+                    dst: Some(ValueId(19)),
+                    args: vec![ValueId(15), ValueId(16), ValueId(17), ValueId(18)],
+                },
+            ],
+            ret: None,
+            declared_caps: vec![crate::Capability::Stdout],
+        };
+        let main = MirFunction {
+            name: "main".into(),
+            params: vec![],
+            ops: vec![
+                Op::Alloc { dst: ValueId(0), repr: heap(), init: Init::Str("hi".into()) },
+                Op::CallFn {
+                    dst: None,
+                    name: "print_str".into(),
+                    args: vec![CallArg::Handle(ValueId(0))],
+                    result: None,
+                },
+                Op::Drop { v: ValueId(0) },
+            ],
+            ret: None,
+            ..Default::default()
+        };
+        let prog = MirProgram { functions: vec![print_str, main] };
+        // The prim ops render to valid wasm and print "hi\n" (trimmed to "hi").
+        if let Some(out) = build_and_run("prim_print_str", &render_wasm_program(&prog)) {
+            assert_eq!(out, "hi");
         }
     }
 
