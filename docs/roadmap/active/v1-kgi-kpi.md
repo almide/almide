@@ -70,8 +70,15 @@
   証明済みへ。WasmCert-Coq import + ランタイム heap refinement 証明 + per-build V'。
 - **Gap 2**: frees / leak-freedom / reuse ―― 精密所有権モデル(Perceus per-edge)を
   MIR に。証明書形式の a/m/r 文字がその ground-fact 化の入口。
-- **Gap 3**: 言語面被覆 + 実プログラム被覆 ―― call(即時) → 制御フロー → closure
-  → nested heap。二重オラクル(v0 コーパス)が被覆テスト。
+- **Gap 3**(= ③ 実行パリティ、次の本命): 言語面被覆 + 実プログラム被覆 ―― **ボトル
+  ネックは lower ではなく RENDER**。`lower_function`(検証)は call/制御フロー/closure
+  を deferred-lower して **97.3%** 通すが、`render_wasm`/`render_rust`(実行)はまだ
+  **subset・call なし**。だから実プログラムは **検証は通るが走らない**(最初の call で
+  render が未対応)。③ = **render を lower に追いつかせる**:
+  **call(即時・入口) → 制御フロー → closure → nested heap**。各段を二重オラクル
+  (v0 コーパスとの byte 一致 / translation_validation.rs #570)で被覆テスト。
+  実プログラム被覆 1(3 行 fixture)→ 実プログラム N 本がこの軸の進捗計。
+  GTM 解錠条件(= v1 が実プログラムを走らせて v0 と一致)。
 
 ---
 
@@ -86,6 +93,29 @@
 ---
 
 ## 週次記録(最新を上に追記)
+
+### 2026-06-14 — lower 被覆ほぼ天井 + 2 つの潜在 accept-but-unsafe を発見・封鎖
+- **守る系**: 全 green 維持。さらに **silent 通過(hole-hunt)が前進** ―― 検証ワーク
+  フロー(敵対的 refute)で **潜在 accept-but-unsafe を 2 件発見し、どちらも封鎖**:
+  (1) **Try/Unwrap/Fan の早期 return wasm リーク** ―― deferred-continue 証明書は均衡
+  (no_leak) だが v0 wasm の Err パス `return_` が Perceus 終端 rc_dec を飛び越し生存
+  ヒープローカルをリーク。**v0 codegen を本丸修正**(emit_early_return_decs、壁ではなく
+  実バグ修正)、経験的にリーク解消(100k×100KB err-loop が OOM せず完走)+ 二重解放
+  なし(260-file wasm corpus + wasm_gc/runtime/cross-target 全緑)を実証。
+  (2) **caps ゲート `mir<=ir` の相殺** ―― FnRef/ClosureCreate マーカーの過剰計数が
+  Computed/Method 省略の過少計数と相殺し得る穴を、count_ir_calls で構造的に封鎖
+  (今は到達不能、by-construction 堅牢化)。**健全性は GENUINELY 100% 維持**。
+- **攻める系**: **lower+verify 被覆 4022→4083(97.3%)**。(あ)小ギャップ一掃
+  (heap-tail Block / Map 挿入 / nested tuple destructure / top-level let global /
+  break スカラフレーム / ループ・分岐アキュムレータ / Computed-effect-call)+ 上記
+  早期 return リーククラスを根治して壁を撤去・−59 回収。性質被覆は **4/8 据置**
+  (リーク修正は emit 層であって証明ではない)。**実プログラム被覆は 1 のまま**
+  (render を実プログラムまで前進させる ③ は未着手)。
+- **読み**: **量の軸(lower 被覆)はほぼ天井**。残りは骨太の新軸 2 つ ―― **③ render
+  catch-up**(lower は call 含め 97.3% 通すが render_wasm/render_rust は subset・call
+  なしで後ろ。実プログラムは検証は通るが走らない → render を lower に追いつかせる、
+  call から)と **④ MSR**(柱 A・未測定)。どちらも fresh session で集中して建てる。
+  守りを 1 つも落とさずこの 2 軸を伸ばせるかが次の勝負。
 
 ### 2026-06-13 — 基準点
 - **守る系**: 全 green(検査器小 / TB 宣言済み / 公理純 / CI green・クロスバージョン
