@@ -295,6 +295,13 @@ impl LowerCtx {
             // runtime effect. Other non-call expr statements stay Unsupported (the
             // lower_effect_call guard rejects them — flight-grade totality).
             IrStmtKind::Expr { expr } => match &expr.kind {
+                // A Unit `if` statement EXECUTES (only the taken arm's effects run) when
+                // its cond is a scalar; otherwise it falls back to the linearization.
+                IrExprKind::If { cond, then, else_ }
+                    if self.try_lower_unit_if(cond, then, else_) =>
+                {
+                    Ok(())
+                }
                 IrExprKind::If { .. } | IrExprKind::Match { .. } => self.lower_branch(expr),
                 IrExprKind::ForIn { var, var_tuple, iterable, body } => {
                     self.lower_for_in(*var, var_tuple, iterable, body)

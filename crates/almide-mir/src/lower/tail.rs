@@ -82,7 +82,13 @@ impl LowerCtx {
                     self.lower_effect_call(tail)?;
                     Ok(None)
                 }
-                // A Unit-typed `if`/`match` tail is LINEARIZED control flow.
+                // A Unit `if` tail EXECUTES (only the taken arm's effects run) when the
+                // cond is a scalar; else it linearizes. `match` stays linearized.
+                IrExprKind::If { cond, then, else_ }
+                    if self.try_lower_unit_if(cond, then, else_) =>
+                {
+                    Ok(None)
+                }
                 IrExprKind::If { .. } | IrExprKind::Match { .. } => {
                     self.lower_branch(tail)?;
                     Ok(None)

@@ -353,9 +353,15 @@ impl LowerCtx {
                     self.record_elided_calls(a);
                     self.materialized_call_arg(dst, repr)
                 }
-                // A scalar literal argument (`f(3.14)`, `f(true)`): a fresh `Const`,
-                // passed by value (no ownership). `LitInt` is already an `Imm` above.
-                IrExprKind::LitFloat { .. } | IrExprKind::LitBool { .. } => {
+                // A Bool literal argument (`f(true)`): the real value 1/0 (the `if` cond
+                // a callee branches on). `LitInt` is already an `Imm` above.
+                IrExprKind::LitBool { value } => {
+                    let dst = self.fresh_value();
+                    self.ops.push(Op::ConstInt { dst, value: if *value { 1 } else { 0 } });
+                    CallArg::Scalar(dst)
+                }
+                // A Float literal (`f(3.14)`): deferred `Const` (Float exec is later).
+                IrExprKind::LitFloat { .. } => {
                     let dst = self.fresh_value();
                     self.ops.push(Op::Const { dst });
                     CallArg::Scalar(dst)
@@ -567,6 +573,12 @@ impl LowerCtx {
             IrExprKind::LitInt { value } => {
                 let dst = self.fresh_value();
                 self.ops.push(Op::ConstInt { dst, value: *value });
+                Some(dst)
+            }
+            // A Bool is a scalar int (true = 1, false = 0) — the `if` condition.
+            IrExprKind::LitBool { value } => {
+                let dst = self.fresh_value();
+                self.ops.push(Op::ConstInt { dst, value: if *value { 1 } else { 0 } });
                 Some(dst)
             }
             IrExprKind::BinOp { op, left, right } => {

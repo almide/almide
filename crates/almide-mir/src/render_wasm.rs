@@ -1067,6 +1067,33 @@ mod tests {
         }
     }
 
+    /// FIZZBUZZ — the canonical real program — runs through v1 and byte-matches v0.
+    /// Exercises EVERYTHING composed: a chained Unit `if … else if … else …` that
+    /// executes ONLY THE TAKEN branch (not all arms), `%`, `==`, comparison, recursion
+    /// (write_int → put_int), Div/Mod, the prim floor, println, and self-hosted
+    /// print_int. `fizzbuzz(6)` is "Fizz" — proving the nested else-if executes (the
+    /// old linearization would print "Fizz\nBuzz\n6").
+    #[test]
+    fn fizzbuzz_matches_v0() {
+        let src = "fn put_int(n: Int, pos: Int) -> Int =\n  \
+            if n < 10 then { prim.store8(pos, 48 + n)\n    pos + 1 }\n  \
+            else { let p = put_int(n / 10, pos)\n    prim.store8(p, 48 + (n % 10))\n    p + 1 }\n\
+            fn write_int(n: Int) -> Unit = { let endp = put_int(n, 512)\n  \
+            prim.store8(endp, 10)\n  prim.store32(8, 512)\n  \
+            prim.store32(12, endp - 512 + 1)\n  let _w = prim.fd_write(1, 8, 1, 0) }\n\
+            fn fizzbuzz(n: Int) -> Unit =\n  \
+            if n % 15 == 0 then println(\"FizzBuzz\")\n  \
+            else if n % 3 == 0 then println(\"Fizz\")\n  \
+            else if n % 5 == 0 then println(\"Buzz\")\n  \
+            else write_int(n)\n\
+            fn main() -> Unit = fizzbuzz(6)\n";
+        let prog = lower_source(src);
+        // Only the taken branch runs: fizzbuzz(6) prints exactly "Fizz" (6 % 3 == 0).
+        if let Some(out) = build_and_run("fizzbuzz", &render_wasm_program(&prog)) {
+            assert_eq!(out, "Fizz");
+        }
+    }
+
     /// The hand-written WAT runtime is the BOOTSTRAP debt (§4.1). This guard
     /// makes the "never grow" rule MECHANICAL (not a comment): the count may only
     /// ratchet DOWN as the runtime self-hosts into Almide. If you added a

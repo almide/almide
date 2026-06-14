@@ -135,6 +135,11 @@ impl LowerCtx {
                 IrExprKind::Call { .. } if matches!(tail.ty, Ty::Unit) => {
                     self.lower_effect_call(tail)?
                 }
+                // A nested Unit `if` arm-tail EXECUTES (only the taken arm runs) — so a
+                // chained `else if … else …` (fizzbuzz) runs ONE branch, not all of them;
+                // else it falls back to linearization.
+                IrExprKind::If { cond, then, else_ }
+                    if self.try_lower_unit_if(cond, then, else_) => {}
                 IrExprKind::If { .. } | IrExprKind::Match { .. } => self.lower_branch(tail)?,
                 _ => self.record_elided_calls(tail),
             }
@@ -179,6 +184,35 @@ impl LowerCtx {
         self.ops.truncate(ops_mark);
         self.live_heap_handles.truncate(lhh_mark);
         None
+    }
+
+    /// Try to lower a UNIT (effect) `if cond then … else …` to EXECUTABLE control flow
+    /// — only the taken arm's EFFECTS run (the old linearization ran BOTH, mismatching
+    /// v0). Each arm goes through `lower_branch_arm` (its Unit-call tail is an effect,
+    /// its heap temps dropped per-arm), wrapped in `IfThen`/`Else`/`EndIf` with no
+    /// result. Returns `false` (rolled back) if the cond is not a lowerable scalar.
+    pub(crate) fn try_lower_unit_if(&mut self, cond: &IrExpr, then: &IrExpr, else_: &IrExpr) -> bool {
+        let ops_mark = self.ops.len();
+        let lhh_mark = self.live_heap_handles.len();
+        let cond_v = match self.lower_scalar_value(cond) {
+            Some(v) => v,
+            None => {
+                self.ops.truncate(ops_mark);
+                return false;
+            }
+        };
+        self.ops.push(Op::IfThen { cond: cond_v, dst: None });
+        let then_ok = self.lower_branch_arm(None, then).is_ok();
+        if then_ok {
+            self.ops.push(Op::Else { val: None });
+            if self.lower_branch_arm(None, else_).is_ok() {
+                self.ops.push(Op::EndIf { val: None });
+                return true;
+            }
+        }
+        self.ops.truncate(ops_mark);
+        self.live_heap_handles.truncate(lhh_mark);
+        false
     }
 
     /// Lower ONE scalar `if` arm (a block's statements + a scalar tail value) with a
