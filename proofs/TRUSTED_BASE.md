@@ -108,8 +108,8 @@ The receipt's claims are scoped to exactly this:
   verification = the definition of parity" in its honest first form: it does NOT
   yet claim the *completion definition* (the proven profile accepting the full
   corpus), it establishes the *mechanism* that measures progress toward it and
-  proves the boundary is a wall, not a hole. **Today's honest coverage: 4004/4195
-  functions in-profile (95%) for ownership+names (caps-VERIFIED is the lower, parity-binding 3451 — see caps note)** (the value-semantics subset,
+  proves the boundary is a wall, not a hole. **Today's honest coverage: 4053/4195
+  functions in-profile (97%) for ownership+names (caps-VERIFIED is the lower, parity-binding 3500 — see caps note)** (the value-semantics subset,
   plus **`Range` values, CLOSURE values, and unresolvable `Method`/`Computed`-target calls** (`f(0..n)`,
   `var g = (x) => …`, `obj.method()`, `(g)()` — a `Range` and a CLOSURE value (a fresh heap env) are fresh values; an unresolvable callee
   (dispatch / closure value not known here) is modeled as a DEFERRED fresh value (a
@@ -144,8 +144,11 @@ The receipt's claims are scoped to exactly this:
   iteration internally balanced ⟹ N runtime iterations are leak-free for any N, NO
   loop op; a heap iterable is borrowed or materialized via `lower_call_args`, the
   loop variable aliases the container per iteration (`Op::Dup`, container-grain) or
-  is a scalar `Const`; `break`/`continue` and a heap reassignment of a pre-loop var
-  are WALLED, a scalar reassignment `i = i+1` is admitted), plus **`if`/`match`
+  is a scalar `Const`; `break`/`continue` are WALLED; a heap reassignment — the loop
+  ACCUMULATOR `acc = acc + [x]` — is DEFERRED, not rebound: `acc` keeps its still-live
+  pre-loop handle across iterations, so no iteration drops a handle a later iteration
+  reads (memory-safe; the accumulation itself is deferred like every Opaque), a scalar
+  reassignment `i = i+1` is admitted), plus **`if`/`match`
   control flow** (statement / scalar- / Unit- / HEAP-tail and
   heap-bind position — arms LINEARIZED into the flat op stream with a per-arm scope
   frame, NO branch op: each arm internally balanced + vacuous on the other path; the
@@ -153,8 +156,10 @@ The receipt's claims are scoped to exactly this:
   (scalar), or a fresh `Alloc{Opaque}` (heap, memory-safe by construction, its value
   CONTENT deferred like every Opaque); a heap `match` subject is MATERIALIZED (a
   fresh value into an owned temp dropped at scope end, a tracked var borrowed); a
-  payload-binding pattern binds container-grain (see below); an arm guard and an arm
-  that reassigns a HEAP variable are WALLED), plus
+  payload-binding pattern binds container-grain (see below); an arm guard is WALLED; an
+  arm that reassigns a HEAP variable is DEFERRED — the var keeps its pre-branch handle,
+  so a post-branch read never dereferences a handle the arm dropped (no path-dependent
+  UAF)), plus
   **tuple destructuring** (`let (a,b) = (x,y)` component-wise, or `(a,b) = t`
   aliasing the container per component), **field/element assignment** (xs[i]=v / r.field=v → MakeUnique copy-on-write), **println of any heap arg** (`println("x")`/`f()`/`a++b` materialized + borrowed — reaches Stdout so caps-unverified, honest), and **reassignment** — `x = v` rebinds `x`; the old binding rides to scope-end
   and is dropped exactly once (a conservative lifetime extension, never a
@@ -206,7 +211,7 @@ The receipt's claims are scoped to exactly this:
   `Module` call, a variant constructor, or a known Stdout-free builtin
   (`assert*`/`eprintln`/`panic`/`to_string` — these reach stderr/abort, NOT
   Stdout) is free; ANY other unknown callee (a walled or cross-file user function)
-  TAINTS, so the function is reported `caps-unverified` (3451/4004 verified, 553
+  TAINTS, so the function is reported `caps-unverified` (3500/4053 verified, 553
   unverified) rather than falsely accepted. **The gate verifies the REAL
   capability-bound property `reachable ⊆ declared`** (exactly what
   `proofs/CapabilityBound.v` proves), not a degenerate "reaches no capability at

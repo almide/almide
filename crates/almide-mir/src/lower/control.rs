@@ -112,21 +112,14 @@ impl LowerCtx {
             IrExprKind::Block { stmts, expr } => (stmts, expr.as_deref()),
             _ => (&[], Some(body)),
         };
-        // A HEAP reassignment inside the arm would rebind a var's `value_of`
-        // PATH-DEPENDENTLY: a post-branch read then dereferences a handle this arm
-        // dropped (a UAF the flat fold cannot see). Wall a top-level heap Assign (a
-        // nested one is re-checked when its control flow recurses). A SCALAR reassign
-        // is harmless — it rebinds to a Copy `Const` (no handle to dangle), so it is
-        // admitted (e.g. a loop counter inside a branch).
-        if stmts.iter().any(stmt_is_heap_reassign) {
-            return Err(LowerError::Unsupported(
-                "branch arm reassigns a heap variable (path-dependent rebind) not in this control-flow slice".into(),
-            ));
-        }
         let mark = self.live_heap_handles.len();
         if let Some((pat, subject)) = pattern {
             self.bind_pattern(pat, subject)?;
         }
+        // Inside the arm, a HEAP reassignment is DEFERRED, not rebound: a post-branch
+        // read must not dereference a handle this arm dropped (the `in_frame` discipline
+        // in `lower_stmt`). The accumulator keeps its still-live handle — memory-safe.
+        self.in_frame += 1;
         for stmt in stmts {
             self.lower_stmt(stmt)?;
         }
@@ -146,6 +139,7 @@ impl LowerCtx {
                 _ => self.record_elided_calls(tail),
             }
         }
+        self.in_frame -= 1;
         self.drop_arm_locals(mark);
         Ok(())
     }
@@ -174,9 +168,11 @@ impl LowerCtx {
     /// grain like field extraction — it keeps the container alive for the iteration,
     /// dropped at its end; element-precise identity needs the layout brick), a SCALAR
     /// element is a `Const`. WALLED: a `break`/`continue` (the early-exit path would
-    /// skip the frame's drops = a leak), and a HEAP reassignment of a pre-loop var (an
-    /// iteration-dependent rebind → UAF). A scalar reassignment (`i = i + 1`) is a
-    /// Copy `Const`, harmless, admitted.
+    /// skip the frame's drops = a leak). A HEAP reassignment (the accumulator,
+    /// `acc = acc + [x]`) is DEFERRED, not walled: the `in_frame` discipline keeps `acc`
+    /// pinned to its still-live handle across iterations (memory-safe; the accumulation
+    /// is deferred like every `Opaque`). A scalar reassignment (`i = i + 1`) is a Copy
+    /// `Const`, harmless, admitted.
     pub(crate) fn lower_for_in(
         &mut self,
         var: VarId,
@@ -223,9 +219,15 @@ impl LowerCtx {
                 self.value_of.insert(v, dst);
             }
         }
+        // A heap reassignment in the body is the loop ACCUMULATOR (`acc = acc + [x]`):
+        // it is DEFERRED, not rebound (the `in_frame` discipline) — `acc` keeps its
+        // still-live handle across iterations, so the next iteration never dereferences
+        // a freed handle. Memory-safe; the accumulation itself is deferred like `Opaque`.
+        self.in_frame += 1;
         for stmt in body {
             self.lower_stmt(stmt)?;
         }
+        self.in_frame -= 1;
         self.drop_arm_locals(mark);
         Ok(())
     }
@@ -233,30 +235,31 @@ impl LowerCtx {
     /// Lower a `while cond { body }` like a `for-in` body — a PER-ITERATION SCOPE
     /// FRAME makes one modeled iteration balanced, sound for any N. The condition is
     /// evaluated each iteration (its caps captured); the body's locals are dropped at
-    /// iteration end. Same WALLS as `for-in` (`break`/`continue`, heap reassignment).
+    /// iteration end. Same as `for-in`: `break`/`continue` walled, a heap reassignment
+    /// (accumulator) deferred by the `in_frame` discipline.
     pub(crate) fn lower_while(&mut self, cond: &IrExpr, body: &[IrStmt]) -> Result<(), LowerError> {
         self.record_elided_calls(cond);
         self.guard_loop_body(body, "while")?;
         let mark = self.live_heap_handles.len();
+        // A heap reassignment in the body is DEFERRED (the `in_frame` discipline) — the
+        // accumulator keeps its still-live handle across iterations. Memory-safe.
+        self.in_frame += 1;
         for stmt in body {
             self.lower_stmt(stmt)?;
         }
+        self.in_frame -= 1;
         self.drop_arm_locals(mark);
         Ok(())
     }
 
-    /// Shared loop-body admission: a `break`/`continue` (the early-exit path would
-    /// skip the per-iteration frame's drops = a leak) and a HEAP reassignment of a
-    /// pre-loop variable (an iteration-dependent `value_of` rebind → UAF) are walled.
+    /// Shared loop-body admission: a `break`/`continue` is walled — its early-exit path
+    /// would skip the per-iteration frame's drops (a leak). A HEAP reassignment (the
+    /// accumulator) is NOT walled: it is deferred by the `in_frame` discipline so the
+    /// var keeps its still-live handle across iterations (memory-safe).
     pub(crate) fn guard_loop_body(&self, body: &[IrStmt], what: &str) -> Result<(), LowerError> {
         if body_breaks_or_continues(body) {
             return Err(LowerError::Unsupported(format!(
                 "{what} body with break/continue (early exit would skip per-iteration drops) not in this brick"
-            )));
-        }
-        if body.iter().any(stmt_is_heap_reassign) {
-            return Err(LowerError::Unsupported(format!(
-                "{what} body reassigns a heap variable (iteration-dependent rebind) not in this brick"
             )));
         }
         Ok(())

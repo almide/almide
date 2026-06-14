@@ -550,10 +550,12 @@
     }
 
     #[test]
-    fn loop_body_heap_reassign_is_walled() {
-        // var acc = []; while c { acc = [] }  — a HEAP reassign of a pre-loop var is an
-        // iteration-dependent value_of rebind (→ UAF). Must WALL. (A scalar reassign
-        // would be admitted — see `while_with_scalar_counter_reassign_lowers`.)
+    fn loop_body_heap_accumulator_is_deferred_and_safe() {
+        // var acc = []; while c { acc = [] }  — a HEAP reassign of a pre-loop var is the
+        // loop ACCUMULATOR. It is DEFERRED (not rebound): `acc` keeps its still-live
+        // pre-loop handle across iterations, so no iteration drops a handle a later
+        // iteration reads. The reassign emits NO ownership op (acc's `value_of` is
+        // unchanged) → exactly one Alloc (the pre-loop `[]`) and one Drop (scope end).
         let reassign = stmt(IrStmtKind::Assign {
             var: VarId(0),
             value: ir_expr(IrExprKind::List { elements: vec![] }, list_int()),
@@ -566,10 +568,59 @@
             bind(0, list_int(), ir_expr(IrExprKind::List { elements: vec![] }, list_int())),
             stmt(IrStmtKind::Expr { expr: w }),
         ]);
-        match lower_body(&b, "main") {
-            Err(LowerError::Unsupported(r)) => assert!(r.contains("reassigns a heap"), "got: {r}"),
-            other => panic!("expected a heap-reassign wall, got {other:?}"),
-        }
+        let mir = lower_body(&b, "main").expect("the accumulator is deferred, not walled");
+        let allocs = mir.ops.iter().filter(|o| matches!(o, Op::Alloc { .. })).count();
+        let drops = mir.ops.iter().filter(|o| matches!(o, Op::Drop { .. })).count();
+        assert_eq!(allocs, 1, "only the pre-loop alloc — the reassign is deferred: {:?}", mir.ops);
+        assert_eq!(drops, 1, "acc dropped exactly once at scope end: {:?}", mir.ops);
+        assert_eq!(verify_ownership(&mir), Ok(()), "no UAF — acc stays pinned to its live handle");
+    }
+
+    #[test]
+    fn accumulator_read_after_the_loop_is_memory_safe() {
+        use almide_lang::intern::sym;
+        // The ADVERSARIAL case the deferral exists for:
+        //   var acc = []; for x in xs { acc = acc + [x] }; use(acc)
+        // A naive rebind would point `value_of[acc]` at a handle the per-iteration frame
+        // DROPS, then `use(acc)` after the loop dereferences it → UAF. The deferral pins
+        // `acc` to its pre-loop handle (still live at the post-loop read), so this is
+        // memory-safe by construction. `acc` must still be a tracked var the call borrows.
+        let plus = ir_expr(
+            IrExprKind::BinOp {
+                op: almide_ir::BinOp::ConcatList,
+                left: Box::new(ir_expr(IrExprKind::Var { id: VarId(0) }, list_int())),
+                right: Box::new(ir_expr(IrExprKind::List { elements: vec![] }, list_int())),
+            },
+            list_int(),
+        );
+        let acc_plus = stmt(IrStmtKind::Assign { var: VarId(0), value: plus });
+        let forin = ir_expr(
+            IrExprKind::ForIn {
+                var: VarId(1),
+                var_tuple: None,
+                iterable: Box::new(ir_expr(IrExprKind::Var { id: VarId(2) }, list_int())),
+                body: vec![acc_plus],
+            },
+            Ty::Unit,
+        );
+        let use_acc = stmt(IrStmtKind::Expr {
+            expr: ir_expr(
+                IrExprKind::Call {
+                    target: CallTarget::Named { name: sym("use") },
+                    args: vec![ir_expr(IrExprKind::Var { id: VarId(0) }, list_int())],
+                    type_args: vec![],
+                },
+                Ty::Unit,
+            ),
+        });
+        let b = body(vec![
+            bind(0, list_int(), ir_expr(IrExprKind::List { elements: vec![] }, list_int())),
+            bind(2, list_int(), ir_expr(IrExprKind::List { elements: vec![] }, list_int())),
+            stmt(IrStmtKind::Expr { expr: forin }),
+            use_acc,
+        ]);
+        let mir = lower_body(&b, "main").expect("accumulator + post-loop read lowers");
+        assert_eq!(verify_ownership(&mir), Ok(()), "post-loop read borrows a still-live handle — no UAF");
     }
 
     #[test]
@@ -684,9 +735,11 @@
     }
 
     #[test]
-    fn branch_arm_reassigning_a_variable_is_walled() {
-        // var z = []; if c then { z = [9] } else { }  — the arm reassigns pre-branch z
-        // (a path-dependent value_of rebind → UAF the flat fold can't see). Must WALL.
+    fn branch_arm_heap_reassign_is_deferred_and_safe() {
+        // var z = []; if c then { z = [9] } else { }  — the arm reassigns pre-branch z.
+        // A naive rebind would point `value_of[z]` at an arm-local handle the per-arm
+        // teardown drops, so a post-branch read would UAF. The reassign is DEFERRED: `z`
+        // keeps its still-live pre-branch handle. Exactly one Alloc (`[]`), one Drop.
         let then = unit_block(vec![stmt(IrStmtKind::Assign {
             var: VarId(0),
             value: ir_expr(IrExprKind::List { elements: vec![] }, list_int()),
@@ -695,10 +748,12 @@
             bind(0, list_int(), ir_expr(IrExprKind::List { elements: vec![] }, list_int())),
             stmt(IrStmtKind::Expr { expr: iff(then, unit_block(vec![]), Ty::Unit) }),
         ]);
-        match lower_body(&b, "main") {
-            Err(LowerError::Unsupported(r)) => assert!(r.contains("reassigns"), "got: {r}"),
-            other => panic!("expected a reassign wall, got {other:?}"),
-        }
+        let mir = lower_body(&b, "main").expect("the arm reassign is deferred, not walled");
+        let allocs = mir.ops.iter().filter(|o| matches!(o, Op::Alloc { .. })).count();
+        let drops = mir.ops.iter().filter(|o| matches!(o, Op::Drop { .. })).count();
+        assert_eq!(allocs, 1, "only the pre-branch alloc — the arm reassign is deferred: {:?}", mir.ops);
+        assert_eq!(drops, 1, "z dropped exactly once at scope end: {:?}", mir.ops);
+        assert_eq!(verify_ownership(&mir), Ok(()), "no path-dependent UAF — z stays pinned");
     }
 
     #[test]

@@ -138,6 +138,13 @@ pub(crate) struct LowerCtx {
     /// not perform, so it is walled — never lowered to an unbacked cert event.
     param_values: HashSet<ValueId>,
     next_value: u32,
+    /// Depth of enclosing control-flow FRAMES (branch arms / loop bodies). A heap
+    /// reassignment at depth > 0 must NOT rebind `value_of` — the new handle would
+    /// be frame-local (dropped at the frame's end), yet the var is read on the next
+    /// iteration or after the branch merges, dereferencing a freed handle (a UAF the
+    /// flat fold cannot see). Inside a frame such a reassignment is DEFERRED: the var
+    /// keeps its still-live handle and the new value is carried like every `Opaque`.
+    in_frame: u32,
 }
 
 impl LowerCtx {
@@ -199,7 +206,9 @@ impl LowerCtx {
     pub(crate) fn lower_stmt(&mut self, stmt: &IrStmt) -> Result<(), LowerError> {
         match &stmt.kind {
             IrStmtKind::Bind { var, ty, value, .. } => self.lower_bind(*var, ty, value),
-            // `x = value` — reassignment. REBIND `x` to the new value (reusing
+            // `x = value` — reassignment.
+            //
+            // At function TOP LEVEL: REBIND `x` to the new value (reusing
             // `lower_bind`). The OLD binding's handle stays in `live_heap_handles`
             // and is dropped at scope end — a conservative lifetime EXTENSION
             // (memory-safe, never a double-free: the old object is dropped exactly
@@ -207,7 +216,23 @@ impl LowerCtx {
             // old `x` inside `value` (e.g. `x = f(x)`) lowers BEFORE the rebind
             // overwrites `value_of[x]`, so it borrows the still-live old handle —
             // never a use-after-free.
-            IrStmtKind::Assign { var, value } => self.lower_bind(*var, &value.ty, value),
+            //
+            // Inside a control-flow FRAME (`in_frame > 0`): a HEAP rebind would
+            // repoint `value_of[x]` to a frame-local handle the per-iteration / per-arm
+            // teardown drops, while `x` is read on the next iteration or after the
+            // branch merges → UAF. So DEFER it — `x` keeps its still-live handle (the
+            // loop/branch accumulator stays memory-safe), and the new value is carried
+            // like every `Opaque`; capture its calls so the caps fold stays honest. A
+            // SCALAR reassignment (`i = i + 1`) rebinds to a Copy `Const` with no handle
+            // to dangle, so it is admitted unchanged (e.g. a loop counter).
+            IrStmtKind::Assign { var, value } => {
+                if self.in_frame > 0 && is_heap_ty(&value.ty) {
+                    self.record_elided_calls(value);
+                    Ok(())
+                } else {
+                    self.lower_bind(*var, &value.ty, value)
+                }
+            }
             // `let (a, b) = (x, y)` — a TUPLE destructuring bind.
             IrStmtKind::BindDestructure { pattern, value } => {
                 self.lower_destructure(pattern, value)
@@ -318,14 +343,6 @@ mod tail;
 mod control;
 mod calls;
 
-
-/// Is a statement a HEAP reassignment (`x = <heap value>`)? Such a rebind inside a
-/// branch arm or loop body changes a var's `value_of` in a path/iteration-dependent
-/// way the flat fold cannot see (→ UAF), so it is walled. A SCALAR reassignment is a
-/// Copy `Const` with no handle to dangle, so it is NOT flagged (admitted).
-pub(crate) fn stmt_is_heap_reassign(s: &IrStmt) -> bool {
-    matches!(&s.kind, IrStmtKind::Assign { value, .. } if is_heap_ty(&value.ty))
-}
 
 /// Does a statement list contain a `break`/`continue` that targets THIS loop — i.e.
 /// not nested inside another loop (which captures its own)? Used to wall a loop body
