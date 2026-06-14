@@ -669,22 +669,19 @@ impl LowerCtx {
             }
         };
         match (name, args.as_slice()) {
-            // println(s) — s a bound heap string: borrow it for a Stdout write.
-            ("println", [arg]) if is_heap_ty(&arg.ty) => match &arg.kind {
-                IrExprKind::Var { id } => {
-                    let v = self.value_for(*id)?;
-                    self.ops.push(Op::Call {
-                        dst: None,
-                        func: RtFn::PrintStr,
-                        args: vec![CallArg::Handle(v)],
-                    result: None });
-                    Ok(())
-                }
-                other => Err(LowerError::Unsupported(format!(
-                    "println of {} (only a bound heap var) not in this brick",
-                    kind_name(other)
-                ))),
-            },
+            // println(s) — the heap-string argument is BORROWED for a Stdout write.
+            // A non-var arg (a literal `println("x")`, a concat `println(a ++ b)`,
+            // an interpolation `println("${x}")`, or a call result `println(f())`)
+            // is materialized into an owned temp by `lower_call_args` (the same
+            // arg machinery as a normal call), then borrowed; the temp is dropped
+            // at scope end. The Stdout effect makes the function caps-unverified
+            // (it reaches Stdout, which `declared_caps` is empty for) — honest, not
+            // claimed caps-safe.
+            ("println", [arg]) if is_heap_ty(&arg.ty) => {
+                let lowered = self.lower_call_args(std::slice::from_ref(arg))?;
+                self.ops.push(Op::Call { dst: None, func: RtFn::PrintStr, args: lowered, result: None });
+                Ok(())
+            }
             // A USER function call (Unit result, e.g. `beep()`) → Op::CallFn. The
             // call BORROWS its heap-handle args (no refcount change here). The
             // callee's capabilities are accounted for at the CALL SITE against
