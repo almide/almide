@@ -464,7 +464,16 @@ impl LowerCtx {
             | IrExprKind::LitBool { .. }
             | IrExprKind::LitFloat { .. }
             | IrExprKind::BinOp { .. }
-            | IrExprKind::UnOp { .. } => {
+            | IrExprKind::UnOp { .. }
+            // A SCALAR field/element/tuple extraction is an unambiguous COPY (a
+            // scalar is never reference-counted), so it is a `Const` — its
+            // container carries its own ownership. (A HEAP extraction is an ALIAS
+            // / share — it needs a layout-aware field-access op with `Dup`
+            // semantics and stays walled until that brick.)
+            | IrExprKind::Member { .. }
+            | IrExprKind::IndexAccess { .. }
+            | IrExprKind::MapAccess { .. }
+            | IrExprKind::TupleIndex { .. } => {
                 let dst = self.fresh_value();
                 self.ops.push(Op::Const { dst });
                 Ok(Some(dst))
@@ -593,6 +602,25 @@ impl LowerCtx {
                         self.ops.push(Op::Const { dst });
                         CallArg::Scalar(dst)
                     }
+                }
+                // A field/element/tuple EXTRACTION argument. A SCALAR result is an
+                // unambiguous COPY → `Const`. A HEAP result is an ALIAS/share (the
+                // v0 codegen reads a stored field as an alias) that needs a
+                // layout-aware field-access op with `Dup` semantics — walled until
+                // that brick (treating it as a fresh `Alloc` would double-count rc).
+                IrExprKind::Member { .. }
+                | IrExprKind::IndexAccess { .. }
+                | IrExprKind::MapAccess { .. }
+                | IrExprKind::TupleIndex { .. } => {
+                    if is_heap_ty(&a.ty) {
+                        return Err(LowerError::Unsupported(format!(
+                            "call argument heap {} (extraction is an alias/share — needs a field-access op) not in this brick",
+                            kind_name(&a.kind)
+                        )));
+                    }
+                    let dst = self.fresh_value();
+                    self.ops.push(Op::Const { dst });
+                    CallArg::Scalar(dst)
                 }
                 // A Named user-call result, materialized into an owned temp.
                 IrExprKind::Call { target: CallTarget::Named { name }, args: inner, .. } => {
@@ -1122,5 +1150,46 @@ mod tests {
             .expect("heap concat bind lowers");
         assert!(matches!(mir2.ops[0], Op::Alloc { .. }), "heap BinOp is Alloc: {:?}", mir2.ops);
         assert_eq!(verify_ownership(&mir2), Ok(()));
+    }
+
+    #[test]
+    fn scalar_extraction_is_const_heap_extraction_walls() {
+        // fn f() = xs[i]  with a SCALAR element type → a `Const` copy (no ownership).
+        let scalar_idx = ir_expr(
+            IrExprKind::IndexAccess {
+                object: Box::new(ir_expr(IrExprKind::Var { id: VarId(0) }, list_int())),
+                index: Box::new(ir_expr(IrExprKind::LitInt { value: 0 }, Ty::Int)),
+            },
+            Ty::Int,
+        );
+        let mir = lower_body(
+            &ir_expr(IrExprKind::Block { stmts: vec![], expr: Some(Box::new(scalar_idx)) }, Ty::Int),
+            "main",
+        )
+        .expect("scalar extraction lowers");
+        assert!(mir.ops.iter().any(|o| matches!(o, Op::Const { .. })), "scalar extraction is Const: {:?}", mir.ops);
+        assert_eq!(verify_ownership(&mir), Ok(()));
+
+        // A HEAP extraction (element type String) is an alias/share — walled until
+        // the field-access op exists (treating it as fresh would double-count rc).
+        let heap_idx = ir_expr(
+            IrExprKind::IndexAccess {
+                object: Box::new(ir_expr(IrExprKind::Var { id: VarId(0) }, list_int())),
+                index: Box::new(ir_expr(IrExprKind::LitInt { value: 0 }, Ty::Int)),
+            },
+            Ty::String,
+        );
+        let arg_call = ir_expr(
+            IrExprKind::Call {
+                target: CallTarget::Named { name: almide_lang::intern::sym("f") },
+                args: vec![heap_idx],
+                type_args: vec![],
+            },
+            Ty::Unit,
+        );
+        match lower_body(&body(vec![stmt(IrStmtKind::Expr { expr: arg_call })]), "main") {
+            Err(LowerError::Unsupported(m)) => assert!(m.contains("alias/share"), "got: {m}"),
+            other => panic!("expected a heap-extraction wall, got {other:?}"),
+        }
     }
 }
