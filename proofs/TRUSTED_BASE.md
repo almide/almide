@@ -108,8 +108,8 @@ The receipt's claims are scoped to exactly this:
   verification = the definition of parity" in its honest first form: it does NOT
   yet claim the *completion definition* (the proven profile accepting the full
   corpus), it establishes the *mechanism* that measures progress toward it and
-  proves the boundary is a wall, not a hole. **Today's honest coverage: 4081/4195
-  functions in-profile (97%) for ownership+names (caps-VERIFIED is the lower, parity-binding 3528 — see caps note)** (the value-semantics subset,
+  proves the boundary is a wall, not a hole. **Today's honest coverage: 4022/4195
+  functions in-profile (96%) for ownership+names (caps-VERIFIED is the lower, parity-binding 3479 — see caps note)** (the value-semantics subset,
   plus **`Range` values, CLOSURE values, and unresolvable `Method`/`Computed`-target calls** (`f(0..n)`,
   `var g = (x) => …`, `obj.method()`, `(g)()` — a `Range` and a CLOSURE value (a fresh heap env) are fresh values; an unresolvable callee
   (dispatch / closure value not known here) is modeled as a DEFERRED fresh value (a
@@ -118,14 +118,24 @@ The receipt's claims are scoped to exactly this:
   function caps-unverified — honest, the callee's capabilities are unknown), plus
   **error operators** (`e!`/`e?`/`e ?? d`/`e?.field` yield a FRESH value — the
   unwrapped/defaulted/mapped result, deferred like every Opaque; the operand's
-  calls are captured. NOTE: Almide has NO `try`/`catch` — `e?` is `Result → Option`,
-  `e ?? d` is unwrap-or-default, `e?.f` is optional chaining, all TOTAL value maps
-  with no control flow; only `e!` (`Unwrap`, effect-fn) PROPAGATES an error.
-  KNOWN-LIMITATION: that error-PROPAGATION of `e!` is DEFERRED — the model takes the
-  always-continue path, which is self-consistent (each handle still drops exactly
-  once on either runtime exit, so no double-free/leak/UAF) and thus memory-SAFE;
-  error propagation is functional, not a safety property, so it is deferred like
-  every Opaque content), plus
+  calls are captured. Almide has NO `try`/`catch`: `e ?? d` (unwrap-or-default),
+  `e?` AS `ToOption` (`Result → Option`) and `e?.f` (optional chaining) are TOTAL
+  value maps with NO control flow — always safe to defer. But **`e!` (`Unwrap`) and
+  the effect-fn auto-`?` (`Try`) EARLY-RETURN `Err`**, and that early return is NOT
+  freely deferrable: on **wasm** the Err path is a bare `return_` that jumps PAST the
+  function's scope-end heap frees (the Perceus rc_decs sit only at the terminal `Ret`;
+  `flatten_exit_tail_blocks` replays them only for TAIL-position `break`/`continue`,
+  not `Try`/`Unwrap`/`Fan`), so a heap local LIVE at the early return LEAKS — a v0
+  WASM codegen leak (Rust is leak-free: `e!`→`?`→scope-exit `Drop`). The
+  deferred-continue cert is balanced (the checker proves it no_leak), so certifying
+  that shape would be **accept-but-unsafe**. CLOSED: the v1 lowering now WALLS a
+  `Try`/`Unwrap` whenever an owned heap local is live (`expr_has_early_return` +
+  `!live_heap_handles.is_empty()`) — same discipline as `break`. With no live heap
+  handle there is no Drop to skip, so it is admitted (deferred). KNOWN-LIMITATION:
+  the underlying v0 wasm leak itself is not yet fixed (the ideal fix replays the
+  scope frees before the Err `return_`, extending `flatten_exit_tail_blocks` to
+  `Try`/`Unwrap`/`Fan` — a Perceus-pass change, perceus-belt follow-up); until then
+  the v1 spine honestly WALLS the leaky shape rather than certifying it), plus
   **destructuring patterns** (a `match` arm's `Some(x)`/`Ok(v)`/`Foo(a,b)` and a
   `let Foo{..}=`/`let (a,b)=` bind their payloads CONTAINER-GRAIN — a heap binding
   aliases the whole subject (`Op::Dup`, reusing the proven `a` event; element/payload-
@@ -218,7 +228,7 @@ The receipt's claims are scoped to exactly this:
   `Module` call, a variant constructor, or a known Stdout-free builtin
   (`assert*`/`eprintln`/`panic`/`to_string` — these reach stderr/abort, NOT
   Stdout) is free; ANY other unknown callee (a walled or cross-file user function)
-  TAINTS, so the function is reported `caps-unverified` (3528/4081 verified, 553
+  TAINTS, so the function is reported `caps-unverified` (3479/4022 verified, 543
   unverified) rather than falsely accepted. **The gate verifies the REAL
   capability-bound property `reachable ⊆ declared`** (exactly what
   `proofs/CapabilityBound.v` proves), not a degenerate "reaches no capability at

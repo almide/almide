@@ -57,6 +57,15 @@ impl LowerCtx {
     /// - `Unit` / absent → a Unit-returning body (no return value).
     /// Anything else is an explicit `Unsupported` (flight-grade totality).
     pub(crate) fn lower_tail(&mut self, tail: Option<&IrExpr>) -> Result<Option<ValueId>, LowerError> {
+        // EARLY-RETURN LEAK GUARD (see lower_stmt): a tail `Try`/`Unwrap` that `return
+        // Err` on failure, with a live heap local, leaks that local on the wasm Err path.
+        if let Some(t) = tail {
+            if !self.live_heap_handles.is_empty() && expr_has_early_return(t) {
+                return Err(LowerError::Unsupported(
+                    "Try/Unwrap early-return tail with a live heap local (the wasm Err path would skip its free = a leak) not in this brick".into(),
+                ));
+            }
+        }
         let tail = match tail {
             Some(t) => t,
             None => return Ok(None),

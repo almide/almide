@@ -1065,32 +1065,51 @@
     }
 
     #[test]
-    fn error_operators_yield_a_fresh_value() {
-        // var opt = []; var x = opt!  and  fn g() = opt ?? []  — an error operator
-        // yields a FRESH value (Opaque heap here), the operand deferred and the
-        // early-return of `!`/`?` deferred (always-continue is balanced). Both lower.
+    fn error_operators_with_no_live_heap_local_lower() {
+        // var x = []!  and  var y = []  ?? []  with NO prior live heap local — an error
+        // operator yields a FRESH Opaque, the operand deferred. `!`/`?` early-return is
+        // safe to defer here: with no live heap handle there is no Drop the wasm Err path
+        // could skip = no leak. UnwrapOr (`??`) never early-returns regardless.
+        let unwrap = ir_expr(
+            IrExprKind::Unwrap {
+                expr: Box::new(ir_expr(IrExprKind::List { elements: vec![] }, list_int())),
+            },
+            list_int(),
+        );
+        let unwrap_or = ir_expr(
+            IrExprKind::UnwrapOr {
+                expr: Box::new(ir_expr(IrExprKind::List { elements: vec![] }, list_int())),
+                fallback: Box::new(ir_expr(IrExprKind::List { elements: vec![] }, list_int())),
+            },
+            list_int(),
+        );
+        // `var x = []!` is the FIRST heap-affecting stmt (live_heap_handles empty), then
+        // `var y = [] ?? []`. UnwrapOr is not an early return, so x being live is fine.
+        let b = body(vec![bind(0, list_int(), unwrap), bind(1, list_int(), unwrap_or)]);
+        let mir = lower_body(&b, "main").expect("error operators with no live heap local lower");
+        assert_eq!(verify_ownership(&mir), Ok(()), "fresh results balanced by scope-end drops");
+    }
+
+    #[test]
+    fn unwrap_over_a_live_heap_local_walls() {
+        // var opt = []; var x = opt!  — `opt` is a LIVE owned heap local when the `!`
+        // early-returns. On wasm the Err path skips opt's free = a LEAK (accept-but-unsafe
+        // were it deferred). Must WALL. (UnwrapOr / ToOption / OptionalChain do NOT early
+        // return and are unaffected.)
         let unwrap = ir_expr(
             IrExprKind::Unwrap {
                 expr: Box::new(ir_expr(IrExprKind::Var { id: VarId(0) }, list_int())),
             },
             list_int(),
         );
-        let unwrap_or = ir_expr(
-            IrExprKind::UnwrapOr {
-                expr: Box::new(ir_expr(IrExprKind::Var { id: VarId(0) }, list_int())),
-                fallback: Box::new(ir_expr(IrExprKind::List { elements: vec![] }, list_int())),
-            },
-            list_int(),
-        );
         let b = body(vec![
             bind(0, list_int(), ir_expr(IrExprKind::List { elements: vec![] }, list_int())),
             bind(1, list_int(), unwrap),
-            bind(2, list_int(), unwrap_or),
         ]);
-        let mir = lower_body(&b, "main").expect("error operators lower");
-        let opaque = mir.ops.iter().filter(|o| matches!(o, Op::Alloc { init: Init::Opaque, .. })).count();
-        assert_eq!(opaque, 2, "each of the two error operators is a fresh Opaque: {:?}", mir.ops);
-        assert_eq!(verify_ownership(&mir), Ok(()), "fresh results balanced by scope-end drops");
+        match lower_body(&b, "main") {
+            Err(LowerError::Unsupported(m)) => assert!(m.contains("early-return"), "got: {m}"),
+            other => panic!("expected an early-return-leak wall, got {other:?}"),
+        }
     }
 
     #[test]
