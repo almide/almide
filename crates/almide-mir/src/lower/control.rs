@@ -476,6 +476,60 @@ impl LowerCtx {
         self.value_of = value_of_snapshot;
     }
 
+    /// Try to lower a HEAP-RESULT `if cond then A else B` (a String/data-returning branch)
+    /// to EXECUTABLE control flow — only the taken arm allocates, and its value is the
+    /// function result. SOUNDNESS by PER-ARM BALANCE (no Coq change — see
+    /// docs/roadmap/active/v1-heap-result-control-flow.md): each arm `Alloc`s its value
+    /// (cert `i`) AND `Consume`s it (cert `m`) so the arm is internally `"im"` balanced
+    /// exactly like a scalar arm carries none; the `IfThen` result `dst` is NEVER an
+    /// `Alloc`, so it is not in the ownership cert's object set and `func.ret = dst` emits
+    /// no second move-out (no double-free). The render selects one arm at runtime
+    /// (`(if (result i32) …)`), so exactly one `Alloc` happens and is returned rc=1 to the
+    /// caller — the untaken arm never allocates (no leak). FIRST version: both arms are
+    /// direct string LITERALS (the common `if c then "a" else "b"`); other arm kinds fall
+    /// back to today's sound Opaque form. Returns the result `dst`, or `None` (rolled
+    /// back) when out of subset.
+    pub(crate) fn try_lower_heap_result_if(
+        &mut self,
+        cond: &IrExpr,
+        then: &IrExpr,
+        else_: &IrExpr,
+        result_ty: &Ty,
+    ) -> Option<ValueId> {
+        if !is_heap_ty(result_ty) {
+            return None;
+        }
+        let (IrExprKind::LitStr { value: then_s }, IrExprKind::LitStr { value: else_s }) =
+            (&then.kind, &else_.kind)
+        else {
+            return None;
+        };
+        let repr = repr_of(result_ty).ok()?;
+        let ops_mark = self.ops.len();
+        let cond_v = match self.lower_scalar_value(cond) {
+            Some(v) => v,
+            None => {
+                self.ops.truncate(ops_mark);
+                return None;
+            }
+        };
+        let dst = self.fresh_value();
+        self.ops.push(Op::IfThen { cond: cond_v, dst: Some(dst) });
+        // THEN arm: allocate the literal and MOVE IT OUT (`Consume` = the per-arm move-out
+        // that balances the arm's Alloc). It is NOT added to `live_heap_handles` (it is
+        // moved out as the result, not dropped at scope end).
+        let then_obj = self.fresh_value();
+        self.ops.push(Op::Alloc { dst: then_obj, repr, init: Init::Str(then_s.clone()) });
+        self.ops.push(Op::Consume { v: then_obj });
+        self.ops.push(Op::Else { val: Some(then_obj) });
+        // ELSE arm: same.
+        let else_obj = self.fresh_value();
+        self.ops.push(Op::Alloc { dst: else_obj, repr, init: Init::Str(else_s.clone()) });
+        self.ops.push(Op::Consume { v: else_obj });
+        self.ops.push(Op::EndIf { val: Some(else_obj) });
+        Some(dst)
+    }
+
     /// Try to lower `for i in start..end { body }` over a SCALAR Int index as a REAL loop
     /// that EXECUTES every step — desugaring the range to the same while machinery
     /// (`LoopStart`/`LoopBreakUnless`/`LoopEnd` + `SetLocal`). The index is its own stable

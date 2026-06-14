@@ -228,11 +228,22 @@ impl LowerCtx {
                     };
                     Ok(Some(dst))
                 }
-                // `fn f() = if c then … else …` — a heap-result branch RETURNED.
-                // LINEARIZE the arms (per-arm balanced, values deferred) and move out
-                // ONE fresh `Alloc{Opaque}` — the merged result slot, NOT added to
-                // live_heap_handles (it is the return value). See `lower_branch`.
-                IrExprKind::If { .. } | IrExprKind::Match { .. } => {
+                // `fn f() = if c then "a" else "b"` — a heap-result branch RETURNED. A
+                // literal-armed `if` EXECUTES (only the taken arm allocates, returned rc=1)
+                // via per-arm Alloc+Consume balance; otherwise LINEARIZE the arms and move
+                // out ONE fresh `Alloc{Opaque}` (the deferred merged result slot, NOT added
+                // to live_heap_handles — it is the return value). See `lower_branch`.
+                IrExprKind::If { cond, then, else_ } => {
+                    if let Some(dst) = self.try_lower_heap_result_if(cond, then, else_, &tail.ty) {
+                        return Ok(Some(dst));
+                    }
+                    self.lower_branch(tail)?;
+                    let dst = self.fresh_value();
+                    let repr = repr_of(&tail.ty)?;
+                    self.ops.push(Op::Alloc { dst, repr, init: Init::Opaque });
+                    Ok(Some(dst))
+                }
+                IrExprKind::Match { .. } => {
                     self.lower_branch(tail)?;
                     let dst = self.fresh_value();
                     let repr = repr_of(&tail.ty)?;

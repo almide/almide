@@ -231,7 +231,15 @@ pub fn render_wasm_fn(func: &MirFunction, label_off: &BTreeMap<String, (u32, u32
             }
             Op::IfThen { cond, dst } => {
                 if_stack.push(*dst);
-                let res = if dst.is_some() { " (result i64)" } else { "" };
+                // The result type follows the dst repr: a heap-result `if` yields an i32
+                // handle, a scalar one an i64 (value_reprs_wasm fixed dst from the arm val).
+                let res = match dst {
+                    Some(d) => format!(
+                        " (result {})",
+                        wasm_ty(reprs.get(d).copied().unwrap_or(SCALAR_REPR))
+                    ),
+                    None => String::new(),
+                };
                 let set = dst.map(|d| format!("(local.set {} ", local(d))).unwrap_or_default();
                 body.push_str(&format!(
                     "    {set}(if{res} (i64.ne (local.get {c}) (i64.const 0))\n      (then\n",
@@ -283,6 +291,10 @@ fn defined_value(op: &Op) -> Option<ValueId> {
 /// Infer each value's Repr (params + op results) for local/param/result typing.
 fn value_reprs_wasm(func: &MirFunction) -> BTreeMap<ValueId, Repr> {
     let mut m = BTreeMap::new();
+    // The `if`-result `dst` repr follows the ARM values (a heap-result `if` yields an i32
+    // handle, a scalar one an i64): seed `dst` scalar at `IfThen`, then OVERWRITE it from
+    // the arm value's repr at `EndIf`. The stack pairs each `EndIf` with its `IfThen` dst.
+    let mut if_result_stack: Vec<Option<ValueId>> = Vec::new();
     for p in &func.params {
         m.insert(p.value, p.repr);
     }
@@ -302,9 +314,23 @@ fn value_reprs_wasm(func: &MirFunction) -> BTreeMap<ValueId, Repr> {
             Op::Prim { dst: Some(dst), .. } => {
                 m.insert(*dst, SCALAR_REPR);
             }
-            // A scalar `if` result is i64 (heap-result ifs are a later step).
-            Op::IfThen { dst: Some(dst), .. } => {
-                m.insert(*dst, SCALAR_REPR);
+            // An `if` result: seed scalar, recorded on the stack; the real repr (scalar
+            // i64 or heap-result i32) is fixed from the arm value at the matching `EndIf`.
+            Op::IfThen { dst, .. } => {
+                if_result_stack.push(*dst);
+                if let Some(dst) = dst {
+                    m.insert(*dst, SCALAR_REPR);
+                }
+            }
+            Op::EndIf { val: Some(v) } => {
+                if let Some(Some(dst)) = if_result_stack.pop() {
+                    if let Some(r) = m.get(v).copied() {
+                        m.insert(dst, r);
+                    }
+                }
+            }
+            Op::EndIf { val: None } => {
+                if_result_stack.pop();
             }
             // A call's result repr is the callee's RETURN repr, carried on the op
             // (`result`) — the same field the ownership analysis reads to know a call
@@ -1123,6 +1149,27 @@ mod tests {
         // Only the taken branch runs: fizzbuzz(6) prints exactly "Fizz" (6 % 3 == 0).
         if let Some(out) = build_and_run("fizzbuzz", &render_wasm_program(&prog)) {
             assert_eq!(out, "Fizz");
+        }
+    }
+
+    #[test]
+    fn heap_result_if_returns_the_taken_arm_string() {
+        // `if c then "yes" else "no"` RETURNS a String — only the taken arm allocates,
+        // returned rc=1 to the caller (per-arm Alloc+Consume balance). label(true)="yes",
+        // label(false)="no", byte-matching v0.
+        let src = "fn label(c: Bool) -> String = if c then \"yes\" else \"no\"\n\
+            fn main() -> Unit = {\n  \
+            println(label(true))\n  println(label(false)) }\n";
+        let prog = lower_source(src);
+        let f = prog.functions.iter().find(|f| f.name == "label").unwrap();
+        // It must EXECUTE (IfThen marker), not defer to a single Opaque Alloc.
+        assert!(
+            f.ops.iter().any(|op| matches!(op, Op::IfThen { .. })),
+            "heap-result if must lower to IfThen (executable), got {:?}",
+            f.ops
+        );
+        if let Some(out) = build_and_run("heap_result_if", &render_wasm_program(&prog)) {
+            assert_eq!(out, "yes\nno");
         }
     }
 
