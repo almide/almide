@@ -631,16 +631,12 @@ impl LowerCtx {
     /// constructor/record pattern, or a value that is neither a matching tuple
     /// literal nor a tracked heap var — stays an explicit `Unsupported` (totality).
     fn lower_destructure(&mut self, pattern: &IrPattern, value: &IrExpr) -> Result<(), LowerError> {
-        let pats = match pattern {
-            IrPattern::Tuple { elements } => elements,
-            _ => {
-                return Err(LowerError::Unsupported(
-                    "destructure of a non-tuple pattern not in this brick".into(),
-                ))
-            }
-        };
-        // Shape 1: component-wise from a same-arity tuple literal.
-        if let IrExprKind::Tuple { elements: vals } = &value.kind {
+        // Shape 1: component-wise from a same-arity tuple LITERAL — each component is
+        // bound to the ACTUAL element (a fresh value / alias, not a container alias),
+        // the most precise lowering. The element's call caps are captured, not elided.
+        if let (IrPattern::Tuple { elements: pats }, IrExprKind::Tuple { elements: vals }) =
+            (pattern, &value.kind)
+        {
             if pats.len() == vals.len() {
                 for (p, v) in pats.iter().zip(vals) {
                     match p {
@@ -657,37 +653,21 @@ impl LowerCtx {
                 return Ok(());
             }
         }
-        // Shape 2: alias the whole container `t` per heap component.
-        if let IrExprKind::Var { id } = &value.kind {
-            if is_heap_ty(&value.ty) {
-                let container = self.value_for(*id)?;
-                for p in pats {
-                    match p {
-                        IrPattern::Wildcard => {}
-                        IrPattern::Bind { var, ty } => {
-                            let dst = self.fresh_value();
-                            if is_heap_ty(ty) {
-                                self.ops.push(Op::Dup { dst, src: container });
-                                self.live_heap_handles.push(dst);
-                            } else {
-                                self.ops.push(Op::Const { dst });
-                            }
-                            self.value_of.insert(*var, dst);
-                        }
-                        _ => {
-                            return Err(LowerError::Unsupported(
-                                "destructure sub-pattern (only a bound var or `_`) not in this brick"
-                                    .into(),
-                            ))
-                        }
-                    }
-                }
-                return Ok(());
+        // Shape 2 (general): materialize/borrow the value as a SUBJECT (a tracked heap
+        // var is borrowed, a fresh heap value is materialized + dropped at scope end),
+        // then bind the pattern CONTAINER-GRAIN (each heap binding aliases the whole
+        // subject — `bind_pattern`). Handles tuple-from-var, constructor, record, and
+        // option/result destructuring; the bound vars drop at scope end.
+        let subject: Option<ValueId> = if is_heap_ty(&value.ty) {
+            match self.lower_call_args(std::slice::from_ref(value))?.into_iter().next() {
+                Some(CallArg::Handle(v)) => Some(v),
+                _ => None,
             }
-        }
-        Err(LowerError::Unsupported(
-            "destructure (only a tuple literal or a tracked heap var) not in this brick".into(),
-        ))
+        } else {
+            self.record_elided_calls(value);
+            None
+        };
+        self.bind_pattern(pattern, subject)
     }
 
     fn value_for(&self, var: VarId) -> Result<ValueId, LowerError> {
@@ -988,12 +968,14 @@ impl LowerCtx {
     /// `match` arm GUARD, and an arm that REASSIGNS a variable (a path-dependent
     /// `value_of` rebind the flat fold cannot see → UAF).
     fn lower_branch(&mut self, expr: &IrExpr) -> Result<(), LowerError> {
-        let arms: Vec<&IrExpr> = match &expr.kind {
+        match &expr.kind {
             IrExprKind::If { cond, then, else_ } => {
                 // The condition is evaluated ONCE before the branch — it is scalar
                 // (Bool), so no ownership, but capture the caps of any call in it.
                 self.record_elided_calls(cond);
-                vec![then, else_]
+                self.lower_branch_arm(None, then)?;
+                self.lower_branch_arm(None, else_)?;
+                Ok(())
             }
             IrExprKind::Match { subject, arms } => {
                 // The subject is inspected once. A heap subject goes through
@@ -1001,42 +983,33 @@ impl LowerCtx {
                 // heap value (a call/literal result) is MATERIALIZED into an owned temp
                 // dropped at the OUTER scope (never leaked — eliding its `Alloc` would
                 // be accept-but-unsafe). A scalar subject carries no ownership; capture
-                // any call in it for caps.
-                if is_heap_ty(&subject.ty) {
-                    self.lower_call_args(std::slice::from_ref(subject))?;
+                // any call in it for caps. Its ValueId (when heap) is the container a
+                // payload-binding pattern aliases per arm.
+                let subject_value: Option<ValueId> = if is_heap_ty(&subject.ty) {
+                    match self.lower_call_args(std::slice::from_ref(subject))?.into_iter().next() {
+                        Some(CallArg::Handle(v)) => Some(v),
+                        _ => None,
+                    }
                 } else {
                     self.record_elided_calls(subject);
-                }
-                let mut bodies = Vec::with_capacity(arms.len());
+                    None
+                };
                 for arm in arms {
-                    // A pattern that BINDS any value extracts a payload/field/element
-                    // — its object identity needs the layout brick (#54). A guard is a
-                    // deferred heap-touching sub-computation. Both are walled.
-                    if !pattern_binds_nothing(&arm.pattern) {
-                        return Err(LowerError::Unsupported(
-                            "match arm pattern binds a value (needs the layout brick) not in this control-flow slice".into(),
-                        ));
-                    }
+                    // A guard is a deferred heap-touching sub-computation — walled.
                     if arm.guard.is_some() {
                         return Err(LowerError::Unsupported(
                             "match arm guard not in this control-flow slice".into(),
                         ));
                     }
-                    bodies.push(&arm.body);
+                    self.lower_branch_arm(Some((&arm.pattern, subject_value)), &arm.body)?;
                 }
-                bodies
+                Ok(())
             }
-            other => {
-                return Err(LowerError::Unsupported(format!(
-                    "lower_branch on a non-branch {}",
-                    kind_name(other)
-                )))
-            }
-        };
-        for body in arms {
-            self.lower_branch_arm(body)?;
+            other => Err(LowerError::Unsupported(format!(
+                "lower_branch on a non-branch {}",
+                kind_name(other)
+            ))),
         }
-        Ok(())
     }
 
     /// Lower ONE branch arm into the flat op stream with a PER-ARM SCOPE FRAME:
@@ -1044,7 +1017,17 @@ impl LowerCtx {
     /// added (so the arm is internally balanced, and vacuous when the other arm runs).
     /// The arm's result is DISCARDED (Unit/statement) or a SCALAR the caller merges
     /// into one `Const`; a heap result is walled. See [`Self::lower_branch`].
-    fn lower_branch_arm(&mut self, body: &IrExpr) -> Result<(), LowerError> {
+    ///
+    /// For a `match` arm, `pattern` is `Some((pat, subject))` — the pattern's bound
+    /// variables are introduced at the START of the frame (so they drop with the arm):
+    /// a HEAP payload aliases the whole SUBJECT (`Op::Dup` — container-grain, like a
+    /// field extraction; element/payload-PRECISE identity needs the layout brick),
+    /// a SCALAR payload is a `Const`. See [`Self::bind_pattern`].
+    fn lower_branch_arm(
+        &mut self,
+        pattern: Option<(&IrPattern, Option<ValueId>)>,
+        body: &IrExpr,
+    ) -> Result<(), LowerError> {
         let (stmts, tail): (&[IrStmt], Option<&IrExpr>) = match &body.kind {
             IrExprKind::Block { stmts, expr } => (stmts, expr.as_deref()),
             _ => (&[], Some(body)),
@@ -1061,6 +1044,9 @@ impl LowerCtx {
             ));
         }
         let mark = self.live_heap_handles.len();
+        if let Some((pat, subject)) = pattern {
+            self.bind_pattern(pat, subject)?;
+        }
         for stmt in stmts {
             self.lower_stmt(stmt)?;
         }
@@ -1089,6 +1075,72 @@ impl LowerCtx {
     fn drop_arm_locals(&mut self, mark: usize) {
         for v in self.live_heap_handles.split_off(mark).into_iter().rev() {
             self.ops.push(Op::Drop { v });
+        }
+    }
+
+    /// Introduce the variables a destructuring `pattern` binds, CONTAINER-GRAIN: a
+    /// HEAP payload/field/element aliases the WHOLE `subject` (`Op::Dup`), a SCALAR one
+    /// is a `Const`. Aliasing the container keeps it (and thus the bound value within
+    /// it) alive for the binding's lifetime — a conservative lifetime WIDENING that
+    /// can never shorten a lifetime, so never a use-after-free; and it reuses the
+    /// proven `a`/`Op::Dup` event, so the Coq checker and the `#a == #Dup` backing gate
+    /// are UNCHANGED. HONEST SCOPE (value-content, NOT safety): a bound var denotes "a
+    /// reference to the SUBJECT", not "the payload's value" — payload/field-PRECISE
+    /// aliasing needs the layout brick (offsets + per-field heap-ness) and is deferred,
+    /// exactly like `Init::Opaque` content. WALLED: a `RecordPattern` shorthand field
+    /// (`{ name }` — no bound `VarId` to thread) and a heap binding over a non-heap
+    /// subject (the container has no handle to `Dup`).
+    fn bind_pattern(
+        &mut self,
+        pattern: &IrPattern,
+        subject: Option<ValueId>,
+    ) -> Result<(), LowerError> {
+        match pattern {
+            IrPattern::Wildcard | IrPattern::None | IrPattern::Literal { .. } => Ok(()),
+            IrPattern::Bind { var, ty } => {
+                let dst = self.fresh_value();
+                if is_heap_ty(ty) {
+                    let src = subject.ok_or_else(|| {
+                        LowerError::Unsupported(
+                            "heap pattern binding over a non-heap subject (no container to alias) not in this brick".into(),
+                        )
+                    })?;
+                    self.ops.push(Op::Dup { dst, src });
+                    self.live_heap_handles.push(dst);
+                } else {
+                    self.ops.push(Op::Const { dst });
+                }
+                self.value_of.insert(*var, dst);
+                Ok(())
+            }
+            IrPattern::Some { inner } | IrPattern::Ok { inner } | IrPattern::Err { inner } => {
+                self.bind_pattern(inner, subject)
+            }
+            IrPattern::Constructor { args, .. } => {
+                for p in args {
+                    self.bind_pattern(p, subject)?;
+                }
+                Ok(())
+            }
+            IrPattern::Tuple { elements } | IrPattern::List { elements } => {
+                for p in elements {
+                    self.bind_pattern(p, subject)?;
+                }
+                Ok(())
+            }
+            IrPattern::RecordPattern { fields, .. } => {
+                for f in fields {
+                    match &f.pattern {
+                        Some(p) => self.bind_pattern(p, subject)?,
+                        None => {
+                            return Err(LowerError::Unsupported(
+                                "record pattern shorthand field (no bound VarId) not in this brick".into(),
+                            ))
+                        }
+                    }
+                }
+                Ok(())
+            }
         }
     }
 
@@ -1410,34 +1462,6 @@ fn find_var_ty(stmts: &[IrStmt], var: VarId) -> Option<Ty> {
         f.visit_stmt(stmt);
     }
     f.ty
-}
-
-/// Does a `match` pattern BIND no value — i.e. only inspect tags/shape, never
-/// extract a payload/field/element into a variable? A binding pattern needs the
-/// layout brick (#54) to know WHERE the bound value lives (offset + heap-ness), so
-/// the control-flow slice admits only non-binding patterns: a `Wildcard`, a literal
-/// match, `None`, or a constructor/tuple/record/list whose sub-patterns ALL bind
-/// nothing (`Some(_)`, `Ok(0)`, `(_, _)`). A `Bind` (even scalar — its position in
-/// the subject is unknown without layout) makes the whole pattern binding.
-fn pattern_binds_nothing(pat: &IrPattern) -> bool {
-    match pat {
-        IrPattern::Wildcard | IrPattern::Literal { .. } | IrPattern::None => true,
-        IrPattern::Bind { .. } => false,
-        IrPattern::Some { inner } | IrPattern::Ok { inner } | IrPattern::Err { inner } => {
-            pattern_binds_nothing(inner)
-        }
-        IrPattern::Constructor { args, .. } => args.iter().all(pattern_binds_nothing),
-        IrPattern::Tuple { elements } | IrPattern::List { elements } => {
-            elements.iter().all(pattern_binds_nothing)
-        }
-        IrPattern::RecordPattern { fields, .. } => {
-            // A field with `pattern: None` is the shorthand `{ name }` — it BINDS the
-            // field to `name`, so it is NOT a non-binding pattern.
-            fields
-                .iter()
-                .all(|f| f.pattern.as_ref().is_some_and(pattern_binds_nothing))
-        }
-    }
 }
 
 /// Extract a concrete initializer from a fresh-heap bind value. A `List[Int]`
@@ -2277,35 +2301,102 @@ mod tests {
     }
 
     #[test]
-    fn match_arm_binding_pattern_is_walled() {
-        // match n { x => () }  — a Bind pattern extracts a value whose position needs
-        // the layout brick (#54). Must WALL (no silent miscompile).
-        let arm = almide_ir::IrMatchArm {
-            pattern: IrPattern::Bind { var: VarId(1), ty: Ty::Int },
+    fn match_arm_heap_payload_binding_aliases_the_subject() {
+        use almide_lang::intern::sym;
+        // var opt = make(); match opt { Some(x) => use(x), None => () }  — the heap
+        // payload `x` aliases the WHOLE subject (Op::Dup, container-grain), dropped at
+        // arm end; `None` binds nothing. Balanced.
+        let arm_some = almide_ir::IrMatchArm {
+            pattern: IrPattern::Some {
+                inner: Box::new(IrPattern::Bind { var: VarId(1), ty: Ty::String }),
+            },
+            guard: None,
+            body: ir_expr(
+                IrExprKind::Call {
+                    target: CallTarget::Named { name: sym("use") },
+                    args: vec![ir_expr(IrExprKind::Var { id: VarId(1) }, Ty::String)],
+                    type_args: vec![],
+                },
+                Ty::Unit,
+            ),
+        };
+        let arm_none = almide_ir::IrMatchArm {
+            pattern: IrPattern::None,
             guard: None,
             body: ir_expr(IrExprKind::Unit, Ty::Unit),
         };
         let m = ir_expr(
             IrExprKind::Match {
-                subject: Box::new(ir_expr(IrExprKind::Var { id: VarId(0) }, Ty::Int)),
+                subject: Box::new(ir_expr(IrExprKind::Var { id: VarId(0) }, list_int())),
+                arms: vec![arm_some, arm_none],
+            },
+            Ty::Unit,
+        );
+        let b = body(vec![
+            bind(0, list_int(), ir_expr(IrExprKind::List { elements: vec![] }, list_int())),
+            stmt(IrStmtKind::Expr { expr: m }),
+        ]);
+        let mir = lower_body(&b, "main").expect("payload-binding match lowers");
+        assert!(
+            mir.ops.iter().any(|o| matches!(o, Op::Dup { src: ValueId(0), .. })),
+            "the heap payload aliases the subject (container-grain): {:?}",
+            mir.ops
+        );
+        assert_eq!(verify_ownership(&mir), Ok(()), "the payload Dup is balanced by an arm-end drop");
+    }
+
+    #[test]
+    fn match_record_shorthand_pattern_is_walled() {
+        // match r { { name } => () }  — a record shorthand field has no bound VarId to
+        // thread, so it stays walled (totality, no silent miscompile).
+        let arm = almide_ir::IrMatchArm {
+            pattern: IrPattern::RecordPattern {
+                name: "R".into(),
+                fields: vec![almide_ir::IrFieldPattern { name: "name".into(), pattern: None }],
+                rest: false,
+            },
+            guard: None,
+            body: ir_expr(IrExprKind::Unit, Ty::Unit),
+        };
+        let m = ir_expr(
+            IrExprKind::Match {
+                subject: Box::new(ir_expr(IrExprKind::Var { id: VarId(0) }, list_int())),
                 arms: vec![arm],
             },
             Ty::Unit,
         );
         let b = body(vec![
-            bind(0, Ty::Int, ir_expr(IrExprKind::LitInt { value: 3 }, Ty::Int)),
+            bind(0, list_int(), ir_expr(IrExprKind::List { elements: vec![] }, list_int())),
             stmt(IrStmtKind::Expr { expr: m }),
         ]);
         match lower_body(&b, "main") {
-            Err(LowerError::Unsupported(r)) => assert!(r.contains("binds a value"), "got: {r}"),
-            other => panic!("expected a pattern-binding wall, got {other:?}"),
+            Err(LowerError::Unsupported(r)) => assert!(r.contains("shorthand"), "got: {r}"),
+            other => panic!("expected a record-shorthand wall, got {other:?}"),
         }
-        // A NON-binding pattern (Some(_) / None / _) is admitted by the gate.
-        assert!(pattern_binds_nothing(&IrPattern::Wildcard));
-        assert!(pattern_binds_nothing(&IrPattern::Some { inner: Box::new(IrPattern::Wildcard) }));
-        assert!(!pattern_binds_nothing(&IrPattern::Some {
-            inner: Box::new(IrPattern::Bind { var: VarId(1), ty: Ty::Int })
-        }));
+    }
+
+    #[test]
+    fn constructor_destructure_binds_container_grain() {
+        // var r = make(); let Foo(a) = r  — the heap field `a` aliases the whole
+        // subject `r` (Op::Dup, container-grain), dropped at scope end. Balanced.
+        let pattern = IrPattern::Constructor {
+            name: "Foo".into(),
+            args: vec![IrPattern::Bind { var: VarId(1), ty: Ty::String }],
+        };
+        let b = body(vec![
+            bind(0, list_int(), ir_expr(IrExprKind::List { elements: vec![] }, list_int())),
+            stmt(IrStmtKind::BindDestructure {
+                pattern,
+                value: ir_expr(IrExprKind::Var { id: VarId(0) }, list_int()),
+            }),
+        ]);
+        let mir = lower_body(&b, "main").expect("constructor destructure lowers");
+        assert!(
+            mir.ops.iter().any(|o| matches!(o, Op::Dup { src: ValueId(0), .. })),
+            "the heap field aliases the subject container: {:?}",
+            mir.ops
+        );
+        assert_eq!(verify_ownership(&mir), Ok(()));
     }
 
     #[test]
