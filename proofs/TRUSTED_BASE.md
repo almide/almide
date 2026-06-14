@@ -161,7 +161,7 @@ The receipt's claims are scoped to exactly this:
   `Module` call, a variant constructor, or a known Stdout-free builtin
   (`assert*`/`eprintln`/`panic`/`to_string` — these reach stderr/abort, NOT
   Stdout) is free; ANY other unknown callee (a walled or cross-file user function)
-  TAINTS, so the function is reported `caps-unverified` (1810/2602 verified, 792
+  TAINTS, so the function is reported `caps-unverified` (2126/2602 verified, 476
   unverified) rather than falsely accepted. **The gate verifies the REAL
   capability-bound property `reachable ⊆ declared`** (exactly what
   `proofs/CapabilityBound.v` proves), not a degenerate "reaches no capability at
@@ -177,13 +177,25 @@ The receipt's claims are scoped to exactly this:
   reaches a capability it did NOT declare — e.g. a non-`effect fn` that prints,
   since the frontend `is_effect` flag does not cover every Stdout reach — fails
   `reachable ⊆ declared` and is conservatively caps-unverified, never falsely
-  accepted. **A call ELIDED by Opaque lowering**
-  (a list element, ctor payload, or BinOp operand — absent from `func.ops`) is a
-  second caps blind spot the fold cannot see: a function whose source has MORE
-  call nodes than its MIR (`count_ir_calls` > MIR call-ops), or any transitive
-  caller of one, is conservatively TAINTED (not claimed caps-safe) until the
-  elided call is materialized — so the caps-verified count is HONEST, never
-  over-claimed. This closes the direct-witness hole
+  accepted. **A call ELIDED by Opaque lowering** (a list element, ctor payload,
+  BinOp operand, or scalar value — its sub-expressions are not lowered) is a
+  second caps blind spot the fold cannot see. `lower::record_elided_calls` SURFACES
+  each such call as a bare EFFECT MARKER `Op::CallFn{dst:None, args:[], result:None}`:
+  the existing handlers treat a result-less, dst-less call as a PURE EFFECT — it
+  emits NO ownership event and references NO value (so ownership/name witnesses and
+  the `+1`-backing gate are unchanged), yet the caps fold matches it by NAME and
+  folds the callee transitively. Only a SOUNDLY-modelled call is surfaced — a
+  first-order `Named` call (the fold opens or honestly taints it) and a first-order
+  PURE `Module` call; a higher-order / effectful-`Module` / `Method` / `Computed`
+  call is left elided so the gate keeps the function tainted (no FALSE de-taint).
+  SOUNDNESS BACKSTOP: a marker is recorded only at a wholesale-elided position, so
+  the MIR call count can only rise TOWARD the IR's — the corpus gate asserts
+  `mir_calls <= ir_calls`, making a double-count (the one way a marker could mask a
+  real elision and falsely de-taint) a WALL BREACH, structurally impossible to
+  ship. A function whose source STILL has more call nodes than its MIR (an
+  un-materializable elided call), or any transitive caller of one, stays
+  conservatively TAINTED — so the caps-verified count is HONEST, never over-claimed.
+  This closes the direct-witness hole
   (`reachable_caps`'s honest-scope: an unknown callee contributed ∅). HONEST
   SCOPE: only `Capability::Stdout` is modeled, so the property is "no undeclared
   **Stdout** effect"; stderr, abort, fs, net are real host effects not yet named

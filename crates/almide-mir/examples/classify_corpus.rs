@@ -72,7 +72,11 @@ fn count_ir_calls(body: &almide_ir::IrExpr) -> usize {
         }
     }
     let mut cc = CallCounter { n: 0 };
-    almide_ir::visit::walk_expr(&mut cc, body);
+    // `visit_expr` (NOT `walk_expr`) so a ROOT-position call is counted too — an
+    // expression-bodied `fn f() = g(x)` has the call AT the body root; `walk_expr`
+    // would descend past it and undercount (masking a nested elision in its args,
+    // e.g. `fn f() = g([h()])`). Counting the root keeps `mir_calls <= ir_calls`.
+    almide_ir::visit::IrVisitor::visit_expr(&mut cc, body);
     cc.n
 }
 
@@ -173,6 +177,13 @@ struct Tally {
     /// Functions whose certificate has an UNBACKED `+1` (the borrow-by-default
     /// soundness gate). Must stay empty — a non-empty list is a wall breach.
     cert_backing_breaches: Vec<String>,
+    /// Functions whose MIR call-op count EXCEEDS their source call-node count — the
+    /// caps-soundness gate for the elided-call effect markers (`record_elided_calls`).
+    /// A marker may only ADD a call-op for a genuinely ELIDED call, so `mir_calls`
+    /// can rise at most TO `ir_calls`; `mir_calls > ir_calls` means a marker
+    /// DOUBLE-COUNTED a call already lowered — which could mask a real elision and
+    /// FALSELY de-taint a Stdout-reaching function. Must stay empty (a wall breach).
+    call_count_breaches: Vec<String>,
     /// In-profile functions whose Stdout-freedom is provable transitively (every
     /// `Op::CallFn` callee is Stdout-free): their empty capability witness is
     /// emitted for the proven checker. accept ⟹ no undeclared Stdout effect.
@@ -305,6 +316,15 @@ fn main() {
                     if ir_calls > mir_calls {
                         elided_call_fns.insert(func.name.as_str().to_string());
                     }
+                    // SOUNDNESS BACKSTOP for the elided-call effect markers: a marker
+                    // (`record_elided_calls`) may only surface a genuinely ELIDED
+                    // call, so the MIR call count can rise at most TO the IR's. If it
+                    // EXCEEDS, a marker double-counted a lowered call — which could
+                    // mask another elision and falsely de-taint. A wall breach.
+                    if mir_calls > ir_calls {
+                        t.call_count_breaches
+                            .push(format!("{}::{} (mir {mir_calls} > ir {ir_calls})", file.display(), func.name.as_str()));
+                    }
                     // Ownership is one heap object per line; names are one line per
                     // function. Both are LOCAL properties — no transitivity.
                     ownership_stream.push_str(&ownership_certificate(&mir));
@@ -412,6 +432,10 @@ fn main() {
         t.cert_backing_breaches.len()
     );
     eprintln!(
+        "  mir>ir calls (BUG)   : {}  <- elided-call marker double-count gate",
+        t.call_count_breaches.len()
+    );
+    eprintln!(
         "  caps-verified        : {}  <- provably reach no Stdout (transitive); witness emitted",
         t.caps_verified
     );
@@ -422,8 +446,12 @@ fn main() {
     for p in &t.cert_backing_breaches {
         eprintln!("      UNBACKED {p}");
     }
+    for p in &t.call_count_breaches {
+        eprintln!("      MIR>IR {p}");
+    }
 
-    let total_breaches = t.lower_panics.len() + t.cert_backing_breaches.len();
+    let total_breaches =
+        t.lower_panics.len() + t.cert_backing_breaches.len() + t.call_count_breaches.len();
     if total_breaches == 0 {
         eprintln!(
             "WALL OK: lower_function was TOTAL over {} corpus functions \
@@ -446,6 +474,14 @@ fn main() {
                  a param or op injected ownership no runtime op performs \
                  (the gate-blind use-after-free class).",
                 t.cert_backing_breaches.len()
+            );
+        }
+        if !t.call_count_breaches.is_empty() {
+            eprintln!(
+                "WALL BREACH: {} function(s) have MORE MIR call-ops than IR call-nodes — \
+                 an elided-call effect marker double-counted a lowered call, which could \
+                 mask a real elision and falsely de-taint a Stdout-reaching function.",
+                t.call_count_breaches.len()
             );
         }
         std::process::exit(1);

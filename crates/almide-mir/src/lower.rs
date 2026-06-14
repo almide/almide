@@ -215,8 +215,18 @@ impl LowerCtx {
             }
             // In-place mutation of a place: `xs[i] = v` and `r.field = v` both
             // require the buffer to be UNIQUELY owned (copy-on-write) → `MakeUnique`.
-            IrStmtKind::IndexAssign { target, .. } | IrStmtKind::FieldAssign { target, .. } => {
-                self.lower_place_mutation(*target)
+            // The written value (and an index expression) are deferred — record any
+            // call inside them so the caps fold is not blind to their effects.
+            IrStmtKind::IndexAssign { target, index, value } => {
+                self.lower_place_mutation(*target)?;
+                self.record_elided_calls(index);
+                self.record_elided_calls(value);
+                Ok(())
+            }
+            IrStmtKind::FieldAssign { target, value, .. } => {
+                self.lower_place_mutation(*target)?;
+                self.record_elided_calls(value);
+                Ok(())
             }
             // A bare expression statement that is an EFFECT call (`println(s)`).
             // Non-call expr statements stay Unsupported (the lower_effect_call
@@ -251,10 +261,14 @@ impl LowerCtx {
 
     fn lower_bind(&mut self, var: VarId, ty: &Ty, value: &IrExpr) -> Result<(), LowerError> {
         if !is_heap_ty(ty) {
-            // Scalar binding: define a Copy value, no ownership accounting.
+            // Scalar binding: define a Copy value, no ownership accounting. The
+            // value's CONTENT is deferred (a single `Const`), so any call inside it
+            // (`var n = list.len(xs)`) is elided — record those calls as effect
+            // markers so the capability fold still sees their effects.
             let dst = self.fresh_value();
             self.value_of.insert(var, dst);
             self.ops.push(Op::Const { dst });
+            self.record_elided_calls(value);
             return Ok(());
         }
         match &value.kind {
@@ -292,6 +306,7 @@ impl LowerCtx {
                 self.value_of.insert(var, dst);
                 self.ops.push(Op::Alloc { dst, repr, init });
                 self.live_heap_handles.push(dst);
+                self.record_elided_calls(value);
                 Ok(())
             }
             // `var v = r.x` / `xs[i]` — a HEAP extraction: alias the container
@@ -426,6 +441,69 @@ impl LowerCtx {
         let dst = self.fresh_value();
         self.ops.push(Op::Dup { dst, src });
         Ok(dst)
+    }
+
+    /// Make the CALLS hidden inside a value whose CONTENT is deferred to
+    /// `Init::Opaque` / `Const` VISIBLE to the transitive capability fold. An
+    /// Opaque/Const value lowers NONE of its sub-expressions, so a call buried in a
+    /// list element, constructor payload, operand, or scalar value (`[f()]`,
+    /// `Some(g(x))`, `a ++ h()`, `var n = list.len(xs)`) vanishes from the MIR —
+    /// invisible to the caps fold over `Op::CallFn` edges, forcing the corpus gate
+    /// to conservatively TAINT the whole function. This appends a bare EFFECT MARKER
+    /// `Op::CallFn { dst: None, args: [], result: None }` per such call: the
+    /// existing handlers already treat a result-less, dst-less call as a PURE EFFECT
+    /// — `ownership_certificate` emits no event (no `+1`/drop), `name_witness`
+    /// references nothing (no dangling ref), the `+1`-backing gate ignores it — yet
+    /// `reachable_caps_or_tainted` matches it by NAME and folds the callee
+    /// transitively. So the EFFECT becomes analyzable while the value CONTENT stays
+    /// deferred: the same Opaque deferral, now extended to the capability axis.
+    ///
+    /// Only calls whose capabilities the fold models SOUNDLY are recorded: a
+    /// first-order `Named` call (the fold opens an in-profile callee or honestly
+    /// taints an unknown one) and a first-order PURE `Module` call (a dotted name
+    /// the gate treats as Stdout-free — sound because it IS pure). A higher-order
+    /// call (unmodelled closure caps), an effectful/impure `Module` call (its dotted
+    /// name would be WRONGLY treated as free), and a `Method`/`Computed` target are
+    /// SKIPPED — left elided, so the `ir_calls > mir_calls` gate keeps the function
+    /// tainted (no FALSE de-taint). This never errors and never walls — it only adds
+    /// effect markers, so it can never turn an in-profile function `Unsupported`.
+    ///
+    /// SOUNDNESS BACKSTOP: a marker is recorded ONLY at a wholesale-elided position
+    /// (the caller emits one `Opaque`/`Const` op for the whole `value`, lowering
+    /// none of its sub-calls), so the MIR call-op count can only rise TOWARD the
+    /// IR's, never past it. The corpus gate asserts `mir_calls <= ir_calls` — a
+    /// double-count (the one way a marker could mask a real elision and FALSELY
+    /// de-taint a function) then fails the gate, structurally impossible to ship.
+    fn record_elided_calls(&mut self, value: &IrExpr) {
+        use almide_ir::visit::{walk_expr, IrVisitor};
+        struct Collector {
+            names: Vec<String>,
+        }
+        impl IrVisitor for Collector {
+            fn visit_expr(&mut self, e: &IrExpr) {
+                if let IrExprKind::Call { target, args, .. } = &e.kind {
+                    if !is_higher_order(args) {
+                        match target {
+                            CallTarget::Named { name } => {
+                                self.names.push(name.as_str().to_string())
+                            }
+                            CallTarget::Module { module, func, .. }
+                                if purity::is_pure(module.as_str(), func.as_str()) =>
+                            {
+                                self.names.push(format!("{}.{}", module.as_str(), func.as_str()))
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                walk_expr(self, e);
+            }
+        }
+        let mut c = Collector { names: Vec::new() };
+        c.visit_expr(value);
+        for name in c.names {
+            self.ops.push(Op::CallFn { dst: None, name, args: Vec::new(), result: None });
+        }
     }
 
     /// `let (a, b) = …` — a TUPLE destructuring bind. Two sound shapes:
@@ -578,6 +656,7 @@ impl LowerCtx {
                     let repr = repr_of(&tail.ty)?;
                     let init = alloc_init(tail);
                     self.ops.push(Op::Alloc { dst, repr, init });
+                    self.record_elided_calls(tail);
                     Ok(Some(dst))
                 }
                 // A function-call result returned directly (`fn f() = g(xs)`): the
@@ -647,6 +726,7 @@ impl LowerCtx {
             | IrExprKind::TupleIndex { .. } => {
                 let dst = self.fresh_value();
                 self.ops.push(Op::Const { dst });
+                self.record_elided_calls(tail);
                 Ok(Some(dst))
             }
             other => Err(LowerError::Unsupported(format!(
@@ -747,6 +827,7 @@ impl LowerCtx {
                     let repr = repr_of(&a.ty)?;
                     let init = alloc_init(a);
                     self.ops.push(Op::Alloc { dst, repr, init });
+                    self.record_elided_calls(a);
                     self.materialized_call_arg(dst, repr)
                 }
                 // A scalar literal argument (`f(3.14)`, `f(true)`): a fresh `Const`,
@@ -762,6 +843,7 @@ impl LowerCtx {
                 // ownership (value semantics — the result is fresh, never an alias).
                 IrExprKind::BinOp { .. } | IrExprKind::UnOp { .. } => {
                     let dst = self.fresh_value();
+                    self.record_elided_calls(a);
                     if is_heap_ty(&a.ty) {
                         let repr = repr_of(&a.ty)?;
                         self.ops.push(Op::Alloc { dst, repr, init: Init::Opaque });
@@ -786,8 +868,12 @@ impl LowerCtx {
                         let repr = repr_of(&a.ty)?;
                         self.materialized_call_arg(dst, repr)
                     } else {
+                        // A SCALAR extraction is a `Const` copy — its container
+                        // (which may itself be a call, `g().field`) is elided; record
+                        // any call so the caps fold sees it.
                         let dst = self.fresh_value();
                         self.ops.push(Op::Const { dst });
+                        self.record_elided_calls(a);
                         CallArg::Scalar(dst)
                     }
                 }
@@ -1279,6 +1365,71 @@ mod tests {
         );
         assert!(mir.ops.iter().any(|o| matches!(o, Op::CallFn { name, .. } if name == "f")));
         assert_eq!(verify_ownership(&mir), Ok(()));
+    }
+
+    #[test]
+    fn elided_calls_in_an_opaque_value_emit_cert_neutral_effect_markers() {
+        use almide_lang::intern::sym;
+        let named = |n: &str, args: Vec<IrExpr>| {
+            ir_expr(
+                IrExprKind::Call {
+                    target: CallTarget::Named { name: sym(n) },
+                    args,
+                    type_args: vec![],
+                },
+                list_int(),
+            )
+        };
+        // var xs = [helper(), other()]  — the list literal lowers to ONE Opaque
+        // `Alloc`, ELIDING its element calls. `record_elided_calls` surfaces each as
+        // a bare EFFECT MARKER `CallFn{dst:None, args:[], result:None}` so the caps
+        // fold can see them, while the value content stays deferred.
+        let elements = vec![named("helper", vec![]), named("other", vec![])];
+        let b = body(vec![bind(0, list_int(), ir_expr(IrExprKind::List { elements }, list_int()))]);
+        let mir = lower_body(&b, "main").expect("lowers");
+
+        let markers: Vec<&str> = mir
+            .ops
+            .iter()
+            .filter_map(|o| match o {
+                Op::CallFn { dst: None, name, args, result: None } if args.is_empty() => {
+                    Some(name.as_str())
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(markers, vec!["helper", "other"], "one marker per elided call");
+
+        // CERT-NEUTRAL: ownership is just the list Alloc (+1) and its scope-end Drop
+        // (−1) — a marker injects no `+1`/drop. NAMES-NEUTRAL: a dst-less, arg-less
+        // marker references nothing, so it cannot dangle.
+        assert_eq!(verify_ownership(&mir), Ok(()));
+        let cert = crate::certificate::ownership_certificate(&mir);
+        assert_eq!(cert.matches('i').count(), 1, "only the list Alloc is a +1, not the markers");
+        let nw = crate::certificate::name_witness(&mir);
+        assert!(nw.used.iter().all(|u| nw.defined.contains(u)), "no dangling MIR reference");
+
+        // A HIGHER-ORDER call is SKIPPED (unmodelled closure caps): no marker, so the
+        // `ir_calls > mir_calls` gate keeps such a function honestly tainted.
+        let fn_ty = Ty::Fn { params: vec![], ret: Box::new(Ty::Int) };
+        let ho = body(vec![bind(
+            1,
+            list_int(),
+            ir_expr(
+                IrExprKind::List {
+                    elements: vec![named(
+                        "apply",
+                        vec![ir_expr(IrExprKind::Var { id: VarId(2) }, fn_ty)],
+                    )],
+                },
+                list_int(),
+            ),
+        )]);
+        let mir2 = lower_body(&ho, "main").expect("lowers");
+        assert!(
+            !mir2.ops.iter().any(|o| matches!(o, Op::CallFn { dst: None, .. })),
+            "a higher-order call is not recorded as a marker"
+        );
     }
 
     #[test]
