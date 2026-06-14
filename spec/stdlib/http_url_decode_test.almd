@@ -1,0 +1,20 @@
+// wasm:skip — http is a native-only module (no socket layer on wasm-direct);
+// the client and url_decode have no WASM dispatch, matching net/process/random.
+import http
+
+test "http.url_decode decodes a multibyte percent-escaped value" {
+  assert_eq(http.url_decode("%E7%8C%AB"), "猫")
+}
+
+test "http.url_decode turns '+' and %20 into spaces" {
+  assert_eq(http.url_decode("a+b%20c"), "a b c")
+}
+
+test "http.url_decode passes plain text through unchanged" {
+  assert_eq(http.url_decode("plain-text_123"), "plain-text_123")
+}
+
+test "http.url_decode passes malformed escapes through verbatim" {
+  assert_eq(http.url_decode("%ZZ"), "%ZZ");
+  assert_eq(http.url_decode("100%"), "100%")
+}
