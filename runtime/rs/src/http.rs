@@ -117,11 +117,17 @@ pub fn almide_http_query_params(req: &AlmideHttpRequest) -> AlmideMap<String, St
         for pair in q.split('&') {
             let mut kv = pair.splitn(2, '=');
             if let (Some(k), Some(v)) = (kv.next(), kv.next()) {
-                params.insert(k.to_string(), v.to_string());
+                params.insert(percent_decode(k), percent_decode(v));
             }
         }
     }
     params
+}
+
+/// Percent-decode a URL component for manual use (stdlib `http.url_decode`).
+/// Same rules as the query-param decoder: `+` → space, `%XX` → raw byte.
+pub fn almide_http_url_decode(s: &str) -> String {
+    percent_decode(s)
 }
 
 // ── HTTP Client ──
@@ -170,6 +176,39 @@ pub fn almide_http_request(method: &str, url: &str, body: &str, headers: &Almide
     } else {
         let mut stream = stream;
         http_exchange(&mut stream, method, &host, &path, body, headers)
+    }
+}
+
+// ── Binary client ──
+//
+// Mirrors the String client but returns the raw response body as `Vec<u8>`
+// (Almide `Bytes`) with NO UTF-8 conversion, so binary payloads (images,
+// audio — e.g. TTS mp3/wav) survive byte-identical.
+
+pub fn almide_http_get_bytes(url: &str) -> Result<Vec<u8>, String> {
+    almide_http_request_bytes("GET", url, "", &AlmideMap::new())
+}
+
+pub fn almide_http_request_bytes(method: &str, url: &str, body: &str, headers: &AlmideMap<String, String>) -> Result<Vec<u8>, String> {
+    let (is_https, host, port, path) = parse_url(url)?;
+
+    let stream = TcpStream::connect(format!("{}:{}", host, port))
+        .map_err(|e| format!("connection failed: {}", e))?;
+    stream.set_read_timeout(Some(std::time::Duration::from_secs(30))).ok();
+
+    if is_https {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let mut tls_stream = make_tls_stream(&host, stream)?;
+            http_exchange_bytes(&mut tls_stream, method, &host, &path, body, headers)
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            Err("HTTPS is not supported on WASM target".to_string())
+        }
+    } else {
+        let mut stream = stream;
+        http_exchange_bytes(&mut stream, method, &host, &path, body, headers)
     }
 }
 
@@ -470,6 +509,90 @@ fn decode_chunked(body: &str) -> String {
         } else { break; }
     }
     result
+}
+
+/// Like `http_exchange` but returns the raw response body bytes. The
+/// header/body split and chunked decode operate at the byte level so binary
+/// payloads are never run through `from_utf8_lossy`.
+fn http_exchange_bytes(stream: &mut (impl Read + Write), method: &str, host: &str, path: &str, body: &str, headers: &AlmideMap<String, String>) -> Result<Vec<u8>, String> {
+    let mut req = format!("{} {} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n", method, path, host);
+    if !body.is_empty() {
+        req.push_str(&format!("Content-Length: {}\r\n", body.len()));
+        if !headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("content-type")) {
+            req.push_str("Content-Type: application/json\r\n");
+        }
+    }
+    for (k, v) in headers.iter() { req.push_str(&format!("{}: {}\r\n", k, v)); }
+    req.push_str("\r\n");
+    req.push_str(body);
+
+    stream.write_all(req.as_bytes()).map_err(|e| format!("write failed: {}", e))?;
+
+    let mut response = Vec::new();
+    stream.read_to_end(&mut response).map_err(|e| format!("read failed: {}", e))?;
+
+    // Split header/body on the raw bytes — never decode the body as UTF-8.
+    if let Some(idx) = response.windows(4).position(|w| w == b"\r\n\r\n") {
+        let header_section = String::from_utf8_lossy(&response[..idx]).to_lowercase();
+        let resp_body = &response[idx + 4..];
+        if header_section.contains("transfer-encoding: chunked") {
+            Ok(decode_chunked_bytes(resp_body))
+        } else {
+            Ok(resp_body.to_vec())
+        }
+    } else {
+        Ok(response)
+    }
+}
+
+/// Byte-level chunked transfer-decoding (mirrors `decode_chunked` for `Vec<u8>`).
+fn decode_chunked_bytes(body: &[u8]) -> Vec<u8> {
+    let mut result = Vec::new();
+    let mut pos = 0usize;
+    while pos < body.len() {
+        let line_end = match body[pos..].windows(2).position(|w| w == b"\r\n") {
+            Some(i) => pos + i,
+            None => break,
+        };
+        let size_str = String::from_utf8_lossy(&body[pos..line_end]);
+        let size = usize::from_str_radix(size_str.trim(), 16).unwrap_or(0);
+        if size == 0 { break; }
+        let data_start = line_end + 2;
+        if data_start + size <= body.len() {
+            result.extend_from_slice(&body[data_start..data_start + size]);
+            pos = data_start + size;
+            if pos + 2 <= body.len() && &body[pos..pos + 2] == b"\r\n" { pos += 2; }
+        } else { break; }
+    }
+    result
+}
+
+/// Percent-decode an `application/x-www-form-urlencoded` component: `+` → space,
+/// `%XX` → the raw byte 0xXX. Bytes are gathered first then interpreted as UTF-8
+/// (lossy) so multi-byte sequences like `%E7%8C%AB` (猫) round-trip. Malformed or
+/// truncated `%` escapes pass through verbatim.
+fn percent_decode(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'%' if i + 2 < bytes.len() => {
+                let hi = (bytes[i + 1] as char).to_digit(16);
+                let lo = (bytes[i + 2] as char).to_digit(16);
+                if let (Some(h), Some(l)) = (hi, lo) {
+                    out.push((h * 16 + l) as u8);
+                    i += 3;
+                } else {
+                    out.push(b'%');
+                    i += 1;
+                }
+            }
+            b'+' => { out.push(b' '); i += 1; }
+            c => { out.push(c); i += 1; }
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 fn parse_request(stream: &mut TcpStream) -> Result<AlmideHttpRequest, String> {
