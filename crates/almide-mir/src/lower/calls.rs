@@ -329,7 +329,9 @@ impl LowerCtx {
                 | IrExprKind::Unwrap { .. }
                 | IrExprKind::UnwrapOr { .. }
                 | IrExprKind::ToOption { .. }
-                | IrExprKind::OptionalChain { .. } => {
+                | IrExprKind::OptionalChain { .. }
+                // A RANGE argument (`f(0..n)`) is a fresh value of the same shape.
+                | IrExprKind::Range { .. } => {
                     let dst = self.fresh_value();
                     self.record_elided_calls(a);
                     if is_heap_ty(&a.ty) {
@@ -390,11 +392,26 @@ impl LowerCtx {
                     let repr = repr_of(&a.ty)?;
                     self.materialized_call_arg(dst, repr)
                 }
-                IrExprKind::Call { target, .. } => {
-                    return Err(LowerError::Unsupported(format!(
-                        "call argument Call[{}] not in this brick",
-                        call_target_kind(target)
-                    )))
+                // A `Method`/`Computed`-target call argument (`f(obj.m())`,
+                // `f((g)())`): an UNRESOLVABLE callee (dispatch / closure value not
+                // known here) — model it as a DEFERRED fresh value (a heap `Alloc`
+                // borrowed+dropped, a scalar `Const`). Its receiver's/args' calls are
+                // captured by `record_elided_calls`, but the method/computed call
+                // itself is NOT (skipped), so the source has MORE call nodes than the
+                // MIR ⇒ the `ir_calls > mir_calls` gate TAINTS the function caps-
+                // unverified (honest — the callee's capabilities are unknown). The
+                // result value is deferred, like every Opaque.
+                IrExprKind::Call { .. } => {
+                    let dst = self.fresh_value();
+                    self.record_elided_calls(a);
+                    if is_heap_ty(&a.ty) {
+                        let repr = repr_of(&a.ty)?;
+                        self.ops.push(Op::Alloc { dst, repr, init: Init::Opaque });
+                        self.materialized_call_arg(dst, repr)
+                    } else {
+                        self.ops.push(Op::Const { dst });
+                        CallArg::Scalar(dst)
+                    }
                 }
                 other => {
                     return Err(LowerError::Unsupported(format!(

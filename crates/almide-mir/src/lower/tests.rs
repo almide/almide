@@ -830,6 +830,36 @@
     }
 
     #[test]
+    fn method_call_binds_a_deferred_fresh_opaque() {
+        use almide_lang::intern::sym;
+        // var x = obj.method()  — an unresolvable Method callee → ONE deferred fresh
+        // Alloc{Opaque} (the result), the call elided (so the caps gate taints it).
+        // Balanced; never walled (totality preserved without a real dispatch model).
+        let mcall = ir_expr(
+            IrExprKind::Call {
+                target: CallTarget::Method {
+                    object: Box::new(ir_expr(IrExprKind::Var { id: VarId(0) }, list_int())),
+                    method: sym("method"),
+                },
+                args: vec![],
+                type_args: vec![],
+            },
+            list_int(),
+        );
+        let b = body(vec![
+            bind(0, list_int(), ir_expr(IrExprKind::List { elements: vec![] }, list_int())),
+            bind(1, list_int(), mcall),
+        ]);
+        let mir = lower_body(&b, "main").expect("method call binds");
+        assert!(
+            mir.ops.iter().any(|o| matches!(o, Op::Alloc { dst: ValueId(1), init: Init::Opaque, .. })),
+            "the method result is a deferred fresh Opaque: {:?}",
+            mir.ops
+        );
+        assert_eq!(verify_ownership(&mir), Ok(()));
+    }
+
+    #[test]
     fn match_on_a_fresh_heap_subject_is_materialized_and_dropped() {
         use almide_lang::intern::sym;
         // match make() { _ => () }  — the fresh heap subject is MATERIALIZED into an

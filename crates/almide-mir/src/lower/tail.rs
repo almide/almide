@@ -189,6 +189,17 @@ impl LowerCtx {
                     self.ops.push(Op::Alloc { dst, repr, init: Init::Opaque });
                     Ok(Some(dst))
                 }
+                // `fn f(o) = o.method()` / `(g)()` returned — an UNRESOLVABLE
+                // `Method`/`Computed` callee (the `Named`/`Module` arms are above).
+                // Move out ONE deferred fresh `Alloc{Opaque}`; the call is elided so
+                // the gate taints the function caps-unverified (honest).
+                IrExprKind::Call { .. } => {
+                    let dst = self.fresh_value();
+                    let repr = repr_of(&tail.ty)?;
+                    self.ops.push(Op::Alloc { dst, repr, init: Init::Opaque });
+                    self.record_elided_calls(tail);
+                    Ok(Some(dst))
+                }
                 other => Err(LowerError::Unsupported(format!(
                     "heap move-out from {} (only a bound var, fresh literal, or call) not in this brick",
                     kind_name(other)
@@ -220,7 +231,13 @@ impl LowerCtx {
             | IrExprKind::Unwrap { .. }
             | IrExprKind::UnwrapOr { .. }
             | IrExprKind::ToOption { .. }
-            | IrExprKind::OptionalChain { .. } => {
+            | IrExprKind::OptionalChain { .. }
+            // A scalar-result CALL (`fn f() = g()` / `o.m()` / `(h)()`) or RANGE
+            // returned: a fresh `Const` (no ownership). `record_elided_calls` captures
+            // the analyzable callees' caps; an unresolvable Method/Computed call is
+            // elided ⇒ the gate taints the function honestly.
+            | IrExprKind::Call { .. }
+            | IrExprKind::Range { .. } => {
                 let dst = self.fresh_value();
                 self.ops.push(Op::Const { dst });
                 self.record_elided_calls(tail);

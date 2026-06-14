@@ -109,10 +109,20 @@ impl LowerCtx {
                 self.live_heap_handles.push(dst);
                 Ok(())
             }
-            IrExprKind::Call { target, .. } => Err(LowerError::Unsupported(format!(
-                "heap bind from Call[{}] not in this brick",
-                call_target_kind(target)
-            ))),
+            // `var x = obj.method(args)` / `var x = (g)(args)` — an UNRESOLVABLE
+            // `Method`/`Computed` callee bound to a heap var. Model the result as ONE
+            // deferred fresh `Alloc{Opaque}` (its receiver's/args' calls captured by
+            // `record_elided_calls`; the method/computed call itself is elided, so the
+            // `ir_calls > mir_calls` gate taints the function caps-unverified — honest).
+            IrExprKind::Call { .. } => {
+                let dst = self.fresh_value();
+                let repr = repr_of(ty)?;
+                self.value_of.insert(var, dst);
+                self.ops.push(Op::Alloc { dst, repr, init: Init::Opaque });
+                self.live_heap_handles.push(dst);
+                self.record_elided_calls(value);
+                Ok(())
+            }
             // `var x = if c then … else …` — a heap-result branch. LINEARIZE the arms
             // (each per-arm balanced, its value deferred), then bind `x` to ONE fresh
             // `Alloc{Opaque}` — the merged result slot. Memory-safe by construction
