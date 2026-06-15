@@ -456,6 +456,22 @@
     }
 
     #[test]
+    fn self_hosted_string_join() {
+        // SELF-HOSTED string.join — reads a List[String] (borrowed) + concatenates with sep.
+        // join(split("a,bb,ccc",","), "-")="a-bb-ccc" (also CONTENT-verifies split's pieces!);
+        // join(split("x",","),"-")="x"; multi-byte sep join(split("p::q::r","::"),"+")="p+q+r".
+        let src = "fn main() -> Unit = {\n  \
+            println(string.join(string.split(\"a,bb,ccc\", \",\"), \"-\"))\n  \
+            println(string.join(string.split(\"x\", \",\"), \"-\"))\n  \
+            println(string.join(string.split(\"p::q::r\", \"::\"), \"+\")) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "string.join"));
+        if let Some(out) = build_and_run("self_hosted_string_join", &render_wasm_program(&prog)) {
+            assert_eq!(out, "a-bb-ccc\nx\np+q+r");
+        }
+    }
+
+    #[test]
     fn self_hosted_math_sqrt() {
         // SELF-HOSTED math.sqrt = prim.fsqrt (f64.sqrt, byte-exact with v0). sqrt(16)=4,
         // sqrt(2)=1.41…→to_int 1, sqrt(81)=9.
