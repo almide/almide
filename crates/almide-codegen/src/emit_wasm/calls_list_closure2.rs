@@ -19,6 +19,22 @@ use almide_ir::{BinOp, IrExpr, IrExprKind};
 use almide_lang::types::Ty;
 use wasm_encoder::ValType;
 
+// ── SIMD reduction/map geometry (derived so the relationships stay visible) ──
+/// i64 / f64 element size in bytes.
+const F64_BYTES: i32 = 8;
+/// 64-bit SIMD lanes in a v128 (i64x2 / f64x2).
+const SIMD_LANES_64: i32 = 2;
+/// Bytes spanned by one v128 register.
+const V128_BYTES: i32 = SIMD_LANES_64 * F64_BYTES;
+/// v128 loads issued per unrolled SIMD iteration.
+const SIMD_UNROLL: i32 = 4;
+/// 64-bit elements consumed per SIMD iteration (unroll × lanes).
+const SIMD_GROUP: i32 = SIMD_UNROLL * SIMD_LANES_64;
+/// Bytes advanced per SIMD iteration (unroll × v128 bytes).
+const SIMD_STRIDE_BYTES: i32 = SIMD_UNROLL * V128_BYTES;
+/// Mask that rounds an element count down to a whole SIMD group (`& ~(GROUP-1)`).
+const SIMD_GROUP_MASK: i32 = !(SIMD_GROUP - 1);
+
 /// A pipeline stage for stream fusion.
 enum PipelineStage<'a> {
     Map(&'a IrExpr),    // lambda expr
@@ -1031,6 +1047,19 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(src);
             }
             "fold" => {
+                // SIMD fast path: `xs |> fold(init, (a, x) => a + x)` over a borrowed
+                // Int list with no fused pipeline — i64x2 reduction instead of a scalar
+                // accumulate loop (rustc autovectorizes the same sum). Falls through to
+                // the general fold below for any other shape.
+                if matches!(&args[0].kind, IrExprKind::Var { .. })
+                    && self.detect_pipeline(&args[0]).is_empty()
+                    && matches!(self.resolve_list_elem(&args[0], None), Ty::Int)
+                    && matches!(&args[1].ty, Ty::Int)
+                    && Self::is_simd_fold_sum(&args[2])
+                {
+                    self.emit_simd_fold_sum(&args[0], &args[1], list_data_off);
+                    return true;
+                }
                 // fold(list, init, fn(acc, elem) → acc)
                 // Resolve types from closure Fn signature when available
                 // Derive element type from the input list (most reliable source)
@@ -1641,5 +1670,78 @@ impl FuncCompiler<'_> {
         } else {
             None
         }
+    }
+
+    /// Detect `(acc, elem) => acc + elem` — a SIMD-vectorizable Int sum reduction.
+    fn is_simd_fold_sum(fn_arg: &IrExpr) -> bool {
+        if let IrExprKind::Lambda { params, body, .. } = &fn_arg.kind {
+            let (Some((p0, _)), Some((p1, _))) = (params.first(), params.get(1)) else { return false };
+            if let IrExprKind::BinOp { op: BinOp::AddInt, left, right } = &body.kind {
+                if let (IrExprKind::Var { id: l }, IrExprKind::Var { id: r }) = (&left.kind, &right.kind) {
+                    return (l.0 == p0.0 && r.0 == p1.0) || (l.0 == p1.0 && r.0 == p0.0);
+                }
+            }
+        }
+        false
+    }
+
+    /// SIMD i64 sum reduction for `xs |> fold(init, (a, x) => a + x)`. Accumulates
+    /// into an i64x2 (8 i64 per iteration, 4× v128) then horizontal-adds the two
+    /// lanes and finishes a scalar tail. rustc autovectorizes the same reduction;
+    /// the scalar fold loop did not, leaving it ~2.5× behind. The source list is a
+    /// borrowed Var (read, never freed here), so no RC handling is needed.
+    fn emit_simd_fold_sum(&mut self, list_arg: &IrExpr, init_arg: &IrExpr, list_data_off: i32) {
+        let list_ptr = self.scratch.alloc_i32();
+        let src_ptr = self.scratch.alloc_i32();
+        let end_ptr = self.scratch.alloc_i32();
+        let simd_end = self.scratch.alloc_i32();
+        let acc = self.scratch.alloc_i64();
+        let acc_v = self.scratch.alloc_v128();
+        self.emit_expr(list_arg);
+        wasm!(self.func, { local_set(Local(list_ptr)); });
+        self.emit_expr(init_arg);
+        wasm!(self.func, {
+            local_set(Local(acc));
+            // src_ptr = &xs[0]; end_ptr = src_ptr + len * F64_BYTES
+            local_get(Local(list_ptr)); i32_const(Imm32(list_data_off)); i32_add; local_set(Local(src_ptr));
+            local_get(Local(src_ptr));
+            local_get(Local(list_ptr)); i32_load(0); i32_const(Imm32(F64_BYTES)); i32_mul; i32_add; local_set(Local(end_ptr));
+            // simd_end = src_ptr + (len & ~(GROUP-1)) * F64_BYTES  (whole SIMD groups)
+            local_get(Local(src_ptr));
+            local_get(Local(list_ptr)); i32_load(0); i32_const(Imm32(SIMD_GROUP_MASK)); i32_and; i32_const(Imm32(F64_BYTES)); i32_mul; i32_add; local_set(Local(simd_end));
+            // acc_v = i64x2(0, 0)
+            i64_const(Imm64(0)); i64x2_splat; local_set(Local(acc_v));
+            // SIMD loop: SIMD_GROUP i64 (SIMD_UNROLL × v128) per iteration into the lane-pair accumulator
+            block_empty; loop_empty;
+              local_get(Local(src_ptr)); local_get(Local(simd_end)); i32_ge_u; br_if(1);
+              local_get(Local(acc_v));
+              local_get(Local(src_ptr)); v128_load(0); i64x2_add;
+              local_get(Local(src_ptr)); v128_load(V128_BYTES as u64); i64x2_add;
+              local_get(Local(src_ptr)); v128_load((2 * V128_BYTES) as u64); i64x2_add;
+              local_get(Local(src_ptr)); v128_load((3 * V128_BYTES) as u64); i64x2_add;
+              local_set(Local(acc_v));
+              local_get(Local(src_ptr)); i32_const(Imm32(SIMD_STRIDE_BYTES)); i32_add; local_set(Local(src_ptr));
+              br(0);
+            end; end;
+            // acc += acc_v.lane0 + acc_v.lane1
+            local_get(Local(acc));
+            local_get(Local(acc_v)); i64x2_extract_lane(0);
+            local_get(Local(acc_v)); i64x2_extract_lane(1);
+            i64_add; i64_add; local_set(Local(acc));
+            // scalar tail (remaining < SIMD_GROUP elements)
+            block_empty; loop_empty;
+              local_get(Local(src_ptr)); local_get(Local(end_ptr)); i32_ge_u; br_if(1);
+              local_get(Local(acc)); local_get(Local(src_ptr)); i64_load(0); i64_add; local_set(Local(acc));
+              local_get(Local(src_ptr)); i32_const(Imm32(F64_BYTES)); i32_add; local_set(Local(src_ptr));
+              br(0);
+            end; end;
+            local_get(Local(acc));
+        });
+        self.scratch.free_v128(acc_v);
+        self.scratch.free_i64(acc);
+        self.scratch.free_i32(simd_end);
+        self.scratch.free_i32(end_ptr);
+        self.scratch.free_i32(src_ptr);
+        self.scratch.free_i32(list_ptr);
     }
 }

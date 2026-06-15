@@ -322,6 +322,11 @@ pub struct RuntimeFuncs {
     /// block had its free-list `next` clobbered by the host (the C-042
     /// poison class). Pinning makes fs scratch immortal BY CONSTRUCTION.
     pub alloc_pinned: u32,
+    /// `__alloc_nozero(size)` — like `__alloc` but skips zeroing a recycled
+    /// free-list block, for callers (matrix transpose/matmul/zeros) that
+    /// immediately overwrite the whole data area. Avoids a redundant full-block
+    /// fill that dominated those ops' wall time.
+    pub alloc_nozero: u32,
     /// Global index holding the heap start address (immutable).
     /// Pointers below this are in the data section and must NOT be rc_dec'd.
     pub heap_start_global: u32,
@@ -607,7 +612,7 @@ impl WasmEmitter {
             case_table_bytes: 0,
             rt: RuntimeFuncs {
                 fd_write: 0, alloc: 0, rc_inc: 0, rc_dec: 0, cow_check: 0,
-                heap_save: 0, heap_restore: 0, alloc_pinned: 0, heap_start_global: 0,
+                heap_save: 0, heap_restore: 0, alloc_pinned: 0, alloc_nozero: 0, heap_start_global: 0,
                 println_str: 0, println_int: 0,
                 int_to_string: 0, float_to_string: 0,
                 float_parse: 0, float_to_fixed: 0, float_pow: 0,
