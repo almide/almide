@@ -1261,6 +1261,27 @@
     }
 
     #[test]
+    fn self_hosted_option_or_else() {
+        // SELF-HOSTED option.or_else(o, f): Some(x) → Some(x) (kept), None → f() (a 0-arg thunk
+        // returning an Option, invoked ONLY on the None arm via a heap-result CallIndirect).
+        // or_else(Some(5), ()=>Some(99))=Some(5) ; or_else(None, ()=>Some(99))=Some(99) ; or_else(
+        // None, ()=>None)=None. Byte-matches v0.
+        let src = "fn main() -> Unit = {\n  \
+            let o1 = list.first([5, 6])\n  let m1 = option.or_else(o1, () => Some(99))\n  \
+            match m1 {\n    Some(v) => println(int.to_string(v)),\n    None => println(\"none\"),\n  }\n  \
+            let o2 = list.get([5], 9)\n  let m2 = option.or_else(o2, () => Some(99))\n  \
+            match m2 {\n    Some(v) => println(int.to_string(v)),\n    None => println(\"none\"),\n  }\n  \
+            let o3 = list.get([5], 9)\n  let m3 = option.or_else(o3, () => None)\n  \
+            match m3 {\n    Some(v) => println(int.to_string(v)),\n    None => println(\"none\"),\n  } }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "option.or_else"));
+        if let Some(out) = build_and_run("self_hosted_option_or_else", &render_wasm_program(&prog)) {
+            // or_else(Some(5),..)=5 ; or_else(None,()=>Some(99))=99 ; or_else(None,()=>None)=none
+            assert_eq!(out, "5\n99\nnone");
+        }
+    }
+
+    #[test]
     fn self_hosted_option_unwrap_or_else() {
         // SELF-HOSTED option.unwrap_or_else(o, f): Some(x) → x, None → f() (a 0-arg thunk invoked via
         // CallIndirect ONLY on the None arm). unwrap_or_else(Some(5), ()=>99)=5 ; unwrap_or_else(None,

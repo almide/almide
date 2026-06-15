@@ -61,3 +61,18 @@ fn option_unwrap_or_else(o: Option[Int], f: () -> Int) -> Int = {
   let x = prim.load64(h + 12)
   if len >= 1 then x else __opt_unwrap_else(f)
 }
+
+// option.or_else(o, f) = o.or_else(f): Some(x) → Some(x) (kept), None → f() (a 0-arg thunk itself
+// returning an Option, invoked via a heap-result CallIndirect ONLY on the None arm). The kept Some
+// is rebuilt from its scalar slot (Option[Int]); the helper isolates the heap-result thunk call.
+fn __opt_orelse_none(f: () -> Option[Int]) -> Option[Int] = {
+  let r = f()
+  r
+}
+
+fn option_or_else(o: Option[Int], f: () -> Option[Int]) -> Option[Int] = {
+  let h = prim.handle(o)
+  let len = prim.load32(h + 4)
+  let x = prim.load64(h + 12)
+  if len >= 1 then Some(x) else __opt_orelse_none(f)
+}
