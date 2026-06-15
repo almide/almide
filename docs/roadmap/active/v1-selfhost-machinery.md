@@ -73,10 +73,23 @@ payload(data[0]) stores are added (no ownership delta).
   balanced both ways) — verify + spawn refuters (a Some-arm binding a borrowed param must
   still REJECT).
 
-## Machinery 2 — List-building (unblocks string.split, list.map result)
-Build a `List[T]`: add `prim.alloc_list(n)` (n*8-byte slots, like alloc_str), set rc/len/cap,
-`prim.store64` each element/handle. NESTED OWNERSHIP: a List[String] owns its substring Allocs
-— the cert must track container-owns-elements (the value-semantics convention, Brick #54).
+## Machinery 2 — List-building — FLOOR DONE; List[Int] flowing; List[String] BLOCKED
+`Init::DynList` + `prim.alloc_list(n)` + `prim.store64` landed (cert i, like DynStr). DONE
+(List[Int], i64 value slots, fully sound + loop-bounded): **list.reverse / take / drop /
+slice / range / repeat**. The string builders (slice/trim/reverse/replace/replace_first/
+pad/trim_start/trim_end) similarly use prim.alloc_str.
+
+**THE List[String] BLOCKER (critical for split/lines/map):** `Op::Drop` is a FLAT
+`rc_dec` on the block — it does NOT recursively free heap ELEMENTS. So a function that
+CREATES NEW strings and stores them in a list (string.split, string.lines, list.map's
+result) LEAKS those strings on the list's drop → a loop OOMs → violates the loop-bounded
+rule. (list.reverse/repeat over a List[String] are FINE — they only ALIAS existing element
+handles, create no new strings, so nothing leaks.) **string.split etc. need NESTED-HEAP RC
+first: a Drop that recursively rc_dec's a list's heap elements** — cert-touching (the cert
+must track container-owns-elements, the value-semantics convention / Brick #54) and the
+Drop/render must know the element type (List[Int] → no element drop; List[String] →
+per-element drop). This is the next big machinery slice; until it lands, only List[Int]
+construction and List[String] aliasing are admissible.
 Count substrings first (2-pass) or grow. Cert-touching (nested owned heap) → adversarial.
 
 ## Machinery 3 — Closures (unblocks list.map/filter/fold) — HARDEST
