@@ -79,3 +79,43 @@ fn string_replace(s: String, from: String, to: String) -> String = {
   if flen <= 0 then __rep_copy_str(s)
   else __rep_do(s, from, to)
 }
+
+// Byte address of the first `from` match in [pos, send), or `send` if none.
+fn __repf_find(pos: Int, send: Int, fbase: Int, flen: Int) -> Int =
+  if pos + flen > send then send
+  else {
+    let m = __rep_eq(pos, fbase, flen)
+    if m then pos
+    else __repf_find(pos + 1, send, fbase, flen)
+  }
+
+// Build s[0..off] ++ to ++ s[off+flen..] (the match at byte offset `off`).
+fn __repf_do(s: String, from: String, to: String, off: Int) -> String = {
+  let h = prim.handle(s)
+  let slen = prim.load32(h + 4)
+  let fh = prim.handle(from)
+  let flen = prim.load32(fh + 4)
+  let th = prim.handle(to)
+  let tlen = prim.load32(th + 4)
+  let sbase = h + 12
+  let rlen = slen - flen + tlen
+  let buf = prim.alloc_str(rlen)
+  let dbase = prim.handle(buf) + 12
+  let _c1 = __rep_copy(sbase, dbase, off)
+  let _c2 = __rep_copy(th + 12, dbase + off, tlen)
+  let rest = slen - off - flen
+  let _c3 = __rep_copy(sbase + off + flen, dbase + off + tlen, rest)
+  buf
+}
+
+fn string_replace_first(s: String, from: String, to: String) -> String = {
+  let h = prim.handle(s)
+  let slen = prim.load32(h + 4)
+  let fh = prim.handle(from)
+  let flen = prim.load32(fh + 4)
+  let sbase = h + 12
+  let send = sbase + slen
+  let fpos = __repf_find(sbase, send, fh + 12, flen)
+  if fpos >= send then __rep_copy_str(s)
+  else __repf_do(s, from, to, fpos - sbase)
+}

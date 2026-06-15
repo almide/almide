@@ -629,7 +629,13 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
         (include_str!("../../../stdlib/string_slice.almd"), &[("string_slice", "string.slice")]),
         (include_str!("../../../stdlib/string_trim.almd"), &[("string_trim", "string.trim")]),
         (include_str!("../../../stdlib/string_reverse.almd"), &[("string_reverse", "string.reverse")]),
-        (include_str!("../../../stdlib/string_replace.almd"), &[("string_replace", "string.replace")]),
+        (
+            include_str!("../../../stdlib/string_replace.almd"),
+            &[
+                ("string_replace", "string.replace"),
+                ("string_replace_first", "string.replace_first"),
+            ],
+        ),
         (
             include_str!("../../../stdlib/string_pad.almd"),
             &[("string_pad_start", "string.pad_start"), ("string_pad_end", "string.pad_end")],
@@ -1731,6 +1737,25 @@ mod tests {
         assert!(prog.functions.iter().any(|f| f.name == "string.replace"), "linked");
         if let Some(out) = build_and_run("string_replace", &render_wasm_program(&prog)) {
             assert_eq!(out, "a-b-c\nxYYx\nabc\nhi");
+        }
+    }
+
+    #[test]
+    fn self_hosted_string_replace_first() {
+        // string.replace_first self-hosted (find the first match, splice in `to`): only the
+        // first occurrence is replaced: replace_first("a,b,c",",","-")="a-b,c", growing
+        // ("xax","a","YY")="xYYx", no match ("abc","z","Q")="abc". byte-matching v0.
+        let src = "fn main() -> Unit = {\n  \
+            let a = string.replace_first(\"a,b,c\", \",\", \"-\")\n  \
+            let b = string.replace_first(\"xax\", \"a\", \"YY\")\n  \
+            let c = string.replace_first(\"abc\", \"z\", \"Q\")\n  \
+            println(a)\n  \
+            println(b)\n  \
+            println(c) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "string.replace_first"), "linked");
+        if let Some(out) = build_and_run("string_replace_first", &render_wasm_program(&prog)) {
+            assert_eq!(out, "a-b,c\nxYYx\nabc");
         }
     }
 
