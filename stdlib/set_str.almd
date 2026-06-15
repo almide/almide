@@ -360,3 +360,8 @@ fn set_fold_str(s: Set[String], init: Int, f: (Int, String) -> Int) -> Int = {
   let n = prim.load32(sh + 4)
   __set_str_fold_loop(sh, f, n, 0, init)
 }
+
+// set.map over Set[String] is DEFERRED: the closure returns a NEW owned String per element and a
+// dedup-DISCARDED duplicate must be freed in ONE branch of the recursion only — that consume-in-
+// one-arm interacts badly with the per-arm teardown (drop_arm_locals split_off underflow). Needs
+// a lowering fix (per-branch owned-heap accounting), not an .almd change.
