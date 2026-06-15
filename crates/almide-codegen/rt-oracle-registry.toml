@@ -137,6 +137,24 @@ note = "spec/wasm_cross/rc_alloc_stress.almd: 1000-element list growth (sum=4995
 
 [[routine]]
 file = "runtime.rs"
+routine = "compile_alloc_variant"
+status = "verified"
+class = "fixture"
+oracle = "no native counterpart — the parameterized body shared by compile_alloc and compile_alloc_nozero (the `zero_on_reuse` flag selects whether a recycled free-list block is zero-filled before return); same observable-correctness oracle as compile_alloc"
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "Not a distinct runtime routine: compile_alloc / compile_alloc_nozero both delegate here, so spec/wasm_cross/rc_alloc_stress.almd exercises it on every allocation. Refactored out of compile_alloc to express the zero-fill choice once instead of duplicating the allocator. The BUMP path never zeros (fresh wasm pages are zero); reclaimed-then-rebumped memory IS dirty, but the one read-before-write caller that can land there — variant construction — zeros its own payload tail (calls.rs::emit_zero_variant_tail), and map/set tags can't reach a reclaimed block (their in-place-mutator builders disable reclamation)."
+
+[[routine]]
+file = "runtime.rs"
+routine = "compile_alloc_nozero"
+status = "verified"
+class = "fixture"
+oracle = "no native counterpart — bump allocator variant that SKIPS the free-list-reuse zero-fill; sound only for callers that overwrite the whole returned buffer (every read is bounded by a length/cap they also write). Oracle is the same observable correctness as compile_alloc: a caller that reads an un-written byte would diverge from native."
+test = "tests/wasm_runtime_test.rs::wasm_cross_target_spec"
+note = "Routed from emit_list_alloc (list_layout.rs — pre-sized list data is written in full by map/filter/range/collect, reads bounded by len) and the string-append grow path (expressions.rs try_emit_string_append_loop — old prefix copied, the rest filled). spec/wasm_cross/rc_alloc_stress.almd churns exactly these list allocations byte-identically: an unsound skip would surface an un-zeroed reused block as a wrong checksum. Maps keep compile_alloc (Swiss/COD tag arrays depend on the reuse zero-fill); variants keep compile_alloc and additionally zero their own payload tail at construction."
+
+[[routine]]
+file = "runtime.rs"
 routine = "compile_rc_inc"
 status = "verified"
 class = "fixture"

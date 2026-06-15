@@ -9,6 +9,11 @@ use std::collections::BTreeMap;
 // Named constants for raw WASM immediate values used in this module.
 /// Position of the sign bit in an i64 (used by the f64 total-order key transform).
 const I64_SIGN_BIT_POS: i64 = 63;
+/// Bytes of a variant's discriminant tag, stored at offset 0 ahead of the
+/// payload. A variant value is laid out `[tag: i32][payload…]`, padded to the
+/// max payload across the type's constructors so `mem_eq` can compare any two
+/// by a single fixed-width span.
+pub(super) const VARIANT_TAG_SIZE: u32 = 4;
 
 use super::FuncCompiler;
 use super::VariantCase;
@@ -1280,10 +1285,10 @@ impl FuncCompiler<'_> {
                 let max_payload = cases.iter()
                     .map(|c| super::values::record_size(&c.fields))
                     .max().unwrap_or(0);
-                return 4 + max_payload; // tag + max payload
+                return VARIANT_TAG_SIZE + max_payload; // tag + max payload
             }
         }
-        4 // fallback: tag only
+        VARIANT_TAG_SIZE // fallback: tag only
     }
 
     /// Find the variant tag for a constructor name, searching variant_info by subject type.

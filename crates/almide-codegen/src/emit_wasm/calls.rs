@@ -8,6 +8,7 @@ use wasm_encoder::ValType;
 
 use super::FuncCompiler;
 use super::values;
+use super::equality::VARIANT_TAG_SIZE;
 
 // ---------------------------------------------------------------------------
 // Named immediate constants used in inline WASM emission below.
@@ -71,6 +72,31 @@ fn sized_type_info(name: &str) -> Option<(SizedKind, u32)> {
 use super::wasm_macro::wasm;
 
 impl FuncCompiler<'_> {
+    /// Zero a variant value's unwritten payload tail `[written_end, total_size)`.
+    ///
+    /// A constructor writes only its own tag + payload, but variant `==` lowers
+    /// to `mem_eq` over the FULL max-payload span (so any two values of the type
+    /// compare with one fixed width). A never-touched wasm page reads zero, so
+    /// the unwritten tail used to compare equal by luck — until heap reclamation
+    /// (function-scope / iter_scope) began rolling the bump pointer back over
+    /// live-then-freed memory: a re-bumped variant then carries stale tail bytes,
+    /// and two otherwise-equal values diverge there, trapping the `assert_eq`
+    /// (spec/lang/variant_mixed_eq_test, regression_v0_11_test). The constructor
+    /// clears its own tail rather than `__alloc` zeroing every bump — the latter
+    /// taxed all map/list allocation (precise_all map_insert 0.67x → 1.06x), and
+    /// map/set tags (the only other read-before-write region) can't reach a
+    /// reclaimed block: their in-place-mutator builders trip `expr_writes_outer_heap`
+    /// and disable reclamation.
+    fn emit_zero_variant_tail(&mut self, scratch: u32, written_end: u32, total_size: u32) {
+        if total_size <= written_end { return; }
+        wasm!(self.func, {
+            local_get(Local(scratch)); i32_const(Imm32(written_end as i32)); i32_add;
+            i32_const(Imm32(0));
+            i32_const(Imm32((total_size - written_end) as i32));
+            memory_fill;
+        });
+    }
+
     /// Fallback for module dispatch: when `emit_<module>_call` has no arm
     /// for `func` (often a mono-specialized `filter__Int_String`), try
     /// `func_map["almide_rt_<module>_<func>"]` — the name ResolveCalls
@@ -350,8 +376,11 @@ impl FuncCompiler<'_> {
                                     local_get(Local(scratch));
                                     i32_const(Imm32(tag as i32));
                                     i32_store(0);
-                                    local_get(Local(scratch));
                                 });
+                                // The constructor wrote only the tag; zero the rest
+                                // of the max-payload span it leaves untouched.
+                                self.emit_zero_variant_tail(scratch, VARIANT_TAG_SIZE, variant_size);
+                                wasm!(self.func, { local_get(Local(scratch)); });
                                 self.scratch.free_i32(scratch);
                                 return;
                             } else if !is_unit {
@@ -377,13 +406,16 @@ impl FuncCompiler<'_> {
                                 // dup), the same rule emit_record uses; a
                                 // bare emit_expr stored a payload the source
                                 // binding still owned and later Dec'd.
-                                let mut offset = 4u32;
+                                let mut offset = VARIANT_TAG_SIZE;
                                 for arg in args {
                                     wasm!(self.func, { local_get(Local(scratch)); });
                                     self.emit_stored_field(arg);
                                     self.emit_store_at(&arg.ty, offset);
                                     offset += values::byte_size(&arg.ty);
                                 }
+                                // This constructor's payload may be shorter than the
+                                // type's max; zero the unwritten span up to total_size.
+                                self.emit_zero_variant_tail(scratch, offset, total_size);
                                 wasm!(self.func, { local_get(Local(scratch)); });
                                 self.scratch.free_i32(scratch);
                                 return;

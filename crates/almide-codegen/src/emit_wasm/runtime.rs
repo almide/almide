@@ -664,6 +664,14 @@ fn compile_alloc_variant(emitter: &mut WasmEmitter, func_idx: u32, zero_on_reuse
             w.i32c(Imm32(-1)).eq();
             w.if_void(|w| { w.unreachable_(); }, |_| {});
         }, |_| {});
+        // Bump path does NOT zero: a never-touched wasm page is already zero, and
+        // the only callers that read before they write — variant payload tails —
+        // zero their own tail at construction (calls.rs), because whole-block
+        // zeroing here taxed every map/list bump (precise_all map_insert 0.67x →
+        // 1.06x). Reclaimed-then-rebumped memory IS dirty, but map/set tags (the
+        // other read-before-write region) never land in a reclaimed region: their
+        // builders use in-place mutators, which trip `expr_writes_outer_heap` and
+        // disable iter_scope / function-scope reclamation.
         // Write header
         w.get(Local(1)).get(Local(0)).emit_store(size_off, size_ty);
         w.get(Local(1)).i32c(Imm32(1)).emit_store(rc_off, rc_ty);

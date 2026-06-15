@@ -121,11 +121,22 @@ fn compile_function_inner(
     // (#417) and falls back to the native build. These margins cover realistic
     // functions; the exact fix is a two-pass emit that sizes caps to the measured
     // high-water mark. Unused scratch locals are zero-cost declarations.
+    //
+    // Function-scope heap reclamation (below) draws ONE i32 scratch slot that
+    // stays live across the entire body (it holds the entry heap frontier), so it
+    // is NOT freed before the body's own temporaries are allocated. Reserve that
+    // slot on top of the body budget in BOTH branches — otherwise a body that
+    // already peaks at the minimal i32 cap overflows by exactly one once the
+    // reclamation slot is taken first (codegen_borrow_test / protocol_stress_test:
+    // body needs 4, +1 frontier slot = 5 > 4). The reserve is unconditional because
+    // eligibility is decided after the compiler is built; an unused extra i32 local
+    // is a zero-cost declaration.
+    const FN_SCOPE_FRONTIER_SLOTS: usize = 1;
     let (scratch_i32_cap, scratch_i64_cap, scratch_f64_cap, scratch_v128_cap) = if needs_full_scratch {
-        (64usize, 48usize, 48usize, 8usize)
+        (64 + FN_SCOPE_FRONTIER_SLOTS, 48usize, 48usize, 8usize)
     } else {
         // Minimal: enough for basic match/if temporaries
-        (4usize, 2usize, 2usize, 0usize)
+        (4 + FN_SCOPE_FRONTIER_SLOTS, 2usize, 2usize, 0usize)
     };
     let scratch_i32_base = param_count + local_decls.len() as u32;
     for _ in 0..scratch_i32_cap { local_decls.push((1, ValType::I32)); }
