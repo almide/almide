@@ -4,3 +4,7 @@
 // type-agnostic i32 pointer, so this monomorphic `List[Int]` impl reads the right field
 // for ANY List at the wasm level. Reads only — `xs` is borrowed, no allocation.
 fn list_len(xs: List[Int]) -> Int = prim.load32(prim.handle(xs) + 4)
+
+// list.length is an exact alias of list.len (v0 binds both to almide_rt_list_len) — the same
+// element-count read, so the self-host shares one implementation.
+fn list_length(xs: List[Int]) -> Int = prim.load32(prim.handle(xs) + 4)

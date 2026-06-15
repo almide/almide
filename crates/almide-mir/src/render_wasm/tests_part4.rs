@@ -472,6 +472,24 @@
     }
 
     #[test]
+    fn self_hosted_list_length_and_join() {
+        // list.length is an exact alias of list.len (element count). list.join is identical to
+        // string.join (`xs.join(sep)`) — both reuse the existing self-host impls. length([10,20,
+        // 30])=3; join(split("a,bb,ccc",","),"-")="a-bb-ccc"; empty-sep join(split("xy",""),"")
+        // round-trips the codepoints "xy".
+        let src = "fn main() -> Unit = {\n  \
+            println(int.to_string(list.length([10, 20, 30])))\n  \
+            println(list.join(string.split(\"a,bb,ccc\", \",\"), \"-\"))\n  \
+            println(list.join(string.split(\"p::q::r\", \"::\"), \"+\")) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "list.length"));
+        assert!(prog.functions.iter().any(|f| f.name == "list.join"));
+        if let Some(out) = build_and_run("self_hosted_list_length_join", &render_wasm_program(&prog)) {
+            assert_eq!(out, "3\na-bb-ccc\np+q+r");
+        }
+    }
+
+    #[test]
     fn self_hosted_math_fmin_fmax_and_float_id() {
         // math.fmin/fmax are NaN-AWARE (return the non-NaN operand, NOT wasm's NaN-propagating
         // f64.min/max): fmin(3,7)=3, fmax(3,7)=7, fmin(NaN,5)=5 (the NaN case distinguishes the

@@ -49,3 +49,16 @@ fn string_join(parts: List[String], sep: String) -> String = {
   let _x = __join_fill(prim.handle(result), ph, count, seph, sep_len, 0, 0)
   result
 }
+
+// list.join(xs, sep) is identical to string.join (v0 both = `xs.join(sep)`) — same read-only
+// fold over the List[String] parts, reusing the same helpers. Parts/sep borrowed; result owned.
+fn list_join(parts: List[String], sep: String) -> String = {
+  let ph = prim.handle(parts)
+  let count = prim.load32(ph + 4)
+  let seph = prim.handle(sep)
+  let sep_len = prim.load32(seph + 4)
+  let total = __join_totlen(ph, count, sep_len, 0, 0)
+  let result = prim.alloc_str(total)
+  let _x = __join_fill(prim.handle(result), ph, count, seph, sep_len, 0, 0)
+  result
+}
