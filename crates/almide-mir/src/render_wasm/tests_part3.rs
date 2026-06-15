@@ -768,3 +768,20 @@
             assert_eq!(out, "a=1,2\nb=1");
         }
     }
+
+    #[test]
+    fn self_hosted_string_from_codepoint_encodes_utf8() {
+        // string.from_codepoint self-hosted: UTF-8 encode a scalar value, "" for an
+        // invalid one (negative / surrogate / > 10FFFF). 72->"H", 12354->"あ" (3-byte),
+        // -1->"" (empty, placed mid-stream so the last printed line is non-empty), 97->"a".
+        let src = "fn main() -> Unit = {\n  \
+            let a = string.from_codepoint(72)\n  println(a)\n  \
+            let b = string.from_codepoint(12354)\n  println(b)\n  \
+            let c = string.from_codepoint(0 - 1)\n  println(c)\n  \
+            let d = string.from_codepoint(97)\n  println(d) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "string.from_codepoint"));
+        if let Some(out) = build_and_run("string_from_codepoint", &render_wasm_program(&prog)) {
+            assert_eq!(out, "H\nあ\n\na");
+        }
+    }
