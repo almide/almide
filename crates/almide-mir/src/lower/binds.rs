@@ -519,6 +519,44 @@ impl LowerCtx {
     /// cert is one `Alloc` = i either way (init-agnostic), so NO checker change.
     pub(crate) fn try_lower_option_ctor(&mut self, value: &IrExpr, ty: &Ty) -> Option<ValueId> {
         match &value.kind {
+            // `Some(heap)` RETURNED / bound directly — a fresh OWNED message/element (a LitStr, a
+            // Named-call result, or an OWNED `Var` in `live_heap_handles`, NOT a borrowed param)
+            // materializes the 0-or-1-element DynListStr Option (the element MOVED in). Same cert as
+            // the heap-result-`if` arm; the owned gate keeps a borrowed `Some(param)` deferred.
+            IrExprKind::OptionSome { expr } if is_heap_ty(&expr.ty) => {
+                let repr = repr_of(ty).ok()?;
+                let piece = match &expr.kind {
+                    IrExprKind::Var { id }
+                        if self
+                            .value_for(*id)
+                            .map(|v| self.live_heap_handles.contains(&v))
+                            .unwrap_or(false) =>
+                    {
+                        self.value_for(*id).ok()?
+                    }
+                    IrExprKind::LitStr { value } => {
+                        let pr = repr_of(&expr.ty).ok()?;
+                        let p = self.fresh_value();
+                        self.ops.push(Op::Alloc { dst: p, repr: pr, init: Init::Str(value.clone()) });
+                        p
+                    }
+                    IrExprKind::Call { target: CallTarget::Named { name }, args, .. } => {
+                        let lowered = self.lower_call_args(args).ok()?;
+                        let pr = repr_of(&expr.ty).ok()?;
+                        let p = self.fresh_value();
+                        self.ops.push(Op::CallFn {
+                            dst: Some(p),
+                            name: name.as_str().to_string(),
+                            args: lowered,
+                            result: Some(pr),
+                        });
+                        p
+                    }
+                    _ => return None,
+                };
+                // materialize_opt_str_some tracks materialized_options + heap_elem_lists.
+                Some(self.materialize_opt_str_some(piece, repr))
+            }
             IrExprKind::OptionSome { expr } => {
                 // SCALAR payload only — `lower_scalar_value` returns `None` for a heap
                 // payload, which IS the gate (a heap `Some` aliases its element, a later

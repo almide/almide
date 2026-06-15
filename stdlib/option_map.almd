@@ -88,3 +88,19 @@ fn option_to_result(o: Option[Int], msg: String) -> Result[Int, String] = {
   let x = prim.load64(h + 12)
   if len >= 1 then Ok(x) else Err(__copy_str(msg))
 }
+
+// option.flatten(o) = o.flatten(): Some(inner) → inner, None → None. Re-reads the inner Option's
+// len-tag + scalar slot and REBUILDS it (no ownership transfer — the outer keeps its inner, freed
+// by the caller's DropListStr; the rebuilt Option is fresh). Some(Some(x))→Some(x), Some(None)→None.
+fn __opt_flatten_inner(inner_h: Int) -> Option[Int] = {
+  let ilen = prim.load32(inner_h + 4)
+  let ival = prim.load64(inner_h + 12)
+  if ilen >= 1 then Some(ival) else None
+}
+
+fn option_flatten(o: Option[Option[Int]]) -> Option[Int] = {
+  let h = prim.handle(o)
+  let len = prim.load32(h + 4)
+  let inner_h = prim.load64(h + 12)
+  if len == 0 then None else __opt_flatten_inner(inner_h)
+}

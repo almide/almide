@@ -1261,6 +1261,24 @@
     }
 
     #[test]
+    fn self_hosted_option_flatten() {
+        // SELF-HOSTED option.flatten(o) = o.flatten(): Some(inner) → inner, None → None. The outer
+        // Option[Option[Int]] is built via `Some(list.first/get(..))` (the new heap-`Some` materialize),
+        // and flatten re-reads the inner's tag/value. flatten(Some(Some(5)))=Some(5); flatten(Some(
+        // None))=None. Byte-matches v0.
+        let src = "fn main() -> Unit = {\n  \
+            let inner = list.first([5, 6])\n  let oo = Some(inner)\n  let f1 = option.flatten(oo)\n  \
+            match f1 {\n    Some(v) => println(int.to_string(v)),\n    None => println(\"none\"),\n  }\n  \
+            let inner2 = list.get([5], 9)\n  let oo2 = Some(inner2)\n  let f2 = option.flatten(oo2)\n  \
+            match f2 {\n    Some(v) => println(int.to_string(v)),\n    None => println(\"none\"),\n  } }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "option.flatten"));
+        if let Some(out) = build_and_run("self_hosted_option_flatten", &render_wasm_program(&prog)) {
+            assert_eq!(out, "5\nnone");
+        }
+    }
+
+    #[test]
     fn self_hosted_result_map_err() {
         // SELF-HOSTED result.map_err(r, f): Ok(x) → Ok(x), Err(e) → Err(f(e)). The closure maps the
         // Err message (HEAP String arg → HEAP String result), invoked ONLY on the Err arm over a
