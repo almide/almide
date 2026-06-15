@@ -555,7 +555,7 @@ pub(crate) fn is_self_host_option_module_fn(module: &str, func: &str) -> bool {
         "list" => {
             matches!(func, "get" | "first" | "last" | "index_of" | "binary_search" | "max" | "min")
         }
-        "string" => matches!(func, "index_of" | "last_index_of"),
+        "string" => matches!(func, "index_of" | "last_index_of" | "codepoint"),
         _ => false,
     }
 }

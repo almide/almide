@@ -817,3 +817,19 @@
             assert_eq!(out, "20\n2\n0");
         }
     }
+
+    #[test]
+    fn self_hosted_string_codepoint_decodes_first_char() {
+        // string.codepoint self-hosted: first codepoint's scalar value, None for "".
+        // "A"->65, "あ"->12354 (3-byte), "日"->26085, ""->None (printed as -1 via ??).
+        let src = "fn main() -> Unit = {\n  \
+            let a = string.codepoint(\"A\") ?? (0 - 1)\n  let sa = int.to_string(a)\n  println(sa)\n  \
+            let b = string.codepoint(\"あ\") ?? (0 - 1)\n  let sb = int.to_string(b)\n  println(sb)\n  \
+            let c = string.codepoint(\"日\") ?? (0 - 1)\n  let sc = int.to_string(c)\n  println(sc)\n  \
+            let d = string.codepoint(\"\") ?? (0 - 1)\n  let sd = int.to_string(d)\n  println(sd) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "string.codepoint"));
+        if let Some(out) = build_and_run("string_codepoint", &render_wasm_program(&prog)) {
+            assert_eq!(out, "65\n12354\n26085\n-1");
+        }
+    }
