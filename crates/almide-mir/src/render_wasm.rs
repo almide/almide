@@ -758,7 +758,11 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
         ),
         (
             include_str!("../../../stdlib/list_search.almd"),
-            &[("list_contains", "list.contains"), ("list_index_of", "list.index_of")],
+            &[
+                ("list_contains", "list.contains"),
+                ("list_index_of", "list.index_of"),
+                ("list_binary_search", "list.binary_search"),
+            ],
         ),
         (include_str!("../../../stdlib/list_reverse.almd"), &[("list_reverse", "list.reverse")]),
         (

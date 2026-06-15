@@ -785,3 +785,21 @@
             assert_eq!(out, "H\nあ\n\na");
         }
     }
+
+    #[test]
+    fn self_hosted_list_binary_search_returns_some_index_or_none() {
+        // list.binary_search over a sorted List[Int], replicating Rust std's loop so the
+        // index byte-matches v0. [1,3,5,7,9]: find 5 -> Some(2), 7 -> Some(3), 1 -> Some(0),
+        // 9 -> Some(4); 4 -> None, 0 -> None, 10 -> None. Printed via unwrap_or(-1).
+        let src = "fn main() -> Unit = {\n  \
+            let a = list.binary_search([1, 3, 5, 7, 9], 5) ?? (0 - 1)\n  let sa = int.to_string(a)\n  println(sa)\n  \
+            let b = list.binary_search([1, 3, 5, 7, 9], 9) ?? (0 - 1)\n  let sb = int.to_string(b)\n  println(sb)\n  \
+            let c = list.binary_search([1, 3, 5, 7, 9], 1) ?? (0 - 1)\n  let sc = int.to_string(c)\n  println(sc)\n  \
+            let d = list.binary_search([1, 3, 5, 7, 9], 4) ?? (0 - 1)\n  let sd = int.to_string(d)\n  println(sd)\n  \
+            let e = list.binary_search([1, 3, 5, 7, 9], 10) ?? (0 - 1)\n  let se = int.to_string(e)\n  println(se) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "list.binary_search"));
+        if let Some(out) = build_and_run("list_binary_search", &render_wasm_program(&prog)) {
+            assert_eq!(out, "2\n4\n0\n-1\n-1");
+        }
+    }

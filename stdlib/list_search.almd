@@ -32,3 +32,33 @@ fn list_index_of(xs: List[Int], x: Int) -> Option[Int] = {
   if idx < 0 then __lio_none()
   else __lio_some(idx)
 }
+
+// list.binary_search over a SORTED List[Int] (v0 is already monomorphic &[i64]):
+// `xs.binary_search(&target).ok()`. Replicates Rust std's exact loop — mid = left +
+// size/2, recompute size = right-left after each narrowing — so the index returned for
+// duplicate keys byte-matches v0. __bsearch returns the found index or -1; the Option is
+// materialized via the dedicated none/some helpers (the proven index_of pattern).
+fn __bsearch(h: Int, target: Int, left: Int, right: Int, size: Int) -> Int =
+  if left >= right then -1
+  else {
+    let mid = left + size / 2
+    let e = prim.load64(h + 12 + mid * 8)
+    if e == target then mid
+    else if e < target then {
+      let nl = mid + 1
+      let nsize = right - nl
+      __bsearch(h, target, nl, right, nsize)
+    }
+    else {
+      let nsize = mid - left
+      __bsearch(h, target, left, mid, nsize)
+    }
+  }
+
+fn list_binary_search(xs: List[Int], target: Int) -> Option[Int] = {
+  let h = prim.handle(xs)
+  let len = prim.load32(h + 4)
+  let idx = __bsearch(h, target, 0, len, len)
+  if idx < 0 then __lio_none()
+  else __lio_some(idx)
+}
