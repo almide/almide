@@ -170,6 +170,14 @@ impl LowerCtx {
                 | IrExprKind::ClosureCreate { .. }
                 | IrExprKind::Range { .. }
                 | IrExprKind::RuntimeCall { .. } => {
+                    // A `Some(scalar)`/`None` RETURNED (`fn some_int(x) = Some(x)`) is
+                    // MATERIALIZED so the caller receives a real 0-or-1-element-list
+                    // Option (len-correct) it can `match` — the self-host Option fns
+                    // (list.get/first/last) return through such helpers. Moved out (NOT
+                    // pushed to live_heap_handles), cert = Alloc i + move-out m.
+                    if let Some(dst) = self.try_lower_option_ctor(tail, &tail.ty) {
+                        return Ok(Some(dst));
+                    }
                     let dst = self.fresh_value();
                     let repr = repr_of(&tail.ty)?;
                     let init = alloc_init(tail);

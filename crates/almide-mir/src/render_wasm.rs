@@ -604,6 +604,7 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
         (include_str!("../../../stdlib/string_slice.almd"), &[("string_slice", "string.slice")]),
         (include_str!("../../../stdlib/string_trim.almd"), &[("string_trim", "string.trim")]),
         (include_str!("../../../stdlib/list_get_or.almd"), &[("list_get_or", "list.get_or")]),
+        (include_str!("../../../stdlib/list_get.almd"), &[("list_get", "list.get")]),
     ]
 }
 
@@ -1390,6 +1391,70 @@ mod tests {
             assert_eq!(out.lines().count(), 3000, "every iteration must print (no OOM/leak)");
             assert_eq!(out.lines().next(), Some("0"));
             assert_eq!(out.lines().last(), Some("2999"));
+        }
+    }
+
+    #[test]
+    fn self_hosted_list_get_returns_some_or_none() {
+        // `list.get(xs, i)` SELF-HOSTED over the prim floor returns `Some(element)` in
+        // bounds / `None` out of bounds, matched via the materialized-Option variant match
+        // (list.get's result is tracked, so the `match` executes only the taken arm).
+        // get(1)=Some(20)→"20", get(5)=None→"none", byte-matching v0's list.get + match.
+        let src = "fn main() -> Unit = {\n  \
+            let xs = [10, 20, 30]\n  \
+            match list.get(xs, 1) {\n    \
+            Some(x) => println(int.to_string(x)),\n    \
+            None => println(\"none\"),\n  }\n  \
+            match list.get(xs, 5) {\n    \
+            Some(x) => println(int.to_string(x)),\n    \
+            None => println(\"none\"),\n  } }\n";
+        let prog = lower_source(src);
+        // list.get is self-hosted (auto-linked), not an external runtime call.
+        assert!(
+            prog.functions.iter().any(|f| f.name == "list.get"),
+            "list.get must be auto-linked as a self-host fn"
+        );
+        if let Some(out) = build_and_run("list_get", &render_wasm_program(&prog)) {
+            assert_eq!(out, "20\nnone");
+        }
+    }
+
+    #[test]
+    fn self_hosted_list_get_via_bound_var_executes() {
+        // The BOUND-VAR form `let o = list.get(xs, i); match o { … }` also executes — the
+        // self-host Option result bound to `o` is tracked at the bind. get(0)=Some(10)→"10".
+        let src = "fn main() -> Unit = {\n  \
+            let xs = [10, 20, 30]\n  \
+            let o = list.get(xs, 0)\n  \
+            match o {\n    \
+            Some(x) => println(int.to_string(x)),\n    \
+            None => println(\"none\"),\n  } }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("list_get_var", &render_wasm_program(&prog)) {
+            assert_eq!(out, "10");
+        }
+    }
+
+    #[test]
+    fn self_hosted_list_get_loop_is_bounded() {
+        // ADVERSARIAL: calling list.get + matching its Option every iteration must run in
+        // BOUNDED memory — each call's fresh Option (returned through the heap-result-if
+        // move-out, materialized into the match subject's owned temp) is freed at the
+        // iteration's end and reused. 2000 iterations would overrun the 64 KiB page if the
+        // per-call Option leaked. Completing all 2000 proves the call + match ownership
+        // balance (no leak/double-free through the self-host call path).
+        let src = "fn main() -> Unit = {\n  \
+            let xs = [7, 8, 9]\n  \
+            var i = 0\n  \
+            while i < 2000 {\n    \
+            match list.get(xs, 1) {\n      \
+            Some(x) => println(int.to_string(x)),\n      \
+            None => println(\"none\"),\n    }\n    \
+            i = i + 1\n  } }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("list_get_loop", &render_wasm_program(&prog)) {
+            assert_eq!(out.lines().count(), 2000, "every iteration prints (no OOM/leak)");
+            assert!(out.lines().all(|l| l == "8"), "list.get(xs,1) is always Some(8)");
         }
     }
 

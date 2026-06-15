@@ -544,6 +544,16 @@ pub(crate) fn find_var_ty(stmts: &[IrStmt], var: VarId) -> Option<Ty> {
 /// Extract a concrete initializer from a fresh-heap bind value. A `List[Int]`
 /// literal yields [`Init::IntList`]; everything else is [`Init::Opaque`] (the
 /// computation is carried by a later brick).
+/// Does the stdlib `module.func` call return a real MATERIALIZED 0-or-1-element-list
+/// Option (a self-host Option fn whose impl returns through tail-materialized `Some`/
+/// `None`)? Its result may be tracked in `materialized_options` so a `match` over it
+/// EXECUTES. The SINGLE SOURCE for both the bound-var path (binds.rs) and the direct-
+/// subject path (control.rs) — keep them in sync to avoid tracking a non-materialized
+/// call (which would misread as `None`). Add a name only when its self-host impl lands.
+pub(crate) fn is_self_host_option_module_fn(module: &str, func: &str) -> bool {
+    module == "list" && func == "get"
+}
+
 pub(crate) fn alloc_init(value: &IrExpr) -> Init {
     if let IrExprKind::LitStr { value } = &value.kind {
         return Init::Str(value.clone());

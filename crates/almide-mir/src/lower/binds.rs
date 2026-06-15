@@ -187,6 +187,11 @@ impl LowerCtx {
                     self.lower_pure_module_value_call(module.as_str(), func.as_str(), args, ty)?;
                 self.value_of.insert(var, dst);
                 self.live_heap_handles.push(dst);
+                // A self-host Option fn (`list.get`) returns a real materialized Option —
+                // track the bound result so a later `match` over the var EXECUTES.
+                if is_self_host_option_module_fn(module.as_str(), func.as_str()) {
+                    self.materialized_options.insert(dst);
+                }
                 Ok(())
             }
             // `var x = obj.method(args)` / `var x = (g)(args)` — an UNRESOLVABLE

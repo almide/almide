@@ -73,6 +73,15 @@ impl LowerCtx {
                     self.record_elided_calls(subject);
                     None
                 };
+                // A `match` whose SUBJECT is a self-host Option-returning call
+                // (list.get/first/last) — which returns a real materialized 0-or-1-element-
+                // list Option — gets that result TRACKED so the variant-match executes over
+                // it. (A direct `Some`/`None` bound var is already tracked at construction.)
+                if let Some(v) = subject_value {
+                    if is_self_host_option_call(subject) {
+                        self.materialized_options.insert(v);
+                    }
+                }
                 // A `match` over a MATERIALIZED Option (`Some(scalar)`/`None`) EXECUTES
                 // — only the taken arm runs — when the subject is tracked; otherwise it
                 // LINEARIZES below (the sound both-arms fallback).
@@ -810,5 +819,21 @@ impl LowerCtx {
             )));
         }
         Ok(())
+    }
+}
+
+/// Is `subject` a call to a SELF-HOST Option-returning stdlib fn? Such a call returns a
+/// real MATERIALIZED 0-or-1-element-list Option (its impl returns through `Some(scalar)`/
+/// `None` helpers, tail-materialized), so a `match` over its result may EXECUTE — the call
+/// dst is tracked in `materialized_options`. NARROW to the fns ACTUALLY self-hosted today
+/// (`list.get`): a fn merely declared Option-returning but NOT self-hosted would return a
+/// deferred `Opaque` (len0) that must NOT be tracked, else the match would misread it as
+/// `None`. Add a name here only when its self-host impl + registry entry land together.
+fn is_self_host_option_call(subject: &IrExpr) -> bool {
+    match &subject.kind {
+        IrExprKind::Call { target: CallTarget::Module { module, func, .. }, .. } => {
+            is_self_host_option_module_fn(module.as_str(), func.as_str())
+        }
+        _ => false,
     }
 }
