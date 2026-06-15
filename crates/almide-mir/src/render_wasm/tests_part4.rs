@@ -514,6 +514,41 @@
     }
 
     #[test]
+    fn self_hosted_bytes_transform() {
+        // SELF-HOSTED bytes.new/concat/reverse/repeat/starts_with/ends_with over the Bytes
+        // block machinery. new(3)=[0,0,0]; concat("ab","cd")="abcd"; reverse("abc")="cba";
+        // repeat("xy",3)="xyxyxy"; starts_with/ends_with byte-compare. Byte-matches v0.
+        let src = "fn main() -> Unit = {\n  \
+            let n3 = bytes.new(3)\n  \
+            println(int.to_string(bytes.len(n3)))\n  \
+            println(int.to_string(bytes.get_or(n3, 0, 9)))\n  \
+            let ab = bytes.from_string(\"ab\")\n  let cd = bytes.from_string(\"cd\")\n  \
+            let cc = bytes.concat(ab, cd)\n  \
+            println(int.to_string(bytes.len(cc)))\n  \
+            println(int.to_string(bytes.get_or(cc, 0, 0)))\n  \
+            println(int.to_string(bytes.get_or(cc, 3, 0)))\n  \
+            let abc = bytes.from_string(\"abc\")\n  let rev = bytes.reverse(abc)\n  \
+            println(int.to_string(bytes.get_or(rev, 0, 0)))\n  \
+            println(int.to_string(bytes.get_or(rev, 2, 0)))\n  \
+            let xy = bytes.from_string(\"xy\")\n  let rep = bytes.repeat(xy, 3)\n  \
+            println(int.to_string(bytes.len(rep)))\n  \
+            println(int.to_string(bytes.get_or(rep, 5, 0)))\n  \
+            let hello = bytes.from_string(\"hello\")\n  let he = bytes.from_string(\"he\")\n  let lo = bytes.from_string(\"lo\")\n  \
+            let sw1 = bytes.starts_with(hello, he)\n  let s1 = if sw1 then 1 else 0\n  println(int.to_string(s1))\n  \
+            let sw2 = bytes.starts_with(hello, lo)\n  let s2 = if sw2 then 1 else 0\n  println(int.to_string(s2))\n  \
+            let ew1 = bytes.ends_with(hello, lo)\n  let e1 = if ew1 then 1 else 0\n  println(int.to_string(e1))\n  \
+            let ew2 = bytes.ends_with(hello, he)\n  let e2 = if ew2 then 1 else 0\n  println(int.to_string(e2)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "bytes.concat"));
+        assert!(prog.functions.iter().any(|f| f.name == "bytes.starts_with"));
+        if let Some(out) = build_and_run("self_hosted_bytes_transform", &render_wasm_program(&prog)) {
+            // new3 len3 b0=0; concat len4 b0=97 b3=100; reverse b0=99 b2=97; repeat len6 b5=121;
+            // starts_with("hello","he")=1 ("hello","lo")=0; ends_with("hello","lo")=1 ("hello","he")=0
+            assert_eq!(out, "3\n0\n4\n97\n100\n99\n97\n6\n121\n1\n0\n1\n0");
+        }
+    }
+
+    #[test]
     fn self_hosted_math_sqrt() {
         // SELF-HOSTED math.sqrt = prim.fsqrt (f64.sqrt, byte-exact with v0). sqrt(16)=4,
         // sqrt(2)=1.41…→to_int 1, sqrt(81)=9.

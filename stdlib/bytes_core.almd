@@ -33,3 +33,92 @@ fn bytes_get_or(b: Bytes, i: Int, default: Int) -> Int = {
     if i < n then prim.load8(h + 12 + i) else default
   } else default
 }
+
+// Fill n bytes at p with zero (bytes.new returns a zeroed block; alloc_bytes leaves it raw).
+fn __zerofill(p: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else { prim.store8(p + i, 0); __zerofill(p, n, i + 1) }
+
+// bytes.new(len) -> a fresh zero-filled Bytes of max(0, len) bytes.
+fn bytes_new(len: Int) -> Bytes = {
+  let n = if len > 0 then len else 0
+  let b = prim.alloc_bytes(n)
+  let _x = __zerofill(prim.handle(b) + 12, n, 0)
+  b
+}
+
+// bytes.concat(a, b) -> a fresh Bytes holding a's bytes then b's bytes.
+fn bytes_concat(a: Bytes, b: Bytes) -> Bytes = {
+  let an = prim.load32(prim.handle(a) + 4)
+  let bn = prim.load32(prim.handle(b) + 4)
+  let out = prim.alloc_bytes(an + bn)
+  let op = prim.handle(out) + 12
+  let ap = prim.handle(a) + 12
+  let bp = prim.handle(b) + 12
+  let _x = __bytecopy(op, ap, an, 0)
+  let _y = __bytecopy(op + an, bp, bn, 0)
+  out
+}
+
+// Copy n bytes from src into dst in REVERSE order (dst[n-1-i] = src[i]).
+fn __revcopy(dst: Int, src: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let byte = prim.load8(src + i)
+    let pos = dst + (n - 1 - i)
+    prim.store8(pos, byte)
+    __revcopy(dst, src, n, i + 1)
+  }
+
+// bytes.reverse(b) -> a fresh Bytes with the bytes reversed.
+fn bytes_reverse(b: Bytes) -> Bytes = {
+  let n = prim.load32(prim.handle(b) + 4)
+  let out = prim.alloc_bytes(n)
+  let _x = __revcopy(prim.handle(out) + 12, prim.handle(b) + 12, n, 0)
+  out
+}
+
+// Copy the blen-byte block at src into dst n times back-to-back.
+fn __repcopy(dst: Int, src: Int, blen: Int, n: Int, k: Int) -> Int =
+  if k >= n then 0
+  else {
+    let off = dst + k * blen
+    let _x = __bytecopy(off, src, blen, 0)
+    __repcopy(dst, src, blen, n, k + 1)
+  }
+
+// bytes.repeat(b, count) -> b repeated max(0, count) times.
+fn bytes_repeat(b: Bytes, count: Int) -> Bytes = {
+  let blen = prim.load32(prim.handle(b) + 4)
+  let n = if count > 0 then count else 0
+  let out = prim.alloc_bytes(blen * n)
+  let _x = __repcopy(prim.handle(out) + 12, prim.handle(b) + 12, blen, n, 0)
+  out
+}
+
+// Are the n bytes at pa equal to the n bytes at pb? (Lazy recursion: only the taken arm runs.)
+fn __byteq(pa: Int, pb: Int, n: Int, i: Int) -> Bool =
+  if i >= n then true
+  else {
+    let x = prim.load8(pa + i)
+    let y = prim.load8(pb + i)
+    if x == y then __byteq(pa, pb, n, i + 1) else false
+  }
+
+// bytes.starts_with(b, prefix) -> does b begin with prefix?
+fn bytes_starts_with(b: Bytes, prefix: Bytes) -> Bool = {
+  let bn = prim.load32(prim.handle(b) + 4)
+  let pn = prim.load32(prim.handle(prefix) + 4)
+  let pb = prim.handle(b) + 12
+  let pp = prim.handle(prefix) + 12
+  if pn > bn then false else __byteq(pb, pp, pn, 0)
+}
+
+// bytes.ends_with(b, suffix) -> does b end with suffix?
+fn bytes_ends_with(b: Bytes, suffix: Bytes) -> Bool = {
+  let bn = prim.load32(prim.handle(b) + 4)
+  let sn = prim.load32(prim.handle(suffix) + 4)
+  let pb = prim.handle(b) + 12 + (bn - sn)
+  let ps = prim.handle(suffix) + 12
+  if sn > bn then false else __byteq(pb, ps, sn, 0)
+}
