@@ -616,6 +616,7 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
                 ("string_contains", "string.contains"),
                 ("string_count", "string.count"),
                 ("string_index_of", "string.index_of"),
+                ("string_last_index_of", "string.last_index_of"),
             ],
         ),
     ]
@@ -1574,6 +1575,25 @@ mod tests {
         assert!(prog.functions.iter().any(|f| f.name == "string.index_of"), "linked");
         if let Some(out) = build_and_run("string_index_of", &render_wasm_program(&prog)) {
             assert_eq!(out, "2\nnone\n2");
+        }
+    }
+
+    #[test]
+    fn self_hosted_string_last_index_of() {
+        // string.last_index_of self-hosted (Option[Int], codepoint index, backward scan):
+        // last_index_of("abcabc","bc")=Some(4) (the LATER "bc", codepoint index), ("abcabc",
+        // "z")=None, ("a日a日","日")=Some(3) (the LATER 日, codepoint index 3). byte-match v0.
+        let src = "fn main() -> Unit = {\n  \
+            match string.last_index_of(\"abcabc\", \"bc\") {\n    \
+            Some(x) => println(int.to_string(x)),\n    None => println(\"none\"),\n  }\n  \
+            match string.last_index_of(\"abcabc\", \"z\") {\n    \
+            Some(x) => println(int.to_string(x)),\n    None => println(\"none\"),\n  }\n  \
+            match string.last_index_of(\"a日a日\", \"日\") {\n    \
+            Some(x) => println(int.to_string(x)),\n    None => println(\"none\"),\n  } }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "string.last_index_of"), "linked");
+        if let Some(out) = build_and_run("string_last_index_of", &render_wasm_program(&prog)) {
+            assert_eq!(out, "4\nnone\n3");
         }
     }
 

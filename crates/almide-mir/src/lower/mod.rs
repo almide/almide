@@ -553,7 +553,7 @@ pub(crate) fn find_var_ty(stmts: &[IrStmt], var: VarId) -> Option<Ty> {
 pub(crate) fn is_self_host_option_module_fn(module: &str, func: &str) -> bool {
     match module {
         "list" => matches!(func, "get" | "first" | "last"),
-        "string" => func == "index_of",
+        "string" => matches!(func, "index_of" | "last_index_of"),
         _ => false,
     }
 }

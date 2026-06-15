@@ -111,3 +111,24 @@ fn string_index_of(s: String, needle: String) -> Option[Int] = {
   if bpos < 0 then __io_none()
   else __io_at(hs + 12, bpos)
 }
+
+// BYTE position of the LAST needle match at or before `pos`, or -1 if none — scan
+// backward from the last possible start. The empty needle matches at `slen` (v0
+// rfind("") = Some(len)). Reuses __byte_eq.
+fn __rfind_byte(sbase: Int, nbase: Int, nlen: Int, pos: Int) -> Int =
+  if pos < 0 then -1
+  else {
+    let m = __byte_eq(sbase + pos, nbase, nlen)
+    if m then pos
+    else __rfind_byte(sbase, nbase, nlen, pos - 1)
+  }
+
+fn string_last_index_of(s: String, needle: String) -> Option[Int] = {
+  let hs = prim.handle(s)
+  let hn = prim.handle(needle)
+  let slen = prim.load32(hs + 4)
+  let nlen = prim.load32(hn + 4)
+  let bpos = __rfind_byte(hs + 12, hn + 12, nlen, slen - nlen)
+  if bpos < 0 then __io_none()
+  else __io_at(hs + 12, bpos)
+}
