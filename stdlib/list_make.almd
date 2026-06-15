@@ -1,0 +1,33 @@
+// list_make — SELF-HOSTED `list.range` / `list.repeat` for v1 over the prim floor:
+// construct a List[Int] via prim.alloc_list + store64. range(start,end) = the half-open
+// integer run; repeat(x,n) = n copies of x. Both store i64 VALUES (no new heap elements
+// created), so they are fully sound and loop-bounded — even a heap `x` is only aliased
+// (like list.reverse), never freshly allocated, so nothing leaks. Result owned.
+
+fn __range_fill(lh: Int, start: Int, count: Int, i: Int) -> Int =
+  if i >= count then 0
+  else {
+    prim.store64(lh + 12 + i * 8, start + i)
+    __range_fill(lh, start, count, i + 1)
+  }
+
+fn list_range(start: Int, end: Int) -> List[Int] = {
+  let count = if end > start then end - start else 0
+  let buf = prim.alloc_list(count)
+  let _x = __range_fill(prim.handle(buf), start, count, 0)
+  buf
+}
+
+fn __repeat_fill(lh: Int, x: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    prim.store64(lh + 12 + i * 8, x)
+    __repeat_fill(lh, x, n, i + 1)
+  }
+
+fn list_repeat(x: Int, n: Int) -> List[Int] = {
+  let count = if n > 0 then n else 0
+  let buf = prim.alloc_list(count)
+  let _x = __repeat_fill(prim.handle(buf), x, count, 0)
+  buf
+}

@@ -667,6 +667,10 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
         ),
         (include_str!("../../../stdlib/list_reverse.almd"), &[("list_reverse", "list.reverse")]),
         (
+            include_str!("../../../stdlib/list_make.almd"),
+            &[("list_range", "list.range"), ("list_repeat", "list.repeat")],
+        ),
+        (
             include_str!("../../../stdlib/list_take_drop.almd"),
             &[
                 ("list_take", "list.take"),
@@ -1845,6 +1849,53 @@ mod tests {
         if let Some(out) = build_and_run("list_reverse_loop", &render_wasm_program(&prog)) {
             assert_eq!(out.lines().count(), 2000, "every iteration prints (no OOM/leak)");
             assert!(out.lines().all(|l| l == "3"));
+        }
+    }
+
+    #[test]
+    fn self_hosted_list_range_and_repeat() {
+        // list.range/repeat self-hosted (List[Int] construction, i64 values = no leak):
+        // range(2,6)=[2,3,4,5], range(5,5)=[], repeat(7,3)=[7,7,7]. Read back via list.len +
+        // list.get_or. byte-matching v0.
+        let src = "fn main() -> Unit = {\n  \
+            let r = list.range(2, 6)\n  \
+            let e = list.range(5, 5)\n  \
+            let p = list.repeat(7, 3)\n  \
+            let rl = list.len(r)\n  \
+            let r0 = list.get_or(r, 0, 0)\n  \
+            let r3 = list.get_or(r, 3, 0)\n  \
+            let el = list.len(e)\n  \
+            let pl = list.len(p)\n  \
+            let p2 = list.get_or(p, 2, 0)\n  \
+            println(int.to_string(rl))\n  \
+            println(int.to_string(r0))\n  \
+            println(int.to_string(r3))\n  \
+            println(int.to_string(el))\n  \
+            println(int.to_string(pl))\n  \
+            println(int.to_string(p2)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "list.range"), "linked");
+        assert!(prog.functions.iter().any(|f| f.name == "list.repeat"), "linked");
+        if let Some(out) = build_and_run("list_make", &render_wasm_program(&prog)) {
+            assert_eq!(out, "4\n2\n5\n0\n3\n7");
+        }
+    }
+
+    #[test]
+    fn self_hosted_list_range_loop_bounded() {
+        // ADVERSARIAL: list.range every iteration allocs + drops a List[Int] (no heap
+        // elements to leak) — bounded memory.
+        let src = "fn main() -> Unit = {\n  \
+            var i = 0\n  \
+            while i < 2000 {\n    \
+            let r = list.range(0, 5)\n    \
+            let s = list.get_or(r, 4, 0)\n    \
+            println(int.to_string(s))\n    \
+            i = i + 1\n  } }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("list_range_loop", &render_wasm_program(&prog)) {
+            assert_eq!(out.lines().count(), 2000, "every iteration prints (no OOM/leak)");
+            assert!(out.lines().all(|l| l == "4"));
         }
     }
 
