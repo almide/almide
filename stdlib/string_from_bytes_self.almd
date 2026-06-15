@@ -1,0 +1,21 @@
+// string_from_bytes_self — SELF-HOSTED string.from_bytes for v1: copy a `List[Int]`'s low bytes
+// into a fresh String (the inverse of string.to_bytes, which emits the String's UTF-8 bytes).
+// Each i64 list slot's low 8 bits become one output byte. For VALID UTF-8 input this byte-matches
+// v0's `String::from_utf8_lossy`; the lossy U+FFFD replacement of an INVALID byte sequence is a
+// later refinement (v0 substitutes the replacement char, this copies the raw bytes). Source borrowed.
+
+fn __sfb_copy(dst: Int, src: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let v = prim.load64(src + i * 8)
+    prim.store8(dst + i, v)
+    __sfb_copy(dst, src, n, i + 1)
+  }
+
+fn string_from_bytes(xs: List[Int]) -> String = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  let out = prim.alloc_str(n)
+  let _x = __sfb_copy(prim.handle(out) + 12, h + 12, n, 0)
+  out
+}

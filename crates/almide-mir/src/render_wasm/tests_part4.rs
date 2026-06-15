@@ -814,6 +814,22 @@
     }
 
     #[test]
+    fn self_hosted_string_from_bytes() {
+        // SELF-HOSTED string.from_bytes — copy a List[Int]'s low bytes into a fresh String. For
+        // VALID UTF-8 it byte-matches v0's from_utf8_lossy: [72,105]="Hi", "hello" bytes, and the
+        // 4-byte sequence [240,159,152,128] = the U+1F600 emoji. (Invalid UTF-8 lossy = a refinement.)
+        let src = "fn main() -> Unit = {\n  \
+            let a = [72, 105]\n  println(string.from_bytes(a))\n  \
+            let b = [104, 101, 108, 108, 111]\n  println(string.from_bytes(b))\n  \
+            let c = [240, 159, 152, 128]\n  println(string.from_bytes(c)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "string.from_bytes"));
+        if let Some(out) = build_and_run("self_hosted_string_from_bytes", &render_wasm_program(&prog)) {
+            assert_eq!(out, "Hi\nhello\n😀");
+        }
+    }
+
+    #[test]
     fn self_hosted_math_pi_e() {
         // SELF-HOSTED math.pi / math.e — the f64 constants (declared `= _` in stdlib/math.almd).
         // Verified via float.to_int(const * 1000): pi -> 3141, e -> 2718. Byte-matches v0.
@@ -953,6 +969,7 @@
             assert_eq!(out, "4\n2\n3\n3\n5\n0");
         }
     }
+
 
 
 

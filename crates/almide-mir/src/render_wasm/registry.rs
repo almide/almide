@@ -247,6 +247,10 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
             &[("string_to_bytes", "string.to_bytes")],
         ),
         (
+            include_str!("../../../../stdlib/string_from_bytes_self.almd"),
+            &[("string_from_bytes", "string.from_bytes")],
+        ),
+        (
             include_str!("../../../../stdlib/string_trim.almd"),
             &[
                 ("string_trim", "string.trim"),
