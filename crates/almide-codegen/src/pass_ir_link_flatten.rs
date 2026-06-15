@@ -177,6 +177,25 @@ fn rename_expr(e: IrExpr, map: &HashMap<String, Sym>) -> IrExpr {
                 }
             }
         }
+        // Loop bodies hold `Vec<IrStmt>` directly (not a Block child), so the
+        // Block arm above misses their `let`-binding type annotations. Without
+        // this, a `let p = mod.f()` inside a `while`/`for` keeps the unmangled
+        // type name and the walker emits `let p: P` against the flat struct
+        // `almide_rt_mod_P` → E0425 (cross-module record bound in a loop).
+        IrExprKind::While { body, .. } => {
+            for s in body.iter_mut() {
+                if let IrStmtKind::Bind { ty, .. } = &mut s.kind {
+                    *ty = rename_ty(ty, map);
+                }
+            }
+        }
+        IrExprKind::ForIn { body, .. } => {
+            for s in body.iter_mut() {
+                if let IrStmtKind::Bind { ty, .. } = &mut s.kind {
+                    *ty = rename_ty(ty, map);
+                }
+            }
+        }
         IrExprKind::Record { name: Some(n), .. } => {
             // A struct literal carries its (now-qualified) type name as the ctor
             // (`mod.Type`, pinned by lowering); mangle it to the flat struct name.

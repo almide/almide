@@ -411,7 +411,11 @@ fn strip_borrows_at_tco_calls(
 /// - ALL self-recursive calls are in tail position
 /// - Not a test helper (name starts with `__test_`)
 /// - Return type can be default-initialized (primitives, tuples of primitives, etc.)
-fn is_tco_candidate(func: &IrFunction) -> bool {
+///
+/// `pub` so borrow inference can pre-bake the owned-param signature these
+/// functions will get (their params become loop state → owned), keeping callers'
+/// inferred borrows consistent with the post-TCO signature.
+pub fn is_tco_candidate(func: &IrFunction) -> bool {
     if func.name.starts_with("__test_") {
         return false;
     }

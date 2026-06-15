@@ -1757,6 +1757,66 @@ impl FuncCompiler<'_> {
         let str_local = match self.var_map.get(&str_var.0) { Some(&v) => v, None => return false };
         let counter_local = match self.var_map.get(&counter_var.0) { Some(&v) => v, None => return false };
 
+        // BULK fast path: `while counter < BOUND { s = s + CONST_CHAR; counter += 1 }`
+        // appends (BOUND - counter) identical bytes, so the entire loop collapses to one
+        // capacity reservation + memory.fill. rustc lowers the equivalent push-loop
+        // char-by-char and LLVM will not coalesce it into a memset — a decisive idiom win.
+        // Restricted to a side-effect-free bound (literal / variable) so evaluating it once
+        // (instead of per iteration) is sound.
+        if let IrExprKind::BinOp { op: BinOp::Lt, left, right } = &cond.kind {
+            if matches!(&left.kind, IrExprKind::Var { id } if *id == counter_var)
+                && matches!(&right.kind, IrExprKind::LitInt { .. } | IrExprKind::Var { .. })
+            {
+                use super::engine::layout::{STRING, string};
+                let data_off = self.emitter.layout_reg.fixed_offset(STRING, string::DATA) as i32;
+                let cap_off = self.emitter.layout_reg.fixed_offset(STRING, string::CAP) as i32 as u32;
+                // Almide `Int` is an i64 on wasm: bound and the counter are i64; the byte
+                // run length and string len/cap are i32.
+                let bound = self.scratch.alloc_i64();
+                let run = self.scratch.alloc_i32();
+                let s = self.scratch.alloc_i32();
+                let len = self.scratch.alloc_i32();
+                let new_len = self.scratch.alloc_i32();
+                self.emit_expr(right);
+                wasm!(self.func, {
+                    local_set(Local(bound));
+                    // run = (bound - counter) wrapped to i32; only proceed when positive
+                    local_get(Local(bound)); local_get(Local(counter_local)); i64_sub; i32_wrap_i64; local_set(Local(run));
+                    local_get(Local(run)); i32_const(Imm32(0)); i32_gt_s;
+                    if_empty;
+                      local_get(Local(str_local)); local_set(Local(s));
+                      local_get(Local(s)); i32_load(0); local_set(Local(len));
+                      local_get(Local(len)); local_get(Local(run)); i32_add; local_set(Local(new_len));
+                      // grow the backing buffer iff new_len exceeds capacity
+                      local_get(Local(new_len)); local_get(Local(s)); i32_load(cap_off); i32_gt_u;
+                      if_empty;
+                        local_get(Local(new_len)); i32_const(Imm32(data_off)); i32_add;
+                        call(self.emitter.rt.alloc_nozero); local_set(Local(s));
+                        local_get(Local(s)); i32_const(Imm32(data_off)); i32_add;
+                        local_get(Local(str_local)); i32_const(Imm32(data_off)); i32_add;
+                        local_get(Local(len)); memory_copy;
+                        local_get(Local(s)); local_get(Local(new_len)); i32_store(cap_off);
+                      end;
+                      // fill the appended run with the constant byte, in one shot
+                      local_get(Local(s)); i32_const(Imm32(data_off)); i32_add; local_get(Local(len)); i32_add;
+                      i32_const(Imm32(byte_val as i32));
+                      local_get(Local(run));
+                      memory_fill;
+                      // finalize: len = new_len, counter = bound, rebind s
+                      local_get(Local(s)); local_get(Local(new_len)); i32_store(0);
+                      local_get(Local(s)); local_set(Local(str_local));
+                      local_get(Local(bound)); local_set(Local(counter_local));
+                    end;
+                });
+                self.scratch.free_i32(new_len);
+                self.scratch.free_i32(len);
+                self.scratch.free_i32(s);
+                self.scratch.free_i32(run);
+                self.scratch.free_i64(bound);
+                return true;
+            }
+        }
+
         // Emit optimized loop with hoisted len/cap
         let s = self.scratch.alloc_i32();
         let len = self.scratch.alloc_i32();
@@ -1805,7 +1865,9 @@ impl FuncCompiler<'_> {
               local_get(Local(cap));
               i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32));
               i32_add;
-              call(self.emitter.rt.alloc); local_tee(Local(s));
+              // Grow buffer is overwritten in full (old prefix via memory.copy below,
+              // the rest by subsequent appends, reads bounded by len) → skip reuse-zeroing.
+              call(self.emitter.rt.alloc_nozero); local_tee(Local(s));
               // Copy old data
               i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32)); i32_add;
               local_get(Local(str_local));

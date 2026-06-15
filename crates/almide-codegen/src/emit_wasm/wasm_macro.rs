@@ -638,6 +638,18 @@ macro_rules! wasm {
     (@emit $f:expr, i64x2_splat; $($rest:tt)*) => {
         $f.instruction(&wasm_encoder::Instruction::I64x2Splat); wasm!(@emit $f, $($rest)*)
     };
+    (@emit $f:expr, i64x2_extract_lane($lane:expr); $($rest:tt)*) => {
+        $f.instruction(&wasm_encoder::Instruction::I64x2ExtractLane($lane)); wasm!(@emit $f, $($rest)*)
+    };
+    (@emit $f:expr, i64x2_replace_lane($lane:expr); $($rest:tt)*) => {
+        $f.instruction(&wasm_encoder::Instruction::I64x2ReplaceLane($lane)); wasm!(@emit $f, $($rest)*)
+    };
+    (@emit $f:expr, v128_xor; $($rest:tt)*) => {
+        $f.instruction(&wasm_encoder::Instruction::V128Xor); wasm!(@emit $f, $($rest)*)
+    };
+    (@emit $f:expr, i8x16_shuffle($lanes:expr); $($rest:tt)*) => {
+        $f.instruction(&wasm_encoder::Instruction::I8x16Shuffle($lanes)); wasm!(@emit $f, $($rest)*)
+    };
 }
 
 pub(super) use wasm;
