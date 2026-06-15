@@ -92,10 +92,36 @@ per-element drop). This is the next big machinery slice; until it lands, only Li
 construction and List[String] aliasing are admissible.
 Count substrings first (2-pass) or grow. Cert-touching (nested owned heap) → adversarial.
 
-## Machinery 3 — Closures (unblocks list.map/filter/fold) — HARDEST
+## Machinery 3 — Closures (unblocks map/filter/fold/reduce/scan/find/each/sort_by …) — HARDEST
 Self-host must INVOKE the closure `f` on each element (`f(x)` where f is a fn-value param).
-v1 must lower a call through a function VALUE (not a named callee). The hard frontier; design
-last.
+**KEY FINDING (investigated): v1's wasm render has NO function table / `call_indirect` /
+`elem` at all** — so this is a from-scratch build of the entire indirect-call surface, the
+largest remaining slice. Current state: `IrExprKind::Lambda { params, body, lambda_id }`
+lowers to `Alloc{Opaque}` (not a real function); a `Computed { callee }` call (`(g)(x)`)
+is WALLED by `is_higher_order` (calls.rs:193) → deferred. Required pieces, in order:
+1. **Lambda → a real MirFunction + a table slot.** Each lambda body becomes its own wasm
+   `func` (lower its body like any fn); register it in a new wasm `(table funcref)` + `(elem)`
+   indexed by `lambda_id`. The closure VALUE = the table index (a scalar i64) for a NON-
+   capturing lambda; a capturing one also needs an env block (the `ClosureCreate`/`EnvLoad`
+   path) carrying the captures, so the value = (table_idx, env_ptr) — do NON-capturing FIRST.
+2. **`Computed`-call → `call_indirect`.** `f(x)` where `f` is a fn-value local lowers to
+   `(call_indirect (type $sig) (args…) (local.get f))`. Needs a `(type)` per arity/sig.
+3. **Un-wall higher-order + CAPS.** Remove the `is_higher_order` wall for the admitted case;
+   the invoked closure's capabilities are UNKNOWN, so the calling fn must be tainted
+   caps-UNVERIFIED (honest, like an elided call) — NOT claimed caps-safe. This keeps caps
+   SOUND (`used ⊆ declared` can't be proven, so don't claim it) — verify caps stays ≥ 3582
+   (the closure-using corpus fns were already caps-unverified, so no regression expected).
+4. **Ownership/discipline:** the table/elem are STATIC module structure (not handwritten
+   RUNTIME WAT) so the `handwritten_wasm_runtime_does_not_grow` baseline is untouched IF the
+   lambda funcs + table render inline (no new `$rc_*`-style runtime helpers). The closure
+   value (a scalar table_idx) carries no ownership; a capturing env IS a heap object (i/d).
+5. **Then self-host list.map/filter** (alloc_list result + `f(elem)` per slot) — but a
+   List[String] result still needs Machinery-2's nested-heap RC, so map over List[Int]→
+   List[Int] lands first.
+ADVERSARIAL: cert-touching (un-walls higher-order). The soundness rests on the caps taint
+(never claim a closure call is caps-safe) — spawn refuters trying to get an undeclared
+Stdout closure to pass caps. Multi-turn; implement the infrastructure (1+2) before any
+stdlib fn, with corpus-wall caps ACCEPT verified at each step.
 
 ## Known writing-idiom gaps (use the workaround now; fix centrally later)
 `if` as a BinOp OPERAND (`n + (if c …)`) and a scalar CALL as a call-ARG (`f(g(x))`) and a
