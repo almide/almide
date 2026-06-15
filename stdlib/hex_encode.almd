@@ -1,0 +1,39 @@
+// hex_encode — SELF-HOSTED hex.encode / hex.encode_upper for v1. Each input byte becomes two
+// hex digits in a fresh String: the high nibble (byte >> 4) then the low nibble (byte & 0x0F),
+// mapped to '0'..'9' / 'a'..'f' (lowercase, alpha base 97) or 'A'..'F' (uppercase, base 65).
+// Bytes read via the prim floor; the 2n-byte String built via prim.alloc_str. Source borrowed.
+
+// A nibble (0..15) -> its ASCII hex digit: 0..9 -> '0'..'9', 10..15 -> alpha_base + (nibble - 10).
+fn __hex_digit(nibble: Int, alpha_base: Int) -> Int =
+  if nibble < 10 then 48 + nibble else alpha_base + (nibble - 10)
+
+// Write 2 hex digits per source byte into dst (dst[2i], dst[2i+1]); alpha_base selects case.
+fn __hex_fill(dst: Int, src: Int, n: Int, i: Int, abase: Int) -> Int =
+  if i >= n then 0
+  else {
+    let byte = prim.load8(src + i)
+    let hi = prim.bshr_u(byte, 4)
+    let lo = prim.band(byte, 15)
+    let hc = __hex_digit(hi, abase)
+    let lc = __hex_digit(lo, abase)
+    let o = dst + i * 2
+    prim.store8(o, hc)
+    prim.store8(o + 1, lc)
+    __hex_fill(dst, src, n, i + 1, abase)
+  }
+
+// hex.encode(b) -> lowercase hex string (two chars per byte).
+fn hex_encode(b: Bytes) -> String = {
+  let n = prim.load32(prim.handle(b) + 4)
+  let out = prim.alloc_str(n * 2)
+  let _x = __hex_fill(prim.handle(out) + 12, prim.handle(b) + 12, n, 0, 97)
+  out
+}
+
+// hex.encode_upper(b) -> uppercase hex string (two chars per byte).
+fn hex_encode_upper(b: Bytes) -> String = {
+  let n = prim.load32(prim.handle(b) + 4)
+  let out = prim.alloc_str(n * 2)
+  let _x = __hex_fill(prim.handle(out) + 12, prim.handle(b) + 12, n, 0, 65)
+  out
+}

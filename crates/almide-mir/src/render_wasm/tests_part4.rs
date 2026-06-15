@@ -658,6 +658,25 @@
     }
 
     #[test]
+    fn self_hosted_hex_encode() {
+        // SELF-HOSTED hex.encode / hex.encode_upper (Bytes -> hex String) over the bytes machinery
+        // + the bitwise prim floor. Each byte -> two hex digits (high nibble byte>>4, low byte&0xF).
+        // encode([0,15,255,16])="000fff10"; encode_upper([171,205])="ABCD". Byte-matches v0.
+        let src = "fn main() -> Unit = {\n  \
+            let xs = [0, 15, 255, 16]\n  let b = bytes.from_list(xs)\n  \
+            println(hex.encode(b))\n  \
+            let ys = [171, 205]\n  let b2 = bytes.from_list(ys)\n  \
+            println(hex.encode_upper(b2))\n  \
+            println(hex.encode(b2)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "hex.encode"));
+        assert!(prog.functions.iter().any(|f| f.name == "hex.encode_upper"));
+        if let Some(out) = build_and_run("self_hosted_hex_encode", &render_wasm_program(&prog)) {
+            assert_eq!(out, "000fff10\nABCD\nabcd");
+        }
+    }
+
+    #[test]
     fn self_hosted_math_sqrt() {
         // SELF-HOSTED math.sqrt = prim.fsqrt (f64.sqrt, byte-exact with v0). sqrt(16)=4,
         // sqrt(2)=1.41…→to_int 1, sqrt(81)=9.
