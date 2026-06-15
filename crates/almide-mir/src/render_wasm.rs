@@ -176,14 +176,20 @@ pub fn render_wasm_program(prog: &MirProgram) -> String {
         .collect::<String>();
     // Closure dispatch: when any function makes an indirect (closure) call, emit a module
     // function table whose slot i holds function i (the lambda-lifting convention — a
-    // lifted lambda is bound to its slot index), plus the 1-param closure signature
-    // `$closure_fn1` that `call_indirect` checks against. Gated on CallIndirect presence so
-    // non-closure programs render byte-identically (no table, no behavior change).
-    let has_closure = prog
+    // lifted lambda is bound to its slot index), plus ONE closure signature per ARITY that
+    // appears (`$closure_fnN` = N i64 params → i64) that `call_indirect` checks against.
+    // Gated on CallIndirect presence so non-closure programs render byte-identically (no
+    // table, no behavior change). Multi-arity supports fold `(Acc, Int) -> Acc` etc.
+    let arities: std::collections::BTreeSet<usize> = prog
         .functions
         .iter()
-        .any(|f| f.ops.iter().any(|op| matches!(op, Op::CallIndirect { .. })));
-    let closure_table = if has_closure {
+        .flat_map(|f| f.ops.iter())
+        .filter_map(|op| match op {
+            Op::CallIndirect { args, .. } => Some(args.len()),
+            _ => None,
+        })
+        .collect();
+    let closure_table = if !arities.is_empty() {
         let n = prog.functions.len();
         let names = prog
             .functions
@@ -191,9 +197,18 @@ pub fn render_wasm_program(prog: &MirProgram) -> String {
             .map(|f| format!("${}", f.name))
             .collect::<Vec<_>>()
             .join(" ");
-        format!(
-            "  (type $closure_fn1 (func (param i64) (result i64)))\n  (table {n} funcref)\n  (elem (i32.const 0) func {names})\n",
-        )
+        let types = arities
+            .iter()
+            .map(|a| {
+                let params = if *a == 0 {
+                    String::new()
+                } else {
+                    format!(" (param {})", vec!["i64"; *a].join(" "))
+                };
+                format!("  (type $closure_fn{a} (func{params} (result i64)))\n")
+            })
+            .collect::<String>();
+        format!("{types}  (table {n} funcref)\n  (elem (i32.const 0) func {names})\n")
     } else {
         String::new()
     };
@@ -543,14 +558,16 @@ fn render_op(
             format!("    (local.set {d} {expr})\n", d = local(*dst))
         }
         // An indirect (closure) call: push the args, then the table index, and dispatch
-        // through the module function table with the 1-param closure signature. The table +
-        // `(type $closure_fn1)` are emitted by render_wasm_program when any CallIndirect
-        // exists; `table_idx` is the runtime slot of the lifted lambda.
+        // through the module function table with the closure signature OF THIS ARITY
+        // (`$closure_fnN`, N = arg count). The table + every `(type $closure_fnN)` are
+        // emitted by render_wasm_program for each arity present; `table_idx` is the runtime
+        // slot of the lifted lambda.
         Op::CallIndirect { dst, table_idx, args, .. } => {
             let argstr = args.iter().map(render_arg_wasm).collect::<Vec<_>>().join(" ");
+            let arity = args.len();
             // The table index is a wasm i32; the MIR value is the uniform i64, so wrap it.
             let call = format!(
-                "(call_indirect (type $closure_fn1) {argstr} (i32.wrap_i64 (local.get {})))",
+                "(call_indirect (type $closure_fn{arity}) {argstr} (i32.wrap_i64 (local.get {})))",
                 local(*table_idx)
             );
             match dst {

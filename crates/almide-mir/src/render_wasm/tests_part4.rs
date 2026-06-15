@@ -120,6 +120,22 @@
     }
 
     #[test]
+    fn self_hosted_list_fold() {
+        // SELF-HOSTED higher-order `list.fold` — the FIRST two-arity closure (f: (Acc, Int) ->
+        // Acc via $closure_fn2). fold([1,2,3,4], 0, (a,x)=>a+x)=10; fold([1,2,3,4], 1, (a,x)=>
+        // a*x)=24. The 2-arg closure is invoked via CallIndirect through the new per-arity
+        // closure type; byte-matches v0.
+        let src = "fn main() -> Unit = {\n  \
+            let s = list.fold([1, 2, 3, 4], 0, (a, x) => a + x)\n  println(int.to_string(s))\n  \
+            let p = list.fold([1, 2, 3, 4], 1, (a, x) => a * x)\n  println(int.to_string(p)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "list.fold"));
+        if let Some(out) = build_and_run("self_hosted_list_fold", &render_wasm_program(&prog)) {
+            assert_eq!(out, "10\n24");
+        }
+    }
+
+    #[test]
     fn self_hosted_list_take_end_drop_end() {
         // list.take_end/drop_end self-hosted: last n / all-but-last n, List[Int] slot-copy.
         // take_end([1,2,3,4,5],2)=[4,5] ([0]=4,len 2); drop_end([1,2,3,4,5],2)=[1,2,3]

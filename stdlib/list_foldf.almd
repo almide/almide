@@ -1,0 +1,20 @@
+// list_foldf — SELF-HOSTED higher-order `list.fold` for v1 over the prim floor + closures.
+// The first TWO-arity closure use: f : (Acc, Int) -> Acc, invoked via CallIndirect through
+// $closure_fn2. Left fold — acc starts at `init`, then acc = f(acc, xs[i]) for each element
+// in order, matching v0's fold(xs, init, f). List[Int] with an Int accumulator (the dominant
+// case; a non-Int accumulator would need a repr-specialized variant). The scalar acc carries
+// no heap; the source is only read (borrowed). (Distinct from list_fold.almd, which hosts the
+// fixed-operator folds product/max/min.)
+
+fn __foldf_loop(sh: Int, f: (Int, Int) -> Int, n: Int, i: Int, acc: Int) -> Int =
+  if i >= n then acc
+  else {
+    let x = prim.load64(sh + 12 + i * 8)
+    let nacc = f(acc, x)
+    __foldf_loop(sh, f, n, i + 1, nacc)
+  }
+
+fn list_fold(xs: List[Int], init: Int, f: (Int, Int) -> Int) -> Int = {
+  let n = list.len(xs)
+  __foldf_loop(prim.handle(xs), f, n, 0, init)
+}
