@@ -364,6 +364,24 @@
     }
 
     #[test]
+    fn self_hosted_int_rotate() {
+        // SELF-HOSTED int.rotate_left/right (width-parameterized, logical-shift via prim.bshr_u).
+        // rotate_left(1,4,8)=16, rotate_right(16,4,8)=1, rotate_left(128,1,8)=1 (high bit wraps
+        // to bit 0), rotate_left(1,4,32)=16. Byte-matches v0.
+        let src = "fn main() -> Unit = {\n  \
+            println(int.to_string(int.rotate_left(1, 4, 8)))\n  \
+            println(int.to_string(int.rotate_right(16, 4, 8)))\n  \
+            println(int.to_string(int.rotate_left(128, 1, 8)))\n  \
+            println(int.to_string(int.rotate_left(1, 4, 32))) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "int.rotate_left"));
+        assert!(prog.functions.iter().any(|f| f.name == "int.rotate_right"));
+        if let Some(out) = build_and_run("self_hosted_int_rotate", &render_wasm_program(&prog)) {
+            assert_eq!(out, "16\n1\n1\n16");
+        }
+    }
+
+    #[test]
     fn self_hosted_math_sqrt() {
         // SELF-HOSTED math.sqrt = prim.fsqrt (f64.sqrt, byte-exact with v0). sqrt(16)=4,
         // sqrt(2)=1.41…→to_int 1, sqrt(81)=9.

@@ -193,6 +193,7 @@ fn render_op(op: &Op) -> Option<String> {
                 IntOp::Xor => format!("{a} ^ {b}"),
                 IntOp::Shl => format!("{a} << {b}"),
                 IntOp::Shr => format!("{a} >> {b}"),
+                IntOp::ShrU => format!("(({a} as u64) >> {b}) as i64"),
             };
             Some(format!("let {d}: i64 = {rhs};"))
         }

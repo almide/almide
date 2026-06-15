@@ -787,6 +787,7 @@ impl LowerCtx {
             "bxor" => Some(crate::IntOp::Xor),
             "bshl" => Some(crate::IntOp::Shl),
             "bshr" => Some(crate::IntOp::Shr),
+            "bshr_u" => Some(crate::IntOp::ShrU),
             _ => None,
         };
         if let Some(op) = bitop {

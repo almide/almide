@@ -377,6 +377,9 @@ pub enum IntOp {
     Shl,
     /// Arithmetic (sign-extending) shift right, matching v0's `>>` on `i64`.
     Shr,
+    /// LOGICAL (zero-filling) shift right (`i64.shr_u`) — for unsigned/bit-width ops like
+    /// int.rotate_* which shift the value as a u64. The shift amount is wasm-masked to 0..63.
+    ShrU,
 }
 
 /// A runtime function the MIR can call. An enum (not a string) so the renderer

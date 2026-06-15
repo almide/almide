@@ -575,6 +575,7 @@ fn render_op(
                 IntOp::Xor => format!("(i64.xor {args})"),
                 IntOp::Shl => format!("(i64.shl {args})"),
                 IntOp::Shr => format!("(i64.shr_s {args})"),
+                IntOp::ShrU => format!("(i64.shr_u {args})"),
             };
             format!("    (local.set {d} {expr})\n", d = local(*dst))
         }

@@ -51,6 +51,9 @@ fn bxor(a: Int, b: Int) -> Int = _
 fn bshl(n: Int, bits: Int) -> Int = _
 @intrinsic("almide_rt_prim_bshr")
 fn bshr(n: Int, bits: Int) -> Int = _
+// LOGICAL (zero-filling) shift right — the value is shifted as a u64 (i64.shr_u).
+@intrinsic("almide_rt_prim_bshr_u")
+fn bshr_u(n: Int, bits: Int) -> Int = _
 
 // Allocate a runtime-sized OWNED String of `byte_len` bytes (rc=1, length set, data
 // uninitialized). The string builders (int.to_string, concat) fill the bytes via

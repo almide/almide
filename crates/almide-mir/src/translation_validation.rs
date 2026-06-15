@@ -73,6 +73,7 @@ pub fn wasm_pattern(op: &crate::Op) -> Option<String> {
         Op::IntBinOp { op: IntOp::Xor, .. } => "i64.xor".into(),
         Op::IntBinOp { op: IntOp::Shl, .. } => "i64.shl".into(),
         Op::IntBinOp { op: IntOp::Shr, .. } => "i64.shr_s".into(),
+        Op::IntBinOp { op: IntOp::ShrU, .. } => "i64.shr_u".into(),
         // A release decrements the refcount cell — realized by `call $rc_dec`.
         Op::Drop { .. } => "call $rc_dec".into(),
         // A copy-on-write: MakeUnique clones a SHARED block before in-place
