@@ -261,3 +261,54 @@ fn set_symmetric_difference(a: Set[Int], b: Set[Int]) -> Set[Int] = {
   prim.store32(rh + 4, w2)
   r
 }
+
+// ── Higher-order Set[Int] (closures machinery) ── the predicate f is invoked via CallIndirect.
+// A pure predicate byte-matches v0 (single pass, no short-circuit). filter keeps a subset of an
+// already-unique set, so the result stays unique (no re-dedup).
+
+fn __set_filter_fill(dh: Int, sh: Int, f: (Int) -> Bool, n: Int, i: Int, di: Int) -> Int =
+  if i >= n then di
+  else {
+    let x = prim.load64(sh + 12 + i * 8)
+    let keep = f(x)
+    if keep then {
+      prim.store64(dh + 12 + di * 8, x)
+      __set_filter_fill(dh, sh, f, n, i + 1, di + 1)
+    } else {
+      __set_filter_fill(dh, sh, f, n, i + 1, di)
+    }
+  }
+
+fn set_filter(s: Set[Int], f: (Int) -> Bool) -> Set[Int] = {
+  let sh = prim.handle(s)
+  let n = prim.load32(sh + 4)
+  let r = prim.alloc_set(n)
+  let rh = prim.handle(r)
+  let count = __set_filter_fill(rh, sh, f, n, 0, 0)
+  prim.store32(rh + 4, count)
+  r
+}
+
+// Sum the predicate's 0/1 over all elements (a Bool is an i64 0/1) → the hit COUNT.
+fn __set_count_hits(sh: Int, f: (Int) -> Bool, n: Int, i: Int, acc: Int) -> Int =
+  if i >= n then acc
+  else {
+    let x = prim.load64(sh + 12 + i * 8)
+    let h = f(x)
+    if h then __set_count_hits(sh, f, n, i + 1, acc + 1)
+    else __set_count_hits(sh, f, n, i + 1, acc)
+  }
+
+fn set_all(s: Set[Int], f: (Int) -> Bool) -> Bool = {
+  let sh = prim.handle(s)
+  let n = prim.load32(sh + 4)
+  let hits = __set_count_hits(sh, f, n, 0, 0)
+  hits >= n
+}
+
+fn set_any(s: Set[Int], f: (Int) -> Bool) -> Bool = {
+  let sh = prim.handle(s)
+  let n = prim.load32(sh + 4)
+  let hits = __set_count_hits(sh, f, n, 0, 0)
+  hits > 0
+}

@@ -1373,6 +1373,28 @@
     }
 
     #[test]
+    fn self_hosted_set_higher_order() {
+        // SELF-HOSTED set.filter/all/any over Set[Int] (closures machinery — the predicate is a
+        // lambda invoked via CallIndirect). s={1,2,3,4,5}: filter(x>2)={3,4,5} len 3 sum 12;
+        // all(x>0)=true; any(x>4)=true; all(x>3)=false. Byte-matches v0.
+        let src = "fn main() -> Unit = {\n  \
+            let s = set.from_list([1, 2, 3, 4, 5])\n  \
+            let big = set.filter(s, (x) => x > 2)\n  println(int.to_string(set.len(big)))\n  \
+            let bl = set.to_list(big)\n  println(int.to_string(list.sum(bl)))\n  \
+            let allpos = set.all(s, (x) => x > 0)\n  let va = if allpos then 1 else 0\n  \
+            println(int.to_string(va))\n  \
+            let anybig = set.any(s, (x) => x > 4)\n  let vb = if anybig then 1 else 0\n  \
+            println(int.to_string(vb))\n  \
+            let allbig = set.all(s, (x) => x > 3)\n  let vc = if allbig then 1 else 0\n  \
+            println(int.to_string(vc)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "set.filter"));
+        if let Some(out) = build_and_run("self_hosted_set_higher_order", &render_wasm_program(&prog)) {
+            assert_eq!(out, "3\n12\n1\n1\n0");
+        }
+    }
+
+    #[test]
     fn self_hosted_set_core_loop_reclaims() {
         // SOUNDNESS for the new Set[Int] heap path: a bounded loop building + dropping a fresh
         // Set[Int] every iteration must reclaim each (plain non-nested drop) — no leak (OOM) or
