@@ -72,6 +72,14 @@ fn alloc_bytes(n: Int) -> Bytes = _
 @intrinsic("almide_rt_prim_alloc_list")
 fn alloc_list(n: Int) -> List[Int] = _
 
+// Allocate a runtime-sized OWNED `List[Float]` of `n` i64 slots — physically IDENTICAL to
+// `alloc_list` (a plain, non-nested-ownership block; drops as a flat block), but typed as
+// List[Float] so a float-array builder can return it. Each f64 element occupies its 8-byte
+// slot as raw BITS, stored via `store64(addr, prim.fbits(x))`. A dedicated name (not a generic
+// `alloc_list[A]`) keeps scalar scratch-list element inference unambiguous for `alloc_list`.
+@intrinsic("almide_rt_prim_alloc_list")
+fn alloc_list_f64(n: Int) -> List[Float] = _
+
 // Allocate a runtime-sized OWNED `List[String]` of `n` slots (Machinery 2: a NESTED-
 // ownership list). Fill via `store_str`, which MOVES each owned String into a slot; the
 // whole list is freed recursively (each element String + the block) at scope end.

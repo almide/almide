@@ -771,7 +771,7 @@ impl LowerCtx {
         // `prim.alloc_list(n)` allocates a runtime-sized OWNED `List[Int]` of n i64 slots —
         // an `Op::Alloc` (cert `i`), the list-building sibling of alloc_str. The caller
         // fills it via `prim.store64`; moved out / dropped like any heap value.
-        if func == "alloc_list" {
+        if func == "alloc_list" || func == "alloc_list_f64" {
             let len_v = self.lower_scalar_value(&args[0]).ok_or_else(|| {
                 LowerError::Unsupported("prim.alloc_list length is not a lowerable scalar".into())
             })?;

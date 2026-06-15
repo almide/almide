@@ -1284,6 +1284,48 @@
     }
 
     #[test]
+    fn self_hosted_bytes_read_f64_array() {
+        // SELF-HOSTED bytes.read_f64_le_array / read_f64_be_array → List[Float] (the List[Float]
+        // machinery: prim.alloc_list generalized to List[A], f64 BITS stored in each i64 slot via
+        // prim.fbits + store64; plain non-nested-ownership drop). Read the raw slot bits back via
+        // prim.load64 and byte-match v0's f64 bit pattern: 1.0=0x3FF0000000000000=4607182418800017408,
+        // 2.0=0x4000000000000000=4611686018427387904. LE [..,240,63]=1.0; BE [63,240,..]=1.0.
+        let src = "fn main() -> Unit = {\n  \
+            let b = bytes.from_list([0, 0, 0, 0, 0, 0, 240, 63, 0, 0, 0, 0, 0, 0, 0, 64])\n  \
+            let a = bytes.read_f64_le_array(b, 0, 2)\n  \
+            println(int.to_string(prim.load64(prim.handle(a) + 12)))\n  \
+            println(int.to_string(prim.load64(prim.handle(a) + 12 + 8)))\n  \
+            let b2 = bytes.from_list([63, 240, 0, 0, 0, 0, 0, 0])\n  \
+            let a2 = bytes.read_f64_be_array(b2, 0, 1)\n  \
+            println(int.to_string(prim.load64(prim.handle(a2) + 12))) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "bytes.read_f64_le_array"));
+        if let Some(out) = build_and_run("self_hosted_bytes_read_f64_array", &render_wasm_program(&prog)) {
+            assert_eq!(out, "4607182418800017408\n4611686018427387904\n4607182418800017408");
+        }
+    }
+
+    #[test]
+    fn self_hosted_bytes_read_f64_array_loop_reclaims() {
+        // SOUNDNESS for the new List[Float] heap path: a bounded loop that allocates a fresh
+        // List[Float] (read_f64_le_array) every iteration must RECLAIM each one (plain non-nested
+        // drop) — no leak (would OOM) and no double-free (would trap). 4000 iterations runs to
+        // completion and prints the last element's bits (1.0 = 4607182418800017408).
+        let src = "fn main() -> Unit = {\n  \
+            let b = bytes.from_list([0, 0, 0, 0, 0, 0, 240, 63])\n  \
+            var i = 0\n  var last = 0\n  \
+            while i < 4000 {\n    \
+              let a = bytes.read_f64_le_array(b, 0, 1)\n    \
+              last = prim.load64(prim.handle(a) + 12)\n    \
+              i = i + 1\n  }\n  \
+            println(int.to_string(last)) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("self_hosted_bytes_read_f64_array_loop_reclaims", &render_wasm_program(&prog)) {
+            assert_eq!(out, "4607182418800017408");
+        }
+    }
+
+    #[test]
     fn self_hosted_bytes_read_array_be_and_wide() {
         // SELF-HOSTED big-endian + i16/i64 array reads, each reusing its self-hosted scalar read.
         // u16_be [0,1,0,2]@0×2=[1,2] sum 3; i16_le [255,255]@0×1=-1 (negated 1);
