@@ -921,3 +921,19 @@
             assert_eq!(out, "255\n0\n100\n65535\n0");
         }
     }
+
+    #[test]
+    fn self_hosted_option_is_some_is_none() {
+        // option.is_some/is_none self-hosted: read the materialized Option's header length
+        // (Some=1, None=0). is_some(Some 5)=T, is_some(None)=F, is_none(None)=T.
+        let src = "fn main() -> Unit = {\n  \
+            let a: Option[Int] = Some(5)\n  let s1 = option.is_some(a)\n  if s1 then println(\"T\") else println(\"F\")\n  \
+            let b: Option[Int] = None\n  let s2 = option.is_some(b)\n  if s2 then println(\"T2\") else println(\"F2\")\n  \
+            let s3 = option.is_none(b)\n  if s3 then println(\"T3\") else println(\"F3\") }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "option.is_some"));
+        assert!(prog.functions.iter().any(|f| f.name == "option.is_none"));
+        if let Some(out) = build_and_run("option_pred", &render_wasm_program(&prog)) {
+            assert_eq!(out, "T\nF2\nT3");
+        }
+    }

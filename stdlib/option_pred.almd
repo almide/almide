@@ -1,0 +1,16 @@
+// option_pred — SELF-HOSTED `option.is_some` / `option.is_none` for v1. A materialized
+// Option is a 0-or-1-element list (Some = len 1, None = len 0), so the predicate is just
+// the header length read — element-type-agnostic (like list.is_empty), so a monomorphic
+// Option[Int] impl serves any Option. Reads only (the Option is borrowed); scalar Bool.
+
+fn option_is_some(o: Option[Int]) -> Bool = {
+  let h = prim.handle(o)
+  let len = prim.load32(h + 4)
+  len == 1
+}
+
+fn option_is_none(o: Option[Int]) -> Bool = {
+  let h = prim.handle(o)
+  let len = prim.load32(h + 4)
+  len == 0
+}
