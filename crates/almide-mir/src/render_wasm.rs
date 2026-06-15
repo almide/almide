@@ -691,6 +691,7 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
                 ("int_count_leading_zeros", "int.count_leading_zeros"),
                 ("int_bit_width", "int.bit_width"),
                 ("int_log2_floor", "int.log2_floor"),
+                ("int_log2_ceil", "int.log2_ceil"),
                 ("int_next_power_of_two", "int.next_power_of_two"),
                 ("int_prev_power_of_two", "int.prev_power_of_two"),
             ],
@@ -2626,6 +2627,24 @@ mod tests {
         assert!(prog.functions.iter().any(|f| f.name == "string.slice"));
         if let Some(out) = build_and_run("string_slice", &render_wasm_program(&prog)) {
             assert_eq!(out, "ell\n日本");
+        }
+    }
+
+    #[test]
+    fn self_hosted_int_log2_ceil() {
+        // int.log2_ceil self-hosted (reuse __clz): n<=1 → 0, else 64 - clz(n-1) =
+        // bit_width(n-1). ceil: 1→0, 2→1, 3→2, 4→2, 5→3, 8→3, 9→4.
+        let src = "fn main() -> Unit = {\n  \
+            let a = int.log2_ceil(2)\n  let sa = int.to_string(a)\n  println(sa)\n  \
+            let b = int.log2_ceil(3)\n  let sb = int.to_string(b)\n  println(sb)\n  \
+            let c = int.log2_ceil(4)\n  let sc = int.to_string(c)\n  println(sc)\n  \
+            let d = int.log2_ceil(5)\n  let sd = int.to_string(d)\n  println(sd)\n  \
+            let e = int.log2_ceil(9)\n  let se = int.to_string(e)\n  println(se)\n  \
+            let f = int.log2_ceil(1)\n  let sf = int.to_string(f)\n  println(sf) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "int.log2_ceil"));
+        if let Some(out) = build_and_run("int_log2_ceil", &render_wasm_program(&prog)) {
+            assert_eq!(out, "1\n2\n2\n3\n4\n0");
         }
     }
 

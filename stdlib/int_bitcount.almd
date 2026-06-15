@@ -55,6 +55,14 @@ fn int_log2_floor(n: Int) -> Int =
     63 - lz
   }
 
+// log2_ceil: ceil(log2(n)) for n > 1 (= bit_width(n-1)), 0 for n <= 1.
+fn int_log2_ceil(n: Int) -> Int =
+  if n <= 1 then 0
+  else {
+    let lz = __clz(n - 1, 63)
+    64 - lz
+  }
+
 // next_power_of_two: smallest power of 2 >= n (1 for n <= 1) = 1 << bit_width(n-1).
 fn int_next_power_of_two(n: Int) -> Int =
   if n <= 1 then 1
