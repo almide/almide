@@ -1,0 +1,51 @@
+// list_sortby — SELF-HOSTED `list.sort_by` for v1 over the prim floor + closures. A STABLE
+// sort by a CACHED key: the key fn f: (Int) -> Int ($closure_fn1) is called EXACTLY ONCE per
+// element (matching v0's sort_by_cached_key), into a scratch key array; then a stable
+// insertion sort reorders the value copy AND the key array together (strict `>` so equal keys
+// keep their order). List[Int]/Int key. The scratch key list is owned + dropped at scope end
+// (no leak); the result value list is returned owned rc=1. Source borrowed.
+
+fn __sb_init(bh: Int, sh: Int, kh: Int, f: (Int) -> Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let v = prim.load64(sh + 12 + i * 8)
+    let k = f(v)
+    prim.store64(bh + 12 + i * 8, v)
+    prim.store64(kh + 12 + i * 8, k)
+    __sb_init(bh, sh, kh, f, n, i + 1)
+  }
+
+// Shift the sorted prefix right while its key exceeds k; return the insertion slot.
+fn __sb_shift(bh: Int, kh: Int, j: Int, k: Int) -> Int =
+  if j <= 0 then j
+  else {
+    let kp = prim.load64(kh + 12 + (j - 1) * 8)
+    if kp > k then {
+      let vp = prim.load64(bh + 12 + (j - 1) * 8)
+      prim.store64(bh + 12 + j * 8, vp)
+      prim.store64(kh + 12 + j * 8, kp)
+      __sb_shift(bh, kh, j - 1, k)
+    } else {
+      j
+    }
+  }
+
+fn __sb_insert(bh: Int, kh: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let v = prim.load64(bh + 12 + i * 8)
+    let k = prim.load64(kh + 12 + i * 8)
+    let pos = __sb_shift(bh, kh, i, k)
+    prim.store64(bh + 12 + pos * 8, v)
+    prim.store64(kh + 12 + pos * 8, k)
+    __sb_insert(bh, kh, n, i + 1)
+  }
+
+fn list_sort_by(xs: List[Int], f: (Int) -> Int) -> List[Int] = {
+  let n = list.len(xs)
+  let buf = prim.alloc_list(n)
+  let keys = prim.alloc_list(n)
+  let _a = __sb_init(prim.handle(buf), prim.handle(xs), prim.handle(keys), f, n, 0)
+  let _b = __sb_insert(prim.handle(buf), prim.handle(keys), n, 0)
+  buf
+}
