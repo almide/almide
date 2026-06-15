@@ -125,3 +125,43 @@ fn list_find_str(xs: List[String], f: (String) -> Bool) -> Option[String] = {
   let n = prim.load32(h + 4)
   __list_find_str_loop(h, f, n, 0)
 }
+
+// list.unique over a List[String] — keep the FIRST occurrence of each distinct element, dropping
+// all later duplicates (v0's `if !r.contains(x) r.push(x)`), first-occurrence order. Membership is
+// byte equality against the RESULT so far; each kept element is a fresh DEEP COPY (the copy is made
+// AND consumed within one branch — no cross-arm conditional consume).
+
+// Is string x already among the first `count` elements of the result block dh?
+fn __dh_has_str(dh: Int, count: Int, x: String, i: Int) -> Bool =
+  if i >= count then false
+  else {
+    let e = prim.load_str(dh + 12 + i * 8)
+    let eq = __str_eq(e, x)
+    if eq then true
+    else __dh_has_str(dh, count, x, i + 1)
+  }
+
+fn __unique_str_step(sh: Int, dh: Int, n: Int, i: Int, di: Int) -> Int = {
+  let cur = prim.load_str(sh + 12 + i * 8)
+  let present = __dh_has_str(dh, di, cur, 0)
+  if present then __unique_str_fill(sh, dh, n, i + 1, di)
+  else {
+    let copy = string.repeat(cur, 1)
+    prim.store_str(dh + 12 + di * 8, copy)
+    __unique_str_fill(sh, dh, n, i + 1, di + 1)
+  }
+}
+
+fn __unique_str_fill(sh: Int, dh: Int, n: Int, i: Int, di: Int) -> Int =
+  if i >= n then di
+  else __unique_str_step(sh, dh, n, i, di)
+
+fn list_unique_str(xs: List[String]) -> List[String] = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  let out = prim.alloc_list_str(n)
+  let oh = prim.handle(out)
+  let di = __unique_str_fill(h, oh, n, 0, 0)
+  prim.store32(oh + 4, di)
+  out
+}

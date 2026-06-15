@@ -715,7 +715,7 @@ pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], resu
     use almide_lang::types::constructor::TypeConstructorId;
     if module == "list" {
         // List[heap]-RETURNING combinators (the result is a new heap-element list).
-        if matches!(func, "map" | "filter" | "reverse" | "take" | "drop") {
+        if matches!(func, "map" | "filter" | "reverse" | "take" | "drop" | "unique") {
             if let Ty::Applied(TypeConstructorId::List, args) = result_ty {
                 if args.len() == 1 && is_heap_ty(&args[0]) {
                     return format!("list.{func}_str");

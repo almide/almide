@@ -1699,6 +1699,41 @@
     }
 
     #[test]
+    fn self_hosted_list_string_unique() {
+        // SELF-HOSTED list.unique over a List[String] — keep first occurrence, drop all later dups
+        // (membership vs the result via __str_eq; kept elements deep-copied). xs=[a,b,a,c,b,a]=
+        // [a,b,c] len 3, first "a", sum-of-lens 3. Byte-matches v0.
+        let src = "fn main() -> Unit = {\n  \
+            let xs = string.split(\"a,b,a,c,b,a\", \",\")\n  \
+            let u = list.unique(xs)\n  println(int.to_string(list.len(u)))\n  \
+            let f = list.get(u, 0)\n  match f { Some(v) => println(v), None => println(\"none\"), }\n  \
+            let last = list.get(u, 2)\n  match last { Some(v) => println(v), None => println(\"none\"), } }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "list.unique_str"));
+        if let Some(out) = build_and_run("self_hosted_list_string_unique", &render_wasm_program(&prog)) {
+            assert_eq!(out, "3\na\nc");
+        }
+    }
+
+    #[test]
+    fn self_hosted_list_string_unique_loop_reclaims() {
+        // SOUNDNESS for list.unique_str: a bounded loop building + dropping a fresh deduped
+        // List[String] each iteration must reclaim every kept element + the block — no leak/double-
+        // free. 3000 iters, prints the last result's len (2).
+        let src = "fn main() -> Unit = {\n  \
+            var i = 0\n  var last = 0\n  \
+            while i < 3000 {\n    \
+              let u = list.unique(string.split(\"xx,yy,xx,yy\", \",\"))\n    \
+              last = list.len(u)\n    \
+              i = i + 1\n  }\n  \
+            println(int.to_string(last)) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("self_hosted_list_string_unique_loop_reclaims", &render_wasm_program(&prog)) {
+            assert_eq!(out, "2");
+        }
+    }
+
+    #[test]
     fn self_hosted_list_string_find() {
         // SELF-HOSTED list.find over a List[String] → Option[String] (predicate higher-order; the
         // matched element returned as Some(deep copy), else None; materialized Option, match-exec).
