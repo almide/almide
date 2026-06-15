@@ -757,6 +757,31 @@
     }
 
     #[test]
+    fn self_hosted_float_convert() {
+        // SELF-HOSTED float.to_int8/16/32 + to_uint8/16/32 — Rust's saturating `f as iN`/`as uN`
+        // (out-of-range clamps to the type's min/max). prim.f2i truncates toward zero; the body
+        // clamps to the narrower range. A negative result is printed as 0 - v. Byte-matches v0.
+        let src = "fn main() -> Unit = {\n  \
+            println(int.to_string(float.to_int8(100.0)))\n  \
+            println(int.to_string(float.to_int8(200.0)))\n  \
+            let nf = float.from_int(0 - 200)\n  let neg = float.to_int8(nf)\n  let nm = 0 - neg\n  println(int.to_string(nm))\n  \
+            let f16 = float.from_int(40000)\n  println(int.to_string(float.to_int16(f16)))\n  \
+            let f32 = float.from_int(3000000000)\n  println(int.to_string(float.to_int32(f32)))\n  \
+            println(int.to_string(float.to_uint8(200.0)))\n  \
+            println(int.to_string(float.to_uint8(300.0)))\n  \
+            let un = float.from_int(0 - 5)\n  println(int.to_string(float.to_uint8(un)))\n  \
+            let u16 = float.from_int(70000)\n  println(int.to_string(float.to_uint16(u16)))\n  \
+            let u32 = float.from_int(5000000000)\n  println(int.to_string(float.to_uint32(u32))) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "float.to_int8"));
+        assert!(prog.functions.iter().any(|f| f.name == "float.to_uint32"));
+        if let Some(out) = build_and_run("self_hosted_float_convert", &render_wasm_program(&prog)) {
+            // 100; sat-high 127; sat-low -128 -> 128; 32767; 2147483647; 200; 255; neg->0; 65535; 4294967295
+            assert_eq!(out, "100\n127\n128\n32767\n2147483647\n200\n255\n0\n65535\n4294967295");
+        }
+    }
+
+    #[test]
     fn self_hosted_hex_encode() {
         // SELF-HOSTED hex.encode / hex.encode_upper (Bytes -> hex String) over the bytes machinery
         // + the bitwise prim floor. Each byte -> two hex digits (high nibble byte>>4, low byte&0xF).
@@ -881,4 +906,5 @@
             assert_eq!(out, "4\n2\n3\n3\n5\n0");
         }
     }
+
 

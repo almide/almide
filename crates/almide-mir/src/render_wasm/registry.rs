@@ -143,6 +143,17 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
             &[("int_to_float", "int.to_float"), ("int_to_float64", "int.to_float64")],
         ),
         (
+            include_str!("../../../../stdlib/float_convert.almd"),
+            &[
+                ("float_to_int8", "float.to_int8"),
+                ("float_to_int16", "float.to_int16"),
+                ("float_to_int32", "float.to_int32"),
+                ("float_to_uint8", "float.to_uint8"),
+                ("float_to_uint16", "float.to_uint16"),
+                ("float_to_uint32", "float.to_uint32"),
+            ],
+        ),
+        (
             include_str!("../../../../stdlib/hex_encode.almd"),
             &[("hex_encode", "hex.encode"), ("hex_encode_upper", "hex.encode_upper")],
         ),
