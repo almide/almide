@@ -228,6 +228,17 @@ impl LowerCtx {
                     self.live_heap_handles.push(dst);
                     return Ok(());
                 }
+                // A scalar-field tuple `(a, b)` of NON-LITERAL fields (vars / scalar exprs) — a
+                // literal `(3, 7)` is already an `Init::IntList` below. Construct the 2-slot block
+                // and store each field's computed value (the tuple-machinery construction sibling
+                // of the precise destructure). A heap-field tuple falls through to the Opaque alloc.
+                if let IrExprKind::Tuple { elements } = &value.kind {
+                    if let Some(dst) = self.try_lower_scalar_tuple_construct(elements) {
+                        self.value_of.insert(var, dst);
+                        self.live_heap_handles.push(dst);
+                        return Ok(());
+                    }
+                }
                 let dst = self.fresh_value();
                 let repr = repr_of(ty)?;
                 let init = alloc_init(value);
@@ -456,6 +467,40 @@ impl LowerCtx {
             }
         }
         self.bind_pattern(pattern, subject)
+    }
+
+    /// Construct a SCALAR-field tuple `(a, b, …)`: alloc an n-slot block (Init::DynList) and store
+    /// each field's computed scalar value at its slot via `Prim::Store`. Returns `None` (caller
+    /// falls back to the Opaque alloc) if any field is heap or not a lowerable scalar.
+    fn try_lower_scalar_tuple_construct(&mut self, elements: &[IrExpr]) -> Option<ValueId> {
+        use crate::{IntOp, PrimKind};
+        if elements.iter().any(|e| is_heap_ty(&e.ty)) {
+            return None;
+        }
+        // Lower each field's scalar value first (before the alloc, so a field expr that itself
+        // allocates doesn't interleave with our store sequence).
+        let vals: Vec<ValueId> = elements
+            .iter()
+            .map(|e| self.lower_scalar_value(e))
+            .collect::<Option<Vec<_>>>()?;
+        let len = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: len, value: elements.len() as i64 });
+        let dst = self.fresh_value();
+        self.ops.push(Op::Alloc {
+            dst,
+            repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT },
+            init: crate::Init::DynList { len },
+        });
+        let h = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![dst] });
+        for (i, v) in vals.into_iter().enumerate() {
+            let off = self.fresh_value();
+            self.ops.push(Op::ConstInt { dst: off, value: 12 + (i as i64) * 8 });
+            let addr = self.fresh_value();
+            self.ops.push(Op::IntBinOp { dst: addr, op: IntOp::Add, a: h, b: off });
+            self.ops.push(Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args: vec![addr, v] });
+        }
+        Some(dst)
     }
 
     /// Extract each SCALAR field of a tuple `subject` (a heap block) into its bound var via a

@@ -1752,6 +1752,23 @@
     }
 
     #[test]
+    fn scalar_tuple_var_field_construct() {
+        // TUPLE machinery: a `(a, b)` of NON-LITERAL scalar fields (vars / computed exprs)
+        // constructs dynamically (alloc + Prim::Store each field), then destructures precisely.
+        // a=3,b=7: (a,b)→(3,7); (a+1, b*2)→(4,14). Byte-matches v0.
+        let src = "fn main() -> Unit = {\n  \
+            let a = 3\n  let b = 7\n  \
+            let t = (a, b)\n  let (x, y) = t\n  \
+            println(int.to_string(x))\n  println(int.to_string(y))\n  \
+            let u = (a + 1, b * 2)\n  let (p, q) = u\n  \
+            println(int.to_string(p))\n  println(int.to_string(q)) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("scalar_tuple_var_field_construct", &render_wasm_program(&prog)) {
+            assert_eq!(out, "3\n7\n4\n14");
+        }
+    }
+
+    #[test]
     fn scalar_tuple_construct_and_destructure() {
         // TUPLE machinery (scalar-field slice): a `(3, 7)` literal materializes a 2-slot block
         // (Init::IntList, like a List[Int] literal); a `let (a, b) = t` destructure LOADS each
