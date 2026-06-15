@@ -265,7 +265,26 @@ impl LowerCtx {
             // closure's invocation capabilities are unknown), never falsely caps-verified.
             // A discarded HEAP result is a fresh `Alloc{Opaque}` dropped at scope end;
             // a Unit/scalar result carries no ownership.
-            CallTarget::Computed { .. } => {
+            CallTarget::Computed { callee } => {
+                // A Unit-result call THROUGH a lifted lambda value EXECUTES via CallIndirect
+                // (e.g. `let f = (x) => print_it(x); f(3)`). Otherwise — a dynamic closure
+                // value we cannot name — DEFER as before (calls captured, the Computed call
+                // elided ⇒ honest caps taint).
+                if let Some(table_idx) = self.funcref_value_of(callee) {
+                    let mark = self.ops.len();
+                    let lhh = self.live_heap_handles.len();
+                    if let Ok(lowered) = self.lower_call_args(args) {
+                        self.ops.push(Op::CallIndirect {
+                            dst: None,
+                            table_idx,
+                            args: lowered,
+                            result: None,
+                        });
+                        return Ok(());
+                    }
+                    self.ops.truncate(mark);
+                    self.live_heap_handles.truncate(lhh);
+                }
                 self.record_elided_calls(call);
                 if is_heap_ty(&call.ty) {
                     let dst = self.fresh_value();
@@ -515,10 +534,53 @@ impl LowerCtx {
     /// caps fold are preserved: a real `CallFn` replaces the elided marker 1:1 (same
     /// callee NAME, so `reachable_caps` is unchanged; same op count, so the
     /// `mir_calls <= ir_calls` gate cannot falsely de-taint).
+    /// If `callee` names a local bound to a LIFTED lambda (an `Op::FuncRef` value recorded
+    /// in `funcref_values`), return that value — the table slot a `CallIndirect` dispatches
+    /// through. Returns `None` for any other computed callee (a dynamic closure param, an
+    /// unanalyzable value), so the caller keeps the sound deferred model for those.
+    pub(crate) fn funcref_value_of(&self, callee: &IrExpr) -> Option<ValueId> {
+        if let IrExprKind::Var { id } = &callee.kind {
+            if let Some(v) = self.value_of.get(id) {
+                if self.funcref_values.contains(v) {
+                    return Some(*v);
+                }
+            }
+        }
+        None
+    }
+
     pub(crate) fn try_lower_scalar_call(&mut self, value: &IrExpr, ty: &Ty) -> Option<ValueId> {
         let ops_mark = self.ops.len();
         let lhh_mark = self.live_heap_handles.len();
         match &value.kind {
+            // A scalar call THROUGH a lifted lambda value (`let y = f(5)` where `f` bound a
+            // non-capturing lambda ⇒ an `Op::FuncRef`). The callee resolves to a funcref
+            // value, so this lowers to `Op::CallIndirect` and the closure EXECUTES — args
+            // materialized like any call, the scalar result bound. A Computed callee that is
+            // NOT a known funcref returns `None` and DEFERS (the existing model). The MIR
+            // CallIndirect is a genuine call (the corpus gate counts it), so it replaces the
+            // elided Computed 1:1 — no spurious caps taint, no `mir > ir` breach.
+            IrExprKind::Call { target: CallTarget::Computed { callee }, args, .. } => {
+                let table_idx = self.funcref_value_of(callee)?;
+                let repr = repr_of(ty).ok()?;
+                match self.lower_call_args(args) {
+                    Ok(lowered) => {
+                        let dst = self.fresh_value();
+                        self.ops.push(Op::CallIndirect {
+                            dst: Some(dst),
+                            table_idx,
+                            args: lowered,
+                            result: Some(repr),
+                        });
+                        Some(dst)
+                    }
+                    Err(_) => {
+                        self.ops.truncate(ops_mark);
+                        self.live_heap_handles.truncate(lhh_mark);
+                        None
+                    }
+                }
+            }
             // A scalar `Named` user call (`fn f() = g()`, `let n = add(2, 3)`).
             IrExprKind::Call { target: CallTarget::Named { name }, args, .. } => {
                 let repr = repr_of(ty).ok()?;

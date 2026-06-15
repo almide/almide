@@ -2,6 +2,25 @@
 // Textually included by render_wasm/tests.rs (one module: helpers/tests share scope).
 
     #[test]
+    fn lifted_lambda_executes_via_call_indirect() {
+        // THE closures-machinery floor (the path to higher-order self-host: list.map/filter/
+        // fold). A non-capturing `let f = (x) => x + 1` LIFTS to a fresh `__lambda_*`
+        // function bound via Op::FuncRef; `f(5)` lowers to Op::CallIndirect through that slot
+        // and EXECUTES, computing 6 — byte-matching v0. End-to-end: lower (lift + FuncRef +
+        // CallIndirect) → render (function table) → wasm → wasmtime.
+        let src = "fn main() -> Unit = {\n  \
+            let f = (x) => x + 1\n  let y = f(5)\n  let s = int.to_string(y)\n  println(s) }\n";
+        let prog = lower_source(src);
+        assert!(
+            prog.functions.iter().any(|f| f.name.starts_with("__lambda_")),
+            "the non-capturing lambda must be lifted to a __lambda_* function"
+        );
+        if let Some(out) = build_and_run("lifted_lambda_call_indirect", &render_wasm_program(&prog)) {
+            assert_eq!(out, "6");
+        }
+    }
+
+    #[test]
     fn self_hosted_list_take_end_drop_end() {
         // list.take_end/drop_end self-hosted: last n / all-but-last n, List[Int] slot-copy.
         // take_end([1,2,3,4,5],2)=[4,5] ([0]=4,len 2); drop_end([1,2,3,4,5],2)=[1,2,3]

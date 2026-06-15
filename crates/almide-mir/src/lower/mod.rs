@@ -111,7 +111,11 @@ pub fn lower_function_all(
     func: &IrFunction,
     globals: &HashMap<VarId, Ty>,
 ) -> Result<Vec<MirFunction>, LowerError> {
-    let mut ctx = LowerCtx { globals: globals.clone(), ..Default::default() };
+    let mut ctx = LowerCtx {
+        globals: globals.clone(),
+        fn_name: func.name.as_str().to_string(),
+        ..Default::default()
+    };
     let params = ctx.bind_params(&func.params)?;
     let ret = ctx.lower_body_into(&func.body)?;
     // The function's EFFECT SIGNATURE → its declared capability bound. The v1 model
@@ -205,13 +209,20 @@ pub(crate) struct LowerCtx {
     /// len-as-tag execution safe without any global materialization invariant.
     materialized_options: HashSet<ValueId>,
     /// Lambda-lifted auxiliary functions produced while lowering this function's body
-    /// (a `let f = (x) => …` lifts its body to a fresh MirFunction here, bound via
-    /// `Op::FuncRef`). `lower_function_all` returns these alongside the main function so
-    /// the program assembler tables + verifies them. Empty until the lambda-lifting +
-    /// corpus-harness integration lands (the lifting that writes to it is the next slice;
-    /// the lower_function_all plumbing is already in place).
-    #[allow(dead_code)]
+    /// (a non-capturing `let f = (x) => …` or a lambda call-argument lifts its body to a
+    /// fresh MirFunction here, bound via `Op::FuncRef`). `lower_function_all` returns these
+    /// alongside the main function so the program assembler tables + verifies them.
     lifted: Vec<crate::MirFunction>,
+    /// The enclosing source function's name — the file-unique prefix for lifted lambda
+    /// names (`__lambda_<fn_name>_<n>`). The corpus harness keys the in-profile map by name
+    /// within a file, so two source functions each lifting `__lambda_0` would COLLIDE
+    /// without this prefix (one lambda's certificate silently lost). Set by
+    /// `lower_function_all`; empty for the param-free testable `lower_body` entry.
+    fn_name: String,
+    /// MIR values that denote a lifted lambda's table slot (an `Op::FuncRef` dst). A later
+    /// call whose callee is one of these (`f(args)` where `f` bound a lifted lambda) lowers
+    /// to `Op::CallIndirect` through it instead of deferring — the closure EXECUTES.
+    funcref_values: HashSet<ValueId>,
 }
 
 impl LowerCtx {

@@ -9,6 +9,75 @@ use almide_lang::types::Ty;
 
 impl LowerCtx {
 
+    /// Lift a NON-CAPTURING lambda `(params) => body` into a fresh top-level MIR function
+    /// (the closures machinery) and emit an `Op::FuncRef` binding its table slot, returning
+    /// that scalar value (recorded in `funcref_values` so a later call through it lowers to
+    /// `Op::CallIndirect`). Returns `None` for a CAPTURING lambda (its body references an
+    /// enclosing local — a real closure environment the proven model cannot represent) or a
+    /// body outside the lowering subset; the caller then keeps the deferred `Opaque` model.
+    ///
+    /// SOUNDNESS: the lifted body is lowered by the SAME `lower_body_into` as any function,
+    /// so it carries its own ownership / name-totality / capability certificate that the
+    /// proven checker re-verifies. Its capabilities reach THIS function through the
+    /// `Op::FuncRef` edge — folded at closure CREATION (coverage-free; see
+    /// `certificate::reachable_caps` / `reachable_caps_or_tainted`), so a printing lambda
+    /// can never be silently caps-verified regardless of how/whether it is later invoked.
+    /// The lambda is named `__lambda_<fn_name>_<n>` — file-unique (the harness keys the
+    /// in-profile map by name), with nested lifts flattened into this function's set.
+    pub(crate) fn lift_lambda(
+        &mut self,
+        params: &[(VarId, Ty)],
+        body: &IrExpr,
+    ) -> Option<ValueId> {
+        // free_vars over the lambda's own params reports exactly its captures (a `Var` node
+        // denotes only locals). A non-empty set ⇒ a real environment ⇒ not liftable here.
+        let mut bound: std::collections::HashSet<VarId> = std::collections::HashSet::new();
+        for (v, _) in params {
+            bound.insert(*v);
+        }
+        if !almide_ir::free_vars::free_vars(body, &bound).is_empty() {
+            return None;
+        }
+        // Lower the body in a FRESH sub-context sharing only the globals (its own value
+        // space + params). A failure (a body outside the subset) aborts the lift cleanly —
+        // nothing is emitted into `self`, so the caller's deferred fallback stays sound.
+        let mut sub = LowerCtx {
+            globals: self.globals.clone(),
+            fn_name: self.fn_name.clone(),
+            ..Default::default()
+        };
+        let mut mir_params = Vec::new();
+        for (v, ty) in params {
+            let pv = sub.fresh_value();
+            sub.value_of.insert(*v, pv);
+            let repr = repr_of(ty).ok()?;
+            if repr.is_heap() {
+                sub.param_values.insert(pv);
+            }
+            mir_params.push(crate::MirParam { value: pv, repr });
+        }
+        let ret = sub.lower_body_into(body).ok()?;
+        let name = format!("__lambda_{}_{}", self.fn_name, self.lifted.len());
+        let mut nested = std::mem::take(&mut sub.lifted);
+        // A lifted lambda is pure-by-default (declared ∅): an effectful one is NOT silently
+        // accepted — its own caps witness (Stdout used ⊄ ∅ declared) faults the subset
+        // checker, and the FuncRef edge propagates that to every holder. (A lambda carries
+        // no `is_effect` flag in the IR; ∅ is the conservative, never-over-accepting bound.)
+        let lifted_fn = crate::MirFunction {
+            name: name.clone(),
+            params: mir_params,
+            ops: sub.ops,
+            ret,
+            declared_caps: Vec::new(),
+        };
+        self.lifted.push(lifted_fn);
+        self.lifted.append(&mut nested);
+        let dst = self.fresh_value();
+        self.ops.push(Op::FuncRef { dst, name });
+        self.funcref_values.insert(dst);
+        Some(dst)
+    }
+
     pub(crate) fn lower_bind(&mut self, var: VarId, ty: &Ty, value: &IrExpr) -> Result<(), LowerError> {
         if !is_heap_ty(ty) {
             // Scalar binding: a Copy value, no ownership accounting. A RESOLVABLE
@@ -100,6 +169,26 @@ impl LowerCtx {
             // early return that is DEFERRED here: the always-continue path is self-
             // consistent (each handle still drops exactly once, so memory-safe); error
             // propagation is functional, not a safety property.)
+            // A `let f = (params) => body` lambda. A NON-CAPTURING one LIFTS to a fresh
+            // top-level function bound via `Op::FuncRef` (a scalar table slot) — so a later
+            // `f(args)` lowers to `Op::CallIndirect` and the closure EXECUTES. A CAPTURING
+            // lambda (its body references an enclosing local) needs an environment the
+            // proven model has no representation for, so it falls through to the deferred
+            // `Alloc{Opaque}` (its calls elided ⇒ honest caps taint), unchanged.
+            IrExprKind::Lambda { params, body, .. } => {
+                if let Some(dst) = self.lift_lambda(params, body) {
+                    self.value_of.insert(var, dst);
+                    return Ok(());
+                }
+                let dst = self.fresh_value();
+                let repr = repr_of(ty)?;
+                let init = alloc_init(value);
+                self.value_of.insert(var, dst);
+                self.ops.push(Op::Alloc { dst, repr, init });
+                self.live_heap_handles.push(dst);
+                self.record_elided_calls(value);
+                Ok(())
+            }
             IrExprKind::List { .. }
             | IrExprKind::MapLiteral { .. }
             | IrExprKind::EmptyMap
@@ -123,7 +212,8 @@ impl LowerCtx {
             // a fresh value — both `Alloc{Opaque}`. The closure is NOT invoked here, so
             // its body's calls are elided ⇒ the gate taints the function caps-unverified
             // honestly (the closure's invocation capabilities are unknown).
-            | IrExprKind::Lambda { .. }
+            // (A NON-CAPTURING `Lambda` is intercepted ABOVE and LIFTED to a FuncRef; only
+            // a capturing one — a real environment — reaches this deferred Opaque arm.)
             | IrExprKind::ClosureCreate { .. }
             | IrExprKind::Range { .. }
             // A RUNTIME CALL result is a fresh value (its call is elided ⇒ the gate
