@@ -199,3 +199,64 @@ fn map_update(m: Map[Int, Int], k: Int, f: (Int) -> Int) -> Map[Int, Int] = {
   prim.store32(rh + 4, len)
   r
 }
+
+// ── Higher-order Map[Int,Int] (closures machinery) ── the predicate f is a TWO-arity closure
+// f : (Key, Value) -> Bool invoked via CallIndirect $closure_fn2. A pure predicate byte-matches
+// v0 (single pass, insertion order). filter keeps a subset of entries (still unique keys).
+
+fn __map_filter_fill(sh: Int, len: Int, rh: Int, f: (Int, Int) -> Bool, i: Int, w: Int) -> Int =
+  if i >= len then w
+  else {
+    let k = prim.load64(sh + 12 + i * 16)
+    let v = prim.load64(sh + 12 + i * 16 + 8)
+    let keep = f(k, v)
+    if keep then {
+      prim.store64(rh + 12 + w * 16, k)
+      prim.store64(rh + 12 + w * 16 + 8, v)
+      __map_filter_fill(sh, len, rh, f, i + 1, w + 1)
+    } else {
+      __map_filter_fill(sh, len, rh, f, i + 1, w)
+    }
+  }
+
+fn map_filter(m: Map[Int, Int], f: (Int, Int) -> Bool) -> Map[Int, Int] = {
+  let sh = prim.handle(m)
+  let len = prim.load32(sh + 4)
+  let slots = len * 2
+  let r = prim.alloc_map(slots)
+  let rh = prim.handle(r)
+  let w = __map_filter_fill(sh, len, rh, f, 0, 0)
+  prim.store32(rh + 4, w)
+  r
+}
+
+// Sum the predicate's 0/1 over all entries → the hit COUNT (a Bool is an i64 0/1).
+fn __map_count_hits(sh: Int, len: Int, f: (Int, Int) -> Bool, i: Int, acc: Int) -> Int =
+  if i >= len then acc
+  else {
+    let k = prim.load64(sh + 12 + i * 16)
+    let v = prim.load64(sh + 12 + i * 16 + 8)
+    let h = f(k, v)
+    if h then __map_count_hits(sh, len, f, i + 1, acc + 1)
+    else __map_count_hits(sh, len, f, i + 1, acc)
+  }
+
+fn map_all(m: Map[Int, Int], f: (Int, Int) -> Bool) -> Bool = {
+  let sh = prim.handle(m)
+  let len = prim.load32(sh + 4)
+  let hits = __map_count_hits(sh, len, f, 0, 0)
+  hits >= len
+}
+
+fn map_any(m: Map[Int, Int], f: (Int, Int) -> Bool) -> Bool = {
+  let sh = prim.handle(m)
+  let len = prim.load32(sh + 4)
+  let hits = __map_count_hits(sh, len, f, 0, 0)
+  hits > 0
+}
+
+fn map_count(m: Map[Int, Int], f: (Int, Int) -> Bool) -> Int = {
+  let sh = prim.handle(m)
+  let len = prim.load32(sh + 4)
+  __map_count_hits(sh, len, f, 0, 0)
+}

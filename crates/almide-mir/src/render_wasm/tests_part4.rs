@@ -1465,6 +1465,26 @@
     }
 
     #[test]
+    fn self_hosted_map_higher_order() {
+        // SELF-HOSTED map.filter/all/any/count over Map[Int,Int] (closures machinery — a 2-arity
+        // predicate f(k,v) via CallIndirect). m={1:10,2:20,3:30}: filter(v>15)={2:20,3:30} len 2
+        // values sum 50; all(v>0)=true; any(k==2)=true; count(v>=20)=2. Byte-matches v0.
+        let src = "fn main() -> Unit = {\n  \
+            let m1 = map.set(map.new(), 1, 10)\n  let m2 = map.set(m1, 2, 20)\n  \
+            let m = map.set(m2, 3, 30)\n  \
+            let fm = map.filter(m, (k, v) => v > 15)\n  println(int.to_string(map.len(fm)))\n  \
+            let fv = map.values(fm)\n  println(int.to_string(list.sum(fv)))\n  \
+            let ap = map.all(m, (k, v) => v > 0)\n  let va = if ap then 1 else 0\n  println(int.to_string(va))\n  \
+            let an = map.any(m, (k, v) => k == 2)\n  let vn = if an then 1 else 0\n  println(int.to_string(vn))\n  \
+            let cn = map.count(m, (k, v) => v >= 20)\n  println(int.to_string(cn)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "map.filter"));
+        if let Some(out) = build_and_run("self_hosted_map_higher_order", &render_wasm_program(&prog)) {
+            assert_eq!(out, "2\n50\n1\n1\n2");
+        }
+    }
+
+    #[test]
     fn self_hosted_map_core_loop_reclaims() {
         // SOUNDNESS for the new Map[Int,Int] heap path: a bounded loop building + dropping a
         // fresh Map every iteration must reclaim each (plain non-nested drop) — no leak/double-free.
