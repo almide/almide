@@ -312,32 +312,59 @@ fn main() {
         }
         for func in &ir.functions {
             t.functions += 1;
-            let lowered =
-                catch_unwind(AssertUnwindSafe(|| almide_mir::lower::lower_function(func, &globals)));
+            let lowered = catch_unwind(AssertUnwindSafe(|| {
+                almide_mir::lower::lower_function_all(func, &globals)
+            }));
             match lowered {
-                Ok(Ok(mir)) => {
-                    t.in_profile += 1;
-                    // The borrow-by-default soundness gate: every `+1` event must
-                    // be backed by a real runtime op (no synthetic param `+1`).
-                    if !plus_one_events_backed(&mir) {
-                        t.cert_backing_breaches
-                            .push(format!("{}::{}", file.display(), func.name.as_str()));
+                Ok(Ok(mirs)) => {
+                    // `mirs[0]` is the source function; `mirs[1..]` are lambda-lifted
+                    // auxiliaries (the closures machinery lifts `let f = (x) => …` bodies
+                    // into fresh functions). Every one is a real MIR function the proven
+                    // checker re-verifies, so backing / ownership / names witnesses are
+                    // emitted for ALL of them and the program assembler tables them by the
+                    // same position. With no lifting wired the vector is just `[main]` and
+                    // this is byte-identical to the prior single-function pass.
+                    t.in_profile += mirs.len();
+                    for mir in &mirs {
+                        // The borrow-by-default soundness gate: every `+1` event must
+                        // be backed by a real runtime op (no synthetic param `+1`).
+                        if !plus_one_events_backed(mir) {
+                            t.cert_backing_breaches
+                                .push(format!("{}::{}", file.display(), mir.name));
+                        }
+                        // Ownership is one heap object per line; names are one line per
+                        // function. Both are LOCAL properties — no transitivity.
+                        ownership_stream.push_str(&ownership_certificate(mir));
+                        names_stream.push_str(&name_witness_string(mir));
+                        names_stream.push('\n');
                     }
                     // CAPS SOUNDNESS: count the source's call nodes. A call ELIDED by
-                    // Opaque lowering (a list element, ctor payload, BinOp operand,
-                    // …) is absent from func.ops, so the transitive caps fold over
-                    // CallFn edges cannot see its effects — if it reached Stdout the
-                    // function would be falsely caps-verified. A function (or any of
-                    // its transitive callees) with MORE IR calls than MIR call-ops is
-                    // therefore conservatively TAINTED below (not claimed caps-safe).
+                    // Opaque lowering (a list element, ctor payload, BinOp operand, …) is
+                    // absent from the MIR ops, so the transitive caps fold over CallFn /
+                    // FuncRef edges cannot see its effects — if it reached Stdout the
+                    // function would be falsely caps-verified. The IR call count covers the
+                    // WHOLE source body (including any lambda later lifted out), so the MIR
+                    // call count is summed across the main AND its lifted auxiliaries — a
+                    // lifted lambda carries its body's calls, and a `CallIndirect` (a
+                    // lowered closure invocation) is a genuine call counted here too. If the
+                    // cluster has MORE IR calls than MIR call-ops some call was elided
+                    // SOMEWHERE within it, so EVERY function of the cluster is conservatively
+                    // TAINTED below (we cannot tell which member hid it).
                     let ir_calls = count_ir_calls(&func.body);
-                    let mir_calls = mir
-                        .ops
+                    let mir_calls = mirs
                         .iter()
-                        .filter(|o| matches!(o, Op::Call { .. } | Op::CallFn { .. }))
+                        .flat_map(|m| m.ops.iter())
+                        .filter(|o| {
+                            matches!(
+                                o,
+                                Op::Call { .. } | Op::CallFn { .. } | Op::CallIndirect { .. }
+                            )
+                        })
                         .count();
                     if ir_calls > mir_calls {
-                        elided_call_fns.insert(func.name.as_str().to_string());
+                        for mir in &mirs {
+                            elided_call_fns.insert(mir.name.clone());
+                        }
                     }
                     // SOUNDNESS BACKSTOP for the elided-call effect markers: a marker
                     // (`record_elided_calls`) may only surface a genuinely ELIDED
@@ -345,15 +372,15 @@ fn main() {
                     // EXCEEDS, a marker double-counted a lowered call — which could
                     // mask another elision and falsely de-taint. A wall breach.
                     if mir_calls > ir_calls {
-                        t.call_count_breaches
-                            .push(format!("{}::{} (mir {mir_calls} > ir {ir_calls})", file.display(), func.name.as_str()));
+                        t.call_count_breaches.push(format!(
+                            "{}::{} (mir {mir_calls} > ir {ir_calls})",
+                            file.display(),
+                            func.name.as_str()
+                        ));
                     }
-                    // Ownership is one heap object per line; names are one line per
-                    // function. Both are LOCAL properties — no transitivity.
-                    ownership_stream.push_str(&ownership_certificate(&mir));
-                    names_stream.push_str(&name_witness_string(&mir));
-                    names_stream.push('\n');
-                    file_mirs.push((func.name.as_str().to_string(), mir));
+                    for mir in mirs {
+                        file_mirs.push((mir.name.clone(), mir));
+                    }
                 }
                 Ok(Err(almide_mir::lower::LowerError::Unsupported(reason))) => {
                     *t.unsupported.entry(reason_key(&reason)).or_insert(0) += 1;

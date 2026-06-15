@@ -293,6 +293,11 @@ pub fn reaches_capability_or_unknown(
         Op::CallFn { name: callee, .. } => {
             reaches_capability_or_unknown(callee, program, is_known_free, is_elided, visited)
         }
+        // A FuncRef closure's effects reach this function at creation — fold like a callee
+        // (the boolean counterpart of the FuncRef edge in `reachable_caps_or_tainted`).
+        Op::FuncRef { name: callee, .. } => {
+            reaches_capability_or_unknown(callee, program, is_known_free, is_elided, visited)
+        }
         _ => false,
     })
 }
@@ -327,6 +332,20 @@ pub fn reachable_caps_or_tainted(
     let mut caps = cap_witness(func).used;
     for op in &func.ops {
         if let Op::CallFn { name: callee, .. } = op {
+            match reachable_caps_or_tainted(callee, program, is_known_free, is_elided, visited) {
+                Some(c) => caps.extend(c),
+                None => return None,
+            }
+        }
+        // A FuncRef CREATES a closure to a lifted lambda — fold its caps at CREATION,
+        // exactly as [`reachable_caps`] does. Coverage-free: the closure's effects reach
+        // this function however or whether it is later invoked (a CallIndirect, a deferred
+        // call, or never). WITHOUT this, a function holding a printing lifted lambda would
+        // be falsely caps-VERIFIED here (the lambda's Stdout unseen by the CallFn-only fold)
+        // the moment lambda-lifting emits FuncRef into the corpus — an accept-but-unsafe
+        // hole. The lambda is in `program` (the harness puts every lifted aux in the
+        // in-profile map); an unanalyzable/elided lambda taints (`None`) like any callee.
+        if let Op::FuncRef { name: callee, .. } = op {
             match reachable_caps_or_tainted(callee, program, is_known_free, is_elided, visited) {
                 Some(c) => caps.extend(c),
                 None => return None,
@@ -978,6 +997,58 @@ mod tests {
         let elided = |n: &str| n == "f";
         let mut v3 = BTreeSet::new();
         assert_eq!(reachable_caps_or_tainted("f", &p2, &none_free, &elided, &mut v3), None);
+    }
+
+    #[test]
+    fn tainted_fold_follows_funcref_edges_to_a_lifted_lambda() {
+        use std::collections::{BTreeMap, BTreeSet};
+        // THE harness path (classify_corpus uses `reachable_caps_or_tainted`, NOT
+        // `reachable_caps`). A main that holds a lifted lambda via `Op::FuncRef` must fold
+        // that lambda's caps here too, or the corpus gate would falsely caps-VERIFY a main
+        // whose lifted lambda secretly prints (accept-but-unsafe) the moment lambda-lifting
+        // emits FuncRef into the corpus.
+        let none_free = |_: &str| false;
+        let not_elided = |_: &str| false;
+        // ADVERSARIAL: the lifted lambda prints. main = `FuncRef(printing_lambda)` only —
+        // no CallIndirect — so coverage-free folding (at creation) must still surface Stdout.
+        let mut printing_lambda = func(vec![
+            Op::Const { dst: ValueId(0) },
+            Op::Call {
+                dst: None,
+                func: RtFn::PrintInt,
+                args: vec![CallArg::Scalar(ValueId(0))],
+                result: None,
+            },
+        ]);
+        printing_lambda.name = "printing_lambda".into();
+        let mut main = func(vec![Op::FuncRef { dst: ValueId(0), name: "printing_lambda".into() }]);
+        main.name = "main".into();
+        let mut program: BTreeMap<String, MirFunction> = BTreeMap::new();
+        for f in [printing_lambda, main] {
+            program.insert(f.name.clone(), f);
+        }
+        let mut v = BTreeSet::new();
+        assert_eq!(
+            reachable_caps_or_tainted("main", &program, &none_free, &not_elided, &mut v),
+            Some(vec![Capability::Stdout]),
+            "a main holding a printing lifted lambda must reach Stdout in the harness fold"
+        );
+        // A PURE lifted lambda folds ∅ — no spurious taint (keeps a non-printing closure
+        // caps-verified, so the corpus caps count does not drop).
+        let mut pure_lambda = func(vec![Op::ConstInt { dst: ValueId(0), value: 1 }]);
+        pure_lambda.name = "pure_lambda".into();
+        let mut main2 = func(vec![Op::FuncRef { dst: ValueId(0), name: "pure_lambda".into() }]);
+        main2.name = "main".into();
+        let mut p2: BTreeMap<String, MirFunction> = BTreeMap::new();
+        for f in [pure_lambda, main2] {
+            p2.insert(f.name.clone(), f);
+        }
+        let mut v2 = BTreeSet::new();
+        assert_eq!(
+            reachable_caps_or_tainted("main", &p2, &none_free, &not_elided, &mut v2),
+            Some(Vec::new()),
+            "a main holding a pure lifted lambda reaches no capability"
+        );
     }
 
     #[test]
