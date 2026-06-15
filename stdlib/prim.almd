@@ -114,3 +114,8 @@ fn fne(a: Float, b: Float) -> Bool = _
 fn f2i(x: Float) -> Int = _
 @intrinsic("almide_rt_prim_i2f")
 fn i2f(x: Int) -> Float = _
+// Raw f64↔i64 BIT reinterpret (identity in the i64-uniform model — the value IS the bits).
+@intrinsic("almide_rt_prim_fbits")
+fn fbits(x: Float) -> Int = _
+@intrinsic("almide_rt_prim_ffrombits")
+fn ffrombits(b: Int) -> Float = _

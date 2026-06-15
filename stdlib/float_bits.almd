@@ -1,0 +1,7 @@
+// float_bits — SELF-HOSTED `float.to_bits` / `int.bits_to_float` over the Float prim floor.
+// In the i64-uniform model a Float value ALREADY holds the f64 bits, so both are the raw
+// bit reinterpret = an identity pass-through (prim.fbits / prim.ffrombits). Byte-exact with
+// v0's `f.to_bits() as i64` / `f64::from_bits(b as u64)`. Pure scalar — cert untouched.
+
+fn float_to_bits(x: Float) -> Int = prim.fbits(x)
+fn int_bits_to_float(b: Int) -> Float = prim.ffrombits(b)

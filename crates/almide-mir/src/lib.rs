@@ -313,6 +313,9 @@ pub enum PrimKind {
     FloatToInt,
     /// `reinterpret(f64.convert_i64_s(x))` — Int → Float.
     IntToFloat,
+    /// IDENTITY — the raw f64↔i64 BIT reinterpret (`float.to_bits` / `int.bits_to_float`):
+    /// the i64-uniform value ALREADY holds the f64 bits, so this is a no-op pass-through.
+    FloatBits,
 }
 
 /// A unary f64 op (the value is the f64 bits in an i64; render reinterprets around it).

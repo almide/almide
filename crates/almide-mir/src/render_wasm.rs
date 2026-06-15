@@ -695,6 +695,8 @@ fn render_op(
                 PrimKind::IntToFloat => {
                     format!("(i64.reinterpret_f64 (f64.convert_i64_s (local.get {})))", local(args[0]))
                 }
+                // to_bits / bits_to_float: the value IS the bits — identity pass-through.
+                PrimKind::FloatBits => format!("(local.get {})", local(args[0])),
             };
             match dst {
                 Some(d) => format!("    (local.set {} {body})\n", local(*d)),

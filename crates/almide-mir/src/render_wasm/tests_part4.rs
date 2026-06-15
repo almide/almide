@@ -349,6 +349,21 @@
     }
 
     #[test]
+    fn self_hosted_float_bits() {
+        // SELF-HOSTED float.to_bits / int.bits_to_float = identity bit reinterpret (the value
+        // IS the f64 bits). to_bits(2.0)=0x4000000000000000=4611686018427387904; round-trip
+        // bits_to_float(that) back to 2.0 → to_int 2.
+        let src = "fn main() -> Unit = {\n  \
+            let bits = float.to_bits(2.0)\n  println(int.to_string(bits))\n  \
+            let back = int.bits_to_float(bits)\n  println(int.to_string(float.to_int(back))) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "float.to_bits"));
+        if let Some(out) = build_and_run("self_hosted_float_bits", &render_wasm_program(&prog)) {
+            assert_eq!(out, "4611686018427387904\n2");
+        }
+    }
+
+    #[test]
     fn self_hosted_math_sqrt() {
         // SELF-HOSTED math.sqrt = prim.fsqrt (f64.sqrt, byte-exact with v0). sqrt(16)=4,
         // sqrt(2)=1.41…→to_int 1, sqrt(81)=9.

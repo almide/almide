@@ -830,6 +830,7 @@ impl LowerCtx {
             "fne" => PrimKind::FloatCmp(crate::FCmpOp::Ne),
             "f2i" => PrimKind::FloatToInt,
             "i2f" => PrimKind::IntToFloat,
+            "fbits" | "ffrombits" => PrimKind::FloatBits,
             _ => return Err(LowerError::Unsupported(format!("unknown primitive prim.{func}"))),
         };
         let mut lowered = Vec::with_capacity(args.len());
