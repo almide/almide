@@ -1261,6 +1261,27 @@
     }
 
     #[test]
+    fn self_hosted_list_get_first_last_str() {
+        // SELF-HOSTED list.get / list.first / list.last over a List[String] → Option[String] (the
+        // repr-poly _str accessors). An in-bounds element is returned as Some(a deep copy); out of
+        // bounds is None. get(["a","bb","ccc"],1)=Some("bb"); get(_,9)=None; first=Some("a"); last=
+        // Some("ccc"). Byte-matches v0.
+        let src = "fn main() -> Unit = {\n  \
+            let parts = string.split(\"a,bb,ccc\", \",\")\n  \
+            let g1 = list.get(parts, 1)\n  match g1 {\n    Some(v) => println(v),\n    None => println(\"none\"),\n  }\n  \
+            let g2 = list.get(parts, 9)\n  match g2 {\n    Some(v) => println(v),\n    None => println(\"none\"),\n  }\n  \
+            let f = list.first(parts)\n  match f {\n    Some(v) => println(v),\n    None => println(\"none\"),\n  }\n  \
+            let l = list.last(parts)\n  match l {\n    Some(v) => println(v),\n    None => println(\"none\"),\n  } }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "list.get_str"));
+        assert!(prog.functions.iter().any(|f| f.name == "list.first_str"));
+        assert!(prog.functions.iter().any(|f| f.name == "list.last_str"));
+        if let Some(out) = build_and_run("self_hosted_list_get_first_last_str", &render_wasm_program(&prog)) {
+            assert_eq!(out, "bb\nnone\na\nccc");
+        }
+    }
+
+    #[test]
     fn self_hosted_list_take_drop_str() {
         // SELF-HOSTED list.take / list.drop over a List[String] (the repr-poly _str variants). Same
         // clamping as the List[Int] version; each kept element is deep-copied. take(["a","b","c","d"],

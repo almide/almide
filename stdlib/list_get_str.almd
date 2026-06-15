@@ -1,0 +1,32 @@
+// list_get_str — SELF-HOSTED list.get / list.first / list.last over a List[String], returning
+// Option[String] (the repr-poly _str variants of the value-returning accessors). An in-bounds
+// element is returned as Some(a fresh DEEP COPY) — the list keeps owning the original, so the
+// Option is single-owned (no double-free); out of bounds is None. Source borrowed; result owned.
+
+// Some(copy of element i) — the in-bounds case (i is valid when this is called). Reads the element
+// as a BORROW (prim.load_str), then deep-copies it into a fresh owned String wrapped in Some.
+fn __get_str_some(h: Int, i: Int) -> Option[String] = {
+  let x = prim.load_str(h + 12 + i * 8)
+  let copy = string.repeat(x, 1)
+  Some(copy)
+}
+
+fn list_get_str(xs: List[String], i: Int) -> Option[String] = {
+  let h = prim.handle(xs)
+  let len = prim.load32(h + 4)
+  if i < 0 then None
+  else if i >= len then None
+  else __get_str_some(h, i)
+}
+
+fn list_first_str(xs: List[String]) -> Option[String] = {
+  let h = prim.handle(xs)
+  let len = prim.load32(h + 4)
+  if len <= 0 then None else __get_str_some(h, 0)
+}
+
+fn list_last_str(xs: List[String]) -> Option[String] = {
+  let h = prim.handle(xs)
+  let len = prim.load32(h + 4)
+  if len <= 0 then None else __get_str_some(h, len - 1)
+}

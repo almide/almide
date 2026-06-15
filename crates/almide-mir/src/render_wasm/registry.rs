@@ -47,6 +47,7 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
         (include_str!("../../../../stdlib/list_filter_str.almd"), &[("list_filter_str", "list.filter_str")]),
         (include_str!("../../../../stdlib/list_reverse_str.almd"), &[("list_reverse_str", "list.reverse_str")]),
         (include_str!("../../../../stdlib/list_takedrop_str.almd"), &[("list_take_str", "list.take_str"), ("list_drop_str", "list.drop_str")]),
+        (include_str!("../../../../stdlib/list_get_str.almd"), &[("list_get_str", "list.get_str"), ("list_first_str", "list.first_str"), ("list_last_str", "list.last_str")]),
         (include_str!("../../../../stdlib/list_filter.almd"), &[("list_filter", "list.filter")]),
         (
             include_str!("../../../../stdlib/list_anyall.almd"),

@@ -666,7 +666,7 @@ pub(crate) fn find_var_ty(stmts: &[IrStmt], var: VarId) -> Option<Ty> {
 pub(crate) fn is_self_host_option_module_fn(module: &str, func: &str) -> bool {
     match module {
         "list" => {
-            matches!(func, "get" | "first" | "last" | "index_of" | "binary_search" | "max" | "min" | "find" | "find_index" | "reduce")
+            matches!(func, "get" | "first" | "last" | "index_of" | "binary_search" | "max" | "min" | "find" | "find_index" | "reduce" | "get_str" | "first_str" | "last_str")
         }
         "string" => matches!(func, "index_of" | "last_index_of" | "codepoint" | "first" | "last" | "get" | "strip_prefix" | "strip_suffix"),
         "bytes" => matches!(func, "get" | "index_of"),
@@ -690,10 +690,21 @@ pub(crate) fn is_self_host_option_module_fn(module: &str, func: &str) -> bool {
 /// the plain name. `module.func` is unchanged for everything else.
 pub(crate) fn list_heap_call_name(module: &str, func: &str, result_ty: &Ty) -> String {
     use almide_lang::types::constructor::TypeConstructorId;
-    if module == "list" && matches!(func, "map" | "filter" | "reverse" | "take" | "drop") {
-        if let Ty::Applied(TypeConstructorId::List, args) = result_ty {
-            if args.len() == 1 && is_heap_ty(&args[0]) {
-                return format!("list.{func}_str");
+    if module == "list" {
+        // List[heap]-RETURNING combinators (the result is a new heap-element list).
+        if matches!(func, "map" | "filter" | "reverse" | "take" | "drop") {
+            if let Ty::Applied(TypeConstructorId::List, args) = result_ty {
+                if args.len() == 1 && is_heap_ty(&args[0]) {
+                    return format!("list.{func}_str");
+                }
+            }
+        }
+        // Element-RETURNING accessors over a List[heap] (the result is an Option[heap]).
+        if matches!(func, "get" | "first" | "last") {
+            if let Ty::Applied(TypeConstructorId::Option, args) = result_ty {
+                if args.len() == 1 && is_heap_ty(&args[0]) {
+                    return format!("list.{func}_str");
+                }
             }
         }
     }
