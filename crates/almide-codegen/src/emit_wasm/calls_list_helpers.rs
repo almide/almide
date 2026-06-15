@@ -619,104 +619,128 @@ impl FuncCompiler<'_> {
             local_get(Local(xs_ptr)); i32_load(0); local_set(Local(len));
             // alloc dst
             i32_const(Imm32(self.emitter.layout_reg.header_size(LIST) as i32)); local_get(Local(len)); i32_const(Imm32(es as i32)); i32_mul; i32_add;
-            call(self.emitter.rt.alloc); local_set(Local(dst));
+            // dst's data area is written in full by every path below (bulk/reverse
+            // copy, or the merge's initial src→dst copy), so skip the reuse zero-fill.
+            call(self.emitter.rt.alloc_nozero); local_set(Local(dst));
             local_get(Local(dst)); local_get(Local(len)); i32_store(0);
         });
 
-        // 2. Pre-scan SOURCE (xs_ptr) for asc/desc before copying.
-        let is_asc = self.scratch.alloc_i32();
-        let is_desc = self.scratch.alloc_i32();
+        // 2. Pre-scan SOURCE (xs_ptr) for an existing run, then copy in one pass.
+        //    Pick the direction from the FIRST pair and scan that one way — a
+        //    single comparison per element — exactly as Rust's .sort() run
+        //    detection does. (The old scan tested ascending AND descending every
+        //    step: two comparisons and four loads per element, which was the bulk
+        //    of the cost on the fully-reversed input this benchmarks.)
+        let dir_desc = self.scratch.alloc_i32();
+        let sorted = self.scratch.alloc_i32();
         let scan_done = self.scratch.alloc_i32();
+        let data_off = self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32;
         wasm!(self.func, {
+            // Default to the merge path; a fully-ordered run overrides this.
+            // (scratch locals are reused, so an explicit reset is required.)
+            i32_const(Imm32(0)); local_set(Local(scan_done));
             local_get(Local(len)); i32_const(Imm32(SORT_MIN_LEN)); i32_lt_u;
             if_empty;
-              // len < 2: nothing to sort, but still copy the 0/1 source elements
-              // to dst. The sort-proper path (scan_done==0) copies src→dst, but
-              // this short-circuit skipped it — so dst's data stayed the zeroed
-              // alloc and a singleton sort returned a zeroed element.
-              local_get(Local(dst)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32)); i32_add;
-              local_get(Local(xs_ptr)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32)); i32_add;
+              // len < 2: nothing to order, but still copy the 0/1 source elements
+              // (the sort-proper path is skipped, so dst would stay uninitialized).
+              local_get(Local(dst)); i32_const(Imm32(data_off)); i32_add;
+              local_get(Local(xs_ptr)); i32_const(Imm32(data_off)); i32_add;
               local_get(Local(len)); i32_const(Imm32(es as i32)); i32_mul;
               memory_copy;
               i32_const(Imm32(1)); local_set(Local(scan_done));
             else_;
-              i32_const(Imm32(1)); local_set(Local(is_asc));
-              i32_const(Imm32(1)); local_set(Local(is_desc));
+              // dir_desc = NOT (xs[0] <= xs[1]); sorted optimistically true.
+              local_get(Local(xs_ptr)); i32_const(Imm32(data_off)); i32_add;
+        });
+        kind.emit_load(&mut self.func); // xs[0]
+        wasm!(self.func, {
+              local_get(Local(xs_ptr)); i32_const(Imm32(data_off)); i32_add; i32_const(Imm32(es as i32)); i32_add;
+        });
+        kind.emit_load(&mut self.func); // xs[1]
+        self.emit_sort_le_cmp(&kind); // xs[0] <= xs[1]
+        wasm!(self.func, {
+              i32_eqz; local_set(Local(dir_desc));
+              i32_const(Imm32(1)); local_set(Local(sorted));
               i32_const(Imm32(0)); local_set(Local(i));
-              block_empty; loop_empty;
-                local_get(Local(i)); local_get(Local(len)); i32_const(Imm32(1)); i32_sub; i32_ge_u; br_if(1);
-                // Load xs[i] and xs[i+1]
-                local_get(Local(xs_ptr)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32)); i32_add;
-                local_get(Local(i)); i32_const(Imm32(es as i32)); i32_mul; i32_add;
-        });
-        kind.emit_load(&mut self.func); // xs[i]
-        wasm!(self.func, {
-                local_get(Local(xs_ptr)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32)); i32_add;
-                local_get(Local(i)); i32_const(Imm32(1)); i32_add; i32_const(Imm32(es as i32)); i32_mul; i32_add;
-        });
-        kind.emit_load(&mut self.func); // xs[i+1]
-        // Check: if dst[i] > dst[i+1] → not ascending
-        // We need both values for two comparisons. Duplicate via locals.
-        // Actually, emit_le_cmp consumes both. Let me do two separate scans? No, too slow.
-        // Simpler: just check dst[i] <= dst[i+1] for ascending.
-        self.emit_sort_le_cmp(&kind); // dst[i] <= dst[i+1]
-        wasm!(self.func, {
-                i32_eqz;
-                if_empty; i32_const(Imm32(0)); local_set(Local(is_asc)); end;
-                // Check descending: xs[i] >= xs[i+1]
-                local_get(Local(xs_ptr)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32)); i32_add;
-                local_get(Local(i)); i32_const(Imm32(1)); i32_add; i32_const(Imm32(es as i32)); i32_mul; i32_add;
-        });
-        kind.emit_load(&mut self.func); // xs[i+1]
-        wasm!(self.func, {
-                local_get(Local(xs_ptr)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32)); i32_add;
-                local_get(Local(i)); i32_const(Imm32(es as i32)); i32_mul; i32_add;
-        });
-        kind.emit_load(&mut self.func); // xs[i]
-        self.emit_sort_le_cmp(&kind); // dst[i+1] <= dst[i]
-        wasm!(self.func, {
-                i32_eqz;
-                if_empty; i32_const(Imm32(0)); local_set(Local(is_desc)); end;
-                // Early exit if neither
-                local_get(Local(is_asc)); local_get(Local(is_desc)); i32_or; i32_eqz;
-                br_if(1); // break scan loop
-                local_get(Local(i)); i32_const(Imm32(1)); i32_add; local_set(Local(i)); br(0);
-              end; end;
-              // Determine result
-              local_get(Local(is_asc));
+              local_get(Local(dir_desc));
               if_empty;
-                // Already sorted: just bulk copy
-                local_get(Local(dst)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32)); i32_add;
-                local_get(Local(xs_ptr)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32)); i32_add;
-                local_get(Local(len)); i32_const(Imm32(es as i32)); i32_mul;
-                memory_copy;
-                i32_const(Imm32(1)); local_set(Local(scan_done));
-              else_;
-                local_get(Local(is_desc));
-                if_empty;
-                  // Reverse copy: dst[i] = src[len-1-i] (1 pass, no swap)
-                  i32_const(Imm32(0)); local_set(Local(i));
-                  block_empty; loop_empty;
-                    local_get(Local(i)); local_get(Local(len)); i32_ge_u; br_if(1);
-                    local_get(Local(dst)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32)); i32_add;
-                    local_get(Local(i)); i32_const(Imm32(es as i32)); i32_mul; i32_add;
-                    local_get(Local(xs_ptr)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(LIST, ll::DATA) as i32)); i32_add;
-                    local_get(Local(len)); i32_const(Imm32(1)); i32_sub; local_get(Local(i)); i32_sub;
-                    i32_const(Imm32(es as i32)); i32_mul; i32_add;
+                // ── descending: verify and reverse-write in a single pass ──
+                // While xs[i+1] <= xs[i] holds, place dst[len-1-i] = xs[i]. The
+                // first violation bails to the merge below, which recopies xs→dst
+                // and so discards these speculative writes; a complete pass then
+                // drops in the final (smallest) element and skips the merge. Fusing
+                // the run check with the reverse keeps xs hot in cache instead of
+                // re-reading all of it in a separate reverse pass.
+                block_empty; loop_empty;
+                  local_get(Local(i)); local_get(Local(len)); i32_const(Imm32(1)); i32_sub; i32_ge_u; br_if(1);
+                  local_get(Local(xs_ptr)); i32_const(Imm32(data_off)); i32_add;
+                  local_get(Local(i)); i32_const(Imm32(1)); i32_add; i32_const(Imm32(es as i32)); i32_mul; i32_add;
+        });
+        kind.emit_load(&mut self.func); // xs[i+1]
+        wasm!(self.func, {
+                  local_get(Local(xs_ptr)); i32_const(Imm32(data_off)); i32_add;
+                  local_get(Local(i)); i32_const(Imm32(es as i32)); i32_mul; i32_add;
+        });
+        kind.emit_load(&mut self.func); // xs[i]
+        self.emit_sort_le_cmp(&kind); // xs[i+1] <= xs[i]
+        wasm!(self.func, {
+                  // first out-of-order pair → bail straight to the merge below
+                  i32_eqz; if_empty; i32_const(Imm32(0)); local_set(Local(sorted)); br(2); end;
+                  // dst[len-1-i] = xs[i]
+                  local_get(Local(dst)); i32_const(Imm32(data_off)); i32_add;
+                  local_get(Local(len)); i32_const(Imm32(1)); i32_sub; local_get(Local(i)); i32_sub; i32_const(Imm32(es as i32)); i32_mul; i32_add;
+                  local_get(Local(xs_ptr)); i32_const(Imm32(data_off)); i32_add;
+                  local_get(Local(i)); i32_const(Imm32(es as i32)); i32_mul; i32_add;
         });
         kind.emit_copy_one(&mut self.func);
         wasm!(self.func, {
-                    local_get(Local(i)); i32_const(Imm32(1)); i32_add; local_set(Local(i)); br(0);
-                  end; end;
+                  local_get(Local(i)); i32_const(Imm32(1)); i32_add; local_set(Local(i)); br(0);
+                end; end;
+                // fully descending (exited via the bound, sorted still 1): place
+                // the final, smallest element dst[0] = xs[len-1].
+                local_get(Local(sorted));
+                if_empty;
+                  local_get(Local(dst)); i32_const(Imm32(data_off)); i32_add;
+                  local_get(Local(xs_ptr)); i32_const(Imm32(data_off)); i32_add;
+                  local_get(Local(len)); i32_const(Imm32(1)); i32_sub; i32_const(Imm32(es as i32)); i32_mul; i32_add;
+        });
+        kind.emit_copy_one(&mut self.func);
+        wasm!(self.func, {
                   i32_const(Imm32(1)); local_set(Local(scan_done));
-                else_;
-                  i32_const(Imm32(0)); local_set(Local(scan_done));
+                end;
+              else_;
+                // ── ascending run: every step must keep xs[i] <= xs[i+1] ──
+                block_empty; loop_empty;
+                  local_get(Local(i)); local_get(Local(len)); i32_const(Imm32(1)); i32_sub; i32_ge_u; br_if(1);
+                  local_get(Local(xs_ptr)); i32_const(Imm32(data_off)); i32_add;
+                  local_get(Local(i)); i32_const(Imm32(es as i32)); i32_mul; i32_add;
+        });
+        kind.emit_load(&mut self.func); // xs[i]
+        wasm!(self.func, {
+                  local_get(Local(xs_ptr)); i32_const(Imm32(data_off)); i32_add;
+                  local_get(Local(i)); i32_const(Imm32(1)); i32_add; i32_const(Imm32(es as i32)); i32_mul; i32_add;
+        });
+        kind.emit_load(&mut self.func); // xs[i+1]
+        self.emit_sort_le_cmp(&kind); // xs[i] <= xs[i+1]
+        wasm!(self.func, {
+                  // first out-of-order pair → bail straight to the merge below
+                  i32_eqz; if_empty; i32_const(Imm32(0)); local_set(Local(sorted)); br(2); end;
+                  local_get(Local(i)); i32_const(Imm32(1)); i32_add; local_set(Local(i)); br(0);
+                end; end;
+                local_get(Local(sorted));
+                if_empty;
+                  // already ascending → bulk copy
+                  local_get(Local(dst)); i32_const(Imm32(data_off)); i32_add;
+                  local_get(Local(xs_ptr)); i32_const(Imm32(data_off)); i32_add;
+                  local_get(Local(len)); i32_const(Imm32(es as i32)); i32_mul;
+                  memory_copy;
+                  i32_const(Imm32(1)); local_set(Local(scan_done));
                 end;
               end;
             end;
         });
-        self.scratch.free_i32(is_desc);
-        self.scratch.free_i32(is_asc);
+        self.scratch.free_i32(sorted);
+        self.scratch.free_i32(dir_desc);
 
         // 3. Bottom-up merge sort (only if scan_done == 0).
         wasm!(self.func, {
@@ -728,7 +752,8 @@ impl FuncCompiler<'_> {
             local_get(Local(len)); i32_const(Imm32(es as i32)); i32_mul;
             memory_copy;
             local_get(Local(len)); i32_const(Imm32(es as i32)); i32_mul;
-            call(self.emitter.rt.alloc); local_set(Local(tmp));
+            // tmp is fully written by each merge pass before it is read back.
+            call(self.emitter.rt.alloc_nozero); local_set(Local(tmp));
             i32_const(Imm32(1)); local_set(Local(width));
             block_empty; loop_empty;
               local_get(Local(width)); local_get(Local(len)); i32_ge_u; br_if(1);
