@@ -1,0 +1,81 @@
+// string_replace — SELF-HOSTED `string.replace` for v1 over the prim floor: replace every
+// non-overlapping occurrence of `from` with `to`, building a new String via prim.alloc_str.
+// Byte-level (a valid-UTF-8 needle matches at codepoint boundaries). The result length is
+// computed up front (slen + count*(tolen-fromlen)). An empty `from` returns a copy of `s`
+// (v0's insert-between-chars behavior is not matched, but the loop stays finite). Cert-
+// untouching (DynStr Alloc = i, like trim/slice/reverse). `s`/`from`/`to` borrowed.
+
+fn __rep_eq(a: Int, b: Int, n: Int) -> Bool =
+  if n <= 0 then true
+  else {
+    let x = prim.load8(a)
+    let y = prim.load8(b)
+    if x == y then __rep_eq(a + 1, b + 1, n - 1)
+    else false
+  }
+
+fn __rep_matches(pos: Int, send: Int, fbase: Int, flen: Int) -> Bool =
+  if pos + flen > send then false
+  else __rep_eq(pos, fbase, flen)
+
+fn __rep_count(pos: Int, send: Int, fbase: Int, flen: Int, acc: Int) -> Int =
+  if pos + flen > send then acc
+  else {
+    let m = __rep_eq(pos, fbase, flen)
+    if m then __rep_count(pos + flen, send, fbase, flen, acc + 1)
+    else __rep_count(pos + 1, send, fbase, flen, acc)
+  }
+
+fn __rep_copy(src: Int, dst: Int, n: Int) -> Int =
+  if n <= 0 then 0
+  else {
+    prim.store8(dst, prim.load8(src))
+    __rep_copy(src + 1, dst + 1, n - 1)
+  }
+
+// Walk `s` from `spos`, writing into `dst`: on a `from` match emit `to`, else copy one byte.
+fn __rep_fill(spos: Int, send: Int, fbase: Int, flen: Int, tbase: Int, tlen: Int, dst: Int) -> Int =
+  if spos >= send then dst
+  else {
+    let m = __rep_matches(spos, send, fbase, flen)
+    if m then {
+      let _c = __rep_copy(tbase, dst, tlen)
+      __rep_fill(spos + flen, send, fbase, flen, tbase, tlen, dst + tlen)
+    } else {
+      prim.store8(dst, prim.load8(spos))
+      __rep_fill(spos + 1, send, fbase, flen, tbase, tlen, dst + 1)
+    }
+  }
+
+// Copy `s` into a fresh owned String (the empty-`from` fallback).
+fn __rep_copy_str(s: String) -> String = {
+  let h = prim.handle(s)
+  let slen = prim.load32(h + 4)
+  let buf = prim.alloc_str(slen)
+  let _c = __rep_copy(h + 12, prim.handle(buf) + 12, slen)
+  buf
+}
+
+fn __rep_do(s: String, from: String, to: String) -> String = {
+  let h = prim.handle(s)
+  let slen = prim.load32(h + 4)
+  let fh = prim.handle(from)
+  let flen = prim.load32(fh + 4)
+  let th = prim.handle(to)
+  let tlen = prim.load32(th + 4)
+  let sbase = h + 12
+  let send = sbase + slen
+  let count = __rep_count(sbase, send, fh + 12, flen, 0)
+  let delta = tlen - flen
+  let rlen = slen + count * delta
+  let buf = prim.alloc_str(rlen)
+  let _x = __rep_fill(sbase, send, fh + 12, flen, th + 12, tlen, prim.handle(buf) + 12)
+  buf
+}
+
+fn string_replace(s: String, from: String, to: String) -> String = {
+  let fh = prim.handle(from)
+  let flen = prim.load32(fh + 4)
+  if flen <= 0 then __rep_copy_str(s)
+  else __rep_do(s, from, to)
+}

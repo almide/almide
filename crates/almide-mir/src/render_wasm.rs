@@ -629,6 +629,7 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
         (include_str!("../../../stdlib/string_slice.almd"), &[("string_slice", "string.slice")]),
         (include_str!("../../../stdlib/string_trim.almd"), &[("string_trim", "string.trim")]),
         (include_str!("../../../stdlib/string_reverse.almd"), &[("string_reverse", "string.reverse")]),
+        (include_str!("../../../stdlib/string_replace.almd"), &[("string_replace", "string.replace")]),
         (include_str!("../../../stdlib/list_get_or.almd"), &[("list_get_or", "list.get_or")]),
         (
             include_str!("../../../stdlib/int_scalar.almd"),
@@ -1704,6 +1705,28 @@ mod tests {
         assert!(prog.functions.iter().any(|f| f.name == "string.reverse"), "linked");
         if let Some(out) = build_and_run("string_reverse", &render_wasm_program(&prog)) {
             assert_eq!(out, "olleh\n日ba");
+        }
+    }
+
+    #[test]
+    fn self_hosted_string_replace() {
+        // string.replace self-hosted (build via prim.alloc_str, result length computed up
+        // front): replace("a,b,c",",","-")="a-b-c" (same len), replace("xax","a","YY")=
+        // "xYYx" (growing), replace("aXbXc","X","")="abc" (shrinking), replace("hi","z","Q")
+        // ="hi" (no match). byte-matching v0.
+        let src = "fn main() -> Unit = {\n  \
+            let a = string.replace(\"a,b,c\", \",\", \"-\")\n  \
+            let b = string.replace(\"xax\", \"a\", \"YY\")\n  \
+            let c = string.replace(\"aXbXc\", \"X\", \"\")\n  \
+            let d = string.replace(\"hi\", \"z\", \"Q\")\n  \
+            println(a)\n  \
+            println(b)\n  \
+            println(c)\n  \
+            println(d) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "string.replace"), "linked");
+        if let Some(out) = build_and_run("string_replace", &render_wasm_program(&prog)) {
+            assert_eq!(out, "a-b-c\nxYYx\nabc\nhi");
         }
     }
 
