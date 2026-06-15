@@ -92,6 +92,29 @@ fn lookup_user_borrows(callee: &str) -> Option<Vec<ParamBorrow>> {
 /// rounds propagate those borrows up through their callers. Converges quickly
 /// in practice — typical fix-points reach in 2-3 rounds; we cap at 6 for
 /// safety.
+/// Pre-bake the owned-param signature a TCO-bound function will end up with.
+///
+/// `TailCallOptPass` (which runs after this) rewrites a tail-recursive function
+/// into a loop whose params are the mutable loop state, forcing them to owned —
+/// EXCEPT a `Bytes` param kept borrowed to avoid cloning a large buffer each
+/// iteration (same rule as `pass_tco::rewrite_to_loop`). Borrow inference runs
+/// before TCO, so without this it would infer those params as `Ref` and a caller
+/// forwarding a value into one would get a `Ref` param that clashes with the
+/// post-TCO owned signature → E0308. Bake the owned-ness in now so the whole
+/// call chain stays consistent.
+fn tco_owned_params(func: &IrFunction, mut borrows: Vec<ParamBorrow>) -> Vec<ParamBorrow> {
+    if crate::pass_tco::is_tco_candidate(func) {
+        for (i, b) in borrows.iter_mut().enumerate() {
+            let is_preserved_bytes = matches!(func.params.get(i).map(|p| &p.ty), Some(Ty::Bytes))
+                && !matches!(b, ParamBorrow::Own);
+            if !is_preserved_bytes {
+                *b = ParamBorrow::Own;
+            }
+        }
+    }
+    borrows
+}
+
 pub fn infer_borrow_signatures(program: &mut IrProgram) -> HashMap<String, Vec<ParamBorrow>> {
     let mut sigs: HashMap<String, Vec<ParamBorrow>> = HashMap::new();
 
@@ -232,7 +255,7 @@ pub fn infer_borrow_signatures(program: &mut IrProgram) -> HashMap<String, Vec<P
         MOD_SCOPE.with(|m| *m.borrow_mut() = None);
         for func in &mut program.functions {
             if func.is_test || is_derive_fn(func) || is_monomorphized(&func.name) || func.generics.as_ref().map_or(false, |g| !g.is_empty()) { continue; }
-            let borrows = infer_function_borrows(func);
+            let borrows = tco_owned_params(func, infer_function_borrows(func));
             // Always record the signature (including all-Own) so that the
             // fixed-point iteration can distinguish "known to be Own" from
             // "not yet analysed". Without this, self-recursive functions
@@ -249,7 +272,7 @@ pub fn infer_borrow_signatures(program: &mut IrProgram) -> HashMap<String, Vec<P
             MOD_SCOPE.with(|m| *m.borrow_mut() = Some(mod_name.clone()));
             for func in &mut module.functions {
                 if func.is_test || is_derive_fn(func) || is_monomorphized(&func.name) || func.generics.as_ref().map_or(false, |g| !g.is_empty()) { continue; }
-                let borrows = infer_function_borrows(func);
+                let borrows = tco_owned_params(func, infer_function_borrows(func));
                 sigs.insert(format!("{}::{}", mod_name, func.name), borrows.clone());
                 // `ResolveCallsPass` rewrites bundled-Almide calls to
                 // `CallTarget::Named { almide_rt_<m>_<f> }`. BorrowInsertion
