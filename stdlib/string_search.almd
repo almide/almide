@@ -1,0 +1,51 @@
+// string_search — SELF-HOSTED byte-search string predicates for v1 over the prim floor:
+// `string.starts_with` / `string.ends_with` / `string.contains`. All are pure BYTE scans
+// (no allocation) sharing one `__byte_eq` comparison — byte-level matching is string-level
+// because every affix/needle is itself a complete valid UTF-8 String (UTF-8 is self-
+// synchronizing). Reads only — args borrowed. Cert-untouching (no heap Alloc).
+
+// True iff the `n` bytes at address `a` equal the `n` bytes at address `b`.
+fn __byte_eq(a: Int, b: Int, n: Int) -> Bool =
+  if n <= 0 then true
+  else {
+    let x = prim.load8(a)
+    let y = prim.load8(b)
+    if x == y then __byte_eq(a + 1, b + 1, n - 1)
+    else false
+  }
+
+fn string_starts_with(s: String, prefix: String) -> Bool = {
+  let hs = prim.handle(s)
+  let hp = prim.handle(prefix)
+  let slen = prim.load32(hs + 4)            // byte length at LIST_LEN_OFFSET(4)
+  let plen = prim.load32(hp + 4)
+  if plen > slen then false
+  else __byte_eq(hs + 12, hp + 12, plen)    // compare from the data start (LIST_HEADER 12)
+}
+
+fn string_ends_with(s: String, suffix: String) -> Bool = {
+  let hs = prim.handle(s)
+  let hp = prim.handle(suffix)
+  let slen = prim.load32(hs + 4)
+  let plen = prim.load32(hp + 4)
+  if plen > slen then false
+  else __byte_eq(hs + 12 + (slen - plen), hp + 12, plen)  // compare from the tail
+}
+
+// Scan each start position; at each, byte-compare `nlen` bytes against the needle.
+fn __contains_scan(sbase: Int, slen: Int, nbase: Int, nlen: Int, pos: Int) -> Bool =
+  if pos + nlen > slen then false
+  else {
+    let m = __byte_eq(sbase + pos, nbase, nlen)
+    if m then true
+    else __contains_scan(sbase, slen, nbase, nlen, pos + 1)
+  }
+
+fn string_contains(s: String, needle: String) -> Bool = {
+  let hs = prim.handle(s)
+  let hn = prim.handle(needle)
+  let slen = prim.load32(hs + 4)
+  let nlen = prim.load32(hn + 4)
+  if nlen <= 0 then true                     // every string contains the empty needle
+  else __contains_scan(hs + 12, slen, hn + 12, nlen, 0)
+}

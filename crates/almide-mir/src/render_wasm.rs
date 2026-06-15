@@ -609,10 +609,11 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
             &[("list_get", "list.get"), ("list_first", "list.first"), ("list_last", "list.last")],
         ),
         (
-            include_str!("../../../stdlib/string_starts_ends.almd"),
+            include_str!("../../../stdlib/string_search.almd"),
             &[
                 ("string_starts_with", "string.starts_with"),
                 ("string_ends_with", "string.ends_with"),
+                ("string_contains", "string.contains"),
             ],
         ),
     ]
@@ -1511,6 +1512,25 @@ mod tests {
         assert!(prog.functions.iter().any(|f| f.name == "string.ends_with"), "linked");
         if let Some(out) = build_and_run("string_starts_ends", &render_wasm_program(&prog)) {
             assert_eq!(out, "T\nF\nT\nF");
+        }
+    }
+
+    #[test]
+    fn self_hosted_string_contains() {
+        // string.contains self-hosted (a byte scan over each start position, reusing
+        // __byte_eq): contains("hello world","lo w")=true, ("hello","xyz")=false,
+        // ("hello","")=true (empty needle). byte-matching v0; results bound then printed T/F.
+        let src = "fn main() -> Unit = {\n  \
+            let a = string.contains(\"hello world\", \"lo w\")\n  \
+            let b = string.contains(\"hello\", \"xyz\")\n  \
+            let c = string.contains(\"hello\", \"\")\n  \
+            if a then println(\"T\") else println(\"F\")\n  \
+            if b then println(\"T\") else println(\"F\")\n  \
+            if c then println(\"T\") else println(\"F\") }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "string.contains"), "linked");
+        if let Some(out) = build_and_run("string_contains", &render_wasm_program(&prog)) {
+            assert_eq!(out, "T\nF\nT");
         }
     }
 
