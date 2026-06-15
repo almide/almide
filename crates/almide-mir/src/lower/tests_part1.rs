@@ -1,0 +1,693 @@
+// Core-IR → MIR lowering tests — part 1 of 2. Included by lower/tests.rs (one module).
+
+    fn ir_expr(kind: IrExprKind, ty: Ty) -> IrExpr {
+        IrExpr { kind, ty, span: None, def_id: None }
+    }
+    fn stmt(kind: IrStmtKind) -> IrStmt {
+        IrStmt { kind, span: None }
+    }
+    fn list_int() -> Ty {
+        // Any Applied/heap type works for the ownership logic; List[Int] is the
+        // value-semantics shape under test.
+        Ty::Applied(TypeConstructorId::List, vec![Ty::Int])
+    }
+    fn bind(var: u32, ty: Ty, value: IrExpr) -> IrStmt {
+        stmt(IrStmtKind::Bind {
+            var: VarId(var),
+            mutability: almide_ir::Mutability::Var,
+            ty,
+            value,
+        })
+    }
+    /// Build a Unit-returning body block (avoids constructing a full IrFunction).
+    fn body(stmts: Vec<IrStmt>) -> IrExpr {
+        ir_expr(IrExprKind::Block { stmts, expr: None }, Ty::Unit)
+    }
+
+    #[test]
+    fn alias_then_cow_lowers_to_balanced_mir() {
+        // var a = [1,2,3]; var b = a; a[0] = 9
+        let b = body(vec![
+            bind(0, list_int(), ir_expr(IrExprKind::List { elements: vec![] }, list_int())),
+            bind(1, list_int(), ir_expr(IrExprKind::Var { id: VarId(0) }, list_int())),
+            stmt(IrStmtKind::IndexAssign {
+                target: VarId(0),
+                index: ir_expr(IrExprKind::LitInt { value: 0 }, Ty::Int),
+                value: ir_expr(IrExprKind::LitInt { value: 9 }, Ty::Int),
+            }),
+        ]);
+        let mir = lower_body(&b, "main").expect("lowers");
+
+        // Expect: Alloc(a=V0), Dup(b=V1 from V0), MakeUnique(a=V0), Drop, Drop.
+        assert!(matches!(mir.ops[0], Op::Alloc { dst: ValueId(0), .. }));
+        assert!(matches!(mir.ops[1], Op::Dup { dst: ValueId(1), src: ValueId(0) }));
+        assert!(matches!(mir.ops[2], Op::MakeUnique { v: ValueId(0) }));
+        let drops = mir.ops.iter().filter(|o| matches!(o, Op::Drop { .. })).count();
+        assert_eq!(drops, 2, "two handles (a, b) → two scope-end drops");
+
+        // The single ownership decision must be balanced by construction.
+        assert_eq!(verify_ownership(&mir), Ok(()));
+    }
+
+    #[test]
+    fn heap_return_is_a_balanced_move_out() {
+        // fn build() -> List[Int] = { var a = [1,2,3]; a }
+        // The tail `a` is a heap move-out: Alloc(+1), returned/consumed(−1), and
+        // NOT dropped at scope end. Ownership witness `id` → balanced.
+        let tail = ir_expr(IrExprKind::Var { id: VarId(0) }, list_int());
+        let b = ir_expr(
+            IrExprKind::Block {
+                stmts: vec![bind(
+                    0,
+                    list_int(),
+                    ir_expr(IrExprKind::List { elements: vec![] }, list_int()),
+                )],
+                expr: Some(Box::new(tail)),
+            },
+            list_int(),
+        );
+        let mir = lower_body(&b, "build").expect("lowers");
+        assert!(matches!(mir.ops[0], Op::Alloc { dst: ValueId(0), .. }));
+        // moved out, so NO scope-end Drop of the returned handle.
+        assert!(!mir.ops.iter().any(|o| matches!(o, Op::Drop { .. })));
+        assert_eq!(mir.ret, Some(ValueId(0)));
+        // The move-out balances the Alloc — the verifier accepts.
+        assert_eq!(verify_ownership(&mir), Ok(()));
+    }
+
+    #[test]
+    fn scalar_bind_needs_no_ownership() {
+        // let n = 5
+        let b = body(vec![bind(
+            0,
+            Ty::Int,
+            ir_expr(IrExprKind::LitInt { value: 5 }, Ty::Int),
+        )]);
+        let mir = lower_body(&b, "main").expect("lowers");
+        // An int literal materializes its real value (ConstInt) — still no ownership.
+        assert_eq!(mir.ops, vec![Op::ConstInt { dst: ValueId(0), value: 5 }]);
+        assert_eq!(verify_ownership(&mir), Ok(()));
+    }
+
+    #[test]
+    fn fresh_heap_bind_allocs_and_drops() {
+        // var s = "hi"
+        let b = body(vec![bind(
+            0,
+            Ty::String,
+            ir_expr(IrExprKind::LitStr { value: "hi".into() }, Ty::String),
+        )]);
+        let mir = lower_body(&b, "main").expect("lowers");
+        assert!(matches!(mir.ops[0], Op::Alloc { .. }));
+        assert!(matches!(mir.ops[1], Op::Drop { .. }));
+        assert_eq!(verify_ownership(&mir), Ok(()));
+    }
+
+    #[test]
+    fn out_of_subset_is_an_explicit_error_not_silent() {
+        // A bare expression statement is outside this brick → explicit Unsupported.
+        let b = body(vec![stmt(IrStmtKind::Expr {
+            expr: ir_expr(IrExprKind::LitInt { value: 1 }, Ty::Int),
+        })]);
+        match lower_body(&b, "main") {
+            Err(LowerError::Unsupported(_)) => {}
+            other => panic!("expected Unsupported, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn unknown_type_is_rejected_at_repr() {
+        assert!(matches!(repr_of(&Ty::Unknown), Err(LowerError::Unsupported(_))));
+    }
+
+    #[test]
+    fn use_after_free_caught_if_decision_were_wrong() {
+        // Sanity that the verifier guards the lowering: a hand-broken MIR with a
+        // missing alias Dup would leave the alias' Drop unbalanced.
+        let broken = MirFunction {
+            name: "broken".into(),
+            ops: vec![
+                Op::Alloc { dst: ValueId(0), repr: Repr::Ptr { layout: PLACEHOLDER_LAYOUT }, init: Init::Opaque },
+                Op::Drop { v: ValueId(0) },
+                Op::Drop { v: ValueId(0) }, // second drop with no Dup → double free
+            ],
+            ..Default::default()
+        };
+        let errs = verify_ownership(&broken).unwrap_err();
+        assert!(errs.iter().any(|e| e.kind == ViolationKind::DoubleFree));
+    }
+
+    // ── stdlib Module-call lowering (brick #47) ──
+
+    fn module_call(module: &str, func: &str, args: Vec<IrExpr>, ty: Ty) -> IrExpr {
+        use almide_lang::intern::sym;
+        ir_expr(
+            IrExprKind::Call {
+                target: CallTarget::Module { module: sym(module), func: sym(func), def_id: None },
+                args,
+                type_args: vec![],
+            },
+            ty,
+        )
+    }
+
+    #[test]
+    fn is_higher_order_detects_function_typed_args() {
+        let fn_ty = Ty::Fn { params: vec![Ty::Int], ret: Box::new(Ty::Int) };
+        let plain = ir_expr(IrExprKind::Var { id: VarId(0) }, Ty::String);
+        let closure = ir_expr(IrExprKind::Var { id: VarId(1) }, fn_ty);
+        assert!(!is_higher_order(std::slice::from_ref(&plain)));
+        assert!(is_higher_order(&[plain, closure]));
+    }
+
+    #[test]
+    fn pure_first_order_module_call_lowers() {
+        // var s = "x"; var t = string.trim(s)  — first-order + pure → admitted.
+        let b = body(vec![
+            bind(0, Ty::String, ir_expr(IrExprKind::LitStr { value: "x".into() }, Ty::String)),
+            bind(
+                1,
+                Ty::String,
+                module_call(
+                    "string",
+                    "trim",
+                    vec![ir_expr(IrExprKind::Var { id: VarId(0) }, Ty::String)],
+                    Ty::String,
+                ),
+            ),
+        ]);
+        let mir = lower_body(&b, "main").expect("pure first-order Module call lowers");
+        assert!(
+            mir.ops.iter().any(|o| matches!(o, Op::CallFn { name, .. } if name == "string.trim")),
+            "expected an Op::CallFn named string.trim, got {:?}",
+            mir.ops
+        );
+        // A fresh owned heap result, balanced by a scope-end drop.
+        assert_eq!(verify_ownership(&mir), Ok(()));
+    }
+
+    #[test]
+    fn higher_order_module_call_with_opaque_fn_value_is_walled() {
+        // var ys = list.map(xs, f)  with f : (Int) -> Int an OPAQUE function value —
+        // its capabilities are unanalyzable here, so it is walled (admitting it would
+        // be accept-but-unsafe). (An analyzable Lambda closure IS admitted — see
+        // `higher_order_module_call_with_lambda_captures_closure_caps`.)
+        let fn_ty = Ty::Fn { params: vec![Ty::Int], ret: Box::new(Ty::Int) };
+        let b = body(vec![
+            bind(0, list_int(), ir_expr(IrExprKind::List { elements: vec![] }, list_int())),
+            bind(
+                1,
+                list_int(),
+                module_call(
+                    "list",
+                    "map",
+                    vec![
+                        ir_expr(IrExprKind::Var { id: VarId(0) }, list_int()),
+                        ir_expr(IrExprKind::Var { id: VarId(2) }, fn_ty),
+                    ],
+                    list_int(),
+                ),
+            ),
+        ]);
+        match lower_body(&b, "main") {
+            Err(LowerError::Unsupported(m)) => {
+                assert!(m.contains("opaque function-value"), "got: {m}")
+            }
+            other => panic!("expected an opaque-function-value wall, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn higher_order_module_call_with_lambda_captures_closure_caps() {
+        use almide_lang::intern::sym;
+        // var ys = list.map(xs, (x) => f(x))  — a higher-order PURE combinator with an
+        // analyzable Lambda closure is ADMITTED: the closure body's call `f` is
+        // captured as an effect marker (so its caps reach the witness), the closure is
+        // deferred (no env materialized), and the result is a fresh owned list.
+        let lambda = ir_expr(
+            IrExprKind::Lambda {
+                params: vec![(VarId(3), Ty::Int)],
+                body: Box::new(ir_expr(
+                    IrExprKind::Call {
+                        target: CallTarget::Named { name: sym("f") },
+                        args: vec![ir_expr(IrExprKind::Var { id: VarId(3) }, Ty::Int)],
+                        type_args: vec![],
+                    },
+                    Ty::Int,
+                )),
+                lambda_id: None,
+            },
+            Ty::Fn { params: vec![Ty::Int], ret: Box::new(Ty::Int) },
+        );
+        let b = body(vec![
+            bind(0, list_int(), ir_expr(IrExprKind::List { elements: vec![] }, list_int())),
+            bind(
+                1,
+                list_int(),
+                module_call(
+                    "list",
+                    "map",
+                    vec![ir_expr(IrExprKind::Var { id: VarId(0) }, list_int()), lambda],
+                    list_int(),
+                ),
+            ),
+        ]);
+        let mir = lower_body(&b, "main").expect("higher-order pure combinator with a lambda lowers");
+        // The closure body's call `f` is captured as a marker; the HOF result is a
+        // fresh owned list (CallFn `list.map`).
+        assert!(
+            mir.ops.iter().any(|o| matches!(o, Op::CallFn { dst: None, name, .. } if name == "f")),
+            "closure body call captured as a marker: {:?}",
+            mir.ops
+        );
+        assert!(
+            mir.ops.iter().any(|o| matches!(o, Op::CallFn { dst: Some(_), name, .. } if name == "list.map")),
+            "the HOF result is a fresh owned value",
+        );
+        assert_eq!(verify_ownership(&mir), Ok(()));
+    }
+
+    #[test]
+    fn effect_position_pure_combinator_captures_closure_caps() {
+        use almide_lang::intern::sym;
+        // list.each(xs, (x) => f(x))  as a STATEMENT — the side effect is the
+        // closure's: `f` is captured as a marker, the Unit-result HOF carries no
+        // ownership. (An effectful Module effect call still walls via the purity gate.)
+        let lambda = ir_expr(
+            IrExprKind::Lambda {
+                params: vec![(VarId(3), Ty::Int)],
+                body: Box::new(ir_expr(
+                    IrExprKind::Call {
+                        target: CallTarget::Named { name: sym("f") },
+                        args: vec![ir_expr(IrExprKind::Var { id: VarId(3) }, Ty::Int)],
+                        type_args: vec![],
+                    },
+                    Ty::Unit,
+                )),
+                lambda_id: None,
+            },
+            Ty::Fn { params: vec![Ty::Int], ret: Box::new(Ty::Unit) },
+        );
+        let each = module_call(
+            "list",
+            "each",
+            vec![ir_expr(IrExprKind::Var { id: VarId(0) }, list_int()), lambda],
+            Ty::Unit,
+        );
+        let b = body(vec![
+            bind(0, list_int(), ir_expr(IrExprKind::List { elements: vec![] }, list_int())),
+            stmt(IrStmtKind::Expr { expr: each }),
+        ]);
+        let mir = lower_body(&b, "main").expect("effect-position combinator lowers");
+        assert!(
+            mir.ops.iter().any(|o| matches!(o, Op::CallFn { dst: None, name, .. } if name == "f")),
+            "closure body call captured as a marker: {:?}",
+            mir.ops
+        );
+        assert!(
+            mir.ops.iter().any(|o| matches!(o, Op::CallFn { name, .. } if name == "list.each")),
+            "the Unit-result combinator is emitted",
+        );
+        assert_eq!(verify_ownership(&mir), Ok(()));
+    }
+
+    #[test]
+    fn effectful_module_call_is_walled() {
+        // var x = fs.read_text(p)  → walled (fs is effectful; its capability cannot
+        // yet be charged into the witness, so admitting it would be accept-but-unsafe).
+        let b = body(vec![
+            bind(0, Ty::String, ir_expr(IrExprKind::LitStr { value: "p".into() }, Ty::String)),
+            bind(
+                1,
+                Ty::String,
+                module_call(
+                    "fs",
+                    "read_text",
+                    vec![ir_expr(IrExprKind::Var { id: VarId(0) }, Ty::String)],
+                    Ty::String,
+                ),
+            ),
+        ]);
+        match lower_body(&b, "main") {
+            Err(LowerError::Unsupported(m)) => assert!(m.contains("effectful/impure"), "got: {m}"),
+            other => panic!("expected an effectful wall, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn nested_call_arg_materializes_into_owned_temp() {
+        use almide_lang::intern::sym;
+        // var x = outer(inner())  — inner()'s heap result is materialized into an
+        // owned temp, borrowed into outer, and dropped at scope end; outer's result
+        // is bound and dropped. Two CallFns emitted, in evaluation order.
+        let named = |n: &str, args: Vec<IrExpr>| {
+            ir_expr(
+                IrExprKind::Call {
+                    target: CallTarget::Named { name: sym(n) },
+                    args,
+                    type_args: vec![],
+                },
+                list_int(),
+            )
+        };
+        let b = body(vec![bind(0, list_int(), named("outer", vec![named("inner", vec![])]))]);
+        let mir = lower_body(&b, "main").expect("nested call arg lowers");
+        let callfns: Vec<&str> = mir
+            .ops
+            .iter()
+            .filter_map(|o| match o {
+                Op::CallFn { name, .. } => Some(name.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(callfns, vec!["inner", "outer"], "inner materialized before outer");
+        // The materialized temp + the outer result are both balanced (each `i`
+        // matched by a scope-end `d`).
+        assert_eq!(verify_ownership(&mir), Ok(()));
+    }
+
+    #[test]
+    fn literal_call_arg_materializes_and_drops() {
+        use almide_lang::intern::sym;
+        // f("hello")  — the string literal argument is materialized via `Alloc`,
+        // borrowed into the call, and dropped at scope end (cert `i` + `d`).
+        let call = ir_expr(
+            IrExprKind::Call {
+                target: CallTarget::Named { name: sym("f") },
+                args: vec![ir_expr(IrExprKind::LitStr { value: "hello".into() }, Ty::String)],
+                type_args: vec![],
+            },
+            Ty::Unit,
+        );
+        let b = body(vec![stmt(IrStmtKind::Expr { expr: call })]);
+        let mir = lower_body(&b, "main").expect("literal call arg lowers");
+        assert!(
+            mir.ops.iter().any(|o| matches!(o, Op::Alloc { .. })),
+            "the literal is materialized via Alloc: {:?}",
+            mir.ops
+        );
+        assert!(mir.ops.iter().any(|o| matches!(o, Op::CallFn { name, .. } if name == "f")));
+        assert_eq!(verify_ownership(&mir), Ok(()));
+    }
+
+    #[test]
+    fn elided_calls_in_an_opaque_value_emit_cert_neutral_effect_markers() {
+        use almide_lang::intern::sym;
+        let named = |n: &str, args: Vec<IrExpr>| {
+            ir_expr(
+                IrExprKind::Call {
+                    target: CallTarget::Named { name: sym(n) },
+                    args,
+                    type_args: vec![],
+                },
+                list_int(),
+            )
+        };
+        // var xs = [helper(), other()]  — the list literal lowers to ONE Opaque
+        // `Alloc`, ELIDING its element calls. `record_elided_calls` surfaces each as
+        // a bare EFFECT MARKER `CallFn{dst:None, args:[], result:None}` so the caps
+        // fold can see them, while the value content stays deferred.
+        let elements = vec![named("helper", vec![]), named("other", vec![])];
+        let b = body(vec![bind(0, list_int(), ir_expr(IrExprKind::List { elements }, list_int()))]);
+        let mir = lower_body(&b, "main").expect("lowers");
+
+        let markers: Vec<&str> = mir
+            .ops
+            .iter()
+            .filter_map(|o| match o {
+                Op::CallFn { dst: None, name, args, result: None } if args.is_empty() => {
+                    Some(name.as_str())
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(markers, vec!["helper", "other"], "one marker per elided call");
+
+        // CERT-NEUTRAL: ownership is just the list Alloc (+1) and its scope-end Drop
+        // (−1) — a marker injects no `+1`/drop. NAMES-NEUTRAL: a dst-less, arg-less
+        // marker references nothing, so it cannot dangle.
+        assert_eq!(verify_ownership(&mir), Ok(()));
+        let cert = crate::certificate::ownership_certificate(&mir);
+        assert_eq!(cert.matches('i').count(), 1, "only the list Alloc is a +1, not the markers");
+        let nw = crate::certificate::name_witness(&mir);
+        assert!(nw.used.iter().all(|u| nw.defined.contains(u)), "no dangling MIR reference");
+
+        // A HIGHER-ORDER call is SKIPPED (unmodelled closure caps): no marker, so the
+        // `ir_calls > mir_calls` gate keeps such a function honestly tainted.
+        let fn_ty = Ty::Fn { params: vec![], ret: Box::new(Ty::Int) };
+        let ho = body(vec![bind(
+            1,
+            list_int(),
+            ir_expr(
+                IrExprKind::List {
+                    elements: vec![named(
+                        "apply",
+                        vec![ir_expr(IrExprKind::Var { id: VarId(2) }, fn_ty)],
+                    )],
+                },
+                list_int(),
+            ),
+        )]);
+        let mir2 = lower_body(&ho, "main").expect("lowers");
+        assert!(
+            !mir2.ops.iter().any(|o| matches!(o, Op::CallFn { dst: None, .. })),
+            "a higher-order call is not recorded as a marker"
+        );
+    }
+
+    fn bool_var() -> IrExpr {
+        ir_expr(IrExprKind::Var { id: VarId(5) }, Ty::Bool)
+    }
+    fn unit_block(stmts: Vec<IrStmt>) -> IrExpr {
+        ir_expr(IrExprKind::Block { stmts, expr: None }, Ty::Unit)
+    }
+    fn iff(then: IrExpr, els: IrExpr, ty: Ty) -> IrExpr {
+        ir_expr(
+            IrExprKind::If { cond: Box::new(bool_var()), then: Box::new(then), else_: Box::new(els) },
+            ty,
+        )
+    }
+
+    #[test]
+    fn for_in_heap_element_aliases_container_per_iteration() {
+        use almide_lang::intern::sym;
+        // var xs = []; for s in xs { println(s) }  — the heap loop var `s` aliases the
+        // whole container `xs` (Op::Dup) for the iteration and is dropped at iteration
+        // end; the println borrows it. Per-iteration frame balanced.
+        let prn_s = stmt(IrStmtKind::Expr {
+            expr: ir_expr(
+                IrExprKind::Call {
+                    target: CallTarget::Named { name: sym("println") },
+                    args: vec![ir_expr(IrExprKind::Var { id: VarId(1) }, Ty::String)],
+                    type_args: vec![],
+                },
+                Ty::Unit,
+            ),
+        });
+        let forin = ir_expr(
+            IrExprKind::ForIn {
+                var: VarId(1),
+                var_tuple: None,
+                iterable: Box::new(ir_expr(IrExprKind::Var { id: VarId(0) }, list_int())),
+                body: vec![prn_s],
+            },
+            Ty::Unit,
+        );
+        let b = body(vec![
+            bind(0, list_int(), ir_expr(IrExprKind::List { elements: vec![] }, list_int())),
+            stmt(IrStmtKind::Expr { expr: forin }),
+        ]);
+        let mir = lower_body(&b, "main").expect("for-in lowers");
+        assert!(
+            mir.ops.iter().any(|o| matches!(o, Op::Dup { src: ValueId(0), .. })),
+            "loop var aliases the container: {:?}",
+            mir.ops
+        );
+        assert_eq!(verify_ownership(&mir), Ok(()), "per-iteration frame balanced");
+    }
+
+    #[test]
+    fn computed_effect_call_is_deferred_and_tainted() {
+        // var g = (x) => …; (g)()  — a Computed effect call (closure-VALUE callee) in
+        // statement position. Deferred like a Computed value call: no nameable CallFn is
+        // emitted (the call is elided), so it lowers (memory-safe, no ownership op for a
+        // Unit result) and the ir_calls>mir_calls gate taints it caps-unverified.
+        let g_ref = ir_expr(IrExprKind::Var { id: VarId(0) }, Ty::Unit);
+        let computed = ir_expr(
+            IrExprKind::Call {
+                target: CallTarget::Computed { callee: Box::new(g_ref) },
+                args: vec![],
+                type_args: vec![],
+            },
+            Ty::Unit,
+        );
+        let b = body(vec![stmt(IrStmtKind::Expr { expr: computed })]);
+        let mir = lower_body(&b, "main").expect("a Computed effect call is deferred, not walled");
+        // No nameable CallFn for the computed callee (it is elided → caps taint).
+        assert!(
+            !mir.ops.iter().any(|o| matches!(o, Op::CallFn { .. } | Op::Call { .. })),
+            "the computed call is elided (no marker): {:?}",
+            mir.ops
+        );
+        assert_eq!(verify_ownership(&mir), Ok(()));
+    }
+
+    #[test]
+    fn heap_bind_from_block_lowers() {
+        // var x = { var a = [1]; a }  — a heap BLOCK value: lower the block's stmts, then
+        // bind x to the heap tail (here the block-local `a`, aliased via Dup). Balanced.
+        let blk = ir_expr(
+            IrExprKind::Block {
+                stmts: vec![bind(1, list_int(), ir_expr(IrExprKind::List { elements: vec![] }, list_int()))],
+                expr: Some(Box::new(ir_expr(IrExprKind::Var { id: VarId(1) }, list_int()))),
+            },
+            list_int(),
+        );
+        let b = body(vec![bind(0, list_int(), blk)]);
+        let mir = lower_body(&b, "main").expect("heap bind from a block lowers");
+        assert_eq!(verify_ownership(&mir), Ok(()));
+    }
+
+    #[test]
+    fn map_insert_is_a_place_mutation() {
+        // var m = []; m[k] = v  — map insertion is in-place: MakeUnique (copy-on-write).
+        let mi = stmt(IrStmtKind::MapInsert {
+            target: VarId(0),
+            key: ir_expr(IrExprKind::LitStr { value: "b".into() }, Ty::String),
+            value: ir_expr(IrExprKind::LitInt { value: 2 }, Ty::Int),
+        });
+        let b = body(vec![
+            bind(0, list_int(), ir_expr(IrExprKind::List { elements: vec![] }, list_int())),
+            mi,
+        ]);
+        let mir = lower_body(&b, "main").expect("map insert lowers");
+        assert!(mir.ops.iter().any(|o| matches!(o, Op::MakeUnique { .. })), "map insert is MakeUnique: {:?}", mir.ops);
+        assert_eq!(verify_ownership(&mir), Ok(()));
+    }
+
+    #[test]
+    fn nested_tuple_destructure_recurses() {
+        // let (a, (b, c)) = (1, (2, "x"))  — the nested sub-pattern (b, c) binds against
+        // the nested tuple literal (2, "x") component-wise (recursion). String leaf = heap.
+        let inner_pat = IrPattern::Tuple {
+            elements: vec![
+                IrPattern::Bind { var: VarId(1), ty: Ty::Int },
+                IrPattern::Bind { var: VarId(2), ty: Ty::String },
+            ],
+        };
+        let pat = IrPattern::Tuple {
+            elements: vec![IrPattern::Bind { var: VarId(0), ty: Ty::Int }, inner_pat],
+        };
+        let inner_val = ir_expr(
+            IrExprKind::Tuple {
+                elements: vec![
+                    ir_expr(IrExprKind::LitInt { value: 2 }, Ty::Int),
+                    ir_expr(IrExprKind::LitStr { value: "x".into() }, Ty::String),
+                ],
+            },
+            Ty::Unit,
+        );
+        let val = ir_expr(
+            IrExprKind::Tuple {
+                elements: vec![ir_expr(IrExprKind::LitInt { value: 1 }, Ty::Int), inner_val],
+            },
+            Ty::Unit,
+        );
+        let b = body(vec![stmt(IrStmtKind::BindDestructure { pattern: pat, value: val })]);
+        let mir = lower_body(&b, "main").expect("nested tuple destructure lowers");
+        assert_eq!(verify_ownership(&mir), Ok(()));
+    }
+
+    #[test]
+    fn global_reference_is_admitted_scalar_const_and_heap_alloc() {
+        use almide_lang::intern::sym;
+        // A function references two top-level `let` globals it never binds locally: a
+        // SCALAR global (Int) and a HEAP global (List). value_or_global admits each from
+        // the DECLARED global set — scalar as a Copy `Const`, heap as a fresh owned
+        // `Alloc{Opaque}` dropped at scope end (an owned copy, memory-safe by construction).
+        let mut globals = HashMap::new();
+        globals.insert(VarId(7), Ty::Int);
+        globals.insert(VarId(8), list_int());
+        let call = ir_expr(
+            IrExprKind::Call {
+                target: CallTarget::Named { name: sym("f") },
+                args: vec![
+                    ir_expr(IrExprKind::Var { id: VarId(7) }, Ty::Int),
+                    ir_expr(IrExprKind::Var { id: VarId(8) }, list_int()),
+                ],
+                type_args: vec![],
+            },
+            Ty::Unit,
+        );
+        let b = body(vec![stmt(IrStmtKind::Expr { expr: call })]);
+        let mir = lower_body_with_globals(&b, "main", globals).expect("global refs admitted");
+        assert!(
+            mir.ops.iter().any(|o| matches!(o, Op::Const { .. })),
+            "scalar global is a Const: {:?}",
+            mir.ops
+        );
+        assert!(
+            mir.ops.iter().any(|o| matches!(o, Op::Alloc { init: Init::Opaque, .. })),
+            "heap global is an owned Alloc Opaque: {:?}",
+            mir.ops
+        );
+        assert_eq!(verify_ownership(&mir), Ok(()), "heap-global copy is balanced (alloc + scope-end drop)");
+    }
+
+    #[test]
+    fn unbound_non_global_var_still_walls() {
+        use almide_lang::intern::sym;
+        // The DISCIPLINE: a value_of miss that is NOT in the declared global set is a
+        // genuine lowering gap and must still WALL — never silently absorbed as a "global".
+        let call = ir_expr(
+            IrExprKind::Call {
+                target: CallTarget::Named { name: sym("f") },
+                args: vec![ir_expr(IrExprKind::Var { id: VarId(99) }, Ty::Int)],
+                type_args: vec![],
+            },
+            Ty::Unit,
+        );
+        let b = body(vec![stmt(IrStmtKind::Expr { expr: call })]);
+        match lower_body_with_globals(&b, "main", HashMap::new()) {
+            Err(LowerError::Unsupported(m)) => assert!(m.contains("unbound var"), "got: {m}"),
+            other => panic!("expected an unbound-var wall (a real gap), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn while_with_scalar_counter_reassign_lowers() {
+        // var i = 0; while c { i = 5 }  — a SCALAR reassign is a Copy `Const` (no
+        // handle), admitted; the body has no heap, so the loop lowers balanced.
+        let inc = stmt(IrStmtKind::Assign {
+            var: VarId(0),
+            value: ir_expr(IrExprKind::LitInt { value: 5 }, Ty::Int),
+        });
+        let w = ir_expr(
+            IrExprKind::While { cond: Box::new(bool_var()), body: vec![inc] },
+            Ty::Unit,
+        );
+        let b = body(vec![
+            bind(0, Ty::Int, ir_expr(IrExprKind::LitInt { value: 0 }, Ty::Int)),
+            stmt(IrStmtKind::Expr { expr: w }),
+        ]);
+        let mir = lower_body(&b, "main").expect("while with scalar reassign lowers");
+        assert_eq!(verify_ownership(&mir), Ok(()));
+    }
+
+    #[test]
+    fn scalar_frame_break_is_admitted_as_noop() {
+        // while c { break }  — the per-iteration frame holds NO heap handle, so there is
+        // no Drop a real early exit could skip = no leak on either target. The break is a
+        // no-op; the loop lowers balanced.
+        let w = ir_expr(
+            IrExprKind::While {
+                cond: Box::new(bool_var()),
+                body: vec![stmt(IrStmtKind::Expr { expr: ir_expr(IrExprKind::Break, Ty::Unit) })],
+            },
+            Ty::Unit,
+        );
+        let b = body(vec![stmt(IrStmtKind::Expr { expr: w })]);
+        let mir = lower_body(&b, "main").expect("a scalar-frame break is admitted (no leak possible)");
+        assert_eq!(verify_ownership(&mir), Ok(()));
+    }
+
