@@ -16,6 +16,29 @@ call_name)])]`; auto-link renames impl→call (keeps the caps gate reading a kno
 `module.func`); `lower_source` dedups by name (recursively-linked print_str copies).
 
 ## Machinery 1 — Option (unblocks list.get / first / last)
+**STATUS: match-execution CORE DONE** (commit "Execute match over a materialized Option…").
+A `match opt { Some(x) => …, None => … }` over a DIRECTLY-bound `Some(scalar)`/`None`
+now EXECUTES the taken arm only (= v0), byte-matching: `Init::OptSome { payload }` (a
+1-element list, render via `list_new(1,…)` + `list_set 0 payload`); `None` stays
+`Init::Opaque` (len0). `try_lower_option_ctor` (binds.rs) materializes + records the dst
+in a new `materialized_options: HashSet<ValueId>`; `try_lower_variant_match` (control.rs)
+reads `len` as the tag (`prim.Handle`+`Load{4}`@+4), extracts `data[0]` (`Load{8}`@+12)
+on the Some branch, wraps the per-arm frames in `IfThen`/`Else`/`EndIf`. The
+`materialized_options` GATE is the soundness key — only a tracked subject is read by len,
+so a non-materialized Opaque Option keeps the linearized fallback; AND because both arms
+are per-arm-balanced, even a gate miss is at worst a wrong-arm CORRECTNESS bug, never a
+memory bug. Cert-neutral (Alloc = i init-agnostic; markers no-op; scalar prims):
+corpus-wall ACCEPT UNCHANGED 13139/4083/3582. Tests: `variant_match_over_a_materialized_
+option_executes` (Some(42)/None → 42/none), `option_allocating_loop_matches_bounded`
+(3000-iter materialize+match+free = bounded, no leak). SCALAR payload + UNIT arms only.
+**NEXT (the remaining wiring for the NAMED fns)**: (a) CALL-RESULT tracking — mark a
+`CallFn`/Module-call dst materialized when the callee is a self-host Option fn, so
+`let o = list.get(xs,i); match o` and `match list.get(…)` execute → then self-host
+list.get/first/last (the impl uses `some_int(x)=Some(x)`/`none_int()=None` helpers so the
+materialization stays in TAIL position; list.get's body is a heap-result-if with those
+CALL arms, already handled). (b) scalar-RESULT arms (`let s = match o { Some(x)=>…, None=>…}`).
+(c) heap payload (Some[String] — the element-alias refinement).
+
 **Layout (DE-RISKED): Option = a 0-or-1-element LIST block** — reuse the existing list layout
 `[rc][len@4][cap@8][data@12]`. `None` = a 0-element list (len=0). `Some(x)` = a 1-element list
 (len=1, `data[0]`=x). No new block kind, no new Init. The ownership cert is UNCHANGED: a
