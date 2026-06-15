@@ -315,6 +315,11 @@ impl LowerCtx {
                 if is_self_host_result_module_fn(module.as_str(), func.as_str()) {
                     self.materialized_results.insert(dst);
                 }
+                // A self-host HEAP-Ok Result fn (`value.as_string` → Result[String, String]) — track
+                // it in the cap-as-tag set so a `match` reads cap@8 + binds slot-0 String.
+                if crate::lower::is_self_host_result_str_module_fn(module.as_str(), func.as_str()) {
+                    self.materialized_results_str.insert(dst);
+                }
                 // A `List[String]` result (string.split / a List[String] combinator) is a
                 // nested-ownership list — its scope-end drop must recursively free elements.
                 if is_heap_elem_list_ty(ty) {
@@ -676,6 +681,46 @@ impl LowerCtx {
             // slot 0, Err = len 1 owning the message), tracked so the caller can `match` it. Same
             // cert as the heap-result-`if` arms (reuses `materialize_result_ok` / the Some-string
             // builder) — no new Init. SCALAR Ok payload, heap (Var/LitStr/Named-call) Err payload.
+            // HEAP-Ok `Result[String, String]` (`Ok(s)` with a heap payload, both arms heap) RETURNED
+            // / bound directly — the 2-SLOT DynListStr (String @slot 0, Ok/Err tag @slot 1, len 1 so
+            // `DropListStr` frees only the one String). Same cert as the Err-heap arm (one owned
+            // String moved in). Owned-`Var` / LitStr / Named-call piece only (a borrowed param would
+            // double-free), else the deferred Opaque.
+            IrExprKind::ResultOk { expr }
+                if is_heap_ty(&expr.ty) && Self::is_heap_ok_result(ty) =>
+            {
+                let repr = repr_of(ty).ok()?;
+                let piece = match &expr.kind {
+                    IrExprKind::Var { id }
+                        if self
+                            .value_for(*id)
+                            .map(|v| self.live_heap_handles.contains(&v))
+                            .unwrap_or(false) =>
+                    {
+                        self.value_for(*id).ok()?
+                    }
+                    IrExprKind::LitStr { value } => {
+                        let pr = repr_of(&expr.ty).ok()?;
+                        let p = self.fresh_value();
+                        self.ops.push(Op::Alloc { dst: p, repr: pr, init: Init::Str(value.clone()) });
+                        p
+                    }
+                    IrExprKind::Call { target: CallTarget::Named { name }, args, .. } => {
+                        let lowered = self.lower_call_args(args).ok()?;
+                        let pr = repr_of(&expr.ty).ok()?;
+                        let p = self.fresh_value();
+                        self.ops.push(Op::CallFn {
+                            dst: Some(p),
+                            name: name.as_str().to_string(),
+                            args: lowered,
+                            result: Some(pr),
+                        });
+                        p
+                    }
+                    _ => return None,
+                };
+                Some(self.materialize_result_str(piece, repr, false))
+            }
             IrExprKind::ResultOk { expr } if !is_heap_ty(&expr.ty) => {
                 let payload = self.lower_scalar_value(expr)?;
                 let repr = repr_of(ty).ok()?;

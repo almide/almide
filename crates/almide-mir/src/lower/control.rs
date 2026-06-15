@@ -418,8 +418,11 @@ impl LowerCtx {
         arms: &[IrMatchArm],
     ) -> bool {
         use crate::PrimKind;
-        let subj = match subject_value {
-            Some(v) if self.materialized_results.contains(&v) => v,
+        // A HEAP-Ok `Result[String, String]` (cap-as-tag, Ok binds a heap String) vs the scalar
+        // `Result[Int, String]` (len-as-tag, Ok binds a scalar int).
+        let (subj, str_result) = match subject_value {
+            Some(v) if self.materialized_results_str.contains(&v) => (v, true),
+            Some(v) if self.materialized_results.contains(&v) => (v, false),
             _ => return false,
         };
         if arms.len() != 2 || arms.iter().any(|a| a.guard.is_some()) {
@@ -434,7 +437,9 @@ impl LowerCtx {
             match &arm.pattern {
                 IrPattern::Ok { inner } => {
                     let bind = match inner.as_ref() {
-                        IrPattern::Bind { var, ty } if !is_heap_ty(ty) => Some(*var),
+                        // Scalar Ok (Result[Int,String]) binds a scalar int; a heap-Ok
+                        // (Result[String,String]) binds a heap String — gated to `str_result`.
+                        IrPattern::Bind { var, ty } if is_heap_ty(ty) == str_result => Some(*var),
                         IrPattern::Wildcard => None,
                         _ => return false,
                     };
@@ -473,7 +478,10 @@ impl LowerCtx {
         let lhh_mark = self.live_heap_handles.len();
         let h = self.fresh_value();
         self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![subj] });
-        let tag = self.load_at_offset(h, 4, PrimKind::Load { width: 4 });
+        // The tag is the HIGH 32 bits of slot 0 (@16) for a heap-Ok Result (the low 32 bits @12 hold
+        // the owned String handle), `len` (@4) for a scalar one.
+        let tag_off = if str_result { 16 } else { 4 };
+        let tag = self.load_at_offset(h, tag_off, PrimKind::Load { width: 4 });
         self.ops.push(Op::IfThen { cond: tag, dst: None });
         // THEN (tag != 0 = Err): the message is the BORROWED slot-0 handle.
         if let Some((bind_var, _)) = err_bind {
@@ -487,10 +495,17 @@ impl LowerCtx {
             return false;
         }
         self.ops.push(Op::Else { val: None });
-        // ELSE (tag == 0 = Ok): the value is the scalar slot-0 COPY.
+        // ELSE (tag == 0 = Ok): a scalar Result yields the slot-0 int COPY; a heap-Ok Result yields
+        // the BORROWED slot-0 String handle (the Result keeps ownership through its DropListStr).
         if let Some(bind_var) = ok_bind {
-            let payload = self.load_at_offset(h, 12, PrimKind::Load { width: 8 });
-            self.value_of.insert(bind_var, payload);
+            if str_result {
+                let payload = self.load_at_offset(h, 12, PrimKind::LoadHandle);
+                self.value_of.insert(bind_var, payload);
+                self.param_values.insert(payload);
+            } else {
+                let payload = self.load_at_offset(h, 12, PrimKind::Load { width: 8 });
+                self.value_of.insert(bind_var, payload);
+            }
         }
         if self.lower_branch_arm(None, ok_body).is_err() {
             self.ops.truncate(ops_mark);
@@ -942,6 +957,26 @@ impl LowerCtx {
             // message String (DropListStr frees it — exactly `Some(string)`). So BOTH arms reuse the
             // proven Option[String] cert (Alloc `i` + the per-arm `Consume` `m`; the Err's String is
             // moved in `m` and freed by the scope-end DropListStr `d`) — NO new Init, NO checker change.
+            // HEAP-Ok `Result[String, String]`: BOTH `Ok(string)` and `Err(string)` own a String, so
+            // len-as-tag can't distinguish — materialize a len-1 DynListStr + the Ok/Err tag in cap@8.
+            IrExprKind::ResultOk { expr }
+                if is_heap_ty(&expr.ty) && Self::is_heap_ok_result(result_ty) =>
+            {
+                let repr = repr_of(result_ty).ok()?;
+                let piece = self.lower_result_str_piece(expr)?;
+                let obj = self.materialize_result_str(piece, repr, false);
+                self.ops.push(Op::Consume { v: obj });
+                Some(obj)
+            }
+            IrExprKind::ResultErr { expr }
+                if is_heap_ty(&expr.ty) && Self::is_heap_ok_result(result_ty) =>
+            {
+                let repr = repr_of(result_ty).ok()?;
+                let piece = self.lower_result_str_piece(expr)?;
+                let obj = self.materialize_result_str(piece, repr, true);
+                self.ops.push(Op::Consume { v: obj });
+                Some(obj)
+            }
             IrExprKind::ResultOk { expr } if !is_heap_ty(&expr.ty) => {
                 let payload = self.lower_scalar_value(expr)?;
                 let repr = repr_of(result_ty).ok()?;
@@ -1017,6 +1052,91 @@ impl LowerCtx {
         self.heap_elem_lists.insert(obj);
         self.materialized_options.insert(obj);
         obj
+    }
+
+    /// `Ok(string)` / `Err(string)` for a HEAP-Ok `Result[String, String]` = a len-1 `DynListStr`
+    /// owning the one String at slot 0 (Ok's value OR Err's message), with the Ok/Err TAG written to
+    /// the `cap` field (@8): 0=Ok, 1=Err. `len` stays 1 so `DropListStr` frees the String regardless
+    /// of which arm. Cert = `materialize_opt_str_some` (Alloc `i` + the String `m` + scope-end `d`);
+    /// the cap-tag store is an opaque prim op. Tracked in `materialized_results_str` for the match.
+    /// Is `ty` a `Result[heap, heap]` (e.g. `Result[String, String]`)? Both Ok and Err own a heap
+    /// payload, so it uses the cap-as-tag heap-Ok materialization, NOT the scalar len-as-tag one.
+    pub(crate) fn is_heap_ok_result(ty: &Ty) -> bool {
+        use almide_lang::types::constructor::TypeConstructorId;
+        matches!(ty, Ty::Applied(TypeConstructorId::Result, a)
+            if a.len() == 2 && is_heap_ty(&a[0]) && is_heap_ty(&a[1]))
+    }
+
+    /// Lower a heap-String piece (an `Ok`/`Err` payload) to its owned handle: a tracked Var, a
+    /// String literal (fresh Alloc), or a Named-call result. Returns `None` for any other shape.
+    pub(crate) fn lower_result_str_piece(&mut self, expr: &IrExpr) -> Option<ValueId> {
+        match &expr.kind {
+            IrExprKind::Var { id } => self.value_for(*id).ok(),
+            IrExprKind::LitStr { value } => {
+                let pr = repr_of(&expr.ty).ok()?;
+                let p = self.fresh_value();
+                self.ops.push(Op::Alloc { dst: p, repr: pr, init: Init::Str(value.clone()) });
+                Some(p)
+            }
+            IrExprKind::Call { target: CallTarget::Named { name }, args, .. } => {
+                let lowered = self.lower_call_args(args).ok()?;
+                let pr = repr_of(&expr.ty).ok()?;
+                let p = self.fresh_value();
+                self.ops.push(Op::CallFn {
+                    dst: Some(p),
+                    name: name.as_str().to_string(),
+                    args: lowered,
+                    result: Some(pr),
+                });
+                Some(p)
+            }
+            _ => None,
+        }
+    }
+
+    pub(crate) fn materialize_result_str(
+        &mut self,
+        piece: ValueId,
+        repr: crate::Repr,
+        is_err: bool,
+    ) -> ValueId {
+        use crate::PrimKind;
+        // A 1-SLOT DynListStr (cap 1, len 1 — IDENTICAL block size to every other String/Value block,
+        // so the single-head free-list reuses it; a wider block would be a distinct size that the
+        // size-exact reuse leaks). Slot 0's LOW 32 bits (@12) own the String handle, its HIGH 32 bits
+        // (@16) carry the Ok/Err tag — `DropListStr` does `i32.wrap` of the i64 slot, taking ONLY the
+        // low-32 handle to free, so the high-32 tag is inert (never mistaken for a handle).
+        let one = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: one, value: 1 });
+        let obj = self.fresh_value();
+        self.ops.push(Op::Alloc { dst: obj, repr, init: Init::DynListStr { len: one } });
+        let oh = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(oh), args: vec![obj] });
+        // slot 0 LOW (@12) := the String handle (zero-extended i64 → high 32 bits cleared), CONSUME
+        // the piece (move-in). This 8-byte store MUST precede the tag store (it zeroes @16).
+        let off12 = self.const_add(oh, 12);
+        let ph = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(ph), args: vec![piece] });
+        self.ops.push(Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args: vec![off12, ph] });
+        self.ops.push(Op::Consume { v: piece });
+        self.live_heap_handles.retain(|h| *h != piece);
+        // slot 0 HIGH (@16) := the Ok/Err tag (0 = Ok, 1 = Err) — overwrites the cleared high half.
+        let off16 = self.const_add(oh, 16);
+        let tag = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: tag, value: if is_err { 1 } else { 0 } });
+        self.ops.push(Op::Prim { kind: PrimKind::Store { width: 4 }, dst: None, args: vec![off16, tag] });
+        self.heap_elem_lists.insert(obj);
+        self.materialized_results_str.insert(obj);
+        obj
+    }
+
+    /// `handle + k` as a fresh i64 address value (ConstInt + IntBinOp::Add).
+    fn const_add(&mut self, base: ValueId, k: i64) -> ValueId {
+        let c = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: c, value: k });
+        let dst = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst, op: IntOp::Add, a: base, b: c });
+        dst
     }
 
     /// `Ok(int)` for `Result[Int, String]` = a cap-1/len-0 `DynListStr`: allocate ONE element slot

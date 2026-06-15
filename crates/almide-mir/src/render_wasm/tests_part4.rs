@@ -1932,6 +1932,41 @@
     }
 
     #[test]
+    fn self_hosted_value_as_string() {
+        // SELF-HOSTED value.as_string → the HEAP-Ok Result[String,String] (len-1 DynListStr + cap@8
+        // tag). as_string(str "hello")=Ok("hello") match→"hello"; as_string(int 5)=Err("expected
+        // Str") match→the message. Byte-matches v0.
+        let src = "fn main() -> Unit = {\n  \
+            let vs = value.str(\"hello\")\n  let r = value.as_string(vs)\n  \
+            match r { Ok(s) => println(s), Err(e) => println(e), }\n  \
+            let vi = value.int(5)\n  let r2 = value.as_string(vi)\n  \
+            match r2 { Ok(s) => println(s), Err(e) => println(e), } }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "value.as_string"));
+        if let Some(out) = build_and_run("self_hosted_value_as_string", &render_wasm_program(&prog)) {
+            assert_eq!(out, "hello\nexpected Str");
+        }
+    }
+
+    #[test]
+    fn self_hosted_value_as_string_loop_reclaims() {
+        // SOUNDNESS for the heap-Ok Result path: a bounded loop building + dropping a Result[String,
+        // String] (the slot-0 String reclaimed by DropListStr regardless of Ok/Err) — no leak/double-
+        // free. 4000 iters; the Ok arm uses string.len on the borrowed payload (5).
+        let src = "fn main() -> Unit = {\n  \
+            var i = 0\n  var last = 0\n  \
+            while i < 4000 {\n    \
+              let vs = value.str(\"abcde\")\n    let r = value.as_string(vs)\n    \
+              match r { Ok(s) => { let n = string.len(s)\n last = n }, Err(e) => { last = 0 }, }\n    \
+              i = i + 1\n  }\n  \
+            println(int.to_string(last)) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("self_hosted_value_as_string_loop_reclaims", &render_wasm_program(&prog)) {
+            assert_eq!(out, "5");
+        }
+    }
+
+    #[test]
     fn self_hosted_value_str() {
         // SELF-HOSTED value.str — a heap-payload Value (tag 4) owning a deep-copied String at +12.
         // value.str("hello") → tag 4, payload "hello". Verified by reading the block via prim.

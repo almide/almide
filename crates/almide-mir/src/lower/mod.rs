@@ -229,6 +229,13 @@ pub(crate) struct LowerCtx {
     /// 0) ONLY over a subject in this set; any other Result is a deferred `Opaque` (len 0 → MISREADS
     /// as Ok) and keeps the sound LINEARIZED match. The Result analogue of `materialized_options`.
     materialized_results: HashSet<ValueId>,
+    /// MIR values KNOWN to be MATERIALIZED HEAP-Ok Results (`Result[String, String]` etc.): a 1-slot
+    /// DynListStr (cap 1, len 1 — IDENTICAL block size to every String, so the free-list reuses it)
+    /// that ALWAYS owns one String in slot 0's LOW 32 bits (@12 — Ok's value OR Err's message), with
+    /// the Ok/Err TAG in slot 0's HIGH 32 bits (@16: 0=Ok, 1=Err). `DropListStr` `i32.wrap`s the slot
+    /// to the low-32 handle, so the high-32 tag is inert. An `Ok`/`Err` `match` reads @16 and binds
+    /// the @12 handle as a borrowed String. The heap-Ok-payload analogue of `materialized_results`.
+    materialized_results_str: HashSet<ValueId>,
     /// Lambda-lifted auxiliary functions produced while lowering this function's body
     /// (a non-capturing `let f = (x) => …` or a lambda call-argument lifts its body to a
     /// fresh MirFunction here, bound via `Op::FuncRef`). `lower_function_all` returns these
@@ -835,6 +842,13 @@ pub(crate) fn is_self_host_result_module_fn(module: &str, func: &str) -> bool {
             | ("value", "as_bool")
             | ("value", "as_float")
     )
+}
+
+/// Does `module.func` return a materialized HEAP-Ok `Result[String, String]` (the cap-as-tag
+/// DynListStr layout, both Ok and Err owning a String)? Its result is tracked in
+/// `materialized_results_str` so an `Ok`/`Err` `match` over it EXECUTES reading cap@8.
+pub(crate) fn is_self_host_result_str_module_fn(module: &str, func: &str) -> bool {
+    matches!((module, func), ("value", "as_string"))
 }
 
 pub(crate) fn alloc_init(value: &IrExpr) -> Init {

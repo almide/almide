@@ -89,7 +89,18 @@ fn value_str(s: String) -> Value = {
   v
 }
 
-// value.as_string is DEFERRED: it returns Result[String, String] — a HEAP-Ok-payload Result. The
-// existing materialized Result construction/match assume a SCALAR Ok at slot0 (Result[Int,String]),
-// so a String Ok is mis-extracted (garbage). Needs a heap-Ok Result construction + match + a
-// DropResultStr drop (parallel to DropValue), a focused multi-step machinery slice.
+// value.as_string — Ok(a fresh deep COPY of the payload String) when the Value is a Str (tag 4),
+// else Err("expected Str"). Returns the HEAP-Ok Result[String, String] (a 1-slot DynListStr owning
+// the one String in slot 0's low 32 bits, the Ok/Err tag in slot 0's high 32 bits) — a `match` over
+// it reads the high half and binds the slot-0 String handle.
+fn __vstr_ok(h: Int) -> Result[String, String] = {
+  let s = prim.load_str(h + 12)
+  let copy = string.repeat(s, 1)
+  Ok(copy)
+}
+fn value_as_string(v: Value) -> Result[String, String] = {
+  let h = prim.handle(v)
+  let tag = prim.load32(h + 4)
+  if tag == 4 then __vstr_ok(h)
+  else Err("expected Str")
+}
