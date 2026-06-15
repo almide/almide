@@ -664,6 +664,8 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
                 ("int_count_leading_zeros", "int.count_leading_zeros"),
                 ("int_bit_width", "int.bit_width"),
                 ("int_log2_floor", "int.log2_floor"),
+                ("int_next_power_of_two", "int.next_power_of_two"),
+                ("int_prev_power_of_two", "int.prev_power_of_two"),
             ],
         ),
         (
@@ -1749,6 +1751,31 @@ mod tests {
         assert!(prog.functions.iter().any(|f| f.name == "int.bit_width"), "linked");
         if let Some(out) = build_and_run("int_bitwidth", &render_wasm_program(&prog)) {
             assert_eq!(out, "0\n1\n8\n0\n3\n-1");
+        }
+    }
+
+    #[test]
+    fn self_hosted_int_power_of_two() {
+        // int.next_power_of_two / prev_power_of_two self-hosted (1 << bit_width(n-1) /
+        // 1 << log2_floor(n)): next(5)=8, next(8)=8, next(0)=1; prev(5)=4, prev(8)=8,
+        // prev(0)=0. byte-matching v0.
+        let src = "fn main() -> Unit = {\n  \
+            let a = int.next_power_of_two(5)\n  \
+            let b = int.next_power_of_two(8)\n  \
+            let c = int.next_power_of_two(0)\n  \
+            let d = int.prev_power_of_two(5)\n  \
+            let e = int.prev_power_of_two(8)\n  \
+            let f = int.prev_power_of_two(0)\n  \
+            println(int.to_string(a))\n  \
+            println(int.to_string(b))\n  \
+            println(int.to_string(c))\n  \
+            println(int.to_string(d))\n  \
+            println(int.to_string(e))\n  \
+            println(int.to_string(f)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "int.next_power_of_two"), "linked");
+        if let Some(out) = build_and_run("int_pow2", &render_wasm_program(&prog)) {
+            assert_eq!(out, "8\n8\n1\n4\n8\n0");
         }
     }
 

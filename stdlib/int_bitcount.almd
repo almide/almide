@@ -54,3 +54,21 @@ fn int_log2_floor(n: Int) -> Int =
     let lz = __clz(n, 63)
     63 - lz
   }
+
+// next_power_of_two: smallest power of 2 >= n (1 for n <= 1) = 1 << bit_width(n-1).
+fn int_next_power_of_two(n: Int) -> Int =
+  if n <= 1 then 1
+  else {
+    let lz = __clz(n - 1, 63)
+    let w = 64 - lz
+    prim.bshl(1, w)
+  }
+
+// prev_power_of_two: largest power of 2 <= n (0 for n <= 0) = 1 << log2_floor(n).
+fn int_prev_power_of_two(n: Int) -> Int =
+  if n <= 0 then 0
+  else {
+    let lz = __clz(n, 63)
+    let lf = 63 - lz
+    prim.bshl(1, lf)
+  }
