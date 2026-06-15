@@ -616,6 +616,8 @@ impl LowerCtx {
         for v in self.live_heap_handles.split_off(mark).into_iter().rev() {
             if self.heap_elem_lists.contains(&v) {
                 self.ops.push(Op::DropListStr { v });
+            } else if self.value_handles.contains(&v) {
+                self.ops.push(Op::DropValue { v });
             } else {
                 self.ops.push(Op::Drop { v });
             }

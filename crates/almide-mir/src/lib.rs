@@ -200,6 +200,13 @@ pub enum Op {
     /// element handle, THEN `rc_dec`s the list (so a shared list's aliases don't free the
     /// elements early). The nested-ownership counterpart of `Drop` for Machinery 2.
     DropListStr { v: ValueId },
+    /// `drop_value v` — release a dynamic `Value` (the Codec data model). A scalar Value
+    /// (Null/Bool/Int/Float, tag < 4) owns NO heap payload, so this frees just the block; a
+    /// heap-payload Value (Str/Array/Object, tag ≥ 4) owns ONE handle at +12, freed first IFF
+    /// this is the last reference (rc==1). Same cert event as [`Op::Drop`] (one `−1`/`d` on the
+    /// Value object — the payload was accounted `m`/consumed when stored into it). The
+    /// RUNTIME-TAG-DISPATCHED counterpart of `Drop` for the Value type.
+    DropValue { v: ValueId },
     /// `consume v` — transfer v's reference OUT (into a container, a return, or
     /// a callee that takes ownership). v is dead here; the reference lives on
     /// elsewhere. Renders as a move (Rust) / ptr-transfer with no inc (wasm).
@@ -603,7 +610,7 @@ pub fn verify_ownership(func: &MirFunction) -> Result<(), Vec<Violation>> {
             // A `DropListStr` releases the LIST object exactly like a `Drop` (the recursive
             // element free is a RENDER concern, gated on rc==1; the cert sees one −1 on the
             // list — its elements were `Consume`d into it when stored).
-            Op::Drop { v } | Op::DropListStr { v } => {
+            Op::Drop { v } | Op::DropListStr { v } | Op::DropValue { v } => {
                 match release(&object_of, &mut rc, &mut dead, &borrowed, *v) {
                     Ok(()) => {}
                     Err(()) => violations.push(violation(i, *v, ViolationKind::DoubleFree)),

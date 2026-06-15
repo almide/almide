@@ -309,6 +309,11 @@ impl LowerCtx {
                 if is_heap_elem_list_ty(ty) {
                     self.heap_elem_lists.insert(dst);
                 }
+                // A `Value` result (value.str/int/… or a Value-returning combinator) drops via the
+                // runtime-tag-dispatched DropValue (a heap-payload Value owns one handle).
+                if crate::lower::is_value_ty(ty) {
+                    self.value_handles.insert(dst);
+                }
                 Ok(())
             }
             // `var o = f(x)` where `f` is a lifted lambda / function-typed param returning a

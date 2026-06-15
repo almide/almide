@@ -249,6 +249,22 @@ pub(crate) struct LowerCtx {
     /// not a flat [`Op::Drop`] — so the element Strings are reclaimed. Populated when an
     /// `alloc_list_str` result or a `List[String]`-typed bind is created (Machinery 2).
     heap_elem_lists: HashSet<ValueId>,
+    /// MIR values of the dynamic `Value` type (the Codec data model). A scope-end drop emits
+    /// [`Op::DropValue`] (runtime-tag-dispatched: a Str/Array/Object Value frees its one heap
+    /// payload, a scalar Value just frees the block) instead of a flat [`Op::Drop`]. Populated
+    /// when a `Value`-typed bind is created.
+    value_handles: HashSet<ValueId>,
+}
+
+/// Is `ty` the dynamic `Value` type (the Codec data model)? Its scope-end drop is the
+/// runtime-tag-dispatched [`Op::DropValue`], since a heap-payload Value (Str/Array/Object) owns a
+/// handle the flat `Drop` would leak.
+pub(crate) fn is_value_ty(ty: &Ty) -> bool {
+    match ty {
+        Ty::Named(name, _) => name.as_str() == "Value",
+        Ty::Variant { name, .. } => name.as_str() == "Value",
+        _ => false,
+    }
 }
 
 /// Is `ty` a `List[T]` / `Option[T]` whose element `T` is itself a HEAP type (e.g. `List[String]`,
@@ -582,6 +598,8 @@ impl LowerCtx {
             .map(|v| {
                 if self.heap_elem_lists.contains(v) {
                     Op::DropListStr { v: *v }
+                } else if self.value_handles.contains(v) {
+                    Op::DropValue { v: *v }
                 } else {
                     Op::Drop { v: *v }
                 }

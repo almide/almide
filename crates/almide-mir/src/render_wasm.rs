@@ -677,6 +677,19 @@ fn render_op(
                  \x20   (call $rc_dec (local.get {p}))\n"
             )
         }
+        // RUNTIME-TAG-DISPATCHED drop of a dynamic `Value`: IFF this is the last reference (rc==1)
+        // AND the variant TAG (at +4) is a heap payload (≥ 4 = Str/Array/Object), first `rc_dec`
+        // the ONE payload handle at +12 (i32.wrap'd from its i64 slot); a scalar Value (tag < 4)
+        // owns no payload. THEN `rc_dec` the Value block. The block-free is the single cert `d`.
+        Op::DropValue { v } => {
+            let p = local(*v);
+            format!(
+                "    (if (i32.and (i32.eq (i32.load (local.get {p})) (i32.const 1)) (i32.ge_s (i32.load (i32.add (local.get {p}) (i32.const 4))) (i32.const 4)))\n\
+                 \x20     (then\n\
+                 \x20       (call $rc_dec (i32.wrap_i64 (i64.load (i32.add (local.get {p}) (i32.const 12)))))))\n\
+                 \x20   (call $rc_dec (local.get {p}))\n"
+            )
+        }
         // COPY-ON-WRITE before an in-place mutation (A1.3-render, refining
         // CowSafety.v): if the block is SHARED (rc > 1), clone it so the mutation
         // touches no alias. The `rc_dec` runs FIRST (rc 2→1 — the alias keeps the

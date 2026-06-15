@@ -75,3 +75,16 @@ fn value_as_float(v: Value) -> Result[Float, String] = {
   else if tag == 2 then __vf_fromint(raw)
   else Err("expected Float")
 }
+
+// value.str — a heap-payload Value (tag 4 = Str). The Value OWNS a fresh DEEP COPY of `s` stored
+// (consumed) into the +12 payload slot via prim.store_str; the runtime-tag-dispatched DropValue
+// frees it when the Value is released. (value.as_string is deferred — it returns Result[String,
+// String], a heap-Ok-payload Result the current len-as-tag Result layout doesn't yet reclaim.)
+fn value_str(s: String) -> Value = {
+  let v = prim.alloc_value(1)
+  let h = prim.handle(v)
+  prim.store32(h + 4, 4)        // tag = Str
+  let copy = string.repeat(s, 1)
+  prim.store_str(h + 12, copy)  // MOVE the owned copy into the Value's payload slot
+  v
+}

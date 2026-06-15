@@ -1699,6 +1699,40 @@
     }
 
     #[test]
+    fn self_hosted_value_str() {
+        // SELF-HOSTED value.str — a heap-payload Value (tag 4) owning a deep-copied String at +12.
+        // value.str("hello") → tag 4, payload "hello". Verified by reading the block via prim.
+        let src = "fn main() -> Unit = {\n  \
+            let v = value.str(\"hello\")\n  let h = prim.handle(v)\n  \
+            println(int.to_string(prim.load32(h + 4)))\n  \
+            let payload = prim.load_str(h + 12)\n  println(payload) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "value.str"));
+        if let Some(out) = build_and_run("self_hosted_value_str", &render_wasm_program(&prog)) {
+            assert_eq!(out, "4\nhello");
+        }
+    }
+
+    #[test]
+    fn self_hosted_value_str_loop_reclaims() {
+        // SOUNDNESS for the new DropValue heap path: a bounded loop building + dropping a fresh
+        // heap-payload Value (value.str) each iteration must reclaim the payload String + the block
+        // (the runtime-tag DropValue) — no leak (OOM) / double-free (trap). 4000 iters, prints the
+        // last Value's tag (4).
+        let src = "fn main() -> Unit = {\n  \
+            var i = 0\n  var last = 0\n  \
+            while i < 4000 {\n    \
+              let v = value.str(\"payload-string\")\n    \
+              last = prim.load32(prim.handle(v) + 4)\n    \
+              i = i + 1\n  }\n  \
+            println(int.to_string(last)) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("self_hosted_value_str_loop_reclaims", &render_wasm_program(&prog)) {
+            assert_eq!(out, "4");
+        }
+    }
+
+    #[test]
     fn self_hosted_set_string_loop_reclaims() {
         // SOUNDNESS for the Set[String] nested-ownership path: a bounded loop building + dropping a
         // fresh Set[String] each iteration must reclaim each element String + the block (DropListStr)
