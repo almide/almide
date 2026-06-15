@@ -903,3 +903,21 @@
             assert_eq!(out, "-56\n200\n-25536\n4464");
         }
     }
+
+    #[test]
+    fn self_hosted_int_to_unsigned_saturating() {
+        // int.to_uint8/16/32/64_saturating self-hosted: clamp to [0, 2^N-1] (scalar value,
+        // no Option). to_uint8_sat(300)=255, (-5)=0, (100)=100; to_uint16_sat(70000)=65535;
+        // to_uint64_sat(-1)=0.
+        let src = "fn main() -> Unit = {\n  \
+            let a = int.to_uint8_saturating(300)\n  let sa = int.to_string(a)\n  println(sa)\n  \
+            let b = int.to_uint8_saturating(0 - 5)\n  let sb = int.to_string(b)\n  println(sb)\n  \
+            let c = int.to_uint8_saturating(100)\n  let sc = int.to_string(c)\n  println(sc)\n  \
+            let d = int.to_uint16_saturating(70000)\n  let sd = int.to_string(d)\n  println(sd)\n  \
+            let e = int.to_uint64_saturating(0 - 1)\n  let se = int.to_string(e)\n  println(se) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "int.to_uint8_saturating"));
+        if let Some(out) = build_and_run("int_usat", &render_wasm_program(&prog)) {
+            assert_eq!(out, "255\n0\n100\n65535\n0");
+        }
+    }
