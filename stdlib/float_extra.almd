@@ -8,3 +8,11 @@ fn float_clamp(n: Float, lo: Float, hi: Float) -> Float = {
 }
 
 fn float_is_nan(n: Float) -> Bool = prim.fne(n, n)
+
+// sign(n) = f64::signum: magnitude 1.0 with n's SIGN BIT (so signum(+0.0)=1.0,
+// signum(-0.0)=-1.0), and NaN for NaN. `copysign(1.0, n)` gives the sign-bit behavior
+// exactly; the NaN case is guarded (copysign of NaN would drop the NaN payload).
+fn float_sign(n: Float) -> Float = {
+  let nan = prim.fne(n, n)
+  if nan then n else prim.fcopysign(1.0, n)
+}

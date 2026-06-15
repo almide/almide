@@ -96,6 +96,8 @@ fn fdiv(a: Float, b: Float) -> Float = _
 fn fmin(a: Float, b: Float) -> Float = _
 @intrinsic("almide_rt_prim_fmax")
 fn fmax(a: Float, b: Float) -> Float = _
+@intrinsic("almide_rt_prim_fcopysign")
+fn fcopysign(a: Float, b: Float) -> Float = _
 @intrinsic("almide_rt_prim_flt")
 fn flt(a: Float, b: Float) -> Bool = _
 @intrinsic("almide_rt_prim_fle")

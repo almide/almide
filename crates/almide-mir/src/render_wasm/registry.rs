@@ -78,7 +78,11 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
         ),
         (
             include_str!("../../../../stdlib/float_extra.almd"),
-            &[("float_clamp", "float.clamp"), ("float_is_nan", "float.is_nan")],
+            &[
+                ("float_clamp", "float.clamp"),
+                ("float_is_nan", "float.is_nan"),
+                ("float_sign", "float.sign"),
+            ],
         ),
         (include_str!("../../../../stdlib/float_round.almd"), &[("float_round", "float.round")]),
         (include_str!("../../../../stdlib/list_len.almd"), &[("list_len", "list.len")]),

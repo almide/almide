@@ -334,6 +334,9 @@ pub enum FBinOp {
     Div,
     Min,
     Max,
+    /// `f64.copysign(a, b)` — magnitude of `a` with the sign bit of `b` (the basis for an
+    /// exact `f64::signum`: `copysign(1.0, x)`, with NaN handled by the caller).
+    CopySign,
 }
 
 /// An f64 comparison — yields an i64 0/1 (the Bool / `if` condition).

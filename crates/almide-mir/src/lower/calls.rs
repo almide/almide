@@ -821,6 +821,7 @@ impl LowerCtx {
             "fdiv" => PrimKind::FloatBin(crate::FBinOp::Div),
             "fmin" => PrimKind::FloatBin(crate::FBinOp::Min),
             "fmax" => PrimKind::FloatBin(crate::FBinOp::Max),
+            "fcopysign" => PrimKind::FloatBin(crate::FBinOp::CopySign),
             "flt" => PrimKind::FloatCmp(crate::FCmpOp::Lt),
             "fle" => PrimKind::FloatCmp(crate::FCmpOp::Le),
             "fgt" => PrimKind::FloatCmp(crate::FCmpOp::Gt),

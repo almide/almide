@@ -319,6 +319,22 @@
     }
 
     #[test]
+    fn self_hosted_float_sign() {
+        // SELF-HOSTED float.sign = f64::signum (sign-bit based via copysign). sign(5)=1,
+        // sign(-5)=-1, sign(+0.0)=1 (signum of +0.0 is 1.0, NOT 0). to_int printed.
+        let src = "fn main() -> Unit = {\n  \
+            let a = float.to_int(float.sign(float.from_int(5)))\n  println(int.to_string(a))\n  \
+            let b = float.to_int(float.sign(float.from_int(0 - 5)))\n  println(int.to_string(b))\n  \
+            let c = float.to_int(float.sign(float.from_int(0)))\n  println(int.to_string(c)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "float.sign"));
+        if let Some(out) = build_and_run("self_hosted_float_sign", &render_wasm_program(&prog)) {
+            // sign(5)=1, sign(-5)=-1, sign(+0.0)=1
+            assert_eq!(out, "1\n-1\n1");
+        }
+    }
+
+    #[test]
     fn self_hosted_float_round() {
         // SELF-HOSTED float.round — round half AWAY from zero (v0's f64::round, NOT half-even).
         // round(2.5)=3, round(2.4)=2, round(3.5)=4 (half-even would give 2 and 4 — the 2.5 case

@@ -672,6 +672,7 @@ fn render_op(
                         FBinOp::Div => "f64.div",
                         FBinOp::Min => "f64.min",
                         FBinOp::Max => "f64.max",
+                        FBinOp::CopySign => "f64.copysign",
                     };
                     format!("(i64.reinterpret_f64 ({instr} {} {}))", f(0), f(1))
                 }
