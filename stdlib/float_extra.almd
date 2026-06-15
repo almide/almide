@@ -1,0 +1,10 @@
+// float_extra — more SELF-HOSTED `float.*` over the Float prim floor. clamp(n,lo,hi) =
+// fmin(fmax(n,lo),hi) = n.clamp(lo,hi) (assuming lo<=hi); is_nan(n) = n != n (only NaN is
+// unequal to itself). Pure scalar — cert untouched. Matches v0's f64 semantics.
+
+fn float_clamp(n: Float, lo: Float, hi: Float) -> Float = {
+  let m = prim.fmax(n, lo)
+  prim.fmin(m, hi)
+}
+
+fn float_is_nan(n: Float) -> Bool = prim.fne(n, n)

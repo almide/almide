@@ -299,6 +299,26 @@
     }
 
     #[test]
+    fn self_hosted_float_extra() {
+        // SELF-HOSTED float.clamp / float.is_nan. clamp(5,0,3)=3, clamp(-1,0,3)=0, clamp(2,0,3)
+        // =2 (to_int printed). is_nan(sqrt(-1))=1 (NaN), is_nan(5.0)=0. Byte-matches v0.
+        let src = "fn main() -> Unit = {\n  \
+            let z = float.from_int(0)\n  let th = float.from_int(3)\n  \
+            let c1 = float.to_int(float.clamp(float.from_int(5), z, th))\n  println(int.to_string(c1))\n  \
+            let c2 = float.to_int(float.clamp(float.from_int(0 - 1), z, th))\n  println(int.to_string(c2))\n  \
+            let c3 = float.to_int(float.clamp(float.from_int(2), z, th))\n  println(int.to_string(c3))\n  \
+            let nan = float.sqrt(float.from_int(0 - 1))\n  let b1 = float.is_nan(nan)\n  let i1 = if b1 then 1 else 0\n  println(int.to_string(i1))\n  \
+            let five = float.from_int(5)\n  let b2 = float.is_nan(five)\n  let i2 = if b2 then 1 else 0\n  println(int.to_string(i2)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "float.clamp"));
+        assert!(prog.functions.iter().any(|f| f.name == "float.is_nan"));
+        if let Some(out) = build_and_run("self_hosted_float_extra", &render_wasm_program(&prog)) {
+            // clamp: 3,0,2 ; is_nan: 1,0
+            assert_eq!(out, "3\n0\n2\n1\n0");
+        }
+    }
+
+    #[test]
     fn self_hosted_list_flat_map() {
         // SELF-HOSTED `list.flat_map` — closure returns a LIST (heap-returning closure). f =
         // (x) => list.range(x, x+2) = [x, x+1]; flat_map([1,2,3], f) = [1,2]++[2,3]++[3,4] =
