@@ -81,6 +81,14 @@ pub fn name_witness(func: &MirFunction) -> NameWitness {
                 }
                 record_args(args, &mut used);
             }
+            // A closure call USES the table-index value (the closure) plus its args.
+            Op::CallIndirect { dst, table_idx, args, .. } => {
+                if let Some(d) = dst {
+                    defined.push(*d);
+                }
+                used.push(*table_idx);
+                record_args(args, &mut used);
+            }
             // The if-condition is USED; the result `dst` is DEFINED; the arm values are
             // USED. (The arm OPS, flat between the markers, define/use as usual.)
             Op::IfThen { cond, dst } => {
@@ -136,6 +144,13 @@ pub fn cap_witness(func: &MirFunction) -> CapWitness {
         // a self-hosted runtime fn using it (print_str) must declare Stdout, exactly
         // like a `PrintStr` runtime call (this keeps the sandbox accounting complete).
         if let Op::Prim { kind: crate::PrimKind::FdWrite, .. } = op {
+            used.push(Capability::Stdout);
+        }
+        // SOUNDNESS CRUX: a CallIndirect invokes an UNANALYZABLE closure, which may reach
+        // ANY capability. Conservatively mark EVERY capability used (here: Stdout, the only
+        // modeled one), so `used ⊆ declared` holds ONLY for a fn that DECLARES it — a closure
+        // that secretly writes Stdout can never pass caps un-witnessed (accept-but-unsafe).
+        if let Op::CallIndirect { .. } = op {
             used.push(Capability::Stdout);
         }
     }
@@ -581,6 +596,27 @@ mod tests {
             Op::Drop { v: ValueId(0) },
         ]);
         assert!(cap_witness(&pure).used.is_empty());
+    }
+
+    #[test]
+    fn call_indirect_conservatively_taints_every_capability() {
+        // THE CLOSURES SOUNDNESS CRUX: a CallIndirect invokes an unanalyzable closure that
+        // may reach ANY capability, so the witness must conservatively mark every modeled
+        // cap (Stdout) USED — a fn with a closure call is caps-verified ONLY if it DECLARES
+        // it. A pure-looking fn that calls a secretly-Stdout closure can never pass
+        // un-witnessed (accept-but-unsafe).
+        let closure_caller = func(vec![
+            Op::ConstInt { dst: ValueId(0), value: 0 }, // the closure value (a table index)
+            Op::CallIndirect { dst: None, table_idx: ValueId(0), args: vec![], result: None },
+        ]);
+        let w = cap_witness(&closure_caller);
+        assert_eq!(w.used, vec![Capability::Stdout], "a CallIndirect must witness Stdout used");
+        // With no declared caps (the default), used ⊄ allowed → the proven `used ⊆ allowed`
+        // checker REJECTS it as caps-verified — it stays honestly caps-unverified.
+        assert!(
+            !w.used.iter().all(|c| w.allowed.contains(c)),
+            "a closure caller with no declared caps must NOT be silently caps-verified"
+        );
     }
 
     #[test]

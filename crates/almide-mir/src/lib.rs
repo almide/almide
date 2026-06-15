@@ -213,6 +213,17 @@ pub enum Op {
     /// callee (the compositionality lever for ownership).
     CallFn { dst: Option<ValueId>, name: String, args: Vec<CallArg>, result: Option<Repr> },
 
+    /// Call a CLOSURE VALUE indirectly: `dst = (table[table_idx])(args)` — the
+    /// function-value invocation `(f)(x)` the higher-order self-host (list.map/filter/
+    /// fold) needs, lowered to wasm `call_indirect`. `table_idx` is a scalar (the closure
+    /// value = a function-table index). SOUNDNESS-CRITICAL for caps: the callee is an
+    /// UNANALYZABLE closure, so [`crate::certificate::cap_witness`] treats this op as
+    /// reaching EVERY capability (conservative `used ⊇ all`) — a fn with a `CallIndirect`
+    /// is therefore caps-VERIFIED only if it DECLARES the cap, never silently (a closure
+    /// that reaches Stdout could otherwise pass un-witnessed = accept-but-unsafe). Args are
+    /// borrowed/moved like a `CallFn`; a heap result is a fresh owned value.
+    CallIndirect { dst: Option<ValueId>, table_idx: ValueId, args: Vec<CallArg>, result: Option<Repr> },
+
     /// `dst = a <op> b` on scalars (no ownership) — the arithmetic runtime
     /// functions need.
     IntBinOp { dst: ValueId, op: IntOp, a: ValueId, b: ValueId },
@@ -529,7 +540,12 @@ pub fn verify_ownership(func: &MirFunction) -> Result<(), Vec<Violation>> {
             // whose `result` is a heap repr returns a FRESH OWNED value (the
             // callee allocated and moved it out — the return-mode signature): the
             // `dst` becomes a new owned object, like Alloc.
-            Op::Call { args, dst, result, .. } | Op::CallFn { args, dst, result, .. } => {
+            Op::Call { args, dst, result, .. }
+            | Op::CallFn { args, dst, result, .. }
+            // A CallIndirect has the same ownership shape as a CallFn: its heap-arg handles
+            // must be live, a heap result is a FRESH OWNED value. The `table_idx` is a
+            // scalar closure value (no ownership).
+            | Op::CallIndirect { args, dst, result, .. } => {
                 for a in args {
                     if let CallArg::Handle(v) = a {
                         if live_object(&object_of, &rc, &dead, &borrowed, *v).is_none() {

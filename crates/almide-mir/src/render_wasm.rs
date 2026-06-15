@@ -489,6 +489,12 @@ fn render_op(op: &Op, label_off: &BTreeMap<String, (u32, u32)>) -> String {
             };
             format!("    (local.set {d} {expr})\n", d = local(*dst))
         }
+        // CallIndirect render needs the module function table + per-arity `(type)` — wired
+        // in a later closures-machinery slice. No lowering emits this op yet (dead path), so
+        // a WAT comment placeholder keeps render TOTAL without affecting any real program.
+        Op::CallIndirect { .. } => {
+            String::from("    ;; call_indirect — closure machinery: function table not yet wired\n")
+        }
         Op::CallFn { dst, name, args, .. } => {
             let argstr = args.iter().map(render_arg_wasm).collect::<Vec<_>>().join(" ");
             match dst {

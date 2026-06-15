@@ -170,6 +170,9 @@ fn render_op(op: &Op) -> Option<String> {
         // Runtime calls are spelled as the idiomatic Rust operation (the bootstrap
         // runtime; ultimately these are calls to self-hosted Almide functions).
         Op::Call { func, args, .. } => Some(render_call(func, args)),
+        // CallIndirect is wasm-only (native uses v0 codegen) and unwired (no lowering emits
+        // it yet) — emit nothing.
+        Op::CallIndirect { .. } => None,
         Op::IntBinOp { dst, op, a, b } => {
             let (a, b, d) = (var(*a), var(*b), var(*dst));
             // A comparison yields a `bool` → cast to the i64 scalar model (0/1).
