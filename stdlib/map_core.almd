@@ -260,3 +260,21 @@ fn map_count(m: Map[Int, Int], f: (Int, Int) -> Bool) -> Int = {
   let len = prim.load32(sh + 4)
   __map_count_hits(sh, len, f, 0, 0)
 }
+
+// map.fold — left fold with a THREE-arity closure f : (Acc, Key, Value) -> Acc (v0's
+// fold(m, init, f), acc first). Int accumulator. The closure dispatches via $closure_fn3 (the
+// render generates one closure type per arity that appears — 3-arity needs no new machinery).
+fn __map_fold_loop(sh: Int, f: (Int, Int, Int) -> Int, len: Int, i: Int, acc: Int) -> Int =
+  if i >= len then acc
+  else {
+    let k = prim.load64(sh + 12 + i * 16)
+    let v = prim.load64(sh + 12 + i * 16 + 8)
+    let nacc = f(acc, k, v)
+    __map_fold_loop(sh, f, len, i + 1, nacc)
+  }
+
+fn map_fold(m: Map[Int, Int], init: Int, f: (Int, Int, Int) -> Int) -> Int = {
+  let sh = prim.handle(m)
+  let len = prim.load32(sh + 4)
+  __map_fold_loop(sh, f, len, 0, init)
+}

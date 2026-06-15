@@ -1485,6 +1485,23 @@
     }
 
     #[test]
+    fn self_hosted_map_fold_three_arity_closure() {
+        // SELF-HOSTED map.fold — the FIRST 3-arity closure f(acc,k,v) via $closure_fn3 (the render
+        // auto-generates a closure type per arity, so 3-arity needs no new machinery). m={1:10,
+        // 2:20,3:30}: fold(0, (a,k,v) => a + k + v) = (1+10)+(2+20)+(3+30) = 66. Byte-matches v0.
+        let src = "fn main() -> Unit = {\n  \
+            let m1 = map.set(map.new(), 1, 10)\n  let m2 = map.set(m1, 2, 20)\n  \
+            let m = map.set(m2, 3, 30)\n  \
+            let total = map.fold(m, 0, (a, k, v) => a + k + v)\n  \
+            println(int.to_string(total)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "map.fold"));
+        if let Some(out) = build_and_run("self_hosted_map_fold_three_arity_closure", &render_wasm_program(&prog)) {
+            assert_eq!(out, "66");
+        }
+    }
+
+    #[test]
     fn self_hosted_map_core_loop_reclaims() {
         // SOUNDNESS for the new Map[Int,Int] heap path: a bounded loop building + dropping a
         // fresh Map every iteration must reclaim each (plain non-nested drop) — no leak/double-free.
