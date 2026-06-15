@@ -916,6 +916,25 @@
     }
 
     #[test]
+    fn self_hosted_string_is_whitespace() {
+        // SELF-HOSTED string.is_whitespace — every codepoint is in the Unicode White_Space set
+        // (decoded per-codepoint via UTF-8, checked against the exact set incl. U+3000 ideographic
+        // space). "   "=true, "a b"=false, ""=true (all() over empty), "　"(U+3000)=true,
+        // "　x"=false. Byte-matches v0's s.chars().all(|c| c.is_whitespace()). Bool printed 1/0.
+        let src = "fn main() -> Unit = {\n  \
+            let a = string.is_whitespace(\"   \")\n  let na = if a then 1 else 0\n  println(int.to_string(na))\n  \
+            let b = string.is_whitespace(\"a b\")\n  let nb = if b then 1 else 0\n  println(int.to_string(nb))\n  \
+            let c = string.is_whitespace(\"\")\n  let nc = if c then 1 else 0\n  println(int.to_string(nc))\n  \
+            let d = string.is_whitespace(\"　\")\n  let nd = if d then 1 else 0\n  println(int.to_string(nd))\n  \
+            let e = string.is_whitespace(\"　x\")\n  let ne = if e then 1 else 0\n  println(int.to_string(ne)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "string.is_whitespace"));
+        if let Some(out) = build_and_run("self_hosted_string_is_whitespace", &render_wasm_program(&prog)) {
+            assert_eq!(out, "1\n0\n1\n1\n0");
+        }
+    }
+
+    #[test]
     fn self_hosted_string_length() {
         // SELF-HOSTED string.length — the explicit-name alias of string.len (both = the UTF-8
         // codepoint count). length("hello")=5, length("日本語")=3, length("")=0. Byte-matches v0.
@@ -1086,3 +1105,5 @@
             assert_eq!(out, "4\n2\n3\n3\n5\n0");
         }
     }
+
+

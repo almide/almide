@@ -153,3 +153,66 @@ fn string_strip_suffix(s: String, suffix: String) -> Option[String] = {
   let rlen = __suf_len(sh, fh, sn, fl)
   if rlen < 0 then None else Some(__sub_from(s, 0, rlen))
 }
+
+// ── string.is_whitespace — every codepoint is in the Unicode White_Space property ──
+// White_Space = {U+0009..000D, U+0020, U+0085, U+00A0, U+1680, U+2000..200A, U+2028, U+2029,
+// U+202F, U+205F, U+3000} (all <= U+3000, so 1/2/3-byte). The empty string is whitespace (all()).
+
+// Decode the codepoint from its n UTF-8 bytes (n = 1/2/3; 4-byte are never whitespace).
+fn __ws_cp(b0: Int, b1: Int, b2: Int, n: Int) -> Int =
+  if n == 1 then b0
+  else if n == 2 then {
+    let hi = prim.band(b0, 31)
+    let lo = prim.band(b1, 63)
+    let sh = prim.bshl(hi, 6)
+    prim.bor(sh, lo)
+  }
+  else {
+    let hi = prim.band(b0, 15)
+    let mid = prim.band(b1, 63)
+    let lo = prim.band(b2, 63)
+    let shi = prim.bshl(hi, 12)
+    let smid = prim.bshl(mid, 6)
+    let p = prim.bor(shi, smid)
+    prim.bor(p, lo)
+  }
+
+// Is cp in the Unicode White_Space set? A FLAT else-if chain (every branch nests in the else —
+// no nested-if-in-THEN, which the if-marker render does not reconstruct).
+fn __is_ws(cp: Int) -> Bool =
+  if cp < 9 then false
+  else if cp <= 13 then true     // U+0009..U+000D
+  else if cp == 32 then true     // U+0020
+  else if cp == 133 then true    // U+0085
+  else if cp == 160 then true    // U+00A0
+  else if cp == 5760 then true   // U+1680
+  else if cp < 8192 then false
+  else if cp <= 8202 then true   // U+2000..U+200A
+  else if cp == 8232 then true   // U+2028
+  else if cp == 8233 then true   // U+2029
+  else if cp == 8239 then true   // U+202F
+  else if cp == 8287 then true   // U+205F
+  else if cp == 12288 then true  // U+3000
+  else false
+
+// Are all codepoints from byte offset `pos` whitespace? (lazy: stops at the first non-ws.)
+fn __ws_all(h: Int, blen: Int, pos: Int) -> Bool =
+  if pos >= blen then true
+  else {
+    let b0 = prim.load8(h + 12 + pos)
+    let n = __cp_len(b0)
+    let f1 = if n > 1 then 1 else 0
+    let f2 = if n > 2 then 1 else 0
+    let b1 = prim.load8(h + 12 + pos + f1)
+    let b2 = prim.load8(h + 12 + pos + f2 * 2)
+    let cp = __ws_cp(b0, b1, b2, n)
+    let w = __is_ws(cp)
+    if w then __ws_all(h, blen, pos + n) else false
+  }
+
+// string.is_whitespace(s) -> is every codepoint a Unicode whitespace char? ("" -> true).
+fn string_is_whitespace(s: String) -> Bool = {
+  let h = prim.handle(s)
+  let blen = prim.load32(h + 4)
+  __ws_all(h, blen, 0)
+}
