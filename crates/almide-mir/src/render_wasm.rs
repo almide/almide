@@ -677,6 +677,8 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
                 ("int_bshl", "int.bshl"),
                 ("int_bshr", "int.bshr"),
                 ("int_bnot", "int.bnot"),
+                ("int_byte_swap", "int.byte_swap"),
+                ("int_bit_reverse", "int.bit_reverse"),
             ],
         ),
         (include_str!("../../../stdlib/int_hex.almd"), &[("int_to_hex", "int.to_hex")]),
@@ -1800,6 +1802,27 @@ mod tests {
         assert!(prog.functions.iter().any(|f| f.name == "int.to_hex"), "linked");
         if let Some(out) = build_and_run("int_hex", &render_wasm_program(&prog)) {
             assert_eq!(out, "ff\n0\n10\na\nffffffffffffffff");
+        }
+    }
+
+    #[test]
+    fn self_hosted_int_byte_swap_and_bit_reverse() {
+        // int.byte_swap / bit_reverse self-hosted (bit ops): byte_swap(2^56)=1 (top byte
+        // -> bottom); both are involutions, so swap/reverse twice = the original (byte_swap
+        // round-trips 305419896, bit_reverse round-trips 5). byte-matching v0.
+        let src = "fn main() -> Unit = {\n  \
+            let a = int.byte_swap(72057594037927936)\n  \
+            let bs1 = int.byte_swap(305419896)\n  \
+            let bs2 = int.byte_swap(bs1)\n  \
+            let br1 = int.bit_reverse(5)\n  \
+            let br2 = int.bit_reverse(br1)\n  \
+            println(int.to_string(a))\n  \
+            println(int.to_string(bs2))\n  \
+            println(int.to_string(br2)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "int.byte_swap"), "linked");
+        if let Some(out) = build_and_run("int_bswap", &render_wasm_program(&prog)) {
+            assert_eq!(out, "1\n305419896\n5");
         }
     }
 
