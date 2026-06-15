@@ -646,6 +646,15 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
         ),
         (include_str!("../../../stdlib/string_slice.almd"), &[("string_slice", "string.slice")]),
         (
+            include_str!("../../../stdlib/string_take_drop.almd"),
+            &[
+                ("string_take", "string.take"),
+                ("string_take_end", "string.take_end"),
+                ("string_drop", "string.drop"),
+                ("string_drop_end", "string.drop_end"),
+            ],
+        ),
+        (
             include_str!("../../../stdlib/string_to_bytes.almd"),
             &[("string_to_bytes", "string.to_bytes")],
         ),
@@ -2613,6 +2622,27 @@ mod tests {
         assert!(prog.functions.iter().any(|f| f.name == "string.slice"));
         if let Some(out) = build_and_run("string_slice", &render_wasm_program(&prog)) {
             assert_eq!(out, "ell\n日本");
+        }
+    }
+
+    #[test]
+    fn self_hosted_string_take_drop_codepoint_indexed() {
+        // string.take/drop/take_end/drop_end self-hosted: codepoint-indexed prefixes &
+        // suffixes, reducing to the slice walk. take("hello",3)="hel", drop("hello",2)=
+        // "llo", take_end("hello",2)="lo", drop_end("hello",2)="hel"; multibyte:
+        // take("日本語",2)="日本", drop("日本語",1)="本語" (codepoints, not bytes).
+        let src = "fn main() -> Unit = {\n  \
+            let a = string.take(\"hello\", 3)\n  println(a)\n  \
+            let b = string.drop(\"hello\", 2)\n  println(b)\n  \
+            let c = string.take_end(\"hello\", 2)\n  println(c)\n  \
+            let d = string.drop_end(\"hello\", 2)\n  println(d)\n  \
+            let e = string.take(\"日本語\", 2)\n  println(e)\n  \
+            let f = string.drop(\"日本語\", 1)\n  println(f) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "string.take"));
+        assert!(prog.functions.iter().any(|f| f.name == "string.drop"));
+        if let Some(out) = build_and_run("string_take_drop", &render_wasm_program(&prog)) {
+            assert_eq!(out, "hel\nllo\nlo\nhel\n日本\n本語");
         }
     }
 
