@@ -22,3 +22,26 @@ fn int_to_int32(n: Int) -> Int = {
 }
 
 fn int_to_int64(n: Int) -> Int = n
+
+// int.to_int8/16/32_saturating: CLAMP n to the signed N-bit range (v0 returns Int8/16/32
+// but the value — and its decimal print — is exactly the clamp). Pure scalar; the same
+// `-> Int` shape as to_int8 above (the value byte-matches v0). Shared clamp helper.
+fn __sat_clamp(n: Int, lo: Int, hi: Int) -> Int =
+  if n < lo then lo
+  else if n > hi then hi
+  else n
+
+fn int_to_int8_saturating(n: Int) -> Int = {
+  let lo = 0 - 128
+  __sat_clamp(n, lo, 127)
+}
+
+fn int_to_int16_saturating(n: Int) -> Int = {
+  let lo = 0 - 32768
+  __sat_clamp(n, lo, 32767)
+}
+
+fn int_to_int32_saturating(n: Int) -> Int = {
+  let lo = 0 - 2147483648
+  __sat_clamp(n, lo, 2147483647)
+}

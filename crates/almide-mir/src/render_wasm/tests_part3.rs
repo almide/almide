@@ -833,3 +833,21 @@
             assert_eq!(out, "65\n12354\n26085\n-1");
         }
     }
+
+    #[test]
+    fn self_hosted_int_to_sized_saturating() {
+        // int.to_int8/16/32_saturating self-hosted: clamp to the signed N-bit range.
+        // to_int8_sat(200)=127, (-200)=-128, (50)=50; to_int16_sat(40000)=32767;
+        // to_int32_sat(3000000000)=2147483647.
+        let src = "fn main() -> Unit = {\n  \
+            let a = int.to_int8_saturating(200)\n  let sa = int.to_string(a)\n  println(sa)\n  \
+            let b = int.to_int8_saturating(0 - 200)\n  let sb = int.to_string(b)\n  println(sb)\n  \
+            let c = int.to_int8_saturating(50)\n  let sc = int.to_string(c)\n  println(sc)\n  \
+            let d = int.to_int16_saturating(40000)\n  let sd = int.to_string(d)\n  println(sd)\n  \
+            let e = int.to_int32_saturating(3000000000)\n  let se = int.to_string(e)\n  println(se) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "int.to_int8_saturating"));
+        if let Some(out) = build_and_run("int_sized_sat", &render_wasm_program(&prog)) {
+            assert_eq!(out, "127\n-128\n50\n32767\n2147483647");
+        }
+    }
