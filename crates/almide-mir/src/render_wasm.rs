@@ -588,6 +588,7 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
         (include_str!("../../../stdlib/list_len.almd"), &[("list_len", "list.len")]),
         (include_str!("../../../stdlib/list_is_empty.almd"), &[("list_is_empty", "list.is_empty")]),
         (include_str!("../../../stdlib/list_sum.almd"), &[("list_sum", "list.sum")]),
+        (include_str!("../../../stdlib/string_slice.almd"), &[("string_slice", "string.slice")]),
     ]
 }
 
@@ -1511,6 +1512,20 @@ mod tests {
         assert!(prog.functions.iter().any(|f| f.name == "list.is_empty"));
         if let Some(out) = build_and_run("list_is_empty", &render_wasm_program(&prog)) {
             assert_eq!(out, "nonempty");
+        }
+    }
+
+    #[test]
+    fn self_hosted_string_slice_uses_codepoint_indices() {
+        // string.slice self-hosted: codepoint indices, clamped, UTF-8 byte-range copy.
+        // slice("hello",1,4)="ell"; slice("日本語",0,2)="日本" (codepoint, not byte, indices).
+        let src = "fn main() -> Unit = {\n  \
+            let a = string.slice(\"hello\", 1, 4)\n  println(a)\n  \
+            let b = string.slice(\"日本語\", 0, 2)\n  println(b) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "string.slice"));
+        if let Some(out) = build_and_run("string_slice", &render_wasm_program(&prog)) {
+            assert_eq!(out, "ell\n日本");
         }
     }
 
