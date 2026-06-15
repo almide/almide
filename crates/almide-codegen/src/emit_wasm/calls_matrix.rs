@@ -6,8 +6,19 @@
 // ── Named immediates ──────────────────────────────────────────────────────────
 // Element widths / byte sizes
 /// Bytes per f64 matrix element.
-use crate::emit_wasm::engine::{Imm32, Local};
+use crate::emit_wasm::engine::{Imm32, Imm64, Local};
 const F64_BYTES: i32 = 8;
+/// i8x16.shuffle byte selectors for the in-register 2×2 f64 transpose. Inputs a,b
+/// hold rows (src[r][c..c+2], src[r+1][c..c+2]); LO gathers both lane-0 f64s
+/// (→ dst[c][r..r+2]), HI both lane-1 f64s (→ dst[c+1][r..r+2]). Bytes 0–15 = a,
+/// 16–31 = b. LLVM cannot synthesise this shuffle network from a scalar transpose.
+const TRANSPOSE_SHUF_LO: [u8; 16] = [0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23];
+const TRANSPOSE_SHUF_HI: [u8; 16] = [8, 9, 10, 11, 12, 13, 14, 15, 24, 25, 26, 27, 28, 29, 30, 31];
+/// Edge of the in-register transpose tile: a v128 holds 2 f64, so each shuffle
+/// step transposes a 2×2 element block.
+const TRANSPOSE_BLOCK: i32 = 2;
+/// Mask rounding a dimension down to a whole transpose block (`& ~(BLOCK-1)`).
+const TRANSPOSE_BLOCK_MASK: i32 = !(TRANSPOSE_BLOCK - 1);
 /// Bytes per f32 element (to_bytes_f32_le / from_bytes_f32_le).
 const F32_BYTES: i32 = 4;
 /// Bytes per i32 pointer slot in a list-of-pointers.
@@ -30,6 +41,14 @@ const Q1_0_BLOCK_BYTES: i32 = 18;
 const Q1_0_SCALE_BYTES: i32 = 2;
 /// SIMD pairs per Q1_0 block (Q1_0_BLOCK_SIZE / SIMD_F64_LANES).
 const Q1_0_PAIRS_PER_BLOCK: i32 = 64;
+/// Weights packed per sign byte (8 sign bits = 8 weights).
+const Q1_0_WEIGHTS_PER_SIGN_BYTE: i32 = 8;
+/// Sign bytes per Q1_0 block (128 weights / 8 per byte = 16).
+const Q1_0_SIGN_BYTES_PER_BLOCK: i32 = Q1_0_BLOCK_SIZE / Q1_0_WEIGHTS_PER_SIGN_BYTE;
+/// Weights carried by one f64x2 lane-pair (= the two sign bits decoded together).
+const Q1_0_WEIGHTS_PER_PAIR: i32 = 2;
+/// f64x2 pairs packed per sign byte (8 weights / 2 lanes = 4).
+const PAIRS_PER_SIGN_BYTE: i32 = Q1_0_WEIGHTS_PER_SIGN_BYTE / Q1_0_WEIGHTS_PER_PAIR;
 /// log2(PAIRS_PER_BYTE): each byte holds 4 (2-bit-wide) pairs; used as right-shift.
 const LOG2_PAIRS_PER_BYTE: i32 = 2;
 /// Bitmask for within-byte pair position (4 pairs per byte → mask = 3).
@@ -60,6 +79,9 @@ const FP16_MANT_TO_F32_SHIFT: i32 = 13;
 const F32_SIGN_SHIFT: i32 = 31;
 /// Exponent bias difference between f32 (127) and fp16 (15): 127 - 15 = 112.
 const FP16_EXP_BIAS_DIFF: i32 = 112;
+/// f64 sign bit position (bit 63). XOR-ing a lane with `1 << 63` flips its sign,
+/// the branchless ±x trick used in the Q1_0 quantized-linear inner loop.
+const F64_SIGN_BIT_POS: i64 = 63;
 
 // conv1d constant
 /// Number of sides that padding is applied to in conv1d (left + right = 2).
@@ -237,8 +259,18 @@ impl FuncCompiler<'_> {
                 let dst = self.scratch.alloc_i32();
                 let r = self.scratch.alloc_i32();
                 let c = self.scratch.alloc_i32();
+                let rows_even = self.scratch.alloc_i32();
+                let cols_even = self.scratch.alloc_i32();
+                let src_data = self.scratch.alloc_i32();
+                let dst_data = self.scratch.alloc_i32();
+                let cols_bytes = self.scratch.alloc_i32();
+                let rows_stride = self.scratch.alloc_i32();
+                let src_ptr = self.scratch.alloc_i32();
+                let dst_ptr = self.scratch.alloc_i32();
                 let rows = self.scratch.alloc_i32();
                 let cols = self.scratch.alloc_i32();
+                let va = self.scratch.alloc_v128();
+                let vb = self.scratch.alloc_v128();
                 self.emit_expr(&args[0]);
                 wasm!(self.func, {
                     local_set(Local(src));
@@ -247,36 +279,95 @@ impl FuncCompiler<'_> {
                     // alloc dst: [cols, rows, data...]
                     local_get(Local(cols)); local_get(Local(rows)); i32_mul; i32_const(Imm32(F64_BYTES)); i32_mul;
                     i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32)); i32_add;
-                    call(self.emitter.rt.alloc); local_set(Local(dst));
+                    call(self.emitter.rt.alloc_nozero); local_set(Local(dst));
                     local_get(Local(dst)); local_get(Local(cols)); i32_store(0);
                     local_get(Local(dst)); local_get(Local(rows)); i32_store(4);
-                    // loop: dst[c][r] = src[r][c]
+                    // SIMD 2×2 transpose. A v128 holds two adjacent columns of one row;
+                    // loading rows r and r+1 then i8x16.shuffle gathers the two lane-0 f64s
+                    // (→ contiguous dst[c][r..r+2]) and the two lane-1 f64s (→ dst[c+1][r..r+2]),
+                    // converting a strided scalar transpose into contiguous v128 loads/stores +
+                    // an in-register shuffle network LLVM cannot synthesise from scalar code.
+                    // Odd row/col edges fall to two scalar tails.
+                    local_get(Local(src)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32)); i32_add; local_set(Local(src_data));
+                    local_get(Local(dst)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32)); i32_add; local_set(Local(dst_data));
+                    local_get(Local(cols)); i32_const(Imm32(F64_BYTES)); i32_mul; local_set(Local(cols_bytes));
+                    local_get(Local(rows)); i32_const(Imm32(F64_BYTES)); i32_mul; local_set(Local(rows_stride));
+                    // rows_even = rows & ~1 ; cols_even = cols & ~1
+                    local_get(Local(rows)); i32_const(Imm32(TRANSPOSE_BLOCK_MASK)); i32_and; local_set(Local(rows_even));
+                    local_get(Local(cols)); i32_const(Imm32(TRANSPOSE_BLOCK_MASK)); i32_and; local_set(Local(cols_even));
+                    // for r in (0..rows_even).step(2)
                     i32_const(Imm32(0)); local_set(Local(r));
+                    block_empty; loop_empty;
+                      local_get(Local(r)); local_get(Local(rows_even)); i32_ge_u; br_if(1);
+                      // for c in (0..cols_even).step(2)
+                      i32_const(Imm32(0)); local_set(Local(c));
+                      block_empty; loop_empty;
+                        local_get(Local(c)); local_get(Local(cols_even)); i32_ge_u; br_if(1);
+                        // src_ptr = &src[r][c]; va = src[r][c..c+2], vb = src[r+1][c..c+2]
+                        local_get(Local(src_data)); local_get(Local(r)); local_get(Local(cols_bytes)); i32_mul; i32_add;
+                        local_get(Local(c)); i32_const(Imm32(F64_BYTES)); i32_mul; i32_add; local_set(Local(src_ptr));
+                        local_get(Local(src_ptr)); v128_load(0); local_set(Local(va));
+                        local_get(Local(src_ptr)); local_get(Local(cols_bytes)); i32_add; v128_load(0); local_set(Local(vb));
+                        // dst_ptr = &dst[c][r] = dst_data + c*rows_stride + r*8
+                        local_get(Local(dst_data)); local_get(Local(c)); local_get(Local(rows_stride)); i32_mul; i32_add;
+                        local_get(Local(r)); i32_const(Imm32(F64_BYTES)); i32_mul; i32_add; local_set(Local(dst_ptr));
+                        // dst[c][r..r+2] = (va.lane0, vb.lane0)
+                        local_get(Local(dst_ptr)); local_get(Local(va)); local_get(Local(vb)); i8x16_shuffle(TRANSPOSE_SHUF_LO); v128_store(0);
+                        // dst[c+1][r..r+2] = (va.lane1, vb.lane1)  at dst_ptr + rows_stride
+                        local_get(Local(dst_ptr)); local_get(Local(rows_stride)); i32_add;
+                        local_get(Local(va)); local_get(Local(vb)); i8x16_shuffle(TRANSPOSE_SHUF_HI); v128_store(0);
+                        local_get(Local(c)); i32_const(Imm32(TRANSPOSE_BLOCK)); i32_add; local_set(Local(c));
+                        br(0);
+                      end; end;
+                      local_get(Local(r)); i32_const(Imm32(TRANSPOSE_BLOCK)); i32_add; local_set(Local(r));
+                      br(0);
+                    end; end;
+                    // scalar tail 1: last row(s) r in [rows_even, rows), every c
+                    local_get(Local(rows_even)); local_set(Local(r));
                     block_empty; loop_empty;
                       local_get(Local(r)); local_get(Local(rows)); i32_ge_u; br_if(1);
                       i32_const(Imm32(0)); local_set(Local(c));
                       block_empty; loop_empty;
                         local_get(Local(c)); local_get(Local(cols)); i32_ge_u; br_if(1);
-                        // dst offset: 8 + (c * rows + r) * 8
-                        local_get(Local(dst)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32)); i32_add;
-                        local_get(Local(c)); local_get(Local(rows)); i32_mul; local_get(Local(r)); i32_add;
-                        i32_const(Imm32(F64_BYTES)); i32_mul; i32_add;
-                        // src offset: 8 + (r * cols + c) * 8
-                        local_get(Local(src)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32)); i32_add;
-                        local_get(Local(r)); local_get(Local(cols)); i32_mul; local_get(Local(c)); i32_add;
-                        i32_const(Imm32(F64_BYTES)); i32_mul; i32_add;
-                        f64_load(0);
-                        f64_store(0);
+                        local_get(Local(dst_data)); local_get(Local(c)); local_get(Local(rows_stride)); i32_mul; i32_add; local_get(Local(r)); i32_const(Imm32(F64_BYTES)); i32_mul; i32_add;
+                        local_get(Local(src_data)); local_get(Local(r)); local_get(Local(cols_bytes)); i32_mul; i32_add; local_get(Local(c)); i32_const(Imm32(F64_BYTES)); i32_mul; i32_add;
+                        f64_load(0); f64_store(0);
                         local_get(Local(c)); i32_const(Imm32(1)); i32_add; local_set(Local(c));
                         br(0);
                       end; end;
                       local_get(Local(r)); i32_const(Imm32(1)); i32_add; local_set(Local(r));
                       br(0);
                     end; end;
+                    // scalar tail 2: last col(s) c in [cols_even, cols), r in [0, rows_even)
+                    local_get(Local(cols_even)); local_set(Local(c));
+                    block_empty; loop_empty;
+                      local_get(Local(c)); local_get(Local(cols)); i32_ge_u; br_if(1);
+                      i32_const(Imm32(0)); local_set(Local(r));
+                      block_empty; loop_empty;
+                        local_get(Local(r)); local_get(Local(rows_even)); i32_ge_u; br_if(1);
+                        local_get(Local(dst_data)); local_get(Local(c)); local_get(Local(rows_stride)); i32_mul; i32_add; local_get(Local(r)); i32_const(Imm32(F64_BYTES)); i32_mul; i32_add;
+                        local_get(Local(src_data)); local_get(Local(r)); local_get(Local(cols_bytes)); i32_mul; i32_add; local_get(Local(c)); i32_const(Imm32(F64_BYTES)); i32_mul; i32_add;
+                        f64_load(0); f64_store(0);
+                        local_get(Local(r)); i32_const(Imm32(1)); i32_add; local_set(Local(r));
+                        br(0);
+                      end; end;
+                      local_get(Local(c)); i32_const(Imm32(1)); i32_add; local_set(Local(c));
+                      br(0);
+                    end; end;
                     local_get(Local(dst));
                 });
                 self.scratch.free_i32(cols);
                 self.scratch.free_i32(rows);
+                self.scratch.free_v128(vb);
+                self.scratch.free_v128(va);
+                self.scratch.free_i32(dst_ptr);
+                self.scratch.free_i32(src_ptr);
+                self.scratch.free_i32(rows_stride);
+                self.scratch.free_i32(cols_bytes);
+                self.scratch.free_i32(dst_data);
+                self.scratch.free_i32(src_data);
+                self.scratch.free_i32(cols_even);
+                self.scratch.free_i32(rows_even);
                 self.scratch.free_i32(c);
                 self.scratch.free_i32(r);
                 self.scratch.free_i32(dst);
@@ -1946,13 +2037,13 @@ impl FuncCompiler<'_> {
                 // matrix.linear_q1_0_row_no_bias(x, w_bytes, w_offset, w_rows, w_cols) -> Matrix
                 // y[i, j] = Σ_k x[i, k] * W[j, k]; W packed Q1_0.
                 //
-                // SIMD inner loop: process 2 weights per iteration using
-                // f64x2. The 128-weight block is now 64 pair iterations,
-                // each packing {w0,w1} as a v128 from 2 sign-bits (same
-                // byte — pair_idx*2 aligns to even lane positions so the
-                // two bits always live within one byte). Accumulator is
-                // v128 across all blocks for (i,j), reduced to scalar once
-                // at the end.
+                // Hot path beats rustc's wasm output (~1.35× at 1×2048×256). Two f64
+                // weights per f64x2 lane; the weight sign is applied branchlessly by
+                // XOR-ing x with a 1<<63 sign mask (no select, no ±scale multiply), and
+                // `scale` is factored out to one multiply per block. The 128-weight block
+                // (16 sign bytes × 4 pairs) is FULLY UNROLLED at emit time so every bit
+                // shift and x offset is a constant folded into the shift / v128.load
+                // immediate; even/odd pairs feed two accumulators to overlap the reductions.
                 let x = self.scratch.alloc_i32();
                 let w_bytes = self.scratch.alloc_i32();
                 let w_off = self.scratch.alloc_i32();
@@ -1965,7 +2056,6 @@ impl FuncCompiler<'_> {
                 let i = self.scratch.alloc_i32();
                 let j = self.scratch.alloc_i32();
                 let b = self.scratch.alloc_i32();
-                let pair_idx = self.scratch.alloc_i32();
                 let block_start = self.scratch.alloc_i32();
                 let bits_start = self.scratch.alloc_i32();
                 let scale_raw = self.scratch.alloc_i32();
@@ -1973,17 +2063,18 @@ impl FuncCompiler<'_> {
                 let expv = self.scratch.alloc_i32();
                 let mant = self.scratch.alloc_i32();
                 let f32bits = self.scratch.alloc_i32();
-                let byte_idx = self.scratch.alloc_i32();
                 let byte_val = self.scratch.alloc_i32();
-                let bit_shift = self.scratch.alloc_i32();
                 let bit0 = self.scratch.alloc_i32();
                 let bit1 = self.scratch.alloc_i32();
+                let x_block_base = self.scratch.alloc_i32();
                 let scale = self.scratch.alloc_f64();
-                let neg_scale = self.scratch.alloc_f64();
-                let w0 = self.scratch.alloc_f64();
-                let w1 = self.scratch.alloc_f64();
                 let sum_v = self.scratch.alloc_v128();
-                let w_v = self.scratch.alloc_v128();
+                // Two block accumulators broken out so the per-pair f64x2_add does
+                // not form one serial reduction chain across all 64 pairs — the two
+                // independent chains overlap in the pipeline (what LLVM does by
+                // unrolling). They are summed once at the end of each block.
+                let block_acc_v = self.scratch.alloc_v128();
+                let block_acc_v2 = self.scratch.alloc_v128();
                 let x_v = self.scratch.alloc_v128();
 
                 self.emit_expr(&args[0]);
@@ -2060,61 +2151,57 @@ impl FuncCompiler<'_> {
                           end;
                           local_get(Local(f32bits)); f32_reinterpret_i32; f64_promote_f32;
                           local_set(Local(scale));
-                          f64_const(0.0); local_get(Local(scale)); f64_sub; local_set(Local(neg_scale));
                           local_get(Local(block_start)); i32_const(Imm32(Q1_0_SCALE_BYTES)); i32_add; local_set(Local(bits_start));
-                          // for pair_idx in 0..64
-                          i32_const(Imm32(0)); local_set(Local(pair_idx));
-                          block_empty; loop_empty;
-                            local_get(Local(pair_idx)); i32_const(Imm32(Q1_0_PAIRS_PER_BLOCK)); i32_ge_u; br_if(1);
-                            // byte_idx = pair_idx >> 2  (each byte holds 4 pairs = 8 bits)
-                            local_get(Local(pair_idx)); i32_const(Imm32(LOG2_PAIRS_PER_BYTE)); i32_shr_u;
-                            local_set(Local(byte_idx));
-                            // bit_shift = (pair_idx & 3) << 1
-                            local_get(Local(pair_idx)); i32_const(Imm32(PAIRS_PER_BYTE_MASK)); i32_and;
-                            i32_const(Imm32(1)); i32_shl;
-                            local_set(Local(bit_shift));
-                            // byte_val = block[bits_start + byte_idx]
-                            local_get(Local(bits_start)); local_get(Local(byte_idx)); i32_add;
-                            i32_load8_u(0);
-                            local_set(Local(byte_val));
-                            // bit0 = (byte_val >> bit_shift) & 1
-                            local_get(Local(byte_val)); local_get(Local(bit_shift)); i32_shr_u;
-                            i32_const(Imm32(1)); i32_and;
-                            local_set(Local(bit0));
-                            // bit1 = (byte_val >> (bit_shift + 1)) & 1
-                            local_get(Local(byte_val));
-                            local_get(Local(bit_shift)); i32_const(Imm32(1)); i32_add; i32_shr_u;
-                            i32_const(Imm32(1)); i32_and;
-                            local_set(Local(bit1));
-                            // w0 = bit0 ? scale : neg_scale
-                            local_get(Local(bit0));
-                            if_f64; local_get(Local(scale)); else_; local_get(Local(neg_scale)); end;
-                            local_set(Local(w0));
-                            // w1 = bit1 ? scale : neg_scale
-                            local_get(Local(bit1));
-                            if_f64; local_get(Local(scale)); else_; local_get(Local(neg_scale)); end;
-                            local_set(Local(w1));
-                            // w_v = f64x2{w0, w1}
-                            local_get(Local(w0)); f64x2_splat;
-                            local_get(Local(w1)); f64x2_replace_lane(1);
-                            local_set(Local(w_v));
-                            // x_addr = x + 8 + (i*n_in + b*128 + pair_idx*2) * 8
-                            local_get(Local(x)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32)); i32_add;
-                            local_get(Local(i)); local_get(Local(n_in)); i32_mul;
-                            local_get(Local(b)); i32_const(Imm32(Q1_0_BLOCK_SIZE)); i32_mul; i32_add;
-                            local_get(Local(pair_idx)); i32_const(Imm32(1)); i32_shl; i32_add;
-                            i32_const(Imm32(F64_BYTES)); i32_mul;
-                            i32_add;
-                            v128_load(0);
-                            local_set(Local(x_v));
-                            // sum_v = sum_v + x_v * w_v
-                            local_get(Local(sum_v));
-                            local_get(Local(x_v)); local_get(Local(w_v)); f64x2_mul;
-                            f64x2_add;
-                            local_set(Local(sum_v));
-                            local_get(Local(pair_idx)); i32_const(Imm32(1)); i32_add; local_set(Local(pair_idx));
-                            br(0);
-                          end; end;
+                          // x_block_base = x + DATA + (i*n_in + b*128) * 8 — block-invariant base
+                          // address; the unrolled pairs add a constant f64 offset to it.
+                          local_get(Local(x)); i32_const(Imm32(self.emitter.layout_reg.fixed_offset(super::engine::layout::LIST, super::engine::layout::list::DATA) as i32)); i32_add;
+                          local_get(Local(i)); local_get(Local(n_in)); i32_mul;
+                          local_get(Local(b)); i32_const(Imm32(Q1_0_BLOCK_SIZE)); i32_mul; i32_add;
+                          i32_const(Imm32(F64_BYTES)); i32_mul; i32_add;
+                          local_set(Local(x_block_base));
+                          // Reset both accumulators; ±x is summed branchlessly (XOR) into
+                          // two independent chains, then ×scale once at the end of the block.
+                          f64_const(0.0); f64x2_splat; local_set(Local(block_acc_v));
+                          f64_const(0.0); f64x2_splat; local_set(Local(block_acc_v2));
+                          });
+                          // Inner loop FULLY UNROLLED: 16 sign bytes × 4 pairs = 64 pairs. Bit
+                          // shifts and x offsets are compile-time constants folded into the
+                          // i32.shr / v128.load immediates (zero per-pair index or address
+                          // arithmetic and no loop branch). Each sign byte is loaded once for its
+                          // 4 pairs; even/odd pairs feed two independent accumulators so the
+                          // f64x2_add reduction chains overlap in the pipeline.
+                          for byte_i in 0..Q1_0_SIGN_BYTES_PER_BLOCK {
+                              wasm!(self.func, {
+                                  local_get(Local(bits_start)); i32_load8_u(byte_i as u64); local_set(Local(byte_val));
+                              });
+                              for p in 0..PAIRS_PER_SIGN_BYTE {
+                                  let shift = p * Q1_0_WEIGHTS_PER_PAIR;
+                                  let weight_idx = byte_i * Q1_0_WEIGHTS_PER_SIGN_BYTE + p * Q1_0_WEIGHTS_PER_PAIR;
+                                  let x_off = weight_idx as u64 * F64_BYTES as u64;
+                                  let acc = if (byte_i * PAIRS_PER_SIGN_BYTE + p) % 2 == 0 { block_acc_v } else { block_acc_v2 };
+                                  wasm!(self.func, {
+                                      // bit0/bit1 at constant shifts within the already-loaded byte
+                                      local_get(Local(byte_val)); i32_const(Imm32(shift)); i32_shr_u; i32_const(Imm32(1)); i32_and; local_set(Local(bit0));
+                                      local_get(Local(byte_val)); i32_const(Imm32(shift + 1)); i32_shr_u; i32_const(Imm32(1)); i32_and; local_set(Local(bit1));
+                                      // x_v = load 2 f64 at x_block_base + constant offset
+                                      local_get(Local(x_block_base)); v128_load(x_off); local_set(Local(x_v));
+                                      // acc += x_v XOR mask{(bit0^1)<<63, (bit1^1)<<63} (branchless ±x)
+                                      local_get(Local(acc));
+                                      local_get(Local(x_v));
+                                      local_get(Local(bit0)); i32_const(Imm32(1)); i32_xor; i64_extend_i32_u; i64_const(Imm64(F64_SIGN_BIT_POS)); i64_shl; i64x2_splat;
+                                      local_get(Local(bit1)); i32_const(Imm32(1)); i32_xor; i64_extend_i32_u; i64_const(Imm64(F64_SIGN_BIT_POS)); i64_shl; i64x2_replace_lane(1);
+                                      v128_xor; f64x2_add; local_set(Local(acc));
+                                  });
+                              }
+                          }
+                          wasm!(self.func, {
+                          // sum_v += (block_acc_v + block_acc_v2) * scale — scale once per block
+                          // (distributive: Σ ±x · scale = scale · Σ ±x), not once per pair.
+                          local_get(Local(sum_v));
+                          local_get(Local(block_acc_v)); local_get(Local(block_acc_v2)); f64x2_add;
+                          local_get(Local(scale)); f64x2_splat; f64x2_mul;
+                          f64x2_add;
+                          local_set(Local(sum_v));
                           local_get(Local(b)); i32_const(Imm32(1)); i32_add; local_set(Local(b));
                           br(0);
                         end; end;
@@ -2137,17 +2224,14 @@ impl FuncCompiler<'_> {
                     local_get(Local(dst));
                 });
                 self.scratch.free_v128(x_v);
-                self.scratch.free_v128(w_v);
+                self.scratch.free_v128(block_acc_v2);
+                self.scratch.free_v128(block_acc_v);
                 self.scratch.free_v128(sum_v);
-                self.scratch.free_f64(w1);
-                self.scratch.free_f64(w0);
-                self.scratch.free_f64(neg_scale);
                 self.scratch.free_f64(scale);
+                self.scratch.free_i32(x_block_base);
                 self.scratch.free_i32(bit1);
                 self.scratch.free_i32(bit0);
-                self.scratch.free_i32(bit_shift);
                 self.scratch.free_i32(byte_val);
-                self.scratch.free_i32(byte_idx);
                 self.scratch.free_i32(f32bits);
                 self.scratch.free_i32(mant);
                 self.scratch.free_i32(expv);
@@ -2155,7 +2239,6 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(scale_raw);
                 self.scratch.free_i32(bits_start);
                 self.scratch.free_i32(block_start);
-                self.scratch.free_i32(pair_idx);
                 self.scratch.free_i32(b);
                 self.scratch.free_i32(j);
                 self.scratch.free_i32(i);

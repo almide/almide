@@ -253,6 +253,9 @@ pub fn register_runtime_functions(emitter: &mut WasmEmitter) {
     let alloc_pinned_ty = emitter.register_type(vec![ValType::I32], vec![ValType::I32]);
     emitter.rt.alloc_pinned = emitter.register_func("__alloc_pinned", alloc_pinned_ty);
 
+    // __alloc_nozero(size: i32) -> i32 — like __alloc, no zeroing on free-list reuse
+    emitter.rt.alloc_nozero = emitter.register_func("__alloc_nozero", alloc_ty);
+
     // __println_str(ptr: i32) -> ()
     let println_ty = emitter.register_type(vec![ValType::I32], vec![]);
     emitter.rt.println_str = emitter.register_func("__println_str", println_ty);
@@ -464,6 +467,7 @@ pub fn compile_runtime(emitter: &mut WasmEmitter) {
     compile_heap_save(emitter);
     compile_heap_restore(emitter);
     compile_alloc_pinned(emitter);
+    compile_alloc_nozero(emitter);
     compile_println_str(emitter);
     compile_int_to_string(emitter);
     // float.to_string driver (Dragon4 shortest-decimal). Registered early, so
@@ -531,8 +535,24 @@ pub fn compile_runtime(emitter: &mut WasmEmitter) {
 /// All returned pointers are guaranteed to be 8-byte aligned, matching wasi-libc
 /// and Emscripten conventions. This ensures i64 loads/stores never trap on alignment.
 fn compile_alloc(emitter: &mut WasmEmitter) {
+    let idx = emitter.rt.alloc;
+    compile_alloc_variant(emitter, idx, true);
+}
+/// `__alloc_nozero`: identical to `__alloc` but does NOT zero a reused free-list
+/// block. For callers that immediately overwrite the entire data area (matrix
+/// transpose / matmul / zeros), the reuse-zeroing in `__alloc` is pure waste —
+/// at 512×512 f64 it was ~70% of a transpose's wall time (a fresh 2 MB fill per
+/// call). Bump-path blocks come from fresh wasm pages (already zero), so only the
+/// reuse path differs.
+fn compile_alloc_nozero(emitter: &mut WasmEmitter) {
+    let idx = emitter.rt.alloc_nozero;
+    compile_alloc_variant(emitter, idx, false);
+}
+/// Shared body for the `__alloc` family. `zero_on_reuse` controls whether a
+/// recycled free-list block has its data area cleared before return.
+fn compile_alloc_variant(emitter: &mut WasmEmitter, func_idx: u32, zero_on_reuse: bool) {
     use super::engine::{WasmBuilder, layout::*};
-    let type_idx = emitter.func_type_indices[&emitter.rt.alloc];
+    let type_idx = emitter.func_type_indices[&func_idx];
     let hdr = emitter.layout_reg.header_size(ALLOC_HEADER) as i32;
     let rc_off = emitter.layout_reg.fixed_offset(ALLOC_HEADER, alloc::RC);
     let size_off = emitter.layout_reg.fixed_offset(ALLOC_HEADER, alloc::SIZE);
@@ -600,12 +620,15 @@ fn compile_alloc(emitter: &mut WasmEmitter) {
                 });
                 // RC = 1
                 w.get(Local(4)).i32c(Imm32(1)).emit_store(rc_off, rc_ty);
-                // Zero-fill reused block's data area to prevent stale data
-                // (critical for Swiss Table tag arrays)
-                w.get(Local(4)).i32c(Imm32(hdr)).add();  // data_ptr
-                w.i32c(Imm32(0));                 // fill value
-                w.get(Local(4)).emit_load(size_off, size_ty); // size
-                w.raw(wasm_encoder::Instruction::MemoryFill(0));
+                if zero_on_reuse {
+                    // Zero-fill reused block's data area to prevent stale data
+                    // (critical for Swiss Table tag arrays). Skipped by
+                    // __alloc_nozero, whose callers overwrite the whole block.
+                    w.get(Local(4)).i32c(Imm32(hdr)).add();  // data_ptr
+                    w.i32c(Imm32(0));                 // fill value
+                    w.get(Local(4)).emit_load(size_off, size_ty); // size
+                    w.raw(wasm_encoder::Instruction::MemoryFill(0));
+                }
                 // Return data ptr
                 w.get(Local(4)).i32c(Imm32(hdr)).add().ret();
             }, |_| {});
@@ -641,6 +664,14 @@ fn compile_alloc(emitter: &mut WasmEmitter) {
             w.i32c(Imm32(-1)).eq();
             w.if_void(|w| { w.unreachable_(); }, |_| {});
         }, |_| {});
+        // Bump path does NOT zero: a never-touched wasm page is already zero, and
+        // the only callers that read before they write — variant payload tails —
+        // zero their own tail at construction (calls.rs), because whole-block
+        // zeroing here taxed every map/list bump (precise_all map_insert 0.67x →
+        // 1.06x). Reclaimed-then-rebumped memory IS dirty, but map/set tags (the
+        // other read-before-write region) never land in a reclaimed region: their
+        // builders use in-place mutators, which trip `expr_writes_outer_heap` and
+        // disable iter_scope / function-scope reclamation.
         // Write header
         w.get(Local(1)).get(Local(0)).emit_store(size_off, size_ty);
         w.get(Local(1)).i32c(Imm32(1)).emit_store(rc_off, rc_ty);
@@ -648,7 +679,7 @@ fn compile_alloc(emitter: &mut WasmEmitter) {
         w.get(Local(1)).i32c(Imm32(hdr)).add();
     }
     f.instruction(&wasm_encoder::Instruction::End);
-    emitter.add_compiled(CompiledFunc::tracked_for(emitter.rt.alloc, type_idx, f));
+    emitter.add_compiled(CompiledFunc::tracked_for(func_idx, type_idx, f));
 }
 
 /// Whether this emission activates real reference-count frees — the DEFAULT
