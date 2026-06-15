@@ -13,3 +13,13 @@ fn result_is_err(r: Result[Int, String]) -> Bool = {
   let len = prim.load32(prim.handle(r) + 4)
   len >= 1
 }
+
+// result.unwrap_or(r, default) -> the Ok value, or `default` for Err. Ok = len 0 with the value in
+// slot 0 (load64), Err = len != 0. Reads slot 0 unconditionally (harmless for Err — its slot holds
+// the message handle, which the else arm ignores). `r` is borrowed; the value is a scalar copy.
+fn result_unwrap_or(r: Result[Int, String], default: Int) -> Int = {
+  let h = prim.handle(r)
+  let len = prim.load32(h + 4)
+  let v = prim.load64(h + 12)
+  if len == 0 then v else default
+}

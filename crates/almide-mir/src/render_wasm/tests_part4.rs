@@ -1223,6 +1223,23 @@
     }
 
     #[test]
+    fn self_hosted_result_unwrap_or() {
+        // SELF-HOSTED result.unwrap_or: extract the Ok value (slot 0, len-tag 0) or the default for
+        // Err. unwrap_or(Ok(5), -1)=5 ; unwrap_or(Ok(0), 99)=0 (the Ok value, NOT the default) ;
+        // unwrap_or(Err, -1)=-1. Byte-matches v0.
+        let src = "fn mk(n: Int) -> Result[Int, String] = if n >= 0 then Ok(n) else Err(\"neg\")\n\
+                   fn main() -> Unit = {\n  \
+            let r1 = mk(5)\n  let v1 = result.unwrap_or(r1, 0 - 1)\n  println(int.to_string(v1))\n  \
+            let r2 = mk(0)\n  let v2 = result.unwrap_or(r2, 99)\n  println(int.to_string(v2))\n  \
+            let r3 = mk(0 - 1)\n  let v3 = result.unwrap_or(r3, 0 - 1)\n  println(int.to_string(v3)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "result.unwrap_or"));
+        if let Some(out) = build_and_run("self_hosted_result_unwrap_or", &render_wasm_program(&prog)) {
+            assert_eq!(out, "5\n0\n-1");
+        }
+    }
+
+    #[test]
     fn result_err_string_allocating_loop_is_bounded() {
         // ADVERSARIAL leak/double-free guard for the Result machinery: a loop building thousands of
         // `Err(msg)` AND `Ok(int)` Results must run in BOUNDED memory — each Err owns a fresh message
