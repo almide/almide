@@ -1593,6 +1593,27 @@
     }
 
     #[test]
+    fn self_hosted_set_string_construction() {
+        // SELF-HOSTED Set[String] new/insert/remove/symmetric_difference (heap-element, deep copies).
+        // new()→insert "a","b","a"(dup)={a,b} len 2; remove "a"={b} len 1 first "b"; sym_diff(
+        // {a,b,c},{b,c,d})={a,d} len 2. Byte-matches v0.
+        let src = "fn main() -> Unit = {\n  \
+            let e = set.new()\n  let s1 = set.insert(e, \"a\")\n  let s2 = set.insert(s1, \"b\")\n  \
+            let s = set.insert(s2, \"a\")\n  println(int.to_string(set.len(s)))\n  \
+            let r = set.remove(s, \"a\")\n  println(int.to_string(set.len(r)))\n  \
+            let rl = set.to_list(r)\n  let f = list.get(rl, 0)\n  \
+            match f { Some(v) => println(v), None => println(\"none\"), }\n  \
+            let a = set.from_list(string.split(\"a,b,c\", \",\"))\n  \
+            let b = set.from_list(string.split(\"b,c,d\", \",\"))\n  \
+            let sd = set.symmetric_difference(a, b)\n  println(int.to_string(set.len(sd))) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "set.insert_str"));
+        if let Some(out) = build_and_run("self_hosted_set_string_construction", &render_wasm_program(&prog)) {
+            assert_eq!(out, "2\n1\nb\n2");
+        }
+    }
+
+    #[test]
     fn self_hosted_set_string_loop_reclaims() {
         // SOUNDNESS for the Set[String] nested-ownership path: a bounded loop building + dropping a
         // fresh Set[String] each iteration must reclaim each element String + the block (DropListStr)

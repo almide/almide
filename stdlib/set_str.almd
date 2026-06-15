@@ -213,3 +213,84 @@ fn set_is_disjoint_str(a: Set[String], b: Set[String]) -> Bool = {
   let blen = prim.load32(bh + 4)
   __set_str_none_in(ah, alen, bh, blen, 0)
 }
+
+// ── Set[String] construction (closure-free) ── new/insert/remove/symmetric_difference, results own
+// deep copies.
+
+fn set_new_str() -> Set[String] = prim.alloc_set_str(0)
+
+// Append x (deep copy) to the result rh (holding `slen` elements) iff absent; return new count.
+fn __set_str_addone(rh: Int, slen: Int, x: String) -> Int = {
+  let present = __set_has_str(rh, slen, x, 0)
+  if present then slen
+  else {
+    let copy = string.repeat(x, 1)
+    prim.store_str(rh + 12 + slen * 8, copy)
+    slen + 1
+  }
+}
+
+fn set_insert_str(s: Set[String], x: String) -> Set[String] = {
+  let sh = prim.handle(s)
+  let slen = prim.load32(sh + 4)
+  let cap = slen + 1
+  let r = prim.alloc_set_str(cap)
+  let rh = prim.handle(r)
+  let _c = __set_str_copyn(sh, rh, slen, 0)
+  let w = __set_str_addone(rh, slen, x)
+  prim.store32(rh + 4, w)
+  r
+}
+
+// Copy s's elements EXCEPT x (deep), preserving survivors' order; return the new count.
+fn __set_str_remove_fill(sh: Int, slen: Int, rh: Int, x: String, i: Int, w: Int) -> Int =
+  if i >= slen then w
+  else {
+    let e = prim.load_str(sh + 12 + i * 8)
+    let eq = __str_eq(e, x)
+    if eq then __set_str_remove_fill(sh, slen, rh, x, i + 1, w)
+    else {
+      let copy = string.repeat(e, 1)
+      prim.store_str(rh + 12 + w * 8, copy)
+      __set_str_remove_fill(sh, slen, rh, x, i + 1, w + 1)
+    }
+  }
+
+fn set_remove_str(s: Set[String], x: String) -> Set[String] = {
+  let sh = prim.handle(s)
+  let slen = prim.load32(sh + 4)
+  let r = prim.alloc_set_str(slen)
+  let rh = prim.handle(r)
+  let w = __set_str_remove_fill(sh, slen, rh, x, 0, 0)
+  prim.store32(rh + 4, w)
+  r
+}
+
+// Append b's elements NOT in the ORIGINAL a (deep copies), growing count w. For sym-difference,
+// after a's-not-in-b is written (disjoint, so no re-dedup needed).
+fn __set_str_addb_nota(ah: Int, alen: Int, bh: Int, blen: Int, rh: Int, j: Int, w: Int) -> Int =
+  if j >= blen then w
+  else {
+    let x = prim.load_str(bh + 12 + j * 8)
+    let inA = __set_has_str(ah, alen, x, 0)
+    if inA then __set_str_addb_nota(ah, alen, bh, blen, rh, j + 1, w)
+    else {
+      let copy = string.repeat(x, 1)
+      prim.store_str(rh + 12 + w * 8, copy)
+      __set_str_addb_nota(ah, alen, bh, blen, rh, j + 1, w + 1)
+    }
+  }
+
+fn set_symmetric_difference_str(a: Set[String], b: Set[String]) -> Set[String] = {
+  let ah = prim.handle(a)
+  let bh = prim.handle(b)
+  let alen = prim.load32(ah + 4)
+  let blen = prim.load32(bh + 4)
+  let cap = alen + blen
+  let r = prim.alloc_set_str(cap)
+  let rh = prim.handle(r)
+  let w1 = __set_str_diff(ah, alen, bh, blen, rh, 0, 0)
+  let w2 = __set_str_addb_nota(ah, alen, bh, blen, rh, 0, w1)
+  prim.store32(rh + 4, w2)
+  r
+}

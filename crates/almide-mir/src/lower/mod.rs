@@ -723,8 +723,11 @@ pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], resu
                 if a.len() == 1 && is_heap_ty(&a[0])
         );
         // RESULT-keyed: constructors / Set-returning algebra over heap elements.
-        if matches!(func, "from_list" | "to_list" | "union" | "intersection" | "difference")
-            && result_is_heap_container
+        if matches!(
+            func,
+            "from_list" | "to_list" | "union" | "intersection" | "difference"
+                | "new" | "insert" | "remove" | "symmetric_difference"
+        ) && result_is_heap_container
         {
             return format!("set.{func}_str");
         }
