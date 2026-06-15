@@ -202,3 +202,79 @@ fn bytes_pad_right(b: Bytes, target_len: Int, val: Int) -> Bytes = {
   let _y = __fillval(dst + n, pad, val, 0)
   out
 }
+
+// Copy n i64 list slots (at src, 8-byte stride) into n single bytes at dst (low byte each).
+fn __fl_copy(dst: Int, src: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let v = prim.load64(src + i * 8)
+    prim.store8(dst + i, v)
+    __fl_copy(dst, src, n, i + 1)
+  }
+
+// bytes.from_list(xs) -> a Bytes whose i-th byte is the low byte of xs[i].
+fn bytes_from_list(xs: List[Int]) -> Bytes = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  let out = prim.alloc_bytes(n)
+  let _x = __fl_copy(prim.handle(out) + 12, h + 12, n, 0)
+  out
+}
+
+// Copy n bytes (at src) into n i64 list slots at dst (zero-extended, 8-byte stride).
+fn __tl_copy(dst: Int, src: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let byte = prim.load8(src + i)
+    prim.store64(dst + i * 8, byte)
+    __tl_copy(dst, src, n, i + 1)
+  }
+
+// bytes.to_list(b) -> a List[Int] whose i-th element is b[i] (0..255).
+fn bytes_to_list(b: Bytes) -> List[Int] = {
+  let n = prim.load32(prim.handle(b) + 4)
+  let out = prim.alloc_list(n)
+  let _x = __tl_copy(prim.handle(out) + 12, prim.handle(b) + 12, n, 0)
+  out
+}
+
+// Is the pn-byte pattern at pp found in the bn-byte haystack at pb, scanning from position i?
+fn __contains_at(pb: Int, pp: Int, bn: Int, pn: Int, i: Int) -> Bool =
+  if i + pn > bn then false
+  else {
+    let eq = __byteq(pb + i, pp, pn, 0)
+    if eq then true else __contains_at(pb, pp, bn, pn, i + 1)
+  }
+
+// bytes.contains(b, pat) -> does b contain pat as a contiguous sub-sequence? (empty pat = true)
+fn bytes_contains(b: Bytes, pat: Bytes) -> Bool = {
+  let bn = prim.load32(prim.handle(b) + 4)
+  let pn = prim.load32(prim.handle(pat) + 4)
+  let pb = prim.handle(b) + 12
+  let pp = prim.handle(pat) + 12
+  if pn == 0 then true
+  else { if pn > bn then false else __contains_at(pb, pp, bn, pn, 0) }
+}
+
+// XOR n bytes of pa with pb into dst.
+fn __xorcopy(dst: Int, pa: Int, pb: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let x = prim.load8(pa + i)
+    let y = prim.load8(pb + i)
+    let z = prim.bxor(x, y)
+    prim.store8(dst + i, z)
+    __xorcopy(dst, pa, pb, n, i + 1)
+  }
+
+// bytes.xor(a, b) -> a fresh Bytes of min(len a, len b) bytes, each a[i] XOR b[i].
+fn bytes_xor(a: Bytes, b: Bytes) -> Bytes = {
+  let an = prim.load32(prim.handle(a) + 4)
+  let bn = prim.load32(prim.handle(b) + 4)
+  let n = if an < bn then an else bn
+  let out = prim.alloc_bytes(n)
+  let pa = prim.handle(a) + 12
+  let pb = prim.handle(b) + 12
+  let _x = __xorcopy(prim.handle(out) + 12, pa, pb, n, 0)
+  out
+}

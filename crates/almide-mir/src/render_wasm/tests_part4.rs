@@ -588,6 +588,37 @@
     }
 
     #[test]
+    fn self_hosted_bytes_list_contains_xor() {
+        // SELF-HOSTED bytes.from_list/to_list/contains/xor (the List[Int] <-> Bytes bridge +
+        // substring search + xor). from_list([72,73,74])="HIJ"; to_list("AB")=[65,66];
+        // contains is sub-sequence search; xor([12,10],[10,6])=[6,12]. Byte-matches v0.
+        let src = "fn main() -> Unit = {\n  \
+            let xs = [72, 73, 74]\n  let fl = bytes.from_list(xs)\n  \
+            println(int.to_string(bytes.len(fl)))\n  \
+            println(int.to_string(bytes.get_or(fl, 0, 0)))\n  \
+            println(int.to_string(bytes.get_or(fl, 2, 0)))\n  \
+            let ab = bytes.from_string(\"AB\")\n  let tl = bytes.to_list(ab)\n  \
+            println(int.to_string(list.len(tl)))\n  \
+            println(int.to_string(list.get_or(tl, 0, 0)))\n  \
+            println(int.to_string(list.get_or(tl, 1, 0)))\n  \
+            let hello = bytes.from_string(\"hello\")\n  let ell = bytes.from_string(\"ell\")\n  let xyz = bytes.from_string(\"xyz\")\n  let emp = bytes.from_string(\"\")\n  \
+            let c1 = bytes.contains(hello, ell)\n  let n1 = if c1 then 1 else 0\n  println(int.to_string(n1))\n  \
+            let c2 = bytes.contains(hello, xyz)\n  let n2 = if c2 then 1 else 0\n  println(int.to_string(n2))\n  \
+            let c3 = bytes.contains(hello, emp)\n  let n3 = if c3 then 1 else 0\n  println(int.to_string(n3))\n  \
+            let ya = [12, 10]\n  let yb = [10, 6]\n  let ba = bytes.from_list(ya)\n  let bb = bytes.from_list(yb)\n  \
+            let xr = bytes.xor(ba, bb)\n  \
+            println(int.to_string(bytes.get_or(xr, 0, 0)))\n  \
+            println(int.to_string(bytes.get_or(xr, 1, 0))) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "bytes.from_list"));
+        assert!(prog.functions.iter().any(|f| f.name == "bytes.to_list"));
+        if let Some(out) = build_and_run("self_hosted_bytes_list_contains_xor", &render_wasm_program(&prog)) {
+            // from_list len3 b0=72 b2=74; to_list len2 e0=65 e1=66; contains 1,0,1; xor [6,12]
+            assert_eq!(out, "3\n72\n74\n2\n65\n66\n1\n0\n1\n6\n12");
+        }
+    }
+
+    #[test]
     fn self_hosted_math_sqrt() {
         // SELF-HOSTED math.sqrt = prim.fsqrt (f64.sqrt, byte-exact with v0). sqrt(16)=4,
         // sqrt(2)=1.41…→to_int 1, sqrt(81)=9.
