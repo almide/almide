@@ -223,6 +223,24 @@
     }
 
     #[test]
+    fn self_hosted_list_unique_by() {
+        // SELF-HOSTED `list.unique_by` — keep the first element of each distinct key. key = x%3:
+        // [1,2,3,4,5,6] → keys [1,2,0,1,2,0] → keep first of each: 1(k1),2(k2),3(k0) → [1,2,3].
+        // len 3, sum 6, ys[2]=3. Byte-matches v0 for a pure key.
+        let src = "fn main() -> Unit = {\n  \
+            let ys = list.unique_by([1, 2, 3, 4, 5, 6], (x) => x % 3)\n  \
+            println(int.to_string(list.len(ys)))\n  \
+            println(int.to_string(list.sum(ys)))\n  \
+            println(int.to_string(list.get_or(ys, 2, 0))) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "list.unique_by"));
+        if let Some(out) = build_and_run("self_hosted_list_unique_by", &render_wasm_program(&prog)) {
+            // [1,2,3]: len3 sum6 ys[2]=3
+            assert_eq!(out, "3\n6\n3");
+        }
+    }
+
+    #[test]
     fn self_hosted_list_take_end_drop_end() {
         // list.take_end/drop_end self-hosted: last n / all-but-last n, List[Int] slot-copy.
         // take_end([1,2,3,4,5],2)=[4,5] ([0]=4,len 2); drop_end([1,2,3,4,5],2)=[1,2,3]
