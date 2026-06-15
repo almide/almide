@@ -836,6 +836,46 @@
     }
 
     #[test]
+    fn self_hosted_string_char_at() {
+        // SELF-HOSTED string.get(s, idx) -> Option[String] (the idx-th codepoint) over the
+        // Option[String] construction machinery. CONTENT is verified by reading the materialized
+        // Option directly via the prim floor (len-as-tag at +4, element handle at +12, its bytes):
+        // char_at("hello",1)=Some("e"=101), [0]=Some("h"=104), [10]=None(len0); char_at("日本語",1)
+        // =Some("本"= 3 bytes, lead 0xE6=230); [-1]=None. Byte-matches v0's s.chars().nth(idx).
+        let src = "fn main() -> Unit = {\n  \
+            let o1 = string.get(\"hello\", 1)\n  let h1 = prim.handle(o1)\n  \
+            println(int.to_string(prim.load32(h1 + 4)))\n  \
+            let e1 = prim.load64(h1 + 12)\n  println(int.to_string(prim.load8(e1 + 12)))\n  \
+            let o0 = string.get(\"hello\", 0)\n  let e0 = prim.load64(prim.handle(o0) + 12)\n  \
+            println(int.to_string(prim.load8(e0 + 12)))\n  \
+            let oN = string.get(\"hello\", 10)\n  println(int.to_string(prim.load32(prim.handle(oN) + 4)))\n  \
+            let oJ = string.get(\"日本語\", 1)\n  let eJ = prim.load64(prim.handle(oJ) + 12)\n  \
+            println(int.to_string(prim.load32(eJ + 4)))\n  println(int.to_string(prim.load8(eJ + 12)))\n  \
+            let oNeg = string.get(\"hello\", 0 - 1)\n  println(int.to_string(prim.load32(prim.handle(oNeg) + 4))) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "string.get"));
+        if let Some(out) = build_and_run("self_hosted_string_char_at", &render_wasm_program(&prog)) {
+            assert_eq!(out, "1\n101\n104\n0\n3\n230\n0");
+        }
+    }
+
+    #[test]
+    fn string_char_at_option_loop_is_bounded() {
+        // ADVERSARIAL leak guard: a loop materializing an Option[String] (char_at owning a slice)
+        // and tag-matching it each iteration runs in BOUNDED memory (DropListStr frees each).
+        let src = "fn main() -> Unit = {\n  \
+            var i = 0\n  \
+            while i < 4000 {\n    \
+            let o = string.get(\"abc\", 1)\n    match o { Some(_) => println(\"y\"), None => println(\"n\"), }\n    \
+            i = i + 1\n  }\n  \
+            println(\"done\") }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("string_char_at_option_loop", &render_wasm_program(&prog)) {
+            assert!(out.ends_with("done"), "loop must terminate (bounded memory)");
+        }
+    }
+
+    #[test]
     fn string_first_option_loop_is_bounded() {
         // ADVERSARIAL leak guard: a loop that MATERIALIZES an Option[String] (string.first owning a
         // slice String) and tag-matches it every iteration must run in BOUNDED memory — each
@@ -1009,6 +1049,7 @@
             assert_eq!(out, "4\n2\n3\n3\n5\n0");
         }
     }
+
 
 
 

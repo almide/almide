@@ -252,7 +252,10 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
         ),
         (
             include_str!("../../../../stdlib/string_first_last.almd"),
-            &[("string_first", "string.first"), ("string_last", "string.last")],
+            &[
+                ("string_first", "string.first"), ("string_last", "string.last"),
+                ("string_char_at", "string.get"),
+            ],
         ),
         (
             include_str!("../../../../stdlib/string_trim.almd"),

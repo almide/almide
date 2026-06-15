@@ -65,3 +65,32 @@ fn string_last(s: String) -> Option[String] = {
   let blen = prim.load32(h + 4)
   if blen <= 0 then None else Some(__last_char(s))
 }
+
+// Byte offset of the `target`-th codepoint (i = current index, pos = current byte offset), or -1
+// if target is out of range (walked past the end). A negative target never matches → -1.
+fn __cp_at(h: Int, blen: Int, target: Int, i: Int, pos: Int) -> Int =
+  if pos >= blen then 0 - 1
+  else if i == target then pos
+  else {
+    let b = prim.load8(h + 12 + pos)
+    let cl = __cp_len(b)
+    __cp_at(h, blen, target, i + 1, pos + cl)
+  }
+
+// The codepoint at byte offset `pos` as a fresh owned String.
+fn __slice_cp(s: String, pos: Int) -> String = {
+  let h = prim.handle(s)
+  let b = prim.load8(h + 12 + pos)
+  let cl = __cp_len(b)
+  let out = prim.alloc_str(cl)
+  let _x = __copy_n(prim.handle(out) + 12, h + 12 + pos, cl, 0)
+  out
+}
+
+// string.char_at(s, idx) -> Some(the idx-th codepoint) or None (idx out of range / negative).
+fn string_char_at(s: String, idx: Int) -> Option[String] = {
+  let h = prim.handle(s)
+  let blen = prim.load32(h + 4)
+  let pos = __cp_at(h, blen, idx, 0, 0)
+  if pos < 0 then None else Some(__slice_cp(s, pos))
+}
