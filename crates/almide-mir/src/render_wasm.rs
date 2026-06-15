@@ -590,6 +590,7 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
         (include_str!("../../../stdlib/list_sum.almd"), &[("list_sum", "list.sum")]),
         (include_str!("../../../stdlib/string_slice.almd"), &[("string_slice", "string.slice")]),
         (include_str!("../../../stdlib/string_trim.almd"), &[("string_trim", "string.trim")]),
+        (include_str!("../../../stdlib/list_get_or.almd"), &[("list_get_or", "list.get_or")]),
     ]
 }
 
@@ -1541,6 +1542,20 @@ mod tests {
         assert!(prog.functions.iter().any(|f| f.name == "string.trim"));
         if let Some(out) = build_and_run("string_trim", &render_wasm_program(&prog)) {
             assert_eq!(out, "hello\nworld");
+        }
+    }
+
+    #[test]
+    fn self_hosted_list_get_or_reads_element_or_default() {
+        // list.get_or self-hosted: read element i (prim.load64) or the default out of bounds.
+        // get_or([10,20,30],1,99)=20, get_or([10,20,30],5,99)=99.
+        let src = "fn main() -> Unit = {\n  \
+            let a = list.get_or([10, 20, 30], 1, 99)\n  println(int.to_string(a))\n  \
+            let b = list.get_or([10, 20, 30], 5, 99)\n  println(int.to_string(b)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "list.get_or"));
+        if let Some(out) = build_and_run("list_get_or", &render_wasm_program(&prog)) {
+            assert_eq!(out, "20\n99");
         }
     }
 
