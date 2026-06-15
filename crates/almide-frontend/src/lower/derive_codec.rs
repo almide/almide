@@ -46,7 +46,7 @@ pub(super) fn auto_derive_encode(vt: &mut VarTable, type_name: &str, type_ty: &T
 
     IrFunction {
         name: sym(&format!("{}.encode", type_name)),
-        params: vec![IrParam { var, ty: type_ty.clone(), name: sym("_v"), borrow: ParamBorrow::Own, open_record: None, default: None, attrs: vec![] }],
+        params: vec![IrParam { var, ty: type_ty.clone(), name: sym("_v"), borrow: ParamBorrow::Own, is_mut: false, open_record: None, default: None, attrs: vec![] }],
         ret_ty: value_ty,
         body,
         is_effect: false, is_async: false, is_test: false,
@@ -233,7 +233,7 @@ pub(super) fn auto_derive_decode(vt: &mut VarTable, type_name: &str, type_ty: &T
 
     IrFunction {
         name: sym(&format!("{}.decode", type_name)),
-        params: vec![IrParam { var: var_v, ty: value_ty, name: sym("_v"), borrow: ParamBorrow::Own, open_record: None, default: None, attrs: vec![] }],
+        params: vec![IrParam { var: var_v, ty: value_ty, name: sym("_v"), borrow: ParamBorrow::Own, is_mut: false, open_record: None, default: None, attrs: vec![] }],
         ret_ty: result_ty,
         body,
         is_effect: false, is_async: false, is_test: false,
@@ -376,7 +376,7 @@ pub(super) fn auto_derive_variant_encode(vt: &mut VarTable, type_name: &str, typ
 
     IrFunction {
         name: sym(&format!("{}.encode", type_name)),
-        params: vec![IrParam { var, ty: type_ty.clone(), name: sym("_v"), borrow: ParamBorrow::Own, open_record: None, default: None, attrs: vec![] }],
+        params: vec![IrParam { var, ty: type_ty.clone(), name: sym("_v"), borrow: ParamBorrow::Own, is_mut: false, open_record: None, default: None, attrs: vec![] }],
         ret_ty: value_ty,
         body,
         is_effect: false, is_async: false, is_test: false,
@@ -573,7 +573,7 @@ pub(super) fn auto_derive_variant_decode(vt: &mut VarTable, type_name: &str, typ
 
     IrFunction {
         name: sym(&format!("{}.decode", type_name)),
-        params: vec![IrParam { var: var_v, ty: value_ty, name: sym("_v"), borrow: ParamBorrow::Own, open_record: None, default: None, attrs: vec![] }],
+        params: vec![IrParam { var: var_v, ty: value_ty, name: sym("_v"), borrow: ParamBorrow::Own, is_mut: false, open_record: None, default: None, attrs: vec![] }],
         ret_ty: result_ty,
         body,
         is_effect: false, is_async: false, is_test: false,
