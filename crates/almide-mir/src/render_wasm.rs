@@ -585,6 +585,7 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
             include_str!("../../../stdlib/math_int.almd"),
             &[("math_abs", "math.abs"), ("math_max", "math.max"), ("math_min", "math.min")],
         ),
+        (include_str!("../../../stdlib/list_len.almd"), &[("list_len", "list.len")]),
     ]
 }
 
@@ -1467,6 +1468,20 @@ mod tests {
         assert!(prog.functions.iter().any(|f| f.name == "math.min"));
         if let Some(out) = build_and_run("math_int", &render_wasm_program(&prog)) {
             assert_eq!(out, "5\n7\n3");
+        }
+    }
+
+    #[test]
+    fn self_hosted_list_len_reads_the_element_count() {
+        // The first LIST self-host: list.len reads the header element-count field. Needs
+        // the generic prim.handle[A] (now accepts List too). len([1,2,3])=3, len(5 elems)=5.
+        let src = "fn main() -> Unit = {\n  \
+            let n = list.len([1, 2, 3])\n  println(int.to_string(n))\n  \
+            let m = list.len([10, 20, 30, 40, 50])\n  println(int.to_string(m)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "list.len"));
+        if let Some(out) = build_and_run("list_len", &render_wasm_program(&prog)) {
+            assert_eq!(out, "3\n5");
         }
     }
 

@@ -9,10 +9,12 @@
 // (The @intrinsic symbol is a v0-codegen placeholder; v1 recognizes these by the
 // `prim` module name, not the symbol, and emits Op::Prim.)
 
-// Reinterpret a heap handle (a String/List pointer) as an Int address — the bridge
-// that lets all address math be ordinary Int arithmetic.
+// Reinterpret a heap handle (any heap value: String / List / Map pointer) as an Int
+// address — the bridge that lets all address math be ordinary Int arithmetic. Generic
+// over the heap type `A` so list/map self-host fns can take a handle too; UNSAFE (a
+// scalar `A` would reinterpret its value as an address).
 @intrinsic("almide_rt_prim_handle")
-fn handle(ptr: String) -> Int = _
+fn handle[A](ptr: A) -> Int = _
 
 // Load 1 byte at `addr`, zero-extended to Int.
 @intrinsic("almide_rt_prim_load8")
