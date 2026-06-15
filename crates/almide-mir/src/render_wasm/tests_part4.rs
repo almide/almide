@@ -1614,6 +1614,30 @@
     }
 
     #[test]
+    fn self_hosted_set_string_higher_order() {
+        // SELF-HOSTED Set[String] filter/all/any/fold (closures over String elements, heap-arg ABI).
+        // s={apple,banana,kiwi,fig}: filter(len>3)={apple,banana,kiwi} len 3; all(len>2)=true;
+        // any(len<4)=true (fig=3); fold(0, +len)=5+6+4+3=18. Byte-matches v0. Closure bodies use a
+        // let-bind (scalar-call-as-operand gap workaround).
+        let src = "fn main() -> Unit = {\n  \
+            let s = set.from_list(string.split(\"apple,banana,kiwi,fig\", \",\"))\n  \
+            let big = set.filter(s, (x) => { let l = string.len(x)\n l > 3 })\n  \
+            println(int.to_string(set.len(big)))\n  \
+            let al = set.all(s, (x) => { let l = string.len(x)\n l > 2 })\n  \
+            if al then println(\"all-long\") else println(\"no\")\n  \
+            let an = set.any(s, (x) => { let l = string.len(x)\n l < 4 })\n  \
+            if an then println(\"has-short\") else println(\"no\")\n  \
+            let total = set.fold(s, 0, (acc, x) => { let l = string.len(x)\n acc + l })\n  \
+            println(int.to_string(total)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "set.filter_str"));
+        assert!(prog.functions.iter().any(|f| f.name == "set.fold_str"));
+        if let Some(out) = build_and_run("self_hosted_set_string_higher_order", &render_wasm_program(&prog)) {
+            assert_eq!(out, "3\nall-long\nhas-short\n18");
+        }
+    }
+
+    #[test]
     fn self_hosted_set_string_loop_reclaims() {
         // SOUNDNESS for the Set[String] nested-ownership path: a bounded loop building + dropping a
         // fresh Set[String] each iteration must reclaim each element String + the block (DropListStr)

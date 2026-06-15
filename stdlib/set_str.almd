@@ -294,3 +294,69 @@ fn set_symmetric_difference_str(a: Set[String], b: Set[String]) -> Set[String] =
   prim.store32(rh + 4, w2)
   r
 }
+
+// ── Higher-order Set[String] (closures machinery; the closure takes a String element by handle,
+// widened by the heap-arg closure ABI) ── filter keeps a deep-copied subset; all/any/fold read.
+
+fn __set_str_filter_fill(dh: Int, sh: Int, f: (String) -> Bool, n: Int, i: Int, di: Int) -> Int =
+  if i >= n then di
+  else {
+    let x = prim.load_str(sh + 12 + i * 8)
+    let keep = f(x)
+    if keep then {
+      let copy = string.repeat(x, 1)
+      prim.store_str(dh + 12 + di * 8, copy)
+      __set_str_filter_fill(dh, sh, f, n, i + 1, di + 1)
+    } else {
+      __set_str_filter_fill(dh, sh, f, n, i + 1, di)
+    }
+  }
+
+fn set_filter_str(s: Set[String], f: (String) -> Bool) -> Set[String] = {
+  let sh = prim.handle(s)
+  let n = prim.load32(sh + 4)
+  let r = prim.alloc_set_str(n)
+  let rh = prim.handle(r)
+  let count = __set_str_filter_fill(rh, sh, f, n, 0, 0)
+  prim.store32(rh + 4, count)
+  r
+}
+
+fn __set_str_count_hits(sh: Int, f: (String) -> Bool, n: Int, i: Int, acc: Int) -> Int =
+  if i >= n then acc
+  else {
+    let x = prim.load_str(sh + 12 + i * 8)
+    let h = f(x)
+    if h then __set_str_count_hits(sh, f, n, i + 1, acc + 1)
+    else __set_str_count_hits(sh, f, n, i + 1, acc)
+  }
+
+fn set_all_str(s: Set[String], f: (String) -> Bool) -> Bool = {
+  let sh = prim.handle(s)
+  let n = prim.load32(sh + 4)
+  let hits = __set_str_count_hits(sh, f, n, 0, 0)
+  hits >= n
+}
+
+fn set_any_str(s: Set[String], f: (String) -> Bool) -> Bool = {
+  let sh = prim.handle(s)
+  let n = prim.load32(sh + 4)
+  let hits = __set_str_count_hits(sh, f, n, 0, 0)
+  hits > 0
+}
+
+// set.fold over Set[String] — f : (Acc, String) -> Acc (Int accumulator). 2-arity closure with a
+// String second arg (heap-widened). Insertion-order walk.
+fn __set_str_fold_loop(sh: Int, f: (Int, String) -> Int, n: Int, i: Int, acc: Int) -> Int =
+  if i >= n then acc
+  else {
+    let x = prim.load_str(sh + 12 + i * 8)
+    let nacc = f(acc, x)
+    __set_str_fold_loop(sh, f, n, i + 1, nacc)
+  }
+
+fn set_fold_str(s: Set[String], init: Int, f: (Int, String) -> Int) -> Int = {
+  let sh = prim.handle(s)
+  let n = prim.load32(sh + 4)
+  __set_str_fold_loop(sh, f, n, 0, init)
+}

@@ -726,17 +726,19 @@ pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], resu
         if matches!(
             func,
             "from_list" | "to_list" | "union" | "intersection" | "difference"
-                | "new" | "insert" | "remove" | "symmetric_difference"
+                | "new" | "insert" | "remove" | "symmetric_difference" | "filter"
         ) && result_is_heap_container
         {
             return format!("set.{func}_str");
         }
-        // ARG-keyed: a Bool/scalar-returning predicate over a `Set[heap]` subject (arg 0).
+        // ARG-keyed: a Bool/scalar-returning fn over a `Set[heap]` subject (arg 0).
         let arg0_is_heap_set = matches!(
             arg_tys.first(),
             Some(Ty::Applied(TypeConstructorId::Set, a)) if a.len() == 1 && is_heap_ty(&a[0])
         );
-        if matches!(func, "contains" | "is_subset" | "is_disjoint") && arg0_is_heap_set {
+        if matches!(func, "contains" | "is_subset" | "is_disjoint" | "all" | "any" | "fold")
+            && arg0_is_heap_set
+        {
             return format!("set.{func}_str");
         }
     }
