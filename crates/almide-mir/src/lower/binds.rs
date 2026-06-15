@@ -475,7 +475,7 @@ impl LowerCtx {
     fn try_lower_scalar_tuple_construct(&mut self, elements: &[IrExpr]) -> Option<ValueId> {
         use crate::{IntOp, PrimKind};
         if elements.iter().any(|e| is_heap_ty(&e.ty)) {
-            return None;
+            return None; // heap-field tuple deferred (the all-heap path traps inside loops — TODO).
         }
         // Lower each field's scalar value first (before the alloc, so a field expr that itself
         // allocates doesn't interleave with our store sequence).
@@ -505,7 +505,8 @@ impl LowerCtx {
 
     /// Extract each SCALAR field of a tuple `subject` (a heap block) into its bound var via a
     /// `Prim::Load` at the field's slot. Returns `false` (caller falls back to `bind_pattern`) if
-    /// any field is heap or a non-`Bind`/`Wildcard` pattern (precise heap-field move is deferred).
+    /// any field is heap or a non-`Bind`/`Wildcard` pattern (precise heap-field move is deferred —
+    /// the all-heap borrow path traps inside loops, TODO the while-loop interaction).
     fn try_lower_scalar_tuple(&mut self, pats: &[IrPattern], subject: ValueId) -> bool {
         use crate::{IntOp, PrimKind};
         for p in pats {
