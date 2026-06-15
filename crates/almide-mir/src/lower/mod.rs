@@ -177,6 +177,14 @@ pub(crate) struct LowerCtx {
     /// — still WALLED). Confirming against the declared set, not merely a `value_of`
     /// miss, is what keeps the boundary a wall instead of a silent hole.
     globals: HashMap<VarId, Ty>,
+    /// MIR values KNOWN to be MATERIALIZED Options (the 0-or-1-element-list layout:
+    /// `Some(x)` = `Init::OptSome` len=1, `None` = `Init::Opaque` len=0). A variant
+    /// `match` may EXECUTE (read `len` as the tag, extract `data[0]`) ONLY over a
+    /// subject in this set — every other Option (a closure/range/deferred `Opaque`, a
+    /// non-self-host Option-returning call) is `Opaque` with len=0 and would MISREAD as
+    /// `None`, so it keeps the sound LINEARIZED match. This is the gate that makes the
+    /// len-as-tag execution safe without any global materialization invariant.
+    materialized_options: HashSet<ValueId>,
 }
 
 impl LowerCtx {

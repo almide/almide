@@ -135,6 +135,14 @@ pub enum Init {
     /// is a fresh owned object, moved out / dropped like a literal. This is the primitive
     /// the self-hosted `int.to_string` (and string-builders) allocate their result with.
     DynStr { len: ValueId },
+    /// A materialized `Some(payload)` — Option modeled as a 0-or-1-element LIST block
+    /// (the proven list layout `[rc][len@4][cap@8][data@12]`): `Some(x)` is a 1-element
+    /// list (len=1, `data[0]`=x), `None` is the 0-element list (`Init::Opaque`, len=0).
+    /// The tag IS the length, so a variant `match` reads `len` and extracts `data[0]`.
+    /// SCALAR payload only (a heap payload would alias the element — a later refinement).
+    /// The ownership cert is the SAME one `i` as any `Alloc` (init-agnostic), so NO
+    /// checker change: a fresh owned object, moved out / dropped like a literal.
+    OptSome { payload: ValueId },
 }
 
 /// One MIR statement. Ownership is EXPLICIT: a heap value's refcount is changed

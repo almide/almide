@@ -73,6 +73,12 @@ impl LowerCtx {
                     self.record_elided_calls(subject);
                     None
                 };
+                // A `match` over a MATERIALIZED Option (`Some(scalar)`/`None`) EXECUTES
+                // — only the taken arm runs — when the subject is tracked; otherwise it
+                // LINEARIZES below (the sound both-arms fallback).
+                if self.try_lower_variant_match(subject_value, arms) {
+                    return Ok(());
+                }
                 for arm in arms {
                     // An arm GUARD is a scalar Bool sub-condition. The arms are
                     // LINEARIZED regardless of the guard, so it adds no ownership — just
@@ -271,6 +277,110 @@ impl LowerCtx {
         self.ops.truncate(ops_mark);
         self.live_heap_handles.truncate(lhh_mark);
         false
+    }
+
+    /// Try to EXECUTE a `match opt { Some(x) => …, None => … }` over a MATERIALIZED
+    /// Option (the 0-or-1-element-list layout): read `len` as the tag, and on the Some
+    /// branch extract `data[0]` as the payload. Only the taken arm runs (v0 semantics),
+    /// vs the linearized fallback that runs both. Returns `false` (rolled back) when not
+    /// in the subset — the caller then LINEARIZES.
+    ///
+    /// SOUNDNESS — the gate is `subject ∈ materialized_options`: the len-as-tag read is
+    /// correct ONLY for a value KNOWN to carry the layout (`Some`=len1 / `None`=len0).
+    /// Every other Option is a deferred `Opaque` (len0) that would MISREAD as `None`, so
+    /// it is NOT in the set and keeps the sound linearized match. The execution adds NO
+    /// ownership event: the tag/payload reads are scalar prims, the markers are no-ops in
+    /// `verify_ownership`, and each arm is a PER-ARM-BALANCED frame (`lower_branch_arm`)
+    /// — exactly the linearization the cert already proves, only wrapped in `IfThen`/
+    /// `Else`/`EndIf` so one arm runs. SCALAR payload only (a heap bind would alias the
+    /// element — a later refinement); UNIT arm bodies only (a value result is a later
+    /// refinement). The subject was already materialized/borrowed by the caller.
+    pub(crate) fn try_lower_variant_match(
+        &mut self,
+        subject_value: Option<ValueId>,
+        arms: &[IrMatchArm],
+    ) -> bool {
+        use crate::PrimKind;
+        // Gate 1: the subject is a TRACKED materialized Option.
+        let subj = match subject_value {
+            Some(v) if self.materialized_options.contains(&v) => v,
+            _ => return false,
+        };
+        // Gate 2: exactly a `[Some(scalar-bind?), None]` shape, no guards, Unit bodies.
+        if arms.len() != 2 || arms.iter().any(|a| a.guard.is_some()) {
+            return false;
+        }
+        let mut some: Option<(&IrExpr, Option<VarId>)> = None;
+        let mut none: Option<&IrExpr> = None;
+        for arm in arms {
+            match &arm.pattern {
+                IrPattern::Some { inner } => {
+                    let bind = match inner.as_ref() {
+                        IrPattern::Bind { var, ty } if !is_heap_ty(ty) => Some(*var),
+                        IrPattern::Wildcard => None,
+                        _ => return false, // heap bind / nested ctor — not in this subset
+                    };
+                    if some.is_some() {
+                        return false;
+                    }
+                    some = Some((&arm.body, bind));
+                }
+                IrPattern::None | IrPattern::Wildcard => {
+                    if none.is_some() {
+                        return false;
+                    }
+                    none = Some(&arm.body);
+                }
+                _ => return false,
+            }
+        }
+        let ((some_body, some_bind), none_body) = match (some, none) {
+            (Some(s), Some(n)) => (s, n),
+            _ => return false,
+        };
+        if !matches!(some_body.ty, Ty::Unit) || !matches!(none_body.ty, Ty::Unit) {
+            return false;
+        }
+        // Emit: tag = load32(handle(subj) + 4); if tag != 0 then Some-arm else None-arm.
+        let ops_mark = self.ops.len();
+        let lhh_mark = self.live_heap_handles.len();
+        let h = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![subj] });
+        let tag = self.load_at_offset(h, 4, PrimKind::Load { width: 4 });
+        self.ops.push(Op::IfThen { cond: tag, dst: None });
+        // Some-arm (then): extract the scalar payload `data[0] = load64(handle + 12)`,
+        // bind it, lower the arm body in a per-arm frame.
+        if let Some(bind_var) = some_bind {
+            let payload = self.load_at_offset(h, 12, PrimKind::Load { width: 8 });
+            self.value_of.insert(bind_var, payload);
+        }
+        let some_ok = self.lower_branch_arm(None, some_body).is_ok();
+        if !some_ok {
+            self.ops.truncate(ops_mark);
+            self.live_heap_handles.truncate(lhh_mark);
+            return false;
+        }
+        self.ops.push(Op::Else { val: None });
+        if self.lower_branch_arm(None, none_body).is_err() {
+            self.ops.truncate(ops_mark);
+            self.live_heap_handles.truncate(lhh_mark);
+            return false;
+        }
+        self.ops.push(Op::EndIf { val: None });
+        true
+    }
+
+    /// Emit `base + offset` then a `prim` load of `kind` at that address, returning the
+    /// loaded value (an i64 in the prim floor's uniform model). The address arithmetic
+    /// mirrors what `prim.handle(x) + offset` lowers to (`Op::ConstInt` + `Op::IntBinOp`).
+    fn load_at_offset(&mut self, base: ValueId, offset: i64, kind: crate::PrimKind) -> ValueId {
+        let off = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: off, value: offset });
+        let addr = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst: addr, op: IntOp::Add, a: base, b: off });
+        let dst = self.fresh_value();
+        self.ops.push(Op::Prim { kind, dst: Some(dst), args: vec![addr] });
+        dst
     }
 
     /// Lower ONE scalar `if` arm (a block's statements + a scalar tail value) with a

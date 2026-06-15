@@ -404,10 +404,23 @@ fn render_op(op: &Op, label_off: &BTreeMap<String, (u32, u32)>) -> String {
                 shift = ELEM_SIZE.trailing_zeros(),
             )
         }
+        // A materialized `Some(payload)`: a 1-element list (len=1) whose `data[0]` holds
+        // the scalar payload. `None` is the 0-element list (`Init::Opaque`, len=0). A
+        // variant `match` reads `len` as the tag and `data[0]` as the payload. Cert: one
+        // `Alloc` = i, init-agnostic (no checker change).
+        Op::Alloc { dst, init: Init::OptSome { payload }, .. } => {
+            let cap = 1 + PUSH_HEADROOM;
+            format!(
+                "    (local.set {d} (call $list_new (i32.const 1) (i32.const {cap})))\n\
+                 \x20   (call $list_set (local.get {d}) (i32.const 0) (local.get {p}))\n",
+                d = local(*dst),
+                p = local(*payload),
+            )
+        }
         Op::Alloc { dst, init, .. } => {
             let elems: &[i64] = match init {
                 Init::IntList(e) => e,
-                Init::Opaque | Init::Str(_) | Init::DynStr { .. } => &[],
+                Init::Opaque | Init::Str(_) | Init::DynStr { .. } | Init::OptSome { .. } => &[],
             };
             let len = elems.len() as u32;
             let cap = len + PUSH_HEADROOM;
@@ -1316,6 +1329,67 @@ mod tests {
         );
         if let Some(out) = build_and_run("heap_if_call_arm", &render_wasm_program(&prog)) {
             assert_eq!(out, "HEY\nno");
+        }
+    }
+
+    #[test]
+    fn variant_match_over_a_materialized_option_executes() {
+        // `match opt { Some(x) => …, None => … }` over a LOCALLY-bound, MATERIALIZED
+        // Option RUNS only the matched arm — Option is the 0-or-1-element-list layout
+        // (`Some(x)` = len=1, `data[0]`=x; `None` = len=0), so the match reads `len` as
+        // the tag and extracts `data[0]` as the payload. show(Some(42))="42",
+        // show(None)="none", byte-matching v0's native Option match. The subject is a
+        // TRACKED materialized Option (the `materialized_options` gate); a non-tracked
+        // Option would keep the sound linearized both-arms fallback.
+        let src = "fn main() -> Unit = {\n  \
+            let a = Some(42)\n  \
+            match a {\n    \
+            Some(x) => println(int.to_string(x)),\n    \
+            None => println(\"none\"),\n  }\n  \
+            let b: Option[Int] = None\n  \
+            match b {\n    \
+            Some(x) => println(int.to_string(x)),\n    \
+            None => println(\"none\"),\n  } }\n";
+        let prog = lower_source(src);
+        let main = prog.functions.iter().find(|f| f.name == "main").unwrap();
+        // The match EXECUTES (IfThen marker over the tag read), not linearized-both-arms.
+        assert!(
+            main.ops.iter().any(|op| matches!(op, Op::IfThen { .. })),
+            "variant match must lower to IfThen (executable), got {:?}",
+            main.ops
+        );
+        // `Some(42)` materializes a payload-carrying Alloc (the 1-element list).
+        assert!(
+            main.ops.iter().any(|op| matches!(op, Op::Alloc { init: Init::OptSome { .. }, .. })),
+            "Some(42) must materialize Init::OptSome, got {:?}",
+            main.ops
+        );
+        if let Some(out) = build_and_run("variant_match", &render_wasm_program(&prog)) {
+            assert_eq!(out, "42\nnone");
+        }
+    }
+
+    #[test]
+    fn option_allocating_loop_matches_bounded() {
+        // ADVERSARIAL: a loop that MATERIALIZES a `Some(i)` Option block every iteration
+        // and matches it must run in BOUNDED memory — each iteration's Option is freed
+        // (rc_dec) at the iteration frame's end and the free-list REUSES it. 3000
+        // iterations × an Option block would overrun the single 64 KiB page (~2900 allocs)
+        // if the materialized Option leaked. Completing all 3000 lines proves the per-arm/
+        // per-iteration ownership balance holds for the new `Init::OptSome` Alloc.
+        let src = "fn main() -> Unit = {\n  \
+            var i = 0\n  \
+            while i < 3000 {\n    \
+            let o = Some(i)\n    \
+            match o {\n      \
+            Some(x) => println(int.to_string(x)),\n      \
+            None => println(\"none\"),\n    }\n    \
+            i = i + 1\n  } }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("option_loop", &render_wasm_program(&prog)) {
+            assert_eq!(out.lines().count(), 3000, "every iteration must print (no OOM/leak)");
+            assert_eq!(out.lines().next(), Some("0"));
+            assert_eq!(out.lines().last(), Some("2999"));
         }
     }
 

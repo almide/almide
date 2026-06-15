@@ -120,6 +120,14 @@ impl LowerCtx {
             // A RUNTIME CALL result is a fresh value (its call is elided ⇒ the gate
             // taints the function honestly, like Method/Computed).
             | IrExprKind::RuntimeCall { .. } => {
+                // An Option ctor in the executable subset (`Some(scalar)` / `None`) is
+                // MATERIALIZED + tracked so a later `match` over the bound var executes;
+                // everything else is the deferred fresh `Alloc` (value-semantics).
+                if let Some(dst) = self.try_lower_option_ctor(value, ty) {
+                    self.value_of.insert(var, dst);
+                    self.live_heap_handles.push(dst);
+                    return Ok(());
+                }
                 let dst = self.fresh_value();
                 let repr = repr_of(ty)?;
                 let init = alloc_init(value);
@@ -352,6 +360,46 @@ impl LowerCtx {
                 }
                 Ok(())
             }
+        }
+    }
+
+    /// If `value` is an Option CONSTRUCTOR in the executable subset — `Some(scalar)`
+    /// or `None` — lower it to a MATERIALIZED 0-or-1-element-list block and TRACK the
+    /// resulting `dst` as a materialized Option, so a later variant `match` over it may
+    /// EXECUTE (read `len` as the tag, extract `data[0]`). Returns the fresh OWNED heap
+    /// handle `dst` (NOT pushed to `live_heap_handles` — the caller does its own
+    /// position-specific bookkeeping). Returns `None` when `value` is not a tracked
+    /// Option ctor (a heap-payload `Some`, whose payload is not a lowerable scalar,
+    /// falls through here too): the caller then takes its normal deferred-`Opaque` path,
+    /// and a `match` over THAT value stays soundly LINEARIZED (it is never in the set).
+    ///
+    /// `Some(x)` is `Init::OptSome` (len=1, `data[0]`=x); `None` is `Init::Opaque`
+    /// (len=0) — the SAME render as today, only now its `dst` is tracked. The ownership
+    /// cert is one `Alloc` = i either way (init-agnostic), so NO checker change.
+    pub(crate) fn try_lower_option_ctor(&mut self, value: &IrExpr, ty: &Ty) -> Option<ValueId> {
+        match &value.kind {
+            IrExprKind::OptionSome { expr } => {
+                // SCALAR payload only — `lower_scalar_value` returns `None` for a heap
+                // payload, which IS the gate (a heap `Some` aliases its element, a later
+                // refinement; it falls through to the deferred `Opaque` path, untracked).
+                let payload = self.lower_scalar_value(expr)?;
+                let dst = self.fresh_value();
+                let repr = repr_of(ty).ok()?;
+                self.ops.push(Op::Alloc { dst, repr, init: Init::OptSome { payload } });
+                self.materialized_options.insert(dst);
+                Some(dst)
+            }
+            IrExprKind::OptionNone => {
+                let dst = self.fresh_value();
+                let repr = repr_of(ty).ok()?;
+                // `None` is the 0-element list (len=0) — identical to `Init::Opaque`, only
+                // tracked. Tracking is harmless for a heap-payload Option: the `match` gate
+                // INDEPENDENTLY requires a scalar bind, so a heap match never executes.
+                self.ops.push(Op::Alloc { dst, repr, init: Init::Opaque });
+                self.materialized_options.insert(dst);
+                Some(dst)
+            }
+            _ => None,
         }
     }
 }
