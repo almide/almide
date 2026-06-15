@@ -653,6 +653,15 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
                 ("int_to_u8", "int.to_u8"),
             ],
         ),
+        (
+            include_str!("../../../stdlib/int_sized.almd"),
+            &[
+                ("int_to_int8", "int.to_int8"),
+                ("int_to_int16", "int.to_int16"),
+                ("int_to_int32", "int.to_int32"),
+                ("int_to_int64", "int.to_int64"),
+            ],
+        ),
         (include_str!("../../../stdlib/string_slice.almd"), &[("string_slice", "string.slice")]),
         (
             include_str!("../../../stdlib/string_is_digit.almd"),
@@ -2636,6 +2645,25 @@ mod tests {
         assert!(prog.functions.iter().any(|f| f.name == "string.slice"));
         if let Some(out) = build_and_run("string_slice", &render_wasm_program(&prog)) {
             assert_eq!(out, "ell\n日本");
+        }
+    }
+
+    #[test]
+    fn self_hosted_int_to_sized_signed() {
+        // int.to_int8/16/32/64 self-hosted: low N bits, sign-extended. to_int8(200)=-56,
+        // to_int8(100)=100, to_int16(40000)=-25536, to_int32(3000000000)=-1294967296,
+        // to_int64(123)=123.
+        let src = "fn main() -> Unit = {\n  \
+            let a = int.to_int8(200)\n  let sa = int.to_string(a)\n  println(sa)\n  \
+            let b = int.to_int8(100)\n  let sb = int.to_string(b)\n  println(sb)\n  \
+            let c = int.to_int16(40000)\n  let sc = int.to_string(c)\n  println(sc)\n  \
+            let d = int.to_int32(3000000000)\n  let sd = int.to_string(d)\n  println(sd)\n  \
+            let e = int.to_int64(123)\n  let se = int.to_string(e)\n  println(se) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "int.to_int8"));
+        assert!(prog.functions.iter().any(|f| f.name == "int.to_int32"));
+        if let Some(out) = build_and_run("int_sized", &render_wasm_program(&prog)) {
+            assert_eq!(out, "-56\n100\n-25536\n-1294967296\n123");
         }
     }
 
