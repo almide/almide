@@ -62,6 +62,27 @@
     }
 
     #[test]
+    fn self_hosted_list_filter() {
+        // SELF-HOSTED `list.filter` (variable-length higher-order). filter([1..6], (x) => x %
+        // 2 == 0) keeps the evens [2,4,6]: over-allocate, pack matches via CallIndirect on
+        // the predicate (called ONCE per element = byte-matches v0), patch the result len.
+        let src = "fn main() -> Unit = {\n  \
+            let ys = list.filter([1, 2, 3, 4, 5, 6], (x) => x % 2 == 0)\n  \
+            let s = int.to_string(list.len(ys))\n  println(s)\n  \
+            let t = int.to_string(list.sum(ys))\n  println(t)\n  \
+            let e = int.to_string(list.get_or(ys, 0, 0))\n  println(e) }\n";
+        let prog = lower_source(src);
+        assert!(
+            prog.functions.iter().any(|f| f.name == "list.filter"),
+            "list.filter must be auto-linked from the self-host registry"
+        );
+        if let Some(out) = build_and_run("self_hosted_list_filter", &render_wasm_program(&prog)) {
+            // [2,4,6]: len 3, sum 12, ys[0] = 2
+            assert_eq!(out, "3\n12\n2");
+        }
+    }
+
+    #[test]
     fn self_hosted_list_take_end_drop_end() {
         // list.take_end/drop_end self-hosted: last n / all-but-last n, List[Int] slot-copy.
         // take_end([1,2,3,4,5],2)=[4,5] ([0]=4,len 2); drop_end([1,2,3,4,5],2)=[1,2,3]
