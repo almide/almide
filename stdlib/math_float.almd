@@ -1,0 +1,6 @@
+// math_float — SELF-HOSTED `math.sqrt` over the Float prim floor. f64.sqrt is the single
+// CORRECTLY-ROUNDED wasm transcendental-ish instruction, so math.sqrt = prim.fsqrt is
+// byte-exact with v0's `x.sqrt()`. (sin/cos/log/exp need a libm-matching polynomial — they
+// have no wasm instruction and are deferred.) Pure scalar — cert untouched.
+
+fn math_sqrt(x: Float) -> Float = prim.fsqrt(x)

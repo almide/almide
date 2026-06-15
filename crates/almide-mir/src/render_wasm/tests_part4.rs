@@ -349,6 +349,21 @@
     }
 
     #[test]
+    fn self_hosted_math_sqrt() {
+        // SELF-HOSTED math.sqrt = prim.fsqrt (f64.sqrt, byte-exact with v0). sqrt(16)=4,
+        // sqrt(2)=1.41…→to_int 1, sqrt(81)=9.
+        let src = "fn main() -> Unit = {\n  \
+            let a = float.to_int(math.sqrt(16.0))\n  println(int.to_string(a))\n  \
+            let b = float.to_int(math.sqrt(2.0))\n  println(int.to_string(b))\n  \
+            let c = float.to_int(math.sqrt(81.0))\n  println(int.to_string(c)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "math.sqrt"));
+        if let Some(out) = build_and_run("self_hosted_math_sqrt", &render_wasm_program(&prog)) {
+            assert_eq!(out, "4\n1\n9");
+        }
+    }
+
+    #[test]
     fn self_hosted_float_round() {
         // SELF-HOSTED float.round — round half AWAY from zero (v0's f64::round, NOT half-even).
         // round(2.5)=3, round(2.4)=2, round(3.5)=4 (half-even would give 2 and 4 — the 2.5 case
