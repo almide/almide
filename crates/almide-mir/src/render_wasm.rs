@@ -630,6 +630,10 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
         (include_str!("../../../stdlib/string_trim.almd"), &[("string_trim", "string.trim")]),
         (include_str!("../../../stdlib/string_reverse.almd"), &[("string_reverse", "string.reverse")]),
         (include_str!("../../../stdlib/string_replace.almd"), &[("string_replace", "string.replace")]),
+        (
+            include_str!("../../../stdlib/string_pad.almd"),
+            &[("string_pad_start", "string.pad_start"), ("string_pad_end", "string.pad_end")],
+        ),
         (include_str!("../../../stdlib/list_get_or.almd"), &[("list_get_or", "list.get_or")]),
         (
             include_str!("../../../stdlib/int_scalar.almd"),
@@ -1727,6 +1731,28 @@ mod tests {
         assert!(prog.functions.iter().any(|f| f.name == "string.replace"), "linked");
         if let Some(out) = build_and_run("string_replace", &render_wasm_program(&prog)) {
             assert_eq!(out, "a-b-c\nxYYx\nabc\nhi");
+        }
+    }
+
+    #[test]
+    fn self_hosted_string_pad_start_and_end() {
+        // string.pad_start/pad_end self-hosted (pad to a CODEPOINT width with the first
+        // char of pad, build via prim.alloc_str): pad_start("ab",5,"x")="xxxab", already-
+        // wide pad_start("ab",2,"x")="ab", pad_end("ab",5,"-")="ab---", pad_start("5",3,"0")
+        // ="005". byte-matching v0.
+        let src = "fn main() -> Unit = {\n  \
+            let a = string.pad_start(\"ab\", 5, \"x\")\n  \
+            let b = string.pad_start(\"ab\", 2, \"x\")\n  \
+            let c = string.pad_end(\"ab\", 5, \"-\")\n  \
+            let d = string.pad_start(\"5\", 3, \"0\")\n  \
+            println(a)\n  \
+            println(b)\n  \
+            println(c)\n  \
+            println(d) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "string.pad_start"), "linked");
+        if let Some(out) = build_and_run("string_pad", &render_wasm_program(&prog)) {
+            assert_eq!(out, "xxxab\nab\nab---\n005");
         }
     }
 
