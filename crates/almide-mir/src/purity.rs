@@ -53,7 +53,7 @@ pub const PURE_MODULES: &[&str] = &[
     "int32", "int8", "int_scalar", "int_to_string", "json", "list", "list_fold", "list_get", "list_get_or", "list_is_empty",
     "list_len", "list_search", "list_sum", "map", "math", "math_int", "matrix", "option", "path", "regex", "result",
     "set", "string", "string_is_empty",
-    "string_len", "string_repeat", "string_search", "string_slice", "string_trim",
+    "string_len", "string_repeat", "string_reverse", "string_search", "string_slice", "string_trim",
     "uint16", "uint32",
     "uint64", "uint8", "value",
 ];

@@ -609,6 +609,7 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
         (include_str!("../../../stdlib/list_sum.almd"), &[("list_sum", "list.sum")]),
         (include_str!("../../../stdlib/string_slice.almd"), &[("string_slice", "string.slice")]),
         (include_str!("../../../stdlib/string_trim.almd"), &[("string_trim", "string.trim")]),
+        (include_str!("../../../stdlib/string_reverse.almd"), &[("string_reverse", "string.reverse")]),
         (include_str!("../../../stdlib/list_get_or.almd"), &[("list_get_or", "list.get_or")]),
         (
             include_str!("../../../stdlib/int_scalar.almd"),
@@ -1658,6 +1659,23 @@ mod tests {
         assert!(prog.functions.iter().any(|f| f.name == "math.pow"), "linked");
         if let Some(out) = build_and_run("math_sign_pow", &render_wasm_program(&prog)) {
             assert_eq!(out, "1\n-1\n0\n1024\n1\n125");
+        }
+    }
+
+    #[test]
+    fn self_hosted_string_reverse() {
+        // string.reverse self-hosted (CODEPOINT reversal, not byte): reverse("hello")=
+        // "olleh"; reverse("ab日")="日ba" — the multibyte char's bytes stay in order, only
+        // the char sequence reverses. byte-matching v0's chars().rev().
+        let src = "fn main() -> Unit = {\n  \
+            let a = string.reverse(\"hello\")\n  \
+            let b = string.reverse(\"ab日\")\n  \
+            println(a)\n  \
+            println(b) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "string.reverse"), "linked");
+        if let Some(out) = build_and_run("string_reverse", &render_wasm_program(&prog)) {
+            assert_eq!(out, "olleh\n日ba");
         }
     }
 

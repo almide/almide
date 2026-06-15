@@ -1,0 +1,42 @@
+// string_reverse — SELF-HOSTED `string.reverse` for v1 over the prim floor: reverse the
+// CODEPOINT order (v0's chars().rev()), NOT the bytes — each multibyte char keeps its byte
+// order, only the char sequence is reversed. Allocates a String of the same byte length via
+// prim.alloc_str and copies each source codepoint to the tail of the output, moving
+// backward. Cert-untouching (the DynStr Alloc is one `i`, like trim/slice). `s` borrowed.
+
+// UTF-8 codepoint byte length from its lead byte.
+fn __cp_len(b: Int) -> Int =
+  if b < 128 then 1
+  else if b < 224 then 2
+  else if b < 240 then 3
+  else 4
+
+// Copy `n` bytes forward from `src` to `dst` (preserves order within a codepoint).
+fn __rev_copy_n(src: Int, dst: Int, n: Int) -> Int =
+  if n <= 0 then 0
+  else {
+    prim.store8(dst, prim.load8(src))
+    __rev_copy_n(src + 1, dst + 1, n - 1)
+  }
+
+// Walk source codepoints front-to-back, placing each at the tail of the output (`out_end`
+// shrinks by each codepoint's length), so the char order is reversed.
+fn __rev_walk(src: Int, send: Int, dst_base: Int, out_end: Int) -> Int =
+  if src >= send then 0
+  else {
+    let b = prim.load8(src)
+    let cl = __cp_len(b)
+    let off = out_end - cl
+    let dst = dst_base + off
+    let _x = __rev_copy_n(src, dst, cl)
+    __rev_walk(src + cl, send, dst_base, out_end - cl)
+  }
+
+fn string_reverse(s: String) -> String = {
+  let h = prim.handle(s)
+  let blen = prim.load32(h + 4)
+  let buf = prim.alloc_str(blen)
+  let dbase = prim.handle(buf) + 12
+  let _x = __rev_walk(h + 12, h + 12 + blen, dbase, blen)
+  buf
+}
