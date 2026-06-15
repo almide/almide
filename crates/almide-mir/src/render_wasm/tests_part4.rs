@@ -1261,6 +1261,26 @@
     }
 
     #[test]
+    fn self_hosted_option_filter() {
+        // SELF-HOSTED option.filter(o, pred) = o.filter(pred): keep Some(x) iff pred(x), else None;
+        // pred invoked (CallIndirect) ONLY on the Some arm. filter(Some(5), >3)=Some(5);
+        // filter(Some(2), >3)=None; filter(None, >3)=None. Byte-matches v0.
+        let src = "fn main() -> Unit = {\n  \
+            let o1 = list.first([5, 6])\n  let m1 = option.filter(o1, (x) => x > 3)\n  \
+            match m1 {\n    Some(v) => println(int.to_string(v)),\n    None => println(\"none\"),\n  }\n  \
+            let o2 = list.first([2, 9])\n  let m2 = option.filter(o2, (x) => x > 3)\n  \
+            match m2 {\n    Some(v) => println(int.to_string(v)),\n    None => println(\"none\"),\n  }\n  \
+            let o3 = list.get([5], 9)\n  let m3 = option.filter(o3, (x) => x > 3)\n  \
+            match m3 {\n    Some(v) => println(int.to_string(v)),\n    None => println(\"none\"),\n  } }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "option.filter"));
+        if let Some(out) = build_and_run("self_hosted_option_filter", &render_wasm_program(&prog)) {
+            // filter(Some(5),>3)=5 ; filter(Some(2),>3)=none ; filter(None,>3)=none
+            assert_eq!(out, "5\nnone\nnone");
+        }
+    }
+
+    #[test]
     fn option_map_loop_is_bounded() {
         // ADVERSARIAL leak/double-free guard: a loop materializing an Option, mapping it through a
         // closure (CallIndirect via the __opt_map_some helper) and matching the fresh result each
