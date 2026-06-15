@@ -937,3 +937,17 @@
             assert_eq!(out, "T\nF2\nT3");
         }
     }
+
+    #[test]
+    fn self_hosted_option_unwrap_or_function() {
+        // option.unwrap_or (the function form of ??): the Some payload, else the default.
+        // unwrap_or(Some(42), 0)=42, unwrap_or(None, 7)=7.
+        let src = "fn main() -> Unit = {\n  \
+            let a: Option[Int] = Some(42)\n  let x = option.unwrap_or(a, 0)\n  let sx = int.to_string(x)\n  println(sx)\n  \
+            let b: Option[Int] = None\n  let y = option.unwrap_or(b, 7)\n  let sy = int.to_string(y)\n  println(sy) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "option.unwrap_or"));
+        if let Some(out) = build_and_run("option_unwrap_or_fn", &render_wasm_program(&prog)) {
+            assert_eq!(out, "42\n7");
+        }
+    }

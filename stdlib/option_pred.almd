@@ -14,3 +14,13 @@ fn option_is_none(o: Option[Int]) -> Bool = {
   let len = prim.load32(h + 4)
   len == 0
 }
+
+// option.unwrap_or: the Some payload (data[0]) when len==1, else the default. The payload
+// read is eager but only USED for Some — a None (len 0) discards it (a harmless in-memory
+// read, no trap). Scalar payload (Option[Int]); the function form of the `??` operator.
+fn option_unwrap_or(o: Option[Int], default: Int) -> Int = {
+  let h = prim.handle(o)
+  let len = prim.load32(h + 4)
+  let some_val = prim.load64(h + 12)
+  if len == 1 then some_val else default
+}
