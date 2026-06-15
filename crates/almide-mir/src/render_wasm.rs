@@ -632,6 +632,8 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
                 ("math_min", "math.min"),
                 ("math_sign", "math.sign"),
                 ("math_pow", "math.pow"),
+                ("math_factorial", "math.factorial"),
+                ("math_choose", "math.choose"),
             ],
         ),
         (include_str!("../../../stdlib/list_len.almd"), &[("list_len", "list.len")]),
@@ -2645,6 +2647,26 @@ mod tests {
         assert!(prog.functions.iter().any(|f| f.name == "string.slice"));
         if let Some(out) = build_and_run("string_slice", &render_wasm_program(&prog)) {
             assert_eq!(out, "ell\n日本");
+        }
+    }
+
+    #[test]
+    fn self_hosted_math_factorial_and_choose() {
+        // math.factorial = (1..=n).product() (1 for n<=1); math.choose = C(n,k) via the
+        // running multiply-before-divide product. factorial(0)=1, (5)=120, (-3)=1;
+        // choose(5,2)=10, choose(10,3)=120, choose(5,7)=0.
+        let src = "fn main() -> Unit = {\n  \
+            let a = math.factorial(0)\n  let sa = int.to_string(a)\n  println(sa)\n  \
+            let b = math.factorial(5)\n  let sb = int.to_string(b)\n  println(sb)\n  \
+            let c = math.factorial(0 - 3)\n  let sc = int.to_string(c)\n  println(sc)\n  \
+            let d = math.choose(5, 2)\n  let sd = int.to_string(d)\n  println(sd)\n  \
+            let e = math.choose(10, 3)\n  let se = int.to_string(e)\n  println(se)\n  \
+            let f = math.choose(5, 7)\n  let sf = int.to_string(f)\n  println(sf) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "math.factorial"));
+        assert!(prog.functions.iter().any(|f| f.name == "math.choose"));
+        if let Some(out) = build_and_run("math_choose", &render_wasm_program(&prog)) {
+            assert_eq!(out, "1\n120\n1\n10\n120\n0");
         }
     }
 
