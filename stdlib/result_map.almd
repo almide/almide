@@ -74,3 +74,20 @@ fn result_unwrap_or_else(r: Result[Int, String], f: (String) -> Int) -> Int = {
   let x = prim.load64(h + 12)
   if len == 0 then x else __res_unwrap_else(x, f)
 }
+
+// result.map_err(r, f) = r.map_err(f): Ok(x) → Ok(x), Err(e) → Err(f(e)). The closure maps the Err
+// message (a HEAP String arg) to a new String (heap result), invoked ONLY on the Err arm over a
+// deep COPY of the message. The closure's fresh result is moved into the new Err (an owned Var, so
+// the Err materializes); the copy `e` is freed at the helper's scope end.
+fn __res_maperr_err(emsg: Int, f: (String) -> String) -> Result[Int, String] = {
+  let e = __rcopy_at(emsg)
+  let new = f(e)
+  Err(new)
+}
+
+fn result_map_err(r: Result[Int, String], f: (String) -> String) -> Result[Int, String] = {
+  let h = prim.handle(r)
+  let len = prim.load32(h + 4)
+  let x = prim.load64(h + 12)
+  if len == 0 then Ok(x) else __res_maperr_err(x, f)
+}

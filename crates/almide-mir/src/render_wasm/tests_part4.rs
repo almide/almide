@@ -1261,6 +1261,42 @@
     }
 
     #[test]
+    fn self_hosted_result_map_err() {
+        // SELF-HOSTED result.map_err(r, f): Ok(x) → Ok(x), Err(e) → Err(f(e)). The closure maps the
+        // Err message (HEAP String arg → HEAP String result), invoked ONLY on the Err arm over a
+        // deep copy. map_err(Ok(5), repeat·2)=Ok(5); map_err(Err"oops", repeat·2)=Err("oopsoops").
+        let src = "fn main() -> Unit = {\n  \
+            let r1 = int.parse(\"5\")\n  let m1 = result.map_err(r1, (e) => string.repeat(e, 2))\n  \
+            match m1 {\n    Ok(v) => println(int.to_string(v)),\n    Err(e) => println(e),\n  }\n  \
+            let r2 = int.parse(\"abc\")\n  let m2 = result.map_err(r2, (e) => string.repeat(e, 2))\n  \
+            match m2 {\n    Ok(v) => println(int.to_string(v)),\n    Err(e) => println(e),\n  } }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "result.map_err"));
+        if let Some(out) = build_and_run("self_hosted_result_map_err", &render_wasm_program(&prog)) {
+            // Ok(5) preserved; Err message "invalid digit found in string" repeated twice
+            assert_eq!(out, "5\ninvalid digit found in stringinvalid digit found in string");
+        }
+    }
+
+    #[test]
+    fn result_map_err_loop_is_bounded() {
+        // ADVERSARIAL leak guard: a loop mapping a short Err message through a closure and matching
+        // the result must run in BOUNDED memory — the deep copy `e`, the closure's new String and
+        // the Result blocks are freed each iteration (no leak / double-free of the borrowed input).
+        let src = "fn main() -> Unit = {\n  \
+            var i = 0\n  \
+            while i < 4000 {\n    \
+              let er = option.to_result(list.get([5], 9), \"e\")\n    let m = result.map_err(er, (e) => string.repeat(e, 1))\n    \
+              match m {\n      Ok(v) => println(\"k\"),\n      Err(e) => println(e),\n    }\n    \
+              i = i + 1\n  }\n  \
+            println(\"done\") }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("result_map_err_loop_bounded", &render_wasm_program(&prog)) {
+            assert!(out.ends_with("done"), "loop must terminate (bounded memory)");
+        }
+    }
+
+    #[test]
     fn self_hosted_result_unwrap_or_else() {
         // SELF-HOSTED result.unwrap_or_else(r, f): Ok(x) → x, Err(e) → f(e). The closure takes the
         // Err message (a HEAP String arg — the new uniform-i64 closure ABI) and is invoked ONLY on

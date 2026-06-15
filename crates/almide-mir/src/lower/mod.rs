@@ -691,6 +691,7 @@ pub(crate) fn is_self_host_result_module_fn(module: &str, func: &str) -> bool {
             | ("option", "to_result")
             | ("result", "map")
             | ("result", "flat_map")
+            | ("result", "map_err")
     )
 }
 

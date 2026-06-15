@@ -553,11 +553,20 @@ impl LowerCtx {
             }
             IrExprKind::ResultErr { expr } if is_heap_ty(&expr.ty) => {
                 let repr = repr_of(ty).ok()?;
-                // Only a FRESH owned message (a LitStr alloc or a Named-call result) — a `Var`
-                // payload may be a BORROWED param, and CONSUMING a borrow into the Err is a
-                // move-out of a value the caller still owns (a double-free the checker rejects).
-                // So a `Var` Err falls through to the sound deferred `Opaque`.
+                // A FRESH owned message only — a LitStr alloc, a Named-call result, or an OWNED
+                // `Var` (one in `live_heap_handles` — a freshly-built/closure-returned String, NOT
+                // a BORROWED param). Consuming a borrow into the Err would move out a value the
+                // caller still owns (a double-free the checker rejects), so a borrowed `Var` falls
+                // through to the sound deferred `Opaque`.
                 let piece = match &expr.kind {
+                    IrExprKind::Var { id }
+                        if self
+                            .value_for(*id)
+                            .map(|v| self.live_heap_handles.contains(&v))
+                            .unwrap_or(false) =>
+                    {
+                        self.value_for(*id).ok()?
+                    }
                     IrExprKind::LitStr { value } => {
                         let pr = repr_of(&expr.ty).ok()?;
                         let p = self.fresh_value();
