@@ -492,6 +492,28 @@
     }
 
     #[test]
+    fn self_hosted_bytes_core() {
+        // SELF-HOSTED bytes.* core (Bytes = a byte block, same layout as String). from_string
+        // ("hi")=[104,105]: len 2, byte[0]=104 ('h'), byte[1]=105 ('i'), out-of-bounds→default
+        // 99. is_empty(from_string(""))=true, is_empty(from_string("x"))=false.
+        let src = "fn main() -> Unit = {\n  \
+            let b = bytes.from_string(\"hi\")\n  \
+            println(int.to_string(bytes.len(b)))\n  \
+            println(int.to_string(bytes.get_or(b, 0, 0)))\n  \
+            println(int.to_string(bytes.get_or(b, 1, 0)))\n  \
+            println(int.to_string(bytes.get_or(b, 5, 99)))\n  \
+            let e = bytes.from_string(\"\")\n  let ee = bytes.is_empty(e)\n  let n1 = if ee then 1 else 0\n  println(int.to_string(n1))\n  \
+            let x = bytes.from_string(\"x\")\n  let xe = bytes.is_empty(x)\n  let n2 = if xe then 1 else 0\n  println(int.to_string(n2)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "bytes.from_string"));
+        assert!(prog.functions.iter().any(|f| f.name == "bytes.len"));
+        if let Some(out) = build_and_run("self_hosted_bytes_core", &render_wasm_program(&prog)) {
+            // len2, byte[0]=104, byte[1]=105, oob=99, is_empty("")=1, is_empty("x")=0
+            assert_eq!(out, "2\n104\n105\n99\n1\n0");
+        }
+    }
+
+    #[test]
     fn self_hosted_math_sqrt() {
         // SELF-HOSTED math.sqrt = prim.fsqrt (f64.sqrt, byte-exact with v0). sqrt(16)=4,
         // sqrt(2)=1.41…→to_int 1, sqrt(81)=9.

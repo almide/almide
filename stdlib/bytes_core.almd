@@ -1,0 +1,35 @@
+// bytes_core — SELF-HOSTED `bytes.*` core ops for v1. A `Bytes` value is a byte block (the
+// same [rc][len@4][cap@8][data@12] layout as a String, only typed Bytes), so the reads/writes
+// are the proven prim byte ops. from_string copies a String's bytes into a fresh Bytes; len/
+// is_empty read the header; get_or reads a byte (0..255) or a default. Source borrowed.
+
+fn __bytecopy(dst: Int, src: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let b = prim.load8(src + i)
+    prim.store8(dst + i, b)
+    __bytecopy(dst, src, n, i + 1)
+  }
+
+fn bytes_from_string(s: String) -> Bytes = {
+  let sh = prim.handle(s)
+  let n = prim.load32(sh + 4)
+  let b = prim.alloc_bytes(n)
+  let _x = __bytecopy(prim.handle(b) + 12, sh + 12, n, 0)
+  b
+}
+
+fn bytes_len(b: Bytes) -> Int = prim.load32(prim.handle(b) + 4)
+
+fn bytes_is_empty(b: Bytes) -> Bool = {
+  let n = prim.load32(prim.handle(b) + 4)
+  n == 0
+}
+
+fn bytes_get_or(b: Bytes, i: Int, default: Int) -> Int = {
+  let h = prim.handle(b)
+  let n = prim.load32(h + 4)
+  if i >= 0 then {
+    if i < n then prim.load8(h + 12 + i) else default
+  } else default
+}

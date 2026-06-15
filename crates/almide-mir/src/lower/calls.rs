@@ -752,9 +752,13 @@ impl LowerCtx {
         // `prim.alloc_str(byte_len)` allocates a runtime-sized OWNED String — an `Op::Alloc`
         // (cert `i`, a fresh owned object), NOT a scalar prim. The caller fills its bytes
         // via `prim.store8`; the result is moved out / dropped like any heap value.
-        if func == "alloc_str" {
+        // `prim.alloc_str(n)` / `prim.alloc_bytes(n)` BOTH allocate a runtime-sized OWNED byte
+        // block (`Init::DynStr`: rc=1, len set, data filled by store8) — physically identical;
+        // they differ only in the prim's DECLARED return type (String vs Bytes). A flat heap
+        // value (no nested ownership), moved out / dropped like any String.
+        if func == "alloc_str" || func == "alloc_bytes" {
             let len_v = self.lower_scalar_value(&args[0]).ok_or_else(|| {
-                LowerError::Unsupported("prim.alloc_str length is not a lowerable scalar".into())
+                LowerError::Unsupported(format!("prim.{func} length is not a lowerable scalar"))
             })?;
             let dst = self.fresh_value();
             self.ops.push(Op::Alloc {

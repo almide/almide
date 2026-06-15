@@ -97,6 +97,15 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
         (include_str!("../../../../stdlib/string_lines.almd"), &[("string_lines", "string.lines")]),
         (include_str!("../../../../stdlib/string_join.almd"), &[("string_join", "string.join")]),
         (
+            include_str!("../../../../stdlib/bytes_core.almd"),
+            &[
+                ("bytes_from_string", "bytes.from_string"),
+                ("bytes_len", "bytes.len"),
+                ("bytes_is_empty", "bytes.is_empty"),
+                ("bytes_get_or", "bytes.get_or"),
+            ],
+        ),
+        (
             include_str!("../../../../stdlib/int_rotate.almd"),
             &[("int_rotate_left", "int.rotate_left"), ("int_rotate_right", "int.rotate_right")],
         ),

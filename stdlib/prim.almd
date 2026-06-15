@@ -61,6 +61,11 @@ fn bshr_u(n: Int, bits: Int) -> Int = _
 @intrinsic("almide_rt_prim_alloc_str")
 fn alloc_str(byte_len: Int) -> String = _
 
+// Allocate a runtime-sized OWNED Bytes block of `n` bytes — physically the same byte block as
+// `alloc_str`, only typed `Bytes`. Filled via store8; read via load8. A flat heap value.
+@intrinsic("almide_rt_prim_alloc_bytes")
+fn alloc_bytes(n: Int) -> Bytes = _
+
 // Allocate a runtime-sized OWNED List[Int] of `n` i64 slots (rc=1, len=cap=n, elements
 // uninitialized). The list builders (list.reverse/take/drop) fill the slots via `store64`
 // and return it — an owned heap value, moved out / dropped like any List.
