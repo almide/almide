@@ -1734,6 +1734,24 @@
     }
 
     #[test]
+    fn self_hosted_list_string_dedup() {
+        // SELF-HOSTED list.dedup over a List[String] — drop CONSECUTIVE duplicates (cur vs source
+        // i-1 via __str_eq; kept elements deep-copied). xs=[a,a,b,b,b,a,c]=[a,b,a,c] len 4, first
+        // "a", elem 2 "a", last "c". Byte-matches v0.
+        let src = "fn main() -> Unit = {\n  \
+            let xs = string.split(\"a,a,b,b,b,a,c\", \",\")\n  \
+            let d = list.dedup(xs)\n  println(int.to_string(list.len(d)))\n  \
+            let e0 = list.get(d, 0)\n  match e0 { Some(v) => println(v), None => println(\"none\"), }\n  \
+            let e2 = list.get(d, 2)\n  match e2 { Some(v) => println(v), None => println(\"none\"), }\n  \
+            let e3 = list.get(d, 3)\n  match e3 { Some(v) => println(v), None => println(\"none\"), } }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "list.dedup_str"));
+        if let Some(out) = build_and_run("self_hosted_list_string_dedup", &render_wasm_program(&prog)) {
+            assert_eq!(out, "4\na\na\nc");
+        }
+    }
+
+    #[test]
     fn self_hosted_list_string_find() {
         // SELF-HOSTED list.find over a List[String] → Option[String] (predicate higher-order; the
         // matched element returned as Some(deep copy), else None; materialized Option, match-exec).

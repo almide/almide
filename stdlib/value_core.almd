@@ -88,3 +88,8 @@ fn value_str(s: String) -> Value = {
   prim.store_str(h + 12, copy)  // MOVE the owned copy into the Value's payload slot
   v
 }
+
+// value.as_string is DEFERRED: it returns Result[String, String] — a HEAP-Ok-payload Result. The
+// existing materialized Result construction/match assume a SCALAR Ok at slot0 (Result[Int,String]),
+// so a String Ok is mis-extracted (garbage). Needs a heap-Ok Result construction + match + a
+// DropResultStr drop (parallel to DropValue), a focused multi-step machinery slice.

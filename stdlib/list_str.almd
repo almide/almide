@@ -165,3 +165,38 @@ fn list_unique_str(xs: List[String]) -> List[String] = {
   prim.store32(oh + 4, di)
   out
 }
+
+// list.dedup over a List[String] — drop CONSECUTIVE duplicates (v0's `if r.last() != x then push`).
+// For consecutive-dedup, comparing cur to the immediately PRECEDING SOURCE element (i-1) yields the
+// same result as comparing to the last-kept. Element 0 is always kept; kept elements are deep-copied.
+fn __dedup_str_isdup(sh: Int, i: Int, cur: String) -> Bool =
+  if i <= 0 then false
+  else {
+    let prev = prim.load_str(sh + 12 + (i - 1) * 8)
+    __str_eq(prev, cur)
+  }
+
+fn __dedup_str_step(sh: Int, dh: Int, n: Int, i: Int, di: Int) -> Int = {
+  let cur = prim.load_str(sh + 12 + i * 8)
+  let skip = __dedup_str_isdup(sh, i, cur)
+  if skip then __dedup_str_fill(sh, dh, n, i + 1, di)
+  else {
+    let copy = string.repeat(cur, 1)
+    prim.store_str(dh + 12 + di * 8, copy)
+    __dedup_str_fill(sh, dh, n, i + 1, di + 1)
+  }
+}
+
+fn __dedup_str_fill(sh: Int, dh: Int, n: Int, i: Int, di: Int) -> Int =
+  if i >= n then di
+  else __dedup_str_step(sh, dh, n, i, di)
+
+fn list_dedup_str(xs: List[String]) -> List[String] = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  let out = prim.alloc_list_str(n)
+  let oh = prim.handle(out)
+  let di = __dedup_str_fill(h, oh, n, 0, 0)
+  prim.store32(oh + 4, di)
+  out
+}
