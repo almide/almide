@@ -49,3 +49,36 @@ fn string_contains(s: String, needle: String) -> Bool = {
   if nlen <= 0 then true                     // every string contains the empty needle
   else __contains_scan(hs + 12, slen, hn + 12, nlen, 0)
 }
+
+// Count codepoints (UTF-8 start bytes, i.e. bytes whose top bits are NOT 10xxxxxx) in the
+// first `n` bytes from `base` — the same decode `string.len` uses.
+fn __cp_count(base: Int, n: Int) -> Int =
+  if n <= 0 then 0
+  else {
+    let b = prim.load8(base)
+    let step = if b / 64 == 2 then 0 else 1   // 64..=127 region 2 == continuation byte
+    let rest = __cp_count(base + 1, n - 1)
+    step + rest
+  }
+
+// Count NON-OVERLAPPING needle matches from `pos`, skipping past each match (v0 semantics:
+// `s.matches(needle).count()`).
+fn __count_scan(sbase: Int, slen: Int, nbase: Int, nlen: Int, pos: Int, acc: Int) -> Int =
+  if pos + nlen > slen then acc
+  else {
+    let m = __byte_eq(sbase + pos, nbase, nlen)
+    if m then __count_scan(sbase, slen, nbase, nlen, pos + nlen, acc + 1)
+    else __count_scan(sbase, slen, nbase, nlen, pos + 1, acc)
+  }
+
+fn string_count(s: String, needle: String) -> Int = {
+  let hs = prim.handle(s)
+  let hn = prim.handle(needle)
+  let slen = prim.load32(hs + 4)
+  let nlen = prim.load32(hn + 4)
+  if nlen <= 0 then {
+    let c = __cp_count(hs + 12, slen)         // empty needle matches at each char boundary
+    c + 1
+  }
+  else __count_scan(hs + 12, slen, hn + 12, nlen, 0, 0)
+}

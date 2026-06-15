@@ -614,6 +614,7 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
                 ("string_starts_with", "string.starts_with"),
                 ("string_ends_with", "string.ends_with"),
                 ("string_contains", "string.contains"),
+                ("string_count", "string.count"),
             ],
         ),
     ]
@@ -1531,6 +1532,27 @@ mod tests {
         assert!(prog.functions.iter().any(|f| f.name == "string.contains"), "linked");
         if let Some(out) = build_and_run("string_contains", &render_wasm_program(&prog)) {
             assert_eq!(out, "T\nF\nT");
+        }
+    }
+
+    #[test]
+    fn self_hosted_string_count() {
+        // string.count self-hosted (NON-OVERLAPPING byte-scan count reusing __byte_eq):
+        // count("abcabc","bc")=2, count("aaa","aa")=1 (skips past each match), count(
+        // "hello","z")=0, count("ab","")=3 (empty needle = char_count+1). byte-matching v0.
+        let src = "fn main() -> Unit = {\n  \
+            let a = string.count(\"abcabc\", \"bc\")\n  \
+            let b = string.count(\"aaa\", \"aa\")\n  \
+            let c = string.count(\"hello\", \"z\")\n  \
+            let d = string.count(\"ab\", \"\")\n  \
+            println(int.to_string(a))\n  \
+            println(int.to_string(b))\n  \
+            println(int.to_string(c))\n  \
+            println(int.to_string(d)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "string.count"), "linked");
+        if let Some(out) = build_and_run("string_count", &render_wasm_program(&prog)) {
+            assert_eq!(out, "2\n1\n0\n3");
         }
     }
 
