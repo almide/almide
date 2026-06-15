@@ -143,6 +143,12 @@ pub enum Init {
     /// The ownership cert is the SAME one `i` as any `Alloc` (init-agnostic), so NO
     /// checker change: a fresh owned object, moved out / dropped like a literal.
     OptSome { payload: ValueId },
+    /// A DYNAMICALLY-sized, runtime-allocated `List[Int]` of `len` (a ValueId) i64-element
+    /// slots — an OWNED, rc=1 block (len = cap = `len`, `LIST_HEADER + len*ELEM_SIZE`
+    /// bytes), filled by the caller via `prim.store64`. The list-building sibling of
+    /// `DynStr`; the ownership cert is the SAME one `i` as any `Alloc` (init-agnostic), so
+    /// NO checker change. List[Int] elements are i64 values (no nested heap ownership).
+    DynList { len: ValueId },
 }
 
 /// One MIR statement. Ownership is EXPLICIT: a heap value's refcount is changed

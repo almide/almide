@@ -652,6 +652,21 @@ impl LowerCtx {
             });
             return Ok(Some(dst));
         }
+        // `prim.alloc_list(n)` allocates a runtime-sized OWNED `List[Int]` of n i64 slots —
+        // an `Op::Alloc` (cert `i`), the list-building sibling of alloc_str. The caller
+        // fills it via `prim.store64`; moved out / dropped like any heap value.
+        if func == "alloc_list" {
+            let len_v = self.lower_scalar_value(&args[0]).ok_or_else(|| {
+                LowerError::Unsupported("prim.alloc_list length is not a lowerable scalar".into())
+            })?;
+            let dst = self.fresh_value();
+            self.ops.push(Op::Alloc {
+                dst,
+                repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT },
+                init: crate::Init::DynList { len: len_v },
+            });
+            return Ok(Some(dst));
+        }
         let kind = match func {
             "handle" => PrimKind::Handle,
             "load8" => PrimKind::Load { width: 1 },
@@ -659,6 +674,7 @@ impl LowerCtx {
             "load64" => PrimKind::Load { width: 8 },
             "store32" => PrimKind::Store { width: 4 },
             "store8" => PrimKind::Store { width: 1 },
+            "store64" => PrimKind::Store { width: 8 },
             "fd_write" => PrimKind::FdWrite,
             _ => return Err(LowerError::Unsupported(format!("unknown primitive prim.{func}"))),
         };

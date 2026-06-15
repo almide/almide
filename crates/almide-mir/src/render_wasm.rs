@@ -417,10 +417,29 @@ fn render_op(op: &Op, label_off: &BTreeMap<String, (u32, u32)>) -> String {
                 p = local(*payload),
             )
         }
+        // A runtime-sized OWNED `List[Int]` of `len` i64 slots: $alloc `LIST_HEADER +
+        // len*ELEM_SIZE` bytes, set rc=1 + len + cap (= the element count). Elements are
+        // left UNINITIALIZED for the caller to fill via `prim.store64`. The list-building
+        // sibling of `DynStr`. Cert: one `Alloc` = i, init-agnostic — no checker change.
+        Op::Alloc { dst, init: Init::DynList { len }, .. } => {
+            let wlen = format!("(i32.wrap_i64 (local.get {}))", local(*len));
+            let bytes = format!("(i32.mul {wlen} (i32.const {ELEM_SIZE}))");
+            format!(
+                "    (local.set {d} (call $alloc (i32.add (i32.const {LIST_HEADER}) {bytes})))\n\
+                 \x20   (i32.store (i32.add (local.get {d}) (i32.const {LIST_RC_OFFSET})) (i32.const {RC_INITIAL}))\n\
+                 \x20   (i32.store (i32.add (local.get {d}) (i32.const {LIST_LEN_OFFSET})) {wlen})\n\
+                 \x20   (i32.store (i32.add (local.get {d}) (i32.const {LIST_CAP_OFFSET})) {wlen})\n",
+                d = local(*dst),
+            )
+        }
         Op::Alloc { dst, init, .. } => {
             let elems: &[i64] = match init {
                 Init::IntList(e) => e,
-                Init::Opaque | Init::Str(_) | Init::DynStr { .. } | Init::OptSome { .. } => &[],
+                Init::Opaque
+                | Init::Str(_)
+                | Init::DynStr { .. }
+                | Init::OptSome { .. }
+                | Init::DynList { .. } => &[],
             };
             let len = elems.len() as u32;
             let cap = len + PUSH_HEADROOM;
@@ -628,6 +647,7 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
             include_str!("../../../stdlib/list_search.almd"),
             &[("list_contains", "list.contains"), ("list_index_of", "list.index_of")],
         ),
+        (include_str!("../../../stdlib/list_reverse.almd"), &[("list_reverse", "list.reverse")]),
         (
             include_str!("../../../stdlib/list_fold.almd"),
             &[
@@ -1676,6 +1696,46 @@ mod tests {
         assert!(prog.functions.iter().any(|f| f.name == "string.reverse"), "linked");
         if let Some(out) = build_and_run("string_reverse", &render_wasm_program(&prog)) {
             assert_eq!(out, "olleh\n日ba");
+        }
+    }
+
+    #[test]
+    fn self_hosted_list_reverse() {
+        // list.reverse self-hosted — the FIRST List-CONSTRUCTING fn (prim.alloc_list +
+        // store64): reverse([10,20,30]) = [30,20,10], read back via list.get_or. List[Int]
+        // (i64 value copies, fully sound). byte-matching v0.
+        let src = "fn main() -> Unit = {\n  \
+            let xs = [10, 20, 30]\n  \
+            let r = list.reverse(xs)\n  \
+            let a = list.get_or(r, 0, 0)\n  \
+            let b = list.get_or(r, 1, 0)\n  \
+            let c = list.get_or(r, 2, 0)\n  \
+            println(int.to_string(a))\n  \
+            println(int.to_string(b))\n  \
+            println(int.to_string(c)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "list.reverse"), "linked");
+        if let Some(out) = build_and_run("list_reverse", &render_wasm_program(&prog)) {
+            assert_eq!(out, "30\n20\n10");
+        }
+    }
+
+    #[test]
+    fn self_hosted_list_reverse_loop_bounded() {
+        // ADVERSARIAL: list.reverse every iteration allocates a new List[Int] and drops it
+        // (flat rc_dec, no nested elements) — bounded memory, the alloc_list+drop balance.
+        let src = "fn main() -> Unit = {\n  \
+            let xs = [1, 2, 3]\n  \
+            var i = 0\n  \
+            while i < 2000 {\n    \
+            let r = list.reverse(xs)\n    \
+            let a = list.get_or(r, 0, 0)\n    \
+            println(int.to_string(a))\n    \
+            i = i + 1\n  } }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("list_reverse_loop", &render_wasm_program(&prog)) {
+            assert_eq!(out.lines().count(), 2000, "every iteration prints (no OOM/leak)");
+            assert!(out.lines().all(|l| l == "3"));
         }
     }
 

@@ -138,8 +138,9 @@ fn render_op(op: &Op) -> Option<String> {
                 // A runtime-sized String is wasm-only (native uses v0 codegen); an empty
                 // placeholder keeps the type a Vec<i64>.
                 Init::Opaque | Init::DynStr { .. } => "Vec::new()".to_string(),
-                // A materialized `Some(payload)` is wasm-only (native uses v0 codegen).
-                Init::OptSome { .. } => "Vec::new()".to_string(),
+                // A materialized `Some(payload)` / runtime List are wasm-only (native uses
+                // v0 codegen).
+                Init::OptSome { .. } | Init::DynList { .. } => "Vec::new()".to_string(),
             };
             Some(format!("let mut {}: Vec<i64> = {init_expr};", var(*dst)))
         }
