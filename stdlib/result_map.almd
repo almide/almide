@@ -1,0 +1,34 @@
+// result_map — SELF-HOSTED result.map(r, f) = r.map(f): Ok(x) → Ok(f(x)), Err(e) → Err(e). The
+// closure f is applied ONLY to the Ok value (via a heap-result helper call, so the closure call is
+// not in an OptionSome/ResultOk scalar position). The Err message is PRESERVED by deep-copying it
+// (v0's map keeps the same Err) — a borrowed Result's slot-0 String is copied into a fresh owned
+// Err, so single ownership holds (no double-free with the input). `r` is borrowed; result owned.
+
+fn __rbcopy(dst: Int, src: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let b = prim.load8(src + i)
+    prim.store8(dst + i, b)
+    __rbcopy(dst, src, n, i + 1)
+  }
+
+// Deep-copy the String at byte address `mh` (the Result's slot-0 message handle).
+fn __rcopy_at(mh: Int) -> String = {
+  let blen = prim.load32(mh + 4)
+  let out = prim.alloc_str(blen)
+  let _x = __rbcopy(prim.handle(out) + 12, mh + 12, blen, 0)
+  out
+}
+
+// Ok(f(x)) — the closure applied on the Ok arm only (a heap-result helper isolates the call).
+fn __res_map_ok(x: Int, f: (Int) -> Int) -> Result[Int, String] = {
+  let y = f(x)
+  Ok(y)
+}
+
+fn result_map(r: Result[Int, String], f: (Int) -> Int) -> Result[Int, String] = {
+  let h = prim.handle(r)
+  let len = prim.load32(h + 4)
+  let x = prim.load64(h + 12)
+  if len == 0 then __res_map_ok(x, f) else Err(__rcopy_at(x))
+}

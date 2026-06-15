@@ -1261,6 +1261,43 @@
     }
 
     #[test]
+    fn self_hosted_result_map() {
+        // SELF-HOSTED result.map(r, f) = r.map(f): Ok(x) → Ok(f(x)) (f applied ONLY on the Ok arm),
+        // Err(e) → Err(e) (the message PRESERVED by deep copy). map(Ok(5), *10)=Ok(50); map(Err"...",
+        // *10) keeps the message. Built on int.parse Results; the Err message extracted via match.
+        let src = "fn main() -> Unit = {\n  \
+            let r1 = int.parse(\"5\")\n  let m1 = result.map(r1, (x) => x * 10)\n  \
+            match m1 {\n    Ok(v) => println(int.to_string(v)),\n    Err(e) => println(e),\n  }\n  \
+            let r2 = int.parse(\"abc\")\n  let m2 = result.map(r2, (x) => x * 10)\n  \
+            match m2 {\n    Ok(v) => println(int.to_string(v)),\n    Err(e) => println(e),\n  } }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "result.map"));
+        if let Some(out) = build_and_run("self_hosted_result_map", &render_wasm_program(&prog)) {
+            assert_eq!(out, "50\ninvalid digit found in string");
+        }
+    }
+
+    #[test]
+    fn result_map_loop_is_bounded() {
+        // ADVERSARIAL leak guard: a loop mapping an Err Result (deep-copying the short message each
+        // iteration) and matching it must run in BOUNDED memory — input Result, the mapped Result
+        // and the one-slot message copy are all 20-byte. The copy is freed once (no double-free).
+        // A short-message Err is built via option.to_result(None, "e") (int.parse messages are long,
+        // which would hit the head-only free-list's mixed-size fragmentation — a separate property).
+        let src = "fn main() -> Unit = {\n  \
+            var i = 0\n  \
+            while i < 4000 {\n    \
+              let o = list.get([5], 9)\n    let r = option.to_result(o, \"e\")\n    let m = result.map(r, (x) => x + 1)\n    \
+              match m {\n      Ok(v) => println(\"k\"),\n      Err(e) => println(e),\n    }\n    \
+              i = i + 1\n  }\n  \
+            println(\"done\") }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("result_map_loop_bounded", &render_wasm_program(&prog)) {
+            assert!(out.ends_with("done"), "loop must terminate (bounded memory)");
+        }
+    }
+
+    #[test]
     fn self_hosted_option_to_result() {
         // SELF-HOSTED option.to_result(o, msg) = o.ok_or(msg.to_string()): Some(x) → Ok(x), None →
         // Err(a fresh COPY of msg). v0 copies the message, so the borrowed msg is deep-copied (not

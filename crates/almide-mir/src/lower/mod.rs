@@ -686,7 +686,7 @@ pub(crate) fn is_self_host_option_module_fn(module: &str, func: &str) -> bool {
 pub(crate) fn is_self_host_result_module_fn(module: &str, func: &str) -> bool {
     matches!(
         (module, func),
-        ("int", "parse") | ("int", "from_hex") | ("option", "to_result")
+        ("int", "parse") | ("int", "from_hex") | ("option", "to_result") | ("result", "map")
     )
 }
 

@@ -539,6 +539,49 @@ impl LowerCtx {
                 self.materialized_options.insert(dst);
                 Some(dst)
             }
+            // A `Result[Int, String]` ctor RETURNED / bound directly (`fn f() = Ok(y)` / `… = Err(
+            // msg)`) MATERIALIZES the DynListStr Result (len-as-tag: Ok = len 0 with the scalar in
+            // slot 0, Err = len 1 owning the message), tracked so the caller can `match` it. Same
+            // cert as the heap-result-`if` arms (reuses `materialize_result_ok` / the Some-string
+            // builder) — no new Init. SCALAR Ok payload, heap (Var/LitStr/Named-call) Err payload.
+            IrExprKind::ResultOk { expr } if !is_heap_ty(&expr.ty) => {
+                let payload = self.lower_scalar_value(expr)?;
+                let repr = repr_of(ty).ok()?;
+                let dst = self.materialize_result_ok(payload, repr);
+                self.materialized_results.insert(dst);
+                Some(dst)
+            }
+            IrExprKind::ResultErr { expr } if is_heap_ty(&expr.ty) => {
+                let repr = repr_of(ty).ok()?;
+                // Only a FRESH owned message (a LitStr alloc or a Named-call result) — a `Var`
+                // payload may be a BORROWED param, and CONSUMING a borrow into the Err is a
+                // move-out of a value the caller still owns (a double-free the checker rejects).
+                // So a `Var` Err falls through to the sound deferred `Opaque`.
+                let piece = match &expr.kind {
+                    IrExprKind::LitStr { value } => {
+                        let pr = repr_of(&expr.ty).ok()?;
+                        let p = self.fresh_value();
+                        self.ops.push(Op::Alloc { dst: p, repr: pr, init: Init::Str(value.clone()) });
+                        p
+                    }
+                    IrExprKind::Call { target: CallTarget::Named { name }, args, .. } => {
+                        let lowered = self.lower_call_args(args).ok()?;
+                        let pr = repr_of(&expr.ty).ok()?;
+                        let p = self.fresh_value();
+                        self.ops.push(Op::CallFn {
+                            dst: Some(p),
+                            name: name.as_str().to_string(),
+                            args: lowered,
+                            result: Some(pr),
+                        });
+                        p
+                    }
+                    _ => return None,
+                };
+                let dst = self.materialize_opt_str_some(piece, repr);
+                self.materialized_results.insert(dst);
+                Some(dst)
+            }
             _ => None,
         }
     }
