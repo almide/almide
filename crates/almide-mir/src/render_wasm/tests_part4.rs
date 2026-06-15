@@ -1353,6 +1353,26 @@
     }
 
     #[test]
+    fn self_hosted_set_construction() {
+        // SELF-HOSTED set.new/insert/remove/symmetric_difference over Set[Int]. new()→insert 5,7,5
+        // (dup ignored)={5,7} len 2; remove(5)={7} len 1 sum 7; sym_diff({1,2,3},{3,4})={1,2,4}
+        // len 3 sum 7. Byte-matches v0 (insert/remove clone-then-mutate, insertion order).
+        let src = "fn main() -> Unit = {\n  \
+            let e = set.new()\n  let s1 = set.insert(e, 5)\n  let s2 = set.insert(s1, 7)\n  \
+            let s3 = set.insert(s2, 5)\n  println(int.to_string(set.len(s3)))\n  \
+            let r = set.remove(s3, 5)\n  println(int.to_string(set.len(r)))\n  \
+            let rl = set.to_list(r)\n  println(int.to_string(list.sum(rl)))\n  \
+            let a = set.from_list([1, 2, 3])\n  let b = set.from_list([3, 4])\n  \
+            let sd = set.symmetric_difference(a, b)\n  let sdl = set.to_list(sd)\n  \
+            println(int.to_string(set.len(sd)))\n  println(int.to_string(list.sum(sdl))) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "set.insert"));
+        if let Some(out) = build_and_run("self_hosted_set_construction", &render_wasm_program(&prog)) {
+            assert_eq!(out, "2\n1\n7\n3\n7");
+        }
+    }
+
+    #[test]
     fn self_hosted_set_core_loop_reclaims() {
         // SOUNDNESS for the new Set[Int] heap path: a bounded loop building + dropping a fresh
         // Set[Int] every iteration must reclaim each (plain non-nested drop) — no leak (OOM) or

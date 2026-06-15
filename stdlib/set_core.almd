@@ -183,3 +183,81 @@ fn set_is_disjoint(a: Set[Int], b: Set[Int]) -> Bool = {
   let blen = prim.load32(bh + 4)
   __set_none_in(ah, alen, bh, blen, 0)
 }
+
+// ── Set construction (closure-free, Int) ── new/insert/remove/symmetric_difference. Each
+// returns a fresh owned Set (v0's insert/remove clone-then-mutate).
+
+// An empty Set[Int] — a 0-length block. alloc_set(0) already sets len=0.
+fn set_new() -> Set[Int] = prim.alloc_set(0)
+
+// Append x to result `rh` (which holds `slen` elements) iff absent; return the new count.
+fn __set_addone(rh: Int, slen: Int, x: Int) -> Int = {
+  let present = __set_has(rh, slen, x, 0)
+  if present then slen
+  else {
+    prim.store64(rh + 12 + slen * 8, x)
+    slen + 1
+  }
+}
+
+fn set_insert(s: Set[Int], x: Int) -> Set[Int] = {
+  let sh = prim.handle(s)
+  let slen = prim.load32(sh + 4)
+  let cap = slen + 1
+  let r = prim.alloc_set(cap)
+  let rh = prim.handle(r)
+  let _c = __set_copy(sh, rh, slen, 0)
+  let w = __set_addone(rh, slen, x)
+  prim.store32(rh + 4, w)
+  r
+}
+
+// Copy s's elements EXCEPT x into result rh (preserving the survivors' order); return the count.
+fn __set_remove_fill(sh: Int, slen: Int, rh: Int, x: Int, i: Int, w: Int) -> Int =
+  if i >= slen then w
+  else {
+    let e = prim.load64(sh + 12 + i * 8)
+    if e == x then __set_remove_fill(sh, slen, rh, x, i + 1, w)
+    else {
+      prim.store64(rh + 12 + w * 8, e)
+      __set_remove_fill(sh, slen, rh, x, i + 1, w + 1)
+    }
+  }
+
+fn set_remove(s: Set[Int], x: Int) -> Set[Int] = {
+  let sh = prim.handle(s)
+  let slen = prim.load32(sh + 4)
+  let r = prim.alloc_set(slen)
+  let rh = prim.handle(r)
+  let w = __set_remove_fill(sh, slen, rh, x, 0, 0)
+  prim.store32(rh + 4, w)
+  r
+}
+
+// Append b's elements NOT in the ORIGINAL a (handle ah, len alen), growing count w. Used by
+// symmetric_difference after the a-not-in-b part is already written (disjoint, so no re-dedup).
+fn __set_addb_nota(ah: Int, alen: Int, bh: Int, blen: Int, rh: Int, j: Int, w: Int) -> Int =
+  if j >= blen then w
+  else {
+    let x = prim.load64(bh + 12 + j * 8)
+    let inA = __set_has(ah, alen, x, 0)
+    if inA then __set_addb_nota(ah, alen, bh, blen, rh, j + 1, w)
+    else {
+      prim.store64(rh + 12 + w * 8, x)
+      __set_addb_nota(ah, alen, bh, blen, rh, j + 1, w + 1)
+    }
+  }
+
+fn set_symmetric_difference(a: Set[Int], b: Set[Int]) -> Set[Int] = {
+  let ah = prim.handle(a)
+  let bh = prim.handle(b)
+  let alen = prim.load32(ah + 4)
+  let blen = prim.load32(bh + 4)
+  let cap = alen + blen
+  let r = prim.alloc_set(cap)
+  let rh = prim.handle(r)
+  let w1 = __set_diff(ah, alen, bh, blen, rh, 0, 0)        // a not in b (a's order)
+  let w2 = __set_addb_nota(ah, alen, bh, blen, rh, 0, w1)  // then b not in a (b's order)
+  prim.store32(rh + 4, w2)
+  r
+}
