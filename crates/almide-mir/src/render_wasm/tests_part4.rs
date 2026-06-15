@@ -437,6 +437,25 @@
     }
 
     #[test]
+    fn self_hosted_string_lines() {
+        // SELF-HOSTED string.lines (Machinery 2). Verified by line COUNT (list.len): "a\nb\nc"
+        // =3, "a\nb\n"=2 (trailing newline drops the empty final line), ""=0, "\n"=1, "a\n\nb"
+        // =3 (empty middle line kept), "x"=1. Byte-matches v0's s.lines() boundary rules.
+        let src = "fn main() -> Unit = {\n  \
+            println(int.to_string(list.len(string.lines(\"a\\nb\\nc\"))))\n  \
+            println(int.to_string(list.len(string.lines(\"a\\nb\\n\"))))\n  \
+            println(int.to_string(list.len(string.lines(\"\"))))\n  \
+            println(int.to_string(list.len(string.lines(\"\\n\"))))\n  \
+            println(int.to_string(list.len(string.lines(\"a\\n\\nb\"))))\n  \
+            println(int.to_string(list.len(string.lines(\"x\")))) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "string.lines"));
+        if let Some(out) = build_and_run("self_hosted_string_lines", &render_wasm_program(&prog)) {
+            assert_eq!(out, "3\n2\n0\n1\n3\n1");
+        }
+    }
+
+    #[test]
     fn self_hosted_math_sqrt() {
         // SELF-HOSTED math.sqrt = prim.fsqrt (f64.sqrt, byte-exact with v0). sqrt(16)=4,
         // sqrt(2)=1.41…→to_int 1, sqrt(81)=9.
