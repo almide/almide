@@ -310,6 +310,11 @@ pub enum PrimKind {
     Handle,
     /// Load `width` bytes (1/4/8) at a computed i64 address, zero-extended to i64.
     Load { width: u8 },
+    /// Load a 4-byte i32 HANDLE at a computed i64 address — UNLIKE `Load { width: 4 }`, the
+    /// result keeps the `Ptr` (i32) repr (no i64 zero-extend), so it IS a heap handle a caller
+    /// can pass to a String/List consumer. The bridge for extracting a heap element from a slot
+    /// (a `match Some(s)` payload / a `List[String]` element). A borrowed alias — no ownership.
+    LoadHandle,
     /// Store the low `width` bytes (1/4/8) of an i64 value at a computed i64 address.
     Store { width: u8 },
     /// The `fd_write` WASI host call — `args = [fd, iov, count, nwritten]`, dst = the

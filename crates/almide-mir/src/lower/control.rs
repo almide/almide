@@ -319,18 +319,24 @@ impl LowerCtx {
         if arms.len() != 2 || arms.iter().any(|a| a.guard.is_some()) {
             return false;
         }
-        // A SCALAR Some-bind extracts data[0] as a value COPY; a HEAP payload (Option[String])
-        // is walled here (the i64-slot → i32-handle repr extract is a later slice) — a `Some(_)`
-        // tag-match still works (reads the tag, no extract; DropListStr frees the element).
-        let mut some: Option<(&IrExpr, Option<VarId>)> = None;
+        // The Some-bind carries an is_heap flag. A SCALAR payload is a value COPY (load64). A HEAP
+        // payload (Option[String]) is bound as a BORROW of the Option's element (LoadHandle =
+        // i32, recorded in param_values), gated to a subject that is a nested-ownership list (so
+        // the Option keeps ownership through its scope-end DropListStr; a consuming arm auto-Dups).
+        let mut some: Option<(&IrExpr, Option<(VarId, bool)>)> = None;
         let mut none: Option<&IrExpr> = None;
         for arm in arms {
             match &arm.pattern {
                 IrPattern::Some { inner } => {
                     let bind = match inner.as_ref() {
-                        IrPattern::Bind { var, ty } if !is_heap_ty(ty) => Some(*var),
+                        IrPattern::Bind { var, ty } if !is_heap_ty(ty) => Some((*var, false)),
+                        IrPattern::Bind { var, ty }
+                            if is_heap_ty(ty) && self.heap_elem_lists.contains(&subj) =>
+                        {
+                            Some((*var, true))
+                        }
                         IrPattern::Wildcard => None,
-                        _ => return false, // heap bind / nested ctor — not in this subset
+                        _ => return false, // heap bind w/o nested-ownership subject / nested ctor
                     };
                     if some.is_some() {
                         return false;
@@ -360,11 +366,20 @@ impl LowerCtx {
         self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![subj] });
         let tag = self.load_at_offset(h, 4, PrimKind::Load { width: 4 });
         self.ops.push(Op::IfThen { cond: tag, dst: None });
-        // Some-arm (then): extract the scalar payload `data[0] = load64(handle + 12)`,
-        // bind it, lower the arm body in a per-arm frame.
-        if let Some(bind_var) = some_bind {
-            let payload = self.load_at_offset(h, 12, PrimKind::Load { width: 8 });
+        // Some-arm (then): extract the payload `data[0]`, bind it, lower the arm in a per-arm
+        // frame. A SCALAR is a value COPY (load64); a HEAP element is `LoadHandle` (an i32 Ptr)
+        // recorded in `param_values` (BORROWED) — the Option owns it (DropListStr frees it at
+        // scope end), so the bound var is not a second owner; a consuming use auto-Dups.
+        if let Some((bind_var, is_heap)) = some_bind {
+            let payload = if is_heap {
+                self.load_at_offset(h, 12, PrimKind::LoadHandle)
+            } else {
+                self.load_at_offset(h, 12, PrimKind::Load { width: 8 })
+            };
             self.value_of.insert(bind_var, payload);
+            if is_heap {
+                self.param_values.insert(payload);
+            }
         }
         let some_ok = self.lower_branch_arm(None, some_body).is_ok();
         if !some_ok {

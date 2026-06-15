@@ -385,7 +385,11 @@ fn value_reprs_wasm(func: &MirFunction) -> BTreeMap<ValueId, Repr> {
             | Op::IntBinOp { dst, .. } => {
                 m.insert(*dst, SCALAR_REPR);
             }
-            // A prim result (a load, fd_write errno, or handle→address) is a scalar i64.
+            // A `LoadHandle` result is a heap PTR (i32 handle); every other prim result (a load,
+            // fd_write errno, or handle→address) is a scalar i64.
+            Op::Prim { dst: Some(dst), kind: PrimKind::LoadHandle, .. } => {
+                m.insert(*dst, Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT });
+            }
             Op::Prim { dst: Some(dst), .. } => {
                 m.insert(*dst, SCALAR_REPR);
             }
@@ -674,6 +678,9 @@ fn render_op(
                 PrimKind::Load { width: 1 } => format!("(i64.extend_i32_u (i32.load8_u {}))", w(0)),
                 PrimKind::Load { width: 4 } => format!("(i64.extend_i32_u (i32.load {}))", w(0)),
                 PrimKind::Load { .. } => format!("(i64.load {})", w(0)),
+                // An i32 HANDLE load — NO i64 extend; the dst local is `Ptr` (i32), so the loaded
+                // i32 handle is a real String/List pointer (see value_reprs_wasm).
+                PrimKind::LoadHandle => format!("(i32.load {})", w(0)),
                 PrimKind::Store { width: 1 } => format!("(i32.store8 {} {})", w(0), w(1)),
                 PrimKind::Store { width: 4 } => format!("(i32.store {} {})", w(0), w(1)),
                 PrimKind::Store { .. } => format!("(i64.store {} (local.get {}))", w(0), local(args[1])),

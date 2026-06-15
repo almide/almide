@@ -815,23 +815,22 @@
 
     #[test]
     fn self_hosted_string_first_last() {
-        // SELF-HOSTED string.first / string.last returning Option[String] — the OPTION[STRING]
-        // CONSTRUCTION machinery: Some(slice) materializes a 1-element DynListStr OWNING the
-        // codepoint slice, None a 0-element one; both freed recursively by DropListStr at scope
-        // end. A `Some(_)`/`None` TAG-match EXECUTES (len-as-tag, no extraction): a non-empty
-        // string -> Some, "" -> None. (The content-extract — the i64-slot/i32-handle repr — is the
-        // next slice.) The Some/None decision byte-matches v0.
+        // SELF-HOSTED string.first / string.last returning Option[String]. The ERGONOMIC content
+        // EXTRACT now works: `match Some(c) => println(c)` reads the element handle via LoadHandle
+        // (i32 Ptr repr) and BORROWS it (the Option keeps ownership, frees it at scope-end
+        // DropListStr — sound). first("hi")="h", first("日本")="日", first("")=None; last("hi")="i",
+        // last("")=None. Byte-matches v0's s.chars().next()/.last().
         let src = "fn main() -> Unit = {\n  \
-            let f1 = string.first(\"hi\")\n  match f1 { Some(_) => println(\"y\"), None => println(\"n\"), }\n  \
-            let f2 = string.first(\"日本\")\n  match f2 { Some(_) => println(\"y\"), None => println(\"n\"), }\n  \
-            let f3 = string.first(\"\")\n  match f3 { Some(_) => println(\"y\"), None => println(\"n\"), }\n  \
-            let l1 = string.last(\"hi\")\n  match l1 { Some(_) => println(\"y\"), None => println(\"n\"), }\n  \
-            let l3 = string.last(\"\")\n  match l3 { Some(_) => println(\"y\"), None => println(\"n\"), } }\n";
+            let f1 = string.first(\"hi\")\n  match f1 { Some(c) => println(c), None => println(\"empty\"), }\n  \
+            let f2 = string.first(\"日本\")\n  match f2 { Some(c) => println(c), None => println(\"empty\"), }\n  \
+            let f3 = string.first(\"\")\n  match f3 { Some(c) => println(c), None => println(\"empty\"), }\n  \
+            let l1 = string.last(\"hi\")\n  match l1 { Some(c) => println(c), None => println(\"empty\"), }\n  \
+            let l3 = string.last(\"\")\n  match l3 { Some(c) => println(c), None => println(\"empty\"), } }\n";
         let prog = lower_source(src);
         assert!(prog.functions.iter().any(|f| f.name == "string.first"));
         assert!(prog.functions.iter().any(|f| f.name == "string.last"));
         if let Some(out) = build_and_run("self_hosted_string_first_last", &render_wasm_program(&prog)) {
-            assert_eq!(out, "y\ny\nn\ny\nn");
+            assert_eq!(out, "h\n日\nempty\ni\nempty");
         }
     }
 
@@ -907,7 +906,7 @@
         let src = "fn main() -> Unit = {\n  \
             var i = 0\n  \
             while i < 4000 {\n    \
-            let o = string.first(\"xyz\")\n    match o { Some(_) => println(\"y\"), None => println(\"n\"), }\n    \
+            let o = string.first(\"xyz\")\n    match o { Some(c) => println(c), None => println(\"n\"), }\n    \
             i = i + 1\n  }\n  \
             println(\"done\") }\n";
         let prog = lower_source(src);
@@ -1087,15 +1086,3 @@
             assert_eq!(out, "4\n2\n3\n3\n5\n0");
         }
     }
-
-
-
-
-
-
-
-
-
-
-
-
