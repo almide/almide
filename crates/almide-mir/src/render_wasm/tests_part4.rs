@@ -692,6 +692,28 @@
     }
 
     #[test]
+    fn self_hosted_bytes_read_f64() {
+        // SELF-HOSTED bytes.read_f64_be / read_f64_le — combine 8 bytes into the i64 bit pattern
+        // then prim.ffrombits reinterprets it as the Float. Verified via float.to_int (1.0->1,
+        // 2.5->2, 256.0->256); read_f64_le reads the same value from reversed bytes. Byte-matches v0.
+        let src = "fn main() -> Unit = {\n  \
+            let one = [63, 240, 0, 0, 0, 0, 0, 0]\n  let bone = bytes.from_list(one)\n  \
+            println(int.to_string(float.to_int(bytes.read_f64_be(bone, 0))))\n  \
+            let two5 = [64, 4, 0, 0, 0, 0, 0, 0]\n  let bt = bytes.from_list(two5)\n  \
+            println(int.to_string(float.to_int(bytes.read_f64_be(bt, 0))))\n  \
+            let big = [64, 112, 0, 0, 0, 0, 0, 0]\n  let bb = bytes.from_list(big)\n  \
+            println(int.to_string(float.to_int(bytes.read_f64_be(bb, 0))))\n  \
+            let onele = [0, 0, 0, 0, 0, 0, 240, 63]\n  let bol = bytes.from_list(onele)\n  \
+            println(int.to_string(float.to_int(bytes.read_f64_le(bol, 0)))) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "bytes.read_f64_be"));
+        assert!(prog.functions.iter().any(|f| f.name == "bytes.read_f64_le"));
+        if let Some(out) = build_and_run("self_hosted_bytes_read_f64", &render_wasm_program(&prog)) {
+            assert_eq!(out, "1\n2\n256\n1");
+        }
+    }
+
+    #[test]
     fn self_hosted_hex_encode() {
         // SELF-HOSTED hex.encode / hex.encode_upper (Bytes -> hex String) over the bytes machinery
         // + the bitwise prim floor. Each byte -> two hex digits (high nibble byte>>4, low byte&0xF).

@@ -559,3 +559,74 @@ fn bytes_read_i64_le(b: Bytes, pos: Int) -> Int = {
     }
   }
 }
+
+// bytes.read_f64_be(b, pos) -> the big-endian IEEE-754 f64 at pos (0.0 if out of range). The
+// 8 bytes form the i64 bit pattern; prim.ffrombits reinterprets it as the Float.
+fn bytes_read_f64_be(b: Bytes, pos: Int) -> Float = {
+  let n = prim.load32(prim.handle(b) + 4)
+  let base = prim.handle(b) + 12 + pos
+  if pos < 0 then prim.ffrombits(0)
+  else {
+    if pos + 8 > n then prim.ffrombits(0)
+    else {
+      let b0 = prim.load8(base)
+      let b1 = prim.load8(base + 1)
+      let b2 = prim.load8(base + 2)
+      let b3 = prim.load8(base + 3)
+      let b4 = prim.load8(base + 4)
+      let b5 = prim.load8(base + 5)
+      let b6 = prim.load8(base + 6)
+      let b7 = prim.load8(base + 7)
+      let s0 = prim.bshl(b0, 56)
+      let s1 = prim.bshl(b1, 48)
+      let s2 = prim.bshl(b2, 40)
+      let s3 = prim.bshl(b3, 32)
+      let s4 = prim.bshl(b4, 24)
+      let s5 = prim.bshl(b5, 16)
+      let s6 = prim.bshl(b6, 8)
+      let q0 = prim.bor(s0, s1)
+      let q1 = prim.bor(q0, s2)
+      let q2 = prim.bor(q1, s3)
+      let q3 = prim.bor(q2, s4)
+      let q4 = prim.bor(q3, s5)
+      let q5 = prim.bor(q4, s6)
+      let bits = prim.bor(q5, b7)
+      prim.ffrombits(bits)
+    }
+  }
+}
+
+// bytes.read_f64_le(b, pos) -> the little-endian IEEE-754 f64 at pos (0.0 if out of range).
+fn bytes_read_f64_le(b: Bytes, pos: Int) -> Float = {
+  let n = prim.load32(prim.handle(b) + 4)
+  let base = prim.handle(b) + 12 + pos
+  if pos < 0 then prim.ffrombits(0)
+  else {
+    if pos + 8 > n then prim.ffrombits(0)
+    else {
+      let b0 = prim.load8(base)
+      let b1 = prim.load8(base + 1)
+      let b2 = prim.load8(base + 2)
+      let b3 = prim.load8(base + 3)
+      let b4 = prim.load8(base + 4)
+      let b5 = prim.load8(base + 5)
+      let b6 = prim.load8(base + 6)
+      let b7 = prim.load8(base + 7)
+      let s1 = prim.bshl(b1, 8)
+      let s2 = prim.bshl(b2, 16)
+      let s3 = prim.bshl(b3, 24)
+      let s4 = prim.bshl(b4, 32)
+      let s5 = prim.bshl(b5, 40)
+      let s6 = prim.bshl(b6, 48)
+      let s7 = prim.bshl(b7, 56)
+      let q0 = prim.bor(b0, s1)
+      let q1 = prim.bor(q0, s2)
+      let q2 = prim.bor(q1, s3)
+      let q3 = prim.bor(q2, s4)
+      let q4 = prim.bor(q3, s5)
+      let q5 = prim.bor(q4, s6)
+      let bits = prim.bor(q5, s7)
+      prim.ffrombits(bits)
+    }
+  }
+}
