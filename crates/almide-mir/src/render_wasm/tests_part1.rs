@@ -51,6 +51,51 @@
     }
 
     #[test]
+    fn func_ref_resolves_a_lambda_slot_by_name_then_call_indirect() {
+        // FuncRef materializes a lifted function's table slot BY NAME (the lambda-lifting
+        // binding for `let f = (x) => …`), then CallIndirect dispatches through it. main is
+        // slot 0, add1 slot 1; `f = FuncRef("add1")` must resolve to 1 (not a hardcoded
+        // index), so `f(5)` = 6.
+        let scalar = Repr::Scalar { width: ScalarWidth::Double };
+        let main = MirFunction {
+            name: "main".into(),
+            params: vec![],
+            ops: vec![
+                Op::FuncRef { dst: ValueId(0), name: "add1".into() },
+                Op::CallIndirect {
+                    dst: Some(ValueId(1)),
+                    table_idx: ValueId(0),
+                    args: vec![CallArg::Imm(5)],
+                    result: Some(scalar),
+                },
+                Op::Call {
+                    dst: None,
+                    func: RtFn::PrintInt,
+                    args: vec![CallArg::Scalar(ValueId(1))],
+                    result: None,
+                },
+            ],
+            ret: None,
+            ..Default::default()
+        };
+        let add1 = MirFunction {
+            name: "add1".into(),
+            params: vec![MirParam { value: ValueId(0), repr: scalar }],
+            ops: vec![
+                Op::ConstInt { dst: ValueId(1), value: 1 },
+                Op::IntBinOp { dst: ValueId(2), op: IntOp::Add, a: ValueId(0), b: ValueId(1) },
+            ],
+            ret: Some(ValueId(2)),
+            ..Default::default()
+        };
+        // main at slot 0, add1 at slot 1 — FuncRef("add1") must resolve to 1.
+        let prog = MirProgram { functions: vec![main, add1] };
+        if let Some(out) = build_and_run("func_ref", &render_wasm_program(&prog)) {
+            assert_eq!(out, "6");
+        }
+    }
+
+    #[test]
     fn call_indirect_dispatches_through_the_function_table() {
         // Closures execution floor: a lifted lambda `add1(x) = x + 1` at table slot 0,
         // invoked by `main` via Op::CallIndirect with a runtime table index (the slot the

@@ -109,6 +109,9 @@ pub fn name_witness(func: &MirFunction) -> NameWitness {
                 used.push(*local);
                 used.push(*src);
             }
+            // A function reference DEFINES its scalar slot value; it uses no MIR value
+            // (the referenced function name is resolved structurally by the render).
+            Op::FuncRef { dst, .. } => defined.push(*dst),
         }
     }
     if let Some(r) = func.ret {

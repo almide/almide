@@ -100,7 +100,9 @@ pub fn wasm_pattern(op: &crate::Op) -> Option<String> {
         | Op::SetLocal { .. }
         // CallIndirect renders to `call_indirect` once the table is wired; no single-token
         // per-op pattern claim here (like the if-markers), and no lowering emits it yet.
+        // FuncRef (a closure's table-slot value) is likewise structural, no token claim.
         | Op::CallIndirect { .. }
+        | Op::FuncRef { .. }
         | Op::Call { func: RtFn::PrintStr, .. } => return None,
     })
 }

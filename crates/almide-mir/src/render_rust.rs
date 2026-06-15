@@ -171,8 +171,8 @@ fn render_op(op: &Op) -> Option<String> {
         // runtime; ultimately these are calls to self-hosted Almide functions).
         Op::Call { func, args, .. } => Some(render_call(func, args)),
         // CallIndirect is wasm-only (native uses v0 codegen) and unwired (no lowering emits
-        // it yet) — emit nothing.
-        Op::CallIndirect { .. } => None,
+        // it yet) — emit nothing. FuncRef (a closure's table-slot value) is likewise.
+        Op::CallIndirect { .. } | Op::FuncRef { .. } => None,
         Op::IntBinOp { dst, op, a, b } => {
             let (a, b, d) = (var(*a), var(*b), var(*dst));
             // A comparison yields a `bool` → cast to the i64 scalar model (0/1).

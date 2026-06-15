@@ -224,6 +224,13 @@ pub enum Op {
     /// borrowed/moved like a `CallFn`; a heap result is a fresh owned value.
     CallIndirect { dst: Option<ValueId>, table_idx: ValueId, args: Vec<CallArg>, result: Option<Repr> },
 
+    /// `dst = the function-table slot of the lifted function `name`` — a scalar index
+    /// (carried in the i64-uniform value) used as a `CallIndirect.table_idx`. The render
+    /// resolves `name` to its position in the module function table. This materializes a
+    /// lifted lambda's value (the closures-machinery binding for `let f = (x) => …`). No
+    /// ownership (a scalar constant); no capability (the dispatch site taints, not this).
+    FuncRef { dst: ValueId, name: String },
+
     /// `dst = a <op> b` on scalars (no ownership) — the arithmetic runtime
     /// functions need.
     IntBinOp { dst: ValueId, op: IntOp, a: ValueId, b: ValueId },
@@ -499,6 +506,9 @@ pub fn verify_ownership(func: &MirFunction) -> Result<(), Vec<Violation>> {
             }
             Op::Const { dst: _ } | Op::ConstInt { .. } => {
                 // A scalar — no ownership accounting.
+            }
+            Op::FuncRef { .. } => {
+                // A function-table slot index — a scalar constant, no ownership.
             }
             Op::Dup { dst, src } => {
                 if let Some(o) = live_object(&object_of, &rc, &dead, &borrowed, *src) {

@@ -124,8 +124,10 @@ pub fn render_wasm(func: &MirFunction) -> String {
         .join(" ");
 
     let mut body = String::new();
+    // Single-function render (test entry): no module table, so FuncRef has no slots.
+    let no_slots: BTreeMap<String, u32> = BTreeMap::new();
     for op in &func.ops {
-        body.push_str(&render_op(op, &label_off));
+        body.push_str(&render_op(op, &label_off, &no_slots));
     }
 
     format!(
@@ -159,8 +161,19 @@ pub fn render_wasm_program(prog: &MirProgram) -> String {
             }
         }
     }
-    let funcs =
-        prog.functions.iter().map(|f| render_wasm_fn(f, &label_off)).collect::<String>();
+    // Function-table slots by NAME (position in the module) — a FuncRef resolves its
+    // referenced function to this index, the same index the `(elem)` table uses.
+    let func_slots: BTreeMap<String, u32> = prog
+        .functions
+        .iter()
+        .enumerate()
+        .map(|(i, f)| (f.name.clone(), i as u32))
+        .collect();
+    let funcs = prog
+        .functions
+        .iter()
+        .map(|f| render_wasm_fn(f, &label_off, &func_slots))
+        .collect::<String>();
     // Closure dispatch: when any function makes an indirect (closure) call, emit a module
     // function table whose slot i holds function i (the lambda-lifting convention — a
     // lifted lambda is bound to its slot index), plus the 1-param closure signature
@@ -193,7 +206,11 @@ pub fn render_wasm_program(prog: &MirProgram) -> String {
 }
 
 /// Render one MIR function with its signature (params, locals, result).
-pub fn render_wasm_fn(func: &MirFunction, label_off: &BTreeMap<String, (u32, u32)>) -> String {
+pub fn render_wasm_fn(
+    func: &MirFunction,
+    label_off: &BTreeMap<String, (u32, u32)>,
+    func_slots: &BTreeMap<String, u32>,
+) -> String {
     let reprs = value_reprs_wasm(func);
     let params = func
         .params
@@ -278,7 +295,7 @@ pub fn render_wasm_fn(func: &MirFunction, label_off: &BTreeMap<String, (u32, u32
                 let close = if dst.is_some() { "))\n" } else { ")\n" };
                 body.push_str(&format!("{}      ){close}", arm_val(val)));
             }
-            _ => body.push_str(&render_op(op, label_off)),
+            _ => body.push_str(&render_op(op, label_off, func_slots)),
         }
     }
     let tail = func.ret.map(|r| format!("    (local.get {})\n", local(r))).unwrap_or_default();
@@ -302,6 +319,7 @@ fn defined_value(op: &Op) -> Option<ValueId> {
         | Op::Dup { dst, .. }
         | Op::Const { dst }
         | Op::ConstInt { dst, .. }
+        | Op::FuncRef { dst, .. }
         | Op::IntBinOp { dst, .. }
         | Op::Pure { dst, .. } => Some(*dst),
         Op::CallFn { dst, .. } | Op::Call { dst, .. } => *dst,
@@ -331,7 +349,10 @@ fn value_reprs_wasm(func: &MirFunction) -> BTreeMap<ValueId, Repr> {
                 let r = m.get(src).copied().unwrap_or(Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT });
                 m.insert(*dst, r);
             }
-            Op::Const { dst } | Op::ConstInt { dst, .. } | Op::IntBinOp { dst, .. } => {
+            Op::Const { dst }
+            | Op::ConstInt { dst, .. }
+            | Op::FuncRef { dst, .. }
+            | Op::IntBinOp { dst, .. } => {
                 m.insert(*dst, SCALAR_REPR);
             }
             // A prim result (a load, fd_write errno, or handle→address) is a scalar i64.
@@ -377,7 +398,11 @@ fn local(v: ValueId) -> String {
     format!("$v{}", v.0)
 }
 
-fn render_op(op: &Op, label_off: &BTreeMap<String, (u32, u32)>) -> String {
+fn render_op(
+    op: &Op,
+    label_off: &BTreeMap<String, (u32, u32)>,
+    func_slots: &BTreeMap<String, u32>,
+) -> String {
     match op {
         // A STRING literal — a heap block `[rc][len][cap][utf8 bytes...]` (same header
         // as a list; len/cap are BYTE counts). $alloc the block, set the header, store
@@ -559,6 +584,13 @@ fn render_op(op: &Op, label_off: &BTreeMap<String, (u32, u32)>) -> String {
         // later — no dec at THIS site); Const/Borrow/Pure touch no refcount.
         // A materialized integer constant: set the local to the immediate. (A
         // deferred `Const` renders to nothing — the local keeps the zero default.)
+        // A function reference: resolve the lifted function's name to its module
+        // function-table slot (its position) and materialize the slot as the scalar value
+        // a later CallIndirect dispatches through. Unknown name → slot 0 (defensive).
+        Op::FuncRef { dst, name } => {
+            let slot = func_slots.get(name).copied().unwrap_or(0);
+            format!("    (local.set {} (i64.const {slot}))\n", local(*dst))
+        }
         Op::ConstInt { dst, value } => {
             format!("    (local.set {} (i64.const {value}))\n", local(*dst))
         }
