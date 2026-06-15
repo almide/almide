@@ -1261,6 +1261,25 @@
     }
 
     #[test]
+    fn self_hosted_list_chunk() {
+        // SELF-HOSTED list.chunk(xs, n): split into consecutive chunks of n (last may be smaller),
+        // a NESTED List[List[Int]] built via prim.alloc_list_str + per-chunk alloc_list. Verified by
+        // list.len (chunk count) and list.flatten/sum (contents). chunk([1..5],2)=[[1,2],[3,4],[5]]:
+        // 3 chunks, flatten len 5 sum 15 [2]=3 ; chunk([1..4],2)=2 chunks, flatten sum 10.
+        let src = "fn main() -> Unit = {\n  \
+            let cs = list.chunk([1, 2, 3, 4, 5], 2)\n  println(int.to_string(list.len(cs)))\n  \
+            let fl = list.flatten(cs)\n  println(int.to_string(list.len(fl)))\n  \
+            println(int.to_string(list.sum(fl)))\n  println(int.to_string(list.get_or(fl, 2, 0)))\n  \
+            let ev = list.chunk([1, 2, 3, 4], 2)\n  println(int.to_string(list.len(ev)))\n  \
+            let fe = list.flatten(ev)\n  println(int.to_string(list.sum(fe))) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "list.chunk"));
+        if let Some(out) = build_and_run("self_hosted_list_chunk", &render_wasm_program(&prog)) {
+            assert_eq!(out, "3\n5\n15\n3\n2\n10");
+        }
+    }
+
+    #[test]
     fn self_hosted_list_flatten() {
         // SELF-HOSTED list.flatten: List[List[Int]] -> List[Int], concatenating sublists. The nested
         // input is built via prim.alloc_list_str + prim.store_str (now generic over the heap element

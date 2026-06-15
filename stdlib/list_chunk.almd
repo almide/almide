@@ -1,0 +1,39 @@
+// list_chunk — SELF-HOSTED list.chunk(xs, n) for v1: split xs into consecutive chunks of size n
+// (the last may be smaller), as v0's `xs.chunks(n)`. Builds a NESTED list: a DynListStr outer (via
+// prim.alloc_list_str) whose slots own each chunk (a fresh List[Int], moved in via prim.store_str).
+// n > 0 (chunks(0) panics in v0). Source borrowed; the whole nested result is freshly owned.
+
+fn __chunk_copy(dst: Int, src: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let v = prim.load64(src + i * 8)
+    prim.store64(dst + i * 8, v)
+    __chunk_copy(dst, src, n, i + 1)
+  }
+
+// Build one chunk: a fresh List[Int] holding xs[start .. start+clen].
+fn __chunk_one(sh: Int, start: Int, clen: Int) -> List[Int] = {
+  let c = prim.alloc_list(clen)
+  let _x = __chunk_copy(prim.handle(c) + 12, sh + 12 + start * 8, clen, 0)
+  c
+}
+
+// Fill the outer list: at chunk index ci / source offset `start`, build the chunk + move it in.
+fn __chunk_outer(oh: Int, sh: Int, total: Int, cn: Int, ci: Int, start: Int) -> Int =
+  if start >= total then 0
+  else {
+    let rem = total - start
+    let clen = if rem < cn then rem else cn
+    let chunk = __chunk_one(sh, start, clen)
+    prim.store_str(oh + 12 + ci * 8, chunk)
+    __chunk_outer(oh, sh, total, cn, ci + 1, start + cn)
+  }
+
+fn list_chunk(xs: List[Int], n: Int) -> List[List[Int]] = {
+  let sh = prim.handle(xs)
+  let total = prim.load32(sh + 4)
+  let num = (total + n - 1) / n
+  let outer = prim.alloc_list_str(num)
+  let _x = __chunk_outer(prim.handle(outer), sh, total, n, 0, 0)
+  outer
+}
