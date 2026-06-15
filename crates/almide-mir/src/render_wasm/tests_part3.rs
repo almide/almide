@@ -803,3 +803,17 @@
             assert_eq!(out, "2\n4\n0\n-1\n-1");
         }
     }
+
+    #[test]
+    fn self_hosted_list_tail_drops_the_head() {
+        // list.tail = list.drop(xs,1): elements [1,n) as a fresh List[Int], empty for a
+        // 0/1-element list. tail([10,20,30])=[20,30] ([0]=20, len 2); tail([42])=[] (len 0).
+        let src = "fn main() -> Unit = {\n  \
+            let a = list.tail([10, 20, 30])\n  let a0 = list.get_or(a, 0, 0)\n  let la = list.len(a)\n  let sa = int.to_string(a0)\n  println(sa)\n  let sla = int.to_string(la)\n  println(sla)\n  \
+            let b = list.tail([42])\n  let lb = list.len(b)\n  let slb = int.to_string(lb)\n  println(slb) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "list.tail"));
+        if let Some(out) = build_and_run("list_tail", &render_wasm_program(&prog)) {
+            assert_eq!(out, "20\n2\n0");
+        }
+    }

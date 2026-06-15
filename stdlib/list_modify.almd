@@ -108,3 +108,16 @@ fn list_remove_at(xs: List[Int], i: Int) -> List[Int] = {
   let _r = __remove_fill(h + 12, bh + 12, n, i, oob)
   buf
 }
+
+// list.tail = list.drop(xs, 1): a fresh List[Int] of elements [1, n) (empty when n<=1).
+// Self-contained copy (reusing __copy_slots), so it needs no cross-stdlib call.
+fn list_tail(xs: List[Int]) -> List[Int] = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  let newlen = if n > 0 then n - 1 else 0
+  let buf = prim.alloc_list(newlen)
+  let bh = prim.handle(buf)
+  let src1 = h + 12 + 8
+  let _c = __copy_slots(src1, bh + 12, newlen, 0)
+  buf
+}
