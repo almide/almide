@@ -1569,6 +1569,30 @@
     }
 
     #[test]
+    fn self_hosted_set_string_algebra() {
+        // SELF-HOSTED Set[String] union/intersection/difference/is_subset/is_disjoint (heap-element
+        // algebra, deep-copied results, __str_eq membership; repr-poly dispatch to the _str variant).
+        // a={a,b,c,d} b={c,d,e,f}: union len 6; intersection={c,d} len 2 first "c"; difference(a,b)=
+        // {a,b} len 2; is_subset({c,d},a)=true; is_disjoint(a,b)=false. Byte-matches v0.
+        let src = "fn main() -> Unit = {\n  \
+            let a = set.from_list(string.split(\"a,b,c,d\", \",\"))\n  \
+            let b = set.from_list(string.split(\"c,d,e,f\", \",\"))\n  \
+            let u = set.union(a, b)\n  println(int.to_string(set.len(u)))\n  \
+            let inter = set.intersection(a, b)\n  println(int.to_string(set.len(inter)))\n  \
+            let il = set.to_list(inter)\n  let f = list.get(il, 0)\n  \
+            match f { Some(v) => println(v), None => println(\"none\"), }\n  \
+            let diff = set.difference(a, b)\n  println(int.to_string(set.len(diff)))\n  \
+            let sub = set.is_subset(inter, a)\n  if sub then println(\"subset\") else println(\"no\")\n  \
+            let dj = set.is_disjoint(a, b)\n  if dj then println(\"disjoint\") else println(\"no\") }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "set.union_str"));
+        assert!(prog.functions.iter().any(|f| f.name == "set.is_subset_str"));
+        if let Some(out) = build_and_run("self_hosted_set_string_algebra", &render_wasm_program(&prog)) {
+            assert_eq!(out, "6\n2\nc\n2\nsubset\nno");
+        }
+    }
+
+    #[test]
     fn self_hosted_set_string_loop_reclaims() {
         // SOUNDNESS for the Set[String] nested-ownership path: a bounded loop building + dropping a
         // fresh Set[String] each iteration must reclaim each element String + the block (DropListStr)

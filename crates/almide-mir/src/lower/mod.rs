@@ -722,15 +722,19 @@ pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], resu
             Ty::Applied(TypeConstructorId::Set | TypeConstructorId::List, a)
                 if a.len() == 1 && is_heap_ty(&a[0])
         );
-        if matches!(func, "from_list" | "to_list") && result_is_heap_container {
+        // RESULT-keyed: constructors / Set-returning algebra over heap elements.
+        if matches!(func, "from_list" | "to_list" | "union" | "intersection" | "difference")
+            && result_is_heap_container
+        {
             return format!("set.{func}_str");
         }
-        if func == "contains" {
-            if let Some(Ty::Applied(TypeConstructorId::Set, a)) = arg_tys.first() {
-                if a.len() == 1 && is_heap_ty(&a[0]) {
-                    return "set.contains_str".to_string();
-                }
-            }
+        // ARG-keyed: a Bool/scalar-returning predicate over a `Set[heap]` subject (arg 0).
+        let arg0_is_heap_set = matches!(
+            arg_tys.first(),
+            Some(Ty::Applied(TypeConstructorId::Set, a)) if a.len() == 1 && is_heap_ty(&a[0])
+        );
+        if matches!(func, "contains" | "is_subset" | "is_disjoint") && arg0_is_heap_set {
+            return format!("set.{func}_str");
         }
     }
     format!("{module}.{func}")

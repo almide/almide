@@ -84,3 +84,132 @@ fn set_to_list_str(s: Set[String]) -> List[String] = {
   let _x = __set_to_list_str_fill(sh, oh, len, 0)
   out
 }
+
+// ── Set[String] algebra ── results own DEEP COPIES (no double-free with the operands). Order
+// matches v0: union = a's order then b's-not-in-a; intersection/difference = a's order.
+
+// Deep-copy a's first `len` elements into rh (the result's a-portion).
+fn __set_str_copyn(sh: Int, rh: Int, len: Int, i: Int) -> Int =
+  if i >= len then 0
+  else {
+    let e = prim.load_str(sh + 12 + i * 8)
+    let copy = string.repeat(e, 1)
+    prim.store_str(rh + 12 + i * 8, copy)
+    __set_str_copyn(sh, rh, len, i + 1)
+  }
+
+// Append b's elements NOT in the result's a-portion (first `acount` slots), as deep copies.
+fn __set_str_addb(acount: Int, bh: Int, blen: Int, rh: Int, j: Int, w: Int) -> Int =
+  if j >= blen then w
+  else {
+    let x = prim.load_str(bh + 12 + j * 8)
+    let present = __set_has_str(rh, acount, x, 0)
+    if present then __set_str_addb(acount, bh, blen, rh, j + 1, w)
+    else {
+      let copy = string.repeat(x, 1)
+      prim.store_str(rh + 12 + w * 8, copy)
+      __set_str_addb(acount, bh, blen, rh, j + 1, w + 1)
+    }
+  }
+
+fn set_union_str(a: Set[String], b: Set[String]) -> Set[String] = {
+  let ah = prim.handle(a)
+  let bh = prim.handle(b)
+  let alen = prim.load32(ah + 4)
+  let blen = prim.load32(bh + 4)
+  let cap = alen + blen
+  let r = prim.alloc_set_str(cap)
+  let rh = prim.handle(r)
+  let _c = __set_str_copyn(ah, rh, alen, 0)
+  let w = __set_str_addb(alen, bh, blen, rh, 0, alen)
+  prim.store32(rh + 4, w)
+  r
+}
+
+// Append a's elements that ARE in b (intersection) as deep copies.
+fn __set_str_inter(ah: Int, alen: Int, bh: Int, blen: Int, rh: Int, i: Int, w: Int) -> Int =
+  if i >= alen then w
+  else {
+    let x = prim.load_str(ah + 12 + i * 8)
+    let inB = __set_has_str(bh, blen, x, 0)
+    if inB then {
+      let copy = string.repeat(x, 1)
+      prim.store_str(rh + 12 + w * 8, copy)
+      __set_str_inter(ah, alen, bh, blen, rh, i + 1, w + 1)
+    }
+    else __set_str_inter(ah, alen, bh, blen, rh, i + 1, w)
+  }
+
+fn set_intersection_str(a: Set[String], b: Set[String]) -> Set[String] = {
+  let ah = prim.handle(a)
+  let bh = prim.handle(b)
+  let alen = prim.load32(ah + 4)
+  let blen = prim.load32(bh + 4)
+  let r = prim.alloc_set_str(alen)
+  let rh = prim.handle(r)
+  let w = __set_str_inter(ah, alen, bh, blen, rh, 0, 0)
+  prim.store32(rh + 4, w)
+  r
+}
+
+// Append a's elements NOT in b (difference) as deep copies.
+fn __set_str_diff(ah: Int, alen: Int, bh: Int, blen: Int, rh: Int, i: Int, w: Int) -> Int =
+  if i >= alen then w
+  else {
+    let x = prim.load_str(ah + 12 + i * 8)
+    let inB = __set_has_str(bh, blen, x, 0)
+    if inB then __set_str_diff(ah, alen, bh, blen, rh, i + 1, w)
+    else {
+      let copy = string.repeat(x, 1)
+      prim.store_str(rh + 12 + w * 8, copy)
+      __set_str_diff(ah, alen, bh, blen, rh, i + 1, w + 1)
+    }
+  }
+
+fn set_difference_str(a: Set[String], b: Set[String]) -> Set[String] = {
+  let ah = prim.handle(a)
+  let bh = prim.handle(b)
+  let alen = prim.load32(ah + 4)
+  let blen = prim.load32(bh + 4)
+  let r = prim.alloc_set_str(alen)
+  let rh = prim.handle(r)
+  let w = __set_str_diff(ah, alen, bh, blen, rh, 0, 0)
+  prim.store32(rh + 4, w)
+  r
+}
+
+// All of a's first `alen` elements present in b?
+fn __set_str_all_in(ah: Int, alen: Int, bh: Int, blen: Int, i: Int) -> Bool =
+  if i >= alen then true
+  else {
+    let x = prim.load_str(ah + 12 + i * 8)
+    let inB = __set_has_str(bh, blen, x, 0)
+    if inB then __set_str_all_in(ah, alen, bh, blen, i + 1)
+    else false
+  }
+
+fn set_is_subset_str(a: Set[String], b: Set[String]) -> Bool = {
+  let ah = prim.handle(a)
+  let bh = prim.handle(b)
+  let alen = prim.load32(ah + 4)
+  let blen = prim.load32(bh + 4)
+  __set_str_all_in(ah, alen, bh, blen, 0)
+}
+
+// None of a's first `alen` elements present in b?
+fn __set_str_none_in(ah: Int, alen: Int, bh: Int, blen: Int, i: Int) -> Bool =
+  if i >= alen then true
+  else {
+    let x = prim.load_str(ah + 12 + i * 8)
+    let inB = __set_has_str(bh, blen, x, 0)
+    if inB then false
+    else __set_str_none_in(ah, alen, bh, blen, i + 1)
+  }
+
+fn set_is_disjoint_str(a: Set[String], b: Set[String]) -> Bool = {
+  let ah = prim.handle(a)
+  let bh = prim.handle(b)
+  let alen = prim.load32(ah + 4)
+  let blen = prim.load32(bh + 4)
+  __set_str_none_in(ah, alen, bh, blen, 0)
+}
