@@ -672,6 +672,12 @@ fn fmt_expr(out: &mut String, expr: &Expr, depth: usize) {
             else { out.push('\n'); out.push_str(&ind(depth)); }
             out.push_str("else "); fmt_expr(out, else_, depth);
         }
+        ExprKind::IfLet { name, scrutinee, then, else_ } => {
+            out.push_str("if let "); out.push_str(name.as_str());
+            out.push_str(" = "); fmt_expr(out, scrutinee, depth);
+            out.push(' '); fmt_expr(out, then, depth);
+            out.push_str(" else "); fmt_expr(out, else_, depth);
+        }
         ExprKind::Match { subject, arms, .. } => {
             out.push_str("match "); fmt_expr(out, subject, depth); out.push_str(" {\n");
             let ai = ind(depth + 1);

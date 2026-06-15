@@ -167,6 +167,11 @@ pub enum ExprKind {
     Pipe { left: Box<Expr>, right: Box<Expr> },
     Compose { left: Box<Expr>, right: Box<Expr> },
     If { cond: Box<Expr>, then: Box<Expr>, else_: Box<Expr> },
+    /// `if let name = scrutinee { then } else { else_ }` — Swift-style implicit unwrap:
+    /// `name` binds the value INSIDE the scrutinee's Option/Result (the frontend desugars
+    /// to `match scrutinee { Some(name)|Ok(name) => then, _ => else_ }` once the scrutinee
+    /// type is known). Kept as a distinct node so the formatter preserves the surface form.
+    IfLet { name: Sym, scrutinee: Box<Expr>, then: Box<Expr>, else_: Box<Expr> },
     Match { subject: Box<Expr>, arms: Vec<MatchArm> },
     Block { stmts: Vec<Stmt>, expr: Option<Box<Expr>> },
     Fan { exprs: Vec<Expr> },
@@ -496,6 +501,9 @@ pub fn visit_expr_mut(expr: &mut Expr, f: &mut impl FnMut(&mut Expr)) {
         ExprKind::Unary { operand, .. } => visit_expr_mut(operand, f),
         ExprKind::If { cond, then, else_ } => {
             visit_expr_mut(cond, f); visit_expr_mut(then, f); visit_expr_mut(else_, f);
+        }
+        ExprKind::IfLet { scrutinee, then, else_, .. } => {
+            visit_expr_mut(scrutinee, f); visit_expr_mut(then, f); visit_expr_mut(else_, f);
         }
         ExprKind::Match { subject, arms } => {
             visit_expr_mut(subject, f);

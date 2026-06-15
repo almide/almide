@@ -9,6 +9,31 @@ impl Parser {
         let span = Some(self.current_span());
         self.expect(TokenType::If)?;
         self.skip_newlines();
+        // `if let name = scrutinee { then } else { else_ }` — Swift-style implicit
+        // unwrap (the frontend desugars to a Some/Ok match). The scrutinee is parsed
+        // with `parse_or` so a trailing `{` opens the then-block (not a record), the
+        // same trick `match` uses for its subject.
+        if self.check(TokenType::Let) {
+            self.expect(TokenType::Let)?;
+            self.skip_newlines();
+            let name = self.expect_ident()?;
+            self.skip_newlines();
+            self.expect(TokenType::Eq)?;
+            self.skip_newlines();
+            let scrutinee = self.parse_or()?;
+            self.skip_newlines();
+            let then = self.parse_brace_expr()?;
+            self.skip_newlines();
+            self.expect(TokenType::Else)?;
+            self.skip_newlines();
+            let else_ = self.parse_brace_expr()?;
+            return Ok(Expr::new(self.next_id(), span, ExprKind::IfLet {
+                name,
+                scrutinee: Box::new(scrutinee),
+                then: Box::new(then),
+                else_: Box::new(else_),
+            }));
+        }
         let cond = self.parse_expr()?;
         self.skip_newlines();
         self.expect(TokenType::Then)?;

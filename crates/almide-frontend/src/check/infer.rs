@@ -714,6 +714,39 @@ impl Checker {
                 then_ty
             }
 
+            ExprKind::IfLet { name, scrutinee, then, else_ } => {
+                // Swift-style implicit unwrap: `name` binds the value INSIDE the
+                // scrutinee's Option[T] / Result[T, E] (the T). Lowering desugars this
+                // to a `match` on Some/Ok once the scrutinee type is known; the checker
+                // only INFERS (no rewrite — desugar belongs in lowering).
+                let scrut_ty = self.infer_expr(scrutinee);
+                let resolved = resolve_ty(&scrut_ty, &self.uf);
+                let bound_ty = match &resolved {
+                    Ty::Applied(TypeConstructorId::Option, args) if args.len() == 1 => {
+                        args[0].clone()
+                    }
+                    Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => {
+                        args[0].clone()
+                    }
+                    Ty::Unknown => Ty::Unknown,
+                    other => {
+                        self.emit(super::err(
+                            format!("`if let` requires an Option or Result, found `{}`", other.display()),
+                            "bind the inner value of an Option/Result: `if let v = some_option { … } else { … }`".to_string(),
+                            "if let scrutinee".to_string(),
+                        ).with_code("E001"));
+                        Ty::Unknown
+                    }
+                };
+                self.env.push_scope();
+                self.env.define_var(name, bound_ty);
+                let then_ty = self.infer_expr(then);
+                self.env.pop_scope();
+                let else_ty = self.infer_expr(else_);
+                self.constrain_with_hint(then_ty.clone(), else_ty, "if let branches", None);
+                then_ty
+            }
+
             ExprKind::Match { subject, arms, .. } => {
                 let subject_ty = self.infer_expr(subject);
                 let sc = resolve_ty(&subject_ty, &self.uf);

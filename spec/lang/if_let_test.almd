@@ -1,0 +1,44 @@
+// if let — Swift-style implicit unwrap of Option/Result (task #32).
+// `if let name = scrutinee { … } else { … }` binds the UNWRAPPED inner value;
+// the frontend desugars it to a Some/Ok match once the scrutinee type is known.
+
+test "if let unwraps Some" {
+  let x: Option[Int] = Some(42)
+  let r = if let v = x { v } else { 0 }
+  assert_eq(r, 42)
+}
+
+test "if let takes the else branch on None" {
+  let x: Option[Int] = None
+  let r = if let v = x { v } else { 99 }
+  assert_eq(r, 99)
+}
+
+test "if let unwraps Ok" {
+  let x: Result[Int, String] = Ok(7)
+  let r = if let v = x { v + 1 } else { 0 }
+  assert_eq(r, 8)
+}
+
+test "if let takes the else branch on Err" {
+  let x: Result[Int, String] = Err("bad")
+  let r = if let v = x { v } else { 0 - 1 }
+  assert_eq(r, 0 - 1)
+}
+
+test "if let binds a String payload" {
+  let x: Option[String] = Some("hi")
+  let r = if let s = x { s } else { "none" }
+  assert_eq(r, "hi")
+}
+
+test "if let in statement position" {
+  var out = "none"
+  let x: Option[Int] = Some(5)
+  if let v = x {
+    out = int.to_string(v)
+  } else {
+    out = "none"
+  }
+  assert_eq(out, "5")
+}
