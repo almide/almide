@@ -86,6 +86,12 @@ fn alloc_list_str[A](n: Int) -> List[A] = _
 @intrinsic("almide_rt_prim_store_str")
 fn store_str[A](addr: Int, piece: A) -> Unit = _
 
+// Load the String handle at slot byte-address `addr` KEEPING its Ptr repr — a BORROW of the slot's
+// String (the dual of store_str's read side), for passing a List[String] element to a closure or a
+// String fn. The list still owns the element; the loaded value is not a second owner.
+@intrinsic("almide_rt_prim_load_str")
+fn load_str(addr: Int) -> String = _
+
 // The fd_write WASI host call — the only sandbox exit (reaches Stdout). Returns the
 // errno. `iov` points at an iovec array of `count` {ptr,len} pairs; `nw` receives
 // the bytes written.

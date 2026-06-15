@@ -58,7 +58,7 @@ impl LowerCtx {
         let repr = repr_of(result_ty)?;
         self.ops.push(Op::CallFn {
             dst: Some(dst),
-            name: format!("{module}.{func}"),
+            name: list_heap_call_name(module, func, result_ty),
             args: lowered,
             result: Some(repr),
         });
@@ -853,6 +853,9 @@ impl LowerCtx {
             "load8" => PrimKind::Load { width: 1 },
             "load32" => PrimKind::Load { width: 4 },
             "load64" => PrimKind::Load { width: 8 },
+            // Load a 4-byte handle KEEPING Ptr repr — reads a String element out of a list slot
+            // (a borrow of the slot's String, for passing to a closure / String fn).
+            "load_str" => PrimKind::LoadHandle,
             "store32" => PrimKind::Store { width: 4 },
             "store8" => PrimKind::Store { width: 1 },
             "store64" => PrimKind::Store { width: 8 },
@@ -889,6 +892,14 @@ impl LowerCtx {
             lowered.push(v);
         }
         let dst = if matches!(kind, PrimKind::Store { .. }) { None } else { Some(self.fresh_value()) };
+        // `prim.load_str` (LoadHandle) yields a BORROW of a list slot's String — the list still owns
+        // it. Mark the result BORROWED so a `let` binding does not add it to the scope-end drop set
+        // (that would double-free with the owning list's DropListStr).
+        if matches!(kind, PrimKind::LoadHandle) {
+            if let Some(d) = dst {
+                self.param_values.insert(d);
+            }
+        }
         self.ops.push(Op::Prim { kind, dst, args: lowered });
         Ok(dst)
     }

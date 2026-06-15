@@ -683,6 +683,23 @@ pub(crate) fn is_self_host_option_module_fn(module: &str, func: &str) -> bool {
 /// layout)? Its result may be tracked in `materialized_results` so an `Ok`/`Err` `match` over it
 /// EXECUTES. NARROW to fns actually self-hosted — any other Result is a deferred `Opaque` (len 0,
 /// would misread as `Ok`). `int.parse` is the canonical for string.to_int/to_integer/parse_int.
+/// The CallFn name for a stdlib `module.func` call, routing the REPR-POLYMORPHIC list combinators
+/// to their `_str` variant when the RESULT is a `List[heap]` (e.g. `list.map` over a `List[String]`
+/// → `list.map_str`, a DynListStr-result impl). The element repr (i64 vs i32 handle) demands a
+/// separate variant; the variant reads/writes via the heap-aware prim ops. Scalar-result lists keep
+/// the plain name. `module.func` is unchanged for everything else.
+pub(crate) fn list_heap_call_name(module: &str, func: &str, result_ty: &Ty) -> String {
+    use almide_lang::types::constructor::TypeConstructorId;
+    if module == "list" && matches!(func, "map") {
+        if let Ty::Applied(TypeConstructorId::List, args) = result_ty {
+            if args.len() == 1 && is_heap_ty(&args[0]) {
+                return format!("list.{func}_str");
+            }
+        }
+    }
+    format!("{module}.{func}")
+}
+
 pub(crate) fn is_self_host_result_module_fn(module: &str, func: &str) -> bool {
     matches!(
         (module, func),

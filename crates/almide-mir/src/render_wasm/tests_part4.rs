@@ -1261,6 +1261,42 @@
     }
 
     #[test]
+    fn self_hosted_list_map_str() {
+        // SELF-HOSTED list.map over a List[String] (the repr-poly _str variant, auto-dispatched on a
+        // List[heap] result). Each element is borrowed (prim.load_str), passed to the closure over
+        // the heap-arg ABI, and the fresh result moved into a DynListStr. map(split"a,b,c", repeat·2)
+        // = ["aa","bb","cc"], verified via list.join + list.len. Byte-matches v0.
+        let src = "fn main() -> Unit = {\n  \
+            let parts = string.split(\"a,b,c\", \",\")\n  \
+            let mapped = list.map(parts, (x) => string.repeat(x, 2))\n  \
+            println(int.to_string(list.len(mapped)))\n  \
+            println(list.join(mapped, \"-\")) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "list.map_str"));
+        if let Some(out) = build_and_run("self_hosted_list_map_str", &render_wasm_program(&prog)) {
+            assert_eq!(out, "3\naa-bb-cc");
+        }
+    }
+
+    #[test]
+    fn list_map_str_loop_is_bounded() {
+        // ADVERSARIAL leak/double-free guard: a loop mapping a List[String] through a closure each
+        // iteration must run in BOUNDED memory — the input list + elements (borrowed, freed by their
+        // own DropListStr), the closure's fresh element Strings and the result DynListStr are all
+        // freed once. Short uniform strings keep every block one-slot (20 bytes) for free-list reuse.
+        let src = "fn main() -> Unit = {\n  \
+            var i = 0\n  \
+            while i < 3000 {\n    \
+              let parts = string.split(\"a,b\", \",\")\n    let m = list.map(parts, (x) => string.repeat(x, 1))\n    \
+              let _l = list.len(m)\n    i = i + 1\n  }\n  \
+            println(\"done\") }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("list_map_str_loop_bounded", &render_wasm_program(&prog)) {
+            assert!(out.ends_with("done"), "loop must terminate (bounded memory)");
+        }
+    }
+
+    #[test]
     fn self_hosted_list_windows() {
         // SELF-HOSTED list.windows / list.window — all CONTIGUOUS (overlapping) sub-slices of length
         // n (v0's xs.windows(n): n>len → [], else len-n+1 windows). windows([1,2,3,4],2)=[[1,2],[2,3],

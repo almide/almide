@@ -43,6 +43,7 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
             ],
         ),
         (include_str!("../../../../stdlib/list_map.almd"), &[("list_map", "list.map")]),
+        (include_str!("../../../../stdlib/list_map_str.almd"), &[("list_map_str", "list.map_str")]),
         (include_str!("../../../../stdlib/list_filter.almd"), &[("list_filter", "list.filter")]),
         (
             include_str!("../../../../stdlib/list_anyall.almd"),

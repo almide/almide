@@ -289,7 +289,11 @@ impl LowerCtx {
                 let dst =
                     self.lower_pure_module_value_call(module.as_str(), func.as_str(), args, ty)?;
                 self.value_of.insert(var, dst);
-                self.live_heap_handles.push(dst);
+                // A BORROW result (`prim.load_str` of a list slot — the list still owns it) is NOT
+                // added to the scope-end drop set; everything else is a fresh owned value.
+                if !self.param_values.contains(&dst) {
+                    self.live_heap_handles.push(dst);
+                }
                 // A self-host Option fn (`list.get`) returns a real materialized Option —
                 // track the bound result so a later `match` over the var EXECUTES.
                 if is_self_host_option_module_fn(module.as_str(), func.as_str()) {
