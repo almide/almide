@@ -26,3 +26,8 @@ fn list_all(xs: List[Int], f: (Int) -> Bool) -> Bool = {
   let hits = __count_hits(prim.handle(xs), f, n, 0, 0)
   hits >= n
 }
+
+fn list_count(xs: List[Int], f: (Int) -> Bool) -> Int = {
+  let n = list.len(xs)
+  __count_hits(prim.handle(xs), f, n, 0, 0)
+}

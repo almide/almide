@@ -101,6 +101,25 @@
     }
 
     #[test]
+    fn self_hosted_list_count_and_while() {
+        // SELF-HOSTED `list.count` / `list.take_while` / `list.drop_while` (1-arity predicate,
+        // closures machinery). count([1..6], even)=3; take_while([2,4,5,6], even)=[2,4] (stops
+        // at 5); drop_while([2,4,5,6], even)=[5,6]. Predicate via CallIndirect, byte-match v0.
+        let src = "fn main() -> Unit = {\n  \
+            let c = list.count([1, 2, 3, 4, 5, 6], (x) => x % 2 == 0)\n  println(int.to_string(c))\n  \
+            let tw = list.take_while([2, 4, 5, 6], (x) => x % 2 == 0)\n  println(int.to_string(list.len(tw)))\n  println(int.to_string(list.sum(tw)))\n  \
+            let dw = list.drop_while([2, 4, 5, 6], (x) => x % 2 == 0)\n  println(int.to_string(list.len(dw)))\n  println(int.to_string(list.sum(dw))) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "list.count"));
+        assert!(prog.functions.iter().any(|f| f.name == "list.take_while"));
+        assert!(prog.functions.iter().any(|f| f.name == "list.drop_while"));
+        if let Some(out) = build_and_run("self_hosted_list_count_while", &render_wasm_program(&prog)) {
+            // count=3 ; take_while=[2,4] len2 sum6 ; drop_while=[5,6] len2 sum11
+            assert_eq!(out, "3\n2\n6\n2\n11");
+        }
+    }
+
+    #[test]
     fn self_hosted_list_take_end_drop_end() {
         // list.take_end/drop_end self-hosted: last n / all-but-last n, List[Int] slot-copy.
         // take_end([1,2,3,4,5],2)=[4,5] ([0]=4,len 2); drop_end([1,2,3,4,5],2)=[1,2,3]

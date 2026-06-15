@@ -1,0 +1,56 @@
+// list_whilep — SELF-HOSTED `list.take_while` / `list.drop_while` for v1 over the prim
+// floor + closures. take_while keeps the LEADING run where f(x) is true (stops at the first
+// false); drop_while removes that leading run and keeps the rest. Both invoke the predicate
+// f via CallIndirect through its slot, called once per inspected element (byte-matches v0).
+// List[Int]; elements are i64 VALUES copied (no new heap), result `len` patched to the kept
+// count (the over-allocated capacity is reclaimed by the free-list). Source borrowed.
+
+fn __takew_fill(dh: Int, sh: Int, f: (Int) -> Bool, n: Int, i: Int) -> Int =
+  if i >= n then i
+  else {
+    let x = prim.load64(sh + 12 + i * 8)
+    let h = f(x)
+    if h then {
+      prim.store64(dh + 12 + i * 8, x)
+      __takew_fill(dh, sh, f, n, i + 1)
+    } else {
+      i
+    }
+  }
+
+fn list_take_while(xs: List[Int], f: (Int) -> Bool) -> List[Int] = {
+  let n = list.len(xs)
+  let buf = prim.alloc_list(n)
+  let cnt = __takew_fill(prim.handle(buf), prim.handle(xs), f, n, 0)
+  prim.store32(prim.handle(buf) + 4, cnt)
+  buf
+}
+
+fn __dropw_skip(sh: Int, f: (Int) -> Bool, n: Int, i: Int) -> Int =
+  if i >= n then n
+  else {
+    let x = prim.load64(sh + 12 + i * 8)
+    let h = f(x)
+    if h then {
+      __dropw_skip(sh, f, n, i + 1)
+    } else {
+      i
+    }
+  }
+
+fn __copy_tail(dh: Int, sh: Int, si: Int, di: Int, n: Int) -> Int =
+  if si >= n then di
+  else {
+    let x = prim.load64(sh + 12 + si * 8)
+    prim.store64(dh + 12 + di * 8, x)
+    __copy_tail(dh, sh, si + 1, di + 1, n)
+  }
+
+fn list_drop_while(xs: List[Int], f: (Int) -> Bool) -> List[Int] = {
+  let n = list.len(xs)
+  let skip = __dropw_skip(prim.handle(xs), f, n, 0)
+  let keep = n - skip
+  let buf = prim.alloc_list(keep)
+  let _x = __copy_tail(prim.handle(buf), prim.handle(xs), skip, 0, n)
+  buf
+}

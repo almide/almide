@@ -45,7 +45,11 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
         (include_str!("../../../../stdlib/list_filter.almd"), &[("list_filter", "list.filter")]),
         (
             include_str!("../../../../stdlib/list_anyall.almd"),
-            &[("list_any", "list.any"), ("list_all", "list.all")],
+            &[("list_any", "list.any"), ("list_all", "list.all"), ("list_count", "list.count")],
+        ),
+        (
+            include_str!("../../../../stdlib/list_whilep.almd"),
+            &[("list_take_while", "list.take_while"), ("list_drop_while", "list.drop_while")],
         ),
         (include_str!("../../../../stdlib/list_len.almd"), &[("list_len", "list.len")]),
         (include_str!("../../../../stdlib/list_is_empty.almd"), &[("list_is_empty", "list.is_empty")]),
