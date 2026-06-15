@@ -35,3 +35,25 @@ fn float_to_uint32(f: Float) -> UInt32 = {
 
 // float.to_int64(f) -> the full-width saturating `f as i64` — exactly the prim float floor's f2i.
 fn float_to_int64(f: Float) -> Int64 = prim.f2i(f)
+
+// float.to_uint64(f) -> the saturating `f as u64` (NaN/negative -> 0, >= 2^64 -> u64::MAX). For
+// f < 2^63 this is f2i; for f in [2^63, 2^64) the value exceeds i64, so split off 2^63 and OR the
+// high bit back in (f2i saturates to i64::MAX for f >= 2^64, which | (1<<63) = u64::MAX). The u64
+// is returned as its i64 bit-pattern (negative for values >= 2^63).
+fn float_to_uint64(f: Float) -> UInt64 = {
+  let lt0 = prim.flt(f, 0.0)
+  if lt0 then 0
+  else {
+    let two62 = prim.bshl(1, 62)        // 2^63 as a Float — built at runtime (the literal
+    let f262 = prim.i2f(two62)          // 9223372036854775808.0 overflows the i64 float-literal
+    let two63 = prim.fadd(f262, f262)   // parser, so add 2^62 + 2^62 instead)
+    let big = prim.fge(f, two63)
+    if big then {
+      let g = prim.fsub(f, two63)
+      let lo = prim.f2i(g)
+      let hibit = prim.bshl(1, 63)
+      prim.bor(lo, hibit)
+    }
+    else prim.f2i(f)
+  }
+}

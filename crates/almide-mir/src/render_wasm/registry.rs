@@ -155,6 +155,7 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
                 ("float_to_uint16", "float.to_uint16"),
                 ("float_to_uint32", "float.to_uint32"),
                 ("float_to_int64", "float.to_int64"),
+                ("float_to_uint64", "float.to_uint64"),
             ],
         ),
         (

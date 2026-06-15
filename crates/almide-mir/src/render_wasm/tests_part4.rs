@@ -757,6 +757,25 @@
     }
 
     #[test]
+    fn self_hosted_float_to_uint64() {
+        // SELF-HOSTED float.to_uint64 — saturating `f as u64`. For the in-i64-range inputs:
+        // to_uint64(5.0)=5, (1000.9)=1000 (truncate), (-3.0)=0, (0.0)=0 — verified via int.to_string.
+        // (For f >= 2^63 the body splits off 2^63 and ORs the high bit back so the u64 is exact; the
+        // probe `prim.bor(prim.f2i(f-2^63), 1<<63)` produces i64::MIN for f=2^63, but a UInt64 result
+        // can't be int.to_string'd or `==`-compared from the test — verified inline separately.)
+        let src = "fn main() -> Unit = {\n  \
+            println(int.to_string(float.to_uint64(5.0)))\n  \
+            println(int.to_string(float.to_uint64(1000.9)))\n  \
+            let neg = float.from_int(0 - 3)\n  println(int.to_string(float.to_uint64(neg)))\n  \
+            println(int.to_string(float.to_uint64(0.0))) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "float.to_uint64"));
+        if let Some(out) = build_and_run("self_hosted_float_to_uint64", &render_wasm_program(&prog)) {
+            assert_eq!(out, "5\n1000\n0\n0");
+        }
+    }
+
+    #[test]
     fn self_hosted_float_convert() {
         // SELF-HOSTED float.to_int8/16/32 + to_uint8/16/32 — Rust's saturating `f as iN`/`as uN`
         // (out-of-range clamps to the type's min/max). prim.f2i truncates toward zero; the body
@@ -1105,5 +1124,9 @@
             assert_eq!(out, "4\n2\n3\n3\n5\n0");
         }
     }
+
+
+
+
 
 
