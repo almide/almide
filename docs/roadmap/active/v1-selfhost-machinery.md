@@ -31,13 +31,20 @@ memory bug. Cert-neutral (Alloc = i init-agnostic; markers no-op; scalar prims):
 corpus-wall ACCEPT UNCHANGED 13139/4083/3582. Tests: `variant_match_over_a_materialized_
 option_executes` (Some(42)/None → 42/none), `option_allocating_loop_matches_bounded`
 (3000-iter materialize+match+free = bounded, no leak). SCALAR payload + UNIT arms only.
-**NEXT (the remaining wiring for the NAMED fns)**: (a) CALL-RESULT tracking — mark a
-`CallFn`/Module-call dst materialized when the callee is a self-host Option fn, so
-`let o = list.get(xs,i); match o` and `match list.get(…)` execute → then self-host
-list.get/first/last (the impl uses `some_int(x)=Some(x)`/`none_int()=None` helpers so the
-materialization stays in TAIL position; list.get's body is a heap-result-if with those
-CALL arms, already handled). (b) scalar-RESULT arms (`let s = match o { Some(x)=>…, None=>…}`).
-(c) heap payload (Some[String] — the element-alias refinement).
+**NAMED FNS DONE — list.get / list.first / list.last self-hosted** (commits "Self-host
+list.get…" + "Self-host list.first and list.last…"). CALL-RESULT tracking landed:
+`is_self_host_option_module_fn(module,func)` (the SINGLE source shared by binds.rs's
+bound-var path and control.rs's direct-subject path) marks a self-host Option call's dst
+materialized, so BOTH `let o = list.get(xs,i); match o` AND `match list.get(…)` execute.
+The impls (stdlib/list_get.almd) return `Some(scalar)`/`None` through TAIL-materialized
+helpers (`__opt_some_at`/`__opt_none_int`, the tail.rs OptionSome/None hook); list.get's
+body is a heap-result-if with those CALL arms (already handled). get(1)=Some(20)/get(5)=
+None, first([10,20,30])=Some(10)/last=Some(30)/first([])=None all byte-match v0; a
+2000-iter list.get-and-match loop is bounded (no leak). corpus-wall ACCEPT unchanged.
+**NEXT**: (a) scalar-RESULT arms (`let s = match o { Some(x)=>…, None=>…}`). (b) heap
+payload (Some[String] — the element-alias refinement). (c) `??`/`!` over a materialized
+Option (the unwrap operators, deferred today). (d) string.split / list.map (the harder
+List-building / closure machinery — Machinery 2/3).
 
 **Layout (DE-RISKED): Option = a 0-or-1-element LIST block** — reuse the existing list layout
 `[rc][len@4][cap@8][data@12]`. `None` = a 0-element list (len=0). `Some(x)` = a 1-element list
