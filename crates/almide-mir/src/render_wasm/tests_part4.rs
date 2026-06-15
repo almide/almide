@@ -1240,6 +1240,33 @@
     }
 
     #[test]
+    fn self_hosted_string_to_int() {
+        // SELF-HOSTED string.to_int = s.trim().parse::<i64>(). Ok values via result.unwrap_or (a
+        // negative is printed as its negation since int.to_string is non-negative); the Err path is
+        // checked by is_err + the message LENGTH and first byte, which pin Rust's exact ParseIntError
+        // strings: empty=38/'c', invalid digit=29/'i', too large=38/'n'@'l', too small=38/'n'@'s'.
+        let src = "fn ms(r: Result[Int, String]) -> Int = {\n  let mh = prim.load64(prim.handle(r) + 12)\n  prim.load32(mh + 4)\n}\n\
+                   fn mb(r: Result[Int, String], at: Int) -> Int = {\n  let mh = prim.load64(prim.handle(r) + 12)\n  prim.load8(mh + 12 + at)\n}\n\
+                   fn main() -> Unit = {\n  \
+            let a = int.parse(\"42\")\n  println(int.to_string(result.unwrap_or(a, 0)))\n  \
+            let b = int.parse(\" -7 \")\n  let bv = result.unwrap_or(b, 0)\n  let bn = 0 - bv\n  println(int.to_string(bn))\n  \
+            let c = int.parse(\"+99\")\n  println(int.to_string(result.unwrap_or(c, 0)))\n  \
+            let z = int.parse(\"0\")\n  println(int.to_string(result.unwrap_or(z, 0 - 1)))\n  \
+            let mx = int.parse(\"9223372036854775807\")\n  println(int.to_string(result.unwrap_or(mx, 0)))\n  \
+            let e = int.parse(\"\")\n  let e1 = result.is_err(e)\n  let ze = if e1 then 1 else 0\n  println(int.to_string(ze))\n  println(int.to_string(ms(e)))\n  println(int.to_string(mb(e, 0)))\n  \
+            let iv = int.parse(\"12a\")\n  let iv1 = result.is_err(iv)\n  let zi = if iv1 then 1 else 0\n  println(int.to_string(zi))\n  println(int.to_string(ms(iv)))\n  println(int.to_string(mb(iv, 0)))\n  \
+            let tl = int.parse(\"9223372036854775808\")\n  let tl1 = result.is_err(tl)\n  let zl = if tl1 then 1 else 0\n  println(int.to_string(zl))\n  println(int.to_string(ms(tl)))\n  println(int.to_string(mb(tl, 11)))\n  \
+            let tsm = int.parse(\"-9223372036854775809\")\n  let ts1 = result.is_err(tsm)\n  let zs = if ts1 then 1 else 0\n  println(int.to_string(zs))\n  println(int.to_string(ms(tsm)))\n  println(int.to_string(mb(tsm, 11))) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "int.parse"));
+        if let Some(out) = build_and_run("self_hosted_string_to_int", &render_wasm_program(&prog)) {
+            // 42 ; -7 (printed negated = 7) ; 99 ; 0 ; i64::MAX ; empty(is_err 1, len 38, 'c'=99) ;
+            // invalid(1, 29, 'i'=105) ; too-large(1, 38, byte11 'l'=108) ; too-small(1, 38, 's'=115)
+            assert_eq!(out, "42\n7\n99\n0\n9223372036854775807\n1\n38\n99\n1\n29\n105\n1\n38\n108\n1\n38\n115");
+        }
+    }
+
+    #[test]
     fn self_hosted_result_to_option() {
         // SELF-HOSTED result.to_option: Ok → Some(value), Err → None. It READS the Result len-tag and
         // BUILDS a fresh Option[Int] over v1's own Option machinery; a `match` over the result then
@@ -1281,9 +1308,4 @@
             assert_eq!(out, "done");
         }
     }
-
-
-
-
-
 
