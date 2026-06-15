@@ -1261,6 +1261,29 @@
     }
 
     #[test]
+    fn self_hosted_bytes_read_array() {
+        // SELF-HOSTED bytes.read_u16_le_array / read_u32_le_array / read_i32_le_array — read `count`
+        // fixed-width LE values into a List[Int], reusing the scalar reads (0-padded out of range).
+        // u16 [1,0,2,0,255,255]@0×3=[1,2,65535]; u32 [1,0,0,0,2,0,0,0]@0×2 sum 3; i32 [255×4]×1=-1
+        // (printed negated = 1); OOB u16 [1,0]@0×3=[1,0,0] (len 3, sum 1). Byte-matches v0.
+        let src = "fn main() -> Unit = {\n  \
+            let b = bytes.from_list([1, 0, 2, 0, 255, 255])\n  let a = bytes.read_u16_le_array(b, 0, 3)\n  \
+            println(int.to_string(list.len(a)))\n  println(int.to_string(list.get_or(a, 0, 0)))\n  \
+            println(int.to_string(list.get_or(a, 2, 0)))\n  \
+            let b2 = bytes.from_list([1, 0, 0, 0, 2, 0, 0, 0])\n  let a2 = bytes.read_u32_le_array(b2, 0, 2)\n  \
+            println(int.to_string(list.sum(a2)))\n  \
+            let b3 = bytes.from_list([255, 255, 255, 255])\n  let a3 = bytes.read_i32_le_array(b3, 0, 1)\n  \
+            let v = list.get_or(a3, 0, 0)\n  let nv = 0 - v\n  println(int.to_string(nv))\n  \
+            let b4 = bytes.from_list([1, 0])\n  let a4 = bytes.read_u16_le_array(b4, 0, 3)\n  \
+            println(int.to_string(list.len(a4)))\n  println(int.to_string(list.sum(a4))) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "bytes.read_u16_le_array"));
+        if let Some(out) = build_and_run("self_hosted_bytes_read_array", &render_wasm_program(&prog)) {
+            assert_eq!(out, "3\n1\n65535\n3\n1\n3\n1");
+        }
+    }
+
+    #[test]
     fn self_hosted_list_get_first_last_str() {
         // SELF-HOSTED list.get / list.first / list.last over a List[String] → Option[String] (the
         // repr-poly _str accessors). An in-bounds element is returned as Some(a deep copy); out of

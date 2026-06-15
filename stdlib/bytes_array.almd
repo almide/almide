@@ -1,0 +1,49 @@
+// bytes_array — SELF-HOSTED bytes.read_*_array for v1: read `count` fixed-width values starting at
+// `pos` into a fresh List[Int]. Each element reuses the corresponding self-hosted scalar read (which
+// already yields 0 for an out-of-range slot), so the array is always `count` long with 0-padding —
+// exactly v0's per-element loop. `b` is borrowed; the result List[Int] is owned.
+
+fn __arr_u16le(b: Bytes, dh: Int, pos: Int, count: Int, i: Int) -> Int =
+  if i >= count then 0
+  else {
+    let v = bytes.read_u16_le(b, pos + i * 2)
+    prim.store64(dh + 12 + i * 8, v)
+    __arr_u16le(b, dh, pos, count, i + 1)
+  }
+
+fn bytes_read_u16_le_array(b: Bytes, pos: Int, count: Int) -> List[Int] = {
+  let n = if count > 0 then count else 0
+  let buf = prim.alloc_list(n)
+  let _x = __arr_u16le(b, prim.handle(buf), pos, n, 0)
+  buf
+}
+
+fn __arr_u32le(b: Bytes, dh: Int, pos: Int, count: Int, i: Int) -> Int =
+  if i >= count then 0
+  else {
+    let v = bytes.read_u32_le(b, pos + i * 4)
+    prim.store64(dh + 12 + i * 8, v)
+    __arr_u32le(b, dh, pos, count, i + 1)
+  }
+
+fn bytes_read_u32_le_array(b: Bytes, pos: Int, count: Int) -> List[Int] = {
+  let n = if count > 0 then count else 0
+  let buf = prim.alloc_list(n)
+  let _x = __arr_u32le(b, prim.handle(buf), pos, n, 0)
+  buf
+}
+
+fn __arr_i32le(b: Bytes, dh: Int, pos: Int, count: Int, i: Int) -> Int =
+  if i >= count then 0
+  else {
+    let v = bytes.read_i32_le(b, pos + i * 4)
+    prim.store64(dh + 12 + i * 8, v)
+    __arr_i32le(b, dh, pos, count, i + 1)
+  }
+
+fn bytes_read_i32_le_array(b: Bytes, pos: Int, count: Int) -> List[Int] = {
+  let n = if count > 0 then count else 0
+  let buf = prim.alloc_list(n)
+  let _x = __arr_i32le(b, prim.handle(buf), pos, n, 0)
+  buf
+}
