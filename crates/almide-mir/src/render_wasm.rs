@@ -646,6 +646,10 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
         ),
         (include_str!("../../../stdlib/string_slice.almd"), &[("string_slice", "string.slice")]),
         (
+            include_str!("../../../stdlib/string_is_digit.almd"),
+            &[("string_is_digit", "string.is_digit")],
+        ),
+        (
             include_str!("../../../stdlib/string_take_drop.almd"),
             &[
                 ("string_take", "string.take"),
@@ -2622,6 +2626,23 @@ mod tests {
         assert!(prog.functions.iter().any(|f| f.name == "string.slice"));
         if let Some(out) = build_and_run("string_slice", &render_wasm_program(&prog)) {
             assert_eq!(out, "ell\n日本");
+        }
+    }
+
+    #[test]
+    fn self_hosted_string_is_digit_ascii_byte_scan() {
+        // string.is_digit self-hosted: !empty && every codepoint an ASCII digit, via a
+        // byte scan over [48,57]. is_digit("12345")=true, is_digit("12a45")=false,
+        // is_digit("")=false, is_digit("日")=false (multibyte lead byte >= 0x80).
+        let src = "fn main() -> Unit = {\n  \
+            let a = string.is_digit(\"12345\")\n  if a then println(\"T1\") else println(\"F1\")\n  \
+            let b = string.is_digit(\"12a45\")\n  if b then println(\"T2\") else println(\"F2\")\n  \
+            let c = string.is_digit(\"\")\n  if c then println(\"T3\") else println(\"F3\")\n  \
+            let d = string.is_digit(\"日\")\n  if d then println(\"T4\") else println(\"F4\") }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "string.is_digit"));
+        if let Some(out) = build_and_run("string_is_digit", &render_wasm_program(&prog)) {
+            assert_eq!(out, "T1\nF2\nF3\nF4");
         }
     }
 

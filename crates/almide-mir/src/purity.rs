@@ -52,7 +52,7 @@ pub const PURE_MODULES: &[&str] = &[
     "base64", "bytes", "error", "float", "float32", "hex", "html", "int", "int16",
     "int32", "int8", "int_bitcount", "int_bits", "int_hex", "int_scalar", "int_to_string", "json", "list", "list_dedup", "list_fold", "list_get", "list_get_or", "list_intersperse", "list_is_empty",
     "list_len", "list_make", "list_reverse", "list_search", "list_sort", "list_sum", "list_take_drop", "list_unique", "map", "math", "math_int", "matrix", "option", "path", "regex", "result",
-    "set", "string", "string_is_empty",
+    "set", "string", "string_is_digit", "string_is_empty",
     "string_len", "string_pad", "string_repeat", "string_replace", "string_reverse", "string_search", "string_slice", "string_take_drop", "string_to_bytes", "string_trim",
     "uint16", "uint32",
     "uint64", "uint8", "value",
