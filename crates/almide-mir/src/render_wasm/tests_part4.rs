@@ -1836,6 +1836,33 @@
     }
 
     #[test]
+    fn self_hosted_map_string_string_higher_order() {
+        // SELF-HOSTED higher-order Map[String,String]: filter/all/any/count ((K,V)->Bool, 2-arg) +
+        // fold ((Acc,K,V)->Acc, 3-arg, mixing scalar Acc + heap K/V). m={a:xx, bb:y, c:zzz}: filter
+        // (len(v)>1)={a:xx, c:zzz} len 2; all(len(k)>=1)=true; any(len(v)==3)=true; count(len(k)==1)
+        // =2 (a,c); fold(0, acc+len(k)+len(v)) = (1+2)+(2+1)+(1+3) = 10. Byte-matches v0.
+        let src = "fn main() -> Unit = {\n  \
+            let m1 = map.set(map.new(), \"a\", \"xx\")\n  let m2 = map.set(m1, \"bb\", \"y\")\n  \
+            let m = map.set(m2, \"c\", \"zzz\")\n  \
+            let fm = map.filter(m, (k, v) => { let l = string.len(v)\n l > 1 })\n  \
+            println(int.to_string(map.len(fm)))\n  \
+            let al = map.all(m, (k, v) => { let l = string.len(k)\n l >= 1 })\n  \
+            let va = if al then 1 else 0\n  println(int.to_string(va))\n  \
+            let an = map.any(m, (k, v) => { let l = string.len(v)\n l == 3 })\n  \
+            let vn = if an then 1 else 0\n  println(int.to_string(vn))\n  \
+            let cn = map.count(m, (k, v) => { let l = string.len(k)\n l == 1 })\n  \
+            println(int.to_string(cn))\n  \
+            let tot = map.fold(m, 0, (acc, k, v) => { let lk = string.len(k)\n let lv = string.len(v)\n acc + lk + lv })\n  \
+            println(int.to_string(tot)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "map.filter_str"));
+        assert!(prog.functions.iter().any(|f| f.name == "map.fold_str"));
+        if let Some(out) = build_and_run("self_hosted_map_string_string_higher_order", &render_wasm_program(&prog)) {
+            assert_eq!(out, "2\n1\n1\n2\n10");
+        }
+    }
+
+    #[test]
     fn self_hosted_map_string_string_loop_reclaims() {
         // SOUNDNESS for the Map[String,String] nested-ownership path: a bounded loop building +
         // dropping a fresh Map[String,String] each iteration must reclaim every key + value String +
