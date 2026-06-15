@@ -295,6 +295,11 @@ impl LowerCtx {
                 if is_self_host_option_module_fn(module.as_str(), func.as_str()) {
                     self.materialized_options.insert(dst);
                 }
+                // A self-host Result fn (`int.parse`) returns a real materialized Result — track it
+                // so a later `match r { Ok(v) => …, Err(e) => … }` over the var EXECUTES.
+                if is_self_host_result_module_fn(module.as_str(), func.as_str()) {
+                    self.materialized_results.insert(dst);
+                }
                 // A `List[String]` result (string.split / a List[String] combinator) is a
                 // nested-ownership list — its scope-end drop must recursively free elements.
                 if is_heap_elem_list_ty(ty) {

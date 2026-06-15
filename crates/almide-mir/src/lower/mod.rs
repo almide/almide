@@ -223,6 +223,12 @@ pub(crate) struct LowerCtx {
     /// `None`, so it keeps the sound LINEARIZED match. This is the gate that makes the
     /// len-as-tag execution safe without any global materialization invariant.
     materialized_options: HashSet<ValueId>,
+    /// MIR values KNOWN to be MATERIALIZED Results (the DynListStr len-as-tag layout: `Ok(int)` =
+    /// len 0 with the value in slot 0, `Err(string)` = len 1 owning the message). An `Ok`/`Err`
+    /// `match` may EXECUTE (read `len` as the tag — len 0 → Ok, len != 0 → Err — and extract slot
+    /// 0) ONLY over a subject in this set; any other Result is a deferred `Opaque` (len 0 → MISREADS
+    /// as Ok) and keeps the sound LINEARIZED match. The Result analogue of `materialized_options`.
+    materialized_results: HashSet<ValueId>,
     /// Lambda-lifted auxiliary functions produced while lowering this function's body
     /// (a non-capturing `let f = (x) => …` or a lambda call-argument lifts its body to a
     /// fresh MirFunction here, bound via `Op::FuncRef`). `lower_function_all` returns these
@@ -669,6 +675,14 @@ pub(crate) fn is_self_host_option_module_fn(module: &str, func: &str) -> bool {
         "result" => matches!(func, "to_option"),
         _ => false,
     }
+}
+
+/// Does `module.func` return a real MATERIALIZED `Result[Int, String]` (the DynListStr len-as-tag
+/// layout)? Its result may be tracked in `materialized_results` so an `Ok`/`Err` `match` over it
+/// EXECUTES. NARROW to fns actually self-hosted — any other Result is a deferred `Opaque` (len 0,
+/// would misread as `Ok`). `int.parse` is the canonical for string.to_int/to_integer/parse_int.
+pub(crate) fn is_self_host_result_module_fn(module: &str, func: &str) -> bool {
+    matches!((module, func), ("int", "parse"))
 }
 
 pub(crate) fn alloc_init(value: &IrExpr) -> Init {

@@ -1240,6 +1240,45 @@
     }
 
     #[test]
+    fn self_hosted_result_match_ok_err() {
+        // THE Result match-extract: `match int.parse(s) { Ok(v) => …, Err(e) => … }` EXECUTES — the
+        // Ok arm binds the scalar value (slot 0, len-tag 0), the Err arm binds the message String
+        // (borrowed LoadHandle of slot 0, freed by the Result's scope-end DropListStr). This finally
+        // prints the Err MESSAGE directly, byte-matching Rust's exact ParseIntError strings.
+        let src = "fn main() -> Unit = {\n  \
+            let r1 = int.parse(\"42\")\n  match r1 {\n    Ok(v) => println(int.to_string(v)),\n    Err(e) => println(e),\n  }\n  \
+            let r2 = int.parse(\" -7 \")\n  match r2 {\n    Ok(v) => { let n = 0 - v\n println(int.to_string(n)) },\n    Err(e) => println(e),\n  }\n  \
+            let r3 = int.parse(\"abc\")\n  match r3 {\n    Ok(v) => println(int.to_string(v)),\n    Err(e) => println(e),\n  }\n  \
+            let r4 = int.parse(\"\")\n  match r4 {\n    Ok(v) => println(int.to_string(v)),\n    Err(e) => println(e),\n  }\n  \
+            let r5 = int.parse(\"9999999999999999999999\")\n  match r5 {\n    Ok(v) => println(int.to_string(v)),\n    Err(e) => println(e),\n  } }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "int.parse"));
+        if let Some(out) = build_and_run("self_hosted_result_match_ok_err", &render_wasm_program(&prog)) {
+            assert_eq!(out, "42\n7\ninvalid digit found in string\ncannot parse integer from empty string\nnumber too large to fit in target type");
+        }
+    }
+
+    #[test]
+    fn result_match_loop_is_bounded() {
+        // ADVERSARIAL leak/double-free guard for the Result MATCH-extract: a loop that materializes
+        // a Result, tag-matches it (Ok arm binds the scalar value), and drops it each iteration must
+        // run in BOUNDED memory. The Ok block is one element-slot wide (same 20-byte size as the "k"
+        // arm string), so the head-only free-list reuses them. The match reads are borrows (no
+        // ownership change); the subject is freed by the scope-end DropListStr exactly once.
+        let src = "fn main() -> Unit = {\n  \
+            var i = 0\n  \
+            while i < 4000 {\n    \
+              let r = int.parse(\"42\")\n    \
+              match r {\n      Ok(v) => println(\"k\"),\n      Err(e) => println(e),\n    }\n    \
+              i = i + 1\n  }\n  \
+            println(\"done\") }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("result_match_loop_bounded", &render_wasm_program(&prog)) {
+            assert!(out.ends_with("done"), "loop must terminate (bounded memory)");
+        }
+    }
+
+    #[test]
     fn self_hosted_string_to_int() {
         // SELF-HOSTED string.to_int = s.trim().parse::<i64>(). Ok values via result.unwrap_or (a
         // negative is printed as its negation since int.to_string is non-negative); the Err path is

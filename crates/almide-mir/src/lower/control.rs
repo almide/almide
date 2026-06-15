@@ -81,11 +81,17 @@ impl LowerCtx {
                     if is_self_host_option_call(subject) {
                         self.materialized_options.insert(v);
                     }
+                    if is_self_host_result_call(subject) {
+                        self.materialized_results.insert(v);
+                    }
                 }
-                // A `match` over a MATERIALIZED Option (`Some(scalar)`/`None`) EXECUTES
-                // — only the taken arm runs — when the subject is tracked; otherwise it
-                // LINEARIZES below (the sound both-arms fallback).
+                // A `match` over a MATERIALIZED Option (`Some(scalar)`/`None`) or Result
+                // (`Ok(scalar)`/`Err(string)`) EXECUTES — only the taken arm runs — when the
+                // subject is tracked; otherwise it LINEARIZES below (the sound both-arms fallback).
                 if self.try_lower_variant_match(subject_value, arms) {
+                    return Ok(());
+                }
+                if self.try_lower_result_match(subject_value, arms) {
                     return Ok(());
                 }
                 for arm in arms {
@@ -389,6 +395,104 @@ impl LowerCtx {
         }
         self.ops.push(Op::Else { val: None });
         if self.lower_branch_arm(None, none_body).is_err() {
+            self.ops.truncate(ops_mark);
+            self.live_heap_handles.truncate(lhh_mark);
+            return false;
+        }
+        self.ops.push(Op::EndIf { val: None });
+        true
+    }
+
+    /// EXECUTE a `match r { Ok(v) => …, Err(e) => … }` over a MATERIALIZED Result — only the taken
+    /// arm runs. The Result analogue of [`Self::try_lower_variant_match`], reusing the same
+    /// per-arm-balanced cert: the markers no-op in `verify_ownership`, each arm is a per-arm frame,
+    /// the tag/payload reads are scalar prims. The len-as-tag is INVERSE of Option: `len == 0` = Ok
+    /// (the value is a scalar slot-0 COPY, load64), `len != 0` = Err (the message is a borrowed
+    /// `LoadHandle` of slot 0 — the Result owns it, freed by the scope-end DropListStr, so the bound
+    /// var is not a second owner). SOUNDNESS — gated on `subject ∈ materialized_results`: only a
+    /// known DynListStr-Result is read len-as-tag; any other (deferred `Opaque`, len 0) would
+    /// MISREAD as Ok, so it is not in the set and keeps the sound LINEARIZED match.
+    pub(crate) fn try_lower_result_match(
+        &mut self,
+        subject_value: Option<ValueId>,
+        arms: &[IrMatchArm],
+    ) -> bool {
+        use crate::PrimKind;
+        let subj = match subject_value {
+            Some(v) if self.materialized_results.contains(&v) => v,
+            _ => return false,
+        };
+        if arms.len() != 2 || arms.iter().any(|a| a.guard.is_some()) {
+            return false;
+        }
+        // Exactly [Ok(scalar-bind?), Err(heap-bind?)], no nested ctors, Unit bodies. An Ok binds a
+        // SCALAR Int (value copy); an Err binds a heap String (borrowed slot-0 handle), gated to a
+        // nested-ownership subject (so the Result keeps ownership through its DropListStr).
+        let mut ok: Option<(&IrExpr, Option<VarId>)> = None;
+        let mut err: Option<(&IrExpr, Option<(VarId, bool)>)> = None;
+        for arm in arms {
+            match &arm.pattern {
+                IrPattern::Ok { inner } => {
+                    let bind = match inner.as_ref() {
+                        IrPattern::Bind { var, ty } if !is_heap_ty(ty) => Some(*var),
+                        IrPattern::Wildcard => None,
+                        _ => return false,
+                    };
+                    if ok.is_some() {
+                        return false;
+                    }
+                    ok = Some((&arm.body, bind));
+                }
+                IrPattern::Err { inner } => {
+                    let bind = match inner.as_ref() {
+                        IrPattern::Bind { var, ty }
+                            if is_heap_ty(ty) && self.heap_elem_lists.contains(&subj) =>
+                        {
+                            Some((*var, true))
+                        }
+                        IrPattern::Wildcard => None,
+                        _ => return false,
+                    };
+                    if err.is_some() {
+                        return false;
+                    }
+                    err = Some((&arm.body, bind));
+                }
+                _ => return false,
+            }
+        }
+        let ((ok_body, ok_bind), (err_body, err_bind)) = match (ok, err) {
+            (Some(o), Some(e)) => (o, e),
+            _ => return false,
+        };
+        if !matches!(ok_body.ty, Ty::Unit) || !matches!(err_body.ty, Ty::Unit) {
+            return false;
+        }
+        // tag = load32(handle(subj) + 4); if tag != 0 then Err-arm else Ok-arm (len 0 = Ok).
+        let ops_mark = self.ops.len();
+        let lhh_mark = self.live_heap_handles.len();
+        let h = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![subj] });
+        let tag = self.load_at_offset(h, 4, PrimKind::Load { width: 4 });
+        self.ops.push(Op::IfThen { cond: tag, dst: None });
+        // THEN (tag != 0 = Err): the message is the BORROWED slot-0 handle.
+        if let Some((bind_var, _)) = err_bind {
+            let payload = self.load_at_offset(h, 12, PrimKind::LoadHandle);
+            self.value_of.insert(bind_var, payload);
+            self.param_values.insert(payload);
+        }
+        if self.lower_branch_arm(None, err_body).is_err() {
+            self.ops.truncate(ops_mark);
+            self.live_heap_handles.truncate(lhh_mark);
+            return false;
+        }
+        self.ops.push(Op::Else { val: None });
+        // ELSE (tag == 0 = Ok): the value is the scalar slot-0 COPY.
+        if let Some(bind_var) = ok_bind {
+            let payload = self.load_at_offset(h, 12, PrimKind::Load { width: 8 });
+            self.value_of.insert(bind_var, payload);
+        }
+        if self.lower_branch_arm(None, ok_body).is_err() {
             self.ops.truncate(ops_mark);
             self.live_heap_handles.truncate(lhh_mark);
             return false;
@@ -1083,6 +1187,15 @@ fn is_self_host_option_call(subject: &IrExpr) -> bool {
     match &subject.kind {
         IrExprKind::Call { target: CallTarget::Module { module, func, .. }, .. } => {
             is_self_host_option_module_fn(module.as_str(), func.as_str())
+        }
+        _ => false,
+    }
+}
+
+fn is_self_host_result_call(subject: &IrExpr) -> bool {
+    match &subject.kind {
+        IrExprKind::Call { target: CallTarget::Module { module, func, .. }, .. } => {
+            is_self_host_result_module_fn(module.as_str(), func.as_str())
         }
         _ => false,
     }
