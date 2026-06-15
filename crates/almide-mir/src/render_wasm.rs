@@ -615,6 +615,7 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
                 ("string_ends_with", "string.ends_with"),
                 ("string_contains", "string.contains"),
                 ("string_count", "string.count"),
+                ("string_index_of", "string.index_of"),
             ],
         ),
     ]
@@ -1553,6 +1554,43 @@ mod tests {
         assert!(prog.functions.iter().any(|f| f.name == "string.count"), "linked");
         if let Some(out) = build_and_run("string_count", &render_wasm_program(&prog)) {
             assert_eq!(out, "2\n1\n0\n3");
+        }
+    }
+
+    #[test]
+    fn self_hosted_string_index_of() {
+        // string.index_of self-hosted (Option[Int], CODEPOINT index matching v0): index_of(
+        // "abcdef","cd")=Some(2), ("abcdef","zz")=None, ("日本語","語")=Some(2) — the codepoint
+        // index 2, NOT the byte offset 6. The Option result is tracked (string gate) so the
+        // match executes the taken arm.
+        let src = "fn main() -> Unit = {\n  \
+            match string.index_of(\"abcdef\", \"cd\") {\n    \
+            Some(x) => println(int.to_string(x)),\n    None => println(\"none\"),\n  }\n  \
+            match string.index_of(\"abcdef\", \"zz\") {\n    \
+            Some(x) => println(int.to_string(x)),\n    None => println(\"none\"),\n  }\n  \
+            match string.index_of(\"日本語\", \"語\") {\n    \
+            Some(x) => println(int.to_string(x)),\n    None => println(\"none\"),\n  } }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "string.index_of"), "linked");
+        if let Some(out) = build_and_run("string_index_of", &render_wasm_program(&prog)) {
+            assert_eq!(out, "2\nnone\n2");
+        }
+    }
+
+    #[test]
+    fn self_hosted_string_index_of_loop_bounded() {
+        // ADVERSARIAL: index_of + match every iteration must be bounded — the per-call
+        // materialized Option is freed at the iteration's end (the string gate tracks it).
+        let src = "fn main() -> Unit = {\n  \
+            var i = 0\n  \
+            while i < 2000 {\n    \
+            match string.index_of(\"abcdef\", \"cd\") {\n      \
+            Some(x) => println(int.to_string(x)),\n      None => println(\"none\"),\n    }\n    \
+            i = i + 1\n  } }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("index_of_loop", &render_wasm_program(&prog)) {
+            assert_eq!(out.lines().count(), 2000, "every iteration prints (no OOM/leak)");
+            assert!(out.lines().all(|l| l == "2"));
         }
     }
 

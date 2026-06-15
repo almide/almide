@@ -551,7 +551,11 @@ pub(crate) fn find_var_ty(stmts: &[IrStmt], var: VarId) -> Option<Ty> {
 /// subject path (control.rs) — keep them in sync to avoid tracking a non-materialized
 /// call (which would misread as `None`). Add a name only when its self-host impl lands.
 pub(crate) fn is_self_host_option_module_fn(module: &str, func: &str) -> bool {
-    module == "list" && matches!(func, "get" | "first" | "last")
+    match module {
+        "list" => matches!(func, "get" | "first" | "last"),
+        "string" => func == "index_of",
+        _ => false,
+    }
 }
 
 pub(crate) fn alloc_init(value: &IrExpr) -> Init {
