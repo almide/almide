@@ -679,6 +679,7 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
                 ("int_bnot", "int.bnot"),
             ],
         ),
+        (include_str!("../../../stdlib/int_hex.almd"), &[("int_to_hex", "int.to_hex")]),
         (
             include_str!("../../../stdlib/int_scalar.almd"),
             &[
@@ -1776,6 +1777,29 @@ mod tests {
         assert!(prog.functions.iter().any(|f| f.name == "int.next_power_of_two"), "linked");
         if let Some(out) = build_and_run("int_pow2", &render_wasm_program(&prog)) {
             assert_eq!(out, "8\n8\n1\n4\n8\n0");
+        }
+    }
+
+    #[test]
+    fn self_hosted_int_to_hex() {
+        // int.to_hex self-hosted (lowercase {:x}, no leading zeros, negatives as the full
+        // unsigned 64-bit): to_hex(255)=ff, to_hex(0)=0, to_hex(16)=10, to_hex(10)=a,
+        // to_hex(-1)=ffffffffffffffff. byte-matching v0.
+        let src = "fn main() -> Unit = {\n  \
+            let a = int.to_hex(255)\n  \
+            let b = int.to_hex(0)\n  \
+            let c = int.to_hex(16)\n  \
+            let d = int.to_hex(10)\n  \
+            let e = int.to_hex(0 - 1)\n  \
+            println(a)\n  \
+            println(b)\n  \
+            println(c)\n  \
+            println(d)\n  \
+            println(e) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "int.to_hex"), "linked");
+        if let Some(out) = build_and_run("int_hex", &render_wasm_program(&prog)) {
+            assert_eq!(out, "ff\n0\n10\na\nffffffffffffffff");
         }
     }
 
