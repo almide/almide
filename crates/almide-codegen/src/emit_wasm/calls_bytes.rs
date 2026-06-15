@@ -589,16 +589,71 @@ impl FuncCompiler<'_> {
             }
             "cmp" => self.emit_bytes_cmp(args),
             "from_string" => {
-                // bytes.from_string(s): String and Bytes have same layout [len:i32][data:u8...]
-                // Just return the string pointer (effectively a cast)
+                // bytes.from_string(s): COPY into an independent Bytes buffer.
+                // A zero-copy cast (just returning the string pointer) aliases the
+                // source String's buffer — but String is RC-managed, so when the
+                // result is bound to a `let`, the String's scope-end Dec frees the
+                // buffer the Bytes still points at: a later bytes.len/get reads freed
+                // memory (len = reclaimed-cap header, data zeroed). #690. Bytes and
+                // String share the [len][cap][data@8] layout, so copy len bytes.
+                let src = self.scratch.alloc_i32();
+                let len = self.scratch.alloc_i32();
+                let dst = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
+                let data_off = self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32;
+                let cap_off = self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::CAP);
+                let hdr = self.emitter.layout_reg.header_size(super::engine::layout::STRING) as i32;
+                wasm!(self.func, {
+                    local_set(Local(src));
+                    local_get(Local(src)); i32_load(0); local_set(Local(len));   // source byte length
+                    local_get(Local(len)); i32_const(Imm32(hdr)); i32_add;
+                    call(self.emitter.rt.alloc);
+                    local_set(Local(dst));
+                    local_get(Local(dst)); local_get(Local(len)); i32_store(0);          // len
+                    local_get(Local(dst)); local_get(Local(len)); i32_store(cap_off);    // cap = len
+                    local_get(Local(dst)); i32_const(Imm32(data_off)); i32_add;
+                    local_get(Local(src)); i32_const(Imm32(data_off)); i32_add;
+                    local_get(Local(len));
+                    memory_copy;
+                    local_get(Local(dst));
+                });
+                self.scratch.free_i32(src);
+                self.scratch.free_i32(len);
+                self.scratch.free_i32(dst);
             }
             "to_string_lossy" => {
-                // Same layout as String. WASM target does not yet validate UTF-8;
-                // invalid sequences pass through unchanged (the JS host will see
-                // garbage but no panic). Real lossy substitution lives in the
-                // Rust runtime.
+                // COPY into an independent String buffer (not a cast). A zero-copy
+                // cast aliases the source Bytes' buffer; when the result String is
+                // bound / outlives the call, its RC dec frees the buffer the Bytes
+                // (e.g. a module-global write target) still points at — a later read
+                // of that Bytes then hits freed memory. Same hazard as from_string
+                // (#690), reverse direction (Bytes→String). Bytes/String share the
+                // [len][cap][data@8] layout; copy len bytes. (WASM does not validate
+                // UTF-8; invalid sequences pass through unchanged.)
+                let src = self.scratch.alloc_i32();
+                let len = self.scratch.alloc_i32();
+                let dst = self.scratch.alloc_i32();
                 self.emit_expr(&args[0]);
+                let data_off = self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::DATA) as i32;
+                let cap_off = self.emitter.layout_reg.fixed_offset(super::engine::layout::STRING, super::engine::layout::string::CAP);
+                let hdr = self.emitter.layout_reg.header_size(super::engine::layout::STRING) as i32;
+                wasm!(self.func, {
+                    local_set(Local(src));
+                    local_get(Local(src)); i32_load(0); local_set(Local(len));
+                    local_get(Local(len)); i32_const(Imm32(hdr)); i32_add;
+                    call(self.emitter.rt.alloc);
+                    local_set(Local(dst));
+                    local_get(Local(dst)); local_get(Local(len)); i32_store(0);
+                    local_get(Local(dst)); local_get(Local(len)); i32_store(cap_off);
+                    local_get(Local(dst)); i32_const(Imm32(data_off)); i32_add;
+                    local_get(Local(src)); i32_const(Imm32(data_off)); i32_add;
+                    local_get(Local(len));
+                    memory_copy;
+                    local_get(Local(dst));
+                });
+                self.scratch.free_i32(src);
+                self.scratch.free_i32(len);
+                self.scratch.free_i32(dst);
             }
             "is_valid_utf8" => self.emit_bytes_is_valid_utf8(args),
             "to_string" => {
