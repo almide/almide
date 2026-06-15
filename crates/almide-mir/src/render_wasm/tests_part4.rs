@@ -168,6 +168,24 @@
     }
 
     #[test]
+    fn self_hosted_list_find_index_and_scan() {
+        // find_index([10,20,30,40], x>25)=Some(2) (30 is index 2), find_index(_, x>99)=None.
+        // scan([1,2,3,4], 0, +)=[1,3,6,10] (running sums; len 4, sum 20, ys[3]=10). find_index
+        // = the find pattern with the INDEX payload; scan = a 2-arity fold emitting each acc.
+        let src = "fn main() -> Unit = {\n  \
+            let i = list.find_index([10, 20, 30, 40], (x) => x > 25) ?? 99\n  println(int.to_string(i))\n  \
+            let j = list.find_index([10, 20, 30, 40], (x) => x > 99) ?? 99\n  println(int.to_string(j))\n  \
+            let ys = list.scan([1, 2, 3, 4], 0, (a, x) => a + x)\n  println(int.to_string(list.len(ys)))\n  println(int.to_string(list.sum(ys)))\n  println(int.to_string(list.get_or(ys, 3, 0))) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "list.find_index"));
+        assert!(prog.functions.iter().any(|f| f.name == "list.scan"));
+        if let Some(out) = build_and_run("self_hosted_list_find_index_scan", &render_wasm_program(&prog)) {
+            // find_index=2 ; none→99 ; scan len4 sum20 ys[3]=10
+            assert_eq!(out, "2\n99\n4\n20\n10");
+        }
+    }
+
+    #[test]
     fn self_hosted_list_take_end_drop_end() {
         // list.take_end/drop_end self-hosted: last n / all-but-last n, List[Int] slot-copy.
         // take_end([1,2,3,4,5],2)=[4,5] ([0]=4,len 2); drop_end([1,2,3,4,5],2)=[1,2,3]
