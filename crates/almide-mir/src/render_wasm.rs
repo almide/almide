@@ -627,6 +627,7 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
         (include_str!("../../../stdlib/list_is_empty.almd"), &[("list_is_empty", "list.is_empty")]),
         (include_str!("../../../stdlib/list_sum.almd"), &[("list_sum", "list.sum")]),
         (include_str!("../../../stdlib/list_sort.almd"), &[("list_sort", "list.sort")]),
+        (include_str!("../../../stdlib/list_unique.almd"), &[("list_unique", "list.unique")]),
         (include_str!("../../../stdlib/string_slice.almd"), &[("string_slice", "string.slice")]),
         (
             include_str!("../../../stdlib/string_trim.almd"),
@@ -1939,6 +1940,29 @@ mod tests {
         if let Some(out) = build_and_run("list_sort_loop", &render_wasm_program(&prog)) {
             assert_eq!(out.lines().count(), 2000, "every iteration prints (no OOM/leak)");
             assert!(out.lines().all(|l| l == "1"));
+        }
+    }
+
+    #[test]
+    fn self_hosted_list_unique() {
+        // list.unique self-hosted (keep the first occurrence of each value): unique(
+        // [1,1,2,2,1,3]) = [1,2,3] (insertion order). Read back via list.len + list.get_or.
+        // byte-matching v0.
+        let src = "fn main() -> Unit = {\n  \
+            let xs = [1, 1, 2, 2, 1, 3]\n  \
+            let u = list.unique(xs)\n  \
+            let ul = list.len(u)\n  \
+            let u0 = list.get_or(u, 0, 0)\n  \
+            let u1 = list.get_or(u, 1, 0)\n  \
+            let u2 = list.get_or(u, 2, 0)\n  \
+            println(int.to_string(ul))\n  \
+            println(int.to_string(u0))\n  \
+            println(int.to_string(u1))\n  \
+            println(int.to_string(u2)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "list.unique"), "linked");
+        if let Some(out) = build_and_run("list_unique", &render_wasm_program(&prog)) {
+            assert_eq!(out, "3\n1\n2\n3");
         }
     }
 
