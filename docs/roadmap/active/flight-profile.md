@@ -102,6 +102,8 @@ counted range のみ・no-alloc-in-loop・static pool ── これは **DO-178C
 「レビューで守る」を「証明書で機械強制する」に変えること。**プロファイル制約は
 弱みではなく、flight code が既に書いている形を proof で enforce する売りになる。**
 
+→ **具体実装設計(Op 拡張・Coq 定理文・接合点・de-risking 順)**: [flight-wcet-loops](flight-wcet-loops.md)
+
 ---
 
 ## 4. フロント(い) — Rust → Ferrocene 忠実性
@@ -157,6 +159,8 @@ Rust 経路が**2本に分裂**している:
 
 §9 が却下したのは「Rust を**真**にする」案。本プロファイルは「Rust を**証明束縛された
 レンダラ**にする」案で、別物。
+
+→ **具体実装設計(rust_pattern 表・忠実性定理・信頼基底台帳・Ferrocene 実証経路)**: [flight-rust-ferrocene](flight-rust-ferrocene.md)
 
 ---
 
@@ -259,6 +263,8 @@ Almide 飛行サブセット            counted loop / no-alloc-in-loop / static
 
 ## 9. 関連
 
+- [flight-wcet-loops](flight-wcet-loops.md) ── **キーストーン(あ) G-F1/G-F2 の具体実装設計**(counted loop + Coq 持ち上げ + 確保上限)
+- [flight-rust-ferrocene](flight-rust-ferrocene.md) ── **キーストーン(い) G-F3 の具体実装設計**(本番 MIR→Rust + rust_pattern 忠実性)
 - [v1-proof-architecture](v1-proof-architecture.md) ── PCC スパインの着地形、Gap 1/2
 - [certificate-format-v1](certificate-format-v1.md) ── i/a/d/m/r/b 所有権アルファベット
 - [v1-mir-architecture](v1-mir-architecture.md) ── §1 wasm 主権・§9 却下案(§4.4 で和解)
