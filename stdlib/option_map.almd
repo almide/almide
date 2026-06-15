@@ -33,3 +33,19 @@ fn option_filter(o: Option[Int], pred: (Int) -> Bool) -> Option[Int] = {
   let x = prim.load64(h + 12)
   if len >= 1 then __opt_filter_some(x, pred) else None
 }
+
+// option.flat_map(o, f) = o.and_then(f): Some(x) → f(x) (itself an Option), None → None. The
+// closure RETURNS a heap Option, invoked via a heap-result CallIndirect ONLY on the Some arm; its
+// fresh owned result is moved straight out. The helper isolates the closure call so option_flat_map's
+// Some arm is a plain named call (the proven heap-result call-arm).
+fn __opt_flatmap_some(x: Int, f: (Int) -> Option[Int]) -> Option[Int] = {
+  let r = f(x)
+  r
+}
+
+fn option_flat_map(o: Option[Int], f: (Int) -> Option[Int]) -> Option[Int] = {
+  let h = prim.handle(o)
+  let len = prim.load32(h + 4)
+  let x = prim.load64(h + 12)
+  if len >= 1 then __opt_flatmap_some(x, f) else None
+}

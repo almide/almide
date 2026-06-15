@@ -1261,6 +1261,45 @@
     }
 
     #[test]
+    fn self_hosted_option_flat_map() {
+        // SELF-HOSTED option.flat_map(o, f) = o.and_then(f): Some(x) → f(x) (an Option itself),
+        // None → None. The closure RETURNS an Option (heap-result CallIndirect), invoked ONLY on the
+        // Some arm. flat_map(Some(5), x=>Some(x*2))=Some(10); flat_map(Some(5), x=>None)=None;
+        // flat_map(None, x=>Some(x*2))=None. Byte-matches v0.
+        let src = "fn main() -> Unit = {\n  \
+            let o1 = list.first([5, 6])\n  let m1 = option.flat_map(o1, (x) => Some(x * 2))\n  \
+            match m1 {\n    Some(v) => println(int.to_string(v)),\n    None => println(\"none\"),\n  }\n  \
+            let o2 = list.first([5, 6])\n  let m2 = option.flat_map(o2, (x) => None)\n  \
+            match m2 {\n    Some(v) => println(int.to_string(v)),\n    None => println(\"none\"),\n  }\n  \
+            let o3 = list.get([5], 9)\n  let m3 = option.flat_map(o3, (x) => Some(x * 2))\n  \
+            match m3 {\n    Some(v) => println(int.to_string(v)),\n    None => println(\"none\"),\n  } }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "option.flat_map"));
+        if let Some(out) = build_and_run("self_hosted_option_flat_map", &render_wasm_program(&prog)) {
+            // flat_map(Some(5),x=>Some(x*2))=10 ; flat_map(Some(5),x=>None)=none ; flat_map(None,..)=none
+            assert_eq!(out, "10\nnone\nnone");
+        }
+    }
+
+    #[test]
+    fn option_flat_map_loop_is_bounded() {
+        // ADVERSARIAL leak guard: a loop flat-mapping an Option through a heap-result closure (which
+        // allocates a fresh inner Option each Some iteration) and matching it must run in BOUNDED
+        // memory — the input Option, the closure's fresh Option and the "k" string are all one-slot.
+        let src = "fn main() -> Unit = {\n  \
+            var i = 0\n  \
+            while i < 4000 {\n    \
+              let o = list.first([5, 6])\n    let m = option.flat_map(o, (x) => Some(x + 1))\n    \
+              match m {\n      Some(v) => println(\"k\"),\n      None => println(\"n\"),\n    }\n    \
+              i = i + 1\n  }\n  \
+            println(\"done\") }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("option_flat_map_loop_bounded", &render_wasm_program(&prog)) {
+            assert!(out.ends_with("done"), "loop must terminate (bounded memory)");
+        }
+    }
+
+    #[test]
     fn self_hosted_option_filter() {
         // SELF-HOSTED option.filter(o, pred) = o.filter(pred): keep Some(x) iff pred(x), else None;
         // pred invoked (CallIndirect) ONLY on the Some arm. filter(Some(5), >3)=Some(5);
