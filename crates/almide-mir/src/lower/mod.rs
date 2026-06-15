@@ -788,7 +788,7 @@ pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], resu
             Ty::Applied(TypeConstructorId::Map, a)
                 if a.len() == 2 && is_heap_ty(&a[0]) && is_heap_ty(&a[1])
         );
-        if matches!(func, "new" | "set" | "remove") && result_is_heap_map {
+        if matches!(func, "new" | "set" | "remove" | "merge" | "update") && result_is_heap_map {
             return format!("map.{func}_str");
         }
         if func == "get" {

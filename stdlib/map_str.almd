@@ -180,3 +180,91 @@ fn map_remove_str(m: Map[String, String], k: String) -> Map[String, String] = {
   prim.store32(rh + 4, w * 2)
   r
 }
+
+// map.merge — a's entries (overridden by b where keys overlap), then b's keys not in a. Each value
+// is the FINAL value, deep-copied once (no free-then-replace): for an a-key also in b, copy b's
+// value; else a's. Then append b's new keys.
+fn __mmerge_aval(ah: Int, bh: Int, rh: Int, i: Int, bidx: Int) -> Int =
+  if bidx < 0 then {
+    let av = prim.load_str(ah + 12 + i * 16 + 8)
+    __store_copy(rh + 12 + i * 16 + 8, av)
+  }
+  else {
+    let bv = prim.load_str(bh + 12 + bidx * 16 + 8)
+    __store_copy(rh + 12 + i * 16 + 8, bv)
+  }
+
+fn __mmerge_copya(ah: Int, bh: Int, bentries: Int, rh: Int, aentries: Int, i: Int) -> Int =
+  if i >= aentries then 0
+  else {
+    let k = prim.load_str(ah + 12 + i * 16)
+    let _kc = __store_copy(rh + 12 + i * 16, k)
+    let bidx = __mstr_find(bh, bentries, k, 0)
+    let _vc = __mmerge_aval(ah, bh, rh, i, bidx)
+    __mmerge_copya(ah, bh, bentries, rh, aentries, i + 1)
+  }
+
+fn __mmerge_addnew(ah: Int, aentries: Int, bh: Int, bentries: Int, rh: Int, j: Int, w: Int) -> Int =
+  if j >= bentries then w
+  else {
+    let k = prim.load_str(bh + 12 + j * 16)
+    let aidx = __mstr_find(ah, aentries, k, 0)
+    if aidx >= 0 then __mmerge_addnew(ah, aentries, bh, bentries, rh, j + 1, w)
+    else {
+      let v = prim.load_str(bh + 12 + j * 16 + 8)
+      let _kc = __store_copy(rh + 12 + w * 16, k)
+      let _vc = __store_copy(rh + 12 + w * 16 + 8, v)
+      __mmerge_addnew(ah, aentries, bh, bentries, rh, j + 1, w + 1)
+    }
+  }
+
+fn map_merge_str(a: Map[String, String], b: Map[String, String]) -> Map[String, String] = {
+  let ah = prim.handle(a)
+  let bh = prim.handle(b)
+  let an = prim.load32(ah + 4)
+  let bn = prim.load32(bh + 4)
+  let aentries = an / 2
+  let bentries = bn / 2
+  let cap = (aentries + bentries) * 2
+  let r = prim.alloc_map_str(cap)
+  let rh = prim.handle(r)
+  let _c = __mmerge_copya(ah, bh, bentries, rh, aentries, 0)
+  let w = __mmerge_addnew(ah, aentries, bh, bentries, rh, 0, aentries)
+  prim.store32(rh + 4, w * 2)
+  r
+}
+
+// map.update — if k is present, replace its value with f(old); else the map is unchanged. f is a
+// one-arity closure (String)->String. Entry count never changes. Deep-copy all keys + the unchanged
+// values; for the matching key store f(old) (created + consumed in __store_fv, no conditional consume).
+fn __store_fv(addr: Int, oldv: String, f: (String) -> String) -> Int = {
+  let nv = f(oldv)
+  prim.store_str(addr, nv)
+  0
+}
+
+fn __mupdate_val(eq: Bool, addr: Int, oldv: String, f: (String) -> String) -> Int =
+  if eq then __store_fv(addr, oldv, f)
+  else __store_copy(addr, oldv)
+
+fn __mupdate_copy(sh: Int, rh: Int, entries: Int, k: String, f: (String) -> String, i: Int) -> Int =
+  if i >= entries then 0
+  else {
+    let kk = prim.load_str(sh + 12 + i * 16)
+    let _kc = __store_copy(rh + 12 + i * 16, kk)
+    let oldv = prim.load_str(sh + 12 + i * 16 + 8)
+    let eq = __str_eq(kk, k)
+    let _vc = __mupdate_val(eq, rh + 12 + i * 16 + 8, oldv, f)
+    __mupdate_copy(sh, rh, entries, k, f, i + 1)
+  }
+
+fn map_update_str(m: Map[String, String], k: String, f: (String) -> String) -> Map[String, String] = {
+  let sh = prim.handle(m)
+  let n = prim.load32(sh + 4)
+  let entries = n / 2
+  let r = prim.alloc_map_str(n)
+  let rh = prim.handle(r)
+  let _c = __mupdate_copy(sh, rh, entries, k, f, 0)
+  prim.store32(rh + 4, n)
+  r
+}

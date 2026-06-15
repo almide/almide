@@ -1815,6 +1815,27 @@
     }
 
     #[test]
+    fn self_hosted_map_string_string_merge_update() {
+        // SELF-HOSTED Map[String,String] merge/update. a={x:1, y:2} b={y:9, z:3}: merge={x:1, y:9,
+        // z:3} (b overrides y, appends z) len 3, get("y")="9", get("z")="3". update("x", v=>repeat
+        // v×2): {x:11, y:2} get("x")="11". Byte-matches v0. Closure body is a let-bound self-host call.
+        let src = "fn main() -> Unit = {\n  \
+            let a = map.set(map.set(map.new(), \"x\", \"1\"), \"y\", \"2\")\n  \
+            let b = map.set(map.set(map.new(), \"y\", \"9\"), \"z\", \"3\")\n  \
+            let mg = map.merge(a, b)\n  println(int.to_string(map.len(mg)))\n  \
+            let gy = map.get(mg, \"y\")\n  match gy { Some(v) => println(v), None => println(\"none\"), }\n  \
+            let gz = map.get(mg, \"z\")\n  match gz { Some(v) => println(v), None => println(\"none\"), }\n  \
+            let mu = map.update(a, \"x\", (s) => { let r = string.repeat(s, 2)\n r })\n  \
+            let gx = map.get(mu, \"x\")\n  match gx { Some(v) => println(v), None => println(\"none\"), } }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "map.merge_str"));
+        assert!(prog.functions.iter().any(|f| f.name == "map.update_str"));
+        if let Some(out) = build_and_run("self_hosted_map_string_string_merge_update", &render_wasm_program(&prog)) {
+            assert_eq!(out, "3\n9\n3\n11");
+        }
+    }
+
+    #[test]
     fn self_hosted_map_string_string_loop_reclaims() {
         // SOUNDNESS for the Map[String,String] nested-ownership path: a bounded loop building +
         // dropping a fresh Map[String,String] each iteration must reclaim every key + value String +
