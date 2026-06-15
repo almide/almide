@@ -152,6 +152,22 @@
     }
 
     #[test]
+    fn self_hosted_list_reduce() {
+        // SELF-HOSTED `list.reduce` — seedless fold (two-arity closure + Option result). reduce
+        // ([3,1,4,1,5], max)=Some(5); reduce([], +)=None. Combines $closure_fn2 with the
+        // call-arm materialized-Option; consumed via ??, byte-matching v0.
+        let src = "fn main() -> Unit = {\n  \
+            let m = list.reduce([3, 1, 4, 1, 5], (a, x) => if a > x then a else x) ?? 0\n  println(int.to_string(m))\n  \
+            let e = list.reduce([], (a, x) => a + x) ?? 99\n  println(int.to_string(e)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "list.reduce"));
+        if let Some(out) = build_and_run("self_hosted_list_reduce", &render_wasm_program(&prog)) {
+            // reduce(max)=5 ; reduce([])=None → fallback 99
+            assert_eq!(out, "5\n99");
+        }
+    }
+
+    #[test]
     fn self_hosted_list_take_end_drop_end() {
         // list.take_end/drop_end self-hosted: last n / all-but-last n, List[Int] slot-copy.
         // take_end([1,2,3,4,5],2)=[4,5] ([0]=4,len 2); drop_end([1,2,3,4,5],2)=[1,2,3]

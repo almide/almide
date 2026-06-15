@@ -1,0 +1,24 @@
+// list_reduce — SELF-HOSTED `list.reduce` for v1: a left fold with NO seed — None on the
+// empty list, else Some(fold of xs[1..] starting from xs[0]). Combines the two-arity closure
+// (f: (Acc, Int) -> Acc via $closure_fn2) with the call-arm materialized-Option result (the
+// Some/None tail-position helpers, like list.find/max). List[Int]/Int; source borrowed.
+
+fn __reduce_loop(sh: Int, f: (Int, Int) -> Int, n: Int, i: Int, acc: Int) -> Int =
+  if i >= n then acc
+  else {
+    let x = prim.load64(sh + 12 + i * 8)
+    let nacc = f(acc, x)
+    __reduce_loop(sh, f, n, i + 1, nacc)
+  }
+
+fn __reduce_none() -> Option[Int] = None
+fn __reduce_some(sh: Int, f: (Int, Int) -> Int, n: Int) -> Option[Int] = {
+  let first = prim.load64(sh + 12)
+  let r = __reduce_loop(sh, f, n, 1, first)
+  Some(r)
+}
+
+fn list_reduce(xs: List[Int], f: (Int, Int) -> Int) -> Option[Int] = {
+  let n = list.len(xs)
+  if n <= 0 then __reduce_none() else __reduce_some(prim.handle(xs), f, n)
+}
