@@ -57,3 +57,20 @@ fn result_to_err_option(r: Result[Int, String]) -> Option[String] = {
   let x = prim.load64(h + 12)
   if len == 0 then None else Some(__rcopy_at(x))
 }
+
+// result.unwrap_or_else(r, f) = r.unwrap_or_else(f): Ok(x) → x, Err(e) → f(e). The closure takes
+// the Err message (a HEAP arg — the uniform-i64 closure ABI) and returns a scalar. f is invoked
+// ONLY on the Err arm, over a deep COPY of the message (so f borrows a value the input still owns);
+// the copy is freed at the helper's scope end. `r` is borrowed; the result is a scalar Int.
+fn __res_unwrap_else(emsg: Int, f: (String) -> Int) -> Int = {
+  let e = __rcopy_at(emsg)
+  let y = f(e)
+  y
+}
+
+fn result_unwrap_or_else(r: Result[Int, String], f: (String) -> Int) -> Int = {
+  let h = prim.handle(r)
+  let len = prim.load32(h + 4)
+  let x = prim.load64(h + 12)
+  if len == 0 then x else __res_unwrap_else(x, f)
+}

@@ -1261,6 +1261,22 @@
     }
 
     #[test]
+    fn self_hosted_result_unwrap_or_else() {
+        // SELF-HOSTED result.unwrap_or_else(r, f): Ok(x) → x, Err(e) → f(e). The closure takes the
+        // Err message (a HEAP String arg — the new uniform-i64 closure ABI) and is invoked ONLY on
+        // the Err arm. unwrap_or_else(Ok(5), e=>len e)=5 (f not called); unwrap_or_else(Err"invalid
+        // digit found in string", e=>len e)=29 (len of the message). Byte-matches v0.
+        let src = "fn main() -> Unit = {\n  \
+            let r1 = int.parse(\"5\")\n  let v1 = result.unwrap_or_else(r1, (e) => string.len(e))\n  println(int.to_string(v1))\n  \
+            let r2 = int.parse(\"abc\")\n  let v2 = result.unwrap_or_else(r2, (e) => string.len(e))\n  println(int.to_string(v2)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "result.unwrap_or_else"));
+        if let Some(out) = build_and_run("self_hosted_result_unwrap_or_else", &render_wasm_program(&prog)) {
+            assert_eq!(out, "5\n29");
+        }
+    }
+
+    #[test]
     fn self_hosted_result_to_err_option() {
         // SELF-HOSTED result.to_err_option(r) = r.err(): Ok → None, Err(e) → Some(e). Builds an
         // Option[String] with the Err message DEEP-COPIED into Some (v0 clones it). Extracted via a
@@ -1648,6 +1664,19 @@
         let prog = lower_source(src);
         if let Some(out) = build_and_run("result_err_loop_bounded", &render_wasm_program(&prog)) {
             assert_eq!(out, "done");
+        }
+    }
+
+    #[test]
+    fn heap_arg_closure_executes() {
+        // A closure taking a HEAP (String) arg executes: the closure ABI is uniform i64, so a
+        // lifted lambda receives the String handle as an i64 raw param and NARROWS it to its Ptr
+        // at entry (the dual of the CallIndirect's i64.extend widen). `(x) => string.len(x)` over
+        // "hello" returns 5.
+        let src = "fn ap(s: String, f: (String) -> Int) -> Int = f(s)\n                   fn main() -> Unit = {\n  let n = ap(\"hello\", (x) => string.len(x))\n  println(int.to_string(n)) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("probe_heap_arg_closure", &render_wasm_program(&prog)) {
+            assert_eq!(out, "5");
         }
     }
 

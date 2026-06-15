@@ -237,10 +237,31 @@ pub fn render_wasm_fn(
     func_slots: &BTreeMap<String, u32>,
 ) -> String {
     let reprs = value_reprs_wasm(func);
+    // A LIFTED LAMBDA (`__lambda_*`) is dispatched through the function table against the uniform
+    // i64 closure signature (`$closure_fnN`), so its params MUST all be i64. A HEAP param (a Ptr)
+    // is received as an i64 raw param and NARROWED to its Ptr value local at entry (the dual of the
+    // CallIndirect's `i64.extend_i32_u` widen); a scalar param is already i64. Regular functions
+    // keep their natural per-repr signature.
+    let is_lambda = func.name.starts_with("__lambda_");
+    let mut lambda_narrow = String::new();
+    let mut lambda_heap_locals: Vec<String> = Vec::new();
     let params = func
         .params
         .iter()
-        .map(|p| format!("(param {} {})", local(p.value), wasm_ty(p.repr)))
+        .map(|p| {
+            if is_lambda && p.repr.is_heap() {
+                lambda_heap_locals.push(format!("(local {} i32)", local(p.value)));
+                lambda_narrow.push_str(&format!(
+                    "    (local.set {v} (i32.wrap_i64 (local.get {v}_raw)))\n",
+                    v = local(p.value)
+                ));
+                format!("(param {}_raw i64)", local(p.value))
+            } else if is_lambda {
+                format!("(param {} i64)", local(p.value))
+            } else {
+                format!("(param {} {})", local(p.value), wasm_ty(p.repr))
+            }
+        })
         .collect::<Vec<_>>()
         .join(" ");
     let result = func
@@ -263,8 +284,11 @@ pub fn render_wasm_fn(
     if func.ops.iter().any(|op| matches!(op, Op::DropListStr { .. })) {
         locals.push("(local $dlsi i32) (local $dlsn i32)".to_string());
     }
+    // A lifted lambda's heap params become i32 value locals (narrowed from their i64 raw params).
+    locals.extend(lambda_heap_locals);
     let locals_decl = locals.join(" ");
-    let mut body = String::new();
+    // The heap-param narrowing runs first, before any body op reads the Ptr value local.
+    let mut body = lambda_narrow;
     // The if-markers (IfThen/Else/EndIf) render to a NESTED wasm `if`/`else` — a
     // stateful reconstruction of the flat marker stream. A scalar `if` is an
     // expression `(local.set $dst (if (result i64) cond (then …val) (else …val)))`;
@@ -598,7 +622,17 @@ fn render_op(
         // emitted by render_wasm_program for each arity present; `table_idx` is the runtime
         // slot of the lifted lambda.
         Op::CallIndirect { dst, table_idx, args, result } => {
-            let argstr = args.iter().map(render_arg_wasm).collect::<Vec<_>>().join(" ");
+            // The closure ABI is uniform i64 (`$closure_fnN` = N i64 params). A HEAP arg (a Ptr,
+            // an i32 local) is WIDENED to i64 to match; the lambda narrows it back at entry
+            // (render_wasm_fn's lambda heap-param coercion).
+            let argstr = args
+                .iter()
+                .map(|a| match a {
+                    CallArg::Handle(v) => format!("(i64.extend_i32_u (local.get {}))", local(*v)),
+                    other => render_arg_wasm(other),
+                })
+                .collect::<Vec<_>>()
+                .join(" ");
             let arity = args.len();
             // Pick the closure type of this arity AND result repr (`_h` = heap/i32 result).
             let suffix = if result.map(|r| r.is_heap()).unwrap_or(false) { "_h" } else { "" };
