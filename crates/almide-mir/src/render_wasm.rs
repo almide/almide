@@ -596,7 +596,13 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
         (include_str!("../../../stdlib/string_is_empty.almd"), &[("string_is_empty", "string.is_empty")]),
         (
             include_str!("../../../stdlib/math_int.almd"),
-            &[("math_abs", "math.abs"), ("math_max", "math.max"), ("math_min", "math.min")],
+            &[
+                ("math_abs", "math.abs"),
+                ("math_max", "math.max"),
+                ("math_min", "math.min"),
+                ("math_sign", "math.sign"),
+                ("math_pow", "math.pow"),
+            ],
         ),
         (include_str!("../../../stdlib/list_len.almd"), &[("list_len", "list.len")]),
         (include_str!("../../../stdlib/list_is_empty.almd"), &[("list_is_empty", "list.is_empty")]),
@@ -1627,6 +1633,31 @@ mod tests {
         if let Some(out) = build_and_run("unwrap_or_loop", &render_wasm_program(&prog)) {
             assert_eq!(out.lines().count(), 2000, "every iteration prints (no OOM/leak)");
             assert!(out.lines().all(|l| l == "20"));
+        }
+    }
+
+    #[test]
+    fn self_hosted_math_sign_and_pow() {
+        // math.sign/pow self-hosted (scalar i64): sign(7)=1, sign(-3)=-1, sign(0)=0;
+        // pow(2,10)=1024, pow(3,0)=1, pow(5,3)=125. byte-matching v0 (pow via %2 / /2
+        // exponentiation-by-squaring = v0's e&1 / e>>1, the same wrapped result).
+        let src = "fn main() -> Unit = {\n  \
+            let a = math.sign(7)\n  \
+            let b = math.sign(0 - 3)\n  \
+            let c = math.sign(0)\n  \
+            let d = math.pow(2, 10)\n  \
+            let e = math.pow(3, 0)\n  \
+            let f = math.pow(5, 3)\n  \
+            println(int.to_string(a))\n  \
+            println(int.to_string(b))\n  \
+            println(int.to_string(c))\n  \
+            println(int.to_string(d))\n  \
+            println(int.to_string(e))\n  \
+            println(int.to_string(f)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "math.pow"), "linked");
+        if let Some(out) = build_and_run("math_sign_pow", &render_wasm_program(&prog)) {
+            assert_eq!(out, "1\n-1\n0\n1024\n1\n125");
         }
     }
 

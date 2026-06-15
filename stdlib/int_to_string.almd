@@ -7,7 +7,8 @@
 //
 // It allocates a String of exactly the digit count via `prim.alloc_str` (an owned
 // rc=1 block, cert `i`), fills the decimal bytes via `prim.store8`, and returns it
-// (moved out, freed by the caller). NON-NEGATIVE for now; signed is a refinement.
+// (moved out, freed by the caller). A NEGATIVE n prepends '-' then formats |n|.
+// (i64::MIN, whose magnitude has no positive i64, is the one unhandled edge.)
 
 // Count the decimal digits of `n` (n >= 0), accumulator-style so the recursion is a
 // tail call (no `acc + count(...)` arithmetic over a call).
@@ -28,9 +29,25 @@ fn __itos_fill(n: Int, pos: Int) -> Int =
     p + 1
   }
 
-fn int_to_string(n: Int) -> String = {
+// Non-negative path: a String of exactly the digit count.
+fn __itos_pos(n: Int) -> String = {
   let len = __itos_count_digits(n, 0)
   let buf = prim.alloc_str(len)              // owned rc=1 String, `len` bytes
   let _end = __itos_fill(n, prim.handle(buf) + 12)  // data starts at handle + LIST_HEADER(12)
   buf
 }
+
+// Negative path: `m` = |n| > 0. One extra byte for the leading '-' (45), then the digits.
+fn __itos_neg(m: Int) -> String = {
+  let digits = __itos_count_digits(m, 0)
+  let len = digits + 1
+  let buf = prim.alloc_str(len)
+  let base = prim.handle(buf) + 12
+  prim.store8(base, 45)                      // '-' = 45
+  let _end = __itos_fill(m, base + 1)
+  buf
+}
+
+fn int_to_string(n: Int) -> String =
+  if n < 0 then __itos_neg(0 - n)
+  else __itos_pos(n)
