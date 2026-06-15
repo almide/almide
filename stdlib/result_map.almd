@@ -32,3 +32,18 @@ fn result_map(r: Result[Int, String], f: (Int) -> Int) -> Result[Int, String] = 
   let x = prim.load64(h + 12)
   if len == 0 then __res_map_ok(x, f) else Err(__rcopy_at(x))
 }
+
+// result.flat_map(r, f) = r.and_then(f): Ok(x) → f(x) (an Result itself), Err(e) → Err(e). The
+// closure RETURNS a Result (heap-result CallIndirect), invoked ONLY on the Ok arm; its fresh owned
+// result is moved straight out. The Err message is preserved by deep copy, as in result.map.
+fn __res_flatmap_ok(x: Int, f: (Int) -> Result[Int, String]) -> Result[Int, String] = {
+  let r = f(x)
+  r
+}
+
+fn result_flat_map(r: Result[Int, String], f: (Int) -> Result[Int, String]) -> Result[Int, String] = {
+  let h = prim.handle(r)
+  let len = prim.load32(h + 4)
+  let x = prim.load64(h + 12)
+  if len == 0 then __res_flatmap_ok(x, f) else Err(__rcopy_at(x))
+}

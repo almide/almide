@@ -1261,6 +1261,26 @@
     }
 
     #[test]
+    fn self_hosted_result_flat_map() {
+        // SELF-HOSTED result.flat_map(r, f) = r.and_then(f): Ok(x) → f(x) (a Result itself), Err(e)
+        // → Err(e) (message preserved by deep copy). The closure RETURNS a Result (heap-result
+        // CallIndirect), invoked ONLY on the Ok arm. flat_map(Ok(5), x=>Ok(x*2))=Ok(10); flat_map(
+        // Ok(5), x=>Err"bad")=Err"bad"; flat_map(Err"...", f) keeps the message. Byte-matches v0.
+        let src = "fn main() -> Unit = {\n  \
+            let r1 = int.parse(\"5\")\n  let m1 = result.flat_map(r1, (x) => Ok(x * 2))\n  \
+            match m1 {\n    Ok(v) => println(int.to_string(v)),\n    Err(e) => println(e),\n  }\n  \
+            let r2 = int.parse(\"5\")\n  let m2 = result.flat_map(r2, (x) => Err(\"bad\"))\n  \
+            match m2 {\n    Ok(v) => println(int.to_string(v)),\n    Err(e) => println(e),\n  }\n  \
+            let r3 = int.parse(\"abc\")\n  let m3 = result.flat_map(r3, (x) => Ok(x * 2))\n  \
+            match m3 {\n    Ok(v) => println(int.to_string(v)),\n    Err(e) => println(e),\n  } }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "result.flat_map"));
+        if let Some(out) = build_and_run("self_hosted_result_flat_map", &render_wasm_program(&prog)) {
+            assert_eq!(out, "10\nbad\ninvalid digit found in string");
+        }
+    }
+
+    #[test]
     fn self_hosted_result_map() {
         // SELF-HOSTED result.map(r, f) = r.map(f): Ok(x) → Ok(f(x)) (f applied ONLY on the Ok arm),
         // Err(e) → Err(e) (the message PRESERVED by deep copy). map(Ok(5), *10)=Ok(50); map(Err"...",
