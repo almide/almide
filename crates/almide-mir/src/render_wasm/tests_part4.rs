@@ -1240,6 +1240,46 @@
     }
 
     #[test]
+    fn self_hosted_option_map() {
+        // SELF-HOSTED option.map(o, f) = o.map(f): Some(x) → Some(f(x)) (the closure invoked via
+        // CallIndirect, ONLY on the Some arm), None → None. The result is a fresh materialized
+        // Option so a `match` over it EXECUTES. map(first[5,6,7], *10)=Some(50); map(get[5] oob,
+        // *10)=None. Byte-matches v0.
+        let src = "fn main() -> Unit = {\n  \
+            let o1 = list.first([5, 6, 7])\n  let m1 = option.map(o1, (x) => x * 10)\n  \
+            match m1 {\n    Some(v) => println(int.to_string(v)),\n    None => println(\"none\"),\n  }\n  \
+            let o2 = list.get([5], 9)\n  let m2 = option.map(o2, (x) => x * 10)\n  \
+            match m2 {\n    Some(v) => println(int.to_string(v)),\n    None => println(\"none\"),\n  }\n  \
+            let o3 = list.first([7, 8])\n  let m3 = option.map(o3, (x) => x + 100)\n  \
+            match m3 {\n    Some(v) => println(int.to_string(v)),\n    None => println(\"none\"),\n  } }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "option.map"));
+        if let Some(out) = build_and_run("self_hosted_option_map", &render_wasm_program(&prog)) {
+            // map(Some(5),*10)=50 ; map(None,*10)=none ; map(Some(7),+100)=107
+            assert_eq!(out, "50\nnone\n107");
+        }
+    }
+
+    #[test]
+    fn option_map_loop_is_bounded() {
+        // ADVERSARIAL leak/double-free guard: a loop materializing an Option, mapping it through a
+        // closure (CallIndirect via the __opt_map_some helper) and matching the fresh result each
+        // iteration must run in BOUNDED memory — the input Option, the mapped Option and the "k"
+        // arm string are all one-slot (20-byte) so the head-only free-list reuses them.
+        let src = "fn main() -> Unit = {\n  \
+            var i = 0\n  \
+            while i < 4000 {\n    \
+              let o = list.first([5, 6])\n    let m = option.map(o, (x) => x * 2)\n    \
+              match m {\n      Some(v) => println(\"k\"),\n      None => println(\"n\"),\n    }\n    \
+              i = i + 1\n  }\n  \
+            println(\"done\") }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("option_map_loop_bounded", &render_wasm_program(&prog)) {
+            assert!(out.ends_with("done"), "loop must terminate (bounded memory)");
+        }
+    }
+
+    #[test]
     fn self_hosted_int_from_hex() {
         // SELF-HOSTED int.from_hex = i64::from_str_radix(s.trim().trim_start_matches("0x"), 16).
         // The "0x" strip is lowercase + REPEATED and BEFORE the sign: "0xff"=255, "0x0xff"=255 (strip

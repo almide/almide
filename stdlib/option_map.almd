@@ -1,0 +1,20 @@
+// option_map — SELF-HOSTED option.map(o, f) = o.map(f) for v1 over the prim floor + the closures
+// machinery. Reads the materialized Option's len-tag (Some = len 1, None = len 0). The closure is
+// invoked ONLY on the Some arm (v0 never calls f for None) — the Some arm is a CALL to a helper
+// that applies f and builds Some(f(x)); the None arm builds None. SCALAR payload (Option[Int]) so
+// there is no nested-heap transfer; `o` is borrowed, the result is a fresh owned Option.
+
+// Apply f to x and wrap as Some(f(x)) — a heap-returning helper, so option_map's Some arm is a
+// direct user call (the proven heap-result call-arm) and f is invoked via CallIndirect here, not in
+// an OptionSome scalar position (which does not lower a closure call).
+fn __opt_map_some(x: Int, f: (Int) -> Int) -> Option[Int] = {
+  let y = f(x)
+  Some(y)
+}
+
+fn option_map(o: Option[Int], f: (Int) -> Int) -> Option[Int] = {
+  let h = prim.handle(o)
+  let len = prim.load32(h + 4)
+  let x = prim.load64(h + 12)
+  if len >= 1 then __opt_map_some(x, f) else None
+}
