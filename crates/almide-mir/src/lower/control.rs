@@ -829,6 +829,49 @@ impl LowerCtx {
                 self.ops.push(Op::Consume { v: obj });
                 Some(obj)
             }
+            // `Ok(int)` / `Err(string)` arms of a `Result[Int, String]`-returning heap `if` (the
+            // parse-family shape `if ok then Ok(v) else Err("msg")`). Result reuses the Option[String]
+            // DynListStr layout with len-AS-TAG: `Ok` = a cap-1/len-0 block (the int sits in slot 0
+            // but DropListStr frees no element — like `None`); `Err` = a cap-1/len-1 block owning the
+            // message String (DropListStr frees it — exactly `Some(string)`). So BOTH arms reuse the
+            // proven Option[String] cert (Alloc `i` + the per-arm `Consume` `m`; the Err's String is
+            // moved in `m` and freed by the scope-end DropListStr `d`) — NO new Init, NO checker change.
+            IrExprKind::ResultOk { expr } if !is_heap_ty(&expr.ty) => {
+                let payload = self.lower_scalar_value(expr)?;
+                let repr = repr_of(result_ty).ok()?;
+                let obj = self.materialize_result_ok(payload, repr);
+                self.ops.push(Op::Consume { v: obj });
+                Some(obj)
+            }
+            IrExprKind::ResultErr { expr } if is_heap_ty(&expr.ty) => {
+                let repr = repr_of(result_ty).ok()?;
+                let piece = match &expr.kind {
+                    IrExprKind::Var { id } => self.value_for(*id).ok()?,
+                    IrExprKind::LitStr { value } => {
+                        let pr = repr_of(&expr.ty).ok()?;
+                        let p = self.fresh_value();
+                        self.ops.push(Op::Alloc { dst: p, repr: pr, init: Init::Str(value.clone()) });
+                        p
+                    }
+                    IrExprKind::Call { target: CallTarget::Named { name }, args, .. } => {
+                        let lowered = self.lower_call_args(args).ok()?;
+                        let pr = repr_of(&expr.ty).ok()?;
+                        let p = self.fresh_value();
+                        self.ops.push(Op::CallFn {
+                            dst: Some(p),
+                            name: name.as_str().to_string(),
+                            args: lowered,
+                            result: Some(pr),
+                        });
+                        p
+                    }
+                    _ => return None,
+                };
+                // `Err` IS `Some(message)` physically (cap-1/len-1 DynListStr owning the String).
+                let obj = self.materialize_opt_str_some(piece, repr);
+                self.ops.push(Op::Consume { v: obj });
+                Some(obj)
+            }
             _ => None,
         }
     }
@@ -867,6 +910,38 @@ impl LowerCtx {
         self.ops.push(Op::Alloc { dst: obj, repr, init: Init::DynListStr { len: zero } });
         self.heap_elem_lists.insert(obj);
         self.materialized_options.insert(obj);
+        obj
+    }
+
+    /// `Ok(int)` for `Result[Int, String]` = a cap-1/len-0 `DynListStr`: allocate ONE element slot
+    /// (so the block is the same physical size as an `Err`'s, free-list-compatible via cap), store
+    /// the int in slot 0, then OVERRIDE the len field to 0 so `DropListStr` frees no element (the
+    /// int is scalar, owns nothing). Cert: a `None`-like DynListStr (Alloc `i`, no String move-in,
+    /// scope-end DropListStr `d`) — the int store + len override are opaque prim ops the checker
+    /// ignores. The tag read (len == 0) marks it `Ok`.
+    pub(crate) fn materialize_result_ok(&mut self, payload: ValueId, repr: crate::Repr) -> ValueId {
+        use crate::PrimKind;
+        let one = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: one, value: 1 });
+        let obj = self.fresh_value();
+        self.ops.push(Op::Alloc { dst: obj, repr, init: Init::DynListStr { len: one } });
+        let oh = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(oh), args: vec![obj] });
+        // slot 0 (handle + 12) = the Ok int.
+        let twelve = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: twelve, value: 12 });
+        let daddr = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst: daddr, op: IntOp::Add, a: oh, b: twelve });
+        self.ops.push(Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args: vec![daddr, payload] });
+        // len field (handle + 4) := 0 so DropListStr treats it as element-free (the Ok tag).
+        let four = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: four, value: 4 });
+        let laddr = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst: laddr, op: IntOp::Add, a: oh, b: four });
+        let zero = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: zero, value: 0 });
+        self.ops.push(Op::Prim { kind: PrimKind::Store { width: 4 }, dst: None, args: vec![laddr, zero] });
+        self.heap_elem_lists.insert(obj);
         obj
     }
 

@@ -1,0 +1,15 @@
+// result_core — SELF-HOSTED result.is_ok / result.is_err for v1 over the prim floor. A
+// Result[Int, String] is materialized as a DynListStr with len-AS-TAG (the Ok/Err constructors
+// build it): Ok = len 0 (the value sits in slot 0 but is not owned/freed), Err = len 1 (owns the
+// message String, freed by DropListStr). So the discriminant is just the header `len` field:
+// is_ok ⇔ len == 0, is_err ⇔ len != 0. Reads only — `r` is borrowed, no allocation.
+
+fn result_is_ok(r: Result[Int, String]) -> Bool = {
+  let len = prim.load32(prim.handle(r) + 4)
+  len == 0
+}
+
+fn result_is_err(r: Result[Int, String]) -> Bool = {
+  let len = prim.load32(prim.handle(r) + 4)
+  len >= 1
+}

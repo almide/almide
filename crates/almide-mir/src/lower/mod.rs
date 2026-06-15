@@ -252,11 +252,21 @@ pub(crate) struct LowerCtx {
 /// frees the one element + the block).
 pub(crate) fn is_heap_elem_list_ty(ty: &Ty) -> bool {
     use almide_lang::types::constructor::TypeConstructorId;
-    matches!(
-        ty,
+    match ty {
+        // `List[heap]` / `Option[heap]` — a single heap element slot (DynListStr nested ownership).
         Ty::Applied(TypeConstructorId::List | TypeConstructorId::Option, args)
-            if args.len() == 1 && is_heap_ty(&args[0])
-    )
+            if args.len() == 1 && is_heap_ty(&args[0]) =>
+        {
+            true
+        }
+        // `Result[_, heap-Err]` is physically the SAME DynListStr (the Ok/Err materialization reuses
+        // it): `Err` owns the heap Err payload in slot 0 (len 1 → DropListStr frees it), `Ok` is
+        // len 0 (frees nothing). So a Result value is dropped recursively, exactly like Option[heap].
+        Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 && is_heap_ty(&args[1]) => {
+            true
+        }
+        _ => false,
+    }
 }
 
 impl LowerCtx {

@@ -1201,6 +1201,51 @@
         }
     }
 
+    #[test]
+    fn self_hosted_result_is_ok_is_err() {
+        // THE Result machinery floor: `Ok(int)` / `Err(string)` MATERIALIZE (the parse-family shape
+        // `if ok then Ok(v) else Err("msg")`) as a DynListStr with len-AS-TAG (Ok=len0 with the int
+        // in slot 0, Err=len1 owning the message) — reusing the Option[String] cert (no new Init,
+        // no checker change). SELF-HOSTED result.is_ok / result.is_err read the tag. mk(5)=Ok →
+        // is_ok 1 / is_err 0 ; mk(-1)=Err → is_ok 0 / is_err 1. Byte-matches v0.
+        let src = "fn mk(n: Int) -> Result[Int, String] = if n >= 0 then Ok(n) else Err(\"neg\")\n\
+                   fn main() -> Unit = {\n  \
+            let r1 = mk(5)\n  let a = result.is_ok(r1)\n  let za = if a then 1 else 0\n  println(int.to_string(za))\n  \
+            let r2 = mk(0 - 1)\n  let b = result.is_ok(r2)\n  let zb = if b then 1 else 0\n  println(int.to_string(zb))\n  \
+            let r3 = mk(0 - 2)\n  let c = result.is_err(r3)\n  let zc = if c then 1 else 0\n  println(int.to_string(zc))\n  \
+            let r4 = mk(7)\n  let d = result.is_err(r4)\n  let zd = if d then 1 else 0\n  println(int.to_string(zd)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "result.is_ok"));
+        assert!(prog.functions.iter().any(|f| f.name == "result.is_err"));
+        if let Some(out) = build_and_run("self_hosted_result_is_ok_is_err", &render_wasm_program(&prog)) {
+            assert_eq!(out, "1\n0\n1\n0");
+        }
+    }
+
+    #[test]
+    fn result_err_string_allocating_loop_is_bounded() {
+        // ADVERSARIAL leak/double-free guard for the Result machinery: a loop building thousands of
+        // `Err(msg)` AND `Ok(int)` Results must run in BOUNDED memory — each Err owns a fresh message
+        // String freed by the scope-end DropListStr (len1, frees String + block), each Ok frees only
+        // its block (len0). If the Err String leaked at the RC level it would OOM; if it double-freed
+        // it would trap. The message is one element-slot wide (so the String block, the Err Result and
+        // the Ok Result are all the same 20-byte size → the head-only $alloc free-list reuses them; a
+        // MIXED-size churn is bound by that pre-existing FreeList property, not the ownership cert,
+        // which holds for any size — every block is freed exactly once). Runs to completion = sound.
+        let src = "fn mk(n: Int) -> Result[Int, String] = if n >= 0 then Ok(n) else Err(\"e\")\n\
+                   fn main() -> Unit = {\n  \
+            var i = 0\n  \
+            while i < 4000 {\n    \
+              let r = mk(0 - 1)\n    let _x = result.is_err(r)\n    \
+              let s = mk(i)\n    let _y = result.is_ok(s)\n    \
+              i = i + 1\n  }\n  \
+            println(\"done\") }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("result_err_loop_bounded", &render_wasm_program(&prog)) {
+            assert_eq!(out, "done");
+        }
+    }
+
 
 
 
