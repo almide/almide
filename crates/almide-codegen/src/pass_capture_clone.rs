@@ -109,7 +109,20 @@ fn detect_shared_mut(program: &IrProgram) -> HashSet<VarId> {
     let globals: HashSet<VarId> = program.top_lets.iter().map(|t| t.var)
         .chain(program.modules.iter().flat_map(|m| m.top_lets.iter().map(|t| t.var)))
         .collect();
-    struct LambdaWalker<'a> { vt: &'a VarTable, globals: &'a HashSet<VarId>, out: HashSet<VarId> }
+    // Function parameters. An Almide source param is always immutable, so a param
+    // marked `Mutability::Var` only ever got that way from the TCO pass rewriting a
+    // tail-recursive fn into a loop (its params become the loop's mutable state).
+    // That "mutation" is the per-iteration reassignment, NOT a mutation through a
+    // closure — and a closure created inside the loop body must capture the current
+    // iteration's value (a clone), not share one cell across iterations. So a
+    // captured param needs a shared cell only if the closure ITSELF mutates it;
+    // its bare `Var` flag (TCO artifact) must not trigger shared-mut. (Without this
+    // exclusion the param read emits `.get()` on a value that was never cell-wrapped
+    // — params have no `SharedMut::new` declaration site — yielding E0061/E0277.)
+    let params: HashSet<VarId> = program.functions.iter().flat_map(|f| f.params.iter().map(|p| p.var))
+        .chain(program.modules.iter().flat_map(|m| m.functions.iter().flat_map(|f| f.params.iter().map(|p| p.var))))
+        .collect();
+    struct LambdaWalker<'a> { vt: &'a VarTable, globals: &'a HashSet<VarId>, params: &'a HashSet<VarId>, out: HashSet<VarId> }
     impl almide_ir::visit::IrVisitor for LambdaWalker<'_> {
         fn visit_expr(&mut self, expr: &IrExpr) {
             if let IrExprKind::Lambda { params, body, .. } = &expr.kind {
@@ -129,7 +142,14 @@ fn detect_shared_mut(program: &IrProgram) -> HashSet<VarId> {
                     // (`Rc<RefCell<T>>`) — the walker picks by type. Without this a
                     // non-Copy capture went through `RcCow`, whose copy-on-write loses
                     // the mutation. (Closure v2: P3 = Copy, P6 = non-Copy.)
-                    if matches!(info.mutability, Mutability::Var) || mutated.contains(&v) {
+                    // For a function param, the `Var` flag is a TCO artifact, so only a
+                    // genuine closure-body mutation counts (see `params` note above).
+                    let needs_cell = if self.params.contains(&v) {
+                        mutated.contains(&v)
+                    } else {
+                        matches!(info.mutability, Mutability::Var) || mutated.contains(&v)
+                    };
+                    if needs_cell {
                         self.out.insert(v);
                     }
                 }
@@ -138,7 +158,7 @@ fn detect_shared_mut(program: &IrProgram) -> HashSet<VarId> {
         }
     }
     use almide_ir::visit::IrVisitor;
-    let mut w = LambdaWalker { vt: &program.var_table, globals: &globals, out: HashSet::new() };
+    let mut w = LambdaWalker { vt: &program.var_table, globals: &globals, params: &params, out: HashSet::new() };
     for f in &program.functions { w.visit_expr(&f.body); }
     for m in &program.modules { for f in &m.functions { w.visit_expr(&f.body); } }
     w.out
