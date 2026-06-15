@@ -82,3 +82,19 @@ fn list_count_str(xs: List[String], f: (String) -> Bool) -> Int = {
   let n = prim.load32(h + 4)
   __list_str_count_hits(h, f, n, 0, 0)
 }
+
+// list.fold over a List[String] — f : (Acc, String) -> Acc (Int accumulator), a 2-arity closure
+// with a String element second arg (heap-widened). Left fold in element order. Read-only.
+fn __list_str_fold_loop(h: Int, f: (Int, String) -> Int, n: Int, i: Int, acc: Int) -> Int =
+  if i >= n then acc
+  else {
+    let x = prim.load_str(h + 12 + i * 8)
+    let nacc = f(acc, x)
+    __list_str_fold_loop(h, f, n, i + 1, nacc)
+  }
+
+fn list_fold_str(xs: List[String], init: Int, f: (Int, String) -> Int) -> Int = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  __list_str_fold_loop(h, f, n, 0, init)
+}

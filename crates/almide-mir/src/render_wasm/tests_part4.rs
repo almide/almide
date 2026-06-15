@@ -1684,6 +1684,21 @@
     }
 
     #[test]
+    fn self_hosted_list_string_fold() {
+        // SELF-HOSTED list.fold over a List[String] — f(acc, x) 2-arity closure, String element 2nd
+        // arg (heap-widened). xs=[ab,cde,f]: fold(0, acc + len(x)) = 2+3+1 = 6. Byte-matches v0.
+        let src = "fn main() -> Unit = {\n  \
+            let xs = string.split(\"ab,cde,f\", \",\")\n  \
+            let total = list.fold(xs, 0, (acc, x) => { let l = string.len(x)\n acc + l })\n  \
+            println(int.to_string(total)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "list.fold_str"));
+        if let Some(out) = build_and_run("self_hosted_list_string_fold", &render_wasm_program(&prog)) {
+            assert_eq!(out, "6");
+        }
+    }
+
+    #[test]
     fn self_hosted_set_string_loop_reclaims() {
         // SOUNDNESS for the Set[String] nested-ownership path: a bounded loop building + dropping a
         // fresh Set[String] each iteration must reclaim each element String + the block (DropListStr)
