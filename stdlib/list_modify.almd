@@ -1,0 +1,62 @@
+// list_modify — SELF-HOSTED `list.set` / `list.swap` for v1 over the prim floor.
+// Both return a fresh same-length List[Int] copy with one (set) or two (swap) i64 slots
+// changed — the SAME slot-copy pattern as the shipped list.reverse/sort (scalar
+// elements, so the cert is one owned Alloc, no nested ownership). v0 indexes with
+// `i as usize`, so a negative or >= len index silently no-ops (the copy is returned
+// unchanged). The mutating decision lives in a SCALAR helper (returns 0), so list_set/
+// list_swap have a plain heap tail `buf` — no heap-result `if`. (List[Int] variant; a
+// List[String] element is an i32 handle in the same i64 slot, deferred per the repr note.)
+
+fn __copy_slots(src: Int, dst: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let off = i * 8
+    let v = prim.load64(src + off)
+    prim.store64(dst + off, v)
+    __copy_slots(src, dst, n, i + 1)
+  }
+
+// Store x at slot i of the list at base `bh` iff 0 <= i < n (else no-op). Returns 0.
+fn __set_slot(bh: Int, n: Int, i: Int, x: Int) -> Int =
+  if i < 0 then 0
+  else if i >= n then 0
+  else {
+    prim.store64(bh + 12 + i * 8, x)
+    0
+  }
+
+fn list_set(xs: List[Int], i: Int, x: Int) -> List[Int] = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  let buf = prim.alloc_list(n)
+  let bh = prim.handle(buf)
+  let _c = __copy_slots(h + 12, bh + 12, n, 0)
+  let _s = __set_slot(bh, n, i, x)
+  buf
+}
+
+// Swap slots i and j of the list at base `bh` iff both are in [0, n) (else no-op).
+fn __swap_slots(bh: Int, n: Int, i: Int, j: Int) -> Int =
+  if i < 0 then 0
+  else if i >= n then 0
+  else if j < 0 then 0
+  else if j >= n then 0
+  else {
+    let ai = bh + 12 + i * 8
+    let aj = bh + 12 + j * 8
+    let vi = prim.load64(ai)
+    let vj = prim.load64(aj)
+    prim.store64(ai, vj)
+    prim.store64(aj, vi)
+    0
+  }
+
+fn list_swap(xs: List[Int], i: Int, j: Int) -> List[Int] = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  let buf = prim.alloc_list(n)
+  let bh = prim.handle(buf)
+  let _c = __copy_slots(h + 12, bh + 12, n, 0)
+  let _s = __swap_slots(bh, n, i, j)
+  buf
+}

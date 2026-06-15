@@ -636,6 +636,10 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
                 ("math_choose", "math.choose"),
             ],
         ),
+        (
+            include_str!("../../../stdlib/list_modify.almd"),
+            &[("list_set", "list.set"), ("list_swap", "list.swap")],
+        ),
         (include_str!("../../../stdlib/list_len.almd"), &[("list_len", "list.len")]),
         (include_str!("../../../stdlib/list_is_empty.almd"), &[("list_is_empty", "list.is_empty")]),
         (include_str!("../../../stdlib/list_sum.almd"), &[("list_sum", "list.sum")]),
@@ -2647,6 +2651,24 @@ mod tests {
         assert!(prog.functions.iter().any(|f| f.name == "string.slice"));
         if let Some(out) = build_and_run("string_slice", &render_wasm_program(&prog)) {
             assert_eq!(out, "ell\n日本");
+        }
+    }
+
+    #[test]
+    fn self_hosted_list_set_and_swap() {
+        // list.set/swap self-hosted: a fresh same-length List[Int] copy with one/two slots
+        // changed; OOB index no-ops (v0's `i as usize`). set([10,20,30],1,99)[1]=99;
+        // swap([1,2,3,4],0,3) → [0]=4,[3]=1; set([5,6,7],9,0) unchanged → [0]=5.
+        let src = "fn main() -> Unit = {\n  \
+            let r = list.set([10, 20, 30], 1, 99)\n  let a = list.get_or(r, 1, 0)\n  let sa = int.to_string(a)\n  println(sa)\n  \
+            let s = list.swap([1, 2, 3, 4], 0, 3)\n  let b = list.get_or(s, 0, 0)\n  let sb = int.to_string(b)\n  println(sb)\n  \
+            let c = list.get_or(s, 3, 0)\n  let sc = int.to_string(c)\n  println(sc)\n  \
+            let t = list.set([5, 6, 7], 9, 0)\n  let d = list.get_or(t, 0, 0)\n  let sd = int.to_string(d)\n  println(sd) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "list.set"));
+        assert!(prog.functions.iter().any(|f| f.name == "list.swap"));
+        if let Some(out) = build_and_run("list_modify", &render_wasm_program(&prog)) {
+            assert_eq!(out, "99\n4\n1\n5");
         }
     }
 
