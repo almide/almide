@@ -1,0 +1,9 @@
+// math_int — SELF-HOSTED scalar Int math (abs/max/min) for v1, plain scalar
+// if/arithmetic — NO heap, NO prim floor. Matches v0's i64 `.abs()`/`.max()`/`.min()`.
+// The runtime linker auto-includes the ones a program calls (all share this file).
+
+fn math_abs(n: Int) -> Int = if n < 0 then 0 - n else n
+
+fn math_max(a: Int, b: Int) -> Int = if a > b then a else b
+
+fn math_min(a: Int, b: Int) -> Int = if a < b then a else b

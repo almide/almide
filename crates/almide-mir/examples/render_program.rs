@@ -89,16 +89,19 @@ fn main() {
 
     // Auto-link the self-hosted stdlib runtime (the registry — int.to_string, string.concat,
     // …) when an entry is called but not defined, renaming its impl fn to the call name.
-    for (call_name, impl_fn, source) in almide_mir::render_wasm::self_host_runtime() {
-        let called = functions.iter().any(|f| {
-            f.ops.iter().any(|op| matches!(op, almide_mir::Op::CallFn { name, .. } if name == call_name))
+    for (source, entries) in almide_mir::render_wasm::self_host_runtime() {
+        let any_called = entries.iter().any(|(_, call)| {
+            functions.iter().any(|f| {
+                f.ops.iter().any(|op| matches!(op, almide_mir::Op::CallFn { name, .. } if name == call))
+            })
         });
-        if called && !functions.iter().any(|f| &f.name == call_name) {
+        let any_defined = entries.iter().any(|(_, call)| functions.iter().any(|f| &f.name == call));
+        if any_called && !any_defined {
             let rt = source_to_ir(source);
             for f in &rt.functions {
                 if let Ok(mut mir) = almide_mir::lower::lower_function(f, &globals) {
-                    if &mir.name == impl_fn {
-                        mir.name = call_name.to_string();
+                    if let Some((_, call)) = entries.iter().find(|(impl_fn, _)| &mir.name == impl_fn) {
+                        mir.name = call.to_string();
                     }
                     functions.push(mir);
                 }

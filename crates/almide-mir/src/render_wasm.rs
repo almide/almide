@@ -575,12 +575,16 @@ fn render_call(
 /// `(call $module.func)` resolves AND the caps gate reads it as a known-pure stdlib
 /// `module.func`. The single source of truth for the stdlib self-host campaign (§4.1:
 /// the runtime self-hosts into Almide; the trusted floor stays the prim ops + checker).
-pub fn self_host_runtime() -> &'static [(&'static str, &'static str, &'static str)] {
+pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, &'static str)])] {
     &[
-        ("int.to_string", "int_to_string", include_str!("../../../stdlib/int_to_string.almd")),
-        ("string.len", "string_len", include_str!("../../../stdlib/string_len.almd")),
-        ("string.repeat", "string_repeat", include_str!("../../../stdlib/string_repeat.almd")),
-        ("string.is_empty", "string_is_empty", include_str!("../../../stdlib/string_is_empty.almd")),
+        (include_str!("../../../stdlib/int_to_string.almd"), &[("int_to_string", "int.to_string")]),
+        (include_str!("../../../stdlib/string_len.almd"), &[("string_len", "string.len")]),
+        (include_str!("../../../stdlib/string_repeat.almd"), &[("string_repeat", "string.repeat")]),
+        (include_str!("../../../stdlib/string_is_empty.almd"), &[("string_is_empty", "string.is_empty")]),
+        (
+            include_str!("../../../stdlib/math_int.almd"),
+            &[("math_abs", "math.abs"), ("math_max", "math.max"), ("math_min", "math.min")],
+        ),
     ]
 }
 
@@ -919,12 +923,15 @@ mod tests {
         // `(call $module.func)` resolves AND the caps gate reads it as a known-pure stdlib
         // `module.func` — no caps-coverage regression). Conditional, so non-using programs
         // are not bloated by builders + helpers.
-        for (call_name, impl_fn, source) in self_host_runtime() {
-            if calls_fn(&functions, call_name) && !functions.iter().any(|f| &f.name == call_name) {
+        for (source, entries) in self_host_runtime() {
+            let any_called = entries.iter().any(|(_, call)| calls_fn(&functions, call));
+            let any_defined =
+                entries.iter().any(|(_, call)| functions.iter().any(|f| &f.name == call));
+            if any_called && !any_defined {
                 let mut rt = lower_source(source);
                 for f in rt.functions.iter_mut() {
-                    if &f.name == impl_fn {
-                        f.name = call_name.to_string();
+                    if let Some((_, call)) = entries.iter().find(|(impl_fn, _)| &f.name == impl_fn) {
+                        f.name = call.to_string();
                     }
                 }
                 functions.extend(rt.functions);
@@ -1444,6 +1451,22 @@ mod tests {
         assert!(prog.functions.iter().any(|f| f.name == "string.is_empty"));
         if let Some(out) = build_and_run("string_is_empty", &render_wasm_program(&prog)) {
             assert_eq!(out, "empty\nnonempty");
+        }
+    }
+
+    #[test]
+    fn self_hosted_math_int_abs_max_min() {
+        // Scalar Int math self-hosted from one shared file (math_int.almd, grouped registry
+        // entry): pure scalar if/arithmetic, no heap/prim. abs(-5)=5, max(3,7)=7, min(3,7)=3.
+        let src = "fn main() -> Unit = {\n  \
+            let a = math.abs(0 - 5)\n  println(int.to_string(a))\n  \
+            let b = math.max(3, 7)\n  println(int.to_string(b))\n  \
+            let c = math.min(3, 7)\n  println(int.to_string(c)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "math.abs"));
+        assert!(prog.functions.iter().any(|f| f.name == "math.min"));
+        if let Some(out) = build_and_run("math_int", &render_wasm_program(&prog)) {
+            assert_eq!(out, "5\n7\n3");
         }
     }
 
