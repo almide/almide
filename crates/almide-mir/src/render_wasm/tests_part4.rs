@@ -136,6 +136,22 @@
     }
 
     #[test]
+    fn self_hosted_list_find() {
+        // SELF-HOSTED `list.find` — Option-returning higher-order. find([1,2,3,4], x>2)=Some(3),
+        // find(_, x>9)=None. Some/None built in tail position (the call-arm Option pattern,
+        // like list.max), consumed via `??`; byte-matches v0.
+        let src = "fn main() -> Unit = {\n  \
+            let a = list.find([1, 2, 3, 4], (x) => x > 2) ?? 0\n  println(int.to_string(a))\n  \
+            let b = list.find([1, 2, 3, 4], (x) => x > 9) ?? 0\n  println(int.to_string(b)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "list.find"));
+        if let Some(out) = build_and_run("self_hosted_list_find", &render_wasm_program(&prog)) {
+            // find(x>2)=Some(3)→3 ; find(x>9)=None→0 (fallback)
+            assert_eq!(out, "3\n0");
+        }
+    }
+
+    #[test]
     fn self_hosted_list_take_end_drop_end() {
         // list.take_end/drop_end self-hosted: last n / all-but-last n, List[Int] slot-copy.
         // take_end([1,2,3,4,5],2)=[4,5] ([0]=4,len 2); drop_end([1,2,3,4,5],2)=[1,2,3]
