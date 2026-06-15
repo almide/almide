@@ -186,6 +186,23 @@
     }
 
     #[test]
+    fn self_hosted_list_zip_with() {
+        // SELF-HOSTED `list.zip_with` — two lists + a two-arity closure ($closure_fn2), result
+        // length = min. zip_with([1,2,3],[10,20,30,40], +)=[11,22,33] (stops at 3). len 3, sum
+        // 66, ys[2]=33. Byte-matches v0.
+        let src = "fn main() -> Unit = {\n  \
+            let ys = list.zip_with([1, 2, 3], [10, 20, 30, 40], (a, b) => a + b)\n  \
+            println(int.to_string(list.len(ys)))\n  println(int.to_string(list.sum(ys)))\n  \
+            println(int.to_string(list.get_or(ys, 2, 0))) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "list.zip_with"));
+        if let Some(out) = build_and_run("self_hosted_list_zip_with", &render_wasm_program(&prog)) {
+            // [11,22,33]: len3 sum66 ys[2]=33
+            assert_eq!(out, "3\n66\n33");
+        }
+    }
+
+    #[test]
     fn self_hosted_list_take_end_drop_end() {
         // list.take_end/drop_end self-hosted: last n / all-but-last n, List[Int] slot-copy.
         // take_end([1,2,3,4,5],2)=[4,5] ([0]=4,len 2); drop_end([1,2,3,4,5],2)=[1,2,3]
