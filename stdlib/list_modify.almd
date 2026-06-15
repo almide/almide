@@ -145,3 +145,30 @@ fn list_drop_end(xs: List[Int], n: Int) -> List[Int] = {
   let _c = __copy_slots(h + 12, prim.handle(buf) + 12, endi, 0)
   buf
 }
+
+// Apply f to slot i of the list at base `bh` iff 0 <= i < n (else no-op). The closure `f` is
+// invoked via CallIndirect (the list.map machinery), here CONDITIONALLY — v0's update only calls
+// `f(s.clone())` when the index is in bounds. Returns 0 (a scalar helper, so list_update keeps a
+// plain heap tail `buf`, no heap-result if).
+fn __upd_slot(bh: Int, n: Int, i: Int, f: (Int) -> Int) -> Int =
+  if i < 0 then 0
+  else if i >= n then 0
+  else {
+    let old = prim.load64(bh + 12 + i * 8)
+    let new = f(old)
+    prim.store64(bh + 12 + i * 8, new)
+    0
+  }
+
+// list.update(xs, i, f): a fresh same-length List[Int] copy with slot i replaced by f(xs[i])
+// (the in-bounds case); an out-of-range index returns the copy unchanged. Same single-owned-Alloc
+// cert as list.set — the only addition is the conditional closure call inside the scalar helper.
+fn list_update(xs: List[Int], i: Int, f: (Int) -> Int) -> List[Int] = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  let buf = prim.alloc_list(n)
+  let bh = prim.handle(buf)
+  let _c = __copy_slots(h + 12, bh + 12, n, 0)
+  let _s = __upd_slot(bh, n, i, f)
+  buf
+}

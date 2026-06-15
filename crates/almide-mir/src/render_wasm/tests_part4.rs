@@ -1177,6 +1177,30 @@
         }
     }
 
+    #[test]
+    fn self_hosted_list_update() {
+        // SELF-HOSTED list.update(xs, i, f): a same-length copy with slot i replaced by f(xs[i])
+        // (the closure invoked via CallIndirect, here CONDITIONALLY). In-bounds: update([10,20,30],
+        // 1, *100)=[10,2000,30]. Out-of-range (i>=len OR i<0): the copy is returned unchanged, f
+        // never called (matching v0's get_mut no-op). Byte-matches v0.
+        let src = "fn main() -> Unit = {\n  \
+            let a = list.update([10, 20, 30], 1, (x) => x * 100)\n  \
+            println(int.to_string(list.get_or(a, 0, 0)))\n  \
+            println(int.to_string(list.get_or(a, 1, 0)))\n  \
+            println(int.to_string(list.get_or(a, 2, 0)))\n  \
+            println(int.to_string(list.len(a)))\n  \
+            let b = list.update([1, 2, 3], 5, (x) => x + 1)\n  \
+            println(int.to_string(list.sum(b)))\n  \
+            let c = list.update([1, 2, 3], 0 - 1, (x) => x + 1)\n  \
+            println(int.to_string(list.sum(c))) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "list.update"));
+        if let Some(out) = build_and_run("self_hosted_list_update", &render_wasm_program(&prog)) {
+            // [10,2000,30]: 10, 2000, 30, len 3 ; out-of-range sum 6 ; negative sum 6
+            assert_eq!(out, "10\n2000\n30\n3\n6\n6");
+        }
+    }
+
 
 
 
