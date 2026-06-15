@@ -1284,6 +1284,27 @@
     }
 
     #[test]
+    fn self_hosted_bytes_read_array_be_and_wide() {
+        // SELF-HOSTED big-endian + i16/i64 array reads, each reusing its self-hosted scalar read.
+        // u16_be [0,1,0,2]@0×2=[1,2] sum 3; i16_le [255,255]@0×1=-1 (negated 1);
+        // i32_be [0,0,0,7]@0×1=[7]; i64_le [5,0,0,0,0,0,0,0]@0×1=[5]. Byte-matches v0.
+        let src = "fn main() -> Unit = {\n  \
+            let b = bytes.from_list([0, 1, 0, 2])\n  let a = bytes.read_u16_be_array(b, 0, 2)\n  \
+            println(int.to_string(list.sum(a)))\n  \
+            let b2 = bytes.from_list([255, 255])\n  let a2 = bytes.read_i16_le_array(b2, 0, 1)\n  \
+            let v = list.get_or(a2, 0, 0)\n  let nv = 0 - v\n  println(int.to_string(nv))\n  \
+            let b3 = bytes.from_list([0, 0, 0, 7])\n  let a3 = bytes.read_i32_be_array(b3, 0, 1)\n  \
+            println(int.to_string(list.get_or(a3, 0, 0)))\n  \
+            let b4 = bytes.from_list([5, 0, 0, 0, 0, 0, 0, 0])\n  let a4 = bytes.read_i64_le_array(b4, 0, 1)\n  \
+            println(int.to_string(list.get_or(a4, 0, 0))) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "bytes.read_u16_be_array"));
+        if let Some(out) = build_and_run("self_hosted_bytes_read_array_be_and_wide", &render_wasm_program(&prog)) {
+            assert_eq!(out, "3\n1\n7\n5");
+        }
+    }
+
+    #[test]
     fn self_hosted_list_get_first_last_str() {
         // SELF-HOSTED list.get / list.first / list.last over a List[String] → Option[String] (the
         // repr-poly _str accessors). An in-bounds element is returned as Some(a deep copy); out of
