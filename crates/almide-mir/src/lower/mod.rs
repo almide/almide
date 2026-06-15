@@ -96,6 +96,21 @@ pub fn lower_function(
     func: &IrFunction,
     globals: &HashMap<VarId, Ty>,
 ) -> Result<MirFunction, LowerError> {
+    // The main function only; any lambda-lifted auxiliaries are dropped (callers that
+    // need them — render/verify paths — use `lower_function_all`). Sound while no lambda
+    // lifting is wired (lifted is empty); when it is, those paths verify the auxiliaries.
+    let mut all = lower_function_all(func, globals)?;
+    Ok(all.remove(0))
+}
+
+/// Lower a function to its MIR plus any lambda-lifted auxiliary functions (index 0 is the
+/// main function). The closures machinery lifts `let f = (x) => …` bodies into fresh
+/// functions accumulated in `LowerCtx::lifted`; this returns them so the program assembler
+/// can table + verify them. With no lifting wired the result is just `[main]`.
+pub fn lower_function_all(
+    func: &IrFunction,
+    globals: &HashMap<VarId, Ty>,
+) -> Result<Vec<MirFunction>, LowerError> {
     let mut ctx = LowerCtx { globals: globals.clone(), ..Default::default() };
     let params = ctx.bind_params(&func.params)?;
     let ret = ctx.lower_body_into(&func.body)?;
@@ -111,13 +126,17 @@ pub fn lower_function(
     } else {
         Vec::new()
     };
-    Ok(MirFunction {
+    let lifted = std::mem::take(&mut ctx.lifted);
+    let main = MirFunction {
         name: func.name.as_str().to_string(),
         params,
         ops: ctx.ops,
         ret,
         declared_caps,
-    })
+    };
+    let mut all = vec![main];
+    all.extend(lifted);
+    Ok(all)
 }
 
 /// Lower a function body expression to MIR (the param-free testable core;
@@ -185,6 +204,13 @@ pub(crate) struct LowerCtx {
     /// `None`, so it keeps the sound LINEARIZED match. This is the gate that makes the
     /// len-as-tag execution safe without any global materialization invariant.
     materialized_options: HashSet<ValueId>,
+    /// Lambda-lifted auxiliary functions produced while lowering this function's body
+    /// (a `let f = (x) => …` lifts its body to a fresh MirFunction here, bound via
+    /// `Op::FuncRef`). `lower_function_all` returns these alongside the main function so
+    /// the program assembler tables + verifies them. Empty until lambda lifting is wired
+    /// (the lifting that writes to it lands in the next slice; the plumbing is in place).
+    #[allow(dead_code)]
+    lifted: Vec<crate::MirFunction>,
 }
 
 impl LowerCtx {

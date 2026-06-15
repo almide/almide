@@ -71,8 +71,10 @@ fn main() {
     let mut functions = Vec::new();
     let mut walled = Vec::new();
     for func in &ir.functions {
-        match almide_mir::lower::lower_function(func, &globals) {
-            Ok(mir) => functions.push(mir),
+        // lower_function_all returns the main function plus any lambda-lifted auxiliaries
+        // (index 0 is main); all go into the module so the function table covers them.
+        match almide_mir::lower::lower_function_all(func, &globals) {
+            Ok(mirs) => functions.extend(mirs),
             Err(e) => walled.push(format!("{}: {e:?}", func.name.as_str())),
         }
     }

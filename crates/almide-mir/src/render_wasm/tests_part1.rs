@@ -218,8 +218,12 @@
                 globals.insert(tl.var, tl.ty.clone());
             }
         }
-        let mut functions: Vec<MirFunction> =
-            ir.functions.iter().filter_map(|f| crate::lower::lower_function(f, &globals).ok()).collect();
+        let mut functions: Vec<MirFunction> = ir
+            .functions
+            .iter()
+            .filter_map(|f| crate::lower::lower_function_all(f, &globals).ok())
+            .flatten()
+            .collect();
         // Auto-link the self-hosted stdlib runtime: for each registry entry CALLED but not
         // defined, lower its Almide source and rename the impl fn to the call name (so
         // `(call $module.func)` resolves AND the caps gate reads it as a known-pure stdlib
