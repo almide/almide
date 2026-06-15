@@ -1306,6 +1306,46 @@
     }
 
     #[test]
+    fn self_hosted_set_core() {
+        // SELF-HOSTED Set[Int] core (the Set machinery: a v1 Set[Int] IS a v1 List block with
+        // unique insertion-ordered Int elements; prim.alloc_set + dedup-fill + len-patch). v0:
+        // set.from_list([3,1,2,2,3,1])={3,1,2} len 3; contains(2)=true contains(9)=false;
+        // to_list=[3,1,2] (insertion order) sum 6, first elem 3. Byte-matches v0.
+        let src = "fn main() -> Unit = {\n  \
+            let s = set.from_list([3, 1, 2, 2, 3, 1])\n  \
+            println(int.to_string(set.len(s)))\n  \
+            let c2 = set.contains(s, 2)\n  let v2 = if c2 then 1 else 0\n  println(int.to_string(v2))\n  \
+            let c9 = set.contains(s, 9)\n  let v9 = if c9 then 1 else 0\n  println(int.to_string(v9))\n  \
+            let e = set.is_empty(s)\n  let ve = if e then 1 else 0\n  println(int.to_string(ve))\n  \
+            let xs = set.to_list(s)\n  \
+            println(int.to_string(list.sum(xs)))\n  \
+            println(int.to_string(list.get_or(xs, 0, 0))) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "set.from_list"));
+        if let Some(out) = build_and_run("self_hosted_set_core", &render_wasm_program(&prog)) {
+            assert_eq!(out, "3\n1\n0\n0\n6\n3");
+        }
+    }
+
+    #[test]
+    fn self_hosted_set_core_loop_reclaims() {
+        // SOUNDNESS for the new Set[Int] heap path: a bounded loop building + dropping a fresh
+        // Set[Int] every iteration must reclaim each (plain non-nested drop) — no leak (OOM) or
+        // double-free (trap). 4000 iterations, prints the last set's len (2).
+        let src = "fn main() -> Unit = {\n  \
+            var i = 0\n  var last = 0\n  \
+            while i < 4000 {\n    \
+              let s = set.from_list([7, 7, 8])\n    \
+              last = set.len(s)\n    \
+              i = i + 1\n  }\n  \
+            println(int.to_string(last)) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("self_hosted_set_core_loop_reclaims", &render_wasm_program(&prog)) {
+            assert_eq!(out, "2");
+        }
+    }
+
+    #[test]
     fn self_hosted_bytes_read_f64_array_loop_reclaims() {
         // SOUNDNESS for the new List[Float] heap path: a bounded loop that allocates a fresh
         // List[Float] (read_f64_le_array) every iteration must RECLAIM each one (plain non-nested

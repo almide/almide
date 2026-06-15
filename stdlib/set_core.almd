@@ -1,0 +1,68 @@
+// set_core — SELF-HOSTED Set[Int] core for v1. A v1 `Set[Int]` IS a v1 List block
+// [rc][len@4][cap@8][data@12] holding UNIQUE, INSERTION-ORDERED Int elements — exactly v0's
+// dense de-duplicated insertion-ordered AlmideSet (native == wasm == self-host observably).
+// from_list dedups (first-seen order); len/is_empty/contains read; to_list copies to a List[Int].
+// Source borrowed; constructed sets/lists owned. Int elements only (scalar slots); Set[String]
+// (heap elements, nested ownership) is a later refinement.
+
+// Is x already among the first `count` Int elements at block-handle `dh`? Linear membership,
+// the same O(n) scan v0's AlmideSet uses.
+fn __set_has(dh: Int, count: Int, x: Int, i: Int) -> Bool =
+  if i >= count then false
+  else {
+    let e = prim.load64(dh + 12 + i * 8)
+    if e == x then true
+    else __set_has(dh, count, x, i + 1)
+  }
+
+// Append each not-yet-present element of list `xh` (length xlen) into the set block `sh`,
+// growing the unique count `w`. Returns the final unique count (= the set's len).
+fn __set_fill(xh: Int, xlen: Int, sh: Int, i: Int, w: Int) -> Int =
+  if i >= xlen then w
+  else {
+    let x = prim.load64(xh + 12 + i * 8)
+    let present = __set_has(sh, w, x, 0)
+    if present then __set_fill(xh, xlen, sh, i + 1, w)
+    else {
+      prim.store64(sh + 12 + w * 8, x)
+      __set_fill(xh, xlen, sh, i + 1, w + 1)
+    }
+  }
+
+fn set_from_list(xs: List[Int]) -> Set[Int] = {
+  let xh = prim.handle(xs)
+  let xlen = prim.load32(xh + 4)
+  let s = prim.alloc_set(xlen)          // over-alloc xlen slots; patch len to the unique count
+  let sh = prim.handle(s)
+  let u = __set_fill(xh, xlen, sh, 0, 0)
+  prim.store32(sh + 4, u)               // len field := unique count
+  s
+}
+
+fn set_len(s: Set[Int]) -> Int = prim.load32(prim.handle(s) + 4)
+
+fn set_is_empty(s: Set[Int]) -> Bool = prim.load32(prim.handle(s) + 4) == 0
+
+fn set_contains(s: Set[Int], x: Int) -> Bool = {
+  let h = prim.handle(s)
+  let len = prim.load32(h + 4)
+  __set_has(h, len, x, 0)
+}
+
+// Copy the set's first `len` Int elements into a fresh List block.
+fn __set_copy(sh: Int, oh: Int, len: Int, i: Int) -> Int =
+  if i >= len then 0
+  else {
+    let e = prim.load64(sh + 12 + i * 8)
+    prim.store64(oh + 12 + i * 8, e)
+    __set_copy(sh, oh, len, i + 1)
+  }
+
+fn set_to_list(s: Set[Int]) -> List[Int] = {
+  let h = prim.handle(s)
+  let len = prim.load32(h + 4)
+  let out = prim.alloc_list(len)
+  let oh = prim.handle(out)
+  let _x = __set_copy(h, oh, len, 0)
+  out
+}

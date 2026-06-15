@@ -80,6 +80,14 @@ fn alloc_list(n: Int) -> List[Int] = _
 @intrinsic("almide_rt_prim_alloc_list")
 fn alloc_list_f64(n: Int) -> List[Float] = _
 
+// Allocate a runtime-sized OWNED `Set[Int]` of `n` i64 slots — physically IDENTICAL to
+// `alloc_list` (a plain block [rc][len][cap][data]; drops as a flat block), but typed as
+// Set[Int] so a set builder can return it. A v1 Set[Int] IS a v1 List block with unique,
+// insertion-ordered Int elements; the builder over-allocs `n`, fills the unique elements, and
+// patches the len field via store32. A dedicated name keeps `alloc_list`'s inference clean.
+@intrinsic("almide_rt_prim_alloc_list")
+fn alloc_set(n: Int) -> Set[Int] = _
+
 // Allocate a runtime-sized OWNED `List[String]` of `n` slots (Machinery 2: a NESTED-
 // ownership list). Fill via `store_str`, which MOVES each owned String into a slot; the
 // whole list is freed recursively (each element String + the block) at scope end.
