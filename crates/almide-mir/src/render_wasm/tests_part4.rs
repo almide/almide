@@ -1638,6 +1638,31 @@
     }
 
     #[test]
+    fn self_hosted_list_string_search() {
+        // SELF-HOSTED list.contains / list.index_of over a List[String] (byte string equality
+        // __str_eq; arg-keyed dispatch). Also exercises set.contains_str in the SAME program so the
+        // duplicate __str_eq (in list_str.almd + set_str.almd) must DEDUP by name (no "duplicate
+        // func"). xs=[a,b,c,d]: contains("c")=true, contains("z")=false; index_of("c")=Some(2),
+        // index_of("z")=None; set.contains over the same elements = true. Byte-matches v0.
+        let src = "fn main() -> Unit = {\n  \
+            let xs = string.split(\"a,b,c,d\", \",\")\n  \
+            let c1 = list.contains(xs, \"c\")\n  if c1 then println(\"has-c\") else println(\"no\")\n  \
+            let c2 = list.contains(xs, \"z\")\n  if c2 then println(\"has-z\") else println(\"no\")\n  \
+            let i1 = list.index_of(xs, \"c\")\n  \
+            match i1 { Some(v) => println(int.to_string(v)), None => println(\"none\"), }\n  \
+            let i2 = list.index_of(xs, \"z\")\n  \
+            match i2 { Some(v) => println(int.to_string(v)), None => println(\"none\"), }\n  \
+            let s = set.from_list(xs)\n  let sc = set.contains(s, \"b\")\n  \
+            if sc then println(\"set-has-b\") else println(\"no\") }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "list.contains_str"));
+        assert!(prog.functions.iter().any(|f| f.name == "list.index_of_str"));
+        if let Some(out) = build_and_run("self_hosted_list_string_search", &render_wasm_program(&prog)) {
+            assert_eq!(out, "has-c\nno\n2\nnone\nset-has-b");
+        }
+    }
+
+    #[test]
     fn self_hosted_set_string_loop_reclaims() {
         // SOUNDNESS for the Set[String] nested-ownership path: a bounded loop building + dropping a
         // fresh Set[String] each iteration must reclaim each element String + the block (DropListStr)

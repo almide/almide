@@ -1,0 +1,52 @@
+// list_str — SELF-HOSTED list.contains / list.index_of over a List[String] (the heap-element
+// search variants). Both scan by byte-level string equality (__str_eq); contains returns Bool,
+// index_of returns Option[Int] (the first match's index, or None). The source is borrowed (each
+// element read via prim.load_str). __str_eq/__str_eq_bytes are duplicated from set_str.almd; the
+// runtime linker DEDUPS functions by name, so co-linking both modules keeps one copy.
+
+fn __str_eq_bytes(pa: Int, pb: Int, n: Int, i: Int) -> Bool =
+  if i >= n then true
+  else {
+    let ca = prim.load8(pa + i)
+    let cb = prim.load8(pb + i)
+    if ca == cb then __str_eq_bytes(pa, pb, n, i + 1)
+    else false
+  }
+
+fn __str_eq(a: String, b: String) -> Bool = {
+  let ha = prim.handle(a)
+  let hb = prim.handle(b)
+  let la = prim.load32(ha + 4)
+  let lb = prim.load32(hb + 4)
+  if la != lb then false
+  else __str_eq_bytes(ha + 12, hb + 12, la, 0)
+}
+
+// First index of x among the first `len` elements at block-handle h, or -1 if absent.
+fn __list_str_index(h: Int, len: Int, x: String, i: Int) -> Int =
+  if i >= len then 0 - 1
+  else {
+    let e = prim.load_str(h + 12 + i * 8)
+    let eq = __str_eq(e, x)
+    if eq then i
+    else __list_str_index(h, len, x, i + 1)
+  }
+
+fn list_contains_str(xs: List[String], x: String) -> Bool = {
+  let h = prim.handle(xs)
+  let len = prim.load32(h + 4)
+  let idx = __list_str_index(h, len, x, 0)
+  idx >= 0
+}
+
+// Each Option arm is built in a HELPER TAIL (the materialized-Option layout).
+fn __lis_none() -> Option[Int] = None
+fn __lis_some(i: Int) -> Option[Int] = Some(i)
+
+fn list_index_of_str(xs: List[String], x: String) -> Option[Int] = {
+  let h = prim.handle(xs)
+  let len = prim.load32(h + 4)
+  let idx = __list_str_index(h, len, x, 0)
+  if idx < 0 then __lis_none()
+  else __lis_some(idx)
+}

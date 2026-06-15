@@ -712,6 +712,15 @@ pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], resu
                 }
             }
         }
+        // SEARCH over a List[heap] keyed on the SUBJECT (arg 0): contains → Bool, index_of →
+        // Option[Int] (a SCALAR-result Option, so it can't be keyed on the result type).
+        if matches!(func, "contains" | "index_of") {
+            if let Some(Ty::Applied(TypeConstructorId::List, a)) = arg_tys.first() {
+                if a.len() == 1 && is_heap_ty(&a[0]) {
+                    return format!("list.{func}_str");
+                }
+            }
+        }
     }
     if module == "set" {
         // `Set[heap]`-RETURNING constructors key on the RESULT element type; `set.to_list` over a
