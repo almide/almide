@@ -1,0 +1,3 @@
+// list_is_empty — SELF-HOSTED `list.is_empty` for v1. The header element-count field is
+// 0 iff the list is empty. Reads only — `xs` is borrowed, type-agnostic at the wasm level.
+fn list_is_empty(xs: List[Int]) -> Bool = prim.load32(prim.handle(xs) + 4) == 0

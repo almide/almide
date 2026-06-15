@@ -656,6 +656,7 @@ impl LowerCtx {
             "handle" => PrimKind::Handle,
             "load8" => PrimKind::Load { width: 1 },
             "load32" => PrimKind::Load { width: 4 },
+            "load64" => PrimKind::Load { width: 8 },
             "store32" => PrimKind::Store { width: 4 },
             "store8" => PrimKind::Store { width: 1 },
             "fd_write" => PrimKind::FdWrite,

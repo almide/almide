@@ -1,0 +1,17 @@
+// list_sum — SELF-HOSTED `list.sum` for v1 over the prim floor. Iterates the list's i64
+// element slots (8 bytes each, starting at LIST_HEADER) and adds them. Matches v0's
+// `xs.iter().fold(0, +)`. Reads only — `xs` is borrowed, no allocation.
+
+// Sum the i64 slots in [addr, end) into acc.
+fn __list_sum(addr: Int, end: Int, acc: Int) -> Int =
+  if addr >= end then acc
+  else {
+    let e = prim.load64(addr)
+    __list_sum(addr + 8, end, acc + e)   // ELEM_SIZE = 8
+  }
+
+fn list_sum(xs: List[Int]) -> Int = {
+  let h = prim.handle(xs)
+  let len = prim.load32(h + 4)              // element count at LIST_LEN_OFFSET(4)
+  __list_sum(h + 12, h + 12 + len * 8, 0)   // elements at LIST_HEADER(12)
+}

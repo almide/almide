@@ -24,6 +24,10 @@ fn load8(addr: Int) -> Int = _
 @intrinsic("almide_rt_prim_load32")
 fn load32(addr: Int) -> Int = _
 
+// Load 8 bytes (a full i64 — a List/Map element slot) at `addr`.
+@intrinsic("almide_rt_prim_load64")
+fn load64(addr: Int) -> Int = _
+
 // Store the low 4 bytes of `val` at `addr`.
 @intrinsic("almide_rt_prim_store32")
 fn store32(addr: Int, val: Int) -> Unit = _

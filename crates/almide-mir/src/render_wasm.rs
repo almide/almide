@@ -586,6 +586,8 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
             &[("math_abs", "math.abs"), ("math_max", "math.max"), ("math_min", "math.min")],
         ),
         (include_str!("../../../stdlib/list_len.almd"), &[("list_len", "list.len")]),
+        (include_str!("../../../stdlib/list_is_empty.almd"), &[("list_is_empty", "list.is_empty")]),
+        (include_str!("../../../stdlib/list_sum.almd"), &[("list_sum", "list.sum")]),
     ]
 }
 
@@ -1482,6 +1484,33 @@ mod tests {
         assert!(prog.functions.iter().any(|f| f.name == "list.len"));
         if let Some(out) = build_and_run("list_len", &render_wasm_program(&prog)) {
             assert_eq!(out, "3\n5");
+        }
+    }
+
+    #[test]
+    fn self_hosted_list_sum_iterates_elements() {
+        // list.sum self-hosted: iterate the i64 element slots (prim.load64) and add.
+        // sum([1,2,3,4])=10, sum([100,200])=300, matching v0's fold(0,+).
+        let src = "fn main() -> Unit = {\n  \
+            let s = list.sum([1, 2, 3, 4])\n  println(int.to_string(s))\n  \
+            let t = list.sum([100, 200])\n  println(int.to_string(t)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "list.sum"));
+        if let Some(out) = build_and_run("list_sum", &render_wasm_program(&prog)) {
+            assert_eq!(out, "10\n300");
+        }
+    }
+
+    #[test]
+    fn self_hosted_list_is_empty_tests_the_count() {
+        // list.is_empty self-hosted: the element-count field is 0 iff empty.
+        let src = "fn main() -> Unit = {\n  \
+            let a = list.is_empty([1, 2])\n  \
+            if a then println(\"empty\") else println(\"nonempty\") }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "list.is_empty"));
+        if let Some(out) = build_and_run("list_is_empty", &render_wasm_program(&prog)) {
+            assert_eq!(out, "nonempty");
         }
     }
 
