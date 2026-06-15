@@ -619,6 +619,45 @@
     }
 
     #[test]
+    fn self_hosted_bytes_insert_remove_read() {
+        // SELF-HOSTED bytes.insert/remove_at + the big-endian/little-endian integer reads
+        // (read_u16_be/i16_be/i16_le/i32_be over the bitwise prim floor with sign extension).
+        // insert clamps pos; remove_at clones on out-of-range; reads return 0 out of range.
+        // A negative i16 is mapped to 999 (int.to_string is non-negative). Byte-matches v0.
+        let src = "fn main() -> Unit = {\n  \
+            let abc = bytes.from_string(\"abc\")\n  \
+            let i1 = bytes.insert(abc, 1, 90)\n  \
+            println(int.to_string(bytes.len(i1)))\n  \
+            println(int.to_string(bytes.get_or(i1, 1, 0)))\n  \
+            println(int.to_string(bytes.get_or(i1, 2, 0)))\n  \
+            let i2 = bytes.insert(abc, 0, 88)\n  println(int.to_string(bytes.get_or(i2, 0, 0)))\n  \
+            let i3 = bytes.insert(abc, 10, 88)\n  println(int.to_string(bytes.get_or(i3, 3, 0)))\n  \
+            let r1 = bytes.remove_at(abc, 1)\n  \
+            println(int.to_string(bytes.len(r1)))\n  \
+            println(int.to_string(bytes.get_or(r1, 1, 0)))\n  \
+            let r2 = bytes.remove_at(abc, 5)\n  \
+            println(int.to_string(bytes.len(r2)))\n  \
+            println(int.to_string(bytes.get_or(r2, 0, 0)))\n  \
+            let p12 = [1, 2]\n  let bp = bytes.from_list(p12)\n  \
+            println(int.to_string(bytes.read_u16_be(bp, 0)))\n  \
+            println(int.to_string(bytes.read_i16_be(bp, 0)))\n  \
+            let ff = [255, 255]\n  let bf = bytes.from_list(ff)\n  \
+            let v = bytes.read_i16_be(bf, 0)\n  let m = if v < 0 then 999 else v\n  println(int.to_string(m))\n  \
+            let p21 = [2, 1]\n  let bl = bytes.from_list(p21)\n  \
+            println(int.to_string(bytes.read_i16_le(bl, 0)))\n  \
+            let q = [0, 0, 1, 0]\n  let bq = bytes.from_list(q)\n  \
+            println(int.to_string(bytes.read_i32_be(bq, 0))) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "bytes.insert"));
+        assert!(prog.functions.iter().any(|f| f.name == "bytes.read_i32_be"));
+        if let Some(out) = build_and_run("self_hosted_bytes_insert_remove_read", &render_wasm_program(&prog)) {
+            // insert(1) len4 b1=90 b2=98; insert(0) b0=88; insert(10) b3=88; remove(1) len2 b1=99;
+            // remove(5) clone len3 b0=97; read_u16_be 258; read_i16_be 258; neg->999; read_i16_le 258; read_i32_be 256
+            assert_eq!(out, "4\n90\n98\n88\n88\n2\n99\n3\n97\n258\n258\n999\n258\n256");
+        }
+    }
+
+    #[test]
     fn self_hosted_math_sqrt() {
         // SELF-HOSTED math.sqrt = prim.fsqrt (f64.sqrt, byte-exact with v0). sqrt(16)=4,
         // sqrt(2)=1.41…→to_int 1, sqrt(81)=9.

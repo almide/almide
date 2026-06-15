@@ -278,3 +278,113 @@ fn bytes_xor(a: Bytes, b: Bytes) -> Bytes = {
   let _x = __xorcopy(prim.handle(out) + 12, pa, pb, n, 0)
   out
 }
+
+// bytes.insert(b, pos, val) -> a fresh copy of b with `val` inserted at clamped position pos.
+fn bytes_insert(b: Bytes, pos: Int, val: Int) -> Bytes = {
+  let n = prim.load32(prim.handle(b) + 4)
+  let p = if pos < 0 then 0 else (if pos > n then n else pos)
+  let out = prim.alloc_bytes(n + 1)
+  let dst = prim.handle(out) + 12
+  let src = prim.handle(b) + 12
+  let _x = __bytecopy(dst, src, p, 0)
+  let ip = dst + p
+  prim.store8(ip, val)
+  let dsttail = dst + p + 1
+  let srctail = src + p
+  let _y = __bytecopy(dsttail, srctail, n - p, 0)
+  out
+}
+
+// bytes.remove_at(b, pos) -> a fresh copy of b with byte pos removed (out-of-range pos = clone).
+fn bytes_remove_at(b: Bytes, pos: Int) -> Bytes = {
+  let n = prim.load32(prim.handle(b) + 4)
+  let valid = if pos >= 0 then (if pos < n then 1 else 0) else 0
+  let outlen = n - valid
+  let out = prim.alloc_bytes(outlen)
+  let dst = prim.handle(out) + 12
+  let src = prim.handle(b) + 12
+  let p = if valid > 0 then pos else n
+  let _x = __bytecopy(dst, src, p, 0)
+  let tail = n - p - valid
+  let srctail = src + p + valid
+  let dsttail = dst + p
+  let _y = __bytecopy(dsttail, srctail, tail, 0)
+  out
+}
+
+// Sign-extend a 16-bit / 32-bit unsigned value into a signed Int.
+fn __sext16(u: Int) -> Int = if u >= 32768 then u - 65536 else u
+fn __sext32(u: Int) -> Int = if u >= 2147483648 then u - 4294967296 else u
+
+// bytes.read_u16_be(b, pos) -> the unsigned big-endian u16 at pos (0 if out of range).
+fn bytes_read_u16_be(b: Bytes, pos: Int) -> Int = {
+  let n = prim.load32(prim.handle(b) + 4)
+  let base = prim.handle(b) + 12 + pos
+  if pos < 0 then 0
+  else {
+    if pos + 2 > n then 0
+    else {
+      let hi = prim.load8(base)
+      let lo = prim.load8(base + 1)
+      let sh = prim.bshl(hi, 8)
+      prim.bor(sh, lo)
+    }
+  }
+}
+
+// bytes.read_i16_be(b, pos) -> the signed big-endian i16 at pos (0 if out of range).
+fn bytes_read_i16_be(b: Bytes, pos: Int) -> Int = {
+  let n = prim.load32(prim.handle(b) + 4)
+  let base = prim.handle(b) + 12 + pos
+  if pos < 0 then 0
+  else {
+    if pos + 2 > n then 0
+    else {
+      let hi = prim.load8(base)
+      let lo = prim.load8(base + 1)
+      let sh = prim.bshl(hi, 8)
+      let u = prim.bor(sh, lo)
+      __sext16(u)
+    }
+  }
+}
+
+// bytes.read_i16_le(b, pos) -> the signed little-endian i16 at pos (0 if out of range).
+fn bytes_read_i16_le(b: Bytes, pos: Int) -> Int = {
+  let n = prim.load32(prim.handle(b) + 4)
+  let base = prim.handle(b) + 12 + pos
+  if pos < 0 then 0
+  else {
+    if pos + 2 > n then 0
+    else {
+      let lo = prim.load8(base)
+      let hi = prim.load8(base + 1)
+      let sh = prim.bshl(hi, 8)
+      let u = prim.bor(lo, sh)
+      __sext16(u)
+    }
+  }
+}
+
+// bytes.read_i32_be(b, pos) -> the signed big-endian i32 at pos (0 if out of range).
+fn bytes_read_i32_be(b: Bytes, pos: Int) -> Int = {
+  let n = prim.load32(prim.handle(b) + 4)
+  let base = prim.handle(b) + 12 + pos
+  if pos < 0 then 0
+  else {
+    if pos + 4 > n then 0
+    else {
+      let b0 = prim.load8(base)
+      let b1 = prim.load8(base + 1)
+      let b2 = prim.load8(base + 2)
+      let b3 = prim.load8(base + 3)
+      let s0 = prim.bshl(b0, 24)
+      let s1 = prim.bshl(b1, 16)
+      let s2 = prim.bshl(b2, 8)
+      let p01 = prim.bor(s0, s1)
+      let p012 = prim.bor(p01, s2)
+      let u = prim.bor(p012, b3)
+      __sext32(u)
+    }
+  }
+}
