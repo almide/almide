@@ -644,6 +644,15 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
             include_str!("../../../stdlib/list_intersperse.almd"),
             &[("list_intersperse", "list.intersperse")],
         ),
+        (
+            include_str!("../../../stdlib/int_wrap.almd"),
+            &[
+                ("int_wrap_add", "int.wrap_add"),
+                ("int_wrap_mul", "int.wrap_mul"),
+                ("int_to_u32", "int.to_u32"),
+                ("int_to_u8", "int.to_u8"),
+            ],
+        ),
         (include_str!("../../../stdlib/string_slice.almd"), &[("string_slice", "string.slice")]),
         (
             include_str!("../../../stdlib/string_is_digit.almd"),
@@ -2627,6 +2636,25 @@ mod tests {
         assert!(prog.functions.iter().any(|f| f.name == "string.slice"));
         if let Some(out) = build_and_run("string_slice", &render_wasm_program(&prog)) {
             assert_eq!(out, "ell\n日本");
+        }
+    }
+
+    #[test]
+    fn self_hosted_int_wrap_and_narrow() {
+        // int.wrap_add/wrap_mul/to_u32/to_u8 self-hosted (band/mask over the prim floor).
+        // wrap_add(250,10,8)=260&0xFF=4; wrap_mul(20,20,8)=400&0xFF=144; to_u8(-1)=255;
+        // to_u32(-1)=4294967295; wrap_add(1,2,64)=3 (no mask).
+        let src = "fn main() -> Unit = {\n  \
+            let a = int.wrap_add(250, 10, 8)\n  let sa = int.to_string(a)\n  println(sa)\n  \
+            let b = int.wrap_mul(20, 20, 8)\n  let sb = int.to_string(b)\n  println(sb)\n  \
+            let c = int.to_u8(0 - 1)\n  let sc = int.to_string(c)\n  println(sc)\n  \
+            let d = int.to_u32(0 - 1)\n  let sd = int.to_string(d)\n  println(sd)\n  \
+            let e = int.wrap_add(1, 2, 64)\n  let se = int.to_string(e)\n  println(se) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "int.wrap_add"));
+        assert!(prog.functions.iter().any(|f| f.name == "int.to_u8"));
+        if let Some(out) = build_and_run("int_wrap", &render_wasm_program(&prog)) {
+            assert_eq!(out, "4\n144\n255\n4294967295\n3");
         }
     }
 

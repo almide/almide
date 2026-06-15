@@ -1,0 +1,28 @@
+// int_wrap — SELF-HOSTED wrapping arithmetic + unsigned narrowing for v1 (pure scalar).
+// v0 masks to the low `bits` bits of the u64 reinterpretation:
+//   wrap_add(a,b,bits) = (a +w b) & mask,  wrap_mul = (a *w b) & mask
+//   mask = bits>=64 ? all-ones : (1<<bits)-1     (wasm i64 add/mul already wrap = u64 wrap)
+//   to_u32(n) = n & 0xFFFFFFFF,  to_u8(n) = n & 0xFF     (zero-extended low bits)
+// Composed from the prim bitwise floor (bshl/band); cert-untouching (scalar).
+
+fn __wrap_mask(s: Int, bits: Int) -> Int =
+  if bits >= 64 then s
+  else {
+    let hi = prim.bshl(1, bits)
+    let mask = hi - 1
+    prim.band(s, mask)
+  }
+
+fn int_wrap_add(a: Int, b: Int, bits: Int) -> Int = {
+  let s = a + b
+  __wrap_mask(s, bits)
+}
+
+fn int_wrap_mul(a: Int, b: Int, bits: Int) -> Int = {
+  let s = a * b
+  __wrap_mask(s, bits)
+}
+
+fn int_to_u32(n: Int) -> Int = prim.band(n, 4294967295)
+
+fn int_to_u8(n: Int) -> Int = prim.band(n, 255)
