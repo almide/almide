@@ -30,6 +30,13 @@ fn int_to_uint64(n: Int) -> Int = n
 fn int_from_int64(n: Int64) -> Int = n
 fn int_from_uint64(n: UInt64) -> Int = n
 
+// Unsigned narrowing: the low N bits, ZERO-extended (v0's `n as u8/u16/u32`). The result
+// is in [0, 2^N) so it is non-negative and its decimal print matches v0. Same band masks
+// as to_u8/to_u32, returned as Int (the value is exact; the unsigned type is the caller's).
+fn int_to_uint8(n: Int) -> Int = prim.band(n, 255)
+fn int_to_uint16(n: Int) -> Int = prim.band(n, 65535)
+fn int_to_uint32(n: Int) -> Int = prim.band(n, 4294967295)
+
 // int.to_int8/16/32_saturating: CLAMP n to the signed N-bit range (v0 returns Int8/16/32
 // but the value — and its decimal print — is exactly the clamp). Pure scalar; the same
 // `-> Int` shape as to_int8 above (the value byte-matches v0). Shared clamp helper.

@@ -868,3 +868,19 @@
             assert_eq!(out, "42\n99\n7");
         }
     }
+
+    #[test]
+    fn self_hosted_int_to_unsigned_narrowing() {
+        // int.to_uint8/16/32 self-hosted: low N bits, zero-extended (band mask).
+        // to_uint8(-1)=255, to_uint8(300)=44, to_uint16(-1)=65535, to_uint32(-1)=4294967295.
+        let src = "fn main() -> Unit = {\n  \
+            let a = int.to_uint8(0 - 1)\n  let sa = int.to_string(a)\n  println(sa)\n  \
+            let b = int.to_uint8(300)\n  let sb = int.to_string(b)\n  println(sb)\n  \
+            let c = int.to_uint16(0 - 1)\n  let sc = int.to_string(c)\n  println(sc)\n  \
+            let d = int.to_uint32(0 - 1)\n  let sd = int.to_string(d)\n  println(sd) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "int.to_uint8"));
+        if let Some(out) = build_and_run("int_uint", &render_wasm_program(&prog)) {
+            assert_eq!(out, "255\n44\n65535\n4294967295");
+        }
+    }
