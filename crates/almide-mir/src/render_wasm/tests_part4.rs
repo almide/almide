@@ -319,6 +319,24 @@
     }
 
     #[test]
+    fn self_hosted_float_round() {
+        // SELF-HOSTED float.round — round half AWAY from zero (v0's f64::round, NOT half-even).
+        // round(2.5)=3, round(2.4)=2, round(3.5)=4 (half-even would give 2 and 4 — the 2.5 case
+        // distinguishes). to_int printed.
+        let src = "fn main() -> Unit = {\n  \
+            let a = float.to_int(float.round(2.5))\n  println(int.to_string(a))\n  \
+            let b = float.to_int(float.round(2.4))\n  println(int.to_string(b))\n  \
+            let c = float.to_int(float.round(3.5))\n  println(int.to_string(c))\n  \
+            let d = float.to_int(float.round(2.6))\n  println(int.to_string(d)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "float.round"));
+        if let Some(out) = build_and_run("self_hosted_float_round", &render_wasm_program(&prog)) {
+            // round: 2.5->3, 2.4->2, 3.5->4, 2.6->3
+            assert_eq!(out, "3\n2\n4\n3");
+        }
+    }
+
+    #[test]
     fn self_hosted_list_flat_map() {
         // SELF-HOSTED `list.flat_map` — closure returns a LIST (heap-returning closure). f =
         // (x) => list.range(x, x+2) = [x, x+1]; flat_map([1,2,3], f) = [1,2]++[2,3]++[3,4] =
