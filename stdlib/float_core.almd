@@ -1,0 +1,13 @@
+// float_core — SELF-HOSTED `float.*` core ops for v1 over the Float prim floor. A `Float` is
+// the i64-uniform value holding the f64 BITS; each op is a thin wrapper over a prim that
+// reinterprets i64↔f64 around the wasm f64 instruction. Pure scalar — the cert is untouched
+// (Op::Prim, no ownership). Matches v0's f64 semantics for finite, non-NaN values.
+
+fn float_abs(x: Float) -> Float = prim.fabs(x)
+fn float_sqrt(x: Float) -> Float = prim.fsqrt(x)
+fn float_floor(x: Float) -> Float = prim.ffloor(x)
+fn float_ceil(x: Float) -> Float = prim.fceil(x)
+fn float_min(a: Float, b: Float) -> Float = prim.fmin(a, b)
+fn float_max(a: Float, b: Float) -> Float = prim.fmax(a, b)
+fn float_to_int(x: Float) -> Int = prim.f2i(x)
+fn float_from_int(x: Int) -> Float = prim.i2f(x)

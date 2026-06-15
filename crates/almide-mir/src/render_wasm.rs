@@ -40,7 +40,10 @@
 //! from the open-stdlib ratchet the rule guards (the trust spine's own core, not
 //! "another stdlib routine"). The ratchet on the open surface stays as strict.
 
-use crate::{CallArg, Init, IntOp, MirFunction, MirProgram, Op, PrimKind, Repr, RtFn, ValueId};
+use crate::{
+    CallArg, FBinOp, FCmpOp, FUnOp, Init, IntOp, MirFunction, MirProgram, Op, PrimKind, Repr, RtFn,
+    ValueId,
+};
 use std::collections::{BTreeMap, BTreeSet};
 
 // Fixed low-memory addresses (named — no raw literals in the emitted WAT logic).
@@ -647,6 +650,49 @@ fn render_op(
                 PrimKind::Store { .. } => format!("(i64.store {} (local.get {}))", w(0), local(args[1])),
                 PrimKind::FdWrite => {
                     format!("(i64.extend_i32_u (call $fd_write {} {} {} {}))", w(0), w(1), w(2), w(3))
+                }
+                // FLOAT floor: the i64 value holds the f64 bits — reinterpret around the op.
+                PrimKind::FloatUn(op) => {
+                    let f = |a: usize| format!("(f64.reinterpret_i64 (local.get {}))", local(args[a]));
+                    let inner = match op {
+                        FUnOp::Abs => format!("(f64.abs {})", f(0)),
+                        FUnOp::Sqrt => format!("(f64.sqrt {})", f(0)),
+                        FUnOp::Floor => format!("(f64.floor {})", f(0)),
+                        FUnOp::Ceil => format!("(f64.ceil {})", f(0)),
+                        FUnOp::Neg => format!("(f64.neg {})", f(0)),
+                    };
+                    format!("(i64.reinterpret_f64 {inner})")
+                }
+                PrimKind::FloatBin(op) => {
+                    let f = |a: usize| format!("(f64.reinterpret_i64 (local.get {}))", local(args[a]));
+                    let instr = match op {
+                        FBinOp::Add => "f64.add",
+                        FBinOp::Sub => "f64.sub",
+                        FBinOp::Mul => "f64.mul",
+                        FBinOp::Div => "f64.div",
+                        FBinOp::Min => "f64.min",
+                        FBinOp::Max => "f64.max",
+                    };
+                    format!("(i64.reinterpret_f64 ({instr} {} {}))", f(0), f(1))
+                }
+                PrimKind::FloatCmp(op) => {
+                    let f = |a: usize| format!("(f64.reinterpret_i64 (local.get {}))", local(args[a]));
+                    let instr = match op {
+                        FCmpOp::Lt => "f64.lt",
+                        FCmpOp::Le => "f64.le",
+                        FCmpOp::Gt => "f64.gt",
+                        FCmpOp::Ge => "f64.ge",
+                        FCmpOp::Eq => "f64.eq",
+                        FCmpOp::Ne => "f64.ne",
+                    };
+                    // f64 compare yields an i32 0/1 — extend to the i64-uniform Bool.
+                    format!("(i64.extend_i32_u ({instr} {} {}))", f(0), f(1))
+                }
+                PrimKind::FloatToInt => {
+                    format!("(i64.trunc_f64_s (f64.reinterpret_i64 (local.get {})))", local(args[0]))
+                }
+                PrimKind::IntToFloat => {
+                    format!("(i64.reinterpret_f64 (f64.convert_i64_s (local.get {})))", local(args[0]))
                 }
             };
             match dst {

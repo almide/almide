@@ -421,10 +421,11 @@ impl LowerCtx {
                     self.ops.push(Op::ConstInt { dst, value: if *value { 1 } else { 0 } });
                     CallArg::Scalar(dst)
                 }
-                // A Float literal (`f(3.14)`): deferred `Const` (Float exec is later).
-                IrExprKind::LitFloat { .. } => {
+                // A Float literal arg (`f(2.5)`): the i64-uniform value carries the f64 BITS
+                // (the float-floor render reinterprets), so `2.5` materializes as ConstInt.
+                IrExprKind::LitFloat { value } => {
                     let dst = self.fresh_value();
-                    self.ops.push(Op::Const { dst });
+                    self.ops.push(Op::ConstInt { dst, value: value.to_bits() as i64 });
                     CallArg::Scalar(dst)
                 }
                 // A fresh BinOp/UnOp result as an argument (`f(a + b)`, `f(-n)`), or an
@@ -685,6 +686,13 @@ impl LowerCtx {
                 self.ops.push(Op::ConstInt { dst, value: if *value { 1 } else { 0 } });
                 Some(dst)
             }
+            // A FLOAT literal: the i64-uniform value holds the f64 BITS, so `3.5` materializes
+            // as `ConstInt(3.5_f64.to_bits())`. The render's float prims reinterpret it back.
+            IrExprKind::LitFloat { value } => {
+                let dst = self.fresh_value();
+                self.ops.push(Op::ConstInt { dst, value: value.to_bits() as i64 });
+                Some(dst)
+            }
             IrExprKind::BinOp { op, left, right } => {
                 let iop = match op {
                     BinOp::AddInt => crate::IntOp::Add,
@@ -801,6 +809,26 @@ impl LowerCtx {
             "store8" => PrimKind::Store { width: 1 },
             "store64" => PrimKind::Store { width: 8 },
             "fd_write" => PrimKind::FdWrite,
+            // The FLOAT floor (the f64 bits live in the i64-uniform value; render reinterprets).
+            "fabs" => PrimKind::FloatUn(crate::FUnOp::Abs),
+            "fsqrt" => PrimKind::FloatUn(crate::FUnOp::Sqrt),
+            "ffloor" => PrimKind::FloatUn(crate::FUnOp::Floor),
+            "fceil" => PrimKind::FloatUn(crate::FUnOp::Ceil),
+            "fneg" => PrimKind::FloatUn(crate::FUnOp::Neg),
+            "fadd" => PrimKind::FloatBin(crate::FBinOp::Add),
+            "fsub" => PrimKind::FloatBin(crate::FBinOp::Sub),
+            "fmul" => PrimKind::FloatBin(crate::FBinOp::Mul),
+            "fdiv" => PrimKind::FloatBin(crate::FBinOp::Div),
+            "fmin" => PrimKind::FloatBin(crate::FBinOp::Min),
+            "fmax" => PrimKind::FloatBin(crate::FBinOp::Max),
+            "flt" => PrimKind::FloatCmp(crate::FCmpOp::Lt),
+            "fle" => PrimKind::FloatCmp(crate::FCmpOp::Le),
+            "fgt" => PrimKind::FloatCmp(crate::FCmpOp::Gt),
+            "fge" => PrimKind::FloatCmp(crate::FCmpOp::Ge),
+            "feq" => PrimKind::FloatCmp(crate::FCmpOp::Eq),
+            "fne" => PrimKind::FloatCmp(crate::FCmpOp::Ne),
+            "f2i" => PrimKind::FloatToInt,
+            "i2f" => PrimKind::IntToFloat,
             _ => return Err(LowerError::Unsupported(format!("unknown primitive prim.{func}"))),
         };
         let mut lowered = Vec::with_capacity(args.len());

@@ -92,12 +92,13 @@ impl LowerCtx {
                 return Ok(());
             }
             // An INT literal carries its real value (`ConstInt` → `(i64.const v)`),
-            // the scalar-value foundation; other scalars stay the deferred `Const`.
-            if let IrExprKind::LitInt { value } = &value.kind {
-                let dst = self.fresh_value();
-                self.value_of.insert(var, dst);
-                self.ops.push(Op::ConstInt { dst, value: *value });
-                return Ok(());
+            // the scalar-value foundation; other scalars stay the deferred `Const`. A FLOAT
+            // literal carries its f64 BITS the same way (the float-floor render reinterprets).
+            if let IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. } = &value.kind {
+                if let Some(dst) = self.lower_scalar_value(value) {
+                    self.value_of.insert(var, dst);
+                    return Ok(());
+                }
             }
             // A scalar Int Add/Sub/Mul computes its real value (IntBinOp), and a
             // scalar prim-floor call (`let n = prim.load32(a)`) becomes an Op::Prim —

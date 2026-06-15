@@ -278,6 +278,27 @@
     }
 
     #[test]
+    fn self_hosted_float_core() {
+        // SELF-HOSTED `float.*` over the FLOAT prim floor (f64 bits in the i64-uniform value).
+        // abs(-5.0)=5, sqrt(16.0)=4, floor(2.5)=2, ceil(2.5)=3, min(3.0,7.0)=3, max=7. Results
+        // converted to Int (float.to_int) for printing; from_int builds the Float inputs.
+        let src = "fn main() -> Unit = {\n  \
+            let n5 = float.from_int(0 - 5)\n  let a = float.to_int(float.abs(n5))\n  println(int.to_string(a))\n  \
+            let s16 = float.from_int(16)\n  let s = float.to_int(float.sqrt(s16))\n  println(int.to_string(s))\n  \
+            let f = float.to_int(float.floor(2.5))\n  println(int.to_string(f))\n  \
+            let c = float.to_int(float.ceil(2.5))\n  println(int.to_string(c))\n  \
+            let lo = float.to_int(float.min(float.from_int(3), float.from_int(7)))\n  println(int.to_string(lo))\n  \
+            let hi = float.to_int(float.max(float.from_int(3), float.from_int(7)))\n  println(int.to_string(hi)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "float.abs"));
+        assert!(prog.functions.iter().any(|f| f.name == "float.sqrt"));
+        if let Some(out) = build_and_run("self_hosted_float_core", &render_wasm_program(&prog)) {
+            // abs(-5)=5 sqrt(16)=4 floor(2.5)=2 ceil(2.5)=3 min=3 max=7
+            assert_eq!(out, "5\n4\n2\n3\n3\n7");
+        }
+    }
+
+    #[test]
     fn self_hosted_list_flat_map() {
         // SELF-HOSTED `list.flat_map` — closure returns a LIST (heap-returning closure). f =
         // (x) => list.range(x, x+2) = [x, x+1]; flat_map([1,2,3], f) = [1,2]++[2,3]++[3,4] =

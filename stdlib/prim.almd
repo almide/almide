@@ -69,3 +69,46 @@ fn alloc_list(n: Int) -> List[Int] = _
 // the bytes written.
 @intrinsic("almide_rt_prim_fd_write")
 fn fd_write(fd: Int, iov: Int, count: Int, nw: Int) -> Int = _
+
+// The FLOAT floor: a `Float` is the i64-uniform value holding the f64 BITS; each op
+// reinterprets i64→f64, computes the wasm f64 instruction, and reinterprets back (a
+// compare / f2i yields a real Int). Pure scalar — the cert is untouched. This is what
+// lets `float.*` / `math.*` (sqrt/floor/min/…) be self-hosted in Almide.
+@intrinsic("almide_rt_prim_fabs")
+fn fabs(x: Float) -> Float = _
+@intrinsic("almide_rt_prim_fsqrt")
+fn fsqrt(x: Float) -> Float = _
+@intrinsic("almide_rt_prim_ffloor")
+fn ffloor(x: Float) -> Float = _
+@intrinsic("almide_rt_prim_fceil")
+fn fceil(x: Float) -> Float = _
+@intrinsic("almide_rt_prim_fneg")
+fn fneg(x: Float) -> Float = _
+@intrinsic("almide_rt_prim_fadd")
+fn fadd(a: Float, b: Float) -> Float = _
+@intrinsic("almide_rt_prim_fsub")
+fn fsub(a: Float, b: Float) -> Float = _
+@intrinsic("almide_rt_prim_fmul")
+fn fmul(a: Float, b: Float) -> Float = _
+@intrinsic("almide_rt_prim_fdiv")
+fn fdiv(a: Float, b: Float) -> Float = _
+@intrinsic("almide_rt_prim_fmin")
+fn fmin(a: Float, b: Float) -> Float = _
+@intrinsic("almide_rt_prim_fmax")
+fn fmax(a: Float, b: Float) -> Float = _
+@intrinsic("almide_rt_prim_flt")
+fn flt(a: Float, b: Float) -> Bool = _
+@intrinsic("almide_rt_prim_fle")
+fn fle(a: Float, b: Float) -> Bool = _
+@intrinsic("almide_rt_prim_fgt")
+fn fgt(a: Float, b: Float) -> Bool = _
+@intrinsic("almide_rt_prim_fge")
+fn fge(a: Float, b: Float) -> Bool = _
+@intrinsic("almide_rt_prim_feq")
+fn feq(a: Float, b: Float) -> Bool = _
+@intrinsic("almide_rt_prim_fne")
+fn fne(a: Float, b: Float) -> Bool = _
+@intrinsic("almide_rt_prim_f2i")
+fn f2i(x: Float) -> Int = _
+@intrinsic("almide_rt_prim_i2f")
+fn i2f(x: Int) -> Float = _

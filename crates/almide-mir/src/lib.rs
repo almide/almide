@@ -301,6 +301,50 @@ pub enum PrimKind {
     /// The `fd_write` WASI host call — `args = [fd, iov, count, nwritten]`, dst = the
     /// i64 errno. The ONLY sandbox exit; carries [`Capability::Stdout`].
     FdWrite,
+    /// The FLOAT floor: a `Float` scalar is the i64-uniform value holding the f64 BITS, so
+    /// every float op `reinterpret`s i64→f64, computes, and `reinterpret`s back (a compare /
+    /// to-int yields a real i64). Scalar, no ownership — the cert is untouched (these are
+    /// `Op::Prim`, no-ops in verify_ownership). This opens the whole `float.*` / `math.*`
+    /// f64 category for self-host over `prim.fabs` / `prim.fadd` / `prim.f2i` / etc.
+    FloatUn(FUnOp),
+    FloatBin(FBinOp),
+    FloatCmp(FCmpOp),
+    /// `i64.trunc_f64_s(reinterpret(x))` — Float → Int (truncate toward zero, v0's `as i64`).
+    FloatToInt,
+    /// `reinterpret(f64.convert_i64_s(x))` — Int → Float.
+    IntToFloat,
+}
+
+/// A unary f64 op (the value is the f64 bits in an i64; render reinterprets around it).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FUnOp {
+    Abs,
+    Sqrt,
+    Floor,
+    Ceil,
+    Neg,
+}
+
+/// A binary f64 op.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FBinOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Min,
+    Max,
+}
+
+/// An f64 comparison — yields an i64 0/1 (the Bool / `if` condition).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FCmpOp {
+    Lt,
+    Le,
+    Gt,
+    Ge,
+    Eq,
+    Ne,
 }
 
 /// A scalar integer binary operation.
