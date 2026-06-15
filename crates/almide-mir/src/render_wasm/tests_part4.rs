@@ -1261,6 +1261,43 @@
     }
 
     #[test]
+    fn self_hosted_option_to_result() {
+        // SELF-HOSTED option.to_result(o, msg) = o.ok_or(msg.to_string()): Some(x) → Ok(x), None →
+        // Err(a fresh COPY of msg). v0 copies the message, so the borrowed msg is deep-copied (not
+        // moved) into the Err — no double-free. The Err message is extracted via match and printed,
+        // byte-matching. to_result(Some(5),"missing")=Ok(5); to_result(None,"missing")=Err("missing").
+        let src = "fn main() -> Unit = {\n  \
+            let o1 = list.first([5, 6])\n  let r1 = option.to_result(o1, \"missing\")\n  \
+            match r1 {\n    Ok(v) => println(int.to_string(v)),\n    Err(e) => println(e),\n  }\n  \
+            let o2 = list.get([5], 9)\n  let r2 = option.to_result(o2, \"missing\")\n  \
+            match r2 {\n    Ok(v) => println(int.to_string(v)),\n    Err(e) => println(e),\n  } }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "option.to_result"));
+        if let Some(out) = build_and_run("self_hosted_option_to_result", &render_wasm_program(&prog)) {
+            assert_eq!(out, "5\nmissing");
+        }
+    }
+
+    #[test]
+    fn option_to_result_loop_is_bounded() {
+        // ADVERSARIAL leak guard: a loop building Err(copy-of-msg) Results (each a fresh deep copy)
+        // and matching them must run in BOUNDED memory — the input None, the Err Result and the
+        // one-slot msg copy are all 20-byte so the head-only free-list reuses them. The deep copy is
+        // freed by the Result's scope-end DropListStr exactly once (no double-free with the borrowed msg).
+        let src = "fn main() -> Unit = {\n  \
+            var i = 0\n  \
+            while i < 4000 {\n    \
+              let o = list.get([5], 9)\n    let r = option.to_result(o, \"e\")\n    \
+              match r {\n      Ok(v) => println(\"k\"),\n      Err(e) => println(e),\n    }\n    \
+              i = i + 1\n  }\n  \
+            println(\"done\") }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("option_to_result_loop_bounded", &render_wasm_program(&prog)) {
+            assert!(out.ends_with("done"), "loop must terminate (bounded memory)");
+        }
+    }
+
+    #[test]
     fn self_hosted_option_or_else() {
         // SELF-HOSTED option.or_else(o, f): Some(x) → Some(x) (kept), None → f() (a 0-arg thunk
         // returning an Option, invoked ONLY on the None arm via a heap-result CallIndirect).

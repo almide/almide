@@ -76,3 +76,15 @@ fn option_or_else(o: Option[Int], f: () -> Option[Int]) -> Option[Int] = {
   let x = prim.load64(h + 12)
   if len >= 1 then Some(x) else __opt_orelse_none(f)
 }
+
+// option.to_result(o, msg) = o.ok_or(msg.to_string()): Some(x) → Ok(x), None → Err(a fresh COPY of
+// msg). v0 copies the message (to_string), so the borrowed `msg` is NOT moved into the Result — a
+// deep copy (string.repeat ·1) is, keeping single ownership (no double-free with the caller's msg).
+fn __copy_str(s: String) -> String = string.repeat(s, 1)
+
+fn option_to_result(o: Option[Int], msg: String) -> Result[Int, String] = {
+  let h = prim.handle(o)
+  let len = prim.load32(h + 4)
+  let x = prim.load64(h + 12)
+  if len >= 1 then Ok(x) else Err(__copy_str(msg))
+}
