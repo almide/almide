@@ -1,0 +1,47 @@
+// list_sort — SELF-HOSTED `list.sort` for v1 over the prim floor: copy the elements into a
+// fresh List[Int] (prim.alloc_list) and selection-sort it in place by ascending i64 value.
+// Sound + loop-bounded (i64 value copies, no new heap elements). List[Int] only: a heap-
+// element list would be sorted by HANDLE address, not value — a per-type refinement. O(n^2)
+// with O(n) recursion depth (very long lists may exhaust the stack; TCO is a later add).
+
+fn __sort_load(h: Int, i: Int) -> Int = prim.load64(h + 12 + i * 8)
+
+// Index of the minimum element in [i, n), scanning j from `i+1`, best starting at `i`.
+fn __sort_min(h: Int, n: Int, j: Int, best: Int) -> Int =
+  if j >= n then best
+  else {
+    let e = __sort_load(h, j)
+    let be = __sort_load(h, best)
+    let nb = if e < be then j else best
+    __sort_min(h, n, j + 1, nb)
+  }
+
+// Selection-sort the buffer at handle `h` (n elements) in place.
+fn __sort_sel(h: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let mi = __sort_min(h, n, i + 1, i)
+    let a = __sort_load(h, i)
+    let b = __sort_load(h, mi)
+    prim.store64(h + 12 + i * 8, b)
+    prim.store64(h + 12 + mi * 8, a)
+    __sort_sel(h, n, i + 1)
+  }
+
+fn __sort_copy(srch: Int, dsth: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let e = prim.load64(srch + 12 + i * 8)
+    prim.store64(dsth + 12 + i * 8, e)
+    __sort_copy(srch, dsth, n, i + 1)
+  }
+
+fn list_sort(xs: List[Int]) -> List[Int] = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  let buf = prim.alloc_list(n)
+  let bh = prim.handle(buf)
+  let _c = __sort_copy(h, bh, n, 0)
+  let _s = __sort_sel(bh, n, 0)
+  buf
+}

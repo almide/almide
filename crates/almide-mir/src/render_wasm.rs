@@ -626,6 +626,7 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
         (include_str!("../../../stdlib/list_len.almd"), &[("list_len", "list.len")]),
         (include_str!("../../../stdlib/list_is_empty.almd"), &[("list_is_empty", "list.is_empty")]),
         (include_str!("../../../stdlib/list_sum.almd"), &[("list_sum", "list.sum")]),
+        (include_str!("../../../stdlib/list_sort.almd"), &[("list_sort", "list.sort")]),
         (include_str!("../../../stdlib/string_slice.almd"), &[("string_slice", "string.slice")]),
         (
             include_str!("../../../stdlib/string_trim.almd"),
@@ -1896,6 +1897,48 @@ mod tests {
         if let Some(out) = build_and_run("list_range_loop", &render_wasm_program(&prog)) {
             assert_eq!(out.lines().count(), 2000, "every iteration prints (no OOM/leak)");
             assert!(out.lines().all(|l| l == "4"));
+        }
+    }
+
+    #[test]
+    fn self_hosted_list_sort() {
+        // list.sort self-hosted (selection sort over a fresh List[Int] buffer): sort(
+        // [3,1,4,1,5,9,2,6]) = [1,1,2,3,4,5,6,9]. Read back via list.len + list.get_or.
+        // byte-matching v0's ascending Ord sort.
+        let src = "fn main() -> Unit = {\n  \
+            let xs = [3, 1, 4, 1, 5, 9, 2, 6]\n  \
+            let s = list.sort(xs)\n  \
+            let sl = list.len(s)\n  \
+            let s0 = list.get_or(s, 0, 0)\n  \
+            let s1 = list.get_or(s, 1, 0)\n  \
+            let s7 = list.get_or(s, 7, 0)\n  \
+            println(int.to_string(sl))\n  \
+            println(int.to_string(s0))\n  \
+            println(int.to_string(s1))\n  \
+            println(int.to_string(s7)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "list.sort"), "linked");
+        if let Some(out) = build_and_run("list_sort", &render_wasm_program(&prog)) {
+            assert_eq!(out, "8\n1\n1\n9");
+        }
+    }
+
+    #[test]
+    fn self_hosted_list_sort_loop_bounded() {
+        // ADVERSARIAL: list.sort every iteration allocs + sorts + drops a List[Int] —
+        // bounded memory (i64 values, no element leak).
+        let src = "fn main() -> Unit = {\n  \
+            let xs = [3, 1, 2]\n  \
+            var i = 0\n  \
+            while i < 2000 {\n    \
+            let s = list.sort(xs)\n    \
+            let lo = list.get_or(s, 0, 0)\n    \
+            println(int.to_string(lo))\n    \
+            i = i + 1\n  } }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("list_sort_loop", &render_wasm_program(&prog)) {
+            assert_eq!(out.lines().count(), 2000, "every iteration prints (no OOM/leak)");
+            assert!(out.lines().all(|l| l == "1"));
         }
     }
 
