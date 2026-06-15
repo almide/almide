@@ -682,7 +682,7 @@ pub(crate) fn is_self_host_option_module_fn(module: &str, func: &str) -> bool {
 /// EXECUTES. NARROW to fns actually self-hosted — any other Result is a deferred `Opaque` (len 0,
 /// would misread as `Ok`). `int.parse` is the canonical for string.to_int/to_integer/parse_int.
 pub(crate) fn is_self_host_result_module_fn(module: &str, func: &str) -> bool {
-    matches!((module, func), ("int", "parse"))
+    matches!((module, func), ("int", "parse") | ("int", "from_hex"))
 }
 
 pub(crate) fn alloc_init(value: &IrExpr) -> Init {

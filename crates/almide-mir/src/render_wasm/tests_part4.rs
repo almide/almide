@@ -1240,6 +1240,30 @@
     }
 
     #[test]
+    fn self_hosted_int_from_hex() {
+        // SELF-HOSTED int.from_hex = i64::from_str_radix(s.trim().trim_start_matches("0x"), 16).
+        // The "0x" strip is lowercase + REPEATED and BEFORE the sign: "0xff"=255, "0x0xff"=255 (strip
+        // twice), "0x1a"=26, "-2a"=-42 (printed negated=42). The quirks fail as Rust does: "0XFF"
+        // (uppercase 0X not stripped → 'X' invalid), "0x" (empty after strip). Overflow uses the
+        // SIGNED checked accumulator so "8000000000000000"=2^63 is too large but "-8000000000000000"
+        // = i64::MIN parses (verified as 0-(v+1) = i64::MAX = 9223372036854775807).
+        let src = "fn main() -> Unit = {\n  \
+            let a = int.from_hex(\"ff\")\n  match a {\n    Ok(v) => println(int.to_string(v)),\n    Err(e) => println(e),\n  }\n  \
+            let b = int.from_hex(\"0x1a\")\n  match b {\n    Ok(v) => println(int.to_string(v)),\n    Err(e) => println(e),\n  }\n  \
+            let c = int.from_hex(\"0x0xff\")\n  match c {\n    Ok(v) => println(int.to_string(v)),\n    Err(e) => println(e),\n  }\n  \
+            let d = int.from_hex(\"-2a\")\n  match d {\n    Ok(v) => { let n = 0 - v\n println(int.to_string(n)) },\n    Err(e) => println(e),\n  }\n  \
+            let e = int.from_hex(\"0XFF\")\n  match e {\n    Ok(v) => println(int.to_string(v)),\n    Err(g) => println(g),\n  }\n  \
+            let f = int.from_hex(\"0x\")\n  match f {\n    Ok(v) => println(int.to_string(v)),\n    Err(g) => println(g),\n  }\n  \
+            let big = int.from_hex(\"8000000000000000\")\n  match big {\n    Ok(v) => println(int.to_string(v)),\n    Err(g) => println(g),\n  }\n  \
+            let mn = int.from_hex(\"-8000000000000000\")\n  match mn {\n    Ok(v) => { let w = v + 1\n let x = 0 - w\n println(int.to_string(x)) },\n    Err(g) => println(g),\n  } }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "int.from_hex"));
+        if let Some(out) = build_and_run("self_hosted_int_from_hex", &render_wasm_program(&prog)) {
+            assert_eq!(out, "255\n26\n255\n42\ninvalid digit found in string\ncannot parse integer from empty string\nnumber too large to fit in target type\n9223372036854775807");
+        }
+    }
+
+    #[test]
     fn self_hosted_result_match_ok_err() {
         // THE Result match-extract: `match int.parse(s) { Ok(v) => …, Err(e) => … }` EXECUTES — the
         // Ok arm binds the scalar value (slot 0, len-tag 0), the Err arm binds the message String
