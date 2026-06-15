@@ -884,3 +884,22 @@
             assert_eq!(out, "255\n44\n65535\n4294967295");
         }
     }
+
+    #[test]
+    fn self_hosted_int_from_sized_widening() {
+        // int.from_int8/16/32 + from_uint8/16/32 self-hosted: identity over v1's i64-uniform
+        // scalars. Round-trip through to_*: from_int8(to_int8(200))=-56,
+        // from_uint8(to_uint8(200))=200, from_int16(to_int16(40000))=-25536,
+        // from_uint16(to_uint16(70000))=4464.
+        let src = "fn main() -> Unit = {\n  \
+            let a = int.to_int8(200)\n  let fa = int.from_int8(a)\n  let sa = int.to_string(fa)\n  println(sa)\n  \
+            let b = int.to_uint8(200)\n  let fb = int.from_uint8(b)\n  let sb = int.to_string(fb)\n  println(sb)\n  \
+            let c = int.to_int16(40000)\n  let fc = int.from_int16(c)\n  let sc = int.to_string(fc)\n  println(sc)\n  \
+            let d = int.to_uint16(70000)\n  let fd = int.from_uint16(d)\n  let sd = int.to_string(fd)\n  println(sd) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "int.from_int8"));
+        assert!(prog.functions.iter().any(|f| f.name == "int.from_uint16"));
+        if let Some(out) = build_and_run("int_from_sized", &render_wasm_program(&prog)) {
+            assert_eq!(out, "-56\n200\n-25536\n4464");
+        }
+    }
