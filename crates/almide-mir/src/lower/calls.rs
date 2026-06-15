@@ -788,7 +788,7 @@ impl LowerCtx {
         // physically identical to alloc_list) — but the dst is tracked as a NESTED-OWNERSHIP
         // list, so its scope-end drop is a recursive `DropListStr` (frees the owned element
         // Strings) and `prim.store_str` Consumes each String moved into it (Machinery 2).
-        if func == "alloc_list_str" || func == "alloc_set_str" {
+        if func == "alloc_list_str" || func == "alloc_set_str" || func == "alloc_map_str" {
             let len_v = self.lower_scalar_value(&args[0]).ok_or_else(|| {
                 LowerError::Unsupported("prim.alloc_list_str length is not a lowerable scalar".into())
             })?;

@@ -97,6 +97,14 @@ fn alloc_set(n: Int) -> Set[Int] = _
 @intrinsic("almide_rt_prim_alloc_list")
 fn alloc_map(slots: Int) -> Map[Int, Int] = _
 
+// Allocate a runtime-sized OWNED `Map[String, String]` of `slots` NESTED-ownership slots —
+// physically a DynListStr (each i64 slot an owned String handle, freed recursively by DropListStr).
+// A Map[String,String] interleaves keys and values [k0,v0,k1,v1,...] — ALL slots are String
+// handles, so the uniform DropListStr frees every key + value. `slots = 2 * entry_capacity`; the
+// `len` header carries the SLOT count (so DropListStr frees them all), and map.len reads len/2.
+@intrinsic("almide_rt_prim_alloc_list_str")
+fn alloc_map_str(slots: Int) -> Map[String, String] = _
+
 // Allocate a runtime-sized OWNED `Value` block (the dynamic data model) — physically a v1 List
 // block, but typed Value. A SCALAR Value (Null/Bool/Int/Float) reuses the layout as
 // [rc][len@4 = TAG][cap@8][payload@12]: the `len` field carries the variant TAG (0=Null, 1=Bool,

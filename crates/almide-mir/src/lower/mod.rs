@@ -289,6 +289,14 @@ pub(crate) fn is_heap_elem_list_ty(ty: &Ty) -> bool {
         Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 && is_heap_ty(&args[1]) => {
             true
         }
+        // `Map[heap, heap]` (e.g. `Map[String, String]`) — a DynListStr of INTERLEAVED key+value
+        // String handles [k0,v0,k1,v1,...]; EVERY slot is a heap handle, so the uniform recursive
+        // DropListStr frees all keys and values. (`len` = the slot count; map.len reads len/2.)
+        Ty::Applied(TypeConstructorId::Map, args)
+            if args.len() == 2 && is_heap_ty(&args[0]) && is_heap_ty(&args[1]) =>
+        {
+            true
+        }
         _ => false,
     }
 }
@@ -769,6 +777,34 @@ pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], resu
             && arg0_is_heap_set
         {
             return format!("set.{func}_str");
+        }
+    }
+    if module == "map" {
+        // A `Map[heap, heap]` (e.g. Map[String,String]) routes to the `_str` variant. new/set
+        // RETURN a Map[heap,heap]; get returns Option[heap]; len/is_empty/contains read a
+        // Map[heap,heap] SUBJECT (arg 0, scalar result).
+        let result_is_heap_map = matches!(
+            result_ty,
+            Ty::Applied(TypeConstructorId::Map, a)
+                if a.len() == 2 && is_heap_ty(&a[0]) && is_heap_ty(&a[1])
+        );
+        if matches!(func, "new" | "set") && result_is_heap_map {
+            return format!("map.{func}_str");
+        }
+        if func == "get" {
+            if let Ty::Applied(TypeConstructorId::Option, a) = result_ty {
+                if a.len() == 1 && is_heap_ty(&a[0]) {
+                    return "map.get_str".to_string();
+                }
+            }
+        }
+        let arg0_is_heap_map = matches!(
+            arg_tys.first(),
+            Some(Ty::Applied(TypeConstructorId::Map, a))
+                if a.len() == 2 && is_heap_ty(&a[0]) && is_heap_ty(&a[1])
+        );
+        if matches!(func, "len" | "is_empty" | "contains") && arg0_is_heap_map {
+            return format!("map.{func}_str");
         }
     }
     format!("{module}.{func}")

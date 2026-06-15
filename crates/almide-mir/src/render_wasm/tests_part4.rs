@@ -1770,6 +1770,48 @@
     }
 
     #[test]
+    fn self_hosted_map_string_string() {
+        // SELF-HOSTED Map[String,String] (uniform-heap DynListStr, len=2*entries, DropListStr frees
+        // all keys+values). Keys built via string.split (List[String] literal gap). new→set("a","x")
+        // →set("b","y")→set("a","z")[update in place]={a:z, b:y} len 2; get("a")="z", get("b")="y",
+        // get("zz")=None; contains("b")=true. Byte-matches v0.
+        let src = "fn main() -> Unit = {\n  \
+            let m0 = map.new()\n  \
+            let m1 = map.set(m0, \"a\", \"x\")\n  let m2 = map.set(m1, \"b\", \"y\")\n  \
+            let m = map.set(m2, \"a\", \"z\")\n  \
+            println(int.to_string(map.len(m)))\n  \
+            let ga = map.get(m, \"a\")\n  match ga { Some(v) => println(v), None => println(\"none\"), }\n  \
+            let gb = map.get(m, \"b\")\n  match gb { Some(v) => println(v), None => println(\"none\"), }\n  \
+            let gz = map.get(m, \"zz\")\n  match gz { Some(v) => println(v), None => println(\"none\"), }\n  \
+            let c = map.contains(m, \"b\")\n  let vc = if c then 1 else 0\n  println(int.to_string(vc)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "map.set_str"));
+        assert!(prog.functions.iter().any(|f| f.name == "map.get_str"));
+        if let Some(out) = build_and_run("self_hosted_map_string_string", &render_wasm_program(&prog)) {
+            assert_eq!(out, "2\nz\ny\nnone\n1");
+        }
+    }
+
+    #[test]
+    fn self_hosted_map_string_string_loop_reclaims() {
+        // SOUNDNESS for the Map[String,String] nested-ownership path: a bounded loop building +
+        // dropping a fresh Map[String,String] each iteration must reclaim every key + value String +
+        // the block (DropListStr over all slots) — no leak/double-free. 3000 iters, last len 2.
+        let src = "fn main() -> Unit = {\n  \
+            var i = 0\n  var last = 0\n  \
+            while i < 3000 {\n    \
+              let m1 = map.set(map.new(), \"key-one\", \"val-one\")\n    \
+              let m = map.set(m1, \"key-two\", \"val-two\")\n    \
+              last = map.len(m)\n    \
+              i = i + 1\n  }\n  \
+            println(int.to_string(last)) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("self_hosted_map_string_string_loop_reclaims", &render_wasm_program(&prog)) {
+            assert_eq!(out, "2");
+        }
+    }
+
+    #[test]
     fn self_hosted_value_str() {
         // SELF-HOSTED value.str — a heap-payload Value (tag 4) owning a deep-copied String at +12.
         // value.str("hello") → tag 4, payload "hello". Verified by reading the block via prim.
