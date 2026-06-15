@@ -658,6 +658,40 @@
     }
 
     #[test]
+    fn self_hosted_bytes_more_reads() {
+        // SELF-HOSTED bytes.read_u8/read_bool/read_u16_le/read_u32_be/read_u32_le/read_i32_le/
+        // read_i64_be/read_i64_le. Unsigned reads stay non-negative (u32 max = 4294967295), i32_le
+        // sign-extends (-1 -> 999), i64 reads are full-width. Byte-matches v0.
+        let src = "fn main() -> Unit = {\n  \
+            let ab = [65, 200]\n  let bab = bytes.from_list(ab)\n  \
+            println(int.to_string(bytes.read_u8(bab, 0)))\n  \
+            println(int.to_string(bytes.read_u8(bab, 1)))\n  \
+            println(int.to_string(bytes.read_u8(bab, 5)))\n  \
+            let bl = [0, 7]\n  let bbl = bytes.from_list(bl)\n  \
+            let rb0 = bytes.read_bool(bbl, 0)\n  let z0 = if rb0 then 1 else 0\n  println(int.to_string(z0))\n  \
+            let rb1 = bytes.read_bool(bbl, 1)\n  let z1 = if rb1 then 1 else 0\n  println(int.to_string(z1))\n  \
+            let p12 = [1, 2]\n  let b12 = bytes.from_list(p12)\n  \
+            println(int.to_string(bytes.read_u16_le(b12, 0)))\n  \
+            let q = [0, 0, 1, 0]\n  let bq = bytes.from_list(q)\n  \
+            println(int.to_string(bytes.read_u32_be(bq, 0)))\n  \
+            let ql = [0, 1, 0, 0]\n  let bql = bytes.from_list(ql)\n  \
+            println(int.to_string(bytes.read_u32_le(bql, 0)))\n  \
+            let big = [255, 255, 255, 255]\n  let bbig = bytes.from_list(big)\n  \
+            println(int.to_string(bytes.read_u32_be(bbig, 0)))\n  \
+            let vi = bytes.read_i32_le(bbig, 0)\n  let mi = if vi < 0 then 999 else vi\n  println(int.to_string(mi))\n  \
+            let e8 = [0, 0, 0, 0, 0, 0, 1, 0]\n  let be8 = bytes.from_list(e8)\n  \
+            println(int.to_string(bytes.read_i64_be(be8, 0)))\n  \
+            let e8l = [0, 1, 0, 0, 0, 0, 0, 0]\n  let be8l = bytes.from_list(e8l)\n  \
+            println(int.to_string(bytes.read_i64_le(be8l, 0))) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "bytes.read_u8"));
+        assert!(prog.functions.iter().any(|f| f.name == "bytes.read_i64_be"));
+        if let Some(out) = build_and_run("self_hosted_bytes_more_reads", &render_wasm_program(&prog)) {
+            assert_eq!(out, "65\n200\n0\n0\n1\n513\n256\n256\n4294967295\n999\n256\n256");
+        }
+    }
+
+    #[test]
     fn self_hosted_hex_encode() {
         // SELF-HOSTED hex.encode / hex.encode_upper (Bytes -> hex String) over the bytes machinery
         // + the bitwise prim floor. Each byte -> two hex digits (high nibble byte>>4, low byte&0xF).

@@ -388,3 +388,174 @@ fn bytes_read_i32_be(b: Bytes, pos: Int) -> Int = {
     }
   }
 }
+
+// bytes.read_u8(b, pos) -> the byte at pos (0 if out of range).
+fn bytes_read_u8(b: Bytes, pos: Int) -> Int = {
+  let h = prim.handle(b)
+  let n = prim.load32(h + 4)
+  if pos < 0 then 0 else { if pos < n then prim.load8(h + 12 + pos) else 0 }
+}
+
+// Is the byte at addr non-zero? (a Bool-returning helper, so read_bool's arm stays a call.)
+fn __byte_nonzero(addr: Int) -> Bool = {
+  let v = prim.load8(addr)
+  v != 0
+}
+
+// bytes.read_bool(b, pos) -> is the byte at pos non-zero? (false if out of range).
+fn bytes_read_bool(b: Bytes, pos: Int) -> Bool = {
+  let h = prim.handle(b)
+  let n = prim.load32(h + 4)
+  if pos < 0 then false else { if pos < n then __byte_nonzero(h + 12 + pos) else false }
+}
+
+// bytes.read_u16_le(b, pos) -> the unsigned little-endian u16 at pos (0 if out of range).
+fn bytes_read_u16_le(b: Bytes, pos: Int) -> Int = {
+  let n = prim.load32(prim.handle(b) + 4)
+  let base = prim.handle(b) + 12 + pos
+  if pos < 0 then 0
+  else {
+    if pos + 2 > n then 0
+    else {
+      let lo = prim.load8(base)
+      let hi = prim.load8(base + 1)
+      let sh = prim.bshl(hi, 8)
+      prim.bor(lo, sh)
+    }
+  }
+}
+
+// bytes.read_u32_be(b, pos) -> the unsigned big-endian u32 at pos (0 if out of range).
+fn bytes_read_u32_be(b: Bytes, pos: Int) -> Int = {
+  let n = prim.load32(prim.handle(b) + 4)
+  let base = prim.handle(b) + 12 + pos
+  if pos < 0 then 0
+  else {
+    if pos + 4 > n then 0
+    else {
+      let b0 = prim.load8(base)
+      let b1 = prim.load8(base + 1)
+      let b2 = prim.load8(base + 2)
+      let b3 = prim.load8(base + 3)
+      let s0 = prim.bshl(b0, 24)
+      let s1 = prim.bshl(b1, 16)
+      let s2 = prim.bshl(b2, 8)
+      let p01 = prim.bor(s0, s1)
+      let p012 = prim.bor(p01, s2)
+      prim.bor(p012, b3)
+    }
+  }
+}
+
+// bytes.read_u32_le(b, pos) -> the unsigned little-endian u32 at pos (0 if out of range).
+fn bytes_read_u32_le(b: Bytes, pos: Int) -> Int = {
+  let n = prim.load32(prim.handle(b) + 4)
+  let base = prim.handle(b) + 12 + pos
+  if pos < 0 then 0
+  else {
+    if pos + 4 > n then 0
+    else {
+      let b0 = prim.load8(base)
+      let b1 = prim.load8(base + 1)
+      let b2 = prim.load8(base + 2)
+      let b3 = prim.load8(base + 3)
+      let s1 = prim.bshl(b1, 8)
+      let s2 = prim.bshl(b2, 16)
+      let s3 = prim.bshl(b3, 24)
+      let p01 = prim.bor(b0, s1)
+      let p012 = prim.bor(p01, s2)
+      prim.bor(p012, s3)
+    }
+  }
+}
+
+// bytes.read_i32_le(b, pos) -> the signed little-endian i32 at pos (0 if out of range).
+fn bytes_read_i32_le(b: Bytes, pos: Int) -> Int = {
+  let n = prim.load32(prim.handle(b) + 4)
+  let base = prim.handle(b) + 12 + pos
+  if pos < 0 then 0
+  else {
+    if pos + 4 > n then 0
+    else {
+      let b0 = prim.load8(base)
+      let b1 = prim.load8(base + 1)
+      let b2 = prim.load8(base + 2)
+      let b3 = prim.load8(base + 3)
+      let s1 = prim.bshl(b1, 8)
+      let s2 = prim.bshl(b2, 16)
+      let s3 = prim.bshl(b3, 24)
+      let p01 = prim.bor(b0, s1)
+      let p012 = prim.bor(p01, s2)
+      let u = prim.bor(p012, s3)
+      __sext32(u)
+    }
+  }
+}
+
+// bytes.read_i64_be(b, pos) -> the signed big-endian i64 at pos (full width, 0 if out of range).
+fn bytes_read_i64_be(b: Bytes, pos: Int) -> Int = {
+  let n = prim.load32(prim.handle(b) + 4)
+  let base = prim.handle(b) + 12 + pos
+  if pos < 0 then 0
+  else {
+    if pos + 8 > n then 0
+    else {
+      let b0 = prim.load8(base)
+      let b1 = prim.load8(base + 1)
+      let b2 = prim.load8(base + 2)
+      let b3 = prim.load8(base + 3)
+      let b4 = prim.load8(base + 4)
+      let b5 = prim.load8(base + 5)
+      let b6 = prim.load8(base + 6)
+      let b7 = prim.load8(base + 7)
+      let s0 = prim.bshl(b0, 56)
+      let s1 = prim.bshl(b1, 48)
+      let s2 = prim.bshl(b2, 40)
+      let s3 = prim.bshl(b3, 32)
+      let s4 = prim.bshl(b4, 24)
+      let s5 = prim.bshl(b5, 16)
+      let s6 = prim.bshl(b6, 8)
+      let q0 = prim.bor(s0, s1)
+      let q1 = prim.bor(q0, s2)
+      let q2 = prim.bor(q1, s3)
+      let q3 = prim.bor(q2, s4)
+      let q4 = prim.bor(q3, s5)
+      let q5 = prim.bor(q4, s6)
+      prim.bor(q5, b7)
+    }
+  }
+}
+
+// bytes.read_i64_le(b, pos) -> the signed little-endian i64 at pos (full width, 0 if out of range).
+fn bytes_read_i64_le(b: Bytes, pos: Int) -> Int = {
+  let n = prim.load32(prim.handle(b) + 4)
+  let base = prim.handle(b) + 12 + pos
+  if pos < 0 then 0
+  else {
+    if pos + 8 > n then 0
+    else {
+      let b0 = prim.load8(base)
+      let b1 = prim.load8(base + 1)
+      let b2 = prim.load8(base + 2)
+      let b3 = prim.load8(base + 3)
+      let b4 = prim.load8(base + 4)
+      let b5 = prim.load8(base + 5)
+      let b6 = prim.load8(base + 6)
+      let b7 = prim.load8(base + 7)
+      let s1 = prim.bshl(b1, 8)
+      let s2 = prim.bshl(b2, 16)
+      let s3 = prim.bshl(b3, 24)
+      let s4 = prim.bshl(b4, 32)
+      let s5 = prim.bshl(b5, 40)
+      let s6 = prim.bshl(b6, 48)
+      let s7 = prim.bshl(b7, 56)
+      let q0 = prim.bor(b0, s1)
+      let q1 = prim.bor(q0, s2)
+      let q2 = prim.bor(q1, s3)
+      let q3 = prim.bor(q2, s4)
+      let q4 = prim.bor(q3, s5)
+      let q5 = prim.bor(q4, s6)
+      prim.bor(q5, s7)
+    }
+  }
+}
