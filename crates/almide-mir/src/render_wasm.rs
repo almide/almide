@@ -662,6 +662,8 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
                 ("int_pop_count", "int.pop_count"),
                 ("int_count_trailing_zeros", "int.count_trailing_zeros"),
                 ("int_count_leading_zeros", "int.count_leading_zeros"),
+                ("int_bit_width", "int.bit_width"),
+                ("int_log2_floor", "int.log2_floor"),
             ],
         ),
         (
@@ -1723,6 +1725,30 @@ mod tests {
         assert!(prog.functions.iter().any(|f| f.name == "int.pop_count"), "linked");
         if let Some(out) = build_and_run("int_bitcount", &render_wasm_program(&prog)) {
             assert_eq!(out, "1\n3\n3\n64\n60\n63");
+        }
+    }
+
+    #[test]
+    fn self_hosted_int_bit_width_and_log2() {
+        // int.bit_width / log2_floor self-hosted (reuse __clz): bit_width(0)=0, (1)=1,
+        // (255)=8; log2_floor(1)=0, (8)=3, (0)=-1. byte-matching v0.
+        let src = "fn main() -> Unit = {\n  \
+            let a = int.bit_width(0)\n  \
+            let b = int.bit_width(1)\n  \
+            let c = int.bit_width(255)\n  \
+            let d = int.log2_floor(1)\n  \
+            let e = int.log2_floor(8)\n  \
+            let f = int.log2_floor(0)\n  \
+            println(int.to_string(a))\n  \
+            println(int.to_string(b))\n  \
+            println(int.to_string(c))\n  \
+            println(int.to_string(d))\n  \
+            println(int.to_string(e))\n  \
+            println(int.to_string(f)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "int.bit_width"), "linked");
+        if let Some(out) = build_and_run("int_bitwidth", &render_wasm_program(&prog)) {
+            assert_eq!(out, "0\n1\n8\n0\n3\n-1");
         }
     }
 

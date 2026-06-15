@@ -38,3 +38,19 @@ fn __clz(n: Int, i: Int) -> Int =
   }
 
 fn int_count_leading_zeros(n: Int) -> Int = __clz(n, 63)
+
+// bit_width: bits needed to represent n (0 for n==0), = 64 - leading_zeros for n != 0.
+fn int_bit_width(n: Int) -> Int =
+  if n == 0 then 0
+  else {
+    let lz = __clz(n, 63)
+    64 - lz
+  }
+
+// log2_floor: floor(log2(n)) for n > 0 (= highest set bit index), -1 for n <= 0.
+fn int_log2_floor(n: Int) -> Int =
+  if n <= 0 then 0 - 1
+  else {
+    let lz = __clz(n, 63)
+    63 - lz
+  }
