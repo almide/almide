@@ -6,6 +6,7 @@ use wasm_encoder::{Function, ValType};
 use almide_ir::{IrFunction, IrExpr, IrExprKind, IrStmt, IrStmtKind, VarTable};
 
 use super::{CompiledFunc, FuncCompiler, WasmEmitter};
+use super::engine::{Imm32, Local};
 use super::statements::collect_locals;
 
 /// Check if a function body uses stdlib calls, closures, or complex operations
@@ -160,7 +161,45 @@ fn compile_function_inner(
         wasm!(compiler.func, { call(compiler.emitter.rt.init_preopen_dirs); });
     }
 
+    // Function-scope heap reclamation (the non-loop analog of iter_scope). When a
+    // function returns a SCALAR (no heap escapes through the return), allocates
+    // heap, and never writes outer heap, roll the bump pointer back to entry on
+    // exit. Sequential calls then bump into the just-reclaimed WARM region instead
+    // of growing into cold (page-faulting) pages — this is what made `data |>
+    // list.map` ~4× slower than rustc when called once per benchmark: the result
+    // leaked and every call hit fresh memory, while a loop's iter_scope already
+    // recovered it. The scalar result sits on the wasm value stack, untouched by
+    // the global resets. The escape guard (`expr_writes_outer_heap`, hardened in
+    // #643) keeps any in-place-mutated / outer-stored heap out of the rollback.
+    let fn_scope = matches!(
+        func.ret_ty,
+        almide_lang::types::Ty::Int
+            | almide_lang::types::Ty::Bool
+            | almide_lang::types::Ty::Float
+            | almide_lang::types::Ty::Unit
+    ) && compiler.expr_allocates_heap(&func.body)
+        && !compiler.expr_writes_outer_heap(&func.body);
+    let fn_scope_local = if fn_scope {
+        let sl = compiler.scratch.alloc_i32();
+        wasm!(compiler.func, { global_get(compiler.emitter.heap_ptr_global); local_set(Local(sl)); });
+        Some(sl)
+    } else {
+        None
+    };
+
     compiler.emit_expr(&func.body);
+
+    // Restore the bump frontier + forget the free list (every node freed in the
+    // body points into the region being reclaimed — the same wholesale-forget the
+    // loop iter_scope relies on). Global sets do not disturb the stacked result.
+    if let Some(sl) = fn_scope_local {
+        wasm!(compiler.func, {
+            local_get(Local(sl));
+            global_set(compiler.emitter.heap_ptr_global);
+            i32_const(Imm32(0));
+            global_set(compiler.emitter.free_list_global);
+        });
+    }
 
     // Perceus function-exit rc_dec is now handled by PerceusPass (IR-level RcDec nodes)
 

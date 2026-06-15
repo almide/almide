@@ -43,10 +43,18 @@ impl FuncCompiler<'_> {
     }
 
     /// Allocate list for `len_local` elements. Returns scratch local with ptr.
+    ///
+    /// Uses `__alloc_nozero`: a pre-sized list's data area is written in full by
+    /// its producer (map/filter/range/collect), and `len` bounds every read, so a
+    /// recycled free-list block need not be zeroed first. On a warm repeated
+    /// allocation (the common `data |> list.map` loop) this is the difference
+    /// between touching 8 MB once vs twice — list combinators were ~4× off rustc
+    /// purely from the redundant reuse-zeroing, not the (already SIMD) inner loop.
+    /// (Swiss-Table maps DO need the zero-fill — they keep using `__alloc`.)
     pub fn emit_list_alloc(&mut self, len_local: u32, elem_size: u32) -> u32 {
         use super::engine::{WasmBuilder, layout::LIST};
         let dst = self.scratch.alloc_i32();
-        let alloc_fn = self.emitter.rt.alloc;
+        let alloc_fn = self.emitter.rt.alloc_nozero;
         let mut w = WasmBuilder::new(&mut self.func, &self.emitter.layout_reg);
         w.alloc_collection(LIST, len_local, elem_size, dst, alloc_fn);
         dst
