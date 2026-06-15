@@ -1,0 +1,44 @@
+// string_chars — SELF-HOSTED `string.chars` for v1 over the prim floor + Machinery 2. Each
+// Unicode codepoint becomes a fresh 1-char owned String; the result List[String] owns them
+// (freed recursively on DropListStr). The codepoint count = string.len; each codepoint's byte
+// length comes from its UTF-8 LEAD byte (1: <0x80, 2: <0xE0, 3: <0xF0, else 4). Source borrowed.
+
+fn __cp_len(lead: Int) -> Int =
+  if lead < 128 then 1
+  else if lead < 224 then 2
+  else if lead < 240 then 3
+  else 4
+
+fn __copy_bytes(dst: Int, src: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let b = prim.load8(src + i)
+    prim.store8(dst + i, b)
+    __copy_bytes(dst, src, n, i + 1)
+  }
+
+// A fresh owned String = the `n` bytes of s starting at byte offset `start`.
+fn __take_bytes(sh: Int, start: Int, n: Int) -> String = {
+  let piece = prim.alloc_str(n)
+  let _x = __copy_bytes(prim.handle(piece) + 12, sh + 12 + start, n, 0)
+  piece
+}
+
+fn __chars_fill(lh: Int, sh: Int, slen: Int, bpos: Int, idx: Int) -> Int =
+  if bpos >= slen then idx
+  else {
+    let lead = prim.load8(sh + 12 + bpos)
+    let clen = __cp_len(lead)
+    let piece = __take_bytes(sh, bpos, clen)
+    prim.store_str(lh + 12 + idx * 8, piece)
+    __chars_fill(lh, sh, slen, bpos + clen, idx + 1)
+  }
+
+fn string_chars(s: String) -> List[String] = {
+  let sh = prim.handle(s)
+  let slen = prim.load32(sh + 4)
+  let count = string.len(s)
+  let result = prim.alloc_list_str(count)
+  let _x = __chars_fill(prim.handle(result), sh, slen, 0, 0)
+  result
+}

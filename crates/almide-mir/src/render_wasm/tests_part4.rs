@@ -420,6 +420,23 @@
     }
 
     #[test]
+    fn self_hosted_string_chars() {
+        // SELF-HOSTED string.chars (Machinery 2). Verified by the codepoint COUNT (list.len):
+        // chars("abc")=3, chars("")=0, chars("a日c")=3 (the multibyte CJK char is ONE element),
+        // chars("日本語")=3. Each codepoint's bytes (1-4, from the UTF-8 lead) are copied out.
+        let src = "fn main() -> Unit = {\n  \
+            println(int.to_string(list.len(string.chars(\"abc\"))))\n  \
+            println(int.to_string(list.len(string.chars(\"\"))))\n  \
+            println(int.to_string(list.len(string.chars(\"a日c\"))))\n  \
+            println(int.to_string(list.len(string.chars(\"日本語\")))) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "string.chars"));
+        if let Some(out) = build_and_run("self_hosted_string_chars", &render_wasm_program(&prog)) {
+            assert_eq!(out, "3\n0\n3\n3");
+        }
+    }
+
+    #[test]
     fn self_hosted_math_sqrt() {
         // SELF-HOSTED math.sqrt = prim.fsqrt (f64.sqrt, byte-exact with v0). sqrt(16)=4,
         // sqrt(2)=1.41…→to_int 1, sqrt(81)=9.

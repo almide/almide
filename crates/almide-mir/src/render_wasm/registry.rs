@@ -88,6 +88,7 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
         (include_str!("../../../../stdlib/float_round.almd"), &[("float_round", "float.round")]),
         (include_str!("../../../../stdlib/math_float.almd"), &[("math_sqrt", "math.sqrt")]),
         (include_str!("../../../../stdlib/string_split.almd"), &[("string_split", "string.split")]),
+        (include_str!("../../../../stdlib/string_chars.almd"), &[("string_chars", "string.chars")]),
         (
             include_str!("../../../../stdlib/int_rotate.almd"),
             &[("int_rotate_left", "int.rotate_left"), ("int_rotate_right", "int.rotate_right")],
