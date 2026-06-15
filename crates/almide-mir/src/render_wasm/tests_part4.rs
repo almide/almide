@@ -335,6 +335,20 @@
     }
 
     #[test]
+    fn self_hosted_float_is_infinite() {
+        // SELF-HOSTED float.is_infinite — |n| == +inf (inf built as 1.0/0.0). is_infinite(1e400)
+        // =true (1e400 overflows the f64 to +inf), is_infinite(5.0)=false. Booleans as 1/0.
+        let src = "fn main() -> Unit = {\n  \
+            let big = 1e400\n  let i1b = float.is_infinite(big)\n  let i1 = if i1b then 1 else 0\n  println(int.to_string(i1))\n  \
+            let five = float.from_int(5)\n  let i2b = float.is_infinite(five)\n  let i2 = if i2b then 1 else 0\n  println(int.to_string(i2)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "float.is_infinite"));
+        if let Some(out) = build_and_run("self_hosted_float_is_infinite", &render_wasm_program(&prog)) {
+            assert_eq!(out, "1\n0");
+        }
+    }
+
+    #[test]
     fn self_hosted_float_round() {
         // SELF-HOSTED float.round — round half AWAY from zero (v0's f64::round, NOT half-even).
         // round(2.5)=3, round(2.4)=2, round(3.5)=4 (half-even would give 2 and 4 — the 2.5 case

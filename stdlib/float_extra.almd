@@ -16,3 +16,12 @@ fn float_sign(n: Float) -> Float = {
   let nan = prim.fne(n, n)
   if nan then n else prim.fcopysign(1.0, n)
 }
+
+// is_infinite(n): true iff n is +inf or -inf. |n| == +inf catches both; a NaN |n| is
+// unequal to inf (→ false), a finite |n| < inf (→ false). inf is built as 1.0/0.0 (wasm
+// f64.div by zero is +inf, no trap).
+fn float_is_infinite(n: Float) -> Bool = {
+  let inf = prim.fdiv(1.0, 0.0)
+  let an = prim.fabs(n)
+  prim.feq(an, inf)
+}
