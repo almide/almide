@@ -185,6 +185,11 @@ fn render_op(op: &Op) -> Option<String> {
                 IntOp::Ge => format!("({a} >= {b}) as i64"),
                 IntOp::Eq => format!("({a} == {b}) as i64"),
                 IntOp::Ne => format!("({a} != {b}) as i64"),
+                IntOp::And => format!("{a} & {b}"),
+                IntOp::Or => format!("{a} | {b}"),
+                IntOp::Xor => format!("{a} ^ {b}"),
+                IntOp::Shl => format!("{a} << {b}"),
+                IntOp::Shr => format!("{a} >> {b}"),
             };
             Some(format!("let {d}: i64 = {rhs};"))
         }

@@ -295,6 +295,13 @@ pub enum IntOp {
     Ge,
     Eq,
     Ne,
+    // Bitwise i64 ops (the int.band/bor/bxor/bshl/bshr floor). Scalar, no ownership.
+    And,
+    Or,
+    Xor,
+    Shl,
+    /// Arithmetic (sign-extending) shift right, matching v0's `>>` on `i64`.
+    Shr,
 }
 
 /// A runtime function the MIR can call. An enum (not a string) so the renderer

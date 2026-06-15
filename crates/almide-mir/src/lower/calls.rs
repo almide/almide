@@ -667,6 +667,27 @@ impl LowerCtx {
             });
             return Ok(Some(dst));
         }
+        // Bitwise binary ops lower to a scalar `Op::IntBinOp` (i64 and/or/xor/shl/shr_s),
+        // not an `Op::Prim` — the int.band/bor/bxor/bshl/bshr floor. No ownership.
+        let bitop = match func {
+            "band" => Some(crate::IntOp::And),
+            "bor" => Some(crate::IntOp::Or),
+            "bxor" => Some(crate::IntOp::Xor),
+            "bshl" => Some(crate::IntOp::Shl),
+            "bshr" => Some(crate::IntOp::Shr),
+            _ => None,
+        };
+        if let Some(op) = bitop {
+            let a = self.lower_scalar_value(&args[0]).ok_or_else(|| {
+                LowerError::Unsupported(format!("prim.{func} arg 0 is not a lowerable scalar"))
+            })?;
+            let b = self.lower_scalar_value(&args[1]).ok_or_else(|| {
+                LowerError::Unsupported(format!("prim.{func} arg 1 is not a lowerable scalar"))
+            })?;
+            let dst = self.fresh_value();
+            self.ops.push(Op::IntBinOp { dst, op, a, b });
+            return Ok(Some(dst));
+        }
         let kind = match func {
             "handle" => PrimKind::Handle,
             "load8" => PrimKind::Load { width: 1 },

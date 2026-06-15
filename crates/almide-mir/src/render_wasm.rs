@@ -481,6 +481,11 @@ fn render_op(op: &Op, label_off: &BTreeMap<String, (u32, u32)>) -> String {
                 IntOp::Ge => format!("(i64.extend_i32_u (i64.ge_s {args}))"),
                 IntOp::Eq => format!("(i64.extend_i32_u (i64.eq {args}))"),
                 IntOp::Ne => format!("(i64.extend_i32_u (i64.ne {args}))"),
+                IntOp::And => format!("(i64.and {args})"),
+                IntOp::Or => format!("(i64.or {args})"),
+                IntOp::Xor => format!("(i64.xor {args})"),
+                IntOp::Shl => format!("(i64.shl {args})"),
+                IntOp::Shr => format!("(i64.shr_s {args})"),
             };
             format!("    (local.set {d} {expr})\n", d = local(*dst))
         }
@@ -651,6 +656,17 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
             &[("string_pad_start", "string.pad_start"), ("string_pad_end", "string.pad_end")],
         ),
         (include_str!("../../../stdlib/list_get_or.almd"), &[("list_get_or", "list.get_or")]),
+        (
+            include_str!("../../../stdlib/int_bits.almd"),
+            &[
+                ("int_band", "int.band"),
+                ("int_bor", "int.bor"),
+                ("int_bxor", "int.bxor"),
+                ("int_bshl", "int.bshl"),
+                ("int_bshr", "int.bshr"),
+                ("int_bnot", "int.bnot"),
+            ],
+        ),
         (
             include_str!("../../../stdlib/int_scalar.almd"),
             &[
@@ -1647,6 +1663,33 @@ mod tests {
         assert!(prog.functions.iter().any(|f| f.name == "int.clamp"), "linked");
         if let Some(out) = build_and_run("int_scalar", &render_wasm_program(&prog)) {
             assert_eq!(out, "7\n3\n8\n5\n0\n10");
+        }
+    }
+
+    #[test]
+    fn self_hosted_int_bitwise_ops() {
+        // int.band/bor/bxor/bnot/bshl/bshr self-hosted (i64 bitwise via the new IntOp
+        // And/Or/Xor/Shl/Shr; bnot is -n-1). band(12,10)=8, bor=14, bxor=6, bnot(5)=-6,
+        // bshl(1,4)=16, bshr(256,2)=64, bshr(-8,1)=-4 (arithmetic). byte-matching v0.
+        let src = "fn main() -> Unit = {\n  \
+            let a = int.band(12, 10)\n  \
+            let b = int.bor(12, 10)\n  \
+            let c = int.bxor(12, 10)\n  \
+            let d = int.bnot(5)\n  \
+            let e = int.bshl(1, 4)\n  \
+            let f = int.bshr(256, 2)\n  \
+            let g = int.bshr(0 - 8, 1)\n  \
+            println(int.to_string(a))\n  \
+            println(int.to_string(b))\n  \
+            println(int.to_string(c))\n  \
+            println(int.to_string(d))\n  \
+            println(int.to_string(e))\n  \
+            println(int.to_string(f))\n  \
+            println(int.to_string(g)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "int.bxor"), "linked");
+        if let Some(out) = build_and_run("int_bits", &render_wasm_program(&prog)) {
+            assert_eq!(out, "8\n14\n6\n-6\n16\n64\n-4");
         }
     }
 
