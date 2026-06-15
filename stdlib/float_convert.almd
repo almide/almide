@@ -32,3 +32,6 @@ fn float_to_uint32(f: Float) -> UInt32 = {
   let t = prim.f2i(f)
   if t < 0 then 0 else (if t > 4294967295 then 4294967295 else t)
 }
+
+// float.to_int64(f) -> the full-width saturating `f as i64` — exactly the prim float floor's f2i.
+fn float_to_int64(f: Float) -> Int64 = prim.f2i(f)

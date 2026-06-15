@@ -782,6 +782,20 @@
     }
 
     #[test]
+    fn self_hosted_float_to_int64() {
+        // SELF-HOSTED float.to_int64 = prim.f2i (full-width saturating `f as i64`, truncating
+        // toward zero). to_int64(2.9)=2, to_int64(100.0)=100. Byte-matches v0.
+        let src = "fn main() -> Unit = {\n  \
+            println(int.to_string(float.to_int64(2.9)))\n  \
+            println(int.to_string(float.to_int64(100.0))) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "float.to_int64"));
+        if let Some(out) = build_and_run("self_hosted_float_to_int64", &render_wasm_program(&prog)) {
+            assert_eq!(out, "2\n100");
+        }
+    }
+
+    #[test]
     fn self_hosted_hex_encode() {
         // SELF-HOSTED hex.encode / hex.encode_upper (Bytes -> hex String) over the bytes machinery
         // + the bitwise prim floor. Each byte -> two hex digits (high nibble byte>>4, low byte&0xF).
@@ -906,5 +920,6 @@
             assert_eq!(out, "4\n2\n3\n3\n5\n0");
         }
     }
+
 
 
