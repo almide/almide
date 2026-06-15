@@ -634,6 +634,10 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
         (include_str!("../../../stdlib/list_sort.almd"), &[("list_sort", "list.sort")]),
         (include_str!("../../../stdlib/list_unique.almd"), &[("list_unique", "list.unique")]),
         (include_str!("../../../stdlib/list_dedup.almd"), &[("list_dedup", "list.dedup")]),
+        (
+            include_str!("../../../stdlib/list_intersperse.almd"),
+            &[("list_intersperse", "list.intersperse")],
+        ),
         (include_str!("../../../stdlib/string_slice.almd"), &[("string_slice", "string.slice")]),
         (
             include_str!("../../../stdlib/string_to_bytes.almd"),
@@ -2192,6 +2196,32 @@ mod tests {
         assert!(prog.functions.iter().any(|f| f.name == "list.dedup"), "linked");
         if let Some(out) = build_and_run("list_dedup", &render_wasm_program(&prog)) {
             assert_eq!(out, "3\n1\n2\n1");
+        }
+    }
+
+    #[test]
+    fn self_hosted_list_intersperse() {
+        // list.intersperse self-hosted (insert sep between elements): intersperse([1,2,3],0)
+        // =[1,0,2,0,3], intersperse([5],9)=[5] (no sep for one element). Read back via
+        // list.len + list.get_or. byte-matching v0.
+        let src = "fn main() -> Unit = {\n  \
+            let xs = [1, 2, 3]\n  \
+            let r = list.intersperse(xs, 0)\n  \
+            let rl = list.len(r)\n  \
+            let r0 = list.get_or(r, 0, 9)\n  \
+            let r1 = list.get_or(r, 1, 9)\n  \
+            let r4 = list.get_or(r, 4, 9)\n  \
+            let one = list.intersperse([5], 9)\n  \
+            let ol = list.len(one)\n  \
+            println(int.to_string(rl))\n  \
+            println(int.to_string(r0))\n  \
+            println(int.to_string(r1))\n  \
+            println(int.to_string(r4))\n  \
+            println(int.to_string(ol)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "list.intersperse"), "linked");
+        if let Some(out) = build_and_run("list_intersperse", &render_wasm_program(&prog)) {
+            assert_eq!(out, "5\n1\n0\n3\n1");
         }
     }
 

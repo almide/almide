@@ -1,0 +1,28 @@
+// list_intersperse — SELF-HOSTED `list.intersperse` for v1 over the prim floor: insert
+// `sep` between consecutive elements ([x0, sep, x1, sep, ..., xn-1]). Builds a List[Int]
+// (prim.alloc_list + store64): element i lands at slot 2i, the separator after it at slot
+// 2i+1 (except after the last). Sound + loop-bounded (i64 value copies). List[Int] only.
+
+fn __isp_sep(dh: Int, n: Int, sep: Int, i: Int) -> Int =
+  if i < n - 1 then {
+    prim.store64(dh + 12 + i * 16 + 8, sep)
+    0
+  } else 0
+
+fn __isp_fill(sh: Int, dh: Int, n: Int, sep: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let e = prim.load64(sh + 12 + i * 8)
+    prim.store64(dh + 12 + i * 16, e)
+    let _s = __isp_sep(dh, n, sep, i)
+    __isp_fill(sh, dh, n, sep, i + 1)
+  }
+
+fn list_intersperse(xs: List[Int], sep: Int) -> List[Int] = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  let count = if n <= 0 then 0 else n * 2 - 1
+  let buf = prim.alloc_list(count)
+  let _f = __isp_fill(h, prim.handle(buf), n, sep, 0)
+  buf
+}
