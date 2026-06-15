@@ -649,6 +649,10 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
         ),
         (include_str!("../../../stdlib/list_reverse.almd"), &[("list_reverse", "list.reverse")]),
         (
+            include_str!("../../../stdlib/list_take_drop.almd"),
+            &[("list_take", "list.take"), ("list_drop", "list.drop")],
+        ),
+        (
             include_str!("../../../stdlib/list_fold.almd"),
             &[
                 ("list_product", "list.product"),
@@ -1736,6 +1740,33 @@ mod tests {
         if let Some(out) = build_and_run("list_reverse_loop", &render_wasm_program(&prog)) {
             assert_eq!(out.lines().count(), 2000, "every iteration prints (no OOM/leak)");
             assert!(out.lines().all(|l| l == "3"));
+        }
+    }
+
+    #[test]
+    fn self_hosted_list_take_and_drop() {
+        // list.take/drop self-hosted (List[Int] construction via alloc_list + __copy_slice):
+        // take([10,20,30,40],2)=[10,20], drop(...,2)=[30,40]. Read back via list.len +
+        // list.get_or. byte-matching v0.
+        let src = "fn main() -> Unit = {\n  \
+            let xs = [10, 20, 30, 40]\n  \
+            let t = list.take(xs, 2)\n  \
+            let d = list.drop(xs, 2)\n  \
+            let tl = list.len(t)\n  \
+            let t0 = list.get_or(t, 0, 0)\n  \
+            let t1 = list.get_or(t, 1, 0)\n  \
+            let d0 = list.get_or(d, 0, 0)\n  \
+            let d1 = list.get_or(d, 1, 0)\n  \
+            println(int.to_string(tl))\n  \
+            println(int.to_string(t0))\n  \
+            println(int.to_string(t1))\n  \
+            println(int.to_string(d0))\n  \
+            println(int.to_string(d1)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "list.take"), "linked");
+        assert!(prog.functions.iter().any(|f| f.name == "list.drop"), "linked");
+        if let Some(out) = build_and_run("list_take_drop", &render_wasm_program(&prog)) {
+            assert_eq!(out, "2\n10\n20\n30\n40");
         }
     }
 
