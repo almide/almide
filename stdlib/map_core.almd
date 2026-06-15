@@ -132,3 +132,70 @@ fn map_values(m: Map[Int, Int]) -> List[Int] = {
   let _x = __map_values_fill(h, oh, len, 0)
   out
 }
+
+// map.get — Some(value) when the key is present, None otherwise (a materialized Option[Int]).
+// Each arm is built in a HELPER TAIL (the materialized-Option layout, mirroring list.max/min:
+// a `__none()` helper for None, a `__some_at` helper for Some), so the result is a real Option.
+fn __map_none() -> Option[Int] = None
+fn __map_get_some(h: Int, idx: Int) -> Option[Int] = {
+  let v = prim.load64(h + 12 + idx * 16 + 8)
+  Some(v)
+}
+
+fn map_get(m: Map[Int, Int], k: Int) -> Option[Int] = {
+  let h = prim.handle(m)
+  let len = prim.load32(h + 4)
+  let idx = __map_find(h, len, k, 0)
+  if idx < 0 then __map_none()
+  else __map_get_some(h, idx)
+}
+
+// map.merge — clone a, then insert every entry of b (b's keys override a's value in place,
+// b's new keys append). Result order: a's order (overridden values) then b's new keys (b order).
+fn __map_merge_addb(rh: Int, bh: Int, blen: Int, j: Int, w: Int) -> Int =
+  if j >= blen then w
+  else {
+    let k = prim.load64(bh + 12 + j * 16)
+    let v = prim.load64(bh + 12 + j * 16 + 8)
+    let idx = __map_find(rh, w, k, 0)
+    let w2 = __map_put(rh, w, idx, k, v)
+    __map_merge_addb(rh, bh, blen, j + 1, w2)
+  }
+
+fn map_merge(a: Map[Int, Int], b: Map[Int, Int]) -> Map[Int, Int] = {
+  let ah = prim.handle(a)
+  let bh = prim.handle(b)
+  let alen = prim.load32(ah + 4)
+  let blen = prim.load32(bh + 4)
+  let slots = (alen + blen) * 2
+  let r = prim.alloc_map(slots)
+  let rh = prim.handle(r)
+  let _c = __map_copy(ah, rh, alen, 0)
+  let w = __map_merge_addb(rh, bh, blen, 0, alen)
+  prim.store32(rh + 4, w)
+  r
+}
+
+// map.update — if k is present, replace its value with f(old); else the map is unchanged. f is a
+// one-arity closure (Int)->Int invoked via CallIndirect. update never changes the entry count.
+fn __map_update_at(rh: Int, idx: Int, f: (Int) -> Int) -> Int =
+  if idx < 0 then 0
+  else {
+    let old = prim.load64(rh + 12 + idx * 16 + 8)
+    let nv = f(old)
+    prim.store64(rh + 12 + idx * 16 + 8, nv)
+    0
+  }
+
+fn map_update(m: Map[Int, Int], k: Int, f: (Int) -> Int) -> Map[Int, Int] = {
+  let sh = prim.handle(m)
+  let len = prim.load32(sh + 4)
+  let slots = len * 2
+  let r = prim.alloc_map(slots)
+  let rh = prim.handle(r)
+  let _c = __map_copy(sh, rh, len, 0)
+  let idx = __map_find(sh, len, k, 0)
+  let _u = __map_update_at(rh, idx, f)
+  prim.store32(rh + 4, len)
+  r
+}

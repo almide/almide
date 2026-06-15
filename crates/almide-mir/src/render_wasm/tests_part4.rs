@@ -1438,6 +1438,33 @@
     }
 
     #[test]
+    fn self_hosted_map_get_merge_update() {
+        // SELF-HOSTED map.get (materialized Option[Int], match-extractable) + map.merge (b
+        // overrides a's values, appends new keys) + map.update (closure on present key). m={1:10,
+        // 2:20}: get(2)=Some(20) match→20, get(9)=None match→-1; merge with {2:99,3:30}={1:10,2:99,
+        // 3:30} get(2)=99 get(3)=30; update(1, x=>x*5)={1:50,...} get(1)=50. Byte-matches v0.
+        let src = "fn main() -> Unit = {\n  \
+            let m1 = map.set(map.new(), 1, 10)\n  let m = map.set(m1, 2, 20)\n  \
+            let g2 = map.get(m, 2)\n  \
+            match g2 { Some(v) => println(int.to_string(v)), None => println(\"none\"), }\n  \
+            let g9 = map.get(m, 9)\n  \
+            match g9 { Some(v) => println(int.to_string(v)), None => println(\"none\"), }\n  \
+            let b1 = map.set(map.new(), 2, 99)\n  let b = map.set(b1, 3, 30)\n  \
+            let mg = map.merge(m, b)\n  \
+            println(int.to_string(map.len(mg)))\n  \
+            println(int.to_string(map.get_or(mg, 2, 0)))\n  \
+            println(int.to_string(map.get_or(mg, 3, 0)))\n  \
+            let mu = map.update(m, 1, (x) => x * 5)\n  \
+            println(int.to_string(map.get_or(mu, 1, 0))) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "map.get"));
+        assert!(prog.functions.iter().any(|f| f.name == "map.merge"));
+        if let Some(out) = build_and_run("self_hosted_map_get_merge_update", &render_wasm_program(&prog)) {
+            assert_eq!(out, "20\nnone\n3\n99\n30\n50");
+        }
+    }
+
+    #[test]
     fn self_hosted_map_core_loop_reclaims() {
         // SOUNDNESS for the new Map[Int,Int] heap path: a bounded loop building + dropping a
         // fresh Map every iteration must reclaim each (plain non-nested drop) — no leak/double-free.

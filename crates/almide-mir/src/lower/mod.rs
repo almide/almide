@@ -675,6 +675,9 @@ pub(crate) fn is_self_host_option_module_fn(module: &str, func: &str) -> bool {
         // over either result EXECUTES.
         "result" => matches!(func, "to_option" | "to_err_option"),
         "option" => matches!(func, "map" | "filter" | "flat_map" | "or_else" | "flatten"),
+        // map.get(m, k) builds a materialized Option[Int] (Some(value) when the key is found via
+        // the paired-slot scan, None otherwise) — a `match` over it EXECUTES.
+        "map" => matches!(func, "get"),
         _ => false,
     }
 }
