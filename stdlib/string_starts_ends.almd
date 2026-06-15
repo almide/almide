@@ -1,0 +1,33 @@
+// string_starts_ends — SELF-HOSTED `string.starts_with` / `string.ends_with` for v1 over
+// the prim floor: does `s` begin / end with the given affix? Pure BYTE comparison (no
+// allocation), correct for UTF-8 because the affix is itself a complete valid UTF-8
+// String — a byte-level prefix/suffix match is a string-level one (UTF-8 is self-
+// synchronizing). Reads only — both args borrowed. Cert-untouching (no heap Alloc).
+
+// True iff the `n` bytes at address `a` equal the `n` bytes at address `b`.
+fn __byte_eq(a: Int, b: Int, n: Int) -> Bool =
+  if n <= 0 then true
+  else {
+    let x = prim.load8(a)
+    let y = prim.load8(b)
+    if x == y then __byte_eq(a + 1, b + 1, n - 1)
+    else false
+  }
+
+fn string_starts_with(s: String, prefix: String) -> Bool = {
+  let hs = prim.handle(s)
+  let hp = prim.handle(prefix)
+  let slen = prim.load32(hs + 4)            // byte length at LIST_LEN_OFFSET(4)
+  let plen = prim.load32(hp + 4)
+  if plen > slen then false
+  else __byte_eq(hs + 12, hp + 12, plen)    // compare from the data start (LIST_HEADER 12)
+}
+
+fn string_ends_with(s: String, suffix: String) -> Bool = {
+  let hs = prim.handle(s)
+  let hp = prim.handle(suffix)
+  let slen = prim.load32(hs + 4)
+  let plen = prim.load32(hp + 4)
+  if plen > slen then false
+  else __byte_eq(hs + 12 + (slen - plen), hp + 12, plen)  // compare from the tail
+}

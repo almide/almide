@@ -608,6 +608,13 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
             include_str!("../../../stdlib/list_get.almd"),
             &[("list_get", "list.get"), ("list_first", "list.first"), ("list_last", "list.last")],
         ),
+        (
+            include_str!("../../../stdlib/string_starts_ends.almd"),
+            &[
+                ("string_starts_with", "string.starts_with"),
+                ("string_ends_with", "string.ends_with"),
+            ],
+        ),
     ]
 }
 
@@ -1481,6 +1488,29 @@ mod tests {
         assert!(prog.functions.iter().any(|f| f.name == "list.last"), "list.last linked");
         if let Some(out) = build_and_run("list_first_last", &render_wasm_program(&prog)) {
             assert_eq!(out, "10\n30\nnone");
+        }
+    }
+
+    #[test]
+    fn self_hosted_string_starts_and_ends_with() {
+        // string.starts_with / string.ends_with self-hosted (pure byte comparison over the
+        // prim floor): starts_with("hello","he")=true / ("hello","lo")=false; ends_with(
+        // "hello","lo")=true / ("hello","he")=false — byte-matching v0. (The Bool result is
+        // bound first since a scalar call in an if-cond does not lower; printed T/F.)
+        let src = "fn main() -> Unit = {\n  \
+            let a = string.starts_with(\"hello\", \"he\")\n  \
+            let b = string.starts_with(\"hello\", \"lo\")\n  \
+            let c = string.ends_with(\"hello\", \"lo\")\n  \
+            let d = string.ends_with(\"hello\", \"he\")\n  \
+            if a then println(\"T\") else println(\"F\")\n  \
+            if b then println(\"T\") else println(\"F\")\n  \
+            if c then println(\"T\") else println(\"F\")\n  \
+            if d then println(\"T\") else println(\"F\") }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "string.starts_with"), "linked");
+        assert!(prog.functions.iter().any(|f| f.name == "string.ends_with"), "linked");
+        if let Some(out) = build_and_run("string_starts_ends", &render_wasm_program(&prog)) {
+            assert_eq!(out, "T\nF\nT\nF");
         }
     }
 
