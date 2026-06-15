@@ -1395,6 +1395,24 @@
     }
 
     #[test]
+    fn self_hosted_set_map_fold() {
+        // SELF-HOSTED set.map (result re-dedup — f may collapse distinct inputs) + set.fold
+        // (2-arity closure, acc-first). s={1,2,3,4}: map(x => x % 2)={1,0} len 2 sum 1 (1,0,1,0
+        // dedups to {1,0}); fold(0, (acc,x) => acc + x)=10. Byte-matches v0.
+        let src = "fn main() -> Unit = {\n  \
+            let s = set.from_list([1, 2, 3, 4])\n  \
+            let m = set.map(s, (x) => x % 2)\n  println(int.to_string(set.len(m)))\n  \
+            let ml = set.to_list(m)\n  println(int.to_string(list.sum(ml)))\n  \
+            let total = set.fold(s, 0, (acc, x) => acc + x)\n  println(int.to_string(total)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "set.map"));
+        assert!(prog.functions.iter().any(|f| f.name == "set.fold"));
+        if let Some(out) = build_and_run("self_hosted_set_map_fold", &render_wasm_program(&prog)) {
+            assert_eq!(out, "2\n1\n10");
+        }
+    }
+
+    #[test]
     fn self_hosted_set_core_loop_reclaims() {
         // SOUNDNESS for the new Set[Int] heap path: a bounded loop building + dropping a fresh
         // Set[Int] every iteration must reclaim each (plain non-nested drop) — no leak (OOM) or

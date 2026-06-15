@@ -312,3 +312,45 @@ fn set_any(s: Set[Int], f: (Int) -> Bool) -> Bool = {
   let hits = __set_count_hits(sh, f, n, 0, 0)
   hits > 0
 }
+
+// set.map — apply f to each element, collecting UNIQUE results (f may collapse distinct inputs
+// to the same output, so the mapped values MUST be re-deduped, exactly v0's `.map(f).collect()`
+// into an AlmideSet). Append f(x) iff not already present; first-seen order. Int->Int.
+fn __set_map_fill(dh: Int, sh: Int, f: (Int) -> Int, n: Int, i: Int, w: Int) -> Int =
+  if i >= n then w
+  else {
+    let x = prim.load64(sh + 12 + i * 8)
+    let y = f(x)
+    let present = __set_has(dh, w, y, 0)
+    if present then __set_map_fill(dh, sh, f, n, i + 1, w)
+    else {
+      prim.store64(dh + 12 + w * 8, y)
+      __set_map_fill(dh, sh, f, n, i + 1, w + 1)
+    }
+  }
+
+fn set_map(s: Set[Int], f: (Int) -> Int) -> Set[Int] = {
+  let sh = prim.handle(s)
+  let n = prim.load32(sh + 4)
+  let r = prim.alloc_set(n)
+  let rh = prim.handle(r)
+  let w = __set_map_fill(rh, sh, f, n, 0, 0)
+  prim.store32(rh + 4, w)
+  r
+}
+
+// set.fold — left fold with a TWO-arity closure f : (Acc, Int) -> Acc (acc first, element
+// second — v0's fold(s, init, f)). Int accumulator. The set walk order = insertion order.
+fn __set_fold_loop(sh: Int, f: (Int, Int) -> Int, n: Int, i: Int, acc: Int) -> Int =
+  if i >= n then acc
+  else {
+    let x = prim.load64(sh + 12 + i * 8)
+    let nacc = f(acc, x)
+    __set_fold_loop(sh, f, n, i + 1, nacc)
+  }
+
+fn set_fold(s: Set[Int], init: Int, f: (Int, Int) -> Int) -> Int = {
+  let sh = prim.handle(s)
+  let n = prim.load32(sh + 4)
+  __set_fold_loop(sh, f, n, 0, init)
+}
