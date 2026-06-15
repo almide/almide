@@ -123,6 +123,20 @@ ADVERSARIAL: cert-touching (un-walls higher-order). The soundness rests on the c
 Stdout closure to pass caps. Multi-turn; implement the infrastructure (1+2) before any
 stdlib fn, with corpus-wall caps ACCEPT verified at each step.
 
+**THE SOUNDNESS CRUX (found while investigating — the one place an accept-but-unsafe hole
+hides):** today a `Computed` call is ELIDED, so `count_ir_calls` sees ir>mir and TAINTS the
+fn caps-UNVERIFIED (honest — closure caps unknown). If `call_indirect` is emitted as a
+clean MIR op that maps 1:1 to the ir Computed node, that taint VANISHES and the fn becomes
+caps-VERIFIED — but the closure may reach Stdout, so the caps witness would MISS it =
+accept-but-unsafe = a hole in a PROVEN property (the trust spine's core). So `CallIndirect`
+must NOT be caps-clean: either keep the ir>mir taint (don't count it 1:1) OR have
+`cap_witness` treat a `CallIndirect` as using EVERY capability (conservative `used ⊇ all`),
+so `used ⊆ declared` only holds for a fn that DECLARES all caps — i.e. a CallIndirect fn is
+never silently caps-verified. corpus-wall `caps` must stay 3582 (the closure-using corpus
+fns are already caps-unverified, so a correct impl keeps them so — a DROP below 3582 or a
+spurious RISE both signal the taint is wrong). This caps taint is the single highest-risk
+line of the whole campaign; implement + adversarially verify it FIRST, in isolation.
+
 ## Known writing-idiom gaps (use the workaround now; fix centrally later)
 `if` as a BinOp OPERAND (`n + (if c …)`) and a scalar CALL as a call-ARG (`f(g(x))`) and a
 Bool CALL as an if-COND (`if is_ws(b) …`) all DON'T lower — bind them first (`let t = …; …t`).
