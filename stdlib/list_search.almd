@@ -1,0 +1,34 @@
+// list_search — SELF-HOSTED `list.contains` / `list.index_of` for v1 over the prim floor:
+// linear element search by EQUALITY. Both share __idx_find, which compares each i64
+// element slot (LIST_HEADER + i*ELEM_SIZE) to `x`. This monomorphic List[Int] impl serves
+// List[Int] (i64 elements compared by value); other element types store i32 handles in the
+// i64 slot, where handle equality is NOT value equality — those need a per-element-type
+// variant (a later refinement). Reads only — `xs` borrowed. contains is cert-untouching;
+// index_of returns a materialized Option (the proven 0-or-1-element-list layout).
+
+// Index of the first element == x scanning from `i`, or -1 if none.
+fn __idx_find(h: Int, len: Int, x: Int, i: Int) -> Int =
+  if i >= len then -1
+  else {
+    let e = prim.load64(h + 12 + i * 8)
+    if e == x then i
+    else __idx_find(h, len, x, i + 1)
+  }
+
+fn list_contains(xs: List[Int], x: Int) -> Bool = {
+  let h = prim.handle(xs)
+  let len = prim.load32(h + 4)
+  let idx = __idx_find(h, len, x, 0)
+  idx >= 0
+}
+
+fn __lio_none() -> Option[Int] = None
+fn __lio_some(i: Int) -> Option[Int] = Some(i)
+
+fn list_index_of(xs: List[Int], x: Int) -> Option[Int] = {
+  let h = prim.handle(xs)
+  let len = prim.load32(h + 4)
+  let idx = __idx_find(h, len, x, 0)
+  if idx < 0 then __lio_none()
+  else __lio_some(idx)
+}

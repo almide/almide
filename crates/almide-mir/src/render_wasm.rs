@@ -609,6 +609,10 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
             &[("list_get", "list.get"), ("list_first", "list.first"), ("list_last", "list.last")],
         ),
         (
+            include_str!("../../../stdlib/list_search.almd"),
+            &[("list_contains", "list.contains"), ("list_index_of", "list.index_of")],
+        ),
+        (
             include_str!("../../../stdlib/string_search.almd"),
             &[
                 ("string_starts_with", "string.starts_with"),
@@ -1492,6 +1496,29 @@ mod tests {
         assert!(prog.functions.iter().any(|f| f.name == "list.last"), "list.last linked");
         if let Some(out) = build_and_run("list_first_last", &render_wasm_program(&prog)) {
             assert_eq!(out, "10\n30\nnone");
+        }
+    }
+
+    #[test]
+    fn self_hosted_list_contains_and_index_of() {
+        // list.contains / list.index_of self-hosted (linear element search by == over the
+        // i64 slots): contains([10,20,30],20)=true / 99=false; index_of([10,20,30],30)=
+        // Some(2) / 99=None (a materialized Option, the match executes). byte-matching v0.
+        let src = "fn main() -> Unit = {\n  \
+            let xs = [10, 20, 30]\n  \
+            let a = list.contains(xs, 20)\n  \
+            let b = list.contains(xs, 99)\n  \
+            if a then println(\"T\") else println(\"F\")\n  \
+            if b then println(\"T\") else println(\"F\")\n  \
+            match list.index_of(xs, 30) {\n    \
+            Some(i) => println(int.to_string(i)),\n    None => println(\"none\"),\n  }\n  \
+            match list.index_of(xs, 99) {\n    \
+            Some(i) => println(int.to_string(i)),\n    None => println(\"none\"),\n  } }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "list.contains"), "linked");
+        assert!(prog.functions.iter().any(|f| f.name == "list.index_of"), "linked");
+        if let Some(out) = build_and_run("list_search", &render_wasm_program(&prog)) {
+            assert_eq!(out, "T\nF\n2\nnone");
         }
     }
 
