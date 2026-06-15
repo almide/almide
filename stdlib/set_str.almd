@@ -1,0 +1,86 @@
+// set_str — SELF-HOSTED Set[String] (the heap-element / nested-ownership Set). A Set[String] IS a
+// v1 DynListStr block (each i64 slot an OWNED String handle, freed recursively via DropListStr) of
+// UNIQUE, insertion-ordered Strings — v0's AlmideSet over String. Membership uses byte-level string
+// equality (__str_eq); each stored element is a fresh DEEP COPY (so the set owns it independently,
+// no double-free with the source). from_list dedups; contains queries; to_list copies out.
+
+// Byte-level string equality: same length AND same bytes. Reads only (both borrowed).
+fn __str_eq_bytes(pa: Int, pb: Int, n: Int, i: Int) -> Bool =
+  if i >= n then true
+  else {
+    let ca = prim.load8(pa + i)
+    let cb = prim.load8(pb + i)
+    if ca == cb then __str_eq_bytes(pa, pb, n, i + 1)
+    else false
+  }
+
+fn __str_eq(a: String, b: String) -> Bool = {
+  let ha = prim.handle(a)
+  let hb = prim.handle(b)
+  let la = prim.load32(ha + 4)
+  let lb = prim.load32(hb + 4)
+  if la != lb then false
+  else __str_eq_bytes(ha + 12, hb + 12, la, 0)
+}
+
+// Is string x already among the first `count` elements of the set block sh? Each element is read
+// as a BORROW (prim.load_str — the set keeps owning it) and compared by bytes.
+fn __set_has_str(sh: Int, count: Int, x: String, i: Int) -> Bool =
+  if i >= count then false
+  else {
+    let e = prim.load_str(sh + 12 + i * 8)
+    let eq = __str_eq(e, x)
+    if eq then true
+    else __set_has_str(sh, count, x, i + 1)
+  }
+
+// Append each not-yet-present element of list xh (length xlen) into the set block sh as a fresh
+// DEEP COPY, growing the unique count w. Returns the final unique count.
+fn __set_str_fill(xh: Int, xlen: Int, sh: Int, i: Int, w: Int) -> Int =
+  if i >= xlen then w
+  else {
+    let x = prim.load_str(xh + 12 + i * 8)
+    let present = __set_has_str(sh, w, x, 0)
+    if present then __set_str_fill(xh, xlen, sh, i + 1, w)
+    else {
+      let copy = string.repeat(x, 1)
+      prim.store_str(sh + 12 + w * 8, copy)
+      __set_str_fill(xh, xlen, sh, i + 1, w + 1)
+    }
+  }
+
+fn set_from_list_str(xs: List[String]) -> Set[String] = {
+  let xh = prim.handle(xs)
+  let xlen = prim.load32(xh + 4)
+  let s = prim.alloc_set_str(xlen)
+  let sh = prim.handle(s)
+  let u = __set_str_fill(xh, xlen, sh, 0, 0)
+  prim.store32(sh + 4, u)
+  s
+}
+
+fn set_contains_str(s: Set[String], x: String) -> Bool = {
+  let sh = prim.handle(s)
+  let len = prim.load32(sh + 4)
+  __set_has_str(sh, len, x, 0)
+}
+
+// Copy each element of the set into a fresh List[String] as a DEEP COPY (so the returned list owns
+// its elements independently of the set).
+fn __set_to_list_str_fill(sh: Int, oh: Int, len: Int, i: Int) -> Int =
+  if i >= len then 0
+  else {
+    let e = prim.load_str(sh + 12 + i * 8)
+    let copy = string.repeat(e, 1)
+    prim.store_str(oh + 12 + i * 8, copy)
+    __set_to_list_str_fill(sh, oh, len, i + 1)
+  }
+
+fn set_to_list_str(s: Set[String]) -> List[String] = {
+  let sh = prim.handle(s)
+  let len = prim.load32(sh + 4)
+  let out = prim.alloc_list_str(len)
+  let oh = prim.handle(out)
+  let _x = __set_to_list_str_fill(sh, oh, len, 0)
+  out
+}

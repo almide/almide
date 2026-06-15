@@ -53,12 +53,13 @@ impl LowerCtx {
                 .lower_prim_call(func, args)?
                 .ok_or_else(|| LowerError::Unsupported(format!("prim.{func} yields no value here")));
         }
+        let arg_tys: Vec<Ty> = args.iter().map(|a| a.ty.clone()).collect();
         let lowered = self.lower_pure_module_call_args(module, func, args)?;
         let dst = self.fresh_value();
         let repr = repr_of(result_ty)?;
         self.ops.push(Op::CallFn {
             dst: Some(dst),
-            name: list_heap_call_name(module, func, result_ty),
+            name: list_heap_call_name(module, func, &arg_tys, result_ty),
             args: lowered,
             result: Some(repr),
         });
@@ -787,7 +788,7 @@ impl LowerCtx {
         // physically identical to alloc_list) — but the dst is tracked as a NESTED-OWNERSHIP
         // list, so its scope-end drop is a recursive `DropListStr` (frees the owned element
         // Strings) and `prim.store_str` Consumes each String moved into it (Machinery 2).
-        if func == "alloc_list_str" {
+        if func == "alloc_list_str" || func == "alloc_set_str" {
             let len_v = self.lower_scalar_value(&args[0]).ok_or_else(|| {
                 LowerError::Unsupported("prim.alloc_list_str length is not a lowerable scalar".into())
             })?;

@@ -259,8 +259,10 @@ pub(crate) struct LowerCtx {
 pub(crate) fn is_heap_elem_list_ty(ty: &Ty) -> bool {
     use almide_lang::types::constructor::TypeConstructorId;
     match ty {
-        // `List[heap]` / `Option[heap]` — a single heap element slot (DynListStr nested ownership).
-        Ty::Applied(TypeConstructorId::List | TypeConstructorId::Option, args)
+        // `List[heap]` / `Option[heap]` / `Set[heap]` — heap element slots (DynListStr nested
+        // ownership). A `Set[heap]` is physically a `List[heap]` of unique elements, so the SAME
+        // recursive free applies (each owned element + the block).
+        Ty::Applied(TypeConstructorId::List | TypeConstructorId::Option | TypeConstructorId::Set, args)
             if args.len() == 1 && is_heap_ty(&args[0]) =>
         {
             true
@@ -691,7 +693,7 @@ pub(crate) fn is_self_host_option_module_fn(module: &str, func: &str) -> bool {
 /// → `list.map_str`, a DynListStr-result impl). The element repr (i64 vs i32 handle) demands a
 /// separate variant; the variant reads/writes via the heap-aware prim ops. Scalar-result lists keep
 /// the plain name. `module.func` is unchanged for everything else.
-pub(crate) fn list_heap_call_name(module: &str, func: &str, result_ty: &Ty) -> String {
+pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], result_ty: &Ty) -> String {
     use almide_lang::types::constructor::TypeConstructorId;
     if module == "list" {
         // List[heap]-RETURNING combinators (the result is a new heap-element list).
@@ -707,6 +709,26 @@ pub(crate) fn list_heap_call_name(module: &str, func: &str, result_ty: &Ty) -> S
             if let Ty::Applied(TypeConstructorId::Option, args) = result_ty {
                 if args.len() == 1 && is_heap_ty(&args[0]) {
                     return format!("list.{func}_str");
+                }
+            }
+        }
+    }
+    if module == "set" {
+        // `Set[heap]`-RETURNING constructors key on the RESULT element type; `set.to_list` over a
+        // `Set[heap]` returns a `List[heap]`; the predicate `set.contains` keys on its SUBJECT
+        // (arg 0) element type (its result is Bool). Each routes to the heap-element `_str` variant.
+        let result_is_heap_container = matches!(
+            result_ty,
+            Ty::Applied(TypeConstructorId::Set | TypeConstructorId::List, a)
+                if a.len() == 1 && is_heap_ty(&a[0])
+        );
+        if matches!(func, "from_list" | "to_list") && result_is_heap_container {
+            return format!("set.{func}_str");
+        }
+        if func == "contains" {
+            if let Some(Ty::Applied(TypeConstructorId::Set, a)) = arg_tys.first() {
+                if a.len() == 1 && is_heap_ty(&a[0]) {
+                    return "set.contains_str".to_string();
                 }
             }
         }

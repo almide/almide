@@ -1547,6 +1547,46 @@
     }
 
     #[test]
+    fn self_hosted_set_string() {
+        // SELF-HOSTED Set[String] (heap-element / nested-ownership set, DynListStr; dedup via byte
+        // string equality __str_eq; deep-copied elements). The repr-poly dispatch routes set.from_list
+        // /contains/to_list over a Set[String] to the _str variant. from_list(["apple","banana",
+        // "apple","cherry","banana"])={apple,banana,cherry} len 3; contains("banana")=true,
+        // ("grape")=false; to_list first="apple". Byte-matches v0.
+        let src = "fn main() -> Unit = {\n  \
+            let xs = string.split(\"apple,banana,apple,cherry,banana\", \",\")\n  \
+            let s = set.from_list(xs)\n  println(int.to_string(set.len(s)))\n  \
+            let ca = set.contains(s, \"banana\")\n  if ca then println(\"has-banana\") else println(\"no\")\n  \
+            let cb = set.contains(s, \"grape\")\n  if cb then println(\"has-grape\") else println(\"no\")\n  \
+            let ys = set.to_list(s)\n  println(int.to_string(list.len(ys)))\n  \
+            let first = list.get(ys, 0)\n  match first { Some(v) => println(v), None => println(\"none\"), } }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "set.from_list_str"));
+        assert!(prog.functions.iter().any(|f| f.name == "set.contains_str"));
+        if let Some(out) = build_and_run("self_hosted_set_string", &render_wasm_program(&prog)) {
+            assert_eq!(out, "3\nhas-banana\nno\n3\napple");
+        }
+    }
+
+    #[test]
+    fn self_hosted_set_string_loop_reclaims() {
+        // SOUNDNESS for the Set[String] nested-ownership path: a bounded loop building + dropping a
+        // fresh Set[String] each iteration must reclaim each element String + the block (DropListStr)
+        // — no leak (OOM) / double-free (trap). 3000 iterations, prints the last set's len (2).
+        let src = "fn main() -> Unit = {\n  \
+            var i = 0\n  var last = 0\n  \
+            while i < 3000 {\n    \
+              let s = set.from_list(string.split(\"xx,yy,xx\", \",\"))\n    \
+              last = set.len(s)\n    \
+              i = i + 1\n  }\n  \
+            println(int.to_string(last)) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("self_hosted_set_string_loop_reclaims", &render_wasm_program(&prog)) {
+            assert_eq!(out, "2");
+        }
+    }
+
+    #[test]
     fn self_hosted_map_core_loop_reclaims() {
         // SOUNDNESS for the new Map[Int,Int] heap path: a bounded loop building + dropping a
         // fresh Map every iteration must reclaim each (plain non-nested drop) — no leak/double-free.

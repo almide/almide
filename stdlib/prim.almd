@@ -114,6 +114,13 @@ fn alloc_value(slots: Int) -> Value = _
 @intrinsic("almide_rt_prim_alloc_list_str")
 fn alloc_list_str[A](n: Int) -> List[A] = _
 
+// Allocate a runtime-sized OWNED `Set[A]` of `n` NESTED-ownership slots — physically IDENTICAL to
+// `alloc_list_str` (DynListStr; each slot an owned heap handle, freed recursively via DropListStr),
+// but typed Set[A] so a heap-element set builder (Set[String]) can return it. Fill via store_str
+// (which MOVES each owned element in); over-alloc `n`, patch the len field to the unique count.
+@intrinsic("almide_rt_prim_alloc_list_str")
+fn alloc_set_str[A](n: Int) -> Set[A] = _
+
 // Store heap `piece`'s handle at the slot byte-address `addr` AND CONSUME `piece` (its ownership
 // MOVES into the list). After this the piece is dead in the caller — the list owns it and frees it
 // on its recursive drop. (`addr` = handle(list) + 12 + i*8.) Generic over any heap element type.
