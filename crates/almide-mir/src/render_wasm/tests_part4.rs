@@ -1261,6 +1261,29 @@
     }
 
     #[test]
+    fn self_hosted_list_flatten() {
+        // SELF-HOSTED list.flatten: List[List[Int]] -> List[Int], concatenating sublists. The nested
+        // input is built via prim.alloc_list_str + prim.store_str (now generic over the heap element
+        // type, here List[Int]). flatten([[1,2],[3,4,5]]) = [1,2,3,4,5]: len 5, sum 15, [0]=1, [4]=5.
+        let src = "fn mk() -> List[List[Int]] = {\n  \
+            let outer: List[List[Int]] = prim.alloc_list_str(2)\n  \
+            let a = list.range(1, 3)\n  let b = list.range(3, 6)\n  \
+            let oh = prim.handle(outer)\n  \
+            prim.store_str(oh + 12, a)\n  prim.store_str(oh + 20, b)\n  outer\n}\n\
+                   fn main() -> Unit = {\n  \
+            let nested = mk()\n  let flat = list.flatten(nested)\n  \
+            println(int.to_string(list.len(flat)))\n  \
+            println(int.to_string(list.sum(flat)))\n  \
+            println(int.to_string(list.get_or(flat, 0, 0)))\n  \
+            println(int.to_string(list.get_or(flat, 4, 0))) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "list.flatten"));
+        if let Some(out) = build_and_run("self_hosted_list_flatten", &render_wasm_program(&prog)) {
+            assert_eq!(out, "5\n15\n1\n5");
+        }
+    }
+
+    #[test]
     fn self_hosted_option_flatten() {
         // SELF-HOSTED option.flatten(o) = o.flatten(): Some(inner) → inner, None → None. The outer
         // Option[Option[Int]] is built via `Some(list.first/get(..))` (the new heap-`Some` materialize),

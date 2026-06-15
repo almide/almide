@@ -75,14 +75,16 @@ fn alloc_list(n: Int) -> List[Int] = _
 // Allocate a runtime-sized OWNED `List[String]` of `n` slots (Machinery 2: a NESTED-
 // ownership list). Fill via `store_str`, which MOVES each owned String into a slot; the
 // whole list is freed recursively (each element String + the block) at scope end.
+// Generic over the heap element type `A` (String, but also List[Int] for a List[List[Int]], etc.)
+// — the block is the same DynListStr (each slot a heap handle, freed recursively).
 @intrinsic("almide_rt_prim_alloc_list_str")
-fn alloc_list_str(n: Int) -> List[String] = _
+fn alloc_list_str[A](n: Int) -> List[A] = _
 
-// Store String `piece`'s handle at the slot byte-address `addr` AND CONSUME `piece` (its
-// ownership MOVES into the list). After this the piece is dead in the caller — the list owns
-// it and frees it on its recursive drop. (`addr` = handle(list) + 12 + i*8.)
+// Store heap `piece`'s handle at the slot byte-address `addr` AND CONSUME `piece` (its ownership
+// MOVES into the list). After this the piece is dead in the caller — the list owns it and frees it
+// on its recursive drop. (`addr` = handle(list) + 12 + i*8.) Generic over any heap element type.
 @intrinsic("almide_rt_prim_store_str")
-fn store_str(addr: Int, piece: String) -> Unit = _
+fn store_str[A](addr: Int, piece: A) -> Unit = _
 
 // The fd_write WASI host call — the only sandbox exit (reaches Stdout). Returns the
 // errno. `iov` points at an iovec array of `count` {ptr,len} pairs; `nw` receives
