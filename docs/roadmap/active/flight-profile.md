@@ -226,10 +226,12 @@ Almide 飛行サブセット            counted loop / no-alloc-in-loop / static
 ### 7.3 現在地(正直なマーカー)
 
 - **G-F0**: 🔄 進行中 ── self-host stdlib で実行パリティを登攀中(string/list/math を Almide 化)
-- **G-F1〜F3**: 📐 設計済み・未実装 ── 本書 §3/§4 のキーストーン2本が**最大の技術的山**
-- **G-F4〜F6**: ⬜ 未着手
+- **G-F1**: 📐 規範仕様あり・未強制 ── [flight-subset-spec](flight-subset-spec.md)(特徴分類・open question 決着・`@flight` 強制設計)
+- **G-F2/G-F3**: 📐 設計済み・未実装 ── 本書 §3/§4 のキーストーン2本が**最大の技術的山**([flight-wcet-loops](flight-wcet-loops.md) / [flight-rust-ferrocene](flight-rust-ferrocene.md))
+- **G-F4**: 📐 設計済み・未実装 ── [flight-reference-app](flight-reference-app.md)(PID 制御則カーネル + make verify 7 段 + receipt。Slice 0 は今 green)
+- **G-F5/G-F6**: 📐 設計済み・未着手 ── [flight-qualification](flight-qualification.md)(DO-178C/330/333 マッピング + 資格化キット)
 
-→ ラダー上、**まだ G-F0 の途中**。クリティカルパス = G-F0 完遂 → キーストーン(あ)(い) → リファレンスアプリ → ドシエ種 + キット定義。
+→ ラダー上、**まだ G-F0 の途中**(全 gate に設計はついた)。クリティカルパス = G-F0 完遂 → キーストーン(あ)(い) → リファレンスアプリ → ドシエ種 + キット定義。**全 gate が「未着手」から「設計済み・未実装」に上がった**(7 gate 全てに具体設計文書)。
 
 ### 7.4 「近い」に**不要**(誇張防止・後回し)
 
@@ -263,8 +265,11 @@ Almide 飛行サブセット            counted loop / no-alloc-in-loop / static
 
 ## 9. 関連
 
-- [flight-wcet-loops](flight-wcet-loops.md) ── **キーストーン(あ) G-F1/G-F2 の具体実装設計**(counted loop + Coq 持ち上げ + 確保上限)
+- [flight-subset-spec](flight-subset-spec.md) ── **G-F1 規範仕様**(飛行サブセットの特徴 IN/OUT・open question 決着・`@flight` 強制)
+- [flight-wcet-loops](flight-wcet-loops.md) ── **キーストーン(あ) G-F2 の具体実装設計**(counted loop + Coq 持ち上げ + 確保上限)
 - [flight-rust-ferrocene](flight-rust-ferrocene.md) ── **キーストーン(い) G-F3 の具体実装設計**(本番 MIR→Rust + rust_pattern 忠実性)
+- [flight-reference-app](flight-reference-app.md) ── **G-F4**(PID 制御則カーネル + make verify 7 段 + receipt)
+- [flight-qualification](flight-qualification.md) ── **G-F5/G-F6**(DO-178C/330/333 マッピング + 資格化キット)
 - [v1-proof-architecture](v1-proof-architecture.md) ── PCC スパインの着地形、Gap 1/2
 - [certificate-format-v1](certificate-format-v1.md) ── i/a/d/m/r/b 所有権アルファベット
 - [v1-mir-architecture](v1-mir-architecture.md) ── §1 wasm 主権・§9 却下案(§4.4 で和解)
