@@ -1,14 +1,21 @@
 # v1 stdlib self-host — the machinery phase (Option / List-building / closures)
 
-Status: **14 clean functions self-hosted (read/scalar/range/byte-copy, all cert-untouching,
-corpus-wall ACCEPT every commit). The remaining NAMED functions need EXECUTION-MODEL
-machinery** — each a cert-touching slice that warrants the adversarial pass the goal mandates.
-This records the de-risked designs so they are implemented from a settled plan, not improvised
-at the end of a long session.
+Status: **~28 functions self-hosted + executing = v0 (corpus-wall ACCEPT 13139/4083/3582
+every commit). The Option match-execution machinery is DONE; the campaign is now in clean
+batch-production (string/list scalar/read predicates) with the Option-returning fns reusing
+the materialized-Option layout.** Goal `/goal`: run until ALL ~381 v0 stdlib fns execute
+byte-for-byte. This records the de-risked designs so harder slices are implemented from a
+settled plan.
 
-## Done (self-hosted + executing = v0)
-int.to_string, print_str(println), string.len/repeat/is_empty/slice/trim,
-math.abs/max/min, list.len/is_empty/sum/get_or. The string pattern: read header
+## Done (self-hosted + executing = v0) — ~28 fns
+- **core**: int.to_string, print_str(println)
+- **string**: len, repeat, is_empty, slice, trim, starts_with, ends_with, contains, count,
+  index_of (Option, codepoint), last_index_of (Option, codepoint)
+- **math**: abs, max, min
+- **list**: len, is_empty, sum, get_or, get (Option), first (Option), last (Option),
+  contains, index_of (Option), product, max (Option), min (Option)
+
+The string pattern: read header
 (`handle(s)+4`=byte-len, `+12`=data) via prim.load8/32, build via prim.alloc_str+store8,
 recursion for loops. The list pattern: `+4`=element count, `+12`=8-byte i64 slots
 (prim.load64). Registry groups by file: `self_host_runtime() = &[(source, &[(impl_fn,
