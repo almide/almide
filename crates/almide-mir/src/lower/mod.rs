@@ -656,10 +656,14 @@ pub(crate) fn alloc_init(value: &IrExpr) -> Init {
         return Init::Str(value.clone());
     }
     if let IrExprKind::List { elements } = &value.kind {
+        // A list of scalar literals materializes its slots: an Int element stores its value, a
+        // Float element stores its f64 BITS (the i64-uniform Float repr — a `List[Float]` slot
+        // is read back via load64 + ffrombits). A mixed/non-literal list stays Opaque.
         let ints: Option<Vec<i64>> = elements
             .iter()
             .map(|e| match &e.kind {
                 IrExprKind::LitInt { value } => Some(*value),
+                IrExprKind::LitFloat { value } => Some(value.to_bits() as i64),
                 _ => None,
             })
             .collect();

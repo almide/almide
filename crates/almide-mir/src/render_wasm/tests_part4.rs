@@ -796,6 +796,24 @@
     }
 
     #[test]
+    fn list_float_literal_materializes_its_element_bits() {
+        // A `List[Float]` LITERAL now materializes its slots (alloc_init maps a LitFloat element to
+        // its f64 BITS, the i64-uniform Float repr) — previously such a list silently lowered to an
+        // empty/Opaque block (len 0), a latent miscompile. Read back via prim.load64 + ffrombits:
+        // len 3, xs[1] = 20.0 -> float.to_int 20, xs[2] = 30.0 -> 30. The lowering floor that a
+        // future List[Float] stdlib fn will read.
+        let src = "fn main() -> Unit = {\n  \
+            let xs = [10.0, 20.0, 30.0]\n  let h = prim.handle(xs)\n  \
+            println(int.to_string(prim.load32(h + 4)))\n  \
+            let e1 = prim.ffrombits(prim.load64(h + 12 + 8))\n  println(int.to_string(float.to_int(e1)))\n  \
+            let e2 = prim.ffrombits(prim.load64(h + 12 + 16))\n  println(int.to_string(float.to_int(e2))) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("list_float_literal_materializes", &render_wasm_program(&prog)) {
+            assert_eq!(out, "3\n20\n30");
+        }
+    }
+
+    #[test]
     fn self_hosted_math_pi_e() {
         // SELF-HOSTED math.pi / math.e — the f64 constants (declared `= _` in stdlib/math.almd).
         // Verified via float.to_int(const * 1000): pi -> 3141, e -> 2718. Byte-matches v0.
@@ -935,6 +953,9 @@
             assert_eq!(out, "4\n2\n3\n3\n5\n0");
         }
     }
+
+
+
 
 
 
