@@ -638,7 +638,12 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
         ),
         (
             include_str!("../../../stdlib/list_modify.almd"),
-            &[("list_set", "list.set"), ("list_swap", "list.swap")],
+            &[
+                ("list_set", "list.set"),
+                ("list_swap", "list.swap"),
+                ("list_insert", "list.insert"),
+                ("list_remove_at", "list.remove_at"),
+            ],
         ),
         (include_str!("../../../stdlib/list_len.almd"), &[("list_len", "list.len")]),
         (include_str!("../../../stdlib/list_is_empty.almd"), &[("list_is_empty", "list.is_empty")]),
@@ -2651,6 +2656,25 @@ mod tests {
         assert!(prog.functions.iter().any(|f| f.name == "string.slice"));
         if let Some(out) = build_and_run("string_slice", &render_wasm_program(&prog)) {
             assert_eq!(out, "ell\n日本");
+        }
+    }
+
+    #[test]
+    fn self_hosted_list_insert_and_remove_at() {
+        // list.insert/remove_at self-hosted: length-changing List[Int] copies. insert at a
+        // clamped index, remove a valid index (else unchanged). insert([1,2,3],1,9) =
+        // [1,9,2,3] (len 4, [1]=9); insert([1,2],9,7) appends ([2]=7, len 3);
+        // remove_at([4,5,6,7],1) = [4,6,7] ([1]=6, len 3); remove_at([8,9],5) unchanged.
+        let src = "fn main() -> Unit = {\n  \
+            let a = list.insert([1, 2, 3], 1, 9)\n  let a1 = list.get_or(a, 1, 0)\n  let la = list.len(a)\n  let sa = int.to_string(a1)\n  println(sa)\n  let sla = int.to_string(la)\n  println(sla)\n  \
+            let b = list.insert([1, 2], 9, 7)\n  let b2 = list.get_or(b, 2, 0)\n  let sb = int.to_string(b2)\n  println(sb)\n  \
+            let c = list.remove_at([4, 5, 6, 7], 1)\n  let c1 = list.get_or(c, 1, 0)\n  let lc = list.len(c)\n  let sc = int.to_string(c1)\n  println(sc)\n  let slc = int.to_string(lc)\n  println(slc)\n  \
+            let d = list.remove_at([8, 9], 5)\n  let ld = list.len(d)\n  let sld = int.to_string(ld)\n  println(sld) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "list.insert"));
+        assert!(prog.functions.iter().any(|f| f.name == "list.remove_at"));
+        if let Some(out) = build_and_run("list_modify2", &render_wasm_program(&prog)) {
+            assert_eq!(out, "9\n4\n7\n6\n3\n2");
         }
     }
 
