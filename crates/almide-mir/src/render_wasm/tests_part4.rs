@@ -83,6 +83,24 @@
     }
 
     #[test]
+    fn self_hosted_list_any_all() {
+        // SELF-HOSTED `list.any` / `list.all` (predicate → Bool, short-circuiting). any([1,2,
+        // 3], x>2)=true, any(_, x>9)=false; all([2,4,6], even)=true, all([2,3,4], even)=false.
+        // The predicate is a lifted lambda invoked via CallIndirect. Booleans printed as 1/0.
+        let src = "fn main() -> Unit = {\n  \
+            let a1 = list.any([1, 2, 3], (x) => x > 2)\n  let n1 = if a1 then 1 else 0\n  println(int.to_string(n1))\n  \
+            let a2 = list.any([1, 2, 3], (x) => x > 9)\n  let n2 = if a2 then 1 else 0\n  println(int.to_string(n2))\n  \
+            let b1 = list.all([2, 4, 6], (x) => x % 2 == 0)\n  let n3 = if b1 then 1 else 0\n  println(int.to_string(n3))\n  \
+            let b2 = list.all([2, 3, 4], (x) => x % 2 == 0)\n  let n4 = if b2 then 1 else 0\n  println(int.to_string(n4)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "list.any"));
+        assert!(prog.functions.iter().any(|f| f.name == "list.all"));
+        if let Some(out) = build_and_run("self_hosted_list_any_all", &render_wasm_program(&prog)) {
+            assert_eq!(out, "1\n0\n1\n0");
+        }
+    }
+
+    #[test]
     fn self_hosted_list_take_end_drop_end() {
         // list.take_end/drop_end self-hosted: last n / all-but-last n, List[Int] slot-copy.
         // take_end([1,2,3,4,5],2)=[4,5] ([0]=4,len 2); drop_end([1,2,3,4,5],2)=[1,2,3]
