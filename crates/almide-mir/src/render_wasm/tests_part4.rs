@@ -1793,6 +1793,28 @@
     }
 
     #[test]
+    fn self_hosted_map_string_string_keys_values_remove() {
+        // SELF-HOSTED Map[String,String] keys/values/remove. m={a:x, b:y, c:z}: keys=[a,b,c] (first
+        // "a"), values=[x,y,z] (first "x"); remove("b")={a:x, c:z} len 2, get("b")=None, get("c")="z".
+        let src = "fn main() -> Unit = {\n  \
+            let m1 = map.set(map.new(), \"a\", \"x\")\n  let m2 = map.set(m1, \"b\", \"y\")\n  \
+            let m = map.set(m2, \"c\", \"z\")\n  \
+            let ks = map.keys(m)\n  println(int.to_string(list.len(ks)))\n  \
+            let k0 = list.get(ks, 0)\n  match k0 { Some(v) => println(v), None => println(\"none\"), }\n  \
+            let vs = map.values(m)\n  let v0 = list.get(vs, 0)\n  \
+            match v0 { Some(v) => println(v), None => println(\"none\"), }\n  \
+            let r = map.remove(m, \"b\")\n  println(int.to_string(map.len(r)))\n  \
+            let gb = map.get(r, \"b\")\n  match gb { Some(v) => println(v), None => println(\"none\"), }\n  \
+            let gc = map.get(r, \"c\")\n  match gc { Some(v) => println(v), None => println(\"none\"), } }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "map.keys_str"));
+        assert!(prog.functions.iter().any(|f| f.name == "map.remove_str"));
+        if let Some(out) = build_and_run("self_hosted_map_string_string_keys_values_remove", &render_wasm_program(&prog)) {
+            assert_eq!(out, "3\na\nx\n2\nnone\nz");
+        }
+    }
+
+    #[test]
     fn self_hosted_map_string_string_loop_reclaims() {
         // SOUNDNESS for the Map[String,String] nested-ownership path: a bounded loop building +
         // dropping a fresh Map[String,String] each iteration must reclaim every key + value String +

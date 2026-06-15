@@ -116,3 +116,67 @@ fn map_set_str(m: Map[String, String], k: String, v: String) -> Map[String, Stri
   prim.store32(rh + 4, rslots)
   r
 }
+
+// map.keys / map.values — extract each entry's key (even slot) / value (odd slot) into a fresh
+// List[String], deep-copied so the list owns them independently of the map.
+fn __mkeys_fill(sh: Int, oh: Int, entries: Int, i: Int) -> Int =
+  if i >= entries then 0
+  else {
+    let k = prim.load_str(sh + 12 + i * 16)
+    let _c = __store_copy(oh + 12 + i * 8, k)
+    __mkeys_fill(sh, oh, entries, i + 1)
+  }
+
+fn map_keys_str(m: Map[String, String]) -> List[String] = {
+  let h = prim.handle(m)
+  let n = prim.load32(h + 4)
+  let entries = n / 2
+  let out = prim.alloc_list_str(entries)
+  let oh = prim.handle(out)
+  let _x = __mkeys_fill(h, oh, entries, 0)
+  out
+}
+
+fn __mvalues_fill(sh: Int, oh: Int, entries: Int, i: Int) -> Int =
+  if i >= entries then 0
+  else {
+    let v = prim.load_str(sh + 12 + i * 16 + 8)
+    let _c = __store_copy(oh + 12 + i * 8, v)
+    __mvalues_fill(sh, oh, entries, i + 1)
+  }
+
+fn map_values_str(m: Map[String, String]) -> List[String] = {
+  let h = prim.handle(m)
+  let n = prim.load32(h + 4)
+  let entries = n / 2
+  let out = prim.alloc_list_str(entries)
+  let oh = prim.handle(out)
+  let _x = __mvalues_fill(h, oh, entries, 0)
+  out
+}
+
+// map.remove — copy every entry EXCEPT the one keyed k (preserving survivors' order); deep copies.
+fn __mremove_fill(sh: Int, rh: Int, entries: Int, k: String, i: Int, w: Int) -> Int =
+  if i >= entries then w
+  else {
+    let kk = prim.load_str(sh + 12 + i * 16)
+    let eq = __str_eq(kk, k)
+    if eq then __mremove_fill(sh, rh, entries, k, i + 1, w)
+    else {
+      let _kc = __store_copy(rh + 12 + w * 16, kk)
+      let vv = prim.load_str(sh + 12 + i * 16 + 8)
+      let _vc = __store_copy(rh + 12 + w * 16 + 8, vv)
+      __mremove_fill(sh, rh, entries, k, i + 1, w + 1)
+    }
+  }
+
+fn map_remove_str(m: Map[String, String], k: String) -> Map[String, String] = {
+  let sh = prim.handle(m)
+  let n = prim.load32(sh + 4)
+  let entries = n / 2
+  let r = prim.alloc_map_str(n)
+  let rh = prim.handle(r)
+  let w = __mremove_fill(sh, rh, entries, k, 0, 0)
+  prim.store32(rh + 4, w * 2)
+  r
+}
