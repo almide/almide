@@ -1,0 +1,21 @@
+// list_map — SELF-HOSTED `list.map` for v1 over the prim floor + the closures machinery.
+// Build a fresh List[Int] of the same length (prim.alloc_list) and fill slot i with
+// f(xs[i]), invoking the closure `f` via CallIndirect through its table slot. List[Int]
+// → List[Int] (scalar i64 elements; a value-returning map needs no nested-heap RC). The
+// result is owned rc=1; the source is only read (borrowed), so nothing leaks.
+
+fn __map_fill(dh: Int, sh: Int, f: (Int) -> Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let x = prim.load64(sh + 12 + i * 8)
+    let y = f(x)
+    prim.store64(dh + 12 + i * 8, y)
+    __map_fill(dh, sh, f, n, i + 1)
+  }
+
+fn list_map(xs: List[Int], f: (Int) -> Int) -> List[Int] = {
+  let n = list.len(xs)
+  let buf = prim.alloc_list(n)
+  let _x = __map_fill(prim.handle(buf), prim.handle(xs), f, n, 0)
+  buf
+}

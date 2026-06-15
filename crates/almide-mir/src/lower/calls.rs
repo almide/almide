@@ -85,10 +85,23 @@ impl LowerCtx {
                 "effectful/impure stdlib Module call {module}.{func} needs a declared capability not in this brick"
             )));
         }
-        let mut regular: Vec<IrExpr> = Vec::new();
+        let mut out: Vec<CallArg> = Vec::with_capacity(args.len());
         for a in args {
             match &a.kind {
-                IrExprKind::Lambda { body, .. } => self.record_elided_calls(body),
+                // A NON-CAPTURING lambda ARGUMENT to a pure combinator (`list.map(xs, (x) =>
+                // …)`): LIFT it and PASS its FuncRef table slot BY VALUE, so a SELF-HOSTED
+                // combinator (auto-linked `list.map`/`filter`/`fold`) receives a real
+                // callable closure and invokes it via CallIndirect. A CAPTURING lambda has no
+                // liftable form, so it keeps the builtin-combinator model: its calls are
+                // captured for the caps fold and the value is DROPPED (a builtin combinator
+                // that is never self-host-linked ignores the extra arg — its name is
+                // is_known_free, no body to mismatch). The lifted lambda's caps reach this
+                // function through the FuncRef edge (folded at creation), so a printing
+                // closure can never be silently caps-verified.
+                IrExprKind::Lambda { params, body, .. } => match self.lift_lambda(params, body) {
+                    Some(slot) => out.push(CallArg::Scalar(slot)),
+                    None => self.record_elided_calls(body),
+                },
                 IrExprKind::ClosureCreate { func_name, .. } => self.ops.push(Op::CallFn {
                     dst: None,
                     name: func_name.as_str().to_string(),
@@ -106,10 +119,12 @@ impl LowerCtx {
                         "Module call {module}.{func} with an opaque function-value argument (capabilities unanalyzable) not in this brick"
                     )))
                 }
-                _ => regular.push(a.clone()),
+                // A regular (non-closure) argument — lower it with the same per-arg machinery
+                // as any call, preserving argument ORDER among the closure slots.
+                _ => out.extend(self.lower_call_args(std::slice::from_ref(a))?),
             }
         }
-        self.lower_call_args(&regular)
+        Ok(out)
     }
 
     /// Lower a pure `Module` COMBINATOR applied for its EFFECT (`list.each(xs, f)` in
@@ -340,6 +355,13 @@ impl LowerCtx {
         let mut out = Vec::with_capacity(args.len());
         for a in args {
             let arg = match &a.kind {
+                // A FUNCTION-typed var (`f` passed on to `__map_fill(…, f, …)`) is a SCALAR
+                // table slot, NOT a borrowed heap handle — pass it by value so the callee can
+                // CallIndirect through it. (Its `Ty::Fn` is_heap, so it must precede the heap
+                // Var arm.) This threads a closure through nested self-host helpers.
+                IrExprKind::Var { id } if matches!(a.ty, Ty::Fn { .. }) => {
+                    CallArg::Scalar(self.value_or_global(*id)?)
+                }
                 IrExprKind::Var { id } if is_heap_ty(&a.ty) => CallArg::Handle(self.value_or_global(*id)?),
                 IrExprKind::Var { id } => CallArg::Scalar(self.value_or_global(*id)?),
                 IrExprKind::LitInt { value } => CallArg::Imm(*value),

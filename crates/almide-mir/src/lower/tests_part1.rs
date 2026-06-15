@@ -252,19 +252,31 @@
                 ),
             ),
         ]);
-        let mir = lower_body(&b, "main").expect("higher-order pure combinator with a lambda lowers");
-        // The closure body's call `f` is captured as a marker; the HOF result is a
-        // fresh owned list (CallFn `list.map`).
+        let all =
+            lower_body_all(&b, "main").expect("higher-order pure combinator with a lambda lowers");
+        let main = &all[0];
+        // The non-capturing closure is LIFTED: a `__lambda_*` aux holds its body's `f` call
+        // (so `f`'s caps still reach the witness — now via the FuncRef edge, not an in-main
+        // marker), and main binds it via Op::FuncRef and passes its slot to `list.map`.
         assert!(
-            mir.ops.iter().any(|o| matches!(o, Op::CallFn { dst: None, name, .. } if name == "f")),
-            "closure body call captured as a marker: {:?}",
-            mir.ops
+            all[1..]
+                .iter()
+                .any(|fnc| fnc.name.starts_with("__lambda_")
+                    && fnc.ops.iter().any(|o| matches!(o, Op::CallFn { name, .. } if name == "f"))),
+            "the closure body call `f` lives in the lifted lambda: {all:?}"
         );
         assert!(
-            mir.ops.iter().any(|o| matches!(o, Op::CallFn { dst: Some(_), name, .. } if name == "list.map")),
+            main.ops.iter().any(|o| matches!(o, Op::FuncRef { .. })),
+            "main binds the lifted lambda via FuncRef: {:?}",
+            main.ops
+        );
+        assert!(
+            main.ops.iter().any(|o| matches!(o, Op::CallFn { dst: Some(_), name, .. } if name == "list.map")),
             "the HOF result is a fresh owned value",
         );
-        assert_eq!(verify_ownership(&mir), Ok(()));
+        for fnc in &all {
+            assert_eq!(verify_ownership(fnc), Ok(()));
+        }
     }
 
     #[test]
@@ -298,17 +310,30 @@
             bind(0, list_int(), ir_expr(IrExprKind::List { elements: vec![] }, list_int())),
             stmt(IrStmtKind::Expr { expr: each }),
         ]);
-        let mir = lower_body(&b, "main").expect("effect-position combinator lowers");
+        let all = lower_body_all(&b, "main").expect("effect-position combinator lowers");
+        let main = &all[0];
+        // The non-capturing closure LIFTS: its `f` call lives in the lifted lambda (caps
+        // still reach the witness via the FuncRef edge), and main passes the slot to
+        // `list.each` and binds it via FuncRef.
         assert!(
-            mir.ops.iter().any(|o| matches!(o, Op::CallFn { dst: None, name, .. } if name == "f")),
-            "closure body call captured as a marker: {:?}",
-            mir.ops
+            all[1..]
+                .iter()
+                .any(|fnc| fnc.name.starts_with("__lambda_")
+                    && fnc.ops.iter().any(|o| matches!(o, Op::CallFn { name, .. } if name == "f"))),
+            "the closure body call `f` lives in the lifted lambda: {all:?}"
         );
         assert!(
-            mir.ops.iter().any(|o| matches!(o, Op::CallFn { name, .. } if name == "list.each")),
+            main.ops.iter().any(|o| matches!(o, Op::FuncRef { .. })),
+            "main binds the lifted lambda via FuncRef: {:?}",
+            main.ops
+        );
+        assert!(
+            main.ops.iter().any(|o| matches!(o, Op::CallFn { name, .. } if name == "list.each")),
             "the Unit-result combinator is emitted",
         );
-        assert_eq!(verify_ownership(&mir), Ok(()));
+        for fnc in &all {
+            assert_eq!(verify_ownership(fnc), Ok(()));
+        }
     }
 
     #[test]

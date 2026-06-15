@@ -41,6 +41,27 @@
     }
 
     #[test]
+    fn self_hosted_list_map() {
+        // SELF-HOSTED `list.map` (the first higher-order stdlib fn). list.map([1,2,3,4],
+        // (x) => x * x) builds [1,4,9,16] over the prim floor: a fresh List[Int], each slot
+        // filled with f(elem) invoked via CallIndirect through the lifted lambda's slot.
+        // Byte-matches v0 (sum + a sampled element confirm the contents).
+        let src = "fn main() -> Unit = {\n  \
+            let ys = list.map([1, 2, 3, 4], (x) => x * x)\n  \
+            let s = int.to_string(list.sum(ys))\n  println(s)\n  \
+            let e = int.to_string(list.get_or(ys, 3, 0))\n  println(e) }\n";
+        let prog = lower_source(src);
+        assert!(
+            prog.functions.iter().any(|f| f.name == "list.map"),
+            "list.map must be auto-linked from the self-host registry"
+        );
+        if let Some(out) = build_and_run("self_hosted_list_map", &render_wasm_program(&prog)) {
+            // 1+4+9+16 = 30 ; ys[3] = 16
+            assert_eq!(out, "30\n16");
+        }
+    }
+
+    #[test]
     fn self_hosted_list_take_end_drop_end() {
         // list.take_end/drop_end self-hosted: last n / all-but-last n, List[Int] slot-copy.
         // take_end([1,2,3,4,5],2)=[4,5] ([0]=4,len 2); drop_end([1,2,3,4,5],2)=[1,2,3]

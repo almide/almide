@@ -151,6 +151,21 @@ pub fn lower_body(body: &IrExpr, name: &str) -> Result<MirFunction, LowerError> 
     Ok(MirFunction { name: name.to_string(), ops: ctx.ops, ret, ..Default::default() })
 }
 
+/// Like [`lower_body`] but returns the main function PLUS any lambda-lifted auxiliaries
+/// the body produced (index 0 is the main). The plain [`lower_body`] discards the lifted
+/// set, so a test that lifts a closure must use this to see (and verify) the lifted
+/// function where the closure's body — and its captured calls — now live.
+#[cfg(test)]
+pub(crate) fn lower_body_all(body: &IrExpr, name: &str) -> Result<Vec<MirFunction>, LowerError> {
+    let mut ctx = LowerCtx { fn_name: name.to_string(), ..Default::default() };
+    let ret = ctx.lower_body_into(body)?;
+    let lifted = std::mem::take(&mut ctx.lifted);
+    let mut all =
+        vec![MirFunction { name: name.to_string(), ops: ctx.ops, ret, ..Default::default() }];
+    all.extend(lifted);
+    Ok(all)
+}
+
 /// Like [`lower_body`] but seeds the declared GLOBAL set (top-level `let`s) so a
 /// reference to one is admitted by `value_or_global` instead of walled. Test/diagnostic
 /// entry — `lower_function` builds the same context for real programs.
