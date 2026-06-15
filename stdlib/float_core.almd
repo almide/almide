@@ -11,3 +11,6 @@ fn float_min(a: Float, b: Float) -> Float = prim.fmin(a, b)
 fn float_max(a: Float, b: Float) -> Float = prim.fmax(a, b)
 fn float_to_int(x: Float) -> Int = prim.f2i(x)
 fn float_from_int(x: Int) -> Float = prim.i2f(x)
+// to_float64 / from_float64 are the f64↔f64 identity (Almide's `Float` IS f64).
+fn float_to_float64(x: Float) -> Float = x
+fn float_from_float64(x: Float) -> Float = x

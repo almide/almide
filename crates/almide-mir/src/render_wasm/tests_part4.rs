@@ -472,6 +472,26 @@
     }
 
     #[test]
+    fn self_hosted_math_fmin_fmax_and_float_id() {
+        // math.fmin/fmax are NaN-AWARE (return the non-NaN operand, NOT wasm's NaN-propagating
+        // f64.min/max): fmin(3,7)=3, fmax(3,7)=7, fmin(NaN,5)=5 (the NaN case distinguishes the
+        // replicated logic from a raw f64.min). float.to_float64/from_float64 = identity.
+        let src = "fn main() -> Unit = {\n  \
+            println(int.to_string(float.to_int(math.fmin(float.from_int(3), float.from_int(7)))))\n  \
+            println(int.to_string(float.to_int(math.fmax(float.from_int(3), float.from_int(7)))))\n  \
+            let nan = float.sqrt(float.from_int(0 - 1))\n  \
+            println(int.to_string(float.to_int(math.fmin(nan, float.from_int(5)))))\n  \
+            println(int.to_string(float.to_int(float.to_float64(float.from_int(9))))) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "math.fmin"));
+        assert!(prog.functions.iter().any(|f| f.name == "float.to_float64"));
+        if let Some(out) = build_and_run("self_hosted_math_fminmax", &render_wasm_program(&prog)) {
+            // fmin(3,7)=3, fmax(3,7)=7, fmin(NaN,5)=5, to_float64(9)=9
+            assert_eq!(out, "3\n7\n5\n9");
+        }
+    }
+
+    #[test]
     fn self_hosted_math_sqrt() {
         // SELF-HOSTED math.sqrt = prim.fsqrt (f64.sqrt, byte-exact with v0). sqrt(16)=4,
         // sqrt(2)=1.41…→to_int 1, sqrt(81)=9.

@@ -4,3 +4,32 @@
 // have no wasm instruction and are deferred.) Pure scalar — cert untouched.
 
 fn math_sqrt(x: Float) -> Float = prim.fsqrt(x)
+
+// math.fmin/fmax are NaN-AWARE (return the non-NaN operand, unlike wasm f64.min/max which
+// propagate NaN): `if is_nan(a) then b else if is_nan(b) then a else <min/max>`. Replicated
+// exactly (is_nan via fne(x,x), the min/max via fgt/flt + the bound conds).
+fn math_fmin(a: Float, b: Float) -> Float = {
+  let anan = prim.fne(a, a)
+  if anan then b
+  else {
+    let bnan = prim.fne(b, b)
+    if bnan then a
+    else {
+      let agtb = prim.fgt(a, b)
+      if agtb then b else a
+    }
+  }
+}
+
+fn math_fmax(a: Float, b: Float) -> Float = {
+  let anan = prim.fne(a, a)
+  if anan then b
+  else {
+    let bnan = prim.fne(b, b)
+    if bnan then a
+    else {
+      let altb = prim.flt(a, b)
+      if altb then b else a
+    }
+  }
+}
