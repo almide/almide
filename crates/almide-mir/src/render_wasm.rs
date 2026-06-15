@@ -576,7 +576,10 @@ fn render_call(
 /// `module.func`. The single source of truth for the stdlib self-host campaign (§4.1:
 /// the runtime self-hosts into Almide; the trusted floor stays the prim ops + checker).
 pub fn self_host_runtime() -> &'static [(&'static str, &'static str, &'static str)] {
-    &[("int.to_string", "int_to_string", include_str!("../../../stdlib/int_to_string.almd"))]
+    &[
+        ("int.to_string", "int_to_string", include_str!("../../../stdlib/int_to_string.almd")),
+        ("string.len", "string_len", include_str!("../../../stdlib/string_len.almd")),
+    ]
 }
 
 /// The fixed WAT runtime: WASI import, memory, bump allocator, list ops, integer
@@ -932,6 +935,11 @@ mod tests {
             let rt = lower_source(include_str!("../../../stdlib/print_str.almd"));
             functions.extend(rt.functions);
         }
+        // A recursively-linked impl re-runs this auto-link, so it can carry its own copy of
+        // print_str (or, later, a shared helper). Keep the FIRST definition of each name —
+        // they are identical (same source), so dedup is a no-op on behavior, not a merge.
+        let mut seen = std::collections::HashSet::new();
+        functions.retain(|f| seen.insert(f.name.clone()));
         MirProgram { functions }
     }
 
@@ -1383,6 +1391,26 @@ mod tests {
         );
         if let Some(out) = build_and_run("bundled_itos", &render_wasm_program(&prog)) {
             assert_eq!(out, "0\n1\n2\n3\n4\n5\n6\n7\n8\n9");
+        }
+    }
+
+    #[test]
+    fn self_hosted_string_len_counts_codepoints() {
+        // The first FUNCTION-call stdlib self-host: string.len (a Module call → 1:1 IR/MIR,
+        // no mir>ir gate issue). v0's string.len is the CODEPOINT count, so the self-hosted
+        // impl decodes UTF-8: len("hello")=5, len("日本語")=3 (3 chars, 9 bytes).
+        let src = "fn main() -> Unit = {\n  \
+            let n = string.len(\"hello\")\n  \
+            println(int.to_string(n))\n  \
+            let m = string.len(\"日本語\")\n  \
+            println(int.to_string(m)) }\n";
+        let prog = lower_source(src);
+        assert!(
+            prog.functions.iter().any(|f| f.name == "string.len"),
+            "string.len must be auto-linked"
+        );
+        if let Some(out) = build_and_run("string_len", &render_wasm_program(&prog)) {
+            assert_eq!(out, "5\n3");
         }
     }
 

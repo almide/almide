@@ -41,6 +41,25 @@ impl LowerCtx {
                 }
                 self.ops.truncate(mark);
             }
+            // A scalar `if`/`match` VALUE (`let step = if c then 0 else 1`) EXECUTES — only
+            // the taken arm runs — via the if-marker machinery; a non-literal `match` or a
+            // non-scalar subject falls through to the deferred `Const`.
+            if let IrExprKind::If { cond, then, else_ } = &value.kind {
+                if let Some(dst) = self.try_lower_scalar_if(cond, then, else_, ty) {
+                    self.value_of.insert(var, dst);
+                    return Ok(());
+                }
+            }
+            if let IrExprKind::Match { subject, arms } = &value.kind {
+                if let Some(if_expr) = self.desugar_match_to_if(subject, arms, ty) {
+                    if let IrExprKind::If { cond, then, else_ } = &if_expr.kind {
+                        if let Some(dst) = self.try_lower_scalar_if(cond, then, else_, ty) {
+                            self.value_of.insert(var, dst);
+                            return Ok(());
+                        }
+                    }
+                }
+            }
             let dst = self.fresh_value();
             self.value_of.insert(var, dst);
             self.ops.push(Op::Const { dst });
