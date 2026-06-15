@@ -161,10 +161,33 @@ pub fn render_wasm_program(prog: &MirProgram) -> String {
     }
     let funcs =
         prog.functions.iter().map(|f| render_wasm_fn(f, &label_off)).collect::<String>();
+    // Closure dispatch: when any function makes an indirect (closure) call, emit a module
+    // function table whose slot i holds function i (the lambda-lifting convention — a
+    // lifted lambda is bound to its slot index), plus the 1-param closure signature
+    // `$closure_fn1` that `call_indirect` checks against. Gated on CallIndirect presence so
+    // non-closure programs render byte-identically (no table, no behavior change).
+    let has_closure = prog
+        .functions
+        .iter()
+        .any(|f| f.ops.iter().any(|op| matches!(op, Op::CallIndirect { .. })));
+    let closure_table = if has_closure {
+        let n = prog.functions.len();
+        let names = prog
+            .functions
+            .iter()
+            .map(|f| format!("${}", f.name))
+            .collect::<Vec<_>>()
+            .join(" ");
+        format!(
+            "  (type $closure_fn1 (func (param i64) (result i64)))\n  (table {n} funcref)\n  (elem (i32.const 0) func {names})\n",
+        )
+    } else {
+        String::new()
+    };
     // `main` is `Unit` (v0 rejects a non-`Unit` main — it must implement
     // `Termination`), so `_start` discards nothing: a void `(call $main)` matches.
     format!(
-        "{preamble}{data}{funcs}  (func (export \"_start\") (call $main))\n)\n",
+        "{preamble}{data}{closure_table}{funcs}  (func (export \"_start\") (call $main))\n)\n",
         preamble = preamble(),
     )
 }
@@ -282,6 +305,7 @@ fn defined_value(op: &Op) -> Option<ValueId> {
         | Op::IntBinOp { dst, .. }
         | Op::Pure { dst, .. } => Some(*dst),
         Op::CallFn { dst, .. } | Op::Call { dst, .. } => *dst,
+        Op::CallIndirect { dst, .. } => *dst,
         Op::Prim { dst, .. } => *dst,
         Op::IfThen { dst, .. } => *dst,
         _ => None,
@@ -337,6 +361,10 @@ fn value_reprs_wasm(func: &MirFunction) -> BTreeMap<ValueId, Repr> {
             // hands back a heap object. A String/List-returning call is a Ptr (i32),
             // NOT a scalar; typing it i64 mismatched `$alloc`'s i32 handle.
             Op::CallFn { dst: Some(d), result, .. } => {
+                m.insert(*d, result.unwrap_or(SCALAR_REPR));
+            }
+            // An indirect (closure) call's result repr is likewise carried on the op.
+            Op::CallIndirect { dst: Some(d), result, .. } => {
                 m.insert(*d, result.unwrap_or(SCALAR_REPR));
             }
             _ => {}
@@ -489,11 +517,21 @@ fn render_op(op: &Op, label_off: &BTreeMap<String, (u32, u32)>) -> String {
             };
             format!("    (local.set {d} {expr})\n", d = local(*dst))
         }
-        // CallIndirect render needs the module function table + per-arity `(type)` — wired
-        // in a later closures-machinery slice. No lowering emits this op yet (dead path), so
-        // a WAT comment placeholder keeps render TOTAL without affecting any real program.
-        Op::CallIndirect { .. } => {
-            String::from("    ;; call_indirect — closure machinery: function table not yet wired\n")
+        // An indirect (closure) call: push the args, then the table index, and dispatch
+        // through the module function table with the 1-param closure signature. The table +
+        // `(type $closure_fn1)` are emitted by render_wasm_program when any CallIndirect
+        // exists; `table_idx` is the runtime slot of the lifted lambda.
+        Op::CallIndirect { dst, table_idx, args, .. } => {
+            let argstr = args.iter().map(render_arg_wasm).collect::<Vec<_>>().join(" ");
+            // The table index is a wasm i32; the MIR value is the uniform i64, so wrap it.
+            let call = format!(
+                "(call_indirect (type $closure_fn1) {argstr} (i32.wrap_i64 (local.get {})))",
+                local(*table_idx)
+            );
+            match dst {
+                Some(d) => format!("    (local.set {} {call})\n", local(*d)),
+                None => format!("    (drop {call})\n"),
+            }
         }
         Op::CallFn { dst, name, args, .. } => {
             let argstr = args.iter().map(render_arg_wasm).collect::<Vec<_>>().join(" ");

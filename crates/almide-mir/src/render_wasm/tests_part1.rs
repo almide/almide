@@ -50,6 +50,50 @@
         }
     }
 
+    #[test]
+    fn call_indirect_dispatches_through_the_function_table() {
+        // Closures execution floor: a lifted lambda `add1(x) = x + 1` at table slot 0,
+        // invoked by `main` via Op::CallIndirect with a runtime table index (the slot the
+        // lambda would be bound to). main: fidx = 0; y = (table[fidx])(5); print y -> 6.
+        let scalar = Repr::Scalar { width: ScalarWidth::Double };
+        let add1 = MirFunction {
+            name: "add1".into(),
+            params: vec![MirParam { value: ValueId(0), repr: scalar }],
+            ops: vec![
+                Op::ConstInt { dst: ValueId(1), value: 1 },
+                Op::IntBinOp { dst: ValueId(2), op: IntOp::Add, a: ValueId(0), b: ValueId(1) },
+            ],
+            ret: Some(ValueId(2)),
+            ..Default::default()
+        };
+        let main = MirFunction {
+            name: "main".into(),
+            params: vec![],
+            ops: vec![
+                // add1 is function/table index 0 (first in prog.functions).
+                Op::ConstInt { dst: ValueId(0), value: 0 },
+                Op::CallIndirect {
+                    dst: Some(ValueId(1)),
+                    table_idx: ValueId(0),
+                    args: vec![CallArg::Imm(5)],
+                    result: Some(scalar),
+                },
+                Op::Call {
+                    dst: None,
+                    func: RtFn::PrintInt,
+                    args: vec![CallArg::Scalar(ValueId(1))],
+                    result: None,
+                },
+            ],
+            ret: None,
+            ..Default::default()
+        };
+        let prog = MirProgram { functions: vec![add1, main] };
+        if let Some(out) = build_and_run("call_indirect", &render_wasm_program(&prog)) {
+            assert_eq!(out, "6");
+        }
+    }
+
     /// A HEAP-returning user call (`fn mk() -> String = "hi"`): the result is a Ptr
     /// (an i32 `$alloc` handle), so the caller's local must be typed i32 — NOT the
     /// scalar i64 default. Regression for `value_reprs_wasm` reading the call op's
