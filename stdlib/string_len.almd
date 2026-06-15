@@ -22,3 +22,11 @@ fn string_len(s: String) -> Int = {
   let blen = prim.load32(h + 4)              // byte length at LIST_LEN_OFFSET(4)
   __strlen_count(h + 12, h + 12 + blen, 0)   // data at LIST_HEADER(12)
 }
+
+// string.length — an explicit-name alias of string.len (both map to almide_rt_string_len, the
+// codepoint count); reuses the same UTF-8 codepoint-start counter.
+fn string_length(s: String) -> Int = {
+  let h = prim.handle(s)
+  let blen = prim.load32(h + 4)
+  __strlen_count(h + 12, h + 12 + blen, 0)
+}

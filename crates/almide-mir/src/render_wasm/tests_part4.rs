@@ -917,6 +917,21 @@
     }
 
     #[test]
+    fn self_hosted_string_length() {
+        // SELF-HOSTED string.length — the explicit-name alias of string.len (both = the UTF-8
+        // codepoint count). length("hello")=5, length("日本語")=3, length("")=0. Byte-matches v0.
+        let src = "fn main() -> Unit = {\n  \
+            println(int.to_string(string.length(\"hello\")))\n  \
+            println(int.to_string(string.length(\"日本語\")))\n  \
+            println(int.to_string(string.length(\"\"))) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "string.length"));
+        if let Some(out) = build_and_run("self_hosted_string_length", &render_wasm_program(&prog)) {
+            assert_eq!(out, "5\n3\n0");
+        }
+    }
+
+    #[test]
     fn self_hosted_string_from_bytes() {
         // SELF-HOSTED string.from_bytes — copy a List[Int]'s low bytes into a fresh String. For
         // VALID UTF-8 it byte-matches v0's from_utf8_lossy: [72,105]="Hi", "hello" bytes, and the
