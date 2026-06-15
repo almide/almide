@@ -121,3 +121,27 @@ fn list_tail(xs: List[Int]) -> List[Int] = {
   let _c = __copy_slots(src1, bh + 12, newlen, 0)
   buf
 }
+
+// list.take_end(xs, n): the LAST n elements (whole list when n<0 or n>=len, per v0's
+// n as usize). start = clamped; copy [start, len) into a fresh List[Int].
+fn list_take_end(xs: List[Int], n: Int) -> List[Int] = {
+  let h = prim.handle(xs)
+  let len = prim.load32(h + 4)
+  let start = if n < 0 then 0 else (if n >= len then 0 else len - n)
+  let newlen = len - start
+  let buf = prim.alloc_list(newlen)
+  let srcbase = h + 12 + start * 8
+  let _c = __copy_slots(srcbase, prim.handle(buf) + 12, newlen, 0)
+  buf
+}
+
+// list.drop_end(xs, n): all but the LAST n elements (empty when n<0 or n>=len). end =
+// clamped; copy [0, end) into a fresh List[Int].
+fn list_drop_end(xs: List[Int], n: Int) -> List[Int] = {
+  let h = prim.handle(xs)
+  let len = prim.load32(h + 4)
+  let endi = if n < 0 then 0 else (if n >= len then 0 else len - n)
+  let buf = prim.alloc_list(endi)
+  let _c = __copy_slots(h + 12, prim.handle(buf) + 12, endi, 0)
+  buf
+}
