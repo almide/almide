@@ -1671,6 +1671,33 @@ impl Checker {
             }
             ast::Stmt::FieldAssign { value, .. } => { self.infer_expr(value); }
             ast::Stmt::Guard { cond, else_, .. } => { self.infer_expr(cond); self.infer_expr(else_); }
+            ast::Stmt::GuardLet { name, scrutinee, else_, .. } => {
+                // Swift-style: bind `name` to the value inside the scrutinee's
+                // Option/Result for the REST of the block (define_var in the current
+                // block scope persists across the following stmts). The else branch
+                // diverges; lowering desugars the block tail into a Some/Ok match.
+                let scrut_ty = self.infer_expr(scrutinee);
+                let resolved = resolve_ty(&scrut_ty, &self.uf);
+                let bound_ty = match &resolved {
+                    Ty::Applied(TypeConstructorId::Option, args) if args.len() == 1 => {
+                        args[0].clone()
+                    }
+                    Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => {
+                        args[0].clone()
+                    }
+                    Ty::Unknown => Ty::Unknown,
+                    other => {
+                        self.emit(super::err(
+                            format!("`guard let` requires an Option or Result, found `{}`", other.display()),
+                            "bind the inner value of an Option/Result: `guard let v = some_option else { return }`".to_string(),
+                            "guard let scrutinee".to_string(),
+                        ).with_code("E001"));
+                        Ty::Unknown
+                    }
+                };
+                self.infer_expr(else_);
+                self.env.define_var(name, bound_ty);
+            }
             ast::Stmt::Expr { expr, .. } => {
                 let t = self.infer_expr(expr);
                 // #662: a discarded expression statement whose type carries an

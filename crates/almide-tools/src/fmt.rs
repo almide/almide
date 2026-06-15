@@ -317,6 +317,10 @@ fn collect_module_refs_stmt(stmt: &Stmt, used: &mut std::collections::HashSet<St
             collect_module_refs_expr(cond, used);
             collect_module_refs_expr(else_, used);
         }
+        Stmt::GuardLet { scrutinee, else_, .. } => {
+            collect_module_refs_expr(scrutinee, used);
+            collect_module_refs_expr(else_, used);
+        }
         _ => {}
     }
 }
@@ -822,6 +826,7 @@ fn fmt_stmt(out: &mut String, stmt: &Stmt, depth: usize) {
         Stmt::IndexAssign { target, index, value, .. } => { w!(out, "{i}{target}["); fmt_expr(out, index, depth); out.push_str("] = "); fmt_expr(out, value, depth); }
         Stmt::FieldAssign { target, field, value, .. } => { w!(out, "{i}{target}.{field} = "); fmt_expr(out, value, depth); }
         Stmt::Guard { cond, else_, .. } => { out.push_str(&i); out.push_str("guard "); fmt_expr(out, cond, depth); out.push_str(" else "); fmt_expr(out, else_, depth); }
+        Stmt::GuardLet { name, scrutinee, else_, .. } => { out.push_str(&i); out.push_str("guard let "); out.push_str(name.as_str()); out.push_str(" = "); fmt_expr(out, scrutinee, depth); out.push_str(" else "); fmt_expr(out, else_, depth); }
         Stmt::Expr { expr, .. } => { out.push_str(&i); fmt_expr(out, expr, depth); }
         Stmt::Comment { text } => { wln!(out, "{i}{text}"); return; }
         Stmt::Error { .. } => return,

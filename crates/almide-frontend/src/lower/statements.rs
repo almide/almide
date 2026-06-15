@@ -11,6 +11,7 @@ pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &ast::Stmt) -> IrStmt {
     let span = match stmt {
         ast::Stmt::Let { span, .. } | ast::Stmt::Var { span, .. }
         | ast::Stmt::Assign { span, .. } | ast::Stmt::Guard { span, .. }
+        | ast::Stmt::GuardLet { span, .. }
         | ast::Stmt::Expr { span, .. } | ast::Stmt::IndexAssign { span, .. }
         | ast::Stmt::FieldAssign { span, .. } | ast::Stmt::LetDestructure { span, .. }
         | ast::Stmt::Error { span, .. } => *span,
@@ -102,6 +103,11 @@ pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &ast::Stmt) -> IrStmt {
             let ir_cond = lower_expr(ctx, cond);
             let ir_else = lower_expr(ctx, else_);
             IrStmtKind::Guard { cond: ir_cond, else_: ir_else }
+        }
+        // `guard let` binds for the REST of the block, so the enclosing block lowering
+        // (lower_block_stmts) restructures it into a match — it never reaches here.
+        ast::Stmt::GuardLet { .. } => {
+            unreachable!("guard let is desugared by the enclosing block, not lower_stmt")
         }
         ast::Stmt::Expr { expr, .. } => {
             let ir_expr = lower_expr(ctx, expr);

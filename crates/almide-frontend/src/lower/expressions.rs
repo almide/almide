@@ -392,10 +392,9 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
         }
         ast::ExprKind::Block { stmts, expr, .. } => {
             ctx.push_scope();
-            let ir_stmts: Vec<IrStmt> = stmts.iter().map(|s| lower_stmt(ctx, s)).collect();
-            let ir_expr = expr.as_ref().map(|e| Box::new(lower_expr(ctx, e)));
+            let body = lower_block_body(ctx, stmts, expr.as_deref(), &ty, span);
             ctx.pop_scope();
-            ctx.mk(IrExprKind::Block { stmts: ir_stmts, expr: ir_expr }, ty, span)
+            body
         }
 
         ast::ExprKind::Fan { exprs, .. } => {
@@ -723,6 +722,66 @@ pub(super) fn lower_expr(ctx: &mut LowerCtx, expr: &ast::Expr) -> IrExpr {
         ast::ExprKind::Todo { message, .. } => ctx.mk(IrExprKind::Todo { message: message.clone() }, ty, span),
         ast::ExprKind::Error => ctx.mk(IrExprKind::Unit, Ty::Unknown, span),
         ast::ExprKind::Placeholder => ctx.mk(IrExprKind::Unit, Ty::Unknown, span),
+    }
+}
+
+/// Lower a block body (stmts + optional tail), desugaring `guard let`. A `guard let
+/// name = scrutinee else { alt }` binds `name` for the REST of the block, so everything
+/// after it (the remaining stmts + the tail) becomes the Some/Ok arm of a match on the
+/// scrutinee, and `alt` the wildcard arm. Statements before the guard stay as block
+/// stmts. Recurses so multiple guard-lets nest. Without a guard-let it lowers normally.
+/// The caller owns the block scope (push/pop around this).
+fn lower_block_body(
+    ctx: &mut LowerCtx,
+    stmts: &[ast::Stmt],
+    tail: Option<&ast::Expr>,
+    ty: &Ty,
+    span: Option<ast::Span>,
+) -> IrExpr {
+    if let Some(i) = stmts.iter().position(|s| matches!(s, ast::Stmt::GuardLet { .. })) {
+        let pre: Vec<IrStmt> = stmts[..i].iter().map(|s| lower_stmt(ctx, s)).collect();
+        let (name, scrutinee, else_) = match &stmts[i] {
+            ast::Stmt::GuardLet { name, scrutinee, else_, .. } => (*name, scrutinee, else_),
+            _ => unreachable!(),
+        };
+        let s = lower_expr(ctx, scrutinee);
+        let subject_ty = if let IrExprKind::Var { id } = &s.kind {
+            let vt_ty = &ctx.var_table.get(*id).ty;
+            if matches!(vt_ty, Ty::Applied(_, _)) && !matches!(&s.ty, Ty::Applied(_, _)) {
+                vt_ty.clone()
+            } else {
+                s.ty.clone()
+            }
+        } else {
+            s.ty.clone()
+        };
+        let s = if subject_ty != s.ty { IrExpr { ty: subject_ty.clone(), ..s } } else { s };
+        let inner = ast::Pattern::Ident { name };
+        let bind_pat = match &subject_ty {
+            Ty::Applied(TypeConstructorId::Result, _) => {
+                ast::Pattern::Ok { inner: Box::new(inner) }
+            }
+            _ => ast::Pattern::Some { inner: Box::new(inner) },
+        };
+        // Some/Ok arm: bind name, then the rest of the block (recurse for nested guards).
+        ctx.push_scope();
+        let pat1 = lower_pattern(ctx, &bind_pat, &subject_ty);
+        let rest = lower_block_body(ctx, &stmts[i + 1..], tail, ty, span);
+        ctx.pop_scope();
+        let arm1 = IrMatchArm { pattern: pat1, guard: None, body: rest };
+        // Wildcard arm: the else branch (must diverge).
+        ctx.push_scope();
+        let pat2 = lower_pattern(ctx, &ast::Pattern::Wildcard, &subject_ty);
+        let alt = lower_expr(ctx, else_);
+        ctx.pop_scope();
+        let arm2 = IrMatchArm { pattern: pat2, guard: None, body: alt };
+        let match_expr =
+            ctx.mk(IrExprKind::Match { subject: Box::new(s), arms: vec![arm1, arm2] }, ty.clone(), span);
+        ctx.mk(IrExprKind::Block { stmts: pre, expr: Some(Box::new(match_expr)) }, ty.clone(), span)
+    } else {
+        let ir_stmts: Vec<IrStmt> = stmts.iter().map(|s| lower_stmt(ctx, s)).collect();
+        let ir_expr = tail.map(|e| Box::new(lower_expr(ctx, e)));
+        ctx.mk(IrExprKind::Block { stmts: ir_stmts, expr: ir_expr }, ty.clone(), span)
     }
 }
 

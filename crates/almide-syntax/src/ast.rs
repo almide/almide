@@ -240,6 +240,11 @@ pub enum Stmt {
     IndexAssign { target: Sym, index: Box<Expr>, value: Expr, #[serde(skip)] span: Option<Span> },
     FieldAssign { target: Sym, field: Sym, value: Expr, #[serde(skip)] span: Option<Span> },
     Guard { cond: Expr, else_: Expr, #[serde(skip)] span: Option<Span> },
+    /// `guard let name = scrutinee else { else_ }` — Swift-style: `name` binds the value
+    /// inside the scrutinee's Option/Result and stays in scope for the REST of the block;
+    /// the else branch must diverge. The frontend desugars the block tail into the Some/Ok
+    /// arm of a match on the scrutinee.
+    GuardLet { name: Sym, scrutinee: Expr, else_: Expr, #[serde(skip)] span: Option<Span> },
     Expr { expr: Expr, #[serde(skip)] span: Option<Span> },
     Comment { text: String },
     /// Placeholder for a parse error — allows partial AST construction.
@@ -454,6 +459,7 @@ fn visit_stmt_exprs_mut(stmt: &mut Stmt, f: &mut impl FnMut(&mut Expr)) {
         Stmt::IndexAssign { index, value, .. } => { visit_expr_mut(index, f); visit_expr_mut(value, f); }
         Stmt::FieldAssign { value, .. } => visit_expr_mut(value, f),
         Stmt::Guard { cond, else_, .. } => { visit_expr_mut(cond, f); visit_expr_mut(else_, f); }
+        Stmt::GuardLet { scrutinee, else_, .. } => { visit_expr_mut(scrutinee, f); visit_expr_mut(else_, f); }
         Stmt::Expr { expr, .. } => visit_expr_mut(expr, f),
         Stmt::Comment { .. } | Stmt::Error { .. } => {}
     }
