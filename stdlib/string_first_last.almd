@@ -94,3 +94,62 @@ fn string_char_at(s: String, idx: Int) -> Option[String] = {
   let pos = __cp_at(h, blen, idx, 0, 0)
   if pos < 0 then None else Some(__slice_cp(s, pos))
 }
+
+// Do the n bytes at `pp` equal the n bytes at `sp`? (lazy: only the matching prefix recurses.)
+fn __byteq_at(sp: Int, pp: Int, n: Int, i: Int) -> Bool =
+  if i >= n then true
+  else {
+    let a = prim.load8(sp + i)
+    let b = prim.load8(pp + i)
+    if a == b then __byteq_at(sp, pp, n, i + 1) else false
+  }
+
+// s[start .. start+n] (byte range) as a fresh owned String.
+fn __sub_from(s: String, start: Int, n: Int) -> String = {
+  let h = prim.handle(s)
+  let out = prim.alloc_str(n)
+  let _x = __copy_n(prim.handle(out) + 12, h + 12 + start, n, 0)
+  out
+}
+
+// The remainder START byte-offset (= pn) if s starts with prefix, else -1.
+fn __pref_off(sh: Int, ph: Int, sn: Int, pn: Int) -> Int =
+  if pn > sn then 0 - 1
+  else {
+    let sd = sh + 12
+    let pd = ph + 12
+    let m = __byteq_at(sd, pd, pn, 0)
+    if m then pn else 0 - 1
+  }
+
+// string.strip_prefix(s, prefix) -> Some(s without prefix) if s starts with prefix, else None.
+fn string_strip_prefix(s: String, prefix: String) -> Option[String] = {
+  let sh = prim.handle(s)
+  let ph = prim.handle(prefix)
+  let sn = prim.load32(sh + 4)
+  let pn = prim.load32(ph + 4)
+  let off = __pref_off(sh, ph, sn, pn)
+  let rlen = sn - off
+  if off < 0 then None else Some(__sub_from(s, off, rlen))
+}
+
+// The remainder LENGTH (= sn - fl) if s ends with suffix, else -1.
+fn __suf_len(sh: Int, fh: Int, sn: Int, fl: Int) -> Int =
+  if fl > sn then 0 - 1
+  else {
+    let start = sn - fl
+    let sd = sh + 12 + start
+    let fd = fh + 12
+    let m = __byteq_at(sd, fd, fl, 0)
+    if m then start else 0 - 1
+  }
+
+// string.strip_suffix(s, suffix) -> Some(s without suffix) if s ends with suffix, else None.
+fn string_strip_suffix(s: String, suffix: String) -> Option[String] = {
+  let sh = prim.handle(s)
+  let fh = prim.handle(suffix)
+  let sn = prim.load32(sh + 4)
+  let fl = prim.load32(fh + 4)
+  let rlen = __suf_len(sh, fh, sn, fl)
+  if rlen < 0 then None else Some(__sub_from(s, 0, rlen))
+}

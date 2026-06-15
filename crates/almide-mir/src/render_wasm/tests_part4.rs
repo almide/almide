@@ -860,6 +860,29 @@
     }
 
     #[test]
+    fn self_hosted_string_strip_prefix_suffix() {
+        // SELF-HOSTED string.strip_prefix / strip_suffix -> Option[String] (the remainder after
+        // stripping a matching prefix/suffix, else None) over the Option[String] construction
+        // machinery. CONTENT verified via prim reads of the materialized Option: strip_prefix
+        // ("hello","he")=Some("llo"= 3 bytes lead 'l'=108), ("hello","xy")=None; strip_suffix
+        // ("hello","lo")=Some("hel"= 3 bytes lead 'h'=104), ("hello","xy")=None. Byte-matches v0.
+        let src = "fn main() -> Unit = {\n  \
+            let o1 = string.strip_prefix(\"hello\", \"he\")\n  let h1 = prim.handle(o1)\n  \
+            println(int.to_string(prim.load32(h1 + 4)))\n  \
+            let e1 = prim.load64(h1 + 12)\n  println(int.to_string(prim.load32(e1 + 4)))\n  println(int.to_string(prim.load8(e1 + 12)))\n  \
+            let o2 = string.strip_prefix(\"hello\", \"xy\")\n  println(int.to_string(prim.load32(prim.handle(o2) + 4)))\n  \
+            let o3 = string.strip_suffix(\"hello\", \"lo\")\n  let e3 = prim.load64(prim.handle(o3) + 12)\n  \
+            println(int.to_string(prim.load8(e3 + 12)))\n  println(int.to_string(prim.load32(e3 + 4)))\n  \
+            let o4 = string.strip_suffix(\"hello\", \"xy\")\n  println(int.to_string(prim.load32(prim.handle(o4) + 4))) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "string.strip_prefix"));
+        assert!(prog.functions.iter().any(|f| f.name == "string.strip_suffix"));
+        if let Some(out) = build_and_run("self_hosted_string_strip_prefix_suffix", &render_wasm_program(&prog)) {
+            assert_eq!(out, "1\n3\n108\n0\n104\n3\n0");
+        }
+    }
+
+    #[test]
     fn string_char_at_option_loop_is_bounded() {
         // ADVERSARIAL leak guard: a loop materializing an Option[String] (char_at owning a slice)
         // and tag-matching it each iteration runs in BOUNDED memory (DropListStr frees each).
@@ -1049,6 +1072,7 @@
             assert_eq!(out, "4\n2\n3\n3\n5\n0");
         }
     }
+
 
 
 

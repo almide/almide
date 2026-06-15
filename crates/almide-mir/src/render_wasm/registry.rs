@@ -255,6 +255,8 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
             &[
                 ("string_first", "string.first"), ("string_last", "string.last"),
                 ("string_char_at", "string.get"),
+                ("string_strip_prefix", "string.strip_prefix"),
+                ("string_strip_suffix", "string.strip_suffix"),
             ],
         ),
         (
