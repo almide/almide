@@ -627,7 +627,14 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
         (include_str!("../../../stdlib/list_is_empty.almd"), &[("list_is_empty", "list.is_empty")]),
         (include_str!("../../../stdlib/list_sum.almd"), &[("list_sum", "list.sum")]),
         (include_str!("../../../stdlib/string_slice.almd"), &[("string_slice", "string.slice")]),
-        (include_str!("../../../stdlib/string_trim.almd"), &[("string_trim", "string.trim")]),
+        (
+            include_str!("../../../stdlib/string_trim.almd"),
+            &[
+                ("string_trim", "string.trim"),
+                ("string_trim_start", "string.trim_start"),
+                ("string_trim_end", "string.trim_end"),
+            ],
+        ),
         (include_str!("../../../stdlib/string_reverse.almd"), &[("string_reverse", "string.reverse")]),
         (
             include_str!("../../../stdlib/string_replace.almd"),
@@ -1756,6 +1763,26 @@ mod tests {
         assert!(prog.functions.iter().any(|f| f.name == "string.replace_first"), "linked");
         if let Some(out) = build_and_run("string_replace_first", &render_wasm_program(&prog)) {
             assert_eq!(out, "a-b,c\nxYYx\nabc");
+        }
+    }
+
+    #[test]
+    fn self_hosted_string_trim_start_and_end() {
+        // trim_start strips LEADING ASCII whitespace (keeps trailing), trim_end strips
+        // TRAILING (keeps leading): trim_start("  abc")="abc", trim_end("xyz  ")="xyz";
+        // trim_start("  ab ")="ab " keeps the one trailing space (len 3). byte-matching v0.
+        let src = "fn main() -> Unit = {\n  \
+            let a = string.trim_start(\"  abc\")\n  \
+            let b = string.trim_end(\"xyz  \")\n  \
+            let t = string.trim_start(\"  ab \")\n  \
+            let lt = string.len(t)\n  \
+            println(a)\n  \
+            println(b)\n  \
+            println(int.to_string(lt)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "string.trim_start"), "linked");
+        if let Some(out) = build_and_run("string_trim_se", &render_wasm_program(&prog)) {
+            assert_eq!(out, "abc\nxyz\n3");
         }
     }
 

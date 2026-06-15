@@ -43,3 +43,29 @@ fn string_trim(s: String) -> String = {
   let _e = __trim_copy(ws_start, prim.handle(buf) + 12, nbytes)
   buf
 }
+
+// Strip ASCII whitespace from the START only (leading), copying the remainder.
+fn string_trim_start(s: String) -> String = {
+  let h = prim.handle(s)
+  let blen = prim.load32(h + 4)
+  let base = h + 12
+  let end = base + blen
+  let ws_start = __trim_start(base, end)
+  let nbytes = end - ws_start
+  let buf = prim.alloc_str(nbytes)
+  let _e = __trim_copy(ws_start, prim.handle(buf) + 12, nbytes)
+  buf
+}
+
+// Strip ASCII whitespace from the END only (trailing), copying the prefix.
+fn string_trim_end(s: String) -> String = {
+  let h = prim.handle(s)
+  let blen = prim.load32(h + 4)
+  let base = h + 12
+  let end = base + blen
+  let ws_end = __trim_end(base, end)
+  let nbytes = ws_end - base
+  let buf = prim.alloc_str(nbytes)
+  let _e = __trim_copy(base, prim.handle(buf) + 12, nbytes)
+  buf
+}
