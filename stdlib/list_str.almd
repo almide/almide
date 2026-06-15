@@ -200,3 +200,35 @@ fn list_dedup_str(xs: List[String]) -> List[String] = {
   prim.store32(oh + 4, di)
   out
 }
+
+// list.intersperse over a List[String] — insert `sep` between each pair of elements (v0:
+// [a,sep,b,sep,c]; result length 2n-1, or 0 for the empty list). Each element AND each inserted
+// separator is a fresh DEEP COPY (created + consumed in one block — no conditional consume).
+fn __intersperse_step(sh: Int, oh: Int, sep: String, n: Int, last: Int, i: Int, di: Int) -> Int = {
+  let e = prim.load_str(sh + 12 + i * 8)
+  let ecopy = string.repeat(e, 1)
+  prim.store_str(oh + 12 + di * 8, ecopy)
+  if i < last then {
+    let scopy = string.repeat(sep, 1)
+    prim.store_str(oh + 12 + (di + 1) * 8, scopy)
+    __intersperse_fill(sh, oh, sep, n, last, i + 1, di + 2)
+  } else {
+    __intersperse_fill(sh, oh, sep, n, last, i + 1, di + 1)
+  }
+}
+
+fn __intersperse_fill(sh: Int, oh: Int, sep: String, n: Int, last: Int, i: Int, di: Int) -> Int =
+  if i >= n then di
+  else __intersperse_step(sh, oh, sep, n, last, i, di)
+
+fn list_intersperse_str(xs: List[String], sep: String) -> List[String] = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  let cap = n * 2
+  let out = prim.alloc_list_str(cap)
+  let oh = prim.handle(out)
+  let last = n - 1
+  let di = __intersperse_fill(h, oh, sep, n, last, 0, 0)
+  prim.store32(oh + 4, di)
+  out
+}

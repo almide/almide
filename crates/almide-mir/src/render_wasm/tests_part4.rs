@@ -1752,6 +1752,23 @@
     }
 
     #[test]
+    fn self_hosted_list_string_intersperse() {
+        // SELF-HOSTED list.intersperse over a List[String] — insert sep between elements (deep
+        // copies). xs=[a,b,c] sep="-" → [a,-,b,-,c] len 5, idx0 "a", idx1 "-", idx4 "c". v0-match.
+        let src = "fn main() -> Unit = {\n  \
+            let xs = string.split(\"a,b,c\", \",\")\n  \
+            let r = list.intersperse(xs, \"-\")\n  println(int.to_string(list.len(r)))\n  \
+            let e0 = list.get(r, 0)\n  match e0 { Some(v) => println(v), None => println(\"none\"), }\n  \
+            let e1 = list.get(r, 1)\n  match e1 { Some(v) => println(v), None => println(\"none\"), }\n  \
+            let e4 = list.get(r, 4)\n  match e4 { Some(v) => println(v), None => println(\"none\"), } }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "list.intersperse_str"));
+        if let Some(out) = build_and_run("self_hosted_list_string_intersperse", &render_wasm_program(&prog)) {
+            assert_eq!(out, "5\na\n-\nc");
+        }
+    }
+
+    #[test]
     fn self_hosted_list_string_find() {
         // SELF-HOSTED list.find over a List[String] → Option[String] (predicate higher-order; the
         // matched element returned as Some(deep copy), else None; materialized Option, match-exec).
