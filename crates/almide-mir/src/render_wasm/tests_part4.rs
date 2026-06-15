@@ -1328,6 +1328,31 @@
     }
 
     #[test]
+    fn self_hosted_set_algebra() {
+        // SELF-HOSTED set.union/intersection/difference/is_subset/is_disjoint over Set[Int],
+        // reusing __set_has + the alloc_set/dedup/len-patch core. a={1,2,3,4} b={3,4,5,6}:
+        // union={1,2,3,4,5,6} len 6 sum 21; intersection={3,4} sum 7; difference(a,b)={1,2} sum 3;
+        // is_subset({3,4},a)=true; is_disjoint(a,b)=false. Byte-matches v0.
+        let src = "fn main() -> Unit = {\n  \
+            let a = set.from_list([1, 2, 3, 4])\n  let b = set.from_list([3, 4, 5, 6])\n  \
+            let u = set.union(a, b)\n  println(int.to_string(set.len(u)))\n  \
+            let ul = set.to_list(u)\n  println(int.to_string(list.sum(ul)))\n  \
+            let inter = set.intersection(a, b)\n  let il = set.to_list(inter)\n  \
+            println(int.to_string(set.len(inter)))\n  println(int.to_string(list.sum(il)))\n  \
+            let diff = set.difference(a, b)\n  let dl = set.to_list(diff)\n  \
+            println(int.to_string(list.sum(dl)))\n  \
+            let sub = set.is_subset(inter, a)\n  let vsub = if sub then 1 else 0\n  \
+            println(int.to_string(vsub))\n  \
+            let dj = set.is_disjoint(a, b)\n  let vdj = if dj then 1 else 0\n  \
+            println(int.to_string(vdj)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "set.union"));
+        if let Some(out) = build_and_run("self_hosted_set_algebra", &render_wasm_program(&prog)) {
+            assert_eq!(out, "6\n21\n2\n7\n3\n1\n0");
+        }
+    }
+
+    #[test]
     fn self_hosted_set_core_loop_reclaims() {
         // SOUNDNESS for the new Set[Int] heap path: a bounded loop building + dropping a fresh
         // Set[Int] every iteration must reclaim each (plain non-nested drop) — no leak (OOM) or
