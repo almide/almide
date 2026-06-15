@@ -444,7 +444,46 @@ impl LowerCtx {
             self.record_elided_calls(value);
             None
         };
+        // PRECISE tuple field extraction (the layout brick, scalar-field slice): a tuple value is a
+        // block [rc][len][cap][f0@12, f1@20, ...]; an ALL-SCALAR-field destructure (`let (a, b) = t`)
+        // loads each field at its slot instead of the container-grain alias. The tuple still drops
+        // at scope end (scalar fields move nothing). Heap-field tuples fall back to bind_pattern.
+        if let IrPattern::Tuple { elements } = pattern {
+            if let Some(subj) = subject {
+                if self.try_lower_scalar_tuple(elements, subj) {
+                    return Ok(());
+                }
+            }
+        }
         self.bind_pattern(pattern, subject)
+    }
+
+    /// Extract each SCALAR field of a tuple `subject` (a heap block) into its bound var via a
+    /// `Prim::Load` at the field's slot. Returns `false` (caller falls back to `bind_pattern`) if
+    /// any field is heap or a non-`Bind`/`Wildcard` pattern (precise heap-field move is deferred).
+    fn try_lower_scalar_tuple(&mut self, pats: &[IrPattern], subject: ValueId) -> bool {
+        use crate::{IntOp, PrimKind};
+        for p in pats {
+            match p {
+                IrPattern::Bind { ty, .. } if !is_heap_ty(ty) => {}
+                IrPattern::Wildcard => {}
+                _ => return false,
+            }
+        }
+        let h = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![subject] });
+        for (i, p) in pats.iter().enumerate() {
+            if let IrPattern::Bind { var, .. } = p {
+                let off = self.fresh_value();
+                self.ops.push(Op::ConstInt { dst: off, value: 12 + (i as i64) * 8 });
+                let addr = self.fresh_value();
+                self.ops.push(Op::IntBinOp { dst: addr, op: IntOp::Add, a: h, b: off });
+                let v = self.fresh_value();
+                self.ops.push(Op::Prim { kind: PrimKind::Load { width: 8 }, dst: Some(v), args: vec![addr] });
+                self.value_of.insert(*var, v);
+            }
+        }
+        true
     }
 
     /// Introduce the variables a destructuring `pattern` binds, CONTAINER-GRAIN: a

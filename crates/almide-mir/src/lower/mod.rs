@@ -841,10 +841,12 @@ pub(crate) fn alloc_init(value: &IrExpr) -> Init {
     if let IrExprKind::LitStr { value } = &value.kind {
         return Init::Str(value.clone());
     }
-    if let IrExprKind::List { elements } = &value.kind {
-        // A list of scalar literals materializes its slots: an Int element stores its value, a
-        // Float element stores its f64 BITS (the i64-uniform Float repr — a `List[Float]` slot
-        // is read back via load64 + ffrombits). A mixed/non-literal list stays Opaque.
+    // A list OR tuple of scalar literals materializes its slots: an Int element stores its value, a
+    // Float element stores its f64 BITS (the i64-uniform Float repr — read back via load64 +
+    // ffrombits). A `(3, 7)` tuple is physically a 2-slot block [3@12, 7@20], exactly a List[Int]
+    // literal — so a scalar-literal-field tuple shares the IntList materialization. A mixed/
+    // non-literal list or tuple stays Opaque.
+    if let IrExprKind::List { elements } | IrExprKind::Tuple { elements } = &value.kind {
         let ints: Option<Vec<i64>> = elements
             .iter()
             .map(|e| match &e.kind {

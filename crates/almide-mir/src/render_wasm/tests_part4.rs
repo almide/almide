@@ -1752,6 +1752,22 @@
     }
 
     #[test]
+    fn scalar_tuple_construct_and_destructure() {
+        // TUPLE machinery (scalar-field slice): a `(3, 7)` literal materializes a 2-slot block
+        // (Init::IntList, like a List[Int] literal); a `let (a, b) = t` destructure LOADS each
+        // field at its slot (precise extraction, not the container-grain alias). Computes a=3, b=7,
+        // a+b via the bound scalars. Byte-matches v0. The foundation for list.zip/enumerate/etc.
+        let src = "fn main() -> Unit = {\n  \
+            let t = (3, 7)\n  let (a, b) = t\n  \
+            println(int.to_string(a))\n  println(int.to_string(b))\n  \
+            let s = a + b\n  println(int.to_string(s)) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("scalar_tuple_construct_and_destructure", &render_wasm_program(&prog)) {
+            assert_eq!(out, "3\n7\n10");
+        }
+    }
+
+    #[test]
     fn self_hosted_list_string_intersperse() {
         // SELF-HOSTED list.intersperse over a List[String] — insert sep between elements (deep
         // copies). xs=[a,b,c] sep="-" → [a,-,b,-,c] len 5, idx0 "a", idx1 "-", idx4 "c". v0-match.
