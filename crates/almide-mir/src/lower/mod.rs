@@ -690,7 +690,7 @@ pub(crate) fn is_self_host_option_module_fn(module: &str, func: &str) -> bool {
 /// the plain name. `module.func` is unchanged for everything else.
 pub(crate) fn list_heap_call_name(module: &str, func: &str, result_ty: &Ty) -> String {
     use almide_lang::types::constructor::TypeConstructorId;
-    if module == "list" && matches!(func, "map") {
+    if module == "list" && matches!(func, "map" | "filter") {
         if let Ty::Applied(TypeConstructorId::List, args) = result_ty {
             if args.len() == 1 && is_heap_ty(&args[0]) {
                 return format!("list.{func}_str");

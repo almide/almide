@@ -1261,6 +1261,24 @@
     }
 
     #[test]
+    fn self_hosted_list_filter_str() {
+        // SELF-HOSTED list.filter over a List[String] (the repr-poly _str variant). Single pass: keep
+        // each element whose predicate is true, DEEP-COPYING it into the result; the len header is
+        // patched to the match count. filter(["a","bb","c","dd"], len>1) = ["bb","dd"]; verified via
+        // list.len + list.join. Byte-matches v0.
+        let src = "fn main() -> Unit = {\n  \
+            let parts = string.split(\"a,bb,c,dd\", \",\")\n  \
+            let kept = list.filter(parts, (x) => { let n = string.len(x)\n n > 1 })\n  \
+            println(int.to_string(list.len(kept)))\n  \
+            println(list.join(kept, \"-\")) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "list.filter_str"));
+        if let Some(out) = build_and_run("self_hosted_list_filter_str", &render_wasm_program(&prog)) {
+            assert_eq!(out, "2\nbb-dd");
+        }
+    }
+
+    #[test]
     fn self_hosted_list_map_str() {
         // SELF-HOSTED list.map over a List[String] (the repr-poly _str variant, auto-dispatched on a
         // List[heap] result). Each element is borrowed (prim.load_str), passed to the closure over
