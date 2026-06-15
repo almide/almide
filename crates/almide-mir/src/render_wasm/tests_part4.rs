@@ -1261,6 +1261,24 @@
     }
 
     #[test]
+    fn self_hosted_list_take_drop_str() {
+        // SELF-HOSTED list.take / list.drop over a List[String] (the repr-poly _str variants). Same
+        // clamping as the List[Int] version; each kept element is deep-copied. take(["a","b","c","d"],
+        // 2)=["a","b"]; drop(_,2)=["c","d"]; drop(["a","b"],9) (n>len) = []. Byte-matches v0.
+        let src = "fn main() -> Unit = {\n  \
+            let parts = string.split(\"a,b,c,d\", \",\")\n  \
+            let t = list.take(parts, 2)\n  println(int.to_string(list.len(t)))\n  println(list.join(t, \"-\"))\n  \
+            let d = list.drop(parts, 2)\n  println(int.to_string(list.len(d)))\n  println(list.join(d, \"-\"))\n  \
+            let p2 = string.split(\"a,b\", \",\")\n  let dn = list.drop(p2, 9)\n  println(int.to_string(list.len(dn))) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "list.take_str"));
+        assert!(prog.functions.iter().any(|f| f.name == "list.drop_str"));
+        if let Some(out) = build_and_run("self_hosted_list_take_drop_str", &render_wasm_program(&prog)) {
+            assert_eq!(out, "2\na-b\n2\nc-d\n0");
+        }
+    }
+
+    #[test]
     fn self_hosted_list_reverse_str() {
         // SELF-HOSTED list.reverse over a List[String] (the repr-poly _str variant). Each element is
         // DEEP-COPIED into the mirrored slot. reverse(["a","b","c"])=["c","b","a"]; verified via
