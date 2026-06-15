@@ -673,7 +673,7 @@ pub(crate) fn is_self_host_option_module_fn(module: &str, func: &str) -> bool {
         // result.to_option builds a materialized Option[Int] from a Result's len-tag (Ok → Some,
         // Err → None); option.map rebuilds a materialized Option (Some(f(x)) / None) — a `match`
         // over either result EXECUTES.
-        "result" => matches!(func, "to_option"),
+        "result" => matches!(func, "to_option" | "to_err_option"),
         "option" => matches!(func, "map" | "filter" | "flat_map" | "or_else"),
         _ => false,
     }

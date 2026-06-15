@@ -1261,6 +1261,40 @@
     }
 
     #[test]
+    fn self_hosted_result_to_err_option() {
+        // SELF-HOSTED result.to_err_option(r) = r.err(): Ok → None, Err(e) → Some(e). Builds an
+        // Option[String] with the Err message DEEP-COPIED into Some (v0 clones it). Extracted via a
+        // Some(e) heap match. to_err_option(Ok(5))=None; to_err_option(Err"...")=Some("..."). v0-match.
+        let src = "fn main() -> Unit = {\n  \
+            let r1 = int.parse(\"5\")\n  let o1 = result.to_err_option(r1)\n  \
+            match o1 {\n    Some(e) => println(e),\n    None => println(\"none\"),\n  }\n  \
+            let r2 = int.parse(\"abc\")\n  let o2 = result.to_err_option(r2)\n  \
+            match o2 {\n    Some(e) => println(e),\n    None => println(\"none\"),\n  } }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "result.to_err_option"));
+        if let Some(out) = build_and_run("self_hosted_result_to_err_option", &render_wasm_program(&prog)) {
+            assert_eq!(out, "none\ninvalid digit found in string");
+        }
+    }
+
+    #[test]
+    fn result_to_err_option_loop_is_bounded() {
+        // ADVERSARIAL leak guard: a loop turning a short-message Err into Some(copy) and matching it
+        // must run in BOUNDED memory — all blocks are one-slot (20-byte). The copy is freed once.
+        let src = "fn main() -> Unit = {\n  \
+            var i = 0\n  \
+            while i < 4000 {\n    \
+              let er = option.to_result(list.get([5], 9), \"e\")\n    let o = result.to_err_option(er)\n    \
+              match o {\n      Some(e) => println(e),\n      None => println(\"n\"),\n    }\n    \
+              i = i + 1\n  }\n  \
+            println(\"done\") }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("result_to_err_option_loop_bounded", &render_wasm_program(&prog)) {
+            assert!(out.ends_with("done"), "loop must terminate (bounded memory)");
+        }
+    }
+
+    #[test]
     fn self_hosted_result_flat_map() {
         // SELF-HOSTED result.flat_map(r, f) = r.and_then(f): Ok(x) → f(x) (a Result itself), Err(e)
         // → Err(e) (message preserved by deep copy). The closure RETURNS a Result (heap-result

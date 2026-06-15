@@ -47,3 +47,13 @@ fn result_flat_map(r: Result[Int, String], f: (Int) -> Result[Int, String]) -> R
   let x = prim.load64(h + 12)
   if len == 0 then __res_flatmap_ok(x, f) else Err(__rcopy_at(x))
 }
+
+// result.to_err_option(r) = r.err(): Ok → None, Err(e) → Some(e). Builds an Option[String] (the
+// Err message deep-copied into Some, as v0 clones it). The Some owns a fresh copy — single owner,
+// no double-free with the borrowed input. `r` is borrowed; the Option is freshly owned.
+fn result_to_err_option(r: Result[Int, String]) -> Option[String] = {
+  let h = prim.handle(r)
+  let len = prim.load32(h + 4)
+  let x = prim.load64(h + 12)
+  if len == 0 then None else Some(__rcopy_at(x))
+}
