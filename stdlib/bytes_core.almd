@@ -122,3 +122,83 @@ fn bytes_ends_with(b: Bytes, suffix: Bytes) -> Bool = {
   let ps = prim.handle(suffix) + 12
   if sn > bn then false else __byteq(pb, ps, sn, 0)
 }
+
+// bytes.slice(b, start, end) -> the [start, end) byte range (v0 clamps each index to
+// [0, len] with negative wrapping to len; a start >= end yields an empty Bytes).
+fn bytes_slice(b: Bytes, start: Int, end: Int) -> Bytes = {
+  let len = prim.load32(prim.handle(b) + 4)
+  let s = if start < 0 then len else (if start > len then len else start)
+  let e0 = if end < 0 then len else (if end > len then len else end)
+  let e = if e0 > s then e0 else s
+  let m = e - s
+  let out = prim.alloc_bytes(m)
+  let dst = prim.handle(out) + 12
+  let src = prim.handle(b) + 12 + s
+  let _x = __bytecopy(dst, src, m, 0)
+  out
+}
+
+// Lexicographic byte comparison: -1 if a < b, 0 if equal, 1 if a > b (a prefix is the smaller).
+fn __bytecmp(pa: Int, pb: Int, na: Int, nb: Int, i: Int) -> Int =
+  if i >= na then (if i >= nb then 0 else 0 - 1)
+  else {
+    if i >= nb then 1
+    else {
+      let x = prim.load8(pa + i)
+      let y = prim.load8(pb + i)
+      if x < y then 0 - 1
+      else { if x > y then 1 else __bytecmp(pa, pb, na, nb, i + 1) }
+    }
+  }
+
+// bytes.cmp(a, b) -> -1 / 0 / 1 (lexicographic).
+fn bytes_cmp(a: Bytes, b: Bytes) -> Int = {
+  let na = prim.load32(prim.handle(a) + 4)
+  let nb = prim.load32(prim.handle(b) + 4)
+  let pa = prim.handle(a) + 12
+  let pb = prim.handle(b) + 12
+  __bytecmp(pa, pb, na, nb, 0)
+}
+
+// Store `val` into the byte at address `p`; returns 0 so it can sit in a value position.
+fn __set_byte(p: Int, val: Int) -> Int = { prim.store8(p, val); 0 }
+
+// bytes.set(b, i, val) -> a fresh copy of b with byte i set to val (out-of-range i = no change).
+fn bytes_set(b: Bytes, i: Int, val: Int) -> Bytes = {
+  let n = prim.load32(prim.handle(b) + 4)
+  let out = prim.alloc_bytes(n)
+  let dst = prim.handle(out) + 12
+  let _x = __bytecopy(dst, prim.handle(b) + 12, n, 0)
+  let pos = dst + i
+  let _y = if i >= 0 then (if i < n then __set_byte(pos, val) else 0) else 0
+  out
+}
+
+// Fill n bytes at p with val.
+fn __fillval(p: Int, n: Int, val: Int, i: Int) -> Int =
+  if i >= n then 0
+  else { prim.store8(p + i, val); __fillval(p, n, val, i + 1) }
+
+// bytes.pad_left(b, target_len, val) -> b prefixed with `val` bytes up to target_len (no-op if longer).
+fn bytes_pad_left(b: Bytes, target_len: Int, val: Int) -> Bytes = {
+  let n = prim.load32(prim.handle(b) + 4)
+  let t = if target_len > n then target_len else n
+  let pad = t - n
+  let out = prim.alloc_bytes(t)
+  let dst = prim.handle(out) + 12
+  let _x = __fillval(dst, pad, val, 0)
+  let _y = __bytecopy(dst + pad, prim.handle(b) + 12, n, 0)
+  out
+}
+
+// bytes.pad_right(b, target_len, val) -> b suffixed with `val` bytes up to target_len (no-op if longer).
+fn bytes_pad_right(b: Bytes, target_len: Int, val: Int) -> Bytes = {
+  let n = prim.load32(prim.handle(b) + 4)
+  let t = if target_len > n then target_len else n
+  let pad = t - n
+  let out = prim.alloc_bytes(t)
+  let dst = prim.handle(out) + 12
+  let _x = __bytecopy(dst, prim.handle(b) + 12, n, 0)
+  let _y = __fillval(dst + n, pad, val, 0)
+  out
+}

@@ -549,6 +549,45 @@
     }
 
     #[test]
+    fn self_hosted_bytes_slice_cmp_set_pad() {
+        // SELF-HOSTED bytes.slice/cmp/set/pad_left/pad_right. slice("hello",1,4)="ell";
+        // slice("hello",3,1)=empty; cmp lexicographic (printed as -1/0/1 -> 0/1/2 since
+        // int.to_string is non-negative); set copies+overwrites one byte (oob = no change);
+        // pad_left/pad_right extend with a fill byte. Byte-matches v0.
+        let src = "fn main() -> Unit = {\n  \
+            let hello = bytes.from_string(\"hello\")\n  \
+            let sl = bytes.slice(hello, 1, 4)\n  \
+            println(int.to_string(bytes.len(sl)))\n  \
+            println(int.to_string(bytes.get_or(sl, 0, 0)))\n  \
+            println(int.to_string(bytes.get_or(sl, 2, 0)))\n  \
+            let sl2 = bytes.slice(hello, 3, 1)\n  \
+            println(int.to_string(bytes.len(sl2)))\n  \
+            let abc = bytes.from_string(\"abc\")\n  let abd = bytes.from_string(\"abd\")\n  let ab = bytes.from_string(\"ab\")\n  \
+            let c1 = bytes.cmp(abc, abd)\n  let r1 = if c1 < 0 then 0 else (if c1 > 0 then 2 else 1)\n  println(int.to_string(r1))\n  \
+            let c2 = bytes.cmp(abc, abc)\n  let r2 = if c2 < 0 then 0 else (if c2 > 0 then 2 else 1)\n  println(int.to_string(r2))\n  \
+            let c3 = bytes.cmp(abd, abc)\n  let r3 = if c3 < 0 then 0 else (if c3 > 0 then 2 else 1)\n  println(int.to_string(r3))\n  \
+            let c4 = bytes.cmp(ab, abc)\n  let r4 = if c4 < 0 then 0 else (if c4 > 0 then 2 else 1)\n  println(int.to_string(r4))\n  \
+            let st = bytes.set(abc, 1, 90)\n  println(int.to_string(bytes.get_or(st, 1, 0)))\n  \
+            let st2 = bytes.set(abc, 5, 90)\n  println(int.to_string(bytes.get_or(st2, 1, 0)))\n  \
+            let hi = bytes.from_string(\"hi\")\n  \
+            let pl = bytes.pad_left(hi, 5, 48)\n  \
+            println(int.to_string(bytes.len(pl)))\n  \
+            println(int.to_string(bytes.get_or(pl, 0, 0)))\n  \
+            println(int.to_string(bytes.get_or(pl, 4, 0)))\n  \
+            let pr = bytes.pad_right(hi, 5, 48)\n  \
+            println(int.to_string(bytes.get_or(pr, 0, 0)))\n  \
+            println(int.to_string(bytes.get_or(pr, 4, 0))) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "bytes.slice"));
+        assert!(prog.functions.iter().any(|f| f.name == "bytes.cmp"));
+        if let Some(out) = build_and_run("self_hosted_bytes_slice_cmp_set_pad", &render_wasm_program(&prog)) {
+            // slice len3 b0=101 b2=108; empty len0; cmp 0,1,2,0; set b1=90, oob b1=98;
+            // pad_left len5 b0=48 b4=105; pad_right b0=104 b4=48
+            assert_eq!(out, "3\n101\n108\n0\n0\n1\n2\n0\n90\n98\n5\n48\n105\n104\n48");
+        }
+    }
+
+    #[test]
     fn self_hosted_math_sqrt() {
         // SELF-HOSTED math.sqrt = prim.fsqrt (f64.sqrt, byte-exact with v0). sqrt(16)=4,
         // sqrt(2)=1.41…→to_int 1, sqrt(81)=9.
