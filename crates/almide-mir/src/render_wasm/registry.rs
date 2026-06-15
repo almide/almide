@@ -134,6 +134,8 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
                 ("bytes_read_i64_le", "bytes.read_i64_le"),
                 ("bytes_read_f64_be", "bytes.read_f64_be"),
                 ("bytes_read_f64_le", "bytes.read_f64_le"),
+                ("bytes_get", "bytes.get"),
+                ("bytes_index_of", "bytes.index_of"),
             ],
         ),
         (

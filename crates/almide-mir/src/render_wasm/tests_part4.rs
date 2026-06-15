@@ -714,6 +714,35 @@
     }
 
     #[test]
+    fn self_hosted_bytes_get_index_of() {
+        // SELF-HOSTED bytes.get / bytes.index_of returning a MATERIALIZED Option[Int] (the
+        // 0-or-1-element-list layout, reusing the list.get machinery). A `match` over the result
+        // EXECUTES (the call is tracked in is_self_host_option_module_fn): get(1)=Some(20),
+        // get(5)=None; index_of("ll")=Some(2), index_of("xyz")=None, index_of("")=Some(0).
+        let src = "fn main() -> Unit = {\n  \
+            let xs = [10, 20, 30]\n  let b = bytes.from_list(xs)\n  \
+            let g1 = bytes.get(b, 1)\n  \
+            match g1 {\n    Some(v) => println(int.to_string(v)),\n    None => println(\"none\"),\n  }\n  \
+            let g2 = bytes.get(b, 5)\n  \
+            match g2 {\n    Some(v) => println(int.to_string(v)),\n    None => println(\"none\"),\n  }\n  \
+            let hello = bytes.from_string(\"hello\")\n  let ll = bytes.from_string(\"ll\")\n  \
+            let i1 = bytes.index_of(hello, ll)\n  \
+            match i1 {\n    Some(v) => println(int.to_string(v)),\n    None => println(\"none\"),\n  }\n  \
+            let xyz = bytes.from_string(\"xyz\")\n  \
+            let i2 = bytes.index_of(hello, xyz)\n  \
+            match i2 {\n    Some(v) => println(int.to_string(v)),\n    None => println(\"none\"),\n  }\n  \
+            let emp = bytes.from_string(\"\")\n  \
+            let i3 = bytes.index_of(hello, emp)\n  \
+            match i3 {\n    Some(v) => println(int.to_string(v)),\n    None => println(\"none\"),\n  } }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "bytes.get"));
+        assert!(prog.functions.iter().any(|f| f.name == "bytes.index_of"));
+        if let Some(out) = build_and_run("self_hosted_bytes_get_index_of", &render_wasm_program(&prog)) {
+            assert_eq!(out, "20\nnone\n2\nnone\n0");
+        }
+    }
+
+    #[test]
     fn self_hosted_hex_encode() {
         // SELF-HOSTED hex.encode / hex.encode_upper (Bytes -> hex String) over the bytes machinery
         // + the bitwise prim floor. Each byte -> two hex digits (high nibble byte>>4, low byte&0xF).

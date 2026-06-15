@@ -630,3 +630,37 @@ fn bytes_read_f64_le(b: Bytes, pos: Int) -> Float = {
     }
   }
 }
+
+// Option[Int] materialization helpers (the 0-or-1-element-list layout: Some(x)=len1 data[0]=x,
+// None=len0). Built in TAIL position so the lowering materializes them (Init::OptSome/OptNone).
+fn __byte_none() -> Option[Int] = None
+fn __byte_some_at(h: Int, i: Int) -> Option[Int] = Some(prim.load8(h + 12 + i))
+fn __byte_some_idx(i: Int) -> Option[Int] = Some(i)
+
+// bytes.get(b, i) -> Some(byte i) for an in-bounds index, else None.
+fn bytes_get(b: Bytes, i: Int) -> Option[Int] = {
+  let h = prim.handle(b)
+  let len = prim.load32(h + 4)
+  if i < 0 then __byte_none()
+  else if i >= len then __byte_none()
+  else __byte_some_at(h, i)
+}
+
+// First position >= i where the pn-byte pattern at pp matches the haystack at pb, or -1. The
+// empty-pattern (pn=0) case naturally returns 0 (__byteq of 0 bytes is true); pn>bn returns -1.
+fn __b_idx_find(pb: Int, pp: Int, bn: Int, pn: Int, i: Int) -> Int =
+  if i + pn > bn then -1
+  else {
+    let eq = __byteq(pb + i, pp, pn, 0)
+    if eq then i else __b_idx_find(pb, pp, bn, pn, i + 1)
+  }
+
+// bytes.index_of(b, pat) -> Some(first index of pat in b), or None (empty pat = Some(0)).
+fn bytes_index_of(b: Bytes, pat: Bytes) -> Option[Int] = {
+  let bn = prim.load32(prim.handle(b) + 4)
+  let pn = prim.load32(prim.handle(pat) + 4)
+  let pb = prim.handle(b) + 12
+  let pp = prim.handle(pat) + 12
+  let idx = __b_idx_find(pb, pp, bn, pn, 0)
+  if idx < 0 then __byte_none() else __byte_some_idx(idx)
+}
