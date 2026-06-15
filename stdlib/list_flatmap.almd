@@ -1,0 +1,52 @@
+// list_flatmap — SELF-HOSTED `list.flat_map` for v1 over the heap-returning closure machinery.
+// f: (Int) -> List[Int] ($closure_fn1_h) maps each element to a sublist; the result is their
+// concatenation. Two passes (the result length is unknown up front): pass 1 sums the sublist
+// lengths, pass 2 copies each sublist's elements into the over-allocated buffer. Each pass's
+// per-element work lives in a __step fn so the owned sublist `sub` is dropped on RETURN —
+// before the next element — keeping only ONE sublist live (O(1)). A pure f is called twice
+// (vs v0's once) — same RESULT. List[Int]; source borrowed; result owned.
+
+fn __flm_len_step(sh: Int, f: (Int) -> List[Int], i: Int) -> Int = {
+  let x = prim.load64(sh + 12 + i * 8)
+  let sub = f(x)
+  let subh = prim.handle(sub)
+  prim.load32(subh + 4)
+}
+
+fn __flm_total(sh: Int, f: (Int) -> List[Int], n: Int, i: Int, acc: Int) -> Int =
+  if i >= n then acc
+  else {
+    let s = __flm_len_step(sh, f, i)
+    __flm_total(sh, f, n, i + 1, acc + s)
+  }
+
+fn __flm_copy(dh: Int, subh: Int, sublen: Int, j: Int, di: Int) -> Int =
+  if j >= sublen then di
+  else {
+    let e = prim.load64(subh + 12 + j * 8)
+    prim.store64(dh + 12 + di * 8, e)
+    __flm_copy(dh, subh, sublen, j + 1, di + 1)
+  }
+
+fn __flm_fill_step(dh: Int, sh: Int, f: (Int) -> List[Int], i: Int, di: Int) -> Int = {
+  let x = prim.load64(sh + 12 + i * 8)
+  let sub = f(x)
+  let subh = prim.handle(sub)
+  let sublen = prim.load32(subh + 4)
+  __flm_copy(dh, subh, sublen, 0, di)
+}
+
+fn __flm_fill(dh: Int, sh: Int, f: (Int) -> List[Int], n: Int, i: Int, di: Int) -> Int =
+  if i >= n then di
+  else {
+    let ndi = __flm_fill_step(dh, sh, f, i, di)
+    __flm_fill(dh, sh, f, n, i + 1, ndi)
+  }
+
+fn list_flat_map(xs: List[Int], f: (Int) -> List[Int]) -> List[Int] = {
+  let n = list.len(xs)
+  let total = __flm_total(prim.handle(xs), f, n, 0, 0)
+  let buf = prim.alloc_list(total)
+  let _x = __flm_fill(prim.handle(buf), prim.handle(xs), f, n, 0, 0)
+  buf
+}

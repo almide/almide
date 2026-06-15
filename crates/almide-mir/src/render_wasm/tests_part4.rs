@@ -278,6 +278,42 @@
     }
 
     #[test]
+    fn self_hosted_list_flat_map() {
+        // SELF-HOSTED `list.flat_map` — closure returns a LIST (heap-returning closure). f =
+        // (x) => list.range(x, x+2) = [x, x+1]; flat_map([1,2,3], f) = [1,2]++[2,3]++[3,4] =
+        // [1,2,2,3,3,4]. len 6, sum 15, ys[0]=1, ys[5]=4. Two-pass; each owned sublist dropped.
+        let src = "fn main() -> Unit = {\n  \
+            let ys = list.flat_map([1, 2, 3], (x) => list.range(x, x + 2))\n  \
+            println(int.to_string(list.len(ys)))\n  \
+            println(int.to_string(list.sum(ys)))\n  \
+            println(int.to_string(list.get_or(ys, 0, 0)))\n  \
+            println(int.to_string(list.get_or(ys, 5, 0))) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "list.flat_map"));
+        if let Some(out) = build_and_run("self_hosted_list_flat_map", &render_wasm_program(&prog)) {
+            // [1,2,2,3,3,4]: len6 sum15 ys[0]=1 ys[5]=4
+            assert_eq!(out, "6\n15\n1\n4");
+        }
+    }
+
+    #[test]
+    fn flat_map_sublists_do_not_leak() {
+        // BOUNDED-LOOP LEAK GUARD for the heap-returning (List) closure. flat_map over 1000
+        // elems allocates 1000 owned sublists; each is dropped on its __step's return + reused
+        // (fixed 1-elem sublists are same-size, so the head-only free-list reclaims them). If a
+        // sublist leaked the 1-page memory would trap. f = (x) => [x] → result len n.
+        let src = "fn main() -> Unit = {\n  \
+            let xs = list.range(0, 1000)\n  \
+            let ys = list.flat_map(xs, (x) => list.range(x, x + 1))\n  \
+            println(int.to_string(list.len(ys))) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("flat_map_no_leak", &render_wasm_program(&prog)) {
+            // range(x, x+1) = [x] (1 elem) per element → result len = 1000
+            assert_eq!(out, "1000");
+        }
+    }
+
+    #[test]
     fn self_hosted_list_take_end_drop_end() {
         // list.take_end/drop_end self-hosted: last n / all-but-last n, List[Int] slot-copy.
         // take_end([1,2,3,4,5],2)=[4,5] ([0]=4,len 2); drop_end([1,2,3,4,5],2)=[1,2,3]
