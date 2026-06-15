@@ -650,7 +650,11 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
         (include_str!("../../../stdlib/list_reverse.almd"), &[("list_reverse", "list.reverse")]),
         (
             include_str!("../../../stdlib/list_take_drop.almd"),
-            &[("list_take", "list.take"), ("list_drop", "list.drop")],
+            &[
+                ("list_take", "list.take"),
+                ("list_drop", "list.drop"),
+                ("list_slice", "list.slice"),
+            ],
         ),
         (
             include_str!("../../../stdlib/list_fold.almd"),
@@ -1767,6 +1771,33 @@ mod tests {
         assert!(prog.functions.iter().any(|f| f.name == "list.drop"), "linked");
         if let Some(out) = build_and_run("list_take_drop", &render_wasm_program(&prog)) {
             assert_eq!(out, "2\n10\n20\n30\n40");
+        }
+    }
+
+    #[test]
+    fn self_hosted_list_slice() {
+        // list.slice self-hosted (List[Int] construction): slice([10,20,30,40,50],1,4)=
+        // [20,30,40]; end clamps to len (slice(...,3,99)=[40,50]); start>=end is empty
+        // (slice(...,4,2)=[]). byte-matching v0.
+        let src = "fn main() -> Unit = {\n  \
+            let xs = [10, 20, 30, 40, 50]\n  \
+            let a = list.slice(xs, 1, 4)\n  \
+            let b = list.slice(xs, 3, 99)\n  \
+            let c = list.slice(xs, 4, 2)\n  \
+            let al = list.len(a)\n  \
+            let a0 = list.get_or(a, 0, 0)\n  \
+            let a2 = list.get_or(a, 2, 0)\n  \
+            let bl = list.len(b)\n  \
+            let cl = list.len(c)\n  \
+            println(int.to_string(al))\n  \
+            println(int.to_string(a0))\n  \
+            println(int.to_string(a2))\n  \
+            println(int.to_string(bl))\n  \
+            println(int.to_string(cl)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "list.slice"), "linked");
+        if let Some(out) = build_and_run("list_slice", &render_wasm_program(&prog)) {
+            assert_eq!(out, "3\n20\n40\n2\n0");
         }
     }
 

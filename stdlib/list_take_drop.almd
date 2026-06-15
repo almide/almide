@@ -38,3 +38,17 @@ fn list_drop(xs: List[Int], n: Int) -> List[Int] = {
   let _x = __copy_slice(h, bh, start, count, 0)
   buf
 }
+
+// list.slice(xs, start, end) = elements [start, min(end, len)); empty when start >= end.
+// The negative edges mirror v0's `as usize` (negative end -> len, negative start -> empty).
+fn list_slice(xs: List[Int], start: Int, end: Int) -> List[Int] = {
+  let h = prim.handle(xs)
+  let len = prim.load32(h + 4)
+  let e = if end < 0 then len else (if end > len then len else end)
+  let s = if start < 0 then len else start
+  let count = if s >= e then 0 else e - s
+  let buf = prim.alloc_list(count)
+  let bh = prim.handle(buf)
+  let _x = __copy_slice(h, bh, s, count, 0)
+  buf
+}
