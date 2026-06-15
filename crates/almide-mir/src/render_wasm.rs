@@ -657,6 +657,14 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
         ),
         (include_str!("../../../stdlib/list_get_or.almd"), &[("list_get_or", "list.get_or")]),
         (
+            include_str!("../../../stdlib/int_bitcount.almd"),
+            &[
+                ("int_pop_count", "int.pop_count"),
+                ("int_count_trailing_zeros", "int.count_trailing_zeros"),
+                ("int_count_leading_zeros", "int.count_leading_zeros"),
+            ],
+        ),
+        (
             include_str!("../../../stdlib/int_bits.almd"),
             &[
                 ("int_band", "int.band"),
@@ -1690,6 +1698,31 @@ mod tests {
         assert!(prog.functions.iter().any(|f| f.name == "int.bxor"), "linked");
         if let Some(out) = build_and_run("int_bits", &render_wasm_program(&prog)) {
             assert_eq!(out, "8\n14\n6\n-6\n16\n64\n-4");
+        }
+    }
+
+    #[test]
+    fn self_hosted_int_bit_counts() {
+        // int.pop_count / count_trailing_zeros / count_leading_zeros self-hosted (composed
+        // from bshr/band over 64 bits): pop_count(8)=1, pop_count(7)=3, ctz(8)=3, ctz(0)=64,
+        // clz(8)=60, clz(1)=63. byte-matching v0's u64 count_ones/trailing/leading_zeros.
+        let src = "fn main() -> Unit = {\n  \
+            let a = int.pop_count(8)\n  \
+            let b = int.pop_count(7)\n  \
+            let c = int.count_trailing_zeros(8)\n  \
+            let d = int.count_trailing_zeros(0)\n  \
+            let e = int.count_leading_zeros(8)\n  \
+            let f = int.count_leading_zeros(1)\n  \
+            println(int.to_string(a))\n  \
+            println(int.to_string(b))\n  \
+            println(int.to_string(c))\n  \
+            println(int.to_string(d))\n  \
+            println(int.to_string(e))\n  \
+            println(int.to_string(f)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "int.pop_count"), "linked");
+        if let Some(out) = build_and_run("int_bitcount", &render_wasm_program(&prog)) {
+            assert_eq!(out, "1\n3\n3\n64\n60\n63");
         }
     }
 
