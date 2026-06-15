@@ -1,0 +1,46 @@
+// list_dedup — SELF-HOSTED `list.dedup` for v1 over the prim floor: drop CONSECUTIVE
+// duplicates (keep an element only when it differs from the one before it), v0's dedup.
+// Two passes over the i64 slots: count the kept run-starts, then fill a fresh List[Int]
+// (prim.alloc_list). Sound + loop-bounded (i64 value copies); List[Int] only. The empty
+// list takes a separate arm so the first element is never read out of bounds.
+
+fn __dedup_count(h: Int, n: Int, i: Int, prev: Int, acc: Int) -> Int =
+  if i >= n then acc
+  else {
+    let cur = prim.load64(h + 12 + i * 8)
+    let keep = if cur == prev then 0 else 1
+    __dedup_count(h, n, i + 1, cur, acc + keep)
+  }
+
+fn __dedup_fill(sh: Int, dh: Int, n: Int, i: Int, prev: Int, di: Int) -> Int =
+  if i >= n then 0
+  else {
+    let cur = prim.load64(sh + 12 + i * 8)
+    if cur == prev then __dedup_fill(sh, dh, n, i + 1, prev, di)
+    else {
+      prim.store64(dh + 12 + di * 8, cur)
+      __dedup_fill(sh, dh, n, i + 1, cur, di + 1)
+    }
+  }
+
+fn __dedup_empty() -> List[Int] = {
+  let buf = prim.alloc_list(0)
+  buf
+}
+
+fn __dedup_build(h: Int, n: Int) -> List[Int] = {
+  let first = prim.load64(h + 12)
+  let count = __dedup_count(h, n, 1, first, 1)
+  let buf = prim.alloc_list(count)
+  let dh = prim.handle(buf)
+  prim.store64(dh + 12, first)
+  let _f = __dedup_fill(h, dh, n, 1, first, 1)
+  buf
+}
+
+fn list_dedup(xs: List[Int]) -> List[Int] = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  if n <= 0 then __dedup_empty()
+  else __dedup_build(h, n)
+}

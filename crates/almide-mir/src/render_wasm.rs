@@ -628,6 +628,7 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
         (include_str!("../../../stdlib/list_sum.almd"), &[("list_sum", "list.sum")]),
         (include_str!("../../../stdlib/list_sort.almd"), &[("list_sort", "list.sort")]),
         (include_str!("../../../stdlib/list_unique.almd"), &[("list_unique", "list.unique")]),
+        (include_str!("../../../stdlib/list_dedup.almd"), &[("list_dedup", "list.dedup")]),
         (include_str!("../../../stdlib/string_slice.almd"), &[("string_slice", "string.slice")]),
         (
             include_str!("../../../stdlib/string_trim.almd"),
@@ -1963,6 +1964,29 @@ mod tests {
         assert!(prog.functions.iter().any(|f| f.name == "list.unique"), "linked");
         if let Some(out) = build_and_run("list_unique", &render_wasm_program(&prog)) {
             assert_eq!(out, "3\n1\n2\n3");
+        }
+    }
+
+    #[test]
+    fn self_hosted_list_dedup() {
+        // list.dedup self-hosted (drop CONSECUTIVE duplicates only): dedup([1,1,2,2,1])=
+        // [1,2,1] (the trailing 1 stays — not adjacent to the earlier 1s). Read back via
+        // list.len + list.get_or. byte-matching v0.
+        let src = "fn main() -> Unit = {\n  \
+            let xs = [1, 1, 2, 2, 1]\n  \
+            let d = list.dedup(xs)\n  \
+            let dl = list.len(d)\n  \
+            let d0 = list.get_or(d, 0, 0)\n  \
+            let d1 = list.get_or(d, 1, 0)\n  \
+            let d2 = list.get_or(d, 2, 0)\n  \
+            println(int.to_string(dl))\n  \
+            println(int.to_string(d0))\n  \
+            println(int.to_string(d1))\n  \
+            println(int.to_string(d2)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "list.dedup"), "linked");
+        if let Some(out) = build_and_run("list_dedup", &render_wasm_program(&prog)) {
+            assert_eq!(out, "3\n1\n2\n1");
         }
     }
 
