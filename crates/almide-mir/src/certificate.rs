@@ -135,6 +135,16 @@ pub struct CapWitness {
 /// (the single, exhaustive mapping). NOTE: capabilities reached transitively
 /// through [`Op::CallFn`] (user/runtime callees) are a later brick — this
 /// witness covers a function's DIRECT host effects.
+/// The lifted-function NAME a value denotes, if it was bound by an `Op::FuncRef` in this
+/// function — the closures caps fold reads this to follow a `CallIndirect` through a known
+/// lambda (MIR values are single-assignment, so the lookup is unambiguous).
+fn funcref_name(func: &MirFunction, v: ValueId) -> Option<&str> {
+    func.ops.iter().find_map(|op| match op {
+        Op::FuncRef { dst, name } if *dst == v => Some(name.as_str()),
+        _ => None,
+    })
+}
+
 pub fn cap_witness(func: &MirFunction) -> CapWitness {
     let mut used: Vec<Capability> = Vec::new();
     for op in &func.ops {
@@ -149,12 +159,18 @@ pub fn cap_witness(func: &MirFunction) -> CapWitness {
         if let Op::Prim { kind: crate::PrimKind::FdWrite, .. } = op {
             used.push(Capability::Stdout);
         }
-        // SOUNDNESS CRUX: a CallIndirect invokes an UNANALYZABLE closure, which may reach
-        // ANY capability. Conservatively mark EVERY capability used (here: Stdout, the only
-        // modeled one), so `used ⊆ declared` holds ONLY for a fn that DECLARES it — a closure
-        // that secretly writes Stdout can never pass caps un-witnessed (accept-but-unsafe).
-        if let Op::CallIndirect { .. } = op {
-            used.push(Capability::Stdout);
+        // SOUNDNESS CRUX: a CallIndirect invokes a closure that may reach ANY capability.
+        // When the table index resolves to a KNOWN lifted lambda (a `FuncRef` in THIS
+        // function), its REAL caps are folded transitively by `reachable_caps` (which
+        // follows the same `FuncRef` edge) — no conservative taint needed, so a non-printing
+        // closure stays caps-verified. Only a DYNAMIC closure (table_idx not a local
+        // `FuncRef` — e.g. a closure PARAMETER) is unanalyzable here, so it conservatively
+        // marks Stdout used: such a fn is caps-verified ONLY if it DECLARES it (a closure
+        // that secretly writes Stdout can never pass un-witnessed — accept-but-unsafe).
+        if let Op::CallIndirect { table_idx, .. } = op {
+            if funcref_name(func, *table_idx).is_none() {
+                used.push(Capability::Stdout);
+            }
         }
     }
     CapWitness { allowed: func.declared_caps.clone(), used }
@@ -200,6 +216,14 @@ pub fn reachable_caps(
     for op in &func.ops {
         if let Op::CallFn { name: callee, .. } = op {
             caps.extend(reachable_caps(callee, program, visited));
+        }
+        // A CallIndirect through a known lifted lambda folds that lambda's caps — the same
+        // edge cap_witness trusts to drop the conservative taint, so the two stay sound
+        // together (a printing lambda's Stdout still reaches the caller; a pure one's ∅).
+        if let Op::CallIndirect { table_idx, .. } = op {
+            if let Some(callee) = funcref_name(func, *table_idx) {
+                caps.extend(reachable_caps(callee, program, visited));
+            }
         }
     }
     caps
@@ -619,6 +643,72 @@ mod tests {
         assert!(
             !w.used.iter().all(|c| w.allowed.contains(c)),
             "a closure caller with no declared caps must NOT be silently caps-verified"
+        );
+    }
+
+    #[test]
+    fn call_indirect_through_a_pure_funcref_folds_no_caps() {
+        use std::collections::{BTreeMap, BTreeSet};
+        // PRECISE FOLD: main = `f = FuncRef("pure_lambda"); (f)()` where the lambda is PURE.
+        // The table index resolves to a KNOWN lifted lambda, so cap_witness does NOT
+        // conservatively taint Stdout — the lambda's real (empty) caps are folded instead,
+        // keeping a non-printing closure caps-VERIFIED (no spurious taint, no corpus drop).
+        let mut pure_lambda = func(vec![Op::ConstInt { dst: ValueId(0), value: 1 }]);
+        pure_lambda.name = "pure_lambda".into();
+        let mut main = func(vec![
+            Op::FuncRef { dst: ValueId(0), name: "pure_lambda".into() },
+            Op::CallIndirect { dst: None, table_idx: ValueId(0), args: vec![], result: None },
+        ]);
+        main.name = "main".into();
+        assert!(
+            cap_witness(&main).used.is_empty(),
+            "a CallIndirect to a known pure lambda must not conservatively taint"
+        );
+        let mut program: BTreeMap<String, MirFunction> = BTreeMap::new();
+        for f in [pure_lambda, main.clone()] {
+            program.insert(f.name.clone(), f);
+        }
+        let mut seen = BTreeSet::new();
+        assert!(
+            reachable_caps("main", &program, &mut seen).is_empty(),
+            "a pure-lambda closure reaches no capability"
+        );
+    }
+
+    #[test]
+    fn call_indirect_through_a_printing_funcref_still_reaches_stdout() {
+        use std::collections::{BTreeMap, BTreeSet};
+        // ADVERSARIAL: the lambda SECRETLY prints. The known-FuncRef fold must STILL surface
+        // its Stdout (no accept-but-unsafe) — the fold follows the same edge cap_witness
+        // dropped the taint for, so a printing lambda's effect always reaches the caller.
+        let mut printing_lambda = func(vec![
+            Op::Const { dst: ValueId(0) },
+            Op::Call {
+                dst: None,
+                func: RtFn::PrintInt,
+                args: vec![CallArg::Scalar(ValueId(0))],
+                result: None,
+            },
+        ]);
+        printing_lambda.name = "printing_lambda".into();
+        let mut main = func(vec![
+            Op::FuncRef { dst: ValueId(0), name: "printing_lambda".into() },
+            Op::CallIndirect { dst: None, table_idx: ValueId(0), args: vec![], result: None },
+        ]);
+        main.name = "main".into();
+        let mut program: BTreeMap<String, MirFunction> = BTreeMap::new();
+        for f in [printing_lambda, main.clone()] {
+            program.insert(f.name.clone(), f);
+        }
+        let mut seen = BTreeSet::new();
+        assert!(
+            reachable_caps("main", &program, &mut seen).contains(&Capability::Stdout),
+            "a printing closure must still surface Stdout transitively (no accept-but-unsafe)"
+        );
+        assert_eq!(
+            transitive_cap_witness_string(&main, &program),
+            "|0",
+            "rejected: declares no caps but reaches Stdout through the lambda"
         );
     }
 
