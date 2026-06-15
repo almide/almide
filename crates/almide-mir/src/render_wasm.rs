@@ -1591,6 +1591,46 @@ mod tests {
     }
 
     #[test]
+    fn self_hosted_option_unwrap_or_scalar() {
+        // `<self-host Option[Int]> ?? <Int>` EXECUTES (tag read + payload/fallback): the
+        // Some branch yields the payload, the None branch the fallback. index_of("abcdef",
+        // "cd") ?? 99 = 2, index_of("abcdef","zz") ?? 99 = 99; list.get(xs,1) ?? 0 = 20,
+        // list.get(xs,9) ?? 0 = 0. byte-matching v0's `??`.
+        let src = "fn main() -> Unit = {\n  \
+            let xs = [10, 20, 30]\n  \
+            let a = string.index_of(\"abcdef\", \"cd\") ?? 99\n  \
+            let b = string.index_of(\"abcdef\", \"zz\") ?? 99\n  \
+            let c = list.get(xs, 1) ?? 0\n  \
+            let d = list.get(xs, 9) ?? 0\n  \
+            println(int.to_string(a))\n  \
+            println(int.to_string(b))\n  \
+            println(int.to_string(c))\n  \
+            println(int.to_string(d)) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("unwrap_or", &render_wasm_program(&prog)) {
+            assert_eq!(out, "2\n99\n20\n0");
+        }
+    }
+
+    #[test]
+    fn self_hosted_option_unwrap_or_loop_bounded() {
+        // ADVERSARIAL: `list.get(xs,1) ?? 0` every iteration materializes + drops the
+        // Option (read for its scalar payload), so the loop runs bounded (no leak).
+        let src = "fn main() -> Unit = {\n  \
+            let xs = [10, 20, 30]\n  \
+            var i = 0\n  \
+            while i < 2000 {\n    \
+            let v = list.get(xs, 1) ?? 0\n    \
+            println(int.to_string(v))\n    \
+            i = i + 1\n  } }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("unwrap_or_loop", &render_wasm_program(&prog)) {
+            assert_eq!(out.lines().count(), 2000, "every iteration prints (no OOM/leak)");
+            assert!(out.lines().all(|l| l == "20"));
+        }
+    }
+
+    #[test]
     fn self_hosted_string_starts_and_ends_with() {
         // string.starts_with / string.ends_with self-hosted (pure byte comparison over the
         // prim floor): starts_with("hello","he")=true / ("hello","lo")=false; ends_with(

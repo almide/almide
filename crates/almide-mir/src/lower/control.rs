@@ -379,6 +379,64 @@ impl LowerCtx {
         true
     }
 
+    /// Try to EXECUTE `<materialized Option> ?? <scalar fallback>` to a SCALAR value: read
+    /// the tag (len) and yield the payload (`data[0]`) when Some, else the fallback. Gated
+    /// to a DIRECT self-host Option call — every such fn returns `Option[Int]`, so the
+    /// payload is a scalar (no element alias), and its result is a real materialized Option
+    /// dropped at scope end. Returns the scalar `dst`, or `None` (rolled back) when not in
+    /// this subset (a non-call expr, or a heap fallback) — the caller defers to `Opaque`.
+    ///
+    /// SOUND: the Option's `Alloc` (the now-MATERIALIZED call, no longer elided) is `i`,
+    /// dropped at scope end `d` = balanced; the tag/payload reads are scalar prims, the
+    /// markers no-op, the payload is an i64 value COPY (not an alias), so dropping the
+    /// Option after is safe. The call becoming real only improves caps (analyzed, not
+    /// elided) and stays 1:1 with its IR call-node (no mir>ir issue).
+    pub(crate) fn try_lower_option_unwrap_or(
+        &mut self,
+        expr: &IrExpr,
+        fallback: &IrExpr,
+    ) -> Option<ValueId> {
+        use crate::PrimKind;
+        if !is_self_host_option_call(expr) {
+            return None;
+        }
+        let ops_mark = self.ops.len();
+        let lhh_mark = self.live_heap_handles.len();
+        let handle = match self.lower_call_args(std::slice::from_ref(expr)) {
+            Ok(args) => match args.into_iter().next() {
+                Some(CallArg::Handle(v)) => v,
+                _ => {
+                    self.ops.truncate(ops_mark);
+                    self.live_heap_handles.truncate(lhh_mark);
+                    return None;
+                }
+            },
+            Err(_) => {
+                self.ops.truncate(ops_mark);
+                self.live_heap_handles.truncate(lhh_mark);
+                return None;
+            }
+        };
+        let h = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![handle] });
+        let tag = self.load_at_offset(h, 4, PrimKind::Load { width: 4 });
+        let result = self.fresh_value();
+        self.ops.push(Op::IfThen { cond: tag, dst: Some(result) });
+        let payload = self.load_at_offset(h, 12, PrimKind::Load { width: 8 });
+        self.ops.push(Op::Else { val: Some(payload) });
+        // The fallback is evaluated in the None (else) arm; a heap fallback rolls back.
+        let fb = match self.lower_scalar_value(fallback) {
+            Some(v) => v,
+            None => {
+                self.ops.truncate(ops_mark);
+                self.live_heap_handles.truncate(lhh_mark);
+                return None;
+            }
+        };
+        self.ops.push(Op::EndIf { val: Some(fb) });
+        Some(result)
+    }
+
     /// Emit `base + offset` then a `prim` load of `kind` at that address, returning the
     /// loaded value (an i64 in the prim floor's uniform model). The address arithmetic
     /// mirrors what `prim.handle(x) + offset` lowers to (`Op::ConstInt` + `Op::IntBinOp`).

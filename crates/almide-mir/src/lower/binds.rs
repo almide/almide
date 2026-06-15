@@ -60,6 +60,15 @@ impl LowerCtx {
                     }
                 }
             }
+            // `let idx = string.index_of(s, x) ?? -1` — a `??` over a materialized Option
+            // EXECUTES to a scalar (tag read + payload/fallback), unwrapping the self-host
+            // Option[Int] fns; outside the subset it falls through to the deferred `Const`.
+            if let IrExprKind::UnwrapOr { expr, fallback } = &value.kind {
+                if let Some(dst) = self.try_lower_option_unwrap_or(expr, fallback) {
+                    self.value_of.insert(var, dst);
+                    return Ok(());
+                }
+            }
             let dst = self.fresh_value();
             self.value_of.insert(var, dst);
             self.ops.push(Op::Const { dst });
