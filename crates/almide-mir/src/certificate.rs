@@ -217,13 +217,14 @@ pub fn reachable_caps(
         if let Op::CallFn { name: callee, .. } = op {
             caps.extend(reachable_caps(callee, program, visited));
         }
-        // A CallIndirect through a known lifted lambda folds that lambda's caps — the same
-        // edge cap_witness trusts to drop the conservative taint, so the two stay sound
-        // together (a printing lambda's Stdout still reaches the caller; a pure one's ∅).
-        if let Op::CallIndirect { table_idx, .. } = op {
-            if let Some(callee) = funcref_name(func, *table_idx) {
-                caps.extend(reachable_caps(callee, program, visited));
-            }
+        // A FuncRef CREATES a closure to a known lifted lambda; fold that lambda's caps at
+        // CREATION. This accounts the closure's effects in this function regardless of HOW
+        // or WHETHER it is later invoked (a CallIndirect, a deferred call, an operand call,
+        // or never) — so there is NO call-site coverage requirement, which is what makes
+        // incremental lambda-lifting sound. Precise: a pure lambda folds ∅, a printing one
+        // folds Stdout. The same edge cap_witness trusts to drop the CallIndirect taint.
+        if let Op::FuncRef { name: callee, .. } = op {
+            caps.extend(reachable_caps(callee, program, visited));
         }
     }
     caps
@@ -709,6 +710,37 @@ mod tests {
             transitive_cap_witness_string(&main, &program),
             "|0",
             "rejected: declares no caps but reaches Stdout through the lambda"
+        );
+    }
+
+    #[test]
+    fn func_ref_alone_accounts_the_lambda_caps_without_a_call_indirect() {
+        use std::collections::{BTreeMap, BTreeSet};
+        // COVERAGE-FREE SOUNDNESS: a FuncRef to a printing lambda accounts its Stdout in the
+        // creating function EVEN WITH NO CallIndirect — the closure might be invoked via a
+        // deferred/operand call path or passed elsewhere, so accounting at CREATION means
+        // incremental lambda-lifting cannot lose a closure's effect however the call lowers.
+        let mut printing = func(vec![
+            Op::Const { dst: ValueId(0) },
+            Op::Call {
+                dst: None,
+                func: RtFn::PrintInt,
+                args: vec![CallArg::Scalar(ValueId(0))],
+                result: None,
+            },
+        ]);
+        printing.name = "printing".into();
+        // main only CREATES the closure (FuncRef) — it does NOT CallIndirect it.
+        let mut main = func(vec![Op::FuncRef { dst: ValueId(0), name: "printing".into() }]);
+        main.name = "main".into();
+        let mut program: BTreeMap<String, MirFunction> = BTreeMap::new();
+        for f in [printing, main.clone()] {
+            program.insert(f.name.clone(), f);
+        }
+        let mut seen = BTreeSet::new();
+        assert!(
+            reachable_caps("main", &program, &mut seen).contains(&Capability::Stdout),
+            "creating a closure to a printing lambda must account its Stdout even without a call"
         );
     }
 
