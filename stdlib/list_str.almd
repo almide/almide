@@ -98,3 +98,30 @@ fn list_fold_str(xs: List[String], init: Int, f: (Int, String) -> Int) -> Int = 
   let n = prim.load32(h + 4)
   __list_str_fold_loop(h, f, n, 0, init)
 }
+
+// list.find over a List[String] — the FIRST element satisfying the predicate, as Some(a fresh DEEP
+// COPY), or None (a materialized Option[String]). The element is read as a BORROW; the copy is the
+// owned Some payload (no double-free with the list). Each Option arm is a helper TAIL.
+fn __lfs_none() -> Option[String] = None
+fn __lfs_some(x: String) -> Option[String] = {
+  let copy = string.repeat(x, 1)
+  Some(copy)
+}
+// Split so the lets live in a function BODY and the heap-result `if` is its TAIL (a block with lets
+// as a heap-result-if's else arm does not lower — mirror list_get_str's flat helper-tail shape).
+fn __list_find_str_at(h: Int, f: (String) -> Bool, n: Int, i: Int) -> Option[String] = {
+  let x = prim.load_str(h + 12 + i * 8)
+  let hit = f(x)
+  if hit then __lfs_some(x)
+  else __list_find_str_loop(h, f, n, i + 1)
+}
+
+fn __list_find_str_loop(h: Int, f: (String) -> Bool, n: Int, i: Int) -> Option[String] =
+  if i >= n then __lfs_none()
+  else __list_find_str_at(h, f, n, i)
+
+fn list_find_str(xs: List[String], f: (String) -> Bool) -> Option[String] = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  __list_find_str_loop(h, f, n, 0)
+}

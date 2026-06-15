@@ -722,8 +722,9 @@ pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], resu
                 }
             }
         }
-        // Element-RETURNING accessors over a List[heap] (the result is an Option[heap]).
-        if matches!(func, "get" | "first" | "last") {
+        // Element-RETURNING accessors / search over a List[heap] (the result is an Option[heap]):
+        // get/first/last (positional) + find (predicate higher-order).
+        if matches!(func, "get" | "first" | "last" | "find") {
             if let Ty::Applied(TypeConstructorId::Option, args) = result_ty {
                 if args.len() == 1 && is_heap_ty(&args[0]) {
                     return format!("list.{func}_str");

@@ -1699,6 +1699,24 @@
     }
 
     #[test]
+    fn self_hosted_list_string_find() {
+        // SELF-HOSTED list.find over a List[String] → Option[String] (predicate higher-order; the
+        // matched element returned as Some(deep copy), else None; materialized Option, match-exec).
+        // xs=[apple,banana,kiwi,fig]: find(len==6)=Some("banana"); find(len==99)=None. v0-match.
+        let src = "fn main() -> Unit = {\n  \
+            let xs = string.split(\"apple,banana,kiwi,fig\", \",\")\n  \
+            let f1 = list.find(xs, (x) => { let l = string.len(x)\n l == 6 })\n  \
+            match f1 { Some(v) => println(v), None => println(\"none\"), }\n  \
+            let f2 = list.find(xs, (x) => { let l = string.len(x)\n l == 99 })\n  \
+            match f2 { Some(v) => println(v), None => println(\"none\"), } }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "list.find_str"));
+        if let Some(out) = build_and_run("self_hosted_list_string_find", &render_wasm_program(&prog)) {
+            assert_eq!(out, "banana\nnone");
+        }
+    }
+
+    #[test]
     fn self_hosted_value_str() {
         // SELF-HOSTED value.str — a heap-payload Value (tag 4) owning a deep-copied String at +12.
         // value.str("hello") → tag 4, payload "hello". Verified by reading the block via prim.
