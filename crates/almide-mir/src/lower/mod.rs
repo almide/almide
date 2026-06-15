@@ -245,7 +245,20 @@ impl LowerCtx {
         for p in params {
             let v = self.fresh_value();
             self.value_of.insert(p.var, v);
-            let repr = repr_of(&p.ty)?; // Ptr (heap) / Scalar; Unsupported if Unknown or non-value
+            // A FUNCTION-typed param (`f: (Int) -> Int`, the closures machinery) is a SCALAR
+            // table slot (an i64 index into the module function table), NOT a heap value:
+            // the caller passes the lifted lambda's `FuncRef` value. So it gets a scalar
+            // Repr and joins `funcref_values` — a `f(x)` call in the body then lowers to
+            // `Op::CallIndirect` through it (the dynamic-closure path; cap_witness taints
+            // it conservatively, so a higher-order function stays honestly caps-unverified).
+            // This is what lets `list.map`/`filter`/`fold` be self-hosted in Almide.
+            let repr = if matches!(p.ty, Ty::Fn { .. }) {
+                let r = Repr::Scalar { width: crate::ScalarWidth::Double };
+                self.funcref_values.insert(v);
+                r
+            } else {
+                repr_of(&p.ty)? // Ptr (heap) / Scalar; Unsupported if Unknown or non-value
+            };
             if repr.is_heap() {
                 self.param_values.insert(v);
             }

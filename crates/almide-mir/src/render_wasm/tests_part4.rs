@@ -21,6 +21,26 @@
     }
 
     #[test]
+    fn user_higher_order_function_executes() {
+        // The full closures machinery end-to-end (the path to list.map/filter/fold). A
+        // user-defined higher-order `apply(f, x) = f(x)`: `f` is a FUNCTION-typed PARAM
+        // (a scalar table slot, NOT a heap value) invoked via Op::CallIndirect; the call
+        // site `apply((n) => n + 10, 5)` LIFTS the lambda argument to a FuncRef slot passed
+        // BY VALUE. Computes 15, byte-matching v0. Proves (A) lambda-arg lift + (B) Fn-param
+        // scalar repr + (C) CallIndirect through a function-typed param all compose.
+        let src = "fn apply(f: (Int) -> Int, x: Int) -> Int = {\n  let r = f(x)\n  r\n}\n\
+            fn main() -> Unit = {\n  let v = apply((n) => n + 10, 5)\n  let s = int.to_string(v)\n  println(s) }\n";
+        let prog = lower_source(src);
+        assert!(
+            prog.functions.iter().any(|f| f.name.starts_with("__lambda_")),
+            "the lambda argument must be lifted to a __lambda_* function"
+        );
+        if let Some(out) = build_and_run("user_higher_order", &render_wasm_program(&prog)) {
+            assert_eq!(out, "15");
+        }
+    }
+
+    #[test]
     fn self_hosted_list_take_end_drop_end() {
         // list.take_end/drop_end self-hosted: last n / all-but-last n, List[Int] slot-copy.
         // take_end([1,2,3,4,5],2)=[4,5] ([0]=4,len 2); drop_end([1,2,3,4,5],2)=[1,2,3]

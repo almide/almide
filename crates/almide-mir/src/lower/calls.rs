@@ -343,6 +343,24 @@ impl LowerCtx {
                 IrExprKind::Var { id } if is_heap_ty(&a.ty) => CallArg::Handle(self.value_or_global(*id)?),
                 IrExprKind::Var { id } => CallArg::Scalar(self.value_or_global(*id)?),
                 IrExprKind::LitInt { value } => CallArg::Imm(*value),
+                // A NON-CAPTURING lambda ARGUMENT (`list.map(xs, (x) => x + 1)`): LIFT it to
+                // a fresh `__lambda_*` function and pass its `FuncRef` table slot BY VALUE
+                // (a scalar i64) — the callee invokes it via `Op::CallIndirect` through its
+                // function-typed param. This is the call-site half of higher-order self-host
+                // (`list.map`/`filter`/`fold`). A CAPTURING lambda has no liftable form, so
+                // it falls through to the deferred Opaque arm below (unchanged).
+                IrExprKind::Lambda { params, body, .. } => {
+                    match self.lift_lambda(params, body) {
+                        Some(slot) => CallArg::Scalar(slot),
+                        None => {
+                            let dst = self.fresh_value();
+                            let repr = repr_of(&a.ty)?;
+                            self.ops.push(Op::Alloc { dst, repr, init: alloc_init(a) });
+                            self.record_elided_calls(a);
+                            self.materialized_call_arg(dst, repr)
+                        }
+                    }
+                }
                 // A fresh HEAP literal argument (`f("x")`, `f([1, 2, 3])`):
                 // materialized into an owned temp via `Alloc`, borrowed into the
                 // call, dropped at scope end — cert `i` (alloc) + `d` (drop), both
@@ -363,7 +381,9 @@ impl LowerCtx {
                 // materialized + borrowed into the call. The callee borrows it per the
                 // borrow-by-default convention; its body's calls are elided ⇒ the gate
                 // taints the function caps-unverified (invocation caps unknown).
-                | IrExprKind::Lambda { .. }
+                // (A NON-CAPTURING `Lambda` arg is intercepted BELOW and lifted to a scalar
+                // FuncRef slot passed by value — `list.map(xs, (x) => x + 1)`; only a
+                // capturing one reaches this deferred Opaque arm.)
                 | IrExprKind::ClosureCreate { .. } => {
                     let dst = self.fresh_value();
                     let repr = repr_of(&a.ty)?;
