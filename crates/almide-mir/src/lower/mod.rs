@@ -207,8 +207,9 @@ pub(crate) struct LowerCtx {
     /// Lambda-lifted auxiliary functions produced while lowering this function's body
     /// (a `let f = (x) => …` lifts its body to a fresh MirFunction here, bound via
     /// `Op::FuncRef`). `lower_function_all` returns these alongside the main function so
-    /// the program assembler tables + verifies them. Empty until lambda lifting is wired
-    /// (the lifting that writes to it lands in the next slice; the plumbing is in place).
+    /// the program assembler tables + verifies them. Empty until the lambda-lifting +
+    /// corpus-harness integration lands (the lifting that writes to it is the next slice;
+    /// the lower_function_all plumbing is already in place).
     #[allow(dead_code)]
     lifted: Vec<crate::MirFunction>,
 }
