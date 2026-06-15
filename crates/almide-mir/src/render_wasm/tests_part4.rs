@@ -1261,6 +1261,21 @@
     }
 
     #[test]
+    fn self_hosted_option_unwrap_or_else() {
+        // SELF-HOSTED option.unwrap_or_else(o, f): Some(x) → x, None → f() (a 0-arg thunk invoked via
+        // CallIndirect ONLY on the None arm). unwrap_or_else(Some(5), ()=>99)=5 ; unwrap_or_else(None,
+        // ()=>99)=99. Byte-matches v0.
+        let src = "fn main() -> Unit = {\n  \
+            let o1 = list.first([5, 6])\n  let v1 = option.unwrap_or_else(o1, () => 99)\n  println(int.to_string(v1))\n  \
+            let o2 = list.get([5], 9)\n  let v2 = option.unwrap_or_else(o2, () => 99)\n  println(int.to_string(v2)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "option.unwrap_or_else"));
+        if let Some(out) = build_and_run("self_hosted_option_unwrap_or_else", &render_wasm_program(&prog)) {
+            assert_eq!(out, "5\n99");
+        }
+    }
+
+    #[test]
     fn self_hosted_list_with_capacity() {
         // SELF-HOSTED list.with_capacity(cap) -> an EMPTY list (v0's Vec::with_capacity has len 0;
         // the reserved capacity is not observable). with_capacity(5)/with_capacity(0) both have len

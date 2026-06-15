@@ -49,3 +49,15 @@ fn option_flat_map(o: Option[Int], f: (Int) -> Option[Int]) -> Option[Int] = {
   let x = prim.load64(h + 12)
   if len >= 1 then __opt_flatmap_some(x, f) else None
 }
+
+// option.unwrap_or_else(o, f) = o.unwrap_or_else(f): Some(x) → x, None → f() (a 0-arg thunk). The
+// thunk is invoked via CallIndirect ONLY on the None arm (a named helper isolates the call so the
+// scalar `if` arm is a plain call). Result is a SCALAR Int. `o` is borrowed.
+fn __opt_unwrap_else(f: () -> Int) -> Int = f()
+
+fn option_unwrap_or_else(o: Option[Int], f: () -> Int) -> Int = {
+  let h = prim.handle(o)
+  let len = prim.load32(h + 4)
+  let x = prim.load64(h + 12)
+  if len >= 1 then x else __opt_unwrap_else(f)
+}
