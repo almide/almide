@@ -276,6 +276,9 @@ impl LowerCtx {
                     result: Some(repr),
                 });
                 self.live_heap_handles.push(dst);
+                if is_heap_elem_list_ty(ty) {
+                    self.heap_elem_lists.insert(dst);
+                }
                 Ok(())
             }
             // `var x = string.trim(s)` — a stdlib MODULE call returning a heap
@@ -291,6 +294,11 @@ impl LowerCtx {
                 // track the bound result so a later `match` over the var EXECUTES.
                 if is_self_host_option_module_fn(module.as_str(), func.as_str()) {
                     self.materialized_options.insert(dst);
+                }
+                // A `List[String]` result (string.split / a List[String] combinator) is a
+                // nested-ownership list — its scope-end drop must recursively free elements.
+                if is_heap_elem_list_ty(ty) {
+                    self.heap_elem_lists.insert(dst);
                 }
                 Ok(())
             }

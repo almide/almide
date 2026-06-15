@@ -67,6 +67,18 @@ fn alloc_str(byte_len: Int) -> String = _
 @intrinsic("almide_rt_prim_alloc_list")
 fn alloc_list(n: Int) -> List[Int] = _
 
+// Allocate a runtime-sized OWNED `List[String]` of `n` slots (Machinery 2: a NESTED-
+// ownership list). Fill via `store_str`, which MOVES each owned String into a slot; the
+// whole list is freed recursively (each element String + the block) at scope end.
+@intrinsic("almide_rt_prim_alloc_list_str")
+fn alloc_list_str(n: Int) -> List[String] = _
+
+// Store String `piece`'s handle at the slot byte-address `addr` AND CONSUME `piece` (its
+// ownership MOVES into the list). After this the piece is dead in the caller — the list owns
+// it and frees it on its recursive drop. (`addr` = handle(list) + 12 + i*8.)
+@intrinsic("almide_rt_prim_store_str")
+fn store_str(addr: Int, piece: String) -> Unit = _
+
 // The fd_write WASI host call — the only sandbox exit (reaches Stdout). Returns the
 // errno. `iov` points at an iovec array of `count` {ptr,len} pairs; `nw` receives
 // the bytes written.

@@ -238,6 +238,18 @@ pub(crate) struct LowerCtx {
     /// call whose callee is one of these (`f(args)` where `f` bound a lifted lambda) lowers
     /// to `Op::CallIndirect` through it instead of deferring — the closure EXECUTES.
     funcref_values: HashSet<ValueId>,
+    /// MIR values that are `List[String]` (NESTED-OWNERSHIP lists — their i64 slots hold OWNED
+    /// String handles). A scope-end drop of one emits [`Op::DropListStr`] (recursive free),
+    /// not a flat [`Op::Drop`] — so the element Strings are reclaimed. Populated when an
+    /// `alloc_list_str` result or a `List[String]`-typed bind is created (Machinery 2).
+    heap_elem_lists: HashSet<ValueId>,
+}
+
+/// Is `ty` a `List[T]` whose element `T` is itself a HEAP type (e.g. `List[String]`)? Such a
+/// list OWNS its elements — it needs the recursive [`Op::DropListStr`], not a flat drop.
+pub(crate) fn is_heap_elem_list_ty(ty: &Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    matches!(ty, Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 && is_heap_ty(&args[0]))
 }
 
 impl LowerCtx {
@@ -535,10 +547,22 @@ impl LowerCtx {
     }
 
     pub(crate) fn emit_scope_end_drops(&mut self) {
-        // Reverse binding order (LIFO scope teardown).
-        for v in self.live_heap_handles.iter().rev() {
-            self.ops.push(Op::Drop { v: *v });
-        }
+        // Reverse binding order (LIFO scope teardown). A `List[String]` value is released by a
+        // RECURSIVE `DropListStr` (frees its owned element Strings); every other heap value by
+        // a flat `Drop`.
+        let drops: Vec<Op> = self
+            .live_heap_handles
+            .iter()
+            .rev()
+            .map(|v| {
+                if self.heap_elem_lists.contains(v) {
+                    Op::DropListStr { v: *v }
+                } else {
+                    Op::Drop { v: *v }
+                }
+            })
+            .collect();
+        self.ops.extend(drops);
     }
 }
 

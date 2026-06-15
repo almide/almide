@@ -382,6 +382,44 @@
     }
 
     #[test]
+    fn self_hosted_string_split() {
+        // SELF-HOSTED string.split — Machinery 2 (List[String], nested ownership). Verified by
+        // the PIECE COUNT (list.len, element-repr-agnostic) over the separator-finding edge
+        // cases: "a,bb,ccc"->3, "x"->1 (no sep), "a,,b"->3 (empty middle), ""->1 (empty src),
+        // "a::b::c" w/ a MULTI-BYTE sep ->3. (Byte-copy of each piece is the proven alloc_str
+        // + __copy_bytes path; element CONTENT access needs a repr-aware List[String] get.)
+        let src = "fn main() -> Unit = {\n  \
+            println(int.to_string(list.len(string.split(\"a,bb,ccc\", \",\"))))\n  \
+            println(int.to_string(list.len(string.split(\"x\", \",\"))))\n  \
+            println(int.to_string(list.len(string.split(\"a,,b\", \",\"))))\n  \
+            println(int.to_string(list.len(string.split(\"\", \",\"))))\n  \
+            println(int.to_string(list.len(string.split(\"a::b::c\", \"::\")))) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "string.split"));
+        if let Some(out) = build_and_run("self_hosted_string_split", &render_wasm_program(&prog)) {
+            assert_eq!(out, "3\n1\n3\n1\n3");
+        }
+    }
+
+    #[test]
+    fn string_split_pieces_do_not_leak() {
+        // BOUNDED-LOOP LEAK GUARD for Machinery 2 (1-page memory). A while loop splits 2000
+        // times; each split's result List[String] (3 owned Strings) MUST be recursively freed
+        // (DropListStr) at the loop-iteration scope end. If the element Strings or the list
+        // leaked, $alloc would exhaust memory and trap. Completing + the right last count proves
+        // the recursive free works.
+        let src = "fn main() -> Unit = {\n  \
+            var i = 0\n  var last = 0\n  \
+            while i < 2000 {\n  \
+              let p = string.split(\"a,bb,ccc\", \",\")\n  last = list.len(p)\n  i = i + 1\n  }\n  \
+            println(int.to_string(last)) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("string_split_no_leak", &render_wasm_program(&prog)) {
+            assert_eq!(out, "3");
+        }
+    }
+
+    #[test]
     fn self_hosted_math_sqrt() {
         // SELF-HOSTED math.sqrt = prim.fsqrt (f64.sqrt, byte-exact with v0). sqrt(16)=4,
         // sqrt(2)=1.41…→to_int 1, sqrt(81)=9.

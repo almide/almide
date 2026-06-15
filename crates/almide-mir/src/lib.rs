@@ -156,6 +156,13 @@ pub enum Init {
     /// `DynStr`; the ownership cert is the SAME one `i` as any `Alloc` (init-agnostic), so
     /// NO checker change. List[Int] elements are i64 values (no nested heap ownership).
     DynList { len: ValueId },
+    /// A DYNAMICALLY-sized OWNED `List[String]` of `len` slots — physically identical to
+    /// `DynList` (the slots hold i64-widened String handles), but the value is tracked as a
+    /// NESTED-OWNERSHIP list: each element handle stored into it is `Consume`d (owned by the
+    /// list), and a scope-end drop is an [`Op::DropListStr`] (recursive free), not a flat
+    /// `Drop`. The ownership cert is the SAME one `i` as any `Alloc` (init-agnostic). This is
+    /// the Machinery-2 allocation for string.split / lines / chars and List[String] results.
+    DynListStr { len: ValueId },
 }
 
 /// One MIR statement. Ownership is EXPLICIT: a heap value's refcount is changed
@@ -186,6 +193,13 @@ pub enum Op {
     /// `drop v` — release one owned reference (−1); at 0 the value is freed
     /// (Rust scope-end drop, wasm `__rc_dec`).
     Drop { v: ValueId },
+    /// `drop_list_str v` — release a `List[String]` (a list whose i64 slots hold OWNED
+    /// String handles): a RECURSIVE drop. Same cert event as [`Op::Drop`] (one `−1`/`d` on
+    /// the LIST object — the elements were already accounted as `m`/consumed when stored into
+    /// it), but the RENDER, IFF this is the last reference (rc==1), first `rc_dec`s each
+    /// element handle, THEN `rc_dec`s the list (so a shared list's aliases don't free the
+    /// elements early). The nested-ownership counterpart of `Drop` for Machinery 2.
+    DropListStr { v: ValueId },
     /// `consume v` — transfer v's reference OUT (into a container, a return, or
     /// a callee that takes ownership). v is dead here; the reference lives on
     /// elsewhere. Renders as a move (Rust) / ptr-transfer with no inc (wasm).
@@ -581,10 +595,15 @@ pub fn verify_ownership(func: &MirFunction) -> Result<(), Vec<Violation>> {
                     violations.push(violation(i, *src, ViolationKind::UseAfterFree));
                 }
             }
-            Op::Drop { v } => match release(&object_of, &mut rc, &mut dead, &borrowed, *v) {
-                Ok(()) => {}
-                Err(()) => violations.push(violation(i, *v, ViolationKind::DoubleFree)),
-            },
+            // A `DropListStr` releases the LIST object exactly like a `Drop` (the recursive
+            // element free is a RENDER concern, gated on rc==1; the cert sees one −1 on the
+            // list — its elements were `Consume`d into it when stored).
+            Op::Drop { v } | Op::DropListStr { v } => {
+                match release(&object_of, &mut rc, &mut dead, &borrowed, *v) {
+                    Ok(()) => {}
+                    Err(()) => violations.push(violation(i, *v, ViolationKind::DoubleFree)),
+                }
+            }
             Op::Consume { v } => match release(&object_of, &mut rc, &mut dead, &borrowed, *v) {
                 Ok(()) => {}
                 Err(()) => violations.push(violation(i, *v, ViolationKind::UseAfterMove)),

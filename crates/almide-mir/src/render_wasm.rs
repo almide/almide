@@ -258,6 +258,11 @@ pub fn render_wasm_fn(
             }
         }
     }
+    // A recursive List[String] drop needs two i32 scratch locals (loop index + length); they
+    // are function-wide (DropListStr ops never nest) and only declared when one is present.
+    if func.ops.iter().any(|op| matches!(op, Op::DropListStr { .. })) {
+        locals.push("(local $dlsi i32) (local $dlsn i32)".to_string());
+    }
     let locals_decl = locals.join(" ");
     let mut body = String::new();
     // The if-markers (IfThen/Else/EndIf) render to a NESTED wasm `if`/`else` — a
@@ -499,7 +504,10 @@ fn render_op(
         // len*ELEM_SIZE` bytes, set rc=1 + len + cap (= the element count). Elements are
         // left UNINITIALIZED for the caller to fill via `prim.store64`. The list-building
         // sibling of `DynStr`. Cert: one `Alloc` = i, init-agnostic — no checker change.
-        Op::Alloc { dst, init: Init::DynList { len }, .. } => {
+        // A DynList (List[Int], scalar slots) OR a DynListStr (List[String], heap-handle
+        // slots) — physically IDENTICAL: alloc `LIST_HEADER + len*ELEM_SIZE`, rc=1, len=cap.
+        // (The DropListStr free is what distinguishes the nested-ownership variant.)
+        Op::Alloc { dst, init: Init::DynList { len } | Init::DynListStr { len }, .. } => {
             let wlen = format!("(i32.wrap_i64 (local.get {}))", local(*len));
             let bytes = format!("(i32.mul {wlen} (i32.const {ELEM_SIZE}))");
             format!(
@@ -528,7 +536,8 @@ fn render_op(
                 | Init::DynStr { .. }
                 | Init::OptSome { .. }
                 | Init::OptNone
-                | Init::DynList { .. } => &[],
+                | Init::DynList { .. }
+                | Init::DynListStr { .. } => &[],
             };
             let len = elems.len() as u32;
             let cap = len + PUSH_HEADROOM;
@@ -611,6 +620,25 @@ fn render_op(
         // use-after-free sentinel. This is the byte the perceus V binds each
         // witness drop to (the leak-freedom realization on the artifact).
         Op::Drop { v } => format!("    (call $rc_dec (local.get {}))\n", local(*v)),
+        // RECURSIVE drop of a List[String]: IFF this is the last reference (rc==1), free each
+        // element handle first (an aliased list keeps its elements alive), THEN rc_dec the
+        // list block. The element handle lives in the i64 slot (`12 + i*8`), i32.wrap'd back.
+        // Uses the function-wide scratch locals $dlsi/$dlsn (declared in render_wasm_fn).
+        Op::DropListStr { v } => {
+            let p = local(*v);
+            format!(
+                "    (if (i32.eq (i32.load (local.get {p})) (i32.const 1))\n\
+                 \x20     (then\n\
+                 \x20       (local.set $dlsi (i32.const 0))\n\
+                 \x20       (local.set $dlsn (i32.load (i32.add (local.get {p}) (i32.const 4))))\n\
+                 \x20       (block $dlsbrk (loop $dlscont\n\
+                 \x20         (br_if $dlsbrk (i32.ge_s (local.get $dlsi) (local.get $dlsn)))\n\
+                 \x20         (call $rc_dec (i32.wrap_i64 (i64.load (i32.add (local.get {p}) (i32.add (i32.const 12) (i32.mul (local.get $dlsi) (i32.const 8)))))))\n\
+                 \x20         (local.set $dlsi (i32.add (local.get $dlsi) (i32.const 1)))\n\
+                 \x20         (br $dlscont)))))\n\
+                 \x20   (call $rc_dec (local.get {p}))\n"
+            )
+        }
         // COPY-ON-WRITE before an in-place mutation (A1.3-render, refining
         // CowSafety.v): if the block is SHARED (rc > 1), clone it so the mutation
         // touches no alias. The `rc_dec` runs FIRST (rc 2→1 — the alias keeps the

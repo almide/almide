@@ -140,7 +140,9 @@ fn render_op(op: &Op) -> Option<String> {
                 Init::Opaque | Init::DynStr { .. } => "Vec::new()".to_string(),
                 // A materialized `Some(payload)` / runtime List are wasm-only (native uses
                 // v0 codegen).
-                Init::OptSome { .. } | Init::OptNone | Init::DynList { .. } => "Vec::new()".to_string(),
+                Init::OptSome { .. } | Init::OptNone | Init::DynList { .. } | Init::DynListStr { .. } => {
+                    "Vec::new()".to_string()
+                }
             };
             Some(format!("let mut {}: Vec<i64> = {init_expr};", var(*dst)))
         }
@@ -160,7 +162,7 @@ fn render_op(op: &Op) -> Option<String> {
         Op::Dup { dst, src } => {
             Some(format!("let mut {}: Vec<i64> = {}.clone();", var(*dst), var(*src)))
         }
-        Op::Drop { .. } => None,    // Rust drops at scope end
+        Op::Drop { .. } | Op::DropListStr { .. } => None, // Rust drops at scope end (wasm-only)
         Op::Consume { .. } => None, // a move
         Op::Borrow { v } => Some(format!("let _ = &{};", var(*v))),
         // MakeUnique is a no-op in idiomatic Rust: the Dup clone already gave

@@ -779,6 +779,49 @@ impl LowerCtx {
             });
             return Ok(Some(dst));
         }
+        // `prim.alloc_list_str(n)` allocates a runtime-sized OWNED `List[String]` (n slots,
+        // physically identical to alloc_list) — but the dst is tracked as a NESTED-OWNERSHIP
+        // list, so its scope-end drop is a recursive `DropListStr` (frees the owned element
+        // Strings) and `prim.store_str` Consumes each String moved into it (Machinery 2).
+        if func == "alloc_list_str" {
+            let len_v = self.lower_scalar_value(&args[0]).ok_or_else(|| {
+                LowerError::Unsupported("prim.alloc_list_str length is not a lowerable scalar".into())
+            })?;
+            let dst = self.fresh_value();
+            self.ops.push(Op::Alloc {
+                dst,
+                repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT },
+                init: crate::Init::DynListStr { len: len_v },
+            });
+            self.heap_elem_lists.insert(dst);
+            return Ok(Some(dst));
+        }
+        // `prim.store_str(list, byte_addr_of_slot, piece)` — store the String `piece`'s handle
+        // into the list slot at `byte_addr_of_slot` AND CONSUME the piece (its reference is
+        // MOVED into the list, which now owns it — cert `m`, removed from the scope drop set).
+        // The slot holds the i64-widened handle; `DropListStr` later i32.wrap's it to free.
+        if func == "store_str" {
+            let addr = self.lower_scalar_value(&args[0]).ok_or_else(|| {
+                LowerError::Unsupported("prim.store_str slot address is not a lowerable scalar".into())
+            })?;
+            // The piece must be a tracked heap var (so we can Consume it). Its handle value:
+            let piece = match &args[1].kind {
+                IrExprKind::Var { id } => self.value_for(*id)?,
+                _ => {
+                    return Err(LowerError::Unsupported(
+                        "prim.store_str piece must be a heap variable (to consume)".into(),
+                    ))
+                }
+            };
+            // The slot value is the piece's HANDLE (its address as an i64). Op::Prim Handle
+            // gives that; store it 8-wide at the slot, then Consume the piece (move-out).
+            let handle = self.fresh_value();
+            self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(handle), args: vec![piece] });
+            self.ops.push(Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args: vec![addr, handle] });
+            self.ops.push(Op::Consume { v: piece });
+            self.live_heap_handles.retain(|h| *h != piece);
+            return Ok(None);
+        }
         // Bitwise binary ops lower to a scalar `Op::IntBinOp` (i64 and/or/xor/shl/shr_s),
         // not an `Op::Prim` — the int.band/bor/bxor/bshl/bshr floor. No ownership.
         let bitop = match func {

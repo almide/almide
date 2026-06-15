@@ -57,7 +57,11 @@ pub fn name_witness(func: &MirFunction) -> NameWitness {
                 defined.push(*dst);
                 used.push(*src);
             }
-            Op::Drop { v } | Op::Consume { v } | Op::Borrow { v } | Op::MakeUnique { v } => {
+            Op::Drop { v }
+            | Op::DropListStr { v }
+            | Op::Consume { v }
+            | Op::Borrow { v }
+            | Op::MakeUnique { v } => {
                 used.push(*v)
             }
             Op::Pure { dst, uses } => {
@@ -413,8 +417,10 @@ pub fn ownership_certificate(func: &MirFunction) -> String {
                 s.of.insert(*dst, o);
                 s.event(o, 'a');
             }
-            // Plain release (−1).
-            Op::Drop { v } => {
+            // Plain release (−1). A `DropListStr` is the SAME single `d` on the LIST object —
+            // its element Strings were already accounted as `m` (consumed) when stored into
+            // it, so the recursive runtime free adds no extra cert event.
+            Op::Drop { v } | Op::DropListStr { v } => {
                 let o = s.object_of(*v);
                 s.event(o, 'd');
             }
