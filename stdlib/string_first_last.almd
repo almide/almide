@@ -1,0 +1,67 @@
+// string_first_last — SELF-HOSTED string.first / string.last for v1, returning Option[String]
+// (the first / last CODEPOINT as a 1-char String, or None for the empty string). Option[String]
+// is materialized as a 0-or-1-element DynListStr (Machinery 2): `Some(c)` owns the slice String,
+// `None` is the empty Option. The codepoint boundary is found via UTF-8 lead/continuation bytes:
+// a lead byte's high bits give its length (1/2/3/4); a continuation byte is 0b10xxxxxx (byte/64==2).
+// Source `s` is borrowed; the returned slice is a fresh owned String.
+
+// UTF-8 codepoint byte length from its lead byte: <128 = 1 (ASCII), <224 = 2, <240 = 3, else 4.
+fn __cp_len(b: Int) -> Int =
+  if b < 128 then 1
+  else if b < 224 then 2
+  else if b < 240 then 3
+  else 4
+
+// Copy n bytes from src into dst.
+fn __copy_n(dst: Int, src: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let b = prim.load8(src + i)
+    prim.store8(dst + i, b)
+    __copy_n(dst, src, n, i + 1)
+  }
+
+// The first codepoint of s as a fresh owned String (s is non-empty when this is called).
+fn __first_char(s: String) -> String = {
+  let h = prim.handle(s)
+  let b0 = prim.load8(h + 12)
+  let cl = __cp_len(b0)
+  let out = prim.alloc_str(cl)
+  let _x = __copy_n(prim.handle(out) + 12, h + 12, cl, 0)
+  out
+}
+
+// string.first(s) -> Some(first codepoint) for a non-empty string, else None.
+fn string_first(s: String) -> Option[String] = {
+  let h = prim.handle(s)
+  let blen = prim.load32(h + 4)
+  if blen <= 0 then None else Some(__first_char(s))
+}
+
+// Byte offset of the last codepoint's LEAD byte: scan back from i past continuation bytes
+// (0b10xxxxxx, i.e. byte/64 == 2) until a lead byte (or the start).
+fn __last_start(h: Int, i: Int) -> Int =
+  if i <= 0 then 0
+  else {
+    let b = prim.load8(h + 12 + i)
+    let cont = b / 64
+    if cont == 2 then __last_start(h, i - 1) else i
+  }
+
+// The last codepoint of s as a fresh owned String (s is non-empty when this is called).
+fn __last_char(s: String) -> String = {
+  let h = prim.handle(s)
+  let blen = prim.load32(h + 4)
+  let start = __last_start(h, blen - 1)
+  let n = blen - start
+  let out = prim.alloc_str(n)
+  let _x = __copy_n(prim.handle(out) + 12, h + 12 + start, n, 0)
+  out
+}
+
+// string.last(s) -> Some(last codepoint) for a non-empty string, else None.
+fn string_last(s: String) -> Option[String] = {
+  let h = prim.handle(s)
+  let blen = prim.load32(h + 4)
+  if blen <= 0 then None else Some(__last_char(s))
+}

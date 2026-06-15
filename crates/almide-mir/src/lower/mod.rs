@@ -245,11 +245,18 @@ pub(crate) struct LowerCtx {
     heap_elem_lists: HashSet<ValueId>,
 }
 
-/// Is `ty` a `List[T]` whose element `T` is itself a HEAP type (e.g. `List[String]`)? Such a
-/// list OWNS its elements — it needs the recursive [`Op::DropListStr`], not a flat drop.
+/// Is `ty` a `List[T]` / `Option[T]` whose element `T` is itself a HEAP type (e.g. `List[String]`,
+/// `Option[String]`)? Such a container OWNS its element(s) — it needs the recursive
+/// [`Op::DropListStr`], not a flat drop. An `Option[String]` is physically a 0-or-1-element
+/// `List[String]` (Machinery 2), so the SAME recursive free applies (len 0 frees nothing, len 1
+/// frees the one element + the block).
 pub(crate) fn is_heap_elem_list_ty(ty: &Ty) -> bool {
     use almide_lang::types::constructor::TypeConstructorId;
-    matches!(ty, Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 && is_heap_ty(&args[0]))
+    matches!(
+        ty,
+        Ty::Applied(TypeConstructorId::List | TypeConstructorId::Option, args)
+            if args.len() == 1 && is_heap_ty(&args[0])
+    )
 }
 
 impl LowerCtx {
@@ -645,7 +652,7 @@ pub(crate) fn is_self_host_option_module_fn(module: &str, func: &str) -> bool {
         "list" => {
             matches!(func, "get" | "first" | "last" | "index_of" | "binary_search" | "max" | "min" | "find" | "find_index" | "reduce")
         }
-        "string" => matches!(func, "index_of" | "last_index_of" | "codepoint"),
+        "string" => matches!(func, "index_of" | "last_index_of" | "codepoint" | "first" | "last"),
         "bytes" => matches!(func, "get" | "index_of"),
         _ => false,
     }

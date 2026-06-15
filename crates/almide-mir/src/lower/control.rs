@@ -319,6 +319,9 @@ impl LowerCtx {
         if arms.len() != 2 || arms.iter().any(|a| a.guard.is_some()) {
             return false;
         }
+        // A SCALAR Some-bind extracts data[0] as a value COPY; a HEAP payload (Option[String])
+        // is walled here (the i64-slot → i32-handle repr extract is a later slice) — a `Some(_)`
+        // tag-match still works (reads the tag, no extract; DropListStr frees the element).
         let mut some: Option<(&IrExpr, Option<VarId>)> = None;
         let mut none: Option<&IrExpr> = None;
         for arm in arms {
@@ -758,11 +761,49 @@ impl LowerCtx {
             // — the SAME per-arm `"im"` balance as a literal arm (init-agnostic `Alloc` = `i`,
             // `Consume` = `m`). `Some`'s payload must be a lowerable scalar (a heap payload
             // aliases its element — a later brick; it falls out of the subset here).
+            // A HEAP payload (`Some(string_var)` — an `Option[String]`) materializes a 0-or-1-
+            // element `DynListStr` (Machinery 2): the owned String is MOVED into slot 0 (cert `m`)
+            // and the whole Option is freed recursively (`DropListStr`) at scope end. Same `Alloc`
+            // = `i` + `Consume` = `m` per-arm balance as the scalar case; reuses the proven
+            // List[String] cert (init-agnostic). Only a Var payload (the owned slice, let-bound).
+            IrExprKind::OptionSome { expr } if is_heap_ty(&expr.ty) => {
+                let repr = repr_of(result_ty).ok()?;
+                // The owned String payload: a let-bound Var (its handle), or a direct user-call
+                // that RETURNS a fresh owned String (CallFn result, rc 1) — materialized into the
+                // Option below (its `Consume` `m` balances the alloc/call `i`).
+                let piece = match &expr.kind {
+                    IrExprKind::Var { id } => self.value_for(*id).ok()?,
+                    IrExprKind::Call { target: CallTarget::Named { name }, args, .. } => {
+                        let lowered = self.lower_call_args(args).ok()?;
+                        let pr = repr_of(&expr.ty).ok()?;
+                        let p = self.fresh_value();
+                        self.ops.push(Op::CallFn {
+                            dst: Some(p),
+                            name: name.as_str().to_string(),
+                            args: lowered,
+                            result: Some(pr),
+                        });
+                        p
+                    }
+                    _ => return None,
+                };
+                let obj = self.materialize_opt_str_some(piece, repr);
+                self.ops.push(Op::Consume { v: obj });
+                Some(obj)
+            }
             IrExprKind::OptionSome { expr } => {
                 let payload = self.lower_scalar_value(expr)?;
                 let repr = repr_of(result_ty).ok()?;
                 let obj = self.fresh_value();
                 self.ops.push(Op::Alloc { dst: obj, repr, init: Init::OptSome { payload } });
+                self.ops.push(Op::Consume { v: obj });
+                Some(obj)
+            }
+            // A `None` for an `Option[heap]` is the 0-element `DynListStr` (so `DropListStr` frees
+            // it uniformly); a scalar Option keeps `Init::OptNone`.
+            IrExprKind::OptionNone if is_heap_elem_list_ty(result_ty) => {
+                let repr = repr_of(result_ty).ok()?;
+                let obj = self.materialize_opt_str_none(repr);
                 self.ops.push(Op::Consume { v: obj });
                 Some(obj)
             }
@@ -775,6 +816,43 @@ impl LowerCtx {
             }
             _ => None,
         }
+    }
+
+    /// `Some(piece)` for `Option[String]` = a 1-element `DynListStr`: store `piece`'s handle into
+    /// slot 0 + CONSUME it (moves in), track as nested-ownership list + materialized Option.
+    /// Reuses the proven Machinery-2 `store_str` op sequence — no new cert.
+    pub(crate) fn materialize_opt_str_some(&mut self, piece: ValueId, repr: crate::Repr) -> ValueId {
+        use crate::PrimKind;
+        let one = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: one, value: 1 });
+        let obj = self.fresh_value();
+        self.ops.push(Op::Alloc { dst: obj, repr, init: Init::DynListStr { len: one } });
+        let oh = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(oh), args: vec![obj] });
+        let twelve = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: twelve, value: 12 });
+        let addr = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst: addr, op: IntOp::Add, a: oh, b: twelve });
+        let ph = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(ph), args: vec![piece] });
+        self.ops.push(Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args: vec![addr, ph] });
+        self.ops.push(Op::Consume { v: piece });
+        self.live_heap_handles.retain(|h| *h != piece);
+        self.heap_elem_lists.insert(obj);
+        self.materialized_options.insert(obj);
+        obj
+    }
+
+    /// Materialize `None` for an `Option[String]` as a 0-element `DynListStr` (tracked like
+    /// `materialize_opt_str_some`). `DropListStr` over len 0 frees only the block.
+    pub(crate) fn materialize_opt_str_none(&mut self, repr: crate::Repr) -> ValueId {
+        let zero = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: zero, value: 0 });
+        let obj = self.fresh_value();
+        self.ops.push(Op::Alloc { dst: obj, repr, init: Init::DynListStr { len: zero } });
+        self.heap_elem_lists.insert(obj);
+        self.materialized_options.insert(obj);
+        obj
     }
 
     /// Try to lower `for i in start..end { body }` over a SCALAR Int index as a REAL loop

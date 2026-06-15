@@ -814,6 +814,46 @@
     }
 
     #[test]
+    fn self_hosted_string_first_last() {
+        // SELF-HOSTED string.first / string.last returning Option[String] — the OPTION[STRING]
+        // CONSTRUCTION machinery: Some(slice) materializes a 1-element DynListStr OWNING the
+        // codepoint slice, None a 0-element one; both freed recursively by DropListStr at scope
+        // end. A `Some(_)`/`None` TAG-match EXECUTES (len-as-tag, no extraction): a non-empty
+        // string -> Some, "" -> None. (The content-extract — the i64-slot/i32-handle repr — is the
+        // next slice.) The Some/None decision byte-matches v0.
+        let src = "fn main() -> Unit = {\n  \
+            let f1 = string.first(\"hi\")\n  match f1 { Some(_) => println(\"y\"), None => println(\"n\"), }\n  \
+            let f2 = string.first(\"日本\")\n  match f2 { Some(_) => println(\"y\"), None => println(\"n\"), }\n  \
+            let f3 = string.first(\"\")\n  match f3 { Some(_) => println(\"y\"), None => println(\"n\"), }\n  \
+            let l1 = string.last(\"hi\")\n  match l1 { Some(_) => println(\"y\"), None => println(\"n\"), }\n  \
+            let l3 = string.last(\"\")\n  match l3 { Some(_) => println(\"y\"), None => println(\"n\"), } }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "string.first"));
+        assert!(prog.functions.iter().any(|f| f.name == "string.last"));
+        if let Some(out) = build_and_run("self_hosted_string_first_last", &render_wasm_program(&prog)) {
+            assert_eq!(out, "y\ny\nn\ny\nn");
+        }
+    }
+
+    #[test]
+    fn string_first_option_loop_is_bounded() {
+        // ADVERSARIAL leak guard: a loop that MATERIALIZES an Option[String] (string.first owning a
+        // slice String) and tag-matches it every iteration must run in BOUNDED memory — each
+        // iteration's Option + its owned element are freed by DropListStr before the back-edge,
+        // no OOM / double-free.
+        let src = "fn main() -> Unit = {\n  \
+            var i = 0\n  \
+            while i < 4000 {\n    \
+            let o = string.first(\"xyz\")\n    match o { Some(_) => println(\"y\"), None => println(\"n\"), }\n    \
+            i = i + 1\n  }\n  \
+            println(\"done\") }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("string_first_option_loop", &render_wasm_program(&prog)) {
+            assert!(out.ends_with("done"), "loop must terminate (bounded memory), got tail {:?}", &out[out.len().saturating_sub(20)..]);
+        }
+    }
+
+    #[test]
     fn self_hosted_string_from_bytes() {
         // SELF-HOSTED string.from_bytes — copy a List[Int]'s low bytes into a fresh String. For
         // VALID UTF-8 it byte-matches v0's from_utf8_lossy: [72,105]="Hi", "hello" bytes, and the
@@ -969,6 +1009,7 @@
             assert_eq!(out, "4\n2\n3\n3\n5\n0");
         }
     }
+
 
 
 
