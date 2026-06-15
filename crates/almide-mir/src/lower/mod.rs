@@ -552,7 +552,7 @@ pub(crate) fn find_var_ty(stmts: &[IrStmt], var: VarId) -> Option<Ty> {
 /// call (which would misread as `None`). Add a name only when its self-host impl lands.
 pub(crate) fn is_self_host_option_module_fn(module: &str, func: &str) -> bool {
     match module {
-        "list" => matches!(func, "get" | "first" | "last" | "index_of"),
+        "list" => matches!(func, "get" | "first" | "last" | "index_of" | "max" | "min"),
         "string" => matches!(func, "index_of" | "last_index_of"),
         _ => false,
     }

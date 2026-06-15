@@ -613,6 +613,14 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
             &[("list_contains", "list.contains"), ("list_index_of", "list.index_of")],
         ),
         (
+            include_str!("../../../stdlib/list_fold.almd"),
+            &[
+                ("list_product", "list.product"),
+                ("list_max", "list.max"),
+                ("list_min", "list.min"),
+            ],
+        ),
+        (
             include_str!("../../../stdlib/string_search.almd"),
             &[
                 ("string_starts_with", "string.starts_with"),
@@ -1519,6 +1527,33 @@ mod tests {
         assert!(prog.functions.iter().any(|f| f.name == "list.index_of"), "linked");
         if let Some(out) = build_and_run("list_search", &render_wasm_program(&prog)) {
             assert_eq!(out, "T\nF\n2\nnone");
+        }
+    }
+
+    #[test]
+    fn self_hosted_list_product_max_min() {
+        // list.product / list.max / list.min self-hosted (i64 left folds): product([2,3,4])
+        // =24, product([])=1; max([3,1,4,1,5])=Some(5), min=Some(1), max([])=None (the empty
+        // list yields None via the materialized Option). byte-matching v0.
+        let src = "fn main() -> Unit = {\n  \
+            let xs = [3, 1, 4, 1, 5]\n  \
+            let zs = [2, 3, 4]\n  \
+            let ys: List[Int] = []\n  \
+            let p = list.product(zs)\n  \
+            let q = list.product(ys)\n  \
+            println(int.to_string(p))\n  \
+            println(int.to_string(q))\n  \
+            match list.max(xs) {\n    \
+            Some(m) => println(int.to_string(m)),\n    None => println(\"none\"),\n  }\n  \
+            match list.min(xs) {\n    \
+            Some(m) => println(int.to_string(m)),\n    None => println(\"none\"),\n  }\n  \
+            match list.max(ys) {\n    \
+            Some(m) => println(int.to_string(m)),\n    None => println(\"none\"),\n  } }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "list.product"), "linked");
+        assert!(prog.functions.iter().any(|f| f.name == "list.max"), "linked");
+        if let Some(out) = build_and_run("list_fold", &render_wasm_program(&prog)) {
+            assert_eq!(out, "24\n1\n5\n1\nnone");
         }
     }
 
