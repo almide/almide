@@ -55,7 +55,7 @@ pub const PURE_MODULES: &[&str] = &[
     "result_core", "result_map", "set", "set_core", "string", "string_chars", "string_codepoint", "string_first_last", "string_from_bytes_self", "string_from_codepoint", "string_is_digit", "string_is_empty", "string_join",
     "string_len", "string_lines", "string_pad", "string_repeat", "string_replace", "string_reverse", "string_search", "string_slice", "string_split", "string_take_drop", "string_to_bytes", "string_to_int", "string_trim",
     "uint16", "uint32",
-    "uint64", "uint8", "value",
+    "uint64", "uint8", "value", "value_core",
 ];
 
 /// Is `module` a provably-pure stdlib data module (reaches no host capability)?

@@ -1502,6 +1502,27 @@
     }
 
     #[test]
+    fn self_hosted_value_scalar_constructors() {
+        // SELF-HOSTED scalar Value constructors (the dynamic data model: a v1 block whose `len`
+        // header field carries the variant TAG, payload at +12). value.int(42)→tag 2 payload 42;
+        // value.null()→tag 0; value.bool(true)→tag 1 payload 1; value.float(1.0)→tag 3 payload
+        // 0x3FF...=4607182418800017408 (f64 bits). Verified by reading the block via prim.
+        let src = "fn main() -> Unit = {\n  \
+            let vi = value.int(42)\n  let hi = prim.handle(vi)\n  \
+            println(int.to_string(prim.load32(hi + 4)))\n  println(int.to_string(prim.load64(hi + 12)))\n  \
+            let vn = value.null()\n  println(int.to_string(prim.load32(prim.handle(vn) + 4)))\n  \
+            let vb = value.bool(true)\n  let hb = prim.handle(vb)\n  \
+            println(int.to_string(prim.load32(hb + 4)))\n  println(int.to_string(prim.load64(hb + 12)))\n  \
+            let vf = value.float(1.0)\n  let hf = prim.handle(vf)\n  \
+            println(int.to_string(prim.load32(hf + 4)))\n  println(int.to_string(prim.load64(hf + 12))) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "value.int"));
+        if let Some(out) = build_and_run("self_hosted_value_scalar_constructors", &render_wasm_program(&prog)) {
+            assert_eq!(out, "2\n42\n0\n1\n1\n3\n4607182418800017408");
+        }
+    }
+
+    #[test]
     fn self_hosted_map_core_loop_reclaims() {
         // SOUNDNESS for the new Map[Int,Int] heap path: a bounded loop building + dropping a
         // fresh Map every iteration must reclaim each (plain non-nested drop) — no leak/double-free.

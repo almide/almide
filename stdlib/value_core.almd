@@ -1,0 +1,38 @@
+// value_core — SELF-HOSTED scalar `Value` constructors for v1 (the dynamic data model used by
+// Codec/json). A SCALAR Value (Null/Bool/Int/Float) is a v1 block [rc][len@4 = TAG][cap@8][
+// payload@12]: the `len` header field carries the variant TAG (0=Null, 1=Bool, 2=Int, 3=Float),
+// the 8-byte payload slot holds the scalar value (Bool 0/1, Int, or f64 BITS). Drops flat (scalar
+// payload, no nested ownership). Str/Array/Object (heap payloads, tags 4/5/6) are a refinement.
+
+fn value_null() -> Value = {
+  let v = prim.alloc_value(1)
+  let h = prim.handle(v)
+  prim.store32(h + 4, 0)        // tag = Null
+  v
+}
+
+fn value_int(n: Int) -> Value = {
+  let v = prim.alloc_value(1)
+  let h = prim.handle(v)
+  prim.store32(h + 4, 2)        // tag = Int
+  prim.store64(h + 12, n)       // payload
+  v
+}
+
+fn value_bool(b: Bool) -> Value = {
+  let v = prim.alloc_value(1)
+  let h = prim.handle(v)
+  prim.store32(h + 4, 1)        // tag = Bool
+  let bi = if b then 1 else 0
+  prim.store64(h + 12, bi)      // payload 0/1
+  v
+}
+
+fn value_float(f: Float) -> Value = {
+  let v = prim.alloc_value(1)
+  let h = prim.handle(v)
+  prim.store32(h + 4, 3)        // tag = Float
+  let bits = prim.fbits(f)
+  prim.store64(h + 12, bits)    // payload = f64 BITS
+  v
+}

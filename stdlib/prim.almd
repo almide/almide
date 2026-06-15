@@ -97,6 +97,15 @@ fn alloc_set(n: Int) -> Set[Int] = _
 @intrinsic("almide_rt_prim_alloc_list")
 fn alloc_map(slots: Int) -> Map[Int, Int] = _
 
+// Allocate a runtime-sized OWNED `Value` block (the dynamic data model) — physically a v1 List
+// block, but typed Value. A SCALAR Value (Null/Bool/Int/Float) reuses the layout as
+// [rc][len@4 = TAG][cap@8][payload@12]: the `len` field carries the variant TAG (0=Null, 1=Bool,
+// 2=Int, 3=Float) and the first 8-byte slot holds the scalar payload (Bool 0/1, Int, or f64 BITS).
+// Drops as a flat block (scalar payload, no nested ownership). Str/Array/Object (heap payloads)
+// are a later refinement. `slots`=1 gives one payload slot; the caller patches the tag via store32.
+@intrinsic("almide_rt_prim_alloc_list")
+fn alloc_value(slots: Int) -> Value = _
+
 // Allocate a runtime-sized OWNED `List[String]` of `n` slots (Machinery 2: a NESTED-
 // ownership list). Fill via `store_str`, which MOVES each owned String into a slot; the
 // whole list is freed recursively (each element String + the block) at scope end.
