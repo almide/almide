@@ -851,3 +851,20 @@
             assert_eq!(out, "127\n-128\n50\n32767\n2147483647");
         }
     }
+
+    #[test]
+    fn self_hosted_int_64bit_conversions_are_bit_identity() {
+        // int.to_uint64/from_int64/from_uint64 self-hosted: bit-identity over the shared
+        // i64 repr. from_int64(to_int64(42))=42, from_uint64(to_uint64(99))=99,
+        // to_uint64(7)=7.
+        let src = "fn main() -> Unit = {\n  \
+            let t = int.to_int64(42)\n  let b = int.from_int64(t)\n  let sb = int.to_string(b)\n  println(sb)\n  \
+            let u = int.to_uint64(99)\n  let c = int.from_uint64(u)\n  let sc = int.to_string(c)\n  println(sc)\n  \
+            let d = int.to_uint64(7)\n  let sd = int.to_string(d)\n  println(sd) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "int.from_int64"));
+        assert!(prog.functions.iter().any(|f| f.name == "int.to_uint64"));
+        if let Some(out) = build_and_run("int_widen", &render_wasm_program(&prog)) {
+            assert_eq!(out, "42\n99\n7");
+        }
+    }

@@ -23,6 +23,13 @@ fn int_to_int32(n: Int) -> Int = {
 
 fn int_to_int64(n: Int) -> Int = n
 
+// The 64-bit conversions are bit-identity (Int/Int64/UInt64 share the i64 repr): v0's
+// `n`, `n as u64`, `n as i64` all keep the bits, so the value byte-matches. Same -> Int
+// shape as to_int8 (the result value is exact; the sign interpretation is the caller's).
+fn int_to_uint64(n: Int) -> Int = n
+fn int_from_int64(n: Int64) -> Int = n
+fn int_from_uint64(n: UInt64) -> Int = n
+
 // int.to_int8/16/32_saturating: CLAMP n to the signed N-bit range (v0 returns Int8/16/32
 // but the value — and its decimal print — is exactly the clamp). Pure scalar; the same
 // `-> Int` shape as to_int8 above (the value byte-matches v0). Shared clamp helper.
