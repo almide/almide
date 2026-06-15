@@ -22,3 +22,20 @@ fn list_get(xs: List[Int], i: Int) -> Option[Int] = {
   else if i >= len then __opt_none_int()
   else __opt_some_at(h, i)
 }
+
+// `list.first` — Some(element 0) for a non-empty list, else None. Reuses the same
+// 0-or-1-element-list Option helpers (the materialization machinery generalizes).
+fn list_first(xs: List[Int]) -> Option[Int] = {
+  let h = prim.handle(xs)
+  let len = prim.load32(h + 4)
+  if len <= 0 then __opt_none_int()
+  else __opt_some_at(h, 0)
+}
+
+// `list.last` — Some(element len-1) for a non-empty list, else None.
+fn list_last(xs: List[Int]) -> Option[Int] = {
+  let h = prim.handle(xs)
+  let len = prim.load32(h + 4)
+  if len <= 0 then __opt_none_int()
+  else __opt_some_at(h, len - 1)
+}

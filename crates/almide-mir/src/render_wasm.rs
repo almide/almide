@@ -604,7 +604,10 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
         (include_str!("../../../stdlib/string_slice.almd"), &[("string_slice", "string.slice")]),
         (include_str!("../../../stdlib/string_trim.almd"), &[("string_trim", "string.trim")]),
         (include_str!("../../../stdlib/list_get_or.almd"), &[("list_get_or", "list.get_or")]),
-        (include_str!("../../../stdlib/list_get.almd"), &[("list_get", "list.get")]),
+        (
+            include_str!("../../../stdlib/list_get.almd"),
+            &[("list_get", "list.get"), ("list_first", "list.first"), ("list_last", "list.last")],
+        ),
     ]
 }
 
@@ -1455,6 +1458,29 @@ mod tests {
         if let Some(out) = build_and_run("list_get_loop", &render_wasm_program(&prog)) {
             assert_eq!(out.lines().count(), 2000, "every iteration prints (no OOM/leak)");
             assert!(out.lines().all(|l| l == "8"), "list.get(xs,1) is always Some(8)");
+        }
+    }
+
+    #[test]
+    fn self_hosted_list_first_and_last_return_some_or_none() {
+        // list.first / list.last self-hosted over the SAME Option machinery (reusing the
+        // 0-or-1-element-list helpers): Some(end element) for a non-empty list, None for
+        // empty. first([10,20,30])=Some(10), last=Some(30), first([])=None — byte-matching
+        // v0. Proves the materialized-Option layout generalizes beyond list.get.
+        let src = "fn main() -> Unit = {\n  \
+            let xs = [10, 20, 30]\n  \
+            match list.first(xs) {\n    \
+            Some(x) => println(int.to_string(x)),\n    None => println(\"none\"),\n  }\n  \
+            match list.last(xs) {\n    \
+            Some(x) => println(int.to_string(x)),\n    None => println(\"none\"),\n  }\n  \
+            let ys: List[Int] = []\n  \
+            match list.first(ys) {\n    \
+            Some(x) => println(int.to_string(x)),\n    None => println(\"none\"),\n  } }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "list.first"), "list.first linked");
+        assert!(prog.functions.iter().any(|f| f.name == "list.last"), "list.last linked");
+        if let Some(out) = build_and_run("list_first_last", &render_wasm_program(&prog)) {
+            assert_eq!(out, "10\n30\nnone");
         }
     }
 
