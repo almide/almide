@@ -1523,6 +1523,30 @@
     }
 
     #[test]
+    fn self_hosted_value_scalar_extractors() {
+        // SELF-HOSTED value.as_int/as_bool/as_float → Result[T, String] (read the tag, Ok(payload)
+        // on a match else Err("expected T"); materialized Result, match-executable). as_int(int 42)=
+        // Ok(42); as_int(null)=Err("expected Int"); as_bool(bool true)=Ok(true)→"yes"; as_float(int 7)
+        // widens to Ok(7.0)="float-ok"; as_float(null)=Err("expected Float"). Byte-matches v0.
+        let src = "fn main() -> Unit = {\n  \
+            let oi = value.as_int(value.int(42))\n  \
+            match oi { Ok(n) => println(int.to_string(n)), Err(e) => println(e), }\n  \
+            let oi2 = value.as_int(value.null())\n  \
+            match oi2 { Ok(n) => println(int.to_string(n)), Err(e) => println(e), }\n  \
+            let ob = value.as_bool(value.bool(true))\n  \
+            match ob { Ok(b) => if b then println(\"yes\") else println(\"no\"), Err(e) => println(e), }\n  \
+            let of = value.as_float(value.int(7))\n  \
+            match of { Ok(f) => println(\"float-ok\"), Err(e) => println(e), }\n  \
+            let of2 = value.as_float(value.null())\n  \
+            match of2 { Ok(f) => println(\"float-ok\"), Err(e) => println(e), } }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "value.as_int"));
+        if let Some(out) = build_and_run("self_hosted_value_scalar_extractors", &render_wasm_program(&prog)) {
+            assert_eq!(out, "42\nexpected Int\nyes\nfloat-ok\nexpected Float");
+        }
+    }
+
+    #[test]
     fn self_hosted_map_core_loop_reclaims() {
         // SOUNDNESS for the new Map[Int,Int] heap path: a bounded loop building + dropping a
         // fresh Map every iteration must reclaim each (plain non-nested drop) — no leak/double-free.

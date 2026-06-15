@@ -36,3 +36,42 @@ fn value_float(f: Float) -> Value = {
   prim.store64(h + 12, bits)    // payload = f64 BITS
   v
 }
+
+// ── Scalar extractors (Result[T, String]) ── read the tag; Ok(payload) on a match, else
+// Err("expected T") with v0's exact message (the materialized Result machinery, match-executable).
+
+fn value_as_int(v: Value) -> Result[Int, String] = {
+  let h = prim.handle(v)
+  let tag = prim.load32(h + 4)
+  let n = prim.load64(h + 12)
+  if tag == 2 then Ok(n)
+  else Err("expected Int")
+}
+
+fn value_as_bool(v: Value) -> Result[Bool, String] = {
+  let h = prim.handle(v)
+  let tag = prim.load32(h + 4)
+  let raw = prim.load64(h + 12)
+  let b = raw != 0
+  if tag == 1 then Ok(b)
+  else Err("expected Bool")
+}
+
+// A JSON number has no int/float split, so an integer Value is a valid Float — widen it
+// (Value::Int(n) => Ok(n as f64)), matching v0's value.as_float (#658).
+fn __vf_frombits(raw: Int) -> Result[Float, String] = {
+  let f = prim.ffrombits(raw)
+  Ok(f)
+}
+fn __vf_fromint(raw: Int) -> Result[Float, String] = {
+  let f = prim.i2f(raw)
+  Ok(f)
+}
+fn value_as_float(v: Value) -> Result[Float, String] = {
+  let h = prim.handle(v)
+  let tag = prim.load32(h + 4)
+  let raw = prim.load64(h + 12)
+  if tag == 3 then __vf_frombits(raw)
+  else if tag == 2 then __vf_fromint(raw)
+  else Err("expected Float")
+}

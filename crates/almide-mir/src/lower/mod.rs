@@ -723,6 +723,11 @@ pub(crate) fn is_self_host_result_module_fn(module: &str, func: &str) -> bool {
             | ("result", "map")
             | ("result", "flat_map")
             | ("result", "map_err")
+            // value.as_int/as_bool/as_float build a materialized Result[T, String] (Ok(payload)
+            // on a tag match, else Err("expected T")) — a `match` over the result EXECUTES.
+            | ("value", "as_int")
+            | ("value", "as_bool")
+            | ("value", "as_float")
     )
 }
 
