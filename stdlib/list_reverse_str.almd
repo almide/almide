@@ -1,0 +1,20 @@
+// list_reverse_str — SELF-HOSTED list.reverse over a List[String] (the repr-poly _str variant).
+// Build a fresh DynListStr of the same length, placing a DEEP COPY (string.repeat ·1) of element i
+// at slot n-1-i — so the result is single-owned (the source still owns the originals, no
+// double-free). Source borrowed; result owned.
+
+fn __revstr_fill(dh: Int, sh: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let x = prim.load_str(sh + 12 + i * 8)
+    let copy = string.repeat(x, 1)
+    prim.store_str(dh + 12 + (n - 1 - i) * 8, copy)
+    __revstr_fill(dh, sh, n, i + 1)
+  }
+
+fn list_reverse_str(xs: List[String]) -> List[String] = {
+  let n = list.len(xs)
+  let buf = prim.alloc_list_str(n)
+  let _x = __revstr_fill(prim.handle(buf), prim.handle(xs), n, 0)
+  buf
+}

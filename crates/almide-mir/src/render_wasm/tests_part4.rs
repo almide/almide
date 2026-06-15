@@ -1261,6 +1261,23 @@
     }
 
     #[test]
+    fn self_hosted_list_reverse_str() {
+        // SELF-HOSTED list.reverse over a List[String] (the repr-poly _str variant). Each element is
+        // DEEP-COPIED into the mirrored slot. reverse(["a","b","c"])=["c","b","a"]; verified via
+        // list.join + list.len. Byte-matches v0.
+        let src = "fn main() -> Unit = {\n  \
+            let parts = string.split(\"a,b,c\", \",\")\n  \
+            let rev = list.reverse(parts)\n  \
+            println(int.to_string(list.len(rev)))\n  \
+            println(list.join(rev, \"-\")) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "list.reverse_str"));
+        if let Some(out) = build_and_run("self_hosted_list_reverse_str", &render_wasm_program(&prog)) {
+            assert_eq!(out, "3\nc-b-a");
+        }
+    }
+
+    #[test]
     fn self_hosted_list_filter_str() {
         // SELF-HOSTED list.filter over a List[String] (the repr-poly _str variant). Single pass: keep
         // each element whose predicate is true, DEEP-COPYING it into the result; the len header is
