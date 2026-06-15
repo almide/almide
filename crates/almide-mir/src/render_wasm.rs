@@ -589,6 +589,7 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
         (include_str!("../../../stdlib/list_is_empty.almd"), &[("list_is_empty", "list.is_empty")]),
         (include_str!("../../../stdlib/list_sum.almd"), &[("list_sum", "list.sum")]),
         (include_str!("../../../stdlib/string_slice.almd"), &[("string_slice", "string.slice")]),
+        (include_str!("../../../stdlib/string_trim.almd"), &[("string_trim", "string.trim")]),
     ]
 }
 
@@ -1526,6 +1527,20 @@ mod tests {
         assert!(prog.functions.iter().any(|f| f.name == "string.slice"));
         if let Some(out) = build_and_run("string_slice", &render_wasm_program(&prog)) {
             assert_eq!(out, "ell\n日本");
+        }
+    }
+
+    #[test]
+    fn self_hosted_string_trim_strips_ascii_whitespace() {
+        // string.trim self-hosted: scan past leading/trailing ASCII WS, copy the middle.
+        // trim("  hello  ")="hello", trim("world   ")="world".
+        let src = "fn main() -> Unit = {\n  \
+            let a = string.trim(\"  hello  \")\n  println(a)\n  \
+            let b = string.trim(\"world   \")\n  println(b) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "string.trim"));
+        if let Some(out) = build_and_run("string_trim", &render_wasm_program(&prog)) {
+            assert_eq!(out, "hello\nworld");
         }
     }
 

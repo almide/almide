@@ -1,0 +1,45 @@
+// string_trim — SELF-HOSTED `string.trim` for v1 over the prim floor. Trims ASCII
+// whitespace (tab/LF/VT/FF/CR = 9..13, space = 32) from both ends and copies the middle.
+// ASCII WS bytes are all < 128, so a multibyte UTF-8 char (bytes >= 128) is never matched
+// — byte-level trimming is correct. (Unicode-only whitespace, e.g. U+00A0, is a later
+// refinement; the common case is ASCII.) Self-contained helpers.
+
+fn __trim_is_ws(b: Int) -> Bool =
+  if b == 32 then true
+  else if b >= 9 then (if b <= 13 then true else false)
+  else false
+
+// First non-WS byte address scanning forward from `addr`.
+fn __trim_start(addr: Int, end: Int) -> Int =
+  if addr >= end then addr
+  else {
+    let w = __trim_is_ws(prim.load8(addr))
+    if w then __trim_start(addr + 1, end) else addr
+  }
+
+// Address just past the last non-WS byte scanning backward from `addr`.
+fn __trim_end(start: Int, addr: Int) -> Int =
+  if addr <= start then addr
+  else {
+    let w = __trim_is_ws(prim.load8(addr - 1))
+    if w then __trim_end(start, addr - 1) else addr
+  }
+
+fn __trim_copy(src: Int, dst: Int, len: Int) -> Int =
+  if len <= 0 then dst
+  else {
+    prim.store8(dst, prim.load8(src))
+    __trim_copy(src + 1, dst + 1, len - 1)
+  }
+
+fn string_trim(s: String) -> String = {
+  let h = prim.handle(s)
+  let blen = prim.load32(h + 4)
+  let base = h + 12
+  let ws_start = __trim_start(base, base + blen)
+  let ws_end = __trim_end(ws_start, base + blen)
+  let nbytes = if ws_end > ws_start then ws_end - ws_start else 0
+  let buf = prim.alloc_str(nbytes)
+  let _e = __trim_copy(ws_start, prim.handle(buf) + 12, nbytes)
+  buf
+}
