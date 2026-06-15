@@ -761,6 +761,40 @@
     }
 
     #[test]
+    fn self_hosted_bytes_eof_and_valid_utf8() {
+        // SELF-HOSTED bytes.eof (negative pos wraps to usize -> always past-end) and
+        // bytes.is_valid_utf8 (= std::str::from_utf8().is_ok(), Rust's exact validation table:
+        // valid ASCII / multibyte / 4-byte emoji = true; lone-continuation, overlong, surrogate,
+        // truncated and > U+10FFFF = false). Bools print as 1/0. Byte-matches v0.
+        // NB: the `if X then 1 else 0` is BOUND to a let before int.to_string (an if directly in a
+        // call-arg defers to 0 — the known call-arg-if gap), and each Bytes is pre-bound (no nested
+        // call as an arg).
+        let src = "fn main() -> Unit = {\n  \
+            let abc = bytes.from_string(\"abc\")\n  \
+            let e0 = bytes.eof(abc, 0)\n  let z0 = if e0 then 1 else 0\n  println(int.to_string(z0))\n  \
+            let e3 = bytes.eof(abc, 3)\n  let z3 = if e3 then 1 else 0\n  println(int.to_string(z3))\n  \
+            let e2 = bytes.eof(abc, 2)\n  let z2 = if e2 then 1 else 0\n  println(int.to_string(z2))\n  \
+            let en = bytes.eof(abc, 0 - 1)\n  let zn = if en then 1 else 0\n  println(int.to_string(zn))\n  \
+            let hi = bytes.from_string(\"hi\")\n  let vhi = bytes.is_valid_utf8(hi)\n  let yhi = if vhi then 1 else 0\n  println(int.to_string(yhi))\n  \
+            let jp = bytes.from_string(\"日\")\n  let vjp = bytes.is_valid_utf8(jp)\n  let yjp = if vjp then 1 else 0\n  println(int.to_string(yjp))\n  \
+            let ff = bytes.from_list([255])\n  let vff = bytes.is_valid_utf8(ff)\n  let yff = if vff then 1 else 0\n  println(int.to_string(yff))\n  \
+            let ov = bytes.from_list([192, 128])\n  let vov = bytes.is_valid_utf8(ov)\n  let yov = if vov then 1 else 0\n  println(int.to_string(yov))\n  \
+            let sg = bytes.from_list([237, 160, 128])\n  let vsg = bytes.is_valid_utf8(sg)\n  let ysg = if vsg then 1 else 0\n  println(int.to_string(ysg))\n  \
+            let tr = bytes.from_list([194])\n  let vtr = bytes.is_valid_utf8(tr)\n  let ytr = if vtr then 1 else 0\n  println(int.to_string(ytr))\n  \
+            let lc = bytes.from_list([128])\n  let vlc = bytes.is_valid_utf8(lc)\n  let ylc = if vlc then 1 else 0\n  println(int.to_string(ylc))\n  \
+            let h4 = bytes.from_list([244, 144, 128, 128])\n  let vh4 = bytes.is_valid_utf8(h4)\n  let yh4 = if vh4 then 1 else 0\n  println(int.to_string(yh4))\n  \
+            let em = bytes.from_list([240, 159, 152, 128])\n  let vem = bytes.is_valid_utf8(em)\n  let yem = if vem then 1 else 0\n  println(int.to_string(yem)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "bytes.eof"));
+        assert!(prog.functions.iter().any(|f| f.name == "bytes.is_valid_utf8"));
+        if let Some(out) = build_and_run("self_hosted_bytes_eof_valid_utf8", &render_wasm_program(&prog)) {
+            // eof: false,true,false,true ; valid: hi=1, 日=1, [FF]=0, overlong=0, surrogate=0,
+            // truncated=0, lone-cont=0, >10FFFF=0, emoji=1
+            assert_eq!(out, "0\n1\n0\n1\n1\n1\n0\n0\n0\n0\n0\n0\n1");
+        }
+    }
+
+    #[test]
     fn self_hosted_int_to_float() {
         // SELF-HOSTED int.to_float / int.to_float64 = prim.i2f (i64 -> f64). Verified via a
         // round-trip through the self-hosted float.to_int: to_int(to_float(42))=42. Byte-matches v0.

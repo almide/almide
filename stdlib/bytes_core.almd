@@ -664,3 +664,101 @@ fn bytes_index_of(b: Bytes, pat: Bytes) -> Option[Int] = {
   let idx = __b_idx_find(pb, pp, bn, pn, 0)
   if idx < 0 then __byte_none() else __byte_some_idx(idx)
 }
+
+// bytes.eof(b, pos) -> is pos at/past the end? v0 casts pos to usize, so a NEGATIVE pos wraps to
+// a huge unsigned value that is always >= len → true (the past-end sentinel). Reads the header.
+// A negative pos folds to n (so `p >= n` holds), matching the usize-wrap; the tail is a bare
+// comparison (the proven Bool-returning shape).
+fn bytes_eof(b: Bytes, pos: Int) -> Bool = {
+  let n = prim.load32(prim.handle(b) + 4)
+  let p = if pos < 0 then n else pos
+  p >= n
+}
+
+// ── bytes.is_valid_utf8 — std::str::from_utf8(b).is_ok(), replicated as Rust's exact validation
+// table. A continuation byte is 0x80..=0xBF. The lead byte fixes the width AND a tighter range on
+// the SECOND byte that rejects overlong encodings, UTF-16 surrogates (U+D800..U+DFFF) and
+// codepoints > U+10FFFF; every later byte is a plain continuation. A truncated tail is invalid.
+
+// Is x a UTF-8 continuation byte (0x80..=0xBF)?
+fn __cont(x: Int) -> Bool =
+  if x < 128 then false
+  else if x < 192 then true
+  else false
+
+// Is lo <= x <= hi?
+fn __inrange(x: Int, lo: Int, hi: Int) -> Bool =
+  if x < lo then false
+  else if x > hi then false
+  else true
+
+// Sequence byte width from a multibyte lead (b0 in 0xC2..=0xF4): 0xC2..0xDF=2, 0xE0..0xEF=3, else 4.
+fn __width(b0: Int) -> Int =
+  if b0 < 224 then 2
+  else if b0 < 240 then 3
+  else 4
+
+// The 2nd byte's low bound: 0xE0 -> 0xA0 (no overlong 3-byte), 0xF0 -> 0x90 (no overlong 4-byte).
+fn __b1lo(b0: Int, w: Int) -> Int =
+  if w == 2 then 128
+  else if w == 3 then (if b0 == 224 then 160 else 128)
+  else (if b0 == 240 then 144 else 128)
+
+// The 2nd byte's high bound: 0xED -> 0x9F (no surrogate), 0xF4 -> 0x8F (no codepoint > U+10FFFF).
+fn __b1hi(b0: Int, w: Int) -> Int =
+  if w == 2 then 191
+  else if w == 3 then (if b0 == 237 then 159 else 191)
+  else (if b0 == 244 then 143 else 191)
+
+// Are bytes [i..w) at `pos` all continuation bytes? (the 2nd byte has its own tighter range; the
+// 3rd/4th are plain continuations — checked here from i=2.)
+fn __rest_cont(h: Int, pos: Int, w: Int, i: Int) -> Bool =
+  if i >= w then true
+  else {
+    let b = prim.load8(h + pos + i)
+    let c = __cont(b)
+    if c then __rest_cont(h, pos, w, i + 1) else false
+  }
+
+// Is the w-byte sequence at `pos` well-formed? The 2nd byte must be in its lead-specific range,
+// every later byte a plain continuation.
+fn __seq_ok(h: Int, pos: Int, b0: Int, w: Int) -> Bool = {
+  let b1 = prim.load8(h + pos + 1)
+  let lo = __b1lo(b0, w)
+  let hi = __b1hi(b0, w)
+  let r1 = __inrange(b1, lo, hi)
+  if r1 then __rest_cont(h, pos, w, 2) else false
+}
+
+// Validate the codepoint starting at `pos`; return the next offset, or -1 if invalid/truncated.
+// 0x80..0xC1 as a lead is invalid (continuation byte / overlong 2-byte); 0xF5.. is invalid. The
+// multibyte arm is a BLOCK with a let-bound width + nested scalar ifs (the proven lowering shape).
+fn __utf8_step(h: Int, n: Int, pos: Int) -> Int = {
+  let b0 = prim.load8(h + pos)
+  if b0 < 128 then pos + 1
+  else if b0 < 194 then 0 - 1
+  else if b0 < 245 then {
+    let w = __width(b0)
+    if pos + w > n then 0 - 1
+    else {
+      let okall = __seq_ok(h, pos, b0, w)
+      if okall then pos + w else 0 - 1
+    }
+  }
+  else 0 - 1
+}
+
+// Walk every codepoint from `pos`; valid iff each step advances (lazy: stops at the first error).
+// The recursive call sits in the THEN-arm (the proven __byteq_at recursion shape).
+fn __utf8_valid(h: Int, n: Int, pos: Int) -> Bool =
+  if pos >= n then true
+  else {
+    let nxt = __utf8_step(h, n, pos)
+    if nxt >= 0 then __utf8_valid(h, n, nxt) else false
+  }
+
+fn bytes_is_valid_utf8(b: Bytes) -> Bool = {
+  let dh = prim.handle(b) + 12
+  let n = prim.load32(prim.handle(b) + 4)
+  __utf8_valid(dh, n, 0)
+}
