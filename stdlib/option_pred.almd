@@ -24,3 +24,22 @@ fn option_unwrap_or(o: Option[Int], default: Int) -> Int = {
   let some_val = prim.load64(h + 12)
   if len == 1 then some_val else default
 }
+
+// option.to_list: Some(x) -> [x], None -> []. A fresh List[Int] of the Option's own
+// length (0 or 1) — scalar element, so the cert is one owned Alloc (like list.range). The
+// payload copy is isolated in a scalar helper, so the function keeps a plain heap tail.
+fn __otl_fill(srch: Int, dsth: Int, len: Int) -> Int =
+  if len == 1 then {
+    let v = prim.load64(srch + 12)
+    prim.store64(dsth + 12, v)
+    0
+  }
+  else 0
+
+fn option_to_list(o: Option[Int]) -> List[Int] = {
+  let h = prim.handle(o)
+  let len = prim.load32(h + 4)
+  let buf = prim.alloc_list(len)
+  let _f = __otl_fill(h, prim.handle(buf), len)
+  buf
+}

@@ -26,6 +26,7 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
                 ("option_is_some", "option.is_some"),
                 ("option_is_none", "option.is_none"),
                 ("option_unwrap_or", "option.unwrap_or"),
+                ("option_to_list", "option.to_list"),
             ],
         ),
         (

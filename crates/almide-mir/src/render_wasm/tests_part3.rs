@@ -951,3 +951,18 @@
             assert_eq!(out, "42\n7");
         }
     }
+
+    #[test]
+    fn self_hosted_option_to_list() {
+        // option.to_list: Some(x) -> [x], None -> []. to_list(Some 9) has len 1 + [0]=9;
+        // to_list(None) has len 0. (List[Int]; read back via list.len + list.get_or.)
+        let src = "fn main() -> Unit = {\n  \
+            let a: Option[Int] = Some(9)\n  let la = option.to_list(a)\n  let na = list.len(la)\n  let sna = int.to_string(na)\n  println(sna)\n  \
+            let ea = list.get_or(la, 0, 0)\n  let sea = int.to_string(ea)\n  println(sea)\n  \
+            let b: Option[Int] = None\n  let lb = option.to_list(b)\n  let nb = list.len(lb)\n  let snb = int.to_string(nb)\n  println(snb) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "option.to_list"));
+        if let Some(out) = build_and_run("option_to_list", &render_wasm_program(&prog)) {
+            assert_eq!(out, "1\n9\n0");
+        }
+    }
