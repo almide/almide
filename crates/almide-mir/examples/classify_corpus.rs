@@ -105,7 +105,10 @@ fn plus_one_events_backed(mir: &MirFunction) -> bool {
         .iter()
         .filter(|o| match o {
             Op::Call { dst: Some(_), result: Some(r), .. }
-            | Op::CallFn { dst: Some(_), result: Some(r), .. } => r.is_heap(),
+            | Op::CallFn { dst: Some(_), result: Some(r), .. }
+            // A heap-returning CallIndirect (a closure that moves out a fresh owned value)
+            // backs an `i` exactly like a heap-returning CallFn — keep the gate consistent.
+            | Op::CallIndirect { dst: Some(_), result: Some(r), .. } => r.is_heap(),
             _ => false,
         })
         .count();

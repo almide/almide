@@ -293,6 +293,29 @@ impl LowerCtx {
                 }
                 Ok(())
             }
+            // `var o = f(x)` where `f` is a lifted lambda / function-typed param returning a
+            // HEAP value (`(Int) -> Option[Int]` / `-> List[Int]`): EXECUTE the closure via a
+            // heap-result `Op::CallIndirect`. The result is a FRESH OWNED value (the closure
+            // moves it out — cert `i`, dropped at scope end — the foundation for filter_map /
+            // flat_map). A Computed callee that is NOT a known funcref falls through to the
+            // deferred Opaque below.
+            IrExprKind::Call { target: CallTarget::Computed { callee }, args, .. }
+                if self.funcref_value_of(callee).is_some() =>
+            {
+                let table_idx = self.funcref_value_of(callee).unwrap();
+                let repr = repr_of(ty)?;
+                let lowered = self.lower_call_args(args)?;
+                let dst = self.fresh_value();
+                self.ops.push(Op::CallIndirect {
+                    dst: Some(dst),
+                    table_idx,
+                    args: lowered,
+                    result: Some(repr),
+                });
+                self.value_of.insert(var, dst);
+                self.live_heap_handles.push(dst);
+                Ok(())
+            }
             // `var x = obj.method(args)` / `var x = (g)(args)` — an UNRESOLVABLE
             // `Method`/`Computed` callee bound to a heap var. Model the result as ONE
             // deferred fresh `Alloc{Opaque}` (its receiver's/args' calls captured by
@@ -496,10 +519,9 @@ impl LowerCtx {
             IrExprKind::OptionNone => {
                 let dst = self.fresh_value();
                 let repr = repr_of(ty).ok()?;
-                // `None` is the 0-element list (len=0) — identical to `Init::Opaque`, only
-                // tracked. Tracking is harmless for a heap-payload Option: the `match` gate
-                // INDEPENDENTLY requires a scalar bind, so a heap match never executes.
-                self.ops.push(Op::Alloc { dst, repr, init: Init::Opaque });
+                // `None` is the 0-element Option, sized like `OptSome` (`Init::OptNone`) so the
+                // free-list reuses a block between Some/None results; tracked as materialized.
+                self.ops.push(Op::Alloc { dst, repr, init: Init::OptNone });
                 self.materialized_options.insert(dst);
                 Some(dst)
             }

@@ -143,6 +143,13 @@ pub enum Init {
     /// The ownership cert is the SAME one `i` as any `Alloc` (init-agnostic), so NO
     /// checker change: a fresh owned object, moved out / dropped like a literal.
     OptSome { payload: ValueId },
+    /// A materialized `None` — the 0-element Option (len=0, the tag), but allocated with the
+    /// SAME physical size as `OptSome` (cap=1 + headroom). Sizing it identically to `Some`
+    /// is what lets the size-bucketed `$alloc` free-list REUSE a block between `Some` and
+    /// `None` results (a closure returning `(Int) -> Option[Int]` alternates them — distinct
+    /// sizes would fragment the head-only free-list and grow memory). len=0 still reads as
+    /// `None`; the spare slot is unused. Init-agnostic `i` cert (no checker change).
+    OptNone,
     /// A DYNAMICALLY-sized, runtime-allocated `List[Int]` of `len` (a ValueId) i64-element
     /// slots — an OWNED, rc=1 block (len = cap = `len`, `LIST_HEADER + len*ELEM_SIZE`
     /// bytes), filled by the caller via `prim.store64`. The list-building sibling of

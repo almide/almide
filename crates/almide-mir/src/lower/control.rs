@@ -749,6 +749,26 @@ impl LowerCtx {
                 self.drop_arm_locals(arm_mark);
                 Some(obj)
             }
+            // A direct Option ctor arm (`if c then Some(x*2) else None` — the filter_map / map
+            // closure body): materialize the 0-or-1-element Option block + Consume (move-out)
+            // — the SAME per-arm `"im"` balance as a literal arm (init-agnostic `Alloc` = `i`,
+            // `Consume` = `m`). `Some`'s payload must be a lowerable scalar (a heap payload
+            // aliases its element — a later brick; it falls out of the subset here).
+            IrExprKind::OptionSome { expr } => {
+                let payload = self.lower_scalar_value(expr)?;
+                let repr = repr_of(result_ty).ok()?;
+                let obj = self.fresh_value();
+                self.ops.push(Op::Alloc { dst: obj, repr, init: Init::OptSome { payload } });
+                self.ops.push(Op::Consume { v: obj });
+                Some(obj)
+            }
+            IrExprKind::OptionNone => {
+                let repr = repr_of(result_ty).ok()?;
+                let obj = self.fresh_value();
+                self.ops.push(Op::Alloc { dst: obj, repr, init: Init::OptNone });
+                self.ops.push(Op::Consume { v: obj });
+                Some(obj)
+            }
             _ => None,
         }
     }

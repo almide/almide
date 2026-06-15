@@ -180,16 +180,22 @@ pub fn render_wasm_program(prog: &MirProgram) -> String {
     // appears (`$closure_fnN` = N i64 params → i64) that `call_indirect` checks against.
     // Gated on CallIndirect presence so non-closure programs render byte-identically (no
     // table, no behavior change). Multi-arity supports fold `(Acc, Int) -> Acc` etc.
-    let arities: std::collections::BTreeSet<usize> = prog
+    // Each distinct closure SIGNATURE is `(arity, heap_result)`: a closure returning a HEAP
+    // value (`(Int) -> Option[Int]` for filter_map, `-> List[Int]` for flat_map) is a wasm
+    // i32 result (`$closure_fnN_h`), a scalar result is i64 (`$closure_fnN`). The CallIndirect
+    // render picks the matching type by its arg count + result repr.
+    let sigs: std::collections::BTreeSet<(usize, bool)> = prog
         .functions
         .iter()
         .flat_map(|f| f.ops.iter())
         .filter_map(|op| match op {
-            Op::CallIndirect { args, .. } => Some(args.len()),
+            Op::CallIndirect { args, result, .. } => {
+                Some((args.len(), result.map(|r| r.is_heap()).unwrap_or(false)))
+            }
             _ => None,
         })
         .collect();
-    let closure_table = if !arities.is_empty() {
+    let closure_table = if !sigs.is_empty() {
         let n = prog.functions.len();
         let names = prog
             .functions
@@ -197,15 +203,16 @@ pub fn render_wasm_program(prog: &MirProgram) -> String {
             .map(|f| format!("${}", f.name))
             .collect::<Vec<_>>()
             .join(" ");
-        let types = arities
+        let types = sigs
             .iter()
-            .map(|a| {
+            .map(|(a, heap)| {
                 let params = if *a == 0 {
                     String::new()
                 } else {
                     format!(" (param {})", vec!["i64"; *a].join(" "))
                 };
-                format!("  (type $closure_fn{a} (func{params} (result i64)))\n")
+                let (suffix, res) = if *heap { ("_h", "i32") } else { ("", "i64") };
+                format!("  (type $closure_fn{a}{suffix} (func{params} (result {res})))\n")
             })
             .collect::<String>();
         format!("{types}  (table {n} funcref)\n  (elem (i32.const 0) func {names})\n")
@@ -500,6 +507,16 @@ fn render_op(
                 d = local(*dst),
             )
         }
+        // `None` SIZED LIKE `OptSome` (len 0, cap 1+headroom) so the size-bucketed free-list
+        // can REUSE one block between a closure's Some and None results (distinct sizes would
+        // fragment the head-only `$alloc` free-list and grow memory). len 0 reads as None.
+        Op::Alloc { dst, init: Init::OptNone, .. } => {
+            let cap = 1 + PUSH_HEADROOM;
+            format!(
+                "    (local.set {d} (call $list_new (i32.const 0) (i32.const {cap})))\n",
+                d = local(*dst),
+            )
+        }
         Op::Alloc { dst, init, .. } => {
             let elems: &[i64] = match init {
                 Init::IntList(e) => e,
@@ -507,6 +524,7 @@ fn render_op(
                 | Init::Str(_)
                 | Init::DynStr { .. }
                 | Init::OptSome { .. }
+                | Init::OptNone
                 | Init::DynList { .. } => &[],
             };
             let len = elems.len() as u32;
@@ -562,12 +580,14 @@ fn render_op(
         // (`$closure_fnN`, N = arg count). The table + every `(type $closure_fnN)` are
         // emitted by render_wasm_program for each arity present; `table_idx` is the runtime
         // slot of the lifted lambda.
-        Op::CallIndirect { dst, table_idx, args, .. } => {
+        Op::CallIndirect { dst, table_idx, args, result } => {
             let argstr = args.iter().map(render_arg_wasm).collect::<Vec<_>>().join(" ");
             let arity = args.len();
+            // Pick the closure type of this arity AND result repr (`_h` = heap/i32 result).
+            let suffix = if result.map(|r| r.is_heap()).unwrap_or(false) { "_h" } else { "" };
             // The table index is a wasm i32; the MIR value is the uniform i64, so wrap it.
             let call = format!(
-                "(call_indirect (type $closure_fn{arity}) {argstr} (i32.wrap_i64 (local.get {})))",
+                "(call_indirect (type $closure_fn{arity}{suffix}) {argstr} (i32.wrap_i64 (local.get {})))",
                 local(*table_idx)
             );
             match dst {

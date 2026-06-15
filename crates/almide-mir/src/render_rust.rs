@@ -140,7 +140,7 @@ fn render_op(op: &Op) -> Option<String> {
                 Init::Opaque | Init::DynStr { .. } => "Vec::new()".to_string(),
                 // A materialized `Some(payload)` / runtime List are wasm-only (native uses
                 // v0 codegen).
-                Init::OptSome { .. } | Init::DynList { .. } => "Vec::new()".to_string(),
+                Init::OptSome { .. } | Init::OptNone | Init::DynList { .. } => "Vec::new()".to_string(),
             };
             Some(format!("let mut {}: Vec<i64> = {init_expr};", var(*dst)))
         }

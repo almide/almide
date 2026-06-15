@@ -426,9 +426,16 @@ pub fn ownership_certificate(func: &MirFunction) -> String {
             }
             // A call that returns a FRESH OWNED heap value (the callee allocated
             // it and moved it out to us — the return-mode signature read at the
-            // call site, callee not opened) is a +1, like Alloc.
+            // call site, callee not opened) is a +1, like Alloc. A `CallIndirect`
+            // (a closure invocation) returning heap is the SAME: a closure moves its
+            // result out, so a heap-returning closure call (`let o = f(x)` where
+            // `f: (Int) -> Option[Int]`) owns a fresh value, dropped at scope end —
+            // the foundation for `list.filter_map` / `flat_map`. A non-capturing
+            // lifted lambda materializes its result (`Some(x)` allocs), and a closure
+            // param points to one — so the result is always owned, never borrowed.
             Op::Call { dst: Some(d), result: Some(r), .. }
             | Op::CallFn { dst: Some(d), result: Some(r), .. }
+            | Op::CallIndirect { dst: Some(d), result: Some(r), .. }
                 if r.is_heap() =>
             {
                 s.of.insert(*d, *d);

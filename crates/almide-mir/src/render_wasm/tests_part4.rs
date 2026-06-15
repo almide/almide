@@ -241,6 +241,43 @@
     }
 
     #[test]
+    fn self_hosted_list_filter_map() {
+        // SELF-HOSTED `list.filter_map` — the FIRST heap-returning closure (f: (Int) ->
+        // Option[Int] via $closure_fn1_h). Keep doubled evens: filter_map([1,2,3,4,5], x =>
+        // if x%2==0 then Some(x*2) else None) = [4,8] (from 2,4). len 2, sum 12, ys[0]=4.
+        // Each closure result Option is owned and dropped — byte-matches v0.
+        let src = "fn main() -> Unit = {\n  \
+            let ys = list.filter_map([1, 2, 3, 4, 5], (x) => if x % 2 == 0 then Some(x * 2) else None)\n  \
+            println(int.to_string(list.len(ys)))\n  \
+            println(int.to_string(list.sum(ys)))\n  \
+            println(int.to_string(list.get_or(ys, 0, 0))) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "list.filter_map"));
+        if let Some(out) = build_and_run("self_hosted_list_filter_map", &render_wasm_program(&prog)) {
+            // [4,8]: len2 sum12 ys[0]=4
+            assert_eq!(out, "2\n12\n4");
+        }
+    }
+
+    #[test]
+    fn filter_map_closure_results_do_not_leak() {
+        // BOUNDED-LOOP LEAK GUARD for the heap-returning closure (memory is a fixed 1 page =
+        // 64 KiB). filter_map over 3000 elems allocates 3000 owned Option results. With each
+        // dropped + reused (O(1), __fm_step frees `o` before the next), peak ≈ xs+buf ≈ 48 KiB
+        // — FITS. If a closure result LEAKED, the 3000 un-freed Options would ≈ double memory
+        // to ~96 KiB and trap (out of bounds). Completing with the right count is the proof.
+        let src = "fn main() -> Unit = {\n  \
+            let xs = list.range(0, 3000)\n  \
+            let ys = list.filter_map(xs, (x) => if x % 3 == 0 then Some(x) else None)\n  \
+            println(int.to_string(list.len(ys))) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("filter_map_no_leak", &render_wasm_program(&prog)) {
+            // multiples of 3 in [0,3000): 0,3,…,2997 = 1000
+            assert_eq!(out, "1000");
+        }
+    }
+
+    #[test]
     fn self_hosted_list_take_end_drop_end() {
         // list.take_end/drop_end self-hosted: last n / all-but-last n, List[Int] slot-copy.
         // take_end([1,2,3,4,5],2)=[4,5] ([0]=4,len 2); drop_end([1,2,3,4,5],2)=[1,2,3]
