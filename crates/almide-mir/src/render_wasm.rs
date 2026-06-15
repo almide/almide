@@ -636,6 +636,10 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
         (include_str!("../../../stdlib/list_dedup.almd"), &[("list_dedup", "list.dedup")]),
         (include_str!("../../../stdlib/string_slice.almd"), &[("string_slice", "string.slice")]),
         (
+            include_str!("../../../stdlib/string_to_bytes.almd"),
+            &[("string_to_bytes", "string.to_bytes")],
+        ),
+        (
             include_str!("../../../stdlib/string_trim.almd"),
             &[
                 ("string_trim", "string.trim"),
@@ -1905,6 +1909,31 @@ mod tests {
         assert!(prog.functions.iter().any(|f| f.name == "string.reverse"), "linked");
         if let Some(out) = build_and_run("string_reverse", &render_wasm_program(&prog)) {
             assert_eq!(out, "olleh\n日ba");
+        }
+    }
+
+    #[test]
+    fn self_hosted_string_to_bytes() {
+        // string.to_bytes self-hosted (the UTF-8 bytes as a List[Int]): to_bytes("ABC")=
+        // [65,66,67]; to_bytes("日")=[230,151,165] (3 UTF-8 bytes). Read back via list.len +
+        // list.get_or. byte-matching v0; a 2000-iter loop is bounded (List[Int], no leak).
+        let src = "fn main() -> Unit = {\n  \
+            let b = string.to_bytes(\"ABC\")\n  \
+            let bl = list.len(b)\n  \
+            let b0 = list.get_or(b, 0, 0)\n  \
+            let b2 = list.get_or(b, 2, 0)\n  \
+            let m = string.to_bytes(\"日\")\n  \
+            let ml = list.len(m)\n  \
+            let m0 = list.get_or(m, 0, 0)\n  \
+            println(int.to_string(bl))\n  \
+            println(int.to_string(b0))\n  \
+            println(int.to_string(b2))\n  \
+            println(int.to_string(ml))\n  \
+            println(int.to_string(m0)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "string.to_bytes"), "linked");
+        if let Some(out) = build_and_run("string_to_bytes", &render_wasm_program(&prog)) {
+            assert_eq!(out, "3\n65\n67\n3\n230");
         }
     }
 
