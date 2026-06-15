@@ -1240,6 +1240,25 @@
     }
 
     #[test]
+    fn self_hosted_result_to_option() {
+        // SELF-HOSTED result.to_option: Ok → Some(value), Err → None. It READS the Result len-tag and
+        // BUILDS a fresh Option[Int] over v1's own Option machinery; a `match` over the result then
+        // EXECUTES (result.to_option is tracked in is_self_host_option_module_fn). to_option(Ok(5))=
+        // Some(5) → prints 5 ; to_option(Err)=None → prints none. Byte-matches v0.
+        let src = "fn mk(n: Int) -> Result[Int, String] = if n >= 0 then Ok(n) else Err(\"neg\")\n\
+                   fn main() -> Unit = {\n  \
+            let r1 = mk(5)\n  let o1 = result.to_option(r1)\n  \
+            match o1 {\n    Some(v) => println(int.to_string(v)),\n    None => println(\"none\"),\n  }\n  \
+            let r2 = mk(0 - 1)\n  let o2 = result.to_option(r2)\n  \
+            match o2 {\n    Some(v) => println(int.to_string(v)),\n    None => println(\"none\"),\n  } }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "result.to_option"));
+        if let Some(out) = build_and_run("self_hosted_result_to_option", &render_wasm_program(&prog)) {
+            assert_eq!(out, "5\nnone");
+        }
+    }
+
+    #[test]
     fn result_err_string_allocating_loop_is_bounded() {
         // ADVERSARIAL leak/double-free guard for the Result machinery: a loop building thousands of
         // `Err(msg)` AND `Ok(int)` Results must run in BOUNDED memory — each Err owns a fresh message

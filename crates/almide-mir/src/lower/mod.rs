@@ -664,6 +664,9 @@ pub(crate) fn is_self_host_option_module_fn(module: &str, func: &str) -> bool {
         }
         "string" => matches!(func, "index_of" | "last_index_of" | "codepoint" | "first" | "last" | "get" | "strip_prefix" | "strip_suffix"),
         "bytes" => matches!(func, "get" | "index_of"),
+        // result.to_option builds a materialized Option[Int] from a Result's len-tag (Ok → Some,
+        // Err → None), so a `match` over its result EXECUTES.
+        "result" => matches!(func, "to_option"),
         _ => false,
     }
 }

@@ -23,3 +23,13 @@ fn result_unwrap_or(r: Result[Int, String], default: Int) -> Int = {
   let v = prim.load64(h + 12)
   if len == 0 then v else default
 }
+
+// result.to_option(r) -> Some(value) for Ok, None for Err — the Result→Option bridge. Reads the
+// len-tag, then BUILDS a fresh Option[Int] (Some materializes the scalar slot-0 value, None the
+// empty Option) over v1's own Option machinery. `r` is borrowed; the Option is freshly owned.
+fn result_to_option(r: Result[Int, String]) -> Option[Int] = {
+  let h = prim.handle(r)
+  let len = prim.load32(h + 4)
+  let v = prim.load64(h + 12)
+  if len == 0 then Some(v) else None
+}
