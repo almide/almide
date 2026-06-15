@@ -1663,6 +1663,27 @@
     }
 
     #[test]
+    fn self_hosted_list_string_higher_order() {
+        // SELF-HOSTED list.all/any/count over a List[String] (predicate over String elements,
+        // heap-arg closure; arg-keyed dispatch). xs=[apple,banana,kiwi,fig]: all(len>2)=true;
+        // any(len<4)=true (fig); count(len>4)=2 (banana=6,apple=5). Byte-matches v0. Closure body
+        // uses a let-bind for the scalar call.
+        let src = "fn main() -> Unit = {\n  \
+            let xs = string.split(\"apple,banana,kiwi,fig\", \",\")\n  \
+            let al = list.all(xs, (x) => { let l = string.len(x)\n l > 2 })\n  \
+            if al then println(\"all-long\") else println(\"no\")\n  \
+            let an = list.any(xs, (x) => { let l = string.len(x)\n l < 4 })\n  \
+            if an then println(\"has-short\") else println(\"no\")\n  \
+            let cn = list.count(xs, (x) => { let l = string.len(x)\n l > 4 })\n  \
+            println(int.to_string(cn)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "list.count_str"));
+        if let Some(out) = build_and_run("self_hosted_list_string_higher_order", &render_wasm_program(&prog)) {
+            assert_eq!(out, "all-long\nhas-short\n2");
+        }
+    }
+
+    #[test]
     fn self_hosted_set_string_loop_reclaims() {
         // SOUNDNESS for the Set[String] nested-ownership path: a bounded loop building + dropping a
         // fresh Set[String] each iteration must reclaim each element String + the block (DropListStr)

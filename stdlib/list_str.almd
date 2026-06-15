@@ -50,3 +50,35 @@ fn list_index_of_str(xs: List[String], x: String) -> Option[Int] = {
   if idx < 0 then __lis_none()
   else __lis_some(idx)
 }
+
+// ── Higher-order list.all/any/count over a List[String] (the predicate takes a String element by
+// handle, heap-arg closure ABI; reads only, no allocation). Sum the predicate's 0/1 into a hit
+// count: any = count>0, all = count==len, count = the hit count itself. Pure predicate = v0-match.
+fn __list_str_count_hits(h: Int, f: (String) -> Bool, n: Int, i: Int, acc: Int) -> Int =
+  if i >= n then acc
+  else {
+    let x = prim.load_str(h + 12 + i * 8)
+    let hit = f(x)
+    if hit then __list_str_count_hits(h, f, n, i + 1, acc + 1)
+    else __list_str_count_hits(h, f, n, i + 1, acc)
+  }
+
+fn list_any_str(xs: List[String], f: (String) -> Bool) -> Bool = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  let hits = __list_str_count_hits(h, f, n, 0, 0)
+  hits > 0
+}
+
+fn list_all_str(xs: List[String], f: (String) -> Bool) -> Bool = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  let hits = __list_str_count_hits(h, f, n, 0, 0)
+  hits >= n
+}
+
+fn list_count_str(xs: List[String], f: (String) -> Bool) -> Int = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  __list_str_count_hits(h, f, n, 0, 0)
+}
