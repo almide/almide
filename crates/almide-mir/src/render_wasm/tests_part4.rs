@@ -677,6 +677,26 @@
     }
 
     #[test]
+    fn self_hosted_base64_encode() {
+        // SELF-HOSTED base64.encode / base64.encode_url (RFC 4648, padded) over the bytes machinery
+        // + bitwise prim floor. encode("Man")="TWFu"; "Ma"="TWE="; "M"="TQ=="; the 2-byte tail
+        // [251,255] exercises the alphabet-specific 62/63: std "+/8=", url "-_8=". Byte-matches v0.
+        let src = "fn main() -> Unit = {\n  \
+            let m = bytes.from_string(\"Man\")\n  println(base64.encode(m))\n  \
+            let m2 = bytes.from_string(\"Ma\")\n  println(base64.encode(m2))\n  \
+            let m1 = bytes.from_string(\"M\")\n  println(base64.encode(m1))\n  \
+            let ff = [251, 255]\n  let bf = bytes.from_list(ff)\n  \
+            println(base64.encode_url(bf))\n  \
+            println(base64.encode(bf)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "base64.encode"));
+        assert!(prog.functions.iter().any(|f| f.name == "base64.encode_url"));
+        if let Some(out) = build_and_run("self_hosted_base64_encode", &render_wasm_program(&prog)) {
+            assert_eq!(out, "TWFu\nTWE=\nTQ==\n-_8=\n+/8=");
+        }
+    }
+
+    #[test]
     fn self_hosted_math_sqrt() {
         // SELF-HOSTED math.sqrt = prim.fsqrt (f64.sqrt, byte-exact with v0). sqrt(16)=4,
         // sqrt(2)=1.41…→to_int 1, sqrt(81)=9.
@@ -762,3 +782,4 @@
             assert_eq!(out, "4\n2\n3\n3\n5\n0");
         }
     }
+

@@ -131,6 +131,10 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
             &[("hex_encode", "hex.encode"), ("hex_encode_upper", "hex.encode_upper")],
         ),
         (
+            include_str!("../../../../stdlib/base64_encode.almd"),
+            &[("base64_encode", "base64.encode"), ("base64_encode_url", "base64.encode_url")],
+        ),
+        (
             include_str!("../../../../stdlib/int_rotate.almd"),
             &[("int_rotate_left", "int.rotate_left"), ("int_rotate_right", "int.rotate_right")],
         ),

@@ -1,0 +1,73 @@
+// base64_encode — SELF-HOSTED base64.encode / base64.encode_url (RFC 4648, padded). Each 3-byte
+// group becomes 4 chars (6 bits each); a 1- or 2-byte tail is padded with '='. The alphabet is
+// computed arithmetically: 0..25 -> 'A'..'Z', 26..51 -> 'a'..'z', 52..61 -> '0'..'9', 62/63 are
+// the alphabet-specific symbols ('+'/'/' standard, '-'/'_' URL-safe). Output length = ceil(n/3)*4.
+
+// A 6-bit index (0..63) -> its base64 ASCII char; c62/c63 are the alphabet-specific symbols.
+fn __b64_char(idx: Int, c62: Int, c63: Int) -> Int =
+  if idx < 26 then 65 + idx
+  else {
+    if idx < 52 then 97 + (idx - 26)
+    else {
+      if idx < 62 then 48 + (idx - 52)
+      else { if idx < 63 then c62 else c63 }
+    }
+  }
+
+// Encode the n-byte input at src into base64 at dst (4 chars per 3-byte group, '=' padded tail).
+// The 2nd/3rd source bytes are read from a CLAMPED offset (so the read is always in bounds even
+// for a 1- or 2-byte tail) and zeroed via a 0/1 presence flag; the 3rd/4th output chars likewise
+// compute the char unconditionally then SELECT it or '=' (61) — both keep every arm a plain scalar.
+fn __b64_fill(dst: Int, src: Int, n: Int, i: Int, c62: Int, c63: Int) -> Int =
+  if i >= n then 0
+  else {
+    let rem = n - i
+    let f1 = if rem > 1 then 1 else 0
+    let f2 = if rem > 2 then 1 else 0
+    let b0 = prim.load8(src + i)
+    let b1raw = prim.load8(src + i + f1)
+    let b2raw = prim.load8(src + i + f2 * 2)
+    let b1 = b1raw * f1
+    let b2 = b2raw * f2
+    let s0 = prim.bshl(b0, 16)
+    let s1 = prim.bshl(b1, 8)
+    let p = prim.bor(s0, s1)
+    let acc = prim.bor(p, b2)
+    let sh18 = prim.bshr_u(acc, 18)
+    let sh12 = prim.bshr_u(acc, 12)
+    let sh6 = prim.bshr_u(acc, 6)
+    let i0 = prim.band(sh18, 63)
+    let i1 = prim.band(sh12, 63)
+    let i2 = prim.band(sh6, 63)
+    let i3 = prim.band(acc, 63)
+    let dstpos = dst + (i / 3) * 4
+    let ch0 = __b64_char(i0, c62, c63)
+    let ch1 = __b64_char(i1, c62, c63)
+    let ch2 = __b64_char(i2, c62, c63)
+    let ch3 = __b64_char(i3, c62, c63)
+    let c2 = if rem > 1 then ch2 else 61
+    let c3 = if rem > 2 then ch3 else 61
+    prim.store8(dstpos, ch0)
+    prim.store8(dstpos + 1, ch1)
+    prim.store8(dstpos + 2, c2)
+    prim.store8(dstpos + 3, c3)
+    __b64_fill(dst, src, n, i + 3, c62, c63)
+  }
+
+// base64.encode(b) -> the standard-alphabet ('+' '/') padded base64 String.
+fn base64_encode(b: Bytes) -> String = {
+  let n = prim.load32(prim.handle(b) + 4)
+  let chunks = (n + 2) / 3
+  let out = prim.alloc_str(chunks * 4)
+  let _x = __b64_fill(prim.handle(out) + 12, prim.handle(b) + 12, n, 0, 43, 47)
+  out
+}
+
+// base64.encode_url(b) -> the URL-safe ('-' '_') padded base64 String.
+fn base64_encode_url(b: Bytes) -> String = {
+  let n = prim.load32(prim.handle(b) + 4)
+  let chunks = (n + 2) / 3
+  let out = prim.alloc_str(chunks * 4)
+  let _x = __b64_fill(prim.handle(out) + 12, prim.handle(b) + 12, n, 0, 45, 95)
+  out
+}
