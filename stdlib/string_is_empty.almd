@@ -1,0 +1,5 @@
+// string_is_empty — the SELF-HOSTED `string.is_empty(s)` for v1. The byte length is 0
+// iff the string is empty, so this reads the header len field (no UTF-8 decode needed;
+// empty in bytes ⟺ empty in codepoints). Reads only — `s` is borrowed, no allocation.
+fn string_is_empty(s: String) -> Bool =
+  prim.load32(prim.handle(s) + 4) == 0   // LIST_LEN_OFFSET(4)

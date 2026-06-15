@@ -579,6 +579,8 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static str, &'static st
     &[
         ("int.to_string", "int_to_string", include_str!("../../../stdlib/int_to_string.almd")),
         ("string.len", "string_len", include_str!("../../../stdlib/string_len.almd")),
+        ("string.repeat", "string_repeat", include_str!("../../../stdlib/string_repeat.almd")),
+        ("string.is_empty", "string_is_empty", include_str!("../../../stdlib/string_is_empty.almd")),
     ]
 }
 
@@ -1411,6 +1413,37 @@ mod tests {
         );
         if let Some(out) = build_and_run("string_len", &render_wasm_program(&prog)) {
             assert_eq!(out, "5\n3");
+        }
+    }
+
+    #[test]
+    fn self_hosted_string_repeat_builds_the_repetition() {
+        // string.repeat(s, n) self-hosted: alloc len(s)*n bytes, byte-copy s n times.
+        // repeat("ab",3)="ababab", repeat("x",5)="xxxxx", byte-matching v0's s.repeat(n).
+        let src = "fn main() -> Unit = {\n  \
+            let a = string.repeat(\"ab\", 3)\n  \
+            println(a)\n  \
+            let b = string.repeat(\"x\", 5)\n  \
+            println(b) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "string.repeat"));
+        if let Some(out) = build_and_run("string_repeat", &render_wasm_program(&prog)) {
+            assert_eq!(out, "ababab\nxxxxx");
+        }
+    }
+
+    #[test]
+    fn self_hosted_string_is_empty_tests_the_length() {
+        // string.is_empty(s) self-hosted: the header byte-length is 0 iff empty.
+        let src = "fn main() -> Unit = {\n  \
+            let a = string.is_empty(\"\")\n  \
+            if a then println(\"empty\") else println(\"nonempty\")\n  \
+            let b = string.is_empty(\"x\")\n  \
+            if b then println(\"empty\") else println(\"nonempty\") }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "string.is_empty"));
+        if let Some(out) = build_and_run("string_is_empty", &render_wasm_program(&prog)) {
+            assert_eq!(out, "empty\nnonempty");
         }
     }
 
