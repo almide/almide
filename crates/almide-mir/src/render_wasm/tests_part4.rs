@@ -1261,6 +1261,25 @@
     }
 
     #[test]
+    fn self_hosted_list_windows() {
+        // SELF-HOSTED list.windows / list.window — all CONTIGUOUS (overlapping) sub-slices of length
+        // n (v0's xs.windows(n): n>len → [], else len-n+1 windows). windows([1,2,3,4],2)=[[1,2],[2,3],
+        // [3,4]]: 3 windows, flatten len 6 sum 15. windows(_,5) over 2 elems = []. window is an alias.
+        let src = "fn main() -> Unit = {\n  \
+            let ws = list.windows([1, 2, 3, 4], 2)\n  println(int.to_string(list.len(ws)))\n  \
+            let fl = list.flatten(ws)\n  println(int.to_string(list.len(fl)))\n  \
+            println(int.to_string(list.sum(fl)))\n  \
+            let empty = list.windows([1, 2], 5)\n  println(int.to_string(list.len(empty)))\n  \
+            let wv = list.window([1, 2, 3], 2)\n  println(int.to_string(list.len(wv))) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "list.windows"));
+        assert!(prog.functions.iter().any(|f| f.name == "list.window"));
+        if let Some(out) = build_and_run("self_hosted_list_windows", &render_wasm_program(&prog)) {
+            assert_eq!(out, "3\n6\n15\n0\n2");
+        }
+    }
+
+    #[test]
     fn self_hosted_list_chunk() {
         // SELF-HOSTED list.chunk(xs, n): split into consecutive chunks of n (last may be smaller),
         // a NESTED List[List[Int]] built via prim.alloc_list_str + per-chunk alloc_list. Verified by

@@ -37,3 +37,26 @@ fn list_chunk(xs: List[Int], n: Int) -> List[List[Int]] = {
   let _x = __chunk_outer(prim.handle(outer), sh, total, n, 0, 0)
   outer
 }
+
+// ── list.windows / list.window — all CONTIGUOUS (overlapping) sub-slices of length n. v0's
+// xs.windows(n): n > len → [], else len-n+1 windows. window and windows behave identically here
+// (windows(n) already yields nothing for n > len). Each window reuses the chunk-copy helper. ──
+fn __win_outer(oh: Int, sh: Int, n: Int, num: Int, wi: Int) -> Int =
+  if wi >= num then 0
+  else {
+    let w = __chunk_one(sh, wi, n)
+    prim.store_str(oh + 12 + wi * 8, w)
+    __win_outer(oh, sh, n, num, wi + 1)
+  }
+
+fn __do_windows(xs: List[Int], n: Int) -> List[List[Int]] = {
+  let sh = prim.handle(xs)
+  let total = prim.load32(sh + 4)
+  let num = if n > total then 0 else total - n + 1
+  let outer = prim.alloc_list_str(num)
+  let _x = __win_outer(prim.handle(outer), sh, n, num, 0)
+  outer
+}
+
+fn list_windows(xs: List[Int], n: Int) -> List[List[Int]] = __do_windows(xs, n)
+fn list_window(xs: List[Int], n: Int) -> List[List[Int]] = __do_windows(xs, n)
