@@ -88,6 +88,15 @@ fn alloc_list_f64(n: Int) -> List[Float] = _
 @intrinsic("almide_rt_prim_alloc_list")
 fn alloc_set(n: Int) -> Set[Int] = _
 
+// Allocate a runtime-sized OWNED `Map[Int,Int]` of `slots` i64 slots — physically IDENTICAL to
+// `alloc_list` (a plain block; drops flat), but typed as Map[Int,Int]. A v1 Map[Int,Int] IS a
+// v1 List block of PAIRED slots [rc][len][cap][k0,v0,k1,v1,...] (16 bytes/entry, key then value,
+// insertion-ordered like v0's Vec<(K,V)>); the builder passes `slots = 2 * entry_capacity`, fills
+// entries, and patches the len field to the ENTRY count via store32. Scalar k/v, no nested
+// ownership. A dedicated name keeps `alloc_list`'s scratch-list inference unambiguous.
+@intrinsic("almide_rt_prim_alloc_list")
+fn alloc_map(slots: Int) -> Map[Int, Int] = _
+
 // Allocate a runtime-sized OWNED `List[String]` of `n` slots (Machinery 2: a NESTED-
 // ownership list). Fill via `store_str`, which MOVES each owned String into a slot; the
 // whole list is freed recursively (each element String + the block) at scope end.

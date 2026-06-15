@@ -1413,6 +1413,48 @@
     }
 
     #[test]
+    fn self_hosted_map_core() {
+        // SELF-HOSTED Map[Int,Int] core (the Map machinery: a v1 Map IS a v1 List of PAIRED
+        // 16-byte slots [k,v,...]; prim.alloc_map + insertion-order set/remove + len-patch). v0:
+        // new→set(1,10)→set(2,20)→set(1,99) [update in place] = {1:99, 2:20} len 2; get_or(2,0)=20,
+        // get_or(9,-1)=-1; contains(1)=true; remove(1)={2:20} len 1; keys sum 1+2=3 before remove;
+        // values sum 99+20=119. Byte-matches v0.
+        let src = "fn main() -> Unit = {\n  \
+            let m0 = map.new()\n  let m1 = map.set(m0, 1, 10)\n  let m2 = map.set(m1, 2, 20)\n  \
+            let m = map.set(m2, 1, 99)\n  \
+            println(int.to_string(map.len(m)))\n  \
+            println(int.to_string(map.get_or(m, 2, 0)))\n  \
+            println(int.to_string(map.get_or(m, 9, 0 - 1)))\n  \
+            let c1 = map.contains(m, 1)\n  let vc1 = if c1 then 1 else 0\n  println(int.to_string(vc1))\n  \
+            let ks = map.keys(m)\n  println(int.to_string(list.sum(ks)))\n  \
+            let vs = map.values(m)\n  println(int.to_string(list.sum(vs)))\n  \
+            let r = map.remove(m, 1)\n  println(int.to_string(map.len(r)))\n  \
+            println(int.to_string(map.get_or(r, 2, 0))) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "map.set"));
+        if let Some(out) = build_and_run("self_hosted_map_core", &render_wasm_program(&prog)) {
+            assert_eq!(out, "2\n20\n-1\n1\n3\n119\n1\n20");
+        }
+    }
+
+    #[test]
+    fn self_hosted_map_core_loop_reclaims() {
+        // SOUNDNESS for the new Map[Int,Int] heap path: a bounded loop building + dropping a
+        // fresh Map every iteration must reclaim each (plain non-nested drop) — no leak/double-free.
+        let src = "fn main() -> Unit = {\n  \
+            var i = 0\n  var last = 0\n  \
+            while i < 4000 {\n    \
+              let m0 = map.new()\n    let m1 = map.set(m0, 3, 30)\n    let m = map.set(m1, 4, 40)\n    \
+              last = map.get_or(m, 4, 0)\n    \
+              i = i + 1\n  }\n  \
+            println(int.to_string(last)) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("self_hosted_map_core_loop_reclaims", &render_wasm_program(&prog)) {
+            assert_eq!(out, "40");
+        }
+    }
+
+    #[test]
     fn self_hosted_set_core_loop_reclaims() {
         // SOUNDNESS for the new Set[Int] heap path: a bounded loop building + dropping a fresh
         // Set[Int] every iteration must reclaim each (plain non-nested drop) — no leak (OOM) or
