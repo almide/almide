@@ -315,6 +315,15 @@ impl LowerCtx {
                 self.ops.push(Op::ConstInt { dst, value: *value });
                 Ok(Some(dst))
             }
+            // A FLOAT literal returned directly (`fn pi() = 3.14159`) materializes its REAL f64
+            // BITS as a `ConstInt` (the i64-uniform Float repr), so the fn returns the constant,
+            // not the deferred-`Const` zero — the same materialization `lower_scalar_value` does
+            // for a LitFloat operand. (The frontend folds `{ let p = 3.14; p }` to this form.)
+            IrExprKind::LitFloat { value } => {
+                let dst = self.fresh_value();
+                self.ops.push(Op::ConstInt { dst, value: value.to_bits() as i64 });
+                Ok(Some(dst))
+            }
             // A scalar Int Add/Sub/Mul computes its REAL value (IntBinOp over
             // recursively-lowered operands), so a fn `add(a, b) = a + b` returns the
             // sum — not the deferred-Const zero. Outside the int-arith subset (Div/
@@ -334,7 +343,6 @@ impl LowerCtx {
                 Ok(Some(dst))
             }
             IrExprKind::LitBool { .. }
-            | IrExprKind::LitFloat { .. }
             | IrExprKind::UnOp { .. }
             // A SCALAR field/element/tuple extraction is an unambiguous COPY (a
             // scalar is never reference-counted), so it is a `Const` — its

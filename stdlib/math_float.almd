@@ -33,3 +33,11 @@ fn math_fmax(a: Float, b: Float) -> Float = {
     }
   }
 }
+
+// math.pi / math.e — the f64 constants (declared `= _` in stdlib/math.almd; self-hosted here).
+// The decimal literals are the shortest round-tripping forms of std::f64::consts::PI / E, so
+// they parse to the identical f64 bits (a float-literal tail materializes its real bits via the
+// LitFloat tail-lowering). Zero-arg, pure. (floor/ceil/round/is_nan are float-only in the v1
+// frontend — not callable as math.*, so not self-hosted here.)
+fn math_pi() -> Float = 3.141592653589793
+fn math_e() -> Float = 2.718281828459045

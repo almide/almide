@@ -796,6 +796,21 @@
     }
 
     #[test]
+    fn self_hosted_math_pi_e() {
+        // SELF-HOSTED math.pi / math.e — the f64 constants (declared `= _` in stdlib/math.almd).
+        // Verified via float.to_int(const * 1000): pi -> 3141, e -> 2718. Byte-matches v0.
+        let src = "fn main() -> Unit = {\n  \
+            let cpi = math.pi()\n  let cpi1000 = prim.fmul(cpi, 1000.0)\n  println(int.to_string(float.to_int(cpi1000)))\n  \
+            let ce = math.e()\n  let ce1000 = prim.fmul(ce, 1000.0)\n  println(int.to_string(float.to_int(ce1000))) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "math.pi"));
+        assert!(prog.functions.iter().any(|f| f.name == "math.e"));
+        if let Some(out) = build_and_run("self_hosted_math_pi_e", &render_wasm_program(&prog)) {
+            assert_eq!(out, "3141\n2718");
+        }
+    }
+
+    #[test]
     fn self_hosted_hex_encode() {
         // SELF-HOSTED hex.encode / hex.encode_upper (Bytes -> hex String) over the bytes machinery
         // + the bitwise prim floor. Each byte -> two hex digits (high nibble byte>>4, low byte&0xF).
@@ -920,6 +935,8 @@
             assert_eq!(out, "4\n2\n3\n3\n5\n0");
         }
     }
+
+
 
 
 
