@@ -339,7 +339,7 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
         (include_str!("../../../../stdlib/list_reverse.almd"), &[("list_reverse", "list.reverse")]),
         (
             include_str!("../../../../stdlib/list_make.almd"),
-            &[("list_range", "list.range"), ("list_repeat", "list.repeat")],
+            &[("list_range", "list.range"), ("list_repeat", "list.repeat"), ("list_with_capacity", "list.with_capacity")],
         ),
         (
             include_str!("../../../../stdlib/list_take_drop.almd"),

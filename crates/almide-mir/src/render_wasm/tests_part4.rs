@@ -1261,6 +1261,22 @@
     }
 
     #[test]
+    fn self_hosted_list_with_capacity() {
+        // SELF-HOSTED list.with_capacity(cap) -> an EMPTY list (v0's Vec::with_capacity has len 0;
+        // the reserved capacity is not observable). with_capacity(5)/with_capacity(0) both have len
+        // 0 and sum 0. Byte-matches v0.
+        let src = "fn main() -> Unit = {\n  \
+            let a = list.with_capacity(5)\n  println(int.to_string(list.len(a)))\n  \
+            println(int.to_string(list.sum(a)))\n  \
+            let b = list.with_capacity(0)\n  println(int.to_string(list.len(b))) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "list.with_capacity"));
+        if let Some(out) = build_and_run("self_hosted_list_with_capacity", &render_wasm_program(&prog)) {
+            assert_eq!(out, "0\n0\n0");
+        }
+    }
+
+    #[test]
     fn self_hosted_option_flat_map() {
         // SELF-HOSTED option.flat_map(o, f) = o.and_then(f): Some(x) → f(x) (an Option itself),
         // None → None. The closure RETURNS an Option (heap-result CallIndirect), invoked ONLY on the
