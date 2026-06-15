@@ -605,6 +605,15 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
         (include_str!("../../../stdlib/string_trim.almd"), &[("string_trim", "string.trim")]),
         (include_str!("../../../stdlib/list_get_or.almd"), &[("list_get_or", "list.get_or")]),
         (
+            include_str!("../../../stdlib/int_scalar.almd"),
+            &[
+                ("int_abs", "int.abs"),
+                ("int_min", "int.min"),
+                ("int_max", "int.max"),
+                ("int_clamp", "int.clamp"),
+            ],
+        ),
+        (
             include_str!("../../../stdlib/list_get.almd"),
             &[("list_get", "list.get"), ("list_first", "list.first"), ("list_last", "list.last")],
         ),
@@ -1554,6 +1563,30 @@ mod tests {
         assert!(prog.functions.iter().any(|f| f.name == "list.max"), "linked");
         if let Some(out) = build_and_run("list_fold", &render_wasm_program(&prog)) {
             assert_eq!(out, "24\n1\n5\n1\nnone");
+        }
+    }
+
+    #[test]
+    fn self_hosted_int_scalar_ops() {
+        // int.abs/min/max/clamp self-hosted (scalar i64 arithmetic): abs(-7)=7, min(3,8)=3,
+        // max(3,8)=8, clamp(5,0,10)=5, clamp(-2,0,10)=0, clamp(99,0,10)=10. byte-match v0.
+        let src = "fn main() -> Unit = {\n  \
+            let a = int.abs(0 - 7)\n  \
+            let b = int.min(3, 8)\n  \
+            let c = int.max(3, 8)\n  \
+            let d = int.clamp(5, 0, 10)\n  \
+            let e = int.clamp(0 - 2, 0, 10)\n  \
+            let f = int.clamp(99, 0, 10)\n  \
+            println(int.to_string(a))\n  \
+            println(int.to_string(b))\n  \
+            println(int.to_string(c))\n  \
+            println(int.to_string(d))\n  \
+            println(int.to_string(e))\n  \
+            println(int.to_string(f)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "int.clamp"), "linked");
+        if let Some(out) = build_and_run("int_scalar", &render_wasm_program(&prog)) {
+            assert_eq!(out, "7\n3\n8\n5\n0\n10");
         }
     }
 
