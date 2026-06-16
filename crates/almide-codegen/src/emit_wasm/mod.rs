@@ -452,6 +452,11 @@ pub struct WasmEmitter {
     next_func_idx: u32,
     pub func_map: HashMap<String, u32>,
     pub module_names: Vec<String>,
+    /// Per-function `mut` parameter flags, keyed by the call target's name
+    /// (top-level fn → `name`; module fn → `module::func`). The loop/fn-scope
+    /// reclamation escape check consults it: a call that passes an outer-scope
+    /// var into a `mut` param may realloc it, so the value escapes (#705).
+    pub mut_param_sigs: HashMap<String, Vec<bool>>,
     /// Reverse lookup for `@intrinsic("almide_rt_<m>_<f>")` attributes:
     /// mangled symbol → (stdlib module name, Almide fn name). Populated
     /// once from bundled stdlib sources; used by the WASM `RuntimeCall`
@@ -601,6 +606,7 @@ impl WasmEmitter {
             next_func_idx: 0,
             func_map: HashMap::new(),
             module_names: Vec::new(),
+            mut_param_sigs: HashMap::new(),
             intrinsic_symbol_to_fn: HashMap::new(),
             func_type_indices: HashMap::new(),
             compiled: Vec::new(),
@@ -947,6 +953,23 @@ impl FuncCompiler<'_> {
     /// `new_ptr` is a local already holding the new object pointer. No-op when the
     /// target is not a bare `Var` (e.g. `foo().push(x)` has nowhere to write back).
     pub fn emit_mutator_writeback(&mut self, target: &almide_ir::IrExpr, new_ptr: u32) {
+        // A field of a record (`list.push(b.xs, v)` on a `mut b`): store the
+        // realloc'd pointer back into the field slot `[base + offset]`. The
+        // record block is shared (passed by pointer), so the write persists to
+        // the caller — the wasm counterpart of native's `&mut b.xs` (#703/#705).
+        // Without this the new buffer is dropped and the field keeps pointing at
+        // the pre-realloc block (silently wrong — slabhra's tape on wasm).
+        if let almide_ir::IrExprKind::Member { object, field } = &target.kind {
+            if let Some(total_offset) = self.member_field_store_offset(object, field) {
+                self.emit_expr(object);
+                wasm!(self.func, {
+                    i32_const(Imm32(total_offset as i32)); i32_add;
+                    local_get(Local(new_ptr));
+                    i32_store(0);
+                });
+            }
+            return;
+        }
         let id = match &target.kind {
             almide_ir::IrExprKind::Var { id } => id.0,
             _ => return,
@@ -1015,6 +1038,24 @@ pub(crate) fn emit(program: &IrProgram) -> Vec<u8> {
     emitter.needs_cow = program.codegen_annotations.needs_cow.iter().map(|v| v.0).collect();
     emitter.global_alias = program.codegen_annotations.global_alias.iter()
         .map(|(k, v)| (k.0, v.0)).collect();
+
+    // Per-function `mut` parameter flags, for the loop/fn-scope reclamation
+    // escape check. Top-level fns key on `name`; module fns on `module::func` —
+    // matching the `CallTarget::Named`/`CallTarget::Module` the scanner sees.
+    for func in &program.functions {
+        emitter.mut_param_sigs.insert(
+            func.name.to_string(),
+            func.params.iter().map(|p| p.is_mut).collect(),
+        );
+    }
+    for module in &program.modules {
+        for func in &module.functions {
+            emitter.mut_param_sigs.insert(
+                format!("{}::{}", module.name, func.name),
+                func.params.iter().map(|p| p.is_mut).collect(),
+            );
+        }
+    }
 
     // Phase 0: Collect `@intrinsic(symbol)` → (module, fn_name) from every
     // bundled stdlib source so the `RuntimeCall` fallback path can route
