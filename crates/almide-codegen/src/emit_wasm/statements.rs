@@ -1040,7 +1040,6 @@ impl FuncCompiler<'_> {
     pub(super) fn expr_writes_outer_heap(&self, expr: &IrExpr) -> bool {
         struct HeapWriteScanner<'a> {
             var_table: &'a almide_ir::VarTable,
-            mut_sigs: &'a std::collections::HashMap<String, Vec<bool>>,
             found: bool,
         }
         impl IrVisitor for HeapWriteScanner<'_> {
@@ -1071,67 +1070,10 @@ impl FuncCompiler<'_> {
             }
             fn visit_expr(&mut self, expr: &IrExpr) {
                 if self.found { return; }
-                // A mutating collection call (`list.push(out, v)`, `map.insert`,
-                // …) may REALLOCATE its first argument and write the new pointer
-                // back into it. If that arg is a named place rooted at a Var, the
-                // realloc'd buffer escapes the iteration — so the iteration arena
-                // must NOT reclaim it (#705). The Assign/IndexAssign cases above
-                // miss this because the mutation is a CALL, not an assignment:
-                // `var out = []; while … { … list.push(out, …) }` had `out`'s
-                // grown buffer freed by the iteration's heap rollback, so it
-                // never accumulated past one element.
-                // By the time a While body is scanned, a stdlib mutator is a
-                // `RuntimeCall` with a mangled `almide_rt_<module>_<func>` symbol
-                // (it can also still be a `CallTarget::Module` on some paths —
-                // handle both).
-                // Also escape-unsafe: a USER function with a `mut` parameter fed
-                // an outer-scope var (`op.add(t, …)` where `t` is the loop's
-                // tape). The callee may realloc the field it mutates; the new
-                // buffer escapes via `t`. mut_sigs gives each callee's per-param
-                // `mut` flags (keyed `name` / `module::func`). This is what makes
-                // slabhra's build loop — all `op.*`/`tp.*` Module calls on a mut
-                // tape — opt out of the arena.
-                let mutates_outer_place = match &expr.kind {
-                    IrExprKind::RuntimeCall { symbol, args } => {
-                        symbol.strip_prefix("almide_rt_")
-                            .and_then(|rest| rest.split_once('_'))
-                            .map(|(module, func)| {
-                                !args.is_empty()
-                                    && collection_mutator_may_realloc(module, func)
-                                    && expr_root_is_var(&args[0])
-                            })
-                            .unwrap_or(false)
-                    }
-                    IrExprKind::Call { target, args, .. } => {
-                        // stdlib collection mutator surfacing as a Module call
-                        let stdlib_mut = matches!(target,
-                            almide_ir::CallTarget::Module { module, func, .. }
-                            if !args.is_empty()
-                                && collection_mutator_may_realloc(module.as_str(), func.as_str())
-                                && expr_root_is_var(&args[0]));
-                        // user fn / module fn whose `mut` param slot gets an
-                        // outer-scope var
-                        let user_mut = call_target_key(target)
-                            .and_then(|k| self.mut_sigs.get(&k))
-                            .map(|sig| args.iter().enumerate().any(|(i, a)|
-                                sig.get(i).copied().unwrap_or(false) && expr_root_is_var(a)))
-                            .unwrap_or(false);
-                        stdlib_mut || user_mut
-                    }
-                    _ => false,
-                };
-                if mutates_outer_place {
-                    self.found = true;
-                    return;
-                }
                 walk_expr(self, expr);
             }
         }
-        let mut scanner = HeapWriteScanner {
-            var_table: self.var_table,
-            mut_sigs: &self.emitter.mut_param_sigs,
-            found: false,
-        };
+        let mut scanner = HeapWriteScanner { var_table: self.var_table, found: false };
         scanner.visit_expr(expr);
         scanner.found
     }
@@ -1180,57 +1122,6 @@ impl FuncCompiler<'_> {
         scanner.found
     }
 
-}
-
-/// A collection method that may REALLOCATE its first argument and write the new
-/// pointer back into it — so a buffer it grows escapes the iteration it runs in.
-/// Must cover every method that calls `emit_mutator_writeback` in
-/// calls_{list,map,set,bytes,string}.rs. Over-inclusion only opts a loop out of
-/// the iteration-arena optimization (always correct); a MISS lets the arena
-/// reclaim a still-live buffer (#705). So this errs generous.
-fn collection_mutator_may_realloc(module: &str, func: &str) -> bool {
-    match module {
-        "list" => matches!(func,
-            "push" | "insert" | "append" | "extend" | "concat" | "pop" | "remove"
-            | "set" | "swap" | "clear" | "truncate" | "retain" | "reverse"
-            | "sort" | "sort_by" | "dedup" | "fill"),
-        "map" => matches!(func, "insert" | "remove" | "delete" | "clear" | "set"),
-        "set" => matches!(func, "add" | "insert" | "remove" | "delete" | "clear"),
-        "string" => matches!(func,
-            "push" | "push_char" | "pop" | "insert" | "append" | "extend"
-            | "clear" | "drop" | "truncate"),
-        // bytes mutates through a wide write_*/set_* surface plus the growers.
-        "bytes" => func.starts_with("write_") || func.starts_with("set_")
-            || matches!(func,
-                "push" | "pop" | "append" | "append_f64_le" | "extend" | "clear"
-                | "truncate" | "resize" | "fill" | "copy_within"
-                | "read_length_prefixed_strings_le"),
-        _ => false,
-    }
-}
-
-/// Key a call target into the `mut_param_sigs` map: top-level fn → `name`,
-/// module fn → `module::func`. None for Method/Computed (no static sig).
-fn call_target_key(target: &almide_ir::CallTarget) -> Option<String> {
-    match target {
-        almide_ir::CallTarget::Named { name } => Some(name.to_string()),
-        almide_ir::CallTarget::Module { module, func, .. } =>
-            Some(format!("{}::{}", module, func)),
-        _ => None,
-    }
-}
-
-/// True if `expr` is a named place rooted at a variable (`v`, `v.f`, `v.f.g`,
-/// `v[i]`) — i.e. could be an outer-scope binding that outlives the iteration,
-/// so a pointer written back into it escapes.
-fn expr_root_is_var(expr: &IrExpr) -> bool {
-    match &expr.kind {
-        IrExprKind::Var { .. } => true,
-        IrExprKind::Member { object, .. }
-        | IrExprKind::TupleIndex { object, .. }
-        | IrExprKind::IndexAccess { object, .. } => expr_root_is_var(object),
-        _ => false,
-    }
 }
 
 /// Infer the type of a bind value from its IR expression structure.
