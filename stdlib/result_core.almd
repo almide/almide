@@ -54,3 +54,28 @@ fn result_to_list(r: Result[Int, String]) -> List[Int] = {
   let v = prim.load64(h + 12)
   if len == 0 then __rtl_one(v) else __rtl_empty()
 }
+
+// result.zip(a, b) = both Ok → Ok((va, vb)), else the FIRST Err (its message COPIED — a/b are
+// borrowed, so the error String is deep-copied not moved, keeping single ownership). The Ok payload
+// is a scalar (Int,Int) tuple (Init::DynList); the whole result is the HEAP-Ok Result[(Int,Int),
+// String] (value.as_string's 1-slot DynListStr, payload handle @12, Ok/Err tag in slot-0 high bits).
+fn __rzip_ok(av: Int, bv: Int) -> Result[(Int, Int), String] = {
+  let t = (av, bv)
+  Ok(t)
+}
+fn __rzip_err(msg_h: Int) -> Result[(Int, Int), String] = {
+  let s = prim.load_str(msg_h + 12)
+  let copy = string.repeat(s, 1)
+  Err(copy)
+}
+fn result_zip(a: Result[Int, String], b: Result[Int, String]) -> Result[(Int, Int), String] = {
+  let ah = prim.handle(a)
+  let alen = prim.load32(ah + 4)
+  let av = prim.load64(ah + 12)
+  let bh = prim.handle(b)
+  let blen = prim.load32(bh + 4)
+  let bv = prim.load64(bh + 12)
+  if alen >= 1 then __rzip_err(ah)
+  else if blen >= 1 then __rzip_err(bh)
+  else __rzip_ok(av, bv)
+}

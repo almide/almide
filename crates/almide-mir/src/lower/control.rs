@@ -93,6 +93,17 @@ impl LowerCtx {
                     if is_self_host_result_call(subject) {
                         self.materialized_results.insert(v);
                     }
+                    // A self-host HEAP-Ok Result call (result.zip → Result[(Int,Int), String]) — track
+                    // it in the cap-as-tag set (so the match reads tag @16 + binds the @12 payload
+                    // handle) AND, since it owns a heap payload (the Err String / the Ok tuple), in
+                    // heap_elem_lists (so the heap-payload bind gates open AND the scope-end drop is
+                    // the recursive DropListStr). Without it the match linearizes → garbage.
+                    if is_self_host_result_str_call(subject) {
+                        self.materialized_results_str.insert(v);
+                        if crate::lower::is_heap_elem_list_ty(&subject.ty) {
+                            self.heap_elem_lists.insert(v);
+                        }
+                    }
                 }
                 // A `match` over a MATERIALIZED Option (`Some(scalar)`/`None`) or Result
                 // (`Ok(scalar)`/`Err(string)`) EXECUTES — only the taken arm runs — when the
@@ -1327,6 +1338,18 @@ fn is_self_host_result_call(subject: &IrExpr) -> bool {
     match &subject.kind {
         IrExprKind::Call { target: CallTarget::Module { module, func, .. }, .. } => {
             is_self_host_result_module_fn(module.as_str(), func.as_str())
+        }
+        _ => false,
+    }
+}
+
+/// Is the match subject a self-host call returning a HEAP-Ok Result (`result.zip` /
+/// `value.as_string` — the cap-as-tag 1-slot DynListStr)? Drives the `materialized_results_str` +
+/// `heap_elem_lists` tracking so a direct `match` over it executes (binds the @12 payload handle).
+fn is_self_host_result_str_call(subject: &IrExpr) -> bool {
+    match &subject.kind {
+        IrExprKind::Call { target: CallTarget::Module { module, func, .. }, .. } => {
+            crate::lower::is_self_host_result_str_module_fn(module.as_str(), func.as_str())
         }
         _ => false,
     }

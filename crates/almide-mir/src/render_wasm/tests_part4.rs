@@ -2024,6 +2024,40 @@
     }
 
     #[test]
+    fn self_hosted_result_zip() {
+        // SELF-HOSTED result.zip → both Ok → Ok((va, vb)) (a scalar tuple in a HEAP-Ok Result), else
+        // the first Err (message deep-copied). Ok payload destructured; Err message printed. v0-match.
+        let src = "fn main() -> Unit = {\n  \
+            let a: Result[Int, String] = Ok(3)\n  let b: Result[Int, String] = Ok(4)\n  \
+            match result.zip(a, b) { Ok(p) => { let (x, y) = p\n println(int.to_string(x + y)) }, Err(e) => println(e), }\n  \
+            let c: Result[Int, String] = Err(\"bad\")\n  \
+            match result.zip(a, c) { Ok(p) => { let (x, y) = p\n println(int.to_string(x + y)) }, Err(e) => println(e), }\n  \
+            match result.zip(c, b) { Ok(p) => { let (x, y) = p\n println(int.to_string(x + y)) }, Err(e) => println(e), } }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "result.zip"));
+        if let Some(out) = build_and_run("self_hosted_result_zip", &render_wasm_program(&prog)) {
+            assert_eq!(out, "7\nbad\nbad");
+        }
+    }
+
+    #[test]
+    fn self_hosted_result_zip_loop_reclaims() {
+        // SOUNDNESS: a bounded loop building result.zip, matching + destructuring the Ok tuple (the
+        // heap-Ok Result owns the tuple, freed by DropListStr each iter) — no leak/double-free.
+        let src = "fn main() -> Unit = {\n  \
+            var i = 0\n  var last = 0\n  \
+            while i < 4000 {\n    \
+              let a: Result[Int, String] = Ok(i)\n    let b: Result[Int, String] = Ok(1)\n    \
+              match result.zip(a, b) { Ok(p) => { let (x, y) = p\n last = x + y }, Err(e) => { last = 0 }, }\n    \
+              i = i + 1\n  }\n  \
+            println(int.to_string(last)) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("self_hosted_result_zip_loop_reclaims", &render_wasm_program(&prog)) {
+            assert_eq!(out, "4000");
+        }
+    }
+
+    #[test]
     fn self_hosted_bytes_skip() {
         // SELF-HOSTED bytes.skip → advance pos by n, clamped to the byte length. Pure scalar over the
         // Bytes header (len@4). Byte-matches v0's `let np = pos + n; if np > len then len else np`.

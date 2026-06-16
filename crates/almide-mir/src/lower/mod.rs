@@ -860,7 +860,7 @@ pub(crate) fn is_self_host_result_module_fn(module: &str, func: &str) -> bool {
 /// DynListStr layout, both Ok and Err owning a String)? Its result is tracked in
 /// `materialized_results_str` so an `Ok`/`Err` `match` over it EXECUTES reading cap@8.
 pub(crate) fn is_self_host_result_str_module_fn(module: &str, func: &str) -> bool {
-    matches!((module, func), ("value", "as_string"))
+    matches!((module, func), ("value", "as_string") | ("result", "zip"))
 }
 
 pub(crate) fn alloc_init(value: &IrExpr) -> Init {

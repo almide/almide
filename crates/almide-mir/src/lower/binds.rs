@@ -728,6 +728,46 @@ impl LowerCtx {
                 self.materialized_results.insert(dst);
                 Some(dst)
             }
+            // HEAP-Ok `Result[(Int,Int), String]` etc. — `Err(msg)` RETURNED / bound directly
+            // (`fn __rzip_err(..) = Err(copy)`). The Err message goes into the SAME cap-as-tag 1-slot
+            // DynListStr as the heap-Ok arm (payload @12, tag @16 = 1), so a `match` reading tag @16
+            // sees Err. Without this it would fall to the len-as-tag arm below (a DIFFERENT layout the
+            // heap-Ok match misreads). Owned-`Var` / LitStr / Named-call piece only.
+            IrExprKind::ResultErr { expr }
+                if is_heap_ty(&expr.ty) && Self::is_heap_ok_result(ty) =>
+            {
+                let repr = repr_of(ty).ok()?;
+                let piece = match &expr.kind {
+                    IrExprKind::Var { id }
+                        if self
+                            .value_for(*id)
+                            .map(|v| self.live_heap_handles.contains(&v))
+                            .unwrap_or(false) =>
+                    {
+                        self.value_for(*id).ok()?
+                    }
+                    IrExprKind::LitStr { value } => {
+                        let pr = repr_of(&expr.ty).ok()?;
+                        let p = self.fresh_value();
+                        self.ops.push(Op::Alloc { dst: p, repr: pr, init: Init::Str(value.clone()) });
+                        p
+                    }
+                    IrExprKind::Call { target: CallTarget::Named { name }, args, .. } => {
+                        let lowered = self.lower_call_args(args).ok()?;
+                        let pr = repr_of(&expr.ty).ok()?;
+                        let p = self.fresh_value();
+                        self.ops.push(Op::CallFn {
+                            dst: Some(p),
+                            name: name.as_str().to_string(),
+                            args: lowered,
+                            result: Some(pr),
+                        });
+                        p
+                    }
+                    _ => return None,
+                };
+                Some(self.materialize_result_str(piece, repr, true))
+            }
             IrExprKind::ResultErr { expr } if is_heap_ty(&expr.ty) => {
                 let repr = repr_of(ty).ok()?;
                 // A FRESH owned message only — a LitStr alloc, a Named-call result, or an OWNED
