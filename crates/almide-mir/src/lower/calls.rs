@@ -429,6 +429,27 @@ impl LowerCtx {
                     self.ops.push(Op::ConstInt { dst, value: value.to_bits() as i64 });
                     CallArg::Scalar(dst)
                 }
+                // `f(opt ?? default)` — a `??` over a self-host materialized Option in a CALL-ARG
+                // position (`int.to_string(list.get(xs, i) ?? 0)` — extremely common). The let-bind
+                // path executes this via `try_lower_option_unwrap_or` (tag-read + payload/default);
+                // the arg position must too, else the Option call deferred to a bare elided-call
+                // marker (wrong arity → invalid wasm). Scalar result only; a heap fallback / non-
+                // Option operand returns None and falls through to the deferred path below.
+                IrExprKind::UnwrapOr { expr, fallback } if !is_heap_ty(&a.ty) => {
+                    let mark = self.ops.len();
+                    let lhh_mark = self.live_heap_handles.len();
+                    match self.try_lower_option_unwrap_or(expr, fallback) {
+                        Some(v) => CallArg::Scalar(v),
+                        None => {
+                            self.ops.truncate(mark);
+                            self.live_heap_handles.truncate(lhh_mark);
+                            let dst = self.fresh_value();
+                            self.record_elided_calls(a);
+                            self.ops.push(Op::Const { dst });
+                            CallArg::Scalar(dst)
+                        }
+                    }
+                }
                 // A fresh BinOp/UnOp result as an argument (`f(a + b)`, `f(-n)`), or an
                 // ERROR OPERATOR result (`f(x!)`, `f(x ?? d)`, `f(x?.field)`): a fresh
                 // computed value — a heap result is materialized via `Alloc` (borrowed

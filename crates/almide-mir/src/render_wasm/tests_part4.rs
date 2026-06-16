@@ -3811,3 +3811,28 @@
             assert_eq!(out.lines().count(), 5000);
         }
     }
+
+    #[test]
+    fn opt_unwrap_or_in_call_arg() {
+        // `int.to_string(opt ?? default)` — `??` over a materialized Option in call-arg position.
+        let src = "fn main() -> Unit = {\n  let xs = [7]\n\
+            println(int.to_string(list.get(xs, 0) ?? 0))\n\
+            println(int.to_string(list.get(xs, 5) ?? 99))\n\
+            println(int.to_string(list.first(xs) ?? 0)) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("opt_unwrap_or_in_call_arg", &render_wasm_program(&prog)) {
+            assert_eq!(out, "7\n99\n7");
+        }
+    }
+
+    #[test]
+    fn opt_unwrap_or_call_arg_bounded_loop() {
+        // Adversarial: 5000 iters, each materializes an Option for ?? in a call-arg. No leak/trap.
+        let src = "fn main() -> Unit = {\n  let xs = [42]\n  var i = 0\n\
+            while i < 5000 { println(int.to_string(list.get(xs, 0) ?? 0))\n    i = i + 1 } }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("opt_unwrap_or_call_arg_bounded_loop", &render_wasm_program(&prog)) {
+            assert_eq!(out.lines().count(), 5000);
+            assert!(out.ends_with("42"));
+        }
+    }
