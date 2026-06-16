@@ -1,0 +1,3 @@
+expects_code = "E026"
+expects_error = "cannot index a String"
+hint_substring = "string.get"

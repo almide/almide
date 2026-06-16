@@ -513,6 +513,20 @@ impl Checker {
                         Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 => args[0].clone(),
                         Ty::Applied(TypeConstructorId::Map, args) if args.len() == 2 => Ty::option(args[1].clone()),
                         Ty::Bytes => Ty::Int,
+                        // A String has no `[]` indexing — it is a UTF-8 codepoint
+                        // sequence, not a byte/char array. Without this arm the
+                        // type fell to `Unknown`, the checker passed, and codegen
+                        // emitted a `[COMPILER BUG] unresolved IndexAccess` blamed
+                        // on the user (#558). Reject at check with a hint to the
+                        // codepoint-indexed stdlib accessors.
+                        Ty::String => {
+                            self.emit(super::err(
+                                "cannot index a String with `[]`",
+                                "a String is a UTF-8 codepoint sequence, not an array — use `string.get(s, i)` (returns `Option[String]`) or `string.char_at(s, i)`",
+                                "string index",
+                            ).with_code("E026"));
+                            Ty::Unknown
+                        }
                         _ => Ty::Unknown,
                     }
                 }
