@@ -3849,3 +3849,19 @@
             assert_eq!(out, "7\n99\n7");
         }
     }
+
+    #[test]
+    fn for_in_list_executes() {
+        // `for x in xs { println(int.to_string(x)) }` over a List[Int] — REAL iteration.
+        let src = "fn main() -> Unit = {\n  let xs = [10, 20, 30]\n  for x in xs { println(int.to_string(x)) } }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("for_in_list_executes", &render_wasm_program(&prog)) {
+            assert_eq!(out, "10\n20\n30");
+        }
+        // sum accumulation via a mutable scalar
+        let src2 = "fn main() -> Unit = {\n  let xs = [1, 2, 3, 4, 5]\n  var total = 0\n  for x in xs { total = total + x }\n  println(int.to_string(total)) }\n";
+        let prog2 = lower_source(src2);
+        if let Some(out) = build_and_run("for_in_list_sum", &render_wasm_program(&prog2)) {
+            assert_eq!(out, "15");
+        }
+    }

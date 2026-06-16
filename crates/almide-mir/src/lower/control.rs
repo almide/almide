@@ -703,6 +703,10 @@ impl LowerCtx {
         if self.try_lower_scalar_for_range(var, var_tuple, iterable, body) {
             return Ok(());
         }
+        // Then try to EXECUTE `for x in xs` over a List[Int] as a real element loop.
+        if self.try_lower_scalar_for_list(var, var_tuple, iterable, body) {
+            return Ok(());
+        }
         // The iterable is evaluated ONCE before the loop. A heap iterable goes through
         // `lower_call_args` — an already-tracked `Var` is borrowed (no new ownership),
         // a fresh heap value is materialized into an owned temp dropped at the OUTER
@@ -1297,6 +1301,112 @@ impl LowerCtx {
         self.ops.push(Op::SetLocal { local: i_v, src: next_v });
         self.ops.push(Op::LoopEnd);
         true
+    }
+
+    /// EXECUTE `for x in xs { … }` over a `List[Int]` as a real loop (vs the model-one-iteration
+    /// form): borrow the list handle once, walk an internal index `i` 0..len via the loop markers,
+    /// load element `i` (an i64 slot) and `SetLocal` the loop var `x` each iteration, run the body.
+    /// SOUND by reuse of the for-range / while machinery: the body is per-iteration-balanced
+    /// (`drop_arm_locals`), the markers no-op in the cert (it verifies ONE balanced iteration), and
+    /// a scalar element is a COPY (no ownership). GATED to `List[Int]` (scalar i64 elements), a scalar
+    /// Int loop var, no tuple/break/continue — a heap-element list (borrowed String elements) defers.
+    pub(crate) fn try_lower_scalar_for_list(
+        &mut self,
+        var: VarId,
+        var_tuple: &Option<Vec<VarId>>,
+        iterable: &IrExpr,
+        body: &[IrStmt],
+    ) -> bool {
+        use almide_lang::types::constructor::TypeConstructorId;
+        use crate::PrimKind;
+        let elem_int = matches!(&iterable.ty,
+            Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && matches!(a[0], Ty::Int));
+        if !elem_int
+            || var_tuple.is_some()
+            || body_breaks_or_continues(body)
+            || !matches!(find_var_ty(body, var), Some(Ty::Int))
+        {
+            return false;
+        }
+        let ops_mark = self.ops.len();
+        let lhh_mark = self.live_heap_handles.len();
+        let value_of_snapshot = self.value_of.clone();
+
+        // Borrow the list (evaluated once); a Var is borrowed, a fresh literal is materialized
+        // (owned, dropped at the outer scope — it stays in live_heap_handles).
+        let list_v = match self.lower_call_args(std::slice::from_ref(iterable)) {
+            Ok(args) => match args.into_iter().next() {
+                Some(CallArg::Handle(v)) => v,
+                _ => {
+                    self.rollback_scalar_loop(ops_mark, lhh_mark, value_of_snapshot);
+                    return false;
+                }
+            },
+            Err(_) => {
+                self.rollback_scalar_loop(ops_mark, lhh_mark, value_of_snapshot);
+                return false;
+            }
+        };
+        let h = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![list_v] });
+        let len_v = self.load_at_offset(h, 4, PrimKind::Load { width: 4 });
+        let i_v = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: i_v, value: 0 });
+        let one_v = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: one_v, value: 1 });
+        // The loop var `x` — a stable mutable local, set to element[i] each iteration.
+        let x_v = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: x_v, value: 0 });
+        self.value_of.insert(var, x_v);
+
+        self.ops.push(Op::LoopStart);
+        let cond_v = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst: cond_v, op: IntOp::Lt, a: i_v, b: len_v });
+        self.ops.push(Op::LoopBreakUnless { cond: cond_v });
+        // x = load64(h + 12 + i*8).
+        let i8_v = self.fresh_value();
+        let eight = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: eight, value: 8 });
+        self.ops.push(Op::IntBinOp { dst: i8_v, op: IntOp::Mul, a: i_v, b: eight });
+        let base = self.load_addr(h, 12);
+        let addr = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst: addr, op: IntOp::Add, a: base, b: i8_v });
+        let elem = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Load { width: 8 }, dst: Some(elem), args: vec![addr] });
+        self.ops.push(Op::SetLocal { local: x_v, src: elem });
+
+        let body_mark = self.live_heap_handles.len();
+        self.in_frame += 1;
+        self.scalar_loop_depth += 1;
+        let mut ok = true;
+        for stmt in body {
+            if self.lower_stmt(stmt).is_err() {
+                ok = false;
+                break;
+            }
+        }
+        self.scalar_loop_depth -= 1;
+        self.in_frame -= 1;
+        if !ok {
+            self.rollback_scalar_loop(ops_mark, lhh_mark, value_of_snapshot);
+            return false;
+        }
+        self.drop_arm_locals(body_mark);
+        let next_v = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst: next_v, op: IntOp::Add, a: i_v, b: one_v });
+        self.ops.push(Op::SetLocal { local: i_v, src: next_v });
+        self.ops.push(Op::LoopEnd);
+        true
+    }
+
+    /// `base + offset` as a fresh value (the address-arithmetic half of `load_at_offset`,
+    /// without the load — used when the loaded address feeds further arithmetic).
+    fn load_addr(&mut self, base: ValueId, offset: i64) -> ValueId {
+        let off = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: off, value: offset });
+        let addr = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst: addr, op: IntOp::Add, a: base, b: off });
+        addr
     }
 
     pub(crate) fn lower_while(&mut self, cond: &IrExpr, body: &[IrStmt]) -> Result<(), LowerError> {
