@@ -1070,6 +1070,43 @@ impl FuncCompiler<'_> {
             }
             fn visit_expr(&mut self, expr: &IrExpr) {
                 if self.found { return; }
+                // A mutating collection call (`list.push(out, v)`, `map.insert`,
+                // …) may REALLOCATE its first argument and write the new pointer
+                // back into it. If that arg is a named place rooted at a Var, the
+                // realloc'd buffer escapes the iteration — so the iteration arena
+                // must NOT reclaim it (#705). The Assign/IndexAssign cases above
+                // miss this because the mutation is a CALL, not an assignment:
+                // `var out = []; while … { … list.push(out, …) }` had `out`'s
+                // grown buffer freed by the iteration's heap rollback, so it
+                // never accumulated past one element.
+                // By the time a While body is scanned, a stdlib mutator is a
+                // `RuntimeCall` with a mangled `almide_rt_<module>_<func>` symbol
+                // (it can also still be a `CallTarget::Module` on some paths —
+                // handle both).
+                let mutates_outer_place = match &expr.kind {
+                    IrExprKind::RuntimeCall { symbol, args } => {
+                        symbol.strip_prefix("almide_rt_")
+                            .and_then(|rest| rest.split_once('_'))
+                            .map(|(module, func)| {
+                                !args.is_empty()
+                                    && collection_mutator_may_realloc(module, func)
+                                    && expr_root_is_var(&args[0])
+                            })
+                            .unwrap_or(false)
+                    }
+                    IrExprKind::Call {
+                        target: almide_ir::CallTarget::Module { module, func, .. }, args, ..
+                    } => {
+                        !args.is_empty()
+                            && collection_mutator_may_realloc(module.as_str(), func.as_str())
+                            && expr_root_is_var(&args[0])
+                    }
+                    _ => false,
+                };
+                if mutates_outer_place {
+                    self.found = true;
+                    return;
+                }
                 walk_expr(self, expr);
             }
         }
@@ -1122,6 +1159,46 @@ impl FuncCompiler<'_> {
         scanner.found
     }
 
+}
+
+/// A collection method that may REALLOCATE its first argument and write the new
+/// pointer back into it — so a buffer it grows escapes the iteration it runs in.
+/// Must cover every method that calls `emit_mutator_writeback` in
+/// calls_{list,map,set,bytes,string}.rs. Over-inclusion only opts a loop out of
+/// the iteration-arena optimization (always correct); a MISS lets the arena
+/// reclaim a still-live buffer (#705). So this errs generous.
+fn collection_mutator_may_realloc(module: &str, func: &str) -> bool {
+    match module {
+        "list" => matches!(func,
+            "push" | "insert" | "append" | "extend" | "concat" | "pop" | "remove"
+            | "set" | "swap" | "clear" | "truncate" | "retain" | "reverse"
+            | "sort" | "sort_by" | "dedup" | "fill"),
+        "map" => matches!(func, "insert" | "remove" | "delete" | "clear" | "set"),
+        "set" => matches!(func, "add" | "insert" | "remove" | "delete" | "clear"),
+        "string" => matches!(func,
+            "push" | "push_char" | "pop" | "insert" | "append" | "extend"
+            | "clear" | "drop" | "truncate"),
+        // bytes mutates through a wide write_*/set_* surface plus the growers.
+        "bytes" => func.starts_with("write_") || func.starts_with("set_")
+            || matches!(func,
+                "push" | "pop" | "append" | "append_f64_le" | "extend" | "clear"
+                | "truncate" | "resize" | "fill" | "copy_within"
+                | "read_length_prefixed_strings_le"),
+        _ => false,
+    }
+}
+
+/// True if `expr` is a named place rooted at a variable (`v`, `v.f`, `v.f.g`,
+/// `v[i]`) — i.e. could be an outer-scope binding that outlives the iteration,
+/// so a pointer written back into it escapes.
+fn expr_root_is_var(expr: &IrExpr) -> bool {
+    match &expr.kind {
+        IrExprKind::Var { .. } => true,
+        IrExprKind::Member { object, .. }
+        | IrExprKind::TupleIndex { object, .. }
+        | IrExprKind::IndexAccess { object, .. } => expr_root_is_var(object),
+        _ => false,
+    }
 }
 
 /// Infer the type of a bind value from its IR expression structure.

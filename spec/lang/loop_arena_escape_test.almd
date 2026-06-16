@@ -1,0 +1,67 @@
+// Regression: the per-iteration heap arena (iter_scope) must NOT reclaim a
+// buffer that a `list.push` GROWS into an outer-scope var inside the loop.
+//
+// A loop whose body both (a) allocates a temporary that the arena reclaims
+// (here `list.get` returns a heap Option box inside the inner loop) and (b)
+// `list.push`-es into a var declared OUTSIDE the loop, used to drop the pushed
+// list's reallocated buffer at iteration end on wasm — so `out` never grew past
+// one element (`mm` returned [last] instead of [a,b,c]). expr_writes_outer_heap
+// now recognizes the mutating call and opts the loop out of the arena, making
+// this bit-identical on native and wasm. This runs on BOTH targets.
+
+fn mm(a: List[Float], rows: Int, cols: Int) -> List[Float] = {
+  var out: List[Float] = []
+  var j = 0
+  while j < cols {
+    var s = 0.0
+    var p = 0
+    while p < rows {
+      s = s + (list.get(a, p) ?? 0.0)   // inner-loop heap temp (Option box)
+      p = p + 1
+    }
+    list.push(out, s)                     // grows an OUTER-scope var
+    j = j + 1
+  }
+  out
+}
+
+test "loop arena keeps a list grown by an inner-loop body (#705)" {
+  // a = [1, 2, 3]; rows=3 → each column sums to 6; cols=4 → [6,6,6,6]
+  let r = mm([1.0, 2.0, 3.0], 3, 4)
+  assert(list.len(r) == 4)
+  assert(r[0] == 6.0)
+  assert(r[1] == 6.0)
+  assert(r[2] == 6.0)
+  assert(r[3] == 6.0)
+}
+
+// Matmul shape (the slabhra k_matmul kernel that exposed this): out grows to
+// ar*bc elements across nested loops that read both input lists.
+fn matmul(a: List[Float], ar: Int, ac: Int, b: List[Float], bc: Int) -> List[Float] = {
+  var out: List[Float] = []
+  var i = 0
+  while i < ar {
+    var j = 0
+    while j < bc {
+      var s = 0.0
+      var p = 0
+      while p < ac {
+        s = s + (list.get(a, i * ac + p) ?? 0.0) * (list.get(b, p * bc + j) ?? 0.0)
+        p = p + 1
+      }
+      list.push(out, s)
+      j = j + 1
+    }
+    i = i + 1
+  }
+  out
+}
+
+test "matmul kernel grows its output across nested loops (#705)" {
+  // [0.5, -1] (1x2) · [0.1,0.2,-0.3, 0.4,-0.5,0.6] (2x3) = [-0.35, 0.6, -0.75]
+  let z = matmul([0.5, 0.0 - 1.0], 1, 2, [0.1, 0.2, 0.0 - 0.3, 0.4, 0.0 - 0.5, 0.6], 3)
+  assert(list.len(z) == 3)
+  assert(z[0] > 0.0 - 0.36 and z[0] < 0.0 - 0.34)
+  assert(z[1] > 0.59 and z[1] < 0.61)
+  assert(z[2] > 0.0 - 0.76 and z[2] < 0.0 - 0.74)
+}
