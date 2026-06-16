@@ -2082,6 +2082,24 @@
     }
 
     #[test]
+    fn self_hosted_int16_int32_conversions() {
+        // SELF-HOSTED int16.to_* / int32.to_* (same two-hop shape as int8), byte-matching v0:
+        // widening (1000 → 1000 / 100000 → 100000) and unsigned narrowing wrap (1000 & 0xFF = 232,
+        // 100000 & 0xFFFF = 34464).
+        let src = "fn main() -> Unit = {\n  \
+            let a: Int16 = int.to_int16(1000)\n  let r1 = int16.to_int32(a)\n  println(int.to_string(int.from_int32(r1)))\n  \
+            let r2 = int16.to_uint8(a)\n  println(int.to_string(int.from_uint8(r2)))\n  \
+            let b: Int32 = int.to_int32(100000)\n  let r3 = int32.to_int64(b)\n  println(int.to_string(r3))\n  \
+            let r4 = int32.to_uint16(b)\n  println(int.to_string(int.from_uint16(r4))) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "int16.to_int32"));
+        assert!(prog.functions.iter().any(|f| f.name == "int32.to_int64"));
+        if let Some(out) = build_and_run("self_hosted_int16_int32_conversions", &render_wasm_program(&prog)) {
+            assert_eq!(out, "1000\n232\n100000\n34464");
+        }
+    }
+
+    #[test]
     fn self_hosted_float_checked_64bit() {
         // The 64-bit variants: 2^63 / 2^64 bound built at runtime. to_uint64 of a value in
         // [2^63, 2^64) is rejected by the ROUND-TRIP (i64-repr wraps negative ≠ n), not the range —
