@@ -24,7 +24,7 @@ fn mk_fn(name: &str, params: Vec<IrParam>, ret_ty: Ty, body: IrExpr, is_effect: 
 
 fn mk_param(vt: &mut VarTable, name: &str, ty: Ty) -> IrParam {
     let var = vt.alloc(sym(name), ty.clone(), Mutability::Let, None);
-    IrParam { var, ty: ty.clone(), name: sym(name), borrow: ParamBorrow::Own, open_record: None, default: None, attrs: vec![] }
+    IrParam { var, ty: ty.clone(), name: sym(name), borrow: ParamBorrow::Own, is_mut: false, open_record: None, default: None, attrs: vec![] }
 }
 
 fn mk_program(functions: Vec<IrFunction>, var_table: VarTable) -> IrProgram {

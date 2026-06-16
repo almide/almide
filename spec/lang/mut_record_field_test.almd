@@ -1,0 +1,52 @@
+// #703: a `mut` parameter of a RECORD type can have `list.push` applied to one
+// of its List-typed fields — the field access `b.xs` of a `mut b` is a mutable
+// place, so the borrow is `&mut b.xs` and the push is O(1) amortized in place.
+//
+// Cross-target: runs on BOTH native and wasm. A record is passed by a shared
+// pointer, so a reallocating `list.push` into a field writes the new buffer
+// pointer back into the field slot `[base + offset]` on wasm too
+// (emit_mutator_writeback handles the Member lvalue — #705), and the loop/
+// fn-scope heap reclamation recognizes the field as an escape and does not
+// reclaim it. The bare `mut List` *param* case (pointer in a non-addressable
+// wasm local) is still wasm-divergent — see mut_list_param_test.almd.
+
+type Box = { xs: List[Int] }
+
+fn add(mut b: Box, v: Int) -> Int = {
+  list.push(b.xs, v)
+  list.len(b.xs) - 1
+}
+
+test "mut record-field push: in place across calls (#703)" {
+  var b: Box = { xs: [] }
+  let i = add(b, 7)
+  let j = add(b, 99)
+  assert(i == 0)
+  assert(j == 1)
+  assert(list.len(b.xs) == 2)
+  assert(b.xs[0] == 7)
+  assert(b.xs[1] == 99)
+}
+
+// A record holding several parallel growing lists — the slabhra-tape shape that
+// motivated #703 (its tape is a record of 9 parallel lists; functional rebuild
+// per push was O(n²), in-place push is O(1) amortized).
+type Tape = { val: List[Float], op: List[Int] }
+
+fn record_node(mut t: Tape, x: Float, o: Int) -> Int = {
+  list.push(t.val, x)
+  list.push(t.op, o)
+  list.len(t.val) - 1
+}
+
+test "mut record with multiple parallel list fields (#703, slabhra-tape shape)" {
+  var t: Tape = { val: [], op: [] }
+  let a = record_node(t, 1.5, 0)
+  let b = record_node(t, 2.5, 4)
+  let c = record_node(t, 3.5, 1)
+  assert(a == 0 and b == 1 and c == 2)
+  assert(list.len(t.val) == 3)
+  assert(list.len(t.op) == 3)
+  assert(t.val[2] == 3.5)
+  assert(t.op[1] == 4)
+}
