@@ -2181,6 +2181,20 @@
     }
 
     #[test]
+    fn self_hosted_datetime_to_iso() {
+        // SELF-HOSTED datetime.to_iso (fixed-width buffer fill, no concat), byte-matching v0:
+        // ts=0 -> 1970-01-01T00:00:00Z; ts=1e9 -> 2001-09-09T01:46:40Z.
+        let src = "fn main() -> Unit = {\n  \
+            println(datetime.to_iso(0))\n  \
+            let t = 1000000000\n  println(datetime.to_iso(t)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "datetime.to_iso"));
+        if let Some(out) = build_and_run("self_hosted_datetime_to_iso", &render_wasm_program(&prog)) {
+            assert_eq!(out, "1970-01-01T00:00:00Z\n2001-09-09T01:46:40Z");
+        }
+    }
+
+    #[test]
     fn self_hosted_datetime_from_parts() {
         // SELF-HOSTED datetime.from_parts (inverse civil), byte-matching v0: round-trips epoch 0 and
         // 1e9 from their (y,m,d,h,min,s) parts.
