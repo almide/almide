@@ -269,7 +269,7 @@ fn convert_expr(
             };
             let mut func_params = vec![IrParam {
                 var: env_var, ty: env_ty, name: sym("__env"),
-                borrow: ParamBorrow::Own, open_record: None, default: None, attrs: vec![],
+                borrow: ParamBorrow::Own, is_mut: false, open_record: None, default: None, attrs: vec![],
             }];
             for (i, (vid, vty)) in params.iter().enumerate() {
                 let info_name = vt.get(*vid).name;
@@ -289,7 +289,7 @@ fn convert_expr(
                 }
                 func_params.push(IrParam {
                     var: *vid, ty: resolved, name: info_name,
-                    borrow: ParamBorrow::Own, open_record: None, default: None, attrs: vec![],
+                    borrow: ParamBorrow::Own, is_mut: false, open_record: None, default: None, attrs: vec![],
                 });
             }
 

@@ -1,0 +1,67 @@
+// wasm:skip — in-place mutation of a `mut` record/list param does not yet
+// persist on the wasm target (a reallocating `list.push` moves the inline list
+// header and the new pointer is not written back to the caller's slot — the
+// wasm counterpart of #703, still open). Native is correct; these run native.
+//
+// #703: a `mut` parameter of a RECORD type can have `list.push` applied to one
+// of its List-typed fields — the field access `b.xs` of a `mut b` is a mutable
+// place, so the borrow is `&mut b.xs` and the push is O(1) amortized in place,
+// exactly like a bare `mut List` param. Previously this was rejected at the
+// checker (E007 "temporary expression") and then mis-lowered to an owned
+// non-`mut` binding (E0596).
+
+type Box = { xs: List[Int] }
+
+fn add(mut b: Box, v: Int) -> Int = {
+  list.push(b.xs, v)
+  list.len(b.xs) - 1
+}
+
+test "mut record-field push: in place across calls (#703)" {
+  var b: Box = { xs: [] }
+  let i = add(b, 7)
+  let j = add(b, 99)
+  assert(i == 0)
+  assert(j == 1)
+  assert(list.len(b.xs) == 2)
+  assert(b.xs[0] == 7)
+  assert(b.xs[1] == 99)
+}
+
+// A record holding several parallel growing lists — the slabhra-tape shape that
+// motivated #703 (its tape is a record of 9 parallel lists; functional rebuild
+// per push was O(n²), in-place push is O(1) amortized).
+type Tape = { val: List[Float], op: List[Int] }
+
+fn record_node(mut t: Tape, x: Float, o: Int) -> Int = {
+  list.push(t.val, x)
+  list.push(t.op, o)
+  list.len(t.val) - 1
+}
+
+test "mut record with multiple parallel list fields (#703, slabhra-tape shape)" {
+  var t: Tape = { val: [], op: [] }
+  let a = record_node(t, 1.5, 0)
+  let b = record_node(t, 2.5, 4)
+  let c = record_node(t, 3.5, 1)
+  assert(a == 0 and b == 1 and c == 2)
+  assert(list.len(t.val) == 3)
+  assert(list.len(t.op) == 3)
+  assert(t.val[2] == 3.5)
+  assert(t.op[1] == 4)
+}
+
+// Contrast (already worked): a bare `mut List` param pushes in place.
+fn push9(mut v: List[Int], x: Int) -> Int = {
+  list.push(v, x)
+  list.len(v) - 1
+}
+
+test "mut List param still pushes in place (contrast to record field)" {
+  var v: List[Int] = [10]
+  let i = push9(v, 20)
+  let j = push9(v, 30)
+  assert(i == 1 and j == 2)
+  assert(list.len(v) == 3)
+  assert(v[2] == 30)
+}
