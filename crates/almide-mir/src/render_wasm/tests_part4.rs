@@ -2099,6 +2099,31 @@
     }
 
     #[test]
+    fn self_hosted_datetime_arithmetic() {
+        // SELF-HOSTED pure-arithmetic datetime.* (Unix-seconds i64), byte-matching v0: add_*,
+        // diff_seconds, from/to_unix identity, the floor-mod component extractors (3661s = 1h1m1s),
+        // is_before/is_after.
+        let src = "fn main() -> Unit = {\n  \
+            let r1 = datetime.add_days(100, 1)\n  println(int.to_string(r1))\n  \
+            let r2 = datetime.add_hours(100, 1)\n  println(int.to_string(r2))\n  \
+            let r3 = datetime.add_minutes(100, 1)\n  println(int.to_string(r3))\n  \
+            let r4 = datetime.add_seconds(100, 1)\n  println(int.to_string(r4))\n  \
+            let r5 = datetime.diff_seconds(200, 100)\n  println(int.to_string(r5))\n  \
+            let r6 = datetime.from_unix(555)\n  println(int.to_string(r6))\n  \
+            let r7 = datetime.to_unix(555)\n  println(int.to_string(r7))\n  \
+            let r8 = datetime.hour(3661)\n  println(int.to_string(r8))\n  \
+            let r9 = datetime.minute(3661)\n  println(int.to_string(r9))\n  \
+            let r10 = datetime.second(3661)\n  println(int.to_string(r10))\n  \
+            let bf = datetime.is_before(5, 10)\n  let nb = if bf then 1 else 0\n  println(int.to_string(nb))\n  \
+            let af = datetime.is_after(5, 10)\n  let na = if af then 1 else 0\n  println(int.to_string(na)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "datetime.add_days"));
+        if let Some(out) = build_and_run("self_hosted_datetime_arithmetic", &render_wasm_program(&prog)) {
+            assert_eq!(out, "86500\n3700\n160\n101\n100\n555\n555\n1\n1\n1\n1\n0");
+        }
+    }
+
+    #[test]
     fn self_hosted_float32_conversions() {
         // SELF-HOSTED float32.to_* (widen f32→f64 then float.to_<dst>), byte-matching v0: 3.5 → i32
         // 3 (truncate), 200.0 → i8 127 (clamp), 200.0 → u8 200, 3.5 → f64 3.5 (exact widen).

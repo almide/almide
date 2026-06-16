@@ -197,6 +197,23 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
             ],
         ),
         (
+            include_str!("../../../../stdlib/datetime_arith.almd"),
+            &[
+                ("datetime_add_days", "datetime.add_days"),
+                ("datetime_add_hours", "datetime.add_hours"),
+                ("datetime_add_minutes", "datetime.add_minutes"),
+                ("datetime_add_seconds", "datetime.add_seconds"),
+                ("datetime_diff_seconds", "datetime.diff_seconds"),
+                ("datetime_from_unix", "datetime.from_unix"),
+                ("datetime_to_unix", "datetime.to_unix"),
+                ("datetime_hour", "datetime.hour"),
+                ("datetime_minute", "datetime.minute"),
+                ("datetime_second", "datetime.second"),
+                ("datetime_is_before", "datetime.is_before"),
+                ("datetime_is_after", "datetime.is_after"),
+            ],
+        ),
+        (
             include_str!("../../../../stdlib/float32_convert.almd"),
             &[
                 ("float32_to_int8", "float32.to_int8"),

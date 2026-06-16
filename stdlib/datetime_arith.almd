@@ -1,0 +1,24 @@
+// datetime_arith — SELF-HOSTED pure-arithmetic datetime.* for v1. A DateTime is a Unix timestamp
+// in SECONDS (an i64), so the calendar-free ops are plain scalar arithmetic, byte-matching v0's
+// runtime/rs/src/datetime.rs. The component extractors floor-mod with the `(x % m + m) % m` idiom
+// so a NEGATIVE (pre-epoch) timestamp still yields the in-range component, exactly like v0.
+//
+// Deferred: year/month/day/weekday (the civil-calendar algorithm), from_parts, to_iso/format/
+// parse_iso (string formatting/parsing), now/monotonic_ns (EFFECTFUL — they read the host clock).
+
+fn datetime_add_days(ts: Int, n: Int) -> Int = ts + n * 86400
+fn datetime_add_hours(ts: Int, n: Int) -> Int = ts + n * 3600
+fn datetime_add_minutes(ts: Int, n: Int) -> Int = ts + n * 60
+fn datetime_add_seconds(ts: Int, n: Int) -> Int = ts + n
+
+fn datetime_diff_seconds(a: Int, b: Int) -> Int = a - b
+
+fn datetime_from_unix(seconds: Int) -> Int = seconds
+fn datetime_to_unix(ts: Int) -> Int = ts
+
+fn datetime_hour(ts: Int) -> Int = (((ts % 86400) + 86400) % 86400) / 3600
+fn datetime_minute(ts: Int) -> Int = (((ts % 3600) + 3600) % 3600) / 60
+fn datetime_second(ts: Int) -> Int = ((ts % 60) + 60) % 60
+
+fn datetime_is_before(a: Int, b: Int) -> Bool = a < b
+fn datetime_is_after(a: Int, b: Int) -> Bool = a > b

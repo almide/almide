@@ -49,7 +49,7 @@
 /// drift gate re-derives the effectful set from `stdlib/*.almd` and fails if any
 /// name here ever declares an `effect fn`.
 pub const PURE_MODULES: &[&str] = &[
-    "base64", "base64_encode", "bytes", "bytes_array", "bytes_core", "error", "error_chain", "error_message", "float", "float32", "float32_convert", "float_bits", "float_checked", "float_convert", "float_core", "float_extra", "float_round", "float_saturating", "hex", "hex_encode", "html", "int", "int16",
+    "base64", "base64_encode", "bytes", "bytes_array", "bytes_core", "datetime_arith", "error", "error_chain", "error_message", "float", "float32", "float32_convert", "float_bits", "float_checked", "float_convert", "float_core", "float_extra", "float_round", "float_saturating", "hex", "hex_encode", "html", "int", "int16",
     "int16_convert", "int32", "int32_convert", "int8", "int8_convert", "int_bitcount", "int_bits", "int_checked", "int_hex", "int_rotate", "int_scalar", "int_sized", "int_to_float", "int_to_string", "int_wrap", "json", "list", "list_anyall", "list_chunk", "list_dedup", "list_filter", "list_filter_str", "list_filtermap", "list_find", "list_flatmap", "list_flatten", "list_fold", "list_foldf", "list_get", "list_get_or", "list_get_str", "list_intersperse", "list_is_empty",
     "list_len", "list_make", "list_map", "list_map_str", "list_modify", "list_reduce", "list_reverse", "list_reverse_str", "list_scan", "list_search", "list_sort", "list_sortby", "list_str", "list_sum", "list_take_drop", "list_takedrop_str", "list_unique", "list_uniqueby", "list_whilep", "list_zipwith", "map", "map_core", "map_str", "math", "math_float", "math_int", "matrix", "option", "option_collect", "option_map", "option_pred", "path", "regex", "result",
     "result_core", "result_map", "set", "set_core", "set_str", "string", "string_chars", "string_codepoint", "string_first_last", "string_from_bytes_self", "string_from_codepoint", "string_is_digit", "string_is_empty", "string_join",
@@ -62,8 +62,35 @@ pub const PURE_MODULES: &[&str] = &[
 /// `func` is accepted for a future per-function refinement but unused today —
 /// admission is module-granular because the impure-plain modules are walled in
 /// full (see the module doc).
-pub fn is_pure(module: &str, _func: &str) -> bool {
-    PURE_MODULES.contains(&module)
+pub fn is_pure(module: &str, func: &str) -> bool {
+    PURE_MODULES.contains(&module) || is_pure_fn_in_impure_module(module, func)
+}
+
+/// A genuinely-PURE function living inside an otherwise impure-plain module. `datetime` is walled
+/// as a whole because `now`/`monotonic_ns` read the wall clock, but its calendar arithmetic over a
+/// plain i64 Unix-seconds timestamp reaches NO host capability — admitting it is the refinement the
+/// module-level under-approximation anticipated. SOUND: every fn listed is scalar arithmetic /
+/// comparison (its self-host body in datetime_arith.almd uses no prim host op, no Stdout); the
+/// effectful `now`/`monotonic_ns` are deliberately NOT listed, so they stay caps-walled.
+fn is_pure_fn_in_impure_module(module: &str, func: &str) -> bool {
+    match module {
+        "datetime" => matches!(
+            func,
+            "add_days"
+                | "add_hours"
+                | "add_minutes"
+                | "add_seconds"
+                | "diff_seconds"
+                | "from_unix"
+                | "to_unix"
+                | "hour"
+                | "minute"
+                | "second"
+                | "is_before"
+                | "is_after"
+        ),
+        _ => false,
+    }
 }
 
 #[cfg(test)]
