@@ -80,6 +80,15 @@ impl LowerCtx {
                 if let Some(v) = subject_value {
                     if is_self_host_option_call(subject) {
                         self.materialized_options.insert(v);
+                        // An `Option[heap]` (e.g. `Option[(Int,Int)]` from option.zip) OWNS its
+                        // payload — track it as a nested-ownership list so the variant-match binds the
+                        // Some payload by `LoadHandle` (the borrowed element handle, not the whole
+                        // Option) AND the scope-end drop is the recursive `DropListStr` (frees the
+                        // owned payload, no leak). Without this the heap-payload bind gate fails →
+                        // the match linearizes and reads the Option's own slots as the payload.
+                        if crate::lower::is_heap_elem_list_ty(&subject.ty) {
+                            self.heap_elem_lists.insert(v);
+                        }
                     }
                     if is_self_host_result_call(subject) {
                         self.materialized_results.insert(v);

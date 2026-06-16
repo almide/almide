@@ -877,21 +877,34 @@ fn preamble() -> String {
   (global $freelist (mut i32) (i32.const 0))
 
   (func $alloc (param $n i32) (result i32)
-    (local $p i32)
-    ;; reuse the free-list head iff it is exactly n bytes (FreeList.alloc: a valid
-    ;; allocation is the fresh frontier OR a block currently on the free-list).
-    (if (i32.ne (global.get $freelist) (i32.const 0))
-      (then
-        (local.set $p (global.get $freelist))
+    (local $p i32) (local $prev i32)
+    ;; FIRST-FIT reuse: SEARCH the free-list for ANY block of exactly n bytes and unlink it
+    ;; (FreeList.alloc: a valid allocation is the fresh frontier OR a block currently on the free-
+    ;; list — searching the list, not just its head, still returns ONLY a free-list block, so the
+    ;; proven no-double-free / bounded-reuse properties hold; head-only reuse LEAKED whenever
+    ;; heterogeneous sizes interleaved — a smaller block stuck at the head shadowed a size match
+    ;; deeper in the list, forcing a fresh bump every iteration). The link lives in the dead LEN
+    ;; field. prev==0 marks the head.
+    (local.set $prev (i32.const 0))
+    (local.set $p (global.get $freelist))
+    (block $done
+      (loop $scan
+        (br_if $done (i32.eqz (local.get $p)))
         (if (i32.eq (i32.add (i32.const {LIST_HEADER})
                              (i32.mul (i32.load (i32.add (local.get $p) (i32.const {LIST_CAP_OFFSET})))
                                       (i32.const {ELEM_SIZE})))
                     (local.get $n))
           (then
-            (global.set $freelist
-              (i32.load (i32.add (local.get $p) (i32.const {LIST_LEN_OFFSET}))))
-            (return (local.get $p))))))
-    ;; else bump the frontier (a genuinely fresh block)
+            ;; unlink p: head → freelist = p.next; else prev.next = p.next
+            (if (i32.eqz (local.get $prev))
+              (then (global.set $freelist (i32.load (i32.add (local.get $p) (i32.const {LIST_LEN_OFFSET})))))
+              (else (i32.store (i32.add (local.get $prev) (i32.const {LIST_LEN_OFFSET}))
+                              (i32.load (i32.add (local.get $p) (i32.const {LIST_LEN_OFFSET}))))))
+            (return (local.get $p))))
+        (local.set $prev (local.get $p))
+        (local.set $p (i32.load (i32.add (local.get $p) (i32.const {LIST_LEN_OFFSET}))))
+        (br $scan)))
+    ;; not found: bump the frontier (a genuinely fresh block)
     (local.set $p (global.get $bump))
     (global.set $bump (i32.add (local.get $p) (local.get $n)))
     (local.get $p))

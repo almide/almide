@@ -1988,6 +1988,42 @@
     }
 
     #[test]
+    fn self_hosted_option_zip() {
+        // SELF-HOSTED option.zip → Some((a, b)) when both Some (a SCALAR (Int,Int) tuple owned by a
+        // heap Some), None otherwise. The Some payload is a HEAP tuple — the variant-match binds it by
+        // LoadHandle (the borrowed tuple handle) and the scope-end DropListStr frees it. Args are
+        // let-bound Options (a literal `Some(x)` call-arg does not materialize). Byte-matches v0.
+        let src = "fn main() -> Unit = {\n  \
+            let a = Some(3)\n  let b = Some(4)\n  \
+            match option.zip(a, b) { Some(p) => { let (x, y) = p\n println(int.to_string(x + y)) }, None => println(\"none\"), }\n  \
+            let c: Option[Int] = None\n  \
+            match option.zip(a, c) { Some(p) => { let (x, y) = p\n println(int.to_string(x + y)) }, None => println(\"none\"), } }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "option.zip"));
+        if let Some(out) = build_and_run("self_hosted_option_zip", &render_wasm_program(&prog)) {
+            assert_eq!(out, "7\nnone");
+        }
+    }
+
+    #[test]
+    fn self_hosted_option_zip_loop_reclaims() {
+        // SOUNDNESS for the Option[heap-tuple] match path: a bounded loop building option.zip, matching
+        // + destructuring (the heap Some owns a flat scalar tuple, freed by DropListStr each iter) — no
+        // leak/double-free. 4000 iters; `last` accumulates the destructured sum.
+        let src = "fn main() -> Unit = {\n  \
+            var i = 0\n  var last = 0\n  \
+            while i < 4000 {\n    \
+              let a = Some(i)\n    let b = Some(1)\n    \
+              match option.zip(a, b) { Some(p) => { let (x, y) = p\n last = x + y }, None => { last = 0 }, }\n    \
+              i = i + 1\n  }\n  \
+            println(int.to_string(last)) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("self_hosted_option_zip_loop_reclaims", &render_wasm_program(&prog)) {
+            assert_eq!(out, "4000");
+        }
+    }
+
+    #[test]
     fn self_hosted_bytes_skip() {
         // SELF-HOSTED bytes.skip → advance pos by n, clamped to the byte length. Pure scalar over the
         // Bytes header (len@4). Byte-matches v0's `let np = pos + n; if np > len then len else np`.

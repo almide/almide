@@ -104,3 +104,19 @@ fn option_flatten(o: Option[Option[Int]]) -> Option[Int] = {
   let inner_h = prim.load64(h + 12)
   if len == 0 then None else __opt_flatten_inner(inner_h)
 }
+
+fn __opt_zip_some(av: Int, bv: Int) -> Option[(Int, Int)] = {
+  let t = (av, bv)
+  Some(t)
+}
+fn option_zip(a: Option[Int], b: Option[Int]) -> Option[(Int, Int)] = {
+  let ah = prim.handle(a)
+  let alen = prim.load32(ah + 4)
+  let av = prim.load64(ah + 12)
+  let bh = prim.handle(b)
+  let blen = prim.load32(bh + 4)
+  let bv = prim.load64(bh + 12)
+  if alen == 0 then None
+  else if blen == 0 then None
+  else __opt_zip_some(av, bv)
+}
