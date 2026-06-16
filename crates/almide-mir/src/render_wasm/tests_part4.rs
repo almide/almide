@@ -2212,6 +2212,20 @@
     }
 
     #[test]
+    fn self_hosted_math_log10_bit_exact() {
+        // SELF-HOSTED math.log10 — BIT-EXACT vs v0: log10(1000)=4613937818241073152,
+        // log10(2)=4599094494223104511, log10(1)=0.
+        let src = "fn main() -> Unit = {\n  \
+            let a = math.log10(1000.0)\n  println(int.to_string(float.to_bits(a)))\n  \
+            let b = math.log10(2.0)\n  println(int.to_string(float.to_bits(b)))\n  \
+            let c = math.log10(1.0)\n  println(int.to_string(float.to_bits(c))) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("self_hosted_math_log10_bit_exact", &render_wasm_program(&prog)) {
+            assert_eq!(out, "4613937818241073152\n4599094494223104511\n0");
+        }
+    }
+
+    #[test]
     fn float_arithmetic_operators_lower() {
         // Float +/-/*// and comparison operators lower to the prim float floor (no explicit
         // prim.fmul needed). 3*2 + 3/2 = 7.5; 3<2 false; 3>2 true.
