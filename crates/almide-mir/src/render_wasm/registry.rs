@@ -242,6 +242,18 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
                 ("int_to_uint64_saturating", "int.to_uint64_saturating"),
             ],
         ),
+        (
+            include_str!("../../../../stdlib/int_checked.almd"),
+            &[
+                ("int_to_int8_checked", "int.to_int8_checked"),
+                ("int_to_int16_checked", "int.to_int16_checked"),
+                ("int_to_int32_checked", "int.to_int32_checked"),
+                ("int_to_uint8_checked", "int.to_uint8_checked"),
+                ("int_to_uint16_checked", "int.to_uint16_checked"),
+                ("int_to_uint32_checked", "int.to_uint32_checked"),
+                ("int_to_uint64_checked", "int.to_uint64_checked"),
+            ],
+        ),
         (include_str!("../../../../stdlib/string_slice.almd"), &[("string_slice", "string.slice")]),
         (
             include_str!("../../../../stdlib/string_is_digit.almd"),

@@ -1932,6 +1932,43 @@
     }
 
     #[test]
+    fn self_hosted_int_checked_conversions() {
+        // SELF-HOSTED int.to_{int,uint}N_checked → Some(n) iff n fits the N-bit range, else None. The
+        // discriminant (the only thing that can differ from v0 — the in-range value is Some(n) by
+        // construction) byte-matches v0's range logic.
+        let src = "fn main() -> Unit = {\n  \
+            match int.to_int8_checked(100) { Some(v) => println(\"some\"), None => println(\"none\"), }\n  \
+            match int.to_int8_checked(200) { Some(v) => println(\"some\"), None => println(\"none\"), }\n  \
+            match int.to_int8_checked(-200) { Some(v) => println(\"some\"), None => println(\"none\"), }\n  \
+            match int.to_uint8_checked(-1) { Some(v) => println(\"some\"), None => println(\"none\"), }\n  \
+            match int.to_uint8_checked(255) { Some(v) => println(\"some\"), None => println(\"none\"), }\n  \
+            match int.to_uint16_checked(70000) { Some(v) => println(\"some\"), None => println(\"none\"), }\n  \
+            match int.to_uint64_checked(-5) { Some(v) => println(\"some\"), None => println(\"none\"), } }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "int.to_int8_checked"));
+        if let Some(out) = build_and_run("self_hosted_int_checked_conversions", &render_wasm_program(&prog)) {
+            assert_eq!(out, "some\nnone\nnone\nnone\nsome\nnone\nnone");
+        }
+    }
+
+    #[test]
+    fn self_hosted_int_checked_loop_reclaims() {
+        // SOUNDNESS: a bounded loop building + dropping the scalar Option[Int] (Some/None) from a
+        // _checked conversion — no leak/double-free. 4000 iters; `last` counts the in-range hits.
+        let src = "fn main() -> Unit = {\n  \
+            var i = 0\n  var last = 0\n  \
+            while i < 4000 {\n    \
+              match int.to_uint8_checked(i) { Some(v) => { last = last + 1 }, None => { last = last }, }\n    \
+              i = i + 1\n  }\n  \
+            println(int.to_string(last)) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("self_hosted_int_checked_loop_reclaims", &render_wasm_program(&prog)) {
+            // i in 0..3999; uint8 in-range is 0..255 → 256 hits.
+            assert_eq!(out, "256");
+        }
+    }
+
+    #[test]
     fn self_hosted_result_to_list() {
         // SELF-HOSTED result.to_list → a 0-or-1-element List[Int] built over the prim floor (Ok→[v]
         // len 1, Err→[] len 0). Byte-matches v0's `match r { Ok(v) => [v], Err(_) => [] }`.

@@ -713,6 +713,18 @@ pub(crate) fn is_self_host_option_module_fn(module: &str, func: &str) -> bool {
         // map.get(m, k) builds a materialized Option[Int] (Some(value) when the key is found via
         // the paired-slot scan, None otherwise) — a `match` over it EXECUTES.
         "map" => matches!(func, "get"),
+        // int.to_{int,uint}N_checked builds a materialized Option[Int] (Some(n) when n fits the
+        // N-bit range, None otherwise) — a `match` over it EXECUTES.
+        "int" => matches!(
+            func,
+            "to_int8_checked"
+                | "to_int16_checked"
+                | "to_int32_checked"
+                | "to_uint8_checked"
+                | "to_uint16_checked"
+                | "to_uint32_checked"
+                | "to_uint64_checked"
+        ),
         _ => false,
     }
 }
