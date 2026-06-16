@@ -3657,3 +3657,34 @@
             assert_eq!(out, "3");
         }
     }
+
+    #[test]
+    fn single_funcref_invoke_probe() {
+        // SINGLE f(x) invocation (what list.map/filter/fold actually do per element).
+        let src = "fn applyf(f: (Int) -> Int, x: Int) -> Int = f(x)\n\
+            fn dbl(n: Int) -> Int = n + n\n\
+            fn main() -> Unit = {\n\
+              println(int.to_string(applyf(dbl, 5))) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("single_funcref_invoke_probe", &render_wasm_program(&prog)) {
+            eprintln!("SINGLE-PROBE out={:?}", out);
+            assert_eq!(out, "10");
+        }
+    }
+
+    #[test]
+    fn self_hosted_read_f16_le_matches_v0() {
+        // f16 decode (f32 semantics, widened) through v1, incl. the OOB→0.0 path (pos 7).
+        let src = "fn main() -> Unit = {\n\
+            let b = bytes.from_string(\"ABCDEFGH\")\n\
+            println(int.to_string(float.to_bits(bytes.read_f16_le(b, 0))))\n\
+            println(int.to_string(float.to_bits(bytes.read_f16_le(b, 1))))\n\
+            println(int.to_string(float.to_bits(bytes.read_f16_le(b, 2))))\n\
+            println(int.to_string(float.to_bits(bytes.read_f16_le(b, 3))))\n\
+            println(int.to_string(float.to_bits(bytes.read_f16_le(b, 6))))\n\
+            println(int.to_string(float.to_bits(bytes.read_f16_le(b, 7)))) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("self_hosted_read_f16_le_matches_v0", &render_wasm_program(&prog)) {
+            assert_eq!(out, "4614223691264294912\n4615353989217648640\n4616484287171002368\n4617614585124356096\n4621005478984417280\n0");
+        }
+    }
