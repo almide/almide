@@ -177,6 +177,17 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
             ],
         ),
         (
+            include_str!("../../../../stdlib/float_checked.almd"),
+            &[
+                ("float_to_int8_checked", "float.to_int8_checked"),
+                ("float_to_int16_checked", "float.to_int16_checked"),
+                ("float_to_int32_checked", "float.to_int32_checked"),
+                ("float_to_uint8_checked", "float.to_uint8_checked"),
+                ("float_to_uint16_checked", "float.to_uint16_checked"),
+                ("float_to_uint32_checked", "float.to_uint32_checked"),
+            ],
+        ),
+        (
             include_str!("../../../../stdlib/hex_encode.almd"),
             &[("hex_encode", "hex.encode"), ("hex_encode_upper", "hex.encode_upper")],
         ),

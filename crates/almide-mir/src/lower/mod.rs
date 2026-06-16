@@ -738,6 +738,18 @@ pub(crate) fn is_self_host_option_module_fn(module: &str, func: &str) -> bool {
                 | "to_uint32_checked"
                 | "to_uint64_checked"
         ),
+        // float.to_{int,uint}N_checked builds a materialized Option[IntN] (Some(to_T(n)) when n is
+        // an exact integer in range, None otherwise) — a `match` over it EXECUTES. Same scalar shape
+        // as the int variants (IntN is i64-repr); to_int64/to_uint64/to_float32 are not yet hosted.
+        "float" => matches!(
+            func,
+            "to_int8_checked"
+                | "to_int16_checked"
+                | "to_int32_checked"
+                | "to_uint8_checked"
+                | "to_uint16_checked"
+                | "to_uint32_checked"
+        ),
         _ => false,
     }
 }

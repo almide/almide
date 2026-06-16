@@ -1988,6 +1988,47 @@
     }
 
     #[test]
+    fn self_hosted_float_checked_conversions() {
+        // SELF-HOSTED float.to_{int,uint}{8,16,32}_checked → Some(T) iff `n` is an EXACT integer in
+        // T's range, else None (out-of-range / fractional / negative-for-unsigned). The discriminant
+        // byte-matches v0's round-trip-via-int.to_float guard; the in-range value is `to_T(n)` by
+        // construction (the 7th line prints the actual value 200 to confirm the payload flows).
+        let src = "fn main() -> Unit = {\n  \
+            match float.to_int8_checked(100.0) { Some(v) => println(\"some\"), None => println(\"none\"), }\n  \
+            match float.to_int8_checked(200.0) { Some(v) => println(\"some\"), None => println(\"none\"), }\n  \
+            match float.to_int8_checked(100.5) { Some(v) => println(\"some\"), None => println(\"none\"), }\n  \
+            match float.to_int16_checked(30000.0) { Some(v) => println(\"some\"), None => println(\"none\"), }\n  \
+            match float.to_int32_checked(2000000000.0) { Some(v) => println(\"some\"), None => println(\"none\"), }\n  \
+            match float.to_uint8_checked(-1.0) { Some(v) => println(\"some\"), None => println(\"none\"), }\n  \
+            match float.to_uint8_checked(200.0) { Some(v) => { let iv = int.from_uint8(v); println(int.to_string(iv)) }, None => println(\"none\"), }\n  \
+            match float.to_uint16_checked(65535.0) { Some(v) => println(\"some\"), None => println(\"none\"), }\n  \
+            match float.to_uint32_checked(5000000000.0) { Some(v) => println(\"some\"), None => println(\"none\"), } }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "float.to_int8_checked"));
+        if let Some(out) = build_and_run("self_hosted_float_checked_conversions", &render_wasm_program(&prog)) {
+            assert_eq!(out, "some\nnone\nnone\nsome\nsome\nnone\n200\nsome\nnone");
+        }
+    }
+
+    #[test]
+    fn self_hosted_float_checked_loop_reclaims() {
+        // SOUNDNESS: a bounded loop building + dropping the scalar Option from a float _checked
+        // conversion — no leak / double-free. 4000 iters; `last` counts the in-range integer hits.
+        let src = "fn main() -> Unit = {\n  \
+            var i = 0\n  var last = 0\n  \
+            while i < 4000 {\n    \
+              let fi = int.to_float(i)\n    \
+              match float.to_uint8_checked(fi) { Some(v) => { last = last + 1 }, None => { last = last }, }\n    \
+              i = i + 1\n  }\n  \
+            println(int.to_string(last)) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("self_hosted_float_checked_loop_reclaims", &render_wasm_program(&prog)) {
+            // i in 0..3999; an in-range integer uint8 is 0..255 → 256 hits.
+            assert_eq!(out, "256");
+        }
+    }
+
+    #[test]
     fn self_hosted_option_zip() {
         // SELF-HOSTED option.zip → Some((a, b)) when both Some (a SCALAR (Int,Int) tuple owned by a
         // heap Some), None otherwise. The Some payload is a HEAP tuple — the variant-match binds it by
