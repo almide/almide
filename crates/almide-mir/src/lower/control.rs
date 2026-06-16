@@ -897,6 +897,17 @@ impl LowerCtx {
                 self.ops.push(Op::Consume { v: obj });
                 Some(obj)
             }
+            // A string-concat arm (`match x { _ => a + b }`, `if c then a + b else …`) — the
+            // __str_concat call's fresh owned String (cert `i`) + the arm's `Consume` (`m`) = the
+            // same per-arm `"im"` balance as the call arms; any materialized arg temp is freed
+            // within the arm (`drop_arm_locals`). Closes an un-wired concat position (caps recovery).
+            IrExprKind::BinOp { op: almide_ir::BinOp::ConcatStr, .. } => {
+                let arm_mark = self.live_heap_handles.len();
+                let obj = self.try_lower_concat_str(arm)?;
+                self.ops.push(Op::Consume { v: obj });
+                self.drop_arm_locals(arm_mark);
+                Some(obj)
+            }
             IrExprKind::If { cond, then, else_ } => {
                 self.lower_heap_result_if_inner(cond, then, else_, result_ty)
             }
