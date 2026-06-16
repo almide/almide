@@ -2181,6 +2181,22 @@
     }
 
     #[test]
+    fn float_arithmetic_operators_lower() {
+        // Float +/-/*// and comparison operators lower to the prim float floor (no explicit
+        // prim.fmul needed). 3*2 + 3/2 = 7.5; 3<2 false; 3>2 true.
+        let src = "fn fcomp(a: Float, b: Float) -> Float = a * b + a / b\n\
+            fn main() -> Unit = {\n  \
+              let x = 3.0\n  let y = 2.0\n  \
+              let r = fcomp(x, y)\n  let eq = prim.feq(r, 7.5)\n  let n = if eq then 1 else 0\n  println(int.to_string(n))\n  \
+              let lt = if x < y then 1 else 0\n  println(int.to_string(lt))\n  \
+              let gt = if x > y then 1 else 0\n  println(int.to_string(gt)) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("float_arithmetic_operators_lower", &render_wasm_program(&prog)) {
+            assert_eq!(out, "1\n0\n1");
+        }
+    }
+
+    #[test]
     fn self_hosted_bytes_split_lines_chunks() {
         // SELF-HOSTED bytes.split / lines / chunks -> List[Bytes] (nested-ownership via
         // alloc_list_str + store_str). Counts via prim.load32(handle+4); content via load_str.

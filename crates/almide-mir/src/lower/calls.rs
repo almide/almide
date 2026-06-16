@@ -695,6 +695,30 @@ impl LowerCtx {
                 Some(dst)
             }
             IrExprKind::BinOp { op, left, right } => {
+                // FLOAT arithmetic + comparison operators → the prim float floor (Op::Prim). The
+                // operands are Float (the i64-uniform f64 bits); the prim reinterprets around the
+                // wasm f64 op. Pure scalar — no ownership (cert untouched). This makes float-heavy
+                // self-host (libm / dtoa) write `a * b` instead of `prim.fmul(a, b)`.
+                let fkind = match op {
+                    BinOp::AddFloat => Some(crate::PrimKind::FloatBin(crate::FBinOp::Add)),
+                    BinOp::SubFloat => Some(crate::PrimKind::FloatBin(crate::FBinOp::Sub)),
+                    BinOp::MulFloat => Some(crate::PrimKind::FloatBin(crate::FBinOp::Mul)),
+                    BinOp::DivFloat => Some(crate::PrimKind::FloatBin(crate::FBinOp::Div)),
+                    BinOp::Lt if matches!(left.ty, Ty::Float) => Some(crate::PrimKind::FloatCmp(crate::FCmpOp::Lt)),
+                    BinOp::Lte if matches!(left.ty, Ty::Float) => Some(crate::PrimKind::FloatCmp(crate::FCmpOp::Le)),
+                    BinOp::Gt if matches!(left.ty, Ty::Float) => Some(crate::PrimKind::FloatCmp(crate::FCmpOp::Gt)),
+                    BinOp::Gte if matches!(left.ty, Ty::Float) => Some(crate::PrimKind::FloatCmp(crate::FCmpOp::Ge)),
+                    BinOp::Eq if matches!(left.ty, Ty::Float) => Some(crate::PrimKind::FloatCmp(crate::FCmpOp::Eq)),
+                    BinOp::Neq if matches!(left.ty, Ty::Float) => Some(crate::PrimKind::FloatCmp(crate::FCmpOp::Ne)),
+                    _ => None,
+                };
+                if let Some(kind) = fkind {
+                    let a = self.lower_scalar_value(left)?;
+                    let b = self.lower_scalar_value(right)?;
+                    let dst = self.fresh_value();
+                    self.ops.push(Op::Prim { kind, dst: Some(dst), args: vec![a, b] });
+                    return Some(dst);
+                }
                 let iop = match op {
                     BinOp::AddInt => crate::IntOp::Add,
                     BinOp::SubInt => crate::IntOp::Sub,
