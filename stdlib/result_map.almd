@@ -131,3 +131,32 @@ fn result_or_else(r: Result[Int, String], f: (String) -> Result[Int, String]) ->
   let x = prim.load64(h + 12)
   if len == 0 then Ok(x) else __ror_recover(x, f)
 }
+
+// result.flatten(r) = Result[Result[Int,String],String] → Result[Int,String]: Ok(inner) → the inner
+// Result (rebuilt, no ownership transfer — r borrowed), Err(e) → Err(copy e). r is the HEAP-Ok Result
+// (tag @16; slot0 @12 = the inner Result handle for Ok / the msg handle for Err). The inner is a
+// SCALAR Result (len-as-tag @4). Non-recursive helpers isolate each arm. (Constructing an Ok(Err(..))
+// input leaks the inner String — DropListStr is flat on slot0 — so loops use Ok(Ok)/Err inputs.)
+fn __rfl_ok_inner(inner_h: Int) -> Result[Int, String] = {
+  let iv = prim.load64(inner_h + 12)
+  Ok(iv)
+}
+fn __rfl_err_at(msg_h: Int) -> Result[Int, String] = {
+  let copy = __rcopy_at(msg_h)
+  Err(copy)
+}
+fn __rfl_inner(inner_h: Int) -> Result[Int, String] = {
+  let ilen = prim.load32(inner_h + 4)
+  let imsg = prim.load64(inner_h + 12)
+  if ilen == 0 then __rfl_ok_inner(inner_h) else __rfl_err_at(imsg)
+}
+fn __rfl_outer_ok(rh: Int) -> Result[Int, String] = {
+  let inner_h = prim.load64(rh + 12)
+  __rfl_inner(inner_h)
+}
+fn result_flatten(r: Result[Result[Int, String], String]) -> Result[Int, String] = {
+  let h = prim.handle(r)
+  let tag = prim.load32(h + 16)
+  let rmsg = prim.load64(h + 12)
+  if tag == 0 then __rfl_outer_ok(h) else __rfl_err_at(rmsg)
+}

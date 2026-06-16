@@ -2128,6 +2128,42 @@
     }
 
     #[test]
+    fn self_hosted_result_flatten() {
+        // SELF-HOSTED result.flatten → Ok(inner) collapses to the inner Result, Err(e) propagates. The
+        // input is a heap-Ok Result[Result[Int,String],String] (tag @16, inner handle @12). v0-match.
+        // (Ok(Err(..)) input leaks the inner String once — harmless for a single run.)
+        let src = "fn main() -> Unit = {\n  \
+            let i1: Result[Int, String] = Ok(9)\n  let r1: Result[Result[Int, String], String] = Ok(i1)\n  let f1 = result.flatten(r1)\n  \
+            match f1 { Ok(v) => println(int.to_string(v)), Err(e) => println(e), }\n  \
+            let r2: Result[Result[Int, String], String] = Err(\"outer\")\n  let f2 = result.flatten(r2)\n  \
+            match f2 { Ok(v) => println(int.to_string(v)), Err(e) => println(e), }\n  \
+            let i3: Result[Int, String] = Err(\"inner\")\n  let r3: Result[Result[Int, String], String] = Ok(i3)\n  let f3 = result.flatten(r3)\n  \
+            match f3 { Ok(v) => println(int.to_string(v)), Err(e) => println(e), } }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "result.flatten"));
+        if let Some(out) = build_and_run("self_hosted_result_flatten", &render_wasm_program(&prog)) {
+            assert_eq!(out, "9\nouter\ninner");
+        }
+    }
+
+    #[test]
+    fn self_hosted_result_flatten_loop_reclaims() {
+        // SOUNDNESS: a bounded loop flattening Ok(Ok(i)) (no inner String → no leak) — reclaimed each
+        // iter. 4000 iters; `last` = the flattened value.
+        let src = "fn main() -> Unit = {\n  \
+            var i = 0\n  var last = 0\n  \
+            while i < 4000 {\n    \
+              let inr: Result[Int, String] = Ok(i)\n    let r: Result[Result[Int, String], String] = Ok(inr)\n    let f = result.flatten(r)\n    \
+              match f { Ok(v) => { last = v }, Err(e) => { last = 0 }, }\n    \
+              i = i + 1\n  }\n  \
+            println(int.to_string(last)) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("self_hosted_result_flatten_loop_reclaims", &render_wasm_program(&prog)) {
+            assert_eq!(out, "3999");
+        }
+    }
+
+    #[test]
     fn self_hosted_bytes_skip() {
         // SELF-HOSTED bytes.skip → advance pos by n, clamped to the byte length. Pure scalar over the
         // Bytes header (len@4). Byte-matches v0's `let np = pos + n; if np > len then len else np`.
