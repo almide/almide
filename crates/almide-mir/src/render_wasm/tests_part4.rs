@@ -2247,6 +2247,37 @@
     }
 
     #[test]
+    fn self_hosted_option_collect() {
+        // SELF-HOSTED option.collect → Some([all values]) when every element is Some, else None. The
+        // List[Option[Int]] input is built via list.map (an Option literal-list does not construct).
+        let src = "fn main() -> Unit = {\n  \
+            let ns = [10, 20, 30]\n  let alls = list.map(ns, (x) => Some(x))\n  let ra = option.collect(alls)\n  \
+            match ra { Some(lst) => println(int.to_string(list.sum(lst))), None => println(\"none\"), }\n  \
+            let mix = list.map(ns, (x) => if x == 20 then None else Some(x))\n  let rb = option.collect(mix)\n  \
+            match rb { Some(lst) => println(int.to_string(list.len(lst))), None => println(\"none\"), } }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "option.collect"));
+        if let Some(out) = build_and_run("self_hosted_option_collect", &render_wasm_program(&prog)) {
+            assert_eq!(out, "60\nnone");
+        }
+    }
+
+    #[test]
+    fn self_hosted_option_collect_loop_reclaims() {
+        // SOUNDNESS: a bounded loop building option.collect (a fresh List[Int] in Some, freed by
+        // DropListStr each iter; `last = list.len(lst)` is a scalar-CALL reassign → a real loop, not
+        // the model-one-iteration fallback that would mask a leak). 4000 iters; `last` = the length.
+        let src = "fn main() -> Unit = {\n  var i = 0\n  var last = 0\n  let ns = [1, 2, 3, 4]\n  \
+            while i < 4000 {\n    let alls = list.map(ns, (x) => Some(x))\n    let r = option.collect(alls)\n    \
+            match r { Some(lst) => { last = list.len(lst) }, None => { last = 0 }, }\n    i = i + 1\n  }\n  \
+            println(int.to_string(last)) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("self_hosted_option_collect_loop_reclaims", &render_wasm_program(&prog)) {
+            assert_eq!(out, "4");
+        }
+    }
+
+    #[test]
     fn self_hosted_bytes_skip() {
         // SELF-HOSTED bytes.skip → advance pos by n, clamped to the byte length. Pure scalar over the
         // Bytes header (len@4). Byte-matches v0's `let np = pos + n; if np > len then len else np`.
