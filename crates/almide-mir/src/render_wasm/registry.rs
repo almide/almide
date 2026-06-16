@@ -197,6 +197,15 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
             ],
         ),
         (
+            include_str!("../../../../stdlib/datetime_calendar.almd"),
+            &[
+                ("datetime_year", "datetime.year"),
+                ("datetime_month", "datetime.month"),
+                ("datetime_day", "datetime.day"),
+                ("datetime_weekday", "datetime.weekday"),
+            ],
+        ),
+        (
             include_str!("../../../../stdlib/datetime_arith.almd"),
             &[
                 ("datetime_add_days", "datetime.add_days"),

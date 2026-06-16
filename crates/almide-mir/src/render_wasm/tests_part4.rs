@@ -2099,6 +2099,27 @@
     }
 
     #[test]
+    fn self_hosted_datetime_calendar() {
+        // SELF-HOSTED datetime.year/month/day/weekday (Hinnant civil algorithm), byte-matching v0:
+        // ts=0 → 1970-01-01 Thursday; ts=1e9 → 2001-09-09 Sunday.
+        let src = "fn main() -> Unit = {\n  \
+            let y0 = datetime.year(0)\n  println(int.to_string(y0))\n  \
+            let m0 = datetime.month(0)\n  println(int.to_string(m0))\n  \
+            let d0 = datetime.day(0)\n  println(int.to_string(d0))\n  \
+            println(datetime.weekday(0))\n  \
+            let t = 1000000000\n  \
+            let y1 = datetime.year(t)\n  println(int.to_string(y1))\n  \
+            let m1 = datetime.month(t)\n  println(int.to_string(m1))\n  \
+            let d1 = datetime.day(t)\n  println(int.to_string(d1))\n  \
+            println(datetime.weekday(t)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "datetime.year"));
+        if let Some(out) = build_and_run("self_hosted_datetime_calendar", &render_wasm_program(&prog)) {
+            assert_eq!(out, "1970\n1\n1\nThursday\n2001\n9\n9\nSunday");
+        }
+    }
+
+    #[test]
     fn self_hosted_datetime_arithmetic() {
         // SELF-HOSTED pure-arithmetic datetime.* (Unix-seconds i64), byte-matching v0: add_*,
         // diff_seconds, from/to_unix identity, the floor-mod component extractors (3661s = 1h1m1s),
