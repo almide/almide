@@ -651,17 +651,43 @@ impl FuncCompiler<'_> {
                     }
                     ("error", "context") => {
                         // error.context(result, msg) → Result[T, String]
-                        // If err: wrap error message with context. If ok: pass through.
+                        // err branch: wrap the message with context. ok branch: COPY
+                        // the payload into a FRESH Result. Returning args[0]'s pointer
+                        // directly would alias a box the caller still owns and Decs;
+                        // Perceus then drops BOTH the arg temp and this result (the
+                        // same pointer on the ok path) — a double-free that a later
+                        // `??`/`match` reads as garbage (#591). A fresh copy makes the
+                        // two Decs free two distinct allocations, exactly as the err
+                        // branch already does. A heap ok payload is rc_inc'd so it
+                        // survives the arg temp's recursive free.
+                        let ok_ty = args[0].ty.result_ok_ty().unwrap_or(Ty::Int);
+                        let ok_has_val = values::ty_to_valtype(&ok_ty).is_some();
+                        let ok_is_heap = crate::pass_perceus::is_heap_type(&ok_ty);
+                        let ok_alloc = 4 + values::byte_size(&ok_ty) as i32;
                         let s = self.scratch.alloc_i32();
                         let s1 = self.scratch.alloc_i32();
                         let s2 = self.scratch.alloc_i32();
                         let s3 = self.scratch.alloc_i32();
+                        let nw = self.scratch.alloc_i32();
                         self.emit_expr(&args[0]);
                         wasm!(self.func, {
                             local_set(Local(s));
                             local_get(Local(s)); i32_load(0); i32_eqz; // tag == 0 (ok)?
                             if_i32;
-                              local_get(Local(s)); // pass ok through
+                              // ok: fresh [tag=0][payload] copy — never alias args[0]
+                              i32_const(Imm32(ok_alloc)); call(self.emitter.rt.alloc); local_set(Local(nw));
+                              local_get(Local(nw)); i32_const(Imm32(0)); i32_store(0);
+                        });
+                        if ok_has_val {
+                            wasm!(self.func, { local_get(Local(nw)); local_get(Local(s)); });
+                            self.emit_load_at(&ok_ty, 4);
+                            if ok_is_heap {
+                                wasm!(self.func, { call(self.emitter.rt.rc_inc); });
+                            }
+                            self.emit_store_at(&ok_ty, 4);
+                        }
+                        wasm!(self.func, {
+                              local_get(Local(nw)); // return the fresh ok copy
                             else_;
                               // Build new err with context: "msg: original_err"
                               local_get(Local(s)); i32_load(4); local_set(Local(s1)); // original err string
@@ -686,6 +712,7 @@ impl FuncCompiler<'_> {
                               local_get(Local(s));
                             end;
                         });
+                        self.scratch.free_i32(nw);
                         self.scratch.free_i32(s3);
                         self.scratch.free_i32(s2);
                         self.scratch.free_i32(s1);
