@@ -185,6 +185,8 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
                 ("float_to_uint8_checked", "float.to_uint8_checked"),
                 ("float_to_uint16_checked", "float.to_uint16_checked"),
                 ("float_to_uint32_checked", "float.to_uint32_checked"),
+                ("float_to_int64_checked", "float.to_int64_checked"),
+                ("float_to_uint64_checked", "float.to_uint64_checked"),
             ],
         ),
         (

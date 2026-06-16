@@ -749,6 +749,8 @@ pub(crate) fn is_self_host_option_module_fn(module: &str, func: &str) -> bool {
                 | "to_uint8_checked"
                 | "to_uint16_checked"
                 | "to_uint32_checked"
+                | "to_int64_checked"
+                | "to_uint64_checked"
         ),
         _ => false,
     }

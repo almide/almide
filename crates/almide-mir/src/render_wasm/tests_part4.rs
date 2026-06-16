@@ -2011,6 +2011,41 @@
     }
 
     #[test]
+    fn prim_f2i_saturates_like_v0_as_cast() {
+        // prim.f2i (float.to_int / to_int64) is SATURATING (i64.trunc_sat_f64_s), matching Rust's
+        // `n as i64` (v0): an out-of-range float clamps to i64::MAX instead of TRAPPING. Regression
+        // for the trunc→trunc_sat render fix that the 64-bit _checked conversions require.
+        let src = "fn main() -> Unit = {\n  \
+            println(int.to_string(float.to_int64(1e19)))\n  \
+            println(int.to_string(float.to_int64(123.9))) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("prim_f2i_saturates_like_v0_as_cast", &render_wasm_program(&prog)) {
+            // 1e19 > i64::MAX → 9223372036854775807 (saturated, NOT a trap); 123.9 → 123 (truncate).
+            assert_eq!(out, "9223372036854775807\n123");
+        }
+    }
+
+    #[test]
+    fn self_hosted_float_checked_64bit() {
+        // The 64-bit variants: 2^63 / 2^64 bound built at runtime. to_uint64 of a value in
+        // [2^63, 2^64) is rejected by the ROUND-TRIP (i64-repr wraps negative ≠ n), not the range —
+        // matching v0. 1e19 (> 2^63, < 2^64) exercises both the int64 range reject and that uint64
+        // round-trip reject. The last line prints the actual Some value (1000000).
+        let src = "fn main() -> Unit = {\n  \
+            match float.to_int64_checked(2000000000.0) { Some(v) => println(\"some\"), None => println(\"none\"), }\n  \
+            match float.to_int64_checked(2000000000.5) { Some(v) => println(\"some\"), None => println(\"none\"), }\n  \
+            match float.to_int64_checked(1e19) { Some(v) => println(\"some\"), None => println(\"none\"), }\n  \
+            match float.to_uint64_checked(-1.0) { Some(v) => println(\"some\"), None => println(\"none\"), }\n  \
+            match float.to_uint64_checked(1e19) { Some(v) => println(\"some\"), None => println(\"none\"), }\n  \
+            match float.to_uint64_checked(1000000.0) { Some(v) => { let iv = int.from_uint64(v); println(int.to_string(iv)) }, None => println(\"none\"), } }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "float.to_int64_checked"));
+        if let Some(out) = build_and_run("self_hosted_float_checked_64bit", &render_wasm_program(&prog)) {
+            assert_eq!(out, "some\nnone\nnone\nnone\nnone\n1000000");
+        }
+    }
+
+    #[test]
     fn self_hosted_float_checked_loop_reclaims() {
         // SOUNDNESS: a bounded loop building + dropping the scalar Option from a float _checked
         // conversion — no leak / double-free. 4000 iters; `last` counts the in-range integer hits.

@@ -772,8 +772,12 @@ fn render_op(
                     // f64 compare yields an i32 0/1 — extend to the i64-uniform Bool.
                     format!("(i64.extend_i32_u ({instr} {} {}))", f(0), f(1))
                 }
+                // SATURATING float→int (i64.trunc_SAT_f64_s), matching Rust's `as` cast (v0): NaN → 0,
+                // > i64::MAX → i64::MAX, < i64::MIN → i64::MIN — NO trap. The plain `i64.trunc_f64_s`
+                // traps on NaN/inf/out-of-range, diverging from v0 (and float_to_uint64.almd already
+                // assumes the saturating form for its f >= 2^64 → u64::MAX path).
                 PrimKind::FloatToInt => {
-                    format!("(i64.trunc_f64_s (f64.reinterpret_i64 (local.get {})))", local(args[0]))
+                    format!("(i64.trunc_sat_f64_s (f64.reinterpret_i64 (local.get {})))", local(args[0]))
                 }
                 PrimKind::IntToFloat => {
                     format!("(i64.reinterpret_f64 (f64.convert_i64_s (local.get {})))", local(args[0]))
