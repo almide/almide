@@ -2164,6 +2164,32 @@
     }
 
     #[test]
+    fn self_hosted_error_chain() {
+        // SELF-HOSTED error.chain → "{outer}\\ncaused by: {cause}" (v0's format!). A 3-way byte
+        // concat over the prim floor. Byte-matches v0.
+        let src = "fn main() -> Unit = { println(error.chain(\"disk full\", \"out of space\")) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "error.chain"));
+        if let Some(out) = build_and_run("self_hosted_error_chain", &render_wasm_program(&prog)) {
+            assert_eq!(out, "disk full\ncaused by: out of space");
+        }
+    }
+
+    #[test]
+    fn self_hosted_error_chain_loop_reclaims() {
+        // SOUNDNESS: a bounded loop building error.chain (a fresh String each iter) — no leak. 5000
+        // iters; `last` = the result byte length (codepoints).
+        let src = "fn main() -> Unit = {\n  var i = 0\n  var last = 0\n  \
+            while i < 5000 {\n    let s = error.chain(\"ab\", \"cd\")\n    last = string.len(s)\n    i = i + 1\n  }\n  \
+            println(int.to_string(last)) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("self_hosted_error_chain_loop_reclaims", &render_wasm_program(&prog)) {
+            // "ab" + "\ncaused by: " (12) + "cd" = 2 + 12 + 2 = 16.
+            assert_eq!(out, "16");
+        }
+    }
+
+    #[test]
     fn self_hosted_bytes_skip() {
         // SELF-HOSTED bytes.skip → advance pos by n, clamped to the byte length. Pure scalar over the
         // Bytes header (len@4). Byte-matches v0's `let np = pos + n; if np > len then len else np`.
