@@ -1040,6 +1040,7 @@ impl FuncCompiler<'_> {
     pub(super) fn expr_writes_outer_heap(&self, expr: &IrExpr) -> bool {
         struct HeapWriteScanner<'a> {
             var_table: &'a almide_ir::VarTable,
+            mut_sigs: &'a std::collections::HashMap<String, Vec<bool>>,
             found: bool,
         }
         impl IrVisitor for HeapWriteScanner<'_> {
@@ -1083,6 +1084,13 @@ impl FuncCompiler<'_> {
                 // `RuntimeCall` with a mangled `almide_rt_<module>_<func>` symbol
                 // (it can also still be a `CallTarget::Module` on some paths —
                 // handle both).
+                // Also escape-unsafe: a USER function with a `mut` parameter fed
+                // an outer-scope var (`op.add(t, …)` where `t` is the loop's
+                // tape). The callee may realloc the field it mutates; the new
+                // buffer escapes via `t`. mut_sigs gives each callee's per-param
+                // `mut` flags (keyed `name` / `module::func`). This is what makes
+                // slabhra's build loop — all `op.*`/`tp.*` Module calls on a mut
+                // tape — opt out of the arena.
                 let mutates_outer_place = match &expr.kind {
                     IrExprKind::RuntimeCall { symbol, args } => {
                         symbol.strip_prefix("almide_rt_")
@@ -1094,12 +1102,21 @@ impl FuncCompiler<'_> {
                             })
                             .unwrap_or(false)
                     }
-                    IrExprKind::Call {
-                        target: almide_ir::CallTarget::Module { module, func, .. }, args, ..
-                    } => {
-                        !args.is_empty()
-                            && collection_mutator_may_realloc(module.as_str(), func.as_str())
-                            && expr_root_is_var(&args[0])
+                    IrExprKind::Call { target, args, .. } => {
+                        // stdlib collection mutator surfacing as a Module call
+                        let stdlib_mut = matches!(target,
+                            almide_ir::CallTarget::Module { module, func, .. }
+                            if !args.is_empty()
+                                && collection_mutator_may_realloc(module.as_str(), func.as_str())
+                                && expr_root_is_var(&args[0]));
+                        // user fn / module fn whose `mut` param slot gets an
+                        // outer-scope var
+                        let user_mut = call_target_key(target)
+                            .and_then(|k| self.mut_sigs.get(&k))
+                            .map(|sig| args.iter().enumerate().any(|(i, a)|
+                                sig.get(i).copied().unwrap_or(false) && expr_root_is_var(a)))
+                            .unwrap_or(false);
+                        stdlib_mut || user_mut
                     }
                     _ => false,
                 };
@@ -1110,7 +1127,11 @@ impl FuncCompiler<'_> {
                 walk_expr(self, expr);
             }
         }
-        let mut scanner = HeapWriteScanner { var_table: self.var_table, found: false };
+        let mut scanner = HeapWriteScanner {
+            var_table: self.var_table,
+            mut_sigs: &self.emitter.mut_param_sigs,
+            found: false,
+        };
         scanner.visit_expr(expr);
         scanner.found
     }
@@ -1185,6 +1206,17 @@ fn collection_mutator_may_realloc(module: &str, func: &str) -> bool {
                 | "truncate" | "resize" | "fill" | "copy_within"
                 | "read_length_prefixed_strings_le"),
         _ => false,
+    }
+}
+
+/// Key a call target into the `mut_param_sigs` map: top-level fn → `name`,
+/// module fn → `module::func`. None for Method/Computed (no static sig).
+fn call_target_key(target: &almide_ir::CallTarget) -> Option<String> {
+    match target {
+        almide_ir::CallTarget::Named { name } => Some(name.to_string()),
+        almide_ir::CallTarget::Module { module, func, .. } =>
+            Some(format!("{}::{}", module, func)),
+        _ => None,
     }
 }
 

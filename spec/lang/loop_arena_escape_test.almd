@@ -65,3 +65,33 @@ test "matmul kernel grows its output across nested loops (#705)" {
   assert(z[1] > 0.59 and z[1] < 0.61)
   assert(z[2] > 0.0 - 0.76 and z[2] < 0.0 - 0.74)
 }
+
+// The same escape happens TRANSITIVELY: a loop that grows an outer record via a
+// USER function with a `mut` param (not a direct `list.push`). This is slabhra's
+// build loop — `op.add(t, …)` etc. on a `mut t: Tape`. The iter-scope check
+// consults each callee's `mut`-param signature, so the loop opts out of the
+// arena and the record's grown fields survive on wasm.
+type Bag = { xs: List[Int] }
+
+fn grow(mut b: Bag, v: Int) -> Int = {
+  list.push(b.xs, v)
+  list.len(b.xs) - 1
+}
+
+fn fill(n: Int) -> Bag = {
+  var b: Bag = { xs: [] }
+  var i = 0
+  while i < n {
+    let _g = grow(b, i * i)   // mutate an outer record through a user `mut` fn
+    i = i + 1
+  }
+  b
+}
+
+test "loop grows an outer record via a user mut-param fn (#705)" {
+  let b = fill(5)
+  assert(list.len(b.xs) == 5)
+  assert(b.xs[0] == 0)
+  assert(b.xs[2] == 4)
+  assert(b.xs[4] == 16)
+}
