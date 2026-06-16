@@ -1988,6 +1988,23 @@
     }
 
     #[test]
+    fn self_hosted_bytes_skip() {
+        // SELF-HOSTED bytes.skip → advance pos by n, clamped to the byte length. Pure scalar over the
+        // Bytes header (len@4). Byte-matches v0's `let np = pos + n; if np > len then len else np`.
+        let src = "fn main() -> Unit = {\n  \
+            let b = bytes.from_string(\"hello\")\n  \
+            println(int.to_string(bytes.skip(b, 0, 3)))\n  \
+            println(int.to_string(bytes.skip(b, 2, 2)))\n  \
+            println(int.to_string(bytes.skip(b, 3, 10)))\n  \
+            println(int.to_string(bytes.skip(b, 0, 5))) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "bytes.skip"));
+        if let Some(out) = build_and_run("self_hosted_bytes_skip", &render_wasm_program(&prog)) {
+            assert_eq!(out, "3\n4\n5\n5");
+        }
+    }
+
+    #[test]
     fn self_hosted_result_to_list() {
         // SELF-HOSTED result.to_list → a 0-or-1-element List[Int] built over the prim floor (Ok→[v]
         // len 1, Err→[] len 0). Byte-matches v0's `match r { Ok(v) => [v], Err(_) => [] }`.

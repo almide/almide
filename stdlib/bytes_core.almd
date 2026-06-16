@@ -762,3 +762,11 @@ fn bytes_is_valid_utf8(b: Bytes) -> Bool = {
   let n = prim.load32(prim.handle(b) + 4)
   __utf8_valid(dh, n, 0)
 }
+
+// bytes.skip(b, pos, n) -> advance `pos` by `n`, CLAMPED to the byte length (a cursor move that
+// never runs past the end). v0: `let np = pos + n; if np > len then len else np`. Pure scalar.
+fn bytes_skip(b: Bytes, pos: Int, n: Int) -> Int = {
+  let len = prim.load32(prim.handle(b) + 4)
+  let np = pos + n
+  if np > len then len else np
+}
