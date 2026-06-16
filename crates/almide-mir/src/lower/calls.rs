@@ -759,8 +759,26 @@ impl LowerCtx {
             {
                 self.lower_prim_call(func.as_str(), args).ok().flatten()
             }
+            // A scalar user/stdlib CALL as an OPERAND (`f(x) - 1`, `g(a) + h(b)`, a nested
+            // `f(g(x))`): delegate to the same `try_lower_scalar_call` the direct-bind path uses.
+            // GATED to a SCALAR result AND SCALAR args so NO heap is materialized — preserving
+            // `lower_scalar_value`'s contract (it pushes only rollback-safe value ops, never an
+            // ownership event, so a caller may freely truncate). A heap arg/result would push
+            // `Alloc`/`Drop` and is left to defer (the unguarded admission broke corpus ownership).
+            IrExprKind::Call { .. }
+                if !is_heap_ty(&expr.ty)
+                    && self.scalar_call_args_only(&expr.kind) =>
+            {
+                self.try_lower_scalar_call(expr, &expr.ty)
+            }
             _ => None,
         }
+    }
+
+    /// True iff `kind` is a `Call` whose every argument is a SCALAR (non-heap) type — the gate
+    /// that keeps a call admissible as a `lower_scalar_value` operand without materializing heap.
+    fn scalar_call_args_only(&self, kind: &IrExprKind) -> bool {
+        matches!(kind, IrExprKind::Call { args, .. } if args.iter().all(|a| !is_heap_ty(&a.ty)))
     }
 
     /// Lower a `prim.*` PRIMITIVE-FLOOR call to an [`Op::Prim`] — the v1 self-host

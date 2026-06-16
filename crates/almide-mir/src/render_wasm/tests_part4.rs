@@ -3637,3 +3637,23 @@
             );
         }
     }
+
+    #[test]
+    fn scalar_call_in_operand_position_lowers() {
+        let src = "fn helper(v: Int) -> Int = {\n\
+              let m = prim.band(v, 4294967295)\n\
+              if m >= 2147483648 then m - 4294967296 else m\n\
+            }\n\
+            fn floortest(x: Float) -> Int = {\n\
+              let ui = prim.fbits(x)\n\
+              let e = helper(prim.band(prim.bshr_u(ui, 52), 2047)) - 1023\n\
+              e\n\
+            }\n\
+            fn main() -> Unit = { println(int.to_string(floortest(8.0))) }\n";
+        let prog = lower_source(src);
+        let wat = render_wasm_program(&prog);
+        // 8.0 bits = 0x4020000000000000; high>>52 & 2047 = exponent field = 1026; -1023 = 3
+        if let Some(out) = build_and_run("scalar_call_in_operand_position_lowers", &wat) {
+            assert_eq!(out, "3");
+        }
+    }
