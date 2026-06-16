@@ -770,3 +770,52 @@ fn bytes_skip(b: Bytes, pos: Int, n: Int) -> Int = {
   let np = pos + n
   if np > len then len else np
 }
+
+// bytes.read_f32_le(b, pos) -> the little-endian IEEE-754 f32 (widened to Float) at pos (0.0 if out
+// of range). Assemble the 4 LE bytes into the u32 bit pattern, then prim.bits_to_f32 = f32::from_bits
+// as f64 (NOT ffrombits, which is the f64 identity). Out-of-range / negative pos -> +0.0.
+fn bytes_read_f32_le(b: Bytes, pos: Int) -> Float = {
+  let n = prim.load32(prim.handle(b) + 4)
+  let base = prim.handle(b) + 12 + pos
+  if pos < 0 then prim.bits_to_f32(0)
+  else {
+    if pos + 4 > n then prim.bits_to_f32(0)
+    else {
+      let b0 = prim.load8(base)
+      let b1 = prim.load8(base + 1)
+      let b2 = prim.load8(base + 2)
+      let b3 = prim.load8(base + 3)
+      let s1 = prim.bshl(b1, 8)
+      let s2 = prim.bshl(b2, 16)
+      let s3 = prim.bshl(b3, 24)
+      let p01 = prim.bor(b0, s1)
+      let p012 = prim.bor(p01, s2)
+      let bits = prim.bor(p012, s3)
+      prim.bits_to_f32(bits)
+    }
+  }
+}
+
+// bytes.read_f32_be(b, pos) -> the big-endian IEEE-754 f32 (widened to Float) at pos (0.0 if out of
+// range).
+fn bytes_read_f32_be(b: Bytes, pos: Int) -> Float = {
+  let n = prim.load32(prim.handle(b) + 4)
+  let base = prim.handle(b) + 12 + pos
+  if pos < 0 then prim.bits_to_f32(0)
+  else {
+    if pos + 4 > n then prim.bits_to_f32(0)
+    else {
+      let b0 = prim.load8(base)
+      let b1 = prim.load8(base + 1)
+      let b2 = prim.load8(base + 2)
+      let b3 = prim.load8(base + 3)
+      let s0 = prim.bshl(b0, 24)
+      let s1 = prim.bshl(b1, 16)
+      let s2 = prim.bshl(b2, 8)
+      let p01 = prim.bor(s0, s1)
+      let p012 = prim.bor(p01, s2)
+      let bits = prim.bor(p012, b3)
+      prim.bits_to_f32(bits)
+    }
+  }
+}

@@ -2128,6 +2128,27 @@
     }
 
     #[test]
+    fn self_hosted_audit_clean_batch() {
+        // int.to_float32_checked (Option round-trip), string.clear (borrow+store len=0), and
+        // bytes.read_f32_be/le (4-byte f32 read → Float). All audit-confirmed clean.
+        let src = "fn main() -> Unit = {\n  \
+            match int.to_float32_checked(100) { Some(v) => println(\"some\"), None => println(\"none\"), }\n  \
+            match int.to_float32_checked(16777217) { Some(v) => println(\"some\"), None => println(\"none\"), }\n  \
+            let s = string.repeat(\"ab\", 3)\n  string.clear(s)\n  let sl = string.len(s)\n  println(int.to_string(sl))\n  \
+            let b = bytes.new(8)\n  bytes.set_u32_be(b, 0, 1069547520)\n  \
+            let f = bytes.read_f32_be(b, 0)\n  let eq = prim.feq(f, 1.5)\n  let ne = if eq then 1 else 0\n  println(int.to_string(ne))\n  \
+            bytes.set_u32_le(b, 0, 1069547520)\n  let g = bytes.read_f32_le(b, 0)\n  let eq2 = prim.feq(g, 1.5)\n  let ne2 = if eq2 then 1 else 0\n  println(int.to_string(ne2)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "int.to_float32_checked"));
+        assert!(prog.functions.iter().any(|f| f.name == "string.clear"));
+        assert!(prog.functions.iter().any(|f| f.name == "bytes.read_f32_be"));
+        if let Some(out) = build_and_run("self_hosted_audit_clean_batch", &render_wasm_program(&prog)) {
+            // 100 round-trips f32 (some); 2^24+1 loses precision (none); clear -> len 0; 1069547520=0x3FC00000=f32 1.5.
+            assert_eq!(out, "some\nnone\n0\n1\n1");
+        }
+    }
+
+    #[test]
     fn self_hosted_datetime_from_parts() {
         // SELF-HOSTED datetime.from_parts (inverse civil), byte-matching v0: round-trips epoch 0 and
         // 1e9 from their (y,m,d,h,min,s) parts.
