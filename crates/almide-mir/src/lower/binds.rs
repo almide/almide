@@ -78,6 +78,58 @@ impl LowerCtx {
         Some(dst)
     }
 
+    /// Lower a `List[String]` LITERAL with FRESH-OWNED elements (`["a"+"b", "c"]`) to an
+    /// alloc_list_str + per-element move-in. Each element (a LitStr or a ConcatStr) is a fresh
+    /// owned String (cert `i`) MOVED into the list (store its handle + `Consume` = `m`); the list
+    /// is a nested-ownership `DynListStr` freed recursively (`DropListStr`) at scope end (`i`+`d`).
+    /// GATED to LitStr/ConcatStr elements (fresh owned — a Var element would need a `Dup`, deferred).
+    /// Closes the heap-container-element concat position (the −214 caps recovery). Gate-first so no
+    /// partial emission (the only `?` is try_lower_concat_str, which never fails for a ConcatStr).
+    fn try_lower_str_list_literal(&mut self, value: &IrExpr) -> Option<ValueId> {
+        use almide_ir::BinOp;
+        use almide_lang::types::constructor::TypeConstructorId;
+        let IrExprKind::List { elements } = &value.kind else {
+            return None;
+        };
+        let str_list = matches!(&value.ty,
+            Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && matches!(a[0], Ty::String));
+        if !str_list || elements.is_empty() {
+            return None;
+        }
+        if !elements.iter().all(|e| {
+            matches!(&e.kind, IrExprKind::LitStr { .. } | IrExprKind::BinOp { op: BinOp::ConcatStr, .. })
+        }) {
+            return None;
+        }
+        let ptr = crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT };
+        let n = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: n, value: elements.len() as i64 });
+        let list = self.fresh_value();
+        self.ops.push(Op::Alloc { dst: list, repr: ptr, init: Init::DynListStr { len: n } });
+        self.heap_elem_lists.insert(list);
+        let h = self.fresh_value();
+        self.ops.push(Op::Prim { kind: crate::PrimKind::Handle, dst: Some(h), args: vec![list] });
+        for (i, elem) in elements.iter().enumerate() {
+            let ev = match &elem.kind {
+                IrExprKind::LitStr { value: s } => {
+                    let obj = self.fresh_value();
+                    self.ops.push(Op::Alloc { dst: obj, repr: ptr, init: Init::Str(s.clone()) });
+                    obj
+                }
+                _ => self.try_lower_concat_str(elem)?,
+            };
+            let off = self.fresh_value();
+            self.ops.push(Op::ConstInt { dst: off, value: 12 + (i as i64) * 8 });
+            let slot = self.fresh_value();
+            self.ops.push(Op::IntBinOp { dst: slot, op: crate::IntOp::Add, a: h, b: off });
+            let eh = self.fresh_value();
+            self.ops.push(Op::Prim { kind: crate::PrimKind::Handle, dst: Some(eh), args: vec![ev] });
+            self.ops.push(Op::Prim { kind: crate::PrimKind::Store { width: 8 }, dst: None, args: vec![slot, eh] });
+            self.ops.push(Op::Consume { v: ev });
+        }
+        Some(list)
+    }
+
     pub(crate) fn lower_bind(&mut self, var: VarId, ty: &Ty, value: &IrExpr) -> Result<(), LowerError> {
         if !is_heap_ty(ty) {
             // Scalar binding: a Copy value, no ownership accounting. A RESOLVABLE
@@ -232,6 +284,13 @@ impl LowerCtx {
                 // `let s = a + b` — a string concat EXECUTES to a fresh owned String (via the
                 // self-host __str_concat), held by the binding and dropped at scope end.
                 if let Some(dst) = self.try_lower_concat_str(value) {
+                    self.value_of.insert(var, dst);
+                    self.live_heap_handles.push(dst);
+                    return Ok(());
+                }
+                // `let xs = ["a" + "b", "c"]` — a List[String] literal with fresh-owned elements
+                // (the heap-container-element concat position; the −214 caps recovery).
+                if let Some(dst) = self.try_lower_str_list_literal(value) {
                     self.value_of.insert(var, dst);
                     self.live_heap_handles.push(dst);
                     return Ok(());

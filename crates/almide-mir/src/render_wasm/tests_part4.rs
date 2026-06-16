@@ -3908,3 +3908,12 @@
             assert_eq!(out.lines().count(), 3001);
         }
     }
+
+    #[test]
+    fn str_list_literal_with_concat() {
+        let src = "fn main() -> Unit = {\n  let xs = [\"a\" + \"b\", \"c\", \"d\" + \"e\"]\n  println(list.join(xs, \",\")) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("str_list_literal_with_concat", &render_wasm_program(&prog)) {
+            assert_eq!(out, "ab,c,de");
+        }
+    }
