@@ -2011,6 +2011,26 @@
     }
 
     #[test]
+    fn self_hosted_float32_demote_promote() {
+        // SELF-HOSTED float.to_float32 (f32.demote_f64) / float.from_float32 (f64.promote_f32) /
+        // int.bits_to_f32 over the new f32 prim floor. Verified by the IEEE round-trip property
+        // (which holds bit-identically in v0, since both use the same demote/promote): an
+        // f32-representable value round-trips exactly; a non-representable one loses precision; the
+        // demote is idempotent on an already-f32 value; bits_to_f32(0x3F800000) widens to 1.0.
+        let src = "fn main() -> Unit = {\n  \
+            let t1 = float.to_float32(3.5)\n  let a = float.from_float32(t1)\n  let ra = prim.feq(a, 3.5)\n  let na = if ra then 1 else 0\n  println(int.to_string(na))\n  \
+            let t2 = float.to_float32(0.1)\n  let b = float.from_float32(t2)\n  let rb = prim.feq(b, 0.1)\n  let nb = if rb then 1 else 0\n  println(int.to_string(nb))\n  \
+            let t3 = float.to_float32(b)\n  let c = float.from_float32(t3)\n  let rc = prim.feq(c, b)\n  let nc = if rc then 1 else 0\n  println(int.to_string(nc))\n  \
+            let d = int.bits_to_f32(1065353216)\n  let rd = prim.feq(d, 1.0)\n  let nd = if rd then 1 else 0\n  println(int.to_string(nd)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "float.to_float32"));
+        if let Some(out) = build_and_run("self_hosted_float32_demote_promote", &render_wasm_program(&prog)) {
+            // exact f32 / inexact / idempotent / bits_to_f32(1.0-pattern) = 1.0.
+            assert_eq!(out, "1\n0\n1\n1");
+        }
+    }
+
+    #[test]
     fn prim_f2i_saturates_like_v0_as_cast() {
         // prim.f2i (float.to_int / to_int64) is SATURATING (i64.trunc_sat_f64_s), matching Rust's
         // `n as i64` (v0): an out-of-range float clamps to i64::MAX instead of TRAPPING. Regression

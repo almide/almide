@@ -57,3 +57,8 @@ fn float_to_uint64(f: Float) -> UInt64 = {
     else prim.f2i(f)
   }
 }
+
+// float.to_float32(n) = `n as f32` — narrow f64 → f32 (round to nearest). The Float32 IS the f32
+// bit pattern in the low half of the i64 slot. float.from_float32(f) widens it back exactly.
+fn float_to_float32(n: Float) -> Float32 = prim.f2f32(n)
+fn float_from_float32(f: Float32) -> Float = prim.f32_2f(f)

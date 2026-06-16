@@ -784,6 +784,17 @@ fn render_op(
                 }
                 // to_bits / bits_to_float: the value IS the bits — identity pass-through.
                 PrimKind::FloatBits => format!("(local.get {})", local(args[0])),
+                // f64 → f32 (demote, round-to-nearest), held as the low-32 f32 bit pattern.
+                PrimKind::F32Demote => format!(
+                    "(i64.extend_i32_u (i32.reinterpret_f32 (f32.demote_f64 (f64.reinterpret_i64 (local.get {})))))",
+                    local(args[0])
+                ),
+                // low-32 f32 pattern → f64 (promote, exact). Serves both float.from_float32 and
+                // int.bits_to_f32 (`f32::from_bits(bits as u32) as f64`).
+                PrimKind::F32Promote => format!(
+                    "(i64.reinterpret_f64 (f64.promote_f32 (f32.reinterpret_i32 (i32.wrap_i64 (local.get {})))))",
+                    local(args[0])
+                ),
             };
             match dst {
                 Some(d) => format!("    (local.set {} {body})\n", local(*d)),

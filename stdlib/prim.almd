@@ -196,3 +196,11 @@ fn i2f(x: Int) -> Float = _
 fn fbits(x: Float) -> Int = _
 @intrinsic("almide_rt_prim_ffrombits")
 fn ffrombits(b: Int) -> Float = _
+// f32 narrow/widen: a Float32 value is its 32-bit pattern in the low half of the i64 slot.
+@intrinsic("almide_rt_prim_f2f32")
+fn f2f32(x: Float) -> Float32 = _
+@intrinsic("almide_rt_prim_f32_2f")
+fn f32_2f(x: Float32) -> Float = _
+// `bits_to_f32(bits)` = `f32::from_bits(bits as u32) as f64` — the same widen on a raw 32-bit pattern.
+@intrinsic("almide_rt_prim_bits_to_f32")
+fn bits_to_f32(bits: Int) -> Float = _

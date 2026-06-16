@@ -335,13 +335,20 @@ pub enum PrimKind {
     FloatUn(FUnOp),
     FloatBin(FBinOp),
     FloatCmp(FCmpOp),
-    /// `i64.trunc_f64_s(reinterpret(x))` — Float → Int (truncate toward zero, v0's `as i64`).
+    /// `i64.trunc_sat_f64_s(reinterpret(x))` — Float → Int (saturating truncate, v0's `as i64`).
     FloatToInt,
     /// `reinterpret(f64.convert_i64_s(x))` — Int → Float.
     IntToFloat,
     /// IDENTITY — the raw f64↔i64 BIT reinterpret (`float.to_bits` / `int.bits_to_float`):
     /// the i64-uniform value ALREADY holds the f64 bits, so this is a no-op pass-through.
     FloatBits,
+    /// `f32.demote_f64` — Float (f64) → Float32. The narrower f32 value is held as its 32-bit
+    /// pattern in the LOW half of the i64 slot (`i32.reinterpret_f32` then zero-extend). Rounds to
+    /// nearest, matching Rust's `n as f32`.
+    F32Demote,
+    /// `f64.promote_f32` — Float32 → Float (f64). Reads the low-32 f32 pattern (`i32.wrap_i64`
+    /// then `f32.reinterpret_i32`) and widens exactly.
+    F32Promote,
 }
 
 /// A unary f64 op (the value is the f64 bits in an i64; render reinterprets around it).
