@@ -205,20 +205,38 @@ impl LowerCtx {
         }
         impl IrVisitor for Collector {
             fn visit_expr(&mut self, e: &IrExpr) {
-                if let IrExprKind::Call { target, args, .. } = &e.kind {
-                    if !is_higher_order(args) {
-                        match target {
-                            CallTarget::Named { name } => {
-                                self.names.push(name.as_str().to_string())
+                match &e.kind {
+                    IrExprKind::Call { target, args, .. } => {
+                        if !is_higher_order(args) {
+                            match target {
+                                CallTarget::Named { name } => {
+                                    self.names.push(name.as_str().to_string())
+                                }
+                                CallTarget::Module { module, func, .. }
+                                    if purity::is_pure(module.as_str(), func.as_str()) =>
+                                {
+                                    self.names
+                                        .push(format!("{}.{}", module.as_str(), func.as_str()))
+                                }
+                                _ => {}
                             }
-                            CallTarget::Module { module, func, .. }
-                                if purity::is_pure(module.as_str(), func.as_str()) =>
-                            {
-                                self.names.push(format!("{}.{}", module.as_str(), func.as_str()))
-                            }
-                            _ => {}
                         }
                     }
+                    // A string `+` OPERATOR (`BinOp::ConcatStr`) lowers, where reachable,
+                    // to a real `__str_concat` CallFn (`try_lower_concat_str`); in a
+                    // DEFERRED position — a heap-result match/if arm tail, an Opaque
+                    // call/branch — it is elided exactly like a call. Surface it as an
+                    // elided `__str_concat` marker so the caps gate's `mir_calls` matches
+                    // the `ir_calls` ConcatStr count (else the enclosing function falsely
+                    // taints caps-unverified — `ir_calls > mir_calls`). SOUND: `__str_concat`
+                    // is pure (empty capability witness — an `Op::CallFn` contributes zero
+                    // caps), and the marker carries NO value (`dst: None`, no leak). The
+                    // marker maps 1:1 to the counted ConcatStr node, so `mir_calls <=
+                    // ir_calls` is preserved.
+                    IrExprKind::BinOp { op: almide_ir::BinOp::ConcatStr, .. } => {
+                        self.names.push("__str_concat".to_string());
+                    }
+                    _ => {}
                 }
                 walk_expr(self, e);
             }

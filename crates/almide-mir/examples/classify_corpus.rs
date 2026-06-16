@@ -50,8 +50,18 @@ use std::path::{Path, PathBuf};
 /// CURRENT one-capability (Stdout-only) vocabulary — stderr/abort are real host
 /// effects the model does not yet name (a wider Capability set is a later brick),
 /// so the honest property is "no undeclared STDOUT effect", not "no host effect".
-const KNOWN_STDOUT_FREE_BUILTINS: &[&str] =
-    &["assert", "assert_eq", "assert_ne", "eprintln", "panic", "to_string"];
+///
+/// `__str_concat` is the self-host string-`+` runtime (`stdlib/string_concat.almd`):
+/// `alloc_str(len a + len b)` then a recursive `prim.store8` byte-copy of both
+/// halves — pure memory, no `fd_write`/Stdout. A deferred ConcatStr (a heap-result
+/// match/if arm, an Opaque tail) surfaces as an elided `__str_concat` `Op::CallFn`
+/// marker (`record_elided_calls`); admitting that name as Stdout-free lets the
+/// enclosing function stay caps-VERIFIED instead of falsely tainting on an
+/// "unanalyzable callee". SOUND: the concat reaches no Stdout, and its operands'
+/// own calls are captured separately by the same marker pass.
+const KNOWN_STDOUT_FREE_BUILTINS: &[&str] = &[
+    "assert", "assert_eq", "assert_ne", "eprintln", "panic", "to_string", "__str_concat",
+];
 
 /// Count call nodes (Call / RuntimeCall / TailCall) in an IR expression tree —
 /// the SOURCE's call count. Compared to the MIR's call-op count to detect a call
