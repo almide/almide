@@ -2181,6 +2181,23 @@
     }
 
     #[test]
+    fn self_hosted_math_log_bit_exact() {
+        // SELF-HOSTED math.log (faithful libm transcription) — BIT-EXACT vs v0 (reference bits
+        // captured by running v0: log(2)=4604418534313441775, log(10)=4612367379483415830,
+        // log(1)=0, log(100)=4616870979110786326).
+        let src = "fn main() -> Unit = {\n  \
+            let a = math.log(2.0)\n  println(int.to_string(float.to_bits(a)))\n  \
+            let b = math.log(10.0)\n  println(int.to_string(float.to_bits(b)))\n  \
+            let c = math.log(1.0)\n  println(int.to_string(float.to_bits(c)))\n  \
+            let d = math.log(100.0)\n  println(int.to_string(float.to_bits(d))) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "math.log"));
+        if let Some(out) = build_and_run("self_hosted_math_log_bit_exact", &render_wasm_program(&prog)) {
+            assert_eq!(out, "4604418534313441775\n4612367379483415830\n0\n4616870979110786326");
+        }
+    }
+
+    #[test]
     fn float_arithmetic_operators_lower() {
         // Float +/-/*// and comparison operators lower to the prim float floor (no explicit
         // prim.fmul needed). 3*2 + 3/2 = 7.5; 3<2 false; 3>2 true.
