@@ -72,3 +72,33 @@ fn datetime_weekday(ts: Int) -> String = {
   let idx = (((ts / 86400) % 7) + 7) % 7
   __wd_name(idx)
 }
+
+// from_parts: the INVERSE civil algorithm (epoch_from_civil) — (y,m,d) → days since epoch, then
+// *86400 + the time-of-day seconds. Same non-negative-i64 reasoning as the forward direction.
+fn __ep_yadj(y: Int, m: Int) -> Int = if m <= 2 then y - 1 else y
+
+fn __ep_era(y: Int, m: Int) -> Int = {
+  let ya = __ep_yadj(y, m)
+  let eadj = if ya >= 0 then ya else ya - 399
+  eadj / 400
+}
+
+fn __ep_doy(m: Int, d: Int) -> Int = {
+  let mp = if m > 2 then m - 3 else m + 9
+  (153 * mp + 2) / 5 + d - 1
+}
+
+fn __ep_doe(y: Int, m: Int, d: Int) -> Int = {
+  let ya = __ep_yadj(y, m)
+  let era = __ep_era(y, m)
+  let yoe = ya - era * 400
+  let doy = __ep_doy(m, d)
+  yoe * 365 + yoe / 4 - yoe / 100 + doy
+}
+
+fn datetime_from_parts(y: Int, m: Int, d: Int, h: Int, min: Int, s: Int) -> Int = {
+  let era = __ep_era(y, m)
+  let doe = __ep_doe(y, m, d)
+  let days = era * 146097 + doe - 719468
+  days * 86400 + h * 3600 + min * 60 + s
+}

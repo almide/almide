@@ -92,6 +92,7 @@ fn is_pure_fn_in_impure_module(module: &str, func: &str) -> bool {
                 | "month"
                 | "day"
                 | "weekday"
+                | "from_parts"
         ),
         _ => false,
     }

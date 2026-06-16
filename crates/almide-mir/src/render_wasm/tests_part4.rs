@@ -2099,6 +2099,20 @@
     }
 
     #[test]
+    fn self_hosted_datetime_from_parts() {
+        // SELF-HOSTED datetime.from_parts (inverse civil), byte-matching v0: round-trips epoch 0 and
+        // 1e9 from their (y,m,d,h,min,s) parts.
+        let src = "fn main() -> Unit = {\n  \
+            let a = datetime.from_parts(1970, 1, 1, 0, 0, 0)\n  println(int.to_string(a))\n  \
+            let b = datetime.from_parts(2001, 9, 9, 1, 46, 40)\n  println(int.to_string(b)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "datetime.from_parts"));
+        if let Some(out) = build_and_run("self_hosted_datetime_from_parts", &render_wasm_program(&prog)) {
+            assert_eq!(out, "0\n1000000000");
+        }
+    }
+
+    #[test]
     fn self_hosted_datetime_calendar() {
         // SELF-HOSTED datetime.year/month/day/weekday (Hinnant civil algorithm), byte-matching v0:
         // ts=0 → 1970-01-01 Thursday; ts=1e9 → 2001-09-09 Sunday.
