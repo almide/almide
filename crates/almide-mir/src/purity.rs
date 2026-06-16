@@ -49,7 +49,7 @@
 /// drift gate re-derives the effectful set from `stdlib/*.almd` and fails if any
 /// name here ever declares an `effect fn`.
 pub const PURE_MODULES: &[&str] = &[
-    "base64", "base64_encode", "bytes", "bytes_array", "bytes_core", "error", "float", "float32", "float_bits", "float_convert", "float_core", "float_extra", "float_round", "hex", "hex_encode", "html", "int", "int16",
+    "base64", "base64_encode", "bytes", "bytes_array", "bytes_core", "error", "float", "float32", "float_bits", "float_convert", "float_core", "float_extra", "float_round", "float_saturating", "hex", "hex_encode", "html", "int", "int16",
     "int32", "int8", "int_bitcount", "int_bits", "int_checked", "int_hex", "int_rotate", "int_scalar", "int_sized", "int_to_float", "int_to_string", "int_wrap", "json", "list", "list_anyall", "list_chunk", "list_dedup", "list_filter", "list_filter_str", "list_filtermap", "list_find", "list_flatmap", "list_flatten", "list_fold", "list_foldf", "list_get", "list_get_or", "list_get_str", "list_intersperse", "list_is_empty",
     "list_len", "list_make", "list_map", "list_map_str", "list_modify", "list_reduce", "list_reverse", "list_reverse_str", "list_scan", "list_search", "list_sort", "list_sortby", "list_str", "list_sum", "list_take_drop", "list_takedrop_str", "list_unique", "list_uniqueby", "list_whilep", "list_zipwith", "map", "map_core", "map_str", "math", "math_float", "math_int", "matrix", "option", "option_map", "option_pred", "path", "regex", "result",
     "result_core", "result_map", "set", "set_core", "set_str", "string", "string_chars", "string_codepoint", "string_first_last", "string_from_bytes_self", "string_from_codepoint", "string_is_digit", "string_is_empty", "string_join",

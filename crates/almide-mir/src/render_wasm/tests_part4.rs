@@ -1932,6 +1932,25 @@
     }
 
     #[test]
+    fn self_hosted_float_saturating_conversions() {
+        // SELF-HOSTED float.to_{int,uint}N_saturating → the f64→iN cast (already saturating: out-of-
+        // range clamps to min/max, NaN → 0), forwarded to the registered float.to_intN. Result is a
+        // sized Int (scalar) → widen via int.from_intN to print. Byte-matches v0.
+        let src = "fn main() -> Unit = {\n  \
+            println(int.to_string(int.from_int8(float.to_int8_saturating(300.0))))\n  \
+            println(int.to_string(int.from_int8(float.to_int8_saturating(-300.0))))\n  \
+            println(int.to_string(int.from_uint8(float.to_uint8_saturating(300.0))))\n  \
+            println(int.to_string(int.from_uint8(float.to_uint8_saturating(-5.0))))\n  \
+            println(int.to_string(int.from_int16(float.to_int16_saturating(70000.0)))) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "float.to_int8_saturating"));
+        if let Some(out) = build_and_run("self_hosted_float_saturating_conversions", &render_wasm_program(&prog)) {
+            // 300→127, -300→-128, u8 300→255, u8 -5→0, i16 70000→32767.
+            assert_eq!(out, "127\n-128\n255\n0\n32767");
+        }
+    }
+
+    #[test]
     fn self_hosted_int_checked_conversions() {
         // SELF-HOSTED int.to_{int,uint}N_checked → Some(n) iff n fits the N-bit range, else None. The
         // discriminant (the only thing that can differ from v0 — the in-range value is Some(n) by
