@@ -115,3 +115,19 @@ fn result_filter(r: Result[Int, String], pred: (Int) -> Bool, err_val: String) -
   let x = prim.load64(h + 12)
   if len == 0 then __rfil_ok(x, pred, err_val) else __rfil_propagate(x)
 }
+
+// result.or_else(r, f) = Ok(v) kept, Err(e) → f(e) (the recovery closure, given a deep COPY of the
+// error). SCALAR Result[Int, String]; the closure RETURNS a Result, invoked via a heap-result
+// CallIndirect ONLY on the Err arm (the proven heap-result call-arm). `r` borrowed; f's fresh result
+// moved straight out.
+fn __ror_recover(emsg: Int, f: (String) -> Result[Int, String]) -> Result[Int, String] = {
+  let e = __rcopy_at(emsg)
+  let r = f(e)
+  r
+}
+fn result_or_else(r: Result[Int, String], f: (String) -> Result[Int, String]) -> Result[Int, String] = {
+  let h = prim.handle(r)
+  let len = prim.load32(h + 4)
+  let x = prim.load64(h + 12)
+  if len == 0 then Ok(x) else __ror_recover(x, f)
+}

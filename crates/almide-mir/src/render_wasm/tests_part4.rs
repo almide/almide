@@ -2095,6 +2095,39 @@
     }
 
     #[test]
+    fn self_hosted_result_or_else() {
+        // SELF-HOSTED result.or_else → Ok(v) kept, Err(e) → f(e) (recovery closure given a copy of the
+        // error). Closure runs only on the Err arm. v0-match (closure within the v1 subset).
+        let src = "fn main() -> Unit = {\n  \
+            let a: Result[Int, String] = Ok(5)\n  let ra = result.or_else(a, (e) => Ok(0))\n  \
+            match ra { Ok(v) => println(int.to_string(v)), Err(e) => println(e), }\n  \
+            let b: Result[Int, String] = Err(\"bad\")\n  let rb = result.or_else(b, (e) => Ok(99))\n  \
+            match rb { Ok(v) => println(int.to_string(v)), Err(e) => println(e), } }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "result.or_else"));
+        if let Some(out) = build_and_run("self_hosted_result_or_else", &render_wasm_program(&prog)) {
+            assert_eq!(out, "5\n99");
+        }
+    }
+
+    #[test]
+    fn self_hosted_result_or_else_loop_reclaims() {
+        // SOUNDNESS: a bounded loop or_else-ing an Err (the error is deep-copied each iter then the
+        // recovery closure returns Ok) — no leak/double-free. 4000 iters.
+        let src = "fn main() -> Unit = {\n  \
+            var i = 0\n  var last = 0\n  \
+            while i < 4000 {\n    \
+              let b: Result[Int, String] = Err(\"bad\")\n    let rb = result.or_else(b, (e) => Ok(7))\n    \
+              match rb { Ok(v) => { last = v }, Err(e) => { last = 0 }, }\n    \
+              i = i + 1\n  }\n  \
+            println(int.to_string(last)) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("self_hosted_result_or_else_loop_reclaims", &render_wasm_program(&prog)) {
+            assert_eq!(out, "7");
+        }
+    }
+
+    #[test]
     fn self_hosted_bytes_skip() {
         // SELF-HOSTED bytes.skip → advance pos by n, clamped to the byte length. Pure scalar over the
         // Bytes header (len@4). Byte-matches v0's `let np = pos + n; if np > len then len else np`.
