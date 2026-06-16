@@ -3734,3 +3734,17 @@
             assert_eq!(out, "95\n95\n66\n67\n68\n95\n95\n95");
         }
     }
+
+    #[test]
+    fn self_hosted_skip_length_prefixed_le_matches_v0() {
+        let src = "fn main() -> Unit = {\n\
+            let b = bytes.from_string(\"ABCDEFGHIJKL\")\n\
+            println(int.to_string(bytes.skip_length_prefixed_le(b, 0, 0)))\n\
+            println(int.to_string(bytes.skip_length_prefixed_le(b, 0, 1)))\n\
+            println(int.to_string(bytes.skip_length_prefixed_le(b, 8, 1)))\n\
+            println(int.to_string(bytes.skip_length_prefixed_le(b, 10, 1))) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("self_hosted_skip_length_prefixed_le_matches_v0", &render_wasm_program(&prog)) {
+            assert_eq!(out, "0\n1145258565\n1280002645\n10");
+        }
+    }

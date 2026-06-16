@@ -1,0 +1,19 @@
+// Self-hosted bytes.skip_length_prefixed_le — advance past `count` length-prefixed entries.
+// Each entry = [u32 LE length][length bytes]. Returns the position after the last skipped
+// entry, or the current position if a length prefix would read past the end. prim.load32 is
+// a little-endian 4-byte read (= u32::from_le_bytes). (count<0 returns pos; the real use is
+// count>=0 — v0's usize-cast skip-until-EOF on negative count is a non-semantic overflow.)
+
+fn __skip_lp(h: Int, total: Int, p: Int, remaining: Int) -> Int =
+  if remaining <= 0 then p
+  else if p + 4 > total then p
+  else {
+    let l = prim.load32(h + 12 + p)
+    __skip_lp(h, total, p + 4 + l, remaining - 1)
+  }
+
+fn bytes_skip_length_prefixed_le(b: Bytes, pos: Int, count: Int) -> Int = {
+  let h = prim.handle(b)
+  let total = prim.load32(h + 4)
+  __skip_lp(h, total, pos, count)
+}
