@@ -2128,6 +2128,23 @@
     }
 
     #[test]
+    fn self_hosted_bytes_read_f32_array() {
+        // SELF-HOSTED bytes.read_f32_be/le_array -> List[Float]. 0x3FC00000=1.5, 0x40400000=3.0.
+        let src = "fn main() -> Unit = {\n  \
+            let b = bytes.new(8)\n  bytes.set_u32_be(b, 0, 1069547520)\n  bytes.set_u32_be(b, 4, 1077936128)\n  \
+            let arr = bytes.read_f32_be_array(b, 0, 2)\n  let ah = prim.handle(arr)\n  \
+            let bits0 = prim.load64(ah + 12)\n  let f0 = prim.ffrombits(bits0)\n  let eq0 = prim.feq(f0, 1.5)\n  let n0 = if eq0 then 1 else 0\n  println(int.to_string(n0))\n  \
+            let bits1 = prim.load64(ah + 20)\n  let f1 = prim.ffrombits(bits1)\n  let eq1 = prim.feq(f1, 3.0)\n  let n1 = if eq1 then 1 else 0\n  println(int.to_string(n1))\n  \
+            let c = bytes.new(4)\n  bytes.set_u32_le(c, 0, 1069547520)\n  let arrle = bytes.read_f32_le_array(c, 0, 1)\n  \
+            let lbits = prim.load64(prim.handle(arrle) + 12)\n  let lf = prim.ffrombits(lbits)\n  let leq = prim.feq(lf, 1.5)\n  let ln = if leq then 1 else 0\n  println(int.to_string(ln)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "bytes.read_f32_be_array"));
+        if let Some(out) = build_and_run("self_hosted_bytes_read_f32_array", &render_wasm_program(&prog)) {
+            assert_eq!(out, "1\n1\n1");
+        }
+    }
+
+    #[test]
     fn self_hosted_audit_clean_batch() {
         // int.to_float32_checked (Option round-trip), string.clear (borrow+store len=0), and
         // bytes.read_f32_be/le (4-byte f32 read → Float). All audit-confirmed clean.

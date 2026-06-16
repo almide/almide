@@ -189,3 +189,37 @@ fn bytes_read_f64_be_array(b: Bytes, pos: Int, count: Int) -> List[Float] = {
   let _x = __arr_f64be(b, prim.handle(buf), pos, n, 0)
   buf
 }
+
+// f32 arrays: `count` IEEE f32 values (stride 4), each widened to Float; read_f32_* auto-pads 0.0
+// past EOF, so the loop just reads count times. Output slots are 8-byte f64 (alloc_list_f64).
+fn __arr_f32le(b: Bytes, dh: Int, pos: Int, count: Int, i: Int) -> Int =
+  if i >= count then 0
+  else {
+    let x = bytes.read_f32_le(b, pos + i * 4)
+    let bits = prim.fbits(x)
+    prim.store64(dh + 12 + i * 8, bits)
+    __arr_f32le(b, dh, pos, count, i + 1)
+  }
+
+fn bytes_read_f32_le_array(b: Bytes, pos: Int, count: Int) -> List[Float] = {
+  let n = if count > 0 then count else 0
+  let buf = prim.alloc_list_f64(n)
+  let _x = __arr_f32le(b, prim.handle(buf), pos, n, 0)
+  buf
+}
+
+fn __arr_f32be(b: Bytes, dh: Int, pos: Int, count: Int, i: Int) -> Int =
+  if i >= count then 0
+  else {
+    let x = bytes.read_f32_be(b, pos + i * 4)
+    let bits = prim.fbits(x)
+    prim.store64(dh + 12 + i * 8, bits)
+    __arr_f32be(b, dh, pos, count, i + 1)
+  }
+
+fn bytes_read_f32_be_array(b: Bytes, pos: Int, count: Int) -> List[Float] = {
+  let n = if count > 0 then count else 0
+  let buf = prim.alloc_list_f64(n)
+  let _x = __arr_f32be(b, prim.handle(buf), pos, n, 0)
+  buf
+}
