@@ -197,6 +197,20 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
             ],
         ),
         (
+            include_str!("../../../../stdlib/float32_convert.almd"),
+            &[
+                ("float32_to_int8", "float32.to_int8"),
+                ("float32_to_int16", "float32.to_int16"),
+                ("float32_to_int32", "float32.to_int32"),
+                ("float32_to_int64", "float32.to_int64"),
+                ("float32_to_uint8", "float32.to_uint8"),
+                ("float32_to_uint16", "float32.to_uint16"),
+                ("float32_to_uint32", "float32.to_uint32"),
+                ("float32_to_uint64", "float32.to_uint64"),
+                ("float32_to_float64", "float32.to_float64"),
+            ],
+        ),
+        (
             include_str!("../../../../stdlib/int8_convert.almd"),
             &[
                 ("int8_to_int16", "int8.to_int16"),

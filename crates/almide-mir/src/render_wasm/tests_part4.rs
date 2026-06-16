@@ -2099,6 +2099,22 @@
     }
 
     #[test]
+    fn self_hosted_float32_conversions() {
+        // SELF-HOSTED float32.to_* (widen f32→f64 then float.to_<dst>), byte-matching v0: 3.5 → i32
+        // 3 (truncate), 200.0 → i8 127 (clamp), 200.0 → u8 200, 3.5 → f64 3.5 (exact widen).
+        let src = "fn main() -> Unit = {\n  \
+            let a: Float32 = float.to_float32(3.5)\n  let r1 = float32.to_int32(a)\n  println(int.to_string(int.from_int32(r1)))\n  \
+            let b: Float32 = float.to_float32(200.0)\n  let r2 = float32.to_int8(b)\n  println(int.to_string(int.from_int8(r2)))\n  \
+            let r3 = float32.to_uint8(b)\n  println(int.to_string(int.from_uint8(r3)))\n  \
+            let r4 = float32.to_float64(a)\n  let eq = prim.feq(r4, 3.5)\n  let n4 = if eq then 1 else 0\n  println(int.to_string(n4)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "float32.to_int32"));
+        if let Some(out) = build_and_run("self_hosted_float32_conversions", &render_wasm_program(&prog)) {
+            assert_eq!(out, "3\n127\n200\n1");
+        }
+    }
+
+    #[test]
     fn self_hosted_int16_int32_conversions() {
         // SELF-HOSTED int16.to_* / int32.to_* (same two-hop shape as int8), byte-matching v0:
         // widening (1000 → 1000 / 100000 → 100000) and unsigned narrowing wrap (1000 & 0xFF = 232,
