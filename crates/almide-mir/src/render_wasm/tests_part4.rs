@@ -2190,6 +2190,32 @@
     }
 
     #[test]
+    fn self_hosted_error_message() {
+        // SELF-HOSTED error.message → Ok → "" (empty), Err → a copy of the message. Byte-matches v0.
+        let src = "fn main() -> Unit = {\n  \
+            let a: Result[Int, String] = Ok(5)\n  let ma = error.message(a)\n  println(int.to_string(string.len(ma)))\n  \
+            let b: Result[Int, String] = Err(\"boom\")\n  let mb = error.message(b)\n  println(mb) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "error.message"));
+        if let Some(out) = build_and_run("self_hosted_error_message", &render_wasm_program(&prog)) {
+            assert_eq!(out, "0\nboom");
+        }
+    }
+
+    #[test]
+    fn self_hosted_error_message_loop_reclaims() {
+        // SOUNDNESS: a bounded loop copying an Err message (a fresh String each iter) — no leak. 5000
+        // iters; `last` = the message length.
+        let src = "fn main() -> Unit = {\n  var i = 0\n  var last = 0\n  \
+            while i < 5000 {\n    let b: Result[Int, String] = Err(\"boom\")\n    let m = error.message(b)\n    last = string.len(m)\n    i = i + 1\n  }\n  \
+            println(int.to_string(last)) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("self_hosted_error_message_loop_reclaims", &render_wasm_program(&prog)) {
+            assert_eq!(out, "4");
+        }
+    }
+
+    #[test]
     fn self_hosted_bytes_skip() {
         // SELF-HOSTED bytes.skip → advance pos by n, clamped to the byte length. Pure scalar over the
         // Bytes header (len@4). Byte-matches v0's `let np = pos + n; if np > len then len else np`.
