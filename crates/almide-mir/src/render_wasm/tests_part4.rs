@@ -2181,6 +2181,40 @@
     }
 
     #[test]
+    fn self_hosted_bytes_split_lines_chunks() {
+        // SELF-HOSTED bytes.split / lines / chunks -> List[Bytes] (nested-ownership via
+        // alloc_list_str + store_str). Counts via prim.load32(handle+4); content via load_str.
+        let src = "fn main() -> Unit = {\n  \
+            let b = bytes.from_string(\"a,b,c\")\n  let sep = bytes.from_string(\",\")\n  let parts = bytes.split(b, sep)\n  println(int.to_string(prim.load32(prim.handle(parts) + 4)))\n  \
+            let t = bytes.from_string(\"x\\ny\")\n  let ls = bytes.lines(t)\n  println(int.to_string(prim.load32(prim.handle(ls) + 4)))\n  \
+            let c = bytes.from_string(\"abcd\")\n  let cks = bytes.chunks(c, 2)\n  println(int.to_string(prim.load32(prim.handle(cks) + 4)))\n  \
+            let cks0 = bytes.chunks(c, 0)\n  println(int.to_string(prim.load32(prim.handle(cks0) + 4)))\n  \
+            let elem = prim.load_str(prim.handle(cks) + 12)\n  println(int.to_string(bytes.get_or(elem, 0, 0))) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "bytes.split"));
+        if let Some(out) = build_and_run("self_hosted_bytes_split_lines_chunks", &render_wasm_program(&prog)) {
+            // split "a,b,c"->3 ; lines "x\ny"->2 ; chunks "abcd"/2 ->2 ; chunks /0 ->0 ; chunk0[0]='a'=97.
+            assert_eq!(out, "3\n2\n2\n0\n97");
+        }
+    }
+
+    #[test]
+    fn self_hosted_bytes_split_loop_reclaims() {
+        // SOUNDNESS: a bounded loop building + dropping a List[Bytes] (split) — the nested-ownership
+        // pieces must be freed (DropListStr), no leak / double-free. 4000 iters.
+        let src = "fn main() -> Unit = {\n  \
+            var i = 0\n  var last = 0\n  \
+            while i < 4000 {\n    \
+              let b = bytes.from_string(\"a,b,c,d\")\n    let sep = bytes.from_string(\",\")\n    let parts = bytes.split(b, sep)\n    \
+              last = prim.load32(prim.handle(parts) + 4)\n    i = i + 1\n  }\n  \
+            println(int.to_string(last)) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("self_hosted_bytes_split_loop_reclaims", &render_wasm_program(&prog)) {
+            assert_eq!(out, "4");
+        }
+    }
+
+    #[test]
     fn self_hosted_datetime_to_iso() {
         // SELF-HOSTED datetime.to_iso (fixed-width buffer fill, no concat), byte-matching v0:
         // ts=0 -> 1970-01-01T00:00:00Z; ts=1e9 -> 2001-09-09T01:46:40Z.

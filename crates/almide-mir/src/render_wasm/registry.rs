@@ -199,6 +199,14 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
             ],
         ),
         (
+            include_str!("../../../../stdlib/bytes_split.almd"),
+            &[
+                ("bytes_split", "bytes.split"),
+                ("bytes_lines", "bytes.lines"),
+                ("bytes_chunks", "bytes.chunks"),
+            ],
+        ),
+        (
             include_str!("../../../../stdlib/bytes_mutate.almd"),
             &[
                 ("bytes_set_u8", "bytes.set_u8"),
