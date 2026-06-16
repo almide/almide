@@ -2064,6 +2064,24 @@
     }
 
     #[test]
+    fn self_hosted_int8_conversions() {
+        // SELF-HOSTED int8.to_* sized conversions (two-hop int.from_int8 → int.to_<dst>), byte-
+        // matching v0's int8.almd. Covers widening (100 → 100), unsigned wrap of a negative
+        // (Int8 -1 → u8 255 / u16 65535), and int→float (100 → 100.0).
+        let src = "fn main() -> Unit = {\n  \
+            let p: Int8 = int.to_int8(100)\n  let r1 = int8.to_int16(p)\n  println(int.to_string(int.from_int16(r1)))\n  \
+            let n: Int8 = int.to_int8(255)\n  let r2 = int8.to_uint8(n)\n  println(int.to_string(int.from_uint8(r2)))\n  \
+            let r3 = int8.to_uint16(n)\n  println(int.to_string(int.from_uint16(r3)))\n  \
+            let r4 = int8.to_int64(p)\n  println(int.to_string(r4))\n  \
+            let r5 = int8.to_float64(p)\n  let eq = prim.feq(r5, 100.0)\n  let n5 = if eq then 1 else 0\n  println(int.to_string(n5)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "int8.to_int16"));
+        if let Some(out) = build_and_run("self_hosted_int8_conversions", &render_wasm_program(&prog)) {
+            assert_eq!(out, "100\n255\n65535\n100\n1");
+        }
+    }
+
+    #[test]
     fn self_hosted_float_checked_64bit() {
         // The 64-bit variants: 2^63 / 2^64 bound built at runtime. to_uint64 of a value in
         // [2^63, 2^64) is rejected by the ROUND-TRIP (i64-repr wraps negative ≠ n), not the range —
