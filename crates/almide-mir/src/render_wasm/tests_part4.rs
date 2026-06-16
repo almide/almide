@@ -3603,3 +3603,17 @@
             assert_eq!(out, "5");
         }
     }
+
+    #[test]
+    fn scalar_var_alias_does_not_zero() {
+        // `let q = p` aliasing a scalar param must keep p's value (was a silent Const(0) zeroing).
+        let src = "fn f(p: Int) -> Int = { let q = p\n  q + 1 }\n\
+            fn g(a: Float) -> Float = { let b = a\n  b }\n\
+            fn main() -> Unit = {\n  \
+              println(int.to_string(f(41)))\n  \
+              let r = g(2.5)\n  let eq = prim.feq(r, 2.5)\n  let n = if eq then 1 else 0\n  println(int.to_string(n)) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("scalar_var_alias_does_not_zero", &render_wasm_program(&prog)) {
+            assert_eq!(out, "42\n1");
+        }
+    }

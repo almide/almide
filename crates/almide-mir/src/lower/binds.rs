@@ -139,6 +139,15 @@ impl LowerCtx {
                     return Ok(());
                 }
             }
+            // `let v = w` aliasing a SCALAR var — v denotes the SAME value (a scalar is freely
+            // duplicable: no copy, no ownership). Without this, a bare-Var scalar RHS fell to the
+            // deferred `Const` below and silently became 0 (the param-alias zeroing trap).
+            if let IrExprKind::Var { id } = &value.kind {
+                if let Ok(src) = self.value_for(*id) {
+                    self.value_of.insert(var, src);
+                    return Ok(());
+                }
+            }
             let dst = self.fresh_value();
             self.value_of.insert(var, dst);
             self.ops.push(Op::Const { dst });
