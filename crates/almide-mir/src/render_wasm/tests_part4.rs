@@ -2115,14 +2115,15 @@
             let g4 = bytes.get_or(b, 4, 0)\n  println(int.to_string(g4))\n  \
             let g5 = bytes.get_or(b, 5, 0)\n  println(int.to_string(g5))\n  \
             let g8 = bytes.get_or(b, 8, 0)\n  println(int.to_string(g8))\n  \
+            let c = bytes.new(8)\n  bytes.set_f64_be(c, 0, 1.5)\n  let cf = bytes.get_or(c, 0, 0)\n  println(int.to_string(cf))\n  \
             bytes.fill(b, 255)\n  let gf = bytes.get_or(b, 7, 0)\n  println(int.to_string(gf))\n  \
             bytes.clear(b)\n  let gl = bytes.len(b)\n  println(int.to_string(gl)) }\n";
         let prog = lower_source(src);
         assert!(prog.functions.iter().any(|f| f.name == "bytes.set_u8"));
         if let Some(out) = build_and_run("self_hosted_bytes_fixed_size_mutation", &render_wasm_program(&prog)) {
             // u8=200; u16_be 4660=0x1234 -> 18,52; u16_le -> 52,18; u32_be 16909060=0x01020304 -> b5=1,b8=4;
-            // fill 255 -> b7=255; clear -> len 0.
-            assert_eq!(out, "200\n18\n52\n52\n18\n1\n4\n255\n0");
+            // f64 1.5 = 0x3FF8.. -> BE byte0=0x3F=63; fill 255 -> b7=255; clear -> len 0.
+            assert_eq!(out, "200\n18\n52\n52\n18\n1\n4\n63\n255\n0");
         }
     }
 

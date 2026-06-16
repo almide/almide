@@ -117,3 +117,17 @@ fn bytes_fill(b: Bytes, val: Int) -> Unit = {
 
 // clear: truncate to length 0 (the cap/data are untouched, like Vec::clear).
 fn bytes_clear(b: Bytes) -> Unit = prim.store32(prim.handle(b) + 4, 0)
+
+// ── f64 (store the 8 IEEE bits; prim.fbits gives the i64 bit pattern) ──
+fn bytes_set_f64_be(b: Bytes, pos: Int, val: Float) -> Unit = {
+  let bits = prim.fbits(val)
+  let n = prim.load32(prim.handle(b) + 4)
+  let base = prim.handle(b) + 12
+  let _ = if pos >= 0 then (if pos + 8 <= n then __s64be(base + pos, bits) else 0) else 0
+}
+fn bytes_set_f64_le(b: Bytes, pos: Int, val: Float) -> Unit = {
+  let bits = prim.fbits(val)
+  let n = prim.load32(prim.handle(b) + 4)
+  let base = prim.handle(b) + 12
+  let _ = if pos >= 0 then (if pos + 8 <= n then __s64le(base + pos, bits) else 0) else 0
+}
