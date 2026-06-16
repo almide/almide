@@ -54,8 +54,8 @@ pub const PURE_MODULES: &[&str] = &[
     "list_len", "list_make", "list_map", "list_map_str", "list_modify", "list_reduce", "list_reverse", "list_reverse_str", "list_scan", "list_search", "list_sort", "list_sortby", "list_str", "list_sum", "list_take_drop", "list_takedrop_str", "list_unique", "list_uniqueby", "list_whilep", "list_zipwith", "map", "map_core", "map_str", "math", "math_exp", "math_float", "math_fpow", "math_int", "math_lgamma", "math_log", "matrix", "option", "option_collect", "option_map", "option_pred", "path", "regex", "result",
     "result_core", "result_map", "set", "set_core", "set_str", "string", "string_chars", "string_codepoint", "string_first_last", "string_from_bytes_self", "string_from_codepoint", "string_is_digit", "string_is_empty", "string_join",
     "string_len", "string_lines", "string_mutate", "string_pad", "string_repeat", "string_replace", "string_reverse", "string_search", "string_slice", "string_split", "string_take_drop", "string_to_bytes", "string_to_int", "string_trim",
-    "uint16", "uint32",
-    "uint64", "uint8", "value", "value_core",
+    "uint16", "uint16_convert", "uint32", "uint32_convert",
+    "uint64", "uint64_convert", "uint8", "uint8_convert", "value", "value_core",
 ];
 
 /// Is `module` a provably-pure stdlib data module (reaches no host capability)?
