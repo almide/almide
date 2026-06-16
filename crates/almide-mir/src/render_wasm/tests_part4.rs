@@ -2198,6 +2198,21 @@
     }
 
     #[test]
+    fn self_hosted_math_exp_bit_exact() {
+        // SELF-HOSTED math.exp (faithful libm) — BIT-EXACT vs v0: exp(1)=4613303445314885482,
+        // exp(0)=4607182418800017408, exp(2.5)=4623047752462491835, exp(-1)=4600298746774613816.
+        let src = "fn main() -> Unit = {\n  \
+            let a = math.exp(1.0)\n  println(int.to_string(float.to_bits(a)))\n  \
+            let b = math.exp(0.0)\n  println(int.to_string(float.to_bits(b)))\n  \
+            let c = math.exp(2.5)\n  println(int.to_string(float.to_bits(c)))\n  \
+            let d = math.exp(0.0 - 1.0)\n  println(int.to_string(float.to_bits(d))) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("self_hosted_math_exp_bit_exact", &render_wasm_program(&prog)) {
+            assert_eq!(out, "4613303445314885482\n4607182418800017408\n4623047752462491835\n4600298746774613816");
+        }
+    }
+
+    #[test]
     fn self_hosted_math_log2_bit_exact() {
         // SELF-HOSTED math.log2 — BIT-EXACT vs v0: log2(8)=4613937818241073152,
         // log2(10)=4614662735865160561, log2(1)=0.
