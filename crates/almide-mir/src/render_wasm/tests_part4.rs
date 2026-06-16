@@ -3688,3 +3688,20 @@
             assert_eq!(out, "4614223691264294912\n4615353989217648640\n4616484287171002368\n4617614585124356096\n4621005478984417280\n0");
         }
     }
+
+    #[test]
+    fn self_hosted_read_f16_le_array_matches_v0() {
+        // read_f16_le_array(2,4): read the 4 f64 slots directly (= float.to_bits per element).
+        let src = "fn main() -> Unit = {\n\
+            let b = bytes.from_string(\"ABCDEFGH\")\n\
+            let xs = bytes.read_f16_le_array(b, 2, 4)\n\
+            let h = prim.handle(xs)\n\
+            println(int.to_string(prim.load64(h + 12)))\n\
+            println(int.to_string(prim.load64(h + 20)))\n\
+            println(int.to_string(prim.load64(h + 28)))\n\
+            println(int.to_string(prim.load64(h + 36))) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("self_hosted_read_f16_le_array_matches_v0", &render_wasm_program(&prog)) {
+            assert_eq!(out, "4616484287171002368\n4618744883077709824\n4621005478984417280\n0");
+        }
+    }

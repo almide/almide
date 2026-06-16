@@ -41,3 +41,31 @@ fn bytes_read_f16_le(b: Bytes, pos: Int) -> Float = {
     __f16_decode(bits)
   }
 }
+
+// bytes.read_f16_le_array — `count` f16 values from `pos` (stride 2) into a List[Float].
+// Decodes inline via the private __f16_decode (NOT a call to the registered bytes.read_f16_le
+// — a same-file registered cross-reference loops the auto-linker). Per-element OOB → 0.0.
+fn __arr_f16le_one(h: Int, p: Int, len: Int) -> Float =
+  if p + 2 > len then 0.0
+  else {
+    let b0 = prim.load8(h + 12 + p)
+    let b1 = prim.load8(h + 12 + p + 1)
+    __f16_decode(prim.bor(b0, prim.bshl(b1, 8)))
+  }
+
+fn __arr_f16le(b: Bytes, dh: Int, pos: Int, count: Int, i: Int) -> Int =
+  if i >= count then 0
+  else {
+    let h = prim.handle(b)
+    let len = prim.load32(h + 4)
+    let x = __arr_f16le_one(h, pos + i * 2, len)
+    prim.store64(dh + 12 + i * 8, prim.fbits(x))
+    __arr_f16le(b, dh, pos, count, i + 1)
+  }
+
+fn bytes_read_f16_le_array(b: Bytes, pos: Int, count: Int) -> List[Float] = {
+  let n = if count > 0 then count else 0
+  let buf = prim.alloc_list_f64(n)
+  let _x = __arr_f16le(b, prim.handle(buf), pos, n, 0)
+  buf
+}
