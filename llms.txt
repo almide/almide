@@ -173,6 +173,7 @@ let root_i = float.to_int(root_f)    // truncating
 | E023 | Derived `Codec`/`Ord`/`Hash` not satisfied by a field type | Add `: P` to the offending field type (every field of a `: P` type must itself be `P`) — or hand-write `Type.encode`/`decode` for Codec |
 | E024 | Integer literal out of range for its type (would silently fold to 0) | Use a literal within the type's range; for large magnitudes use `UInt64` (or `Float`, lossy); `-9223372036854775808` (i64::MIN) is valid |
 | E025 | Cannot infer a concrete type — an undecidable type slot (e.g. the error type of a value that is always `ok(...)`) was never pinned | Annotate the binding with its full type (`let r: Result[Int, String] = ...`); an unconstrained slot is an error even if never constructed, never silently defaulted |
+| E026 | `[]` indexing on a String (a UTF-8 codepoint sequence, not a byte/char array) | Use `string.get(s, i)` (returns `Option[String]`) or `string.char_at(s, i)`; range slicing `s[a..b]` is fine |
 | E420 | Function visibility violation (callee is private) | Make the callee public, or add a public shim |
 
 A rustc 4-digit code (`error[E0XXX]`) leaking through always indicates
