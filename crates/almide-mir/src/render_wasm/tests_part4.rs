@@ -2198,6 +2198,24 @@
     }
 
     #[test]
+    fn self_hosted_math_fpow_bit_exact() {
+        // SELF-HOSTED math.fpow (faithful libm pow, agent-transcribed, verified vs vendored libm
+        // over 32k inputs) — BIT-EXACT vs v0: fpow(2,10)=1024, fpow(2,.5)=sqrt2, fpow(-2,3)=-8,
+        // fpow(10,-2)=.01, fpow(3,3)=27.
+        let src = "fn main() -> Unit = {\n  \
+            let a = math.fpow(2.0, 10.0)\n  println(int.to_string(float.to_bits(a)))\n  \
+            let b = math.fpow(2.0, 0.5)\n  println(int.to_string(float.to_bits(b)))\n  \
+            let c = math.fpow(0.0 - 2.0, 3.0)\n  println(int.to_string(float.to_bits(c)))\n  \
+            let d = math.fpow(10.0, 0.0 - 2.0)\n  println(int.to_string(float.to_bits(d)))\n  \
+            let e = math.fpow(3.0, 3.0)\n  println(int.to_string(float.to_bits(e))) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "math.fpow"));
+        if let Some(out) = build_and_run("self_hosted_math_fpow_bit_exact", &render_wasm_program(&prog)) {
+            assert_eq!(out, "4652218415073722368\n4609047870845172685\n-4602678819172646912\n4576918229304087675\n4628293042053316608");
+        }
+    }
+
+    #[test]
     fn self_hosted_math_exp_bit_exact() {
         // SELF-HOSTED math.exp (faithful libm) — BIT-EXACT vs v0: exp(1)=4613303445314885482,
         // exp(0)=4607182418800017408, exp(2.5)=4623047752462491835, exp(-1)=4600298746774613816.
@@ -3585,4 +3603,3 @@
             assert_eq!(out, "5");
         }
     }
-

@@ -1,0 +1,387 @@
+// math_fpow — SELF-HOSTED math.fpow (the FLOAT pow), a FAITHFUL bit-exact transcription of
+// runtime/rs/src/libm.rs `pow` (vendored libm 0.2.16, origin FreeBSD e_pow.c). The f64 ops are
+// natural Float operators (they lower to the prim float floor); every f64 CONSTANT is a
+// prim.ffrombits(<exact i64 bits>) so the value is the exact libm bit pattern (no decimal-literal
+// drift). Integer/bit work is i64 via the prim bit floor; the Rust i32/u32 semantics are preserved
+// by sign-extending the upper-32 extraction to a signed i32 range and applying explicit i32/u32
+// wraps only where Rust truncates (the odd-int high-shift, the z bit re-split, the u32 underflow
+// subtraction). Validated bit-for-bit against the compiled vendored `pow` over 32k inputs.
+//
+// NB the registered name is `math.fpow` (NOT `math.pow` — that is the INTEGER pow in math_int.almd).
+//
+// Rust `pow` mutates locals and uses many early `return`s; Almide has neither, so the body is
+// restructured into nested if/else value-expressions and __pow_* helpers that thread the would-be
+// mutated state (t1/t2/s/n/p_h/...) through their parameters. `&&`/`||` are expanded to nested ifs.
+
+// ── i32 / u32 emulation over i64 (the bit pattern semantics Rust gets from i32/u32 casts) ──
+
+// unsigned upper 32 bits of an f64 bit pattern, as a value in [0, 2^32).
+fn __fpow_u32hi(bits: Int) -> Int = prim.band(prim.bshr(bits, 32), 4294967295)
+
+// reinterpret a value in [0, 2^32) as a SIGNED i32 (the `as i32` cast Rust applies to (bits>>32)).
+fn __fpow_s32(u: Int) -> Int = {
+  let m = prim.band(u, 4294967295)
+  if m >= 2147483648 then m - 4294967296 else m
+}
+
+// the high word of x as a SIGNED i32 (Rust: (x.to_bits() >> 32) as i32).
+fn __fpow_hi(x: Float) -> Int = {
+  let u = __fpow_u32hi(prim.fbits(x))
+  __fpow_s32(u)
+}
+
+// the low 32 bits of x as an UNSIGNED u32 (Rust: x.to_bits() as u32).
+fn __fpow_lo(x: Float) -> Int = prim.band(prim.fbits(x), 4294967295)
+
+// get_high_word(x): unsigned upper 32 bits.
+fn __fpow_ghw(x: Float) -> Int = __fpow_u32hi(prim.fbits(x))
+
+// with_set_high_word(x, hi): x with its high 32 bits replaced by hi (low 32 of hi kept).
+fn __fpow_wsh(x: Float, hi: Int) -> Float = {
+  let lo = prim.band(prim.fbits(x), 4294967295)
+  let hu = prim.band(hi, 4294967295)
+  prim.ffrombits(prim.bor(lo, prim.bshl(hu, 32)))
+}
+
+// with_set_low_word(x, lo): x with its low 32 bits replaced by lo.
+fn __fpow_wsl(x: Float, lo: Int) -> Float = {
+  let himask = prim.bshl(0 - 1, 32)              // 0xffffffff00000000
+  let hi = prim.band(prim.fbits(x), himask)
+  prim.ffrombits(prim.bor(hi, prim.band(lo, 4294967295)))
+}
+
+// ── vscalbn(x, n) — the extreme-exponent scale (libm.rs:74) ──
+fn __fpow_scalbn(x: Float, n: Int) -> Float = {
+  let fexpmax = prim.ffrombits(9214364837600034816)   // 2^1023
+  let fexpmin = prim.ffrombits(4503599627370496)       // 2^-1022
+  let fpowsub = prim.ffrombits(4845873199050653696)    // 2^53
+  if n > 1023 then {
+    let x1 = x * fexpmax
+    let n1 = n - 1023
+    if n1 > 1023 then {
+      let x2 = x1 * fexpmax
+      let n2 = n1 - 1023
+      let n3 = if n2 > 1023 then 1023 else n2
+      let scale = prim.ffrombits(prim.bshl(1023 + n3, 52))
+      x2 * scale
+    }
+    else {
+      let scale = prim.ffrombits(prim.bshl(1023 + n1, 52))
+      x1 * scale
+    }
+  }
+  else if n < 0 - 1022 then {
+    let mul = fexpmin * fpowsub
+    let add = 1022 - 53                                 // -EXP_MIN - sig_total_bits = 1022 - 53
+    let x1 = x * mul
+    let n1 = n + add
+    if n1 < 0 - 1022 then {
+      let x2 = x1 * mul
+      let n2 = n1 + add
+      let n3 = if n2 < 0 - 1022 then 0 - 1022 else n2
+      let scale = prim.ffrombits(prim.bshl(1023 + n3, 52))
+      x2 * scale
+    }
+    else {
+      let scale = prim.ffrombits(prim.bshl(1023 + n1, 52))
+      x1 * scale
+    }
+  }
+  else {
+    let scale = prim.ffrombits(prim.bshl(1023 + n, 52))
+    x * scale
+  }
+}
+
+// ── stage 4: compute 2**(p_h+p_l) then s*z, given the split (p_h, p_l) and sign s. ──
+// (libm.rs:1448-1484) The i>0x3fe00000 reduction picks an integer n and adjusts p_h; threaded
+// through __fpow_two below.
+fn __fpow_two_finish(s: Float, p_h: Float, p_l: Float, n: Int) -> Float = {
+  let lg2  = prim.ffrombits(4604418534313441775)
+  let lg2h = prim.ffrombits(4604418534330597376)
+  let lg2l = prim.ffrombits(0 - 4746692435354555335)
+  let p1 = prim.ffrombits(4595172819793696062)
+  let p2 = prim.ffrombits(0 - 4654820494858601069)
+  let p3 = prim.ffrombits(4544508515198557740)
+  let p4 = prim.ffrombits(0 - 4702957295668925455)
+  let p5 = prim.ffrombits(4496342204012209360)
+  let t  = __fpow_wsl(p_l + p_h, 0)
+  let u  = t * lg2h
+  let v  = (p_l - (t - p_h)) * lg2 + t * lg2l
+  let z0 = u + v
+  let w  = v - (z0 - u)
+  let tt = z0 * z0
+  let t1 = z0 - tt * (p1 + tt * (p2 + tt * (p3 + tt * (p4 + tt * p5))))
+  let r  = (z0 * t1) / (t1 - 2.0) - (w + z0 * w)
+  let z1 = 1.0 - (r - z0)
+  let ghw = __fpow_ghw(z1)
+  let j0 = __fpow_s32(ghw)
+  let j  = j0 + prim.bshl(n, 20)
+  let z2 = if prim.bshr(j, 20) <= 0 then __fpow_scalbn(z1, n)
+           else __fpow_wsh(z1, j)
+  s * z2
+}
+
+// the i>0x3fe00000 branch: pick n = [z+0.5] and subtract its high part from p_h. (libm.rs:1453-1463)
+fn __fpow_two(s: Float, p_h: Float, p_l: Float, j: Int) -> Float = {
+  let i = prim.band(j, 2147483647)
+  let k = prim.bshr(i, 20) - 1023
+  if i > 1071644672 then {                              // |z| > 0.5
+    let nadj = j + prim.bshr(1048576, k + 1)            // j + (0x00100000 >> (k+1))
+    let n0 = __fpow_s32(nadj)
+    let k2 = prim.bshr(prim.band(n0, 2147483647), 20) - 1023
+    let notmask = prim.bxor(prim.bshr(1048575, k2), 0 - 1)   // ~(0x000fffff >> k2)
+    let t = __fpow_wsh(0.0, prim.band(n0, notmask))
+    let nshift = prim.bshr(prim.bor(prim.band(n0, 1048575), 1048576), 20 - k2)
+    let n = if j < 0 then 0 - nshift else nshift
+    let ph2 = p_h - t
+    __fpow_two_finish(s, ph2, p_l, n)
+  }
+  else __fpow_two_finish(s, p_h, p_l, 0)
+}
+
+// ── stage 3: split y into y1+y2, form z = (y1+y2)*(t1+t2), check over/underflow, then stage 4. ──
+// (libm.rs:1418-1446) Returns via the overflow/underflow shortcuts or __fpow_two.
+fn __fpow_combine(s: Float, y: Float, t1: Float, t2: Float, hy: Int) -> Float = {
+  let huge = prim.ffrombits(9094988921128908188)
+  let tiny = prim.ffrombits(118622047889322841)
+  let ovt  = prim.ffrombits(4365981760143196926)
+  let y1  = __fpow_wsl(y, 0)
+  let p_l = (y - y1) * t1 + y * t2
+  let p_h = y1 * t1
+  let z   = p_l + p_h
+  let zhi = __fpow_u32hi(prim.fbits(z))
+  let j   = __fpow_s32(zhi)
+  let i   = __fpow_s32(prim.band(prim.fbits(z), 4294967295))
+  if j >= 1083179008 then {                             // z >= 1024
+    let jd = __fpow_s32(j - 1083179008)
+    let gt = prim.bor(jd, i)
+    if gt != 0 then s * huge * huge                     // z > 1024 -> overflow
+    else if p_l + ovt > z - p_h then s * huge * huge    // overflow
+    else __fpow_two(s, p_h, p_l, j)
+  }
+  else if prim.band(j, 2147483647) >= 1083231232 then { // z <= -1075
+    let ju = prim.band(j, 4294967295)
+    let lt = prim.bor(prim.band(ju - 3230714880, 4294967295), prim.band(i, 4294967295))
+    if lt != 0 then s * tiny * tiny                      // z < -1075 -> underflow
+    else if p_l <= z - p_h then s * tiny * tiny          // underflow
+    else __fpow_two(s, p_h, p_l, j)
+  }
+  else __fpow_two(s, p_h, p_l, j)
+}
+
+// |y| HUGE path (iy > 0x41e00000) — the log(x) ~ x-x^2/2+... tiny-1-x branch. (libm.rs:1342-1349)
+fn __fpow_huge_y(s: Float, y: Float, ax: Float, hy: Int) -> Float = {
+  let ivln2  = prim.ffrombits(4609176140021203710)
+  let ivln2h = prim.ffrombits(4609176139934466048)
+  let ivln2l = prim.ffrombits(4491406094830001988)
+  let third  = prim.ffrombits(4599676419421066581)      // 0.3333333333333333333333
+  let quarter = prim.ffrombits(4598175219545276416)      // 0.25
+  let t  = ax - 1.0
+  let w  = (t * t) * (0.5 - t * (third - t * quarter))
+  let u  = ivln2h * t
+  let v  = t * ivln2l - w * ivln2
+  let t1 = __fpow_wsl(u + v, 0)
+  let t2 = v - (t1 - u)
+  __fpow_combine(s, y, t1, t2, hy)
+}
+
+// the main log2(ax) computation (the general path), kk-interval already chosen, ax normalized,
+// n the exponent accumulator. (libm.rs:1379-1415) → t1,t2 → __fpow_combine.
+fn __fpow_log2(s: Float, y: Float, ax: Float, ix: Int, kk: Int, n: Int, hy: Int) -> Float = {
+  let dp_h1 = prim.ffrombits(4603444093224222720)
+  let dp_l1 = prim.ffrombits(4489242115478376454)
+  let l1 = prim.ffrombits(4603579539098120963)
+  let l2 = prim.ffrombits(4601392076422097919)
+  let l3 = prim.ffrombits(4599676419357746765)
+  let l4 = prim.ffrombits(4598584653024936193)
+  let l5 = prim.ffrombits(4597478449480325989)
+  let l6 = prim.ffrombits(4596625081194860271)
+  let cp  = prim.ffrombits(4606838314010018813)
+  let cph = prim.ffrombits(4606838314073325568)
+  let cpl = prim.ffrombits(0 - 4738297118486494731)
+  let bp1 = prim.ffrombits(4609434218613702656)         // 1.5
+  // bp[kk], dp_h[kk], dp_l[kk]
+  let bp   = if kk == 0 then 1.0 else bp1
+  let dp_h = if kk == 0 then 0.0 else dp_h1
+  let dp_l = if kk == 0 then 0.0 else dp_l1
+  let axn = __fpow_wsh(ax, ix)                           // ax = with_set_high_word(ax, ix)
+  let u0  = axn - bp
+  let v0  = 1.0 / (axn + bp)
+  let ss  = u0 * v0
+  let s_h = __fpow_wsl(ss, 0)
+  // t_h high word: ((ix>>1)|0x20000000) + 0x00080000 + (kk<<18)
+  let thw = prim.band(prim.bor(prim.bshr(prim.band(ix, 4294967295), 1), 536870912), 4294967295) + 524288 + prim.bshl(kk, 18)
+  let t_h0 = __fpow_wsh(0.0, thw)
+  let t_l0 = axn - (t_h0 - bp)
+  let s_l  = v0 * ((u0 - s_h * t_h0) - s_h * t_l0)
+  let s2a  = ss * ss
+  let r0   = s2a * s2a * (l1 + s2a * (l2 + s2a * (l3 + s2a * (l4 + s2a * (l5 + s2a * l6)))))
+  let r1   = r0 + s_l * (s_h + ss)
+  let s2b  = s_h * s_h
+  let t_h  = __fpow_wsl(3.0 + s2b + r1, 0)
+  let t_l  = r1 - ((t_h - 3.0) - s2b)
+  let u1   = s_h * t_h
+  let v1   = s_l * t_h + t_l * ss
+  let p_h  = __fpow_wsl(u1 + v1, 0)
+  let p_l  = v1 - (p_h - u1)
+  let z_h  = cph * p_h
+  let z_l  = cpl * p_h + p_l * cp + dp_l
+  let tn   = prim.i2f(n)
+  let t1   = __fpow_wsl(((z_h + z_l) + dp_h) + tn, 0)
+  let t2   = z_l - (((t1 - tn) - dp_h) - z_h)
+  __fpow_combine(s, y, t1, t2, hy)
+}
+
+// normalize ax into [1,2)-relative form, pick the kk interval, accumulate n. (libm.rs:1351-1377)
+// `axin` already has the subnormal scaling applied if needed; `ixin`/`n0` carry that state.
+fn __fpow_normalize(s: Float, y: Float, axin: Float, ixin: Int, n0: Int, hy: Int) -> Float = {
+  let n1 = n0 + prim.bshr(ixin, 20) - 1023
+  let j  = prim.band(ixin, 1048575)
+  let ix0 = prim.bor(j, 1072693248)                     // j | 0x3ff00000
+  if j <= 235662 then __fpow_log2(s, y, axin, ix0, 0, n1, hy)        // |x| < sqrt(3/2)
+  else if j < 767610 then __fpow_log2(s, y, axin, ix0, 1, n1, hy)   // |x| < sqrt(3)
+  else __fpow_log2(s, y, axin, ix0 - 1048576, 0, n1 + 1, hy)
+}
+
+// the non-huge-y log2 entry: handle subnormal ax first, then normalize. (libm.rs:1350-1361)
+fn __fpow_general(s: Float, y: Float, ax: Float, ix: Int, hy: Int) -> Float = {
+  let two53 = prim.ffrombits(4845873199050653696)
+  if ix < 1048576 then {                                // subnormal: scale by 2^53
+    let ax2 = ax * two53
+    let ghw2 = __fpow_ghw(ax2)
+    let ix2 = __fpow_s32(ghw2)
+    __fpow_normalize(s, y, ax2, ix2, 0 - 53, hy)
+  }
+  else __fpow_normalize(s, y, ax, ix, 0, hy)
+}
+
+// dispatch into the |y| HUGE path vs the general log2 path. (libm.rs:1304-1416)
+fn __fpow_algo(s: Float, x: Float, y: Float, ax: Float, ix: Int, iy: Int, hy: Int) -> Float = {
+  let huge = prim.ffrombits(9094988921128908188)
+  let tiny = prim.ffrombits(118622047889322841)
+  if iy > 1105199104 then {                             // |y| > 2**31
+    // |y| > 2**64 forced over/underflow
+    if iy > 1139802112 then {
+      if ix <= 1072693247 then (if hy < 0 then huge * huge else tiny * tiny)
+      else if ix >= 1072693248 then (if hy > 0 then huge * huge else tiny * tiny)
+      else if ix < 1072693247 then (if hy < 0 then s * huge * huge else s * tiny * tiny)
+      else if ix > 1072693248 then (if hy > 0 then s * huge * huge else s * tiny * tiny)
+      else __fpow_huge_y(s, y, ax, hy)
+    }
+    else if ix < 1072693247 then (if hy < 0 then s * huge * huge else s * tiny * tiny)
+    else if ix > 1072693248 then (if hy > 0 then s * huge * huge else s * tiny * tiny)
+    else __fpow_huge_y(s, y, ax, hy)
+  }
+  else __fpow_general(s, y, ax, ix, hy)
+}
+
+// determine the sign of the result (s) for x<0, then enter the algorithm. (libm.rs:1291-1302)
+fn __fpow_signed(x: Float, y: Float, hx: Int, ix: Int, iy: Int, hy: Int, yisint: Int) -> Float = {
+  let ax = prim.fabs(x)
+  if hx < 0 then {
+    if yisint == 0 then (x - x) / (x - x)               // (x<0)**non-int = NaN
+    else if yisint == 1 then __fpow_algo(0.0 - 1.0, x, y, ax, ix, iy, hy)
+    else __fpow_algo(1.0, x, y, ax, ix, iy, hy)
+  }
+  else __fpow_algo(1.0, x, y, ax, ix, iy, hy)
+}
+
+// x is +-0,+-inf,+-1 (lx==0 and ix in {0, 0x3ff00000, 0x7ff00000}). (libm.rs:1268-1289)
+fn __fpow_special_x(x: Float, hx: Int, ix: Int, hy: Int, yisint: Int) -> Float = {
+  let ax = prim.fabs(x)
+  let z0 = if hy < 0 then 1.0 / ax else ax
+  if hx < 0 then {
+    if prim.bor(ix - 1072693248, yisint) == 0 then (z0 - z0) / (z0 - z0)   // (-1)**non-int = NaN
+    else if yisint == 1 then 0.0 - z0
+    else z0
+  }
+  else z0
+}
+
+// the odd/even-integer classification of y when x<0. (libm.rs:1194-1222)
+fn __fpow_yisint(hx: Int, iy: Int, ly: Int) -> Int = {
+  if hx < 0 then {
+    if iy >= 1128267776 then 2                           // |y| >= 2^53 -> even int
+    else if iy >= 1072693248 then {
+      let k = prim.bshr(iy, 20) - 1023
+      if k > 20 then {
+        let jraw = prim.band(prim.bshr(ly, 52 - k), 4294967295)
+        let j = __fpow_s32(jraw)
+        let jsh = prim.bshl(j, 52 - k)
+        let jshift = __fpow_s32(jsh)
+        let lys = __fpow_s32(ly)
+        if jshift == lys then 2 - prim.band(j, 1) else 0
+      }
+      else if ly == 0 then {
+        let j = prim.bshr(iy, 20 - k)
+        if prim.bshl(j, 20 - k) == iy then 2 - prim.band(j, 1) else 0
+      }
+      else 0
+    }
+    else 0
+  }
+  else 0
+}
+
+// the NaN guard + special-y + special-x + sign dispatch (kept out of math_fpow so the two
+// 1**y branches share it). (libm.rs:1185-1289)
+fn __fpow_dispatch(x: Float, y: Float, hx: Int, lx: Int, hy: Int, ly: Int, ix: Int, iy: Int) -> Float = {
+  // NaN if either arg is NaN
+  let nan_x = if ix > 2146435072 then 1 else (if ix == 2146435072 then (if lx != 0 then 1 else 0) else 0)
+  let nan_y = if iy > 2146435072 then 1 else (if iy == 2146435072 then (if ly != 0 then 1 else 0) else 0)
+  if prim.bor(nan_x, nan_y) != 0 then x + y
+  else {
+    let yisint = __fpow_yisint(hx, iy, ly)
+    if ly == 0 then {
+      // special value of y
+      if iy == 2146435072 then {                         // y is +-inf
+        let lxs = __fpow_s32(lx)
+        if prim.bor(ix - 1072693248, lxs) == 0 then 1.0                  // (-1)**+-inf = 1
+        else if ix >= 1072693248 then (if hy >= 0 then y else 0.0)       // (|x|>1)**+-inf
+        else (if hy >= 0 then 0.0 else 0.0 - y)                          // (|x|<1)**+-inf
+      }
+      else if iy == 1072693248 then (if hy >= 0 then x else 1.0 / x)     // y is +-1
+      else if hy == 1073741824 then x * x                                // y is 2
+      else if hy == 1071644672 then __fpow_y_half(x, y, hx, lx, hy, ly, ix, iy, yisint)  // y is 0.5
+      else __fpow_after_specials(x, y, hx, lx, hy, ly, ix, iy, yisint)
+    }
+    else __fpow_after_specials(x, y, hx, lx, hy, ly, ix, iy, yisint)
+  }
+}
+
+// y is 0.5: x>=+0 -> sqrt(x); else fall through. (libm.rs:1258-1264)
+fn __fpow_y_half(x: Float, y: Float, hx: Int, lx: Int, hy: Int, ly: Int, ix: Int, iy: Int, yisint: Int) -> Float = {
+  if hx >= 0 then prim.fsqrt(x)
+  else __fpow_after_specials(x, y, hx, lx, hy, ly, ix, iy, yisint)
+}
+
+// after the y-specials: handle the special-x (lx==0 && ix in {0,1,inf}) then signed dispatch.
+// (libm.rs:1267-1302)
+fn __fpow_after_specials(x: Float, y: Float, hx: Int, lx: Int, hy: Int, ly: Int, ix: Int, iy: Int, yisint: Int) -> Float = {
+  if lx == 0 then {
+    if ix == 2146435072 then __fpow_special_x(x, hx, ix, hy, yisint)
+    else if ix == 0 then __fpow_special_x(x, hx, ix, hy, yisint)
+    else if ix == 1072693248 then __fpow_special_x(x, hx, ix, hy, yisint)
+    else __fpow_signed(x, y, hx, ix, iy, hy, yisint)
+  }
+  else __fpow_signed(x, y, hx, ix, iy, hy, yisint)
+}
+
+// ── public entry: math.fpow(base, exp) — libm.rs:1165-1185 (the x**0 / 1**y prelude) ──
+fn math_fpow(base: Float, exp: Float) -> Float = {
+  // NB: use `base`/`exp` DIRECTLY — a scalar `let x = base` alias of a Float PARAMETER does
+  // not lower in v1 (a bare-Var scalar bind falls to the deferred `Const` 0), which would
+  // make x=y=0.0 for every input and collapse to the x**0=1 branch (returns 1.0 always).
+  let hx = __fpow_hi(base)
+  let lx = __fpow_lo(base)
+  let hy = __fpow_hi(exp)
+  let ly = __fpow_lo(exp)
+  let ix = prim.band(hx, 2147483647)
+  let iy = prim.band(hy, 2147483647)
+  // x**0 = 1 (even if x is NaN)
+  if prim.bor(prim.band(iy, 4294967295), ly) == 0 then 1.0
+  // 1**y = 1 (even if y is NaN)
+  else if hx == 1072693248 then (if lx == 0 then 1.0 else __fpow_dispatch(base, exp, hx, lx, hy, ly, ix, iy))
+  else __fpow_dispatch(base, exp, hx, lx, hy, ly, ix, iy)
+}
