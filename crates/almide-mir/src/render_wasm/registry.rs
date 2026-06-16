@@ -217,6 +217,8 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
                 ("bytes_clear", "bytes.clear"),
                 ("bytes_set_f64_be", "bytes.set_f64_be"),
                 ("bytes_set_f64_le", "bytes.set_f64_le"),
+                ("bytes_set_f32_be", "bytes.set_f32_be"),
+                ("bytes_set_f32_le", "bytes.set_f32_le"),
             ],
         ),
         (

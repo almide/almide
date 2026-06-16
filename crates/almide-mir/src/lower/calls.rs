@@ -889,6 +889,7 @@ impl LowerCtx {
             // f64.promote_f32 over a low-32 f32 pattern.
             "f32_2f" | "bits_to_f32" => PrimKind::F32Promote,
             "i2f32" => PrimKind::IntToF32,
+            "f32bits" => PrimKind::F32Bits,
             _ => return Err(LowerError::Unsupported(format!("unknown primitive prim.{func}"))),
         };
         let mut lowered = Vec::with_capacity(args.len());

@@ -131,3 +131,19 @@ fn bytes_set_f64_le(b: Bytes, pos: Int, val: Float) -> Unit = {
   let base = prim.handle(b) + 12
   let _ = if pos >= 0 then (if pos + 8 <= n then __s64le(base + pos, bits) else 0) else 0
 }
+
+// ── f32 (demote f64 → f32, store the 4 f32 bits; prim.f32bits = the f32 bit pattern as Int) ──
+fn bytes_set_f32_be(b: Bytes, pos: Int, val: Float) -> Unit = {
+  let f = prim.f2f32(val)
+  let bits = prim.f32bits(f)
+  let n = prim.load32(prim.handle(b) + 4)
+  let base = prim.handle(b) + 12
+  let _ = if pos >= 0 then (if pos + 4 <= n then __s32be(base + pos, bits) else 0) else 0
+}
+fn bytes_set_f32_le(b: Bytes, pos: Int, val: Float) -> Unit = {
+  let f = prim.f2f32(val)
+  let bits = prim.f32bits(f)
+  let n = prim.load32(prim.handle(b) + 4)
+  let base = prim.handle(b) + 12
+  let _ = if pos >= 0 then (if pos + 4 <= n then __s32le(base + pos, bits) else 0) else 0
+}

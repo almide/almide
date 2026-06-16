@@ -800,6 +800,8 @@ fn render_op(
                     "(i64.extend_i32_u (i32.reinterpret_f32 (f32.convert_i64_s (local.get {}))))",
                     local(args[0])
                 ),
+                // Float32 → its 32-bit pattern as Int: identity (the value IS the low-32 bits).
+                PrimKind::F32Bits => format!("(local.get {})", local(args[0])),
             };
             match dst {
                 Some(d) => format!("    (local.set {} {body})\n", local(*d)),

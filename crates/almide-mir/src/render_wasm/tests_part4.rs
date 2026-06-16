@@ -2128,6 +2128,21 @@
     }
 
     #[test]
+    fn self_hosted_bytes_set_f32() {
+        // SELF-HOSTED bytes.set_f32_be/le (demote f64->f32, store 4 bits via the new f32bits prim).
+        // Round-trip through read_f32_be/le: 1.5 and 3.0 are f32-exact.
+        let src = "fn main() -> Unit = {\n  \
+            let b = bytes.new(8)\n  \
+            bytes.set_f32_be(b, 0, 1.5)\n  let g0 = bytes.read_f32_be(b, 0)\n  let e0 = prim.feq(g0, 1.5)\n  let n0 = if e0 then 1 else 0\n  println(int.to_string(n0))\n  \
+            bytes.set_f32_le(b, 4, 3.0)\n  let g1 = bytes.read_f32_le(b, 4)\n  let e1 = prim.feq(g1, 3.0)\n  let n1 = if e1 then 1 else 0\n  println(int.to_string(n1)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "bytes.set_f32_be"));
+        if let Some(out) = build_and_run("self_hosted_bytes_set_f32", &render_wasm_program(&prog)) {
+            assert_eq!(out, "1\n1");
+        }
+    }
+
+    #[test]
     fn self_hosted_bytes_read_f32_array() {
         // SELF-HOSTED bytes.read_f32_be/le_array -> List[Float]. 0x3FC00000=1.5, 0x40400000=3.0.
         let src = "fn main() -> Unit = {\n  \

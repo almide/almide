@@ -352,6 +352,10 @@ pub enum PrimKind {
     /// `f32.convert_i64_s` — Int → Float32 directly (single rounding), matching Rust's `n as f32`.
     /// Result is the f32 pattern in the low half of the i64 slot.
     IntToF32,
+    /// IDENTITY — Float32 → its 32-bit pattern as an Int. A Float32 value ALREADY holds the f32
+    /// bits in the low 32 of the i64 slot (high 32 zero, from F32Demote/IntToF32's zero-extend), so
+    /// this is a type-only reinterpret (no-op pass-through), like FloatBits for f64.
+    F32Bits,
 }
 
 /// A unary f64 op (the value is the f64 bits in an i64; render reinterprets around it).

@@ -207,3 +207,6 @@ fn bits_to_f32(bits: Int) -> Float = _
 // i64 → f32 directly (single rounding) — `n as f32`.
 @intrinsic("almide_rt_prim_i2f32")
 fn i2f32(x: Int) -> Float32 = _
+// Float32 → its 32-bit pattern as Int (identity reinterpret — the f32 bits ARE the low 32).
+@intrinsic("almide_rt_prim_f32bits")
+fn f32bits(x: Float32) -> Int = _
