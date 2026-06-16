@@ -170,6 +170,11 @@ impl LowerCtx {
                 | IrExprKind::ClosureCreate { .. }
                 | IrExprKind::Range { .. }
                 | IrExprKind::RuntimeCall { .. } => {
+                    // A string concat RETURNED (`fn greet(n) = "Hi, " + n`) — a fresh owned String
+                    // (via __str_concat), moved out as the return (cert CallFn-result i + ret m).
+                    if let Some(dst) = self.try_lower_concat_str(tail) {
+                        return Ok(Some(dst));
+                    }
                     // A `Some(scalar)`/`None` RETURNED (`fn some_int(x) = Some(x)`) is
                     // MATERIALIZED so the caller receives a real 0-or-1-element-list
                     // Option (len-correct) it can `match` — the self-host Option fns

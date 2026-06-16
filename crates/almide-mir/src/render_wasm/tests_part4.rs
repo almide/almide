@@ -3885,3 +3885,26 @@
             assert_eq!(out, "even\n7\neven\n3\n10\n24");
         }
     }
+
+    #[test]
+    fn string_concat_bind_and_arg() {
+        let src = "fn main() -> Unit = {\n  let s = \"Hi, \" + \"World\"\n  println(s)\n  println(\"a\" + \"b\")\n  let name = \"Al\"\n  println(\"Hello, \" + name + \"!\") }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("string_concat_bind_and_arg", &render_wasm_program(&prog)) {
+            assert_eq!(out, "Hi, World\nab\nHello, Al!");
+        }
+    }
+
+    #[test]
+    fn string_concat_tail_and_loop() {
+        // tail-position concat (fn greet = "Hi, " + n) + bounded loop (per-iter fresh String).
+        let src = "fn greet(n: String) -> String = \"Hi, \" + n\n\
+            fn main() -> Unit = {\n  println(greet(\"Al\"))\n\
+              var i = 0\n  while i < 3000 { println(\"x\" + int.to_string(i))\n    i = i + 1 } }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("string_concat_tail_and_loop", &render_wasm_program(&prog)) {
+            assert!(out.starts_with("Hi, Al\nx0\nx1\n"));
+            assert!(out.ends_with("x2999"));
+            assert_eq!(out.lines().count(), 3001);
+        }
+    }

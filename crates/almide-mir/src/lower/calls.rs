@@ -352,6 +352,41 @@ impl LowerCtx {
     /// (an effectful callee taints the caller honestly). The inner call must itself
     /// be admissible: a `Named` user call, or a first-order pure stdlib `Module`
     /// call. Anything else is an explicit `Unsupported` (totality).
+    /// Lower a `BinOp::ConcatStr` (string `a + b`) to a `CallFn` to the self-host `__str_concat`
+    /// (auto-linked) — a FRESH owned String of byte-len(a)+byte-len(b). The operands lower as
+    /// borrowed-or-materialized call args (like any heap call); the result is a fresh owned heap
+    /// value the CALLER owns (a bind drops it `d`, a tail returns it `m`, an arg materializes +
+    /// drops it). OWNERSHIP is the SAME proven shape as any heap-result Named/Module call
+    /// (CallFn-heap-result = cert `i`). Nested `a + b + c` recurses (each ConcatStr → one call).
+    /// Returns `None` (rolled back) if an operand doesn't lower. The mir↔ir gate counts each
+    /// `ConcatStr` node as 1 IR call (classify_corpus.rs) so this synthetic CallFn keeps
+    /// `mir_calls <= ir_calls`.
+    pub(crate) fn try_lower_concat_str(&mut self, value: &IrExpr) -> Option<ValueId> {
+        use almide_ir::BinOp;
+        let IrExprKind::BinOp { op: BinOp::ConcatStr, left, right } = &value.kind else {
+            return None;
+        };
+        let ops_mark = self.ops.len();
+        let lhh_mark = self.live_heap_handles.len();
+        let arg_exprs = [(**left).clone(), (**right).clone()];
+        let args = match self.lower_call_args(&arg_exprs) {
+            Ok(a) => a,
+            Err(_) => {
+                self.ops.truncate(ops_mark);
+                self.live_heap_handles.truncate(lhh_mark);
+                return None;
+            }
+        };
+        let dst = self.fresh_value();
+        self.ops.push(Op::CallFn {
+            dst: Some(dst),
+            name: "__str_concat".to_string(),
+            args,
+            result: Some(Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT }),
+        });
+        Some(dst)
+    }
+
     pub(crate) fn lower_call_args(&mut self, args: &[IrExpr]) -> Result<Vec<CallArg>, LowerError> {
         let mut out = Vec::with_capacity(args.len());
         for a in args {
@@ -428,6 +463,21 @@ impl LowerCtx {
                     let dst = self.fresh_value();
                     self.ops.push(Op::ConstInt { dst, value: value.to_bits() as i64 });
                     CallArg::Scalar(dst)
+                }
+                // `f(a + b)` — a string concat in a CALL-ARG position (also a NESTED `a + b + c`,
+                // where `a + b` is the left operand arg). Lower it to the __str_concat call; its
+                // fresh owned String is borrowed into the outer call and dropped at scope end.
+                IrExprKind::BinOp { op: almide_ir::BinOp::ConcatStr, .. } => {
+                    let repr = repr_of(&a.ty)?;
+                    match self.try_lower_concat_str(a) {
+                        Some(dst) => self.materialized_call_arg(dst, repr, &a.ty),
+                        None => {
+                            let dst = self.fresh_value();
+                            self.ops.push(Op::Alloc { dst, repr, init: Init::Opaque });
+                            self.record_elided_calls(a);
+                            self.materialized_call_arg(dst, repr, &a.ty)
+                        }
+                    }
                 }
                 // `f(opt ?? default)` — a `??` over a self-host materialized Option in a CALL-ARG
                 // position (`int.to_string(list.get(xs, i) ?? 0)` — extremely common). The let-bind

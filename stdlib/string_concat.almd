@@ -1,0 +1,23 @@
+// Self-hosted string concatenation — the `+` operator (BinOp::ConcatStr) lowers to a CallFn
+// to __str_concat. Allocates a fresh String of byte-len(a)+byte-len(b) and byte-copies both
+// halves (both are valid UTF-8, so the result is valid UTF-8 — string.len decodes codepoints
+// from it). len@4 is the BYTE length; data at handle+12. Pure (prim memory ops, no Stdout).
+
+fn __sc_copy(dst: Int, src: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    prim.store8(dst + i, prim.load8(src + i))
+    __sc_copy(dst, src, n, i + 1)
+  }
+
+fn __str_concat(a: String, b: String) -> String = {
+  let ha = prim.handle(a)
+  let hb = prim.handle(b)
+  let la = prim.load32(ha + 4)
+  let lb = prim.load32(hb + 4)
+  let out = prim.alloc_str(la + lb)
+  let ho = prim.handle(out)
+  let _x = __sc_copy(ho + 12, ha + 12, la, 0)
+  let _y = __sc_copy(ho + 12 + la, hb + 12, lb, 0)
+  out
+}

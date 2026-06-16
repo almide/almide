@@ -229,6 +229,13 @@ impl LowerCtx {
             // A RUNTIME CALL result is a fresh value (its call is elided ⇒ the gate
             // taints the function honestly, like Method/Computed).
             | IrExprKind::RuntimeCall { .. } => {
+                // `let s = a + b` — a string concat EXECUTES to a fresh owned String (via the
+                // self-host __str_concat), held by the binding and dropped at scope end.
+                if let Some(dst) = self.try_lower_concat_str(value) {
+                    self.value_of.insert(var, dst);
+                    self.live_heap_handles.push(dst);
+                    return Ok(());
+                }
                 // An Option ctor in the executable subset (`Some(scalar)` / `None`) is
                 // MATERIALIZED + tracked so a later `match` over the bound var executes;
                 // everything else is the deferred fresh `Alloc` (value-semantics).

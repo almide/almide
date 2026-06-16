@@ -76,6 +76,15 @@ fn count_ir_calls(body: &almide_ir::IrExpr) -> usize {
             if matches!(e.kind, Call { .. } | RuntimeCall { .. } | TailCall { .. } | FnRef { .. } | ClosureCreate { .. }) {
                 self.n += 1;
             }
+            // A string concat `a + b` (BinOp::ConcatStr) lowers to ONE synthetic `__str_concat`
+            // CallFn (a mir_call). Count the operator NODE as one ir_call so that synthetic call
+            // has a matching ir_call and `mir_calls <= ir_calls` holds BY CONSTRUCTION — a concat
+            // not yet lowered in some position just leaves mir < ir (honest caps taint), never the
+            // mir > ir over-count that would falsely caps-verify a fn. __str_concat is pure (the
+            // transitive fold sees no Stdout), so the synthetic call adds no real capability.
+            if matches!(&e.kind, almide_ir::IrExprKind::BinOp { op: almide_ir::BinOp::ConcatStr, .. }) {
+                self.n += 1;
+            }
             almide_ir::visit::walk_expr(self, e);
         }
     }
