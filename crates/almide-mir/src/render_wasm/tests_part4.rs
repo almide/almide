@@ -3617,3 +3617,23 @@
             assert_eq!(out, "42\n1");
         }
     }
+
+    #[test]
+    fn self_hosted_log_gamma_matches_v0() {
+        // math.log_gamma via Lanczos, calling the self-hosted math.log transitively.
+        let src = "fn main() -> Unit = {\n\
+            println(int.to_string(float.to_bits(math.log_gamma(1.0))))\n\
+            println(int.to_string(float.to_bits(math.log_gamma(2.0))))\n\
+            println(int.to_string(float.to_bits(math.log_gamma(5.0))))\n\
+            println(int.to_string(float.to_bits(math.log_gamma(0.5))))\n\
+            println(int.to_string(float.to_bits(math.log_gamma(10.5))))\n\
+            println(int.to_string(float.to_bits(math.log_gamma(100.0))))\n\
+            println(int.to_string(float.to_bits(math.log_gamma(3.0)))) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("self_hosted_log_gamma_matches_v0", &render_wasm_program(&prog)) {
+            assert_eq!(
+                out,
+                "-4841369599423283200\n0\n4614338759823076597\n4603330624632627640\n4624037492372685718\n4645025571947385953\n4604418534313441784"
+            );
+        }
+    }

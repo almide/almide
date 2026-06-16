@@ -1,0 +1,41 @@
+// Self-hosted math.log_gamma — Lanczos approximation (g=7, n=9), bit-exact to v0.
+//
+// Mirrors runtime/rs/src/math.rs `almide_rt_math_log_gamma`: Γ(x+1) via Lanczos,
+// input shifted by -1. The two natural-log terms route through the self-hosted
+// math.log (same vendored libm log v0 uses), so the result byte-matches v0.
+//
+// Float constants are materialized via prim.ffrombits(<exact i64 bits>) — decimal
+// literals drift ~1 ULP. The accumulation order matches Rust left-assoc exactly.
+
+fn math_log_gamma(x0: Float) -> Float = {
+  let x = x0 - 1.0
+
+  let c0 = prim.ffrombits(4607182418800015696)
+  let c1 = prim.ffrombits(4649161951908399877)
+  let c2 = prim.ffrombits(0 - 4570119468569323749)
+  let c3 = prim.ffrombits(4649995848448718040)
+  let c4 = prim.ffrombits(0 - 4582953931388014755)
+  let c5 = prim.ffrombits(4623230626370919553)
+  let c6 = prim.ffrombits(0 - 4629211466700216235)
+  let c7 = prim.ffrombits(4532011357038326351)
+  let c8 = prim.ffrombits(4504784147394309871)
+
+  // ag = c0 + Σ c[i+1] / (x + (i+1)), i = 0..7 (left-assoc accumulation)
+  let ag = c0
+    + c1 / (x + 1.0)
+    + c2 / (x + 2.0)
+    + c3 / (x + 3.0)
+    + c4 / (x + 4.0)
+    + c5 / (x + 5.0)
+    + c6 / (x + 6.0)
+    + c7 / (x + 7.0)
+    + c8 / (x + 8.0)
+
+  let t = x + 7.5
+  let half_ln_2pi = prim.ffrombits(4606452282016710324)
+
+  let lt = math.log(t)
+  let lag = math.log(ag)
+
+  half_ln_2pi + (x + 0.5) * lt - t + lag
+}
