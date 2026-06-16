@@ -1932,6 +1932,40 @@
     }
 
     #[test]
+    fn self_hosted_result_to_list() {
+        // SELF-HOSTED result.to_list → a 0-or-1-element List[Int] built over the prim floor (Ok→[v]
+        // len 1, Err→[] len 0). Byte-matches v0's `match r { Ok(v) => [v], Err(_) => [] }`.
+        let src = "fn main() -> Unit = {\n  \
+            let r: Result[Int, String] = Ok(7)\n  let xs = result.to_list(r)\n  \
+            println(int.to_string(list.len(xs)))\n  \
+            let e: Result[Int, String] = Err(\"bad\")\n  let ys = result.to_list(e)\n  \
+            println(int.to_string(list.len(ys))) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "result.to_list"));
+        if let Some(out) = build_and_run("self_hosted_result_to_list", &render_wasm_program(&prog)) {
+            assert_eq!(out, "1\n0");
+        }
+    }
+
+    #[test]
+    fn self_hosted_result_to_list_loop_reclaims() {
+        // SOUNDNESS: a bounded loop building + dropping the 0/1-element List[Int] — no leak/double-
+        // free (the flat List block is reclaimed each iteration). 4000 iters alternating Ok/Err by
+        // parity; `last` accumulates the Ok-list length so the result is observable.
+        let src = "fn main() -> Unit = {\n  \
+            var i = 0\n  var last = 0\n  \
+            while i < 4000 {\n    \
+              let r: Result[Int, String] = Ok(i)\n    let xs = result.to_list(r)\n    \
+              last = list.len(xs)\n    \
+              i = i + 1\n  }\n  \
+            println(int.to_string(last)) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("self_hosted_result_to_list_loop_reclaims", &render_wasm_program(&prog)) {
+            assert_eq!(out, "1");
+        }
+    }
+
+    #[test]
     fn self_hosted_value_as_string() {
         // SELF-HOSTED value.as_string → the HEAP-Ok Result[String, String] (1-slot DynListStr; the
         // String handle in slot 0's low 32 bits, the Ok/Err tag in its high 32 bits). as_string(str

@@ -33,3 +33,24 @@ fn result_to_option(r: Result[Int, String]) -> Option[Int] = {
   let v = prim.load64(h + 12)
   if len == 0 then Some(v) else None
 }
+
+// result.to_list(r) -> [value] for Ok, [] for Err — the Result→List bridge. A 1- or 0-element
+// List[Int] is built directly over the prim floor: `prim.alloc_list(n)` is a flat [rc][len][cap][
+// data] block (scalar Int elements → drops as a flat block, no nested ownership). `r` is borrowed;
+// the List is freshly owned (cert: Alloc `i`, freed flat by the caller `d`). Int-payload only (like
+// unwrap_or/to_option — a String Ok payload would need a List[String] variant).
+fn __rtl_one(v: Int) -> List[Int] = {
+  let xs = prim.alloc_list(1)
+  let dh = prim.handle(xs)
+  prim.store64(dh + 12, v)
+  xs
+}
+
+fn __rtl_empty() -> List[Int] = prim.alloc_list(0)
+
+fn result_to_list(r: Result[Int, String]) -> List[Int] = {
+  let h = prim.handle(r)
+  let len = prim.load32(h + 4)
+  let v = prim.load64(h + 12)
+  if len == 0 then __rtl_one(v) else __rtl_empty()
+}
