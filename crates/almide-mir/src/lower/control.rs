@@ -912,6 +912,22 @@ impl LowerCtx {
                 self.drop_arm_locals(arm_mark);
                 Some(obj)
             }
+            // A PURE stdlib `Module`-call arm (`match n { 0 => "a", _ => int.to_string(n) }` —
+            // the single most common real-program shape). Same per-arm `"im"` balance as the
+            // Named-call arm: the pure call returns a FRESH owned heap value (`i`), the arm's
+            // `Consume` moves it out (`m`); any heap arg it materializes is freed within the arm
+            // (`drop_arm_locals`). The purity gate lives in `lower_pure_module_value_call` (an
+            // impure/HO/unsupported call errors → `None` → the caller keeps the sound Opaque
+            // fallback). Was the gap that dropped a real-program `match → stdlib-call` to Opaque.
+            IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } => {
+                let arm_mark = self.live_heap_handles.len();
+                let obj = self
+                    .lower_pure_module_value_call(module.as_str(), func.as_str(), args, result_ty)
+                    .ok()?;
+                self.ops.push(Op::Consume { v: obj });
+                self.drop_arm_locals(arm_mark);
+                Some(obj)
+            }
             // A direct Option ctor arm (`if c then Some(x*2) else None` — the filter_map / map
             // closure body): materialize the 0-or-1-element Option block + Consume (move-out)
             // — the SAME per-arm `"im"` balance as a literal arm (init-agnostic `Alloc` = `i`,

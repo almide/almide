@@ -3767,3 +3767,47 @@
             assert_eq!(out, "200\n60000\n4000000000\n-1\n200\n44\n-56\n123456789\n4641240890982006784");
         }
     }
+
+    #[test]
+    fn heap_result_match_with_stdlib_call_arm() {
+        // The real-program shape the smoke test surfaced: a String-returning if/match where
+        // one arm is a literal and the other is a pure stdlib call (int.to_string).
+        let if_src = "fn f(n: Int) -> String = if n == 0 then \"a\" else int.to_string(n)\n\
+            fn main() -> Unit = { println(f(0))\n  println(f(7)) }\n";
+        let prog = lower_source(if_src);
+        if let Some(out) = build_and_run("heap_result_if_call_arm", &render_wasm_program(&prog)) {
+            assert_eq!(out, "a\n7");
+        }
+        let match_src = "fn classify(n: Int) -> String = match n % 3 {\n  0 => \"fizz\",\n  _ => int.to_string(n),\n}\n\
+            fn main() -> Unit = {\n  println(classify(9))\n  println(classify(7)) }\n";
+        let prog = lower_source(match_src);
+        if let Some(out) = build_and_run("heap_result_match_call_arm", &render_wasm_program(&prog)) {
+            assert_eq!(out, "fizz\n7");
+        }
+        // The full smoke: pipe + closures + combinators + match-with-call-arm.
+        let smoke = "fn classify(n: Int) -> String = match n % 3 {\n  0 => \"fizz\",\n  _ => int.to_string(n),\n}\n\
+            fn main() -> Unit = {\n\
+              let nums = [3, 1, 4, 1, 5, 9, 2, 6]\n\
+              let evens = nums |> list.filter((n) => n % 2 == 0)\n\
+              let doubled = evens |> list.map((n) => n * 2)\n\
+              let total = doubled |> list.fold(0, (acc, n) => acc + n)\n\
+              println(int.to_string(total))\n  println(int.to_string(list.len(nums)))\n  println(classify(9))\n  println(classify(7)) }\n";
+        let prog = lower_source(smoke);
+        if let Some(out) = build_and_run("smoke_full", &render_wasm_program(&prog)) {
+            assert_eq!(out, "24\n8\nfizz\n7");
+        }
+    }
+
+    #[test]
+    fn heap_result_call_arm_bounded_loop_no_leak() {
+        // Adversarial: 5000 iterations each producing a fresh String via the heap-result match
+        // call-arm. If the per-arm "im" balance leaked or double-freed, this would OOM/trap.
+        let src = "fn label(n: Int) -> String = match n % 2 { 0 => \"even\", _ => int.to_string(n) }\n\
+            fn main() -> Unit = {\n  var i = 0\n  while i < 5000 { println(label(i))\n    i = i + 1 } }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("heap_result_call_arm_bounded_loop_no_leak", &render_wasm_program(&prog)) {
+            // 5000 lines; just check it ran to completion (last line = label(4999) = "4999").
+            assert!(out.ends_with("4999"), "loop did not complete: tail={:?}", &out[out.len().saturating_sub(20)..]);
+            assert_eq!(out.lines().count(), 5000);
+        }
+    }
