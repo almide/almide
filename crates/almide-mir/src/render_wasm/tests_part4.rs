@@ -2216,6 +2216,37 @@
     }
 
     #[test]
+    fn self_hosted_error_context() {
+        // SELF-HOSTED error.context → Ok kept, Err(e) → Err("{ctx}: {e}"). Byte-matches v0.
+        let src = "fn main() -> Unit = {\n  \
+            let a: Result[Int, String] = Ok(5)\n  let ra = error.context(a, \"reading\")\n  \
+            match ra { Ok(v) => println(int.to_string(v)), Err(e) => println(e), }\n  \
+            let b: Result[Int, String] = Err(\"disk full\")\n  let rb = error.context(b, \"reading config\")\n  \
+            match rb { Ok(v) => println(int.to_string(v)), Err(e) => println(e), } }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "error.context"));
+        if let Some(out) = build_and_run("self_hosted_error_context", &render_wasm_program(&prog)) {
+            assert_eq!(out, "5\nreading config: disk full");
+        }
+    }
+
+    #[test]
+    fn self_hosted_error_context_loop_reclaims() {
+        // SOUNDNESS + the scalar-call-reassign-in-loop fix: a bounded loop adding context to an Err
+        // (a fresh concatenated String each iter; `last = string.len(e)` is a scalar CALL reassign, so
+        // the loop runs for real — not the model-one-iteration fallback that would mask a leak). No
+        // leak/double-free. 4000 iters; the contextualized message is "ctx: x" = 6 codepoints.
+        let src = "fn main() -> Unit = {\n  var i = 0\n  var last = 0\n  \
+            while i < 4000 {\n    let b: Result[Int, String] = Err(\"x\")\n    let rb = error.context(b, \"ctx\")\n    \
+            match rb { Ok(v) => { last = 0 }, Err(e) => { last = string.len(e) }, }\n    i = i + 1\n  }\n  \
+            println(int.to_string(last)) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("self_hosted_error_context_loop_reclaims", &render_wasm_program(&prog)) {
+            assert_eq!(out, "6");
+        }
+    }
+
+    #[test]
     fn self_hosted_bytes_skip() {
         // SELF-HOSTED bytes.skip → advance pos by n, clamped to the byte length. Pure scalar over the
         // Bytes header (len@4). Byte-matches v0's `let np = pos + n; if np > len then len else np`.

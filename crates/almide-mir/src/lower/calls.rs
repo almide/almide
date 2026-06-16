@@ -380,7 +380,7 @@ impl LowerCtx {
                             let repr = repr_of(&a.ty)?;
                             self.ops.push(Op::Alloc { dst, repr, init: alloc_init(a) });
                             self.record_elided_calls(a);
-                            self.materialized_call_arg(dst, repr)
+                            self.materialized_call_arg(dst, repr, &a.ty)
                         }
                     }
                 }
@@ -413,7 +413,7 @@ impl LowerCtx {
                     let init = alloc_init(a);
                     self.ops.push(Op::Alloc { dst, repr, init });
                     self.record_elided_calls(a);
-                    self.materialized_call_arg(dst, repr)
+                    self.materialized_call_arg(dst, repr, &a.ty)
                 }
                 // A Bool literal argument (`f(true)`): the real value 1/0 (the `if` cond
                 // a callee branches on). `LitInt` is already an `Imm` above.
@@ -454,7 +454,7 @@ impl LowerCtx {
                         self.record_elided_calls(a);
                         let repr = repr_of(&a.ty)?;
                         self.ops.push(Op::Alloc { dst, repr, init: Init::Opaque });
-                        self.materialized_call_arg(dst, repr)
+                        self.materialized_call_arg(dst, repr, &a.ty)
                     } else {
                         // A scalar Int arithmetic / comparison / prim arg computes its
                         // REAL value (`f(n / 10)` → IntBinOp); outside that subset it
@@ -494,7 +494,7 @@ impl LowerCtx {
                                 dst
                             }
                         };
-                        self.materialized_call_arg(dst, repr)
+                        self.materialized_call_arg(dst, repr, &a.ty)
                     } else {
                         // A SCALAR extraction is a `Const` copy — its container
                         // (which may itself be a call, `g().field`) is elided; record
@@ -516,7 +516,7 @@ impl LowerCtx {
                         args: inner_args,
                         result: Some(repr),
                     });
-                    self.materialized_call_arg(dst, repr)
+                    self.materialized_call_arg(dst, repr, &a.ty)
                 }
                 // A first-order pure stdlib Module-call result, materialized (the
                 // purity + higher-order gates live in `lower_pure_module_value_call`).
@@ -528,7 +528,7 @@ impl LowerCtx {
                         &a.ty,
                     )?;
                     let repr = repr_of(&a.ty)?;
-                    self.materialized_call_arg(dst, repr)
+                    self.materialized_call_arg(dst, repr, &a.ty)
                 }
                 // A `Method`/`Computed`-target call argument (`f(obj.m())`,
                 // `f((g)())`): an UNRESOLVABLE callee (dispatch / closure value not
@@ -545,7 +545,7 @@ impl LowerCtx {
                     if is_heap_ty(&a.ty) {
                         let repr = repr_of(&a.ty)?;
                         self.ops.push(Op::Alloc { dst, repr, init: Init::Opaque });
-                        self.materialized_call_arg(dst, repr)
+                        self.materialized_call_arg(dst, repr, &a.ty)
                     } else {
                         self.ops.push(Op::Const { dst });
                         CallArg::Scalar(dst)
@@ -908,10 +908,19 @@ impl LowerCtx {
     /// Register a freshly-materialized call-result temp used as a call argument: a
     /// HEAP temp is BORROWED into the call (`Handle`) and added to the scope-end
     /// drop set (it is owned by THIS scope, not moved out, so it is released after
-    /// the call returns); a scalar temp is passed by value.
-    pub(crate) fn materialized_call_arg(&mut self, dst: ValueId, repr: Repr) -> CallArg {
+    /// the call returns); a scalar temp is passed by value. A NESTED-OWNERSHIP temp
+    /// (a `List[String]` from `set.from_list(string.split(…))`, etc.) is ALSO recorded
+    /// in `heap_elem_lists` so its scope-end drop is the recursive `DropListStr` that
+    /// frees the owned element Strings — a flat `Drop` would free only the block and
+    /// LEAK the elements (per-iteration in a loop → OOM). Cert is unchanged: one `i`
+    /// (alloc) + one `d` (drop) for the temp; DropListStr vs Drop is the runtime
+    /// realization of that same single `d`.
+    pub(crate) fn materialized_call_arg(&mut self, dst: ValueId, repr: Repr, ty: &Ty) -> CallArg {
         if repr.is_heap() {
             self.live_heap_handles.push(dst);
+            if crate::lower::is_heap_elem_list_ty(ty) {
+                self.heap_elem_lists.insert(dst);
+            }
             CallArg::Handle(dst)
         } else {
             CallArg::Scalar(dst)

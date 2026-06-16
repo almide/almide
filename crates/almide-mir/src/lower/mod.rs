@@ -418,9 +418,22 @@ impl LowerCtx {
                     let local = *self.value_of.get(var).ok_or_else(|| {
                         LowerError::Unsupported("scalar loop reassigns an unbound var".into())
                     })?;
-                    let src = self.lower_scalar_value(value).ok_or_else(|| {
-                        LowerError::Unsupported("non-scalar value in a scalar loop reassignment".into())
-                    })?;
+                    // The reassigned value is a SCALAR: a literal/arithmetic (lower_scalar_value) OR a
+                    // scalar-returning CALL (`last = string.len(e)` / `list.len(xs)`). Without the call
+                    // fallback the whole `while` rolls back to model-one-iteration (runs the body ONCE
+                    // → wrong accumulation AND — worse — it MASKS per-iteration leaks: a body that
+                    // leaks each turn looks clean when run once). A heap value was already rejected
+                    // above, so this only admits a scalar; the call's caps stay in the cert (a real
+                    // CallFn). Faithful-execution by design: this surfaces real leaks, it does not hide
+                    // them (see the set.from_list/string.split in-loop known-hole).
+                    let src = self
+                        .lower_scalar_value(value)
+                        .or_else(|| self.try_lower_scalar_call(value, &value.ty))
+                        .ok_or_else(|| {
+                            LowerError::Unsupported(
+                                "non-scalar value in a scalar loop reassignment".into(),
+                            )
+                        })?;
                     self.ops.push(Op::SetLocal { local, src });
                     return Ok(());
                 }
@@ -851,6 +864,7 @@ pub(crate) fn is_self_host_result_module_fn(module: &str, func: &str) -> bool {
             | ("result", "filter")
             | ("result", "or_else")
             | ("result", "flatten")
+            | ("error", "context")
             // value.as_int/as_bool/as_float build a materialized Result[T, String] (Ok(payload)
             // on a tag match, else Err("expected T")) — a `match` over the result EXECUTES.
             | ("value", "as_int")

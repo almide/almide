@@ -42,3 +42,29 @@ fn error_chain(outer: String, cause: String) -> String = {
   let _3 = __echain_copy(d2, ch + 12, clen, 0)
   out
 }
+
+// error_context(r, ctx) = Ok kept, Err(e) → Err("{ctx}: {e}") (v0's map_err(format!)). SCALAR
+// Result[Int,String]: len 0 = Ok (rebuild the int), else Err — prepend ctx + the 2-byte ": " (58,32)
+// to the borrowed message, all freshly owned. Reuses __echain_copy.
+fn __ectx_err(ch: Int, clen: Int, msg_h: Int) -> Result[Int, String] = {
+  let mlen = prim.load32(msg_h + 4)
+  let total = clen + 2 + mlen
+  let out = prim.alloc_str(total)
+  let d0 = prim.handle(out) + 12
+  let _1 = __echain_copy(d0, ch + 12, clen, 0)
+  let d1 = d0 + clen
+  prim.store8(d1, 58)
+  prim.store8(d1 + 1, 32)
+  let d2 = d1 + 2
+  let _3 = __echain_copy(d2, msg_h + 12, mlen, 0)
+  Err(out)
+}
+
+fn error_context(r: Result[Int, String], ctx: String) -> Result[Int, String] = {
+  let h = prim.handle(r)
+  let len = prim.load32(h + 4)
+  let v = prim.load64(h + 12)
+  let ch = prim.handle(ctx)
+  let clen = prim.load32(ch + 4)
+  if len == 0 then Ok(v) else __ectx_err(ch, clen, v)
+}

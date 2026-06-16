@@ -5,7 +5,7 @@
 pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, &'static str)])] {
     &[
         (include_str!("../../../../stdlib/int_to_string.almd"), &[("int_to_string", "int.to_string")]),
-        (include_str!("../../../../stdlib/error_chain.almd"), &[("error_chain", "error.chain")]),
+        (include_str!("../../../../stdlib/error_chain.almd"), &[("error_chain", "error.chain"), ("error_context", "error.context")]),
         (include_str!("../../../../stdlib/error_message.almd"), &[("error_message", "error.message")]),
         (include_str!("../../../../stdlib/string_len.almd"), &[("string_len", "string.len"), ("string_length", "string.length")]),
         (include_str!("../../../../stdlib/string_repeat.almd"), &[("string_repeat", "string.repeat")]),
