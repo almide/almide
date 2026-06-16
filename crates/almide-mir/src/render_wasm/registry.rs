@@ -233,6 +233,7 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
                 ("bytes_set_f32_be", "bytes.set_f32_be"),
                 ("bytes_set_f32_le", "bytes.set_f32_le"),
                 ("bytes_copy_within", "bytes.copy_within"),
+                ("bytes_copy_from", "bytes.copy_from"),
             ],
         ),
         (

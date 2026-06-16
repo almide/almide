@@ -3719,3 +3719,18 @@
             assert_eq!(out, "65\n66\n67\n68\n65\n66\n67\n72");
         }
     }
+
+    #[test]
+    fn self_hosted_copy_from_matches_v0() {
+        // Cross-buffer copy: copy_from(d="________", s="ABCDEFGH", 2,1,3) → d = "__BCD___".
+        let src = "fn main() -> Unit = {\n\
+            var d = bytes.from_string(\"________\")\n\
+            let s = bytes.from_string(\"ABCDEFGH\")\n\
+            bytes.copy_from(d, s, 2, 1, 3)\n\
+            var i = 0\n\
+            while i < 8 { println(int.to_string(bytes.get_or(d, i, 0)))\n  i = i + 1 } }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("self_hosted_copy_from_matches_v0", &render_wasm_program(&prog)) {
+            assert_eq!(out, "95\n95\n66\n67\n68\n95\n95\n95");
+        }
+    }

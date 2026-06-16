@@ -176,3 +176,31 @@ fn bytes_copy_within(b: Bytes, src_start: Int, src_end: Int, dst: Int) -> Unit =
       else 0)
     else 0
 }
+
+// bytes.copy_from — copy src[src_off..][..len] into dst[dst_off..], borrow both + store (fixed size).
+// v0 gates dst_off/src_off >= len → no-op (usize cast: negatives become huge → out of range), and
+// clamps len to the available space in BOTH buffers (a negative len → huge → clamps to that space).
+fn __cf_copy(dh: Int, sh: Int, doff: Int, soff: Int, i: Int, n: Int) -> Int =
+  if i >= n then 0
+  else { prim.store8(dh + 12 + doff + i, prim.load8(sh + 12 + soff + i)); __cf_copy(dh, sh, doff, soff, i + 1, n) }
+
+fn bytes_copy_from(dst: Bytes, src: Bytes, dst_off: Int, src_off: Int, len: Int) -> Unit = {
+  let dn = prim.load32(prim.handle(dst) + 4)
+  let sn = prim.load32(prim.handle(src) + 4)
+  let dh = prim.handle(dst)
+  let sh = prim.handle(src)
+  let _ =
+    if dst_off >= 0 then
+      (if dst_off < dn then
+        (if src_off >= 0 then
+          (if src_off < sn then {
+            let avail_d = dn - dst_off
+            let avail_s = sn - src_off
+            let avail = if avail_d < avail_s then avail_d else avail_s
+            let n = if len >= 0 then (if len < avail then len else avail) else avail
+            __cf_copy(dh, sh, dst_off, src_off, 0, n)
+          } else 0)
+        else 0)
+      else 0)
+    else 0
+}
