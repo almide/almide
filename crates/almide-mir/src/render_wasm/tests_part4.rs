@@ -2099,6 +2099,34 @@
     }
 
     #[test]
+    fn self_hosted_bytes_fixed_size_mutation() {
+        // SELF-HOSTED in-place fixed-size byte mutations (borrow + prim.store). The mutation is
+        // visible to the caller (shared block); set_u16_be/le verify endianness; fill/clear too.
+        let src = "fn main() -> Unit = {\n  \
+            let b = bytes.new(10)\n  \
+            bytes.set_u8(b, 0, 200)\n  \
+            bytes.set_u16_be(b, 1, 4660)\n  \
+            bytes.set_u16_le(b, 3, 4660)\n  \
+            bytes.set_u32_be(b, 5, 16909060)\n  \
+            let g0 = bytes.get_or(b, 0, 0)\n  println(int.to_string(g0))\n  \
+            let g1 = bytes.get_or(b, 1, 0)\n  println(int.to_string(g1))\n  \
+            let g2 = bytes.get_or(b, 2, 0)\n  println(int.to_string(g2))\n  \
+            let g3 = bytes.get_or(b, 3, 0)\n  println(int.to_string(g3))\n  \
+            let g4 = bytes.get_or(b, 4, 0)\n  println(int.to_string(g4))\n  \
+            let g5 = bytes.get_or(b, 5, 0)\n  println(int.to_string(g5))\n  \
+            let g8 = bytes.get_or(b, 8, 0)\n  println(int.to_string(g8))\n  \
+            bytes.fill(b, 255)\n  let gf = bytes.get_or(b, 7, 0)\n  println(int.to_string(gf))\n  \
+            bytes.clear(b)\n  let gl = bytes.len(b)\n  println(int.to_string(gl)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "bytes.set_u8"));
+        if let Some(out) = build_and_run("self_hosted_bytes_fixed_size_mutation", &render_wasm_program(&prog)) {
+            // u8=200; u16_be 4660=0x1234 -> 18,52; u16_le -> 52,18; u32_be 16909060=0x01020304 -> b5=1,b8=4;
+            // fill 255 -> b7=255; clear -> len 0.
+            assert_eq!(out, "200\n18\n52\n52\n18\n1\n4\n255\n0");
+        }
+    }
+
+    #[test]
     fn self_hosted_datetime_from_parts() {
         // SELF-HOSTED datetime.from_parts (inverse civil), byte-matching v0: round-trips epoch 0 and
         // 1e9 from their (y,m,d,h,min,s) parts.
