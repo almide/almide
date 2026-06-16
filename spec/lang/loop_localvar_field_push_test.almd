@@ -1,0 +1,49 @@
+// Regression (#712): `list.push` into a LOCAL `var`'s record field inside a loop
+// must accumulate. LICM treated the member access `b.xs` as loop-invariant and
+// hoisted it out as a CLONE (`let __licm = b.xs.clone()`), so the push grew the
+// discarded clone and `b.xs` stayed empty (`len 0`) — on BOTH targets. The push
+// receiver is a stdlib in-place mutator's args[0]; LICM now marks its root var
+// loop-variant (in both the Module-call and wasm RuntimeCall forms), so the
+// member is never hoisted. This became reachable after #703 made a `var`/`mut`
+// record field a legal `list.push` target. Runs on BOTH targets.
+
+type Box = { xs: List[Int] }
+
+fn build(n: Int) -> Box = {
+  var b: Box = { xs: [] }
+  var i = 0
+  while i < n {
+    list.push(b.xs, i * i)
+    i = i + 1
+  }
+  b
+}
+
+test "list.push into a local var's record field accumulates across a loop (#712)" {
+  let b = build(5)
+  assert(list.len(b.xs) == 5)
+  assert(b.xs[0] == 0)
+  assert(b.xs[2] == 4)
+  assert(b.xs[4] == 16)
+}
+
+// Two parallel fields grown in the same loop (a record arena shape).
+type Pair = { a: List[Int], b: List[Int] }
+
+fn build_pair(n: Int) -> Pair = {
+  var p: Pair = { a: [], b: [] }
+  var i = 0
+  while i < n {
+    list.push(p.a, i)
+    list.push(p.b, n - i)
+    i = i + 1
+  }
+  p
+}
+
+test "two local-var record fields grown in one loop (#712)" {
+  let p = build_pair(4)
+  assert(list.len(p.a) == 4 and list.len(p.b) == 4)
+  assert(p.a[0] == 0 and p.a[3] == 3)
+  assert(p.b[0] == 4 and p.b[3] == 1)
+}
