@@ -3,9 +3,13 @@
 // target — the SAME two-hop composition as v0's int8.almd, byte-identical. The nested call
 // `int.to_T(int.from_int8(x))` is unrolled to two `let`s (v1 does not lower a call as a call-arg);
 // both callees live cross-file (int_sized / int_to_float), so no intra-file link cycle. Pure scalar.
-//
-// `int8.to_string` is omitted — it needs `int.to_string` of a possibly-NEGATIVE value, and the
-// self-hosted int.to_string is non-negative-only (signed is a separate refinement).
+// `int8.to_string` routes through int.to_string, which formats signed values (the leading '-' for
+// negatives) — Int8 magnitudes never hit the i64::MIN edge.
+
+fn int8_to_string(x: Int8) -> String = {
+  let i = int.from_int8(x)
+  int.to_string(i)
+}
 
 fn int8_to_int16(x: Int8) -> Int16 = {
   let i = int.from_int8(x)

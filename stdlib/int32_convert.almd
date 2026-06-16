@@ -1,6 +1,11 @@
 // int32_convert — SELF-HOSTED int32.to_* sized conversions for v1: `int.to_<dst>(int.from_int32(x))`
 // unrolled to two `let`s (no call-as-arg), byte-matching v0's int32.almd. Cross-file callees, pure
-// scalar. `to_string` omitted (needs signed int.to_string).
+// scalar. `to_string` routes through signed int.to_string.
+
+fn int32_to_string(x: Int32) -> String = {
+  let i = int.from_int32(x)
+  int.to_string(i)
+}
 
 fn int32_to_int8(x: Int32) -> Int8 = {
   let i = int.from_int32(x)

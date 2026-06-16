@@ -2082,6 +2082,23 @@
     }
 
     #[test]
+    fn self_hosted_sized_int_to_string() {
+        // SELF-HOSTED int8/16/32.to_string via int.to_string (which formats SIGNED values). The
+        // negative cases (-128 / -1000 / -100000) exercise the leading-'-' path, byte-matching v0.
+        let src = "fn main() -> Unit = {\n  \
+            let a: Int8 = int.to_int8(255)\n  println(int8.to_string(a))\n  \
+            let b: Int8 = int.to_int8(42)\n  println(int8.to_string(b))\n  \
+            let c: Int16 = int.to_int16(64536)\n  println(int16.to_string(c))\n  \
+            let d: Int32 = int.to_int32(4294867296)\n  println(int32.to_string(d)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "int8.to_string"));
+        if let Some(out) = build_and_run("self_hosted_sized_int_to_string", &render_wasm_program(&prog)) {
+            // 255→i8 -1; 42→42; 64536→i16 -1000; 4294867296→i32 -100000.
+            assert_eq!(out, "-1\n42\n-1000\n-100000");
+        }
+    }
+
+    #[test]
     fn self_hosted_int16_int32_conversions() {
         // SELF-HOSTED int16.to_* / int32.to_* (same two-hop shape as int8), byte-matching v0:
         // widening (1000 → 1000 / 100000 → 100000) and unsigned narrowing wrap (1000 & 0xFF = 232,

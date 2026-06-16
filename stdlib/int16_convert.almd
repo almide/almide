@@ -1,6 +1,11 @@
 // int16_convert — SELF-HOSTED int16.to_* sized conversions for v1: `int.to_<dst>(int.from_int16(x))`
 // unrolled to two `let`s (no call-as-arg), byte-matching v0's int16.almd. Cross-file callees, pure
-// scalar. `to_string` omitted (needs signed int.to_string).
+// scalar. `to_string` routes through signed int.to_string.
+
+fn int16_to_string(x: Int16) -> String = {
+  let i = int.from_int16(x)
+  int.to_string(i)
+}
 
 fn int16_to_int8(x: Int16) -> Int8 = {
   let i = int.from_int16(x)
