@@ -147,3 +147,32 @@ fn bytes_set_f32_le(b: Bytes, pos: Int, val: Float) -> Unit = {
   let base = prim.handle(b) + 12
   let _ = if pos >= 0 then (if pos + 4 <= n then __s32le(base + pos, bits) else 0) else 0
 }
+
+// bytes.copy_within — in-place overlap-safe byte move (memmove), borrow + store, no size change.
+// v0 `b.copy_within(s..e, d)` with usize-cast gating: s/d negative → huge → gate fails (no-op);
+// src_end clamped to len. Forward copy when dst<=s, backward when dst>s (so overlap is safe).
+fn __cw_fwd(base: Int, s: Int, d: Int, i: Int, n: Int) -> Int =
+  if i >= n then 0
+  else { prim.store8(base + d + i, prim.load8(base + s + i)); __cw_fwd(base, s, d, i + 1, n) }
+
+fn __cw_bwd(base: Int, s: Int, d: Int, i: Int) -> Int =
+  if i < 0 then 0
+  else { prim.store8(base + d + i, prim.load8(base + s + i)); __cw_bwd(base, s, d, i - 1) }
+
+fn __cw_move(base: Int, s: Int, d: Int, n: Int) -> Int =
+  if d <= s then __cw_fwd(base, s, d, 0, n) else __cw_bwd(base, s, d, n - 1)
+
+fn bytes_copy_within(b: Bytes, src_start: Int, src_end: Int, dst: Int) -> Unit = {
+  let n = prim.load32(prim.handle(b) + 4)
+  let base = prim.handle(b) + 12
+  let e = if src_end >= 0 then (if src_end < n then src_end else n) else n
+  let cnt = e - src_start
+  let _ =
+    if src_start >= 0 then
+      (if src_start < e then
+        (if dst >= 0 then
+          (if dst + cnt <= n then __cw_move(base, src_start, dst, cnt) else 0)
+        else 0)
+      else 0)
+    else 0
+}

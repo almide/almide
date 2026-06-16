@@ -3705,3 +3705,17 @@
             assert_eq!(out, "4616484287171002368\n4618744883077709824\n4621005478984417280\n0");
         }
     }
+
+    #[test]
+    fn self_hosted_copy_within_matches_v0() {
+        // In-place overlap-safe byte move: copy_within("ABCDEFGH", 0,3,4) → ABCDABCH.
+        let src = "fn main() -> Unit = {\n\
+            var b = bytes.from_string(\"ABCDEFGH\")\n\
+            bytes.copy_within(b, 0, 3, 4)\n\
+            var i = 0\n\
+            while i < 8 { println(int.to_string(bytes.get_or(b, i, 0)))\n  i = i + 1 } }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("self_hosted_copy_within_matches_v0", &render_wasm_program(&prog)) {
+            assert_eq!(out, "65\n66\n67\n68\n65\n66\n67\n72");
+        }
+    }
