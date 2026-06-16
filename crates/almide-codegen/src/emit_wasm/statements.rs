@@ -1007,6 +1007,7 @@ impl FuncCompiler<'_> {
     pub(super) fn expr_writes_outer_heap(&self, expr: &IrExpr) -> bool {
         struct HeapWriteScanner<'a> {
             var_table: &'a almide_ir::VarTable,
+            mut_sigs: &'a std::collections::HashMap<String, Vec<bool>>,
             found: bool,
         }
         impl IrVisitor for HeapWriteScanner<'_> {
@@ -1048,7 +1049,24 @@ impl FuncCompiler<'_> {
                 // misses them; mirror its conservative non-scalar test here.
                 if let IrExprKind::RuntimeCall { symbol, args } = &expr.kind {
                     if crate::pass_closure_conversion::is_inplace_mutator(symbol.as_str()) {
-                        if let Some(IrExprKind::Var { id }) = args.first().map(|a| &a.kind) {
+                        // args[0] may be a bare Var (`list.push(out, …)`) OR a
+                        // field/element of one (`list.push(b.xs, …)` on a `mut
+                        // b`): the realloc'd backing escapes through the rooted
+                        // binding either way. #693 only matched a bare Var, so a
+                        // MEMBER target slipped through and the fn/iter-scope
+                        // reclamation freed a live field buffer — slabhra's tape
+                        // `push_node`, where `list.push(t.depth, …)` traps after
+                        // teardown reuses the address (#705). Walk the
+                        // member/index chain to its root variable.
+                        let mut root = args.first().map(|a| &a.kind);
+                        while let Some(
+                            IrExprKind::Member { object, .. }
+                            | IrExprKind::TupleIndex { object, .. }
+                            | IrExprKind::IndexAccess { object, .. },
+                        ) = root {
+                            root = Some(&object.kind);
+                        }
+                        if let Some(IrExprKind::Var { id }) = root {
                             let ty = &self.var_table.get(*id).ty;
                             let scalar = matches!(ty, Ty::Int | Ty::Float | Ty::Bool | Ty::Unit);
                             if !scalar {
@@ -1058,10 +1076,45 @@ impl FuncCompiler<'_> {
                         }
                     }
                 }
+                // A USER function with a `mut` parameter fed an outer-scope var
+                // (`op.add(t, …)` where `t` is the tape) may realloc the field it
+                // mutates; the new buffer escapes via `t`. The stdlib-mutator
+                // check above misses it because the mutation happens one frame
+                // down. mut_param_sigs gives each callee's per-param `mut` flags.
+                if let IrExprKind::Call { target, args, .. } = &expr.kind {
+                    let key = match target {
+                        almide_ir::CallTarget::Named { name } => Some(name.to_string()),
+                        almide_ir::CallTarget::Module { module, func, .. } =>
+                            Some(format!("{}::{}", module, func)),
+                        _ => None,
+                    };
+                    if let Some(sig) = key.and_then(|k| self.mut_sigs.get(&k)) {
+                        for (i, arg) in args.iter().enumerate() {
+                            if !sig.get(i).copied().unwrap_or(false) { continue; }
+                            // arg in a `mut` slot — escape if it is rooted at a var
+                            let mut root = Some(&arg.kind);
+                            while let Some(
+                                IrExprKind::Member { object, .. }
+                                | IrExprKind::TupleIndex { object, .. }
+                                | IrExprKind::IndexAccess { object, .. },
+                            ) = root {
+                                root = Some(&object.kind);
+                            }
+                            if matches!(root, Some(IrExprKind::Var { .. })) {
+                                self.found = true;
+                                return;
+                            }
+                        }
+                    }
+                }
                 walk_expr(self, expr);
             }
         }
-        let mut scanner = HeapWriteScanner { var_table: self.var_table, found: false };
+        let mut scanner = HeapWriteScanner {
+            var_table: self.var_table,
+            mut_sigs: &self.emitter.mut_param_sigs,
+            found: false,
+        };
         scanner.visit_expr(expr);
         scanner.found
     }

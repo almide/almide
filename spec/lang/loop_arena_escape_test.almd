@@ -1,0 +1,53 @@
+// Regression (#705): the loop iteration-arena AND the function-scope heap
+// reclamation must NOT reclaim a buffer that a `list.push` grows into a place
+// that escapes the scope — whether the push targets a record FIELD of a `mut`
+// param directly, or happens TRANSITIVELY through a callee's `mut` parameter.
+// Each used to free a live buffer on wasm: a Member target slipped past #693's
+// Var-only mutator check (fn-scope reclamation freed `t.depth`'s buffer in a
+// `push_node` that also allocated the `list.get ?? d` Option box), and a
+// `mut`-param callee was invisible to the loop escape scan. Runs on BOTH
+// targets — this is the slabhra-tape build shape.
+
+type Tape = { depth: List[Int] }
+
+// `mut`-param fn that BOTH reads a field via `list.get ?? d` (allocates an
+// Option box the reclamation reclaims) AND pushes into the field (grows a buffer
+// that escapes via `t`). Exercises the Member-rooted in-place-mutator escape.
+fn node(mut t: Tape, pa: Int) -> Int = {
+  let dpa = if pa >= 0 then (list.get(t.depth, pa) ?? 0) else (0 - 1)
+  list.push(t.depth, dpa + 1)
+  list.len(t.depth) - 1
+}
+
+test "mut-param fn grows a record field while allocating an inner temp (#705)" {
+  var t: Tape = { depth: [] }
+  let a = node(t, 0 - 1)        // pa<0: no read; depth 0
+  let b = node(t, a)            // reads t.depth[0], pushes depth 1
+  let c = node(t, b)            // reads t.depth[1], pushes depth 2
+  assert(list.len(t.depth) == 3)
+  assert(t.depth[0] == 0)
+  assert(t.depth[1] == 1)
+  assert(t.depth[2] == 2)
+}
+
+// Transitive: a LOOP grows an outer record through the `mut`-param fn above —
+// the slabhra build-loop shape (`op.add(t, …)` on a `mut t`). The loop's own
+// iteration arena must see the `mut`-param call as an escape.
+fn build_tape(n: Int) -> Tape = {
+  var t: Tape = { depth: [] }
+  var prev = 0 - 1
+  var i = 0
+  while i < n {
+    prev = node(t, prev)
+    i = i + 1
+  }
+  t
+}
+
+test "loop grows an outer record via a user mut-param fn (#705)" {
+  let t = build_tape(6)
+  assert(list.len(t.depth) == 6)
+  assert(t.depth[0] == 0)
+  assert(t.depth[1] == 1)
+  assert(t.depth[5] == 5)
+}
