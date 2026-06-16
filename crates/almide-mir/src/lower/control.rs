@@ -554,25 +554,34 @@ impl LowerCtx {
         fallback: &IrExpr,
     ) -> Option<ValueId> {
         use crate::PrimKind;
-        if !is_self_host_option_call(expr) {
-            return None;
-        }
         let ops_mark = self.ops.len();
         let lhh_mark = self.live_heap_handles.len();
-        let handle = match self.lower_call_args(std::slice::from_ref(expr)) {
-            Ok(args) => match args.into_iter().next() {
-                Some(CallArg::Handle(v)) => v,
-                _ => {
+        // The Option operand's handle: either a VAR already bound to a materialized Option
+        // (`let o = list.get(xs, i); o ?? d` — the most common form, BORROWED, dropped by its
+        // own let-bind at scope end) or a DIRECT self-host Option call (materialized here).
+        let handle = if let IrExprKind::Var { id } = &expr.kind {
+            match self.value_for(*id) {
+                Ok(v) if self.materialized_options.contains(&v) => v,
+                _ => return None,
+            }
+        } else if is_self_host_option_call(expr) {
+            match self.lower_call_args(std::slice::from_ref(expr)) {
+                Ok(args) => match args.into_iter().next() {
+                    Some(CallArg::Handle(v)) => v,
+                    _ => {
+                        self.ops.truncate(ops_mark);
+                        self.live_heap_handles.truncate(lhh_mark);
+                        return None;
+                    }
+                },
+                Err(_) => {
                     self.ops.truncate(ops_mark);
                     self.live_heap_handles.truncate(lhh_mark);
                     return None;
                 }
-            },
-            Err(_) => {
-                self.ops.truncate(ops_mark);
-                self.live_heap_handles.truncate(lhh_mark);
-                return None;
             }
+        } else {
+            return None;
         };
         let h = self.fresh_value();
         self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![handle] });

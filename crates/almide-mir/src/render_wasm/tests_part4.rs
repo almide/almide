@@ -3836,3 +3836,16 @@
             assert!(out.ends_with("42"));
         }
     }
+
+    #[test]
+    fn opt_unwrap_or_var_form() {
+        // `let o = list.get(...); o ?? default` — the bind-then-use form (most common).
+        let src = "fn main() -> Unit = {\n  let xs = [7]\n\
+            let a = list.get(xs, 0)\n  println(int.to_string(a ?? 0))\n\
+            let b = list.get(xs, 9)\n  println(int.to_string(b ?? 99))\n\
+            let c = list.first(xs)\n  println(int.to_string(c ?? 0)) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("opt_unwrap_or_var_form", &render_wasm_program(&prog)) {
+            assert_eq!(out, "7\n99\n7");
+        }
+    }
