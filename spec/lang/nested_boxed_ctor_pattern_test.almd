@@ -1,0 +1,53 @@
+// Regression (#610): a NESTED constructor pattern on a BOXED recursive-variant
+// field used to emit invalid Rust natively. `Node`'s fields are `Box<Tree>`, so
+// the renderer's `Tree::Node(Tree::Leaf(a), Tree::Leaf(b))` failed rustc — the
+// field is `Box<Tree>`, not `Tree` (E0308) — and box-deref also marked the inner
+// `a: Int` for a spurious `*a` (E0614). `almide check` passed, so it shipped as a
+// native "codegen produced invalid Rust" ICE (wasm was already correct). The arm
+// is now rewritten to a flat pattern + a `matches!` shape-guard + `let-else`
+// box-move-outs, so a non-match still falls through to a later arm. Runs on BOTH
+// targets (native ⇄ wasm must agree).
+
+type Tree = Leaf(Int) | Node(Tree, Tree)
+
+fn sum(t: Tree) -> Int = match t {
+  Leaf(n) => n,
+  Node(Leaf(a), Leaf(b)) => a + b,
+  Node(l, r) => sum(l) + sum(r),
+}
+
+test "nested ctor arm refines, falls through to the general Node arm (#610)" {
+  // direct hit on the nested arm
+  assert(sum(Node(Leaf(5), Leaf(7))) == 12)
+  // left is not a Leaf → falls through to Node(l, r)
+  assert(sum(Node(Node(Leaf(1), Leaf(2)), Leaf(3))) == 6)
+  // both sides non-leaf
+  assert(sum(Node(Node(Leaf(1), Leaf(1)), Node(Leaf(2), Leaf(2)))) == 6)
+  // a bare Leaf
+  assert(sum(Leaf(42)) == 42)
+}
+
+// Depth-2 nesting + a boxed Bind (`r`) inside a nested arm, deref'd on use.
+fn classify(t: Tree) -> String = match t {
+  Node(Leaf(a), Node(Leaf(b), Leaf(c))) => "deep:" + int.to_string(a + b + c),
+  Node(Leaf(a), r) => "left:" + int.to_string(a) + ":" + int.to_string(sum(r)),
+  Leaf(n) => "leaf:" + int.to_string(n),
+  Node(l, r) => "node:" + int.to_string(sum(l) + sum(r)),
+}
+
+test "depth-2 nested pattern and a boxed bind inside a nested arm (#610)" {
+  assert_eq(classify(Leaf(9)), "leaf:9")
+  assert_eq(classify(Node(Leaf(1), Node(Leaf(2), Leaf(3)))), "deep:6")
+  assert_eq(classify(Node(Leaf(4), Leaf(10))), "left:4:10")
+  assert_eq(classify(Node(Node(Leaf(1), Leaf(1)), Leaf(5))), "node:7")
+}
+
+// The pre-existing simple shapes (no nesting) must be untouched.
+fn mirror(t: Tree) -> Tree = match t {
+  Leaf(n) => Leaf(n),
+  Node(l, r) => Node(mirror(r), mirror(l)),
+}
+
+test "non-nested recursive patterns still work (#610 no regression)" {
+  assert(sum(mirror(Node(Leaf(1), Node(Leaf(2), Leaf(3))))) == 6)
+}
