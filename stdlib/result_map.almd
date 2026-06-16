@@ -91,3 +91,27 @@ fn result_map_err(r: Result[Int, String], f: (String) -> String) -> Result[Int, 
   let x = prim.load64(h + 12)
   if len == 0 then Ok(x) else __res_maperr_err(x, f)
 }
+
+// result.filter(r, pred, err_val) = Ok(v) kept iff pred(v) (else Err(err_val)); Err(e) propagated.
+// SCALAR Result[Int, String] (len-as-tag). The closure is invoked ONLY on the Ok arm (single-level
+// `if p` — the proven heap-result Var-cond, as in option.filter). Both the kept-fail err_val and the
+// propagated message are deep-COPIED (borrowed → single ownership). Helpers isolate each arm so the
+// arms are plain calls.
+fn __rfil_err_val(err_val: String) -> Result[Int, String] = {
+  let copy = string.repeat(err_val, 1)
+  Err(copy)
+}
+fn __rfil_propagate(emsg: Int) -> Result[Int, String] = {
+  let copy = __rcopy_at(emsg)
+  Err(copy)
+}
+fn __rfil_ok(v: Int, pred: (Int) -> Bool, err_val: String) -> Result[Int, String] = {
+  let p = pred(v)
+  if p then Ok(v) else __rfil_err_val(err_val)
+}
+fn result_filter(r: Result[Int, String], pred: (Int) -> Bool, err_val: String) -> Result[Int, String] = {
+  let h = prim.handle(r)
+  let len = prim.load32(h + 4)
+  let x = prim.load64(h + 12)
+  if len == 0 then __rfil_ok(x, pred, err_val) else __rfil_propagate(x)
+}

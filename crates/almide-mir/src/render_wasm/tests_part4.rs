@@ -2058,6 +2058,43 @@
     }
 
     #[test]
+    fn self_hosted_result_filter() {
+        // SELF-HOSTED result.filter → Ok(v) kept iff pred(v) (else Err(err_val)); Err propagated. The
+        // closure runs only on the Ok arm; the err_val / propagated message are deep-copied. v0-match.
+        let src = "fn main() -> Unit = {\n  \
+            let a: Result[Int, String] = Ok(5)\n  let ra = result.filter(a, (x) => x > 3, \"small\")\n  \
+            match ra { Ok(v) => println(int.to_string(v)), Err(e) => println(e), }\n  \
+            let b: Result[Int, String] = Ok(2)\n  let rb = result.filter(b, (x) => x > 3, \"small\")\n  \
+            match rb { Ok(v) => println(int.to_string(v)), Err(e) => println(e), }\n  \
+            let c: Result[Int, String] = Err(\"bad\")\n  let rc = result.filter(c, (x) => x > 3, \"small\")\n  \
+            match rc { Ok(v) => println(int.to_string(v)), Err(e) => println(e), } }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "result.filter"));
+        if let Some(out) = build_and_run("self_hosted_result_filter", &render_wasm_program(&prog)) {
+            assert_eq!(out, "5\nsmall\nbad");
+        }
+    }
+
+    #[test]
+    fn self_hosted_result_filter_loop_reclaims() {
+        // SOUNDNESS: a bounded loop result.filter-ing, matching both arms (Err copies a String each
+        // fail iter) — no leak/double-free. 4000 iters; even i pass (>2 are kept... use i%... simpler:
+        // keep iff i is large), `last` counts kept.
+        let src = "fn main() -> Unit = {\n  \
+            var i = 0\n  var last = 0\n  \
+            while i < 4000 {\n    \
+              let a: Result[Int, String] = Ok(i)\n    let ra = result.filter(a, (x) => x > 1000, \"small\")\n    \
+              match ra { Ok(v) => { last = last + 1 }, Err(e) => { last = last }, }\n    \
+              i = i + 1\n  }\n  \
+            println(int.to_string(last)) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("self_hosted_result_filter_loop_reclaims", &render_wasm_program(&prog)) {
+            // i in 0..3999; kept iff i > 1000 → 1001..3999 = 2999.
+            assert_eq!(out, "2999");
+        }
+    }
+
+    #[test]
     fn self_hosted_bytes_skip() {
         // SELF-HOSTED bytes.skip → advance pos by n, clamped to the byte length. Pure scalar over the
         // Bytes header (len@4). Byte-matches v0's `let np = pos + n; if np > len then len else np`.
