@@ -1933,9 +1933,10 @@
 
     #[test]
     fn self_hosted_value_as_string() {
-        // SELF-HOSTED value.as_string → the HEAP-Ok Result[String,String] (len-1 DynListStr + cap@8
-        // tag). as_string(str "hello")=Ok("hello") match→"hello"; as_string(int 5)=Err("expected
-        // Str") match→the message. Byte-matches v0.
+        // SELF-HOSTED value.as_string → the HEAP-Ok Result[String, String] (1-slot DynListStr; the
+        // String handle in slot 0's low 32 bits, the Ok/Err tag in its high 32 bits). as_string(str
+        // "hello")=Ok("hello") match→"hello"; as_string(int 5)=Err("expected Str") match→the message.
+        // Byte-matches v0.
         let src = "fn main() -> Unit = {\n  \
             let vs = value.str(\"hello\")\n  let r = value.as_string(vs)\n  \
             match r { Ok(s) => println(s), Err(e) => println(e), }\n  \
