@@ -3865,3 +3865,23 @@
             assert_eq!(out, "15");
         }
     }
+
+    #[test]
+    fn smoke_combined_real_program() {
+        // Real program combining the session's language fixes: for-in over list + ?? default
+        // (var + call-arg) + a heap-result match with a stdlib module-call arm. Must byte-match v0.
+        let src = "fn label(n: Int) -> String = match n % 2 {\n  0 => \"even\",\n  _ => int.to_string(n),\n}\n\
+            fn main() -> Unit = {\n\
+              let xs = [10, 7, 4, 3]\n\
+              for x in xs { println(label(x)) }\n\
+              let first = list.first(xs) ?? 0\n\
+              let missing = list.get(xs, 99) ?? 0\n\
+              println(int.to_string(first + missing))\n\
+              var total = 0\n\
+              for x in xs { total = total + x }\n\
+              println(int.to_string(total)) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("smoke_combined_real_program", &render_wasm_program(&prog)) {
+            assert_eq!(out, "even\n7\neven\n3\n10\n24");
+        }
+    }
