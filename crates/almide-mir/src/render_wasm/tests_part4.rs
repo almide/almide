@@ -2031,6 +2031,24 @@
     }
 
     #[test]
+    fn self_hosted_float32_convert_followons() {
+        // int.to_float32 (f32.convert_i64_s, single rounding) + float.to_float32_checked (Option,
+        // round-trip exactness). 2^24+1 is not f32-representable → rounds to 2^24 (16777216).
+        let src = "fn main() -> Unit = {\n  \
+            let g = int.to_float32(16777217)\n  let gw = float.from_float32(g)\n  let r1 = prim.feq(gw, 16777216.0)\n  let n1 = if r1 then 1 else 0\n  println(int.to_string(n1))\n  \
+            let h = int.to_float32(100)\n  let hw = float.from_float32(h)\n  let r2 = prim.feq(hw, 100.0)\n  let n2 = if r2 then 1 else 0\n  println(int.to_string(n2))\n  \
+            match float.to_float32_checked(3.5) { Some(v) => println(\"some\"), None => println(\"none\"), }\n  \
+            match float.to_float32_checked(0.1) { Some(v) => println(\"some\"), None => println(\"none\"), } }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "int.to_float32"));
+        assert!(prog.functions.iter().any(|f| f.name == "float.to_float32_checked"));
+        if let Some(out) = build_and_run("self_hosted_float32_convert_followons", &render_wasm_program(&prog)) {
+            // 2^24+1 → 2^24 (rounded) / 100 exact / 3.5 f32-exact → Some / 0.1 lossy → None.
+            assert_eq!(out, "1\n1\nsome\nnone");
+        }
+    }
+
+    #[test]
     fn prim_f2i_saturates_like_v0_as_cast() {
         // prim.f2i (float.to_int / to_int64) is SATURATING (i64.trunc_sat_f64_s), matching Rust's
         // `n as i64` (v0): an out-of-range float clamps to i64::MAX instead of TRAPPING. Regression

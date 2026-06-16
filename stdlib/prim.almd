@@ -204,3 +204,6 @@ fn f32_2f(x: Float32) -> Float = _
 // `bits_to_f32(bits)` = `f32::from_bits(bits as u32) as f64` — the same widen on a raw 32-bit pattern.
 @intrinsic("almide_rt_prim_bits_to_f32")
 fn bits_to_f32(bits: Int) -> Float = _
+// i64 → f32 directly (single rounding) — `n as f32`.
+@intrinsic("almide_rt_prim_i2f32")
+fn i2f32(x: Int) -> Float32 = _

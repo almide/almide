@@ -751,6 +751,7 @@ pub(crate) fn is_self_host_option_module_fn(module: &str, func: &str) -> bool {
                 | "to_uint32_checked"
                 | "to_int64_checked"
                 | "to_uint64_checked"
+                | "to_float32_checked"
         ),
         _ => false,
     }

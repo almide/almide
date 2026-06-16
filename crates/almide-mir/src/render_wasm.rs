@@ -795,6 +795,11 @@ fn render_op(
                     "(i64.reinterpret_f64 (f64.promote_f32 (f32.reinterpret_i32 (i32.wrap_i64 (local.get {})))))",
                     local(args[0])
                 ),
+                // i64 → f32 directly (single rounding, v0's `n as f32`), held as the low-32 f32 pattern.
+                PrimKind::IntToF32 => format!(
+                    "(i64.extend_i32_u (i32.reinterpret_f32 (f32.convert_i64_s (local.get {}))))",
+                    local(args[0])
+                ),
             };
             match dst {
                 Some(d) => format!("    (local.set {} {body})\n", local(*d)),

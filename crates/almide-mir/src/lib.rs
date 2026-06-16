@@ -349,6 +349,9 @@ pub enum PrimKind {
     /// `f64.promote_f32` — Float32 → Float (f64). Reads the low-32 f32 pattern (`i32.wrap_i64`
     /// then `f32.reinterpret_i32`) and widens exactly.
     F32Promote,
+    /// `f32.convert_i64_s` — Int → Float32 directly (single rounding), matching Rust's `n as f32`.
+    /// Result is the f32 pattern in the low half of the i64 slot.
+    IntToF32,
 }
 
 /// A unary f64 op (the value is the f64 bits in an i64; render reinterprets around it).
