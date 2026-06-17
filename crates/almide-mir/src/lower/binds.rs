@@ -544,6 +544,26 @@ impl LowerCtx {
                     !is_closure_arg && crate::lower::ty_contains_fn(&a.ty)
                 });
                 let faithful = !self.last_call_had_unlifted_closure && !data_arg_has_fn;
+                // WALL the UNFAITHFUL higher-order combinator instead of silently
+                // mis-valuing it. A HOF call (`list.map`/`filter`/`fold`…) over a
+                // CAPTURING/param-invoking lambda (no liftable slot) or a fn-typed DATA
+                // arg (`list.map(fns, (f) => f(10))` over `fns: List[(Int)->Int]` — a
+                // list of closures the v1 model cannot represent) runs the self-host
+                // combinator with a missing/garbage closure and produces a zero-filled
+                // result. Leaving the result deferred (a `Const 0` `xs[i]`) emits WRONG
+                // BYTES — a silent miscompile. Walling the whole function here is the
+                // honest outcome (render discards it cleanly; no invalid wasm, no wrong
+                // output). The FAITHFUL case (every closure lifted, no fn-typed data —
+                // `list.map(xs, (x) => x + 1)`, `(p) => p.x` over `List[Point]`) is
+                // UNTOUCHED, so the in-scope HOF byte-matches stay materialized.
+                if crate::lower::is_higher_order(args) && !faithful {
+                    return Err(LowerError::Unsupported(format!(
+                        "{}.{} with an unliftable/closure-list higher-order argument \
+                         cannot execute faithfully in this brick (walled, not mis-valued)",
+                        module.as_str(),
+                        func.as_str()
+                    )));
+                }
                 if is_scalar_elem_list_ty(ty) && faithful {
                     self.materialized_lists.insert(dst);
                 }
