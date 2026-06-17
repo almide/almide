@@ -832,13 +832,14 @@ impl LowerCtx {
         }
         let ops_mark = self.ops.len();
         let lhh_mark = self.live_heap_handles.len();
+        let lifted_mark = self.lifted.len();
         let value_of_snapshot = self.value_of.clone();
 
         self.ops.push(Op::LoopStart);
         let cond_v = match self.lower_scalar_value(cond) {
             Some(v) => v,
             None => {
-                self.rollback_scalar_loop(ops_mark, lhh_mark, value_of_snapshot);
+                self.rollback_scalar_loop(ops_mark, lhh_mark, lifted_mark, value_of_snapshot);
                 return false;
             }
         };
@@ -858,7 +859,7 @@ impl LowerCtx {
         self.in_frame -= 1;
 
         if !ok {
-            self.rollback_scalar_loop(ops_mark, lhh_mark, value_of_snapshot);
+            self.rollback_scalar_loop(ops_mark, lhh_mark, lifted_mark, value_of_snapshot);
             return false;
         }
         // Per-iteration heap (a string literal in a body `println`) is released before the
@@ -868,14 +869,25 @@ impl LowerCtx {
         true
     }
 
+    /// Roll back a scalar-loop ATTEMPT (`try_lower_scalar_while` / `_for_range` / `_for_list`),
+    /// restoring EVERY side-effect the partial body lowering may have produced — not only `ops`
+    /// but the LAMBDA-LIFTED auxiliaries (`self.lifted`). A lambda call-arg in the body (`for x in
+    /// xs { … list.map([y], (u) => …) … }`) lifts a `__lambda_*` MirFunction into `self.lifted`;
+    /// if the attempt then rolls back (a heap reassignment aborts it → the model-one-iteration
+    /// fallback re-lowers the SAME body, re-lifting the lambda), the abandoned first copy would
+    /// survive and DOUBLE-COUNT its inner calls (a `mir > ir` wall breach). Truncating `lifted` to
+    /// `lifted_mark` (captured at THIS attempt's start, threaded as a local so NESTED loop attempts
+    /// each roll back to their own floor) makes the rollback total.
     fn rollback_scalar_loop(
         &mut self,
         ops_mark: usize,
         lhh_mark: usize,
+        lifted_mark: usize,
         value_of_snapshot: std::collections::HashMap<almide_ir::VarId, ValueId>,
     ) {
         self.ops.truncate(ops_mark);
         self.live_heap_handles.truncate(lhh_mark);
+        self.lifted.truncate(lifted_mark);
         self.value_of = value_of_snapshot;
     }
 
@@ -1385,6 +1397,7 @@ impl LowerCtx {
         }
         let ops_mark = self.ops.len();
         let lhh_mark = self.live_heap_handles.len();
+        let lifted_mark = self.lifted.len();
         let value_of_snapshot = self.value_of.clone();
 
         // Snapshot `end` once; init the index local `i = start` (a fresh ConstInt — a
@@ -1392,16 +1405,16 @@ impl LowerCtx {
         let end_v = match self.lower_scalar_value(end) {
             Some(v) => v,
             None => {
-                self.rollback_scalar_loop(ops_mark, lhh_mark, value_of_snapshot);
+                self.rollback_scalar_loop(ops_mark, lhh_mark, lifted_mark, value_of_snapshot);
                 return false;
             }
         };
         if self.lower_bind(var, &Ty::Int, start).is_err() {
-            self.rollback_scalar_loop(ops_mark, lhh_mark, value_of_snapshot);
+            self.rollback_scalar_loop(ops_mark, lhh_mark, lifted_mark, value_of_snapshot);
             return false;
         }
         let Some(&i_v) = self.value_of.get(&var) else {
-            self.rollback_scalar_loop(ops_mark, lhh_mark, value_of_snapshot);
+            self.rollback_scalar_loop(ops_mark, lhh_mark, lifted_mark, value_of_snapshot);
             return false;
         };
         let one_v = self.fresh_value();
@@ -1427,7 +1440,7 @@ impl LowerCtx {
         self.scalar_loop_depth -= 1;
         self.in_frame -= 1;
         if !ok {
-            self.rollback_scalar_loop(ops_mark, lhh_mark, value_of_snapshot);
+            self.rollback_scalar_loop(ops_mark, lhh_mark, lifted_mark, value_of_snapshot);
             return false;
         }
         self.drop_arm_locals(body_mark);
@@ -1439,13 +1452,25 @@ impl LowerCtx {
         true
     }
 
-    /// EXECUTE `for x in xs { … }` over a `List[Int]` as a real loop (vs the model-one-iteration
+    /// EXECUTE `for x in xs { … }` over a `List[T]` as a real loop (vs the model-one-iteration
     /// form): borrow the list handle once, walk an internal index `i` 0..len via the loop markers,
-    /// load element `i` (an i64 slot) and `SetLocal` the loop var `x` each iteration, run the body.
+    /// bind element `i` to the loop var `x` each iteration, run the body.
+    ///
+    /// TWO element shapes, BOTH borrowing the list (read-only; the list keeps owning its elements):
+    /// - a SCALAR element (`List[Int/Float/Bool]`, i64 slots) — `Load { width: 8 }` the slot and
+    ///   `SetLocal` the loop var (a stable mutable i64 local, a COPY, no ownership);
+    /// - a HEAP element (`List[String]` / nested-ownership DynListStr, i32-handle slots) — the loop
+    ///   var is the BORROWED element handle, `LoadHandle`d fresh each iteration into `value_of[var]`
+    ///   and recorded in `param_values` so it is NOT a second owner (the list's recursive drop frees
+    ///   the element; the loop var must not free it — no double-free). The body reads the element via
+    ///   string/list ops; a body that MOVES the element out (stores it elsewhere) is not in this
+    ///   subset (the borrow stays read-only), so such a body rolls back.
+    ///
     /// SOUND by reuse of the for-range / while machinery: the body is per-iteration-balanced
-    /// (`drop_arm_locals`), the markers no-op in the cert (it verifies ONE balanced iteration), and
-    /// a scalar element is a COPY (no ownership). GATED to `List[Int]` (scalar i64 elements), a scalar
-    /// Int loop var, no tuple/break/continue — a heap-element list (borrowed String elements) defers.
+    /// (`drop_arm_locals`), the markers no-op in the cert (it verifies ONE balanced iteration), the
+    /// `i < len` guard runs the body the REAL number of times (0 for an empty list — closing the
+    /// model-one-iteration bug that ran a heap-element body ONCE on a garbage handle). GATED to a
+    /// `List[scalar]` / heap-element list, a matching loop-var type, no tuple/break/continue.
     pub(crate) fn try_lower_scalar_for_list(
         &mut self,
         var: VarId,
@@ -1455,32 +1480,64 @@ impl LowerCtx {
     ) -> bool {
         use almide_lang::types::constructor::TypeConstructorId;
         use crate::PrimKind;
-        let elem_int = matches!(&iterable.ty,
-            Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && matches!(a[0], Ty::Int));
-        if !elem_int
-            || var_tuple.is_some()
-            || body_breaks_or_continues(body)
-            || !matches!(find_var_ty(body, var), Some(Ty::Int))
-        {
+        // The element type: a scalar `List[Int/Float/Bool]` (i64 slot) OR a heap-element list
+        // (`List[String]`, i32-handle slot). A Map / non-list iterable defers.
+        let elem_ty = match &iterable.ty {
+            Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 => a[0].clone(),
+            _ => return false,
+        };
+        let elem_heap = is_heap_ty(&elem_ty);
+        // The element SHAPE (scalar vs heap) comes from the iterable's element type, so the loop var
+        // is bound correctly even when it is UNUSED in the body (an `for _ in xs`, or a loop kept for
+        // its effect count) — `find_var_ty` returns None then, which must NOT fall to the model-one-
+        // iteration form (that ran the body ONCE; an empty list must run it ZERO times). When the var
+        // IS used, its body-declared type must agree with the element shape (a defensive consistency
+        // gate against a mis-typed body).
+        let var_ty = find_var_ty(body, var);
+        if let Some(vt) = &var_ty {
+            if is_heap_ty(vt) != elem_heap {
+                return false;
+            }
+        }
+        if var_tuple.is_some() || body_breaks_or_continues(body) {
             return false;
         }
         let ops_mark = self.ops.len();
         let lhh_mark = self.live_heap_handles.len();
+        let lifted_mark = self.lifted.len();
         let value_of_snapshot = self.value_of.clone();
 
         // Borrow the list (evaluated once); a Var is borrowed, a fresh literal is materialized
-        // (owned, dropped at the outer scope — it stays in live_heap_handles).
-        let list_v = match self.lower_call_args(std::slice::from_ref(iterable)) {
-            Ok(args) => match args.into_iter().next() {
-                Some(CallArg::Handle(v)) => v,
-                _ => {
-                    self.rollback_scalar_loop(ops_mark, lhh_mark, value_of_snapshot);
+        // (owned, dropped at the outer scope — it stays in live_heap_handles). A heap-element
+        // list LITERAL (`for s in ["x", "y"]`) needs its elements actually stored, so route it
+        // through `try_lower_str_list_literal` (the filled owned list) rather than the generic
+        // `lower_call_args` Alloc path (which would leave an empty/opaque block → zero iterations).
+        let str_list_literal =
+            elem_heap && matches!(&iterable.kind, IrExprKind::List { elements } if !elements.is_empty());
+        let list_v = if str_list_literal {
+            match self.try_lower_str_list_literal(iterable) {
+                Some(v) => {
+                    self.live_heap_handles.push(v);
+                    v
+                }
+                None => {
+                    self.rollback_scalar_loop(ops_mark, lhh_mark, lifted_mark, value_of_snapshot);
                     return false;
                 }
-            },
-            Err(_) => {
-                self.rollback_scalar_loop(ops_mark, lhh_mark, value_of_snapshot);
-                return false;
+            }
+        } else {
+            match self.lower_call_args(std::slice::from_ref(iterable)) {
+                Ok(args) => match args.into_iter().next() {
+                    Some(CallArg::Handle(v)) => v,
+                    _ => {
+                        self.rollback_scalar_loop(ops_mark, lhh_mark, lifted_mark, value_of_snapshot);
+                        return false;
+                    }
+                },
+                Err(_) => {
+                    self.rollback_scalar_loop(ops_mark, lhh_mark, lifted_mark, value_of_snapshot);
+                    return false;
+                }
             }
         };
         let h = self.fresh_value();
@@ -1490,16 +1547,23 @@ impl LowerCtx {
         self.ops.push(Op::ConstInt { dst: i_v, value: 0 });
         let one_v = self.fresh_value();
         self.ops.push(Op::ConstInt { dst: one_v, value: 1 });
-        // The loop var `x` — a stable mutable local, set to element[i] each iteration.
-        let x_v = self.fresh_value();
-        self.ops.push(Op::ConstInt { dst: x_v, value: 0 });
-        self.value_of.insert(var, x_v);
+        // The SCALAR loop var is a stable mutable i64 local, `SetLocal` to element[i] each iteration.
+        // (A HEAP loop var is bound fresh per iteration below — no stable local: a borrowed i32
+        // handle re-`LoadHandle`d inside the loop.)
+        let x_v = if elem_heap {
+            None
+        } else {
+            let x = self.fresh_value();
+            self.ops.push(Op::ConstInt { dst: x, value: 0 });
+            self.value_of.insert(var, x);
+            Some(x)
+        };
 
         self.ops.push(Op::LoopStart);
         let cond_v = self.fresh_value();
         self.ops.push(Op::IntBinOp { dst: cond_v, op: IntOp::Lt, a: i_v, b: len_v });
         self.ops.push(Op::LoopBreakUnless { cond: cond_v });
-        // x = load64(h + 12 + i*8).
+        // The element-slot address `h + 12 + i*8`.
         let i8_v = self.fresh_value();
         let eight = self.fresh_value();
         self.ops.push(Op::ConstInt { dst: eight, value: 8 });
@@ -1507,9 +1571,21 @@ impl LowerCtx {
         let base = self.load_addr(h, 12);
         let addr = self.fresh_value();
         self.ops.push(Op::IntBinOp { dst: addr, op: IntOp::Add, a: base, b: i8_v });
-        let elem = self.fresh_value();
-        self.ops.push(Op::Prim { kind: PrimKind::Load { width: 8 }, dst: Some(elem), args: vec![addr] });
-        self.ops.push(Op::SetLocal { local: x_v, src: elem });
+        if let Some(x_v) = x_v {
+            // Scalar element: x = load64(slot) — a COPY into the stable mutable local.
+            let elem = self.fresh_value();
+            self.ops.push(Op::Prim { kind: PrimKind::Load { width: 8 }, dst: Some(elem), args: vec![addr] });
+            self.ops.push(Op::SetLocal { local: x_v, src: elem });
+        } else {
+            // Heap element: x = the BORROWED i32 handle at the slot (LoadHandle, Ptr repr), bound
+            // fresh each iteration. Recorded in `param_values` — the list still OWNS the element
+            // (its recursive DropListStr frees it), so the loop var is NOT a second owner and is
+            // NOT added to the per-iteration drop set (no double-free).
+            let elem = self.fresh_value();
+            self.ops.push(Op::Prim { kind: PrimKind::LoadHandle, dst: Some(elem), args: vec![addr] });
+            self.value_of.insert(var, elem);
+            self.param_values.insert(elem);
+        }
 
         let body_mark = self.live_heap_handles.len();
         self.in_frame += 1;
@@ -1524,7 +1600,7 @@ impl LowerCtx {
         self.scalar_loop_depth -= 1;
         self.in_frame -= 1;
         if !ok {
-            self.rollback_scalar_loop(ops_mark, lhh_mark, value_of_snapshot);
+            self.rollback_scalar_loop(ops_mark, lhh_mark, lifted_mark, value_of_snapshot);
             return false;
         }
         self.drop_arm_locals(body_mark);

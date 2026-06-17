@@ -878,6 +878,12 @@ fn render_op(
                 PrimKind::Store { width: 1 } => format!("(i32.store8 {} {})", w(0), w(1)),
                 PrimKind::Store { width: 4 } => format!("(i32.store {} {})", w(0), w(1)),
                 PrimKind::Store { .. } => format!("(i64.store {} (local.get {}))", w(0), local(args[1])),
+                // Bounds-checked element ADDRESS via the preamble `$elem_addr` (idx<0 || idx>=cap
+                // TRAPs — v0's `a[i]` likewise halts on OOB). Both args wrap to i32 (list ptr,
+                // index); the returned i32 address zero-extends back to the i64-uniform dst.
+                PrimKind::ElemAddr => {
+                    format!("(i64.extend_i32_u (call $elem_addr {} {}))", w(0), w(1))
+                }
                 PrimKind::FdWrite => {
                     format!("(i64.extend_i32_u (call $fd_write {} {} {} {}))", w(0), w(1), w(2), w(3))
                 }

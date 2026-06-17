@@ -133,6 +133,7 @@ impl LowerCtx {
         let list = self.fresh_value();
         self.ops.push(Op::Alloc { dst: list, repr: ptr, init: Init::DynListStr { len: n } });
         self.heap_elem_lists.insert(list);
+        self.materialized_lists.insert(list);
         let h = self.fresh_value();
         self.ops.push(Op::Prim { kind: crate::PrimKind::Handle, dst: Some(h), args: vec![list] });
         for (i, elem) in elements.iter().enumerate() {
@@ -237,12 +238,16 @@ impl LowerCtx {
                     return Ok(());
                 }
             }
-            // `let d = r.x` / `let d = t.0` — a SCALAR field projection LOADS the real
-            // value from the materialized aggregate's layout slot (the VALUE MODEL).
-            // Outside the materialized subset it rolls back to the deferred `Const`.
-            if let IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. } = &value.kind {
+            // `let d = r.x` / `let d = t.0` / `let d = xs[i]` — a SCALAR field / element
+            // projection LOADS the real value from the materialized aggregate's layout slot
+            // (the VALUE MODEL); `xs[i]` is a bounds-checked `$elem_addr` load. Outside the
+            // materialized subset it rolls back to the deferred `Const`.
+            if let IrExprKind::Member { .. }
+            | IrExprKind::TupleIndex { .. }
+            | IrExprKind::IndexAccess { .. } = &value.kind
+            {
                 let mark = self.ops.len();
-                if let Some(dst) = self.lower_scalar_field_access(value) {
+                if let Some(dst) = self.lower_scalar_value(value) {
                     self.value_of.insert(var, dst);
                     return Ok(());
                 }
@@ -349,6 +354,17 @@ impl LowerCtx {
                     self.live_heap_handles.push(dst);
                     return Ok(());
                 }
+                // `let ys = xs + [7]` — a SCALAR-element list concat EXECUTES to a fresh owned list
+                // (via the self-host __list_concat), held by the binding and dropped at scope end.
+                // The result is a REAL, POPULATED block (len(a)+len(b) copied slots), so a later
+                // `ys[i]` may index it directly. (A heap-element list concat returns None and falls
+                // through to the deferred Opaque.)
+                if let Some(dst) = self.try_lower_concat_list(value) {
+                    self.value_of.insert(var, dst);
+                    self.live_heap_handles.push(dst);
+                    self.materialized_lists.insert(dst);
+                    return Ok(());
+                }
                 // `let s = "x=${n} y=${t}"` — a STRING INTERPOLATION over the executable
                 // subset (Lit / String Var/LitStr / Int Var/LitInt parts) EXECUTES to a
                 // fresh owned String via the same __str_concat chain, byte-matching v0;
@@ -439,9 +455,16 @@ impl LowerCtx {
                 let dst = self.fresh_value();
                 let repr = repr_of(ty)?;
                 let init = alloc_init(value);
+                // An all-literal `Init::IntList` is a REAL, POPULATED block (every slot a constant) —
+                // admit a direct `xs[i]` bounds-checked load over it. An `Init::Opaque` (a deferred /
+                // unsupported value) is NOT tracked: indexing it would trap on cap 0.
+                let real_list = matches!(init, Init::IntList(_));
                 self.value_of.insert(var, dst);
                 self.ops.push(Op::Alloc { dst, repr, init });
                 self.live_heap_handles.push(dst);
+                if real_list {
+                    self.materialized_lists.insert(dst);
+                }
                 self.record_elided_calls(value);
                 Ok(())
             }
@@ -502,6 +525,28 @@ impl LowerCtx {
                 let dst =
                     self.lower_pure_module_value_call(module.as_str(), func.as_str(), args, ty)?;
                 self.value_of.insert(var, dst);
+                // A SCALAR-element `List[Int/Float/Bool]` result from a self-host list call is a REAL,
+                // POPULATED block — admit a direct `xs[i]` — ONLY when the call is FAITHFULLY executable:
+                //  (1) every closure arg LIFTED (an unlifted `list.map(fns, (f) => f(10))` runs the
+                //      combinator with a missing slot → empty/garbage), AND
+                //  (2) no DATA argument carries a function type (`list.map(fns, …)` over `fns:
+                //      List[(Int)->Int]` — a list of closures the v1 model cannot represent →
+                //      empty/garbage). The combinator's OWN closure arg (a `Lambda`/`FnRef`, function-
+                //      typed by construction) is EXCLUDED — it is handled by (1), and `(p) => p.x` over
+                //      `points: List[Point]` is the faithful case that must stay tracked.
+                // Otherwise the result is unmaterialized and a `xs[i]` over it would TRAP on cap 0, so
+                // it is left deferring to `Const 0` (mis-valued, never a new runtime crash).
+                let data_arg_has_fn = args.iter().any(|a| {
+                    let is_closure_arg = matches!(
+                        &a.kind,
+                        IrExprKind::Lambda { .. } | IrExprKind::FnRef { .. } | IrExprKind::ClosureCreate { .. }
+                    );
+                    !is_closure_arg && crate::lower::ty_contains_fn(&a.ty)
+                });
+                let faithful = !self.last_call_had_unlifted_closure && !data_arg_has_fn;
+                if is_scalar_elem_list_ty(ty) && faithful {
+                    self.materialized_lists.insert(dst);
+                }
                 // A BORROW result (`prim.load_str` of a list slot — the list still owns it) is NOT
                 // added to the scope-end drop set; everything else is a fresh owned value.
                 if !self.param_values.contains(&dst) {
@@ -1098,6 +1143,8 @@ impl LowerCtx {
             self.ops.push(Op::IntBinOp { dst: addr, op: IntOp::Add, a: h, b: off });
             self.ops.push(Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args: vec![addr, v] });
         }
+        // A REAL, POPULATED scalar list block — admit a direct `xs[i]` bounds-checked load.
+        self.materialized_lists.insert(dst);
         Some(dst)
     }
 

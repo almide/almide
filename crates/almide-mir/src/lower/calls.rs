@@ -133,6 +133,7 @@ impl LowerCtx {
                 "effectful/impure stdlib Module call {module}.{func} needs a declared capability not in this brick"
             )));
         }
+        self.last_call_had_unlifted_closure = false;
         let mut out: Vec<CallArg> = Vec::with_capacity(args.len());
         for a in args {
             match &a.kind {
@@ -148,7 +149,12 @@ impl LowerCtx {
                 // closure can never be silently caps-verified.
                 IrExprKind::Lambda { params, body, .. } => match self.lift_lambda(params, body) {
                     Some(slot) => out.push(CallArg::Scalar(slot)),
-                    None => self.record_elided_calls(body),
+                    None => {
+                        // A capturing / param-invoking lambda — no liftable form. The self-host
+                        // combinator runs with a missing closure slot → an empty/garbage result.
+                        self.last_call_had_unlifted_closure = true;
+                        self.record_elided_calls(body);
+                    }
                 },
                 IrExprKind::ClosureCreate { func_name, .. } => self.ops.push(Op::CallFn {
                     dst: None,
@@ -283,6 +289,23 @@ impl LowerCtx {
                     // ir_calls` is preserved.
                     IrExprKind::BinOp { op: almide_ir::BinOp::ConcatStr, .. } => {
                         self.names.push("__str_concat".to_string());
+                    }
+                    // A SCALAR-element list `+` OPERATOR (`BinOp::ConcatList` over List[Int/Float/Bool])
+                    // lowers, where reachable, to a real `__list_concat` CallFn; in a DEFERRED position
+                    // (a statement reassignment `c = c + [10]`, an Opaque branch/arg) it is elided like
+                    // a call. Surface a `__list_concat` marker so the caps gate's `mir_calls` matches the
+                    // `ir_calls` ConcatList count (the gate counts the SAME scalar-element shape). SOUND:
+                    // `__list_concat` is pure (prim memory ops, empty capability witness), the marker
+                    // carries no value (`dst: None`). A HEAP-element list concat is NOT counted by the
+                    // gate and emits NO marker here (the `is_heap_ty` element guard mirrors the count).
+                    IrExprKind::BinOp { op: almide_ir::BinOp::ConcatList, .. } => {
+                        use almide_lang::types::constructor::TypeConstructorId;
+                        let scalar_elem = matches!(&e.ty,
+                            Ty::Applied(TypeConstructorId::List, a)
+                                if a.len() == 1 && !crate::lower::is_heap_ty(&a[0]));
+                        if scalar_elem {
+                            self.names.push("__list_concat".to_string());
+                        }
                     }
                     // A STRING INTERPOLATION in a DEFERRED position — a heap-result match/if
                     // arm where the WHOLE branch fell back to Opaque, or any Opaque value/arg.
@@ -468,6 +491,50 @@ impl LowerCtx {
         self.ops.push(Op::CallFn {
             dst: Some(dst),
             name: "__str_concat".to_string(),
+            args,
+            result: Some(Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT }),
+        });
+        Some(dst)
+    }
+
+    /// Lower a `BinOp::ConcatList` (list `a + b`) over a SCALAR-element list (`List[Int/Float/Bool]`)
+    /// to a `CallFn` to the self-host `__list_concat` (auto-linked) — a FRESH owned list of
+    /// len(a)+len(b) i64 slots, both element ranges byte-copied. The operands lower as borrowed-or-
+    /// materialized call args (like any heap call); the result is a fresh owned list the CALLER owns
+    /// (a bind drops it `d`, a tail returns it `m`, an arg materializes + drops it). OWNERSHIP is the
+    /// SAME proven shape as any heap-result Named/Module call (CallFn-heap-result = cert `i`), exactly
+    /// like `try_lower_concat_str`. GATED to a SCALAR element type: a heap-element list (`List[String]`)
+    /// has owned String handles in its slots that a copy would ALIAS (double-free on drop), so it
+    /// returns `None` (deferred — never wrong bytes). Nested `a + b + c` recurses (each ConcatList →
+    /// one call). The mir↔ir gate counts each `ConcatList` node as 1 IR call (classify_corpus.rs) so
+    /// this synthetic CallFn keeps `mir_calls <= ir_calls`.
+    pub(crate) fn try_lower_concat_list(&mut self, value: &IrExpr) -> Option<ValueId> {
+        use almide_ir::BinOp;
+        use almide_lang::types::constructor::TypeConstructorId;
+        let IrExprKind::BinOp { op: BinOp::ConcatList, left, right } = &value.kind else {
+            return None;
+        };
+        // SCALAR-element list only — a heap element (List[String]) would alias owned handles.
+        let scalar_elem = matches!(&value.ty,
+            Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && !is_heap_ty(&a[0]));
+        if !scalar_elem {
+            return None;
+        }
+        let ops_mark = self.ops.len();
+        let lhh_mark = self.live_heap_handles.len();
+        let arg_exprs = [(**left).clone(), (**right).clone()];
+        let args = match self.lower_call_args(&arg_exprs) {
+            Ok(a) => a,
+            Err(_) => {
+                self.ops.truncate(ops_mark);
+                self.live_heap_handles.truncate(lhh_mark);
+                return None;
+            }
+        };
+        let dst = self.fresh_value();
+        self.ops.push(Op::CallFn {
+            dst: Some(dst),
+            name: "__list_concat".to_string(),
             args,
             result: Some(Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT }),
         });
@@ -682,6 +749,22 @@ impl LowerCtx {
                         }
                     }
                 }
+                // `f(xs + [7])` — a SCALAR-element list concat in a CALL-ARG position. Lower it to
+                // the __list_concat call; its fresh owned list is borrowed into the outer call and
+                // dropped at scope end. A heap-element list concat (or a non-lowerable operand)
+                // returns None and falls to the deferred Opaque.
+                IrExprKind::BinOp { op: almide_ir::BinOp::ConcatList, .. } => {
+                    let repr = repr_of(&a.ty)?;
+                    match self.try_lower_concat_list(a) {
+                        Some(dst) => self.materialized_call_arg(dst, repr, &a.ty),
+                        None => {
+                            let dst = self.fresh_value();
+                            self.ops.push(Op::Alloc { dst, repr, init: Init::Opaque });
+                            self.record_elided_calls(a);
+                            self.materialized_call_arg(dst, repr, &a.ty)
+                        }
+                    }
+                }
                 // `f(opt ?? default)` — a `??` over a self-host materialized Option in a CALL-ARG
                 // position (`int.to_string(list.get(xs, i) ?? 0)` / `println(list.get(ss, i) ?? "d")`
                 // — extremely common). The let-bind path executes this via
@@ -789,15 +872,16 @@ impl LowerCtx {
                             self.materialized_call_arg(dst, repr, &a.ty)
                         }
                     } else {
-                        // A SCALAR extraction (`r.x`, `t.0`) — load the REAL field value
-                        // from the block's layout slot when the container is a
-                        // materialized scalar aggregate (the VALUE MODEL). Outside that
-                        // subset (a non-var / heap-field-aggregate container, or a
-                        // computed container `g().field`) it rolls back to a deferred
-                        // `Const` copy with the container's calls elided (the caps fold
-                        // then sees them), exactly as before.
+                        // A SCALAR extraction (`r.x`, `t.0`, `xs[i]`) — load the REAL field /
+                        // element value from the block's layout slot when the container is a
+                        // materialized scalar aggregate / a tracked list (the VALUE MODEL).
+                        // `lower_scalar_value` dispatches Member/TupleIndex to the field load and
+                        // IndexAccess to the bounds-checked `$elem_addr` load. Outside that subset
+                        // (a non-var / heap-field-aggregate container, or a computed container
+                        // `g().field`) it rolls back to a deferred `Const` copy with the
+                        // container's calls elided (the caps fold then sees them), as before.
                         let mark = self.ops.len();
-                        match self.lower_scalar_field_access(a) {
+                        match self.lower_scalar_value(a) {
                             Some(v) => CallArg::Scalar(v),
                             None => {
                                 self.ops.truncate(mark);
@@ -1119,6 +1203,54 @@ impl LowerCtx {
         Some(dst)
     }
 
+    /// Lower a SCALAR direct index `xs[i]` (`xs: List[Int/Float/Bool]`, scalar i64 element slots)
+    /// to a bounds-checked element load: `prim.handle(xs)` → `$elem_addr(list, i)` (the preamble
+    /// helper that TRAPs on a negative / `>= cap` index — v0's `a[i]` likewise halts on OOB) →
+    /// `Load { width: 8 }` of the i64 slot. The element round-trips losslessly (a narrow Int8 / a
+    /// Float's f64 bits read back exact). GATED to a SCALAR result element AND a resolvable heap
+    /// container var (a tracked List) AND a lowerable scalar index; a heap-element list (an
+    /// i32-handle slot) or an unresolvable container defers to the caller's safe fallback. The
+    /// container is BORROWED (read-only handle), no ownership — `lower_scalar_value`'s contract
+    /// (only rollback-safe value ops, never an ownership event) holds.
+    pub(crate) fn lower_scalar_index_access(
+        &mut self,
+        object: &IrExpr,
+        index: &IrExpr,
+        elem_ty: &Ty,
+    ) -> Option<ValueId> {
+        use crate::PrimKind;
+        // Scalar element only — a heap element (List[String]) needs a borrowing LoadHandle path,
+        // handled by the heap-extraction lowering, not here.
+        if is_heap_ty(elem_ty) {
+            return None;
+        }
+        // The container must be a tracked heap list VAR that is a REAL, POPULATED block (in
+        // `materialized_lists` — a literal / heap param / fully-lifted self-host list result) OR a
+        // borrowed heap PARAM (the caller passes a genuine list). An Opaque/deferred list (a
+        // `list.map` whose param-invoking lambda could not lift → an empty block, cap 0) is NOT
+        // admitted: a bounds-checked `$elem_addr` load would TRAP at `xs[0]` (cap 0), a new runtime
+        // crash. Such a list defers to the caller's safe `Const 0` fallback (mis-valued, never a trap).
+        let list = match &object.kind {
+            IrExprKind::Var { id } if is_heap_ty(&object.ty) => {
+                let v = self.value_or_global(*id).ok()?;
+                if !self.materialized_lists.contains(&v) && !self.param_values.contains(&v) {
+                    return None;
+                }
+                v
+            }
+            _ => return None,
+        };
+        let idx = self.lower_scalar_value(index)?;
+        let h = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![list] });
+        // $elem_addr(list, idx) — bounds-checked i64 slot address (traps OOB).
+        let addr = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::ElemAddr, dst: Some(addr), args: vec![h, idx] });
+        let dst = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Load { width: 8 }, dst: Some(dst), args: vec![addr] });
+        Some(dst)
+    }
+
     pub(crate) fn lower_scalar_value(&mut self, expr: &IrExpr) -> Option<ValueId> {
         use almide_ir::BinOp;
         match &expr.kind {
@@ -1127,6 +1259,12 @@ impl LowerCtx {
             // block's layout slot. Defers (→ None) for a non-materialized container.
             IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. } => {
                 self.lower_scalar_field_access(expr)
+            }
+            // A scalar list element `xs[i]` (`xs: List[Int/Float/Bool]`) — a bounds-checked
+            // element load. Defers (→ None) for a heap element (an i32-handle slot) or a
+            // non-resolvable container.
+            IrExprKind::IndexAccess { object, index } => {
+                self.lower_scalar_index_access(object, index, &expr.ty)
             }
             IrExprKind::LitInt { value } => {
                 let dst = self.fresh_value();

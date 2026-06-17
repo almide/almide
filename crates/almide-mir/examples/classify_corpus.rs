@@ -60,7 +60,7 @@ use std::path::{Path, PathBuf};
 /// "unanalyzable callee". SOUND: the concat reaches no Stdout, and its operands'
 /// own calls are captured separately by the same marker pass.
 const KNOWN_STDOUT_FREE_BUILTINS: &[&str] = &[
-    "assert", "assert_eq", "assert_ne", "eprintln", "panic", "to_string", "__str_concat", "option.unwrap_or_str",
+    "assert", "assert_eq", "assert_ne", "eprintln", "panic", "to_string", "__str_concat", "__list_concat", "option.unwrap_or_str",
 ];
 
 /// Count call nodes (Call / RuntimeCall / TailCall) in an IR expression tree —
@@ -95,6 +95,24 @@ fn count_ir_calls(body: &almide_ir::IrExpr, registry: &almide_mir::lower::Record
             // transitive fold sees no Stdout), so the synthetic call adds no real capability.
             if matches!(&e.kind, almide_ir::IrExprKind::BinOp { op: almide_ir::BinOp::ConcatStr, .. }) {
                 self.n += 1;
+            }
+            // A SCALAR-element list concat `a + b` (BinOp::ConcatList over List[Int/Float/Bool])
+            // lowers to ONE synthetic `__list_concat` CallFn (a mir_call). Count the operator NODE
+            // as one ir_call ONLY for the scalar-element shape the lowering actually emits a call
+            // for — a HEAP-element list concat (List[String]) DEFERS (no MIR call, no count), so
+            // counting it would falsely taint mir<ir. `mir_calls <= ir_calls` holds BY CONSTRUCTION.
+            // __list_concat is pure (prim memory ops, no Stdout), adding no real capability.
+            if let almide_ir::IrExprKind::BinOp { op: almide_ir::BinOp::ConcatList, .. } = &e.kind {
+                let scalar_elem = matches!(
+                    &e.ty,
+                    almide_lang::types::Ty::Applied(
+                        almide_lang::types::constructor::TypeConstructorId::List,
+                        a,
+                    ) if a.len() == 1 && !almide_mir::lower::is_heap_ty(&a[0])
+                );
+                if scalar_elem {
+                    self.n += 1;
+                }
             }
             // The `**` OPERATOR (BinOp::PowFloat / PowInt) lowers to ONE synthetic CallFn —
             // `math.fpow` (the bit-exact libm pow) for Float, `math.pow` (int squaring) for Int.

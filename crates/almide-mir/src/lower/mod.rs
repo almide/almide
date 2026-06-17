@@ -294,6 +294,23 @@ pub(crate) struct LowerCtx {
     /// not a flat [`Op::Drop`] — so the element Strings are reclaimed. Populated when an
     /// `alloc_list_str` result or a `List[String]`-typed bind is created (Machinery 2).
     heap_elem_lists: HashSet<ValueId>,
+    /// MIR values KNOWN to be a REAL, POPULATED list block (a list LITERAL, a heap-list PARAM —
+    /// the v1 convention passes a genuine block —, or a self-host list-returning CALL whose closure
+    /// args ALL lifted, so the callee actually fills it). A direct `xs[i]` (`lower_scalar_index_access`)
+    /// computes a bounds-checked `$elem_addr` load that TRAPS on `i >= cap`, so it may fire ONLY over
+    /// a value in this set: an Opaque/deferred list (a `list.map` whose param-invoking lambda could
+    /// NOT lift → an empty/garbage block) has cap 0 and would TRAP at `xs[0]`, a NEW crash where the
+    /// deferred `Const 0` merely mis-valued. Gating on real materialization keeps `xs[i]` from
+    /// regressing an unmaterialized-list program to a runtime trap.
+    materialized_lists: HashSet<ValueId>,
+    /// Set true by `lower_pure_module_call_args` when a closure ARGUMENT to a pure combinator could
+    /// NOT be lifted to a FuncRef (a capturing / param-invoking lambda — `list.map(fns, (f) => f(10))`)
+    /// and so fell back to `record_elided_calls`. The auto-linked self-host combinator then runs with
+    /// a MISSING closure slot → an empty / garbage result list, NOT a faithfully-filled one. The
+    /// `list.map` bind reads this to decide whether the result is a `materialized_lists` member (safe
+    /// to index directly) — a genuinely-lifted map fills the list (admit `xs[i]`), an unlifted one
+    /// does not (defer `xs[i]` to `Const 0`, no trap). Reset before each module-call arg lowering.
+    last_call_had_unlifted_closure: bool,
     /// MIR values of the dynamic `Value` type (the Codec data model). A scope-end drop emits
     /// [`Op::DropValue`] (runtime-tag-dispatched: a Str/Array/Object Value frees its one heap
     /// payload, a scalar Value just frees the block) instead of a flat [`Op::Drop`]. Populated
@@ -348,6 +365,30 @@ pub(crate) fn is_value_ty(ty: &Ty) -> bool {
         Ty::Variant { name, .. } => name.as_str() == "Value",
         _ => false,
     }
+}
+
+/// Does `ty` CONTAIN a function type anywhere (a `Ty::Fn`, or a List/Option/etc. OF functions —
+/// `List[(Int) -> Int]`)? A self-host list combinator over such an argument (`list.map(fns, …)`
+/// where `fns: List[(Int)->Int]`) cannot faithfully fill its result (the v1 model has no
+/// representation for a list of closures), so the result is empty/garbage and must NOT be treated
+/// as a real `materialized_lists` block (a direct `xs[i]` over it would trap on cap 0).
+pub(crate) fn ty_contains_fn(ty: &Ty) -> bool {
+    match ty {
+        Ty::Fn { .. } => true,
+        Ty::Applied(_, args) => args.iter().any(ty_contains_fn),
+        Ty::Tuple(tys) => tys.iter().any(ty_contains_fn),
+        _ => false,
+    }
+}
+
+/// Is `ty` a `List[T]` whose element `T` is a SCALAR (non-heap) type (`List[Int/Float/Bool]`)?
+/// Such a list's slots are plain i64 values — a direct `xs[i]` reads one with `Load { width: 8 }`,
+/// and `__list_concat` byte-copies them with no ownership. The complement of `is_heap_elem_list_ty`
+/// for the List constructor.
+pub(crate) fn is_scalar_elem_list_ty(ty: &Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    matches!(ty,
+        Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && !is_heap_ty(&a[0]))
 }
 
 /// Is `ty` a `List[T]` / `Option[T]` whose element `T` is itself a HEAP type (e.g. `List[String]`,

@@ -264,6 +264,12 @@ impl LowerCtx {
                     if let Some(dst) = self.try_lower_concat_str(tail) {
                         return Ok(Some(dst));
                     }
+                    // A SCALAR-element list concat RETURNED (`fn pair(xs) = xs + [7]`) — a fresh owned
+                    // list (via __list_concat), moved out as the return (cert CallFn-result i + ret m).
+                    // A heap-element list concat returns None and falls through to the deferred Opaque.
+                    if let Some(dst) = self.try_lower_concat_list(tail) {
+                        return Ok(Some(dst));
+                    }
                     // A STRING INTERPOLATION RETURNED (`fn greet(n) = "Hi, ${n}"`) over the
                     // executable subset — a fresh owned String (via the __str_concat chain),
                     // moved out as the return. A compound/call-operand interp falls through to
@@ -454,14 +460,17 @@ impl LowerCtx {
                 self.record_elided_calls(tail);
                 Ok(Some(dst))
             }
-            // A SCALAR field / tuple element TAIL (`(p) => p.x`, `fn fst(t) = t.0`) —
-            // LOAD the real value from the materialized aggregate's layout slot (the
-            // VALUE MODEL read side, what makes `list.map(points, (p)=>p.x)` return the
-            // real field). Outside the materialized subset it rolls back to the deferred
-            // `Const` (its container's calls elided), exactly as before.
-            IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. } => {
+            // A SCALAR field / tuple element / list element TAIL (`(p) => p.x`, `fn fst(t) = t.0`,
+            // `fn at(xs, i) = xs[i]`) — LOAD the real value from the materialized aggregate's layout
+            // slot (the VALUE MODEL read side, what makes `list.map(points, (p)=>p.x)` return the
+            // real field); `xs[i]` is the bounds-checked `$elem_addr` load. `lower_scalar_value`
+            // dispatches each. Outside the materialized subset it rolls back to the deferred `Const`
+            // (its container's calls elided), exactly as before.
+            IrExprKind::Member { .. }
+            | IrExprKind::TupleIndex { .. }
+            | IrExprKind::IndexAccess { .. } => {
                 let mark = self.ops.len();
-                if let Some(dst) = self.lower_scalar_field_access(tail) {
+                if let Some(dst) = self.lower_scalar_value(tail) {
                     return Ok(Some(dst));
                 }
                 self.ops.truncate(mark);
@@ -472,11 +481,10 @@ impl LowerCtx {
             }
             IrExprKind::LitBool { .. }
             | IrExprKind::UnOp { .. }
-            // A SCALAR element/map extraction is an unambiguous COPY (a scalar is never
+            // A SCALAR map extraction is an unambiguous COPY (a scalar is never
             // reference-counted), so it is a `Const` — its container carries its own
             // ownership. (A HEAP extraction is an ALIAS / share — it needs a layout-aware
             // field-access op with `Dup` semantics and stays walled until that brick.)
-            | IrExprKind::IndexAccess { .. }
             | IrExprKind::MapAccess { .. }
             // A SCALAR error-operator result (`x!`/`x ?? d`/`x?.f` yielding a scalar) is
             // likewise a fresh `Const`; the operator's value + early-return are deferred.

@@ -324,6 +324,15 @@ pub enum PrimKind {
     LoadHandle,
     /// Store the low `width` bytes (1/4/8) of an i64 value at a computed i64 address.
     Store { width: u8 },
+    /// Bounds-checked element ADDRESS for a direct `xs[i]` index — `args = [list_handle,
+    /// index]` (both i64-uniform: the handle reinterpreted to an address, the index a scalar
+    /// i64), dst = the i64 element-slot address `list + LIST_HEADER + idx*ELEM_SIZE`. Renders
+    /// `(call $elem_addr ...)` (the SAME preamble helper v0's `$list_get`/`$list_set` use), so a
+    /// negative or `>= cap` index TRAPS (the controlled-halt bounds wall) instead of reading
+    /// outside the block — v0's `a[i]` likewise halts on OOB (it prints `index out of bounds`
+    /// and exits 1; this traps). For an in-bounds index the loaded element byte-matches v0. A
+    /// scalar address computation, no ownership (a no-op in verify_ownership like every Prim).
+    ElemAddr,
     /// The `fd_write` WASI host call — `args = [fd, iov, count, nwritten]`, dst = the
     /// i64 errno. The ONLY sandbox exit; carries [`Capability::Stdout`].
     FdWrite,
