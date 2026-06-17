@@ -4345,18 +4345,19 @@
     fn unlinked_stdlib_call_is_walled_not_dangling_wasm() {
         use crate::lower::LowerError;
         use crate::render_wasm::{try_render_wasm_program, unlinked_call_names};
-        // `float.to_string` is NOT in the self-host registry (float dtoa is unrevived),
-        // so it auto-links nothing and stays a bare `CallFn` — the canonical unlinked call.
-        // (`float.from_int` IS registered, so it is linked — the contrast that proves the
-        // wall is precise, not a blanket reject of all float.* calls.)
+        // `float.to_fixed` is NOT in the self-host registry (only the free-format `float.to_string`
+        // dtoa is self-hosted; the fixed-precision `{:.N}` path is unrevived), so it auto-links
+        // nothing and stays a bare `CallFn` — the canonical unlinked call. (`float.from_int` AND
+        // the now-linked `float.to_string` ARE registered — the contrast that proves the wall is
+        // precise, not a blanket reject of all float.* calls.)
         let src = "fn main() -> Unit = {\n  \
-            let x = float.from_int(3)\n  println(float.to_string(x)) }\n";
+            let x = float.from_int(3)\n  println(float.to_fixed(x, 2)) }\n";
         let prog = lower_source(src);
         // The resolution check flags exactly the unlinked name, nothing else.
         let missing = unlinked_call_names(&prog);
         assert!(
-            missing.contains("float.to_string"),
-            "the unlinked float.to_string must be detected, got {missing:?}"
+            missing.contains("float.to_fixed"),
+            "the unlinked float.to_fixed must be detected, got {missing:?}"
         );
         assert!(
             !missing.contains("float.from_int"),
@@ -4366,7 +4367,7 @@
         match try_render_wasm_program(&prog) {
             Err(LowerError::Unsupported(msg)) => {
                 assert!(
-                    msg.contains("float.to_string"),
+                    msg.contains("float.to_fixed"),
                     "the wall message must name the unlinked callee, got {msg:?}"
                 );
             }
@@ -4449,27 +4450,31 @@
     }
 
     #[test]
-    fn string_interp_float_part_walls_not_invalid_wasm() {
-        // The UNCOVERED Float type: `${f}` desugars to `float.to_string(f)`, which is PURE
-        // (emitted as a real CallFn) but UNLINKED (float dtoa is not self-hosted) — so the
-        // render wall REJECTS the whole function with Unsupported (NOT invalid wasm, NOT a
-        // v0 regression: v0 keeps its own float_display path; this only changes v1).
-        use crate::lower::LowerError;
-        use crate::render_wasm::{try_render_wasm_program, unlinked_call_names};
-        let src = "fn main() -> Unit = {\n  let f = 2.5\n  println(\"f=${f}\") }\n";
+    fn string_interp_float_part_links_and_byte_matches_v0() {
+        // The Float interp type, now COVERED: `${f}` desugars to `float.to_string(f)`, which is
+        // self-hosted (the faithful Dragon4 in stdlib/float_to_string.almd) and AUTO-LINKED — so
+        // the interp lowers and byte-matches v0's float_display, instead of clean-walling. The
+        // goldens are v0's `almide run` output for the same interps:
+        //   f=2.5  → "f=2.5" ; g=0.001 → "g=0.001" (negative-k leading zeros) ;
+        //   1.0/3.0 → "third=0.3333333333333333" (shortest round-trip).
+        let src = "fn main() -> Unit = {\n  \
+            let f = 2.5\n  println(\"f=${f}\")\n  \
+            let g = 0.001\n  println(\"g=${g}\")\n  \
+            let h = 1.0 / 3.0\n  println(\"third=${h}\") }\n";
         let prog = lower_source(src);
+        // STRUCTURAL: a Float interp must auto-link float.to_string.
         assert!(
-            unlinked_call_names(&prog).contains("float.to_string"),
-            "a Float interp must desugar to the unlinked float.to_string, got {:?}",
-            unlinked_call_names(&prog)
+            prog.functions.iter().any(|f| f.name == "float.to_string"),
+            "a Float interp part must auto-link float.to_string"
         );
-        match try_render_wasm_program(&prog) {
-            Err(LowerError::Unsupported(msg)) => assert!(
-                msg.contains("float.to_string"),
-                "the wall message must name the unlinked float.to_string, got {msg:?}"
-            ),
-            Err(other) => panic!("expected Unsupported, got {other:?}"),
-            Ok(_) => panic!("a Float interp must wall, not render to (possibly invalid) wasm"),
+        // Fully linkable now — no wall.
+        assert!(
+            crate::render_wasm::unlinked_call_names(&prog).is_empty(),
+            "a Float interp must be fully linkable (no wall), got {:?}",
+            crate::render_wasm::unlinked_call_names(&prog)
+        );
+        if let Some(out) = build_and_run("string_interp_float", &render_wasm_program(&prog)) {
+            assert_eq!(out, "f=2.5\ng=0.001\nthird=0.3333333333333333");
         }
     }
 

@@ -1061,3 +1061,43 @@
             assert_eq!(out, "hi\nnone\nZ\nX\n5");
         }
     }
+
+    #[test]
+    fn self_hosted_float_to_string_matches_v0_dragon4() {
+        // The hard dtoa self-host: `float.to_string` is a FAITHFUL Dragon4 (Steele & White)
+        // free-format shortest correctly-rounded decimal over the prim bignum floor — byte-
+        // matching v0's `format!("{}", x)` (shortest round-trip, ALWAYS full decimal, never
+        // scientific; integer-valued floats get a ".0"). This e2e exercises:
+        //   - integer-valued (".0" suffix): 1.0, 100.0, 2.0
+        //   - leading-zero negative-k (the signed-k slot fix; load32 would have dropped the sign):
+        //     0.001, 0.0001, 0.000001
+        //   - shortest round-trip: 1.0/3.0 = 0.3333333333333333, 0.1+0.2 = 0.30000000000000004
+        //   - full-decimal large (no sci notation): 1e20 = 100000000000000000000.0
+        //   - specials: +inf / -inf / NaN, signed zero -0.0.
+        // The exhaustive correctness gate (thousands of random + boundary f64) is the
+        // out-of-tree dual-oracle (corpus-wall does not check output bytes).
+        let src = "fn show(f: Float) -> Unit = println(float.to_string(f))\n\
+            fn main() -> Unit = {\n  \
+              show(1.0)\n  show(100.0)\n  show(2.0)\n  \
+              show(0.001)\n  show(0.0001)\n  show(0.000001)\n  \
+              show(1.0 / 3.0)\n  show(0.1 + 0.2)\n  \
+              show(1e20)\n  \
+              show(1.0 / 0.0)\n  show(-1.0 / 0.0)\n  show(0.0 / 0.0)\n  \
+              show(-0.0)\n  show(0.5)\n }\n";
+        let prog = lower_source(src);
+        assert!(
+            prog.functions.iter().any(|f| f.name == "float.to_string"),
+            "float.to_string must be auto-linked"
+        );
+        if let Some(out) = build_and_run("float_to_string", &render_wasm_program(&prog)) {
+            assert_eq!(
+                out,
+                "1.0\n100.0\n2.0\n\
+                 0.001\n0.0001\n0.000001\n\
+                 0.3333333333333333\n0.30000000000000004\n\
+                 100000000000000000000.0\n\
+                 inf\n-inf\nNaN\n\
+                 -0.0\n0.5"
+            );
+        }
+    }
