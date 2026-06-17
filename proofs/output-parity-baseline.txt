@@ -1,4 +1,7 @@
+spec/churn/map_entry_churn.almd
 spec/churn/record_churn.almd
+spec/lang/var_in_if_test.almd
+spec/wasm_cross/anon_records_and_fusion.almd
 spec/wasm_cross/assign_alias_rc.almd
 spec/wasm_cross/autotry_result_first_arg.almd
 spec/wasm_cross/bytes_f16.almd
@@ -28,6 +31,7 @@ spec/wasm_cross/math_pow.almd
 spec/wasm_cross/nested_tuple_destructure.almd
 spec/wasm_cross/num_edge_to_string.almd
 spec/wasm_cross/phantom_type_param.almd
+spec/wasm_cross/rc_reclaim_churn.almd
 spec/wasm_cross/records_variants.almd
 spec/wasm_cross/reserved_keyword_fn.almd
 spec/wasm_cross/string_codepoint.almd
@@ -35,3 +39,4 @@ spec/wasm_cross/string_codepoint_index.almd
 spec/wasm_cross/string_count_truncation.almd
 spec/wasm_cross/string_lines.almd
 spec/wasm_cross/trig_libm.almd
+spec/wasm_cross/wide_function_body.almd
