@@ -133,7 +133,7 @@ pub fn render_wasm(func: &MirFunction) -> String {
     let no_slots: BTreeMap<String, u32> = BTreeMap::new();
     let no_param_counts: BTreeMap<String, usize> = BTreeMap::new();
     for op in &func.ops {
-        body.push_str(&render_op(op, &label_off, &no_slots, &no_param_counts));
+        body.push_str(&render_op(op, &label_off, &no_slots, &no_param_counts, &func.heap_slot_masks));
     }
 
     format!(
@@ -449,7 +449,7 @@ pub fn render_wasm_fn(
                 let close = if dst.is_some() { "))\n" } else { ")\n" };
                 body.push_str(&format!("{}      ){close}", arm_val(val)));
             }
-            _ => body.push_str(&render_op(op, label_off, func_slots, param_counts)),
+            _ => body.push_str(&render_op(op, label_off, func_slots, param_counts, &func.heap_slot_masks)),
         }
     }
     let tail = func.ret.map(|r| format!("    (local.get {})\n", local(r))).unwrap_or_default();
@@ -561,6 +561,7 @@ fn render_op(
     label_off: &BTreeMap<String, (u32, u32)>,
     func_slots: &BTreeMap<String, u32>,
     param_counts: &BTreeMap<String, usize>,
+    masks: &BTreeMap<ValueId, Vec<usize>>,
 ) -> String {
     match op {
         // A STRING literal — a heap block `[rc][len][cap][utf8 bytes...]` (same header
@@ -784,18 +785,44 @@ fn render_op(
         // Uses the function-wide scratch locals $dlsi/$dlsn (declared in render_wasm_fn).
         Op::DropListStr { v } => {
             let p = local(*v);
-            format!(
-                "    (if (i32.eq (i32.load (local.get {p})) (i32.const 1))\n\
-                 \x20     (then\n\
-                 \x20       (local.set $dlsi (i32.const 0))\n\
-                 \x20       (local.set $dlsn (i32.load (i32.add (local.get {p}) (i32.const 4))))\n\
-                 \x20       (block $dlsbrk (loop $dlscont\n\
-                 \x20         (br_if $dlsbrk (i32.ge_s (local.get $dlsi) (local.get $dlsn)))\n\
-                 \x20         (call $rc_dec (i32.wrap_i64 (i64.load (i32.add (local.get {p}) (i32.add (i32.const 12) (i32.mul (local.get $dlsi) (i32.const 8)))))))\n\
-                 \x20         (local.set $dlsi (i32.add (local.get $dlsi) (i32.const 1)))\n\
-                 \x20         (br $dlscont)))))\n\
-                 \x20   (call $rc_dec (local.get {p}))\n"
-            )
+            // A MIXED record/tuple block carries a per-value HEAP-SLOT MASK: free EXACTLY
+            // those slots (the scalar slots must NOT be `rc_dec`'d), then the block. The mask
+            // slot indices are compile-time known, so the free is UNROLLED (no runtime loop);
+            // the block's `len@4` is the field count, not iterated. The uniform `List[String]`
+            // (no mask) keeps the runtime loop over every slot. Both are gated on rc==1 so a
+            // shared block's aliases don't free the heap fields early — and both emit the SAME
+            // single `d` to the certificate (an `Op::DropListStr`).
+            if let Some(slots) = masks.get(v) {
+                let frees = slots
+                    .iter()
+                    .map(|&i| {
+                        let off = 12 + (i as u32) * 8;
+                        format!(
+                            "         (call $rc_dec (i32.wrap_i64 (i64.load (i32.add (local.get {p}) (i32.const {off})))))\n"
+                        )
+                    })
+                    .collect::<String>();
+                format!(
+                    "    (if (i32.eq (i32.load (local.get {p})) (i32.const 1))\n\
+                     \x20     (then\n\
+                     {frees}\
+                     \x20     ))\n\
+                     \x20   (call $rc_dec (local.get {p}))\n"
+                )
+            } else {
+                format!(
+                    "    (if (i32.eq (i32.load (local.get {p})) (i32.const 1))\n\
+                     \x20     (then\n\
+                     \x20       (local.set $dlsi (i32.const 0))\n\
+                     \x20       (local.set $dlsn (i32.load (i32.add (local.get {p}) (i32.const 4))))\n\
+                     \x20       (block $dlsbrk (loop $dlscont\n\
+                     \x20         (br_if $dlsbrk (i32.ge_s (local.get $dlsi) (local.get $dlsn)))\n\
+                     \x20         (call $rc_dec (i32.wrap_i64 (i64.load (i32.add (local.get {p}) (i32.add (i32.const 12) (i32.mul (local.get $dlsi) (i32.const 8)))))))\n\
+                     \x20         (local.set $dlsi (i32.add (local.get $dlsi) (i32.const 1)))\n\
+                     \x20         (br $dlscont)))))\n\
+                     \x20   (call $rc_dec (local.get {p}))\n"
+                )
+            }
         }
         // RUNTIME-TAG-DISPATCHED drop of a dynamic `Value`: IFF this is the last reference (rc==1)
         // AND the variant TAG (at +4) is a heap payload (≥ 4 = Str/Array/Object), first `rc_dec`

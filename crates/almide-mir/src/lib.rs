@@ -525,6 +525,17 @@ pub struct MirFunction {
     /// body actually uses against this declared bound — accept ⟹ no undeclared
     /// host effect (proofs/CapabilityBound.v). Empty = a pure/sandboxed function.
     pub declared_caps: Vec<Capability>,
+    /// RENDER-ONLY side table: a value → the i64-SLOT INDICES that hold an OWNED heap
+    /// handle, for a MIXED scalar+heap record/tuple block (e.g. `R { name: String, n: Int }`
+    /// = `[0]`). It refines the recursive free of an [`Op::DropListStr`] on such a value:
+    /// instead of the uniform "free EVERY slot" loop (correct only for a homogeneous
+    /// `List[String]`), the render frees exactly these slots, then the block. A value
+    /// ABSENT from this table keeps the uniform-loop behavior (`List[String]` / all-heap
+    /// aggregate). This carries NO ownership semantics — the certificate sees a `DropListStr`
+    /// as the SAME single `d` regardless (each heap field was already accounted `m`/consumed
+    /// at its move-in store), exactly as for `List[String]`. So it is a pure rendering
+    /// refinement (like the `DropValue` tag dispatch) — NOT a new op or certificate event.
+    pub heap_slot_masks: BTreeMap<ValueId, Vec<usize>>,
 }
 
 /// A whole MIR program.

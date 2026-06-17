@@ -707,7 +707,15 @@ impl LowerCtx {
                                 dst
                             }
                         };
-                        self.materialized_call_arg(dst, repr, &a.ty)
+                        // A precise heap-field BORROW (`b.label`) is in `param_values` — the
+                        // container owns it, so it is passed by Handle WITHOUT joining the
+                        // scope-end drop set (no second owner, no double-free). A container-
+                        // grain Dup / deferred Opaque is a fresh owned temp → tracked normally.
+                        if self.param_values.contains(&dst) {
+                            CallArg::Handle(dst)
+                        } else {
+                            self.materialized_call_arg(dst, repr, &a.ty)
+                        }
                     } else {
                         // A SCALAR extraction (`r.x`, `t.0`) — load the REAL field value
                         // from the block's layout slot when the container is a
@@ -948,26 +956,26 @@ impl LowerCtx {
         }
     }
 
-    /// The uniform-slot BYTE OFFSET of a named field of a SCALAR-only record `ty`
-    /// (record / named record), resolving the concrete field types first. `None` if
-    /// `ty` is not a resolvable scalar-only record or has no such field. The offset is
-    /// `BLOCK_HEADER + idx*SLOT_SIZE` — the same slot construction stores to.
-    pub(crate) fn aggregate_field_offset(&self, ty: &Ty, field: &str) -> Option<u32> {
-        let (names, tys) = self.aggregate_field_tys(ty)?;
-        layout::scalar_slots(&tys)?; // wall a heap-field aggregate
+    /// The uniform-slot BYTE OFFSET of a named field, resolving the concrete field types
+    /// first — NOT walling a heap-field aggregate (the layout is one i64 slot per field
+    /// regardless of field-ness, so a heap field's slot is at the same
+    /// `BLOCK_HEADER + idx*SLOT_SIZE` a scalar field's is). A SCALAR read at this offset
+    /// (`r.n` of `{name: String, n: Int}`) loads its value; a heap read (`b.label`) loads
+    /// the slot's owned handle. `None` if `ty` is unresolvable or has no such field.
+    pub(crate) fn aggregate_field_offset_any(&self, ty: &Ty, field: &str) -> Option<u32> {
+        let (names, _tys) = self.aggregate_field_tys(ty)?;
         let idx = names.iter().position(|n| n.as_str() == field)?;
         Some(layout::slot_offset(idx))
     }
 
-    /// The uniform-slot BYTE OFFSET of a tuple element by index. `None` if `ty` is not a
-    /// resolvable scalar-only tuple or the index is out of range.
-    pub(crate) fn aggregate_index_offset(&self, ty: &Ty, index: usize) -> Option<u32> {
+    /// The uniform-slot BYTE OFFSET of a tuple element by index, NOT walling a heap-element
+    /// tuple (the tuple sibling of [`Self::aggregate_field_offset_any`]).
+    pub(crate) fn aggregate_index_offset_any(&self, ty: &Ty, index: usize) -> Option<u32> {
         if !matches!(ty, Ty::Tuple(_)) {
             return None;
         }
         let (_, tys) = self.aggregate_field_tys(ty)?;
-        let n = layout::scalar_slots(&tys)?;
-        if index >= n {
+        if index >= tys.len() {
             return None;
         }
         Some(layout::slot_offset(index))
@@ -980,17 +988,23 @@ impl LowerCtx {
         if is_heap_ty(&expr.ty) {
             return None;
         }
+        // Use the NON-WALLING offset: a SCALAR field of a MIXED heap-field record/tuple is
+        // at the same uniform slot a scalar-only record's is (one i64 slot per field), so
+        // `R { name: String, n: Int }.n` reads slot 1 correctly. The result is scalar
+        // (guarded above), so loading it (load64) is right regardless of the OTHER fields'
+        // heap-ness; the only requirement is the container is materialized with this layout
+        // (the tracked-heap-var guard below), which a heap-field record now is.
         let (container, offset) = match &expr.kind {
             IrExprKind::Member { object, field } => {
-                (object, self.aggregate_field_offset(&object.ty, field.as_str())?)
+                (object, self.aggregate_field_offset_any(&object.ty, field.as_str())?)
             }
             IrExprKind::TupleIndex { object, index } => {
-                (object, self.aggregate_index_offset(&object.ty, *index)?)
+                (object, self.aggregate_index_offset_any(&object.ty, *index)?)
             }
             _ => return None,
         };
         // The container must be a TRACKED heap var whose value is a record/tuple block
-        // BUILT by `try_lower_scalar_record_construct` / the scalar-tuple path (a fresh
+        // BUILT by `try_lower_*_record_construct` / the scalar-tuple path (a fresh
         // `Alloc` with field stores at these very slots). A PARAM-bound aggregate is ALSO
         // admissible: the v1 calling convention passes the block pointer, and the layout
         // is the same on both sides (the same `aggregate_field_tys` + `slot_offset`), so a

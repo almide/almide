@@ -29,6 +29,16 @@ impl LowerCtx {
     /// var) — a nested extraction (`a.b.c`) has no single `src` to `Dup` and stays
     /// walled (totality). The caller decides placement (bind / move-out / borrow).
     pub(crate) fn lower_heap_extraction(&mut self, expr: &IrExpr) -> Result<ValueId, LowerError> {
+        // A PRECISE heap-field read (`b.label`, `t.1` with a String element) of a
+        // MATERIALIZED record/tuple block: load the field's OWNED handle from its layout
+        // slot as a BORROW (the container still owns it — freed by the container's masked
+        // recursive drop). This is the field-VALUE (not the container-grain Dup): the read
+        // returns the String at the slot, byte-correct. Returns the borrowed value (recorded
+        // in `param_values`, NOT in `live_heap_handles` — a borrow, no second owner). Falls
+        // through to the container-grain Dup below when the slot is not resolvable.
+        if let Some(borrowed) = self.try_lower_heap_field_borrow(expr) {
+            return Ok(borrowed);
+        }
         let container = extraction_container(expr).ok_or_else(|| {
             LowerError::Unsupported(format!(
                 "{} is not a field/element extraction",
@@ -47,6 +57,53 @@ impl LowerCtx {
         let dst = self.fresh_value();
         self.ops.push(Op::Dup { dst, src });
         Ok(dst)
+    }
+
+    /// Read a HEAP field/element (`b.label`, `t.1`) of a MATERIALIZED record/tuple block as a
+    /// BORROW: `LoadHandle` the OWNED handle from the field's i64 slot. The container still
+    /// OWNS the field (its masked recursive `DropListStr` frees it), so the read is NOT a
+    /// second owner — the result is recorded in `param_values` (BORROWED, like an `Option`
+    /// payload) and is NOT added to the scope-end drop set. Returns `None` (the caller then
+    /// uses the container-grain fallback) unless the container is a tracked heap VAR whose
+    /// block this brick materialized AND the field type is heap.
+    fn try_lower_heap_field_borrow(&mut self, expr: &IrExpr) -> Option<ValueId> {
+        use crate::PrimKind;
+        if !is_heap_ty(&expr.ty) {
+            return None;
+        }
+        let (container, offset) = match &expr.kind {
+            IrExprKind::Member { object, field } => {
+                (object, self.aggregate_field_offset_any(&object.ty, field.as_str())?)
+            }
+            IrExprKind::TupleIndex { object, index } => {
+                (object, self.aggregate_index_offset_any(&object.ty, *index)?)
+            }
+            _ => return None,
+        };
+        // The container must be a tracked heap VAR whose block this brick MATERIALIZED with
+        // the uniform slot layout (`materialized_aggregates`). A DEREFERENCING heap-field
+        // read of a DEFERRED `Alloc{Opaque}` aggregate (a spread record / a call result) —
+        // whose slots are garbage — would load a junk handle and TRAP at `rc_dec`, so it must
+        // NOT fire here (it falls through to the safe container-grain Dup). A non-var
+        // container (`f().x`) has no single block to load from.
+        let src = match &container.kind {
+            IrExprKind::Var { id } if is_heap_ty(&container.ty) => self.value_or_global(*id).ok()?,
+            _ => return None,
+        };
+        if !self.materialized_aggregates.contains(&src) {
+            return None;
+        }
+        let h = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![src] });
+        let off = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: off, value: offset as i64 });
+        let addr = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst: addr, op: crate::IntOp::Add, a: h, b: off });
+        let dst = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::LoadHandle, dst: Some(dst), args: vec![addr] });
+        // BORROWED: the container owns the field; the read is not a second owner.
+        self.param_values.insert(dst);
+        Some(dst)
     }
 
     /// Lower the body's tail expression to the function's return value.

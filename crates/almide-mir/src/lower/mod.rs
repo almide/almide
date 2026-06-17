@@ -167,12 +167,14 @@ pub fn lower_function_all_with_types(
         Vec::new()
     };
     let lifted = std::mem::take(&mut ctx.lifted);
+    let heap_slot_masks = ctx.record_masks.iter().map(|(v, m)| (*v, m.clone())).collect();
     let main = MirFunction {
         name: func.name.as_str().to_string(),
         params,
         ops: ctx.ops,
         ret,
         declared_caps,
+        heap_slot_masks,
     };
     let mut all = vec![main];
     all.extend(lifted);
@@ -297,6 +299,26 @@ pub(crate) struct LowerCtx {
     /// payload, a scalar Value just frees the block) instead of a flat [`Op::Drop`]. Populated
     /// when a `Value`-typed bind is created.
     value_handles: HashSet<ValueId>,
+    /// MIR values KNOWN to be a record/tuple block this brick MATERIALIZED with the uniform
+    /// slot layout (`try_lower_scalar_record_construct` / `try_lower_record_construct` /
+    /// `try_lower_scalar_tuple_construct` / scalar-tuple/list-slot), plus aggregate-typed
+    /// params (the v1 convention passes the same-layout block pointer). A PRECISE field read
+    /// that DEREFERENCES a loaded slot — a heap-field BORROW (`b.label`), which passes the
+    /// loaded handle to a String/List consumer — is admitted ONLY over a value in this set:
+    /// a DEFERRED `Alloc{Opaque}` aggregate (a spread record / a call result) has ZERO
+    /// (garbage) slot handles, so loading + dereferencing one would TRAP at `rc_dec`. (A
+    /// scalar field read does not dereference, so it tolerates a 0 slot as a benign mis-read;
+    /// but a heap-field deref must be gated on REAL materialization.)
+    materialized_aggregates: HashSet<ValueId>,
+    /// MIR values that are MIXED scalar+heap record/tuple blocks → the i64-SLOT INDICES that
+    /// hold an OWNED heap handle (a `String`/`List`/nested-aggregate field). Such a value's
+    /// scope-end / per-iteration drop emits a [`Op::DropListStr`] (cert = the SAME single `d`
+    /// as any drop — each heap field was accounted `m` when stored), and the render frees
+    /// exactly these slots (then the block) via the per-value mask carried on the
+    /// [`MirFunction::heap_slot_masks`] side table. A value here is treated like a
+    /// `heap_elem_lists` member for drop-op SELECTION, but the mask makes the recursive free
+    /// touch only the heap slots (NOT every slot — the scalar fields must not be `rc_dec`'d).
+    record_masks: HashMap<ValueId, Vec<usize>>,
     /// Named-record layout registry (the VALUE-MODEL field structure): type NAME →
     /// (declared generic param names, declared fields in declaration order). A record
     /// literal / field access typed `Ty::Named(name, args)` resolves its fields here
@@ -673,7 +695,10 @@ impl LowerCtx {
             .iter()
             .rev()
             .map(|v| {
-                if self.heap_elem_lists.contains(v) {
+                // A masked record/tuple and a `List[String]` both free recursively via
+                // `DropListStr` (cert = the SAME single `d`); the render reads `record_masks`
+                // off the function to free only the heap slots (mask) vs every slot (list).
+                if self.heap_elem_lists.contains(v) || self.record_masks.contains_key(v) {
                     Op::DropListStr { v: *v }
                 } else if self.value_handles.contains(v) {
                     Op::DropValue { v: *v }

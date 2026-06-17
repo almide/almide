@@ -72,6 +72,7 @@ impl LowerCtx {
             ops: sub.ops,
             ret,
             declared_caps: Vec::new(),
+            heap_slot_masks: sub.record_masks.iter().map(|(v, m)| (*v, m.clone())).collect(),
         };
         self.lifted.push(lifted_fn);
         self.lifted.append(&mut nested);
@@ -399,6 +400,20 @@ impl LowerCtx {
                         self.live_heap_handles.push(dst);
                         return Ok(());
                     }
+                    // A record with one or more HEAP fields (`R { name: "x", n: i }`) —
+                    // materialize the mixed scalar+heap block + track its heap-slot mask, so a
+                    // `r.n` scalar read AND a `r.name` heap read execute and the block (with its
+                    // owned heap fields) is reclaimed by a masked recursive drop. Rolls back on
+                    // a partially-lowered out-of-subset field (a heap-returning-call field).
+                    let mark = self.ops.len();
+                    let lhh_mark = self.live_heap_handles.len();
+                    if let Some(dst) = self.try_lower_record_construct(value) {
+                        self.value_of.insert(var, dst);
+                        self.live_heap_handles.push(dst);
+                        return Ok(());
+                    }
+                    self.ops.truncate(mark);
+                    self.live_heap_handles.truncate(lhh_mark);
                 }
                 // A scalar `List[Int/Float/Bool]` literal with COMPUTED elements (`[1.0, inf, 0.5]`,
                 // `[a, a]`) — build the block + store each slot (an all-literal list is the IntList
@@ -438,7 +453,12 @@ impl LowerCtx {
                     }
                 };
                 self.value_of.insert(var, dst);
-                self.live_heap_handles.push(dst);
+                // A precise heap-field BORROW (a `LoadHandle` of a slot in a still-owning
+                // container) is in `param_values` — it is NOT a second owner, so it must NOT
+                // join the scope-end drop set (the container's masked drop frees the field).
+                if !self.param_values.contains(&dst) {
+                    self.live_heap_handles.push(dst);
+                }
                 Ok(())
             }
             // `var x = f(...)` — a USER call returning a heap value. The result is
@@ -752,6 +772,155 @@ impl LowerCtx {
             });
         }
         Some(dst)
+    }
+
+    /// Construct a record/tuple with one or more HEAP FIELDS (a `String`/`List`/nested
+    /// aggregate field alongside scalar fields) — `R { name: "x", n: i }`. The block is the
+    /// SAME `[rc][len][cap]` + uniform-i64-slot layout as the scalar path, but each HEAP
+    /// field is a fresh OWNED handle MOVED into its slot (cert `m`), and the value is tracked
+    /// in `record_masks` so its drop frees exactly the heap slots then the block (an
+    /// [`Op::DropListStr`] with the per-value mask — cert = the SAME single `d`).
+    ///
+    /// SOUNDNESS (no new op / no certificate change): this is byte-identical to the
+    /// `List[String]` machinery applied to a mixed slot set. A heap field's owned handle is
+    /// `Consume`d into the slot (cert `m` — moved in, like `prim.store_str`), so each heap
+    /// field is `i…m` (alloc/dup then move-in) and the BLOCK is `i…d` (alloc then the
+    /// recursive `DropListStr`), exactly the balanced shape the proven checker already
+    /// accepts for a list of Strings. A scalar field is a pure `Prim::Store` (no ownership).
+    /// The recursive free at drop touches ONLY the heap slots (the mask) — a scalar slot is
+    /// never `rc_dec`'d. Returns `None` (defer) for an unresolvable type, an omitted heap
+    /// field (a defaulted heap slot would be a garbage handle the drop frees — unsound), or
+    /// a field value not lowerable to an owned handle / scalar.
+    pub(crate) fn try_lower_record_construct(&mut self, value: &IrExpr) -> Option<ValueId> {
+        use crate::{IntOp, PrimKind};
+        let IrExprKind::Record { fields, .. } = &value.kind else {
+            return None;
+        };
+        let (names, tys) = self.aggregate_field_tys(&value.ty)?;
+        if tys.is_empty() {
+            return None;
+        }
+        let n = tys.len();
+        // Per-slot heap-ness from the SUPPLIED field's CONCRETE type (`expr.ty`), NOT the
+        // declared field type — a generic field (`first: A` in `Pair[A,B]`) may leave the
+        // DECLARED type an unresolved param that `is_heap_ty` would mis-classify as heap; the
+        // literal's value carries the concrete instantiated type. `None` for an unsupplied
+        // (defaulted) slot — its concrete heap-ness is unknown here.
+        let mut field_heap: Vec<Option<bool>> = vec![None; n];
+        for (name, expr) in fields {
+            let idx = names.iter().position(|n| n == name)?;
+            field_heap[idx] = Some(is_heap_ty(&expr.ty));
+        }
+        // A DEFAULTED (omitted) slot whose DECLARED type is concretely heap (or an unresolved
+        // generic we can't prove scalar) would leave a zero handle the masked drop frees — so
+        // WALL the whole record (never an unsound partial block). A scalar default (a 0 slot)
+        // is fine. (An omitted scalar slot's `field_heap` stays `None` = treated non-heap.)
+        for i in 0..n {
+            if field_heap[i].is_none() && is_heap_ty(&tys[i]) {
+                return None;
+            }
+        }
+        let heap_slots: Vec<usize> =
+            (0..n).filter(|&i| field_heap[i] == Some(true)).collect();
+        if heap_slots.is_empty() {
+            return None; // no heap field — `try_lower_scalar_record_construct` owns it.
+        }
+        // Lower each supplied field to (declared-index, slot-value, is-heap). Heap fields
+        // become a fresh OWNED handle (the same kinds `try_lower_str_list_literal` admits);
+        // scalar fields a plain value. All lowered BEFORE the alloc (a field expr that
+        // itself allocates must not interleave with our store sequence).
+        let mut slots: Vec<(usize, ValueId, bool)> = Vec::with_capacity(fields.len());
+        for (name, expr) in fields {
+            let idx = names.iter().position(|n| n == name)?;
+            let is_heap = is_heap_ty(&expr.ty);
+            if is_heap {
+                let obj = self.lower_owned_heap_field(expr)?;
+                slots.push((idx, obj, true));
+            } else {
+                let v = self.lower_scalar_value(expr)?;
+                slots.push((idx, v, false));
+            }
+        }
+        let len = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: len, value: n as i64 });
+        let dst = self.fresh_value();
+        self.ops.push(Op::Alloc {
+            dst,
+            repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT },
+            init: crate::Init::DynList { len },
+        });
+        let h = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![dst] });
+        for (idx, v, is_heap) in slots {
+            let off = self.fresh_value();
+            self.ops.push(Op::ConstInt { dst: off, value: layout::slot_offset(idx) as i64 });
+            let addr = self.fresh_value();
+            self.ops.push(Op::IntBinOp { dst: addr, op: IntOp::Add, a: h, b: off });
+            // A heap field stores its HANDLE (i64-widened) then is `Consume`d (moved in);
+            // a scalar field stores its value directly.
+            let store_val = if is_heap {
+                let handle = self.fresh_value();
+                self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(handle), args: vec![v] });
+                handle
+            } else {
+                v
+            };
+            self.ops.push(Op::Prim {
+                kind: PrimKind::Store { width: 8 },
+                dst: None,
+                args: vec![addr, store_val],
+            });
+            if is_heap {
+                self.ops.push(Op::Consume { v });
+                self.live_heap_handles.retain(|x| *x != v);
+            }
+        }
+        self.record_masks.insert(dst, heap_slots);
+        self.materialized_aggregates.insert(dst);
+        Some(dst)
+    }
+
+    /// Lower a record/tuple field EXPRESSION whose type is HEAP to a FRESH OWNED handle the
+    /// aggregate will own (moved into its slot). The admitted kinds mirror
+    /// [`Self::try_lower_str_list_literal`]'s element kinds:
+    /// - a `LitStr` is a fresh `Alloc{Str}` (cert `i`);
+    /// - a `BinOp::ConcatStr` is the self-host `__str_concat` CallFn (cert `i`);
+    /// - a tracked heap `Var` gets its OWN reference via `Dup` (cert `a`) so the original
+    ///   binding keeps its reference (no double-free) and the aggregate owns a distinct one.
+    /// Any other kind (a heap-returning call, a member access, a nested record literal)
+    /// defers — `None`. The returned handle is in `live_heap_handles`; the caller MUST
+    /// `Consume` it (the move-in) and remove it from the live set.
+    fn lower_owned_heap_field(&mut self, expr: &IrExpr) -> Option<ValueId> {
+        use almide_ir::BinOp;
+        match &expr.kind {
+            IrExprKind::LitStr { value: s } => {
+                let obj = self.fresh_value();
+                self.ops.push(Op::Alloc {
+                    dst: obj,
+                    repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT },
+                    init: crate::Init::Str(s.clone()),
+                });
+                self.live_heap_handles.push(obj);
+                Some(obj)
+            }
+            IrExprKind::BinOp { op: BinOp::ConcatStr, .. } => {
+                let obj = self.try_lower_concat_str(expr)?;
+                // try_lower_concat_str returns a fresh owned String (a CallFn result); track it
+                // so the caller's Consume + live-set removal balances it.
+                if !self.live_heap_handles.contains(&obj) {
+                    self.live_heap_handles.push(obj);
+                }
+                Some(obj)
+            }
+            IrExprKind::Var { id } => {
+                let src = *self.value_of.get(id)?;
+                let dup = self.fresh_value();
+                self.ops.push(Op::Dup { dst: dup, src });
+                self.live_heap_handles.push(dup);
+                Some(dup)
+            }
+            _ => None,
+        }
     }
 
     /// Shared block-builder for a scalar tuple/list: lower each element to a scalar value, alloc a

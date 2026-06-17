@@ -228,29 +228,126 @@ fn narrow_int_record_field_round_trips() {
 }
 
 #[test]
-fn heap_field_record_does_not_emit_wrong_bytes() {
-    // A record with a HEAP (String) field is OUTSIDE this value-model brick (it would
-    // need a per-field-heap-aware recursive drop). It must NOT silently materialize with
-    // a wrong/garbage field — construction defers (no scalar-record store sequence) and
-    // the scalar `r.n` read is NOT a layout load (the heap-field record is not a
-    // resolvable scalar aggregate). This guards the WALL discipline: a heap-field record
-    // is never materialized as if it were scalar (no `try_lower_scalar_record_construct`
-    // success for it), so it can't emit a confidently-wrong field value.
+fn heap_field_record_byte_matches_v0() {
+    // A record with a HEAP (String) field alongside a scalar field is now MATERIALIZED as
+    // a mixed scalar+heap block `[rc][len][cap][name@12][n@20]`: the String field is a fresh
+    // OWNED handle moved into its slot (cert `m`), the scalar field stored directly, and the
+    // block's scope-end drop is a MASKED `DropListStr` (free only the heap slot, then the
+    // block — cert = one `d`, no new op). The scalar read `r.n` loads slot 1, the heap read
+    // `r.name` borrows slot 0's handle. Both byte-match v0's stdout. (Was: WALLED — a
+    // heap-field record needed an ownership-aware recursive drop, now expressed with the
+    // EXISTING `Consume`/`DropListStr` cert events.)
     let src = "type R = { name: String, n: Int }\n\
         fn main() -> Unit = {\n  \
-        let r = R { name: \"x\", n: 7 }\n  \
+        let r = R { name: \"hi\", n: 7 }\n  \
+        println(int.to_string(r.n))\n  \
+        println(r.name) }\n";
+    let prog = lower_source(src);
+    // The block is materialized (a width-8 store sequence).
+    let main = prog.functions.iter().find(|f| f.name == "main").expect("main");
+    assert!(
+        main.ops.iter().any(|op| matches!(
+            op,
+            crate::Op::Prim { kind: crate::PrimKind::Store { width: 8 }, .. }
+        )),
+        "a heap-field record is now materialized as a mixed scalar+heap block"
+    );
+    // The OWNERSHIP CERTIFICATE (the gate the corpus-wall + the proven Coq checker run) is
+    // BALANCED on every function: each line never decs below 0 and ends at 0. The String
+    // field is `im` (alloc + move-in `Consume`), the record block is `id` (alloc + masked
+    // `DropListStr` = one `d`) — no new op, no leak, no double-free. (A heap-field READ is a
+    // borrowed `LoadHandle` Handle-arg, accounted by the cert as a no-op call-arg — the same
+    // established borrow shape `prim.load_str` + `println(payload)` uses.)
+    for f in &prog.functions {
+        let cert = crate::certificate::ownership_certificate(f);
+        for line in cert.lines() {
+            let mut rc: i64 = 0;
+            for c in line.chars() {
+                match c {
+                    'i' | 'a' => rc += 1,
+                    'd' | 'm' => {
+                        assert!(rc > 0, "double-free/use-after-move in {} cert line {:?}", f.name, line);
+                        rc -= 1;
+                    }
+                    _ => {}
+                }
+            }
+            assert_eq!(rc, 0, "leak in {} cert line {:?}", f.name, line);
+        }
+    }
+    if let Some(out) = build_and_run("heap_field_record", &render_wasm_program(&prog)) {
+        assert_eq!(out, "7\nhi");
+    }
+}
+
+#[test]
+fn heap_field_record_loop_reclaims() {
+    // SOUNDNESS for the masked recursive drop: a bounded loop building + dropping a fresh
+    // heap-field record each iteration must reclaim the owned String field AND the block
+    // (the masked `DropListStr`) every iteration — no leak (OOM) / double-free (trap). The
+    // String value VARIES per iteration (`"x" + int.to_string(i % 10)`), so a fresh String is
+    // allocated and freed each time. 20000 iters; prints the accumulated scalar field sum.
+    let src = "type R = { name: String, n: Int }\n\
+        fn main() -> Unit = {\n  \
+        var sink = 0\n  var i = 0\n  \
+        while i < 20000 {\n    \
+          let r = R { name: \"x\" + int.to_string(i % 10), n: i }\n    \
+          sink = sink + r.n % 7\n    \
+          i = i + 1\n  }\n  \
+        println(int.to_string(sink)) }\n";
+    let prog = lower_source(src);
+    if let Some(out) = build_and_run("heap_field_record_loop", &render_wasm_program(&prog)) {
+        // sum of (i % 7) for i in 0..20000 (computed by the v0 oracle on this same program).
+        assert_eq!(out, "59997");
+    }
+}
+
+#[test]
+fn spread_heap_field_record_walls_safely() {
+    // A SPREAD heap-field record (`R { ...r, n: 9 }`) is OUT of the construction subset (the
+    // spread base's fields are not re-materialized here) — it must DEFER to a safe Opaque
+    // block, NOT a masked record (a masked drop over garbage slots would `rc_dec` junk and
+    // trap). The guard: a deferred spread record is NOT in `record_masks`, so its drop is a
+    // plain `Drop` (no recursive slot free), and its heap-field reads fall to the safe
+    // container-grain alias (no slot dereference). This is the WALL discipline for the
+    // not-yet-materialized spread shape — memory-safe, just deferred-functional.
+    let src = "type R = { name: String, n: Int }\n\
+        fn main() -> Unit = {\n  \
+        let r = R { name: \"a\", n: 1 }\n  \
+        let r2 = R { ...r, n: 9 }\n  \
         println(int.to_string(r.n)) }\n";
     let prog = lower_source(src);
     let main = prog.functions.iter().find(|f| f.name == "main").expect("main");
-    // No scalar-record store sequence was emitted for the heap-field record: the only
-    // i64 stores in main would be the DynList field stores my construction emits — there
-    // must be NONE here (the record deferred to Opaque). A Prim::Store of width 8 at a
-    // record slot is the signature of a materialized scalar record.
-    let materialized = main.ops.iter().any(|op| {
-        matches!(op, crate::Op::Prim { kind: crate::PrimKind::Store { width: 8 }, .. })
-    });
+    // `r2` (the spread) must NOT be in any heap_slot_mask — only the genuinely-materialized
+    // `r` is masked. (A spread record incorrectly masked would free garbage slots.)
     assert!(
-        !materialized,
-        "a heap-field record must NOT be materialized as a scalar record (wall discipline)"
+        main.heap_slot_masks.len() <= 1,
+        "only the materialized record `r` may carry a heap-slot mask, not the deferred spread"
     );
+    // The cert stays balanced (no double-free from the deferred spread).
+    for f in &prog.functions {
+        let cert = crate::certificate::ownership_certificate(f);
+        for line in cert.lines() {
+            let mut rc: i64 = 0;
+            for c in line.chars() {
+                match c {
+                    'i' | 'a' => rc += 1,
+                    'd' | 'm' => {
+                        assert!(rc > 0, "double-free in {} cert {:?}", f.name, line);
+                        rc -= 1;
+                    }
+                    _ => {}
+                }
+            }
+            assert_eq!(rc, 0, "leak in {} cert {:?}", f.name, line);
+        }
+    }
+    if let Some(out) = build_and_run("spread_heap_field_record", &render_wasm_program(&prog)) {
+        // r.n reads correctly (1); r2 is deferred but never dereferenced unsafely.
+        assert_eq!(out, "1");
+    }
 }
+
+
+
+

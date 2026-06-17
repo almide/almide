@@ -708,7 +708,7 @@ impl LowerCtx {
     /// restoring `live_heap_handles` to its pre-frame length — the per-arm teardown.
     pub(crate) fn drop_arm_locals(&mut self, mark: usize) {
         for v in self.live_heap_handles.split_off(mark).into_iter().rev() {
-            if self.heap_elem_lists.contains(&v) {
+            if self.heap_elem_lists.contains(&v) || self.record_masks.contains_key(&v) {
                 self.ops.push(Op::DropListStr { v });
             } else if self.value_handles.contains(&v) {
                 self.ops.push(Op::DropValue { v });

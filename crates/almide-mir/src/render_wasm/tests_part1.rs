@@ -408,6 +408,7 @@
             ],
             ret: None,
             declared_caps: vec![crate::Capability::Stdout],
+            heap_slot_masks: Default::default(),
         };
         let main = MirFunction {
             name: "main".into(),
