@@ -238,26 +238,20 @@ impl LowerCtx {
                     }
                     // A STRING INTERPOLATION in a DEFERRED position — a heap-result match/if
                     // arm where the WHOLE branch fell back to Opaque, or any Opaque value/arg.
-                    // `count_ir_calls` credits a lowerable interp `K` `__str_concat` + `I`
-                    // `int.to_string` calls REGARDLESS of position (the gate's visitor walks
-                    // every subtree); when the interp does NOT get folded by
-                    // `try_lower_string_interp` (its enclosing branch is Opaque), surface the
-                    // SAME synthetic calls as elided markers so `mir_calls` keeps pace with
-                    // `ir_calls` (else the function falsely taints — the −32 caps regression).
-                    // Both synthetic callees are pure (no Stdout), so markers add no capability;
-                    // a NON-lowerable interp is credited 0 by the gate and emits 0 markers here.
-                    // The operands of a lowerable interp are only Var/LitStr/LitInt (no Call
-                    // nodes), so `walk_expr` below double-counts nothing.
-                    IrExprKind::StringInterp { parts } if crate::lower::interp_str_lowerable(parts) => {
-                        let int_parts = parts
-                            .iter()
-                            .filter(|p| matches!(p, IrStringPart::Expr { expr } if matches!(expr.ty, Ty::Int)))
-                            .count();
-                        for _ in 0..parts.len() {
-                            self.names.push("__str_concat".to_string());
-                        }
-                        for _ in 0..int_parts {
-                            self.names.push("int.to_string".to_string());
+                    // `count_ir_calls` credits a desugarable interp the call NODES of its
+                    // desugared tree REGARDLESS of position (the gate's visitor walks every
+                    // subtree); when the interp does NOT get folded by `try_lower_string_interp`
+                    // (its enclosing branch is Opaque), surface the SAME synthetic calls as
+                    // elided markers so `mir_calls` keeps pace with `ir_calls` (else the function
+                    // falsely taints — the −32 caps regression). Every synthetic callee
+                    // (`__str_concat`, `<module>.to_string`) is pure (no Stdout), so the markers
+                    // add no capability; a NON-desugarable interp is credited 0 and emits 0
+                    // markers here. The SYNTHETIC names are the ConcatStr + to_string wrappers
+                    // ONLY — the operands' OWN calls (a `${g(x)}` callee) are reached by the
+                    // `walk_expr` below over the ORIGINAL parts, so there is no double-count.
+                    IrExprKind::StringInterp { parts } => {
+                        for name in crate::lower::interp_synthetic_call_names(parts) {
+                            self.names.push(name);
                         }
                     }
                     _ => {}
@@ -432,85 +426,30 @@ impl LowerCtx {
     /// Lower a STRING INTERPOLATION `"…${e}…"` to a FRESH owned String, byte-matching
     /// v0 (`emit_string_interp`), via the proven `__str_concat` self-host runtime.
     ///
-    /// MODEL: desugar the K parts into a LEFT-nested `BinOp::ConcatStr` tree seeded by
-    /// an empty `""` literal — `(((("" ++ p0) ++ p1) … ) ++ p_{K-1})` — then lower the
-    /// whole tree through the EXISTING [`Self::try_lower_concat_str`]. Each part becomes
-    /// a String-producing leaf:
-    ///   - a `Lit` → a `LitStr` (a fresh `Alloc{Str}`, no call),
-    ///   - a String `Expr` (a Var / LitStr) → the expr itself (passthrough),
-    ///   - an Int `Expr` (a Var / LitInt) → `int.to_string(e)` (one self-host call).
-    /// Concatenating with a leading `""` is byte-identical to v0 (which special-cases a
-    /// single part to pass it through): `"" ++ bytes == bytes`. So the rendered String is
-    /// byte-for-byte v0's, in EVERY position (bind / call-arg / tail / concat-operand) —
-    /// the caller owns the fresh result exactly like any `try_lower_concat_str` value.
+    /// MODEL: the UNIFORM [`crate::lower::desugar_string_interp`] folds the K parts into
+    /// a LEFT-nested `BinOp::ConcatStr` tree seeded by `""`, each part wrapped in its
+    /// type's `to_string` (a Lit/String part is a no-call leaf; an Int → `int.to_string`,
+    /// a Bool → `bool.to_string`, a Float/compound → `<module>.to_string`). This routine
+    /// then lowers that tree through the EXISTING [`Self::try_lower_concat_str`] — the
+    /// same path the `+` operator uses. Concatenating with a leading `""` is byte-
+    /// identical to v0 (`"" ++ bytes == bytes`), so the rendered String matches v0 in
+    /// EVERY position (bind / call-arg / tail / concat-operand / match-arm), and the
+    /// caller owns the fresh result exactly like any `try_lower_concat_str` value.
     ///
-    /// THE GATE-EXACTNESS INVARIANT (why this never regresses caps): admitted ONLY when
-    /// [`interp_str_lowerable`] holds — every part is a `Lit` or a String/Int Var/LitInt,
-    /// operands `lower_call_args` provably cannot `Err` on (a Var resolves via
-    /// `value_or_global`, a LitStr/LitInt is an infallible immediate). So `try_lower_concat_str`
-    /// CANNOT roll back here, and the lowering emits EXACTLY `K` `__str_concat` calls (K+1
-    /// leaves) + `I` `int.to_string` calls (one per Int part). The corpus gate's
-    /// `count_ir_calls` credits each admitted StringInterp the SAME `K + I` (via the matching
-    /// `interp_str_lowerable` predicate there), so `mir_calls == ir_calls` for the interp's
-    /// contribution: no `mir > ir` (forbidden), no spurious `ir > mir` taint of a previously
-    /// caps-verified function. A NON-admitted interp (compound `${list}`, a `${f()}` call,
-    /// a Float/Bool operand) returns `None` here AND is credited 0 by the gate — it stays the
-    /// deferred `Alloc{Opaque}`, exactly as before, fully memory-safe.
+    /// THE GATE-EXACTNESS INVARIANT (why this never regresses caps): the desugar admits a
+    /// part ONLY when its leaf lowers to exactly one `CallFn` (a pure `module.to_string`)
+    /// or a no-call passthrough, so `try_lower_concat_str` CANNOT roll back here. The
+    /// corpus gate's `count_ir_calls` counts the call NODES of the SAME desugared tree,
+    /// so `mir_calls == ir_calls` for the interp's contribution BY CONSTRUCTION — no
+    /// `mir > ir` (forbidden), no spurious `ir > mir` taint. A part with no admitted
+    /// `to_string` module (a Tuple/Record/variant) makes the desugar return `None`; the
+    /// interp then stays the deferred `Alloc{Opaque}` (credited 0 by the gate), fully
+    /// memory-safe. A Float/compound part DESUGARS but its `to_string` is UNLINKED, so
+    /// the enclosing function emits an unlinked call and the RENDER WALL rejects it — it
+    /// is out of profile and cannot be a `count != lower` mismatch.
     pub(crate) fn try_lower_string_interp(&mut self, parts: &[IrStringPart]) -> Option<ValueId> {
-        if !interp_str_lowerable(parts) {
-            return None;
-        }
-        // An EMPTY interp (`""` with no parts) is just the empty string — a fresh Alloc.
-        let str_ty = Ty::String;
-        let lit = |s: &str| IrExpr {
-            kind: IrExprKind::LitStr { value: s.to_string() },
-            ty: str_ty.clone(),
-            span: None,
-            def_id: None,
-        };
-        // Each part → a String-typed leaf IrExpr.
-        let mut leaves: Vec<IrExpr> = Vec::with_capacity(parts.len() + 1);
-        leaves.push(lit("")); // the byte-neutral seed
-        for p in parts {
-            match p {
-                IrStringPart::Lit { value } => leaves.push(lit(value)),
-                IrStringPart::Expr { expr } if matches!(expr.ty, Ty::String) => {
-                    leaves.push(expr.clone())
-                }
-                IrStringPart::Expr { expr } => {
-                    // An Int part → `int.to_string(expr)` (auto-linked self-host, pure).
-                    leaves.push(IrExpr {
-                        kind: IrExprKind::Call {
-                            target: CallTarget::Module {
-                                module: almide_lang::intern::sym("int"),
-                                func: almide_lang::intern::sym("to_string"),
-                                def_id: None,
-                            },
-                            args: vec![expr.clone()],
-                            type_args: Vec::new(),
-                        },
-                        ty: str_ty.clone(),
-                        span: None,
-                        def_id: None,
-                    })
-                }
-            }
-        }
-        // Fold the leaves into a LEFT-nested ConcatStr tree, then lower via the proven path.
-        let mut acc = leaves.remove(0);
-        for leaf in leaves {
-            acc = IrExpr {
-                kind: IrExprKind::BinOp {
-                    op: almide_ir::BinOp::ConcatStr,
-                    left: Box::new(acc),
-                    right: Box::new(leaf),
-                },
-                ty: str_ty.clone(),
-                span: None,
-                def_id: None,
-            };
-        }
-        self.try_lower_concat_str(&acc)
+        let tree = crate::lower::desugar_string_interp(parts)?;
+        self.try_lower_concat_str(&tree)
     }
 
     pub(crate) fn lower_call_args(&mut self, args: &[IrExpr]) -> Result<Vec<CallArg>, LowerError> {

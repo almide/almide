@@ -131,24 +131,24 @@ fn count_ir_calls(body: &almide_ir::IrExpr) -> usize {
                     self.n += 1;
                 }
             }
-            // A STRING INTERPOLATION `"…${e}…"` over the executable subset lowers to a
-            // synthetic `__str_concat` chain (one per part, +1 empty-seed leaf ⇒ K concats)
-            // plus one `int.to_string` per Int part — all MIR `Op::CallFn`s with NO matching
-            // IR call node (they are synthesized at lowering time, not present in this IR).
-            // Credit EXACTLY that many ir_calls so `mir_calls <= ir_calls` holds by
-            // construction, via the SAME `interp_str_lowerable` predicate the lowering
-            // (`try_lower_string_interp`) gates on. A NON-lowerable interp (compound `${list}`,
-            // a `${f()}` call, a Float/Bool operand) is credited 0 here AND stays the deferred
-            // `Alloc{Opaque}` in the lowering — so the count never over-credits an interp that
-            // does not lower (which would falsely de-taint a function: mir<ir-by-formula but
-            // mir==ir-by-lowering). The synthetic callees (__str_concat, int.to_string) are
-            // pure (no Stdout), so they add no real capability. The interp's OWN operands here
-            // are only Var/LitStr/LitInt (zero inner Call nodes), so there is no double-count
-            // with the Call-node visitor above.
+            // A STRING INTERPOLATION `"…${e}…"` desugars (the SHARED
+            // `almide_mir::lower::desugar_string_interp`) to a synthetic `__str_concat`
+            // chain (one per part, +1 empty-seed leaf ⇒ K concats) plus one
+            // `<module>.to_string` per non-passthrough part (Int → int.to_string, Bool →
+            // bool.to_string, Float/compound → <module>.to_string) — all MIR `Op::CallFn`s
+            // SYNTHESIZED at lowering time (not present in this IR). Credit EXACTLY the call
+            // NODES of that SAME desugared tree (`interp_str_synthetic_call_count`), so
+            // `mir_calls == ir_calls` holds for the interp BY CONSTRUCTION — the gate counts
+            // the identical tree the lowering emits. A NON-desugarable interp (a part with no
+            // admitted `to_string` module — Tuple/Record/variant) is credited 0 here AND stays
+            // the deferred `Alloc{Opaque}` in the lowering, so the count never over-credits an
+            // interp that does not lower. Every synthetic callee is pure (no Stdout), adding no
+            // real capability. The interp's OWN operand calls (a `${g(x)}` callee) are NOT
+            // included by `interp_str_synthetic_call_count` (only the ConcatStr + to_string
+            // wrappers), so the `walk_expr` descent below — which reaches each part's operand
+            // expr — counts them exactly once, with no double-count.
             if let almide_ir::IrExprKind::StringInterp { parts } = &e.kind {
-                if almide_mir::lower::interp_str_lowerable(parts) {
-                    self.n += almide_mir::lower::interp_str_synthetic_call_count(parts);
-                }
+                self.n += almide_mir::lower::interp_str_synthetic_call_count(parts);
             }
             almide_ir::visit::walk_expr(self, e);
         }
@@ -237,30 +237,48 @@ fn source_to_ir(source: &str) -> FrontendOutcome {
     }
 }
 
-/// Count the `StringInterp` SITES in a body, split by whether each is in the executable
-/// subset (`interp_str_lowerable`). `(lowerable, non_lowerable)`. Used to bucket interp
-/// coverage: a lowerable interp in a lowered function = (a) proven; a non-lowerable one
-/// (or any interp in a walled function) = (b) cleanly walled / Opaque (no invalid wasm).
-fn count_interp_sites(body: &almide_ir::IrExpr) -> (usize, usize) {
-    struct InterpCounter {
-        lowerable: usize,
-        non_lowerable: usize,
+/// Count the `StringInterp` SITES in a body, split into `(proven, walled)`:
+///   - PROVEN (a): the interp DESUGARS and EVERY synthetic `<module>.to_string` it
+///     introduces is LINKABLE (in the self-host registry — `int`/`bool`). It folds to a
+///     fully-resolvable `__str_concat` / `int.to_string` / `bool.to_string` chain that
+///     renders to valid wasm and byte-matches v0.
+///   - WALLED (b): the interp is NON-desugarable (a part with no admitted `to_string`
+///     module ⇒ stays Opaque), OR it desugars but a synthetic `to_string` is UNLINKED
+///     (Float/compound — `float.to_string`/`list.to_string` are not self-hosted), so the
+///     enclosing function emits an unlinked call and the render wall rejects it. Either
+///     way: no invalid wasm. (The unlinked-call OCCURRENCES are also folded into (b) by
+///     the per-CallFn loop at the lowering site; this only counts the interp SITE once, as
+///     walled, so a Float interp does not get mis-bucketed as proven.)
+fn count_interp_sites(body: &almide_ir::IrExpr, linkable: &HashSet<String>) -> (usize, usize) {
+    struct InterpCounter<'a> {
+        proven: usize,
+        walled: usize,
+        linkable: &'a HashSet<String>,
     }
-    impl almide_ir::visit::IrVisitor for InterpCounter {
+    impl almide_ir::visit::IrVisitor for InterpCounter<'_> {
         fn visit_expr(&mut self, e: &almide_ir::IrExpr) {
             if let almide_ir::IrExprKind::StringInterp { parts } = &e.kind {
-                if almide_mir::lower::interp_str_lowerable(parts) {
-                    self.lowerable += 1;
+                // PROVEN iff desugarable AND every synthetic to_string is linkable. The
+                // synthetic-name list is empty for a non-desugarable interp (so the all()
+                // is vacuously true) — guard on desugarability explicitly. Only the dotted
+                // `<module>.to_string` names matter for linkability (`__str_concat` is
+                // always registered); checking the full list is sound (it contains it).
+                let desugarable = almide_mir::lower::interp_str_desugarable(parts);
+                let all_linkable = almide_mir::lower::interp_synthetic_call_names(parts)
+                    .iter()
+                    .all(|n| !n.contains('.') || self.linkable.contains(n));
+                if desugarable && all_linkable {
+                    self.proven += 1;
                 } else {
-                    self.non_lowerable += 1;
+                    self.walled += 1;
                 }
             }
             almide_ir::visit::walk_expr(self, e);
         }
     }
-    let mut c = InterpCounter { lowerable: 0, non_lowerable: 0 };
+    let mut c = InterpCounter { proven: 0, walled: 0, linkable };
     almide_ir::visit::IrVisitor::visit_expr(&mut c, body);
-    (c.lowerable, c.non_lowerable)
+    (c.proven, c.walled)
 }
 
 /// Group an `Unsupported` reason into a stable histogram key: the leading clause
@@ -489,13 +507,17 @@ fn main() {
                     // same position. With no lifting wired the vector is just `[main]` and
                     // this is byte-identical to the prior single-function pass.
                     t.in_profile += mirs.len();
-                    // INTERP COVERAGE (a): this function LOWERED, so its lowerable interps
-                    // fold to a registered __str_concat / int.to_string chain (proven
-                    // byte-match v0 by the render_wasm detectors); its non-lowerable interps
-                    // stay the sound Opaque fallback = (b) cleanly walled (no invalid wasm).
-                    let (lowerable, non_lowerable) = count_interp_sites(&func.body);
-                    t.interp_lowered += lowerable;
-                    t.interp_walled += non_lowerable;
+                    // INTERP COVERAGE (a): this function LOWERED, so its FULLY-LINKABLE
+                    // interps (Lit/String/Int/Bool parts) fold to a registered __str_concat /
+                    // int.to_string / bool.to_string chain (proven byte-match v0 by the
+                    // render_wasm detectors); a non-desugarable interp stays the sound Opaque
+                    // fallback, and a desugarable-but-UNLINKED one (Float/compound) walls at
+                    // render — both are (b) cleanly walled (no invalid wasm). The per-CallFn
+                    // loop below ADDS the unlinked-occurrence count to (b); this counts the
+                    // interp SITE once, as proven or walled, with no proven mis-bucket.
+                    let (proven, walled) = count_interp_sites(&func.body, &auto_linkable);
+                    t.interp_lowered += proven;
+                    t.interp_walled += walled;
                     // LINK COVERAGE: a LOWERED function emitting a dotted `Op::CallFn` whose
                     // name the v1 linker cannot resolve (not in the self-host registry) would,
                     // if rendered, emit a dangling `(call $name)` — invalid wasm. The render-
@@ -601,8 +623,8 @@ fn main() {
                     *t.unsupported.entry(reason_key(&reason)).or_insert(0) += 1;
                     // INTERP COVERAGE (b): every interp site inside a WALLED function is
                     // cleanly walled too (its function emits no wasm) — never a miscompile.
-                    let (lowerable, non_lowerable) = count_interp_sites(&func.body);
-                    t.interp_walled += lowerable + non_lowerable;
+                    let (proven, walled) = count_interp_sites(&func.body, &auto_linkable);
+                    t.interp_walled += proven + walled;
                 }
                 Err(_) => {
                     // THE wall breach: lowering must be total. Record file::func.

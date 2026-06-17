@@ -764,46 +764,169 @@ pub fn is_self_host_option_module_fn(module: &str, func: &str) -> bool {
     }
 }
 
-/// Is ONE interpolation part lowerable by [`LowerCtx::try_lower_string_interp`]?
-/// A part is admitted iff it is a literal, a String-typed `Var`/`LitStr`, or an
-/// Int-typed `Var`/`LitInt` — operands [`LowerCtx::lower_call_args`] provably cannot
-/// `Err` on (a Var resolves via `value_or_global`; a LitStr/LitInt is an infallible
-/// immediate). This GUARANTEES the synthesized `__str_concat` / `int.to_string` chain
-/// lowers without rollback, so the emitted call count is EXACTLY predictable.
-pub fn interp_part_str_lowerable(p: &IrStringPart) -> bool {
+/// The PURE stdlib module whose `to_string` renders a value of type `ty` to its
+/// Almide-Display form, for the uniform string-interpolation desugar. `None` ⇒ a
+/// type with no `module.to_string` admitted by the purity gate (a Tuple/Record/
+/// variant/unresolved type); such a part is left to the deferred Opaque fallback,
+/// so the interp stays bucket-(b) walled — never miscompiled.
+///
+/// The returned module MUST be `purity::is_pure(module, "to_string")` (every name
+/// below is in `PURE_MODULES`), so the synthesized `Call { Module }` leaf provably
+/// lowers to a single `Op::CallFn` (no rollback) — the invariant that keeps
+/// `count == lower` exact (see [`desugar_string_interp`]).
+fn interp_to_string_module(ty: &Ty) -> Option<&'static str> {
+    use almide_lang::types::constructor::TypeConstructorId;
+    Some(match ty {
+        Ty::Int => "int",
+        Ty::Bool => "bool",
+        // Float renders via `float.to_string` — PURE + emitted as a `CallFn`, but
+        // UNLINKED (float dtoa is not self-hosted), so the render wall cleanly
+        // REJECTS the whole function. That keeps the interp out of profile (it can
+        // never be a `count != lower` mismatch) until dtoa lands.
+        Ty::Float => "float",
+        Ty::Applied(TypeConstructorId::List, _) => "list",
+        Ty::Applied(TypeConstructorId::Map, _) => "map",
+        Ty::Applied(TypeConstructorId::Set, _) => "set",
+        Ty::Applied(TypeConstructorId::Option, _) => "option",
+        Ty::Applied(TypeConstructorId::Result, _) => "result",
+        _ => return None,
+    })
+}
+
+/// Build the String-producing LEAF for ONE interpolation part, by type:
+///   - a literal text part → a `LitStr` (no call),
+///   - a String-typed part → the expr itself (identity, no call),
+///   - any other part with a pure `module.to_string` → `module.to_string(expr)`
+///     (one `Call { Module }` node — Int/Bool LINK, Float/compound WALL).
+/// Returns `None` for a part whose type has no admitted `to_string` module (a
+/// Tuple/Record/variant) — the caller then declines the whole desugar.
+fn interp_part_leaf(p: &IrStringPart) -> Option<IrExpr> {
+    let lit = |s: &str| IrExpr {
+        kind: IrExprKind::LitStr { value: s.to_string() },
+        ty: Ty::String,
+        span: None,
+        def_id: None,
+    };
     match p {
-        IrStringPart::Lit { .. } => true,
-        IrStringPart::Expr { expr } => match (&expr.ty, &expr.kind) {
-            (Ty::String, IrExprKind::Var { .. }) => true,
-            (Ty::String, IrExprKind::LitStr { .. }) => true,
-            (Ty::Int, IrExprKind::Var { .. }) => true,
-            (Ty::Int, IrExprKind::LitInt { .. }) => true,
-            _ => false,
-        },
+        IrStringPart::Lit { value } => Some(lit(value)),
+        IrStringPart::Expr { expr } if matches!(expr.ty, Ty::String) => Some(expr.clone()),
+        IrStringPart::Expr { expr } => {
+            let module = interp_to_string_module(&expr.ty)?;
+            Some(IrExpr {
+                kind: IrExprKind::Call {
+                    target: CallTarget::Module {
+                        module: almide_lang::intern::sym(module),
+                        func: almide_lang::intern::sym("to_string"),
+                        def_id: None,
+                    },
+                    args: vec![expr.clone()],
+                    type_args: Vec::new(),
+                },
+                ty: Ty::String,
+                span: None,
+                def_id: None,
+            })
+        }
     }
 }
 
-/// Is a WHOLE interpolation lowerable (every part admitted)? The SINGLE predicate the
-/// lowering ([`LowerCtx::try_lower_string_interp`]) and the corpus caps gate
-/// (`count_ir_calls` in classify_corpus) BOTH consult, so the count the gate credits an
-/// interp matches EXACTLY the synthetic calls the lowering emits — `mir_calls <= ir_calls`
-/// stays sound by construction (no `mir > ir` over-count, no spurious caps taint).
-pub fn interp_str_lowerable(parts: &[IrStringPart]) -> bool {
-    parts.iter().all(interp_part_str_lowerable)
+/// Desugar a STRING INTERPOLATION `"…${e}…"` into a left-nested `ConcatStr` fold,
+/// seeded by an empty `""` literal: `(((("" ++ p0) ++ p1) … ) ++ p_{K-1})`. Each
+/// part is wrapped in its type's `to_string` ([`interp_part_leaf`]) — a Lit/String
+/// part is a no-call leaf, every other part a single `module.to_string` call.
+/// Concatenating with the leading `""` is byte-identical to v0's `emit_string_interp`
+/// (`"" ++ bytes == bytes`), so the folded String matches v0 in EVERY position.
+///
+/// This is the SINGLE source the lowering ([`LowerCtx::try_lower_string_interp`])
+/// AND the corpus caps gate (`count_ir_calls` in classify_corpus) BOTH consult: the
+/// gate counts the call NODES of the very tree the lowering emits, so the synthetic
+/// MIR `Op::CallFn`s are 1:1 backed by IR call nodes — `mir_calls == ir_calls` for an
+/// in-profile interp BY CONSTRUCTION (no `mir > ir` over-count, no spurious caps
+/// taint). Soundness rests on one invariant: when this returns `Some(tree)`, every
+/// leaf lowers to exactly one `CallFn` (a pure `module.to_string`, admitted by
+/// `purity::is_pure`) or a no-call passthrough — so `try_lower_concat_str` never
+/// rolls back. Returns `None` (the interp stays the deferred Opaque, credited 0 by
+/// the gate) iff a part has no admitted `to_string` module — a memory-safe defer.
+///
+/// THE WALL DOES THE HEAVY LIFTING: a part whose `to_string` is UNLINKED (Float /
+/// compound — registered in `PURE_MODULES` but not in the self-host runtime) still
+/// desugars to a real `CallFn`, so the enclosing function emits an unlinked call and
+/// the render wall (`try_render_wasm_program`) REJECTS it as `Unsupported`. Such a
+/// function is OUT of profile, so it can never contribute a `count != lower`
+/// mismatch — the only IN-profile interps are the fully-linkable ones (Lit/String/
+/// Int/Bool), where `count == lower` is trivially exact.
+pub fn desugar_string_interp(parts: &[IrStringPart]) -> Option<IrExpr> {
+    let mut acc = IrExpr {
+        kind: IrExprKind::LitStr { value: String::new() },
+        ty: Ty::String,
+        span: None,
+        def_id: None,
+    };
+    for p in parts {
+        let leaf = interp_part_leaf(p)?;
+        acc = IrExpr {
+            kind: IrExprKind::BinOp {
+                op: almide_ir::BinOp::ConcatStr,
+                left: Box::new(acc),
+                right: Box::new(leaf),
+            },
+            ty: Ty::String,
+            span: None,
+            def_id: None,
+        };
+    }
+    Some(acc)
 }
 
-/// The number of SYNTHETIC self-host calls [`LowerCtx::try_lower_string_interp`] emits for
-/// a lowerable interpolation of `parts`: `K` `__str_concat` calls (K parts + 1 empty-seed
-/// leaf ⇒ K concats) plus one `int.to_string` per Int part. The gate ADDS exactly this to
-/// its IR call count for each admitted interp, so the synthetic MIR calls are 1:1 backed.
-/// (Caller must have checked [`interp_str_lowerable`]; an empty `parts` ⇒ 0 calls.)
+/// Count the synthetic `CallFn`s [`desugar_string_interp`] yields for `parts` — the
+/// `ConcatStr` and `module.to_string` call NODES of the desugared tree. The corpus
+/// gate adds exactly this to its IR call count for each interp (it counts the same
+/// tree), so the MIR calls the lowering emits are 1:1 backed. `None` (a part with no
+/// admitted module) ⇒ 0 (the interp stays Opaque, lowering emits no synthetic call).
 pub fn interp_str_synthetic_call_count(parts: &[IrStringPart]) -> usize {
-    let int_parts = parts
-        .iter()
-        .filter(|p| matches!(p, IrStringPart::Expr { expr } if matches!(expr.ty, Ty::Int)))
-        .count();
-    let concats = parts.len(); // K parts + 1 seed leaf = K+1 leaves = K concats
-    concats + int_parts
+    interp_synthetic_call_names(parts).len()
+}
+
+/// The SYNTHETIC call names [`desugar_string_interp`] introduces for `parts`: one
+/// `__str_concat` per fold step (= `parts.len()` for a non-empty interp: K parts over
+/// the `""` seed ⇒ K concats) and one `<module>.to_string` per non-passthrough part
+/// (Int → `int.to_string`, Bool → `bool.to_string`, Float/compound → `<module>.
+/// to_string`). It DOES NOT include the operands' OWN inner calls (a `${g(x)}` callee)
+/// — those live in the original part exprs and are reached separately. Empty (a
+/// `None` desugar — a part with no admitted module) ⇒ the interp stays Opaque, so the
+/// lowering emits no synthetic call and this credits none. Used both to credit the
+/// gate ([`interp_str_synthetic_call_count`]) and to surface the same names as elided
+/// markers when an interp defers (`record_elided_calls`), keeping `mir == ir`.
+pub fn interp_synthetic_call_names(parts: &[IrStringPart]) -> Vec<String> {
+    // A part with no admitted `to_string` module ⇒ the whole interp is non-desugarable
+    // (the lowering returns `None` and defers to Opaque), so it credits zero synthetic
+    // calls. Mirror that all-or-nothing admission exactly.
+    if desugar_string_interp(parts).is_none() {
+        return Vec::new();
+    }
+    let mut names = Vec::with_capacity(parts.len() * 2);
+    for _ in 0..parts.len() {
+        names.push("__str_concat".to_string());
+    }
+    for p in parts {
+        if let IrStringPart::Expr { expr } = p {
+            if !matches!(expr.ty, Ty::String) {
+                if let Some(module) = interp_to_string_module(&expr.ty) {
+                    names.push(format!("{module}.to_string"));
+                }
+            }
+        }
+    }
+    names
+}
+
+/// Is a WHOLE interpolation DESUGARABLE (every part has an admitted `to_string`)? When
+/// true, the lowering folds it to a `ConcatStr` chain; when false, it stays the deferred
+/// Opaque. (Desugarable does NOT imply LINKABLE — a Float/compound part desugars but its
+/// `to_string` is unlinked, so the function walls at render. Use the registry to split
+/// proven-vs-walled; this predicate only answers "does the lowering fold it".)
+pub fn interp_str_desugarable(parts: &[IrStringPart]) -> bool {
+    desugar_string_interp(parts).is_some()
 }
 
 /// Does `module.func` return a real MATERIALIZED `Result[Int, String]` (the DynListStr len-as-tag

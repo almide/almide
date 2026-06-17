@@ -4302,25 +4302,33 @@
     }
 
     #[test]
-    fn string_interp_non_subset_stays_opaque() {
-        // STRUCTURAL GUARD (the negative): an interp with a CALL operand (`${list.len(x)}`)
-        // is NOT in the executable subset, so `try_lower_string_interp` returns None and the
-        // interp stays the sound deferred Opaque — it must NOT be folded to a __str_concat
-        // chain (which would byte-MISMATCH v0, since list.len isn't materialized here). We
-        // assert the interp's value position keeps its Opaque shape by checking the function
-        // lowers without panicking and the call operand is recorded as an elided marker.
+    fn string_interp_int_call_operand_executes_and_byte_matches_v0() {
+        // The uniform desugar wraps an Int part by TYPE, not by operand shape — so an Int
+        // `${list.len(x)}` with a CALL operand now folds to `int.to_string(list.len(x))`.
+        // Both `int.to_string` and `list.len` are self-hosted, so the function fully LINKS
+        // and EXECUTES, byte-matching v0 ("len=3"). (Before the uniform desugar this stayed
+        // a deferred Opaque — the per-operand predicate rejected a non-Var operand. This is
+        // a coverage GAIN, not a regression: the call is MATERIALIZED, so caps stay honest.)
         let src = "fn main() -> Unit = {\n  \
             let xs = [1, 2, 3]\n  println(\"len=${list.len(xs)}\") }\n";
         let prog = lower_source(src);
         let main = prog.functions.iter().find(|f| f.name == "main").expect("main lowered");
-        // The list.len call is elided (deferred Opaque interp) → it appears as a CallFn
-        // marker, NOT folded into a real interp result. (This is the honest-caps behavior;
-        // the interp's CONTENT is a later brick — but it must never silently fold wrong.)
+        // The list.len call is MATERIALIZED as a real CallFn (its result feeds int.to_string),
+        // not silently dropped — its capabilities are visible to the transitive fold.
         assert!(
             main.ops.iter().any(|op| matches!(op,
                 Op::CallFn { name, .. } if name == "list.len")),
-            "a non-subset interp's call operand must be recorded (elided), not silently dropped"
+            "the Int part's call operand must be materialized as a real CallFn"
         );
+        // Fully linkable (int.to_string + list.len both registered) → renders cleanly.
+        assert!(
+            crate::render_wasm::unlinked_call_names(&prog).is_empty(),
+            "an Int-call-operand interp must be fully linkable, got {:?}",
+            crate::render_wasm::unlinked_call_names(&prog)
+        );
+        if let Some(out) = build_and_run("string_interp_int_call_operand", &render_wasm_program(&prog)) {
+            assert_eq!(out, "len=3"); // v0 golden
+        }
     }
 
     // ──────────────────────────────────────────────────────────────────────────────
@@ -4386,5 +4394,101 @@
             .expect("a leaf interp must render cleanly (no wall)");
         if let Some(out) = build_and_run("leaf_interp_after_wall", &wat) {
             assert_eq!(out, "x=42 y=world"); // v0 golden
+        }
+    }
+
+    // ── Uniform interp desugar (fix-0276): per-type `to_string`, the wall walls Float/compound ──
+    //
+    // The StringInterp lowering is now a single uniform desugar: each part is wrapped in its
+    // type's `to_string` (Lit/String passthrough, Int → int.to_string, Bool → bool.to_string,
+    // Float → float.to_string [UNLINKED → walls], compound → <module>.to_string [UNLINKED →
+    // walls]). The COVERED types byte-match v0; the UNCOVERED ones clean-WALL (Unsupported),
+    // never invalid wasm. Goldens captured from `almide run` on the native v0 path.
+
+    #[test]
+    fn string_interp_bool_part_byte_matches_v0() {
+        // The NEW covered type: a Bool `${b}` folds via the self-hosted `bool.to_string`
+        // (`if b then "true" else "false"`), byte-matching v0's interned "true"/"false"
+        // select. v0: "flag=true", "flag=false", "true and false".
+        let src = "fn main() -> Unit = {\n  \
+            let b = true\n  let c = false\n  \
+            println(\"flag=${b}\")\n  \
+            println(\"flag=${c}\")\n  \
+            println(\"${b} and ${c}\") }\n";
+        let prog = lower_source(src);
+        // STRUCTURAL: a Bool interp must auto-link bool.to_string (not defer to Opaque).
+        assert!(
+            prog.functions.iter().any(|f| f.name == "bool.to_string"),
+            "a Bool interp part must auto-link bool.to_string"
+        );
+        // A covered-only interp is fully linkable — render cleanly (no wall).
+        assert!(
+            crate::render_wasm::unlinked_call_names(&prog).is_empty(),
+            "a Bool interp must be fully linkable (no wall), got {:?}",
+            crate::render_wasm::unlinked_call_names(&prog)
+        );
+        if let Some(out) = build_and_run("string_interp_bool", &render_wasm_program(&prog)) {
+            assert_eq!(out, "flag=true\nflag=false\ntrue and false");
+        }
+    }
+
+    #[test]
+    fn string_interp_pure_literal_and_edges_byte_match_v0() {
+        // A pure-literal interp (no `${}`) plus leading / trailing interp positions. The
+        // `""` seed makes a leading `${x}` byte-identical to v0's single-part passthrough.
+        // v0: "no placeholders", "world!", "[world".
+        let src = "fn main() -> Unit = {\n  \
+            let s = \"world\"\n  \
+            println(\"no placeholders\")\n  \
+            println(\"${s}!\")\n  \
+            println(\"[${s}\") }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("string_interp_edges", &render_wasm_program(&prog)) {
+            assert_eq!(out, "no placeholders\nworld!\n[world");
+        }
+    }
+
+    #[test]
+    fn string_interp_float_part_walls_not_invalid_wasm() {
+        // The UNCOVERED Float type: `${f}` desugars to `float.to_string(f)`, which is PURE
+        // (emitted as a real CallFn) but UNLINKED (float dtoa is not self-hosted) — so the
+        // render wall REJECTS the whole function with Unsupported (NOT invalid wasm, NOT a
+        // v0 regression: v0 keeps its own float_display path; this only changes v1).
+        use crate::lower::LowerError;
+        use crate::render_wasm::{try_render_wasm_program, unlinked_call_names};
+        let src = "fn main() -> Unit = {\n  let f = 2.5\n  println(\"f=${f}\") }\n";
+        let prog = lower_source(src);
+        assert!(
+            unlinked_call_names(&prog).contains("float.to_string"),
+            "a Float interp must desugar to the unlinked float.to_string, got {:?}",
+            unlinked_call_names(&prog)
+        );
+        match try_render_wasm_program(&prog) {
+            Err(LowerError::Unsupported(msg)) => assert!(
+                msg.contains("float.to_string"),
+                "the wall message must name the unlinked float.to_string, got {msg:?}"
+            ),
+            Err(other) => panic!("expected Unsupported, got {other:?}"),
+            Ok(_) => panic!("a Float interp must wall, not render to (possibly invalid) wasm"),
+        }
+    }
+
+    #[test]
+    fn string_interp_compound_part_walls_not_invalid_wasm() {
+        // A compound `${xs}` (List) desugars to `list.to_string(xs)` — PURE + emitted, but
+        // UNLINKED (no self-hosted list Display), so the render wall cleanly REJECTS it.
+        use crate::lower::LowerError;
+        use crate::render_wasm::{try_render_wasm_program, unlinked_call_names};
+        let src = "fn main() -> Unit = {\n  let xs = [1, 2, 3]\n  println(\"xs=${xs}\") }\n";
+        let prog = lower_source(src);
+        assert!(
+            unlinked_call_names(&prog).contains("list.to_string"),
+            "a List interp must desugar to the unlinked list.to_string, got {:?}",
+            unlinked_call_names(&prog)
+        );
+        match try_render_wasm_program(&prog) {
+            Err(LowerError::Unsupported(_)) => {}
+            Err(other) => panic!("expected Unsupported, got {other:?}"),
+            Ok(_) => panic!("a compound interp must wall, not render to (possibly invalid) wasm"),
         }
     }

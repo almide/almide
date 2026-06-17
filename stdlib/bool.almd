@@ -1,0 +1,13 @@
+// bool — SELF-HOSTED `bool.to_string` for v1, the one new `to_string` the uniform
+// string-interpolation desugar needs (`"flag=${b}"` → `"" ++ bool.to_string(b)`).
+//
+// Pure scalar `if` — NO heap, NO prim floor. The two String literals it returns are
+// the SAME bytes v0 emits for a Bool interpolation part (`emit_string_part`'s
+// select between the interned "true"/"false"), so a `${b}` interp byte-matches v0.
+//
+// The v1 runtime linker auto-includes this when a program's desugared interp calls
+// `bool.to_string` (registered in `self_host_runtime()`, renamed bool_to_string →
+// bool.to_string). It is NOT a frontend-bundled module (absent from BUNDLED_MODULES),
+// so `bool` stays an internal v1 self-host module name — user source never sees it.
+
+fn bool_to_string(b: Bool) -> String = if b then "true" else "false"
