@@ -1363,15 +1363,21 @@ impl LowerCtx {
                     BinOp::MulInt => crate::IntOp::Mul,
                     BinOp::DivInt => crate::IntOp::Div,
                     BinOp::ModInt => crate::IntOp::Mod,
-                    // Comparisons (the `if` condition) — INT operands only (a Float/
-                    // String compare needs a different op). Gate on the operand type.
+                    // Ordering comparisons (the `if` condition) — INT operands only (a
+                    // Float compare uses the prim float floor above; a String compare needs
+                    // a different op). Gate on the operand type.
                     BinOp::Lt if matches!(left.ty, Ty::Int) => crate::IntOp::Lt,
                     BinOp::Lte if matches!(left.ty, Ty::Int) => crate::IntOp::Le,
                     BinOp::Gt if matches!(left.ty, Ty::Int) => crate::IntOp::Gt,
                     BinOp::Gte if matches!(left.ty, Ty::Int) => crate::IntOp::Ge,
-                    BinOp::Eq if matches!(left.ty, Ty::Int) => crate::IntOp::Eq,
-                    BinOp::Neq if matches!(left.ty, Ty::Int) => crate::IntOp::Ne,
-                    // Pow, Float, logic, concat, non-Int compares: defer.
+                    // Equality — INT or BOOL operands. A `Bool` is an i64 0/1 (a Var loads
+                    // its 0/1, a `LitBool` materializes `ConstInt 0/1` above), so the SAME
+                    // `IntOp::Eq`/`Ne` render is bit-exact for `b == false` / `b1 != b2` as
+                    // for `n == 0`. (Ordering on Bool is undefined in v0, so it is NOT
+                    // admitted; a Float/String/compound `==` still needs a distinct op.)
+                    BinOp::Eq if matches!(left.ty, Ty::Int | Ty::Bool) => crate::IntOp::Eq,
+                    BinOp::Neq if matches!(left.ty, Ty::Int | Ty::Bool) => crate::IntOp::Ne,
+                    // Pow, Float, logic, concat, non-Int/Bool compares: defer.
                     _ => return None,
                 };
                 let a = self.lower_scalar_value(left)?;

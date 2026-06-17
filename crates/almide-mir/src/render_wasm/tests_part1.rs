@@ -545,6 +545,38 @@
         }
     }
 
+    /// `b == false` / `b1 != b2` EXECUTE — a `Bool` is an i64 0/1, so the SAME
+    /// `IntOp::Eq`/`Ne` render the Int comparison uses is bit-exact. Before the gate
+    /// admitted `Ty::Bool` operands, the condition deferred to a `Const 0` and BOTH
+    /// arms ran (v0 mismatch). Here `cmp(false)` prints exactly "is-false" and
+    /// `differ(true,false)` prints "differ" — proving only the taken arm runs.
+    #[test]
+    fn bool_equality_executes_the_taken_arm() {
+        let src = "fn cmp(b: Bool) -> Unit =\n  \
+            if b == false then println(\"is-false\") else println(\"is-true\")\n\
+            fn differ(x: Bool, y: Bool) -> Unit =\n  \
+            if x != y then println(\"differ\") else println(\"same\")\n\
+            fn main() -> Unit = {\n  \
+            cmp(false)\n  cmp(true)\n  differ(true, false)\n  differ(true, true) }\n";
+        let prog = lower_source(src);
+        // The condition must lower to a real `IntBinOp{Eq/Ne}`, not a deferred Const.
+        let cmp = prog.functions.iter().find(|f| f.name == "cmp").unwrap();
+        assert!(
+            cmp.ops.iter().any(|op| matches!(op, Op::IntBinOp { op: IntOp::Eq, .. })),
+            "Bool `==` must lower to IntBinOp Eq, got {:?}",
+            cmp.ops
+        );
+        let differ = prog.functions.iter().find(|f| f.name == "differ").unwrap();
+        assert!(
+            differ.ops.iter().any(|op| matches!(op, Op::IntBinOp { op: IntOp::Ne, .. })),
+            "Bool `!=` must lower to IntBinOp Ne, got {:?}",
+            differ.ops
+        );
+        if let Some(out) = build_and_run("bool_eq", &render_wasm_program(&prog)) {
+            assert_eq!(out, "is-false\nis-true\ndiffer\nsame");
+        }
+    }
+
     #[test]
     fn heap_result_if_returns_the_taken_arm_string() {
         // `if c then "yes" else "no"` RETURNS a String — only the taken arm allocates,
