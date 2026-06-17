@@ -13,7 +13,7 @@ use almide_frontend::ir_link;
 use almide_frontend::lower::lower_program;
 use almide_lang::lexer::Lexer;
 use almide_lang::parser::Parser;
-use almide_mir::render_wasm::render_wasm_program;
+use almide_mir::render_wasm::try_render_wasm_program;
 use almide_mir::MirProgram;
 use almide_optimize::{mono, optimize};
 use std::collections::HashMap;
@@ -125,5 +125,12 @@ fn main() {
         }
     }
 
-    print!("{}", render_wasm_program(&MirProgram { functions }));
+    // Wall any UNLINKED stdlib/runtime call: a `(call $name)` to a function that is
+    // neither defined here (user / auto-linked self-host / print_str) nor a preamble
+    // runtime fn would be a dangling reference (invalid wasm). Reject cleanly instead of
+    // emitting it — conservative and structurally sound (it only removes a bad module).
+    match try_render_wasm_program(&MirProgram { functions }) {
+        Ok(wat) => print!("{wat}"),
+        Err(e) => die(format!("[render_program] {e:?}")),
+    }
 }

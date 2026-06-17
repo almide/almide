@@ -37,7 +37,7 @@ use almide_ir::IrTypeDeclKind;
 use almide_mir::certificate::{
     name_witness_string, ownership_certificate, reachable_caps_or_tainted,
 };
-use almide_mir::{Capability, MirFunction, Op};
+use almide_mir::{Capability, MirFunction, MirProgram, Op};
 use almide_optimize::{mono, optimize};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -237,6 +237,32 @@ fn source_to_ir(source: &str) -> FrontendOutcome {
     }
 }
 
+/// Count the `StringInterp` SITES in a body, split by whether each is in the executable
+/// subset (`interp_str_lowerable`). `(lowerable, non_lowerable)`. Used to bucket interp
+/// coverage: a lowerable interp in a lowered function = (a) proven; a non-lowerable one
+/// (or any interp in a walled function) = (b) cleanly walled / Opaque (no invalid wasm).
+fn count_interp_sites(body: &almide_ir::IrExpr) -> (usize, usize) {
+    struct InterpCounter {
+        lowerable: usize,
+        non_lowerable: usize,
+    }
+    impl almide_ir::visit::IrVisitor for InterpCounter {
+        fn visit_expr(&mut self, e: &almide_ir::IrExpr) {
+            if let almide_ir::IrExprKind::StringInterp { parts } = &e.kind {
+                if almide_mir::lower::interp_str_lowerable(parts) {
+                    self.lowerable += 1;
+                } else {
+                    self.non_lowerable += 1;
+                }
+            }
+            almide_ir::visit::walk_expr(self, e);
+        }
+    }
+    let mut c = InterpCounter { lowerable: 0, non_lowerable: 0 };
+    almide_ir::visit::IrVisitor::visit_expr(&mut c, body);
+    (c.lowerable, c.non_lowerable)
+}
+
 /// Group an `Unsupported` reason into a stable histogram key: the leading clause
 /// before the first variable-debug fragment (`:`, `(`, `{`). Keeps "no scalar
 /// Repr for Named { .. }" and "no scalar Repr for Tuple [..]" in one bucket, so
@@ -277,6 +303,52 @@ struct Tally {
     /// cross-file user function), so their Stdout-freedom cannot be proven; their
     /// witness is NOT emitted (honest: not falsely claimed caps-safe).
     caps_unverified: usize,
+
+    // ── interp / call-link coverage visibility metric (a/b/c) ────────────────────
+    // Every StringInterp SITE + every dotted stdlib CallFn in the corpus, bucketed
+    // HONESTLY against what the render-side wall (`try_render_wasm_program`) guarantees:
+    /// (a) PROVEN: a lowerable interp in a lowered function — it folds to a registered
+    /// `__str_concat` / `int.to_string` chain (byte-match v0 by the render_wasm
+    /// detectors). The interp's synthetic to_string callee (`int.to_string`) is in the
+    /// registry, so it renders to VALID wasm. (Interp sites only; the link metric below
+    /// covers the broader unlinkable-stdlib-call surface.)
+    interp_lowered: usize,
+    /// (b) cleanly WALLED — acceptable (no output, but never invalid wasm). Three honest
+    /// sources, all caught BEFORE any invalid module ships:
+    ///   • a non-subset interp stays the sound Opaque fallback (its fn lowers, the interp
+    ///     just defers — no synthetic call emitted);
+    ///   • an interp inside a function the lowering returned `Unsupported` for;
+    ///   • a function that emits an UNLINKABLE dotted CallFn (a stdlib fn with no
+    ///     self-host registry definition, e.g. `string.to_upper`): the render-side
+    ///     `try_render_wasm_program` REJECTS the whole program with `LowerError::
+    ///     Unsupported` rather than emit a dangling `(call $…)`. Conservative, loud, sound.
+    interp_walled: usize,
+    /// The DISTINCT unlinkable dotted stdlib callees seen across the corpus — the visible
+    /// "would be walled at render" frontier (the remaining self-host-registry gap). Folded
+    /// into bucket (b): every using program is cleanly REJECTED by the render wall, never
+    /// silently miscompiled. This is a MEASUREMENT (the gap is visible every build), NOT a
+    /// soundness breach — the wall converts each of these from a (c) hole into a (b) reject.
+    would_wall_callees: BTreeMap<String, usize>,
+    /// (c) FORBIDDEN — a silent-miscompile / invalid-wasm-passing-as-Ok: a call that
+    /// renders to a dangling `(call $…)` AND is presented as `Ok`. The render-side wall
+    /// (`try_render_wasm_program`) catches EVERY unlinkable `Op::CallFn` before output, so
+    /// no such site can escape to an `Ok` invalid module — this is 0 BY CONSTRUCTION. The
+    /// list records any site that would escape the wall (a wall-completeness breach); it
+    /// MUST stay empty.
+    forbidden_unwalled: Vec<String>,
+}
+
+/// All self-host registry CALL-NAMES (the `module.func` a `CallFn` resolves to once the
+/// v1 linker auto-includes + renames the impl) plus the always-linked `print_str`. A
+/// `CallFn` to any of these is render-resolvable. Built once from the single-source
+/// registry so it can never drift from what render_program / lower_source actually link.
+fn auto_linkable_call_names() -> HashSet<String> {
+    let mut s: HashSet<String> = almide_mir::render_wasm::self_host_runtime()
+        .iter()
+        .flat_map(|(_, entries)| entries.iter().map(|(_, call)| call.to_string()))
+        .collect();
+    s.insert("print_str".to_string());
+    s
 }
 
 /// Recursively collect `.almd` files under a path (file or directory).
@@ -329,6 +401,14 @@ fn main() {
     let mut ownership_stream = String::new();
     let mut names_stream = String::new();
     let mut caps_stream = String::new();
+
+    // The render-resolvable name oracle for the interp-coverage (c) detector: a DOTTED
+    // `CallFn` name (a stdlib `module.func`) renders to `(call $name)` and resolves ONLY
+    // if the v1 linker auto-includes it (it is in the self-host registry). A dotted name
+    // NOT here would dangle (invalid wasm). User functions can't hold a dot, so dotted +
+    // not-auto-linkable is precisely the unlinkable-stdlib-call class (no cross-file user
+    // false positives, which a per-file harness could not otherwise rule out).
+    let auto_linkable = auto_linkable_call_names();
 
     for file in &files {
         t.files += 1;
@@ -387,6 +467,13 @@ fn main() {
                 globals.insert(tl.var, tl.ty.clone());
             }
         }
+        // The functions DEFINED in this file (their names). A PROTOCOL METHOD is a
+        // user-defined function whose name is dotted (`Type.method`, e.g. `MathExpr.eval`)
+        // — it resolves to ITSELF / a sibling method, NOT a stdlib call. The unlinkable-
+        // stdlib detector must exclude these (a dotted name is unlinkable only if it is also
+        // NOT a function defined here), else a self-recursive method call falsely flags.
+        let file_fn_names: HashSet<String> =
+            ir.functions.iter().map(|f| f.name.as_str().to_string()).collect();
         for func in &ir.functions {
             t.functions += 1;
             let lowered = catch_unwind(AssertUnwindSafe(|| {
@@ -402,6 +489,57 @@ fn main() {
                     // same position. With no lifting wired the vector is just `[main]` and
                     // this is byte-identical to the prior single-function pass.
                     t.in_profile += mirs.len();
+                    // INTERP COVERAGE (a): this function LOWERED, so its lowerable interps
+                    // fold to a registered __str_concat / int.to_string chain (proven
+                    // byte-match v0 by the render_wasm detectors); its non-lowerable interps
+                    // stay the sound Opaque fallback = (b) cleanly walled (no invalid wasm).
+                    let (lowerable, non_lowerable) = count_interp_sites(&func.body);
+                    t.interp_lowered += lowerable;
+                    t.interp_walled += non_lowerable;
+                    // LINK COVERAGE: a LOWERED function emitting a dotted `Op::CallFn` whose
+                    // name the v1 linker cannot resolve (not in the self-host registry) would,
+                    // if rendered, emit a dangling `(call $name)` — invalid wasm. The render-
+                    // side `try_render_wasm_program` now WALLS the WHOLE program in that case
+                    // (a clean `LowerError::Unsupported`, never an `Ok` invalid module). So each
+                    // such site is a bucket-(b) cleanly-walled, NOT a (c) forbidden hole. We
+                    // MEASURE the distinct unlinkable callees (the visible self-host gap) and
+                    // fold each occurrence into (b). The wall's COMPLETENESS — that no such site
+                    // escapes to `Ok` — is what keeps (c) == 0 (asserted below).
+                    for mir in &mirs {
+                        for op in &mir.ops {
+                            if let Op::CallFn { name, .. } = op {
+                                // Unlinkable stdlib call ⟺ a DOTTED name that is neither in the
+                                // self-host registry NOR a function defined in this file (a dotted
+                                // user PROTOCOL METHOD resolves to itself/a sibling, so it is NOT a
+                                // dangling stdlib call). This is exactly the class the render wall
+                                // rejects; a user method / cross-file call is out of scope here.
+                                let unlinkable = name.contains('.')
+                                    && !auto_linkable.contains(name)
+                                    && !file_fn_names.contains(name);
+                                if unlinkable {
+                                    *t.would_wall_callees.entry(name.clone()).or_insert(0) += 1;
+                                    t.interp_walled += 1;
+                                    // (c) completeness backstop: this site is genuinely unlinkable,
+                                    // so the render wall MUST flag it. `unlinked_call_names` is the
+                                    // wall's OWN predicate; if it does NOT contain the name, a site
+                                    // escaped the wall → a real (c) breach. A single-fn probe is
+                                    // sound here: the name is not file-defined, so adding sibling
+                                    // functions could not make it resolve (only the registry could,
+                                    // which `auto_linkable` already ruled out).
+                                    let probe = MirProgram { functions: vec![mir.clone()] };
+                                    if !almide_mir::render_wasm::unlinked_call_names(&probe)
+                                        .contains(name)
+                                    {
+                                        t.forbidden_unwalled.push(format!(
+                                            "{}::{} -> {name} (escaped the render wall)",
+                                            file.display(),
+                                            mir.name
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                    }
                     for mir in &mirs {
                         // The borrow-by-default soundness gate: every `+1` event must
                         // be backed by a real runtime op (no synthetic param `+1`).
@@ -461,6 +599,10 @@ fn main() {
                 }
                 Ok(Err(almide_mir::lower::LowerError::Unsupported(reason))) => {
                     *t.unsupported.entry(reason_key(&reason)).or_insert(0) += 1;
+                    // INTERP COVERAGE (b): every interp site inside a WALLED function is
+                    // cleanly walled too (its function emits no wasm) — never a miscompile.
+                    let (lowerable, non_lowerable) = count_interp_sites(&func.body);
+                    t.interp_walled += lowerable + non_lowerable;
                 }
                 Err(_) => {
                     // THE wall breach: lowering must be total. Record file::func.
@@ -570,15 +712,44 @@ fn main() {
         "  caps-unverified      : {}  <- call an unanalyzable callee; not claimed caps-safe (honest scope)",
         t.caps_unverified
     );
+    // INTERP / LINK COVERAGE visibility metric (a/b/c) — measurement only, no soundness
+    // DECISION (mir<=ir is unchanged; this neither weakens nor strengthens any detector).
+    let would_wall_sites: usize = t.would_wall_callees.values().sum();
+    eprintln!("-- interp / call-link coverage (visibility metric) --");
+    eprintln!(
+        "  (a) lowered (proven) : {}  <- lowerable interp in a lowered fn; folds to a registered chain (byte-match v0)",
+        t.interp_lowered
+    );
+    eprintln!(
+        "  (b) walled (no out)  : {}  <- non-subset interp stays Opaque, interp in a walled fn, OR an unlinkable stdlib call the render wall rejects; acceptable, never invalid wasm",
+        t.interp_walled
+    );
+    eprintln!(
+        "  (c) FORBIDDEN        : {}  <- a site that renders to dangling `(call $…)` AND escapes the render wall (invalid-wasm-as-Ok); MUST be 0",
+        t.forbidden_unwalled.len()
+    );
+    eprintln!(
+        "      of (b): {} unlinkable dotted stdlib call-site(s) across {} distinct callee(s) — the visible self-host-registry gap (render wall rejects each using program cleanly):",
+        would_wall_sites,
+        t.would_wall_callees.len()
+    );
+    for (callee, n) in t.would_wall_callees.iter() {
+        eprintln!("        {n:>4}  {callee}");
+    }
     for p in &t.cert_backing_breaches {
         eprintln!("      UNBACKED {p}");
     }
     for p in &t.call_count_breaches {
         eprintln!("      MIR>IR {p}");
     }
+    for p in &t.forbidden_unwalled {
+        eprintln!("      FORBIDDEN {p}");
+    }
 
-    let total_breaches =
-        t.lower_panics.len() + t.cert_backing_breaches.len() + t.call_count_breaches.len();
+    let total_breaches = t.lower_panics.len()
+        + t.cert_backing_breaches.len()
+        + t.call_count_breaches.len()
+        + t.forbidden_unwalled.len();
     if total_breaches == 0 {
         eprintln!(
             "WALL OK: lower_function was TOTAL over {} corpus functions \
@@ -609,6 +780,15 @@ fn main() {
                  an elided-call effect marker double-counted a lowered call, which could \
                  mask a real elision and falsely de-taint a Stdout-reaching function.",
                 t.call_count_breaches.len()
+            );
+        }
+        if !t.forbidden_unwalled.is_empty() {
+            eprintln!(
+                "WALL BREACH: {} unlinkable stdlib call-site(s) ESCAPED the render wall — a \
+                 dangling `(call $…)` would render as a valid-looking `Ok` module (invalid wasm \
+                 passing as Ok). `try_render_wasm_program` must reject EVERY unlinkable CallFn; \
+                 a gap here is a wall-completeness bug.",
+                t.forbidden_unwalled.len()
             );
         }
         std::process::exit(1);

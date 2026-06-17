@@ -4322,3 +4322,69 @@
             "a non-subset interp's call operand must be recorded (elided), not silently dropped"
         );
     }
+
+    // ──────────────────────────────────────────────────────────────────────────────
+    // THE UNLINKED-CALL WALL (the StringInterp→to_string prerequisite brick).
+    //
+    // Before this wall, a `CallFn` to a stdlib fn NOT in the self-host registry (and not
+    // a user fn / preamble fn) rendered as a dangling `(call $name)` → an INVALID wasm
+    // module that wasmtime/wat2wasm reject — yet `render_wasm_program` returned it as a
+    // plain String (invalid-wasm-passing-as-Ok). `try_render_wasm_program` now detects
+    // the unresolved name at the resolution point and returns `LowerError::Unsupported`.
+    // ──────────────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn unlinked_stdlib_call_is_walled_not_dangling_wasm() {
+        use crate::lower::LowerError;
+        use crate::render_wasm::{try_render_wasm_program, unlinked_call_names};
+        // `float.to_string` is NOT in the self-host registry (float dtoa is unrevived),
+        // so it auto-links nothing and stays a bare `CallFn` — the canonical unlinked call.
+        // (`float.from_int` IS registered, so it is linked — the contrast that proves the
+        // wall is precise, not a blanket reject of all float.* calls.)
+        let src = "fn main() -> Unit = {\n  \
+            let x = float.from_int(3)\n  println(float.to_string(x)) }\n";
+        let prog = lower_source(src);
+        // The resolution check flags exactly the unlinked name, nothing else.
+        let missing = unlinked_call_names(&prog);
+        assert!(
+            missing.contains("float.to_string"),
+            "the unlinked float.to_string must be detected, got {missing:?}"
+        );
+        assert!(
+            !missing.contains("float.from_int"),
+            "a REGISTERED (auto-linked) call must NOT be walled — {missing:?}"
+        );
+        // The walled render returns a clean Unsupported (a loud reject), NOT a String.
+        match try_render_wasm_program(&prog) {
+            Err(LowerError::Unsupported(msg)) => {
+                assert!(
+                    msg.contains("float.to_string"),
+                    "the wall message must name the unlinked callee, got {msg:?}"
+                );
+            }
+            Err(other) => panic!("expected Unsupported, got {other:?}"),
+            Ok(_) => panic!("an unlinked call must be walled, not rendered to (possibly invalid) wasm"),
+        }
+    }
+
+    #[test]
+    fn leaf_interp_still_lowers_and_byte_matches_v0_after_the_wall() {
+        // NO REGRESSION on the 83a72efa leaf slice: a LEAF interp (`${n}` Int, `${s}`
+        // String) is fully linkable (every synthetic call — __str_concat / int.to_string —
+        // is in the registry), so try_render_wasm_program returns Ok and the module runs,
+        // byte-matching v0. Contrast with the unlinked-call wall above.
+        let src = "fn main() -> Unit = {\n  \
+            let n = 42\n  let s = \"world\"\n  \
+            println(\"x=${n} y=${s}\") }\n";
+        let prog = lower_source(src);
+        assert!(
+            crate::render_wasm::unlinked_call_names(&prog).is_empty(),
+            "a leaf interp must be fully linkable (no wall), got {:?}",
+            crate::render_wasm::unlinked_call_names(&prog)
+        );
+        let wat = crate::render_wasm::try_render_wasm_program(&prog)
+            .expect("a leaf interp must render cleanly (no wall)");
+        if let Some(out) = build_and_run("leaf_interp_after_wall", &wat) {
+            assert_eq!(out, "x=42 y=world"); // v0 golden
+        }
+    }

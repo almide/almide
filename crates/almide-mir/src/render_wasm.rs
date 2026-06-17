@@ -142,8 +142,97 @@ pub fn render_wasm(func: &MirFunction) -> String {
     )
 }
 
+/// The fixed-runtime (preamble) wasm functions a `CallFn` could legitimately name even
+/// though they are not `MirFunction`s. In practice no `Op::CallFn` targets these — the
+/// runtime helpers are reached via `Op::Call`/`RtFn` (`render_call`) or `Op::Prim`, never
+/// by raw name — but they belong to the resolvable set so a (hypothetical) user function
+/// or marker that happens to share one of these names is never falsely walled. Derived
+/// from the preamble text so it stays in sync with `preamble()` by construction.
+fn preamble_func_names() -> BTreeSet<String> {
+    let pre = preamble();
+    let mut names = BTreeSet::new();
+    // Match `(func $name` occurrences; the preamble declares each runtime fn this way.
+    for seg in pre.split("(func $").skip(1) {
+        let end = seg.find(|c: char| !(c.is_alphanumeric() || c == '_')).unwrap_or(seg.len());
+        names.insert(seg[..end].to_string());
+    }
+    names
+}
+
+/// The set of wasm function names a rendered module DEFINES (so a `(call $name)` resolves):
+/// every `MirFunction` in the program (user-defined + auto-linked self-host + `print_str`)
+/// plus the fixed preamble runtime functions. This is the AUTHORITATIVE resolution set —
+/// `func_slots` is exactly the program-function half of it.
+fn resolvable_call_names(prog: &MirProgram) -> BTreeSet<String> {
+    let mut names: BTreeSet<String> = prog.functions.iter().map(|f| f.name.clone()).collect();
+    names.extend(preamble_func_names());
+    names
+}
+
+/// The names of `Op::CallFn` targets that resolve to NOTHING — neither a `MirFunction` in
+/// the program nor a preamble runtime function. Each such name, if rendered, would emit a
+/// `(call $name)` to an undefined function ⇒ an INVALID wasm module (wasmtime/wat2wasm
+/// reject it with "undefined function"). The resolution point where a call name maps to a
+/// wasm `$func` is `render_op`'s `Op::CallFn` arm; this is that same lookup, lifted to a
+/// pre-render check so it can return a clean reject instead of emitting the dangling call.
+///
+/// `prim.*` intrinsics never reach here (they are intercepted in lowering → `Op::Prim`);
+/// `Op::Call`/`RtFn` runtime calls and `Op::CallIndirect` table dispatch are resolved by
+/// their own render arms, not by raw name, so they are out of scope by construction.
+pub fn unlinked_call_names(prog: &MirProgram) -> BTreeSet<String> {
+    let resolvable = resolvable_call_names(prog);
+    let mut missing = BTreeSet::new();
+    for f in &prog.functions {
+        for op in &f.ops {
+            if let Op::CallFn { name, .. } = op {
+                if !resolvable.contains(name) {
+                    missing.insert(name.clone());
+                }
+            }
+        }
+    }
+    missing
+}
+
+/// Render a whole MIR program to a WAT module, WALLING any unlinked stdlib/runtime call.
+///
+/// This is the SOUND, conservative entrypoint: if any `Op::CallFn` names a function that
+/// is neither defined in the program (user / auto-linked self-host / `print_str`) nor a
+/// preamble runtime function, the module would reference an undefined `$func` (invalid
+/// wasm). Rather than emit that dangling call (which passed silently as `Ok` before), this
+/// returns [`LowerError::Unsupported`] — a loud, conservative REJECT.
+///
+/// SOUNDNESS: walling only REMOVES a would-be-emitted module (it never adds a call op), so
+/// the MIR call count the corpus gate sees can only DROP — `mir_calls <= ir_calls` is
+/// preserved, and caps-verified cannot regress (a walled function is cleanly excluded, not
+/// mis-counted). It is strictly more conservative: it can never create a false-green.
+pub fn try_render_wasm_program(prog: &MirProgram) -> Result<String, crate::lower::LowerError> {
+    let missing = unlinked_call_names(prog);
+    if !missing.is_empty() {
+        let names = missing.into_iter().collect::<Vec<_>>().join(", ");
+        return Err(crate::lower::LowerError::Unsupported(format!(
+            "unlinked stdlib/runtime call(s) with no wasm definition: {names} — \
+             rendering them would emit a dangling `(call $…)` (invalid wasm). \
+             Add the callee to the self-host registry or wall the using function."
+        )));
+    }
+    Ok(render_wasm_program(prog))
+}
+
 /// Render a whole MIR program (functions + `_start` → `main`) to a WAT module.
+///
+/// This is the raw renderer used by the existing test corpus, which always feeds it
+/// fully-linked programs. Callers that may receive an UNLINKED call (the production
+/// `render_program` path, the corpus-wall harness) must go through
+/// [`try_render_wasm_program`], which walls the dangling-call case cleanly. As a
+/// defensive backstop this raw renderer still asserts linkage and panics loudly rather
+/// than silently emitting invalid wasm — a regression here is a bug, not a quiet miscompile.
 pub fn render_wasm_program(prog: &MirProgram) -> String {
+    debug_assert!(
+        unlinked_call_names(prog).is_empty(),
+        "render_wasm_program fed an unlinked call (use try_render_wasm_program to wall it): {:?}",
+        unlinked_call_names(prog)
+    );
     // Labels (the data section) are module-level — collect across all functions.
     let mut label_off: BTreeMap<String, (u32, u32)> = BTreeMap::new();
     let mut data = String::new();
