@@ -2984,6 +2984,28 @@
     }
 
     #[test]
+    fn heap_unwrap_or_concat_operand_executes() {
+        // DETECTOR for the 4th heap-`??` position — a string-concat OPERAND (`"x" + (opt ?? "d")`).
+        // The `??` operand lowers via lower_call_args → option.unwrap_or_str, then __str_concat.
+        // Without this test the concat-operand position could silently regress to an empty Opaque.
+        // (String INTERPOLATION `"${opt ?? "d"}"` is NOT covered here — StringInterp is entirely
+        // unlowered in v1 MIR, a SEPARATE pre-existing gap tracked as its own brick, NOT a `??`
+        // issue: a plain `"${s}"` is already broken.) v0: "got=bb", "got=DEF".
+        let src = "fn main() -> Unit = {\n  \
+            let parts = string.split(\"a,bb\", \",\")\n  \
+            println(\"got=\" + (list.get(parts, 1) ?? \"DEF\"))\n  \
+            println(\"got=\" + (list.get(parts, 9) ?? \"DEF\")) }\n";
+        let prog = lower_source(src);
+        assert!(
+            prog.functions.iter().any(|f| f.name == "option.unwrap_or_str"),
+            "heap `??` in a concat operand must route to option.unwrap_or_str (not Opaque)"
+        );
+        if let Some(out) = build_and_run("heap_unwrap_or_concat_operand", &render_wasm_program(&prog)) {
+            assert_eq!(out, "got=bb\ngot=DEF");
+        }
+    }
+
+    #[test]
     fn heap_unwrap_or_tail_position_executes() {
         // The RETURN/tail position (`fn f(...) -> String = opt ?? "d"`) — the result is MOVED OUT
         // (track_result=false). pick(parts, 1)="bb"; pick(parts, 9)="DEF". Byte-matches v0.
