@@ -140,6 +140,15 @@ fn main() {
         }
     }
 
+    // If `main` itself was WALLED out of the lowering subset (it needs a capability,
+    // a RawPtr with no scalar Repr, etc.), there is no `$main` in `functions` — yet
+    // render_wasm_program unconditionally emits `(func (export "_start") (call $main))`.
+    // That dangling `$main` is invalid wasm. Wall the WHOLE program cleanly instead of
+    // emitting a main-less module, so the sweep categorizes it as a wall (not a RUNERR).
+    if !functions.iter().any(|f| f.name == "main") {
+        die("[render_program] Unsupported: main is outside the MIR-lowering subset".into());
+    }
+
     // Wall any UNLINKED stdlib/runtime call: a `(call $name)` to a function that is
     // neither defined here (user / auto-linked self-host / print_str) nor a preamble
     // runtime fn would be a dangling reference (invalid wasm). Reject cleanly instead of

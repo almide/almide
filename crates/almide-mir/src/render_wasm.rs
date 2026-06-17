@@ -127,10 +127,13 @@ pub fn render_wasm(func: &MirFunction) -> String {
         .join(" ");
 
     let mut body = String::new();
-    // Single-function render (test entry): no module table, so FuncRef has no slots.
+    // Single-function render (test entry): no module table, so FuncRef has no slots
+    // and no other function exists to elide-call (empty param_counts ⇒ this path is
+    // byte-identical to before).
     let no_slots: BTreeMap<String, u32> = BTreeMap::new();
+    let no_param_counts: BTreeMap<String, usize> = BTreeMap::new();
     for op in &func.ops {
-        body.push_str(&render_op(op, &label_off, &no_slots));
+        body.push_str(&render_op(op, &label_off, &no_slots, &no_param_counts));
     }
 
     format!(
@@ -261,10 +264,17 @@ pub fn render_wasm_program(prog: &MirProgram) -> String {
         .enumerate()
         .map(|(i, f)| (f.name.clone(), i as u32))
         .collect();
+    // Function arity by NAME — a real call always supplies its callee's params,
+    // so a caps-accounting elided-call MARKER (an `Op::CallFn` with no dst/args/
+    // result NAMING a param-taking function) is distinguishable from a genuine
+    // 0-arg void call to a 0-param function. The `Op::CallFn` render uses it to
+    // emit NOTHING for the underflowing marker (see that arm).
+    let param_counts: BTreeMap<String, usize> =
+        prog.functions.iter().map(|f| (f.name.clone(), f.params.len())).collect();
     let funcs = prog
         .functions
         .iter()
-        .map(|f| render_wasm_fn(f, &label_off, &func_slots))
+        .map(|f| render_wasm_fn(f, &label_off, &func_slots, &param_counts))
         .collect::<String>();
     // Closure dispatch: when any function makes an indirect (closure) call, emit a module
     // function table whose slot i holds function i (the lambda-lifting convention — a
@@ -324,6 +334,7 @@ pub fn render_wasm_fn(
     func: &MirFunction,
     label_off: &BTreeMap<String, (u32, u32)>,
     func_slots: &BTreeMap<String, u32>,
+    param_counts: &BTreeMap<String, usize>,
 ) -> String {
     let reprs = value_reprs_wasm(func);
     // A LIFTED LAMBDA (`__lambda_*`) is dispatched through the function table against the uniform
@@ -438,7 +449,7 @@ pub fn render_wasm_fn(
                 let close = if dst.is_some() { "))\n" } else { ")\n" };
                 body.push_str(&format!("{}      ){close}", arm_val(val)));
             }
-            _ => body.push_str(&render_op(op, label_off, func_slots)),
+            _ => body.push_str(&render_op(op, label_off, func_slots, param_counts)),
         }
     }
     let tail = func.ret.map(|r| format!("    (local.get {})\n", local(r))).unwrap_or_default();
@@ -549,6 +560,7 @@ fn render_op(
     op: &Op,
     label_off: &BTreeMap<String, (u32, u32)>,
     func_slots: &BTreeMap<String, u32>,
+    param_counts: &BTreeMap<String, usize>,
 ) -> String {
     match op {
         // A STRING literal — a heap block `[rc][len][cap][utf8 bytes...]` (same header
@@ -735,7 +747,26 @@ fn render_op(
                 None => format!("    (drop {call})\n"),
             }
         }
-        Op::CallFn { dst, name, args, .. } => {
+        Op::CallFn { dst, name, args, result } => {
+            // A caps-accounting ELIDED-CALL MARKER (`record_elided_calls`) is an
+            // `Op::CallFn { dst: None, args: [], result: None }` whose NAME carries
+            // the elided callee's caps identity — it must keep that name for the
+            // caps gate, but it must NOT render as a real `(call $name)`: when
+            // `$name` declares parameters, a 0-arg call underflows the wasm stack
+            // and wasmtime rejects the module. Render NOTHING for such a marker.
+            //
+            // A GENUINE 0-arg void call to a 0-PARAMETER function has the IDENTICAL
+            // shape (`dst:None, args:[], result:None`) and IS valid wasm — it must
+            // still render. The discriminator: a real call always supplies its
+            // callee's params, so only a marker calls a param-taking function with
+            // zero args.
+            let is_elided_marker = dst.is_none()
+                && args.is_empty()
+                && result.is_none()
+                && param_counts.get(name).copied().unwrap_or(0) > 0;
+            if is_elided_marker {
+                return String::new();
+            }
             let argstr = args.iter().map(render_arg_wasm).collect::<Vec<_>>().join(" ");
             match dst {
                 Some(d) => format!("    (local.set {} (call ${name} {argstr}))\n", local(*d)),
