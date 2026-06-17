@@ -319,6 +319,11 @@ pub(crate) struct LowerCtx {
     /// `heap_elem_lists` member for drop-op SELECTION, but the mask makes the recursive free
     /// touch only the heap slots (NOT every slot — the scalar fields must not be `rc_dec`'d).
     record_masks: HashMap<ValueId, Vec<usize>>,
+    /// The CURRENT binding (`lower_bind`) is a MUTABLE `var` (set by `lower_stmt` from the
+    /// `Bind` mutability). A `var b = r.items` heap-field extraction may be COW-mutated later,
+    /// so it must take an OWNED container-grain `Dup` (mutable in place), NOT a precise borrow
+    /// (a shared field handle the value-model refuses to mutate). Read by `lower_heap_extraction`.
+    binding_is_mutable: bool,
     /// Named-record layout registry (the VALUE-MODEL field structure): type NAME →
     /// (declared generic param names, declared fields in declaration order). A record
     /// literal / field access typed `Ty::Named(name, args)` resolves its fields here
@@ -454,7 +459,17 @@ impl LowerCtx {
         // [emit_wasm: emit_early_return_decs], so the deferred-continue cert is faithful
         // on both targets — no leak. See docs/roadmap/active/v0-unwrap-early-return-leak.md.)
         match &stmt.kind {
-            IrStmtKind::Bind { var, ty, value, .. } => self.lower_bind(*var, ty, value),
+            IrStmtKind::Bind { var, ty, value, mutability } => {
+                // A MUTABLE (`var`) binding may be COW-mutated later, so a heap-field
+                // extraction (`var b = r.items`) must take an OWNED copy (container-grain
+                // `Dup`), NOT a precise borrow (which cannot be mutated in place). Flag it so
+                // `lower_heap_extraction` skips the borrow optimization for this bind.
+                let prev = self.binding_is_mutable;
+                self.binding_is_mutable = matches!(mutability, almide_ir::Mutability::Var);
+                let r = self.lower_bind(*var, ty, value);
+                self.binding_is_mutable = prev;
+                r
+            }
             // `x = value` — reassignment.
             //
             // At function TOP LEVEL: REBIND `x` to the new value (reusing
@@ -839,6 +854,191 @@ pub fn is_self_host_option_module_fn(module: &str, func: &str) -> bool {
     }
 }
 
+/// A `Sym`-interning shorthand for the recursive Display builders below.
+fn sym(s: &str) -> almide_lang::intern::Sym {
+    almide_lang::intern::sym(s)
+}
+
+/// A `LitStr` IR leaf (a static text fragment of a Display expansion — `"Point { "`,
+/// `", "`, `" }"`, `"("`, `")"`). No call, the no-op leaf of the `ConcatStr` fold.
+fn lit_str(s: &str) -> IrExpr {
+    IrExpr { kind: IrExprKind::LitStr { value: s.to_string() }, ty: Ty::String, span: None, def_id: None }
+}
+
+/// Left-nest `parts` into a `ConcatStr` fold seeded by `""` — the SAME shape
+/// [`desugar_string_interp`] builds, reused for a record/tuple body so the whole
+/// expansion is one uniform `ConcatStr` tree (K parts ⇒ K `__str_concat` folds).
+fn concat_all(parts: Vec<IrExpr>) -> IrExpr {
+    let mut acc = lit_str("");
+    for p in parts {
+        acc = IrExpr {
+            kind: IrExprKind::BinOp {
+                op: almide_ir::BinOp::ConcatStr,
+                left: Box::new(acc),
+                right: Box::new(p),
+            },
+            ty: Ty::String,
+            span: None,
+            def_id: None,
+        };
+    }
+    acc
+}
+
+/// Wrap `value` in `module.func(value)` (a single `Call { Module }` node), the Display
+/// leaf for a scalar/list/string field — `int.to_string(r.x)`, `string.quote(r.name)`,
+/// `list.to_string(r.items)`, `float.to_string_compound(r.v)`.
+fn to_string_call(module: &str, func: &str, value: IrExpr) -> IrExpr {
+    IrExpr {
+        kind: IrExprKind::Call {
+            target: CallTarget::Module { module: sym(module), func: sym(func), def_id: None },
+            args: vec![value],
+            type_args: Vec::new(),
+        },
+        ty: Ty::String,
+        span: None,
+        def_id: None,
+    }
+}
+
+/// The DECLARATION-ordered fields of an aggregate `ty`, for the recursive Display
+/// expansion: `(opt_type_name, Vec<(opt_field_name, field_ty)>)`. A `Ty::Named(name, args)`
+/// resolves its fields via the layout `registry` (substituting generics) and carries the
+/// type NAME (records print `Point { … }`); a structural `Ty::Record`/`Ty::Tuple` carries
+/// no name. Returns `None` for a non-aggregate or unregistered type (the Display then
+/// declines, the interp walls). MIRRORS `LowerCtx::aggregate_field_tys` exactly so the
+/// desugar and the lowering agree on field count, order, and types.
+fn resolve_aggregate(
+    ty: &Ty,
+    registry: &RecordLayouts,
+) -> Option<(Option<String>, bool, Vec<(Option<String>, Ty)>)> {
+    // `(type_name, is_tuple, [(field_name, field_ty)])`.
+    match ty {
+        Ty::Tuple(elems) => {
+            Some((None, true, elems.iter().map(|t| (None, t.clone())).collect()))
+        }
+        Ty::Record { fields } => Some((
+            None,
+            false,
+            fields.iter().map(|(n, t)| (Some(n.as_str().to_string()), t.clone())).collect(),
+        )),
+        Ty::Named(name, args) => {
+            // Only registry-declared records resolve here; a `Ty::Named` that names no
+            // record layout (an enum / alias / unknown) returns `None` and walls.
+            let (generics, decl_fields) = registry.get(name.as_str())?;
+            let mut subst: HashMap<almide_lang::intern::Sym, Ty> = HashMap::new();
+            for (g, a) in generics.iter().zip(args.iter()) {
+                subst.insert(*g, a.clone());
+            }
+            let fields = decl_fields
+                .iter()
+                .map(|(n, t)| (Some(n.as_str().to_string()), calls::subst_type_var(t, &subst)))
+                .collect();
+            Some((Some(name.as_str().to_string()), false, fields))
+        }
+        _ => None,
+    }
+}
+
+/// Build the Display IR expression for an aggregate VALUE `obj` of type `ty` (a record or
+/// tuple) — the recursive heart of `${record}` / `${tuple}`. Expands to a `ConcatStr` tree:
+///   record: `"Name { " ++ "f0: " ++ fmt(obj.f0) ++ ", " ++ "f1: " ++ fmt(obj.f1) ++ " }"`
+///   tuple:  `"(" ++ fmt(obj.0) ++ ", " ++ fmt(obj.1) ++ ")"`
+/// where `fmt(field)` is [`display_value`] over the field-access node (`Member`/`TupleIndex`).
+/// Returns `None` (the whole interp walls — NEVER wrong bytes) if `ty` is not a resolvable
+/// aggregate or ANY field's type has no Display leaf. The `Member`/`TupleIndex` nodes lower
+/// through the EXISTING value-model field access (scalar slot load / heap-field borrow), so
+/// no new lowering machinery is needed — only this IR shape.
+fn display_aggregate(obj: &IrExpr, ty: &Ty, registry: &RecordLayouts) -> Option<IrExpr> {
+    let (type_name, is_tuple, fields) = resolve_aggregate(ty, registry)?;
+    let mut parts: Vec<IrExpr> = Vec::new();
+    // Opening: `Name { ` for a record, `(` for a tuple. A structural (un-named) record has
+    // no v0 Display form (v0 only Displays a NAMED record), so wall it.
+    if is_tuple {
+        parts.push(lit_str("("));
+    } else {
+        let name = type_name?;
+        parts.push(lit_str(&format!("{name} {{ ")));
+    }
+    for (idx, (fname, fty)) in fields.iter().enumerate() {
+        if idx > 0 {
+            parts.push(lit_str(", "));
+        }
+        if let Some(fname) = fname {
+            parts.push(lit_str(&format!("{fname}: ")));
+        }
+        // The field-access node: `obj.fname` (Member) or `obj.idx` (TupleIndex), typed `fty`.
+        let access = if is_tuple {
+            IrExpr {
+                kind: IrExprKind::TupleIndex { object: Box::new(obj.clone()), index: idx },
+                ty: fty.clone(),
+                span: None,
+                def_id: None,
+            }
+        } else {
+            IrExpr {
+                kind: IrExprKind::Member {
+                    object: Box::new(obj.clone()),
+                    field: sym(fname.as_deref().unwrap_or("")),
+                },
+                ty: fty.clone(),
+                span: None,
+                def_id: None,
+            }
+        };
+        parts.push(display_value(&access, registry)?);
+    }
+    parts.push(lit_str(if is_tuple { ")" } else { " }" }));
+    Some(concat_all(parts))
+}
+
+/// Build the Display IR (a String-producing expression) for a VALUE `expr` of ANY type —
+/// the per-field formatter the record/tuple Display calls recursively. Byte-matches v0's
+/// AlmideRepr for the value's type:
+///   - `Int`     → `int.to_string(expr)`              (signed decimal)
+///   - `Bool`    → `bool.to_string(expr)`             (`true`/`false`)
+///   - `Float`   → `float.to_string_compound(expr)`   (compound form — DROPS the `.0`)
+///   - `String`  → `string.quote(expr)`               (double-quoted + escaped)
+///   - `List[T]` → `list.to_string*(expr)`            (element-type-keyed, as the top-level interp)
+///   - Record/Tuple → [`display_aggregate`] recursively (no call — an inline `ConcatStr`)
+/// Returns `None` (so the enclosing Display declines and the interp walls) for any type
+/// with no Display leaf — a nested `List[List[_]]` element, a Map/Set/Option field, an
+/// unresolved var. NEVER emits a wrong-byte fallback.
+fn display_value(expr: &IrExpr, registry: &RecordLayouts) -> Option<IrExpr> {
+    // A nested record/tuple expands INLINE (recursive `ConcatStr`, no `to_string` call).
+    if matches!(expr.ty, Ty::Record { .. } | Ty::Tuple(_) | Ty::Named(..))
+        && resolve_aggregate(&expr.ty, registry).is_some()
+    {
+        return display_aggregate(expr, &expr.ty, registry);
+    }
+    // Every other value type wraps in its single `to_string`-family call.
+    let (module, func) = display_leaf_call(&expr.ty)?;
+    Some(to_string_call(module, func, expr.clone()))
+}
+
+/// The SINGLE `(module, func)` Display wrapper for a NON-aggregate value type — the source both
+/// [`display_value`] (the IR builder) and [`value_synthetic_names`] (the gate counter) consult, so
+/// the emitted call and the counted call AGREE by construction:
+///   - `Int`     → `int.to_string`            `Bool`  → `bool.to_string`
+///   - `Float`   → `float.to_string_compound` (compound form — drops the `.0`)
+///   - `String`  → `string.quote`             (double-quoted + escaped)
+///   - `List[T]` → `list.to_string*`          (element-type-keyed; unsupported → unlinked, walls)
+///   - Map/Set/Option/Result → the unlinked `<module>.to_string` (walls — never wrong bytes)
+/// `None` for a type with NO Display leaf at all (a bare unresolved var) — the Display declines.
+fn display_leaf_call(ty: &Ty) -> Option<(&'static str, &'static str)> {
+    match ty {
+        Ty::Int => Some(("int", "to_string")),
+        Ty::Bool => Some(("bool", "to_string")),
+        Ty::Float => Some(("float", "to_string_compound")),
+        Ty::String => Some(("string", "quote")),
+        // List / Map / Set / Option / Result route through the element-type-keyed
+        // `interp_to_string_call` (List → a self-host variant; the rest → an unlinked
+        // `<module>.to_string` that walls). A Tuple/Record/variant/unresolved returns the
+        // unlinked `compound.to_string` there, so the enclosing aggregate also walls.
+        _ => interp_to_string_call(ty),
+    }
+}
+
 /// The `(module, func)` pair whose call renders a value of type `ty` to its Almide-Display form
 /// for the string-interpolation desugar. The MIR `CallFn` name is `"<module>.<func>"`, so this is
 /// the SINGLE source both the leaf builder ([`interp_part_leaf`]) and the gate name-lister
@@ -895,39 +1095,76 @@ fn interp_to_string_call(ty: &Ty) -> Option<(&'static str, &'static str)> {
     })
 }
 
+/// Does a record/tuple/list/scalar VALUE of type `ty` materialize with REAL slots the recursive
+/// Display can read — the STATIC (IR-type-only) predicate the gate and the lowering BOTH consult so
+/// they agree on expand-vs-wrap BY CONSTRUCTION (no runtime-`materialized_aggregates` divergence).
+/// Matches exactly what the construction path materializes:
+///   - Int/Bool/Float/String          → yes (scalar / single heap leaf)
+///   - List[scalar]                    → yes (scalar-element block); List[heap] → NO (not materialized)
+///   - a registered record/tuple whose every field is itself `field_displayable` → yes (the
+///     nested-aggregate construction admits a SCALAR-ONLY nested block; a heap-IN-nested field would
+///     leak under the single-level mask, so it is NO)
+///   - Map/Set/Option/Result/variant/unresolved → NO
+fn field_displayable(ty: &Ty, registry: &RecordLayouts) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    match ty {
+        Ty::Int | Ty::Bool | Ty::Float | Ty::String => true,
+        Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 => !is_heap_ty(&a[0]),
+        Ty::Record { .. } | Ty::Tuple(_) | Ty::Named(..) => match resolve_aggregate(ty, registry) {
+            // A NESTED aggregate must be SCALAR-ONLY (the construction's `lower_owned_heap_field`
+            // admits only a scalar-only nested block — a heap-in-nested field would leak).
+            Some((_, _, fields)) => fields.iter().all(|(_, t)| !is_heap_ty(t)),
+            None => false,
+        },
+        _ => false,
+    }
+}
+
+/// Is a record/tuple interpolation PART statically EXPAND-foldable — i.e. the lowering will
+/// materialize it and read its real slots? True iff the part expr is a `Var` (a materialized
+/// aggregate binding; a literal/call result is not a tracked block) AND every field of the
+/// (resolvable) aggregate is `field_displayable`. The gate and the lowering both gate on THIS, so
+/// the synthetic-call count the gate credits equals the calls the lowering emits — for both the
+/// EXPAND path (recursive tree) and the WALL path (one `compound.to_string`).
+pub(crate) fn aggregate_part_expandable(expr: &IrExpr, registry: &RecordLayouts) -> bool {
+    if !matches!(expr.kind, IrExprKind::Var { .. }) {
+        return false; // a literal `${P{..}}` / a call `${f()}` is not a tracked materialized block
+    }
+    match resolve_aggregate(&expr.ty, registry) {
+        Some((_, _, fields)) => fields.iter().all(|(_, t)| field_displayable(t, registry)),
+        None => false,
+    }
+}
+
 /// Build the String-producing LEAF for ONE interpolation part, by type:
 ///   - a literal text part → a `LitStr` (no call),
 ///   - a String-typed part → the expr itself (identity, no call),
-///   - any other part with a pure `module.to_string` → `module.to_string(expr)`
-///     (one `Call { Module }` node — Int/Bool LINK, Float/compound WALL).
-/// Returns `None` for a part whose type has no admitted `to_string` module (a
-/// Tuple/Record/variant) — the caller then declines the whole desugar.
-fn interp_part_leaf(p: &IrStringPart) -> Option<IrExpr> {
-    let lit = |s: &str| IrExpr {
-        kind: IrExprKind::LitStr { value: s.to_string() },
-        ty: Ty::String,
-        span: None,
-        def_id: None,
-    };
+///   - an EXPAND-foldable RECORD/TUPLE part (a materialized Var with displayable fields) → the
+///     recursive layout-driven Display ([`display_aggregate`]), an INLINE `ConcatStr` tree of
+///     per-field formatters; a NON-expandable record/tuple part → ONE unlinked `compound.to_string`
+///     wrapper (the function walls at render — never a wrong byte),
+///   - any other part with a pure `module.to_string` → `module.to_string(expr)`.
+/// Returns `None` for a part whose type has no admitted Display at all (an unresolved type) — the
+/// caller then declines the whole desugar.
+fn interp_part_leaf(p: &IrStringPart, registry: &RecordLayouts) -> Option<IrExpr> {
     match p {
-        IrStringPart::Lit { value } => Some(lit(value)),
+        IrStringPart::Lit { value } => Some(lit_str(value)),
         IrStringPart::Expr { expr } if matches!(expr.ty, Ty::String) => Some(expr.clone()),
+        // A record/tuple part: EXPAND if the lowering will materialize it; else wrap in the
+        // unlinked `compound.to_string` so the function walls (the SAME decision the gate makes).
+        IrStringPart::Expr { expr }
+            if matches!(expr.ty, Ty::Record { .. } | Ty::Tuple(_) | Ty::Named(..))
+                && resolve_aggregate(&expr.ty, registry).is_some() =>
+        {
+            if aggregate_part_expandable(expr, registry) {
+                display_aggregate(expr, &expr.ty, registry)
+            } else {
+                Some(to_string_call("compound", "to_string", expr.clone()))
+            }
+        }
         IrStringPart::Expr { expr } => {
             let (module, func) = interp_to_string_call(&expr.ty)?;
-            Some(IrExpr {
-                kind: IrExprKind::Call {
-                    target: CallTarget::Module {
-                        module: almide_lang::intern::sym(module),
-                        func: almide_lang::intern::sym(func),
-                        def_id: None,
-                    },
-                    args: vec![expr.clone()],
-                    type_args: Vec::new(),
-                },
-                ty: Ty::String,
-                span: None,
-                def_id: None,
-            })
+            Some(to_string_call(module, func, expr.clone()))
         }
     }
 }
@@ -957,15 +1194,10 @@ fn interp_part_leaf(p: &IrStringPart) -> Option<IrExpr> {
 /// function is OUT of profile, so it can never contribute a `count != lower`
 /// mismatch — the only IN-profile interps are the fully-linkable ones (Lit/String/
 /// Int/Bool), where `count == lower` is trivially exact.
-pub fn desugar_string_interp(parts: &[IrStringPart]) -> Option<IrExpr> {
-    let mut acc = IrExpr {
-        kind: IrExprKind::LitStr { value: String::new() },
-        ty: Ty::String,
-        span: None,
-        def_id: None,
-    };
+pub fn desugar_string_interp(parts: &[IrStringPart], registry: &RecordLayouts) -> Option<IrExpr> {
+    let mut acc = lit_str("");
     for p in parts {
-        let leaf = interp_part_leaf(p)?;
+        let leaf = interp_part_leaf(p, registry)?;
         acc = IrExpr {
             kind: IrExprKind::BinOp {
                 op: almide_ir::BinOp::ConcatStr,
@@ -980,55 +1212,128 @@ pub fn desugar_string_interp(parts: &[IrStringPart]) -> Option<IrExpr> {
     Some(acc)
 }
 
+/// The SYNTHETIC call names the recursive Display ([`display_value`]) introduces for a
+/// single value of type `ty` — the `<module>.to_string`-family wrappers, recursively. A
+/// scalar/string/float/list value contributes ONE name; a record/tuple value contributes
+/// none itself but recurses via [`aggregate_synthetic_names`] into its fields. This DOES
+/// NOT count the value's OWN inner calls (it counts the WRAPPERS the desugar adds, not the
+/// operand) — keeping the `count_ir_calls` operand-descent free of double counting.
+fn value_synthetic_names(ty: &Ty, registry: &RecordLayouts, out: &mut Vec<String>) {
+    match ty {
+        // A nested record/tuple expands INLINE (recursive `__str_concat` + field formatters).
+        Ty::Record { .. } | Ty::Tuple(_) | Ty::Named(..) if resolve_aggregate(ty, registry).is_some() => {
+            aggregate_synthetic_names(ty, registry, out);
+        }
+        // Every OTHER value type routes to exactly ONE `to_string`-family call — the SAME single
+        // wrapper [`display_value`] / [`interp_part_leaf`] emit (Int → int.to_string, Float →
+        // float.to_string_compound, String → string.quote, List → list.to_string*, Map/Set/Option/
+        // Result → the unlinked `<module>.to_string` that walls). Keyed off `display_leaf_call` so
+        // the gate's count is BY CONSTRUCTION the lowering's emitted call set.
+        _ => {
+            if let Some((m, f)) = display_leaf_call(ty) {
+                out.push(format!("{m}.{f}"));
+            }
+        }
+    }
+}
+
+/// The SYNTHETIC call names the recursive Display ([`display_aggregate`]) introduces for an
+/// aggregate of type `ty`: one `__str_concat` per `ConcatStr` fold the expansion builds
+/// (= the number of `concat_all` parts at this level) plus the field formatters recursively.
+/// MIRRORS `display_aggregate`'s structure EXACTLY so the gate credits precisely the
+/// synthetic CallFns the lowering emits (count == lower for the aggregate, by construction).
+fn aggregate_synthetic_names(ty: &Ty, registry: &RecordLayouts, out: &mut Vec<String>) {
+    // A non-resolvable aggregate (structural record, unregistered) yields no Display tree —
+    // the part declines and the whole interp credits 0 (matched by `interp_synthetic_call_names`).
+    let Some((type_name, is_tuple, fields)) = resolve_aggregate(ty, registry) else {
+        return;
+    };
+    if !is_tuple && type_name.is_none() {
+        return; // structural record has no Display → walls, credits 0
+    }
+    // `concat_all` parts at this level: opening + (per field: a leading ", " for idx>0,
+    // a "field: " label for a record, the field formatter) + closing.
+    //   record: 1 (open) + Σ_i [ (i>0 → 1) + 1 (label) + 1 (formatter) ] + 1 (close)
+    //   tuple:  1 (open) + Σ_i [ (i>0 → 1) +            1 (formatter) ] + 1 (close)
+    let mut concat_parts = 2; // open + close
+    for (idx, _) in fields.iter().enumerate() {
+        if idx > 0 {
+            concat_parts += 1; // ", "
+        }
+        if !is_tuple {
+            concat_parts += 1; // "field: "
+        }
+        concat_parts += 1; // the field formatter expression
+    }
+    for _ in 0..concat_parts {
+        out.push("__str_concat".to_string());
+    }
+    for (_, fty) in &fields {
+        value_synthetic_names(fty, registry, out);
+    }
+}
+
 /// Count the synthetic `CallFn`s [`desugar_string_interp`] yields for `parts` — the
-/// `ConcatStr` and `module.to_string` call NODES of the desugared tree. The corpus
-/// gate adds exactly this to its IR call count for each interp (it counts the same
-/// tree), so the MIR calls the lowering emits are 1:1 backed. `None` (a part with no
-/// admitted module) ⇒ 0 (the interp stays Opaque, lowering emits no synthetic call).
-pub fn interp_str_synthetic_call_count(parts: &[IrStringPart]) -> usize {
-    interp_synthetic_call_names(parts).len()
+/// `ConcatStr` and `module.to_string`-family call NODES of the desugared tree. The corpus
+/// gate adds exactly this to its IR call count for each interp (it counts the same tree),
+/// so the MIR calls the lowering emits are 1:1 backed. `None` (a part with no admitted
+/// Display) ⇒ 0 (the interp stays Opaque, lowering emits no synthetic call).
+pub fn interp_str_synthetic_call_count(parts: &[IrStringPart], registry: &RecordLayouts) -> usize {
+    interp_synthetic_call_names(parts, registry).len()
 }
 
 /// The SYNTHETIC call names [`desugar_string_interp`] introduces for `parts`: one
-/// `__str_concat` per fold step (= `parts.len()` for a non-empty interp: K parts over
-/// the `""` seed ⇒ K concats) and one `<module>.to_string` per non-passthrough part
-/// (Int → `int.to_string`, Bool → `bool.to_string`, Float/compound → `<module>.
-/// to_string`). It DOES NOT include the operands' OWN inner calls (a `${g(x)}` callee)
-/// — those live in the original part exprs and are reached separately. Empty (a
-/// `None` desugar — a part with no admitted module) ⇒ the interp stays Opaque, so the
-/// lowering emits no synthetic call and this credits none. Used both to credit the
-/// gate ([`interp_str_synthetic_call_count`]) and to surface the same names as elided
-/// markers when an interp defers (`record_elided_calls`), keeping `mir == ir`.
-pub fn interp_synthetic_call_names(parts: &[IrStringPart]) -> Vec<String> {
-    // A part with no admitted `to_string` module ⇒ the whole interp is non-desugarable
-    // (the lowering returns `None` and defers to Opaque), so it credits zero synthetic
-    // calls. Mirror that all-or-nothing admission exactly.
-    if desugar_string_interp(parts).is_none() {
+/// `__str_concat` per TOP-LEVEL fold step (= `parts.len()`: K parts over the `""` seed ⇒ K
+/// concats) and, per non-passthrough part, the Display wrappers it adds — a scalar part one
+/// `<module>.to_string`, a RECORD/TUPLE part the full recursive `__str_concat` + field-
+/// formatter set ([`aggregate_synthetic_names`]). It DOES NOT include the operands' OWN
+/// inner calls (a `${g(x)}` callee) — those live in the original part exprs and are reached
+/// separately by `count_ir_calls`'s descent, so no double count. Empty (a `None` desugar —
+/// a part with no admitted Display) ⇒ the interp stays Opaque, crediting none.
+pub fn interp_synthetic_call_names(parts: &[IrStringPart], registry: &RecordLayouts) -> Vec<String> {
+    // A part with no admitted Display ⇒ the whole interp is non-desugarable (the lowering
+    // returns `None` and defers to Opaque), so it credits zero synthetic calls.
+    if desugar_string_interp(parts, registry).is_none() {
         return Vec::new();
     }
     let mut names = Vec::with_capacity(parts.len() * 2);
+    // The TOP-LEVEL fold: K parts over the `""` seed ⇒ K `__str_concat` (the interp's own
+    // outer concatenation — a record/tuple part is ONE top-level part here, its INNER
+    // `__str_concat`s are added by `value_synthetic_names` below).
     for _ in 0..parts.len() {
         names.push("__str_concat".to_string());
     }
     for p in parts {
         if let IrStringPart::Expr { expr } = p {
-            if !matches!(expr.ty, Ty::String) {
-                if let Some((module, func)) = interp_to_string_call(&expr.ty) {
-                    names.push(format!("{module}.{func}"));
+            if matches!(expr.ty, Ty::String) {
+                continue; // a String part is a no-call passthrough
+            }
+            // A TOP-LEVEL record/tuple part mirrors `interp_part_leaf`'s expand-vs-wrap: an
+            // EXPAND-foldable part (a materialized Var with displayable fields) credits the full
+            // recursive tree; a NON-expandable one credits ONE `compound.to_string` (the wall).
+            if matches!(expr.ty, Ty::Record { .. } | Ty::Tuple(_) | Ty::Named(..))
+                && resolve_aggregate(&expr.ty, registry).is_some()
+            {
+                if aggregate_part_expandable(expr, registry) {
+                    aggregate_synthetic_names(&expr.ty, registry, &mut names);
+                } else {
+                    names.push("compound.to_string".to_string());
                 }
+            } else {
+                value_synthetic_names(&expr.ty, registry, &mut names);
             }
         }
     }
     names
 }
 
-/// Is a WHOLE interpolation DESUGARABLE (every part has an admitted `to_string`)? When
-/// true, the lowering folds it to a `ConcatStr` chain; when false, it stays the deferred
-/// Opaque. (Desugarable does NOT imply LINKABLE — a Float/compound part desugars but its
-/// `to_string` is unlinked, so the function walls at render. Use the registry to split
-/// proven-vs-walled; this predicate only answers "does the lowering fold it".)
-pub fn interp_str_desugarable(parts: &[IrStringPart]) -> bool {
-    desugar_string_interp(parts).is_some()
+/// Is a WHOLE interpolation DESUGARABLE (every part has an admitted Display)? When true, the
+/// lowering folds it to a `ConcatStr` chain; when false, it stays the deferred Opaque.
+/// (Desugarable does NOT imply LINKABLE — a Float part desugars but float.to_string is
+/// unlinked, so the function walls at render. Use the registry to split proven-vs-walled;
+/// this predicate only answers "does the lowering fold it".)
+pub fn interp_str_desugarable(parts: &[IrStringPart], registry: &RecordLayouts) -> bool {
+    desugar_string_interp(parts, registry).is_some()
 }
 
 /// Does `module.func` return a real MATERIALIZED `Result[Int, String]` (the DynListStr len-as-tag

@@ -368,6 +368,11 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
         (include_str!("../../../../stdlib/list_to_string_b.almd"), &[("list_to_string_b", "list.to_string_b")]),
         (include_str!("../../../../stdlib/list_to_string_s.almd"), &[("list_to_string_s", "list.to_string_s")]),
         (include_str!("../../../../stdlib/list_to_string_f.almd"), &[("list_to_string_f", "list.to_string_f")]),
+        // Single-value compound formatters for record/tuple Display (the `${record}`/`${tuple}`
+        // form): a Float field drops the trailing ".0" like a List[Float] element, a String field
+        // is quoted+escaped like a List[String] element. Both reuse the proven list-element logic.
+        (include_str!("../../../../stdlib/float_to_string_compound.almd"), &[("float_to_string_compound", "float.to_string_compound")]),
+        (include_str!("../../../../stdlib/string_quote.almd"), &[("string_quote", "string.quote")]),
         (include_str!("../../../../stdlib/list_len.almd"), &[("list_len", "list.len"), ("list_length", "list.length")]),
         (include_str!("../../../../stdlib/list_flatten.almd"), &[("list_flatten", "list.flatten")]),
         (include_str!("../../../../stdlib/list_chunk.almd"), &[("list_chunk", "list.chunk"), ("list_windows", "list.windows"), ("list_window", "list.window")]),

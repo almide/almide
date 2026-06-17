@@ -68,11 +68,12 @@ const KNOWN_STDOUT_FREE_BUILTINS: &[&str] = &[
 /// ELIDED by Opaque lowering (a list element, ctor payload, BinOp operand): such
 /// a call's effects are absent from the MIR, a caps blind spot the transitive
 /// fold cannot see, so its function is conservatively tainted (not caps-verified).
-fn count_ir_calls(body: &almide_ir::IrExpr) -> usize {
-    struct CallCounter {
+fn count_ir_calls(body: &almide_ir::IrExpr, registry: &almide_mir::lower::RecordLayouts) -> usize {
+    struct CallCounter<'a> {
         n: usize,
+        registry: &'a almide_mir::lower::RecordLayouts,
     }
-    impl almide_ir::visit::IrVisitor for CallCounter {
+    impl almide_ir::visit::IrVisitor for CallCounter<'_> {
         fn visit_expr(&mut self, e: &almide_ir::IrExpr) {
             use almide_ir::IrExprKind::{Call, ClosureCreate, FnRef, RuntimeCall, TailCall};
             // A direct call is one ir_call. A FnRef / ClosureCreate passed to a pure
@@ -148,12 +149,12 @@ fn count_ir_calls(body: &almide_ir::IrExpr) -> usize {
             // wrappers), so the `walk_expr` descent below — which reaches each part's operand
             // expr — counts them exactly once, with no double-count.
             if let almide_ir::IrExprKind::StringInterp { parts } = &e.kind {
-                self.n += almide_mir::lower::interp_str_synthetic_call_count(parts);
+                self.n += almide_mir::lower::interp_str_synthetic_call_count(parts, self.registry);
             }
             almide_ir::visit::walk_expr(self, e);
         }
     }
-    let mut cc = CallCounter { n: 0 };
+    let mut cc = CallCounter { n: 0, registry };
     // `visit_expr` (NOT `walk_expr`) so a ROOT-position call is counted too — an
     // expression-bodied `fn f() = g(x)` has the call AT the body root; `walk_expr`
     // would descend past it and undercount (masking a nested elision in its args,
@@ -249,11 +250,16 @@ fn source_to_ir(source: &str) -> FrontendOutcome {
 ///     way: no invalid wasm. (The unlinked-call OCCURRENCES are also folded into (b) by
 ///     the per-CallFn loop at the lowering site; this only counts the interp SITE once, as
 ///     walled, so a Float interp does not get mis-bucketed as proven.)
-fn count_interp_sites(body: &almide_ir::IrExpr, linkable: &HashSet<String>) -> (usize, usize) {
+fn count_interp_sites(
+    body: &almide_ir::IrExpr,
+    linkable: &HashSet<String>,
+    registry: &almide_mir::lower::RecordLayouts,
+) -> (usize, usize) {
     struct InterpCounter<'a> {
         proven: usize,
         walled: usize,
         linkable: &'a HashSet<String>,
+        registry: &'a almide_mir::lower::RecordLayouts,
     }
     impl almide_ir::visit::IrVisitor for InterpCounter<'_> {
         fn visit_expr(&mut self, e: &almide_ir::IrExpr) {
@@ -263,8 +269,8 @@ fn count_interp_sites(body: &almide_ir::IrExpr, linkable: &HashSet<String>) -> (
                 // is vacuously true) — guard on desugarability explicitly. Only the dotted
                 // `<module>.to_string` names matter for linkability (`__str_concat` is
                 // always registered); checking the full list is sound (it contains it).
-                let desugarable = almide_mir::lower::interp_str_desugarable(parts);
-                let all_linkable = almide_mir::lower::interp_synthetic_call_names(parts)
+                let desugarable = almide_mir::lower::interp_str_desugarable(parts, self.registry);
+                let all_linkable = almide_mir::lower::interp_synthetic_call_names(parts, self.registry)
                     .iter()
                     .all(|n| !n.contains('.') || self.linkable.contains(n));
                 if desugarable && all_linkable {
@@ -276,7 +282,7 @@ fn count_interp_sites(body: &almide_ir::IrExpr, linkable: &HashSet<String>) -> (
             almide_ir::visit::walk_expr(self, e);
         }
     }
-    let mut c = InterpCounter { proven: 0, walled: 0, linkable };
+    let mut c = InterpCounter { proven: 0, walled: 0, linkable, registry };
     almide_ir::visit::IrVisitor::visit_expr(&mut c, body);
     (c.proven, c.walled)
 }
@@ -522,7 +528,7 @@ fn main() {
                     // render — both are (b) cleanly walled (no invalid wasm). The per-CallFn
                     // loop below ADDS the unlinked-occurrence count to (b); this counts the
                     // interp SITE once, as proven or walled, with no proven mis-bucket.
-                    let (proven, walled) = count_interp_sites(&func.body, &auto_linkable);
+                    let (proven, walled) = count_interp_sites(&func.body, &auto_linkable, &record_layouts);
                     t.interp_lowered += proven;
                     t.interp_walled += walled;
                     // LINK COVERAGE: a LOWERED function emitting a dotted `Op::CallFn` whose
@@ -594,7 +600,7 @@ fn main() {
                     // cluster has MORE IR calls than MIR call-ops some call was elided
                     // SOMEWHERE within it, so EVERY function of the cluster is conservatively
                     // TAINTED below (we cannot tell which member hid it).
-                    let ir_calls = count_ir_calls(&func.body);
+                    let ir_calls = count_ir_calls(&func.body, &record_layouts);
                     let mir_calls = mirs
                         .iter()
                         .flat_map(|m| m.ops.iter())
@@ -630,7 +636,7 @@ fn main() {
                     *t.unsupported.entry(reason_key(&reason)).or_insert(0) += 1;
                     // INTERP COVERAGE (b): every interp site inside a WALLED function is
                     // cleanly walled too (its function emits no wasm) — never a miscompile.
-                    let (proven, walled) = count_interp_sites(&func.body, &auto_linkable);
+                    let (proven, walled) = count_interp_sites(&func.body, &auto_linkable, &record_layouts);
                     t.interp_walled += proven + walled;
                 }
                 Err(_) => {

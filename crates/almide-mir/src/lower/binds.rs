@@ -387,6 +387,19 @@ impl LowerCtx {
                         self.live_heap_handles.push(dst);
                         return Ok(());
                     }
+                    // A HEAP-element tuple (`(1, "a")`, `(p, 9)`) — materialize the mixed block
+                    // + track its heap-slot mask, so `t.0`/`${tuple}` execute and the block (with
+                    // its owned heap elements) is reclaimed by a masked recursive drop. Rolls back
+                    // on a non-lowerable element (then Opaque → the Display walls).
+                    let mark = self.ops.len();
+                    let lhh_mark = self.live_heap_handles.len();
+                    if let Some(dst) = self.try_lower_tuple_construct(elements) {
+                        self.value_of.insert(var, dst);
+                        self.live_heap_handles.push(dst);
+                        return Ok(());
+                    }
+                    self.ops.truncate(mark);
+                    self.live_heap_handles.truncate(lhh_mark);
                 }
                 // A SCALAR-only record `R { x: 3, y: 4 }` — build the tight-packed,
                 // width-aware block + store each field at its layout slot (the VALUE
@@ -689,9 +702,80 @@ impl LowerCtx {
 
     fn try_lower_scalar_tuple_construct(&mut self, elements: &[IrExpr]) -> Option<ValueId> {
         if elements.iter().any(|e| is_heap_ty(&e.ty)) {
-            return None; // heap-field tuple deferred (the all-heap path traps inside loops — TODO).
+            return None; // heap-element tuple → the masked `try_lower_tuple_construct` path.
         }
-        self.try_lower_scalar_list_slots(elements)
+        let dst = self.try_lower_scalar_list_slots(elements)?;
+        // A scalar tuple is built with the uniform slot layout, so `t.0` / a `${tuple}` Display
+        // reads its real slots. No heap slots → only the SAFE scalar reads are enabled.
+        self.materialized_aggregates.insert(dst);
+        Some(dst)
+    }
+
+    /// Construct a TUPLE `(e0, e1, …)` with one or more HEAP ELEMENTS (a String/List/nested
+    /// aggregate alongside scalars) — the positional analogue of [`Self::try_lower_record_construct`].
+    /// Same `[rc][len][cap]` + uniform-i64-slot block; each heap element is a fresh OWNED handle
+    /// MOVED into its slot (cert `m`), tracked in `record_masks` so the drop frees exactly the heap
+    /// slots then the block (a masked `DropListStr`, cert = the single `d`). Returns `None` (defer)
+    /// for an element value not lowerable to an owned heap handle / scalar — then the tuple falls
+    /// back to Opaque and a `${tuple}` Display WALLS (never wrong bytes). SOUND by the SAME argument
+    /// as the record path (each heap element `i…m`, the block `i…d` — the balanced List[String] shape).
+    pub(crate) fn try_lower_tuple_construct(&mut self, elements: &[IrExpr]) -> Option<ValueId> {
+        use crate::{IntOp, PrimKind};
+        if elements.is_empty() {
+            return None;
+        }
+        let n = elements.len();
+        let heap_slots: Vec<usize> =
+            (0..n).filter(|&i| is_heap_ty(&elements[i].ty)).collect();
+        if heap_slots.is_empty() {
+            return None; // all-scalar → `try_lower_scalar_tuple_construct` owns it.
+        }
+        // Lower every element first (before the alloc), as (slot-value, is-heap).
+        let mut slots: Vec<(ValueId, bool)> = Vec::with_capacity(n);
+        for e in elements {
+            if is_heap_ty(&e.ty) {
+                let obj = self.lower_owned_heap_field(e)?;
+                slots.push((obj, true));
+            } else {
+                let v = self.lower_scalar_value(e)?;
+                slots.push((v, false));
+            }
+        }
+        let len = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: len, value: n as i64 });
+        let dst = self.fresh_value();
+        self.ops.push(Op::Alloc {
+            dst,
+            repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT },
+            init: crate::Init::DynList { len },
+        });
+        let h = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![dst] });
+        for (idx, (v, is_heap)) in slots.into_iter().enumerate() {
+            let off = self.fresh_value();
+            self.ops.push(Op::ConstInt { dst: off, value: layout::slot_offset(idx) as i64 });
+            let addr = self.fresh_value();
+            self.ops.push(Op::IntBinOp { dst: addr, op: IntOp::Add, a: h, b: off });
+            let store_val = if is_heap {
+                let handle = self.fresh_value();
+                self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(handle), args: vec![v] });
+                handle
+            } else {
+                v
+            };
+            self.ops.push(Op::Prim {
+                kind: PrimKind::Store { width: 8 },
+                dst: None,
+                args: vec![addr, store_val],
+            });
+            if is_heap {
+                self.ops.push(Op::Consume { v });
+                self.live_heap_handles.retain(|x| *x != v);
+            }
+        }
+        self.record_masks.insert(dst, heap_slots);
+        self.materialized_aggregates.insert(dst);
+        Some(dst)
     }
 
     /// Construct a SCALAR-only RECORD `R { f0: e0, f1: e1, … }`: alloc a block laid out
@@ -771,6 +855,10 @@ impl LowerCtx {
                 args: vec![addr, v],
             });
         }
+        // Built with the uniform slot layout, so a `${record}` Display (and a heap-field
+        // borrow, were a later field heap) may read its real slots. A scalar-only record has
+        // no heap slots, so this only enables the SAFE field reads — never a garbage deref.
+        self.materialized_aggregates.insert(dst);
         Some(dst)
     }
 
@@ -918,6 +1006,50 @@ impl LowerCtx {
                 self.ops.push(Op::Dup { dst: dup, src });
                 self.live_heap_handles.push(dup);
                 Some(dup)
+            }
+            // A `List[Int/Float/Bool]` LITERAL field (`{ items: [1, 2, 3] }`, `{ items: [] }`) —
+            // materialize the scalar-element block (flat slots, no nested ownership) as a fresh
+            // OWNED list. The aggregate owns it; its masked recursive drop `rc_dec`s the block
+            // (sound: scalar elements need no per-element free). An EMPTY scalar list is a valid
+            // 0-length block (so `{ items: [] }` materializes, not Opaque-with-garbage). A
+            // heap-element list (`List[String]`/`List[Record]`) DEFERS (`None`) — its elements
+            // need a per-element recursive free not wired through the single-level mask — so the
+            // aggregate falls back to Opaque and the field-read path WALLS (never wrong bytes).
+            IrExprKind::List { elements } => {
+                use almide_lang::types::constructor::TypeConstructorId;
+                let scalar_list = matches!(&expr.ty,
+                    Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && !is_heap_ty(&a[0]));
+                if !scalar_list {
+                    return None;
+                }
+                let obj = self.try_lower_scalar_list_slots(elements)?;
+                self.live_heap_handles.push(obj);
+                Some(obj)
+            }
+            // A NESTED RECORD LITERAL field (`Outer { p: Point { x: 1, y: 2 }, n: 5 }`) —
+            // materialize the inner block as a fresh OWNED aggregate the outer owns. Its own
+            // construction (scalar / mixed-heap) registers it in `materialized_aggregates`, so
+            // the recursive `${outer}` Display reads the inner's real slots. The outer's masked
+            // drop `rc_dec`s the inner block; if the INNER has heap fields of its OWN, those are
+            // freed by the inner block's own mask — but the outer mask only `rc_dec`s the inner
+            // BLOCK (one level), so a heap-IN-nested field would leak. To stay sound, admit a
+            // nested aggregate ONLY when it is SCALAR-only (no nested heap to leak); a nested
+            // aggregate with its own heap field defers (`None`) → the outer walls (never wrong
+            // bytes, never a leak).
+            IrExprKind::Record { .. } | IrExprKind::Tuple { .. } => {
+                let scalar_only = self
+                    .aggregate_field_tys(&expr.ty)
+                    .is_some_and(|(_, tys)| tys.iter().all(|t| !is_heap_ty(t)));
+                if !scalar_only {
+                    return None;
+                }
+                let obj = match &expr.kind {
+                    IrExprKind::Record { .. } => self.try_lower_scalar_record_construct(expr)?,
+                    IrExprKind::Tuple { elements } => self.try_lower_scalar_tuple_construct(elements)?,
+                    _ => return None,
+                };
+                self.live_heap_handles.push(obj);
+                Some(obj)
             }
             _ => None,
         }

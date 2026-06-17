@@ -12,7 +12,7 @@ use almide_lang::types::Ty;
 /// the generic-record instantiation used by the VALUE MODEL (`Box[Int]`'s `value: T`
 /// becomes `value: Int`). Total over `Ty`; an unmapped `TypeVar` is left as-is (the
 /// caller's `scalar_field_width` then rejects it, walling the record).
-fn subst_type_var(
+pub(super) fn subst_type_var(
     ty: &Ty,
     subst: &std::collections::HashMap<almide_lang::intern::Sym, Ty>,
 ) -> Ty {
@@ -247,10 +247,11 @@ impl LowerCtx {
     /// de-taint a function) then fails the gate, structurally impossible to ship.
     pub(crate) fn record_elided_calls(&mut self, value: &IrExpr) {
         use almide_ir::visit::{walk_expr, IrVisitor};
-        struct Collector {
+        struct Collector<'a> {
             names: Vec<String>,
+            registry: &'a crate::lower::RecordLayouts,
         }
-        impl IrVisitor for Collector {
+        impl IrVisitor for Collector<'_> {
             fn visit_expr(&mut self, e: &IrExpr) {
                 match &e.kind {
                     IrExprKind::Call { target, args, .. } => {
@@ -297,7 +298,7 @@ impl LowerCtx {
                     // ONLY — the operands' OWN calls (a `${g(x)}` callee) are reached by the
                     // `walk_expr` below over the ORIGINAL parts, so there is no double-count.
                     IrExprKind::StringInterp { parts } => {
-                        for name in crate::lower::interp_synthetic_call_names(parts) {
+                        for name in crate::lower::interp_synthetic_call_names(parts, self.registry) {
                             self.names.push(name);
                         }
                     }
@@ -306,9 +307,12 @@ impl LowerCtx {
                 walk_expr(self, e);
             }
         }
-        let mut c = Collector { names: Vec::new() };
-        c.visit_expr(value);
-        for name in c.names {
+        let names = {
+            let mut c = Collector { names: Vec::new(), registry: &self.record_layouts };
+            c.visit_expr(value);
+            c.names
+        };
+        for name in names {
             self.ops.push(Op::CallFn { dst: None, name, args: Vec::new(), result: None });
         }
     }
@@ -495,8 +499,76 @@ impl LowerCtx {
     /// the enclosing function emits an unlinked call and the RENDER WALL rejects it — it
     /// is out of profile and cannot be a `count != lower` mismatch.
     pub(crate) fn try_lower_string_interp(&mut self, parts: &[IrStringPart]) -> Option<ValueId> {
-        let tree = crate::lower::desugar_string_interp(parts)?;
+        // The desugar decides, per record/tuple part, EXPAND (a STATICALLY-expandable Var — a
+        // materialized-aggregate binding with displayable fields → the recursive Display tree,
+        // byte-matching v0) vs WRAP (any other aggregate → ONE unlinked `compound.to_string`, so
+        // the function walls at render). The SAME static predicate (`aggregate_part_expandable`)
+        // drives the corpus gate's `interp_synthetic_call_names`, so the synthetic call COUNT the
+        // gate credits equals the one this lowering emits BY CONSTRUCTION.
+        //
+        // SAFETY GATE: "expandable" is a STATIC over-approximation (a `Var` need not denote a
+        // materialized block — e.g. `let p = f()` is an Opaque call result). Reading its fields
+        // would print garbage. So when the desugar WOULD expand a part but the var is NOT in
+        // `materialized_aggregates` at lowering time, route the WHOLE interp to the compound WALL
+        // — padded to the gate's synthetic-call count so `mir == ir` still holds (the extra calls
+        // are pure elided markers; the one unlinked `compound.to_string` walls the function).
+        if self.first_unmaterialized_expand_part(parts) {
+            return Some(self.lower_interp_compound_wall(parts));
+        }
+        let tree = crate::lower::desugar_string_interp(parts, &self.record_layouts)?;
         self.try_lower_concat_str(&tree)
+    }
+
+    /// Is there a record/tuple part the desugar would EXPAND (statically `aggregate_part_expandable`)
+    /// but whose Var is NOT actually a materialized aggregate at lowering time — so its field reads
+    /// would be garbage? `false` when every would-expand part is genuinely materialized (the fold is
+    /// safe). When `true`, the caller routes the whole interp to the count-padded compound wall.
+    fn first_unmaterialized_expand_part(&self, parts: &[IrStringPart]) -> bool {
+        parts.iter().any(|p| {
+            let IrStringPart::Expr { expr } = p else { return false };
+            if !crate::lower::aggregate_part_expandable(expr, &self.record_layouts) {
+                return false;
+            }
+            let materialized = match &expr.kind {
+                IrExprKind::Var { id } => self
+                    .value_of
+                    .get(id)
+                    .is_some_and(|v| self.materialized_aggregates.contains(v)),
+                _ => false,
+            };
+            !materialized
+        })
+    }
+
+    /// Lower an interpolation whose statically-expandable record/tuple part is NOT materialized at
+    /// runtime: route to ONE unlinked `compound.to_string` (the result — walls the function at
+    /// render, so its bytes never run) PLUS `pad` pure elided markers so the MIR call count EQUALS
+    /// the gate's `interp_synthetic_call_names` count for this interp (`mir == ir`, no false caps
+    /// taint, no forbidden `mir > ir`). The markers (`__str_concat` / dotted `to_string`) reach no
+    /// Stdout. The returned `dst` is tracked by the CALLER (like `try_lower_concat_str`).
+    fn lower_interp_compound_wall(&mut self, parts: &[IrStringPart]) -> ValueId {
+        // The gate counts this interp's synthetic calls assuming the expand happens. We emit ONE
+        // real `compound.to_string` + (gate_count - 1) pure markers so the totals match exactly.
+        let gate_count = crate::lower::interp_synthetic_call_names(parts, &self.record_layouts).len();
+        let mut emitted = 0usize;
+        let dst = self.fresh_value();
+        self.ops.push(Op::CallFn {
+            dst: Some(dst),
+            name: "compound.to_string".to_string(),
+            args: Vec::new(),
+            result: Some(crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT }),
+        });
+        emitted += 1;
+        while emitted < gate_count {
+            self.ops.push(Op::CallFn {
+                dst: None,
+                name: "__str_concat".to_string(),
+                args: Vec::new(),
+                result: None,
+            });
+            emitted += 1;
+        }
+        dst
     }
 
     pub(crate) fn lower_call_args(&mut self, args: &[IrExpr]) -> Result<Vec<CallArg>, LowerError> {
@@ -981,6 +1053,31 @@ impl LowerCtx {
         Some(layout::slot_offset(index))
     }
 
+    /// Resolve an aggregate CONTAINER expression to the i64 BYTE-ADDRESS of its block (the base
+    /// for a `base + slot_offset` field load). A `Var` bound to a tracked heap aggregate (or a
+    /// param-bound aggregate) is `Prim::Handle`'d directly. A NESTED aggregate field (`o.p` in
+    /// `o.p.x`) is borrowed via `try_lower_heap_field_borrow` (the loaded inner-block handle) then
+    /// `Prim::Handle`'d — so field access composes to arbitrary depth over materialized blocks.
+    /// `None` for a non-resolvable container (`f().x`, a non-materialized var) → the caller defers.
+    pub(crate) fn resolve_aggregate_container_handle(&mut self, container: &IrExpr) -> Option<ValueId> {
+        use crate::PrimKind;
+        let block = match &container.kind {
+            IrExprKind::Var { id } if is_heap_ty(&container.ty) => self.value_or_global(*id).ok()?,
+            // A nested aggregate field — borrow its loaded inner-block handle. Gated on the
+            // OUTER container being materialized (inside `try_lower_heap_field_borrow`), so a
+            // garbage slot is never dereferenced.
+            IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. }
+                if is_heap_ty(&container.ty) =>
+            {
+                self.try_lower_heap_field_borrow(container)?
+            }
+            _ => return None,
+        };
+        let h = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![block] });
+        Some(h)
+    }
+
     pub(crate) fn lower_scalar_field_access(&mut self, expr: &IrExpr) -> Option<ValueId> {
         use crate::{IntOp, PrimKind};
         // Scalar result only (the caller's contract; a heap field defers to the
@@ -1003,19 +1100,10 @@ impl LowerCtx {
             }
             _ => return None,
         };
-        // The container must be a TRACKED heap var whose value is a record/tuple block
-        // BUILT by `try_lower_*_record_construct` / the scalar-tuple path (a fresh
-        // `Alloc` with field stores at these very slots). A PARAM-bound aggregate is ALSO
-        // admissible: the v1 calling convention passes the block pointer, and the layout
-        // is the same on both sides (the same `aggregate_field_tys` + `slot_offset`), so a
-        // load at the slot is correct. A non-var container (`f().x`) has no block to load
-        // from → defer.
-        let src = match &container.kind {
-            IrExprKind::Var { id } if is_heap_ty(&container.ty) => self.value_or_global(*id).ok()?,
-            _ => return None,
-        };
-        let h = self.fresh_value();
-        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![src] });
+        // Resolve the container to a block handle: a TRACKED heap var (a `try_lower_*_construct`
+        // block or a param-bound aggregate), OR a NESTED aggregate field (`o.p` of `o.p.x`) whose
+        // borrowed handle points to the inner block. A non-resolvable container (`f().x`) → defer.
+        let h = self.resolve_aggregate_container_handle(container)?;
         let off = self.fresh_value();
         self.ops.push(Op::ConstInt { dst: off, value: offset as i64 });
         let addr = self.fresh_value();

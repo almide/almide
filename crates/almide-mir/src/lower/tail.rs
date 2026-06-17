@@ -36,8 +36,15 @@ impl LowerCtx {
         // returns the String at the slot, byte-correct. Returns the borrowed value (recorded
         // in `param_values`, NOT in `live_heap_handles` — a borrow, no second owner). Falls
         // through to the container-grain Dup below when the slot is not resolvable.
-        if let Some(borrowed) = self.try_lower_heap_field_borrow(expr) {
-            return Ok(borrowed);
+        //
+        // SKIP the borrow for a MUTABLE (`var`) binding: a `var b = r.items` may be COW-mutated
+        // (`b[0] = 99`), which the value-model refuses on a borrowed field handle. The
+        // container-grain `Dup` below gives an OWNED, in-place-mutable copy (the pre-materialized
+        // behavior), so the COW case keeps lowering instead of walling.
+        if !self.binding_is_mutable {
+            if let Some(borrowed) = self.try_lower_heap_field_borrow(expr) {
+                return Ok(borrowed);
+            }
         }
         let container = extraction_container(expr).ok_or_else(|| {
             LowerError::Unsupported(format!(
@@ -66,7 +73,7 @@ impl LowerCtx {
     /// payload) and is NOT added to the scope-end drop set. Returns `None` (the caller then
     /// uses the container-grain fallback) unless the container is a tracked heap VAR whose
     /// block this brick materialized AND the field type is heap.
-    fn try_lower_heap_field_borrow(&mut self, expr: &IrExpr) -> Option<ValueId> {
+    pub(crate) fn try_lower_heap_field_borrow(&mut self, expr: &IrExpr) -> Option<ValueId> {
         use crate::PrimKind;
         if !is_heap_ty(&expr.ty) {
             return None;
@@ -80,21 +87,33 @@ impl LowerCtx {
             }
             _ => return None,
         };
-        // The container must be a tracked heap VAR whose block this brick MATERIALIZED with
-        // the uniform slot layout (`materialized_aggregates`). A DEREFERENCING heap-field
-        // read of a DEFERRED `Alloc{Opaque}` aggregate (a spread record / a call result) —
-        // whose slots are garbage — would load a junk handle and TRAP at `rc_dec`, so it must
-        // NOT fire here (it falls through to the safe container-grain Dup). A non-var
-        // container (`f().x`) has no single block to load from.
-        let src = match &container.kind {
-            IrExprKind::Var { id } if is_heap_ty(&container.ty) => self.value_or_global(*id).ok()?,
+        // The container must be MATERIALIZED with the uniform slot layout — a tracked heap VAR
+        // (its block built by `try_lower_*_construct`, a param-bound aggregate), OR a NESTED
+        // aggregate field whose inner block is itself materialized. A DEREFERENCING heap-field
+        // read of a DEFERRED `Alloc{Opaque}` aggregate (garbage slots) would load a junk handle
+        // and TRAP at `rc_dec`, so the resolver returns `None` for it (the caller falls back to
+        // the safe container-grain Dup). The Var case gates on `materialized_aggregates`; the
+        // nested case recurses through this same borrow (gated at each level).
+        let h = match &container.kind {
+            IrExprKind::Var { id } if is_heap_ty(&container.ty) => {
+                let src = self.value_or_global(*id).ok()?;
+                if !self.materialized_aggregates.contains(&src) {
+                    return None;
+                }
+                let h = self.fresh_value();
+                self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![src] });
+                h
+            }
+            IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. }
+                if is_heap_ty(&container.ty) =>
+            {
+                let inner = self.try_lower_heap_field_borrow(container)?;
+                let h = self.fresh_value();
+                self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![inner] });
+                h
+            }
             _ => return None,
         };
-        if !self.materialized_aggregates.contains(&src) {
-            return None;
-        }
-        let h = self.fresh_value();
-        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![src] });
         let off = self.fresh_value();
         self.ops.push(Op::ConstInt { dst: off, value: offset as i64 });
         let addr = self.fresh_value();
