@@ -1062,10 +1062,11 @@ fn interp_to_string_call(ty: &Ty) -> Option<(&'static str, &'static str)> {
     Some(match ty {
         Ty::Int => ("int", "to_string"),
         Ty::Bool => ("bool", "to_string"),
-        // Float renders via `float.to_string` (self-hosted Dragon4 — LINKED). The compound-LIST
-        // element float is a SEPARATE format (drops `.0`); only the top-level/scalar interp uses
-        // float.to_string here.
-        Ty::Float => ("float", "to_string"),
+        // Scalar `${f}` interp uses v0's Display format, which DROPS the `.0` for integer-valued
+        // floats (`3.0`->`3`, `100.0`->`100`) — exactly the compound formatter
+        // `float.to_string_compound`, NOT `float.to_string` (which keeps `.0` for an EXPLICIT
+        // `float.to_string(x)` call). Same drop-.0 Display a Float record/list field already uses.
+        Ty::Float => ("float", "to_string_compound"),
         Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 => match &args[0] {
             Ty::Int => ("list", "to_string"),
             Ty::Float => ("list", "to_string_f"),
