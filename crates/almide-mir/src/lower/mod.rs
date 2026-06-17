@@ -764,32 +764,59 @@ pub fn is_self_host_option_module_fn(module: &str, func: &str) -> bool {
     }
 }
 
-/// The PURE stdlib module whose `to_string` renders a value of type `ty` to its
-/// Almide-Display form, for the uniform string-interpolation desugar. `None` ⇒ a
-/// type with no `module.to_string` admitted by the purity gate (a Tuple/Record/
-/// variant/unresolved type); such a part is left to the deferred Opaque fallback,
-/// so the interp stays bucket-(b) walled — never miscompiled.
+/// The `(module, func)` pair whose call renders a value of type `ty` to its Almide-Display form
+/// for the string-interpolation desugar. The MIR `CallFn` name is `"<module>.<func>"`, so this is
+/// the SINGLE source both the leaf builder ([`interp_part_leaf`]) and the gate name-lister
+/// ([`interp_synthetic_call_names`]) consult — they agree on the exact call name BY CONSTRUCTION,
+/// keeping `mir == ir` for the corpus caps gate. The module MUST be pure (`purity::is_pure`).
 ///
-/// The returned module MUST be `purity::is_pure(module, "to_string")` (every name
-/// below is in `PURE_MODULES`), so the synthesized `Call { Module }` leaf provably
-/// lowers to a single `Op::CallFn` (no rollback) — the invariant that keeps
-/// `count == lower` exact (see [`desugar_string_interp`]).
-fn interp_to_string_module(ty: &Ty) -> Option<&'static str> {
+/// For a `List[T]` the func is ELEMENT-TYPE-KEYED so each variant is a monomorphic self-host impl
+/// that reads the slot at the right width/repr and formats the element in v0's COMPOUND form (NB:
+/// the compound-Float element drops the trailing `.0` — see `list_to_string_f.almd`):
+///   - `List[Int]`            → `list.to_string`     (i64 slot, decimal digits)
+///   - `List[Float]`          → `list.to_string_f`   (f64-bits slot, compound float, drops `.0`)
+///   - `List[Bool]`           → `list.to_string_b`   (i64 0/1 slot, `true`/`false`)
+///   - `List[String]`         → `list.to_string_s`   (i32-handle slot, quoted+escaped)
+/// Any OTHER element type (NESTED `List[List[_]]`, Map/Set/Option/Record element, an unresolved var)
+/// returns `None`: the whole interp declines the desugar and stays cleanly walled — NEVER a wrong
+/// byte. Nested lists are walled deliberately: v1 does not yet materialize a `List[List[_]]` literal
+/// (the inner handles are never stored), so a nested element formatter would read garbage slots;
+/// walling is the sound choice. (Map/Set/Option/Result top-level `to_string` stay unlinked = walled.)
+fn interp_to_string_call(ty: &Ty) -> Option<(&'static str, &'static str)> {
     use almide_lang::types::constructor::TypeConstructorId;
     Some(match ty {
-        Ty::Int => "int",
-        Ty::Bool => "bool",
-        // Float renders via `float.to_string` — PURE + emitted as a `CallFn`, but
-        // UNLINKED (float dtoa is not self-hosted), so the render wall cleanly
-        // REJECTS the whole function. That keeps the interp out of profile (it can
-        // never be a `count != lower` mismatch) until dtoa lands.
-        Ty::Float => "float",
-        Ty::Applied(TypeConstructorId::List, _) => "list",
-        Ty::Applied(TypeConstructorId::Map, _) => "map",
-        Ty::Applied(TypeConstructorId::Set, _) => "set",
-        Ty::Applied(TypeConstructorId::Option, _) => "option",
-        Ty::Applied(TypeConstructorId::Result, _) => "result",
-        _ => return None,
+        Ty::Int => ("int", "to_string"),
+        Ty::Bool => ("bool", "to_string"),
+        // Float renders via `float.to_string` (self-hosted Dragon4 — LINKED). The compound-LIST
+        // element float is a SEPARATE format (drops `.0`); only the top-level/scalar interp uses
+        // float.to_string here.
+        Ty::Float => ("float", "to_string"),
+        Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 => match &args[0] {
+            Ty::Int => ("list", "to_string"),
+            Ty::Float => ("list", "to_string_f"),
+            Ty::Bool => ("list", "to_string_b"),
+            Ty::String => ("list", "to_string_s"),
+            // An unsupported element type (NESTED `List[List[_]]`, `List[Map]`, …) routes to an
+            // UNLINKED variant name so the interp DESUGARS to a real `list.to_string_x` CallFn that
+            // the render wall then REJECTS — the function walls cleanly. Returning `None` here would
+            // instead leave the interp Opaque and the `println` would emit NOTHING (a silent empty
+            // miscompile); routing-to-unlinked preserves the all-or-nothing wall. NEVER registered.
+            _ => ("list", "to_string_x"),
+        },
+        // Map/Set/Option/Result top-level `to_string` are not self-hosted → the synthesized call is
+        // UNLINKED, so the using function walls at render (never a wrong byte). Keep routing them so
+        // the gate accounts the same call name the lowering emits (mir == ir), exactly as before.
+        Ty::Applied(TypeConstructorId::Map, _) => ("map", "to_string"),
+        Ty::Applied(TypeConstructorId::Set, _) => ("set", "to_string"),
+        Ty::Applied(TypeConstructorId::Option, _) => ("option", "to_string"),
+        Ty::Applied(TypeConstructorId::Result, _) => ("result", "to_string"),
+        // Tuple / Record / variant / any other type has no self-hosted `to_string` yet.
+        // Route to an UNLINKED `to_string` so the interp DESUGARS to a real CallFn that the
+        // render wall REJECTS (the function walls cleanly) — NEVER leave it Opaque, which
+        // makes `println("${tuple}")` emit NOTHING (a silent empty miscompile). This is the
+        // nested-`List` lesson (above) applied UNIFORMLY: no interp Expr part may fall to
+        // Opaque. NEVER registered, so every such function walls all-or-nothing.
+        _ => ("compound", "to_string"),
     })
 }
 
@@ -811,12 +838,12 @@ fn interp_part_leaf(p: &IrStringPart) -> Option<IrExpr> {
         IrStringPart::Lit { value } => Some(lit(value)),
         IrStringPart::Expr { expr } if matches!(expr.ty, Ty::String) => Some(expr.clone()),
         IrStringPart::Expr { expr } => {
-            let module = interp_to_string_module(&expr.ty)?;
+            let (module, func) = interp_to_string_call(&expr.ty)?;
             Some(IrExpr {
                 kind: IrExprKind::Call {
                     target: CallTarget::Module {
                         module: almide_lang::intern::sym(module),
-                        func: almide_lang::intern::sym("to_string"),
+                        func: almide_lang::intern::sym(func),
                         def_id: None,
                     },
                     args: vec![expr.clone()],
@@ -911,8 +938,8 @@ pub fn interp_synthetic_call_names(parts: &[IrStringPart]) -> Vec<String> {
     for p in parts {
         if let IrStringPart::Expr { expr } = p {
             if !matches!(expr.ty, Ty::String) {
-                if let Some(module) = interp_to_string_module(&expr.ty) {
-                    names.push(format!("{module}.to_string"));
+                if let Some((module, func)) = interp_to_string_call(&expr.ty) {
+                    names.push(format!("{module}.{func}"));
                 }
             }
         }
@@ -1082,6 +1109,10 @@ pub(crate) fn alloc_init(value: &IrExpr) -> Init {
             .map(|e| match &e.kind {
                 IrExprKind::LitInt { value } => Some(*value),
                 IrExprKind::LitFloat { value } => Some(value.to_bits() as i64),
+                // A Bool literal occupies its 8-byte slot as 0/1 (the i64-uniform Bool repr), so a
+                // `[true, false]` literal materializes exactly like an IntList of [1, 0] — read back
+                // via load64 as 0/1. (`${bool_list}` → list.to_string_b reads these slots.)
+                IrExprKind::LitBool { value } => Some(*value as i64),
                 _ => None,
             })
             .collect();

@@ -4480,15 +4480,18 @@
 
     #[test]
     fn string_interp_compound_part_walls_not_invalid_wasm() {
-        // A compound `${xs}` (List) desugars to `list.to_string(xs)` — PURE + emitted, but
-        // UNLINKED (no self-hosted list Display), so the render wall cleanly REJECTS it.
+        // An UNSUPPORTED-element compound `${xs}` (a NESTED `List[List[Int]]`) desugars to the
+        // UNLINKED `list.to_string_x` (the never-registered sentinel), so the render wall cleanly
+        // REJECTS it — never invalid wasm, never wrong bytes. (Flat Int/Float/Bool/String element
+        // lists ARE self-hosted now and prove byte-match v0 in the `compound_list_interp_*` tests;
+        // this guards that the OUT-OF-SUBSET element types still wall as a unit.)
         use crate::lower::LowerError;
         use crate::render_wasm::{try_render_wasm_program, unlinked_call_names};
-        let src = "fn main() -> Unit = {\n  let xs = [1, 2, 3]\n  println(\"xs=${xs}\") }\n";
+        let src = "fn main() -> Unit = {\n  let xs: List[List[Int]] = [[1, 2], [3]]\n  println(\"xs=${xs}\") }\n";
         let prog = lower_source(src);
         assert!(
-            unlinked_call_names(&prog).contains("list.to_string"),
-            "a List interp must desugar to the unlinked list.to_string, got {:?}",
+            unlinked_call_names(&prog).contains("list.to_string_x"),
+            "a nested-List interp must desugar to the unlinked list.to_string_x, got {:?}",
             unlinked_call_names(&prog)
         );
         match try_render_wasm_program(&prog) {

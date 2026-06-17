@@ -1,0 +1,97 @@
+// list_to_string_s — SELF-HOSTED `list.to_string` over a `List[String]`, byte-matching v0's compound
+// repr `["a", "b"]` (the `${list}` form). v0 renders each element via `almide_repr_str`:
+//   "\"" + s with { \ → \\, " → \", \n → \n, \r → \r, \t → \t } + "\""
+// other bytes (incl. multibyte UTF-8) pass through verbatim. Layout: 8-byte slots, each holding the
+// element String's handle (i32, read as the low bits of the i64 slot via prim.load64); the String
+// block is [rc][len@4][cap@8][bytes@12]. `xs` borrowed (slots read, not moved); result a fresh String.
+
+// Does byte b need a backslash escape? (\ " \n \r \t) → it contributes 2 output bytes.
+fn __ltss_is_escaped(b: Int) -> Bool =
+  if b == 92 then true                // '\'
+  else if b == 34 then true           // '"'
+  else if b == 10 then true           // '\n'
+  else if b == 13 then true           // '\r'
+  else if b == 9 then true            // '\t'
+  else false
+
+// Escaped byte width of the slen bytes at `src`: each escaped byte counts 2, others 1.
+fn __ltss_esc_len(src: Int, slen: Int, i: Int, acc: Int) -> Int =
+  if i >= slen then acc
+  else {
+    let b = prim.load8(src + i)
+    let w = if __ltss_is_escaped(b) then 2 else 1
+    __ltss_esc_len(src, slen, i + 1, acc + w)
+  }
+
+// The escape letter for an escaped control byte (n/r/t); a literal \ or " escapes to ITSELF.
+fn __ltss_esc_char(b: Int) -> Int =
+  if b == 10 then 110                 // 'n'
+  else if b == 13 then 114            // 'r'
+  else if b == 9 then 116             // 't'
+  else b                              // '\' and '"' escape to themselves
+
+// Copy+escape the slen bytes at `src` to `dst`; return the address past the last written byte.
+fn __ltss_fill_esc(src: Int, dst: Int, slen: Int, i: Int, pos: Int) -> Int =
+  if i >= slen then pos
+  else {
+    let b = prim.load8(src + i)
+    let pos1 = if __ltss_is_escaped(b) then {
+      prim.store8(pos, 92)            // '\'
+      prim.store8(pos + 1, __ltss_esc_char(b))
+      pos + 2
+    } else {
+      prim.store8(pos, b)
+      pos + 1
+    }
+    __ltss_fill_esc(src, dst, slen, i + 1, pos1)
+  }
+
+// Width of one element repr: 2 quotes + escaped body length.
+fn __ltss_elem_width(elem: Int) -> Int = {
+  let slen = prim.load32(elem + 4)
+  2 + __ltss_esc_len(elem + 12, slen, 0, 0)
+}
+
+// Write one element's `"..."` repr at `pos`; return the address past it.
+fn __ltss_fill_elem(elem: Int, pos: Int) -> Int = {
+  let slen = prim.load32(elem + 4)
+  prim.store8(pos, 34)               // opening '"'
+  let mid = __ltss_fill_esc(elem + 12, pos + 1, slen, 0, pos + 1)
+  prim.store8(mid, 34)               // closing '"'
+  mid + 1
+}
+
+fn __ltss_body_len(addr: Int, count: Int, i: Int, acc: Int) -> Int =
+  if i >= count then acc
+  else {
+    let elem = prim.load64(addr + i * 8)
+    let sep = if i > 0 then 2 else 0
+    __ltss_body_len(addr, count, i + 1, acc + sep + __ltss_elem_width(elem))
+  }
+
+fn __ltss_fill_body(addr: Int, count: Int, i: Int, pos: Int) -> Int =
+  if i >= count then pos
+  else {
+    let pos1 = if i > 0 then {
+      prim.store8(pos, 44)           // ','
+      prim.store8(pos + 1, 32)       // ' '
+      pos + 2
+    } else pos
+    let elem = prim.load64(addr + i * 8)
+    let pos2 = __ltss_fill_elem(elem, pos1)
+    __ltss_fill_body(addr, count, i + 1, pos2)
+  }
+
+fn list_to_string_s(xs: List[String]) -> String = {
+  let h = prim.handle(xs)
+  let count = prim.load32(h + 4)
+  let addr = h + 12
+  let body = __ltss_body_len(addr, count, 0, 0)
+  let total = body + 2
+  let buf = prim.alloc_str(total)
+  let base = prim.handle(buf) + 12
+  prim.store8(base, 91)              // '['
+  let after = __ltss_fill_body(addr, count, 0, base + 1)
+  prim.store8(after, 93)             // ']'
+  buf
+}

@@ -1,0 +1,82 @@
+// list_to_string_f — SELF-HOSTED `list.to_string` over a `List[Float]`, byte-matching v0's compound
+// repr `[1, 2.5]` (the `${list}` form). THE TRAP: v0 renders each float element with `format!("{}",
+// f64)`, which is the SHORTEST round-trip decimal in FIXED notation — IDENTICAL to the self-hosted
+// `float.to_string` (Dragon4) EXCEPT integer-valued floats DROP the trailing ".0" (`1.0` → "1",
+// `100.0` → "100"), whereas `float.to_string` keeps it (`1.0` → "1.0"). So the element form is
+// EXACTLY `float.to_string(x)` with a trailing ".0" stripped:
+//   - "1.0"  → "1"      "100.0" → "100"     "0.0" → "0"     "-0.0" → "-0"
+//   - "2.5"  → "2.5"    "0.1"   → "0.1"     (no trailing ".0" → unchanged)
+//   - "inf" / "-inf" / "NaN"                (no trailing ".0" → unchanged)
+// This REUSES all of Dragon4 (the self-hosted float.to_string) and only re-renders the integer case
+// — provably the same digits as v0, since v0's compound float and v0's scalar float share the digit
+// stream and differ only by the ".0" suffix. Layout: 8-byte slots holding f64 BITS (read via
+// prim.load64 → the i64 bit pattern → prim.ffrombits to a Float). `xs` borrowed; result owned.
+
+// Does the `n`-byte string at `src` end in ".0"? (n >= 2 and last two bytes are '.' '0'.)
+// NB: `and` does not lower in v1's if-conditions, so this is a NESTED if (the documented idiom).
+fn __ltsf_ends_dot0(src: Int, n: Int) -> Bool =
+  if n < 2 then false
+  else if prim.load8(src + n - 2) != 46 then false      // not '.'
+  else prim.load8(src + n - 1) == 48                    // last byte is '0'
+
+// The element output byte length: float.to_string's length, minus 2 if it ends in ".0".
+fn __ltsf_elem_width(bits: Int) -> Int = {
+  let x = prim.ffrombits(bits)
+  let s = float.to_string(x)
+  let sh = prim.handle(s)
+  let n = prim.load32(sh + 4)
+  if __ltsf_ends_dot0(sh + 12, n) then n - 2 else n
+}
+
+// Copy `n` bytes from `src` to `dst`; return the address past the last byte.
+fn __ltsf_bcopy(src: Int, dst: Int, n: Int) -> Int =
+  if n <= 0 then dst
+  else {
+    prim.store8(dst, prim.load8(src))
+    __ltsf_bcopy(src + 1, dst + 1, n - 1)
+  }
+
+// Write the element (float.to_string with a trailing ".0" stripped) at `pos`; return the address past.
+fn __ltsf_fill_elem(bits: Int, pos: Int) -> Int = {
+  let x = prim.ffrombits(bits)
+  let s = float.to_string(x)
+  let sh = prim.handle(s)
+  let n = prim.load32(sh + 4)
+  let w = if __ltsf_ends_dot0(sh + 12, n) then n - 2 else n
+  __ltsf_bcopy(sh + 12, pos, w)
+}
+
+fn __ltsf_body_len(addr: Int, count: Int, i: Int, acc: Int) -> Int =
+  if i >= count then acc
+  else {
+    let bits = prim.load64(addr + i * 8)
+    let sep = if i > 0 then 2 else 0
+    __ltsf_body_len(addr, count, i + 1, acc + sep + __ltsf_elem_width(bits))
+  }
+
+fn __ltsf_fill_body(addr: Int, count: Int, i: Int, pos: Int) -> Int =
+  if i >= count then pos
+  else {
+    let pos1 = if i > 0 then {
+      prim.store8(pos, 44)           // ','
+      prim.store8(pos + 1, 32)       // ' '
+      pos + 2
+    } else pos
+    let bits = prim.load64(addr + i * 8)
+    let pos2 = __ltsf_fill_elem(bits, pos1)
+    __ltsf_fill_body(addr, count, i + 1, pos2)
+  }
+
+fn list_to_string_f(xs: List[Float]) -> String = {
+  let h = prim.handle(xs)
+  let count = prim.load32(h + 4)
+  let addr = h + 12
+  let body = __ltsf_body_len(addr, count, 0, 0)
+  let total = body + 2
+  let buf = prim.alloc_str(total)
+  let base = prim.handle(buf) + 12
+  prim.store8(base, 91)              // '['
+  let after = __ltsf_fill_body(addr, count, 0, base + 1)
+  prim.store8(after, 93)             // ']'
+  buf
+}

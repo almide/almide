@@ -90,24 +90,39 @@ fn main() {
     }
 
     // Auto-link the self-hosted stdlib runtime (the registry — int.to_string, string.concat,
-    // …) when an entry is called but not defined, renaming its impl fn to the call name.
-    for (source, entries) in almide_mir::render_wasm::self_host_runtime() {
-        let any_called = entries.iter().any(|(_, call)| {
-            functions.iter().any(|f| {
-                f.ops.iter().any(|op| matches!(op, almide_mir::Op::CallFn { name, .. } if name == call))
-            })
-        });
-        let any_defined = entries.iter().any(|(_, call)| functions.iter().any(|f| &f.name == call));
-        if any_called && !any_defined {
-            let rt = source_to_ir(source);
-            for f in &rt.functions {
-                if let Ok(mut mir) = almide_mir::lower::lower_function(f, &globals) {
-                    if let Some((_, call)) = entries.iter().find(|(impl_fn, _)| &mir.name == impl_fn) {
-                        mir.name = call.to_string();
+    // …) when an entry is called but not defined, renaming its impl fn to the call name. A linked
+    // impl may itself call ANOTHER registry entry (e.g. `list.to_string_f` → `float.to_string`), so
+    // iterate to a FIXPOINT: keep linking until a full pass adds nothing. (The test harness
+    // `lower_source` gets this transitive closure for free via its recursive auto-link; this loop
+    // is the example-side equivalent.)
+    loop {
+        let before = functions.len();
+        for (source, entries) in almide_mir::render_wasm::self_host_runtime() {
+            let any_called = entries.iter().any(|(_, call)| {
+                functions.iter().any(|f| {
+                    f.ops.iter().any(|op| matches!(op, almide_mir::Op::CallFn { name, .. } if name == call))
+                })
+            });
+            let any_defined =
+                entries.iter().any(|(_, call)| functions.iter().any(|f| &f.name == call));
+            if any_called && !any_defined {
+                let rt = source_to_ir(source);
+                for f in &rt.functions {
+                    if let Ok(mut mir) = almide_mir::lower::lower_function(f, &globals) {
+                        if let Some((_, call)) = entries.iter().find(|(impl_fn, _)| &mir.name == impl_fn) {
+                            mir.name = call.to_string();
+                        }
+                        functions.push(mir);
                     }
-                    functions.push(mir);
                 }
             }
+        }
+        // Dedup by name (a recursively-linked impl carries its own helper copies, e.g. print_str);
+        // keep the first definition — identical source ⇒ a no-op merge.
+        let mut seen = std::collections::HashSet::new();
+        functions.retain(|f| seen.insert(f.name.clone()));
+        if functions.len() == before {
+            break;
         }
     }
 
