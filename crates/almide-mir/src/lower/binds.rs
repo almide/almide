@@ -78,14 +78,18 @@ impl LowerCtx {
         Some(dst)
     }
 
-    /// Lower a `List[String]` LITERAL with FRESH-OWNED elements (`["a"+"b", "c"]`) to an
-    /// alloc_list_str + per-element move-in. Each element (a LitStr or a ConcatStr) is a fresh
-    /// owned String (cert `i`) MOVED into the list (store its handle + `Consume` = `m`); the list
-    /// is a nested-ownership `DynListStr` freed recursively (`DropListStr`) at scope end (`i`+`d`).
-    /// GATED to LitStr/ConcatStr elements (fresh owned — a Var element would need a `Dup`, deferred).
-    /// Closes the heap-container-element concat position (the −214 caps recovery). Gate-first so no
-    /// partial emission (the only `?` is try_lower_concat_str, which never fails for a ConcatStr).
-    fn try_lower_str_list_literal(&mut self, value: &IrExpr) -> Option<ValueId> {
+    /// Lower a `List[String]` LITERAL to an alloc_list_str + per-element move-in. Each element is
+    /// stored into a nested-ownership `DynListStr` (freed recursively via `DropListStr` at scope end,
+    /// cert `i`+`d`). Element ownership by kind:
+    /// - a LitStr / ConcatStr is a FRESH owned String (cert `i`), MOVED in (store handle + `Consume`);
+    /// - a `Var` binds a STILL-LIVE owned String the list must not steal — it gets its OWN reference
+    ///   via `Dup` (cert `a`/+1), then that fresh handle is `Consume`d into the list. The original var
+    ///   keeps its reference (its scope-end drop stays balanced), and the list owns a distinct one
+    ///   (DropListStr releases it) — no double-free, no leak. (`[e0, e1]` of `string.repeat` results,
+    ///   `[a, a]` of a computed `a` — the same var may appear twice, each occurrence its own `Dup`.)
+    /// GATED to those element kinds; any other (a heap-returning call as a bare element, a member
+    /// access) defers. Gate-first so no partial emission.
+    pub(crate) fn try_lower_str_list_literal(&mut self, value: &IrExpr) -> Option<ValueId> {
         use almide_ir::BinOp;
         use almide_lang::types::constructor::TypeConstructorId;
         let IrExprKind::List { elements } = &value.kind else {
@@ -96,9 +100,14 @@ impl LowerCtx {
         if !str_list || elements.is_empty() {
             return None;
         }
-        if !elements.iter().all(|e| {
-            matches!(&e.kind, IrExprKind::LitStr { .. } | IrExprKind::BinOp { op: BinOp::ConcatStr, .. })
-        }) {
+        // Gate: every element must be a fresh-owned LitStr/ConcatStr OR a tracked heap Var (so we can
+        // Dup it). A Var whose value isn't tracked here cannot be Dup'd → defer the whole literal.
+        let all_lowerable = elements.iter().all(|e| match &e.kind {
+            IrExprKind::LitStr { .. } | IrExprKind::BinOp { op: BinOp::ConcatStr, .. } => true,
+            IrExprKind::Var { id } => self.value_of.contains_key(id),
+            _ => false,
+        });
+        if !all_lowerable {
             return None;
         }
         let ptr = crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT };
@@ -115,6 +124,14 @@ impl LowerCtx {
                     let obj = self.fresh_value();
                     self.ops.push(Op::Alloc { dst: obj, repr: ptr, init: Init::Str(s.clone()) });
                     obj
+                }
+                // A Var element: acquire a fresh owned reference (Dup) the list will own; the original
+                // binding keeps its own reference. The dup is then Consume'd (moved) into the slot.
+                IrExprKind::Var { id } => {
+                    let src = *self.value_of.get(id)?;
+                    let dup = self.fresh_value();
+                    self.ops.push(Op::Dup { dst: dup, src });
+                    dup
                 }
                 _ => self.try_lower_concat_str(elem)?,
             };
@@ -339,6 +356,14 @@ impl LowerCtx {
                         self.live_heap_handles.push(dst);
                         return Ok(());
                     }
+                }
+                // A scalar `List[Int/Float/Bool]` literal with COMPUTED elements (`[1.0, inf, 0.5]`,
+                // `[a, a]`) — build the block + store each slot (an all-literal list is the IntList
+                // path in `alloc_init` below; a computed element can't fold to a constant).
+                if let Some(dst) = self.try_lower_scalar_list_construct(value) {
+                    self.value_of.insert(var, dst);
+                    self.live_heap_handles.push(dst);
+                    return Ok(());
                 }
                 let dst = self.fresh_value();
                 let repr = repr_of(ty)?;
@@ -578,10 +603,40 @@ impl LowerCtx {
     /// Construct a SCALAR-field tuple `(a, b, …)`: alloc an n-slot block (Init::DynList) and store
     /// each field's computed scalar value at its slot via `Prim::Store`. Returns `None` (caller
     /// falls back to the Opaque alloc) if any field is heap or not a lowerable scalar.
+    /// A scalar `List[Int]`/`List[Float]`/`List[Bool]` LITERAL with NON-literal elements (`[1.0, inf,
+    /// 0.5]`, `[a, a]`, `[f(x), g(y)]`) — an all-literal list is already an `Init::IntList`, but a
+    /// computed element can't be folded to a constant, so build the block explicitly: alloc `n` i64
+    /// slots and `store64` each element's lowered scalar value (a Float's f64 bits, an Int's value).
+    /// Scalar elements own no heap, so a flat `DynList` (drops as a flat block) is correct — no nested
+    /// ownership. Returns None (defer to the Opaque alloc) if any element is heap or non-scalar-
+    /// lowerable. The list-shaped sibling of [`Self::try_lower_scalar_tuple_construct`].
+    pub(crate) fn try_lower_scalar_list_construct(&mut self, value: &IrExpr) -> Option<ValueId> {
+        use almide_lang::types::constructor::TypeConstructorId;
+        let IrExprKind::List { elements } = &value.kind else {
+            return None;
+        };
+        // Only SCALAR-element lists (List[Int]/Float/Bool). A heap-element list is the str path above.
+        let scalar_list = matches!(&value.ty,
+            Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && !is_heap_ty(&a[0]));
+        if !scalar_list || elements.is_empty() {
+            return None;
+        }
+        self.try_lower_scalar_list_slots(elements)
+    }
+
     fn try_lower_scalar_tuple_construct(&mut self, elements: &[IrExpr]) -> Option<ValueId> {
-        use crate::{IntOp, PrimKind};
         if elements.iter().any(|e| is_heap_ty(&e.ty)) {
             return None; // heap-field tuple deferred (the all-heap path traps inside loops — TODO).
+        }
+        self.try_lower_scalar_list_slots(elements)
+    }
+
+    /// Shared block-builder for a scalar tuple/list: lower each element to a scalar value, alloc a
+    /// `DynList` of `n` i64 slots, `store64` each. Element ownership-free (scalars), flat drop.
+    fn try_lower_scalar_list_slots(&mut self, elements: &[IrExpr]) -> Option<ValueId> {
+        use crate::{IntOp, PrimKind};
+        if elements.iter().any(|e| is_heap_ty(&e.ty)) {
+            return None;
         }
         // Lower each field's scalar value first (before the alloc, so a field expr that itself
         // allocates doesn't interleave with our store sequence).

@@ -105,6 +105,15 @@ fn alloc_map(slots: Int) -> Map[Int, Int] = _
 @intrinsic("almide_rt_prim_alloc_list_str")
 fn alloc_map_str(slots: Int) -> Map[String, String] = _
 
+// Allocate a runtime-sized OWNED `Map[String, Int]` (the heap-KEY, scalar-VALUE map — serves
+// Map[String,Int] AND Map[String,Float], one i64 value slot either way) — physically a DynListStr
+// (nested-ownership, freed recursively by DropListStr). Layout: `entries` String-handle KEY slots
+// then `entries` i64 VALUE slots; `slots = 2 * entries` is the FULL alloc (so `cap` lets the free-
+// list reuse the block), while map.set stores `len` = `entries` so DropListStr frees ONLY the key
+// handles and never touches the scalar value region.
+@intrinsic("almide_rt_prim_alloc_list_str")
+fn alloc_map_skv(slots: Int) -> Map[String, Int] = _
+
 // Allocate a runtime-sized OWNED `Value` block (the dynamic data model) — physically a v1 List
 // block, but typed Value. A SCALAR Value (Null/Bool/Int/Float) reuses the layout as
 // [rc][len@4 = TAG][cap@8][payload@12]: the `len` field carries the variant TAG (0=Null, 1=Bool,

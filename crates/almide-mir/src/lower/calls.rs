@@ -57,9 +57,20 @@ impl LowerCtx {
         let lowered = self.lower_pure_module_call_args(module, func, args)?;
         let dst = self.fresh_value();
         let repr = repr_of(result_ty)?;
+        // `string.slice(s, start)` is the 2-arg overload of `string.slice(s, start, end)` with the
+        // implicit `end = string.len(s)` (v0: `s.chars().skip(start)`). The frontend admits the short
+        // form (min_params=2) WITHOUT padding it, so the 3-param `string.slice` impl would underflow.
+        // Route the 2-arg form to a DEDICATED `string.slice2(s, start)` variant that computes the end
+        // itself — this stays ONE CallFn ↔ ONE IR call node (no extra synthetic call, so the corpus
+        // `mir == ir` double-count gate is untouched), unlike synthesizing a `string.len` call arg.
+        let name = if module == "string" && func == "slice" && args.len() == 2 {
+            "string.slice2".to_string()
+        } else {
+            list_heap_call_name(module, func, &arg_tys, result_ty)
+        };
         self.ops.push(Op::CallFn {
             dst: Some(dst),
-            name: list_heap_call_name(module, func, &arg_tys, result_ty),
+            name,
             args: lowered,
             result: Some(repr),
         });
@@ -996,7 +1007,7 @@ impl LowerCtx {
         // physically identical to alloc_list) — but the dst is tracked as a NESTED-OWNERSHIP
         // list, so its scope-end drop is a recursive `DropListStr` (frees the owned element
         // Strings) and `prim.store_str` Consumes each String moved into it (Machinery 2).
-        if func == "alloc_list_str" || func == "alloc_set_str" || func == "alloc_map_str" {
+        if func == "alloc_list_str" || func == "alloc_set_str" || func == "alloc_map_str" || func == "alloc_map_skv" {
             let len_v = self.lower_scalar_value(&args[0]).ok_or_else(|| {
                 LowerError::Unsupported("prim.alloc_list_str length is not a lowerable scalar".into())
             })?;

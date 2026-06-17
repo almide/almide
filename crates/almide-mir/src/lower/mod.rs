@@ -967,9 +967,56 @@ pub fn interp_str_desugarable(parts: &[IrStringPart]) -> bool {
 /// the plain name. `module.func` is unchanged for everything else.
 pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], result_ty: &Ty) -> String {
     use almide_lang::types::constructor::TypeConstructorId;
+    // `fold` threads an ACCUMULATOR (= the result type). A HEAP accumulator (e.g. a String built up
+    // across the fold) needs the closure-result + accumulator to be an i32 handle, not the i64 the
+    // scalar-accumulator fold variants hardcode — emitting an i32 there is invalid wasm. No heap-
+    // accumulator fold variant is self-hosted yet, so route it to an UNREGISTERED name: render walls
+    // it cleanly (a controlled reject) rather than emitting a repr-mismatched module. (Soundness-
+    // preserving: a wall is never a miscompile.)
+    if func == "fold" && matches!(module, "list" | "map" | "set") && is_heap_ty(result_ty) {
+        return format!("{module}.fold_hacc");
+    }
     if module == "list" {
-        // List[heap]-RETURNING combinators (the result is a new heap-element list).
-        if matches!(func, "map" | "filter" | "reverse" | "take" | "drop" | "unique" | "dedup" | "intersperse") {
+        // List[Float] ordering uses IEEE-754 totalOrder (f64::total_cmp), NOT a signed-int slot
+        // compare. Float is SCALAR (is_heap_ty false), so the heap routes below never fire for it —
+        // route sort/min/max explicitly on the element being Ty::Float (C-055). sort_by keys on the
+        // CLOSURE (arg 1) RETURN type being Float — the element list may be any type (e.g. List[R]).
+        if matches!(func, "sort" | "min" | "max") {
+            if let Some(Ty::Applied(TypeConstructorId::List, a)) = arg_tys.first() {
+                if a.len() == 1 && a[0] == Ty::Float {
+                    return format!("list.{func}_float");
+                }
+            }
+        }
+        if func == "sort_by" {
+            if let Some(Ty::Fn { ret, .. }) = arg_tys.get(1) {
+                if **ret == Ty::Float {
+                    return "list.sort_by_float".to_string();
+                }
+            }
+        }
+        // `list.map` is the one combinator whose SOURCE and RESULT element reprs may DIFFER (the
+        // closure transforms the type). A heap RESULT over a SCALAR source (`float.to_string` over a
+        // List[Float], `int.to_string` over a List[Int]) must read the source slot as a raw i64
+        // scalar (load64), not as a String handle (load_str) — that is `map_s2h`; a heap result over
+        // a heap source is the all-String `map_str`.
+        if func == "map" {
+            if let Ty::Applied(TypeConstructorId::List, rargs) = result_ty {
+                if rargs.len() == 1 && is_heap_ty(&rargs[0]) {
+                    let src_heap = matches!(
+                        arg_tys.first(),
+                        Some(Ty::Applied(TypeConstructorId::List, s)) if s.len() == 1 && is_heap_ty(&s[0])
+                    );
+                    return if src_heap {
+                        "list.map_str".to_string()
+                    } else {
+                        "list.map_s2h".to_string()
+                    };
+                }
+            }
+        }
+        // The element-PRESERVING List[heap]-returning combinators (source elem == result elem).
+        if matches!(func, "filter" | "reverse" | "take" | "drop" | "unique" | "dedup" | "intersperse") {
             if let Ty::Applied(TypeConstructorId::List, args) = result_ty {
                 if args.len() == 1 && is_heap_ty(&args[0]) {
                     return format!("list.{func}_str");
@@ -984,6 +1031,11 @@ pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], resu
                     return format!("list.{func}_str");
                 }
             }
+        }
+        // get_or returns the ELEMENT directly (not an Option). Over a List[heap] it must return
+        // an i32 handle (a deep copy), so it is keyed on the heap RESULT being the element type.
+        if func == "get_or" && is_heap_ty(result_ty) {
+            return "list.get_or_str".to_string();
         }
         // SUBJECT-keyed (arg 0) over a List[heap], where the result is scalar (Bool/Int/Option[Int])
         // so it can't be keyed on the result type: search (contains/index_of) + the predicate
@@ -1026,41 +1078,47 @@ pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], resu
         }
     }
     if module == "map" {
-        // A `Map[heap, heap]` (e.g. Map[String,String]) routes to the `_str` variant. new/set
-        // RETURN a Map[heap,heap]; get returns Option[heap]; len/is_empty/contains read a
-        // Map[heap,heap] SUBJECT (arg 0, scalar result).
-        let result_is_heap_map = matches!(
-            result_ty,
-            Ty::Applied(TypeConstructorId::Map, a)
-                if a.len() == 2 && is_heap_ty(&a[0]) && is_heap_ty(&a[1])
-        );
-        if matches!(func, "new" | "set" | "remove" | "merge" | "update" | "filter") && result_is_heap_map {
-            return format!("map.{func}_str");
-        }
-        if func == "get" {
-            if let Ty::Applied(TypeConstructorId::Option, a) = result_ty {
-                if a.len() == 1 && is_heap_ty(&a[0]) {
-                    return "map.get_str".to_string();
-                }
+        // A map's REPR is set by its (key, value) heap-ness, read from whichever Map type the call
+        // exposes: arg 0 (the SUBJECT of set/get/fold/filter/…) takes priority, else the RESULT
+        // (map.new() has no args). The two repr families:
+        //   key heap, value heap  → `_str` (map_str: interleaved all-String entries)
+        //   key heap, value scalar → `_skv` (map_skv: String keys + i64 values, serves
+        //                            Map[String,Int] AND Map[String,Float] — the value is one i64)
+        //   key scalar             → the plain map_core (Map[Int,Int]); a scalar-key heap-value map
+        //                            has no variant yet, so it falls through (walled by repr).
+        // The element-returning forms (get → Option[V], keys/values → List[elem]) read the same
+        // key/value reprs off the subject map (arg 0).
+        let map_kv = |ty: &Ty| match ty {
+            Ty::Applied(TypeConstructorId::Map, a) if a.len() == 2 => {
+                Some((is_heap_ty(&a[0]), is_heap_ty(&a[1])))
             }
-        }
-        // keys/values over a Map[heap,heap] return a List[heap] — key on the RESULT element type.
-        if matches!(func, "keys" | "values") {
-            if let Ty::Applied(TypeConstructorId::List, a) = result_ty {
-                if a.len() == 1 && is_heap_ty(&a[0]) {
-                    return format!("map.{func}_str");
-                }
+            _ => None,
+        };
+        let kv = arg_tys
+            .first()
+            .and_then(&map_kv)
+            .or_else(|| map_kv(result_ty));
+        if let Some((key_heap, val_heap)) = kv {
+            // Each repr family routes ONLY the funcs its self-hosted variant file actually defines
+            // (an unlisted func keeps the plain name — never a dangling `_str`/`_skv` reference).
+            let variant = match (key_heap, val_heap) {
+                (true, true) => matches!(
+                    func,
+                    "new" | "set" | "remove" | "merge" | "update" | "filter" | "get" | "keys"
+                        | "values" | "len" | "is_empty" | "contains" | "all" | "any" | "count" | "fold"
+                )
+                .then_some("_str"),
+                (true, false) => matches!(
+                    func,
+                    "new" | "set" | "remove" | "filter" | "get" | "get_or" | "keys" | "values"
+                        | "len" | "is_empty" | "contains" | "all" | "any" | "count" | "fold"
+                )
+                .then_some("_skv"),
+                _ => None,
+            };
+            if let Some(suffix) = variant {
+                return format!("map.{func}{suffix}");
             }
-        }
-        let arg0_is_heap_map = matches!(
-            arg_tys.first(),
-            Some(Ty::Applied(TypeConstructorId::Map, a))
-                if a.len() == 2 && is_heap_ty(&a[0]) && is_heap_ty(&a[1])
-        );
-        if matches!(func, "len" | "is_empty" | "contains" | "all" | "any" | "count" | "fold")
-            && arg0_is_heap_map
-        {
-            return format!("map.{func}_str");
         }
     }
     format!("{module}.{func}")

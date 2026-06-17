@@ -170,6 +170,19 @@ impl LowerCtx {
                 | IrExprKind::ClosureCreate { .. }
                 | IrExprKind::Range { .. }
                 | IrExprKind::RuntimeCall { .. } => {
+                    // A `List[String]` literal RETURNED (`fn make() = [e0, e1]`) — build a real
+                    // nested-ownership DynListStr (each element moved/Dup'd in), moved out as the
+                    // return (NOT tracked, so no scope-end DropListStr — the caller owns it). Without
+                    // this the literal fell to the Opaque alloc = an empty len-0 list.
+                    if let Some(dst) = self.try_lower_str_list_literal(tail) {
+                        return Ok(Some(dst));
+                    }
+                    // A scalar `List[Int/Float/Bool]` literal RETURNED with computed elements —
+                    // build + store each slot, moved out (an all-literal list is the Opaque/IntList
+                    // path below). Without this a `[a, a]` of computed scalars returned an empty list.
+                    if let Some(dst) = self.try_lower_scalar_list_construct(tail) {
+                        return Ok(Some(dst));
+                    }
                     // A string concat RETURNED (`fn greet(n) = "Hi, " + n`) — a fresh owned String
                     // (via __str_concat), moved out as the return (cert CallFn-result i + ret m).
                     if let Some(dst) = self.try_lower_concat_str(tail) {

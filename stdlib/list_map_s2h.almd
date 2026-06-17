@@ -1,0 +1,23 @@
+// list_map_s2h — SELF-HOSTED list.map over a List[SCALAR] producing a List[heap] (e.g.
+// `list.map(List[Float], float.to_string)` or `list.map(List[Int], int.to_string)`). The dispatch
+// routes here when the RESULT element is heap but the SOURCE element is SCALAR: list.map_str would
+// misread the i64 scalar slot as a String handle (prim.load_str) and corrupt it. Here the source
+// element is read as a raw i64 SCALAR (prim.load64) — the closure interprets the bits (an Int, or a
+// Float's f64 bits) — and the closure's FRESH owned String result is MOVED into the DynListStr
+// result via prim.store_str. Source borrowed; result owned (nested ownership, DropListStr frees it).
+
+fn __maps2h_fill(dh: Int, sh: Int, f: (Int) -> String, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let x = prim.load64(sh + 12 + i * 8)
+    let y = f(x)
+    prim.store_str(dh + 12 + i * 8, y)
+    __maps2h_fill(dh, sh, f, n, i + 1)
+  }
+
+fn list_map_s2h(xs: List[Int], f: (Int) -> String) -> List[String] = {
+  let n = list.len(xs)
+  let buf = prim.alloc_list_str(n)
+  let _x = __maps2h_fill(prim.handle(buf), prim.handle(xs), f, n, 0)
+  buf
+}

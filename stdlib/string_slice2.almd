@@ -1,0 +1,48 @@
+// string_slice2 — SELF-HOSTED 2-arg `string.slice(s, start)` = `string.slice(s, start, len)` where
+// `len` is the CODEPOINT count (v0: `s.chars().skip(start)`). The frontend admits the short form
+// (min_params=2) without padding it, so the v1 dispatch routes the 2-arg call HERE rather than to
+// the 3-param string.slice (which would arity-underflow). The end is the codepoint count, computed
+// the same way string_slice does — then the byte range [start_cp, count) is copied into a fresh
+// String. Independent of string.slice so the dispatch stays a clean ONE-call ↔ ONE-IR-node mapping.
+
+fn __slice2_cpcount(addr: Int, end: Int, n: Int) -> Int =
+  if addr >= end then n
+  else {
+    let b = prim.load8(addr)
+    let step = if b / 64 == 2 then 0 else 1
+    __slice2_cpcount(addr + 1, end, n + step)
+  }
+
+fn __slice2_skip(addr: Int, end: Int) -> Int =
+  if addr >= end then addr
+  else if prim.load8(addr) / 64 == 2 then __slice2_skip(addr + 1, end)
+  else addr
+
+fn __slice2_offset(addr: Int, end: Int, k: Int) -> Int =
+  if k <= 0 then addr
+  else if addr >= end then addr
+  else {
+    let next = __slice2_skip(addr + 1, end)
+    __slice2_offset(next, end, k - 1)
+  }
+
+fn __slice2_copy(src: Int, dst: Int, len: Int) -> Int =
+  if len <= 0 then dst
+  else {
+    prim.store8(dst, prim.load8(src))
+    __slice2_copy(src + 1, dst + 1, len - 1)
+  }
+
+fn string_slice2(s: String, start: Int) -> String = {
+  let h = prim.handle(s)
+  let blen = prim.load32(h + 4)
+  let base = h + 12
+  let count = __slice2_cpcount(base, base + blen, 0)
+  let s_idx = if start < 0 then 0 else (if start > count then count else start)
+  let byte_start = __slice2_offset(base, base + blen, s_idx)
+  let byte_end = base + blen
+  let nbytes = if byte_end > byte_start then byte_end - byte_start else 0
+  let buf = prim.alloc_str(nbytes)
+  let _e = __slice2_copy(byte_start, prim.handle(buf) + 12, nbytes)
+  buf
+}

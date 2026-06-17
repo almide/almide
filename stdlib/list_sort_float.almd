@@ -1,0 +1,56 @@
+// list_sort_float — SELF-HOSTED `list.sort` over a List[Float], ordered by IEEE-754 totalOrder
+// (the ordering twin of f64::total_cmp): -0.0 < +0.0, NaN is the greatest (after +inf), negatives
+// sort by magnitude-with-sign. The plain list.sort compares the i64 SLOT bits with SIGNED-int `<`,
+// which is garbage for f64 patterns. Here each slot's raw f64 bits are mapped to a MONOTONE i64 key
+//   key = bits ^ ((bits >>_s 63) >>_u 1)
+// (arithmetic shift broadcasts the sign, logical shift drops the sign bit, XOR flips the lower 63
+// bits of a negative) and the keys are compared as signed i64 = totalOrder. The STORED elements stay
+// the original f64 bits — only the comparison key is transformed. Selection sort; List[Float] only.
+
+fn __ftotal_sf(b: Int) -> Int = {
+  let s = prim.bshr(b, 63)
+  let m = prim.bshr_u(s, 1)
+  prim.bxor(b, m)
+}
+
+fn __sortf_load(h: Int, i: Int) -> Int = prim.load64(h + 12 + i * 8)
+
+fn __sortf_min(h: Int, n: Int, j: Int, best: Int) -> Int =
+  if j >= n then best
+  else {
+    let e = __sortf_load(h, j)
+    let be = __sortf_load(h, best)
+    let ek = __ftotal_sf(e)
+    let bk = __ftotal_sf(be)
+    let nb = if ek < bk then j else best
+    __sortf_min(h, n, j + 1, nb)
+  }
+
+fn __sortf_sel(h: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let mi = __sortf_min(h, n, i + 1, i)
+    let a = __sortf_load(h, i)
+    let b = __sortf_load(h, mi)
+    prim.store64(h + 12 + i * 8, b)
+    prim.store64(h + 12 + mi * 8, a)
+    __sortf_sel(h, n, i + 1)
+  }
+
+fn __sortf_copy(srch: Int, dsth: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let e = prim.load64(srch + 12 + i * 8)
+    prim.store64(dsth + 12 + i * 8, e)
+    __sortf_copy(srch, dsth, n, i + 1)
+  }
+
+fn list_sort_float(xs: List[Float]) -> List[Float] = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  let buf = prim.alloc_list_f64(n)
+  let bh = prim.handle(buf)
+  let _c = __sortf_copy(h, bh, n, 0)
+  let _s = __sortf_sel(bh, n, 0)
+  buf
+}
