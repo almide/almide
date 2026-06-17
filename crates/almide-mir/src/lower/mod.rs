@@ -20,7 +20,7 @@
 
 use crate::{Init, MirFunction, MirParam, Op, Repr, ValueId, PLACEHOLDER_LAYOUT};
 use almide_ir::{
-    CallTarget, IrExpr, IrExprKind, IrFunction, IrParam, IrStmt, IrStmtKind, VarId,
+    CallTarget, IrExpr, IrExprKind, IrFunction, IrParam, IrStmt, IrStmtKind, IrStringPart, VarId,
 };
 use almide_lang::types::Ty;
 use std::collections::{HashMap, HashSet};
@@ -762,6 +762,48 @@ pub fn is_self_host_option_module_fn(module: &str, func: &str) -> bool {
         "json" => matches!(func, "as_int" | "as_float" | "as_bool" | "as_string"),
         _ => false,
     }
+}
+
+/// Is ONE interpolation part lowerable by [`LowerCtx::try_lower_string_interp`]?
+/// A part is admitted iff it is a literal, a String-typed `Var`/`LitStr`, or an
+/// Int-typed `Var`/`LitInt` — operands [`LowerCtx::lower_call_args`] provably cannot
+/// `Err` on (a Var resolves via `value_or_global`; a LitStr/LitInt is an infallible
+/// immediate). This GUARANTEES the synthesized `__str_concat` / `int.to_string` chain
+/// lowers without rollback, so the emitted call count is EXACTLY predictable.
+pub fn interp_part_str_lowerable(p: &IrStringPart) -> bool {
+    match p {
+        IrStringPart::Lit { .. } => true,
+        IrStringPart::Expr { expr } => match (&expr.ty, &expr.kind) {
+            (Ty::String, IrExprKind::Var { .. }) => true,
+            (Ty::String, IrExprKind::LitStr { .. }) => true,
+            (Ty::Int, IrExprKind::Var { .. }) => true,
+            (Ty::Int, IrExprKind::LitInt { .. }) => true,
+            _ => false,
+        },
+    }
+}
+
+/// Is a WHOLE interpolation lowerable (every part admitted)? The SINGLE predicate the
+/// lowering ([`LowerCtx::try_lower_string_interp`]) and the corpus caps gate
+/// (`count_ir_calls` in classify_corpus) BOTH consult, so the count the gate credits an
+/// interp matches EXACTLY the synthetic calls the lowering emits — `mir_calls <= ir_calls`
+/// stays sound by construction (no `mir > ir` over-count, no spurious caps taint).
+pub fn interp_str_lowerable(parts: &[IrStringPart]) -> bool {
+    parts.iter().all(interp_part_str_lowerable)
+}
+
+/// The number of SYNTHETIC self-host calls [`LowerCtx::try_lower_string_interp`] emits for
+/// a lowerable interpolation of `parts`: `K` `__str_concat` calls (K parts + 1 empty-seed
+/// leaf ⇒ K concats) plus one `int.to_string` per Int part. The gate ADDS exactly this to
+/// its IR call count for each admitted interp, so the synthetic MIR calls are 1:1 backed.
+/// (Caller must have checked [`interp_str_lowerable`]; an empty `parts` ⇒ 0 calls.)
+pub fn interp_str_synthetic_call_count(parts: &[IrStringPart]) -> usize {
+    let int_parts = parts
+        .iter()
+        .filter(|p| matches!(p, IrStringPart::Expr { expr } if matches!(expr.ty, Ty::Int)))
+        .count();
+    let concats = parts.len(); // K parts + 1 seed leaf = K+1 leaves = K concats
+    concats + int_parts
 }
 
 /// Does `module.func` return a real MATERIALIZED `Result[Int, String]` (the DynListStr len-as-tag

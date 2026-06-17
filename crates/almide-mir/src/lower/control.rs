@@ -958,6 +958,21 @@ impl LowerCtx {
                 self.drop_arm_locals(arm_mark);
                 Some(obj)
             }
+            // A STRING INTERPOLATION arm (`match e { Click{button,..} => "click:${button}" }`)
+            // over the executable subset — the __str_concat chain's fresh owned String (`i`) +
+            // the arm's `Consume` (`m`) = the same per-arm `"im"` balance as the concat arm; any
+            // intermediate temp is freed within the arm (`drop_arm_locals`). A compound/call-
+            // operand interp returns None → the caller keeps the sound Opaque arm fallback. This
+            // is REQUIRED for gate exactness: `count_ir_calls` credits a lowerable interp wherever
+            // it sits (the visitor walks match/if arms), so the lowering MUST fold it here too,
+            // else `ir_calls > mir_calls` falsely taints the function (the −32 caps regression).
+            IrExprKind::StringInterp { parts } => {
+                let arm_mark = self.live_heap_handles.len();
+                let obj = self.try_lower_string_interp(parts)?;
+                self.ops.push(Op::Consume { v: obj });
+                self.drop_arm_locals(arm_mark);
+                Some(obj)
+            }
             IrExprKind::If { cond, then, else_ } => {
                 self.lower_heap_result_if_inner(cond, then, else_, result_ty)
             }

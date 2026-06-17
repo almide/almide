@@ -131,6 +131,25 @@ fn count_ir_calls(body: &almide_ir::IrExpr) -> usize {
                     self.n += 1;
                 }
             }
+            // A STRING INTERPOLATION `"…${e}…"` over the executable subset lowers to a
+            // synthetic `__str_concat` chain (one per part, +1 empty-seed leaf ⇒ K concats)
+            // plus one `int.to_string` per Int part — all MIR `Op::CallFn`s with NO matching
+            // IR call node (they are synthesized at lowering time, not present in this IR).
+            // Credit EXACTLY that many ir_calls so `mir_calls <= ir_calls` holds by
+            // construction, via the SAME `interp_str_lowerable` predicate the lowering
+            // (`try_lower_string_interp`) gates on. A NON-lowerable interp (compound `${list}`,
+            // a `${f()}` call, a Float/Bool operand) is credited 0 here AND stays the deferred
+            // `Alloc{Opaque}` in the lowering — so the count never over-credits an interp that
+            // does not lower (which would falsely de-taint a function: mir<ir-by-formula but
+            // mir==ir-by-lowering). The synthetic callees (__str_concat, int.to_string) are
+            // pure (no Stdout), so they add no real capability. The interp's OWN operands here
+            // are only Var/LitStr/LitInt (zero inner Call nodes), so there is no double-count
+            // with the Call-node visitor above.
+            if let almide_ir::IrExprKind::StringInterp { parts } = &e.kind {
+                if almide_mir::lower::interp_str_lowerable(parts) {
+                    self.n += almide_mir::lower::interp_str_synthetic_call_count(parts);
+                }
+            }
             almide_ir::visit::walk_expr(self, e);
         }
     }

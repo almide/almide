@@ -3179,9 +3179,10 @@
         // DETECTOR for the 4th heap-`??` position — a string-concat OPERAND (`"x" + (opt ?? "d")`).
         // The `??` operand lowers via lower_call_args → option.unwrap_or_str, then __str_concat.
         // Without this test the concat-operand position could silently regress to an empty Opaque.
-        // (String INTERPOLATION `"${opt ?? "d"}"` is NOT covered here — StringInterp is entirely
-        // unlowered in v1 MIR, a SEPARATE pre-existing gap tracked as its own brick, NOT a `??`
-        // issue: a plain `"${s}"` is already broken.) v0: "got=bb", "got=DEF".
+        // (String INTERPOLATION over the EXECUTABLE subset — Lit / String Var/LitStr / Int Var/LitInt
+        // parts — IS now lowered; see the `string_interp_*` tests below. A `"${opt ?? "d"}"` interp
+        // whose operand is a `??`/compound/call is NOT in that subset and stays Opaque.) v0: "got=bb",
+        // "got=DEF".
         let src = "fn main() -> Unit = {\n  \
             let parts = string.split(\"a,bb\", \",\")\n  \
             println(\"got=\" + (list.get(parts, 1) ?? \"DEF\"))\n  \
@@ -4179,6 +4180,7 @@
         }
     }
 
+
     #[test]
     fn str_list_literal_with_concat() {
         let src = "fn main() -> Unit = {\n  let xs = [\"a\" + \"b\", \"c\", \"d\" + \"e\"]\n  println(list.join(xs, \",\")) }\n";
@@ -4186,4 +4188,137 @@
         if let Some(out) = build_and_run("str_list_literal_with_concat", &render_wasm_program(&prog)) {
             assert_eq!(out, "ab,c,de");
         }
+    }
+
+    // ── String interpolation `"…${e}…"` — the executable subset (fix-0276) ──────────
+    //
+    // A StringInterp whose parts are all Lit / String Var-or-LitStr / Int Var-or-LitInt
+    // lowers to a fresh owned String via the `__str_concat` chain (seeded with an empty
+    // "" leaf), byte-matching v0's `emit_string_interp`. These detectors pin the four
+    // value positions (call-arg / bind / tail / match-arm) + the structural guard that a
+    // NON-subset interp (a `${list.len(x)}` call operand) stays the sound Opaque fallback.
+    // (Goldens captured from `almide run` on the native v0 path.)
+
+    #[test]
+    fn string_interp_call_arg_executes() {
+        // The HIGHEST-traffic position: `println("…${x}…")`. Mixed String + Int operands.
+        // v0: "x=42 y=world", "count:42", "world" (single-part passthrough).
+        let src = "fn main() -> Unit = {\n  \
+            let n = 42\n  let s = \"world\"\n  \
+            println(\"x=${n} y=${s}\")\n  \
+            println(\"count:${n}\")\n  \
+            println(\"${s}\") }\n";
+        let prog = lower_source(src);
+        // STRUCTURAL GUARD: a lowerable interp routes through __str_concat, never an empty
+        // Opaque — auto-linking the self-host concat runtime is the observable signature.
+        assert!(
+            prog.functions.iter().any(|f| f.name == "__str_concat"),
+            "a lowerable interp must auto-link __str_concat (not defer to empty Opaque)"
+        );
+        if let Some(out) = build_and_run("string_interp_call_arg", &render_wasm_program(&prog)) {
+            assert_eq!(out, "x=42 y=world\ncount:42\nworld");
+        }
+    }
+
+    #[test]
+    fn string_interp_bind_position_executes() {
+        // A `let lbl = "[${s}]"` BIND — the interp result is owned by the binding and
+        // dropped at scope end. v0: "[world]".
+        let src = "fn main() -> Unit = {\n  \
+            let s = \"world\"\n  let lbl = \"[${s}]\"\n  println(lbl) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("string_interp_bind", &render_wasm_program(&prog)) {
+            assert_eq!(out, "[world]");
+        }
+    }
+
+    #[test]
+    fn string_interp_tail_position_executes() {
+        // A RETURN/tail-position interp (`fn greet(name) = "Hi, ${name}!"`) — moved out as
+        // the result. v0: "Hi, Ada!".
+        let src = "fn greet(name: String) -> String = \"Hi, ${name}!\"\n\
+            fn main() -> Unit = {\n  println(greet(\"Ada\")) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("string_interp_tail", &render_wasm_program(&prog)) {
+            assert_eq!(out, "Hi, Ada!");
+        }
+    }
+
+    #[test]
+    fn string_interp_match_arm_executes() {
+        // A heap-result MATCH-arm interp (`match k { _ => "v=${n}" }`). The arm folds the
+        // interp per-arm (cert `im`), only the taken arm runs. v0: "v=7" / "other".
+        let src = "fn label(k: Int, n: Int) -> String = match k {\n  \
+            0 => \"other\",\n  _ => \"v=${n}\",\n}\n\
+            fn main() -> Unit = {\n  \
+            println(label(1, 7))\n  println(label(0, 9)) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("string_interp_match_arm", &render_wasm_program(&prog)) {
+            assert_eq!(out, "v=7\nother");
+        }
+    }
+
+    #[test]
+    fn string_interp_multipart_int_and_string() {
+        // A 4-part interp mixing two Int Vars and a String Var with literals — exercises the
+        // K-concat + I-int.to_string glue count exactly. v0: "p(3,4)=ok".
+        let src = "fn main() -> Unit = {\n  \
+            let a = 3\n  let b = 4\n  let r = \"ok\"\n  \
+            println(\"p(${a},${b})=${r}\") }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("string_interp_multipart", &render_wasm_program(&prog)) {
+            assert_eq!(out, "p(3,4)=ok");
+        }
+    }
+
+    #[test]
+    fn string_interp_loop_reclaims() {
+        // SOUNDNESS: a bounded loop building a fresh interp String each iteration must
+        // reclaim every round (no leak / no double-free → no OOM). The chain allocs K+1
+        // intermediate Strings per round, all freed at the iteration frame's end.
+        let src = "fn main() -> Unit = {\n  \
+            var i = 0\n  while i < 4000 { println(\"row ${i} done\")\n    i = i + 1 } }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("string_interp_loop", &render_wasm_program(&prog)) {
+            assert!(out.starts_with("row 0 done\nrow 1 done\n"));
+            assert!(out.ends_with("row 3999 done"));
+            assert_eq!(out.lines().count(), 4000);
+        }
+    }
+
+    #[test]
+    fn string_interp_single_part_var_is_owned_copy() {
+        // OWNERSHIP soundness for the single-part `"${s}"` passthrough: the interp builds a
+        // FRESH owned String (`"" ++ s`), so the original `s` stays live and independently
+        // owned — using BOTH afterward (and concatenating them) must not double-free. v0:
+        // "hello\nhello\nhellohello".
+        let src = "fn main() -> Unit = {\n  \
+            let s = \"hello\"\n  let t = \"${s}\"\n  \
+            println(t)\n  println(s)\n  println(s + t) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("string_interp_single_part_alias", &render_wasm_program(&prog)) {
+            assert_eq!(out, "hello\nhello\nhellohello");
+        }
+    }
+
+    #[test]
+    fn string_interp_non_subset_stays_opaque() {
+        // STRUCTURAL GUARD (the negative): an interp with a CALL operand (`${list.len(x)}`)
+        // is NOT in the executable subset, so `try_lower_string_interp` returns None and the
+        // interp stays the sound deferred Opaque — it must NOT be folded to a __str_concat
+        // chain (which would byte-MISMATCH v0, since list.len isn't materialized here). We
+        // assert the interp's value position keeps its Opaque shape by checking the function
+        // lowers without panicking and the call operand is recorded as an elided marker.
+        let src = "fn main() -> Unit = {\n  \
+            let xs = [1, 2, 3]\n  println(\"len=${list.len(xs)}\") }\n";
+        let prog = lower_source(src);
+        let main = prog.functions.iter().find(|f| f.name == "main").expect("main lowered");
+        // The list.len call is elided (deferred Opaque interp) → it appears as a CallFn
+        // marker, NOT folded into a real interp result. (This is the honest-caps behavior;
+        // the interp's CONTENT is a later brick — but it must never silently fold wrong.)
+        assert!(
+            main.ops.iter().any(|op| matches!(op,
+                Op::CallFn { name, .. } if name == "list.len")),
+            "a non-subset interp's call operand must be recorded (elided), not silently dropped"
+        );
     }

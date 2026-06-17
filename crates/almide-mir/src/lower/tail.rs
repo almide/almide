@@ -175,6 +175,15 @@ impl LowerCtx {
                     if let Some(dst) = self.try_lower_concat_str(tail) {
                         return Ok(Some(dst));
                     }
+                    // A STRING INTERPOLATION RETURNED (`fn greet(n) = "Hi, ${n}"`) over the
+                    // executable subset — a fresh owned String (via the __str_concat chain),
+                    // moved out as the return. A compound/call-operand interp falls through to
+                    // the deferred Opaque below.
+                    if let IrExprKind::StringInterp { parts } = &tail.kind {
+                        if let Some(dst) = self.try_lower_string_interp(parts) {
+                            return Ok(Some(dst));
+                        }
+                    }
                     // A `Some(scalar)`/`None` RETURNED (`fn some_int(x) = Some(x)`) is
                     // MATERIALIZED so the caller receives a real 0-or-1-element-list
                     // Option (len-correct) it can `match` — the self-host Option fns

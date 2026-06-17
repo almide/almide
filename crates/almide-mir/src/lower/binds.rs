@@ -301,6 +301,19 @@ impl LowerCtx {
                     self.live_heap_handles.push(dst);
                     return Ok(());
                 }
+                // `let s = "x=${n} y=${t}"` — a STRING INTERPOLATION over the executable
+                // subset (Lit / String Var/LitStr / Int Var/LitInt parts) EXECUTES to a
+                // fresh owned String via the same __str_concat chain, byte-matching v0;
+                // held by the binding and dropped at scope end. An interp with a compound
+                // (`${list}`) or call (`${f()}`) operand falls through to the deferred
+                // `Alloc{Opaque}` below, unchanged.
+                if let IrExprKind::StringInterp { parts } = &value.kind {
+                    if let Some(dst) = self.try_lower_string_interp(parts) {
+                        self.value_of.insert(var, dst);
+                        self.live_heap_handles.push(dst);
+                        return Ok(());
+                    }
+                }
                 // `let xs = ["a" + "b", "c"]` — a List[String] literal with fresh-owned elements
                 // (the heap-container-element concat position; the −214 caps recovery).
                 if let Some(dst) = self.try_lower_str_list_literal(value) {
