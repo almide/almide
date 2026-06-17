@@ -711,7 +711,7 @@ pub(crate) fn find_var_ty(stmts: &[IrStmt], var: VarId) -> Option<Ty> {
 /// EXECUTES. The SINGLE SOURCE for both the bound-var path (binds.rs) and the direct-
 /// subject path (control.rs) — keep them in sync to avoid tracking a non-materialized
 /// call (which would misread as `None`). Add a name only when its self-host impl lands.
-pub(crate) fn is_self_host_option_module_fn(module: &str, func: &str) -> bool {
+pub fn is_self_host_option_module_fn(module: &str, func: &str) -> bool {
     match module {
         "list" => {
             matches!(func, "get" | "first" | "last" | "index_of" | "binary_search" | "max" | "min" | "find" | "find_index" | "reduce" | "get_str" | "first_str" | "last_str")

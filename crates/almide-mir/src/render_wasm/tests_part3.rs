@@ -1034,14 +1034,18 @@
         // json STR-payload over the SHARED Value repr (tag 4 = Str, the payload String @12). from_string
         // builds a Str Value owning a deep copy; as_string returns Option[String] (the repr-poly 0-or-1-
         // element DynListStr materialization, same path as list.get_str). as_string(Str "hi")=Some("hi")
-        // -> match "hi"; as_string(Int)=None -> "none". The trailing 4000-iter loop builds + drops a Str
-        // Value AND its Option each round (string.len reads the borrowed Some payload = 5): bounded, no
-        // leak/double-free — exercises DropValue (tag-dispatched Str free) + Option drop under churn e2e.
+        // -> match "hi"; as_string(Int)=None -> "none". The `??` lines exercise json.as_string in the
+        // heap-`??` path (the case originally dodged with `match`, now CLOSED via option.unwrap_or_str):
+        // as_string(Str "Z") ?? "X" = "Z"; as_string(Int) ?? "X" = "X". The trailing 4000-iter loop
+        // builds + drops a Str Value AND its Option each round (string.len reads the borrowed Some
+        // payload = 5): bounded, no leak/double-free — DropValue (tag-dispatched Str free) + Option e2e.
         let src = "import json\nfn main() -> Unit = {\n  \
             let vs = json.from_string(\"hi\")\n  \
             let os = json.as_string(vs)\n  match os {\n    Some(v) => println(v),\n    None => println(\"none\"),\n  }\n  \
             let vi = json.from_int(5)\n  \
             let oi = json.as_string(vi)\n  match oi {\n    Some(v) => println(v),\n    None => println(\"none\"),\n  }\n  \
+            let vz = json.from_string(\"Z\")\n  let oz = json.as_string(vz)\n  let sz = oz ?? \"X\"\n  println(sz)\n  \
+            let vj = json.from_int(9)\n  let sj = json.as_string(vj) ?? \"X\"\n  println(sj)\n  \
             var i = 0\n  var last = 0\n  \
             while i < 4000 {\n    \
               let vx = json.from_string(\"abcde\")\n    let ox = json.as_string(vx)\n    \
@@ -1052,8 +1056,8 @@
         assert!(prog.functions.iter().any(|f| f.name == "json.from_string"));
         assert!(prog.functions.iter().any(|f| f.name == "json.as_string"));
         if let Some(out) = build_and_run("json_string", &render_wasm_program(&prog)) {
-            // as_string(Str "hi")=Some("hi")->match->"hi"; as_string(Int 5)=None->"none"; the loop's
-            // last = string.len("abcde") = 5 after 4000 reclaimed rounds. Heap Option + DropValue e2e.
-            assert_eq!(out, "hi\nnone\n5");
+            // as_string(Str "hi")=Some->match->"hi"; as_string(Int 5)=None->"none"; as_string(Str "Z")
+            // ?? "X" = "Z"; as_string(Int 9) ?? "X" = "X"; loop last = string.len("abcde") = 5.
+            assert_eq!(out, "hi\nnone\nZ\nX\n5");
         }
     }

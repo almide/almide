@@ -60,7 +60,7 @@ use std::path::{Path, PathBuf};
 /// "unanalyzable callee". SOUND: the concat reaches no Stdout, and its operands'
 /// own calls are captured separately by the same marker pass.
 const KNOWN_STDOUT_FREE_BUILTINS: &[&str] = &[
-    "assert", "assert_eq", "assert_ne", "eprintln", "panic", "to_string", "__str_concat",
+    "assert", "assert_eq", "assert_ne", "eprintln", "panic", "to_string", "__str_concat", "option.unwrap_or_str",
 ];
 
 /// Count call nodes (Call / RuntimeCall / TailCall) in an IR expression tree —
@@ -94,6 +94,42 @@ fn count_ir_calls(body: &almide_ir::IrExpr) -> usize {
             // transitive fold sees no Stdout), so the synthetic call adds no real capability.
             if matches!(&e.kind, almide_ir::IrExprKind::BinOp { op: almide_ir::BinOp::ConcatStr, .. }) {
                 self.n += 1;
+            }
+            // A heap-String `??` (`Option[String] ?? default`) lowers to ONE synthetic
+            // `option.unwrap_or_str` CallFn (a mir_call) — but ONLY when its operand can be
+            // materialized as a self-host Option: a Var (possibly a materialized Option, which
+            // lowers) or a direct self-host OPTION call (string.first / list.get / json.as_string
+            // …). Count the operator node EXACTLY in those cases, so `mir_calls <= ir_calls` holds
+            // by construction without over-tainting a `??` over a NON-Option operand (a `Result`
+            // call like `value.as_string(x) ?? "?"`, or a not-yet-self-hosted `json.get_string`),
+            // which does NOT lower to a call (mir+0). A scalar `??` (non-String fallback) is also
+            // excluded (it lowers inline, no call). option.unwrap_or_str is pure (prim +
+            // string.repeat, no Stdout), so the synthetic call adds no real capability.
+            if let almide_ir::IrExprKind::UnwrapOr { expr, fallback } = &e.kind {
+                // The operand must be an OPTION (not a Result — `value.as_string(x) ?? "?"` is a
+                // Result `??`, expr.ty = Result, which the lowering does NOT route to
+                // option.unwrap_or_str, so counting it would falsely taint mir<ir).
+                let operand_is_option = matches!(
+                    &expr.ty,
+                    almide_lang::types::Ty::Applied(
+                        almide_lang::types::constructor::TypeConstructorId::Option,
+                        _
+                    )
+                );
+                let operand_lowers = match &expr.kind {
+                    almide_ir::IrExprKind::Var { .. } => true,
+                    almide_ir::IrExprKind::Call {
+                        target: almide_ir::CallTarget::Module { module, func, .. },
+                        ..
+                    } => almide_mir::lower::is_self_host_option_module_fn(module.as_str(), func.as_str()),
+                    _ => false,
+                };
+                if matches!(fallback.ty, almide_lang::types::Ty::String)
+                    && operand_is_option
+                    && operand_lowers
+                {
+                    self.n += 1;
+                }
             }
             almide_ir::visit::walk_expr(self, e);
         }

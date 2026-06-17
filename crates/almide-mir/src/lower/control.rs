@@ -548,20 +548,30 @@ impl LowerCtx {
     /// markers no-op, the payload is an i64 value COPY (not an alias), so dropping the
     /// Option after is safe. The call becoming real only improves caps (analyzed, not
     /// elided) and stays 1:1 with its IR call-node (no mir>ir issue).
+    /// `track_result` governs the HEAP-String result only: `true` (a let-bind / call-arg temp)
+    /// pushes the fresh owned String to `live_heap_handles` so it is dropped at scope end; `false`
+    /// (a RETURN/tail position) leaves it untracked because it is MOVED OUT to the caller (tracking
+    /// it would double-free). The scalar path is unaffected (a scalar result owns nothing).
     pub(crate) fn try_lower_option_unwrap_or(
         &mut self,
         expr: &IrExpr,
         fallback: &IrExpr,
+        track_result: bool,
     ) -> Option<ValueId> {
         use crate::PrimKind;
         let ops_mark = self.ops.len();
         let lhh_mark = self.live_heap_handles.len();
         // The Option operand's handle: either a VAR already bound to a materialized Option
         // (`let o = list.get(xs, i); o ?? d` — the most common form, BORROWED, dropped by its
-        // own let-bind at scope end) or a DIRECT self-host Option call (materialized here).
+        // own let-bind at scope end), a function PARAM of Option type (`fn f(o: Option[String]) =
+        // o ?? d` — passed by the caller as a real materialized Option block, BORROWED, not dropped
+        // here), or a DIRECT self-host Option call (materialized here). The param case is sound by
+        // the same evidence as `materialized_options`: an Option-typed param is a real 0-or-1-
+        // element block (the calling convention), so its len-as-tag read is correct — NOT a deferred
+        // Opaque (those are never params), which is why the bare-Var gate excludes non-Option Vars.
         let handle = if let IrExprKind::Var { id } = &expr.kind {
             match self.value_for(*id) {
-                Ok(v) if self.materialized_options.contains(&v) => v,
+                Ok(v) if self.materialized_options.contains(&v) || self.param_values.contains(&v) => v,
                 _ => return None,
             }
         } else if is_self_host_option_call(expr) {
@@ -583,6 +593,46 @@ impl LowerCtx {
         } else {
             return None;
         };
+        // HEAP-String result (`Option[String] ?? "default"` — the most common heap `??`): the scalar
+        // unwrap below can't carry a heap payload (it would mis-read the slot-0 String HANDLE as an
+        // i64 scalar). Route to the self-host `option.unwrap_or_str` CALL — a call returning a FRESH
+        // owned String (cert `i`, bound + dropped like any heap value), which sidesteps the
+        // bind-position heap-result-`if` cert problem entirely. The Option is BORROWED (the callee
+        // reads + copies it); the fallback is materialized/borrowed by `lower_call_args`. Gated to
+        // `Ty::String` (a `List`/other-heap payload would corrupt — its slot is not a String handle),
+        // and `count_ir_calls` counts a String-fallback `UnwrapOr` node so this synthetic call keeps
+        // `mir_calls <= ir_calls` (the same accounting as the `__str_concat` operator-desugar).
+        if matches!(fallback.ty, Ty::String) {
+            let fb_args = match self.lower_call_args(std::slice::from_ref(fallback)) {
+                Ok(a) => a,
+                Err(_) => {
+                    self.ops.truncate(ops_mark);
+                    self.live_heap_handles.truncate(lhh_mark);
+                    return None;
+                }
+            };
+            let repr = match repr_of(&fallback.ty) {
+                Ok(r) => r,
+                Err(_) => {
+                    self.ops.truncate(ops_mark);
+                    self.live_heap_handles.truncate(lhh_mark);
+                    return None;
+                }
+            };
+            let mut call_args = vec![CallArg::Handle(handle)];
+            call_args.extend(fb_args);
+            let dst = self.fresh_value();
+            self.ops.push(Op::CallFn {
+                dst: Some(dst),
+                name: "option.unwrap_or_str".to_string(),
+                args: call_args,
+                result: Some(repr),
+            });
+            if track_result {
+                self.live_heap_handles.push(dst);
+            }
+            return Some(dst);
+        }
         let h = self.fresh_value();
         self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![handle] });
         let tag = self.load_at_offset(h, 4, PrimKind::Load { width: 4 });

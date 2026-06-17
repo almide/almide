@@ -32,6 +32,10 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
             ],
         ),
         (
+            include_str!("../../../../stdlib/option_unwrap_or_str.almd"),
+            &[("option_unwrap_or_str", "option.unwrap_or_str")],
+        ),
+        (
             include_str!("../../../../stdlib/list_modify.almd"),
             &[
                 ("list_set", "list.set"),

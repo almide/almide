@@ -498,23 +498,34 @@ impl LowerCtx {
                     }
                 }
                 // `f(opt ?? default)` — a `??` over a self-host materialized Option in a CALL-ARG
-                // position (`int.to_string(list.get(xs, i) ?? 0)` — extremely common). The let-bind
-                // path executes this via `try_lower_option_unwrap_or` (tag-read + payload/default);
-                // the arg position must too, else the Option call deferred to a bare elided-call
-                // marker (wrong arity → invalid wasm). Scalar result only; a heap fallback / non-
-                // Option operand returns None and falls through to the deferred path below.
-                IrExprKind::UnwrapOr { expr, fallback } if !is_heap_ty(&a.ty) => {
+                // position (`int.to_string(list.get(xs, i) ?? 0)` / `println(list.get(ss, i) ?? "d")`
+                // — extremely common). The let-bind path executes this via
+                // `try_lower_option_unwrap_or`; the arg position must too, else the Option call
+                // deferred to a bare elided-call marker (wrong arity → invalid wasm). A SCALAR result
+                // passes by value; a HEAP-String result (`option.unwrap_or_str` — a fresh owned
+                // String, tracked for scope-end drop by the helper) passes as a borrowed Handle. A
+                // non-String-heap / non-Option operand returns None and defers below.
+                IrExprKind::UnwrapOr { expr, fallback } => {
                     let mark = self.ops.len();
                     let lhh_mark = self.live_heap_handles.len();
-                    match self.try_lower_option_unwrap_or(expr, fallback) {
+                    match self.try_lower_option_unwrap_or(expr, fallback, true) {
+                        Some(v) if is_heap_ty(&a.ty) => CallArg::Handle(v),
                         Some(v) => CallArg::Scalar(v),
                         None => {
                             self.ops.truncate(mark);
                             self.live_heap_handles.truncate(lhh_mark);
-                            let dst = self.fresh_value();
-                            self.record_elided_calls(a);
-                            self.ops.push(Op::Const { dst });
-                            CallArg::Scalar(dst)
+                            if is_heap_ty(&a.ty) {
+                                let dst = self.fresh_value();
+                                let repr = repr_of(&a.ty)?;
+                                self.ops.push(Op::Alloc { dst, repr, init: Init::Opaque });
+                                self.record_elided_calls(a);
+                                self.materialized_call_arg(dst, repr, &a.ty)
+                            } else {
+                                let dst = self.fresh_value();
+                                self.record_elided_calls(a);
+                                self.ops.push(Op::Const { dst });
+                                CallArg::Scalar(dst)
+                            }
                         }
                     }
                 }
@@ -527,7 +538,7 @@ impl LowerCtx {
                 | IrExprKind::UnOp { .. }
                 | IrExprKind::Try { .. }
                 | IrExprKind::Unwrap { .. }
-                | IrExprKind::UnwrapOr { .. }
+                // (UnwrapOr is handled in full — scalar + heap — by the dedicated arm above.)
                 | IrExprKind::ToOption { .. }
                 | IrExprKind::OptionalChain { .. }
                 // A RANGE (`f(0..n)`), a RUNTIME CALL, or an `if`/`match` ARGUMENT is a

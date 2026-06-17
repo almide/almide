@@ -186,7 +186,7 @@ impl LowerCtx {
             // EXECUTES to a scalar (tag read + payload/fallback), unwrapping the self-host
             // Option[Int] fns; outside the subset it falls through to the deferred `Const`.
             if let IrExprKind::UnwrapOr { expr, fallback } = &value.kind {
-                if let Some(dst) = self.try_lower_option_unwrap_or(expr, fallback) {
+                if let Some(dst) = self.try_lower_option_unwrap_or(expr, fallback, true) {
                     self.value_of.insert(var, dst);
                     return Ok(());
                 }
@@ -205,6 +205,19 @@ impl LowerCtx {
             self.ops.push(Op::Const { dst });
             self.record_elided_calls(value);
             return Ok(());
+        }
+        // `let s = opt ?? "default"` — a HEAP-String `??` over a materialized Option[String]
+        // EXECUTES via the self-host `option.unwrap_or_str` CALL (try_lower_option_unwrap_or's heap
+        // branch): a fresh owned String, bound + dropped like any heap value. This CLOSES the
+        // silent-empty `Alloc{Opaque}` hole the deferred arm below leaves for heap `??` (the
+        // `list.get(xs,i) ?? "d"` / `json.as_string(v) ?? "d"` miscompile). Outside the subset
+        // (a non-String heap payload, a non-materialized operand) it falls through to the deferred
+        // `Alloc{Opaque}` arm below — unchanged, the existing memory-safe incompleteness.
+        if let IrExprKind::UnwrapOr { expr, fallback } = &value.kind {
+            if let Some(dst) = self.try_lower_option_unwrap_or(expr, fallback, true) {
+                self.value_of.insert(var, dst);
+                return Ok(());
+            }
         }
         match &value.kind {
             // Alias: `var b = a` — b is a NEW handle denoting the SAME heap

@@ -183,6 +183,15 @@ impl LowerCtx {
                     if let Some(dst) = self.try_lower_option_ctor(tail, &tail.ty) {
                         return Ok(Some(dst));
                     }
+                    // `fn f() -> String = opt ?? "d"` — a heap-String `??` RETURNED. Executes via the
+                    // self-host `option.unwrap_or_str` call (try_lower_option_unwrap_or's heap branch),
+                    // MOVED OUT as the return (track_result=false — the caller owns it; tracking it
+                    // would double-free). Closes the tail-position heap-`??` silent-Opaque hole.
+                    if let IrExprKind::UnwrapOr { expr, fallback } = &tail.kind {
+                        if let Some(dst) = self.try_lower_option_unwrap_or(expr, fallback, false) {
+                            return Ok(Some(dst));
+                        }
+                    }
                     let dst = self.fresh_value();
                     let repr = repr_of(&tail.ty)?;
                     let init = alloc_init(tail);

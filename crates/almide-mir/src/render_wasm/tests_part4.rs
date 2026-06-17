@@ -2960,6 +2960,63 @@
     }
 
     #[test]
+    fn heap_unwrap_or_executes_byte_matches_v0() {
+        // DETECTOR for the heap-`??` hole (was: `Option[String] ?? heap_default` silent-miscompiled
+        // to an empty Alloc{Opaque}). The fix routes it to the self-host option.unwrap_or_str CALL.
+        // Covers BOTH subject forms the user reported: a BOUND var (`oh ?? d`) and a DIRECT call
+        // (`f(x) ?? d`). Pure list.get only — no json, so this pins the SHARED `??` lowering.
+        // v0: get(["a","bb"],1)="bb"; get(_,9) ?? "DEF" = "DEF"; the direct-call forms match.
+        let src = "fn main() -> Unit = {\n  \
+            let parts = string.split(\"a,bb\", \",\")\n  \
+            let g1 = list.get(parts, 1)\n  let s1 = g1 ?? \"DEF\"\n  println(s1)\n  \
+            let g2 = list.get(parts, 9)\n  let s2 = g2 ?? \"DEF\"\n  println(s2)\n  \
+            println(list.get(parts, 0) ?? \"DEF\")\n  \
+            println(list.get(parts, 5) ?? \"DEF\") }\n";
+        let prog = lower_source(src);
+        // STRUCTURAL GUARD: the heap `??` must route to the real call, never the silent Opaque.
+        assert!(
+            prog.functions.iter().any(|f| f.name == "option.unwrap_or_str"),
+            "heap `??` must auto-link option.unwrap_or_str (not defer to empty Opaque)"
+        );
+        if let Some(out) = build_and_run("heap_unwrap_or_executes", &render_wasm_program(&prog)) {
+            assert_eq!(out, "bb\nDEF\na\nDEF");
+        }
+    }
+
+    #[test]
+    fn heap_unwrap_or_tail_position_executes() {
+        // The RETURN/tail position (`fn f(...) -> String = opt ?? "d"`) — the result is MOVED OUT
+        // (track_result=false). pick(parts, 1)="bb"; pick(parts, 9)="DEF". Byte-matches v0.
+        let src = "fn pick(parts: List[String], i: Int) -> String = list.get(parts, i) ?? \"DEF\"\n\
+            fn main() -> Unit = {\n  \
+            let parts = string.split(\"a,bb,ccc\", \",\")\n  \
+            println(pick(parts, 1))\n  println(pick(parts, 9)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "option.unwrap_or_str"));
+        if let Some(out) = build_and_run("heap_unwrap_or_tail", &render_wasm_program(&prog)) {
+            assert_eq!(out, "bb\nDEF");
+        }
+    }
+
+    #[test]
+    fn heap_unwrap_or_loop_reclaims() {
+        // SOUNDNESS for the heap-`??` call path: a 4000-iter loop building + dropping the Option AND
+        // the unwrapped String each round — no leak / no double-free. The Some payload is COPIED by
+        // option.unwrap_or_str (the Option keeps its element, freed by its own scope-end DropListStr),
+        // so the unwrapped String is independently owned. last = string.len(unwrapped) = 2 ("bb").
+        let src = "fn main() -> Unit = {\n  \
+            var i = 0\n  var last = 0\n  \
+            while i < 4000 {\n    \
+              let parts = string.split(\"a,bb\", \",\")\n    let g = list.get(parts, 1)\n    \
+              let s = g ?? \"DEF\"\n    last = string.len(s)\n    i = i + 1\n  }\n  \
+            println(int.to_string(last)) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("heap_unwrap_or_loop_reclaims", &render_wasm_program(&prog)) {
+            assert_eq!(out, "2");
+        }
+    }
+
+    #[test]
     fn self_hosted_list_get_first_last_str() {
         // SELF-HOSTED list.get / list.first / list.last over a List[String] → Option[String] (the
         // repr-poly _str accessors). An in-bounds element is returned as Some(a deep copy); out of
