@@ -1251,7 +1251,30 @@ impl LowerCtx {
         Some(dst)
     }
 
+    /// Lower a SCALAR (Int/Bool/Float) value expression to a `ValueId` holding its REAL
+    /// value, or `None` (the caller then DEFERS to `Const`). SELF-ROLLBACK contract: on a
+    /// `None` return this restores BOTH `self.ops` AND `self.live_heap_handles` to their
+    /// entry length, so the function leaves NO net side effect when it fails — a caller may
+    /// roll back with an `ops`-only truncate (the historic discipline) and still be correct
+    /// even though a sub-lowering (a scalar CALL OPERAND, `5 + string.len("abc")`) may
+    /// MATERIALIZE a fresh heap argument temp (an `Alloc` registered for a scope-end drop).
+    /// On SUCCESS, any such temp stays tracked (it is a genuine value to free at scope end),
+    /// exactly as a direct `let _ = string.len("abc")` bind tracks it. The actual lowering
+    /// is [`Self::lower_scalar_value_inner`].
     pub(crate) fn lower_scalar_value(&mut self, expr: &IrExpr) -> Option<ValueId> {
+        let ops_mark = self.ops.len();
+        let lhh_mark = self.live_heap_handles.len();
+        match self.lower_scalar_value_inner(expr) {
+            Some(v) => Some(v),
+            None => {
+                self.ops.truncate(ops_mark);
+                self.live_heap_handles.truncate(lhh_mark);
+                None
+            }
+        }
+    }
+
+    fn lower_scalar_value_inner(&mut self, expr: &IrExpr) -> Option<ValueId> {
         use almide_ir::BinOp;
         match &expr.kind {
             IrExprKind::Var { id } => self.value_or_global(*id).ok(),
@@ -1374,26 +1397,46 @@ impl LowerCtx {
             {
                 self.lower_prim_call(func.as_str(), args).ok().flatten()
             }
-            // A scalar user/stdlib CALL as an OPERAND (`f(x) - 1`, `g(a) + h(b)`, a nested
-            // `f(g(x))`): delegate to the same `try_lower_scalar_call` the direct-bind path uses.
-            // GATED to a SCALAR result AND SCALAR args so NO heap is materialized — preserving
-            // `lower_scalar_value`'s contract (it pushes only rollback-safe value ops, never an
-            // ownership event, so a caller may freely truncate). A heap arg/result would push
-            // `Alloc`/`Drop` and is left to defer (the unguarded admission broke corpus ownership).
-            IrExprKind::Call { .. }
-                if !is_heap_ty(&expr.ty)
-                    && self.scalar_call_args_only(&expr.kind) =>
-            {
+            // A scalar `if`/`match` as an OPERAND (`a + (if c then 1 else 2)`,
+            // `n + match k { 0 => x, _ => y }`): EXECUTE it to a scalar via the same
+            // `try_lower_scalar_if` the let-bind path uses — only the taken arm runs. The
+            // helper is self-contained: it marks BOTH `ops` and `live_heap_handles`, drops
+            // every per-arm heap temp WITHIN its arm (so on success `live_heap_handles` is
+            // exactly at entry — no net ownership event), and fully rolls back on a miss. So
+            // it honors `lower_scalar_value`'s contract and a caller's `ops`-only truncate
+            // stays correct. A heap-RESULT if/match is NOT this path (string `+` is ConcatStr,
+            // and a let-bound heap if is the separate escalated-cert path) — it defers.
+            IrExprKind::If { cond, then, else_ } if !is_heap_ty(&expr.ty) => {
+                self.try_lower_scalar_if(cond, then, else_, &expr.ty)
+            }
+            IrExprKind::Match { subject, arms } if !is_heap_ty(&expr.ty) => {
+                let if_expr = self.desugar_match_to_if(subject, arms, &expr.ty)?;
+                match &if_expr.kind {
+                    IrExprKind::If { cond, then, else_ } => {
+                        self.try_lower_scalar_if(cond, then, else_, &expr.ty)
+                    }
+                    _ => None,
+                }
+            }
+            // A scalar user/stdlib CALL as an OPERAND (`5 + string.len(s)`, `5 +
+            // string.len("abc")` after the optimizer inlines a `let s = "abc"`, `g(a) +
+            // h(b)`, `string.len(s) > 0`, a nested `f(g(x))`): EXECUTE it via the same
+            // `try_lower_scalar_call` the direct-bind path uses. Its argument lowering
+            // (`lower_call_args`) materializes/borrows heap args exactly as a bound `let k =
+            // call` already does — a heap `Var` is BORROWED (`CallArg::Handle`, no ownership
+            // event), a FRESH heap literal is `Alloc`'d into an owned temp released at scope
+            // end. The latter pushes to `live_heap_handles`, but the SELF-ROLLBACK wrapper
+            // (see `lower_scalar_value`) restores both `ops` and `live_heap_handles` if this
+            // (or a sibling operand) later fails, so the materialize is rollback-safe. A
+            // Method/Computed/impure-Module callee returns `None` from `try_lower_scalar_call`
+            // (rolled back) and DEFERS — honest, the caps fold tags the elided callee. A heap
+            // RESULT operand is NOT this path (string `+` is ConcatStr; a let-bound heap if is
+            // the separate escalated-cert path) — it is gated out by `!is_heap_ty`.
+            IrExprKind::Call { .. } if !is_heap_ty(&expr.ty) => {
                 self.try_lower_scalar_call(expr, &expr.ty)
             }
             _ => None,
         }
-    }
-
-    /// True iff `kind` is a `Call` whose every argument is a SCALAR (non-heap) type — the gate
-    /// that keeps a call admissible as a `lower_scalar_value` operand without materializing heap.
-    fn scalar_call_args_only(&self, kind: &IrExprKind) -> bool {
-        matches!(kind, IrExprKind::Call { args, .. } if args.iter().all(|a| !is_heap_ty(&a.ty)))
     }
 
     /// Lower a `prim.*` PRIMITIVE-FLOOR call to an [`Op::Prim`] — the v1 self-host

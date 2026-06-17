@@ -4331,6 +4331,77 @@
         }
     }
 
+    #[test]
+    fn scalar_call_in_arithmetic_operand_executes_and_byte_matches_v0() {
+        // THE fix-0276 GAP: a scalar Int/Bool CALL (or if/match) used as a BinOp/comparison
+        // OPERAND used to DEFER to `Const 0` — `5 + string.len(s)` silently computed `5 + 0`.
+        // Now `lower_scalar_value` MATERIALIZES the operand call (a real CallFn over its
+        // borrowed/materialized heap args, the self-rollback wrapper making it safe), so the
+        // arithmetic is correct. The optimizer inlines `let s = "abc"`, so the call here is
+        // `string.len("abc")` — a FRESH heap-LITERAL arg materialized + dropped at scope end.
+        // v0 golden ("8") via `almide run`.
+        let src = "fn main() -> Unit = {\n  \
+            let s = \"abc\"\n  let n = 5 + string.len(s)\n  println(\"${n}\") }\n";
+        let prog = lower_source(src);
+        // The operand call is a REAL CallFn (its result feeds the IntBinOp), not dropped to 0.
+        let any_fn = prog.functions.iter().flat_map(|f| f.ops.iter()).any(|op| matches!(op,
+            Op::CallFn { name, .. } if name == "string.len"));
+        assert!(any_fn, "the arithmetic operand's string.len call must be materialized as a real CallFn");
+        if let Some(out) = build_and_run("scalar_call_operand_arith", &render_wasm_program(&prog)) {
+            assert_eq!(out, "8"); // v0 golden: 5 + len("abc")=5+3
+        }
+    }
+
+    #[test]
+    fn scalar_if_in_arithmetic_operand_executes_and_byte_matches_v0() {
+        // The `if`/`match` half of the fix-0276 gap: `a + (if c then 1 else 2)` used to defer
+        // the parenthesized `if` operand to `Const 0`. Now it EXECUTES via `try_lower_scalar_if`
+        // (only the taken arm runs), so the sum is right. v0 golden: "11 12".
+        let src = "fn main() -> Unit = {\n  \
+            let a = 10\n  \
+            let r1 = a + (if true then 1 else 2)\n  \
+            let r2 = a + (if false then 1 else 2)\n  \
+            println(\"${r1} ${r2}\") }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("scalar_if_operand_arith", &render_wasm_program(&prog)) {
+            assert_eq!(out, "11 12"); // v0 golden
+        }
+    }
+
+    #[test]
+    fn noisy_call_in_operand_keeps_caller_caps_tainted() {
+        // FALSE-GREEN GUARD for fix-0276: materializing an operand call makes MORE calls real,
+        // so the caps fold must still TAINT a caller whose operand call reaches Stdout. A
+        // `noisy()` that `println`s, used as `5 + noisy(3)`, becomes a real CallFn edge — the
+        // transitive cap fold (`reachable_caps`) must report Stdout reachable for `compute`, so
+        // it can never be falsely caps-VERIFIED. (A PURE operand call like `string.len` stays
+        // empty-reachable — the contrast that proves the taint is precise, not blanket.)
+        use crate::certificate::reachable_caps;
+        let noisy_src = "fn noisy(x: Int) -> Int = {\n  println(\"side\")\n  x + 1\n}\n\
+            fn compute() -> Int = { 5 + noisy(3) }\n\
+            fn main() -> Unit = { println(\"${compute()}\") }\n";
+        let prog = lower_source(noisy_src);
+        let program: std::collections::BTreeMap<String, crate::MirFunction> =
+            prog.functions.iter().map(|f| (f.name.clone(), f.clone())).collect();
+        let mut visited = std::collections::BTreeSet::new();
+        let reach = reachable_caps("compute", &program, &mut visited);
+        assert!(
+            reach.contains(&crate::Capability::Stdout),
+            "a printing operand call must keep the caller's transitive caps tainted (Stdout reachable), got {reach:?}"
+        );
+        // Contrast: a PURE operand call leaves the caller empty-reachable (no false taint).
+        let pure_src = "fn compute() -> Int = { let s = \"abc\"\n  5 + string.len(s) }\n\
+            fn main() -> Unit = { println(\"${compute()}\") }\n";
+        let pure = lower_source(pure_src);
+        let pure_program: std::collections::BTreeMap<String, crate::MirFunction> =
+            pure.functions.iter().map(|f| (f.name.clone(), f.clone())).collect();
+        let mut v2 = std::collections::BTreeSet::new();
+        assert!(
+            reachable_caps("compute", &pure_program, &mut v2).is_empty(),
+            "a pure operand call must NOT taint the caller's transitive caps"
+        );
+    }
+
     // ──────────────────────────────────────────────────────────────────────────────
     // THE UNLINKED-CALL WALL (the StringInterp→to_string prerequisite brick).
     //
