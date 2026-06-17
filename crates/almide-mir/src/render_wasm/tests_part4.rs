@@ -2258,6 +2258,197 @@
         }
     }
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    #[test]
+    fn math_trig_independent_golden_cross_check() {
+        // INDEPENDENT cross-check of the self-hosted sin/cos/tan: golden bits generated SEPARATELY
+        // via the production `~/.local/bin/almide` binary (a different oracle path than the agent's
+        // own dev sweep), covering every reduction path — π/4 (no reduction), 100 (Cody-Waite),
+        // 1e6 (Cody-Waite tier), π/2 (special: sin=1, cos≈0, tan huge), 1e20 (Payne-Hanek). If the
+        // v1-self-host trig byte-matches THESE independently-derived goldens, the port is confirmed.
+        // Direct literal args (for-in over a List[Float] literal is a separate v1 gap — elements
+        // read as 0.0; the agent's tests use direct args for the same reason).
+        let src = "fn main() -> Unit = {\n  \
+            println(int.to_string(float.to_bits(math.sin(0.7853981633974483))))\n  \
+            println(int.to_string(float.to_bits(math.cos(0.7853981633974483))))\n  \
+            println(int.to_string(float.to_bits(math.tan(0.7853981633974483))))\n  \
+            println(int.to_string(float.to_bits(math.sin(100.0))))\n  \
+            println(int.to_string(float.to_bits(math.cos(100.0))))\n  \
+            println(int.to_string(float.to_bits(math.tan(100.0))))\n  \
+            println(int.to_string(float.to_bits(math.sin(1000000.0))))\n  \
+            println(int.to_string(float.to_bits(math.cos(1000000.0))))\n  \
+            println(int.to_string(float.to_bits(math.tan(1000000.0))))\n  \
+            println(int.to_string(float.to_bits(math.sin(1.5707963267948966))))\n  \
+            println(int.to_string(float.to_bits(math.cos(1.5707963267948966))))\n  \
+            println(int.to_string(float.to_bits(math.tan(1.5707963267948966))))\n  \
+            println(int.to_string(float.to_bits(math.sin(100000000000000000000.0))))\n  \
+            println(int.to_string(float.to_bits(math.cos(100000000000000000000.0))))\n  \
+            println(int.to_string(float.to_bits(math.tan(100000000000000000000.0)))) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("math_trig_independent_golden", &render_wasm_program(&prog)) {
+            assert_eq!(
+                out,
+                // π/4                100.0                1e6                  π/2                  1e20
+                "4604544271217802188\n4604544271217802189\n4607182418800017407\n\
+                 -4620635881084269128\n4605942297449095135\n-4619907664570524360\n\
+                 -4623395494513026969\n4606612732610269996\n-4622969797129849664\n\
+                 4607182418800017408\n4364452196894661639\n4849535219099880885\n\
+                 -4619384910413732784\n4605056453202808125\n-4617589314634034284"
+            );
+        }
+    }
+
+    #[test]
+    fn self_hosted_math_sin_bit_exact() {
+        // SELF-HOSTED math.sin (faithful libm transcription incl. Payne-Hanek large path) —
+        // BIT-EXACT vs v0 across small (no reduction) / medium (Cody-Waite) / large (Payne-Hanek)
+        // / special inputs. Golden bits captured by running the production binary.
+        let src = "fn main() -> Unit = {\n  \
+            println(int.to_string(float.to_bits(math.sin(0.0))))\n  \
+            println(int.to_string(float.to_bits(math.sin(0.5))))\n  \
+            println(int.to_string(float.to_bits(math.sin(0.7))))\n  \
+            println(int.to_string(float.to_bits(math.sin(0.0 - 0.5))))\n  \
+            println(int.to_string(float.to_bits(math.sin(1.0))))\n  \
+            println(int.to_string(float.to_bits(math.sin(1.5))))\n  \
+            println(int.to_string(float.to_bits(math.sin(2.0))))\n  \
+            println(int.to_string(float.to_bits(math.sin(3.0))))\n  \
+            println(int.to_string(float.to_bits(math.sin(3.14159))))\n  \
+            println(int.to_string(float.to_bits(math.sin(5.0))))\n  \
+            println(int.to_string(float.to_bits(math.sin(10.0))))\n  \
+            println(int.to_string(float.to_bits(math.sin(100.0))))\n  \
+            println(int.to_string(float.to_bits(math.sin(1000.0))))\n  \
+            println(int.to_string(float.to_bits(math.sin(1000000.0))))\n  \
+            println(int.to_string(float.to_bits(math.sin(1.0e20))))\n  \
+            println(int.to_string(float.to_bits(math.sin(1.0e100))))\n  \
+            println(int.to_string(float.to_bits(math.sin(0.0 - 1.0e20)))) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "math.sin"));
+        if let Some(out) = build_and_run("self_hosted_math_sin_bit_exact", &render_wasm_program(&prog)) {
+            assert_eq!(
+                out,
+                "0\n4602308182625945072\n4603977816617654712\n-4621063854228830736\n\
+                 4605754516372524270\n4607159855645224331\n4606365442650518598\n4594252404416238939\n\
+                 4523376038002314448\n-4616559595297400525\n-4620296710764933294\n-4620635881084269128\n\
+                 4605623088326516843\n-4623395494513026969\n-4619384910413732784\n-4622843457162800295\n\
+                 4603987126441043024"
+            );
+        }
+    }
+
+    #[test]
+    fn self_hosted_math_cos_bit_exact() {
+        // SELF-HOSTED math.cos — BIT-EXACT vs v0 across small / medium / Payne-Hanek / special.
+        let src = "fn main() -> Unit = {\n  \
+            println(int.to_string(float.to_bits(math.cos(0.0))))\n  \
+            println(int.to_string(float.to_bits(math.cos(0.5))))\n  \
+            println(int.to_string(float.to_bits(math.cos(0.7))))\n  \
+            println(int.to_string(float.to_bits(math.cos(0.0 - 0.5))))\n  \
+            println(int.to_string(float.to_bits(math.cos(1.0))))\n  \
+            println(int.to_string(float.to_bits(math.cos(1.5))))\n  \
+            println(int.to_string(float.to_bits(math.cos(2.0))))\n  \
+            println(int.to_string(float.to_bits(math.cos(3.0))))\n  \
+            println(int.to_string(float.to_bits(math.cos(3.14159))))\n  \
+            println(int.to_string(float.to_bits(math.cos(5.0))))\n  \
+            println(int.to_string(float.to_bits(math.cos(10.0))))\n  \
+            println(int.to_string(float.to_bits(math.cos(100.0))))\n  \
+            println(int.to_string(float.to_bits(math.cos(1000.0))))\n  \
+            println(int.to_string(float.to_bits(math.cos(1000000.0))))\n  \
+            println(int.to_string(float.to_bits(math.cos(1.0e20))))\n  \
+            println(int.to_string(float.to_bits(math.cos(1.0e100))))\n  \
+            println(int.to_string(float.to_bits(math.cos(0.0 - 1.0e20)))) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "math.cos"));
+        if let Some(out) = build_and_run("self_hosted_math_cos_bit_exact", &render_wasm_program(&prog)) {
+            assert_eq!(
+                out,
+                "4607182418800017408\n4606079780542709072\n4605064305524579731\n4606079780542709072\n\
+                 4603041830072026764\n4589761573224315303\n-4622203781984849403\n-4616279757631920686\n\
+                 -4616189618054790112\n4598781623568911065\n-4617639132858127585\n4605942297449095135\n\
+                 4603240679942123964\n4606612732610269996\n4605056453202808125\n4606504395019403765\n\
+                 4605056453202808125"
+            );
+        }
+    }
+
+    #[test]
+    fn self_hosted_math_tan_bit_exact() {
+        // SELF-HOSTED math.tan — BIT-EXACT vs v0 across small / medium / Payne-Hanek / special.
+        let src = "fn main() -> Unit = {\n  \
+            println(int.to_string(float.to_bits(math.tan(0.0))))\n  \
+            println(int.to_string(float.to_bits(math.tan(0.5))))\n  \
+            println(int.to_string(float.to_bits(math.tan(0.7))))\n  \
+            println(int.to_string(float.to_bits(math.tan(0.0 - 0.5))))\n  \
+            println(int.to_string(float.to_bits(math.tan(1.0))))\n  \
+            println(int.to_string(float.to_bits(math.tan(1.5))))\n  \
+            println(int.to_string(float.to_bits(math.tan(2.0))))\n  \
+            println(int.to_string(float.to_bits(math.tan(3.0))))\n  \
+            println(int.to_string(float.to_bits(math.tan(3.14159))))\n  \
+            println(int.to_string(float.to_bits(math.tan(5.0))))\n  \
+            println(int.to_string(float.to_bits(math.tan(10.0))))\n  \
+            println(int.to_string(float.to_bits(math.tan(100.0))))\n  \
+            println(int.to_string(float.to_bits(math.tan(1000.0))))\n  \
+            println(int.to_string(float.to_bits(math.tan(1000000.0))))\n  \
+            println(int.to_string(float.to_bits(math.tan(1.0e20))))\n  \
+            println(int.to_string(float.to_bits(math.tan(1.0e100))))\n  \
+            println(int.to_string(float.to_bits(math.tan(0.0 - 1.0e20)))) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "math.tan"));
+        if let Some(out) = build_and_run("self_hosted_math_tan_bit_exact", &render_wasm_program(&prog)) {
+            assert_eq!(
+                out,
+                "0\n4603095874924660554\n4605761878818060462\n-4620276161930115254\n\
+                 4609692760021066662\n4624128011757193079\n-4611269345697771272\n-4629068236098062225\n\
+                 -4699995998852439300\n-4608577374993532153\n4604015134707169154\n-4619907664570524360\n\
+                 4609300570492383514\n-4622969797129849664\n-4617589314634034284\n-4622285276847837315\n\
+                 4605782722220741524"
+            );
+        }
+    }
+
+    #[test]
+    fn self_hosted_trig_payne_hanek_q0_positive() {
+        // The Payne-Hanek large-arg path exercises BOTH the q0<0 and the q0>0 sub-cases of
+        // rem_pio2_large (q0 = e0 - 24*(jv+1)). 1e22 lands on q0=2 (the rare path that adjusts
+        // iq[jz-1] and triggers a recompute); 1e21/1e50/1e200/1.5e308 hit q0<0. All byte-match v0.
+        let src = "fn main() -> Unit = {\n  \
+            println(int.to_string(float.to_bits(math.sin(1.0e22))))\n  \
+            println(int.to_string(float.to_bits(math.cos(1.0e22))))\n  \
+            println(int.to_string(float.to_bits(math.tan(1.0e22))))\n  \
+            println(int.to_string(float.to_bits(math.sin(1.0e21))))\n  \
+            println(int.to_string(float.to_bits(math.sin(1.0e50))))\n  \
+            println(int.to_string(float.to_bits(math.sin(1.0e200))))\n  \
+            println(int.to_string(float.to_bits(math.sin(1.5e308))))\n  \
+            println(int.to_string(float.to_bits(math.sin(1.0e30)))) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("self_hosted_trig_payne_hanek_q0_positive", &render_wasm_program(&prog)) {
+            assert_eq!(
+                out,
+                "-4617520874450586729\n4602887919370356980\n-4613357852672216488\n\
+                 -4619187932947755553\n-4621044495868110040\n-4619396462747793844\n\
+                 4605030192930844164\n4576532847381215079"
+            );
+        }
+    }
+
     #[test]
     fn float_arithmetic_operators_lower() {
         // Float +/-/*// and comparison operators lower to the prim float floor (no explicit
