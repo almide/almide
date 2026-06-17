@@ -1,3 +1,4 @@
+spec/churn/record_churn.almd
 spec/wasm_cross/assign_alias_rc.almd
 spec/wasm_cross/bytes_f16.almd
 spec/wasm_cross/const_fold_nonfinite_float.almd
