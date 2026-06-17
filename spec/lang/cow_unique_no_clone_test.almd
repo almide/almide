@@ -1,0 +1,76 @@
+// Regression (#696 / #695): `__cow_check` (the copy-on-write guard emitted at the
+// mutation sites of AliasCowPass-marked vars) used to clone the WHOLE heap object
+// UNCONDITIONALLY — a stale carryover from the pre-0.27.0 bump-allocate-and-leak
+// model where the refcount was a no-op. Once frees became the default the rc is a
+// real count, but the clone stayed unconditional, so a `needs_cow` list mutated in
+// a loop (`while … { list.push(merged, …) }` where `cur = merged` aliases it) was
+// cloned in full on EVERY push: O(n²) work + memory churn that trapped on wasm at
+// n≳8000 (#696) and made a List[String] build quadratic (#695). The guard now
+// skips the clone when the object is uniquely owned (rc ≤ 1) and only copies a
+// genuinely shared one — so value semantics are unchanged but the in-loop mutation
+// is O(1) amortized again. Runs on BOTH targets.
+
+// Value semantics must still hold: a mutation through one alias of a SHARED list
+// must not be visible through the other (the rc > 1 path still clones).
+test "aliased list keeps value semantics under in-place push (#696)" {
+  var a: List[Int] = [1, 2, 3]
+  let b = a
+  list.push(a, 4)
+  assert_eq(list.len(a), 4)
+  assert_eq(list.len(b), 3)
+  assert_eq(b[0], 1)
+  assert_eq(a[3], 4)
+}
+
+// A bottom-up merge sort: `cur = merged` aliases the push-built list across the
+// outer loop, marking `merged` needs_cow. At n≳8000 the per-push full clone made
+// wasm trap with a raw "out of bounds memory access". This must now sort
+// correctly (and not trap) on both targets.
+fn msort(xs: List[Int]) -> List[Int] = {
+  let n = list.len(xs)
+  var cur = list.slice(xs, 0, n)
+  var width = 1
+  while width < n {
+    var merged: List[Int] = []
+    var lo = 0
+    while lo < n {
+      let mid = if lo + width < n then lo + width else n
+      let hi = if lo + 2 * width < n then lo + 2 * width else n
+      var i = lo
+      var j = mid
+      while i < mid and j < hi {
+        if (list.get(cur, i) ?? 0) <= (list.get(cur, j) ?? 0)
+          then { list.push(merged, list.get(cur, i) ?? 0); i = i + 1 }
+          else { list.push(merged, list.get(cur, j) ?? 0); j = j + 1 }
+      }
+      while i < mid { list.push(merged, list.get(cur, i) ?? 0); i = i + 1 }
+      while j < hi { list.push(merged, list.get(cur, j) ?? 0); j = j + 1 }
+      lo = lo + 2 * width
+    }
+    cur = merged
+    width = width * 2
+  }
+  cur
+}
+
+test "bottom-up merge sort of 8000 reversed ints, cross-target (#696)" {
+  var xs: List[Int] = []
+  var i = 0
+  while i < 8000 { list.push(xs, 8000 - i); i = i + 1 }   // [8000, 7999, …, 1]
+  let s = msort(xs)
+  assert_eq(list.len(s), 8000)
+  assert_eq(s[0], 1)
+  assert_eq(s[7999], 8000)
+  assert_eq(s[4000], 4001)
+}
+
+// A List[String] of freshly-allocated strings built by repeated push — the #695
+// shape (the strings are needs_cow alias-marked); must build correctly at scale.
+test "build a List[String] of 4000 fresh strings (#695)" {
+  var ss: List[String] = []
+  var i = 0
+  while i < 4000 { list.push(ss, "v" + int.to_string(i)); i = i + 1 }
+  assert_eq(list.len(ss), 4000)
+  assert_eq(ss[0], "v0")
+  assert_eq(ss[3999], "v3999")
+}

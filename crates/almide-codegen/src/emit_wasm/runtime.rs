@@ -830,21 +830,29 @@ fn compile_rc_dec(emitter: &mut WasmEmitter) {
 /// body carries no hardcoded element-size — it works uniformly for List/String/
 /// Map/Record/Bytes/variant blocks, all of which __alloc stamps with their size.
 ///
-/// This clones UNCONDITIONALLY (a data-section pointer, which has no header, is the
-/// only pass-through). It does NOT branch on the refcount: in the current WASM
-/// runtime the rc header guard (rc_inc/rc_dec) is a no-op (a bump-allocate-and-leak
-/// model — see `HEAP_START_GLOBAL_IDX`), so the rc never reflects aliasing and a
-/// `rc>1` test would never fire. Unconditional clone matches the Rust target's
-/// eager `.clone()` at the bind: correct, and the extra copy when the alias is
-/// already dead is the accepted, conservative cost of `needs_cow` marking. The
-/// original block is left untouched (it leaks like every other block today), so no
-/// refcount bookkeeping is needed.
+/// A data-section pointer (no header) is the one pass-through. Otherwise: when
+/// frees are ENABLED (the 0.27.0+ default — a real refcount), a UNIQUELY-owned
+/// object (`rc <= 1`) has no alias to protect, so the mutation is safe in place
+/// and we return `ptr` unchanged; only a genuinely SHARED object (`rc > 1`) is
+/// cloned. This was unconditional under the original bump-allocate-and-leak model
+/// (where rc was a no-op and a `rc>1` test could never fire) — but that left a
+/// `needs_cow` var mutated in a loop (`while … { list.push(merged, …) }` where
+/// `cur = merged` aliases it) cloning the WHOLE list on EVERY push: O(n²) work and
+/// memory churn that trapped on wasm at scale (#696, and the List[String] O(n²)
+/// of #695). With `ALMIDE_WASM_FREES=0` the rc is a no-op, so we keep the
+/// unconditional clone (a `rc<=1` test would always pass and break value
+/// semantics). The shared (`rc>1`) path is unchanged — the original block is left
+/// untouched (it leaks like every other block under the leak model), matching the
+/// Rust target's eager `.clone()` at the bind.
 fn compile_cow_check(emitter: &mut WasmEmitter) {
     use super::engine::{WasmBuilder, layout::*};
     let type_idx = emitter.func_type_indices[&emitter.rt.cow_check];
     let size_neg = emitter.layout_reg.alloc_header_neg_offset(alloc::SIZE) as i32;
     let size_ty = emitter.layout_reg.field(ALLOC_HEADER, alloc::SIZE).ty;
+    let rc_neg = emitter.layout_reg.alloc_header_neg_offset(alloc::RC) as i32;
+    let rc_ty = emitter.layout_reg.field(ALLOC_HEADER, alloc::RC).ty;
     let alloc_fn = emitter.rt.alloc;
+    let frees = wasm_frees_enabled();
 
     // locals: 1 = $size (data byte count), 2 = $new_ptr
     let mut f = Function::new([(2, ValType::I32)]);
@@ -855,6 +863,13 @@ fn compile_cow_check(emitter: &mut WasmEmitter) {
         // global directly (the rt field is still 0 at this compile point).
         w.get(Local(0)).gget(HEAP_START_GLOBAL_IDX).lt_u();
         w.if_void(|w| { w.get(Local(0)).ret(); }, |_| {});
+        if frees {
+            // Uniquely owned (rc <= 1, i.e. rc < 2) → no alias to protect, skip the
+            // clone. (#696/#695) Only a shared object falls through to the copy.
+            w.get(Local(0)).i32c(Imm32(rc_neg)).sub().emit_load(0, rc_ty);
+            w.i32c(Imm32(2)).lt_u();
+            w.if_void(|w| { w.get(Local(0)).ret(); }, |_| {});
+        }
         // size = header.SIZE; new = alloc(size); memcpy(new, ptr, size); return new.
         w.get(Local(0)).i32c(Imm32(size_neg)).sub().emit_load(0, size_ty).set(Local(1));
         w.get(Local(1)).call(alloc_fn).set(Local(2));
