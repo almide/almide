@@ -225,12 +225,13 @@
     }
 
     #[test]
-    fn heap_result_if_yields_one_fresh_opaque_merged_slot() {
+    fn heap_result_if_outside_executable_subset_is_walled_not_an_empty_opaque() {
         use almide_lang::intern::sym;
-        // fn f() = if c then make() else [9]  — a HEAP-result branch. Arms are
-        // linearized (each per-arm balanced; the make() call's caps captured, its
-        // value deferred), and the result is ONE fresh `Alloc{Opaque}` MOVED OUT (the
-        // merged slot) — never per-arm phi-merged. Balanced + moved out by the cert.
+        // fn f() = if c then make() else []  — a HEAP-result branch OUTSIDE the executable
+        // `try_lower_heap_result_if` subset (an empty-list arm has no faithful encoding).
+        // The OLD path linearized the arms and MOVED OUT one fresh `Alloc{Opaque}` — an
+        // EMPTY merged result the caller observes = a silent miscompile. It now REJECTS
+        // explicitly so the function walls cleanly.
         let then = ir_expr(
             IrExprKind::Call {
                 target: CallTarget::Named { name: sym("make") },
@@ -244,32 +245,25 @@
             IrExprKind::Block { stmts: vec![], expr: Some(Box::new(iff(then, els, list_int()))) },
             list_int(),
         );
-        let mir = lower_body(&b, "f").expect("heap if tail lowers");
-        // The make() call's caps are captured as an effect marker (deferred value).
-        assert!(
-            mir.ops.iter().any(|o| matches!(o, Op::CallFn { dst: None, name, .. } if name == "make")),
-            "the arm call's caps are captured: {:?}",
-            mir.ops
-        );
-        // The merged result is the LAST op: a fresh Opaque Alloc, MOVED OUT (returned,
-        // so NOT dropped at scope end).
-        assert!(matches!(mir.ops.last(), Some(Op::Alloc { init: Init::Opaque, .. })));
-        assert!(mir.ret.is_some(), "the fresh merged result is the return value");
-        assert!(!mir.ops.iter().any(|o| matches!(o, Op::Drop { .. })), "moved out, not dropped");
-        assert_eq!(verify_ownership(&mir), Ok(()), "fresh result + balanced arms");
+        match lower_body(&b, "f") {
+            Err(LowerError::Unsupported(_)) => {}
+            other => panic!("expected an explicit heap-result-if reject, got: {other:?}"),
+        }
     }
 
     #[test]
-    fn heap_result_if_bind_drops_the_merged_slot_at_scope_end() {
-        // var x = if c then [1] else [2]  (Unit body) — the merged fresh Opaque is
-        // BOUND and dropped at scope end (cert i + d, balanced).
+    fn heap_result_if_bound_to_a_var_is_walled_not_an_empty_opaque() {
+        // var x = if c then [] else []  (Unit body) — a let-bound heap-result `if`. The OLD
+        // path bound `x` to a fresh `Alloc{Opaque}` (an EMPTY list); any later read of `x`
+        // observes empty bytes = a silent miscompile, AND the merged slot has no sound
+        // scope-end drop in the flat certificate. It now REJECTS explicitly.
         let then = ir_expr(IrExprKind::List { elements: vec![] }, list_int());
         let els = ir_expr(IrExprKind::List { elements: vec![] }, list_int());
         let b = body(vec![bind(0, list_int(), iff(then, els, list_int()))]);
-        let mir = lower_body(&b, "main").expect("heap if bind lowers");
-        assert!(mir.ops.iter().any(|o| matches!(o, Op::Alloc { init: Init::Opaque, .. })));
-        assert!(mir.ops.iter().any(|o| matches!(o, Op::Drop { .. })), "bound slot dropped at scope end");
-        assert_eq!(verify_ownership(&mir), Ok(()));
+        match lower_body(&b, "main") {
+            Err(LowerError::Unsupported(_)) => {}
+            other => panic!("expected an explicit let-bound heap-result-if reject, got: {other:?}"),
+        }
     }
 
     #[test]
@@ -441,11 +435,11 @@
     }
 
     #[test]
-    fn method_call_binds_a_deferred_fresh_opaque() {
+    fn heap_method_call_bound_to_a_var_is_walled_not_an_empty_opaque() {
         use almide_lang::intern::sym;
-        // var x = obj.method()  — an unresolvable Method callee → ONE deferred fresh
-        // Alloc{Opaque} (the result), the call elided (so the caps gate taints it).
-        // Balanced; never walled (totality preserved without a real dispatch model).
+        // var x = obj.method()  — an unresolvable Method callee returning a HEAP value. The
+        // OLD path bound `x` to a deferred `Alloc{Opaque}` (an EMPTY list); any later read
+        // of `x` observes empty bytes = a silent miscompile. It now REJECTS explicitly.
         let mcall = ir_expr(
             IrExprKind::Call {
                 target: CallTarget::Method {
@@ -461,13 +455,10 @@
             bind(0, list_int(), ir_expr(IrExprKind::List { elements: vec![] }, list_int())),
             bind(1, list_int(), mcall),
         ]);
-        let mir = lower_body(&b, "main").expect("method call binds");
-        assert!(
-            mir.ops.iter().any(|o| matches!(o, Op::Alloc { dst: ValueId(1), init: Init::Opaque, .. })),
-            "the method result is a deferred fresh Opaque: {:?}",
-            mir.ops
-        );
-        assert_eq!(verify_ownership(&mir), Ok(()));
+        match lower_body(&b, "main") {
+            Err(LowerError::Unsupported(_)) => {}
+            other => panic!("expected an explicit heap method-call reject, got: {other:?}"),
+        }
     }
 
     #[test]
@@ -599,9 +590,10 @@
         assert!(mir2.ops.iter().any(|o| matches!(o, Op::Dup { .. })), "heap extraction is a container Dup: {:?}", mir2.ops);
         assert_eq!(verify_ownership(&mir2), Ok(()));
 
-        // A NESTED-container extraction (the immediate container is itself an
-        // extraction, not a tracked var) has no `src` to Dup, so it falls back to a
-        // DEFERRED fresh `Alloc{Opaque}` — never walled, always memory-safe.
+        // A NESTED-container HEAP extraction (the immediate container is itself an
+        // extraction, not a tracked var) has no `src` to Dup. The OLD path fell back to a
+        // deferred `Alloc{Opaque}` — an EMPTY heap value borrowed into `g` = a silent
+        // miscompile. It now REJECTS explicitly (the extraction's `Err` propagates).
         let nested = ir_expr(
             IrExprKind::Member { object: Box::new(idx(c(), list_int())), field: sym("x") },
             list_int(),
@@ -618,13 +610,10 @@
             bind(0, list_int(), ir_expr(IrExprKind::List { elements: vec![] }, list_int())),
             stmt(IrStmtKind::Expr { expr: nested_call }),
         ]);
-        let mir3 = lower_body(&b2, "main").expect("nested extraction falls back to a deferred fresh value");
-        assert!(
-            mir3.ops.iter().any(|o| matches!(o, Op::Alloc { init: Init::Opaque, .. })),
-            "the nested extraction is a deferred fresh Opaque: {:?}",
-            mir3.ops
-        );
-        assert_eq!(verify_ownership(&mir3), Ok(()));
+        match lower_body(&b2, "main") {
+            Err(LowerError::Unsupported(_)) => {}
+            other => panic!("expected an explicit nested-extraction reject, got: {other:?}"),
+        }
     }
 
     #[test]

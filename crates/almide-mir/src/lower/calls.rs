@@ -661,12 +661,15 @@ impl LowerCtx {
                 IrExprKind::Lambda { params, body, .. } => {
                     match self.lift_lambda(params, body) {
                         Some(slot) => CallArg::Scalar(slot),
+                        // A CAPTURING lambda has no liftable form, so it would materialize a
+                        // deferred `Init::Opaque` (an EMPTY closure env) and pass it to the
+                        // callee, which would invoke garbage = a SILENT MISCOMPILE. Reject.
                         None => {
-                            let dst = self.fresh_value();
-                            let repr = repr_of(&a.ty)?;
-                            self.ops.push(Op::Alloc { dst, repr, init: alloc_init(a) });
-                            self.record_elided_calls(a);
-                            self.materialized_call_arg(dst, repr, &a.ty)
+                            return Err(LowerError::Unsupported(
+                                "capturing lambda in a call-argument position cannot be lifted \
+                                 (would pass an empty deferred closure env)"
+                                    .into(),
+                            ))
                         }
                     }
                 }
@@ -682,11 +685,17 @@ impl LowerCtx {
                     let repr = repr_of(&a.ty)?;
                     match self.try_lower_string_interp(parts) {
                         Some(dst) => self.materialized_call_arg(dst, repr, &a.ty),
+                        // A non-lowerable interp as a call ARGUMENT would materialize a
+                        // deferred `Init::Opaque` (an EMPTY String) and BORROW it into the
+                        // call — the callee reads zero bytes = a SILENT MISCOMPILE. Reject
+                        // explicitly so the enclosing function walls cleanly instead of
+                        // emitting wrong output.
                         None => {
-                            let dst = self.fresh_value();
-                            self.ops.push(Op::Alloc { dst, repr, init: Init::Opaque });
-                            self.record_elided_calls(a);
-                            self.materialized_call_arg(dst, repr, &a.ty)
+                            return Err(LowerError::Unsupported(
+                                "non-lowerable string interpolation in a call-argument position \
+                                 (would borrow an empty deferred String)"
+                                    .into(),
+                            ))
                         }
                     }
                 }
@@ -713,9 +722,21 @@ impl LowerCtx {
                 // FuncRef slot passed by value — `list.map(xs, (x) => x + 1)`; only a
                 // capturing one reaches this deferred Opaque arm.)
                 | IrExprKind::ClosureCreate { .. } => {
-                    let dst = self.fresh_value();
                     let repr = repr_of(&a.ty)?;
                     let init = alloc_init(a);
+                    // `alloc_init` faithfully materializes a string literal and a scalar-
+                    // literal list/tuple; every other constructor (Map/Record/Result/Option/
+                    // closure, a computed-element list) yields `Init::Opaque` — an EMPTY heap
+                    // value. Borrowing an empty value into the call lets the callee read zero
+                    // bytes = a SILENT MISCOMPILE, so reject the unfaithful case explicitly.
+                    if matches!(init, Init::Opaque) {
+                        return Err(LowerError::Unsupported(format!(
+                            "{} argument cannot be faithfully materialized in this brick \
+                             (would borrow an empty deferred heap value)",
+                            kind_name(&a.kind)
+                        )));
+                    }
+                    let dst = self.fresh_value();
                     self.ops.push(Op::Alloc { dst, repr, init });
                     self.record_elided_calls(a);
                     self.materialized_call_arg(dst, repr, &a.ty)
@@ -741,11 +762,14 @@ impl LowerCtx {
                     let repr = repr_of(&a.ty)?;
                     match self.try_lower_concat_str(a) {
                         Some(dst) => self.materialized_call_arg(dst, repr, &a.ty),
+                        // A non-lowerable string concat as a call ARGUMENT would borrow an
+                        // empty deferred String into the callee = a SILENT MISCOMPILE. Reject.
                         None => {
-                            let dst = self.fresh_value();
-                            self.ops.push(Op::Alloc { dst, repr, init: Init::Opaque });
-                            self.record_elided_calls(a);
-                            self.materialized_call_arg(dst, repr, &a.ty)
+                            return Err(LowerError::Unsupported(
+                                "non-lowerable string concat in a call-argument position \
+                                 (would borrow an empty deferred String)"
+                                    .into(),
+                            ))
                         }
                     }
                 }
@@ -757,11 +781,14 @@ impl LowerCtx {
                     let repr = repr_of(&a.ty)?;
                     match self.try_lower_concat_list(a) {
                         Some(dst) => self.materialized_call_arg(dst, repr, &a.ty),
+                        // A non-lowerable list concat (heap-element / non-lowerable operand) as a
+                        // call ARGUMENT would borrow an empty deferred list = a SILENT MISCOMPILE.
                         None => {
-                            let dst = self.fresh_value();
-                            self.ops.push(Op::Alloc { dst, repr, init: Init::Opaque });
-                            self.record_elided_calls(a);
-                            self.materialized_call_arg(dst, repr, &a.ty)
+                            return Err(LowerError::Unsupported(
+                                "non-lowerable list concat in a call-argument position \
+                                 (would borrow an empty deferred list)"
+                                    .into(),
+                            ))
                         }
                     }
                 }
@@ -783,17 +810,20 @@ impl LowerCtx {
                             self.ops.truncate(mark);
                             self.live_heap_handles.truncate(lhh_mark);
                             if is_heap_ty(&a.ty) {
-                                let dst = self.fresh_value();
-                                let repr = repr_of(&a.ty)?;
-                                self.ops.push(Op::Alloc { dst, repr, init: Init::Opaque });
-                                self.record_elided_calls(a);
-                                self.materialized_call_arg(dst, repr, &a.ty)
-                            } else {
-                                let dst = self.fresh_value();
-                                self.record_elided_calls(a);
-                                self.ops.push(Op::Const { dst });
-                                CallArg::Scalar(dst)
+                                // A non-lowerable `??` with a HEAP result as a call ARGUMENT
+                                // would borrow an empty deferred heap value = a SILENT
+                                // MISCOMPILE. Reject. (A SCALAR `??` falls to the deferred
+                                // `Const` 0 below — the separate silent-zero class, left as-is.)
+                                return Err(LowerError::Unsupported(
+                                    "non-lowerable `??` with a heap result in a call-argument \
+                                     position (would borrow an empty deferred heap value)"
+                                        .into(),
+                                ));
                             }
+                            let dst = self.fresh_value();
+                            self.record_elided_calls(a);
+                            self.ops.push(Op::Const { dst });
+                            CallArg::Scalar(dst)
                         }
                     }
                 }
@@ -818,11 +848,14 @@ impl LowerCtx {
                 | IrExprKind::If { .. }
                 | IrExprKind::Match { .. } => {
                     if is_heap_ty(&a.ty) {
-                        let dst = self.fresh_value();
-                        self.record_elided_calls(a);
-                        let repr = repr_of(&a.ty)?;
-                        self.ops.push(Op::Alloc { dst, repr, init: Init::Opaque });
-                        self.materialized_call_arg(dst, repr, &a.ty)
+                        // A heap-result operator / branch as a call ARGUMENT (`f(a ++ b)`
+                        // unlowered, `f(if c then "a" else "b")`, `f(0..n)`) would borrow an
+                        // empty deferred heap value into the callee = a SILENT MISCOMPILE.
+                        return Err(LowerError::Unsupported(format!(
+                            "heap-result {} in a call-argument position cannot be faithfully \
+                             computed in this brick (would borrow an empty deferred heap value)",
+                            kind_name(&a.kind)
+                        )));
                     } else {
                         // A scalar Int arithmetic / comparison / prim arg computes its
                         // REAL value (`f(n / 10)` → IntBinOp); outside that subset it
@@ -852,16 +885,10 @@ impl LowerCtx {
                 | IrExprKind::TupleIndex { .. } => {
                     if is_heap_ty(&a.ty) {
                         let repr = repr_of(&a.ty)?;
-                        let dst = match self.lower_heap_extraction(a) {
-                            Ok(dst) => dst,
-                            // A non-var container (`f().x`) → deferred fresh Opaque.
-                            Err(_) => {
-                                let dst = self.fresh_value();
-                                self.ops.push(Op::Alloc { dst, repr, init: Init::Opaque });
-                                self.record_elided_calls(a);
-                                dst
-                            }
-                        };
+                        // A non-var container (`f().x`) cannot be aliased (no single `src` to
+                        // `Dup`); the deferred Opaque empty value borrowed into the callee is a
+                        // SILENT MISCOMPILE, so a failed extraction rejects here.
+                        let dst = self.lower_heap_extraction(a)?;
                         // A precise heap-field BORROW (`b.label`) is in `param_values` — the
                         // container owns it, so it is passed by Handle WITHOUT joining the
                         // scope-end drop set (no second owner, no double-free). A container-
@@ -928,16 +955,21 @@ impl LowerCtx {
                 // unverified (honest — the callee's capabilities are unknown). The
                 // result value is deferred, like every Opaque.
                 IrExprKind::Call { .. } => {
+                    if is_heap_ty(&a.ty) {
+                        // An unresolvable `Method`/`Computed` call with a HEAP result as a
+                        // call ARGUMENT (`f(obj.m())`, `f((g)())`) would borrow an empty
+                        // deferred heap value into the callee = a SILENT MISCOMPILE. Reject.
+                        // (A SCALAR result still defers to `Const` 0 below — silent-zero class.)
+                        return Err(LowerError::Unsupported(
+                            "unresolvable method/computed call with a heap result in a \
+                             call-argument position (would borrow an empty deferred heap value)"
+                                .into(),
+                        ));
+                    }
                     let dst = self.fresh_value();
                     self.record_elided_calls(a);
-                    if is_heap_ty(&a.ty) {
-                        let repr = repr_of(&a.ty)?;
-                        self.ops.push(Op::Alloc { dst, repr, init: Init::Opaque });
-                        self.materialized_call_arg(dst, repr, &a.ty)
-                    } else {
-                        self.ops.push(Op::Const { dst });
-                        CallArg::Scalar(dst)
-                    }
+                    self.ops.push(Op::Const { dst });
+                    CallArg::Scalar(dst)
                 }
                 other => {
                     return Err(LowerError::Unsupported(format!(

@@ -732,12 +732,17 @@ impl LowerCtx {
             .ok_or_else(|| LowerError::Unsupported(format!("use of unbound var {var:?}")))?;
         let dst = self.fresh_value();
         if is_heap_ty(&ty) {
-            let repr = repr_of(&ty)?;
-            self.ops.push(Op::Alloc { dst, repr, init: Init::Opaque });
-            self.live_heap_handles.push(dst);
-        } else {
-            self.ops.push(Op::Const { dst });
+            // A HEAP module-level global modeled as a fresh owned `Alloc{Opaque}` is an
+            // EMPTY heap value — any read of the global (`println(g)`, returning it,
+            // passing it on) observes empty bytes = a SILENT MISCOMPILE. Reject explicitly
+            // until a global's real initializer can be faithfully reconstructed here.
+            // (A SCALAR global is still a real `Const` below.)
+            return Err(LowerError::Unsupported(format!(
+                "reference to a heap module-level global {var:?} cannot be faithfully \
+                 materialized in this brick (would observe an empty deferred heap value)"
+            )));
         }
+        self.ops.push(Op::Const { dst });
         self.value_of.insert(var, dst);
         Ok(dst)
     }

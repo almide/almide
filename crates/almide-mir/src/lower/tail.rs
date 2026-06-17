@@ -296,9 +296,22 @@ impl LowerCtx {
                             return Ok(Some(dst));
                         }
                     }
-                    let dst = self.fresh_value();
                     let repr = repr_of(&tail.ty)?;
                     let init = alloc_init(tail);
+                    // `alloc_init` faithfully materializes a string literal and a scalar-
+                    // literal list/tuple (handled together with the faithful attempts above);
+                    // every other constructor (Map/Record/Result/Option/closure/range, a
+                    // non-foldable list) yields `Init::Opaque` — an EMPTY heap value the caller
+                    // would observe as the return = a SILENT MISCOMPILE. Reject the unfaithful
+                    // case explicitly.
+                    if matches!(init, Init::Opaque) {
+                        return Err(LowerError::Unsupported(format!(
+                            "heap-result {} cannot be faithfully returned in this brick \
+                             (would move out an empty deferred heap value)",
+                            kind_name(&tail.kind)
+                        )));
+                    }
+                    let dst = self.fresh_value();
                     self.ops.push(Op::Alloc { dst, repr, init });
                     self.record_elided_calls(tail);
                     Ok(Some(dst))
@@ -336,22 +349,14 @@ impl LowerCtx {
                 }
                 // `fn f(r) = r.x` — a HEAP extraction returned directly: alias the
                 // container (`Op::Dup`) and move it out (cert `a` + `m`). A non-var
-                // container (`f().x`, nested) falls back to a deferred fresh Opaque,
-                // moved out — never walled.
+                // container (`f().x`, nested) cannot be aliased, so a failed extraction
+                // would move out a deferred Opaque EMPTY value the caller observes = a
+                // SILENT MISCOMPILE. Reject explicitly instead.
                 IrExprKind::Member { .. }
                 | IrExprKind::IndexAccess { .. }
                 | IrExprKind::MapAccess { .. }
                 | IrExprKind::TupleIndex { .. } => {
-                    let dst = match self.lower_heap_extraction(tail) {
-                        Ok(dst) => dst,
-                        Err(_) => {
-                            let dst = self.fresh_value();
-                            let repr = repr_of(&tail.ty)?;
-                            self.ops.push(Op::Alloc { dst, repr, init: Init::Opaque });
-                            self.record_elided_calls(tail);
-                            dst
-                        }
-                    };
+                    let dst = self.lower_heap_extraction(tail)?;
                     Ok(Some(dst))
                 }
                 // `fn f() = if c then "a" else "b"` — a heap-result branch RETURNED. A
@@ -363,11 +368,14 @@ impl LowerCtx {
                     if let Some(dst) = self.try_lower_heap_result_if(cond, then, else_, &tail.ty) {
                         return Ok(Some(dst));
                     }
-                    self.lower_branch(tail)?;
-                    let dst = self.fresh_value();
-                    let repr = repr_of(&tail.ty)?;
-                    self.ops.push(Op::Alloc { dst, repr, init: Init::Opaque });
-                    Ok(Some(dst))
+                    // Outside the executable heap-result-if subset, the arms would linearize
+                    // and the RETURN value would be one deferred Opaque EMPTY heap object the
+                    // caller observes = a SILENT MISCOMPILE. Reject explicitly.
+                    Err(LowerError::Unsupported(
+                        "heap-result `if` outside the executable subset cannot be faithfully \
+                         returned in this brick (would move out an empty deferred heap value)"
+                            .into(),
+                    ))
                 }
                 // A heap-result `match` over Int literal patterns with string-literal arms
                 // EXECUTES: desugar to a nested heap-result `if` and run only the matched
@@ -382,22 +390,25 @@ impl LowerCtx {
                             }
                         }
                     }
-                    self.lower_branch(tail)?;
-                    let dst = self.fresh_value();
-                    let repr = repr_of(&tail.ty)?;
-                    self.ops.push(Op::Alloc { dst, repr, init: Init::Opaque });
-                    Ok(Some(dst))
+                    // Outside the executable heap-result-match subset, the RETURN value would
+                    // be one deferred Opaque EMPTY heap object the caller observes = a SILENT
+                    // MISCOMPILE. Reject explicitly.
+                    Err(LowerError::Unsupported(
+                        "heap-result `match` outside the executable subset cannot be faithfully \
+                         returned in this brick (would move out an empty deferred heap value)"
+                            .into(),
+                    ))
                 }
                 // `fn f(o) = o.method()` / `(g)()` returned — an UNRESOLVABLE
                 // `Method`/`Computed` callee (the `Named`/`Module` arms are above).
-                // Move out ONE deferred fresh `Alloc{Opaque}`; the call is elided so
-                // the gate taints the function caps-unverified (honest).
+                // Moving out a deferred Opaque EMPTY value the caller observes is a SILENT
+                // MISCOMPILE, so reject explicitly.
                 IrExprKind::Call { .. } => {
-                    let dst = self.fresh_value();
-                    let repr = repr_of(&tail.ty)?;
-                    self.ops.push(Op::Alloc { dst, repr, init: Init::Opaque });
-                    self.record_elided_calls(tail);
-                    Ok(Some(dst))
+                    Err(LowerError::Unsupported(
+                        "heap-result method/computed call cannot be faithfully returned in this \
+                         brick (would move out an empty deferred heap value)"
+                            .into(),
+                    ))
                 }
                 other => Err(LowerError::Unsupported(format!(
                     "heap move-out from {} (only a bound var, fresh literal, or call) not in this brick",

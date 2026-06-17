@@ -702,29 +702,26 @@
     }
 
     #[test]
-    fn let_bound_heap_result_if_stays_opaque_walled() {
-        // A let-bound (NON-TAIL) heap-result `if` is NOT executed — its single scope-end
-        // drop of the merged `IfThen` dst has no sound flat-certificate encoding (the
-        // per-arm "im" move-out balance leaves nothing to drop → the checker REJECTS
-        // `im·im·d`). So it MUST stay the deferred `Alloc{Opaque}` (memory-safe, value
-        // deferred), NEVER an executable IfThen in this position. This pins the soundness
-        // boundary: a regression that re-enables it would make corpus ownership REJECT.
+    fn let_bound_heap_result_if_is_walled_not_silently_empty() {
+        // A let-bound (NON-TAIL) heap-result `if` has NO faithful executable encoding here:
+        // a tail heap-result `if` moves each arm's value out (the per-arm "im" balance), but
+        // a let-bound value is held and dropped at scope end — that single scope-end drop of
+        // the merged `IfThen` dst has no sound flat-certificate encoding (the checker REJECTS
+        // `im·im·d`). The OLD path bound `label` to a deferred `Alloc{Opaque}` — an EMPTY
+        // String — so `println(label)` printed EMPTY instead of "small": a SILENT MISCOMPILE.
+        // The function now WALLS explicitly (omitted from the lowered program) instead of
+        // emitting wrong bytes. This pins the discipline: the silent-empty case is converted
+        // to a clean wall, NOT re-enabled as an unsound executable IfThen.
         let src = "fn main() -> Unit = {\n  \
             let x = 15\n  \
             let label = if x > 20 then \"big\" else \"small\"\n  \
             println(label) }\n";
         let prog = lower_source(src);
-        let main = prog.functions.iter().find(|f| f.name == "main").unwrap();
         assert!(
-            !main.ops.iter().any(|op| matches!(op, Op::IfThen { .. })),
-            "let-bound heap-result if must NOT lower to an (unsound) IfThen, got {:?}",
-            main.ops
-        );
-        // The proven ownership checker must ACCEPT the (Opaque) lowering.
-        assert_eq!(
-            crate::verify_ownership(main),
-            Ok(()),
-            "the Opaque-walled let-bound heap-result if must be ownership-ACCEPT"
+            !prog.functions.iter().any(|f| f.name == "main"),
+            "a let-bound heap-result if must WALL (the function is omitted), not lower to a \
+             silent-empty Opaque; got functions: {:?}",
+            prog.functions.iter().map(|f| &f.name).collect::<Vec<_>>()
         );
     }
 

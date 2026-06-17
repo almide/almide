@@ -471,23 +471,14 @@ impl LowerCtx {
             // `var v = r.x` / `xs[i]` — a HEAP extraction: alias the container
             // (`Op::Dup`), bound here and dropped at scope end (cert `a` + `d`). When
             // the container is NOT a tracked var (`f().x`, nested `a.b.c`), there is no
-            // single `src` to `Dup`, so fall back to a deferred fresh `Alloc{Opaque}`
-            // (the extracted value deferred, its container's calls captured) — never a
-            // wall (totality), always memory-safe (a clean fresh alloc).
+            // single `src` to `Dup`; the deferred Opaque EMPTY value the binding would
+            // hold is observed by any later read of `v` = a SILENT MISCOMPILE, so a failed
+            // extraction rejects here.
             IrExprKind::Member { .. }
             | IrExprKind::IndexAccess { .. }
             | IrExprKind::MapAccess { .. }
             | IrExprKind::TupleIndex { .. } => {
-                let dst = match self.lower_heap_extraction(value) {
-                    Ok(dst) => dst,
-                    Err(_) => {
-                        let dst = self.fresh_value();
-                        let repr = repr_of(ty)?;
-                        self.ops.push(Op::Alloc { dst, repr, init: Init::Opaque });
-                        self.record_elided_calls(value);
-                        dst
-                    }
-                };
+                let dst = self.lower_heap_extraction(value)?;
                 self.value_of.insert(var, dst);
                 // A precise heap-field BORROW (a `LoadHandle` of a slot in a still-owning
                 // container) is in `param_values` — it is NOT a second owner, so it must NOT
@@ -623,46 +614,34 @@ impl LowerCtx {
                 Ok(())
             }
             // `var x = obj.method(args)` / `var x = (g)(args)` — an UNRESOLVABLE
-            // `Method`/`Computed` callee bound to a heap var. Model the result as ONE
-            // deferred fresh `Alloc{Opaque}` (its receiver's/args' calls captured by
-            // `record_elided_calls`; the method/computed call itself is elided, so the
-            // `ir_calls > mir_calls` gate taints the function caps-unverified — honest).
+            // `Method`/`Computed` callee bound to a heap var. The deferred Opaque EMPTY
+            // value the binding would hold is observed by any later read of `x` = a SILENT
+            // MISCOMPILE, so reject explicitly.
             IrExprKind::Call { .. } => {
-                let dst = self.fresh_value();
-                let repr = repr_of(ty)?;
-                self.value_of.insert(var, dst);
-                self.ops.push(Op::Alloc { dst, repr, init: Init::Opaque });
-                self.live_heap_handles.push(dst);
-                self.record_elided_calls(value);
-                Ok(())
+                Err(LowerError::Unsupported(
+                    "heap-result method/computed call bound to a var cannot be faithfully \
+                     computed in this brick (would bind an empty deferred heap value)"
+                        .into(),
+                ))
             }
-            // `var x = if c then … else …` / `let x = match … { … }` — a heap-result
-            // branch in a NON-TAIL, let-bound position. LINEARIZE the arms (each per-arm
-            // balanced, its value deferred), then bind `x` to ONE fresh `Alloc{Opaque}` —
-            // the merged result slot. Memory-safe by construction (the arms balance; the
-            // result is a clean fresh alloc dropped at scope end); which arm's value it
-            // equals is functional, deferred like every `Opaque`. The same WALLS as
-            // statement position still apply per arm.
-            //
-            // Unlike TAIL position (`try_lower_heap_result_if`), a let-bound heap-result
-            // value is NOT moved out — it is bound and dropped at scope end. That single
-            // scope-end `Drop` on the MERGED `IfThen` dst has NO sound encoding in the FLAT
-            // ownership certificate: the per-arm `"im"` balance models each arm's value
-            // being moved OUT (the tail-return transfer), so a trailing `Drop` of the dst
-            // would release a moved-out object — the checker REJECTS the resulting
-            // `im·im·d` (empirically verified: an executable let-bound heap-result if/match
-            // makes corpus ownership REJECT, accept⟹safe violated). The flat cert cannot
-            // attribute ONE scope-end drop to exactly-one-of-two arm allocs without a
-            // checker/Coq change (out of scope). So a let-bound heap-result if/match stays
-            // the sound deferred `Opaque` here until the certificate can express it.
+            // `let s = if c then "A" else "B"; …` / `let x = match … { … }` — a heap-result
+            // branch in a NON-TAIL, let-bound position. There is NO faithful executable
+            // encoding here: a tail heap-result `if` moves each arm's value OUT (the
+            // per-arm `"im"` balance), but a LET-BOUND value is held and dropped at scope
+            // end — a trailing `Drop` of the merged `IfThen` dst would release a moved-out
+            // object (the checker REJECTS the resulting `im·im·d` — accept⟹safe violated),
+            // and attributing ONE scope-end drop to exactly-one-of-two arm allocs needs a
+            // checker/Coq change (out of scope). The OLD fallback bound `x` to a deferred
+            // `Init::Opaque` — an EMPTY heap value — so `println(s)` printed EMPTY instead
+            // of "A"/"B": a SILENT MISCOMPILE. Reject explicitly so the function walls
+            // cleanly instead of emitting wrong bytes.
             IrExprKind::If { .. } | IrExprKind::Match { .. } => {
-                self.lower_branch(value)?;
-                let dst = self.fresh_value();
-                let repr = repr_of(ty)?;
-                self.value_of.insert(var, dst);
-                self.ops.push(Op::Alloc { dst, repr, init: Init::Opaque });
-                self.live_heap_handles.push(dst);
-                Ok(())
+                Err(LowerError::Unsupported(
+                    "heap-result `if`/`match` bound to a let/var cannot be faithfully \
+                     computed in this brick (would bind an empty deferred heap value); \
+                     the merged result has no sound scope-end drop in the flat certificate"
+                        .into(),
+                ))
             }
             // `var x = { stmts; tail }` — a heap BLOCK value. Lower the block's
             // statements (their locals ride to the enclosing scope and are dropped at

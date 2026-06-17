@@ -624,39 +624,52 @@
     }
 
     #[test]
-    fn global_reference_is_admitted_scalar_const_and_heap_alloc() {
+    fn scalar_global_reference_is_a_const() {
         use almide_lang::intern::sym;
-        // A function references two top-level `let` globals it never binds locally: a
-        // SCALAR global (Int) and a HEAP global (List). value_or_global admits each from
-        // the DECLARED global set — scalar as a Copy `Const`, heap as a fresh owned
-        // `Alloc{Opaque}` dropped at scope end (an owned copy, memory-safe by construction).
+        // A function references a top-level SCALAR `let` global (Int) it never binds
+        // locally. value_or_global admits it from the DECLARED global set as a Copy
+        // `Const` — a real value, not a deferred heap object.
         let mut globals = HashMap::new();
         globals.insert(VarId(7), Ty::Int);
-        globals.insert(VarId(8), list_int());
         let call = ir_expr(
             IrExprKind::Call {
                 target: CallTarget::Named { name: sym("f") },
-                args: vec![
-                    ir_expr(IrExprKind::Var { id: VarId(7) }, Ty::Int),
-                    ir_expr(IrExprKind::Var { id: VarId(8) }, list_int()),
-                ],
+                args: vec![ir_expr(IrExprKind::Var { id: VarId(7) }, Ty::Int)],
                 type_args: vec![],
             },
             Ty::Unit,
         );
         let b = body(vec![stmt(IrStmtKind::Expr { expr: call })]);
-        let mir = lower_body_with_globals(&b, "main", globals).expect("global refs admitted");
+        let mir = lower_body_with_globals(&b, "main", globals).expect("scalar global ref admitted");
         assert!(
             mir.ops.iter().any(|o| matches!(o, Op::Const { .. })),
             "scalar global is a Const: {:?}",
             mir.ops
         );
-        assert!(
-            mir.ops.iter().any(|o| matches!(o, Op::Alloc { init: Init::Opaque, .. })),
-            "heap global is an owned Alloc Opaque: {:?}",
-            mir.ops
+    }
+
+    #[test]
+    fn heap_global_reference_is_walled_not_an_empty_opaque() {
+        use almide_lang::intern::sym;
+        // A reference to a HEAP module-level global (List) USED TO bind a fresh owned
+        // `Alloc{Opaque}` — an EMPTY heap value. Observing it (here: passing it to `f`)
+        // emitted empty bytes = a silent miscompile. value_or_global now REJECTS a heap
+        // global reference explicitly so the function walls cleanly.
+        let mut globals = HashMap::new();
+        globals.insert(VarId(8), list_int());
+        let call = ir_expr(
+            IrExprKind::Call {
+                target: CallTarget::Named { name: sym("f") },
+                args: vec![ir_expr(IrExprKind::Var { id: VarId(8) }, list_int())],
+                type_args: vec![],
+            },
+            Ty::Unit,
         );
-        assert_eq!(verify_ownership(&mir), Ok(()), "heap-global copy is balanced (alloc + scope-end drop)");
+        let b = body(vec![stmt(IrStmtKind::Expr { expr: call })]);
+        match lower_body_with_globals(&b, "main", globals) {
+            Err(LowerError::Unsupported(_)) => {}
+            other => panic!("expected an explicit heap-global reject, got: {other:?}"),
+        }
     }
 
     #[test]
