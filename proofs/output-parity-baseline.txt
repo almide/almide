@@ -4,6 +4,7 @@ spec/wasm_cross/bytes_f16.almd
 spec/wasm_cross/const_fold_nonfinite_float.almd
 spec/wasm_cross/container_alias_return.almd
 spec/wasm_cross/empty_collection_fold.almd
+spec/wasm_cross/float_interp_forms.almd
 spec/wasm_cross/int_div_mod_ok.almd
 spec/wasm_cross/int_pow_overflow_wraps.almd
 spec/wasm_cross/int_wrap_rotate_width.almd
