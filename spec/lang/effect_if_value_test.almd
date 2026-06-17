@@ -1,0 +1,93 @@
+// Regression (#717): an effect-fn call inside an `if`/`match` expression that is
+// USED AS A VALUE (bound by `let`) inside an EFFECT FN must lower correctly. The
+// checker lifts an effect-call branch to `Result[T, String]`, so the whole
+// `if`/`match` inherited that Result type; auto-? then unwrapped the branches to
+// `T` but left the node (and its `let` binding) typed `Result[T]`. Native emitted
+// `let x: Result<T, String> = if c { (eff())? } else { pure() }` — a `?`-over-Vec
+// vs Result<Vec> mismatch (E0308, "codegen produced invalid Rust"). The node type
+// is now recomputed from the unwrapped branches. (auto-? runs in effect fns, not
+// `test` blocks, so the pattern lives in effect fns the tests call.) BOTH targets.
+
+fn pure_one() -> List[Int] = [1, 1]
+effect fn eff_two() -> List[Int] = [2, 2, 2]
+effect fn eff_three() -> List[Int] = [3, 3, 3, 3]
+
+// effect call + pure branch, if-value bound by let
+effect fn pick_mixed(cond: Bool) -> Result[Int, String] = {
+  let pick = if cond then eff_two() else pure_one()
+  ok(list.len(pick))
+}
+
+// effect calls on BOTH branches
+effect fn pick_both(cond: Bool) -> Result[Int, String] = {
+  let pick = if cond then eff_two() else eff_three()
+  ok(list.len(pick))
+}
+
+// effect call in a match-value bound by let
+effect fn pick_match(n: Int) -> Result[Int, String] = {
+  let pick = match n {
+    2 => eff_two(),
+    _ => pure_one(),
+  }
+  ok(list.len(pick))
+}
+
+// effect call in a block-tail if bound by let
+effect fn pick_block(cond: Bool) -> Result[Int, String] = {
+  let pick = {
+    let _warm = pure_one()
+    if cond then eff_two() else eff_three()
+  }
+  ok(list.len(pick))
+}
+
+test "effect call in if-value bound by let, mixed with a pure branch (#717)" {
+  assert_eq(pick_mixed(true), ok(3))
+  assert_eq(pick_mixed(false), ok(2))
+}
+
+test "effect calls on BOTH if branches bound by let (#717)" {
+  assert_eq(pick_both(true), ok(3))
+  assert_eq(pick_both(false), ok(4))
+}
+
+test "effect call in a match-value bound by let (#717)" {
+  assert_eq(pick_match(2), ok(3))
+  assert_eq(pick_match(9), ok(2))
+}
+
+test "effect call in a block-tail if bound by let (#717)" {
+  assert_eq(pick_block(true), ok(3))
+  assert_eq(pick_block(false), ok(4))
+}
+
+// Error propagation through the if-value must still short-circuit `err` out of
+// the enclosing effect fn (the auto-? on the chosen branch stays load-bearing).
+effect fn boom(x: Int) -> Result[Int, String] =
+  if x < 0 then err("neg") else ok(x)
+
+effect fn via_if(x: Int) -> Result[Int, String] = {
+  let v = if x > 10 then boom(x) else boom(0 - 1)
+  ok(v + 100)
+}
+
+test "effect propagation through an if-value still short-circuits err (#717)" {
+  assert_eq(via_if(20), ok(120))
+  assert_eq(via_if(5), err("neg"))
+}
+
+// An explicitly Result-annotated binding must KEEP its Result (not be unwrapped
+// by the node-type recompute) — guards against over-correction.
+effect fn annotated(cond: Bool) -> Result[Int, String] = {
+  let r: Result[Int, String] = if cond then ok(7) else err("x")
+  match r {
+    ok(v) => ok(v),
+    err(e) => err(e),
+  }
+}
+
+test "annotated Result binding over an if stays a Result (#717)" {
+  assert_eq(annotated(true), ok(7))
+  assert_eq(annotated(false), err("x"))
+}

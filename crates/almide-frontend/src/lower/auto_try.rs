@@ -485,7 +485,23 @@ fn insert_try(expr: IrExpr, in_match_subject: bool, ctx: &mut TryCtx) -> IrExpr 
         other => other,
     };
 
-    let mut result = IrExpr { kind, ty: ty.clone(), span, def_id: None };
+    // #717: an `if`/`match`/tail-`block` YIELDS its branch type. The checker
+    // lifts an effect-fn-call branch to `Result[T, String]`, so the whole node
+    // inherits that Result type — but `insert_try` above just auto-?'d those
+    // branches down to `T`. Recompute the node type from the (now-unwrapped)
+    // branches so a `let pick = if c then eff() else pure()` binding gets `T`,
+    // not the stale `Result[T]` (which then emitted `Result<T>` = `?`-branches,
+    // an E0308 type mismatch). Pure / genuinely-Result branches are unchanged:
+    // their branch types already equal the original node type.
+    let node_ty = match &kind {
+        IrExprKind::If { then, else_, .. } if then.ty == else_.ty => then.ty.clone(),
+        IrExprKind::Match { arms, .. }
+            if !arms.is_empty() && arms.iter().all(|a| a.body.ty == arms[0].body.ty)
+            => arms[0].body.ty.clone(),
+        IrExprKind::Block { expr: Some(tail), .. } => tail.ty.clone(),
+        _ => ty.clone(),
+    };
+    let mut result = IrExpr { kind, ty: node_ty, span, def_id: None };
 
     if should_wrap {
         let inner_ty = match &ty {
@@ -537,11 +553,14 @@ fn insert_try_stmt(stmt: IrStmt, ctx: &mut TryCtx) -> IrStmt {
                         span, def_id: None,
                     };
                 }
-                let new_ty = if matches!(&new_value.kind, IrExprKind::Try { .. }) {
-                    new_value.ty.clone()
-                } else {
-                    ty
-                };
+                // The binding type IS the value's type. A top-level Try unwraps
+                // Result→T; an `if`/`match`/block whose effect branches were just
+                // auto-?'d likewise now yields T (its node type was recomputed
+                // above, #717). Either way `new_value.ty` is authoritative — the
+                // old `else { ty }` kept the stale effect-lifted `Result[T]` for
+                // those non-Try forms, emitting `Result<T>` over `?`-branches.
+                let _ = ty;
+                let new_ty = new_value.ty.clone();
                 // Keep the var table in sync with the unwrap: a later
                 // `v = effectCall()` reads this entry to decide its own
                 // wrap/strip, so a stale Result type would invert that rule.
