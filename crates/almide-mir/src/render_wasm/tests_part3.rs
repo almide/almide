@@ -1002,3 +1002,29 @@
             assert_eq!(out, "1970-01-01 00:00:00\n02/01/1970");
         }
     }
+
+    #[test]
+    fn self_hosted_json_scalar() {
+        // json scalar constructors + accessors over the SHARED Value repr (value_core's tag@4 block).
+        // from_int(7) |> as_int = Some 7; from_bool(true) |> as_bool = Some true; a TAG MISMATCH ->
+        // None (as_bool on an Int Value, as_int on null) -> the `??` fallback. Exercises the
+        // materialized-Option return + DropValue (flat scalar drop) end-to-end through v1.
+        let src = "import json\nfn main() -> Unit = {\n  \
+            let vi = json.from_int(7)\n  \
+            let oi = json.as_int(vi)\n  let i = oi ?? 0\n  println(int.to_string(i))\n  \
+            let vf = json.from_float(3.0)\n  \
+            let ofi = json.as_int(vf)\n  let fi = ofi ?? 0\n  println(int.to_string(fi))\n  \
+            let vb = json.from_bool(true)\n  \
+            let ob = json.as_bool(vb)\n  let b = ob ?? false\n  let bi = if b then 1 else 0\n  println(int.to_string(bi))\n  \
+            let on = json.as_bool(vi)\n  let nb = on ?? false\n  let nbi = if nb then 1 else 0\n  println(int.to_string(nbi))\n  \
+            let vn = json.null()\n  \
+            let onv = json.as_int(vn)\n  let nv = onv ?? 0\n  println(int.to_string(nv)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "json.from_int"));
+        assert!(prog.functions.iter().any(|f| f.name == "json.as_int"));
+        if let Some(out) = build_and_run("json_scalar", &render_wasm_program(&prog)) {
+            // as_int(Int 7)=7; as_int(Float 3.0)=3 (the f64->i64 WIDENING); as_bool(Bool true)=1;
+            // as_bool(Int)=None->0; as_int(null)=None->0. Materialized-Option return + DropValue e2e.
+            assert_eq!(out, "7\n3\n1\n0\n0");
+        }
+    }

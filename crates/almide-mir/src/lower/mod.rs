@@ -754,6 +754,10 @@ pub(crate) fn is_self_host_option_module_fn(module: &str, func: &str) -> bool {
                 | "to_uint64_checked"
                 | "to_float32_checked"
         ),
+        // json.as_int/as_float/as_bool build a materialized Option (Some(scalar) / None) by reading
+        // the shared Value tag (@4) — a `match`/`??` over the result EXECUTES. as_int/as_float WIDEN
+        // across Int/Float exactly like v0; as_string/as_array (heap payloads) are a refinement.
+        "json" => matches!(func, "as_int" | "as_float" | "as_bool"),
         _ => false,
     }
 }
