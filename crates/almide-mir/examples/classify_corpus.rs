@@ -96,6 +96,18 @@ fn count_ir_calls(body: &almide_ir::IrExpr, registry: &almide_mir::lower::Record
             if matches!(&e.kind, almide_ir::IrExprKind::BinOp { op: almide_ir::BinOp::ConcatStr, .. }) {
                 self.n += 1;
             }
+            // The `**` OPERATOR (BinOp::PowFloat / PowInt) lowers to ONE synthetic CallFn —
+            // `math.fpow` (the bit-exact libm pow) for Float, `math.pow` (int squaring) for Int.
+            // Count the operator NODE as one ir_call so that synthetic call has a matching ir_call
+            // and `mir_calls <= ir_calls` holds BY CONSTRUCTION (a `**` not yet lowered in some
+            // position just leaves mir < ir — honest caps taint, never the mir > ir over-count that
+            // would falsely caps-verify a fn). Both callees are PURE (math/math_fpow modules reach
+            // no Stdout), so the synthetic call adds no real capability.
+            if matches!(&e.kind, almide_ir::IrExprKind::BinOp {
+                op: almide_ir::BinOp::PowFloat | almide_ir::BinOp::PowInt, ..
+            }) {
+                self.n += 1;
+            }
             // A heap-String `??` (`Option[String] ?? default`) lowers to ONE synthetic
             // `option.unwrap_or_str` CallFn (a mir_call) — but ONLY when its operand can be
             // materialized as a self-host Option: a Var (possibly a materialized Option, which

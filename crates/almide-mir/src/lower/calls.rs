@@ -1147,6 +1147,31 @@ impl LowerCtx {
                 Some(dst)
             }
             IrExprKind::BinOp { op, left, right } => {
+                // The `**` OPERATOR has no single hardware instruction — it desugars to a CALL into
+                // the self-hosted pow stdlib, exactly as if the user wrote `math.fpow(a, b)` /
+                // `math.pow(a, b)`. `PowFloat` → `math.fpow` (the bit-exact libm transcription),
+                // `PowInt` → `math.pow` (exponentiation-by-squaring). Both callees live in a
+                // PURE_MODULES module, so the synthesized `Op::CallFn` carries an EMPTY capability
+                // witness (sound), and the corpus `count_ir_calls` credits the operator node 1:1 so
+                // `mir_calls <= ir_calls` holds BY CONSTRUCTION (no elision-masking over-count).
+                let pow_callee = match op {
+                    BinOp::PowFloat => Some("math.fpow"),
+                    BinOp::PowInt => Some("math.pow"),
+                    _ => None,
+                };
+                if let Some(callee) = pow_callee {
+                    let a = self.lower_scalar_value(left)?;
+                    let b = self.lower_scalar_value(right)?;
+                    let repr = repr_of(&expr.ty).ok()?;
+                    let dst = self.fresh_value();
+                    self.ops.push(Op::CallFn {
+                        dst: Some(dst),
+                        name: callee.to_string(),
+                        args: vec![CallArg::Scalar(a), CallArg::Scalar(b)],
+                        result: Some(repr),
+                    });
+                    return Some(dst);
+                }
                 // FLOAT arithmetic + comparison operators → the prim float floor (Op::Prim). The
                 // operands are Float (the i64-uniform f64 bits); the prim reinterprets around the
                 // wasm f64 op. Pure scalar — no ownership (cert untouched). This makes float-heavy

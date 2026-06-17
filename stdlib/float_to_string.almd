@@ -402,7 +402,12 @@ fn __dg_string_main(x: Float) -> String = {
   let ff = if raw_exp == 0 then raw_mant else raw_mant + 4503599627370496
   let e = if raw_exp == 0 then 0 - 1074 else raw_exp - 1075
   let even = prim.band(ff, 1) == 0
-  let low_bnd = (raw_mant == 0) and (raw_exp > 1)
+  // The asymmetric-low-boundary flag: raw_mant == 0 AND raw_exp > 1. v1 does NOT lower the
+  // `and` OPERATOR (it defers to a Const-0/false), which silently skipped the MP/R/S<<=1
+  // boundary doubling and dropped the last significant digit for powers of two >= 2^64
+  // (e.g. 18446744073709552000.0 → ...550000.0). Express it as a nested `if` (which DOES
+  // lower, via the scalar-if value path) so the flag is REAL — see the dual-oracle byte-match.
+  let low_bnd = if raw_mant == 0 then raw_exp > 1 else false
 
   // scratch block: 468 i64 slots = 3744 bytes >= SCRATCH_BYTES(3740).
   let blk = prim.alloc_list(468)
