@@ -1,10 +1,15 @@
 spec/churn/record_churn.almd
 spec/wasm_cross/assign_alias_rc.almd
+spec/wasm_cross/autotry_result_first_arg.almd
 spec/wasm_cross/bytes_f16.almd
+spec/wasm_cross/bytes_from_list_param.almd
 spec/wasm_cross/const_fold_nonfinite_float.almd
 spec/wasm_cross/container_alias_return.almd
+spec/wasm_cross/default_param_ref.almd
 spec/wasm_cross/empty_collection_fold.almd
 spec/wasm_cross/float_interp_forms.almd
+spec/wasm_cross/float_shortest_roundtrip.almd
+spec/wasm_cross/i64_min_literal.almd
 spec/wasm_cross/int_div_mod_ok.almd
 spec/wasm_cross/int_pow_overflow_wraps.almd
 spec/wasm_cross/int_wrap_rotate_width.almd
@@ -16,7 +21,11 @@ spec/wasm_cross/list_swap_oob.almd
 spec/wasm_cross/map_filter.almd
 spec/wasm_cross/math_explog.almd
 spec/wasm_cross/math_log_gamma.almd
+spec/wasm_cross/math_pow.almd
 spec/wasm_cross/nested_tuple_destructure.almd
+spec/wasm_cross/num_edge_to_string.almd
+spec/wasm_cross/phantom_type_param.almd
+spec/wasm_cross/reserved_keyword_fn.almd
 spec/wasm_cross/string_codepoint_index.almd
 spec/wasm_cross/string_count_truncation.almd
 spec/wasm_cross/string_lines.almd
