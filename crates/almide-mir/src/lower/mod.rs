@@ -756,8 +756,10 @@ pub(crate) fn is_self_host_option_module_fn(module: &str, func: &str) -> bool {
         ),
         // json.as_int/as_float/as_bool build a materialized Option (Some(scalar) / None) by reading
         // the shared Value tag (@4) — a `match`/`??` over the result EXECUTES. as_int/as_float WIDEN
-        // across Int/Float exactly like v0; as_string/as_array (heap payloads) are a refinement.
-        "json" => matches!(func, "as_int" | "as_float" | "as_bool"),
+        // across Int/Float exactly like v0. json.as_string is the heap-payload case: Some(a deep copy
+        // of the Str payload @12) / None — the repr-poly Option[String] materialization (a 0-or-1-
+        // element DynListStr, same path as list.get_str); as_array (List[Value]) is a refinement.
+        "json" => matches!(func, "as_int" | "as_float" | "as_bool" | "as_string"),
         _ => false,
     }
 }

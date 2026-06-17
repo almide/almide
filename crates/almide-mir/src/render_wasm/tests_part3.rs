@@ -1028,3 +1028,32 @@
             assert_eq!(out, "7\n3\n1\n0\n0");
         }
     }
+
+    #[test]
+    fn self_hosted_json_string() {
+        // json STR-payload over the SHARED Value repr (tag 4 = Str, the payload String @12). from_string
+        // builds a Str Value owning a deep copy; as_string returns Option[String] (the repr-poly 0-or-1-
+        // element DynListStr materialization, same path as list.get_str). as_string(Str "hi")=Some("hi")
+        // -> match "hi"; as_string(Int)=None -> "none". The trailing 4000-iter loop builds + drops a Str
+        // Value AND its Option each round (string.len reads the borrowed Some payload = 5): bounded, no
+        // leak/double-free — exercises DropValue (tag-dispatched Str free) + Option drop under churn e2e.
+        let src = "import json\nfn main() -> Unit = {\n  \
+            let vs = json.from_string(\"hi\")\n  \
+            let os = json.as_string(vs)\n  match os {\n    Some(v) => println(v),\n    None => println(\"none\"),\n  }\n  \
+            let vi = json.from_int(5)\n  \
+            let oi = json.as_string(vi)\n  match oi {\n    Some(v) => println(v),\n    None => println(\"none\"),\n  }\n  \
+            var i = 0\n  var last = 0\n  \
+            while i < 4000 {\n    \
+              let vx = json.from_string(\"abcde\")\n    let ox = json.as_string(vx)\n    \
+              match ox { Some(s) => { let n = string.len(s)\n last = n }, None => { last = 0 }, }\n    \
+              i = i + 1\n  }\n  \
+            println(int.to_string(last)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "json.from_string"));
+        assert!(prog.functions.iter().any(|f| f.name == "json.as_string"));
+        if let Some(out) = build_and_run("json_string", &render_wasm_program(&prog)) {
+            // as_string(Str "hi")=Some("hi")->match->"hi"; as_string(Int 5)=None->"none"; the loop's
+            // last = string.len("abcde") = 5 after 4000 reclaimed rounds. Heap Option + DropValue e2e.
+            assert_eq!(out, "hi\nnone\n5");
+        }
+    }
