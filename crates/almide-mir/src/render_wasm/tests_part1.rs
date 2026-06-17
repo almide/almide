@@ -627,6 +627,76 @@
     }
 
     #[test]
+    fn heap_result_if_with_var_arms_executes() {
+        // `if c then a else b` over borrowed String PARAMS (TAIL position) — each Var arm
+        // ACQUIRES a fresh owned reference (`Op::Dup` = the per-arm "am" balance) and moves
+        // it out as the function result; the caller's params are untouched (no double-
+        // free). pick(true,…)="yes". The cert is `am·am` (Dup acquire + Consume move-out
+        // per arm) — verified ACCEPT by the proven ownership checker.
+        let src = "fn pick(c: Bool, a: String, b: String) -> String = if c then a else b\n\
+            fn main() -> Unit = {\n  \
+            println(pick(true, \"yes\", \"no\"))\n  println(pick(false, \"yes\", \"no\")) }\n";
+        let prog = lower_source(src);
+        let f = prog.functions.iter().find(|f| f.name == "pick").unwrap();
+        assert!(
+            f.ops.iter().any(|op| matches!(op, Op::IfThen { .. }))
+                && f.ops.iter().any(|op| matches!(op, Op::Dup { .. })),
+            "var-arm heap-result if must lower to IfThen + Dup, got {:?}",
+            f.ops
+        );
+        if let Some(out) = build_and_run("heap_if_var_arm", &render_wasm_program(&prog)) {
+            assert_eq!(out, "yes\nno");
+        }
+    }
+
+    #[test]
+    fn heap_result_if_with_bool_call_cond_executes() {
+        // `if string.contains(s, "x") then "y" else "n"` (TAIL position) — a Bool-
+        // returning PURE call WITH HEAP ARGS as the condition. It is materialized to a
+        // scalar BEFORE the IfThen, its transient heap arg temps freed within the cond
+        // frame (cert `id` for the call's owned arg temps, balanced). tag("box")="y".
+        let src = "fn tag(s: String) -> String = if string.contains(s, \"x\") then \"y\" else \"n\"\n\
+            fn main() -> Unit = { println(tag(\"box\")) }\n";
+        let prog = lower_source(src);
+        let f = prog.functions.iter().find(|f| f.name == "tag").unwrap();
+        assert!(
+            f.ops.iter().any(|op| matches!(op, Op::IfThen { .. })),
+            "bool-call-cond heap-result if must lower to IfThen, got {:?}",
+            f.ops
+        );
+        if let Some(out) = build_and_run("heap_if_bool_call_cond", &render_wasm_program(&prog)) {
+            assert_eq!(out, "y");
+        }
+    }
+
+    #[test]
+    fn let_bound_heap_result_if_stays_opaque_walled() {
+        // A let-bound (NON-TAIL) heap-result `if` is NOT executed — its single scope-end
+        // drop of the merged `IfThen` dst has no sound flat-certificate encoding (the
+        // per-arm "im" move-out balance leaves nothing to drop → the checker REJECTS
+        // `im·im·d`). So it MUST stay the deferred `Alloc{Opaque}` (memory-safe, value
+        // deferred), NEVER an executable IfThen in this position. This pins the soundness
+        // boundary: a regression that re-enables it would make corpus ownership REJECT.
+        let src = "fn main() -> Unit = {\n  \
+            let x = 15\n  \
+            let label = if x > 20 then \"big\" else \"small\"\n  \
+            println(label) }\n";
+        let prog = lower_source(src);
+        let main = prog.functions.iter().find(|f| f.name == "main").unwrap();
+        assert!(
+            !main.ops.iter().any(|op| matches!(op, Op::IfThen { .. })),
+            "let-bound heap-result if must NOT lower to an (unsound) IfThen, got {:?}",
+            main.ops
+        );
+        // The proven ownership checker must ACCEPT the (Opaque) lowering.
+        assert_eq!(
+            crate::verify_ownership(main),
+            Ok(()),
+            "the Opaque-walled let-bound heap-result if must be ownership-ACCEPT"
+        );
+    }
+
+    #[test]
     fn variant_match_over_a_materialized_option_executes() {
         // `match opt { Some(x) => …, None => … }` over a LOCALLY-bound, MATERIALIZED
         // Option RUNS only the matched arm — Option is the 0-or-1-element-list layout

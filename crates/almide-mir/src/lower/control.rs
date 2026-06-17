@@ -917,6 +917,37 @@ impl LowerCtx {
         result
     }
 
+    /// Materialize the CONDITION of a heap-result `if` to a scalar (Bool = i64 0/1)
+    /// BEFORE the `IfThen` marker. The common shape is a pure `lower_scalar_value` cond
+    /// (a comparison, a Var, a literal) — tried first, no ownership. When that defers, a
+    /// Bool/Int-returning PURE call WITH HEAP ARGS (`if string.contains(s, x) then …`,
+    /// `if list.is_empty(xs) then …`) is materialized via `try_lower_scalar_call`: the
+    /// call's heap arg temps are pushed to `live_heap_handles`, and a per-cond frame
+    /// (`drop_arm_locals`) frees them IMMEDIATELY after the call — they are transient to
+    /// the condition, not owned by either arm. The scalar result is not a heap handle, so
+    /// it survives the frame teardown. SOUND: the cond eval is internally balanced (each
+    /// arg temp alloc'd `i` + dropped `d` within the frame), exactly the per-arm
+    /// discipline; outside the pure-scalar-call subset it walls (`None` → Opaque). The
+    /// gate keeping a heap-arg call OUT of `lower_scalar_value` (its rollback-safe, no-
+    /// ownership contract) does not bind here — this position freely emits ownership ops.
+    fn lower_heap_result_cond(&mut self, cond: &IrExpr) -> Option<ValueId> {
+        if let Some(v) = self.lower_scalar_value(cond) {
+            return Some(v);
+        }
+        // A scalar-returning (Bool/Int) PURE call with heap args — materialize it, then
+        // free the transient arg temps within a cond-local frame.
+        if let IrExprKind::Call { .. } = &cond.kind {
+            if !is_heap_ty(&cond.ty) {
+                let frame = self.live_heap_handles.len();
+                if let Some(v) = self.try_lower_scalar_call(cond, &cond.ty) {
+                    self.drop_arm_locals(frame);
+                    return Some(v);
+                }
+            }
+        }
+        None
+    }
+
     fn lower_heap_result_if_inner(
         &mut self,
         cond: &IrExpr,
@@ -924,7 +955,7 @@ impl LowerCtx {
         else_: &IrExpr,
         result_ty: &Ty,
     ) -> Option<ValueId> {
-        let cond_v = self.lower_scalar_value(cond)?;
+        let cond_v = self.lower_heap_result_cond(cond)?;
         let dst = self.fresh_value();
         self.ops.push(Op::IfThen { cond: cond_v, dst: Some(dst) });
         let then_obj = self.lower_heap_result_arm(then, result_ty)?;
@@ -946,6 +977,23 @@ impl LowerCtx {
                 self.ops.push(Op::Alloc { dst: obj, repr, init: Init::Str(value.clone()) });
                 self.ops.push(Op::Consume { v: obj });
                 Some(obj)
+            }
+            // A bare-Var arm (`if c then a else b` over heap params/locals — the `pick`
+            // shape): the arm must MOVE OUT an owned reference, but `a`/`b` are still
+            // owned elsewhere (a borrowed param the caller owns, or a let-local with its
+            // own scope-end drop). ACQUIRE a fresh reference (`Op::Dup` = cert `i`-grade:
+            // a new owned object, rc+1) and move it out (the arm's `Consume` = `m`) — the
+            // SAME per-arm `"im"` balance as a literal arm, and the ORIGINAL handle is
+            // untouched (no double-free: the Dup'd ref is independent; the original drops
+            // exactly once at its own scope end). Sound for BOTH a param (the proven
+            // auto-acquire from the tail-Var path) and a tracked local. `value_for` walls
+            // an unbound/global var → the caller keeps the Opaque fallback.
+            IrExprKind::Var { id } => {
+                let src = self.value_for(*id).ok()?;
+                let dst = self.fresh_value();
+                self.ops.push(Op::Dup { dst, src });
+                self.ops.push(Op::Consume { v: dst });
+                Some(dst)
             }
             // A string-concat arm (`match x { _ => a + b }`, `if c then a + b else …`) — the
             // __str_concat call's fresh owned String (cert `i`) + the arm's `Consume` (`m`) = the
@@ -985,6 +1033,18 @@ impl LowerCtx {
             // ran (garbage rc_dec → trap). Per-arm, the temp is freed only if this arm
             // executes — the same per-iteration-balance discipline the loops use.
             IrExprKind::Call { target: CallTarget::Named { name }, args, .. } => {
+                // A DIRECT SELF-RECURSIVE call arm (`name == fn_name`) is the unbounded-
+                // stack tail-recursion shape (`fn spin = if … then acc else spin(…)`).
+                // v1 has NO TCO, so EXECUTING it deeply overflows the wasm call stack
+                // (a fail-stop trap). Executing the heap-result if here would convert a
+                // shallow-correct / deep-trapping recursion — a NET LOSS over the sound
+                // Opaque fallback for the canonical 2M-deep TCO acceptance fixture. WALL
+                // it (→ `None`): the function keeps its memory-safe linearized form until
+                // real TCO lands. (A non-self call recurses no deeper than the caller, so
+                // it stays admitted.)
+                if name.as_str() == self.fn_name {
+                    return None;
+                }
                 let repr = repr_of(result_ty).ok()?;
                 let arm_mark = self.live_heap_handles.len();
                 let lowered = self.lower_call_args(args).ok()?;

@@ -571,12 +571,25 @@ impl LowerCtx {
                 self.record_elided_calls(value);
                 Ok(())
             }
-            // `var x = if c then … else …` — a heap-result branch. LINEARIZE the arms
-            // (each per-arm balanced, its value deferred), then bind `x` to ONE fresh
-            // `Alloc{Opaque}` — the merged result slot. Memory-safe by construction
-            // (the arms balance; the result is a clean fresh alloc dropped at scope
-            // end); which arm's value it equals is functional, deferred like every
-            // `Opaque`. The same WALLS as statement position still apply per arm.
+            // `var x = if c then … else …` / `let x = match … { … }` — a heap-result
+            // branch in a NON-TAIL, let-bound position. LINEARIZE the arms (each per-arm
+            // balanced, its value deferred), then bind `x` to ONE fresh `Alloc{Opaque}` —
+            // the merged result slot. Memory-safe by construction (the arms balance; the
+            // result is a clean fresh alloc dropped at scope end); which arm's value it
+            // equals is functional, deferred like every `Opaque`. The same WALLS as
+            // statement position still apply per arm.
+            //
+            // Unlike TAIL position (`try_lower_heap_result_if`), a let-bound heap-result
+            // value is NOT moved out — it is bound and dropped at scope end. That single
+            // scope-end `Drop` on the MERGED `IfThen` dst has NO sound encoding in the FLAT
+            // ownership certificate: the per-arm `"im"` balance models each arm's value
+            // being moved OUT (the tail-return transfer), so a trailing `Drop` of the dst
+            // would release a moved-out object — the checker REJECTS the resulting
+            // `im·im·d` (empirically verified: an executable let-bound heap-result if/match
+            // makes corpus ownership REJECT, accept⟹safe violated). The flat cert cannot
+            // attribute ONE scope-end drop to exactly-one-of-two arm allocs without a
+            // checker/Coq change (out of scope). So a let-bound heap-result if/match stays
+            // the sound deferred `Opaque` here until the certificate can express it.
             IrExprKind::If { .. } | IrExprKind::Match { .. } => {
                 self.lower_branch(value)?;
                 let dst = self.fresh_value();
