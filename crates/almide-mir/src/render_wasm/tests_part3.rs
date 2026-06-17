@@ -987,3 +987,18 @@
             assert_eq!(out, "hello\nell\nhij");
         }
     }
+
+    #[test]
+    fn self_hosted_datetime_format() {
+        // datetime.format(ts, pattern): token substitution (YYYY/MM/DD/HH/mm/ss) in v0's SEQUENTIAL
+        // .replace() order, composing the self-hosted datetime.year/.../second + string.replace +
+        // __dt_pad zero-padding. ts=0 = the unix epoch 1970-01-01T00:00:00Z; ts=86400 = 1970-01-02.
+        let src = "fn main() -> Unit = {\n  \
+            println(datetime.format(0, \"YYYY-MM-DD HH:mm:ss\"))\n  \
+            println(datetime.format(86400, \"DD/MM/YYYY\")) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "datetime.format"));
+        if let Some(out) = build_and_run("datetime_format", &render_wasm_program(&prog)) {
+            assert_eq!(out, "1970-01-01 00:00:00\n02/01/1970");
+        }
+    }

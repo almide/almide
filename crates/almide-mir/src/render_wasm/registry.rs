@@ -245,7 +245,7 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
         ),
         (
             include_str!("../../../../stdlib/datetime_format.almd"),
-            &[("datetime_to_iso", "datetime.to_iso")],
+            &[("datetime_to_iso", "datetime.to_iso"), ("datetime_format", "datetime.format")],
         ),
         (
             include_str!("../../../../stdlib/datetime_calendar.almd"),

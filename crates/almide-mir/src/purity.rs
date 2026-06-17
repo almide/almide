@@ -94,6 +94,7 @@ fn is_pure_fn_in_impure_module(module: &str, func: &str) -> bool {
                 | "weekday"
                 | "from_parts"
                 | "to_iso"
+                | "format"
         ),
         _ => false,
     }
