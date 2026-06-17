@@ -966,3 +966,24 @@
             assert_eq!(out, "1\n9\n0");
         }
     }
+
+    #[test]
+    fn self_hosted_bytes_string_reads() {
+        // bytes.to_string_lossy / read_string_at / read_string_be self-hosted: a Bytes is the
+        // [rc][len][cap][data] byte block; each builds a FRESH String by a prim byte-copy of the
+        // selected window. to_string_lossy(from_string "hello")="hello"; read_string_at(b,1,3)
+        // ="ell" (bytes 1..4); read_string_be over [0,0,0,3,'h','i','j'] reads the BE-4 length
+        // prefix (3) then copies the 3 body bytes -> "hij". Byte-matches v0 for valid UTF-8.
+        let src = "fn main() -> Unit = {\n  \
+            let b = bytes.from_string(\"hello\")\n  \
+            println(bytes.to_string_lossy(b))\n  \
+            println(bytes.read_string_at(b, 1, 3))\n  \
+            let p = bytes.from_list([0, 0, 0, 3, 104, 105, 106])\n  \
+            println(bytes.read_string_be(p, 0)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "bytes.to_string_lossy"));
+        assert!(prog.functions.iter().any(|f| f.name == "bytes.read_string_be"));
+        if let Some(out) = build_and_run("bytes_string_reads", &render_wasm_program(&prog)) {
+            assert_eq!(out, "hello\nell\nhij");
+        }
+    }

@@ -1,0 +1,58 @@
+// bytes_string — SELF-HOSTED bytes.{to_string_lossy, read_string_at, read_string_be} for v1.
+// A Bytes is the [rc][len@4][cap@8][data@12] byte block; each result is a FRESH String built by
+// prim.alloc_str + a byte copy of the selected range (prim.load8/store8 — the proven bytes_core
+// discipline). v0 uses String::from_utf8_lossy, so this byte-MATCHES v0 for VALID UTF-8 input; for
+// INVALID UTF-8 v0 substitutes U+FFFD (0xEF 0xBF 0xBD) per maximal subpart while this copies the raw
+// bytes — a DOCUMENTED edge (the value path for valid text is exact, like string.trim's ASCII-only
+// whitespace). Source Bytes is BORROWED (no refcount change). All bounds use a scalar-if effective
+// length (never a heap-result if), so only ONE alloc path lowers.
+
+fn __bs_copy(dst: Int, src: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    prim.store8(dst + i, prim.load8(src + i))
+    __bs_copy(dst, src, n, i + 1)
+  }
+
+// bytes.to_string_lossy(b): the whole data region decoded as UTF-8.
+fn bytes_to_string_lossy(b: Bytes) -> String = {
+  let h = prim.handle(b)
+  let n = prim.load32(h + 4)
+  let out = prim.alloc_str(n)
+  let _x = __bs_copy(prim.handle(out) + 12, h + 12, n, 0)
+  out
+}
+
+// bytes.read_string_at(b, pos, len): the len-byte window at pos, or "" when out of bounds
+// (v0: `if pos+len > b.len() { "" }`). The bounds check folds into the effective copy length.
+fn bytes_read_string_at(b: Bytes, pos: Int, len: Int) -> String = {
+  let h = prim.handle(b)
+  let blen = prim.load32(h + 4)
+  let n = if pos + len > blen then 0 else len
+  let out = prim.alloc_str(n)
+  let _x = __bs_copy(prim.handle(out) + 12, h + 12 + pos, n, 0)
+  out
+}
+
+// 4-byte BIG-ENDIAN u32 at address p (prim.load8 returns the unsigned byte 0..255).
+fn __bs_be32(p: Int) -> Int = {
+  let b0 = prim.load8(p)
+  let b1 = prim.load8(p + 1)
+  let b2 = prim.load8(p + 2)
+  let b3 = prim.load8(p + 3)
+  ((b0 * 256 + b1) * 256 + b2) * 256 + b3
+}
+
+// bytes.read_string_be(b, pos): a 4-byte BE length prefix at pos, then that many UTF-8 body bytes.
+// "" when the prefix or the body runs past the end (v0's two bounds checks), expressed as nested
+// scalar-ifs folding into one effective copy length (no `and`/`or`, no heap-result if).
+fn bytes_read_string_be(b: Bytes, pos: Int) -> String = {
+  let h = prim.handle(b)
+  let blen = prim.load32(h + 4)
+  let hdr_ok = pos + 4 <= blen
+  let slen = if hdr_ok then __bs_be32(h + 12 + pos) else 0
+  let n = if hdr_ok then (if pos + 4 + slen > blen then 0 else slen) else 0
+  let out = prim.alloc_str(n)
+  let _x = __bs_copy(prim.handle(out) + 12, h + 12 + pos + 4, n, 0)
+  out
+}
