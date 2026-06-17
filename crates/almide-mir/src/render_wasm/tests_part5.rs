@@ -155,3 +155,102 @@ fn compound_list_interp_nested_walls_cleanly() {
         Ok(_) => panic!("a nested-List interp must wall, not render to (possibly invalid) wasm"),
     }
 }
+
+// ── Record / tuple VALUE MODEL (fix-0276): construction + field/element access ──
+//
+// A named-record literal `R { x: …, y: … }` is materialized as a flat heap block
+// `[rc][len][cap][x@12][y@20]…` (one i64 slot per field, declaration order), and a
+// field access `r.x` LOADS from its slot — so a field reads back exactly what was
+// stored, byte-matching v0's stdout (the dual-oracle matches output, not the raw
+// pointer layout). The goldens are from `almide run` on the v0 oracle.
+
+#[test]
+fn record_field_access_byte_matches_v0() {
+    // distance_sq reads a.x/a.y/b.x/b.y of two `Point` records and computes over them;
+    // the field reads must return the stored values (3,4 and 0,0), giving 25.
+    let src = "type Point = { x: Int, y: Int }\n\
+        fn distance_sq(a: Point, b: Point) -> Int =\n  \
+        (a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y)\n\
+        fn main() -> Unit = {\n  \
+        let p1 = Point { x: 3, y: 4 }\n  \
+        let p2 = Point { x: 0, y: 0 }\n  \
+        println(int.to_string(p1.x) + \" \" + int.to_string(p1.y))\n  \
+        println(int.to_string(distance_sq(p1, p2))) }\n";
+    let prog = lower_source(src);
+    if let Some(out) = build_and_run("record_field_access", &render_wasm_program(&prog)) {
+        assert_eq!(out, "3 4\n25");
+    }
+}
+
+#[test]
+fn record_field_access_in_lifted_lambda_matches_v0() {
+    // `(p) => p.x` over a `List[Point]` mapped by self-hosted list.map: the lifted
+    // lambda receives each record handle and LOADS p.x. list.sum over the result
+    // confirms the field reads (1+3+5 = 9). The list-of-records is itself materialized
+    // (each element a fresh owned record block, recursively freed via DropListStr).
+    let src = "type Point = { x: Int, y: Int }\n\
+        fn main() -> Unit = {\n  \
+        let points = [Point { x: 1, y: 2 }, Point { x: 3, y: 4 }, Point { x: 5, y: 6 }]\n  \
+        let xs = list.map(points, (p) => p.x)\n  \
+        println(int.to_string(list.sum(xs))) }\n";
+    let prog = lower_source(src);
+    if let Some(out) = build_and_run("record_field_in_lambda", &render_wasm_program(&prog)) {
+        assert_eq!(out, "9");
+    }
+}
+
+#[test]
+fn tuple_element_access_byte_matches_v0() {
+    // A scalar tuple `(Int, Int)` literal materializes its slots; `.0`/`.1` load them.
+    let src = "fn main() -> Unit = {\n  \
+        let t = (11, 22)\n  \
+        println(int.to_string(t.0) + \":\" + int.to_string(t.1)) }\n";
+    let prog = lower_source(src);
+    if let Some(out) = build_and_run("tuple_element_access", &render_wasm_program(&prog)) {
+        assert_eq!(out, "11:22");
+    }
+}
+
+#[test]
+fn narrow_int_record_field_round_trips() {
+    // An `Int8` field stored in a uniform i64 slot round-trips losslessly through
+    // `int.from_int8` (127 stays 127, the high field reads independently). Guards that
+    // the uniform-slot layout is correct for narrow-int fields (no width-packing needed
+    // for the observable output).
+    let src = "type Rec = { b: Int8, n: Int }\n\
+        fn main() -> Unit = {\n  \
+        let r: Rec = { b: 127, n: 9999 }\n  \
+        println(int.to_string(int.from_int8(r.b)) + \":\" + int.to_string(r.n)) }\n";
+    let prog = lower_source(src);
+    if let Some(out) = build_and_run("narrow_int_record", &render_wasm_program(&prog)) {
+        assert_eq!(out, "127:9999");
+    }
+}
+
+#[test]
+fn heap_field_record_does_not_emit_wrong_bytes() {
+    // A record with a HEAP (String) field is OUTSIDE this value-model brick (it would
+    // need a per-field-heap-aware recursive drop). It must NOT silently materialize with
+    // a wrong/garbage field — construction defers (no scalar-record store sequence) and
+    // the scalar `r.n` read is NOT a layout load (the heap-field record is not a
+    // resolvable scalar aggregate). This guards the WALL discipline: a heap-field record
+    // is never materialized as if it were scalar (no `try_lower_scalar_record_construct`
+    // success for it), so it can't emit a confidently-wrong field value.
+    let src = "type R = { name: String, n: Int }\n\
+        fn main() -> Unit = {\n  \
+        let r = R { name: \"x\", n: 7 }\n  \
+        println(int.to_string(r.n)) }\n";
+    let prog = lower_source(src);
+    let main = prog.functions.iter().find(|f| f.name == "main").expect("main");
+    // No scalar-record store sequence was emitted for the heap-field record: the only
+    // i64 stores in main would be the DynList field stores my construction emits — there
+    // must be NONE here (the record deferred to Opaque). A Prim::Store of width 8 at a
+    // record slot is the signature of a materialized scalar record.
+    let materialized = main.ops.iter().any(|op| {
+        matches!(op, crate::Op::Prim { kind: crate::PrimKind::Store { width: 8 }, .. })
+    });
+    assert!(
+        !materialized,
+        "a heap-field record must NOT be materialized as a scalar record (wall discipline)"
+    );
+}

@@ -8,6 +8,42 @@ use almide_ir::{
 };
 use almide_lang::types::Ty;
 
+/// Substitute `Ty::TypeVar(name)` with the supplied concrete type throughout `ty` —
+/// the generic-record instantiation used by the VALUE MODEL (`Box[Int]`'s `value: T`
+/// becomes `value: Int`). Total over `Ty`; an unmapped `TypeVar` is left as-is (the
+/// caller's `scalar_field_width` then rejects it, walling the record).
+fn subst_type_var(
+    ty: &Ty,
+    subst: &std::collections::HashMap<almide_lang::intern::Sym, Ty>,
+) -> Ty {
+    match ty {
+        Ty::TypeVar(name) => subst.get(name).cloned().unwrap_or_else(|| ty.clone()),
+        Ty::Applied(id, args) => {
+            Ty::Applied(id.clone(), args.iter().map(|a| subst_type_var(a, subst)).collect())
+        }
+        Ty::Record { fields } => Ty::Record {
+            fields: fields.iter().map(|(n, t)| (*n, subst_type_var(t, subst))).collect(),
+        },
+        Ty::OpenRecord { fields } => Ty::OpenRecord {
+            fields: fields.iter().map(|(n, t)| (*n, subst_type_var(t, subst))).collect(),
+        },
+        Ty::Tuple(elems) => Ty::Tuple(elems.iter().map(|e| subst_type_var(e, subst)).collect()),
+        Ty::Named(name, args) => {
+            Ty::Named(*name, args.iter().map(|a| subst_type_var(a, subst)).collect())
+        }
+        Ty::Fn { params, ret } => Ty::Fn {
+            params: params.iter().map(|p| subst_type_var(p, subst)).collect(),
+            ret: Box::new(subst_type_var(ret, subst)),
+        },
+        Ty::Union(members) => {
+            Ty::Union(members.iter().map(|m| subst_type_var(m, subst)).collect())
+        }
+        // Scalars, Variant, Const*, Unknown, Never, etc. carry no nested TypeVar this
+        // brick substitutes through — returned unchanged.
+        other => other.clone(),
+    }
+}
+
 impl LowerCtx {
 
     /// Lower a stdlib `Module` call (`<module>.<func>(args)`) in a VALUE position
@@ -673,13 +709,24 @@ impl LowerCtx {
                         };
                         self.materialized_call_arg(dst, repr, &a.ty)
                     } else {
-                        // A SCALAR extraction is a `Const` copy — its container
-                        // (which may itself be a call, `g().field`) is elided; record
-                        // any call so the caps fold sees it.
-                        let dst = self.fresh_value();
-                        self.ops.push(Op::Const { dst });
-                        self.record_elided_calls(a);
-                        CallArg::Scalar(dst)
+                        // A SCALAR extraction (`r.x`, `t.0`) — load the REAL field value
+                        // from the block's layout slot when the container is a
+                        // materialized scalar aggregate (the VALUE MODEL). Outside that
+                        // subset (a non-var / heap-field-aggregate container, or a
+                        // computed container `g().field`) it rolls back to a deferred
+                        // `Const` copy with the container's calls elided (the caps fold
+                        // then sees them), exactly as before.
+                        let mark = self.ops.len();
+                        match self.lower_scalar_field_access(a) {
+                            Some(v) => CallArg::Scalar(v),
+                            None => {
+                                self.ops.truncate(mark);
+                                let dst = self.fresh_value();
+                                self.ops.push(Op::Const { dst });
+                                self.record_elided_calls(a);
+                                CallArg::Scalar(dst)
+                            }
+                        }
                     }
                 }
                 // A Named user-call result, materialized into an owned temp.
@@ -849,10 +896,136 @@ impl LowerCtx {
     /// roll back a partial attempt by truncating `self.ops`. The cert is unaffected:
     /// `IntBinOp`/`ConstInt` are no-ops for ownership and already define their `dst` /
     /// use their operands for the name witness.
+    /// Lower a SCALAR field/element PROJECTION (`r.x`, `t.0`) to a real `Prim::Load`
+    /// at the field's layout slot — the v1 VALUE MODEL read side. Returns the loaded
+    /// scalar `dst`, or `None` (defer/wall) when the projection is not in the
+    /// materialized subset:
+    ///   - the container is not a TRACKED heap var (`f().x`, a nested `a.b.c` — no
+    ///     single block to load from),
+    ///   - the container's type is not a SCALAR-only record/tuple (a heap-field
+    ///     aggregate is constructed as a deferred `Opaque`, whose slots are NOT the
+    ///     layout offsets, so loading would read garbage — walled instead),
+    ///   - the field is heap-typed (a String field — handled by the container-grain
+    ///     `lower_heap_extraction`, not a scalar load).
+    ///
+    /// SOUNDNESS: a pure `Prim::Load` reads a copy of the scalar — no ownership event
+    /// (the container keeps its single reference, dropped once at scope end). The gate
+    /// on a MATERIALIZED scalar-aggregate container is what makes the offset correct:
+    /// a deferred `Opaque` record never reaches here (its type would still be a
+    /// scalar-aggregate, but it was never built with field stores — see below).
+    /// The DECLARATION-ordered scalar field types of an aggregate container type, for
+    /// the VALUE MODEL: a `Ty::Record`/`Ty::Tuple` is structural (used directly), a
+    /// `Ty::Named(name, args)` is resolved via the [`LowerCtx::record_layouts`] registry,
+    /// substituting the declared generic params with `args` (so a `Box[Int]` field
+    /// `value: T` is sized as `Int` — the #650 instantiated-layout concern). Returns
+    /// `None` for a non-aggregate / unregistered / arity-mismatched type (the caller
+    /// then walls). The field NAMES are returned alongside so a `.field` access can find
+    /// its index; a tuple has positional "fields" so its names are empty.
+    pub(crate) fn aggregate_field_tys(&self, ty: &Ty) -> Option<(Vec<almide_lang::intern::Sym>, Vec<Ty>)> {
+        match ty {
+            Ty::Record { fields } => {
+                Some((fields.iter().map(|(n, _)| *n).collect(), fields.iter().map(|(_, t)| t.clone()).collect()))
+            }
+            Ty::Tuple(elems) => Some((Vec::new(), elems.clone())),
+            Ty::Named(name, args) => {
+                let (generics, decl_fields) = self.record_layouts.get(name.as_str())?;
+                // Substitute the declared generic params (`T`, `A`, …) with the concrete
+                // `args` from the instantiated type. A param with no supplied arg (arity
+                // mismatch) is a resolution failure → wall.
+                let mut subst: std::collections::HashMap<almide_lang::intern::Sym, Ty> =
+                    std::collections::HashMap::new();
+                for (g, a) in generics.iter().zip(args.iter()) {
+                    subst.insert(*g, a.clone());
+                }
+                let names = decl_fields.iter().map(|(n, _)| *n).collect();
+                let tys = decl_fields
+                    .iter()
+                    .map(|(_, t)| subst_type_var(t, &subst))
+                    .collect();
+                Some((names, tys))
+            }
+            _ => None,
+        }
+    }
+
+    /// The uniform-slot BYTE OFFSET of a named field of a SCALAR-only record `ty`
+    /// (record / named record), resolving the concrete field types first. `None` if
+    /// `ty` is not a resolvable scalar-only record or has no such field. The offset is
+    /// `BLOCK_HEADER + idx*SLOT_SIZE` — the same slot construction stores to.
+    pub(crate) fn aggregate_field_offset(&self, ty: &Ty, field: &str) -> Option<u32> {
+        let (names, tys) = self.aggregate_field_tys(ty)?;
+        layout::scalar_slots(&tys)?; // wall a heap-field aggregate
+        let idx = names.iter().position(|n| n.as_str() == field)?;
+        Some(layout::slot_offset(idx))
+    }
+
+    /// The uniform-slot BYTE OFFSET of a tuple element by index. `None` if `ty` is not a
+    /// resolvable scalar-only tuple or the index is out of range.
+    pub(crate) fn aggregate_index_offset(&self, ty: &Ty, index: usize) -> Option<u32> {
+        if !matches!(ty, Ty::Tuple(_)) {
+            return None;
+        }
+        let (_, tys) = self.aggregate_field_tys(ty)?;
+        let n = layout::scalar_slots(&tys)?;
+        if index >= n {
+            return None;
+        }
+        Some(layout::slot_offset(index))
+    }
+
+    pub(crate) fn lower_scalar_field_access(&mut self, expr: &IrExpr) -> Option<ValueId> {
+        use crate::{IntOp, PrimKind};
+        // Scalar result only (the caller's contract; a heap field defers to the
+        // container-grain extraction).
+        if is_heap_ty(&expr.ty) {
+            return None;
+        }
+        let (container, offset) = match &expr.kind {
+            IrExprKind::Member { object, field } => {
+                (object, self.aggregate_field_offset(&object.ty, field.as_str())?)
+            }
+            IrExprKind::TupleIndex { object, index } => {
+                (object, self.aggregate_index_offset(&object.ty, *index)?)
+            }
+            _ => return None,
+        };
+        // The container must be a TRACKED heap var whose value is a record/tuple block
+        // BUILT by `try_lower_scalar_record_construct` / the scalar-tuple path (a fresh
+        // `Alloc` with field stores at these very slots). A PARAM-bound aggregate is ALSO
+        // admissible: the v1 calling convention passes the block pointer, and the layout
+        // is the same on both sides (the same `aggregate_field_tys` + `slot_offset`), so a
+        // load at the slot is correct. A non-var container (`f().x`) has no block to load
+        // from → defer.
+        let src = match &container.kind {
+            IrExprKind::Var { id } if is_heap_ty(&container.ty) => self.value_or_global(*id).ok()?,
+            _ => return None,
+        };
+        let h = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![src] });
+        let off = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: off, value: offset as i64 });
+        let addr = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst: addr, op: IntOp::Add, a: h, b: off });
+        let dst = self.fresh_value();
+        // Uniform i64 slot — `Load { width: 8 }`. The stored scalar (any width) round-
+        // trips losslessly: a narrow Int8 stored as the full i64 value reads back exact.
+        self.ops.push(Op::Prim {
+            kind: PrimKind::Load { width: 8 },
+            dst: Some(dst),
+            args: vec![addr],
+        });
+        Some(dst)
+    }
+
     pub(crate) fn lower_scalar_value(&mut self, expr: &IrExpr) -> Option<ValueId> {
         use almide_ir::BinOp;
         match &expr.kind {
             IrExprKind::Var { id } => self.value_or_global(*id).ok(),
+            // A SCALAR record field / tuple element (`r.x`, `t.0`) — load from the
+            // block's layout slot. Defers (→ None) for a non-materialized container.
+            IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. } => {
+                self.lower_scalar_field_access(expr)
+            }
             IrExprKind::LitInt { value } => {
                 let dst = self.fresh_value();
                 self.ops.push(Op::ConstInt { dst, value: *value });

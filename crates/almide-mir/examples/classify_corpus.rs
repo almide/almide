@@ -492,10 +492,17 @@ fn main() {
         // NOT a function defined here), else a self-recursive method call falsely flags.
         let file_fn_names: HashSet<String> =
             ir.functions.iter().map(|f| f.name.as_str().to_string()).collect();
+        // The record-layout registry (type name → fields) for the VALUE MODEL, so the
+        // corpus-wall exercises (and the proven checker re-verifies) record/`r.x`
+        // materialization over the whole v0 corpus, not just the structurally-typed forms.
+        let mut record_layouts = almide_mir::lower::build_record_layouts(&ir.type_decls);
+        for m in &ir.modules {
+            record_layouts.extend(almide_mir::lower::build_record_layouts(&m.type_decls));
+        }
         for func in &ir.functions {
             t.functions += 1;
             let lowered = catch_unwind(AssertUnwindSafe(|| {
-                almide_mir::lower::lower_function_all(func, &globals)
+                almide_mir::lower::lower_function_all_with_types(func, &globals, &record_layouts)
             }));
             match lowered {
                 Ok(Ok(mirs)) => {

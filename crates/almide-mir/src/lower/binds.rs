@@ -44,6 +44,9 @@ impl LowerCtx {
         let mut sub = LowerCtx {
             globals: self.globals.clone(),
             fn_name: self.fn_name.clone(),
+            // The lifted body may access a record/tuple field (`(p) => p.x`), so it needs
+            // the VALUE-MODEL field registry too.
+            record_layouts: self.record_layouts.clone(),
             ..Default::default()
         };
         let mut mir_params = Vec::new();
@@ -95,16 +98,29 @@ impl LowerCtx {
         let IrExprKind::List { elements } = &value.kind else {
             return None;
         };
-        let str_list = matches!(&value.ty,
+        // A `List[String]` OR a `List[Record]` whose every element is a SCALAR-only
+        // record literal — both are NESTED-OWNERSHIP lists (i64 slots holding owned heap
+        // handles, recursively freed via `DropListStr`'s per-slot `rc_dec`). A scalar
+        // record is a flat block, so `rc_dec` frees it correctly (no String-specific
+        // recursion). This is what makes `[Point{..}, Point{..}]` (then `list.map(…, p =>
+        // p.x)`) materialize. A `List` of any OTHER heap element (a heap-field record, a
+        // List, a call result) defers.
+        let elem_str = matches!(&value.ty,
             Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && matches!(a[0], Ty::String));
-        if !str_list || elements.is_empty() {
+        let elem_scalar_record = matches!(&value.ty,
+            Ty::Applied(TypeConstructorId::List, a)
+                if a.len() == 1 && self.aggregate_field_tys(&a[0])
+                    .and_then(|(_, tys)| layout::scalar_slots(&tys)).is_some());
+        if (!elem_str && !elem_scalar_record) || elements.is_empty() {
             return None;
         }
-        // Gate: every element must be a fresh-owned LitStr/ConcatStr OR a tracked heap Var (so we can
-        // Dup it). A Var whose value isn't tracked here cannot be Dup'd → defer the whole literal.
+        // Gate: every element must be a fresh-owned String (LitStr/ConcatStr) OR a tracked
+        // heap Var (so we can Dup it) OR — for a record list — a scalar-only record LITERAL
+        // we can materialize. A Var whose value isn't tracked here cannot be Dup'd → defer.
         let all_lowerable = elements.iter().all(|e| match &e.kind {
             IrExprKind::LitStr { .. } | IrExprKind::BinOp { op: BinOp::ConcatStr, .. } => true,
             IrExprKind::Var { id } => self.value_of.contains_key(id),
+            IrExprKind::Record { .. } => elem_scalar_record,
             _ => false,
         });
         if !all_lowerable {
@@ -133,6 +149,9 @@ impl LowerCtx {
                     self.ops.push(Op::Dup { dst: dup, src });
                     dup
                 }
+                // A scalar-only record literal element — materialize a fresh OWNED record
+                // block (`try_lower_scalar_record_construct`, cert `i`), moved into the slot.
+                IrExprKind::Record { .. } => self.try_lower_scalar_record_construct(elem)?,
                 _ => self.try_lower_concat_str(elem)?,
             };
             let off = self.fresh_value();
@@ -216,6 +235,17 @@ impl LowerCtx {
                     self.value_of.insert(var, src);
                     return Ok(());
                 }
+            }
+            // `let d = r.x` / `let d = t.0` — a SCALAR field projection LOADS the real
+            // value from the materialized aggregate's layout slot (the VALUE MODEL).
+            // Outside the materialized subset it rolls back to the deferred `Const`.
+            if let IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. } = &value.kind {
+                let mark = self.ops.len();
+                if let Some(dst) = self.lower_scalar_field_access(value) {
+                    self.value_of.insert(var, dst);
+                    return Ok(());
+                }
+                self.ops.truncate(mark);
             }
             let dst = self.fresh_value();
             self.value_of.insert(var, dst);
@@ -352,6 +382,19 @@ impl LowerCtx {
                 // of the precise destructure). A heap-field tuple falls through to the Opaque alloc.
                 if let IrExprKind::Tuple { elements } = &value.kind {
                     if let Some(dst) = self.try_lower_scalar_tuple_construct(elements) {
+                        self.value_of.insert(var, dst);
+                        self.live_heap_handles.push(dst);
+                        return Ok(());
+                    }
+                }
+                // A SCALAR-only record `R { x: 3, y: 4 }` — build the tight-packed,
+                // width-aware block + store each field at its layout slot (the VALUE
+                // MODEL: `r.x`/`r.y` read back exactly what was stored). A HEAP-field
+                // record (a String/List field) needs an ownership-aware recursive drop
+                // this brick does not have, so it falls through to the deferred Opaque
+                // (which the field-access path then WALLS rather than mis-reads).
+                if let IrExprKind::Record { .. } = &value.kind {
+                    if let Some(dst) = self.try_lower_scalar_record_construct(value) {
                         self.value_of.insert(var, dst);
                         self.live_heap_handles.push(dst);
                         return Ok(());
@@ -629,6 +672,86 @@ impl LowerCtx {
             return None; // heap-field tuple deferred (the all-heap path traps inside loops — TODO).
         }
         self.try_lower_scalar_list_slots(elements)
+    }
+
+    /// Construct a SCALAR-only RECORD `R { f0: e0, f1: e1, … }`: alloc a block laid out
+    /// by [`Self::aggregate_field_tys`] + [`layout::field_slots`] (per-field TIGHT-PACKED
+    /// at width-aware offsets after the `[rc][len][cap]` header) and `Prim::Store` each
+    /// field's computed scalar at its own (offset, width). Unlike
+    /// [`Self::try_lower_scalar_list_slots`] (uniform 8-byte slots), this honours each
+    /// field's DECLARED width (Int8 → width 1, Bool/Int32 → 4, Int/Float → 8), so a
+    /// `{ b: Int8, n: Int }` round-trips through `r.b`/`r.n` byte-exactly.
+    ///
+    /// The field order + concrete widths come from the record's TYPE (resolved via the
+    /// layout registry, substituting generic params with the instantiated args — so a
+    /// `Box[Int]` field `value: T` is sized as `Int`, the #650 concern), NOT the literal's
+    /// field order: construction and `r.x` projection consult the SAME declaration-ordered
+    /// slot list, so they cannot desync even if the literal lists fields out of order.
+    ///
+    /// Returns `None` (defer/wall) for a non-record / unresolvable type, a HEAP field
+    /// (needs an ownership-aware recursive drop — out of this value-model brick), an
+    /// unsupported scalar width, or a field whose value is not a lowerable scalar.
+    ///
+    /// SOUNDNESS: a scalar-only record owns NO nested heap, so the block is a FLAT
+    /// `DynList` — its scope-end drop is the ordinary single `Drop` (cert `i`+`d`), no
+    /// new ownership op or certificate event. The fields are pure `Prim::Store`s (no
+    /// ownership), exactly like the scalar-tuple / IntList path: one i64 slot per field,
+    /// `12 + idx*8`, `store64`. A narrow Int8 value round-trips losslessly through its
+    /// i64 slot, so a uniform slot is correct for the observable output.
+    pub(crate) fn try_lower_scalar_record_construct(
+        &mut self,
+        value: &IrExpr,
+    ) -> Option<ValueId> {
+        use crate::{IntOp, PrimKind};
+        // Only an explicit `Record` literal reaches here (a `SpreadRecord` defers).
+        let IrExprKind::Record { fields, .. } = &value.kind else {
+            return None;
+        };
+        // The CANONICAL declaration-ordered (name, concrete-type) field list. A heap
+        // field / unresolvable type ⇒ `None` (via `scalar_slots`) ⇒ wall.
+        let (names, tys) = self.aggregate_field_tys(&value.ty)?;
+        let n = layout::scalar_slots(&tys)?;
+        if names.len() != n {
+            return None;
+        }
+        // Lower every supplied field value FIRST (before the alloc) so a field expr that
+        // itself allocates does not interleave with our store sequence. Map each literal
+        // field to its DECLARED index (the literal may list fields out of declaration
+        // order — the slot offset follows the declaration, not the literal). A record may
+        // OMIT a field (default) — the fresh block's slot stays zero, never garbage.
+        let mut field_vals: Vec<(usize, ValueId)> = Vec::with_capacity(fields.len());
+        for (name, expr) in fields {
+            let idx = names.iter().position(|n| n == name)?;
+            // A field whose VALUE is heap is out of the scalar value-model — wall the
+            // whole record (never a partial wrong-bytes block).
+            if is_heap_ty(&expr.ty) {
+                return None;
+            }
+            let v = self.lower_scalar_value(expr)?;
+            field_vals.push((idx, v));
+        }
+        let len = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: len, value: n as i64 });
+        let dst = self.fresh_value();
+        self.ops.push(Op::Alloc {
+            dst,
+            repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT },
+            init: crate::Init::DynList { len },
+        });
+        let h = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![dst] });
+        for (idx, v) in field_vals {
+            let off = self.fresh_value();
+            self.ops.push(Op::ConstInt { dst: off, value: layout::slot_offset(idx) as i64 });
+            let addr = self.fresh_value();
+            self.ops.push(Op::IntBinOp { dst: addr, op: IntOp::Add, a: h, b: off });
+            self.ops.push(Op::Prim {
+                kind: PrimKind::Store { width: 8 },
+                dst: None,
+                args: vec![addr, v],
+            });
+        }
+        Some(dst)
     }
 
     /// Shared block-builder for a scalar tuple/list: lower each element to a scalar value, alloc a

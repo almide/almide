@@ -111,9 +111,45 @@ pub fn lower_function_all(
     func: &IrFunction,
     globals: &HashMap<VarId, Ty>,
 ) -> Result<Vec<MirFunction>, LowerError> {
+    lower_function_all_with_types(func, globals, &RecordLayouts::new())
+}
+
+/// Build the [`RecordLayouts`] registry from a program's type declarations — the
+/// VALUE-MODEL field structure the lowering consults to materialize records and
+/// resolve `r.x`. Each `type R = { … }` becomes `R → (generic params, fields)`;
+/// variant / alias decls carry no flat record layout and are skipped (a record
+/// VARIANT is a separate, tagged shape — out of this brick). Call once per
+/// program and pass the result into [`lower_function_all_with_types`].
+pub fn build_record_layouts(type_decls: &[almide_ir::IrTypeDecl]) -> RecordLayouts {
+    let mut out = RecordLayouts::new();
+    for decl in type_decls {
+        if let almide_ir::IrTypeDeclKind::Record { fields } = &decl.kind {
+            let generics = decl
+                .generics
+                .as_ref()
+                .map(|gs| gs.iter().map(|g| g.name).collect())
+                .unwrap_or_default();
+            let field_tys = fields.iter().map(|f| (f.name, f.ty.clone())).collect();
+            out.insert(decl.name.as_str().to_string(), (generics, field_tys));
+        }
+    }
+    out
+}
+
+/// [`lower_function_all`] WITH the program's record-layout registry threaded in —
+/// the entry the real pipeline (render_program) uses so a `Ty::Named` record
+/// resolves its fields (and `r.x` materializes). The plain [`lower_function_all`]
+/// passes an empty registry (the structurally-typed `Ty::Record`/`Ty::Tuple`
+/// paths still work; a `Ty::Named` aggregate stays walled without it).
+pub fn lower_function_all_with_types(
+    func: &IrFunction,
+    globals: &HashMap<VarId, Ty>,
+    record_layouts: &RecordLayouts,
+) -> Result<Vec<MirFunction>, LowerError> {
     let mut ctx = LowerCtx {
         globals: globals.clone(),
         fn_name: func.name.as_str().to_string(),
+        record_layouts: record_layouts.clone(),
         ..Default::default()
     };
     let params = ctx.bind_params(&func.params)?;
@@ -261,7 +297,20 @@ pub(crate) struct LowerCtx {
     /// payload, a scalar Value just frees the block) instead of a flat [`Op::Drop`]. Populated
     /// when a `Value`-typed bind is created.
     value_handles: HashSet<ValueId>,
+    /// Named-record layout registry (the VALUE-MODEL field structure): type NAME →
+    /// (declared generic param names, declared fields in declaration order). A record
+    /// literal / field access typed `Ty::Named(name, args)` resolves its fields here
+    /// (substituting the generic params with `args`), so `r.x` loads from the same slot
+    /// construction stored to. Empty when lowering without a type registry (the
+    /// param-free testable entry) — a `Ty::Named` aggregate then stays walled, a
+    /// `Ty::Record`/`Ty::Tuple` (structurally typed) still resolves directly.
+    record_layouts: RecordLayouts,
 }
+
+/// Type NAME → (generic param names, declaration-ordered fields) — the VALUE-MODEL
+/// field registry threaded into lowering (see [`LowerCtx::record_layouts`]).
+pub type RecordLayouts =
+    HashMap<String, (Vec<almide_lang::intern::Sym>, Vec<(almide_lang::intern::Sym, Ty)>)>;
 
 /// Is `ty` the dynamic `Value` type (the Codec data model)? Its scope-end drop is the
 /// runtime-tag-dispatched [`Op::DropValue`], since a heap-payload Value (Str/Array/Object) owns a
@@ -638,6 +687,7 @@ impl LowerCtx {
 }
 
 mod binds;
+mod layout;
 mod tail;
 mod control;
 mod calls;

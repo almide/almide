@@ -378,17 +378,30 @@ impl LowerCtx {
                 self.record_elided_calls(tail);
                 Ok(Some(dst))
             }
+            // A SCALAR field / tuple element TAIL (`(p) => p.x`, `fn fst(t) = t.0`) —
+            // LOAD the real value from the materialized aggregate's layout slot (the
+            // VALUE MODEL read side, what makes `list.map(points, (p)=>p.x)` return the
+            // real field). Outside the materialized subset it rolls back to the deferred
+            // `Const` (its container's calls elided), exactly as before.
+            IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. } => {
+                let mark = self.ops.len();
+                if let Some(dst) = self.lower_scalar_field_access(tail) {
+                    return Ok(Some(dst));
+                }
+                self.ops.truncate(mark);
+                let dst = self.fresh_value();
+                self.ops.push(Op::Const { dst });
+                self.record_elided_calls(tail);
+                Ok(Some(dst))
+            }
             IrExprKind::LitBool { .. }
             | IrExprKind::UnOp { .. }
-            // A SCALAR field/element/tuple extraction is an unambiguous COPY (a
-            // scalar is never reference-counted), so it is a `Const` — its
-            // container carries its own ownership. (A HEAP extraction is an ALIAS
-            // / share — it needs a layout-aware field-access op with `Dup`
-            // semantics and stays walled until that brick.)
-            | IrExprKind::Member { .. }
+            // A SCALAR element/map extraction is an unambiguous COPY (a scalar is never
+            // reference-counted), so it is a `Const` — its container carries its own
+            // ownership. (A HEAP extraction is an ALIAS / share — it needs a layout-aware
+            // field-access op with `Dup` semantics and stays walled until that brick.)
             | IrExprKind::IndexAccess { .. }
             | IrExprKind::MapAccess { .. }
-            | IrExprKind::TupleIndex { .. }
             // A SCALAR error-operator result (`x!`/`x ?? d`/`x?.f` yielding a scalar) is
             // likewise a fresh `Const`; the operator's value + early-return are deferred.
             | IrExprKind::Try { .. }

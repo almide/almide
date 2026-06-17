@@ -68,12 +68,21 @@ fn main() {
         }
     }
 
+    // The record-layout registry (type name → fields) for the VALUE MODEL: a record
+    // literal / `r.x` typed `Ty::Named` resolves its field offsets here. Built from the
+    // program's type declarations (+ each module's).
+    let mut record_layouts = almide_mir::lower::build_record_layouts(&ir.type_decls);
+    for m in &ir.modules {
+        record_layouts.extend(almide_mir::lower::build_record_layouts(&m.type_decls));
+    }
+
     let mut functions = Vec::new();
     let mut walled = Vec::new();
     for func in &ir.functions {
-        // lower_function_all returns the main function plus any lambda-lifted auxiliaries
-        // (index 0 is main); all go into the module so the function table covers them.
-        match almide_mir::lower::lower_function_all(func, &globals) {
+        // lower_function_all_with_types returns the main function plus any lambda-lifted
+        // auxiliaries (index 0 is main); all go into the module so the function table
+        // covers them. The record registry is threaded so `Ty::Named` records materialize.
+        match almide_mir::lower::lower_function_all_with_types(func, &globals, &record_layouts) {
             Ok(mirs) => functions.extend(mirs),
             Err(e) => walled.push(format!("{}: {e:?}", func.name.as_str())),
         }

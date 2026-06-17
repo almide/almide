@@ -218,10 +218,16 @@
                 globals.insert(tl.var, tl.ty.clone());
             }
         }
+        let mut record_layouts = crate::lower::build_record_layouts(&ir.type_decls);
+        for m in &ir.modules {
+            record_layouts.extend(crate::lower::build_record_layouts(&m.type_decls));
+        }
         let mut functions: Vec<MirFunction> = ir
             .functions
             .iter()
-            .filter_map(|f| crate::lower::lower_function_all(f, &globals).ok())
+            .filter_map(|f| {
+                crate::lower::lower_function_all_with_types(f, &globals, &record_layouts).ok()
+            })
             .flatten()
             .collect();
         // Auto-link the self-hosted stdlib runtime: for each registry entry CALLED but not
