@@ -577,6 +577,84 @@
         }
     }
 
+    /// VALUE-POSITION UnOp + logical And/Or EXECUTE (audit bucket 1). Before this fix
+    /// `lower_scalar_value_inner` had NO `UnOp` arm and no `And`/`Or` case, so `-a` /
+    /// `not x` / `a and b` / `a or b` in a value position fell through to the caller's
+    /// `Const 0` materialization (read 0), and as an `if` CONDITION the un-lowered
+    /// predicate made `try_lower_scalar_if`/`try_lower_unit_if` run BOTH arms. The
+    /// operands here are FUNCTION PARAMETERS (not literals) so the frontend's constant
+    /// `fold.rs` cannot evaporate the `UnOp`/`And`/`Or` before lowering sees it — the
+    /// new arms are genuinely exercised. `classify(5, 0)`:
+    ///   - `neg(n)` = `0 - n` over a param → int negation
+    ///   - `not (n < 0)` → boolean not in a cond (only the taken arm runs)
+    ///   - `n > 0 and m > 0` (m=0) → false → else arm
+    ///   - `n > 0 or m > 0` → true → then arm
+    /// Each result feeds `int.to_string` (auto-linked, non-negative), printed. Output
+    /// byte-matches v0 (`almide run`).
+    #[test]
+    fn value_position_unop_and_logical_and_or_execute() {
+        let src = "fn ineg(n: Int) -> Int = 0 - n\n\
+            fn bnot(n: Int) -> Int = if not (n < 0) then 1 else 0\n\
+            fn band(n: Int, m: Int) -> Int = if n > 0 and m > 0 then 1 else 0\n\
+            fn bor(n: Int, m: Int) -> Int = if n > 0 or m > 0 then 7 else 9\n\
+            fn main() -> Unit = {\n  \
+            println(int.to_string(ineg(0 - 5)))\n  \
+            println(int.to_string(bnot(5)))\n  \
+            println(int.to_string(band(5, 0)))\n  \
+            println(int.to_string(bor(5, 0))) }\n";
+        let prog = lower_source(src);
+        // `not (n < 0)` (a param-driven Not) must lower to a real `IntBinOp{Sub}` (1 - b),
+        // not a deferred Const — proving the new UnOp arm is wired and reached.
+        let bnot = prog.functions.iter().find(|f| f.name == "bnot").unwrap();
+        assert!(
+            bnot.ops.iter().any(|op| matches!(op, Op::IntBinOp { op: IntOp::Sub, .. })),
+            "`not` must lower to IntBinOp Sub (1 - b), got {:?}",
+            bnot.ops
+        );
+        // `and` / `or` over params in a cond must lower to real IntOp And/Or (eager == v0).
+        let band = prog.functions.iter().find(|f| f.name == "band").unwrap();
+        let bor = prog.functions.iter().find(|f| f.name == "bor").unwrap();
+        assert!(
+            band.ops.iter().any(|op| matches!(op, Op::IntBinOp { op: IntOp::And, .. })),
+            "`and` must lower to IntOp And, got {:?}",
+            band.ops
+        );
+        assert!(
+            bor.ops.iter().any(|op| matches!(op, Op::IntBinOp { op: IntOp::Or, .. })),
+            "`or` must lower to IntOp Or, got {:?}",
+            bor.ops
+        );
+        if let Some(out) = build_and_run("value_unop_and_or", &render_wasm_program(&prog)) {
+            // 5 (ineg(-5) = 5), 1 (not(5<0)=not false=true→then), 0 (5>0 and 0>0=false→else),
+            // 7 (5>0 or 0>0=true→then).
+            assert_eq!(out, "5\n1\n0\n7");
+        }
+    }
+
+    /// Float negation in a value position EXECUTES via the `f64.neg` prim (the
+    /// i64-uniform value holds the f64 bits; the prim reinterprets around the negate).
+    /// The operand is a PARAM (`fneg(x) = -x`) so the constant fold cannot collapse it
+    /// before lowering — the new `UnOp::NegFloat` arm is exercised. `fneg(2.5)` = -2.5,
+    /// byte-matching v0's `float.to_string(-x)`.
+    #[test]
+    fn value_position_float_neg_executes() {
+        let src = "fn fneg(x: Float) -> Float = -x\n\
+            fn main() -> Unit = println(float.to_string(fneg(2.5)))\n";
+        let prog = lower_source(src);
+        // `-x` over a param must reach the f64.neg prim (FloatUn Neg), not a deferred Const.
+        let fneg = prog.functions.iter().find(|f| f.name == "fneg").unwrap();
+        assert!(
+            fneg.ops.iter().any(
+                |op| matches!(op, Op::Prim { kind: PrimKind::FloatUn(FUnOp::Neg), .. })
+            ),
+            "float `-x` must lower to the FloatUn Neg prim, got {:?}",
+            fneg.ops
+        );
+        if let Some(out) = build_and_run("value_float_neg", &render_wasm_program(&prog)) {
+            assert_eq!(out, "-2.5");
+        }
+    }
+
     #[test]
     fn heap_result_if_returns_the_taken_arm_string() {
         // `if c then "yes" else "no"` RETURNS a String — only the taken arm allocates,

@@ -1317,6 +1317,30 @@ impl LowerCtx {
         }
     }
 
+    /// Lower a scalar operand that must be PURE — it computes a scalar AND materializes
+    /// NO heap temp (it does not grow `live_heap_handles`). Returns `None` (fully rolled
+    /// back) if the operand is not scalar-lowerable OR if lowering it allocated a heap
+    /// temp (e.g. `string.contains(s, "@")` materializes the `"@"` literal as an owned
+    /// String). This is the gate for `UnOp` / logical `And`/`Or`: those positions must
+    /// not pull a heap-materializing call into a per-value scalar computation, because
+    /// the enclosing tail/heap-result-`if` machinery owns the per-arm heap balance — a
+    /// stray `Alloc` here would register an owned temp whose `Consume` lands OUTSIDE
+    /// that frame, producing a dangling consume (`m`) the ownership checker rejects.
+    /// A heap-materializing operand therefore WALLS, falling back to the sound prior
+    /// (Opaque / linearized) lowering — never both-arms, never a spurious consume.
+    fn lower_pure_scalar_operand(&mut self, expr: &IrExpr) -> Option<ValueId> {
+        let ops_mark = self.ops.len();
+        let lhh_mark = self.live_heap_handles.len();
+        match self.lower_scalar_value_inner(expr) {
+            Some(v) if self.live_heap_handles.len() == lhh_mark => Some(v),
+            _ => {
+                self.ops.truncate(ops_mark);
+                self.live_heap_handles.truncate(lhh_mark);
+                None
+            }
+        }
+    }
+
     fn lower_scalar_value_inner(&mut self, expr: &IrExpr) -> Option<ValueId> {
         use almide_ir::BinOp;
         match &expr.kind {
@@ -1420,11 +1444,39 @@ impl LowerCtx {
                     // admitted; a Float/String/compound `==` still needs a distinct op.)
                     BinOp::Eq if matches!(left.ty, Ty::Int | Ty::Bool) => crate::IntOp::Eq,
                     BinOp::Neq if matches!(left.ty, Ty::Int | Ty::Bool) => crate::IntOp::Ne,
-                    // Pow, Float, logic, concat, non-Int/Bool compares: defer.
+                    // Logical `and`/`or` on Bool operands → EAGER `i64.and`/`i64.or` of the
+                    // two lowered Bools (each an i64 0/1: a `LitBool` materializes ConstInt
+                    // 0/1, a Var loads its 0/1, a nested compare yields 0/1). This is
+                    // BIT-EXACT with v0, which itself evaluates BOTH operands unconditionally
+                    // (`emit(left); emit(right); i32.and/i32.or` — NO short-circuit) — so
+                    // eager `and`/`or` is the faithful transcription, not an approximation.
+                    // 0/1 ∧ 0/1 (resp. ∨) stays in {0,1}, so the result is a valid Bool the
+                    // `if` condition / `to_string` reads uniformly. The SOUNDNESS subtlety
+                    // (v0 is eager so there is no observable to short-circuit) is moot for a
+                    // pure operand; a SIDE-EFFECTING operand (a printing call) would still be
+                    // executed once by v0's eager emit, but to keep the cert/effect reasoning
+                    // simple we only admit operands that `lower_scalar_value` accepts as a
+                    // pure scalar predicate below — a non-lowerable operand returns None
+                    // (WALL), never both-arms / never 0.
+                    BinOp::And if matches!(left.ty, Ty::Bool) => crate::IntOp::And,
+                    BinOp::Or if matches!(left.ty, Ty::Bool) => crate::IntOp::Or,
+                    // Pow, Float, concat, non-Int/Bool compares: defer.
                     _ => return None,
                 };
-                let a = self.lower_scalar_value(left)?;
-                let b = self.lower_scalar_value(right)?;
+                // `and`/`or` admit only PURE operands. v0's eager emit evaluates BOTH
+                // unconditionally, so an effect-free operand is bit-exact; but a
+                // heap-materializing operand (`is_empty(x) and contains(y, "@")`) would
+                // register an owned temp whose consume escapes the enclosing per-arm
+                // frame (a dangling `m`). Gate it out → WALL to the sound prior lowering.
+                // The arithmetic/comparison ops keep the plain `lower_scalar_value`: by
+                // type their operands are Int/Float/Bool scalars that never materialize a
+                // heap temp, so the pure-gate would be a no-op there.
+                let is_logic = matches!(iop, crate::IntOp::And | crate::IntOp::Or);
+                let (a, b) = if is_logic {
+                    (self.lower_pure_scalar_operand(left)?, self.lower_pure_scalar_operand(right)?)
+                } else {
+                    (self.lower_scalar_value(left)?, self.lower_scalar_value(right)?)
+                };
                 let dst = self.fresh_value();
                 self.ops.push(Op::IntBinOp { dst, op: iop, a, b });
                 Some(dst)
@@ -1483,6 +1535,54 @@ impl LowerCtx {
             // the separate escalated-cert path) — it is gated out by `!is_heap_ty`.
             IrExprKind::Call { .. } if !is_heap_ty(&expr.ty) => {
                 self.try_lower_scalar_call(expr, &expr.ty)
+            }
+            // A scalar UNARY op (`-a`, `not x`). The operand lowers via the SAME scalar
+            // value path (a Var load, a literal, a nested compare/arith) — if it is not
+            // scalar-lowerable we return None (WALL/defer), never a silent 0. Previously
+            // there was NO UnOp arm here, so EVERY `-a` / `not x` in a value position fell
+            // through to `_ => None` → the caller's Const-0 materialization, reading 0; and
+            // in an `if` CONDITION the un-lowered cond made `try_lower_scalar_if` /
+            // `try_lower_unit_if` run BOTH arms. This arm closes both failures.
+            IrExprKind::UnOp { op, operand } => {
+                use almide_ir::UnOp;
+                // PURE operand only: a `not string.contains(s, "@")` materializes the
+                // `"@"` literal as an owned heap temp — admitting it would land a
+                // dangling `Consume` outside the enclosing per-arm heap frame (a bare
+                // `m` the ownership checker rejects). Such an operand WALLS (→ None),
+                // falling back to the sound prior linearized/Opaque lowering.
+                let x = self.lower_pure_scalar_operand(operand)?;
+                let dst = self.fresh_value();
+                match op {
+                    // Integer negation: `0 - x` (no dedicated wasm i64 negate op; the
+                    // IntBinOp Sub renders `i64.sub` of a ConstInt 0 and x, matching v0's
+                    // `0i64 - x`). i64::MIN negation overflows identically to v0's wrapping.
+                    UnOp::NegInt => {
+                        let zero = self.fresh_value();
+                        self.ops.push(Op::ConstInt { dst: zero, value: 0 });
+                        self.ops.push(Op::IntBinOp { dst, op: crate::IntOp::Sub, a: zero, b: x });
+                        Some(dst)
+                    }
+                    // Float negation: the existing `f64.neg` prim (the i64-uniform value
+                    // holds the f64 bits; the prim reinterprets around `f64.neg` — sign-bit
+                    // flip, so `-0.0` and NaN behave exactly as v0's `f64::neg`).
+                    UnOp::NegFloat => {
+                        self.ops.push(Op::Prim {
+                            kind: crate::PrimKind::FloatUn(crate::FUnOp::Neg),
+                            dst: Some(dst),
+                            args: vec![x],
+                        });
+                        Some(dst)
+                    }
+                    // Boolean `not`: a Bool is an i64 0/1, so `1 - b` flips it (b∈{0,1} →
+                    // 1-b∈{1,0}). Renders `i64.sub` of ConstInt 1 and b; the result stays in
+                    // {0,1}, a valid Bool the `if` condition reads uniformly.
+                    UnOp::Not => {
+                        let one = self.fresh_value();
+                        self.ops.push(Op::ConstInt { dst: one, value: 1 });
+                        self.ops.push(Op::IntBinOp { dst, op: crate::IntOp::Sub, a: one, b: x });
+                        Some(dst)
+                    }
+                }
             }
             _ => None,
         }

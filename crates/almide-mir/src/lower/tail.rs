@@ -503,8 +503,26 @@ impl LowerCtx {
                 self.record_elided_calls(tail);
                 Ok(Some(dst))
             }
+            // A scalar UNARY op RETURNED directly (`fn ineg(n) = -n`, `fn flip(b) = not b`,
+            // `fn fneg(x) = -x`) computes its REAL value via `lower_scalar_value` (the
+            // UnOp arm: int neg `0 - x`, float neg the `f64.neg` prim, bool `not` `1 - b`)
+            // — NOT the deferred-`Const` zero this used to fall into. This is the TAIL-
+            // position twin of the value-position UnOp fix: a function whose body IS a
+            // `UnOp` is a value position, so it must compute, not read 0. Outside the
+            // scalar subset (a non-lowerable operand) it rolls back to the Const below,
+            // exactly like the `BinOp` tail arm.
+            IrExprKind::UnOp { .. } if !is_heap_ty(&tail.ty) => {
+                let mark = self.ops.len();
+                if let Some(dst) = self.lower_scalar_value(tail) {
+                    return Ok(Some(dst));
+                }
+                self.ops.truncate(mark);
+                let dst = self.fresh_value();
+                self.ops.push(Op::Const { dst });
+                self.record_elided_calls(tail);
+                Ok(Some(dst))
+            }
             IrExprKind::LitBool { .. }
-            | IrExprKind::UnOp { .. }
             // A SCALAR map extraction is an unambiguous COPY (a scalar is never
             // reference-counted), so it is a `Const` — its container carries its own
             // ownership. (A HEAP extraction is an ALIAS / share — it needs a layout-aware
