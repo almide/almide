@@ -114,14 +114,20 @@ impl LowerCtx {
                 if self.try_lower_result_match(subject_value, arms) {
                     return Ok(());
                 }
+                // A GUARDED arm reaching the linearization fallback cannot be faithfully
+                // lowered: the both-arms linearization runs EVERY arm's effects regardless
+                // of the guard's truth, so the guard's conditional SELECTION is lost — a
+                // silent miscompile (it would run the wrong arm, or both). WALL it (the
+                // executable desugar in `desugar_match_to_if` already declines guards, so
+                // the only way a guard reaches here is the linearization path).
+                if arms.iter().any(|a| a.guard.is_some()) {
+                    return Err(LowerError::Unsupported(
+                        "match arm guard cannot be faithfully lowered (the linearization runs \
+                         every arm, losing the guard's conditional selection) not in this brick"
+                            .into(),
+                    ));
+                }
                 for arm in arms {
-                    // An arm GUARD is a scalar Bool sub-condition. The arms are
-                    // LINEARIZED regardless of the guard, so it adds no ownership — just
-                    // capture the caps of any call inside it; the guard's conditional
-                    // truth (and any heap touch within it) is deferred like every Opaque.
-                    if let Some(guard) = &arm.guard {
-                        self.record_elided_calls(guard);
-                    }
                     self.lower_branch_arm(Some((&arm.pattern, subject_value)), &arm.body)?;
                 }
                 Ok(())
@@ -182,6 +188,12 @@ impl LowerCtx {
                 IrExprKind::If { cond, then, else_ }
                     if self.try_lower_unit_if(cond, then, else_) => {}
                 IrExprKind::If { .. } | IrExprKind::Match { .. } => self.lower_branch(tail)?,
+                // A nested BLOCK tail (`{ stmt; … }` as an arm's tail — e.g. a flattened
+                // binder body, or a brace-wrapped arm) must NOT fall to `record_elided_calls`:
+                // that captures only the calls inside and SILENTLY DROPS its statements (the
+                // `match … { x => { r = 999 } }` assignment-loss). Recurse so its statements
+                // run as effects and its own tail is dispatched the same way.
+                IrExprKind::Block { .. } => self.lower_branch_arm(None, tail)?,
                 _ => self.record_elided_calls(tail),
             }
         }
@@ -227,13 +239,21 @@ impl LowerCtx {
         None
     }
 
-    /// Desugar a `match subj { lit => body, …, _ => body }` over INT LITERAL patterns
-    /// (+ a trailing wildcard/bind catch-all, no guards) to a nested `if subj == lit
+    /// Desugar a `match subj { lit => body, …, _ => body }` to a nested `if subj == lit
     /// then body else …` IrExpr — so it EXECUTES via the if machinery (only the matched
     /// arm runs). `subj` is cloned into each `==`; a Var resolves to the same ValueId
     /// (no re-eval), and a non-scalar-lowerable subject makes the cond fail → the caller
     /// falls back to linearization. Returns `None` for non-literal patterns / guards /
     /// a non-exhaustive literal list (the linearization handles those).
+    ///
+    /// Handled SCALAR-subject shapes:
+    /// - INT LITERAL arms + a trailing wildcard/binder catch-all;
+    /// - a BOOL subject `match b { true => A, false => B }` (exhaustive over `{true,false}`
+    ///   with no wildcard) → `if b then A else B`, where the `true`/`false` arms may appear
+    ///   in either order;
+    /// - a BINDER catch-all `x => body`, which BINDS `x` to the subject (a `let x = subj`
+    ///   wrapped around `body`) so the arm body's references to `x` resolve — without the
+    ///   bind, `x` would lower to a deferred 0 and the whole match silently miscompile.
     pub(crate) fn desugar_match_to_if(
         &self,
         subject: &IrExpr,
@@ -243,7 +263,56 @@ impl LowerCtx {
         if arms.is_empty() || arms.iter().any(|a| a.guard.is_some()) {
             return None;
         }
+        // A BOOL subject is exhaustive over `{true, false}` WITHOUT a wildcard: the literal
+        // chain below would run off the end (`build_match_chain([])` → None). Desugar the
+        // canonical 2-arm form `match b { true => A, false => B }` to `if b then A else B`
+        // directly (arms in either order); other Bool shapes (a single wildcard/binder arm)
+        // fall through to the generic chain.
+        if matches!(subject.ty, Ty::Bool) {
+            if let Some(if_expr) = self.desugar_bool_match(subject, arms, result_ty) {
+                return Some(if_expr);
+            }
+        }
         self.build_match_chain(subject, arms, result_ty)
+    }
+
+    /// A 2-arm `match b { true => A, false => B }` (arms in either order, no guards) →
+    /// `if b then A else B`. Returns `None` if the shape is not exactly the two Bool
+    /// literals (e.g. a wildcard arm) — the caller then falls to `build_match_chain`.
+    fn desugar_bool_match(
+        &self,
+        subject: &IrExpr,
+        arms: &[IrMatchArm],
+        result_ty: &Ty,
+    ) -> Option<IrExpr> {
+        if arms.len() != 2 {
+            return None;
+        }
+        let bool_lit = |arm: &IrMatchArm| -> Option<bool> {
+            match &arm.pattern {
+                IrPattern::Literal { expr } => match &expr.kind {
+                    IrExprKind::LitBool { value } => Some(*value),
+                    _ => None,
+                },
+                _ => None,
+            }
+        };
+        let (b0, b1) = (bool_lit(&arms[0])?, bool_lit(&arms[1])?);
+        // Must be exactly one `true` arm and one `false` arm.
+        if b0 == b1 {
+            return None;
+        }
+        let (then_arm, else_arm) = if b0 { (&arms[0], &arms[1]) } else { (&arms[1], &arms[0]) };
+        Some(IrExpr {
+            kind: IrExprKind::If {
+                cond: Box::new(subject.clone()),
+                then: Box::new(then_arm.body.clone()),
+                else_: Box::new(else_arm.body.clone()),
+            },
+            ty: result_ty.clone(),
+            span: None,
+            def_id: None,
+        })
     }
 
     fn build_match_chain(
@@ -254,8 +323,12 @@ impl LowerCtx {
     ) -> Option<IrExpr> {
         let (first, rest) = arms.split_first()?;
         match &first.pattern {
-            // A catch-all: its body is the value, no further test.
-            IrPattern::Wildcard | IrPattern::Bind { .. } => Some(first.body.clone()),
+            // A wildcard catch-all: its body is the value, no further test.
+            IrPattern::Wildcard => Some(first.body.clone()),
+            // A BINDER catch-all `x => body`: bind `x` to the subject so the body's
+            // references to `x` resolve to the subject value. Without the bind, `x` would
+            // lower to a deferred 0 (a silent miscompile of `match n { 0 => .., x => x+1 }`).
+            IrPattern::Bind { var, ty } => Some(Self::bind_subject(*var, ty, subject, &first.body)),
             IrPattern::Literal { expr } => {
                 // A literal-only tail with no catch-all is not exhaustive over Int — defer.
                 let else_branch = self.build_match_chain(subject, rest, result_ty)?;
@@ -285,6 +358,46 @@ impl LowerCtx {
         }
     }
 
+    /// `{ let var = subject; body }` typed like `body` — the binder-arm binding so the
+    /// arm body's references to `var` resolve to the subject value (a SCALAR subject; the
+    /// `let` lowers as a Copy bind). The subject is re-cloned, but a scalar subject is a
+    /// pure value (Var/literal) so re-evaluation is side-effect-free.
+    ///
+    /// When `body` is itself a Block (`x => { r = 999 }` in STATEMENT position), its
+    /// statements are FLATTENED in after the `let` rather than nested as the outer Block's
+    /// tail expr. A nested-Block tail would reach `lower_branch_arm`'s tail dispatch as an
+    /// `IrExprKind::Block`, which only handled Call/If/Match — a bare-statement Block (an
+    /// `Assign`) fell through to `record_elided_calls` and the assignment was SILENTLY
+    /// DROPPED (the `match n { 0 => {r=100}, x => {r=999} }` miscompile). Flattening lifts
+    /// the body's statements to be the outer Block's own statements, where the `stmts` loop
+    /// lowers them as effects, and the body's own tail becomes the outer tail.
+    fn bind_subject(var: VarId, var_ty: &Ty, subject: &IrExpr, body: &IrExpr) -> IrExpr {
+        let bind = IrStmt {
+            kind: IrStmtKind::Bind {
+                var,
+                mutability: almide_ir::Mutability::Let,
+                ty: var_ty.clone(),
+                value: subject.clone(),
+            },
+            span: None,
+        };
+        let (stmts, tail): (Vec<IrStmt>, Option<Box<IrExpr>>) = match &body.kind {
+            IrExprKind::Block { stmts, expr } => {
+                let mut s = Vec::with_capacity(stmts.len() + 1);
+                s.push(bind);
+                s.extend(stmts.iter().cloned());
+                (s, expr.clone())
+            }
+            _ => (vec![bind], Some(Box::new(body.clone()))),
+        };
+        IrExpr {
+            kind: IrExprKind::Block { stmts, expr: tail },
+            ty: body.ty.clone(),
+            span: None,
+            def_id: None,
+        }
+    }
+
     /// Try to lower a UNIT (effect) `if cond then … else …` to EXECUTABLE control flow
     /// — only the taken arm's EFFECTS run (the old linearization ran BOTH, mismatching
     /// v0). Each arm goes through `lower_branch_arm` (its Unit-call tail is an effect,
@@ -301,13 +414,19 @@ impl LowerCtx {
             }
         };
         self.ops.push(Op::IfThen { cond: cond_v, dst: None });
+        // Exactly ONE arm runs at runtime, so a scalar reassignment of an outer mutable
+        // var inside an arm must mutate that var's stable local IN PLACE (`SetLocal`), not
+        // rebind a fresh frame-local — see `LowerCtx::unit_arm_depth`.
+        self.unit_arm_depth += 1;
         let then_ok = self.lower_branch_arm(None, then).is_ok();
-        if then_ok {
+        let both_ok = then_ok && {
             self.ops.push(Op::Else { val: None });
-            if self.lower_branch_arm(None, else_).is_ok() {
-                self.ops.push(Op::EndIf { val: None });
-                return true;
-            }
+            self.lower_branch_arm(None, else_).is_ok()
+        };
+        self.unit_arm_depth -= 1;
+        if both_ok {
+            self.ops.push(Op::EndIf { val: None });
+            return true;
         }
         self.ops.truncate(ops_mark);
         self.live_heap_handles.truncate(lhh_mark);
@@ -1735,42 +1854,56 @@ impl LowerCtx {
 
     pub(crate) fn lower_while(&mut self, cond: &IrExpr, body: &[IrStmt]) -> Result<(), LowerError> {
         // First try to EXECUTE it as a real scalar-state loop; on any out-of-subset
-        // feature this rolls back cleanly and we keep the model-one-iteration form below.
+        // feature this rolls back cleanly and we reach the model-one-iteration form below.
         if self.try_lower_scalar_while(cond, body) {
             return Ok(());
         }
+        // The fallback below runs the body straight-line ONCE (the model-one-iteration
+        // form). A `break`/`continue` (no early-exit branch) and a HEAP ACCUMULATOR
+        // reassignment (deferred → the accumulation is dropped) BOTH make that one
+        // iteration produce the wrong answer — WALL them rather than silently miscompile.
+        // (Walling BEFORE lowering the body avoids emitting partial ops; the executable
+        // `try_lower_scalar_while` already declined both shapes and rolled back.)
+        self.wall_break_over_heap_frame(body, "while", self.live_heap_handles.len())?;
+        if body_reassigns_heap(body) {
+            return Err(LowerError::Unsupported(
+                "while body with a heap-accumulator reassignment cannot be faithfully lowered \
+                 (the model-one-iteration fallback defers the reassignment, dropping the \
+                 accumulation) not in this brick"
+                    .into(),
+            ));
+        }
         self.record_elided_calls(cond);
         let mark = self.live_heap_handles.len();
-        // A heap reassignment in the body is DEFERRED (the `in_frame` discipline) — the
-        // accumulator keeps its still-live handle across iterations. Memory-safe.
         self.in_frame += 1;
         for stmt in body {
             self.lower_stmt(stmt)?;
         }
         self.in_frame -= 1;
-        self.wall_break_over_heap_frame(body, "while", mark)?;
         self.drop_arm_locals(mark);
         Ok(())
     }
 
-    /// Post-lowering loop-body admission for `break`/`continue`. The early exit is
-    /// lowered as a no-op (the cert models the loop completing, frame Drops intact),
-    /// which is leak-safe ONLY when the per-iteration frame holds NO heap handle a real
-    /// early exit could skip — `live_heap_handles` holds only heap handles, so a frame
-    /// that grew past `mark` (a heap loop variable's `Op::Dup`, a heap body local, or a
-    /// materialized temp) holds one. At runtime the v0 wasm backend frees AFTER the break
-    /// branch target, so such a frame would LEAK; KEEP WALLING it. A scalar-only frame
-    /// (scalar loop variable, no heap local; the heap accumulator is deferred, not a
-    /// frame handle) has no Drop to skip and is admitted with the break/continue no-op.
+    /// Post-lowering loop-body admission for `break`/`continue` reaching the
+    /// MODEL-ONE-ITERATION fallback (the executable `try_lower_scalar_*` paths already
+    /// decline a break/continue body and roll back, so this is only hit when the loop
+    /// linearizes to one modeled iteration). That fallback runs the body straight-line
+    /// ONCE with NO loop and NO early-exit branch, so it CANNOT honor an early exit: the
+    /// break/continue is silently dropped and the loop produces the wrong answer (e.g.
+    /// `while i<100 { if i==7 then break; i=i+1 }; print(i)` → v0 `7`, the one-iteration
+    /// form `1`). WALL it — a break/continue is faithfully executed only by the real-loop
+    /// markers (`try_lower_scalar_while`/`_for_*`), which do not yet cover early exits.
+    /// (This SUBSUMES the prior heap-frame leak wall: a heap-frame early exit would also
+    /// skip a per-iteration Drop, but the selection bug walls every break/continue first.)
     pub(crate) fn wall_break_over_heap_frame(
         &self,
         body: &[IrStmt],
         what: &str,
-        mark: usize,
+        _mark: usize,
     ) -> Result<(), LowerError> {
-        if self.live_heap_handles.len() > mark && body_breaks_or_continues(body) {
+        if body_breaks_or_continues(body) {
             return Err(LowerError::Unsupported(format!(
-                "{what} body with break/continue over a heap frame (early exit would skip a per-iteration heap drop = a wasm leak) not in this brick"
+                "{what} body with break/continue cannot be faithfully lowered (the model-one-iteration fallback runs the body once with no early-exit branch, losing the break/continue) not in this brick"
             )));
         }
         Ok(())

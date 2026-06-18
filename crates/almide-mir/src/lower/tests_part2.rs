@@ -39,17 +39,18 @@
             stmt(IrStmtKind::Expr { expr: forin }),
         ]);
         match lower_body(&b, "main") {
-            Err(LowerError::Unsupported(r)) => assert!(r.contains("heap frame"), "got: {r}"),
-            other => panic!("expected a heap-frame break wall, got {other:?}"),
+            Err(LowerError::Unsupported(r)) => assert!(r.contains("break/continue"), "got: {r}"),
+            other => panic!("expected a break/continue wall, got {other:?}"),
         }
     }
 
     #[test]
-    fn scalar_loop_with_heap_accumulator_and_break_lowers() {
+    fn scalar_loop_with_break_walls() {
         // var acc = []; for i in 0..n { if c then { break } else { } ; acc = acc + [i] }
-        // The loop variable `i` is scalar (Const, NOT a frame handle) and the heap
-        // accumulator is DEFERRED via in_frame (also not a frame handle), so the frame is
-        // empty of heap handles → the break is admitted (no leak). The common pattern.
+        // The model-one-iteration fallback runs the body straight-line ONCE with no
+        // early-exit branch, so the `break` is silently dropped — the loop would run to the
+        // end instead of stopping. WALL it (the discipline fix: never silently miscompile an
+        // early exit; faithful break needs the real-loop markers, which don't yet cover it).
         let brk = unit_block(vec![stmt(IrStmtKind::Expr { expr: ir_expr(IrExprKind::Break, Ty::Unit) })]);
         let body_if = stmt(IrStmtKind::Expr { expr: iff(brk, unit_block(vec![]), Ty::Unit) });
         let acc_plus = stmt(IrStmtKind::Assign {
@@ -83,17 +84,20 @@
             bind(0, list_int(), ir_expr(IrExprKind::List { elements: vec![] }, list_int())),
             stmt(IrStmtKind::Expr { expr: forin }),
         ]);
-        let mir = lower_body(&b, "main").expect("scalar loop + heap accumulator + break lowers");
-        assert_eq!(verify_ownership(&mir), Ok(()));
+        match lower_body(&b, "main") {
+            Err(LowerError::Unsupported(r)) => assert!(r.contains("break/continue"), "got: {r}"),
+            other => panic!("expected a break/continue wall, got {other:?}"),
+        }
     }
 
     #[test]
-    fn loop_body_heap_accumulator_is_deferred_and_safe() {
+    fn while_body_heap_accumulator_walls() {
         // var acc = []; while c { acc = [] }  — a HEAP reassign of a pre-loop var is the
-        // loop ACCUMULATOR. It is DEFERRED (not rebound): `acc` keeps its still-live
-        // pre-loop handle across iterations, so no iteration drops a handle a later
-        // iteration reads. The reassign emits NO ownership op (acc's `value_of` is
-        // unchanged) → exactly one Alloc (the pre-loop `[]`) and one Drop (scope end).
+        // loop ACCUMULATOR. The model-one-iteration `while` fallback DEFERS it (no rebind),
+        // which is memory-safe BUT drops the accumulation: the loop would print the initial
+        // `acc`, not the accumulated one (`var acc="S"; while … { acc=acc+"x" }` → v0 `Sxxx`,
+        // the fallback `S`). WALL it (the discipline fix) — a faithful heap accumulator needs
+        // a real loop with cross-back-edge heap merge, not yet in this brick.
         let reassign = stmt(IrStmtKind::Assign {
             var: VarId(0),
             value: ir_expr(IrExprKind::List { elements: vec![] }, list_int()),
@@ -106,12 +110,12 @@
             bind(0, list_int(), ir_expr(IrExprKind::List { elements: vec![] }, list_int())),
             stmt(IrStmtKind::Expr { expr: w }),
         ]);
-        let mir = lower_body(&b, "main").expect("the accumulator is deferred, not walled");
-        let allocs = mir.ops.iter().filter(|o| matches!(o, Op::Alloc { .. })).count();
-        let drops = mir.ops.iter().filter(|o| matches!(o, Op::Drop { .. })).count();
-        assert_eq!(allocs, 1, "only the pre-loop alloc — the reassign is deferred: {:?}", mir.ops);
-        assert_eq!(drops, 1, "acc dropped exactly once at scope end: {:?}", mir.ops);
-        assert_eq!(verify_ownership(&mir), Ok(()), "no UAF — acc stays pinned to its live handle");
+        match lower_body(&b, "main") {
+            Err(LowerError::Unsupported(r)) => {
+                assert!(r.contains("heap-accumulator"), "got: {r}")
+            }
+            other => panic!("expected a heap-accumulator wall, got {other:?}"),
+        }
     }
 
     #[test]

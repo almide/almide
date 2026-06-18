@@ -713,10 +713,12 @@
     }
 
     #[test]
-    fn scalar_frame_break_is_admitted_as_noop() {
-        // while c { break }  — the per-iteration frame holds NO heap handle, so there is
-        // no Drop a real early exit could skip = no leak on either target. The break is a
-        // no-op; the loop lowers balanced.
+    fn scalar_frame_break_walls() {
+        // while c { break }  — the model-one-iteration `while` fallback runs the body once
+        // with no early-exit branch, so the `break` is silently dropped: a `while i<100 { if
+        // i==7 then break; i=i+1 }` would print `1` (one iteration), v0 prints `7`. The frame
+        // holds no heap handle (so it is leak-safe), but the SELECTION is still wrong — WALL it
+        // (the discipline fix), since a faithful break needs the real-loop markers.
         let w = ir_expr(
             IrExprKind::While {
                 cond: Box::new(bool_var()),
@@ -725,7 +727,9 @@
             Ty::Unit,
         );
         let b = body(vec![stmt(IrStmtKind::Expr { expr: w })]);
-        let mir = lower_body(&b, "main").expect("a scalar-frame break is admitted (no leak possible)");
-        assert_eq!(verify_ownership(&mir), Ok(()));
+        match lower_body(&b, "main") {
+            Err(LowerError::Unsupported(r)) => assert!(r.contains("break/continue"), "got: {r}"),
+            other => panic!("expected a break/continue wall, got {other:?}"),
+        }
     }
 

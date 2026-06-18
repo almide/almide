@@ -400,6 +400,51 @@ fn spread_heap_field_record_materializes_soundly() {
     }
 }
 
+/// A STATEMENT-position binder `match` whose arm body is a BLOCK that REASSIGNS an outer
+/// mutable var EXECUTES the matched arm and mutates the var in place — byte-matching v0.
+/// Regression for the two bugs `bind_subject` + the Unit-arm scalar reassignment closed:
+///  (1) the binder arm's `{ r = 999 }` block body was nested as the desugared `if`'s tail
+///      expr and dropped (`lower_branch_arm`'s tail dispatch had no `Block` case → the
+///      assignment vanished); `bind_subject` now flattens the block's statements in after
+///      the `let`, and the tail dispatch recurses into a nested block.
+///  (2) a scalar `r = 999` inside a Unit arm rebound `value_of[r]` to a fresh frame-local,
+///      so the post-match read saw the LAST-lowered arm's local (unset at runtime when the
+///      OTHER arm ran → 0); it now mutates `r`'s stable local via `SetLocal` (in place, as
+///      v0 does). The matched binder arm runs (n=3 ≠ 0 → `r = 999`), so v0 prints 999.
+#[test]
+fn stmt_binder_match_block_arm_reassigns_outer_var() {
+    let src = "fn main() -> Unit = {\n  \
+        var n = 3\n  \
+        var r = 0\n  \
+        match n {\n    0 => { r = 100 },\n    x => { r = 999 }\n  }\n  \
+        println(int.to_string(r)) }\n";
+    let prog = lower_source(src);
+    assert!(
+        crate::render_wasm::unlinked_call_names(&prog).is_empty(),
+        "the match must lower + link, got {:?}",
+        crate::render_wasm::unlinked_call_names(&prog)
+    );
+    if let Some(out) = build_and_run("stmt_binder_match_block", &render_wasm_program(&prog)) {
+        assert_eq!(out, "999", "the matched binder arm `r = 999` must run and be read in place");
+    }
+}
+
+/// The LITERAL arm of the same shape, TAKEN (n=0 → `r = 100`): the literal arm's block body
+/// `{ r = 100 }` mutates the outer `r` in place too. Guards the SetLocal fix against the
+/// taken-arm position — before it, the post-match read saw the binder (else) arm's frozen
+/// local (0) regardless of which arm ran at runtime. v0 prints 100.
+#[test]
+fn stmt_binder_match_literal_arm_taken_reassigns_in_place() {
+    let src = "fn main() -> Unit = {\n  \
+        var n = 0\n  \
+        var r = 0\n  \
+        match n {\n    0 => { r = 100 },\n    x => { r = x + 1 }\n  }\n  \
+        println(int.to_string(r)) }\n";
+    let prog = lower_source(src);
+    if let Some(out) = build_and_run("stmt_match_literal_taken", &render_wasm_program(&prog)) {
+        assert_eq!(out, "100", "the taken literal arm `r = 100` must mutate r in place");
+    }
+}
 
 
 

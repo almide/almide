@@ -246,6 +246,20 @@ pub(crate) struct LowerCtx {
     /// falls back to its sound model-one-iteration form (a heap accumulator is deferred,
     /// not run, exactly as before).
     scalar_loop_depth: u32,
+    /// Depth of enclosing EXECUTABLE Unit (statement) `if`/`match` arms — lowered with
+    /// real markers (`IfThen`/`Else`/`EndIf`) so exactly ONE arm runs at runtime. When
+    /// > 0, a scalar `Assign` to a var that ALREADY has a stable local (declared outside
+    /// the arm — `var r = 0`) mutates that local via [`Op::SetLocal`] instead of rebinding
+    /// `value_of` to a fresh value. A fresh rebind is frame-local: `value_of[var]` ends up
+    /// pointing at whichever arm was lowered LAST (last-writer-wins), so a read after the
+    /// branch sees a local only that arm's `local.set` wrote — but at runtime the OTHER
+    /// arm ran, leaving it unset (the `match n { 0 => {r=100}, x => {r=999} }` 0-vs-999
+    /// silent miscompile). SetLocal-to-the-stable-local is the faithful in-place mutation
+    /// v0 performs. Distinct from `scalar_loop_depth` (loops also block heap rebinds and
+    /// roll back the whole attempt); here a heap reassignment keeps the existing branch-arm
+    /// DEFER behavior. Cert-neutral: a scalar `SetLocal` carries no heap ownership (the
+    /// same no-op `verify_ownership` already proves for the loop-carried SetLocal).
+    unit_arm_depth: u32,
     /// The module's top-level `let` bindings (VarId → declared Ty). A reference to one
     /// of these resolves to no FUNCTION-local `value_of` entry; this DECLARED set lets
     /// `value_or_global` distinguish a legitimate global reference (materialize a fresh
@@ -646,6 +660,28 @@ impl LowerCtx {
                     self.ops.push(Op::SetLocal { local, src });
                     return Ok(());
                 }
+                // Inside an EXECUTABLE Unit (statement) arm, a SCALAR reassignment of a var
+                // that ALREADY has a stable local (declared outside the arm) mutates that
+                // local IN PLACE via `SetLocal` — exactly as v0 does — instead of a fresh
+                // rebind. A rebind is frame-local: `value_of[var]` would end up pointing at
+                // whichever arm lowered LAST, so a read after the branch sees a local only
+                // that arm's `local.set` wrote, while at runtime the OTHER arm ran (the
+                // `match n { 0 => {r=100}, x => {r=999} }` silent miscompile). The value must
+                // be a SCALAR lowerable to a single value (literal/arithmetic/scalar call);
+                // a heap reassignment keeps the existing branch-arm DEFER below. The local
+                // is the var's own already-defined slot, so SetLocal carries no new heap
+                // ownership (cert-neutral, like the loop-carried SetLocal above).
+                if self.unit_arm_depth > 0 && !is_heap_ty(&value.ty) {
+                    if let Some(&local) = self.value_of.get(var) {
+                        if let Some(src) = self
+                            .lower_scalar_value(value)
+                            .or_else(|| self.try_lower_scalar_call(value, &value.ty))
+                        {
+                            self.ops.push(Op::SetLocal { local, src });
+                            return Ok(());
+                        }
+                    }
+                }
                 if self.in_frame > 0 && is_heap_ty(&value.ty) {
                     self.record_elided_calls(value);
                     Ok(())
@@ -874,6 +910,51 @@ pub(crate) fn body_breaks_or_continues(stmts: &[IrStmt]) -> bool {
             match &e.kind {
                 IrExprKind::Break | IrExprKind::Continue => self.found = true,
                 // A nested loop captures its OWN break/continue — do not descend.
+                IrExprKind::ForIn { .. } | IrExprKind::While { .. } => {}
+                _ => walk_expr(self, e),
+            }
+        }
+    }
+    let mut s = Scan { found: false };
+    for stmt in stmts {
+        s.visit_stmt(stmt);
+    }
+    s.found
+}
+
+/// Does a loop body REASSIGN a HEAP variable (`acc = acc + "x"`, `xs = xs + [e]`) in a
+/// position the THIS-loop model-one-iteration fallback would reach (not nested inside an
+/// inner loop, which manages its own)? Such a reassignment is the loop ACCUMULATOR: the
+/// fallback DEFERS it (it emits no rebind, `value_of[acc]` stays pinned to the pre-loop
+/// handle) — memory-safe but the accumulation is DROPPED, so the loop prints the initial
+/// value (e.g. `var acc="S"; while i<3 { acc=acc+"x" }` → v0 `Sxxx`, the fallback `S`).
+/// The executable `try_lower_scalar_while`/`_for_*` paths already decline a heap reassign
+/// and roll back, so a body reaching the fallback with one cannot be faithfully run — the
+/// caller WALLs it instead of silently eliding the accumulation.
+pub(crate) fn body_reassigns_heap(stmts: &[IrStmt]) -> bool {
+    use almide_ir::visit::{walk_expr, walk_stmt, IrVisitor};
+    struct Scan {
+        found: bool,
+    }
+    impl IrVisitor for Scan {
+        fn visit_stmt(&mut self, stmt: &IrStmt) {
+            if self.found {
+                return;
+            }
+            if let IrStmtKind::Assign { value, .. } = &stmt.kind {
+                if is_heap_ty(&value.ty) {
+                    self.found = true;
+                    return;
+                }
+            }
+            walk_stmt(self, stmt);
+        }
+        fn visit_expr(&mut self, e: &IrExpr) {
+            if self.found {
+                return;
+            }
+            match &e.kind {
+                // A nested loop captures its OWN accumulator — do not descend.
                 IrExprKind::ForIn { .. } | IrExprKind::While { .. } => {}
                 _ => walk_expr(self, e),
             }

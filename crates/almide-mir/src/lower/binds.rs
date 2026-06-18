@@ -199,7 +199,12 @@ impl LowerCtx {
             // An INT literal carries its real value (`ConstInt` → `(i64.const v)`),
             // the scalar-value foundation; other scalars stay the deferred `Const`. A FLOAT
             // literal carries its f64 BITS the same way (the float-floor render reinterprets).
-            if let IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. } = &value.kind {
+            // A BOOL literal materializes to ConstInt 0/1 (else `var b=true` stays a deferred
+            // Const 0, and `if b` / `match b { true=>.. }` always takes the false arm).
+            if let IrExprKind::LitInt { .. }
+            | IrExprKind::LitFloat { .. }
+            | IrExprKind::LitBool { .. } = &value.kind
+            {
                 if let Some(dst) = self.lower_scalar_value(value) {
                     self.value_of.insert(var, dst);
                     return Ok(());
