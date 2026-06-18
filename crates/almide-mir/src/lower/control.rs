@@ -327,6 +327,27 @@ impl LowerCtx {
         result_ty: &Ty,
     ) -> Option<IrExpr> {
         let (first, rest) = arms.split_first()?;
+        // Bind an arm's pattern var to the subject. A SCALAR PURE subject (a Var / literal) is
+        // freely substitutable: `var := subject` is inlined into the body, producing a DIRECT
+        // expr (NOT a `{ let var = subj; .. }` Block) — so a HEAP-result binder/guard match
+        // (`fn f(n) -> String = match n { x if g => "..", _ => ".." }`, a classifier) lowers
+        // through the proven heap-result-`if` path too (which cannot lower a Block tail). A
+        // NON-pure subject (a call — re-evaluation would duplicate effects) keeps `bind_subject`
+        // (single eval; its heap case stays walled, its scalar case runs via `lower_scalar_arm`).
+        let subject_pure = matches!(
+            &subject.kind,
+            IrExprKind::Var { .. }
+                | IrExprKind::LitInt { .. }
+                | IrExprKind::LitBool { .. }
+                | IrExprKind::LitFloat { .. }
+        );
+        let bind_or_subst = |var: VarId, ty: &Ty, body: &IrExpr| -> IrExpr {
+            if subject_pure {
+                almide_ir::substitute_var_in_expr(body, var, subject)
+            } else {
+                Self::bind_subject(var, ty, subject, body)
+            }
+        };
         // A GUARDED arm `pat if g => body` runs `body` only when the pattern matches AND `g`
         // holds; otherwise control falls through to the rest. Desugar to `if <pat-test && g>
         // then body else <rest>` (a Bind pattern binds the subject around the test so both `g`
@@ -348,10 +369,10 @@ impl LowerCtx {
             return match &first.pattern {
                 // `_ if g`: the guard alone gates the body.
                 IrPattern::Wildcard => Some(mk_if(guard.clone(), &first.body, else_branch)),
-                // `x if g`: bind x = subject around `if g then body else rest` so g/body see x.
+                // `x if g`: bind x = subject in `if g then body else rest` so g/body see x.
                 IrPattern::Bind { var, ty } => {
                     let inner = mk_if(guard.clone(), &first.body, else_branch);
-                    Some(Self::bind_subject(*var, ty, subject, &inner))
+                    Some(bind_or_subst(*var, ty, &inner))
                 }
                 // `lit if g`: cond = (subject == lit) && g.
                 IrPattern::Literal { expr } => {
@@ -387,7 +408,7 @@ impl LowerCtx {
             // A BINDER catch-all `x => body`: bind `x` to the subject so the body's
             // references to `x` resolve to the subject value. Without the bind, `x` would
             // lower to a deferred 0 (a silent miscompile of `match n { 0 => .., x => x+1 }`).
-            IrPattern::Bind { var, ty } => Some(Self::bind_subject(*var, ty, subject, &first.body)),
+            IrPattern::Bind { var, ty } => Some(bind_or_subst(*var, ty, &first.body)),
             IrPattern::Literal { expr } => {
                 // A literal-only tail with no catch-all is not exhaustive over Int — defer.
                 let else_branch = self.build_match_chain(subject, rest, result_ty)?;
