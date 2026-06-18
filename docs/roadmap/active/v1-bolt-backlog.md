@@ -119,4 +119,18 @@ Bolt を1つ取る(優先 = byte-match を最も上げる)
 - **🚩 最初の商売頂上(①agent市場)** = Camp 1(残 C1-B1〜B5)+ C3-B1 + S-B1 ── **近い・列挙可能**
 - **🏔 真の頂上(全市場・飛行)** = + C2(MSR)+ C4-B2(byte束縛)+ Camp 5(飛行)── **遠い(長丁場 = byte束縛と飛行)**
 
-**現在 active**: C1-B1(heap-result variant match)。**並行で今すぐ起動すべき**: C2-B1(MSR 実験)、C1-B5(unbiased corpus)、S-B1(make-verify デモ)。
+## Mob 判断:② を勝ち筋として active 昇格(2026-06-18)
+
+north-star に照らすと **②(検証+回復)が勝ち筋(既に 6/8、Python 0/8 silent)、①(run率)は床で
+残りは Camp 4 escalation に gated**(unbiased 0/15、最難関、soundness-critical)。MSR-survival は
+天井で蒸発、verification が生き残った ── よって優先 fork を組み替える:
+
+- **🟢 active(② = 勝ち筋を育てる)**
+  - **S-B1**: make-verify デモ拡張(②の実証・model-zoo に効く・GTM 種)
+  - **C2-B3**: MSR-as-recoverability 実験(②の測定・regime 定量化)
+  - 通常作業の compiler-②(silent を出荷しない壁規律)は継続
+- **🟡 Mob-gated(① = 床、あなたの go 待ち)**
+  - **C4-B1 + C1-B1 の cert-precision**(heap-result merged-dst / 2段再帰 drop = Coq trust base 拡張)。
+    soundness-critical・rush 禁止・fresh+adversarial で「usable にする」と腹を括った時に着手
+- **🔴 fade(diminishing)**
+  - **C1-B2 / C1-B4**(cert-clean ① の残り plumbing/stdlib)。easy 分収穫済み、default で長く掘らない
