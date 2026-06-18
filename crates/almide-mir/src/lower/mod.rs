@@ -72,6 +72,13 @@ pub fn is_variant_ty(ty: &Ty) -> bool {
     )
 }
 
+/// Is `ty` a `Result[_, _]` (vs an `Option[_]`)? Selects the len-as-tag arm arrangement for a
+/// `??` / `match` over a variant: Option `Some` = `tag != 0`, Result `Ok` = `tag == 0` (INVERSE).
+pub fn is_result_ty(ty: &Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    matches!(ty, Ty::Applied(TypeConstructorId::Result, _))
+}
+
 /// The [`Repr`] of a value of type `ty` — the LAYOUT decision, made once here.
 /// Heap types get `Ptr` with a placeholder [`LayoutId`] (the layout pass, a
 /// later brick, assigns real ids); scalars get their named byte width.

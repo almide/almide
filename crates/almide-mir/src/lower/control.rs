@@ -904,6 +904,10 @@ impl LowerCtx {
         // INVERSELY: Option Some = `tag != 0` (take payload), Result Ok = `tag == 0` (take payload).
         // `is_result` selects the arm arrangement below; a Result operand also skips the Option-only
         // `option.unwrap_or_str` String branch (a `Result[String,String] ?? "d"` is a later case).
+        let is_named_variant_call = matches!(
+            &expr.kind,
+            IrExprKind::Call { target: CallTarget::Named { .. }, .. }
+        ) && is_variant_ty(&expr.ty);
         let is_result = match &expr.kind {
             IrExprKind::Var { id } => self
                 .value_for(*id)
@@ -913,6 +917,8 @@ impl LowerCtx {
                         && !self.materialized_options.contains(&v)
                 })
                 .unwrap_or(false),
+            // A USER function returning Result — read its tag INVERSELY (Ok = tag 0).
+            _ if is_named_variant_call => is_result_ty(&expr.ty),
             _ => is_self_host_result_call(expr),
         };
         let handle = if let IrExprKind::Var { id } = &expr.kind {
@@ -929,7 +935,14 @@ impl LowerCtx {
                 }
                 _ => return None,
             }
-        } else if is_self_host_option_call(expr) || is_self_host_result_call(expr) {
+        } else if is_self_host_option_call(expr)
+            || is_self_host_result_call(expr)
+            || is_named_variant_call
+        {
+            // A self-host OR user-function call returning Option/Result — materialize it (the
+            // Named-call arm seeds the READ-shape into `materialized_options/results`, so the
+            // tag read below is over a KNOWN-layout block) and read its tag, exactly like a
+            // tracked Var. The owned result is dropped at scope end by `materialized_call_arg`.
             match self.lower_call_args(std::slice::from_ref(expr)) {
                 Ok(args) => match args.into_iter().next() {
                     Some(CallArg::Handle(v)) => v,

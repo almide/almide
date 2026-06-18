@@ -999,7 +999,18 @@ impl LowerCtx {
                         args: inner_args,
                         result: Some(repr),
                     });
-                    self.materialized_call_arg(dst, repr, &a.ty)
+                    let arg = self.materialized_call_arg(dst, repr, &a.ty);
+                    // A user function returning Option/Result yields a REAL same-layout variant
+                    // block (an in-profile `-> Option[T]` callee returns `OptSome`/`OptNone`,
+                    // a `-> Result[..]` the DynListStr — the v1 calling convention, the SAME
+                    // evidence as a variant PARAM). Seed the READ-shape so a `match`/`??` over
+                    // this owned call result EXECUTES (reads the tag) instead of WALLing/deferring.
+                    // Ownership is unchanged — `materialized_call_arg` already registered the
+                    // scope-end drop; `seed_variant_param` adds only layout knowledge.
+                    if is_variant_ty(&a.ty) {
+                        self.seed_variant_param(dst, &a.ty);
+                    }
+                    arg
                 }
                 // A first-order pure stdlib Module-call result, materialized (the
                 // purity + higher-order gates live in `lower_pure_module_value_call`).
