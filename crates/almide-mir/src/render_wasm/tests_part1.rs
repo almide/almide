@@ -702,27 +702,34 @@
     }
 
     #[test]
-    fn let_bound_heap_result_if_is_walled_not_silently_empty() {
-        // A let-bound (NON-TAIL) heap-result `if` has NO faithful executable encoding here:
-        // a tail heap-result `if` moves each arm's value out (the per-arm "im" balance), but
-        // a let-bound value is held and dropped at scope end — that single scope-end drop of
-        // the merged `IfThen` dst has no sound flat-certificate encoding (the checker REJECTS
-        // `im·im·d`). The OLD path bound `label` to a deferred `Alloc{Opaque}` — an EMPTY
-        // String — so `println(label)` printed EMPTY instead of "small": a SILENT MISCOMPILE.
-        // The function now WALLS explicitly (omitted from the lowered program) instead of
-        // emitting wrong bytes. This pins the discipline: the silent-empty case is converted
-        // to a clean wall, NOT re-enabled as an unsound executable IfThen.
+    fn let_bound_heap_result_if_executes_via_tail_duplication() {
+        // A let-bound (NON-TAIL) heap-result `if` is RESTRUCTURED by the tail-duplication
+        // desugar: `let label = if x > 20 then "big" else "small"; println(label)` becomes
+        // `if x > 20 then { let label = "big"; println(label) } else { let label = "small";
+        // println(label) }`, so each arm independently allocates `label`, uses it, and drops
+        // it at the arm's frame end (the per-arm `i…d` balance the proven checker already
+        // accepts for a Unit `if` — NO certificate change, no merged-dst). Only one arm runs,
+        // so duplicating `println(label)` is semantically identical to v0. `main` now LOWERS
+        // (no longer walled) and EXECUTES — x=15, 15 > 20 is false, so it prints "small",
+        // byte-matching v0. This is the root-fix that recovers the walled corpus functions.
         let src = "fn main() -> Unit = {\n  \
             let x = 15\n  \
             let label = if x > 20 then \"big\" else \"small\"\n  \
             println(label) }\n";
         let prog = lower_source(src);
+        let main = prog
+            .functions
+            .iter()
+            .find(|f| f.name == "main")
+            .expect("a let-bound heap-result if now LOWERS via tail-duplication (not walled)");
         assert!(
-            !prog.functions.iter().any(|f| f.name == "main"),
-            "a let-bound heap-result if must WALL (the function is omitted), not lower to a \
-             silent-empty Opaque; got functions: {:?}",
-            prog.functions.iter().map(|f| &f.name).collect::<Vec<_>>()
+            main.ops.iter().any(|op| matches!(op, Op::IfThen { .. })),
+            "the desugared let-bound if executes via an IfThen marker, got {:?}",
+            main.ops
         );
+        if let Some(out) = build_and_run("let_bound_heap_if", &render_wasm_program(&prog)) {
+            assert_eq!(out, "small", "the taken (else) arm prints its bound String");
+        }
     }
 
     #[test]

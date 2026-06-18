@@ -476,6 +476,18 @@ impl LowerCtx {
     /// wrapping never weakens the boundary (control-flow / unsupported tails still
     /// become an explicit `Unsupported`).
     pub(crate) fn lower_body_into(&mut self, body: &IrExpr) -> Result<Option<ValueId>, LowerError> {
+        // TAIL-DUPLICATION desugar: a `let s = <heap-result if/match>; <rest>` (which `lower_bind`
+        // walls — the merged-dst has no sound flat-cert scope-end drop) is rewritten PURELY in the
+        // IR to push the continuation `<rest>` into each arm (`if c then { let s = A; <rest> } else
+        // …`), turning the branch into the block TAIL. The rewritten body then lowers through the
+        // ordinary statements+tail path — no special dispatch — so each branch independently binds +
+        // drops its own `s` (the per-arm `i…d` balance the proven checker already accepts). The
+        // SAME rewrite runs in the caps `count_ir_calls` gate ("desugar-before-both"), so the
+        // duplicated calls stay 1:1 between MIR and IR by construction. `lower_tail`'s per-position
+        // `if` machinery (Unit/scalar/heap) walls any unfaithful arm explicitly.
+        if let Some(rewritten) = desugar_let_bound_heap_branch(body) {
+            return self.lower_body_into(&rewritten);
+        }
         let (stmts, tail): (&[IrStmt], Option<&IrExpr>) = match &body.kind {
             IrExprKind::Block { stmts, expr } => (stmts, expr.as_deref()),
             _ => (&[], Some(body)),
@@ -1658,6 +1670,86 @@ pub(crate) fn is_higher_order(args: &[IrExpr]) -> bool {
                     | IrExprKind::ClosureCreate { .. }
                     | IrExprKind::FnRef { .. }
             )
+    })
+}
+
+/// TAIL-DUPLICATION desugar for a `let s = <heap-result if/match>; <rest>` in a NON-tail,
+/// let-bound position — the shape `lower_bind` walls (a merged-dst heap value has no sound
+/// scope-end drop in the flat certificate).
+///
+/// This is a PURE IR→IR rewrite applied to a function BODY *before* both lowering and the
+/// caps `count_ir_calls` gate ("desugar-before-both"): they see the IDENTICAL node tree, so the
+/// duplicated continuation's calls are counted exactly as the lowering emits them and the
+/// `mir == ir` 1:1 invariant holds BY CONSTRUCTION — no special-casing in either side, no risk
+/// of an IR-structure count formula leaking a false `mir > ir` (or masking an elision).
+///
+/// Scan the body block's `(stmts, tail)` for the FIRST `Bind { s, ty, value }` whose `value` is a
+/// heap-result `if`/`match` and `ty` is heap. Found at index `i`, push the continuation `<rest>`
+/// (`stmts[i+1..] ++ tail`) into each arm:
+///   `… ; let s = if c then A else B; <rest>`  →  `… ; if c then { let s = A; <rest> } else { let s = B; <rest> }`
+/// (and the `match` analog — each literal-pattern arm, via `desugar_match_to_if`, binds its value
+/// then runs `<rest>`). The rewritten branch becomes the block's TAIL, so the EXISTING `lower_tail`
+/// machinery executes it by result kind (Unit/scalar/heap `if`) — each arm independently binds `s`
+/// (cert `i`), runs `<rest>` and drops `s` + the continuation's locals at the arm frame end (cert
+/// `d`): the per-arm `i…d` balance the proven checker already accepts. Only ONE arm runs at runtime,
+/// so duplicating `<rest>` is semantically identical to v0. NO certificate / Coq change.
+///
+/// GATE (bounded + sound — WALL what cannot be duplicated cleanly; the rewritten tree still routes
+/// through the per-position `if` machinery, which itself rolls back to an explicit wall on an
+/// unfaithful arm/cond):
+///  - The continuation `<rest>` must NOT itself carry another unresolved heap let-bound `if`/`match`
+///    (duplicating a duplicating continuation risks exponential blow-up) — left to the wall.
+///  - A `match` not reducible to a literal-pattern else-if chain (`desugar_match_to_if`) — left to
+///    the wall.
+///
+/// Returns `Some(rewritten_body)` when the desugar applies, `None` (the body is unchanged) otherwise.
+pub fn desugar_let_bound_heap_branch(body: &IrExpr) -> Option<IrExpr> {
+    let IrExprKind::Block { stmts, expr: tail } = &body.kind else {
+        return None;
+    };
+    // Find the first heap let-bound `if`/`match` bind.
+    let (i, bind_var, bind_ty, branch) = stmts.iter().enumerate().find_map(|(i, s)| match &s.kind {
+        IrStmtKind::Bind { var, ty, value, .. }
+            if is_heap_ty(ty)
+                && matches!(&value.kind, IrExprKind::If { .. } | IrExprKind::Match { .. }) =>
+        {
+            Some((i, *var, ty.clone(), value))
+        }
+        _ => None,
+    })?;
+    // BOUNDED-DUPLICATION gate: refuse when the continuation itself carries another unresolved
+    // heap let-bound `if`/`match`.
+    let rest_has_branch_bind = stmts[i + 1..].iter().any(|s| matches!(
+        &s.kind,
+        IrStmtKind::Bind { ty, value, .. }
+            if is_heap_ty(ty)
+                && matches!(&value.kind, IrExprKind::If { .. } | IrExprKind::Match { .. })
+    ));
+    if rest_has_branch_bind {
+        return None;
+    }
+    let result_ty = &body.ty;
+    let rest_stmts: Vec<IrStmt> = stmts[i + 1..].to_vec();
+    let rest_tail: Option<Box<IrExpr>> = tail.clone();
+    // Reduce a `match` to a nested literal-pattern `if` chain (the same `desugar_match_to_if`
+    // the tail/scalar machinery uses) — a pure builder, so a throwaway default ctx suffices.
+    let if_branch = match &branch.kind {
+        IrExprKind::If { .. } => (*branch).clone(),
+        IrExprKind::Match { subject, arms } => {
+            LowerCtx::default().desugar_match_to_if(subject, arms, &branch.ty)?
+        }
+        _ => return None,
+    };
+    let rewritten_branch = LowerCtx::wrap_branch_arms(
+        &if_branch, bind_var, &bind_ty, &rest_stmts, &rest_tail, result_ty,
+    );
+    // The prefix statements `stmts[0..i]` stay; the rewritten branch is the new block TAIL.
+    let prefix: Vec<IrStmt> = stmts[..i].to_vec();
+    Some(IrExpr {
+        kind: IrExprKind::Block { stmts: prefix, expr: Some(Box::new(rewritten_branch)) },
+        ty: result_ty.clone(),
+        span: body.span.clone(),
+        def_id: body.def_id,
     })
 }
 

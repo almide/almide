@@ -550,6 +550,13 @@ fn main() {
                     // same position. With no lifting wired the vector is just `[main]` and
                     // this is byte-identical to the prior single-function pass.
                     t.in_profile += mirs.len();
+                    // The EFFECTIVE body the lowering actually saw: a let-bound heap-result
+                    // `if`/`match` is tail-duplicated PURELY in the IR before lowering, so the
+                    // caps `count_ir_calls` 1:1 gate and the interp-coverage count must read the
+                    // SAME rewritten tree (the duplicated continuation's calls / interps appear
+                    // once per arm in BOTH MIR and this counted IR — `mir == ir` by construction).
+                    let eff_body = almide_mir::lower::desugar_let_bound_heap_branch(&func.body)
+                        .unwrap_or_else(|| func.body.clone());
                     // INTERP COVERAGE (a): this function LOWERED, so its FULLY-LINKABLE
                     // interps (Lit/String/Int/Bool parts) fold to a registered __str_concat /
                     // int.to_string / bool.to_string chain (proven byte-match v0 by the
@@ -558,7 +565,7 @@ fn main() {
                     // render — both are (b) cleanly walled (no invalid wasm). The per-CallFn
                     // loop below ADDS the unlinked-occurrence count to (b); this counts the
                     // interp SITE once, as proven or walled, with no proven mis-bucket.
-                    let (proven, walled) = count_interp_sites(&func.body, &auto_linkable, &record_layouts);
+                    let (proven, walled) = count_interp_sites(&eff_body, &auto_linkable, &record_layouts);
                     t.interp_lowered += proven;
                     t.interp_walled += walled;
                     // LINK COVERAGE: a LOWERED function emitting a dotted `Op::CallFn` whose
@@ -630,7 +637,7 @@ fn main() {
                     // cluster has MORE IR calls than MIR call-ops some call was elided
                     // SOMEWHERE within it, so EVERY function of the cluster is conservatively
                     // TAINTED below (we cannot tell which member hid it).
-                    let ir_calls = count_ir_calls(&func.body, &record_layouts);
+                    let ir_calls = count_ir_calls(&eff_body, &record_layouts);
                     let mir_calls = mirs
                         .iter()
                         .flat_map(|m| m.ops.iter())

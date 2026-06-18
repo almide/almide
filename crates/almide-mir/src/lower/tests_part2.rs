@@ -252,17 +252,220 @@
     }
 
     #[test]
-    fn heap_result_if_bound_to_a_var_is_walled_not_an_empty_opaque() {
-        // var x = if c then [] else []  (Unit body) — a let-bound heap-result `if`. The OLD
-        // path bound `x` to a fresh `Alloc{Opaque}` (an EMPTY list); any later read of `x`
-        // observes empty bytes = a silent miscompile, AND the merged slot has no sound
-        // scope-end drop in the flat certificate. It now REJECTS explicitly.
+    fn heap_result_if_bound_to_a_var_is_memory_safe_after_desugar() {
+        // var x = if c then [] else []  (Unit body, x UNUSED) — a let-bound heap-result `if`.
+        // The tail-duplication desugar restructures this to `if c then { let x = [] } else
+        // { let x = [] }` as the Unit tail. The cond is an unbound `Var(5)` here, so the
+        // executable Unit-`if` machinery cannot build an `IfThen` and falls back to the SOUND
+        // both-arms LINEARIZATION (each arm allocs its own empty list, binds the unused x,
+        // drops it at the arm frame end). The result is OWNERSHIP-BALANCED — one Alloc + one
+        // Drop per arm, no silent-empty merged-dst, no double-free, no leak. This pins the
+        // discipline: even outside the executable subset the desugared form is memory-safe
+        // (NEVER wrong bytes), and `x` being unused means the empty Opaque arms are
+        // observationally identical to v0. (The FAITHFUL, USED case — a resolvable cond +
+        // string arms read by the continuation — LOWERS+executes via real `IfThen` markers;
+        // see `let_bound_heap_result_if_executes_via_tail_duplication`.)
         let then = ir_expr(IrExprKind::List { elements: vec![] }, list_int());
         let els = ir_expr(IrExprKind::List { elements: vec![] }, list_int());
         let b = body(vec![bind(0, list_int(), iff(then, els, list_int()))]);
+        let mir = lower_body(&b, "main").expect("the desugared form lowers memory-safely");
+        let allocs = mir.ops.iter().filter(|o| matches!(o, Op::Alloc { .. })).count();
+        let drops = mir.ops.iter().filter(|o| matches!(o, Op::Drop { .. })).count();
+        assert_eq!(allocs, drops, "every per-arm alloc is dropped within its arm: {:?}", mir.ops);
+        assert_eq!(verify_ownership(&mir), Ok(()), "no double-free, no leak");
+    }
+
+    // A faithful Bool cond (lowers to a scalar 0/1 via `lower_scalar_value`), so the
+    // tail-duplication desugar can fire.
+    fn faithful_cond() -> IrExpr {
+        ir_expr(IrExprKind::LitBool { value: true }, Ty::Bool)
+    }
+    fn iff_faithful(then: IrExpr, els: IrExpr, ty: Ty) -> IrExpr {
+        ir_expr(
+            IrExprKind::If {
+                cond: Box::new(faithful_cond()),
+                then: Box::new(then),
+                else_: Box::new(els),
+            },
+            ty,
+        )
+    }
+    fn lit_str(s: &str) -> IrExpr {
+        ir_expr(IrExprKind::LitStr { value: s.into() }, Ty::String)
+    }
+
+    #[test]
+    fn let_bound_heap_result_if_lowers_via_tail_duplication_and_is_balanced() {
+        // let s = if c then "A" else "B"; println(s)  — the canonical shape. The desugar
+        // pushes `println(s)` into each arm: `if c then { let s = "A"; println(s) } else
+        // { let s = "B"; println(s) }`. Each arm allocs its own String, uses it, drops it at
+        // the arm frame end — the per-arm `i…d` balance the checker already accepts. The body
+        // now LOWERS (not walled) and is ownership-BALANCED, with executable `IfThen` markers.
+        let then = lit_str("A");
+        let els = lit_str("B");
+        let prn = stmt(IrStmtKind::Expr {
+            expr: ir_expr(
+                IrExprKind::Call {
+                    target: CallTarget::Named { name: almide_lang::intern::sym("println") },
+                    args: vec![ir_expr(IrExprKind::Var { id: VarId(0) }, Ty::String)],
+                    type_args: vec![],
+                },
+                Ty::Unit,
+            ),
+        });
+        let b = body(vec![bind(0, Ty::String, iff_faithful(then, els, Ty::String)), prn]);
+        let mir = lower_body(&b, "main").expect("the faithful let-bound heap-result if lowers");
+        assert!(
+            mir.ops.iter().any(|o| matches!(o, Op::IfThen { .. })),
+            "executes via an IfThen marker (only the taken arm runs): {:?}",
+            mir.ops
+        );
+        // Two Allocs (one per arm — each arm's "A"/"B"), each dropped within its arm.
+        assert_eq!(
+            mir.ops.iter().filter(|o| matches!(o, Op::Alloc { .. })).count(),
+            2,
+            "one String alloc per arm (no merged-dst): {:?}",
+            mir.ops
+        );
+        assert_eq!(
+            verify_ownership(&mir),
+            Ok(()),
+            "each arm independently allocs + drops its own s — no double-free, no leak"
+        );
+    }
+
+    #[test]
+    fn let_bound_heap_result_if_with_a_continuation_use_lowers() {
+        // let s = if c then "A" else "B"; let t = s + "!"; println(t)  — the continuation
+        // ITSELF builds a heap value from s. Both `let t = …` and `println(t)` are pushed into
+        // each arm, so each arm's `s`, `t` are alloc'd + dropped within the arm. Balanced.
+        let then = lit_str("A");
+        let els = lit_str("B");
+        let concat = ir_expr(
+            IrExprKind::BinOp {
+                op: almide_ir::BinOp::ConcatStr,
+                left: Box::new(ir_expr(IrExprKind::Var { id: VarId(0) }, Ty::String)),
+                right: Box::new(lit_str("!")),
+            },
+            Ty::String,
+        );
+        let prn = stmt(IrStmtKind::Expr {
+            expr: ir_expr(
+                IrExprKind::Call {
+                    target: CallTarget::Named { name: almide_lang::intern::sym("println") },
+                    args: vec![ir_expr(IrExprKind::Var { id: VarId(1) }, Ty::String)],
+                    type_args: vec![],
+                },
+                Ty::Unit,
+            ),
+        });
+        let b = body(vec![
+            bind(0, Ty::String, iff_faithful(then, els, Ty::String)),
+            bind(1, Ty::String, concat),
+            prn,
+        ]);
+        let mir = lower_body(&b, "main").expect("the continuation-using let-bound if lowers");
+        assert!(mir.ops.iter().any(|o| matches!(o, Op::IfThen { .. })));
+        assert_eq!(
+            verify_ownership(&mir),
+            Ok(()),
+            "the duplicated continuation (let t = s + \"!\") is per-arm balanced"
+        );
+    }
+
+    #[test]
+    fn let_bound_heap_result_if_scalar_continuation_returns_value() {
+        // fn f() -> Int = { let s = if c then "A" else "BB"; string.len(s) }  — a SCALAR-
+        // returning body whose continuation reads `s`. The desugar pushes `string.len(s)` into
+        // each arm; the scalar `if` machinery moves out the per-arm scalar result. The Strings
+        // alloc + drop within each arm; the returned Int is a value (no ownership). Balanced.
+        let then = lit_str("A");
+        let els = lit_str("BB");
+        let len_call = ir_expr(
+            IrExprKind::Call {
+                target: CallTarget::Module {
+                    module: almide_lang::intern::sym("string"),
+                    func: almide_lang::intern::sym("len"),
+                    def_id: None,
+                },
+                args: vec![ir_expr(IrExprKind::Var { id: VarId(0) }, Ty::String)],
+                type_args: vec![],
+            },
+            Ty::Int,
+        );
+        let b = ir_expr(
+            IrExprKind::Block {
+                stmts: vec![bind(0, Ty::String, iff_faithful(then, els, Ty::String))],
+                expr: Some(Box::new(len_call)),
+            },
+            Ty::Int,
+        );
+        let mir = lower_body(&b, "f").expect("the scalar-continuation let-bound if lowers");
+        assert!(mir.ops.iter().any(|o| matches!(o, Op::IfThen { .. })));
+        assert_eq!(verify_ownership(&mir), Ok(()), "each arm's String drops within the arm");
+    }
+
+    #[test]
+    fn let_bound_heap_result_match_lowers_via_tail_duplication() {
+        // let s = match n { 0 => "zero", _ => "other" }; println(s)  — the match analog. The
+        // match desugars to a nested literal-pattern `if` chain, and the continuation is pushed
+        // into each leaf arm. Lowers + balanced.
+        let arm0 = almide_ir::IrMatchArm {
+            pattern: IrPattern::Literal { expr: ir_expr(IrExprKind::LitInt { value: 0 }, Ty::Int) },
+            guard: None,
+            body: lit_str("zero"),
+        };
+        let arm_default = almide_ir::IrMatchArm {
+            pattern: IrPattern::Wildcard,
+            guard: None,
+            body: lit_str("other"),
+        };
+        let subject = ir_expr(IrExprKind::LitInt { value: 0 }, Ty::Int);
+        let m = ir_expr(
+            IrExprKind::Match { subject: Box::new(subject), arms: vec![arm0, arm_default] },
+            Ty::String,
+        );
+        let prn = stmt(IrStmtKind::Expr {
+            expr: ir_expr(
+                IrExprKind::Call {
+                    target: CallTarget::Named { name: almide_lang::intern::sym("println") },
+                    args: vec![ir_expr(IrExprKind::Var { id: VarId(0) }, Ty::String)],
+                    type_args: vec![],
+                },
+                Ty::Unit,
+            ),
+        });
+        let b = body(vec![bind(0, Ty::String, m), prn]);
+        let mir = lower_body(&b, "main").expect("the let-bound heap-result match lowers");
+        assert!(mir.ops.iter().any(|o| matches!(o, Op::IfThen { .. })));
+        assert_eq!(verify_ownership(&mir), Ok(()));
+    }
+
+    #[test]
+    fn nested_let_bound_branch_continuation_stays_walled() {
+        // let s = if c then "A" else "B"; let t = if c then "C" else "D"; println(s); println(t)
+        // — the continuation ITSELF contains a SECOND unresolved heap let-bound if. Duplicating a
+        // duplicating continuation risks exponential blow-up, so the bounded-duplication gate
+        // REFUSES (returns a clean miss) and the normal path WALLS the first bind explicitly.
+        let if1 = iff_faithful(lit_str("A"), lit_str("B"), Ty::String);
+        let if2 = iff_faithful(lit_str("C"), lit_str("D"), Ty::String);
+        let b = body(vec![
+            bind(0, Ty::String, if1),
+            bind(1, Ty::String, if2),
+            stmt(IrStmtKind::Expr {
+                expr: ir_expr(
+                    IrExprKind::Call {
+                        target: CallTarget::Named { name: almide_lang::intern::sym("println") },
+                        args: vec![ir_expr(IrExprKind::Var { id: VarId(0) }, Ty::String)],
+                        type_args: vec![],
+                    },
+                    Ty::Unit,
+                ),
+            }),
+        ]);
         match lower_body(&b, "main") {
             Err(LowerError::Unsupported(_)) => {}
-            other => panic!("expected an explicit let-bound heap-result-if reject, got: {other:?}"),
+            other => panic!("nested let-bound branch continuation must stay walled, got: {other:?}"),
         }
     }
 

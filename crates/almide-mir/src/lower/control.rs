@@ -314,6 +314,69 @@ impl LowerCtx {
         false
     }
 
+    /// Recursively wrap each LEAF arm of `if_branch` so the arm `value` becomes `{ let s = value;
+    /// <rest> }` typed `result_ty`. A nested `if` arm (an else-if chain from a desugared match)
+    /// recurses; a leaf value-arm gets the continuation block.
+    pub(crate) fn wrap_branch_arms(
+        if_branch: &IrExpr,
+        bind_var: VarId,
+        bind_ty: &Ty,
+        rest_stmts: &[IrStmt],
+        rest_tail: &Option<Box<IrExpr>>,
+        result_ty: &Ty,
+    ) -> IrExpr {
+        let IrExprKind::If { cond, then, else_ } = &if_branch.kind else {
+            // A non-`if` leaf: wrap it as a continuation block.
+            return Self::continuation_block(if_branch, bind_var, bind_ty, rest_stmts, rest_tail, result_ty);
+        };
+        let wrap = |arm: &IrExpr| -> IrExpr {
+            if matches!(&arm.kind, IrExprKind::If { .. }) {
+                Self::wrap_branch_arms(arm, bind_var, bind_ty, rest_stmts, rest_tail, result_ty)
+            } else {
+                Self::continuation_block(arm, bind_var, bind_ty, rest_stmts, rest_tail, result_ty)
+            }
+        };
+        IrExpr {
+            kind: IrExprKind::If {
+                cond: cond.clone(),
+                then: Box::new(wrap(then)),
+                else_: Box::new(wrap(else_)),
+            },
+            ty: result_ty.clone(),
+            span: None,
+            def_id: None,
+        }
+    }
+
+    /// `{ let s = arm_value; <rest_stmts>; <rest_tail> }` typed `result_ty` — the continuation pushed
+    /// behind the per-arm bind of `s`.
+    fn continuation_block(
+        arm_value: &IrExpr,
+        bind_var: VarId,
+        bind_ty: &Ty,
+        rest_stmts: &[IrStmt],
+        rest_tail: &Option<Box<IrExpr>>,
+        result_ty: &Ty,
+    ) -> IrExpr {
+        let mut stmts: Vec<IrStmt> = Vec::with_capacity(rest_stmts.len() + 1);
+        stmts.push(IrStmt {
+            kind: IrStmtKind::Bind {
+                var: bind_var,
+                mutability: almide_ir::Mutability::Let,
+                ty: bind_ty.clone(),
+                value: arm_value.clone(),
+            },
+            span: None,
+        });
+        stmts.extend(rest_stmts.iter().cloned());
+        IrExpr {
+            kind: IrExprKind::Block { stmts, expr: rest_tail.clone() },
+            ty: result_ty.clone(),
+            span: None,
+            def_id: None,
+        }
+    }
+
     /// Try to EXECUTE a `match opt { Some(x) => …, None => … }` over a MATERIALIZED
     /// Option (the 0-or-1-element-list layout): read `len` as the tag, and on the Some
     /// branch extract `data[0]` as the payload. Only the taken arm runs (v0 semantics),
