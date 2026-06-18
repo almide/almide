@@ -744,6 +744,11 @@ impl LowerCtx {
         result_ty: &Ty,
     ) -> Option<ValueId> {
         use crate::PrimKind;
+        // SCALAR result only. A HEAP-result variant match (`match opt { Some => "..", None =>
+        // ".." }`) ran byte-correct via `lower_heap_result_arm` but the proven OWNERSHIP
+        // checker REJECTED the witness (the owned heap SUBJECT + per-arm move-out is the
+        // merged-dst cert-precision frontier — an ESCALATION, the Coq trust-vocabulary work,
+        // not this brick). Keep it a clean WALL.
         if is_heap_ty(result_ty)
             || !is_heap_ty(&subject.ty)
             || arms.len() != 2
