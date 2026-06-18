@@ -872,14 +872,15 @@ impl LowerCtx {
                         }
                     }
                 }
-                // A scalar-result `match` over a VARIANT (Option/Result) subject must EXECUTE
-                // the tag-read value-match (`try_lower_variant_value_match` via
-                // `lower_scalar_value`); if it falls outside that subset a Const-0 fallback
-                // would SILENTLY pick a wrong arm (a `match Some(x)` reading 0), so WALL it.
-                // The executing common forms (`let o = Some(..); match o`,
-                // `match list.get(..)`, `match f()`) return a real `CallArg::Scalar` here.
+                // A scalar-result `match` over a HEAP subject must EXECUTE: a VARIANT
+                // (Option/Result) via the tag-read value-match, a scalar-pattern subject via
+                // the desugared if-chain. If it falls outside the executable subset (e.g. a
+                // `match s { "a" => 1, _ => 9 }` over a String — string equality is not yet
+                // lowered) a Const-0 fallback would SILENTLY pick a wrong arm, so WALL it. The
+                // executing forms (`match o`/`match list.get(..)`/`match n { 1 => .. }`)
+                // return a real `CallArg::Scalar` here.
                 IrExprKind::Match { subject, .. }
-                    if !is_heap_ty(&a.ty) && is_variant_ty(&subject.ty) =>
+                    if !is_heap_ty(&a.ty) && is_heap_ty(&subject.ty) =>
                 {
                     let mark = self.ops.len();
                     match self.lower_scalar_value(a) {
@@ -887,9 +888,10 @@ impl LowerCtx {
                         None => {
                             self.ops.truncate(mark);
                             return Err(LowerError::Unsupported(
-                                "variant (Option/Result) match in a call-argument position \
-                                 outside the executable subset cannot be faithfully computed \
-                                 (a Const-0 would silently pick a wrong arm) not in this brick"
+                                "scalar-result match over a heap subject in a call-argument \
+                                 position outside the executable subset cannot be faithfully \
+                                 computed (a Const-0 would silently pick a wrong arm) not in \
+                                 this brick"
                                     .into(),
                             ));
                         }
