@@ -231,6 +231,25 @@ impl LowerCtx {
                 }
             }
             if let IrExprKind::Match { subject, arms } = &value.kind {
+                // A VARIANT (Option/Result) subject — execute the tag-read value-match
+                // (only the taken arm runs, the scalar payload bound). A ctor pattern is not
+                // `subj == lit`, so it can't reach `desugar_match_to_if`; without this the
+                // result stayed an unset deferred Const (a silent 0).
+                if is_variant_ty(&subject.ty) {
+                    if let Some(dst) = self.try_lower_variant_value_match(subject, arms, ty) {
+                        self.value_of.insert(var, dst);
+                        return Ok(());
+                    }
+                    // Outside the executable subset a Const-0 would silently pick a wrong
+                    // arm — WALL (the discipline: an unfaithful variant match rejects, never
+                    // emits a deferred 0).
+                    return Err(LowerError::Unsupported(
+                        "variant (Option/Result) match bound to a let/var outside the \
+                         executable subset cannot be faithfully computed (a Const-0 would \
+                         silently pick a wrong arm) not in this brick"
+                            .into(),
+                    ));
+                }
                 if let Some(if_expr) = self.desugar_match_to_if(subject, arms, ty) {
                     if let IrExprKind::If { cond, then, else_ } = &if_expr.kind {
                         if let Some(dst) = self.try_lower_scalar_if(cond, then, else_, ty) {

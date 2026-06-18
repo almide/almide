@@ -718,6 +718,153 @@ impl LowerCtx {
         true
     }
 
+    /// VALUE-position variant match: a `match opt { Some(x) => <scalar>, None => <scalar> }`
+    /// (or `Ok/Err`) used as an OPERAND / let / call-argument EXECUTES to a SCALAR `dst` —
+    /// read the tag, run ONLY the taken arm, bind the scalar payload. The value analogue of
+    /// [`Self::try_lower_variant_match`] / [`Self::try_lower_result_match`] (which require
+    /// UNIT arms): without it a ctor-pattern value match desugared to nothing (a `Some`/`Ok`
+    /// pattern is not `subj == lit`) and the result local stayed UNSET = a silent 0.
+    /// Returns `None` (rolled back) outside the subset — the caller then WALLs (a Const-0
+    /// would silently pick a wrong arm).
+    ///
+    /// SOUNDNESS — the subject is materialized/borrowed by `lower_call_args` (an owned ctor
+    /// temp drops at scope end via `live_heap_handles`; a tracked Var borrows), gated on
+    /// `∈ materialized_options/results` so the len-as-tag read is only over a value KNOWN to
+    /// carry the layout (`Some`=len1 / `None`=len0; scalar `Ok`=len0 / `Err`=len≠0). The
+    /// tag/payload reads are scalar prims, the `IfThen`/`Else`/`EndIf` markers no-op in
+    /// `verify_ownership`, and each arm is a scalar value with NO heap ownership event —
+    /// exactly the per-arm-balanced linearization the cert already proves, wrapped so one
+    /// arm runs. The enclosing `lower_scalar_value` self-rollback restores `ops` +
+    /// `live_heap_handles` on a miss, so the subject materialize is rollback-safe. SCALAR
+    /// payload + SCALAR result only (a heap-result variant match merges heap arms — later).
+    pub(crate) fn try_lower_variant_value_match(
+        &mut self,
+        subject: &IrExpr,
+        arms: &[IrMatchArm],
+        result_ty: &Ty,
+    ) -> Option<ValueId> {
+        use crate::PrimKind;
+        if is_heap_ty(result_ty)
+            || !is_heap_ty(&subject.ty)
+            || arms.len() != 2
+            || arms.iter().any(|a| a.guard.is_some())
+        {
+            return None;
+        }
+        let ops_mark = self.ops.len();
+        let lhh_mark = self.live_heap_handles.len();
+        let rollback = |s: &mut Self| {
+            s.ops.truncate(ops_mark);
+            s.live_heap_handles.truncate(lhh_mark);
+            None
+        };
+        // Materialize/borrow + track the subject exactly as the statement Match entry does:
+        // an owned ctor temp (`Some(5)`) is dropped at scope end; a tracked Var (`let o =
+        // Some(5)`) is borrowed; a self-host Option/Result-returning call is tracked here.
+        let subj = match self
+            .lower_call_args(std::slice::from_ref(subject))
+            .ok()
+            .and_then(|a| a.into_iter().next())
+        {
+            Some(CallArg::Handle(v)) => v,
+            _ => return rollback(self),
+        };
+        if is_self_host_option_call(subject) {
+            self.materialized_options.insert(subj);
+        }
+        if is_self_host_result_call(subject) {
+            self.materialized_results.insert(subj);
+        }
+        // Dispatch on the tracking set. An Option reads len-as-tag (Some=len≠0); a scalar
+        // Result reads len-as-tag INVERSE (Err=len≠0, Ok=len0). The if-skeleton is uniform
+        // (then = tag≠0, else = tag==0): Option → then=Some/else=None; Result → then=Err/else=Ok.
+        let is_option = self.materialized_options.contains(&subj);
+        let is_result = self.materialized_results.contains(&subj);
+        if !is_option && !is_result {
+            return rollback(self);
+        }
+        // Parse the two arms into (then_body, then_bind, else_body, else_bind) where a bind is
+        // an optional SCALAR payload var (`Some(x)` / `Ok(x)` / a scalar `Err(c)`). A heap bind
+        // (`Err(msg: String)`) is allowed only when the arm body never needs it as an owner —
+        // here it is bound as a BORROW of the Result's owned slot-0 handle, gated on the subject
+        // being a nested-ownership list (it frees the payload at scope end). A wildcard binds nothing.
+        let scalar_bind = |inner: &IrPattern| -> Result<Option<(VarId, bool)>, ()> {
+            match inner {
+                IrPattern::Bind { var, ty } if !is_heap_ty(ty) => Ok(Some((*var, false))),
+                IrPattern::Wildcard => Ok(None),
+                _ => Err(()),
+            }
+        };
+        let heap_or_scalar_bind = |s: &Self, inner: &IrPattern| -> Result<Option<(VarId, bool)>, ()> {
+            match inner {
+                IrPattern::Bind { var, ty } if !is_heap_ty(ty) => Ok(Some((*var, false))),
+                IrPattern::Bind { var, ty } if is_heap_ty(ty) && s.heap_elem_lists.contains(&subj) => {
+                    Ok(Some((*var, true)))
+                }
+                IrPattern::Wildcard => Ok(None),
+                _ => Err(()),
+            }
+        };
+        let mut then_slot: Option<(&IrExpr, Option<(VarId, bool)>)> = None;
+        let mut else_slot: Option<(&IrExpr, Option<(VarId, bool)>)> = None;
+        for arm in arms {
+            let parsed: Result<(bool, Option<(VarId, bool)>), ()> = match &arm.pattern {
+                // Option Some (then) / None (else).
+                IrPattern::Some { inner } if is_option => scalar_bind(inner).map(|b| (true, b)),
+                IrPattern::None | IrPattern::Wildcard if is_option => Ok((false, None)),
+                // scalar Result Err (then) / Ok (else).
+                IrPattern::Err { inner } if is_result => {
+                    heap_or_scalar_bind(self, inner).map(|b| (true, b))
+                }
+                IrPattern::Ok { inner } if is_result => scalar_bind(inner).map(|b| (false, b)),
+                _ => Err(()),
+            };
+            match parsed {
+                Ok((true, bind)) if then_slot.is_none() => then_slot = Some((&arm.body, bind)),
+                Ok((false, bind)) if else_slot.is_none() => else_slot = Some((&arm.body, bind)),
+                _ => return rollback(self),
+            }
+        }
+        let ((then_body, then_bind), (else_body, else_bind)) = match (then_slot, else_slot) {
+            (Some(t), Some(e)) => (t, e),
+            _ => return rollback(self),
+        };
+        // Emit: h = handle(subj); tag = load32(h + 4); dst = if tag != 0 then <then> else <else>.
+        let dst = self.fresh_value();
+        let h = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![subj] });
+        let tag = self.load_at_offset(h, 4, PrimKind::Load { width: 4 });
+        self.ops.push(Op::IfThen { cond: tag, dst: Some(dst) });
+        let bind_payload = |s: &mut Self, bind: Option<(VarId, bool)>| {
+            if let Some((bind_var, is_heap)) = bind {
+                let payload = if is_heap {
+                    s.load_at_offset(h, 12, PrimKind::LoadHandle)
+                } else {
+                    s.load_at_offset(h, 12, PrimKind::Load { width: 8 })
+                };
+                s.value_of.insert(bind_var, payload);
+                if is_heap {
+                    s.param_values.insert(payload);
+                }
+            }
+        };
+        // THEN (tag != 0): the Some payload / the Err message.
+        bind_payload(self, then_bind);
+        let then_val = match self.lower_scalar_arm(then_body) {
+            Some(v) => v,
+            None => return rollback(self),
+        };
+        self.ops.push(Op::Else { val: Some(then_val) });
+        // ELSE (tag == 0): the None branch / the scalar Ok payload.
+        bind_payload(self, else_bind);
+        let else_val = match self.lower_scalar_arm(else_body) {
+            Some(v) => v,
+            None => return rollback(self),
+        };
+        self.ops.push(Op::EndIf { val: Some(else_val) });
+        Some(dst)
+    }
+
     /// Try to EXECUTE `<materialized Option> ?? <scalar fallback>` to a SCALAR value: read
     /// the tag (len) and yield the payload (`data[0]`) when Some, else the fallback. Gated
     /// to a DIRECT self-host Option call — every such fn returns `Option[Int]`, so the

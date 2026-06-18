@@ -850,6 +850,29 @@ impl LowerCtx {
                         }
                     }
                 }
+                // A scalar-result `match` over a VARIANT (Option/Result) subject must EXECUTE
+                // the tag-read value-match (`try_lower_variant_value_match` via
+                // `lower_scalar_value`); if it falls outside that subset a Const-0 fallback
+                // would SILENTLY pick a wrong arm (a `match Some(x)` reading 0), so WALL it.
+                // The executing common forms (`let o = Some(..); match o`,
+                // `match list.get(..)`, `match f()`) return a real `CallArg::Scalar` here.
+                IrExprKind::Match { subject, .. }
+                    if !is_heap_ty(&a.ty) && is_variant_ty(&subject.ty) =>
+                {
+                    let mark = self.ops.len();
+                    match self.lower_scalar_value(a) {
+                        Some(v) => CallArg::Scalar(v),
+                        None => {
+                            self.ops.truncate(mark);
+                            return Err(LowerError::Unsupported(
+                                "variant (Option/Result) match in a call-argument position \
+                                 outside the executable subset cannot be faithfully computed \
+                                 (a Const-0 would silently pick a wrong arm) not in this brick"
+                                    .into(),
+                            ));
+                        }
+                    }
+                }
                 // A fresh BinOp/UnOp result as an argument (`f(a + b)`, `f(-n)`), or an
                 // ERROR OPERATOR result (`f(x!)`, `f(x ?? d)`, `f(x?.field)`): a fresh
                 // computed value — a heap result is materialized via `Alloc` (borrowed
@@ -1622,6 +1645,12 @@ impl LowerCtx {
                 self.try_lower_scalar_if(cond, then, else_, &expr.ty)
             }
             IrExprKind::Match { subject, arms } if !is_heap_ty(&expr.ty) => {
+                // A VARIANT (Option/Result) subject — execute via the tag-read value-match
+                // (ctor patterns are not `subj == lit`, so `desugar_match_to_if` can't reach
+                // them; the result would stay an unset 0 = a silent miscompile).
+                if is_heap_ty(&subject.ty) {
+                    return self.try_lower_variant_value_match(subject, arms, &expr.ty);
+                }
                 let if_expr = self.desugar_match_to_if(subject, arms, &expr.ty)?;
                 match &if_expr.kind {
                     IrExprKind::If { cond, then, else_ } => {

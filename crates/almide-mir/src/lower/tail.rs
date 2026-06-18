@@ -562,6 +562,21 @@ impl LowerCtx {
             // machinery (only the matched arm runs). Non-literal patterns / guards / a
             // non-scalar subject fall back to the deferred linearize + merged `Const`.
             IrExprKind::Match { subject, arms } => {
+                // A VARIANT (Option/Result) subject returned by a function — execute the
+                // tag-read value-match (only the taken arm runs, the scalar payload bound);
+                // `fn pick(o) = match o { Some(x) => x, None => -1 }` is the canonical form.
+                // A ctor pattern is not `subj == lit`, so it can't reach `desugar_match_to_if`.
+                if is_variant_ty(&subject.ty) {
+                    if let Some(dst) = self.try_lower_variant_value_match(subject, arms, &tail.ty) {
+                        return Ok(Some(dst));
+                    }
+                    return Err(LowerError::Unsupported(
+                        "variant (Option/Result) match in tail position outside the \
+                         executable subset cannot be faithfully computed (a Const-0 would \
+                         silently pick a wrong arm) not in this brick"
+                            .into(),
+                    ));
+                }
                 if let Some(if_expr) = self.desugar_match_to_if(subject, arms, &tail.ty) {
                     if let IrExprKind::If { cond, then, else_ } = &if_expr.kind {
                         if let Some(dst) = self.try_lower_scalar_if(cond, then, else_, &tail.ty) {

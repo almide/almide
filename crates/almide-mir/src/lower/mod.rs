@@ -60,6 +60,18 @@ pub fn is_heap_ty(ty: &Ty) -> bool {
     )
 }
 
+/// Is `ty` an `Option[_]` / `Result[_, _]` — a tagged heap VARIANT? Used to gate the
+/// value-position variant-match WALL: a scalar-result match over an Option/Result subject
+/// that can't execute the tag-read must reject (a Const-0 would pick a wrong arm), but a
+/// String/List literal match (a separate gap) keeps its existing deferred lowering.
+pub fn is_variant_ty(ty: &Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    matches!(
+        ty,
+        Ty::Applied(TypeConstructorId::Option | TypeConstructorId::Result, _)
+    )
+}
+
 /// The [`Repr`] of a value of type `ty` — the LAYOUT decision, made once here.
 /// Heap types get `Ptr` with a placeholder [`LayoutId`] (the layout pass, a
 /// later brick, assigns real ids); scalars get their named byte width.
