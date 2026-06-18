@@ -1,0 +1,5 @@
+// An AI added a `discount` parameter to `line` and updated the first call —
+// but FORGOT the second call site.
+fn line(price: Int, qty: Int, discount: Int) -> Int = price * qty - discount
+fn subtotal() -> Int = line(100, 2, 10) + line(50, 3)   // <- 2nd call missing the new arg
+fn main() -> Unit = { println(int.to_string(subtotal())) }

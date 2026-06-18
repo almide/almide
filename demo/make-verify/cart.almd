@@ -1,0 +1,4 @@
+// A cart total. `line(price, qty)` is called from two places.
+fn line(price: Int, qty: Int) -> Int = price * qty
+fn subtotal() -> Int = line(100, 2) + line(50, 3)
+fn main() -> Unit = { println(int.to_string(subtotal())) }

@@ -24,7 +24,28 @@ The real differentiator is **what happens when there _is_ a mistake** — and:
 That response is a property of the **language + compiler + proof spine** — it does not
 evaporate as models get stronger.
 
-## The scenario
+## The measured number (unbiased)
+
+We injected **8 realistic AI modification mistakes** (each authored by a separate
+agent, both in Almide and in Python) and asked the *language*, at author/CI time:
+caught-and-recoverable, or silent?
+
+- **Almide caught 6/8 at compile** with an actionable diagnostic. The 2 it didn't:
+  one was a pure-logic off-by-one (a control — no type system catches it), and one
+  exposed a real Almide diagnostic gap we're tracking (a stale field name reported as
+  an internal error rather than "unknown field").
+- **Python's compile gate (`py_compile`) caught 0/8.** Every mistake passed lint/compile
+  and shipped — surfacing later as a silently wrong value or a runtime crash.
+
+`./run.sh` reproduces three of them live with real compiler output (below is the first).
+
+## The scenarios
+
+`./run.sh` walks three: (1) a non-exhaustive match (Python ships a silently wrong
+**value**), (2) a missed call site after a signature change, and (3) an Option/None
+result used without handling the absent case (Python passes its compile gate, then
+crashes at runtime). In all three, Almide refuses to build the wrong program with an
+actionable diagnostic. The detailed walkthrough of #1:
 
 An AI is asked to "add a `Triangle` variant to `Shape`." It updates the **type** but
 forgets to handle it in `area()` — the single most common modification mistake.

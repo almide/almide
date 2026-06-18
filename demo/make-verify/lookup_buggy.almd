@@ -1,0 +1,8 @@
+// An AI "simplified" it: used the Option results directly, forgetting that
+// list.get can be absent (dropped the `?? 0`).
+fn main() -> Unit = {
+  let xs = [10, 20, 30]
+  let a = list.get(xs, 0)
+  let b = list.get(xs, 1)
+  println(int.to_string(a + b))   // a, b are Option[Int], not Int
+}

@@ -1,0 +1,7 @@
+// Sum the first two list elements. `list.get` returns Option[Int].
+fn main() -> Unit = {
+  let xs = [10, 20, 30]
+  let a = list.get(xs, 0) ?? 0
+  let b = list.get(xs, 1) ?? 0
+  println(int.to_string(a + b))
+}
