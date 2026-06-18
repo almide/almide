@@ -357,6 +357,19 @@ impl LowerCtx {
                 | IrExprKind::MapAccess { .. }
                 | IrExprKind::TupleIndex { .. } => {
                     let dst = self.lower_heap_extraction(tail)?;
+                    // A PRECISE field BORROW (`fn f(r) = r.name` over a materialized/param
+                    // record — the loaded slot handle is in `param_values`, the CONTAINER still
+                    // owns it) cannot be moved out as-is: the caller would drop it while the
+                    // container also drops it = a double-free. AUTO-ACQUIRE an OWNED reference
+                    // first (`Op::Dup` cert `a`, then move out cert `m` — exactly `let q = r.name;
+                    // q`), so the returned `am` is independent of the container's reference. A
+                    // container-grain `Dup` result (NOT a borrow — `lower_heap_extraction`'s
+                    // fallback already acquired its own reference) is moved out directly.
+                    if self.param_values.contains(&dst) {
+                        let owned = self.fresh_value();
+                        self.ops.push(Op::Dup { dst: owned, src: dst });
+                        return Ok(Some(owned)); // moved out, NOT tracked (no double-drop)
+                    }
                     Ok(Some(dst))
                 }
                 // `fn f() = if c then "a" else "b"` — a heap-result branch RETURNED. A

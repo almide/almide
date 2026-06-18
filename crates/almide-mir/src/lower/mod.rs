@@ -510,6 +510,29 @@ impl LowerCtx {
                     }
                 }
             }
+            // A RECORD / TUPLE param (`fn f(r: R)`, `fn f(t: (Int, String))`, and the closure
+            // params of a lifted lambda — `(r) => r.name` over a `List[R]`) is passed by the
+            // caller as a REAL materialized block of the SAME uniform-slot layout the
+            // constructors build (the v1 calling convention). SEED it as a materialized
+            // aggregate so a `r.field` / `t.i` access inside the callee READS its real slot
+            // (a scalar `Load`, a heap `LoadHandle` BORROW) instead of returning the empty
+            // deferred value. Gated to a type the layout registry can RESOLVE (a registered
+            // `Ty::Named` record or a structural `Ty::Record`/`Ty::Tuple`) — a String/List/
+            // Map heap param is NOT an aggregate (`aggregate_field_tys` is `None`) so it is
+            // never mis-seeded.
+            //
+            // SOUNDNESS: a record/tuple param is BORROWED (it stays in `param_values`,
+            // un-dropped — the caller owns it). Seeding `materialized_aggregates` adds ONLY
+            // the READ-shape knowledge (scalar/handle prim loads of its real slots), NEVER an
+            // ownership event or a drop — exactly the variant-param reasoning above. A heap
+            // FIELD read is a `LoadHandle` BORROW (recorded in `param_values`, not a second
+            // owner), so the field's owner (the caller's block) frees it once — no leak / no
+            // double-free.
+            Ty::Record { .. } | Ty::Tuple(_) | Ty::Named(..)
+                if self.aggregate_field_tys(ty).is_some() =>
+            {
+                self.materialized_aggregates.insert(v);
+            }
             _ => {}
         }
     }

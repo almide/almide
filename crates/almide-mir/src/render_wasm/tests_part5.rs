@@ -135,25 +135,20 @@ fn compound_list_interp_float_byte_matches_v0_with_dot0_drop() {
 
 #[test]
 fn compound_list_interp_nested_walls_cleanly() {
-    // A NESTED List[List[Int]] element is OUT of subset (v1 does not materialize the inner-list
-    // handles): it routes to the never-registered `list.to_string_x`, so the fn WALLS (Unsupported)
-    // rather than emit wrong bytes or invalid wasm. This is the all-or-nothing soundness boundary.
-    use crate::lower::LowerError;
-    use crate::render_wasm::{try_render_wasm_program, unlinked_call_names};
+    // A NESTED `List[List[Int]]` LITERAL is OUT of subset: the inner-list handles are a
+    // nested-ownership element the single-level `DropListStr` cannot free recursively, so the
+    // literal cannot be faithfully materialized. The list-literal WALL (binds.rs) rejects the
+    // whole `main` at lowering — earlier than the old interp `list.to_string_x` route, and a
+    // strictly cleaner wall (no empty len-0 block emitted, no wrong bytes). `lower_source`
+    // drops the walled `main`, so it is ABSENT from the program (never rendered to wasm).
     let src = "fn main() -> Unit = {\n  \
         let xs: List[List[Int]] = [[1, 2], [3]]\n  \
         println(\"${xs}\") }\n";
     let prog = lower_source(src);
     assert!(
-        unlinked_call_names(&prog).contains("list.to_string_x"),
-        "a nested List interp must route to the unlinked list.to_string_x, got {:?}",
-        unlinked_call_names(&prog)
+        !prog.functions.iter().any(|f| f.name == "main"),
+        "a nested List[List[Int]] literal must WALL main at lowering (absent), not emit an empty list"
     );
-    match try_render_wasm_program(&prog) {
-        Err(LowerError::Unsupported(_)) => {}
-        Err(other) => panic!("expected Unsupported, got {other:?}"),
-        Ok(_) => panic!("a nested-List interp must wall, not render to (possibly invalid) wasm"),
-    }
 }
 
 // ── Record / tuple VALUE MODEL (fix-0276): construction + field/element access ──
@@ -197,6 +192,70 @@ fn record_field_access_in_lifted_lambda_matches_v0() {
     if let Some(out) = build_and_run("record_field_in_lambda", &render_wasm_program(&prog)) {
         assert_eq!(out, "9");
     }
+}
+
+#[test]
+fn generic_record_spread_byte_matches_v0() {
+    // fix-0276 target 1: a GENERIC record spread (`Box { ...b, value: 8 }`). The spread
+    // materializes a fresh block of the INSTANTIATED layout (`subst_type_var` resolves the
+    // generic field `value: T` to `Int`), COPYING the non-overridden heap field `label`
+    // (a `Dup` of the base's borrowed handle, so both records own a distinct reference) and
+    // storing the override. `b2.value` reads the override (8), `b2.label`/`b.label` both read
+    // the copied String ("old") — value semantics, no double-free. (The Pair case exercises
+    // two generics + a trailing concrete heap field.)
+    let src = "type Box[T] = { value: T, label: String }\n\
+        type Pair[A, B] = { first: A, second: B, tag: String }\n\
+        fn main() -> Unit = {\n  \
+        let b = Box { value: 7, label: \"old\" }\n  \
+        let b2 = Box { ...b, value: 8 }\n  \
+        println(\"b2=${b2.value} b.label=${b.label} b2.label=${b2.label}\")\n  \
+        let p = Pair { first: 100, second: \"hi\", tag: \"T\" }\n  \
+        let p2 = Pair { ...p, first: 200 }\n  \
+        println(\"${p2.first} ${p2.second} ${p2.tag}\") }\n";
+    let prog = lower_source(src);
+    if let Some(out) = build_and_run("generic_record_spread", &render_wasm_program(&prog)) {
+        assert_eq!(out, "b2=8 b.label=old b2.label=old\n200 hi T");
+    }
+}
+
+#[test]
+fn heap_field_record_param_read_byte_matches_v0() {
+    // fix-0276 (target 2 enabling fix): a heap field read over a RECORD PARAM (`fn f(r: R) =
+    // r.name`). A record param is passed by the caller as a real same-layout block (the v1
+    // calling convention), so `seed_variant_param` now seeds it into `materialized_aggregates`
+    // — `r.name` BORROWS its real slot, and the tail moves it out with a `Dup` (an owned copy,
+    // no double-free with the caller's record). Before this fix it read an EMPTY deferred value
+    // (the silent-empty List[R]-map root cause).
+    let src = "type R = { name: String, v: Int }\n\
+        fn getname(r: R) -> String = r.name\n\
+        fn main() -> Unit = {\n  \
+        let x = R { name: \"hello\", v: 9 }\n  \
+        println(getname(x) + \" \" + getname(x)) }\n";
+    let prog = lower_source(src);
+    if let Some(out) = build_and_run("heap_field_record_param", &render_wasm_program(&prog)) {
+        // Both reads return "hello" — the caller's record is untouched (no double-free).
+        assert_eq!(out, "hello hello");
+    }
+}
+
+#[test]
+fn nested_ownership_list_literal_walls_not_empty() {
+    // fix-0276 (target 2): a `List[R]` LITERAL where R has a HEAP field needs a two-level
+    // recursive drop (the list frees each record, each record frees its String field) the
+    // single-level `DropListStr` cannot express — the nested-ownership frontier. The list-literal
+    // WALL rejects `main` at lowering rather than emitting an empty len-0 block (the old silent
+    // miscompile: a `list.map`/`sort_by` over it read NOTHING). `lower_source` drops the walled
+    // main, so it is ABSENT — a clean wall, never wrong/empty bytes.
+    let src = "type R = { name: String, v: Float }\n\
+        fn fmtr(xs: List[R]) -> String = list.join(list.map(xs, (r) => r.name), \",\")\n\
+        fn main() -> Unit = {\n  \
+        let rs = [R { name: \"a\", v: 3.5 }, R { name: \"b\", v: 1.2 }]\n  \
+        println(fmtr(rs)) }\n";
+    let prog = lower_source(src);
+    assert!(
+        !prog.functions.iter().any(|f| f.name == "main"),
+        "a List[R] (heap-field record) literal must WALL main at lowering, not emit an empty list"
+    );
 }
 
 #[test]
@@ -303,28 +362,21 @@ fn heap_field_record_loop_reclaims() {
 }
 
 #[test]
-fn spread_heap_field_record_walls_safely() {
-    // A SPREAD heap-field record (`R { ...r, n: 9 }`) is OUT of the construction subset (the
-    // spread base's fields are not re-materialized here) — it must DEFER to a safe Opaque
-    // block, NOT a masked record (a masked drop over garbage slots would `rc_dec` junk and
-    // trap). The guard: a deferred spread record is NOT in `record_masks`, so its drop is a
-    // plain `Drop` (no recursive slot free), and its heap-field reads fall to the safe
-    // container-grain alias (no slot dereference). This is the WALL discipline for the
-    // not-yet-materialized spread shape — memory-safe, just deferred-functional.
+fn spread_heap_field_record_materializes_soundly() {
+    // A SPREAD heap-field record (`R { ...r, n: 9 }`) is now MATERIALIZED: a fresh block of
+    // the same uniform-slot layout, COPYING each non-overridden field from the base (a scalar
+    // load, a heap-handle Dup so both records own a DISTINCT reference) and storing the
+    // overrides. So `r2.n` reads the override (9), `r2.name` the copied String ("a"), and `r`
+    // is UNCHANGED (its own reference intact). Both `r` and `r2` carry a heap-slot mask — each
+    // is freed by its own masked recursive `DropListStr` with no double-free (the copy is a
+    // `Dup`, an independent rc), no leak (each record's String freed once).
     let src = "type R = { name: String, n: Int }\n\
         fn main() -> Unit = {\n  \
         let r = R { name: \"a\", n: 1 }\n  \
         let r2 = R { ...r, n: 9 }\n  \
-        println(int.to_string(r.n)) }\n";
+        println(int.to_string(r2.n)) }\n";
     let prog = lower_source(src);
-    let main = prog.functions.iter().find(|f| f.name == "main").expect("main");
-    // `r2` (the spread) must NOT be in any heap_slot_mask — only the genuinely-materialized
-    // `r` is masked. (A spread record incorrectly masked would free garbage slots.)
-    assert!(
-        main.heap_slot_masks.len() <= 1,
-        "only the materialized record `r` may carry a heap-slot mask, not the deferred spread"
-    );
-    // The cert stays balanced (no double-free from the deferred spread).
+    // The cert stays balanced (the spread copy's `Dup` is matched by the masked drop's free).
     for f in &prog.functions {
         let cert = crate::certificate::ownership_certificate(f);
         for line in cert.lines() {
@@ -343,8 +395,8 @@ fn spread_heap_field_record_walls_safely() {
         }
     }
     if let Some(out) = build_and_run("spread_heap_field_record", &render_wasm_program(&prog)) {
-        // r.n reads correctly (1); r2 is deferred but never dereferenced unsafely.
-        assert_eq!(out, "1");
+        // r2.n reads the override (9); r2.name copied "a"; r untouched — no double-free.
+        assert_eq!(out, "9");
     }
 }
 

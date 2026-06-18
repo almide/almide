@@ -28,6 +28,17 @@ pub(super) fn subst_type_var(
             fields: fields.iter().map(|(n, t)| (*n, subst_type_var(t, subst))).collect(),
         },
         Ty::Tuple(elems) => Ty::Tuple(elems.iter().map(|e| subst_type_var(e, subst)).collect()),
+        // A generic PARAMETER of a record decl is stored as a bare `Named(T, [])` (the
+        // frontend lowers an uninstantiated type variable to a nullary named type, NOT a
+        // `Ty::TypeVar`). When `T` is one of this type's params (it is in `subst`), resolve
+        // it to the instantiated arg — this is the #650 "generic field sized by its
+        // INSTANTIATED type" fix, the substitution `aggregate_field_tys` relies on so a
+        // `Box[Int]` field `value: T` resolves to `Int` (and its heap-ness is decided
+        // correctly for the spread-copy / offset paths). A `Named` WITH args is a real
+        // applied type — recurse into the args only.
+        Ty::Named(name, args) if args.is_empty() && subst.contains_key(name) => {
+            subst.get(name).cloned().unwrap_or_else(|| ty.clone())
+        }
         Ty::Named(name, args) => {
             Ty::Named(*name, args.iter().map(|a| subst_type_var(a, subst)).collect())
         }

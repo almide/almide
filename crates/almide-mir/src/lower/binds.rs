@@ -56,6 +56,13 @@ impl LowerCtx {
             let repr = repr_of(ty).ok()?;
             if repr.is_heap() {
                 sub.param_values.insert(pv);
+                // SEED the param's variant/aggregate read-shape — IDENTICAL to `bind_params`.
+                // A closure over a record/tuple param (`(r) => r.name`, `(r) => r.v` — the
+                // List[R] map/sort_by key fns) needs `r` in `materialized_aggregates` so its
+                // field read borrows the real slot; an Option/Result param needs its variant
+                // tracking so a `match` inside the closure executes. Without this the lifted
+                // body read an EMPTY deferred value (the silent-empty List[R] map bug).
+                sub.seed_variant_param(pv, ty);
             }
             mir_params.push(crate::MirParam { value: pv, repr });
         }
@@ -452,6 +459,24 @@ impl LowerCtx {
                     self.ops.truncate(mark);
                     self.live_heap_handles.truncate(lhh_mark);
                 }
+                // A SPREAD record `R { ...base, f: override }` — build a fresh block of the
+                // same layout, COPYING each non-overridden field from `base` (a scalar load,
+                // a heap-handle Dup so both records own a distinct reference) and storing the
+                // overrides. So `let b2 = Box { ...b, value: 8 }` reads `b2.value=8
+                // b2.label=old` while `b.label` still reads `old`. Rolls back to the deferred
+                // Opaque (whose field reads WALL) on a non-materialized base / out-of-subset
+                // override — never wrong bytes.
+                if let IrExprKind::SpreadRecord { .. } = &value.kind {
+                    let mark = self.ops.len();
+                    let lhh_mark = self.live_heap_handles.len();
+                    if let Some(dst) = self.try_lower_spread_record_construct(value) {
+                        self.value_of.insert(var, dst);
+                        self.live_heap_handles.push(dst);
+                        return Ok(());
+                    }
+                    self.ops.truncate(mark);
+                    self.live_heap_handles.truncate(lhh_mark);
+                }
                 // A scalar `List[Int/Float/Bool]` literal with COMPUTED elements (`[1.0, inf, 0.5]`,
                 // `[a, a]`) — build the block + store each slot (an all-literal list is the IntList
                 // path in `alloc_init` below; a computed element can't fold to a constant).
@@ -459,6 +484,32 @@ impl LowerCtx {
                     self.value_of.insert(var, dst);
                     self.live_heap_handles.push(dst);
                     return Ok(());
+                }
+                // A NON-EMPTY `List[heap]` LITERAL that NONE of the materialization paths above
+                // could build — a list of heap-FIELD records/tuples (`[R{name:String,…}, …]`), a
+                // list of lists, a list of heap call-results. The flat `Init::Opaque` fallback
+                // below would emit an EMPTY len-0 block (`list_new(0, …)`); a later `list.map` /
+                // `list.sort_by` / `xs[i]` over it then silently reads NOTHING = wrong/empty bytes.
+                // (A heap-field-record element needs a TWO-LEVEL recursive drop — the list frees
+                // each record, each record frees its String fields — which the single-level
+                // `DropListStr` cannot express without a new ownership op; that is the
+                // nested-ownership frontier, out of this brick.) WALL the function cleanly instead
+                // of mis-valuing it — the render discards it (no invalid wasm, no empty output).
+                // GATED to a NON-EMPTY heap-element `List` LITERAL (an empty `[]`, a scalar list,
+                // and a `List[String]`/scalar-aggregate list are all handled above), so this only
+                // rejects the genuinely-unmaterializable case.
+                if let IrExprKind::List { elements } = &value.kind {
+                    use almide_lang::types::constructor::TypeConstructorId;
+                    let heap_elem_list = matches!(ty,
+                        Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && is_heap_ty(&a[0]));
+                    if heap_elem_list && !elements.is_empty() {
+                        return Err(LowerError::Unsupported(
+                            "non-empty List[heap] literal with nested-ownership elements \
+                             (a heap-field record/tuple, a list, a call result) cannot be \
+                             faithfully materialized in this brick (walled, not emitted empty)"
+                                .into(),
+                        ));
+                    }
                 }
                 let dst = self.fresh_value();
                 let repr = repr_of(ty)?;
@@ -1044,6 +1095,154 @@ impl LowerCtx {
             }
         }
         self.record_masks.insert(dst, heap_slots);
+        self.materialized_aggregates.insert(dst);
+        Some(dst)
+    }
+
+    /// Construct a SPREAD record `R { ...base, f: override, … }`: a FRESH block of the
+    /// SAME uniform-slot layout, where each declared field's slot is either the supplied
+    /// OVERRIDE value or COPIED from `base`. The copy preserves value semantics — `base`
+    /// is left fully intact (a scalar slot is a `Load` copy; a heap slot is a borrowed
+    /// handle `Dup`'d so the new record owns a DISTINCT reference while `base` keeps its
+    /// own). This is what makes `let b2 = Box { ...b, value: 8 }` print `b2.value=8
+    /// b2.label=old` while `b.label` still reads `old` — both records own the same string
+    /// content through independent reference counts.
+    ///
+    /// GATE: `base` must be a MATERIALIZED aggregate var (its slots are real — a deferred
+    /// `Opaque` base would copy garbage), every declared field's CONCRETE type must be
+    /// known (resolved from `base.ty`, which carries the instantiated generic args — the
+    /// `Pair[Int,String]` concern), and every override value must lower to an owned-handle
+    /// (heap) / scalar. Any miss → `None` (the binding falls back to the deferred Opaque,
+    /// whose field reads then WALL — never wrong bytes).
+    ///
+    /// SOUNDNESS (no new op / no certificate change): identical to [`Self::try_lower_record_construct`]'s
+    /// shape — the block is `i…d` (alloc then the masked `DropListStr`), each heap slot
+    /// holds an OWNED handle that is `Consume`d (moved) into the slot (cert `m`). A copied
+    /// heap field's owned handle comes from `Dup`-ing `base`'s borrowed slot handle (cert
+    /// `a` then `m` = the balanced shape the checker already accepts for a List[String]
+    /// element duplicated from another container). `base` is never consumed, so it remains
+    /// the sole owner of its own slots (dropped once at its own scope end).
+    pub(crate) fn try_lower_spread_record_construct(&mut self, value: &IrExpr) -> Option<ValueId> {
+        use crate::{IntOp, PrimKind};
+        let IrExprKind::SpreadRecord { base, fields } = &value.kind else {
+            return None;
+        };
+        // The CANONICAL declaration-ordered (name, concrete-type) field list. The result's
+        // type carries the instantiated generic args, so a `Pair[Int,String]` field `first: A`
+        // resolves to `Int`. An unresolvable type ⇒ `None` ⇒ wall.
+        let (names, tys) = self.aggregate_field_tys(&value.ty)?;
+        let n = tys.len();
+        if n == 0 || names.len() != n {
+            return None;
+        }
+        // The base must be a TRACKED, MATERIALIZED aggregate var — its slots are real, so a
+        // copy reads the right value (a deferred Opaque base would copy garbage). Resolve its
+        // block handle.
+        let base_block = match &base.kind {
+            IrExprKind::Var { id } if is_heap_ty(&base.ty) => {
+                let src = self.value_or_global(*id).ok()?;
+                if !self.materialized_aggregates.contains(&src) {
+                    return None;
+                }
+                src
+            }
+            _ => return None,
+        };
+        // Per declared slot: the override expr (if the literal supplies it) or `None` (copy
+        // from base). A field NOT in the declaration is a type error the checker rejects
+        // upstream, so a supplied field always maps to a declared index.
+        let mut overrides: Vec<Option<&IrExpr>> = vec![None; n];
+        for (name, expr) in fields {
+            let idx = names.iter().position(|nm| nm == name)?;
+            overrides[idx] = Some(expr);
+        }
+        // The slot is heap iff the declared CONCRETE type is heap (the base's slot, and the
+        // copy/override, follow that). A generic field already substituted to its concrete
+        // type by `aggregate_field_tys`, so `is_heap_ty` is decisive here.
+        let heap_slots: Vec<usize> = (0..n).filter(|&i| is_heap_ty(&tys[i])).collect();
+        // Lower every OVERRIDE value FIRST (before the alloc) so an override expr that itself
+        // allocates does not interleave with our store sequence. Copies read from `base` and
+        // are emitted inline at store time (a pure Load / a Dup of a borrowed handle — neither
+        // allocates a block that could interleave badly). Each entry: (slot-value, is-heap).
+        // For a heap OVERRIDE the value is a fresh owned handle to Consume into the slot.
+        let mut override_vals: Vec<Option<(ValueId, bool)>> = vec![None; n];
+        for (i, ov) in overrides.iter().enumerate() {
+            if let Some(expr) = ov {
+                if is_heap_ty(&tys[i]) {
+                    let obj = self.lower_owned_heap_field(expr)?;
+                    override_vals[i] = Some((obj, true));
+                } else {
+                    let v = self.lower_scalar_value(expr)?;
+                    override_vals[i] = Some((v, false));
+                }
+            }
+        }
+        let len = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: len, value: n as i64 });
+        let dst = self.fresh_value();
+        self.ops.push(Op::Alloc {
+            dst,
+            repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT },
+            init: crate::Init::DynList { len },
+        });
+        let h = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![dst] });
+        // The base's block handle, for the per-slot copy loads.
+        let bh = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(bh), args: vec![base_block] });
+        for i in 0..n {
+            let is_heap = is_heap_ty(&tys[i]);
+            // The destination slot address.
+            let off = self.fresh_value();
+            self.ops.push(Op::ConstInt { dst: off, value: layout::slot_offset(i) as i64 });
+            let addr = self.fresh_value();
+            self.ops.push(Op::IntBinOp { dst: addr, op: IntOp::Add, a: h, b: off });
+            // The value to store: an OVERRIDE's lowered value, or a COPY from base's slot.
+            let (slot_val, consume_owned) = match override_vals[i].take() {
+                Some((v, true)) => {
+                    // A heap override: store its handle, then Consume the owned value (moved in).
+                    let handle = self.fresh_value();
+                    self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(handle), args: vec![v] });
+                    (handle, Some(v))
+                }
+                Some((v, false)) => (v, None), // a scalar override: store directly.
+                None => {
+                    // Copy from base's slot at the same offset.
+                    let baddr = self.fresh_value();
+                    self.ops.push(Op::IntBinOp { dst: baddr, op: IntOp::Add, a: bh, b: off });
+                    if is_heap {
+                        // BORROW base's slot handle, then Dup it: the new record owns a DISTINCT
+                        // reference (cert `a`), so base's own slot stays valid and the new block's
+                        // masked drop frees only its own reference (no double-free).
+                        let borrowed = self.fresh_value();
+                        self.ops.push(Op::Prim { kind: PrimKind::LoadHandle, dst: Some(borrowed), args: vec![baddr] });
+                        let owned = self.fresh_value();
+                        self.ops.push(Op::Dup { dst: owned, src: borrowed });
+                        self.live_heap_handles.push(owned);
+                        let handle = self.fresh_value();
+                        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(handle), args: vec![owned] });
+                        (handle, Some(owned))
+                    } else {
+                        // A scalar copy: a pure value Load (no ownership).
+                        let v = self.fresh_value();
+                        self.ops.push(Op::Prim { kind: PrimKind::Load { width: 8 }, dst: Some(v), args: vec![baddr] });
+                        (v, None)
+                    }
+                }
+            };
+            self.ops.push(Op::Prim {
+                kind: PrimKind::Store { width: 8 },
+                dst: None,
+                args: vec![addr, slot_val],
+            });
+            if let Some(v) = consume_owned {
+                self.ops.push(Op::Consume { v });
+                self.live_heap_handles.retain(|x| *x != v);
+            }
+        }
+        if !heap_slots.is_empty() {
+            self.record_masks.insert(dst, heap_slots);
+        }
         self.materialized_aggregates.insert(dst);
         Some(dst)
     }

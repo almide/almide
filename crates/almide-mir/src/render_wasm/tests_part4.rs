@@ -4551,23 +4551,18 @@
 
     #[test]
     fn string_interp_compound_part_walls_not_invalid_wasm() {
-        // An UNSUPPORTED-element compound `${xs}` (a NESTED `List[List[Int]]`) desugars to the
-        // UNLINKED `list.to_string_x` (the never-registered sentinel), so the render wall cleanly
-        // REJECTS it — never invalid wasm, never wrong bytes. (Flat Int/Float/Bool/String element
-        // lists ARE self-hosted now and prove byte-match v0 in the `compound_list_interp_*` tests;
-        // this guards that the OUT-OF-SUBSET element types still wall as a unit.)
-        use crate::lower::LowerError;
-        use crate::render_wasm::{try_render_wasm_program, unlinked_call_names};
+        // An UNSUPPORTED-element compound `${xs}` (a NESTED `List[List[Int]]` LITERAL) is a
+        // nested-ownership value the single-level `DropListStr` cannot free recursively. The
+        // list-literal WALL (binds.rs) now rejects the whole `main` at lowering — earlier than
+        // the old interp `list.to_string_x` route, and a strictly cleaner wall (no empty len-0
+        // block emitted, no wrong bytes, never invalid wasm). `lower_source` drops the walled
+        // `main`, so it is ABSENT from the program. (Flat Int/Float/Bool/String element lists ARE
+        // self-hosted now and prove byte-match v0 in the `compound_list_interp_*` tests; this
+        // guards that the OUT-OF-SUBSET element types still wall as a unit.)
         let src = "fn main() -> Unit = {\n  let xs: List[List[Int]] = [[1, 2], [3]]\n  println(\"xs=${xs}\") }\n";
         let prog = lower_source(src);
         assert!(
-            unlinked_call_names(&prog).contains("list.to_string_x"),
-            "a nested-List interp must desugar to the unlinked list.to_string_x, got {:?}",
-            unlinked_call_names(&prog)
+            !prog.functions.iter().any(|f| f.name == "main"),
+            "a nested List[List[Int]] literal must WALL main at lowering (absent), not emit an empty list"
         );
-        match try_render_wasm_program(&prog) {
-            Err(LowerError::Unsupported(_)) => {}
-            Err(other) => panic!("expected Unsupported, got {other:?}"),
-            Ok(_) => panic!("a compound interp must wall, not render to (possibly invalid) wasm"),
-        }
     }
