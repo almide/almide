@@ -112,6 +112,20 @@ fn count_ir_calls(body: &almide_ir::IrExpr, registry: &almide_mir::lower::Record
                     self.n += 1;
                 }
             }
+            // A STRING-subject `match s { "a" => .., "b" => .., _ => .. }` desugars to a nested
+            // `if string.eq(s, "a") then .. else if string.eq(s, "b") then ..` — ONE synthetic
+            // `string.eq` CallFn PER STRING-LITERAL arm (the catch-all/binder arm emits no call).
+            // Count those arms here so the synthetic calls have matching ir_calls and
+            // `mir_calls <= ir_calls` holds BY CONSTRUCTION. `string.eq` is pure (no Stdout).
+            if let almide_ir::IrExprKind::Match { subject, arms } = &e.kind {
+                if matches!(subject.ty, almide_lang::types::Ty::String) {
+                    let lit_arms = arms
+                        .iter()
+                        .filter(|a| matches!(a.pattern, almide_ir::IrPattern::Literal { .. }))
+                        .count();
+                    self.n += lit_arms;
+                }
+            }
             // A SCALAR-element list concat `a + b` (BinOp::ConcatList over List[Int/Float/Bool])
             // lowers to ONE synthetic `__list_concat` CallFn (a mir_call). Count the operator NODE
             // as one ir_call ONLY for the scalar-element shape the lowering actually emits a call
