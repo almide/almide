@@ -251,7 +251,10 @@ impl LowerCtx {
                     // IT OUT as the return (NOT tracked → the caller owns it, no scope-end
                     // drop). Same cert as the heap-literal return: alloc(i) + move-out(m).
                     if let IrExprKind::Record { .. } = &tail.kind {
-                        if let Some(dst) = self.try_lower_record_construct(tail) {
+                        if let Some(dst) = self
+                            .try_lower_record_construct(tail)
+                            .or_else(|| self.try_lower_scalar_record_construct(tail))
+                        {
                             return Ok(Some(dst));
                         }
                     }

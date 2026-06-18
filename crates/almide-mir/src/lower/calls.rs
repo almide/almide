@@ -756,7 +756,12 @@ impl LowerCtx {
                 // subset (a heap-returning-call field) it WALLs — never an `Init::Opaque` empty.
                 IrExprKind::Record { .. } => {
                     let repr = repr_of(&a.ty)?;
-                    match self.try_lower_record_construct(a) {
+                    // heap-field records via `try_lower_record_construct`; all-scalar-field
+                    // records (`Point { x, y }`) via `try_lower_scalar_record_construct`.
+                    match self
+                        .try_lower_record_construct(a)
+                        .or_else(|| self.try_lower_scalar_record_construct(a))
+                    {
                         Some(dst) => self.materialized_call_arg(dst, repr, &a.ty),
                         None => {
                             return Err(LowerError::Unsupported(
