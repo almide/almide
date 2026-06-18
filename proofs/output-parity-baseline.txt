@@ -17,6 +17,8 @@ spec/wasm_cross/float_sign_minmax_ieee.almd
 spec/wasm_cross/generic_concat.almd
 spec/wasm_cross/i64_min_literal.almd
 spec/wasm_cross/int_div_mod_ok.almd
+spec/wasm_cross/int_float_ops.almd
+spec/wasm_cross/int_from_hex.almd
 spec/wasm_cross/int_pow_overflow_wraps.almd
 spec/wasm_cross/int_wrap_rotate_width.almd
 spec/wasm_cross/list_insert_clamp.almd
@@ -35,6 +37,7 @@ spec/wasm_cross/phantom_type_param.almd
 spec/wasm_cross/rc_reclaim_churn.almd
 spec/wasm_cross/records_variants.almd
 spec/wasm_cross/reserved_keyword_fn.almd
+spec/wasm_cross/sized_numeric_literals.almd
 spec/wasm_cross/string_codepoint.almd
 spec/wasm_cross/string_codepoint_index.almd
 spec/wasm_cross/string_count_truncation.almd
