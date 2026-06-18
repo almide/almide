@@ -246,6 +246,15 @@ impl LowerCtx {
                 | IrExprKind::ClosureCreate { .. }
                 | IrExprKind::Range { .. }
                 | IrExprKind::RuntimeCall { .. } => {
+                    // A RECORD literal RETURNED (`fn mk(a) = P { x: a, y: a * 2 }`) — build the
+                    // real layout block (scalar fields stored, heap fields moved in) and MOVE
+                    // IT OUT as the return (NOT tracked → the caller owns it, no scope-end
+                    // drop). Same cert as the heap-literal return: alloc(i) + move-out(m).
+                    if let IrExprKind::Record { .. } = &tail.kind {
+                        if let Some(dst) = self.try_lower_record_construct(tail) {
+                            return Ok(Some(dst));
+                        }
+                    }
                     // A `List[String]` literal RETURNED (`fn make() = [e0, e1]`) — build a real
                     // nested-ownership DynListStr (each element moved/Dup'd in), moved out as the
                     // return (NOT tracked, so no scope-end DropListStr — the caller owns it). Without
