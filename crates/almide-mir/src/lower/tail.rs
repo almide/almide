@@ -528,11 +528,10 @@ impl LowerCtx {
             // ownership. (A HEAP extraction is an ALIAS / share — it needs a layout-aware
             // field-access op with `Dup` semantics and stays walled until that brick.)
             | IrExprKind::MapAccess { .. }
-            // A SCALAR error-operator result (`x!`/`x ?? d`/`x?.f` yielding a scalar) is
+            // A SCALAR error-operator result (`x!`/`x?.f` yielding a scalar) is
             // likewise a fresh `Const`; the operator's value + early-return are deferred.
             | IrExprKind::Try { .. }
             | IrExprKind::Unwrap { .. }
-            | IrExprKind::UnwrapOr { .. }
             | IrExprKind::ToOption { .. }
             | IrExprKind::OptionalChain { .. }
             // A RANGE returned: a fresh `Const` (no ownership); any analyzable callee
@@ -540,6 +539,28 @@ impl LowerCtx {
             // CALL is handled by its own arm above — a real executable `CallFn` when
             // resolvable, else the same deferred `Const` + elided marker.)
             | IrExprKind::Range { .. } => {
+                let dst = self.fresh_value();
+                self.ops.push(Op::Const { dst });
+                self.record_elided_calls(tail);
+                Ok(Some(dst))
+            }
+            // A SCALAR tail `??` (`fn parse_or_zero(s) = int.parse(s) ?? 0`, the canonical
+            // form) EXECUTES the unwrap (tag read + payload-or-fallback) — it was a deferred
+            // `Const` 0 here (a silent wrong value, neither payload nor fallback). Outside the
+            // executable subset a `??` over a VARIANT operand WALLs (a Const-0 would be wrong);
+            // a non-variant operand keeps the deferred `Const`.
+            IrExprKind::UnwrapOr { expr, fallback } => {
+                if let Some(dst) = self.try_lower_option_unwrap_or(expr, fallback, false) {
+                    return Ok(Some(dst));
+                }
+                if is_variant_ty(&expr.ty) {
+                    return Err(LowerError::Unsupported(
+                        "?? over an Option/Result operand in tail position outside the \
+                         executable subset cannot be faithfully computed (a Const-0 would be \
+                         a wrong value) not in this brick"
+                            .into(),
+                    ));
+                }
                 let dst = self.fresh_value();
                 self.ops.push(Op::Const { dst });
                 self.record_elided_calls(tail);
