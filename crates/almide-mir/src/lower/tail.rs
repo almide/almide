@@ -599,11 +599,15 @@ impl LowerCtx {
                     ));
                 }
                 if let Some(if_expr) = self.desugar_match_to_if(subject, arms, &tail.ty) {
-                    if let IrExprKind::If { cond, then, else_ } = &if_expr.kind {
-                        if let Some(dst) = self.try_lower_scalar_if(cond, then, else_, &tail.ty) {
-                            return Ok(Some(dst));
-                        }
+                    // `If` (literal arms) OR `Block` (`{ let x = subj; if … }` for a
+                    // binder/guarded arm) — `lower_scalar_arm` runs both; roll back on a miss.
+                    let mark = self.ops.len();
+                    let lhh = self.live_heap_handles.len();
+                    if let Some(dst) = self.lower_scalar_arm(&if_expr) {
+                        return Ok(Some(dst));
                     }
+                    self.ops.truncate(mark);
+                    self.live_heap_handles.truncate(lhh);
                 }
                 self.lower_branch(tail)?;
                 let dst = self.fresh_value();

@@ -1684,13 +1684,11 @@ impl LowerCtx {
                 if is_heap_ty(&subject.ty) {
                     return self.try_lower_variant_value_match(subject, arms, &expr.ty);
                 }
+                // The desugared chain may be an `If` (literal arms) OR a `Block` (`{ let x =
+                // subj; if … }` for a binder/guarded-binder arm) — `lower_scalar_arm` handles
+                // both (its tail-`if`/`match` recursion runs the scalar-if machinery).
                 let if_expr = self.desugar_match_to_if(subject, arms, &expr.ty)?;
-                match &if_expr.kind {
-                    IrExprKind::If { cond, then, else_ } => {
-                        self.try_lower_scalar_if(cond, then, else_, &expr.ty)
-                    }
-                    _ => None,
-                }
+                self.lower_scalar_arm(&if_expr)
             }
             // A scalar user/stdlib CALL as an OPERAND (`5 + string.len(s)`, `5 +
             // string.len("abc")` after the optimizer inlines a `let s = "abc"`, `g(a) +

@@ -260,7 +260,7 @@ impl LowerCtx {
         arms: &[IrMatchArm],
         result_ty: &Ty,
     ) -> Option<IrExpr> {
-        if arms.is_empty() || arms.iter().any(|a| a.guard.is_some()) {
+        if arms.is_empty() {
             return None;
         }
         // A BOOL subject is exhaustive over `{true, false}` WITHOUT a wildcard: the literal
@@ -289,6 +289,11 @@ impl LowerCtx {
             return None;
         }
         let bool_lit = |arm: &IrMatchArm| -> Option<bool> {
+            // A GUARDED bool arm (`true if g => ..`) is NOT an unconditional `true`; decline so
+            // it falls to `build_match_chain`, which folds the guard into the condition.
+            if arm.guard.is_some() {
+                return None;
+            }
             match &arm.pattern {
                 IrPattern::Literal { expr } => match &expr.kind {
                     IrExprKind::LitBool { value } => Some(*value),
@@ -322,6 +327,60 @@ impl LowerCtx {
         result_ty: &Ty,
     ) -> Option<IrExpr> {
         let (first, rest) = arms.split_first()?;
+        // A GUARDED arm `pat if g => body` runs `body` only when the pattern matches AND `g`
+        // holds; otherwise control falls through to the rest. Desugar to `if <pat-test && g>
+        // then body else <rest>` (a Bind pattern binds the subject around the test so both `g`
+        // and `body` see it). This keeps a scalar guarded match in the cert-clean nested-`if`
+        // subset — vs the linearization, which runs every arm and LOSES the guard (a
+        // `match n { x if x > 3 => 10, _ => 0 }` → silent 0 miscompile).
+        if let Some(guard) = &first.guard {
+            let else_branch = self.build_match_chain(subject, rest, result_ty)?;
+            let mk_if = |cond: IrExpr, then: &IrExpr, els: IrExpr| IrExpr {
+                kind: IrExprKind::If {
+                    cond: Box::new(cond),
+                    then: Box::new(then.clone()),
+                    else_: Box::new(els),
+                },
+                ty: result_ty.clone(),
+                span: None,
+                def_id: None,
+            };
+            return match &first.pattern {
+                // `_ if g`: the guard alone gates the body.
+                IrPattern::Wildcard => Some(mk_if(guard.clone(), &first.body, else_branch)),
+                // `x if g`: bind x = subject around `if g then body else rest` so g/body see x.
+                IrPattern::Bind { var, ty } => {
+                    let inner = mk_if(guard.clone(), &first.body, else_branch);
+                    Some(Self::bind_subject(*var, ty, subject, &inner))
+                }
+                // `lit if g`: cond = (subject == lit) && g.
+                IrPattern::Literal { expr } => {
+                    let eq = IrExpr {
+                        kind: IrExprKind::BinOp {
+                            op: almide_ir::BinOp::Eq,
+                            left: Box::new(subject.clone()),
+                            right: Box::new(expr.clone()),
+                        },
+                        ty: Ty::Bool,
+                        span: None,
+                        def_id: None,
+                    };
+                    let cond = IrExpr {
+                        kind: IrExprKind::BinOp {
+                            op: almide_ir::BinOp::And,
+                            left: Box::new(eq),
+                            right: Box::new(guard.clone()),
+                        },
+                        ty: Ty::Bool,
+                        span: None,
+                        def_id: None,
+                    };
+                    Some(mk_if(cond, &first.body, else_branch))
+                }
+                // A guarded ctor/tuple/Some·Ok·Err arm — defer (the variant path / linearization).
+                _ => None,
+            };
+        }
         match &first.pattern {
             // A wildcard catch-all: its body is the value, no further test.
             IrPattern::Wildcard => Some(first.body.clone()),
@@ -1068,7 +1127,7 @@ impl LowerCtx {
     /// Lower ONE scalar `if` arm (a block's statements + a scalar tail value) with a
     /// per-arm scope frame: the heap temps the arm allocates are dropped WITHIN the arm
     /// (so taken-arm-only execution stays balanced). Returns the tail's scalar value.
-    fn lower_scalar_arm(&mut self, arm: &IrExpr) -> Option<ValueId> {
+    pub(crate) fn lower_scalar_arm(&mut self, arm: &IrExpr) -> Option<ValueId> {
         let (stmts, tail): (&[IrStmt], Option<&IrExpr>) = match &arm.kind {
             IrExprKind::Block { stmts, expr } => (stmts, expr.as_deref()),
             _ => (&[], Some(arm)),

@@ -251,12 +251,16 @@ impl LowerCtx {
                     ));
                 }
                 if let Some(if_expr) = self.desugar_match_to_if(subject, arms, ty) {
-                    if let IrExprKind::If { cond, then, else_ } = &if_expr.kind {
-                        if let Some(dst) = self.try_lower_scalar_if(cond, then, else_, ty) {
-                            self.value_of.insert(var, dst);
-                            return Ok(());
-                        }
+                    // `If` (literal arms) OR `Block` (`{ let x = subj; if … }` for a
+                    // binder/guarded arm) — `lower_scalar_arm` runs both; roll back on a miss.
+                    let mark = self.ops.len();
+                    let lhh = self.live_heap_handles.len();
+                    if let Some(dst) = self.lower_scalar_arm(&if_expr) {
+                        self.value_of.insert(var, dst);
+                        return Ok(());
                     }
+                    self.ops.truncate(mark);
+                    self.live_heap_handles.truncate(lhh);
                 }
             }
             // `let idx = string.index_of(s, x) ?? -1` — a `??` over a materialized Option
