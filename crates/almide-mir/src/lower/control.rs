@@ -1515,6 +1515,46 @@ impl LowerCtx {
             IrExprKind::If { cond, then, else_ } => {
                 self.lower_heap_result_if_inner(cond, then, else_, result_ty)
             }
+            // A TUPLE literal arm (`if c then (a, b) else (0, 0)`, `... else (parse(s), pos)`):
+            // materialize the flat (scalar) or nested-ownership (heap-element) tuple block
+            // (cert `i`) and MOVE IT OUT (`Consume` = `m`) — the same per-arm `"im"` balance as
+            // a literal arm. Any heap element it materializes is freed within the arm.
+            IrExprKind::Tuple { elements } => {
+                let arm_mark = self.live_heap_handles.len();
+                let obj = self
+                    .try_lower_scalar_tuple_construct(elements)
+                    .or_else(|| self.try_lower_tuple_construct(elements))?;
+                self.ops.push(Op::Consume { v: obj });
+                self.drop_arm_locals(arm_mark);
+                Some(obj)
+            }
+            // A BLOCK arm (`else { let c = string.get(s, pos) ?? ""; <heap-tail> }` — the
+            // dominant real-parser shape): lower its statements as effects in a per-arm frame,
+            // then its tail as the arm's moved-out heap value (recursing into this same arm
+            // lowering, which `Consume`s the tail). The block's own heap let-locals (tracked in
+            // `live_heap_handles` since `arm_mark`) are freed WITHIN the arm via
+            // `drop_arm_locals`; the moved-out value is `Consume`d (never in that set), so it is
+            // not double-freed. Same per-arm balance the scalar block arm proves.
+            IrExprKind::Block { stmts, expr } => {
+                let tail = expr.as_deref()?;
+                let arm_mark = self.live_heap_handles.len();
+                self.in_frame += 1;
+                let mut ok = true;
+                for stmt in stmts {
+                    if self.lower_stmt(stmt).is_err() {
+                        ok = false;
+                        break;
+                    }
+                }
+                let obj = if ok {
+                    self.lower_heap_result_arm(tail, result_ty)
+                } else {
+                    None
+                };
+                self.drop_arm_locals(arm_mark);
+                self.in_frame -= 1;
+                obj
+            }
             // A direct user-call arm (`if c then f(x) else "d"`): the callee returns a
             // FRESH owned heap value (CallFn-with-heap-result = cert `i`), moved out by the
             // arm's `Consume` (cert `m`) — the same `"im"` balance as a literal arm. Any

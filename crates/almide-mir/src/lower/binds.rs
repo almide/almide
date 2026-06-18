@@ -867,7 +867,7 @@ impl LowerCtx {
         self.try_lower_scalar_list_slots(elements)
     }
 
-    fn try_lower_scalar_tuple_construct(&mut self, elements: &[IrExpr]) -> Option<ValueId> {
+    pub(crate) fn try_lower_scalar_tuple_construct(&mut self, elements: &[IrExpr]) -> Option<ValueId> {
         if elements.iter().any(|e| is_heap_ty(&e.ty)) {
             return None; // heap-element tuple → the masked `try_lower_tuple_construct` path.
         }
