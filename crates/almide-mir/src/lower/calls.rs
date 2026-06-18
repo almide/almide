@@ -748,6 +748,25 @@ impl LowerCtx {
                         }
                     }
                 }
+                // A RECORD literal argument (`f(P { x: 3, y: 4 })`) materializes the real
+                // layout block via `try_lower_record_construct` (the SAME block a `let p =
+                // P{..}` builds — scalar fields stored, heap fields moved in), borrowed into
+                // the call and dropped at scope end via `materialized_call_arg`: cert `i`
+                // (alloc) + `d` (drop), identical to the verified fresh-heap bind. Outside the
+                // subset (a heap-returning-call field) it WALLs — never an `Init::Opaque` empty.
+                IrExprKind::Record { .. } => {
+                    let repr = repr_of(&a.ty)?;
+                    match self.try_lower_record_construct(a) {
+                        Some(dst) => self.materialized_call_arg(dst, repr, &a.ty),
+                        None => {
+                            return Err(LowerError::Unsupported(
+                                "record argument cannot be faithfully materialized in this \
+                                 brick (a field outside the executable subset)"
+                                    .into(),
+                            ))
+                        }
+                    }
+                }
                 // A fresh HEAP literal argument (`f("x")`, `f([1, 2, 3])`):
                 // materialized into an owned temp via `Alloc`, borrowed into the
                 // call, dropped at scope end — cert `i` (alloc) + `d` (drop), both
@@ -756,7 +775,6 @@ impl LowerCtx {
                 | IrExprKind::List { .. }
                 | IrExprKind::MapLiteral { .. }
                 | IrExprKind::EmptyMap
-                | IrExprKind::Record { .. }
                 | IrExprKind::SpreadRecord { .. }
                 | IrExprKind::Tuple { .. }
                 // A CLOSURE value argument (`register((x) => …)`): a fresh heap env,
