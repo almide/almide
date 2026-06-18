@@ -2,6 +2,13 @@ spec/churn/closure_env_churn.almd
 spec/churn/map_entry_churn.almd
 spec/churn/record_churn.almd
 spec/lang/var_in_if_test.almd
+spec/programs/closure_scale.almd
+spec/programs/fib_rec.almd
+spec/programs/gcd_pairs.almd
+spec/programs/grade_classify.almd
+spec/programs/running_stats.almd
+spec/programs/safe_parse_sum.almd
+spec/programs/sum_of_squares.almd
 spec/wasm_cross/anon_records_and_fusion.almd
 spec/wasm_cross/assign_alias_rc.almd
 spec/wasm_cross/autotry_result_first_arg.almd

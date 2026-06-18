@@ -1,0 +1,11 @@
+fn check(age: Int) -> Result[Int, String] =
+  if age < 0 then Err("negative")
+  else if age > 150 then Err("too large")
+  else Ok(age)
+fn label(age: Int) -> String =
+  match check(age) { Ok(a) => "ok:" + int.to_string(a), Err(e) => "bad:" + e }
+fn main() -> Unit = {
+  println(label(30))
+  println(label(-5))
+  println(label(200))
+}
