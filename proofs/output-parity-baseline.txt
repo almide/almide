@@ -1,3 +1,4 @@
+spec/churn/closure_env_churn.almd
 spec/churn/map_entry_churn.almd
 spec/churn/record_churn.almd
 spec/lang/var_in_if_test.almd

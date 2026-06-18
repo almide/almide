@@ -303,6 +303,16 @@ pub(crate) struct LowerCtx {
     /// call whose callee is one of these (`f(args)` where `f` bound a lifted lambda) lowers
     /// to `Op::CallIndirect` through it instead of deferring — the closure EXECUTES.
     funcref_values: HashSet<ValueId>,
+    /// C1 DIRECT-CALL INLINE: source-`VarId` → the INLINE lambda (`params`, `body`) a `let f =
+    /// (x) => body` statically bound. A later DIRECT call `f(args)` whose callee is this `f`
+    /// is DEFUNCTIONALIZED — the body is lowered INLINE with each param bound to its arg, and
+    /// the captures resolve through `value_of` (they are in scope at the call site). This is
+    /// what makes `let s = "ab"; let f = (x) => string.len(s) + x; f(1)` EXECUTE (return 3)
+    /// instead of deferring the capturing lambda to an Opaque + `Const 0`. A lambda that ALSO
+    /// lifts (non-capturing) keeps its `funcref_values` CallIndirect path; this map is the
+    /// inline route for the CAPTURING / non-lifted case (recorded for BOTH, the call site
+    /// prefers inline). Cleared per function (Default).
+    lambda_bindings: HashMap<VarId, (Vec<(VarId, Ty)>, IrExpr)>,
     /// MIR values that are `List[String]` (NESTED-OWNERSHIP lists — their i64 slots hold OWNED
     /// String handles). A scope-end drop of one emits [`Op::DropListStr`] (recursive free),
     /// not a flat [`Op::Drop`] — so the element Strings are reclaimed. Populated when an

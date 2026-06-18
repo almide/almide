@@ -42,18 +42,25 @@
 
     #[test]
     fn self_hosted_list_map() {
-        // SELF-HOSTED `list.map` (the first higher-order stdlib fn). list.map([1,2,3,4],
-        // (x) => x * x) builds [1,4,9,16] over the prim floor: a fresh List[Int], each slot
-        // filled with f(elem) invoked via CallIndirect through the lifted lambda's slot.
-        // Byte-matches v0 (sum + a sampled element confirm the contents).
+        // C1 DEFUNCTIONALIZED `list.map` over an INLINE lambda. list.map([1,2,3,4], (x) => x
+        // * x) builds [1,4,9,16] via a SPECIALIZED loop at the call site — a fresh List[Int],
+        // each slot filled with the INLINED body `x * x` (no runtime closure, no CallIndirect,
+        // no auto-linked `list.map` combinator). Byte-matches v0 (sum + a sampled element
+        // confirm the contents).
         let src = "fn main() -> Unit = {\n  \
             let ys = list.map([1, 2, 3, 4], (x) => x * x)\n  \
             let s = int.to_string(list.sum(ys))\n  println(s)\n  \
             let e = int.to_string(list.get_or(ys, 3, 0))\n  println(e) }\n";
         let prog = lower_source(src);
+        // The inline lambda is defunctionalized away — no `list.map` combinator CallFn (so it
+        // is NOT auto-linked) and no lifted `__lambda_*` aux.
         assert!(
-            prog.functions.iter().any(|f| f.name == "list.map"),
-            "list.map must be auto-linked from the self-host registry"
+            !prog.functions.iter().any(|f| f.name == "list.map"),
+            "list.map is inlined, NOT auto-linked as a combinator"
+        );
+        assert!(
+            !prog.functions.iter().any(|f| f.name.starts_with("__lambda_")),
+            "the inline lambda is defunctionalized, not lifted"
         );
         if let Some(out) = build_and_run("self_hosted_list_map", &render_wasm_program(&prog)) {
             // 1+4+9+16 = 30 ; ys[3] = 16
@@ -72,9 +79,11 @@
             let t = int.to_string(list.sum(ys))\n  println(t)\n  \
             let e = int.to_string(list.get_or(ys, 0, 0))\n  println(e) }\n";
         let prog = lower_source(src);
+        // C1: the inline predicate is defunctionalized — `list.filter` is inlined as a loop
+        // (over-allocate, pack matches, patch len), NOT auto-linked as a combinator.
         assert!(
-            prog.functions.iter().any(|f| f.name == "list.filter"),
-            "list.filter must be auto-linked from the self-host registry"
+            !prog.functions.iter().any(|f| f.name == "list.filter"),
+            "list.filter is inlined, NOT auto-linked as a combinator"
         );
         if let Some(out) = build_and_run("self_hosted_list_filter", &render_wasm_program(&prog)) {
             // [2,4,6]: len 3, sum 12, ys[0] = 2
@@ -129,7 +138,12 @@
             let s = list.fold([1, 2, 3, 4], 0, (a, x) => a + x)\n  println(int.to_string(s))\n  \
             let p = list.fold([1, 2, 3, 4], 1, (a, x) => a * x)\n  println(int.to_string(p)) }\n";
         let prog = lower_source(src);
-        assert!(prog.functions.iter().any(|f| f.name == "list.fold"));
+        // C1: the inline 2-arity closure is defunctionalized — `list.fold` is inlined as a
+        // loop with a stable accumulator local, NOT auto-linked as a combinator.
+        assert!(
+            !prog.functions.iter().any(|f| f.name == "list.fold"),
+            "list.fold is inlined, NOT auto-linked as a combinator"
+        );
         if let Some(out) = build_and_run("self_hosted_list_fold", &render_wasm_program(&prog)) {
             assert_eq!(out, "10\n24");
         }
@@ -4400,6 +4414,97 @@
             reachable_caps("compute", &pure_program, &mut v2).is_empty(),
             "a pure operand call must NOT taint the caller's transitive caps"
         );
+    }
+
+    #[test]
+    fn c1_defunc_capturing_map_executes_and_is_pure() {
+        // C1: a CAPTURING inline lambda in `list.map` is DEFUNCTIONALIZED inline — the
+        // capture `k` resolves through the in-scope binding, NOT a closure env. It EXECUTES
+        // (byte-matches v0 `[10, 20, 30]`) AND, with the result-producing work isolated in a
+        // pure fn, the transitive cap fold reports EMPTY (the inlined `x * k` reaches no host
+        // capability — no CallIndirect conservatism, no lifted-lambda Stdout). The inline path
+        // is NOT a caps regression: a pure body stays pure.
+        use crate::certificate::reachable_caps;
+        let src = "fn build() -> List[Int] = {\n  let k = 10\n  \
+            list.map([1, 2, 3], (x) => x * k) }\n\
+            fn main() -> Unit = { println(\"${build()}\") }\n";
+        let prog = lower_source(src);
+        // No lifted lambda, no `list.map` combinator — the closure is defunctionalized away.
+        assert!(
+            !prog.functions.iter().any(|f| f.name.starts_with("__lambda_") || f.name == "list.map"),
+            "the capturing map lambda is inlined (no __lambda_*, no list.map combinator)"
+        );
+        let program: std::collections::BTreeMap<String, crate::MirFunction> =
+            prog.functions.iter().map(|f| (f.name.clone(), f.clone())).collect();
+        let mut visited = std::collections::BTreeSet::new();
+        assert!(
+            reachable_caps("build", &program, &mut visited).is_empty(),
+            "a pure inlined map body must NOT taint the producer's transitive caps"
+        );
+        if let Some(out) = build_and_run("c1_capturing_map", &render_wasm_program(&prog)) {
+            assert_eq!(out, "[10, 20, 30]");
+        }
+    }
+
+    #[test]
+    fn c1_defunc_filter_and_fold_execute() {
+        // C1: an inline `filter` predicate and an inline `fold` reducer are defunctionalized
+        // as loops at the call site (over-allocate+pack+patch-len for filter, a stable
+        // accumulator local for fold). Byte-matches v0: filter([1..4], x>2)=[3,4],
+        // fold([1..4], 0, +)=10. No combinator CallFn, no closure.
+        let src = "fn main() -> Unit = {\n  \
+            let a = list.filter([1, 2, 3, 4], (x) => x > 2)\n  println(\"${a}\")\n  \
+            let s = list.fold([1, 2, 3, 4], 0, (acc, x) => acc + x)\n  println(int.to_string(s)) }\n";
+        let prog = lower_source(src);
+        assert!(
+            !prog.functions.iter().any(|f| f.name == "list.filter" || f.name == "list.fold"),
+            "filter/fold inline lambdas are defunctionalized, not auto-linked"
+        );
+        if let Some(out) = build_and_run("c1_filter_fold", &render_wasm_program(&prog)) {
+            assert_eq!(out, "[3, 4]\n10");
+        }
+    }
+
+    #[test]
+    fn c1_defunc_map_false_green_keeps_caller_caps_tainted() {
+        // FALSE-GREEN GUARD for C1: a `list.map(xs, (x) => { println("hit"); x })` body has a
+        // REAL Stdout edge. My defunctionalization declines a side-effecting body (it is not
+        // scalar-pure-lowerable) → the lambda falls to the self-host path (LIFTED + CallIndirect).
+        // The lifted lambda's Stdout MUST reach the caller's transitive witness via the FuncRef
+        // edge — so a printing map can NEVER be falsely caps-VERIFIED. (This is the exact
+        // accept-but-unsafe the discipline forbids: the inline must not swallow the println.)
+        use crate::certificate::reachable_caps;
+        let src = "fn run() -> Unit = {\n  \
+            let _r = list.map([1, 2, 3], (x) => { println(\"hit\"); x }) }\n\
+            fn main() -> Unit = { run() }\n";
+        let prog = lower_source(src);
+        let program: std::collections::BTreeMap<String, crate::MirFunction> =
+            prog.functions.iter().map(|f| (f.name.clone(), f.clone())).collect();
+        let mut visited = std::collections::BTreeSet::new();
+        let reach = reachable_caps("run", &program, &mut visited);
+        assert!(
+            reach.contains(&crate::Capability::Stdout),
+            "a printing map lambda must keep the caller's transitive caps tainted (Stdout reachable), got {reach:?}"
+        );
+        // And it still EXECUTES the side effect (prints "hit" thrice), byte-matching v0.
+        if let Some(out) = build_and_run("c1_false_green", &render_wasm_program(&prog)) {
+            assert_eq!(out, "hit\nhit\nhit");
+        }
+    }
+
+    #[test]
+    fn c1_direct_call_inline_executes_captured_lambda() {
+        // C1 DIRECT-CALL INLINE: `let s = "ab"; let f = (x) => string.len(s) + x; f(1)` — the
+        // CAPTURING let-bound lambda is inlined at its DIRECT call site (the capture `s` resolves
+        // through the in-scope binding). EXECUTES to 3 (was a silent `Const 0` before C1 — the
+        // capturing lambda deferred to an Opaque + zero). Byte-matches v0.
+        let src = "fn main() -> Unit = {\n  let s = \"ab\"\n  \
+            let f = (x) => string.len(s) + x\n  \
+            println(int.to_string(f(1))) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("c1_direct_inline", &render_wasm_program(&prog)) {
+            assert_eq!(out, "3");
+        }
     }
 
     // ──────────────────────────────────────────────────────────────────────────────

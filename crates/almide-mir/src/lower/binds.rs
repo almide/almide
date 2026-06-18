@@ -324,10 +324,20 @@ impl LowerCtx {
             // proven model has no representation for, so it falls through to the deferred
             // `Alloc{Opaque}` (its calls elided ⇒ honest caps taint), unchanged.
             IrExprKind::Lambda { params, body, .. } => {
+                // C1 DIRECT-CALL INLINE: record the lambda (params + body) so a later DIRECT
+                // call `f(args)` to this `var` is DEFUNCTIONALIZED (the body inlined with the
+                // params bound to the args, captures resolved through `value_of`). Recorded
+                // for BOTH the liftable and the capturing case — the call site prefers inline.
+                self.lambda_bindings.insert(var, (params.clone(), (**body).clone()));
                 if let Some(dst) = self.lift_lambda(params, body) {
                     self.value_of.insert(var, dst);
                     return Ok(());
                 }
+                // A CAPTURING / non-liftable lambda — NO `Op::FuncRef` slot exists, but the
+                // direct-call inline above can still EXECUTE a `f(args)`. Bind a placeholder
+                // value so `f` is in `value_of` (a lone `f` never invoked carries no
+                // observable, and a captured-`f`-passed-to-a-HOF is the C2 first-class case
+                // that WALLS at that HOF). The deferred Opaque keeps the value memory-safe.
                 let dst = self.fresh_value();
                 let repr = repr_of(ty)?;
                 let init = alloc_init(value);

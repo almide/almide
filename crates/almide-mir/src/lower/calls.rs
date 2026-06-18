@@ -100,6 +100,18 @@ impl LowerCtx {
                 .lower_prim_call(func, args)?
                 .ok_or_else(|| LowerError::Unsupported(format!("prim.{func} yields no value here")));
         }
+        // C1 DEFUNCTIONALIZATION — a `list.map`/`filter`/`fold` whose closure arg is an
+        // INLINE lambda is specialized as a loop at the call site (no runtime closure, no
+        // CallIndirect, no lifted fn). This is tried FIRST so a CAPTURING inline lambda
+        // (`(x) => x * k`) WORKS via inline rather than walling at the self-host path below
+        // (a capturing lambda has no liftable FuncRef). A non-inlinable form (a first-class
+        // Var closure, a heap element/result, a side-effecting body) returns `None` and
+        // falls through to the existing `lift_lambda` / self-host-combinator routing.
+        if module == "list" && matches!(func, "map" | "filter" | "fold") {
+            if let Some(dst) = self.try_lower_defunc_list_hof(func, args, result_ty) {
+                return Ok(dst);
+            }
+        }
         let arg_tys: Vec<Ty> = args.iter().map(|a| a.ty.clone()).collect();
         let lowered = self.lower_pure_module_call_args(module, func, args)?;
         let dst = self.fresh_value();
@@ -977,10 +989,24 @@ impl LowerCtx {
                                 .into(),
                         ));
                     }
-                    let dst = self.fresh_value();
-                    self.record_elided_calls(a);
-                    self.ops.push(Op::Const { dst });
-                    CallArg::Scalar(dst)
+                    // C1 DIRECT-CALL INLINE: a SCALAR-result `Computed` call `f(x)` whose callee
+                    // is a statically-known let-bound INLINE lambda is DEFUNCTIONALIZED to its
+                    // inlined body (`try_lower_scalar_call`'s Computed arm). This EXECUTES
+                    // `int.to_string(f(1))` (= 3 for `let f = (x) => string.len(s) + x`) instead
+                    // of the deferred `Const 0` silent-zero below. `try_lower_scalar_call` is
+                    // rollback-safe (restores ops + handles on a miss), so a non-inlinable
+                    // Method/Computed callee falls through to the deferred `Const` exactly as
+                    // before — the caps fold still tags it via `record_elided_calls`.
+                    let mark = self.ops.len();
+                    if let Some(v) = self.try_lower_scalar_call(a, &a.ty) {
+                        CallArg::Scalar(v)
+                    } else {
+                        self.ops.truncate(mark);
+                        let dst = self.fresh_value();
+                        self.record_elided_calls(a);
+                        self.ops.push(Op::Const { dst });
+                        CallArg::Scalar(dst)
+                    }
                 }
                 other => {
                     return Err(LowerError::Unsupported(format!(
@@ -1036,6 +1062,21 @@ impl LowerCtx {
             // CallIndirect is a genuine call (the corpus gate counts it), so it replaces the
             // elided Computed 1:1 — no spurious caps taint, no `mir > ir` breach.
             IrExprKind::Call { target: CallTarget::Computed { callee }, args, .. } => {
+                // C1 DIRECT-CALL INLINE: a `f(args)` whose callee `f` is a statically-known
+                // let-bound INLINE lambda is DEFUNCTIONALIZED — the body is lowered inline with
+                // params bound to args, captures resolved through `value_of`. Tried FIRST (a
+                // capturing lambda has no FuncRef slot; even a liftable one prefers inline — a
+                // direct call edge is more sound for caps than a CallIndirect). Returns None →
+                // the CallIndirect / defer path below.
+                if !is_heap_ty(ty) {
+                    if let Some(v) = self.try_inline_direct_lambda_call(callee, args, ty) {
+                        return Some(v);
+                    }
+                    // The inline attempt rolls itself back on failure (its own marks), so the
+                    // op stream is clean here for the CallIndirect fallback.
+                    self.ops.truncate(ops_mark);
+                    self.live_heap_handles.truncate(lhh_mark);
+                }
                 let table_idx = self.funcref_value_of(callee)?;
                 let repr = repr_of(ty).ok()?;
                 match self.lower_call_args(args) {
@@ -1091,6 +1132,76 @@ impl LowerCtx {
                 }
             }
             _ => None,
+        }
+    }
+
+    /// C1 DIRECT-CALL INLINE — defunctionalize a `f(args)` whose callee `f` is a
+    /// statically-known let-bound INLINE lambda (`let f = (x) => body`). The body is
+    /// lowered INLINE with each param bound to its lowered argument value; the lambda's
+    /// CAPTURES (free vars like the `s` in `(x) => string.len(s) + x`) resolve through the
+    /// EXISTING `value_of` map — they are in scope at the call site, so no env block and no
+    /// substitution are needed. NO runtime closure, NO `CallIndirect`, NO lifted function:
+    /// a static call graph, the inlined body's calls are REAL IR call nodes the caps fold
+    /// and `count_ir_calls` see in place.
+    ///
+    /// SCALAR result only (this slice): the body lowers via `lower_scalar_value` (a
+    /// Var/literal/arith/scalar-call/`string.len`-style pure-module call), which is
+    /// rollback-safe (it restores `ops` + `live_heap_handles` on a partial miss). A heap
+    /// result, or a body the scalar subset cannot lower (a side effect, a heap op), returns
+    /// `None` and the caller keeps the existing CallIndirect / deferred path. Each ARGUMENT
+    /// is lowered as a scalar value (a literal/Var/arith); a non-scalar-lowerable arg →
+    /// `None` (defer). Self-contained marks make a partial attempt fully reversible.
+    ///
+    /// SOUNDNESS: param binding is `value_of[param] = arg_value` (a pure local rebind, no
+    /// ownership event — a SCALAR arg carries none); the body lowers exactly as if its
+    /// statements/expr were written at the call site. The captures are BORROWED through
+    /// `value_of` (no new owner — the enclosing binding still owns `s`, dropped once at its
+    /// own scope end), so no double-free. NB: a parameter VarId is UNIQUE per lambda (the
+    /// frontend assigns fresh VarIds), so binding it cannot clobber a live caller local.
+    fn try_inline_direct_lambda_call(
+        &mut self,
+        callee: &IrExpr,
+        args: &[IrExpr],
+        ty: &Ty,
+    ) -> Option<ValueId> {
+        // The callee must be a Var statically bound to a recorded inline lambda.
+        let callee_var = match &callee.kind {
+            IrExprKind::Var { id } => *id,
+            _ => return None,
+        };
+        let (params, body) = self.lambda_bindings.get(&callee_var)?.clone();
+        if params.len() != args.len() {
+            return None;
+        }
+        let ops_mark = self.ops.len();
+        let lhh_mark = self.live_heap_handles.len();
+        // Lower each ARGUMENT to a scalar value, then bind the param to it. (A heap arg is
+        // out of this slice — it would need owned/borrow tracking; defer.)
+        for ((pvar, pty), arg) in params.iter().zip(args.iter()) {
+            if is_heap_ty(pty) {
+                self.ops.truncate(ops_mark);
+                self.live_heap_handles.truncate(lhh_mark);
+                return None;
+            }
+            match self.lower_scalar_value(arg) {
+                Some(v) => {
+                    self.value_of.insert(*pvar, v);
+                }
+                None => {
+                    self.ops.truncate(ops_mark);
+                    self.live_heap_handles.truncate(lhh_mark);
+                    return None;
+                }
+            }
+        }
+        // Lower the lambda BODY inline as a scalar value (captures resolve through value_of).
+        match self.lower_scalar_value(&body) {
+            Some(v) if !is_heap_ty(ty) => Some(v),
+            _ => {
+                self.ops.truncate(ops_mark);
+                self.live_heap_handles.truncate(lhh_mark);
+                None
+            }
         }
     }
 

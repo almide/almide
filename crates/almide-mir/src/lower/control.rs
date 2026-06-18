@@ -1842,6 +1842,262 @@ impl LowerCtx {
         true
     }
 
+    /// C1 DEFUNCTIONALIZATION — inline a `list.map`/`filter`/`fold` with an INLINE-LAMBDA
+    /// closure argument as a SPECIALIZED loop at the call site: NO runtime closure, NO
+    /// `Op::CallIndirect`, NO lifted `__lambda_*` function. The lambda body is lowered
+    /// INLINE per element with its PARAM bound to the element (`let x = elem`) and its
+    /// CAPTURES resolved through the EXISTING `value_of` map (an inline / let-bound lambda's
+    /// free vars are already in scope at the call site — no env block, no substitution). So
+    /// a CAPTURING lambda (`let k = 10; list.map(xs, (x) => x * k)`) WORKS: `k` is just a
+    /// `Var` the inlined `x * k` reads through `value_of`, exactly as if hand-written as a
+    /// `for x in xs` loop.
+    ///
+    /// SOUNDNESS by REUSE — the same machinery the for-in/for-list loops already prove
+    /// sound (task #67): a real `LoopStart`/`LoopBreakUnless`/`LoopEnd` over a stable i64
+    /// index local; the result list is a `DynList`/`DynStr`-grade fresh OWNED block built
+    /// exactly like a scalar list LITERAL (`try_lower_scalar_list_slots`); the per-element
+    /// body lowers via `lower_scalar_value` (pure, no ownership event), so NO heap temp
+    /// crosses the back-edge. The inlined body's calls are REAL IR call nodes that
+    /// `count_ir_calls` already counts in-place (the lambda body sits in the IR call-arg the
+    /// gate's visitor walks), and the caps fold sees them directly — there is NO
+    /// `CallIndirect` conservatism and NO elided marker, so a function stays caps-verified
+    /// iff its inlined bodies are pure. A body the scalar subset cannot lower (a `println`
+    /// side effect, a heap result) → `None` (rolled back), and the caller keeps the existing
+    /// self-host-combinator / WALL path. NARROW to a SCALAR-element source list and a SCALAR
+    /// lambda result/element (the dual-oracle subset): a heap element/result needs the
+    /// nested-ownership build this slice does not emit, so it WALLS (defers) cleanly.
+    ///
+    /// Returns the result value (`map`/`filter`: a fresh OWNED scalar `List`; `fold`: a
+    /// scalar accumulator carrying no ownership), or `None` (fully rolled back) when out of
+    /// subset. The caller (`lower_pure_module_value_call`) treats the `Some` result exactly
+    /// like a self-host combinator's: a fresh owned heap list is bound + dropped, a scalar
+    /// fold result is bound.
+    pub(crate) fn try_lower_defunc_list_hof(
+        &mut self,
+        func: &str,
+        args: &[IrExpr],
+        result_ty: &Ty,
+    ) -> Option<ValueId> {
+        use almide_lang::types::constructor::TypeConstructorId;
+        // The closure arg index per combinator: map/filter = arg 1, fold = arg 2 (after init).
+        let (xs, lambda_idx, init_idx) = match func {
+            "map" | "filter" if args.len() == 2 => (&args[0], 1usize, None),
+            "fold" if args.len() == 3 => (&args[0], 2usize, Some(1usize)),
+            _ => return None,
+        };
+        // The CLOSURE arg MUST be an INLINE lambda (`(x) => …`). A first-class Var/FnRef
+        // closure is C2 (not inlinable here) — defer to the self-host path / WALL.
+        let (params, body) = match &args[lambda_idx].kind {
+            IrExprKind::Lambda { params, body, .. } => (params, body.as_ref()),
+            _ => return None,
+        };
+        // SCALAR-element source list only (`List[Int/Float/Bool]`, i64 slots). A heap element
+        // (an i32 handle) would need the nested-ownership build this slice does not emit.
+        let src_scalar = matches!(&xs.ty,
+            Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && !is_heap_ty(&a[0]));
+        if !src_scalar {
+            return None;
+        }
+        // map/filter: a SCALAR-element result list (`List[Int/Float/Bool]`, i64 slots — the
+        // block this slice builds). fold: a SCALAR accumulator. A heap result element or a
+        // heap accumulator needs the nested-ownership build this slice does not emit → defer.
+        let result_ok = match func {
+            "map" | "filter" => matches!(result_ty,
+                Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && !is_heap_ty(&a[0])),
+            "fold" => !is_heap_ty(result_ty),
+            _ => false,
+        };
+        if !result_ok {
+            return None;
+        }
+        // map/filter have exactly ONE param (the element); fold has TWO (acc, element).
+        let expected_params = if func == "fold" { 2 } else { 1 };
+        if params.len() != expected_params {
+            return None;
+        }
+
+        let ops_mark = self.ops.len();
+        let lhh_mark = self.live_heap_handles.len();
+        let lifted_mark = self.lifted.len();
+        let value_of_snapshot = self.value_of.clone();
+
+        let result = self.lower_defunc_list_hof_inner(func, xs, params, body, init_idx.map(|i| &args[i]));
+        if result.is_none() {
+            self.rollback_scalar_loop(ops_mark, lhh_mark, lifted_mark, value_of_snapshot);
+        } else {
+            // The closure was FAITHFULLY inlined (the body executes per element through real
+            // ops) — there is NO unlifted/missing closure slot. Clear the flag so the bind
+            // path treats the result as a genuinely-materialized list (`materialized_lists`),
+            // NOT as an unfaithful HOF to WALL. (My result IS a real, populated block.)
+            self.last_call_had_unlifted_closure = false;
+        }
+        result
+    }
+
+    fn lower_defunc_list_hof_inner(
+        &mut self,
+        func: &str,
+        xs: &IrExpr,
+        params: &[(VarId, Ty)],
+        body: &IrExpr,
+        init: Option<&IrExpr>,
+    ) -> Option<ValueId> {
+        use crate::PrimKind;
+        // Borrow the source list (evaluated once). A Var is borrowed; a fresh literal is
+        // materialized into an owned temp dropped at the OUTER scope (it stays in
+        // live_heap_handles). A non-handle iterable (a Range / scalar) is out of subset.
+        let list_v = match self.lower_call_args(std::slice::from_ref(xs)).ok()?.into_iter().next()? {
+            CallArg::Handle(v) => v,
+            _ => return None,
+        };
+        let h = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![list_v] });
+        let len_v = self.load_at_offset(h, 4, PrimKind::Load { width: 4 });
+
+        // The FOLD accumulator: a stable mutable scalar local seeded from `init`. map/filter
+        // build a result list block of `len` slots instead.
+        let (acc_local, result_list, result_h, cursor) = match func {
+            "fold" => {
+                let init_v = self.lower_scalar_value(init?)?;
+                // A STABLE mutable local: ConstInt-seed then SetLocal to the init value (so the
+                // local is distinct and reassignable across iterations, the proven loop-state model).
+                let acc = self.fresh_value();
+                self.ops.push(Op::ConstInt { dst: acc, value: 0 });
+                self.ops.push(Op::SetLocal { local: acc, src: init_v });
+                (Some(acc), None, None, None)
+            }
+            "map" | "filter" => {
+                // A fresh OWNED `DynList` of `len` slots (map: len = len(xs); filter: len(xs) is
+                // the MAX, the real length is patched to the write-cursor after the loop). Built
+                // exactly like a scalar list literal — a flat block, scope-end `Drop`.
+                let dst = self.fresh_value();
+                self.ops.push(Op::Alloc {
+                    dst,
+                    repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT },
+                    init: crate::Init::DynList { len: len_v },
+                });
+                let rh = self.fresh_value();
+                self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(rh), args: vec![dst] });
+                // filter needs a write-cursor (the count of kept elements) — a stable local.
+                let cur = if func == "filter" {
+                    let c = self.fresh_value();
+                    self.ops.push(Op::ConstInt { dst: c, value: 0 });
+                    Some(c)
+                } else {
+                    None
+                };
+                (None, Some(dst), Some(rh), cur)
+            }
+            _ => return None,
+        };
+
+        // The loop index (stable mutable i64 local) and the +1 step constant.
+        let i_v = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: i_v, value: 0 });
+        let one_v = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: one_v, value: 1 });
+
+        self.ops.push(Op::LoopStart);
+        let cond_v = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst: cond_v, op: IntOp::Lt, a: i_v, b: len_v });
+        self.ops.push(Op::LoopBreakUnless { cond: cond_v });
+
+        // Load element[i] from the SOURCE list: addr = src_h + 12 + i*8, then load64.
+        let i8_v = self.fresh_value();
+        let eight = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: eight, value: 8 });
+        self.ops.push(Op::IntBinOp { dst: i8_v, op: IntOp::Mul, a: i_v, b: eight });
+        let src_base = self.load_addr(h, 12);
+        let src_addr = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst: src_addr, op: IntOp::Add, a: src_base, b: i8_v });
+        let elem = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Load { width: 8 }, dst: Some(elem), args: vec![src_addr] });
+
+        // Bind the lambda PARAM(s). map/filter: the single element param = elem. fold: acc
+        // (the stable local) + element param = elem. The CAPTURES need no binding — their
+        // VarIds already resolve through `value_of`.
+        let elem_param = if func == "fold" { params[1].0 } else { params[0].0 };
+        self.value_of.insert(elem_param, elem);
+        if func == "fold" {
+            self.value_of.insert(params[0].0, acc_local.unwrap());
+        }
+
+        // Lower the lambda BODY inline as a per-iteration scalar frame. A side-effecting /
+        // heap-result body (the false-green `{ println("hit"); x }`) is NOT scalar-lowerable
+        // → None → the whole HOF rolls back and the caller WALLS (caps stays honest).
+        let body_mark = self.live_heap_handles.len();
+        self.in_frame += 1;
+        self.scalar_loop_depth += 1;
+        let body_v = self.lower_scalar_value(body);
+        self.scalar_loop_depth -= 1;
+        self.in_frame -= 1;
+        let body_v = match body_v {
+            Some(v) => v,
+            None => return None,
+        };
+        self.drop_arm_locals(body_mark);
+
+        match func {
+            "map" => {
+                // result[i] = body_v.
+                let rh = result_h.unwrap();
+                let rbase = self.load_addr(rh, 12);
+                let raddr = self.fresh_value();
+                self.ops.push(Op::IntBinOp { dst: raddr, op: IntOp::Add, a: rbase, b: i8_v });
+                self.ops.push(Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args: vec![raddr, body_v] });
+            }
+            "filter" => {
+                // if body_v (Bool) then { result[cursor] = elem; cursor += 1 }.
+                let rh = result_h.unwrap();
+                let cur = cursor.unwrap();
+                self.ops.push(Op::IfThen { cond: body_v, dst: None });
+                // then-arm: store elem at result[cursor*8], bump cursor.
+                let c8 = self.fresh_value();
+                self.ops.push(Op::IntBinOp { dst: c8, op: IntOp::Mul, a: cur, b: eight });
+                let rbase = self.load_addr(rh, 12);
+                let raddr = self.fresh_value();
+                self.ops.push(Op::IntBinOp { dst: raddr, op: IntOp::Add, a: rbase, b: c8 });
+                self.ops.push(Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args: vec![raddr, elem] });
+                let cnext = self.fresh_value();
+                self.ops.push(Op::IntBinOp { dst: cnext, op: IntOp::Add, a: cur, b: one_v });
+                self.ops.push(Op::SetLocal { local: cur, src: cnext });
+                self.ops.push(Op::Else { val: None });
+                self.ops.push(Op::EndIf { val: None });
+            }
+            "fold" => {
+                // acc = body_v.
+                self.ops.push(Op::SetLocal { local: acc_local.unwrap(), src: body_v });
+            }
+            _ => return None,
+        }
+
+        // Advance the index and close the loop.
+        let next_v = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst: next_v, op: IntOp::Add, a: i_v, b: one_v });
+        self.ops.push(Op::SetLocal { local: i_v, src: next_v });
+        self.ops.push(Op::LoopEnd);
+
+        match func {
+            "fold" => Some(acc_local.unwrap()),
+            "map" => Some(result_list.unwrap()),
+            "filter" => {
+                // Patch the result list's `len` field (offset 4) to the write-cursor: the
+                // visible length is the count of kept elements (cap stays len(xs), unused
+                // tail slots are harmless — a `${list}` Display reads `len`, an `xs[i]`
+                // bounds-checks against `len`). `store32` at result_h + 4.
+                let rh = result_h.unwrap();
+                let cur = cursor.unwrap();
+                let four = self.fresh_value();
+                self.ops.push(Op::ConstInt { dst: four, value: 4 });
+                let lenaddr = self.fresh_value();
+                self.ops.push(Op::IntBinOp { dst: lenaddr, op: IntOp::Add, a: rh, b: four });
+                self.ops.push(Op::Prim { kind: PrimKind::Store { width: 4 }, dst: None, args: vec![lenaddr, cur] });
+                Some(result_list.unwrap())
+            }
+            _ => None,
+        }
+    }
+
     /// `base + offset` as a fresh value (the address-arithmetic half of `load_at_offset`,
     /// without the load — used when the loaded address feeds further arithmetic).
     fn load_addr(&mut self, base: ValueId, offset: i64) -> ValueId {

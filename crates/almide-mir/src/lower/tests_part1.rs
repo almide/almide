@@ -255,24 +255,37 @@
         let all =
             lower_body_all(&b, "main").expect("higher-order pure combinator with a lambda lowers");
         let main = &all[0];
-        // The non-capturing closure is LIFTED: a `__lambda_*` aux holds its body's `f` call
-        // (so `f`'s caps still reach the witness — now via the FuncRef edge, not an in-main
-        // marker), and main binds it via Op::FuncRef and passes its slot to `list.map`.
+        // C1 DEFUNCTIONALIZATION: the INLINE lambda `(x) => f(x)` is now SPECIALIZED as a
+        // loop INSIDE main — the body call `f` is a DIRECT `CallFn` in main (NOT in a lifted
+        // `__lambda_*`, NOT behind a `CallIndirect`). This is strictly MORE sound for caps:
+        // the fold sees `f`'s call edge DIRECTLY in main (no FuncRef-edge indirection, no
+        // CallIndirect conservatism), so a printing/effectful `f` taints main honestly.
         assert!(
-            all[1..]
-                .iter()
-                .any(|fnc| fnc.name.starts_with("__lambda_")
-                    && fnc.ops.iter().any(|o| matches!(o, Op::CallFn { name, .. } if name == "f"))),
-            "the closure body call `f` lives in the lifted lambda: {all:?}"
+            main.ops.iter().any(|o| matches!(o, Op::CallFn { name, .. } if name == "f")),
+            "the inlined closure body call `f` is a direct CallFn in main: {:?}",
+            main.ops
+        );
+        // No lifted lambda and no FuncRef — the closure was defunctionalized away.
+        assert!(
+            !all[1..].iter().any(|fnc| fnc.name.starts_with("__lambda_")),
+            "no __lambda_* aux is emitted (the lambda is inlined): {all:?}"
         );
         assert!(
-            main.ops.iter().any(|o| matches!(o, Op::FuncRef { .. })),
-            "main binds the lifted lambda via FuncRef: {:?}",
+            !main.ops.iter().any(|o| matches!(o, Op::FuncRef { .. } | Op::CallIndirect { .. })),
+            "no FuncRef / CallIndirect — the closure is inlined, not lifted: {:?}",
+            main.ops
+        );
+        // No `list.map` CallFn — the combinator itself is inlined as a loop (LoopStart),
+        // and the result is a fresh OWNED `DynList` (the Alloc), dropped at scope end.
+        assert!(
+            main.ops.iter().any(|o| matches!(o, Op::LoopStart)),
+            "the map is a real loop: {:?}",
             main.ops
         );
         assert!(
-            main.ops.iter().any(|o| matches!(o, Op::CallFn { dst: Some(_), name, .. } if name == "list.map")),
-            "the HOF result is a fresh owned value",
+            !main.ops.iter().any(|o| matches!(o, Op::CallFn { name, .. } if name == "list.map")),
+            "no `list.map` combinator call — it is inlined: {:?}",
+            main.ops
         );
         for fnc in &all {
             assert_eq!(verify_ownership(fnc), Ok(()));
