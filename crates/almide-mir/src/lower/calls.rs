@@ -722,6 +722,32 @@ impl LowerCtx {
                         }
                     }
                 }
+                // An Option/Result CONSTRUCTOR argument (`f(Some(8))`, `g(Ok(y))`,
+                // `h(Err("e"))`, `k(None)`) materializes a REAL tagged block via
+                // `try_lower_option_ctor` — the SAME `OptSome`/`OptNone`/DynListStr-Result
+                // blocks a `let o = Some(8)` builds (len-as-tag, scalar payload moved in /
+                // owned heap Err) — borrowed into the call and dropped at scope end via
+                // `materialized_call_arg`: cert `i` (alloc) + `d` (drop), identical to the
+                // verified fresh-heap bind. Outside that subset (a heap payload it declines,
+                // e.g. a borrowed-param `Some(p)`) it WALLs — never the `Init::Opaque` empty
+                // value the grouped arm below would build (which a callee reads as zero
+                // bytes = a silent miscompile).
+                IrExprKind::OptionSome { .. }
+                | IrExprKind::OptionNone
+                | IrExprKind::ResultOk { .. }
+                | IrExprKind::ResultErr { .. } => {
+                    let repr = repr_of(&a.ty)?;
+                    match self.try_lower_option_ctor(a, &a.ty) {
+                        Some(dst) => self.materialized_call_arg(dst, repr, &a.ty),
+                        None => {
+                            return Err(LowerError::Unsupported(format!(
+                                "{} argument cannot be faithfully materialized in this brick \
+                                 (a heap payload outside the executable subset)",
+                                kind_name(&a.kind)
+                            )))
+                        }
+                    }
+                }
                 // A fresh HEAP literal argument (`f("x")`, `f([1, 2, 3])`):
                 // materialized into an owned temp via `Alloc`, borrowed into the
                 // call, dropped at scope end — cert `i` (alloc) + `d` (drop), both
@@ -733,10 +759,6 @@ impl LowerCtx {
                 | IrExprKind::Record { .. }
                 | IrExprKind::SpreadRecord { .. }
                 | IrExprKind::Tuple { .. }
-                | IrExprKind::ResultOk { .. }
-                | IrExprKind::ResultErr { .. }
-                | IrExprKind::OptionSome { .. }
-                | IrExprKind::OptionNone
                 // A CLOSURE value argument (`register((x) => …)`): a fresh heap env,
                 // materialized + borrowed into the call. The callee borrows it per the
                 // borrow-by-default convention; its body's calls are elided ⇒ the gate

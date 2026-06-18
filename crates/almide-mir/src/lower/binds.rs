@@ -261,11 +261,21 @@ impl LowerCtx {
             }
             // `let idx = string.index_of(s, x) ?? -1` — a `??` over a materialized Option
             // EXECUTES to a scalar (tag read + payload/fallback), unwrapping the self-host
-            // Option[Int] fns; outside the subset it falls through to the deferred `Const`.
+            // Option[Int] fns; outside the subset a `??` over a VARIANT operand can't read
+            // the tag (e.g. a USER-function Option/Result result not yet tracked as
+            // materialized) — a Const-0 would be a wrong value, so WALL (never silently 0).
             if let IrExprKind::UnwrapOr { expr, fallback } = &value.kind {
                 if let Some(dst) = self.try_lower_option_unwrap_or(expr, fallback, true) {
                     self.value_of.insert(var, dst);
                     return Ok(());
+                }
+                if is_variant_ty(&expr.ty) {
+                    return Err(LowerError::Unsupported(
+                        "?? over an Option/Result operand outside the executable subset (e.g. a \
+                         user-function result not tracked as materialized) cannot be faithfully \
+                         computed (a Const-0 would be a wrong value) not in this brick"
+                            .into(),
+                    ));
                 }
             }
             // `let v = w` aliasing a SCALAR var — v denotes the SAME value (a scalar is freely
