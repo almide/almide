@@ -745,10 +745,13 @@ impl LowerCtx {
     ) -> Option<ValueId> {
         use crate::PrimKind;
         // SCALAR result only. A HEAP-result variant match (`match opt { Some => "..", None =>
-        // ".." }`) ran byte-correct via `lower_heap_result_arm` but the proven OWNERSHIP
-        // checker REJECTED the witness (the owned heap SUBJECT + per-arm move-out is the
-        // merged-dst cert-precision frontier — an ESCALATION, the Coq trust-vocabulary work,
-        // not this brick). Keep it a clean WALL.
+        // ".." }` returning a String) ran byte-correct via `lower_heap_result_arm`, but the
+        // proven OWNERSHIP checker REJECTS the witness for BOTH an owned AND a borrowed-param
+        // subject (empirically confirmed 2026-06-18 — corpus-wall WALL GATE FAIL either way).
+        // The merged-dst heap-result match is the cert-precision frontier: the branch-join of
+        // two per-arm move-outs into one owned heap `dst` is unprovable in the current Coq
+        // trust vocabulary (a heap-result `if` proves because its cond is scalar — no heap
+        // subject read). This is an ESCALATION (extend the trust base), NOT a brick. Clean WALL.
         if is_heap_ty(result_ty)
             || !is_heap_ty(&subject.ty)
             || arms.len() != 2
