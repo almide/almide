@@ -15,6 +15,7 @@ spec/wasm_cross/float_interp_forms.almd
 spec/wasm_cross/float_shortest_roundtrip.almd
 spec/wasm_cross/float_sign_minmax_ieee.almd
 spec/wasm_cross/generic_concat.almd
+spec/wasm_cross/generic_record_field_size.almd
 spec/wasm_cross/i64_min_literal.almd
 spec/wasm_cross/int_div_mod_ok.almd
 spec/wasm_cross/int_float_ops.almd
