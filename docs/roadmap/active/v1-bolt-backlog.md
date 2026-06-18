@@ -33,7 +33,7 @@ Bolt <ID>: <一行 intent>
 - **C1-B1: heap-result variant match を実行**
   DoD: `match opt { Some(x) => "str", None => "str" }`(match が heap 値を返す)が v0 byte一致、非実行は WALL
   gate: dual-oracle byte一致 + CI緑 + false-green。real-program corpus の 3 WALL 中2本(safe_div_chain/validate_age)が flip
-  deps: Option/Result value-match(✅済) / 状態: 🔄
+  deps: Option/Result value-match(✅済) / 状態: 🧱 **Camp 4 gated(2026-06-18)** — byte一致するが proven ownership checker が owned/param 両方で REJECT(merged-dst の branch-join が現 Coq trust 語彙で証明不可)。trust spine が2回拒否→walled。これは Camp 4 cert-precision の ESCALATION であって単純 Camp 1 Bolt でない。SCALAR-result の variant match(call-arg/let/operand/tail)は ✅済(commits 63afd081/90ac820e/4154ba5b/6eb21c52)
 - **C1-B2: 残り heap 値配管(~650、histogram)**
   DoD: List-arg(253)/ OptionSome・ResultOk-arg(271)/ heap-result match(103)/ Record・Result 返り(~90)/ List[heap] literal(62)を各々 byte一致 or WALL
   gate: 各サブクラスごと dual-oracle + CI / 状態: ⬜(列挙済)
@@ -45,18 +45,22 @@ Bolt <ID>: <一行 intent>
   gate: per-fn dual-oracle + CI / 状態: 🔄(175 module self-host 済、継続)
 - **C1-B5: ⭐ *unbiased* corpus で honest 距離を測る**
   DoD: dojo task-bank or LLM が別プロセス生成した(自作でない)プログラム batch で byte-match % を測定 → 偏りのない実数
-  gate: そのもの(これが計測器)/ 状態: ⬜ **← 最重要・近く実施**(自作 57 は biased-upward)
+  gate: そのもの(これが計測器)/ 状態: ✅ **実施済(2026-06-18)** — 別プロセスの 15 agent が生成した(自作でない)プログラム → v1 byte-match **0/15**(自作 57 は 7-9/10 = biased-upward を実証)。silent miscompile 0(soundness 無傷)。支配的 gap = Map/Set/records/guards。詳細 [[project_v1_output_parity_gap]]
 - **Camp 1 Exit**: 実 agent プログラムが走って v0 byte一致 → ①市場 + make-verify デモが立つ
+  - ✅ **make-verify デモ着手(2026-06-18, commit bed15165)**: `demo/make-verify/` — 誤修正は Almide で明確+回復可能(E010+修正提示)・Python で silent。MSR 再定義(失敗の明確性+回復可能性)を実物で具現、model 非依存(inject-mistake)。種は育成中。
 
 ## 🏕 Camp 2 — MSR(存亡の賭け)【0%・並行で*今すぐ*起動】
 
 - **C2-B1: MSR 統制実験を組む**
   DoD: Dojo に Almide vs Python/TS/Rust/SPARK の修正タスク統制群、回せる状態
-  gate: 実験デザインのレビュー / 状態: ⬜ **← 0% のままが最大リスク、最優先で着手**
+  gate: 実験デザインのレビュー / 状態: ✅ **ハーネス構築済(2026-06-18)** — seed→modify(blind)→judge を Almide/Python/Rust で(SPARK/TS は後 round)。fairness control + language-neutral pinned oracle(v1 交絡を修正済)。workflow script `msr-v2`
 - **C2-B2: 回して数字を出す**
   DoD: MSR の実数 + 対照群との差
-  gate: 統制・対照群つき測定 / deps: C2-B1 / 状態: ⬜
-- **Camp 2 Exit(Mob 判断)**: MSR で GTM 主軸決定 ── 勝てば「AI が書く×信頼」、負ければ「安全な実行基板」へピボット
+  gate: 統制・対照群つき測定 / deps: C2-B1 / 状態: ✅ **3実験実施(v1→v2→v3-haiku)、ただし★天井効果★** — 中難度では Opus も Haiku も全言語 5/5・0 retry(差ゼロ)。binding lever は model 強度でなく**タスク難度**。**MSR は regime 依存**。GTM 含意 → C2-B3。詳細 [[project_summit_map]]
+- **C2-B3: ⭐ MSR 再定義(失敗の明確性+回復可能性)で測り直す**(Mob 確定)
+  DoD: 「修正が*間違ってる*時、言語が明確に捕捉+回復可能か」を inject-mistake(model 非依存)で測定 → Almide/Rust(compile catch+diagnostic)vs Python(silent)。難タスク or 弱/多様モデルで regime を定量化
+  gate: inject-mistake catch-rate + recovery / 状態: 🔄 demo で原理実証済(make-verify)、実験化は未
+- **Camp 2 Exit(Mob 判断)**: MSR で GTM 主軸決定。**3実験の示唆: 二値生存は frontier で蒸発(天井)、頑健な差別化は「検証(証明付き安全)」+「失敗が明確・回復可能」。GTM 軸は MSR 単独より verification 寄りが頑健**(人間判断)
 
 ## 🏕 Camp 3 — 検証済み WASM/WASI component producer(賭け)
 
