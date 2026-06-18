@@ -96,6 +96,22 @@ fn count_ir_calls(body: &almide_ir::IrExpr, registry: &almide_mir::lower::Record
             if matches!(&e.kind, almide_ir::IrExprKind::BinOp { op: almide_ir::BinOp::ConcatStr, .. }) {
                 self.n += 1;
             }
+            // A STRING equality `a == b` / `a != b` (BinOp::Eq/Neq over String operands) lowers
+            // to ONE synthetic `string.eq` CallFn (the `!=` negate is a prim, not a call). Count
+            // the operator NODE as one ir_call so the synthetic call has a matching ir_call and
+            // `mir_calls <= ir_calls` holds BY CONSTRUCTION. Gated on a String LEFT operand — an
+            // Int/Bool/Float `==` lowers to a prim compare (no call), so it is NOT counted.
+            // `string.eq` is pure (byte compare, no Stdout), adding no real capability.
+            if let almide_ir::IrExprKind::BinOp {
+                op: almide_ir::BinOp::Eq | almide_ir::BinOp::Neq,
+                left,
+                ..
+            } = &e.kind
+            {
+                if matches!(left.ty, almide_lang::types::Ty::String) {
+                    self.n += 1;
+                }
+            }
             // A SCALAR-element list concat `a + b` (BinOp::ConcatList over List[Int/Float/Bool])
             // lowers to ONE synthetic `__list_concat` CallFn (a mir_call). Count the operator NODE
             // as one ir_call ONLY for the scalar-element shape the lowering actually emits a call
