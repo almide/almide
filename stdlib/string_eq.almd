@@ -1,0 +1,19 @@
+// string_eq — SELF-HOSTED `a == b` for String in v1, over the prim floor. v0 = `a == b`
+// (the `__str_eq` runtime: byte-length then byte-wise compare). The string layout is the
+// List header (byte len @4, data bytes @12). Unequal byte length ⟹ not equal; else compare
+// the data bytes [0, len). Reads only — both `a` and `b` are borrowed, no allocation.
+fn string_eq(a: String, b: String) -> Bool = {
+  let ha = prim.handle(a)
+  let hb = prim.handle(b)
+  let la = prim.load32(ha + 4)
+  if la != prim.load32(hb + 4) then false
+  else __streq_at(ha + 12, hb + 12, 0, la)
+}
+
+// Byte-wise tail recursion over the two data regions (da/db are data addresses, n the byte
+// length). Pure scalar (Int address arithmetic + load8 compare), so it lowers in the v1
+// subset; `da`/`db` are raw addresses, not owned handles, so there is no ownership event.
+fn __streq_at(da: Int, db: Int, i: Int, n: Int) -> Bool =
+  if i >= n then true
+  else if prim.load8(da + i) == prim.load8(db + i) then __streq_at(da, db, i + 1, n)
+  else false

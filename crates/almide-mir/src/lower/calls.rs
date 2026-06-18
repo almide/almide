@@ -1632,6 +1632,25 @@ impl LowerCtx {
                     self.ops.push(Op::Prim { kind, dst: Some(dst), args: vec![a, b] });
                     return Some(dst);
                 }
+                // STRING equality (`c == ":"` / `a != b` over String) → the self-host
+                // `string.eq` byte-compare call (→ scalar Bool). Both operands are BORROWED
+                // heap String handles (the call reads + copies; no ownership event). `!=` is
+                // `1 - eq`. This is the dominant real-parser condition; without it the cond
+                // silently lowered to 0 (false) — the yaml/char-scan miscompile.
+                if matches!(op, BinOp::Eq | BinOp::Neq) && matches!(left.ty, Ty::String) {
+                    let args = [(**left).clone(), (**right).clone()];
+                    let eq = self
+                        .lower_pure_module_value_call("string", "eq", &args, &Ty::Bool)
+                        .ok()?;
+                    if matches!(op, BinOp::Eq) {
+                        return Some(eq);
+                    }
+                    let one = self.fresh_value();
+                    self.ops.push(Op::ConstInt { dst: one, value: 1 });
+                    let dst = self.fresh_value();
+                    self.ops.push(Op::IntBinOp { dst, op: crate::IntOp::Sub, a: one, b: eq });
+                    return Some(dst);
+                }
                 let iop = match op {
                     BinOp::AddInt => crate::IntOp::Add,
                     BinOp::SubInt => crate::IntOp::Sub,
