@@ -99,29 +99,32 @@ impl LowerCtx {
         let IrExprKind::List { elements } = &value.kind else {
             return None;
         };
-        // A `List[String]` OR a `List[Record]` whose every element is a SCALAR-only
-        // record literal — both are NESTED-OWNERSHIP lists (i64 slots holding owned heap
-        // handles, recursively freed via `DropListStr`'s per-slot `rc_dec`). A scalar
-        // record is a flat block, so `rc_dec` frees it correctly (no String-specific
-        // recursion). This is what makes `[Point{..}, Point{..}]` (then `list.map(…, p =>
-        // p.x)`) materialize. A `List` of any OTHER heap element (a heap-field record, a
-        // List, a call result) defers.
+        // A `List[String]` OR a `List[ScalarAggregate]` whose every element is a SCALAR-only
+        // record OR tuple literal — all are NESTED-OWNERSHIP lists (i64 slots holding owned heap
+        // handles, recursively freed via `DropListStr`'s per-slot `rc_dec`). A scalar record/tuple
+        // is a FLAT block (no inner heap slots), so `rc_dec` frees it correctly (no String-specific
+        // recursion). This is what makes `[Point{..}, Point{..}]` (then `list.map(…, p => p.x)`)
+        // AND `[(1, 100), (127, 300)]` (then a `for (x, y) in …`) materialize as a REAL list of the
+        // right length. A `List` of any OTHER heap element (a heap-field record/tuple, a List, a
+        // call result) defers — a heap-field aggregate needs the masked recursive drop this builder
+        // (a flat per-slot `rc_dec`) does not emit, so its inner heap would leak; gated out by
+        // `scalar_slots` (which is `None` for any non-scalar field).
         let elem_str = matches!(&value.ty,
             Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && matches!(a[0], Ty::String));
-        let elem_scalar_record = matches!(&value.ty,
+        let elem_scalar_aggregate = matches!(&value.ty,
             Ty::Applied(TypeConstructorId::List, a)
                 if a.len() == 1 && self.aggregate_field_tys(&a[0])
                     .and_then(|(_, tys)| layout::scalar_slots(&tys)).is_some());
-        if (!elem_str && !elem_scalar_record) || elements.is_empty() {
+        if (!elem_str && !elem_scalar_aggregate) || elements.is_empty() {
             return None;
         }
         // Gate: every element must be a fresh-owned String (LitStr/ConcatStr) OR a tracked
-        // heap Var (so we can Dup it) OR — for a record list — a scalar-only record LITERAL
-        // we can materialize. A Var whose value isn't tracked here cannot be Dup'd → defer.
+        // heap Var (so we can Dup it) OR — for an aggregate list — a scalar-only record/tuple
+        // LITERAL we can materialize. A Var whose value isn't tracked here cannot be Dup'd → defer.
         let all_lowerable = elements.iter().all(|e| match &e.kind {
             IrExprKind::LitStr { .. } | IrExprKind::BinOp { op: BinOp::ConcatStr, .. } => true,
             IrExprKind::Var { id } => self.value_of.contains_key(id),
-            IrExprKind::Record { .. } => elem_scalar_record,
+            IrExprKind::Record { .. } | IrExprKind::Tuple { .. } => elem_scalar_aggregate,
             _ => false,
         });
         if !all_lowerable {
@@ -154,6 +157,11 @@ impl LowerCtx {
                 // A scalar-only record literal element — materialize a fresh OWNED record
                 // block (`try_lower_scalar_record_construct`, cert `i`), moved into the slot.
                 IrExprKind::Record { .. } => self.try_lower_scalar_record_construct(elem)?,
+                // A scalar-only tuple literal element (`(1, 100)`) — materialize a fresh OWNED
+                // flat 2-slot block (`try_lower_scalar_tuple_construct`, cert `i`), moved into the
+                // slot. The SAME flat shape as a scalar record, so the list's per-slot `rc_dec`
+                // frees it correctly.
+                IrExprKind::Tuple { .. } => self.try_lower_scalar_tuple_construct_for_elem(elem)?,
                 _ => self.try_lower_concat_str(elem)?,
             };
             let off = self.fresh_value();
@@ -719,13 +727,16 @@ impl LowerCtx {
             self.record_elided_calls(value);
             None
         };
-        // PRECISE tuple field extraction (the layout brick, scalar-field slice): a tuple value is a
-        // block [rc][len][cap][f0@12, f1@20, ...]; an ALL-SCALAR-field destructure (`let (a, b) = t`)
-        // loads each field at its slot instead of the container-grain alias. The tuple still drops
-        // at scope end (scalar fields move nothing). Heap-field tuples fall back to bind_pattern.
+        // PRECISE tuple field extraction (the layout brick): a tuple value is a block
+        // [rc][len][cap][f0@12, f1@20, ...]; a destructure (`let (a, b) = t`) loads each field at
+        // its OWN slot instead of the container-grain alias. A SCALAR field is a value COPY; a HEAP
+        // field (`let (inner, z) = n` over `((Int,Int), Int)`) is the BORROWED slot handle (the
+        // tuple keeps ownership through its masked scope-end drop). Without this, `bind_pattern`
+        // aliased the WHOLE container for a heap field and emitted `Const 0` for a scalar field
+        // alongside it = the `8192:2000:0` miscompile.
         if let IrPattern::Tuple { elements } = pattern {
             if let Some(subj) = subject {
-                if self.try_lower_scalar_tuple(elements, subj) {
+                if self.try_lower_tuple_destructure(elements, subj) {
                     return Ok(());
                 }
             }
@@ -766,6 +777,18 @@ impl LowerCtx {
         // reads its real slots. No heap slots → only the SAFE scalar reads are enabled.
         self.materialized_aggregates.insert(dst);
         Some(dst)
+    }
+
+    /// Materialize a scalar-only tuple LITERAL element of a `List[(scalar, …)]` (`(1, 100)` in
+    /// `[(1, 100), (127, 300)]`). Takes the tuple `IrExpr`, builds the fresh OWNED flat block, and
+    /// returns its handle for the list-slot store. `None` (the list defers) on a non-tuple or a
+    /// heap-field tuple element. The element does NOT join `materialized_aggregates` (the FOR-loop
+    /// var binding tracks its own per-iteration handle); it is just the owned slot value moved in.
+    fn try_lower_scalar_tuple_construct_for_elem(&mut self, elem: &IrExpr) -> Option<ValueId> {
+        let IrExprKind::Tuple { elements } = &elem.kind else {
+            return None;
+        };
+        self.try_lower_scalar_tuple_construct(elements)
     }
 
     /// Construct a TUPLE `(e0, e1, …)` with one or more HEAP ELEMENTS (a String/List/nested
@@ -1147,15 +1170,34 @@ impl LowerCtx {
         Some(dst)
     }
 
-    /// Extract each SCALAR field of a tuple `subject` (a heap block) into its bound var via a
-    /// `Prim::Load` at the field's slot. Returns `false` (caller falls back to `bind_pattern`) if
-    /// any field is heap or a non-`Bind`/`Wildcard` pattern (precise heap-field move is deferred —
-    /// the all-heap borrow path traps inside loops, TODO the while-loop interaction).
-    fn try_lower_scalar_tuple(&mut self, pats: &[IrPattern], subject: ValueId) -> bool {
+    /// Extract each field of a tuple `subject` (a heap block) into its bound var via a precise
+    /// per-slot `Prim` read: a SCALAR field is a value COPY (`Load width 8`), a HEAP field is the
+    /// BORROWED slot handle (`LoadHandle`, recorded in `param_values` — the tuple still OWNS the
+    /// element, freed by its masked scope-end drop, so the bound var is NOT a second owner). A heap
+    /// field is admitted ONLY when the subject is a TRACKED owning aggregate (`materialized_
+    /// aggregates`, with a `record_masks` heap-slot mask) or a borrowed PARAM/element handle
+    /// (`param_values` — the caller owns it): in both cases reading the slot is a borrow with a
+    /// guaranteed single owner, never a leak/double-free. Otherwise (an untracked heap subject —
+    /// no mask to free the borrowed inner block) it returns `false` and the caller falls back to
+    /// the container-grain `bind_pattern` (still memory-safe, just imprecise) so we never emit a
+    /// dangling borrow. Returns `false` for any non-`Bind`/`Wildcard` sub-pattern (a nested tuple
+    /// pattern in ONE statement is deferred — sz4 splits it into two statements, which works).
+    fn try_lower_tuple_destructure(&mut self, pats: &[IrPattern], subject: ValueId) -> bool {
         use crate::{IntOp, PrimKind};
+        // Does the subject OWN its heap slots (a tracked masked aggregate) OR is it a borrow whose
+        // owner is elsewhere (a param / a borrowed element handle)? Either way a per-slot HEAP read
+        // is a sound borrow. An untracked owned heap subject would leak the borrowed inner block, so
+        // a heap field over it must defer to the container-grain alias.
+        let heap_borrow_ok =
+            self.materialized_aggregates.contains(&subject) || self.param_values.contains(&subject);
         for p in pats {
             match p {
                 IrPattern::Bind { ty, .. } if !is_heap_ty(ty) => {}
+                IrPattern::Bind { .. } => {
+                    if !heap_borrow_ok {
+                        return false;
+                    }
+                }
                 IrPattern::Wildcard => {}
                 _ => return false,
             }
@@ -1163,13 +1205,26 @@ impl LowerCtx {
         let h = self.fresh_value();
         self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![subject] });
         for (i, p) in pats.iter().enumerate() {
-            if let IrPattern::Bind { var, .. } = p {
+            if let IrPattern::Bind { var, ty } = p {
                 let off = self.fresh_value();
                 self.ops.push(Op::ConstInt { dst: off, value: 12 + (i as i64) * 8 });
                 let addr = self.fresh_value();
                 self.ops.push(Op::IntBinOp { dst: addr, op: IntOp::Add, a: h, b: off });
                 let v = self.fresh_value();
-                self.ops.push(Op::Prim { kind: PrimKind::Load { width: 8 }, dst: Some(v), args: vec![addr] });
+                if is_heap_ty(ty) {
+                    // BORROW the slot's owned handle (an i32 Ptr). The tuple keeps ownership (its
+                    // masked drop frees it), so the bound var joins `param_values` (not a second
+                    // owner, not in the scope-end drop set). A nested tuple/record handle bound this
+                    // way is itself a tracked aggregate iff the subject's mask owns it — record it so
+                    // a FURTHER `(ix, iy) = inner` destructure of it can also borrow its heap slots.
+                    self.ops.push(Op::Prim { kind: PrimKind::LoadHandle, dst: Some(v), args: vec![addr] });
+                    self.param_values.insert(v);
+                    if matches!(ty, Ty::Tuple(_)) || self.aggregate_field_tys(ty).is_some() {
+                        self.materialized_aggregates.insert(v);
+                    }
+                } else {
+                    self.ops.push(Op::Prim { kind: PrimKind::Load { width: 8 }, dst: Some(v), args: vec![addr] });
+                }
                 self.value_of.insert(*var, v);
             }
         }

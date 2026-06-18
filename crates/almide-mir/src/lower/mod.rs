@@ -461,10 +461,57 @@ impl LowerCtx {
             };
             if repr.is_heap() {
                 self.param_values.insert(v);
+                // A heap variant param (`Option[T]` / `Result[T, String]`) is passed by the caller
+                // as a REAL materialized block of the SAME layout the constructors build (the v1
+                // calling convention — see `param_values` in `try_lower_option_unwrap_or`). SEED its
+                // variant-tracking so a `match`/`??` over the PARAM inside the callee EXECUTES (reads
+                // the real tag/payload) instead of LINEARIZING (running both arms = garbage). Without
+                // this, `fn show(r: Result[Int,String]) = match r { Ok=>…, Err=>… }` ran both arms.
+                // SOUND: a borrowed variant param owns nothing here (it stays `param_values`,
+                // un-dropped — the caller owns it), so seeding it only changes how the match READS
+                // the tag/payload (scalar prims, no ownership event), never the drop discipline.
+                self.seed_variant_param(v, &p.ty);
             }
             out.push(MirParam { value: v, repr });
         }
         Ok(out)
+    }
+
+    /// Seed the variant-tracking sets for a heap `Option`/`Result` PARAM so a `match`/`??` over
+    /// it executes (the caller passes a real same-layout block — the v1 calling convention). The
+    /// classification MIRRORS the let-bind call-result tracking in `lower_bind` exactly:
+    ///   - `Option[scalar]`        → `materialized_options`            (len-as-tag, scalar payload)
+    ///   - `Option[heap]`          → `materialized_options` + `heap_elem_lists` (borrowed handle)
+    ///   - `Result[scalar, heap]`  → `materialized_results`            (len-as-tag, scalar Ok)
+    ///   - `Result[heap, heap]`    → `materialized_results_str` + `heap_elem_lists` (cap-as-tag)
+    /// `param_values` already holds the borrowed handle (the caller owns it), so this adds only the
+    /// READ-shape knowledge, no ownership change.
+    fn seed_variant_param(&mut self, v: ValueId, ty: &Ty) {
+        use almide_lang::types::constructor::TypeConstructorId;
+        match ty {
+            Ty::Applied(TypeConstructorId::Option, a) if a.len() == 1 => {
+                self.materialized_options.insert(v);
+                if is_heap_ty(&a[0]) {
+                    self.heap_elem_lists.insert(v);
+                }
+            }
+            Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 => {
+                if is_heap_ty(&a[0]) && is_heap_ty(&a[1]) {
+                    // Both arms heap (`Result[String, String]`) — the cap-as-tag 1-slot DynListStr.
+                    self.materialized_results_str.insert(v);
+                    self.heap_elem_lists.insert(v);
+                } else {
+                    // Scalar Ok (`Result[Int, String]`) — len-as-tag, scalar Ok payload. A heap Err
+                    // payload is owned by the Result block (DropListStr frees it); mark the nested-
+                    // ownership so an `Err(e)` arm binds the borrowed slot-0 handle.
+                    self.materialized_results.insert(v);
+                    if is_heap_ty(&a[1]) {
+                        self.heap_elem_lists.insert(v);
+                    }
+                }
+            }
+            _ => {}
+        }
     }
 
     /// Lower a function body (statements + tail + scope-end drops) into `self` —

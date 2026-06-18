@@ -632,12 +632,38 @@ impl LowerCtx {
         // the same evidence as `materialized_options`: an Option-typed param is a real 0-or-1-
         // element block (the calling convention), so its len-as-tag read is correct — NOT a deferred
         // Opaque (those are never params), which is why the bare-Var gate excludes non-Option Vars.
+        //
+        // A `??` operand is EITHER an Option (`o ?? d` → Some-payload / fallback) OR a scalar Result
+        // (`int.parse(s) ?? -1` → Ok-payload / fallback). They share the len-as-tag layout but read
+        // INVERSELY: Option Some = `tag != 0` (take payload), Result Ok = `tag == 0` (take payload).
+        // `is_result` selects the arm arrangement below; a Result operand also skips the Option-only
+        // `option.unwrap_or_str` String branch (a `Result[String,String] ?? "d"` is a later case).
+        let is_result = match &expr.kind {
+            IrExprKind::Var { id } => self
+                .value_for(*id)
+                .ok()
+                .map(|v| {
+                    self.materialized_results.contains(&v)
+                        && !self.materialized_options.contains(&v)
+                })
+                .unwrap_or(false),
+            _ => is_self_host_result_call(expr),
+        };
         let handle = if let IrExprKind::Var { id } = &expr.kind {
             match self.value_for(*id) {
-                Ok(v) if self.materialized_options.contains(&v) || self.param_values.contains(&v) => v,
+                // A bare-Var operand must be a tracked materialized Option/Result OR a borrowed
+                // variant PARAM (`param_values` — same calling-convention soundness as the match):
+                // a deferred Opaque Var (len 0) would MISREAD as None/Err, so it is excluded.
+                Ok(v)
+                    if self.materialized_options.contains(&v)
+                        || self.materialized_results.contains(&v)
+                        || self.param_values.contains(&v) =>
+                {
+                    v
+                }
                 _ => return None,
             }
-        } else if is_self_host_option_call(expr) {
+        } else if is_self_host_option_call(expr) || is_self_host_result_call(expr) {
             match self.lower_call_args(std::slice::from_ref(expr)) {
                 Ok(args) => match args.into_iter().next() {
                     Some(CallArg::Handle(v)) => v,
@@ -665,7 +691,7 @@ impl LowerCtx {
         // `Ty::String` (a `List`/other-heap payload would corrupt — its slot is not a String handle),
         // and `count_ir_calls` counts a String-fallback `UnwrapOr` node so this synthetic call keeps
         // `mir_calls <= ir_calls` (the same accounting as the `__str_concat` operator-desugar).
-        if matches!(fallback.ty, Ty::String) {
+        if matches!(fallback.ty, Ty::String) && !is_result {
             let fb_args = match self.lower_call_args(std::slice::from_ref(fallback)) {
                 Ok(a) => a,
                 Err(_) => {
@@ -696,23 +722,46 @@ impl LowerCtx {
             }
             return Some(dst);
         }
+        // A SCALAR `??`: read the tag (len @4) and pick the slot-0 payload vs the fallback. The
+        // payload is an i64 value COPY (`Load width 8`) — fine for a scalar Ok/Some; a heap payload
+        // is handled by the String branch above (Option) or stays out of subset (Result[String,…]).
         let h = self.fresh_value();
         self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![handle] });
         let tag = self.load_at_offset(h, 4, PrimKind::Load { width: 4 });
         let result = self.fresh_value();
         self.ops.push(Op::IfThen { cond: tag, dst: Some(result) });
-        let payload = self.load_at_offset(h, 12, PrimKind::Load { width: 8 });
-        self.ops.push(Op::Else { val: Some(payload) });
-        // The fallback is evaluated in the None (else) arm; a heap fallback rolls back.
-        let fb = match self.lower_scalar_value(fallback) {
-            Some(v) => v,
-            None => {
-                self.ops.truncate(ops_mark);
-                self.live_heap_handles.truncate(lhh_mark);
-                return None;
-            }
-        };
-        self.ops.push(Op::EndIf { val: Some(fb) });
+        // `IfThen` runs the THEN arm when `tag != 0`. For an OPTION that is Some (take the slot-0
+        // payload); for a RESULT that is Err (take the FALLBACK — Ok is `tag == 0`, the ELSE arm).
+        // So the two arms are SWAPPED between the cases. The ops emitted between IfThen/Else land in
+        // the THEN body, those between Else/EndIf in the ELSE body — so the payload Load and the
+        // fallback computation must each sit in the arm that USES them.
+        if is_result {
+            // THEN = Err (tag != 0) → the fallback computed HERE; ELSE = Ok → the slot-0 payload.
+            let fb = match self.lower_scalar_value(fallback) {
+                Some(v) => v,
+                None => {
+                    self.ops.truncate(ops_mark);
+                    self.live_heap_handles.truncate(lhh_mark);
+                    return None;
+                }
+            };
+            self.ops.push(Op::Else { val: Some(fb) });
+            let payload = self.load_at_offset(h, 12, PrimKind::Load { width: 8 });
+            self.ops.push(Op::EndIf { val: Some(payload) });
+        } else {
+            // THEN = Some (tag != 0) → the slot-0 payload loaded HERE; ELSE = None → the fallback.
+            let payload = self.load_at_offset(h, 12, PrimKind::Load { width: 8 });
+            self.ops.push(Op::Else { val: Some(payload) });
+            let fb = match self.lower_scalar_value(fallback) {
+                Some(v) => v,
+                None => {
+                    self.ops.truncate(ops_mark);
+                    self.live_heap_handles.truncate(lhh_mark);
+                    return None;
+                }
+            };
+            self.ops.push(Op::EndIf { val: Some(fb) });
+        }
         Some(result)
     }
 
