@@ -1005,6 +1005,22 @@ impl LowerCtx {
                             Some(v) => CallArg::Scalar(v),
                             None => {
                                 self.ops.truncate(mark);
+                                // A scalar field access on a COMPUTED CALL result (`mk(5).x`)
+                                // — the call result is not a tracked aggregate, so a Const-0
+                                // reads a WRONG value (and the record-returning callee now
+                                // renders, making it observable). WALL it. A tracked-Var
+                                // container (`r.x`) lowered above and never reaches here; other
+                                // computed containers keep the deferred Const (unchanged).
+                                if let IrExprKind::Member { object, .. } = &a.kind {
+                                    if matches!(object.kind, IrExprKind::Call { .. }) {
+                                        return Err(LowerError::Unsupported(
+                                            "scalar field access on a computed call result \
+                                             cannot be faithfully computed in this brick (a \
+                                             Const-0 would read a wrong value) not in this brick"
+                                                .into(),
+                                        ));
+                                    }
+                                }
                                 let dst = self.fresh_value();
                                 self.ops.push(Op::Const { dst });
                                 self.record_elided_calls(a);
