@@ -98,6 +98,15 @@ fn __vstr_ok(h: Int) -> Result[String, String] = {
   let copy = string.repeat(s, 1)
   Ok(copy)
 }
+// NOTE: the COMPOUND Value model (value.array tag-5 + recursive __drop_value + value.stringify) is a
+// STAGED follow-up — empirically validated this session (the recursive raw-handle drop RAN correctly
+// in render_program: `value.int(5)` round-trip = "5"), but NOT shipped because (a) value.stringify's
+// array case is a String-accumulator self-recursion that hits the heap-result self-rec GUARD (TCO) and
+// POISONS value_core; (b) the test-harness `lower_source` links self-host differently from
+// render_program, so `$__drop_value` resolved in production but not the unit tests; (c) value.array's
+// arg `[value.int(1), …]` needs the List[Value] materialize (try_lower_str_list_literal Call elements)
+// not yet wired. The working code + the precise blockers are in docs/roadmap/active/v1-value-model.md.
+
 fn value_as_string(v: Value) -> Result[String, String] = {
   let h = prim.handle(v)
   let tag = prim.load32(h + 4)

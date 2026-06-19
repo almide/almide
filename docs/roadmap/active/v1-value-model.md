@@ -48,6 +48,55 @@ total/safe separately. This is the soundness-critical core of self-hosting the V
 CEO's "design-first, don't-rush" discipline applies. The BREAKTHROUGH is real (raw-handle self-host
 sidesteps the borrow-by-default/consuming-convention problem); the rc_dec EXPOSURE is the gated step.
 
+## ★ IMPLEMENTED + EMPIRICALLY VALIDATED 2026-06-19 (prim infra committed; self-host staged with 4 confirmed blockers)
+
+COMMITTED (83176420): `prim.rc_dec`/`prim.rc_inc` (PrimKind::RcDec/RcInc, reuse the proven `$rc_dec`/`$rc_inc`,
+NO new WAT func = §4.1-OK), WHITELISTED in lower_prim_call to `fn_name ∈ {__drop_value, __varr_copy}` (the
+untracked-free containment — a Prim is a cert no-op, so an unrestricted rc_dec would let any fn double-free
+unseen). The whitelist + `prim.load_handle` (b50853ef) are the floor.
+
+The self-host (below) was WRITTEN, BUILT, and the recursive drop RAN CORRECTLY in render_program
+(`let a = value.int(5); match value.as_int(a) {…}` → "5", with `$__drop_value` linked + called, line 758 of
+the emitted wat). It is STAGED (reverted from value_core.almd to keep the tree green) pending 4 EMPIRICAL
+blockers found by implementing it:
+
+1. **value.stringify is TCO-blocked AND poisons value_core.** Its array case `__vstr_arr(v,i,n,acc) = if i>=n
+   then acc else __vstr_arr(v,i+1,n, acc+sep+value_stringify(e))` is a heap-result (String) SELF-RECURSION →
+   hits the self-rec GUARD → does NOT lower → an unlinked `$__vstr_arr` → and because value_core auto-links
+   ITS WHOLE SOURCE when any value.* is called, EVERY Value program then walls. FIX: restructure stringify as
+   a Unit-extract-to-List[Value] (Unit self-rec is NOT guarded) + `list.fold(",", value_stringify)` (fold is
+   C1-defunctionalized, so value_stringify's recursion is indirect, guard-free); OR land TCO first.
+2. **Test-harness vs production linking diverge.** render_program (corpus-wall/output-parity) auto-links
+   `__drop_value` (rides on value_core); the unit-test `lower_source` (tests_part1.rs:195, via
+   `lower_function_all_with_types`) did NOT → the json unit tests failed `unknown func $__drop_value` while
+   production ran fine. Align lower_source's auto-link with render_program before wiring DropValue→__drop_value.
+3. **List[Value] materialize is needed first.** `value.array([value.int(1),…])`'s arg walls:
+   `try_lower_str_list_literal` (binds.rs:103) admits LitStr/Var/Record/Tuple/ConcatStr but NOT Call elements.
+   Add a Call-element arm (materialize each via the CallFn, Consume into the slot) gated to a `List[Value]`.
+4. **The drop is UN-GATE-VERIFIABLE (the soundness crux).** A wrong tag-5 drop = a silent LEAK: the output is
+   still correct (leak happens after the print) and the cert sees DropValue as one balanced `d` — so neither
+   output-parity NOR corpus-wall catches it. Needs a dedicated LEAK test (loop create+drop, assert no memory
+   growth / address reuse) BEFORE the drop can be trusted. This is the ②-critical reason it was NOT rushed.
+
+THE WORKING SELF-HOST CODE (value_core.almd, ready to re-paste once 1-3 are cleared; self-contained tag-5
+`[rc][tag=5 @4][len @8][elem@12…]`, shallow-copy via rc_inc, raw-handle recursive drop = empty cert):
+```almide
+fn __varr_copy(src: Int, dst: Int, i: Int, n: Int) -> Unit =
+  if i >= n then () else { let e = prim.load64(src + 12 + i * 8); prim.rc_inc(e); prim.store64(dst + 12 + i * 8, e); __varr_copy(src, dst, i + 1, n) }
+fn value_array(items: List[Value]) -> Value = {
+  let ih = prim.handle(items); let n = prim.load32(ih + 4); let v = prim.alloc_value(n); let vh = prim.handle(v)
+  prim.store32(vh + 4, 5); prim.store32(vh + 8, n); __varr_copy(ih, vh, 0, n); v }
+fn __vdrop_arr(v: Value, i: Int, n: Int) -> Unit =
+  if i >= n then () else { let h = prim.handle(v); let e: Value = prim.load_handle(h + 12 + i * 8); __drop_value(e); __vdrop_arr(v, i + 1, n) }
+fn __drop_value(v: Value) -> Unit = {
+  let h = prim.handle(v)
+  if prim.load32(h + 0) == 1 then { let tag = prim.load32(h + 4); if tag == 5 then __vdrop_arr(v, 0, prim.load32(h + 8)) else if tag == 4 then prim.rc_dec(prim.load64(h + 12)) else () } else ()
+  prim.rc_dec(h) }
+```
+The render wiring (reverted): `Op::DropValue { v } => format!("    (call $__drop_value (local.get {}))\n", local(*v))`
++ register `("value_array","value.array")` and (once stringify is restructured) `("value_stringify","value.stringify")`.
+Almide gotcha CONFIRMED: the Unit literal is `()` NOT `unit`.
+
 ## PRIM-FLOOR layer found 2026-06-19 (the foundation below piece 1)
 
 The prim floor (load_str/store_str/load64/store64/handle) has NO typed `load_list` to read a
