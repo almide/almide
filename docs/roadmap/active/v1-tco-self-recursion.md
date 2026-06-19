@@ -182,3 +182,21 @@ chain re-evaluated on the final scalars. Emit `LoopStart` / `LoopBreakUnless{con
 corpus-wall (existing cert) + tests. GATE-VERIFIABLE, bounded (a wrong derivation fails byte-match →
 revert) — but a genuinely intricate transform, a focused brick. scan_quote/find_colon_at first (2 walls,
 the reconstructible subset); oct_rec/bin_rec/flow_rec/flow_step likely follow the same shape.
+
+### LANDED 2026-06-19 (commit 77c91648): scalar-arg TCO — scan_quote/find_colon_at, yaml 22→19
+
+IMPLEMENTED `try_tco_rewrite` (lower/mod.rs): the result_kind + scalar-loop + post-loop-dispatch
+transform, gated to HEAP-result tail-self-rec with SCALAR loop-carried args. VERIFIED: scan_quote
+byte-matches v0 (3/99/99/0), corpus-wall ACCEPT, output-parity 61/61, 466 tests. yaml 22→19
+(scan_quote + find_colon_at now lower; float.parse recognition earlier took 22→21, TCO 21→19).
+
+REMAINING self-rec walls ALL need a HARDER extension (heap loop-carried args = a heap back-edge merge,
+the `while_body_heap_accumulator_walls` class):
+- `oct_rec`/`bin_rec`: `match list.first(cs)` leaves (need MATCH-leaf support in tco_collect/rewrite)
+  AND `cs: List[String]` is a HEAP loop-carried arg (drop(cs,1) each turn) — out of the scalar gate.
+- `flow_rec`/`flow_step`: MUTUAL recursion (flow_rec↔flow_step, not direct self-rec) AND `acc:
+  List[String]` heap accumulator (acc+[x]).
+So the next TCO brick is HEAP-LOOP-CARRIED: a scalar loop carrying a heap accumulator needs the
+accumulator merged across the back-edge (rebind the heap local each iteration, freed once) — the
+hard case the scalar-while explicitly rejects today. Plus match-leaf + mutual-rec support. Each is a
+further focused extension; the scalar-arg subset (this commit) is the clean foundation.
