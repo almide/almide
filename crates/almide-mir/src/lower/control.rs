@@ -1665,7 +1665,16 @@ impl LowerCtx {
                 // that RETURNS a fresh owned String (CallFn result, rc 1) — materialized into the
                 // Option below (its `Consume` `m` balances the alloc/call `i`).
                 let piece = match &expr.kind {
-                    IrExprKind::Var { id } => self.value_for(*id).ok()?,
+                    // `some(v)` over a Var STILL OWNED elsewhere (a borrowed param, or a local with
+                    // its own scope-end drop): `Op::Dup` a fresh owned reference (cert `a`) to MOVE
+                    // into the Option, leaving the original to drop once at its scope — never a bare
+                    // move-out `m` the checker rejects (param → `am`, owned local → `iamd`).
+                    IrExprKind::Var { id } => {
+                        let src = self.value_for(*id).ok()?;
+                        let p = self.fresh_value();
+                        self.ops.push(Op::Dup { dst: p, src });
+                        p
+                    }
                     IrExprKind::Call { target: CallTarget::Named { name }, args, .. } => {
                         let lowered = self.lower_call_args(args).ok()?;
                         let pr = repr_of(&expr.ty).ok()?;
@@ -1828,7 +1837,18 @@ impl LowerCtx {
     /// String literal (fresh Alloc), or a Named-call result. Returns `None` for any other shape.
     pub(crate) fn lower_result_str_piece(&mut self, expr: &IrExpr) -> Option<ValueId> {
         match &expr.kind {
-            IrExprKind::Var { id } => self.value_for(*id).ok(),
+            // `ok(f)` / `err(msg)` over a Var that is STILL OWNED elsewhere — a borrowed param
+            // (`fn validate(f) = .. ok(f)`) or a let-local with its own scope-end drop. The piece
+            // is MOVED INTO the Result block (`materialize_result_str` `Consume`s it), so it must be
+            // a FRESH owned reference: `Op::Dup` (acquire, cert `a`) the var, leaving the original
+            // untouched (it drops exactly once at its own scope — no double-free, no bare move-out
+            // `m` underflow the proven checker rejects). Same `a…m` balance as the bare-Var if-arm.
+            IrExprKind::Var { id } => {
+                let src = self.value_for(*id).ok()?;
+                let dst = self.fresh_value();
+                self.ops.push(Op::Dup { dst, src });
+                Some(dst)
+            }
             IrExprKind::LitStr { value } => {
                 let pr = repr_of(&expr.ty).ok()?;
                 let p = self.fresh_value();

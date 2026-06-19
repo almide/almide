@@ -1536,25 +1536,30 @@ impl LowerCtx {
         }
     }
 
-    /// Lower a scalar operand that must be PURE — it computes a scalar AND materializes
-    /// NO heap temp (it does not grow `live_heap_handles`). Returns `None` (fully rolled
-    /// back) if the operand is not scalar-lowerable OR if lowering it allocated a heap
-    /// temp (e.g. `string.contains(s, "@")` materializes the `"@"` literal as an owned
-    /// String). This is the gate for `UnOp` / logical `And`/`Or`: those positions must
-    /// not pull a heap-materializing call into a per-value scalar computation, because
-    /// the enclosing tail/heap-result-`if` machinery owns the per-arm heap balance — a
-    /// stray `Alloc` here would register an owned temp whose `Consume` lands OUTSIDE
-    /// that frame, producing a dangling consume (`m`) the ownership checker rejects.
-    /// A heap-materializing operand therefore WALLS, falling back to the sound prior
-    /// (Opaque / linearized) lowering — never both-arms, never a spurious consume.
-    fn lower_pure_scalar_operand(&mut self, expr: &IrExpr) -> Option<ValueId> {
+    /// Lower a scalar operand of an EAGER `UnOp` (`not e`) or logical `And`/`Or`, FREEING any
+    /// transient heap temp the operand materializes WITHIN a local frame. The canonical case is
+    /// `c == "'"` (→ `string.eq(c, "'")`): the `"'"` literal is a fresh owned String that is dead
+    /// the instant the `Bool` is computed, so it is `Alloc`'d (cert `i`) and `Drop`'d (cert `d`)
+    /// LOCALLY here — the operand is internally balanced and registers NO temp in the enclosing
+    /// frame. This is SOUND precisely because `and`/`or`/`not` are EAGER in v0 (both operands /
+    /// the operand always evaluate, NO short-circuit), so the `Drop` always runs on the same path
+    /// as the `Alloc`; the scalar `Bool` result survives the frame teardown (it is not a heap
+    /// handle). Returns `None` (fully rolled back) if the operand is not scalar-lowerable. (Before,
+    /// a heap-materializing operand was GATED OUT to `None` → the caller fell back to a silent
+    /// `Const 0` / a `WALL` — the `not (c == "'" or c == "\"")` miscompile.)
+    fn lower_scalar_operand(&mut self, expr: &IrExpr) -> Option<ValueId> {
         let ops_mark = self.ops.len();
-        let lhh_mark = self.live_heap_handles.len();
+        let frame = self.live_heap_handles.len();
         match self.lower_scalar_value_inner(expr) {
-            Some(v) if self.live_heap_handles.len() == lhh_mark => Some(v),
-            _ => {
+            Some(v) => {
+                // Free any transient temp the operand allocated (e.g. a string-eq literal),
+                // keeping the operand internally `i…d`-balanced — the scalar `v` is not among them.
+                self.drop_arm_locals(frame);
+                Some(v)
+            }
+            None => {
                 self.ops.truncate(ops_mark);
-                self.live_heap_handles.truncate(lhh_mark);
+                self.live_heap_handles.truncate(frame);
                 None
             }
         }
@@ -1711,7 +1716,7 @@ impl LowerCtx {
                 // heap temp, so the pure-gate would be a no-op there.
                 let is_logic = matches!(iop, crate::IntOp::And | crate::IntOp::Or);
                 let (a, b) = if is_logic {
-                    (self.lower_pure_scalar_operand(left)?, self.lower_pure_scalar_operand(right)?)
+                    (self.lower_scalar_operand(left)?, self.lower_scalar_operand(right)?)
                 } else {
                     (self.lower_scalar_value(left)?, self.lower_scalar_value(right)?)
                 };
@@ -1787,12 +1792,12 @@ impl LowerCtx {
             // `try_lower_unit_if` run BOTH arms. This arm closes both failures.
             IrExprKind::UnOp { op, operand } => {
                 use almide_ir::UnOp;
-                // PURE operand only: a `not string.contains(s, "@")` materializes the
-                // `"@"` literal as an owned heap temp — admitting it would land a
-                // dangling `Consume` outside the enclosing per-arm heap frame (a bare
-                // `m` the ownership checker rejects). Such an operand WALLS (→ None),
-                // falling back to the sound prior linearized/Opaque lowering.
-                let x = self.lower_pure_scalar_operand(operand)?;
+                // The operand is EAGER (always evaluated), so a `not (c == "'")` whose
+                // `string.eq` materializes the `"'"` literal is lowered with that temp
+                // `Alloc`'d + `Drop`'d LOCALLY (`lower_scalar_operand`'s frame) — internally
+                // `i…d`-balanced, no temp escaping to the enclosing per-arm heap frame. A
+                // non-scalar-lowerable operand still WALLS (→ None).
+                let x = self.lower_scalar_operand(operand)?;
                 let dst = self.fresh_value();
                 match op {
                     // Integer negation: `0 - x` (no dedicated wasm i64 negate op; the
