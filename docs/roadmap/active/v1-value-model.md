@@ -2,6 +2,29 @@
 
 **Status: DESIGN (2026-06-19). CEO chose path A ("Aでいくぞ"): keep the trusted base minimal, PROVE the Value model (constructors/extractors/serializer self-hosted in .almd, cert-verified), with the recursive free as the ONE trusted runtime routine (like `DropListStr` already is). Coq-free; byte-match-verified vs v0 `runtime/rs/src/value.rs` per brick.**
 
+## yaml wall countdown (the live tally)
+
+74 functions → walls: 22 (session start) → 21 (float.parse recognition) → **19** (scalar-arg TCO, commit 77c91648) → **17** (nested heap-result `match` arm, below). Remaining 17 below.
+
+### LANDED 2026-06-19: nested heap-result `match` arm — yaml 19→17 (try_decimal, parse_number)
+
+`lower_heap_result_arm` (control.rs) handled Module-call / Named-call / nested-`if` / ctor arms but
+fell to `_ => None` on a nested `match` arm, walling any heap-result `if`/`match` whose arm is itself a
+`match` — the `try_decimal` shape (`match int.parse(c) { ok(n) => value.int(n), err(_) => match
+float.parse(c) {…} }`) and `parse_number`'s then-arm (`match int.from_hex(..) { ok(n) => value.int(n),
+err(_) => value.str(raw) }`). FIX: add a `Match` arm case that recurses through the SAME proven
+machinery the tail position uses — `try_lower_variant_value_match` for a variant subject (subject-drop-
+before-arms over a scalar payload + a heap-result-`if` skeleton), `desugar_match_to_if` +
+`lower_heap_result_if_inner` for an Int-literal subject. The recursion already `Consume`s each leaf and
+returns the merged if-result `dst`, so the arm adds NO extra `Consume` (exactly like the nested-`If`
+arm). CERT-CLEAN: it composes two already-proven, internally-balanced lowerings — NO new MIR op, NO
+checker change. VERIFIED: a focused fixture (`spec/wasm_cross/nested_match_heap_arm.almd`, linkable
+int.parse/int.from_hex only) byte-matches v0 (5/5 cases); corpus-wall ACCEPT (4231 fns, 14370 heap
+objects, 3 props); output-parity baseline 61/61 (no regression) + the new fixture ratcheted in; the 3
+non-baseline MISMATCH files are PRE-EXISTING (confirmed by an A/B stash test — unrelated to this brick).
+NOTE: try_decimal/parse_number now LOWER (wall gone) but a full-yaml program using them still needs
+float.parse (strtod) to RENDER — the lowering wall and the link wall are independent counts.
+
 ## Why this is the keystone
 
 yaml's remaining 22 v1 walls are dominated by the dynamic `Value` model: `value.array`/`value.object` build it (collect_seq/collect_map), `value.as_array` binds the array payload (yaml:249 `ok(items) => emit_seq(items, ind)`), `value.stringify` + the yaml `emit` serializer read it. v1 self-hosts SCALAR Values (value_core.almd: Null/Bool/Int/Float tags 0-3, Str tag 4) but NOT the COMPOUND ones (Array tag 5, Object tag 6). The blocker is the RECURSIVE FREE: a `List[Value]`/Array's elements are themselves Values with their own heap payloads, so the existing `DropListStr` (a FLAT per-slot `rc_dec`) LEAKS them.

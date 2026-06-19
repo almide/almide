@@ -703,6 +703,9 @@ fn main() {
                     }
                 }
                 Ok(Err(almide_mir::lower::LowerError::Unsupported(reason))) => {
+                    if std::env::var("WALL_NAMES").is_ok() {
+                        eprintln!("WALLED {} :: {} :: {}", file.display(), func.name.as_str(), reason);
+                    }
                     *t.unsupported.entry(reason_key(&reason)).or_insert(0) += 1;
                     // INTERP COVERAGE (b): every interp site inside a WALLED function is
                     // cleanly walled too (its function emits no wasm) — never a miscompile.

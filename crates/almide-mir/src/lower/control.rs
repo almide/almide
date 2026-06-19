@@ -1803,6 +1803,33 @@ impl LowerCtx {
                 self.ops.push(Op::Consume { v: obj });
                 Some(obj)
             }
+            // A NESTED `match` arm (`match int.parse(c) { ok(n) => value.int(n), err(_) =>
+            // match float.parse(c) { … } }` — try_decimal; `if … then match int.from_hex(..) {
+            // ok(n) => value.int(n), err(_) => value.str(raw) } else …` — parse_number's then-arm).
+            // Recurse through the SAME machinery the tail-position `match` uses: a variant subject
+            // runs the proven `try_lower_variant_value_match` (subject-drop-before-arms over a
+            // scalar payload, then a heap-result-`if` skeleton), an Int-literal subject desugars
+            // to a nested heap-result `if`. The recursive call ALREADY `Consume`s each leaf arm
+            // (the move-out balance) and returns the merged if-result `dst` — so this arm adds NO
+            // extra `Consume` (exactly like the nested-`If` arm above), avoiding a double-move-out.
+            // Cert-clean: it composes two already-proven, internally-balanced lowerings; on any
+            // out-of-subset shape the inner attempt rolls itself back and returns `None`, so the
+            // OUTER `try_lower_heap_result_if` restores the op stream and walls the function.
+            IrExprKind::Match { subject, arms } => {
+                if is_variant_ty(&subject.ty) {
+                    if let Some(dst) =
+                        self.try_lower_variant_value_match(subject, arms, result_ty)
+                    {
+                        return Some(dst);
+                    }
+                }
+                if let Some(if_expr) = self.desugar_match_to_if(subject, arms, result_ty) {
+                    if let IrExprKind::If { cond, then, else_ } = &if_expr.kind {
+                        return self.lower_heap_result_if_inner(cond, then, else_, result_ty);
+                    }
+                }
+                None
+            }
             _ => None,
         }
     }

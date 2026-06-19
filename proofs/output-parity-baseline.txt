@@ -42,6 +42,7 @@ spec/wasm_cross/map_filter.almd
 spec/wasm_cross/math_explog.almd
 spec/wasm_cross/math_log_gamma.almd
 spec/wasm_cross/math_pow.almd
+spec/wasm_cross/nested_match_heap_arm.almd
 spec/wasm_cross/nested_tuple_destructure.almd
 spec/wasm_cross/num_edge_to_string.almd
 spec/wasm_cross/option_result.almd
