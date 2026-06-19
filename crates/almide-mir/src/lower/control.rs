@@ -1490,6 +1490,10 @@ impl LowerCtx {
     /// desugared `match`'s else-if) recurses, its result dst being this arm's value.
     fn lower_heap_result_arm(&mut self, arm: &IrExpr, result_ty: &Ty) -> Option<ValueId> {
         match &arm.kind {
+            // An `e!` arm (`if c then parse_sequence(..)! else ..`) — effect-fn error
+            // propagation: `e!` returns e's Result unchanged (Ok→Ok, Err→Err), so strip the
+            // `!` and lower `e` as the arm (the same identity the tail-position `e!` uses).
+            IrExprKind::Unwrap { expr } => self.lower_heap_result_arm(expr, result_ty),
             IrExprKind::LitStr { value } => {
                 let repr = repr_of(result_ty).ok()?;
                 let obj = self.fresh_value();
