@@ -57,17 +57,22 @@ and kernel-verified. The rest is gate-verifiable engineering.
    `new = __list_concat(acc, [x]); Drop acc; SetLocal acc, new` (`try_lower_concat_list`; the cert-backed
    slot now accepted by step 2). Plus mutual-recursion inlining (flow_step→flow_rec).
 
-   **⚠ DESIGN QUESTION surfaced (the producer's crux): the accumulator's OWNERSHIP CONVENTION.** A clean
-   `i(id)m` slot needs `acc` OWNED (initial `i` + loop drop-old/alloc-new + move-out). But the v1 default
-   is BORROW-by-default params: a borrowed `acc` param has NO `i`, so dropping it in iteration 1
-   double-frees the caller's reference, and the cert is `(id)m` → correctly REJECTED. So the producer must
-   make a TCO'd self-append accumulator param **OWNED (moved-in)**: the caller MOVES `acc` in (the initial
-   `[]` is owned, not borrowed), the callee owns it, the loop drops/reallocs/returns it → clean `i(id)m`.
-   This is a per-function calling-convention change for the accumulator param (a Dup-at-loop-start
-   alternative makes the cert mix the param object with the new objects — messy; moved-in is cleaner).
-   Decide + implement this convention before wiring (c). Also note: `try_lower_concat_list` handles only
-   SCALAR-element lists — yaml's `List[Value]`/`List[(k,v)]` accumulators additionally need heap-element
-   concat (+ value.object/stringify), so the synthetic `List[Int]` append validates the MECHANISM first.
+   **DESIGN RESOLVED — approach 3 (fresh-slot upfront-copy), the cleanest, NO convention change.** The
+   crux: a clean `i(id)m` needs the slot OWNED with `of[slot] = slot` (the cert keys the slot stream by its
+   ValueId). A borrowed `acc` param has no `i` (cert `(id)m` → correctly REJECTED; dropping it iter-1
+   double-frees the caller). Rebinding the param via Dup/owned-param makes `of[slot] ≠ slot` (the param
+   object diverges from the slot key) → messy cert. THE FIX: introduce a FRESH slot var `acc_slot` and init
+   it `acc_slot = __list_concat(acc, [])` (an owned copy). A Call heap-result sets `of[acc_slot] = acc_slot`
+   AUTOMATICALLY (cert `i`), so the slot key == its object — clean. Then substitute `acc → acc_slot`
+   throughout the loop body + bases; the loop carries `acc_slot` (drop-old/alloc-new), bases return it
+   (move out). cert = `i(id)m`, EXACTLY what step 2 accepts. The borrowed param `acc` stays borrowed
+   (caller owns it) — read only for the upfront copy. byte-match holds (the copy + per-iter append builds
+   the identical final list as v0's recursion). Implementation pieces: (i) detect heap append accumulator
+   (carried[ai] heap + every self-call value `ConcatList{left:Var(acc)}`); (ii) an IR var-substitution
+   helper (Var(acc)→Var(acc_slot)); (iii) emit the upfront `let acc_slot = acc + []` bind; (iv) the in-loop
+   Assign wiring (c). `try_lower_concat_list` is SCALAR-element only → a synthetic `List[Int]` append
+   validates the MECHANISM first; yaml's `List[Value]`/`List[(k,v)]` then need heap-element concat (+
+   value.object/stringify).
 4. **Verify**: corpus-wall ACCEPT + the yaml walls clear (flow_rec/collect_*/block_*) + byte-match v0 + leak-loop.
 
 The ENTIRE verification/trust side of C (proof + extracted checker + cert serializer + verify_ownership) is
