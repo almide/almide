@@ -27,6 +27,9 @@ printf 'R\n'        > /tmp/reuse_uaf.cert      # reuse with nothing owned (rc=0)
 printf 'IARD\n'    > /tmp/shared_reuse.cert    # reuse of a SHARED object (rc=2): balances but unsound → REJECT
 printf 'IIDD\n'    > /tmp/stack.cert          # operand-STACK balance (push push pop pop) ≡ the same fold → ACCEPT
 printf 'IDD\n'     > /tmp/stack_uflow.cert     # operand-stack UNDERFLOW (pop below empty) → REJECT
+printf 'I(DI)M\n'  > /tmp/loop_acc.cert        # heap-loop-carried accumulator slot: acquire, loop[drop-old acquire-new], move-out → ACCEPT
+printf 'I(I)M\n'   > /tmp/loop_leak.cert       # loop body LEAKS (acquire each iter, never release) → REJECT
+printf 'I(D)M\n'   > /tmp/loop_drain.cert      # loop body DRAINS (release each iter, never acquire) → REJECT
 
 run() { # path expected_exit
   set +e; ./checker ownership "$1" >/tmp/checker.out 2>&1; local rc=$?; set -e
@@ -41,7 +44,11 @@ run /tmp/reuse_uaf.cert 1
 run /tmp/shared_reuse.cert 1
 run /tmp/stack.cert 0
 run /tmp/stack_uflow.cert 1
+run /tmp/loop_acc.cert 0
+run /tmp/loop_leak.cert 1
+run /tmp/loop_drain.cert 1
 
 echo
 echo "CHECKER OK: the kernel-proven check accepts the balanced certificate and"
-echo "rejects double-free / leak — the proof now runs on real bytes."
+echo "rejects double-free / leak (incl. heap-loop-carried accumulator certs via the"
+echo "loop-aware check_cert_lc) — the proof now runs on real bytes."

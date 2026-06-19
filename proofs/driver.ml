@@ -18,7 +18,7 @@ let () =
   let bytes = read_file Sys.argv.(2) in
   let accepted =
     match mode with
-    | "ownership" -> Checker.check_cert bytes
+    | "ownership" -> Checker.check_cert_lc bytes  (* loop-aware (v2); flat certs unchanged *)
     | "names" -> Checker.check_names_cert bytes
     | "caps" -> Checker.check_caps_cert bytes
     | m ->

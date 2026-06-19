@@ -14,4 +14,7 @@ Extract Inductive bool => "bool" [ "true" "false" ].
 Extract Inductive list => "list" [ "[]" "(::)" ].
 
 Set Extraction Output Directory ".".
-Extraction "checker.ml" check_cert check_names_cert check_caps_cert.
+(* `check_cert_lc` is the loop-aware ownership checker (format v2, backward-compatible
+   with the flat `check_cert`); the driver dispatches ownership to it so loop certs
+   (heap-loop-carried accumulators) are accepted on the same proven spine. *)
+Extraction "checker.ml" check_cert check_cert_lc check_names_cert check_caps_cert.

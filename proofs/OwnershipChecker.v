@@ -297,10 +297,205 @@ Proof. reflexivity. Qed.
 Example reuses_shared_iard_not_unique : reuses_unique [Inc; Alias; Reuse; Dec] 0 = false.
 Proof. reflexivity. Qed.
 
+(* ─── HEAP-LOOP-CARRIED extension (option C, the COMPLETENESS fix) ───
+   The flat per-object cert above cannot express a loop-carried heap accumulator
+   (`acc = acc + [x]` each iteration: drop the old object, alloc a new one, rebind
+   the slot — different objects sharing one SLOT, the old's `d` an iteration after
+   the new's `i`). So `verify_ownership` FALSE-REJECTS safe `acc + [x]` loops — an
+   incompleteness. Here a cert LINE gains a LOOP item whose flat body runs ANY
+   number of times; the accumulator slot's cert is `[COp Inc; CLoop [Dec; Inc];
+   COp MoveOut]` (acquire once; each iteration release-old + acquire-new = net 0;
+   move out the final). The rule: accept a loop iff its body PRESERVES rc (and does
+   not fault) from the entry count — then EVERY iteration count is sound, PROVED
+   below (`check_line_unroll_sound`). (OwnershipLoop.v proves the same rule on a
+   focused alphabet; this is the production port over the full Inc/Alias/Dec/
+   MoveOut/Reuse alphabet so the extracted checker accepts loop certs.) *)
+
+Inductive CertItem : Type :=
+  | COp : Op -> CertItem            (* a plain op *)
+  | CLoop : list Op -> CertItem.    (* a loop body run any number of times *)
+
+(* exec_line folds a cert LINE. A CLoop body is checked via the existing flat `exec`
+   (its body is plain ops); accepted iff the body preserves rc (sufficient for any
+   iteration count). Structural recursion on the item list — no nesting (bodies are
+   plain `list Op`), so this compiles without the nested-inductive guard issue. *)
+Fixpoint exec_line (cs : list CertItem) (rc : Z) : option Z :=
+  match cs with
+  | [] => Some rc
+  | COp o :: rest =>
+      match exec [o] rc with
+      | Some rc' => exec_line rest rc'
+      | None => None
+      end
+  | CLoop body :: rest =>
+      match exec body rc with
+      | Some rc' => if Z.eqb rc' rc then exec_line rest rc else None
+      | None => None
+      end
+  end.
+
+Definition check_line (cs : list CertItem) : bool :=
+  match exec_line cs 0 with Some z => Z.eqb z 0 | None => false end.
+
+(* exec distributes over append (over the full alphabet). *)
+Lemma exec_app :
+  forall a b rc,
+    exec (a ++ b) rc =
+      match exec a rc with Some rc' => exec b rc' | None => None end.
+Proof.
+  induction a as [| o a IH]; intros b rc; simpl.
+  - reflexivity.
+  - destruct o; simpl.
+    + apply IH.
+    + apply IH.
+    + destruct (rc <=? 0). reflexivity. apply IH.
+    + destruct (rc <=? 0). reflexivity. apply IH.
+    + destruct (Z.eqb rc 1). apply IH. reflexivity.
+Qed.
+
+(* exec over a cons = single-op step then the rest. *)
+Lemma exec_cons :
+  forall o b rc,
+    exec (o :: b) rc =
+      match exec [o] rc with Some rc' => exec b rc' | None => None end.
+Proof. intros o b rc. change (o :: b) with ([o] ++ b). apply exec_app. Qed.
+
+(* A flat body that PRESERVES rc, repeated n times, still preserves rc. *)
+Lemma exec_repeat_preserve :
+  forall body rc, exec body rc = Some rc ->
+    forall n, exec (List.concat (List.repeat body n)) rc = Some rc.
+Proof.
+  intros body rc Hpres. induction n as [| n IH]; simpl.
+  - reflexivity.
+  - rewrite exec_app, Hpres. exact IH.
+Qed.
+
+(* CONCRETE unrolling: a cert line unrolls to a flat run (each CLoop body → n copies). *)
+Inductive UnrollsL : list CertItem -> list Op -> Prop :=
+  | UL_nil : UnrollsL [] []
+  | UL_op : forall o a b, UnrollsL a b -> UnrollsL (COp o :: a) (o :: b)
+  | UL_loop : forall body a b n,
+      UnrollsL a b -> UnrollsL (CLoop body :: a) (List.concat (List.repeat body n) ++ b).
+
+(* SOUNDNESS CORE: an accepting line, at any rc, executes EVERY unrolling to the
+   same result — so no unrolling faults and the final rc matches. *)
+Lemma exec_line_unroll :
+  forall cs fops, UnrollsL cs fops ->
+    forall rc r, exec_line cs rc = Some r -> exec fops rc = Some r.
+Proof.
+  intros cs fops HU. induction HU; intros rc r Hexec.
+  - (* nil *) simpl in *. exact Hexec.
+  - (* COp o — case on the concrete op so exec/exec_line both reduce *)
+    destruct o; simpl in *.
+    + apply IHHU; exact Hexec.
+    + apply IHHU; exact Hexec.
+    + destruct (rc <=? 0); [discriminate | apply IHHU; exact Hexec].
+    + destruct (rc <=? 0); [discriminate | apply IHHU; exact Hexec].
+    + destruct (Z.eqb rc 1); [apply IHHU; exact Hexec | discriminate].
+  - (* CLoop body *) simpl in *.
+    destruct (exec body rc) as [rc' |] eqn:Eb; [| discriminate].
+    destruct (Z.eqb rc' rc) eqn:Eq; [| discriminate].
+    apply Z.eqb_eq in Eq. subst rc'.
+    rewrite exec_app, (exec_repeat_preserve body rc Eb n).
+    apply IHHU. exact Hexec.
+Qed.
+
+(* The headline: an ACCEPTED loop cert line guarantees EVERY concrete unrolling is
+   free of double-free / use-after-free AND leak — the completeness the flat cert
+   lacked, now SOUND (the false-rejection closed at the root). *)
+Theorem check_line_unroll_sound :
+  forall cs, check_line cs = true ->
+    forall fops, UnrollsL cs fops ->
+      run fops <> None /\ run fops = Some 0.
+Proof.
+  intros cs H fops HU. unfold check_line in H. unfold run.
+  destruct (exec_line cs 0) as [z |] eqn:E; [| discriminate].
+  apply Z.eqb_eq in H. subst z.
+  rewrite (exec_line_unroll cs fops HU 0 0 E). split. discriminate. reflexivity.
+Qed.
+
+(* non-vacuity: the accumulator slot accepts; a leaky/draining loop body is rejected. *)
+Example acc_slot_line_accepts : check_line [COp Inc; CLoop [Dec; Inc]; COp MoveOut] = true.
+Proof. reflexivity. Qed.
+Example leaky_loop_line_rejects : check_line [COp Inc; CLoop [Inc]; COp MoveOut] = false.
+Proof. reflexivity. Qed.
+Example draining_loop_line_rejects : check_line [COp Inc; CLoop [Dec]; COp MoveOut] = false.
+Proof. reflexivity. Qed.
+
+(* ─── LOOP-AWARE certificate parsing (format v2, backward-compatible) ───
+   Extends the byte format with loop delimiters `(` … `)` around a flat loop body:
+   e.g. `i(di)m` = COp Inc, CLoop [Dec; Inc], COp MoveOut (the accumulator slot).
+   A cert with NO parens parses to all-`COp` lines, and `check_line` on those folds
+   exactly like the flat `check` — so every existing v1 certificate is unchanged.
+   The op alphabet inside/outside a loop is the same i/a/d/m/r. *)
+Definition lparen : ascii := "("%char.
+Definition rparen : ascii := ")"%char.
+
+(* Flush the in-progress line to a finished `list CertItem` (closing a dangling
+   loop defensively, though well-formed certs close every `(` before newline/EOF). *)
+Definition finish_line (cur : list CertItem) (lp : option (list Op)) : list CertItem :=
+  match lp with
+  | Some body => rev (CLoop (rev body) :: cur)
+  | None => rev cur
+  end.
+
+Fixpoint parse_lc (s : string) (cur : list CertItem) (lp : option (list Op))
+                  {struct s} : list (list CertItem) :=
+  match s with
+  | EmptyString => [finish_line cur lp]
+  | String b rest =>
+      if Ascii.eqb b newline then finish_line cur lp :: parse_lc rest [] None
+      else if Ascii.eqb b lparen then parse_lc rest cur (Some [])
+      else if Ascii.eqb b rparen then
+        match lp with
+        | Some body => parse_lc rest (CLoop (rev body) :: cur) None
+        | None => parse_lc rest cur None
+        end
+      else match parse_byte b with
+           | Some op =>
+               match lp with
+               | Some body => parse_lc rest cur (Some (op :: body))
+               | None => parse_lc rest (COp op :: cur) None
+               end
+           | None => parse_lc rest cur lp
+           end
+  end.
+
+(* The full loop-aware checker over raw certificate bytes. *)
+Definition check_cert_lc (s : string) : bool :=
+  forallb check_line (parse_lc s [] None).
+
+(* SOUNDNESS over bytes: an accepted loop certificate has, for EVERY parsed line and
+   EVERY concrete unrolling of that line, no double-free / use-after-free and no
+   leak. (Per-line via check_line_unroll_sound; lifted over all lines here.) *)
+Theorem check_cert_lc_sound :
+  forall s, check_cert_lc s = true ->
+    forall cs, In cs (parse_lc s [] None) ->
+      forall fops, UnrollsL cs fops -> run fops <> None /\ run fops = Some 0.
+Proof.
+  intros s H cs Hin fops HU.
+  unfold check_cert_lc in H. rewrite forallb_forall in H.
+  apply (check_line_unroll_sound cs (H cs Hin) fops HU).
+Qed.
+
+(* backward-compat + non-vacuity on real bytes *)
+Example cert_lc_flat_accepts : check_cert_lc "iidd"%string = true.
+Proof. reflexivity. Qed.
+Example cert_lc_flat_rejects : check_cert_lc "idd"%string = false.
+Proof. reflexivity. Qed.
+Example cert_lc_acc_slot_accepts : check_cert_lc "i(di)m"%string = true.   (* accumulator slot *)
+Proof. reflexivity. Qed.
+Example cert_lc_leaky_loop_rejects : check_cert_lc "i(i)m"%string = false. (* loop body leaks *)
+Proof. reflexivity. Qed.
+Example cert_lc_draining_loop_rejects : check_cert_lc "i(d)m"%string = false. (* loop body drains *)
+Proof. reflexivity. Qed.
+
 (* AXIOM AUDIT (the "Print Assumptions ⊆ standard" gate). Soundness must rest on
    nothing but the Coq kernel — no admits, no extra axioms. Expected output:
    "Closed under the global context". *)
 Print Assumptions check_sound.
+Print Assumptions check_line_unroll_sound.
+Print Assumptions check_cert_lc_sound.
 Print Assumptions check_all_sound.
 Print Assumptions check_cert_sound.
 Print Assumptions check_reuse_sound.
