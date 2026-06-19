@@ -148,6 +148,29 @@ the better long-term (it also lifts the Err-heap-bind + Some-heap-bind deferrals
 (a wrong choice = UAF or double-free), so it is design-first, NOT a session-end rush. Everything ELSE
 in the Value model is built + verified (see the FULL BUILD ATTEMPT section above); THIS is the one gate.
 
+## Camp-4 depth, fully investigated 2026-06-19: a LOWERING-ONLY path exists, but needs a NEW heap-Result-of-list rep
+
+Good news (no kernel/Coq change needed): the cert ALREADY backstops the hard part. If the heap-payload
+match binds `items` as a BORROW (LoadHandle of the subject's payload slot) and drops the SUBJECT
+**after** the arms (not the current before), `verify_ownership` sees ONE subject drop — flat-cert-clean.
+And the no-alias safety is FREE: an arm that RETURNS the borrowed payload (`ok(items) => items`) is a
+"return of a non-owned value" the cert already REJECTS (lib.rs:725), so only use-not-move arms (yaml's
+`ok(items) => emit_seq(items, ind)`) pass. So Camp-4 is a LOWERING change to `try_lower_result_match`
+(borrow-payload + drop-subject-after), NOT a checker/Coq change. (I was over-conservative earlier.)
+
+The REMAINING real work — a NEW heap-Result-of-list REPRESENTATION: `value.as_array : Result[List[Value],
+String]` can NOT reuse the str-result cap@16 rep (value.as_string, is_self_host_result_str_module_fn).
+The cap-as-tag writes the Ok/Err tag at the payload's @16 — fine for a String (that's its byte region)
+but for a `List[Value]` @16 is the HIGH 32 bits of `elem0` (slots at @12,@20,…) → the tag would CORRUPT
+element 0. So a list-payload Result needs a SEPARATE Ok-shell rep `[rc][tag@4][_][payload@12=list]` (the
+match reads tag@4, binds `items`=LoadHandle@12) — distinct from the str-result cap@16 machinery. THE
+PLAN: (1) a `value`-result-of-heap rep + tracking set (separate shell, not cap@16); (2) admit Ok(heap)
+bind in try_lower_result_match (scalar_bind→heap_or_scalar_bind for Ok) with borrow + drop-subject-AFTER
+for THIS rep only (don't perturb the proven str-result drop-before path); (3) verify the round-trip
+(`value.as_int(items[i])`) + corpus-wall + no str-result regression. This is a focused rep+lowering
+brick (NOT kernel/Coq) — the cert rejects misuse, so it is verifiable, just delicate (a wrong rep is a
+silent-corruption class that corpus-wall's cert may not catch — needs the round-trip + leak gates).
+
 ## PRIM-FLOOR layer found 2026-06-19 (the foundation below piece 1)
 
 The prim floor (load_str/store_str/load64/store64/handle) has NO typed `load_list` to read a
