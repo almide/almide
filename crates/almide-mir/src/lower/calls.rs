@@ -1966,6 +1966,9 @@ impl LowerCtx {
             // Load a 4-byte handle KEEPING Ptr repr — reads a String element out of a list slot
             // (a borrow of the slot's String, for passing to a closure / String fn).
             "load_str" => PrimKind::LoadHandle,
+            // Generic typed `load_handle[A]` — the same i32-handle-keeping load as `load_str`, for
+            // reading a `List[Value]`/`Value` payload out of a Value's slot (the Value model floor).
+            "load_handle" => PrimKind::LoadHandle,
             "store32" => PrimKind::Store { width: 4 },
             "store8" => PrimKind::Store { width: 1 },
             "store64" => PrimKind::Store { width: 8 },

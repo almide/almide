@@ -150,6 +150,14 @@ fn store_str[A](addr: Int, piece: A) -> Unit = _
 @intrinsic("almide_rt_prim_load_str")
 fn load_str(addr: Int) -> String = _
 
+// Load a heap HANDLE (an i32 pointer kept as a heap repr, NOT zero-extended like load64) from a
+// slot, typed as the heap type `A` — the generic sibling of `load_str` (which is fixed to String).
+// `value.as_array` reads its `List[Value]` payload via `load_handle[List[Value]]`; a Value reads a
+// nested `Value` via `load_handle[Value]`. A BORROW of the slot's owned handle (the container keeps
+// ownership through its recursive drop) — like `handle`'s inverse. Lowers to the same `LoadHandle`.
+@intrinsic("almide_rt_prim_load_handle")
+fn load_handle[A](addr: Int) -> A = _
+
 // The fd_write WASI host call — the only sandbox exit (reaches Stdout). Returns the
 // errno. `iov` points at an iovec array of `count` {ptr,len} pairs; `nw` receives
 // the bytes written.
