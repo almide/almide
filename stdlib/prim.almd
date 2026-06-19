@@ -158,6 +158,16 @@ fn load_str(addr: Int) -> String = _
 @intrinsic("almide_rt_prim_load_handle")
 fn load_handle[A](addr: Int) -> A = _
 
+// Raw refcount RELEASE / ACQUIRE of a heap handle (an Int address) — reuse the proven $rc_dec/$rc_inc.
+// The MECHANISM the self-hosted `value.__drop_value` (recursive Value free) + `value.array` (shallow
+// copy = rc_inc each element) are written with. Operating on a RAW Int means the ownership cert sees
+// NO event (a Prim is a no-op in verify_ownership), like `string_eq` — so leak/double-free safety is
+// the differential test's burden, not the cert. Contained to the Value drop/copy routines.
+@intrinsic("almide_rt_prim_rc_dec")
+fn rc_dec(addr: Int) -> Unit = _
+@intrinsic("almide_rt_prim_rc_inc")
+fn rc_inc(addr: Int) -> Unit = _
+
 // The fd_write WASI host call — the only sandbox exit (reaches Stdout). Returns the
 // errno. `iov` points at an iovec array of `count` {ptr,len} pairs; `nw` receives
 // the bytes written.

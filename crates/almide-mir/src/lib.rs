@@ -336,6 +336,20 @@ pub enum PrimKind {
     /// The `fd_write` WASI host call — `args = [fd, iov, count, nwritten]`, dst = the
     /// i64 errno. The ONLY sandbox exit; carries [`Capability::Stdout`].
     FdWrite,
+    /// Release one reference of a RAW heap handle (`(call $rc_dec …)`), the inverse of [`RcInc`].
+    /// The MECHANISM the self-hosted recursive `value.__drop_value` frees a dynamic Value tree with
+    /// (the §4.1-compliant alternative to a hand-written WAT drop): it operates on raw Int handles,
+    /// so its ownership cert is EMPTY (a `Prim` is a no-op in verify_ownership) — like `string_eq`.
+    /// REUSES the proven `$rc_dec` (no new WAT func). args = [addr], no dst (Unit). TRUSTED like the
+    /// inline DropListStr's per-element rc_dec — its leak/double-free safety is the differential
+    /// test's burden (a value.stringify round-trip), NOT the ownership cert. Use is contained to the
+    /// drop routine.
+    RcDec,
+    /// Acquire one reference of a RAW heap handle (`(call $rc_inc …)`) — the self-host `value.array`
+    /// SHALLOW-COPIES a `List[Value]` by `rc_inc`-ing each element into a new owned list (matching
+    /// v0's `items.clone()` observably) so the borrowed `items` param is untouched. args = [addr],
+    /// no dst. REUSES the proven `$rc_inc`. Cert no-op (raw handle), trusted like RcDec.
+    RcInc,
     /// The FLOAT floor: a `Float` scalar is the i64-uniform value holding the f64 BITS, so
     /// every float op `reinterpret`s i64→f64, computes, and `reinterpret`s back (a compare /
     /// to-int yields a real i64). Scalar, no ownership — the cert is untouched (these are

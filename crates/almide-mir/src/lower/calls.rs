@@ -1972,6 +1972,20 @@ impl LowerCtx {
             "store32" => PrimKind::Store { width: 4 },
             "store8" => PrimKind::Store { width: 1 },
             "store64" => PrimKind::Store { width: 8 },
+            // Raw refcount free/acquire — the Value drop/copy mechanism. GATED to the value-model
+            // self-host fns (the trusted recursive-free / shallow-copy, like the inline DropListStr):
+            // an UNTRACKED free exposed to arbitrary code would let any fn double-free outside the
+            // ownership cert's sight, so only `__drop_value`/`value_array` may name it.
+            "rc_dec" | "rc_inc"
+                if matches!(self.fn_name.as_str(), "__drop_value" | "value_array") =>
+            {
+                if func == "rc_dec" { PrimKind::RcDec } else { PrimKind::RcInc }
+            }
+            "rc_dec" | "rc_inc" => {
+                return Err(LowerError::Unsupported(format!(
+                    "prim.{func} is restricted to the value-model drop/copy routines (untracked free)"
+                )))
+            }
             "fd_write" => PrimKind::FdWrite,
             // The FLOAT floor (the f64 bits live in the i64-uniform value; render reinterprets).
             "fabs" => PrimKind::FloatUn(crate::FUnOp::Abs),
@@ -2011,7 +2025,11 @@ impl LowerCtx {
             })?;
             lowered.push(v);
         }
-        let dst = if matches!(kind, PrimKind::Store { .. }) { None } else { Some(self.fresh_value()) };
+        let dst = if matches!(kind, PrimKind::Store { .. } | PrimKind::RcDec | PrimKind::RcInc) {
+            None
+        } else {
+            Some(self.fresh_value())
+        };
         // `prim.load_str` (LoadHandle) yields a BORROW of a list slot's String — the list still owns
         // it. Mark the result BORROWED so a `let` binding does not add it to the scope-end drop set
         // (that would double-free with the owning list's DropListStr).

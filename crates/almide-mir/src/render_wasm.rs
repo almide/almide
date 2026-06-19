@@ -887,6 +887,11 @@ fn render_op(
                 PrimKind::FdWrite => {
                     format!("(i64.extend_i32_u (call $fd_write {} {} {} {}))", w(0), w(1), w(2), w(3))
                 }
+                // RAW refcount ops (the self-host drop/copy mechanism) — reuse the proven $rc_dec/
+                // $rc_inc on the i32-wrapped handle. dst is None (Unit), so the `match dst` below
+                // emits the call as a STATEMENT (no local.set).
+                PrimKind::RcDec => format!("(call $rc_dec {})", w(0)),
+                PrimKind::RcInc => format!("(call $rc_inc {})", w(0)),
                 // FLOAT floor: the i64 value holds the f64 bits — reinterpret around the op.
                 PrimKind::FloatUn(op) => {
                     let f = |a: usize| format!("(f64.reinterpret_i64 (local.get {}))", local(args[a]));
