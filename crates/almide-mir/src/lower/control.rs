@@ -861,11 +861,25 @@ impl LowerCtx {
         if is_self_host_result_call(subject) {
             self.materialized_results.insert(subj);
         }
+        // A self-host HEAP-Ok Result (`value.as_string` — cap-as-tag DynListStr) is tracked as a
+        // str-result (read @16) + a nested-ownership list (freed by DropListStr at scope end).
+        if is_self_host_result_str_call(subject) {
+            self.materialized_results_str.insert(subj);
+            self.heap_elem_lists.insert(subj);
+        }
         // Dispatch on the tracking set. An Option reads len-as-tag (Some=len≠0); a scalar
         // Result reads len-as-tag INVERSE (Err=len≠0, Ok=len0). The if-skeleton is uniform
         // (then = tag≠0, else = tag==0): Option → then=Some/else=None; Result → then=Err/else=Ok.
         let is_option = self.materialized_options.contains(&subj);
-        let is_result = self.materialized_results.contains(&subj);
+        // A scalar Result reads len-as-tag (@4); a HEAP-Ok `Result[String,String]` (value.as_string,
+        // the cap-as-tag DynListStr) reads the tag at the slot-0 HIGH 32 bits (@16). Both arrange
+        // Err=then(tag≠0)/Ok=else(tag0); only the tag OFFSET differs. A str-result match here is
+        // ADMITTED for WILDCARD/scalar binds (`match value.as_string(v) { ok(_) => …, err(_) => … }`
+        // — is_scalar_type); a heap-payload bind over a str-result (`ok(s: String)`) is the Camp-4
+        // borrowed-slot case → gated out below (heap_or_scalar_bind already requires heap_elem_lists,
+        // and the heap-RESULT branch defers it).
+        let is_result_str = self.materialized_results_str.contains(&subj);
+        let is_result = self.materialized_results.contains(&subj) || is_result_str;
         if !is_option && !is_result {
             return rollback(self);
         }
@@ -923,11 +937,14 @@ impl LowerCtx {
         {
             return rollback(self);
         }
-        // Emit: h = handle(subj); tag = load32(h + 4); dst = if tag != 0 then <then> else <else>.
+        // Emit: h = handle(subj); tag = load32(h + off); dst = if tag != 0 then <then> else <else>.
+        // A scalar Option/Result reads len-as-tag (@4); a heap-Ok `Result[String,String]`
+        // (value.as_string) reads the cap-as-tag at the slot-0 HIGH 32 bits (@16).
+        let tag_off = if is_result_str { 16 } else { 4 };
         let dst = self.fresh_value();
         let h = self.fresh_value();
         self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![subj] });
-        let tag = self.load_at_offset(h, 4, PrimKind::Load { width: 4 });
+        let tag = self.load_at_offset(h, tag_off, PrimKind::Load { width: 4 });
         // Bind the scalar payload(s) as subj-independent COPIES (load64 @12) BEFORE the arms —
         // for the heap-result case this is what severs the arm's heap move-out from the subject.
         let bind_payload = |s: &mut Self, bind: Option<(VarId, bool)>| {
