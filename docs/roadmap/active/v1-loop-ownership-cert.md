@@ -50,12 +50,24 @@ and kernel-verified. The rest is gate-verifiable engineering.
    ownership`). corpus-wall (14564 objs) green — backward-compatible. (2 pre-existing render_wasm json
    wasm-exec failures are unrelated — confirmed by stashing only these two files; another agent's list-cap work.)
 3. **Lowering** (`lower/mod.rs`): emit the heap-loop-carried accumulator MIR — the append-accumulator TCO.
-   THREE touch points now scoped: (a) `try_tco_rewrite` line ~2184 — drop the `carried[i] && is_heap_ty`
-   bail WHEN the carried heap arg's every self-call value is `acc + [x]` (a ConcatList/`+` appending the
-   accumulator to itself); (b) `tco_rewrite` — emit that carried arg as a reassignment `acc = acc + [x]`;
-   (c) the in-loop `Assign` lowering (mod.rs ~690, currently `Err` on heap reassign in a scalar loop) —
-   admit `acc = acc + [x]` → `new = concat(acc, [x]); Drop acc; SetLocal acc, new` (the cert-backed slot,
-   now accepted by step 2). Plus mutual-recursion inlining (flow_step→flow_rec) to expose the loop.
+   Touch points: (a) `try_tco_rewrite` line ~2184 — drop the `carried[i] && is_heap_ty` bail WHEN the
+   carried heap arg's every self-call value is `acc + [x]` (`BinOp::ConcatList` with `left = Var(acc)`);
+   (b) `tco_rewrite` already emits that carried arg as `Assign { acc, acc + [x] }` (no change); (c) the
+   in-loop `Assign` lowering (mod.rs ~690, currently `Err` on heap reassign) — admit `acc = acc + [x]` →
+   `new = __list_concat(acc, [x]); Drop acc; SetLocal acc, new` (`try_lower_concat_list`; the cert-backed
+   slot now accepted by step 2). Plus mutual-recursion inlining (flow_step→flow_rec).
+
+   **⚠ DESIGN QUESTION surfaced (the producer's crux): the accumulator's OWNERSHIP CONVENTION.** A clean
+   `i(id)m` slot needs `acc` OWNED (initial `i` + loop drop-old/alloc-new + move-out). But the v1 default
+   is BORROW-by-default params: a borrowed `acc` param has NO `i`, so dropping it in iteration 1
+   double-frees the caller's reference, and the cert is `(id)m` → correctly REJECTED. So the producer must
+   make a TCO'd self-append accumulator param **OWNED (moved-in)**: the caller MOVES `acc` in (the initial
+   `[]` is owned, not borrowed), the callee owns it, the loop drops/reallocs/returns it → clean `i(id)m`.
+   This is a per-function calling-convention change for the accumulator param (a Dup-at-loop-start
+   alternative makes the cert mix the param object with the new objects — messy; moved-in is cleaner).
+   Decide + implement this convention before wiring (c). Also note: `try_lower_concat_list` handles only
+   SCALAR-element lists — yaml's `List[Value]`/`List[(k,v)]` accumulators additionally need heap-element
+   concat (+ value.object/stringify), so the synthetic `List[Int]` append validates the MECHANISM first.
 4. **Verify**: corpus-wall ACCEPT + the yaml walls clear (flow_rec/collect_*/block_*) + byte-match v0 + leak-loop.
 
 The ENTIRE verification/trust side of C (proof + extracted checker + cert serializer + verify_ownership) is
