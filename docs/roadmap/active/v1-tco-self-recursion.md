@@ -145,3 +145,18 @@ self-call arm `SetLocal` the updated scalar args + loop. After `LoopEnd`, return
 scalar SetLocals carry no ownership. VERIFY: byte-match v0 on `scan_quote`/`find_colon` inputs +
 corpus-wall + tests. This is a focused but well-scoped brick (a new recursion→loop transform), NOT a
 session-end one-liner — but it is the HIGHEST-LEVERAGE next move (TCO unblocks ~6 of the 22 walls).
+
+### CORRECTION (implementation-level, 2026-06-19): TCO needs a NEW MIR primitive, not a loop-reuse
+
+Examined at the op level: scan_quote's base cases (`none`, `some(pos)`) sit MID-BODY (inside the
+`if in_q … else if # … else …` chain), NOT at the loop top. The existing loop primitive is a TOP-TEST
+`LoopBreakUnless { cond }` (control.rs:1377/2032) — it can only exit at the head of an iteration. So
+the recursion→loop transform CANNOT reuse it: it needs a **MID-BODY BREAK-WITH-RESULT** primitive
+(`Op::LoopBreak { result: ValueId }` or similar) that exits the loop carrying a heap result computed at
+an arbitrary point in the body. That is a NEW MIR op + render (`(br $loopexit)` after setting the
+result local, inside a wasm `block`/`loop` with the result threaded) + cert handling (the break's
+result `i` must balance against the function `m`; the cert must treat the loop body's per-iteration ops
+as balanced, and the break-result as the moved-out return). So the "mid-loop-break-with-result MIR
+primitive" named in this doc's title is REAL and REQUIRED — TCO is a focused MIR+render+cert brick, not
+a transform over the existing top-test loops. (This is why the self-rec guard at control.rs:1641 stays:
+without the new primitive there is no sound lowering, only the deep-trapping recursion.)
