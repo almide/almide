@@ -78,6 +78,33 @@ impl LowerCtx {
         if !is_heap_ty(&expr.ty) {
             return None;
         }
+        // A HEAP-element list index `xs[i]` (`xs: List[String]`) — LoadHandle the element's OWNED
+        // handle at the bounds-checked `$elem_addr(list, i)` as a BORROW (the list still owns it,
+        // freed by its DropListStr; the read is not a second owner → `param_values`). Without this
+        // a heap `xs[i]` fell through to the container-grain `Dup` (the WHOLE list), which a String
+        // consumer then read as a String = the list HEADER bytes (the `$ ` garbage). Gated to a
+        // tracked/materialized list var so `$elem_addr` reads a real populated block (else defer).
+        if let IrExprKind::IndexAccess { object, index } = &expr.kind {
+            let list = match &object.kind {
+                IrExprKind::Var { id } if is_heap_ty(&object.ty) => {
+                    let v = self.value_or_global(*id).ok()?;
+                    if !self.materialized_lists.contains(&v) && !self.param_values.contains(&v) {
+                        return None;
+                    }
+                    v
+                }
+                _ => return None,
+            };
+            let idx = self.lower_scalar_value(index)?;
+            let h = self.fresh_value();
+            self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![list] });
+            let addr = self.fresh_value();
+            self.ops.push(Op::Prim { kind: PrimKind::ElemAddr, dst: Some(addr), args: vec![h, idx] });
+            let dst = self.fresh_value();
+            self.ops.push(Op::Prim { kind: PrimKind::LoadHandle, dst: Some(dst), args: vec![addr] });
+            self.param_values.insert(dst);
+            return Some(dst);
+        }
         let (container, offset) = match &expr.kind {
             IrExprKind::Member { object, field } => {
                 (object, self.aggregate_field_offset_any(&object.ty, field.as_str())?)
