@@ -93,12 +93,23 @@ append accumulators.
 
 ## Remaining toward yaml=0 (the producer EXTENSIONS — the chain is proven, these widen its element domain)
 
-- **Heap-element concat** (`items + [val]` over `List[Value]`/`List[(k,v)]`): `try_lower_concat_list`
-  is SCALAR-element only (a heap element would alias owned handles). yaml's accumulators are `List[Value]`,
-  so they need a heap-element `__list_concat` that Dup's each carried element (per-element cert) + the right
-  `drop_op_for` (DropListValue). This is THE lever for the yaml append walls.
-- **value.object / value.stringify** (the Value-parser map/serializer) + **tuple-heap** ((Value,Int) drop)
-  + **mutual-recursion inlining** (flow_step→flow_rec) to expose the loop. Then the 11 walls fall → yaml 0.
+- **✅ DONE 2026-06-20 (commit 7074579d): heap-element concat.** `__list_concat_rc` (self-host, rc_inc per
+  element via the whitelisted `__lc_copy_rc`) + `try_lower_concat_list` admits String/Value elements +
+  marks `heap_elem_lists`/`value_elem_lists` (so `drop_op_for` = DropListStr/DropListValue) + the gate
+  `count_ir_calls` counts the heap-element ConcatList (mir≤ir holds). VERIFIED on
+  `spec/wasm_cross/append_accumulator_heap.almd` (`List[String]` build_s + extend_s): byte-matches v0,
+  corpus-wall green (cleared 2 spec walls 866→864), output-parity 70→71, cargo-test clean. So `acc + [x]`
+  now lowers for SCALAR (Int/…) AND HEAP (String/Value) element accumulators on the proven `i(id)m` slot.
+- **⚠ THE SOLE NEXT LEVER for ~half the yaml walls = MUTUAL-RECURSION INLINING.** All 11 yaml walls are
+  "heap-result if/match cannot be faithfully returned" — because every append fn is MUTUAL-recursive
+  (`flow_rec↔flow_step`, `collect_seq↔seq_item`, `collect_map↔map_entry`, `collect_block↔block_line↔
+  block_nonblank`), so `try_tco_rewrite` (self-call detector) NEVER fires (each calls a SIBLING, not
+  itself) → falls to normal lowering → the heap-result-if wall. Inlining the single-call sibling into the
+  caller makes it DIRECT self-recursive → the TCO fires → with the now-ready scalar+heap append concat it
+  lowers. `flow_rec` (List[String]) and `collect_seq` (List[Value]) fall FIRST (their element domain is
+  done). `collect_map` (List[(String,Value)]) additionally needs tuple-element concat + value.object;
+  `block_*` need tuple-heap drop. So: mutual-inline → flow_rec/flow_step + collect_seq/seq_item fall;
+  + tuple-element/value.object/stringify/tuple-heap → the rest → yaml 0.
 
 After C lands end-to-end: the 11 walls fall (with value.object/stringify + tuple-heap for the Value-parser
 subset), driving yaml → 0 — on a PROVEN spine, the v1 completeness ideal.
