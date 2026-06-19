@@ -23,6 +23,31 @@ yaml's remaining 22 v1 walls are dominated by the dynamic `Value` model: `value.
 
 5. **`value.stringify`** self-host — recursive: scalar → "null"/"true"/n/float.to_string; Str → `"\"" + escape(s) + "\""` (escape `\\ " \n \r \t` EXACTLY as v0 value.rs:228); Array → `"[" + (items |> list.map(stringify) |> list.join(",")) + "]"`; Object → `"{" + (pairs |> list.map((k,v) => "\"" + escape(k) + "\":" + stringify(v)) |> join(",")) + "}"`. The self-call is inside `list.map` (defunctionalized by C1, NON-tail) so the self-rec GUARD does not apply — it should lower. float via the self-hosted float.to_string (#63). VERIFY: `value.stringify(value.array([value.int(1), value.str("a")]))` byte-matches v0 (`[1,"a"]`).
 
+## §4.1-COMPLIANT RECURSIVE DROP — the design BREAKTHROUGH + its soundness boundary (2026-06-19)
+
+The `handwritten_wasm_runtime_does_not_grow` gate (§4.1) FORBIDS a hand-written WAT `$__drop_value`
+(I tried — reverted). The §4.1-compliant path: SELF-HOST `__drop_value` in Almide, operating on RAW
+HANDLES (Int), exactly like `string_eq`/`__streq_at` — `fn __drop_value(v: Int) -> Unit = { let tag
+= prim.load32(v + 4); if tag == 5 { <loop: __drop_value(prim.load_handle(elem_addr)) > over the
+List[Value]>; prim.rc_dec(list) } else if tag >= 4 { prim.rc_dec(payload) }; prim.rc_dec(v) }`.
+Because it operates on raw Ints (no heap-TYPED values), its ownership cert is EMPTY (no i/a/d/m) —
+cert-clean like string_eq. The render of `Op::DropValue` becomes a `CallFn` to it; the Op KEEPS its
+cert `d` (so the Value's alloc still balances). Needs ONE new prim: `prim.rc_dec(addr: Int) -> Unit`
+→ a `PrimKind::RcDec` that emits `(call $rc_dec …)` — REUSES the existing `$rc_dec`, NO new WAT func,
+§4.1-OK.
+
+**SOUNDNESS BOUNDARY (the catch — this is task #30 "runtime Almide化" territory, soundness-critical):**
+`verify_ownership` treats `Op::Prim` as a no-op (lib.rs:705). So `prim.rc_dec` is an UNTRACKED free —
+a self-host fn using it can double-free WITHOUT the checker catching it (a cert HOLE). This is the
+SAME trust level as `DropListStr`'s inline per-element rc_dec (untracked, gated rc==1, trusted), BUT
+exposing `prim.rc_dec` to ALL self-host widens the trusted surface: ANY .almd fn could misuse it.
+CONTAINMENT options (design-first, do NOT rush): (a) gate `prim.rc_dec` to a whitelist (only
+`value_core.__drop_value` may call it), enforced like the purity registry; (b) a dedicated
+`Op::DropValueRecursive` the lowering emits ONLY for the drop routine; (c) prove the drop routine
+total/safe separately. This is the soundness-critical core of self-hosting the Value drop — the
+CEO's "design-first, don't-rush" discipline applies. The BREAKTHROUGH is real (raw-handle self-host
+sidesteps the borrow-by-default/consuming-convention problem); the rc_dec EXPOSURE is the gated step.
+
 ## PRIM-FLOOR layer found 2026-06-19 (the foundation below piece 1)
 
 The prim floor (load_str/store_str/load64/store64/handle) has NO typed `load_list` to read a
