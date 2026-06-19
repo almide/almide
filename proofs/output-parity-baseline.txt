@@ -34,6 +34,7 @@ spec/wasm_cross/int_pow_overflow_wraps.almd
 spec/wasm_cross/int_wrap_rotate_width.almd
 spec/wasm_cross/letbound_variant_match.almd
 spec/wasm_cross/list_insert_clamp.almd
+spec/wasm_cross/list_iter_tco.almd
 spec/wasm_cross/list_product_overflow.almd
 spec/wasm_cross/list_remove_at_oob.almd
 spec/wasm_cross/list_slice_oob.almd

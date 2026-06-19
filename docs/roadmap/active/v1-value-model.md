@@ -51,6 +51,30 @@ STORES + value.as_array READS correctly + the Ok(items) borrow + tag dispatch) +
 output-parity. REMAINING Value walls (6): collect_map/collect_seq/seq_item/parse_lines/parse_nested/map_entry
 (build value.array/object during parsing) + value.object/value.stringify.
 
+## ★★★★★★ LANDED 2026-06-19: list-iterator TCO (heap-loop-carried escape) — yaml 13→11 (oct_rec, bin_rec)
+
+The FIRST heap-loop-carried recursion cleared WITHOUT a cert extension — a cert-clean TRANSFORM
+(extends scalar-TCO). A tail-self-recursive fn over a SHRINKING list (`f(.., cs)` matched on
+`list.first(cs)`, recursing with `list.drop(cs,1)`) is rewritten so `cs` is an INVARIANT borrowed
+list + a synthetic scalar INDEX `idx`: `match list.first(cs) { none => BASE, some(ch) => BODY }` →
+`if idx < list.len(cs) then { let ch = cs[idx]; BODY } else BASE`, and each `f(list.drop(cs,1), …)`
+bumps `idx += 1` (in `tco_rewrite`). `cs` is never reassigned → the loop is the proven cert-clean
+scalar form; NO heap back-edge merge, NO `verify_ownership` change. `try_list_iter_rewrite` (lower/mod.rs)
+runs BEFORE `tco_collect` (which bails on a `match` body). VERIFIED: `spec/wasm_cross/list_iter_tco.almd`
+byte-matches v0 (bin_rec 5/15/0/-1 direct-arm + a block-arm `cnt` len 5/0); corpus-wall ACCEPT (14548
+heap) + cargo test + output-parity 67/67.
+BUG FIXED en route: `max_var_id` skipped PATTERN-bound vars (`some(ch)`), so the synthetic `rk`/`idx`
+COLLIDED with `ch` → the renderer reused one local for an i32 handle AND an i64 flag = invalid wasm.
+Now counts pattern binds (also hardens the existing scalar-TCO).
+SEPARATE PRE-EXISTING BUG found (NOT this transform — reproduces with no TCO): `string.codepoint(cs[i])`
+over a BORROWED list element returns 0 (`string.eq` on a borrowed element WORKS, so it is codepoint-
+specific — likely the borrowed-element arg defers to a `Const 0`). oct_rec LOWERS correctly (the TCO is
+right + cert-accepted) but its RENDER is wrong until this codepoint-borrow gap is fixed — the same
+"lowers, needs one more piece to render" relation as try_decimal↔float.parse (and oct_rec is anyway
+gated by float.parse, so no miscompile renders). bin_rec uses string-eq, not codepoint → fully correct.
+NEXT: the codepoint-borrow gap (small, makes oct_rec render-correct), then the APPEND-accumulator TCO
+variant (collect_seq/flow_rec `acc + [x]` → in-place push) + mutual-recursion (flow_rec↔flow_step).
+
 ## yaml wall countdown (the live tally)
 
 74 functions → walls: 22 (session start) → 21 (float.parse recognition) → **19** (scalar-arg TCO, commit 77c91648) → **17** (nested heap-result `match` arm, commit 5510dc47) → **16** (str-result heap-payload bind = `emit`, commit fab14729) → **15** (let-bound variant-call read-shape seed = `num_signed_base`, below). Remaining 15: oct_rec, bin_rec (heap-loop-carried + match-leaf), flow_rec, flow_step (mutual-rec + heap acc), block_scalar/block_line/block_nonblank (tuple-heap + let-bound heap-if), parse_lines, map_entry, parse_nested, collect_map, collect_seq, seq_item, emit_non_int, is_compound (the Value-array model: value.array/as_array/object/stringify + recursive drop).

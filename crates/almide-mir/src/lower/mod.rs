@@ -1932,11 +1932,43 @@ pub(crate) fn is_higher_order(args: &[IrExpr]) -> bool {
 /// allocated as `max + 1` without a frontend var-table round-trip.
 fn max_var_id(body: &IrExpr) -> u32 {
     use almide_ir::visit::IrVisitor;
+    use almide_ir::IrPattern;
+    // A pattern binds variables (`some(ch)`, `ok(x)`, `(a, b)`) that are NOT `IrExprKind::Var` /
+    // `IrStmtKind::Bind` nodes, so the visitor's expr/stmt hooks miss them. A fresh synthetic var
+    // (`rk`/`idx` = max+1/+2) MUST clear them too — else it COLLIDES with a pattern bind and the
+    // renderer reuses one local for two types (an i32 element handle AND an i64 flag = invalid wasm).
+    fn pat_max(p: &IrPattern, acc: &mut u32) {
+        match p {
+            IrPattern::Bind { var, .. } => *acc = (*acc).max(var.0),
+            IrPattern::Some { inner } | IrPattern::Ok { inner } | IrPattern::Err { inner } => {
+                pat_max(inner, acc)
+            }
+            IrPattern::Tuple { elements } | IrPattern::List { elements }
+            | IrPattern::Constructor { args: elements, .. } => {
+                for e in elements {
+                    pat_max(e, acc);
+                }
+            }
+            IrPattern::RecordPattern { fields, .. } => {
+                for f in fields {
+                    if let Some(fp) = &f.pattern {
+                        pat_max(fp, acc);
+                    }
+                }
+            }
+            IrPattern::Wildcard | IrPattern::None | IrPattern::Literal { .. } => {}
+        }
+    }
     struct M(u32);
     impl IrVisitor for M {
         fn visit_expr(&mut self, e: &IrExpr) {
             if let IrExprKind::Var { id } = &e.kind {
                 self.0 = self.0.max(id.0);
+            }
+            if let IrExprKind::Match { arms, .. } = &e.kind {
+                for arm in arms {
+                    pat_max(&arm.pattern, &mut self.0);
+                }
             }
             almide_ir::visit::walk_expr(self, e);
         }
@@ -2027,33 +2059,52 @@ fn tco_rewrite(
     carried: &[bool],
     rk: VarId,
     next_kind: &mut i64,
+    idx: Option<VarId>,
 ) -> IrExpr {
     match &body.kind {
         IrExprKind::If { cond, then, else_ } => tco_ir(
             IrExprKind::If {
                 cond: cond.clone(),
-                then: Box::new(tco_rewrite(then, fn_name, params, carried, rk, next_kind)),
-                else_: Box::new(tco_rewrite(else_, fn_name, params, carried, rk, next_kind)),
+                then: Box::new(tco_rewrite(then, fn_name, params, carried, rk, next_kind, idx)),
+                else_: Box::new(tco_rewrite(else_, fn_name, params, carried, rk, next_kind, idx)),
             },
             Ty::Unit,
         ),
         IrExprKind::Block { stmts, expr: Some(tail) } => tco_ir(
             IrExprKind::Block {
                 stmts: stmts.clone(),
-                expr: Some(Box::new(tco_rewrite(tail, fn_name, params, carried, rk, next_kind))),
+                expr: Some(Box::new(tco_rewrite(tail, fn_name, params, carried, rk, next_kind, idx))),
             },
             Ty::Unit,
         ),
         IrExprKind::Call { target: CallTarget::Named { name }, args, .. }
             if name.as_str() == fn_name =>
         {
-            let assigns: Vec<IrStmt> = (0..params.len())
+            let mut assigns: Vec<IrStmt> = (0..params.len())
                 .filter(|&i| carried[i])
                 .map(|i| IrStmt {
                     kind: IrStmtKind::Assign { var: params[i].var, value: args[i].clone() },
                     span: None,
                 })
                 .collect();
+            // LIST-ITERATOR self-call: the consumed list param is INVARIANT (carried[ci]=false), so
+            // advancing it `list.drop(cs,1)` becomes `idx = idx + 1` — the cert-clean iterator bump.
+            if let Some(iv) = idx {
+                assigns.push(IrStmt {
+                    kind: IrStmtKind::Assign {
+                        var: iv,
+                        value: tco_ir(
+                            IrExprKind::BinOp {
+                                op: almide_ir::BinOp::AddInt,
+                                left: Box::new(tco_ir(IrExprKind::Var { id: iv }, Ty::Int)),
+                                right: Box::new(tco_ir(IrExprKind::LitInt { value: 1 }, Ty::Int)),
+                            },
+                            Ty::Int,
+                        ),
+                    },
+                    span: None,
+                });
+            }
             tco_ir(IrExprKind::Block { stmts: assigns, expr: None }, Ty::Unit)
         }
         _ => {
@@ -2090,13 +2141,27 @@ pub(crate) fn try_tco_rewrite(
     if !is_heap_ty(&body.ty) {
         return None;
     }
+    let n = params.len();
+    let max_v = max_var_id(body).max(params.iter().map(|p| p.var.0).max().unwrap_or(0));
+    let rk = VarId(max_v + 1);
+    // LIST-ITERATOR rewrite (the heap-loop-carried escape): a HEAP carried param `cs` consumed in
+    // EVERY self-call ONLY as `list.drop(cs, 1)`, with the body matching on `list.first(cs)`, is a
+    // forward list scan. Rewrite it to an INVARIANT borrowed `cs` + a synthetic scalar INDEX `idx`:
+    // `match list.first(cs) { none => BASE, some(ch) => BODY }` → `if idx < list.len(cs) then { let
+    // ch = cs[idx]; BODY } else BASE`, and each `f(list.drop(cs,1), …)` self-call bumps `idx += 1`
+    // (handled in `tco_rewrite`). `cs` becomes invariant, so the loop is the cert-clean scalar form —
+    // NO heap back-edge merge, NO cert change. Closes oct_rec/bin_rec. Done BEFORE `tco_collect`
+    // (which bails on a `match` body), so the rewritten `if` body is what gets collected + lowered.
+    let lit = try_list_iter_rewrite(fn_name, body, params, max_v + 2);
+    let work_body: &IrExpr = lit.as_ref().map(|(b, _, _)| b).unwrap_or(body);
+    let idx_var = lit.as_ref().map(|(_, iv, _)| *iv);
+
     let mut calls: Vec<&[IrExpr]> = Vec::new();
     let mut bases: Vec<&IrExpr> = Vec::new();
-    tco_collect(body, fn_name, &mut calls, &mut bases)?;
+    tco_collect(work_body, fn_name, &mut calls, &mut bases)?;
     if calls.is_empty() || bases.is_empty() {
         return None;
     }
-    let n = params.len();
     if calls.iter().any(|c| c.len() != n) {
         return None;
     }
@@ -2109,18 +2174,21 @@ pub(crate) fn try_tco_rewrite(
             }
         }
     }
-    // A carried arg must be SCALAR (a heap loop-carried arg needs a heap back-edge merge — not
-    // this brick). An invariant heap param (the `String s`, never reassigned) is fine.
+    // The list-iterator param is now INVARIANT — its `list.drop(cs,1)` self-call arg is replaced by
+    // the `idx` bump (in `tco_rewrite`), so `cs` is never reassigned in the loop.
+    if let Some((_, _, ci)) = &lit {
+        carried[*ci] = false;
+    }
+    // A carried arg must be SCALAR (a heap loop-carried arg needs a heap back-edge merge — not this
+    // brick). The list-iterator rewrite already converted the one admissible heap pattern.
     if (0..n).any(|i| carried[i] && is_heap_ty(&params[i].ty)) {
         return None;
     }
-    let max_v = max_var_id(body).max(params.iter().map(|p| p.var.0).max().unwrap_or(0));
-    let rk = VarId(max_v + 1);
     let base_exprs: Vec<IrExpr> = bases.iter().map(|b| (*b).clone()).collect();
     let ret_ty = body.ty.clone();
 
     let mut next_kind = 1i64;
-    let loop_body = tco_rewrite(body, fn_name, params, &carried, rk, &mut next_kind);
+    let loop_body = tco_rewrite(work_body, fn_name, params, &carried, rk, &mut next_kind, idx_var);
 
     // Post-loop dispatch: `if rk == 1 then base_1 else if … else base_N` (last base = final else).
     let eq_rk = |k: i64| {
@@ -2145,7 +2213,19 @@ pub(crate) fn try_tco_rewrite(
         );
     }
 
-    // `{ var rk = 0; while (rk == 0) { <loop_body> }; <post> }`
+    // `{ [var idx = 0;] var rk = 0; while (rk == 0) { <loop_body> }; <post> }`
+    let mut inits: Vec<IrStmt> = Vec::new();
+    if let Some(iv) = idx_var {
+        inits.push(IrStmt {
+            kind: IrStmtKind::Bind {
+                var: iv,
+                mutability: almide_ir::Mutability::Var,
+                ty: Ty::Int,
+                value: tco_ir(IrExprKind::LitInt { value: 0 }, Ty::Int),
+            },
+            span: None,
+        });
+    }
     let init = IrStmt {
         kind: IrStmtKind::Bind {
             var: rk,
@@ -2155,6 +2235,7 @@ pub(crate) fn try_tco_rewrite(
         },
         span: None,
     };
+    inits.push(init);
     let while_stmt = IrStmt {
         kind: IrStmtKind::Expr {
             expr: tco_ir(
@@ -2167,10 +2248,176 @@ pub(crate) fn try_tco_rewrite(
         },
         span: None,
     };
+    inits.push(while_stmt);
     Some(tco_ir(
-        IrExprKind::Block { stmts: vec![init, while_stmt], expr: Some(Box::new(post)) },
+        IrExprKind::Block { stmts: inits, expr: Some(Box::new(post)) },
         ret_ty,
     ))
+}
+
+/// Detect + rewrite the LIST-ITERATOR heap-loop-carried pattern (oct_rec/bin_rec): a heap carried
+/// param `cs` consumed in EVERY self-call ONLY as `list.drop(Var(cs), 1)`, with the body an outer
+/// `match list.first(Var(cs)) { none => BASE, some(ch) => BODY }`. Returns the rewritten body (the
+/// match → `if idx < list.len(cs) then { let ch = cs[idx]; BODY } else BASE`) + the fresh `idx`
+/// VarId, and FLIPS `carried[ci]` to false (cs is now invariant — the iterator is `idx`, bumped per
+/// self-call in `tco_rewrite`). `None` if the pattern does not hold. Cert-clean: the result is the
+/// scalar-TCO loop over `idx` + the borrowed-stable `cs`; no heap back-edge merge.
+fn try_list_iter_rewrite(
+    fn_name: &str,
+    body: &IrExpr,
+    params: &[almide_ir::IrParam],
+    fresh: u32,
+) -> Option<(IrExpr, VarId, usize)> {
+    // The body must be `match SUBJ { none => .., some(ch) => .. }` with SUBJ = `list.first(Var(cs))`.
+    let IrExprKind::Match { subject, arms } = &body.kind else { return None };
+    if arms.len() != 2 {
+        return None;
+    }
+    let (cs_var, first_ty) = match &subject.kind {
+        IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
+            if module.as_str() == "list" && func.as_str() == "first" && args.len() == 1 =>
+        {
+            match &args[0].kind {
+                IrExprKind::Var { id } => (*id, subject.ty.clone()),
+                _ => return None,
+            }
+        }
+        _ => return None,
+    };
+    // `cs` must be a param, and EVERY self-call must pass `list.drop(Var(cs), 1)` in its slot.
+    let ci = params.iter().position(|p| p.var == cs_var)?;
+    if !is_heap_ty(&params[ci].ty) {
+        return None;
+    }
+    let is_drop1 = |e: &IrExpr| -> bool {
+        matches!(&e.kind, IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
+            if module.as_str() == "list" && func.as_str() == "drop" && args.len() == 2
+                && matches!(&args[0].kind, IrExprKind::Var { id } if *id == cs_var)
+                && matches!(&args[1].kind, IrExprKind::LitInt { value: 1 }))
+    };
+    // Collect EVERY self-call anywhere in the body (not just tail position) and require each to pass
+    // `list.drop(cs,1)` in slot `ci` — so `cs` is a pure forward iterator with no other use.
+    let mut ok = true;
+    let mut any_self = false;
+    {
+        use almide_ir::visit::IrVisitor;
+        struct W<'a> {
+            fn_name: &'a str,
+            ci: usize,
+            is_drop1: &'a dyn Fn(&IrExpr) -> bool,
+            ok: &'a mut bool,
+            any: &'a mut bool,
+        }
+        impl IrVisitor for W<'_> {
+            fn visit_expr(&mut self, e: &IrExpr) {
+                if let IrExprKind::Call { target: CallTarget::Named { name }, args, .. } = &e.kind {
+                    if name.as_str() == self.fn_name {
+                        *self.any = true;
+                        if self.ci >= args.len() || !(self.is_drop1)(&args[self.ci]) {
+                            *self.ok = false;
+                        }
+                    }
+                }
+                almide_ir::visit::walk_expr(self, e);
+            }
+        }
+        let mut w = W { fn_name, ci, is_drop1: &is_drop1, ok: &mut ok, any: &mut any_self };
+        w.visit_expr(body);
+    }
+    if !ok || !any_self {
+        return None;
+    }
+    // Parse the two arms: a `None` arm (the BASE) and a `Some(ch | _)` arm (the BODY). `ch` is a
+    // scalar element bind (String element) — bound to `cs[idx]` (a borrow) in the rewrite.
+    use almide_ir::IrPattern;
+    let mut none_body: Option<&IrExpr> = None;
+    let mut some_body: Option<(&IrExpr, Option<(VarId, Ty)>)> = None;
+    for arm in arms {
+        if arm.guard.is_some() {
+            return None;
+        }
+        match &arm.pattern {
+            IrPattern::None | IrPattern::Wildcard if none_body.is_none() => none_body = Some(&arm.body),
+            IrPattern::Some { inner } if some_body.is_none() => {
+                let bind = match inner.as_ref() {
+                    IrPattern::Bind { var, ty } => Some((*var, ty.clone())),
+                    IrPattern::Wildcard => None,
+                    _ => return None,
+                };
+                some_body = Some((&arm.body, bind));
+            }
+            _ => return None,
+        }
+    }
+    let none_body = none_body?;
+    let (some_body, ch_bind) = some_body?;
+    let idx = VarId(fresh);
+    let elem_ty = match &first_ty {
+        Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, a) if a.len() == 1 => {
+            a[0].clone()
+        }
+        _ => return None,
+    };
+    // list.len(cs): clone the `list.first` subject node + retarget to `len`, typed Int.
+    let len_call = match &subject.kind {
+        IrExprKind::Call { target: CallTarget::Module { module, def_id, .. }, args, type_args } => {
+            tco_ir(
+                IrExprKind::Call {
+                    target: CallTarget::Module {
+                        module: *module,
+                        func: almide_lang::intern::sym("len"),
+                        def_id: *def_id,
+                    },
+                    args: args.clone(),
+                    type_args: type_args.clone(),
+                },
+                Ty::Int,
+            )
+        }
+        _ => return None,
+    };
+    // cond: `idx < list.len(cs)`
+    let cond = tco_ir(
+        IrExprKind::BinOp {
+            op: almide_ir::BinOp::Lt,
+            left: Box::new(tco_ir(IrExprKind::Var { id: idx }, Ty::Int)),
+            right: Box::new(len_call),
+        },
+        Ty::Bool,
+    );
+    // then: `{ [let ch = cs[idx]]; SOME_BODY }` — the element BORROW.
+    let mut then_stmts: Vec<IrStmt> = Vec::new();
+    if let Some((ch_var, ch_ty)) = ch_bind {
+        let elem = tco_ir(
+            IrExprKind::IndexAccess {
+                object: Box::new(tco_ir(IrExprKind::Var { id: cs_var }, params[ci].ty.clone())),
+                index: Box::new(tco_ir(IrExprKind::Var { id: idx }, Ty::Int)),
+            },
+            elem_ty,
+        );
+        then_stmts.push(IrStmt {
+            kind: IrStmtKind::Bind {
+                var: ch_var,
+                mutability: almide_ir::Mutability::Let,
+                ty: ch_ty,
+                value: elem,
+            },
+            span: None,
+        });
+    }
+    let then_expr = tco_ir(
+        IrExprKind::Block { stmts: then_stmts, expr: Some(Box::new(some_body.clone())) },
+        body.ty.clone(),
+    );
+    let new_body = tco_ir(
+        IrExprKind::If {
+            cond: Box::new(cond),
+            then: Box::new(then_expr),
+            else_: Box::new(none_body.clone()),
+        },
+        body.ty.clone(),
+    );
+    Some((new_body, idx, ci))
 }
 
 /// Find the FIRST heap-result `if`/`match` sitting in a call-ARGUMENT position anywhere within
