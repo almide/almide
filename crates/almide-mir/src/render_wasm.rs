@@ -65,6 +65,11 @@ const ELEM_SIZE: u32 = 8; // i64 elements
 // A freshly allocated heap block has exactly one owner — the `Alloc`'s +1, the
 // initial value of the cell RuntimeModel.v's `exec` starts the fold from.
 const RC_INITIAL: i32 = 1;
+// Dynamic `Value` variant TAGS (stored in the block's LEN field @4). 0-3 are SCALAR (no heap
+// payload); >= `VALUE_TAG_HEAP_MIN` own a payload handle @12 — Str (the String), Array (a
+// `List[Value]`), Object (the key/value store). Mirrors stdlib/value_core.almd's tag literals.
+const VALUE_TAG_HEAP_MIN: u32 = 4; // first tag whose @12 payload is an owned heap handle (Str)
+const VALUE_TAG_ARRAY: u32 = 5; // Array: payload @12 is a `List[Value]` (recursively freed)
 const PUSH_HEADROOM: u32 = 8; // spare cap so demo pushes never realloc
 const IOVEC_LEN_OFFSET: u32 = I32_SIZE; // iovec = [buf:i32 @0][len:i32 @4]
 
@@ -824,19 +829,12 @@ fn render_op(
                 )
             }
         }
-        // RUNTIME-TAG-DISPATCHED drop of a dynamic `Value`: IFF this is the last reference (rc==1)
-        // AND the variant TAG (at +4) is a heap payload (≥ 4 = Str/Array/Object), first `rc_dec`
-        // the ONE payload handle at +12 (i32.wrap'd from its i64 slot); a scalar Value (tag < 4)
-        // owns no payload. THEN `rc_dec` the Value block. The block-free is the single cert `d`.
-        Op::DropValue { v } => {
-            let p = local(*v);
-            format!(
-                "    (if (i32.and (i32.eq (i32.load (local.get {p})) (i32.const 1)) (i32.ge_s (i32.load (i32.add (local.get {p}) (i32.const 4))) (i32.const 4)))\n\
-                 \x20     (then\n\
-                 \x20       (call $rc_dec (i32.wrap_i64 (i64.load (i32.add (local.get {p}) (i32.const 12)))))))\n\
-                 \x20   (call $rc_dec (local.get {p}))\n"
-            )
-        }
+        // RUNTIME-TAG-DISPATCHED drop of a dynamic `Value` — the RECURSIVE `$__drop_value` (a tag<4
+        // scalar dec's only; tag 4 frees the String; tag 5 recurses each Array element then frees the
+        // list; tag 6 frees the object store). Was an INLINE single-level free that LEAKED an Array's
+        // element Values; the recursion is the trusted free routine (like the inline DropListStr), one
+        // cert `d` per `Op::DropValue`.
+        Op::DropValue { v } => format!("    (call $__drop_value (local.get {}))\n", local(*v)),
         // COPY-ON-WRITE before an in-place mutation (A1.3-render, refining
         // CowSafety.v): if the block is SHARED (rc > 1), clone it so the mutation
         // touches no alias. The `rc_dec` runs FIRST (rc 2→1 — the alias keeps the
@@ -1115,6 +1113,37 @@ fn preamble() -> String {
     (i32.store (i32.add (local.get $p) (i32.const {LIST_RC_OFFSET}))
                (i32.add (i32.load (i32.add (local.get $p) (i32.const {LIST_RC_OFFSET})))
                         (i32.const 1))))
+
+  ;; RECURSIVE tag-dispatched free of a dynamic `Value` (the dynamic-data-model drop). At the LAST
+  ;; reference (rc==1) it frees the nested payload BEFORE the block: tag<4 (Null/Bool/Int/Float) owns
+  ;; nothing; tag==5 (Array) `$__drop_value`s EACH element of the `List[Value]` payload then frees the
+  ;; list; tag 4/6 (Str/Object) `rc_dec` the one payload handle (a Str's String; an Object store).
+  ;; THEN `rc_dec` the Value block. A SHARED Value (rc>1) just dec's (an alias keeps the payload
+  ;; alive). The cert sees ONE `d` per `Op::DropValue` (this routine is the trusted recursive free,
+  ;; like the inline `DropListStr` — verified by a value.stringify round-trip differential, not Coq).
+  (func $__drop_value (param $p i32)
+    (local $tag i32) (local $pl i32) (local $i i32) (local $n i32)
+    (if (i32.ne (i32.load (i32.add (local.get $p) (i32.const {LIST_RC_OFFSET}))) (i32.const 1))
+      (then (call $rc_dec (local.get $p)) (return)))
+    (local.set $tag (i32.load (i32.add (local.get $p) (i32.const {LIST_LEN_OFFSET}))))
+    (if (i32.eq (local.get $tag) (i32.const {VALUE_TAG_ARRAY}))
+      (then
+        (local.set $pl (i32.wrap_i64 (i64.load (i32.add (local.get $p) (i32.const {LIST_HEADER})))))
+        (if (i32.eq (i32.load (i32.add (local.get $pl) (i32.const {LIST_RC_OFFSET}))) (i32.const 1))
+          (then
+            (local.set $n (i32.load (i32.add (local.get $pl) (i32.const {LIST_LEN_OFFSET}))))
+            (local.set $i (i32.const 0))
+            (block $dvbrk (loop $dvcont
+              (br_if $dvbrk (i32.ge_s (local.get $i) (local.get $n)))
+              (call $__drop_value (i32.wrap_i64 (i64.load (i32.add (local.get $pl)
+                (i32.add (i32.const {LIST_HEADER}) (i32.mul (local.get $i) (i32.const {ELEM_SIZE})))))))
+              (local.set $i (i32.add (local.get $i) (i32.const 1)))
+              (br $dvcont)))))
+        (call $rc_dec (local.get $pl)))
+      (else
+        (if (i32.ge_s (local.get $tag) (i32.const {VALUE_TAG_HEAP_MIN}))
+          (then (call $rc_dec (i32.wrap_i64 (i64.load (i32.add (local.get $p) (i32.const {LIST_HEADER})))))))))
+    (call $rc_dec (local.get $p)))
 
   (func $elem_addr (param $list i32) (param $idx i32) (result i32)
     ;; SAFETY WALL: an out-of-range index would compute an address OUTSIDE the
