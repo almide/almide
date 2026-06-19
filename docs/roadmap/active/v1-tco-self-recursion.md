@@ -77,6 +77,27 @@ heap result escaping a loop), the design is WRONG → revert, do NOT ship; the
 fallback is to leave the self-rec guard (yaml stays walled on these) until the
 loop-result cert is extended.
 
+## BLOCKER found 2026-06-19: the loop primitives are TOP-TEST ONLY
+
+The MIR loop markers (`LoopStart` / `LoopBreakUnless{cond}` at the TOP /
+`LoopEnd` back-edge / `SetLocal`) model a classic `while cond { body }` — ONE
+exit, tested at the top, no value. General TCO needs MID-loop break with a
+RESULT: a self-recursive function has ≥2 base cases (`none` vs `some(p)`),
+interleaved with the recurse arm, each producing a DIFFERENT heap result. That
+cannot be expressed as a single top-test while + post-loop result derivation
+without rewriting the computation per-function (not a general transform).
+
+So TCO needs a NEW loop primitive: a mid-loop **break that sets the function
+result and exits** (e.g. `Op::LoopBreakWith { val }` rendering `(result.set;
+br $outer)`), plus the cert reasoning that the result `Alloc` (`i`) escaping the
+loop is `Consume`d (`m`) exactly once after `LoopEnd`. This is a MIR + render +
+**ownership-cert extension** (a heap value crossing the loop boundary) — strictly
+larger and more soundness-critical than reusing the existing top-test markers.
+Implement it design-first + adversarial; verify the escaping-result object's
+`im` trace is ACCEPTED by the proven checker BEFORE shipping. If the checker
+cannot model a heap result escaping a loop, this is a genuine cert frontier
+(like Camp 4) → Mob-gate, do not ship rejected.
+
 ## Scope / gates
 
 - ONLY self-recursive (direct `name == self.fn_name`); mutual recursion is a
