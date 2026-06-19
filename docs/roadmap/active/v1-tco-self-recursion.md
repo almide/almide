@@ -118,3 +118,30 @@ heap-returning function in the corpus). Combined with (2) the non-self-rec
 heap-arm shapes (after_colon tuple-with-heap-Value etc.) and (3) the Camp-4
 heap-payload variant match (the 4 `looks_numeric`/`is_compound`/… + float.parse
 self-host), this is the path to yaml = 0 walls on v1. TCO is the keystone.
+
+## CLEANEST TCO ENTRY POINT, found at the function level 2026-06-19: scan_quote / find_colon_at
+
+These two yaml functions are the most tractable TCO targets (and unblock 2 of the 22 walls directly,
+likely oct_rec/bin_rec/flow_rec too — same shape):
+```almide
+fn scan_quote(s: String, pos: Int, in_q: Bool) -> Option[Int] =
+  if pos >= string.len(s) then none
+  else { let c = string.get(s, pos) ?? ""
+    if in_q then scan_quote(s, pos + 1, not (c == "'" or c == "\""))   // TAIL self-call
+    else if c == "#" and ... then some(pos)                            // base: scalar-payload Option
+    else scan_quote(s, pos + 1, c == "'" or c == "\"") }               // TAIL self-call
+```
+SHAPE = the textbook TCO case: **tail self-recursion, SCALAR loop-carried args (pos, in_q), a
+SCALAR-payload `Option[Int]` result, base cases `none`/`some(scalar)`**. No heap arg, no heap accumulator.
+
+BUILD (extend the EXISTING loop machinery — control.rs ~1349 scalar-while + ~2027 for-range use
+`LoopStart`/`LoopBreakUnless`/`LoopEnd`/`SetLocal`): replace the self-rec GUARD (control.rs:1641
+`if name == self.fn_name { return None }`) with a TCO transform for THIS shape — detect a body whose
+if/match arms are either (a) a direct self-call with the same fn + scalar-updated args, or (b) a base
+expression; emit a `LoopStart` … per-iteration: compute the branch conditions, on a base arm set a
+RESULT local (`Op::Alloc` the `none`/`some(pos)` Option — the ONE heap alloc, `i`) + break, on a
+self-call arm `SetLocal` the updated scalar args + loop. After `LoopEnd`, return the result local
+(`m`). The cert sees one `i` (the result Option at the taken break) + one `m` (return) = balanced; the
+scalar SetLocals carry no ownership. VERIFY: byte-match v0 on `scan_quote`/`find_colon` inputs +
+corpus-wall + tests. This is a focused but well-scoped brick (a new recursion→loop transform), NOT a
+session-end one-liner — but it is the HIGHEST-LEVERAGE next move (TCO unblocks ~6 of the 22 walls).
