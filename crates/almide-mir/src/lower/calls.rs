@@ -925,10 +925,21 @@ impl LowerCtx {
                 // computed value — a heap result is materialized via `Alloc` (borrowed
                 // and dropped), a scalar result is a `Const`. Operands carry their own
                 // ownership; the operator's value (and any early-return) is deferred.
+                // An `f(x!)` (Unwrap — effect-fn error propagation) as a call ARGUMENT was a
+                // deferred `Const`/`Opaque` = a SILENT MISCOMPILE (`f(int.parse(s)!)` passed 0).
+                // The faithful lowering needs early-return-on-Err (a later brick); until then
+                // WALL it — NEVER pass a silently-wrong value (the ② cardinal rule).
+                IrExprKind::Unwrap { .. } => {
+                    return Err(LowerError::Unsupported(
+                        "unwrap `!` in a call-argument position cannot be faithfully computed \
+                         (needs early-return propagation; a Const/Opaque would be a silently \
+                         wrong value) not in this brick"
+                            .into(),
+                    ));
+                }
                 IrExprKind::BinOp { .. }
                 | IrExprKind::UnOp { .. }
                 | IrExprKind::Try { .. }
-                | IrExprKind::Unwrap { .. }
                 // (UnwrapOr is handled in full — scalar + heap — by the dedicated arm above.)
                 | IrExprKind::ToOption { .. }
                 | IrExprKind::OptionalChain { .. }

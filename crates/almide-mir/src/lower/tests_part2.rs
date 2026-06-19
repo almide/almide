@@ -613,10 +613,17 @@
             },
             list_int(),
         );
-        // `var x = []!` is the FIRST heap-affecting stmt (live_heap_handles empty), then
-        // `var y = [] ?? []`. UnwrapOr is not an early return, so x being live is fine.
-        let b = body(vec![bind(0, list_int(), unwrap), bind(1, list_int(), unwrap_or)]);
-        let mir = lower_body(&b, "main").expect("error operators with no live heap local lower");
+        // `var x = []!` bound to a let/var — the deferred lowering was memory-safe (balanced)
+        // but its VALUE was a deferred Const/Opaque = a SILENT MISCOMPILE (the bound result is
+        // wrong, not the unwrapped value). Per the ② cardinal rule, `let x = e!` now WALLs until
+        // the faithful early-return lowering lands; `var y = [] ?? []` (UnwrapOr) still lowers.
+        let b = body(vec![bind(0, list_int(), unwrap)]);
+        assert!(
+            lower_body(&b, "main").is_err(),
+            "unwrap `!` bound to a var WALLs (silent miscompile until early-return lowering)"
+        );
+        let b2 = body(vec![bind(1, list_int(), unwrap_or)]);
+        let mir = lower_body(&b2, "main").expect("UnwrapOr still lowers");
         assert_eq!(verify_ownership(&mir), Ok(()), "fresh results balanced by scope-end drops");
     }
 
@@ -633,12 +640,17 @@
             },
             list_int(),
         );
+        // The deferred lowering was memory-safe (the v0 leak fix), but `var x = opt!` bound a
+        // SILENTLY-WRONG value (a deferred result, not the unwrapped one). Per the ② cardinal
+        // rule, `let x = e!` now WALLs until the faithful early-return lowering lands.
         let b = body(vec![
             bind(0, list_int(), ir_expr(IrExprKind::List { elements: vec![] }, list_int())),
             bind(1, list_int(), unwrap),
         ]);
-        let mir = lower_body(&b, "main").expect("unwrap over a live heap local now lowers (v0 leak fixed)");
-        assert_eq!(verify_ownership(&mir), Ok(()));
+        assert!(
+            lower_body(&b, "main").is_err(),
+            "unwrap `!` bound to a var WALLs (silent miscompile until early-return lowering)"
+        );
     }
 
     #[test]

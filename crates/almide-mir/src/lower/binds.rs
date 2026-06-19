@@ -184,6 +184,17 @@ impl LowerCtx {
     }
 
     pub(crate) fn lower_bind(&mut self, var: VarId, ty: &Ty, value: &IrExpr) -> Result<(), LowerError> {
+        // `let r = e!` (Unwrap — effect-fn error propagation) bound to a let/var was a deferred
+        // `Const`/`Alloc{Opaque}` = a SILENT MISCOMPILE (`int.parse(s)!` bound 0, `g()!` empty).
+        // The faithful lowering needs early-return-on-Err (a later brick); until then WALL it —
+        // NEVER bind a silently-wrong value (the ② cardinal rule). Both scalar + heap paths.
+        if matches!(&value.kind, IrExprKind::Unwrap { .. }) {
+            return Err(LowerError::Unsupported(
+                "unwrap `!` bound to a let/var cannot be faithfully computed (needs early-return \
+                 propagation; a Const/Opaque would be a silently wrong value) not in this brick"
+                    .into(),
+            ));
+        }
         if !is_heap_ty(ty) {
             // Scalar binding: a Copy value, no ownership accounting. A RESOLVABLE
             // scalar call (`let n = add(2, 3)`, `let m = string.len(s)`) is lowered to
