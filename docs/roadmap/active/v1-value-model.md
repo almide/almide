@@ -23,6 +23,20 @@ yaml's remaining 22 v1 walls are dominated by the dynamic `Value` model: `value.
 
 5. **`value.stringify`** self-host — recursive: scalar → "null"/"true"/n/float.to_string; Str → `"\"" + escape(s) + "\""` (escape `\\ " \n \r \t` EXACTLY as v0 value.rs:228); Array → `"[" + (items |> list.map(stringify) |> list.join(",")) + "]"`; Object → `"{" + (pairs |> list.map((k,v) => "\"" + escape(k) + "\":" + stringify(v)) |> join(",")) + "}"`. The self-call is inside `list.map` (defunctionalized by C1, NON-tail) so the self-rec GUARD does not apply — it should lower. float via the self-hosted float.to_string (#63). VERIFY: `value.stringify(value.array([value.int(1), value.str("a")]))` byte-matches v0 (`[1,"a"]`).
 
+## PRIM-FLOOR layer found 2026-06-19 (the foundation below piece 1)
+
+The prim floor (load_str/store_str/load64/store64/handle) has NO typed `load_list` to read a
+`List[Value]` payload back out of a Value's @12 slot (load_str is hardcoded to return String). So
+`value.array` storing a `List[Value]` payload + `value.as_array`/`stringify` reading it back needs a
+prim-floor addition first: a `prim.load_list` (a typed `LoadHandle` returning `List[Value]`, the list
+sibling of `load_str`), wired in `lower_prim_call` (calls.rs:1968 maps load_str→LoadHandle) + the prim
+stdlib type sig. (Alternatively: represent a Value-array as a SELF-CONTAINED tag-5 block holding the
+element Value handles inline — no separate List payload, no load_list — but then value.array must COPY
+items's elements in, and stringify/drop iterate the inline slots; weigh vs the load_list approach.)
+The LAYERS, foundation-up: `prim.load_list` → recursive `__drop_value` → List[Value] materialize →
+value.array/object/as_array/stringify self-host → registry. Each layer is revealed by implementing the
+one below it (empirically confirmed this session).
+
 ## Gates (per brick, the proven methodology — 9 bricks this session)
 
 corpus-wall ACCEPT (3 props, ownership = the leak/double-free check that catches a bad recursive drop) + a Value-model byte-match probe (build + stringify, compared to v0) + cargo test + output-parity baseline. A drop bug = a leak/double-free → corpus-wall REJECTS or the probe diverges → revert (never ship). After the Value model: TCO (mid-loop-break-with-result, docs/roadmap/active/v1-tco-self-recursion.md) + float.parse → yaml 0 walls.
