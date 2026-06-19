@@ -39,16 +39,28 @@ and kernel-verified. The rest is gate-verifiable engineering.
    `check`). `Extract.v` extracts `check_cert_lc`; `driver.ml` dispatches ownership to it. `build-checker.sh`
    round-trips real bytes: `I(DI)M` ACCEPT (accumulator slot), `I(I)M`/`I(D)M` REJECT (leak/drain). The
    corpus-wall (14564 heap objs) still ACCEPTs via `check_cert_lc` — zero regression.
-2. **Rust cert emission** (`certificate.rs ownership_certificate` + `lib.rs verify_ownership`): BOTH the
-   serializer and the Rust-side checker must become loop-aware. A loop-carried SLOT (a local `SetLocal`'d
-   inside `LoopStart`…`LoopEnd`, body = drop-old + alloc-new) emits as ONE stream `i(di)m` (init acquire;
-   `(`+drop+alloc+`)` per the loop body; move-out). Needs: group the old/new objects of the slot into the
-   slot stream + wrap the in-loop events in `(`/`)`; track `SetLocal` rebind (object_of[acc] ← object_of[new]).
-   Testable in isolation with a synthetic loop MIR unit test (no step 3 needed to test step 2).
-3. **Lowering** (`lower/mod.rs`): emit the heap-loop-carried accumulator MIR — the append-accumulator TCO
-   (the functional `acc + [x]` loop with `LoopStart/SetLocal/LoopEnd` markers), now CERT-BACKED so
-   `verify_ownership` accepts it. Plus mutual-recursion inlining (flow_step→flow_rec) to expose the loop.
+2. **✅ DONE 2026-06-20 (commit 291a1f35): Rust loop-aware cert emission + verify.** `lib.rs
+   verify_ownership` — `Op::SetLocal { local, src }` now REBINDS a heap slot (`object_of[local] ←
+   object_of[src]`, slot live again); the OLD object was released by the body's preceding `Drop`, so the
+   per-iteration invariant holds (scalar SetLocal is still a no-op). `certificate.rs ownership_certificate`
+   — `loop_carried_slots()` pre-scans `SetLocal` feeders inside `LoopStart`…`LoopEnd`; the slot folds to
+   ONE stream `i(id)m` (Alloc/Call feeder `i` routed to the slot, `(`/`)` around the loop body). Unit
+   tests: `loop_carried_accumulator_folds_to_one_slot_stream` (`i(id)m`, verify_ownership Ok), leaky body
+   `i(i)m` rejected. The PROVEN extracted checker ACCEPTs the emitted `i(id)m` (verified via `./checker
+   ownership`). corpus-wall (14564 objs) green — backward-compatible. (2 pre-existing render_wasm json
+   wasm-exec failures are unrelated — confirmed by stashing only these two files; another agent's list-cap work.)
+3. **Lowering** (`lower/mod.rs`): emit the heap-loop-carried accumulator MIR — the append-accumulator TCO.
+   THREE touch points now scoped: (a) `try_tco_rewrite` line ~2184 — drop the `carried[i] && is_heap_ty`
+   bail WHEN the carried heap arg's every self-call value is `acc + [x]` (a ConcatList/`+` appending the
+   accumulator to itself); (b) `tco_rewrite` — emit that carried arg as a reassignment `acc = acc + [x]`;
+   (c) the in-loop `Assign` lowering (mod.rs ~690, currently `Err` on heap reassign in a scalar loop) —
+   admit `acc = acc + [x]` → `new = concat(acc, [x]); Drop acc; SetLocal acc, new` (the cert-backed slot,
+   now accepted by step 2). Plus mutual-recursion inlining (flow_step→flow_rec) to expose the loop.
 4. **Verify**: corpus-wall ACCEPT + the yaml walls clear (flow_rec/collect_*/block_*) + byte-match v0 + leak-loop.
+
+The ENTIRE verification/trust side of C (proof + extracted checker + cert serializer + verify_ownership) is
+DONE + verified (commits 7f673b4c, c05fc209, 291a1f35). Step 3 is the producer-side lowering that emits the
+MIR this now-complete trust spine accepts; ②-safe (byte-match + corpus-wall + check_cert_lc gate it).
 
 After C lands end-to-end: the 11 walls fall (with value.object/stringify + tuple-heap for the Value-parser
 subset), driving yaml → 0 — on a PROVEN spine, the v1 completeness ideal.
