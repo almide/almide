@@ -31,19 +31,24 @@ and kernel-verified. The rest is gate-verifiable engineering.
 
 ## Remaining C integration (each gate-verifiable — corpus-wall + byte-match + the proof gate)
 
-1. **Production checker + cert format**: port the `Loop` construct into `OwnershipChecker.v` (the EXTRACTED
-   runnable checker) + a cert-format loop delimiter (e.g. `(`/`)` nesting in `parse_go`), re-prove
-   `check_sound`/`check_cert_sound` for the Loop arm (reusing OwnershipLoop's `check_unroll_sound`), and
-   re-Extract (Extract.v → checker.ml). `proofs/build-checker.sh` round-trips it on a loop cert.
-2. **Rust cert emission** (`certificate.rs` / `lib.rs verify_ownership`): track `Op::SetLocal` REBIND of a
-   heap loop-carried local (object_of[acc] ← object_of[new]); emit the slot's cert as `Inc … Loop[body] …
-   MoveOut` (the body = the per-iteration drop-old + alloc-new + any balanced temps), the OTHER objects
-   per-iteration-balanced inside the loop. This is where the flat one-pass becomes loop-aware.
+1. **✅ DONE 2026-06-20 (commit c05fc209): Production checker + cert format.** `OwnershipChecker.v` gains
+   `CertItem` (`COp`/`CLoop`), `exec_line`, `check_line`, and the soundness re-derivation over the full
+   Inc/Alias/Dec/MoveOut/Reuse alphabet (`exec_app`, `exec_repeat_preserve`, `UnrollsL`, `exec_line_unroll`,
+   **`check_line_unroll_sound`**, **`check_cert_lc_sound`**) — axiom-clean, in the proof gate. Cert format
+   v2: loop delimiters `(`…`)` (`parse_lc`), backward-compatible (no-paren certs fold exactly like flat
+   `check`). `Extract.v` extracts `check_cert_lc`; `driver.ml` dispatches ownership to it. `build-checker.sh`
+   round-trips real bytes: `I(DI)M` ACCEPT (accumulator slot), `I(I)M`/`I(D)M` REJECT (leak/drain). The
+   corpus-wall (14564 heap objs) still ACCEPTs via `check_cert_lc` — zero regression.
+2. **Rust cert emission** (`certificate.rs ownership_certificate` + `lib.rs verify_ownership`): BOTH the
+   serializer and the Rust-side checker must become loop-aware. A loop-carried SLOT (a local `SetLocal`'d
+   inside `LoopStart`…`LoopEnd`, body = drop-old + alloc-new) emits as ONE stream `i(di)m` (init acquire;
+   `(`+drop+alloc+`)` per the loop body; move-out). Needs: group the old/new objects of the slot into the
+   slot stream + wrap the in-loop events in `(`/`)`; track `SetLocal` rebind (object_of[acc] ← object_of[new]).
+   Testable in isolation with a synthetic loop MIR unit test (no step 3 needed to test step 2).
 3. **Lowering** (`lower/mod.rs`): emit the heap-loop-carried accumulator MIR — the append-accumulator TCO
    (the functional `acc + [x]` loop with `LoopStart/SetLocal/LoopEnd` markers), now CERT-BACKED so
    `verify_ownership` accepts it. Plus mutual-recursion inlining (flow_step→flow_rec) to expose the loop.
-4. **Verify**: corpus-wall ACCEPT (the re-extracted checker accepts the loop certs) + the yaml walls clear
-   (flow_rec/collect_*/block_*) + byte-match v0 + leak-loop.
+4. **Verify**: corpus-wall ACCEPT + the yaml walls clear (flow_rec/collect_*/block_*) + byte-match v0 + leak-loop.
 
 After C lands end-to-end: the 11 walls fall (with value.object/stringify + tuple-heap for the Value-parser
 subset), driving yaml → 0 — on a PROVEN spine, the v1 completeness ideal.
