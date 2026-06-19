@@ -172,7 +172,12 @@ pub fn lower_function_all_with_types(
         ..Default::default()
     };
     let params = ctx.bind_params(&func.params)?;
-    let ret = ctx.lower_body_into(&func.body)?;
+    // TCO: a tail-self-recursive heap-result function is rewritten to a scalar loop + post-loop
+    // dispatch (the existing self-rec guard would otherwise wall it). The rewritten body lowers
+    // through the ordinary statements+tail path; if it is out of the TCO subset, `None` keeps the
+    // original body (which the self-rec guard walls as before — no regression).
+    let tco_body = try_tco_rewrite(&ctx.fn_name, &func.params, &func.body);
+    let ret = ctx.lower_body_into(tco_body.as_ref().unwrap_or(&func.body))?;
     // The function's EFFECT SIGNATURE → its declared capability bound. The v1 model
     // has one capability (Stdout); an `effect fn` declares it may reach the host, so
     // it admits the only modeled cap. A pure `fn` declares ∅ — so if it reached
@@ -1916,6 +1921,222 @@ fn max_var_id(body: &IrExpr) -> u32 {
 /// Is `e` a HEAP-result `if`/`match` (the form `lower_bind` walls / the tail-dup recovers)?
 fn is_heap_branch(e: &IrExpr) -> bool {
     is_heap_ty(&e.ty) && matches!(e.kind, IrExprKind::If { .. } | IrExprKind::Match { .. })
+}
+
+// ─────────────────── TCO: tail-self-recursion → scalar loop ───────────────────
+// A tail-self-recursive `f(p…) = <if/block tree whose leaves are self-calls f(p'…) or base
+// exprs>` is rewritten to the GATE-VERIFIABLE cert-clean shape: a SCALAR-only top-test loop
+// (the loop body only reassigns the scalar loop-carried params + a `result_kind` flag) followed
+// by a POST-LOOP dispatch that builds the heap result from `result_kind` + the final scalars.
+// No new MIR primitive, no cert change — the existing scalar-while + heap-result-if lowering
+// verify it. Replaces the self-rec-guard wall for the reconstructible-base subset (scan_quote,
+// find_colon_at, …). See docs/roadmap/active/v1-tco-self-recursion.md.
+
+fn tco_ir(kind: IrExprKind, ty: Ty) -> IrExpr {
+    IrExpr { kind, ty, span: None, def_id: None }
+}
+
+fn tco_contains_self(e: &IrExpr, fn_name: &str) -> bool {
+    use almide_ir::visit::IrVisitor;
+    struct S<'a>(&'a str, bool);
+    impl IrVisitor for S<'_> {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            if let IrExprKind::Call { target: CallTarget::Named { name }, .. } = &e.kind {
+                if name.as_str() == self.0 {
+                    self.1 = true;
+                }
+            }
+            almide_ir::visit::walk_expr(self, e);
+        }
+    }
+    let mut s = S(fn_name, false);
+    s.visit_expr(e);
+    s.1
+}
+
+/// Walk tail-position leaves: a self-call pushes its args to `calls`; any other tail leaf is a
+/// base (pushed to `bases`). `None` if a self-call sits in a NON-tail position (not TCO-able).
+fn tco_collect<'a>(
+    body: &'a IrExpr,
+    fn_name: &str,
+    calls: &mut Vec<&'a [IrExpr]>,
+    bases: &mut Vec<&'a IrExpr>,
+) -> Option<()> {
+    match &body.kind {
+        IrExprKind::If { then, else_, .. } => {
+            tco_collect(then, fn_name, calls, bases)?;
+            tco_collect(else_, fn_name, calls, bases)
+        }
+        IrExprKind::Block { expr: Some(tail), .. } => tco_collect(tail, fn_name, calls, bases),
+        IrExprKind::Call { target: CallTarget::Named { name }, args, .. }
+            if name.as_str() == fn_name =>
+        {
+            calls.push(args);
+            Some(())
+        }
+        _ => {
+            if tco_contains_self(body, fn_name) {
+                return None; // a self-call buried in a non-tail leaf — not TCO-able here
+            }
+            bases.push(body);
+            Some(())
+        }
+    }
+}
+
+/// Rewrite tail leaves: a self-call → a Block assigning each CARRIED param to its new arg; a base
+/// → `result_kind = <its 1-based kind>` (kinds assigned in `tco_collect`'s left-to-right order).
+fn tco_rewrite(
+    body: &IrExpr,
+    fn_name: &str,
+    params: &[almide_ir::IrParam],
+    carried: &[bool],
+    rk: VarId,
+    next_kind: &mut i64,
+) -> IrExpr {
+    match &body.kind {
+        IrExprKind::If { cond, then, else_ } => tco_ir(
+            IrExprKind::If {
+                cond: cond.clone(),
+                then: Box::new(tco_rewrite(then, fn_name, params, carried, rk, next_kind)),
+                else_: Box::new(tco_rewrite(else_, fn_name, params, carried, rk, next_kind)),
+            },
+            Ty::Unit,
+        ),
+        IrExprKind::Block { stmts, expr: Some(tail) } => tco_ir(
+            IrExprKind::Block {
+                stmts: stmts.clone(),
+                expr: Some(Box::new(tco_rewrite(tail, fn_name, params, carried, rk, next_kind))),
+            },
+            Ty::Unit,
+        ),
+        IrExprKind::Call { target: CallTarget::Named { name }, args, .. }
+            if name.as_str() == fn_name =>
+        {
+            let assigns: Vec<IrStmt> = (0..params.len())
+                .filter(|&i| carried[i])
+                .map(|i| IrStmt {
+                    kind: IrStmtKind::Assign { var: params[i].var, value: args[i].clone() },
+                    span: None,
+                })
+                .collect();
+            tco_ir(IrExprKind::Block { stmts: assigns, expr: None }, Ty::Unit)
+        }
+        _ => {
+            let k = *next_kind;
+            *next_kind += 1;
+            tco_ir(
+                IrExprKind::Block {
+                    stmts: vec![IrStmt {
+                        kind: IrStmtKind::Assign {
+                            var: rk,
+                            value: tco_ir(IrExprKind::LitInt { value: k }, Ty::Int),
+                        },
+                        span: None,
+                    }],
+                    expr: None,
+                },
+                Ty::Unit,
+            )
+        }
+    }
+}
+
+/// Rewrite a tail-self-recursive function body to a scalar loop + post-loop dispatch, or `None`
+/// if it is outside the TCO subset (no self-call, a heap loop-carried arg, a self-call in a
+/// non-tail position, or no base). The result lowers through the ordinary statements+tail path.
+pub(crate) fn try_tco_rewrite(
+    fn_name: &str,
+    params: &[almide_ir::IrParam],
+    body: &IrExpr,
+) -> Option<IrExpr> {
+    // Only a HEAP-result self-rec function (the kind the self-rec guard walls — it returns an
+    // Option/Result/Value/String the deep recursion would build then trap on). A SCALAR self-rec
+    // already lowers (shallow-correct), so leave it untouched (no regression risk).
+    if !is_heap_ty(&body.ty) {
+        return None;
+    }
+    let mut calls: Vec<&[IrExpr]> = Vec::new();
+    let mut bases: Vec<&IrExpr> = Vec::new();
+    tco_collect(body, fn_name, &mut calls, &mut bases)?;
+    if calls.is_empty() || bases.is_empty() {
+        return None;
+    }
+    let n = params.len();
+    if calls.iter().any(|c| c.len() != n) {
+        return None;
+    }
+    // A param is loop-CARRIED iff some self-call passes a value other than the param itself.
+    let mut carried = vec![false; n];
+    for c in &calls {
+        for i in 0..n {
+            if !matches!(&c[i].kind, IrExprKind::Var { id } if *id == params[i].var) {
+                carried[i] = true;
+            }
+        }
+    }
+    // A carried arg must be SCALAR (a heap loop-carried arg needs a heap back-edge merge — not
+    // this brick). An invariant heap param (the `String s`, never reassigned) is fine.
+    if (0..n).any(|i| carried[i] && is_heap_ty(&params[i].ty)) {
+        return None;
+    }
+    let max_v = max_var_id(body).max(params.iter().map(|p| p.var.0).max().unwrap_or(0));
+    let rk = VarId(max_v + 1);
+    let base_exprs: Vec<IrExpr> = bases.iter().map(|b| (*b).clone()).collect();
+    let ret_ty = body.ty.clone();
+
+    let mut next_kind = 1i64;
+    let loop_body = tco_rewrite(body, fn_name, params, &carried, rk, &mut next_kind);
+
+    // Post-loop dispatch: `if rk == 1 then base_1 else if … else base_N` (last base = final else).
+    let eq_rk = |k: i64| {
+        tco_ir(
+            IrExprKind::BinOp {
+                op: almide_ir::BinOp::Eq,
+                left: Box::new(tco_ir(IrExprKind::Var { id: rk }, Ty::Int)),
+                right: Box::new(tco_ir(IrExprKind::LitInt { value: k }, Ty::Int)),
+            },
+            Ty::Bool,
+        )
+    };
+    let mut post = base_exprs.last()?.clone();
+    for (idx, base) in base_exprs.iter().enumerate().rev().skip(1) {
+        post = tco_ir(
+            IrExprKind::If {
+                cond: Box::new(eq_rk((idx + 1) as i64)),
+                then: Box::new(base.clone()),
+                else_: Box::new(post),
+            },
+            ret_ty.clone(),
+        );
+    }
+
+    // `{ var rk = 0; while (rk == 0) { <loop_body> }; <post> }`
+    let init = IrStmt {
+        kind: IrStmtKind::Bind {
+            var: rk,
+            mutability: almide_ir::Mutability::Var,
+            ty: Ty::Int,
+            value: tco_ir(IrExprKind::LitInt { value: 0 }, Ty::Int),
+        },
+        span: None,
+    };
+    let while_stmt = IrStmt {
+        kind: IrStmtKind::Expr {
+            expr: tco_ir(
+                IrExprKind::While {
+                    cond: Box::new(eq_rk(0)),
+                    body: vec![IrStmt { kind: IrStmtKind::Expr { expr: loop_body }, span: None }],
+                },
+                Ty::Unit,
+            ),
+        },
+        span: None,
+    };
+    Some(tco_ir(
+        IrExprKind::Block { stmts: vec![init, while_stmt], expr: Some(Box::new(post)) },
+        ret_ty,
+    ))
 }
 
 /// Find the FIRST heap-result `if`/`match` sitting in a call-ARGUMENT position anywhere within
