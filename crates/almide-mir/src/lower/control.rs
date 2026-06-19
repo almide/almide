@@ -824,16 +824,14 @@ impl LowerCtx {
         result_ty: &Ty,
     ) -> Option<ValueId> {
         use crate::PrimKind;
-        // SCALAR result only. A HEAP-result variant match (`match opt { Some => "..", None =>
-        // ".." }` returning a String) ran byte-correct via `lower_heap_result_arm`, but the
-        // proven OWNERSHIP checker REJECTS the witness for BOTH an owned AND a borrowed-param
-        // subject (empirically confirmed 2026-06-18 — corpus-wall WALL GATE FAIL either way).
-        // The merged-dst heap-result match is the cert-precision frontier: the branch-join of
-        // two per-arm move-outs into one owned heap `dst` is unprovable in the current Coq
-        // trust vocabulary (a heap-result `if` proves because its cond is scalar — no heap
-        // subject read). This is an ESCALATION (extend the trust base), NOT a brick. Clean WALL.
-        if is_heap_ty(result_ty)
-            || !is_heap_ty(&subject.ty)
+        // SCALAR result, OR a HEAP result over a SCALAR-PAYLOAD variant via the
+        // SUBJECT-DROP-BEFORE-ARMS desugar (below): copy the scalar tag/payload, DROP the
+        // owned subject BEFORE the arms, then run the proven heap-result-`if` (scalar cond) —
+        // so the arm's per-arm heap move-out no longer overlaps the owned-subject borrow the
+        // checker rejected. A HEAP-PAYLOAD variant (`Option[String]` — the arm borrows the
+        // subject's slot, no scalar copy possible) stays the true Camp-4 frontier and is
+        // gated out below.
+        if !is_heap_ty(&subject.ty)
             || arms.len() != 2
             || arms.iter().any(|a| a.guard.is_some())
         {
@@ -917,12 +915,21 @@ impl LowerCtx {
             (Some(t), Some(e)) => (t, e),
             _ => return rollback(self),
         };
+        let heap_res = is_heap_ty(result_ty);
+        // A HEAP result is admitted ONLY for a SCALAR payload. A heap payload (`Some(s:
+        // String)`) would have the arm BORROW the subject's slot — which the subj-drop-before-
+        // arms desugar can't do (we drop the subject), so it's the true Camp-4 frontier: defer.
+        if heap_res && (matches!(then_bind, Some((_, true))) || matches!(else_bind, Some((_, true))))
+        {
+            return rollback(self);
+        }
         // Emit: h = handle(subj); tag = load32(h + 4); dst = if tag != 0 then <then> else <else>.
         let dst = self.fresh_value();
         let h = self.fresh_value();
         self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![subj] });
         let tag = self.load_at_offset(h, 4, PrimKind::Load { width: 4 });
-        self.ops.push(Op::IfThen { cond: tag, dst: Some(dst) });
+        // Bind the scalar payload(s) as subj-independent COPIES (load64 @12) BEFORE the arms —
+        // for the heap-result case this is what severs the arm's heap move-out from the subject.
         let bind_payload = |s: &mut Self, bind: Option<(VarId, bool)>| {
             if let Some((bind_var, is_heap)) = bind {
                 let payload = if is_heap {
@@ -936,16 +943,37 @@ impl LowerCtx {
                 }
             }
         };
-        // THEN (tag != 0): the Some payload / the Err message.
         bind_payload(self, then_bind);
-        let then_val = match self.lower_scalar_arm(then_body) {
+        bind_payload(self, else_bind);
+        // SUBJECT-DROP-BEFORE-ARMS (the design that the checker accepts): for a HEAP result,
+        // drop the OWNED subject NOW — before the arms — so its lifetime (`i..d`, balanced and
+        // independent) does not overlap the per-arm heap move-out + branch-join (which is then
+        // exactly the proven heap-result-`if` over a scalar cond). A BORROWED subject (param /
+        // tracked var, not in `live_heap_handles`) is owned elsewhere → left untouched; the
+        // scalar payload copy above already makes the arms subj-independent. Scalar-result
+        // matches keep the subject live (unchanged — they were already proven).
+        if heap_res {
+            if let Some(pos) = self.live_heap_handles.iter().rposition(|&v| v == subj) {
+                self.live_heap_handles.remove(pos);
+                self.ops.push(Op::Drop { v: subj });
+            }
+        }
+        self.ops.push(Op::IfThen { cond: tag, dst: Some(dst) });
+        let lower_arm = |s: &mut Self, body: &IrExpr| -> Option<ValueId> {
+            if heap_res {
+                s.lower_heap_result_arm(body, result_ty)
+            } else {
+                s.lower_scalar_arm(body)
+            }
+        };
+        // THEN (tag != 0): the Some payload / the Err message.
+        let then_val = match lower_arm(self, then_body) {
             Some(v) => v,
             None => return rollback(self),
         };
         self.ops.push(Op::Else { val: Some(then_val) });
         // ELSE (tag == 0): the None branch / the scalar Ok payload.
-        bind_payload(self, else_bind);
-        let else_val = match self.lower_scalar_arm(else_body) {
+        let else_val = match lower_arm(self, else_body) {
             Some(v) => v,
             None => return rollback(self),
         };

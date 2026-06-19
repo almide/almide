@@ -406,6 +406,17 @@ impl LowerCtx {
                 // EXECUTES: desugar to a nested heap-result `if` and run only the matched
                 // arm; otherwise LINEARIZE to one deferred `Alloc{Opaque}`.
                 IrExprKind::Match { subject, arms } => {
+                    // A heap-result VARIANT (Option/Result) match (`match scan_quote(..) {
+                    // some(p) => "..", none => ".." }`) over a SCALAR payload — the
+                    // subject-drop-before-arms desugar (cert-clean, scalar-payload only; a heap
+                    // payload self-gates back to None here = the true Camp-4 frontier).
+                    if is_variant_ty(&subject.ty) {
+                        if let Some(dst) =
+                            self.try_lower_variant_value_match(subject, arms, &tail.ty)
+                        {
+                            return Ok(Some(dst));
+                        }
+                    }
                     if let Some(if_expr) = self.desugar_match_to_if(subject, arms, &tail.ty) {
                         if let IrExprKind::If { cond, then, else_ } = &if_expr.kind {
                             if let Some(dst) =
