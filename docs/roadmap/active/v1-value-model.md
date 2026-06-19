@@ -4,7 +4,26 @@
 
 ## yaml wall countdown (the live tally)
 
-74 functions → walls: 22 (session start) → 21 (float.parse recognition) → **19** (scalar-arg TCO, commit 77c91648) → **17** (nested heap-result `match` arm, below). Remaining 17 below.
+74 functions → walls: 22 (session start) → 21 (float.parse recognition) → **19** (scalar-arg TCO, commit 77c91648) → **17** (nested heap-result `match` arm, commit 5510dc47) → **16** (str-result heap-payload bind = `emit`, below). Remaining 16: oct_rec, bin_rec (heap-loop-carried + match-leaf), flow_rec, flow_step (mutual-rec + heap acc), num_signed_base (let-bound heap-if = a checker change), block_scalar/block_line/block_nonblank (tuple-heap), parse_lines, map_entry, parse_nested, collect_map, collect_seq, seq_item, emit_non_int, is_compound (the Value-array model: value.array/as_array/object/stringify + recursive drop).
+
+### LANDED 2026-06-19: str-result heap-payload bind — yaml 17→16 (emit)
+
+The Camp-4 frontier for a str-result (`Result[String, String]` from `value.as_string` — slot-0 @12
+owns the ONE String, the Ok/Err tag at @16, read via `(i32.load)` = low-32 handle only). `emit`
+(`match value.as_string(v) { ok(s) => emit_scalar(s), err(_) => emit_non_string(v, ind) }`) binds the
+Ok String AND returns a heap result — the case `try_lower_variant_value_match` gated out at 936 (the
+subject-drop-BEFORE-arms desugar can't borrow a dropped subject). RESOLUTION (cert-clean, no checker
+change): for a str-result heap bind, bind the payload as a BORROW (`LoadHandle` @12, in `param_values`),
+DEFER the owned subject's drop to AFTER the branch-join (so the borrow is live through both arms), and
+rely on the bare-Var arm's auto-acquire (`Op::Dup`) — so the drop-after frees slot-0 exactly once
+whether an arm borrows the payload (a call arg) or returns it. Also widened the Ok-arm bind from
+`scalar_bind` to `heap_or_scalar_bind` (self-gated on `heap_elem_lists`, so a scalar Result still
+rejects a heap bind — no regression). A NON-str heap payload (heap-Result-of-list, Array element) has
+no single-slot borrow rep yet → still the true Camp-4 frontier (the Value-array model). VERIFIED:
+`spec/wasm_cross/str_result_heap_bind.almd` byte-matches v0 for BOTH the borrow-payload and
+return-payload shapes (5/5); corpus-wall ACCEPT (4234 fns, 14392 heap objects — the ownership cert IS
+the leak/double-free check, so accept ⟹ the drop-after is leak-free); output-parity 62/62 + new fixture;
+the 3 non-baseline MISMATCH files remain pre-existing.
 
 ### LANDED 2026-06-19: nested heap-result `match` arm — yaml 19→17 (try_decimal, parse_number)
 

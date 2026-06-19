@@ -52,6 +52,7 @@ spec/wasm_cross/records_variants.almd
 spec/wasm_cross/reserved_keyword_fn.almd
 spec/wasm_cross/set_insertion_order.almd
 spec/wasm_cross/sized_numeric_literals.almd
+spec/wasm_cross/str_result_heap_bind.almd
 spec/wasm_cross/string_codepoint.almd
 spec/wasm_cross/string_codepoint_index.almd
 spec/wasm_cross/string_count_truncation.almd

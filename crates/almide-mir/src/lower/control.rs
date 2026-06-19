@@ -912,11 +912,17 @@ impl LowerCtx {
                 // Option Some (then) / None (else).
                 IrPattern::Some { inner } if is_option => scalar_bind(inner).map(|b| (true, b)),
                 IrPattern::None | IrPattern::Wildcard if is_option => Ok((false, None)),
-                // scalar Result Err (then) / Ok (else).
+                // Result Err (then) / Ok (else). BOTH use `heap_or_scalar_bind`: a scalar Result
+                // binds a scalar payload, a str-result (`value.as_string`) binds its slot-0 String
+                // as a BORROW (gated on `heap_elem_lists` — only a nested-ownership subject, so a
+                // scalar Result still rejects a heap bind). The Ok side carries the str-result's
+                // String payload (`ok(s) => emit_scalar(s)`), the very thing `emit` needs.
                 IrPattern::Err { inner } if is_result => {
                     heap_or_scalar_bind(self, inner).map(|b| (true, b))
                 }
-                IrPattern::Ok { inner } if is_result => scalar_bind(inner).map(|b| (false, b)),
+                IrPattern::Ok { inner } if is_result => {
+                    heap_or_scalar_bind(self, inner).map(|b| (false, b))
+                }
                 _ => Err(()),
             };
             match parsed {
@@ -930,11 +936,19 @@ impl LowerCtx {
             _ => return rollback(self),
         };
         let heap_res = is_heap_ty(result_ty);
-        // A HEAP result is admitted ONLY for a SCALAR payload. A heap payload (`Some(s:
-        // String)`) would have the arm BORROW the subject's slot — which the subj-drop-before-
-        // arms desugar can't do (we drop the subject), so it's the true Camp-4 frontier: defer.
-        if heap_res && (matches!(then_bind, Some((_, true))) || matches!(else_bind, Some((_, true))))
-        {
+        let has_heap_bind =
+            matches!(then_bind, Some((_, true))) || matches!(else_bind, Some((_, true)));
+        // A HEAP result with a HEAP-PAYLOAD bind is admitted ONLY over a str-result
+        // (`value.as_string` — slot-0 @12 owns the ONE String, the Ok/Err tag at @16). The
+        // payload binds as a BORROW (`LoadHandle` @12, in `param_values`), the OWNED subject is
+        // dropped AFTER the arms (not before) so the borrow is live through them, and a bare-Var
+        // arm (`ok(s) => s`) auto-acquires (`Op::Dup`) — so the drop-after frees the subject's
+        // slot-0 String exactly once whether an arm borrows it (a call arg) or returns it. The
+        // `emit` shape (`match value.as_string(v) { ok(s) => emit_scalar(s), err(_) => … }`) is
+        // exactly this. A NON-str heap payload (a heap-Result-of-list, an Array element) has no
+        // single-slot borrow rep yet — the true Camp-4 frontier — so it still defers.
+        let str_heap_bind = heap_res && has_heap_bind && is_result_str;
+        if heap_res && has_heap_bind && !is_result_str {
             return rollback(self);
         }
         // Emit: h = handle(subj); tag = load32(h + off); dst = if tag != 0 then <then> else <else>.
@@ -968,8 +982,10 @@ impl LowerCtx {
         // exactly the proven heap-result-`if` over a scalar cond). A BORROWED subject (param /
         // tracked var, not in `live_heap_handles`) is owned elsewhere → left untouched; the
         // scalar payload copy above already makes the arms subj-independent. Scalar-result
-        // matches keep the subject live (unchanged — they were already proven).
-        if heap_res {
+        // matches keep the subject live (unchanged — they were already proven). A str-result
+        // HEAP-bind (`str_heap_bind`) is the exception: its payload BORROWS slot-0, so the subject
+        // must stay live THROUGH the arms — its drop is deferred to AFTER the branch-join below.
+        if heap_res && !str_heap_bind {
             if let Some(pos) = self.live_heap_handles.iter().rposition(|&v| v == subj) {
                 self.live_heap_handles.remove(pos);
                 self.ops.push(Op::Drop { v: subj });
@@ -995,6 +1011,18 @@ impl LowerCtx {
             None => return rollback(self),
         };
         self.ops.push(Op::EndIf { val: Some(else_val) });
+        // SUBJECT-DROP-AFTER-ARMS (the str-result heap-bind path): the payload borrowed slot-0, so
+        // the subject stayed live through both arms — drop the OWNED subject ONCE here, after the
+        // branch-join. The merged result `dst` is a fresh arm value (a concat, a Dup'd copy, a new
+        // call result), independent of the freed subject, so freeing the subject's slot-0 String is
+        // sound (a bare-Var arm already Dup'd it; a call arm only borrowed it). A BORROWED subject
+        // (param / tracked var, not in `live_heap_handles`) is owned elsewhere → left untouched.
+        if str_heap_bind {
+            if let Some(pos) = self.live_heap_handles.iter().rposition(|&v| v == subj) {
+                self.live_heap_handles.remove(pos);
+                self.ops.push(Op::Drop { v: subj });
+            }
+        }
         Some(dst)
     }
 
