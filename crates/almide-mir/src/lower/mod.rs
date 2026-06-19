@@ -598,7 +598,10 @@ impl LowerCtx {
         // SAME rewrite runs in the caps `count_ir_calls` gate ("desugar-before-both"), so the
         // duplicated calls stay 1:1 between MIR and IR by construction. `lower_tail`'s per-position
         // `if` machinery (Unit/scalar/heap) walls any unfaithful arm explicitly.
-        if let Some(rewritten) = desugar_let_bound_heap_branch(body) {
+        // ANF-LIFT a heap-result `if`/`match` out of a call ARGUMENT first (`println(if c then
+        // "a" else "b")` → `let tmp = if..; println(tmp)`), so the tail-duplication below then
+        // recovers it. Same rewrite runs in the count gate (desugar-before-both).
+        if let Some(rewritten) = desugar_heap_branches(body) {
             return self.lower_body_into(&rewritten);
         }
         let (stmts, tail): (&[IrStmt], Option<&IrExpr>) = match &body.kind {
@@ -1883,6 +1886,182 @@ pub(crate) fn is_higher_order(args: &[IrExpr]) -> bool {
 ///    the wall.
 ///
 /// Returns `Some(rewritten_body)` when the desugar applies, `None` (the body is unchanged) otherwise.
+/// The max `VarId` used anywhere in `body` (0 if none) — so a fresh synthetic var can be
+/// allocated as `max + 1` without a frontend var-table round-trip.
+fn max_var_id(body: &IrExpr) -> u32 {
+    use almide_ir::visit::IrVisitor;
+    struct M(u32);
+    impl IrVisitor for M {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            if let IrExprKind::Var { id } = &e.kind {
+                self.0 = self.0.max(id.0);
+            }
+            almide_ir::visit::walk_expr(self, e);
+        }
+        fn visit_stmt(&mut self, s: &IrStmt) {
+            if let IrStmtKind::Bind { var, .. } = &s.kind {
+                self.0 = self.0.max(var.0);
+            }
+            almide_ir::visit::walk_stmt(self, s);
+        }
+    }
+    let mut m = M(0);
+    m.visit_expr(body);
+    m.0
+}
+
+/// Is `e` a HEAP-result `if`/`match` (the form `lower_bind` walls / the tail-dup recovers)?
+fn is_heap_branch(e: &IrExpr) -> bool {
+    is_heap_ty(&e.ty) && matches!(e.kind, IrExprKind::If { .. } | IrExprKind::Match { .. })
+}
+
+/// Find the FIRST heap-result `if`/`match` sitting in a call-ARGUMENT position anywhere within
+/// `e` (recursing through nested calls), and return `(the branch, e with that branch replaced by
+/// `Var(tmp)`)`. Each call's nested arguments are searched BEFORE the call's own direct args, so
+/// `f(g(if..))` lifts the inner `if` first; the caller re-runs to a fixpoint to lift the rest.
+/// Recursion is confined to `Call` nodes — a heap-branch that is NOT a call argument (e.g. a bare
+/// `let s = if..`, or an `if`-arm interior) is left for the tail-duplication / per-arm machinery.
+fn extract_first_callarg_branch(e: &IrExpr, tmp: VarId) -> Option<(IrExpr, IrExpr)> {
+    let IrExprKind::Call { target, args, type_args } = &e.kind else {
+        return None;
+    };
+    let rebuild = |new_args: Vec<IrExpr>| IrExpr {
+        kind: IrExprKind::Call {
+            target: target.clone(),
+            args: new_args,
+            type_args: type_args.clone(),
+        },
+        ty: e.ty.clone(),
+        span: e.span.clone(),
+        def_id: e.def_id,
+    };
+    // (1) Innermost-first: a heap-branch nested inside a sub-call argument.
+    for (idx, a) in args.iter().enumerate() {
+        if let Some((branch, new_a)) = extract_first_callarg_branch(a, tmp) {
+            let mut new_args = args.clone();
+            new_args[idx] = new_a;
+            return Some((branch, rebuild(new_args)));
+        }
+    }
+    // (2) This call's own direct heap-branch argument.
+    let arg_idx = args.iter().position(is_heap_branch)?;
+    let branch = args[arg_idx].clone();
+    let mut new_args = args.clone();
+    new_args[arg_idx] = IrExpr {
+        kind: IrExprKind::Var { id: tmp },
+        ty: branch.ty.clone(),
+        span: branch.span.clone(),
+        def_id: None,
+    };
+    Some((branch, rebuild(new_args)))
+}
+
+/// ANF-LIFT a heap-result `if`/`match` out of a CALL-ARGUMENT into a fresh let-bind, so the
+/// existing `desugar_let_bound_heap_branch` tail-duplication then makes it lower. Rewrites the
+/// FIRST `f(.., if c then A else B, ..)` (including a nested `f(g(if..))` and the block's TAIL
+/// expression `{ ..; f(if..) }`) to `let tmp = if c then A else B; f(.., tmp, ..)` (tmp = a fresh
+/// `Var` of the arg's type). Returns `None` if no such call-arg exists. MUST be applied in BOTH
+/// the lowering and the `count_ir_calls` gate via [`desugar_heap_branches`] (desugar-before-both)
+/// so the duplicated calls stay 1:1 (mir == ir).
+pub fn desugar_callarg_heap_if(body: &IrExpr) -> Option<IrExpr> {
+    let IrExprKind::Block { stmts, expr: tail } = &body.kind else {
+        return None;
+    };
+    let tmp = VarId(max_var_id(body) + 1);
+    // STATEMENT position: the first `Expr`/`Bind`/`Assign` whose value contains a call-arg branch.
+    for (i, s) in stmts.iter().enumerate() {
+        let value = match &s.kind {
+            IrStmtKind::Expr { expr } => Some(expr),
+            IrStmtKind::Bind { value, .. } => Some(value),
+            IrStmtKind::Assign { value, .. } => Some(value),
+            _ => None,
+        };
+        let Some(v) = value else { continue };
+        let Some((branch, new_v)) = extract_first_callarg_branch(v, tmp) else {
+            continue;
+        };
+        let lift = IrStmt {
+            kind: IrStmtKind::Bind {
+                var: tmp,
+                mutability: almide_ir::Mutability::Let,
+                ty: branch.ty.clone(),
+                value: branch,
+            },
+            span: s.span.clone(),
+        };
+        let new_stmt = IrStmt {
+            kind: match &s.kind {
+                IrStmtKind::Expr { .. } => IrStmtKind::Expr { expr: new_v },
+                IrStmtKind::Bind { var, mutability, ty, .. } => IrStmtKind::Bind {
+                    var: *var,
+                    mutability: *mutability,
+                    ty: ty.clone(),
+                    value: new_v,
+                },
+                IrStmtKind::Assign { var, .. } => IrStmtKind::Assign { var: *var, value: new_v },
+                other => other.clone(),
+            },
+            span: s.span.clone(),
+        };
+        let mut new_stmts: Vec<IrStmt> = stmts[..i].to_vec();
+        new_stmts.push(lift);
+        new_stmts.push(new_stmt);
+        new_stmts.extend(stmts[i + 1..].iter().cloned());
+        return Some(IrExpr {
+            kind: IrExprKind::Block { stmts: new_stmts, expr: tail.clone() },
+            ty: body.ty.clone(),
+            span: body.span.clone(),
+            def_id: body.def_id,
+        });
+    }
+    // TAIL position: `{ ..; f(if..) }` — the call is the block's return expression, not a
+    // statement, so the lifted `let tmp = if..` is APPENDED and the rewritten call becomes the
+    // new tail. The tail-duplication then pushes that tail into each arm.
+    if let Some(t) = tail.as_deref() {
+        if let Some((branch, new_t)) = extract_first_callarg_branch(t, tmp) {
+            let lift = IrStmt {
+                kind: IrStmtKind::Bind {
+                    var: tmp,
+                    mutability: almide_ir::Mutability::Let,
+                    ty: branch.ty.clone(),
+                    value: branch,
+                },
+                span: t.span.clone(),
+            };
+            let mut new_stmts = stmts.clone();
+            new_stmts.push(lift);
+            return Some(IrExpr {
+                kind: IrExprKind::Block { stmts: new_stmts, expr: Some(Box::new(new_t)) },
+                ty: body.ty.clone(),
+                span: body.span.clone(),
+                def_id: body.def_id,
+            });
+        }
+    }
+    None
+}
+
+/// Apply the call-arg ANF-lift ([`desugar_callarg_heap_if`]) and the heap-branch tail-duplication
+/// ([`desugar_let_bound_heap_branch`]) repeatedly to a FIXPOINT — the exact rewrite sequence
+/// `lower_body_into` performs before lowering. Both the lowering and the `count_ir_calls` caps gate
+/// call this, so the duplicated calls are counted 1:1 (mir == ir) regardless of how many branches
+/// a body lifts. Returns `None` if the body is already in normal form (no rewrite applied).
+pub fn desugar_heap_branches(body: &IrExpr) -> Option<IrExpr> {
+    let mut cur: Option<IrExpr> = None;
+    loop {
+        let src = cur.as_ref().unwrap_or(body);
+        if let Some(r) = desugar_callarg_heap_if(src) {
+            cur = Some(r);
+            continue;
+        }
+        if let Some(r) = desugar_let_bound_heap_branch(src) {
+            cur = Some(r);
+            continue;
+        }
+        return cur;
+    }
+}
+
 pub fn desugar_let_bound_heap_branch(body: &IrExpr) -> Option<IrExpr> {
     let IrExprKind::Block { stmts, expr: tail } = &body.kind else {
         return None;

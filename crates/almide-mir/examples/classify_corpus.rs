@@ -585,7 +585,10 @@ fn main() {
                     // caps `count_ir_calls` 1:1 gate and the interp-coverage count must read the
                     // SAME rewritten tree (the duplicated continuation's calls / interps appear
                     // once per arm in BOTH MIR and this counted IR — `mir == ir` by construction).
-                    let eff_body = almide_mir::lower::desugar_let_bound_heap_branch(&func.body)
+                    // desugar-before-both: the SAME ANF-lift (call-arg heap-if → let) then
+                    // tail-duplication the lowering applies, so the duplicated calls are counted
+                    // 1:1 (mir == ir) and the caps gate stays exact.
+                    let eff_body = almide_mir::lower::desugar_heap_branches(&func.body)
                         .unwrap_or_else(|| func.body.clone());
                     // INTERP COVERAGE (a): this function LOWERED, so its FULLY-LINKABLE
                     // interps (Lit/String/Int/Bool parts) fold to a registered __str_concat /
