@@ -1450,14 +1450,23 @@ impl LowerCtx {
     /// gate keeping a heap-arg call OUT of `lower_scalar_value` (its rollback-safe, no-
     /// ownership contract) does not bind here — this position freely emits ownership ops.
     fn lower_heap_result_cond(&mut self, cond: &IrExpr) -> Option<ValueId> {
+        // A scalar cond can itself MATERIALIZE a transient heap temp — `if c == "#"` lowers to
+        // `string.eq(c, "#")` whose `"#"` literal is a fresh owned String. That temp is dead the
+        // instant the Bool is computed, so it MUST be freed HERE, within a cond-local frame, BEFORE
+        // the `IfThen` marker — never deferred to the enclosing arm's `drop_arm_locals`. The cond
+        // of a NESTED heap-result `if` (the else-of-an-else parser shape) sits inside one arm's
+        // wasm branch; deferring its temp's `Drop` to the OUTER block scope emits an UNCONDITIONAL
+        // `rc_dec` of a local that the sibling arm never initialized (garbage/0 → trap). The frame
+        // keeps the cond internally `i…d`-balanced exactly where it executes.
+        let frame = self.live_heap_handles.len();
         if let Some(v) = self.lower_scalar_value(cond) {
+            self.drop_arm_locals(frame);
             return Some(v);
         }
         // A scalar-returning (Bool/Int) PURE call with heap args — materialize it, then
         // free the transient arg temps within a cond-local frame.
         if let IrExprKind::Call { .. } = &cond.kind {
             if !is_heap_ty(&cond.ty) {
-                let frame = self.live_heap_handles.len();
                 if let Some(v) = self.try_lower_scalar_call(cond, &cond.ty) {
                     self.drop_arm_locals(frame);
                     return Some(v);
