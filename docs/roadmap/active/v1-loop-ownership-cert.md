@@ -73,11 +73,32 @@ and kernel-verified. The rest is gate-verifiable engineering.
    Assign wiring (c). `try_lower_concat_list` is SCALAR-element only → a synthetic `List[Int]` append
    validates the MECHANISM first; yaml's `List[Value]`/`List[(k,v)]` then need heap-element concat (+
    value.object/stringify).
-4. **Verify**: corpus-wall ACCEPT + the yaml walls clear (flow_rec/collect_*/block_*) + byte-match v0 + leak-loop.
+4. **✅ DONE 2026-06-20 (commit f3ce5401): the append-accumulator TCO PRODUCER.** `try_tco_rewrite` now
+   detects a heap carried param whose every self-call value is `acc + [x]`, introduces a fresh OWNED slot
+   (`let slot = acc + []`, substitutes `acc → slot`), and the in-loop `Assign` lowers `slot = slot + [x]`
+   to `new = __list_concat(slot,[x]); Drop slot; SetLocal slot,new`. End-to-end VERIFIED on
+   `spec/wasm_cross/append_accumulator.almd` (List[Int]): in-profile (was walled), ownership cert `i(id)m`
+   ×2, **byte-matches v0** (output-parity baseline, match 69→70), corpus-wall green, cargo-test clean
+   (the 2 json wasm fails are another agent's pre-existing). The rendered loop emits the per-iteration
+   `rc_dec(old)` (frees confirmed in the wat). MEMORY NOTE: `__list_concat` COPIES (O(n²) like v0 deep
+   recursion); large n OOBs on wasm's 64KB at n≈110 (sum(1..n)·8B) — an allocator-reclamation/efficiency
+   limit, NOT an rc-leak (the cert PROVES rc-balance; the frees are emitted). A future in-place push makes
+   it O(n). Fixture n kept small.
 
-The ENTIRE verification/trust side of C (proof + extracted checker + cert serializer + verify_ownership) is
-DONE + verified (commits 7f673b4c, c05fc209, 291a1f35). Step 3 is the producer-side lowering that emits the
-MIR this now-complete trust spine accepts; ②-safe (byte-match + corpus-wall + check_cert_lc gate it).
+**🎯 THE ENTIRE OPTION-C CHAIN NOW WORKS END-TO-END** (proof → extracted checker → cert serializer →
+verify_ownership → producer lowering), all verified: commits 7f673b4c, c05fc209, 291a1f35, f3ce5401.
+A heap-loop-carried append accumulator compiles from `.almd`, lowers on the v1 trust spine, carries the
+PROVEN `i(id)m` cert, and byte-matches v0. The completeness hole is closed AT THE ROOT for scalar-element
+append accumulators.
+
+## Remaining toward yaml=0 (the producer EXTENSIONS — the chain is proven, these widen its element domain)
+
+- **Heap-element concat** (`items + [val]` over `List[Value]`/`List[(k,v)]`): `try_lower_concat_list`
+  is SCALAR-element only (a heap element would alias owned handles). yaml's accumulators are `List[Value]`,
+  so they need a heap-element `__list_concat` that Dup's each carried element (per-element cert) + the right
+  `drop_op_for` (DropListValue). This is THE lever for the yaml append walls.
+- **value.object / value.stringify** (the Value-parser map/serializer) + **tuple-heap** ((Value,Int) drop)
+  + **mutual-recursion inlining** (flow_step→flow_rec) to expose the loop. Then the 11 walls fall → yaml 0.
 
 After C lands end-to-end: the 11 walls fall (with value.object/stringify + tuple-heap for the Value-parser
 subset), driving yaml → 0 — on a PROVEN spine, the v1 completeness ideal.
