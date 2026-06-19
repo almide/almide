@@ -63,17 +63,20 @@ scalar form; NO heap back-edge merge, NO `verify_ownership` change. `try_list_it
 runs BEFORE `tco_collect` (which bails on a `match` body). VERIFIED: `spec/wasm_cross/list_iter_tco.almd`
 byte-matches v0 (bin_rec 5/15/0/-1 direct-arm + a block-arm `cnt` len 5/0); corpus-wall ACCEPT (14548
 heap) + cargo test + output-parity 67/67.
-BUG FIXED en route: `max_var_id` skipped PATTERN-bound vars (`some(ch)`), so the synthetic `rk`/`idx`
-COLLIDED with `ch` → the renderer reused one local for an i32 handle AND an i64 flag = invalid wasm.
-Now counts pattern binds (also hardens the existing scalar-TCO).
-SEPARATE PRE-EXISTING BUG found (NOT this transform — reproduces with no TCO): `string.codepoint(cs[i])`
-over a BORROWED list element returns 0 (`string.eq` on a borrowed element WORKS, so it is codepoint-
-specific — likely the borrowed-element arg defers to a `Const 0`). oct_rec LOWERS correctly (the TCO is
-right + cert-accepted) but its RENDER is wrong until this codepoint-borrow gap is fixed — the same
-"lowers, needs one more piece to render" relation as try_decimal↔float.parse (and oct_rec is anyway
-gated by float.parse, so no miscompile renders). bin_rec uses string-eq, not codepoint → fully correct.
-NEXT: the codepoint-borrow gap (small, makes oct_rec render-correct), then the APPEND-accumulator TCO
-variant (collect_seq/flow_rec `acc + [x]` → in-place push) + mutual-recursion (flow_rec↔flow_step).
+2 BUGS FIXED en route:
+- `max_var_id` skipped PATTERN-bound vars (`some(ch)`), so the synthetic `rk`/`idx` COLLIDED with `ch`
+  → the renderer reused one local for an i32 handle AND an i64 flag = invalid wasm. Now counts pattern
+  binds (also hardens the existing scalar-TCO).
+- (commit 1601af5e) A scalar `??` in a BinOp OPERAND position (`(int.parse(s) ?? 0) - 48`,
+  `(codepoint(ch) ?? 0) - 48`) fell through `lower_scalar_value` to a `Const 0`, so the WHOLE BinOp
+  silently read 0. This was a GENERAL pre-existing silent miscompile (mis-diagnosed at first as a
+  "codepoint-borrow" gap — codepoint(cs[i]) alone is FINE; the bug was the `?? · - 48`). Added a
+  scalar-`??` arm to `lower_scalar_value_inner` (`try_lower_option_unwrap_or`, gated on a scalar
+  fallback). With it, oct_rec/bin_rec now BYTE-MATCH v0 end-to-end (oct 15/511/.../83, bin 5/15) —
+  `spec/wasm_cross/unwrap_or_operand.almd` + the oct/bin probe. So oct_rec is FULLY correct (lowering +
+  render), not just walled-clear; it only still needs float.parse to render inside a full yaml program.
+NEXT: the APPEND-accumulator TCO variant (collect_seq/flow_rec `acc + [x]` → in-place push) +
+mutual-recursion (flow_rec↔flow_step), then value.object/stringify + tuple-heap (block_*).
 
 ## yaml wall countdown (the live tally)
 
