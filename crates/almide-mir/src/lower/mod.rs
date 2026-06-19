@@ -689,6 +689,31 @@ impl LowerCtx {
                 // sound model-one-iteration form.
                 if self.scalar_loop_depth > 0 {
                     if is_heap_ty(&value.ty) {
+                        // APPEND ACCUMULATOR (option C): `slot = slot + [x]` → alloc the new list, DROP
+                        // the old slot, rebind the slot IN PLACE (`SetLocal`). The slot is an OWNED
+                        // loop-carried list (initialized to an owned copy of the param before the loop by
+                        // the TCO); each iteration drops the previous object + acquires the new one — the
+                        // cert-`i(id)m` loop-carried slot PROVED leak/double-free-free for any iteration
+                        // count (OwnershipChecker.v `check_line_unroll_sound`). Only a SELF-append
+                        // (`Var(slot) + …`) qualifies; any other heap reassign still defers below.
+                        if let IrExprKind::BinOp {
+                            op: almide_ir::BinOp::ConcatList,
+                            left,
+                            ..
+                        } = &value.kind
+                        {
+                            if matches!(&left.kind, IrExprKind::Var { id } if id == var) {
+                                if let Some(&slot_local) = self.value_of.get(var) {
+                                    if let Some(new) = self.try_lower_concat_list(value) {
+                                        let drop_op = self.drop_op_for(slot_local);
+                                        self.ops.push(drop_op);
+                                        self.ops
+                                            .push(Op::SetLocal { local: slot_local, src: new });
+                                        return Ok(());
+                                    }
+                                }
+                            }
+                        }
                         return Err(LowerError::Unsupported(
                             "heap reassignment in a scalar loop body".into(),
                         ));
@@ -2156,9 +2181,95 @@ pub(crate) fn try_tco_rewrite(
     let work_body: &IrExpr = lit.as_ref().map(|(b, _, _)| b).unwrap_or(body);
     let idx_var = lit.as_ref().map(|(_, iv, _)| *iv);
 
+    // FIRST collection — detect the self-calls + carried params (on the pre-substitution body).
+    let mut calls0: Vec<&[IrExpr]> = Vec::new();
+    let mut bases0: Vec<&IrExpr> = Vec::new();
+    tco_collect(work_body, fn_name, &mut calls0, &mut bases0)?;
+    if calls0.is_empty() || bases0.is_empty() {
+        return None;
+    }
+    if calls0.iter().any(|c| c.len() != n) {
+        return None;
+    }
+    let mut carried0 = vec![false; n];
+    for c in &calls0 {
+        for i in 0..n {
+            if !matches!(&c[i].kind, IrExprKind::Var { id } if *id == params[i].var) {
+                carried0[i] = true;
+            }
+        }
+    }
+    if let Some((_, _, ci)) = &lit {
+        carried0[*ci] = false;
+    }
+    // APPEND ACCUMULATORS (option C producer): a heap carried param whose EVERY self-call value is
+    // `acc + [x]` (`BinOp::ConcatList` appending the accumulator to itself). Each becomes an OWNED
+    // loop-carried SLOT — a fresh var initialized to `acc + []` (an owned copy: a `__list_concat`
+    // Call heap-result, so `of[slot]=slot` and cert `i`), substituted for `acc` throughout, then
+    // drop-old/alloc-new per iteration (cert `i(id)m`, accepted by the proven `check_cert_lc`). A heap
+    // carried param that is NOT a self-append needs a general heap back-edge merge — still unsupported.
+    let is_self_append = |e: &IrExpr, acc: VarId| -> bool {
+        matches!(&e.kind, IrExprKind::BinOp { op: almide_ir::BinOp::ConcatList, left, .. }
+            if matches!(&left.kind, IrExprKind::Var { id } if *id == acc))
+    };
+    let mut append_accs: Vec<usize> = Vec::new();
+    for i in 0..n {
+        if carried0[i] && is_heap_ty(&params[i].ty) {
+            if calls0.iter().all(|c| is_self_append(&c[i], params[i].var)) {
+                append_accs.push(i);
+            } else {
+                return None;
+            }
+        }
+    }
+    drop(calls0);
+    drop(bases0);
+
+    // Build the (possibly substituted) working body + params + upfront slot-init binds.
+    let mut slot_next = max_v + 3;
+    let mut upfront: Vec<IrStmt> = Vec::new();
+    let mut params_v: Vec<almide_ir::IrParam> = params.to_vec();
+    let subst_body: Option<IrExpr> = if append_accs.is_empty() {
+        None
+    } else {
+        let mut b = work_body.clone();
+        for &ai in &append_accs {
+            let slot = VarId(slot_next);
+            slot_next += 1;
+            let acc_var = params[ai].var;
+            let list_ty = params[ai].ty.clone();
+            // upfront: `let slot = acc + []` — a fresh OWNED copy of the borrowed accumulator param.
+            let empty = tco_ir(IrExprKind::List { elements: vec![] }, list_ty.clone());
+            let copy = tco_ir(
+                IrExprKind::BinOp {
+                    op: almide_ir::BinOp::ConcatList,
+                    left: Box::new(tco_ir(IrExprKind::Var { id: acc_var }, list_ty.clone())),
+                    right: Box::new(empty),
+                },
+                list_ty.clone(),
+            );
+            upfront.push(IrStmt {
+                kind: IrStmtKind::Bind {
+                    var: slot,
+                    mutability: almide_ir::Mutability::Var,
+                    ty: list_ty.clone(),
+                    value: copy,
+                },
+                span: None,
+            });
+            let slot_ref = tco_ir(IrExprKind::Var { id: slot }, list_ty);
+            b = almide_ir::substitute_var_in_expr(&b, acc_var, &slot_ref);
+            params_v[ai].var = slot;
+        }
+        Some(b)
+    };
+    let work_ref: &IrExpr = subst_body.as_ref().unwrap_or(work_body);
+    let params2: &[almide_ir::IrParam] = &params_v;
+
+    // SECOND collection — on the substituted body, with the slot params.
     let mut calls: Vec<&[IrExpr]> = Vec::new();
     let mut bases: Vec<&IrExpr> = Vec::new();
-    tco_collect(work_body, fn_name, &mut calls, &mut bases)?;
+    tco_collect(work_ref, fn_name, &mut calls, &mut bases)?;
     if calls.is_empty() || bases.is_empty() {
         return None;
     }
@@ -2169,7 +2280,7 @@ pub(crate) fn try_tco_rewrite(
     let mut carried = vec![false; n];
     for c in &calls {
         for i in 0..n {
-            if !matches!(&c[i].kind, IrExprKind::Var { id } if *id == params[i].var) {
+            if !matches!(&c[i].kind, IrExprKind::Var { id } if *id == params2[i].var) {
                 carried[i] = true;
             }
         }
@@ -2179,16 +2290,20 @@ pub(crate) fn try_tco_rewrite(
     if let Some((_, _, ci)) = &lit {
         carried[*ci] = false;
     }
-    // A carried arg must be SCALAR (a heap loop-carried arg needs a heap back-edge merge — not this
-    // brick). The list-iterator rewrite already converted the one admissible heap pattern.
-    if (0..n).any(|i| carried[i] && is_heap_ty(&params[i].ty)) {
+    // A carried HEAP arg is admitted ONLY as an append-accumulator SLOT (handled below by the in-loop
+    // `Assign` lowering as drop-old/alloc-new); any other heap carry needs a general back-edge merge.
+    let append_slots: std::collections::BTreeSet<VarId> =
+        append_accs.iter().map(|&i| params2[i].var).collect();
+    if (0..n)
+        .any(|i| carried[i] && is_heap_ty(&params2[i].ty) && !append_slots.contains(&params2[i].var))
+    {
         return None;
     }
     let base_exprs: Vec<IrExpr> = bases.iter().map(|b| (*b).clone()).collect();
     let ret_ty = body.ty.clone();
 
     let mut next_kind = 1i64;
-    let loop_body = tco_rewrite(work_body, fn_name, params, &carried, rk, &mut next_kind, idx_var);
+    let loop_body = tco_rewrite(work_ref, fn_name, params2, &carried, rk, &mut next_kind, idx_var);
 
     // Post-loop dispatch: `if rk == 1 then base_1 else if … else base_N` (last base = final else).
     let eq_rk = |k: i64| {
@@ -2213,8 +2328,9 @@ pub(crate) fn try_tco_rewrite(
         );
     }
 
-    // `{ [var idx = 0;] var rk = 0; while (rk == 0) { <loop_body> }; <post> }`
-    let mut inits: Vec<IrStmt> = Vec::new();
+    // `{ [let slot = acc + [];]* [var idx = 0;] var rk = 0; while (rk == 0) { <loop_body> }; <post> }`
+    // The append-accumulator slot inits (owned copies of the borrowed `acc` params) come FIRST.
+    let mut inits: Vec<IrStmt> = upfront;
     if let Some(iv) = idx_var {
         inits.push(IrStmt {
             kind: IrStmtKind::Bind {

@@ -12,6 +12,7 @@ spec/programs/safe_div_chain.almd
 spec/programs/safe_parse_sum.almd
 spec/programs/sum_of_squares.almd
 spec/wasm_cross/anon_records_and_fusion.almd
+spec/wasm_cross/append_accumulator.almd
 spec/wasm_cross/assign_alias_rc.almd
 spec/wasm_cross/autotry_result_first_arg.almd
 spec/wasm_cross/bytes_f16.almd
