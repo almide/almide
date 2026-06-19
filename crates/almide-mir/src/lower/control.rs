@@ -1196,6 +1196,13 @@ impl LowerCtx {
             IrExprKind::If { cond, then, else_ } => {
                 self.try_lower_scalar_if(cond, then, else_, &t.ty)
             }
+            // A nested VARIANT (Option/Result) match (`err(_) => match float.parse(s) { … }` —
+            // the is_numeric_or_bool / looks_numeric chain) EXECUTES via the same tag-read
+            // value-match the tail uses; its own arms recurse through `lower_scalar_arm`, so an
+            // N-deep nest lowers. A LITERAL-pattern match desugars to the if-chain as before.
+            IrExprKind::Match { subject, arms } if is_variant_ty(&subject.ty) => {
+                self.try_lower_variant_value_match(subject, arms, &t.ty)
+            }
             IrExprKind::Match { subject, arms } => self
                 .desugar_match_to_if(subject, arms, &t.ty)
                 .and_then(|if_expr| match &if_expr.kind {
