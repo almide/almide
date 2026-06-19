@@ -100,16 +100,26 @@ append accumulators.
   `spec/wasm_cross/append_accumulator_heap.almd` (`List[String]` build_s + extend_s): byte-matches v0,
   corpus-wall green (cleared 2 spec walls 866→864), output-parity 70→71, cargo-test clean. So `acc + [x]`
   now lowers for SCALAR (Int/…) AND HEAP (String/Value) element accumulators on the proven `i(id)m` slot.
-- **⚠ THE SOLE NEXT LEVER for ~half the yaml walls = MUTUAL-RECURSION INLINING.** All 11 yaml walls are
-  "heap-result if/match cannot be faithfully returned" — because every append fn is MUTUAL-recursive
-  (`flow_rec↔flow_step`, `collect_seq↔seq_item`, `collect_map↔map_entry`, `collect_block↔block_line↔
-  block_nonblank`), so `try_tco_rewrite` (self-call detector) NEVER fires (each calls a SIBLING, not
-  itself) → falls to normal lowering → the heap-result-if wall. Inlining the single-call sibling into the
-  caller makes it DIRECT self-recursive → the TCO fires → with the now-ready scalar+heap append concat it
-  lowers. `flow_rec` (List[String]) and `collect_seq` (List[Value]) fall FIRST (their element domain is
-  done). `collect_map` (List[(String,Value)]) additionally needs tuple-element concat + value.object;
-  `block_*` need tuple-heap drop. So: mutual-inline → flow_rec/flow_step + collect_seq/seq_item fall;
-  + tuple-element/value.object/stringify/tuple-heap → the rest → yaml 0.
+- **MUTUAL-RECURSION INLINING — PROTOTYPED + a KEY FINDING (2026-06-20, reverted, not committed).** All 11
+  yaml walls are "heap-result if/match" because every append fn is MUTUAL-recursive (`flow_rec↔flow_step`,
+  `collect_seq↔seq_item`, `collect_map↔map_entry`, `collect_block↔block_line↔block_nonblank`), so
+  `try_tco_rewrite` (self-call detector) never fires. A prototype `inline_mutual_tail_recursion` (inline the
+  single-call sibling G into caller F via `substitute_var_in_expr` per param + drop G; an `IrMutVisitor`
+  rebuild) + the detection relaxation (a self-call passes `acc` OR `acc+[x]`) + the `tco_rewrite`
+  identity-assign skip — VERIFIED on a synthetic `frec⇄fstep` (List[String], byte-matches v0). On yaml it
+  took 11→9 BUT **regressed `esc_rec` + `collect_block` (in-profile → walled)**: inlining makes F
+  self-recursive → the TCO FIRES → and TCO then WALLS a fn that lowered fine WITHOUT the TCO. ② forbids that
+  incompleteness regression, so it was reverted.
+  **THE FIX (next): a TRY-LOWER GUARD** — only inline (F,G) when F currently WALLS *and* the inlined F then
+  LOWERS (thread `globals`+`record_layouts` into the pass, attempt `lower_function_all_with_types` on both).
+  No regression by construction. With the guard, a wall clears only when the inlined fn ALSO clears its
+  per-fn gap: `flow_rec`/`collect_block` (List[String]) additionally need **`[call_result]` element
+  materialization** (`try_lower_str_list_literal` admits only LitStr/ConcatStr/Var elements — yaml appends
+  `acc + [string.slice(…)]`/`[string.drop(…)]`, a CALL element, which must be materialized = lowered +
+  moved in); `collect_seq` returns `(Value,Int)` (tuple-return, not bare List[Value]); `collect_map` needs
+  tuple-element concat + value.object; `block_*` need tuple-heap drop. So the real path: guarded-inline +
+  `[call]`-element materialization → flow_rec/collect_block; + tuple-return/value.object/stringify/tuple-heap
+  → the rest → yaml 0. (The append concat itself — scalar + String/Value heap — is DONE and byte-verified.)
 
 After C lands end-to-end: the 11 walls fall (with value.object/stringify + tuple-heap for the Value-parser
 subset), driving yaml → 0 — on a PROVEN spine, the v1 completeness ideal.
