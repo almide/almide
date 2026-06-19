@@ -791,6 +791,19 @@ impl LowerCtx {
                 // capturing one reaches this deferred Opaque arm.)
                 | IrExprKind::ClosureCreate { .. } => {
                     let repr = repr_of(&a.ty)?;
+                    // A NON-EMPTY `List[String]` (or scalar-aggregate-element) LITERAL arg
+                    // (`f(["a", "b"])`) materializes the REAL nested-ownership DynListStr via the
+                    // same builder the RETURN position uses (each element moved/Dup'd in), borrowed
+                    // into the call + dropped at scope end by DropListStr (cert `i` + recursive `d`).
+                    // Without this it fell to `alloc_init` → `Init::Opaque` empty list = rejected as
+                    // a silent miscompile below. (An empty/`List[Value]`/computed list still defers
+                    // to `alloc_init`, unchanged — the foundation for heap-element-list call args.)
+                    if matches!(&a.kind, IrExprKind::List { .. }) {
+                        if let Some(dst) = self.try_lower_str_list_literal(a) {
+                            out.push(self.materialized_call_arg(dst, repr, &a.ty));
+                            continue;
+                        }
+                    }
                     let init = alloc_init(a);
                     // `alloc_init` faithfully materializes a string literal and a scalar-
                     // literal list/tuple; every other constructor (Map/Record/Result/Option/
