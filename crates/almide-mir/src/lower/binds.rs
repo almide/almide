@@ -624,6 +624,17 @@ impl LowerCtx {
                 if is_heap_elem_list_ty(ty) {
                     self.heap_elem_lists.insert(dst);
                 }
+                // A user function returning Option/Result yields a REAL same-layout variant block
+                // (the v1 calling convention — `seed_variant_param`'s contract). SEED its READ-shape
+                // so a later `match x { … }` / `x ?? d` over the LET-BOUND var EXECUTES (reads the
+                // tag) exactly as the direct-call-arg position already does (`lower_call_args`'s
+                // Named arm). Adds ONLY layout knowledge — `dst` is already an owned heap value
+                // dropped at scope end, so no ownership/cert change. This is what made
+                // `let parsed = parse_oct(d); match parsed { … }` (num_signed_base, after the
+                // let-bound-heap-`if` tail-duplication) lower instead of wall.
+                if is_variant_ty(ty) {
+                    self.seed_variant_param(dst, ty);
+                }
                 Ok(())
             }
             // `var x = string.trim(s)` — a stdlib MODULE call returning a heap

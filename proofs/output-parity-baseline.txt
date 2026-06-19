@@ -32,6 +32,7 @@ spec/wasm_cross/int_float_ops.almd
 spec/wasm_cross/int_from_hex.almd
 spec/wasm_cross/int_pow_overflow_wraps.almd
 spec/wasm_cross/int_wrap_rotate_width.almd
+spec/wasm_cross/letbound_variant_match.almd
 spec/wasm_cross/list_insert_clamp.almd
 spec/wasm_cross/list_product_overflow.almd
 spec/wasm_cross/list_remove_at_oob.almd

@@ -4,7 +4,23 @@
 
 ## yaml wall countdown (the live tally)
 
-74 functions → walls: 22 (session start) → 21 (float.parse recognition) → **19** (scalar-arg TCO, commit 77c91648) → **17** (nested heap-result `match` arm, commit 5510dc47) → **16** (str-result heap-payload bind = `emit`, below). Remaining 16: oct_rec, bin_rec (heap-loop-carried + match-leaf), flow_rec, flow_step (mutual-rec + heap acc), num_signed_base (let-bound heap-if = a checker change), block_scalar/block_line/block_nonblank (tuple-heap), parse_lines, map_entry, parse_nested, collect_map, collect_seq, seq_item, emit_non_int, is_compound (the Value-array model: value.array/as_array/object/stringify + recursive drop).
+74 functions → walls: 22 (session start) → 21 (float.parse recognition) → **19** (scalar-arg TCO, commit 77c91648) → **17** (nested heap-result `match` arm, commit 5510dc47) → **16** (str-result heap-payload bind = `emit`, commit fab14729) → **15** (let-bound variant-call read-shape seed = `num_signed_base`, below). Remaining 15: oct_rec, bin_rec (heap-loop-carried + match-leaf), flow_rec, flow_step (mutual-rec + heap acc), block_scalar/block_line/block_nonblank (tuple-heap + let-bound heap-if), parse_lines, map_entry, parse_nested, collect_map, collect_seq, seq_item, emit_non_int, is_compound (the Value-array model: value.array/as_array/object/stringify + recursive drop).
+
+### LANDED 2026-06-19: let-bound variant-call read-shape seed — yaml 16→15 (num_signed_base)
+
+`num_signed_base`'s `let parsed = if kind=="o" then parse_oct(d) else parse_bin(d); match parsed {…}`
+walled even though (a) the let-bound-heap-`if` tail-duplication (`desugar_let_bound_heap_branch`)
+distributes the `match` into each arm and (b) the nested-`match`-arm brick lowers a match arm. The
+remaining gap: a LET-BOUND user-function Result/Option var was NOT seeded with its variant READ-shape,
+so `match parsed` saw an untracked subject and walled — even though the DIRECT call-arg position
+(`lower_call_args`'s Named arm, calls.rs:1075) already seeds it via `seed_variant_param`. FIX: call
+`seed_variant_param(dst, ty)` on a variant-returning Named user call in `lower_bind` too — the exact
+mirror of the direct path. `seed_variant_param` adds ONLY layout/read knowledge (the bound `dst` is
+already an owned heap value dropped at scope end), so NO ownership/cert change. VERIFIED:
+`spec/wasm_cross/letbound_variant_match.almd` byte-matches v0 (both a plain `let p = mk(b); match p`
+and the full `let parsed = if … ; match parsed` num_signed_base shape); corpus-wall ACCEPT; output-parity
++ cargo test green. (block_scalar shares the let-bound-heap-`if` but ALSO returns a `(Value, Int)` heap
+tuple — the tuple-heap brick — so it stays walled.)
 
 ### LANDED 2026-06-19: str-result heap-payload bind — yaml 17→16 (emit)
 
