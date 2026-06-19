@@ -160,3 +160,25 @@ as balanced, and the break-result as the moved-out return). So the "mid-loop-bre
 primitive" named in this doc's title is REAL and REQUIRED — TCO is a focused MIR+render+cert brick, not
 a transform over the existing top-test loops. (This is why the self-rec guard at control.rs:1641 stays:
 without the new primitive there is no sound lowering, only the deep-trapping recursion.)
+
+### REFINEMENT 2026-06-19: the GATE-VERIFIABLE cert-clean structure (no new primitive, no cert change)
+
+Re-analysis shows TCO is implementable WITHOUT the new `Op::LoopBreak` primitive (and so without a
+cert change — which would be UNVERIFIABLE since corpus-wall *uses* the cert). The cert-clean shape:
+**a SCALAR-ONLY top-test loop + a POST-LOOP heap-result-if.**
+- The loop body updates ONLY the scalar loop-carried args (`pos`, `in_q`) via `SetLocal` — NO heap in
+  the body, so each iteration is trivially per-iteration-balanced (the existing cert passes as-is).
+- The heap result (`none`/`some(pos)`) is computed AFTER the loop, as an ordinary heap-result-if over
+  the FINAL scalar state — balanced normally (`i`+`m`), no Alloc escaping the loop body.
+PRECONDITION: the base results must be RECONSTRUCTIBLE from the final scalar state. scan_quote/find_colon_at
+satisfy it: `if pos >= len then none else some(pos)`. (A function whose base result needs more than the
+final scalars would need the result-in-loop form → the Alloc escapes the loop body → the cert flags it →
+that subset still needs the new primitive. So START with the reconstructible subset.)
+THE TRANSFORM (the intricate part): from the body's nested if/else where leaves are self-calls
+`f(invariant, pos', in_q')` or base exprs, DERIVE (a) the continue-condition = ¬(any base reached), (b)
+the loop body = the scalar updates on the self-call paths, (c) the post-loop result = the base-expr
+chain re-evaluated on the final scalars. Emit `LoopStart` / `LoopBreakUnless{continue}` / body
+`SetLocal`s / `LoopEnd`, then the post-loop heap-result-if. VERIFY: byte-match v0 on scan_quote inputs +
+corpus-wall (existing cert) + tests. GATE-VERIFIABLE, bounded (a wrong derivation fails byte-match →
+revert) — but a genuinely intricate transform, a focused brick. scan_quote/find_colon_at first (2 walls,
+the reconstructible subset); oct_rec/bin_rec/flow_rec/flow_step likely follow the same shape.
