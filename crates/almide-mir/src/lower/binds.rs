@@ -739,10 +739,17 @@ impl LowerCtx {
                 if is_self_host_result_module_fn(module.as_str(), func.as_str()) {
                     self.materialized_results.insert(dst);
                 }
-                // A self-host HEAP-Ok Result fn (`value.as_string` → Result[String, String]) — track
-                // it in the cap-as-tag set so a `match` reads cap@8 + binds slot-0 String.
+                // A self-host HEAP-Ok Result fn (`value.as_string`/`value.as_array`) — track it in the
+                // cap-as-tag set so a `match` reads tag @16 + binds the @12 payload. The DROP differs
+                // by Ok-arm: a `List[Value]` Ok (`value.as_array`) frees recursively
+                // (`value_result_lists` → `DropResultListValue`), else a String Ok flat (`DropListStr`).
                 if crate::lower::is_self_host_result_str_module_fn(module.as_str(), func.as_str()) {
                     self.materialized_results_str.insert(dst);
+                    if crate::lower::is_result_listval_ty(ty) {
+                        self.value_result_lists.insert(dst);
+                    } else {
+                        self.heap_elem_lists.insert(dst);
+                    }
                 }
                 // A `List[String]` result (string.split / a List[String] combinator) is a
                 // nested-ownership list — its scope-end drop must recursively free elements.

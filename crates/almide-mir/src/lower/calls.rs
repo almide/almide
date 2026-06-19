@@ -1981,7 +1981,7 @@ impl LowerCtx {
             "rc_dec" | "rc_inc"
                 if matches!(
                     self.fn_name.as_str(),
-                    "__drop_value" | "__drop_list_value" | "__varr_copy" | "__vfill"
+                    "__drop_value" | "__drop_list_value" | "__drop_result_lv" | "__varr_copy" | "__vfill"
                 ) =>
             {
                 if func == "rc_dec" { PrimKind::RcDec } else { PrimKind::RcInc }
@@ -2062,6 +2062,13 @@ impl LowerCtx {
             self.live_heap_handles.push(dst);
             if crate::lower::is_heap_elem_list_ty(ty) {
                 self.heap_elem_lists.insert(dst);
+            }
+            // A `Value` call-argument temp (`f(value.array([…]))`, `f(value.str(s))`) drops via the
+            // runtime-tag-dispatched `Op::DropValue` (recursive — an Array frees its element Values, a
+            // Str its String), NOT a flat `Op::Drop` (which would leak the nested payload). Without
+            // this a tag-5 Array / tag-4 Str passed as an argument leaks at the call-site scope end.
+            if crate::lower::is_value_ty(ty) {
+                self.value_handles.insert(dst);
             }
             CallArg::Handle(dst)
         } else {

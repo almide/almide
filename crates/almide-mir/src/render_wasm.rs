@@ -844,6 +844,13 @@ fn render_op(
         Op::DropListValue { v } => {
             format!("    (call $__drop_list_value (local.get {}))\n", local(*v))
         }
+        // RECURSIVE drop of a `value.as_array` Result `Result[List[Value], String]` — the self-hosted
+        // `$__drop_result_lv` (value_core.almd) tag-dispatches at the last ref: Ok frees the
+        // `List[Value]` payload recursively, Err frees the String, then the block. A flat `DropListStr`
+        // would only rc_dec the @12 list handle, leaking its element Values. Single cert `d`.
+        Op::DropResultListValue { v } => {
+            format!("    (call $__drop_result_lv (local.get {}))\n", local(*v))
+        }
         // COPY-ON-WRITE before an in-place mutation (A1.3-render, refining
         // CowSafety.v): if the block is SHARED (rc > 1), clone it so the mutation
         // touches no alias. The `rc_dec` runs FIRST (rc 2→1 — the alias keeps the

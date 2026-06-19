@@ -61,6 +61,7 @@ pub fn name_witness(func: &MirFunction) -> NameWitness {
             | Op::DropListStr { v }
             | Op::DropValue { v }
             | Op::DropListValue { v }
+            | Op::DropResultListValue { v }
             | Op::Consume { v }
             | Op::Borrow { v }
             | Op::MakeUnique { v } => {
@@ -423,7 +424,11 @@ pub fn ownership_certificate(func: &MirFunction) -> String {
             // object — its elements were already accounted as `m` (consumed) when stored into it, so
             // the recursive runtime free (per-String, or per-Value via `$__drop_value`) adds no extra
             // cert event.
-            Op::Drop { v } | Op::DropListStr { v } | Op::DropValue { v } | Op::DropListValue { v } => {
+            Op::Drop { v }
+            | Op::DropListStr { v }
+            | Op::DropValue { v }
+            | Op::DropListValue { v }
+            | Op::DropResultListValue { v } => {
                 let o = s.object_of(*v);
                 s.event(o, 'd');
             }

@@ -31,6 +31,26 @@ CEO gated "design-first" — now empirically verified by the leak loop (the cert
 REMAINING for the 8 Value walls: `value.as_array` (read-back, needs a Result-of-List[Value] rep whose
 drop is value-aware — another tag-dispatched drop) + `value.stringify` (recursive serializer) + value.object.
 
+## ★★★★★ LANDED 2026-06-19: value.as_array — yaml 15→13 (is_compound + emit_non_int)
+
+The READ side of the Value-array model. `value.as_array(v)` returns `Result[List[Value], String]` in
+the cap-as-tag rep (REUSING the str-result `materialized_results_str` MATCH machinery — tag @16, payload
+@12 — so the Camp-4 borrow-bind `ok(items) => …` is the str_heap_bind borrow+drop-after from fab14729,
+NO new match code). The DROP is the new part: a value-array Result frees its `List[Value]` payload
+RECURSIVELY (`Op::DropResultListValue` → self-hosted `$__drop_result_lv`: tag@16 0→`$__drop_list_value`,
+1→rc_dec; a flat `DropListStr` would leak the list's element Values). Tracking is TYPE-DRIVEN
+(`is_result_listval_ty`: Ok-arm is a `List`) so it's sound at EVERY str-result marking site
+(try_lower_variant_value_match, lower_branch, seed_variant_param, lower_bind) — `value_result_lists`
+when the Ok is a List, `heap_elem_lists` when a String. Drop-op selection unified into one
+`drop_op_for` helper (emit_scope_end_drops + drop_arm_locals + the variant-match subject drop). ALSO
+fixed a latent leak: `materialized_call_arg` now marks a `Value` call-arg `value_handles` (→ recursive
+`DropValue`), not a flat `Drop` — a `f(value.array([…]))` arg was leaking its element Values.
+VERIFIED: `value_as_array_roundtrip.almd` byte-matches v0 (arr_len 3/-1/0, is_compound 1/0 — value.array
+STORES + value.as_array READS correctly + the Ok(items) borrow + tag dispatch) + `value_as_array_leak_loop.almd`
+(the 3-LEVEL Result→List[Value]→Value→String drop completes "done"); corpus-wall ACCEPT + cargo test +
+output-parity. REMAINING Value walls (6): collect_map/collect_seq/seq_item/parse_lines/parse_nested/map_entry
+(build value.array/object during parsing) + value.object/value.stringify.
+
 ## yaml wall countdown (the live tally)
 
 74 functions → walls: 22 (session start) → 21 (float.parse recognition) → **19** (scalar-arg TCO, commit 77c91648) → **17** (nested heap-result `match` arm, commit 5510dc47) → **16** (str-result heap-payload bind = `emit`, commit fab14729) → **15** (let-bound variant-call read-shape seed = `num_signed_base`, below). Remaining 15: oct_rec, bin_rec (heap-loop-carried + match-leaf), flow_rec, flow_step (mutual-rec + heap acc), block_scalar/block_line/block_nonblank (tuple-heap + let-bound heap-if), parse_lines, map_entry, parse_nested, collect_map, collect_seq, seq_item, emit_non_int, is_compound (the Value-array model: value.array/as_array/object/stringify + recursive drop).

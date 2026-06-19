@@ -370,6 +370,12 @@ pub(crate) struct LowerCtx {
     /// leak each element Value's nested payload. Populated when a `List[Value]` literal/arg is
     /// materialized. Distinct from `heap_elem_lists` (String elements, whose `rc_dec` is the full free).
     value_elem_lists: HashSet<ValueId>,
+    /// MIR values that are a `value.as_array` Result `Result[List[Value], String]` (the cap-as-tag
+    /// 1-slot block whose Ok payload @12 is a `List[Value]`). A scope-end drop emits
+    /// [`Op::DropResultListValue`] (`$__drop_result_lv`: Ok → recursive list free, Err → String free)
+    /// instead of the flat [`Op::DropListStr`] (which leaks the list's element Values). Read by the
+    /// SAME cap@16 match machinery as a str-result (`materialized_results_str`); only the DROP differs.
+    value_result_lists: HashSet<ValueId>,
     /// MIR values KNOWN to be a record/tuple block this brick MATERIALIZED with the uniform
     /// slot layout (`try_lower_scalar_record_construct` / `try_lower_record_construct` /
     /// `try_lower_scalar_tuple_construct` / scalar-tuple/list-slot), plus aggregate-typed
@@ -551,9 +557,15 @@ impl LowerCtx {
             }
             Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 => {
                 if is_heap_ty(&a[0]) && is_heap_ty(&a[1]) {
-                    // Both arms heap (`Result[String, String]`) — the cap-as-tag 1-slot DynListStr.
+                    // Both arms heap — the cap-as-tag 1-slot DynListStr. The DROP differs by Ok-arm:
+                    // a `List[Value]` Ok (`value.as_array`) frees recursively (`value_result_lists`),
+                    // else a String Ok (`value.as_string`) frees flat (`heap_elem_lists`).
                     self.materialized_results_str.insert(v);
-                    self.heap_elem_lists.insert(v);
+                    if is_result_listval_ty(ty) {
+                        self.value_result_lists.insert(v);
+                    } else {
+                        self.heap_elem_lists.insert(v);
+                    }
                 } else {
                     // Scalar Ok (`Result[Int, String]`) — len-as-tag, scalar Ok payload. A heap Err
                     // payload is owned by the Result block (DropListStr frees it); mark the nested-
@@ -908,32 +920,31 @@ impl LowerCtx {
         Ok(dst)
     }
 
+    /// The correct release op for a heap value at scope/frame end, by its tracking set (the SINGLE
+    /// source of truth for drop-op selection — used by `emit_scope_end_drops`, `drop_arm_locals`, and
+    /// the variant-match subject drop). Order matters: the recursive value-drops are checked BEFORE
+    /// the flat `DropListStr`, since a `value.as_array` Result / a `List[Value]` is ALSO a
+    /// `heap_elem_list`, but a flat per-slot `rc_dec` there would leak the nested element Values.
+    pub(crate) fn drop_op_for(&self, v: ValueId) -> Op {
+        if self.value_result_lists.contains(&v) {
+            Op::DropResultListValue { v }
+        } else if self.value_elem_lists.contains(&v) {
+            Op::DropListValue { v }
+        } else if self.heap_elem_lists.contains(&v) || self.record_masks.contains_key(&v) {
+            Op::DropListStr { v }
+        } else if self.value_handles.contains(&v) {
+            Op::DropValue { v }
+        } else {
+            Op::Drop { v }
+        }
+    }
+
     pub(crate) fn emit_scope_end_drops(&mut self) {
         // Reverse binding order (LIFO scope teardown). A `List[String]` value is released by a
         // RECURSIVE `DropListStr` (frees its owned element Strings); every other heap value by
         // a flat `Drop`.
-        let drops: Vec<Op> = self
-            .live_heap_handles
-            .iter()
-            .rev()
-            .map(|v| {
-                // A `List[Value]` frees recursively via `DropListValue` (`$__drop_value` per element)
-                // — checked FIRST, before the flat-element `DropListStr`, since a value-list would
-                // otherwise leak each element Value's nested payload.
-                if self.value_elem_lists.contains(v) {
-                    Op::DropListValue { v: *v }
-                // A masked record/tuple and a `List[String]` both free recursively via
-                // `DropListStr` (cert = the SAME single `d`); the render reads `record_masks`
-                // off the function to free only the heap slots (mask) vs every slot (list).
-                } else if self.heap_elem_lists.contains(v) || self.record_masks.contains_key(v) {
-                    Op::DropListStr { v: *v }
-                } else if self.value_handles.contains(v) {
-                    Op::DropValue { v: *v }
-                } else {
-                    Op::Drop { v: *v }
-                }
-            })
-            .collect();
+        let drops: Vec<Op> =
+            self.live_heap_handles.iter().rev().map(|v| self.drop_op_for(*v)).collect();
         self.ops.extend(drops);
     }
 }
@@ -1790,7 +1801,19 @@ pub(crate) fn is_self_host_result_module_fn(module: &str, func: &str) -> bool {
 /// DynListStr layout, both Ok and Err owning a String)? Its result is tracked in
 /// `materialized_results_str` so an `Ok`/`Err` `match` over it EXECUTES reading cap@8.
 pub(crate) fn is_self_host_result_str_module_fn(module: &str, func: &str) -> bool {
-    matches!((module, func), ("value", "as_string") | ("result", "zip"))
+    matches!((module, func), ("value", "as_string") | ("result", "zip") | ("value", "as_array"))
+}
+
+/// Is `ty` a `value.as_array`-style Result whose Ok arm is a `List[Value]` (a heap-Ok Result with a
+/// LIST-of-Value payload)? Such a Result reuses the cap@16 str-result MATCH machinery, but its DROP
+/// must free the list RECURSIVELY (`Op::DropResultListValue`/`value_result_lists`), not flat
+/// (`DropListStr` would leak the list's element Values). The DISTINGUISHER from `value.as_string`'s
+/// `Result[String, String]` is the Ok-arm being a `List`, so the tracking is TYPE-driven (sound
+/// wherever only the `ValueId` + its `ty` are known — seed_variant_param, the match subject).
+pub(crate) fn is_result_listval_ty(ty: &Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    matches!(ty, Ty::Applied(TypeConstructorId::Result, a)
+        if a.len() == 2 && matches!(&a[0], Ty::Applied(TypeConstructorId::List, _)))
 }
 
 pub(crate) fn alloc_init(value: &IrExpr) -> Init {

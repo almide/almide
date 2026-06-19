@@ -100,7 +100,9 @@ impl LowerCtx {
                     // the recursive DropListStr). Without it the match linearizes → garbage.
                     if is_self_host_result_str_call(subject) {
                         self.materialized_results_str.insert(v);
-                        if crate::lower::is_heap_elem_list_ty(&subject.ty) {
+                        if crate::lower::is_result_listval_ty(&subject.ty) {
+                            self.value_result_lists.insert(v);
+                        } else if crate::lower::is_heap_elem_list_ty(&subject.ty) {
                             self.heap_elem_lists.insert(v);
                         }
                     }
@@ -861,11 +863,18 @@ impl LowerCtx {
         if is_self_host_result_call(subject) {
             self.materialized_results.insert(subj);
         }
-        // A self-host HEAP-Ok Result (`value.as_string` — cap-as-tag DynListStr) is tracked as a
-        // str-result (read @16) + a nested-ownership list (freed by DropListStr at scope end).
+        // A self-host HEAP-Ok Result (`value.as_string`/`value.as_array`/`result.zip` — cap-as-tag
+        // DynListStr) is tracked as a str-result (the match reads tag @16 + binds the @12 payload
+        // handle). The DROP differs by Ok-arm type: a `List[Value]` Ok (`value.as_array`) frees
+        // RECURSIVELY (`value_result_lists` → `DropResultListValue`), else a String Ok frees flat
+        // (`heap_elem_lists` → `DropListStr`). Type-driven so it is sound at every tracking site.
         if is_self_host_result_str_call(subject) {
             self.materialized_results_str.insert(subj);
-            self.heap_elem_lists.insert(subj);
+            if crate::lower::is_result_listval_ty(&subject.ty) {
+                self.value_result_lists.insert(subj);
+            } else {
+                self.heap_elem_lists.insert(subj);
+            }
         }
         // Dispatch on the tracking set. An Option reads len-as-tag (Some=len≠0); a scalar
         // Result reads len-as-tag INVERSE (Err=len≠0, Ok=len0). The if-skeleton is uniform
@@ -898,7 +907,14 @@ impl LowerCtx {
         let heap_or_scalar_bind = |s: &Self, inner: &IrPattern| -> Result<Option<(VarId, bool)>, ()> {
             match inner {
                 IrPattern::Bind { var, ty } if !is_heap_ty(ty) => Ok(Some((*var, false))),
-                IrPattern::Bind { var, ty } if is_heap_ty(ty) && s.heap_elem_lists.contains(&subj) => {
+                // A heap payload bind is admitted over a nested-ownership subject — a str-result
+                // (`heap_elem_lists`, the `value.as_string` String payload) OR a value-array result
+                // (`value_result_lists`, the `value.as_array` `List[Value]` payload, e.g. `ok(items)
+                // => emit_seq(items)`). Both bind the @12 handle as a BORROW (drop-subject-after).
+                IrPattern::Bind { var, ty }
+                    if is_heap_ty(ty)
+                        && (s.heap_elem_lists.contains(&subj) || s.value_result_lists.contains(&subj)) =>
+                {
                     Ok(Some((*var, true)))
                 }
                 IrPattern::Wildcard => Ok(None),
@@ -988,7 +1004,8 @@ impl LowerCtx {
         if heap_res && !str_heap_bind {
             if let Some(pos) = self.live_heap_handles.iter().rposition(|&v| v == subj) {
                 self.live_heap_handles.remove(pos);
-                self.ops.push(Op::Drop { v: subj });
+                let op = self.drop_op_for(subj);
+                self.ops.push(op);
             }
         }
         self.ops.push(Op::IfThen { cond: tag, dst: Some(dst) });
@@ -1020,7 +1037,8 @@ impl LowerCtx {
         if str_heap_bind {
             if let Some(pos) = self.live_heap_handles.iter().rposition(|&v| v == subj) {
                 self.live_heap_handles.remove(pos);
-                self.ops.push(Op::Drop { v: subj });
+                let op = self.drop_op_for(subj);
+                self.ops.push(op);
             }
         }
         Some(dst)
@@ -1267,18 +1285,8 @@ impl LowerCtx {
     /// restoring `live_heap_handles` to its pre-frame length — the per-arm teardown.
     pub(crate) fn drop_arm_locals(&mut self, mark: usize) {
         for v in self.live_heap_handles.split_off(mark).into_iter().rev() {
-            // A `List[Value]` frees recursively via `DropListValue` (`$__drop_value` per element) —
-            // checked FIRST, before the flat-element `DropListStr` (a value-list is also a
-            // `heap_elem_list`, but a flat per-slot rc_dec would leak each element Value's payload).
-            if self.value_elem_lists.contains(&v) {
-                self.ops.push(Op::DropListValue { v });
-            } else if self.heap_elem_lists.contains(&v) || self.record_masks.contains_key(&v) {
-                self.ops.push(Op::DropListStr { v });
-            } else if self.value_handles.contains(&v) {
-                self.ops.push(Op::DropValue { v });
-            } else {
-                self.ops.push(Op::Drop { v });
-            }
+            let op = self.drop_op_for(v);
+            self.ops.push(op);
         }
     }
 

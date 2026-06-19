@@ -62,4 +62,6 @@ spec/wasm_cross/string_from_bytes.almd
 spec/wasm_cross/string_lines.almd
 spec/wasm_cross/trig_libm.almd
 spec/wasm_cross/value_array_leak_loop.almd
+spec/wasm_cross/value_as_array_leak_loop.almd
+spec/wasm_cross/value_as_array_roundtrip.almd
 spec/wasm_cross/wide_function_body.almd

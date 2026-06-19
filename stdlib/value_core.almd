@@ -191,3 +191,54 @@ fn __drop_list_value(xs: List[Value]) -> Unit = {
   if prim.load32(h + 0) == 1 then __vdrop_list(xs, 0, prim.load32(h + 4)) else ()
   prim.rc_dec(h)
 }
+
+// value.as_array — read the tag; a tag-5 Array yields `Ok(<a fresh List[Value] of its elements>)`,
+// else `Err("expected Array")`. The fresh list SHALLOW-COPIES the Array's inline element handles
+// (`__vfill` + rc_inc), so the array stays valid; the returned Result OWNS the list (freed
+// recursively by `__drop_result_lv` at the caller's scope end — see Op::DropResultListValue).
+
+// Copy the n inline element handles of a tag-5 Array `v` into a fresh List[Value] `dst`, rc_inc'ing
+// each (both the array and the new list own a ref; each frees its own at its scope end).
+fn __vfill(v: Value, dst: List[Value], i: Int, n: Int) -> Unit =
+  if i >= n then ()
+  else {
+    let vh = prim.handle(v)
+    let e = prim.load64(vh + 12 + i * 8)
+    prim.rc_inc(e)
+    let dh = prim.handle(dst)
+    prim.store64(dh + 12 + i * 8, e)
+    __vfill(v, dst, i + 1, n)
+  }
+
+fn __varr_to_list(v: Value) -> List[Value] = {
+  let vh = prim.handle(v)
+  let n = prim.load32(vh + 8)         // Array len @8
+  let lst: List[Value] = prim.alloc_list_str(n)
+  let lh = prim.handle(lst)
+  prim.store32(lh + 4, n)             // List len @4
+  __vfill(v, lst, 0, n)
+  lst
+}
+
+fn value_as_array(v: Value) -> Result[List[Value], String] = {
+  let h = prim.handle(v)
+  let tag = prim.load32(h + 4)
+  if tag == 5 then Ok(__varr_to_list(v))
+  else Err("expected Array")
+}
+
+// The RECURSIVE free of a `value.as_array` Result (the render of `Op::DropResultListValue` calls
+// this). The Result is a 1-slot cap-as-tag DynListStr `[rc@0][len@4=1][cap@8][@12 payload][@16 tag]`:
+// @16 = 0 (Ok, payload @12 = a List[Value]) or 1 (Err, payload @12 = the String). At the LAST ref
+// (rc==1): Ok → free the list recursively via `__drop_list_value`; Err → free the String; THEN free
+// the Result block. A flat `DropListStr` would only rc_dec @12 (the list block), LEAKING its elements.
+fn __drop_result_lv(r: Result[List[Value], String]) -> Unit = {
+  let h = prim.handle(r)
+  if prim.load32(h + 0) == 1 then {
+    if prim.load32(h + 16) == 0 then {
+      let lst: List[Value] = prim.load_handle(h + 12)
+      __drop_list_value(lst)
+    } else prim.rc_dec(prim.load64(h + 12))
+  } else ()
+  prim.rc_dec(h)
+}

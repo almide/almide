@@ -216,6 +216,13 @@ pub enum Op {
     /// Values were accounted `m`/consumed when stored). The Value-element counterpart of
     /// `DropListStr` (which is for String elements, whose `rc_dec` IS their full free).
     DropListValue { v: ValueId },
+    /// `drop_result_lv v` — release a `value.as_array` Result `Result[List[Value], String]` (the
+    /// cap-as-tag 1-slot block `[rc][len@4=1][cap@8][@12 payload][@16 tag]`). IFF the last reference
+    /// (rc==1), the RENDER tag-dispatches on @16: Ok (0) frees the `List[Value]` payload @12
+    /// RECURSIVELY (`$__drop_list_value`), Err (1) frees the String @12 (`rc_dec`); THEN the block.
+    /// A flat `DropListStr` would only rc_dec @12 (the list block), LEAKING its element Values. Same
+    /// cert event as [`Op::Drop`] (one `−1`/`d` on the Result object — its payload was `m`/consumed).
+    DropResultListValue { v: ValueId },
     /// `consume v` — transfer v's reference OUT (into a container, a return, or
     /// a callee that takes ownership). v is dead here; the reference lives on
     /// elsewhere. Renders as a move (Rust) / ptr-transfer with no inc (wasm).
@@ -667,7 +674,11 @@ pub fn verify_ownership(func: &MirFunction) -> Result<(), Vec<Violation>> {
             // A `DropListStr`/`DropListValue` releases the LIST object exactly like a `Drop` (the
             // recursive element free is a RENDER concern, gated on rc==1; the cert sees one −1 on the
             // list — its elements were `Consume`d into it when stored).
-            Op::Drop { v } | Op::DropListStr { v } | Op::DropValue { v } | Op::DropListValue { v } => {
+            Op::Drop { v }
+            | Op::DropListStr { v }
+            | Op::DropValue { v }
+            | Op::DropListValue { v }
+            | Op::DropResultListValue { v } => {
                 match release(&object_of, &mut rc, &mut dead, &borrowed, *v) {
                     Ok(()) => {}
                     Err(()) => violations.push(violation(i, *v, ViolationKind::DoubleFree)),
