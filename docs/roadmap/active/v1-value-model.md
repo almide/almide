@@ -125,6 +125,29 @@ layout brick: payload-precise heap-payload binding + heap-Result-of-list trackin
 staged value.array/as_array/__drop_value, register them, wire Op::DropValue→$__drop_value, and verify
 with a round-trip (`value.as_int(items[i])`) + the leak loop. yaml's emit/collect then unblock.
 
+## ★★★ THE FINAL GATE PINNED PRECISELY 2026-06-19: the Camp-4 frontier (heap-payload bind over a heap-Result)
+
+The "layout brick" for as_array usage is, precisely, the **Camp-4 frontier** in `try_lower_result_match`
+(control.rs ~916-939). `match value.as_array(a) { Ok(items) => … }` where `items: List[Value]` is a
+HEAP-payload bind over a HEAP-Result. Two hard stops:
+- `Ok(inner)` uses `scalar_bind` (line 919) which admits ONLY scalar/wildcard — a heap `items` → rollback.
+- Even via `heap_or_scalar_bind`, line 936 ROLLS BACK any heap-payload bind when `heap_res` (the
+  "Camp-4 frontier: defer").
+ROOT CAUSE (a real cert-design problem, not a one-liner): in the cap-as-tag rep (value.as_string,
+7b24ef8f) the Ok payload ALIASES the subject (same handle). The heap-Result match does SUBJECT-DROP-
+BEFORE-ARMS (line 965) to make the arms a clean scalar-cond `if` — but then a payload BORROW (`items` =
+LoadHandle@12 = the subject) DANGLES. The alternative (MOVE the payload into each arm's bind, arm owns +
+drops) makes `verify_ownership` — which processes the if-arms FLAT — see TWO drops of the one subject =
+a false double-free (the checker doesn't model then/else mutual exclusion). So neither the borrow nor
+the move is cert-clean today.
+THE REAL FIX (one of): (a) teach `verify_ownership` then/else MUTUAL EXCLUSION (a drop in `then` and a
+drop in `else` of the same object is ONE net drop) — the principled fix, unblocks heap-payload binds
+generally; or (b) a NON-SHARED Result rep (a separate Ok shell `[rc][tag][_][payload@12=list]` so the
+payload is a distinct owned object the arm moves out, and the shell drop frees only the shell). (a) is
+the better long-term (it also lifts the Err-heap-bind + Some-heap-bind deferrals). This is ②-critical
+(a wrong choice = UAF or double-free), so it is design-first, NOT a session-end rush. Everything ELSE
+in the Value model is built + verified (see the FULL BUILD ATTEMPT section above); THIS is the one gate.
+
 ## PRIM-FLOOR layer found 2026-06-19 (the foundation below piece 1)
 
 The prim floor (load_str/store_str/load64/store64/handle) has NO typed `load_list` to read a
