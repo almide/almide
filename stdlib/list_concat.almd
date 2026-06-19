@@ -30,3 +30,31 @@ fn __list_concat(a: List[Int], b: List[Int]) -> List[Int] = {
   let _y = __lc_copy(ho + 12 + la * 8, hb + 12, lb, 0)
   out
 }
+
+// HEAP-ELEMENT concat (the rc-incrementing variant prim.rc_inc was written for): each slot is an
+// OWNED heap handle (a String, a Value, a scalar-aggregate), so the new list must ACQUIRE its own
+// reference per element (rc_inc) — then dropping the source (DropListStr / DropListValue, recursive
+// rc_dec per element) does not free what the new list now co-owns. This serves `List[String] + …`,
+// `List[Value] + …`, `List[(k,v)] + …` (the heap-loop-carried append accumulators). The raw rc_inc is
+// cert-INVISIBLE (a Prim), so the per-element leak-safety is the differential/leak-loop's burden; the
+// list BLOCK's `i(id)m` is the proven part. Self-hosted (reuses $rc_inc), so §4.1 holds.
+fn __lc_copy_rc(dst: Int, src: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let e = prim.load64(src + i * 8)
+    prim.rc_inc(e)
+    prim.store64(dst + i * 8, e)
+    __lc_copy_rc(dst, src, n, i + 1)
+  }
+
+fn __list_concat_rc(a: List[Int], b: List[Int]) -> List[Int] = {
+  let ha = prim.handle(a)
+  let hb = prim.handle(b)
+  let la = prim.load32(ha + 4)
+  let lb = prim.load32(hb + 4)
+  let out = prim.alloc_list(la + lb)
+  let ho = prim.handle(out)
+  let _x = __lc_copy_rc(ho + 12, ha + 12, la, 0)
+  let _y = __lc_copy_rc(ho + 12 + la * 8, hb + 12, lb, 0)
+  out
+}

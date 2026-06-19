@@ -126,21 +126,24 @@ fn count_ir_calls(body: &almide_ir::IrExpr, registry: &almide_mir::lower::Record
                     self.n += lit_arms;
                 }
             }
-            // A SCALAR-element list concat `a + b` (BinOp::ConcatList over List[Int/Float/Bool])
-            // lowers to ONE synthetic `__list_concat` CallFn (a mir_call). Count the operator NODE
-            // as one ir_call ONLY for the scalar-element shape the lowering actually emits a call
-            // for — a HEAP-element list concat (List[String]) DEFERS (no MIR call, no count), so
-            // counting it would falsely taint mir<ir. `mir_calls <= ir_calls` holds BY CONSTRUCTION.
-            // __list_concat is pure (prim memory ops, no Stdout), adding no real capability.
+            // A list concat `a + b` (BinOp::ConcatList) lowers to ONE synthetic CallFn — `__list_concat`
+            // (SCALAR-element, byte-copy) or `__list_concat_rc` (HEAP-element String/Value, rc-incrementing
+            // copy). Count the operator NODE as one ir_call for EXACTLY the element shapes the lowering
+            // emits a call for (scalar, or String/Value heap-element); a heap-FIELD aggregate element
+            // (tuple/record) still DEFERS (no MIR call, no count). `mir_calls <= ir_calls` holds BY
+            // CONSTRUCTION. Both concat runtimes are pure (prim memory ops, no Stdout).
             if let almide_ir::IrExprKind::BinOp { op: almide_ir::BinOp::ConcatList, .. } = &e.kind {
-                let scalar_elem = matches!(
+                let lowered = matches!(
                     &e.ty,
                     almide_lang::types::Ty::Applied(
                         almide_lang::types::constructor::TypeConstructorId::List,
                         a,
-                    ) if a.len() == 1 && !almide_mir::lower::is_heap_ty(&a[0])
+                    ) if a.len() == 1
+                        && (!almide_mir::lower::is_heap_ty(&a[0])
+                            || matches!(a[0], almide_lang::types::Ty::String)
+                            || almide_mir::lower::is_value_ty(&a[0]))
                 );
-                if scalar_elem {
+                if lowered {
                     self.n += 1;
                 }
             }

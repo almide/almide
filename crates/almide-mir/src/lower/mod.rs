@@ -419,7 +419,7 @@ pub type RecordLayouts =
 /// Is `ty` the dynamic `Value` type (the Codec data model)? Its scope-end drop is the
 /// runtime-tag-dispatched [`Op::DropValue`], since a heap-payload Value (Str/Array/Object) owns a
 /// handle the flat `Drop` would leak.
-pub(crate) fn is_value_ty(ty: &Ty) -> bool {
+pub fn is_value_ty(ty: &Ty) -> bool {
     match ty {
         Ty::Named(name, _) => name.as_str() == "Value",
         Ty::Variant { name, .. } => name.as_str() == "Value",

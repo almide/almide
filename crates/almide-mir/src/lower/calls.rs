@@ -537,10 +537,18 @@ impl LowerCtx {
         let IrExprKind::BinOp { op: BinOp::ConcatList, left, right } = &value.kind else {
             return None;
         };
-        // SCALAR-element list only — a heap element (List[String]) would alias owned handles.
-        let scalar_elem = matches!(&value.ty,
-            Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && !is_heap_ty(&a[0]));
-        if !scalar_elem {
+        let elem_ty = match &value.ty {
+            Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 => a[0].clone(),
+            _ => return None,
+        };
+        // SCALAR-element (i64 slots: Int/Float/Bool) → byte-copy `__list_concat`. HEAP-element String or
+        // Value (OWNED handle slots) → the rc-incrementing `__list_concat_rc` (the new list co-owns each
+        // element; the source's recursive drop frees its own refs). A heap-FIELD aggregate element
+        // (tuple/record with inner heap) still DEFERS — it needs the masked recursive drop (tuple-heap).
+        let scalar_elem = !is_heap_ty(&elem_ty);
+        let heap_elem =
+            is_heap_ty(&elem_ty) && (matches!(elem_ty, Ty::String) || crate::lower::is_value_ty(&elem_ty));
+        if !scalar_elem && !heap_elem {
             return None;
         }
         let ops_mark = self.ops.len();
@@ -555,12 +563,23 @@ impl LowerCtx {
             }
         };
         let dst = self.fresh_value();
+        let name = if scalar_elem { "__list_concat" } else { "__list_concat_rc" };
         self.ops.push(Op::CallFn {
             dst: Some(dst),
-            name: "__list_concat".to_string(),
+            name: name.to_string(),
             args,
             result: Some(Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT }),
         });
+        // Mark the heap-element result for the correct RECURSIVE drop (DropListValue per `$__drop_value`
+        // for Value, DropListStr per-slot rc_dec for String) so scope-end / loop teardown frees each
+        // owned element — the leak-safety the cert-invisible per-element rc_inc relies on the drop for.
+        if heap_elem {
+            if crate::lower::is_value_ty(&elem_ty) {
+                self.value_elem_lists.insert(dst);
+            } else {
+                self.heap_elem_lists.insert(dst);
+            }
+        }
         Some(dst)
     }
 
@@ -1987,11 +2006,18 @@ impl LowerCtx {
             // an UNTRACKED free exposed to arbitrary code would let any fn double-free outside the
             // ownership cert's sight, so only the value-model drop/copy routines may name it: the
             // recursive drop (`__drop_value`, rc_dec), the array shallow-copy (`__varr_copy`, rc_inc),
-            // and the as_array element-list fill (`__vfill`, rc_inc). See docs/roadmap/active/v1-value-model.md.
+            // the as_array element-list fill (`__vfill`, rc_inc), and the heap-element list-concat copy
+            // (`__lc_copy_rc`, rc_inc — the new list co-owns each appended element, balanced by the
+            // source's recursive DropListStr/DropListValue). See docs/roadmap/active/v1-value-model.md.
             "rc_dec" | "rc_inc"
                 if matches!(
                     self.fn_name.as_str(),
-                    "__drop_value" | "__drop_list_value" | "__drop_result_lv" | "__varr_copy" | "__vfill"
+                    "__drop_value"
+                        | "__drop_list_value"
+                        | "__drop_result_lv"
+                        | "__varr_copy"
+                        | "__vfill"
+                        | "__lc_copy_rc"
                 ) =>
             {
                 if func == "rc_dec" { PrimKind::RcDec } else { PrimKind::RcInc }
