@@ -1844,6 +1844,16 @@ impl LowerCtx {
                     }
                 }
             }
+            // A SCALAR `??` in a value/operand position (`(int.parse(s) ?? 0) - 48`,
+            // `(codepoint(ch) ?? 0)` fed to arithmetic) — execute the unwrap (tag read +
+            // payload-or-fallback) via the same machinery the tail/let positions use. Without this
+            // arm a `??` operand fell to `_ => None` → the caller's `Const 0`, so the WHOLE BinOp
+            // silently read 0 (`(x ?? 0) - 48` → 0, not x-48). Scalar result only — a heap-String
+            // `??` is not a scalar value operand. `try_lower_option_unwrap_or` is rollback-safe and
+            // emits its own balanced Option materialize/drop, exactly like the scalar-Call arm above.
+            IrExprKind::UnwrapOr { expr, fallback } if !is_heap_ty(&fallback.ty) => {
+                self.try_lower_option_unwrap_or(expr, fallback, false)
+            }
             _ => None,
         }
     }
