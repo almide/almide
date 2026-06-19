@@ -263,6 +263,21 @@ impl LowerCtx {
                             return Ok(Some(dst));
                         }
                     }
+                    // A TUPLE literal RETURNED (`fn pair(s) = (s, 5)`, `(parse_inline(t), pos + 1)`
+                    // — the dominant yaml `(Value, Int)` parser shape): build the real block (scalar
+                    // slots stored, heap elements moved in via `lower_owned_heap_field`) and MOVE IT
+                    // OUT as the return (the block is `record_masks`-tracked but NOT in
+                    // `live_heap_handles`, so it is the moved-out result — the caller owns it, no
+                    // scope-end drop). Same cert as the Record return: alloc(i) + per-element moves +
+                    // move-out(m). The caller's destructure reads it precisely (it's a masked aggregate).
+                    if let IrExprKind::Tuple { elements } = &tail.kind {
+                        if let Some(dst) = self
+                            .try_lower_scalar_tuple_construct(elements)
+                            .or_else(|| self.try_lower_tuple_construct(elements))
+                        {
+                            return Ok(Some(dst));
+                        }
+                    }
                     // A `List[String]` literal RETURNED (`fn make() = [e0, e1]`) — build a real
                     // nested-ownership DynListStr (each element moved/Dup'd in), moved out as the
                     // return (NOT tracked, so no scope-end DropListStr — the caller owns it). Without

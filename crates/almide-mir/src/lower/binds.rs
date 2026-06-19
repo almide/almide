@@ -846,6 +846,27 @@ impl LowerCtx {
         // alongside it = the `8192:2000:0` miscompile.
         if let IrPattern::Tuple { elements } = pattern {
             if let Some(subj) = subject {
+                // A CALL-RESULT tuple (`let (v, n) = dispatch(..)`) is a real OWNED block the
+                // callee built (the `lower_tail` Tuple materialize) but `materialized_call_arg`
+                // tracked it only flatly (a plain Drop would LEAK its heap slot, and it is not a
+                // `materialized_aggregate` so the precise destructure below bails to the `Const 0`
+                // container-alias garbage). SEED it as a masked aggregate: record the heap-slot
+                // mask (so the scope-end drop is the recursive `DropListStr` that frees the owned
+                // String/Value slot) + mark it `materialized_aggregates` (so per-slot borrow reads
+                // execute). Only for an owned, still-live result (in `live_heap_handles`) — a
+                // borrowed param/var already carries its own tracking.
+                if !self.materialized_aggregates.contains(&subj)
+                    && self.live_heap_handles.contains(&subj)
+                {
+                    if let Ty::Tuple(tys) = &value.ty {
+                        let heap_slots: Vec<usize> =
+                            (0..tys.len()).filter(|&i| is_heap_ty(&tys[i])).collect();
+                        if !heap_slots.is_empty() {
+                            self.record_masks.insert(subj, heap_slots);
+                            self.materialized_aggregates.insert(subj);
+                        }
+                    }
+                }
                 if self.try_lower_tuple_destructure(elements, subj) {
                     return Ok(());
                 }
@@ -1344,6 +1365,34 @@ impl LowerCtx {
                 self.ops.push(Op::Dup { dst: dup, src });
                 self.live_heap_handles.push(dup);
                 Some(dup)
+            }
+            // A user-call element (`(parse_inline(after), pos + 1)` — the dominant yaml tuple shape):
+            // the callee returns a FRESH owned heap value (CallFn result = cert `i`, rc 1), tracked
+            // so the enclosing tuple's per-slot `Consume` (`m`) moves it into the slot — the tuple
+            // then owns it (its masked recursive DropListStr frees it). Same `i`/`m` balance as the
+            // Var element's Dup. A pure Module-call (`value.array(items)`) returns a fresh Value the
+            // same way; an impure/HO callee errors → None → the tuple defers (sound Opaque).
+            IrExprKind::Call { target: CallTarget::Named { name }, args, .. } => {
+                let lowered = self.lower_call_args(args).ok()?;
+                let repr = repr_of(&expr.ty).ok()?;
+                let obj = self.fresh_value();
+                self.ops.push(Op::CallFn {
+                    dst: Some(obj),
+                    name: name.as_str().to_string(),
+                    args: lowered,
+                    result: Some(repr),
+                });
+                self.live_heap_handles.push(obj);
+                Some(obj)
+            }
+            IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } => {
+                let obj = self
+                    .lower_pure_module_value_call(module.as_str(), func.as_str(), args, &expr.ty)
+                    .ok()?;
+                if !self.live_heap_handles.contains(&obj) {
+                    self.live_heap_handles.push(obj);
+                }
+                Some(obj)
             }
             // A `List[Int/Float/Bool]` LITERAL field (`{ items: [1, 2, 3] }`, `{ items: [] }`) —
             // materialize the scalar-element block (flat slots, no nested ownership) as a fresh
