@@ -85,6 +85,12 @@ impl LowerCtx {
         // consumer then read as a String = the list HEADER bytes (the `$ ` garbage). Gated to a
         // tracked/materialized list var so `$elem_addr` reads a real populated block (else defer).
         if let IrExprKind::IndexAccess { object, index } = &expr.kind {
+            // GATE: the container must be a `List[heap]` (a nested-ownership list whose slots hold
+            // owned element HANDLES). A scalar `List[Int]` slot holds an i64 VALUE, not a handle —
+            // LoadHandle'ing it would borrow a non-handle (a use-after-free in the cert), so defer.
+            if !crate::lower::is_heap_elem_list_ty(&object.ty) {
+                return None;
+            }
             let list = match &object.kind {
                 IrExprKind::Var { id } if is_heap_ty(&object.ty) => {
                     let v = self.value_or_global(*id).ok()?;
