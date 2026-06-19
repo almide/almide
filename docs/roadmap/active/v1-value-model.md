@@ -73,10 +73,15 @@ blockers found by implementing it:
 3. **List[Value] materialize is needed first.** `value.array([value.int(1),…])`'s arg walls:
    `try_lower_str_list_literal` (binds.rs:103) admits LitStr/Var/Record/Tuple/ConcatStr but NOT Call elements.
    Add a Call-element arm (materialize each via the CallFn, Consume into the slot) gated to a `List[Value]`.
-4. **The drop is UN-GATE-VERIFIABLE (the soundness crux).** A wrong tag-5 drop = a silent LEAK: the output is
-   still correct (leak happens after the print) and the cert sees DropValue as one balanced `d` — so neither
-   output-parity NOR corpus-wall catches it. Needs a dedicated LEAK test (loop create+drop, assert no memory
-   growth / address reuse) BEFORE the drop can be trusted. This is the ②-critical reason it was NOT rushed.
+4. **The drop is UN-GATE-VERIFIABLE by the EXISTING gates (the soundness crux) — but a LEAK TEST works.**
+   A wrong tag-5 drop = a silent LEAK: the output is still correct (leak happens after the print) and the cert
+   sees DropValue as one balanced `d` — so neither output-parity NOR corpus-wall catches it. **RESOLVED
+   2026-06-19: the allocator HAS a free list (`$freelist`: `$rc_dec` at rc 0 pushes the block, `$alloc`
+   reuses a same-size block), so a LEAK TEST is feasible — a `while i < 100000 { let xs = [..]; … }`
+   create+drop loop COMPLETES if freed (freelist keeps memory in page 1) and TRAPS (OOB store past 64KB) if
+   leaked. PROVEN: a 100000-iter List[String] create+drop loop runs to "done" → DropListStr is leak-free.**
+   So the Value drop CAN be trusted: leak-test `while i<100000 { let a = value.array([value.int(i)…]); … }`.
+   Self-recursion can NOT drive the loop (no TCO → stack overflow at ~100k depth); a `while` loop must.
 
 THE WORKING SELF-HOST CODE (value_core.almd, ready to re-paste once 1-3 are cleared; self-contained tag-5
 `[rc][tag=5 @4][len @8][elem@12…]`, shallow-copy via rc_inc, raw-handle recursive drop = empty cert):
