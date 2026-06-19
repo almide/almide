@@ -741,12 +741,25 @@ pub fn verify_ownership(func: &MirFunction) -> Result<(), Vec<Violation>> {
             | Op::Else { .. }
             | Op::EndIf { .. }
             // Loop markers carry no ownership; the body ops between them are
-            // per-iteration-balanced (verified flat, one iteration). `SetLocal` is a
-            // scalar copy into a stable local — no heap, no ownership.
+            // per-iteration-balanced (verified flat, one iteration).
             | Op::LoopStart
             | Op::LoopBreakUnless { .. }
-            | Op::LoopEnd
-            | Op::SetLocal { .. } => {}
+            | Op::LoopEnd => {}
+            // `SetLocal` into a HEAP slot is a loop-carried REBIND (`acc = acc + [x]`):
+            // the slot now aliases the source's object. The slot's OLD object was
+            // released by a preceding `Drop` in the loop body, so rebinding makes the
+            // slot LIVE again (= the new object), preserving the per-iteration invariant
+            // (slot owns exactly one ref at the body's start and end) — exactly the
+            // soundness condition proved in OwnershipChecker.v's `check_line_unroll_sound`
+            // (a rc-preserving loop body is leak/double-free-free for any iteration
+            // count). For a SCALAR src (the scalar-TCO loop var) `object_of` has no
+            // entry, so this is a no-op, as before.
+            Op::SetLocal { local, src } => {
+                if let Some(o) = object_of.get(src).copied() {
+                    object_of.insert(*local, o);
+                    dead.insert(*local, false);
+                }
+            }
         }
     }
 

@@ -15,7 +15,7 @@
 //! correspondence, and `proofs/gate.sh` runs the actual proven binary on it.
 
 use crate::{CallArg, Capability, MirFunction, Op, ValueId};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// The name-totality witness (proofs/NameTotality.v, the 2nd flight-grade
 /// property): the DEFINED value ids (params + op results) and the USED value ids
@@ -389,8 +389,62 @@ impl Streams {
     }
 }
 
-/// Emit the per-object ownership certificate (format v0) for a function.
+/// Pre-scan for HEAP loop-carried SLOTS (option C). A `SetLocal { local, src }`
+/// inside a `LoopStart`…`LoopEnd` region, whose `src` is a heap object (an
+/// `Alloc`/heap-call-result allocated in the loop body — the `acc + [x]` feeder),
+/// makes `local` a loop-carried accumulator slot: across iterations the slot drops
+/// its old object and acquires `src` as the new one. The certificate folds the
+/// slot's per-iteration drop-old + acquire-new into ONE stream wrapped in loop
+/// delimiters `(`…`)`, so it reads `i(id)m` (acquire once; loop body acquire-new +
+/// drop-old = rc-preserving; move out the final) — accepted by the proven
+/// `check_cert_lc`. Returns `feeder -> slot` (route the feeder's `i` to the slot
+/// stream) and the set of slot locals (open/close `(`/`)` around the loop body).
+fn loop_carried_slots(func: &MirFunction) -> (BTreeMap<ValueId, ValueId>, BTreeSet<ValueId>) {
+    // Heap object dsts: Alloc, and calls with a heap result.
+    let mut heap_objs: BTreeSet<ValueId> = BTreeSet::new();
+    for p in &func.params {
+        if p.repr.is_heap() {
+            heap_objs.insert(p.value);
+        }
+    }
+    for op in &func.ops {
+        match op {
+            Op::Alloc { dst, .. } => {
+                heap_objs.insert(*dst);
+            }
+            Op::Call { dst: Some(d), result: Some(r), .. }
+            | Op::CallFn { dst: Some(d), result: Some(r), .. }
+            | Op::CallIndirect { dst: Some(d), result: Some(r), .. }
+                if r.is_heap() =>
+            {
+                heap_objs.insert(*d);
+            }
+            _ => {}
+        }
+    }
+    let mut feeder_to_slot: BTreeMap<ValueId, ValueId> = BTreeMap::new();
+    let mut slots: BTreeSet<ValueId> = BTreeSet::new();
+    let mut depth: u32 = 0;
+    for op in &func.ops {
+        match op {
+            Op::LoopStart => depth += 1,
+            Op::LoopEnd => depth = depth.saturating_sub(1),
+            Op::SetLocal { local, src } if depth > 0 && heap_objs.contains(src) => {
+                feeder_to_slot.insert(*src, *local);
+                slots.insert(*local);
+            }
+            _ => {}
+        }
+    }
+    (feeder_to_slot, slots)
+}
+
+/// Emit the per-object ownership certificate (format v2) for a function. Heap
+/// loop-carried accumulator slots are folded into a single `i(id)m` stream with
+/// loop delimiters (option C); everything else is the flat per-object format.
 pub fn ownership_certificate(func: &MirFunction) -> String {
+    let (feeder_to_slot, slots) = loop_carried_slots(func);
+    let mut depth: u32 = 0;
     let mut s = Streams::new();
 
     // Heap params are BORROWED (the v1 calling convention): the CALLER owns the
@@ -410,8 +464,15 @@ pub fn ownership_certificate(func: &MirFunction) -> String {
     for op in &func.ops {
         match op {
             Op::Alloc { dst, .. } => {
-                s.of.insert(*dst, *dst);
-                s.event(*dst, 'i');
+                // An Alloc that FEEDS a loop-carried slot routes its `i` into the slot
+                // stream (folded inside the loop delimiters); otherwise its own stream.
+                if let Some(&slot) = feeder_to_slot.get(dst) {
+                    s.of.insert(*dst, slot);
+                    s.event(slot, 'i');
+                } else {
+                    s.of.insert(*dst, *dst);
+                    s.event(*dst, 'i');
+                }
             }
             Op::Dup { dst, src } => {
                 // ALIAS acquire (+1): a new handle on an existing shared object.
@@ -452,11 +513,40 @@ pub fn ownership_certificate(func: &MirFunction) -> String {
             | Op::CallIndirect { dst: Some(d), result: Some(r), .. }
                 if r.is_heap() =>
             {
-                s.of.insert(*d, *d);
-                s.event(*d, 'i');
+                // A heap loop-carried FEEDER (`new = acc + [x]`): its `i` belongs to
+                // the SLOT stream (the slot absorbs `new` via the following SetLocal),
+                // folded inside the loop delimiters → `i(id)m`. Otherwise it is a
+                // fresh owned object with its own stream (`i`).
+                if let Some(&slot) = feeder_to_slot.get(d) {
+                    s.of.insert(*d, slot);
+                    s.event(slot, 'i');
+                } else {
+                    s.of.insert(*d, *d);
+                    s.event(*d, 'i');
+                }
             }
-            // No refcount change: Borrow/MakeUnique/Const/Pure/IntBinOp, and a
-            // call with a void/scalar result (its heap-handle args are borrowed).
+            // Loop delimiters for a heap loop-carried slot: open `(` on each slot
+            // stream when entering a top-level loop, close `)` on leaving — so the
+            // slot's per-iteration acquire-new + drop-old reads `(id)`, certifying a
+            // rc-preserving body (option C, proved in check_line_unroll_sound).
+            Op::LoopStart => {
+                if depth == 0 {
+                    for slot in &slots {
+                        s.event(*slot, '(');
+                    }
+                }
+                depth += 1;
+            }
+            Op::LoopEnd => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    for slot in &slots {
+                        s.event(*slot, ')');
+                    }
+                }
+            }
+            // No refcount change: Borrow/MakeUnique/Const/Pure/IntBinOp/SetLocal, and
+            // a call with a void/scalar result (its heap-handle args are borrowed).
             _ => {}
         }
     }
@@ -519,6 +609,49 @@ mod tests {
         // object a: "id", object b: "id" — two balanced lines.
         assert_eq!(ownership_certificate(&f), "id\nid\n");
         assert_eq!(verify_ownership(&f), Ok(()));
+    }
+
+    #[test]
+    fn loop_carried_accumulator_folds_to_one_slot_stream() {
+        // The heap-loop-carried accumulator (option C): `acc` is alloc'd, then each
+        // iteration allocs a NEW object (the `acc + [x]` feeder), drops the OLD acc,
+        // and rebinds `acc = new` via SetLocal; finally `acc` is returned (moved out).
+        //   acc=Alloc; loop { new=Alloc; Drop acc; SetLocal acc,new }; ret acc
+        // The slot folds to ONE stream `i(id)m` — acquire once; loop body acquire-new +
+        // drop-old (a rc-preserving body); move out — accepted by the proven check_cert_lc.
+        let (acc, new) = (ValueId(0), ValueId(1));
+        let mut f = func(vec![
+            Op::Alloc { dst: acc, repr: heap(), init: Init::Opaque },
+            Op::LoopStart,
+            Op::Alloc { dst: new, repr: heap(), init: Init::Opaque },
+            Op::Drop { v: acc },
+            Op::SetLocal { local: acc, src: new },
+            Op::LoopEnd,
+        ]);
+        f.ret = Some(acc);
+        assert_eq!(ownership_certificate(&f), "i(id)m\n");
+        // The Rust-side checker accepts it too (SetLocal rebind preserves the slot
+        // invariant) — its verdict matches the proven check_cert_lc on the cert.
+        assert_eq!(verify_ownership(&f), Ok(()));
+    }
+
+    #[test]
+    fn loop_carried_leaky_body_is_rejected() {
+        // A loop body that allocs but never drops the old acc → the slot stream is
+        // `i(i)m` (loop body NOT rc-preserving: net +1) → REJECT, both here and in Coq.
+        let (acc, new) = (ValueId(0), ValueId(1));
+        let mut f = func(vec![
+            Op::Alloc { dst: acc, repr: heap(), init: Init::Opaque },
+            Op::LoopStart,
+            Op::Alloc { dst: new, repr: heap(), init: Init::Opaque },
+            Op::SetLocal { local: acc, src: new },
+            Op::LoopEnd,
+        ]);
+        f.ret = Some(acc);
+        assert_eq!(ownership_certificate(&f), "i(i)m\n");
+        // verify_ownership flags the leaked old `acc` object (the dropped Alloc never
+        // released before rebind) — the cert faithfully carries the rejection.
+        assert!(verify_ownership(&f).is_err());
     }
 
     #[test]
