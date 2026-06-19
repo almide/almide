@@ -1975,11 +1975,11 @@ impl LowerCtx {
             // Raw refcount free/acquire — the Value drop/copy mechanism. GATED to the value-model
             // self-host fns (the trusted recursive-free / shallow-copy, like the inline DropListStr):
             // an UNTRACKED free exposed to arbitrary code would let any fn double-free outside the
-            // ownership cert's sight, so only the recursive-drop (`__drop_value`) / shallow-copy
-            // (`__varr_copy`) value-model routines may name it. (Staged: the value-model self-host
-            // that uses these is a follow-up — see docs/roadmap/active/v1-value-model.md.)
+            // ownership cert's sight, so only the value-model drop/copy routines may name it: the
+            // recursive drop (`__drop_value`, rc_dec), the array shallow-copy (`__varr_copy`, rc_inc),
+            // and the as_array element-list fill (`__vfill`, rc_inc). See docs/roadmap/active/v1-value-model.md.
             "rc_dec" | "rc_inc"
-                if matches!(self.fn_name.as_str(), "__drop_value" | "__varr_copy") =>
+                if matches!(self.fn_name.as_str(), "__drop_value" | "__varr_copy" | "__vfill") =>
             {
                 if func == "rc_dec" { PrimKind::RcDec } else { PrimKind::RcInc }
             }

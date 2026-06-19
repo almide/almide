@@ -102,6 +102,29 @@ The render wiring (reverted): `Op::DropValue { v } => format!("    (call $__drop
 + register `("value_array","value.array")` and (once stringify is restructured) `("value_stringify","value.stringify")`.
 Almide gotcha CONFIRMED: the Unit literal is `()` NOT `unit`.
 
+## ★★ FULL BUILD ATTEMPT 2026-06-19 — built end-to-end; the ONE remaining gate is the LAYOUT BRICK (as_array usage)
+
+Drove the entire coupled batch this session and CONFIRMED each piece by build + run, then re-staged
+(unverifiable end-to-end → not shipped, per ②). What WORKS (verified):
+- `prim.rc_dec`/`rc_inc` + `prim.load_handle` (COMMITTED) + the whitelist (to `__drop_value`/`__varr_copy`/`__vfill`).
+- **List[Value] materialize** — `[value.int(1), …]` admits Call elements (Module value.* via lower_pure_module_value_call, Named via CallFn), Consumed into the nested-ownership list. BUILT (walled before, renders now).
+- **value.array** (self-contained tag-5, shallow-copy via `__varr_copy`+rc_inc) — the emitted wat is CORRECT by inspection (alloc n slots, store tag@4=5 / len@8=n, rc_inc+store each element).
+- **__drop_value** (recursive raw-handle, Unit self-rec helpers `__vdrop_arr` — NOT guarded) — RAN in production earlier.
+- **value.as_array** (extract to a fresh List[Value] via `__vfill`+rc_inc; `prim.alloc_list_str` is generic `[A]` so `alloc_list_str` typed `List[Value]` needs no new prim) — CONSTRUCTS correctly.
+- `Almide gotchas CONFIRMED: Unit literal is `()`; `value.at` is NOT a v0 fn (frontend rejects) — use the real v0 `value.as_array`; the allocator HAS a `$freelist` so the leak-loop gate works.`
+
+THE ONE REMAINING GATE — **the LAYOUT BRICK (payload-precise heap binding)** — blocks as_array USAGE:
+`match value.as_array(a) { Ok(items) => items[i] / list.len(items) }` MIS-BINDS. Two coupled causes:
+(1) `bind_pattern` (control.rs ~150) binds a HEAP payload by Dup'ing the WHOLE subject (container-grain —
+its own comment says "payload-PRECISE identity needs the layout brick"), so `items` = the Result shell,
+not the inner list. (2) The heap-Result-of-LIST is not tracked: `materialized_results_str` only marks
+`Result[String,_]` (the cap@16 str-result machinery, 7b24ef8f); a `Result[List[Value],String]` is
+unrecognized, so the match linearizes/mis-reads. EVIDENCE: `value.array([7,8,9])` then
+`Ok(items)=>list.len(items)` prints 1, not 3 (reads the shell, not the list). So the NEXT brick is the
+layout brick: payload-precise heap-payload binding + heap-Result-of-list tracking. Then re-paste the
+staged value.array/as_array/__drop_value, register them, wire Op::DropValue→$__drop_value, and verify
+with a round-trip (`value.as_int(items[i])`) + the leak loop. yaml's emit/collect then unblock.
+
 ## PRIM-FLOOR layer found 2026-06-19 (the foundation below piece 1)
 
 The prim floor (load_str/store_str/load64/store64/handle) has NO typed `load_list` to read a
