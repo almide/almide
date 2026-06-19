@@ -215,6 +215,12 @@ impl LowerCtx {
                     self.live_heap_handles.retain(|h| *h != v); // moved out, not dropped
                     Ok(Some(v))
                 }
+                // A TAIL `e!` (Unwrap — effect-fn error propagation in return position):
+                // `f() = g()!` PROPAGATES g's Result unchanged (Ok→Ok, Err→Err), i.e. it IS
+                // `f() = g()` at the effect-Result level. So strip the `!` and lower `e` as the
+                // tail (return its Result directly). This unblocks the `parse_mapping =
+                // collect_map(..)!` shape (a tail call result propagated).
+                IrExprKind::Unwrap { expr } => return self.lower_tail(Some(expr)),
                 // A fresh heap literal returned directly (`fn f() = [1, 2, 3]`):
                 // allocate it and move it out. It is NOT added to
                 // `live_heap_handles`, so it is the return value (consumed at the
@@ -236,7 +242,6 @@ impl LowerCtx {
                 | IrExprKind::BinOp { .. }
                 | IrExprKind::UnOp { .. }
                 | IrExprKind::Try { .. }
-                | IrExprKind::Unwrap { .. }
                 | IrExprKind::UnwrapOr { .. }
                 | IrExprKind::ToOption { .. }
                 | IrExprKind::OptionalChain { .. }
@@ -551,10 +556,9 @@ impl LowerCtx {
             // ownership. (A HEAP extraction is an ALIAS / share — it needs a layout-aware
             // field-access op with `Dup` semantics and stays walled until that brick.)
             | IrExprKind::MapAccess { .. }
-            // A SCALAR error-operator result (`x!`/`x?.f` yielding a scalar) is
+            // A SCALAR error-operator result (`x?.f` yielding a scalar) is
             // likewise a fresh `Const`; the operator's value + early-return are deferred.
             | IrExprKind::Try { .. }
-            | IrExprKind::Unwrap { .. }
             | IrExprKind::ToOption { .. }
             | IrExprKind::OptionalChain { .. }
             // A RANGE returned: a fresh `Const` (no ownership); any analyzable callee
@@ -567,6 +571,9 @@ impl LowerCtx {
                 self.record_elided_calls(tail);
                 Ok(Some(dst))
             }
+            // A TAIL `e!` (Unwrap — effect-fn error propagation): `f() = g()!` propagates g's
+            // Result unchanged, i.e. it IS `f() = g()`. Strip the `!` and lower `e` as the tail.
+            IrExprKind::Unwrap { expr } => self.lower_tail(Some(expr)),
             // A SCALAR tail `??` (`fn parse_or_zero(s) = int.parse(s) ?? 0`, the canonical
             // form) EXECUTES the unwrap (tag read + payload-or-fallback) — it was a deferred
             // `Const` 0 here (a silent wrong value, neither payload nor fallback). Outside the
