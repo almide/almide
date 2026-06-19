@@ -1979,7 +1979,10 @@ impl LowerCtx {
             // recursive drop (`__drop_value`, rc_dec), the array shallow-copy (`__varr_copy`, rc_inc),
             // and the as_array element-list fill (`__vfill`, rc_inc). See docs/roadmap/active/v1-value-model.md.
             "rc_dec" | "rc_inc"
-                if matches!(self.fn_name.as_str(), "__drop_value" | "__varr_copy" | "__vfill") =>
+                if matches!(
+                    self.fn_name.as_str(),
+                    "__drop_value" | "__drop_list_value" | "__varr_copy" | "__vfill"
+                ) =>
             {
                 if func == "rc_dec" { PrimKind::RcDec } else { PrimKind::RcInc }
             }

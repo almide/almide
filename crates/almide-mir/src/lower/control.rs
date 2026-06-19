@@ -1267,7 +1267,12 @@ impl LowerCtx {
     /// restoring `live_heap_handles` to its pre-frame length — the per-arm teardown.
     pub(crate) fn drop_arm_locals(&mut self, mark: usize) {
         for v in self.live_heap_handles.split_off(mark).into_iter().rev() {
-            if self.heap_elem_lists.contains(&v) || self.record_masks.contains_key(&v) {
+            // A `List[Value]` frees recursively via `DropListValue` (`$__drop_value` per element) —
+            // checked FIRST, before the flat-element `DropListStr` (a value-list is also a
+            // `heap_elem_list`, but a flat per-slot rc_dec would leak each element Value's payload).
+            if self.value_elem_lists.contains(&v) {
+                self.ops.push(Op::DropListValue { v });
+            } else if self.heap_elem_lists.contains(&v) || self.record_masks.contains_key(&v) {
                 self.ops.push(Op::DropListStr { v });
             } else if self.value_handles.contains(&v) {
                 self.ops.push(Op::DropValue { v });

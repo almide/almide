@@ -364,6 +364,12 @@ pub(crate) struct LowerCtx {
     /// payload, a scalar Value just frees the block) instead of a flat [`Op::Drop`]. Populated
     /// when a `Value`-typed bind is created.
     value_handles: HashSet<ValueId>,
+    /// MIR values that are `List[Value]` (a list whose i64 slots hold OWNED dynamic `Value` handles,
+    /// each itself possibly a heap-payload Str/Array). A scope-end drop emits [`Op::DropListValue`]
+    /// (recursive `$__drop_value` per element) instead of the flat [`Op::DropListStr`], which would
+    /// leak each element Value's nested payload. Populated when a `List[Value]` literal/arg is
+    /// materialized. Distinct from `heap_elem_lists` (String elements, whose `rc_dec` is the full free).
+    value_elem_lists: HashSet<ValueId>,
     /// MIR values KNOWN to be a record/tuple block this brick MATERIALIZED with the uniform
     /// slot layout (`try_lower_scalar_record_construct` / `try_lower_record_construct` /
     /// `try_lower_scalar_tuple_construct` / scalar-tuple/list-slot), plus aggregate-typed
@@ -911,10 +917,15 @@ impl LowerCtx {
             .iter()
             .rev()
             .map(|v| {
+                // A `List[Value]` frees recursively via `DropListValue` (`$__drop_value` per element)
+                // — checked FIRST, before the flat-element `DropListStr`, since a value-list would
+                // otherwise leak each element Value's nested payload.
+                if self.value_elem_lists.contains(v) {
+                    Op::DropListValue { v: *v }
                 // A masked record/tuple and a `List[String]` both free recursively via
                 // `DropListStr` (cert = the SAME single `d`); the render reads `record_masks`
                 // off the function to free only the heap slots (mask) vs every slot (list).
-                if self.heap_elem_lists.contains(v) || self.record_masks.contains_key(v) {
+                } else if self.heap_elem_lists.contains(v) || self.record_masks.contains_key(v) {
                     Op::DropListStr { v: *v }
                 } else if self.value_handles.contains(v) {
                     Op::DropValue { v: *v }

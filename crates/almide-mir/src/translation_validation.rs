@@ -77,7 +77,8 @@ pub fn wasm_pattern(op: &crate::Op) -> Option<String> {
         // A release decrements the refcount cell — realized by `call $rc_dec`.
         Op::Drop { .. } => "call $rc_dec".into(),
         Op::DropListStr { .. } => "call $rc_dec".into(),
-        Op::DropValue { .. } => "call $rc_dec".into(),
+        Op::DropValue { .. } => "call $__drop_value".into(),
+        Op::DropListValue { .. } => "call $__drop_list_value".into(),
         // A copy-on-write: MakeUnique clones a SHARED block before in-place
         // mutation — realized by `call $list_copy` (in the cow's then-branch).
         Op::MakeUnique { .. } => "call $list_copy".into(),

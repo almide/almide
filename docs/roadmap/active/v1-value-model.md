@@ -2,6 +2,35 @@
 
 **Status: DESIGN (2026-06-19). CEO chose path A ("Aでいくぞ"): keep the trusted base minimal, PROVE the Value model (constructors/extractors/serializer self-hosted in .almd, cert-verified), with the recursive free as the ONE trusted runtime routine (like `DropListStr` already is). Coq-free; byte-match-verified vs v0 `runtime/rs/src/value.rs` per brick.**
 
+## ★★★★ LANDED 2026-06-19: the recursive Value-drop FOUNDATION (value.array + 3-level recursive free)
+
+The path-A keystone — the ONE trusted-base addition — is BUILT and LEAK-VERIFIED (no longer staged):
+- **value.array** (value_core.almd): a SELF-CONTAINED tag-5 Value `[rc@0][tag=5 @4][len@8][elem@12+i*8]`,
+  shallow-copying each element handle in via `__varr_copy` (`prim.rc_inc`). Registered.
+- **__drop_value** (recursive, raw-handle, EMPTY cert): tag-dispatched at the last ref (rc==1) — tag 5
+  frees each element Value via `__vdrop_arr`→`__drop_value`, tag 4 frees the String, scalar nothing.
+  `Op::DropValue` now renders to `(call $__drop_value …)` (REPLACES the flat inline drop that leaked an
+  Array's element Values). Verified NO-regression (output-parity 64→65, all existing scalar/Str Value
+  programs byte-match — they drop via $__drop_value identically).
+- **__drop_list_value** + **Op::DropListValue** + the `value_elem_lists` set: a `List[Value]` frees each
+  element via `$__drop_value` (a flat `DropListStr` would leak each element Value's payload). The cert
+  treats `DropListValue` as one `d` (added to lib.rs + certificate.rs groupings). Wired into BOTH
+  `emit_scope_end_drops` AND `drop_arm_locals` (the per-iteration/arm teardown — the bug found by the
+  leak loop: the loop body used `drop_arm_locals`, which initially still emitted the flat `DropListStr`).
+- **List[Value] materialize**: `try_lower_str_list_literal` admits `[value.int(1), value.str("a")]` (Call
+  elements) + marks `value_elem_lists`.
+- `prim.rc_dec`/`rc_inc` whitelist += `__drop_list_value`.
+
+§4.1-COMPLIANT: NO new hand-written WAT runtime function — `$__drop_value`/`$__drop_list_value` are
+self-hosted Almide (auto-linked with value_core) reusing the proven `$rc_dec`/`$rc_inc`. The 3-LEVEL
+recursive free (Array → element-Value → String) is LEAK-VERIFIED by `spec/wasm_cross/value_array_leak_loop.almd`
+(a 20000-iter create+drop loop with a Str element — completes "done"; a leak would OOB-trap past 64KB
+well before ~320 iters since the allocator has a free list). GATES: corpus-wall ACCEPT (14491 heap, no
+leak/double-free) + cargo test (incl. §4.1 + cert) + output-parity 65/65. This is the soundness-core the
+CEO gated "design-first" — now empirically verified by the leak loop (the cert canNOT see a tag-5 leak).
+REMAINING for the 8 Value walls: `value.as_array` (read-back, needs a Result-of-List[Value] rep whose
+drop is value-aware — another tag-dispatched drop) + `value.stringify` (recursive serializer) + value.object.
+
 ## yaml wall countdown (the live tally)
 
 74 functions → walls: 22 (session start) → 21 (float.parse recognition) → **19** (scalar-arg TCO, commit 77c91648) → **17** (nested heap-result `match` arm, commit 5510dc47) → **16** (str-result heap-payload bind = `emit`, commit fab14729) → **15** (let-bound variant-call read-shape seed = `num_signed_base`, below). Remaining 15: oct_rec, bin_rec (heap-loop-carried + match-leaf), flow_rec, flow_step (mutual-rec + heap acc), block_scalar/block_line/block_nonblank (tuple-heap + let-bound heap-if), parse_lines, map_entry, parse_nested, collect_map, collect_seq, seq_item, emit_non_int, is_compound (the Value-array model: value.array/as_array/object/stringify + recursive drop).

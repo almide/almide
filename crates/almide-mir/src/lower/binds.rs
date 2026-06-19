@@ -122,16 +122,26 @@ impl LowerCtx {
             Ty::Applied(TypeConstructorId::List, a)
                 if a.len() == 1 && self.aggregate_field_tys(&a[0])
                     .and_then(|(_, tys)| layout::scalar_slots(&tys)).is_some());
-        if (!elem_str && !elem_scalar_aggregate) || elements.is_empty() {
+        // A `List[Value]` (`[value.int(1), value.str("a")]`) — its slots hold OWNED dynamic Values,
+        // each freed RECURSIVELY at scope end via `Op::DropListValue` (`$__drop_value` per element),
+        // so a Str/Array element's nested payload is reclaimed. Elements are fresh-owned ctor CALLS
+        // (Module `value.*` / a Named `Value`-returning fn) or a tracked Value Var (Dup'd).
+        let elem_value = matches!(&value.ty,
+            Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && is_value_ty(&a[0]));
+        if (!elem_str && !elem_scalar_aggregate && !elem_value) || elements.is_empty() {
             return None;
         }
         // Gate: every element must be a fresh-owned String (LitStr/ConcatStr) OR a tracked
         // heap Var (so we can Dup it) OR — for an aggregate list — a scalar-only record/tuple
-        // LITERAL we can materialize. A Var whose value isn't tracked here cannot be Dup'd → defer.
+        // LITERAL we can materialize OR — for a value list — a fresh-owned Value CALL. A Var whose
+        // value isn't tracked here cannot be Dup'd → defer.
         let all_lowerable = elements.iter().all(|e| match &e.kind {
             IrExprKind::LitStr { .. } | IrExprKind::BinOp { op: BinOp::ConcatStr, .. } => true,
             IrExprKind::Var { id } => self.value_of.contains_key(id),
             IrExprKind::Record { .. } | IrExprKind::Tuple { .. } => elem_scalar_aggregate,
+            IrExprKind::Call { target: CallTarget::Named { .. } | CallTarget::Module { .. }, .. } => {
+                elem_value && is_value_ty(&e.ty)
+            }
             _ => false,
         });
         if !all_lowerable {
@@ -142,7 +152,14 @@ impl LowerCtx {
         self.ops.push(Op::ConstInt { dst: n, value: elements.len() as i64 });
         let list = self.fresh_value();
         self.ops.push(Op::Alloc { dst: list, repr: ptr, init: Init::DynListStr { len: n } });
-        self.heap_elem_lists.insert(list);
+        // A `List[Value]` drops via `Op::DropListValue` (recursive `$__drop_value` per element); a
+        // String/aggregate list via the flat-element `Op::DropListStr`. Marking the right set is what
+        // makes the scope-end drop reclaim each element's nested payload (no leak).
+        if elem_value {
+            self.value_elem_lists.insert(list);
+        } else {
+            self.heap_elem_lists.insert(list);
+        }
         self.materialized_lists.insert(list);
         let h = self.fresh_value();
         self.ops.push(Op::Prim { kind: crate::PrimKind::Handle, dst: Some(h), args: vec![list] });
@@ -169,6 +186,26 @@ impl LowerCtx {
                 // slot. The SAME flat shape as a scalar record, so the list's per-slot `rc_dec`
                 // frees it correctly.
                 IrExprKind::Tuple { .. } => self.try_lower_scalar_tuple_construct_for_elem(elem)?,
+                // A `Value` ctor CALL element (`value.int(1)`, `value.str(s)`) — a fresh OWNED Value
+                // (Module via the pure-call path, Named via CallFn), MOVED into the slot. The list's
+                // `Op::DropListValue` frees each recursively at scope end.
+                IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
+                    if elem_value =>
+                {
+                    self.lower_pure_module_value_call(module.as_str(), func.as_str(), args, &elem.ty).ok()?
+                }
+                IrExprKind::Call { target: CallTarget::Named { name }, args, .. } if elem_value => {
+                    let lowered = self.lower_call_args(args).ok()?;
+                    let obj = self.fresh_value();
+                    let repr = repr_of(&elem.ty).ok()?;
+                    self.ops.push(Op::CallFn {
+                        dst: Some(obj),
+                        name: name.as_str().to_string(),
+                        args: lowered,
+                        result: Some(repr),
+                    });
+                    obj
+                }
                 _ => self.try_lower_concat_str(elem)?,
             };
             let off = self.fresh_value();

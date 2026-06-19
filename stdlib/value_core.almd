@@ -117,3 +117,77 @@ fn value_as_string(v: Value) -> Result[String, String] = {
   if tag == 4 then __vstr_ok(h)
   else Err("expected Str")
 }
+
+// ── COMPOUND Value: Array (tag 5) — SELF-CONTAINED block [rc@0][tag=5 @4][len@8][elem@12+i*8].
+// `value.array(items)` allocs an n-slot Value, writes tag/len, and SHALLOW-COPIES each element
+// handle in (`rc_inc` — the Array shares the element Values; v0's `Array(items.clone())` is the
+// same shared-immutable copy). The recursive free `__drop_value` traverses tag-5 elements at the
+// LAST ref (rc==1). Both routines operate on RAW handles (Int) so their ownership cert is EMPTY
+// (a Prim is a checker no-op) — leak/double-free safety is the leak-loop's burden, the SAME trust
+// level as the inline DropListStr. `prim.rc_inc`/`rc_dec` are whitelisted to exactly these names.
+
+// Shallow-copy n element handles from a List[Value] `src` block into an Array `dst` block, rc_inc'ing
+// each (the Array becomes a co-owner; the source list keeps its own refs, freed at its scope end).
+fn __varr_copy(src: Int, dst: Int, i: Int, n: Int) -> Unit =
+  if i >= n then ()
+  else {
+    let e = prim.load64(src + 12 + i * 8)
+    prim.rc_inc(e)
+    prim.store64(dst + 12 + i * 8, e)
+    __varr_copy(src, dst, i + 1, n)
+  }
+
+fn value_array(items: List[Value]) -> Value = {
+  let ih = prim.handle(items)
+  let n = prim.load32(ih + 4)
+  let v = prim.alloc_value(n)
+  let vh = prim.handle(v)
+  prim.store32(vh + 4, 5)            // tag = Array
+  prim.store32(vh + 8, n)            // len (reuses the cap slot @8)
+  __varr_copy(ih, vh, 0, n)
+  v
+}
+
+// Recursively release each element Value of a tag-5 Array (called only at the Array's last ref).
+fn __vdrop_arr(v: Value, i: Int, n: Int) -> Unit =
+  if i >= n then ()
+  else {
+    let h = prim.handle(v)
+    let e: Value = prim.load_handle(h + 12 + i * 8)
+    __drop_value(e)
+    __vdrop_arr(v, i + 1, n)
+  }
+
+// The runtime-tag-dispatched RECURSIVE Value free (the render of `Op::DropValue` calls this). At the
+// LAST ref (rc==1): tag 5 (Array) frees each element Value recursively; tag 4 (Str) frees the one
+// String payload; tag < 4 (scalar) owns nothing. THEN release the block. Unit self-recursion (via
+// __vdrop_arr) is NOT heap-result, so the self-rec guard does not apply — it lowers.
+fn __drop_value(v: Value) -> Unit = {
+  let h = prim.handle(v)
+  if prim.load32(h + 0) == 1 then {
+    let tag = prim.load32(h + 4)
+    if tag == 5 then __vdrop_arr(v, 0, prim.load32(h + 8))
+    else if tag == 4 then prim.rc_dec(prim.load64(h + 12))
+    else ()
+  } else ()
+  prim.rc_dec(h)
+}
+
+// The RECURSIVE free of a `List[Value]` (the render of `Op::DropListValue` calls this). A List[Value]
+// is a DynListStr block [rc@0][len@4][cap@8][elem@12+i*8] whose slots hold OWNED Value handles. At the
+// LAST ref (rc==1) each element is released via `__drop_value` (tag-dispatched, so a Str/Array element's
+// nested payload is freed too — a flat per-slot rc_dec would leak it), THEN the list block is released.
+fn __vdrop_list(xs: List[Value], i: Int, n: Int) -> Unit =
+  if i >= n then ()
+  else {
+    let h = prim.handle(xs)
+    let e: Value = prim.load_handle(h + 12 + i * 8)
+    __drop_value(e)
+    __vdrop_list(xs, i + 1, n)
+  }
+
+fn __drop_list_value(xs: List[Value]) -> Unit = {
+  let h = prim.handle(xs)
+  if prim.load32(h + 0) == 1 then __vdrop_list(xs, 0, prim.load32(h + 4)) else ()
+  prim.rc_dec(h)
+}

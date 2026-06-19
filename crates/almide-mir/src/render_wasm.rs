@@ -824,18 +824,25 @@ fn render_op(
                 )
             }
         }
-        // RUNTIME-TAG-DISPATCHED drop of a dynamic `Value`: IFF this is the last reference (rc==1)
-        // AND the variant TAG (at +4) is a heap payload (≥ 4 = Str/Array/Object), first `rc_dec`
-        // the ONE payload handle at +12 (i32.wrap'd from its i64 slot); a scalar Value (tag < 4)
-        // owns no payload. THEN `rc_dec` the Value block. The block-free is the single cert `d`.
+        // RUNTIME-TAG-DISPATCHED RECURSIVE drop of a dynamic `Value` — the self-hosted
+        // `$__drop_value` (value_core.almd): at the LAST ref (rc==1) it frees the nested payload by
+        // tag (Array tag 5 → each element Value recursively; Str tag 4 → the one String; scalar < 4
+        // → nothing), then releases the block. A Value only exists if a `value.*` ctor built it, so
+        // value_core (and `$__drop_value` with it) is ALWAYS linked wherever a `DropValue` is emitted.
+        // The Op keeps its single cert `d`; the recursion is the trusted routine (raw-handle, empty
+        // cert), verified by the create+drop LEAK LOOP (the freelist makes a leak observable as an
+        // OOB trap). REPLACES the flat inline drop, which leaked an Array's element Values (tag 5).
         Op::DropValue { v } => {
-            let p = local(*v);
-            format!(
-                "    (if (i32.and (i32.eq (i32.load (local.get {p})) (i32.const 1)) (i32.ge_s (i32.load (i32.add (local.get {p}) (i32.const 4))) (i32.const 4)))\n\
-                 \x20     (then\n\
-                 \x20       (call $rc_dec (i32.wrap_i64 (i64.load (i32.add (local.get {p}) (i32.const 12)))))))\n\
-                 \x20   (call $rc_dec (local.get {p}))\n"
-            )
+            format!("    (call $__drop_value (local.get {}))\n", local(*v))
+        }
+        // RECURSIVE drop of a `List[Value]` — the self-hosted `$__drop_list_value` (value_core.almd):
+        // IFF the last reference (rc==1), it calls `$__drop_value` on each element (tag-dispatched, so
+        // a Str/Array element's nested payload is freed too — a flat `DropListStr` per-slot `rc_dec`
+        // would LEAK it), THEN frees the list block. Linked alongside `$__drop_value` whenever any
+        // value.* is used (a List[Value] only arises in value-model code). Single cert `d`; the
+        // recursion is the trusted routine (empty cert), verified by the create+drop LEAK LOOP.
+        Op::DropListValue { v } => {
+            format!("    (call $__drop_list_value (local.get {}))\n", local(*v))
         }
         // COPY-ON-WRITE before an in-place mutation (A1.3-render, refining
         // CowSafety.v): if the block is SHARED (rc > 1), clone it so the mutation

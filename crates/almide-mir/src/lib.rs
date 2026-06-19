@@ -207,6 +207,15 @@ pub enum Op {
     /// Value object — the payload was accounted `m`/consumed when stored into it). The
     /// RUNTIME-TAG-DISPATCHED counterpart of `Drop` for the Value type.
     DropValue { v: ValueId },
+    /// `drop_list_value v` — release a `List[Value]` (a list whose i64 slots hold OWNED dynamic
+    /// `Value` handles, each itself possibly a heap-payload Str/Array). A flat `DropListStr` would
+    /// `rc_dec` each slot's Value block WITHOUT freeing that Value's own nested payload (its String,
+    /// or an Array's element Values) — a LEAK. So the RENDER, IFF this is the last reference (rc==1),
+    /// calls the recursive `$__drop_value` on each element (which tag-dispatches), THEN frees the
+    /// list block. Same cert event as [`Op::Drop`] (one `−1`/`d` on the LIST object — the element
+    /// Values were accounted `m`/consumed when stored). The Value-element counterpart of
+    /// `DropListStr` (which is for String elements, whose `rc_dec` IS their full free).
+    DropListValue { v: ValueId },
     /// `consume v` — transfer v's reference OUT (into a container, a return, or
     /// a callee that takes ownership). v is dead here; the reference lives on
     /// elsewhere. Renders as a move (Rust) / ptr-transfer with no inc (wasm).
@@ -655,10 +664,10 @@ pub fn verify_ownership(func: &MirFunction) -> Result<(), Vec<Violation>> {
                     violations.push(violation(i, *src, ViolationKind::UseAfterFree));
                 }
             }
-            // A `DropListStr` releases the LIST object exactly like a `Drop` (the recursive
-            // element free is a RENDER concern, gated on rc==1; the cert sees one −1 on the
+            // A `DropListStr`/`DropListValue` releases the LIST object exactly like a `Drop` (the
+            // recursive element free is a RENDER concern, gated on rc==1; the cert sees one −1 on the
             // list — its elements were `Consume`d into it when stored).
-            Op::Drop { v } | Op::DropListStr { v } | Op::DropValue { v } => {
+            Op::Drop { v } | Op::DropListStr { v } | Op::DropValue { v } | Op::DropListValue { v } => {
                 match release(&object_of, &mut rc, &mut dead, &borrowed, *v) {
                     Ok(()) => {}
                     Err(()) => violations.push(violation(i, *v, ViolationKind::DoubleFree)),
