@@ -70,10 +70,27 @@ DONE in this commit:
 - ✅ corpus-wall ACCEPT (ownership 16303), diff-fuzz green, the 4 `*_loop_reclaims` tests still pass,
   a new wasmtime cargo test (`string_accumulator_parser_tco_executes_on_wasmtime`).
 
-STILL WALLS (csv not yet byte-matched — remaining levers, all SOUND walls now):
-- `parse_rows_rec`/`parse_after_field`: MULTI-accumulator (two `List` carries) + a tuple-destructure
-  self-call (`let (field, np) = parse_quoted_field(...)` then `parse_rows_rec(…, rows, current_row +
-  [field])`) — needs the simultaneous-update staging to handle a heap destructure result.
+## PROGRESS (commit 1d8bdd92) — step 2 partial: multi-accumulator reset + cross-read
+
+The multi-accumulator gap decomposed into FOUR sub-gaps (minimal repros each). Two are now DONE:
+- ✅ **RESET** a heap accumulator to a fresh empty (`cur = []` / `acc = ""`) — admitted as a
+  loop-carried slot update (the parser resets the current-row acc after a delimiter).
+- ✅ **heap-acc-reads-heap-acc** (`out = out + cur` while `cur = ""`) — per-iteration heap assigns
+  emitted in READ-DEPENDENCY topological order (reader before readee); only a CYCLE walls.
+  A two-String-accumulator parser now byte-matches v0 (leak-loop verified, cargo test
+  `multi_accumulator_reset_and_cross_read_tco_executes_on_wasmtime`).
+
+STILL WALLS (csv `List[List[String]]` parser — the remaining two sub-gaps + the earlier ones):
+- ❌ **nested heap-element list** — `rows: List[List[String]]`, so `rows + [cur]` has a `List[String]`
+  ELEMENT. `try_lower_concat_list` admits scalar / String / Value / (String,Value) elements only —
+  a List element (a list-of-lists) needs the doubly-recursive drop (`DropListListStr`). This is the
+  csv blocker now (csvcore repro walls here, not in the TCO).
+- ❌ **scalar-var list literal** `[pos]` — a `List[Int]` literal with a variable element does not
+  materialize (`alloc_init` yields `Init::Opaque`; `try_lower_str_list_literal` only does heap
+  elements). General gap (mc3 repro), not csv-specific but on the same path.
+- ❌ **mutual recursion + tuple-destructure** — `parse_rows_rec` ⇄ `parse_after_field` (mutual tail
+  recursion → needs `inline_mutual_tail_recursion` to fuse them) and the `"` branch's
+  `let (field, np) = parse_quoted_field(...)` (a tuple-destructure self-call).
 - `parse`/`parse_records`: the `ok(value.array(...))` ResultOk wrapper + a `list.map` closure.
 
 ## SEPARATE blocker: toml's v0 oracle is BROKEN
