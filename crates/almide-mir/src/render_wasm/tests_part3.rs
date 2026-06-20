@@ -687,6 +687,27 @@
     }
 
     #[test]
+    fn scalar_var_list_literal_materializes_on_wasmtime() {
+        // A `List[Int/Float/Bool]` literal with a VARIABLE element (`[n]`, `[a, b]`) in a value /
+        // call-arg position. An all-LITERAL list folds to an `Init::IntList`, but a computed element
+        // forced `alloc_init` to `Init::Opaque` (an empty list) → walled as unfaithful. Now the
+        // call-arg path also tries `try_lower_scalar_list_construct` (flat `DynList` + `store64` each
+        // element). This unblocks the append-accumulator element `acc + [n]` (the parser-row shape that
+        // accumulates a scalar per step). Scalar elements own no heap, so the scope-end drop is flat.
+        // 2000x is the leak gate.
+        let src = "fn build(n: Int, acc: List[Int]) -> List[Int] =\n  \
+              if n >= 8 then acc else build(n + 1, acc + [n * n])\n\
+            fn main() -> Unit = {\n  \
+              println(int.to_string(list.sum(build(0, []))))\n  \
+              var s = 0\n  for i in 0..2000 { s = s + list.sum(build(0, [])) }\n  \
+              println(int.to_string(s)) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("scalar_var_list", &render_wasm_program(&prog)) {
+            assert_eq!(out, "140\n280000");
+        }
+    }
+
+    #[test]
     fn multi_accumulator_reset_and_cross_read_tco_executes_on_wasmtime() {
         // The csv-row shape: TWO heap accumulators where one's new value READS the other
         // (`out = out + cur`) while that other is RESET (`cur = ""`) in the same self-call. The TCO

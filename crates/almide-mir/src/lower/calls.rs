@@ -825,8 +825,17 @@ impl LowerCtx {
                     // Without this it fell to `alloc_init` → `Init::Opaque` empty list = rejected as
                     // a silent miscompile below. (An empty/`List[Value]`/computed list still defers
                     // to `alloc_init`, unchanged — the foundation for heap-element-list call args.)
+                    // A NON-EMPTY heap-element `List[String]`/aggregate literal → the nested-ownership
+                    // builder; a SCALAR-element `List[Int/Float/Bool]` with NON-literal elements
+                    // (`[pos]`, `[a, b]`) → the flat `DynList` + `store64` builder (a scalar list owns
+                    // no heap, so the scope-end drop is a flat `Drop`). Both yield a REAL populated
+                    // block, vs the `alloc_init` `Init::Opaque` that an all-literal-only path leaves
+                    // (rejected below). Closes `f([pos])` / the `acc + [pos]` append-accumulator element.
                     if matches!(&a.kind, IrExprKind::List { .. }) {
-                        if let Some(dst) = self.try_lower_str_list_literal(a) {
+                        if let Some(dst) = self
+                            .try_lower_str_list_literal(a)
+                            .or_else(|| self.try_lower_scalar_list_construct(a))
+                        {
                             out.push(self.materialized_call_arg(dst, repr, &a.ty));
                             continue;
                         }
