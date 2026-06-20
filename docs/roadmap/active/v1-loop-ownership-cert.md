@@ -226,7 +226,22 @@ append accumulators.
   wrong inline slips through. REVERTED (mod.rs note) per ②: a fake wall-count drop that ships a
   miscompile is worse than an honest wall. The REAL blocker is the collect_block↔block_line TCO append
   reading every element as "" — reproduced by the 2-cycle `collect_block`/`block_line` synthetic; fix
-  THAT first, THEN the call-arg lift is safe. Do NOT re-add the bare lift without fixing the element read.
+  THAT first, THEN the call-arg lift is safe.
+
+  **🎯 ROOT PINNED (2026-06-20, bisection with the lift temporarily re-enabled): it is the mutual-inline's
+  `substitute_var_in_expr` producing a LIST ELEMENT that fails to materialize → "".** On the 2-cycle
+  `collect_block`/`block_line` synthetic: a CONSTANT element directly in block_line's body (`acc + ["Z"]`)
+  byte-MATCHES (`Z|E|Z`) — TCO + slot + inline machinery are correct. But `acc + [line]` where `line` is
+  block_line's PARAM, with collect_block passing even a constant `"X"`, gives "" for EVERY element
+  (`X|X|X` → `||`). And `["a"] + [line]` / `[x,y]` with `line`/`x`/`y` as ordinary LOCALS byte-MATCH.
+  So a var element is fine; the wrongness is SOLELY the SUBSTITUTED element — `substitute_var_in_expr`
+  replacing `Var(line)` inside `[ … ]` yields a node `try_lower_str_list_literal` then mis-materializes
+  to empty. (flow_rec inlines fine: its appended element is a CALL `string.slice(s,start,pos)`, not a
+  bare substituted var/literal.) FIX (next session): make `inline_mutual_tail_recursion` emit a
+  `let p = arg;` per param instead of `substitute_var_in_expr` (so elements stay LOCAL-var refs that
+  lower), OR make `try_lower_str_list_literal` classify by the LIST's element type, not the substituted
+  node's own. Then re-add the bare-call-arg lift → block_line lowers correctly, yaml 7→6. Do NOT re-add
+  the lift before this fix.
 
   **🔧 CONCRETE RECIPE for the let-bind `!` (2026-06-20, the Result repr is now confirmed).** v1 MIR
   represents an effect-fn `Result[T,String]` as a DynListStr with a LEN-AS-TAG (see
