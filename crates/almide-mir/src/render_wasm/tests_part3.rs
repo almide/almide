@@ -687,6 +687,27 @@
     }
 
     #[test]
+    fn multi_accumulator_reset_and_cross_read_tco_executes_on_wasmtime() {
+        // The csv-row shape: TWO heap accumulators where one's new value READS the other
+        // (`out = out + cur`) while that other is RESET (`cur = ""`) in the same self-call. The TCO
+        // append-accumulator now (1) admits a RESET to a fresh empty (`""`/`[]`) as a loop-carried
+        // slot update, and (2) emits the per-iteration heap assigns in READ-DEPENDENCY order (the
+        // reader `out` before the reset of `cur`), so `out` sees the OLD `cur`. A cyclic read
+        // (`a=a+b; b=b+a`) still walls. 2000x is the leak gate (each slot's drop-old/alloc-new).
+        let src = "fn scan(text: String, pos: Int, out: String, cur: String) -> String = {\n  \
+              if pos >= string.len(text) then out + cur\n  \
+              else { let c = string.get(text, pos) ?? \"\"; if c == \",\" then scan(text, pos + 1, out + cur, \"\") else scan(text, pos + 1, out, cur + c) } }\n\
+            fn main() -> Unit = {\n  \
+              println(scan(\"ab,cd,ef\", 0, \"\", \"\"))\n  \
+              var n = 0\n  for i in 0..2000 { n = n + string.len(scan(\"ab,cd,ef\", 0, \"\", \"\")) }\n  \
+              println(int.to_string(n)) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("multi_acc_tco", &render_wasm_program(&prog)) {
+            assert_eq!(out, "abcdef\n12000");
+        }
+    }
+
+    #[test]
     fn recursive_variant_to_string_executes_on_wasmtime() {
         // THE #1 LEVER (ADT brick 5b): a RECURSIVE custom variant `Expr = Lit(Int) | Add(Expr,
         // Expr) | Neg(Expr)` with a recursive `to_string` — nested-variant ctor construct

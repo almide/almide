@@ -2602,6 +2602,68 @@ fn tco_contains_self(e: &IrExpr, fn_name: &str) -> bool {
     s.1
 }
 
+/// Does expression `e` read variable `v` anywhere (a `Var { id: v }` node)?
+fn expr_reads_var(e: &IrExpr, v: VarId) -> bool {
+    use almide_ir::visit::{walk_expr, IrVisitor};
+    struct R {
+        v: VarId,
+        found: bool,
+    }
+    impl IrVisitor for R {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            if let IrExprKind::Var { id } = &e.kind {
+                if *id == self.v {
+                    self.found = true;
+                }
+            }
+            walk_expr(self, e);
+        }
+    }
+    let mut r = R { v, found: false };
+    r.visit_expr(e);
+    r.found
+}
+
+/// Order the changed heap-accumulator param indices `idxs` so that an accumulator whose new value
+/// READS another changed heap accumulator is assigned BEFORE that one — the reader must observe the
+/// OLD value (a `rows = rows + [cur]` self-call alongside `cur = []` must run rows FIRST, while `cur`
+/// still holds the old row). Edge `a → b` (emit a before b) iff `args[idxs[a]]` reads
+/// `params[idxs[b]].var`. Kahn's topological sort; `None` if the read-graph is CYCLIC (e.g.
+/// `a = a + b; b = b + a` — no order sees both olds; that residual needs owned-temp staging).
+fn order_heap_accs_by_read_dep(
+    idxs: &[usize],
+    args: &[IrExpr],
+    params: &[almide_ir::IrParam],
+) -> Option<Vec<usize>> {
+    let n = idxs.len();
+    let mut indeg = vec![0usize; n];
+    let mut edges: Vec<Vec<usize>> = vec![Vec::new(); n];
+    for a in 0..n {
+        for b in 0..n {
+            if a != b && expr_reads_var(&args[idxs[a]], params[idxs[b]].var) {
+                edges[a].push(b); // idxs[a] reads idxs[b] ⇒ a before b
+                indeg[b] += 1;
+            }
+        }
+    }
+    let mut queue: Vec<usize> = (0..n).filter(|&i| indeg[i] == 0).collect();
+    let mut order: Vec<usize> = Vec::new();
+    while let Some(a) = queue.pop() {
+        order.push(idxs[a]);
+        for &b in &edges[a] {
+            indeg[b] -= 1;
+            if indeg[b] == 0 {
+                queue.push(b);
+            }
+        }
+    }
+    if order.len() == n {
+        Some(order)
+    } else {
+        None // a cycle — no read-before-reset order exists
+    }
+}
+
 /// Walk tail-position leaves: a self-call pushes its args to `calls`; any other tail leaf is a
 /// base (pushed to `bases`). `None` if a self-call sits in a NON-tail position (not TCO-able).
 fn tco_collect<'a>(
@@ -2691,14 +2753,22 @@ fn tco_rewrite(
                     finals.push((params[i].var, t, params[i].ty.clone()));
                 }
             }
-            // Phase 2: HEAP append accumulator(s) — `acc = acc + [x]` reads the still-OLD scalar locals.
-            for i in 0..params.len() {
-                if changed(i) && is_heap_ty(&params[i].ty) {
-                    stmts.push(IrStmt {
-                        kind: IrStmtKind::Assign { var: params[i].var, value: args[i].clone() },
-                        span: None,
-                    });
-                }
+            // Phase 2: HEAP append/reset accumulator(s) — `acc = acc + [x]` reads the still-OLD scalar
+            // locals. Emit in READ-DEPENDENCY order so a heap accumulator that reads ANOTHER heap
+            // accumulator (`rows = rows + [cur]` alongside `cur = []`) is assigned BEFORE that one is
+            // updated — the reader must observe the old value. try_tco_rewrite already walled the
+            // cyclic case, so the order always exists (the unwrap_or is a defensive param-order
+            // fallback).
+            let heap_changed: Vec<usize> = (0..params.len())
+                .filter(|&i| changed(i) && is_heap_ty(&params[i].ty))
+                .collect();
+            let heap_order = order_heap_accs_by_read_dep(&heap_changed, args, params)
+                .unwrap_or(heap_changed);
+            for i in heap_order {
+                stmts.push(IrStmt {
+                    kind: IrStmtKind::Assign { var: params[i].var, value: args[i].clone() },
+                    span: None,
+                });
             }
             // Phase 3: commit the staged scalar updates.
             for (p, t, ty) in finals {
@@ -2817,16 +2887,25 @@ pub(crate) fn try_tco_rewrite(
     let is_identity = |e: &IrExpr, acc: VarId| -> bool {
         matches!(&e.kind, IrExprKind::Var { id } if *id == acc)
     };
+    // A RESET to a FRESH EMPTY heap value (`cur = []` / `acc = ""`): the parser-row shape resets the
+    // current-row accumulator after a delimiter. Like a self-append it is a fresh owned heap value the
+    // loop-carried slot takes via drop-old/alloc-new (cert `i(id)m`); the in-loop `Assign` lowering's
+    // general `lower_owned_heap_field` path materializes the empty literal.
+    let is_reset = |e: &IrExpr| -> bool {
+        matches!(&e.kind, IrExprKind::List { elements } if elements.is_empty())
+            || matches!(&e.kind, IrExprKind::LitStr { value } if value.is_empty())
+    };
     let mut append_accs: Vec<usize> = Vec::new();
     for i in 0..n {
         if carried0[i] && is_heap_ty(&params[i].ty) {
-            // Each self-call passes the accumulator either UNCHANGED (`acc`, a pass-through branch — the
-            // multi-branch parser loops) or APPENDED (`acc + [x]`); at least one appends (else not
-            // carried). A heap carry that is neither needs a general back-edge merge — unsupported.
-            if calls0
-                .iter()
-                .all(|c| is_identity(&c[i], params[i].var) || is_self_append(&c[i], params[i].var))
-            {
+            // Each self-call passes the accumulator UNCHANGED (`acc`, a pass-through branch), APPENDED
+            // (`acc + [x]`), or RESET to a fresh empty (`[]`/`""`); at least one grows/resets it (else
+            // not carried). A heap carry outside these needs a general back-edge merge — unsupported.
+            if calls0.iter().all(|c| {
+                is_identity(&c[i], params[i].var)
+                    || is_self_append(&c[i], params[i].var)
+                    || is_reset(&c[i])
+            }) {
                 append_accs.push(i);
             } else {
                 return None;
@@ -2916,44 +2995,24 @@ pub(crate) fn try_tco_rewrite(
     {
         return None;
     }
-    // SIMULTANEOUS-UPDATE SAFETY (residual). `tco_rewrite` now stages scalar updates in temps and runs
-    // the heap-accumulator assigns BEFORE committing them, so scalar↔scalar and heap-reads-scalar
-    // cross-dependencies are correct. The ONE shape it does NOT order is a HEAP accumulator arg that
-    // reads ANOTHER carried HEAP accumulator (the phase-2 heap assigns run sequentially); with ≥2 heap
-    // accumulators that would be an off-by-one. WALL only that (rare; every yaml loop has one heap acc).
+    // SIMULTANEOUS-UPDATE SAFETY. `tco_rewrite` stages scalar updates in temps and runs the heap
+    // accumulator assigns BEFORE committing them, so scalar↔scalar and heap-reads-scalar are correct.
+    // A HEAP accumulator arg that reads ANOTHER carried HEAP accumulator (`rows = rows + [cur]` while
+    // `cur = []`) is handled by emitting the heap assigns in READ-DEPENDENCY order (reader before the
+    // accumulator it reads — `order_heap_accs_by_read_dep` in tco_rewrite), so the reader sees the OLD
+    // value. WALL only the residual the topological order CANNOT serialize: a CYCLE (`a = a + b`,
+    // `b = b + a` — no order sees both olds; needs owned-temp staging, not in this brick).
     {
-        use almide_ir::visit::{walk_expr, IrVisitor};
-        let heap_carried: std::collections::BTreeSet<VarId> = (0..n)
-            .filter(|&i| carried[i] && is_heap_ty(&params2[i].ty))
-            .map(|i| params2[i].var)
-            .collect();
-        if heap_carried.len() > 1 {
-            struct R<'a> {
-                carried: &'a std::collections::BTreeSet<VarId>,
-                self_var: VarId,
-                found: bool,
-            }
-            impl IrVisitor for R<'_> {
-                fn visit_expr(&mut self, e: &IrExpr) {
-                    if let IrExprKind::Var { id } = &e.kind {
-                        if *id != self.self_var && self.carried.contains(id) {
-                            self.found = true;
-                        }
-                    }
-                    walk_expr(self, e);
-                }
-            }
-            for c in &calls {
-                for i in 0..n {
-                    if carried[i] && is_heap_ty(&params2[i].ty) {
-                        let mut r =
-                            R { carried: &heap_carried, self_var: params2[i].var, found: false };
-                        r.visit_expr(&c[i]);
-                        if r.found {
-                            return None;
-                        }
-                    }
-                }
+        for c in &calls {
+            let changed_heap: Vec<usize> = (0..n)
+                .filter(|&i| {
+                    carried[i]
+                        && is_heap_ty(&params2[i].ty)
+                        && !matches!(&c[i].kind, IrExprKind::Var { id } if *id == params2[i].var)
+                })
+                .collect();
+            if order_heap_accs_by_read_dep(&changed_heap, c, params2).is_none() {
+                return None; // a heap-accumulator read cycle — unsupported
             }
         }
         // PURE-VAR ALIAS HAZARD: a carried scalar whose new value is exactly ANOTHER carried param
