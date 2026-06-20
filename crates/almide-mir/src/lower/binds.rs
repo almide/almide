@@ -367,9 +367,29 @@ impl LowerCtx {
             // `let v = w` aliasing a SCALAR var — v denotes the SAME value (a scalar is freely
             // duplicable: no copy, no ownership). Without this, a bare-Var scalar RHS fell to the
             // deferred `Const` below and silently became 0 (the param-alias zeroing trap).
+            //
+            // BUT a MUTABLE `var v = w` must get its OWN local: if it aliased w's local, a later
+            // `v = …` reassignment would `SetLocal` w's slot and SILENTLY CORRUPT w (the sha1
+            // `var a = h0; … a = temp` trap that clobbered h0). Seed a fresh scalar local with a
+            // type-agnostic i64 copy (`v = w + 0` — integer-add of 0 is identity on the i64-uniform
+            // bits of Int/Float/Bool), so reassigning `v` never touches `w`. An immutable `let v = w`
+            // is never reassigned, so the cheaper alias stays.
             if let IrExprKind::Var { id } = &value.kind {
                 if let Ok(src) = self.value_for(*id) {
-                    self.value_of.insert(var, src);
+                    if self.binding_is_mutable && !is_heap_ty(&value.ty) {
+                        let zero = self.fresh_value();
+                        self.ops.push(Op::ConstInt { dst: zero, value: 0 });
+                        let dst = self.fresh_value();
+                        self.ops.push(Op::IntBinOp {
+                            dst,
+                            op: crate::IntOp::Add,
+                            a: src,
+                            b: zero,
+                        });
+                        self.value_of.insert(var, dst);
+                    } else {
+                        self.value_of.insert(var, src);
+                    }
                     return Ok(());
                 }
             }
@@ -1426,7 +1446,7 @@ impl LowerCtx {
     /// Any other kind (a heap-returning call, a member access, a nested record literal)
     /// defers — `None`. The returned handle is in `live_heap_handles`; the caller MUST
     /// `Consume` it (the move-in) and remove it from the live set.
-    fn lower_owned_heap_field(&mut self, expr: &IrExpr) -> Option<ValueId> {
+    pub(crate) fn lower_owned_heap_field(&mut self, expr: &IrExpr) -> Option<ValueId> {
         use almide_ir::BinOp;
         match &expr.kind {
             IrExprKind::LitStr { value: s } => {
@@ -1443,6 +1463,13 @@ impl LowerCtx {
                 let obj = self.try_lower_concat_str(expr)?;
                 // try_lower_concat_str returns a fresh owned String (a CallFn result); track it
                 // so the caller's Consume + live-set removal balances it.
+                if !self.live_heap_handles.contains(&obj) {
+                    self.live_heap_handles.push(obj);
+                }
+                Some(obj)
+            }
+            IrExprKind::StringInterp { parts } => {
+                let obj = self.try_lower_string_interp(parts)?;
                 if !self.live_heap_handles.contains(&obj) {
                     self.live_heap_handles.push(obj);
                 }

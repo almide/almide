@@ -935,6 +935,18 @@ impl LowerCtx {
                                 }
                             }
                         }
+                        // [UNDER TEST] GENERAL heap accumulator — `slot = <fresh-owned-heap expr>`.
+                        if let Some(&slot_local) = self.value_of.get(var) {
+                            if let Some(new) = self.lower_owned_heap_field(value) {
+                                if new != slot_local {
+                                    let drop_op = self.drop_op_for(slot_local);
+                                    self.ops.push(drop_op);
+                                    self.ops.push(Op::SetLocal { local: slot_local, src: new });
+                                    self.live_heap_handles.retain(|&v| v != new);
+                                    return Ok(());
+                                }
+                            }
+                        }
                         return Err(LowerError::Unsupported(
                             "heap reassignment in a scalar loop body".into(),
                         ));

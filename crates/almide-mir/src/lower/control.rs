@@ -2189,7 +2189,7 @@ impl LowerCtx {
         };
         if var_tuple.is_some()
             || body_breaks_or_continues(body)
-            || !matches!(find_var_ty(body, var), Some(Ty::Int))
+            || matches!(find_var_ty(body, var), Some(t) if !matches!(t, Ty::Int))
             || !matches!(start.kind, IrExprKind::LitInt { .. })
         {
             return false;
