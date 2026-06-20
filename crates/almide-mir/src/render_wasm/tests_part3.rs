@@ -687,6 +687,32 @@
     }
 
     #[test]
+    fn nested_list_of_lists_recursive_drop_executes_on_wasmtime() {
+        // THE BOSS (csv `rows: List[List[String]]`): a list whose elements are owned `List[String]`
+        // rows. Three pieces meet: (1) the list-of-lists CONCAT `rows + [cur]` (admit a List[String]
+        // element via `__list_concat_rc`); (2) the singleton `[cur]` materialization; (3) the
+        // RECURSIVE `Op::DropListListStr` — a NESTED wasm loop freeing each row's cell Strings, then
+        // each row, then the outer block. A flat `DropListStr` would only `rc_dec` each row HANDLE,
+        // leaking the cells. EVERY value of this type (concat result, call result, accumulator slot)
+        // routes to `list_list_str_lists` so its drop is the nested one. The 2000x build+drop is the
+        // LEAK GATE (an under-free OOMs the freelist as an OOB trap — exactly what this caught first).
+        let src = "fn scan(text: String, pos: Int, rows: List[List[String]], cur: List[String]) -> List[List[String]] = {\n  \
+              if pos >= string.len(text) then rows + [cur]\n  \
+              else { let c = string.get(text, pos) ?? \"\"\n    \
+                if c == \",\" then scan(text, pos + 1, rows, cur + [c])\n    \
+                else if c == \"\\n\" then scan(text, pos + 1, rows + [cur], [])\n    \
+                else scan(text, pos + 1, rows, cur + [c]) } }\n\
+            fn main() -> Unit = {\n  \
+              println(int.to_string(list.len(scan(\"ab,cd\\nef,gh\\n\", 0, [], []))))\n  \
+              var n = 0\n  for i in 0..2000 { n = n + list.len(scan(\"ab,cd\\nef,gh\\n\", 0, [], [])) }\n  \
+              println(int.to_string(n)) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("nested_list_drop", &render_wasm_program(&prog)) {
+            assert_eq!(out, "3\n6000");
+        }
+    }
+
+    #[test]
     fn scalar_var_list_literal_materializes_on_wasmtime() {
         // A `List[Int/Float/Bool]` literal with a VARIABLE element (`[n]`, `[a, b]`) in a value /
         // call-arg position. An all-LITERAL list folds to an `Init::IntList`, but a computed element

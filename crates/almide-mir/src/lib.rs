@@ -230,6 +230,15 @@ pub enum Op {
     /// A flat `DropListStr` would only rc_dec @12 (the list block), LEAKING its element Values. Same
     /// cert event as [`Op::Drop`] (one `−1`/`d` on the Result object — its payload was `m`/consumed).
     DropResultListValue { v: ValueId },
+    /// `drop_list_list_str v` — release a `List[List[String]]` whose element slots hold owned
+    /// `List[String]` blocks (the csv `rows` shape: a list of rows, each a list of cells). The render
+    /// emits a NESTED loop: at the outer list's last ref (rc==1), for each element it frees the inner
+    /// `List[String]` at ITS last ref (per-slot `rc_dec` of each String), then `rc_dec`s the inner
+    /// block; THEN the outer block. A flat `DropListStr` would only `rc_dec` each inner-list HANDLE,
+    /// LEAKING the cell Strings (the inner list's last-ref free never runs). Same single cert `d` as
+    /// [`Op::Drop`]; the per-element recursion is the trusted routine (raw-handle, leak-loop verified).
+    /// The list-of-lists counterpart of `DropListStr`.
+    DropListListStr { v: ValueId },
     /// `drop_variant v : ty` — release a CUSTOM variant (user ADT) block whose ctor fields may be
     /// nested variant/heap handles (`Add(Expr, Expr)`). A flat `Drop`/`DropListStr` would `rc_dec`
     /// the block (and masked slots) WITHOUT recursively freeing a child variant's OWN nested fields
@@ -696,6 +705,7 @@ pub fn verify_ownership(func: &MirFunction) -> Result<(), Vec<Violation>> {
             | Op::DropListValue { v }
             | Op::DropListStrValue { v }
             | Op::DropResultListValue { v }
+            | Op::DropListListStr { v }
             | Op::DropVariant { v, .. } => {
                 match release(&object_of, &mut rc, &mut dead, &borrowed, *v) {
                     Ok(()) => {}

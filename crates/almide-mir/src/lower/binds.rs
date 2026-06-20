@@ -135,7 +135,16 @@ impl LowerCtx {
         let elem_str_value = matches!(&value.ty,
             Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && matches!(&a[0],
                 Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String) && is_value_ty(&tys[1])));
-        if (!elem_str && !elem_scalar_aggregate && !elem_value && !elem_str_value) || elements.is_empty() {
+        // A `List[List[String]]` (`[cur]` — the csv `rows + [cur]` singleton) — each element is an
+        // owned `List[String]` block (Dup'd in, the new list co-owns each row), reclaimed RECURSIVELY
+        // at scope end via `Op::DropListListStr` (the nested cell + row free). A flat `DropListStr`
+        // would only rc_dec each row HANDLE, leaking the cell Strings.
+        let elem_list_str = matches!(&value.ty,
+            Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && matches!(&a[0],
+                Ty::Applied(TypeConstructorId::List, b) if b.len() == 1 && matches!(b[0], Ty::String)));
+        if (!elem_str && !elem_scalar_aggregate && !elem_value && !elem_str_value && !elem_list_str)
+            || elements.is_empty()
+        {
             return None;
         }
         // Gate: every element must be a fresh-owned String (LitStr/ConcatStr) OR a tracked
@@ -170,6 +179,8 @@ impl LowerCtx {
             self.value_elem_lists.insert(list);
         } else if elem_str_value {
             self.str_value_elem_lists.insert(list);
+        } else if elem_list_str {
+            self.list_list_str_lists.insert(list);
         } else {
             self.heap_elem_lists.insert(list);
         }
@@ -736,7 +747,9 @@ impl LowerCtx {
                     result: Some(repr),
                 });
                 self.live_heap_handles.push(dst);
-                if is_heap_elem_list_ty(ty) {
+                if crate::lower::is_list_list_str_ty(ty) {
+                    self.list_list_str_lists.insert(dst);
+                } else if is_heap_elem_list_ty(ty) {
                     self.heap_elem_lists.insert(dst);
                 }
                 // A user function returning Option/Result yields a REAL same-layout variant block
@@ -831,7 +844,9 @@ impl LowerCtx {
                 }
                 // A `List[String]` result (string.split / a List[String] combinator) is a
                 // nested-ownership list — its scope-end drop must recursively free elements.
-                if is_heap_elem_list_ty(ty) {
+                if crate::lower::is_list_list_str_ty(ty) {
+                    self.list_list_str_lists.insert(dst);
+                } else if is_heap_elem_list_ty(ty) {
                     self.heap_elem_lists.insert(dst);
                 }
                 // A `Value` result (value.str/int/… or a Value-returning combinator) drops via the

@@ -749,6 +749,12 @@ pub(crate) struct LowerCtx {
     /// not a flat [`Op::Drop`] — so the element Strings are reclaimed. Populated when an
     /// `alloc_list_str` result or a `List[String]`-typed bind is created (Machinery 2).
     heap_elem_lists: HashSet<ValueId>,
+    /// MIR values that are a `List[List[String]]` (the csv `rows` shape: a list whose element slots
+    /// hold owned `List[String]` blocks). A scope-end drop emits [`Op::DropListListStr`] (a NESTED
+    /// free: each row's cell Strings, then each row block, then the outer block) — a flat
+    /// `DropListStr` would only `rc_dec` each inner-list handle, LEAKING the cells. Populated by the
+    /// list-of-lists concat (`rows + [cur]`).
+    list_list_str_lists: HashSet<ValueId>,
     /// MIR values KNOWN to be a REAL, POPULATED list block (a list LITERAL, a heap-list PARAM —
     /// the v1 convention passes a genuine block —, or a self-host list-returning CALL whose closure
     /// args ALL lifted, so the callee actually fills it). A direct `xs[i]` (`lower_scalar_index_access`)
@@ -975,6 +981,18 @@ pub(crate) fn is_scalar_elem_list_ty(ty: &Ty) -> bool {
 /// [`Op::DropListStr`], not a flat drop. An `Option[String]` is physically a 0-or-1-element
 /// `List[String]` (Machinery 2), so the SAME recursive free applies (len 0 frees nothing, len 1
 /// frees the one element + the block).
+/// A `List[List[String]]` — its element slots hold owned `List[String]` blocks (the csv `rows`
+/// shape). Its scope-end drop must be [`Op::DropListListStr`] (the nested cell + row free); a flat
+/// `DropListStr` (what `is_heap_elem_list_ty` would route it to, since List[List[String]] is also a
+/// `List[heap]`) would only `rc_dec` each row HANDLE, leaking the cell Strings. So EVERY tracking
+/// site checks this FIRST.
+pub(crate) fn is_list_list_str_ty(ty: &Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    matches!(ty,
+        Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && matches!(&a[0],
+            Ty::Applied(TypeConstructorId::List, b) if b.len() == 1 && matches!(b[0], Ty::String)))
+}
+
 pub(crate) fn is_heap_elem_list_ty(ty: &Ty) -> bool {
     use almide_lang::types::constructor::TypeConstructorId;
     match ty {
@@ -1231,6 +1249,34 @@ impl LowerCtx {
                                         return Ok(());
                                     }
                                 }
+                            }
+                        }
+                        // RESET to a fresh EMPTY heap value (`cur = []` / `acc = ""` — the parser
+                        // resets the current-row accumulator after a delimiter): materialize the empty
+                        // block, drop the old slot, rebind IN PLACE. Not a ConcatList (fast-path) nor
+                        // a `lower_owned_heap_field` shape, so handle it here. Cert: drop-old (`d`) +
+                        // alloc (`i`) = the same loop-carried `i(id)` the append slot proves.
+                        if let Some(&slot_local) = self.value_of.get(var) {
+                            let empty = match &value.kind {
+                                IrExprKind::List { elements } if elements.is_empty() => Some(
+                                    crate::Init::IntList(vec![]),
+                                ),
+                                IrExprKind::LitStr { value: s } if s.is_empty() => {
+                                    Some(crate::Init::Str(String::new()))
+                                }
+                                _ => None,
+                            };
+                            if let Some(init) = empty {
+                                let new = self.fresh_value();
+                                self.ops.push(Op::Alloc {
+                                    dst: new,
+                                    repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT },
+                                    init,
+                                });
+                                let drop_op = self.drop_op_for(slot_local);
+                                self.ops.push(drop_op);
+                                self.ops.push(Op::SetLocal { local: slot_local, src: new });
+                                return Ok(());
                             }
                         }
                         // [UNDER TEST] GENERAL heap accumulator — `slot = <fresh-owned-heap expr>`.
@@ -1512,6 +1558,11 @@ impl LowerCtx {
             Op::DropListValue { v }
         } else if self.str_value_elem_lists.contains(&v) {
             Op::DropListStrValue { v }
+        } else if self.list_list_str_lists.contains(&v) {
+            // `List[List[String]]` — checked BEFORE heap_elem_lists (it also matches
+            // is_heap_elem_list_ty): the nested loop frees each inner row's cell Strings, which a
+            // flat DropListStr would leak.
+            Op::DropListListStr { v }
         } else if self.heap_elem_lists.contains(&v) || self.record_masks.contains_key(&v) {
             Op::DropListStr { v }
         } else if self.value_handles.contains(&v) {

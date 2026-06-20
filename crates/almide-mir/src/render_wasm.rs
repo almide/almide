@@ -384,6 +384,15 @@ pub fn render_wasm_fn(
     if func.ops.iter().any(|op| matches!(op, Op::DropListStr { .. })) {
         locals.push("(local $dlsi i32) (local $dlsn i32)".to_string());
     }
+    // A recursive `List[List[String]]` drop is a NESTED loop: the OUTER loop over the rows needs its
+    // own index/length/inner-handle scratch (`$dlsi`/`$dlsn` serve the INNER cell loop). It also uses
+    // the inner-loop locals, so declare those too when no plain DropListStr already did.
+    if func.ops.iter().any(|op| matches!(op, Op::DropListListStr { .. })) {
+        locals.push("(local $dlli i32) (local $dlln i32) (local $dllinner i32)".to_string());
+        if !func.ops.iter().any(|op| matches!(op, Op::DropListStr { .. })) {
+            locals.push("(local $dlsi i32) (local $dlsn i32)".to_string());
+        }
+    }
     // A lifted lambda's heap params become i32 value locals (narrowed from their i64 raw params).
     locals.extend(lambda_heap_locals);
     let locals_decl = locals.join(" ");
@@ -823,6 +832,39 @@ fn render_op(
                      \x20   (call $rc_dec (local.get {p}))\n"
                 )
             }
+        }
+        // RECURSIVE drop of a `List[List[String]]` (the csv `rows` shape) — a NESTED loop, no link.
+        // At the OUTER list's last ref (rc==1), for each element slot: load the inner `List[String]`
+        // handle; at ITS last ref free each cell String (per-slot `rc_dec`); `rc_dec` the inner block;
+        // THEN `rc_dec` the outer block. A flat `DropListStr` would only `rc_dec` each inner HANDLE,
+        // never running the inner list's last-ref free → the cell Strings LEAK. Cert = the single `d`
+        // (the inner frees are the trusted raw-handle routine, leak-loop verified). Uses the dedicated
+        // outer-loop locals `$dlli`/`$dlln`/`$dllinner`; the inner loop reuses `$dlsi`/`$dlsn`.
+        Op::DropListListStr { v } => {
+            let p = local(*v);
+            format!(
+                "    (if (i32.eq (i32.load (local.get {p})) (i32.const 1))\n\
+                 \x20     (then\n\
+                 \x20       (local.set $dlli (i32.const 0))\n\
+                 \x20       (local.set $dlln (i32.load (i32.add (local.get {p}) (i32.const 4))))\n\
+                 \x20       (block $dllbrk (loop $dllcont\n\
+                 \x20         (br_if $dllbrk (i32.ge_s (local.get $dlli) (local.get $dlln)))\n\
+                 \x20         (local.set $dllinner (i32.wrap_i64 (i64.load (i32.add (local.get {p}) (i32.add (i32.const 12) (i32.mul (local.get $dlli) (i32.const 8)))))))\n\
+                 \x20         (if (i32.eq (i32.load (local.get $dllinner)) (i32.const 1))\n\
+                 \x20           (then\n\
+                 \x20             (local.set $dlsi (i32.const 0))\n\
+                 \x20             (local.set $dlsn (i32.load (i32.add (local.get $dllinner) (i32.const 4))))\n\
+                 \x20             (block $dlsbrk (loop $dlscont\n\
+                 \x20               (br_if $dlsbrk (i32.ge_s (local.get $dlsi) (local.get $dlsn)))\n\
+                 \x20               (call $rc_dec (i32.wrap_i64 (i64.load (i32.add (local.get $dllinner) (i32.add (i32.const 12) (i32.mul (local.get $dlsi) (i32.const 8)))))))\n\
+                 \x20               (local.set $dlsi (i32.add (local.get $dlsi) (i32.const 1)))\n\
+                 \x20               (br $dlscont)))))\n\
+                 \x20         (call $rc_dec (local.get $dllinner))\n\
+                 \x20         (local.set $dlli (i32.add (local.get $dlli) (i32.const 1)))\n\
+                 \x20         (br $dllcont))))\n\
+                 \x20     )\n\
+                 \x20   (call $rc_dec (local.get {p}))\n"
+            )
         }
         // RUNTIME-TAG-DISPATCHED RECURSIVE drop of a dynamic `Value` — the self-hosted
         // `$__drop_value` (value_core.almd): at the LAST ref (rc==1) it frees the nested payload by

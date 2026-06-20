@@ -554,7 +554,13 @@ impl LowerCtx {
         let str_value_elem = matches!(&elem_ty,
             Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String)
                 && crate::lower::is_value_ty(&tys[1]));
-        if !scalar_elem && !heap_elem && !str_value_elem {
+        // A `List[String]` ELEMENT (so `value` is a `List[List[String]]` — the csv `rows + [cur]`
+        // shape). `__list_concat_rc` rc-incs each inner-list handle (the new outer list co-owns each
+        // row); the outer's recursive `Op::DropListListStr` frees each row's cells + each row block.
+        let list_str_elem = matches!(&elem_ty,
+            Ty::Applied(TypeConstructorId::List, a)
+                if a.len() == 1 && matches!(a[0], Ty::String));
+        if !scalar_elem && !heap_elem && !str_value_elem && !list_str_elem {
             return None;
         }
         let ops_mark = self.ops.len();
@@ -587,6 +593,8 @@ impl LowerCtx {
             }
         } else if str_value_elem {
             self.str_value_elem_lists.insert(dst);
+        } else if list_str_elem {
+            self.list_list_str_lists.insert(dst);
         }
         Some(dst)
     }
@@ -2143,7 +2151,9 @@ impl LowerCtx {
     pub(crate) fn materialized_call_arg(&mut self, dst: ValueId, repr: Repr, ty: &Ty) -> CallArg {
         if repr.is_heap() {
             self.live_heap_handles.push(dst);
-            if crate::lower::is_heap_elem_list_ty(ty) {
+            if crate::lower::is_list_list_str_ty(ty) {
+                self.list_list_str_lists.insert(dst);
+            } else if crate::lower::is_heap_elem_list_ty(ty) {
                 self.heap_elem_lists.insert(dst);
             }
             // A `Value` call-argument temp (`f(value.array([…]))`, `f(value.str(s))`) drops via the
