@@ -80,18 +80,23 @@ The multi-accumulator gap decomposed into FOUR sub-gaps (minimal repros each). T
   A two-String-accumulator parser now byte-matches v0 (leak-loop verified, cargo test
   `multi_accumulator_reset_and_cross_read_tco_executes_on_wasmtime`).
 
-STILL WALLS (csv `List[List[String]]` parser — the remaining two sub-gaps + the earlier ones):
-- ❌ **nested heap-element list** — `rows: List[List[String]]`, so `rows + [cur]` has a `List[String]`
-  ELEMENT. `try_lower_concat_list` admits scalar / String / Value / (String,Value) elements only —
-  a List element (a list-of-lists) needs the doubly-recursive drop (`DropListListStr`). This is the
-  csv blocker now (csvcore repro walls here, not in the TCO).
-- ❌ **scalar-var list literal** `[pos]` — a `List[Int]` literal with a variable element does not
-  materialize (`alloc_init` yields `Init::Opaque`; `try_lower_str_list_literal` only does heap
-  elements). General gap (mc3 repro), not csv-specific but on the same path.
-- ❌ **mutual recursion + tuple-destructure** — `parse_rows_rec` ⇄ `parse_after_field` (mutual tail
-  recursion → needs `inline_mutual_tail_recursion` to fuse them) and the `"` branch's
-  `let (field, np) = parse_quoted_field(...)` (a tuple-destructure self-call).
-- `parse`/`parse_records`: the `ok(value.array(...))` ResultOk wrapper + a `list.map` closure.
+DONE (commit cd8ad5e6): ✅ **scalar-var list literal** `[pos]` — `lower_call_args` materializes it via
+`try_lower_scalar_list_construct` (flat `DynList` + store64).
+
+DONE (commit fc4d8425) — THE BOSS: ✅ **nested heap-element list** `List[List[String]]`. New
+`Op::DropListListStr` renders a NESTED wasm loop (free each row's cells, each row, then the outer
+block); `try_lower_concat_list` admits a `List[String]` element (`rows + [cur]`, `__list_concat_rc`);
+`try_lower_str_list_literal` builds the `[cur]` singleton; the in-loop assign handles a RESET
+(`cur = []`); EVERY value of this type routes to a new `list_list_str_lists` set (via
+`is_list_list_str_ty`, checked BEFORE `is_heap_elem_list_ty`) so its drop is the nested one. The leak
+loop first OOM-trapped (call-result temps routed to the flat drop) → fixed by routing at all tracking
+sites. csvcore byte-matches v0, 2000× leak loop clean, corpus-wall ACCEPT, csv classify **5/6 → 7/4**
+(parse_rows_rec + parse_after_field now lower).
+
+STILL WALLS (csv full byte-match — the remaining levers, all SOUND walls):
+- ❌ `parse` — `ok(value.array(...))` ResultOk wrapper (a heap-result Result).
+- ❌ `parse_records` — a `list.map` with a closure list (unliftable higher-order arg).
+- ❌ `parse_rows` / `stringify_records` — heap-result `if` (a remaining arm shape).
 
 ## SEPARATE blocker: toml's v0 oracle is BROKEN
 
