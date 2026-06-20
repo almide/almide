@@ -839,6 +839,81 @@ impl LowerCtx {
         {
             return None;
         }
+        // DESUGAR a tuple Some/Ok payload — `some((idx, line)) => B` → `some($p) => { let (idx,line) = $p; B }`.
+        // The single var `$p` is bound below via the HEAP-payload path (into `param_values`), so the
+        // `let (idx,line) = $p` tuple destructure then lowers (`try_lower_tuple_destructure` borrows each
+        // slot). A raw tuple VAR/param destructure alone walls (no `param_values` entry), so the rewrite to
+        // the @12-handle bind is required, not a plain var destructure. `$p` ids start above subject+arms.
+        let has_tuple_payload = arms.iter().any(|a| {
+            matches!(&a.pattern, IrPattern::Some { inner } | IrPattern::Ok { inner }
+                if matches!(&**inner, IrPattern::Tuple { .. }))
+        });
+        let desugared: Vec<IrMatchArm>;
+        let arms: &[IrMatchArm] = if has_tuple_payload {
+            let mut next = arms
+                .iter()
+                .map(|a| crate::lower::max_var_id(&a.body))
+                .max()
+                .unwrap_or(0)
+                .max(crate::lower::max_var_id(subject))
+                + 1;
+            let mut out: Vec<IrMatchArm> = Vec::with_capacity(arms.len());
+            for a in arms {
+                let inner_tuple = match &a.pattern {
+                    IrPattern::Some { inner } | IrPattern::Ok { inner } => match &**inner {
+                        IrPattern::Tuple { elements } => Some(elements.clone()),
+                        _ => None,
+                    },
+                    _ => None,
+                };
+                let Some(elements) = inner_tuple else {
+                    out.push(a.clone());
+                    continue;
+                };
+                let p = VarId(next);
+                next += 1;
+                let tuple_ty = Ty::Tuple(
+                    elements
+                        .iter()
+                        .map(|e| match e {
+                            IrPattern::Bind { ty, .. } => ty.clone(),
+                            _ => Ty::Unknown,
+                        })
+                        .collect(),
+                );
+                let p_inner = Box::new(IrPattern::Bind { var: p, ty: tuple_ty.clone() });
+                let new_pat = match &a.pattern {
+                    IrPattern::Some { .. } => IrPattern::Some { inner: p_inner },
+                    _ => IrPattern::Ok { inner: p_inner },
+                };
+                let destr = IrStmt {
+                    kind: IrStmtKind::BindDestructure {
+                        pattern: IrPattern::Tuple { elements },
+                        value: IrExpr {
+                            kind: IrExprKind::Var { id: p },
+                            ty: tuple_ty,
+                            span: None,
+                            def_id: None,
+                        },
+                    },
+                    span: None,
+                };
+                let body = IrExpr {
+                    kind: IrExprKind::Block {
+                        stmts: vec![destr],
+                        expr: Some(Box::new(a.body.clone())),
+                    },
+                    ty: a.body.ty.clone(),
+                    span: a.body.span.clone(),
+                    def_id: a.body.def_id,
+                };
+                out.push(IrMatchArm { pattern: new_pat, guard: a.guard.clone(), body });
+            }
+            desugared = out;
+            &desugared
+        } else {
+            arms
+        };
         let ops_mark = self.ops.len();
         let lhh_mark = self.live_heap_handles.len();
         let rollback = |s: &mut Self| {
@@ -900,6 +975,13 @@ impl LowerCtx {
         let scalar_bind = |inner: &IrPattern| -> Result<Option<(VarId, bool)>, ()> {
             match inner {
                 IrPattern::Bind { var, ty } if !is_heap_ty(ty) => Ok(Some((*var, false))),
+                // A heap TUPLE payload (`some((idx,line))` desugared to `some($p)`): bind @12 as the
+                // tuple-handle BORROW (the desugared `let (idx,line)=$p` then destructures each slot —
+                // sound because `$p` lands in `param_values`). The subject drops AFTER the arms (the
+                // tuple stays live through them); a move-out arm auto-`Dup`s in `lower_heap_result_arm`.
+                IrPattern::Bind { var, ty } if is_heap_ty(ty) && matches!(ty, Ty::Tuple(_)) => {
+                    Ok(Some((*var, true)))
+                }
                 IrPattern::Wildcard => Ok(None),
                 _ => Err(()),
             }
@@ -964,7 +1046,12 @@ impl LowerCtx {
         // exactly this. A NON-str heap payload (a heap-Result-of-list, an Array element) has no
         // single-slot borrow rep yet — the true Camp-4 frontier — so it still defers.
         let str_heap_bind = heap_res && has_heap_bind && is_result_str;
-        if heap_res && has_heap_bind && !is_result_str {
+        // The Option-tuple payload (`some((idx,line))`): a heap bind over an OPTION subject is always
+        // the desugared tuple-handle borrow (scalar_bind only returns heap for a `Ty::Tuple`). It is
+        // handled exactly like `str_heap_bind` — borrow @12, subject drops AFTER the arms — but reads
+        // the Option len-as-tag @4 (not the str-result cap-tag @16).
+        let opt_tuple_bind = heap_res && has_heap_bind && is_option;
+        if heap_res && has_heap_bind && !is_result_str && !opt_tuple_bind {
             return rollback(self);
         }
         // Emit: h = handle(subj); tag = load32(h + off); dst = if tag != 0 then <then> else <else>.
@@ -1001,7 +1088,7 @@ impl LowerCtx {
         // matches keep the subject live (unchanged — they were already proven). A str-result
         // HEAP-bind (`str_heap_bind`) is the exception: its payload BORROWS slot-0, so the subject
         // must stay live THROUGH the arms — its drop is deferred to AFTER the branch-join below.
-        if heap_res && !str_heap_bind {
+        if heap_res && !str_heap_bind && !opt_tuple_bind {
             if let Some(pos) = self.live_heap_handles.iter().rposition(|&v| v == subj) {
                 self.live_heap_handles.remove(pos);
                 let op = self.drop_op_for(subj);
@@ -1034,7 +1121,7 @@ impl LowerCtx {
         // call result), independent of the freed subject, so freeing the subject's slot-0 String is
         // sound (a bare-Var arm already Dup'd it; a call arm only borrowed it). A BORROWED subject
         // (param / tracked var, not in `live_heap_handles`) is owned elsewhere → left untouched.
-        if str_heap_bind {
+        if str_heap_bind || opt_tuple_bind {
             if let Some(pos) = self.live_heap_handles.iter().rposition(|&v| v == subj) {
                 self.live_heap_handles.remove(pos);
                 let op = self.drop_op_for(subj);

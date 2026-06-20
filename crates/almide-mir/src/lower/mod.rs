@@ -2170,7 +2170,7 @@ pub(crate) fn is_higher_order(args: &[IrExpr]) -> bool {
 /// Returns `Some(rewritten_body)` when the desugar applies, `None` (the body is unchanged) otherwise.
 /// The max `VarId` used anywhere in `body` (0 if none) — so a fresh synthetic var can be
 /// allocated as `max + 1` without a frontend var-table round-trip.
-fn max_var_id(body: &IrExpr) -> u32 {
+pub(crate) fn max_var_id(body: &IrExpr) -> u32 {
     use almide_ir::visit::IrVisitor;
     use almide_ir::IrPattern;
     // A pattern binds variables (`some(ch)`, `ok(x)`, `(a, b)`) that are NOT `IrExprKind::Var` /
