@@ -2764,6 +2764,28 @@ fn try_list_iter_rewrite(
 /// Recursion is confined to `Call` nodes — a heap-branch that is NOT a call argument (e.g. a bare
 /// `let s = if..`, or an `if`-arm interior) is left for the tail-duplication / per-arm machinery.
 fn extract_first_callarg_branch(e: &IrExpr, tmp: VarId) -> Option<(IrExpr, IrExpr)> {
+    // A TUPLE element may itself wrap a call-arg branch (`(value.str(if c then a else b), end)` — the
+    // block_scalar/block_line return shape). Recurse into each element so the inner `if` is ANF-lifted
+    // out (`let t = if c then a else b; (value.str(t), end)`), which `desugar_let_bound_heap_branch`
+    // then tail-duplicates into a heap-result `if` with Tuple arms — both of which already lower.
+    if let IrExprKind::Tuple { elements } = &e.kind {
+        for (idx, el) in elements.iter().enumerate() {
+            if let Some((branch, new_el)) = extract_first_callarg_branch(el, tmp) {
+                let mut new_elements = elements.clone();
+                new_elements[idx] = new_el;
+                return Some((
+                    branch,
+                    IrExpr {
+                        kind: IrExprKind::Tuple { elements: new_elements },
+                        ty: e.ty.clone(),
+                        span: e.span.clone(),
+                        def_id: e.def_id,
+                    },
+                ));
+            }
+        }
+        return None;
+    }
     let IrExprKind::Call { target, args, type_args } = &e.kind else {
         return None;
     };
@@ -2900,7 +2922,75 @@ pub fn desugar_heap_branches(body: &IrExpr) -> Option<IrExpr> {
             cur = Some(r);
             continue;
         }
+        if let Some(r) = desugar_nested_branch_arms(src) {
+            cur = Some(r);
+            continue;
+        }
         return cur;
+    }
+}
+
+/// Recurse the heap-branch desugar INTO an `if`/`match` arm and a block TAIL. After a let-bound
+/// duplication the body becomes `Block{prefix; if c then {<nested branch>} else {…}}`, whose arm
+/// blocks may still hide a call-arg `if` (`(value.str(if…), end)`) or another let-bound branch (the
+/// block_scalar two-`if` shape). Normalizing those HERE — inside the SHARED `desugar_heap_branches`
+/// both `lower_body_into` and the `count_ir_calls` caps gate call — keeps the duplicated calls 1:1
+/// (mir == ir); doing it lowering-side only (in `lower_heap_result_arm`) would double-count.
+fn desugar_nested_branch_arms(body: &IrExpr) -> Option<IrExpr> {
+    match &body.kind {
+        IrExprKind::If { cond, then, else_ } => {
+            let nt = desugar_heap_branches(then);
+            let ne = desugar_heap_branches(else_);
+            if nt.is_none() && ne.is_none() {
+                return None;
+            }
+            Some(IrExpr {
+                kind: IrExprKind::If {
+                    cond: cond.clone(),
+                    then: Box::new(nt.unwrap_or_else(|| (**then).clone())),
+                    else_: Box::new(ne.unwrap_or_else(|| (**else_).clone())),
+                },
+                ty: body.ty.clone(),
+                span: body.span.clone(),
+                def_id: body.def_id,
+            })
+        }
+        IrExprKind::Match { subject, arms } => {
+            let mut changed = false;
+            let new_arms: Vec<almide_ir::IrMatchArm> = arms
+                .iter()
+                .map(|a| match desugar_heap_branches(&a.body) {
+                    Some(nb) => {
+                        changed = true;
+                        almide_ir::IrMatchArm {
+                            pattern: a.pattern.clone(),
+                            guard: a.guard.clone(),
+                            body: nb,
+                        }
+                    }
+                    None => a.clone(),
+                })
+                .collect();
+            if !changed {
+                return None;
+            }
+            Some(IrExpr {
+                kind: IrExprKind::Match { subject: subject.clone(), arms: new_arms },
+                ty: body.ty.clone(),
+                span: body.span.clone(),
+                def_id: body.def_id,
+            })
+        }
+        IrExprKind::Block { stmts, expr: Some(tail) } => {
+            let nt = desugar_heap_branches(tail)?;
+            Some(IrExpr {
+                kind: IrExprKind::Block { stmts: stmts.clone(), expr: Some(Box::new(nt)) },
+                ty: body.ty.clone(),
+                span: body.span.clone(),
+                def_id: body.def_id,
+            })
+        }
+        _ => None,
     }
 }
 
@@ -2920,13 +3010,22 @@ pub fn desugar_let_bound_heap_branch(body: &IrExpr) -> Option<IrExpr> {
     })?;
     // BOUNDED-DUPLICATION gate: refuse when the continuation itself carries another unresolved
     // heap let-bound `if`/`match`.
-    let rest_has_branch_bind = stmts[i + 1..].iter().any(|s| matches!(
-        &s.kind,
-        IrStmtKind::Bind { ty, value, .. }
-            if is_heap_ty(ty)
-                && matches!(&value.kind, IrExprKind::If { .. } | IrExprKind::Match { .. })
-    ));
-    if rest_has_branch_bind {
+    // BOUNDED-DUPLICATION: the continuation is copied into BOTH arms, so each remaining heap let-bound
+    // `if`/`match` in `rest` doubles the leaf-arm count as the fixpoint resolves them one at a time. A
+    // FEW are fine (block_scalar = 2: `let joined = if…; let tmp = if…(value.str arg, ANF-lifted)`), so
+    // allow up to 2 (≤ 2^3 = 8 leaves) and refuse beyond that to keep the duplication bounded.
+    let rest_branch_binds = stmts[i + 1..]
+        .iter()
+        .filter(|s| {
+            matches!(
+                &s.kind,
+                IrStmtKind::Bind { ty, value, .. }
+                    if is_heap_ty(ty)
+                        && matches!(&value.kind, IrExprKind::If { .. } | IrExprKind::Match { .. })
+            )
+        })
+        .count();
+    if rest_branch_binds > 2 {
         return None;
     }
     let result_ty = &body.ty;

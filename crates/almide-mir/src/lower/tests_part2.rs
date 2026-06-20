@@ -446,30 +446,46 @@
     }
 
     #[test]
-    fn nested_let_bound_branch_continuation_stays_walled() {
-        // let s = if c then "A" else "B"; let t = if c then "C" else "D"; println(s); println(t)
-        // — the continuation ITSELF contains a SECOND unresolved heap let-bound if. Duplicating a
-        // duplicating continuation risks exponential blow-up, so the bounded-duplication gate
-        // REFUSES (returns a clean miss) and the normal path WALLS the first bind explicitly.
-        let if1 = iff_faithful(lit_str("A"), lit_str("B"), Ty::String);
-        let if2 = iff_faithful(lit_str("C"), lit_str("D"), Ty::String);
-        let b = body(vec![
-            bind(0, Ty::String, if1),
-            bind(1, Ty::String, if2),
+    fn nested_let_bound_branch_continuation_bounded_duplication() {
+        // let s = if c then "A" else "B"; let t = if c then "C" else "D"; println(s)
+        // — the continuation has a SECOND heap let-bound if. With the BOUNDED-duplication relaxation
+        // (≤ 2 remaining branch binds → ≤ 2^3 leaf arms), the fixpoint now resolves BOTH ifs into flat
+        // leaves `let s=…; let t=…; println(s)`, each with its own balanced s+t drops — so it LOWERS
+        // soundly. (block_scalar's `let joined = if…; (value.str(if…), end)` is this 2-if shape.)
+        let println_s = |v: u32| {
             stmt(IrStmtKind::Expr {
                 expr: ir_expr(
                     IrExprKind::Call {
                         target: CallTarget::Named { name: almide_lang::intern::sym("println") },
-                        args: vec![ir_expr(IrExprKind::Var { id: VarId(0) }, Ty::String)],
+                        args: vec![ir_expr(IrExprKind::Var { id: VarId(v) }, Ty::String)],
                         type_args: vec![],
                     },
                     Ty::Unit,
                 ),
-            }),
+            })
+        };
+        let mk = || iff_faithful(lit_str("A"), lit_str("B"), Ty::String);
+        let b = body(vec![bind(0, Ty::String, mk()), bind(1, Ty::String, mk()), println_s(0)]);
+        let mir = lower_body(&b, "main").expect("the bounded 2-if continuation now lowers");
+        assert_eq!(
+            verify_ownership(&mir),
+            Ok(()),
+            "each leaf's s+t allocs are dropped exactly once: {:?}",
+            mir.ops
+        );
+
+        // FOUR ifs (3 in the continuation after the first) EXCEED the bound → still WALLS: the
+        // exponential-blow-up guard holds beyond ≤ 2 remaining branch binds.
+        let b4 = body(vec![
+            bind(0, Ty::String, mk()),
+            bind(1, Ty::String, mk()),
+            bind(2, Ty::String, mk()),
+            bind(3, Ty::String, mk()),
+            println_s(0),
         ]);
-        match lower_body(&b, "main") {
+        match lower_body(&b4, "main") {
             Err(LowerError::Unsupported(_)) => {}
-            other => panic!("nested let-bound branch continuation must stay walled, got: {other:?}"),
+            other => panic!("> 2 nested continuation must still wall, got: {other:?}"),
         }
     }
 

@@ -239,6 +239,17 @@ impl LowerCtx {
                     .into(),
             ));
         }
+        // A BLOCK-valued bind (`let a = { let n = 5; n * n }` — an inlined pipe-lambda, or any block
+        // in value position): lower the block's statements as effects in the current scope, then bind
+        // `var` to the block's TAIL by recursing. Without this the Block falls through to the scalar
+        // path's deferred `Const` and mis-lowers to 0. A block-local `let` extends to the outer scope
+        // — a conservative, memory-safe lifetime extension (the same discipline as a deferred reassign).
+        if let IrExprKind::Block { stmts, expr: Some(tail) } = &value.kind {
+            for stmt in stmts {
+                self.lower_stmt(stmt)?;
+            }
+            return self.lower_bind(var, ty, tail);
+        }
         if !is_heap_ty(ty) {
             // Scalar binding: a Copy value, no ownership accounting. A RESOLVABLE
             // scalar call (`let n = add(2, 3)`, `let m = string.len(s)`) is lowered to

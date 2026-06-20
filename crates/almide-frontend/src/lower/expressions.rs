@@ -844,6 +844,34 @@ fn lower_pipe(ctx: &mut LowerCtx, left: &ast::Expr, right: &ast::Expr, ty: Ty, s
             let target = lower_call_target(ctx, right);
             ctx.mk(IrExprKind::Call { target, args: vec![ir_left], type_args: vec![] }, ty, span)
         }
+        // `a |> (n) => body` — INLINE the immediately-applied lambda to `{ let n = a; body }`.
+        // A pipe RHS lambda is applied exactly once, so binding its single param to the piped value
+        // and evaluating the body is identical on BOTH targets — and it avoids a Computed-callee
+        // call, which v1 MIR cannot lower as a first-class closure (it silently mis-lowered
+        // `5 |> (n) => n * n` to 0). Multi-param / zero-param lambdas keep the Computed-call form.
+        ast::ExprKind::Lambda { params, body, .. } if params.len() == 1 => {
+            let ir_left = lower_expr(ctx, left);
+            let p = &params[0];
+            let param_ty = p
+                .ty
+                .as_ref()
+                .map(|te| resolve_type_expr(te))
+                .unwrap_or_else(|| ctx.expr_ty(left));
+            ctx.push_scope();
+            let var = ctx.define_var(&p.name, param_ty.clone(), Mutability::Let, span.clone());
+            let ir_body = lower_expr(ctx, body);
+            ctx.pop_scope();
+            let bind = IrStmt {
+                kind: IrStmtKind::Bind {
+                    var,
+                    mutability: Mutability::Let,
+                    ty: param_ty,
+                    value: ir_left,
+                },
+                span: span.clone(),
+            };
+            ctx.mk(IrExprKind::Block { stmts: vec![bind], expr: Some(Box::new(ir_body)) }, ty, span)
+        }
         _ => {
             let ir_left = lower_expr(ctx, left);
             let ir_right = lower_expr(ctx, right);
