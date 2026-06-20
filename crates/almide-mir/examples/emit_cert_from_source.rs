@@ -91,11 +91,47 @@ fn main() {
         .functions
         .iter()
         .find(|f| f.name.as_str() == func_name)
+        // `mir` mode iterates by substring (mono renames generics, e.g. `unbox$String`), so it
+        // does not need an exact-name `func`; fall back to the first function to avoid the die.
+        .or_else(|| ir.functions.first())
         .unwrap_or_else(|| die(format!("no function `{func_name}` in {path}")));
 
     if property == "ir" {
         // Debug aid: dump the real linked-IR body the lowering sees.
         eprintln!("{:#?}", func.body);
+        return;
+    }
+
+    if property == "mir" {
+        // Debug aid: dump the MIR ops the variant-aware lowering produces (for ALL functions
+        // whose name contains `func_name`, since mono specializes generics like `unbox$String`).
+        let mut record_layouts = almide_mir::lower::build_record_layouts(&ir.type_decls);
+        let mut variant_layouts = almide_mir::lower::build_variant_layouts(&ir.type_decls);
+        for m in &ir.modules {
+            record_layouts.extend(almide_mir::lower::build_record_layouts(&m.type_decls));
+            let vl = almide_mir::lower::build_variant_layouts(&m.type_decls);
+            variant_layouts.by_type.extend(vl.by_type);
+            variant_layouts.ctor_to_type.extend(vl.ctor_to_type);
+        }
+        for f in &ir.functions {
+            if !f.name.as_str().contains(func_name.as_str()) {
+                continue;
+            }
+            match almide_mir::lower::lower_function_all_with_layouts(
+                f, &globals, &record_layouts, &variant_layouts,
+            ) {
+                Ok(mirs) => {
+                    for mir in &mirs {
+                        eprintln!("=== {} ===", mir.name);
+                        eprintln!("ownership cert: {}", ownership_certificate(mir));
+                        for (i, op) in mir.ops.iter().enumerate() {
+                            eprintln!("  [{i}] {op:?}");
+                        }
+                    }
+                }
+                Err(e) => eprintln!("=== {} WALL: {e:?} ===", f.name.as_str()),
+            }
+        }
         return;
     }
 

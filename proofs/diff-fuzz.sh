@@ -140,6 +140,7 @@ EOF
        a=$((1+$(ri 40))); b=$((1+$(ri 40))); c=$((1+$(ri 40)))
        cat <<EOF
 type Tok = Num(Int) | Pair(Int, Int) | Eof
+type Word = Tok2(String) | Blank
 fn val(t: Tok) -> Int = match t {
   Pair(x, y) => x * y,
   Num(n)     => n,
@@ -155,6 +156,14 @@ fn name(t: Tok) -> String = match t {
   Pair(x, y) => "pair",
   Eof        => "eof",
 }
+fn wtag(w: Word) -> String = match w {
+  Tok2(s) => s,
+  Blank   => "_",
+}
+fn wlen(w: Word) -> Int = match w {
+  Tok2(s) => string.len(s),
+  Blank   => 0,
+}
 fn main() -> Unit = {
   let mid = Num($c)
   println(int.to_string(val(Num($a))))
@@ -167,6 +176,9 @@ fn main() -> Unit = {
   println(name(Num($a)))
   println(name(Pair($b, $c)))
   println(name(Eof))
+  println(wtag(Tok2("hi")))
+  println(wtag(Blank))
+  println(int.to_string(wlen(Tok2("abcd")) + wlen(Blank)))
 }
 EOF
        ;;

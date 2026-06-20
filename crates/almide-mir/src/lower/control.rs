@@ -7,14 +7,14 @@ use almide_ir::{
 };
 use almide_lang::types::Ty;
 
-/// One parsed arm of a custom-variant `match` (ADT brick 3). A `Ctor` arm tests `tag ==
-/// tag` and binds its SCALAR fields from slots (`(slot index 1+i, bound var)`); a `Wildcard`
-/// arm is the unconditional catch-all. A heap-field bind is walled (ADT brick 5c): neither a
-/// borrow (a consuming re-use `Other(s)` `m`s at rc 0) nor a `Dup`'d owned bind (a move-out
-/// `B(x) => x` double-acquires → `aamdm`, net −1) is universally cert-sound — it needs
-/// USE-AWARE binding (borrow for read-only/borrow-pass, Dup for consume/move-out).
+/// One parsed arm of a custom-variant `match` (ADT bricks 3/5c). A `Ctor` arm tests `tag ==
+/// tag` and binds its fields from slots — `(slot index 1+i, bound var, is_heap)`: a SCALAR
+/// field is an i64 value copy; a leaf-heap (`String`) field is a BORROW of the slot handle
+/// (the subject keeps ownership). A move-out arm auto-`Dup`s in `lower_heap_result_arm`; a
+/// consuming re-use `Dup`s in `lower_owned_heap_field` — so the borrow is never released at
+/// rc 0. A `Wildcard` arm is the unconditional catch-all.
 enum VariantArmKind {
-    Ctor { tag: i64, binds: Vec<(usize, VarId)> },
+    Ctor { tag: i64, binds: Vec<(usize, VarId, bool)> },
     Wildcard,
 }
 
@@ -1227,6 +1227,15 @@ impl LowerCtx {
         let type_name = self.custom_variant_type_name(&subject.ty)?;
         let layout = self.variant_layouts.by_type.get(&type_name)?.clone();
         let plans = self.parse_variant_arms(&layout, arms)?;
+        // A SINGLE-arm HEAP-result match (a 1-ctor newtype `unbox`, `match b { B(x) => x }`)
+        // returns the arm value DIRECTLY to `func.ret` — with no IfThen branch-merge `dst` to
+        // route through, the arm's move-out `Consume` (`m`) double-moves with the ret's move
+        // (`m`), the `amm`/`aamdm` net-−1 the proven checker REJECTS. A multi-arm match routes
+        // through the IfThen `dst` (one ret move). Wall the degenerate single-arm heap case
+        // (ADT brick 5c-newtype) rather than emit a checker-rejected double-move.
+        if is_heap_ty(result_ty) && plans.len() == 1 {
+            return None;
+        }
         let ops_mark = self.ops.len();
         let lhh_mark = self.live_heap_handles.len();
         // Materialize/borrow the subject → a Handle (the variant block pointer).
@@ -1292,10 +1301,13 @@ impl LowerCtx {
                             IrPattern::Wildcard => {}
                             // slot 1+i (slot 0 is the tag). A SCALAR field binds by value copy.
                             IrPattern::Bind { var, ty } if !is_heap_ty(ty) => {
-                                binds.push((1 + i, *var))
+                                binds.push((1 + i, *var, false))
                             }
-                            // a heap-field bind (use-aware ownership = ADT brick 5c) /
-                            // nested ctor pattern — decline.
+                            // A leaf-heap (`String`) field binds as a borrow of the slot handle.
+                            IrPattern::Bind { var, ty } if matches!(ty, Ty::String) => {
+                                binds.push((1 + i, *var, true))
+                            }
+                            // a non-String heap field / nested ctor pattern — ADT brick 5b.
                             _ => return None,
                         }
                     }
@@ -1319,13 +1331,19 @@ impl LowerCtx {
     /// all rc-balanced; a BORROW would `Consume`/`m` at rc 0 on a re-use (the rejected double-free).
     fn bind_variant_arm(&mut self, kind: &VariantArmKind, h: ValueId) {
         if let VariantArmKind::Ctor { binds, .. } = kind {
-            for (slot, var) in binds {
-                let payload = self.load_at_offset(
-                    h,
-                    layout::slot_offset(*slot) as i64,
-                    crate::PrimKind::Load { width: 8 },
-                );
-                self.value_of.insert(*var, payload);
+            for (slot, var, is_heap) in binds {
+                let off = layout::slot_offset(*slot) as i64;
+                if *is_heap {
+                    // BORROW the slot handle: the subject owns the String; a move-out auto-Dups
+                    // in `lower_heap_result_arm`, a consuming re-use Dups in `lower_owned_heap_field`.
+                    let p = self.load_at_offset(h, off, crate::PrimKind::LoadHandle);
+                    self.param_values.insert(p);
+                    self.value_of.insert(*var, p);
+                } else {
+                    let payload =
+                        self.load_at_offset(h, off, crate::PrimKind::Load { width: 8 });
+                    self.value_of.insert(*var, payload);
+                }
             }
         }
     }

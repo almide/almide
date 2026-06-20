@@ -643,6 +643,26 @@
     }
 
     #[test]
+    fn custom_variant_heap_field_bind_executes_on_wasmtime() {
+        // A multi-arm custom-variant `match` that BINDS a leaf-heap (`String`) ctor field (ADT
+        // brick 5c): `Text(s) => s` moves it out (auto-`Dup` in lower_heap_result_arm),
+        // `string.len(s)` reads it (borrow). The subject keeps ownership (its masked drop frees
+        // the slot); a 1000x construct+match+drop loop must not leak. Byte-matches v0. (A
+        // SINGLE-arm heap match — a 1-ctor newtype — is walled: its direct-to-ret double-move.)
+        let src = "type Msg = Text(String) | Code(Int) | Quit\n\
+            fn name(m: Msg) -> String = match m { Text(s) => s, Code(c) => \"code\", Quit => \"quit\" }\n\
+            fn weight(m: Msg) -> Int = match m { Text(s) => string.len(s), Code(c) => c, Quit => 0 }\n\
+            fn main() -> Unit = {\n  \
+              println(name(Text(\"hi\")))\n  println(name(Code(7)))\n  println(name(Quit))\n  \
+              var n = 0\n  for i in 0..1000 { n = n + weight(Text(\"abc\")) }\n  \
+              println(int.to_string(n)) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("custom_variant_heapfield", &render_wasm_program(&prog)) {
+            assert_eq!(out, "hi\ncode\nquit\n3000");
+        }
+    }
+
+    #[test]
     fn custom_variant_unit_statement_match_runs_one_arm() {
         // A UNIT-result custom-variant `match` in STATEMENT position (ADT brick 3, unit path):
         // only the TAKEN arm's effect runs — the regression guard for the both-arms
