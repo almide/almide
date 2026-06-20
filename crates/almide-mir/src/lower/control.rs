@@ -932,10 +932,24 @@ impl LowerCtx {
             Some(CallArg::Handle(v)) => v,
             _ => return rollback(self),
         };
-        if is_self_host_option_call(subject) {
+        // A USER-FN `Named` call returning Option/Result is tracked the SAME as a self-host call: every
+        // Option/Result value uses the one DynListStr len-as-tag repr (brick #51), so `match find_colon(t)
+        // { none => …, some(cp) => … }` over `fn find_colon(..) -> Option[Int]` reads the tag @4 + binds the
+        // scalar payload @12 identically. `subj` is the OWNED call result (live, dropped-before for a scalar
+        // payload), and the tracking is per-subject. A HEAP-Ok user Result still self-gates (heap_or_scalar_
+        // bind requires a str-result), so only scalar payloads lower — never a silently-wrong heap move-out.
+        let is_named_call =
+            matches!(&subject.kind, IrExprKind::Call { target: CallTarget::Named { .. }, .. });
+        if is_self_host_option_call(subject)
+            || (is_named_call
+                && crate::lower::is_variant_ty(&subject.ty)
+                && !crate::lower::is_result_ty(&subject.ty))
+        {
             self.materialized_options.insert(subj);
         }
-        if is_self_host_result_call(subject) {
+        if is_self_host_result_call(subject)
+            || (is_named_call && crate::lower::is_result_ty(&subject.ty))
+        {
             self.materialized_results.insert(subj);
         }
         // A self-host HEAP-Ok Result (`value.as_string`/`value.as_array`/`result.zip` — cap-as-tag
@@ -1103,12 +1117,25 @@ impl LowerCtx {
                 s.lower_scalar_arm(body)
             }
         };
+        // BRANCH OWNERSHIP ISOLATION: the two arms are ALTERNATE (only one runs), so each must lower
+        // from the SAME ownership state. A borrowed param consumed in the THEN arm (`pairs + [(k,v)]`)
+        // must still be available to the ELSE arm (`value.object(pairs)`) and vice versa — without this
+        // the THEN arm's `Consume`/move leaks into the ELSE arm's lowering-time view and the ELSE arm
+        // walls. Snapshot the owned/borrowed sets before THEN, restore them before ELSE (the emitted ops
+        // are per-branch; only the lowering-time tracking is reset). The shared payload binds (cp, $p)
+        // were inserted before IfThen, so they survive in both.
+        let pv_snapshot = self.param_values.clone();
+        let lhh_snapshot = self.live_heap_handles.clone();
+        let ma_snapshot = self.materialized_aggregates.clone();
         // THEN (tag != 0): the Some payload / the Err message.
         let then_val = match lower_arm(self, then_body) {
             Some(v) => v,
             None => return rollback(self),
         };
         self.ops.push(Op::Else { val: Some(then_val) });
+        self.param_values = pv_snapshot;
+        self.live_heap_handles = lhh_snapshot;
+        self.materialized_aggregates = ma_snapshot;
         // ELSE (tag == 0): the None branch / the scalar Ok payload.
         let else_val = match lower_arm(self, else_body) {
             Some(v) => v,
