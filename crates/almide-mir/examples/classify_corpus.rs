@@ -568,6 +568,14 @@ fn main() {
         for m in &ir.modules {
             record_layouts.extend(almide_mir::lower::build_record_layouts(&m.type_decls));
         }
+        // The variant-layout registry (custom ADTs) — the value-model sibling of
+        // `record_layouts`, so the corpus-wall exercises variant construct / `match` too.
+        let mut variant_layouts = almide_mir::lower::build_variant_layouts(&ir.type_decls);
+        for m in &ir.modules {
+            let m_vl = almide_mir::lower::build_variant_layouts(&m.type_decls);
+            variant_layouts.by_type.extend(m_vl.by_type);
+            variant_layouts.ctor_to_type.extend(m_vl.ctor_to_type);
+        }
         // PROGRAM pre-pass: inline mutual-recursive tail siblings → direct self-recursion (exposed to
         // the append-accumulator TCO). Guarded: only where it makes a walled fn lower (no regression).
         let inlined_fns =
@@ -575,7 +583,12 @@ fn main() {
         for func in &inlined_fns {
             t.functions += 1;
             let lowered = catch_unwind(AssertUnwindSafe(|| {
-                almide_mir::lower::lower_function_all_with_types(func, &globals, &record_layouts)
+                almide_mir::lower::lower_function_all_with_layouts(
+                    func,
+                    &globals,
+                    &record_layouts,
+                    &variant_layouts,
+                )
             }));
             match lowered {
                 Ok(Ok(mirs)) => {

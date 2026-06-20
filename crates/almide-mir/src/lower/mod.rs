@@ -155,20 +155,96 @@ pub fn build_record_layouts(type_decls: &[almide_ir::IrTypeDecl]) -> RecordLayou
     out
 }
 
+/// Build the [`VariantLayouts`] registry from a program's type declarations — the
+/// VALUE-MODEL tag + per-constructor field structure the ADT bricks consult to construct,
+/// `match`, and drop a custom variant. Each `type V = A(..) | B { .. } | C` becomes
+/// `V → VariantLayout { tag-indexed cases, slot_count }`; record / alias decls carry no
+/// variant layout and are skipped. The tag is the declaration index and tuple-constructor
+/// fields are named `_0`, `_1`, … — both matching v0's `emit_wasm` registration, so the
+/// backends agree on tag and field identity. Call once per program and pass the result
+/// into [`lower_function_all_with_layouts`].
+pub fn build_variant_layouts(type_decls: &[almide_ir::IrTypeDecl]) -> VariantLayouts {
+    use almide_ir::{IrTypeDeclKind, IrVariantKind};
+    let mut out = VariantLayouts::default();
+    for decl in type_decls {
+        let IrTypeDeclKind::Variant { cases, .. } = &decl.kind else {
+            continue;
+        };
+        let generics = decl
+            .generics
+            .as_ref()
+            .map(|gs| gs.iter().map(|g| g.name).collect())
+            .unwrap_or_default();
+        let type_name = decl.name.as_str().to_string();
+        let mut case_layouts = Vec::with_capacity(cases.len());
+        let mut max_arity = 0usize;
+        for (tag, case) in cases.iter().enumerate() {
+            let fields: Vec<(almide_lang::intern::Sym, Ty)> = match &case.kind {
+                IrVariantKind::Unit => Vec::new(),
+                // A tuple constructor's positional fields get the same `_0`, `_1`, …
+                // synthetic names v0 assigns, so field identity is shared across backends.
+                IrVariantKind::Tuple { fields } => fields
+                    .iter()
+                    .enumerate()
+                    .map(|(i, ty)| (almide_lang::intern::sym(&format!("_{i}")), ty.clone()))
+                    .collect(),
+                IrVariantKind::Record { fields } => {
+                    fields.iter().map(|f| (f.name, f.ty.clone())).collect()
+                }
+            };
+            max_arity = max_arity.max(fields.len());
+            out.ctor_to_type
+                .insert(case.name.as_str().to_string(), type_name.clone());
+            case_layouts.push(VariantCaseLayout {
+                ctor: case.name,
+                tag: tag as u32,
+                fields,
+            });
+        }
+        out.by_type.insert(
+            type_name,
+            VariantLayout {
+                generics,
+                cases: case_layouts,
+                // slot 0 is the tag; slots 1.. are the widest constructor's fields, so all
+                // constructors of the type share one block size (uniform alloc + sound `==`).
+                slot_count: 1 + max_arity,
+            },
+        );
+    }
+    out
+}
+
 /// [`lower_function_all`] WITH the program's record-layout registry threaded in —
 /// the entry the real pipeline (render_program) uses so a `Ty::Named` record
 /// resolves its fields (and `r.x` materializes). The plain [`lower_function_all`]
 /// passes an empty registry (the structurally-typed `Ty::Record`/`Ty::Tuple`
-/// paths still work; a `Ty::Named` aggregate stays walled without it).
+/// paths still work; a `Ty::Named` aggregate stays walled without it). Delegates to
+/// [`lower_function_all_with_layouts`] with an empty VARIANT registry — so a custom
+/// variant stays walled (the ADT bricks call `_with_layouts` to admit it).
 pub fn lower_function_all_with_types(
     func: &IrFunction,
     globals: &HashMap<VarId, Ty>,
     record_layouts: &RecordLayouts,
 ) -> Result<Vec<MirFunction>, LowerError> {
+    lower_function_all_with_layouts(func, globals, record_layouts, &VariantLayouts::default())
+}
+
+/// [`lower_function_all_with_types`] WITH the program's VARIANT-layout registry threaded in
+/// too — the entry the real pipeline uses once custom ADTs participate in the value model
+/// (the construct / `match` / drop bricks consult [`LowerCtx::variant_layouts`]). The
+/// record-only entry above delegates here with an empty variant registry.
+pub fn lower_function_all_with_layouts(
+    func: &IrFunction,
+    globals: &HashMap<VarId, Ty>,
+    record_layouts: &RecordLayouts,
+    variant_layouts: &VariantLayouts,
+) -> Result<Vec<MirFunction>, LowerError> {
     let mut ctx = LowerCtx {
         globals: globals.clone(),
         fn_name: func.name.as_str().to_string(),
         record_layouts: record_layouts.clone(),
+        variant_layouts: variant_layouts.clone(),
         ..Default::default()
     };
     let params = ctx.bind_params(&func.params)?;
@@ -630,12 +706,77 @@ pub(crate) struct LowerCtx {
     /// param-free testable entry) — a `Ty::Named` aggregate then stays walled, a
     /// `Ty::Record`/`Ty::Tuple` (structurally typed) still resolves directly.
     record_layouts: RecordLayouts,
+    /// Custom-variant (ADT) layout registry (the tag + per-constructor field structure):
+    /// type NAME → its [`VariantLayout`], with a ctor-name → type reverse index. A variant
+    /// CONSTRUCT / `match` resolves its tag and field slots here, the value-model sibling of
+    /// `record_layouts`. Empty when lowering without a type registry — a variant value then
+    /// stays walled (the pre-ADT-brick status quo). Populated by [`build_variant_layouts`]
+    /// and threaded via [`lower_function_all_with_layouts`].
+    #[allow(dead_code)] // consumed by the variant construct / match / drop bricks (ADT-2+)
+    variant_layouts: VariantLayouts,
 }
 
 /// Type NAME → (generic param names, declaration-ordered fields) — the VALUE-MODEL
 /// field registry threaded into lowering (see [`LowerCtx::record_layouts`]).
 pub type RecordLayouts =
     HashMap<String, (Vec<almide_lang::intern::Sym>, Vec<(almide_lang::intern::Sym, Ty)>)>;
+
+/// One constructor of a variant type, as the value model sees it: its name, its `tag`
+/// (the declaration index — `type E = Lit(Int) | Add(E,E) | Neg(E)` gives Lit=0, Add=1,
+/// Neg=2), and its declaration-ordered fields. A TUPLE constructor's positional fields
+/// are named `_0`, `_1`, … and a RECORD constructor keeps its declared names — the same
+/// synthesis v0 (`emit_wasm` variant registration) uses, so the two backends agree on
+/// field identity. A UNIT constructor has no fields.
+#[derive(Clone, Debug)]
+pub struct VariantCaseLayout {
+    pub ctor: almide_lang::intern::Sym,
+    pub tag: u32,
+    pub fields: Vec<(almide_lang::intern::Sym, Ty)>,
+}
+
+/// One variant type's VALUE-MODEL layout. A v1 variant value is a record-like heap block
+/// in the SAME uniform-i64-slot model records use (NOT v0's byte-packed layout — only the
+/// OBSERVABLE output must match v0, never the internal bytes): `slot 0` holds the tag and
+/// `slots 1..` hold the ACTIVE constructor's fields. `slot_count` is `1 + max arity over
+/// all cases`, so EVERY constructor of the type occupies an identically sized block — a
+/// uniform alloc and a sound `==` over the whole block, the v1 analogue of v0's
+/// max-payload padding (`variant_alloc_size`).
+#[derive(Clone, Debug)]
+pub struct VariantLayout {
+    pub generics: Vec<almide_lang::intern::Sym>,
+    /// Indexed by tag (`cases[t].tag == t`).
+    pub cases: Vec<VariantCaseLayout>,
+    pub slot_count: usize,
+}
+
+impl VariantLayout {
+    /// The case whose constructor is `ctor`, if any.
+    pub fn case_by_ctor(&self, ctor: &str) -> Option<&VariantCaseLayout> {
+        self.cases.iter().find(|c| c.ctor.as_str() == ctor)
+    }
+}
+
+/// The variant-type sibling of [`RecordLayouts`]: type NAME → its [`VariantLayout`], plus a
+/// constructor-name → owning-type reverse index (a `Lit(7)` constructor expression carries
+/// its ctor name; this resolves the variant type the way v0's `find_variant_tag_by_ctor`
+/// fallback does). Threaded into lowering alongside `record_layouts` so a variant
+/// construct / `match` can find its tag + field layout. Empty when lowering without a type
+/// registry — a variant value then stays walled (the pre-ADT-brick status quo).
+#[derive(Clone, Debug, Default)]
+pub struct VariantLayouts {
+    pub by_type: HashMap<String, VariantLayout>,
+    pub ctor_to_type: HashMap<String, String>,
+}
+
+impl VariantLayouts {
+    /// Resolve a constructor name to its owning type's name + layout + the specific case.
+    pub fn lookup_ctor(&self, ctor: &str) -> Option<(&str, &VariantLayout, &VariantCaseLayout)> {
+        let ty = self.ctor_to_type.get(ctor)?;
+        let layout = self.by_type.get(ty)?;
+        let case = layout.case_by_ctor(ctor)?;
+        Some((ty.as_str(), layout, case))
+    }
+}
 
 /// Is `ty` the dynamic `Value` type (the Codec data model)? Its scope-end drop is the
 /// runtime-tag-dispatched [`Op::DropValue`], since a heap-payload Value (Str/Array/Object) owns a

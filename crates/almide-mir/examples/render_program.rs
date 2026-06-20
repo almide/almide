@@ -76,6 +76,16 @@ fn main() {
         record_layouts.extend(almide_mir::lower::build_record_layouts(&m.type_decls));
     }
 
+    // The variant-layout registry (type name → tag + per-constructor fields) for custom
+    // ADTs, the value-model sibling of `record_layouts`. A variant construct / `match`
+    // resolves its tag + field slots here.
+    let mut variant_layouts = almide_mir::lower::build_variant_layouts(&ir.type_decls);
+    for m in &ir.modules {
+        let m_vl = almide_mir::lower::build_variant_layouts(&m.type_decls);
+        variant_layouts.by_type.extend(m_vl.by_type);
+        variant_layouts.ctor_to_type.extend(m_vl.ctor_to_type);
+    }
+
     // PROGRAM pre-pass: inline mutual-recursive tail siblings so the parser loops become direct
     // self-recursion (exposed to the append-accumulator TCO). Guarded: only where it makes a walled
     // function lower (no regression). Semantics-preserving.
@@ -88,7 +98,12 @@ fn main() {
         // lower_function_all_with_types returns the main function plus any lambda-lifted
         // auxiliaries (index 0 is main); all go into the module so the function table
         // covers them. The record registry is threaded so `Ty::Named` records materialize.
-        match almide_mir::lower::lower_function_all_with_types(func, &globals, &record_layouts) {
+        match almide_mir::lower::lower_function_all_with_layouts(
+            func,
+            &globals,
+            &record_layouts,
+            &variant_layouts,
+        ) {
             Ok(mirs) => functions.extend(mirs),
             Err(e) => walled.push(format!("{}: {e:?}", func.name.as_str())),
         }

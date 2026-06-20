@@ -746,3 +746,87 @@
         }
     }
 
+    // ── ADT brick 1: build_variant_layouts — the variant value-model registry ──────────
+
+    /// `type Shape = Circle(Float) | Rect { w: Float, h: Float } | Dot` exercises all three
+    /// constructor shapes (tuple / record / unit) in one decl. The registry must record:
+    /// tags in declaration order; tuple fields synthesised as `_0`, `_1`, … and record
+    /// fields by declared name (both matching v0's emit_wasm registration); a `slot_count`
+    /// padded to `1 (tag) + widest arity` so every constructor shares one block size; and a
+    /// ctor-name → type reverse index for `lookup_ctor`.
+    #[test]
+    fn build_variant_layouts_registers_tags_fields_and_slot_count() {
+        use almide_lang::intern::sym;
+        let f = |name: &str, ty: Ty| IrFieldDecl {
+            name: sym(name),
+            ty,
+            default: None,
+            alias: None,
+            attrs: vec![],
+        };
+        let decl = IrTypeDecl {
+            name: "Shape".into(),
+            kind: IrTypeDeclKind::Variant {
+                cases: vec![
+                    IrVariantDecl {
+                        name: "Circle".into(),
+                        kind: IrVariantKind::Tuple { fields: vec![Ty::Float] },
+                    },
+                    IrVariantDecl {
+                        name: "Rect".into(),
+                        kind: IrVariantKind::Record {
+                            fields: vec![f("w", Ty::Float), f("h", Ty::Float)],
+                        },
+                    },
+                    IrVariantDecl { name: "Dot".into(), kind: IrVariantKind::Unit },
+                ],
+                is_generic: false,
+                boxed_args: HashSet::new(),
+                boxed_record_fields: HashSet::new(),
+            },
+            deriving: None,
+            generics: None,
+            visibility: IrVisibility::Public,
+            doc: None,
+            blank_lines_before: 0,
+        };
+
+        let vl = build_variant_layouts(&[decl]);
+        let layout = vl.by_type.get("Shape").expect("Shape registered");
+
+        // slot 0 = tag, slots 1.. = the widest constructor (Rect, arity 2) → 1 + 2 = 3.
+        assert_eq!(layout.slot_count, 3);
+        assert!(layout.generics.is_empty());
+        assert_eq!(layout.cases.len(), 3);
+
+        // Tuple ctor: tag 0, positional field named `_0`.
+        assert_eq!(layout.cases[0].ctor.as_str(), "Circle");
+        assert_eq!(layout.cases[0].tag, 0);
+        assert_eq!(layout.cases[0].fields.len(), 1);
+        assert_eq!(layout.cases[0].fields[0].0.as_str(), "_0");
+        assert_eq!(layout.cases[0].fields[0].1, Ty::Float);
+
+        // Record ctor: tag 1, declared field names preserved in order.
+        assert_eq!(layout.cases[1].ctor.as_str(), "Rect");
+        assert_eq!(layout.cases[1].tag, 1);
+        let rect_names: Vec<&str> =
+            layout.cases[1].fields.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(rect_names, ["w", "h"]);
+
+        // Unit ctor: tag 2, no fields.
+        assert_eq!(layout.cases[2].ctor.as_str(), "Dot");
+        assert_eq!(layout.cases[2].tag, 2);
+        assert!(layout.cases[2].fields.is_empty());
+
+        // Reverse index: every ctor resolves to its owning type.
+        for ctor in ["Circle", "Rect", "Dot"] {
+            assert_eq!(vl.ctor_to_type.get(ctor).map(String::as_str), Some("Shape"));
+        }
+
+        // lookup_ctor ties the reverse index to the case by name.
+        let (ty_name, _layout, case) = vl.lookup_ctor("Rect").expect("Rect resolves");
+        assert_eq!(ty_name, "Shape");
+        assert_eq!(case.tag, 1);
+        assert!(vl.lookup_ctor("Nope").is_none());
+    }
+
