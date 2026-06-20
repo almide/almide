@@ -2101,6 +2101,27 @@ impl LowerCtx {
             IrExprKind::If { cond, then, else_ } => {
                 self.lower_heap_result_if_inner(cond, then, else_, result_ty)
             }
+            // A LIST-literal arm (`if string.is_empty(t) then [] else parse_rows_rec(...)` — the
+            // parser entry's empty-or-recurse split): materialize the block + MOVE IT OUT
+            // (`Consume` = `m`) — the same per-arm `"im"` as a literal arm. An EMPTY `[]` is a fresh
+            // empty list block (no elements to free); a populated heap/scalar list reuses the bind
+            // builders (which mark the right recursive-drop set, though the moved-out result is freed
+            // by the CALLER per its type, not here).
+            IrExprKind::List { elements } => {
+                let arm_mark = self.live_heap_handles.len();
+                let obj = if elements.is_empty() {
+                    let repr = repr_of(result_ty).ok()?;
+                    let dst = self.fresh_value();
+                    self.ops.push(Op::Alloc { dst, repr, init: Init::IntList(vec![]) });
+                    dst
+                } else {
+                    self.try_lower_str_list_literal(arm)
+                        .or_else(|| self.try_lower_scalar_list_construct(arm))?
+                };
+                self.ops.push(Op::Consume { v: obj });
+                self.drop_arm_locals(arm_mark);
+                Some(obj)
+            }
             // A TUPLE literal arm (`if c then (a, b) else (0, 0)`, `... else (parse(s), pos)`):
             // materialize the flat (scalar) or nested-ownership (heap-element) tuple block
             // (cert `i`) and MOVE IT OUT (`Consume` = `m`) — the same per-arm `"im"` balance as

@@ -687,6 +687,24 @@
     }
 
     #[test]
+    fn empty_list_heap_result_if_arm_executes_on_wasmtime() {
+        // A heap-result `if` with an EMPTY-list `[]` arm (`if cond then [] else <list>` — the parser
+        // entry's empty-or-recurse split: `parse_rows = if is_empty(t) then [] else parse_rows_rec(...)`).
+        // lower_heap_result_arm now materializes an empty `[]` arm (a fresh empty list block) +
+        // Consumes it, alongside the populated-list-literal and call arms. Closes csv's parse_rows.
+        let src = "fn gen(flag: Bool) -> List[String] = if flag then [] else [\"a\", \"b\"]\n\
+            fn seq(n: Int) -> List[String] = if n <= 0 then [] else seq(n - 1) + [int.to_string(n)]\n\
+            fn pick(flag: Bool, n: Int) -> List[String] = if flag then [] else seq(n)\n\
+            fn main() -> Unit = {\n  \
+              println(int.to_string(list.len(gen(true))) + \",\" + int.to_string(list.len(gen(false))))\n  \
+              println(int.to_string(list.len(pick(true, 5))) + \",\" + int.to_string(list.len(pick(false, 5)))) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("empty_list_arm", &render_wasm_program(&prog)) {
+            assert_eq!(out, "0,2\n0,5");
+        }
+    }
+
+    #[test]
     fn nested_list_of_lists_recursive_drop_executes_on_wasmtime() {
         // THE BOSS (csv `rows: List[List[String]]`): a list whose elements are owned `List[String]`
         // rows. Three pieces meet: (1) the list-of-lists CONCAT `rows + [cur]` (admit a List[String]
