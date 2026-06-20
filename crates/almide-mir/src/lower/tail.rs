@@ -459,6 +459,13 @@ impl LowerCtx {
                 // EXECUTES: desugar to a nested heap-result `if` and run only the matched
                 // arm; otherwise LINEARIZE to one deferred `Alloc{Opaque}`.
                 IrExprKind::Match { subject, arms } => {
+                    // A CUSTOM variant (user ADT) subject with a HEAP result — tag@slot0 dispatch
+                    // with heap-result arms (ADT brick 4, e.g. recursive `to_string`).
+                    if let Some(dst) =
+                        self.try_lower_custom_variant_match(subject, arms, &tail.ty)
+                    {
+                        return Ok(Some(dst));
+                    }
                     // A heap-result VARIANT (Option/Result) match (`match scan_quote(..) {
                     // some(p) => "..", none => ".." }`) over a SCALAR payload — the
                     // subject-drop-before-arms desugar (cert-clean, scalar-payload only; a heap

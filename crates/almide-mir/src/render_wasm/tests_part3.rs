@@ -605,6 +605,24 @@
     }
 
     #[test]
+    fn custom_variant_heap_result_match_executes_on_wasmtime() {
+        // A HEAP (String) result custom-variant `match` over a BORROWED param subject (ADT
+        // brick 4) — each arm moves out a fresh String; the bound scalar field `n` is read from
+        // the borrowed subject's slot. The shape of recursive `to_string` minus the recursion.
+        // Byte-matches v0.
+        let src = "type Tok = Num(Int) | Sym(Int) | Eof\n\
+            fn name(t: Tok) -> String = match t {\n  \
+              Num(n) => \"num:\" + int.to_string(n),\n  \
+              Sym(s) => \"sym\",\n  \
+              Eof    => \"eof\",\n}\n\
+            fn main() -> Unit = { println(name(Num(7))); println(name(Sym(2))); println(name(Eof)) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("custom_variant_heap", &render_wasm_program(&prog)) {
+            assert_eq!(out, "num:7\nsym\neof");
+        }
+    }
+
+    #[test]
     fn custom_variant_unit_statement_match_runs_one_arm() {
         // A UNIT-result custom-variant `match` in STATEMENT position (ADT brick 3, unit path):
         // only the TAKEN arm's effect runs — the regression guard for the both-arms

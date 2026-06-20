@@ -1197,16 +1197,20 @@ impl LowerCtx {
     /// the subset — the caller then walls (a Const-0 would silently pick a wrong arm — the ②
     /// cardinal rule).
     ///
-    /// SUBSET: SCALAR result + SCALAR ctor-field binds only (a heap-result arm = ADT brick 4, a
-    /// heap/nested ctor field = ADT brick 5). No guards.
+    /// SUBSET: SCALAR result (ADT brick 3) OR a HEAP result over a BORROWED subject (ADT brick 4,
+    /// e.g. recursive `to_string` — each arm reads the borrowed subject's scalar slots and moves
+    /// out a fresh heap value). SCALAR ctor-field binds only (a heap/nested ctor field = ADT
+    /// brick 5). No guards. An OWNED-temp subject with a heap result would need
+    /// subject-drop-before-arms (the cert rejects the owned-borrow / arm-move-out overlap) — it
+    /// WALLS here rather than emit cert-failing MIR (ADT brick 4b).
     ///
     /// SOUNDNESS: the subject is materialized/borrowed by `lower_call_args` (an owned ctor temp
     /// drops at scope end via `live_heap_handles`; a tracked Var/param borrows). The tag/field
     /// reads are scalar prims, the `IfThen`/`Else`/`EndIf` markers no-op in `verify_ownership`,
-    /// and each arm is a per-arm-balanced frame (`lower_scalar_arm`) with NO heap ownership
-    /// event (scalar binds) — exactly the per-arm linearization the cert proves, wrapped so one
-    /// arm runs. The LAST arm is the unconditional `else` (the frontend guarantees the match is
-    /// exhaustive, so the remaining constructor / wildcard always matches there).
+    /// and each arm is a per-arm-balanced frame (`lower_scalar_arm` / `lower_heap_result_arm`)
+    /// with NO heap ownership event beyond the arm's own move-out — exactly the per-arm
+    /// linearization the cert proves, wrapped so one arm runs. The LAST arm is the unconditional
+    /// `else` (the frontend guarantees the match is exhaustive).
     pub(crate) fn try_lower_custom_variant_match(
         &mut self,
         subject: &IrExpr,
@@ -1214,8 +1218,7 @@ impl LowerCtx {
         result_ty: &Ty,
     ) -> Option<ValueId> {
         use crate::PrimKind;
-        // SCALAR result only (heap result = ADT brick 4); no guards; ≥1 arm.
-        if is_heap_ty(result_ty) || arms.is_empty() || arms.iter().any(|a| a.guard.is_some()) {
+        if arms.is_empty() || arms.iter().any(|a| a.guard.is_some()) {
             return None;
         }
         // The subject must be a registered custom variant; clone its layout out of the borrow.
@@ -1237,11 +1240,19 @@ impl LowerCtx {
                 return None;
             }
         };
+        // A HEAP result over an OWNED subject temp would overlap the owned-subject borrow with the
+        // arm's heap move-out (the cert rejects it). Subject-drop-before-arms is ADT brick 4b —
+        // for now WALL it (a borrowed param/var subject, the recursive-to_string case, proceeds).
+        if is_heap_ty(result_ty) && self.live_heap_handles.contains(&subj) {
+            self.ops.truncate(ops_mark);
+            self.live_heap_handles.truncate(lhh_mark);
+            return None;
+        }
         // Read the tag from slot 0, then emit the per-arm if-chain.
         let h = self.fresh_value();
         self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![subj] });
         let tag = self.load_at_offset(h, layout::slot_offset(0) as i64, PrimKind::Load { width: 8 });
-        match self.emit_variant_arm_chain(h, tag, &plans) {
+        match self.emit_variant_arm_chain(h, tag, &plans, result_ty) {
             Some(dst) => Some(dst),
             None => {
                 self.ops.truncate(ops_mark);
@@ -1390,22 +1401,29 @@ impl LowerCtx {
     }
 
     /// Emit the right-nested `if tag == t0 { arm0 } else if … else { last }` chain for a
-    /// custom-variant match, returning the ValueId holding the chain's scalar result. The LAST
+    /// custom-variant value match, returning the ValueId holding the chain's result. The LAST
     /// plan is the unconditional `else` (no tag test — exhaustiveness guarantees it matches); a
     /// `Wildcard` anywhere is likewise an unconditional `else` (the rest is unreachable). Each
-    /// arm body lowers in its own per-arm frame via `lower_scalar_arm`. `None` (caller rolls
-    /// back) if an arm body is outside the scalar subset.
+    /// arm body lowers in its own per-arm frame — `lower_scalar_arm` for a scalar result
+    /// (ADT brick 3), `lower_heap_result_arm` for a heap result (ADT brick 4, the arm moves out
+    /// a fresh heap value). `None` (caller rolls back) if an arm body is outside the subset.
     fn emit_variant_arm_chain(
         &mut self,
         h: ValueId,
         tag: ValueId,
         plans: &[(VariantArmKind, &IrExpr)],
+        result_ty: &Ty,
     ) -> Option<ValueId> {
+        let heap = is_heap_ty(result_ty);
         let ((kind, body), rest) = plans.split_first()?;
         // The last arm, or any Wildcard, is the unconditional else (no tag test).
         if rest.is_empty() || matches!(kind, VariantArmKind::Wildcard) {
             self.bind_variant_arm(kind, h);
-            return self.lower_scalar_arm(body);
+            return if heap {
+                self.lower_heap_result_arm(body, result_ty)
+            } else {
+                self.lower_scalar_arm(body)
+            };
         }
         let arm_tag = match kind {
             VariantArmKind::Ctor { tag, .. } => *tag,
@@ -1418,9 +1436,13 @@ impl LowerCtx {
         self.ops.push(Op::IntBinOp { dst: cond, op: IntOp::Eq, a: tag, b: tc });
         self.ops.push(Op::IfThen { cond, dst: Some(dst) });
         self.bind_variant_arm(kind, h);
-        let then_v = self.lower_scalar_arm(body)?;
+        let then_v = if heap {
+            self.lower_heap_result_arm(body, result_ty)?
+        } else {
+            self.lower_scalar_arm(body)?
+        };
         self.ops.push(Op::Else { val: Some(then_v) });
-        let else_v = self.emit_variant_arm_chain(h, tag, rest)?;
+        let else_v = self.emit_variant_arm_chain(h, tag, rest, result_ty)?;
         self.ops.push(Op::EndIf { val: Some(else_v) });
         Some(dst)
     }

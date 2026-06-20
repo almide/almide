@@ -150,6 +150,11 @@ fn show(t: Tok) -> Unit = match t {
   Pair(x, y) => println(int.to_string(x + y)),
   Eof        => println("eof"),
 }
+fn name(t: Tok) -> String = match t {
+  Num(n)     => "num:" + int.to_string(n),
+  Pair(x, y) => "pair",
+  Eof        => "eof",
+}
 fn main() -> Unit = {
   let mid = Num($c)
   println(int.to_string(val(Num($a))))
@@ -159,6 +164,9 @@ fn main() -> Unit = {
   show(Num($b))
   show(Pair($a, $c))
   show(Eof)
+  println(name(Num($a)))
+  println(name(Pair($b, $c)))
+  println(name(Eof))
 }
 EOF
        ;;
