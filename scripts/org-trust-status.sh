@@ -36,14 +36,16 @@ echo "building classify_corpus…" >&2
 # The repos verified by a real v0==v1 byte-match (not just wall=0). Update as new ones are checked.
 BYTE_VERIFIED=" yaml sha1 "
 
+# The Almide-LIBRARY entry, taken ONLY from `src/` (a real module root), never from embedded shims
+# (`stdlib/`) or benchmark fixtures (`research/`, `benchmark/`) — those misfired into bogus repo-level
+# numbers (e.g. almide-fable-llm, a Rust project, reported a random MSR benchmark file). `sort` makes
+# the pick deterministic. Empty result ⇒ the repo is not a single-module Almide library.
 find_entry() {
-  local d="$1" e=""
+  local d="$1"
   for c in "src/mod.almd" "src/lib.almd" "src/$(basename "$d").almd"; do
     [ -f "$d/$c" ] && { echo "$d/$c"; return; }
   done
-  e="$(find "$d/src" -name '*.almd' 2>/dev/null | grep -vE '_test\.almd' | head -1 || true)"
-  [ -z "$e" ] && e="$(find "$d" -name '*.almd' 2>/dev/null | grep -vE '_test\.almd|/spec/|/tests/|/\.worktrees/' | head -1 || true)"
-  echo "$e"
+  find "$d/src" -maxdepth 2 -name '*.almd' 2>/dev/null | grep -vE '_test\.almd' | sort | head -1 || true
 }
 
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
@@ -55,7 +57,10 @@ for d in "$ORG_DIR"/*/; do
   repo="$(basename "$d")"
   [ "$repo" = "almide" ] && continue                       # the compiler itself is the v0 corpus, not a target
   entry="$(find_entry "${d%/}")"
-  [ -z "$entry" ] && continue
+  if [ -z "$entry" ]; then
+    rows="${rows}| \`$repo\` | — | — | ▫ not an Almide \`src/\` library | — |\n"
+    continue
+  fi
   out="$(WALL_NAMES=1 "$BIN" --out "$tmp/o" "$entry" 2>&1 || true)"
   ip="$(printf '%s' "$out" | grep -oE 'in-profile \(lowers\)[ ]*: [0-9]+' | grep -oE '[0-9]+$' || true)"
   wl="$(printf '%s' "$out" | grep -oE 'walled \(Unsupported\)[ ]*: [0-9]+' | grep -oE '[0-9]+$' || true)"
