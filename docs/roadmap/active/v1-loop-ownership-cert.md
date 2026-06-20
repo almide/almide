@@ -119,16 +119,28 @@ append accumulators.
   spec corpus walls (in-profile 3712→3718)**; corpus-wall green; cargo-test clean; yaml UNCHANGED at 11 (no
   regression — esc_rec/collect_block stay in-profile, the guard refused to touch them).
 
-  **⚠ REMAINING per-fn gaps (yaml's append fns need these to lower after the guarded inline):**
-  - **`[call_result]` element materialization** — flow_rec/collect_block append `acc + [string.slice(…)]` /
-    `[string.drop(…)]`: a 1-element `List[String]` with a STRING-returning MODULE-call element.
-    `try_lower_str_list_literal` admits only LitStr/ConcatStr/Var (+ Value-call for elem_value);
-    `lower_owned_heap_field`'s Module arm routes to `lower_pure_module_value_call` (VALUE-only). So a
-    String-returning module call (`string.slice`/`string.drop`) needs a string-module-call→owned-handle
-    lowering path. THE next lever for flow_rec/collect_block.
-  - `collect_seq` returns `(Value,Int)` (tuple-return, not bare List[Value]); `collect_map` needs
-    tuple-element concat + value.object; `block_*` need tuple-heap drop. Then yaml → 0.
-  (The append concat itself — scalar + String/Value heap — and the guarded mutual-inline are DONE + verified.)
+  **✅ DONE 2026-06-20 (commit f6199af9): `[call_result]` element materialization + the off-by-one guard →
+  yaml 11→9.** `try_lower_str_list_literal` now admits a STRING-returning Module/Named CALL element
+  (`[string.slice(s,0,1)]`) for `elem_str` (not just Value-call for elem_value): it lowers the call to a
+  fresh owned String (the registered `string.slice` runtime — `lower_pure_module_value_call` already
+  handles general module calls, not value-only) MOVED into the slot. Byte-verified:
+  `spec/wasm_cross/list_call_element.almd` (`xs + [string.slice(s,0,1)]`) matches v0.
+  **🚨 + a SILENT-MISCOMPILE found & fixed:** a `[string.slice]` element revealed that the TCO assigns
+  carried params SEQUENTIALLY, so `acc + [string.slice(s, i, …)]` reading the loop index `i` (reassigned
+  `i=i+1`) saw the NEW `i` → off-by-one (`chars("abc")` → `b-c-` not `a-b-c`). FIXED by WALLING
+  cross-dependent TCO (a self-call arg reading another carried param) in `try_tco_rewrite` — ②-safe (walls,
+  never miscompiles); the common case (each arg reads only its own param) is unaffected. yaml 11→9:
+  flow_step + one more now lower correctly; the cross-dep fns (flow_rec, chars) wall instead of miscompiling.
+
+  **⚠ REMAINING (the 9 walls):**
+  - **flow_rec** is now blocked ONLY by the cross-dep wall (`acc + [string.slice(s, start, pos)]` reads
+    start/pos). The real fix = SIMULTANEOUS-UPDATE TCO: stage each new arg value in a temp (reading OLD
+    params), then assign all — then flow_rec lowers (drops the wall). THE next lever.
+  - `collect_seq`/`seq_item`, `collect_map`/`map_entry` return `(Value,Int)` (tuple-return) + need
+    value.object; `block_*`/`collect_block` need tuple-heap; `parse_lines`/`parse_nested` are the heap-result
+    match roots. → yaml 0.
+  (The append concat — scalar + String/Value heap — the guarded mutual-inline, and the call-element
+  materialization are DONE + verified; the off-by-one is GUARDED, not latent.)
 
 After C lands end-to-end: the 11 walls fall (with value.object/stringify + tuple-heap for the Value-parser
 subset), driving yaml → 0 — on a PROVEN spine, the v1 completeness ideal.
