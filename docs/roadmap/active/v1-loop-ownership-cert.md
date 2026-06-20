@@ -110,16 +110,25 @@ append accumulators.
   took 11→9 BUT **regressed `esc_rec` + `collect_block` (in-profile → walled)**: inlining makes F
   self-recursive → the TCO FIRES → and TCO then WALLS a fn that lowered fine WITHOUT the TCO. ② forbids that
   incompleteness regression, so it was reverted.
-  **THE FIX (next): a TRY-LOWER GUARD** — only inline (F,G) when F currently WALLS *and* the inlined F then
-  LOWERS (thread `globals`+`record_layouts` into the pass, attempt `lower_function_all_with_types` on both).
-  No regression by construction. With the guard, a wall clears only when the inlined fn ALSO clears its
-  per-fn gap: `flow_rec`/`collect_block` (List[String]) additionally need **`[call_result]` element
-  materialization** (`try_lower_str_list_literal` admits only LitStr/ConcatStr/Var elements — yaml appends
-  `acc + [string.slice(…)]`/`[string.drop(…)]`, a CALL element, which must be materialized = lowered +
-  moved in); `collect_seq` returns `(Value,Int)` (tuple-return, not bare List[Value]); `collect_map` needs
-  tuple-element concat + value.object; `block_*` need tuple-heap drop. So the real path: guarded-inline +
-  `[call]`-element materialization → flow_rec/collect_block; + tuple-return/value.object/stringify/tuple-heap
-  → the rest → yaml 0. (The append concat itself — scalar + String/Value heap — is DONE and byte-verified.)
+  **✅ DONE 2026-06-20 (commit 8c9a5c07): the GUARDED mutual-recursion inline.** `inline_mutual_tail_recursion`
+  (lower/mod.rs, threaded `globals`+`record_layouts`): inlines a single-call mutual sibling G into caller F
+  (`IrMutVisitor` + `substitute_var_in_expr` per param) + drops G, **ONLY when F currently WALLS and the
+  inlined F then LOWERS** (try-lower both) — no regression by construction. + detection relax (a self-call
+  passes `acc` OR `acc+[x]`) + `tco_rewrite` identity-assign skip. Wired into render_program + classify_corpus.
+  VERIFIED: `spec/wasm_cross/mutual_append.almd` (`frec⇄fstep`, List[String]) byte-matches v0; **cleared 6
+  spec corpus walls (in-profile 3712→3718)**; corpus-wall green; cargo-test clean; yaml UNCHANGED at 11 (no
+  regression — esc_rec/collect_block stay in-profile, the guard refused to touch them).
+
+  **⚠ REMAINING per-fn gaps (yaml's append fns need these to lower after the guarded inline):**
+  - **`[call_result]` element materialization** — flow_rec/collect_block append `acc + [string.slice(…)]` /
+    `[string.drop(…)]`: a 1-element `List[String]` with a STRING-returning MODULE-call element.
+    `try_lower_str_list_literal` admits only LitStr/ConcatStr/Var (+ Value-call for elem_value);
+    `lower_owned_heap_field`'s Module arm routes to `lower_pure_module_value_call` (VALUE-only). So a
+    String-returning module call (`string.slice`/`string.drop`) needs a string-module-call→owned-handle
+    lowering path. THE next lever for flow_rec/collect_block.
+  - `collect_seq` returns `(Value,Int)` (tuple-return, not bare List[Value]); `collect_map` needs
+    tuple-element concat + value.object; `block_*` need tuple-heap drop. Then yaml → 0.
+  (The append concat itself — scalar + String/Value heap — and the guarded mutual-inline are DONE + verified.)
 
 After C lands end-to-end: the 11 walls fall (with value.object/stringify + tuple-heap for the Value-parser
 subset), driving yaml → 0 — on a PROVEN spine, the v1 completeness ideal.
