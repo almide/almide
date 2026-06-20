@@ -2192,43 +2192,78 @@ fn tco_rewrite(
     rk: VarId,
     next_kind: &mut i64,
     idx: Option<VarId>,
+    next_var: &mut u32,
 ) -> IrExpr {
     match &body.kind {
         IrExprKind::If { cond, then, else_ } => tco_ir(
             IrExprKind::If {
                 cond: cond.clone(),
-                then: Box::new(tco_rewrite(then, fn_name, params, carried, rk, next_kind, idx)),
-                else_: Box::new(tco_rewrite(else_, fn_name, params, carried, rk, next_kind, idx)),
+                then: Box::new(tco_rewrite(then, fn_name, params, carried, rk, next_kind, idx, next_var)),
+                else_: Box::new(tco_rewrite(else_, fn_name, params, carried, rk, next_kind, idx, next_var)),
             },
             Ty::Unit,
         ),
         IrExprKind::Block { stmts, expr: Some(tail) } => tco_ir(
             IrExprKind::Block {
                 stmts: stmts.clone(),
-                expr: Some(Box::new(tco_rewrite(tail, fn_name, params, carried, rk, next_kind, idx))),
+                expr: Some(Box::new(tco_rewrite(tail, fn_name, params, carried, rk, next_kind, idx, next_var))),
             },
             Ty::Unit,
         ),
         IrExprKind::Call { target: CallTarget::Named { name }, args, .. }
             if name.as_str() == fn_name =>
         {
-            // Skip an IDENTITY self-call arg (`acc` passed unchanged in a pass-through branch of a
-            // multi-branch loop): the stable local already holds it, so `acc = acc` is a no-op — and for
-            // a HEAP slot it would otherwise hit the in-loop Assign as a non-ConcatList heap reassign and wall.
-            let mut assigns: Vec<IrStmt> = (0..params.len())
-                .filter(|&i| {
-                    carried[i]
-                        && !matches!(&args[i].kind, IrExprKind::Var { id } if *id == params[i].var)
-                })
-                .map(|i| IrStmt {
-                    kind: IrStmtKind::Assign { var: params[i].var, value: args[i].clone() },
+            // SIMULTANEOUS UPDATE (the loop carries all params at once): a self-call arg may read ANOTHER
+            // carried param (`acc + [string.slice(s, pos, …)]` reads `pos`; `start = pos + 1` reads `pos`),
+            // so a plain sequential assign would see already-updated values — an off-by-one. Stage every
+            // carried SCALAR's new value in a fresh temp (reading OLD params), THEN do the HEAP
+            // accumulator assigns (which read the still-OLD scalar locals), THEN commit the scalar temps.
+            // An IDENTITY arg (`acc` passed unchanged) is skipped (the stable local already holds it).
+            let changed = |i: usize| {
+                carried[i] && !matches!(&args[i].kind, IrExprKind::Var { id } if *id == params[i].var)
+            };
+            let mut stmts: Vec<IrStmt> = Vec::new();
+            let mut finals: Vec<(VarId, VarId, Ty)> = Vec::new();
+            // Phase 1: stage carried SCALAR args in temps (read OLD params).
+            for i in 0..params.len() {
+                if changed(i) && !is_heap_ty(&params[i].ty) {
+                    let t = VarId(*next_var);
+                    *next_var += 1;
+                    stmts.push(IrStmt {
+                        kind: IrStmtKind::Bind {
+                            var: t,
+                            mutability: almide_ir::Mutability::Let,
+                            ty: params[i].ty.clone(),
+                            value: args[i].clone(),
+                        },
+                        span: None,
+                    });
+                    finals.push((params[i].var, t, params[i].ty.clone()));
+                }
+            }
+            // Phase 2: HEAP append accumulator(s) — `acc = acc + [x]` reads the still-OLD scalar locals.
+            for i in 0..params.len() {
+                if changed(i) && is_heap_ty(&params[i].ty) {
+                    stmts.push(IrStmt {
+                        kind: IrStmtKind::Assign { var: params[i].var, value: args[i].clone() },
+                        span: None,
+                    });
+                }
+            }
+            // Phase 3: commit the staged scalar updates.
+            for (p, t, ty) in finals {
+                stmts.push(IrStmt {
+                    kind: IrStmtKind::Assign {
+                        var: p,
+                        value: tco_ir(IrExprKind::Var { id: t }, ty),
+                    },
                     span: None,
-                })
-                .collect();
+                });
+            }
             // LIST-ITERATOR self-call: the consumed list param is INVARIANT (carried[ci]=false), so
             // advancing it `list.drop(cs,1)` becomes `idx = idx + 1` — the cert-clean iterator bump.
             if let Some(iv) = idx {
-                assigns.push(IrStmt {
+                stmts.push(IrStmt {
                     kind: IrStmtKind::Assign {
                         var: iv,
                         value: tco_ir(
@@ -2243,7 +2278,7 @@ fn tco_rewrite(
                     span: None,
                 });
             }
-            tco_ir(IrExprKind::Block { stmts: assigns, expr: None }, Ty::Unit)
+            tco_ir(IrExprKind::Block { stmts, expr: None }, Ty::Unit)
         }
         _ => {
             let k = *next_kind;
@@ -2421,38 +2456,62 @@ pub(crate) fn try_tco_rewrite(
     {
         return None;
     }
-    // SIMULTANEOUS-UPDATE SAFETY: the loop assigns carried params SEQUENTIALLY, so a self-call arg that
-    // reads ANOTHER carried param (`acc + [string.slice(s, i, …)]` reading the loop index `i`, or
-    // `start = pos + 1` reading `pos`) would see the ALREADY-reassigned value — an off-by-one SILENT
-    // MISCOMPILE. WALL such cross-dependent TCO (a correct fix needs temp-staged simultaneous update).
-    // The common case (each arg reads only its own param + non-carried locals) is unaffected.
+    // SIMULTANEOUS-UPDATE SAFETY (residual). `tco_rewrite` now stages scalar updates in temps and runs
+    // the heap-accumulator assigns BEFORE committing them, so scalar↔scalar and heap-reads-scalar
+    // cross-dependencies are correct. The ONE shape it does NOT order is a HEAP accumulator arg that
+    // reads ANOTHER carried HEAP accumulator (the phase-2 heap assigns run sequentially); with ≥2 heap
+    // accumulators that would be an off-by-one. WALL only that (rare; every yaml loop has one heap acc).
     {
         use almide_ir::visit::{walk_expr, IrVisitor};
-        let carried_vars: std::collections::BTreeSet<VarId> =
-            (0..n).filter(|&i| carried[i]).map(|i| params2[i].var).collect();
-        struct R<'a> {
-            carried: &'a std::collections::BTreeSet<VarId>,
-            self_var: VarId,
-            found: bool,
-        }
-        impl IrVisitor for R<'_> {
-            fn visit_expr(&mut self, e: &IrExpr) {
-                if let IrExprKind::Var { id } = &e.kind {
-                    if *id != self.self_var && self.carried.contains(id) {
-                        self.found = true;
+        let heap_carried: std::collections::BTreeSet<VarId> = (0..n)
+            .filter(|&i| carried[i] && is_heap_ty(&params2[i].ty))
+            .map(|i| params2[i].var)
+            .collect();
+        if heap_carried.len() > 1 {
+            struct R<'a> {
+                carried: &'a std::collections::BTreeSet<VarId>,
+                self_var: VarId,
+                found: bool,
+            }
+            impl IrVisitor for R<'_> {
+                fn visit_expr(&mut self, e: &IrExpr) {
+                    if let IrExprKind::Var { id } = &e.kind {
+                        if *id != self.self_var && self.carried.contains(id) {
+                            self.found = true;
+                        }
+                    }
+                    walk_expr(self, e);
+                }
+            }
+            for c in &calls {
+                for i in 0..n {
+                    if carried[i] && is_heap_ty(&params2[i].ty) {
+                        let mut r =
+                            R { carried: &heap_carried, self_var: params2[i].var, found: false };
+                        r.visit_expr(&c[i]);
+                        if r.found {
+                            return None;
+                        }
                     }
                 }
-                walk_expr(self, e);
             }
         }
+        // PURE-VAR ALIAS HAZARD: a carried scalar whose new value is exactly ANOTHER carried param
+        // (`start = pos`) cannot be staged in a copy temp — `let t = pos` ALIASES pos's local, so the
+        // later `start = t` reads pos's ALREADY-updated value (off-by-one). A COMPUTED arg (`pos + 1`)
+        // stages a fresh value and is fine. Wall the pure-var-aliasing form (rare; the parser loops use
+        // computed indices like `pos + 1`).
+        let carried_scalars: std::collections::BTreeSet<VarId> = (0..n)
+            .filter(|&i| carried[i] && !is_heap_ty(&params2[i].ty))
+            .map(|i| params2[i].var)
+            .collect();
         for c in &calls {
             for i in 0..n {
                 if carried[i] {
-                    let mut r =
-                        R { carried: &carried_vars, self_var: params2[i].var, found: false };
-                    r.visit_expr(&c[i]);
-                    if r.found {
-                        return None;
+                    if let IrExprKind::Var { id } = &c[i].kind {
+                        if *id != params2[i].var && carried_scalars.contains(id) {
+                            return None;
+                        }
                     }
                 }
             }
@@ -2462,7 +2521,10 @@ pub(crate) fn try_tco_rewrite(
     let ret_ty = body.ty.clone();
 
     let mut next_kind = 1i64;
-    let loop_body = tco_rewrite(work_ref, fn_name, params2, &carried, rk, &mut next_kind, idx_var);
+    // `slot_next` is the next free VarId (after rk / list-iter idx / append slots) — tco_rewrite draws
+    // its simultaneous-update temps from here.
+    let loop_body =
+        tco_rewrite(work_ref, fn_name, params2, &carried, rk, &mut next_kind, idx_var, &mut slot_next);
 
     // Post-loop dispatch: `if rk == 1 then base_1 else if … else base_N` (last base = final else).
     let eq_rk = |k: i64| {

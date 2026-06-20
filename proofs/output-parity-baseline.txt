@@ -20,6 +20,7 @@ spec/wasm_cross/bytes_f16.almd
 spec/wasm_cross/bytes_from_list_param.almd
 spec/wasm_cross/const_fold_nonfinite_float.almd
 spec/wasm_cross/container_alias_return.almd
+spec/wasm_cross/cross_dep_accumulator.almd
 spec/wasm_cross/default_param_ref.almd
 spec/wasm_cross/empty_collection_annotated.almd
 spec/wasm_cross/empty_collection_fold.almd
