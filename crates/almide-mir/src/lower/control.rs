@@ -7,6 +7,15 @@ use almide_ir::{
 };
 use almide_lang::types::Ty;
 
+/// One parsed arm of a custom-variant `match` (ADT brick 3). A `Ctor` arm tests `tag ==
+/// tag` and binds its SCALAR fields from slots (`(slot index 1+i, bound var)`); a `Wildcard`
+/// arm is the unconditional catch-all. (A binder catch-all `x => …` over a variant is walled
+/// for now — its scalar-context binding to the whole block is a later brick.)
+enum VariantArmKind {
+    Ctor { tag: i64, binds: Vec<(usize, VarId)> },
+    Wildcard,
+}
+
 impl LowerCtx {
 
     /// Lower an `if`/`match` in STATEMENT or scalar-/Unit-TAIL position by
@@ -1155,6 +1164,162 @@ impl LowerCtx {
                 self.ops.push(op);
             }
         }
+        Some(dst)
+    }
+
+    /// If `ty` is a CUSTOM variant (a user ADT) with a registered [`VariantLayout`], return its
+    /// type name. Handles the three surface forms a variant type takes
+    /// (`Named` / inline `Variant` / `Applied(UserDefined)`). `None` for Option/Result (those
+    /// use the dedicated len-as-tag path) and every non-variant type.
+    pub(crate) fn custom_variant_type_name(&self, ty: &Ty) -> Option<String> {
+        use almide_lang::types::constructor::TypeConstructorId;
+        let name = match ty {
+            Ty::Named(n, _) => n.as_str().to_string(),
+            Ty::Variant { name, .. } => name.as_str().to_string(),
+            Ty::Applied(TypeConstructorId::UserDefined(n), _) => n.clone(),
+            _ => return None,
+        };
+        self.variant_layouts.by_type.contains_key(&name).then_some(name)
+    }
+
+    /// EXECUTE a `match v { Ctor(binds…) => arm, … }` over a CUSTOM variant (ADT brick 3) —
+    /// read the tag from slot 0 and dispatch to the matching arm; only the taken arm runs. The
+    /// N-constructor generalization of [`Self::try_lower_variant_value_match`] (the 2-variant
+    /// Option/Result case), over the v1 tag@slot0 + i64-slot value model (NOT the len-as-tag
+    /// Option/Result repr). Returns the scalar result `dst`, or `None` (rolled back) outside
+    /// the subset — the caller then walls (a Const-0 would silently pick a wrong arm — the ②
+    /// cardinal rule).
+    ///
+    /// SUBSET: SCALAR result + SCALAR ctor-field binds only (a heap-result arm = ADT brick 4, a
+    /// heap/nested ctor field = ADT brick 5). No guards.
+    ///
+    /// SOUNDNESS: the subject is materialized/borrowed by `lower_call_args` (an owned ctor temp
+    /// drops at scope end via `live_heap_handles`; a tracked Var/param borrows). The tag/field
+    /// reads are scalar prims, the `IfThen`/`Else`/`EndIf` markers no-op in `verify_ownership`,
+    /// and each arm is a per-arm-balanced frame (`lower_scalar_arm`) with NO heap ownership
+    /// event (scalar binds) — exactly the per-arm linearization the cert proves, wrapped so one
+    /// arm runs. The LAST arm is the unconditional `else` (the frontend guarantees the match is
+    /// exhaustive, so the remaining constructor / wildcard always matches there).
+    pub(crate) fn try_lower_custom_variant_match(
+        &mut self,
+        subject: &IrExpr,
+        arms: &[IrMatchArm],
+        result_ty: &Ty,
+    ) -> Option<ValueId> {
+        use crate::PrimKind;
+        // SCALAR result only (heap result = ADT brick 4); no guards; ≥1 arm.
+        if is_heap_ty(result_ty) || arms.is_empty() || arms.iter().any(|a| a.guard.is_some()) {
+            return None;
+        }
+        // The subject must be a registered custom variant; clone its layout out of the borrow.
+        let type_name = self.custom_variant_type_name(&subject.ty)?;
+        let layout = self.variant_layouts.by_type.get(&type_name)?.clone();
+        // Parse each arm into a plan over OWNED data (so `self` is free to mutate below). The
+        // arm bodies stay borrowed from `arms` (a param, not `self`) — no borrow conflict.
+        let mut plans: Vec<(VariantArmKind, &IrExpr)> = Vec::with_capacity(arms.len());
+        for arm in arms {
+            let kind = match &arm.pattern {
+                IrPattern::Constructor { name, args } => {
+                    let case = layout.case_by_ctor(name)?;
+                    if args.len() != case.fields.len() {
+                        return None;
+                    }
+                    let mut binds = Vec::new();
+                    for (i, fp) in args.iter().enumerate() {
+                        match fp {
+                            IrPattern::Wildcard => {}
+                            IrPattern::Bind { var, ty } if !is_heap_ty(ty) => {
+                                binds.push((1 + i, *var)) // slot 1+i (slot 0 is the tag)
+                            }
+                            // a heap-field bind / nested ctor pattern — ADT brick 5
+                            _ => return None,
+                        }
+                    }
+                    VariantArmKind::Ctor { tag: case.tag as i64, binds }
+                }
+                IrPattern::Wildcard => VariantArmKind::Wildcard,
+                // a binder catch-all `x => …` over a variant — walled for now (later brick)
+                _ => return None,
+            };
+            plans.push((kind, &arm.body));
+        }
+        let ops_mark = self.ops.len();
+        let lhh_mark = self.live_heap_handles.len();
+        // Materialize/borrow the subject → a Handle (the variant block pointer).
+        let subj = match self
+            .lower_call_args(std::slice::from_ref(subject))
+            .ok()
+            .and_then(|a| a.into_iter().next())
+        {
+            Some(CallArg::Handle(v)) => v,
+            _ => {
+                self.ops.truncate(ops_mark);
+                self.live_heap_handles.truncate(lhh_mark);
+                return None;
+            }
+        };
+        // Read the tag from slot 0, then emit the per-arm if-chain.
+        let h = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![subj] });
+        let tag = self.load_at_offset(h, layout::slot_offset(0) as i64, PrimKind::Load { width: 8 });
+        match self.emit_variant_arm_chain(h, tag, &plans) {
+            Some(dst) => Some(dst),
+            None => {
+                self.ops.truncate(ops_mark);
+                self.live_heap_handles.truncate(lhh_mark);
+                None
+            }
+        }
+    }
+
+    /// Bind a custom-variant arm's scalar ctor fields from the block's slots (a `Wildcard`
+    /// arm binds nothing). Each field is an i64 value COPY loaded from `h + slot_offset(1+i)`.
+    fn bind_variant_arm(&mut self, kind: &VariantArmKind, h: ValueId) {
+        if let VariantArmKind::Ctor { binds, .. } = kind {
+            for (slot, var) in binds {
+                let payload = self.load_at_offset(
+                    h,
+                    layout::slot_offset(*slot) as i64,
+                    crate::PrimKind::Load { width: 8 },
+                );
+                self.value_of.insert(*var, payload);
+            }
+        }
+    }
+
+    /// Emit the right-nested `if tag == t0 { arm0 } else if … else { last }` chain for a
+    /// custom-variant match, returning the ValueId holding the chain's scalar result. The LAST
+    /// plan is the unconditional `else` (no tag test — exhaustiveness guarantees it matches); a
+    /// `Wildcard` anywhere is likewise an unconditional `else` (the rest is unreachable). Each
+    /// arm body lowers in its own per-arm frame via `lower_scalar_arm`. `None` (caller rolls
+    /// back) if an arm body is outside the scalar subset.
+    fn emit_variant_arm_chain(
+        &mut self,
+        h: ValueId,
+        tag: ValueId,
+        plans: &[(VariantArmKind, &IrExpr)],
+    ) -> Option<ValueId> {
+        let ((kind, body), rest) = plans.split_first()?;
+        // The last arm, or any Wildcard, is the unconditional else (no tag test).
+        if rest.is_empty() || matches!(kind, VariantArmKind::Wildcard) {
+            self.bind_variant_arm(kind, h);
+            return self.lower_scalar_arm(body);
+        }
+        let arm_tag = match kind {
+            VariantArmKind::Ctor { tag, .. } => *tag,
+            VariantArmKind::Wildcard => unreachable!("handled above"),
+        };
+        let dst = self.fresh_value();
+        let tc = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: tc, value: arm_tag });
+        let cond = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst: cond, op: IntOp::Eq, a: tag, b: tc });
+        self.ops.push(Op::IfThen { cond, dst: Some(dst) });
+        self.bind_variant_arm(kind, h);
+        let then_v = self.lower_scalar_arm(body)?;
+        self.ops.push(Op::Else { val: Some(then_v) });
+        let else_v = self.emit_variant_arm_chain(h, tag, rest)?;
+        self.ops.push(Op::EndIf { val: Some(else_v) });
         Some(dst)
     }
 

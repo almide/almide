@@ -1080,6 +1080,28 @@ impl LowerCtx {
                         }
                     }
                 }
+                // A custom-variant CONSTRUCTOR argument (`val(Num(7))`, `f(Eof)`) — NOT a
+                // function call: materialize the tagged value-model block (tag@slot0 + scalar
+                // fields@slot1..) via `try_lower_variant_ctor`, borrowed into the call and
+                // dropped at scope end (cert `i` + `d`, like the record-literal arg above).
+                // Must PRECEDE the generic Named-call arm, which would emit a dangling
+                // `CallFn "Num"` (an unlinked call = invalid wasm). Outside the subset (a
+                // heap/recursive ctor field — ADT brick 5) it WALLs, never a wrong-bytes block.
+                IrExprKind::Call { target: CallTarget::Named { name }, .. }
+                    if self.variant_layouts.ctor_to_type.contains_key(name.as_str()) =>
+                {
+                    let repr = repr_of(&a.ty)?;
+                    match self.try_lower_variant_ctor(a) {
+                        Some(dst) => self.materialized_call_arg(dst, repr, &a.ty),
+                        None => {
+                            return Err(LowerError::Unsupported(format!(
+                                "variant constructor `{}` argument cannot be faithfully \
+                                 materialized in this brick (a heap/recursive field — ADT brick 5)",
+                                name.as_str()
+                            )))
+                        }
+                    }
+                }
                 // A Named user-call result, materialized into an owned temp.
                 IrExprKind::Call { target: CallTarget::Named { name }, args: inner, .. } => {
                     let inner_args = self.lower_call_args(inner)?;
@@ -1794,6 +1816,10 @@ impl LowerCtx {
                 self.try_lower_scalar_if(cond, then, else_, &expr.ty)
             }
             IrExprKind::Match { subject, arms } if !is_heap_ty(&expr.ty) => {
+                // A CUSTOM variant (user ADT) subject — tag@slot0 dispatch (ADT brick 3).
+                if let Some(dst) = self.try_lower_custom_variant_match(subject, arms, &expr.ty) {
+                    return Some(dst);
+                }
                 // A VARIANT (Option/Result) subject — execute via the tag-read value-match
                 // (ctor patterns are not `subj == lit`, so `desugar_match_to_if` can't reach
                 // them; the result would stay an unset 0 = a silent miscompile).

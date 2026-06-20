@@ -222,11 +222,26 @@
         for m in &ir.modules {
             record_layouts.extend(crate::lower::build_record_layouts(&m.type_decls));
         }
+        // Variant (custom-ADT) layouts — threaded exactly as `examples/render_program.rs` does,
+        // so a variant construct / `match` lowers here too (empty for non-variant programs ⇒
+        // byte-identical to the record-only path for every existing test).
+        let mut variant_layouts = crate::lower::build_variant_layouts(&ir.type_decls);
+        for m in &ir.modules {
+            let m_vl = crate::lower::build_variant_layouts(&m.type_decls);
+            variant_layouts.by_type.extend(m_vl.by_type);
+            variant_layouts.ctor_to_type.extend(m_vl.ctor_to_type);
+        }
         let mut functions: Vec<MirFunction> = ir
             .functions
             .iter()
             .filter_map(|f| {
-                crate::lower::lower_function_all_with_types(f, &globals, &record_layouts).ok()
+                crate::lower::lower_function_all_with_layouts(
+                    f,
+                    &globals,
+                    &record_layouts,
+                    &variant_layouts,
+                )
+                .ok()
             })
             .flatten()
             .collect();

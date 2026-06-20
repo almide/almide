@@ -313,6 +313,13 @@ impl LowerCtx {
                 }
             }
             if let IrExprKind::Match { subject, arms } = &value.kind {
+                // A CUSTOM variant (user ADT) subject — tag@slot0 dispatch (ADT brick 3).
+                // `let v = match t { Num(n) => n, … }`. Without this the ctor-pattern match
+                // fell through to a deferred Const 0 (a silent miscompile).
+                if let Some(dst) = self.try_lower_custom_variant_match(subject, arms, ty) {
+                    self.value_of.insert(var, dst);
+                    return Ok(());
+                }
                 // A VARIANT (Option/Result) subject — execute the tag-read value-match
                 // (only the taken arm runs, the scalar payload bound). A ctor pattern is not
                 // `subj == lit`, so it can't reach `desugar_match_to_if`; without this the
@@ -701,6 +708,23 @@ impl LowerCtx {
             // a FRESH OWNED heap value (the callee's return-mode signature, read
             // from the bind's heap type — the checker need not open the callee).
             IrExprKind::Call { target: CallTarget::Named { name }, args, .. } => {
+                // A custom-variant CONSTRUCTOR `let t = Num(9)` (ADT brick 2) is NOT a call —
+                // build the tagged value-model block (tag@slot0 + scalar fields@slot1..), bound
+                // + dropped at scope end (cert `i` + `d`, like the scalar-record bind). Must
+                // precede the CallFn emission, which would emit a dangling `(call $Num)`. A
+                // heap/recursive ctor field is ADT brick 5 → WALL (never a wrong-bytes block).
+                if self.variant_layouts.ctor_to_type.contains_key(name.as_str()) {
+                    if let Some(dst) = self.try_lower_variant_ctor(value) {
+                        self.value_of.insert(var, dst);
+                        self.live_heap_handles.push(dst);
+                        return Ok(());
+                    }
+                    return Err(LowerError::Unsupported(format!(
+                        "variant constructor `{}` bound to a let/var cannot be faithfully \
+                         materialized in this brick (a heap/recursive field — ADT brick 5)",
+                        name.as_str()
+                    )));
+                }
                 let lowered = self.lower_call_args(args)?;
                 let dst = self.fresh_value();
                 let repr = repr_of(ty)?;
@@ -1178,6 +1202,73 @@ impl LowerCtx {
         // Built with the uniform slot layout, so a `${record}` Display (and a heap-field
         // borrow, were a later field heap) may read its real slots. A scalar-only record has
         // no heap slots, so this only enables the SAFE field reads — never a garbage deref.
+        self.materialized_aggregates.insert(dst);
+        Some(dst)
+    }
+
+    /// Construct a custom-variant value `Ctor(args…)` (ADT brick 2) as the v1 value-model
+    /// block: a `slot_count`-wide uniform-i64-slot block — the SAME `[rc][len][cap]` header +
+    /// i64-slot layout a record uses (NOT v0's byte-packed `[tag][packed fields]`; only the
+    /// OBSERVABLE output byte-matches v0, never the internal bytes) — whose slot 0 holds the
+    /// constructor's TAG and slots `1+i` hold its i-th field. SCALAR fields only: a
+    /// heap/recursive ctor field (a nested variant, a `String`) is an ADT-brick-5 concern, so
+    /// `None` (the caller walls — never a partial wrong-bytes block). The block is one owned
+    /// allocation (cert `i`; its scope-end `Drop` = cert `d`), tracked as a materialized
+    /// aggregate so a later field read / `==` may load its real slots. Mirrors
+    /// [`Self::try_lower_scalar_record_construct`] with a leading tag slot.
+    pub(crate) fn try_lower_variant_ctor(&mut self, value: &IrExpr) -> Option<ValueId> {
+        use crate::{IntOp, PrimKind};
+        let IrExprKind::Call { target: CallTarget::Named { name }, args, .. } = &value.kind else {
+            return None;
+        };
+        // Resolve the ctor's tag + the type's uniform block width from the registry. Cloned
+        // out of the immutable borrow so the lowering below can mutate `self`.
+        let (tag, slot_count, arity) = {
+            let (_ty, layout, case) = self.variant_layouts.lookup_ctor(name.as_str())?;
+            (case.tag as i64, layout.slot_count, case.fields.len())
+        };
+        if args.len() != arity {
+            return None;
+        }
+        // Lower every field value FIRST (before the alloc) so a field expr that itself
+        // allocates does not interleave with our store sequence. SCALAR fields only.
+        let mut field_vals: Vec<ValueId> = Vec::with_capacity(args.len());
+        for arg in args {
+            if is_heap_ty(&arg.ty) {
+                return None; // heap / recursive ctor field — ADT brick 5
+            }
+            let v = self.lower_scalar_value(arg)?;
+            field_vals.push(v);
+        }
+        // Allocate the `slot_count`-wide block.
+        let len = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: len, value: slot_count as i64 });
+        let dst = self.fresh_value();
+        self.ops.push(Op::Alloc {
+            dst,
+            repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT },
+            init: crate::Init::DynList { len },
+        });
+        let h = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![dst] });
+        // Store the tag into slot 0, then each scalar field into slot `1+i`.
+        let tagv = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: tagv, value: tag });
+        let mut slots: Vec<(usize, ValueId)> = vec![(0, tagv)];
+        for (i, v) in field_vals.into_iter().enumerate() {
+            slots.push((1 + i, v));
+        }
+        for (slot, v) in slots {
+            let off = self.fresh_value();
+            self.ops.push(Op::ConstInt { dst: off, value: layout::slot_offset(slot) as i64 });
+            let addr = self.fresh_value();
+            self.ops.push(Op::IntBinOp { dst: addr, op: IntOp::Add, a: h, b: off });
+            self.ops.push(Op::Prim {
+                kind: PrimKind::Store { width: 8 },
+                dst: None,
+                args: vec![addr, v],
+            });
+        }
         self.materialized_aggregates.insert(dst);
         Some(dst)
     }

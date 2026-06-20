@@ -584,6 +584,27 @@
     }
 
     #[test]
+    fn custom_variant_scalar_match_executes_on_wasmtime() {
+        // A custom ADT `Tok = Num(Int) | Sym(Int) | Eof` end-to-end through v1 (ADT bricks 2+3):
+        // ctor construct (the tagged value-model block — tag@slot0 + scalar field slot) in BOTH
+        // arg (`val(Num(7))`) and let (`let t = Num(9)`) positions, and an N-arm tag-dispatch
+        // `match` → scalar result. Byte-matches v0 (7 / 40 / -1 / 9). Scalar fields only ⇒ the
+        // block frees flat, no `$__drop_value`.
+        let src = "type Tok = Num(Int) | Sym(Int) | Eof\n\
+            fn val(t: Tok) -> Int = match t { Num(n) => n, Sym(s) => s * 10, Eof => -1 }\n\
+            fn main() -> Unit = {\n  \
+              println(int.to_string(val(Num(7))))\n  \
+              println(int.to_string(val(Sym(4))))\n  \
+              println(int.to_string(val(Eof)))\n  \
+              let t = Num(9)\n  println(int.to_string(val(t))) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "val"));
+        if let Some(out) = build_and_run("custom_variant", &render_wasm_program(&prog)) {
+            assert_eq!(out, "7\n40\n-1\n9");
+        }
+    }
+
+    #[test]
     fn freelist_reuses_a_freed_block() {
         // A1.2-render: alloc p1, free p1 (-> the free-list), then alloc p2 of the
         // SAME size. p2 must REUSE p1's freed block (FreeList.alloc reusing a

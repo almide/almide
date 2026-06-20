@@ -133,12 +133,33 @@ fn classify(n: Int) -> Int = match n { 0 => 100, 1 => 200, 2 => 300, _ => n * 7 
 fn main() -> Unit = println(int.to_string(classify($a) + classify($((RANDOM % 6)))))
 EOF
        ;;
+    8) # CUSTOM VARIANT (user ADT): scalar-field constructors + tag-dispatch match (the v1
+       # value model — tag@slot0 + i64 field slots). Exercises ctor construct in arg + let
+       # positions AND a multi-arm scalar match (ADT bricks 2+3). Arms are emitted out of tag
+       # order on purpose (the match tests each arm's own tag, not declaration order).
+       a=$((1+$(ri 40))); b=$((1+$(ri 40))); c=$((1+$(ri 40)))
+       cat <<EOF
+type Tok = Num(Int) | Pair(Int, Int) | Eof
+fn val(t: Tok) -> Int = match t {
+  Pair(x, y) => x * y,
+  Num(n)     => n,
+  Eof        => -1,
+}
+fn main() -> Unit = {
+  let mid = Num($c)
+  println(int.to_string(val(Num($a))))
+  println(int.to_string(val(Pair($a, $b))))
+  println(int.to_string(val(Eof)))
+  println(int.to_string(val(mid)))
+}
+EOF
+       ;;
   esac
 }
 
 mismatch=0; match=0; wall=0; skip=0; runerr=0
 for k in $(seq 1 "$N"); do
-  t=$(( RANDOM % 8 ))
+  t=$(( RANDOM % 9 ))
   src="$TMP/p$k.almd"; gen "$t" > "$src"
   o0="$("$ALM" run "$src" 2>/dev/null)" || { skip=$((skip+1)); continue; }   # v0 must run (else skip)
   if ! "$RP" "$src" > "$src.wat" 2>/dev/null; then wall=$((wall+1)); continue; fi   # v1 walls = fine

@@ -661,6 +661,13 @@ impl LowerCtx {
             // machinery (only the matched arm runs). Non-literal patterns / guards / a
             // non-scalar subject fall back to the deferred linearize + merged `Const`.
             IrExprKind::Match { subject, arms } => {
+                // A CUSTOM variant (user ADT) subject — tag@slot0 dispatch (ADT brick 3).
+                // `fn val(t: Tok) -> Int = match t { Num(n) => n, … }`.
+                if let Some(dst) =
+                    self.try_lower_custom_variant_match(subject, arms, &tail.ty)
+                {
+                    return Ok(Some(dst));
+                }
                 // A VARIANT (Option/Result) subject returned by a function — execute the
                 // tag-read value-match (only the taken arm runs, the scalar payload bound);
                 // `fn pick(o) = match o { Some(x) => x, None => -1 }` is the canonical form.
