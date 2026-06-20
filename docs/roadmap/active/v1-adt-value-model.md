@@ -94,19 +94,33 @@ backends agree on tag + field identity even though the byte layout differs.
      `func.ret`→`m` double-counted (certificate.rs). corpus-wall ACCEPT (ownership 16085→16161), a
      1000× leak loop, a wasmtime cargo test + a diff-fuzz heap-field template. (`emit_cert_from_source
      <f> <fn> mir` now dumps the MIR ops + cert — the debug aid that found it.)
-   - **5b — nested-variant ctor fields + recursive drop** — the LAST piece for the recursive `Expr`
-     to_string lever. `try_lower_variant_ctor` still WALLs a nested-variant ctor field (`Add(Expr,Expr)`
-     — only scalar + leaf String land). A flat rc_dec of a child Expr block leaks its grandchildren, so
-     it needs a tag-driven recursive free: a per-type `$__drop_<T>(ptr)` emitted fn (read tag@slot0,
-     recursively drop each variant field + rc_dec leaf fields, free the block) or a runtime layout
-     table — the `$__drop_value` shape — accepted by the checker as one trusted `d`. NOTE the single-arm
-     gate above: `tos` is multi-arm (Lit|Add|Neg) so the 5c path serves it; the remaining work is the
-     nested CONSTRUCT + the recursive DROP.
+   - **5b — nested-variant ctor fields + recursive drop** ✅ DONE (commit `c98486be`) — THE #1 LEVER
+     IS LIT. `try_lower_variant_ctor` recursively builds a nested-variant ctor field (`Add(Lit(1),
+     Neg(Lit(2)))` — a ctor-call arg → recurse, a var → `Dup`) + moves it in, and tracks the block for
+     `Op::DropVariant`. The match heap-field bind extends to variant-typed fields (the recursive
+     `tos(l)`/`tos(r)` borrow-pass). The recursive free is a GENERATED per-type Almide fn `$__drop_<T>`
+     (`generate_variant_drop_sources` — the `$__drop_value` shape: `prim.handle`/`load*`/`load_handle`/
+     `rc_dec` + self-recursion), auto-linked via a TWO-PASS `source_to_ir` in render_program +
+     lower_source; it is `prim`-only so its ownership cert is EMPTY (a trusted routine — the `rc_dec`
+     whitelist admits `__drop_*`). `Op::DropVariant` is one trusted `d` (like `DropValue`). Verified:
+     `tos(Add(Lit(1), Neg(Lit(2)))) == "(1 + -2)"` byte-matches v0 + a deep tree; a 2000× build+tos+drop
+     LEAK LOOP is clean (the recursion's only correctness gate); corpus-wall ACCEPT (ownership
+     16161→16300, the proven checker accepts the recursive corpus variants, zero double-free/leak); a
+     deterministic wasmtime cargo test + a diff-fuzz recursive-variant template.
 
    STANDING LESSON (re-proven this round): a heap-field variant lowering can byte-match on wasmtime yet
-   be a latent double-free — only the kernel-proven `[ownership]` checker catches it. Both a borrow and a
-   Dup'd-owned bind REJECTED until the cert-driven diagnosis pinned the *single-arm direct-ret*
-   double-move; gating that (not the bind model) was the fix. NEVER ship a checker-rejected witness.
+   be a latent double-free — only the kernel-proven `[ownership]` checker catches it (5c) / the LEAK
+   LOOP catches it for trusted prim-routines (5b). Both a borrow and a Dup'd-owned bind REJECTED until
+   the cert-driven diagnosis pinned the *single-arm direct-ret* double-move; gating that (not the bind
+   model) was the fix. NEVER ship a checker-rejected witness.
+
+## STATUS: ① ADT value-model COMPLETE (bricks 1–5)
+
+Custom ADTs are first-class in the v1 trust spine: construct + N-arm tag-dispatch match (scalar /
+heap-result, all positions incl. Unit-statement) + scalar/String/nested-variant ctor fields + recursive
+drop, all byte-matching v0, corpus-wall-sound (proven checker, zero silent miscompiles / double-frees),
+and per-PR diff-fuzz + deterministic cargo guarded. The #1 cross-repo wall lever (recursive
+`to_string`/pretty-print over `type Expr = Lit | Add | Neg`) is LIT.
 
 ## Why this is ① (value-model unification), not a one-off
 
