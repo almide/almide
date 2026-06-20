@@ -341,6 +341,18 @@ append accumulators.
   `some((idx,line)) => B` → `some($p) => { let (idx,line)=$p; B }` (fresh `$p` from `max_var_id+1`), then
   extend `heap_or_scalar_bind` to admit a heap TUPLE payload over an Option subject. Then yaml 3→1; map_entry's
   tuple-element append → 1→0.
+
+  **⚠ CORRECTION (the destructure-desugar route is BLOCKED — tested):** `let (idx, line) = pair` over a tuple
+  VAR/param byte-WALLS on its own (`/tmp/td.almd`: v0 `7:hi`, v1 WALLS) — `lower_destructure`'s shapes are a
+  tuple LITERAL value or a tracked container, neither covers a plain tuple var → scalar+heap split. (cs's
+  `let (v,n) = cs(...)` lowered because the RHS is a fresh call-result tuple, a different shape.) So the
+  Option-tuple-match canNOT desugar to `some($p) => { let (idx,line)=$p; … }`. It must bind idx/line DIRECTLY
+  inside the variant-match's `bind_payload`: load `@12` (the tuple handle), then `idx = load(handle +
+  slot_offset(0))` (scalar copy) and `line = load(handle + slot_offset(1))` (a heap-handle BORROW), and drop
+  the subject AFTER the arms. That means restructuring the per-arm bind from `Option<(VarId,bool)>` to a
+  multi-bind (single OR tuple) — an intricate, ownership-critical change (a wrong drop-after = UAF), but the
+  cert + byte-match gates catch any error. THE remaining work: this multi-bind restructure (parse_lines/
+  parse_nested) + the List[(String,Value)] tuple-element append (map_entry).
   (Also this turn: commit 75c9100e had accidentally dropped the block_line fresh-VarId fix from mod.rs via
   a stale working tree — recovered via `git checkout 5518fff3 -- mod.rs`, re-verified block_line byte-match;
   yaml back to 6. corpus-wall green, in-profile 3741, ownership 15035 ACCEPT.)
