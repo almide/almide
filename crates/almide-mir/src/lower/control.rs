@@ -9,9 +9,10 @@ use almide_lang::types::Ty;
 
 /// One parsed arm of a custom-variant `match` (ADT brick 3). A `Ctor` arm tests `tag ==
 /// tag` and binds its SCALAR fields from slots (`(slot index 1+i, bound var)`); a `Wildcard`
-/// arm is the unconditional catch-all. (A heap-field bind / binder catch-all over a variant is
-/// walled — the heap-field bind's ownership coordination, which the proven checker REJECTED a
-/// borrow+auto-Dup attempt at over the corpus, is ADT brick 5.)
+/// arm is the unconditional catch-all. A heap-field bind is walled (ADT brick 5c): neither a
+/// borrow (a consuming re-use `Other(s)` `m`s at rc 0) nor a `Dup`'d owned bind (a move-out
+/// `B(x) => x` double-acquires → `aamdm`, net −1) is universally cert-sound — it needs
+/// USE-AWARE binding (borrow for read-only/borrow-pass, Dup for consume/move-out).
 enum VariantArmKind {
     Ctor { tag: i64, binds: Vec<(usize, VarId)> },
     Wildcard,
@@ -1293,7 +1294,7 @@ impl LowerCtx {
                             IrPattern::Bind { var, ty } if !is_heap_ty(ty) => {
                                 binds.push((1 + i, *var))
                             }
-                            // a heap-field bind (ownership coordination = ADT brick 5) /
+                            // a heap-field bind (use-aware ownership = ADT brick 5c) /
                             // nested ctor pattern — decline.
                             _ => return None,
                         }
@@ -1309,8 +1310,13 @@ impl LowerCtx {
         Some(plans)
     }
 
-    /// Bind a custom-variant arm's scalar ctor fields from the block's slots (a `Wildcard`
-    /// arm binds nothing). Each field is an i64 value COPY loaded from `h + slot_offset(1+i)`.
+    /// Bind a custom-variant arm's ctor fields from the block's slots (a `Wildcard` arm binds
+    /// nothing). A SCALAR field is an i64 value COPY (`Load`); a leaf-heap (`String`) field is a
+    /// `Dup`'d OWNED copy of the slot handle (`LoadHandle` then `Op::Dup`, rc+1) pushed to
+    /// `live_heap_handles` so the ARM FRAME drops it at arm end (`emit_variant_arm_chain` marks
+    /// before this call). The OWNED copy — not a borrow — is what the proven checker needs: a
+    /// consuming re-use moves an owned ref, a read-only use drops it, a move-out hands it off,
+    /// all rc-balanced; a BORROW would `Consume`/`m` at rc 0 on a re-use (the rejected double-free).
     fn bind_variant_arm(&mut self, kind: &VariantArmKind, h: ValueId) {
         if let VariantArmKind::Ctor { binds, .. } = kind {
             for (slot, var) in binds {
@@ -1383,8 +1389,7 @@ impl LowerCtx {
             return Ok(());
         };
         if rest.is_empty() || matches!(kind, VariantArmKind::Wildcard) {
-            self.bind_variant_arm(kind, h);
-            return self.lower_branch_arm(None, body);
+            return self.lower_variant_unit_arm(kind, body, h);
         }
         let arm_tag = match kind {
             VariantArmKind::Ctor { tag, .. } => *tag,
@@ -1395,11 +1400,27 @@ impl LowerCtx {
         let cond = self.fresh_value();
         self.ops.push(Op::IntBinOp { dst: cond, op: IntOp::Eq, a: tag, b: tc });
         self.ops.push(Op::IfThen { cond, dst: None });
-        self.bind_variant_arm(kind, h);
-        self.lower_branch_arm(None, body)?;
+        self.lower_variant_unit_arm(kind, body, h)?;
         self.ops.push(Op::Else { val: None });
         self.emit_variant_unit_chain(h, tag, rest)?;
         self.ops.push(Op::EndIf { val: None });
+        Ok(())
+    }
+
+    /// Lower one UNIT-statement custom-variant arm (its effects), with a PER-ARM FRAME that
+    /// drops the arm's `Dup`'d heap-field binds at arm end (the unit sibling of
+    /// [`Self::lower_variant_arm_value`]). The mark precedes `bind_variant_arm` so a heap field
+    /// bound + read by the effect (`println(s)`) is released here. Scalar arms add nothing.
+    fn lower_variant_unit_arm(
+        &mut self,
+        kind: &VariantArmKind,
+        body: &IrExpr,
+        h: ValueId,
+    ) -> Result<(), LowerError> {
+        let mark = self.live_heap_handles.len();
+        self.bind_variant_arm(kind, h);
+        self.lower_branch_arm(None, body)?;
+        self.drop_arm_locals(mark);
         Ok(())
     }
 
@@ -1421,12 +1442,7 @@ impl LowerCtx {
         let ((kind, body), rest) = plans.split_first()?;
         // The last arm, or any Wildcard, is the unconditional else (no tag test).
         if rest.is_empty() || matches!(kind, VariantArmKind::Wildcard) {
-            self.bind_variant_arm(kind, h);
-            return if heap {
-                self.lower_heap_result_arm(body, result_ty)
-            } else {
-                self.lower_scalar_arm(body)
-            };
+            return self.lower_variant_arm_value(kind, body, h, result_ty, heap);
         }
         let arm_tag = match kind {
             VariantArmKind::Ctor { tag, .. } => *tag,
@@ -1438,16 +1454,37 @@ impl LowerCtx {
         let cond = self.fresh_value();
         self.ops.push(Op::IntBinOp { dst: cond, op: IntOp::Eq, a: tag, b: tc });
         self.ops.push(Op::IfThen { cond, dst: Some(dst) });
-        self.bind_variant_arm(kind, h);
-        let then_v = if heap {
-            self.lower_heap_result_arm(body, result_ty)?
-        } else {
-            self.lower_scalar_arm(body)?
-        };
+        let then_v = self.lower_variant_arm_value(kind, body, h, result_ty, heap)?;
         self.ops.push(Op::Else { val: Some(then_v) });
         let else_v = self.emit_variant_arm_chain(h, tag, rest, result_ty)?;
         self.ops.push(Op::EndIf { val: Some(else_v) });
         Some(dst)
+    }
+
+    /// Lower one custom-variant arm to its value, with a PER-ARM FRAME that drops the arm's
+    /// `Dup`'d heap-field binds at arm end. The mark is taken BEFORE `bind_variant_arm` (whose
+    /// owned heap binds land in `live_heap_handles`), so `drop_arm_locals` releases exactly the
+    /// fields not moved out: a borrow-passed field (`tos(l)`) drops here; a moved-out field
+    /// (`Text(s) => s`) was `Dup`+`Consume`'d again by `lower_heap_result_arm`, so its original
+    /// bind still drops here (rc-balanced — the transient extra ref is freed). A scalar arm adds
+    /// nothing to the frame, so this is a no-op for the brick-2/3 paths.
+    fn lower_variant_arm_value(
+        &mut self,
+        kind: &VariantArmKind,
+        body: &IrExpr,
+        h: ValueId,
+        result_ty: &Ty,
+        heap: bool,
+    ) -> Option<ValueId> {
+        let mark = self.live_heap_handles.len();
+        self.bind_variant_arm(kind, h);
+        let v = if heap {
+            self.lower_heap_result_arm(body, result_ty)
+        } else {
+            self.lower_scalar_arm(body)
+        }?;
+        self.drop_arm_locals(mark);
+        Some(v)
     }
 
     /// Try to EXECUTE `<materialized Option> ?? <scalar fallback>` to a SCALAR value: read

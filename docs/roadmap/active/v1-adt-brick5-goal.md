@@ -52,23 +52,42 @@ corpus-wall after each.
   (v1 uses its OWN uniform-i64-slot block — tag@slot0, fields@slot1.., padded to slot_count —
   NOT v0's byte-packed layout. Only the observable stdout must match v0.)
 
-## Step 5c — heap-field match bind (the blocker; do this FIRST, cert-driven)
+## Step 5c — heap-field match bind (the blocker; USE-AWARE binding is the answer)
 
-1. **Diagnose the reject precisely** (don't guess). Temporarily re-enable a heap-field bind in
-   `parse_variant_arms` + `bind_variant_arm` (borrow model), build classify_corpus, run
-   `cargo run -q -p almide-mir --example classify_corpus -- --out /tmp/cw spec`, then read
-   `/tmp/cw/ownership.cert`. Each line is one heap object's `i/a/d/m` lifecycle; find the
-   UNBALANCED one the checker rejects (the corpus pattern that breaks). Understand the exact
-   shape before redesigning. Then REVERT the scratch change.
-2. **Redesign the bind to be cert-balanced.** Hypothesis (verify, don't trust): bind a heap
-   field as a **`Dup`'d OWNED copy** (`LoadHandle` then `Op::Dup`, rc+1, push to
-   `live_heap_handles`) so a read-only use drops it at arm end (balanced) and a move-out is a
-   clean owned hand-off — rather than a borrow. Study how `let x = r.field` heap extraction
-   (`lower_heap_extraction`) and the Option heap-payload path coordinate move-out vs read-only;
-   the right model must make BOTH `Add(l,r) => …tos(l)…` (borrow-passed to a recursive call) and
-   `Text(s) => s` (move-out) cert-balanced. Gate corpus-wall ACCEPT.
-3. Byte-match a String-field bind fixture (`Msg = Text(String) | …; match m { Text(s) =>
-   string.len(s), … }` and `Text(s) => s`) + a leak loop. Commit only when corpus-wall ACCEPT.
+DIAGNOSIS DONE (this session). The exact corpus reproducer + the two failure modes are known:
+
+- The rejecting corpus function is **`spec/wasm_cross/generic_fn_in_inferred_lambda.almd`** —
+  `fn unbox[T](b: Box[T]) -> T = match b { B(x) => x }` monomorphized at `Box[String]`: a
+  String field bound and **moved out** (`B(x) => x`) over a borrowed param. Its single
+  ownership.cert lifecycle pinpoints the bug:
+  - **borrow bind** (`LoadHandle`+`param_values`, + `lower_heap_result_arm`'s Var auto-Dup):
+    move-out `B(x)=>x` is fine (`am`), BUT a **consuming re-use** `Ctor(s) => Other(s)` emits a
+    `Consume`/`m` on the borrow at rc 0 → REJECT.
+  - **Dup'd owned bind** (`LoadHandle`+`Op::Dup`, push `live_heap_handles`, dropped by the arm
+    frame): consuming re-use is fine, BUT move-out `B(x)=>x` **double-acquires** — the bind `a`
+    + `lower_heap_result_arm`'s auto-Dup `a` + its `m` + the arm-frame `d` + the return `m` =
+    `aamdm`, **net −1 over-release** → REJECT.
+  Reproduce: `cargo run -q -p almide-mir --example classify_corpus -- --out /tmp/cw
+  spec/wasm_cross/generic_fn_in_inferred_lambda.almd` then `cat /tmp/cw/ownership.cert`
+  (`aamdm` with Dup; balanced `am` with borrow).
+
+THE FIX = **USE-AWARE binding**. A bound heap field needs the bind mode chosen by how the arm
+BODY uses it:
+  - read-only / borrow-passed to a borrowing callee (`string.len(x)`, `tos(l)`): **borrow**
+    (`LoadHandle`+`param_values`, NOT in `live_heap_handles`, no drop) — `ad`-free, balanced.
+  - moved out as the arm result (`B(x) => x`): **borrow + the existing auto-Dup** in
+    `lower_heap_result_arm`'s Var case (`am`) — do NOT pre-Dup (that double-acquires).
+  - consumed into a new ctor / a consuming call (`Ctor(s) => Other(s)`): **`Dup` then move**
+    (`am`) — pre-Dup so the move is of an owned ref, not the borrow.
+  Implement by classifying each bound field's use in the arm body (a small use-visitor:
+  borrowed-pass vs moved-out-as-result vs consumed), then bind accordingly. The per-arm-frame
+  helpers `lower_variant_arm_value` / `lower_variant_unit_arm` already exist (they drop owned
+  binds at arm end via `drop_arm_locals` from a mark taken BEFORE the bind — conditional-safe).
+  NOTE: do NOT move an owned local out of `live_heap_handles` inside a CONDITIONAL arm — lhh is
+  compile-time, the branch is runtime; the other arm still needs the scope drop. Keep drops
+  per-arm (inside the IfThen/Else region) as the helpers do.
+
+VERIFY: corpus-wall ACCEPT (the gate) + byte-match `unbox`-style + `tos`-style + a leak loop.
 
 ## Step 5b — recursive drop (after 5c)
 
