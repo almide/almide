@@ -140,16 +140,29 @@ append accumulators.
   narrowed to (a) heap-acc reads another heap-acc, (b) a PURE-VAR alias arg (`start = pos`, which a copy
   temp can't stage) — both rare, walled ②-safely. +3 corpus walls (in-profile 3719→3722); output-parity OK.
 
-  **⚠ REMAINING (yaml STILL 9 — flow_rec's last gap is its BASE, not the loop):**
-  - **flow_rec** now inlines + TCO-loops correctly, but its BASE `if pos>=len { let last=trim(slice); if
-    string.is_empty(last) then acc else acc + [last] }` is a HEAP-RESULT IF in the (post-loop) return —
-    the "heap-result if cannot be faithfully returned" wall. Both arms ARE lowerable alone (acc move-out;
-    `acc + [last]` concat), so the gap is heap-result-if lowering in tail/return position (cf. the earlier
-    nested-heap-result-match-arm brick 5510dc47). THE next lever for flow_rec.
-  - `collect_seq`/`seq_item`, `collect_map`/`map_entry` return `(Value,Int)` (tuple-return) + value.object;
-    `block_*`/`collect_block` tuple-heap; `parse_lines`/`parse_nested` heap-result match roots. → yaml 0.
-  (Append concat — scalar + String/Value heap — guarded mutual-inline, call-element materialization, and
-  simultaneous-update TCO are DONE + verified; the two off-by-one classes are GUARDED, not latent.)
+  - **✅ flow_rec base DONE (commit af2a5695): ConcatList arm in `lower_heap_result_arm`.** The
+    heap-result-if return `if string.is_empty(last) then acc else acc + [last]` (a Var move-out arm + a
+    ConcatList arm) now lowers (the `"im"` per-arm balance). flow_rec lowers END-TO-END → yaml 9→8.
+    Byte-verified `spec/wasm_cross/heap_result_if_append.almd`; +3 corpus walls (3722→3725).
+
+  **⚠ REMAINING (yaml 8 — the Value-PARSER core; each fn stacks MULTIPLE gaps, not one lever):**
+  `collect_seq`/`seq_item`, `collect_map`/`map_entry`, `block_*`, `parse_lines`/`parse_nested`. Analysis of
+  `collect_seq` (representative) — it returns `(Value, Int)` and:
+  - **tuple-return**: the base is `(value.array(items), pos)` — a HEAP-result TUPLE return (Value + Int),
+    not a bare List. Needs heap-result tuple-return lowering (the Value built from the accumulator at the base).
+  - **value.array-at-base** (DONE as an op) folded into the tuple.
+  - **mutual + extra callee**: `seq_item` is the mutual sibling BUT also calls `dash_item` — the guarded
+    inline still applies (seq_item called only by collect_seq), but the inlined body keeps the dash_item call.
+  - **tuple-destructure of an effect call**: `let (val, next) = dash_item(...)!` — bind a `(Value, Int)`
+    from an effect-fn Result, then append `items + [val]`.
+  - **effect fn** (`!` Result propagation) returning a tuple.
+  So `collect_seq` needs heap-result-tuple-return + effect-tuple-destructure (+ the append/inline/TCO that
+  are DONE). `collect_map` adds **value.object** + `List[(String,Value)]` (tuple-element) append; `block_*`
+  add **tuple-heap drop**; `parse_*` are heap-result match roots. These are several substantial bricks
+  (the Value-parser machinery), not a single lever — the append-accumulator foundation is complete; the
+  remainder is value-aggregate construction + tuple plumbing.
+  (Append concat — scalar + String/Value heap — guarded mutual-inline, call-element materialization,
+  simultaneous-update TCO, and the heap-result-if append base are DONE + verified; off-by-one classes GUARDED.)
 
 After C lands end-to-end: the 11 walls fall (with value.object/stringify + tuple-heap for the Value-parser
 subset), driving yaml → 0 — on a PROVEN spine, the v1 completeness ideal.
