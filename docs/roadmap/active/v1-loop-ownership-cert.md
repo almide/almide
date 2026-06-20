@@ -196,6 +196,25 @@ append accumulators.
   value.object, list.find+lambda+Option-tuple-match, tuple-heap+3-cycle) — each soundness-sensitive,
   each its own byte-match. NOT one lever. The append-accumulator + option-C foundation is complete.
 
+  **✅ block_scalar DONE 2026-06-20 (commit b31096e8): yaml 8→7 — and the blocker was NOT what was
+  scoped above.** block_scalar's actual wall was the RETURN `(value.str(if string.ends_with(ind,"-") then
+  joined else joined+"\n"), end)`: a heap-result `if` nested inside `value.str(..)` inside a TUPLE element,
+  preceded by `let joined = if…` (two heap let-bound ifs) — NOT tuple-heap-drop, NOT the 3-cycle. Three
+  composing fixes: (1) `extract_first_callarg_branch` recurses into TUPLE elements (ANF-lifts the
+  `value.str(if…)` arg); (2) the bounded-duplication gate allows ≤2 remaining branch binds (was: refuse
+  ANY); (3) `desugar_heap_branches` recurses INTO if/match arms + block tails (`desugar_nested_branch_arms`)
+  so a duplicated arm's nested let-bound if resolves — all in the SHARED desugar (lower == count, no
+  mir>ir breach). **Two PRE-EXISTING silent miscompiles this exposed in control_flow (C-044) were also
+  fixed:** (a) `x |> (n) => body` was desugared to a Computed-callee call v1 MIR mis-lowered to 0 — the
+  frontend now INLINES it to `{let n=x; body}` (`lower_pipe`); (b) a BLOCK-valued scalar bind
+  `let a = {…; tail}` also mis-lowered to 0 — `lower_bind` now runs the block's stmts then binds the tail.
+  Verified: corpus-wall in-profile 3725→3733 (+8), ownership 14984 ACCEPT, cargo-test 466, output-parity
+  no baseline regression + control_flow NEWLY wasm-byte-matches (fixtures heap_result_tuple_return,
+  pipe_lambda_block_value). (A pipe-lambda in a CALL-ARG position now WALLS, not mis-lowers — safe; ANF-lift
+  it later.) **REMAINING yaml 7: block_line (block_scalar's sibling, likely closest), collect_map,
+  collect_seq, map_entry, parse_lines, parse_nested, seq_item** — the 6 effect fns still need the
+  effect-monad let-bind `!` (⛔ note above) + value.object.
+
   **🔧 CONCRETE RECIPE for the let-bind `!` (2026-06-20, the Result repr is now confirmed).** v1 MIR
   represents an effect-fn `Result[T,String]` as a DynListStr with a LEN-AS-TAG (see
   `materialize_result_ok`, control.rs:2030): `len @ handle+4` is `0` for Ok / `≠0` for Err; the Ok payload
@@ -215,6 +234,22 @@ append accumulators.
   added) lowers it. HARDEST integration = collect_seq, where this `!` sits INSIDE the TCO loop body, so the
   Err early-return becomes a loop-carried `if` (the then-arm `return r` is a break-with-value) — do the
   ISOLATED non-TCO `let x = mk(n)!` synthetic FIRST (byte-match), then the TCO integration. Start there.
+
+  **⛔ DEFINITIVE (2026-06-20, the recipe above has an unmet PREREQUISITE — code-confirmed).** v1 MIR
+  does NOT wrap a user effect fn's return in the DynListStr Result repr: `lower_body_with_globals`
+  (mod.rs:180) returns `lower_body_into(body)` verbatim as `ret` — no Ok-wrap. So a user effect fn returns
+  a BARE value (`(Value,Int)`), with NO tag. The tail `f()!` strips soundly ONLY because g ≡ f() at the
+  Result level (tail.rs:253, an IDENTITY — g returns exactly f()'s value, Ok or Err). But the LET-BIND
+  `let x = f()!; rest` is g ≠ f() (f() THEN rest), so a naive strip runs `rest` with a garbage x on the
+  Err path = a SILENT MISCOMPILE — which is why binds.rs:235 deliberately WALLS it (NOT strips it). A
+  correct let-bind `!` needs a real early-return, which needs a runtime Result TAG to branch on — but the
+  bare-value model has none. So the prerequisite is to BUILD the v1 effect-Result discipline: wrap every
+  effect-fn return in the Result repr (materialize_result_ok / an Err ctor) AND make `!`/`?` tag-aware at
+  EVERY call site (the tail `!` would change from identity-strip to a tag-check pass-through). That is a
+  MAJOR cross-cutting subsystem (every effect fn + every effect call), not the single desugar the recipe
+  assumed. ②: a naive strip is OUT (Err-path miscompile). So the 6 effect-fn walls hinge on building the
+  effect-monad first; the 2 block_* walls (non-effect) are independent (3-cycle inline + tuple-heap) and
+  are the more tractable next target if avoiding the effect-monad subsystem.
   (Append concat — scalar + String/Value heap — guarded mutual-inline, call-element materialization,
   simultaneous-update TCO, and the heap-result-if append base are DONE + verified; off-by-one classes GUARDED.)
 
