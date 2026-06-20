@@ -2827,16 +2827,35 @@ fn extract_first_callarg_branch(e: &IrExpr, tmp: VarId) -> Option<(IrExpr, IrExp
 /// `Var` of the arg's type). Returns `None` if no such call-arg exists. MUST be applied in BOTH
 /// the lowering and the `count_ir_calls` gate via [`desugar_heap_branches`] (desugar-before-both)
 /// so the duplicated calls stay 1:1 (mir == ir).
-pub fn desugar_callarg_heap_if(body: &IrExpr) -> Option<IrExpr> {
-    // NOTE: a BARE call/tuple body lift (`collect_block(.., if …)`) was tried to clear block_line, but
-    // making block_line lowerable let the guarded mutual-inline fold collect_block↔block_line into a
-    // TCO whose append-accumulator silently mis-lowered every element to "" (byte-mismatch, not a wall).
-    // Reverted — ② forbids shipping that. block_line stays walled until the TCO/append interaction is
-    // understood (see the block_line note in v1-loop-ownership-cert.md).
+pub fn desugar_callarg_heap_if(body: &IrExpr, next_var: &mut u32) -> Option<IrExpr> {
     let IrExprKind::Block { stmts, expr: tail } = &body.kind else {
-        return None;
+        // A BARE call/tuple body (not in a block) with a call-arg heap branch — `collect_block(..,
+        // if list.is_empty(acc) then acc else acc+[""])`, a `block_line` if-arm reached via
+        // `desugar_nested_branch_arms`. Lift the branch to a block `{ let tmp = if…; <body'> }`. The
+        // fresh id comes from the FUNCTION-WIDE `next_var` counter, NOT `max_var_id(this arm)` — the arm
+        // omits a sibling-arm var (`line`, used only in the else arm), so an arm-local max would alias
+        // it and the renderer would read one arm's value in the other (block_line's `string.drop(v19)`).
+        let tmp = VarId(*next_var);
+        *next_var += 1;
+        let (branch, new_body) = extract_first_callarg_branch(body, tmp)?;
+        let lift = IrStmt {
+            kind: IrStmtKind::Bind {
+                var: tmp,
+                mutability: almide_ir::Mutability::Let,
+                ty: branch.ty.clone(),
+                value: branch,
+            },
+            span: body.span.clone(),
+        };
+        return Some(IrExpr {
+            kind: IrExprKind::Block { stmts: vec![lift], expr: Some(Box::new(new_body)) },
+            ty: body.ty.clone(),
+            span: body.span.clone(),
+            def_id: body.def_id,
+        });
     };
-    let tmp = VarId(max_var_id(body) + 1);
+    let tmp = VarId(*next_var);
+    *next_var += 1;
     // STATEMENT position: the first `Expr`/`Bind`/`Assign` whose value contains a call-arg branch.
     for (i, s) in stmts.iter().enumerate() {
         let value = match &s.kind {
@@ -2916,10 +2935,18 @@ pub fn desugar_callarg_heap_if(body: &IrExpr) -> Option<IrExpr> {
 /// call this, so the duplicated calls are counted 1:1 (mir == ir) regardless of how many branches
 /// a body lifts. Returns `None` if the body is already in normal form (no rewrite applied).
 pub fn desugar_heap_branches(body: &IrExpr) -> Option<IrExpr> {
+    // Seed a FUNCTION-WIDE fresh-VarId counter ABOVE every id in the whole body, then thread it through
+    // the recursion so a lift inside one `if` arm never reuses an id live in a SIBLING arm (block_line's
+    // `string.drop` read the then-arm's concat because an arm-local `max_var_id` aliased `line`).
+    let mut next_var = max_var_id(body) + 1;
+    desugar_heap_branches_inner(body, &mut next_var)
+}
+
+fn desugar_heap_branches_inner(body: &IrExpr, next_var: &mut u32) -> Option<IrExpr> {
     let mut cur: Option<IrExpr> = None;
     loop {
         let src = cur.as_ref().unwrap_or(body);
-        if let Some(r) = desugar_callarg_heap_if(src) {
+        if let Some(r) = desugar_callarg_heap_if(src, next_var) {
             cur = Some(r);
             continue;
         }
@@ -2927,7 +2954,7 @@ pub fn desugar_heap_branches(body: &IrExpr) -> Option<IrExpr> {
             cur = Some(r);
             continue;
         }
-        if let Some(r) = desugar_nested_branch_arms(src) {
+        if let Some(r) = desugar_nested_branch_arms(src, next_var) {
             cur = Some(r);
             continue;
         }
@@ -2941,11 +2968,11 @@ pub fn desugar_heap_branches(body: &IrExpr) -> Option<IrExpr> {
 /// block_scalar two-`if` shape). Normalizing those HERE — inside the SHARED `desugar_heap_branches`
 /// both `lower_body_into` and the `count_ir_calls` caps gate call — keeps the duplicated calls 1:1
 /// (mir == ir); doing it lowering-side only (in `lower_heap_result_arm`) would double-count.
-fn desugar_nested_branch_arms(body: &IrExpr) -> Option<IrExpr> {
+fn desugar_nested_branch_arms(body: &IrExpr, next_var: &mut u32) -> Option<IrExpr> {
     match &body.kind {
         IrExprKind::If { cond, then, else_ } => {
-            let nt = desugar_heap_branches(then);
-            let ne = desugar_heap_branches(else_);
+            let nt = desugar_heap_branches_inner(then, next_var);
+            let ne = desugar_heap_branches_inner(else_, next_var);
             if nt.is_none() && ne.is_none() {
                 return None;
             }
@@ -2964,7 +2991,7 @@ fn desugar_nested_branch_arms(body: &IrExpr) -> Option<IrExpr> {
             let mut changed = false;
             let new_arms: Vec<almide_ir::IrMatchArm> = arms
                 .iter()
-                .map(|a| match desugar_heap_branches(&a.body) {
+                .map(|a| match desugar_heap_branches_inner(&a.body, next_var) {
                     Some(nb) => {
                         changed = true;
                         almide_ir::IrMatchArm {
@@ -2987,7 +3014,7 @@ fn desugar_nested_branch_arms(body: &IrExpr) -> Option<IrExpr> {
             })
         }
         IrExprKind::Block { stmts, expr: Some(tail) } => {
-            let nt = desugar_heap_branches(tail)?;
+            let nt = desugar_heap_branches_inner(tail, next_var)?;
             Some(IrExpr {
                 kind: IrExprKind::Block { stmts: stmts.clone(), expr: Some(Box::new(nt)) },
                 ty: body.ty.clone(),
