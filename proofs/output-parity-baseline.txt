@@ -16,6 +16,7 @@ spec/wasm_cross/append_accumulator.almd
 spec/wasm_cross/append_accumulator_heap.almd
 spec/wasm_cross/assign_alias_rc.almd
 spec/wasm_cross/autotry_result_first_arg.almd
+spec/wasm_cross/block_line_collect.almd
 spec/wasm_cross/bytes_f16.almd
 spec/wasm_cross/bytes_from_list_param.almd
 spec/wasm_cross/const_fold_nonfinite_float.almd
