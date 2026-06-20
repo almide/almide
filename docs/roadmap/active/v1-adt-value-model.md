@@ -53,14 +53,21 @@ backends agree on tag + field identity even though the byte layout differs.
    No heap fields ⇒ no recursive drop ⇒ brick 2+3 verifiable alone. The recursive/heap-field `Expr`
    (the #1 to_string lever) needs brick 5 and comes after.
 
-2. **Ctor construct (scalar fields first)** — intercept a `Call{Named(ctor)}` whose name is in
-   `variant_layouts.ctor_to_type`: `Alloc` a `slot_count`-wide block, `Store` the tag into slot 0, lower
-   each arg into slot `1+i` (scalar copy via the `try_lower_scalar_record_construct` slot machinery; a
-   HEAP/recursive field is a brick-5 concern — wall it for now). FIRST byte-verifiable point with…
-3. **Tag-dispatch match (scalar result)** — `match t { Ctor(binds…) => arm }`: `handle → tag@slot0`,
-   dispatch to N arms (chained `IfThen`/`Else` on tag==i, or a switch), bind each ctor's scalar fields
-   from its `1+i` slots. Byte-match `val`/`classify` (scalar). N-variant generalization of
-   `try_lower_variant_value_match` (the 2-variant Option case).
+2. **Ctor construct (scalar fields first)** — ✅ DONE (commit `62a4a862`). `try_lower_variant_ctor`
+   (binds.rs) intercepts a `Call{Named(ctor)}` whose name is in `variant_layouts.ctor_to_type`: `Alloc`
+   a `slot_count`-wide block, `Store` the tag into slot 0, lower each arg into slot `1+i` (scalar copy via
+   the `try_lower_scalar_record_construct` slot machinery). Wired in the call-ARG path (`val(Num(7))`,
+   calls.rs) and the LET-bind path (`let t = Num(9)`, binds.rs). A HEAP/recursive ctor field walls
+   (ADT brick 5) — never a wrong-bytes block.
+3. **Tag-dispatch match (scalar result)** — ✅ DONE (commit `62a4a862`). `try_lower_custom_variant_match`
+   (control.rs): materialize/borrow the subject → `handle → tag@slot0`, emit the right-nested
+   `if tag==t_i { bind scalar fields from slots 1+i; arm } else …` chain (the last arm / any wildcard is
+   the unconditional else — exhaustiveness guarantees it). Wired at the tail, let-bind, and
+   scalar-operand match sites (NOT gated by the Option/Result-only `is_variant_ty`). N-constructor
+   generalization of `try_lower_variant_value_match`. Byte-matches v0 across out-of-order arms, wildcard,
+   multi-field ctors, and bind/let positions; corpus-wall proven checker accepts all witnesses; a new
+   diff-fuzz generative variant template + a deterministic wasmtime cargo test guard it. SCALAR result +
+   SCALAR ctor-field binds only (heap-result arm = brick 4, heap/nested ctor field = brick 5).
 4. **Heap-result match** — the same dispatch with `lower_heap_result_arm` + subject-drop-before-arms, so a
    String/heap-returning arm works. Byte-match recursive `to_string` (the #1 lever) → /tmp/adt.almd.
 5. **Recursive drop + heap/recursive ctor fields** — admit heap-handle ctor fields (a nested
