@@ -2054,8 +2054,10 @@ impl LowerCtx {
                         | "__varr_copy"
                         | "__vfill"
                         | "__lc_copy_rc"
-                ) =>
+                ) || self.fn_name.starts_with("__drop_") =>
             {
+                // `__drop_*` also covers the GENERATED per-type custom-variant recursive drops
+                // (`__drop_Expr`, ADT brick 5b) — the same trusted prim-only free routine.
                 if func == "rc_dec" { PrimKind::RcDec } else { PrimKind::RcInc }
             }
             "rc_dec" | "rc_inc" => {

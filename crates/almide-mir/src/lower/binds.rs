@@ -1221,29 +1221,43 @@ impl LowerCtx {
         let IrExprKind::Call { target: CallTarget::Named { name }, args, .. } = &value.kind else {
             return None;
         };
-        // Resolve the ctor's tag + the type's uniform block width from the registry. Cloned
-        // out of the immutable borrow so the lowering below can mutate `self`.
-        let (tag, slot_count, arity) = {
-            let (_ty, layout, case) = self.variant_layouts.lookup_ctor(name.as_str())?;
-            (case.tag as i64, layout.slot_count, case.fields.len())
+        // Resolve the ctor's tag + the type's uniform block width + the OWNING TYPE NAME from the
+        // registry. Cloned out of the immutable borrow so the lowering below can mutate `self`.
+        let (tag, slot_count, arity, type_name) = {
+            let (ty, layout, case) = self.variant_layouts.lookup_ctor(name.as_str())?;
+            (case.tag as i64, layout.slot_count, case.fields.len(), ty.to_string())
         };
         if args.len() != arity {
             return None;
         }
-        // Lower every field value FIRST (before the alloc) so a field expr that itself
-        // allocates does not interleave with our store sequence. Each field is SCALAR (a value
-        // copy) or a LEAF heap `String` (a fresh OWNED handle moved into its slot, cert `m`,
-        // freed by the masked DropListStr — the SAME machinery a String-field record uses). A
-        // non-String heap field (a List, or a NESTED/recursive variant whose flat rc_dec would
-        // not recursively free its children) is ADT brick 5b → WALL, never a leak.
+        // Does this TYPE need the recursive DropVariant (a nested-variant field)? If so, its heap
+        // fields are freed by the generated `$__drop_<T>`, NOT the masked DropListStr.
+        let needs_rec = self.variant_layouts.needs_recursive_drop(&type_name);
+        // Lower every field value FIRST (before the alloc) so a field expr that itself allocates
+        // does not interleave with our store sequence. A SCALAR field is a value copy; a leaf
+        // `String` field is a fresh OWNED handle (lower_owned_heap_field) moved in; a NESTED
+        // VARIANT field is recursively constructed (a ctor call → try_lower_variant_ctor) or
+        // `Dup`'d (a var → lower_owned_heap_field) and moved in — its recursive free is the
+        // generated `$__drop_<T>`. A List/other heap field is still ADT-brick-5+ → WALL.
         let mut field_vals: Vec<(ValueId, bool /* is_heap */)> = Vec::with_capacity(args.len());
         for arg in args {
-            if is_heap_ty(&arg.ty) {
-                if !matches!(arg.ty, Ty::String) {
-                    return None; // List / nested-variant ctor field — ADT brick 5b
-                }
+            if self.variant_layouts.field_is_variant(&arg.ty) {
+                let is_ctor_call = matches!(
+                    &arg.kind,
+                    IrExprKind::Call { target: CallTarget::Named { name }, .. }
+                        if self.variant_layouts.ctor_to_type.contains_key(name.as_str())
+                );
+                let v = if is_ctor_call {
+                    self.try_lower_variant_ctor(arg)?
+                } else {
+                    self.lower_owned_heap_field(arg)?
+                };
+                field_vals.push((v, true));
+            } else if matches!(arg.ty, Ty::String) {
                 let obj = self.lower_owned_heap_field(arg)?;
                 field_vals.push((obj, true));
+            } else if is_heap_ty(&arg.ty) {
+                return None; // List / other heap ctor field — a later brick
             } else {
                 let v = self.lower_scalar_value(arg)?;
                 field_vals.push((v, false));
@@ -1291,9 +1305,12 @@ impl LowerCtx {
                 heap_slots.push(slot);
             }
         }
-        // A heap (String) field makes the block a masked aggregate — its drop frees those slots
-        // (rc_dec) then the block (the SAME DropListStr a String-field record uses).
-        if !heap_slots.is_empty() {
+        // Drop selection: a NESTED-variant type uses the recursive `Op::DropVariant` (the
+        // generated `$__drop_<T>` frees every heap field — variant slots recursively, String
+        // slots flat — then the block). A String-only-field type uses the masked DropListStr.
+        if needs_rec {
+            self.variant_drop_handles.insert(dst, type_name);
+        } else if !heap_slots.is_empty() {
             self.record_masks.insert(dst, heap_slots);
         }
         self.materialized_aggregates.insert(dst);

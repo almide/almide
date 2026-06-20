@@ -179,6 +179,14 @@ fn main() -> Unit = {
   println(wtag(Tok2("hi")))
   println(wtag(Blank))
   println(int.to_string(wlen(Tok2("abcd")) + wlen(Blank)))
+  println(tos(Add(Lit($a), Neg(Lit($b)))))
+  println(tos(Add(Neg(Lit($c)), Lit($a))))
+}
+type Expr = Lit(Int) | Add(Expr, Expr) | Neg(Expr)
+fn tos(e: Expr) -> String = match e {
+  Lit(n)    => int.to_string(n),
+  Add(l, r) => "(" + tos(l) + " + " + tos(r) + ")",
+  Neg(x)    => "-" + tos(x),
 }
 EOF
        ;;

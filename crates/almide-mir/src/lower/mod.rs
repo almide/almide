@@ -215,6 +215,122 @@ pub fn build_variant_layouts(type_decls: &[almide_ir::IrTypeDecl]) -> VariantLay
     out
 }
 
+/// If `ty` names a user VARIANT in `variant_names`, return that name (the recursion target for a
+/// nested-variant ctor field's drop). Handles the three variant-type surface forms.
+fn variant_field_name(ty: &Ty, variant_names: &std::collections::HashSet<String>) -> Option<String> {
+    use almide_lang::types::constructor::TypeConstructorId;
+    let n = match ty {
+        Ty::Named(n, _) => n.as_str().to_string(),
+        Ty::Variant { name, .. } => name.as_str().to_string(),
+        Ty::Applied(TypeConstructorId::UserDefined(n), _) => n.clone(),
+        _ => return None,
+    };
+    variant_names.contains(&n).then_some(n)
+}
+
+/// A variant type NEEDS a generated recursive drop fn (`Op::DropVariant` → `$__drop_<T>`) iff some
+/// ctor field is itself a user variant: a flat `rc_dec` of that nested block would leak its own
+/// heap children. A String-only-field variant uses the masked `DropListStr` (ADT brick 5a/5c)
+/// instead — no recursive fn. Used by both the generator and `try_lower_variant_ctor` (to choose
+/// `DropVariant` tracking), so the two never disagree.
+pub fn variant_needs_recursive_drop(
+    decl: &almide_ir::IrTypeDecl,
+    variant_names: &std::collections::HashSet<String>,
+) -> bool {
+    use almide_ir::{IrTypeDeclKind, IrVariantKind};
+    let IrTypeDeclKind::Variant { cases, .. } = &decl.kind else {
+        return false;
+    };
+    cases.iter().any(|c| {
+        let tys: Vec<&Ty> = match &c.kind {
+            IrVariantKind::Unit => vec![],
+            IrVariantKind::Tuple { fields } => fields.iter().collect(),
+            IrVariantKind::Record { fields } => fields.iter().map(|f| &f.ty).collect(),
+        };
+        tys.iter().any(|t| variant_field_name(t, variant_names).is_some())
+    })
+}
+
+/// The set of all user-variant type names in `type_decls` — the lookup `variant_field_name` uses.
+pub fn variant_type_names(
+    type_decls: &[almide_ir::IrTypeDecl],
+) -> std::collections::HashSet<String> {
+    use almide_ir::IrTypeDeclKind;
+    type_decls
+        .iter()
+        .filter(|d| matches!(d.kind, IrTypeDeclKind::Variant { .. }))
+        .map(|d| d.name.as_str().to_string())
+        .collect()
+}
+
+/// Generate the ALMIDE SOURCE for each variant type's recursive drop fn `__drop_<T>` (ADT brick
+/// 5b) — the `$__drop_value` shape: at the last ref (rc==1) read the tag, recursively
+/// `__drop_<V>` each nested-variant field + `prim.rc_dec` each leaf `String` field, then release
+/// the block. Returns the concatenated source to APPEND to the program (so the `type` decls it
+/// references are in scope); only types that `variant_needs_recursive_drop` get a fn. The fn is
+/// `prim`-only ⇒ empty ownership cert (a trusted routine — its leak/double-free correctness is
+/// the create+drop LEAK LOOP's burden, exactly like `__drop_value`). The slot offsets match the
+/// v1 construct (`[rc@0][len@4][cap@8][tag=slot0@12][field i @ 12+(1+i)*8]`).
+pub fn generate_variant_drop_sources(type_decls: &[almide_ir::IrTypeDecl]) -> String {
+    use almide_ir::{IrTypeDeclKind, IrVariantKind};
+    let names = variant_type_names(type_decls);
+    let mut out = String::new();
+    for decl in type_decls {
+        if !variant_needs_recursive_drop(decl, &names) {
+            continue;
+        }
+        let IrTypeDeclKind::Variant { cases, .. } = &decl.kind else { continue };
+        let tname = decl.name.as_str();
+        out.push_str(&format!("fn __drop_{tname}(e: {tname}) -> Unit = {{\n"));
+        out.push_str("  let h = prim.handle(e)\n");
+        out.push_str("  if prim.load32(h + 0) == 1 then {\n");
+        out.push_str(&format!("    let t = prim.load64(h + {})\n", layout::slot_offset(0)));
+        // One tag branch per ctor that has a heap field; chained `if t == k then {..} else ..`.
+        let mut branch = String::new();
+        let mut first = true;
+        for (tag, case) in cases.iter().enumerate() {
+            let tys: Vec<Ty> = match &case.kind {
+                IrVariantKind::Unit => vec![],
+                IrVariantKind::Tuple { fields } => fields.clone(),
+                IrVariantKind::Record { fields } => fields.iter().map(|f| f.ty.clone()).collect(),
+            };
+            // Per-field free statements (variant → recurse, String → rc_dec, scalar → skip).
+            let mut frees = String::new();
+            let mut idx = 0usize;
+            for (i, ty) in tys.iter().enumerate() {
+                let off = layout::slot_offset(1 + i);
+                if let Some(fv) = variant_field_name(ty, &names) {
+                    frees.push_str(&format!(
+                        "        let f{idx}: {fv} = prim.load_handle(h + {off})\n        __drop_{fv}(f{idx})\n"
+                    ));
+                    idx += 1;
+                } else if matches!(ty, Ty::String) {
+                    frees.push_str(&format!(
+                        "        prim.rc_dec(prim.load64(h + {off}))\n"
+                    ));
+                }
+            }
+            if frees.is_empty() {
+                continue; // scalar/Unit ctor — nothing to free
+            }
+            let kw = if first { "if" } else { "else if" };
+            branch.push_str(&format!("    {kw} t == {tag} then {{\n{frees}      }}\n"));
+            first = false;
+        }
+        if branch.is_empty() {
+            // No heap-field ctor (shouldn't happen — needs_recursive_drop was true), guard anyway.
+            out.push_str("    ()\n");
+        } else {
+            out.push_str(&branch);
+            out.push_str("    else ()\n");
+        }
+        out.push_str("  } else ()\n");
+        out.push_str("  prim.rc_dec(h)\n");
+        out.push_str("}\n");
+    }
+    out
+}
+
 /// [`lower_function_all`] WITH the program's record-layout registry threaded in —
 /// the entry the real pipeline (render_program) uses so a `Ty::Named` record
 /// resolves its fields (and `r.x` materializes). The plain [`lower_function_all`]
@@ -712,8 +828,13 @@ pub(crate) struct LowerCtx {
     /// `record_layouts`. Empty when lowering without a type registry — a variant value then
     /// stays walled (the pre-ADT-brick status quo). Populated by [`build_variant_layouts`]
     /// and threaded via [`lower_function_all_with_layouts`].
-    #[allow(dead_code)] // consumed by the variant construct / match / drop bricks (ADT-2+)
     variant_layouts: VariantLayouts,
+    /// Constructed CUSTOM-VARIANT values whose scope-end drop must be the RECURSIVE
+    /// [`Op::DropVariant`] (a nested-variant type — `Add(Expr, Expr)` — whose flat free would leak
+    /// child blocks), mapped to their TYPE NAME (so the render calls the generated `$__drop_<ty>`).
+    /// `drop_op_for` consults this before the flat/masked drops. Populated by
+    /// `try_lower_variant_ctor` for a type that [`VariantLayouts::needs_recursive_drop`] (ADT brick 5b).
+    variant_drop_handles: HashMap<ValueId, String>,
 }
 
 /// Type NAME → (generic param names, declaration-ordered fields) — the VALUE-MODEL
@@ -775,6 +896,42 @@ impl VariantLayouts {
         let layout = self.by_type.get(ty)?;
         let case = layout.case_by_ctor(ctor)?;
         Some((ty.as_str(), layout, case))
+    }
+
+    /// Does the variant type `type_name` need the RECURSIVE [`Op::DropVariant`] (the generated
+    /// `$__drop_<ty>`) — i.e. does some ctor field hold another user variant whose flat free would
+    /// leak its children? A String-only-field variant uses the masked `DropListStr` instead (ADT
+    /// brick 5a/5c). This is the lowering-side mirror of
+    /// [`crate::lower::variant_needs_recursive_drop`], computed from the registry's field Tys.
+    pub fn needs_recursive_drop(&self, type_name: &str) -> bool {
+        let Some(layout) = self.by_type.get(type_name) else { return false };
+        layout.cases.iter().any(|c| {
+            c.fields.iter().any(|(_, ty)| self.field_is_variant(ty))
+        })
+    }
+
+    /// Is `ty` one of the variant types in this registry (a nested-variant ctor field)?
+    pub fn field_is_variant(&self, ty: &Ty) -> bool {
+        use almide_lang::types::constructor::TypeConstructorId;
+        let n = match ty {
+            Ty::Named(n, _) => n.as_str(),
+            Ty::Variant { name, .. } => name.as_str(),
+            Ty::Applied(TypeConstructorId::UserDefined(n), _) => n.as_str(),
+            _ => return false,
+        };
+        self.by_type.contains_key(n)
+    }
+
+    /// The variant type NAME of `ty` if it is a registry variant (the recursion / construct target).
+    pub fn field_variant_name(&self, ty: &Ty) -> Option<String> {
+        use almide_lang::types::constructor::TypeConstructorId;
+        let n = match ty {
+            Ty::Named(n, _) => n.as_str().to_string(),
+            Ty::Variant { name, .. } => name.as_str().to_string(),
+            Ty::Applied(TypeConstructorId::UserDefined(n), _) => n.clone(),
+            _ => return None,
+        };
+        self.by_type.contains_key(&n).then_some(n)
     }
 }
 
@@ -1325,7 +1482,9 @@ impl LowerCtx {
     /// the flat `DropListStr`, since a `value.as_array` Result / a `List[Value]` is ALSO a
     /// `heap_elem_list`, but a flat per-slot `rc_dec` there would leak the nested element Values.
     pub(crate) fn drop_op_for(&self, v: ValueId) -> Op {
-        if self.value_result_lists.contains(&v) {
+        if let Some(ty) = self.variant_drop_handles.get(&v) {
+            Op::DropVariant { v, ty: ty.clone() }
+        } else if self.value_result_lists.contains(&v) {
             Op::DropResultListValue { v }
         } else if self.value_elem_lists.contains(&v) {
             Op::DropListValue { v }

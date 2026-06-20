@@ -663,6 +663,31 @@
     }
 
     #[test]
+    fn recursive_variant_to_string_executes_on_wasmtime() {
+        // THE #1 LEVER (ADT brick 5b): a RECURSIVE custom variant `Expr = Lit(Int) | Add(Expr,
+        // Expr) | Neg(Expr)` with a recursive `to_string` — nested-variant ctor construct
+        // (`Add(Lit(1), Neg(Lit(2)))`), heap-field match binds passed to the recursive call, and
+        // the GENERATED recursive drop `$__drop_Expr` (the only thing freeing the tree; a flat
+        // free would leak grandchildren). The 2000x build+tos+drop loop is the LEAK GATE — a leak
+        // or double-free traps via the freelist. Byte-matches v0.
+        let src = "type Expr = Lit(Int) | Add(Expr, Expr) | Neg(Expr)\n\
+            fn tos(e: Expr) -> String = match e {\n  \
+              Lit(n)    => int.to_string(n),\n  \
+              Add(l, r) => \"(\" + tos(l) + \" + \" + tos(r) + \")\",\n  \
+              Neg(x)    => \"-\" + tos(x),\n}\n\
+            fn main() -> Unit = {\n  \
+              println(tos(Add(Lit(1), Neg(Lit(2)))))\n  \
+              println(tos(Add(Neg(Add(Lit(3), Lit(4))), Neg(Neg(Lit(5))))))\n  \
+              var acc = 0\n  for i in 0..2000 { acc = acc + string.len(tos(Add(Lit(i), Neg(Lit(i))))) }\n  \
+              println(int.to_string(acc)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "__drop_Expr"), "the recursive drop fn must be generated + linked");
+        if let Some(out) = build_and_run("recursive_variant", &render_wasm_program(&prog)) {
+            assert_eq!(out, "(1 + -2)\n(-(3 + 4) + --5)\n25780");
+        }
+    }
+
+    #[test]
     fn custom_variant_unit_statement_match_runs_one_arm() {
         // A UNIT-result custom-variant `match` in STATEMENT position (ADT brick 3, unit path):
         // only the TAKEN arm's effect runs — the regression guard for the both-arms

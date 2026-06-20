@@ -1303,11 +1303,17 @@ impl LowerCtx {
                             IrPattern::Bind { var, ty } if !is_heap_ty(ty) => {
                                 binds.push((1 + i, *var, false))
                             }
-                            // A leaf-heap (`String`) field binds as a borrow of the slot handle.
-                            IrPattern::Bind { var, ty } if matches!(ty, Ty::String) => {
+                            // A leaf-heap (`String`) OR a nested-VARIANT field binds as a borrow of
+                            // the slot handle (the subject owns it; a move-out auto-Dups, a
+                            // borrow-pass like `tos(l)` just reads — ADT brick 5c, extended to
+                            // variant fields for the recursive `Expr` to_string lever).
+                            IrPattern::Bind { var, ty }
+                                if matches!(ty, Ty::String)
+                                    || self.variant_layouts.field_is_variant(ty) =>
+                            {
                                 binds.push((1 + i, *var, true))
                             }
-                            // a non-String heap field / nested ctor pattern — ADT brick 5b.
+                            // a List/other heap field / nested ctor pattern — a later brick.
                             _ => return None,
                         }
                     }

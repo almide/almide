@@ -199,15 +199,23 @@
         use almide_lang::lexer::Lexer;
         use almide_lang::parser::Parser;
         use almide_optimize::{mono, optimize};
-        let tokens = Lexer::tokenize(src);
-        let mut prog = Parser::new(tokens).parse().expect("parse");
-        let canon = canonicalize::canonicalize_program(&prog, std::iter::empty());
-        let mut checker = Checker::from_env(canon.env);
-        let _ = checker.infer_program(&mut prog);
-        let mut ir = lower_program(&prog, &checker.env, &checker.type_map);
-        optimize::optimize_program(&mut ir);
-        mono::monomorphize(&mut ir);
-        ir_link::ir_link(&mut ir);
+        let to_ir = |s: &str| {
+            let tokens = Lexer::tokenize(s);
+            let mut prog = Parser::new(tokens).parse().expect("parse");
+            let canon = canonicalize::canonicalize_program(&prog, std::iter::empty());
+            let mut checker = Checker::from_env(canon.env);
+            let _ = checker.infer_program(&mut prog);
+            let mut ir = lower_program(&prog, &checker.env, &checker.type_map);
+            optimize::optimize_program(&mut ir);
+            mono::monomorphize(&mut ir);
+            ir_link::ir_link(&mut ir);
+            ir
+        };
+        let ir = to_ir(src);
+        // ADT brick 5b: generate the per-type recursive-drop fns for nested-variant types and
+        // re-lower with them in scope (the same two-pass as examples/render_program.rs).
+        let drops = crate::lower::generate_variant_drop_sources(&ir.type_decls);
+        let ir = if drops.is_empty() { ir } else { to_ir(&format!("{src}\n{drops}")) };
         let mut globals: std::collections::HashMap<almide_ir::VarId, almide_lang::types::Ty> =
             std::collections::HashMap::new();
         for tl in &ir.top_lets {

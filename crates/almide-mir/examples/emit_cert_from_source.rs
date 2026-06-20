@@ -102,6 +102,12 @@ fn main() {
         return;
     }
 
+    if property == "drops" {
+        // Debug aid: print the GENERATED recursive-drop fn source (ADT brick 5b).
+        print!("{}", almide_mir::lower::generate_variant_drop_sources(&ir.type_decls));
+        return;
+    }
+
     if property == "mir" {
         // Debug aid: dump the MIR ops the variant-aware lowering produces (for ALL functions
         // whose name contains `func_name`, since mono specializes generics like `unbox$String`).
