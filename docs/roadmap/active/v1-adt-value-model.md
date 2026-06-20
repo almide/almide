@@ -76,23 +76,30 @@ backends agree on tag + field identity even though the byte layout differs.
    WALLS (needs subject-drop-before-arms, brick 4b) rather than emit cert-failing MIR. corpus-wall
    ownership 15904→16046 (heap-result variant matches now lower, proven checker accepts all).
 5. **Heap/recursive ctor fields + recursive drop** — the remaining frontier (unlocks the recursive
-   `Expr` to_string, the #1 lever). NAIVE ATTEMPT REJECTED BY THE PROVEN CHECKER (the discipline
-   working): binding a heap (`String`) ctor field as a borrow (`LoadHandle`+param_values) and letting an
-   arm move it out (`Text(s) => s`) DOUBLE-FREES — the subject's masked drop frees the slot AND the
-   caller frees the moved-out handle. corpus-wall `[ownership] REJECT` caught it (it byte-matched on
-   wasmtime — a LATENT double-free that did not surface). The correct model needs:
-   - **construct**: a heap-handle ctor field MOVED into its slot (cert `m`), block tracked in
-     `record_masks` — sound on its own (the String-field record machinery), but only useful WITH a sound
-     match-bind;
-   - **match-bind**: bind a heap field as a **`Dup`'d OWNED copy** (rc+1, cert `a`), so a read-only use
-     drops it at arm end (balanced) AND a move-out hands the caller a distinct ref while the subject
-     keeps its own — both rc-balanced. (The borrow+auto-Dup-on-move-out coordination the Option
-     heap-payload path uses, generalized — the intricate part.)
-   - **recursive drop**: a nested-variant field (`Add(Expr,Expr)`) can't be freed by a flat rc_dec (it
-     leaks grandchildren). Needs a tag-driven recursive free (per-type drop fn / runtime layout table,
-     the `$__drop_value` shape) — verify with a create+drop **leak loop** AND corpus-wall ACCEPT.
-   Each sub-step MUST pass the proven checker before shipping (never a checker-rejected witness — the ②
-   cardinal rule, just demonstrated).
+   `Expr` to_string, the #1 lever). Split into three sub-steps, each gated on corpus-wall ACCEPT:
+
+   - **5a — leaf String CONSTRUCT** ✅ DONE (commit `f2c32c90`). `try_lower_variant_ctor` moves a
+     `String` ctor field into its slot (cert `m`) + tracks `record_masks`, so the block's scope-end drop
+     frees it via the SAME masked DropListStr a String-field record uses. corpus-wall ACCEPT (ownership
+     16046→16085); a 1000× construct+drop leak-loop cargo test on wasmtime. (Construct-only: the field
+     is still matched with a WILDCARD — the heap-field BIND is 5c.)
+   - **5c — heap-field match BIND** — NOT YET. Two attempts at a borrow (`LoadHandle`+param_values, the
+     Option heap-payload pattern + `lower_heap_result_arm`'s move-out auto-Dup) were BOTH REJECTED by the
+     proven checker over the corpus (`[ownership] REJECT`, ownership would rise 16085→16162). So
+     borrow+auto-Dup is INSUFFICIENT here — some corpus pattern unbalances. The naive failure (a
+     move-out `Text(s) => s`) was a latent double-free that byte-matched on wasmtime; the checker is the
+     real gate. Next: dump the rejecting object's i/a/d/m lifecycle (the corpus-wall `ownership.cert`)
+     to find the exact unbalanced shape before re-attempting — likely a **`Dup`'d OWNED bind** (rc+1,
+     dropped at arm end / moved out cleanly) rather than a borrow, but MUST be cert-verified, not
+     reasoned.
+   - **5b — recursive drop** (nested-variant field, `Add(Expr,Expr)`) — a flat rc_dec of a child block
+     leaks its grandchildren. Needs a tag-driven recursive free (a per-type `$__drop_<T>` emitted fn, or
+     a runtime layout table — the `$__drop_value` shape), accepted by the checker as one trusted `d`.
+
+   STANDING LESSON (re-proven twice this round): a heap-field variant lowering can byte-match on
+   wasmtime yet be a latent double-free — only the kernel-proven `[ownership]` checker catches it. NEVER
+   ship a checker-rejected witness (the ② cardinal rule). Construct (5a) was separable + sound; the
+   bind/drop are the genuine ownership frontier.
 
 ## Why this is ① (value-model unification), not a one-off
 
