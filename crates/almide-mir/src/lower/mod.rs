@@ -205,6 +205,99 @@ pub fn lower_function_all_with_types(
     Ok(all)
 }
 
+/// A function CAN-ERR (returns `Err` on some input) iff its body has a direct `err(…)` (`ResultErr`) OR
+/// it `!`-PROPAGATES (an `Unwrap` over a `Named` call to) a can-err function. A function whose entire
+/// `!`-call closure is err-free NEVER returns `Err`, so `let pat = f()!` over it is faithfully
+/// `let pat = f()` (the same pass-through the tail `!` already uses). KEY: an error reached only through
+/// a `match`/`??` (e.g. the yaml cluster calling the PURE `oct_rec`/`bin_rec` int parsers, which DO have
+/// `err(…)`, but via `match` not `!`) is HANDLED, not propagated, so it does NOT make the caller can-err —
+/// the yaml parser cluster is therefore entirely never-err.
+fn has_result_err(body: &IrExpr) -> bool {
+    use almide_ir::visit::{walk_expr, IrVisitor};
+    struct V(bool);
+    impl IrVisitor for V {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            if matches!(&e.kind, IrExprKind::ResultErr { .. }) {
+                self.0 = true;
+            }
+            walk_expr(self, e);
+        }
+    }
+    let mut v = V(false);
+    v.visit_expr(body);
+    v.0
+}
+
+fn unwrap_named_callees(body: &IrExpr) -> std::collections::HashSet<String> {
+    use almide_ir::visit::{walk_expr, IrVisitor};
+    struct V(std::collections::HashSet<String>);
+    impl IrVisitor for V {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            if let IrExprKind::Unwrap { expr } = &e.kind {
+                if let IrExprKind::Call { target: CallTarget::Named { name }, .. } = &expr.kind {
+                    self.0.insert(name.as_str().to_string());
+                }
+            }
+            walk_expr(self, e);
+        }
+    }
+    let mut v = V(std::collections::HashSet::new());
+    v.visit_expr(body);
+    v.0
+}
+
+/// The set of function names that CAN return `Err` — `has_result_err` seeds + `!`-propagation fixpoint.
+pub fn compute_can_err(fns: &[IrFunction]) -> std::collections::HashSet<String> {
+    use std::collections::HashSet;
+    let mut can_err: HashSet<String> = fns
+        .iter()
+        .filter(|f| has_result_err(&f.body))
+        .map(|f| f.name.as_str().to_string())
+        .collect();
+    let callees: Vec<(String, HashSet<String>)> = fns
+        .iter()
+        .map(|f| (f.name.as_str().to_string(), unwrap_named_callees(&f.body)))
+        .collect();
+    loop {
+        let mut changed = false;
+        for (name, cs) in &callees {
+            if !can_err.contains(name) && cs.iter().any(|g| can_err.contains(g)) {
+                can_err.insert(name.clone());
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    can_err
+}
+
+/// Strip `Unwrap` (`!`) over a NEVER-ERR `Named` call: `let pat = f()!` → `let pat = f()` and a
+/// `f()!` self-call → bare `f()` (so `tco_collect` sees the recursion). SOUND — a never-err callee always
+/// returns `Ok`, so the `!` is a no-op; a CAN-ERR callee's `!` is LEFT untouched (it still walls in
+/// `lower_destructure`/`lower_bind`), so its error is never silently dropped (the blanket strip that did
+/// drop it byte-mismatched safe_div_chain & co. — see the roadmap note).
+pub fn strip_never_err_unwraps(body: &mut IrExpr, can_err: &std::collections::HashSet<String>) {
+    use almide_ir::{walk_expr_mut, IrMutVisitor};
+    struct S<'a>(&'a std::collections::HashSet<String>);
+    impl IrMutVisitor for S<'_> {
+        fn visit_expr_mut(&mut self, expr: &mut IrExpr) {
+            walk_expr_mut(self, expr);
+            let strip = matches!(&expr.kind, IrExprKind::Unwrap { expr: inner }
+                if matches!(&inner.kind, IrExprKind::Call { target: CallTarget::Named { name }, .. }
+                    if !self.0.contains(name.as_str())));
+            if strip {
+                if let IrExprKind::Unwrap { expr: inner } = &expr.kind {
+                    let inner = (**inner).clone();
+                    *expr = inner;
+                }
+            }
+        }
+    }
+    S(can_err).visit_expr_mut(body);
+}
+
 /// PROGRAM-level pre-pass: inline a MUTUAL-recursive tail SIBLING so the caller becomes DIRECT
 /// self-recursive — exposing the parser loops (`flow_rec ⇄ flow_step`, `collect_seq ⇄ seq_item`, …)
 /// to the append-accumulator TCO, which only fires on a SELF-call.
@@ -241,6 +334,21 @@ pub fn inline_mutual_tail_recursion(
         c.visit_expr(body);
         c.names
     }
+    // NEVER-ERR `!` STRIP (sound, the scoped form of the reverted blanket strip): an effect call whose
+    // callee provably never returns `Err` has a no-op `!`, so `let pat = f()!` → `let pat = f()` and a
+    // `f()!` self-call → bare `f()` (which `tco_collect` then recognizes). This is what lets the yaml
+    // parser cluster (entirely never-err) TCO; `safe_div` & co. (can-err) keep their `!` and stay walled.
+    // Done HERE, before the inline guard's try-lower, so inlined-F sees the stripped body and lowers.
+    let can_err = compute_can_err(fns);
+    let stripped: Vec<IrFunction> = fns
+        .iter()
+        .map(|f| {
+            let mut nf = f.clone();
+            strip_never_err_unwraps(&mut nf.body, &can_err);
+            nf
+        })
+        .collect();
+    let fns: &[IrFunction] = &stripped;
     let lowers =
         |f: &IrFunction| lower_function_all_with_types(f, globals, record_layouts).is_ok();
     let calls: Map<String, HashSet<String>> =
