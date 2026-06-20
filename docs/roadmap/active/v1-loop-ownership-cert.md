@@ -215,6 +215,19 @@ append accumulators.
   collect_seq, map_entry, parse_lines, parse_nested, seq_item** — the 6 effect fns still need the
   effect-monad let-bind `!` (⛔ note above) + value.object.
 
+  **⚠ block_line — a CAUGHT ②-trap (2026-06-20): metric-lowerable but RUNTIME-MISCOMPILES, kept WALLED.**
+  block_line's body is `if is_blank then collect_block(.., if list.is_empty(acc) then acc else acc+[""])
+  else block_nonblank(..)` — a heap-result `if` whose then-arm CALL carries a call-arg heap `if`. A
+  `desugar_callarg_heap_if` extension lifting a BARE call/tuple body (so `desugar_nested_branch_arms`
+  reaches the per-arm call) DID drop block_line's wall (yaml 7→6) — BUT it then let the guarded
+  mutual-inline fold collect_block↔block_line into a TCO whose append-accumulator silently mis-lowered
+  EVERY element to "" (`["a","","bb","c"]` → `["","","",""]`, a byte-MISMATCH, NOT a wall). The
+  mutual-inline guard only checks that inlined-F LOWERS, not that it byte-matches, so a lowerable-but-
+  wrong inline slips through. REVERTED (mod.rs note) per ②: a fake wall-count drop that ships a
+  miscompile is worse than an honest wall. The REAL blocker is the collect_block↔block_line TCO append
+  reading every element as "" — reproduced by the 2-cycle `collect_block`/`block_line` synthetic; fix
+  THAT first, THEN the call-arg lift is safe. Do NOT re-add the bare lift without fixing the element read.
+
   **🔧 CONCRETE RECIPE for the let-bind `!` (2026-06-20, the Result repr is now confirmed).** v1 MIR
   represents an effect-fn `Result[T,String]` as a DynListStr with a LEN-AS-TAG (see
   `materialize_result_ok`, control.rs:2030): `len @ handle+4` is `0` for Ok / `≠0` for Err; the Ok payload

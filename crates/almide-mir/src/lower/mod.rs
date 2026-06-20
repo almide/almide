@@ -2828,6 +2828,11 @@ fn extract_first_callarg_branch(e: &IrExpr, tmp: VarId) -> Option<(IrExpr, IrExp
 /// the lowering and the `count_ir_calls` gate via [`desugar_heap_branches`] (desugar-before-both)
 /// so the duplicated calls stay 1:1 (mir == ir).
 pub fn desugar_callarg_heap_if(body: &IrExpr) -> Option<IrExpr> {
+    // NOTE: a BARE call/tuple body lift (`collect_block(.., if …)`) was tried to clear block_line, but
+    // making block_line lowerable let the guarded mutual-inline fold collect_block↔block_line into a
+    // TCO whose append-accumulator silently mis-lowered every element to "" (byte-mismatch, not a wall).
+    // Reverted — ② forbids shipping that. block_line stays walled until the TCO/append interaction is
+    // understood (see the block_line note in v1-loop-ownership-cert.md).
     let IrExprKind::Block { stmts, expr: tail } = &body.kind else {
         return None;
     };
