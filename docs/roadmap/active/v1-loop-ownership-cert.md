@@ -264,6 +264,17 @@ append accumulators.
   duplicated continuation gets globally-unique ids. THEN the bare-call-arg lift is sound → block_line
   lowers correctly → yaml 7→6. Do NOT re-add the lift before the fresh-id threading.
 
+  **⚠ UPDATE: simple id-reuse is also RULED OUT.** `max_var_id` (mod.rs:2065) DOES count `IrStmtKind::Bind`
+  vars (visit_stmt, line 2107) + Match pattern binds, so the lift's `let tmp` IS counted and the next
+  `max_var_id+1` is higher — no naive id reuse. So the v19-not-v15 disconnect is NOT an IR-VarId clash; it
+  is a `value_of` / materialization disconnect at the MIR-lowering layer: after the inline substitutes the
+  CALL `line_at(lines,pos)` into BOTH block_line's cond (`string.is_empty(line)`) and its element
+  (`string.drop(line, 0)`), the lowering materializes line_at once (`v15`) but the element's `string.drop`
+  binds to `v19` (the sibling arm's concat). FOUR hypotheses now disproven (substitution, borrowed-param,
+  fresh-let inline, naive id-reuse). NEXT: dump the MIR Op stream (not just wat) for the `line_at` synthetic
+  and trace which Op sets the `string.drop` arg to v19 — the bug is in how the lift/desugar threads
+  `value_of` for a call substituted into multiple positions. Needs a focused MIR-op-level session.
+
   **🔧 CONCRETE RECIPE for the let-bind `!` (2026-06-20, the Result repr is now confirmed).** v1 MIR
   represents an effect-fn `Result[T,String]` as a DynListStr with a LEN-AS-TAG (see
   `materialize_result_ok`, control.rs:2030): `len @ handle+4` is `0` for Ok / `≠0` for Err; the Ok payload
