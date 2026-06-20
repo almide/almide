@@ -327,6 +327,20 @@ append accumulators.
     [(key, val)] … } }` — Option-SCALAR match (cp) is fine, but the accumulator append `pairs + [(key,
     val)]` is a **List[(String,Value)] TUPLE-ELEMENT append** (value.object itself is proven — collect_map's
     base lowers). The tuple-element list append is the gap.
+
+  **🔧 RECIPE for the Option-tuple-payload match (parse_lines/parse_nested).** Layout confirmed: a tuple is
+  a `DynList`, element `i` at `layout::slot_offset(i)` (so `(idx,line)` = scalar @ slot_offset(0), String
+  handle @ slot_offset(1)); the Option `Some` payload sits at the variant block's `@12` as the TUPLE handle.
+  Extend `try_lower_variant_value_match` (control.rs:822): when a `Some`/`Ok` inner pattern is a `Tuple`,
+  bind `@12` (the tuple handle) as a BORROW to a fresh `$p` (like `str_heap_bind`), then lower the arm with
+  `let (idx,line) = $p` prepended (a `BindDestructure` over the tracked container — `lower_destructure`'s
+  "tracked heap var aliases the container" path), and DROP the subject AFTER the arms (the `str_heap_bind`
+  branch at control.rs:1037), because `parse_lines`/`parse_nested` only BORROW `line` (pass it to
+  `dispatch`/`nested_dispatch`/`indent_of`/`string.trim`), never move it out — so the subject's
+  drop-after frees the tuple + its String exactly once. Cleanest impl: a top-of-function desugar
+  `some((idx,line)) => B` → `some($p) => { let (idx,line)=$p; B }` (fresh `$p` from `max_var_id+1`), then
+  extend `heap_or_scalar_bind` to admit a heap TUPLE payload over an Option subject. Then yaml 3→1; map_entry's
+  tuple-element append → 1→0.
   (Also this turn: commit 75c9100e had accidentally dropped the block_line fresh-VarId fix from mod.rs via
   a stale working tree — recovered via `git checkout 5518fff3 -- mod.rs`, re-verified block_line byte-match;
   yaml back to 6. corpus-wall green, in-profile 3741, ownership 15035 ACCEPT.)
