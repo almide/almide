@@ -132,15 +132,24 @@ append accumulators.
   never miscompiles); the common case (each arg reads only its own param) is unaffected. yaml 11→9:
   flow_step + one more now lower correctly; the cross-dep fns (flow_rec, chars) wall instead of miscompiling.
 
-  **⚠ REMAINING (the 9 walls):**
-  - **flow_rec** is now blocked ONLY by the cross-dep wall (`acc + [string.slice(s, start, pos)]` reads
-    start/pos). The real fix = SIMULTANEOUS-UPDATE TCO: stage each new arg value in a temp (reading OLD
-    params), then assign all — then flow_rec lowers (drops the wall). THE next lever.
-  - `collect_seq`/`seq_item`, `collect_map`/`map_entry` return `(Value,Int)` (tuple-return) + need
-    value.object; `block_*`/`collect_block` need tuple-heap; `parse_lines`/`parse_nested` are the heap-result
-    match roots. → yaml 0.
-  (The append concat — scalar + String/Value heap — the guarded mutual-inline, and the call-element
-  materialization are DONE + verified; the off-by-one is GUARDED, not latent.)
+  **✅ DONE 2026-06-20 (commit 89664c68): SIMULTANEOUS-UPDATE TCO.** `tco_rewrite` stages each carried
+  SCALAR's new value in a fresh temp (reading OLD params), runs the HEAP append assigns (still-old scalars),
+  then commits the temps — so a cross-dependent append (`acc + [string.slice(s, i, …)]` reading the loop
+  index, `flow_rec`'s `acc + [slice(s, start, pos)]`) is no longer off-by-one. Byte-verified:
+  `spec/wasm_cross/cross_dep_accumulator.almd` (chars `a-b-c`, win `ab|bc|cd`). The cross-dep wall is now
+  narrowed to (a) heap-acc reads another heap-acc, (b) a PURE-VAR alias arg (`start = pos`, which a copy
+  temp can't stage) — both rare, walled ②-safely. +3 corpus walls (in-profile 3719→3722); output-parity OK.
+
+  **⚠ REMAINING (yaml STILL 9 — flow_rec's last gap is its BASE, not the loop):**
+  - **flow_rec** now inlines + TCO-loops correctly, but its BASE `if pos>=len { let last=trim(slice); if
+    string.is_empty(last) then acc else acc + [last] }` is a HEAP-RESULT IF in the (post-loop) return —
+    the "heap-result if cannot be faithfully returned" wall. Both arms ARE lowerable alone (acc move-out;
+    `acc + [last]` concat), so the gap is heap-result-if lowering in tail/return position (cf. the earlier
+    nested-heap-result-match-arm brick 5510dc47). THE next lever for flow_rec.
+  - `collect_seq`/`seq_item`, `collect_map`/`map_entry` return `(Value,Int)` (tuple-return) + value.object;
+    `block_*`/`collect_block` tuple-heap; `parse_lines`/`parse_nested` heap-result match roots. → yaml 0.
+  (Append concat — scalar + String/Value heap — guarded mutual-inline, call-element materialization, and
+  simultaneous-update TCO are DONE + verified; the two off-by-one classes are GUARDED, not latent.)
 
 After C lands end-to-end: the 11 walls fall (with value.object/stringify + tuple-heap for the Value-parser
 subset), driving yaml → 0 — on a PROVEN spine, the v1 completeness ideal.
