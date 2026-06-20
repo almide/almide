@@ -585,6 +585,12 @@ pub(crate) struct LowerCtx {
     /// leak each element Value's nested payload. Populated when a `List[Value]` literal/arg is
     /// materialized. Distinct from `heap_elem_lists` (String elements, whose `rc_dec` is the full free).
     value_elem_lists: HashSet<ValueId>,
+    /// MIR values that are a `List[(String, Value)]` whose element slots hold owned (String, Value)
+    /// TUPLE blocks (the yaml `pairs` shape). A scope-end drop emits [`Op::DropListStrValue`]
+    /// (`$__drop_list_str_value`: per tuple, rc_dec the String slot + recursive `$__drop_value` the Value
+    /// slot, then the tuple, then the list) — a flat [`Op::DropListStr`] would leak each tuple's payloads.
+    /// Populated when a `List[(String,Value)]` concat is materialized via `__list_concat_rc`.
+    str_value_elem_lists: HashSet<ValueId>,
     /// MIR values that are a `value.as_array` Result `Result[List[Value], String]` (the cap-as-tag
     /// 1-slot block whose Ok payload @12 is a `List[Value]`). A scope-end drop emits
     /// [`Op::DropResultListValue`] (`$__drop_result_lv`: Ok → recursive list free, Err → String free)
@@ -1170,6 +1176,8 @@ impl LowerCtx {
             Op::DropResultListValue { v }
         } else if self.value_elem_lists.contains(&v) {
             Op::DropListValue { v }
+        } else if self.str_value_elem_lists.contains(&v) {
+            Op::DropListStrValue { v }
         } else if self.heap_elem_lists.contains(&v) || self.record_masks.contains_key(&v) {
             Op::DropListStr { v }
         } else if self.value_handles.contains(&v) {

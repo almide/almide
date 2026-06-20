@@ -128,7 +128,14 @@ impl LowerCtx {
         // (Module `value.*` / a Named `Value`-returning fn) or a tracked Value Var (Dup'd).
         let elem_value = matches!(&value.ty,
             Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && is_value_ty(&a[0]));
-        if (!elem_str && !elem_scalar_aggregate && !elem_value) || elements.is_empty() {
+        // A `List[(String, Value)]` (`[(key, val)]` — the yaml `pairs + [(k,v)]` append) — each element is a
+        // HEAP-FIELD (String, Value) tuple, materialized via `try_lower_tuple_construct` (rc-owning both
+        // fields) and reclaimed RECURSIVELY at scope end via `Op::DropListStrValue` (per tuple: rc_dec the
+        // String + `$__drop_value` the Value). A flat `DropListStr` would leak each tuple's payloads.
+        let elem_str_value = matches!(&value.ty,
+            Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && matches!(&a[0],
+                Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String) && is_value_ty(&tys[1])));
+        if (!elem_str && !elem_scalar_aggregate && !elem_value && !elem_str_value) || elements.is_empty() {
             return None;
         }
         // Gate: every element must be a fresh-owned String (LitStr/ConcatStr) OR a tracked
@@ -138,7 +145,8 @@ impl LowerCtx {
         let all_lowerable = elements.iter().all(|e| match &e.kind {
             IrExprKind::LitStr { .. } | IrExprKind::BinOp { op: BinOp::ConcatStr, .. } => true,
             IrExprKind::Var { id } => self.value_of.contains_key(id),
-            IrExprKind::Record { .. } | IrExprKind::Tuple { .. } => elem_scalar_aggregate,
+            IrExprKind::Record { .. } => elem_scalar_aggregate,
+            IrExprKind::Tuple { .. } => elem_scalar_aggregate || elem_str_value,
             IrExprKind::Call { target: CallTarget::Named { .. } | CallTarget::Module { .. }, .. } => {
                 // A Value-returning ctor call (elem_value), OR — for a List[String] — a String-returning
                 // call element (`[string.slice(s,a,b)]` in `acc + [string.slice(…)]`, the dominant yaml
@@ -160,6 +168,8 @@ impl LowerCtx {
         // makes the scope-end drop reclaim each element's nested payload (no leak).
         if elem_value {
             self.value_elem_lists.insert(list);
+        } else if elem_str_value {
+            self.str_value_elem_lists.insert(list);
         } else {
             self.heap_elem_lists.insert(list);
         }
@@ -188,6 +198,12 @@ impl LowerCtx {
                 // flat 2-slot block (`try_lower_scalar_tuple_construct`, cert `i`), moved into the
                 // slot. The SAME flat shape as a scalar record, so the list's per-slot `rc_dec`
                 // frees it correctly.
+                // A HEAP-FIELD `(String, Value)` tuple element (`(key, val)`) — materialize a fresh OWNED
+                // mixed 2-slot block (`try_lower_tuple_construct`, rc-owning both fields), moved into the
+                // slot; the list's `DropListStrValue` reclaims each tuple recursively.
+                IrExprKind::Tuple { elements: tup_elems } if elem_str_value => {
+                    self.try_lower_tuple_construct(tup_elems)?
+                }
                 IrExprKind::Tuple { .. } => self.try_lower_scalar_tuple_construct_for_elem(elem)?,
                 // A heap-returning CALL element — a fresh OWNED value MOVED into the slot. A `Value`
                 // ctor (`value.int(1)`) for a List[Value]; a String-returning call (`string.slice(s,a,b)`

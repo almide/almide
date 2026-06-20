@@ -844,6 +844,15 @@ fn render_op(
         Op::DropListValue { v } => {
             format!("    (call $__drop_list_value (local.get {}))\n", local(*v))
         }
+        // RECURSIVE drop of a `List[(String, Value)]` — the self-hosted `$__drop_list_str_value`
+        // (value_core.almd): at the list's last ref each (String, Value) tuple element is freed at its own
+        // last ref (its String slot rc_dec'd flat, its Value slot freed recursively via `$__drop_value`),
+        // then the tuple block, then the list block. A flat `DropListStr` would only rc_dec the @12 tuple
+        // handle, leaking each tuple's String + Value. Single cert `d`; the recursion is the trusted
+        // routine (empty cert), verified by the create+drop LEAK LOOP. The TUPLE-element `DropListValue`.
+        Op::DropListStrValue { v } => {
+            format!("    (call $__drop_list_str_value (local.get {}))\n", local(*v))
+        }
         // RECURSIVE drop of a `value.as_array` Result `Result[List[Value], String]` — the self-hosted
         // `$__drop_result_lv` (value_core.almd) tag-dispatches at the last ref: Ok frees the
         // `List[Value]` payload recursively, Err frees the String, then the block. A flat `DropListStr`

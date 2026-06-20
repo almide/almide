@@ -548,7 +548,13 @@ impl LowerCtx {
         let scalar_elem = !is_heap_ty(&elem_ty);
         let heap_elem =
             is_heap_ty(&elem_ty) && (matches!(elem_ty, Ty::String) || crate::lower::is_value_ty(&elem_ty));
-        if !scalar_elem && !heap_elem {
+        // A `(String, Value)` TUPLE element (the yaml `pairs` shape) — `__list_concat_rc` rc-owns each
+        // tuple, freed recursively by `Op::DropListStrValue` (rc_dec the String slot + `$__drop_value` the
+        // Value slot, per tuple). The two-heap-field aggregate `DropListStr` cannot express.
+        let str_value_elem = matches!(&elem_ty,
+            Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String)
+                && crate::lower::is_value_ty(&tys[1]));
+        if !scalar_elem && !heap_elem && !str_value_elem {
             return None;
         }
         let ops_mark = self.ops.len();
@@ -579,6 +585,8 @@ impl LowerCtx {
             } else {
                 self.heap_elem_lists.insert(dst);
             }
+        } else if str_value_elem {
+            self.str_value_elem_lists.insert(dst);
         }
         Some(dst)
     }
@@ -2014,6 +2022,8 @@ impl LowerCtx {
                     self.fn_name.as_str(),
                     "__drop_value"
                         | "__drop_list_value"
+                        | "__svdrop_list"
+                        | "__drop_list_str_value"
                         | "__drop_result_lv"
                         | "__varr_copy"
                         | "__vfill"

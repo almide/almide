@@ -61,6 +61,7 @@ pub fn name_witness(func: &MirFunction) -> NameWitness {
             | Op::DropListStr { v }
             | Op::DropValue { v }
             | Op::DropListValue { v }
+            | Op::DropListStrValue { v }
             | Op::DropResultListValue { v }
             | Op::Consume { v }
             | Op::Borrow { v }
@@ -489,6 +490,7 @@ pub fn ownership_certificate(func: &MirFunction) -> String {
             | Op::DropListStr { v }
             | Op::DropValue { v }
             | Op::DropListValue { v }
+            | Op::DropListStrValue { v }
             | Op::DropResultListValue { v } => {
                 let o = s.object_of(*v);
                 s.event(o, 'd');

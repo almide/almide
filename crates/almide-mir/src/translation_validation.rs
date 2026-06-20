@@ -79,6 +79,7 @@ pub fn wasm_pattern(op: &crate::Op) -> Option<String> {
         Op::DropListStr { .. } => "call $rc_dec".into(),
         Op::DropValue { .. } => "call $__drop_value".into(),
         Op::DropListValue { .. } => "call $__drop_list_value".into(),
+        Op::DropListStrValue { .. } => "call $__drop_list_str_value".into(),
         Op::DropResultListValue { .. } => "call $__drop_result_lv".into(),
         // A copy-on-write: MakeUnique clones a SHARED block before in-place
         // mutation — realized by `call $list_copy` (in the cow's then-branch).

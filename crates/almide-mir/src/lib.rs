@@ -216,6 +216,13 @@ pub enum Op {
     /// Values were accounted `m`/consumed when stored). The Value-element counterpart of
     /// `DropListStr` (which is for String elements, whose `rc_dec` IS their full free).
     DropListValue { v: ValueId },
+    /// `drop_list_str_value v` — release a `List[(String, Value)]` whose element slots hold owned
+    /// (String, Value) TUPLE blocks (the yaml `pairs` shape). The render calls the recursive
+    /// `$__drop_list_str_value`: at the list's last ref each tuple is freed at its own last ref (its
+    /// String slot rc_dec'd flat, its Value slot freed recursively via `$__drop_value`), then the tuple,
+    /// then the list block. Same single cert `d` as [`Op::Drop`]; the per-tuple recursion is the trusted
+    /// routine (empty cert, leak-loop verified). The TUPLE-element counterpart of `DropListValue`.
+    DropListStrValue { v: ValueId },
     /// `drop_result_lv v` — release a `value.as_array` Result `Result[List[Value], String]` (the
     /// cap-as-tag 1-slot block `[rc][len@4=1][cap@8][@12 payload][@16 tag]`). IFF the last reference
     /// (rc==1), the RENDER tag-dispatches on @16: Ok (0) frees the `List[Value]` payload @12
@@ -678,6 +685,7 @@ pub fn verify_ownership(func: &MirFunction) -> Result<(), Vec<Violation>> {
             | Op::DropListStr { v }
             | Op::DropValue { v }
             | Op::DropListValue { v }
+            | Op::DropListStrValue { v }
             | Op::DropResultListValue { v } => {
                 match release(&object_of, &mut rc, &mut dead, &borrowed, *v) {
                     Ok(()) => {}

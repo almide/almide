@@ -192,6 +192,34 @@ fn __drop_list_value(xs: List[Value]) -> Unit = {
   prim.rc_dec(h)
 }
 
+// The RECURSIVE free of a `List[(String, Value)]` (the render of `Op::DropListStrValue` calls this). Each
+// element slot @12+i*8 holds an owned (String, Value) TUPLE block [rc@0][len@4][cap@8][str@12][val@20]. At
+// the list's LAST ref (rc==1) every tuple is released: at the TUPLE's own last ref (rc==1) its String slot
+// is rc_dec'd (flat) and its Value slot is freed RECURSIVELY via __drop_value (tag-dispatched, so a nested
+// Array/Str Value frees too — a flat per-slot rc_dec would leak it), then the tuple block; THEN the list
+// block. The per-tuple rc==1 guard is what makes a SHARED tuple (rc>1 — `__list_concat_rc` rc_inc'd it as
+// the new list co-owns it) defer its inner free to the last owner: no double-free, no leak.
+fn __svdrop_list(xs: List[(String, Value)], i: Int, n: Int) -> Unit =
+  if i >= n then ()
+  else {
+    let lh = prim.handle(xs)
+    let tup: (String, Value) = prim.load_handle(lh + 12 + i * 8)
+    let th = prim.handle(tup)
+    if prim.load32(th + 0) == 1 then {
+      prim.rc_dec(prim.load64(th + 12))
+      let vv: Value = prim.load_handle(th + 20)
+      __drop_value(vv)
+    } else ()
+    prim.rc_dec(th)
+    __svdrop_list(xs, i + 1, n)
+  }
+
+fn __drop_list_str_value(xs: List[(String, Value)]) -> Unit = {
+  let h = prim.handle(xs)
+  if prim.load32(h + 0) == 1 then __svdrop_list(xs, 0, prim.load32(h + 4)) else ()
+  prim.rc_dec(h)
+}
+
 // value.as_array — read the tag; a tag-5 Array yields `Ok(<a fresh List[Value] of its elements>)`,
 // else `Err("expected Array")`. The fresh list SHALLOW-COPIES the Array's inline element handles
 // (`__vfill` + rc_inc), so the array stays valid; the returned Result OWNS the list (freed
