@@ -303,6 +303,30 @@ append accumulators.
   the yaml cluster has none) — would be SOUND and reach yaml=0, while leaving `safe_div` & co. walled.
   That per-callee analysis (threaded into the lowering) OR the full effect-monad (return-wrap) is the path;
   the BLANKET strip is permanently OUT.
+
+  **✅✅ NEVER-ERRS-SCOPED STRIP DONE (commit b154a270): yaml 6→3.** Implemented the per-callee can-err
+  analysis in `mod.rs`: `compute_can_err(fns)` seeds with `has_result_err` (body contains `IrExprKind::
+  ResultErr`) and runs a `!`-propagation fixpoint (`unwrap_named_callees` = the `g` in `Unwrap{Call{Named
+  g}}`; a fn can-err if it `!`-propagates a can-err fn). `strip_never_err_unwraps` then replaces
+  `Unwrap{Call{Named g}}` → `Call{Named g}` ONLY for never-err `g` — run as the FIRST step of
+  `inline_mutual_tail_recursion` (before the inline guard's try-lower, so inlined-F sees the bare calls and
+  the append-TCO fires; `tco_collect` then needs no `!`-awareness). The yaml cluster is entirely never-err
+  (no `ResultErr`; the only `err("…")` are PURE `oct_rec`/`bin_rec` reached by `match`, not `!`), so
+  seq_item/collect_seq/collect_map all TCO and clear. VERIFIED ②: corpus-wall in-profile 3741→3758 (+17),
+  ownership 15068 ACCEPT; full v0/v1 spec scan = only the PRE-EXISTING mismatches — `safe_div_chain`,
+  `grade_classify`, `sum_of_squares`, `closure_env_churn`, `map_entry_churn` (the ones the BLANKET strip
+  byte-mismatched) now MATCH because their `!` is can-err and is LEFT. cargo-test 466.
+
+  **⚠ REMAINING yaml 3: map_entry, parse_lines, parse_nested** — distinct value-aggregate / match features
+  (the strip+TCO foundation is done):
+  - **parse_lines, parse_nested**: `… |> list.find((e) => not is_blank(e.1))` (list.find + a LAMBDA with a
+    tuple-index `.1`) THEN `match opt { none => …, some((idx, line)) => … }` — an **Option match with a
+    TUPLE payload** (`some((idx,line))`). try_lower_variant_value_match handles scalar/single-heap payloads;
+    the tuple-payload destructure is the gap.
+  - **map_entry**: `match find_colon(t) { none => (value.object(pairs), pos), some(cp) => { … pairs +
+    [(key, val)] … } }` — Option-SCALAR match (cp) is fine, but the accumulator append `pairs + [(key,
+    val)]` is a **List[(String,Value)] TUPLE-ELEMENT append** (value.object itself is proven — collect_map's
+    base lowers). The tuple-element list append is the gap.
   (Also this turn: commit 75c9100e had accidentally dropped the block_line fresh-VarId fix from mod.rs via
   a stale working tree — recovered via `git checkout 5518fff3 -- mod.rs`, re-verified block_line byte-match;
   yaml back to 6. corpus-wall green, in-profile 3741, ownership 15035 ACCEPT.)
