@@ -178,6 +178,23 @@ append accumulators.
   THE next lever = effect-fn `!` early-return propagation (unblocks 6 of 8). Soundness-critical (a wrong
   Err-propagation = a silent miscompile), so it must land with the early-return desugar + byte-match, not
   a Const/Opaque shortcut (which the wall explicitly rejects today).
+
+  **CORRECTION (2026-06-20, deeper probe): the cluster MOSTLY LOWERS — only 8 of ~74 wall, and their
+  blockers are HETEROGENEOUS (no single keystone).** The dispatchers (dash_item, dash_after,
+  nested_dispatch, …) are in-profile: a TAIL `f()!` in an effect fn is a PASS-THROUGH (the Result is
+  returned as-is → just `f()`), already handled. Only these 8 wall, each on a DIFFERENT feature:
+  - **collect_seq, seq_item** — a LET-BIND `!`: `let (val,next) = dash_item(...)!; <rest>` needs the
+    EARLY-RETURN desugar `match dash_item(...) { ok((val,next)) => <rest>, err(e) => err(e) }` (Ok-arm
+    continuation + tuple-payload destructure + Err-propagation). [the closest 2 — append/inline/TCO/tuple
+    all done; ONLY the let-bind `!` remains]
+  - **collect_map, map_entry** — let-bind `!` + **value.object** (build a Value object from `List[(String,Value)]`).
+  - **parse_lines, parse_nested** — `lines |> … |> list.find((e) => not is_blank(e.1))` (list.find + a
+    LAMBDA + pipeline) + `match next { some((offset,line)) => … }` (Option-of-TUPLE match payload).
+  - **block_scalar, block_line** (+ collect_block) — `(List[String],Int)` **tuple-heap drop** + the
+    3-CYCLE inline (collect_block↔block_line↔block_nonblank).
+  So the path is several DISTINCT bricks (let-bind-`!` early-return ⇒ collect_seq/seq_item first; then
+  value.object, list.find+lambda+Option-tuple-match, tuple-heap+3-cycle) — each soundness-sensitive,
+  each its own byte-match. NOT one lever. The append-accumulator + option-C foundation is complete.
   (Append concat — scalar + String/Value heap — guarded mutual-inline, call-element materialization,
   simultaneous-update TCO, and the heap-result-if append base are DONE + verified; off-by-one classes GUARDED.)
 
