@@ -161,6 +161,23 @@ append accumulators.
   add **tuple-heap drop**; `parse_*` are heap-result match roots. These are several substantial bricks
   (the Value-parser machinery), not a single lever — the append-accumulator foundation is complete; the
   remainder is value-aggregate construction + tuple plumbing.
+
+  **🎯 ROOT-BLOCKER IDENTIFIED (2026-06-20, by synthetic probe): the effect-fn `!` early-return propagation.**
+  The remaining 8 split into TWO sub-clusters by their KEYSTONE:
+  - **6 effect fns** (collect_seq, seq_item, collect_map, map_entry, parse_lines, parse_nested) — ALL are
+    `effect fn` and bind `let (val,next) = dash_item(...)!` / tail `parse_nested(...)!`. A synthetic
+    `let (v,next) = make(n)!` (make an `effect fn -> (Value,Int)`) walls with **"unwrap `!` in a
+    call-argument position cannot be faithfully computed (needs EARLY-RETURN propagation)"**. So the
+    keystone for ALL 6 is `!` propagation = the v1 MIR Result/error machinery: lower `f()!` as
+    `match f() { Ok(v) => <continue>, Err(e) => return Err(e) }` (an early-return on Err). This is a
+    FUNDAMENTAL feature (Result repr + mid-function early-return / its desugar), not a per-fn brick —
+    once it lands, the 6 effect fns' tuple-destructure + tuple-return (both already supported) compose.
+  - **block_scalar/block_line + collect_block** (non-effect `local fn`, NO `!`) — keystone is the 3-CYCLE
+    iterative inline (collect_block↔block_line↔block_nonblank, not a pair) + `(List[String],Int)`
+    tuple-return + tuple-heap drop. Independent of the effect `!` work.
+  THE next lever = effect-fn `!` early-return propagation (unblocks 6 of 8). Soundness-critical (a wrong
+  Err-propagation = a silent miscompile), so it must land with the early-return desugar + byte-match, not
+  a Const/Opaque shortcut (which the wall explicitly rejects today).
   (Append concat — scalar + String/Value heap — guarded mutual-inline, call-element materialization,
   simultaneous-update TCO, and the heap-result-if append base are DONE + verified; off-by-one classes GUARDED.)
 
