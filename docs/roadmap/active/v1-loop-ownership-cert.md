@@ -243,10 +243,26 @@ append accumulators.
   reads EMPTY *inside the TCO loop*: `list.get(lines, pos)` on the BORROWED LIST param `lines` returns
   nothing. chars works because its loop reads a borrowed STRING param (`string.slice(s, …)`); a borrowed
   LIST param read in a mutual-inline→TCO loop comes back empty — the param is dropped/zeroed before the
-  loop body reads it, or the loop fails to carry it. **THE REAL BLOCKER: borrowed-List-param read inside
-  the mutual-inline TCO loop body returns empty.** Needs the TCO loop to keep `lines` live for
-  `list.get`. Do NOT re-add the bare-call-arg lift before THIS (the element/substitution path is a
-  red herring).
+  loop body reads it, or the loop fails to carry it.
+
+  **🎯🎯 TRUE ROOT, wat-CONFIRMED (2026-06-20): a VarId COLLISION in the bare-call-arg lift + desugar
+  duplication.** Dumped the wat for the yaml-faithful `line_at`-helper synthetic (lift re-enabled):
+  ```
+  (local.set $v15 (call $line_at  (local.get $v0) (local.get $v1)))   ;; line = line_at(lines,pos)
+  (local.set $v19 (call $__list_concat_rc (local.get $v2) (local.get $v13)))   ;; THEN arm: acc + [""]
+  (local.set $v28 (call $string.drop (local.get $v19) (i64.const 0)))   ;; ELSE arm: string.drop(line,0)
+  ```
+  The ELSE arm's `string.drop(line, 0)` reads **`$v19` — the THEN arm's `__list_concat` result (a LIST)** —
+  instead of `$v15` (line_at's String). So `line`'s VarId aliases the then-arm's concat slot: the lift
+  (`tmp = max_var_id(body)+1`) + the tail-duplication (`desugar_let_bound_heap_branch` clones the
+  continuation into BOTH arms) + the bounded-dup relaxation reuse a VarId across the two arms, and the
+  global VarId→wasm-local map collides them — string.drop runs on a list pointer → garbage/"". NOT
+  substitution, NOT borrowed-param (both DISPROVEN above); both earlier theories were red herrings.
+  **THE FIX:** thread a single monotonic FRESH-VarId counter through `desugar_heap_branches` /
+  `desugar_callarg_heap_if` / `desugar_let_bound_heap_branch` instead of recomputing `max_var_id(body)+1`
+  per call (which collides once a prior rewrite has already consumed ids), so every lifted `tmp` and every
+  duplicated continuation gets globally-unique ids. THEN the bare-call-arg lift is sound → block_line
+  lowers correctly → yaml 7→6. Do NOT re-add the lift before the fresh-id threading.
 
   **🔧 CONCRETE RECIPE for the let-bind `!` (2026-06-20, the Result repr is now confirmed).** v1 MIR
   represents an effect-fn `Result[T,String]` as a DynListStr with a LEN-AS-TAG (see
