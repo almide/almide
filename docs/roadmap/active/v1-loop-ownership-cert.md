@@ -354,8 +354,22 @@ append accumulators.
   2. ✅ **borrowed `pairs` used in BOTH arms** (`value.object(pairs)` in none, `pairs + [(k,v)]` in some) —
      the THEN arm's consume leaked into the ELSE arm's lowering view → ELSE walled. FIXED: snapshot/restore
      param_values+live+materialized_aggregates between the alternate arms (branch ownership isolation).
-  3. ⛔ **REMAINING: `pairs + [(key,val)]` (List[(String,Value)] tuple-element append) in a CALL-ARG
-     position.** `try_lower_concat_list` (calls.rs:534) admits only String/Value elements (line 548-552); a
+  3. ✅ **DONE (commit 95accd80): `pairs + [(key,val)]` (List[(String,Value)] tuple-element append). yaml
+     1→0.** A new self-hosted recursive drop `$__drop_list_str_value` (value_core.almd: per tuple — rc_dec
+     the String slot @12, `$__drop_value` the Value slot @20, then the tuple, then the list) behind a new
+     `Op::DropListStrValue` (single cert `d`, trusted recursion like `DropListValue`); `try_lower_concat_list`
+     + `try_lower_str_list_literal` admit the heap-field `(String,Value)` tuple element (via `try_lower_tuple_
+     construct` + `__list_concat_rc`), tracked in `str_value_elem_lists`; the rc_dec allowlist + the
+     example-side linker pull `$__drop_list_str_value`/`$__svdrop_list` in. corpus-wall ownership ACCEPT
+     (in-profile 3758→3822, +64 — it also cleared 63 other corpus fns), byte-matches v0, cargo-test 466,
+     full-scan no new mismatch. **⚠ FINDING: a pre-existing TCO-heap-loop leak — `let xs = [heap]; loop(...)`
+     in a tail loop traps (freelist not reused) at ~N/objects-per-iter for List[Value] (proven) AND
+     List[String] AND this new drop EQUALLY (List[Value] 1-elem traps ~2000, 3-elem ~1500, this 4-obj ~1000 —
+     same per-object rate), so it is NOT this drop's bug but a separate freelist/TCO issue affecting every
+     heap-allocating tail loop; worth a dedicated brick.**
+
+  ~~3-OLD. REMAINING: `pairs + [(key,val)]` … CALL-ARG position.~~ (superseded — DONE above; kept for the
+  diagnosis trail): `try_lower_concat_list` (calls.rs:534) admits only String/Value elements (line 548-552); a
      **heap-FIELD aggregate element (tuple/record with inner heap) DEFERS** — the call-arg path then WALLS
      (calls.rs:887, correct ②; the let-bind path silently defers it to an Opaque EMPTY list = a latent
      miscompile, NOT a real lowering — so this is genuinely unsolved, not a gating quirk). THE fix = the
