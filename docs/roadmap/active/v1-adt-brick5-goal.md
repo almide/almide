@@ -97,7 +97,57 @@ direct-ret double-move** (`unbox` newtype `B(x)=>x`: `Op::Consume`→`m` + heap 
 that single-arm heap case is now WALLED, multi-arm proceeds. corpus-wall ACCEPT. Only 5b
 remains for the recursive-`Expr`-to_string lever.
 
-## Step 5b — recursive drop (the LAST piece for the lever)
+## Step 5b — recursive drop (the LAST piece) — CONCRETE RECIPE (designed this session)
+
+KEY INSIGHT: `$__drop_value` (stdlib/value_core.almd) is SELF-HOSTED ALMIDE built from `prim.*`
+ops (`prim.handle`, `prim.load32`, `prim.load_handle`, `prim.rc_dec` + Unit self-recursion).
+A `prim` is a CHECKER NO-OP, so the drop fn has an EMPTY ownership cert — it is a "trusted
+routine", and its leak/double-free correctness is the LEAK LOOP's burden, not the cert's. So a
+custom-variant recursive drop is NOT a render/runtime change — it is a GENERATED per-type
+Almide fn in exactly that shape, auto-linked like value_core, cert-clean by construction.
+
+RECIPE: for each variant type with a nested-variant heap ctor field, GENERATE (v1 layout =
+`[rc@0][len@4][cap@8][tag=slot0@12][field slot i @ 12+(1+i)*8]`, tag stored width-8):
+
+```almide
+fn __drop_Expr(e: Expr) -> Unit = {
+  let h = prim.handle(e)
+  if prim.load32(h + 0) == 1 then {        // last ref
+    let tag = prim.load64(h + 12)          // slot 0 = tag
+    if tag == 1 then {                      // Add: fields slot1@20, slot2@28
+      __drop_Expr(prim.load_handle(h + 20))
+      __drop_Expr(prim.load_handle(h + 28))
+    } else if tag == 2 then {               // Neg: field slot1@20
+      __drop_Expr(prim.load_handle(h + 20))
+    } else ()                               // Lit (tag 0): scalar, nothing to free
+  } else ()
+  prim.rc_dec(h)
+}
+```
+(Only VARIANT/heap fields recurse; a leaf String field is `prim.rc_dec(prim.load64(h+off))`;
+a scalar field is skipped. Mirror `__drop_value`'s tag-5 array case + the `__vdrop_arr` helper
+shape if a ctor needs a loop — variants don't, fixed arity per ctor.)
+
+WIRING:
+1. `Op::DropVariant { v, ty }` in MIR — cert = ONE `d` (lib.rs + certificate.rs, alongside the
+   other Drop* ops). Render → `(call $__drop_<ty> (local.get v))`.
+2. GENERATE the `__drop_<ty>` Almide source per recursive variant type at program assembly and
+   auto-link it (the cleanest hook is alongside `self_host_runtime()` in render_wasm/registry.rs
+   — but that registry is `include_str!` of fixed files, so add a DYNAMIC generated-source path:
+   produce the source string from the `VariantLayouts`, run it through the same frontend feeder
+   `lower_source` uses, rename its fn to `__drop_<ty>`, add to the program functions). Both
+   render_program (trust spine) and the render_wasm `lower_source` test feeder must link it.
+3. CONSTRUCT: `try_lower_variant_ctor` — admit a nested-variant heap field (move the child handle
+   in via `lower_owned_heap_field` — its Var case already `Dup`s — + mask, exactly the String
+   path). Track the constructed value so its scope-end drop is `Op::DropVariant{ty}` (a new
+   tracking set, like `value_handles` → `DropValue`).
+4. MATCH-BIND: extend 5c's `Ty::String` heap-field bind in `parse_variant_arms` to ALSO admit a
+   variant-typed field (borrow — `tos`'s `l`/`r` are borrow-passed to the recursive call, never
+   moved out, multi-arm; the single-arm gate already covers the degenerate newtype).
+5. VERIFY (each step): corpus-wall ACCEPT, a create+drop LEAK LOOP over `Expr` (a freelist makes
+   a leak an OOB trap), and the `tos(Add(Lit(1), Neg(Lit(2)))) == "(1 + -2)"` byte-match.
+
+## Step 5b — original notes
 
 A nested-variant ctor field (`Add(Expr, Expr)`) cannot be freed by a flat `rc_dec` of the child
 slot — that leaks the grandchildren. You need a **tag-driven recursive free**, the shape of the
