@@ -2421,6 +2421,43 @@ pub(crate) fn try_tco_rewrite(
     {
         return None;
     }
+    // SIMULTANEOUS-UPDATE SAFETY: the loop assigns carried params SEQUENTIALLY, so a self-call arg that
+    // reads ANOTHER carried param (`acc + [string.slice(s, i, …)]` reading the loop index `i`, or
+    // `start = pos + 1` reading `pos`) would see the ALREADY-reassigned value — an off-by-one SILENT
+    // MISCOMPILE. WALL such cross-dependent TCO (a correct fix needs temp-staged simultaneous update).
+    // The common case (each arg reads only its own param + non-carried locals) is unaffected.
+    {
+        use almide_ir::visit::{walk_expr, IrVisitor};
+        let carried_vars: std::collections::BTreeSet<VarId> =
+            (0..n).filter(|&i| carried[i]).map(|i| params2[i].var).collect();
+        struct R<'a> {
+            carried: &'a std::collections::BTreeSet<VarId>,
+            self_var: VarId,
+            found: bool,
+        }
+        impl IrVisitor for R<'_> {
+            fn visit_expr(&mut self, e: &IrExpr) {
+                if let IrExprKind::Var { id } = &e.kind {
+                    if *id != self.self_var && self.carried.contains(id) {
+                        self.found = true;
+                    }
+                }
+                walk_expr(self, e);
+            }
+        }
+        for c in &calls {
+            for i in 0..n {
+                if carried[i] {
+                    let mut r =
+                        R { carried: &carried_vars, self_var: params2[i].var, found: false };
+                    r.visit_expr(&c[i]);
+                    if r.found {
+                        return None;
+                    }
+                }
+            }
+        }
+    }
     let base_exprs: Vec<IrExpr> = bases.iter().map(|b| (*b).clone()).collect();
     let ret_ty = body.ty.clone();
 

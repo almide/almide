@@ -140,7 +140,10 @@ impl LowerCtx {
             IrExprKind::Var { id } => self.value_of.contains_key(id),
             IrExprKind::Record { .. } | IrExprKind::Tuple { .. } => elem_scalar_aggregate,
             IrExprKind::Call { target: CallTarget::Named { .. } | CallTarget::Module { .. }, .. } => {
-                elem_value && is_value_ty(&e.ty)
+                // A Value-returning ctor call (elem_value), OR — for a List[String] — a String-returning
+                // call element (`[string.slice(s,a,b)]` in `acc + [string.slice(…)]`, the dominant yaml
+                // append shape): a fresh owned String, moved into the slot. `e.ty` is String here.
+                (elem_value && is_value_ty(&e.ty)) || elem_str
             }
             _ => false,
         });
@@ -186,15 +189,19 @@ impl LowerCtx {
                 // slot. The SAME flat shape as a scalar record, so the list's per-slot `rc_dec`
                 // frees it correctly.
                 IrExprKind::Tuple { .. } => self.try_lower_scalar_tuple_construct_for_elem(elem)?,
-                // A `Value` ctor CALL element (`value.int(1)`, `value.str(s)`) — a fresh OWNED Value
-                // (Module via the pure-call path, Named via CallFn), MOVED into the slot. The list's
-                // `Op::DropListValue` frees each recursively at scope end.
+                // A heap-returning CALL element — a fresh OWNED value MOVED into the slot. A `Value`
+                // ctor (`value.int(1)`) for a List[Value]; a String-returning call (`string.slice(s,a,b)`
+                // — the dominant yaml `acc + [string.slice(…)]` append) for a List[String]. Module via
+                // the pure-call path (→ a registered CallFn like `string.slice`), Named via CallFn. The
+                // list's recursive drop (DropListValue / DropListStr) frees each at scope end.
                 IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
-                    if elem_value =>
+                    if elem_value || elem_str =>
                 {
                     self.lower_pure_module_value_call(module.as_str(), func.as_str(), args, &elem.ty).ok()?
                 }
-                IrExprKind::Call { target: CallTarget::Named { name }, args, .. } if elem_value => {
+                IrExprKind::Call { target: CallTarget::Named { name }, args, .. }
+                    if elem_value || elem_str =>
+                {
                     let lowered = self.lower_call_args(args).ok()?;
                     let obj = self.fresh_value();
                     let repr = repr_of(&elem.ty).ok()?;
