@@ -83,23 +83,30 @@ backends agree on tag + field identity even though the byte layout differs.
      frees it via the SAME masked DropListStr a String-field record uses. corpus-wall ACCEPT (ownership
      16046→16085); a 1000× construct+drop leak-loop cargo test on wasmtime. (Construct-only: the field
      is still matched with a WILDCARD — the heap-field BIND is 5c.)
-   - **5c — heap-field match BIND** — NOT YET. Two attempts at a borrow (`LoadHandle`+param_values, the
-     Option heap-payload pattern + `lower_heap_result_arm`'s move-out auto-Dup) were BOTH REJECTED by the
-     proven checker over the corpus (`[ownership] REJECT`, ownership would rise 16085→16162). So
-     borrow+auto-Dup is INSUFFICIENT here — some corpus pattern unbalances. The naive failure (a
-     move-out `Text(s) => s`) was a latent double-free that byte-matched on wasmtime; the checker is the
-     real gate. Next: dump the rejecting object's i/a/d/m lifecycle (the corpus-wall `ownership.cert`)
-     to find the exact unbalanced shape before re-attempting — likely a **`Dup`'d OWNED bind** (rc+1,
-     dropped at arm end / moved out cleanly) rather than a borrow, but MUST be cert-verified, not
-     reasoned.
-   - **5b — recursive drop** (nested-variant field, `Add(Expr,Expr)`) — a flat rc_dec of a child block
-     leaks its grandchildren. Needs a tag-driven recursive free (a per-type `$__drop_<T>` emitted fn, or
-     a runtime layout table — the `$__drop_value` shape), accepted by the checker as one trusted `d`.
+   - **5c — heap-field match BIND** ✅ DONE (commit `b50e95a3`). A MULTI-arm match binding a leaf
+     String ctor field lowers: **borrow** the slot handle (`LoadHandle`+`param_values`) — the move-out
+     arm auto-`Dup`s in `lower_heap_result_arm`, a consuming re-use `Dup`s in `lower_owned_heap_field`,
+     so the subject (which owns the slot) is never released at rc 0. A **SINGLE-arm heap-result match**
+     (a 1-ctor newtype `unbox`, `B(x)=>x`) is WALLED: with no IfThen branch-merge `dst`, the arm value
+     rets directly and double-moves with the arm `Consume` (`amm`/`aamdm`, net −1 — the checker REJECT).
+     Diagnosed cert-driven: the exact reproducer was `unbox[String]` in
+     `spec/wasm_cross/generic_fn_in_inferred_lambda.almd`; the `Op::Consume`→`m` plus the heap
+     `func.ret`→`m` double-counted (certificate.rs). corpus-wall ACCEPT (ownership 16085→16161), a
+     1000× leak loop, a wasmtime cargo test + a diff-fuzz heap-field template. (`emit_cert_from_source
+     <f> <fn> mir` now dumps the MIR ops + cert — the debug aid that found it.)
+   - **5b — nested-variant ctor fields + recursive drop** — the LAST piece for the recursive `Expr`
+     to_string lever. `try_lower_variant_ctor` still WALLs a nested-variant ctor field (`Add(Expr,Expr)`
+     — only scalar + leaf String land). A flat rc_dec of a child Expr block leaks its grandchildren, so
+     it needs a tag-driven recursive free: a per-type `$__drop_<T>(ptr)` emitted fn (read tag@slot0,
+     recursively drop each variant field + rc_dec leaf fields, free the block) or a runtime layout
+     table — the `$__drop_value` shape — accepted by the checker as one trusted `d`. NOTE the single-arm
+     gate above: `tos` is multi-arm (Lit|Add|Neg) so the 5c path serves it; the remaining work is the
+     nested CONSTRUCT + the recursive DROP.
 
-   STANDING LESSON (re-proven twice this round): a heap-field variant lowering can byte-match on
-   wasmtime yet be a latent double-free — only the kernel-proven `[ownership]` checker catches it. NEVER
-   ship a checker-rejected witness (the ② cardinal rule). Construct (5a) was separable + sound; the
-   bind/drop are the genuine ownership frontier.
+   STANDING LESSON (re-proven this round): a heap-field variant lowering can byte-match on wasmtime yet
+   be a latent double-free — only the kernel-proven `[ownership]` checker catches it. Both a borrow and a
+   Dup'd-owned bind REJECTED until the cert-driven diagnosis pinned the *single-arm direct-ret*
+   double-move; gating that (not the bind model) was the fix. NEVER ship a checker-rejected witness.
 
 ## Why this is ① (value-model unification), not a one-off
 

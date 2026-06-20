@@ -89,7 +89,15 @@ BODY uses it:
 
 VERIFY: corpus-wall ACCEPT (the gate) + byte-match `unbox`-style + `tos`-style + a leak loop.
 
-## Step 5b — recursive drop (after 5c)
+## Step 5c — STATUS: ✅ DONE (commit `b50e95a3`)
+
+Heap-field (String) match binds land for MULTI-arm matches (borrow + auto-Dup on move-out +
+Dup-on-consume). The blocker turned out NOT to be the bind model but the **single-arm
+direct-ret double-move** (`unbox` newtype `B(x)=>x`: `Op::Consume`→`m` + heap `func.ret`→`m`);
+that single-arm heap case is now WALLED, multi-arm proceeds. corpus-wall ACCEPT. Only 5b
+remains for the recursive-`Expr`-to_string lever.
+
+## Step 5b — recursive drop (the LAST piece for the lever)
 
 A nested-variant ctor field (`Add(Expr, Expr)`) cannot be freed by a flat `rc_dec` of the child
 slot — that leaks the grandchildren. You need a **tag-driven recursive free**, the shape of the
