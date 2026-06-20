@@ -93,10 +93,28 @@ loop first OOM-trapped (call-result temps routed to the flat drop) → fixed by 
 sites. csvcore byte-matches v0, 2000× leak loop clean, corpus-wall ACCEPT, csv classify **5/6 → 7/4**
 (parse_rows_rec + parse_after_field now lower).
 
-STILL WALLS (csv full byte-match — the remaining levers, all SOUND walls):
-- ❌ `parse` — `ok(value.array(...))` ResultOk wrapper (a heap-result Result).
-- ❌ `parse_records` — a `list.map` with a closure list (unliftable higher-order arg).
-- ❌ `parse_rows` / `stringify_records` — heap-result `if` (a remaining arm shape).
+DONE (commit b871b73d): ✅ **`[]` heap-result-if arm** — `lower_heap_result_arm` materializes an empty
+list arm (`if is_empty(t) then [] else parse_rows_rec(...)`). csv 7/4 → 8/3 (parse_rows lowers).
+
+FINDING (probes): the **`list.map` closure** lever the dashboard suggested is LARGELY ALREADY DONE —
+scalar / String / Value / block-body / nested-map / map|>join closures all byte-match. The actual
+remaining csv walls are narrower (specific value-construction), not a general closure gap.
+
+DONE (commit 47301322): ✅ **`Result[Value, String]` ok/err wrapper** (csv `parse`'s
+`ok(value.array(...))`). New `Op::DropResultValue` → self-hosted `$__drop_result_value` (tag-dispatch:
+Ok → `$__drop_value`, Err → `rc_dec`); `try_lower_result_value_ctor` (in lower_tail + the if-arm)
+materializes Ok via `lower_owned_heap_field` (handles `value.*` + the nested `list.map`), routed to a
+new `value_result_results` set (`is_value_result_ty`). ok/err + match-read round-trips byte-match;
+corpus-wall ACCEPT; 2000× v1 no OOM. **csv classify 8/3 → 11/2 (parse lowers).**
+
+STILL WALLS (csv full byte-match — the last 2, both value.object-building closures):
+- ❌ `parse_records` — `data |> list.map((row) => { … value.object(pairs) … })`: a block-body closure
+  building a `value.object` from `header`/`row` (a `list.zip`/pairs shape) — a more complex Value
+  construction than the `value.array(value.str)` map.
+- ❌ `stringify_records` — heap-result `if` whose arms use `json.keys` + `value.object` + nested
+  `list.map(... ) |> list.join` over Value objects.
+NOTE: the byte-match DRIVER also needs `value.stringify` self-hosted (currently unlinked) — a
+separate stdlib-runtime lever orthogonal to the lowering.
 
 ## SEPARATE blocker: toml's v0 oracle is BROKEN
 
