@@ -195,6 +195,26 @@ append accumulators.
   So the path is several DISTINCT bricks (let-bind-`!` early-return ⇒ collect_seq/seq_item first; then
   value.object, list.find+lambda+Option-tuple-match, tuple-heap+3-cycle) — each soundness-sensitive,
   each its own byte-match. NOT one lever. The append-accumulator + option-C foundation is complete.
+
+  **🔧 CONCRETE RECIPE for the let-bind `!` (2026-06-20, the Result repr is now confirmed).** v1 MIR
+  represents an effect-fn `Result[T,String]` as a DynListStr with a LEN-AS-TAG (see
+  `materialize_result_ok`, control.rs:2030): `len @ handle+4` is `0` for Ok / `≠0` for Err; the Ok payload
+  (a scalar, or a TUPLE/heap HANDLE) sits at `handle+12`. The tail `f()!` already passes the Result through
+  (`lower_tail(expr)`, tail.rs:256/624) — sound because the tail value IS the fn's return. The LET-BIND
+  `let pat = f()!; rest` (binds.rs:235, walled) desugars to a heap-result `if` — NO new variant-match
+  extension needed:
+  ```
+  let r = f()                                  // Result (DynListStr); track in materialized_results_str
+  if <load(r+4) != 0> then r                   // Err: move the Result out as-is (Dup+Consume, the Var arm)
+  else { let pat = <load(r+12)>; rest }         // Ok: extract the payload @ +12, then the continuation
+  ```
+  The Ok payload extraction + ownership is EXACTLY the existing `value.as_array` str-result path
+  (control.rs:907-916: bind the @12 handle as a BORROW, drop the Result wrapper after) — for a TUPLE
+  payload, follow the bind with a tuple-destructure of the @12 handle (read .0/.1). Both arms produce the
+  fn's `Result`, so the existing heap-result-`if` machinery (incl. the ConcatList/Call/Block arms just
+  added) lowers it. HARDEST integration = collect_seq, where this `!` sits INSIDE the TCO loop body, so the
+  Err early-return becomes a loop-carried `if` (the then-arm `return r` is a break-with-value) — do the
+  ISOLATED non-TCO `let x = mk(n)!` synthetic FIRST (byte-match), then the TCO integration. Start there.
   (Append concat — scalar + String/Value heap — guarded mutual-inline, call-element materialization,
   simultaneous-update TCO, and the heap-result-if append base are DONE + verified; off-by-one classes GUARDED.)
 
