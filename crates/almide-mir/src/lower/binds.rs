@@ -1231,7 +1231,10 @@ impl LowerCtx {
             return None;
         }
         // Lower every field value FIRST (before the alloc) so a field expr that itself
-        // allocates does not interleave with our store sequence. SCALAR fields only.
+        // allocates does not interleave with our store sequence. SCALAR fields only — a heap
+        // ctor field needs an ownership-aware drop (a leaf String moved+masked, or a recursive
+        // variable-tag recursive free) the proven checker REJECTED a naive attempt at, so it is
+        // ADT brick 5 (heap/recursive fields) → WALL here, never a leak/double-free.
         let mut field_vals: Vec<ValueId> = Vec::with_capacity(args.len());
         for arg in args {
             if is_heap_ty(&arg.ty) {

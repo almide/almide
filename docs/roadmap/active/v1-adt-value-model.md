@@ -68,14 +68,31 @@ backends agree on tag + field identity even though the byte layout differs.
    multi-field ctors, and bind/let positions; corpus-wall proven checker accepts all witnesses; a new
    diff-fuzz generative variant template + a deterministic wasmtime cargo test guard it. SCALAR result +
    SCALAR ctor-field binds only (heap-result arm = brick 4, heap/nested ctor field = brick 5).
-4. **Heap-result match** — the same dispatch with `lower_heap_result_arm` + subject-drop-before-arms, so a
-   String/heap-returning arm works. Byte-match recursive `to_string` (the #1 lever) → /tmp/adt.almd.
-5. **Recursive drop + heap/recursive ctor fields** — admit heap-handle ctor fields (a nested
-   `Add(Expr,Expr)` block MOVED into a parent slot, cert `m`, tracked in `record_masks`) AND a
-   layout-driven recursive free: free each ctor's heap fields by the tag's mask, recursing into child
-   variants. The ownership-sensitive part — verify with a create+drop **leak loop** (like
-   DropListStrValue), AND keep diff-fuzz green. One cert `d`, trusted recursion (same shape as
-   `$__drop_value`).
+4. **Heap-result match (borrowed subject)** — ✅ DONE (commit `f37a7314`). A `match t { Ctor(..) =>
+   <String> }` with a heap result over a BORROWED param/var subject dispatches on tag@slot0 and lowers
+   each arm via `lower_heap_result_arm` (the arm moves out a fresh heap value; a bound SCALAR field reads
+   the still-live borrowed subject's slot). `emit_variant_arm_chain` takes `result_ty` and picks
+   scalar vs heap arm lowering; wired at the heap-result tail. An OWNED-temp subject with a heap result
+   WALLS (needs subject-drop-before-arms, brick 4b) rather than emit cert-failing MIR. corpus-wall
+   ownership 15904→16046 (heap-result variant matches now lower, proven checker accepts all).
+5. **Heap/recursive ctor fields + recursive drop** — the remaining frontier (unlocks the recursive
+   `Expr` to_string, the #1 lever). NAIVE ATTEMPT REJECTED BY THE PROVEN CHECKER (the discipline
+   working): binding a heap (`String`) ctor field as a borrow (`LoadHandle`+param_values) and letting an
+   arm move it out (`Text(s) => s`) DOUBLE-FREES — the subject's masked drop frees the slot AND the
+   caller frees the moved-out handle. corpus-wall `[ownership] REJECT` caught it (it byte-matched on
+   wasmtime — a LATENT double-free that did not surface). The correct model needs:
+   - **construct**: a heap-handle ctor field MOVED into its slot (cert `m`), block tracked in
+     `record_masks` — sound on its own (the String-field record machinery), but only useful WITH a sound
+     match-bind;
+   - **match-bind**: bind a heap field as a **`Dup`'d OWNED copy** (rc+1, cert `a`), so a read-only use
+     drops it at arm end (balanced) AND a move-out hands the caller a distinct ref while the subject
+     keeps its own — both rc-balanced. (The borrow+auto-Dup-on-move-out coordination the Option
+     heap-payload path uses, generalized — the intricate part.)
+   - **recursive drop**: a nested-variant field (`Add(Expr,Expr)`) can't be freed by a flat rc_dec (it
+     leaks grandchildren). Needs a tag-driven recursive free (per-type drop fn / runtime layout table,
+     the `$__drop_value` shape) — verify with a create+drop **leak loop** AND corpus-wall ACCEPT.
+   Each sub-step MUST pass the proven checker before shipping (never a checker-rejected witness — the ②
+   cardinal rule, just demonstrated).
 
 ## Why this is ① (value-model unification), not a one-off
 

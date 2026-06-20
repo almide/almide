@@ -9,8 +9,8 @@ use almide_lang::types::Ty;
 
 /// One parsed arm of a custom-variant `match` (ADT brick 3). A `Ctor` arm tests `tag ==
 /// tag` and binds its SCALAR fields from slots (`(slot index 1+i, bound var)`); a `Wildcard`
-/// arm is the unconditional catch-all. (A binder catch-all `x => …` over a variant is walled
-/// for now — its scalar-context binding to the whole block is a later brick.)
+/// arm is the unconditional catch-all. (A heap-field bind / binder catch-all over a variant is
+/// walled — the heap-field ownership coordination is ADT brick 5.)
 enum VariantArmKind {
     Ctor { tag: i64, binds: Vec<(usize, VarId)> },
     Wildcard,
@@ -1288,10 +1288,12 @@ impl LowerCtx {
                     for (i, fp) in args.iter().enumerate() {
                         match fp {
                             IrPattern::Wildcard => {}
+                            // slot 1+i (slot 0 is the tag). A SCALAR field binds by value copy.
                             IrPattern::Bind { var, ty } if !is_heap_ty(ty) => {
-                                binds.push((1 + i, *var)) // slot 1+i (slot 0 is the tag)
+                                binds.push((1 + i, *var))
                             }
-                            // a heap-field bind / nested ctor pattern — ADT brick 5
+                            // a heap-field bind (its ownership coordination is ADT brick 5) /
+                            // nested ctor pattern — decline.
                             _ => return None,
                         }
                     }
