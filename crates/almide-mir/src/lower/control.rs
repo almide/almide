@@ -1603,6 +1603,19 @@ impl LowerCtx {
                 self.drop_arm_locals(arm_mark);
                 Some(obj)
             }
+            // A LIST-concat arm (`if string.is_empty(last) then acc else acc + [last]` — the flow_rec
+            // base): `__list_concat`/`__list_concat_rc`'s fresh owned list (cert `i`) + the arm's
+            // `Consume` (`m`) = the per-arm `"im"` move-out balance. The left operand (`acc`) is BORROWED
+            // by the concat (copied), so it is untouched here and freed at its own scope end; any
+            // materialized element temp is freed within the arm. Closes the heap-result-`if` return whose
+            // arms are an append (the parser-accumulator base case).
+            IrExprKind::BinOp { op: almide_ir::BinOp::ConcatList, .. } => {
+                let arm_mark = self.live_heap_handles.len();
+                let obj = self.try_lower_concat_list(arm)?;
+                self.ops.push(Op::Consume { v: obj });
+                self.drop_arm_locals(arm_mark);
+                Some(obj)
+            }
             // A STRING INTERPOLATION arm (`match e { Click{button,..} => "click:${button}" }`)
             // over the executable subset — the __str_concat chain's fresh owned String (`i`) +
             // the arm's `Consume` (`m`) = the same per-arm `"im"` balance as the concat arm; any
