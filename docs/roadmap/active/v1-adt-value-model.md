@@ -122,6 +122,21 @@ drop, all byte-matching v0, corpus-wall-sound (proven checker, zero silent misco
 and per-PR diff-fuzz + deterministic cargo guarded. The #1 cross-repo wall lever (recursive
 `to_string`/pretty-print over `type Expr = Lit | Add | Neg`) is LIT.
 
+### Org-repo verification (the authoritative byte-match)
+
+REAL `github.com/almide` org variant types now byte-match v0==v1 on the v1 trust spine (the ② gate,
+not just wall-count): `porta`'s `InstanceState = Created | … | Exited(Int) | Failed(String)`
+(unit + scalar + String-payload ctors), `RestartPolicy`/`ValType` (enums), `FdKind` (String payloads)
+— all `almide run` (native) == `render_program | wasmtime`, AND a 2000× ctor+match+drop LEAK LOOP over
+the String-payload `FdKind` is clean. porta's variant ctors no longer wall as "unlinked call".
+
+CAVEAT (measurement, not correctness): `scripts/org-trust-status.sh` sweeps only each repo's ENTRY
+module, so it is BLIND to ADT code living in SUBMODULES (porta's entry is a barrel — 0 in-subset fns).
+The dashboard totals are therefore UNCHANGED by the ADT work; the byte-match above is the real
+evidence. The org-wide NEXT lever (dashboard top reason, ~40 walls) is now the **heap-result-expr
+family** (`match`/`if`/`Range`/`??`/`Try`/`List`/`BinOp` returned-in-tail or in a call-arg) — blocking
+toml/svg/aes/base64/csv — NOT ADTs.
+
 ## Why this is ① (value-model unification), not a one-off
 
 Record / tuple / enum / list are all "a tagged?/masked heap block". Bricks 1-5 make the variant the LAST
