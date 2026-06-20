@@ -2,7 +2,9 @@
 # org-trust-status.sh — sweep the github.com/almide org's Almide-written repos through the v1
 # trust-spine lowering wall and regenerate docs/org-trust-status.md.
 #
-# For each repo it runs the MIR `classify_corpus` example over the repo's entry module and records:
+# For each repo it runs the MIR `classify_corpus` example over EVERY `src/*.almd` module (a barrel
+# entry hides the real code in submodules; cross-module importers are skipped, surfaced as `+N xmod`)
+# and aggregates:
 #   - lowers   : functions in the v1 lowering subset (the proven-checker re-verifies each)
 #   - walls    : functions explicitly walled (Unsupported) — honest, never a silent miscompile
 #   - status   : ✅ wall=0  /  N walls
@@ -36,18 +38,10 @@ echo "building classify_corpus…" >&2
 # The repos verified by a real v0==v1 byte-match (not just wall=0). Update as new ones are checked.
 BYTE_VERIFIED=" yaml sha1 "
 
-# The Almide-LIBRARY entry, taken ONLY from `src/` (a real module root), never from embedded shims
-# (`stdlib/`) or benchmark fixtures (`research/`, `benchmark/`) — those misfired into bogus repo-level
-# numbers (e.g. almide-fable-llm, a Rust project, reported a random MSR benchmark file). `sort` makes
-# the pick deterministic. Empty result ⇒ the repo is not a single-module Almide library.
-find_entry() {
-  local d="$1"
-  for c in "src/mod.almd" "src/lib.almd" "src/$(basename "$d").almd"; do
-    [ -f "$d/$c" ] && { echo "$d/$c"; return; }
-  done
-  find "$d/src" -maxdepth 2 -name '*.almd' 2>/dev/null | grep -vE '_test\.almd' | sort | head -1 || true
-}
-
+# Only `src/*.almd` (a real module root) is swept, never embedded shims (`stdlib/`) or benchmark
+# fixtures (`research/`, `benchmark/`) — those misfired into bogus repo-level numbers (e.g.
+# almide-fable-llm, a Rust project, once reported a random MSR benchmark file). A repo with no
+# `src/*.almd` at all ⇒ not an Almide library.
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/o"                                          # classify_corpus --out needs an existing dir
 rows=""; allwalls="$tmp/allwalls.txt"; : > "$allwalls"
@@ -56,30 +50,47 @@ total_lower=0; total_wall=0; clean=0; counted=0
 for d in "$ORG_DIR"/*/; do
   repo="$(basename "$d")"
   [ "$repo" = "almide" ] && continue                       # the compiler itself is the v0 corpus, not a target
-  entry="$(find_entry "${d%/}")"
-  if [ -z "$entry" ]; then
+  # Sweep EVERY src/ module (recursive), not just the entry — a barrel `mod.almd` re-exports
+  # submodules that hold the real code (porta's variants etc.), so entry-only counting reported
+  # a false 0/0. classify_corpus reads ONE file with no cross-module import resolution, so a
+  # module that imports a SIBLING is `frontend-rejected` and SKIPPED (counted, surfaced as
+  # `+N cross-mod skipped`); a leaf/stdlib-only module is measured. Honest under-count > false 0/0.
+  files="$(find "${d%/}/src" -name '*.almd' 2>/dev/null | grep -vE '_test\.almd' | sort || true)"
+  if [ -z "$files" ]; then
     rows="${rows}| \`$repo\` | — | — | ▫ not an Almide \`src/\` library | — |\n"
     continue
   fi
-  out="$(WALL_NAMES=1 "$BIN" --out "$tmp/o" "$entry" 2>&1 || true)"
-  ip="$(printf '%s' "$out" | grep -oE 'in-profile \(lowers\)[ ]*: [0-9]+' | grep -oE '[0-9]+$' || true)"
-  wl="$(printf '%s' "$out" | grep -oE 'walled \(Unsupported\)[ ]*: [0-9]+' | grep -oE '[0-9]+$' || true)"
-  [ -z "$ip" ] && continue                                  # parse/entry failure — skip silently
+  rip=0; rwl=0; measured=0; skipped=0; : > "$tmp/repowalls"
+  while IFS= read -r f; do
+    [ -z "$f" ] && continue
+    out="$(WALL_NAMES=1 "$BIN" --out "$tmp/o" "$f" 2>&1 || true)"
+    ip="$(printf '%s' "$out" | grep -oE 'in-profile \(lowers\)[ ]*: [0-9]+' | grep -oE '[0-9]+$' || true)"
+    wl="$(printf '%s' "$out" | grep -oE 'walled \(Unsupported\)[ ]*: [0-9]+' | grep -oE '[0-9]+$' || true)"
+    rej="$(printf '%s' "$out" | grep -oE 'frontend-rejected[ ]*: [0-9]+' | grep -oE '[0-9]+$' || echo 0)"
+    if [ -z "$ip" ] || [ "${rej:-0}" != "0" ]; then skipped=$((skipped + 1)); continue; fi
+    measured=$((measured + 1)); rip=$((rip + ip)); rwl=$((rwl + wl))
+    printf '%s' "$out" | grep 'WALLED' | sed -E 's#^WALLED [^:]*:: [a-z0-9_]+ :: ##' >> "$tmp/repowalls" || true
+  done <<EOF
+$files
+EOF
+  if [ "$measured" -eq 0 ]; then
+    if [ "$skipped" -eq 0 ]; then note="no in-subset fns"; else note="all cross-module"; fi
+    rows="${rows}| \`$repo\` | 0 | 0 | ▫ $note | — |\n"
+    continue
+  fi
   counted=$((counted + 1))
-  total_lower=$((total_lower + ip)); total_wall=$((total_wall + wl))
-  printf '%s' "$out" | grep 'WALLED' | sed -E 's#^WALLED [^:]*:: [a-z0-9_]+ :: ##' >> "$allwalls" || true
-  top="$(printf '%s' "$out" | grep 'WALLED' | sed -E 's#^WALLED [^:]*:: [a-z0-9_]+ :: ##; s/`[^`]*`/X/g; s/[0-9]+/N/g' | sort | uniq -c | sort -rn | head -1 | sed -E 's/^ *[0-9]+ //' | cut -c1-60 || true)"
-  if [ "${ip}" = "0" ] && [ "${wl}" = "0" ]; then
-    status="▫ entry has no in-subset fns"   # a barrel / re-export entry — not a real wall=0
-    top="—"
-  elif [ "${wl:-1}" = "0" ]; then
+  total_lower=$((total_lower + rip)); total_wall=$((total_wall + rwl))
+  cat "$tmp/repowalls" >> "$allwalls"
+  top="$(sed -E 's/`[^`]*`/X/g; s/[0-9]+/N/g' "$tmp/repowalls" | sort | uniq -c | sort -rn | head -1 | sed -E 's/^ *[0-9]+ //' | cut -c1-56 || true)"
+  skipnote=""; if [ "$skipped" -gt 0 ]; then skipnote=" +${skipped} xmod"; fi
+  if [ "${rwl}" = "0" ]; then
     clean=$((clean + 1))
-    case "$BYTE_VERIFIED" in *" $repo "*) status="✅ 0 — byte-verified";; *) status="🟡 0 — lowers, byte-match TODO";; esac
+    case "$BYTE_VERIFIED" in *" $repo "*) status="✅ 0 — byte-verified${skipnote}";; *) status="🟡 0 — lowers, byte-match TODO${skipnote}";; esac
     top="—"
   else
-    status="🔴 $wl"
+    status="🔴 ${rwl}${skipnote}"
   fi
-  rows="${rows}| \`$repo\` | $ip | $wl | $status | $top |\n"
+  rows="${rows}| \`$repo\` | $rip | $rwl | $status | $top |\n"
 done
 
 agg="$(sed -E 's/`[^`]*`/X/g; s/[0-9]+/N/g' "$allwalls" | sort | uniq -c | sort -rn | head -12 \
@@ -90,7 +101,7 @@ agg="$(sed -E 's/`[^`]*`/X/g; s/[0-9]+/N/g' "$allwalls" | sort | uniq -c | sort 
   echo
   echo "> Auto-generated by \`scripts/org-trust-status.sh\`. Re-run to refresh. Org dir: \`$ORG_DIR\`."
   echo
-  echo "**${clean}/${counted} repos at wall=0**, ${total_lower} functions lowering / ${total_wall} walled across the swept entries."
+  echo "**${clean}/${counted} repos at wall=0**, ${total_lower} functions lowering / ${total_wall} walled across all swept \`src/\` modules (cross-module importers skipped — see \`+N xmod\`)."
   echo
   echo "⚠ **wall=0 ≠ correct.** It means every function is inside the v1 lowering subset, NOT that the"
   echo "output is byte-identical to v0. The authoritative ② gate is a **v0==v1 byte-match** (run the repo's"
@@ -114,7 +125,7 @@ agg="$(sed -E 's/`[^`]*`/X/g; s/[0-9]+/N/g' "$allwalls" | sort | uniq -c | sort 
   echo
   echo "## Notes"
   echo
-  echo "- Only each repo's **entry module** is swept; a multi-file repo's other \`src/*.almd\` are not yet counted."
+  echo "- **Every** \`src/*.almd\` module is swept (not just the entry). classify_corpus reads one file with no cross-module import resolution, so a module that imports a SIBLING is skipped — surfaced per repo as \`+N xmod\`. The real number is therefore an UNDER-count (the skipped importers add more), never an over-count."
   echo "- The \`almide\` repo itself is the v0 corpus (its own \`proofs/corpus-wall.sh\` gate), not a target here."
   echo "- To byte-verify a repo: render its functions to wasm and diff v0 (native) vs v1 (wasmtime) over the"
   echo "  repo's test vectors, then add it to \`BYTE_VERIFIED\` in the script."
