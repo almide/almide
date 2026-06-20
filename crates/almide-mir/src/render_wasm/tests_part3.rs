@@ -623,6 +623,26 @@
     }
 
     #[test]
+    fn custom_variant_string_field_construct_drops_clean() {
+        // A custom ADT with a LEAF heap (`String`) ctor field (`Text(String)`): construct moves
+        // the String into the masked slot (ADT brick 5a), the block's scope-end drop frees that
+        // slot (the String-field record's DropListStr machinery) — verified by a 1000x
+        // construct+drop loop that must not leak/trap. The field is matched with a WILDCARD (the
+        // heap-field BIND is a later brick); byte-matches v0.
+        let src = "type Msg = Text(String) | Code(Int) | Quit\n\
+            fn tag(m: Msg) -> Int = match m { Text(_) => 1, Code(c) => c, Quit => 0 }\n\
+            fn main() -> Unit = {\n  \
+              var t = 0\n  for i in 0..1000 { t = t + tag(Text(\"xyz\")) }\n  \
+              println(int.to_string(t))\n  \
+              println(int.to_string(tag(Code(7))))\n  \
+              println(int.to_string(tag(Quit))) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("custom_variant_strfield", &render_wasm_program(&prog)) {
+            assert_eq!(out, "1000\n7\n0");
+        }
+    }
+
+    #[test]
     fn custom_variant_unit_statement_match_runs_one_arm() {
         // A UNIT-result custom-variant `match` in STATEMENT position (ADT brick 3, unit path):
         // only the TAKEN arm's effect runs — the regression guard for the both-arms

@@ -1231,17 +1231,23 @@ impl LowerCtx {
             return None;
         }
         // Lower every field value FIRST (before the alloc) so a field expr that itself
-        // allocates does not interleave with our store sequence. SCALAR fields only — a heap
-        // ctor field needs an ownership-aware drop (a leaf String moved+masked, or a recursive
-        // variable-tag recursive free) the proven checker REJECTED a naive attempt at, so it is
-        // ADT brick 5 (heap/recursive fields) → WALL here, never a leak/double-free.
-        let mut field_vals: Vec<ValueId> = Vec::with_capacity(args.len());
+        // allocates does not interleave with our store sequence. Each field is SCALAR (a value
+        // copy) or a LEAF heap `String` (a fresh OWNED handle moved into its slot, cert `m`,
+        // freed by the masked DropListStr — the SAME machinery a String-field record uses). A
+        // non-String heap field (a List, or a NESTED/recursive variant whose flat rc_dec would
+        // not recursively free its children) is ADT brick 5b → WALL, never a leak.
+        let mut field_vals: Vec<(ValueId, bool /* is_heap */)> = Vec::with_capacity(args.len());
         for arg in args {
             if is_heap_ty(&arg.ty) {
-                return None; // heap / recursive ctor field — ADT brick 5
+                if !matches!(arg.ty, Ty::String) {
+                    return None; // List / nested-variant ctor field — ADT brick 5b
+                }
+                let obj = self.lower_owned_heap_field(arg)?;
+                field_vals.push((obj, true));
+            } else {
+                let v = self.lower_scalar_value(arg)?;
+                field_vals.push((v, false));
             }
-            let v = self.lower_scalar_value(arg)?;
-            field_vals.push(v);
         }
         // Allocate the `slot_count`-wide block.
         let len = self.fresh_value();
@@ -1254,23 +1260,41 @@ impl LowerCtx {
         });
         let h = self.fresh_value();
         self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![dst] });
-        // Store the tag into slot 0, then each scalar field into slot `1+i`.
+        // Store the tag into slot 0, then each field into slot `1+i`. A heap field stores its
+        // HANDLE (i64-widened) then is `Consume`d (moved in); a scalar field stores its value.
         let tagv = self.fresh_value();
         self.ops.push(Op::ConstInt { dst: tagv, value: tag });
-        let mut slots: Vec<(usize, ValueId)> = vec![(0, tagv)];
-        for (i, v) in field_vals.into_iter().enumerate() {
-            slots.push((1 + i, v));
+        let store_addr = |s: &mut Self, slot: usize| {
+            let off = s.fresh_value();
+            s.ops.push(Op::ConstInt { dst: off, value: layout::slot_offset(slot) as i64 });
+            let addr = s.fresh_value();
+            s.ops.push(Op::IntBinOp { dst: addr, op: IntOp::Add, a: h, b: off });
+            addr
+        };
+        let addr0 = store_addr(self, 0);
+        self.ops.push(Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args: vec![addr0, tagv] });
+        let mut heap_slots: Vec<usize> = Vec::new();
+        for (i, (v, is_heap)) in field_vals.into_iter().enumerate() {
+            let slot = 1 + i;
+            let addr = store_addr(self, slot);
+            let store_val = if is_heap {
+                let handle = self.fresh_value();
+                self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(handle), args: vec![v] });
+                handle
+            } else {
+                v
+            };
+            self.ops.push(Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args: vec![addr, store_val] });
+            if is_heap {
+                self.ops.push(Op::Consume { v });
+                self.live_heap_handles.retain(|x| *x != v);
+                heap_slots.push(slot);
+            }
         }
-        for (slot, v) in slots {
-            let off = self.fresh_value();
-            self.ops.push(Op::ConstInt { dst: off, value: layout::slot_offset(slot) as i64 });
-            let addr = self.fresh_value();
-            self.ops.push(Op::IntBinOp { dst: addr, op: IntOp::Add, a: h, b: off });
-            self.ops.push(Op::Prim {
-                kind: PrimKind::Store { width: 8 },
-                dst: None,
-                args: vec![addr, v],
-            });
+        // A heap (String) field makes the block a masked aggregate — its drop frees those slots
+        // (rc_dec) then the block (the SAME DropListStr a String-field record uses).
+        if !heap_slots.is_empty() {
+            self.record_masks.insert(dst, heap_slots);
         }
         self.materialized_aggregates.insert(dst);
         Some(dst)
