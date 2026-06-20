@@ -234,14 +234,19 @@ append accumulators.
   byte-MATCHES (`Z|E|Z`) — TCO + slot + inline machinery are correct. But `acc + [line]` where `line` is
   block_line's PARAM, with collect_block passing even a constant `"X"`, gives "" for EVERY element
   (`X|X|X` → `||`). And `["a"] + [line]` / `[x,y]` with `line`/`x`/`y` as ordinary LOCALS byte-MATCH.
-  So a var element is fine; the wrongness is SOLELY the SUBSTITUTED element — `substitute_var_in_expr`
-  replacing `Var(line)` inside `[ … ]` yields a node `try_lower_str_list_literal` then mis-materializes
-  to empty. (flow_rec inlines fine: its appended element is a CALL `string.slice(s,start,pos)`, not a
-  bare substituted var/literal.) FIX (next session): make `inline_mutual_tail_recursion` emit a
-  `let p = arg;` per param instead of `substitute_var_in_expr` (so elements stay LOCAL-var refs that
-  lower), OR make `try_lower_str_list_literal` classify by the LIST's element type, not the substituted
-  node's own. Then re-add the bare-call-arg lift → block_line lowers correctly, yaml 7→6. Do NOT re-add
-  the lift before this fix.
+  **⚠ CORRECTION (2026-06-20, the substitution hypothesis was TESTED and DISPROVEN).** Replacing
+  `inline_sibling_calls`'s `substitute_var_in_expr` with a `let fresh = arg;` + rename-param-to-`fresh`
+  inline (so list elements become LOCAL-var refs `[Var(fresh)]`) did NOT fix it — block_line still emitted
+  every element as "" (and flow_rec/chars stayed byte-correct, so the let-inline is regression-free but
+  not the cure). Reverted. Deeper bisection: with `acc + [string.drop(line, 0)]`, even the call-element
+  is "" — so it is NOT element materialization. The fresh `let line = list.get(lines, pos) ?? ""` itself
+  reads EMPTY *inside the TCO loop*: `list.get(lines, pos)` on the BORROWED LIST param `lines` returns
+  nothing. chars works because its loop reads a borrowed STRING param (`string.slice(s, …)`); a borrowed
+  LIST param read in a mutual-inline→TCO loop comes back empty — the param is dropped/zeroed before the
+  loop body reads it, or the loop fails to carry it. **THE REAL BLOCKER: borrowed-List-param read inside
+  the mutual-inline TCO loop body returns empty.** Needs the TCO loop to keep `lines` live for
+  `list.get`. Do NOT re-add the bare-call-arg lift before THIS (the element/substitution path is a
+  red herring).
 
   **🔧 CONCRETE RECIPE for the let-bind `!` (2026-06-20, the Result repr is now confirmed).** v1 MIR
   represents an effect-fn `Result[T,String]` as a DynListStr with a LEN-AS-TAG (see
