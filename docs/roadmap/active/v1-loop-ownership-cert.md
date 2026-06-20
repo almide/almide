@@ -215,6 +215,21 @@ append accumulators.
   collect_seq, map_entry, parse_lines, parse_nested, seq_item** — the 6 effect fns still need the
   effect-monad let-bind `!` (⛔ note above) + value.object.
 
+  **✅✅ block_line DONE (commit 5518fff3): yaml 7→6, byte-matches v0.** After SIX turns of ②-disciplined
+  bisection (the long note below — substitution / borrowed-param / fresh-let-inline / naive-id-reuse all
+  TESTED and DISPROVEN), the wat showed the else-arm's `string.drop(line, 0)` reading `$v19` (the THEN
+  arm's `__list_concat` result) instead of `line`. ROOT: `desugar_callarg_heap_if`'s bare-call-arg lift
+  sized its fresh `tmp` with `max_var_id(THIS arm)` — but the arm omits `line` (used only in the SIBLING
+  else arm), so `tmp` aliased `line` and the renderer's global VarId→local map collided them. FIX: thread
+  a FUNCTION-WIDE `next_var` counter through `desugar_heap_branches`/`desugar_callarg_heap_if`/
+  `desugar_nested_branch_arms` (a `desugar_heap_branches_inner(body, &mut u32)`; the public wrapper seeds
+  `max_var_id(whole_body)+1`). Verified: spec/wasm_cross/block_line_collect.almd byte-matches (`a||bb|c`),
+  corpus-wall in-profile 3733→3734 + ownership 14988 ACCEPT, cargo-test 466, output-parity no regression +
+  NEW match, full worktree scan = only the 3-4 PRE-EXISTING mismatches (string_ops/fan_map/nested_named/
+  list_string, all confirmed at HEAD~1). **The diagnosis discipline mattered: corpus-wall (ownership) AND
+  the wall-count BOTH accepted the buggy lower; only byte-match caught it — kept ② across 6 turns.**
+
+  **(historical diagnosis — kept for the method)**
   **⚠ block_line — a CAUGHT ②-trap (2026-06-20): metric-lowerable but RUNTIME-MISCOMPILES, kept WALLED.**
   block_line's body is `if is_blank then collect_block(.., if list.is_empty(acc) then acc else acc+[""])
   else block_nonblank(..)` — a heap-result `if` whose then-arm CALL carries a call-arg heap `if`. A
