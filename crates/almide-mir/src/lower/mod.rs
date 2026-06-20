@@ -205,6 +205,113 @@ pub fn lower_function_all_with_types(
     Ok(all)
 }
 
+/// PROGRAM-level pre-pass: inline a MUTUAL-recursive tail SIBLING so the caller becomes DIRECT
+/// self-recursive — exposing the parser loops (`flow_rec ⇄ flow_step`, `collect_seq ⇄ seq_item`, …)
+/// to the append-accumulator TCO, which only fires on a SELF-call.
+///
+/// For a function F that calls a sibling G where G calls F back (a mutual pair) and G is called by
+/// ONLY F (so dead after inlining), every `G(args)` in F is replaced by G's body with G's parameters
+/// substituted by the call's `args`, and G is dropped. Semantics-preserving (a plain inline).
+///
+/// TRY-LOWER GUARD (no regression by construction): the inline is applied ONLY when F currently WALLS
+/// *and* the inlined F then LOWERS — so a function that already lowers (e.g. `esc_rec`, `collect_block`)
+/// is NEVER touched (inlining could make it self-recursive and push it into a TCO path that walls). The
+/// guard lowers F and inlined-F with the program's `globals`/`record_layouts`, exactly as the real
+/// lowering will, so its verdict matches.
+pub fn inline_mutual_tail_recursion(
+    fns: &[IrFunction],
+    globals: &HashMap<VarId, Ty>,
+    record_layouts: &RecordLayouts,
+) -> Vec<IrFunction> {
+    use std::collections::{HashMap as Map, HashSet};
+    fn named_calls(body: &IrExpr) -> HashSet<String> {
+        use almide_ir::visit::{walk_expr, IrVisitor};
+        struct C {
+            names: HashSet<String>,
+        }
+        impl IrVisitor for C {
+            fn visit_expr(&mut self, e: &IrExpr) {
+                if let IrExprKind::Call { target: CallTarget::Named { name }, .. } = &e.kind {
+                    self.names.insert(name.as_str().to_string());
+                }
+                walk_expr(self, e);
+            }
+        }
+        let mut c = C { names: HashSet::new() };
+        c.visit_expr(body);
+        c.names
+    }
+    let lowers =
+        |f: &IrFunction| lower_function_all_with_types(f, globals, record_layouts).is_ok();
+    let calls: Map<String, HashSet<String>> =
+        fns.iter().map(|f| (f.name.as_str().to_string(), named_calls(&f.body))).collect();
+    let mut callers: Map<String, HashSet<String>> = Map::new();
+    for (f, cs) in &calls {
+        for c in cs {
+            callers.entry(c.clone()).or_default().insert(f.clone());
+        }
+    }
+    let by_name: Map<&str, &IrFunction> = fns.iter().map(|f| (f.name.as_str(), f)).collect();
+    let mut rewritten: Map<String, IrFunction> = Map::new();
+    let mut dropped: HashSet<String> = HashSet::new();
+    for f in fns {
+        let fname = f.name.as_str();
+        if dropped.contains(fname) {
+            continue;
+        }
+        // G: F calls G, G calls F back, G ≠ F, G local, ONLY F calls G (droppable).
+        let g = calls[fname].iter().find(|g| {
+            g.as_str() != fname
+                && !dropped.contains(g.as_str())
+                && by_name.contains_key(g.as_str())
+                && calls.get(*g).is_some_and(|gc| gc.contains(fname))
+                && callers.get(*g).is_some_and(|cs| cs.len() == 1 && cs.contains(fname))
+        });
+        if let Some(g) = g {
+            // Guard: only inline if F WALLS now and the inlined F LOWERS (else leave both untouched —
+            // no regression of an already-lowering function).
+            if !lowers(f) {
+                let mut nf = f.clone();
+                inline_sibling_calls(&mut nf.body, g, by_name[g.as_str()]);
+                if lowers(&nf) {
+                    rewritten.insert(fname.to_string(), nf);
+                    dropped.insert(g.clone());
+                }
+            }
+        }
+    }
+    fns.iter()
+        .filter(|f| !dropped.contains(f.name.as_str()))
+        .map(|f| rewritten.remove(f.name.as_str()).unwrap_or_else(|| f.clone()))
+        .collect()
+}
+
+/// Replace every `Call(callee_name, args)` in `body` with `callee`'s body, its parameters substituted
+/// by `args` (a single-level inline; the inlined body's calls — back to the OUTER fn — are left as-is,
+/// turning the caller into a direct self-recursion).
+fn inline_sibling_calls(body: &mut IrExpr, callee_name: &str, callee: &IrFunction) {
+    use almide_ir::{walk_expr_mut, IrMutVisitor};
+    struct V<'a> {
+        name: &'a str,
+        callee: &'a IrFunction,
+    }
+    impl IrMutVisitor for V<'_> {
+        fn visit_expr_mut(&mut self, expr: &mut IrExpr) {
+            walk_expr_mut(self, expr);
+            if let IrExprKind::Call { target: CallTarget::Named { name }, args, .. } = &expr.kind {
+                if name.as_str() == self.name && args.len() == self.callee.params.len() {
+                    let mut b = self.callee.body.clone();
+                    for (p, a) in self.callee.params.iter().zip(args.iter()) {
+                        b = almide_ir::substitute_var_in_expr(&b, p.var, a);
+                    }
+                    *expr = b;
+                }
+            }
+        }
+    }
+    V { name: callee_name, callee }.visit_expr_mut(body);
+}
+
 /// Lower a function body expression to MIR (the param-free testable core;
 /// `lower_function` is the wrapper that seeds parameters first).
 pub fn lower_body(body: &IrExpr, name: &str) -> Result<MirFunction, LowerError> {
@@ -2105,8 +2212,14 @@ fn tco_rewrite(
         IrExprKind::Call { target: CallTarget::Named { name }, args, .. }
             if name.as_str() == fn_name =>
         {
+            // Skip an IDENTITY self-call arg (`acc` passed unchanged in a pass-through branch of a
+            // multi-branch loop): the stable local already holds it, so `acc = acc` is a no-op — and for
+            // a HEAP slot it would otherwise hit the in-loop Assign as a non-ConcatList heap reassign and wall.
             let mut assigns: Vec<IrStmt> = (0..params.len())
-                .filter(|&i| carried[i])
+                .filter(|&i| {
+                    carried[i]
+                        && !matches!(&args[i].kind, IrExprKind::Var { id } if *id == params[i].var)
+                })
                 .map(|i| IrStmt {
                     kind: IrStmtKind::Assign { var: params[i].var, value: args[i].clone() },
                     span: None,
@@ -2212,10 +2325,19 @@ pub(crate) fn try_tco_rewrite(
         matches!(&e.kind, IrExprKind::BinOp { op: almide_ir::BinOp::ConcatList, left, .. }
             if matches!(&left.kind, IrExprKind::Var { id } if *id == acc))
     };
+    let is_identity = |e: &IrExpr, acc: VarId| -> bool {
+        matches!(&e.kind, IrExprKind::Var { id } if *id == acc)
+    };
     let mut append_accs: Vec<usize> = Vec::new();
     for i in 0..n {
         if carried0[i] && is_heap_ty(&params[i].ty) {
-            if calls0.iter().all(|c| is_self_append(&c[i], params[i].var)) {
+            // Each self-call passes the accumulator either UNCHANGED (`acc`, a pass-through branch — the
+            // multi-branch parser loops) or APPENDED (`acc + [x]`); at least one appends (else not
+            // carried). A heap carry that is neither needs a general back-edge merge — unsupported.
+            if calls0
+                .iter()
+                .all(|c| is_identity(&c[i], params[i].var) || is_self_append(&c[i], params[i].var))
+            {
                 append_accs.push(i);
             } else {
                 return None;

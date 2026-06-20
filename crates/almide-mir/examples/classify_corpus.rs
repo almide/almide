@@ -568,7 +568,11 @@ fn main() {
         for m in &ir.modules {
             record_layouts.extend(almide_mir::lower::build_record_layouts(&m.type_decls));
         }
-        for func in &ir.functions {
+        // PROGRAM pre-pass: inline mutual-recursive tail siblings → direct self-recursion (exposed to
+        // the append-accumulator TCO). Guarded: only where it makes a walled fn lower (no regression).
+        let inlined_fns =
+            almide_mir::lower::inline_mutual_tail_recursion(&ir.functions, &globals, &record_layouts);
+        for func in &inlined_fns {
             t.functions += 1;
             let lowered = catch_unwind(AssertUnwindSafe(|| {
                 almide_mir::lower::lower_function_all_with_types(func, &globals, &record_layouts)

@@ -76,9 +76,15 @@ fn main() {
         record_layouts.extend(almide_mir::lower::build_record_layouts(&m.type_decls));
     }
 
+    // PROGRAM pre-pass: inline mutual-recursive tail siblings so the parser loops become direct
+    // self-recursion (exposed to the append-accumulator TCO). Guarded: only where it makes a walled
+    // function lower (no regression). Semantics-preserving.
+    let inlined_fns =
+        almide_mir::lower::inline_mutual_tail_recursion(&ir.functions, &globals, &record_layouts);
+
     let mut functions = Vec::new();
     let mut walled = Vec::new();
-    for func in &ir.functions {
+    for func in &inlined_fns {
         // lower_function_all_with_types returns the main function plus any lambda-lifted
         // auxiliaries (index 0 is main); all go into the module so the function table
         // covers them. The record registry is threaded so `Ty::Named` records materialize.
