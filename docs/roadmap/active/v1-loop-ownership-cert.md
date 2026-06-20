@@ -290,6 +290,23 @@ append accumulators.
   and trace which Op sets the `string.drop` arg to v19 — the bug is in how the lift/desugar threads
   `value_of` for a call substituted into multiple positions. Needs a focused MIR-op-level session.
 
+  **⚠ BLANKET let-bind-`!` STRIP is UNSOUND — a CAUGHT ②-trap (2026-06-20).** Stripping `let (a,b)=f()!`
+  → `let (a,b)=f()` (the tail-`!` pass-through) in `lower_destructure`, plus seeing through `!` in
+  `tco_collect`/`tco_rewrite`, DID clear seq_item→collect_seq→collect_map (yaml 6→3) — BUT the full
+  v0/v1 spec scan caught it MISCOMPILING erroring fns: `safe_div_chain`, `grade_classify`, `sum_of_squares`,
+  `closure_env_churn`, `map_entry_churn` all byte-MISMATCH (the strip drops a real `err(…)` those fns
+  propagate). corpus-wall (ownership) PASSED — only byte-match caught it. REVERTED per ②.
+  KEY DISTINCTION that makes a SOUND version possible: the **yaml parser cluster never returns `err(…)`**
+  (grep-verified: its only `err("…")` are in the PURE int parsers `oct_rec`/`bin_rec`, handled by `match`,
+  not by the effect `!`). So a NEVER-ERRS-SCOPED strip — strip the let-bind `!` ONLY when the callee
+  provably never errs (a call-graph fixpoint: a fn can-err iff it has `err(…)` or `!`-calls a can-err fn;
+  the yaml cluster has none) — would be SOUND and reach yaml=0, while leaving `safe_div` & co. walled.
+  That per-callee analysis (threaded into the lowering) OR the full effect-monad (return-wrap) is the path;
+  the BLANKET strip is permanently OUT.
+  (Also this turn: commit 75c9100e had accidentally dropped the block_line fresh-VarId fix from mod.rs via
+  a stale working tree — recovered via `git checkout 5518fff3 -- mod.rs`, re-verified block_line byte-match;
+  yaml back to 6. corpus-wall green, in-profile 3741, ownership 15035 ACCEPT.)
+
   **🔧 CONCRETE RECIPE for the let-bind `!` (2026-06-20, the Result repr is now confirmed).** v1 MIR
   represents an effect-fn `Result[T,String]` as a DynListStr with a LEN-AS-TAG (see
   `materialize_result_ok`, control.rs:2030): `len @ handle+4` is `0` for Ok / `≠0` for Err; the Ok payload
