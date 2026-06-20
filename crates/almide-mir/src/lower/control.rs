@@ -116,6 +116,13 @@ impl LowerCtx {
                         }
                     }
                 }
+                // A CUSTOM variant (user ADT) statement match — tag@slot0 dispatch (ADT brick 3,
+                // unit sibling). A custom variant must NEVER reach the both-arms linearization
+                // (that runs EVERY arm's effects = a silent miscompile), so once the subject is a
+                // registered variant this either lowers or WALLs — it never falls through.
+                if self.custom_variant_type_name(&subject.ty).is_some() {
+                    return self.lower_custom_variant_unit_match(&subject.ty, subject_value, arms);
+                }
                 // A `match` over a MATERIALIZED Option (`Some(scalar)`/`None`) or Result
                 // (`Ok(scalar)`/`Err(string)`) EXECUTES — only the taken arm runs — when the
                 // subject is tracked; otherwise it LINEARIZES below (the sound both-arms fallback).
@@ -1214,35 +1221,7 @@ impl LowerCtx {
         // The subject must be a registered custom variant; clone its layout out of the borrow.
         let type_name = self.custom_variant_type_name(&subject.ty)?;
         let layout = self.variant_layouts.by_type.get(&type_name)?.clone();
-        // Parse each arm into a plan over OWNED data (so `self` is free to mutate below). The
-        // arm bodies stay borrowed from `arms` (a param, not `self`) — no borrow conflict.
-        let mut plans: Vec<(VariantArmKind, &IrExpr)> = Vec::with_capacity(arms.len());
-        for arm in arms {
-            let kind = match &arm.pattern {
-                IrPattern::Constructor { name, args } => {
-                    let case = layout.case_by_ctor(name)?;
-                    if args.len() != case.fields.len() {
-                        return None;
-                    }
-                    let mut binds = Vec::new();
-                    for (i, fp) in args.iter().enumerate() {
-                        match fp {
-                            IrPattern::Wildcard => {}
-                            IrPattern::Bind { var, ty } if !is_heap_ty(ty) => {
-                                binds.push((1 + i, *var)) // slot 1+i (slot 0 is the tag)
-                            }
-                            // a heap-field bind / nested ctor pattern — ADT brick 5
-                            _ => return None,
-                        }
-                    }
-                    VariantArmKind::Ctor { tag: case.tag as i64, binds }
-                }
-                IrPattern::Wildcard => VariantArmKind::Wildcard,
-                // a binder catch-all `x => …` over a variant — walled for now (later brick)
-                _ => return None,
-            };
-            plans.push((kind, &arm.body));
-        }
+        let plans = self.parse_variant_arms(&layout, arms)?;
         let ops_mark = self.ops.len();
         let lhh_mark = self.live_heap_handles.len();
         // Materialize/borrow the subject → a Handle (the variant block pointer).
@@ -1272,6 +1251,50 @@ impl LowerCtx {
         }
     }
 
+    /// Parse a custom-variant `match`'s arms into per-arm plans — shared by the value-result
+    /// ([`Self::try_lower_custom_variant_match`]) and Unit-statement
+    /// ([`Self::lower_custom_variant_unit_match`]) paths. `None` (the caller walls / declines)
+    /// if any arm is outside the scalar-field subset: a guard, a heap-field bind, a nested ctor
+    /// pattern, or a binder catch-all `x => …` (all later bricks). The bodies stay borrowed
+    /// from `arms` (a param, not `self`) — no borrow conflict with the lowering that follows.
+    fn parse_variant_arms<'a>(
+        &self,
+        layout: &VariantLayout,
+        arms: &'a [IrMatchArm],
+    ) -> Option<Vec<(VariantArmKind, &'a IrExpr)>> {
+        let mut plans: Vec<(VariantArmKind, &IrExpr)> = Vec::with_capacity(arms.len());
+        for arm in arms {
+            if arm.guard.is_some() {
+                return None;
+            }
+            let kind = match &arm.pattern {
+                IrPattern::Constructor { name, args } => {
+                    let case = layout.case_by_ctor(name)?;
+                    if args.len() != case.fields.len() {
+                        return None;
+                    }
+                    let mut binds = Vec::new();
+                    for (i, fp) in args.iter().enumerate() {
+                        match fp {
+                            IrPattern::Wildcard => {}
+                            IrPattern::Bind { var, ty } if !is_heap_ty(ty) => {
+                                binds.push((1 + i, *var)) // slot 1+i (slot 0 is the tag)
+                            }
+                            // a heap-field bind / nested ctor pattern — ADT brick 5
+                            _ => return None,
+                        }
+                    }
+                    VariantArmKind::Ctor { tag: case.tag as i64, binds }
+                }
+                IrPattern::Wildcard => VariantArmKind::Wildcard,
+                // a binder catch-all `x => …` over a variant — walled for now (later brick)
+                _ => return None,
+            };
+            plans.push((kind, &arm.body));
+        }
+        Some(plans)
+    }
+
     /// Bind a custom-variant arm's scalar ctor fields from the block's slots (a `Wildcard`
     /// arm binds nothing). Each field is an i64 value COPY loaded from `h + slot_offset(1+i)`.
     fn bind_variant_arm(&mut self, kind: &VariantArmKind, h: ValueId) {
@@ -1285,6 +1308,85 @@ impl LowerCtx {
                 self.value_of.insert(*var, payload);
             }
         }
+    }
+
+    /// Lower a UNIT-result custom-variant `match` in STATEMENT position (ADT brick 3, the unit
+    /// sibling of [`Self::try_lower_custom_variant_match`]) — read the tag@slot0 and run only the
+    /// taken arm's EFFECTS. The subject is ALREADY materialized/borrowed by the caller (the
+    /// statement-`Match` entry), passed as `subject_value`.
+    ///
+    /// A custom variant must NEVER fall to the both-arms LINEARIZATION (that runs every arm's
+    /// effects = a silent miscompile — e.g. all three `println`s instead of one), so this returns
+    /// `Err` (WALL) on an out-of-subset arm rather than declining to the linearizer. Each arm
+    /// runs in a per-arm frame (`lower_branch_arm`), wrapped in `IfThen`/`Else`/`EndIf` markers
+    /// (no-ops in `verify_ownership`); the last arm / any wildcard is the unconditional else.
+    pub(crate) fn lower_custom_variant_unit_match(
+        &mut self,
+        subject_ty: &Ty,
+        subject_value: Option<ValueId>,
+        arms: &[IrMatchArm],
+    ) -> Result<(), LowerError> {
+        use crate::PrimKind;
+        let wall = |what: &str| {
+            Err(LowerError::Unsupported(format!(
+                "custom-variant statement match {what} cannot be faithfully lowered (a both-arms \
+                 linearization would run every arm's effects) not in this brick"
+            )))
+        };
+        let Some(subj) = subject_value else {
+            return wall("over a non-materialized subject");
+        };
+        let type_name = match self.custom_variant_type_name(subject_ty) {
+            Some(n) => n,
+            None => return wall("over an unresolved variant type"),
+        };
+        let layout = match self.variant_layouts.by_type.get(&type_name) {
+            Some(l) => l.clone(),
+            None => return wall("over an unregistered variant"),
+        };
+        let plans = match self.parse_variant_arms(&layout, arms) {
+            Some(p) if !p.is_empty() => p,
+            _ => return wall("with an arm outside the scalar-field subset"),
+        };
+        let h = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![subj] });
+        let tag = self.load_at_offset(h, layout::slot_offset(0) as i64, PrimKind::Load { width: 8 });
+        self.emit_variant_unit_chain(h, tag, &plans)
+    }
+
+    /// Emit the right-nested `if tag == t0 { arm0 } else if … else { last }` chain for a
+    /// UNIT-result custom-variant statement match. Each arm is a per-arm effect frame
+    /// (`lower_branch_arm` with no result), the markers carry `val: None`. The last plan / any
+    /// wildcard is the unconditional else. `Err` (the whole match walls) if an arm body is out
+    /// of subset — the unit sibling of [`Self::emit_variant_arm_chain`].
+    fn emit_variant_unit_chain(
+        &mut self,
+        h: ValueId,
+        tag: ValueId,
+        plans: &[(VariantArmKind, &IrExpr)],
+    ) -> Result<(), LowerError> {
+        let Some(((kind, body), rest)) = plans.split_first() else {
+            return Ok(());
+        };
+        if rest.is_empty() || matches!(kind, VariantArmKind::Wildcard) {
+            self.bind_variant_arm(kind, h);
+            return self.lower_branch_arm(None, body);
+        }
+        let arm_tag = match kind {
+            VariantArmKind::Ctor { tag, .. } => *tag,
+            VariantArmKind::Wildcard => unreachable!("handled above"),
+        };
+        let tc = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: tc, value: arm_tag });
+        let cond = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst: cond, op: IntOp::Eq, a: tag, b: tc });
+        self.ops.push(Op::IfThen { cond, dst: None });
+        self.bind_variant_arm(kind, h);
+        self.lower_branch_arm(None, body)?;
+        self.ops.push(Op::Else { val: None });
+        self.emit_variant_unit_chain(h, tag, rest)?;
+        self.ops.push(Op::EndIf { val: None });
+        Ok(())
     }
 
     /// Emit the right-nested `if tag == t0 { arm0 } else if … else { last }` chain for a

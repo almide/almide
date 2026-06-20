@@ -605,6 +605,24 @@
     }
 
     #[test]
+    fn custom_variant_unit_statement_match_runs_one_arm() {
+        // A UNIT-result custom-variant `match` in STATEMENT position (ADT brick 3, unit path):
+        // only the TAKEN arm's effect runs — the regression guard for the both-arms
+        // linearization that ran EVERY arm (`num sym eof` per call = a silent miscompile). v0 =
+        // one line per call.
+        let src = "type Tok = Num(Int) | Sym(Int) | Eof\n\
+            fn show(t: Tok) -> Unit = match t {\n  \
+              Num(n) => println(int.to_string(n * 2)),\n  \
+              Sym(s) => println(int.to_string(s)),\n  \
+              Eof    => println(\"end\"),\n}\n\
+            fn main() -> Unit = { show(Num(5)); show(Sym(3)); show(Eof) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("custom_variant_unit", &render_wasm_program(&prog)) {
+            assert_eq!(out, "10\n3\nend");
+        }
+    }
+
+    #[test]
     fn freelist_reuses_a_freed_block() {
         // A1.2-render: alloc p1, free p1 (-> the free-list), then alloc p2 of the
         // SAME size. p2 must REUSE p1's freed block (FreeList.alloc reusing a

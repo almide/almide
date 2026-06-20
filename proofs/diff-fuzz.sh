@@ -145,12 +145,20 @@ fn val(t: Tok) -> Int = match t {
   Num(n)     => n,
   Eof        => -1,
 }
+fn show(t: Tok) -> Unit = match t {
+  Num(n)     => println(int.to_string(n)),
+  Pair(x, y) => println(int.to_string(x + y)),
+  Eof        => println("eof"),
+}
 fn main() -> Unit = {
   let mid = Num($c)
   println(int.to_string(val(Num($a))))
   println(int.to_string(val(Pair($a, $b))))
   println(int.to_string(val(Eof)))
   println(int.to_string(val(mid)))
+  show(Num($b))
+  show(Pair($a, $c))
+  show(Eof)
 }
 EOF
        ;;
