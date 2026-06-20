@@ -342,6 +342,29 @@ append accumulators.
   extend `heap_or_scalar_bind` to admit a heap TUPLE payload over an Option subject. Then yaml 3→1; map_entry's
   tuple-element append → 1→0.
 
+  **✅ Option-tuple-match DONE (commit a89bda41): yaml 3→1** — parse_lines/parse_nested cleared via the
+  variant-match tuple-payload bind + drop-after (corpus-wall ACCEPT, full-scan no new mismatch).
+
+  **🎯 LAST WALL = map_entry (yaml 1), fully diagnosed (up to commit 55343d53).** Three nested blockers,
+  found by bisecting a synthetic down to map_entry's exact shape (`match find_colon(t) { none =>
+  (value.object(pairs), pos), some(cp) => { … cmap(…, pairs + [(key,val)]) } }`):
+  1. ✅ **user-fn-Option subject** (`find_colon` is a `Named` fn, not self-host) — was untracked so the
+     variant-match never fired. FIXED: track a `Named` call returning Option/Result as a materialized
+     subject (same DynListStr len-as-tag repr). Verified by `ufo.almd` byte-match.
+  2. ✅ **borrowed `pairs` used in BOTH arms** (`value.object(pairs)` in none, `pairs + [(k,v)]` in some) —
+     the THEN arm's consume leaked into the ELSE arm's lowering view → ELSE walled. FIXED: snapshot/restore
+     param_values+live+materialized_aggregates between the alternate arms (branch ownership isolation).
+  3. ⛔ **REMAINING: `pairs + [(key,val)]` (List[(String,Value)] tuple-element append) in a CALL-ARG
+     position.** `try_lower_concat_list` (calls.rs:534) admits only String/Value elements (line 548-552); a
+     **heap-FIELD aggregate element (tuple/record with inner heap) DEFERS** — the call-arg path then WALLS
+     (calls.rs:887, correct ②; the let-bind path silently defers it to an Opaque EMPTY list = a latent
+     miscompile, NOT a real lowering — so this is genuinely unsolved, not a gating quirk). THE fix = the
+     true "Camp-4 frontier": a **tuple-aware recursive list drop** (a `DropList` of `(String,Value)` tuples
+     — iterate, masked-drop each tuple, freeing its inner String+Value), so `__list_concat_rc` can rc-own a
+     tuple element and the result reclaims correctly. A NEW runtime drop (List[tuple]), distinct from
+     DropListStr/DropListValue. With it, map_entry lowers → yaml=0. (Isolated repro: `/tmp/eff2.almd`,
+     `/tmp/eff5.almd`; the let-bind defer is `/tmp/sv.almd`.)
+
   **⚠ CORRECTION (the destructure-desugar route is BLOCKED — tested):** `let (idx, line) = pair` over a tuple
   VAR/param byte-WALLS on its own (`/tmp/td.almd`: v0 `7:hi`, v1 WALLS) — `lower_destructure`'s shapes are a
   tuple LITERAL value or a tracked container, neither covers a plain tuple var → scalar+heap split. (cs's
