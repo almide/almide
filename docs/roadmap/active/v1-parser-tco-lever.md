@@ -52,6 +52,30 @@ EACH step gated on corpus-wall ACCEPT (TCO is correctness/leak-prone — the loo
 is the gate) AND the csv v0==v1 byte-match. The lever clears the same class across toml/svg/aes/
 base64 (all parser-shaped).
 
+## PROGRESS (commit 63a7a1a6) — step 1 DONE + a pre-existing miscompile fixed
+
+While wiring the ConcatStr accumulator the byte-match surfaced a PRE-EXISTING silent miscompile (the
+② cardinal violation): a TCO loop body is `{ if base then … else step }`, so the base-check arrives
+as a BLOCK-TAIL `if`, and that tail fell STRAIGHT to `lower_branch` (run BOTH arms with the cond
+record-elided) — turning `if done then {rk:=k} else {step}` into an UNCONDITIONAL `rk:=k`, so the
+loop ran exactly ONCE. ANY recursive parser with a heap `let c = peek(...)` in its body hit it (v0
+`hello`, v1 `h`). **Fix**: route the block-tail if/match through `try_lower_unit_if` FIRST (a real
+branch); fall to `lower_branch` only when it cannot execute. This both kills the miscompile AND makes
+the scalar-index append-accumulator parser loops EXECUTE.
+
+DONE in this commit:
+- ✅ block-tail base-check now branches (the run-once miscompile fixed — list AND string).
+- ✅ ConcatStr (String) accumulator + tuple-result base `(String, Int)` — `is_self_append` matches
+  ConcatStr, the upfront slot-copy is String-aware (`acc + ""`). Leak-loop verified (2000×).
+- ✅ corpus-wall ACCEPT (ownership 16303), diff-fuzz green, the 4 `*_loop_reclaims` tests still pass,
+  a new wasmtime cargo test (`string_accumulator_parser_tco_executes_on_wasmtime`).
+
+STILL WALLS (csv not yet byte-matched — remaining levers, all SOUND walls now):
+- `parse_rows_rec`/`parse_after_field`: MULTI-accumulator (two `List` carries) + a tuple-destructure
+  self-call (`let (field, np) = parse_quoted_field(...)` then `parse_rows_rec(…, rows, current_row +
+  [field])`) — needs the simultaneous-update staging to handle a heap destructure result.
+- `parse`/`parse_records`: the `ok(value.array(...))` ResultOk wrapper + a `list.map` closure.
+
 ## SEPARATE blocker: toml's v0 oracle is BROKEN
 
 toml was the first proposed target but `almide run` (native v0) emits INVALID Rust for it
