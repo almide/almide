@@ -902,6 +902,13 @@ fn render_op(
         Op::DropResultListValue { v } => {
             format!("    (call $__drop_result_lv (local.get {}))\n", local(*v))
         }
+        // RECURSIVE drop of a `Result[Value, String]` (the `ok(value.array(...))` shape) — the
+        // self-hosted `$__drop_result_value` (value_core.almd) tag-dispatches at the last ref: Ok
+        // frees the Value @12 via `$__drop_value` (recursive), Err frees the String @12, then the
+        // block. value_core is always linked here (the program built the Value via a `value.*` ctor).
+        Op::DropResultValue { v } => {
+            format!("    (call $__drop_result_value (local.get {}))\n", local(*v))
+        }
         // RECURSIVE drop of a CUSTOM variant (ADT brick 5b) — the GENERATED per-type
         // `$__drop_<ty>` (the `$__drop_value` shape, auto-linked from generated Almide): at the
         // last ref it reads the tag, recursively frees each variant ctor field + rc_dec's each

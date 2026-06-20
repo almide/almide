@@ -162,7 +162,7 @@ fn render_op(op: &Op) -> Option<String> {
         Op::Dup { dst, src } => {
             Some(format!("let mut {}: Vec<i64> = {}.clone();", var(*dst), var(*src)))
         }
-        Op::Drop { .. } | Op::DropListStr { .. } | Op::DropValue { .. } | Op::DropListValue { .. } | Op::DropListStrValue { .. } | Op::DropResultListValue { .. } | Op::DropListListStr { .. } | Op::DropVariant { .. } => None, // Rust drops at scope end (wasm-only)
+        Op::Drop { .. } | Op::DropListStr { .. } | Op::DropValue { .. } | Op::DropListValue { .. } | Op::DropListStrValue { .. } | Op::DropResultListValue { .. } | Op::DropResultValue { .. } | Op::DropListListStr { .. } | Op::DropVariant { .. } => None, // Rust drops at scope end (wasm-only)
         Op::Consume { .. } => None, // a move
         Op::Borrow { v } => Some(format!("let _ = &{};", var(*v))),
         // MakeUnique is a no-op in idiomatic Rust: the Dup clone already gave

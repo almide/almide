@@ -270,3 +270,19 @@ fn __drop_result_lv(r: Result[List[Value], String]) -> Unit = {
   } else ()
   prim.rc_dec(h)
 }
+
+// The RECURSIVE free of a `Result[Value, String]` (the render of `Op::DropResultValue` calls this) —
+// the `ok(value.array(...))` shape. The cap-as-tag 1-slot block [rc@0][len@4=1][cap@8][@12 payload]
+// [@16 tag]: at the last ref (rc==1), Ok (tag 0) frees the Value @12 RECURSIVELY via `__drop_value`
+// (a nested Array/Str payload frees too — a flat per-slot `rc_dec` would leak it), Err (tag 1) frees
+// the String @12; THEN the block. The Value-payload counterpart of `__drop_result_lv`.
+fn __drop_result_value(r: Result[Value, String]) -> Unit = {
+  let h = prim.handle(r)
+  if prim.load32(h + 0) == 1 then {
+    if prim.load32(h + 16) == 0 then {
+      let v: Value = prim.load_handle(h + 12)
+      __drop_value(v)
+    } else prim.rc_dec(prim.load64(h + 12))
+  } else ()
+  prim.rc_dec(h)
+}

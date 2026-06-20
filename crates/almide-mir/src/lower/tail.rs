@@ -361,6 +361,12 @@ impl LowerCtx {
                             return Ok(Some(dst));
                         }
                     }
+                    // `ok(value.array(...))` / `err(msg)` RETURNED for a `Result[Value, String]` (csv
+                    // `parse`): materialize the Value-Ok / String-Err Result block, MOVED OUT as the
+                    // return (the recursive `Op::DropResultValue` frees it at the caller's scope end).
+                    if let Some(dst) = self.try_lower_result_value_ctor(tail, &tail.ty) {
+                        return Ok(Some(dst));
+                    }
                     let repr = repr_of(&tail.ty)?;
                     let init = alloc_init(tail);
                     // `alloc_init` faithfully materializes a string literal and a scalar-

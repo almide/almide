@@ -2289,6 +2289,20 @@ impl LowerCtx {
             // message String (DropListStr frees it — exactly `Some(string)`). So BOTH arms reuse the
             // proven Option[String] cert (Alloc `i` + the per-arm `Consume` `m`; the Err's String is
             // moved in `m` and freed by the scope-end DropListStr `d`) — NO new Init, NO checker change.
+            // `Result[Value, String]` (the `ok(value.array(...))` shape — csv `parse`): the Ok payload
+            // is a dynamic Value (materialized via `lower_owned_heap_field`, which handles the
+            // `value.*` ctor + the nested `list.map`), the Err a String. Same len-1 + tag@16 block, but
+            // marked `value_result_results` so the drop is the RECURSIVE `Op::DropResultValue` (Ok →
+            // `$__drop_value`). Checked BEFORE the String-Ok arm (Value is also a heap-ok result).
+            IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. }
+                if crate::lower::is_value_result_ty(result_ty) =>
+            {
+                let arm_mark = self.live_heap_handles.len();
+                let obj = self.try_lower_result_value_ctor(arm, result_ty)?;
+                self.ops.push(Op::Consume { v: obj });
+                self.drop_arm_locals(arm_mark);
+                Some(obj)
+            }
             // HEAP-Ok `Result[String, String]`: BOTH `Ok(string)` and `Err(string)` own a String, so
             // len-as-tag can't distinguish — materialize a len-1 DynListStr + the Ok/Err tag in cap@8.
             IrExprKind::ResultOk { expr }
@@ -2296,7 +2310,7 @@ impl LowerCtx {
             {
                 let repr = repr_of(result_ty).ok()?;
                 let piece = self.lower_result_str_piece(expr)?;
-                let obj = self.materialize_result_str(piece, repr, false);
+                let obj = self.materialize_result_str(piece, repr, false, false);
                 self.ops.push(Op::Consume { v: obj });
                 Some(obj)
             }
@@ -2305,7 +2319,7 @@ impl LowerCtx {
             {
                 let repr = repr_of(result_ty).ok()?;
                 let piece = self.lower_result_str_piece(expr)?;
-                let obj = self.materialize_result_str(piece, repr, true);
+                let obj = self.materialize_result_str(piece, repr, true, false);
                 self.ops.push(Op::Consume { v: obj });
                 Some(obj)
             }
@@ -2469,6 +2483,7 @@ impl LowerCtx {
         piece: ValueId,
         repr: crate::Repr,
         is_err: bool,
+        value_ok: bool,
     ) -> ValueId {
         use crate::PrimKind;
         // A 1-SLOT DynListStr (cap 1, len 1 — IDENTICAL block size to every other String/Value block,
@@ -2495,9 +2510,43 @@ impl LowerCtx {
         let tag = self.fresh_value();
         self.ops.push(Op::ConstInt { dst: tag, value: if is_err { 1 } else { 0 } });
         self.ops.push(Op::Prim { kind: PrimKind::Store { width: 4 }, dst: None, args: vec![off16, tag] });
-        self.heap_elem_lists.insert(obj);
+        // A Value-Ok Result (`Result[Value, String]`) drops via the recursive `Op::DropResultValue`
+        // (Ok → `$__drop_value`); a String-Ok Result via the flat `DropListStr` (rc_dec the String).
+        if value_ok {
+            self.value_result_results.insert(obj);
+        } else {
+            self.heap_elem_lists.insert(obj);
+        }
         self.materialized_results_str.insert(obj);
         obj
+    }
+
+    /// Construct a `Result[Value, String]` `ok(<Value>)` / `err(<String>)` (the `ok(value.array(...))`
+    /// shape) — the len-1 + tag@16 block, Ok payload a Value (materialized via `lower_owned_heap_field`,
+    /// which handles the `value.*` ctor + nested `list.map`), Err a String. Marked
+    /// `value_result_results` so the drop is the recursive `Op::DropResultValue`. Returns the block
+    /// (NOT yet Consumed — the caller moves it out as a tail return or an arm `Consume`). `None` for a
+    /// non-`Result[Value, String]` type or a payload outside the materializable subset.
+    pub(crate) fn try_lower_result_value_ctor(
+        &mut self,
+        expr: &IrExpr,
+        result_ty: &Ty,
+    ) -> Option<ValueId> {
+        if !crate::lower::is_value_result_ty(result_ty) {
+            return None;
+        }
+        let repr = repr_of(result_ty).ok()?;
+        match &expr.kind {
+            IrExprKind::ResultOk { expr: inner } => {
+                let piece = self.lower_owned_heap_field(inner)?;
+                Some(self.materialize_result_str(piece, repr, false, true))
+            }
+            IrExprKind::ResultErr { expr: inner } => {
+                let piece = self.lower_result_str_piece(inner)?;
+                Some(self.materialize_result_str(piece, repr, true, true))
+            }
+            _ => None,
+        }
     }
 
     /// `handle + k` as a fresh i64 address value (ConstInt + IntBinOp::Add).

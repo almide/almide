@@ -687,6 +687,25 @@
     }
 
     #[test]
+    fn result_value_ok_wrapper_executes_on_wasmtime() {
+        // The csv `parse` shape: a `Result[Value, String]` constructed by `ok(<Value>)` / `err(msg)`.
+        // The Ok payload is a dynamic Value (materialized via lower_owned_heap_field), stored in the
+        // len-1 + tag@16 block; marked `value_result_results` so the scope-end drop is the recursive
+        // `Op::DropResultValue` ($__drop_value the Ok Value, rc_dec the Err String) — a flat
+        // DropListStr would leak the Ok Value's nested payload. Round-trips: construct (ok/err),
+        // match-read (ok(v)/err(e)), and the recursive drop at scope end.
+        let src = "import json\n\
+            effect fn wrap(n: Int) -> Result[Value, String] = if n < 0 then err(\"neg\") else ok(value.int(n))\n\
+            effect fn main() -> Unit = {\n  \
+              match wrap(42) { ok(v) => println(int.to_string(value.as_int(v) ?? 0)), err(e) => println(\"E:\" + e) }\n  \
+              match wrap(0 - 1) { ok(v) => println(int.to_string(value.as_int(v) ?? 0)), err(e) => println(\"E:\" + e) } }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("result_value_ok", &render_wasm_program(&prog)) {
+            assert_eq!(out, "42\nE:neg");
+        }
+    }
+
+    #[test]
     fn empty_list_heap_result_if_arm_executes_on_wasmtime() {
         // A heap-result `if` with an EMPTY-list `[]` arm (`if cond then [] else <list>` — the parser
         // entry's empty-or-recurse split: `parse_rows = if is_empty(t) then [] else parse_rows_rec(...)`).

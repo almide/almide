@@ -230,6 +230,14 @@ pub enum Op {
     /// A flat `DropListStr` would only rc_dec @12 (the list block), LEAKING its element Values. Same
     /// cert event as [`Op::Drop`] (one `−1`/`d` on the Result object — its payload was `m`/consumed).
     DropResultListValue { v: ValueId },
+    /// `drop_result_value v` — release a `Result[Value, String]` (the `ok(value.array(...))` shape),
+    /// the cap-as-tag 1-slot block `[rc][len@4=1][cap@8][@12 payload][@16 tag]`. IFF the last ref
+    /// (rc==1) the RENDER tag-dispatches on @16 (via self-hosted `$__drop_result_value`): Ok (0)
+    /// frees the Value @12 RECURSIVELY (`$__drop_value` — a nested Array/Str payload frees too), Err
+    /// (1) frees the String @12 (`rc_dec`); THEN the block. A flat `DropListStr` would only rc_dec
+    /// @12, LEAKING the Ok Value's nested payload. Same single cert `d`; the Value-payload counterpart
+    /// of `DropResultListValue`.
+    DropResultValue { v: ValueId },
     /// `drop_list_list_str v` — release a `List[List[String]]` whose element slots hold owned
     /// `List[String]` blocks (the csv `rows` shape: a list of rows, each a list of cells). The render
     /// emits a NESTED loop: at the outer list's last ref (rc==1), for each element it frees the inner
@@ -705,6 +713,7 @@ pub fn verify_ownership(func: &MirFunction) -> Result<(), Vec<Violation>> {
             | Op::DropListValue { v }
             | Op::DropListStrValue { v }
             | Op::DropResultListValue { v }
+            | Op::DropResultValue { v }
             | Op::DropListListStr { v }
             | Op::DropVariant { v, .. } => {
                 match release(&object_of, &mut rc, &mut dead, &borrowed, *v) {

@@ -1986,7 +1986,7 @@ impl LowerCtx {
                     }
                     _ => return None,
                 };
-                Some(self.materialize_result_str(piece, repr, false))
+                Some(self.materialize_result_str(piece, repr, false, false))
             }
             IrExprKind::ResultOk { expr } if !is_heap_ty(&expr.ty) => {
                 let payload = self.lower_scalar_value(expr)?;
@@ -2033,7 +2033,7 @@ impl LowerCtx {
                     }
                     _ => return None,
                 };
-                Some(self.materialize_result_str(piece, repr, true))
+                Some(self.materialize_result_str(piece, repr, true, false))
             }
             IrExprKind::ResultErr { expr } if is_heap_ty(&expr.ty) => {
                 let repr = repr_of(ty).ok()?;

@@ -755,6 +755,10 @@ pub(crate) struct LowerCtx {
     /// `DropListStr` would only `rc_dec` each inner-list handle, LEAKING the cells. Populated by the
     /// list-of-lists concat (`rows + [cur]`).
     list_list_str_lists: HashSet<ValueId>,
+    /// MIR values that are a `Result[Value, String]` (the `ok(value.array(...))` shape). A scope-end
+    /// drop emits [`Op::DropResultValue`] (tag-dispatch: Ok → `$__drop_value`, Err → `rc_dec`) — a
+    /// flat `DropListStr` would leak the Ok Value's nested payload.
+    value_result_results: HashSet<ValueId>,
     /// MIR values KNOWN to be a REAL, POPULATED list block (a list LITERAL, a heap-list PARAM —
     /// the v1 convention passes a genuine block —, or a self-host list-returning CALL whose closure
     /// args ALL lifted, so the callee actually fills it). A direct `xs[i]` (`lower_scalar_index_access`)
@@ -991,6 +995,16 @@ pub(crate) fn is_list_list_str_ty(ty: &Ty) -> bool {
     matches!(ty,
         Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && matches!(&a[0],
             Ty::Applied(TypeConstructorId::List, b) if b.len() == 1 && matches!(b[0], Ty::String)))
+}
+
+/// A `Result[Value, String]` — the `ok(value.array(...))` shape. Its Ok payload is a dynamic Value
+/// (freed RECURSIVELY via `$__drop_value`), its Err a String. Its scope-end drop must be
+/// [`Op::DropResultValue`] (the tag-dispatched recursive free); a flat `DropListStr` would leak the
+/// Ok Value's nested payload.
+pub(crate) fn is_value_result_ty(ty: &Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    matches!(ty, Ty::Applied(TypeConstructorId::Result, a)
+        if a.len() == 2 && is_value_ty(&a[0]) && matches!(a[1], Ty::String))
 }
 
 pub(crate) fn is_heap_elem_list_ty(ty: &Ty) -> bool {
@@ -1554,6 +1568,8 @@ impl LowerCtx {
             Op::DropVariant { v, ty: ty.clone() }
         } else if self.value_result_lists.contains(&v) {
             Op::DropResultListValue { v }
+        } else if self.value_result_results.contains(&v) {
+            Op::DropResultValue { v }
         } else if self.value_elem_lists.contains(&v) {
             Op::DropListValue { v }
         } else if self.str_value_elem_lists.contains(&v) {
