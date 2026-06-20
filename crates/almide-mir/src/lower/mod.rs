@@ -1373,8 +1373,30 @@ impl LowerCtx {
                             IrExprKind::Call { .. } if matches!(t.ty, Ty::Unit) => {
                                 self.lower_effect_call(t)?
                             }
-                            IrExprKind::If { .. } | IrExprKind::Match { .. } => {
-                                self.lower_branch(t)?
+                            // A Block-TAIL `if` (the TCO loop body is `{ if … }`, so the base-check
+                            // arrives HERE, not via the bare-If statement arm): EXECUTE it via
+                            // try_lower_unit_if (real branch — only the taken arm runs) so a loop
+                            // base-check actually conditionally sets `rk`. Only if that declines do
+                            // we consider linearization — and inside a scalar loop linearizing both
+                            // arms runs the loop ONCE (the heap-`let`-in-body silent miscompile), so
+                            // wall it there. Outside a loop, linearize as before.
+                            IrExprKind::If { cond, then, else_ } => {
+                                if !self.try_lower_unit_if(cond, then, else_) {
+                                    self.lower_branch(t)?;
+                                }
+                            }
+                            IrExprKind::Match { subject, arms } => {
+                                let mut done = false;
+                                if let Some(if_expr) =
+                                    self.desugar_match_to_if(subject, arms, &Ty::Unit)
+                                {
+                                    if let IrExprKind::If { cond, then, else_ } = &if_expr.kind {
+                                        done = self.try_lower_unit_if(cond, then, else_);
+                                    }
+                                }
+                                if !done {
+                                    self.lower_branch(t)?;
+                                }
                             }
                             _ => self.record_elided_calls(t),
                         }
@@ -2784,8 +2806,12 @@ pub(crate) fn try_tco_rewrite(
     // Call heap-result, so `of[slot]=slot` and cert `i`), substituted for `acc` throughout, then
     // drop-old/alloc-new per iteration (cert `i(id)m`, accepted by the proven `check_cert_lc`). A heap
     // carried param that is NOT a self-append needs a general heap back-edge merge — still unsupported.
+    // A self-call value that GROWS the accumulator from itself: `acc + [x]` (`ConcatList`) OR
+    // `acc + s` (`ConcatStr`, the STRING accumulator — `parse_unquoted_field(text, pos+1, acc + c)`).
+    // Both allocate a FRESH owned heap value; the TCO makes the accumulator an owned loop-carried
+    // slot (drop-old/alloc-new per iter, cert `i(id)m`).
     let is_self_append = |e: &IrExpr, acc: VarId| -> bool {
-        matches!(&e.kind, IrExprKind::BinOp { op: almide_ir::BinOp::ConcatList, left, .. }
+        matches!(&e.kind, IrExprKind::BinOp { op: almide_ir::BinOp::ConcatList | almide_ir::BinOp::ConcatStr, left, .. }
             if matches!(&left.kind, IrExprKind::Var { id } if *id == acc))
     };
     let is_identity = |e: &IrExpr, acc: VarId| -> bool {
@@ -2823,11 +2849,17 @@ pub(crate) fn try_tco_rewrite(
             slot_next += 1;
             let acc_var = params[ai].var;
             let list_ty = params[ai].ty.clone();
-            // upfront: `let slot = acc + []` — a fresh OWNED copy of the borrowed accumulator param.
-            let empty = tco_ir(IrExprKind::List { elements: vec![] }, list_ty.clone());
+            // upfront: `let slot = acc + <empty>` — a fresh OWNED copy of the borrowed accumulator
+            // param (the concat always allocates, so the slot never aliases it). A String
+            // accumulator copies via `acc + ""` (`ConcatStr`); a list via `acc + []` (`ConcatList`).
+            let (empty, concat_op) = if matches!(list_ty, Ty::String) {
+                (tco_ir(IrExprKind::LitStr { value: String::new() }, Ty::String), almide_ir::BinOp::ConcatStr)
+            } else {
+                (tco_ir(IrExprKind::List { elements: vec![] }, list_ty.clone()), almide_ir::BinOp::ConcatList)
+            };
             let copy = tco_ir(
                 IrExprKind::BinOp {
-                    op: almide_ir::BinOp::ConcatList,
+                    op: concat_op,
                     left: Box::new(tco_ir(IrExprKind::Var { id: acc_var }, list_ty.clone())),
                     right: Box::new(empty),
                 },

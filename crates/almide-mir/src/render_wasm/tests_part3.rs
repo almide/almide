@@ -54,6 +54,30 @@
     }
 
     #[test]
+    fn string_accumulator_parser_tco_executes_on_wasmtime() {
+        // The parser-combinator shape (csv/toml): a tail-self-recursive STRING accumulator
+        // `scan(text, pos+1, acc + c)` returning a TUPLE `(String, Int)`. Two fixes meet here:
+        // (1) the append-accumulator TCO now covers a `ConcatStr` slot (not just `ConcatList`) +
+        // a tuple-result base; (2) the loop body's heap `let c = string.get(...) ?? ""` makes the
+        // base-check a BLOCK-TAIL `if`, which now routes through try_lower_unit_if so the loop
+        // BRANCHES — before, a block-tail `if` fell straight to lower_branch (ran BOTH arms with
+        // the cond elided), so the loop ran exactly ONCE: a silent miscompile (v0 "hello", v1 "h").
+        // The 2000x re-scan is the LEAK gate (the String slot's drop-old/alloc-new per iter).
+        let src = "fn scan(text: String, pos: Int, acc: String) -> (String, Int) =\n  \
+              if pos >= string.len(text) then (acc, pos)\n  \
+              else { let c = string.get(text, pos) ?? \"\"; if c == \",\" then (acc, pos) else scan(text, pos + 1, acc + c) }\n\
+            fn main() -> Unit = {\n  \
+              let (s, p) = scan(\"hello,world\", 0, \"\")\n  \
+              println(s + \" @ \" + int.to_string(p))\n  \
+              var n = 0\n  for i in 0..2000 { let (t, q) = scan(\"hello,world\", 0, \"\"); n = n + string.len(t) }\n  \
+              println(int.to_string(n)) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("string_acc_parser", &render_wasm_program(&prog)) {
+            assert_eq!(out, "hello @ 5\n10000");
+        }
+    }
+
+    #[test]
     fn self_hosted_string_is_empty_tests_the_length() {
         // string.is_empty(s) self-hosted: the header byte-length is 0 iff empty.
         let src = "fn main() -> Unit = {\n  \
