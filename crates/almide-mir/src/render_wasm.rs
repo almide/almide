@@ -860,6 +860,14 @@ fn render_op(
         Op::DropResultListValue { v } => {
             format!("    (call $__drop_result_lv (local.get {}))\n", local(*v))
         }
+        // RECURSIVE drop of a CUSTOM variant (ADT brick 5b) — the GENERATED per-type
+        // `$__drop_<ty>` (the `$__drop_value` shape, auto-linked from generated Almide): at the
+        // last ref it reads the tag, recursively frees each variant ctor field + rc_dec's each
+        // leaf field, then the block. Single cert `d`; the recursion is the trusted prim-only
+        // routine (empty cert), verified by the create+drop LEAK LOOP.
+        Op::DropVariant { v, ty } => {
+            format!("    (call $__drop_{} (local.get {}))\n", ty, local(*v))
+        }
         // COPY-ON-WRITE before an in-place mutation (A1.3-render, refining
         // CowSafety.v): if the block is SHARED (rc > 1), clone it so the mutation
         // touches no alias. The `rc_dec` runs FIRST (rc 2→1 — the alias keeps the

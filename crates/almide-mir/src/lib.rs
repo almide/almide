@@ -230,6 +230,15 @@ pub enum Op {
     /// A flat `DropListStr` would only rc_dec @12 (the list block), LEAKING its element Values. Same
     /// cert event as [`Op::Drop`] (one `−1`/`d` on the Result object — its payload was `m`/consumed).
     DropResultListValue { v: ValueId },
+    /// `drop_variant v : ty` — release a CUSTOM variant (user ADT) block whose ctor fields may be
+    /// nested variant/heap handles (`Add(Expr, Expr)`). A flat `Drop`/`DropListStr` would `rc_dec`
+    /// the block (and masked slots) WITHOUT recursively freeing a child variant's OWN nested fields
+    /// — a LEAK. So the RENDER calls the GENERATED per-type recursive free `$__drop_<ty>` (the
+    /// `$__drop_value` shape: at the last ref read the tag, recursively free each variant field +
+    /// `rc_dec` each leaf field, then the block). Same single cert `d` as [`Op::Drop`]; the recursion
+    /// is the trusted routine (the generated fn is `prim`-only ⇒ empty ownership cert, leak-loop
+    /// verified). The custom-ADT counterpart of `DropValue` (ADT brick 5b).
+    DropVariant { v: ValueId, ty: String },
     /// `consume v` — transfer v's reference OUT (into a container, a return, or
     /// a callee that takes ownership). v is dead here; the reference lives on
     /// elsewhere. Renders as a move (Rust) / ptr-transfer with no inc (wasm).
@@ -686,7 +695,8 @@ pub fn verify_ownership(func: &MirFunction) -> Result<(), Vec<Violation>> {
             | Op::DropValue { v }
             | Op::DropListValue { v }
             | Op::DropListStrValue { v }
-            | Op::DropResultListValue { v } => {
+            | Op::DropResultListValue { v }
+            | Op::DropVariant { v, .. } => {
                 match release(&object_of, &mut rc, &mut dead, &borrowed, *v) {
                     Ok(()) => {}
                     Err(()) => violations.push(violation(i, *v, ViolationKind::DoubleFree)),
