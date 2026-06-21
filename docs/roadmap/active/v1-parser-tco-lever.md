@@ -13,13 +13,25 @@ full Result family — each byte-matches v0, leak-loop clean, corpus-wall ACCEPT
   @12; precise `is_result_str_str_ty` gates the str helper vs result.zip's tuple-Ok). count_ir_calls
   credits the synthetic call so mir==ir. The handle else-if + Var-case admit the Value/List operands.
 
-REMAINING for csv stringify_records (each a SEPARATE increment, NOT the heap-Result family):
-- **Option-of-Value read** (`list.get(rows,i)` → `Option[Value]`): the match Some-arm uses
-  `scalar_bind`, which REJECTS a heap Value payload (a value-Option needs the Result-side
-  `heap_or_scalar_bind` + a value_option seed + the recursive Option drop). `some(v)` currently
-  mis-binds `v` to an empty `{}`. An `option.value_unwrap_or` helper would parallel the Result ones.
-- **nested list.map over List[Value]** (`rows |> list.map((row) => header |> list.map(...))`).
-Both are needed before stringify_records byte-matches; value.get/as_array/as_string are done.
+- ✅ **Option-of-Value read** — DONE (commit cab0924b). `list.get` on a List[Value] dispatches to
+  self-hosted `list.get_value` (NOT the `_str` variant, which `string.repeat`-copied the element,
+  corrupting an Object to `{}`); it SHARES the element via `Some(@i)` (the `Some(Value)` ctor Dup's the
+  borrowed Value like value.get's Ok), and the `??` routes Option[Value] to the prim-based
+  `option.value_unwrap_or` (the value-match Some-arm's scalar_bind rejects a heap payload, so the
+  helper reads len-tag@4 + @12 directly). PLUS a leak fix: a `value.as_array ?? []` operand OWNS its
+  inner list → reclassified to value_result_lists (recursive `DropResultListValue`) in
+  materialized_call_arg (the flat drop leaked the element Values, a loop OOMed); a Result[Value,String]
+  Ok stays flat (CO-OWNED). Verified byte-match incl Object elements, 2000x leak-clean, corpus ACCEPT.
+
+REMAINING for csv stringify_records — both are list.map-closure × Value defunctionalization gaps (the
+heap-Result/Option READ family is now DONE; single-level `list.map` over List[Value] works — `rows |>
+list.map((r) => value.stringify(r))` byte-matches):
+- **Value ops inside a map closure** (`header |> list.map((h) => value.as_string(value.get(row, h) ??
+  …) ?? "")`): a `list.map` whose closure CAPTURES an outer Value (`row`/`obj`) and calls `value.get`
+  on it emits INVALID wasm (a defunctionalization × captured-Value gap — should at least wall cleanly).
+- **nested list.map with a Value OUTER element** (`rows |> list.map((row) => header |> list.map(...))`):
+  walls when the outer element is a Value (nested map over Int + capture already works — it is the
+  Value-outer combination). Both block stringify_records' inner row→cells projection.
 
 
 The org-trust dashboard's top wall reason (~40, blocking toml/svg/aes/base64/csv) reads as the
