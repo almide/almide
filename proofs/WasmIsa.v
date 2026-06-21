@@ -163,6 +163,37 @@ Qed.
 
 Transparent estep1.
 
+(* DETERMINISM of the ISA spec: a configuration steps to at most one successor, so a reduction
+   of a program has a UNIQUE final state. With erun_sound this UPGRADES the rc effects from
+   "exists a reduction reaching E" to "EVERY reduction reaches E": any irun result equals the
+   one the verified interpreter computes. By the combined mutual induction on the derivation. *)
+Scheme istep_ind2 := Induction for istep Sort Prop
+  with irun_ind2 := Induction for irun Sort Prop.
+Combined Scheme step_run_ind from istep_ind2, irun_ind2.
+
+Lemma isa_det :
+  (forall i c c1, istep i c c1 -> forall c2, istep i c c2 -> c1 = c2) /\
+  (forall is c c1, irun is c c1 -> forall c2, irun is c c2 -> c1 = c2).
+Proof.
+  apply step_run_ind;
+    try (intros; match goal with [ H : istep _ _ _ |- _ ] => inversion H; subst; reflexivity end).
+  - (* S_If_true *) intros body cnd s l g m c' Hne _ IH c2 H2.
+    inversion H2; subst; [ apply IH; assumption | exfalso; apply Hne; reflexivity ].
+  - (* S_If_false *) intros body s l g m c2 H2.
+    inversion H2; subst; [ exfalso; match goal with [ H : _ <> _ |- _ ] => apply H; reflexivity end
+                         | reflexivity ].
+  - (* R_nil *) intros c c2 H2; inversion H2; subst; reflexivity.
+  - (* R_cons *) intros i is c c1 c'' Hs1 IHstep Hr1 IHrun c2 H2.
+    inversion H2; subst.
+    match goal with
+    | [ Hs2 : istep i c ?cm, Hr2 : irun is ?cm c2 |- _ ] =>
+        assert (c1 = cm) as Hcm by (apply IHstep; exact Hs2);
+        rewrite <- Hcm in Hr2; exact (IHrun _ Hr2)
+    end.
+Qed.
+
+Definition irun_det := proj2 isa_det.
+
 (* ─── rc_inc, as an ISA program, with its effect carried THROUGH the relation ─── *)
 Definition rc_inc_prog : list instr :=
   [ILocalGet 0; ILocalGet 0; ILoad; IConst 1; IAdd; IStore].
@@ -172,18 +203,16 @@ Definition init (p : Z) (m : Mem) : cfg :=
 
 Opaque upd.
 
-(* The ISA relation REACHES the rt_inc effect: there is a reduction of rc_inc over a cell holding
-   `m p` to a state where it holds `m p + 1` — and (erun_sound) the verified interpreter takes it.
-   `exists`-style because, with the fuel evaluator, pinning "the unique result" would need the
-   completeness direction; the witness comes from running the verified interpreter. *)
-Theorem rc_inc_isa_effect : forall p m,
-  exists c', irun rc_inc_prog (init p m) c' /\ mem c' p = m p + 1.
+(* The rt_inc effect, FORALL: every reduction of rc_inc over a cell holding `m p` leaves it
+   holding `m p + 1`. The verified interpreter computes one such reduction (erun_sound); isa_det
+   makes it THE reduction, so any irun result equals it. *)
+Theorem rc_inc_isa_effect : forall p m c',
+  irun rc_inc_prog (init p m) c' -> mem c' p = m p + 1.
 Proof.
-  intros p m. destruct (erun 10 rc_inc_prog (init p m)) as [c'|] eqn:E.
-  - exists c'. split.
-    + exact (erun_sound _ _ _ _ E).
-    + clear - E. cbn in E. injection E as <-. cbn. apply upd_same.
-  - cbn in E. discriminate.
+  intros p m c' H.
+  destruct (erun 10 rc_inc_prog (init p m)) as [c2|] eqn:E; [|cbn in E; discriminate].
+  pose proof (irun_det _ _ _ H _ (erun_sound _ _ _ _ E)) as ->.
+  clear - E. cbn in E. injection E as <-. cbn. apply upd_same.
 Qed.
 
 Transparent upd.
@@ -214,17 +243,16 @@ Proof.
   do 9 (destruct fuel as [|fuel]; [reflexivity|]). cbn. reflexivity.
 Qed.
 
-(* LEAK-FREEDOM RECLAMATION: releasing a uniquely-owned cell (rc = 1) decrements it to 0 AND
-   links the block onto $freelist (glob := p = 16) — the freed block is reclaimed, not lost.
-   The ISA relation REACHES that state, and (erun_sound) the verified interpreter takes it. *)
-Theorem rc_dec_isa_frees_when_one : forall g0,
-  exists c', irun rc_dec_prog (init_dec 1 g0) c' /\ mem c' 16 = 0 /\ glob c' = 16.
+(* LEAK-FREEDOM RECLAMATION, FORALL: every reduction of rc_dec over a uniquely-owned cell (rc = 1)
+   decrements it to 0 AND links the block onto $freelist (glob := p = 16) — the freed block is
+   reclaimed, not lost. The verified interpreter computes the reduction; isa_det makes it unique. *)
+Theorem rc_dec_isa_frees_when_one : forall g0 c',
+  irun rc_dec_prog (init_dec 1 g0) c' -> mem c' 16 = 0 /\ glob c' = 16.
 Proof.
-  intros g0. destruct (erun 30 rc_dec_prog (init_dec 1 g0)) as [c'|] eqn:E.
-  - exists c'. split.
-    + exact (erun_sound _ _ _ _ E).
-    + clear - E. cbn in E. injection E as <-. cbn. split; reflexivity.
-  - cbn in E. discriminate.
+  intros g0 c' H.
+  destruct (erun 30 rc_dec_prog (init_dec 1 g0)) as [c2|] eqn:E; [|cbn in E; discriminate].
+  pose proof (irun_det _ _ _ H _ (erun_sound _ _ _ _ E)) as ->.
+  clear - E. cbn in E. injection E as <-. cbn. split; reflexivity.
 Qed.
 
 Print Assumptions erun_sound.
