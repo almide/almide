@@ -3001,18 +3001,12 @@ impl LowerCtx {
         if params.len() != expected_params {
             return None;
         }
-        // A HEAP-element map (source and/or result) is inlined ONLY for a CAPTURING closure — the
-        // case with NO liftable form (the lift path `list.map_str` would pass an empty env). A
-        // NON-capturing heap closure keeps the proven `list.map_str` lift path (its own self-host
-        // test + corpus coverage), so defer here. (The SCALAR C1 inline still fires for both, per #67.)
-        let src_heap = matches!(&xs.ty,
-            Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && is_heap_ty(&a[0]));
-        if src_heap || result_heap_elem {
-            let bound: std::collections::HashSet<VarId> = params.iter().map(|(v, _)| *v).collect();
-            if almide_ir::free_vars::free_vars(body, &bound).is_empty() {
-                return None;
-            }
-        }
+        // A HEAP-element map (source and/or result) inlines for BOTH a capturing and a non-capturing
+        // closure: the inline is the preferred defunctionalized path (#67), and the lift path
+        // (`list.map_str`) SILENTLY MIS-COMPILES a NESTED non-capturing heap map (csv `stringify`
+        // returned `,`) — the inline executes it faithfully; a capturing closure has no liftable form
+        // at all. (The SCALAR C1 inline already fires for both; this matches it for heap.) A body the
+        // subset cannot lower still rolls back below → the caller's lift/WALL fallback is unchanged.
 
         let ops_mark = self.ops.len();
         let lhh_mark = self.live_heap_handles.len();

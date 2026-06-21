@@ -3320,17 +3320,19 @@
 
     #[test]
     fn self_hosted_list_map_str() {
-        // SELF-HOSTED list.map over a List[String] (the repr-poly _str variant, auto-dispatched on a
-        // List[heap] result). Each element is borrowed (prim.load_str), passed to the closure over
-        // the heap-arg ABI, and the fresh result moved into a DynListStr. map(split"a,b,c", repeat·2)
-        // = ["aa","bb","cc"], verified via list.join + list.len. Byte-matches v0.
+        // list.map over a List[String] with an INLINE lambda — now DEFUNCTIONALIZED as a specialized
+        // loop (the heap-element extension of #67): the element is read by LoadHandle, the body
+        // (`string.repeat(x, 2)`) lowers per element to a fresh owned String moved into a DynListStr.
+        // map(split"a,b,c", repeat·2) = ["aa","bb","cc"], verified via list.join + list.len; byte-v0.
         let src = "fn main() -> Unit = {\n  \
             let parts = string.split(\"a,b,c\", \",\")\n  \
             let mapped = list.map(parts, (x) => string.repeat(x, 2))\n  \
             println(int.to_string(list.len(mapped)))\n  \
             println(list.join(mapped, \"-\")) }\n";
         let prog = lower_source(src);
-        assert!(prog.functions.iter().any(|f| f.name == "list.map_str"));
+        // The closure was specialized away (inlined) — NO `list.map_str` lift function. This is the
+        // preferred path AND avoids the lift's nested-map silent miscompile (csv `stringify`).
+        assert!(prog.functions.iter().all(|f| f.name != "list.map_str"));
         if let Some(out) = build_and_run("self_hosted_list_map_str", &render_wasm_program(&prog)) {
             assert_eq!(out, "3\naa-bb-cc");
         }
