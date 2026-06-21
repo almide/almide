@@ -1,0 +1,23 @@
+// string_to_lower — SELF-HOSTED `string.to_lower(s)` for v1 over the prim floor. v0 is
+// `s.to_lowercase()` (full Unicode). This is the ASCII fold (`A`..`Z` → `a`..`z`, +32),
+// byte-for-byte identical to v0 for ASCII input (the yaml keyword-match use: null/true/yes/…);
+// a non-ASCII byte is copied unchanged (its multi-byte UTF-8 sequence passes through intact, so
+// the string stays valid — only a non-ASCII UPPERCASE letter would differ from v0's Unicode fold).
+// Allocates a fresh same-byte-length String and copies it lowering each ASCII byte. Self-contained.
+
+fn __tolower_copy(src: Int, dst: Int, len: Int) -> Int =
+  if len <= 0 then dst
+  else {
+    let b = prim.load8(src)
+    let lo = if b >= 65 and b <= 90 then b + 32 else b
+    prim.store8(dst, lo)
+    __tolower_copy(src + 1, dst + 1, len - 1)
+  }
+
+fn string_to_lower(s: String) -> String = {
+  let h = prim.handle(s)
+  let blen = prim.load32(h + 4)
+  let buf = prim.alloc_str(blen)
+  let _e = __tolower_copy(h + 12, prim.handle(buf) + 12, blen)
+  buf
+}

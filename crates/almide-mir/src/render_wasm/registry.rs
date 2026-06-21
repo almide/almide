@@ -464,6 +464,7 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
         ),
         (include_str!("../../../../stdlib/string_slice.almd"), &[("string_slice", "string.slice")]),
         (include_str!("../../../../stdlib/string_slice2.almd"), &[("string_slice2", "string.slice2")]),
+        (include_str!("../../../../stdlib/string_to_lower.almd"), &[("string_to_lower", "string.to_lower")]),
         (
             include_str!("../../../../stdlib/string_is_digit.almd"),
             &[("string_is_digit", "string.is_digit")],
