@@ -845,6 +845,25 @@
     }
 
     #[test]
+    fn record_with_empty_map_and_list_fields_constructs() {
+        // The svg `el` shape: a record whose fields include an EMPTY Map (`attrs: [:]`) and an EMPTY
+        // recursive List (`children: []`). `lower_owned_heap_field` now materializes an empty heap
+        // container (a 0-length layout-agnostic block) as a record field, so the construct lowers and
+        // the field reads (`map.len(e.attrs)`, `list.len(e.children)`) read the real empty slots.
+        let src = "type E = { tag: String, attrs: Map[String, String], children: List[E], content: String }\n\
+            fn el(tag: String) -> E = E { tag: tag, attrs: [:], children: [], content: \"\" }\n\
+            effect fn main() -> Unit = {\n  \
+              let e = el(\"rect\")\n  \
+              println(e.tag)\n  \
+              println(int.to_string(map.len(e.attrs)))\n  \
+              println(int.to_string(list.len(e.children))) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("record_empty_map_list", &render_wasm_program(&prog)) {
+            assert_eq!(out, "rect\n0\n0");
+        }
+    }
+
+    #[test]
     fn list_get_value_option_unwrap_executes_on_wasmtime() {
         // Option-of-Value read (`list.get(rows, i) ?? d` — the stringify_records row accessor). list.get
         // on a List[Value] dispatches to list.get_value (NOT the `_str` variant, which deep-copies the

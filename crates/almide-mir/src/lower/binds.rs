@@ -1687,10 +1687,26 @@ impl LowerCtx {
                 use almide_lang::types::constructor::TypeConstructorId;
                 let scalar_list = matches!(&expr.ty,
                     Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && !is_heap_ty(&a[0]));
-                if !scalar_list {
+                // A NON-EMPTY heap-element list field needs a per-element recursive free (the
+                // recursive-record frontier) → defer. An EMPTY list of ANY element type is a valid
+                // layout-agnostic 0-length block (the svg `el` `children: []` field) — admit it.
+                if !scalar_list && !elements.is_empty() {
                     return None;
                 }
                 let obj = self.try_lower_scalar_list_slots(elements)?;
+                self.live_heap_handles.push(obj);
+                Some(obj)
+            }
+            // An empty Map field — `attrs: [:]` (the svg `el` record). A v1 Map is a List block of
+            // paired slots; an EMPTY one is the same layout-agnostic 0-length block as an empty list.
+            // (A non-empty Map literal as a record field is a later brick.)
+            IrExprKind::EmptyMap => {
+                let obj = self.try_lower_scalar_list_slots(&[])?;
+                self.live_heap_handles.push(obj);
+                Some(obj)
+            }
+            IrExprKind::MapLiteral { entries } if entries.is_empty() => {
+                let obj = self.try_lower_scalar_list_slots(&[])?;
                 self.live_heap_handles.push(obj);
                 Some(obj)
             }
