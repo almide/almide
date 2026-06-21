@@ -78,6 +78,31 @@ GATING NOTE: brick 1 alone may already fix `cm2` (it routes to the result-accumu
 assuming bricks 2/4 are needed. The Coq loop-ownership soundness (option C, 7f673b4c) underwrites the
 whole; this is the extraction/lowering integration only.
 
+### CORRECTED DIAGNOSIS (2026-06-21, sharper — supersedes the "all tuple results broken" framing)
+
+Two disambiguating probes narrowed the bug precisely:
+- `cm4` (a self-rec parser returning `List[(String,Value)]`, accumulating `acc + [(k, value.str(…))]`)
+  **byte-matches v0** (len 3). So the str_value list-literal materialization, the append-accumulator
+  TCO, AND `value.str`'s copied arg are ALL SOUND. (brick 3 is correct; re-land it freely.)
+- `cm2` (the SAME but returning the `(Value, Int)` TUPLE `(value.object(pairs), pos)`) gives garbage
+  (`pos=0`, value garbage) + a teardown trap.
+- The existing `parse_rows_rec` test (csv — a TUPLE-returning self-rec parser) PASSES. **So tuple-result
+  TCO is NOT universally broken.** The difference: `parse_rows_rec`'s base reads LOOP-BODY-LOCALS (`let
+  (field,np)=…`) → `base_reads_loop_local=TRUE` → the in-loop RESULT-ACCUMULATOR path (works). `cm2` /
+  `collect_map` / `collect_seq` bases read ONLY CARRIED PARAMS (`pairs`,`pos`) →
+  `base_reads_loop_local=FALSE` → the POST-LOOP DISPATCH, which recomputes the tuple base and reads
+  STALE values → garbage.
+
+So the REAL bug is the **post-loop dispatch's recomputation of a TUPLE base** (it does not see the loop's
+final carried-param values the way a plain-Var base like `cm4`'s `acc` does). A broad "decline tuple
+results" guard is WRONG — it regresses `parse_rows_rec` (verified: its test FAILED under the guard).
+
+REVISED FIX (narrower): make carried-param-only TUPLE bases use the in-loop result-accumulator (route
+`result_var` for tuple results too, needing `tco_empty_for(Value/Tuple)` + the `(Value,Int)` tuple drop)
+— OR fix the post-loop dispatch to lower a tuple base reading the loop-final carried locals. Either way,
+`parse_rows_rec` (loop-local base) must keep working. The minimal repro is `cm2`; gate against both
+`cm2` (must become correct) and `parse_rows_rec` (must stay correct).
+
 ## csv full-conquest status (4 public fns, v0-vs-v1 byte-match audit)
 
 Audited each `almide/csv` public fn end-to-end (inline the source, v0 `almide run` vs v1
