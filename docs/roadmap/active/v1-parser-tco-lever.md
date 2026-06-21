@@ -1,5 +1,27 @@
 # v1 — the parser-TCO lever (the real "heap-result-expr" cross-repo lever)
 
+## THE LAYOUT BRICK read side — OPEN (commits 5b7efec7, e43db65f)
+
+The heap-Result-of-X read/`??` is the layout brick the value-subsystem flagged. Now landed for the
+full Result family — each byte-matches v0, leak-loop clean, corpus-wall ACCEPT, suite green:
+- **value.get** → `Result[Value,String]` (self-hosted: linear-scan `__vobj_find` index, then a
+  non-recursive `Ok(@12 borrow)`/`Err("missing field '<k>'")` wrap). `match` reads tag@16 + binds the
+  @12 Value (classified `value_result_results` → recursive `DropResultValue`); was garbling ok:0|err:0.
+- **value.as_array** → `Result[List[Value],String]`; **value.as_string** → `Result[String,String]`.
+- The `??` routes each Ok-payload kind to a self-hosted helper reusing the working match read:
+  `result.value_unwrap_or` / `result.list_value_unwrap_or` / `result.str_unwrap_or` (the Ok arm Dup's
+  @12; precise `is_result_str_str_ty` gates the str helper vs result.zip's tuple-Ok). count_ir_calls
+  credits the synthetic call so mir==ir. The handle else-if + Var-case admit the Value/List operands.
+
+REMAINING for csv stringify_records (each a SEPARATE increment, NOT the heap-Result family):
+- **Option-of-Value read** (`list.get(rows,i)` → `Option[Value]`): the match Some-arm uses
+  `scalar_bind`, which REJECTS a heap Value payload (a value-Option needs the Result-side
+  `heap_or_scalar_bind` + a value_option seed + the recursive Option drop). `some(v)` currently
+  mis-binds `v` to an empty `{}`. An `option.value_unwrap_or` helper would parallel the Result ones.
+- **nested list.map over List[Value]** (`rows |> list.map((row) => header |> list.map(...))`).
+Both are needed before stringify_records byte-matches; value.get/as_array/as_string are done.
+
+
 The org-trust dashboard's top wall reason (~40, blocking toml/svg/aes/base64/csv) reads as the
 "heap-result-expr family" (`heap-result if`/`match` … "would move out an empty deferred heap
 value"). Targeting csv (a working v0 oracle, unlike toml — see below) revealed the TRUE cause.

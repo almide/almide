@@ -98,18 +98,15 @@ fn __vstr_ok(h: Int) -> Result[String, String] = {
   let copy = string.repeat(s, 1)
   Ok(copy)
 }
-// COMPOUND Value model (Array tag-5: value.array / __drop_value / value.as_array) — STAGED, code in
-// docs/roadmap/active/v1-value-model.md. This session built it end-to-end and CONFIRMED by inspection
-// + production run: value.array CONSTRUCTS correctly (self-contained tag-5, shallow-copy via rc_inc),
-// the List[Value] materialize (Call elements) works, the recursive __drop_value RUNS, and the leak-loop
-// gate is feasible. The FINAL blocker is as_array USAGE: `value.as_array` returns Result[List[Value],
-// String], but a `match { Ok(items) => items[i] }` MIS-BINDS — `bind_pattern` Dup's the whole Result
-// shell (container-grain; the comment there flags "payload-PRECISE identity needs the layout brick"),
-// and the heap-Result-of-LIST is not in the str-result machinery (materialized_results_str only tracks
-// Result[String,_]). So `items` is the Result, not the inner list (list.len(items)=1, not 3). The
-// remaining work is THE LAYOUT BRICK: payload-precise heap-payload binding + heap-Result-of-list
-// tracking. Once that lands, re-paste the staged code + register value.array/as_array + wire
-// Op::DropValue→$__drop_value, verify with a round-trip + the leak loop.
+// COMPOUND Value model (Array tag-5: value.array / __drop_value / value.as_array). THE LAYOUT BRICK
+// read side is now OPEN: a heap-Result-of-Value (`value.get` → Result[Value,String]) and
+// heap-Result-of-List (`value.as_array` → Result[List[Value],String]) round-trip through BOTH a
+// `match` (tag@16 read + @12 payload bound as a borrow, classified into value_result_results /
+// value_result_lists for the recursive drop) AND a `??` (routed to result.value_unwrap_or /
+// result.list_value_unwrap_or / result.str_unwrap_or — the working match read reused). Verified
+// byte-match v0 + leak-loop clean + corpus-wall ACCEPT. STILL a separate gap: the OPTION-of-Value
+// read (`list.get(rows, i)` → Option[Value]; the match some-arm uses scalar_bind, which rejects a
+// heap Value payload), and nested list.map over List[Value] — both needed for csv stringify_records.
 
 fn value_as_string(v: Value) -> Result[String, String] = {
   let h = prim.handle(v)
