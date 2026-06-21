@@ -7,12 +7,19 @@ render_program+wasmtime). **2 of 4 byte-match; 2 remain, each a DISTINCT mechani
 - ✅ **stringify** (commit 6fb48108 — needed the non-capturing heap-map inline, closing the lift
   path's nested-map silent miscompile that returned `,`).
 - ✅ **stringify_records** (commit b129ad45 — the capturing heap-map / map-closure-over-Value).
-- ❌ **parse_records** — its `header |> list.enumerate |> list.map((entry) => { let (i,key)=entry;
-  (key, value.str(list.get_or(row,i,""))) })` is a list.map whose SOURCE is `List[(Int,String)]` and
-  RESULT is `List[(String,Value)]` — a TUPLE-element map (capturing `row`). The heap-map inline is
-  STRING-element-result only (DropListStr); a tuple-element result needs the str_value_elem_lists
-  (DropListStrValue) build + a Tuple-construct body arm in lower_heap_result_arm + a tuple-destructure
-  element read. Walls "list.map unliftable" (defers → lift → capturing → no env).
+- ❌ **parse_records** — bigger than a single map extension; a multi-piece brick with a PREREQUISITE:
+  1. **`list.enumerate` is `@intrinsic("almide_rt_list_enumerate")`** (stdlib/list.almd:42) — NOT
+     self-hosted, so v1 walls "unlinked list.enumerate" even for a bare `header |> list.enumerate`
+     (a for-in destructure over it). Self-hosting it = `List[String] → List[(Int,String)]` (a recursive
+     or prim builder) PLUS a NEW `(Int,String)`-tuple-element list drop set (the existing tuple-list
+     drops are `(String,Value)` = str_value_elem_lists and `List[Value]` = value_elem_lists; an
+     `(Int,String)` tuple — scalar+String — needs its own per-element "rc_dec slot 1 only" recursive free).
+  2. THEN the **tuple-element map**: `List[(Int,String)] → List[(String,Value)]` capturing `row` — the
+     heap-map inline is STRING-element-result only; this needs the str_value_elem_lists result build +
+     a Tuple-construct body arm (`(key, value.str(…))`) in lower_heap_result_arm + the source element
+     SEEDED as a borrowed tuple (param_values + seed_variant_param) so `let (i,key)=entry` destructures.
+  So parse_records is enumerate-self-host (incl a new tuple-list drop) + tuple-element-map-both-sides —
+  a focused multi-brick, not the quick "tuple map" first estimated.
 - ❌ **parse** — `parse_rows_rec`/`parse_after_field` (a recursive `List[List[String]]` accumulator,
   `rows + [current_row]` / `current_row + [field]`) DOUBLE-FREES at runtime (rc_dec → wasm
   `unreachable`); v0 correct. A recursive-list-of-list ownership bug, INDEPENDENT of the layout brick
