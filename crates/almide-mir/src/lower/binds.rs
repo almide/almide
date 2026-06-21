@@ -671,6 +671,12 @@ impl LowerCtx {
                     let heap_elem_list = matches!(ty,
                         Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && is_heap_ty(&a[0]));
                     if heap_elem_list && !elements.is_empty() {
+                        // A List[Record] literal materializes via the record-list builder (drop →
+                        // $__drop_list_<R>); other nested-ownership element lists stay walled.
+                        if let Some(dst) = self.try_lower_record_list_literal(value) {
+                            self.value_of.insert(var, dst);
+                            return Ok(());
+                        }
                         return Err(LowerError::Unsupported(
                             "non-empty List[heap] literal with nested-ownership elements \
                              (a heap-field record/tuple, a list, a call result) cannot be \
@@ -1455,6 +1461,60 @@ impl LowerCtx {
         }
         self.record_masks.insert(dst, heap_slots);
         self.materialized_aggregates.insert(dst);
+        if let Some(name) = self.record_drop_type_name(&value.ty) {
+            self.variant_drop_handles.insert(dst, name);
+        }
+        Some(dst)
+    }
+
+    /// Materialize a `List[Record]` LITERAL (`group([rect(…), circle(…)])`, `[el("a"), el("b")]`) — a
+    /// list block whose i64 slots each hold an OWNED Element record handle (lowered via
+    /// `lower_owned_heap_field`, MOVED in). Tracked so its scope-end drop routes to the generated
+    /// `$__drop_list_<R>` (each element freed recursively via `$__drop_<R>`). GATE: the element type
+    /// must be a record needing the recursive drop (`record_drop_type_name` Some), so `$__drop_list_<R>`
+    /// exists; otherwise `None` (the caller keeps the scalar / wall path). Empty lists handled elsewhere.
+    pub(crate) fn try_lower_record_list_literal(&mut self, value: &IrExpr) -> Option<ValueId> {
+        use crate::{IntOp, PrimKind};
+        use almide_lang::types::constructor::TypeConstructorId;
+        let IrExprKind::List { elements } = &value.kind else { return None };
+        if elements.is_empty() {
+            return None;
+        }
+        let elem_ty = match &value.ty {
+            Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 => a[0].clone(),
+            _ => return None,
+        };
+        let rname = self.record_drop_type_name(&elem_ty)?;
+        // Lower each element to an OWNED record handle BEFORE the alloc (a field expr that allocates
+        // must not interleave with the store sequence).
+        let mut objs: Vec<ValueId> = Vec::with_capacity(elements.len());
+        for e in elements {
+            objs.push(self.lower_owned_heap_field(e)?);
+        }
+        let n = elements.len();
+        let len = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: len, value: n as i64 });
+        let dst = self.fresh_value();
+        self.ops.push(Op::Alloc {
+            dst,
+            repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT },
+            init: crate::Init::DynList { len },
+        });
+        let h = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![dst] });
+        for (i, obj) in objs.into_iter().enumerate() {
+            let off = self.fresh_value();
+            self.ops.push(Op::ConstInt { dst: off, value: layout::slot_offset(i) as i64 });
+            let addr = self.fresh_value();
+            self.ops.push(Op::IntBinOp { dst: addr, op: IntOp::Add, a: h, b: off });
+            let handle = self.fresh_value();
+            self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(handle), args: vec![obj] });
+            self.ops.push(Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args: vec![addr, handle] });
+            self.ops.push(Op::Consume { v: obj });
+            self.live_heap_handles.retain(|x| *x != obj);
+        }
+        self.variant_drop_handles.insert(dst, format!("list_{rname}"));
+        self.live_heap_handles.push(dst);
         Some(dst)
     }
 
@@ -1692,10 +1752,13 @@ impl LowerCtx {
                 use almide_lang::types::constructor::TypeConstructorId;
                 let scalar_list = matches!(&expr.ty,
                     Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && !is_heap_ty(&a[0]));
-                // A NON-EMPTY heap-element list field needs a per-element recursive free (the
-                // recursive-record frontier) → defer. An EMPTY list of ANY element type is a valid
-                // layout-agnostic 0-length block (the svg `el` `children: []` field) — admit it.
+                // A NON-EMPTY List[Record] literal (`children: [rect(…), …]`) materializes via the
+                // record-list builder (each Element moved in; drop → $__drop_list_<R>).
                 if !scalar_list && !elements.is_empty() {
+                    if let Some(obj) = self.try_lower_record_list_literal(expr) {
+                        return Some(obj);
+                    }
+                    // A NON-EMPTY non-record heap-element list field is the recursive-record frontier → defer.
                     return None;
                 }
                 let obj = self.try_lower_scalar_list_slots(elements)?;

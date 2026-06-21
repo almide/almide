@@ -845,6 +845,27 @@
     }
 
     #[test]
+    fn record_list_literal_materializes_and_drops_leak_free() {
+        // A `List[Record]` LITERAL (`[leaf("a"), leaf("b")]` — the svg `group([rect(…), …])` shape):
+        // build a list block storing each Element handle (moved in via lower_owned_heap_field), routed
+        // to the generated `$__drop_list_<R>` (each element freed recursively via `$__drop_<R>`). The
+        // 10000x loop is the leak gate. Was walled "non-empty List[heap] literal".
+        let src = "type E = { tag: String, kids: List[E] }\n\
+            fn leaf(t: String) -> E = E { tag: t, kids: [] }\n\
+            effect fn main() -> Unit = {\n  \
+              let xs = [leaf(\"a\"), leaf(\"b\"), leaf(\"c\")]\n  \
+              println(int.to_string(list.len(xs)))\n  \
+              var n = 0\n  \
+              for i in 0..10000 { let ys = [leaf(\"x\"), leaf(\"y\")]; n = n + list.len(ys) }\n  \
+              println(int.to_string(n)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "__drop_list_E"), "the recursive list-of-record drop must be generated");
+        if let Some(out) = build_and_run("record_list_literal", &render_wasm_program(&prog)) {
+            assert_eq!(out, "3\n20000");
+        }
+    }
+
+    #[test]
     fn record_call_arg_with_map_field_drops_leak_free() {
         // A record passed as a CALL ARGUMENT (`withattr(mk("x"), …)`) must drop via its masked/recursive
         // drop, NOT the flat `Op::Drop` that rc_dec's only the record block and LEAKS its heap fields

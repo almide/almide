@@ -840,6 +840,13 @@ impl LowerCtx {
                     // block, vs the `alloc_init` `Init::Opaque` that an all-literal-only path leaves
                     // (rejected below). Closes `f([pos])` / the `acc + [pos]` append-accumulator element.
                     if matches!(&a.kind, IrExprKind::List { .. }) {
+                        // A List[Record] literal arg (`group([rect(…), …])`): the record-list builder
+                        // already pushes it to live_heap_handles + routes its drop to $__drop_list_<R>,
+                        // so pass the handle directly (a second materialized_call_arg would double-track).
+                        if let Some(dst) = self.try_lower_record_list_literal(a) {
+                            out.push(CallArg::Handle(dst));
+                            continue;
+                        }
                         if let Some(dst) = self
                             .try_lower_str_list_literal(a)
                             .or_else(|| self.try_lower_scalar_list_construct(a))

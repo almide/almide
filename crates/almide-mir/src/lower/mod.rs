@@ -455,8 +455,13 @@ pub fn generate_record_drop_sources(type_decls: &[almide_ir::IrTypeDecl]) -> Str
         out.push_str("  prim.rc_dec(h)\n");
         out.push_str("}\n");
     }
-    // The per-element-recursive list drops the record fields referenced.
-    for rn in &list_drops {
+    // A per-element-recursive `$__drop_list_<R>` for EVERY recursive-drop record R (not just the
+    // field-referenced ones in `list_drops`) — so a standalone `List[R]` LITERAL value (`group([…])`)
+    // routes its drop here too. Sorted for host-determinism.
+    let _ = &list_drops; // (subsumed by rec_names below)
+    let mut list_drop_names: Vec<&String> = rec_names.iter().collect();
+    list_drop_names.sort();
+    for rn in list_drop_names {
         out.push_str(&format!(
             "fn __drop_list_{rn}(xs: List[{rn}]) -> Unit = {{\n  \
                let h = prim.handle(xs)\n  \
