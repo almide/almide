@@ -54,10 +54,24 @@ REMAINING (smaller): partially-analyzable files still use the per-function `caps
 (reachable computed by the Rust fold) — extending the graph witness to them needs the UNIVERSE
 taint to be the gate's honest-scope "unverified" rather than a hard reject (a policy refinement).
 
-## 全V — cert-level COMPLETE; the heavy remainder is #40
+## 全V — cert-level COMPLETE; #40 byte-binding now grounded on BOTH sides
 The flight-grade properties are all proven at cert level: ownership (double-free + leak),
 names (no dangling), caps (per-function + now transitive composition), stack balance,
-termination, COW safety, loop ownership, and the rc_inc/rc_dec **byte-binding** (grounded in
-wat2wasm, non-circular). The remaining heavy track is **#40**: the full memory machine bound
-to wasm BYTES via a WasmCert-Coq ISA (a complete verified wasm execution semantics) — proofs
-flag it as "the deferred heavy track". That is the next big proof-spine brick.
+termination, COW safety, loop ownership, and the rc_inc/rc_dec **byte-binding**.
+
+## #40 byte-binding — ENCODER + EXECUTOR both grounded (commit 9a82b61d)
+The rc byte-binding has two model-vs-reality gaps; both are now grounded against real tools,
+re-checked every build by `check.sh`:
+- **ENCODER** (`WasmEncode.v`: instruction tree → bytes, `encode_body = rc_inc_bytes`): grounded
+  by `check-wasm-bytes.sh` — wat2wasm re-assembles the rc primitives to the SAME bytes.
+- **EXECUTOR** (`WasmExec.v`: a bespoke interpreter `run_g` proving the bytes' memory effects):
+  NOW grounded by `check-wasm-exec.sh` — wasmtime executes the SAME bytes to EXACTLY the proven
+  effects: rc_inc 4→5, rc_dec rc=1 frees to 0 AND reclaims to `$freelist` (leak-freedom
+  reclamation), rc_dec rc=0 TRAPS (double-free sentinel). So `run_g` is faithful to a real
+  engine for the rc ops — the byte-EXECUTION binding is non-circular.
+
+REMAINING heavy track (#40's maximal form): replace the bespoke `run_g` with the canonical
+**WasmCert-Coq ISA** (a complete verified wasm execution semantics) so the binding holds for
+ALL wasm programs abstractly, not just the rc ops grounded empirically. A multi-week library
+import — proofs flag it "the deferred heavy track". The PRACTICAL byte-binding (the actual
+emitted rc bytes ↔ real encode ↔ real execute) is, however, now closed + grounded.
