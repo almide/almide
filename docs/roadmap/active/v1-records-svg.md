@@ -299,3 +299,36 @@ The C1-defunc `list.map` over the tuple-list + the `let (k,v)=pair` destructure 
 existing (String,Value) tuple-map machinery (element-type-agnostic tuple-handle read). Once this lands:
 `cd /Users/o6lvl4/workspace/github.com/almide/svg && almide test` → all "via WASM", 0 failed = svg
 FULL CONQUEST. The records LANGUAGE FEATURE it builds on is COMPLETE + committed.
+
+## STATUS 6 — ✅ svg FULL CONQUEST ACHIEVED
+
+The svg library renders BYTE-IDENTICAL to v0 on the v1 wasm trust spine, leak-free. The full cascade
+landed + gated this run (suite green, corpus-wall ACCEPT all 4, 10⁴ leak loops):
+
+1. recursive record drop `$__drop_<R>` (05a40219)
+2. record-call-argument leak fix (ec06c7ca)
+3. List[Record] LITERAL materialization — group([…]) (bc36226f)
+4. List[Record] CONCAT in spread override — add_child (7dc509c5)
+5. **map.entries on Map[String,String] + the (String,String) tuple-list** (a4431c39): `map_entries_str`
+   builds rc-shared (key,value) tuples; `DropListStrStr`/`$__drop_list_str_str` frees them;
+   `try_lower_concat_list` + the list-literal builder admit `(String,String)` tuple elements; the
+   defunc `list.map` binds a tuple element as a borrowed materialized aggregate so `let (k,v)=pair`
+   destructures it; a self-recursive call inside a defunc-map body is admitted (`in_defunc_body`) so
+   `children |> list.map(render_el)` INLINES; and the missing `UnOp` arm in lower_bind's scalar path
+   was added so `let hc = not list.is_empty(xs)` emits the operand call (was a deferred Const).
+6. **map.entries-result leak fix** (3a245d5b): `is_list_str_str_ty` reclassifies a bound/arg
+   `List[(String,String)]` to `str_str_elem_lists` (DropListStrStr) before the flat `heap_elem_lists`.
+
+VERIFICATION:
+- `render(rect|>fill)`, `render(text)`, `render(group([rect,circle]))`, `render(doc([…]))` all
+  byte-match v0 via render_program → wasmtime.
+- `render(doc([rect,circle]))` × 10000 in a loop: v0 1690000 == v1 1690000 (leak-free; was OOM).
+- svg repo `almide test`: 15 passed, 0 failed (mod.almd — the records render — VIA WASM).
+- Regression tests: map_entries_str_map_and_tuple_destructure, map_entries_render_loop_leak_free,
+  not_bool_call_bound_in_let, defunc_map_self_recursive_record_render, record_list_literal/concat,
+  record_call_arg_with_map_field, record_recursive_drop — all in render_wasm/tests_part3.rs.
+
+The records LANGUAGE FEATURE (construct / field read / spread / recursive nested-ownership drop /
+leak-freedom / List[Record] literal+concat / Map[String,String] entries) is COMPLETE on v1, and the
+svg full-conquest goal is MET. (svg's path.almd falls to v0's native test fallback — a separate v0
+emit_wasm path-module limitation, outside the records-feature scope.)
