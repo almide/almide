@@ -712,6 +712,21 @@
     }
 
     #[test]
+    fn value_as_string_unwrap_executes_on_wasmtime() {
+        // The String-payload Result `??` (`value.as_string(x) ?? "fb"` — Result[String,String]):
+        // routed to the self-hosted result.str_unwrap_or, completing the Result-`??` family
+        // (Value / List[Value] / String). Ok → the inner String, a tag-mismatch Err → the fallback.
+        let src = "import json\n\
+            effect fn main() -> Unit = {\n  \
+              println(value.as_string(value.str(\"hello\")) ?? \"fb\")\n  \
+              println(value.as_string(value.int(5)) ?? \"fb\") }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("value_as_string_unwrap", &render_wasm_program(&prog)) {
+            assert_eq!(out, "hello\nfb");
+        }
+    }
+
+    #[test]
     fn value_stringify_executes_on_wasmtime() {
         // The recursive JSON serializer, self-hosted in value_core, byte-identical to v0's
         // `almide_rt_value_stringify`: scalars direct, Str quoted+escaped (\ first), Array/Object

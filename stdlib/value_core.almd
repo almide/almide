@@ -233,6 +233,15 @@ fn result_list_value_unwrap_or(r: Result[List[Value], String], d: List[Value]) -
     err(e) => d,
   }
 
+// The String-payload Result `??` (`value.as_string(x) ?? ""`): a Result[String,String] unwrap, the
+// SAME helper pattern — the Ok arm acquires a fresh co-owned String, the Err drops the message. csv
+// stringify_records' inner cell projection (`value.as_string(value.get(row,h) ?? value.null()) ?? ""`).
+fn result_str_unwrap_or(r: Result[String, String], d: String) -> String =
+  match r {
+    ok(v) => v,
+    err(e) => d,
+  }
+
 // value.stringify — the recursive JSON serializer, byte-identical to v0's runtime
 // (`almide_rt_value_stringify`): tag-dispatch; scalars rendered directly, Str quoted+escaped,
 // Array/Object joined with "," (no spaces). Escape replaces `\` FIRST (so the backslashes it

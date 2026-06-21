@@ -1598,7 +1598,8 @@ impl LowerCtx {
             || is_self_host_result_call(expr)
             || (is_self_host_result_str_call(expr)
                 && (crate::lower::is_value_result_ty(&expr.ty)
-                    || crate::lower::is_result_listval_ty(&expr.ty)))
+                    || crate::lower::is_result_listval_ty(&expr.ty)
+                    || crate::lower::is_result_str_str_ty(&expr.ty)))
             || is_named_variant_call
         {
             // A self-host OR user-function call returning Option/Result — materialize it (the
@@ -1636,6 +1637,8 @@ impl LowerCtx {
             Some("result.list_value_unwrap_or")
         } else if crate::lower::is_value_result_ty(&expr.ty) {
             Some("result.value_unwrap_or")
+        } else if crate::lower::is_result_str_str_ty(&expr.ty) {
+            Some("result.str_unwrap_or")
         } else {
             None
         };

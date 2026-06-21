@@ -2470,6 +2470,15 @@ pub fn is_result_listval_ty(ty: &Ty) -> bool {
         if a.len() == 2 && matches!(&a[0], Ty::Applied(TypeConstructorId::List, _)))
 }
 
+/// Is `ty` a `Result[String, String]` (the value.as_string shape — both arms a flat String)? The
+/// PRECISE str-str distinguisher (vs the broader `is_heap_ok_result`, which also matches a tuple-Ok
+/// `result.zip`), so the `??` routes only a genuine String-payload Result to `result.str_unwrap_or`.
+pub fn is_result_str_str_ty(ty: &Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    matches!(ty, Ty::Applied(TypeConstructorId::Result, a)
+        if a.len() == 2 && matches!(&a[0], Ty::String) && matches!(&a[1], Ty::String))
+}
+
 pub(crate) fn alloc_init(value: &IrExpr) -> Init {
     if let IrExprKind::LitStr { value } = &value.kind {
         return Init::Str(value.clone());

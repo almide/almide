@@ -199,9 +199,14 @@ fn count_ir_calls(body: &almide_ir::IrExpr, registry: &almide_mir::lower::Record
                 // result.value_unwrap_or / result.list_value_unwrap_or CALL (a pure value_core
                 // helper, no Stdout). Count +1 so mir == ir, mirroring the String case.
                 let operand_is_value_result = almide_mir::lower::is_value_result_ty(&expr.ty)
-                    || almide_mir::lower::is_result_listval_ty(&expr.ty);
+                    || almide_mir::lower::is_result_listval_ty(&expr.ty)
+                    || almide_mir::lower::is_result_str_str_ty(&expr.ty);
+                // value/list-Ok Result Vars route (the handle Var-case admits them); a str-str Var
+                // keeps its original path, so only a DIRECT str-result CALL lowers to the helper.
                 let value_operand_lowers = match &expr.kind {
-                    almide_ir::IrExprKind::Var { .. } => true,
+                    almide_ir::IrExprKind::Var { .. } => {
+                        !almide_mir::lower::is_result_str_str_ty(&expr.ty)
+                    }
                     almide_ir::IrExprKind::Call {
                         target: almide_ir::CallTarget::Module { module, func, .. },
                         ..
