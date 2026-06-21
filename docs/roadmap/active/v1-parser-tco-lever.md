@@ -1,5 +1,23 @@
 # v1 — the parser-TCO lever (the real "heap-result-expr" cross-repo lever)
 
+## csv full-conquest status (4 public fns, v0-vs-v1 byte-match audit)
+
+Audited each `almide/csv` public fn end-to-end (inline the source, v0 `almide run` vs v1
+render_program+wasmtime). **2 of 4 byte-match; 2 remain, each a DISTINCT mechanism:**
+- ✅ **stringify** (commit 6fb48108 — needed the non-capturing heap-map inline, closing the lift
+  path's nested-map silent miscompile that returned `,`).
+- ✅ **stringify_records** (commit b129ad45 — the capturing heap-map / map-closure-over-Value).
+- ❌ **parse_records** — its `header |> list.enumerate |> list.map((entry) => { let (i,key)=entry;
+  (key, value.str(list.get_or(row,i,""))) })` is a list.map whose SOURCE is `List[(Int,String)]` and
+  RESULT is `List[(String,Value)]` — a TUPLE-element map (capturing `row`). The heap-map inline is
+  STRING-element-result only (DropListStr); a tuple-element result needs the str_value_elem_lists
+  (DropListStrValue) build + a Tuple-construct body arm in lower_heap_result_arm + a tuple-destructure
+  element read. Walls "list.map unliftable" (defers → lift → capturing → no env).
+- ❌ **parse** — `parse_rows_rec`/`parse_after_field` (a recursive `List[List[String]]` accumulator,
+  `rows + [current_row]` / `current_row + [field]`) DOUBLE-FREES at runtime (rc_dec → wasm
+  `unreachable`); v0 correct. A recursive-list-of-list ownership bug, INDEPENDENT of the layout brick
+  / map work (string-parsing + nested list appends). NOT covered by corpus-wall (csv ∉ v0 corpus).
+
 ## THE LAYOUT BRICK read side — OPEN (commits 5b7efec7, e43db65f)
 
 The heap-Result-of-X read/`??` is the layout brick the value-subsystem flagged. Now landed for the
