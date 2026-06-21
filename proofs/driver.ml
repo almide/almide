@@ -12,7 +12,7 @@ let read_file path =
 
 let () =
   if Array.length Sys.argv < 3 then (
-    prerr_endline "usage: checker <ownership|names|caps> <witness-file>";
+    prerr_endline "usage: checker <ownership|names|caps|caps-transitive> <witness-file>";
     exit 2);
   let mode = Sys.argv.(1) in
   let bytes = read_file Sys.argv.(2) in
@@ -21,8 +21,9 @@ let () =
     | "ownership" -> Checker.check_cert_lc bytes  (* loop-aware (v2); flat certs unchanged *)
     | "names" -> Checker.check_names_cert bytes
     | "caps" -> Checker.check_caps_cert bytes
+    | "caps-transitive" -> Checker.check_prog_cert bytes  (* call-graph: transitive reach ⊆ declared *)
     | m ->
-      prerr_endline ("unknown property: " ^ m ^ " (try: ownership | names | caps)");
+      prerr_endline ("unknown property: " ^ m ^ " (try: ownership | names | caps | caps-transitive)");
       exit 2
   in
   if accepted then (print_endline "ACCEPT"; exit 0)

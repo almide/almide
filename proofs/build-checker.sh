@@ -13,6 +13,7 @@ echo "== compile + extract the proven checker =="
 "$COQC" -Q . AlmideTrust OwnershipChecker.v >/dev/null
 "$COQC" -Q . AlmideTrust NameTotality.v >/dev/null
 "$COQC" -Q . AlmideTrust CapabilityBound.v >/dev/null
+"$COQC" -Q . AlmideTrust CapabilityReach.v >/dev/null
 "$COQC" -Q . AlmideTrust Extract.v >/dev/null
 
 echo "== link the runnable checker (extracted check_cert, parser internalized) =="
@@ -48,7 +49,21 @@ run /tmp/loop_acc.cert 0
 run /tmp/loop_leak.cert 1
 run /tmp/loop_drain.cert 1
 
+# TRANSITIVE capability witness (call graph): functions ';'-separated, each
+# `allowed|direct|callee-indices`. accept ⟹ every function's transitive reach ⊆ declared.
+printf '1 2|2|1;1|1|' > /tmp/caps_tr_ok.cert    # main{allow 1,2; use 2; calls helper} helper{allow 1; use 1} → ACCEPT
+printf '1 2|2|1;0|0|' > /tmp/caps_tr_bad.cert    # helper reaches undeclared network (cap 0) ∉ main's allowlist → REJECT
+runt() { # path expected_exit  (caps-transitive mode)
+  set +e; ./checker caps-transitive "$1" >/tmp/checker.out 2>&1; local rc=$?; set -e
+  if [ "$rc" -eq "$2" ]; then echo "ok   $(basename "$1"): $(cat /tmp/checker.out) (exit $rc)";
+  else echo "FAIL $(basename "$1"): got exit $rc want $2 ($(cat /tmp/checker.out))"; exit 1; fi
+}
+runt /tmp/caps_tr_ok.cert 0
+runt /tmp/caps_tr_bad.cert 1
+
 echo
 echo "CHECKER OK: the kernel-proven check accepts the balanced certificate and"
 echo "rejects double-free / leak (incl. heap-loop-carried accumulator certs via the"
-echo "loop-aware check_cert_lc) — the proof now runs on real bytes."
+echo "loop-aware check_cert_lc) — the proof now runs on real bytes. The transitive"
+echo "capability checker (check_prog_cert) accepts a bounded call graph and rejects"
+echo "one whose callee reaches an undeclared capability."

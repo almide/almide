@@ -6,6 +6,7 @@
 From AlmideTrust Require Import OwnershipChecker.
 From AlmideTrust Require Import NameTotality.
 From AlmideTrust Require Import CapabilityBound.
+From AlmideTrust Require Import CapabilityReach.
 From Stdlib Require Import Extraction.
 From Stdlib Require Import ExtrOcamlBasic ExtrOcamlNativeString.
 
@@ -17,4 +18,8 @@ Set Extraction Output Directory ".".
 (* `check_cert_lc` is the loop-aware ownership checker (format v2, backward-compatible
    with the flat `check_cert`); the driver dispatches ownership to it so loop certs
    (heap-loop-carried accumulators) are accepted on the same proven spine. *)
-Extraction "checker.ml" check_cert check_cert_lc check_names_cert check_caps_cert.
+(* `check_prog_cert` (CapabilityReach) is the TRANSITIVE capability checker: it parses the
+   emitted call-graph witness and decides prog_ok, so `accept ⟹ every function's full
+   transitive reach ⊆ its declared bound` — the gate consumes the proof instead of the
+   untrusted transitive fold. *)
+Extraction "checker.ml" check_cert check_cert_lc check_names_cert check_caps_cert check_prog_cert.

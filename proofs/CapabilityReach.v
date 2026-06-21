@@ -17,6 +17,7 @@ From Stdlib Require Import List.
 Import ListNotations.
 From Stdlib Require Import Arith.
 From Stdlib Require Import Bool.
+From Stdlib Require Import String Ascii.
 From AlmideTrust Require Import Subset.
 
 (* A function node: its declared allowlist, its DIRECT used caps, and the indices (into the
@@ -53,7 +54,7 @@ Lemma lookup_fn_ok :
   forall prog, prog_ok prog = true -> forall i, fn_ok prog (lookup prog i) = true.
 Proof.
   intros prog Hprog i. unfold lookup.
-  destruct (Nat.ltb i (length prog)) eqn:Hlt.
+  destruct (Nat.ltb i (List.length prog)) eqn:Hlt.
   - apply Nat.ltb_lt in Hlt.
     unfold prog_ok in Hprog. rewrite forallb_forall in Hprog.
     apply Hprog. apply nth_In. exact Hlt.
@@ -111,4 +112,51 @@ Definition demo_bad : list Fn :=
 Example demo_bad_rejects : prog_ok demo_bad = false.
 Proof. reflexivity. Qed.
 
+(* ─── witness parsing, INTERNALIZED INTO COQ (end-to-end like check_cert) ───
+   A program witness is the call graph the compiler emits: functions separated by ';',
+   each function `<allowed ids>|<direct ids>|<callee indices>` — three whitespace-separated
+   decimal-nat lists (reusing Subset's `pnats`/`split_bar`). Callee entries are 0-based
+   INDICES into the function list (line order). The parser is total; what it produces is
+   what `prog_ok` validates, so the whole "witness bytes ⟶ accept/reject" pipeline is the
+   single extracted proven function `check_prog_cert` (no untrusted transitive fold). *)
+
+Definition is_semi (a : ascii) : bool := Nat.eqb (nat_of_ascii a) 59. (* ';' *)
+
+Fixpoint split_semi (s : string) (cur : string) (acc : list string) : list string :=
+  match s with
+  | EmptyString => acc ++ [cur]
+  | String a r =>
+      if is_semi a then split_semi r EmptyString (acc ++ [cur])
+      else split_semi r (cur ++ String a EmptyString) acc
+  end.
+
+(* one function: split off `allowed`, then `direct`, then the rest is `callees`. *)
+Definition parse_fn (s : string) : Fn :=
+  let (a, rest) := split_bar s EmptyString in
+  let (d, c) := split_bar rest EmptyString in
+  {| fallowed := pnats a None []; fdirect := pnats d None []; fcallees := pnats c None [] |}.
+
+Definition parse_prog (s : string) : list Fn := map parse_fn (split_semi s EmptyString []).
+
+(* THE END-TO-END CHECKER: parse the call-graph witness, then run the program check. *)
+Definition check_prog_cert (s : string) : bool := prog_ok (parse_prog s).
+
+(* SOUNDNESS, end-to-end: acceptance of the witness BYTES guarantees every function's full
+   transitive capability reach stays within its declared bound — `reaches_sound` at the
+   parsed program. The transitive sandbox promise is now decided by the kernel-proven
+   checker over the emitted witness, not by an untrusted fold. *)
+Theorem check_prog_cert_sound :
+  forall s, check_prog_cert s = true ->
+  forall fuel i,
+    subset_prop (fallowed (lookup (parse_prog s) i)) (reaches (parse_prog s) fuel i).
+Proof. intros s H. apply reaches_sound. exact H. Qed.
+
+(* non-vacuous, end-to-end: the demo_ok call graph as a witness string is ACCEPTED; the
+   demo_bad one (helper reaches undeclared network) is REJECTED. *)
+Example cert_ok : check_prog_cert "1 2|2|1;1|1|" = true.
+Proof. reflexivity. Qed.
+Example cert_bad : check_prog_cert "1 2|2|1;0|0|" = false.
+Proof. reflexivity. Qed.
+
 Print Assumptions reaches_sound.
+Print Assumptions check_prog_cert_sound.
