@@ -91,9 +91,20 @@ proven SOUND w.r.t. the relation by fuel induction. **rc_dec carried THROUGH the
 - `rc_dec_isa_frees_when_one`: rc=1 ⟹ decremented to 0 AND reclaimed onto `$freelist` (leak-
   freedom), reachable in the spec (via `erun_sound`).
 So the double-free trap + reclamation that `check-wasm-exec.sh` grounds EMPIRICALLY are now also
-relational ISA THEOREMS. (rc_inc/rc_dec effects are `exists`-style: the fuel evaluator makes
-pinning the unique result need the completeness direction; the witness comes from running the
-verified interpreter. A `forall` upgrade would add `erun` completeness — a follow-up nicety.)
+relational ISA THEOREMS.
+
+FORALL UPGRADE — DONE, every rc theorem is now `forall`/relational (commits 8aaaba53, cf438a37):
+- `isa_det`: the ISA relation is DETERMINISTIC (a config steps to ≤1 successor; combined mutual
+  induction). So a program reduction has a UNIQUE final state.
+- `erun_complete`: irun ⟹ ∃ fuel, erun = Some (combined induction; `erun_S_cons` one-step-unfold
+  keeping inner `erun` folded + `erun_mono_add` fuel monotonicity align the IIf body/continuation
+  at a common fuel — the `cbn`-unfolds-`erun` snag, solved).
+- `rc_inc_isa_effect`, `rc_dec_isa_frees_when_one`: **`forall`** ("EVERY reduction reaches the
+  effect") — the interpreter computes one (`erun_sound`) and `isa_det` makes it THE one.
+- `rc_dec_isa_traps_rel`: **`~ irun`** — NO reduction of a double-free completes (the spec itself
+  is stuck), via `erun_complete` + the executable `forall`-fuel trap. The relational safety theorem.
+So `erun` is a verified interpreter REFINING the spec (sound + complete + deterministic), and all
+three rc facts (inc effect, free/reclaim, double-free trap) hold for EVERY reduction. Axiom-clean.
 
 REMAINING heavy track (#40's maximal form): the FULL canonical WasmCert-Coq ISA (complete
 verified wasm execution semantics) so the binding holds for ALL wasm programs abstractly, not
