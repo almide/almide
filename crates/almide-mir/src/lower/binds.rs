@@ -1899,7 +1899,16 @@ impl LowerCtx {
             // (heap_elem_lists) is correct — the Value is CO-OWNED (the list keeps its ref; the shared
             // block is recursively freed at the LAST ref, via the list's own drop). Checked before the
             // general heap-Some arm, whose Var case requires `live_heap_handles` (a borrow is not).
-            IrExprKind::OptionSome { expr } if crate::lower::is_value_ty(&expr.ty) => {
+            IrExprKind::OptionSome { expr }
+                if crate::lower::is_value_ty(&expr.ty)
+                    || matches!(&expr.ty, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, e)
+                        if e.len() == 1 && matches!(e[0], Ty::String)) =>
+            {
+                // `Some(Value)` (list.get_value) OR `Some(List[String])` (list.get_liststr over a
+                // List[List[String]]): share a NESTED-heap element by handle — Dup the borrowed element
+                // into a co-owned ref (`lower_owned_heap_field`), materialize the 0-or-1 Option. The flat
+                // rc_dec drop is correct (co-owned; the source list keeps its ref and frees the shared
+                // block at the last ref via its own drop).
                 let repr = repr_of(ty).ok()?;
                 let piece = self.lower_owned_heap_field(expr)?;
                 Some(self.materialize_opt_str_some(piece, repr))

@@ -254,6 +254,19 @@ fn option_value_unwrap_or(o: Option[Value], d: Value) -> Value = {
   }
 }
 
+// `?? d` over an Option[List[String]] (`list.get_liststr(rows, i) ?? []`): the SAME len-as-tag prim
+// shape as option_value_unwrap_or, with a List[String] payload — the Some arm loads the @12 inner-list
+// handle and the bare-Var tail auto-acquires (Dup), the None arm returns the fallback.
+fn option_liststr_unwrap_or(o: Option[List[String]], d: List[String]) -> List[String] = {
+  let h = prim.handle(o)
+  let tag = prim.load32(h + 4)
+  if tag == 0 then d
+  else {
+    let v: List[String] = prim.load_handle(h + 12)
+    v
+  }
+}
+
 // list.get / first / last over a List[Value] → Option[Value]. The repr-poly `_str` variants DEEP-COPY
 // the element as a String (`string.repeat`), which corrupts a dynamic Value (an Object copied as a
 // string is empty). The Value accessor instead SHARES the element: `Some(@i)` Dup's the Value handle
@@ -281,6 +294,37 @@ fn list_last_value(xs: List[Value]) -> Option[Value] = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
   if len <= 0 then None else __get_value_some(h, len - 1)
+}
+
+// list.get / first / last over a List[List[String]] → Option[List[String]]. Same SHARE-by-handle
+// discipline as the Value accessor above, for a NESTED-heap element: the repr-poly `_str` variant
+// would DEEP-COPY the element as a String (`string.repeat`), reading a List[String] block's length
+// word as a byte count — garbage. Here `prim.load_handle` reads the element handle and the
+// `List[String]` binding Dup's it (rc_inc the block; the list keeps owning, the Option co-owns), and
+// the result's DropListStr drop frees the block's strings only when its rc reaches 0.
+fn __get_liststr_some(h: Int, i: Int) -> Option[List[String]] = {
+  let v: List[String] = prim.load_handle(h + 12 + i * 8)
+  Some(v)
+}
+
+fn list_get_liststr(xs: List[List[String]], i: Int) -> Option[List[String]] = {
+  let h = prim.handle(xs)
+  let len = prim.load32(h + 4)
+  if i < 0 then None
+  else if i >= len then None
+  else __get_liststr_some(h, i)
+}
+
+fn list_first_liststr(xs: List[List[String]]) -> Option[List[String]] = {
+  let h = prim.handle(xs)
+  let len = prim.load32(h + 4)
+  if len <= 0 then None else __get_liststr_some(h, 0)
+}
+
+fn list_last_liststr(xs: List[List[String]]) -> Option[List[String]] = {
+  let h = prim.handle(xs)
+  let len = prim.load32(h + 4)
+  if len <= 0 then None else __get_liststr_some(h, len - 1)
 }
 
 // value.stringify — the recursive JSON serializer, byte-identical to v0's runtime

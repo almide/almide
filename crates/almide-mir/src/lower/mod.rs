@@ -2351,6 +2351,17 @@ pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], resu
                 {
                     return format!("list.{func}_value");
                 }
+                // A `List[List[String]]` element is itself a heap list, NOT a String — the `_str`
+                // variant would DEEP-COPY it via `string.repeat`, reading the inner list's length word
+                // as a byte count (garbage). Route to the handle-SHARE `_liststr` accessor (the
+                // `List[String]` analogue of `_value`); the inner list is co-owned, dropped DropListStr.
+                if args.len() == 1
+                    && matches!(func, "get" | "first" | "last")
+                    && matches!(&args[0], Ty::Applied(TypeConstructorId::List, e)
+                        if e.len() == 1 && matches!(e[0], Ty::String))
+                {
+                    return format!("list.{func}_liststr");
+                }
                 if args.len() == 1 && is_heap_ty(&args[0]) {
                     return format!("list.{func}_str");
                 }
@@ -2510,6 +2521,16 @@ pub fn is_option_value_ty(ty: &Ty) -> bool {
     use almide_lang::types::constructor::TypeConstructorId;
     matches!(ty, Ty::Applied(TypeConstructorId::Option, a)
         if a.len() == 1 && is_value_ty(&a[0]))
+}
+
+/// Is `ty` an `Option[List[String]]` (the `list.get_liststr(rows, i)` shape — a nested-heap-list
+/// Some-payload)? Its `??` routes to `option.liststr_unwrap_or`, the List[String] analogue of
+/// `option.value_unwrap_or`.
+pub fn is_option_liststr_ty(ty: &Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    matches!(ty, Ty::Applied(TypeConstructorId::Option, a)
+        if a.len() == 1 && matches!(&a[0], Ty::Applied(TypeConstructorId::List, e)
+            if e.len() == 1 && matches!(e[0], Ty::String)))
 }
 
 pub(crate) fn alloc_init(value: &IrExpr) -> Init {
