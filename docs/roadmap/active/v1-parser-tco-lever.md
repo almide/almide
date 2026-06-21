@@ -447,3 +447,26 @@ corpus-wall 4/4 ACCEPT):
 REMAINING for yaml: re-apply bricks 1–5 (mir>ir now free), find+harden the **corpus panic** (blocker b,
 still open — corpus-wall caps step names it), then the 3 stdlib gaps (float.parse / list.enumerate /
 string.to_lower), then yaml byte-match + leak loop.
+
+### Brick re-application probe (2026-06-22) — bricks 1+2 drafted, then REVERTED (sharper blocker map)
+
+Re-applied bricks 1 (`tco_empty_for` → Value/scalar/Tuple) + 2 (`tuple_with_value` routing to
+result_var) and probed `cm2`. Findings (all reverted to keep the tree sound — they regress without 3–5):
+
+- **bricks 1+2 ALONE regress corpus-wall coverage** (still ACCEPT/0-panic, but counts drop:
+  ownership 16556→16549, names 3850→3849). A Value-tuple-returning corpus fn that previously lowered via
+  the post-loop dispatch now routes to result_var and WALLS (because bricks 3–5's tuple
+  construct/drop/destructure are absent). So bricks 1–5 are atomic — never commit 1+2 alone.
+- **`cm2`'s real blocker after bricks 1+2 is NOT tuple construction** — `try_lower_tuple_construct`
+  (binds.rs:1121) ALREADY lowers heap-typed tuple elements (calls `lower_owned_heap_field` per heap
+  slot, records `record_masks`). The wall is in `lower_while` (control.rs:3338, `body_reassigns_heap`):
+  the TCO produces a `while` whose body does `pairs = pairs + [("k", value.str("x"))]` — a HEAP-APPEND
+  accumulator over a `List[(String,Value)]` element. `try_lower_scalar_while` (control.rs:1940) DECLINES
+  it (its append-accumulator path doesn't admit a `(String,Value)` tuple element yet), so the
+  model-one-iteration fallback walls. **So brick 3 is really "admit a (String,Value)/(Value,scalar)
+  tuple ELEMENT in `try_lower_scalar_while`'s heap-append accumulator", not the standalone
+  `try_lower_tuple_construct` (which already works).** Re-scope brick 3 accordingly.
+- v0 oracle for `cm2` (`local effect fn cm2(n,pos,pairs)->(Value,Int)`): `{"k":"x","k":"x","k":"x"}` then
+  `3`. Test via the v1 MIR spine ONLY (`examples/render_program` → WAT → wasmtime, or `lower_source`),
+  NOT `almide run --target wasm` (that is the OLD almide-codegen pipeline, a different backend; it
+  panics earlier in its ANF pass on `List[(String,Value)]` args — unrelated to the MIR spine).
