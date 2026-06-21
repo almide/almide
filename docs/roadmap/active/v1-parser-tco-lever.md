@@ -3,23 +3,31 @@
 ## csv full-conquest status (4 public fns, v0-vs-v1 byte-match audit)
 
 Audited each `almide/csv` public fn end-to-end (inline the source, v0 `almide run` vs v1
-render_program+wasmtime). **2 of 4 byte-match; 2 remain, each a DISTINCT mechanism:**
+render_program+wasmtime). **3 of 4 byte-match; parse_records remains, blocked by a NEWLY-revealed
+issue (nested-heap-list element ops, distinct from the TCO drop-placement bug it was masking):**
 - ✅ **stringify** (commit 6fb48108 — needed the non-capturing heap-map inline, closing the lift
   path's nested-map silent miscompile that returned `,`).
 - ✅ **stringify_records** (commit b129ad45 — the capturing heap-map / map-closure-over-Value).
-- ❌ **parse_records** — bigger than a single map extension; a multi-piece brick with a PREREQUISITE:
-  1. **`list.enumerate` is `@intrinsic("almide_rt_list_enumerate")`** (stdlib/list.almd:42) — NOT
-     self-hosted, so v1 walls "unlinked list.enumerate" even for a bare `header |> list.enumerate`
-     (a for-in destructure over it). Self-hosting it = `List[String] → List[(Int,String)]` (a recursive
-     or prim builder) PLUS a NEW `(Int,String)`-tuple-element list drop set (the existing tuple-list
-     drops are `(String,Value)` = str_value_elem_lists and `List[Value]` = value_elem_lists; an
-     `(Int,String)` tuple — scalar+String — needs its own per-element "rc_dec slot 1 only" recursive free).
-  2. THEN the **tuple-element map**: `List[(Int,String)] → List[(String,Value)]` capturing `row` — the
-     heap-map inline is STRING-element-result only; this needs the str_value_elem_lists result build +
-     a Tuple-construct body arm (`(key, value.str(…))`) in lower_heap_result_arm + the source element
-     SEEDED as a borrowed tuple (param_values + seed_variant_param) so `let (i,key)=entry` destructures.
-  So parse_records is enumerate-self-host (incl a new tuple-list drop) + tuple-element-map-both-sides —
-  a focused multi-brick, not the quick "tuple map" first estimated.
+- ✅ **parse** (commit 646aa233 — the TCO result-accumulator fix: parse_rows_rec's `paf(…, cur+[field])`
+  base, which reads the loop-body-local `field`, is now computed IN the loop via a result accumulator
+  instead of the post-loop dispatch where `field` was dead. THE drop-placement bug, fixed at the root).
+- ❌ **parse_records** — the map machinery (enumerate+map fusion + the tuple-element map, commit
+  a9aecee5) and the parse_rows_rec double-free (the TCO fix, 646aa233) are BOTH done; what remains is a
+  THIRD, separately-revealed issue the TCO trap had been masking: **`list.get` / `list.drop` over a
+  NESTED-heap list `List[List[String]]`** (the `rows` parse_rows returns). Isolated by reducing
+  parse_records body (`va*` repros):
+  - `let header = list.get(rows, 0) ?? []` → **SILENT MISCOMPILE** (`va2`: v0 `[2]`, v1 `[0]`). The
+    dispatch (lower/mod.rs:2354) routes ANY heap element to `list.get_str`, which DEEP-COPIES the
+    element via `string.repeat` — correct for a leaf `String` element, but a COMPOUND-heap element
+    (`List[String]`, `List[_]`) must be SHARED by handle (like the `is_value_ty` → `list.{f}_value`
+    branch at :2350) and tracked by its REAL drop type (`List[String]` → DropListStr, not `_value`'s
+    DropValue). Needs a compound-heap accessor + element-drop tracking, not just the dispatch line.
+  - `let data = list.drop(rows, 1)` → **TRAP** (`va3`). The sublist op is not heap-element-aware for
+    `List[List[String]]` (the moved element handles' rc is mishandled).
+  So parse_records → 4/4 needs the nested-heap-list element accessors (`list.get`/`first`/`last`
+  handle-share + drop-type tracking for compound elements) and a heap-element-aware `list.drop`. The
+  `va2` silent miscompile is a ②-discipline item (mis-dispatch to `_str`); minimum sound step = WALL a
+  compound-heap-element `list.get` (vs the quiet `_str` deep-copy) until the accessor lands.
 - ❌ **parse** (+ the rest of parse_records) — the SHARED `parse_rows_rec`/`parse_after_field`
   double-free (rc_dec → `unreachable` in the prr↔paf mutual recursion). The cause is an INTERACTION,
   narrowed by three minimal repros (an honest correction of an earlier single-cause guess):
