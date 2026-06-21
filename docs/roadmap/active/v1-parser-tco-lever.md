@@ -419,3 +419,31 @@ NEXT SESSION (settled): re-apply the 5 bricks (this section is the exact recipe)
 corpus-gate issues (synthetic-call count + the panic) BEFORE re-testing corpus-wall, then the 3 stdlib
 gaps, then yaml `almide test`. Gate against cm2 (must byte-match) + parse_rows_rec + tuple_destructure
 + corpus-wall (4 ACCEPT) at every step.
+
+## STATUS (2026-06-22, later) — mir>ir breach SOLVED (better than planned); suite-breaking recursion FIXED
+
+Two foundation commits landed on develop-v1 (gate: mir suite 501/0 single-thread + parallel,
+corpus-wall 4/4 ACCEPT):
+
+1. **mir>ir caps breach is GONE — `value.null()` inlined, NOT a gate change** (commit 6ca50e85,
+   `lower/calls.rs`). Instead of teaching `count_ir_calls` to credit the synthetic call (which would
+   add lowering-dependent logic to the trust gate — the [[project_v1_gate_count_vs_lower]] anti-pattern
+   the 守る系 KPI forbids), `value.null()` now lowers INLINE to a tag-0 Value block (Alloc + store32),
+   exactly like the String/List empties. So it is NO CallFn: the TCO's synthetic empty adds zero mir
+   calls (gate-neutral), while an explicit `value.null()` source node still counts in the IR (mir < ir,
+   allowed). corpus-wall ACCEPT unchanged. **This retires corpus-gate blocker (a) entirely without
+   touching the gate.** When re-applying brick 1, `tco_empty_for`'s `Value → value.null()` is now free.
+
+2. **A pre-existing infinite recursion that had been silently breaking the WHOLE mir suite is fixed**
+   (commit 4536f33c, `render_wasm/tests_part1.rs`). The `lower_source` test helper recursively links
+   self-host sources; the Value-drop force-link (a40c1332) set `any_called` for value_core when lowering
+   value_core ITSELF (its drop helpers emit DropValue ops), but `any_defined` only matched the call name
+   (`value.null`) not the impl name (`value_null`), so it re-lowered value_core forever → stack overflow
+   that aborted the test process (masking the suite, and any cargo-test-gated work). Fix: `any_defined`
+   now matches EITHER the call name OR the impl name. The `capturing_heap_map_over_value` test (and the
+   suite) is green again. NOTE: this was NOT the value.null inline's fault — it reproduced with the
+   inline disabled; it is orthogonal test-helper infra.
+
+REMAINING for yaml: re-apply bricks 1–5 (mir>ir now free), find+harden the **corpus panic** (blocker b,
+still open — corpus-wall caps step names it), then the 3 stdlib gaps (float.parse / list.enumerate /
+string.to_lower), then yaml byte-match + leak loop.
