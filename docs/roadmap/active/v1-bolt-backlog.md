@@ -46,6 +46,8 @@ Bolt <ID>: <一行 intent>
 - **C1-B5: ⭐ *unbiased* corpus で honest 距離を測る**
   DoD: dojo task-bank or LLM が別プロセス生成した(自作でない)プログラム batch で byte-match % を測定 → 偏りのない実数
   gate: そのもの(これが計測器)/ 状態: ✅ **実施済(2026-06-18)** — 別プロセスの 15 agent が生成した(自作でない)プログラム → v1 byte-match **0/15**(自作 57 は 7-9/10 = biased-upward を実証)。silent miscompile 0(soundness 無傷)。支配的 gap = Map/Set/records/guards。詳細 [[project_v1_output_parity_gap]]
+  - 🔄 **gap 消化(2026-06-21)**: **records 全域 + `Map[String,String]` を攻略済**(svg full conquest, [[v1-records-svg]]) — record 構築/field/spread/再帰drop/List[Record] literal+concat/`map.entries`(新 `(String,String)` tuple-list)。横断修正 `not <bool-call>` の let arm も。**残 gap = Set / guards / 一般 Map(非 String 値) / path-mini-lang(svg path.almd は v0-wasm 制限で native fallback)**。
+- **C1-B6: 実 repo を v1 で通す(cross-repo conquest)** — csv ✅(4/4) / svg ✅(records render byte一致+leak-free, [[v1-parser-tco-lever]] scoreboard)。次は Map/Set 依存の薄い実 repo を選ぶ。
 - **Camp 1 Exit**: 実 agent プログラムが走って v0 byte一致 → ①市場 + make-verify デモが立つ
   - ✅ **make-verify デモ着手(2026-06-18, commit bed15165)**: `demo/make-verify/` — 誤修正は Almide で明確+回復可能(E010+修正提示)・Python で silent。MSR 再定義(失敗の明確性+回復可能性)を実物で具現、model 非依存(inject-mistake)。種は育成中。
 

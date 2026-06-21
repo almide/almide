@@ -1,5 +1,17 @@
 # v1 — the parser-TCO lever (the real "heap-result-expr" cross-repo lever)
 
+## cross-repo conquest scoreboard (real `github.com/almide` repos on the v1 spine)
+
+- ✅ **csv** — 4/4 public fns byte-match (see below).
+- ✅ **svg** — FULL CONQUEST (2026-06-21). The records-based renderer (rect/text/group/doc/nested
+  children + `map.entries` attrs) renders BYTE-IDENTICAL to v0 and is leak-free at 10⁴. The records
+  language feature (construct / field read / spread / recursive nested-ownership drop / List[Record]
+  literal+concat / `Map[String,String]` entries via the new `(String,String)` tuple-list) is complete
+  on v1; `almide test` 15/0 (mod.almd via WASM). Full design + commit trail: [[v1-records-svg]]
+  (STATUS 6). Cross-cutting fixes that also help every repo: the `not <bool-call>` let arm (lower_bind
+  UnOp), the defunc-map self-recursion admission (`in_defunc_body`), `DropListStrStr` for
+  `List[(String,String)]`.
+
 ## csv full-conquest status (4 public fns, v0-vs-v1 byte-match audit)
 
 Audited each `almide/csv` public fn end-to-end (inline the source, v0 `almide run` vs v1

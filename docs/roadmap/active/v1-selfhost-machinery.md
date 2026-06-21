@@ -14,6 +14,11 @@ settled plan.
 - **math**: abs, max, min
 - **list**: len, is_empty, sum, get_or, get (Option), first (Option), last (Option),
   contains, index_of (Option), product, max (Option), min (Option)
+- **map** (`Map[String,String]` = map_str): new, set, get, keys, values, len, …, and **entries**
+  (`map_entries_str` → `List[(String,String)]`, 2026-06-21) — builds rc-shared (key,value) tuples,
+  freed by `$__drop_list_str_str` (the new `(String,String)` tuple-list: `DropListStrStr`, the
+  `str_str_elem` concat case, the tuple-element defunc-map + `let (k,v)=pair` destructure). The svg
+  render_attrs lever ([[v1-records-svg]]).
 
 The string pattern: read header
 (`handle(s)+4`=byte-len, `+12`=data) via prim.load8/32, build via prim.alloc_str+store8,
