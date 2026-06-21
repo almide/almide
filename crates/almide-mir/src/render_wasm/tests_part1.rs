@@ -284,6 +284,23 @@
         // they are identical (same source), so dedup is a no-op on behavior, not a merge.
         let mut seen = std::collections::HashSet::new();
         functions.retain(|f| seen.insert(f.name.clone()));
+        // A self-hosted fn may call ANOTHER registered impl by its IMPL name (value_core's
+        // `__vstr_arr` recursing through `value_stringify`), but the auto-link RENAMED that def to
+        // its call_name (`value.stringify`). Rewrite those call sites so the internal recursion
+        // resolves to the renamed def, not a dangling impl-name call (mirrors render_program).
+        let impl_to_call: std::collections::HashMap<&str, &str> = self_host_runtime()
+            .iter()
+            .flat_map(|(_, es)| es.iter().map(|(i, c)| (*i, *c)))
+            .collect();
+        for f in functions.iter_mut() {
+            for op in f.ops.iter_mut() {
+                if let crate::Op::CallFn { name, .. } = op {
+                    if let Some(&c) = impl_to_call.get(name.as_str()) {
+                        *name = c.to_string();
+                    }
+                }
+            }
+        }
         MirProgram { functions }
     }
 

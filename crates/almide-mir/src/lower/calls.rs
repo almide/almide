@@ -1153,7 +1153,15 @@ impl LowerCtx {
                         &a.ty,
                     )?;
                     let repr = repr_of(&a.ty)?;
-                    self.materialized_call_arg(dst, repr, &a.ty)
+                    // A prim BORROW result (`prim.load_str` = LoadHandle, marked in `param_values`)
+                    // is owned by its source block — pass it by Handle WITHOUT joining the scope-end
+                    // drop set, exactly like a precise heap-field borrow (`b.label`). Dropping it
+                    // would double-free with the owner's drop (a Str Value's tag-4 payload free).
+                    if self.param_values.contains(&dst) {
+                        CallArg::Handle(dst)
+                    } else {
+                        self.materialized_call_arg(dst, repr, &a.ty)
+                    }
                 }
                 // A `Method`/`Computed`-target call argument (`f(obj.m())`,
                 // `f((g)())`): an UNRESOLVABLE callee (dispatch / closure value not

@@ -193,6 +193,61 @@ fn json_keys(v: Value) -> List[String] = {
   __vobj_keys(v, 0, n, [])
 }
 
+// value.stringify — the recursive JSON serializer, byte-identical to v0's runtime
+// (`almide_rt_value_stringify`): tag-dispatch; scalars rendered directly, Str quoted+escaped,
+// Array/Object joined with "," (no spaces). Escape replaces `\` FIRST (so the backslashes it
+// introduces are not re-escaped), then `"`/newline/CR/tab — v0's exact order.
+fn __json_quote(s: String) -> String = {
+  let e1 = string.replace(s, "\\", "\\\\")
+  let e2 = string.replace(e1, "\"", "\\\"")
+  let e3 = string.replace(e2, "\n", "\\n")
+  let e4 = string.replace(e3, "\r", "\\r")
+  let e5 = string.replace(e4, "\t", "\\t")
+  "\"" + e5 + "\""
+}
+
+// The "," separator before element `i` — "" for the first, "," for the rest. A SCALAR `if` picks
+// the repeat count (k), so the separator is `string.repeat(",", k)` — a call result, not a
+// heap-result `if` (which the scalar-while loop body cannot yet bind; see v1-parser-tco-lever.md).
+fn __vstr_sep(i: Int) -> String = {
+  let k = if i == 0 then 0 else 1
+  string.repeat(",", k)
+}
+
+// Array elements joined by "," — a String ACCUMULATOR recursion (base returns the carried `acc`,
+// the [..] wrap is the caller's); value_stringify is called on each (borrowed) element.
+fn __vstr_arr(v: Value, i: Int, n: Int, acc: String) -> String =
+  if i >= n then acc
+  else {
+    let e: Value = prim.load_handle(prim.handle(v) + 12 + i * 8)
+    let piece = __vstr_sep(i) + value_stringify(e)
+    __vstr_arr(v, i + 1, n, acc + piece)
+  }
+
+// Object pairs joined by "," as `"key":value` — key escaped+quoted, value recursively stringified.
+fn __vstr_obj(v: Value, i: Int, n: Int, acc: String) -> String =
+  if i >= n then acc
+  else {
+    let h = prim.handle(v)
+    let k: String = prim.load_handle(h + 12 + (2 * i) * 8)
+    let val: Value = prim.load_handle(h + 12 + (2 * i + 1) * 8)
+    let piece = __vstr_sep(i) + __json_quote(k) + ":" + value_stringify(val)
+    __vstr_obj(v, i + 1, n, acc + piece)
+  }
+
+fn value_stringify(v: Value) -> String = {
+  let h = prim.handle(v)
+  let tag = prim.load32(h + 4)
+  if tag == 0 then "null"
+  else if tag == 1 then (if prim.load64(h + 12) != 0 then "true" else "false")
+  else if tag == 2 then int.to_string(prim.load64(h + 12))
+  else if tag == 3 then float.to_string(prim.ffrombits(prim.load64(h + 12)))
+  else if tag == 4 then __json_quote(prim.load_str(h + 12))
+  else if tag == 5 then "[" + __vstr_arr(v, 0, prim.load32(h + 8), "") + "]"
+  else if tag == 6 then "{" + __vstr_obj(v, 0, prim.load32(h + 8) / 2, "") + "}"
+  else "null"
+}
+
 // Recursively release each element Value of a tag-5 Array (called only at the Array's last ref).
 fn __vdrop_arr(v: Value, i: Int, n: Int) -> Unit =
   if i >= n then ()

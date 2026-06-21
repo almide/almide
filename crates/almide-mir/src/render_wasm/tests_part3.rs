@@ -687,6 +687,29 @@
     }
 
     #[test]
+    fn value_stringify_executes_on_wasmtime() {
+        // The recursive JSON serializer, self-hosted in value_core, byte-identical to v0's
+        // `almide_rt_value_stringify`: scalars direct, Str quoted+escaped (\ first), Array/Object
+        // joined with "," via a String accumulator (the separator is `string.repeat(",", k)` with a
+        // SCALAR-if k, sidestepping a heap-result-if in the loop body). 2000x is the leak gate — the
+        // `prim.load_str` Str payload is a BORROW (not dropped as a call arg → no double-free).
+        let src = "import json\n\
+            effect fn main() -> Unit = {\n  \
+              println(value.stringify(value.int(42)))\n  \
+              println(value.stringify(value.bool(true)))\n  \
+              println(value.stringify(value.null()))\n  \
+              println(value.stringify(value.str(\"hi\\\"x\")))\n  \
+              println(value.stringify(value.array([value.int(1), value.int(2), value.str(\"a\")])))\n  \
+              println(value.stringify(value.object([(\"k\", value.int(1)), (\"s\", value.str(\"v\"))])))\n  \
+              var n = 0\n  for i in 0..2000 { let s = value.stringify(value.object([(\"x\", value.str(\"v\")), (\"n\", value.int(i))])); n = n + string.len(s) }\n  \
+              println(int.to_string(n)) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("value_stringify", &render_wasm_program(&prog)) {
+            assert_eq!(out, "42\ntrue\nnull\n\"hi\\\"x\"\n[1,2,\"a\"]\n{\"k\":1,\"s\":\"v\"}\n34890");
+        }
+    }
+
+    #[test]
     fn value_object_and_json_keys_execute_on_wasmtime() {
         // The dynamic Value OBJECT (tag 6) self-host: `value.object(pairs)` builds a 2-slot-per-pair
         // block (key String + value Value, each rc_inc'd in — the Object co-owns them, freed by the

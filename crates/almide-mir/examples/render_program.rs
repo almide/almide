@@ -162,6 +162,25 @@ fn main() {
         }
     }
 
+    // A self-hosted runtime fn may call ANOTHER registered impl by its IMPL name (e.g. value_core's
+    // `__vstr_arr` recursing through `value_stringify`), but the auto-link RENAMED that def to its
+    // call_name (`value.stringify`). Rewrite those call sites to the call_name so the internal
+    // recursion resolves to the renamed def instead of a dangling impl-name `(call $…)`.
+    let impl_to_call: std::collections::HashMap<&str, &str> =
+        almide_mir::render_wasm::self_host_runtime()
+            .iter()
+            .flat_map(|(_, es)| es.iter().map(|(i, c)| (*i, *c)))
+            .collect();
+    for f in &mut functions {
+        for op in &mut f.ops {
+            if let almide_mir::Op::CallFn { name, .. } = op {
+                if let Some(&c) = impl_to_call.get(name.as_str()) {
+                    *name = c.to_string();
+                }
+            }
+        }
+    }
+
     // Auto-link the self-hosted runtime: `println(s)` lowers to a `PrintStr` call
     // rendered as `(call $print_str ...)`, so a program that prints needs the
     // Almide-written `print_str` (compiled through this same pipeline). Include the
