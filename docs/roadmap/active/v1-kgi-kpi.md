@@ -57,8 +57,8 @@
 |---|---|---|---|
 | **性質被覆** | 安全性束 の 何 / 8 | **4 / 8**(mem✅ name✅ cap✅ type✅ / leak・reuse・call-mode・byte 残) | C-SAFE / C-PROVEN |
 | **証明書形式の表現力** | eager → perceus → full | **eager**(i/a/d/m 合法、r/b 拒否) | 横断(形式 v1) |
-| **実プログラム被覆** | PCC 鎖を端まで通るコーパス数 | **1**(3 行 fixture) | Gap 3 |
-| **言語面被覆** | subset → call → 制御フロー → closure → nested heap → 全言語 | **subset(call なし)** | Gap 3 |
+| **実プログラム被覆**(③ EXECUTE して v0 byte一致) | 端まで実行して v0 一致する実 repo/関数 | **実 repo 2 full-conquest**(`csv` 4/4 + `svg` records render)+ 多数 fixture ―― いずれも byte一致 + leak-free(10⁴ loop)+ corpus-wall ACCEPT | Gap 3 |
+| **言語面被覆**(③ 実行 path) | subset → call → 制御フロー → closure → nested heap → 全言語 | **call / 制御フロー / heap-result if/match / closure(defunc inline) / nested-heap list / records(構築・field・spread・再帰drop・List[Record] literal+concat) / `Map[String,String]` entries** ―― 実 repo が EXECUTE。残: Set / guards / 一般 Map(非String値) / TS-target | Gap 3 |
 | **バイト束縛** | §3 契約(信頼) → 証明済み | **信頼のまま** | **Gap 1(本丸)** |
 | **frees / leak-freedom** | eager(leak 既知の負) → frees(leak 証明済み) | **eager** | Gap 2 |
 | **統制 MSR** | 未測定 → 対照群との差 | **未測定** | 柱 A |
@@ -163,6 +163,28 @@
 ---
 
 ## 週次記録(最新を上に追記)
+
+### 2026-06-21 — ③実行 path で実 repo 2本 full-conquest(csv + svg)
+- **守る系**: 全 green 維持。corpus-wall **毎コミット ACCEPT**(4性質: ownership 16556 /
+  names 3850 / caps 3141 / caps-transitive 192、leak/double-free なし)。`cargo test -p almide-mir`
+  green(回帰テスト 7 本追加)。検査器規模・TB・公理純度・主張ドリフト不変。silent通過は 🔄 据置。
+  **規律の自己捕捉**: svg を一度 byte一致でコミット後、**10⁴ leak loop で OOM を発見**(map.entries
+  結果の tuple-list が flat drop)→ 即根治(`DropListStrStr`)し次コミットでゲート通過。leak を残した
+  状態は ship していない(②規律)。
+- **攻める系(③ 実行 path)**: **実 repo 2 本が EXECUTE して v0 と byte一致** ―― `csv`(4/4 公開関数)
+  + `svg`(records ベース renderer: rect/text/group/doc/nested children + `map.entries` 属性)。
+  どちらも 10⁴ loop leak-free。**実プログラム被覆 1→実 repo 2 full-conquest + 多数 fixture**。
+  **言語面被覆**: subset → **call / 制御フロー / heap-result if·match / closure(defunc inline) /
+  nested-heap list / records 全域 / `Map[String,String]` entries**。新機構: 再帰 record drop、
+  record 引数 drop、List[Record] literal+concat、`(String,String)` tuple-list(`map_entries_str` /
+  `DropListStrStr`)、defunc-map 内 self-recursion 許可(`in_defunc_body`)、lower_bind の UnOp arm
+  (`let hc = not <call>` の脱落修正)。詳細 [[v1-records-svg]](STATUS 6)/ [[v1-parser-tco-lever]]。
+- **性質被覆は 4/8 据置**: leak-freedom は **経験的に clean(10⁴ loop)だが Perceus 証明は未**
+  ―― 証明済み性質は増えていない(これは emit/実行層の前進であって証明ではない)。Gap 1(byte束縛)/
+  Gap 2(frees 証明)は不変。
+- **読み**: ③ の「実行を建てる新軸」が **実 repo を 2 本通すところまで到達**(検証側先行の差を実行側が
+  詰めた)。残る言語面 gap = **Set / guards / 一般 Map(非String値)**。次は ④ MSR(柱 A・未測定)と
+  Gap 1/2 の証明軸、または Map/Set 依存の薄い実 repo の追加 conquest。守りは 1 つも落とさず前進。
 
 ### 2026-06-14 — lower 被覆ほぼ天井 + 2 つの潜在 accept-but-unsafe を発見・封鎖
 - **守る系**: 全 green 維持。さらに **silent 通過(hole-hunt)が前進** ―― 検証ワーク
