@@ -258,6 +258,66 @@ pub fn transitive_cap_witness_string(
     format!("{}|{}", ids(&func.declared_caps), ids(&reachable))
 }
 
+/// A capability id NO real [`Capability::id`] emits (the registry is Stdout=0 today). The
+/// sentinel UNIVERSE node of the call-graph witness directly "reaches" it, so any function
+/// that reaches an unanalyzable callee (routed to UNIVERSE) is rejected by the proven checker.
+const SENTINEL_CAP: u32 = 1_000_000;
+
+/// Emit the TRANSITIVE capability witness as a CALL GRAPH for the kernel-proven
+/// `check_prog_cert` (proofs/CapabilityReach.v): functions `;`-separated, each
+/// `<declared ids>|<direct ids>|<callee indices>`, callees as 0-based indices into the
+/// emitted (sorted-by-name) order. Unlike [`transitive_cap_witness_string`] — which makes the
+/// COMPILER fold reachability and emits the result — this emits only the GRAPH, and the proven
+/// checker COMPUTES the transitive reach and checks `reach ⊆ declared` per function. The
+/// reachability fold thus moves OUT of the untrusted compiler INTO the proof.
+///
+/// An unknown / cross-file / `is_elided` callee (whose effects this graph cannot see) is
+/// pointed at a sentinel UNIVERSE node (appended last) that directly reaches [`SENTINEL_CAP`],
+/// a capability no real function declares — so any caller transitively reaching it is REJECTED.
+/// This is the same conservative direction as [`reaches_capability_or_unknown`], now decided by
+/// the proof. UNIVERSE declares the sentinel itself, so it passes its own `reach ⊆ declared`.
+pub fn program_cap_graph_witness(
+    program: &BTreeMap<String, MirFunction>,
+    is_known_free: &dyn Fn(&str) -> bool,
+    is_elided: &dyn Fn(&str) -> bool,
+) -> String {
+    let names: Vec<&str> = program.keys().map(|s| s.as_str()).collect();
+    let index_of: BTreeMap<&str, usize> =
+        names.iter().enumerate().map(|(i, n)| (*n, i)).collect();
+    let universe = names.len();
+    let ids = |v: &[Capability]| {
+        v.iter().map(|c| c.id().to_string()).collect::<Vec<_>>().join(" ")
+    };
+    let mut fns: Vec<String> = Vec::with_capacity(names.len() + 1);
+    for name in &names {
+        let func = &program[*name];
+        let mut callees: Vec<usize> = Vec::new();
+        if is_elided(name) {
+            callees.push(universe); // an elided call hides effects from the graph — taint
+        }
+        for op in &func.ops {
+            let callee = match op {
+                Op::CallFn { name: c, .. } | Op::FuncRef { name: c, .. } => Some(c.as_str()),
+                _ => None,
+            };
+            if let Some(c) = callee {
+                if let Some(&idx) = index_of.get(c) {
+                    callees.push(idx);
+                } else if !is_known_free(c) {
+                    callees.push(universe); // unknown / cross-file callee — conservatively taint
+                }
+                // a known-effect-free out-of-program callee reaches nothing → omit
+            }
+        }
+        let cs = callees.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(" ");
+        fns.push(format!("{}|{}|{}", ids(&func.declared_caps), ids(&cap_witness(func).used), cs));
+    }
+    // UNIVERSE: declares + directly uses the sentinel (so it passes its own check) and has no
+    // callees, so it taints any function reaching it without polluting the real graph.
+    fns.push(format!("{}|{}|", SENTINEL_CAP, SENTINEL_CAP));
+    fns.join(";")
+}
+
 /// Conservative transitive capability-reachability — the SOUND basis for a
 /// corpus capability gate across `Op::CallFn` edges. A function's empty (direct)
 /// capability witness is a sound claim of effect-freedom ONLY if this returns
@@ -939,6 +999,36 @@ mod tests {
         let mut undeclared = declared.clone();
         undeclared.declared_caps = vec![];
         assert_eq!(cap_witness_string(&undeclared), "|0");
+    }
+
+    #[test]
+    fn program_cap_graph_witness_emits_the_call_graph_for_check_prog_cert() {
+        use std::collections::BTreeMap;
+        let no = |_: &str| false;
+        // helper prints (Stdout=0); main calls helper; both declare Stdout. Sorted by name:
+        // 0=helper, 1=main, 2=UNIVERSE. helper `0|0|`, main `0||0` (callee 0), UNIVERSE sentinel.
+        let mut helper = func(vec![
+            Op::Const { dst: ValueId(0) },
+            Op::Call { dst: None, func: RtFn::PrintInt, args: vec![CallArg::Scalar(ValueId(0))], result: None },
+        ]);
+        helper.name = "helper".into();
+        helper.declared_caps = vec![Capability::Stdout];
+        let mut main = func(vec![Op::CallFn { dst: None, name: "helper".into(), args: vec![], result: None }]);
+        main.name = "main".into();
+        main.declared_caps = vec![Capability::Stdout];
+        let mut program: BTreeMap<String, MirFunction> = BTreeMap::new();
+        for f in [helper, main] { program.insert(f.name.clone(), f); }
+        // check_prog_cert ACCEPTS: main reaches helper's {0} ⊆ main's declared {0}.
+        assert_eq!(program_cap_graph_witness(&program, &no, &no), "0|0|;0||0;1000000|1000000|");
+
+        // an UNKNOWN (cross-file) callee is routed to the UNIVERSE sentinel → the proven checker
+        // REJECTS (main reaches the sentinel cap ∉ its declared bound). main `0||1`, UNIVERSE 1.
+        let mut m2 = func(vec![Op::CallFn { dst: None, name: "ext".into(), args: vec![], result: None }]);
+        m2.name = "main".into();
+        m2.declared_caps = vec![Capability::Stdout];
+        let mut prog2: BTreeMap<String, MirFunction> = BTreeMap::new();
+        prog2.insert("main".into(), m2);
+        assert_eq!(program_cap_graph_witness(&prog2, &no, &no), "0||1;1000000|1000000|");
     }
 
     #[test]
