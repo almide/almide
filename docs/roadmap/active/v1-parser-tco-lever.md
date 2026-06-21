@@ -11,6 +11,44 @@
   (STATUS 6). Cross-cutting fixes that also help every repo: the `not <bool-call>` let arm (lower_bind
   UnOp), the defunc-map self-recursion admission (`in_defunc_body`), `DropListStrStr` for
   `List[(String,String)]`.
+- 🔄 **yaml** — 1 of 74 fns wall (`collect_map`); the rest lower. The 1 wall is the BIG lever (see below).
+- 🟢 **bigint / rsa / sha1 / porta** — 0 lower-walls (all fns lower); `sha1` byte-matches its test
+  vectors out of the box (2026-06-21 probe). Need only a byte-match audit + leak loop to bank.
+- 🟡 **base64 (9/13) / aes (17/30) / almide-sqlite (20/28) / toml (22/48)** — mechanism walls remain.
+
+## yaml status — the 1 wall is the heap-result-tuple TCO (option C engineering integration)
+
+`collect_map` walls (`heap-result if … would move out an empty deferred heap value`). ROOT: it is a
+MUTUAL-recursive parser (`collect_map ↔ map_entry ↔ after_colon`) that returns a `(Value, Int)` TUPLE
+and accumulates `pairs: List[(String, Value)]`. Its tail SELF-call (`collect_map(…)!`, the blank-line
+skip) is rejected by the heap-result-arm self-call gate — CORRECTLY, because v1 has no TCO for
+heap-result tail recursion and a deep yaml would overflow the wasm stack. So admitting the self-call is
+UNSOUND; the right fix is the **option-C append-accumulator TCO** (turn the same-level entry loop into a
+real loop; the Coq loop-ownership soundness proof is already landed, commit 7f673b4c — this is the
+*engineering integration* that remains).
+
+PROGRESS (2026-06-21, then REVERTED to keep the tree sound): extending the list-literal builder +
+`lower_owned_heap_field` Tuple arm to `(String,Value)` tuples (`DropListStrValue`/`str_value_elem_lists`
+already exist from csv) makes the `[(k, value.str(…))]` accumulator literal MATERIALIZE — a minimal
+`cm2` (literal-key `(Value,Int)` TCO accumulator) moves from WALL → **TRAP**. The TRAP is the CRUX and
+why it was reverted (②discipline — do not ship a reachable miscompile):
+
+- The TCO fires (the recursion becomes a real `while`), and `pairs = pairs + [(k, value.str("x"))]`
+  lowers via the append-accumulator Assign. BUT `value.str(arg)` in the loop body MOVES its String arg
+  into the Value, which escapes into the accumulator (Value → tuple → list → loop-carried `pairs`) — yet
+  the per-iteration teardown (`drop_arm_locals`) STILL `rc_dec`s that String (it stayed in
+  `live_heap_handles`), DOUBLE-FREEING it (`rc_dec(v13)` trap). This is a **loop-body-escape drop-balance
+  bug**: a value-constructor argument that escapes into the loop accumulator is not Consumed out of the
+  per-iteration frame. (`sv1`/`sv2` — the SAME concat/tuple OUTSIDE a loop — are leak-free, so the bug
+  is specifically the loop-escape interaction.)
+- Separately, the real `collect_map` (key = `list.get(lines, pos) ?? ""`, not a literal) still WALLs —
+  a second issue (the `??`-keyed element / the mutual-inline of `map_entry` into a self-recursive shape).
+
+NEXT SESSION (well-scoped): (1) fix the loop-body-escape Consume so a value-constructor arg that lands
+in the accumulator is removed from the per-iteration drop frame; (2) get the mutual-inline to expose
+`collect_map` as self-recursive so the existing TCO targets it (or extend the TCO to the `(Value,Int)`
+tuple result directly); (3) byte-match audit `parse`/`stringify` + 10⁴ leak loop. The str_str/str_value
+list-literal materialization is sound and can be re-landed alongside the loop-escape fix.
 
 ## csv full-conquest status (4 public fns, v0-vs-v1 byte-match audit)
 
