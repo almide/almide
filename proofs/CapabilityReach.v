@@ -18,6 +18,7 @@ Import ListNotations.
 From Stdlib Require Import Arith.
 From Stdlib Require Import Bool.
 From Stdlib Require Import String Ascii.
+From Stdlib Require Import Lia.
 From AlmideTrust Require Import Subset.
 
 (* A function node: its declared allowlist, its DIRECT used caps, and the indices (into the
@@ -117,7 +118,7 @@ Proof. reflexivity. Qed.
    each function `<allowed ids>|<direct ids>|<callee indices>` — three whitespace-separated
    decimal-nat lists (reusing Subset's `pnats`/`split_bar`). Callee entries are 0-based
    INDICES into the function list (line order). The parser is total; what it produces is
-   what `prog_ok` validates, so the whole "witness bytes ⟶ accept/reject" pipeline is the
+   what `prog_within` validates, so the whole "witness bytes ⟶ accept/reject" pipeline is the
    single extracted proven function `check_prog_cert` (no untrusted transitive fold). *)
 
 Definition is_semi (a : ascii) : bool := Nat.eqb (nat_of_ascii a) 59. (* ';' *)
@@ -138,18 +139,33 @@ Definition parse_fn (s : string) : Fn :=
 
 Definition parse_prog (s : string) : list Fn := map parse_fn (split_semi s EmptyString []).
 
-(* THE END-TO-END CHECKER: parse the call-graph witness, then run the program check. *)
-Definition check_prog_cert (s : string) : bool := prog_ok (parse_prog s).
+(* THE GATE CHECKER: for EVERY function, check its transitive reach (the fold computed
+   INSIDE the checker, at fuel = the function count — which bounds any simple call chain in
+   a graph of that many nodes) stays within its declared bound. This is exactly the gate's
+   `reach ⊆ declared` semantics, with the transitive FOLD now done by the proven checker
+   rather than the untrusted Rust reachability fold — and, unlike the `prog_ok` composition
+   law, it accepts a callee that over-declares (no per-edge monotonicity requirement). *)
+Definition prog_within (prog : list Fn) : bool :=
+  forallb (fun i => subset_check (fallowed (lookup prog i)) (reaches prog (List.length prog) i))
+          (List.seq 0 (List.length prog)).
 
-(* SOUNDNESS, end-to-end: acceptance of the witness BYTES guarantees every function's full
-   transitive capability reach stays within its declared bound — `reaches_sound` at the
-   parsed program. The transitive sandbox promise is now decided by the kernel-proven
-   checker over the emitted witness, not by an untrusted fold. *)
+(* THE END-TO-END CHECKER: parse the call-graph witness, then run the program check. *)
+Definition check_prog_cert (s : string) : bool := prog_within (parse_prog s).
+
+(* SOUNDNESS, end-to-end: acceptance of the witness BYTES guarantees every function's
+   transitive capability reach (at the checked fuel = function count, which covers the full
+   reachable set) stays within its declared bound. The transitive sandbox promise is now
+   decided by the kernel-proven checker over the emitted witness, not by an untrusted fold. *)
 Theorem check_prog_cert_sound :
   forall s, check_prog_cert s = true ->
-  forall fuel i,
-    subset_prop (fallowed (lookup (parse_prog s) i)) (reaches (parse_prog s) fuel i).
-Proof. intros s H. apply reaches_sound. exact H. Qed.
+  forall i, i < List.length (parse_prog s) ->
+    subset_prop (fallowed (lookup (parse_prog s) i))
+                (reaches (parse_prog s) (List.length (parse_prog s)) i).
+Proof.
+  intros s H i Hi.
+  unfold check_prog_cert, prog_within in H. rewrite forallb_forall in H.
+  apply subset_check_sound. apply H. apply in_seq. lia.
+Qed.
 
 (* non-vacuous, end-to-end: the demo_ok call graph as a witness string is ACCEPTED; the
    demo_bad one (helper reaches undeclared network) is REJECTED. *)
