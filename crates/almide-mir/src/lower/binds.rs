@@ -1698,6 +1698,16 @@ impl LowerCtx {
                 }
                 Some(obj)
             }
+            // A list CONCAT field (`children: parent.children + [child]` — the svg add_child spread
+            // override): a fresh owned list (`__list_concat`/`_rc`), the new record co-owns it; the
+            // result's per-element drop tracking is set by try_lower_concat_list (incl List[Record]).
+            IrExprKind::BinOp { op: BinOp::ConcatList, .. } => {
+                let obj = self.try_lower_concat_list(expr)?;
+                if !self.live_heap_handles.contains(&obj) {
+                    self.live_heap_handles.push(obj);
+                }
+                Some(obj)
+            }
             IrExprKind::StringInterp { parts } => {
                 let obj = self.try_lower_string_interp(parts)?;
                 if !self.live_heap_handles.contains(&obj) {

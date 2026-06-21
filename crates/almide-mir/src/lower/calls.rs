@@ -560,7 +560,11 @@ impl LowerCtx {
         let list_str_elem = matches!(&elem_ty,
             Ty::Applied(TypeConstructorId::List, a)
                 if a.len() == 1 && matches!(a[0], Ty::String));
-        if !scalar_elem && !heap_elem && !str_value_elem && !list_str_elem {
+        // A RECORD element (`parent.children + [child]` — the svg `add_child` shape): `__list_concat_rc`
+        // rc-incs each record handle (the new list co-owns each), freed recursively by the generated
+        // `$__drop_list_<R>` (each element → `$__drop_<R>`). Gated to a recursive-drop record so that fn exists.
+        let record_elem = self.record_drop_type_name(&elem_ty);
+        if !scalar_elem && !heap_elem && !str_value_elem && !list_str_elem && record_elem.is_none() {
             return None;
         }
         let ops_mark = self.ops.len();
@@ -595,6 +599,8 @@ impl LowerCtx {
             self.str_value_elem_lists.insert(dst);
         } else if list_str_elem {
             self.list_list_str_lists.insert(dst);
+        } else if let Some(rname) = record_elem {
+            self.variant_drop_handles.insert(dst, format!("list_{rname}"));
         }
         Some(dst)
     }

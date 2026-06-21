@@ -845,6 +845,27 @@
     }
 
     #[test]
+    fn record_list_concat_in_spread_override_leak_free() {
+        // The svg `add_child` shape: `{ ...parent, kids: parent.kids + [child] }` — a List[Record]
+        // CONCAT as a spread-override. lower_owned_heap_field now has a ConcatList arm; try_lower_concat_list
+        // rc-incs each record (`__list_concat_rc`) + routes the result to `$__drop_list_<R>`. Was walled
+        // "heap-result SpreadRecord". The 10000x loop is the leak gate.
+        let src = "type E = { tag: String, kids: List[E] }\n\
+            fn leaf(t: String) -> E = E { tag: t, kids: [] }\n\
+            fn addk(p: E, c: E) -> E = { ...p, kids: p.kids + [c] }\n\
+            effect fn main() -> Unit = {\n  \
+              let root = addk(addk(leaf(\"r\"), leaf(\"a\")), leaf(\"b\"))\n  \
+              println(int.to_string(list.len(root.kids)))\n  \
+              var n = 0\n  \
+              for i in 0..10000 { let r = addk(addk(leaf(\"r\"), leaf(\"a\")), leaf(\"b\")); n = n + list.len(r.kids) }\n  \
+              println(int.to_string(n)) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("record_list_concat", &render_wasm_program(&prog)) {
+            assert_eq!(out, "2\n20000");
+        }
+    }
+
+    #[test]
     fn record_list_literal_materializes_and_drops_leak_free() {
         // A `List[Record]` LITERAL (`[leaf("a"), leaf("b")]` — the svg `group([rect(…), …])` shape):
         // build a list block storing each Element handle (moved in via lower_owned_heap_field), routed
