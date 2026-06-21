@@ -13,7 +13,13 @@ its spec files **all "via WASM", 0 failed** (today: `1 via WASM, 1 via native fa
 build-a-tree-render-it-N-times leak loop does not grow memory (the recursive drop is leak-free), AND
 the compiler gates below stay green.
 
-This is **ONE mechanism away**: the **recursive record drop**. Everything else for svg already lowers.
+UPDATE (implementing): the recursive record drop is **DONE** (commit 05a40219). Implementation
+revealed TWO MORE hidden prerequisites svg needs (NOT in the original "1 mechanism" estimate):
+**(A) an owned-value `Map[String,String]` self-host (`map_sss`)** — v1's `Map[String,String]` borrows
+the `map_skv` (String,Int) layout, which stores VALUES raw (`store64`, not owned), so svg's `attrs`
+values DANGLE after the build scope (render reads garbage) and leak; and **(B) `List[Record]` literal
+materialization** — `doc(w,h,[rect(…),…])` / `group([…])` pass a `List[Element]` literal, still walled.
+So svg = record-drop (DONE) + map_sss (A) + List[Record] literal (B). See "THE REMAINING" below.
 
 ## DONE (committed, gated: mir suite + corpus-wall ACCEPT)
 
