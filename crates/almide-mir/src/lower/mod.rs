@@ -2327,6 +2327,14 @@ pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], resu
         // get/first/last (positional) + find (predicate higher-order).
         if matches!(func, "get" | "first" | "last" | "find") {
             if let Ty::Applied(TypeConstructorId::Option, args) = result_ty {
+                // A List[Value] element is a dynamic Value, NOT a String — the `_str` variant DEEP-
+                // COPIES via `string.repeat` (corrupting an Object to {}). Route get/first/last to the
+                // Value accessor, which SHARES the element (rc_inc, like value.get's Ok). (find's
+                // closure-keyed Value form is a later brick — only the positional accessors here.)
+                if args.len() == 1 && is_value_ty(&args[0]) && matches!(func, "get" | "first" | "last")
+                {
+                    return format!("list.{func}_value");
+                }
                 if args.len() == 1 && is_heap_ty(&args[0]) {
                     return format!("list.{func}_str");
                 }
@@ -2477,6 +2485,15 @@ pub fn is_result_str_str_ty(ty: &Ty) -> bool {
     use almide_lang::types::constructor::TypeConstructorId;
     matches!(ty, Ty::Applied(TypeConstructorId::Result, a)
         if a.len() == 2 && matches!(&a[0], Ty::String) && matches!(&a[1], Ty::String))
+}
+
+/// Is `ty` an `Option[Value]` (the `list.get(rows, i)` shape — a dynamic Value Some-payload)? Its
+/// `??` routes to `option.value_unwrap_or` (the prim-based unwrap, since the value-match Some-arm's
+/// scalar_bind rejects a heap Value payload).
+pub fn is_option_value_ty(ty: &Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    matches!(ty, Ty::Applied(TypeConstructorId::Option, a)
+        if a.len() == 1 && is_value_ty(&a[0]))
 }
 
 pub(crate) fn alloc_init(value: &IrExpr) -> Init {

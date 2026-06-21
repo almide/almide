@@ -1639,6 +1639,8 @@ impl LowerCtx {
             Some("result.value_unwrap_or")
         } else if crate::lower::is_result_str_str_ty(&expr.ty) {
             Some("result.str_unwrap_or")
+        } else if crate::lower::is_option_value_ty(&expr.ty) {
+            Some("option.value_unwrap_or")
         } else {
             None
         };

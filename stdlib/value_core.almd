@@ -239,6 +239,50 @@ fn result_str_unwrap_or(r: Result[String, String], d: String) -> String =
     err(e) => d,
   }
 
+// The Value-payload OPTION `??` (`list.get(rows, i) ?? value.object([])`): an Option[Value] unwrap.
+// Written via PRIM (not `match o { some(v) => v, … }`) because the value-match Some-arm uses
+// scalar_bind, which rejects a heap Value payload — but the heap-result-`if` over the len-as-tag
+// (Some = len@4 ≠ 0, payload @12) is EXACTLY the proven value.get shape: the `else`/Some arm loads the
+// @12 Value and the bare-Var tail auto-acquires (Dup), the `then`/None arm returns the fallback.
+fn option_value_unwrap_or(o: Option[Value], d: Value) -> Value = {
+  let h = prim.handle(o)
+  let tag = prim.load32(h + 4)
+  if tag == 0 then d
+  else {
+    let v: Value = prim.load_handle(h + 12)
+    v
+  }
+}
+
+// list.get / first / last over a List[Value] → Option[Value]. The repr-poly `_str` variants DEEP-COPY
+// the element as a String (`string.repeat`), which corrupts a dynamic Value (an Object copied as a
+// string is empty). The Value accessor instead SHARES the element: `Some(@i)` Dup's the Value handle
+// (rc_inc, shallow — the list keeps owning the original; the Option co-owns), exactly value.get's Ok.
+fn __get_value_some(h: Int, i: Int) -> Option[Value] = {
+  let v: Value = prim.load_handle(h + 12 + i * 8)
+  Some(v)
+}
+
+fn list_get_value(xs: List[Value], i: Int) -> Option[Value] = {
+  let h = prim.handle(xs)
+  let len = prim.load32(h + 4)
+  if i < 0 then None
+  else if i >= len then None
+  else __get_value_some(h, i)
+}
+
+fn list_first_value(xs: List[Value]) -> Option[Value] = {
+  let h = prim.handle(xs)
+  let len = prim.load32(h + 4)
+  if len <= 0 then None else __get_value_some(h, 0)
+}
+
+fn list_last_value(xs: List[Value]) -> Option[Value] = {
+  let h = prim.handle(xs)
+  let len = prim.load32(h + 4)
+  if len <= 0 then None else __get_value_some(h, len - 1)
+}
+
 // value.stringify — the recursive JSON serializer, byte-identical to v0's runtime
 // (`almide_rt_value_stringify`): tag-dispatch; scalars rendered directly, Str quoted+escaped,
 // Array/Object joined with "," (no spaces). Escape replaces `\` FIRST (so the backslashes it

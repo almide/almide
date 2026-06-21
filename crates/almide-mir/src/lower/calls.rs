@@ -2162,7 +2162,17 @@ impl LowerCtx {
     pub(crate) fn materialized_call_arg(&mut self, dst: ValueId, repr: Repr, ty: &Ty) -> CallArg {
         if repr.is_heap() {
             self.live_heap_handles.push(dst);
-            if crate::lower::is_list_list_str_ty(ty) {
+            // A `value.as_array(v) ?? []` arg temp (the materialized `??` operand) is a
+            // Result[List[Value],String] that OWNS its inner list — its drop must free the list AND
+            // its element Values RECURSIVELY (`DropResultListValue`); the flat `heap_elem_lists`
+            // fallback would only rc_dec the inner-list handle, LEAKING the element Values (a loop
+            // OOMs). Checked BEFORE is_heap_elem_list_ty, which also matches this Result type.
+            // (A Result[Value,String]'s Ok Value is CO-OWNED — value.get Dup's the object's slot, which
+            // keeps its ref — so the flat rc_dec drop is correct there; a recursive free would
+            // double-free the still-referenced slot. So only the list case is reclassified here.)
+            if crate::lower::is_result_listval_ty(ty) {
+                self.value_result_lists.insert(dst);
+            } else if crate::lower::is_list_list_str_ty(ty) {
                 self.list_list_str_lists.insert(dst);
             } else if crate::lower::is_heap_elem_list_ty(ty) {
                 self.heap_elem_lists.insert(dst);

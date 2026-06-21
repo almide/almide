@@ -712,6 +712,30 @@
     }
 
     #[test]
+    fn list_get_value_option_unwrap_executes_on_wasmtime() {
+        // Option-of-Value read (`list.get(rows, i) ?? d` — the stringify_records row accessor). list.get
+        // on a List[Value] dispatches to list.get_value (NOT the `_str` variant, which deep-copies the
+        // element as a String — corrupting an Object to {}); it SHARES the element via Some(Dup), and the
+        // `??` routes to option.value_unwrap_or (prim-based, since the value-match Some-arm rejects a heap
+        // payload). The 2000x loop is the leak gate: value.as_array's OWNED list drops recursively
+        // (value_result_lists), the shared element Values flat (co-owned). Was returning {} + OOM-leaking.
+        let src = "import json\n\
+            effect fn main() -> Unit = {\n  \
+              let rows = value.as_array(value.array([value.object([(\"a\", value.int(1))]), value.str(\"x\")])) ?? []\n  \
+              println(value.stringify(list.get(rows, 0) ?? value.null()))\n  \
+              println(value.stringify(list.get(rows, 1) ?? value.null()))\n  \
+              println(value.stringify(list.get(rows, 9) ?? value.object([])))\n  \
+              match list.get(rows, 0) { some(v) => println(value.stringify(v)), none => println(\"none\") }\n  \
+              var n = 0\n  for i in 0..2000 { let rs = value.as_array(value.array([value.object([(\"k\", value.int(i))])])) ?? []; let g = list.get(rs, 0) ?? value.null(); n = n + string.len(value.stringify(g)) }\n  \
+              println(int.to_string(n)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "list.get_value"));
+        if let Some(out) = build_and_run("list_get_value_opt", &render_wasm_program(&prog)) {
+            assert_eq!(out, "{\"a\":1}\n\"x\"\n{}\n{\"a\":1}\n18890");
+        }
+    }
+
+    #[test]
     fn value_as_string_unwrap_executes_on_wasmtime() {
         // The String-payload Result `??` (`value.as_string(x) ?? "fb"` — Result[String,String]):
         // routed to the self-hosted result.str_unwrap_or, completing the Result-`??` family

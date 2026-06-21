@@ -1893,6 +1893,17 @@ impl LowerCtx {
             // Named-call result, or an OWNED `Var` in `live_heap_handles`, NOT a borrowed param)
             // materializes the 0-or-1-element DynListStr Option (the element MOVED in). Same cert as
             // the heap-result-`if` arm; the owned gate keeps a borrowed `Some(param)` deferred.
+            // `Some(Value)` — a dynamic Value payload (`list.get_value`'s `Some(@i)`): Dup the
+            // (borrowed) Value into a fresh co-owned ref via `lower_owned_heap_field` (exactly
+            // value.get's `Ok(@12)`), then materialize the 0-or-1 Option. The flat rc_dec drop
+            // (heap_elem_lists) is correct — the Value is CO-OWNED (the list keeps its ref; the shared
+            // block is recursively freed at the LAST ref, via the list's own drop). Checked before the
+            // general heap-Some arm, whose Var case requires `live_heap_handles` (a borrow is not).
+            IrExprKind::OptionSome { expr } if crate::lower::is_value_ty(&expr.ty) => {
+                let repr = repr_of(ty).ok()?;
+                let piece = self.lower_owned_heap_field(expr)?;
+                Some(self.materialize_opt_str_some(piece, repr))
+            }
             IrExprKind::OptionSome { expr } if is_heap_ty(&expr.ty) => {
                 let repr = repr_of(ty).ok()?;
                 let piece = match &expr.kind {

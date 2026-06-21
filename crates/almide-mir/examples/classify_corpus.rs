@@ -200,9 +200,11 @@ fn count_ir_calls(body: &almide_ir::IrExpr, registry: &almide_mir::lower::Record
                 // helper, no Stdout). Count +1 so mir == ir, mirroring the String case.
                 let operand_is_value_result = almide_mir::lower::is_value_result_ty(&expr.ty)
                     || almide_mir::lower::is_result_listval_ty(&expr.ty)
-                    || almide_mir::lower::is_result_str_str_ty(&expr.ty);
-                // value/list-Ok Result Vars route (the handle Var-case admits them); a str-str Var
-                // keeps its original path, so only a DIRECT str-result CALL lowers to the helper.
+                    || almide_mir::lower::is_result_str_str_ty(&expr.ty)
+                    || almide_mir::lower::is_option_value_ty(&expr.ty);
+                // value/list-Ok Result + Option[Value] Vars route (the handle Var-case admits them);
+                // a str-str Var keeps its original path, so only a DIRECT str-result CALL lowers there.
+                // An Option[Value] operand is a self-host option CALL (list.get) or a Var.
                 let value_operand_lowers = match &expr.kind {
                     almide_ir::IrExprKind::Var { .. } => {
                         !almide_mir::lower::is_result_str_str_ty(&expr.ty)
@@ -210,10 +212,16 @@ fn count_ir_calls(body: &almide_ir::IrExpr, registry: &almide_mir::lower::Record
                     almide_ir::IrExprKind::Call {
                         target: almide_ir::CallTarget::Module { module, func, .. },
                         ..
-                    } => almide_mir::lower::is_self_host_result_str_module_fn(
-                        module.as_str(),
-                        func.as_str(),
-                    ),
+                    } => {
+                        almide_mir::lower::is_self_host_result_str_module_fn(
+                            module.as_str(),
+                            func.as_str(),
+                        ) || (almide_mir::lower::is_option_value_ty(&expr.ty)
+                            && almide_mir::lower::is_self_host_option_module_fn(
+                                module.as_str(),
+                                func.as_str(),
+                            ))
+                    }
                     _ => false,
                 };
                 if operand_is_value_result
