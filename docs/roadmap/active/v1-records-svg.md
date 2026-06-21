@@ -31,19 +31,31 @@ String + Map + **recursive List[Element]** fields — the full nested-ownership 
   added to the tail-return path → builds + moves out a fresh same-layout block. (tail.rs.)
   → svg's `attr` now lowers clean.
 
-## Remaining for svg full conquest (the recursive-record frontier)
+## Progress 2 (committed 4190062d, gated: suite 493 + corpus-wall ACCEPT)
 
-1. **`el`** — `Element { tag, attrs: [:], children: [], content: "" }`: record construct with an EMPTY
-   `Map` (`[:]`) and EMPTY `List[Element]` (`[]`) field. `lower_owned_heap_field` must materialize an
-   empty Map / empty List as a record field (today it handles LitStr/ConcatStr/Var/Call).
-2. **List[Element] argument** (doc / group / render call `f(children)`): passing a `List[Element]` to a
-   call walls ("would borrow an empty deferred heap value") — the nested-heap-list arg, analogous to
-   the csv `list.get`/`drop` over `List[List[String]]` but in arg position.
-3. **Recursive Element drop** — a populated `children: List[Element]` field needs a per-field-type
-   masked record drop where the List[Element] slot frees each child Element RECURSIVELY (the
-   nested-ownership record drop; el's empty fields drop flat, but `doc`'s populated children do not).
-4. **Map field ops** — `map.set` (attr), `map.entries` (render) over the `attrs: Map[String,String]`
-   field; `map.entries` is currently unlinked in the v1 self-host registry.
+- **`el`** — empty `Map` (`[:]`) and empty `List[Element]` (`[]`) record fields now materialize
+  (`lower_owned_heap_field` builds a 0-length layout-agnostic block; an empty list of ANY element type
+  is admitted — the recursive `children: []`). `Element { tag, attrs: [:], children: [], content: "" }`
+  constructs + its field reads load the real empty slots.
+- **svg's RECURSIVE RENDERER LOWERS** — `render_el` (recursive, `element.children |> list.map((c) =>
+  render_el(c, …)) |> list.join`), `render_attrs` (Map over `attrs`), and `format_points` all lower
+  clean. The recursive read/traverse side of svg is DONE.
 
-These are the records nested-ownership frontier — a multi-brick continuation, the same class as the
-csv `List[List[String]]` crossing but a wider surface (Map + recursive records).
+## Remaining for svg full conquest (the recursive-record-DROP frontier)
+
+Only the List[Element]-children CONSTRUCTORS remain (`doc`/`group`/`defs` = `{ ...base, children:
+children }`, and `group([e0, e1])` call sites with a `List[Element]` LITERAL). Two intertwined pieces:
+
+1. **List[Element] literal materialization** — `group([rect(…), circle(…)])`: build a list block
+   storing each Element (record) handle (Dup/move), like the csv nested-list builder but for records.
+2. **Recursive Element drop** — THE blocker. Records today drop FLAT via `record_masks` (rc_dec each
+   heap slot), which would leak a populated `children: List[Element]` (rc_dec the list block, leaking
+   the Elements + their String/Map fields). Needs a GENERATED per-record-type recursive drop
+   `$__drop_<Record>` — the same shape as the Value-model `$__drop_value` / the ADT `$__drop_<ty>`
+   (free each heap field; for a `List[Record]` field, free each element recursively) — wired into the
+   masked record drop AND a `List[Record]` drop. This is a substantial mechanism (a record-drop-fn
+   generator), the genuine recursive-ownership frontier for static records; NOT a leaking shortcut
+   (② discipline). A focused next brick.
+
+`map.entries` is also unlinked in the v1 registry (render_attrs lowered because it walls there too —
+re-check once the drop lands).
