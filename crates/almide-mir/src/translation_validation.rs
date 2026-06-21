@@ -80,6 +80,7 @@ pub fn wasm_pattern(op: &crate::Op) -> Option<String> {
         Op::DropValue { .. } => "call $__drop_value".into(),
         Op::DropListValue { .. } => "call $__drop_list_value".into(),
         Op::DropListStrValue { .. } => "call $__drop_list_str_value".into(),
+        Op::DropListStrStr { .. } => "call $__drop_list_str_str".into(),
         Op::DropResultListValue { .. } => "call $__drop_result_lv".into(),
         Op::DropResultValue { .. } => "call $__drop_result_value".into(),
         Op::DropListListStr { .. } => "drop_list_list_str".into(),

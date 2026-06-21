@@ -895,6 +895,13 @@ fn render_op(
         Op::DropListStrValue { v } => {
             format!("    (call $__drop_list_str_value (local.get {}))\n", local(*v))
         }
+        // RECURSIVE drop of a `List[(String, String)]` — the self-hosted `$__drop_list_str_str`
+        // (value_core.almd): each tuple's BOTH String slots rc_dec'd flat at the tuple's last ref, then
+        // the tuple, then the list block. The (String,String) counterpart of `DropListStrValue` (the
+        // map.entries / svg render_attrs shape). Single cert `d`; trusted recursion, leak-loop verified.
+        Op::DropListStrStr { v } => {
+            format!("    (call $__drop_list_str_str (local.get {}))\n", local(*v))
+        }
         // RECURSIVE drop of a `value.as_array` Result `Result[List[Value], String]` — the self-hosted
         // `$__drop_result_lv` (value_core.almd) tag-dispatches at the last ref: Ok frees the
         // `List[Value]` payload recursively, Err frees the String, then the block. A flat `DropListStr`

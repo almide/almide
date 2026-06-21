@@ -887,6 +887,64 @@
     }
 
     #[test]
+    fn map_entries_str_map_and_tuple_destructure() {
+        // The svg render_attrs shape: `map.entries(attrs) |> list.map((p) => { let (k,v)=p; … })`.
+        // map.entries on Map[String,String] → List[(String,String)] (map_entries_str), the defunc
+        // list.map over the (String,String) tuple-list, and the `let (k,v)=p` destructure (which
+        // requires the borrowed tuple element to be a tracked materialized aggregate). Was the wall:
+        // map.entries unlinked + the tuple-element destructure read garbage.
+        let src = "effect fn main() -> Unit = {\n  \
+            var m: Map[String, String] = [:]\n  \
+            m = map.set(m, \"a\", \"1\")\n  \
+            m = map.set(m, \"b\", \"2\")\n  \
+            let s = map.entries(m) |> list.map((p) => { let (k, v) = p; \"${k}=${v}\" }) |> list.join(\" \")\n  \
+            println(s) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("map_entries_str", &render_wasm_program(&prog)) {
+            assert_eq!(out, "a=1 b=2");
+        }
+    }
+
+    #[test]
+    fn not_bool_call_bound_in_let() {
+        // `let hc = not list.is_empty(xs)` — a UnOp(Not) over a Bool CALL, bound to a let. The
+        // lower_bind scalar path had no UnOp arm, so it fell to the deferred Const (the operand call
+        // unemitted, the var silently 0) → `not list.is_empty` always read false (the render_el
+        // `<g/>`-for-a-nonempty-group miscompile). Now routes through lower_scalar_value.
+        let src = "fn pick(xs: List[String]) -> String = {\n  \
+            let hc = not list.is_empty(xs)\n  \
+            if hc then \"has\" else \"none\" }\n\
+            effect fn main() -> Unit = {\n  \
+            println(pick([\"a\"]))\n  \
+            println(pick([])) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("not_bool_call_let", &render_wasm_program(&prog)) {
+            assert_eq!(out, "has\nnone");
+        }
+    }
+
+    #[test]
+    fn defunc_map_self_recursive_record_render() {
+        // The svg render_el shape: a defunctionalized `children |> list.map((c) => rend(c, d+1))`
+        // whose body is a SELF-RECURSIVE call. The heap-result-arm self-call gate WALLED every
+        // self-call (the unbounded-TCO guard); inside a defunc-map body the recursion is bounded by
+        // the tree, so it is admitted (in_defunc_body). Without this the map fell back to a wrong
+        // list.map_str dispatch (invalid wasm / garbage).
+        let src = "type E = { tag: String, kids: List[E] }\n\
+            fn leaf(t: String) -> E = E { tag: t, kids: [] }\n\
+            local fn rend(e: E, d: Int) -> String = {\n  \
+              let body = e.kids |> list.map((c) => rend(c, d + 1)) |> list.join(\",\")\n  \
+              \"${e.tag}[${body}]\" }\n\
+            effect fn main() -> Unit = {\n  \
+              let root = E { tag: \"r\", kids: [leaf(\"a\"), leaf(\"b\")] }\n  \
+              println(rend(root, 0)) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("defunc_map_self_rec", &render_wasm_program(&prog)) {
+            assert_eq!(out, "r[a[],b[]]");
+        }
+    }
+
+    #[test]
     fn record_call_arg_with_map_field_drops_leak_free() {
         // A record passed as a CALL ARGUMENT (`withattr(mk("x"), …)`) must drop via its masked/recursive
         // drop, NOT the flat `Op::Drop` that rc_dec's only the record block and LEAKS its heap fields

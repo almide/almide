@@ -306,7 +306,13 @@ impl LowerCtx {
             // A scalar Int Add/Sub/Mul computes its real value (IntBinOp), and a
             // scalar prim-floor call (`let n = prim.load32(a)`) becomes an Op::Prim —
             // both via lower_scalar_value; outside the subset it rolls back to `Const`.
-            if let IrExprKind::BinOp { .. } | IrExprKind::RuntimeCall { .. } = &value.kind {
+            // A UnOp (`let hc = not list.is_empty(xs)`, `let m = -n`) goes the SAME way —
+            // without it, `not <call>` fell to the deferred `Const` below (the operand call
+            // unemitted, the var silently 0 → the `not list.is_empty` render_el miscompile).
+            if let IrExprKind::BinOp { .. }
+            | IrExprKind::UnOp { .. }
+            | IrExprKind::RuntimeCall { .. } = &value.kind
+            {
                 let mark = self.ops.len();
                 if let Some(dst) = self.lower_scalar_value(value) {
                     self.value_of.insert(var, dst);
@@ -1484,8 +1490,23 @@ impl LowerCtx {
             Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 => a[0].clone(),
             _ => return None,
         };
-        let rname = self.record_drop_type_name(&elem_ty)?;
-        // Lower each element to an OWNED record handle BEFORE the alloc (a field expr that allocates
+        // The element's drop kind: a recursive-drop record (`$__drop_list_<R>`) OR a `(String,String)`
+        // tuple (`Op::DropListStrStr` — the map.entries / `[(k,v), …]` literal shape). Anything else
+        // → `None` (the caller keeps the scalar / wall path).
+        enum ListElemDrop {
+            Record(String),
+            StrStr,
+        }
+        let kind = if let Some(rname) = self.record_drop_type_name(&elem_ty) {
+            ListElemDrop::Record(rname)
+        } else if matches!(&elem_ty,
+            Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String) && matches!(tys[1], Ty::String))
+        {
+            ListElemDrop::StrStr
+        } else {
+            return None;
+        };
+        // Lower each element to an OWNED handle BEFORE the alloc (a field expr that allocates
         // must not interleave with the store sequence).
         let mut objs: Vec<ValueId> = Vec::with_capacity(elements.len());
         for e in elements {
@@ -1513,7 +1534,14 @@ impl LowerCtx {
             self.ops.push(Op::Consume { v: obj });
             self.live_heap_handles.retain(|x| *x != obj);
         }
-        self.variant_drop_handles.insert(dst, format!("list_{rname}"));
+        match kind {
+            ListElemDrop::Record(rname) => {
+                self.variant_drop_handles.insert(dst, format!("list_{rname}"));
+            }
+            ListElemDrop::StrStr => {
+                self.str_str_elem_lists.insert(dst);
+            }
+        }
         self.live_heap_handles.push(dst);
         Some(dst)
     }
@@ -1773,6 +1801,21 @@ impl LowerCtx {
                 }
                 let obj = self.try_lower_scalar_list_slots(elements)?;
                 self.live_heap_handles.push(obj);
+                Some(obj)
+            }
+            // A `(String, String)` TUPLE element of a list literal (`[(k, v), …]` — the map.entries /
+            // str_str shape): a fresh owned tuple block (try_lower_tuple_construct), tracked so the
+            // list builder's Consume + retain balances it. GATED to (String,String) so other tuples
+            // keep the scalar-only `Record | Tuple` arm below (a bare heap-field tuple still defers
+            // there — no leak regression).
+            IrExprKind::Tuple { elements }
+                if matches!(&expr.ty,
+                    Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String) && matches!(tys[1], Ty::String)) =>
+            {
+                let obj = self.try_lower_tuple_construct(elements)?;
+                if !self.live_heap_handles.contains(&obj) {
+                    self.live_heap_handles.push(obj);
+                }
                 Some(obj)
             }
             // An empty Map field — `attrs: [:]` (the svg `el` record). A v1 Map is a List block of

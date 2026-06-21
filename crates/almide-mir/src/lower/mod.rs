@@ -841,6 +841,12 @@ pub(crate) struct LowerCtx {
     /// flat fold cannot see). Inside a frame such a reassignment is DEFERRED: the var
     /// keeps its still-live handle and the new value is carried like every `Opaque`.
     in_frame: u32,
+    /// Depth of enclosing DEFUNCTIONALIZED HOF bodies (`list.map((x) => …)`) being lowered inline.
+    /// When > 0, a SELF-RECURSIVE call in a heap-result body is BOUNDED (the map iterates a finite
+    /// list; a `render_el(child, …)` recurses to the tree's depth, not unbounded), so it is ADMITTED —
+    /// unlike a function-tail self-call (the unbounded TCO shape that overflows the stack), which the
+    /// `lower_heap_result_arm` self-call gate still WALLS when this is 0.
+    in_defunc_body: u32,
     /// Depth of enclosing SCALAR-STATE loops being lowered with real markers
     /// (`LoopStart`/`LoopBreakUnless`/`LoopEnd`). When > 0, a scalar `Assign` reassigns
     /// the var's STABLE local via [`Op::SetLocal`] (the loop-carried state) instead of
@@ -965,6 +971,11 @@ pub(crate) struct LowerCtx {
     /// slot, then the tuple, then the list) — a flat [`Op::DropListStr`] would leak each tuple's payloads.
     /// Populated when a `List[(String,Value)]` concat is materialized via `__list_concat_rc`.
     str_value_elem_lists: HashSet<ValueId>,
+    /// MIR values that are a `List[(String, String)]` (the `map.entries` / svg render_attrs shape) —
+    /// element slots hold owned (String, String) TUPLE blocks. A scope-end drop emits
+    /// [`Op::DropListStrStr`] (`$__drop_list_str_str`: per tuple, rc_dec BOTH String slots, then the
+    /// tuple, then the list). The (String,String) counterpart of `str_value_elem_lists`.
+    str_str_elem_lists: HashSet<ValueId>,
     /// MIR values that are a `value.as_array` Result `Result[List[Value], String]` (the cap-as-tag
     /// 1-slot block whose Ok payload @12 is a `List[Value]`). A scope-end drop emits
     /// [`Op::DropResultListValue`] (`$__drop_result_lv`: Ok → recursive list free, Err → String free)
@@ -1781,6 +1792,8 @@ impl LowerCtx {
             Op::DropListValue { v }
         } else if self.str_value_elem_lists.contains(&v) {
             Op::DropListStrValue { v }
+        } else if self.str_str_elem_lists.contains(&v) {
+            Op::DropListStrStr { v }
         } else if self.list_list_str_lists.contains(&v) {
             // `List[List[String]]` — checked BEFORE heap_elem_lists (it also matches
             // is_heap_elem_list_ty): the nested loop frees each inner row's cell Strings, which a
@@ -2640,6 +2653,7 @@ pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], resu
                     func,
                     "new" | "set" | "remove" | "merge" | "update" | "filter" | "get" | "keys"
                         | "values" | "len" | "is_empty" | "contains" | "all" | "any" | "count" | "fold"
+                        | "entries"
                 )
                 .then_some("_str"),
                 (true, false) => matches!(

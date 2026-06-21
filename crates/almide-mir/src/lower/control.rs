@@ -2265,7 +2265,11 @@ impl LowerCtx {
                 // it (→ `None`): the function keeps its memory-safe linearized form until
                 // real TCO lands. (A non-self call recurses no deeper than the caller, so
                 // it stays admitted.)
-                if name.as_str() == self.fn_name {
+                // EXCEPTION: inside a defunctionalized `list.map` body (`children |> list.map((c) =>
+                // render_el(c, …))`) the self-call is BOUNDED — it recurses to the tree's DEPTH, not
+                // the unbounded linear depth of a tail loop — so executing it is correct (matches v0's
+                // own recursion) and is admitted. The wall applies only to a function-TAIL self-call.
+                if name.as_str() == self.fn_name && self.in_defunc_body == 0 {
                     return None;
                 }
                 let repr = repr_of(result_ty).ok()?;
@@ -3186,6 +3190,20 @@ impl LowerCtx {
         // VarIds already resolve through `value_of`.
         let elem_param = if func == "fold" { params[1].0 } else { params[0].0 };
         self.value_of.insert(elem_param, elem);
+        // A heap-AGGREGATE element (a `(String,String)`/`(String,Value)` tuple, a record) bound as the
+        // lambda param: register the borrowed handle as a materialized aggregate so the body's
+        // `let (k,v)=pair` destructure BORROWS its slots (try_lower_tuple_destructure requires this;
+        // without it the destructure declines → container-grain alias → every field reads garbage).
+        if src_heap {
+            if let Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, a) = &xs.ty {
+                if a.len() == 1
+                    && (matches!(&a[0], Ty::Tuple(_)) || self.aggregate_field_tys(&a[0]).is_some())
+                {
+                    self.param_values.insert(elem);
+                    self.materialized_aggregates.insert(elem);
+                }
+            }
+        }
         if func == "fold" {
             self.value_of.insert(params[0].0, acc_local.unwrap());
         }
@@ -3204,6 +3222,7 @@ impl LowerCtx {
         // subset cannot lower → None → the whole HOF rolls back and the caller WALLS (caps honest).
         let body_mark = self.live_heap_handles.len();
         self.in_frame += 1;
+        self.in_defunc_body += 1;
         let body_v = if let Some(elem_ty) = &result_elem {
             self.lower_heap_result_arm(body, elem_ty)
         } else {
@@ -3212,6 +3231,7 @@ impl LowerCtx {
             self.scalar_loop_depth -= 1;
             v
         };
+        self.in_defunc_body -= 1;
         self.in_frame -= 1;
         let body_v = match body_v {
             Some(v) => v,

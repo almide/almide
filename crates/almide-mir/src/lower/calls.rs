@@ -564,7 +564,14 @@ impl LowerCtx {
         // rc-incs each record handle (the new list co-owns each), freed recursively by the generated
         // `$__drop_list_<R>` (each element → `$__drop_<R>`). Gated to a recursive-drop record so that fn exists.
         let record_elem = self.record_drop_type_name(&elem_ty);
-        if !scalar_elem && !heap_elem && !str_value_elem && !list_str_elem && record_elem.is_none() {
+        // A `(String, String)` TUPLE element (the `map.entries` shape) — `__list_concat_rc` rc-owns each
+        // tuple, freed recursively by `Op::DropListStrStr` (per tuple: rc_dec BOTH String slots). The
+        // (String,String) counterpart of `str_value_elem`.
+        let str_str_elem = matches!(&elem_ty,
+            Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String) && matches!(tys[1], Ty::String));
+        if !scalar_elem && !heap_elem && !str_value_elem && !list_str_elem && !str_str_elem
+            && record_elem.is_none()
+        {
             return None;
         }
         let ops_mark = self.ops.len();
@@ -597,6 +604,8 @@ impl LowerCtx {
             }
         } else if str_value_elem {
             self.str_value_elem_lists.insert(dst);
+        } else if str_str_elem {
+            self.str_str_elem_lists.insert(dst);
         } else if list_str_elem {
             self.list_list_str_lists.insert(dst);
         } else if let Some(rname) = record_elem {
@@ -2087,6 +2096,7 @@ impl LowerCtx {
                     "__drop_value"
                         | "__drop_list_value"
                         | "__svdrop_list"
+                        | "__ssdrop_list"
                         | "__drop_list_str_value"
                         | "__drop_result_lv"
                         | "__varr_copy"

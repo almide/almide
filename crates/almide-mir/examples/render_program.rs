@@ -156,6 +156,7 @@ fn main() {
                                 almide_mir::Op::DropValue { .. }
                                     | almide_mir::Op::DropListValue { .. }
                                     | almide_mir::Op::DropListStrValue { .. }
+                                    | almide_mir::Op::DropListStrStr { .. }
                                     | almide_mir::Op::DropResultValue { .. }
                                     | almide_mir::Op::DropResultListValue { .. }
                             )

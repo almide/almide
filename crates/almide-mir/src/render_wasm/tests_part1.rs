@@ -276,6 +276,7 @@
                                 crate::Op::DropValue { .. }
                                     | crate::Op::DropListValue { .. }
                                     | crate::Op::DropListStrValue { .. }
+                                    | crate::Op::DropListStrStr { .. }
                                     | crate::Op::DropResultValue { .. }
                                     | crate::Op::DropResultListValue { .. }
                             )

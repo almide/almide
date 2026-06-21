@@ -500,6 +500,47 @@ fn __drop_list_str_value(xs: List[(String, Value)]) -> Unit = {
   prim.rc_dec(h)
 }
 
+// The (String, String) tuple-list counterpart of __svdrop_list / __drop_list_str_value (the
+// map.entries / render_attrs shape). At the list's last ref each tuple is freed at its OWN last ref
+// (rc_dec BOTH String slots @ th+12 and @ th+20 — vs the (String,Value) version's __drop_value @20),
+// then the tuple block; then the list block. The per-tuple rc==1 guard makes a SHARED tuple (rc>1,
+// __list_concat_rc rc_inc'd) drop safely. prim-only ⇒ empty cert (a trusted free, leak-loop verified).
+fn __ssdrop_list(xs: List[(String, String)], i: Int, n: Int) -> Unit =
+  if i >= n then ()
+  else {
+    let lh = prim.handle(xs)
+    let tup: (String, String) = prim.load_handle(lh + 12 + i * 8)
+    let th = prim.handle(tup)
+    if prim.load32(th + 0) == 1 then {
+      prim.rc_dec(prim.load64(th + 12))
+      prim.rc_dec(prim.load64(th + 20))
+    } else ()
+    prim.rc_dec(th)
+    __ssdrop_list(xs, i + 1, n)
+  }
+
+fn __drop_list_str_str(xs: List[(String, String)]) -> Unit = {
+  let h = prim.handle(xs)
+  if prim.load32(h + 0) == 1 then __ssdrop_list(xs, 0, prim.load32(h + 4)) else ()
+  prim.rc_dec(h)
+}
+
+// map.entries over a Map[String,String] (the map_str module — interleaved 16-byte entries: key @
+// 12+i*16, value @ 12+i*16+8, both owned). Builds a List[(String,String)] of rc-SHARED (key, value)
+// tuples: `acc + [(k, v)]` Dup's each map String into the tuple's co-ref (the map keeps its own ref;
+// each tuple's drop rc_dec's them; balanced). The render_attrs source.
+fn map_entries_str(m: Map[String, String]) -> List[(String, String)] =
+  __ment_build(m, prim.load32(prim.handle(m) + 4) / 2, 0, [])
+
+fn __ment_build(m: Map[String, String], n: Int, i: Int, acc: List[(String, String)]) -> List[(String, String)] =
+  if i >= n then acc
+  else {
+    let h = prim.handle(m)
+    let k: String = prim.load_str(h + 12 + i * 16)
+    let v: String = prim.load_str(h + 12 + i * 16 + 8)
+    __ment_build(m, n, i + 1, acc + [(k, v)])
+  }
+
 // value.as_array — read the tag; a tag-5 Array yields `Ok(<a fresh List[Value] of its elements>)`,
 // else `Err("expected Array")`. The fresh list SHALLOW-COPIES the Array's inline element handles
 // (`__vfill` + rc_inc), so the array stays valid; the returned Result OWNS the list (freed
