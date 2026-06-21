@@ -35,7 +35,7 @@ use almide_lang::lexer::Lexer;
 use almide_lang::parser::Parser;
 use almide_ir::IrTypeDeclKind;
 use almide_mir::certificate::{
-    name_witness_string, ownership_certificate, reachable_caps_or_tainted,
+    name_witness_string, ownership_certificate, program_cap_graph_witness, reachable_caps_or_tainted,
 };
 use almide_mir::{Capability, MirFunction, MirProgram, Op};
 use almide_optimize::{mono, optimize};
@@ -488,6 +488,11 @@ fn main() {
     let mut ownership_stream = String::new();
     let mut names_stream = String::new();
     let mut caps_stream = String::new();
+    // One line per FULLY-ANALYZABLE+within-bound file: the call-graph witness for the proven
+    // `check_prog_cert` (caps-transitive), which COMPUTES the transitive reach itself — the
+    // fold moves out of this untrusted classifier into the proof. Partially-analyzable files
+    // stay on the per-function `caps.cert` (honest scope), not emitted here.
+    let mut caps_graph_stream = String::new();
 
     // The render-resolvable name oracle for the interp-coverage (c) detector: a DOTTED
     // `CallFn` name (a stdlib `module.func`) renders to `(call $name)` and resolves ONLY
@@ -756,12 +761,16 @@ fn main() {
         let is_elided = |n: &str| elided_call_fns.contains(n);
         let cap_ids =
             |c: &[Capability]| c.iter().map(|x| x.id().to_string()).collect::<Vec<_>>().join(" ");
+        // Track whether the WHOLE file is analyzable + within-bound: only then is the
+        // call-graph witness meaningful (any unanalyzable/over-bound function would route to
+        // the UNIVERSE sentinel and reject — but unanalyzable is honest scope, not a failure).
+        let mut file_graph_clean = !file_mirs.is_empty();
         for (name, mir) in &file_mirs {
             let mut visited = BTreeSet::new();
             match reachable_caps_or_tainted(name, &in_profile_map, &is_known_free, &is_elided, &mut visited)
             {
                 // Unanalyzable (an unknown/cross-file or elided callee hides effects).
-                None => t.caps_unverified += 1,
+                None => { t.caps_unverified += 1; file_graph_clean = false; }
                 // Fully-known reachable set. Caps-VERIFIED iff it is within the
                 // DECLARED bound (`reachable ⊆ declared`): then emit the
                 // `<declared>|<reachable>` witness for the proven `check_caps_cert` to
@@ -782,9 +791,18 @@ fn main() {
                         t.caps_verified += 1;
                     } else {
                         t.caps_unverified += 1;
+                        file_graph_clean = false;
                     }
                 }
             }
+        }
+        // The file is fully analyzable + within bound: emit its call-graph witness as ONE line
+        // for the proven `check_prog_cert` (caps-transitive), which re-derives the transitive
+        // reach itself. (UNIVERSE is unreferenced here — every callee is in-file or known-free.)
+        if file_graph_clean {
+            caps_graph_stream
+                .push_str(&program_cap_graph_witness(&in_profile_map, &is_known_free, &is_elided));
+            caps_graph_stream.push('\n');
         }
     }
 
@@ -804,6 +822,7 @@ fn main() {
     write("ownership.cert", &ownership_stream);
     write("names.cert", &names_stream);
     write("caps.cert", &caps_stream);
+    write("caps_graph.cert", &caps_graph_stream);
 
     // STDERR: the honest coverage report.
     eprintln!("== v0-corpus MIR-lowering wall report ==");

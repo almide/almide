@@ -121,6 +121,12 @@ check_per_function names "$OUTDIR/names.cert" "no dangling MIR reference"
 # "no undeclared STDOUT effect" (stderr / abort / fs / net are real host effects
 # not yet named — a wider Capability set is a later brick).
 check_per_function caps  "$OUTDIR/caps.cert"  "no undeclared Stdout effect, transitive"
+# Caps (TRANSITIVE, fold IN-PROOF): for fully-analyzable files the classifier emits the call
+# GRAPH (one line per file: `declared|direct|callee-indices` per function) and the proven
+# `check_prog_cert` (CapabilityReach) COMPUTES the transitive reach itself — the reachability
+# fold is no longer trusted Rust. A program whose function reaches an undeclared capability,
+# even via a callee, is REJECTED. This is the stronger sibling of the per-function caps gate.
+check_per_function caps-transitive "$OUTDIR/caps_graph.cert" "transitive reach ⊆ declared, fold in-proof (per program)"
 
 cleanup
 echo
