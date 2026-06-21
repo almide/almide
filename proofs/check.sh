@@ -55,5 +55,9 @@ echo "== A2 byte-binding grounding (wat2wasm cross-check; SKIP if wabt absent) =
 bash ./check-wasm-bytes.sh
 
 echo
+echo "== A2 byte-EXECUTION grounding (wasmtime cross-check; SKIP if wasmtime absent) =="
+bash ./check-wasm-exec.sh
+
+echo
 echo "PROOF SPINE OK: kernel-checked, axiom-clean (Closed under the global"
 echo "context), and independently re-verified."
