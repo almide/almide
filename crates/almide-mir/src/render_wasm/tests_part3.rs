@@ -712,6 +712,36 @@
     }
 
     #[test]
+    fn capturing_heap_map_over_value_executes_on_wasmtime() {
+        // map-closure-over-Value: a CAPTURING list.map closure over a HEAP-element list, inlined as a
+        // specialized loop (defunctionalization extended to heap source + heap result). The closure
+        // CAPTURES `obj`/`row` (resolved through value_of) and calls value.get/value.as_string/`??` on
+        // it — the lift path can't represent that env. Exercises the csv stringify_records shape: an
+        // OUTER map over List[Value] whose body is an INNER map over List[String] (capturing the row)
+        // + list.join, with value.get + value.as_string ?? "" + escape_cell-style quoting. 2000x leaks.
+        let src = "import json\n\
+            fn escape_cell(s: String) -> String = if string.contains(s, \",\") then \"\\\"\" + s + \"\\\"\" else s\n\
+            fn rows_to_csv(v: Value) -> String = {\n  \
+              let rows = value.as_array(v) ?? []\n  \
+              let header = [\"name\", \"city\"]\n  \
+              let lines = rows |> list.map((row) =>\n    \
+                header |> list.map((h) => escape_cell(value.as_string(value.get(row, h) ?? value.null()) ?? \"\")) |> list.join(\",\"))\n  \
+              lines |> list.join(\"\\n\")\n }\n\
+            effect fn main() -> Unit = {\n  \
+              let recs = value.array([\n    \
+                value.object([(\"name\", value.str(\"alice\")), (\"city\", value.str(\"nyc\"))]),\n    \
+                value.object([(\"name\", value.str(\"bob\")), (\"city\", value.str(\"LA, CA\"))])\n  \
+              ])\n  \
+              println(rows_to_csv(recs))\n  \
+              var n = 0\n  for i in 0..2000 { let o = value.object([(\"k\", value.str(\"x\"))]); let cs = [\"k\"] |> list.map((h) => value.as_string(value.get(o, h) ?? value.null()) ?? \"\"); n = n + string.len(cs |> list.join(\",\")) }\n  \
+              println(int.to_string(n)) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("capturing_heap_map", &render_wasm_program(&prog)) {
+            assert_eq!(out, "alice,nyc\nbob,\"LA, CA\"\n2000");
+        }
+    }
+
+    #[test]
     fn list_get_value_option_unwrap_executes_on_wasmtime() {
         // Option-of-Value read (`list.get(rows, i) ?? d` — the stringify_records row accessor). list.get
         // on a List[Value] dispatches to list.get_value (NOT the `_str` variant, which deep-copies the

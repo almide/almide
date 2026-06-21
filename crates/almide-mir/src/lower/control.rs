@@ -2105,6 +2105,19 @@ impl LowerCtx {
             // propagation: `e!` returns e's Result unchanged (Ok→Ok, Err→Err), so strip the
             // `!` and lower `e` as the arm (the same identity the tail-position `e!` uses).
             IrExprKind::Unwrap { expr } => self.lower_heap_result_arm(expr, result_ty),
+            // A `??` arm (`(h) => value.as_string(value.get(row,h) ?? …) ?? ""` — the defunc-map cell
+            // projection): the unwrap's fresh owned result (a self-hosted unwrap helper / option_str
+            // call, cert `i`) + the arm's `Consume` (`m`) = the per-arm `"im"` balance; the operand
+            // temp is freed within the arm (`drop_arm_locals`). An out-of-subset `??` returns None →
+            // the caller keeps its WALL/defer (no invalid wasm). track_result=false: NOT a scope-end
+            // local, it is the moved-out arm value.
+            IrExprKind::UnwrapOr { expr, fallback } => {
+                let arm_mark = self.live_heap_handles.len();
+                let obj = self.try_lower_option_unwrap_or(expr, fallback, false)?;
+                self.ops.push(Op::Consume { v: obj });
+                self.drop_arm_locals(arm_mark);
+                Some(obj)
+            }
             IrExprKind::LitStr { value } => {
                 let repr = repr_of(result_ty).ok()?;
                 let obj = self.fresh_value();
@@ -2955,18 +2968,27 @@ impl LowerCtx {
             IrExprKind::Lambda { params, body, .. } => (params, body.as_ref()),
             _ => return None,
         };
-        // SCALAR-element source list only (`List[Int/Float/Bool]`, i64 slots). A heap element
-        // (an i32 handle) would need the nested-ownership build this slice does not emit.
+        // The source element read is a uniform `load64` of slot i — for a SCALAR list it is the
+        // value, for a HEAP list (`List[String]`/`List[Value]`) it is the element HANDLE (a borrow
+        // the inlined body reads). `map` admits a heap source; `filter`/`fold` stay scalar-source
+        // (their element move-out / accumulator paths are not heap-extended here).
         let src_scalar = matches!(&xs.ty,
             Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && !is_heap_ty(&a[0]));
-        if !src_scalar {
+        if !src_scalar && func != "map" {
             return None;
         }
-        // map/filter: a SCALAR-element result list (`List[Int/Float/Bool]`, i64 slots — the
-        // block this slice builds). fold: a SCALAR accumulator. A heap result element or a
-        // heap accumulator needs the nested-ownership build this slice does not emit → defer.
+        // map: a HEAP-element result list (`List[String]`/`List[Value]`) is now built too — each
+        // slot holds an OWNED handle the per-element body produces (via lower_heap_result_arm), and
+        // the result list is tracked for the recursive scope-end drop. filter keeps scalar results;
+        // fold a scalar accumulator. (A heap accumulator / heap-filter still defers.)
+        let result_heap_elem = func == "map"
+            && matches!(result_ty,
+                Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && is_heap_ty(&a[0]));
         let result_ok = match func {
-            "map" | "filter" => matches!(result_ty,
+            "map" => result_heap_elem
+                || matches!(result_ty,
+                    Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && !is_heap_ty(&a[0])),
+            "filter" => matches!(result_ty,
                 Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && !is_heap_ty(&a[0])),
             "fold" => !is_heap_ty(result_ty),
             _ => false,
@@ -2979,13 +3001,42 @@ impl LowerCtx {
         if params.len() != expected_params {
             return None;
         }
+        // A HEAP-element map (source and/or result) is inlined ONLY for a CAPTURING closure — the
+        // case with NO liftable form (the lift path `list.map_str` would pass an empty env). A
+        // NON-capturing heap closure keeps the proven `list.map_str` lift path (its own self-host
+        // test + corpus coverage), so defer here. (The SCALAR C1 inline still fires for both, per #67.)
+        let src_heap = matches!(&xs.ty,
+            Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && is_heap_ty(&a[0]));
+        if src_heap || result_heap_elem {
+            let bound: std::collections::HashSet<VarId> = params.iter().map(|(v, _)| *v).collect();
+            if almide_ir::free_vars::free_vars(body, &bound).is_empty() {
+                return None;
+            }
+        }
 
         let ops_mark = self.ops.len();
         let lhh_mark = self.live_heap_handles.len();
         let lifted_mark = self.lifted.len();
         let value_of_snapshot = self.value_of.clone();
 
-        let result = self.lower_defunc_list_hof_inner(func, xs, params, body, init_idx.map(|i| &args[i]));
+        // The result element type for a heap-element map (the per-element body's owned result is
+        // moved into a slot; the result list is recursively dropped). None ⇒ the scalar path.
+        let result_elem: Option<Ty> = if result_heap_elem {
+            match result_ty {
+                Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 => Some(a[0].clone()),
+                _ => None,
+            }
+        } else {
+            None
+        };
+        let result = self.lower_defunc_list_hof_inner(
+            func,
+            xs,
+            params,
+            body,
+            init_idx.map(|i| &args[i]),
+            result_elem,
+        );
         if result.is_none() {
             self.rollback_scalar_loop(ops_mark, lhh_mark, lifted_mark, value_of_snapshot);
         } else {
@@ -3005,8 +3056,17 @@ impl LowerCtx {
         params: &[(VarId, Ty)],
         body: &IrExpr,
         init: Option<&IrExpr>,
+        result_elem: Option<Ty>,
     ) -> Option<ValueId> {
         use crate::PrimKind;
+        // A heap-element map result is supported for a STRING element only (the result list's
+        // recursive free is the proven `DropListStr` via `heap_elem_lists`). A Value/List element
+        // result needs a different recursive drop — defer cleanly (None → caller keeps WALL/self-host).
+        if let Some(elem) = &result_elem {
+            if !matches!(elem, Ty::String) {
+                return None;
+            }
+        }
         // Borrow the source list (evaluated once). A Var is borrowed; a fresh literal is
         // materialized into an owned temp dropped at the OUTER scope (it stays in
         // live_heap_handles). A non-handle iterable (a Range / scalar) is out of subset.
@@ -3042,6 +3102,12 @@ impl LowerCtx {
                 });
                 let rh = self.fresh_value();
                 self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(rh), args: vec![dst] });
+                // A heap-element (String) map result: track the block for the recursive scope-end
+                // `DropListStr` (frees each element String), not a flat Drop. The per-element body
+                // stores an OWNED String handle into each slot (moved in, this list now owns it).
+                if result_elem.is_some() {
+                    self.heap_elem_lists.insert(dst);
+                }
                 // filter needs a write-cursor (the count of kept elements) — a stable local.
                 let cur = if func == "filter" {
                     let c = self.fresh_value();
@@ -3074,8 +3140,14 @@ impl LowerCtx {
         let src_base = self.load_addr(h, 12);
         let src_addr = self.fresh_value();
         self.ops.push(Op::IntBinOp { dst: src_addr, op: IntOp::Add, a: src_base, b: i8_v });
+        // A HEAP source element is the slot's HANDLE (`LoadHandle` = i32 Ptr — the inlined body reads
+        // it as a BORROWED heap value, e.g. `value.get(row, …)`); a SCALAR element is the i64 value.
+        let src_heap = matches!(&xs.ty,
+            Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, a)
+                if a.len() == 1 && is_heap_ty(&a[0]));
         let elem = self.fresh_value();
-        self.ops.push(Op::Prim { kind: PrimKind::Load { width: 8 }, dst: Some(elem), args: vec![src_addr] });
+        let read_kind = if src_heap { PrimKind::LoadHandle } else { PrimKind::Load { width: 8 } };
+        self.ops.push(Op::Prim { kind: read_kind, dst: Some(elem), args: vec![src_addr] });
 
         // Bind the lambda PARAM(s). map/filter: the single element param = elem. fold: acc
         // (the stable local) + element param = elem. The CAPTURES need no binding — their
@@ -3086,19 +3158,29 @@ impl LowerCtx {
             self.value_of.insert(params[0].0, acc_local.unwrap());
         }
 
-        // Lower the lambda BODY inline as a per-iteration scalar frame. A side-effecting /
-        // heap-result body (the false-green `{ println("hit"); x }`) is NOT scalar-lowerable
-        // → None → the whole HOF rolls back and the caller WALLS (caps stays honest).
+        // Lower the lambda BODY inline as a per-iteration frame. SCALAR result → lower_scalar_value
+        // (pure, no ownership event). HEAP result (`map` → List[String]) → lower_heap_result_arm,
+        // which lowers a general heap-returning body (a call / concat / `??` / nested `list.map …
+        // list.join` — the stringify_records cell projection) to a FRESH owned handle, Consumes it
+        // (moved out of the iteration scope), and drops the body's own temps internally. A body the
+        // subset cannot lower → None → the whole HOF rolls back and the caller WALLS (caps honest).
         let body_mark = self.live_heap_handles.len();
         self.in_frame += 1;
-        self.scalar_loop_depth += 1;
-        let body_v = self.lower_scalar_value(body);
-        self.scalar_loop_depth -= 1;
+        let body_v = if let Some(elem_ty) = &result_elem {
+            self.lower_heap_result_arm(body, elem_ty)
+        } else {
+            self.scalar_loop_depth += 1;
+            let v = self.lower_scalar_value(body);
+            self.scalar_loop_depth -= 1;
+            v
+        };
         self.in_frame -= 1;
         let body_v = match body_v {
             Some(v) => v,
             None => return None,
         };
+        // SCALAR: drop the body's heap temps. HEAP: lower_heap_result_arm already balanced its own
+        // temps + Consumed body_v (moved out), so this is a no-op (live is back to body_mark).
         self.drop_arm_locals(body_mark);
 
         match func {
@@ -3108,7 +3190,17 @@ impl LowerCtx {
                 let rbase = self.load_addr(rh, 12);
                 let raddr = self.fresh_value();
                 self.ops.push(Op::IntBinOp { dst: raddr, op: IntOp::Add, a: rbase, b: i8_v });
-                self.ops.push(Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args: vec![raddr, body_v] });
+                if result_elem.is_some() {
+                    // body_v is an OWNED heap handle (i32) already Consumed by lower_heap_result_arm
+                    // (moved out of the iteration scope). Extend it to i64 (`PrimKind::Handle`,
+                    // exactly the str-list-literal store) then store64 into the slot — the result list
+                    // now owns it (its recursive DropListStr frees it at scope end).
+                    let eh = self.fresh_value();
+                    self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(eh), args: vec![body_v] });
+                    self.ops.push(Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args: vec![raddr, eh] });
+                } else {
+                    self.ops.push(Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args: vec![raddr, body_v] });
+                }
             }
             "filter" => {
                 // if body_v (Bool) then { result[cursor] = elem; cursor += 1 }.
