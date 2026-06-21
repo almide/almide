@@ -266,3 +266,36 @@ single-element tests (`rect|>fill|>render`) need (1) [+ (2) only because the who
 `add_child` must lower]; "group nests children" needs (1)+(2). RECOMMEND: do (2) [List[Record] concat,
 the smaller] then (1) [map.entries_str + (String,String) tuple-list], each gated, then svg `almide
 test` all "via WASM". The records core they build on is complete + committed.
+
+## STATUS 5 — svg is ONE templated piece away (map.entries / (String,String) tuple-list)
+
+This run landed (all gated: suite 496/0, corpus-wall ACCEPT all 4, 10000–20000× leak loops):
+- recursive record drop `$__drop_<R>` (05a40219)
+- record-call-arg leak fix (ec06c7ca)
+- List[Record] LITERAL materialization (bc36226f)
+- List[Record] CONCAT in spread override — svg `add_child` (7dc509c5)
+
+After these, **svg's ONLY remaining wall is `map.entries` on `Map[String,String]`** (render_attrs;
+used by every element render). The SpreadRecord wall is GONE (the concat fixed add_child); add_child,
+attr, fill, render_el, render_attrs, el, rect, group all lower. svg = ONE piece: the
+**`(String,String)` tuple-list**, a DIRECT MIRROR of the existing `(String,Value)` machinery:
+
+- `__drop_list_str_value` / `__svdrop_list` (value_core.almd) → mirror as `__drop_list_str_str` /
+  `__drop_ss_loop` (per tuple: rc_dec BOTH String slots @ th+12 and @ th+20 at the tuple's rc==1, then
+  the tuple block; then the list). The (String,Value) version rc_dec's @12 + `__drop_value` @20 — for
+  (String,String) both are plain `rc_dec`.
+- `map_entries_str(m: Map[String,String]) -> List[(String,String)]` (value_core): the map_str block is
+  interleaved (key @ 12+i*16, value @ 12+i*16+8); build via `acc + [(k, v)]` (rc-shared tuples — the
+  tuple construct Dup's each map String into a co-ref). Register `("map_entries_str","map.entries")`.
+- `try_lower_concat_list`: add a `str_str_elem` case (Tuple[String,String]) → `__list_concat_rc` +
+  track `str_str_elem_lists` (or `variant_drop_handles = "list_str_str"`). MIRROR the `str_value_elem`
+  case exactly.
+- Dispatch `map.entries` on `Map[String,String]` → `map.entries_str` (lower/mod.rs map-dispatch, the
+  "key heap, value heap → _str" branch ~2613).
+- `drop_op_for` + materialized_call_arg + the Call-bind arm: route a `List[(String,String)]` value to
+  the new drop (mirror `str_value_elem_lists` → `DropListStrValue`).
+
+The C1-defunc `list.map` over the tuple-list + the `let (k,v)=pair` destructure should work via the
+existing (String,Value) tuple-map machinery (element-type-agnostic tuple-handle read). Once this lands:
+`cd /Users/o6lvl4/workspace/github.com/almide/svg && almide test` → all "via WASM", 0 failed = svg
+FULL CONQUEST. The records LANGUAGE FEATURE it builds on is COMPLETE + committed.
