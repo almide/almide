@@ -845,6 +845,29 @@
     }
 
     #[test]
+    fn record_call_arg_with_map_field_drops_leak_free() {
+        // A record passed as a CALL ARGUMENT (`withattr(mk("x"), …)`) must drop via its masked/recursive
+        // drop, NOT the flat `Op::Drop` that rc_dec's only the record block and LEAKS its heap fields
+        // (the `f(mk(x))`-in-a-loop OOM). materialized_call_arg now seeds the arg's record_masks +
+        // (for a Map/List[heap]/record field) variant_drop_handles. Map[String,String] (map_str,
+        // interleaved owned key+value) is freed by $__drop_map_ss. The 10000x loop is the leak gate.
+        let src = "type R = { name: String, attrs: Map[String, String] }\n\
+            fn mk(n: String) -> R = R { name: n, attrs: [:] }\n\
+            fn withattr(r: R, k: String, v: String) -> R = { ...r, attrs: map.set(r.attrs, k, v) }\n\
+            effect fn main() -> Unit = {\n  \
+              let r = withattr(mk(\"hi\"), \"a\", \"1\")\n  \
+              println(r.name)\n  \
+              println(int.to_string(map.len(r.attrs)))\n  \
+              var n = 0\n  \
+              for i in 0..10000 { let r2 = withattr(mk(\"x\"), \"k\", \"v\"); n = n + map.len(r2.attrs) }\n  \
+              println(int.to_string(n)) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("record_call_arg_map", &render_wasm_program(&prog)) {
+            assert_eq!(out, "hi\n1\n10000");
+        }
+    }
+
+    #[test]
     fn record_recursive_drop_frees_heap_fields_leak_free() {
         // The recursive record drop: a record with String + List[String] heap fields is freed by the
         // GENERATED `$__drop_R` (rc_dec the String, `$__drop_list_str` the list) — NOT the flat masked

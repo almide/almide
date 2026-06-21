@@ -2185,6 +2185,19 @@ impl LowerCtx {
             if crate::lower::is_value_ty(ty) {
                 self.value_handles.insert(dst);
             }
+            // A RECORD/TUPLE call-argument temp (`f(mk(x))` — a fresh record passed by handle) drops at
+            // the call-site scope end. Without a mask it falls to a flat `Op::Drop` (rc_dec the record
+            // block only), LEAKING every heap field (the `f(mk(x))`-in-a-loop OOM). Seed its heap-slot
+            // `record_masks` (the masked drop frees the leaf fields) and, when a field is a
+            // Map/List[heap]/record/Value, route to the recursive `$__drop_<R>` via variant_drop_handles.
+            if let Some((_, tys)) = self.aggregate_field_tys(ty) {
+                let heap_slots: Vec<usize> =
+                    (0..tys.len()).filter(|&i| is_heap_ty(&tys[i])).collect();
+                self.record_masks.insert(dst, heap_slots);
+                if let Some(name) = self.record_drop_type_name(ty) {
+                    self.variant_drop_handles.insert(dst, name);
+                }
+            }
             CallArg::Handle(dst)
         } else {
             CallArg::Scalar(dst)
