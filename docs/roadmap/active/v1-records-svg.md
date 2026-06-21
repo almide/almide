@@ -134,3 +134,41 @@ records. Concrete pieces:
   engineering; yaml: float.parse strtod + an internal collect_map wall). The deepest frontier.
 - **base64**: v0 E0428 — `@intrinsic("almide_rt_base64_*")` names collide with the stdlib.
 - Already pass v1: sha1, bigint, rsa.
+
+## STATUS (autonomous run — accurate remaining scope, discovered by implementing)
+
+The **recursive record drop is DONE + gated** (commit 05a40219): `generate_record_drop_sources`
+emits `$__drop_<R>` / `$__drop_list_<R>` / `$__drop_map_ss`; `record_drop_type_name` routes records
+via `variant_drop_handles` → `Op::DropVariant`. **Leak-verified at 10000× for a record with String +
+List[String] fields (`record_recursive_drop_frees_heap_fields_leak_free` test).** This is the headline
+"1 mechanism" — delivered.
+
+Implementing it revealed svg needs a CASCADE of more bricks (NOT 1 mechanism). Precise findings:
+
+- svg's `attrs: Map[String,String]` dispatches to **`stdlib/map_str.almd`** (interleaved 16-byte
+  entries: key @ 12+i*16, value @ 12+i*16+8; BOTH store_str-owned; **`len@4 = 2*entries` (slot
+  count)**). The generated `$__drop_map_ss` now matches this (loop `load32(h+4)` slots at 8-byte
+  stride frees the interleaved keys+values) — CORRECT for 1-entry maps at small counts (rec4 works at
+  100×), but **rec4 OOMs at 10000×** → a residual per-iter leak SPECIFIC to the map_str path
+  (rec5/List[String] is leak-free, so it is NOT the record drop). Suspect: `map.set_str` leaks a temp,
+  or an empty-`[:]`-then-`map.set` interaction. NEEDS: bisect the map_str leak (build a bare
+  `var m = [:]; for … { m2 = map.set(m,"k","v") }` loop, no record, and watch memory).
+- **`map.entries` is UNLINKED for `Map[String,String]`** (no `map_entries*` in the registry) — so
+  svg's `render_attrs` (`map.entries(attrs) |> list.map((e)=>{let (k,v)=e; …})`) walls. NEEDS: a
+  `map_entries_str` (→ `List[(String,String)]`) + registry + dispatch, AND the `(String,String)`
+  tuple-list (materialize + destructure + drop — a new tuple-list kind, cf. csv's `(String,Value)`
+  `str_value_elem_lists`).
+- **`List[Record]` literal** (`group([rect(…), circle(…)])`, the "group nests children" test + any
+  multi-child `doc`) — still walls "List argument". NEEDS: a `try_lower_record_list_literal` (alloc +
+  store each Element handle via `lower_owned_heap_field`, track `variant_drop_handles[v] =
+  "list_<R>"`), wired in `lower_owned_heap_field`'s List arm + `lower_call_args` + `lower_bind`;
+  generate `$__drop_list_<R>` for all rec_names R (today only field-referenced ones).
+- A **`heap-result SpreadRecord` (1×)** wall remains in one path (attr/fill/render_attrs/render_el/el
+  are all CLEAN — no regression from the record drop; the suite is 494 green).
+
+svg test breakdown: MOST tests are single-element (`rect(…)|>fill(…)|>render` — need map.entries_str +
+the map_str leak fix, NO List[record]); only "group nests children" needs the List[Record] literal.
+So map.entries_str + map_str-leak unblock the majority; List[record] literal unblocks the last test.
+
+NET: svg = recursive-record-drop (DONE) + map_str-leak-fix + map.entries_str/(String,String)-tuple-list
++ List[Record]-literal. A multi-brick continuation, each gated (suite + corpus-wall + a 10⁴ leak loop).
