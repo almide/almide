@@ -1046,10 +1046,42 @@ impl LowerCtx {
                 if !self.materialized_aggregates.contains(&subj)
                     && self.live_heap_handles.contains(&subj)
                 {
-                    if let Ty::Tuple(tys) = &value.ty {
+                    // The tuple's element types: from value.ty when it is a Tuple, ELSE (brick 5) — an
+                    // effect-fn `let (v,p) = f()!` whose `!` Unwrap render_program strips to a Call, so
+                    // value.ty is the effect Result, NOT a Ty::Tuple — from the PATTERN's bound types.
+                    // Without the pattern fallback the seed misses and the destructure container-grains
+                    // (reads slot 0 as the whole handle + slot 1 as Const 0 — the `8212 / 0` garbage).
+                    let elem_tys: Option<Vec<Ty>> = if let Ty::Tuple(tys) = &value.ty {
+                        Some(tys.clone())
+                    } else if matches!(
+                        &value.kind,
+                        IrExprKind::Unwrap { .. } | IrExprKind::Call { .. }
+                    ) {
+                        Some(
+                            elements
+                                .iter()
+                                .map(|p| match p {
+                                    IrPattern::Bind { ty, .. } => ty.clone(),
+                                    _ => Ty::Unit,
+                                })
+                                .collect(),
+                        )
+                    } else {
+                        None
+                    };
+                    if let Some(tys) = elem_tys {
+                        // A (Value, scalar) tuple's Value slot needs the RECURSIVE __drop_value_tuple
+                        // (a flat record_masks rc_dec leaks the Value's nested payload → 10⁴ OOM) — the
+                        // same routing brick 3's construct uses.
+                        let value_tuple = tys.len() == 2
+                            && crate::lower::is_value_ty(&tys[0])
+                            && !is_heap_ty(&tys[1]);
                         let heap_slots: Vec<usize> =
                             (0..tys.len()).filter(|&i| is_heap_ty(&tys[i])).collect();
-                        if !heap_slots.is_empty() {
+                        if value_tuple {
+                            self.variant_drop_handles.insert(subj, "value_tuple".to_string());
+                            self.materialized_aggregates.insert(subj);
+                        } else if !heap_slots.is_empty() {
                             self.record_masks.insert(subj, heap_slots);
                             self.materialized_aggregates.insert(subj);
                         }
@@ -1821,6 +1853,24 @@ impl LowerCtx {
                     Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String) && matches!(tys[1], Ty::String)) =>
             {
                 let obj = self.try_lower_tuple_construct(elements)?;
+                if !self.live_heap_handles.contains(&obj) {
+                    self.live_heap_handles.push(obj);
+                }
+                Some(obj)
+            }
+            // brick 3: a (Value, scalar) TUPLE — the yaml/cm2 effect-fn tuple-RESULT shape
+            // `(value.object(pairs), pos)`. Slot 0 is a Value (heap, @12), slot 1 a scalar (@20).
+            // `try_lower_tuple_construct` builds it + records `record_masks[obj] = [0]`, but a FLAT
+            // per-slot rc_dec of the Value slot would LEAK the Value's nested Array/Object payload. So
+            // SWAP that for the recursive `$__drop_value_tuple` (value_core) by removing the flat mask
+            // and routing the drop through `variant_drop_handles="value_tuple"` (→ `DropVariant`).
+            IrExprKind::Tuple { elements }
+                if matches!(&expr.ty,
+                    Ty::Tuple(tys) if tys.len() == 2 && crate::lower::is_value_ty(&tys[0]) && !is_heap_ty(&tys[1])) =>
+            {
+                let obj = self.try_lower_tuple_construct(elements)?;
+                self.record_masks.remove(&obj);
+                self.variant_drop_handles.insert(obj, "value_tuple".to_string());
                 if !self.live_heap_handles.contains(&obj) {
                     self.live_heap_handles.push(obj);
                 }

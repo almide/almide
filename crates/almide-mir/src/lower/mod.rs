@@ -2956,6 +2956,27 @@ fn tco_empty_for(ty: &Ty) -> Option<IrExpr> {
         Ty::Applied(TypeConstructorId::List, _) => {
             Some(tco_ir(IrExprKind::List { elements: vec![] }, ty.clone()))
         }
+        // brick 1: scalar accumulators empty to their zero value (no ownership).
+        Ty::Int => Some(tco_ir(IrExprKind::LitInt { value: 0 }, Ty::Int)),
+        Ty::Float => Some(tco_ir(IrExprKind::LitFloat { value: 0.0 }, Ty::Float)),
+        Ty::Bool => Some(tco_ir(IrExprKind::LitBool { value: false }, Ty::Bool)),
+        // brick 1: a tuple accumulator empties componentwise (recursive) — declines if any field
+        // has no clean empty.
+        Ty::Tuple(tys) => {
+            let elements: Option<Vec<IrExpr>> = tys.iter().map(tco_empty_for).collect();
+            elements.map(|elements| tco_ir(IrExprKind::Tuple { elements }, ty.clone()))
+        }
+        // brick 1: a Value result accumulator empties to `value.null()`. It lowers INLINE to a tag-0
+        // Value block (commit 6ca50e85), so it is gate-neutral (no synthetic mir CallFn) — the
+        // CallTarget::Module path my value.null inline intercepts.
+        _ if is_value_ty(ty) => Some(tco_ir(
+            IrExprKind::Call {
+                target: CallTarget::Module { module: sym("value"), func: sym("null"), def_id: None },
+                args: vec![],
+                type_args: vec![],
+            },
+            ty.clone(),
+        )),
         _ => None,
     }
 }
@@ -3438,11 +3459,18 @@ pub(crate) fn try_tco_rewrite(
             .iter()
             .any(|v| loop_lets.contains(v))
     });
-    // When it does, carry the base value out through a RESULT ACCUMULATOR computed in the loop, and
-    // the post-loop is a trivial read. Needs an empty initial value of the result type; without one
-    // (Value/Result) DECLINE the TCO entirely — the function keeps its memory-safe non-TCO form (a
-    // clean wall), never the dispatch's use-after-free.
-    let result_var: Option<VarId> = if base_reads_loop_local {
+    // brick 2: a Value-CONTAINING tuple result must ALSO route to the result accumulator. The
+    // post-loop dispatch recomputes a tuple base from the carried params, but a tuple whose base
+    // holds a `value.object(..)`/`value.str(..)` CALL alongside a sibling scalar carry reads the
+    // scalar STALE (pos=0 not the loop's final pos) — the in-loop accumulator reads the LIVE values.
+    // A Value-FREE tuple (csv `pf`'s `(acc, pos)`) works via the dispatch and routing it regresses
+    // parse_rows_rec, so gate strictly on a Value-containing tuple.
+    let tuple_with_value = matches!(&ret_ty, Ty::Tuple(tys) if tys.iter().any(is_value_ty));
+    // When it does (or a base reads a loop-body-local), carry the base value out through a RESULT
+    // ACCUMULATOR computed in the loop, and the post-loop is a trivial read. Needs an empty initial
+    // value of the result type; without one DECLINE the TCO entirely — the function keeps its
+    // memory-safe non-TCO form (a clean wall), never the dispatch's use-after-free.
+    let result_var: Option<VarId> = if base_reads_loop_local || tuple_with_value {
         tco_empty_for(&ret_ty)?;
         let rv = VarId(slot_next);
         slot_next += 1;
