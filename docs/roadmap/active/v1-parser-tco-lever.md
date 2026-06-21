@@ -23,15 +23,19 @@ full Result family — each byte-matches v0, leak-loop clean, corpus-wall ACCEPT
   materialized_call_arg (the flat drop leaked the element Values, a loop OOMed); a Result[Value,String]
   Ok stays flat (CO-OWNED). Verified byte-match incl Object elements, 2000x leak-clean, corpus ACCEPT.
 
-REMAINING for csv stringify_records — both are list.map-closure × Value defunctionalization gaps (the
-heap-Result/Option READ family is now DONE; single-level `list.map` over List[Value] works — `rows |>
-list.map((r) => value.stringify(r))` byte-matches):
-- **Value ops inside a map closure** (`header |> list.map((h) => value.as_string(value.get(row, h) ??
-  …) ?? "")`): a `list.map` whose closure CAPTURES an outer Value (`row`/`obj`) and calls `value.get`
-  on it emits INVALID wasm (a defunctionalization × captured-Value gap — should at least wall cleanly).
-- **nested list.map with a Value OUTER element** (`rows |> list.map((row) => header |> list.map(...))`):
-  walls when the outer element is a Value (nested map over Int + capture already works — it is the
-  Value-outer combination). Both block stringify_records' inner row→cells projection.
+- ✅ **map-closure-over-Value** — DONE (commit b129ad45/264976e8). csv **stringify_records byte-matches
+  v0** (incl CSV quoting `LA, CA` → `"LA, CA"`). The C1 inline `list.map` was extended to a HEAP-element
+  source AND result: a CAPTURING closure over a List[Value]/List[String] (no liftable env) inlines as a
+  specialized loop — the element is read by `LoadHandle` (a borrowed i32 the body uses, e.g.
+  `value.get(row, h)`), the per-element body lowers via `lower_heap_result_arm` (a general heap expr:
+  call / concat / nested `list.map … list.join` / the new `??` arm routing `value.as_string ?? ""`
+  through the unwrap helpers), and the fresh owned result is Handle-extended + stored into a DynListStr
+  slot tracked `heap_elem_lists` (recursive drop). The nested cell projection (outer map over rows
+  capturing `header`, inner map over header capturing `row`) inlines BOTH levels. Gated to CAPTURING
+  closures (non-capturing heap maps keep the proven `list.map_str` lift path) + STRING-element results.
+  Verified: all map-closure-over-Value shapes byte-match, 2000x leak-clean, corpus-wall ACCEPT (16514
+  heap objects, caps-transitive), suite 487/0, diff-fuzz green. **The full layout-brick lever is closed:
+  heap-Result/Option READ family + Option[Value] + map-closure-over-Value all land csv stringify_records.**
 
 
 The org-trust dashboard's top wall reason (~40, blocking toml/svg/aes/base64/csv) reads as the
