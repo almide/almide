@@ -236,3 +236,33 @@ svg full conquest now needs only svg-SPECIFIC STDLIB coverage (NOT the records f
 svg test breakdown: single-element tests (`rect|>fill|>render`) need (1); "group nests children" needs
 (2). RECOMMEND continuing as: "map.entries_str + (String,String) tuple-list" → "List[Record] literal"
 → svg `almide test` all "via WASM". Each an independent gated brick on the now-complete records core.
+
+## STATUS 4 — records feature + List[Record] literal DONE; svg needs 2 final svg-specific pieces
+
+This autonomous run landed (all gated: suite 496/0, corpus-wall ACCEPT all 4, 10000× leak loops):
+- recursive record drop `$__drop_<R>` (05a40219)
+- record-call-argument leak fix (ec06c7ca)
+- **List[Record] literal materialization** `try_lower_record_list_literal` (bc36226f) — `group([rect…])`
+  builds + drops via `$__drop_list_<R>`; generate `$__drop_list_<R>` for every recursive-drop record.
+
+The records LANGUAGE FEATURE is complete on v1. svg `almide test` (whole module compiled per test
+file) now walls on exactly TWO svg-specific stdlib/lowering pieces (confirmed via svg_r + rec7):
+
+1. **`map.entries` for `Map[String,String]`** (render_attrs, used by EVERY element render) — UNLINKED.
+   Needs `map_entries_str` (→ `List[(String,String)]`) which needs the **`(String,String)` tuple-list**
+   sub-feature: build it (a prim builder over map_str's interleaved entries — alloc a 2-slot tuple per
+   entry, store_str-copy key+value, store the tuple handle in the list), the C1-defunc `list.map` over
+   it with the `let (k,v)=pair` destructure (cf. csv's `(String,Value)` `str_value_elem_lists` —
+   PARALLEL machinery for `(String,String)`), and a `List[(String,String)]` drop (per tuple: rc_dec 2
+   Strings). The biggest remaining piece.
+2. **`List[Record]` CONCAT** (`add_child` = `{ ...parent, children: parent.children + [child] }`) —
+   `lower_owned_heap_field` has no `ConcatList` arm, so the spread-override `children + [child]` walls
+   "heap-result SpreadRecord". Needs: a `ConcatList` arm in `lower_owned_heap_field` that builds the
+   appended `List[Record]` (rc_inc each kept record + the new one, cf. `__ldls_share`) and tracks the
+   result `variant_drop_handles = "list_<R>"`. Smaller than (1); mirrors the List[Record] literal.
+
+Both are svg-SPECIFIC stdlib/lowering coverage, NOT the records feature (done). svg test breakdown:
+single-element tests (`rect|>fill|>render`) need (1) [+ (2) only because the whole module incl
+`add_child` must lower]; "group nests children" needs (1)+(2). RECOMMEND: do (2) [List[Record] concat,
+the smaller] then (1) [map.entries_str + (String,String) tuple-list], each gated, then svg `almide
+test` all "via WASM". The records core they build on is complete + committed.
