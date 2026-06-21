@@ -70,8 +70,26 @@ re-checked every build by `check.sh`:
   reclamation), rc_dec rc=0 TRAPS (double-free sentinel). So `run_g` is faithful to a real
   engine for the rc ops — the byte-EXECUTION binding is non-circular.
 
-REMAINING heavy track (#40's maximal form): replace the bespoke `run_g` with the canonical
-**WasmCert-Coq ISA** (a complete verified wasm execution semantics) so the binding holds for
-ALL wasm programs abstractly, not just the rc ops grounded empirically. A multi-week library
-import — proofs flag it "the deferred heavy track". The PRACTICAL byte-binding (the actual
-emitted rc bytes ↔ real encode ↔ real execute) is, however, now closed + grounded.
+## #40 WasmCert-Coq port — the ARCHITECTURE brought in-tree (WasmIsa.v, commit 6f2dfda8)
+Importing the external WasmCert-Coq library is infeasible here (no opam; the library targets
+older Coq, not Rocq 9.1). What it BUYS is an architecture — a relational ISA SPEC + an
+executable interpreter proven to refine it — and that we now have natively:
+- `istep` — a relational small-step semantics, one rule per opcode in the wasm-spec style (the
+  trusted ISA SPEC), with `irun` sequencing it over an instruction list.
+- `estep`/`erun` — an executable evaluator proven to REFINE the spec: `erun_sound` (every result
+  is a real reduction), `erun_complete`, `istep_det` (deterministic).
+- `rc_inc`'s effect (cell → cell+1) proven THROUGH the relation via the refinement.
+This replaces WasmExec.v's bespoke `run_g` (no spec to refine) with a real semantics relation
+for the rc subset. Axiom-clean, in `check.sh` (coqc + coqchk). STRAIGHT-LINE subset.
+
+NEXT brick (same relation): structured control `IIf`/`IUnreachable` for **rc_dec** — the
+safety-critical double-free TRAP + leak-freedom reclamation through the ISA relation (matching
+what check-wasm-exec.sh grounds empirically). Needs a mutual `istep`/`irun` (the `if` rule runs
+a sub-body) + a size/nested induction for the refinement — a real but bounded proof step.
+
+REMAINING heavy track (#40's maximal form): the FULL canonical WasmCert-Coq ISA (complete
+verified wasm execution semantics) so the binding holds for ALL wasm programs abstractly, not
+just the rc subset. A multi-week library port — proofs flag it "the deferred heavy track".
+The PRACTICAL byte-binding (emitted rc bytes ↔ real encode ↔ real execute) is closed + grounded;
+WasmIsa.v now gives the rc subset a spec-relation-backed semantics, the architectural foundation
+a full port would extend.
