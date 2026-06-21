@@ -283,8 +283,15 @@
                         })
                     });
             }
-            let any_defined =
-                entries.iter().any(|(_, call)| functions.iter().any(|f| &f.name == call));
+            // Recognize a source as already provided if EITHER its renamed call name OR its
+            // original IMPL name is present. The IMPL-name check is the re-entry guard: when this
+            // recursive `lower_source` is lowering value_core ITSELF, value_core's drop helpers emit
+            // DropValue ops, so the Value-drop force above sets any_called — but value_core's own
+            // impl fns (value_null, …) are present (not yet renamed), so any_defined is now true and
+            // we skip re-linking value_core into its own lowering (was an infinite recursion).
+            let any_defined = entries
+                .iter()
+                .any(|(impl_fn, call)| functions.iter().any(|f| &f.name == call || &f.name == impl_fn));
             if any_called && !any_defined {
                 let mut rt = lower_source(source);
                 for f in rt.functions.iter_mut() {
