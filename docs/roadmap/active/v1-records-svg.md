@@ -206,3 +206,33 @@ Each is comparable in size to the record-drop brick. This is a multi-session con
 actionable design + file map + gates are recorded above. Recommend re-scoping the goal to one brick at
 a time (e.g. "fix the map_str-in-loop leak" → "map.entries_str + (String,String) tuple-list" →
 "List[Record] literal"), each gated independently.
+
+## STATUS 3 — the records FEATURE is complete (leak fixed); svg needs an stdlib cascade
+
+The "map_str leak" was MISDIAGNOSED: it was a **record-call-argument leak** (`f(mk(x))`), not map_str.
+A record passed by handle dropped via a flat `Op::Drop` (rc_dec the record block only), leaking every
+heap field. FIXED (commit ec06c7ca): `materialized_call_arg` seeds the arg's `record_masks` + routes a
+Map/List[heap]/record-field record to `$__drop_<R>`. **Leak-verified 10000×/20000×** for a record with
+a `Map[String,String]` field passed as an arg AND as a bind. Tests:
+`record_call_arg_with_map_field_drops_leak_free`, `record_recursive_drop_frees_heap_fields_leak_free`.
+
+So the **records LANGUAGE FEATURE is now complete on v1**: construct (incl empty Map/List fields),
+field read (incl call-returned records), spread (incl returned), recursive nested-ownership drop, and
+leak-freedom — all gated (suite 494/0, corpus-wall ACCEPT all 4 properties, leak loops). The
+recursive record drop + its arg/bind drop are the headline mechanism — DELIVERED.
+
+svg full conquest now needs only svg-SPECIFIC STDLIB coverage (NOT the records feature):
+1. **`map.entries` for `Map[String,String]`** — UNLINKED. render_attrs (`map.entries(attrs) |>
+   list.map((p)=>{let (k,v)=p; …})`) walls. Needs `map_entries_str` (→ `List[(String,String)]`) which
+   in turn needs the **`(String,String)` tuple-list** kind (materialize via a prim builder; the
+   C1-defunc `list.map` over it with the `let (k,v)=p` destructure; the per-element 2-String drop) —
+   a multi-part sub-feature parallel to csv's `(String,Value)` `str_value_elem_lists`.
+2. **`List[Record]` literal** (`group([rect(…), …])`, the "group nests children" test) — a
+   `try_lower_record_list_literal` (alloc + store each Element handle, `variant_drop_handles =
+   "list_<R>"`); generate `$__drop_list_<R>` for all rec_names R.
+3. A residual **`heap-result SpreadRecord` (1×)** wall in one svg fn (not attr/fill/render_attrs/
+   render_el/el — those are clean) — likely resolves once (1)/(2) land or is a small spread-context gap.
+
+svg test breakdown: single-element tests (`rect|>fill|>render`) need (1); "group nests children" needs
+(2). RECOMMEND continuing as: "map.entries_str + (String,String) tuple-list" → "List[Record] literal"
+→ svg `almide test` all "via WASM". Each an independent gated brick on the now-complete records core.
