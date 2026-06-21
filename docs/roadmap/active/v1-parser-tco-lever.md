@@ -3,14 +3,20 @@
 ## csv full-conquest status (4 public fns, v0-vs-v1 byte-match audit)
 
 Audited each `almide/csv` public fn end-to-end (inline the source, v0 `almide run` vs v1
-render_program+wasmtime). **3 of 4 byte-match; parse_records remains, blocked by a NEWLY-revealed
-issue (nested-heap-list element ops, distinct from the TCO drop-placement bug it was masking):**
+render_program+wasmtime). **✅ FULL CONQUEST — 4 of 4 byte-match** (verified: byte-match + 100000×
+leak loop clean + corpus-wall ACCEPT + mir suite). Three distinct mechanisms, fixed at the root:
 - ✅ **stringify** (commit 6fb48108 — needed the non-capturing heap-map inline, closing the lift
   path's nested-map silent miscompile that returned `,`).
 - ✅ **stringify_records** (commit b129ad45 — the capturing heap-map / map-closure-over-Value).
 - ✅ **parse** (commit 646aa233 — the TCO result-accumulator fix: parse_rows_rec's `paf(…, cur+[field])`
   base, which reads the loop-body-local `field`, is now computed IN the loop via a result accumulator
   instead of the post-loop dispatch where `field` was dead. THE drop-placement bug, fixed at the root).
+- ✅ **parse_records** (commits fba2e960 + af8dcdf7 — the nested-heap-list element ops the parse trap
+  had masked: `list.get(rows,0)` / `list.drop(rows,1)` over a `List[List[String]]`. The `_str`
+  variants deep-copy the inner list via `string.repeat` (its length word read as a byte count) — a
+  silent miscompile for get, a double-free trap for drop. New handle-SHARE `list.get_liststr` /
+  `list.{take,drop}_liststr` + `option.liststr_unwrap_or`: each inner list co-owned by rc_inc + raw
+  store64 (`__ldls_share`, whitelisted like `__varr_copy`), freed once at the last ref).
 - ❌ **parse_records** — the map machinery (enumerate+map fusion + the tuple-element map, commit
   a9aecee5) and the parse_rows_rec double-free (the TCO fix, 646aa233) are BOTH done; what remains is a
   THIRD, separately-revealed issue the TCO trap had been masking: **`list.get` / `list.drop` over a
