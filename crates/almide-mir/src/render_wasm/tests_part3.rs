@@ -887,6 +887,28 @@
     }
 
     #[test]
+    fn map_entries_render_loop_leak_free() {
+        // The svg render-in-a-loop leak gate: a map.entries → list.map → list.join chain in a 10000x
+        // loop. The map.entries result `List[(String,String)]` must drop via DropListStrStr (frees
+        // each tuple's two Strings); tracked as heap_elem_lists it dropped flat (DropListStr), leaking
+        // the Strings → OOM. is_list_str_str_ty now reclassifies the bound result. The loop OOMs if it
+        // leaks.
+        let src = "fn rattr(m: Map[String, String]) -> String =\n  \
+            map.entries(m) |> list.map((p) => { let (k, v) = p; \"${k}=${v}\" }) |> list.join(\" \")\n\
+            effect fn main() -> Unit = {\n  \
+              var m: Map[String, String] = [:]\n  \
+              m = map.set(m, \"a\", \"1\")\n  \
+              m = map.set(m, \"b\", \"2\")\n  \
+              var n = 0\n  \
+              for i in 0..10000 { n = n + string.len(rattr(m)) }\n  \
+              println(int.to_string(n)) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("map_entries_loop_leak", &render_wasm_program(&prog)) {
+            assert_eq!(out, "70000");
+        }
+    }
+
+    #[test]
     fn map_entries_str_map_and_tuple_destructure() {
         // The svg render_attrs shape: `map.entries(attrs) |> list.map((p) => { let (k,v)=p; … })`.
         // map.entries on Map[String,String] → List[(String,String)] (map_entries_str), the defunc

@@ -2198,6 +2198,10 @@ impl LowerCtx {
                 self.value_result_lists.insert(dst);
             } else if crate::lower::is_list_list_str_ty(ty) {
                 self.list_list_str_lists.insert(dst);
+            } else if crate::lower::is_list_str_str_ty(ty) {
+                // `List[(String,String)]` (map.entries) arg temp — DropListStrStr frees each tuple's
+                // two Strings; the flat heap_elem_lists fallback would leak them.
+                self.str_str_elem_lists.insert(dst);
             } else if crate::lower::is_heap_elem_list_ty(ty) {
                 self.heap_elem_lists.insert(dst);
             }

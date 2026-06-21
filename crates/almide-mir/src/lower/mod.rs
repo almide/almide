@@ -1180,6 +1180,18 @@ pub(crate) fn is_list_list_str_ty(ty: &Ty) -> bool {
             Ty::Applied(TypeConstructorId::List, b) if b.len() == 1 && matches!(b[0], Ty::String)))
 }
 
+/// A `List[(String, String)]` — the `map.entries` / render_attrs shape. Each element is an owned
+/// (String, String) TUPLE; its scope-end drop must be [`Op::DropListStrStr`] (per tuple: rc_dec BOTH
+/// String slots, then the tuple, then the list). The flat `DropListStr` (`heap_elem_lists`) would
+/// rc_dec only the tuple HANDLE — freeing the tuple block but LEAKING its two Strings (a render loop
+/// OOMs). Checked BEFORE `is_heap_elem_list_ty` (which also matches this List type).
+pub(crate) fn is_list_str_str_ty(ty: &Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    matches!(ty,
+        Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && matches!(&a[0],
+            Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String) && matches!(tys[1], Ty::String)))
+}
+
 /// A `Result[Value, String]` — the `ok(value.array(...))` shape. Its Ok payload is a dynamic Value
 /// (freed RECURSIVELY via `$__drop_value`), its Err a String. Its scope-end drop must be
 /// [`Op::DropResultValue`] (the tag-dispatched recursive free); a flat `DropListStr` would leak the

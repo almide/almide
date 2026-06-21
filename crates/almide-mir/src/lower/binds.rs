@@ -761,6 +761,10 @@ impl LowerCtx {
                 self.live_heap_handles.push(dst);
                 if crate::lower::is_list_list_str_ty(ty) {
                     self.list_list_str_lists.insert(dst);
+                } else if crate::lower::is_list_str_str_ty(ty) {
+                    // `List[(String,String)]` (map.entries) — DropListStrStr frees each tuple's two
+                    // Strings; the flat heap_elem_lists DropListStr would leak them (a render loop OOMs).
+                    self.str_str_elem_lists.insert(dst);
                 } else if is_heap_elem_list_ty(ty) {
                     self.heap_elem_lists.insert(dst);
                 }
@@ -878,6 +882,10 @@ impl LowerCtx {
                 // nested-ownership list — its scope-end drop must recursively free elements.
                 if crate::lower::is_list_list_str_ty(ty) {
                     self.list_list_str_lists.insert(dst);
+                } else if crate::lower::is_list_str_str_ty(ty) {
+                    // `List[(String,String)]` (map.entries) — DropListStrStr frees each tuple's two
+                    // Strings; the flat heap_elem_lists DropListStr would leak them (a render loop OOMs).
+                    self.str_str_elem_lists.insert(dst);
                 } else if is_heap_elem_list_ty(ty) {
                     self.heap_elem_lists.insert(dst);
                 }
