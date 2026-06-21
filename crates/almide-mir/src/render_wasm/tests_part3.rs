@@ -791,6 +791,40 @@
     }
 
     #[test]
+    fn nested_heap_list_get_drop_over_list_of_list_string() {
+        // list.get / list.drop over a List[List[String]] — the csv.parse_records shape: a recursive
+        // parser builds `rows` (a List of inner String-lists), then `header = get(rows,0)`, `data =
+        // drop(rows,1)`. The element is itself a heap list — the `_str` variants would deep-copy it via
+        // string.repeat (reading the inner list's length word as a byte count: a silent miscompile for
+        // get, a double-free trap for drop). The `_liststr` accessors SHARE each inner list by handle
+        // (rc_inc + raw store64, like __varr_copy); co-owned, freed once at the last ref (leak-verified
+        // separately at 100000×). `rows` is built by a CALL (a list-of-lists literal is a separate gap).
+        let src = "fn pfield(text: String, pos: Int, acc: String) -> (String, Int) =\n  \
+              if pos >= string.len(text) then (acc, pos)\n  \
+              else { let c = string.get(text, pos) ?? \"\"\n         if c == \",\" or c == \"\\n\" then (acc, pos) else pfield(text, pos + 1, acc + c) }\n\
+            fn pafter(text: String, pos: Int, rows: List[List[String]], cur: List[String]) -> List[List[String]] =\n  \
+              if pos >= string.len(text) then rows + [cur]\n  \
+              else { let c = string.get(text, pos) ?? \"\"\n         if c == \",\" then prows(text, pos + 1, rows, cur) else if c == \"\\n\" then prows(text, pos + 1, rows + [cur], []) else prows(text, pos, rows, cur) }\n\
+            fn prows(text: String, pos: Int, rows: List[List[String]], cur: List[String]) -> List[List[String]] =\n  \
+              if pos >= string.len(text) then rows + [cur]\n  \
+              else { let c = string.get(text, pos) ?? \"\"\n         if c == \",\" then prows(text, pos + 1, rows, cur + [\"\"]) else if c == \"\\n\" then prows(text, pos + 1, rows + [cur], []) else { let (f, np) = pfield(text, pos, \"\"); pafter(text, np, rows, cur + [f]) } }\n\
+            fn pick(rows: List[List[String]]) -> Int = {\n  \
+              let header = list.get(rows, 0) ?? []\n  \
+              let data = list.drop(rows, 1)\n  \
+              list.len(header) + list.len(data) }\n\
+            effect fn main() -> Unit = {\n  \
+              let rows = prows(\"a,b\\nc\\nd,e,f\", 0, [], [])\n  \
+              println(int.to_string(pick(rows))) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "list.get_liststr"));
+        assert!(prog.functions.iter().any(|f| f.name == "list.drop_liststr"));
+        if let Some(out) = build_and_run("nested_heap_list_get_drop", &render_wasm_program(&prog)) {
+            // rows = [[a,b],[c],[d,e,f]] → len(get(rows,0)=[a,b]) + len(drop(rows,1)=[[c],[d,e,f]]) = 2+2 = 4
+            assert_eq!(out, "4");
+        }
+    }
+
+    #[test]
     fn list_get_value_option_unwrap_executes_on_wasmtime() {
         // Option-of-Value read (`list.get(rows, i) ?? d` — the stringify_records row accessor). list.get
         // on a List[Value] dispatches to list.get_value (NOT the `_str` variant, which deep-copies the

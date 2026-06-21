@@ -2334,6 +2334,16 @@ pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], resu
         // The element-PRESERVING List[heap]-returning combinators (source elem == result elem).
         if matches!(func, "filter" | "reverse" | "take" | "drop" | "unique" | "dedup" | "intersperse") {
             if let Ty::Applied(TypeConstructorId::List, args) = result_ty {
+                // A List[List[String]] result element is itself a heap list — the `_str` deep-copy
+                // (string.repeat) would read its length word as a byte count. take/drop SHARE the inner
+                // lists by handle via the `_liststr` variant; the other combinators are a later brick.
+                if args.len() == 1
+                    && matches!(func, "take" | "drop")
+                    && matches!(&args[0], Ty::Applied(TypeConstructorId::List, e)
+                        if e.len() == 1 && matches!(e[0], Ty::String))
+                {
+                    return format!("list.{func}_liststr");
+                }
                 if args.len() == 1 && is_heap_ty(&args[0]) {
                     return format!("list.{func}_str");
                 }

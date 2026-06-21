@@ -2079,6 +2079,7 @@ impl LowerCtx {
                         | "__varr_copy"
                         | "__vfill"
                         | "__lc_copy_rc"
+                        | "__ldls_share" // list.take/drop_liststr sublist (rc_inc each shared inner list)
                         | "value_get"     // Object linear-scan get (rc_inc the found value)
                         | "__vobj_fill"   // Object shallow-copy (rc_inc each key/value) — value.object
                         | "__vdrop_obj"   // Object recursive free (rc_dec key, __drop_value value)

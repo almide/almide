@@ -327,6 +327,38 @@ fn list_last_liststr(xs: List[List[String]]) -> Option[List[String]] = {
   if len <= 0 then None else __get_liststr_some(h, len - 1)
 }
 
+// list.take / list.drop over a List[List[String]] → a sublist that SHARES the inner-list elements by
+// handle (rc_inc + raw store64, like __varr_copy), NOT the `_str` variant's `string.repeat` deep-copy
+// which would read an inner List[String] block as a byte string (garbage / trap). Source borrowed; the
+// result co-owns each kept inner list (freed at its last ref via the source's / result's own drop).
+fn __ldls_share(src: Int, dst: Int, start: Int, count: Int, i: Int) -> Unit =
+  if i >= count then ()
+  else {
+    let e = prim.load64(src + 12 + (start + i) * 8)
+    prim.rc_inc(e)
+    prim.store64(dst + 12 + i * 8, e)
+    __ldls_share(src, dst, start, count, i + 1)
+  }
+
+fn list_take_liststr(xs: List[List[String]], n: Int) -> List[List[String]] = {
+  let h = prim.handle(xs)
+  let len = prim.load32(h + 4)
+  let count = if n < 0 then len else if n > len then len else n
+  let buf = prim.alloc_list_str(count)
+  __ldls_share(h, prim.handle(buf), 0, count, 0)
+  buf
+}
+
+fn list_drop_liststr(xs: List[List[String]], n: Int) -> List[List[String]] = {
+  let h = prim.handle(xs)
+  let len = prim.load32(h + 4)
+  let start = if n < 0 then len else if n > len then len else n
+  let count = len - start
+  let buf = prim.alloc_list_str(count)
+  __ldls_share(h, prim.handle(buf), start, count, 0)
+  buf
+}
+
 // value.stringify — the recursive JSON serializer, byte-identical to v0's runtime
 // (`almide_rt_value_stringify`): tag-dispatch; scalars rendered directly, Str quoted+escaped,
 // Array/Object joined with "," (no spaces). Escape replaces `\` FIRST (so the backslashes it
