@@ -107,6 +107,29 @@ materializes Ok via `lower_owned_heap_field` (handles `value.*` + the nested `li
 new `value_result_results` set (`is_value_result_ty`). ok/err + match-read round-trips byte-match;
 corpus-wall ACCEPT; 2000× v1 no OOM. **csv classify 8/3 → 11/2 (parse lowers).**
 
+## Value/JSON subsystem (the csv-records dependency) — Phase 1 DONE
+
+The last 2 csv functions need the dynamic Value OBJECT + JSON ops SELF-HOSTED (none were in the v1
+trust spine). A multi-fn subsystem, decomposed:
+
+DONE (commit a0dcf31d): ✅ **value.object + json.keys** (the tag-6 Object). 2-slot-per-pair block
+(key String + value Value, rc_inc'd in), recursive `__vdrop_obj` via `__drop_value`'s new tag-6 arm.
+KEY bug caught: `@8` must hold the SLOT count (2·pairs = the alloc size the freelist reclaims) — the
+pair count there leaked 2 slots/iter (a 2-pair OOM the leak loop trapped). round-trips byte-match v0,
+2000× multi-pair leak loop clean, corpus-wall ACCEPT.
+
+STILL TODO (the deeper Value pieces — each a real sub-gap, NOT a quick add):
+- ❌ **value.get** — built the scan (scalar self-rec → index) + Ok/Err wrap, but (a) a self-recursive
+  `Result[Value,String]` body produces invalid wasm (TCO×Result interaction), (b) the `?? value.null()`
+  UNWRAP and the `match ok(v)` READ of a Value-Ok Result mis-bind / wall (the unwrap_or + match-read
+  of a Value-Ok Result are unwired — only String-Ok is), (c) v0's Err message is `missing field
+  '<k>'`, not a fixed string (byte-match needs the interp). Reverted (kept unbuilt, not a broken commit).
+- ❌ **value.stringify** — a full RECURSIVE JSON serializer (tag-dispatch: null/bool/int/float/quoted
+  string/`[…]`/`{…}` with escaping). The byte-match DRIVER needs it too. The biggest single piece.
+- ❌ **parse_records closure** — `data |> list.map((row) => { … nested list.map → (key, value.str) …
+  value.object(pairs) })`: a block-body closure building `List[(String,Value)]` then a Value object —
+  the closure walls ("unliftable closure"), independent of value.object now existing.
+
 STILL WALLS (csv full byte-match — the last 2, both value.object-building closures):
 - ❌ `parse_records` — `data |> list.map((row) => { … value.object(pairs) … })`: a block-body closure
   building a `value.object` from `header`/`row` (a `list.zip`/pairs shape) — a more complex Value
