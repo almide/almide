@@ -979,6 +979,11 @@ impl LowerCtx {
             self.materialized_results_str.insert(subj);
             if crate::lower::is_result_listval_ty(&subject.ty) {
                 self.value_result_lists.insert(subj);
+            } else if crate::lower::is_value_result_ty(&subject.ty) {
+                // `Result[Value, String]` (value.get): the Ok payload is a single dynamic Value —
+                // its drop is the RECURSIVE `Op::DropResultValue` (Ok → `$__drop_value`), distinct
+                // from a String-Ok's flat DropListStr.
+                self.value_result_results.insert(subj);
             } else {
                 self.heap_elem_lists.insert(subj);
             }
@@ -1027,7 +1032,9 @@ impl LowerCtx {
                 // => emit_seq(items)`). Both bind the @12 handle as a BORROW (drop-subject-after).
                 IrPattern::Bind { var, ty }
                     if is_heap_ty(ty)
-                        && (s.heap_elem_lists.contains(&subj) || s.value_result_lists.contains(&subj)) =>
+                        && (s.heap_elem_lists.contains(&subj)
+                            || s.value_result_lists.contains(&subj)
+                            || s.value_result_results.contains(&subj)) =>
                 {
                     Ok(Some((*var, true)))
                 }
@@ -1575,6 +1582,12 @@ impl LowerCtx {
                 Ok(v)
                     if self.materialized_options.contains(&v)
                         || self.materialized_results.contains(&v)
+                        // a Value/List-Ok Result Var (`value.get`/`value.as_array` result) — its `??`
+                        // routes to the value_unwrap helper below. A String-Ok Result (heap_elem_lists)
+                        // is NOT admitted here: it keeps its original path (the String branch is for
+                        // OPTION[String], and counting a str-Result there falsely taints mir>ir).
+                        || self.value_result_results.contains(&v)
+                        || self.value_result_lists.contains(&v)
                         || self.param_values.contains(&v) =>
                 {
                     v
@@ -1583,6 +1596,9 @@ impl LowerCtx {
             }
         } else if is_self_host_option_call(expr)
             || is_self_host_result_call(expr)
+            || (is_self_host_result_str_call(expr)
+                && (crate::lower::is_value_result_ty(&expr.ty)
+                    || crate::lower::is_result_listval_ty(&expr.ty)))
             || is_named_variant_call
         {
             // A self-host OR user-function call returning Option/Result — materialize it (the
@@ -1607,6 +1623,55 @@ impl LowerCtx {
         } else {
             return None;
         };
+        // HEAP-Value Result `??` (`value.get(o,k) ?? value.null()` — Result[Value,String]): route to
+        // the self-hosted `result.value_unwrap_or`, which reuses the Value-Ok match read (its
+        // `ok(v) => v` arm Dup's the @12 payload; the Result is freed by its scope-end DropResultValue).
+        // A call returning a FRESH owned Value sidesteps the bind-position heap-result rc bookkeeping,
+        // exactly like `option.unwrap_or_str` for the String payload.
+        // The Ok payload selects the helper: a single Value (`value.get`) → `result.value_unwrap_or`;
+        // a `List[Value]` (`value.as_array`) → `result.list_value_unwrap_or` (recursive list drop).
+        // Both reuse the working heap-Ok match read; a call returning a fresh owned heap value
+        // sidesteps the bind-position rc bookkeeping, like `option.unwrap_or_str` for the String case.
+        let value_unwrap_helper = if crate::lower::is_result_listval_ty(&expr.ty) {
+            Some("result.list_value_unwrap_or")
+        } else if crate::lower::is_value_result_ty(&expr.ty) {
+            Some("result.value_unwrap_or")
+        } else {
+            None
+        };
+        if let Some(helper) = value_unwrap_helper {
+            if is_heap_ty(&fallback.ty) {
+                let fb_args = match self.lower_call_args(std::slice::from_ref(fallback)) {
+                    Ok(a) => a,
+                    Err(_) => {
+                        self.ops.truncate(ops_mark);
+                        self.live_heap_handles.truncate(lhh_mark);
+                        return None;
+                    }
+                };
+                let repr = match repr_of(&expr.ty) {
+                    Ok(r) => r,
+                    Err(_) => {
+                        self.ops.truncate(ops_mark);
+                        self.live_heap_handles.truncate(lhh_mark);
+                        return None;
+                    }
+                };
+                let mut call_args = vec![CallArg::Handle(handle)];
+                call_args.extend(fb_args);
+                let dst = self.fresh_value();
+                self.ops.push(Op::CallFn {
+                    dst: Some(dst),
+                    name: helper.to_string(),
+                    args: call_args,
+                    result: Some(repr),
+                });
+                if track_result {
+                    self.live_heap_handles.push(dst);
+                }
+                return Some(dst);
+            }
+        }
         // HEAP-String result (`Option[String] ?? "default"` — the most common heap `??`): the scalar
         // unwrap below can't carry a heap payload (it would mis-read the slot-0 String HANDLE as an
         // i64 scalar). Route to the self-host `option.unwrap_or_str` CALL — a call returning a FRESH
@@ -2462,6 +2527,9 @@ impl LowerCtx {
                 self.ops.push(Op::Alloc { dst: p, repr: pr, init: Init::Str(value.clone()) });
                 Some(p)
             }
+            // `err("missing field '" + key + "'")` — the __str_concat chain's fresh owned String is
+            // moved into the Result block (no Dup: it is already a fresh rc=1 reference).
+            IrExprKind::BinOp { op: almide_ir::BinOp::ConcatStr, .. } => self.try_lower_concat_str(expr),
             IrExprKind::Call { target: CallTarget::Named { name }, args, .. } => {
                 let lowered = self.lower_call_args(args).ok()?;
                 let pr = repr_of(&expr.ty).ok()?;

@@ -194,6 +194,29 @@ fn count_ir_calls(body: &almide_ir::IrExpr, registry: &almide_mir::lower::Record
                 {
                     self.n += 1;
                 }
+                // A Value / List[Value] -payload Result `??` (`value.get(o,k) ?? value.null()`,
+                // `value.as_array(v) ?? []`) — the lowering routes it to ONE synthetic
+                // result.value_unwrap_or / result.list_value_unwrap_or CALL (a pure value_core
+                // helper, no Stdout). Count +1 so mir == ir, mirroring the String case.
+                let operand_is_value_result = almide_mir::lower::is_value_result_ty(&expr.ty)
+                    || almide_mir::lower::is_result_listval_ty(&expr.ty);
+                let value_operand_lowers = match &expr.kind {
+                    almide_ir::IrExprKind::Var { .. } => true,
+                    almide_ir::IrExprKind::Call {
+                        target: almide_ir::CallTarget::Module { module, func, .. },
+                        ..
+                    } => almide_mir::lower::is_self_host_result_str_module_fn(
+                        module.as_str(),
+                        func.as_str(),
+                    ),
+                    _ => false,
+                };
+                if operand_is_value_result
+                    && almide_mir::lower::is_heap_ty(&fallback.ty)
+                    && value_operand_lowers
+                {
+                    self.n += 1;
+                }
             }
             // A STRING INTERPOLATION `"…${e}…"` desugars (the SHARED
             // `almide_mir::lower::desugar_string_interp`) to a synthetic `__str_concat`

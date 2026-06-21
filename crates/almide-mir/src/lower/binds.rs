@@ -838,6 +838,10 @@ impl LowerCtx {
                     self.materialized_results_str.insert(dst);
                     if crate::lower::is_result_listval_ty(ty) {
                         self.value_result_lists.insert(dst);
+                    } else if crate::lower::is_value_result_ty(ty) {
+                        // `Result[Value, String]` (value.get) — a single dynamic Value Ok, freed
+                        // recursively by `Op::DropResultValue` (Ok → `$__drop_value`).
+                        self.value_result_results.insert(dst);
                     } else {
                         self.heap_elem_lists.insert(dst);
                     }

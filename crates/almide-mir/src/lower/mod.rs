@@ -1001,7 +1001,7 @@ pub(crate) fn is_list_list_str_ty(ty: &Ty) -> bool {
 /// (freed RECURSIVELY via `$__drop_value`), its Err a String. Its scope-end drop must be
 /// [`Op::DropResultValue`] (the tag-dispatched recursive free); a flat `DropListStr` would leak the
 /// Ok Value's nested payload.
-pub(crate) fn is_value_result_ty(ty: &Ty) -> bool {
+pub fn is_value_result_ty(ty: &Ty) -> bool {
     use almide_lang::types::constructor::TypeConstructorId;
     matches!(ty, Ty::Applied(TypeConstructorId::Result, a)
         if a.len() == 2 && is_value_ty(&a[0]) && matches!(a[1], Ty::String))
@@ -1114,6 +1114,8 @@ impl LowerCtx {
                     self.materialized_results_str.insert(v);
                     if is_result_listval_ty(ty) {
                         self.value_result_lists.insert(v);
+                    } else if is_value_result_ty(ty) {
+                        self.value_result_results.insert(v);
                     } else {
                         self.heap_elem_lists.insert(v);
                     }
@@ -2449,8 +2451,11 @@ pub(crate) fn is_self_host_result_module_fn(module: &str, func: &str) -> bool {
 /// Does `module.func` return a materialized HEAP-Ok `Result[String, String]` (the cap-as-tag
 /// DynListStr layout, both Ok and Err owning a String)? Its result is tracked in
 /// `materialized_results_str` so an `Ok`/`Err` `match` over it EXECUTES reading cap@8.
-pub(crate) fn is_self_host_result_str_module_fn(module: &str, func: &str) -> bool {
-    matches!((module, func), ("value", "as_string") | ("result", "zip") | ("value", "as_array"))
+pub fn is_self_host_result_str_module_fn(module: &str, func: &str) -> bool {
+    matches!(
+        (module, func),
+        ("value", "as_string") | ("result", "zip") | ("value", "as_array") | ("value", "get")
+    )
 }
 
 /// Is `ty` a `value.as_array`-style Result whose Ok arm is a `List[Value]` (a heap-Ok Result with a
@@ -2459,7 +2464,7 @@ pub(crate) fn is_self_host_result_str_module_fn(module: &str, func: &str) -> boo
 /// (`DropListStr` would leak the list's element Values). The DISTINGUISHER from `value.as_string`'s
 /// `Result[String, String]` is the Ok-arm being a `List`, so the tracking is TYPE-driven (sound
 /// wherever only the `ValueId` + its `ty` are known — seed_variant_param, the match subject).
-pub(crate) fn is_result_listval_ty(ty: &Ty) -> bool {
+pub fn is_result_listval_ty(ty: &Ty) -> bool {
     use almide_lang::types::constructor::TypeConstructorId;
     matches!(ty, Ty::Applied(TypeConstructorId::Result, a)
         if a.len() == 2 && matches!(&a[0], Ty::Applied(TypeConstructorId::List, _)))

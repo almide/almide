@@ -687,6 +687,31 @@
     }
 
     #[test]
+    fn value_get_and_as_array_unwrap_execute_on_wasmtime() {
+        // THE LAYOUT BRICK read side: a heap-Result-of-Value (`value.get` → Result[Value,String]) and
+        // a heap-Result-of-List (`value.as_array` → Result[List[Value],String]) round-trip through
+        // BOTH a `match` (tag@16 read, @12 payload bound as a borrow) AND a `??` (routed to the
+        // self-hosted result.value_unwrap_or / result.list_value_unwrap_or, the Ok arm Dup'ing @12).
+        // The Err message is the byte-exact "missing field '<k>'". 2000x is the leak gate.
+        let src = "import json\n\
+            effect fn main() -> Unit = {\n  \
+              let o = value.object([(\"a\", value.int(7)), (\"b\", value.str(\"hi\"))])\n  \
+              match value.get(o, \"a\") { ok(v) => println(int.to_string(value.as_int(v) ?? 0)), err(e) => println(\"e:\" + e) }\n  \
+              match value.get(o, \"zzz\") { ok(v) => println(\"got\"), err(e) => println(e) }\n  \
+              let g = value.get(o, \"b\") ?? value.null()\n  println(value.stringify(g))\n  \
+              let arr = value.array([value.int(10), value.int(20), value.int(30)])\n  \
+              let items = value.as_array(arr) ?? []\n  \
+              var s = 0\n  for it in items { s = s + (value.as_int(it) ?? 0) }\n  println(int.to_string(s))\n  \
+              var n = 0\n  for i in 0..2000 { let oo = value.object([(\"k\", value.int(i))]); let gg = value.get(oo, \"k\") ?? value.null(); n = n + (value.as_int(gg) ?? 0) }\n  \
+              println(int.to_string(n)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "value.get"));
+        if let Some(out) = build_and_run("value_get_unwrap", &render_wasm_program(&prog)) {
+            assert_eq!(out, "7\nmissing field 'zzz'\n\"hi\"\n60\n1999000");
+        }
+    }
+
+    #[test]
     fn value_stringify_executes_on_wasmtime() {
         // The recursive JSON serializer, self-hosted in value_core, byte-identical to v0's
         // `almide_rt_value_stringify`: scalars direct, Str quoted+escaped (\ first), Array/Object

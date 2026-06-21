@@ -193,6 +193,46 @@ fn json_keys(v: Value) -> List[String] = {
   __vobj_keys(v, 0, n, [])
 }
 
+fn __vobj_find(v: Value, key: String, i: Int, n: Int) -> Int =
+  if i >= n then 0 - 1
+  else {
+    let h = prim.handle(v)
+    let k: String = prim.load_handle(h + 12 + (2 * i) * 8)
+    if k == key then i else __vobj_find(v, key, i + 1, n)
+  }
+
+fn value_get(v: Value, key: String) -> Result[Value, String] = {
+  let h = prim.handle(v)
+  let n = prim.load32(h + 8) / 2
+  let idx = __vobj_find(v, key, 0, n)
+  if idx < 0 then Err("missing field '" + key + "'")
+  else {
+    let val: Value = prim.load_handle(h + 12 + (2 * idx + 1) * 8)
+    Ok(val)
+  }
+}
+
+// The Value-payload `??` (`value.get(o,k) ?? value.null()`): a Result[Value,String] unwrap, routed
+// here so it reuses the working Value-Ok match read (the `ok(v) => v` bare-Var arm auto-acquires a
+// fresh co-owned reference; the Result `r` is freed by its own scope-end DropResultValue). A call
+// returning a fresh owned Value sidesteps the bind-position heap-result-`if` rc bookkeeping, exactly
+// like `option.unwrap_or_str` does for the String payload.
+fn result_value_unwrap_or(r: Result[Value, String], d: Value) -> Value =
+  match r {
+    ok(v) => v,
+    err(e) => d,
+  }
+
+// The List[Value]-payload `??` (`value.as_array(v) ?? []`): a Result[List[Value],String] unwrap,
+// the SAME mechanism as result_value_unwrap_or but the Ok arm is a List[Value] (freed recursively by
+// DropResultListValue). Reuses the working List-Ok match read; the `ok(v) => v` arm acquires a fresh
+// co-owned list. The first line of csv stringify_records.
+fn result_list_value_unwrap_or(r: Result[List[Value], String], d: List[Value]) -> List[Value] =
+  match r {
+    ok(v) => v,
+    err(e) => d,
+  }
+
 // value.stringify — the recursive JSON serializer, byte-identical to v0's runtime
 // (`almide_rt_value_stringify`): tag-dispatch; scalars rendered directly, Str quoted+escaped,
 // Array/Object joined with "," (no spaces). Escape replaces `\` FIRST (so the backslashes it
