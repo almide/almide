@@ -134,11 +134,30 @@ fn main() {
     loop {
         let before = functions.len();
         for (source, entries) in almide_mir::render_wasm::self_host_runtime() {
-            let any_called = entries.iter().any(|(_, call)| {
+            let mut any_called = entries.iter().any(|(_, call)| {
                 functions.iter().any(|f| {
                     f.ops.iter().any(|op| matches!(op, almide_mir::Op::CallFn { name, .. } if name == call))
                 })
             });
+            // A Value drop (DropValue & friends) renders `(call $__drop_value …)` — a value_core
+            // helper that is NOT a registered call_name, so it is only pulled WITH value_core. A
+            // program that builds Values via `json.*` (not `value.*`) reaches no value_core call_name
+            // yet still drops Values, so force value_core when ANY Value-drop op is present.
+            if entries.iter().any(|(_, c)| *c == "value.null") {
+                any_called = any_called
+                    || functions.iter().any(|f| {
+                        f.ops.iter().any(|op| {
+                            matches!(
+                                op,
+                                almide_mir::Op::DropValue { .. }
+                                    | almide_mir::Op::DropListValue { .. }
+                                    | almide_mir::Op::DropListStrValue { .. }
+                                    | almide_mir::Op::DropResultValue { .. }
+                                    | almide_mir::Op::DropResultListValue { .. }
+                            )
+                        })
+                    });
+            }
             let any_defined =
                 entries.iter().any(|(_, call)| functions.iter().any(|f| &f.name == call));
             if any_called && !any_defined {

@@ -259,7 +259,25 @@
         // `module.func` — no caps-coverage regression). Conditional, so non-using programs
         // are not bloated by builders + helpers.
         for (source, entries) in self_host_runtime() {
-            let any_called = entries.iter().any(|(_, call)| calls_fn(&functions, call));
+            let mut any_called = entries.iter().any(|(_, call)| calls_fn(&functions, call));
+            // A Value drop renders `(call $__drop_value …)`, a value_core helper pulled only WITH
+            // value_core. A program building Values via `json.*` (not `value.*`) reaches no
+            // value_core call_name yet still drops Values — force value_core on any Value-drop op.
+            if entries.iter().any(|(_, c)| *c == "value.null") {
+                any_called = any_called
+                    || functions.iter().any(|f| {
+                        f.ops.iter().any(|op| {
+                            matches!(
+                                op,
+                                crate::Op::DropValue { .. }
+                                    | crate::Op::DropListValue { .. }
+                                    | crate::Op::DropListStrValue { .. }
+                                    | crate::Op::DropResultValue { .. }
+                                    | crate::Op::DropResultListValue { .. }
+                            )
+                        })
+                    });
+            }
             let any_defined =
                 entries.iter().any(|(_, call)| functions.iter().any(|f| &f.name == call));
             if any_called && !any_defined {
