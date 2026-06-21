@@ -125,7 +125,18 @@ STILL TODO (the deeper Value pieces — each a real sub-gap, NOT a quick add):
   of a Value-Ok Result are unwired — only String-Ok is), (c) v0's Err message is `missing field
   '<k>'`, not a fixed string (byte-match needs the interp). Reverted (kept unbuilt, not a broken commit).
 - ❌ **value.stringify** — a full RECURSIVE JSON serializer (tag-dispatch: null/bool/int/float/quoted
-  string/`[…]`/`{…}` with escaping). The byte-match DRIVER needs it too. The biggest single piece.
+  string/`[…]`/`{…}` with escaping). ATTEMPTED + reverted (it walls; never shipped broken). Findings:
+  the SCALAR/Str cases lower trivially (string.replace for the escape + int/float.to_string both
+  byte-match v0 — verified). The ARRAY/OBJECT recursion hits a real PARSER-TCO LIMIT: the helper is a
+  String accumulator (`acc + piece` where `piece = sep + value_stringify(elem)`), and TCO DOES fire
+  (recognizes the accumulator → while loop) but then walls at "while body with a heap-accumulator
+  reassignment" (control.rs:3115 `body_reassigns_heap`) — the loop body computes `piece` from a
+  heap-producing CALL (the value_stringify recursion), which the option-C append lowering doesn't
+  stage (it handled simple appends like a peek char, not a heap call-result). TWO routes out, each a
+  bounded brick: (a) extend the TCO to stage a heap call-result temp in the loop body before the
+  accumulator update; (b) the LIST-COMBINATOR route — extract the Value array's elems to a List[Value]
+  then `|> list.map(value_stringify) |> list.join(",")` (list.map+list.join already lower + byte-match,
+  verified), needing the Value-array→List[Value] extraction (a value-element list accumulator) wired.
 - ❌ **parse_records closure** — `data |> list.map((row) => { … nested list.map → (key, value.str) …
   value.object(pairs) })`: a block-body closure building `List[(String,Value)]` then a Value object —
   the closure walls ("unliftable closure"), independent of value.object now existing.
