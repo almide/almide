@@ -161,6 +161,50 @@ Proof.
       * (* IUnreachable *) cbn in H; discriminate.
 Qed.
 
+(* ONE-STEP unfolding of `erun (S n)` on a cons, KEEPING the inner `erun n` calls FOLDED (plain
+   `cbn` unfolds `erun (S n)` via the fuel match, dissolving the very subterm the mono/complete
+   rewrites target). Definitional, so `reflexivity`. *)
+Lemma erun_S_cons : forall n i rest c,
+  erun (S n) (i :: rest) c =
+    match i with
+    | IUnreachable => None
+    | IIf body =>
+        match stk c with
+        | cnd :: s =>
+            if Z.eqb cnd 0 then erun n rest (mkcfg s (loc c) (glob c) (mem c))
+            else match erun n body (mkcfg s (loc c) (glob c) (mem c)) with
+                 | Some c' => erun n rest c' | None => None end
+        | [] => None
+        end
+    | _ => match estep1 i c with Some c' => erun n rest c' | None => None end
+    end.
+Proof. intros n i rest [s l g m]; destruct i; reflexivity. Qed.
+
+(* FUEL MONOTONICITY: a successful run stays successful with more fuel — so completeness can run
+   the IIf body and the continuation at one common fuel bound. *)
+Lemma erun_mono_S : forall n is c c', erun n is c = Some c' -> erun (S n) is c = Some c'.
+Proof.
+  induction n as [|f IHf]; intros is c c' H.
+  - cbn in H; discriminate.
+  - destruct is as [|i rest]; [ cbn in H |- *; exact H |].
+    rewrite erun_S_cons in H |- *. destruct i;
+      try (destruct (estep1 _ c) as [c1|] eqn:E1; [ apply IHf; exact H | discriminate ]).
+    + (* IIf body *) destruct c as [s l g m]; cbn [stk loc glob mem] in H |- *.
+      destruct s as [|cnd s]; [discriminate|].
+      remember (Z.eqb cnd 0) as b. destruct b.
+      * apply IHf; exact H.
+      * destruct (erun f body (mkcfg s l g m)) as [cb|] eqn:Eb; [|discriminate].
+        rewrite (IHf _ _ _ Eb). apply IHf; exact H.
+    + (* IUnreachable *) discriminate.
+Qed.
+
+Lemma erun_mono_add : forall k n is c c', erun n is c = Some c' -> erun (n + k) is c = Some c'.
+Proof.
+  induction k as [|k IHk]; intros n is c c' H.
+  - rewrite Nat.add_0_r; exact H.
+  - rewrite Nat.add_succ_r; apply erun_mono_S; apply IHk; exact H.
+Qed.
+
 Transparent estep1.
 
 (* DETERMINISM of the ISA spec: a configuration steps to at most one successor, so a reduction
@@ -193,6 +237,32 @@ Proof.
 Qed.
 
 Definition irun_det := proj2 isa_det.
+
+(* COMPLETENESS: every reduction is realized by the executable at SOME fuel. With the executable
+   trap theorem this gives the RELATIONAL double-free trap (~irun). Combined induction on the
+   derivation; the per-step property is "head composition at a head fuel `nh`", and the IIf case
+   bumps the body/continuation to a common fuel via erun_mono_add. *)
+Lemma erun_complete : forall is c c', irun is c c' -> exists n, erun n is c = Some c'.
+Proof.
+  enough (Hpair :
+    (forall i c c', istep i c c' ->
+       exists nh, forall rest cc n, erun n rest c' = Some cc -> erun (nh + n) (i :: rest) c = Some cc)
+    /\ (forall is c c', irun is c c' -> exists n, erun n is c = Some c'))
+    by exact (proj2 Hpair).
+  apply step_run_ind.
+  1-10: intros; exists 1%nat; intros rest cc n Hr; cbn; exact Hr.
+  - (* S_If_true *) intros body cnd s l g m c' Hne _ IHbody.
+    destruct IHbody as [nb Hnb]. exists (S nb). intros rest cc n Hr.
+    apply (erun_mono_add n) in Hnb. apply (erun_mono_add nb) in Hr. rewrite Nat.add_comm in Hr.
+    apply Z.eqb_neq in Hne.
+    cbn [Nat.add]. rewrite erun_S_cons. cbn -[erun Z.eqb estep1]. rewrite Hne, Hnb. cbn -[erun]. exact Hr.
+  - (* S_If_false *) intros body s l g m. exists 1%nat. intros rest cc n Hr.
+    cbn [Nat.add]. rewrite erun_S_cons. cbn -[erun]. exact Hr.
+  - (* R_nil *) intros c. exists 1%nat. reflexivity.
+  - (* R_cons *) intros i is c c1 c'' _ IHstep _ IHrun.
+    destruct IHstep as [nh Hh]. destruct IHrun as [n2 H2].
+    exists (nh + n2)%nat. apply Hh. exact H2.
+Qed.
 
 (* ─── rc_inc, as an ISA program, with its effect carried THROUGH the relation ─── *)
 Definition rc_inc_prog : list instr :=
@@ -243,6 +313,16 @@ Proof.
   do 9 (destruct fuel as [|fuel]; [reflexivity|]). cbn. reflexivity.
 Qed.
 
+(* THE SAME TRAP, RELATIONALLY (forall): NO reduction of rc_dec over an already-0 cell completes —
+   `~ irun`. By completeness, a completing reduction would be realized by the interpreter at some
+   fuel; but it returns None at EVERY fuel. So a double-free is stuck in the SPEC itself. *)
+Theorem rc_dec_isa_traps_rel : forall g0 c',
+  ~ irun rc_dec_prog (init_dec 0 g0) c'.
+Proof.
+  intros g0 c' H. apply erun_complete in H. destruct H as [n Hn].
+  rewrite rc_dec_isa_traps_on_zero in Hn. discriminate.
+Qed.
+
 (* LEAK-FREEDOM RECLAMATION, FORALL: every reduction of rc_dec over a uniquely-owned cell (rc = 1)
    decrements it to 0 AND links the block onto $freelist (glob := p = 16) — the freed block is
    reclaimed, not lost. The verified interpreter computes the reduction; isa_det makes it unique. *)
@@ -259,3 +339,5 @@ Print Assumptions erun_sound.
 Print Assumptions rc_inc_isa_effect.
 Print Assumptions rc_dec_isa_traps_on_zero.
 Print Assumptions rc_dec_isa_frees_when_one.
+Print Assumptions rc_dec_isa_traps_rel.
+Print Assumptions erun_complete.
