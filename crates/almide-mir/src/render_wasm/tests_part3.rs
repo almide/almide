@@ -687,6 +687,25 @@
     }
 
     #[test]
+    fn value_object_and_json_keys_execute_on_wasmtime() {
+        // The dynamic Value OBJECT (tag 6) self-host: `value.object(pairs)` builds a 2-slot-per-pair
+        // block (key String + value Value, each rc_inc'd in — the Object co-owns them, freed by the
+        // recursive __vdrop_obj at the last ref via __drop_value). `json.keys` reads them back. The
+        // SLOT count (@8 = 2*pairs) is what the freelist reclaims — storing the pair count there
+        // leaked 2 slots/iter (the 2-pair OOM this caught). 2000x is the leak gate (multi-pair).
+        let src = "import json\n\
+            effect fn main() -> Unit = {\n  \
+              let o = value.object([(\"a\", value.int(1)), (\"bb\", value.str(\"x\"))])\n  \
+              println(int.to_string(list.len(json.keys(o))))\n  \
+              var k = 0\n  for i in 0..2000 { let p = value.object([(\"a\", value.int(i)), (\"b\", value.int(i))]); k = k + list.len(json.keys(p)) }\n  \
+              println(int.to_string(k)) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("value_object", &render_wasm_program(&prog)) {
+            assert_eq!(out, "2\n4000");
+        }
+    }
+
+    #[test]
     fn result_value_ok_wrapper_executes_on_wasmtime() {
         // The csv `parse` shape: a `Result[Value, String]` constructed by `ok(<Value>)` / `err(msg)`.
         // The Ok payload is a dynamic Value (materialized via lower_owned_heap_field), stored in the

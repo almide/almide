@@ -148,6 +148,51 @@ fn value_array(items: List[Value]) -> Value = {
   v
 }
 
+// value.object — a tag-6 Object Value: `alloc_value(2n)` (2 i64 slots per pair), @8 = the PAIR count
+// n, slot layout key@12+(2i)*8 (String handle) / value@12+(2i+1)*8 (Value handle). Each pair's key +
+// value are SHALLOW-COPIED in via rc_inc (the Object co-owns them; the source `pairs` list keeps its
+// own refs, freed at its scope end), exactly like value.array's element copy. The recursive
+// __drop_value (tag 6 → __vdrop_obj) frees them at the Object's last ref.
+fn __vobj_fill(ph: Int, vh: Int, i: Int, n: Int) -> Unit =
+  if i >= n then ()
+  else {
+    let tup = prim.load64(ph + 12 + i * 8)   // the i-th (String, Value) tuple block
+    let key = prim.load64(tup + 12)          // tuple slot 0 = the key String handle
+    let val = prim.load64(tup + 20)          // tuple slot 1 = the value Value handle
+    prim.rc_inc(key)
+    prim.rc_inc(val)
+    prim.store64(vh + 12 + (2 * i) * 8, key)
+    prim.store64(vh + 12 + (2 * i + 1) * 8, val)
+    __vobj_fill(ph, vh, i + 1, n)
+  }
+
+fn value_object(pairs: List[(String, Value)]) -> Value = {
+  let ph = prim.handle(pairs)
+  let n = prim.load32(ph + 4)
+  let v = prim.alloc_value(2 * n)
+  let vh = prim.handle(v)
+  prim.store32(vh + 4, 6)            // tag = Object
+  prim.store32(vh + 8, 2 * n)        // SLOT count @8 (= the alloc size, what the free reclaims); the
+  __vobj_fill(ph, vh, 0, n)          // pair count is slot_count/2 (2 slots per pair: key + value).
+  v
+}
+
+// json.keys — the Object's keys as a fresh `List[String]` (each key SHALLOW-COPIED via the
+// `acc + [k]` list-concat rc_inc; the returned list co-owns each, freed by its scope-end DropListStr).
+fn __vobj_keys(v: Value, i: Int, n: Int, acc: List[String]) -> List[String] =
+  if i >= n then acc
+  else {
+    let h = prim.handle(v)
+    let k: String = prim.load_handle(h + 12 + (2 * i) * 8)
+    __vobj_keys(v, i + 1, n, acc + [k])
+  }
+
+fn json_keys(v: Value) -> List[String] = {
+  let h = prim.handle(v)
+  let n = prim.load32(h + 8) / 2     // @8 is the SLOT count (2 per pair); the pair count is /2
+  __vobj_keys(v, 0, n, [])
+}
+
 // Recursively release each element Value of a tag-5 Array (called only at the Array's last ref).
 fn __vdrop_arr(v: Value, i: Int, n: Int) -> Unit =
   if i >= n then ()
@@ -167,11 +212,25 @@ fn __drop_value(v: Value) -> Unit = {
   if prim.load32(h + 0) == 1 then {
     let tag = prim.load32(h + 4)
     if tag == 5 then __vdrop_arr(v, 0, prim.load32(h + 8))
+    else if tag == 6 then __vdrop_obj(v, 0, prim.load32(h + 8) / 2)
     else if tag == 4 then prim.rc_dec(prim.load64(h + 12))
     else ()
   } else ()
   prim.rc_dec(h)
 }
+
+// Recursively release each (key String, value Value) pair of a tag-6 Object (called only at the
+// Object's last ref). The block has 2 slots per pair: key @12+(2i)*8 (String, flat rc_dec), value
+// @12+(2i+1)*8 (Value, recursive __drop_value so a nested Array/Object payload frees too).
+fn __vdrop_obj(v: Value, i: Int, n: Int) -> Unit =
+  if i >= n then ()
+  else {
+    let h = prim.handle(v)
+    prim.rc_dec(prim.load64(h + 12 + (2 * i) * 8))
+    let val: Value = prim.load_handle(h + 12 + (2 * i + 1) * 8)
+    __drop_value(val)
+    __vdrop_obj(v, i + 1, n)
+  }
 
 // The RECURSIVE free of a `List[Value]` (the render of `Op::DropListValue` calls this). A List[Value]
 // is a DynListStr block [rc@0][len@4][cap@8][elem@12+i*8] whose slots hold OWNED Value handles. At the

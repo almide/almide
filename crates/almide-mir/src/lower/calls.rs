@@ -2071,6 +2071,8 @@ impl LowerCtx {
                         | "__varr_copy"
                         | "__vfill"
                         | "__lc_copy_rc"
+                        | "__vobj_fill"   // Object shallow-copy (rc_inc each key/value) — value.object
+                        | "__vdrop_obj"   // Object recursive free (rc_dec key, __drop_value value)
                 ) || self.fn_name.starts_with("__drop_") =>
             {
                 // `__drop_*` also covers the GENERATED per-type custom-variant recursive drops
