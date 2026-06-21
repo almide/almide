@@ -80,12 +80,20 @@ executable interpreter proven to refine it — and that we now have natively:
   is a real reduction), `erun_complete`, `istep_det` (deterministic).
 - `rc_inc`'s effect (cell → cell+1) proven THROUGH the relation via the refinement.
 This replaces WasmExec.v's bespoke `run_g` (no spec to refine) with a real semantics relation
-for the rc subset. Axiom-clean, in `check.sh` (coqc + coqchk). STRAIGHT-LINE subset.
+for the rc subset. Axiom-clean, in `check.sh` (coqc + coqchk).
 
-NEXT brick (same relation): structured control `IIf`/`IUnreachable` for **rc_dec** — the
-safety-critical double-free TRAP + leak-freedom reclamation through the ISA relation (matching
-what check-wasm-exec.sh grounds empirically). Needs a mutual `istep`/`irun` (the `if` rule runs
-a sub-body) + a size/nested induction for the refinement — a real but bounded proof step.
+STRUCTURED CONTROL — DONE (commit e1d2112c): `istep`/`irun` now cover `IIf` (block `if/end`, runs
+its body) and `IUnreachable` (the trap = a stuck state, no rule). Coq's structural guard rejects
+the nested single/mutual fixpoint (list-inside-instr), so the executable `erun` is FUEL-bounded,
+proven SOUND w.r.t. the relation by fuel induction. **rc_dec carried THROUGH the relation**:
+- `rc_dec_isa_traps_on_zero`: a double-free never completes (the interpreter returns None for
+  EVERY fuel — the sentinel fires), the safety direction.
+- `rc_dec_isa_frees_when_one`: rc=1 ⟹ decremented to 0 AND reclaimed onto `$freelist` (leak-
+  freedom), reachable in the spec (via `erun_sound`).
+So the double-free trap + reclamation that `check-wasm-exec.sh` grounds EMPIRICALLY are now also
+relational ISA THEOREMS. (rc_inc/rc_dec effects are `exists`-style: the fuel evaluator makes
+pinning the unique result need the completeness direction; the witness comes from running the
+verified interpreter. A `forall` upgrade would add `erun` completeness — a follow-up nicety.)
 
 REMAINING heavy track (#40's maximal form): the FULL canonical WasmCert-Coq ISA (complete
 verified wasm execution semantics) so the binding holds for ALL wasm programs abstractly, not
