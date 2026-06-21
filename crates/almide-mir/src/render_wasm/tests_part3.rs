@@ -712,16 +712,14 @@
     }
 
     #[test]
-    #[ignore = "parse_rows_rec double-free: self-recursive sibling arm + destructure-in-nested-else \
-                misplaces the owned-tuple drop before the borrowed field's use (csv parse blocker)"]
     fn parse_rows_rec_destructure_mutual_recursion_double_free() {
-        // REGRESSION GUARD (ignored until fixed) for the csv parse / parse_records double-free: a
+        // REGRESSION GUARD for the csv parse double-free, now FIXED by the TCO result accumulator: a
         // recursive `prr` whose inner-if has a SELF-recursive THEN (`prr(…)`) AND a sibling ELSE that
         // destructures an owned tuple (`let (field, np) = pf(…)`) then uses the borrowed `field` in
-        // `cur + [field]` TRAPS (rc_dec → unreachable) — the tuple is dropped before the field's use.
-        // Replacing the self-recursive THEN with a non-self call (the `ns` repro) avoids it, pinning
-        // the trigger to the self-recursive-arm × sibling-destructure interaction. Once fixed, drop
-        // the #[ignore] — both csv parse and parse_records (map machinery already done) byte-match v0.
+        // `cur + [field]`. Before the fix this TRAPPED — the TCO computed the `paf(…, cur+[field])`
+        // base case in the POST-LOOP dispatch, where the loop-body-local `field` was already dead. The
+        // fix carries such a base out through a result accumulator computed IN the loop (where `field`
+        // is live), via the loop-carried heap slot generalized to any fresh-owned producer.
         let src = "fn pf(text: String, pos: Int, acc: String) -> (String, Int) =\n  \
               if pos >= string.len(text) then (acc, pos)\n  \
               else { let c = string.get(text, pos) ?? \"\"\n         if c == \",\" then (acc, pos) else pf(text, pos + 1, acc + c) }\n\

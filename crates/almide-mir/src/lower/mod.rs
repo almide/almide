@@ -1295,9 +1295,25 @@ impl LowerCtx {
                                 return Ok(());
                             }
                         }
-                        // [UNDER TEST] GENERAL heap accumulator — `slot = <fresh-owned-heap expr>`.
+                        // GENERAL loop-carried heap slot — `slot = <any fresh-owned heap expr>`: a
+                        // non-self list/string concat (`result = rows + [cur]`), or a call result
+                        // (`result = paf(text, np, rows, cur + [field])` — the TCO RESULT ACCUMULATOR
+                        // that carries a base case out of the loop, where its loop-body-local inputs
+                        // like a destructured `field` are still live). Each builds a FRESH owned value
+                        // (cert `i`); drop the old slot (`d`) and rebind in place (`m`) — the SAME
+                        // loop-carried `i(id)m` the self-append/reset slots prove (OwnershipChecker.v
+                        // `check_line_unroll_sound`), generalized to any fresh-owned producer.
                         if let Some(&slot_local) = self.value_of.get(var) {
-                            if let Some(new) = self.lower_owned_heap_field(value) {
+                            let new = match &value.kind {
+                                IrExprKind::BinOp { op: almide_ir::BinOp::ConcatList, .. } => {
+                                    self.try_lower_concat_list(value)
+                                }
+                                IrExprKind::BinOp { op: almide_ir::BinOp::ConcatStr, .. } => {
+                                    self.try_lower_concat_str(value)
+                                }
+                                _ => self.lower_owned_heap_field(value),
+                            };
+                            if let Some(new) = new {
                                 if new != slot_local {
                                     let drop_op = self.drop_op_for(slot_local);
                                     self.ops.push(drop_op);
@@ -2682,6 +2698,22 @@ fn tco_ir(kind: IrExprKind, ty: Ty) -> IrExpr {
     IrExpr { kind, ty, span: None, def_id: None }
 }
 
+/// An empty value of `ty` for the TCO result accumulator's INITIAL binding — a placeholder the first
+/// base case overwrites (its scope-end-style drop on reassignment must be a no-op-equivalent, so it is
+/// a genuine empty heap block, not a deferred Opaque). `List → []`, `String → ""`. Other heap results
+/// (Value, Result) have no clean empty literal, so the accumulator path declines (`None`) and the
+/// caller keeps the post-loop dispatch (or walls, when a base references a loop-body-local).
+fn tco_empty_for(ty: &Ty) -> Option<IrExpr> {
+    use almide_lang::types::constructor::TypeConstructorId;
+    match ty {
+        Ty::String => Some(tco_ir(IrExprKind::LitStr { value: String::new() }, Ty::String)),
+        Ty::Applied(TypeConstructorId::List, _) => {
+            Some(tco_ir(IrExprKind::List { elements: vec![] }, ty.clone()))
+        }
+        _ => None,
+    }
+}
+
 fn tco_contains_self(e: &IrExpr, fn_name: &str) -> bool {
     use almide_ir::visit::IrVisitor;
     struct S<'a>(&'a str, bool);
@@ -2803,20 +2835,21 @@ fn tco_rewrite(
     next_kind: &mut i64,
     idx: Option<VarId>,
     next_var: &mut u32,
+    result: Option<VarId>,
 ) -> IrExpr {
     match &body.kind {
         IrExprKind::If { cond, then, else_ } => tco_ir(
             IrExprKind::If {
                 cond: cond.clone(),
-                then: Box::new(tco_rewrite(then, fn_name, params, carried, rk, next_kind, idx, next_var)),
-                else_: Box::new(tco_rewrite(else_, fn_name, params, carried, rk, next_kind, idx, next_var)),
+                then: Box::new(tco_rewrite(then, fn_name, params, carried, rk, next_kind, idx, next_var, result)),
+                else_: Box::new(tco_rewrite(else_, fn_name, params, carried, rk, next_kind, idx, next_var, result)),
             },
             Ty::Unit,
         ),
         IrExprKind::Block { stmts, expr: Some(tail) } => tco_ir(
             IrExprKind::Block {
                 stmts: stmts.clone(),
-                expr: Some(Box::new(tco_rewrite(tail, fn_name, params, carried, rk, next_kind, idx, next_var))),
+                expr: Some(Box::new(tco_rewrite(tail, fn_name, params, carried, rk, next_kind, idx, next_var, result))),
             },
             Ty::Unit,
         ),
@@ -2899,21 +2932,32 @@ fn tco_rewrite(
             tco_ir(IrExprKind::Block { stmts, expr: None }, Ty::Unit)
         }
         _ => {
+            // A BASE case (a non-self tail). Set `rk` to a non-zero kind so the `while rk == 0` loop
+            // exits. The base VALUE is delivered one of two ways:
+            //   • result accumulator (`result = Some`): assign `<base>` to the carried result var HERE,
+            //     IN the loop — where the base's inputs (carried params AND loop-body-local bindings
+            //     like a destructured `let (field, _) = pf(…)`) are all live. The post-loop trivially
+            //     returns the accumulator. This is the only correct place when the base reads a
+            //     loop-body-local (those are dead in the post-loop dispatch — the parse_rows_rec bug).
+            //   • post-loop dispatch (`result = None`): just record WHICH base via `rk = k`; the value
+            //     is recomputed after the loop. Sound ONLY when the base closes over carried params.
             let k = *next_kind;
             *next_kind += 1;
-            tco_ir(
-                IrExprKind::Block {
-                    stmts: vec![IrStmt {
-                        kind: IrStmtKind::Assign {
-                            var: rk,
-                            value: tco_ir(IrExprKind::LitInt { value: k }, Ty::Int),
-                        },
-                        span: None,
-                    }],
-                    expr: None,
+            let mut stmts: Vec<IrStmt> = Vec::new();
+            if let Some(rv) = result {
+                stmts.push(IrStmt {
+                    kind: IrStmtKind::Assign { var: rv, value: body.clone() },
+                    span: None,
+                });
+            }
+            stmts.push(IrStmt {
+                kind: IrStmtKind::Assign {
+                    var: rk,
+                    value: tco_ir(IrExprKind::LitInt { value: k }, Ty::Int),
                 },
-                Ty::Unit,
-            )
+                span: None,
+            });
+            tco_ir(IrExprKind::Block { stmts, expr: None }, Ty::Unit)
         }
     }
 }
@@ -3137,13 +3181,38 @@ pub(crate) fn try_tco_rewrite(
     let base_exprs: Vec<IrExpr> = bases.iter().map(|b| (*b).clone()).collect();
     let ret_ty = body.ty.clone();
 
-    let mut next_kind = 1i64;
-    // `slot_next` is the next free VarId (after rk / list-iter idx / append slots) — tco_rewrite draws
-    // its simultaneous-update temps from here.
-    let loop_body =
-        tco_rewrite(work_ref, fn_name, params2, &carried, rk, &mut next_kind, idx_var, &mut slot_next);
+    // Does ANY base case reference a LOOP-BODY-LOCAL binding — a `let`/destructure in the loop body
+    // (e.g. `let (field, np) = pf(…)`) — rather than only carried params? Such a base must be computed
+    // IN the loop (the binding is dead in the post-loop dispatch — the parse_rows_rec use-after-free).
+    // `free_vars(base)` excludes anything the base binds internally, so the intersection is exactly the
+    // loop-body bindings the base READS from an enclosing scope.
+    let loop_lets = almide_ir::free_vars::bound_vars(work_ref);
+    let base_reads_loop_local = base_exprs.iter().any(|b| {
+        almide_ir::free_vars::free_vars(b, &std::collections::HashSet::new())
+            .iter()
+            .any(|v| loop_lets.contains(v))
+    });
+    // When it does, carry the base value out through a RESULT ACCUMULATOR computed in the loop, and
+    // the post-loop is a trivial read. Needs an empty initial value of the result type; without one
+    // (Value/Result) DECLINE the TCO entirely — the function keeps its memory-safe non-TCO form (a
+    // clean wall), never the dispatch's use-after-free.
+    let result_var: Option<VarId> = if base_reads_loop_local {
+        tco_empty_for(&ret_ty)?;
+        let rv = VarId(slot_next);
+        slot_next += 1;
+        Some(rv)
+    } else {
+        None
+    };
 
-    // Post-loop dispatch: `if rk == 1 then base_1 else if … else base_N` (last base = final else).
+    let mut next_kind = 1i64;
+    // `slot_next` is the next free VarId (after rk / list-iter idx / append slots / result) — tco_rewrite
+    // draws its simultaneous-update temps from here.
+    let loop_body = tco_rewrite(
+        work_ref, fn_name, params2, &carried, rk, &mut next_kind, idx_var, &mut slot_next, result_var,
+    );
+
+    // `rk == k` (the loop guard uses `rk == 0`; the post-loop dispatch uses `rk == <base kind>`).
     let eq_rk = |k: i64| {
         tco_ir(
             IrExprKind::BinOp {
@@ -3154,17 +3223,24 @@ pub(crate) fn try_tco_rewrite(
             Ty::Bool,
         )
     };
-    let mut post = base_exprs.last()?.clone();
-    for (idx, base) in base_exprs.iter().enumerate().rev().skip(1) {
-        post = tco_ir(
-            IrExprKind::If {
-                cond: Box::new(eq_rk((idx + 1) as i64)),
-                then: Box::new(base.clone()),
-                else_: Box::new(post),
-            },
-            ret_ty.clone(),
-        );
-    }
+    // Post-loop: the accumulator path just READS the result the loop computed; otherwise the dispatch
+    // `if rk == 1 then base_1 else if … else base_N` recomputes the hit base from the carried params.
+    let post = if let Some(rv) = result_var {
+        tco_ir(IrExprKind::Var { id: rv }, ret_ty.clone())
+    } else {
+        let mut post = base_exprs.last()?.clone();
+        for (idx, base) in base_exprs.iter().enumerate().rev().skip(1) {
+            post = tco_ir(
+                IrExprKind::If {
+                    cond: Box::new(eq_rk((idx + 1) as i64)),
+                    then: Box::new(base.clone()),
+                    else_: Box::new(post),
+                },
+                ret_ty.clone(),
+            );
+        }
+        post
+    };
 
     // `{ [let slot = acc + [];]* [var idx = 0;] var rk = 0; while (rk == 0) { <loop_body> }; <post> }`
     // The append-accumulator slot inits (owned copies of the borrowed `acc` params) come FIRST.
@@ -3176,6 +3252,19 @@ pub(crate) fn try_tco_rewrite(
                 mutability: almide_ir::Mutability::Var,
                 ty: Ty::Int,
                 value: tco_ir(IrExprKind::LitInt { value: 0 }, Ty::Int),
+            },
+            span: None,
+        });
+    }
+    // The result accumulator (when used) starts at an empty value of the result type — a placeholder
+    // the first base case overwrites IN the loop; declared mutable so the in-loop base assigns it.
+    if let Some(rv) = result_var {
+        inits.push(IrStmt {
+            kind: IrStmtKind::Bind {
+                var: rv,
+                mutability: almide_ir::Mutability::Var,
+                ty: ret_ty.clone(),
+                value: tco_empty_for(&ret_ty).expect("checked Some above"),
             },
             span: None,
         });

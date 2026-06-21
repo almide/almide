@@ -37,6 +37,60 @@ pub fn free_vars(expr: &IrExpr, bound: &HashSet<VarId>) -> Vec<VarId> {
     v
 }
 
+/// Every `VarId` *bound* anywhere within `expr` — by a `let`/destructure (`Bind`/`BindDestructure`),
+/// a `match`-arm pattern, or a `for-in` loop variable. The dual of [`free_vars`]: where `free_vars`
+/// asks "which enclosing locals does this reference", `bound_vars` asks "which locals does this
+/// introduce". The TCO rewrite uses it to tell a base case that closes over only carried params
+/// (safe to recompute in the post-loop dispatch) from one that references a loop-body-local binding
+/// (which is dead post-loop, so its base must be computed IN the loop and carried out).
+pub fn bound_vars(expr: &IrExpr) -> HashSet<VarId> {
+    let mut c = BoundVarCollector { bound: HashSet::new() };
+    c.visit_expr(expr);
+    c.bound
+}
+
+struct BoundVarCollector {
+    bound: HashSet<VarId>,
+}
+
+impl IrVisitor for BoundVarCollector {
+    fn visit_expr(&mut self, expr: &IrExpr) {
+        match &expr.kind {
+            IrExprKind::Lambda { params, .. } => {
+                for (v, _) in params {
+                    self.bound.insert(*v);
+                }
+            }
+            IrExprKind::Match { arms, .. } => {
+                for arm in arms {
+                    collect_pattern_bindings(&arm.pattern, &mut self.bound);
+                }
+            }
+            IrExprKind::ForIn { var, var_tuple, .. } => {
+                self.bound.insert(*var);
+                if let Some(vt) = var_tuple {
+                    self.bound.extend(vt.iter().copied());
+                }
+            }
+            _ => {}
+        }
+        walk_expr(self, expr);
+    }
+
+    fn visit_stmt(&mut self, stmt: &IrStmt) {
+        match &stmt.kind {
+            IrStmtKind::Bind { var, .. } => {
+                self.bound.insert(*var);
+            }
+            IrStmtKind::BindDestructure { pattern, .. } => {
+                collect_pattern_bindings(pattern, &mut self.bound);
+            }
+            _ => {}
+        }
+        walk_stmt(self, stmt);
+    }
+}
+
 struct FreeVarCollector {
     bound: HashSet<VarId>,
     free: HashSet<VarId>,
