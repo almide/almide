@@ -100,6 +100,34 @@ impl LowerCtx {
                 .lower_prim_call(func, args)?
                 .ok_or_else(|| LowerError::Unsupported(format!("prim.{func} yields no value here")));
         }
+        // INLINE `value.null()` to a tag-0 Value block (Alloc + store32 tag) instead of a CallFn — a
+        // trivial pure constructor (value_core: `alloc_value(1); store32(h+4, 0)`). As a CallFn it would
+        // OVER-COUNT vs the IR when the TCO synthesizes it for a `(Value,Int)` result-accumulator empty
+        // (`mir>ir` caps breach — the synthetic call has no IR node to credit). Inlined it is NO CallFn,
+        // so the TCO's synthetic empty adds no mir call; an explicit `value.null()` source node still
+        // counts in the IR (mir < ir, allowed). The result is a fresh OWNED Value (cert `i`, same as the
+        // call), tracked by the caller via `is_value_ty` exactly as before.
+        if module == "value" && func == "null" && args.is_empty() {
+            use crate::{IntOp, PrimKind};
+            let len = self.fresh_value();
+            self.ops.push(Op::ConstInt { dst: len, value: 1 });
+            let dst = self.fresh_value();
+            self.ops.push(Op::Alloc {
+                dst,
+                repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT },
+                init: crate::Init::DynList { len },
+            });
+            let h = self.fresh_value();
+            self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![dst] });
+            let off = self.fresh_value();
+            self.ops.push(Op::ConstInt { dst: off, value: 4 });
+            let addr = self.fresh_value();
+            self.ops.push(Op::IntBinOp { dst: addr, op: IntOp::Add, a: h, b: off });
+            let zero = self.fresh_value();
+            self.ops.push(Op::ConstInt { dst: zero, value: 0 });
+            self.ops.push(Op::Prim { kind: PrimKind::Store { width: 4 }, dst: None, args: vec![addr, zero] });
+            return Ok(dst);
+        }
         // C1 DEFUNCTIONALIZATION — a `list.map`/`filter`/`fold` whose closure arg is an
         // INLINE lambda is specialized as a loop at the call site (no runtime closure, no
         // CallIndirect, no lifted fn). This is tried FIRST so a CAPTURING inline lambda
