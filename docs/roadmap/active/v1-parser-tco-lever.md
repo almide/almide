@@ -29,12 +29,19 @@ render_program+wasmtime). **2 of 4 byte-match; 2 remain, each a DISTINCT mechani
   - **B** (prr↔paf MUTUAL recursion, NO destructure) → WALLS (out of subset, not a trap).
   - **prrep** (BOTH: prr↔paf mutual recursion + the `let (field,np)=pf(…)` destructure + `cur +
     [field]`) → TRAPS (double-free).
-  So the double-free needs the COMBINATION of the mutual recursion (the `cur + [field]` heap list
-  flowing prr→paf→prr) AND the destructure-sourced field — a heap value's ownership mis-accounted as
-  it threads through the extra `paf` hop. A deep, interaction-specific ownership bug, NOT isolable to a
-  single op; needs careful tracing of the mutual-recursion arg convention for a fresh owned list arg
-  (`cur + [field]`) passed → borrowed → re-passed. The map machinery for parse_records is DONE
-  (a9aecee5); both parse + parse_records trap ONLY here. NOT covered by corpus-wall (csv ∉ v0 corpus).
+  FINAL trigger (regression test `parse_rows_rec_destructure_mutual_recursion_double_free`, #[ignore]):
+  the precise combination is a **SELF-recursive sibling arm + a destructure-in-the-nested-else**. In
+  prr's inner `if c == "," then prr(…) else { let (field,np)=pf(…); paf(…, cur+[field]) }` the THEN is
+  SELF-recursive (`prr(…)`) and the ELSE destructures an owned tuple then uses the borrowed `field` —
+  the owned pf-tuple is dropped (rc_dec'ing its String slot) BEFORE the `cur+[field]` concat reads it
+  (wat: drop at 479 < concat at 551) → freed String copied → double-free. CONFIRMED trigger: the `ns`
+  repro — same code but the inner THEN is `paf(…)` instead of the SELF-recursive `prr(…)` — does NOT
+  trap (the whole prr then lowers as the executable heap-result-if). So the self-recursive sibling arm
+  is what pushes the destructure-else onto the drop-misplacing path. dd (a FLAT `else { destructure;
+  prr(…) }`, self-recursive but no nested if) is also fine (drop at 374 AFTER concat 347). Dup-ing the
+  field does NOT fix it (Dup dropped at the same misplaced point). A focused but deep drop-placement
+  fix for the destructure × self-recursive-sibling-arm × nested-if interaction; high regression risk.
+  map machinery DONE (a9aecee5); both parse + parse_records trap ONLY here. NOT in corpus-wall (csv ∉ corpus).
 
 ## THE LAYOUT BRICK read side — OPEN (commits 5b7efec7, e43db65f)
 

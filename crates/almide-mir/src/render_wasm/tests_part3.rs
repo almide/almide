@@ -712,6 +712,33 @@
     }
 
     #[test]
+    #[ignore = "parse_rows_rec double-free: self-recursive sibling arm + destructure-in-nested-else \
+                misplaces the owned-tuple drop before the borrowed field's use (csv parse blocker)"]
+    fn parse_rows_rec_destructure_mutual_recursion_double_free() {
+        // REGRESSION GUARD (ignored until fixed) for the csv parse / parse_records double-free: a
+        // recursive `prr` whose inner-if has a SELF-recursive THEN (`prr(…)`) AND a sibling ELSE that
+        // destructures an owned tuple (`let (field, np) = pf(…)`) then uses the borrowed `field` in
+        // `cur + [field]` TRAPS (rc_dec → unreachable) — the tuple is dropped before the field's use.
+        // Replacing the self-recursive THEN with a non-self call (the `ns` repro) avoids it, pinning
+        // the trigger to the self-recursive-arm × sibling-destructure interaction. Once fixed, drop
+        // the #[ignore] — both csv parse and parse_records (map machinery already done) byte-match v0.
+        let src = "fn pf(text: String, pos: Int, acc: String) -> (String, Int) =\n  \
+              if pos >= string.len(text) then (acc, pos)\n  \
+              else { let c = string.get(text, pos) ?? \"\"\n         if c == \",\" then (acc, pos) else pf(text, pos + 1, acc + c) }\n\
+            fn paf(text: String, pos: Int, rows: List[List[String]], cur: List[String]) -> List[List[String]] =\n  \
+              if pos >= string.len(text) then rows + [cur]\n  \
+              else { let c = string.get(text, pos) ?? \"\"\n         if c == \",\" then prr(text, pos + 1, rows, cur) else prr(text, pos, rows, cur) }\n\
+            fn prr(text: String, pos: Int, rows: List[List[String]], cur: List[String]) -> List[List[String]] =\n  \
+              if pos >= string.len(text) then rows + [cur]\n  \
+              else { let c = string.get(text, pos) ?? \"\"\n         if c == \",\" then prr(text, pos + 1, rows, cur + [\"\"]) else { let (field, np) = pf(text, pos, \"\"); paf(text, np, rows, cur + [field]) } }\n\
+            fn main() -> Unit = { let r = prr(\"a,b,c\", 0, [], []); for rr in r { println(int.to_string(list.len(rr))) } }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("parse_rows_rec_df", &render_wasm_program(&prog)) {
+            assert_eq!(out, "3");
+        }
+    }
+
+    #[test]
     fn enumerate_map_fusion_to_object_executes_on_wasmtime() {
         // parse_records' core: `header |> list.enumerate |> list.map((entry) => { let (i,key)=entry;
         // (key, value.str(list.get_or(row, i, ""))) })` → value.object. The enumerate+map FUSION
