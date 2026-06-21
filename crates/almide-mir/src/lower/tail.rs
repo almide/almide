@@ -296,6 +296,16 @@ impl LowerCtx {
                             return Ok(Some(dst));
                         }
                     }
+                    // A SPREAD record RETURNED (`fn attr(e, k, v) = { ...e, attrs: map.set(…) }` —
+                    // the svg element-builder shape): build a fresh same-layout block COPYING each
+                    // non-overridden field from the materialized base (scalar Load, heap-handle Dup so
+                    // base keeps its own ref) + storing the overrides, then MOVE IT OUT as the return
+                    // (the caller owns it, no scope-end drop). Same `i…m` cert as the Record return.
+                    if let IrExprKind::SpreadRecord { .. } = &tail.kind {
+                        if let Some(dst) = self.try_lower_spread_record_construct(tail) {
+                            return Ok(Some(dst));
+                        }
+                    }
                     // A TUPLE literal RETURNED (`fn pair(s) = (s, 5)`, `(parse_inline(t), pos + 1)`
                     // — the dominant yaml `(Value, Int)` parser shape): build the real block (scalar
                     // slots stored, heap elements moved in via `lower_owned_heap_field`) and MOVE IT

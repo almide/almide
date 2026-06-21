@@ -825,6 +825,26 @@
     }
 
     #[test]
+    fn record_call_result_field_read_and_spread_return() {
+        // A record returned from a CALL (`let p = bump(mk(5))`) must be tracked as a materialized
+        // aggregate so a heap-field read (`p.y`) loads the real slot — not the container-grain Dup that
+        // returned the whole record (the `mk(5).y` empty-string miscompile). And a SPREAD record
+        // RETURNED from a fn (`fn bump(p) = { ...p, x: p.x + 1 }`, the svg element-builder shape) builds
+        // + moves out a fresh same-layout block (scalar Load + heap Dup of the un-overridden fields).
+        let src = "type P = { x: Int, y: String }\n\
+            fn mk(n: Int) -> P = P { x: n, y: \"hi\" }\n\
+            fn bump(p: P) -> P = { ...p, x: p.x + 1 }\n\
+            effect fn main() -> Unit = {\n  \
+              let p = bump(mk(5))\n  \
+              println(int.to_string(p.x))\n  \
+              println(p.y) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("record_call_spread", &render_wasm_program(&prog)) {
+            assert_eq!(out, "6\nhi");
+        }
+    }
+
+    #[test]
     fn list_get_value_option_unwrap_executes_on_wasmtime() {
         // Option-of-Value read (`list.get(rows, i) ?? d` — the stringify_records row accessor). list.get
         // on a List[Value] dispatches to list.get_value (NOT the `_str` variant, which deep-copies the

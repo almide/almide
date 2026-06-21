@@ -762,6 +762,17 @@ impl LowerCtx {
                 // let-bound-heap-`if` tail-duplication) lower instead of wall.
                 if is_variant_ty(ty) {
                     self.seed_variant_param(dst, ty);
+                } else if let Some((_, tys)) = self.aggregate_field_tys(ty) {
+                    // A user function returning a RECORD/TUPLE yields a REAL same-layout block (the
+                    // callee built it via try_lower_record_construct). Seed its READ-shape
+                    // (materialized_aggregates) so a field read `p.y` loads the real slot instead of
+                    // falling back to the container-grain Dup (which returns the whole record — the
+                    // `mk(5).y` empty-string miscompile), AND its heap-slot MASK (record_masks) so the
+                    // OWNED scope-end drop frees exactly the heap fields (no leak, no double-free).
+                    let heap_slots: Vec<usize> =
+                        (0..tys.len()).filter(|&i| is_heap_ty(&tys[i])).collect();
+                    self.materialized_aggregates.insert(dst);
+                    self.record_masks.insert(dst, heap_slots);
                 }
                 Ok(())
             }
