@@ -142,6 +142,27 @@ STILL TODO (the deeper Value pieces — each a real sub-gap, NOT a quick add):
   value.object(pairs) })`: a block-body closure building `List[(String,Value)]` then a Value object —
   the closure walls ("unliftable closure"), independent of value.object now existing.
 
+## value.get + stringify_records — blocked by THE LAYOUT BRICK (heap-Result-of-Value/List)
+
+ATTEMPTED value.get + reverted (walls + garbles; never shipped broken). Precise findings:
+- v0 spec: `value.get(o,k)` → `Ok(v)` / `Err("missing field '<k>'")` (interp message). Used in
+  stringify_records as `value.get(row,h) ?? value.null()`.
+- value.get's CTOR walls: the body `if idx<0 then Err(msg) else { rc_inc; let val; Ok(val) }` is a
+  heap-result `if` returning `Result[Value,String]`, and it walls "heap-result if outside the
+  executable subset" — the `Ok(<rc_inc'd borrowed Value>)` + `Err(<concat/let message>)` arms aren't
+  in `try_lower_result_value_ctor`'s subset (it handled Ok over a fresh `value.*` / list.map, not a
+  borrowed-then-co-owned Object slot).
+- value.get's READ garbles: a `match value.get(…){ ok(v)=>…, err(e)=>… }` returns `ok:0|err:0` instead
+  of `ok:7|err:'missing field'` — the **Result[Value,String] read** (match + `??`) is unwired
+  (`materialized_results_str` tracks only `Result[String,_]`; a Value-Ok payload read mis-binds).
+- stringify_records' FIRST line is `value.as_array(v) ?? []` = a `Result[List[Value],String]` unwrap —
+  the SAME layout-brick blocker (as_array mis-bind, value_core lines 101-112), reached BEFORE value.get.
+
+So value.get AND stringify_records both need THE LAYOUT BRICK: payload-precise heap-payload
+binding + heap-Result-of-Value/List ctor & read (match/`??`). A substantial, documented machinery
+brick — NOT a quick add. (value.object/json.keys/value.stringify, which need only Value CONSTRUCTION
++ borrowed reads, all landed; the gap is specifically heap-Result-of-Value/List round-tripping.)
+
 STILL WALLS (csv full byte-match — the last 2, both value.object-building closures):
 - ❌ `parse_records` — `data |> list.map((row) => { … value.object(pairs) … })`: a block-body closure
   building a `value.object` from `header`/`row` (a `list.zip`/pairs shape) — a more complex Value
