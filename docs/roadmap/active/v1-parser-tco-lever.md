@@ -44,11 +44,39 @@ why it was reverted (②discipline — do not ship a reachable miscompile):
 - Separately, the real `collect_map` (key = `list.get(lines, pos) ?? ""`, not a literal) still WALLs —
   a second issue (the `??`-keyed element / the mutual-inline of `map_entry` into a self-recursive shape).
 
-NEXT SESSION (well-scoped): (1) fix the loop-body-escape Consume so a value-constructor arg that lands
-in the accumulator is removed from the per-iteration drop frame; (2) get the mutual-inline to expose
-`collect_map` as self-recursive so the existing TCO targets it (or extend the TCO to the `(Value,Int)`
-tuple result directly); (3) byte-match audit `parse`/`stringify` + 10⁴ leak loop. The str_str/str_value
-list-literal materialization is sound and can be re-landed alongside the loop-escape fix.
+ROOT CAUSE (fully de-risked 2026-06-21): `tco_empty_for` (lower/mod.rs:2952 — the result-accumulator's
+initial empty value) handles ONLY `String`/`List`; for a `(Value, Int)` tuple it returns `None`, so the
+TCO declines the in-loop RESULT-ACCUMULATOR path (the csv parse fix 646aa233) and falls back to the OLD
+POST-LOOP DISPATCH, which recomputes the base `(value.object(pairs), pos)` AFTER the loop reading STALE
+values → `pos` reads its entry value (`p=0`, not 3). So the fix is to make the result-accumulator path
+available for tuple results. THE SETTLED 5-BRICK PLAN (implement fresh from this plan, gate each):
+
+1. **`tco_empty_for` → Value + Tuple.** `Value → value.null()` (a clean empty Value); a scalar →
+   `0`/`0.0`/`false`; `Tuple[a,b] → (tco_empty_for(a), tco_empty_for(b))` recursively. This routes
+   `(Value,Int)` results onto the in-loop result-accumulator (no stale post-loop dispatch).
+2. **The tuple result-accumulator DROP.** The accumulator slot holds a `(Value, Int)` tuple; each base
+   reassignment (and the initial empty) drops the old via a NEW `Op::DropTuple`-style op (free slot-0
+   `Value` via `$__drop_value`, slot-1 scalar no-op, then the tuple block). Generalize the existing
+   `record_masks`/per-slot recursive drop to a 2-slot tuple with a Value slot. (Only ONE base is hit per
+   run, so this drops the empty once — but must be correct for multi-base parsers.)
+3. **Re-land the `(String,Value)` / `(String,String)` list-literal materialization** (the reverted
+   `try_lower_record_list_literal` StrValue + `lower_owned_heap_field` Tuple-arm), so the `pairs +
+   [(k, value.str(...))]` accumulator literal builds. SOUND on its own (sv1/sv2 verified).
+4. **Loop-body-escape Consume.** In the loop body, `value.str(arg)` COPIES `arg` (runtime
+   `string.repeat(s,1)`), so `arg` stays the caller's and is correctly `rc_dec`'d at the per-iteration
+   teardown — BUT the trap (`rc_dec(v13)`) shows it is freed TWICE: pin whether the double-`rc_dec` is
+   the per-iter frame + a stale carry, or the arg is mis-shared with the accumulator copy. (Re-derive
+   from a fresh `cm2.wat` with bricks 1-3 in place; the prior trap was BEFORE the result-accumulator
+   path, so it may dissolve once brick 1 routes it correctly.)
+5. **Mutual-inline for the real `collect_map`.** `inline_mutual_tail_recursion` must inline `map_entry`
+   (and the `after_colon` chain's same-level tail) into `collect_map` so it is purely self-recursive at
+   one nesting level (the `parse_nested` deeper call stays a bounded regular call). Then bricks 1-4 apply.
+   The `??`-keyed element (`list.get(lines,pos) ?? ""`) must also lower in the loop body.
+
+Then: byte-match audit `parse`/`stringify` + 10⁴ leak loop + corpus-wall + mir suite, per brick.
+GATING NOTE: brick 1 alone may already fix `cm2` (it routes to the result-accumulator) — verify before
+assuming bricks 2/4 are needed. The Coq loop-ownership soundness (option C, 7f673b4c) underwrites the
+whole; this is the extraction/lowering integration only.
 
 ## csv full-conquest status (4 public fns, v0-vs-v1 byte-match audit)
 
