@@ -172,3 +172,37 @@ So map.entries_str + map_str-leak unblock the majority; List[record] literal unb
 
 NET: svg = recursive-record-drop (DONE) + map_str-leak-fix + map.entries_str/(String,String)-tuple-list
 + List[Record]-literal. A multi-brick continuation, each gated (suite + corpus-wall + a 10⁴ leak loop).
+
+## STATUS 2 (leak localized) — the map_str per-iter leak
+
+Localized the rec4 OOM precisely (autonomous run continued):
+- `recE` (record with an EMPTY `Map[String,String]` field, 10000× loop, NO `map.set`) → ✅ leak-free.
+- `rec5` (record with a `List[String]` field, 10000×) → ✅ leak-free (the record drop itself is sound).
+- `rec4loop` (record with a `map.set`-POPULATED `Map[String,String]` field, 20000× loop) → ✗ OOM.
+
+So the leak is SPECIFIC to the `map.set_str`-populated `Map[String,String]` path in a loop — NOT the
+record drop, NOT the empty-map drop. The generated `$__drop_map_ss` offsets DO match `map_str`
+(interleaved 16-byte entries, key @ 12+i*16 / value @ 12+i*16+8; `len@4 = rslots = 2*entries`; the
+drop loops `load32(h+4)` slots at 8-byte stride = exactly the interleaved keys+values, freeing all),
+and a single `map.set` (rec4a/rec4b) is leak-free — so the leak is a SUBTLE per-iteration imbalance in
+`map.set_str` + the spread-override / call-arg path (a `store_copy` String copy or the map block not
+reclaimed per iter), NOT yet pinned. Next: dump the rec4loop loop-body `Op::Alloc` vs drop ops and
+diff the per-iter heap balance; or build a bare `map.set` loop (avoiding the for-in `[:]`-direct-arg +
+Range-in-call-arg walls via a `Map[String,String]` param) to confirm whether the leak is `map.set_str`
+itself or the record/spread integration.
+
+## Honest scope assessment
+
+The HEADLINE mechanism — the recursive record drop — is DONE, gated (suite 494/0, corpus-wall ACCEPT
+on all 4 properties, 10000× leak-verified for String/List[String] record fields), and committed
+(05a40219). svg full conquest, however, is NOT "1 mechanism": implementing the record drop revealed a
+CASCADE of further independent bricks, each with its own lowering walls:
+  (1) the subtle `map_str`-in-loop leak above (leak gate);
+  (2) `map.entries` is UNLINKED for `Map[String,String]` → render_attrs walls — needs `map_entries_str`
+      (→ `List[(String,String)]`) + a NEW `(String,String)` tuple-list (materialize + list.map + the
+      `let (k,v)=pair` destructure + drop), itself a multi-part feature;
+  (3) `List[Record]` literal materialization (`group([…])`).
+Each is comparable in size to the record-drop brick. This is a multi-session continuation; the precise,
+actionable design + file map + gates are recorded above. Recommend re-scoping the goal to one brick at
+a time (e.g. "fix the map_str-in-loop leak" → "map.entries_str + (String,String) tuple-list" →
+"List[Record] literal"), each gated independently.
