@@ -124,19 +124,20 @@ STILL TODO (the deeper Value pieces — each a real sub-gap, NOT a quick add):
   UNWRAP and the `match ok(v)` READ of a Value-Ok Result mis-bind / wall (the unwrap_or + match-read
   of a Value-Ok Result are unwired — only String-Ok is), (c) v0's Err message is `missing field
   '<k>'`, not a fixed string (byte-match needs the interp). Reverted (kept unbuilt, not a broken commit).
-- ❌ **value.stringify** — a full RECURSIVE JSON serializer (tag-dispatch: null/bool/int/float/quoted
-  string/`[…]`/`{…}` with escaping). ATTEMPTED + reverted (it walls; never shipped broken). Findings:
-  the SCALAR/Str cases lower trivially (string.replace for the escape + int/float.to_string both
-  byte-match v0 — verified). The ARRAY/OBJECT recursion hits a real PARSER-TCO LIMIT: the helper is a
-  String accumulator (`acc + piece` where `piece = sep + value_stringify(elem)`), and TCO DOES fire
-  (recognizes the accumulator → while loop) but then walls at "while body with a heap-accumulator
-  reassignment" (control.rs:3115 `body_reassigns_heap`) — the loop body computes `piece` from a
-  heap-producing CALL (the value_stringify recursion), which the option-C append lowering doesn't
-  stage (it handled simple appends like a peek char, not a heap call-result). TWO routes out, each a
-  bounded brick: (a) extend the TCO to stage a heap call-result temp in the loop body before the
-  accumulator update; (b) the LIST-COMBINATOR route — extract the Value array's elems to a List[Value]
-  then `|> list.map(value_stringify) |> list.join(",")` (list.map+list.join already lower + byte-match,
-  verified), needing the Value-array→List[Value] extraction (a value-element list accumulator) wired.
+- ✅ **value.stringify** — DONE (commit 85e05369). The full recursive JSON serializer, self-hosted in
+  value_core, byte-identical to v0 (null/bool/int/float/quoted-escaped-string/`[…]`/`{…}`). The
+  array/object recursion is a String accumulator whose separator is `string.repeat(",", k)` with a
+  SCALAR-if `k` — this SIDESTEPS the heap-result-if-in-loop-body that walled the first attempt (the
+  real gap = `let sep = if i==0 then "" else ","` in a scalar-while body; the workaround needs no TCO
+  extension). Two enabling fixes: (1) the auto-link (render_program + lower_source) now rewrites
+  internal impl-name calls to the renamed call_name (so `__vstr_arr` recursing through
+  `value_stringify` resolves to the renamed `value.stringify` def); (2) a `prim.load_str` borrow used
+  as a Module-call arg is passed by Handle WITHOUT a scope-end drop (dropping it double-freed the Str
+  Value's tag-4 payload). Plus a pre-existing fix: value_core is now force-linked on any Value-drop op
+  (json.*-built Values' `__drop_value` was dangling — fixed json_scalar/json_string). All 7 value
+  kinds + nested + escaping byte-match v0; 2000x leak loop clean; corpus-wall ACCEPT; suite 484/0.
+  NOTE: the heap-result-if-in-loop-body is still a general gap (the TCO extension, route (a)) — only
+  AVOIDED here, not closed.
 - ❌ **parse_records closure** — `data |> list.map((row) => { … nested list.map → (key, value.str) …
   value.object(pairs) })`: a block-body closure building `List[(String,Value)]` then a Value object —
   the closure walls ("unliftable closure"), independent of value.object now existing.
