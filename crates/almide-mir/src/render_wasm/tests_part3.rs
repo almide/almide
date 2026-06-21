@@ -712,6 +712,30 @@
     }
 
     #[test]
+    fn enumerate_map_fusion_to_object_executes_on_wasmtime() {
+        // parse_records' core: `header |> list.enumerate |> list.map((entry) => { let (i,key)=entry;
+        // (key, value.str(list.get_or(row, i, ""))) })` → value.object. The enumerate+map FUSION
+        // avoids the (Int,String) intermediate (bind i=loop-index, key=element); the body returns a
+        // (String,Value) tuple (Tuple arm + str_value_elem_lists recursive drop). The OUTER
+        // Value-element result (`… |> list.map(r => value.object(…))` → List[Value], value_elem_lists)
+        // is exercised via a value.as_array-derived row list. 2000x is the leak gate.
+        let src = "import json\n\
+            effect fn main() -> Unit = {\n  \
+              let row = [\"x\", \"y\"]\n  let header = [\"a\", \"b\"]\n  \
+              let pairs = header |> list.enumerate |> list.map((entry) => { let (i, key) = entry; (key, value.str(list.get_or(row, i, \"\"))) })\n  \
+              println(value.stringify(value.object(pairs)))\n  \
+              let strs = [\"p\", \"q\"]\n  \
+              let objs = strs |> list.map((s) => value.object([(s, value.int(1))]))\n  \
+              println(value.stringify(value.array(objs)))\n  \
+              var n = 0\n  for j in 0..2000 { let p = header |> list.enumerate |> list.map((entry) => { let (i, key) = entry; (key, value.str(list.get_or(row, i, \"\"))) }); n = n + string.len(value.stringify(value.object(p))) }\n  \
+              println(int.to_string(n)) }\n";
+        let prog = lower_source(src);
+        if let Some(out) = build_and_run("enumerate_map_fusion", &render_wasm_program(&prog)) {
+            assert_eq!(out, "{\"a\":\"x\",\"b\":\"y\"}\n[{\"p\":1},{\"q\":1}]\n34000");
+        }
+    }
+
+    #[test]
     fn capturing_heap_map_over_value_executes_on_wasmtime() {
         // map-closure-over-Value: a CAPTURING list.map closure over a HEAP-element list, inlined as a
         // specialized loop (defunctionalization extended to heap source + heap result). The closure

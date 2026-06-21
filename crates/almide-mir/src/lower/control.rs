@@ -2968,6 +2968,30 @@ impl LowerCtx {
             IrExprKind::Lambda { params, body, .. } => (params, body.as_ref()),
             _ => return None,
         };
+        // enumerate+map FUSION: `list.map(list.enumerate(real), (entry) => { let (i,key)=entry; <tail> })`
+        // → a map-with-index over `real`, binding i=loop-index + key=element, AVOIDING the (Int,String)
+        // intermediate list entirely (no enumerate self-host, no new tuple-list drop). Rebind the
+        // source/params/body to the fused form + remember the index var (bound to i_v in the inner).
+        let fuse_holder: Option<(Vec<(VarId, Ty)>, IrExpr)>;
+        let mut fuse_index: Option<VarId> = None;
+        let (xs, params, body) = if func == "map" {
+            match detect_enum_map_fusion(xs, params, body) {
+                Some((real, i_var, key_var, key_ty, tail)) => {
+                    fuse_index = Some(i_var);
+                    fuse_holder = Some((vec![(key_var, key_ty)], tail));
+                    let (p, b) = fuse_holder.as_ref().unwrap();
+                    (real, p.as_slice(), b)
+                }
+                None => {
+                    fuse_holder = None;
+                    (xs, params.as_slice(), body)
+                }
+            }
+        } else {
+            fuse_holder = None;
+            (xs, params.as_slice(), body)
+        };
+        let _ = &fuse_holder;
         // The source element read is a uniform `load64` of slot i — for a SCALAR list it is the
         // value, for a HEAP list (`List[String]`/`List[Value]`) it is the element HANDLE (a borrow
         // the inlined body reads). `map` admits a heap source; `filter`/`fold` stay scalar-source
@@ -3030,6 +3054,7 @@ impl LowerCtx {
             body,
             init_idx.map(|i| &args[i]),
             result_elem,
+            fuse_index,
         );
         if result.is_none() {
             self.rollback_scalar_loop(ops_mark, lhh_mark, lifted_mark, value_of_snapshot);
@@ -3051,13 +3076,19 @@ impl LowerCtx {
         body: &IrExpr,
         init: Option<&IrExpr>,
         result_elem: Option<Ty>,
+        fuse_index: Option<VarId>,
     ) -> Option<ValueId> {
         use crate::PrimKind;
-        // A heap-element map result is supported for a STRING element only (the result list's
-        // recursive free is the proven `DropListStr` via `heap_elem_lists`). A Value/List element
-        // result needs a different recursive drop — defer cleanly (None → caller keeps WALL/self-host).
+        // The result list's recursive free depends on the element type: a String → `DropListStr`
+        // (heap_elem_lists); a `(String, Value)` tuple → `DropListStrValue` (str_value_elem_lists,
+        // the parse_records pair); a dynamic Value → `DropListValue` (value_elem_lists, parse_records'
+        // outer `data |> list.map(row => value.object(…))`). Any other heap element defers cleanly.
+        let result_is_str_value_tuple = matches!(&result_elem,
+            Some(Ty::Tuple(tys)) if tys.len() == 2
+                && matches!(tys[0], Ty::String) && crate::lower::is_value_ty(&tys[1]));
+        let result_is_value = matches!(&result_elem, Some(t) if crate::lower::is_value_ty(t));
         if let Some(elem) = &result_elem {
-            if !matches!(elem, Ty::String) {
+            if !matches!(elem, Ty::String) && !result_is_str_value_tuple && !result_is_value {
                 return None;
             }
         }
@@ -3096,10 +3127,15 @@ impl LowerCtx {
                 });
                 let rh = self.fresh_value();
                 self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(rh), args: vec![dst] });
-                // A heap-element (String) map result: track the block for the recursive scope-end
-                // `DropListStr` (frees each element String), not a flat Drop. The per-element body
-                // stores an OWNED String handle into each slot (moved in, this list now owns it).
-                if result_elem.is_some() {
+                // A heap-element map result: track the block for the recursive scope-end drop (frees
+                // each element), not a flat Drop — a String element → DropListStr (heap_elem_lists);
+                // a (String, Value) tuple → DropListStrValue (str_value_elem_lists). The per-element
+                // body stores an OWNED handle into each slot (moved in, this list now owns it).
+                if result_is_str_value_tuple {
+                    self.str_value_elem_lists.insert(dst);
+                } else if result_is_value {
+                    self.value_elem_lists.insert(dst);
+                } else if result_elem.is_some() {
                     self.heap_elem_lists.insert(dst);
                 }
                 // filter needs a write-cursor (the count of kept elements) — a stable local.
@@ -3150,6 +3186,12 @@ impl LowerCtx {
         self.value_of.insert(elem_param, elem);
         if func == "fold" {
             self.value_of.insert(params[0].0, acc_local.unwrap());
+        }
+        // enumerate+map FUSION: bind the destructured INDEX var to the loop index `i_v` (a scalar),
+        // so the fused body's `list.get_or(row, i, …)` reads the right index. (key was bound above as
+        // the element param.)
+        if let Some(i_var) = fuse_index {
+            self.value_of.insert(i_var, i_v);
         }
 
         // Lower the lambda BODY inline as a per-iteration frame. SCALAR result → lower_scalar_value
@@ -3330,6 +3372,65 @@ fn is_self_host_option_call(subject: &IrExpr) -> bool {
         }
         _ => false,
     }
+}
+
+/// Detect the enumerate+map FUSION shape: `list.map(list.enumerate(real), (entry) => { let (i,key) =
+/// entry; <tail> })`. Returns `(real, i_var, key_var, key_ty, tail)` — the inner iterates `real`
+/// binding i=loop-index + key=element, running `<tail>` (the block minus the leading destructure), so
+/// the `(Int,String)` intermediate list is never built. `None` if the shape doesn't match (the caller
+/// keeps the ordinary map path). The COMMON enumerate idiom (CLAUDE.md's `cases |> list.enumerate |>
+/// list.map((entry) => { let (idx, case) = entry; … })`).
+fn detect_enum_map_fusion<'a>(
+    xs: &'a IrExpr,
+    params: &[(VarId, Ty)],
+    body: &IrExpr,
+) -> Option<(&'a IrExpr, VarId, VarId, Ty, IrExpr)> {
+    use almide_ir::{IrPattern, IrStmtKind};
+    // xs = list.enumerate(real)
+    let real = match &xs.kind {
+        IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
+            if module.as_str() == "list" && func.as_str() == "enumerate" && args.len() == 1 =>
+        {
+            &args[0]
+        }
+        _ => return None,
+    };
+    if params.len() != 1 {
+        return None;
+    }
+    let entry_var = params[0].0;
+    // body = Block { stmts: [ let (i,key) = entry, ...rest ], expr }
+    let IrExprKind::Block { stmts, expr } = &body.kind else {
+        return None;
+    };
+    let first = stmts.first()?;
+    let IrStmtKind::BindDestructure { pattern: IrPattern::Tuple { elements }, value } = &first.kind
+    else {
+        return None;
+    };
+    if elements.len() != 2 {
+        return None;
+    }
+    match &value.kind {
+        IrExprKind::Var { id } if *id == entry_var => {}
+        _ => return None,
+    }
+    let i_var = match &elements[0] {
+        IrPattern::Bind { var, .. } => *var,
+        _ => return None,
+    };
+    let (key_var, key_ty) = match &elements[1] {
+        IrPattern::Bind { var, ty } => (*var, ty.clone()),
+        _ => return None,
+    };
+    // tail = the block with the leading destructure removed (the remaining stmts + the block tail).
+    let tail = IrExpr {
+        kind: IrExprKind::Block { stmts: stmts[1..].to_vec(), expr: expr.clone() },
+        ty: body.ty.clone(),
+        span: body.span.clone(),
+        def_id: body.def_id,
+    };
+    Some((real, i_var, key_var, key_ty, tail))
 }
 
 fn is_self_host_result_call(subject: &IrExpr) -> bool {
