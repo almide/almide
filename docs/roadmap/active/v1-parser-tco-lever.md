@@ -376,3 +376,46 @@ toml was the first proposed target but `almide run` (native v0) emits INVALID Ru
 (`error[E0308]: expected String, found &str`, 2×) — so toml has NO byte-match oracle until that v0
 Rust-codegen bug is fixed. csv was chosen instead (v0 test passes). The toml v0 bug is a
 v0-backend issue to fix separately before toml can be byte-verified.
+
+## STATUS (2026-06-22) — the 5-brick TCO WORKS in isolation; blocked on the corpus caps-gate
+
+Implemented the full 5-brick effect-fn tuple-result TCO + PROVED it in isolation, then REVERTED
+(②discipline — it breached corpus-wall). What WORKS (verified, then reverted to keep the tree sound):
+- `cm2` (effect fn `(Value,Int)` self-rec parser, `pairs + [(k, value.str(x))]` accumulator) →
+  **byte-matches v0** + `cm2leak` 10000× **leak-free**.
+- `ftup` (effect fn returning a tuple + `let (v,p)=f()!` destructure) → ✅; `cm2p` (pure) ✅; `cm4`
+  (List result) ✅; `parse_rows_rec` (csv, List-tuple) ✅ (not regressed); mir suite green.
+- **yaml module → 0 lower walls** (collect_map/collect_seq lowered).
+
+The 5 bricks (all needed together):
+1. `tco_empty_for` → Value (`value.null()`) / scalar (`0`) / Tuple (recursive) — the result-accumulator empty.
+2. `result_var` routing for a **Value-containing tuple** result (`use_result_acc = base_reads_loop_local
+   || tuple-with-Value`) — the post-loop dispatch reads a tuple base's sibling SCALAR carry stale when a
+   `value.object(..)` CALL is in the base. (A Value-FREE tuple like csv `pf`'s `(acc,pos)` must NOT be
+   routed — it works via the dispatch and routing it regresses parse_rows_rec.)
+3. The `(Value,scalar)` / `(String,Value)` tuple in `lower_owned_heap_field` (via try_lower_tuple_construct).
+4. `__drop_value_tuple` (value_core) — a SINGLE `(Value,Int)` tuple's recursive drop (DropValue the Value
+   slot @12 + block); routed via `variant_drop_handles="value_tuple"` (the flat record_masks leaks the
+   Value payload → 10⁴ OOM).
+5. The destructure-seed (`lower_destructure`): derive the heap-slot mask from the PATTERN (not `value.ty`)
+   for `value.kind = Unwrap|Call` (effect-fn `f()!` / the never-err-stripped `f()`, whose `.ty` is the
+   effect Result, not a Ty::Tuple) — else the destructure container-grains (`p` reads 0). KEEP the
+   value.ty path for a Tuple value, and the no-seed container-grain for a plain Var (the
+   `tuple_destructure_aliases_components` unit test).
+
+**WHY REVERTED — the corpus caps gate (the remaining work, de-risked):**
+- **mir > ir caps breach (1 fn)**: `tco_empty_for`'s `value.null()` is a SYNTHETIC CALL the TCO inserts
+  that the IR does not have, so `count_ir_calls` (IR) < mir CallFn count → the `mir<=ir` gate breaks
+  (the [[project_v1_gate_count_vs_lower]] class). FIX: teach `count_ir_calls` (or the gate) to credit the
+  TCO's synthetic `value.null` (desugar-before-both, or count the empty-init call), like the existing
+  TCO-synthesized ops are accounted.
+- **A corpus fn PANICS (totality breach)** under the changes — find it (corpus-wall caps step names it)
+  and harden the new tuple path against its shape (likely a tuple/aggregate shape the (Value,scalar)
+  arm or the seed mis-handles; gate it out cleanly rather than panic).
+- Separately, yaml's full `parse` still needs **float.parse / list.enumerate / string.to_lower**
+  self-hosted (stdlib gaps the parse path references — independent of the TCO).
+
+NEXT SESSION (settled): re-apply the 5 bricks (this section is the exact recipe), then fix the two
+corpus-gate issues (synthetic-call count + the panic) BEFORE re-testing corpus-wall, then the 3 stdlib
+gaps, then yaml `almide test`. Gate against cm2 (must byte-match) + parse_rows_rec + tuple_destructure
++ corpus-wall (4 ACCEPT) at every step.
