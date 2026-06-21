@@ -845,6 +845,29 @@
     }
 
     #[test]
+    fn record_recursive_drop_frees_heap_fields_leak_free() {
+        // The recursive record drop: a record with String + List[String] heap fields is freed by the
+        // GENERATED `$__drop_R` (rc_dec the String, `$__drop_list_str` the list) — NOT the flat masked
+        // DropListStr that would leak the list's element Strings. The 10000x loop is the leak gate:
+        // each per-iteration record is fully reclaimed (no OOM). `$__drop_R` is routed via DropVariant
+        // (record_drop_type_name → variant_drop_handles) and appended by generate_record_drop_sources.
+        let src = "type R = { name: String, tags: List[String] }\n\
+            fn mk(n: String, t: List[String]) -> R = R { name: n, tags: t }\n\
+            effect fn main() -> Unit = {\n  \
+              let r = mk(\"x\", [\"a\", \"b\"])\n  \
+              println(r.name)\n  \
+              println(int.to_string(list.len(r.tags)))\n  \
+              var n = 0\n  \
+              for i in 0..10000 { let r2 = mk(\"y\", [\"p\", \"q\", \"z\"]); n = n + list.len(r2.tags) }\n  \
+              println(int.to_string(n)) }\n";
+        let prog = lower_source(src);
+        assert!(prog.functions.iter().any(|f| f.name == "__drop_R"), "the recursive record drop must be generated + linked");
+        if let Some(out) = build_and_run("record_recursive_drop", &render_wasm_program(&prog)) {
+            assert_eq!(out, "x\n2\n30000");
+        }
+    }
+
+    #[test]
     fn record_with_empty_map_and_list_fields_constructs() {
         // The svg `el` shape: a record whose fields include an EMPTY Map (`attrs: [:]`) and an EMPTY
         // recursive List (`children: []`). `lower_owned_heap_field` now materializes an empty heap

@@ -60,8 +60,12 @@ fn main() {
     // re-lower with them in scope (so their `type` decls resolve). These are v1-trust-spine-only —
     // v0 (the native oracle) manages its own memory and never sees them. Two-pass: the generation
     // needs the type_decls from pass 1.
-    let drops = almide_mir::lower::generate_variant_drop_sources(&ir.type_decls);
-    let ir = if drops.is_empty() { ir } else { source_to_ir(&format!("{source}\n{drops}")) };
+    let drops = format!(
+        "{}{}",
+        almide_mir::lower::generate_variant_drop_sources(&ir.type_decls),
+        almide_mir::lower::generate_record_drop_sources(&ir.type_decls),
+    );
+    let ir = if drops.trim().is_empty() { ir } else { source_to_ir(&format!("{source}\n{drops}")) };
 
     // Top-level `let` globals (VarId -> Ty), union of program + module top_lets.
     let mut globals: HashMap<almide_ir::VarId, almide_lang::types::Ty> = HashMap::new();

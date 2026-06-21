@@ -773,6 +773,11 @@ impl LowerCtx {
                         (0..tys.len()).filter(|&i| is_heap_ty(&tys[i])).collect();
                     self.materialized_aggregates.insert(dst);
                     self.record_masks.insert(dst, heap_slots);
+                    // A record with a Map/List[heap]/record/Value field drops RECURSIVELY ($__drop_<R>),
+                    // not the flat masked DropListStr (which would leak the nested heap) — route it.
+                    if let Some(name) = self.record_drop_type_name(ty) {
+                        self.variant_drop_handles.insert(dst, name);
+                    }
                 }
                 Ok(())
             }

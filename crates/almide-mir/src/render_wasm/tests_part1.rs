@@ -214,8 +214,12 @@
         let ir = to_ir(src);
         // ADT brick 5b: generate the per-type recursive-drop fns for nested-variant types and
         // re-lower with them in scope (the same two-pass as examples/render_program.rs).
-        let drops = crate::lower::generate_variant_drop_sources(&ir.type_decls);
-        let ir = if drops.is_empty() { ir } else { to_ir(&format!("{src}\n{drops}")) };
+        let drops = format!(
+            "{}{}",
+            crate::lower::generate_variant_drop_sources(&ir.type_decls),
+            crate::lower::generate_record_drop_sources(&ir.type_decls),
+        );
+        let ir = if drops.trim().is_empty() { ir } else { to_ir(&format!("{src}\n{drops}")) };
         let mut globals: std::collections::HashMap<almide_ir::VarId, almide_lang::types::Ty> =
             std::collections::HashMap::new();
         for tl in &ir.top_lets {

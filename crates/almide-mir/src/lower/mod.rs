@@ -331,6 +331,173 @@ pub fn generate_variant_drop_sources(type_decls: &[almide_ir::IrTypeDecl]) -> St
     out
 }
 
+/// A record field whose flat `rc_dec` of its handle would LEAK nested heap (so the record needs a
+/// generated recursive `$__drop_<R>`): a `Map`/`Value`/record/`List[heap]` field. A plain `String`
+/// (its `rc_dec` IS its full free), a scalar, or a `List[scalar]` (the block frees flat) does NOT.
+pub fn record_field_needs_recursive_drop(ty: &Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    match ty {
+        Ty::String => false,
+        Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 => is_heap_ty(&a[0]),
+        _ => is_heap_ty(ty),
+    }
+}
+
+/// The set of RECORD type names whose drop must be the recursive `$__drop_<R>` (any field
+/// [`record_field_needs_recursive_drop`]). A scalar/String-only record keeps the flat masked
+/// `DropListStr`. Mirrors [`variant_needs_recursive_drop`] for records.
+pub fn recursive_record_drop_names(
+    type_decls: &[almide_ir::IrTypeDecl],
+) -> std::collections::HashSet<String> {
+    use almide_ir::IrTypeDeclKind;
+    type_decls
+        .iter()
+        .filter_map(|d| match &d.kind {
+            IrTypeDeclKind::Record { fields }
+                if fields.iter().any(|f| record_field_needs_recursive_drop(&f.ty)) =>
+            {
+                Some(d.name.as_str().to_string())
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// `Some(name)` iff `ty` is a NAMED record/aggregate whose `$__drop_<name>` is generated (it is in
+/// `rec_names`) — so a field of that type recurses via `__drop_<name>`. A non-recursive (scalar-only)
+/// record is `None`: it is freed by a flat `rc_dec` of its block.
+fn recursive_aggregate_name(ty: &Ty, rec_names: &std::collections::HashSet<String>) -> Option<String> {
+    use almide_lang::types::constructor::TypeConstructorId;
+    let n = match ty {
+        Ty::Named(n, _) => n.as_str().to_string(),
+        Ty::Applied(TypeConstructorId::UserDefined(n), _) => n.clone(),
+        _ => return None,
+    };
+    rec_names.contains(&n).then_some(n)
+}
+
+/// Generate the ALMIDE SOURCE for each RECORD type's recursive drop `$__drop_<R>` (the records
+/// counterpart of [`generate_variant_drop_sources`]). Records have NO tag — fields sit at
+/// `slot_offset(i)`, freed per CONCRETE field type: `String → rc_dec`, `Map[String,String] →
+/// __drop_map_ss`, `List[String] → __drop_list_str`, `List[<recursive record>] → __drop_list_<R>`,
+/// a recursive record → `__drop_<R>`, a `Value → __drop_value`, a scalar-only nested aggregate or
+/// `List[scalar]` → flat `rc_dec` of the block, a scalar → skip. Emits the needed `__drop_list_<R>`
+/// loops + the generic `__drop_map_ss` / `__drop_list_str` helpers. All `__drop_`-prefixed ⇒ on the
+/// `prim.rc_dec` whitelist + an empty ownership cert (a trusted free, leak-loop verified).
+pub fn generate_record_drop_sources(type_decls: &[almide_ir::IrTypeDecl]) -> String {
+    use almide_ir::IrTypeDeclKind;
+    use almide_lang::types::constructor::TypeConstructorId;
+    let rec_names = recursive_record_drop_names(type_decls);
+    let mut out = String::new();
+    let mut list_drops: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    let mut need_map_ss = false;
+    let mut need_list_str = false;
+    for decl in type_decls {
+        let IrTypeDeclKind::Record { fields } = &decl.kind else { continue };
+        if !rec_names.contains(decl.name.as_str()) {
+            continue;
+        }
+        let tname = decl.name.as_str();
+        out.push_str(&format!("fn __drop_{tname}(e: {tname}) -> Unit = {{\n"));
+        out.push_str("  let h = prim.handle(e)\n");
+        out.push_str("  if prim.load32(h + 0) == 1 then {\n");
+        let mut frees = String::new();
+        for (i, f) in fields.iter().enumerate() {
+            let off = layout::slot_offset(i);
+            match &f.ty {
+                Ty::String => {
+                    frees.push_str(&format!("    prim.rc_dec(prim.load64(h + {off}))\n"));
+                }
+                Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 => {
+                    if let Some(rn) = recursive_aggregate_name(&a[0], &rec_names) {
+                        list_drops.insert(rn.clone());
+                        frees.push_str(&format!(
+                            "    let f{i}: List[{rn}] = prim.load_handle(h + {off})\n    __drop_list_{rn}(f{i})\n"
+                        ));
+                    } else if matches!(a[0], Ty::String) {
+                        need_list_str = true;
+                        frees.push_str(&format!(
+                            "    let f{i}: List[String] = prim.load_handle(h + {off})\n    __drop_list_str(f{i})\n"
+                        ));
+                    } else {
+                        // List[scalar] or List[non-recursive heap]: flat free the block.
+                        frees.push_str(&format!("    prim.rc_dec(prim.load64(h + {off}))\n"));
+                    }
+                }
+                Ty::Applied(TypeConstructorId::Map, a)
+                    if a.len() == 2 && matches!(a[0], Ty::String) && matches!(a[1], Ty::String) =>
+                {
+                    need_map_ss = true;
+                    frees.push_str(&format!(
+                        "    let f{i}: Map[String, String] = prim.load_handle(h + {off})\n    __drop_map_ss(f{i})\n"
+                    ));
+                }
+                t if is_value_ty(t) => {
+                    frees.push_str(&format!(
+                        "    let f{i}: Value = prim.load_handle(h + {off})\n    __drop_value(f{i})\n"
+                    ));
+                }
+                t => {
+                    if let Some(rn) = recursive_aggregate_name(t, &rec_names) {
+                        frees.push_str(&format!(
+                            "    let f{i}: {rn} = prim.load_handle(h + {off})\n    __drop_{rn}(f{i})\n"
+                        ));
+                    } else if is_heap_ty(t) {
+                        // a non-recursive heap field (scalar-only nested record, scalar map) — flat free.
+                        frees.push_str(&format!("    prim.rc_dec(prim.load64(h + {off}))\n"));
+                    }
+                    // a scalar field — skip (no free).
+                }
+            }
+        }
+        out.push_str(&frees);
+        out.push_str("  } else ()\n");
+        out.push_str("  prim.rc_dec(h)\n");
+        out.push_str("}\n");
+    }
+    // The per-element-recursive list drops the record fields referenced.
+    for rn in &list_drops {
+        out.push_str(&format!(
+            "fn __drop_list_{rn}(xs: List[{rn}]) -> Unit = {{\n  \
+               let h = prim.handle(xs)\n  \
+               if prim.load32(h + 0) == 1 then __drop_list_{rn}_loop(h, prim.load32(h + 4), 0) else ()\n  \
+               prim.rc_dec(h)\n}}\n\
+             fn __drop_list_{rn}_loop(h: Int, n: Int, i: Int) -> Unit =\n  \
+               if i >= n then ()\n  \
+               else {{ let e: {rn} = prim.load_handle(h + 12 + i * 8)\n         __drop_{rn}(e)\n         __drop_list_{rn}_loop(h, n, i + 1) }}\n"
+        ));
+    }
+    if need_map_ss {
+        // v1's `Map[String,String]` borrows the `map_skv` (String,Int) layout: the n KEYS are the
+        // first n slots (`@ 12 + i*8`), DEEP-COPIED + owned by the map (`__skv_store_key` store_str);
+        // the n VALUES are the next n slots, stored RAW (`store64`) — NOT owned by the map (the proper
+        // owned-value `Map[String,String]` self-host is a separate brick, docs/roadmap v1-records-svg).
+        // So the drop frees ONLY the owned key copies (rc_dec the first n slots) — freeing the borrowed
+        // values would DOUBLE-FREE. (`n = load32(h+4)` is the entry count.)
+        out.push_str(
+            "fn __drop_map_ss(m: Map[String, String]) -> Unit = {\n  \
+               let h = prim.handle(m)\n  \
+               if prim.load32(h + 0) == 1 then __drop_map_ss_loop(h, prim.load32(h + 4), 0) else ()\n  \
+               prim.rc_dec(h)\n}\n\
+             fn __drop_map_ss_loop(h: Int, n: Int, i: Int) -> Unit =\n  \
+               if i >= n then ()\n  \
+               else { prim.rc_dec(prim.load64(h + 12 + i * 8))\n         __drop_map_ss_loop(h, n, i + 1) }\n",
+        );
+    }
+    if need_list_str {
+        out.push_str(
+            "fn __drop_list_str(xs: List[String]) -> Unit = {\n  \
+               let h = prim.handle(xs)\n  \
+               if prim.load32(h + 0) == 1 then __drop_list_str_loop(h, prim.load32(h + 4), 0) else ()\n  \
+               prim.rc_dec(h)\n}\n\
+             fn __drop_list_str_loop(h: Int, n: Int, i: Int) -> Unit =\n  \
+               if i >= n then ()\n  \
+               else { prim.rc_dec(prim.load64(h + 12 + i * 8))\n         __drop_list_str_loop(h, n, i + 1) }\n",
+        );
+    }
+    out
+}
+
 /// [`lower_function_all`] WITH the program's record-layout registry threaded in —
 /// the entry the real pipeline (render_program) uses so a `Ty::Named` record
 /// resolves its fields (and `r.x` materializes). The plain [`lower_function_all`]
@@ -1581,6 +1748,23 @@ impl LowerCtx {
     /// the variant-match subject drop). Order matters: the recursive value-drops are checked BEFORE
     /// the flat `DropListStr`, since a `value.as_array` Result / a `List[Value]` is ALSO a
     /// `heap_elem_list`, but a flat per-slot `rc_dec` there would leak the nested element Values.
+    /// The NAMED record type of `ty` iff it needs the recursive `$__drop_<R>` (some field is a
+    /// `Map`/`Value`/record/`List[heap]` — [`record_field_needs_recursive_drop`]). A record VALUE of
+    /// such a type is registered in `variant_drop_handles` so `drop_op_for` routes it to the recursive
+    /// `Op::DropVariant` instead of the flat `DropListStr` (which would leak its nested heap fields).
+    pub(crate) fn record_drop_type_name(&self, ty: &Ty) -> Option<String> {
+        use almide_lang::types::constructor::TypeConstructorId;
+        let name = match ty {
+            Ty::Named(n, _) => n.as_str().to_string(),
+            Ty::Applied(TypeConstructorId::UserDefined(n), _) => n.clone(),
+            _ => return None,
+        };
+        let (_, tys) = self.aggregate_field_tys(ty)?;
+        tys.iter()
+            .any(record_field_needs_recursive_drop)
+            .then_some(name)
+    }
+
     pub(crate) fn drop_op_for(&self, v: ValueId) -> Op {
         if let Some(ty) = self.variant_drop_handles.get(&v) {
             Op::DropVariant { v, ty: ty.clone() }
