@@ -20,10 +20,19 @@ render_program+wasmtime). **2 of 4 byte-match; 2 remain, each a DISTINCT mechani
      SEEDED as a borrowed tuple (param_values + seed_variant_param) so `let (i,key)=entry` destructures.
   So parse_records is enumerate-self-host (incl a new tuple-list drop) + tuple-element-map-both-sides —
   a focused multi-brick, not the quick "tuple map" first estimated.
-- ❌ **parse** — `parse_rows_rec`/`parse_after_field` (a recursive `List[List[String]]` accumulator,
-  `rows + [current_row]` / `current_row + [field]`) DOUBLE-FREES at runtime (rc_dec → wasm
-  `unreachable`); v0 correct. A recursive-list-of-list ownership bug, INDEPENDENT of the layout brick
-  / map work (string-parsing + nested list appends). NOT covered by corpus-wall (csv ∉ v0 corpus).
+- ❌ **parse** (+ the rest of parse_records) — the SHARED `parse_rows_rec`/`parse_after_field`
+  double-free. ROOT CAUSE ISOLATED (minimal repro: a faithful prr↔paf mutual recursion with
+  `let (field, np) = pf(…)` + `current_row + [field]`): **destructuring an OWNED tuple
+  (`let (field, np) = pf(…)`) inside a heap-result-`if` arm DROPS the tuple — and rc_dec's its owned
+  String slot — at the DESTRUCTURE point, BEFORE the borrowed `field` is used in the arm's tail
+  (`current_row + [field]`)**, so `field` dangles → the list-concat copies a freed String → the
+  recursion's next drop hits rc 0 → `unreachable`. Confirmed in the wat: `pf` result dropped (its @12
+  String rc_dec'd to 0) ~70 instrs before the `__list_concat` that reads `field`. NOT a layout-brick /
+  map bug; a DROP-ORDERING bug in the destructure × heap-result-if-arm interaction. Dup-ing the field
+  does NOT fix it (the Dup is dropped at the same early point — the ORDERING is the bug; the tail-dup
+  of the heap-result-if likely splits the destructure's drop from its tail). The map machinery for
+  parse_records is DONE (a9aecee5) — it traps ONLY on this shared parse_rows_rec drop-ordering bug;
+  fixing it lands BOTH parse and parse_records (csv 4/4). NOT covered by corpus-wall (csv ∉ v0 corpus).
 
 ## THE LAYOUT BRICK read side — OPEN (commits 5b7efec7, e43db65f)
 
