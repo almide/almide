@@ -67,99 +67,104 @@ fn match_has_result_arms(arms: &[IrMatchArm]) -> bool {
     arms.iter().any(|arm| matches!(&arm.pattern, IrPattern::Ok { .. } | IrPattern::Err { .. }))
 }
 
-fn collect_result_match_vars(stmts: &[IrStmt], tail: Option<&IrExpr>) -> HashSet<u32> {
+fn collect_result_match_vars(stmts: &[IrStmt], tail: Option<&IrExpr>) -> (HashSet<u32>, HashSet<u32>) {
     let mut vars = HashSet::new();
-    for s in stmts { collect_result_match_vars_stmt(s, &mut vars); }
-    if let Some(e) = tail { collect_result_match_vars_expr(e, &mut vars); }
-    vars
+    let mut force = HashSet::new();
+    for s in stmts { collect_result_match_vars_stmt(s, &mut vars, &mut force); }
+    if let Some(e) = tail { collect_result_match_vars_expr(e, &mut vars, &mut force); }
+    (vars, force)
 }
 
-fn collect_result_match_vars_expr(expr: &IrExpr, vars: &mut HashSet<u32>) {
+// `vars` = every var that must stay a Result (the skip set). `force` ⊆ `vars` = the
+// subset consumed by a Result-`match { ok/err }` or `== ok/err`, which need the FULL
+// Result UNCONDITIONALLY (the consumer reads both arms). A `??`-only var goes to `vars`
+// but NOT `force`, so the #629 effect-`Result[Option,_]`-strip rule still applies to it.
+fn collect_result_match_vars_expr(expr: &IrExpr, vars: &mut HashSet<u32>, force: &mut HashSet<u32>) {
     match &expr.kind {
         IrExprKind::Match { subject, arms } => {
             if match_has_result_arms(arms) {
                 if let IrExprKind::Var { id } = &subject.kind {
                     vars.insert(id.0);
+                    force.insert(id.0);
                 }
             }
-            for arm in arms { collect_result_match_vars_expr(&arm.body, vars); }
-            collect_result_match_vars_expr(subject, vars);
+            for arm in arms { collect_result_match_vars_expr(&arm.body, vars, force); }
+            collect_result_match_vars_expr(subject, vars, force);
         }
         IrExprKind::Block { stmts, expr: tail } => {
-            for s in stmts { collect_result_match_vars_stmt(s, vars); }
-            if let Some(e) = tail { collect_result_match_vars_expr(e, vars); }
+            for s in stmts { collect_result_match_vars_stmt(s, vars, force); }
+            if let Some(e) = tail { collect_result_match_vars_expr(e, vars, force); }
         }
         IrExprKind::If { cond, then, else_ } => {
-            collect_result_match_vars_expr(cond, vars);
-            collect_result_match_vars_expr(then, vars);
-            collect_result_match_vars_expr(else_, vars);
+            collect_result_match_vars_expr(cond, vars, force);
+            collect_result_match_vars_expr(then, vars, force);
+            collect_result_match_vars_expr(else_, vars, force);
         }
         IrExprKind::ForIn { iterable, body, .. } => {
-            collect_result_match_vars_expr(iterable, vars);
-            for s in body { collect_result_match_vars_stmt(s, vars); }
+            collect_result_match_vars_expr(iterable, vars, force);
+            for s in body { collect_result_match_vars_stmt(s, vars, force); }
         }
         IrExprKind::While { cond, body } => {
-            collect_result_match_vars_expr(cond, vars);
-            for s in body { collect_result_match_vars_stmt(s, vars); }
+            collect_result_match_vars_expr(cond, vars, force);
+            for s in body { collect_result_match_vars_stmt(s, vars, force); }
         }
-        // `r ?? d` keeps `r` a Result (its OK type is the value of `??`). This is
-        // why a binding USED as a Result must skip the auto-? unwrap — without it,
-        // `r` would be unwrapped to its OK type and `??` would no longer type-check.
+        // `r ?? d` keeps `r` a Result (its OK type is the value of `??`). NOT a `force`
+        // var: the #629 effect-Result[Option,_] strip rule must still apply to it.
         IrExprKind::UnwrapOr { expr: inner, fallback } => {
             if let IrExprKind::Var { id } = &inner.kind { vars.insert(id.0); }
-            collect_result_match_vars_expr(inner, vars);
-            collect_result_match_vars_expr(fallback, vars);
+            collect_result_match_vars_expr(inner, vars, force);
+            collect_result_match_vars_expr(fallback, vars, force);
         }
-        // `r == ok(v)` / `r == err(e)` (and `!=`) likewise keep `r` a Result.
+        // `r == ok(v)` / `r == err(e)` (and `!=`) read the full Result → `force` vars.
         IrExprKind::BinOp { op: BinOp::Eq | BinOp::Neq, left, right } => {
             let is_res = |e: &IrExpr| matches!(&e.kind,
                 IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. });
-            if is_res(right) { if let IrExprKind::Var { id } = &left.kind { vars.insert(id.0); } }
-            if is_res(left) { if let IrExprKind::Var { id } = &right.kind { vars.insert(id.0); } }
-            collect_result_match_vars_expr(left, vars);
-            collect_result_match_vars_expr(right, vars);
+            if is_res(right) { if let IrExprKind::Var { id } = &left.kind { vars.insert(id.0); force.insert(id.0); } }
+            if is_res(left) { if let IrExprKind::Var { id } = &right.kind { vars.insert(id.0); force.insert(id.0); } }
+            collect_result_match_vars_expr(left, vars, force);
+            collect_result_match_vars_expr(right, vars, force);
         }
         // Recurse through the remaining compound forms so a `r ?? d` / `r == ok(v)`
         // nested in a call argument (e.g. `assert_eq(r ?? -1, 42)`) is still found.
         IrExprKind::BinOp { left, right, .. } => {
-            collect_result_match_vars_expr(left, vars);
-            collect_result_match_vars_expr(right, vars);
+            collect_result_match_vars_expr(left, vars, force);
+            collect_result_match_vars_expr(right, vars, force);
         }
         IrExprKind::Call { args, .. } | IrExprKind::RuntimeCall { args, .. } => {
-            for a in args { collect_result_match_vars_expr(a, vars); }
+            for a in args { collect_result_match_vars_expr(a, vars, force); }
         }
-        IrExprKind::UnOp { operand, .. } => collect_result_match_vars_expr(operand, vars),
+        IrExprKind::UnOp { operand, .. } => collect_result_match_vars_expr(operand, vars, force),
         IrExprKind::Try { expr: inner } | IrExprKind::Unwrap { expr: inner }
         | IrExprKind::Clone { expr: inner } | IrExprKind::Borrow { expr: inner, .. } => {
-            collect_result_match_vars_expr(inner, vars);
+            collect_result_match_vars_expr(inner, vars, force);
         }
         IrExprKind::Tuple { elements } | IrExprKind::List { elements } => {
-            for e in elements { collect_result_match_vars_expr(e, vars); }
+            for e in elements { collect_result_match_vars_expr(e, vars, force); }
         }
         _ => {}
     }
 }
 
-fn collect_result_match_vars_stmt(stmt: &IrStmt, vars: &mut HashSet<u32>) {
+fn collect_result_match_vars_stmt(stmt: &IrStmt, vars: &mut HashSet<u32>, force: &mut HashSet<u32>) {
     match &stmt.kind {
-        IrStmtKind::Bind { value, .. } => collect_result_match_vars_expr(value, vars),
-        IrStmtKind::Expr { expr } => collect_result_match_vars_expr(expr, vars),
+        IrStmtKind::Bind { value, .. } => collect_result_match_vars_expr(value, vars, force),
+        IrStmtKind::Expr { expr } => collect_result_match_vars_expr(expr, vars, force),
         IrStmtKind::Guard { cond, else_ } => {
-            collect_result_match_vars_expr(cond, vars);
-            collect_result_match_vars_expr(else_, vars);
+            collect_result_match_vars_expr(cond, vars, force);
+            collect_result_match_vars_expr(else_, vars, force);
         }
         // Result-usages inside assignment RHS (e.g. `x = (r ?? 0)`) must
         // feed the skip set too, or `r`'s binding would be unwrapped.
-        IrStmtKind::Assign { value, .. } => collect_result_match_vars_expr(value, vars),
+        IrStmtKind::Assign { value, .. } => collect_result_match_vars_expr(value, vars, force),
         IrStmtKind::IndexAssign { index, value, .. } => {
-            collect_result_match_vars_expr(index, vars);
-            collect_result_match_vars_expr(value, vars);
+            collect_result_match_vars_expr(index, vars, force);
+            collect_result_match_vars_expr(value, vars, force);
         }
         IrStmtKind::MapInsert { key, value, .. } => {
-            collect_result_match_vars_expr(key, vars);
-            collect_result_match_vars_expr(value, vars);
+            collect_result_match_vars_expr(key, vars, force);
+            collect_result_match_vars_expr(value, vars, force);
         }
-        IrStmtKind::FieldAssign { value, .. } => collect_result_match_vars_expr(value, vars),
+        IrStmtKind::FieldAssign { value, .. } => collect_result_match_vars_expr(value, vars, force),
         _ => {}
     }
 }
@@ -168,9 +173,9 @@ fn insert_try_body(expr: IrExpr, fn_returns_result: bool, ctx: &mut TryCtx) -> I
     if fn_returns_result {
         match expr.kind {
             IrExprKind::Block { stmts, expr: Some(tail) } => {
-                let skip_unwrap = collect_result_match_vars(&stmts, Some(&tail));
+                let (skip_unwrap, force_skip) = collect_result_match_vars(&stmts, Some(&tail));
                 let stmts = stmts.into_iter()
-                    .map(|s| insert_try_stmt_with_skip(s, &skip_unwrap, ctx))
+                    .map(|s| insert_try_stmt_with_skip(s, &skip_unwrap, &force_skip, ctx))
                     .collect();
                 let tail = insert_try(*tail, false, ctx);
                 let tail = strip_tail_try(tail);
@@ -186,9 +191,9 @@ fn insert_try_body(expr: IrExpr, fn_returns_result: bool, ctx: &mut TryCtx) -> I
         }
     }
     if let IrExprKind::Block { stmts, expr: tail } = expr.kind {
-        let skip_unwrap = collect_result_match_vars(&stmts, tail.as_deref());
+        let (skip_unwrap, force_skip) = collect_result_match_vars(&stmts, tail.as_deref());
         let stmts = stmts.into_iter()
-            .map(|s| insert_try_stmt_with_skip(s, &skip_unwrap, ctx))
+            .map(|s| insert_try_stmt_with_skip(s, &skip_unwrap, &force_skip, ctx))
             .collect();
         let tail = tail.map(|e| Box::new(insert_try(*e, false, ctx)));
         return IrExpr {
@@ -199,7 +204,7 @@ fn insert_try_body(expr: IrExpr, fn_returns_result: bool, ctx: &mut TryCtx) -> I
     insert_try(expr, false, ctx)
 }
 
-fn insert_try_stmt_with_skip(stmt: IrStmt, skip: &HashSet<u32>, ctx: &mut TryCtx) -> IrStmt {
+fn insert_try_stmt_with_skip(stmt: IrStmt, skip: &HashSet<u32>, force: &HashSet<u32>, ctx: &mut TryCtx) -> IrStmt {
     if let IrStmtKind::Bind { var, value, .. } = &stmt.kind {
         // A binding consumed by `??` / `== ok(v)` / `match { ok/err }` is kept a
         // Result so that usage type-checks — BUT only when the binding's value
@@ -211,8 +216,15 @@ fn insert_try_stmt_with_skip(stmt: IrStmt, skip: &HashSet<u32>, ctx: &mut TryCtx
         // value (#629). So only honor the skip when the value's effect-Result
         // OK type is itself a Result (a real Result-fallback) or the binding is
         // an explicitly annotated Result (handled by `annotated_result_vars`).
-        if skip.contains(&var.0)
-            && (ctx.annotated_result_vars.contains(var) || value_ok_is_result(value))
+        // A `match { ok/err }` / `== ok/err` consumer (force) needs the FULL Result
+        // UNCONDITIONALLY — its OK type may be any type (base64 decode's `let bs =
+        // decode_with(..)` is Result[List[Int],String], matched ok/err; the old
+        // value_ok_is_result gate wrongly stripped it to List[Int], so the v1 MIR saw a
+        // non-Result `match` and walled / native emitted invalid Rust). A `??`-only
+        // consumer (skip, not force) keeps the #629 effect-Result[Option,_] strip rule.
+        if force.contains(&var.0)
+            || (skip.contains(&var.0)
+                && (ctx.annotated_result_vars.contains(var) || value_ok_is_result(value)))
         {
             if let IrStmtKind::Bind { var, mutability, ty, value } = stmt.kind {
                 let new_value = insert_try(value, false, ctx);
