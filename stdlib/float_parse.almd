@@ -1,0 +1,72 @@
+// float_parse — SELF-HOSTED `float.parse(s)` → Result[Float, String] for the v1 wasm spine.
+// v0 is `s.trim().parse::<f64>()`. Parses an optional sign, integer part, optional `.fraction`, and
+// optional `e[sign]exp`, then scales the accumulated integer mantissa by a SINGLE exact power of ten:
+// for a mantissa < 2^53 and |net-exp| <= 22 (10^k is an exact f64 there) `mantissa / 10^k` (or `*`)
+// is correctly rounded — byte-identical to Rust's parser for every realistic yaml float (3.14, -0.5,
+// 1e3, 2.5e-3, …). Out-of-grammar input (junk, no digit, inf/nan) returns `err` — yaml matches
+// `err(_)` so the message is opaque. NOT a full IEEE strtod (huge mantissa / |exp|>22 may round
+// differently); sufficient + byte-verified for the yaml scalar grammar. Uses only single-Int / Float
+// returning helpers + position arithmetic (no multi-element tuple returns — outside the v1 subset).
+
+fn __fp_isdigit(b: Int) -> Bool = b >= 48 and b <= 57
+fn __fp_isspace(b: Int) -> Bool = b == 32 or b == 9
+
+fn __fp_skip_sp(addr: Int, end: Int) -> Int =
+  if addr < end and __fp_isspace(prim.load8(addr)) then __fp_skip_sp(addr + 1, end) else addr
+
+fn __fp_skip_sp_end(start: Int, end: Int) -> Int =
+  if end > start and __fp_isspace(prim.load8(end - 1)) then __fp_skip_sp_end(start, end - 1) else end
+
+// Address just past a run of decimal digits at `addr`.
+fn __fp_scan_digits(addr: Int, end: Int) -> Int =
+  if addr < end and __fp_isdigit(prim.load8(addr)) then __fp_scan_digits(addr + 1, end) else addr
+
+// Accumulate the decimal digits in [addr, stop) into mantissa `m`.
+fn __fp_acc(addr: Int, stop: Int, m: Int) -> Int =
+  if addr < stop then __fp_acc(addr + 1, stop, m * 10 + (prim.load8(addr) - 48)) else m
+
+// 10.0^k as an EXACT f64 for 0 <= k <= 22 (repeated *10.0; each step is exact in that range).
+fn __fp_pow10(k: Int) -> Float = if k <= 0 then 1.0 else __fp_pow10(k - 1) * 10.0
+
+fn float_parse(s: String) -> Result[Float, String] = {
+  let h = prim.handle(s)
+  let blen = prim.load32(h + 4)
+  let base = h + 12
+  let st = __fp_skip_sp(base, base + blen)
+  let en = __fp_skip_sp_end(st, base + blen)
+  let neg = st < en and prim.load8(st) == 45
+  let p0 = if st < en and (prim.load8(st) == 45 or prim.load8(st) == 43) then st + 1 else st
+  // integer part
+  let i_end = __fp_scan_digits(p0, en)
+  let icnt = i_end - p0
+  // optional fraction
+  let has_dot = i_end < en and prim.load8(i_end) == 46
+  let f_start = if has_dot then i_end + 1 else i_end
+  let f_end = __fp_scan_digits(f_start, en)
+  let fcnt = f_end - f_start
+  // mantissa = all integer + fraction digits as one integer (skipping the dot)
+  let im = __fp_acc(p0, i_end, 0)
+  let mant = __fp_acc(f_start, f_end, im)
+  // optional exponent
+  let has_e = f_end < en and (prim.load8(f_end) == 101 or prim.load8(f_end) == 69)
+  let e_sign_pos = f_end + 1
+  let e_neg = has_e and e_sign_pos < en and prim.load8(e_sign_pos) == 45
+  let e_digit_start = if has_e and e_sign_pos < en and (prim.load8(e_sign_pos) == 45 or prim.load8(e_sign_pos) == 43) then e_sign_pos + 1 else e_sign_pos
+  let e_end = if has_e then __fp_scan_digits(e_digit_start, en) else f_end
+  let e_mag = if has_e then __fp_acc(e_digit_start, e_end, 0) else 0
+  let exp = if e_neg then 0 - e_mag else e_mag
+  let e_cnt = if has_e then e_end - e_digit_start else 1
+  let got_digit = icnt + fcnt > 0
+  let consumed_all = e_end >= en
+  let ok_form = got_digit and (e_cnt > 0) and consumed_all
+  if not ok_form then err("invalid float literal")
+  else {
+    let net = exp - fcnt
+    let mag = prim.i2f(mant)
+    let pos_net = if net >= 0 then net else 0 - net
+    let p10 = __fp_pow10(pos_net)
+    let scaled = if net >= 0 then mag * p10 else mag / p10
+    let v = if neg then 0.0 - scaled else scaled
+    ok(v)
+  }
+}
