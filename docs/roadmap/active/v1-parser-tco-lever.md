@@ -514,3 +514,36 @@ prototype it reaches 0 walls (14128-line WAT) but FAILS at runtime — TWO remai
 NOTE — v0 native ORACLE is BROKEN for yaml: the current native Rust backend mis-borrows `find_colon`
 (`find_colon_at(s.to_string())` E0308), so `almide test`/`almide run` can't compile yaml on v0. Use the
 yaml_test.almd expected values (or fix that native borrow bug) as the oracle. The v1 spine is unaffected.
+
+## STATUS (2026-06-22, late) — list.enumerate + closure-find DONE; yaml emits VALID wasm + RUNS the parser
+
+The user's "re-land the builder then solve the closure-find" is COMPLETE + committed + gate-green:
+- **`60deaf24` list.enumerate + find-over-(Int,String)-with-closure.** The (Int,String) tuple-list
+  BUILDER (append-accumulator TCO + the (Int,String) element in try_lower_concat_list /
+  try_lower_str_list_literal / lower_owned_heap_field + the recursive `$__drop_list_int_str`),
+  `list_find_int_str` (loads each tuple HANDLE, hands it to the predicate closure reading `e.1`), the
+  heap-payload `Option[(Int,String)]` construct (`materialize_opt_int_str_some`, co-own Dup) +
+  materialize-recognition + the value-result match `some((idx,line))` destructure, AND the
+  `List[(Int,String)]` call-result drop routing (`is_list_int_str_ty` → `variant_drop_handles`). The
+  `enumerate |> find((e)=>…e.1…)` shape byte-matches v0 (`1:b`) + **10⁴ leak-free**; corpus-wall 4/4
+  ACCEPT (coverage 16620); mir suite 501/0. KEY: yaml's match arms are VALUE-result (`value.null()`/`v`)
+  → `try_lower_variant_value_match` (which has the tuple-payload desugar), NOT the Unit-body
+  `try_lower_variant_match`; a Unit-body test linearizes, but that is not yaml's shape.
+- **`96e94de7` list.set over List[String] (`list.set_str`).** The generic `list.set`'s i64 val param
+  mismatched a String element (i32 handle) → invalid wasm in `seq_map`. set_str rc-copies every slot
+  (co-own) + replaces slot i (rc_dec old, co-own new); result drops `DropListStr`. Byte-matches v0.
+
+**yaml NOW COMPILES TO VALID WASM (≈13.7k-line WAT, 0 walls) AND EXECUTES the full parser** —
+`parse → parse_lines → dispatch → parse_mapping → collect_map → map_entry → after_colon → parse_inline
+→ parse_scalar → scalar_typed → scalar_value → scalar_numeric → parse_number`. It TRAPS in
+`parse_number` (`rc_dec`, a double-free) on a MAP-ENTRY value (`parse("a: hello")` traps; a BARE scalar
+`parse("hello")` does NOT trap, it returns `{}`). The trap is NOT reproducible by faithful repros (the
+`match int.parse(c){ok=>value.int,err=>value.str(raw)}` shape, the collect_map (String,Value)
+accumulator with a parse_number value, a loop-local `after` threaded through an effect-fn `(Value,Int)`
+`!` — ALL byte-match in isolation). So it is a SUBTLE interaction in the full number-parsing chain.
+SUSPECT (from the WAT): a `Result[Int,String]` drop (e.g. `int.from_hex` / `int.parse`) that per-element
+`rc_dec`s the payload slot — fine for an `Err(String)` but a double-free / scalar-as-handle for an
+`Ok(Int)`; OR a borrowed-`raw`/`after` double-drop where the value escapes into the accumulator. NEXT:
+dump `$parse_number`'s exact trapping `rc_dec` local in the `parse("a: hello")` WAT, trace it to the
+source drop, fix the Result/borrow drop routing — then yaml runs end-to-end (NOTE: v0-native oracle is
+still broken by the `find_colon` borrow E0308, so byte-match against yaml_test.almd's expected values).
