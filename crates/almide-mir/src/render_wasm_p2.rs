@@ -1,0 +1,536 @@
+fn render_op(
+    op: &Op,
+    label_off: &BTreeMap<String, (u32, u32)>,
+    func_slots: &BTreeMap<String, u32>,
+    param_counts: &BTreeMap<String, usize>,
+    masks: &BTreeMap<ValueId, Vec<usize>>,
+) -> String {
+    match op {
+        // A STRING literal — a heap block `[rc][len][cap][utf8 bytes...]` (same header
+        // as a list; len/cap are BYTE counts). $alloc the block, set the header, store
+        // each byte. Real DATA reproduced from the MIR (the un-defer, ③ exec slice).
+        Op::Alloc { dst, init: Init::Str(string), .. } => {
+            let bytes = string.as_bytes();
+            let blen = bytes.len() as u32;
+            // A String block is sized LIST-COMPATIBLY so the free-list reuses it: `cap` is
+            // the ELEMENT count `ceil(blen / ELEM_SIZE)` (rounded up so the bytes fit), and
+            // the allocation is `LIST_HEADER + cap*ELEM_SIZE` — exactly what the `$alloc`
+            // reuse check recomputes from `cap`. `len` stays the BYTE length (what print
+            // reads). Storing `cap = blen` (a byte count) made the reuse formula
+            // `LIST_HEADER + blen*ELEM_SIZE` overshoot the real size, so freed String
+            // blocks were never reclaimed and a String-allocating loop leaked → OOM.
+            let cap_elems = blen.div_ceil(ELEM_SIZE);
+            let total = LIST_HEADER + cap_elems * ELEM_SIZE;
+            let mut s = format!(
+                "    (local.set {d} (call $alloc (i32.const {total})))\n\
+                 \x20   (i32.store (i32.add (local.get {d}) (i32.const {LIST_RC_OFFSET})) (i32.const {RC_INITIAL}))\n\
+                 \x20   (i32.store (i32.add (local.get {d}) (i32.const {LIST_LEN_OFFSET})) (i32.const {blen}))\n\
+                 \x20   (i32.store (i32.add (local.get {d}) (i32.const {LIST_CAP_OFFSET})) (i32.const {cap_elems}))\n",
+                d = local(*dst),
+            );
+            for (i, b) in bytes.iter().enumerate() {
+                let off = LIST_HEADER + i as u32;
+                s.push_str(&format!(
+                    "    (i32.store8 (i32.add (local.get {d}) (i32.const {off})) (i32.const {b}))\n",
+                    d = local(*dst),
+                ));
+            }
+            s
+        }
+        // A BYTES constant — physically the SAME `[rc][len][cap][bytes…]` block as a String
+        // literal (len/cap are byte counts), but the source bytes are arbitrary (not UTF-8).
+        // Materializes a const Bytes module global (the aes S-box) with no runtime call.
+        Op::Alloc { dst, init: Init::Bytes(data), .. } => {
+            let blen = data.len() as u32;
+            let cap_elems = blen.div_ceil(ELEM_SIZE);
+            let total = LIST_HEADER + cap_elems * ELEM_SIZE;
+            let mut s = format!(
+                "    (local.set {d} (call $alloc (i32.const {total})))\n\
+                 \x20   (i32.store (i32.add (local.get {d}) (i32.const {LIST_RC_OFFSET})) (i32.const {RC_INITIAL}))\n\
+                 \x20   (i32.store (i32.add (local.get {d}) (i32.const {LIST_LEN_OFFSET})) (i32.const {blen}))\n\
+                 \x20   (i32.store (i32.add (local.get {d}) (i32.const {LIST_CAP_OFFSET})) (i32.const {cap_elems}))\n",
+                d = local(*dst),
+            );
+            for (i, b) in data.iter().enumerate() {
+                let off = LIST_HEADER + i as u32;
+                s.push_str(&format!(
+                    "    (i32.store8 (i32.add (local.get {d}) (i32.const {off})) (i32.const {b}))\n",
+                    d = local(*dst),
+                ));
+            }
+            s
+        }
+        // A runtime-sized OWNED String of `len` bytes: round the byte length up to
+        // ELEM_SIZE (list-compatible so the free-list reuses it), $alloc, set rc=1 + the
+        // byte len + the element cap. The data is left UNINITIALIZED for the caller to fill
+        // via `prim.store8` (the self-host `int.to_string` builder). Cert: one `Alloc` = i,
+        // init-agnostic — a fresh owned object, no checker change.
+        Op::Alloc { dst, init: Init::DynStr { len }, .. } => {
+            let wlen = format!("(i32.wrap_i64 (local.get {}))", local(*len));
+            // round byte len up to ELEM_SIZE: (len + ELEM_SIZE-1) & ~(ELEM_SIZE-1)
+            let rounded = format!(
+                "(i32.and (i32.add {wlen} (i32.const {add})) (i32.const {mask}))",
+                add = ELEM_SIZE - 1,
+                mask = -(ELEM_SIZE as i32),
+            );
+            format!(
+                "    (local.set {d} (call $alloc (i32.add (i32.const {LIST_HEADER}) {rounded})))\n\
+                 \x20   (i32.store (i32.add (local.get {d}) (i32.const {LIST_RC_OFFSET})) (i32.const {RC_INITIAL}))\n\
+                 \x20   (i32.store (i32.add (local.get {d}) (i32.const {LIST_LEN_OFFSET})) {wlen})\n\
+                 \x20   (i32.store (i32.add (local.get {d}) (i32.const {LIST_CAP_OFFSET})) (i32.shr_u {rounded} (i32.const {shift})))\n",
+                d = local(*dst),
+                shift = ELEM_SIZE.trailing_zeros(),
+            )
+        }
+        // A materialized `Some(payload)`: a 1-element list (len=1) whose `data[0]` holds
+        // the scalar payload. `None` is the 0-element list (`Init::Opaque`, len=0). A
+        // variant `match` reads `len` as the tag and `data[0]` as the payload. Cert: one
+        // `Alloc` = i, init-agnostic (no checker change).
+        Op::Alloc { dst, init: Init::OptSome { payload }, .. } => {
+            let cap = 1 + PUSH_HEADROOM;
+            format!(
+                "    (local.set {d} (call $list_new (i32.const 1) (i32.const {cap})))\n\
+                 \x20   (call $list_set (local.get {d}) (i32.const 0) (local.get {p}))\n",
+                d = local(*dst),
+                p = local(*payload),
+            )
+        }
+        // A runtime-sized OWNED `List[Int]` of `len` i64 slots: $alloc `LIST_HEADER +
+        // len*ELEM_SIZE` bytes, set rc=1 + len + cap (= the element count). Elements are
+        // left UNINITIALIZED for the caller to fill via `prim.store64`. The list-building
+        // sibling of `DynStr`. Cert: one `Alloc` = i, init-agnostic — no checker change.
+        // A DynList (List[Int], scalar slots) OR a DynListStr (List[String], heap-handle
+        // slots) — physically IDENTICAL: alloc `LIST_HEADER + len*ELEM_SIZE`, rc=1, len=cap.
+        // (The DropListStr free is what distinguishes the nested-ownership variant.)
+        Op::Alloc { dst, init: Init::DynList { len } | Init::DynListStr { len }, .. } => {
+            let wlen = format!("(i32.wrap_i64 (local.get {}))", local(*len));
+            let bytes = format!("(i32.mul {wlen} (i32.const {ELEM_SIZE}))");
+            format!(
+                "    (local.set {d} (call $alloc (i32.add (i32.const {LIST_HEADER}) {bytes})))\n\
+                 \x20   (i32.store (i32.add (local.get {d}) (i32.const {LIST_RC_OFFSET})) (i32.const {RC_INITIAL}))\n\
+                 \x20   (i32.store (i32.add (local.get {d}) (i32.const {LIST_LEN_OFFSET})) {wlen})\n\
+                 \x20   (i32.store (i32.add (local.get {d}) (i32.const {LIST_CAP_OFFSET})) {wlen})\n",
+                d = local(*dst),
+            )
+        }
+        // `None` SIZED LIKE `OptSome` (len 0, cap 1+headroom) so the size-bucketed free-list
+        // can REUSE one block between a closure's Some and None results (distinct sizes would
+        // fragment the head-only `$alloc` free-list and grow memory). len 0 reads as None.
+        Op::Alloc { dst, init: Init::OptNone, .. } => {
+            let cap = 1 + PUSH_HEADROOM;
+            format!(
+                "    (local.set {d} (call $list_new (i32.const 0) (i32.const {cap})))\n",
+                d = local(*dst),
+            )
+        }
+        Op::Alloc { dst, init, .. } => {
+            let elems: &[i64] = match init {
+                Init::IntList(e) => e,
+                Init::Opaque
+                | Init::Str(_)
+                | Init::Bytes(_)
+                | Init::DynStr { .. }
+                | Init::OptSome { .. }
+                | Init::OptNone
+                | Init::DynList { .. }
+                | Init::DynListStr { .. } => &[],
+            };
+            let len = elems.len() as u32;
+            let cap = len + PUSH_HEADROOM;
+            let mut s = format!(
+                "    (local.set {d} (call $list_new (i32.const {len}) (i32.const {cap})))\n",
+                d = local(*dst)
+            );
+            for (i, e) in elems.iter().enumerate() {
+                s.push_str(&format!(
+                    "    (call $list_set (local.get {d}) (i32.const {i}) (i64.const {e}))\n",
+                    d = local(*dst)
+                ));
+            }
+            s
+        }
+        // An alias SHARES the object and bumps its refcount (A1.3-render): dst and
+        // src become two handles to the SAME block, rc += 1 — matching the cert's
+        // Alias = +1 and exercising the proven rc machine on a shared cell (whereas
+        // eager-copy kept every cell at 1). In-place mutation is guarded by cow.
+        Op::Dup { dst, src } => format!(
+            "    (local.set {d} (local.get {s}))\n    (call $rc_inc (local.get {s}))\n",
+            d = local(*dst),
+            s = local(*src)
+        ),
+        // A runtime call → a wasm `call` of the (bootstrap) runtime function.
+        Op::Call { dst, func, args, .. } => render_call(*dst, func, args, label_off),
+        Op::IntBinOp { dst, op, a, b } => {
+            let args = format!("(local.get {}) (local.get {})", local(*a), local(*b));
+            // A comparison yields an i32 0/1 → zero-extend to the i64 scalar model.
+            let expr = match op {
+                IntOp::Add => format!("(i64.add {args})"),
+                IntOp::Sub => format!("(i64.sub {args})"),
+                IntOp::Mul => format!("(i64.mul {args})"),
+                IntOp::Div => format!("(i64.div_s {args})"),
+                IntOp::Mod => format!("(i64.rem_s {args})"),
+                IntOp::Lt => format!("(i64.extend_i32_u (i64.lt_s {args}))"),
+                IntOp::Le => format!("(i64.extend_i32_u (i64.le_s {args}))"),
+                IntOp::Gt => format!("(i64.extend_i32_u (i64.gt_s {args}))"),
+                IntOp::Ge => format!("(i64.extend_i32_u (i64.ge_s {args}))"),
+                IntOp::Eq => format!("(i64.extend_i32_u (i64.eq {args}))"),
+                IntOp::Ne => format!("(i64.extend_i32_u (i64.ne {args}))"),
+                IntOp::And => format!("(i64.and {args})"),
+                IntOp::Or => format!("(i64.or {args})"),
+                IntOp::Xor => format!("(i64.xor {args})"),
+                IntOp::Shl => format!("(i64.shl {args})"),
+                IntOp::Shr => format!("(i64.shr_s {args})"),
+                IntOp::ShrU => format!("(i64.shr_u {args})"),
+            };
+            format!("    (local.set {d} {expr})\n", d = local(*dst))
+        }
+        // An indirect (closure) call: push the args, then the table index, and dispatch
+        // through the module function table with the closure signature OF THIS ARITY
+        // (`$closure_fnN`, N = arg count). The table + every `(type $closure_fnN)` are
+        // emitted by render_wasm_program for each arity present; `table_idx` is the runtime
+        // slot of the lifted lambda.
+        Op::CallIndirect { dst, table_idx, args, result } => {
+            // The closure ABI is uniform i64 (`$closure_fnN` = N i64 params). A HEAP arg (a Ptr,
+            // an i32 local) is WIDENED to i64 to match; the lambda narrows it back at entry
+            // (render_wasm_fn's lambda heap-param coercion).
+            let argstr = args
+                .iter()
+                .map(|a| match a {
+                    CallArg::Handle(v) => format!("(i64.extend_i32_u (local.get {}))", local(*v)),
+                    other => render_arg_wasm(other),
+                })
+                .collect::<Vec<_>>()
+                .join(" ");
+            let arity = args.len();
+            // Pick the closure type of this arity AND result repr (`_h` = heap/i32 result).
+            let suffix = if result.map(|r| r.is_heap()).unwrap_or(false) { "_h" } else { "" };
+            // The table index is a wasm i32; the MIR value is the uniform i64, so wrap it.
+            let call = format!(
+                "(call_indirect (type $closure_fn{arity}{suffix}) {argstr} (i32.wrap_i64 (local.get {})))",
+                local(*table_idx)
+            );
+            match dst {
+                Some(d) => format!("    (local.set {} {call})\n", local(*d)),
+                None => format!("    (drop {call})\n"),
+            }
+        }
+        Op::CallFn { dst, name, args, result } => {
+            // A caps-accounting ELIDED-CALL MARKER (`record_elided_calls`) is an
+            // `Op::CallFn { dst: None, args: [], result: None }` whose NAME carries
+            // the elided callee's caps identity — it must keep that name for the
+            // caps gate, but it must NOT render as a real `(call $name)`: when
+            // `$name` declares parameters, a 0-arg call underflows the wasm stack
+            // and wasmtime rejects the module. Render NOTHING for such a marker.
+            //
+            // A GENUINE 0-arg void call to a 0-PARAMETER function has the IDENTICAL
+            // shape (`dst:None, args:[], result:None`) and IS valid wasm — it must
+            // still render. The discriminator: a real call always supplies its
+            // callee's params, so only a marker calls a param-taking function with
+            // zero args.
+            let is_elided_marker = dst.is_none()
+                && args.is_empty()
+                && result.is_none()
+                && param_counts.get(name).copied().unwrap_or(0) > 0;
+            if is_elided_marker {
+                return String::new();
+            }
+            let argstr = args.iter().map(render_arg_wasm).collect::<Vec<_>>().join(" ");
+            match dst {
+                Some(d) => format!("    (local.set {} (call ${name} {argstr}))\n", local(*d)),
+                None => format!("    (call ${name} {argstr})\n"),
+            }
+        }
+        // A release: decrement the refcount cell (RuntimeModel.v's rt_dec). The
+        // `$rc_dec` primitive traps if the cell is already 0 — the double-free /
+        // use-after-free sentinel. This is the byte the perceus V binds each
+        // witness drop to (the leak-freedom realization on the artifact).
+        Op::Drop { v } => format!("    (call $rc_dec (local.get {}))\n", local(*v)),
+        // RECURSIVE drop of a List[String]: IFF this is the last reference (rc==1), free each
+        // element handle first (an aliased list keeps its elements alive), THEN rc_dec the
+        // list block. The element handle lives in the i64 slot (`12 + i*8`), i32.wrap'd back.
+        // Uses the function-wide scratch locals $dlsi/$dlsn (declared in render_wasm_fn).
+        Op::DropListStr { v } => {
+            let p = local(*v);
+            // A MIXED record/tuple block carries a per-value HEAP-SLOT MASK: free EXACTLY
+            // those slots (the scalar slots must NOT be `rc_dec`'d), then the block. The mask
+            // slot indices are compile-time known, so the free is UNROLLED (no runtime loop);
+            // the block's `len@4` is the field count, not iterated. The uniform `List[String]`
+            // (no mask) keeps the runtime loop over every slot. Both are gated on rc==1 so a
+            // shared block's aliases don't free the heap fields early — and both emit the SAME
+            // single `d` to the certificate (an `Op::DropListStr`).
+            if let Some(slots) = masks.get(v) {
+                let frees = slots
+                    .iter()
+                    .map(|&i| {
+                        let off = 12 + (i as u32) * 8;
+                        format!(
+                            "         (call $rc_dec (i32.wrap_i64 (i64.load (i32.add (local.get {p}) (i32.const {off})))))\n"
+                        )
+                    })
+                    .collect::<String>();
+                format!(
+                    "    (if (i32.eq (i32.load (local.get {p})) (i32.const 1))\n\
+                     \x20     (then\n\
+                     {frees}\
+                     \x20     ))\n\
+                     \x20   (call $rc_dec (local.get {p}))\n"
+                )
+            } else {
+                format!(
+                    "    (if (i32.eq (i32.load (local.get {p})) (i32.const 1))\n\
+                     \x20     (then\n\
+                     \x20       (local.set $dlsi (i32.const 0))\n\
+                     \x20       (local.set $dlsn (i32.load (i32.add (local.get {p}) (i32.const 4))))\n\
+                     \x20       (block $dlsbrk (loop $dlscont\n\
+                     \x20         (br_if $dlsbrk (i32.ge_s (local.get $dlsi) (local.get $dlsn)))\n\
+                     \x20         (call $rc_dec (i32.wrap_i64 (i64.load (i32.add (local.get {p}) (i32.add (i32.const 12) (i32.mul (local.get $dlsi) (i32.const 8)))))))\n\
+                     \x20         (local.set $dlsi (i32.add (local.get $dlsi) (i32.const 1)))\n\
+                     \x20         (br $dlscont)))))\n\
+                     \x20   (call $rc_dec (local.get {p}))\n"
+                )
+            }
+        }
+        // RECURSIVE drop of a `List[List[String]]` (the csv `rows` shape) — a NESTED loop, no link.
+        // At the OUTER list's last ref (rc==1), for each element slot: load the inner `List[String]`
+        // handle; at ITS last ref free each cell String (per-slot `rc_dec`); `rc_dec` the inner block;
+        // THEN `rc_dec` the outer block. A flat `DropListStr` would only `rc_dec` each inner HANDLE,
+        // never running the inner list's last-ref free → the cell Strings LEAK. Cert = the single `d`
+        // (the inner frees are the trusted raw-handle routine, leak-loop verified). Uses the dedicated
+        // outer-loop locals `$dlli`/`$dlln`/`$dllinner`; the inner loop reuses `$dlsi`/`$dlsn`.
+        Op::DropListListStr { v } => {
+            let p = local(*v);
+            format!(
+                "    (if (i32.eq (i32.load (local.get {p})) (i32.const 1))\n\
+                 \x20     (then\n\
+                 \x20       (local.set $dlli (i32.const 0))\n\
+                 \x20       (local.set $dlln (i32.load (i32.add (local.get {p}) (i32.const 4))))\n\
+                 \x20       (block $dllbrk (loop $dllcont\n\
+                 \x20         (br_if $dllbrk (i32.ge_s (local.get $dlli) (local.get $dlln)))\n\
+                 \x20         (local.set $dllinner (i32.wrap_i64 (i64.load (i32.add (local.get {p}) (i32.add (i32.const 12) (i32.mul (local.get $dlli) (i32.const 8)))))))\n\
+                 \x20         (if (i32.eq (i32.load (local.get $dllinner)) (i32.const 1))\n\
+                 \x20           (then\n\
+                 \x20             (local.set $dlsi (i32.const 0))\n\
+                 \x20             (local.set $dlsn (i32.load (i32.add (local.get $dllinner) (i32.const 4))))\n\
+                 \x20             (block $dlsbrk (loop $dlscont\n\
+                 \x20               (br_if $dlsbrk (i32.ge_s (local.get $dlsi) (local.get $dlsn)))\n\
+                 \x20               (call $rc_dec (i32.wrap_i64 (i64.load (i32.add (local.get $dllinner) (i32.add (i32.const 12) (i32.mul (local.get $dlsi) (i32.const 8)))))))\n\
+                 \x20               (local.set $dlsi (i32.add (local.get $dlsi) (i32.const 1)))\n\
+                 \x20               (br $dlscont)))))\n\
+                 \x20         (call $rc_dec (local.get $dllinner))\n\
+                 \x20         (local.set $dlli (i32.add (local.get $dlli) (i32.const 1)))\n\
+                 \x20         (br $dllcont))))\n\
+                 \x20     )\n\
+                 \x20   (call $rc_dec (local.get {p}))\n"
+            )
+        }
+        // RUNTIME-TAG-DISPATCHED RECURSIVE drop of a dynamic `Value` — the self-hosted
+        // `$__drop_value` (value_core.almd): at the LAST ref (rc==1) it frees the nested payload by
+        // tag (Array tag 5 → each element Value recursively; Str tag 4 → the one String; scalar < 4
+        // → nothing), then releases the block. A Value only exists if a `value.*` ctor built it, so
+        // value_core (and `$__drop_value` with it) is ALWAYS linked wherever a `DropValue` is emitted.
+        // The Op keeps its single cert `d`; the recursion is the trusted routine (raw-handle, empty
+        // cert), verified by the create+drop LEAK LOOP (the freelist makes a leak observable as an
+        // OOB trap). REPLACES the flat inline drop, which leaked an Array's element Values (tag 5).
+        Op::DropValue { v } => {
+            format!("    (call $__drop_value (local.get {}))\n", local(*v))
+        }
+        // RECURSIVE drop of a `List[Value]` — the self-hosted `$__drop_list_value` (value_core.almd):
+        // IFF the last reference (rc==1), it calls `$__drop_value` on each element (tag-dispatched, so
+        // a Str/Array element's nested payload is freed too — a flat `DropListStr` per-slot `rc_dec`
+        // would LEAK it), THEN frees the list block. Linked alongside `$__drop_value` whenever any
+        // value.* is used (a List[Value] only arises in value-model code). Single cert `d`; the
+        // recursion is the trusted routine (empty cert), verified by the create+drop LEAK LOOP.
+        Op::DropListValue { v } => {
+            format!("    (call $__drop_list_value (local.get {}))\n", local(*v))
+        }
+        // RECURSIVE drop of a `List[(String, Value)]` — the self-hosted `$__drop_list_str_value`
+        // (value_core.almd): at the list's last ref each (String, Value) tuple element is freed at its own
+        // last ref (its String slot rc_dec'd flat, its Value slot freed recursively via `$__drop_value`),
+        // then the tuple block, then the list block. A flat `DropListStr` would only rc_dec the @12 tuple
+        // handle, leaking each tuple's String + Value. Single cert `d`; the recursion is the trusted
+        // routine (empty cert), verified by the create+drop LEAK LOOP. The TUPLE-element `DropListValue`.
+        Op::DropListStrValue { v } => {
+            format!("    (call $__drop_list_str_value (local.get {}))\n", local(*v))
+        }
+        // RECURSIVE drop of a `List[(String, String)]` — the self-hosted `$__drop_list_str_str`
+        // (value_core.almd): each tuple's BOTH String slots rc_dec'd flat at the tuple's last ref, then
+        // the tuple, then the list block. The (String,String) counterpart of `DropListStrValue` (the
+        // map.entries / svg render_attrs shape). Single cert `d`; trusted recursion, leak-loop verified.
+        Op::DropListStrStr { v } => {
+            format!("    (call $__drop_list_str_str (local.get {}))\n", local(*v))
+        }
+        // RECURSIVE drop of a `value.as_array` Result `Result[List[Value], String]` — the self-hosted
+        // `$__drop_result_lv` (value_core.almd) tag-dispatches at the last ref: Ok frees the
+        // `List[Value]` payload recursively, Err frees the String, then the block. A flat `DropListStr`
+        // would only rc_dec the @12 list handle, leaking its element Values. Single cert `d`.
+        Op::DropResultListValue { v } => {
+            format!("    (call $__drop_result_lv (local.get {}))\n", local(*v))
+        }
+        // RECURSIVE drop of a `Result[Value, String]` (the `ok(value.array(...))` shape) — the
+        // self-hosted `$__drop_result_value` (value_core.almd) tag-dispatches at the last ref: Ok
+        // frees the Value @12 via `$__drop_value` (recursive), Err frees the String @12, then the
+        // block. value_core is always linked here (the program built the Value via a `value.*` ctor).
+        Op::DropResultValue { v } => {
+            format!("    (call $__drop_result_value (local.get {}))\n", local(*v))
+        }
+        // RECURSIVE drop of a CUSTOM variant (ADT brick 5b) — the GENERATED per-type
+        // `$__drop_<ty>` (the `$__drop_value` shape, auto-linked from generated Almide): at the
+        // last ref it reads the tag, recursively frees each variant ctor field + rc_dec's each
+        // leaf field, then the block. Single cert `d`; the recursion is the trusted prim-only
+        // routine (empty cert), verified by the create+drop LEAK LOOP.
+        Op::DropVariant { v, ty } => {
+            format!("    (call $__drop_{} (local.get {}))\n", ty, local(*v))
+        }
+        // COPY-ON-WRITE before an in-place mutation (A1.3-render, refining
+        // CowSafety.v): if the block is SHARED (rc > 1), clone it so the mutation
+        // touches no alias. The `rc_dec` runs FIRST (rc 2→1 — the alias keeps the
+        // original alive, so no temp is needed), then `list_copy` reads the
+        // still-live original into a fresh uniquely-owned block. rc == 1 → no-op.
+        Op::MakeUnique { v } => format!(
+            "    (if (i32.gt_s (i32.load (i32.add (local.get {v}) (i32.const {rc}))) (i32.const 1))\n      (then\n        (call $rc_dec (local.get {v}))\n        (local.set {v} (call $list_copy (local.get {v})))))\n",
+            v = local(*v),
+            rc = LIST_RC_OFFSET
+        ),
+        // Still no-ops: Consume MOVES the reference out (the receiver releases it
+        // later — no dec at THIS site); Const/Borrow/Pure touch no refcount.
+        // A materialized integer constant: set the local to the immediate. (A
+        // deferred `Const` renders to nothing — the local keeps the zero default.)
+        // A function reference: resolve the lifted function's name to its module
+        // function-table slot (its position) and materialize the slot as the scalar value
+        // a later CallIndirect dispatches through. Unknown name → slot 0 (defensive).
+        Op::FuncRef { dst, name } => {
+            let slot = func_slots.get(name).copied().unwrap_or(0);
+            format!("    (local.set {} (i64.const {slot}))\n", local(*dst))
+        }
+        Op::ConstInt { dst, value } => {
+            format!("    (local.set {} (i64.const {value}))\n", local(*dst))
+        }
+        // A primitive-floor op, hand-mapped INLINE (no preamble func). The MIR is
+        // i64-uniform; wrap to i32 at the wasm memory boundary, zero-extend a loaded /
+        // returned i32 back to i64. This is the whole trusted floor for raw memory +
+        // the fd_write host call — everything else (print_str) is Almide over it.
+        Op::Prim { kind, dst, args } => {
+            let w = |i: usize| format!("(i32.wrap_i64 (local.get {}))", local(args[i]));
+            let body = match kind {
+                PrimKind::Handle => format!("(i64.extend_i32_u (local.get {}))", local(args[0])),
+                PrimKind::Load { width: 1 } => format!("(i64.extend_i32_u (i32.load8_u {}))", w(0)),
+                PrimKind::Load { width: 4 } => format!("(i64.extend_i32_u (i32.load {}))", w(0)),
+                PrimKind::Load { .. } => format!("(i64.load {})", w(0)),
+                // An i32 HANDLE load — NO i64 extend; the dst local is `Ptr` (i32), so the loaded
+                // i32 handle is a real String/List pointer (see value_reprs_wasm).
+                PrimKind::LoadHandle => format!("(i32.load {})", w(0)),
+                PrimKind::Store { width: 1 } => format!("(i32.store8 {} {})", w(0), w(1)),
+                PrimKind::Store { width: 4 } => format!("(i32.store {} {})", w(0), w(1)),
+                PrimKind::Store { .. } => format!("(i64.store {} (local.get {}))", w(0), local(args[1])),
+                // Bounds-checked element ADDRESS via the preamble `$elem_addr` (idx<0 || idx>=cap
+                // TRAPs — v0's `a[i]` likewise halts on OOB). Both args wrap to i32 (list ptr,
+                // index); the returned i32 address zero-extends back to the i64-uniform dst.
+                PrimKind::ElemAddr => {
+                    format!("(i64.extend_i32_u (call $elem_addr {} {}))", w(0), w(1))
+                }
+                PrimKind::FdWrite => {
+                    format!("(i64.extend_i32_u (call $fd_write {} {} {} {}))", w(0), w(1), w(2), w(3))
+                }
+                // random_get(buf, buf_len) — the WASI entropy floor; fills buf with random bytes,
+                // returns an i32 errno that zero-extends back to the i64-uniform dst.
+                PrimKind::RandomGet => {
+                    format!("(i64.extend_i32_u (call $random_get {} {}))", w(0), w(1))
+                }
+                // RAW refcount ops (the self-host drop/copy mechanism) — reuse the proven $rc_dec/
+                // $rc_inc on the i32-wrapped handle. dst is None (Unit), so the `match dst` below
+                // emits the call as a STATEMENT (no local.set).
+                PrimKind::RcDec => format!("(call $rc_dec {})", w(0)),
+                PrimKind::RcInc => format!("(call $rc_inc {})", w(0)),
+                // FLOAT floor: the i64 value holds the f64 bits — reinterpret around the op.
+                PrimKind::FloatUn(op) => {
+                    let f = |a: usize| format!("(f64.reinterpret_i64 (local.get {}))", local(args[a]));
+                    let inner = match op {
+                        FUnOp::Abs => format!("(f64.abs {})", f(0)),
+                        FUnOp::Sqrt => format!("(f64.sqrt {})", f(0)),
+                        FUnOp::Floor => format!("(f64.floor {})", f(0)),
+                        FUnOp::Ceil => format!("(f64.ceil {})", f(0)),
+                        FUnOp::Neg => format!("(f64.neg {})", f(0)),
+                    };
+                    format!("(i64.reinterpret_f64 {inner})")
+                }
+                PrimKind::FloatBin(op) => {
+                    let f = |a: usize| format!("(f64.reinterpret_i64 (local.get {}))", local(args[a]));
+                    let instr = match op {
+                        FBinOp::Add => "f64.add",
+                        FBinOp::Sub => "f64.sub",
+                        FBinOp::Mul => "f64.mul",
+                        FBinOp::Div => "f64.div",
+                        FBinOp::Min => "f64.min",
+                        FBinOp::Max => "f64.max",
+                        FBinOp::CopySign => "f64.copysign",
+                    };
+                    format!("(i64.reinterpret_f64 ({instr} {} {}))", f(0), f(1))
+                }
+                PrimKind::FloatCmp(op) => {
+                    let f = |a: usize| format!("(f64.reinterpret_i64 (local.get {}))", local(args[a]));
+                    let instr = match op {
+                        FCmpOp::Lt => "f64.lt",
+                        FCmpOp::Le => "f64.le",
+                        FCmpOp::Gt => "f64.gt",
+                        FCmpOp::Ge => "f64.ge",
+                        FCmpOp::Eq => "f64.eq",
+                        FCmpOp::Ne => "f64.ne",
+                    };
+                    // f64 compare yields an i32 0/1 — extend to the i64-uniform Bool.
+                    format!("(i64.extend_i32_u ({instr} {} {}))", f(0), f(1))
+                }
+                // SATURATING float→int (i64.trunc_SAT_f64_s), matching Rust's `as` cast (v0): NaN → 0,
+                // > i64::MAX → i64::MAX, < i64::MIN → i64::MIN — NO trap. The plain `i64.trunc_f64_s`
+                // traps on NaN/inf/out-of-range, diverging from v0 (and float_to_uint64.almd already
+                // assumes the saturating form for its f >= 2^64 → u64::MAX path).
+                PrimKind::FloatToInt => {
+                    format!("(i64.trunc_sat_f64_s (f64.reinterpret_i64 (local.get {})))", local(args[0]))
+                }
+                PrimKind::IntToFloat => {
+                    format!("(i64.reinterpret_f64 (f64.convert_i64_s (local.get {})))", local(args[0]))
+                }
+                // to_bits / bits_to_float: the value IS the bits — identity pass-through.
+                PrimKind::FloatBits => format!("(local.get {})", local(args[0])),
+                // f64 → f32 (demote, round-to-nearest), held as the low-32 f32 bit pattern.
+                PrimKind::F32Demote => format!(
+                    "(i64.extend_i32_u (i32.reinterpret_f32 (f32.demote_f64 (f64.reinterpret_i64 (local.get {})))))",
+                    local(args[0])
+                ),
+                // low-32 f32 pattern → f64 (promote, exact). Serves both float.from_float32 and
+                // int.bits_to_f32 (`f32::from_bits(bits as u32) as f64`).
+                PrimKind::F32Promote => format!(
+                    "(i64.reinterpret_f64 (f64.promote_f32 (f32.reinterpret_i32 (i32.wrap_i64 (local.get {})))))",
+                    local(args[0])
+                ),
+                // i64 → f32 directly (single rounding, v0's `n as f32`), held as the low-32 f32 pattern.
+                PrimKind::IntToF32 => format!(
+                    "(i64.extend_i32_u (i32.reinterpret_f32 (f32.convert_i64_s (local.get {}))))",
+                    local(args[0])
+                ),
+                // Float32 → its 32-bit pattern as Int: identity (the value IS the low-32 bits).
+                PrimKind::F32Bits => format!("(local.get {})", local(args[0])),
+            };
+            match dst {
+                Some(d) => format!("    (local.set {} {body})\n", local(*d)),
+                None => format!("    {body}\n"),
+            }
+        }
+        // A scalar reassignment of a stable local — the loop-carried state. Reads `src`,
+        // writes the var's own local (reusing the same wasm local is legal: read then set).
+        Op::SetLocal { local: l, src } => {
+            format!("    (local.set {} (local.get {}))\n", local(*l), local(*src))
+        }
+        Op::Consume { .. }
+        | Op::Borrow { .. }
+        | Op::Const { .. }
+        | Op::Pure { .. }
+        // The if- and loop-markers are rendered STATEFULLY by render_wasm_fn (the
+        // flat→nested wasm `if`/`else` and `block`/`loop`); render_op never sees them.
+        | Op::IfThen { .. }
+        | Op::Else { .. }
+        | Op::EndIf { .. }
+        | Op::LoopStart
+        | Op::LoopBreakUnless { .. }
+        | Op::LoopEnd => String::new(),
+    }
+}
