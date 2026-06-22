@@ -574,3 +574,45 @@ scope-end drops — audit the seq path (dash_after's `(parse_inline(after), pos+
 List[Value] accumulator + the `??`-operand Option temps from `string.get(s,pos) ?? ""`) for the same
 class. The single/few-shot parse is correct + balanced; this is depth-of-loop hardening. (v0-native
 oracle still broken by the `find_colon` borrow E0308 — use round-trip + yaml_test expectations.)
+
+## STATUS (2026-06-22, base64/toml/aes) — aes CONQUERED, base64 9→4, the two deep frontiers
+
+This push targeted the three repo-specific walls (base64 / toml / aes). Landed, all gate-green
+(corpus-wall 4/4 ACCEPT, mir 501/0), each a REUSABLE mechanism:
+
+- ✅ **aes RUNS** (FIPS 197 `encrypt_block` byte-matches v0). Lever = **CONST module-global
+  materialization**: a heap module-level global with a const initializer (`let SBOX = bytes.from_list
+  ([…])`, a string literal, an int-list literal) now lowers to a DIRECT `Alloc` — new `Init::Bytes`
+  (arbitrary-byte block, ≠ `Init::Str` because the S-box has 0x00–0xFF). A COMPUTED init keeps walling
+  (materializing it would inject a `CallFn` the gate's IR-side `count_ir_calls` can't see → mir>ir).
+  `global_inits` threaded through render/gate/cert so all three agree. (commit ac7fae5c)
+- ✅ base64 `char_to_val` — a heap-result `Result` **Err arm whose message is a `${}` interpolation**
+  (`err("bad '${ch}'")`): the ResultErr arm folds the interp + frees its intermediates per-arm. (fec44e1a)
+- ✅ base64 `encode_chunks` self-append — **multi-concat accumulator** `acc + c0 + c1 + …`: the TCO's
+  is_self_append recurses the ConcatStr left-spine to its leftmost leaf. (4f2bfdeb)
+
+base64 is now 9→4 walls; aes 0. **The remaining 4 base64 walls + most of toml's 22 bottleneck on TWO
+DEEP FRONTIERS — design slices, NOT incremental bricks:**
+
+### Frontier A — the let-bound heap-result `if` in a loop/recursive body (HIGHEST leverage)
+`let c2 = if cond then A else B` inside a scalar loop body (base64 encode_chunks/decode_chunks; toml
+parse_val/read_basic/…). binds.rs WALLS the general let-bound heap-result `if`: a let-bound value is
+held + dropped at scope end, but the merged `IfThen` dst has no sound scope-end drop in the FLAT cert
+(attributing ONE drop to exactly-one-of-two arm allocs needs a checker/Coq change). At FUNCTION TAIL it
+already works via `desugar_heap_branches` (tail-duplication into each arm). **DESIGN (no Coq change):
+extend the tail-duplication to a let-bound `if` whose continuation is the recursion** — rewrite
+`{ let c = if k then A else B; recurse(acc+…+c) }` → `if k then recurse(acc+…+A) else recurse(acc+…+B)`,
+duplicating the continuation (the recursive call + accumulator update) into each arm so the let-bound
+`if` is ELIMINATED before lowering. Then each arm has a literal `c` and its own self-call; `tco_collect`
+must admit BRANCHED self-calls (one per arm, each a conditional accumulator SetLocal — already supported
+by the loop-body Assign). Risk: TCO composition with branched calls; gate-protected (any double-free →
+cert REJECT). This single lever unblocks base64 ×2 + a large fraction of toml.
+
+### Frontier B — the heap-payload `Result`/variant match (Camp-4)
+`match bs { ok(bytes) => …, err(e) => … }` over a `Result[Bytes, String]` (base64 decode/decode_url).
+`try_lower_variant_value_match` admits SCALAR-payload variants (subject-drop-before-arms) but GATES OUT
+a HEAP payload (the arm borrows the subject's heap slot — `Option[String]`/`Result[Bytes,_]`). This is
+the documented Camp-4 frontier ([[v1-selfhost-machinery]] Machinery 2 extended to match-read). Needs the
+heap-payload extract-then-arm machinery (the arm reads slot-0 as a borrow, the subject drops after).
+
+### toml — also `unwrap !` in a call-arg position + while-body heap-accumulator (on top of Frontier A).
