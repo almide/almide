@@ -11,7 +11,13 @@
   (STATUS 6). Cross-cutting fixes that also help every repo: the `not <bool-call>` let arm (lower_bind
   UnOp), the defunc-map self-recursion admission (`in_defunc_body`), `DropListStrStr` for
   `List[(String,String)]`.
-- 🔄 **yaml** — 1 of 74 fns wall (`collect_map`); the rest lower. The 1 wall is the BIG lever (see below).
+- 🔄 **yaml** — **the TCO wall is GONE (2026-06-22): the effect-fn tuple-result TCO landed, so
+  collect_map/collect_seq + every parser fn LOWER. yaml's `parse` now lowers to a 14128-line WAT with
+  ONLY `list.enumerate` unlinked** (string.to_lower + float.parse self-hosted this session). Remaining
+  to RUN: (a) self-host `list.enumerate` — the (Int,String) tuple-list BUILDER works, but its consumer
+  `list.enumerate |> list.find((e) => …e.1…)` needs find-over-a-tuple-element-WITH-A-CLOSURE (the
+  closure machinery, [[v1-selfhost-machinery]] Machinery 3) which mis-dispatches today; (b) a yaml
+  `seq_map` WASM type mismatch (i64/i32) in the full lowering. See STATUS (2026-06-22, yaml) below.
 - 🟢 **bigint / rsa / sha1 / porta** — 0 lower-walls (all fns lower); `sha1` byte-matches its test
   vectors out of the box (2026-06-21 probe). Need only a byte-match audit + leak loop to bank.
 - 🟡 **base64 (9/13) / aes (17/30) / almide-sqlite (20/28) / toml (22/48)** — mechanism walls remain.
@@ -470,3 +476,41 @@ result_var) and probed `cm2`. Findings (all reverted to keep the tree sound — 
   `3`. Test via the v1 MIR spine ONLY (`examples/render_program` → WAT → wasmtime, or `lower_source`),
   NOT `almide run --target wasm` (that is the OLD almide-codegen pipeline, a different backend; it
   panics earlier in its ANF pass on `List[(String,Value)]` args — unrelated to the MIR spine).
+
+## STATUS (2026-06-22, yaml) — TCO wall GONE; yaml lowers to 14128-line WAT, 1 stdlib + 1 render bug left
+
+The effect-fn tuple-result TCO (the 5 bricks) is LANDED + gate-green (commit 141f6c09; cm2 byte-match +
+10⁴ leak-free, corpus-wall 4/4 ACCEPT 0 panics, mir suite 501/0). With it + the two self-hosted leaf
+stdlib fns this session, **`almide/yaml`'s `parse` lowers on the v1 MIR spine with ZERO TCO walls** —
+the structural blocker the whole roadmap targeted is resolved.
+
+Self-hosted this session (committed, byte-match in isolation, PURE_MODULES-classified):
+- **string.to_lower** (commit, ASCII fold) — `stdlib/string_to_lower.almd`.
+- **float.parse** (commit, sign/int/.frac/e-exp, single exact pow10 scale) — `stdlib/float_parse.almd`.
+  Tuple-free (single-Int/Float helpers); byte-matches `s.trim().parse::<f64>()` for the yaml grammar.
+
+yaml driver = `mod.almd` + a `main` calling `parse("a: 1\nb: hello\nc:\n  - x\n  - y\n")` (test via
+`examples/render_program` → WAT → wasmtime; NOT `almide run --target wasm` = old codegen). After the
+above, `render_program` reports ONLY `unlinked: list.enumerate`; with a (reverted) list.enumerate
+prototype it reaches 0 walls (14128-line WAT) but FAILS at runtime — TWO remaining bugs:
+
+1. **`list.enumerate` (the last stdlib gap).** The (Int,String) tuple-list **builder** machinery WORKS
+   (a tuple-free `__enum_str_rec` append accumulator over `List[(Int,String)]`; the `(Int,String)`
+   element added to `try_lower_concat_list`/`try_lower_str_list_literal`/`lower_owned_heap_field`; a
+   `$__drop_list_int_str` recursive drop in a `list_enumerate.almd`; the `enumerate→enumerate_str`
+   dispatch; `__isdrop_list` in the rc_dec allowlist; `list_enumerate` in PURE_MODULES — all gate-green,
+   corpus-wall 4/4 with coverage +50). REVERTED because the CONSUMER mis-compiles: yaml uses
+   `lines |> list.enumerate |> list.find((e) => not is_blank(e.1))` and `list.find` over a
+   `List[(Int,String)]` WITH A CLOSURE reading the tuple's `.1` is NOT C1-defunc'd (find ∉ the
+   map/filter/fold defunc set) and mis-dispatches to `find_str` (reads each tuple as a String → garbage,
+   the `none`/`0:` output). The REAL remaining work is find-over-a-heap-tuple-element-with-a-closure
+   (the [[v1-selfhost-machinery]] Machinery-3 closure surface), NOT the builder. Re-land the builder
+   (it's sound) THEN solve the closure-find.
+2. **A `seq_map` WASM type mismatch (i64 vs i32)** surfaced only in the FULL yaml lowering
+   (`local effect fn seq_map -> (Value,Int)` = a tuple-returning tail call to `parse_mapping(list.set(…))!`).
+   Not self-recursive (not the committed TCO); likely a render bug in `list.set` / the tuple-returning
+   tail-call path. Isolate with a seq_map-shaped fixture.
+
+NOTE — v0 native ORACLE is BROKEN for yaml: the current native Rust backend mis-borrows `find_colon`
+(`find_colon_at(s.to_string())` E0308), so `almide test`/`almide run` can't compile yaml on v0. Use the
+yaml_test.almd expected values (or fix that native borrow bug) as the oracle. The v1 spine is unaffected.
