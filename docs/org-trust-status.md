@@ -23,14 +23,17 @@ shows here.
 | **sha1** | ✅ RUNS | `hex(hash("abc"))` = `a9993e364706816aba3e25717850c26c9cd0d89d` (correct) |
 | **csv**  | ✅ RUNS | 4/4 public fns byte-match (roadmap [[v1-parser-tco-lever]]) |
 | **svg**  | ✅ RUNS | `almide test` 15/0 via WASM (roadmap) |
-| **bigint** | ❌ blocked | `from_int` uses the IN-PLACE `bytes.push(mut b, v) -> Unit` (a `var buf; while { bytes.push(buf,..) }` mutation accumulator) — UNLINKED on v1. Module-wide wall (the rest of bigint — add/sub/mul/modpow on Bytes — would run). Fix: lower `bytes.push(var,x)` as a functional rebind `var = bytes_append(var,x)` + self-host the append (same shape as list.set_str / the append-accumulator TCO). |
-| **rsa** | ❌ blocked | depends on bigint (modpow) → same `bytes.push` gap; verify after bigint |
+| **bigint** | ✅ RUNS | `add([0xFF],[0x01])` = `[0x01,0x00]` byte-matches v0. The `bytes.push` blocker is FIXED — the in-place `bytes.push(mut b,v)->Unit` now lowers as a functional rebind `buf = bytes.append(buf,x)` + self-hosted `bytes.append` (commit). |
+| **rsa** | 🟡 unblocked | own fns lower; uses `import bigint` (bigint.modpow) — single-file probe can't resolve the sibling import, so verify with the real multi-module build now that bigint runs |
 | **base64** | ❌ wall | a heap module-level global (the lookup table `let TABLE=[…]`) — `reference to a heap module-level global VarId(0)` |
 | **toml** | ❌ wall | heap-result `if` outside the executable subset |
 | **aes** | ❌ wall | heap-result `Range` in a call-argument position |
 
-So the `🟡 lowers, byte-match TODO` rows below split into: **sha1 actually RUNS** (✅), while **bigint/rsa
-do NOT link** (the in-place `bytes.push` self-host gap — the next concrete brick, NOT just byte-match).
+So the `🟡 lowers, byte-match TODO` rows below resolve as: **sha1 + bigint RUN** (✅, byte-verified),
+**rsa** is unblocked (needs the multi-module build to link its `import bigint`). **5 library repos now
+run on v1: yaml, sha1, csv, svg, bigint.** The remaining walls are repo-specific lowering gaps:
+base64 = a heap module-level global, toml = heap-result `if` subset, aes = heap-result `Range` in a
+call arg — each a contained next brick.
 
 ## Per-repo (sorted by walls)
 
