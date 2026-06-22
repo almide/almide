@@ -1696,6 +1696,39 @@ impl LowerCtx {
                 // loop with break/continue is WALLED, because the v0 wasm backend frees
                 // AFTER the break branch target and would leak).
                 IrExprKind::Break | IrExprKind::Continue => Ok(()),
+                // `bytes.push(buf, x)` — the v0 intrinsic is an IN-PLACE mutation (`mut b -> Unit`).
+                // v1 has value semantics, so rewrite it to a functional rebind `buf = bytes.append(buf,
+                // x)` and re-dispatch — the Assign path then handles it (a scalar-loop accumulator
+                // SetLocal via the general heap-reassign, or a top-level rebind). `bytes.append` is the
+                // self-hosted functional append (bytes_core). Only a bare `Var` first arg qualifies; any
+                // other receiver keeps the (walling) effect-call path. Unblocks bigint.from_int / rsa.
+                IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
+                    if module.as_str() == "bytes"
+                        && func.as_str() == "push"
+                        && args.len() == 2
+                        && matches!(&args[0].kind, IrExprKind::Var { .. }) =>
+                {
+                    let IrExprKind::Var { id } = &args[0].kind else { unreachable!() };
+                    let append = IrExpr {
+                        kind: IrExprKind::Call {
+                            target: CallTarget::Module {
+                                module: sym("bytes"),
+                                func: sym("append"),
+                                def_id: None,
+                            },
+                            args: vec![args[0].clone(), args[1].clone()],
+                            type_args: vec![],
+                        },
+                        ty: args[0].ty.clone(),
+                        span: None,
+                        def_id: None,
+                    };
+                    let assign = IrStmt {
+                        kind: IrStmtKind::Assign { var: *id, value: append },
+                        span: None,
+                    };
+                    self.lower_stmt(&assign)
+                }
                 _ => self.lower_effect_call(expr),
             },
             // A source comment carries no ownership — skip it (it is not a

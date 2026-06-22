@@ -174,6 +174,18 @@ fn bytes_set(b: Bytes, i: Int, val: Int) -> Bytes = {
   out
 }
 
+// bytes.append(b, val) — a fresh Bytes = b with `val` appended (the FUNCTIONAL value-semantics form
+// of the in-place `bytes.push(mut b, val)` intrinsic; the v1 MIR lowering rewrites a `bytes.push(buf,
+// x)` statement to `buf = bytes.append(buf, x)`). Allocs n+1, copies b, stores val at slot n.
+fn bytes_append(b: Bytes, val: Int) -> Bytes = {
+  let n = prim.load32(prim.handle(b) + 4)
+  let out = prim.alloc_bytes(n + 1)
+  let dst = prim.handle(out) + 12
+  let _x = __bytecopy(dst, prim.handle(b) + 12, n, 0)
+  prim.store8(dst + n, val)
+  out
+}
+
 // Fill n bytes at p with val.
 fn __fillval(p: Int, n: Int, val: Int, i: Int) -> Int =
   if i >= n then 0
