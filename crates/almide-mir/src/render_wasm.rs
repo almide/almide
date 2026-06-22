@@ -604,6 +604,29 @@ fn render_op(
             }
             s
         }
+        // A BYTES constant — physically the SAME `[rc][len][cap][bytes…]` block as a String
+        // literal (len/cap are byte counts), but the source bytes are arbitrary (not UTF-8).
+        // Materializes a const Bytes module global (the aes S-box) with no runtime call.
+        Op::Alloc { dst, init: Init::Bytes(data), .. } => {
+            let blen = data.len() as u32;
+            let cap_elems = blen.div_ceil(ELEM_SIZE);
+            let total = LIST_HEADER + cap_elems * ELEM_SIZE;
+            let mut s = format!(
+                "    (local.set {d} (call $alloc (i32.const {total})))\n\
+                 \x20   (i32.store (i32.add (local.get {d}) (i32.const {LIST_RC_OFFSET})) (i32.const {RC_INITIAL}))\n\
+                 \x20   (i32.store (i32.add (local.get {d}) (i32.const {LIST_LEN_OFFSET})) (i32.const {blen}))\n\
+                 \x20   (i32.store (i32.add (local.get {d}) (i32.const {LIST_CAP_OFFSET})) (i32.const {cap_elems}))\n",
+                d = local(*dst),
+            );
+            for (i, b) in data.iter().enumerate() {
+                let off = LIST_HEADER + i as u32;
+                s.push_str(&format!(
+                    "    (i32.store8 (i32.add (local.get {d}) (i32.const {off})) (i32.const {b}))\n",
+                    d = local(*dst),
+                ));
+            }
+            s
+        }
         // A runtime-sized OWNED String of `len` bytes: round the byte length up to
         // ELEM_SIZE (list-compatible so the free-list reuses it), $alloc, set rc=1 + the
         // byte len + the element cap. The data is left UNINITIALIZED for the caller to fill
@@ -672,6 +695,7 @@ fn render_op(
                 Init::IntList(e) => e,
                 Init::Opaque
                 | Init::Str(_)
+                | Init::Bytes(_)
                 | Init::DynStr { .. }
                 | Init::OptSome { .. }
                 | Init::OptNone

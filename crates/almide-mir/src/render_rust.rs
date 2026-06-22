@@ -135,6 +135,13 @@ fn render_op(op: &Op) -> Option<String> {
                         s.as_bytes().iter().map(|b| b.to_string()).collect::<Vec<_>>().join(", ");
                     format!("vec![{items}]")
                 }
+                // A Bytes constant — the same byte-block render as a string literal (wasm-only
+                // in practice; native uses v0 codegen). Reproduce the raw bytes as a Vec.
+                Init::Bytes(data) => {
+                    let items =
+                        data.iter().map(|b| b.to_string()).collect::<Vec<_>>().join(", ");
+                    format!("vec![{items}]")
+                }
                 // A runtime-sized String is wasm-only (native uses v0 codegen); an empty
                 // placeholder keeps the type a Vec<i64>.
                 Init::Opaque | Init::DynStr { .. } => "Vec::new()".to_string(),

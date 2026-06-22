@@ -60,6 +60,41 @@ pub fn is_heap_ty(ty: &Ty) -> bool {
     )
 }
 
+/// A CONST-foldable module-global initializer → its direct `Init` (NO runtime call), else `None`.
+/// Admits exactly the compile-time-known heap constants the module-global materialization emits as
+/// data: a string literal, an all-int-literal `List[Int]`, and `bytes.from_list([int literals])`.
+/// Anything COMPUTED (a `string.from_codepoint(..)` / user call) returns `None` and keeps walling —
+/// materializing it would inject a `CallFn` the gate's IR-side `count_ir_calls` cannot see (mir>ir).
+fn const_global_init(init: &IrExpr) -> Option<crate::Init> {
+    match &init.kind {
+        IrExprKind::LitStr { value } => Some(crate::Init::Str(value.clone())),
+        IrExprKind::List { elements } => {
+            let ints: Option<Vec<i64>> = elements
+                .iter()
+                .map(|e| match &e.kind {
+                    IrExprKind::LitInt { value } => Some(*value),
+                    _ => None,
+                })
+                .collect();
+            ints.map(crate::Init::IntList)
+        }
+        IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
+            if module.as_str() == "bytes" && func.as_str() == "from_list" && args.len() == 1 =>
+        {
+            let IrExprKind::List { elements } = &args[0].kind else { return None };
+            let bytes: Option<Vec<u8>> = elements
+                .iter()
+                .map(|e| match &e.kind {
+                    IrExprKind::LitInt { value } => Some(*value as u8),
+                    _ => None,
+                })
+                .collect();
+            bytes.map(crate::Init::Bytes)
+        }
+        _ => None,
+    }
+}
+
 /// Is `ty` an `Option[_]` / `Result[_, _]` — a tagged heap VARIANT? Used to gate the
 /// value-position variant-match WALL: a scalar-result match over an Option/Result subject
 /// that can't execute the tag-read must reject (a Const-0 would pick a wrong arm), but a
@@ -518,6 +553,20 @@ pub fn lower_function_all_with_types(
     lower_function_all_with_layouts(func, globals, record_layouts, &VariantLayouts::default())
 }
 
+/// [`lower_function_all_with_layouts`] WITH the module-level globals' INITIALIZERS threaded
+/// in, so a HEAP global reference materializes its real const value (the base64 alphabet /
+/// aes S-box) instead of walling. The `_with_layouts` entry delegates here with empty inits
+/// (every heap-global reference there still walls, as before — no regression).
+pub fn lower_function_all_with_globals(
+    func: &IrFunction,
+    globals: &HashMap<VarId, Ty>,
+    global_inits: &HashMap<VarId, IrExpr>,
+    record_layouts: &RecordLayouts,
+    variant_layouts: &VariantLayouts,
+) -> Result<Vec<MirFunction>, LowerError> {
+    lower_function_all_impl(func, globals, global_inits, record_layouts, variant_layouts)
+}
+
 /// [`lower_function_all_with_types`] WITH the program's VARIANT-layout registry threaded in
 /// too — the entry the real pipeline uses once custom ADTs participate in the value model
 /// (the construct / `match` / drop bricks consult [`LowerCtx::variant_layouts`]). The
@@ -528,8 +577,19 @@ pub fn lower_function_all_with_layouts(
     record_layouts: &RecordLayouts,
     variant_layouts: &VariantLayouts,
 ) -> Result<Vec<MirFunction>, LowerError> {
+    lower_function_all_impl(func, globals, &HashMap::new(), record_layouts, variant_layouts)
+}
+
+fn lower_function_all_impl(
+    func: &IrFunction,
+    globals: &HashMap<VarId, Ty>,
+    global_inits: &HashMap<VarId, IrExpr>,
+    record_layouts: &RecordLayouts,
+    variant_layouts: &VariantLayouts,
+) -> Result<Vec<MirFunction>, LowerError> {
     let mut ctx = LowerCtx {
         globals: globals.clone(),
+        global_inits: global_inits.clone(),
         fn_name: func.name.as_str().to_string(),
         record_layouts: record_layouts.clone(),
         variant_layouts: variant_layouts.clone(),
@@ -882,6 +942,13 @@ pub(crate) struct LowerCtx {
     /// — still WALLED). Confirming against the declared set, not merely a `value_of`
     /// miss, is what keeps the boundary a wall instead of a silent hole.
     globals: HashMap<VarId, Ty>,
+    /// The module-level globals' INITIALIZER expressions (VarId → its `let` value). A HEAP
+    /// global reference materializes a FRESH OWNED copy by lowering this initializer in place
+    /// (`value_or_global`) — sound value semantics (each reference is an independent copy,
+    /// dropped at scope end). Only initializers inside the lowering subset (a string literal,
+    /// `bytes.from_list([…])`, a scalar-list literal) succeed; anything else keeps the wall.
+    /// Empty for the simple entries; populated by the real pipeline from the program's top_lets.
+    global_inits: HashMap<VarId, IrExpr>,
     /// MIR values KNOWN to be MATERIALIZED Options (the 0-or-1-element-list layout:
     /// `Some(x)` = `Init::OptSome` len=1, `None` = `Init::Opaque` len=0). A variant
     /// `match` may EXECUTE (read `len` as the tag, extract `data[0]`) ONLY over a
@@ -1804,18 +1871,33 @@ impl LowerCtx {
             .get(&var)
             .cloned()
             .ok_or_else(|| LowerError::Unsupported(format!("use of unbound var {var:?}")))?;
-        let dst = self.fresh_value();
         if is_heap_ty(&ty) {
-            // A HEAP module-level global modeled as a fresh owned `Alloc{Opaque}` is an
-            // EMPTY heap value — any read of the global (`println(g)`, returning it,
-            // passing it on) observes empty bytes = a SILENT MISCOMPILE. Reject explicitly
-            // until a global's real initializer can be faithfully reconstructed here.
-            // (A SCALAR global is still a real `Const` below.)
+            // A HEAP module-level global (the base64 alphabet, the aes S-box): MATERIALIZE a FRESH
+            // OWNED copy of its CONST initializer as a DIRECT `Alloc` — a string literal (`Init::Str`),
+            // an int-list literal (`Init::IntList`), or `bytes.from_list([int literals])` (`Init::Bytes`).
+            // CRITICAL: only a CONST-foldable init (NO runtime call) is admitted, so the materialization
+            // injects ZERO `CallFn` ops — the gate's IR-side `count_ir_calls` stays exact (`mir == ir`).
+            // A COMPUTED init (`string.from_codepoint(10)`, a user call) would inject a call the IR-body
+            // count never sees (mir>ir = a false caps de-taint), so it keeps WALLING (no regression).
+            // The fresh owned copy is dropped at scope end like any literal (cert: one `i` + one `d`);
+            // `value_of[var]` caches it so repeated references in the SAME function reuse the one copy.
+            if let Some(init) = self.global_inits.get(&var) {
+                if let Some(const_init) = const_global_init(init) {
+                    let repr = repr_of(&ty)?;
+                    let dst = self.fresh_value();
+                    self.ops.push(Op::Alloc { dst, repr, init: const_init });
+                    self.live_heap_handles.push(dst);
+                    self.value_of.insert(var, dst);
+                    return Ok(dst);
+                }
+            }
             return Err(LowerError::Unsupported(format!(
                 "reference to a heap module-level global {var:?} cannot be faithfully \
-                 materialized in this brick (would observe an empty deferred heap value)"
+                 materialized in this brick (no CONST initializer — a computed init would \
+                 inject an uncounted call)"
             )));
         }
+        let dst = self.fresh_value();
         self.ops.push(Op::Const { dst });
         self.value_of.insert(var, dst);
         Ok(dst)

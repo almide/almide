@@ -78,12 +78,18 @@ fn main() {
     // reference instead of walling it.
     let mut globals: std::collections::HashMap<almide_ir::VarId, almide_lang::types::Ty> =
         std::collections::HashMap::new();
+    // The globals' INITIALIZERS too — so the emitted CERT covers the same heap-global
+    // materialization render_program executes (the global lowers to its real const value).
+    let mut global_inits: std::collections::HashMap<almide_ir::VarId, almide_ir::IrExpr> =
+        std::collections::HashMap::new();
     for tl in &ir.top_lets {
         globals.insert(tl.var, tl.ty.clone());
+        global_inits.insert(tl.var, tl.value.clone());
     }
     for m in &ir.modules {
         for tl in &m.top_lets {
             globals.insert(tl.var, tl.ty.clone());
+            global_inits.insert(tl.var, tl.value.clone());
         }
     }
 
@@ -123,8 +129,8 @@ fn main() {
             if !f.name.as_str().contains(func_name.as_str()) {
                 continue;
             }
-            match almide_mir::lower::lower_function_all_with_layouts(
-                f, &globals, &record_layouts, &variant_layouts,
+            match almide_mir::lower::lower_function_all_with_globals(
+                f, &globals, &global_inits, &record_layouts, &variant_layouts,
             ) {
                 Ok(mirs) => {
                     for mir in &mirs {

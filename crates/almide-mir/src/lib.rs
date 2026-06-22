@@ -125,6 +125,12 @@ pub enum Init {
     Opaque,
     /// A `List[Int]` literal.
     IntList(Vec<i64>),
+    /// A `Bytes` CONSTANT — the raw bytes the EXECUTION render reproduces as a `[rc][len][cap]
+    /// [bytes…]` block (physically identical to a `Str` block, but the bytes are arbitrary, not
+    /// UTF-8: the aes S-box has 0x00–0xFF). The materialization of a const module-level Bytes
+    /// global (`let SBOX = bytes.from_list([…])`) WITHOUT a runtime call — so the gate's IR-side
+    /// call count stays exact (a computed init keeps walling). Cert: one `i`, init-agnostic.
+    Bytes(Vec<u8>),
     /// A string literal's UTF-8 bytes — real DATA the EXECUTION render needs to
     /// reproduce the value (the ownership cert is unaffected: an `Alloc` is one `i`
     /// regardless of content). The un-defer of string data, the first ③ slice.

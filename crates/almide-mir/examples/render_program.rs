@@ -69,12 +69,17 @@ fn main() {
 
     // Top-level `let` globals (VarId -> Ty), union of program + module top_lets.
     let mut globals: HashMap<almide_ir::VarId, almide_lang::types::Ty> = HashMap::new();
+    // The globals' INITIALIZER exprs too — a HEAP global (the base64 alphabet / aes S-box) is
+    // materialized from its real value, not walled. Same union (program + modules).
+    let mut global_inits: HashMap<almide_ir::VarId, almide_ir::IrExpr> = HashMap::new();
     for tl in &ir.top_lets {
         globals.insert(tl.var, tl.ty.clone());
+        global_inits.insert(tl.var, tl.value.clone());
     }
     for m in &ir.modules {
         for tl in &m.top_lets {
             globals.insert(tl.var, tl.ty.clone());
+            global_inits.insert(tl.var, tl.value.clone());
         }
     }
 
@@ -108,9 +113,10 @@ fn main() {
         // lower_function_all_with_types returns the main function plus any lambda-lifted
         // auxiliaries (index 0 is main); all go into the module so the function table
         // covers them. The record registry is threaded so `Ty::Named` records materialize.
-        match almide_mir::lower::lower_function_all_with_layouts(
+        match almide_mir::lower::lower_function_all_with_globals(
             func,
             &globals,
+            &global_inits,
             &record_layouts,
             &variant_layouts,
         ) {

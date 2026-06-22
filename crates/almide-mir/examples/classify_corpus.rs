@@ -587,12 +587,18 @@ fn main() {
         // walling it. Union of program- and module-level top_lets.
         let mut globals: std::collections::HashMap<almide_ir::VarId, almide_lang::types::Ty> =
             std::collections::HashMap::new();
+        // The globals' INITIALIZERS too, so the gate VERIFIES the same heap-global materialization
+        // render_program executes (a heap global lowers to its real const value, not a wall).
+        let mut global_inits: std::collections::HashMap<almide_ir::VarId, almide_ir::IrExpr> =
+            std::collections::HashMap::new();
         for tl in &ir.top_lets {
             globals.insert(tl.var, tl.ty.clone());
+            global_inits.insert(tl.var, tl.value.clone());
         }
         for m in &ir.modules {
             for tl in &m.top_lets {
                 globals.insert(tl.var, tl.ty.clone());
+                global_inits.insert(tl.var, tl.value.clone());
             }
         }
         // The functions DEFINED in this file (their names). A PROTOCOL METHOD is a
@@ -624,9 +630,10 @@ fn main() {
         for func in &inlined_fns {
             t.functions += 1;
             let lowered = catch_unwind(AssertUnwindSafe(|| {
-                almide_mir::lower::lower_function_all_with_layouts(
+                almide_mir::lower::lower_function_all_with_globals(
                     func,
                     &globals,
+                    &global_inits,
                     &record_layouts,
                     &variant_layouts,
                 )
