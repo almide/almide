@@ -616,3 +616,40 @@ the documented Camp-4 frontier ([[v1-selfhost-machinery]] Machinery 2 extended t
 heap-payload extract-then-arm machinery (the arm reads slot-0 as a borrow, the subject drops after).
 
 ### toml — also `unwrap !` in a call-arg position + while-body heap-accumulator (on top of Frontier A).
+
+## STATUS (2026-06-22, turn 2 — base64 ENCODE conquered, Camp-4 is the LAST frontier)
+
+This turn landed THREE reusable lowering levers (all gate-green, corpus-wall 4/4, mir 501/0):
+- ✅ **multi-concat self-append TCO** (`acc + c0 + c1 + …`) — is_self_append recurses the ConcatStr
+  left-spine. (4f2bfdeb)
+- ✅ **let-bound-heap-result-`if` pre-desugar before the TCO** — `desugar_heap_branches` on func.body
+  BEFORE `try_tco_rewrite`, so `{ let c = if k then A else B; recurse(acc+c) }` becomes branched
+  recursion `if k then recurse(acc+A) else recurse(acc+B)` (tco_collect recurses both arms). (8cf460e5)
+  → **base64 `encode_chunks` lowers; base64 ENCODE RUNS** (`encode("hello")=aGVsbG8=`, canonical
+  byte-match, standard + url). (1a871eed + fixture spec/wasm_cross/base64_encode.almd)
+- ✅ **unwrap-`!`-bound-to-a-let desugar** — `{ …; let v = e!; rest }` → `{ …; match e { ok(v) =>
+  {rest}, err($x) => err($x) } }` (the `!` IS early-return-on-Err; the match becomes the tail).
+  corpus ownership coverage 16744→**16877 (+133)** — the TOP cross-repo wall (unwrap-bound-to-let)
+  cleared for scalar/str-result shapes; str-result unwrap byte-matches v0. (a564a12e)
+
+**base64 = 9→3 walls (ENCODE done); the last 3 (decode/decode_url/decode_chunks) + ALL of toml's 22
+now bottleneck on ONE frontier: Camp-4 — the heap-payload `Result`/variant match.**
+
+### Camp-4 design (the last frontier — precise mechanism, NOT yet implemented)
+`match e { ok(v) => …, err(x) => … }` where the bound payload (`v` or `x`) is HEAP (a `String`/`List`).
+Two sub-cases, increasing difficulty:
+1. **scalar-Ok / heap-Err** (decode_chunks's `let v0 = char_to_val(c)!` over `Result[Int,String]`):
+   the err-arm binds the slot-0 String + the unwrap-desugar's `err($x)` re-wraps it. NEEDS: track a
+   `Result[scalar, String]` subject as `heap_elem_lists` too (so `heap_or_scalar_bind` admits the
+   String Err bind AND `drop_op_for` uses `DropListStr` — correct: Ok=len0 frees nothing, Err=len1
+   frees slot-0) WHILE keeping the `materialized_results` len@4 tag read; the err-arm must `Op::Dup`
+   the BORROWED slot-0 String before re-wrapping (else subject-drop-after double-frees it). VERIFY the
+   tag-offset (len@4) and the drop (DropListStr) compose — the risk is a wrong-offset read or a
+   double-free, both gate-caught.
+2. **heap-Ok / heap-Err** (decode's `match decode_with(..) { ok(bytes) => ok(string.from_bytes(bytes)) }`
+   over `Result[List[Int],String]`): the FULL Camp-4 — the Ok arm borrows + consumes the heap List.
+   This is the documented borrowed-slot move-out ([[v1-selfhost-machinery]] Machinery 2 for match-read).
+
+Camp-4 is double-free territory (the memory's explicit fatigue-warning zone): implement it FRESH with
+the gate (ownership cert REJECTs any double-free) as the safety net. It is the single lever that
+finishes base64 (decode) AND unblocks the bulk of toml.
