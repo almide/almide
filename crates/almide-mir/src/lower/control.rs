@@ -966,7 +966,9 @@ impl LowerCtx {
             self.materialized_options.insert(subj);
         }
         if is_self_host_result_call(subject)
-            || (is_named_call && crate::lower::is_result_ty(&subject.ty))
+            || (is_named_call
+                && crate::lower::is_result_ty(&subject.ty)
+                && !Self::is_heap_ok_result(&subject.ty))
         {
             self.materialized_results.insert(subj);
             // Camp-4 sub-case 1 — a SCALAR-Ok / HEAP-Err `Result[Int, String]` (char_to_val; the
@@ -988,7 +990,16 @@ impl LowerCtx {
         // handle). The DROP differs by Ok-arm type: a `List[Value]` Ok (`value.as_array`) frees
         // RECURSIVELY (`value_result_lists` → `DropResultListValue`), else a String Ok frees flat
         // (`heap_elem_lists` → `DropListStr`). Type-driven so it is sound at every tracking site.
-        if is_self_host_result_str_call(subject) {
+        // Camp-4 sub-case 2 — a USER heap-Ok `Result[heap, String]` (decode_chunks's
+        // `Result[List[Int], String]`). Its CONSTRUCTION goes through `materialize_result_str`
+        // (cap-as-tag @16, slot-0 @12 = the heap payload), so the MATCH must read cap-tag @16 too —
+        // route it through the SAME str-result tracking (materialized_results_str + the by-type drop
+        // below: List[Value]→value_result_lists, Value→value_result_results, else flat→heap_elem_lists
+        // = DropListStr, exact for a List[Int]/String Ok). WITHOUT this the match read the len-as-tag
+        // @4 over a cap-tag block — a SILENT MISCOMPILE (Ok payload + tag both misread).
+        if is_self_host_result_str_call(subject)
+            || (is_named_call && Self::is_heap_ok_result(&subject.ty))
+        {
             self.materialized_results_str.insert(subj);
             if crate::lower::is_result_listval_ty(&subject.ty) {
                 self.value_result_lists.insert(subj);
