@@ -969,6 +969,19 @@ impl LowerCtx {
             || (is_named_call && crate::lower::is_result_ty(&subject.ty))
         {
             self.materialized_results.insert(subj);
+            // Camp-4 sub-case 1 — a SCALAR-Ok / HEAP-Err `Result[Int, String]` (char_to_val; the
+            // unwrap-`!`-desugar's `err($x) => err($x)` re-wrap). The len-as-tag read stays @4
+            // (materialized_results, NOT _str), but ALSO track heap_elem_lists so (a) the Err arm's
+            // String payload bind is ADMITTED (heap_or_scalar_bind) and (b) the subject drops via
+            // `DropListStr` — EXACTLY right for this layout: Ok=len0 frees nothing (the int is scalar),
+            // Err=len1 frees slot-0's String. Gated to scalar-Ok + heap-Err so a heap-Ok Result (a
+            // different layout) is untouched. The Err arm move-out auto-`Dup`s in lower_heap_result_arm,
+            // so drop-subject-after frees slot-0 once (no double-free — gate-checked).
+            if let Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, a) = &subject.ty {
+                if a.len() == 2 && !is_heap_ty(&a[0]) && is_heap_ty(&a[1]) {
+                    self.heap_elem_lists.insert(subj);
+                }
+            }
         }
         // A self-host HEAP-Ok Result (`value.as_string`/`value.as_array`/`result.zip` — cap-as-tag
         // DynListStr) is tracked as a str-result (the match reads tag @16 + binds the @12 payload
@@ -1090,7 +1103,14 @@ impl LowerCtx {
         // handled exactly like `str_heap_bind` — borrow @12, subject drops AFTER the arms — but reads
         // the Option len-as-tag @4 (not the str-result cap-tag @16).
         let opt_tuple_bind = heap_res && has_heap_bind && is_option;
-        if heap_res && has_heap_bind && !is_result_str && !opt_tuple_bind {
+        // Camp-4 sub-case 1: a SCALAR-Ok / HEAP-Err `Result[Int, String]` (the unwrap-`!`-desugar's
+        // `err($x) => err($x)`). It reads the len-as-tag @4 (a scalar result, NOT the str-result @16)
+        // but binds the Err arm's slot-0 String @12 as a BORROW — admitted because we marked it
+        // `heap_elem_lists` at tracking time (so `DropListStr` frees slot-0 when Err=len1). The Err
+        // arm's move-out auto-`Dup`s in lower_heap_result_arm, drop-subject-AFTER frees it once.
+        let result_heap_err_bind =
+            heap_res && has_heap_bind && is_result && !is_result_str && self.heap_elem_lists.contains(&subj);
+        if heap_res && has_heap_bind && !is_result_str && !opt_tuple_bind && !result_heap_err_bind {
             return rollback(self);
         }
         // Emit: h = handle(subj); tag = load32(h + off); dst = if tag != 0 then <then> else <else>.
@@ -1127,7 +1147,7 @@ impl LowerCtx {
         // matches keep the subject live (unchanged — they were already proven). A str-result
         // HEAP-bind (`str_heap_bind`) is the exception: its payload BORROWS slot-0, so the subject
         // must stay live THROUGH the arms — its drop is deferred to AFTER the branch-join below.
-        if heap_res && !str_heap_bind && !opt_tuple_bind {
+        if heap_res && !str_heap_bind && !opt_tuple_bind && !result_heap_err_bind {
             if let Some(pos) = self.live_heap_handles.iter().rposition(|&v| v == subj) {
                 self.live_heap_handles.remove(pos);
                 let op = self.drop_op_for(subj);
@@ -1173,7 +1193,7 @@ impl LowerCtx {
         // call result), independent of the freed subject, so freeing the subject's slot-0 String is
         // sound (a bare-Var arm already Dup'd it; a call arm only borrowed it). A BORROWED subject
         // (param / tracked var, not in `live_heap_handles`) is owned elsewhere → left untouched.
-        if str_heap_bind || opt_tuple_bind {
+        if str_heap_bind || opt_tuple_bind || result_heap_err_bind {
             if let Some(pos) = self.live_heap_handles.iter().rposition(|&v| v == subj) {
                 self.live_heap_handles.remove(pos);
                 let op = self.drop_op_for(subj);
@@ -2445,7 +2465,21 @@ impl LowerCtx {
                 // WITHIN this arm; the final message `piece` is MOVED into the Err block (not dropped).
                 let arm_mark = self.live_heap_handles.len();
                 let piece = match &expr.kind {
-                    IrExprKind::Var { id } => self.value_for(*id).ok()?,
+                    IrExprKind::Var { id } => {
+                        let src = self.value_for(*id).ok()?;
+                        // A BORROWED payload (a heap-Err match bind — slot-0 LoadHandle in
+                        // `param_values`, owned by the subject that drops AFTER the arms): acquire a
+                        // fresh owned reference (`Op::Dup`) so re-wrapping it into the Err block does
+                        // NOT double-free when the subject's `DropListStr` frees slot-0. A plain owned
+                        // local (`err(msg)` over a let-bound String) is moved in as before — no Dup.
+                        if self.param_values.contains(&src) {
+                            let p = self.fresh_value();
+                            self.ops.push(Op::Dup { dst: p, src });
+                            p
+                        } else {
+                            src
+                        }
+                    }
                     IrExprKind::LitStr { value } => {
                         let pr = repr_of(&expr.ty).ok()?;
                         let p = self.fresh_value();
