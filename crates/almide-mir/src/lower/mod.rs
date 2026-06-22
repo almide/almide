@@ -4120,6 +4120,14 @@ fn desugar_heap_branches_inner(body: &IrExpr, next_var: &mut u32) -> Option<IrEx
             cur = Some(r);
             continue;
         }
+        if let Some(r) = desugar_flatten_let_block(src) {
+            cur = Some(r);
+            continue;
+        }
+        if let Some(r) = desugar_inline_tail_accumulator(src) {
+            cur = Some(r);
+            continue;
+        }
         if let Some(r) = desugar_callarg_heap_if(src, next_var) {
             cur = Some(r);
             continue;
@@ -4325,6 +4333,112 @@ pub fn desugar_let_unwrap(body: &IrExpr) -> Option<IrExpr> {
         IrExprKind::Block { stmts: stmts[..i].to_vec(), expr: Some(Box::new(match_expr)) },
         result_ty,
     ))
+}
+
+/// `let v = { s…; tail }` — a let bound to a BLOCK — is FLATTENED to `s…; let v = tail`, hoisting the
+/// inner statements into the enclosing block. REQUIRED so the inline-accumulator desugar sees the real
+/// accumulator value: the let-bound-`if` pre-desugar turns `let new_acc = if c then { let b1=…; acc+
+/// [..,b1] } else …` into a `let new_acc = { let b1=…; acc+[..,b1] }` arm, whose value is a Block (not a
+/// ConcatList), so the inline skips it. Flattening yields `let b1=…; let new_acc = acc+[..,b1]` — now
+/// the inline + the TCO admit it. VarIds are unique (no shadow), so hoisting the inner lets is sound.
+/// base64 decode_chunks's nested byte-extraction; toml accumulators.
+pub fn desugar_flatten_let_block(body: &IrExpr) -> Option<IrExpr> {
+    let IrExprKind::Block { stmts, expr: tail } = &body.kind else {
+        return None;
+    };
+    let (i, var, ty, mutability, inner_stmts, inner_tail) =
+        stmts.iter().enumerate().find_map(|(i, s)| match &s.kind {
+            IrStmtKind::Bind { var, ty, value, mutability } => match &value.kind {
+                IrExprKind::Block { stmts: inner, expr: Some(it) } => {
+                    Some((i, *var, ty.clone(), *mutability, inner.clone(), (**it).clone()))
+                }
+                _ => None,
+            },
+            _ => None,
+        })?;
+    let mut new_stmts = stmts[..i].to_vec();
+    new_stmts.extend(inner_stmts);
+    new_stmts.push(IrStmt {
+        kind: IrStmtKind::Bind { var, ty, value: inner_tail, mutability },
+        span: None,
+    });
+    new_stmts.extend_from_slice(&stmts[i + 1..]);
+    Some(IrExpr {
+        kind: IrExprKind::Block { stmts: new_stmts, expr: tail.clone() },
+        ty: body.ty.clone(),
+        span: body.span.clone(),
+        def_id: body.def_id,
+    })
+}
+
+/// Count the occurrences of `var` (as an `IrExprKind::Var`) inside `e` — a local use-count for the
+/// inline desugar below (the global var_table.use_count is post-lowering, unavailable here).
+fn count_var_uses(e: &IrExpr, var: VarId) -> usize {
+    use almide_ir::visit::{walk_expr, IrVisitor};
+    struct C {
+        var: VarId,
+        n: usize,
+    }
+    impl IrVisitor for C {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            if let IrExprKind::Var { id } = &e.kind {
+                if *id == self.var {
+                    self.n += 1;
+                }
+            }
+            walk_expr(self, e);
+        }
+    }
+    let mut c = C { var, n: 0 };
+    c.visit_expr(e);
+    c.n
+}
+
+/// `{ …; let v = <heap expr>; recurse(.., v, ..) }` — a let-bound heap accumulator passed to the block
+/// TAIL — is INLINED: substitute `v` with its value in the tail and drop the let, yielding
+/// `recurse(.., <heap expr>, ..)`. REQUIRED for the TCO over a tail-duplicated accumulator: the
+/// let-bound-if pre-desugar turns `let new_acc = if c then acc+[..] else acc+[..]; recurse(.., new_acc)`
+/// into branched `{ let new_acc = acc+[..]; recurse(.., new_acc) }` arms, but the recursion then passes
+/// `new_acc` (a Var) — which `is_self_append` (`Var(acc) + …`) does NOT recognize, so the TCO declines.
+/// Inlining restores the DIRECT `recurse(.., acc+[..])` the TCO admits. GATED: the let is the LAST stmt
+/// (no intervening reassignment of the value's vars), its value is heap, and `v` is used EXACTLY ONCE
+/// in the tail (so no allocation is duplicated). Base64 decode_chunks / toml accumulators.
+pub fn desugar_inline_tail_accumulator(body: &IrExpr) -> Option<IrExpr> {
+    let IrExprKind::Block { stmts, expr: Some(tail) } = &body.kind else {
+        return None;
+    };
+    let i = stmts.len().checked_sub(1)?;
+    let IrStmtKind::Bind { var, value, mutability: almide_ir::Mutability::Let, .. } = &stmts[i].kind
+    else {
+        return None;
+    };
+    if !is_heap_ty(&value.ty) {
+        return None;
+    }
+    // Only a self-append-shaped value (`acc + …`) — the accumulator case the TCO needs; avoids
+    // inlining an arbitrary call (which could move a side effect into the tail).
+    if !matches!(
+        &value.kind,
+        IrExprKind::BinOp {
+            op: almide_ir::BinOp::ConcatList | almide_ir::BinOp::ConcatStr,
+            ..
+        }
+    ) {
+        return None;
+    }
+    if count_var_uses(tail, *var) != 1 {
+        return None;
+    }
+    let new_tail = almide_ir::substitute::substitute_var_in_expr(tail, *var, value);
+    Some(IrExpr {
+        kind: IrExprKind::Block {
+            stmts: stmts[..i].to_vec(),
+            expr: Some(Box::new(new_tail)),
+        },
+        ty: body.ty.clone(),
+        span: body.span.clone(),
+        def_id: body.def_id,
+    })
 }
 
 /// `let v = if c then e! else d` — an unwrap-`!` INSIDE an `if` arm (base64 decode_chunks:
