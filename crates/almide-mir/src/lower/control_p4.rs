@@ -550,7 +550,11 @@ impl LowerCtx {
                 });
                 Some(p)
             }
-            _ => None,
+            // `ok(string.from_bytes(bytes))` / `ok(int.to_string(n))` — the Ok payload is a stdlib
+            // MODULE call (or any other fresh-owned heap producer): lower it as a fresh owned heap
+            // value (rc=1) that materialize_result_str then MOVES into the Result block, no Dup. This
+            // is base64 decode's `match bs { ok(bytes) => ok(string.from_bytes(bytes)), … }`.
+            _ => self.lower_owned_heap_field(expr),
         }
     }
 
