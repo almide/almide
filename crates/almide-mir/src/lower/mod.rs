@@ -600,8 +600,18 @@ fn lower_function_all_impl(
     // dispatch (the existing self-rec guard would otherwise wall it). The rewritten body lowers
     // through the ordinary statements+tail path; if it is out of the TCO subset, `None` keeps the
     // original body (which the self-rec guard walls as before — no regression).
-    let tco_body = try_tco_rewrite(&ctx.fn_name, &func.params, &func.body);
-    let ret = ctx.lower_body_into(tco_body.as_ref().unwrap_or(&func.body))?;
+    // PRE-DESUGAR before the TCO: a recursive body `{ let c = if k then A else B; recurse(acc + c) }`
+    // has a let-bound heap-result `if` the loop-body lowering would wall. Tail-duplication
+    // (`desugar_heap_branches`) pushes the continuation — INCLUDING the recursive call — into each arm,
+    // yielding BRANCHED recursion `if k then recurse(acc+A) else recurse(acc+B)` that `tco_collect`
+    // handles (it recurses both `if` arms). The let-bound `if` is ELIMINATED, so the loop body lowers.
+    // `lower_body_into` desugars again (idempotent) for the non-TCO path; the caps gate counts the
+    // SAME desugared tree (desugar-before-both), so mir == ir. Unblocks base64 encode/decode_chunks +
+    // toml read_basic/parse_val (the let-bound-heap-`if`-in-a-loop frontier).
+    let pre_tco = desugar_heap_branches(&func.body);
+    let body_ref: &IrExpr = pre_tco.as_ref().unwrap_or(&func.body);
+    let tco_body = try_tco_rewrite(&ctx.fn_name, &func.params, body_ref);
+    let ret = ctx.lower_body_into(tco_body.as_ref().unwrap_or(body_ref))?;
     // The function's EFFECT SIGNATURE → its declared capability bound. The v1 model
     // has one capability (Stdout); an `effect fn` declares it may reach the host, so
     // it admits the only modeled cap. A pure `fn` declares ∅ — so if it reached
