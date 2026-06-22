@@ -365,6 +365,15 @@ impl Checker {
                     // so it doesn't constrain sibling arm types.
                     let arm_ty = if matches!(&arm.body.kind, ExprKind::Err { .. }) {
                         Ty::Never
+                    } else if matches!(&arm.body.kind, ExprKind::Ok { .. }) {
+                        // An EXPLICIT `ok(..)` ctor arm produces a real Result that IS the
+                        // match's result (a re-wrap like base64 decode's `match bs { ok(b) =>
+                        // ok(string.from_bytes(b)), err(e) => err(e) }`), NOT an effect-fn call
+                        // to auto-unwrap. KEEP its Result type so the match types as Result, not
+                        // its OK type — otherwise the v1 MIR saw a String-typed match with
+                        // ResultOk/ResultErr arms and walled (and native re-wrapped wrongly). The
+                        // effect-call-arm auto-unwrap below still applies to non-ctor arms.
+                        arm_ty
                     } else if self.env.auto_unwrap {
                         // In effect fn bodies, auto-unwrap Result[T, E] → T
                         // so match arms mixing effect fn calls (Result) with
