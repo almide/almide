@@ -675,3 +675,30 @@ is NOT a String/Value, so it needs: (a) a layout + tag for a List-Ok Result, (b)
 materialization in a heap-result-if arm, (c) the `match r { ok(bytes) => … }` heap-List-Ok bind +
 drop. This is the single remaining lever finishing base64 DECODE and toml's heap-Ok matches — a
 genuine new-layout slice (do it FRESH with the gate as the double-free net).
+
+## STATUS (2026-06-22, turn 4, effort=max) — Camp-4 LANDED; decode_chunks needs TCO-over-match
+
+Landed this turn (all gate-green, corpus-wall 4/4, mir 501/0; session coverage 16744→17088, +344):
+- ✅ **unwrap-in-if-arm desugar** (`let v = if c then e! else d` → lift the `!`).
+- ✅ **flatten-let-block** (`let v = { s..; tail }` → `s..; let v = tail`) + **inline-tail-accumulator**
+  (a single-use let-bound `acc + …` inlined into the recursion arg so is_self_append admits it) — a
+  nested let-bound-`if` List accumulator now lowers (the decode_chunks `new_acc` shape, in isolation).
+- ✅ **Camp-4 sub-case 1** (scalar-Ok / heap-Err `Result[Int,String]` match — the err-arm String bind
+  + ResultErr Dup, +137 coverage).
+- ✅ **Camp-4 sub-case 2 (VALUE match)** — a value-match over a heap-Ok `Result[List[Int],String]` reads
+  cap-tag @16 (matching materialize_result_str's construction) instead of len-tag @4; FIXED a layout
+  mismatch (the match was reading the wrong tag — a latent silent-miscompile vector) so it byte-matches.
+
+### decode_chunks's LAST blocker — TCO over a `match` (recursion in a match arm)
+base64 decode_chunks STILL walls. ROOT (precisely localized this turn, repro `umr`): the unwrap-`!`
+desugar turns `let x = f(pos)!; recurse(.., acc+[x])` into `match f(pos) { ok(x) => recurse(..,
+acc+[x]), err(e) => err(e) }` — the RECURSION is in a match arm. But the TCO's `tco_collect`/
+`tco_rewrite` only recurse `if`/`Block` tails, NOT `match` arms, so the self-call is seen as a buried
+non-tail leaf → TCO declines → walls. Adding `Match` to tco_collect/tco_rewrite (attempted, reverted as
+unverified) is necessary but NOT sufficient: it ALSO needs (a) the result-accumulator / post-loop
+dispatch to handle the two Result bases `ok(acc)`/`err(e)` (the err base reads the match-bound `e`), and
+(b) the TCO loop-body `match` over a USER Result (char_to_val) to EXECUTE not LINEARIZE — i.e. the
+statement-match subject tracking must cover a user named-call Result (a separate latent linearize-
+miscompile, hok2). These 3 interlock; do them together FRESH with byte-tests (the corpus-wall gate does
+NOT catch byte-miscompiles, so each needs a v0==v1 fixture). This is the single lever finishing base64
+decode + the bulk of toml's heap-Ok / unwrap-in-call-arg walls.
