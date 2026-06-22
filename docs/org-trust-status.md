@@ -25,16 +25,17 @@ shows here.
 | **svg**  | ✅ RUNS | `almide test` 15/0 via WASM (roadmap) |
 | **bigint** | ✅ RUNS | `add([0xFF],[0x01])` = `[0x01,0x00]` byte-matches v0. The `bytes.push` blocker is FIXED — the in-place `bytes.push(mut b,v)->Unit` now lowers as a functional rebind `buf = bytes.append(buf,x)` + self-hosted `bytes.append` (commit). |
 | **rsa** | ✅ RUNS | full `encrypt` runs: DER parse + PKCS1v15 pad (`random.int` over the WASI **entropy floor** — non-zero padding) + `bigint.modpow`, structure byte-identical to v0 (`pad_marker=0,2`, `clen=keysize`). Needed: the heap-result-if Record arm (der_read_tl) + the in-place `bytes.push` fix (bigint) + `Capability::Entropy` (WASI random_get). Verified by inlining the `self.bigint` submodule — a frontend-resolution detail; the v1 lowering under test sees the post-resolution IR either way. |
-| **base64** | ❌ wall | a heap module-level global (the lookup table `let TABLE=[…]`) — `reference to a heap module-level global VarId(0)` |
-| **toml** | ❌ wall | heap-result `if` outside the executable subset |
-| **aes** | ❌ wall | heap-result `Range` in a call-argument position |
+| **aes** | ✅ RUNS | FIPS 197 block `encrypt_block(plain, expand_key(NIST_KEY))` byte-matches v0 (`3925841d…6a0b32`). Unblocked by CONST module-global materialization: `SBOX`/`RCON`/`NIST_KEY` (`bytes.from_list([…])`) now lower to a direct `Init::Bytes` block (no runtime call). The earlier "Range in call-arg" wall was secondary — the module-global was the root. |
+| **base64** | 🟡 partial (9→4 walls) | module-global (`STANDARD`/`URL_SAFE` strings) ✅, `char_to_val` ✅ (heap-result Err-with-`${}`-interpolation arm), multi-concat accumulator TCO ✅. REMAINING 4 bottleneck on TWO DEEP FRONTIERS: `encode_chunks`/`decode_chunks` = a **let-bound heap-result `if`** (`let c2 = if … then … else …`) inside a scalar loop body — fundamentally walled (binds.rs: the merged result has no sound scope-end drop in the FLAT cert; needs a checker/**Coq** drop-attribution change, NOT a contained brick); `decode`/`decode_url` = a **heap-payload `Result` match** (`match bs { ok(bytes)=>…}` over `Result[Bytes,String]`) — the Camp-4 heap-payload-variant-match frontier. |
+| **toml** | ❌ wall (22) | shares the let-bound-heap-result-`if` frontier (parse_val/read_basic/…) + `unwrap !` in a call-arg position + while-body heap-accumulator. Largest remaining; gated on the same deep frontiers as base64. |
 
-So the `🟡 lowers, byte-match TODO` rows below resolve as: **sha1 + bigint + rsa RUN** (✅). **6 library
-repos now run on v1: yaml, sha1, csv, svg, bigint, rsa** — and rsa drove the FIRST effectful capability
-beyond Stdout (the WASI entropy floor), the pattern for the rest of the effectful-27. The remaining
-walls are repo-specific lowering gaps:
-base64 = a heap module-level global, toml = heap-result `if` subset, aes = heap-result `Range` in a
-call arg — each a contained next brick.
+**7 library repos now run on v1: yaml, sha1, csv, svg, bigint, rsa, aes.** rsa drove the first
+effectful capability beyond Stdout (the WASI entropy floor); aes drove CONST module-global
+materialization (`Init::Bytes`). base64 is 9→4 walls (3 reusable mechanisms landed). The LAST two
+walls in base64 — and the bulk of toml's 22 — are NOT contained bricks: they bottleneck on two DEEP
+frontiers, the **let-bound heap-result `if`** (needs a checker/Coq scope-end-drop-attribution change,
+or a tail-duplication-into-recursion rewrite that composes with the TCO) and the **heap-payload
+`Result`/variant match** (Camp-4). These are the next real design slices, not incremental fixes.
 
 ## Per-repo (sorted by walls)
 
