@@ -10,6 +10,28 @@ own vectors/tests on native AND `--target wasm`). `🟡 lowers, byte-match TODO`
 reached wall=0 but have not yet been byte-verified — exactly where a silent miscompile can hide
 (e.g. the `var v=w` scalar-aliasing bug that faked an early sha1=0 until the RFC vectors caught it).
 
+## Run-verification (2026-06-22) — empirical, supersedes the lower-only `🟡` rows
+
+Tested by rendering each repo's `src/mod.almd` (test blocks stripped) + a driver exercising the real
+API through the v1 MIR→WAT→wasmtime spine, comparing to v0 / known vectors. `wall=0` (classify_corpus,
+function-body) ≠ links+runs: an UNLINKED stdlib call (a self-host gap) or a runtime ownership bug only
+shows here.
+
+| repo | RUNS on v1? | evidence / blocker |
+|------|-------------|--------------------|
+| **yaml** | ✅ RUNS | parse+stringify round-trips maps/seqs/nesting/scalars byte-correctly (this session) |
+| **sha1** | ✅ RUNS | `hex(hash("abc"))` = `a9993e364706816aba3e25717850c26c9cd0d89d` (correct) |
+| **csv**  | ✅ RUNS | 4/4 public fns byte-match (roadmap [[v1-parser-tco-lever]]) |
+| **svg**  | ✅ RUNS | `almide test` 15/0 via WASM (roadmap) |
+| **bigint** | ❌ blocked | `from_int` uses the IN-PLACE `bytes.push(mut b, v) -> Unit` (a `var buf; while { bytes.push(buf,..) }` mutation accumulator) — UNLINKED on v1. Module-wide wall (the rest of bigint — add/sub/mul/modpow on Bytes — would run). Fix: lower `bytes.push(var,x)` as a functional rebind `var = bytes_append(var,x)` + self-host the append (same shape as list.set_str / the append-accumulator TCO). |
+| **rsa** | ❌ blocked | depends on bigint (modpow) → same `bytes.push` gap; verify after bigint |
+| **base64** | ❌ wall | a heap module-level global (the lookup table `let TABLE=[…]`) — `reference to a heap module-level global VarId(0)` |
+| **toml** | ❌ wall | heap-result `if` outside the executable subset |
+| **aes** | ❌ wall | heap-result `Range` in a call-argument position |
+
+So the `🟡 lowers, byte-match TODO` rows below split into: **sha1 actually RUNS** (✅), while **bigint/rsa
+do NOT link** (the in-place `bytes.push` self-host gap — the next concrete brick, NOT just byte-match).
+
 ## Per-repo (sorted by walls)
 
 | repo | lowers | walls | status | top wall reason |
