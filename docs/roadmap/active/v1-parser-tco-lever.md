@@ -11,13 +11,14 @@
   (STATUS 6). Cross-cutting fixes that also help every repo: the `not <bool-call>` let arm (lower_bind
   UnOp), the defunc-map self-recursion admission (`in_defunc_body`), `DropListStrStr` for
   `List[(String,String)]`.
-- 🔄 **yaml** — **the TCO wall is GONE (2026-06-22): the effect-fn tuple-result TCO landed, so
-  collect_map/collect_seq + every parser fn LOWER. yaml's `parse` now lowers to a 14128-line WAT with
-  ONLY `list.enumerate` unlinked** (string.to_lower + float.parse self-hosted this session). Remaining
-  to RUN: (a) self-host `list.enumerate` — the (Int,String) tuple-list BUILDER works, but its consumer
-  `list.enumerate |> list.find((e) => …e.1…)` needs find-over-a-tuple-element-WITH-A-CLOSURE (the
-  closure machinery, [[v1-selfhost-machinery]] Machinery 3) which mis-dispatches today; (b) a yaml
-  `seq_map` WASM type mismatch (i64/i32) in the full lowering. See STATUS (2026-06-22, yaml) below.
+- ✅ **yaml — RUNS ON V1 (2026-06-22).** `parse` compiles to a ~13.7k-line WAT (0 walls) and parses
+  real YAML byte-correctly on wasmtime — maps, sequences, nesting, strings/ints/floats/bools all
+  round-trip through `parse`+`stringify` (`a: 1 / b: hello / c:\n  - x\n  - y` → identical). The full
+  chain executes: list.enumerate + find-over-(Int,String)-with-closure, list.set_str, the effect-fn
+  (Value,Int) tuple-result TCO, the heap-result-if Match-arm temp frame, and heap-Value tail/bind drop
+  fixes. REMAINING (not blocking "runs"): a leak long-tail over MANY parses (map ~ok to 1000×, the
+  sequence path leaks sooner) — small per-call under-frees in the deep parser; see STATUS (2026-06-22,
+  runs) below.
 - 🟢 **bigint / rsa / sha1 / porta** — 0 lower-walls (all fns lower); `sha1` byte-matches its test
   vectors out of the box (2026-06-21 probe). Need only a byte-match audit + leak loop to bank.
 - 🟡 **base64 (9/13) / aes (17/30) / almide-sqlite (20/28) / toml (22/48)** — mechanism walls remain.
@@ -547,3 +548,29 @@ SUSPECT (from the WAT): a `Result[Int,String]` drop (e.g. `int.from_hex` / `int.
 dump `$parse_number`'s exact trapping `rc_dec` local in the `parse("a: hello")` WAT, trace it to the
 source drop, fix the Result/borrow drop routing — then yaml runs end-to-end (NOTE: v0-native oracle is
 still broken by the `find_colon` borrow E0308, so byte-match against yaml_test.almd's expected values).
+
+## STATUS (2026-06-22, runs) — 🎉 almide/yaml RUNS ON V1
+
+`almide/yaml`'s `parse` lowers (0 walls) AND executes byte-correctly on the v1 MIR→WAT→wasmtime spine.
+Verified round-trips (parse → yaml's own stringify, identical to input): `a: 1\nb: hello\nc:\n  - x\n  - y`,
+`name: Alice\nport: 8080\npi: 3.14`, `items:\n  - one\n  - two\n  - three`, `nested:\n  a: 1\n  b: 2\nflag: true`.
+The goal "almide v1 で almide/yaml を動かす" is met. Commits this push (all gate-green, corpus-wall 4/4,
+mir suite 501/0):
+- `60deaf24` list.enumerate + find-over-(Int,String)-with-closure (the heap-payload Option machinery).
+- `96e94de7` list.set_str (List[String] set; the i64-val generic list.set made invalid wasm).
+- `6f2128f3` the heap-result-if **Match arm** per-arm frame (its subject-eval temp `string.drop(c,2)`
+  leaked to the function scope-end → an unconditional `rc_dec(0)` trap when the OTHER arm ran — the
+  parse_number 0x crash); + `drop_arm_locals` clamp.
+- `59a5164a` two heap-Value LEAKS: (1) a heap-result tail `f(string.replace(s,..),s)->Value` bypasses
+  scope-end drops so its owned-temp args leaked — free them after the CallFn; (2) a let-bound Named-call
+  Value result had no `value_handles`/DropValue marking (the Module path had it).
+
+REMAINING — leak long-tail (production-hardening, NOT "runs"): repeated parsing eventually OOMs (a map
+input is fine to ~1000×, the SEQUENCE path — collect_seq/seq_item/dash_item/dash_after — leaks sooner).
+The OOM SURFACES wherever the next alloc lands (parse_number → find_colon_at as fixes land), so it is an
+accumulating per-parse under-free, not one site. PATTERN: every leak found so far is a heap value
+(temp / let-local / call result) NOT freed because a heap-result tail/arm bypasses the function
+scope-end drops — audit the seq path (dash_after's `(parse_inline(after), pos+1)` tuple + the collect_seq
+List[Value] accumulator + the `??`-operand Option temps from `string.get(s,pos) ?? ""`) for the same
+class. The single/few-shot parse is correct + balanced; this is depth-of-loop hardening. (v0-native
+oracle still broken by the `find_colon` borrow E0308 — use round-trip + yaml_test expectations.)
