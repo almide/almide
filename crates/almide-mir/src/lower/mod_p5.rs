@@ -40,8 +40,15 @@ pub fn is_self_host_result_str_module_fn(module: &str, func: &str) -> bool {
 /// wherever only the `ValueId` + its `ty` are known — seed_variant_param, the match subject).
 pub fn is_result_listval_ty(ty: &Ty) -> bool {
     use almide_lang::types::constructor::TypeConstructorId;
+    // The Ok arm must be a `List[Value]` SPECIFICALLY — those elements are dynamic Values that
+    // `DropResultListValue` frees recursively. A `List[scalar]` (e.g. `List[Int]` from base64
+    // decode) is a FLAT block whose `DropListStr` rc_dec is correct, AND is how its
+    // `materialize_result_str(value_ok=false)` construction tracks it — so it must fall to the
+    // `heap_elem_lists` branch at every call site, NOT this recursive-Value one (a `List[Int]`
+    // routed here gets a wrong recursive drop that reads each Int as a Value handle).
     matches!(ty, Ty::Applied(TypeConstructorId::Result, a)
-        if a.len() == 2 && matches!(&a[0], Ty::Applied(TypeConstructorId::List, _)))
+        if a.len() == 2 && matches!(&a[0], Ty::Applied(TypeConstructorId::List, le)
+            if le.len() == 1 && is_value_ty(&le[0])))
 }
 
 /// Is `ty` a `Result[String, String]` (the value.as_string shape — both arms a flat String)? The
