@@ -3451,9 +3451,27 @@ pub(crate) fn try_tco_rewrite(
     // `acc + s` (`ConcatStr`, the STRING accumulator — `parse_unquoted_field(text, pos+1, acc + c)`).
     // Both allocate a FRESH owned heap value; the TCO makes the accumulator an owned loop-carried
     // slot (drop-old/alloc-new per iter, cert `i(id)m`).
+    // `acc + x`, OR a LEFT-NESTED chain `acc + a + b + …` whose leftmost leaf is `acc` (base64
+    // encode_chunks: `enc(.., acc + c0 + c1 + c2 + c3)`). Both GROW the accumulator from itself —
+    // a fresh owned heap value the loop-carried slot takes via drop-old/alloc-new; the in-loop
+    // general-reassign path materializes the (possibly nested) concat via try_lower_concat_str/list,
+    // and the OwnershipChecker `i(id)m` proof covers any fresh-owned producer regardless of nesting.
+    fn concat_leftmost_is_var(e: &IrExpr, acc: VarId) -> bool {
+        match &e.kind {
+            IrExprKind::Var { id } => *id == acc,
+            IrExprKind::BinOp {
+                op: almide_ir::BinOp::ConcatList | almide_ir::BinOp::ConcatStr,
+                left,
+                ..
+            } => concat_leftmost_is_var(left, acc),
+            _ => false,
+        }
+    }
     let is_self_append = |e: &IrExpr, acc: VarId| -> bool {
-        matches!(&e.kind, IrExprKind::BinOp { op: almide_ir::BinOp::ConcatList | almide_ir::BinOp::ConcatStr, left, .. }
-            if matches!(&left.kind, IrExprKind::Var { id } if *id == acc))
+        matches!(
+            &e.kind,
+            IrExprKind::BinOp { op: almide_ir::BinOp::ConcatList | almide_ir::BinOp::ConcatStr, .. }
+        ) && concat_leftmost_is_var(e, acc)
     };
     let is_identity = |e: &IrExpr, acc: VarId| -> bool {
         matches!(&e.kind, IrExprKind::Var { id } if *id == acc)
