@@ -291,6 +291,19 @@ fn tco_empty_for(ty: &Ty) -> Option<IrExpr> {
             },
             ty.clone(),
         )),
+        // A `Result[_, String]` accumulator (the unwrap-`!`-desugar's TCO over a `match` — base64
+        // decode_chunks returns `Result[List[Int], String]`): empty to `err("")`, a valid cap-tag
+        // Result block. PLACEHOLDER ONLY — a base (`ok(acc)`/`err(e)`) overwrites the result slot
+        // before the post-loop reads it (recursion always terminates at a base), and the overwrite
+        // drops this `""` via DropListStr. Gated to a String Err so `err("")` typechecks.
+        Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 && matches!(&a[1], Ty::String) => {
+            Some(tco_ir(
+                IrExprKind::ResultErr {
+                    expr: Box::new(tco_ir(IrExprKind::LitStr { value: String::new() }, Ty::String)),
+                },
+                ty.clone(),
+            ))
+        }
         _ => None,
     }
 }
@@ -388,6 +401,18 @@ fn tco_collect<'a>(
             tco_collect(then, fn_name, calls, bases)?;
             tco_collect(else_, fn_name, calls, bases)
         }
+        // A `match` tail (the unwrap-`!` desugar's `match e { ok(v) => …, err(x) => err(x) }`): the
+        // SUBJECT must not itself recurse (a self-call in `e` is not a tail), then each arm is a tail
+        // leaf — the ok-arm may recurse, the err-arm is a base. Mirrors the `if`-arm recursion.
+        IrExprKind::Match { subject, arms } => {
+            if tco_contains_self(subject, fn_name) {
+                return None;
+            }
+            for a in arms {
+                tco_collect(&a.body, fn_name, calls, bases)?;
+            }
+            Some(())
+        }
         IrExprKind::Block { expr: Some(tail), .. } => tco_collect(tail, fn_name, calls, bases),
         IrExprKind::Call { target: CallTarget::Named { name }, args, .. }
             if name.as_str() == fn_name =>
@@ -424,6 +449,22 @@ fn tco_rewrite(
                 cond: cond.clone(),
                 then: Box::new(tco_rewrite(then, fn_name, params, carried, rk, next_kind, idx, next_var, result)),
                 else_: Box::new(tco_rewrite(else_, fn_name, params, carried, rk, next_kind, idx, next_var, result)),
+            },
+            Ty::Unit,
+        ),
+        // A `match` tail: rewrite each arm body (ok-arm → recurse/acc-update, err-arm → base/rk-set),
+        // preserving the subject + patterns so the per-iteration match dispatches continue-or-exit.
+        IrExprKind::Match { subject, arms } => tco_ir(
+            IrExprKind::Match {
+                subject: subject.clone(),
+                arms: arms
+                    .iter()
+                    .map(|a| almide_ir::IrMatchArm {
+                        pattern: a.pattern.clone(),
+                        guard: a.guard.clone(),
+                        body: tco_rewrite(&a.body, fn_name, params, carried, rk, next_kind, idx, next_var, result),
+                    })
+                    .collect(),
             },
             Ty::Unit,
         ),

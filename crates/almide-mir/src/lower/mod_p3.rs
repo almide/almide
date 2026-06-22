@@ -273,6 +273,23 @@ impl LowerCtx {
                                 IrExprKind::BinOp { op: almide_ir::BinOp::ConcatStr, .. } => {
                                     self.try_lower_concat_str(value)
                                 }
+                                // TCO RESULT-ACCUMULATOR base delivery: `result = ok(acc)` / `result =
+                                // err(e)` (the unwrap-`!` desugar's TCO over a `match` — base64
+                                // decode_chunks). lower_result_str_piece DUPs a Var payload (rc_inc,
+                                // cert `a`) so the loop-carried `acc` / borrowed `e` stays valid for its
+                                // OWN scope-end drop — `result` owns a FRESH cap-tag Result block, so the
+                                // slot's `i(id)m` + the payload's rc stay balanced (no double-free, no
+                                // leak). `is_err` picks the @16 tag; `value.ty`'s Result repr is the
+                                // 1-slot DynListStr block materialize_result_str builds.
+                                IrExprKind::ResultOk { expr } | IrExprKind::ResultErr { expr } => {
+                                    let is_err = matches!(&value.kind, IrExprKind::ResultErr { .. });
+                                    match (self.lower_result_str_piece(expr), repr_of(&value.ty)) {
+                                        (Some(piece), Ok(repr)) => {
+                                            Some(self.materialize_result_str(piece, repr, is_err, false))
+                                        }
+                                        _ => None,
+                                    }
+                                }
                                 _ => self.lower_owned_heap_field(value),
                             };
                             if let Some(new) = new {

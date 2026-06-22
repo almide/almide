@@ -117,6 +117,37 @@ impl LowerCtx {
                             self.heap_elem_lists.insert(v);
                         }
                     }
+                    // A USER Named-call returning Result (`match char_to_val(c) { ok(v)=>.., err(e)=>.. }`
+                    // — the TCO loop body the unwrap-`!` desugar produces, base64 decode_chunks). Track
+                    // it like the value-match subject: a SCALAR-Ok `Result[scalar,String]` reads len-tag
+                    // @4 (materialized_results) + heap_elem_lists for the Err-String bind / DropListStr; a
+                    // HEAP-Ok `Result[heap,String]` is constructed cap-tag @16 (materialize_result_str)
+                    // so it reads cap-tag @16 (materialized_results_str) + the by-type drop. WITHOUT this
+                    // a user-Result statement match LINEARIZES (runs BOTH arms) = a silent miscompile.
+                    if matches!(&subject.kind, IrExprKind::Call { target: CallTarget::Named { .. }, .. })
+                        && crate::lower::is_result_ty(&subject.ty)
+                    {
+                        if Self::is_heap_ok_result(&subject.ty) {
+                            // A USER heap-Ok Result is CONSTRUCTED by the heap-Ok ResultOk arm via
+                            // materialize_result_str(value_ok=false) → cap-tag @16 + heap_elem_lists
+                            // (DropListStr). The match MUST agree: track materialized_results_str (read
+                            // tag @16) + heap_elem_lists (the err-arm String bind gate AND the flat
+                            // DropListStr the construction uses for the List[Int]/String Ok payload).
+                            self.materialized_results_str.insert(v);
+                            self.heap_elem_lists.insert(v);
+                        } else {
+                            self.materialized_results.insert(v);
+                            if let Ty::Applied(
+                                almide_lang::types::constructor::TypeConstructorId::Result,
+                                a,
+                            ) = &subject.ty
+                            {
+                                if a.len() == 2 && !is_heap_ty(&a[0]) && is_heap_ty(&a[1]) {
+                                    self.heap_elem_lists.insert(v);
+                                }
+                            }
+                        }
+                    }
                 }
                 // A CUSTOM variant (user ADT) statement match — tag@slot0 dispatch (ADT brick 3,
                 // unit sibling). A custom variant must NEVER reach the both-arms linearization
