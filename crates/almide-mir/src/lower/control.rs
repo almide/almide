@@ -2225,6 +2225,20 @@ impl LowerCtx {
                 self.drop_arm_locals(arm_mark);
                 Some(obj)
             }
+            // A RECORD literal arm (`if len_byte < 0x80 then { tag, length, header_size: 2 } else { … }`
+            // — the rsa der_read_tl shape): materialize the record block (scalar-field fast path, else
+            // the general nested-ownership construct, cert `i`) and MOVE IT OUT (`Consume` = `m`) — the
+            // same per-arm `"im"` balance as the tuple arm. Any heap field it materializes is freed
+            // within the arm (`drop_arm_locals`). Unblocks a record returned via a heap-result `if`.
+            IrExprKind::Record { .. } => {
+                let arm_mark = self.live_heap_handles.len();
+                let obj = self
+                    .try_lower_scalar_record_construct(arm)
+                    .or_else(|| self.try_lower_record_construct(arm))?;
+                self.ops.push(Op::Consume { v: obj });
+                self.drop_arm_locals(arm_mark);
+                Some(obj)
+            }
             // A BLOCK arm (`else { let c = string.get(s, pos) ?? ""; <heap-tail> }` — the
             // dominant real-parser shape): lower its statements as effects in a per-arm frame,
             // then its tail as the arm's moved-out heap value (recursing into this same arm
