@@ -653,3 +653,25 @@ Two sub-cases, increasing difficulty:
 Camp-4 is double-free territory (the memory's explicit fatigue-warning zone): implement it FRESH with
 the gate (ownership cert REJECTs any double-free) as the safety net. It is the single lever that
 finishes base64 (decode) AND unblocks the bulk of toml.
+
+## STATUS (2026-06-22, turn 3) — 7 levers total, +289 corpus coverage; heap-Ok Result is the LAST frontier
+
+Added this turn (all gate-green, corpus-wall 4/4, mir 501/0):
+- ✅ **unwrap-`!`-bound-to-let desugar** (`let v=e!` → `match e {ok(v)=>rest, err(x)=>err(x)}`, +133).
+- ✅ **Camp-4 sub-case 1** (scalar-Ok / heap-Err `Result[Int,String]` match: heap_elem_lists tracking
+  for the Err-String bind + DropListStr + ResultErr-arm Dups the BORROWED payload, +137).
+- ✅ **unwrap-in-if-arm desugar** (`let v=if c then e! else d` → `let $r=if c then e else ok(d); $r!`).
+
+Session total: corpus ownership coverage 16744→17033 (+289), 7 reusable lowering levers (module-global
+Init::Bytes, Err-interp arm, multi-concat TCO, let-bound-if pre-desugar, unwrap-in-let, Camp-4 sub-case
+1, unwrap-in-if-arm). **aes RUNS; base64 ENCODE RUNS.**
+
+### THE LAST FRONTIER — heap-Ok Result (Camp-4 sub-case 2): `Result[List[Int], String]`
+base64 `decode_chunks` walls on `ok(acc)` where `acc: List[Int]` — a HEAP-Ok Result. base64 `decode`/
+`decode_with` + toml's heap-Ok matches need the same. This is a NEW LAYOUT: the existing heap-Ok Result
+handling is str-result-only (`Result[String,String]`/`Result[Value,String]`/`Result[List[Value],String]`
+via materialize_result_str + cap-tag@16). `Result[List[Int], String]` has a `List[Int]` Ok payload that
+is NOT a String/Value, so it needs: (a) a layout + tag for a List-Ok Result, (b) `ok(list)` ctor
+materialization in a heap-result-if arm, (c) the `match r { ok(bytes) => … }` heap-List-Ok bind +
+drop. This is the single remaining lever finishing base64 DECODE and toml's heap-Ok matches — a
+genuine new-layout slice (do it FRESH with the gate as the double-free net).
