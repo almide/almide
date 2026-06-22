@@ -466,6 +466,8 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
         (include_str!("../../../../stdlib/string_slice2.almd"), &[("string_slice2", "string.slice2")]),
         (include_str!("../../../../stdlib/string_to_lower.almd"), &[("string_to_lower", "string.to_lower")]),
         (include_str!("../../../../stdlib/float_parse.almd"), &[("float_parse", "float.parse")]),
+        (include_str!("../../../../stdlib/list_enumerate.almd"), &[("list_enumerate_str", "list.enumerate_str")]),
+        (include_str!("../../../../stdlib/list_find_int_str.almd"), &[("list_find_int_str", "list.find_int_str")]),
         (
             include_str!("../../../../stdlib/string_is_digit.almd"),
             &[("string_is_digit", "string.is_digit")],

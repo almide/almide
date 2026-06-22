@@ -2504,6 +2504,34 @@ impl LowerCtx {
         obj
     }
 
+    /// `Some((Int, String))` — an `Option[(Int, String)]` as a 1-element list holding the tuple handle
+    /// (the `list.find` over a `List[(Int,String)]` result). SAME as `materialize_opt_str_some` but the
+    /// payload is a TUPLE, so the Option's drop must RECURSIVELY free it (`$__drop_list_int_str`, the
+    /// per-tuple rc==1 guard makes co-ownership with the source list safe) — routed via
+    /// `variant_drop_handles="list_int_str"`, NOT the flat `heap_elem_lists` (which would leak the
+    /// tuple's String).
+    pub(crate) fn materialize_opt_int_str_some(&mut self, piece: ValueId, repr: crate::Repr) -> ValueId {
+        use crate::PrimKind;
+        let one = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: one, value: 1 });
+        let obj = self.fresh_value();
+        self.ops.push(Op::Alloc { dst: obj, repr, init: Init::DynListStr { len: one } });
+        let oh = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(oh), args: vec![obj] });
+        let twelve = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: twelve, value: 12 });
+        let addr = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst: addr, op: IntOp::Add, a: oh, b: twelve });
+        let ph = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(ph), args: vec![piece] });
+        self.ops.push(Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args: vec![addr, ph] });
+        self.ops.push(Op::Consume { v: piece });
+        self.live_heap_handles.retain(|h| *h != piece);
+        self.variant_drop_handles.insert(obj, "list_int_str".to_string());
+        self.materialized_options.insert(obj);
+        obj
+    }
+
     /// Materialize `None` for an `Option[String]` as a 0-element `DynListStr` (tracked like
     /// `materialize_opt_str_some`). `DropListStr` over len 0 frees only the block.
     pub(crate) fn materialize_opt_str_none(&mut self, repr: crate::Repr) -> ValueId {

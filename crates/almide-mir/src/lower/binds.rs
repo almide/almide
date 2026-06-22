@@ -142,7 +142,15 @@ impl LowerCtx {
         let elem_list_str = matches!(&value.ty,
             Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && matches!(&a[0],
                 Ty::Applied(TypeConstructorId::List, b) if b.len() == 1 && matches!(b[0], Ty::String)));
-        if (!elem_str && !elem_scalar_aggregate && !elem_value && !elem_str_value && !elem_list_str)
+        // A `List[(Int, String)]` (`[(i, line)]` — the list.enumerate append) — each element is a
+        // (Int @12 scalar, String @20 heap) tuple, materialized via `try_lower_tuple_construct` and
+        // reclaimed RECURSIVELY at scope end via `$__drop_list_int_str` (per tuple: rc_dec the String
+        // only). A flat `DropListStr` would leak each tuple's String.
+        let elem_int_str = matches!(&value.ty,
+            Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && matches!(&a[0],
+                Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::Int) && matches!(tys[1], Ty::String)));
+        if (!elem_str && !elem_scalar_aggregate && !elem_value && !elem_str_value && !elem_list_str
+            && !elem_int_str)
             || elements.is_empty()
         {
             return None;
@@ -155,7 +163,7 @@ impl LowerCtx {
             IrExprKind::LitStr { .. } | IrExprKind::BinOp { op: BinOp::ConcatStr, .. } => true,
             IrExprKind::Var { id } => self.value_of.contains_key(id),
             IrExprKind::Record { .. } => elem_scalar_aggregate,
-            IrExprKind::Tuple { .. } => elem_scalar_aggregate || elem_str_value,
+            IrExprKind::Tuple { .. } => elem_scalar_aggregate || elem_str_value || elem_int_str,
             IrExprKind::Call { target: CallTarget::Named { .. } | CallTarget::Module { .. }, .. } => {
                 // A Value-returning ctor call (elem_value), OR — for a List[String] — a String-returning
                 // call element (`[string.slice(s,a,b)]` in `acc + [string.slice(…)]`, the dominant yaml
@@ -179,6 +187,8 @@ impl LowerCtx {
             self.value_elem_lists.insert(list);
         } else if elem_str_value {
             self.str_value_elem_lists.insert(list);
+        } else if elem_int_str {
+            self.variant_drop_handles.insert(list, "list_int_str".to_string());
         } else if elem_list_str {
             self.list_list_str_lists.insert(list);
         } else {
@@ -212,7 +222,7 @@ impl LowerCtx {
                 // A HEAP-FIELD `(String, Value)` tuple element (`(key, val)`) — materialize a fresh OWNED
                 // mixed 2-slot block (`try_lower_tuple_construct`, rc-owning both fields), moved into the
                 // slot; the list's `DropListStrValue` reclaims each tuple recursively.
-                IrExprKind::Tuple { elements: tup_elems } if elem_str_value => {
+                IrExprKind::Tuple { elements: tup_elems } if elem_str_value || elem_int_str => {
                     self.try_lower_tuple_construct(tup_elems)?
                 }
                 IrExprKind::Tuple { .. } => self.try_lower_scalar_tuple_construct_for_elem(elem)?,
@@ -765,6 +775,10 @@ impl LowerCtx {
                     // `List[(String,String)]` (map.entries) — DropListStrStr frees each tuple's two
                     // Strings; the flat heap_elem_lists DropListStr would leak them (a render loop OOMs).
                     self.str_str_elem_lists.insert(dst);
+                } else if crate::lower::is_list_int_str_ty(ty) {
+                    // `List[(Int,String)]` (list.enumerate) — recursive `$__drop_list_int_str` (rc_dec
+                    // each tuple's String); the flat heap_elem_lists DropListStr would leak them.
+                    self.variant_drop_handles.insert(dst, "list_int_str".to_string());
                 } else if is_heap_elem_list_ty(ty) {
                     self.heap_elem_lists.insert(dst);
                 }
@@ -886,6 +900,10 @@ impl LowerCtx {
                     // `List[(String,String)]` (map.entries) — DropListStrStr frees each tuple's two
                     // Strings; the flat heap_elem_lists DropListStr would leak them (a render loop OOMs).
                     self.str_str_elem_lists.insert(dst);
+                } else if crate::lower::is_list_int_str_ty(ty) {
+                    // `List[(Int,String)]` (list.enumerate) — recursive `$__drop_list_int_str`; the flat
+                    // heap_elem_lists DropListStr would leak each tuple's String (a 10⁴ loop OOMs).
+                    self.variant_drop_handles.insert(dst, "list_int_str".to_string());
                 } else if is_heap_elem_list_ty(ty) {
                     self.heap_elem_lists.insert(dst);
                 }
@@ -1858,6 +1876,20 @@ impl LowerCtx {
                 }
                 Some(obj)
             }
+            // An `(Int, String)` TUPLE element of a list literal (`[(i, line)]` — the list.enumerate
+            // shape): Int slot 0 (scalar @12), String slot 1 (heap @20). try_lower_tuple_construct
+            // builds it (heap mask [1]); it is moved into the enclosing list, whose `$__drop_list_int_str`
+            // frees each tuple's String + block, so the tuple's own (harmless) mask never scope-end-fires.
+            IrExprKind::Tuple { elements }
+                if matches!(&expr.ty,
+                    Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::Int) && matches!(tys[1], Ty::String)) =>
+            {
+                let obj = self.try_lower_tuple_construct(elements)?;
+                if !self.live_heap_handles.contains(&obj) {
+                    self.live_heap_handles.push(obj);
+                }
+                Some(obj)
+            }
             // brick 3: a (Value, scalar) TUPLE — the yaml/cm2 effect-fn tuple-RESULT shape
             // `(value.object(pairs), pos)`. Slot 0 is a Value (heap, @12), slot 1 a scalar (@20).
             // `try_lower_tuple_construct` builds it + records `record_masks[obj] = [0]`, but a FLAT
@@ -2105,6 +2137,18 @@ impl LowerCtx {
             // (heap_elem_lists) is correct — the Value is CO-OWNED (the list keeps its ref; the shared
             // block is recursively freed at the LAST ref, via the list's own drop). Checked before the
             // general heap-Some arm, whose Var case requires `live_heap_handles` (a borrow is not).
+            // `Some((Int, String))` — the `list.find` over a `List[(Int,String)]` result. Co-own the
+            // (borrowed) tuple by Dup (`lower_owned_heap_field`), then materialize a 1-element Option
+            // whose drop is the RECURSIVE `$__drop_list_int_str` (the per-tuple rc==1 guard makes the
+            // co-ownership with the source list safe — no leak, no double-free).
+            IrExprKind::OptionSome { expr }
+                if matches!(&expr.ty,
+                    Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::Int) && matches!(tys[1], Ty::String)) =>
+            {
+                let repr = repr_of(ty).ok()?;
+                let piece = self.lower_owned_heap_field(expr)?;
+                Some(self.materialize_opt_int_str_some(piece, repr))
+            }
             IrExprKind::OptionSome { expr }
                 if crate::lower::is_value_ty(&expr.ty)
                     || matches!(&expr.ty, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, e)

@@ -1192,6 +1192,17 @@ pub(crate) fn is_list_str_str_ty(ty: &Ty) -> bool {
             Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String) && matches!(tys[1], Ty::String)))
 }
 
+/// A `List[(Int, String)]` — the `list.enumerate` result. Each element is an (Int @12 scalar, String
+/// @20 heap) tuple; its scope-end drop must be the recursive `$__drop_list_int_str` (rc_dec each
+/// tuple's String + block), routed via `variant_drop_handles="list_int_str"`. A flat `DropListStr`
+/// would leak each tuple's String (a 10⁴ loop OOMs).
+pub(crate) fn is_list_int_str_ty(ty: &Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    matches!(ty,
+        Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && matches!(&a[0],
+            Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::Int) && matches!(tys[1], Ty::String)))
+}
+
 /// A `Result[Value, String]` — the `ok(value.array(...))` shape. Its Ok payload is a dynamic Value
 /// (freed RECURSIVELY via `$__drop_value`), its Err a String. Its scope-end drop must be
 /// [`Op::DropResultValue`] (the tag-dispatched recursive free); a flat `DropListStr` would leak the
@@ -1953,7 +1964,7 @@ pub(crate) fn find_var_ty(stmts: &[IrStmt], var: VarId) -> Option<Ty> {
 pub fn is_self_host_option_module_fn(module: &str, func: &str) -> bool {
     match module {
         "list" => {
-            matches!(func, "get" | "first" | "last" | "index_of" | "binary_search" | "max" | "min" | "find" | "find_index" | "reduce" | "get_str" | "first_str" | "last_str")
+            matches!(func, "get" | "first" | "last" | "index_of" | "binary_search" | "max" | "min" | "find" | "find_int_str" | "find_index" | "reduce" | "get_str" | "first_str" | "last_str")
         }
         "string" => matches!(func, "index_of" | "last_index_of" | "codepoint" | "first" | "last" | "get" | "strip_prefix" | "strip_suffix"),
         "bytes" => matches!(func, "get" | "index_of"),
@@ -2545,6 +2556,15 @@ pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], resu
                 }
             }
         }
+        // `list.enumerate` over a List[String] → `list.enumerate_str` (result List[(Int, String)]).
+        // Keyed on the SOURCE arg being List[String] (the yaml `lines |> list.enumerate` shape).
+        if func == "enumerate" {
+            if let Some(Ty::Applied(TypeConstructorId::List, s)) = arg_tys.first() {
+                if s.len() == 1 && matches!(s[0], Ty::String) {
+                    return "list.enumerate_str".to_string();
+                }
+            }
+        }
         // The element-PRESERVING List[heap]-returning combinators (source elem == result elem).
         if matches!(func, "filter" | "reverse" | "take" | "drop" | "unique" | "dedup" | "intersperse") {
             if let Ty::Applied(TypeConstructorId::List, args) = result_ty {
@@ -2574,6 +2594,17 @@ pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], resu
                 if args.len() == 1 && is_value_ty(&args[0]) && matches!(func, "get" | "first" | "last")
                 {
                     return format!("list.{func}_value");
+                }
+                // `find` over a `List[(Int, String)]` (the `enumerate |> find(closure)` shape): the
+                // element is a tuple, NOT a String — route to `find_int_str`, which loads each element
+                // as a TUPLE HANDLE and hands it to the predicate closure (reading e.g. `e.1`). The
+                // `_str` fallback would load it as a String handle (garbage).
+                if func == "find"
+                    && args.len() == 1
+                    && matches!(&args[0],
+                        Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::Int) && matches!(tys[1], Ty::String))
+                {
+                    return "list.find_int_str".to_string();
                 }
                 // A `List[List[String]]` element is itself a heap list, NOT a String — the `_str`
                 // variant would DEEP-COPY it via `string.repeat`, reading the inner list's length word

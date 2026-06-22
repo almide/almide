@@ -597,8 +597,13 @@ impl LowerCtx {
         // (String,String) counterpart of `str_value_elem`.
         let str_str_elem = matches!(&elem_ty,
             Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::String) && matches!(tys[1], Ty::String));
+        // An `(Int, String)` TUPLE element (the `list.enumerate` shape) — `__list_concat_rc` rc-owns each
+        // tuple, freed recursively by `$__drop_list_int_str` (per tuple: rc_dec the String slot @20 only,
+        // the Int @12 is scalar). Routed via variant_drop_handles (a DropVariant, like the record case).
+        let int_str_elem = matches!(&elem_ty,
+            Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::Int) && matches!(tys[1], Ty::String));
         if !scalar_elem && !heap_elem && !str_value_elem && !list_str_elem && !str_str_elem
-            && record_elem.is_none()
+            && !int_str_elem && record_elem.is_none()
         {
             return None;
         }
@@ -634,6 +639,8 @@ impl LowerCtx {
             self.str_value_elem_lists.insert(dst);
         } else if str_str_elem {
             self.str_str_elem_lists.insert(dst);
+        } else if int_str_elem {
+            self.variant_drop_handles.insert(dst, "list_int_str".to_string());
         } else if list_str_elem {
             self.list_list_str_lists.insert(dst);
         } else if let Some(rname) = record_elem {
@@ -2125,6 +2132,7 @@ impl LowerCtx {
                         | "__drop_list_value"
                         | "__svdrop_list"
                         | "__ssdrop_list"
+                        | "__isdrop_list" // List[(Int,String)] recursive free (list.enumerate)
                         | "__drop_list_str_value"
                         | "__drop_result_lv"
                         | "__varr_copy"

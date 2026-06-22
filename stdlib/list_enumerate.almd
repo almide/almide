@@ -1,0 +1,35 @@
+// list_enumerate — SELF-HOSTED `list.enumerate` over a `List[String]` for the v1 wasm spine.
+// v0 is `xs.into_iter().enumerate().map(|(i, x)| (i as i64, x))` → `List[(Int, String)]`. This builds
+// that list by a tail-recursive append accumulator (`acc + [(i, line)]`) — each (Int, String) tuple
+// rc-shares its String with the source element (the new list co-owns it). The whole list is freed
+// recursively by `$__drop_list_int_str` (per tuple: rc_dec ONLY the String slot @20, the Int @12 is a
+// scalar; then the tuple, then the list) — co-bundled below so it links with this source. The append
+// + tuple-result drop run on the proven effect-fn/List tuple-result TCO machinery.
+
+fn __enum_str_rec(xs: List[String], i: Int, n: Int, acc: List[(Int, String)]) -> List[(Int, String)] =
+  if i >= n then acc
+  else {
+    let line = list.get(xs, i) ?? ""
+    __enum_str_rec(xs, i + 1, n, acc + [(i, line)])
+  }
+
+fn list_enumerate_str(xs: List[String]) -> List[(Int, String)] =
+  __enum_str_rec(xs, 0, list.len(xs), [])
+
+// The recursive free of a `List[(Int, String)]` (the render of a `list_int_str` DropVariant calls this).
+fn __isdrop_list(xs: List[(Int, String)], i: Int, n: Int) -> Unit =
+  if i >= n then ()
+  else {
+    let lh = prim.handle(xs)
+    let tup: (Int, String) = prim.load_handle(lh + 12 + i * 8)
+    let th = prim.handle(tup)
+    if prim.load32(th + 0) == 1 then prim.rc_dec(prim.load64(th + 20)) else ()
+    prim.rc_dec(th)
+    __isdrop_list(xs, i + 1, n)
+  }
+
+fn __drop_list_int_str(xs: List[(Int, String)]) -> Unit = {
+  let h = prim.handle(xs)
+  if prim.load32(h + 0) == 1 then __isdrop_list(xs, 0, prim.load32(h + 4)) else ()
+  prim.rc_dec(h)
+}
