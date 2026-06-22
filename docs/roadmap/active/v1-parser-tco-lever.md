@@ -1,5 +1,16 @@
 # v1 — the parser-TCO lever (the real "heap-result-expr" cross-repo lever)
 
+## ⭐ decode_chunks ONION — FULLY MAPPED (2026-06-22, turn 5, effort=max). The remaining "base64 decode / toml" frontier is ONE coherent slice: **TCO over a `match` whose result is a `Result`**, with an ownership-critical core. The unwrap-`!` desugar turns `let x = f(p)!; recurse(.., acc+[x])` into `match f(p) { ok(x) => recurse(.., acc+[x]), err(e) => err(e) }` — recursion inside a match arm, returning `Result[heap, String]`. To lower it (verified, repro `umr` = a 1-unwrap version; build it first, it is the unit test for the whole slice):
+
+1. **TCO-over-match** — `tco_collect` + `tco_rewrite` must recurse `match` arms (today: only `if`/`Block`). Small, symmetric with the `if` arms. (Prototyped + reverted — sound but incomplete alone.)
+2. **`tco_empty_for(Result[_,String])` → `err("")`** — a placeholder result-accumulator (a base overwrites it). Small. **This is what makes the TCO FIRE** (without it `tco_empty_for` returns None → TCO declines → "heap-result if" wall). Prototyped: the wall MOVED to layer 4, proving 1+2 work.
+3. **loop-body match EXECUTION** — the TCO loop body becomes `match f(p) { ok(x)=>{acc=acc+[x]; p=..}, err(e)=>{rk=..; result=err(e)} }`; this user-`Result` STATEMENT match must execute not linearize → the lower_branch subject-tracking (control.rs:104) needs a USER named-call `Result` arm (scalar-Ok→materialized_results+heap_elem_lists; heap-Ok→materialized_results_str cap-tag). Also fixes a SEPARATE latent linearize-miscompile (hok2: a user heap-Ok `Result` in a Unit statement match runs BOTH arms today).
+4. **⚠ scalar-loop Result-slot Assign (OWNERSHIP-CRITICAL — the cardinal-sin layer)** — `result = ok(acc)` / `result = err(e)` in the loop (mod.rs:1532 scalar-loop Assign handles only `acc=acc+[x]` append + `[]`/`""` reset; a `ResultOk`/`ResultErr` RHS defers → try_lower_scalar_while declines → "while body heap-accumulator reassignment" wall). MUST materialize via `materialize_result_str` AND **`Dup` the carried payload `acc` before move-in** — else the loop-end drop of `acc` double-frees the list `result` now owns. The cert MUST verify this (the reason this is a careful slice, not a force-through).
+5. **REAL decode_chunks** then adds: 4-deep NESTED unwrap-matches (TCO-over-match handles nesting by recursion) + the `new_acc` nested-if accumulator INSIDE the innermost ok-arm (the landed flatten-let-block + inline-tail-accumulator + let-bound-if pre-desugar must compose with the match nesting — verify on the extracted function).
+
+Do 1–4 together with a v0==v1 byte-test on `umr` BEFORE touching the corpus (corpus-wall does NOT catch byte-miscompiles). This single slice clears base64 decode (3 walls) + the bulk of toml (22). Prototyped 1+2+3 this turn (TCO fires); reverted because 4's ownership Dup + 3's coupling need careful joint implementation under the cert, not piecemeal.
+
+
 ## cross-repo conquest scoreboard (real `github.com/almide` repos on the v1 spine)
 
 - ✅ **csv** — 4/4 public fns byte-match (see below).
