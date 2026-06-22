@@ -7,6 +7,43 @@
 // list_swap have a plain heap tail `buf` — no heap-result `if`. (List[Int] variant; a
 // List[String] element is an i32 handle in the same i64 slot, deferred per the repr note.)
 
+// list.set over a List[String] — the String-element variant. A String slot is an i32 handle in the
+// 8-byte slot; the i64-typed `x` param of `list_set` would mismatch (i32 vs i64 wasm type). This
+// copies every slot with rc_inc (the new list CO-OWNS each String — the source keeps its refs), then
+// at slot i releases the copied old String (rc_dec) and stores a co-owned ref to the new `x`. The
+// result drops via the recursive `DropListStr` (heap_elem_lists, the call-result classification). The
+// per-element rc makes co-ownership sound (no double-free, no leak — verified by the 10⁴ leak loop).
+fn __copy_slots_rc(src: Int, dst: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let e = prim.load64(src + i * 8)
+    prim.rc_inc(e)
+    prim.store64(dst + i * 8, e)
+    __copy_slots_rc(src, dst, n, i + 1)
+  }
+
+fn __set_slot_str(bh: Int, n: Int, i: Int, x: String) -> Int =
+  if i < 0 then 0
+  else if i >= n then 0
+  else {
+    let old = prim.load64(bh + 12 + i * 8)
+    prim.rc_dec(old)
+    let xh = prim.handle(x)
+    prim.rc_inc(xh)
+    prim.store64(bh + 12 + i * 8, xh)
+    0
+  }
+
+fn list_set_str(xs: List[String], i: Int, x: String) -> List[String] = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  let buf = prim.alloc_list_str(n)
+  let bh = prim.handle(buf)
+  let _c = __copy_slots_rc(h + 12, bh + 12, n, 0)
+  let _s = __set_slot_str(bh, n, i, x)
+  buf
+}
+
 fn __copy_slots(src: Int, dst: Int, n: Int, i: Int) -> Int =
   if i >= n then 0
   else {

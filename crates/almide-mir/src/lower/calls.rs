@@ -2138,6 +2138,9 @@ impl LowerCtx {
                         | "__varr_copy"
                         | "__vfill"
                         | "__lc_copy_rc"
+                        | "__copy_slots_rc" // list.set_str: rc-copy each String element (co-own)
+                        | "__set_slot_str"  // list.set_str: rc_dec the replaced element + rc_inc the new
+                        | "list_set_str"    // (also reaches rc via the helpers above; admit by name)
                         | "__ldls_share" // list.take/drop_liststr sublist (rc_inc each shared inner list)
                         | "value_get"     // Object linear-scan get (rc_inc the found value)
                         | "__vobj_fill"   // Object shallow-copy (rc_inc each key/value) — value.object

@@ -2565,6 +2565,16 @@ pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], resu
                 }
             }
         }
+        // `list.set` over a List[String] → `list.set_str` (the val is a String HANDLE, not an i64
+        // Int — the generic list.set's i64 val param mismatches; set_str rc-copies + co-owns). The
+        // yaml `list.set(lines, dp, …)` shape.
+        if func == "set" {
+            if let Some(Ty::Applied(TypeConstructorId::List, s)) = arg_tys.first() {
+                if s.len() == 1 && matches!(s[0], Ty::String) {
+                    return "list.set_str".to_string();
+                }
+            }
+        }
         // The element-PRESERVING List[heap]-returning combinators (source elem == result elem).
         if matches!(func, "filter" | "reverse" | "take" | "drop" | "unique" | "dedup" | "intersperse") {
             if let Ty::Applied(TypeConstructorId::List, args) = result_ty {

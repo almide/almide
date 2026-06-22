@@ -42,6 +42,7 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
             include_str!("../../../../stdlib/list_modify.almd"),
             &[
                 ("list_set", "list.set"),
+                ("list_set_str", "list.set_str"),
                 ("list_swap", "list.swap"),
                 ("list_insert", "list.insert"),
                 ("list_remove_at", "list.remove_at"),
