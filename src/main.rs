@@ -61,7 +61,7 @@ enum Commands {
         /// Output file name
         #[arg(short)]
         o: Option<String>,
-        /// Build target (wasm, npm)
+        /// Build target (default: native; wasm)
         #[arg(long)]
         target: Option<String>,
         /// Optimize for performance (opt-level=2)
