@@ -4124,6 +4124,10 @@ fn desugar_heap_branches_inner(body: &IrExpr, next_var: &mut u32) -> Option<IrEx
             cur = Some(r);
             continue;
         }
+        if let Some(r) = desugar_let_unwrap(src) {
+            cur = Some(r);
+            continue;
+        }
         if let Some(r) = desugar_nested_branch_arms(src, next_var) {
             cur = Some(r);
             continue;
@@ -4253,6 +4257,70 @@ pub fn desugar_let_bound_heap_branch(body: &IrExpr) -> Option<IrExpr> {
         span: body.span.clone(),
         def_id: body.def_id,
     })
+}
+
+/// `{ …; let v = e!; rest }` — an unwrap-`!` bound to a let (an EFFECT-fn early-return on Err) →
+/// `{ …; match e { ok(v) => { rest }, err($x) => err($x) } }`. The `!` IS exactly this: evaluate `e`,
+/// bind the Ok payload to `v` and continue, else return the Err from the enclosing fn. Pushing the
+/// continuation into the ok-arm makes the `match` the block TAIL, so the err-arm `err($x)` IS the
+/// function's return (byte-identical to v0's `?`-style propagation). A SCALAR Ok payload then lowers
+/// via the proven scalar-payload value-match; a HEAP Ok payload stays the Camp-4 frontier. Eliminates
+/// the unwrap-bound-to-let wall — the top cross-repo wall reason (toml, base64 decode_chunks, porta).
+pub fn desugar_let_unwrap(body: &IrExpr) -> Option<IrExpr> {
+    use almide_lang::types::constructor::TypeConstructorId;
+    let IrExprKind::Block { stmts, expr: tail } = &body.kind else {
+        return None;
+    };
+    let (i, bind_var, bind_ty, inner) = stmts.iter().enumerate().find_map(|(i, s)| match &s.kind {
+        IrStmtKind::Bind { var, ty, value, .. } => match &value.kind {
+            IrExprKind::Unwrap { expr } => Some((i, *var, ty.clone(), (**expr).clone())),
+            _ => None,
+        },
+        _ => None,
+    })?;
+    // The unwrapped expr must be a `Result[T, E]` — `!` early-returns its `Err(E)`.
+    let err_ty = match &inner.ty {
+        Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 => a[1].clone(),
+        _ => return None,
+    };
+    let result_ty = body.ty.clone();
+    let fresh = VarId(max_var_id(body) + 1);
+    let mk = |kind: IrExprKind, ty: Ty| IrExpr {
+        kind,
+        ty,
+        span: body.span.clone(),
+        def_id: body.def_id,
+    };
+    // ok(v) => { <rest> }
+    let cont = mk(
+        IrExprKind::Block { stmts: stmts[i + 1..].to_vec(), expr: tail.clone() },
+        result_ty.clone(),
+    );
+    let ok_arm = almide_ir::IrMatchArm {
+        pattern: almide_ir::IrPattern::Ok {
+            inner: Box::new(almide_ir::IrPattern::Bind { var: bind_var, ty: bind_ty }),
+        },
+        guard: None,
+        body: cont,
+    };
+    // err($x) => err($x)  (the propagated error IS the function result)
+    let err_var = mk(IrExprKind::Var { id: fresh }, err_ty.clone());
+    let err_body = mk(IrExprKind::ResultErr { expr: Box::new(err_var) }, result_ty.clone());
+    let err_arm = almide_ir::IrMatchArm {
+        pattern: almide_ir::IrPattern::Err {
+            inner: Box::new(almide_ir::IrPattern::Bind { var: fresh, ty: err_ty }),
+        },
+        guard: None,
+        body: err_body,
+    };
+    let match_expr = mk(
+        IrExprKind::Match { subject: Box::new(inner), arms: vec![ok_arm, err_arm] },
+        result_ty.clone(),
+    );
+    Some(mk(
+        IrExprKind::Block { stmts: stmts[..i].to_vec(), expr: Some(Box::new(match_expr)) },
+        result_ty,
+    ))
 }
 
 /// The kind of a call's resolved target — used to make a walled `Call`'s reason
