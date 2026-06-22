@@ -1823,6 +1823,11 @@ impl LowerCtx {
     /// Drop every heap handle the current scope frame added beyond `mark` (LIFO),
     /// restoring `live_heap_handles` to its pre-frame length — the per-arm teardown.
     pub(crate) fn drop_arm_locals(&mut self, mark: usize) {
+        // Release the handles created SINCE `mark`. Clamp to the current length: a sub-lowering
+        // (e.g. a match that drops its own subject) can leave `live_heap_handles` SHORTER than
+        // `mark`, in which case nothing new is live and this is a no-op (a bare `split_off(mark)`
+        // would panic). Semantically "drop everything from mark onward, nothing if none".
+        let mark = mark.min(self.live_heap_handles.len());
         for v in self.live_heap_handles.split_off(mark).into_iter().rev() {
             let op = self.drop_op_for(v);
             self.ops.push(op);
@@ -2461,16 +2466,31 @@ impl LowerCtx {
             // out-of-subset shape the inner attempt rolls itself back and returns `None`, so the
             // OUTER `try_lower_heap_result_if` restores the op stream and walls the function.
             IrExprKind::Match { subject, arms } => {
+                // PER-ARM FRAME: the match SUBJECT (`int.from_hex(string.drop(c, 2))`) materializes
+                // heap-arg temps (the `string.drop` result) into `live_heap_handles`. Unlike every
+                // other arm kind here, the match lowering does not move them out — they must be freed
+                // WITHIN this arm (inside the wasm then/else branch), else they leak to the FUNCTION
+                // scope-end where an UNCONDITIONAL `rc_dec` of an uninitialized local (when the OTHER
+                // arm ran) is a `rc_dec(0)` trap — the yaml `parse_number` 0x-branch crash. The
+                // recursive lowering Consumes the moved-out result (never in the set), so drop_arm_locals
+                // frees exactly the subject-eval temps.
+                let arm_mark = self.live_heap_handles.len();
                 if is_variant_ty(&subject.ty) {
                     if let Some(dst) =
                         self.try_lower_variant_value_match(subject, arms, result_ty)
                     {
+                        self.drop_arm_locals(arm_mark);
                         return Some(dst);
                     }
                 }
                 if let Some(if_expr) = self.desugar_match_to_if(subject, arms, result_ty) {
                     if let IrExprKind::If { cond, then, else_ } = &if_expr.kind {
-                        return self.lower_heap_result_if_inner(cond, then, else_, result_ty);
+                        if let Some(dst) =
+                            self.lower_heap_result_if_inner(cond, then, else_, result_ty)
+                        {
+                            self.drop_arm_locals(arm_mark);
+                            return Some(dst);
+                        }
                     }
                 }
                 None
