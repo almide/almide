@@ -390,8 +390,14 @@ pub enum PrimKind {
     /// scalar address computation, no ownership (a no-op in verify_ownership like every Prim).
     ElemAddr,
     /// The `fd_write` WASI host call — `args = [fd, iov, count, nwritten]`, dst = the
-    /// i64 errno. The ONLY sandbox exit; carries [`Capability::Stdout`].
+    /// i64 errno. A sandbox exit; carries [`Capability::Stdout`].
     FdWrite,
+    /// The `random_get` WASI host call — `args = [buf, buf_len]`, dst = the i64 errno;
+    /// fills `buf_len` bytes at `buf` with host entropy. The second sandbox exit; reached
+    /// only by the self-hosted `random.int`. Carries [`Capability::Entropy`] (the
+    /// cap_witness counts it exactly like `FdWrite` → Stdout), so a function using it is
+    /// caps-verified ONLY if it declares Entropy — never accept-but-unsafe.
+    RandomGet,
     /// Release one reference of a RAW heap handle (`(call $rc_dec …)`), the inverse of [`RcInc`].
     /// The MECHANISM the self-hosted recursive `value.__drop_value` frees a dynamic Value tree with
     /// (the §4.1-compliant alternative to a hand-written WAT drop): it operates on raw Int handles,
@@ -551,14 +557,22 @@ pub enum Capability {
     /// Writing to standard output (the only host effect the current MIR subset
     /// reaches, via [`RtFn::PrintInt`] / [`RtFn::PrintList`]).
     Stdout,
+    /// Reading host ENTROPY — the WASI `random_get` floor ([`PrimKind::RandomGet`]),
+    /// reached by the self-hosted `random.int`. The second sandbox exit. A pure `fn`
+    /// declares ∅, so it can NEVER reach entropy un-witnessed (the checker REJECTS
+    /// `used ⊄ allowed`); only an `effect fn` (which declares the host caps) may.
+    Entropy,
 }
 
 impl Capability {
     /// The stable registry id — the ONLY place a `Capability` becomes a number.
-    /// MUST agree with proofs/CapabilityBound.v's registry (Stdout = 0).
+    /// proofs/CapabilityBound.v's checker is GENERIC over `list nat` (a `subset_check`,
+    /// no per-capability enumeration), so it needs no edit to admit a new id — only
+    /// this mapping must stay injective + stable (Stdout = 0, Entropy = 1).
     pub const fn id(self) -> u32 {
         match self {
             Capability::Stdout => 0,
+            Capability::Entropy => 1,
         }
     }
 }

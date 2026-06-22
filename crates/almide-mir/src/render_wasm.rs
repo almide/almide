@@ -974,6 +974,11 @@ fn render_op(
                 PrimKind::FdWrite => {
                     format!("(i64.extend_i32_u (call $fd_write {} {} {} {}))", w(0), w(1), w(2), w(3))
                 }
+                // random_get(buf, buf_len) — the WASI entropy floor; fills buf with random bytes,
+                // returns an i32 errno that zero-extends back to the i64-uniform dst.
+                PrimKind::RandomGet => {
+                    format!("(i64.extend_i32_u (call $random_get {} {}))", w(0), w(1))
+                }
                 // RAW refcount ops (the self-host drop/copy mechanism) — reuse the proven $rc_dec/
                 // $rc_inc on the i32-wrapped handle. dst is None (Unit), so the `match dst` below
                 // emits the call as a STATEMENT (no local.set).
@@ -1134,6 +1139,8 @@ fn preamble() -> String {
         r#"(module
   (import "wasi_snapshot_preview1" "fd_write"
     (func $fd_write (param i32 i32 i32 i32) (result i32)))
+  (import "wasi_snapshot_preview1" "random_get"
+    (func $random_get (param i32 i32) (result i32)))
   (memory (export "memory") 1)
   (global $bump (mut i32) (i32.const {HEAP_BASE}))
   ;; the free-list head (0 = empty) — physical reclamation (A1.2-render), the

@@ -179,7 +179,13 @@ impl LowerCtx {
         func: &str,
         args: &[IrExpr],
     ) -> Result<Vec<CallArg>, LowerError> {
-        if !purity::is_pure(module, func) {
+        // `random.int` is the ONE admitted EFFECTFUL stdlib call: it is self-hosted (random_int.almd,
+        // linked here), so its `prim.random_get` is in the program map and the transitive cap_witness
+        // counts its Entropy — UNLIKE a bodyless effectful intrinsic (which would contribute 0 caps =
+        // accept-but-unsafe, the reason is_pure walls the rest). The caller is an `effect fn` (declares
+        // Entropy) so the `used ⊆ declared` checker verifies it; a pure caller is a frontend error.
+        let is_admitted_effectful = module == "random" && func == "int";
+        if !purity::is_pure(module, func) && !is_admitted_effectful {
             return Err(LowerError::Unsupported(format!(
                 "effectful/impure stdlib Module call {module}.{func} needs a declared capability not in this brick"
             )));
@@ -2157,6 +2163,7 @@ impl LowerCtx {
                 )))
             }
             "fd_write" => PrimKind::FdWrite,
+            "random_get" => PrimKind::RandomGet,
             // The FLOAT floor (the f64 bits live in the i64-uniform value; render reinterprets).
             "fabs" => PrimKind::FloatUn(crate::FUnOp::Abs),
             "fsqrt" => PrimKind::FloatUn(crate::FUnOp::Sqrt),

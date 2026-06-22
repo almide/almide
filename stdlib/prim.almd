@@ -174,6 +174,11 @@ fn rc_inc(addr: Int) -> Unit = _
 @intrinsic("almide_rt_prim_fd_write")
 fn fd_write(fd: Int, iov: Int, count: Int, nw: Int) -> Int = _
 
+// The random_get WASI host call — the ENTROPY sandbox exit (reaches Capability::Entropy).
+// Fills `len` bytes at address `buf` with host randomness; returns the errno (0 = ok).
+@intrinsic("almide_rt_prim_random_get")
+fn random_get(buf: Int, len: Int) -> Int = _
+
 // The FLOAT floor: a `Float` is the i64-uniform value holding the f64 BITS; each op
 // reinterprets i64→f64, computes the wasm f64 instruction, and reinterprets back (a
 // compare / f2i yields a real Int). Pure scalar — the cert is untouched. This is what

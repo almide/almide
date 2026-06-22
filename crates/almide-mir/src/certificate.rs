@@ -171,6 +171,13 @@ pub fn cap_witness(func: &MirFunction) -> CapWitness {
         if let Op::Prim { kind: crate::PrimKind::FdWrite, .. } = op {
             used.push(Capability::Stdout);
         }
+        // The `random_get` primitive is the ENTROPY floor op — reached by the self-hosted
+        // `random.int`, so a fn using it must declare Entropy (the same accounting as FdWrite →
+        // Stdout). The transitive `reachable_caps` follows the CallFn edge into `random.int`, so a
+        // caller (pkcs1v15_pad) inherits this Entropy and is caps-verified against its declared bound.
+        if let Op::Prim { kind: crate::PrimKind::RandomGet, .. } = op {
+            used.push(Capability::Entropy);
+        }
         // SOUNDNESS CRUX: a CallIndirect invokes a closure that may reach ANY capability.
         // When the table index resolves to a KNOWN lifted lambda (a `FuncRef` in THIS
         // function), its REAL caps are folded transitively by `reachable_caps` (which

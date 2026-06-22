@@ -1,0 +1,18 @@
+// random_int — SELF-HOSTED `random.int(min, max)` over the WASI entropy floor (prim.random_get),
+// the v1 trust-spine realization of the effectful `random` module. Returns a uniform-ish integer in
+// [min, max] INCLUSIVE (v0's gen_range(min..=max)). It allocs an 8-byte scratch Bytes, fills it with
+// host entropy via prim.random_get, reads it as an i64, masks off the sign bit, and reduces modulo the
+// span. The scratch Bytes is a heap local dropped at scope end (no leak). Because this body reaches
+// prim.random_get, its cap_witness carries Capability::Entropy — so a caller is caps-verified ONLY if
+// it declares Entropy (an `effect fn`); a pure `fn` reaching it is a frontend error AND would REJECT
+// at the gate. (The modulo has a slight bias for non-power-of-two spans — adequate for the functional
+// port; cryptographic uniformity is not promised by this floor.)
+fn random_int(min: Int, max: Int) -> Int = {
+  let span = max - min + 1
+  let buf = prim.alloc_bytes(8)
+  let p = prim.handle(buf) + 12
+  let _e = prim.random_get(p, 8)
+  let r = prim.load64(p)
+  let rpos = int.band(r, 0x7FFFFFFFFFFFFFFF)
+  if span <= 0 then min else min + (rpos % span)
+}
