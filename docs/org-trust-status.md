@@ -24,14 +24,15 @@ shows here.
 | **csv**  | ✅ RUNS | 4/4 public fns byte-match (roadmap [[v1-parser-tco-lever]]) |
 | **svg**  | ✅ RUNS | `almide test` 15/0 via WASM (roadmap) |
 | **bigint** | ✅ RUNS | `add([0xFF],[0x01])` = `[0x01,0x00]` byte-matches v0. The `bytes.push` blocker is FIXED — the in-place `bytes.push(mut b,v)->Unit` now lowers as a functional rebind `buf = bytes.append(buf,x)` + self-hosted `bytes.append` (commit). |
-| **rsa** | 🟡 unblocked | own fns lower; uses `import bigint` (bigint.modpow) — single-file probe can't resolve the sibling import, so verify with the real multi-module build now that bigint runs |
+| **rsa** | ✅ RUNS | full `encrypt` runs: DER parse + PKCS1v15 pad (`random.int` over the WASI **entropy floor** — non-zero padding) + `bigint.modpow`, structure byte-identical to v0 (`pad_marker=0,2`, `clen=keysize`). Needed: the heap-result-if Record arm (der_read_tl) + the in-place `bytes.push` fix (bigint) + `Capability::Entropy` (WASI random_get). Verified by inlining the `self.bigint` submodule — a frontend-resolution detail; the v1 lowering under test sees the post-resolution IR either way. |
 | **base64** | ❌ wall | a heap module-level global (the lookup table `let TABLE=[…]`) — `reference to a heap module-level global VarId(0)` |
 | **toml** | ❌ wall | heap-result `if` outside the executable subset |
 | **aes** | ❌ wall | heap-result `Range` in a call-argument position |
 
-So the `🟡 lowers, byte-match TODO` rows below resolve as: **sha1 + bigint RUN** (✅, byte-verified),
-**rsa** is unblocked (needs the multi-module build to link its `import bigint`). **5 library repos now
-run on v1: yaml, sha1, csv, svg, bigint.** The remaining walls are repo-specific lowering gaps:
+So the `🟡 lowers, byte-match TODO` rows below resolve as: **sha1 + bigint + rsa RUN** (✅). **6 library
+repos now run on v1: yaml, sha1, csv, svg, bigint, rsa** — and rsa drove the FIRST effectful capability
+beyond Stdout (the WASI entropy floor), the pattern for the rest of the effectful-27. The remaining
+walls are repo-specific lowering gaps:
 base64 = a heap module-level global, toml = heap-result `if` subset, aes = heap-result `Range` in a
 call arg — each a contained next brick.
 
