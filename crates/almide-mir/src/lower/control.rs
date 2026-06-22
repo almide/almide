@@ -2440,6 +2440,10 @@ impl LowerCtx {
             }
             IrExprKind::ResultErr { expr } if is_heap_ty(&expr.ty) => {
                 let repr = repr_of(result_ty).ok()?;
+                // Frame the message-build temps: a `${…}` interpolation (`err("bad char '${ch}'")` —
+                // base64 char_to_val) materializes intermediate concat Strings that must be freed
+                // WITHIN this arm; the final message `piece` is MOVED into the Err block (not dropped).
+                let arm_mark = self.live_heap_handles.len();
                 let piece = match &expr.kind {
                     IrExprKind::Var { id } => self.value_for(*id).ok()?,
                     IrExprKind::LitStr { value } => {
@@ -2448,6 +2452,9 @@ impl LowerCtx {
                         self.ops.push(Op::Alloc { dst: p, repr: pr, init: Init::Str(value.clone()) });
                         p
                     }
+                    // `err("…${x}…")` — a string interpolation message: fold it to the __str_concat
+                    // chain (a fresh owned String), exactly like the StringInterp value arm above.
+                    IrExprKind::StringInterp { parts } => self.try_lower_string_interp(parts)?,
                     IrExprKind::Call { target: CallTarget::Named { name }, args, .. } => {
                         let lowered = self.lower_call_args(args).ok()?;
                         let pr = repr_of(&expr.ty).ok()?;
@@ -2462,9 +2469,13 @@ impl LowerCtx {
                     }
                     _ => return None,
                 };
-                // `Err` IS `Some(message)` physically (cap-1/len-1 DynListStr owning the String).
+                // `Err` IS `Some(message)` physically (cap-1/len-1 DynListStr owning the String):
+                // `piece` is MOVED into slot 0 (removed from live_heap_handles), so the per-arm
+                // teardown frees only the interpolation's intermediates, never the moved-in message.
+                self.live_heap_handles.retain(|h| *h != piece);
                 let obj = self.materialize_opt_str_some(piece, repr);
                 self.ops.push(Op::Consume { v: obj });
+                self.drop_arm_locals(arm_mark);
                 Some(obj)
             }
             // A NESTED `match` arm (`match int.parse(c) { ok(n) => value.int(n), err(_) =>
