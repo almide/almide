@@ -354,6 +354,16 @@ impl Checker {
                 // value — it is NOT divergent — so even when every arm is `err`,
                 // the match still has a concrete Result type (not `Never`).
                 let mut arm_real_types = Vec::new();
+                // If ANY arm is an explicit `ok(..)`/`err(..)` ctor, this match PRODUCES a Result (it
+                // re-wraps — base64 decode's `match bs { ok(b) => ok(string.from_bytes(b)), err(e) =>
+                // err(e) }`), so NO arm is auto-unwrapped: every arm keeps its Result type and the
+                // match types as Result, not its OK type. (Auto-unwrapping only the effect-call arms
+                // while a ctor arm stayed Result mismatched — `Result[(String,Int),String]` vs
+                // `(String,Int)` in toml parse_key_part; mistyping the whole match as the OK type
+                // walled the v1 MIR / mis-rewrapped native — base64 decode.) The pure auto-unwrap case
+                // (no ctor arm, just effect-call/value arms unifying to T) is unchanged.
+                let arms_have_result_ctor = arms.iter().any(|a|
+                    matches!(&a.body.kind, ExprKind::Ok { .. } | ExprKind::Err { .. }));
                 for arm in arms.iter_mut() {
                     self.env.push_scope();
                     let sub_c = resolve_ty(&subject_ty, &self.uf);
@@ -365,19 +375,11 @@ impl Checker {
                     // so it doesn't constrain sibling arm types.
                     let arm_ty = if matches!(&arm.body.kind, ExprKind::Err { .. }) {
                         Ty::Never
-                    } else if matches!(&arm.body.kind, ExprKind::Ok { .. }) {
-                        // An EXPLICIT `ok(..)` ctor arm produces a real Result that IS the
-                        // match's result (a re-wrap like base64 decode's `match bs { ok(b) =>
-                        // ok(string.from_bytes(b)), err(e) => err(e) }`), NOT an effect-fn call
-                        // to auto-unwrap. KEEP its Result type so the match types as Result, not
-                        // its OK type — otherwise the v1 MIR saw a String-typed match with
-                        // ResultOk/ResultErr arms and walled (and native re-wrapped wrongly). The
-                        // effect-call-arm auto-unwrap below still applies to non-ctor arms.
-                        arm_ty
-                    } else if self.env.auto_unwrap {
-                        // In effect fn bodies, auto-unwrap Result[T, E] → T
-                        // so match arms mixing effect fn calls (Result) with
-                        // pure expressions (T) unify correctly.
+                    } else if self.env.auto_unwrap && !arms_have_result_ctor {
+                        // In effect fn bodies, auto-unwrap Result[T, E] → T so match arms mixing
+                        // effect fn calls (Result) with pure expressions (T) unify correctly. Skipped
+                        // when an arm is an explicit ok/err ctor (see arms_have_result_ctor above):
+                        // then the match re-wraps a Result and ALL arms keep it.
                         let resolved = resolve_ty(&arm_ty, &self.uf);
                         match resolved {
                             Ty::Applied(TypeConstructorId::Result, ref args) if args.len() == 2 => args[0].clone(),
