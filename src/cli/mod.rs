@@ -186,6 +186,22 @@ fn build_cargo_toml(base_toml: &str, native_deps: &[crate::project::NativeDep]) 
 }
 
 /// Copy native/*.rs files from source_root into src_dir and inject mod declarations into code.
+fn copy_dir_recursive(from: &std::path::Path, to: &std::path::Path) -> Result<(), String> {
+    std::fs::create_dir_all(to).map_err(|e| format!("failed to create {}: {}", to.display(), e))?;
+    let entries = std::fs::read_dir(from).map_err(|e| format!("failed to read {}: {}", from.display(), e))?;
+    for entry in entries.flatten() {
+        let src = entry.path();
+        let dst = to.join(entry.file_name());
+        if src.is_dir() {
+            copy_dir_recursive(&src, &dst)?;
+        } else {
+            std::fs::copy(&src, &dst)
+                .map_err(|e| format!("failed to copy {}: {}", src.display(), e))?;
+        }
+    }
+    Ok(())
+}
+
 fn inject_native_modules(code: &mut String, source_root: Option<&std::path::Path>, src_dir: &std::path::Path) -> Result<(), String> {
     let root = match source_root {
         Some(r) => r,
@@ -204,6 +220,11 @@ fn inject_native_modules(code: &mut String, source_root: Option<&std::path::Path
                 std::fs::write(src_dir.join(entry.file_name()), &content)
                     .map_err(|e| format!("failed to write native module {}: {}", stem, e))?;
                 mod_decls.push_str(&format!("mod {};\n", stem));
+            } else if path.is_dir() {
+                // asset subdirectories (e.g. native/wgsl/*.wgsl) travel with
+                // the modules so include_str!("wgsl/...") resolves in the
+                // generated crate
+                copy_dir_recursive(&path, &src_dir.join(entry.file_name()))?;
             }
         }
     }
