@@ -404,6 +404,7 @@ impl LowerCtx {
                 // `var x = g(xs); x`, so the gate covers it by the same evidence
                 // (the runtime correspondence is exact — the callee returns rc 1).
                 IrExprKind::Call { target: CallTarget::Named { name }, args, .. } => {
+                    let mark = self.live_heap_handles.len();
                     let lowered = self.lower_call_args(args)?;
                     let dst = self.fresh_value();
                     let repr = repr_of(&tail.ty)?;
@@ -413,6 +414,11 @@ impl LowerCtx {
                         args: lowered,
                         result: Some(repr),
                     });
+                    // Free any OWNED-temp arg the call materialized (`f(string.replace(s,…), s)` — the
+                    // yaml `parse_number(string.replace(s,"_",""), s)` shape). A heap-result tail returns
+                    // `dst` directly (moved out, NOT in live_heap_handles), bypassing the function's
+                    // scope-end drops — so the materialized arg temp would LEAK (a parse loop OOMs).
+                    self.drop_arm_locals(mark);
                     Ok(Some(dst))
                 }
                 // `fn f() = string.trim(s)` — a stdlib MODULE call result returned
@@ -420,12 +426,18 @@ impl LowerCtx {
                 // result is moved out (NOT added to live_heap_handles), like the
                 // `Named` case above.
                 IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } => {
+                    let mark = self.live_heap_handles.len();
                     let dst = self.lower_pure_module_value_call(
                         module.as_str(),
                         func.as_str(),
                         args,
                         &tail.ty,
                     )?;
+                    // Free any owned-temp arg materialized for the call — a heap-result tail moves out
+                    // `dst` and bypasses scope-end drops (see the Named case above), so the temp leaks.
+                    // `dst` is moved out (not in live_heap_handles) so it is never among the dropped.
+                    self.live_heap_handles.retain(|h| *h != dst);
+                    self.drop_arm_locals(mark);
                     Ok(Some(dst))
                 }
                 // `fn f(r) = r.x` — a HEAP extraction returned directly: alias the

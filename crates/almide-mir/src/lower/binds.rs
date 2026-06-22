@@ -782,6 +782,12 @@ impl LowerCtx {
                 } else if is_heap_elem_list_ty(ty) {
                     self.heap_elem_lists.insert(dst);
                 }
+                // A `Value` result from a user fn (`let v = parse_number(c, raw)`) drops via the
+                // runtime-tag-dispatched `DropValue` — the SAME marking the Module-call bind path does
+                // (was missing here, so a let-bound Named-call Value leaked: a parse loop OOMs).
+                if crate::lower::is_value_ty(ty) {
+                    self.value_handles.insert(dst);
+                }
                 // A user function returning Option/Result yields a REAL same-layout variant block
                 // (the v1 calling convention — `seed_variant_param`'s contract). SEED its READ-shape
                 // so a later `match x { … }` / `x ?? d` over the LET-BOUND var EXECUTES (reads the
