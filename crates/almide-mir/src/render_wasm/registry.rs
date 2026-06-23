@@ -476,6 +476,10 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
             &[("string_is_digit", "string.is_digit")],
         ),
         (
+            include_str!("../../../../stdlib/string_is_alphanumeric.almd"),
+            &[("string_is_alphanumeric", "string.is_alphanumeric")],
+        ),
+        (
             include_str!("../../../../stdlib/string_from_codepoint.almd"),
             &[("string_from_codepoint", "string.from_codepoint")],
         ),

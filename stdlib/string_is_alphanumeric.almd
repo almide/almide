@@ -1,0 +1,23 @@
+// string_is_alphanumeric — SELF-HOSTED `string.is_alphanumeric(s) -> Bool` for v1 over the prim floor.
+// v0: `!s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric())`. ASCII alphanumerics are the
+// single bytes 48..=57 ('0'..'9'), 65..=90 ('A'..'Z'), 97..=122 ('a'..'z'); any other ASCII byte
+// fails, and any multibyte char has a lead/continuation byte >= 0x80 (outside all three ranges) so it
+// fails too — a BYTE scan is exactly equivalent to the codepoint `is_ascii_alphanumeric` check. Empty
+// → false (matches v0's `!is_empty()` guard).
+
+fn __isalnum(addr: Int, end: Int) -> Bool =
+  if addr >= end then true
+  else {
+    let b = prim.load8(addr)
+    if b >= 48 and b <= 57 then __isalnum(addr + 1, end)
+    else if b >= 65 and b <= 90 then __isalnum(addr + 1, end)
+    else if b >= 97 and b <= 122 then __isalnum(addr + 1, end)
+    else false
+  }
+
+fn string_is_alphanumeric(s: String) -> Bool = {
+  let h = prim.handle(s)
+  let blen = prim.load32(h + 4)
+  if blen == 0 then false
+  else __isalnum(h + 12, h + 12 + blen)
+}

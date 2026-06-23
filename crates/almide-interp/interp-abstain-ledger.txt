@@ -103,6 +103,7 @@ string_codepoint  out-of-interp-scope capability: string.take
 string_codepoint_index  out-of-interp-scope capability: string.slice
 string_count_truncation  out-of-interp-scope capability: string.take
 string_from_bytes  out-of-interp-scope capability: string.to_bytes
+string_is_alphanumeric  out-of-interp-scope capability: string.is_alphanumeric
 string_ops  out-of-interp-scope capability: string.slice
 string_ops_drain  out-of-interp-scope capability: string.replace_first
 string_predicates  out-of-interp-scope capability: string.is_alpha
