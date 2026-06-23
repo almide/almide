@@ -379,6 +379,11 @@ pub(crate) struct LowerCtx {
     /// the `(String, Int)` tuple @12 recursively (its String slot only), Err → `rc_dec` the String) —
     /// a flat `DropListStr` would leak the Ok tuple's String + free the tuple block as if it were one.
     str_int_result_results: HashSet<ValueId>,
+    /// MIR values that are a `Result[(Value, Int), String]` wrapper (toml `parse_val`'s
+    /// `ok((value.…, pos))`). A scope-end drop emits [`Op::DropResultValueInt`] (Ok → free the
+    /// (Value, Int) tuple recursively via `$__drop_value_tuple`, Err → `rc_dec` the String) — a flat
+    /// `DropListStr` would leak the Value's nested payload.
+    value_int_result_results: HashSet<ValueId>,
     /// MIR values KNOWN to be a REAL, POPULATED list block (a list LITERAL, a heap-list PARAM —
     /// the v1 convention passes a genuine block —, or a self-host list-returning CALL whose closure
     /// args ALL lifted, so the callee actually fills it). A direct `xs[i]` (`lower_scalar_index_access`)
@@ -666,6 +671,18 @@ pub fn is_str_int_result_ty(ty: &Ty) -> bool {
         if a.len() == 2
             && matches!(&a[0], Ty::Tuple(ts) if ts.len() == 2
                 && matches!(ts[0], Ty::String) && matches!(ts[1], Ty::Int))
+            && matches!(a[1], Ty::String))
+}
+
+/// `Result[(Value, Int), String]` — the toml `parse_val` `ok((value.…, pos))` shape. The Ok payload
+/// is a `(Value, Int)` tuple (a dynamic-Value heap slot + a scalar Int); routed to
+/// `value_int_result_results` (recursive `Op::DropResultValueInt` via `$__drop_value_tuple`).
+pub fn is_value_int_result_ty(ty: &Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    matches!(ty, Ty::Applied(TypeConstructorId::Result, a)
+        if a.len() == 2
+            && matches!(&a[0], Ty::Tuple(ts) if ts.len() == 2
+                && is_value_ty(&ts[0]) && matches!(ts[1], Ty::Int))
             && matches!(a[1], Ty::String))
 }
 

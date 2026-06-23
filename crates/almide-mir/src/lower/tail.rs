@@ -383,6 +383,12 @@ impl LowerCtx {
                     if let Some(dst) = self.try_lower_result_str_int_ctor(tail, &tail.ty) {
                         return Ok(Some(dst));
                     }
+                    // `ok((value.…, pos))` / `err(msg)` RETURNED for `Result[(Value, Int), String]`
+                    // (toml parse_val): materialize the (Value,Int)-Ok / String-Err block, MOVED OUT
+                    // (the recursive `Op::DropResultValueInt` frees it at the caller's scope end).
+                    if let Some(dst) = self.try_lower_result_value_int_ctor(tail, &tail.ty) {
+                        return Ok(Some(dst));
+                    }
                     let repr = repr_of(&tail.ty)?;
                     let init = alloc_init(tail);
                     // `alloc_init` faithfully materializes a string literal and a scalar-

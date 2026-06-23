@@ -397,6 +397,21 @@ fn render_op(
                  \x20   (call $rc_dec (local.get {p}))\n"
             )
         }
+        // Result[(Value, Int), String] (toml parse_val). Wrapper @12 = the (Value,Int) tuple / Err
+        // String; @16 = tag. At the wrapper's last ref: Ok → value_core's $__drop_value_tuple frees the
+        // tuple recursively (its Value slot via $__drop_value, then the tuple block); Err → rc_dec the
+        // String @12; THEN the wrapper block. value_core is linked (the Ok built a Value via value.*).
+        Op::DropResultValueInt { v } => {
+            let p = local(*v);
+            let payload = format!("(i32.load (i32.add (local.get {p}) (i32.const 12)))");
+            format!(
+                "    (if (i32.eq (i32.load (local.get {p})) (i32.const 1)) (then\n\
+                 \x20     (if (i32.eq (i32.load (i32.add (local.get {p}) (i32.const 16))) (i32.const 0))\n\
+                 \x20       (then (call $__drop_value_tuple {payload}))\n\
+                 \x20       (else (call $rc_dec {payload})))))\n\
+                 \x20   (call $rc_dec (local.get {p}))\n"
+            )
+        }
         // RECURSIVE drop of a CUSTOM variant (ADT brick 5b) — the GENERATED per-type
         // `$__drop_<ty>` (the `$__drop_value` shape, auto-linked from generated Almide): at the
         // last ref it reads the tag, recursively frees each variant ctor field + rc_dec's each

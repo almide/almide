@@ -140,6 +140,8 @@ impl LowerCtx {
                             // String. Other heap-Ok shapes keep the flat heap_elem_lists/DropListStr.
                             if crate::lower::is_str_int_result_ty(&subject.ty) {
                                 self.str_int_result_results.insert(v);
+                            } else if crate::lower::is_value_int_result_ty(&subject.ty) {
+                                self.value_int_result_results.insert(v);
                             } else {
                                 self.heap_elem_lists.insert(v);
                             }

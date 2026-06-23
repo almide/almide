@@ -261,6 +261,15 @@ pub enum Op {
     /// trusted raw-handle routine (leak-loop verified). The tuple-payload counterpart of
     /// `DropResultValue`.
     DropResultStrInt { v: ValueId },
+    /// `drop_result_value_int v` — release a `Result[(Value, Int), String]` (toml `parse_val`'s
+    /// `ok((value.…, pos))` shape). Same cap-as-tag wrapper as `DropResultStrInt`, but the Ok tuple's
+    /// slot0 is a dynamic `Value` (tag-dispatched, can hold a nested Array/Object), so the RENDER frees
+    /// it RECURSIVELY via value_core's `$__drop_value_tuple` (Ok: at the tuple's last ref `$__drop_value`
+    /// slot0 then the tuple block; Err: `rc_dec` the String @12); THEN the wrapper. A flat `DropListStr`
+    /// would leak the Value's nested payload. Same single cert `d`; the recursion is the trusted
+    /// value_core routine (leak-loop verified). value_core is always linked here (the Ok built a Value
+    /// via a `value.*` ctor). The Value-tuple counterpart of `DropResultStrInt`.
+    DropResultValueInt { v: ValueId },
     /// `drop_list_list_str v` — release a `List[List[String]]` whose element slots hold owned
     /// `List[String]` blocks (the csv `rows` shape: a list of rows, each a list of cells). The render
     /// emits a NESTED loop: at the outer list's last ref (rc==1), for each element it frees the inner
@@ -753,6 +762,7 @@ pub fn verify_ownership(func: &MirFunction) -> Result<(), Vec<Violation>> {
             | Op::DropResultListValue { v }
             | Op::DropResultValue { v }
             | Op::DropResultStrInt { v }
+            | Op::DropResultValueInt { v }
             | Op::DropListListStr { v }
             | Op::DropVariant { v, .. } => {
                 match release(&object_of, &mut rc, &mut dead, &borrowed, *v) {

@@ -86,6 +86,8 @@ pub fn wasm_pattern(op: &crate::Op) -> Option<String> {
         // Inline-rendered (no helper) like DropListStr; the cert-claimed token is the
         // final wrapper `call $rc_dec`.
         Op::DropResultStrInt { .. } => "call $rc_dec".into(),
+        // Rendered via a value_core helper call (NOT inline) — the cert-claimed token is that call.
+        Op::DropResultValueInt { .. } => "call $__drop_value_tuple".into(),
         Op::DropListListStr { .. } => "drop_list_list_str".into(),
         Op::DropVariant { ty, .. } => format!("call $__drop_{ty}"),
         // A copy-on-write: MakeUnique clones a SHARED block before in-place
