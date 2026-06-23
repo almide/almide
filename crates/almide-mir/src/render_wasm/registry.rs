@@ -14,6 +14,7 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
         (include_str!("../../../../stdlib/string_repeat.almd"), &[("string_repeat", "string.repeat")]),
         (include_str!("../../../../stdlib/string_is_empty.almd"), &[("string_is_empty", "string.is_empty")]),
         (include_str!("../../../../stdlib/string_eq.almd"), &[("string_eq", "string.eq")]),
+        (include_str!("../../../../stdlib/string_cmp.almd"), &[("string_cmp", "string.cmp")]),
         (
             include_str!("../../../../stdlib/math_int.almd"),
             &[

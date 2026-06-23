@@ -154,19 +154,42 @@ impl LowerCtx {
                         }
                     }
                 }
+                // String ordering `< <= > >=` → `string.cmp(a,b)` (lexicographic, -1/0/1) compared with
+                // 0. WITHOUT this the comparison fell through to the i64-handle path → arbitrary order
+                // (silent), or the if linearized both arms. Both operands BORROWED (cmp only reads).
+                if matches!(op, BinOp::Lt | BinOp::Lte | BinOp::Gt | BinOp::Gte)
+                    && matches!(left.ty, Ty::String)
+                {
+                    let args = [(**left).clone(), (**right).clone()];
+                    let cmp = self
+                        .lower_pure_module_value_call("string", "cmp", &args, &Ty::Int)
+                        .ok()?;
+                    let zero = self.fresh_value();
+                    self.ops.push(Op::ConstInt { dst: zero, value: 0 });
+                    let iop = match op {
+                        BinOp::Lt => crate::IntOp::Lt,
+                        BinOp::Lte => crate::IntOp::Le,
+                        BinOp::Gt => crate::IntOp::Gt,
+                        _ => crate::IntOp::Ge,
+                    };
+                    let dst = self.fresh_value();
+                    self.ops.push(Op::IntBinOp { dst, op: iop, a: cmp, b: zero });
+                    return Some(dst);
+                }
                 let iop = match op {
                     BinOp::AddInt => crate::IntOp::Add,
                     BinOp::SubInt => crate::IntOp::Sub,
                     BinOp::MulInt => crate::IntOp::Mul,
                     BinOp::DivInt => crate::IntOp::Div,
                     BinOp::ModInt => crate::IntOp::Mod,
-                    // Ordering comparisons (the `if` condition) — INT operands only (a
-                    // Float compare uses the prim float floor above; a String compare needs
-                    // a different op). Gate on the operand type.
-                    BinOp::Lt if matches!(left.ty, Ty::Int) => crate::IntOp::Lt,
-                    BinOp::Lte if matches!(left.ty, Ty::Int) => crate::IntOp::Le,
-                    BinOp::Gt if matches!(left.ty, Ty::Int) => crate::IntOp::Gt,
-                    BinOp::Gte if matches!(left.ty, Ty::Int) => crate::IntOp::Ge,
+                    // Ordering comparisons (the `if` condition) — INT or BOOL operands (Bool is an i64
+                    // 0/1, and v0's bool Ord is false < true = 0 < 1, so the i64 compare is bit-exact).
+                    // A Float compare uses the prim float floor above; String ordering is the cmp-call
+                    // above. Gate on the operand type.
+                    BinOp::Lt if matches!(left.ty, Ty::Int | Ty::Bool) => crate::IntOp::Lt,
+                    BinOp::Lte if matches!(left.ty, Ty::Int | Ty::Bool) => crate::IntOp::Le,
+                    BinOp::Gt if matches!(left.ty, Ty::Int | Ty::Bool) => crate::IntOp::Gt,
+                    BinOp::Gte if matches!(left.ty, Ty::Int | Ty::Bool) => crate::IntOp::Ge,
                     // Equality — INT or BOOL operands. A `Bool` is an i64 0/1 (a Var loads
                     // its 0/1, a `LitBool` materializes `ConstInt 0/1` above), so the SAME
                     // `IntOp::Eq`/`Ne` render is bit-exact for `b == false` / `b1 != b2` as

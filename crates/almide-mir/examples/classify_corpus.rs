@@ -124,6 +124,19 @@ fn count_ir_calls(body: &almide_ir::IrExpr, registry: &almide_mir::lower::Record
                     self.n += 1;
                 }
             }
+            // A String ordering `< <= > >=` lowers to ONE `string.cmp` CallFn (then an Int compare
+            // with 0, a prim). Credit the operator node so `mir_calls <= ir_calls` holds. string.cmp
+            // is pure (byte compare, no Stdout).
+            if let almide_ir::IrExprKind::BinOp {
+                op: almide_ir::BinOp::Lt | almide_ir::BinOp::Lte | almide_ir::BinOp::Gt | almide_ir::BinOp::Gte,
+                left,
+                ..
+            } = &e.kind
+            {
+                if matches!(left.ty, almide_lang::types::Ty::String) {
+                    self.n += 1;
+                }
+            }
             // A STRING-subject `match s { "a" => .., "b" => .., _ => .. }` desugars to a nested
             // `if string.eq(s, "a") then .. else if string.eq(s, "b") then ..` — ONE synthetic
             // `string.eq` CallFn PER STRING-LITERAL arm (the catch-all/binder arm emits no call).
