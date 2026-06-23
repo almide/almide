@@ -68,6 +68,33 @@ const KNOWN_STDOUT_FREE_BUILTINS: &[&str] = &[
 /// ELIDED by Opaque lowering (a list element, ctor payload, BinOp operand): such
 /// a call's effects are absent from the MIR, a caps blind spot the transitive
 /// fold cannot see, so its function is conservatively tainted (not caps-verified).
+/// How many synthetic eq CallFns a `left == right` of this type lowers to (mirrors
+/// `lower_eq_typed`): String/Value/List → 1, a scalar → 0, a tuple/record → the SUM over its
+/// fields (recursing). So `(String,Int)` `==` credits 1 (the string.eq), `(Int,Int)` credits 0 —
+/// keeping `mir_calls <= ir_calls` exact for the field-wise compound eq.
+fn count_eq_calls(ty: &almide_lang::types::Ty, registry: &almide_mir::lower::RecordLayouts) -> usize {
+    use almide_lang::types::{constructor::TypeConstructorId as TC, Ty};
+    if matches!(ty, Ty::String) || almide_mir::lower::is_value_ty(ty) {
+        return 1;
+    }
+    if let Ty::Applied(TC::List, es) = ty {
+        return usize::from(
+            es.len() == 1
+                && (matches!(es[0], Ty::Int | Ty::String | Ty::Float | Ty::Bool)
+                    || almide_mir::lower::is_value_ty(&es[0])),
+        );
+    }
+    match ty {
+        Ty::Tuple(elems) => elems.iter().map(|t| count_eq_calls(t, registry)).sum(),
+        Ty::Record { fields } => fields.iter().map(|(_, t)| count_eq_calls(t, registry)).sum(),
+        Ty::Named(name, _args) => registry
+            .get(name.as_str())
+            .map(|(_, decl)| decl.iter().map(|(_, t)| count_eq_calls(t, registry)).sum())
+            .unwrap_or(0),
+        _ => 0,
+    }
+}
+
 fn count_ir_calls(body: &almide_ir::IrExpr, registry: &almide_mir::lower::RecordLayouts) -> usize {
     struct CallCounter<'a> {
         n: usize,
@@ -113,16 +140,9 @@ fn count_ir_calls(body: &almide_ir::IrExpr, registry: &almide_mir::lower::Record
                 ..
             } = &e.kind
             {
-                use almide_lang::types::{constructor::TypeConstructorId, Ty};
-                let lowers_to_eq_call = matches!(left.ty, Ty::String)
-                    || almide_mir::lower::is_value_ty(&left.ty)
-                    || matches!(&left.ty, Ty::Applied(TypeConstructorId::List, es)
-                        if es.len() == 1
-                            && (matches!(es[0], Ty::Int | Ty::String | Ty::Float | Ty::Bool)
-                                || almide_mir::lower::is_value_ty(&es[0])));
-                if lowers_to_eq_call {
-                    self.n += 1;
-                }
+                // String/Value/List → 1 call; a tuple/record → the SUM of its fields' eq calls
+                // (recursing); a scalar → 0. Matches lower_eq_typed's per-field call emission.
+                self.n += count_eq_calls(&left.ty, self.registry);
             }
             // A String ordering `< <= > >=` lowers to ONE `string.cmp` CallFn (then an Int compare
             // with 0, a prim). Credit the operator node so `mir_calls <= ir_calls` holds. string.cmp

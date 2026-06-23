@@ -1,4 +1,102 @@
 impl LowerCtx {
+    /// Synthesize a field-access IrExpr (`base.i` for a tuple, `base.name` for a record) of the
+    /// given field type — the operand handed to a recursive eq.
+    fn field_access_expr(
+        &self,
+        base: &IrExpr,
+        i: usize,
+        names: &[almide_lang::intern::Sym],
+        fty: &Ty,
+    ) -> IrExpr {
+        let kind = if names.is_empty() {
+            IrExprKind::TupleIndex { object: Box::new(base.clone()), index: i }
+        } else {
+            IrExprKind::Member { object: Box::new(base.clone()), field: names[i] }
+        };
+        IrExpr { kind, ty: fty.clone(), span: base.span, def_id: None }
+    }
+
+    /// Deep structural `left == right` for a value of type `ty`, returning the Bool ValueId — the
+    /// recursive core shared by the scalar / String / Value / List / tuple / record eq. Scalars use
+    /// the int/float prim; String→string.eq, Value→value.eq, List[T]→list.eq_T (the existing pure
+    /// calls); a tuple/record is the AND of each field's own typed eq (recursing). Returns None when
+    /// any field's eq cannot lower (e.g. an unmaterialized container) — the caller then walls.
+    fn lower_eq_typed(&mut self, left: &IrExpr, right: &IrExpr, ty: &Ty) -> Option<ValueId> {
+        use almide_lang::types::constructor::TypeConstructorId as TC;
+        match ty {
+            Ty::Int | Ty::Bool => {
+                let a = self.lower_scalar_value(left)?;
+                let b = self.lower_scalar_value(right)?;
+                let dst = self.fresh_value();
+                self.ops.push(Op::IntBinOp { dst, op: crate::IntOp::Eq, a, b });
+                return Some(dst);
+            }
+            Ty::Float => {
+                let a = self.lower_scalar_value(left)?;
+                let b = self.lower_scalar_value(right)?;
+                let dst = self.fresh_value();
+                self.ops.push(Op::Prim {
+                    kind: crate::PrimKind::FloatCmp(crate::FCmpOp::Eq),
+                    dst: Some(dst),
+                    args: vec![a, b],
+                });
+                return Some(dst);
+            }
+            Ty::String => {
+                let args = [left.clone(), right.clone()];
+                return self.lower_pure_module_value_call("string", "eq", &args, &Ty::Bool).ok();
+            }
+            _ => {}
+        }
+        if crate::lower::is_value_ty(ty) {
+            let args = [left.clone(), right.clone()];
+            return self.lower_pure_module_value_call("value", "eq", &args, &Ty::Bool).ok();
+        }
+        if let Ty::Applied(TC::List, es) = ty {
+            if es.len() == 1 {
+                let v = if matches!(es[0], Ty::Int) {
+                    "eq_int"
+                } else if matches!(es[0], Ty::String) {
+                    "eq_str"
+                } else if matches!(es[0], Ty::Float) {
+                    "eq_float"
+                } else if matches!(es[0], Ty::Bool) {
+                    "eq_bool"
+                } else if crate::lower::is_value_ty(&es[0]) {
+                    "eq_value"
+                } else {
+                    return None;
+                };
+                let args = [left.clone(), right.clone()];
+                return self.lower_pure_module_value_call("list", v, &args, &Ty::Bool).ok();
+            }
+        }
+        // Tuple / record → AND of per-field typed eq.
+        if let Some((names, ftys)) = self.aggregate_field_tys(ty) {
+            let mut acc: Option<ValueId> = None;
+            for (i, fty) in ftys.iter().enumerate() {
+                let lf = self.field_access_expr(left, i, &names, fty);
+                let rf = self.field_access_expr(right, i, &names, fty);
+                let e = self.lower_eq_typed(&lf, &rf, fty)?;
+                acc = Some(match acc {
+                    None => e,
+                    Some(prev) => {
+                        let dst = self.fresh_value();
+                        self.ops.push(Op::IntBinOp { dst, op: crate::IntOp::And, a: prev, b: e });
+                        dst
+                    }
+                });
+            }
+            // An empty tuple/record is always equal.
+            return Some(acc.unwrap_or_else(|| {
+                let dst = self.fresh_value();
+                self.ops.push(Op::ConstInt { dst, value: 1 });
+                dst
+            }));
+        }
+        None
+    }
+
     fn lower_scalar_value_inner(&mut self, expr: &IrExpr) -> Option<ValueId> {
         use almide_ir::BinOp;
         match &expr.kind {
@@ -179,6 +277,23 @@ impl LowerCtx {
                     let dst = self.fresh_value();
                     self.ops.push(Op::IntBinOp { dst, op: iop, a: cmp, b: zero });
                     return Some(dst);
+                }
+                // Tuple / record `==` / `!=`: field-wise deep equality (the AND of each field's own
+                // typed eq, recursing into nested tuples/records/heap fields). Was both-arms-
+                // linearized (silent). Only fires for a MATERIALIZED aggregate whose every field eq
+                // lowers; otherwise lower_eq_typed returns None and the `if` walls (loud, safe).
+                if matches!(op, BinOp::Eq | BinOp::Neq) && self.aggregate_field_tys(&left.ty).is_some()
+                {
+                    if let Some(eq) = self.lower_eq_typed(left, right, &left.ty) {
+                        if matches!(op, BinOp::Eq) {
+                            return Some(eq);
+                        }
+                        let one = self.fresh_value();
+                        self.ops.push(Op::ConstInt { dst: one, value: 1 });
+                        let dst = self.fresh_value();
+                        self.ops.push(Op::IntBinOp { dst, op: crate::IntOp::Sub, a: one, b: eq });
+                        return Some(dst);
+                    }
                 }
                 let iop = match op {
                     BinOp::AddInt => crate::IntOp::Add,
