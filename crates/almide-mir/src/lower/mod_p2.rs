@@ -384,6 +384,10 @@ pub(crate) struct LowerCtx {
     /// (Value, Int) tuple recursively via `$__drop_value_tuple`, Err → `rc_dec` the String) — a flat
     /// `DropListStr` would leak the Value's nested payload.
     value_int_result_results: HashSet<ValueId>,
+    /// MIR values that are a `Result[(List[Value], Int), String]` wrapper (toml `collect_array_items`'s
+    /// `ok((items, np))`). A scope-end drop emits [`Op::DropResultListValueInt`] (Ok → free the
+    /// (List[Value], Int) tuple recursively via `$__drop_list_value_tuple`, Err → `rc_dec` the String).
+    list_value_int_result_results: HashSet<ValueId>,
     /// MIR values that are a `Result[(List[String], Int), String]` wrapper (toml `parse_key` /
     /// `parse_table_key`'s `ok((keys, pos))`). A scope-end drop emits [`Op::DropResultListStrInt`]
     /// (Ok → free the (List[String], Int) tuple recursively: each element String, the List block, the
@@ -701,6 +705,20 @@ pub fn is_list_str_int_result_ty(ty: &Ty) -> bool {
             && matches!(&a[0], Ty::Tuple(ts) if ts.len() == 2
                 && matches!(&ts[0], Ty::Applied(TypeConstructorId::List, le)
                     if le.len() == 1 && matches!(le[0], Ty::String))
+                && matches!(ts[1], Ty::Int))
+            && matches!(a[1], Ty::String))
+}
+
+/// `Result[(List[Value], Int), String]` — toml `collect_array_items`. The Ok-tuple's slot0 is a
+/// `List[Value]`; routed to `list_value_int_result_results` (recursive `Op::DropResultListValueInt`,
+/// freeing each element Value via `$__drop_list_value`).
+pub fn is_list_value_int_result_ty(ty: &Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    matches!(ty, Ty::Applied(TypeConstructorId::Result, a)
+        if a.len() == 2
+            && matches!(&a[0], Ty::Tuple(ts) if ts.len() == 2
+                && matches!(&ts[0], Ty::Applied(TypeConstructorId::List, le)
+                    if le.len() == 1 && is_value_ty(&le[0]))
                 && matches!(ts[1], Ty::Int))
             && matches!(a[1], Ty::String))
 }

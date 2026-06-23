@@ -323,6 +323,10 @@ impl LowerCtx {
                 // `Result[(List[String], Int), String]` (toml parse_key): the Ok tuple's List slot is
                 // freed recursively via `Op::DropResultListStrInt`.
                 self.list_str_int_result_results.insert(subj);
+            } else if crate::lower::is_list_value_int_result_ty(&subject.ty) {
+                // `Result[(List[Value], Int), String]` (toml collect_array_items): recursive
+                // `Op::DropResultListValueInt` (`$__drop_list_value_tuple`).
+                self.list_value_int_result_results.insert(subj);
             } else {
                 self.heap_elem_lists.insert(subj);
             }

@@ -270,6 +270,13 @@ pub enum Op {
     /// value_core routine (leak-loop verified). value_core is always linked here (the Ok built a Value
     /// via a `value.*` ctor). The Value-tuple counterpart of `DropResultStrInt`.
     DropResultValueInt { v: ValueId },
+    /// `drop_result_list_value_int v` — release a `Result[(List[Value], Int), String]` (toml
+    /// `collect_array_items`'s `ok((items, np))`). Same cap-as-tag wrapper; the Ok tuple's slot0 is a
+    /// `List[Value]`, freed RECURSIVELY via value_core's `$__drop_list_value_tuple` (Ok: at the tuple's
+    /// last ref `$__drop_list_value` slot0 — each element Value freed by tag — then the tuple block;
+    /// Err: `rc_dec` the String @12); THEN the wrapper. A flat `DropListStr` would leak the element
+    /// Values. The List[Value]-tuple counterpart of `DropResultValueInt`.
+    DropResultListValueInt { v: ValueId },
     /// `drop_result_list_str_int v` — release a `Result[(List[String], Int), String]` (toml
     /// `parse_key` / `parse_table_key`'s `ok((keys, pos))`). Same cap-as-tag wrapper, but the Ok
     /// tuple's slot0 is a `List[String]` handle: the RENDER frees it RECURSIVELY (a NESTED loop —
@@ -773,6 +780,7 @@ pub fn verify_ownership(func: &MirFunction) -> Result<(), Vec<Violation>> {
             | Op::DropResultValue { v }
             | Op::DropResultStrInt { v }
             | Op::DropResultValueInt { v }
+            | Op::DropResultListValueInt { v }
             | Op::DropResultListStrInt { v }
             | Op::DropListListStr { v }
             | Op::DropVariant { v, .. } => {

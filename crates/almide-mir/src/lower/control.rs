@@ -144,6 +144,8 @@ impl LowerCtx {
                                 self.value_int_result_results.insert(v);
                             } else if crate::lower::is_list_str_int_result_ty(&subject.ty) {
                                 self.list_str_int_result_results.insert(v);
+                            } else if crate::lower::is_list_value_int_result_ty(&subject.ty) {
+                                self.list_value_int_result_results.insert(v);
                             } else {
                                 self.heap_elem_lists.insert(v);
                             }

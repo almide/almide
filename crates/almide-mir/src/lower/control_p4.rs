@@ -350,6 +350,16 @@ impl LowerCtx {
                 self.drop_arm_locals(arm_mark);
                 Some(obj)
             }
+            // HEAP-Ok `Result[(List[Value], Int), String]` (toml collect_array_items as an if/match arm).
+            IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. }
+                if crate::lower::is_list_value_int_result_ty(result_ty) =>
+            {
+                let arm_mark = self.live_heap_handles.len();
+                let obj = self.try_lower_result_list_value_int_ctor(arm, result_ty)?;
+                self.ops.push(Op::Consume { v: obj });
+                self.drop_arm_locals(arm_mark);
+                Some(obj)
+            }
             // HEAP-Ok `Result[String, String]`: BOTH `Ok(string)` and `Err(string)` own a String, so
             // len-as-tag can't distinguish — materialize a len-1 DynListStr + the Ok/Err tag in cap@8.
             IrExprKind::ResultOk { expr }
@@ -745,6 +755,38 @@ impl LowerCtx {
         };
         self.heap_elem_lists.remove(&obj);
         self.value_int_result_results.insert(obj);
+        Some(obj)
+    }
+
+    /// Construct a `Result[(List[Value], Int), String]` `ok((<List[Value]>, <Int>))` / `err(<String>)`
+    /// — toml `collect_array_items`. The Ok-tuple's slot0 is a `List[Value]`, so the scope-end drop is
+    /// the recursive `Op::DropResultListValueInt` (`$__drop_list_value_tuple`), tracked in
+    /// `list_value_int_result_results`. `None` outside the exact type / materializable-payload subset.
+    pub(crate) fn try_lower_result_list_value_int_ctor(
+        &mut self,
+        expr: &IrExpr,
+        result_ty: &Ty,
+    ) -> Option<ValueId> {
+        if !crate::lower::is_list_value_int_result_ty(result_ty) {
+            return None;
+        }
+        let repr = repr_of(result_ty).ok()?;
+        let obj = match &expr.kind {
+            IrExprKind::ResultOk { expr: inner } => match &inner.kind {
+                IrExprKind::Tuple { elements } => {
+                    let tup = self.try_lower_tuple_construct(elements)?;
+                    self.materialize_result_str(tup, repr, false, false)
+                }
+                _ => return None,
+            },
+            IrExprKind::ResultErr { expr: inner } => {
+                let piece = self.lower_result_str_piece(inner)?;
+                self.materialize_result_str(piece, repr, true, false)
+            }
+            _ => return None,
+        };
+        self.heap_elem_lists.remove(&obj);
+        self.list_value_int_result_results.insert(obj);
         Some(obj)
     }
 

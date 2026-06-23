@@ -515,6 +515,19 @@ fn __drop_value_tuple(t: (Value, Int)) -> Unit = {
   prim.rc_dec(h)
 }
 
+// The (List[Value], Int) tuple counterpart of __drop_value_tuple (toml collect_array_items's
+// `ok((items, np))` where items: List[Value]). At the tuple's LAST ref (rc==1) the List[Value] slot
+// @12 is freed RECURSIVELY via __drop_list_value (each element Value freed by tag — a flat rc_dec
+// would leak the element Values); the Int @20 is scalar. Then the tuple block. prim-only ⇒ empty cert.
+fn __drop_list_value_tuple(t: (List[Value], Int)) -> Unit = {
+  let h = prim.handle(t)
+  if prim.load32(h + 0) == 1 then {
+    let lv: List[Value] = prim.load_handle(h + 12)
+    __drop_list_value(lv)
+  } else ()
+  prim.rc_dec(h)
+}
+
 // The (String, String) tuple-list counterpart of __svdrop_list / __drop_list_str_value (the
 // map.entries / render_attrs shape). At the list's last ref each tuple is freed at its OWN last ref
 // (rc_dec BOTH String slots @ th+12 and @ th+20 — vs the (String,Value) version's __drop_value @20),

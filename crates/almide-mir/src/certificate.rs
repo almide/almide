@@ -67,6 +67,7 @@ pub fn name_witness(func: &MirFunction) -> NameWitness {
             | Op::DropResultValue { v }
             | Op::DropResultStrInt { v }
             | Op::DropResultValueInt { v }
+            | Op::DropResultListValueInt { v }
             | Op::DropResultListStrInt { v }
             | Op::DropListListStr { v }
             | Op::DropVariant { v, .. }
@@ -570,6 +571,7 @@ pub fn ownership_certificate(func: &MirFunction) -> String {
             | Op::DropResultValue { v }
             | Op::DropResultStrInt { v }
             | Op::DropResultValueInt { v }
+            | Op::DropResultListValueInt { v }
             | Op::DropResultListStrInt { v }
             | Op::DropListListStr { v }
             | Op::DropVariant { v, .. } => {

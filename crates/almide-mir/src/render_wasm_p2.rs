@@ -412,6 +412,20 @@ fn render_op(
                  \x20   (call $rc_dec (local.get {p}))\n"
             )
         }
+        // Result[(List[Value], Int), String] (toml collect_array_items). Ok → value_core's
+        // $__drop_list_value_tuple frees the tuple recursively (its List[Value] slot's element Values,
+        // the List block, the tuple block); Err → rc_dec the String @12; THEN the wrapper.
+        Op::DropResultListValueInt { v } => {
+            let p = local(*v);
+            let payload = format!("(i32.load (i32.add (local.get {p}) (i32.const 12)))");
+            format!(
+                "    (if (i32.eq (i32.load (local.get {p})) (i32.const 1)) (then\n\
+                 \x20     (if (i32.eq (i32.load (i32.add (local.get {p}) (i32.const 16))) (i32.const 0))\n\
+                 \x20       (then (call $__drop_list_value_tuple {payload}))\n\
+                 \x20       (else (call $rc_dec {payload})))))\n\
+                 \x20   (call $rc_dec (local.get {p}))\n"
+            )
+        }
         // Result[(List[String], Int), String] (toml parse_key / parse_table_key). Wrapper @12 =
         // (List[String], Int) tuple / Err String; @16 = tag. Ok: at the tuple's last ref, at the
         // List's last ref rc_dec each element String (the inner loop), the List block, then the tuple

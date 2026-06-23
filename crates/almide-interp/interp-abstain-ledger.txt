@@ -92,6 +92,7 @@ random_int_entropy  out-of-interp-scope capability: random.int
 rc_alloc_stress  out-of-interp-scope capability: in-place container mutation `list.push` (mut receiver; interp args are by-value so the binding cannot be written back)
 regex_engine  out-of-interp-scope capability: regex.is_match
 regex_fuzz_batch  out-of-interp-scope capability: regex.is_match
+result_list_value_int_tuple  out-of-interp-scope capability: value.int
 result_match_rewrap_modcall  out-of-interp-scope capability: string.from_bytes
 result_value_int_tuple  out-of-interp-scope capability: value.int
 set_insertion_order  out-of-interp-scope capability: set.from_list
