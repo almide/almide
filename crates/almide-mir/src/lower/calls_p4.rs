@@ -16,6 +16,21 @@ impl LowerCtx {
         IrExpr { kind, ty: fty.clone(), span: base.span, def_id: None }
     }
 
+    /// The i64 BYTE-ADDRESS (`Prim::Handle`) of a materialized Option block bound to a `Var`, or
+    /// None (a non-Var / untracked operand → the caller defers). Gated on `materialized_options` so
+    /// the len-as-tag read at +4 is only done for a value KNOWN to carry the Option layout.
+    fn materialized_option_handle(&mut self, e: &IrExpr) -> Option<ValueId> {
+        if let IrExprKind::Var { id } = &e.kind {
+            let block = self.value_or_global(*id).ok()?;
+            if self.materialized_options.contains(&block) {
+                let h = self.fresh_value();
+                self.ops.push(Op::Prim { kind: crate::PrimKind::Handle, dst: Some(h), args: vec![block] });
+                return Some(h);
+            }
+        }
+        None
+    }
+
     /// Deep structural `left == right` for a value of type `ty`, returning the Bool ValueId — the
     /// recursive core shared by the scalar / String / Value / List / tuple / record eq. Scalars use
     /// the int/float prim; String→string.eq, Value→value.eq, List[T]→list.eq_T (the existing pure
@@ -69,6 +84,44 @@ impl LowerCtx {
                 };
                 let args = [left.clone(), right.clone()];
                 return self.lower_pure_module_value_call("list", v, &args, &Ty::Bool).ok();
+            }
+        }
+        // Option[SCALAR] == : a branchless masked compare over the materialized 0-or-1-element layout
+        // (tag = len @+4: None=0, Some=1; scalar payload at +12). eq = (tagL==tagR) AND (both-None OR
+        // payloadEq). The payload load is UNCONDITIONAL but MASKED — when a side is None its +12 slot
+        // is a garbage in-bounds read whose result the AND discards, so no control flow and no trap
+        // (a HEAP payload would deref a garbage handle, hence scalar-only; Option[String] defers).
+        if let Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, oa) = ty {
+            if oa.len() == 1 && !crate::lower::is_heap_ty(&oa[0]) {
+                if let (Some(hl), Some(hr)) =
+                    (self.materialized_option_handle(left), self.materialized_option_handle(right))
+                {
+                    let tag_l = self.load_at_offset(hl, 4, crate::PrimKind::Load { width: 4 });
+                    let tag_r = self.load_at_offset(hr, 4, crate::PrimKind::Load { width: 4 });
+                    let pay_l = self.load_at_offset(hl, 12, crate::PrimKind::Load { width: 8 });
+                    let pay_r = self.load_at_offset(hr, 12, crate::PrimKind::Load { width: 8 });
+                    let tags_eq = self.fresh_value();
+                    self.ops.push(Op::IntBinOp { dst: tags_eq, op: crate::IntOp::Eq, a: tag_l, b: tag_r });
+                    let zero = self.fresh_value();
+                    self.ops.push(Op::ConstInt { dst: zero, value: 0 });
+                    let is_none = self.fresh_value();
+                    self.ops.push(Op::IntBinOp { dst: is_none, op: crate::IntOp::Eq, a: tag_l, b: zero });
+                    let pay_eq = self.fresh_value();
+                    if matches!(oa[0], Ty::Float) {
+                        self.ops.push(Op::Prim {
+                            kind: crate::PrimKind::FloatCmp(crate::FCmpOp::Eq),
+                            dst: Some(pay_eq),
+                            args: vec![pay_l, pay_r],
+                        });
+                    } else {
+                        self.ops.push(Op::IntBinOp { dst: pay_eq, op: crate::IntOp::Eq, a: pay_l, b: pay_r });
+                    }
+                    let none_or_pay = self.fresh_value();
+                    self.ops.push(Op::IntBinOp { dst: none_or_pay, op: crate::IntOp::Or, a: is_none, b: pay_eq });
+                    let dst = self.fresh_value();
+                    self.ops.push(Op::IntBinOp { dst, op: crate::IntOp::And, a: tags_eq, b: none_or_pay });
+                    return Some(dst);
+                }
             }
         }
         // Tuple / record → AND of per-field typed eq.
@@ -277,6 +330,26 @@ impl LowerCtx {
                     let dst = self.fresh_value();
                     self.ops.push(Op::IntBinOp { dst, op: iop, a: cmp, b: zero });
                     return Some(dst);
+                }
+                // Option[scalar] `==` / `!=`: branchless masked compare (lower_eq_typed). Was
+                // both-arms-linearized (silent). Fires for a materialized Option with a scalar
+                // payload; otherwise None → the if walls (loud, safe).
+                if matches!(op, BinOp::Eq | BinOp::Neq)
+                    && matches!(
+                        &left.ty,
+                        Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, _)
+                    )
+                {
+                    if let Some(eq) = self.lower_eq_typed(left, right, &left.ty) {
+                        if matches!(op, BinOp::Eq) {
+                            return Some(eq);
+                        }
+                        let one = self.fresh_value();
+                        self.ops.push(Op::ConstInt { dst: one, value: 1 });
+                        let dst = self.fresh_value();
+                        self.ops.push(Op::IntBinOp { dst, op: crate::IntOp::Sub, a: one, b: eq });
+                        return Some(dst);
+                    }
                 }
                 // Tuple / record `==` / `!=`: field-wise deep equality (the AND of each field's own
                 // typed eq, recursing into nested tuples/records/heap fields). Was both-arms-

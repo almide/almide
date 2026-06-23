@@ -246,7 +246,7 @@ impl LowerCtx {
     /// Emit `base + offset` then a `prim` load of `kind` at that address, returning the
     /// loaded value (an i64 in the prim floor's uniform model). The address arithmetic
     /// mirrors what `prim.handle(x) + offset` lowers to (`Op::ConstInt` + `Op::IntBinOp`).
-    fn load_at_offset(&mut self, base: ValueId, offset: i64, kind: crate::PrimKind) -> ValueId {
+    pub(crate) fn load_at_offset(&mut self, base: ValueId, offset: i64, kind: crate::PrimKind) -> ValueId {
         let off = self.fresh_value();
         self.ops.push(Op::ConstInt { dst: off, value: offset });
         let addr = self.fresh_value();
