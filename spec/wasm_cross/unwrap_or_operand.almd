@@ -1,3 +1,4 @@
+// @contract: C-108
 // A scalar `??` in a BinOp OPERAND position (`(int.parse(s) ?? 0) - 48`, `(codepoint(ch) ?? 0)` fed
 // to arithmetic). Before: a `??` operand fell through `lower_scalar_value` to a `Const 0`, so the
 // WHOLE BinOp silently read 0 (a silent miscompile, e.g. oct/bin digit parsing). Now it executes.

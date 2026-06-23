@@ -1,3 +1,4 @@
+// @contract: C-103
 // LEAK GATE for the value.as_array Result drop ($__drop_result_lv): the 3-LEVEL recursive free
 // Result -> List[Value] -> element-Value -> String. A create+drop loop completes "done" if leak-free,
 // OOB-traps past 64KB if leaking (the cert canNOT see this leak). Byte-matches v0 ("done").

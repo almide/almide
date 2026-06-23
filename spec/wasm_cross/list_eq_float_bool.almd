@@ -1,3 +1,4 @@
+// @contract: C-099
 // list == over List[Float] / List[Bool] — element-wise (f64 == / i64 0-1). Were silently both-arms.
 fn cf(a: List[Float], b: List[Float]) -> String = if a == b then "T" else "F"
 fn cb(a: List[Bool], b: List[Bool]) -> String = if a == b then "T" else "F"

@@ -1,3 +1,4 @@
+// @contract: C-104
 // A tail-recursive accumulator whose loop body has a LET-BOUND heap-result `if` (base64 encode_chunks:
 // `let c2 = if remaining>1 then … else …`). Pre-desugaring before the TCO tail-duplicates the
 // continuation (the recursive call + accumulator append) into each arm, turning it into BRANCHED

@@ -1,3 +1,4 @@
+// @contract: C-108
 // An unwrap-`!` INSIDE an `if` arm (base64 decode_chunks: `let v1 = if remaining > 1 then
 // char_to_val(..)! else 0`). The desugar lifts the `!` out of the arm — `if c then e! else d` becomes
 // `let $r = if c then e else ok(d); let v = $r!` — which the let-bound-if pre-desugar + the let-unwrap

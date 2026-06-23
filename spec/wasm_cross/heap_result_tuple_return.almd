@@ -1,3 +1,4 @@
+// @contract: C-106
 fn bscalar(content: List[String], ind: String, end: Int) -> (Value, Int) = {
   let joined = if string.starts_with(ind, "|") then list.join(content, "\n") else list.join(content, " ")
   (value.str(if string.ends_with(ind, "-") then joined else joined + "\n"), end)

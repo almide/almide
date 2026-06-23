@@ -1,3 +1,4 @@
+// @contract: C-105
 // CROSS-DEPENDENT append-accumulator TCO (the off-by-one regression test). The appended element READS a
 // loop index that the SAME self-call also advances, so a naive sequential carried-param update would see
 // the NEW index → off-by-one. The TCO does a SIMULTANEOUS update: stage each scalar's new value in a temp

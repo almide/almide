@@ -1,3 +1,4 @@
+// @contract: C-114
 // `match list.first(xs) { none => A, some(key) => B }` returning a HEAP value (String/Value) — toml
 // set_nested/append_aot's `match list.first(path)`. The Some-payload (a String/Value) binds the @12
 // handle as a borrow via heap_or_scalar_bind (gated on the Option[heap] subject tracked nested-owner);

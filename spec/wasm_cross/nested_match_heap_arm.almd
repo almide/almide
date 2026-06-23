@@ -1,3 +1,4 @@
+// @contract: C-106
 // A heap-result `match` whose ELSE arm is itself a `match` (the try_decimal /
 // parse_number shape): the nested-match arm must lower through the same proven
 // variant-value-match machinery the tail position uses, executing only the

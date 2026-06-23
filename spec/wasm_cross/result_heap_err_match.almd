@@ -1,3 +1,4 @@
+// @contract: C-106
 // Camp-4 sub-case 1: a `match` over a SCALAR-Ok / HEAP-Err `Result[Int, String]` whose Err arm BINDS
 // + re-wraps the heap String error (`err(e) => err(e)` — the unwrap-`!` early-return shape). Reads the
 // len-as-tag @4 (a scalar result), binds slot-0 @12 as a BORROW, the Err arm auto-Dups the borrowed

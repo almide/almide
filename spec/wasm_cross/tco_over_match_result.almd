@@ -1,3 +1,4 @@
+// @contract: C-104
 // TCO over a `match` returning a Result (base64 decode_chunks's core shape). The unwrap-`!` desugar
 // turns `let x = f(p)!; recurse(.., acc+[x])` into `match f(p) { ok(x) => recurse(.., acc+[x]), err(e)
 // => err(e) }` — recursion inside a match arm, the function returning Result[List[Int], String]. Four

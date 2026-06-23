@@ -1,3 +1,4 @@
+// @contract: C-106
 // A record returned via a heap-result `if` (rsa's der_read_tl shape — an anonymous record whose
 // else-arm is a `var`+`for` block). Each arm constructs the record and MOVES IT OUT; the Record arm
 // in lower_heap_result_arm materializes it (scalar fast path / general construct) with a per-arm

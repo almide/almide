@@ -1,3 +1,4 @@
+// @contract: C-104
 // The EFFECT-fn collect_seq/collect_map shape (yaml): a tail-self-recursive effect fn returning a
 // (Value, Int) TUPLE, accumulating a List[Value] via `items + [val]`, where each step DESTRUCTURES an
 // effect-fn `!` result (`let (val, next) = dash_item(..)!`) and the base builds `value.array(items)`.

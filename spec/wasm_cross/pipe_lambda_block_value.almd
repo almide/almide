@@ -1,3 +1,4 @@
+// @contract: C-115
 // PIPE-LAMBDA INLINE + BLOCK-VALUED BIND (two pre-existing silent-miscompiles, both fixed here).
 // `x |> (n) => body` was desugared to a Computed-callee call `((n)=>body)(x)`, which v1 MIR cannot
 // lower as a first-class closure — it silently produced 0. The frontend now INLINES it to a block

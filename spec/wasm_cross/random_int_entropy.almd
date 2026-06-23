@@ -1,3 +1,4 @@
+// @contract: C-112
 // random.int — the WASI ENTROPY floor (Capability::Entropy), the first effectful capability beyond
 // Stdout. The self-hosted random.int (random_int.almd) reads host entropy via prim.random_get
 // (PrimKind::RandomGet → carries Entropy in cap_witness). The VALUE is nondeterministic, so this

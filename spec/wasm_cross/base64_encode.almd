@@ -1,3 +1,4 @@
+// @contract: C-109
 // base64 ENCODE running on v1 (the real almide/base64 encode path, decode omitted): a const string
 // module-global alphabet (Init::Str), encode_with -> encode_chunks (a tail-recursive String
 // accumulator with multi-concat `acc + c0+c1+c2+c3` AND let-bound heap-result `if`s for the pad

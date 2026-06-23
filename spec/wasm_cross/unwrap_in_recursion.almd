@@ -1,3 +1,4 @@
+// @contract: C-108
 // A Result-unwrap `e!` INSIDE a self-recursion (toml read_basic's `let (ch,np)=read_escape(..)!`
 // before the recursive call). desugar_let_unwrap turns the `!` into a match with an err-arm early-
 // return; try_tco_rewrite now BAILS on such an `err($x)`-of-a-Var base (the mid-body early-exit a TCO

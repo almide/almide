@@ -1,3 +1,4 @@
+// @contract: C-106
 // A value-match over a let-bound heap-Ok Result whose ok-arm RE-WRAPS the payload through a stdlib
 // MODULE call into a NEW Result (base64 decode's `match bs { ok(bytes) => ok(string.from_bytes(bytes)),
 // err(e) => err(e) }`). lower_result_str_piece now falls back to lower_owned_heap_field for a non-Var/

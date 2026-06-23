@@ -1130,3 +1130,214 @@ status    = "active"
 evidence  = [
   { path = "tests/crossmod_matrix_test.rs", name = "crossmod_shape_matrix", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-099"
+title     = "comparison/equality operators byte-match native across all operand types on the v1 wasm path"
+statement = "On the v1 wasm path the comparison operators (==, !=, <, <=, >, >=) produce stdout byte-identical to native for every operand type. Heap `==`/`!=` (Value, List[Int|String|Value|Float|Bool]) lowers to a scalar deep-equality call returning a 0/1 cond, so `if heap == heap …` branches on a single arm instead of the both-arms linearization that silently ran BOTH arms; equality is deep/structural element-wise (Value PartialEq, f64 == for floats, i64 0/1 for bools). String ordering (< <= > >=) compares lexicographic content via string.cmp rather than the i64 string handle, and Bool ordering follows value semantics (false < true) instead of being unhandled. Native is the oracle and native == wasm output is the certified invariant."
+since     = "0.27.6"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/value_eq.almd", class = "fixture" },
+  { path = "spec/wasm_cross/list_eq.almd", class = "fixture" },
+  { path = "spec/wasm_cross/list_eq_float_bool.almd", class = "fixture" },
+  { path = "spec/wasm_cross/string_bool_ordering.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-100"
+title     = "Self-hosted String classification/transform ops byte-match native on wasm"
+statement = "The self-hosted String classification predicate `string.is_alphanumeric` and the ASCII-fold transform `string.to_upper` MUST produce stdout byte-identical to native on the v1 wasm path. `is_alphanumeric` returns true only when every codepoint is ASCII alphanumeric and false for the empty string, matching native (`abc123`/`Z9` -> true; `ab-c`/`` -> false). `to_upper` maps `a-z` to `A-Z`, leaves all other bytes (digits, symbols, spaces) and the empty string unchanged, matching native `to_uppercase` over ASCII. Both ops were previously unlinked on v1 and are now certified equivalent across native Rust and wasm32."
+since     = "0.27.6"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/string_is_alphanumeric.almd", class = "fixture" },
+  { path = "spec/wasm_cross/string_to_upper.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-101"
+title     = "List ops over heap elements (String/Value) byte-match native and are leak/double-free free"
+statement = "List operations whose elements are heap-backed handles (List[String], List[Value]) — list.min/list.max, list.sort, list.insert/remove_at/swap, and list.set — produce stdout byte-identical to native on the v1 wasm path. Comparison-based ops order and select by element CONTENT (lexicographic byte order, matching v0's Rust String Ord), not by the raw i64/i32 handle the generic impls compared, which silently picked the wrong element. The typed _str/_value variants rc-copy each retained element to co-own it (so result and source can both drop without double-free), free each removed/replaced element exactly once, and recurse via __drop_value so a replaced Object/Array element's nested children are not leaked. The promise holds at scale: no leaks and no double-frees across repeated/large lists."
+since     = "0.27.6"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/list_minmax_str.almd", class = "fixture" },
+  { path = "spec/wasm_cross/list_modify_heap.almd", class = "fixture" },
+  { path = "spec/wasm_cross/list_set_value.almd", class = "fixture" },
+  { path = "spec/wasm_cross/list_sort_str.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-102"
+title     = "List iteration, call-result element materialization, and tail-recursive list traversal byte-match native"
+statement = "On the v1 wasm path, list element/iteration constructs produce stdout byte-identical to native Rust. A `List[String]` literal whose element is a string-returning module or named call (e.g. `[string.slice(s, 0, 1)]`) materializes a fresh owned String moved into the slot and freed by `DropListStr` at scope end. `list.enumerate` over a `List[String]` builds a `List[(Int,String)]`, and `enumerate |> list.find(closure)` evaluating a closure over the heap tuple's `.1` yields an `Option[(Int,String)]` that constructs, matches, destructures `some((idx, line))`, and drops (`$__drop_list_int_str`) identically across targets. A tail-self-recursive fn over a shrinking list (`list.drop(cs, 1)` per call with `match list.first(cs)`) is rewritten to an invariant borrowed list plus a synthetic scalar index — the cert-clean scalar-TCO form with no heap back-edge merge — covering direct-arm, block-arm-with-let, and string-eq element-use scans."
+since     = "0.27.6"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/list_call_element.almd", class = "fixture" },
+  { path = "spec/wasm_cross/list_enumerate_find.almd", class = "fixture" },
+  { path = "spec/wasm_cross/list_iter_tco.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-103"
+title     = "Self-hosted dynamic Value model (merge, array/as_array roundtrip, tuple TCO) byte-matches native and is leak-free in a loop"
+statement = "On the v1 wasm path the self-hosted dynamic Value model produces stdout byte-identical to native Rust. value.merge does a shallow Object merge that keeps a's keys in a's positions with b's values overriding, then appends b's new keys, and falls back to b when a is non-object (empty-merge is identity). value.array stores and value.as_array reads back the List[Value] payload with correct Ok/Err tag dispatch, and append-accumulator tail recursion building a List[Value] with a (Value, Int) heap-result tuple return lowers identically. The recursive Value drop is leak-free across 20000 create+drop iterations for the 3-level Array -> element-Value -> String and Result -> List[Value] -> element-Value -> String free chains, so the loop completes within page 1 instead of OOB-trapping."
+since     = "0.27.6"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/value_merge.almd", class = "fixture" },
+  { path = "spec/wasm_cross/value_array_leak_loop.almd", class = "fixture" },
+  { path = "spec/wasm_cross/value_as_array_leak_loop.almd", class = "fixture" },
+  { path = "spec/wasm_cross/value_as_array_roundtrip.almd", class = "fixture" },
+  { path = "spec/wasm_cross/value_array_tuple_tco.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-104"
+title     = "Tail-recursive accumulator shapes lower to bounded-stack loops byte-matching native"
+statement = "A self-tail-recursive function whose recursive call carries a growing heap accumulator MUST produce byte-identical stdout, stderr, and exit code on BOTH targets, executing in bounded stack on the v1 wasm path. This holds across the accumulator-construction shapes the TCO desugars must compose: let-bound and nested heap-result `if` arms (tail-duplicated into branched recursion), multi-leaf concat spines (`acc + c0 + c1`), List append, recursion inside a `match` returning `Result[List, String]` (from `!`-unwrap desugaring) on both ok and err paths, and effect-fn `(Value, Int)` tuple-result accumulators that destructure an effectful `!` result each step. A general (non-append) heap recursive arg that is NOT TCO-able instead lowers to a real bounded recursive call that still matches native exactly. Loop-carried accumulators are rc-balanced (drop-old/alloc-new, payload Dup) so there is no leak or double-free, and v1 output equals v0 in every case."
+since     = "0.27.6"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/general_recursion_tail.almd", class = "fixture" },
+  { path = "spec/wasm_cross/tco_let_bound_if.almd", class = "fixture" },
+  { path = "spec/wasm_cross/tco_multi_concat.almd", class = "fixture" },
+  { path = "spec/wasm_cross/tco_nested_list_accumulator.almd", class = "fixture" },
+  { path = "spec/wasm_cross/tco_over_match_result.almd", class = "fixture" },
+  { path = "spec/wasm_cross/effect_tuple_result_tco.almd", class = "fixture" },
+]
+
+# ── APPEND-ACCUMULATOR TCO CROSS-TARGET BYTE-MATCH (option C) ─────────
+[[contract]]
+id        = "C-105"
+title     = "var/append accumulator loops (scalar, owned-handle, cross-dep, mutual-recursion) byte-match native on wasm"
+statement = "A tail-self-recursive function that grows a heap accumulator by `acc + [x]` on every self-call is rewritten by the option-C TCO into a loop carrying one OWNED slot (seed `acc + []`, drop-old/acquire-new per iteration, cert `i(id)m`), and a mutually-recursive parser-loop pair is first reduced to a direct self-call (single-call sibling inlined, or the function-wide fresh-VarId desugar applied) so the same TCO fires. On the v1 wasm path these accumulator loops produce stdout, stderr, and exit code byte-identical to the native Rust oracle for any iteration count: scalar `List[Int]` elements, owned-handle `List[String]` elements (rc-incrementing concat, no leak/double-free), cross-dependent appends that must read the pre-update loop indices (no off-by-one), and mutual-recursion shapes whose semantics are preserved by the inlining. The list BLOCK ownership is machine-proved leak/double-free-free; per-element leak-safety and the final byte-equality are certified by the fixtures themselves."
+since     = "0.27.6"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/append_accumulator.almd", class = "fixture" },
+  { path = "spec/wasm_cross/append_accumulator_heap.almd", class = "fixture" },
+  { path = "spec/wasm_cross/cross_dep_accumulator.almd", class = "fixture" },
+  { path = "spec/wasm_cross/mutual_append.almd", class = "fixture" },
+  { path = "spec/wasm_cross/block_line_collect.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-106"
+title     = "Heap value bound from an if/match arm byte-matches native on the v1 wasm path"
+statement = "On the v1 wasm path, a heap-allocated value (a List, String, tuple, record, or user Result/Option payload) that is produced inside an if-arm or match-arm — including appended/concatenated list arms, record and tuple arms, str-int Ok-tuple arms, string-interpolated Err arms, arms that re-wrap a payload through a stdlib module call, and arms nested inside another match — is lowered with a per-arm ownership frame so only the taken arm's transient heap is materialized and freed exactly once. Each arm's owned value is moved out of the if/match cleanly, bound payloads borrow versus dup correctly, and the subject drops after the arms rather than via an unconditional rc_dec of an untaken arm. The resulting stdout, stderr, and exit code are byte-identical to the native Rust target across both taken-arm cases, with no leaks or rc_dec(0) traps."
+since     = "0.27.6"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/heap_result_if_append.almd", class = "fixture" },
+  { path = "spec/wasm_cross/heap_result_if_match_arm_frame.almd", class = "fixture" },
+  { path = "spec/wasm_cross/heap_result_if_record_arm.almd", class = "fixture" },
+  { path = "spec/wasm_cross/heap_result_if_str_int.almd", class = "fixture" },
+  { path = "spec/wasm_cross/heap_result_tuple_return.almd", class = "fixture" },
+  { path = "spec/wasm_cross/heap_result_err_interp.almd", class = "fixture" },
+  { path = "spec/wasm_cross/nested_match_heap_arm.almd", class = "fixture" },
+  { path = "spec/wasm_cross/result_heap_err_match.almd", class = "fixture" },
+  { path = "spec/wasm_cross/result_heap_ok_match.almd", class = "fixture" },
+  { path = "spec/wasm_cross/str_result_heap_bind.almd", class = "fixture" },
+  { path = "spec/wasm_cross/result_match_rewrap_modcall.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-107"
+title     = "heap Result-of-tuple / Result-of-list Ok payloads round-trip and byte-match native"
+statement = "Producing a Result whose Ok payload is a heap-bearing tuple — (String, Int), (Value, Int), (List[String], Int), or (List[Value], Int) — and then match-consuming it (binding the Ok tuple, destructuring it, printing its parts) emits stdout, stderr, and an exit code on the wasm32 path that are byte-identical to native Rust. Each shape uses its own recursive drop (Op::DropResultStrInt / DropResultValueInt / DropResultListStrInt / DropResultListValueInt, the latter two via value_core's tuple drops) so the Result wrapper, the tuple block, and every heap element inside slot0 are freed exactly once; a flat DropListStr would leak the inner String/Value/list elements. This holds leak-free at scale (loops and recursive accumulation) and on both the Ok and Err arms."
+since     = "0.27.6"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/result_str_int_tuple.almd", class = "fixture" },
+  { path = "spec/wasm_cross/result_value_int_tuple.almd", class = "fixture" },
+  { path = "spec/wasm_cross/result_list_str_int_tuple.almd", class = "fixture" },
+  { path = "spec/wasm_cross/result_list_value_int_tuple.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-108"
+title     = "Unwrap `!` and let-unwrap desugaring byte-match native in every position"
+statement = "The Result-unwrap operator `!` and its `let`-bound forms desugar to an Err-early-return match whose observable native↔wasm behavior is byte-identical for every syntactic position: nested in a call/ctor argument or BinOp operand (ANF-lifted before lowering), inside an `if` arm (lifted out of the arm), bound by `let s = e!`, destructured by `let (a, b) = e!`, and used before a self-recursive tail call (real recursion, not TCO). The Ok payload continues into the pushed-into-ok-arm continuation and the Err propagates as the function's return; a scalar `?? d` fallback in an operand position evaluates correctly instead of silently reading the default. Across all fixtures the wasm32 path emits the same stdout, stderr, and exit code as native Rust (v0==v1)."
+since     = "0.27.6"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/unwrap_in_callarg.almd", class = "fixture" },
+  { path = "spec/wasm_cross/unwrap_in_if_arm.almd", class = "fixture" },
+  { path = "spec/wasm_cross/unwrap_in_recursion.almd", class = "fixture" },
+  { path = "spec/wasm_cross/unwrap_or_operand.almd", class = "fixture" },
+  { path = "spec/wasm_cross/let_unwrap_propagation.almd", class = "fixture" },
+  { path = "spec/wasm_cross/destructure_let_unwrap.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-109"
+title     = "Self-hosted base64 encode byte-matches canonical / native on the v1 wasm path"
+statement = "The self-hosted almide/base64 encode path, compiled to v1 wasm32, prints stdout byte-identical to native and to canonical base64 vectors. This composes a const module-global alphabet string (Init::Str), a tail-recursive String-accumulator encode loop with chained multi-concat (acc + c0 + c1 + c2 + c3), let-bound heap-result `if` expressions for the pad characters, and `string.get ?? \"\"` Option fallbacks. Encoding \"a\", \"ab\", \"hello\", and \"Many hands make light work.\" yields the standard padded base64 output on both backends."
+since     = "0.27.6"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/base64_encode.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-110"
+title     = "In-place bytes.push mutation accumulator byte-matches native on v1 wasm"
+statement = "An in-place `bytes.push(mut buf, val) -> Unit` mutation accumulator inside a `var buf; while { bytes.push(buf, x) }` loop (the bigint.from_int shape) produces stdout byte-identical to native on the v1 wasm path. Because v1 has value semantics, the MIR lowering rewrites each `bytes.push(buf, x)` to the functional rebind `buf = bytes.append(buf, x)` using bytes_core's self-hosted append, preserving observable results. For input 0x010203 it reports length 3 and first byte 3 on both backends."
+since     = "0.27.6"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/bytes_push_inplace.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-111"
+title     = "Module-level const heap globals initialize and read identically on v1 wasm and native"
+statement = "Const module-level heap globals materialize as static DATA with no runtime initializer call, so functions referencing them lower and read byte-identical to native on the v1 wasm path. This covers a string literal global (Init::Str), an int-list literal, and a `bytes.from_list([int literals])` global (Init::Bytes), as in the AES S-box / base64 alphabet shape. Slicing the const string and reading `bytes.read_u8` from the const byte table print the same stdout on both backends."
+since     = "0.27.6"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/module_global_const.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-112"
+title     = "random.int draws stay in-range identically under the WASI entropy floor on v1 wasm"
+statement = "The self-hosted `random.int(lo, hi)` reaches the WASI entropy capability (Capability::Entropy) via prim.random_get on the v1 wasm path, the first effectful capability beyond Stdout, and is callable only from an effect fn that declares Entropy. Because the drawn value is nondeterministic, the certified observable is the deterministic RANGE invariant: every draw satisfies lo <= r <= hi. Drawing random.int(10, 20) fifty times, all 50 draws fall in range and both backends print \"50\"."
+since     = "0.27.6"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/random_int_entropy.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-113"
+title     = "Let-bound ADT/Result variant matched by tag byte-matches native on v1 wasm"
+statement = "A let-bound user-function Result/ADT value that is subsequently matched by tag (the num_signed_base shape) executes the match by reading the variant tag instead of walling, producing stdout byte-identical to native on the v1 wasm path. Seeding the let-binding's variant param gives the bound var the same read-shape a direct call-argument position already has, including the harder case of a let-bound heap-result `if` whose tail-duplication desugar distributes the match into each arm. Matching ok/err over both directly-bound and if-distributed Results prints the same output on both backends."
+since     = "0.27.6"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/letbound_variant_match.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-114"
+title     = "Matching an Option with a heap payload byte-matches native on v1 wasm"
+statement = "Matching an Option whose Some-payload is a heap value (String/Value), as in `match list.first(xs) { none => A, some(key) => B }` from toml set_nested/append_aot, returns the correct branch byte-identical to native on the v1 wasm path. The Some-payload binds the heap handle as a borrow via heap_or_scalar_bind, gated on the Option[heap] subject tracked as a nested-owner, extending the prior lowering that only handled a Tuple Some-payload. picking from [\"hello\", \"world\"] yields \"hello\" and from [] yields the fallback \"empty\" on both backends."
+since     = "0.27.6"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/option_match_heap_payload.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-115"
+title     = "Pipe into a block-bodied lambda producing a value byte-matches native on v1 wasm"
+statement = "A pipe into an inline lambda (`x |> (n) => body`) is inlined by the frontend to a block bind `{ let n = x; body }` and lowered to the correct value on the v1 wasm path, byte-identical to native, fixing a prior silent miscompile that produced 0. This also exercises block-valued scalar binds (`let a = { let n = ...; ... }`), which v1 MIR previously mis-lowered to 0 and now lowers by running the block's statements then binding to the block tail. Single, chained, explicit-block, and block-bodied-lambda forms print 25, 26, 48, and 36 on both backends; a pipe-lambda in a call-argument position safely walls rather than mis-lowering."
+since     = "0.27.6"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/pipe_lambda_block_value.almd", class = "fixture" },
+]

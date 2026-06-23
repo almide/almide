@@ -1,3 +1,4 @@
+// @contract: C-105
 // APPEND-ACCUMULATOR TCO (option C, the heap-loop-carried producer). A tail-self-recursive fn whose
 // EVERY self-call grows a heap accumulator by `acc + [x]` is rewritten to a loop carrying an OWNED slot:
 // the TCO seeds a fresh slot = `acc + []` (an owned copy of the borrowed param), substitutes it for

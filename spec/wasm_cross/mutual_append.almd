@@ -1,3 +1,4 @@
+// @contract: C-105
 // MUTUAL-RECURSION INLINING (the yaml parser-loop shape, `flow_rec ⇄ flow_step`). `frec` tail-calls a
 // sibling `fstep` that tail-calls `frec` back — a mutual pair the append-accumulator TCO cannot see (it
 // fires only on a SELF-call). The program pre-pass `inline_mutual_tail_recursion` inlines the

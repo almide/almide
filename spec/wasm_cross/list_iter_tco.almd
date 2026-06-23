@@ -1,3 +1,4 @@
+// @contract: C-102
 // LIST-ITERATOR TCO (heap-loop-carried escape): a tail-self-recursive fn over a SHRINKING list
 // (`list.drop(cs,1)` per call, `match list.first(cs)`) is rewritten to an INVARIANT borrowed list +
 // a synthetic scalar INDEX — the cert-clean scalar-TCO form, NO heap back-edge merge / cert change.

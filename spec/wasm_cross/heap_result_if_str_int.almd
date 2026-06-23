@@ -1,3 +1,4 @@
+// @contract: C-106
 // A heap-result `if` whose arms are ok((String,Int))/err for Result[(String,Int),String] (toml
 // parse_key_part's `ok((slice, end))` AS AN IF-ARM, not just a tail). The Ok-tuple's String must
 // free recursively via the brick-1 DropResultStrInt — a flat DropListStr would leak it.

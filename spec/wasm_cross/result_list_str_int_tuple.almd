@@ -1,3 +1,4 @@
+// @contract: C-107
 // Result[(List[String], Int), String] producer + match-consumer (toml parse_key's `ok((keys, pos))`).
 // The Ok tuple's slot0 is a List[String], freed RECURSIVELY (each element String + the List block +
 // the tuple block) via Op::DropResultListStrInt — a flat DropListStr would leak the element Strings.

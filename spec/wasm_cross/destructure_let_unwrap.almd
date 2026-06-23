@@ -1,3 +1,4 @@
+// @contract: C-108
 // `let (a, b) = e!` — a DESTRUCTURE-let-unwrap of a tuple-Result (toml parse_key's
 // `let (first, np) = parse_key_part(t, p)!`). desugar_let_unwrap rewrites it to
 // `match e { ok($p2) => { let (a,b) = $p2; <rest> }, err($x) => err($x) }` — the proven direct-match

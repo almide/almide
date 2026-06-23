@@ -1,3 +1,4 @@
+// @contract: C-105
 // HEAP-ELEMENT append-accumulator TCO (option C, widening the proven chain to owned-handle elements).
 // `acc + [s]` over a `List[String]` (each slot an OWNED String handle) lowers like the scalar case —
 // a fresh owned slot, drop-old/acquire-new per iteration, cert `i(id)m` — but the concat is the

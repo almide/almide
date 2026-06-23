@@ -1,3 +1,4 @@
+// @contract: C-102
 // list.enumerate over a List[String] + the `enumerate |> list.find(closure)` consumer (the yaml
 // parse_lines shape): builds a List[(Int,String)], finds the first element matching a CLOSURE that
 // reads the tuple's `.1`, and destructures `some((idx, line))` from the Option[(Int,String)] in a

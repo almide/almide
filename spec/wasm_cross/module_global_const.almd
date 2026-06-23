@@ -1,3 +1,4 @@
+// @contract: C-111
 // CONST module-level heap globals materialize as DATA (no runtime call), so a function referencing
 // them lowers (the aes S-box / base64 alphabet shape): a string literal (Init::Str), an int-list
 // literal (Init::IntList), and bytes.from_list([int literals]) (Init::Bytes). A computed global keeps

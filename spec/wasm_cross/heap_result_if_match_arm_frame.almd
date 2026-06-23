@@ -1,3 +1,4 @@
+// @contract: C-106
 // A heap-result `if` whose THEN arm is a `match <call(temp)> {..}` (the yaml parse_number 0x shape):
 // `if starts_with(c,"0x") then match int.from_hex(string.drop(c,2)) { ok(n)=>value.int(n), err=>.. }
 // else value.str(c)`. The `string.drop(c,2)` arg temp is materialized in the THEN arm; it must be

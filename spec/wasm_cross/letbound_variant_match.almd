@@ -1,3 +1,4 @@
+// @contract: C-113
 // A LET-BOUND user-function Result, then a `match` over the bound var — the num_signed_base
 // shape. `seed_variant_param` on the let-binding gives the bound var the same read-shape the
 // direct-call-arg position already has, so the match executes (reads the tag) instead of walling.

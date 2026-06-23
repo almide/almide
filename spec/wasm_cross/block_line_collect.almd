@@ -1,3 +1,4 @@
+// @contract: C-105
 // MUTUAL-RECURSIVE block collector (collect_block ↔ block_line) — the yaml block-scalar shape. block_line's
 // body is a heap-result `if` whose THEN arm carries a call-arg `if` (`collect_block(.., if list.is_empty(acc)
 // then acc else acc+[""])`) and whose ELSE arm appends `acc + [string.drop(line, 0)]`. The bare-call-arg

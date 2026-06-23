@@ -1,3 +1,4 @@
+// @contract: C-103
 // The NON-EFFECT core of collect_seq/collect_map (the 6 remaining yaml walls): a tail-self-recursive
 // loop returning a `(Value, Int)` TUPLE, accumulating a `List[Value]` with `items + [value.str(..)]`
 // and building `value.array(items)` at the base. This whole stack — append-accumulator TCO over a

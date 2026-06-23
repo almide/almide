@@ -1,3 +1,4 @@
+// @contract: C-101
 // list.min / list.max over a List[String] — by CONTENT (lexicographic), not the i64 handle the generic
 // list_min/list_max compared (→ wrong element, a silent bug). Returns Some(a deep copy) like list.get.
 effect fn main() -> Unit = {

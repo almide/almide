@@ -1,3 +1,4 @@
+// @contract: C-103
 // value.as_array round-trip: build a tag-5 Array, read it back via the cap@16 Result, bind the
 // `List[Value]` payload (the Camp-4 borrow) + len it; Err arm for a non-Array. Verifies value.array
 // STORES correctly + value.as_array READS correctly + the Ok(items) heap-payload bind + tag dispatch.

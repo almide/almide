@@ -1,3 +1,4 @@
+// @contract: C-099
 // list_a == list_b over List[Int|String|Value] — element-wise deep equality. WITHOUT this the heap
 // `==` did not lower to a scalar cond, so `if list==list …` ran BOTH arms (silent miscompile). Now branches.
 fn ci(a: List[Int], b: List[Int]) -> String = if a == b then "T" else "F"

@@ -1,3 +1,4 @@
+// @contract: C-110
 // The in-place `bytes.push(mut b, val) -> Unit` intrinsic (a `var buf; while { bytes.push(buf, x) }`
 // mutation accumulator — bigint.from_int's shape). v1 has value semantics, so the MIR lowering
 // rewrites `bytes.push(buf, x)` to a functional rebind `buf = bytes.append(buf, x)` (bytes_core's

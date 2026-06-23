@@ -1,3 +1,4 @@
+// @contract: C-107
 // Result[(List[Value], Int), String] producer + match-consumer (toml collect_array_items's
 // `ok((items, np))`). The Ok tuple's slot0 is a List[Value], freed RECURSIVELY (each element Value +
 // the List block + the tuple block) via value_core's $__drop_list_value_tuple (Op::DropResultListValueInt).

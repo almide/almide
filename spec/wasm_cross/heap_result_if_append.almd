@@ -1,3 +1,4 @@
+// @contract: C-106
 // HEAP-RESULT-IF in RETURN position whose arms are an append (the flow_rec base case). `collect`'s base
 // `if list.is_empty(acc) then acc else acc + ["end"]` returns a heap-result `if` where one arm MOVES OUT
 // the accumulator (`acc`, a Dup+Consume) and the other a CONCAT (`acc + ["end"]`, a fresh owned list

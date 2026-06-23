@@ -1,3 +1,4 @@
+// @contract: C-107
 // Result[(Value, Int), String] producer + match-consumer (toml parse_val's `ok((value.…, pos))`).
 // The Ok tuple's slot0 is a dynamic Value (can nest an Array/Object), freed RECURSIVELY via
 // value_core's $__drop_value_tuple (Op::DropResultValueInt) — a flat DropListStr would leak it.

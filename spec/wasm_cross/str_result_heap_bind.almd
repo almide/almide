@@ -1,3 +1,4 @@
+// @contract: C-106
 // A heap-result `match` over a str-result (`value.as_string` — Result[String, String]) that
 // BINDS the Ok payload String and a heap result (the `emit` shape): the payload binds as a
 // BORROW of slot-0, the owned subject drops AFTER the arms (not before), and a borrow-or-return

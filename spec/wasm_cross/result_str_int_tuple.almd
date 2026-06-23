@@ -1,3 +1,4 @@
+// @contract: C-107
 // Result[(String, Int), String] producer + match-consumer (toml parse_key_part's `ok((slice, pos))`
 // shape). The Ok payload is a (String heap + Int scalar) tuple: producing `ok((s, n))` (tail) and
 // match-consuming it must drop the wrapper + the tuple's String recursively (Op::DropResultStrInt),

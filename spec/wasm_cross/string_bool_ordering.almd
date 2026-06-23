@@ -1,3 +1,4 @@
+// @contract: C-099
 // String `< <= > >=` (lexicographic via string.cmp) and Bool ordering (false < true). Were silently
 // wrong — String compared the i64 handle, Bool ordering was unhandled. Now they branch correctly.
 fn cs(a: String, b: String) -> String = if a < b then "LT" else if a > b then "GT" else "EQ"

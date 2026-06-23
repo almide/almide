@@ -1,3 +1,4 @@
+// @contract: C-102
 // CALL-RESULT list-element materialization. A `List[String]` literal element may be a STRING-returning
 // MODULE call (`[string.slice(s, 0, 1)]`) or NAMED call, not just a literal/var — the dominant shape in
 // `acc + [string.slice(…)]` accumulators. `try_lower_str_list_literal` lowers it to a fresh OWNED String
