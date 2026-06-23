@@ -66,6 +66,7 @@ list_count_index_truncation  out-of-interp-scope capability: list.take
 list_insert_clamp  out-of-interp-scope capability: list.insert
 list_iter_tco  out-of-interp-scope capability: list.drop
 list_remove_at_oob  out-of-interp-scope capability: list.remove_at
+list_set_value  out-of-interp-scope capability: value.int
 list_slice_oob  out-of-interp-scope capability: list.slice
 list_swap_oob  out-of-interp-scope capability: list.swap
 list_total_order  out-of-interp-scope capability: list.min/max on non-comparable elements

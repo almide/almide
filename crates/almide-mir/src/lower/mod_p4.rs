@@ -724,6 +724,12 @@ pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], resu
                 if s.len() == 1 && matches!(s[0], Ty::String) {
                     return "list.set_str".to_string();
                 }
+                // A List[Value] element is a dynamic Value (i32 handle), not an i64 Int — the generic
+                // list.set's i64 val param mismatches (invalid wasm). set_value rc-copies + co-owns and
+                // frees the replaced element via the recursive __drop_value. toml set_in_aot_last.
+                if s.len() == 1 && is_value_ty(&s[0]) {
+                    return "list.set_value".to_string();
+                }
             }
         }
         // The element-PRESERVING List[heap]-returning combinators (source elem == result elem).

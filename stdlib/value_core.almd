@@ -190,6 +190,43 @@ fn json_keys(v: Value) -> List[String] = {
   __vobj_keys(v, 0, n, [])
 }
 
+// list.set over a List[Value] (toml set_in_aot_last's `list.set(items, idx, …)`). A Value element is an
+// i32 handle in the 8-byte slot (like a String), so the slot copy rc_incs to CO-OWN each element; BUT
+// the REPLACED element must be freed RECURSIVELY via __drop_value — a flat rc_dec would free an
+// Object/Array element's block while LEAKING its nested children (the very reason this lives in
+// value_core, where __drop_value is in scope, not in list_modify). The result is a List[Value] so it
+// drops via the recursive DropListValue. v0 indexes `i as usize`, so negative/>=len silently no-ops.
+fn __lsv_copy(src: Int, dst: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let e = prim.load64(src + i * 8)
+    prim.rc_inc(e)
+    prim.store64(dst + i * 8, e)
+    __lsv_copy(src, dst, n, i + 1)
+  }
+
+fn __lsv_set(bh: Int, n: Int, i: Int, x: Value) -> Int =
+  if i < 0 then 0
+  else if i >= n then 0
+  else {
+    let old: Value = prim.load_handle(bh + 12 + i * 8)
+    __drop_value(old)
+    let xh = prim.handle(x)
+    prim.rc_inc(xh)
+    prim.store64(bh + 12 + i * 8, xh)
+    0
+  }
+
+fn list_set_value(xs: List[Value], i: Int, x: Value) -> List[Value] = {
+  let h = prim.handle(xs)
+  let n = prim.load32(h + 4)
+  let buf = prim.alloc_list_str(n)
+  let bh = prim.handle(buf)
+  let _c = __lsv_copy(h + 12, bh + 12, n, 0)
+  let _s = __lsv_set(bh, n, i, x)
+  buf
+}
+
 fn __vobj_find(v: Value, key: String, i: Int, n: Int) -> Int =
   if i >= n then 0 - 1
   else {

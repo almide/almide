@@ -435,6 +435,9 @@ impl LowerCtx {
                         | "value_get"     // Object linear-scan get (rc_inc the found value)
                         | "__vobj_fill"   // Object shallow-copy (rc_inc each key/value) — value.object
                         | "__vdrop_obj"   // Object recursive free (rc_dec key, __drop_value value)
+                        | "__lsv_copy"    // list.set_value: rc-copy each Value element (co-own)
+                        | "__lsv_set"     // list.set_value: __drop_value the replaced + rc_inc the new
+                        | "list_set_value"
                 ) || self.fn_name.starts_with("__drop_") =>
             {
                 // `__drop_*` also covers the GENERATED per-type custom-variant recursive drops
