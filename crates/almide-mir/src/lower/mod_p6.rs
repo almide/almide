@@ -657,16 +657,36 @@ pub fn desugar_let_unwrap(body: &IrExpr) -> Option<IrExpr> {
     let IrExprKind::Block { stmts, expr: tail } = &body.kind else {
         return None;
     };
-    let (i, bind_var, bind_ty, inner) = stmts.iter().enumerate().find_map(|(i, s)| match &s.kind {
+    // A single-var `let v = e!` (Bind-of-Unwrap) OR a destructure `let (a, b) = e!` (BindDestructure
+    // whose VALUE is Result-typed — the `!` lowers to a bare Result-typed Call here, not a kept Unwrap
+    // node, so key on the TYPE). Both early-return the `Err(E)` and bind/destructure the `Ok(T)`.
+    enum Target {
+        Single { var: VarId, ty: Ty },
+        Destructure { pattern: almide_ir::IrPattern },
+    }
+    let (i, target, inner) = stmts.iter().enumerate().find_map(|(i, s)| match &s.kind {
         IrStmtKind::Bind { var, ty, value, .. } => match &value.kind {
-            IrExprKind::Unwrap { expr } => Some((i, *var, ty.clone(), (**expr).clone())),
+            IrExprKind::Unwrap { expr } => {
+                Some((i, Target::Single { var: *var, ty: ty.clone() }, (**expr).clone()))
+            }
             _ => None,
         },
+        IrStmtKind::BindDestructure { pattern, value } => {
+            // `let (a,b) = e!`. The `!` is EITHER kept as an `Unwrap` node (inner = its Result expr)
+            // OR already stripped to a bare Result-typed value (inner = the value) — handle both so a
+            // destructure-let-unwrap never reaches lowering as a Result-destructured-as-a-tuple.
+            let inner = match &value.kind {
+                IrExprKind::Unwrap { expr } => Some((**expr).clone()),
+                _ if value.ty.is_result() => Some(value.clone()),
+                _ => None,
+            }?;
+            Some((i, Target::Destructure { pattern: pattern.clone() }, inner))
+        }
         _ => None,
     })?;
-    // The unwrapped expr must be a `Result[T, E]` — `!` early-returns its `Err(E)`.
-    let err_ty = match &inner.ty {
-        Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 => a[1].clone(),
+    // The unwrapped expr must be a `Result[T, E]` — `!` early-returns its `Err(E)`, binds `Ok(T)`.
+    let (ok_ty, err_ty) = match &inner.ty {
+        Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 => (a[0].clone(), a[1].clone()),
         _ => return None,
     };
     let result_ty = body.ty.clone();
@@ -677,15 +697,33 @@ pub fn desugar_let_unwrap(body: &IrExpr) -> Option<IrExpr> {
         span: body.span.clone(),
         def_id: body.def_id,
     };
-    // ok(v) => { <rest> }
+    // ok(<bind>) => { <rest> }. A destructure becomes `ok($p2) => { let (a,b) = $p2; <rest> }` — the
+    // hand-written direct-match form that already lowers (a Result destructured directly as a tuple
+    // otherwise silently miscompiled: the wrapper @12/@16 was read as the tuple fields).
+    let (ok_pattern, cont_stmts): (almide_ir::IrPattern, Vec<IrStmt>) = match target {
+        Target::Single { var, ty } => {
+            (almide_ir::IrPattern::Bind { var, ty }, stmts[i + 1..].to_vec())
+        }
+        Target::Destructure { pattern } => {
+            let p2 = VarId(max_var_id(body) + 2);
+            let destr = IrStmt {
+                kind: IrStmtKind::BindDestructure {
+                    pattern,
+                    value: mk(IrExprKind::Var { id: p2 }, ok_ty.clone()),
+                },
+                span: body.span.clone(),
+            };
+            let mut cs = vec![destr];
+            cs.extend(stmts[i + 1..].iter().cloned());
+            (almide_ir::IrPattern::Bind { var: p2, ty: ok_ty.clone() }, cs)
+        }
+    };
     let cont = mk(
-        IrExprKind::Block { stmts: stmts[i + 1..].to_vec(), expr: tail.clone() },
+        IrExprKind::Block { stmts: cont_stmts, expr: tail.clone() },
         result_ty.clone(),
     );
     let ok_arm = almide_ir::IrMatchArm {
-        pattern: almide_ir::IrPattern::Ok {
-            inner: Box::new(almide_ir::IrPattern::Bind { var: bind_var, ty: bind_ty }),
-        },
+        pattern: almide_ir::IrPattern::Ok { inner: Box::new(ok_pattern) },
         guard: None,
         body: cont,
     };
