@@ -83,6 +83,9 @@ pub fn wasm_pattern(op: &crate::Op) -> Option<String> {
         Op::DropListStrStr { .. } => "call $__drop_list_str_str".into(),
         Op::DropResultListValue { .. } => "call $__drop_result_lv".into(),
         Op::DropResultValue { .. } => "call $__drop_result_value".into(),
+        // Inline-rendered (no helper) like DropListStr; the cert-claimed token is the
+        // final wrapper `call $rc_dec`.
+        Op::DropResultStrInt { .. } => "call $rc_dec".into(),
         Op::DropListListStr { .. } => "drop_list_list_str".into(),
         Op::DropVariant { ty, .. } => format!("call $__drop_{ty}"),
         // A copy-on-write: MakeUnique clones a SHARED block before in-place

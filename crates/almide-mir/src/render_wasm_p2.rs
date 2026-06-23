@@ -373,6 +373,30 @@ fn render_op(
         Op::DropResultValue { v } => {
             format!("    (call $__drop_result_value (local.get {}))\n", local(*v))
         }
+        // INLINE recursive drop of a `Result[(String, Int), String]` (toml `parse_key_part`'s
+        // `ok((slice, pos))`). Wrapper `[rc][len@4=1][cap@8][@12 payload-handle][@16 tag]`: at the
+        // wrapper's last ref (rc==1), tag@16==0 (Ok) frees the `(String, Int)` tuple @12 — at the
+        // TUPLE's last ref `rc_dec` its String slot0 @12 (the Int slot1 @20 is scalar), then the tuple
+        // block; tag==1 (Err) `rc_dec`s the String @12. THEN the wrapper block (always). Self-contained
+        // (no helper ⇒ no value_core link needed); the tuple handle is re-loaded rather than spilled to
+        // a scratch local. Cert = the single final wrapper `call $rc_dec` (`d`); the nested frees are
+        // the trusted raw-handle routine, leak-loop verified.
+        Op::DropResultStrInt { v } => {
+            let p = local(*v);
+            // @12 (low 32) = payload handle (Ok: the tuple; Err: the String); @16 = tag (0=Ok).
+            let payload = format!("(i32.load (i32.add (local.get {p}) (i32.const 12)))");
+            // The tuple's String slot0 @12 (read off the tuple handle = `payload`).
+            let tup_str = format!("(i32.load (i32.add {payload} (i32.const 12)))");
+            format!(
+                "    (if (i32.eq (i32.load (local.get {p})) (i32.const 1)) (then\n\
+                 \x20     (if (i32.eq (i32.load (i32.add (local.get {p}) (i32.const 16))) (i32.const 0))\n\
+                 \x20       (then\n\
+                 \x20         (if (i32.eq (i32.load {payload}) (i32.const 1)) (then (call $rc_dec {tup_str})))\n\
+                 \x20         (call $rc_dec {payload}))\n\
+                 \x20       (else (call $rc_dec {payload})))))\n\
+                 \x20   (call $rc_dec (local.get {p}))\n"
+            )
+        }
         // RECURSIVE drop of a CUSTOM variant (ADT brick 5b) — the GENERATED per-type
         // `$__drop_<ty>` (the `$__drop_value` shape, auto-linked from generated Almide): at the
         // last ref it reads the tag, recursively frees each variant ctor field + rc_dec's each

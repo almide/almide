@@ -134,7 +134,15 @@ impl LowerCtx {
                             // tag @16) + heap_elem_lists (the err-arm String bind gate AND the flat
                             // DropListStr the construction uses for the List[Int]/String Ok payload).
                             self.materialized_results_str.insert(v);
-                            self.heap_elem_lists.insert(v);
+                            // A `Result[(String, Int), String]` (toml parse_key_part) needs the
+                            // RECURSIVE DropResultStrInt (frees the Ok tuple's String + block) — a
+                            // flat DropListStr would rc_dec the @12 tuple HANDLE only, leaking its
+                            // String. Other heap-Ok shapes keep the flat heap_elem_lists/DropListStr.
+                            if crate::lower::is_str_int_result_ty(&subject.ty) {
+                                self.str_int_result_results.insert(v);
+                            } else {
+                                self.heap_elem_lists.insert(v);
+                            }
                         } else {
                             self.materialized_results.insert(v);
                             if let Ty::Applied(

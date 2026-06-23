@@ -302,6 +302,12 @@ impl LowerCtx {
                 // its drop is the RECURSIVE `Op::DropResultValue` (Ok → `$__drop_value`), distinct
                 // from a String-Ok's flat DropListStr.
                 self.value_result_results.insert(subj);
+            } else if crate::lower::is_str_int_result_ty(&subject.ty) {
+                // `Result[(String, Int), String]` (toml parse_key_part): the Ok payload is a
+                // (String, Int) tuple — its drop is the RECURSIVE `Op::DropResultStrInt` (frees the
+                // tuple's String + tuple block), distinct from a flat DropListStr which would leak
+                // the tuple's String (it would rc_dec the @12 tuple HANDLE only).
+                self.str_int_result_results.insert(subj);
             } else {
                 self.heap_elem_lists.insert(subj);
             }

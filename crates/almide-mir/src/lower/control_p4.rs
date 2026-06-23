@@ -629,6 +629,50 @@ impl LowerCtx {
         }
     }
 
+    /// Construct a `Result[(String, Int), String]` `ok((<String>, <Int>))` / `err(<String>)` — the
+    /// toml `parse_key_part` `ok((slice, pos))` shape. Ok materializes the `(String, Int)` tuple
+    /// (`try_lower_tuple_construct`, rc-owning the String slot) and wraps it in the cap-as-tag block
+    /// (payload @12 = the tuple handle); Err wraps a String. Tracked in `str_int_result_results` so the
+    /// scope-end drop is the recursive [`Op::DropResultStrInt`] (frees the tuple's String + both blocks)
+    /// — NOT the flat `heap_elem_lists`/`DropListStr` `materialize_result_str` defaults to, which would
+    /// leak the tuple's String. Returns the wrapper block (moved out as the tail return), or `None`
+    /// outside the exact `Result[(String, Int), String]` / materializable-payload subset.
+    pub(crate) fn try_lower_result_str_int_ctor(
+        &mut self,
+        expr: &IrExpr,
+        result_ty: &Ty,
+    ) -> Option<ValueId> {
+        use almide_lang::types::constructor::TypeConstructorId;
+        let is_str_int = matches!(result_ty,
+            Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2
+                && matches!(&a[0], Ty::Tuple(ts) if ts.len() == 2
+                    && matches!(ts[0], Ty::String) && matches!(ts[1], Ty::Int))
+                && matches!(a[1], Ty::String));
+        if !is_str_int {
+            return None;
+        }
+        let repr = repr_of(result_ty).ok()?;
+        let obj = match &expr.kind {
+            IrExprKind::ResultOk { expr: inner } => match &inner.kind {
+                IrExprKind::Tuple { elements } => {
+                    let tup = self.try_lower_tuple_construct(elements)?;
+                    self.materialize_result_str(tup, repr, false, false)
+                }
+                _ => return None,
+            },
+            IrExprKind::ResultErr { expr: inner } => {
+                let piece = self.lower_result_str_piece(inner)?;
+                self.materialize_result_str(piece, repr, true, false)
+            }
+            _ => return None,
+        };
+        // Re-route the drop: materialize_result_str(value_ok=false) tracked `heap_elem_lists`
+        // (flat DropListStr); a (String, Int)-tuple Ok needs the recursive DropResultStrInt.
+        self.heap_elem_lists.remove(&obj);
+        self.str_int_result_results.insert(obj);
+        Some(obj)
+    }
+
     /// `handle + k` as a fresh i64 address value (ConstInt + IntBinOp::Add).
     fn const_add(&mut self, base: ValueId, k: i64) -> ValueId {
         let c = self.fresh_value();

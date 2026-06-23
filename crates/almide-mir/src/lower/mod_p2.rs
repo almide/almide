@@ -374,6 +374,11 @@ pub(crate) struct LowerCtx {
     /// drop emits [`Op::DropResultValue`] (tag-dispatch: Ok → `$__drop_value`, Err → `rc_dec`) — a
     /// flat `DropListStr` would leak the Ok Value's nested payload.
     value_result_results: HashSet<ValueId>,
+    /// MIR values that are a `Result[(String, Int), String]` wrapper (toml `parse_key_part`'s
+    /// `ok((slice, pos))`). A scope-end drop emits [`Op::DropResultStrInt`] (tag-dispatch: Ok → free
+    /// the `(String, Int)` tuple @12 recursively (its String slot only), Err → `rc_dec` the String) —
+    /// a flat `DropListStr` would leak the Ok tuple's String + free the tuple block as if it were one.
+    str_int_result_results: HashSet<ValueId>,
     /// MIR values KNOWN to be a REAL, POPULATED list block (a list LITERAL, a heap-list PARAM —
     /// the v1 convention passes a genuine block —, or a self-host list-returning CALL whose closure
     /// args ALL lifted, so the callee actually fills it). A direct `xs[i]` (`lower_scalar_index_access`)
@@ -648,6 +653,20 @@ pub fn is_value_result_ty(ty: &Ty) -> bool {
     use almide_lang::types::constructor::TypeConstructorId;
     matches!(ty, Ty::Applied(TypeConstructorId::Result, a)
         if a.len() == 2 && is_value_ty(&a[0]) && matches!(a[1], Ty::String))
+}
+
+/// `Result[(String, Int), String]` — the toml `parse_key_part` `ok((slice, pos))` shape. Its Ok
+/// payload is a `(String, Int)` tuple (a heap String slot + a scalar Int slot), so both the producer
+/// (`try_lower_result_str_int_ctor`) and the match-subject drop route it to `str_int_result_results`
+/// (the recursive `Op::DropResultStrInt`), NOT the flat `heap_elem_lists`/`DropListStr` which would
+/// leak the tuple's String.
+pub fn is_str_int_result_ty(ty: &Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    matches!(ty, Ty::Applied(TypeConstructorId::Result, a)
+        if a.len() == 2
+            && matches!(&a[0], Ty::Tuple(ts) if ts.len() == 2
+                && matches!(ts[0], Ty::String) && matches!(ts[1], Ty::Int))
+            && matches!(a[1], Ty::String))
 }
 
 pub(crate) fn is_heap_elem_list_ty(ty: &Ty) -> bool {
