@@ -102,13 +102,25 @@ fn count_ir_calls(body: &almide_ir::IrExpr, registry: &almide_mir::lower::Record
             // `mir_calls <= ir_calls` holds BY CONSTRUCTION. Gated on a String LEFT operand — an
             // Int/Bool/Float `==` lowers to a prim compare (no call), so it is NOT counted.
             // `string.eq` is pure (byte compare, no Stdout), adding no real capability.
+            // ALSO a Value `==`/`!=` (→ `value.eq`) and a List[Int|String|Value] `==`/`!=`
+            // (→ `list.eq_int`/`list.eq_str`/`list.eq_value`) lower to ONE synthetic CallFn — count
+            // the operator NODE for EXACTLY the operand shapes calls_p4 lowers to a call, so each has
+            // a matching ir_call and `mir_calls <= ir_calls` holds BY CONSTRUCTION. All three eq
+            // helpers are pure (deep reads, no Stdout), adding no real capability.
             if let almide_ir::IrExprKind::BinOp {
                 op: almide_ir::BinOp::Eq | almide_ir::BinOp::Neq,
                 left,
                 ..
             } = &e.kind
             {
-                if matches!(left.ty, almide_lang::types::Ty::String) {
+                use almide_lang::types::{constructor::TypeConstructorId, Ty};
+                let lowers_to_eq_call = matches!(left.ty, Ty::String)
+                    || almide_mir::lower::is_value_ty(&left.ty)
+                    || matches!(&left.ty, Ty::Applied(TypeConstructorId::List, es)
+                        if es.len() == 1
+                            && (matches!(es[0], Ty::Int | Ty::String)
+                                || almide_mir::lower::is_value_ty(&es[0])));
+                if lowers_to_eq_call {
                     self.n += 1;
                 }
             }

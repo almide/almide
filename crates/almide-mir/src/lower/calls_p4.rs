@@ -120,6 +120,40 @@ impl LowerCtx {
                     self.ops.push(Op::IntBinOp { dst, op: crate::IntOp::Sub, a: one, b: eq });
                     return Some(dst);
                 }
+                // `list_a == list_b` over a List[Int|String|Value]: a deep element-wise compare call
+                // (→ scalar Bool). Same both-arms-linearization fix as Value/String ==. element type
+                // picks the variant; other element types stay unhandled (the if then walls, loud).
+                if matches!(op, BinOp::Eq | BinOp::Neq) {
+                    if let Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, es) =
+                        &left.ty
+                    {
+                        let variant = if es.len() != 1 {
+                            None
+                        } else if matches!(es[0], Ty::Int) {
+                            Some("eq_int")
+                        } else if matches!(es[0], Ty::String) {
+                            Some("eq_str")
+                        } else if crate::lower::is_value_ty(&es[0]) {
+                            Some("eq_value")
+                        } else {
+                            None
+                        };
+                        if let Some(v) = variant {
+                            let args = [(**left).clone(), (**right).clone()];
+                            let eq = self
+                                .lower_pure_module_value_call("list", v, &args, &Ty::Bool)
+                                .ok()?;
+                            if matches!(op, BinOp::Eq) {
+                                return Some(eq);
+                            }
+                            let one = self.fresh_value();
+                            self.ops.push(Op::ConstInt { dst: one, value: 1 });
+                            let dst = self.fresh_value();
+                            self.ops.push(Op::IntBinOp { dst, op: crate::IntOp::Sub, a: one, b: eq });
+                            return Some(dst);
+                        }
+                    }
+                }
                 let iop = match op {
                     BinOp::AddInt => crate::IntOp::Add,
                     BinOp::SubInt => crate::IntOp::Sub,

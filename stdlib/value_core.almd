@@ -233,6 +233,52 @@ fn __vobj_eq(a: Value, b: Value, i: Int, n: Int) -> Bool =
     if __veq_strval(ka, kb) and value_eq(va, vb) then __vobj_eq(a, b, i + 1, n) else false
   }
 
+// list.eq over List[Int] / List[String] / List[Value] — same length + element-wise equality (v0's
+// Vec PartialEq). Without these `list_a == list_b` did not lower to a scalar cond, so an `if list==list`
+// fell to the both-arms linearization (silent both-run). Int by i64 value; String by content
+// (__veq_strval); Value by deep value_eq. Read-only (both lists BORROWED), no ownership event.
+fn __leq_int(ah: Int, bh: Int, i: Int, n: Int) -> Bool =
+  if i >= n then true
+  else if prim.load64(ah + 12 + i * 8) == prim.load64(bh + 12 + i * 8) then __leq_int(ah, bh, i + 1, n)
+  else false
+
+fn list_eq_int(a: List[Int], b: List[Int]) -> Bool = {
+  let ha = prim.handle(a)
+  let hb = prim.handle(b)
+  if prim.load32(ha + 4) != prim.load32(hb + 4) then false
+  else __leq_int(ha, hb, 0, prim.load32(ha + 4))
+}
+
+fn __leq_str(ah: Int, bh: Int, i: Int, n: Int) -> Bool =
+  if i >= n then true
+  else {
+    let sa: String = prim.load_handle(ah + 12 + i * 8)
+    let sb: String = prim.load_handle(bh + 12 + i * 8)
+    if __veq_strval(sa, sb) then __leq_str(ah, bh, i + 1, n) else false
+  }
+
+fn list_eq_str(a: List[String], b: List[String]) -> Bool = {
+  let ha = prim.handle(a)
+  let hb = prim.handle(b)
+  if prim.load32(ha + 4) != prim.load32(hb + 4) then false
+  else __leq_str(ha, hb, 0, prim.load32(ha + 4))
+}
+
+fn __leq_val(ah: Int, bh: Int, i: Int, n: Int) -> Bool =
+  if i >= n then true
+  else {
+    let va: Value = prim.load_handle(ah + 12 + i * 8)
+    let vb: Value = prim.load_handle(bh + 12 + i * 8)
+    if value_eq(va, vb) then __leq_val(ah, bh, i + 1, n) else false
+  }
+
+fn list_eq_value(a: List[Value], b: List[Value]) -> Bool = {
+  let ha = prim.handle(a)
+  let hb = prim.handle(b)
+  if prim.load32(ha + 4) != prim.load32(hb + 4) then false
+  else __leq_val(ha, hb, 0, prim.load32(ha + 4))
+}
+
 fn value_eq(a: Value, b: Value) -> Bool = {
   let ha = prim.handle(a)
   let hb = prim.handle(b)
