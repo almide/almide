@@ -722,6 +722,22 @@ pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], resu
                 }
             }
         }
+        // chunk/windows/window (build a NESTED List[List[heap]] whose recursive drop is a separate
+        // gap) and the HIGHER-ORDER take_while/drop_while/reduce over a HEAP element (String/Value):
+        // the generic i64 self-host impls copy element handles WITHOUT rc_inc → a DOUBLE-FREE at
+        // scope end (the result and source both free the shared handle), and the HO closure ABI is
+        // i64-scalar so a String/Value i32 handle mismatches the indirect call. Both are memory-
+        // safety bugs the prim-region ownership cert cannot see (it treats prim rc as a no-op), so
+        // they slipped past corpus-wall and trapped only at runtime. Route to an UNREGISTERED name →
+        // render walls cleanly (a controlled reject, never a miscompile or double-free) until the
+        // rc-correct heap variants land. Scalar element lists (Int/Float/Bool) are unaffected.
+        if matches!(func, "chunk" | "windows" | "window" | "take_while" | "drop_while" | "reduce") {
+            if let Some(Ty::Applied(TypeConstructorId::List, s)) = arg_tys.first() {
+                if s.len() == 1 && is_heap_ty(&s[0]) {
+                    return format!("list.{func}_heapelem");
+                }
+            }
+        }
         // `list.set` over a List[String] → `list.set_str` (the val is a String HANDLE, not an i64
         // Int — the generic list.set's i64 val param mismatches; set_str rc-copies + co-owns). The
         // yaml `list.set(lines, dp, …)` shape.
