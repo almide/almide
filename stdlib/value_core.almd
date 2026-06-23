@@ -190,6 +190,65 @@ fn json_keys(v: Value) -> List[String] = {
   __vobj_keys(v, 0, n, [])
 }
 
+// value.eq — deep structural equality of two Values, byte-matching v0's derived PartialEq on Value
+// (so `value_a == value_b` lowers to a scalar Bool and the surrounding `if` BRANCHES instead of
+// linearizing both arms — the silent both-arms miscompile). Tag @4: 0 null, 1 bool, 2 int, 3 float,
+// 4 str, 5 array, 6 object. Scalars compare by value (float via f64 `==`, so NaN≠NaN and -0.0==0.0,
+// matching Rust f64 PartialEq); str by content; array element-wise; object pairwise IN ORDER (v0's
+// Vec<(String,Value)> PartialEq is order-sensitive). Recursive (mutually with __varr_eq/__vobj_eq);
+// reads only (both Values BORROWED), allocates nothing → no ownership event.
+// String content equality, value_core-LOCAL (string.eq is a cross-module call the value_core
+// type-checker cannot resolve). Two String values: equal byte length + equal bytes.
+fn __veq_str_bytes(pa: Int, pb: Int, n: Int, k: Int) -> Bool =
+  if k >= n then true
+  else if prim.load8(pa + k) == prim.load8(pb + k) then __veq_str_bytes(pa, pb, n, k + 1) else false
+
+fn __veq_strval(a: String, b: String) -> Bool = {
+  let ha = prim.handle(a)
+  let hb = prim.handle(b)
+  let la = prim.load32(ha + 4)
+  let lb = prim.load32(hb + 4)
+  if la != lb then false else __veq_str_bytes(ha + 12, hb + 12, la, 0)
+}
+
+fn __varr_eq(a: Value, b: Value, i: Int, n: Int) -> Bool =
+  if i >= n then true
+  else {
+    let ha = prim.handle(a)
+    let hb = prim.handle(b)
+    let ea: Value = prim.load_handle(ha + 12 + i * 8)
+    let eb: Value = prim.load_handle(hb + 12 + i * 8)
+    if value_eq(ea, eb) then __varr_eq(a, b, i + 1, n) else false
+  }
+
+fn __vobj_eq(a: Value, b: Value, i: Int, n: Int) -> Bool =
+  if i >= n then true
+  else {
+    let ha = prim.handle(a)
+    let hb = prim.handle(b)
+    let ka: String = prim.load_handle(ha + 12 + (2 * i) * 8)
+    let kb: String = prim.load_handle(hb + 12 + (2 * i) * 8)
+    let va: Value = prim.load_handle(ha + 12 + (2 * i + 1) * 8)
+    let vb: Value = prim.load_handle(hb + 12 + (2 * i + 1) * 8)
+    if __veq_strval(ka, kb) and value_eq(va, vb) then __vobj_eq(a, b, i + 1, n) else false
+  }
+
+fn value_eq(a: Value, b: Value) -> Bool = {
+  let ha = prim.handle(a)
+  let hb = prim.handle(b)
+  let ta = prim.load32(ha + 4)
+  let tb = prim.load32(hb + 4)
+  if ta != tb then false
+  else if ta == 0 then true
+  else if ta == 1 then prim.load64(ha + 12) == prim.load64(hb + 12)
+  else if ta == 2 then prim.load64(ha + 12) == prim.load64(hb + 12)
+  else if ta == 3 then prim.ffrombits(prim.load64(ha + 12)) == prim.ffrombits(prim.load64(hb + 12))
+  else if ta == 4 then __veq_strval(prim.load_str(ha + 12), prim.load_str(hb + 12))
+  else if ta == 5 then (if prim.load32(ha + 8) == prim.load32(hb + 8) then __varr_eq(a, b, 0, prim.load32(ha + 8)) else false)
+  else if ta == 6 then (if prim.load32(ha + 8) == prim.load32(hb + 8) then __vobj_eq(a, b, 0, prim.load32(ha + 8) / 2) else false)
+  else false
+}
+
 // list.set over a List[Value] (toml set_in_aot_last's `list.set(items, idx, …)`). A Value element is an
 // i32 handle in the 8-byte slot (like a String), so the slot copy rc_incs to CO-OWN each element; BUT
 // the REPLACED element must be freed RECURSIVELY via __drop_value — a flat rc_dec would free an

@@ -119,5 +119,6 @@ value_array_leak_loop  out-of-interp-scope capability: value.int
 value_array_tuple_tco  out-of-interp-scope capability: value.str
 value_as_array_leak_loop  out-of-interp-scope capability: value.int
 value_as_array_roundtrip  out-of-interp-scope capability: value.int
+value_eq  out-of-interp-scope capability: value.int
 value_merge  out-of-interp-scope capability: value.int
 value_repr  out-of-interp-scope capability: value.int

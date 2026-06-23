@@ -101,6 +101,25 @@ impl LowerCtx {
                     self.ops.push(Op::IntBinOp { dst, op: crate::IntOp::Sub, a: one, b: eq });
                     return Some(dst);
                 }
+                // `value.eq` deep-structural call (→ scalar Bool) for a `Value == Value` / `!=`. Without
+                // this the heap `==` did not lower to a scalar cond, so an `if value==value …` fell to the
+                // both-arms linearization and ran BOTH arms (silent miscompile). Both operands BORROWED
+                // (value_eq only reads). `!=` is `1 - eq`. The recursive value_eq byte-matches v0's Value
+                // PartialEq.
+                if matches!(op, BinOp::Eq | BinOp::Neq) && crate::lower::is_value_ty(&left.ty) {
+                    let args = [(**left).clone(), (**right).clone()];
+                    let eq = self
+                        .lower_pure_module_value_call("value", "eq", &args, &Ty::Bool)
+                        .ok()?;
+                    if matches!(op, BinOp::Eq) {
+                        return Some(eq);
+                    }
+                    let one = self.fresh_value();
+                    self.ops.push(Op::ConstInt { dst: one, value: 1 });
+                    let dst = self.fresh_value();
+                    self.ops.push(Op::IntBinOp { dst, op: crate::IntOp::Sub, a: one, b: eq });
+                    return Some(dst);
+                }
                 let iop = match op {
                     BinOp::AddInt => crate::IntOp::Add,
                     BinOp::SubInt => crate::IntOp::Sub,
