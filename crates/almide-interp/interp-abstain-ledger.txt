@@ -65,6 +65,7 @@ list_comprehensive  out-of-interp-scope capability: list.repeat
 list_count_index_truncation  out-of-interp-scope capability: list.take
 list_insert_clamp  out-of-interp-scope capability: list.insert
 list_iter_tco  out-of-interp-scope capability: list.drop
+list_modify_heap  out-of-interp-scope capability: value.int
 list_remove_at_oob  out-of-interp-scope capability: list.remove_at
 list_set_value  out-of-interp-scope capability: value.int
 list_slice_oob  out-of-interp-scope capability: list.slice

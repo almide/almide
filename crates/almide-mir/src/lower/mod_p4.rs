@@ -719,16 +719,18 @@ pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], resu
         // `list.set` over a List[String] → `list.set_str` (the val is a String HANDLE, not an i64
         // Int — the generic list.set's i64 val param mismatches; set_str rc-copies + co-owns). The
         // yaml `list.set(lines, dp, …)` shape.
-        if func == "set" {
+        // The heap-element list MODIFIERS (set/insert/remove_at/swap) over a List[String]/List[Value]:
+        // the generic i64 impls copy slots WITHOUT rc_inc (→ double-free when result+source both drop)
+        // and i32/i64-mismatch on a typed element (set/insert's `x`). The _str/_value variants rc-copy
+        // each element to co-own and recursively free any replaced element. (update is handled below —
+        // it is higher-order.) The element type is the first arg's List parameter.
+        if matches!(func, "set" | "insert" | "remove_at" | "swap") {
             if let Some(Ty::Applied(TypeConstructorId::List, s)) = arg_tys.first() {
                 if s.len() == 1 && matches!(s[0], Ty::String) {
-                    return "list.set_str".to_string();
+                    return format!("list.{func}_str");
                 }
-                // A List[Value] element is a dynamic Value (i32 handle), not an i64 Int — the generic
-                // list.set's i64 val param mismatches (invalid wasm). set_value rc-copies + co-owns and
-                // frees the replaced element via the recursive __drop_value. toml set_in_aot_last.
                 if s.len() == 1 && is_value_ty(&s[0]) {
-                    return "list.set_value".to_string();
+                    return format!("list.{func}_value");
                 }
             }
         }
