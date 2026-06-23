@@ -630,6 +630,18 @@ pub(crate) fn try_tco_rewrite(
     if calls0.iter().any(|c| c.len() != n) {
         return None;
     }
+    // An `err($x)`-of-a-VAR base is the desugared `e!` early-return — a Result-unwrap INSIDE the
+    // recursion (read_basic's `let (ch,np)=read_escape(..)!`). The TCO loop cannot carry that mid-body
+    // early-exit: desugar_let_unwrap (run before this) turned the `!` into a `match e { ok($p)=>{..;
+    // self-call}, err($x)=>err($x) }`, so the self-call sits in a nested match arm whose heap-accumulator
+    // reassign then walls (mod_p3 "heap reassignment in a scalar loop body"). BAIL → the function falls
+    // to the now-allowed REAL recursive lowering (a function-tail self-call, control_p4 ~188), which is
+    // input-bounded and byte-matches v0. A natural `err("literal")` base (not a Var) is unaffected.
+    if bases0.iter().any(|b| {
+        matches!(&b.kind, IrExprKind::ResultErr { expr } if matches!(&expr.kind, IrExprKind::Var { .. }))
+    }) {
+        return None;
+    }
     let mut carried0 = vec![false; n];
     for c in &calls0 {
         for i in 0..n {

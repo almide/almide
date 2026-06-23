@@ -109,6 +109,7 @@ string_rle  out-of-interp-scope capability: string.run_length_encode
 string_split_rle_codepoint  out-of-interp-scope capability: string.run_length_encode
 string_whitespace  out-of-interp-scope capability: string.from_codepoint
 trig_libm  out-of-interp-scope capability: transcendental `math.sin` (backends use vendored musl-libm; interp's platform libm diverges in the last ULP — no oracle match)
+unwrap_in_recursion  out-of-interp-scope capability: string.slice
 unwrap_or_operand  out-of-interp-scope capability: string.codepoint
 value_array_leak_loop  out-of-interp-scope capability: value.int
 value_array_tuple_tco  out-of-interp-scope capability: value.str
