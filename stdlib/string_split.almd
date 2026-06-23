@@ -55,14 +55,56 @@ fn __split_fill(lh: Int, sh: Int, slen: Int, seph: Int, seplen: Int, from: Int, 
   else __split_fill(lh, sh, slen, seph, seplen, pos + seplen, idx + 1)
 }
 
-fn string_split(s: String, sep: String) -> List[String] = {
+fn __is_cstart(sh: Int, p: Int) -> Bool = {
+  let b = prim.load8(sh + 12 + p)
+  b < 128 or b >= 192
+}
+
+fn __count_chars(sh: Int, slen: Int, p: Int, acc: Int) -> Int =
+  if p >= slen then acc
+  else if __is_cstart(sh, p) then __count_chars(sh, slen, p + 1, acc + 1)
+  else __count_chars(sh, slen, p + 1, acc)
+
+fn __next_cstart(sh: Int, slen: Int, p: Int) -> Int =
+  if p >= slen then slen
+  else if __is_cstart(sh, p) then p
+  else __next_cstart(sh, slen, p + 1)
+
+fn __empty_split_fill(lh: Int, sh: Int, slen: Int, from: Int, idx: Int) -> Int =
+  if from >= slen then idx
+  else {
+    let nxt = __next_cstart(sh, slen, from + 1)
+    let piece = __substr(sh, from, nxt)
+    prim.store_str(lh + 12 + idx * 8, piece)
+    __empty_split_fill(lh, sh, slen, nxt, idx + 1)
+  }
+
+fn __empty_split(s: String) -> List[String] = {
   let sh = prim.handle(s)
   let slen = prim.load32(sh + 4)
-  let seph = prim.handle(sep)
-  let seplen = prim.load32(seph + 4)
+  let nchars = __count_chars(sh, slen, 0, 0)
+  let result = prim.alloc_list_str(nchars + 2)
+  let rh = prim.handle(result)
+  let lead = __substr(sh, 0, 0)
+  prim.store_str(rh + 12, lead)
+  let _x = __empty_split_fill(rh, sh, slen, 0, 1)
+  let trail = __substr(sh, 0, 0)
+  prim.store_str(rh + 12 + (nchars + 1) * 8, trail)
+  result
+}
+
+fn __nonempty_split(s: String, seph: Int, seplen: Int) -> List[String] = {
+  let sh = prim.handle(s)
+  let slen = prim.load32(sh + 4)
   let nseps = __count_seps(sh, slen, seph, seplen, 0, 0)
   let count = nseps + 1
   let result = prim.alloc_list_str(count)
   let _x = __split_fill(prim.handle(result), sh, slen, seph, seplen, 0, 0)
   result
+}
+
+fn string_split(s: String, sep: String) -> List[String] = {
+  let seph = prim.handle(sep)
+  let seplen = prim.load32(seph + 4)
+  if seplen == 0 then __empty_split(s) else __nonempty_split(s, seph, seplen)
 }
