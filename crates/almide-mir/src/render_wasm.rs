@@ -381,8 +381,15 @@ pub fn render_wasm_fn(
     }
     // A recursive List[String] drop needs two i32 scratch locals (loop index + length); they
     // are function-wide (DropListStr ops never nest) and only declared when one is present.
-    if func.ops.iter().any(|op| matches!(op, Op::DropListStr { .. })) {
+    if func.ops.iter().any(|op| matches!(op, Op::DropListStr { .. } | Op::DropResultListStrInt { .. })) {
         locals.push("(local $dlsi i32) (local $dlsn i32)".to_string());
+    }
+    // DropResultListStrInt reuses the List[List[String]] scratch ($dlli = tuple handle, $dllinner =
+    // the inner List handle) for its nested Ok-tuple List free; declare them when no DropListListStr did.
+    if func.ops.iter().any(|op| matches!(op, Op::DropResultListStrInt { .. }))
+        && !func.ops.iter().any(|op| matches!(op, Op::DropListListStr { .. }))
+    {
+        locals.push("(local $dlli i32) (local $dlln i32) (local $dllinner i32)".to_string());
     }
     // A recursive `List[List[String]]` drop is a NESTED loop: the OUTER loop over the rows needs its
     // own index/length/inner-handle scratch (`$dlsi`/`$dlsn` serve the INNER cell loop). It also uses

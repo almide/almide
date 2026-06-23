@@ -384,6 +384,11 @@ pub(crate) struct LowerCtx {
     /// (Value, Int) tuple recursively via `$__drop_value_tuple`, Err → `rc_dec` the String) — a flat
     /// `DropListStr` would leak the Value's nested payload.
     value_int_result_results: HashSet<ValueId>,
+    /// MIR values that are a `Result[(List[String], Int), String]` wrapper (toml `parse_key` /
+    /// `parse_table_key`'s `ok((keys, pos))`). A scope-end drop emits [`Op::DropResultListStrInt`]
+    /// (Ok → free the (List[String], Int) tuple recursively: each element String, the List block, the
+    /// tuple block; Err → `rc_dec` the String) — a flat `DropListStr` would leak the List's Strings.
+    list_str_int_result_results: HashSet<ValueId>,
     /// MIR values KNOWN to be a REAL, POPULATED list block (a list LITERAL, a heap-list PARAM —
     /// the v1 convention passes a genuine block —, or a self-host list-returning CALL whose closure
     /// args ALL lifted, so the callee actually fills it). A direct `xs[i]` (`lower_scalar_index_access`)
@@ -683,6 +688,20 @@ pub fn is_value_int_result_ty(ty: &Ty) -> bool {
         if a.len() == 2
             && matches!(&a[0], Ty::Tuple(ts) if ts.len() == 2
                 && is_value_ty(&ts[0]) && matches!(ts[1], Ty::Int))
+            && matches!(a[1], Ty::String))
+}
+
+/// `Result[(List[String], Int), String]` — the toml `parse_key` / `parse_table_key` `ok((keys, pos))`
+/// shape. The Ok-tuple's slot0 is a `List[String]`; routed to `list_str_int_result_results` (recursive
+/// `Op::DropResultListStrInt`, which frees the inner List's element Strings).
+pub fn is_list_str_int_result_ty(ty: &Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    matches!(ty, Ty::Applied(TypeConstructorId::Result, a)
+        if a.len() == 2
+            && matches!(&a[0], Ty::Tuple(ts) if ts.len() == 2
+                && matches!(&ts[0], Ty::Applied(TypeConstructorId::List, le)
+                    if le.len() == 1 && matches!(le[0], Ty::String))
+                && matches!(ts[1], Ty::Int))
             && matches!(a[1], Ty::String))
 }
 
