@@ -308,6 +308,20 @@ impl LowerCtx {
                 self.drop_arm_locals(arm_mark);
                 Some(obj)
             }
+            // HEAP-Ok `Result[(String, Int), String]` (toml parse_key_part's `ok((slice, end))` AS A
+            // HEAP-RESULT-IF/MATCH ARM, not just the tail): reuse the brick-1 producer
+            // try_lower_result_str_int_ctor + its recursive DropResultStrInt drop. Checked BEFORE the
+            // generic heap-Ok String arm (which would route a (String,Int) tuple Ok through a flat
+            // DropListStr, leaking the tuple's String). Same per-arm frame as the Value-Result arm.
+            IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. }
+                if crate::lower::is_str_int_result_ty(result_ty) =>
+            {
+                let arm_mark = self.live_heap_handles.len();
+                let obj = self.try_lower_result_str_int_ctor(arm, result_ty)?;
+                self.ops.push(Op::Consume { v: obj });
+                self.drop_arm_locals(arm_mark);
+                Some(obj)
+            }
             // HEAP-Ok `Result[String, String]`: BOTH `Ok(string)` and `Err(string)` own a String, so
             // len-as-tag can't distinguish — materialize a len-1 DynListStr + the Ok/Err tag in cap@8.
             IrExprKind::ResultOk { expr }
