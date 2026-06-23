@@ -1,0 +1,23 @@
+// string_to_upper — SELF-HOSTED `string.to_upper(s)` for v1 over the prim floor. v0 is
+// `s.to_uppercase()` (full Unicode). This is the ASCII fold (`a`..`z` → `A`..`Z`, -32), byte-for-byte
+// identical to v0 for ASCII input; a non-ASCII byte is copied unchanged (its multi-byte UTF-8 sequence
+// passes through intact, so the string stays valid — only a non-ASCII lowercase letter would differ
+// from v0's Unicode fold). Allocates a fresh same-byte-length String and raises each ASCII byte.
+// Mirrors string_to_lower. Self-contained.
+
+fn __toupper_copy(src: Int, dst: Int, len: Int) -> Int =
+  if len <= 0 then dst
+  else {
+    let b = prim.load8(src)
+    let up = if b >= 97 and b <= 122 then b - 32 else b
+    prim.store8(dst, up)
+    __toupper_copy(src + 1, dst + 1, len - 1)
+  }
+
+fn string_to_upper(s: String) -> String = {
+  let h = prim.handle(s)
+  let blen = prim.load32(h + 4)
+  let buf = prim.alloc_str(blen)
+  let _e = __toupper_copy(h + 12, prim.handle(buf) + 12, blen)
+  buf
+}
