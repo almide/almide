@@ -258,6 +258,13 @@ impl LowerCtx {
                 && !crate::lower::is_result_ty(&subject.ty))
         {
             self.materialized_options.insert(subj);
+            // An `Option[heap]` (`list.first(path): Option[String]` — toml set_nested's
+            // `match list.first(path)`) OWNS its payload: track it as a nested-ownership list so the
+            // Some-payload bind reads the borrowed element handle AND the scope-end drop is the
+            // recursive DropListStr (mirrors control.rs:100 for the statement-match path).
+            if crate::lower::is_heap_elem_list_ty(&subject.ty) {
+                self.heap_elem_lists.insert(subj);
+            }
         }
         if is_self_host_result_call(subject)
             || (is_named_call
@@ -341,20 +348,6 @@ impl LowerCtx {
         // (`Err(msg: String)`) is allowed only when the arm body never needs it as an owner —
         // here it is bound as a BORROW of the Result's owned slot-0 handle, gated on the subject
         // being a nested-ownership list (it frees the payload at scope end). A wildcard binds nothing.
-        let scalar_bind = |inner: &IrPattern| -> Result<Option<(VarId, bool)>, ()> {
-            match inner {
-                IrPattern::Bind { var, ty } if !is_heap_ty(ty) => Ok(Some((*var, false))),
-                // A heap TUPLE payload (`some((idx,line))` desugared to `some($p)`): bind @12 as the
-                // tuple-handle BORROW (the desugared `let (idx,line)=$p` then destructures each slot —
-                // sound because `$p` lands in `param_values`). The subject drops AFTER the arms (the
-                // tuple stays live through them); a move-out arm auto-`Dup`s in `lower_heap_result_arm`.
-                IrPattern::Bind { var, ty } if is_heap_ty(ty) && matches!(ty, Ty::Tuple(_)) => {
-                    Ok(Some((*var, true)))
-                }
-                IrPattern::Wildcard => Ok(None),
-                _ => Err(()),
-            }
-        };
         let heap_or_scalar_bind = |s: &Self, inner: &IrPattern| -> Result<Option<(VarId, bool)>, ()> {
             match inner {
                 IrPattern::Bind { var, ty } if !is_heap_ty(ty) => Ok(Some((*var, false))),
@@ -378,8 +371,14 @@ impl LowerCtx {
         let mut else_slot: Option<(&IrExpr, Option<(VarId, bool)>)> = None;
         for arm in arms {
             let parsed: Result<(bool, Option<(VarId, bool)>), ()> = match &arm.pattern {
-                // Option Some (then) / None (else).
-                IrPattern::Some { inner } if is_option => scalar_bind(inner).map(|b| (true, b)),
+                // Option Some (then) / None (else). Use heap_or_scalar_bind so a HEAP Some-payload
+                // (`some(key)` where key: String/Value/Tuple — toml set_nested's `match list.first(path)`)
+                // binds the @12 handle as a BORROW, gated on the Option[heap] subject being tracked
+                // nested-ownership (heap_elem_lists, set at tracking time). A scalar payload still binds
+                // a copy. Without this only a Tuple Some-payload lowered (scalar_bind's narrow branch).
+                IrPattern::Some { inner } if is_option => {
+                    heap_or_scalar_bind(self, inner).map(|b| (true, b))
+                }
                 IrPattern::None | IrPattern::Wildcard if is_option => Ok((false, None)),
                 // Result Err (then) / Ok (else). BOTH use `heap_or_scalar_bind`: a scalar Result
                 // binds a scalar payload, a str-result (`value.as_string`) binds its slot-0 String
