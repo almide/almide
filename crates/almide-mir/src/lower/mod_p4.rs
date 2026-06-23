@@ -678,11 +678,11 @@ pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], resu
                 if a.len() == 1 && a[0] == Ty::Float {
                     return format!("list.{func}_float");
                 }
-                // list.sort over a List[String] compares by CONTENT, not the i64 handle the generic
-                // list_sort would compare (→ arbitrary/handle order, the silent bug). sort_str does a
-                // lexicographic byte compare + rc-copies the elements.
-                if func == "sort" && a.len() == 1 && matches!(a[0], Ty::String) {
-                    return "list.sort_str".to_string();
+                // list.sort/min/max over a List[String] compare by CONTENT, not the i64 handle the
+                // generic impls compare (→ arbitrary/handle order or wrong element, a silent bug).
+                // _str variants do a lexicographic byte compare.
+                if a.len() == 1 && matches!(a[0], Ty::String) {
+                    return format!("list.{func}_str");
                 }
             }
         }

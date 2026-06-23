@@ -104,3 +104,45 @@ fn list_sort_str(xs: List[String]) -> List[String] = {
   let _s = __sort_sel_str(bh, n, 0)
   buf
 }
+
+// list.min / list.max over a List[String] — by CONTENT (like sort), not handle address (the generic
+// list_min/list_max compared the i64 handle → wrong element, a silent bug). Find the min/max INDEX by
+// __strcmp, then return Some(a fresh DEEP COPY of that element) via string.repeat — single-owned, the
+// source keeps its ref (the __get_str_some pattern; v0 clones too). Empty → None.
+fn __min_idx_str(h: Int, len: Int, i: Int, best: Int) -> Int =
+  if i >= len then best
+  else {
+    let e = prim.load64(h + 12 + i * 8)
+    let be = prim.load64(h + 12 + best * 8)
+    let nb = if __strcmp(e, be) < 0 then i else best
+    __min_idx_str(h, len, i + 1, nb)
+  }
+
+fn __max_idx_str(h: Int, len: Int, i: Int, best: Int) -> Int =
+  if i >= len then best
+  else {
+    let e = prim.load64(h + 12 + i * 8)
+    let be = prim.load64(h + 12 + best * 8)
+    let nb = if __strcmp(e, be) > 0 then i else best
+    __max_idx_str(h, len, i + 1, nb)
+  }
+
+// Some(a fresh DEEP COPY of element i) — mirrors list_get_str's __get_str_some (the else-arm must be a
+// CALL returning Option[String], not an inline Some(call) which walls the heap-result-if).
+fn __idx_str_some(h: Int, i: Int) -> Option[String] = {
+  let x = prim.load_str(h + 12 + i * 8)
+  let copy = string.repeat(x, 1)
+  Some(copy)
+}
+
+fn list_min_str(xs: List[String]) -> Option[String] = {
+  let h = prim.handle(xs)
+  let len = prim.load32(h + 4)
+  if len <= 0 then None else __idx_str_some(h, __min_idx_str(h, len, 1, 0))
+}
+
+fn list_max_str(xs: List[String]) -> Option[String] = {
+  let h = prim.handle(xs)
+  let len = prim.load32(h + 4)
+  if len <= 0 then None else __idx_str_some(h, __max_idx_str(h, len, 1, 0))
+}
