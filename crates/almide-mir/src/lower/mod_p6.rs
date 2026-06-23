@@ -335,6 +335,140 @@ pub fn desugar_callarg_heap_if(body: &IrExpr, next_var: &mut u32) -> Option<IrEx
     None
 }
 
+/// Find the FIRST unwrap-`!` ([`IrExprKind::Unwrap`]) NESTED as a CHILD of a container — a `Call`
+/// argument, a `BinOp` operand, a `Tuple` element, or an `ok`/`err`/`Some` ctor argument — and
+/// return (the `e!` to hoist, the container with that child replaced by `Var(tmp)`). NOT `e` itself
+/// (a top-level `e!` is [`desugar_let_unwrap`]'s job). The hoist + that pass turn `f(.., g(x)!, ..)`
+/// / `ok(int.parse(s)!)` into the proven match-based early-return.
+fn extract_first_callarg_unwrap(e: &IrExpr, tmp: VarId) -> Option<(IrExpr, IrExpr)> {
+    fn take_or_recurse(child: &IrExpr, tmp: VarId) -> Option<(IrExpr, IrExpr)> {
+        if matches!(&child.kind, IrExprKind::Unwrap { .. }) {
+            let var = IrExpr {
+                kind: IrExprKind::Var { id: tmp },
+                ty: child.ty.clone(),
+                span: child.span.clone(),
+                def_id: None,
+            };
+            return Some((child.clone(), var));
+        }
+        extract_first_callarg_unwrap(child, tmp)
+    }
+    let mk = |kind: IrExprKind| IrExpr { kind, ty: e.ty.clone(), span: e.span.clone(), def_id: e.def_id };
+    match &e.kind {
+        IrExprKind::Call { target, args, type_args } => {
+            for (idx, a) in args.iter().enumerate() {
+                if let Some((u, na)) = take_or_recurse(a, tmp) {
+                    let mut v = args.clone();
+                    v[idx] = na;
+                    return Some((u, mk(IrExprKind::Call { target: target.clone(), args: v, type_args: type_args.clone() })));
+                }
+            }
+            None
+        }
+        IrExprKind::BinOp { op, left, right } => {
+            if let Some((u, nl)) = take_or_recurse(left, tmp) {
+                return Some((u, mk(IrExprKind::BinOp { op: *op, left: Box::new(nl), right: right.clone() })));
+            }
+            if let Some((u, nr)) = take_or_recurse(right, tmp) {
+                return Some((u, mk(IrExprKind::BinOp { op: *op, left: left.clone(), right: Box::new(nr) })));
+            }
+            None
+        }
+        IrExprKind::Tuple { elements } => {
+            for (idx, el) in elements.iter().enumerate() {
+                if let Some((u, ne)) = take_or_recurse(el, tmp) {
+                    let mut v = elements.clone();
+                    v[idx] = ne;
+                    return Some((u, mk(IrExprKind::Tuple { elements: v })));
+                }
+            }
+            None
+        }
+        IrExprKind::ResultOk { expr } => take_or_recurse(expr, tmp).map(|(u, ne)| (u, mk(IrExprKind::ResultOk { expr: Box::new(ne) }))),
+        IrExprKind::ResultErr { expr } => take_or_recurse(expr, tmp).map(|(u, ne)| (u, mk(IrExprKind::ResultErr { expr: Box::new(ne) }))),
+        IrExprKind::OptionSome { expr } => take_or_recurse(expr, tmp).map(|(u, ne)| (u, mk(IrExprKind::OptionSome { expr: Box::new(ne) }))),
+        _ => None,
+    }
+}
+
+/// ANF-LIFT an unwrap-`!` out of a CALL-ARGUMENT / operand / ctor-argument into a fresh `let tmp = e!`
+/// so the existing [`desugar_let_unwrap`] then makes it lower (the `?`-early-return). The structural
+/// twin of [`desugar_callarg_heap_if`] for `Unwrap` instead of a heap branch. Rewrites the FIRST
+/// `f(.., g(x)!, ..)` (incl. nested + the block TAIL) to `let tmp = g(x)!; f(.., tmp, ..)`. `None` if
+/// none. In BOTH the lowering and the `count_ir_calls` gate via [`desugar_heap_branches`].
+pub fn desugar_callarg_unwrap(body: &IrExpr, next_var: &mut u32) -> Option<IrExpr> {
+    let IrExprKind::Block { stmts, expr: tail } = &body.kind else {
+        // A BARE expression body (`effect fn g(..) = ok(h(t,p)! + 1)`) — lift the unwrap into a fresh
+        // block `{ let tmp = h(t,p)!; <body'> }` (the same shape desugar_callarg_heap_if's bare case uses).
+        let tmp = VarId(*next_var);
+        let (unwrap, new_body) = extract_first_callarg_unwrap(body, tmp)?;
+        *next_var += 1;
+        let lift = IrStmt {
+            kind: IrStmtKind::Bind { var: tmp, mutability: almide_ir::Mutability::Let, ty: unwrap.ty.clone(), value: unwrap },
+            span: body.span.clone(),
+        };
+        return Some(IrExpr {
+            kind: IrExprKind::Block { stmts: vec![lift], expr: Some(Box::new(new_body)) },
+            ty: body.ty.clone(),
+            span: body.span.clone(),
+            def_id: body.def_id,
+        });
+    };
+    let tmp = VarId(*next_var);
+    for (i, s) in stmts.iter().enumerate() {
+        let value = match &s.kind {
+            IrStmtKind::Expr { expr } => Some(expr),
+            IrStmtKind::Bind { value, .. } => Some(value),
+            IrStmtKind::Assign { value, .. } => Some(value),
+            _ => None,
+        };
+        let Some(v) = value else { continue };
+        let Some((unwrap, new_v)) = extract_first_callarg_unwrap(v, tmp) else { continue };
+        *next_var += 1;
+        let lift = IrStmt {
+            kind: IrStmtKind::Bind { var: tmp, mutability: almide_ir::Mutability::Let, ty: unwrap.ty.clone(), value: unwrap },
+            span: s.span.clone(),
+        };
+        let new_stmt = IrStmt {
+            kind: match &s.kind {
+                IrStmtKind::Expr { .. } => IrStmtKind::Expr { expr: new_v },
+                IrStmtKind::Bind { var, mutability, ty, .. } => IrStmtKind::Bind { var: *var, mutability: *mutability, ty: ty.clone(), value: new_v },
+                IrStmtKind::Assign { var, .. } => IrStmtKind::Assign { var: *var, value: new_v },
+                other => other.clone(),
+            },
+            span: s.span.clone(),
+        };
+        let mut new_stmts: Vec<IrStmt> = stmts[..i].to_vec();
+        new_stmts.push(lift);
+        new_stmts.push(new_stmt);
+        new_stmts.extend(stmts[i + 1..].iter().cloned());
+        return Some(IrExpr {
+            kind: IrExprKind::Block { stmts: new_stmts, expr: tail.clone() },
+            ty: body.ty.clone(),
+            span: body.span.clone(),
+            def_id: body.def_id,
+        });
+    }
+    if let Some(t) = tail.as_deref() {
+        if let Some((unwrap, new_t)) = extract_first_callarg_unwrap(t, tmp) {
+            *next_var += 1;
+            let lift = IrStmt {
+                kind: IrStmtKind::Bind { var: tmp, mutability: almide_ir::Mutability::Let, ty: unwrap.ty.clone(), value: unwrap },
+                span: t.span.clone(),
+            };
+            let mut new_stmts = stmts.clone();
+            new_stmts.push(lift);
+            return Some(IrExpr {
+                kind: IrExprKind::Block { stmts: new_stmts, expr: Some(Box::new(new_t)) },
+                ty: body.ty.clone(),
+                span: body.span.clone(),
+                def_id: body.def_id,
+            });
+        }
+    }
+    None
+}
+
 /// Apply the call-arg ANF-lift ([`desugar_callarg_heap_if`]) and the heap-branch tail-duplication
 /// ([`desugar_let_bound_heap_branch`]) repeatedly to a FIXPOINT — the exact rewrite sequence
 /// `lower_body_into` performs before lowering. Both the lowering and the `count_ir_calls` caps gate
@@ -365,6 +499,10 @@ fn desugar_heap_branches_inner(body: &IrExpr, next_var: &mut u32) -> Option<IrEx
             continue;
         }
         if let Some(r) = desugar_callarg_heap_if(src, next_var) {
+            cur = Some(r);
+            continue;
+        }
+        if let Some(r) = desugar_callarg_unwrap(src, next_var) {
             cur = Some(r);
             continue;
         }
