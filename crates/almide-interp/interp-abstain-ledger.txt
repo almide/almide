@@ -92,6 +92,7 @@ rc_alloc_stress  out-of-interp-scope capability: in-place container mutation `li
 regex_engine  out-of-interp-scope capability: regex.is_match
 regex_fuzz_batch  out-of-interp-scope capability: regex.is_match
 result_match_rewrap_modcall  out-of-interp-scope capability: string.from_bytes
+result_value_int_tuple  out-of-interp-scope capability: value.int
 set_insertion_order  out-of-interp-scope capability: set.from_list
 sized_numeric_literals  out-of-interp-scope capability: int.from_int8
 str_result_heap_bind  out-of-interp-scope capability: value.str
