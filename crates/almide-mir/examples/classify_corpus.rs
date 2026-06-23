@@ -118,7 +118,7 @@ fn count_ir_calls(body: &almide_ir::IrExpr, registry: &almide_mir::lower::Record
                     || almide_mir::lower::is_value_ty(&left.ty)
                     || matches!(&left.ty, Ty::Applied(TypeConstructorId::List, es)
                         if es.len() == 1
-                            && (matches!(es[0], Ty::Int | Ty::String)
+                            && (matches!(es[0], Ty::Int | Ty::String | Ty::Float | Ty::Bool)
                                 || almide_mir::lower::is_value_ty(&es[0])));
                 if lowers_to_eq_call {
                     self.n += 1;

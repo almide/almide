@@ -135,6 +135,10 @@ impl LowerCtx {
                             Some("eq_str")
                         } else if crate::lower::is_value_ty(&es[0]) {
                             Some("eq_value")
+                        } else if matches!(es[0], Ty::Float) {
+                            Some("eq_float")
+                        } else if matches!(es[0], Ty::Bool) {
+                            Some("eq_bool")
                         } else {
                             None
                         };

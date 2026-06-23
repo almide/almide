@@ -249,6 +249,25 @@ fn list_eq_int(a: List[Int], b: List[Int]) -> Bool = {
   else __leq_int(ha, hb, 0, prim.load32(ha + 4))
 }
 
+fn __leq_float(ah: Int, bh: Int, i: Int, n: Int) -> Bool =
+  if i >= n then true
+  else if prim.ffrombits(prim.load64(ah + 12 + i * 8)) == prim.ffrombits(prim.load64(bh + 12 + i * 8)) then __leq_float(ah, bh, i + 1, n)
+  else false
+
+fn list_eq_float(a: List[Float], b: List[Float]) -> Bool = {
+  let ha = prim.handle(a)
+  let hb = prim.handle(b)
+  if prim.load32(ha + 4) != prim.load32(hb + 4) then false
+  else __leq_float(ha, hb, 0, prim.load32(ha + 4))
+}
+
+fn list_eq_bool(a: List[Bool], b: List[Bool]) -> Bool = {
+  let ha = prim.handle(a)
+  let hb = prim.handle(b)
+  if prim.load32(ha + 4) != prim.load32(hb + 4) then false
+  else __leq_int(ha, hb, 0, prim.load32(ha + 4))
+}
+
 fn __leq_str(ah: Int, bh: Int, i: Int, n: Int) -> Bool =
   if i >= n then true
   else {
