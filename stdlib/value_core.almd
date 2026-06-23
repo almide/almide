@@ -227,6 +227,75 @@ fn list_set_value(xs: List[Value], i: Int, x: Value) -> List[Value] = {
   buf
 }
 
+// value.merge — the SHALLOW Object merge v0 does (almide_rt_value_merge): when BOTH a and b are tag-6
+// Objects, the result keeps a's keys IN A'S POSITIONS with b's value overriding where b has the same
+// key, then APPENDS b's keys not in a (b's order) — exactly v0's `pa[pos] = (k, v)` else `pa.push`.
+// Otherwise → b. set_nested supplies the recursion (it merges a freshly-built single-key nested object
+// into root), so this stays one level. LEAK-FREE by the value_object/__vobj_fill discipline: the result
+// Object block is built DIRECTLY (prim.alloc_value) and every key/value handle written in is acquired
+// with EXACTLY ONE prim.rc_inc — never the over-counting tuple+list-concat+value.object chain (which
+// rc_inc'd a second time). a and b stay BORROWED; the result owns one fresh ref per slot, freed once by
+// its scope-end __vdrop_obj. The in-a-position fill matches v0 byte-for-byte (overriding keys do NOT move).
+fn __vmerge_bnew(a: Value, b: Value, j: Int, nb: Int, na: Int, acc: Int) -> Int =
+  if j >= nb then acc
+  else {
+    let bh = prim.handle(b)
+    let bk: String = prim.load_handle(bh + 12 + (2 * j) * 8)
+    let inc = if __vobj_find(a, bk, 0, na) < 0 then 1 else 0
+    __vmerge_bnew(a, b, j + 1, nb, na, acc + inc)
+  }
+
+fn __vmerge_fill_a(a: Value, b: Value, dst: Value, i: Int, na: Int, nb: Int) -> Unit =
+  if i >= na then ()
+  else {
+    let ah = prim.handle(a)
+    let dh = prim.handle(dst)
+    let key = prim.load64(ah + 12 + (2 * i) * 8)
+    let ak: String = prim.load_handle(ah + 12 + (2 * i) * 8)
+    let bidx = __vobj_find(b, ak, 0, nb)
+    let val = if bidx < 0 then prim.load64(ah + 12 + (2 * i + 1) * 8)
+              else prim.load64(prim.handle(b) + 12 + (2 * bidx + 1) * 8)
+    prim.rc_inc(key)
+    prim.rc_inc(val)
+    prim.store64(dh + 12 + (2 * i) * 8, key)
+    prim.store64(dh + 12 + (2 * i + 1) * 8, val)
+    __vmerge_fill_a(a, b, dst, i + 1, na, nb)
+  }
+
+fn __vmerge_app_b(a: Value, b: Value, dst: Value, j: Int, nb: Int, na: Int, w: Int) -> Unit =
+  if j >= nb then ()
+  else {
+    let bh = prim.handle(b)
+    let bk: String = prim.load_handle(bh + 12 + (2 * j) * 8)
+    if __vobj_find(a, bk, 0, na) < 0 then {
+      let dh = prim.handle(dst)
+      let kh = prim.load64(bh + 12 + (2 * j) * 8)
+      let vh = prim.load64(bh + 12 + (2 * j + 1) * 8)
+      prim.rc_inc(kh)
+      prim.rc_inc(vh)
+      prim.store64(dh + 12 + (2 * w) * 8, kh)
+      prim.store64(dh + 12 + (2 * w + 1) * 8, vh)
+      __vmerge_app_b(a, b, dst, j + 1, nb, na, w + 1)
+    } else __vmerge_app_b(a, b, dst, j + 1, nb, na, w)
+  }
+
+fn value_merge(a: Value, b: Value) -> Value = {
+  let ah = prim.handle(a)
+  let bh = prim.handle(b)
+  if prim.load32(ah + 4) == 6 and prim.load32(bh + 4) == 6 then {
+    let na = prim.load32(ah + 8) / 2
+    let nb = prim.load32(bh + 8) / 2
+    let total = na + __vmerge_bnew(a, b, 0, nb, na, 0)
+    let dst = prim.alloc_value(2 * total)
+    let dh = prim.handle(dst)
+    prim.store32(dh + 4, 6)
+    prim.store32(dh + 8, 2 * total)
+    __vmerge_fill_a(a, b, dst, 0, na, nb)
+    __vmerge_app_b(a, b, dst, 0, nb, na, na)
+    dst
+  } else b
+}
+
 fn __vobj_find(v: Value, key: String, i: Int, n: Int) -> Int =
   if i >= n then 0 - 1
   else {
