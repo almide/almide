@@ -185,9 +185,15 @@ impl LowerCtx {
                 // render_el(c, …))`) the self-call is BOUNDED — it recurses to the tree's DEPTH, not
                 // the unbounded linear depth of a tail loop — so executing it is correct (matches v0's
                 // own recursion) and is admitted. The wall applies only to a function-TAIL self-call.
-                if name.as_str() == self.fn_name && self.in_defunc_body == 0 {
-                    return None;
-                }
+                // EXPERIMENT (toml): allow a function-tail self-call to lower as a REAL recursive
+                // CallFn (matches v0's own native recursion exactly — same call-stack depth, same
+                // bytes). The previous unconditional wall kept a sound Opaque/linearized fallback to
+                // avoid a 2M-deep tail-loop wasm stack overflow; but a TCO-able tail loop is already
+                // rewritten by try_tco_rewrite BEFORE here (never reaches this arm), so what remains
+                // is a general-arg recursion (toml parse_doc/set_nested/append_aot) whose depth is
+                // bounded by the input exactly as v0's is. Gated by the full test (the 2M-deep TCO
+                // acceptance fixture is TCO'd, not executed here — if it regresses, this is reverted).
+                let _ = name;
                 let repr = repr_of(result_ty).ok()?;
                 let arm_mark = self.live_heap_handles.len();
                 let lowered = self.lower_call_args(args).ok()?;

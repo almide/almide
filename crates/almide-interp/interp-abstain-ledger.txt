@@ -42,6 +42,7 @@ fan_race_err  out-of-interp-scope capability: fan.race
 fan_var_thunk_list  out-of-interp-scope capability: fan.race
 float_sign_minmax_ieee  out-of-interp-scope capability: transcendental `math.log2` (backends use vendored musl-libm; interp's platform libm diverges in the last ULP — no oracle match)
 fs_preopen_resolve  out-of-interp-scope capability: fs.write
+general_recursion_tail  out-of-interp-scope capability: string.slice
 heap_arena  out-of-interp-scope capability: bytes.heap_save
 heap_result_if_append  out-of-interp-scope capability: string.slice
 heap_result_if_match_arm_frame  out-of-interp-scope capability: value.str
