@@ -190,12 +190,47 @@ fn tos(e: Expr) -> String = match e {
 }
 EOF
        ;;
+    9) # SCALAR COMPARISON across the type matrix — ==/!=/</<=/>/>= over Int/String/Bool/Float, in
+       # BOTH an if-condition AND a value position (`let r = a OP b`). This is the class that shipped
+       # silently: String/Bool ordering compared the i64 handle (arbitrary order), and a heap `==` ran
+       # BOTH arms. No template generated a comparison, so the generative net was blind to the WHOLE
+       # class — this template closes that hole.
+       local cty cop cav cbv
+       cty="$(pick int str bool float)"; cop="$(pick '==' '!=' '<' '<=' '>' '>=')"
+       case $cty in
+         int)   cav="$(ri 100)"; cbv="$(ri 100)" ;;
+         str)   cav="\"$(pick apple banana cat ab abc x)\""; cbv="\"$(pick apple banana cat ab abc x)\"" ;;
+         bool)  cav="$(pick true false)"; cbv="$(pick true false)" ;;
+         float) cav="$(ri 10).$(ri 9)"; cbv="$(ri 10).$(ri 9)" ;;
+       esac
+       cat <<EOF
+fn cmp_if() -> String = if $cav $cop $cbv then "T" else "F"
+fn cmp_val() -> String = { let r = $cav $cop $cbv; if r then "T" else "F" }
+fn main() -> Unit = { println(cmp_if()); println(cmp_val()) }
+EOF
+       ;;
+    10) # LIST COMPARISON — ==/!= over List[Int|String|Float|Bool], if-condition AND value position.
+        # Element-wise deep equality; was both-arms (silently ran both branches of the `if`).
+       local lty lop lav lbv
+       lty="$(pick int str float bool)"; lop="$(pick '==' '!=')"
+       case $lty in
+         int)   lav="[$(ri 9), $(ri 9), $(ri 9)]"; lbv="[$(ri 9), $(ri 9), $(ri 9)]" ;;
+         str)   lav="[\"$(pick a b c)\", \"$(pick a b c)\"]"; lbv="[\"$(pick a b c)\", \"$(pick a b c)\"]" ;;
+         float) lav="[$(ri 5).$(ri 9), $(ri 5).$(ri 9)]"; lbv="[$(ri 5).$(ri 9), $(ri 5).$(ri 9)]" ;;
+         bool)  lav="[$(pick true false), $(pick true false)]"; lbv="[$(pick true false), $(pick true false)]" ;;
+       esac
+       cat <<EOF
+fn cmp_if() -> String = { let a = $lav; let b = $lbv; if a $lop b then "T" else "F" }
+fn cmp_val() -> String = { let a = $lav; let b = $lbv; let r = a $lop b; if r then "T" else "F" }
+fn main() -> Unit = { println(cmp_if()); println(cmp_val()) }
+EOF
+       ;;
   esac
 }
 
 mismatch=0; match=0; wall=0; skip=0; runerr=0
 for k in $(seq 1 "$N"); do
-  t=$(( RANDOM % 9 ))
+  t=$(( RANDOM % 11 ))
   src="$TMP/p$k.almd"; gen "$t" > "$src"
   o0="$("$ALM" run "$src" 2>/dev/null)" || { skip=$((skip+1)); continue; }   # v0 must run (else skip)
   if ! "$RP" "$src" > "$src.wat" 2>/dev/null; then wall=$((wall+1)); continue; fi   # v1 walls = fine
