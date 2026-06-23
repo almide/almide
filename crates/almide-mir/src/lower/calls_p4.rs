@@ -440,6 +440,7 @@ impl LowerCtx {
                         | "list_set_value"
                         | "__lsv_insert_fill" // list.insert_value: rc_inc the inserted Value
                         | "__ls_insert_fill"  // list.insert_str: rc_inc the inserted String
+                        | "__sort_copy_rc"    // list.sort_str: rc-copy each String element (co-own)
                         | "__vmerge_fill_a" // value.merge: rc_inc each kept/overridden key+value (co-own)
                         | "__vmerge_app_b"  // value.merge: rc_inc each appended b key+value (co-own)
                 ) || self.fn_name.starts_with("__drop_") =>
