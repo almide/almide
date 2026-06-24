@@ -14,7 +14,7 @@
 //! `verify_ownership(f)` accepts (same invariant); the unit tests pin that
 //! correspondence, and `proofs/gate.sh` runs the actual proven binary on it.
 
-use crate::{CallArg, Capability, MirFunction, Op, ValueId};
+use crate::{CallArg, Capability, MirFunction, Op, PrimKind, ValueId};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// The name-totality witness (proofs/NameTotality.v, the 2nd flight-grade
@@ -630,6 +630,26 @@ pub fn ownership_certificate(func: &MirFunction) -> String {
                     }
                 }
             }
+            // VALUE-RC (柱C extension) — MIRROR verify_ownership's carrier model so the cert and the
+            // executable verifier AGREE on the prim.handle-fed rc case. prim.handle(v) registers the
+            // handle as a CARRIER of v's object (no event); rc_inc/rc_dec on a carrier emit `a`/`d`
+            // (the proven checker, already rc-aware, verifies the balance). A load64-fed handle has no
+            // `of` entry → no event, exactly as before (the differential-test floor).
+            Op::Prim { kind: PrimKind::Handle, dst: Some(d), args } => {
+                if let Some(&o) = args.first().and_then(|a| s.of.get(a)) {
+                    s.of.insert(*d, o);
+                }
+            }
+            Op::Prim { kind: PrimKind::RcInc, args, .. } => {
+                if let Some(&o) = args.first().and_then(|a| s.of.get(a)) {
+                    s.event(o, 'a');
+                }
+            }
+            Op::Prim { kind: PrimKind::RcDec, args, .. } => {
+                if let Some(&o) = args.first().and_then(|a| s.of.get(a)) {
+                    s.event(o, 'd');
+                }
+            }
             // No refcount change: Borrow/MakeUnique/Const/Pure/IntBinOp/SetLocal, and
             // a call with a void/scalar result (its heap-handle args are borrowed).
             _ => {}
@@ -656,7 +676,7 @@ pub fn ownership_certificate(func: &MirFunction) -> String {
 mod tests {
     use super::*;
     use crate::{
-        verify_ownership, CallArg, Capability, Init, MirFunction, MirParam, Op, Repr, RtFn,
+        verify_ownership, CallArg, Capability, Init, MirFunction, MirParam, Op, PrimKind, Repr, RtFn,
         ValueId, PLACEHOLDER_LAYOUT,
     };
 
@@ -665,6 +685,46 @@ mod tests {
     }
     fn func(ops: Vec<Op>) -> MirFunction {
         MirFunction { name: "f".into(), ops, ..Default::default() }
+    }
+
+    #[test]
+    fn value_rc_carrier_balance_is_certified() {
+        // 柱C extension: `prim.handle(o)` makes the handle a CARRIER of o's object, so an UNBALANCED
+        // rc_inc on it is now a Leak that BOTH verify_ownership and the cert catch — the Value-rc class
+        // that used to be invisible in the prim region. `i`(alloc) + `a`(rc_inc on carrier) + `d`(drop)
+        // = rc 1 at end → leak.
+        let (o, h) = (ValueId(0), ValueId(1));
+        let unbalanced = func(vec![
+            Op::Alloc { dst: o, repr: heap(), init: Init::Opaque },
+            Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![o] },
+            Op::Prim { kind: PrimKind::RcInc, dst: None, args: vec![h] },
+            Op::Drop { v: o },
+        ]);
+        assert_eq!(ownership_certificate(&unbalanced), "iad\n");
+        assert!(verify_ownership(&unbalanced).is_err());
+
+        // A BALANCED rc_inc/rc_dec on the carrier → both ACCEPT (rc 0 at end).
+        let balanced = func(vec![
+            Op::Alloc { dst: o, repr: heap(), init: Init::Opaque },
+            Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![o] },
+            Op::Prim { kind: PrimKind::RcInc, dst: None, args: vec![h] },
+            Op::Prim { kind: PrimKind::RcDec, dst: None, args: vec![h] },
+            Op::Drop { v: o },
+        ]);
+        assert_eq!(ownership_certificate(&balanced), "iadd\n");
+        assert_eq!(verify_ownership(&balanced), Ok(()));
+
+        // A load64-fed rc (NO prim.handle carrier) stays UNMODELED — the differential-test floor: the
+        // RcInc on a non-carrier handle emits no `a` and the verifier no-ops it, so the function is
+        // just the balanced Alloc+Drop ("id").
+        let load_fed = func(vec![
+            Op::Alloc { dst: o, repr: heap(), init: Init::Opaque },
+            Op::Prim { kind: PrimKind::Load { width: 8 }, dst: Some(h), args: vec![o] },
+            Op::Prim { kind: PrimKind::RcInc, dst: None, args: vec![h] },
+            Op::Drop { v: o },
+        ]);
+        assert_eq!(ownership_certificate(&load_fed), "id\n");
+        assert_eq!(verify_ownership(&load_fed), Ok(()));
     }
 
     #[test]

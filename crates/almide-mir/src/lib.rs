@@ -841,7 +841,6 @@ pub fn verify_ownership(func: &MirFunction) -> Result<(), Vec<Violation>> {
             // The if-markers carry no ownership either — the arm OPS (flat between the
             // markers) are processed normally, per-arm-balanced by the lowering.
             Op::IntBinOp { .. }
-            | Op::Prim { .. }
             | Op::IfThen { .. }
             | Op::Else { .. }
             | Op::EndIf { .. }
@@ -850,6 +849,32 @@ pub fn verify_ownership(func: &MirFunction) -> Result<(), Vec<Violation>> {
             | Op::LoopStart
             | Op::LoopBreakUnless { .. }
             | Op::LoopEnd => {}
+            // VALUE-RC modeling (柱C extension) — bring the Value refcount ops out of the prim blind
+            // spot for the NAMEABLE case: prim.handle(v) carries its source object in args[0], so the
+            // rc events on it verify against the same rc machine. load64-fed handles have no carrier
+            // and stay unmodeled (the differential-test floor). MIRRORED in ownership_certificate.
+            Op::Prim { kind, dst, args } => match kind {
+                PrimKind::Handle => {
+                    if let (Some(d), Some(&o)) =
+                        (dst.as_ref(), args.first().and_then(|a| object_of.get(a)))
+                    {
+                        object_of.insert(*d, o);
+                    }
+                }
+                PrimKind::RcInc => {
+                    if let Some(&o) = args.first().and_then(|a| object_of.get(a)) {
+                        *rc.entry(o).or_insert(0) += 1;
+                    }
+                }
+                PrimKind::RcDec => {
+                    if let Some(&o) = args.first().and_then(|a| object_of.get(a)) {
+                        if rc.get(&o).copied().unwrap_or(0) >= 1 {
+                            *rc.entry(o).or_insert(0) -= 1;
+                        }
+                    }
+                }
+                _ => {}
+            },
             // `SetLocal` into a HEAP slot is a loop-carried REBIND (`acc = acc + [x]`):
             // the slot now aliases the source's object. The slot's OLD object was
             // released by a preceding `Drop` in the loop body, so rebinding makes the
