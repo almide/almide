@@ -97,6 +97,8 @@ almide run hello.almd
 
 Almide uses [Perceus](https://www.microsoft.com/en-us/research/publication/perceus-garbage-free-reference-counting-with-reuse/) reference counting for automatic memory management. No GC, no manual free, no pauses.
 
+Where Rust gives you *zero-cost* abstraction (paid for in ownership annotations), Almide gives you **zero-annotation** abstraction: you write none, and every heap free is machine-proven — *write none, prove all.*
+
 The correctness of the RC insertion pass is **mathematically proven** in Lean 4:
 
 ```lean
