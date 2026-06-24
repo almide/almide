@@ -290,6 +290,32 @@ impl LowerCtx {
                                         _ => None,
                                     }
                                 }
+                                // CLOSURE-CALL accumulator: `acc = f(acc, x)` where `f` is a
+                                // first-class lifted combinator (the self-host `list_reduce_str` /
+                                // `list_fold` loop). The CallIndirect yields a FRESH OWNED heap result
+                                // (cert `i`, exactly the value-position closure call in binds_p2) — the
+                                // loop-carried slot then drops-old (`d`) + SetLocals (`m`) it: the SAME
+                                // proven `i(id)m` slot, generalized to a CallIndirect producer
+                                // (OwnershipChecker.v `check_line_unroll_sound` — any fresh-owned
+                                // producer). NOT pushed to live_heap_handles (the slot owns it).
+                                IrExprKind::Call { target: CallTarget::Computed { callee }, args, .. }
+                                    if self.funcref_value_of(callee).is_some() =>
+                                {
+                                    let table_idx = self.funcref_value_of(callee).unwrap();
+                                    match (repr_of(&value.ty), self.lower_call_args(args)) {
+                                        (Ok(repr), Ok(lowered)) => {
+                                            let new = self.fresh_value();
+                                            self.ops.push(Op::CallIndirect {
+                                                dst: Some(new),
+                                                table_idx,
+                                                args: lowered,
+                                                result: Some(repr),
+                                            });
+                                            Some(new)
+                                        }
+                                        _ => None,
+                                    }
+                                }
                                 _ => self.lower_owned_heap_field(value),
                             };
                             if let Some(new) = new {

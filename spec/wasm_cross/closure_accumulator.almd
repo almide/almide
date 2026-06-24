@@ -1,0 +1,27 @@
+// @contract: C-101
+// A loop-carried heap accumulator reassigned by a CLOSURE CALL — `acc = f(acc, x)` over a while/for
+// loop, where f is a first-class lifted combinator. The MIR loop-accumulator slot, previously limited
+// to bare producers (concat / Result ctor), now admits a CallIndirect producer: the SAME proven i(id)m
+// loop-carried slot (OwnershipChecker.v check_line_unroll_sound), generalized. This is the lever the
+// self-host list_reduce_str / list_fold over heap accumulators build on. Byte-matches native; leak-free.
+fn accumulate(items: List[String], f: (String, String) -> String) -> String = {
+  var acc = "["
+  for x in items {
+    acc = f(acc, x)
+  }
+  acc
+}
+fn repeat_apply(f: (String, String) -> String, n: Int) -> String = {
+  var acc = "s"
+  var i = 0
+  while i < n {
+    acc = f(acc, "x")
+    i = i + 1
+  }
+  acc
+}
+effect fn main() -> Unit = {
+  println(accumulate(["a", "b", "c"], (a, b) => a + b))
+  println(accumulate(["x", "y"], (a, b) => a + "-" + b))
+  println(repeat_apply((a, b) => a + b, 4))
+}
