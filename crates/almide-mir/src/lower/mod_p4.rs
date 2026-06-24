@@ -734,7 +734,10 @@ pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], resu
         // take_while/drop_while over a List[String] now have rc-correct _str variants (each kept
         // String DEEP-COPIED so result + source can both drop without a double-free); route to them
         // BEFORE the heap-element wall below. (List[Value] / the other combinators still wall.)
-        if matches!(func, "take_while" | "drop_while" | "chunk" | "windows" | "window") {
+        // `reduce` over a List[String] joins them too: `list.reduce_str` is the self-host tail-`if`
+        // (None on empty, else Some) whose loop is the proven closure-call heap-accumulator (#738 Path
+        // C). Routed to the rc-correct _str variant BEFORE the heap-element wall.
+        if matches!(func, "take_while" | "drop_while" | "chunk" | "windows" | "window" | "reduce") {
             if let Some(Ty::Applied(TypeConstructorId::List, s)) = arg_tys.first() {
                 if s.len() == 1 && matches!(s[0], Ty::String) {
                     return format!("list.{func}_str");
