@@ -91,6 +91,11 @@ fn count_eq_calls(ty: &almide_lang::types::Ty, registry: &almide_mir::lower::Rec
             .get(name.as_str())
             .map(|(_, decl)| decl.iter().map(|(_, t)| count_eq_calls(t, registry)).sum())
             .unwrap_or(0),
+        // Option[heap] == lowers to ONE payload-eq CallFn (string.eq/value.eq/list.eq) in the
+        // both-Some branch; Option[scalar] == is branchless prims (0 calls).
+        Ty::Applied(TC::Option, oa) if oa.len() == 1 => {
+            usize::from(count_eq_calls(&oa[0], registry) >= 1)
+        }
         _ => 0,
     }
 }

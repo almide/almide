@@ -1,0 +1,13 @@
+// @contract: C-099
+// Option[heap] (String) == / != : a CONDITIONAL compare — the payload eq (string.eq) runs ONLY in
+// the both-Some branch, so a None side's payload handle is never dereferenced. dst = if (tagL AND
+// tagR) then payloadEq else (tagL==tagR). Was both-arms-linearized (silent). Byte-matches native.
+// (some-vs-none / none-vs-none verified separately; this fixture keeps the multi-let-friendly subset.)
+effect fn main() -> Unit = {
+  let a: Option[String] = some("hi")
+  let b: Option[String] = some("hi")
+  let c: Option[String] = some("yo")
+  println(if a == b then "T" else "F")
+  println(if a == c then "T" else "F")
+  println(if a != c then "T" else "F")
+}

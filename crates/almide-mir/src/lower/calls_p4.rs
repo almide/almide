@@ -123,6 +123,61 @@ impl LowerCtx {
                     return Some(dst);
                 }
             }
+            // Option[HEAP] (String / Value / List) == : a CONDITIONAL compare — the payload eq (a
+            // deref via string.eq/value.eq/list.eq) runs ONLY when BOTH are Some, so a None side's
+            // payload handle is never dereferenced (the masked scalar trick would deref garbage).
+            // dst = if (tagL AND tagR) then payloadEq(data[0]) else (tagL == tagR).
+            if oa.len() == 1 && crate::lower::is_heap_ty(&oa[0]) {
+                let eq_name: Option<&str> = if matches!(oa[0], Ty::String) {
+                    Some("string.eq")
+                } else if crate::lower::is_value_ty(&oa[0]) {
+                    Some("value.eq")
+                } else if let Ty::Applied(TC::List, es) = &oa[0] {
+                    if es.len() == 1 && matches!(es[0], Ty::Int) {
+                        Some("list.eq_int")
+                    } else if es.len() == 1 && matches!(es[0], Ty::String) {
+                        Some("list.eq_str")
+                    } else if es.len() == 1 && matches!(es[0], Ty::Float) {
+                        Some("list.eq_float")
+                    } else if es.len() == 1 && matches!(es[0], Ty::Bool) {
+                        Some("list.eq_bool")
+                    } else if es.len() == 1 && crate::lower::is_value_ty(&es[0]) {
+                        Some("list.eq_value")
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                if let Some(name) = eq_name {
+                    if let (Some(hl), Some(hr)) =
+                        (self.materialized_option_handle(left), self.materialized_option_handle(right))
+                    {
+                        let tag_l = self.load_at_offset(hl, 4, crate::PrimKind::Load { width: 4 });
+                        let tag_r = self.load_at_offset(hr, 4, crate::PrimKind::Load { width: 4 });
+                        let both_some = self.fresh_value();
+                        self.ops.push(Op::IntBinOp { dst: both_some, op: crate::IntOp::And, a: tag_l, b: tag_r });
+                        let dst = self.fresh_value();
+                        self.ops.push(Op::IfThen { cond: both_some, dst: Some(dst) });
+                        // THEN (both Some): the heap payload eq — only here is data[0] dereferenced.
+                        let pay_l = self.load_at_offset(hl, 12, crate::PrimKind::LoadHandle);
+                        let pay_r = self.load_at_offset(hr, 12, crate::PrimKind::LoadHandle);
+                        let pay_eq = self.fresh_value();
+                        self.ops.push(Op::CallFn {
+                            dst: Some(pay_eq),
+                            name: name.to_string(),
+                            args: vec![CallArg::Handle(pay_l), CallArg::Handle(pay_r)],
+                            result: Some(repr_of(&Ty::Bool).ok()?),
+                        });
+                        self.ops.push(Op::Else { val: Some(pay_eq) });
+                        // ELSE: both-None → equal, one-Some-one-None → not equal (== of the tags).
+                        let tags_eq = self.fresh_value();
+                        self.ops.push(Op::IntBinOp { dst: tags_eq, op: crate::IntOp::Eq, a: tag_l, b: tag_r });
+                        self.ops.push(Op::EndIf { val: Some(tags_eq) });
+                        return Some(dst);
+                    }
+                }
+            }
         }
         // Tuple / record → AND of per-field typed eq.
         if let Some((names, ftys)) = self.aggregate_field_tys(ty) {
