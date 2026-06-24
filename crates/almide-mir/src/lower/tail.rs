@@ -598,6 +598,16 @@ impl LowerCtx {
                 self.ops.push(Op::ConstInt { dst, value: value.to_bits() as i64 });
                 Ok(Some(dst))
             }
+            // A BOOL literal returned directly (`(x) => true` — a constant/param-ignoring predicate
+            // for list.all/any/count, or `fn t() = true`) materializes its 0/1 as a `ConstInt`, NOT
+            // the deferred-`Const` ZERO it used to fall into below (which made `(x) => true` return
+            // FALSE — a silent miscompile of every constant-true predicate). Bool is an i64 0/1, the
+            // same materialization lower_scalar_value does for a LitBool operand.
+            IrExprKind::LitBool { value } => {
+                let dst = self.fresh_value();
+                self.ops.push(Op::ConstInt { dst, value: *value as i64 });
+                Ok(Some(dst))
+            }
             // A scalar Int Add/Sub/Mul computes its REAL value (IntBinOp over
             // recursively-lowered operands), so a fn `add(a, b) = a + b` returns the
             // sum — not the deferred-Const zero. Outside the int-arith subset (Div/
@@ -654,12 +664,11 @@ impl LowerCtx {
                 self.record_elided_calls(tail);
                 Ok(Some(dst))
             }
-            IrExprKind::LitBool { .. }
             // A SCALAR map extraction is an unambiguous COPY (a scalar is never
             // reference-counted), so it is a `Const` — its container carries its own
             // ownership. (A HEAP extraction is an ALIAS / share — it needs a layout-aware
             // field-access op with `Dup` semantics and stays walled until that brick.)
-            | IrExprKind::MapAccess { .. }
+            IrExprKind::MapAccess { .. }
             // A SCALAR error-operator result (`x?.f` yielding a scalar) is
             // likewise a fresh `Const`; the operator's value + early-return are deferred.
             | IrExprKind::Try { .. }
