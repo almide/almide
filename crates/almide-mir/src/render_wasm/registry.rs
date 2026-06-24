@@ -79,7 +79,7 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
         ),
         (
             include_str!("../../../../stdlib/list_whilep.almd"),
-            &[("list_take_while", "list.take_while"), ("list_drop_while", "list.drop_while")],
+            &[("list_take_while", "list.take_while"), ("list_drop_while", "list.drop_while"), ("list_take_while_str", "list.take_while_str"), ("list_drop_while_str", "list.drop_while_str")],
         ),
         (include_str!("../../../../stdlib/list_foldf.almd"), &[("list_fold", "list.fold")]),
         (

@@ -54,3 +54,52 @@ fn list_drop_while(xs: List[Int], f: (Int) -> Bool) -> List[Int] = {
   let _x = __copy_tail(prim.handle(buf), prim.handle(xs), skip, 0, n)
   buf
 }
+
+// ── The HEAP-element (List[String]) variants. The element is a String HANDLE, so a KEPT element is
+// DEEP-COPIED (string.repeat ·1) into the result — single-owned, the source still owns the original
+// (no double-free, the bug the generic i64 impls had). Predicate f: (String) -> Bool via CallIndirect,
+// exactly like list_filter_str. Result `len` is the kept count; result owned, source borrowed. ──
+
+fn __takew_str_fill(dh: Int, sh: Int, f: (String) -> Bool, n: Int, i: Int, di: Int) -> Int =
+  if i >= n then di
+  else {
+    let x = prim.load_str(sh + 12 + i * 8)
+    if f(x) then {
+      let copy = string.repeat(x, 1)
+      prim.store_str(dh + 12 + di * 8, copy)
+      __takew_str_fill(dh, sh, f, n, i + 1, di + 1)
+    } else di
+  }
+
+fn list_take_while_str(xs: List[String], f: (String) -> Bool) -> List[String] = {
+  let n = list.len(xs)
+  let buf = prim.alloc_list_str(n)
+  let cnt = __takew_str_fill(prim.handle(buf), prim.handle(xs), f, n, 0, 0)
+  prim.store32(prim.handle(buf) + 4, cnt)
+  buf
+}
+
+fn __dropw_str_skip(sh: Int, f: (String) -> Bool, n: Int, i: Int) -> Int =
+  if i >= n then n
+  else {
+    let x = prim.load_str(sh + 12 + i * 8)
+    if f(x) then __dropw_str_skip(sh, f, n, i + 1) else i
+  }
+
+fn __copy_tail_str(dh: Int, sh: Int, si: Int, di: Int, n: Int) -> Int =
+  if si >= n then di
+  else {
+    let x = prim.load_str(sh + 12 + si * 8)
+    let copy = string.repeat(x, 1)
+    prim.store_str(dh + 12 + di * 8, copy)
+    __copy_tail_str(dh, sh, si + 1, di + 1, n)
+  }
+
+fn list_drop_while_str(xs: List[String], f: (String) -> Bool) -> List[String] = {
+  let n = list.len(xs)
+  let skip = __dropw_str_skip(prim.handle(xs), f, n, 0)
+  let keep = n - skip
+  let buf = prim.alloc_list_str(keep)
+  let _x = __copy_tail_str(prim.handle(buf), prim.handle(xs), skip, 0, n)
+  buf
+}

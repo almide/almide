@@ -731,6 +731,16 @@ pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], resu
         // they slipped past corpus-wall and trapped only at runtime. Route to an UNREGISTERED name →
         // render walls cleanly (a controlled reject, never a miscompile or double-free) until the
         // rc-correct heap variants land. Scalar element lists (Int/Float/Bool) are unaffected.
+        // take_while/drop_while over a List[String] now have rc-correct _str variants (each kept
+        // String DEEP-COPIED so result + source can both drop without a double-free); route to them
+        // BEFORE the heap-element wall below. (List[Value] / the other combinators still wall.)
+        if matches!(func, "take_while" | "drop_while") {
+            if let Some(Ty::Applied(TypeConstructorId::List, s)) = arg_tys.first() {
+                if s.len() == 1 && matches!(s[0], Ty::String) {
+                    return format!("list.{func}_str");
+                }
+            }
+        }
         if matches!(func, "chunk" | "windows" | "window" | "take_while" | "drop_while" | "reduce") {
             if let Some(Ty::Applied(TypeConstructorId::List, s)) = arg_tys.first() {
                 if s.len() == 1 && is_heap_ty(&s[0]) {
