@@ -23,3 +23,17 @@ The Value reference-count ops (`prim.rc_inc`/`rc_dec`, `Op::DropValue`) live in 
 
 ## Prototyped diff (reverted, lib.rs verify_ownership Prim arm)
 Split the `| Op::Prim { .. }` no-op into `Op::Prim { kind, dst, args } => match kind { Handle => carrier; RcInc => rc+=1 if carrier; RcDec => rc-=1 if carrier && rc≥1; _ => {} }`. Gated: cargo test -p almide-mir 501/0, corpus-wall ACCEPT 18165 (byte-identical). It is a STRICT REFINEMENT for the corpus but introduces a verify_ownership↔cert DIVERGENCE for prim.handle-fed rc — so it must land WITH the matching ownership_certificate emission (brick 1+2 atomic), never alone.
+
+## Brick 3 (load64-fed nested-element rc) — VERDICT: large-redesign-fresh, very-large (scoped 2026-06-24)
+
+There is NO small SOUND cert-proving slice. The "structural reduces to the proven map-fill" idea is WRONG: map-fill's per-iteration body is net-0 (rebind: drop-old + inc-new), which is exactly why OwnershipLoop.v's rc-preserving Loop rule accepts it; a CO-OWN copy loop is net-+1 per element, and OwnershipLoop.v (header line 19-21) explicitly defers/excludes nested co-own. The balancing rc_dec lives in a SEPARATE raw-handle recursive routine (__vdrop_arr/__drop_value) whose cert is EMPTY, so no single-function fold can witness the balance.
+
+The real Brick 3 needs (all NEW, multi-week):
+1. A typed nested-element MIR model — promote load64-fed element handles from untracked raw i64 to a tracked-but-NESTED class (an Op carrying an `ElementOf(container)` relation), so rc_inc on element e is recorded against the container's child-account, not a ghost rc[o]=0.
+2. A cert section pairing a producer's accumulated child-incs with the recursive-drop's child-decs by CONTAINER IDENTITY + element count (a GLOBAL property across the producer loop and the separate drop loop, not per-iteration).
+3. A Coq development `CoownLoop.v` (well-founded induction on container shape — List[List[String]] is 2-level, leaf count ≠ intermediate count) + a RuntimeModel block model (container length fields + rt_recursive_drop emitting exactly N child decs) + the composition lemma SUM(co-own incs) == SUM(recursive-drop decs) + thread a new cert section through Extract.v + driver.ml.
+
+Indivisible: cannot cert-prove ONE producer (reduce_value's __copy_value) without the shared nested-element model + composition lemma. Schedule as a dedicated fresh formal brick.
+
+## Containment-hardening (the tractable near-term, 2026-06-24)
+The trust floor is INTACT: load64-fed rc is an unmodeled no-op GATED by the rc_inc/rc_dec whitelist (calls_p4.rs — only named trusted producers/consumers may name rc_inc/rc_dec; any other .almd fn calling them REJECTS at lowering) + leak-loop fixtures (value_array, value_as_array, list_set_value, list_sort_str, value_merge, + value_object added here). Optional further hardening (deferred, low value): registry-ify the manual whitelist (GOTCHA 3 — it grows by hand-edited match arm).

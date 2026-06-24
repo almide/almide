@@ -1,4 +1,4 @@
-// @contract: C-101
+// @contract: C-116
 // A function whose body IS a bare Bool literal (`fn t() = true`, or a constant/param-ignoring
 // predicate `(x) => true` for list.all/any/count) must RETURN that 0/1 — not the deferred-Const ZERO
 // it used to fall into in tail position (which made `(x) => true` return FALSE, a SILENT MISCOMPILE of

@@ -1,4 +1,4 @@
-// @contract: C-101
+// @contract: C-116
 // float.parse on the IEEE 754 special values inf / infinity / nan (case-insensitive, optional sign) —
 // Rust's strtod accepts these; the v1 self-host float_parse used to reject them as "invalid float
 // literal" (a native-vs-v1 divergence). The values are built by RUNTIME division (1/0 = +inf, 0/0 =

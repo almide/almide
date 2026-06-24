@@ -1142,6 +1142,10 @@ evidence  = [
   { path = "spec/wasm_cross/list_eq.almd", class = "fixture" },
   { path = "spec/wasm_cross/list_eq_float_bool.almd", class = "fixture" },
   { path = "spec/wasm_cross/string_bool_ordering.almd", class = "fixture" },
+  { path = "spec/wasm_cross/tuple_eq.almd", class = "fixture" },
+  { path = "spec/wasm_cross/option_eq.almd", class = "fixture" },
+  { path = "spec/wasm_cross/option_heap_eq.almd", class = "fixture" },
+  { path = "spec/wasm_cross/result_eq.almd", class = "fixture" },
 ]
 
 [[contract]]
@@ -1153,6 +1157,8 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/string_is_alphanumeric.almd", class = "fixture" },
   { path = "spec/wasm_cross/string_to_upper.almd", class = "fixture" },
+  { path = "spec/wasm_cross/split_empty_sep.almd", class = "fixture" },
+  { path = "spec/wasm_cross/replace_empty_pat.almd", class = "fixture" },
 ]
 
 [[contract]]
@@ -1166,6 +1172,12 @@ evidence  = [
   { path = "spec/wasm_cross/list_modify_heap.almd", class = "fixture" },
   { path = "spec/wasm_cross/list_set_value.almd", class = "fixture" },
   { path = "spec/wasm_cross/list_sort_str.almd", class = "fixture" },
+  { path = "spec/wasm_cross/whilep_str.almd", class = "fixture" },
+  { path = "spec/wasm_cross/chunk_str.almd", class = "fixture" },
+  { path = "spec/wasm_cross/fold_heap_acc.almd", class = "fixture" },
+  { path = "spec/wasm_cross/reduce_str.almd", class = "fixture" },
+  { path = "spec/wasm_cross/closure_accumulator.almd", class = "fixture" },
+  { path = "spec/wasm_cross/value_object_leak_loop.almd", class = "fixture" },
 ]
 
 [[contract]]
@@ -1340,4 +1352,15 @@ since     = "0.27.6"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/pipe_lambda_block_value.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-116"
+title     = "v1 scalar-value lowering edges byte-match native (tail Bool literal, float.parse inf/nan)"
+statement = "Two previously-diverging v1 scalar-value cases now produce stdout byte-identical to native. (1) A function whose body IS a bare Bool literal (`fn t() = true`, or a constant/param-ignoring predicate `(x) => true` for list.all/any/count) RETURNS its 0/1 — not the deferred-Const ZERO it used to fall into in tail position, which silently made every constant-true predicate FALSE (list.all((x)=>true) wrongly false). (2) float.parse accepts the IEEE 754 special values inf / infinity / nan (case-insensitive, optional sign) like Rust's strtod, building them by runtime division (1/0, 0/0) so the bit patterns match on both targets; junk still errs and normal floats are unaffected. Native is the oracle."
+since     = "0.27.7"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/bool_literal_tail.almd", class = "fixture" },
+  { path = "spec/wasm_cross/float_parse_special.almd", class = "fixture" },
 ]
