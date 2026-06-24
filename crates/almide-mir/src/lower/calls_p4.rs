@@ -31,6 +31,21 @@ impl LowerCtx {
         None
     }
 
+    /// The i64 BYTE-ADDRESS of a materialized Result block bound to a `Var`, or None. Gated on
+    /// `materialized_results` (the scalar-Ok `Result[scalar,String]` layout: len@4 = 0 for Ok / 1 for
+    /// Err, payload@12) so the tag read is sound only for a value known to carry it.
+    fn materialized_result_handle(&mut self, e: &IrExpr) -> Option<ValueId> {
+        if let IrExprKind::Var { id } = &e.kind {
+            let block = self.value_or_global(*id).ok()?;
+            if self.materialized_results.contains(&block) {
+                let h = self.fresh_value();
+                self.ops.push(Op::Prim { kind: crate::PrimKind::Handle, dst: Some(h), args: vec![block] });
+                return Some(h);
+            }
+        }
+        None
+    }
+
     /// Deep structural `left == right` for a value of type `ty`, returning the Bool ValueId — the
     /// recursive core shared by the scalar / String / Value / List / tuple / record eq. Scalars use
     /// the int/float prim; String→string.eq, Value→value.eq, List[T]→list.eq_T (the existing pure
@@ -176,6 +191,59 @@ impl LowerCtx {
                         self.ops.push(Op::EndIf { val: Some(tags_eq) });
                         return Some(dst);
                     }
+                }
+            }
+        }
+        // Result[scalar, String] == / != : Ok is scalar (len@4=0, value@12), Err is a String
+        // (len@4=1, handle@12). The scalar okEq is computed unconditionally (masked); the heap
+        // errEq (string.eq) runs ONLY in the both-Err branch, so an Ok side's @12 (a scalar, not a
+        // handle) is never dereferenced. dst = if bothErr then errEq else (bothOk AND okEq).
+        if let Ty::Applied(TC::Result, ra) = ty {
+            if ra.len() == 2 && !crate::lower::is_heap_ty(&ra[0]) && matches!(ra[1], Ty::String) {
+                if let (Some(hl), Some(hr)) =
+                    (self.materialized_result_handle(left), self.materialized_result_handle(right))
+                {
+                    let tag_l = self.load_at_offset(hl, 4, crate::PrimKind::Load { width: 4 });
+                    let tag_r = self.load_at_offset(hr, 4, crate::PrimKind::Load { width: 4 });
+                    let zero = self.fresh_value();
+                    self.ops.push(Op::ConstInt { dst: zero, value: 0 });
+                    let ok_l = self.fresh_value();
+                    self.ops.push(Op::IntBinOp { dst: ok_l, op: crate::IntOp::Eq, a: tag_l, b: zero });
+                    let ok_r = self.fresh_value();
+                    self.ops.push(Op::IntBinOp { dst: ok_r, op: crate::IntOp::Eq, a: tag_r, b: zero });
+                    let both_ok = self.fresh_value();
+                    self.ops.push(Op::IntBinOp { dst: both_ok, op: crate::IntOp::And, a: ok_l, b: ok_r });
+                    let pay_ok_l = self.load_at_offset(hl, 12, crate::PrimKind::Load { width: 8 });
+                    let pay_ok_r = self.load_at_offset(hr, 12, crate::PrimKind::Load { width: 8 });
+                    let ok_eq = self.fresh_value();
+                    if matches!(ra[0], Ty::Float) {
+                        self.ops.push(Op::Prim {
+                            kind: crate::PrimKind::FloatCmp(crate::FCmpOp::Eq),
+                            dst: Some(ok_eq),
+                            args: vec![pay_ok_l, pay_ok_r],
+                        });
+                    } else {
+                        self.ops.push(Op::IntBinOp { dst: ok_eq, op: crate::IntOp::Eq, a: pay_ok_l, b: pay_ok_r });
+                    }
+                    let inner = self.fresh_value();
+                    self.ops.push(Op::IntBinOp { dst: inner, op: crate::IntOp::And, a: both_ok, b: ok_eq });
+                    let both_err = self.fresh_value();
+                    self.ops.push(Op::IntBinOp { dst: both_err, op: crate::IntOp::And, a: tag_l, b: tag_r });
+                    let dst = self.fresh_value();
+                    self.ops.push(Op::IfThen { cond: both_err, dst: Some(dst) });
+                    // THEN (both Err): the heap String eq — only here is @12 read as a handle.
+                    let pay_err_l = self.load_at_offset(hl, 12, crate::PrimKind::LoadHandle);
+                    let pay_err_r = self.load_at_offset(hr, 12, crate::PrimKind::LoadHandle);
+                    let err_eq = self.fresh_value();
+                    self.ops.push(Op::CallFn {
+                        dst: Some(err_eq),
+                        name: "string.eq".to_string(),
+                        args: vec![CallArg::Handle(pay_err_l), CallArg::Handle(pay_err_r)],
+                        result: Some(repr_of(&Ty::Bool).ok()?),
+                    });
+                    self.ops.push(Op::Else { val: Some(err_eq) });
+                    self.ops.push(Op::EndIf { val: Some(inner) });
+                    return Some(dst);
                 }
             }
         }
@@ -386,13 +454,15 @@ impl LowerCtx {
                     self.ops.push(Op::IntBinOp { dst, op: iop, a: cmp, b: zero });
                     return Some(dst);
                 }
-                // Option[scalar] `==` / `!=`: branchless masked compare (lower_eq_typed). Was
-                // both-arms-linearized (silent). Fires for a materialized Option with a scalar
-                // payload; otherwise None → the if walls (loud, safe).
+                // Option / Result `==` / `!=` (lower_eq_typed): Option[scalar] is a branchless masked
+                // compare, Option[heap] / Result[scalar,String] a conditional one. Was both-arms-
+                // linearized (silent). Fires for a materialized subject in the handled layout;
+                // otherwise None → the if walls (loud, safe).
                 if matches!(op, BinOp::Eq | BinOp::Neq)
                     && matches!(
                         &left.ty,
                         Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, _)
+                            | Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, _)
                     )
                 {
                     if let Some(eq) = self.lower_eq_typed(left, right, &left.ty) {

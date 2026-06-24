@@ -96,6 +96,15 @@ fn count_eq_calls(ty: &almide_lang::types::Ty, registry: &almide_mir::lower::Rec
         Ty::Applied(TC::Option, oa) if oa.len() == 1 => {
             usize::from(count_eq_calls(&oa[0], registry) >= 1)
         }
+        // Result[scalar, String] == lowers to ONE string.eq CallFn (the Err-String compare in the
+        // both-Err branch); the Ok scalar compare is prims.
+        Ty::Applied(TC::Result, ra)
+            if ra.len() == 2
+                && !almide_mir::lower::is_heap_ty(&ra[0])
+                && matches!(ra[1], Ty::String) =>
+        {
+            1
+        }
         _ => 0,
     }
 }

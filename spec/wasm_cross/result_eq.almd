@@ -1,0 +1,13 @@
+// @contract: C-099
+// Result[scalar, String] == / != : Ok scalar (len@4=0, value@12), Err a String (len@4=1, handle@12).
+// okEq is masked; the heap errEq (string.eq) runs ONLY in the both-Err branch (an Ok side's @12 is a
+// scalar, never dereferenced as a handle). Was both-arms-linearized (silent). Byte-matches native.
+// (ok-vs-err / err-vs-err verified separately; this keeps the multi-let-friendly subset.)
+effect fn main() -> Unit = {
+  let a: Result[Int, String] = ok(5)
+  let b: Result[Int, String] = ok(5)
+  let e: Result[Int, String] = err("boom")
+  println(if a == b then "T" else "F")
+  println(if a == e then "T" else "F")
+  println(if a != e then "T" else "F")
+}
