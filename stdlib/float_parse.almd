@@ -11,6 +11,10 @@
 fn __fp_isdigit(b: Int) -> Bool = b >= 48 and b <= 57
 fn __fp_isspace(b: Int) -> Bool = b == 32 or b == 9
 
+// Case-insensitive byte match (Rust's f64 parser accepts "inf"/"Infinity"/"NaN" in any case).
+fn __fp_lc(b: Int) -> Int = if b >= 65 and b <= 90 then b + 32 else b
+fn __fp_eqci(addr: Int, c: Int) -> Bool = __fp_lc(prim.load8(addr)) == c
+
 fn __fp_skip_sp(addr: Int, end: Int) -> Int =
   if addr < end and __fp_isspace(prim.load8(addr)) then __fp_skip_sp(addr + 1, end) else addr
 
@@ -36,6 +40,17 @@ fn float_parse(s: String) -> Result[Float, String] = {
   let en = __fp_skip_sp_end(st, base + blen)
   let neg = st < en and prim.load8(st) == 45
   let p0 = if st < en and (prim.load8(st) == 45 or prim.load8(st) == 43) then st + 1 else st
+  // IEEE special values (Rust's strtod accepts these): "inf" / "infinity" / "nan", case-insensitive,
+  // the optional sign already folded into neg/p0. Checked before the digit grammar (which rejects them).
+  // Built by RUNTIME division (prim.i2f, NOT folded literals) so the f64 inf/nan bit patterns come from
+  // the hardware — 1/0 = +inf, 0/0 = nan, byte-identical to Rust on both targets; float.to_string
+  // already renders inf/-inf/NaN.
+  let tlen = en - p0
+  let is_inf = (tlen == 3 and __fp_eqci(p0, 105) and __fp_eqci(p0 + 1, 110) and __fp_eqci(p0 + 2, 102))
+    or (tlen == 8 and __fp_eqci(p0, 105) and __fp_eqci(p0 + 1, 110) and __fp_eqci(p0 + 2, 102)
+      and __fp_eqci(p0 + 3, 105) and __fp_eqci(p0 + 4, 110) and __fp_eqci(p0 + 5, 105)
+      and __fp_eqci(p0 + 6, 116) and __fp_eqci(p0 + 7, 121))
+  let is_nan = tlen == 3 and __fp_eqci(p0, 110) and __fp_eqci(p0 + 1, 97) and __fp_eqci(p0 + 2, 110)
   // integer part
   let i_end = __fp_scan_digits(p0, en)
   let icnt = i_end - p0
@@ -59,7 +74,12 @@ fn float_parse(s: String) -> Result[Float, String] = {
   let got_digit = icnt + fcnt > 0
   let consumed_all = e_end >= en
   let ok_form = got_digit and (e_cnt > 0) and consumed_all
-  if not ok_form then err("invalid float literal")
+  if is_inf then {
+    let infv = prim.i2f(1) / prim.i2f(0)
+    if neg then ok(0.0 - infv) else ok(infv)
+  }
+  else if is_nan then ok(prim.i2f(0) / prim.i2f(0))
+  else if not ok_form then err("invalid float literal")
   else {
     let net = exp - fcnt
     let mag = prim.i2f(mant)
