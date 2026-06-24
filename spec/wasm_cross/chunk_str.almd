@@ -1,0 +1,15 @@
+// @contract: C-101
+// list.chunk / windows over a List[String] → List[List[String]]. Each cell is DEEP-COPIED into the
+// inner chunk (single-owned, no double-free — the bug the generic i64 impl had). The result's
+// scope-end Op::DropListListStr recursively frees each cell String + each row + the outer (the
+// nested-list-drop machinery was already wired; only this rc-correct producer was missing). The chunk
+// counts byte-match native; the recursive drop is leak-free (verified at scale separately).
+effect fn main() -> Unit = {
+  let xs = ["a", "b", "c", "d", "e"]
+  println(int.to_string(list.len(list.chunk(xs, 2))))
+  println(int.to_string(list.len(list.chunk(xs, 3))))
+  println(int.to_string(list.len(list.chunk(xs, 1))))
+  println(int.to_string(list.len(list.windows(xs, 2))))
+  let one = ["solo"]
+  println(int.to_string(list.len(list.chunk(one, 5))))
+}

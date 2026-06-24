@@ -60,3 +60,63 @@ fn __do_windows(xs: List[Int], n: Int) -> List[List[Int]] = {
 
 fn list_windows(xs: List[Int], n: Int) -> List[List[Int]] = __do_windows(xs, n)
 fn list_window(xs: List[Int], n: Int) -> List[List[Int]] = __do_windows(xs, n)
+
+// ── The HEAP-element (List[String]) variants → List[List[String]]. Each cell is a String HANDLE, so
+// it is DEEP-COPIED (string.repeat ·1) into the inner chunk — single-owned, the source still owns the
+// original (no double-free). The inner chunk + outer are alloc_list_str blocks. The result is
+// List[List[String]], whose scope-end Op::DropListListStr already recursively frees each cell String,
+// each row block, then the outer (the drop machinery is wired — only this producer was missing). The
+// generic i64 list_chunk flat-copied String handles → a double-free, hence the prior wall. ──
+fn __chunk_copy_str(dst: Int, src: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let x = prim.load_str(src + i * 8)
+    let copy = string.repeat(x, 1)
+    prim.store_str(dst + i * 8, copy)
+    __chunk_copy_str(dst, src, n, i + 1)
+  }
+
+fn __chunk_one_str(sh: Int, start: Int, clen: Int) -> List[String] = {
+  let c = prim.alloc_list_str(clen)
+  let _x = __chunk_copy_str(prim.handle(c) + 12, sh + 12 + start * 8, clen, 0)
+  c
+}
+
+fn __chunk_outer_str(oh: Int, sh: Int, total: Int, cn: Int, ci: Int, start: Int) -> Int =
+  if start >= total then 0
+  else {
+    let rem = total - start
+    let clen = if rem < cn then rem else cn
+    let chunk = __chunk_one_str(sh, start, clen)
+    prim.store_str(oh + 12 + ci * 8, chunk)
+    __chunk_outer_str(oh, sh, total, cn, ci + 1, start + cn)
+  }
+
+fn list_chunk_str(xs: List[String], n: Int) -> List[List[String]] = {
+  let sh = prim.handle(xs)
+  let total = prim.load32(sh + 4)
+  let num = (total + n - 1) / n
+  let outer = prim.alloc_list_str(num)
+  let _x = __chunk_outer_str(prim.handle(outer), sh, total, n, 0, 0)
+  outer
+}
+
+fn __win_outer_str(oh: Int, sh: Int, n: Int, num: Int, wi: Int) -> Int =
+  if wi >= num then 0
+  else {
+    let w = __chunk_one_str(sh, wi, n)
+    prim.store_str(oh + 12 + wi * 8, w)
+    __win_outer_str(oh, sh, n, num, wi + 1)
+  }
+
+fn __do_windows_str(xs: List[String], n: Int) -> List[List[String]] = {
+  let sh = prim.handle(xs)
+  let total = prim.load32(sh + 4)
+  let num = if n > total then 0 else total - n + 1
+  let outer = prim.alloc_list_str(num)
+  let _x = __win_outer_str(prim.handle(outer), sh, n, num, 0)
+  outer
+}
+
+fn list_windows_str(xs: List[String], n: Int) -> List[List[String]] = __do_windows_str(xs, n)
+fn list_window_str(xs: List[String], n: Int) -> List[List[String]] = __do_windows_str(xs, n)

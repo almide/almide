@@ -19,6 +19,7 @@ bytes_f16  out-of-interp-scope capability: bytes.from_list
 bytes_from_list_param  out-of-interp-scope capability: bytes.from_list
 bytes_push_inplace  out-of-interp-scope capability: bytes.new
 bytes_rawptr  out-of-interp-scope capability: bytes.from_list
+chunk_str  out-of-interp-scope capability: list.chunk
 codec_decode_errors  out-of-interp-scope capability: json.parse
 codec_float_int  out-of-interp-scope capability: json.parse
 compound_eq  out-of-interp-scope capability: list.index_of
