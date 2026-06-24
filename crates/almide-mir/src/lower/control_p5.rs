@@ -78,7 +78,10 @@ impl LowerCtx {
         // (their element move-out / accumulator paths are not heap-extended here).
         let src_scalar = matches!(&xs.ty,
             Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && !is_heap_ty(&a[0]));
-        if !src_scalar && func != "map" {
+        // `map` admits a heap source; `fold` now does too (a heap accumulator over a List[String],
+        // e.g. `lines |> list.fold("", (acc, s) => acc + s)` — the element is read as a borrowed
+        // handle like map's). `filter` stays scalar-source.
+        if !src_scalar && !matches!(func, "map" | "fold") {
             return None;
         }
         // map: a HEAP-element result list (`List[String]`/`List[Value]`) is now built too — each
@@ -94,7 +97,10 @@ impl LowerCtx {
                     Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && !is_heap_ty(&a[0])),
             "filter" => matches!(result_ty,
                 Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && !is_heap_ty(&a[0])),
-            "fold" => !is_heap_ty(result_ty),
+            // A SCALAR accumulator (Int/Bool/Float), OR a heap STRING accumulator (`fold("", (acc,x)
+            // => acc + …)`): the inlined `acc = <body>` is the loop-carried slot's drop-old + SetLocal
+            // (the proven i(id)m append-accumulator pattern), reclaiming each transient String.
+            "fold" => !is_heap_ty(result_ty) || matches!(result_ty, Ty::String),
             _ => false,
         };
         if !result_ok {
@@ -159,6 +165,10 @@ impl LowerCtx {
         fuse_index: Option<VarId>,
     ) -> Option<ValueId> {
         use crate::PrimKind;
+        // A HEAP (String) fold accumulator: the inlined `acc = <body>` is a loop-carried slot
+        // drop-old + SetLocal (vs a scalar SetLocal). `acc_ty` is the init's type.
+        let fold_acc_ty: Option<Ty> =
+            if func == "fold" { init.map(|e| e.ty.clone()).filter(is_heap_ty) } else { None };
         // The result list's recursive free depends on the element type: a String → `DropListStr`
         // (heap_elem_lists); a `(String, Value)` tuple → `DropListStrValue` (str_value_elem_lists,
         // the parse_records pair); a dynamic Value → `DropListValue` (value_elem_lists, parse_records'
@@ -187,13 +197,35 @@ impl LowerCtx {
         // build a result list block of `len` slots instead.
         let (acc_local, result_list, result_h, cursor) = match func {
             "fold" => {
-                let init_v = self.lower_scalar_value(init?)?;
-                // A STABLE mutable local: ConstInt-seed then SetLocal to the init value (so the
-                // local is distinct and reassignable across iterations, the proven loop-state model).
-                let acc = self.fresh_value();
-                self.ops.push(Op::ConstInt { dst: acc, value: 0 });
-                self.ops.push(Op::SetLocal { local: acc, src: init_v });
-                (Some(acc), None, None, None)
+                let init_expr = init?;
+                if is_heap_ty(&init_expr.ty) {
+                    // A HEAP (String) accumulator: seed the loop-carried slot with a BARE fresh owned
+                    // String (an i32 Alloc dst) — NOT registered for drop (the slot owns it; the loop's
+                    // drop-old or the scope-end drop frees it exactly once). NO ConstInt seed (which
+                    // would type the local i64 and mismatch the i32 handle stores). Reassigned in place
+                    // via SetLocal each iteration — the proven i(id)m append-accumulator slot. Gated to
+                    // a String LITERAL init (`fold("", …)` / `fold("prefix", …)`); a non-literal heap
+                    // init rolls back (the HOF WALLs).
+                    if let IrExprKind::LitStr { value: s } = &init_expr.kind {
+                        let acc = self.fresh_value();
+                        self.ops.push(Op::Alloc {
+                            dst: acc,
+                            repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT },
+                            init: crate::Init::Str(s.clone()),
+                        });
+                        (Some(acc), None, None, None)
+                    } else {
+                        return None;
+                    }
+                } else {
+                    let init_v = self.lower_scalar_value(init_expr)?;
+                    // A STABLE mutable local: ConstInt-seed then SetLocal to the init value (so the
+                    // local is distinct and reassignable across iterations, the proven loop-state model).
+                    let acc = self.fresh_value();
+                    self.ops.push(Op::ConstInt { dst: acc, value: 0 });
+                    self.ops.push(Op::SetLocal { local: acc, src: init_v });
+                    (Some(acc), None, None, None)
+                }
             }
             "map" | "filter" => {
                 // A fresh OWNED `DynList` of `len` slots (map: len = len(xs); filter: len(xs) is
@@ -299,6 +331,17 @@ impl LowerCtx {
         self.in_defunc_body += 1;
         let body_v = if let Some(elem_ty) = &result_elem {
             self.lower_heap_result_arm(body, elem_ty)
+        } else if fold_acc_ty.is_some() {
+            // A heap (String) fold accumulator: the body `acc + s` is a ConcatStr producing a FRESH
+            // owned String returned as a BARE ValueId (NOT Consumed/registered — exactly the append-
+            // accumulator producer). The reassignment below drops-old + SetLocal moves this in, so it
+            // is single-owned by the slot (lower_heap_result_arm would double-register it → a scope-end
+            // double-free). It reads the loop-carried `acc` BEFORE the drop (borrow-then-rebind). A
+            // non-ConcatStr body returns None → the HOF rolls back and the caller WALLs.
+            self.scalar_loop_depth += 1;
+            let v = self.try_lower_concat_str(body);
+            self.scalar_loop_depth -= 1;
+            v
         } else {
             self.scalar_loop_depth += 1;
             let v = self.lower_scalar_value(body);
@@ -353,7 +396,13 @@ impl LowerCtx {
                 self.ops.push(Op::EndIf { val: None });
             }
             "fold" => {
-                // acc = body_v.
+                // acc = body_v. A HEAP acc DROPS the old slot value first (the loop-carried `i(id)m`
+                // append-accumulator pattern: each transient String reclaimed), then moves the new one
+                // in. A scalar acc just rebinds (no handle to free).
+                if fold_acc_ty.is_some() {
+                    let drop_op = self.drop_op_for(acc_local.unwrap());
+                    self.ops.push(drop_op);
+                }
                 self.ops.push(Op::SetLocal { local: acc_local.unwrap(), src: body_v });
             }
             _ => return None,
@@ -366,6 +415,9 @@ impl LowerCtx {
         self.ops.push(Op::LoopEnd);
 
         match func {
+            // A HEAP acc's final value is an OWNED String returned to the caller, which registers it
+            // for the outer scope-end drop (the same as the map/filter result list — C1 does NOT push
+            // it itself, or it would be double-dropped).
             "fold" => Some(acc_local.unwrap()),
             "map" => Some(result_list.unwrap()),
             "filter" => {
