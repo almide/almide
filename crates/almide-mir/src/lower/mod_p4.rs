@@ -160,7 +160,11 @@ pub fn is_self_host_option_module_fn(module: &str, func: &str) -> bool {
         // across Int/Float exactly like v0. json.as_string is the heap-payload case: Some(a deep copy
         // of the Str payload @12) / None — the repr-poly Option[String] materialization (a 0-or-1-
         // element DynListStr, same path as list.get_str); as_array (List[Value]) is a refinement.
-        "json" => matches!(func, "as_int" | "as_float" | "as_bool" | "as_string"),
+        // json.get is self-hosted (`match value.get(j,key) { ok(v) => some(v), err(_) => none }`),
+        // so it returns a materialized Option[Value] — `json.get(v,k) ?? d` (→ option.value_unwrap_or)
+        // and a `match` over it EXECUTE. The ubiquitous json-accessor idiom, the root of the
+        // wasm-bindgen get_str/get_kind cascade.
+        "json" => matches!(func, "as_int" | "as_float" | "as_bool" | "as_string" | "get"),
         _ => false,
     }
 }

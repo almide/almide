@@ -1,0 +1,12 @@
+// json_get — SELF-HOSTED `json.get(j, key)` over `value.get` (Result[Value, String], wasm-linked):
+// Ok(child) → Some, Err → None. Byte-identical to the `almide_json_get` intrinsic across all cases
+// (present scalar / null / array / bool value, absent key, non-object subject) — verified — so the
+// v1 trust spine lowers it through the PROVEN `value.get` + Option-ctor path with NO hand-written
+// wasm runtime to drift from the native oracle. This is the root of the json-accessor cascade: the
+// ubiquitous `json.get(v, k) ?? default` idiom (→ option.value_unwrap_or) and `match json.get(…)`
+// now EXECUTE on v1, unblocking the wasm-bindgen get_str / get_kind / type-stringifier family.
+fn json_get(j: Value, key: String) -> Option[Value] =
+  match value.get(j, key) {
+    ok(v) => some(v)
+    err(_) => none
+  }
