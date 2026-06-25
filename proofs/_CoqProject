@@ -3,6 +3,7 @@ Subset.v
 OwnershipChecker.v
 OwnershipLoop.v
 CoownLoop.v
+CoownCompose.v
 ALS.v
 Translation.v
 RuntimeModel.v
