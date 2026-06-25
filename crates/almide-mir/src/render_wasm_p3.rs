@@ -11,7 +11,17 @@ fn preamble() -> String {
     (func $args_sizes_get (param i32 i32) (result i32)))
   (import "wasi_snapshot_preview1" "args_get"
     (func $args_get (param i32 i32) (result i32)))
+  (import "wasi_snapshot_preview1" "path_open"
+    (func $path_open (param i32 i32 i32 i32 i32 i64 i64 i32 i32) (result i32)))
+  (import "wasi_snapshot_preview1" "fd_read"
+    (func $fd_read (param i32 i32 i32 i32) (result i32)))
+  (import "wasi_snapshot_preview1" "fd_close"
+    (func $fd_close (param i32) (result i32)))
+  (import "wasi_snapshot_preview1" "fd_filestat_get"
+    (func $fd_filestat_get (param i32 i32) (result i32)))
   (memory (export "memory") 1)
+  ;; the fs.read_text path_open error message — a CONST byte run the Err arm copies.
+  (data (i32.const {RTF_NOTFOUND_ADDR}) "file not found")
   (global $bump (mut i32) (i32.const {HEAP_BASE}))
   ;; the free-list head (0 = empty) — physical reclamation (A1.2-render), the
   ;; realization of proofs/FreeList.v. A freed block is pushed here; $alloc reuses
@@ -50,6 +60,19 @@ fn preamble() -> String {
         (br $scan)))
     ;; not found: bump the frontier (a genuinely fresh block)
     (local.set $p (global.get $bump))
+    (global.set $bump (i32.add (local.get $p) (local.get $n)))
+    (local.get $p))
+
+  ;; 8-byte-ALIGNED bump alloc for TRANSIENT WASI out-param scratch (fd_out/stat/iov/
+  ;; nread/read-buffer) — the host's `fd_filestat_get` writes an i64 at stat+32, which
+  ;; traps unless the buffer is 8-aligned (the `$alloc` byte-sized String frontier leaves
+  ;; the bump at arbitrary parity). This NEVER frees (scratch is immortal, like the emit
+  ;; backend's `__alloc_pinned`), so it is OUTSIDE the free-list / `$alloc` proof surface:
+  ;; it only rounds `$bump` up to 8 and advances — no rc cell, no free-list link, the
+  ;; FreeList.v-realizing `$alloc` is untouched.
+  (func $alloc8 (param $n i32) (result i32)
+    (local $p i32)
+    (local.set $p (i32.and (i32.add (global.get $bump) (i32.const 7)) (i32.const -8)))
     (global.set $bump (i32.add (local.get $p) (local.get $n)))
     (local.get $p))
 
@@ -270,6 +293,90 @@ fn preamble() -> String {
       (local.set $i (i32.add (local.get $i) (i32.const 1)))
       (br $loop)))
     (local.get $result))
+
+  ;; fs.read_text(path) — open the file at $path and read its bytes, returning a fresh
+  ;; OWNED `Result[String, String]` in the EXACT `materialize_result_str` cap-as-tag
+  ;; layout: a 1-slot DynListStr `[rc][len@4=1][cap@8=1][@12 String handle][@16 tag]`
+  ;; (tag 0 = Ok, 1 = Err), so the caller's `!`/`match`/`DropListStr` machinery handles
+  ;; it identically to a self-host-built Result. $path is a borrowed canonical String
+  ;; `[rc][len@4][cap@8][bytes@12…]`. WASI floor: `path_open` (relative to the first
+  ;; preopened dir fd 3, leading '/' stripped — the absolute-path fallback the native
+  ;; emit's __resolve_path uses) gives a file fd; `fd_filestat_get` its byte size;
+  ;; `fd_read` the bytes; we copy them into a canonical String and wrap it Ok. On a
+  ;; path_open error we wrap the message "file not found" Err. The FOURTH sandbox exit
+  ;; (Capability::FsRead) — the result is an owned heap handle the caller's scope-end
+  ;; DropListStr balances (frees the @12 payload String + the block).
+  (func $read_text_file (param $path i32) (result i32)
+    (local $pdata i32) (local $plen i32) (local $fd_out i32) (local $errno i32)
+    (local $fd i32) (local $stat i32) (local $fsize i32) (local $iov i32)
+    (local $nread i32) (local $data i32) (local $str i32) (local $result i32)
+    (local $j i32) (local $msg i32)
+    ;; path bytes + length; strip a leading '/' so the path is relative to preopen fd 3.
+    (local.set $pdata (i32.add (local.get $path) (i32.const {LIST_HEADER})))
+    (local.set $plen (i32.load (i32.add (local.get $path) (i32.const {LIST_LEN_OFFSET}))))
+    (if (i32.and (i32.gt_u (local.get $plen) (i32.const 0))
+                 (i32.eq (i32.load8_u (local.get $pdata)) (i32.const {ASCII_SLASH})))
+      (then
+        (local.set $pdata (i32.add (local.get $pdata) (i32.const 1)))
+        (local.set $plen (i32.sub (local.get $plen) (i32.const 1)))))
+    ;; path_open(dirfd=3, dirflags=0, path_ptr, path_len, oflags=0,
+    ;;   rights_base = fd_read(2) | fd_seek(4) = 6, rights_inheriting=0, fdflags=0, fd_out)
+    (local.set $fd_out (call $alloc8 (i32.const 4)))
+    (local.set $errno
+      (call $path_open (i32.const 3) (i32.const 0) (local.get $pdata) (local.get $plen)
+                       (i32.const 0) (i64.const 6) (i64.const 0) (i32.const 0) (local.get $fd_out)))
+    ;; On a path_open error build Err("file not found").
+    (if (result i32) (i32.ne (local.get $errno) (i32.const 0))
+      (then
+        (local.set $msg (call $rtf_str (i32.const {RTF_NOTFOUND_ADDR}) (i32.const {RTF_NOTFOUND_LEN})))
+        (call $rtf_result (local.get $msg) (i32.const 1)))
+      (else
+        (local.set $fd (i32.load (local.get $fd_out)))
+        ;; fd_filestat_get → file size (i64 @ stat+32; take the low 32 bits). The stat buffer
+        ;; MUST be 8-aligned (the host writes an i64 there) — `$alloc8` guarantees it.
+        (local.set $stat (call $alloc8 (i32.const 64)))
+        (drop (call $fd_filestat_get (local.get $fd) (local.get $stat)))
+        (local.set $fsize (i32.load (i32.add (local.get $stat) (i32.const 32))))
+        ;; fd_read into a fresh buffer; iov = [buf_ptr, buf_len].
+        (local.set $data (call $alloc8 (i32.add (local.get $fsize) (i32.const 8))))
+        (local.set $iov (call $alloc8 (i32.const 8)))
+        (i32.store (local.get $iov) (local.get $data))
+        (i32.store (i32.add (local.get $iov) (i32.const 4)) (local.get $fsize))
+        (local.set $nread (call $alloc8 (i32.const 4)))
+        (drop (call $fd_read (local.get $fd) (local.get $iov) (i32.const 1) (local.get $nread)))
+        (drop (call $fd_close (local.get $fd)))
+        ;; the actual byte count read (may be < the stat size) is the String length.
+        (local.set $fsize (i32.load (local.get $nread)))
+        ;; build the canonical String + copy the bytes, then wrap it Ok.
+        (local.set $str (call $rtf_str (local.get $data) (local.get $fsize)))
+        (call $rtf_result (local.get $str) (i32.const 0)))))
+
+  ;; helper: copy $len bytes at $src into a fresh canonical String `[rc][len][cap][bytes…]`.
+  (func $rtf_str (param $src i32) (param $len i32) (result i32)
+    (local $str i32) (local $j i32)
+    (local.set $str (call $alloc (i32.add (i32.const {LIST_HEADER}) (local.get $len))))
+    (i32.store (i32.add (local.get $str) (i32.const {LIST_RC_OFFSET})) (i32.const {RC_INITIAL}))
+    (i32.store (i32.add (local.get $str) (i32.const {LIST_LEN_OFFSET})) (local.get $len))
+    (i32.store (i32.add (local.get $str) (i32.const {LIST_CAP_OFFSET})) (local.get $len))
+    (local.set $j (i32.const 0))
+    (block $cdone (loop $cloop
+      (br_if $cdone (i32.ge_u (local.get $j) (local.get $len)))
+      (i32.store8 (i32.add (i32.add (local.get $str) (i32.const {LIST_HEADER})) (local.get $j))
+                  (i32.load8_u (i32.add (local.get $src) (local.get $j))))
+      (local.set $j (i32.add (local.get $j) (i32.const 1)))
+      (br $cloop)))
+    (local.get $str))
+
+  ;; helper: wrap a String handle into the cap-as-tag `Result[String, String]` block
+  ;; `[rc][len@4=1][cap@8=1][@12 String handle][@16 tag]` (tag 0 = Ok, 1 = Err).
+  (func $rtf_result (param $payload i32) (param $tag i32) (result i32)
+    (local $obj i32)
+    (local.set $obj (call $list_new (i32.const 1) (i32.const 1)))
+    ;; @12 LOW := the String handle (zero-extended, clearing the high half / @16).
+    (call $list_set (local.get $obj) (i32.const 0) (i64.extend_i32_u (local.get $payload)))
+    ;; @16 := the Ok/Err tag (the slot's high 32 bits).
+    (i32.store (i32.add (local.get $obj) (i32.const {RTF_TAG_OFFSET})) (local.get $tag))
+    (local.get $obj))
 
 "#
     )

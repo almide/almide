@@ -351,8 +351,39 @@
 
     #[test]
     fn effectful_module_call_is_walled() {
-        // var x = fs.read_text(p)  → walled (fs is effectful; its capability cannot
-        // yet be charged into the witness, so admitting it would be accept-but-unsafe).
+        // var x = fs.read_bytes(p)  → walled. `fs` is effectful; `fs.read_bytes` is NOT one of
+        // the ADMITTED self-hosted effectful calls (random.int / env.args / fs.read_text — those
+        // charge a real capability into the transitive witness via their prim floor), so its
+        // capability cannot be charged here and admitting it would be accept-but-unsafe.
+        // (`fs.read_text` is deliberately admitted now — see `effectful_read_text_is_admitted`.)
+        // A HEAP result (List[Int]) so the value-call purity gate is the path that walls it.
+        let b = body(vec![
+            bind(0, Ty::String, ir_expr(IrExprKind::LitStr { value: "p".into() }, Ty::String)),
+            bind(
+                1,
+                Ty::list(Ty::Int),
+                module_call(
+                    "fs",
+                    "read_bytes",
+                    vec![ir_expr(IrExprKind::Var { id: VarId(0) }, Ty::String)],
+                    Ty::list(Ty::Int),
+                ),
+            ),
+        ]);
+        match lower_body(&b, "main") {
+            Err(LowerError::Unsupported(m)) => assert!(m.contains("effectful/impure"), "got: {m}"),
+            other => panic!("expected an effectful wall, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn effectful_read_text_is_admitted() {
+        // var c = fs.read_text(p)  → ADMITTED (no longer walled). `fs.read_text` is a
+        // self-hosted effectful call whose prim floor (`prim.read_text_file`) is linked into
+        // the program, so its FsRead capability IS charged into the transitive cap_witness —
+        // the `used ⊆ declared` checker then verifies an `effect fn` caller. It lowers to a
+        // real `fs.read_text` CallFn returning a fresh OWNED `Result[String, String]` (the
+        // cap-as-tag DynListStr, dropped by the scope-end DropListStr — no leak).
         let b = body(vec![
             bind(0, Ty::String, ir_expr(IrExprKind::LitStr { value: "p".into() }, Ty::String)),
             bind(
@@ -366,10 +397,13 @@
                 ),
             ),
         ]);
-        match lower_body(&b, "main") {
-            Err(LowerError::Unsupported(m)) => assert!(m.contains("effectful/impure"), "got: {m}"),
-            other => panic!("expected an effectful wall, got {other:?}"),
-        }
+        let mir = lower_body(&b, "main").expect("fs.read_text is an admitted effectful call");
+        assert!(
+            mir.ops.iter().any(|op| matches!(op, crate::Op::CallFn { name, .. } if name == "fs.read_text")),
+            "fs.read_text lowers to a real CallFn: {:?}",
+            mir.ops
+        );
+        assert_eq!(verify_ownership(&mir), Ok(()), "the owned Result is balanced by DropListStr");
     }
 
     #[test]

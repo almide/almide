@@ -452,6 +452,23 @@ pub enum PrimKind {
     /// ownership certificate emits an `i` (alloc) for it, balanced by the caller's
     /// scope-end drop (a recursive `DropListStr` over the owned element Strings).
     ArgsGetList,
+    /// The WASI `path_open` + `fd_read` file-read sequence, packaged as ONE high-level
+    /// HEAP-RESULT prim — `args = [path]` (a BORROWED `String` handle), dst = a fresh
+    /// OWNED `Result[String, String]`. Opens the file at `path` (relative to the first
+    /// preopened dir, leading `/` stripped — the same absolute-path fallback the native
+    /// emit's `__resolve_path` uses) and reads its bytes: on success builds `Ok(content)`
+    /// where `content` is a canonical Almide String of the file bytes; on a path_open
+    /// error builds `Err(<message>)`. The result block is the EXACT `materialize_result_str`
+    /// layout — a 1-slot DynListStr `[rc][len@4=1][cap@8][@12 String handle][@16 tag]`
+    /// (tag 0 = Ok, 1 = Err) — so the caller's `!`/`match`/`DropListStr` machinery handles
+    /// it identically to a self-host-built `Result[String, String]`. The FOURTH sandbox
+    /// exit, reached only by the self-hosted `fs.read_text`. Carries [`Capability::FsRead`]
+    /// (the cap_witness counts it exactly like `ArgsGetList` → CliArgs), so a function using
+    /// it is caps-verified ONLY if it declares FsRead — never accept-but-unsafe. Its dst is
+    /// a heap Ptr (like `ArgsGetList`), so the ownership certificate emits an `i` (alloc) for
+    /// it, balanced by the caller's scope-end drop (the flat `DropListStr` over the one owned
+    /// payload String).
+    ReadTextFile,
     /// Release one reference of a RAW heap handle (`(call $rc_dec …)`), the inverse of [`RcInc`].
     /// The MECHANISM the self-hosted recursive `value.__drop_value` frees a dynamic Value tree with
     /// (the §4.1-compliant alternative to a hand-written WAT drop): it operates on raw Int handles,
@@ -622,18 +639,26 @@ pub enum Capability {
     /// pure `fn` declares ∅ and so can NEVER read argv un-witnessed (the checker
     /// REJECTS `used ⊄ allowed`); only an `effect fn` (which declares the host caps) may.
     CliArgs,
+    /// Reading a FILE from the host filesystem — the WASI `path_open` / `fd_read` floor
+    /// ([`PrimKind::ReadTextFile`]), reached by the self-hosted `fs.read_text`. The fourth
+    /// sandbox exit. Accounted exactly like CliArgs/Entropy/Stdout: a pure `fn` declares ∅
+    /// and so can NEVER read a file un-witnessed (the checker REJECTS `used ⊄ allowed`);
+    /// only an `effect fn` (which declares the host caps) may.
+    FsRead,
 }
 
 impl Capability {
     /// The stable registry id — the ONLY place a `Capability` becomes a number.
     /// proofs/CapabilityBound.v's checker is GENERIC over `list nat` (a `subset_check`,
     /// no per-capability enumeration), so it needs no edit to admit a new id — only
-    /// this mapping must stay injective + stable (Stdout = 0, Entropy = 1, CliArgs = 2).
+    /// this mapping must stay injective + stable (Stdout = 0, Entropy = 1, CliArgs = 2,
+    /// FsRead = 3).
     pub const fn id(self) -> u32 {
         match self {
             Capability::Stdout => 0,
             Capability::Entropy => 1,
             Capability::CliArgs => 2,
+            Capability::FsRead => 3,
         }
     }
 }

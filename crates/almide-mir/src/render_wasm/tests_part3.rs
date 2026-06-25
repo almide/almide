@@ -517,15 +517,22 @@
     /// `PrimKind` renders to, bounded by the CAPABILITY set, NOT by hand-mapping
     /// discipline. `$args_get_list` (`PrimKind::ArgsGetList`, Capability::CliArgs) is
     /// the `args_sizes_get` + `args_get` + canonical-`List[String]` assembly the
-    /// self-hosted `env.args` reaches: it CANNOT be written in Almide (it is the
-    /// host-call boundary itself, like the `$fd_write`/`$random_get` IMPORTS — those
-    /// are not `(func $…)` definitions, but a multi-value-out-param WASI sequence that
-    /// produces a heap value has no pure-Almide form). Accounted SEPARATELY from the
-    /// open stdlib surface for the same reason RC primitives are: a host-floor exit is
-    /// the trust spine's own core, not "another stdlib routine." This set grows ONLY
-    /// when the capability vocabulary gains a new heap-result host floor; the open
-    /// ratchet stays exactly as strict.
-    const WASI_FLOOR_FNS: &[&str] = &["$args_get_list"];
+    /// self-hosted `env.args` reaches; `$read_text_file` (`PrimKind::ReadTextFile`,
+    /// Capability::FsRead) is the `path_open` + `fd_read` + canonical-`Result[String,
+    /// String]` assembly the self-hosted `fs.read_text` reaches (with `$rtf_str` /
+    /// `$rtf_result`, the two leaves of that one sequence — copy host bytes into a
+    /// canonical String, wrap a handle in the cap-as-tag Result block; plus `$alloc8`,
+    /// the 8-aligned TRANSIENT WASI-scratch bump the host's i64 out-params require, the
+    /// spine's immortal-scratch counterpart of the emit backend's `__alloc_pinned`).
+    /// They CANNOT be written in Almide (each is the host-call boundary itself, like the
+    /// `$fd_write`/`$random_get` IMPORTS — a multi-value-out-param WASI sequence that
+    /// turns raw host bytes/handles into a heap value has no pure-Almide form).
+    /// Accounted SEPARATELY from the open stdlib surface for the same reason RC
+    /// primitives are: a host-floor exit is the trust spine's own core, not "another
+    /// stdlib routine." This set grows ONLY when the capability vocabulary gains a new
+    /// heap-result host floor; the open ratchet stays exactly as strict.
+    const WASI_FLOOR_FNS: &[&str] =
+        &["$args_get_list", "$read_text_file", "$rtf_str", "$rtf_result", "$alloc8"];
 
     #[test]
     fn handwritten_wasm_runtime_does_not_grow() {

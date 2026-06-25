@@ -29,6 +29,14 @@ pub fn is_self_host_result_str_module_fn(module: &str, func: &str) -> bool {
     matches!(
         (module, func),
         ("value", "as_string") | ("result", "zip") | ("value", "as_array") | ("value", "get")
+            // `fs.read_text` returns the cap-as-tag `Result[String, String]` ($read_text_file builds
+            // it in the EXACT `materialize_result_str` layout — payload @12, Ok/Err tag @16). So a
+            // `match`/`!` over it must read tag @16 + bind the @12 payload handle (the str-result
+            // path), NOT len-as-tag @4. Without this the subject was untracked, so `try_lower_result_
+            // match` bailed and the unwrap bound the WHOLE Result block where the Ok String was
+            // expected — a 1-byte garbage print (low byte of the payload pointer) / an i64↔i32 width
+            // mismatch downstream in csv-to-json.
+            | ("fs", "read_text")
     )
 }
 

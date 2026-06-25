@@ -776,6 +776,25 @@ impl LowerCtx {
             self.heap_elem_lists.insert(dst);
             return Ok(Some(dst));
         }
+        // `prim.read_text_file(path)` — the WASI file-read floor (fs.read_text). ONE
+        // BORROWED `String` arg (the path; the caller still owns it). Its dst is a FRESH
+        // OWNED `Result[String, String]` built by the render in the EXACT
+        // `materialize_result_str` cap-as-tag layout (1-slot DynListStr, payload @12, tag
+        // @16). Tracked like a heap-Ok Result: `materialized_results_str` so a downstream
+        // `match`/`!` reads tag @16, AND `heap_elem_lists` so the heap-payload bind gates open
+        // AND the scope-end drop is the flat `DropListStr` (frees the one owned String @12 +
+        // the block — a flat `Drop` would leak the String). Carries Capability::FsRead
+        // (counted in cap_witness). The render emits the WASI path_open/fd_read sequence.
+        if func == "read_text_file" {
+            let path = self.lower_scalar_value(&args[0]).ok_or_else(|| {
+                LowerError::Unsupported("prim.read_text_file path is not a lowerable scalar/handle".into())
+            })?;
+            let dst = self.fresh_value();
+            self.ops.push(Op::Prim { kind: PrimKind::ReadTextFile, dst: Some(dst), args: vec![path] });
+            self.materialized_results_str.insert(dst);
+            self.heap_elem_lists.insert(dst);
+            return Ok(Some(dst));
+        }
         // Bitwise binary ops lower to a scalar `Op::IntBinOp` (i64 and/or/xor/shl/shr_s),
         // not an `Op::Prim` — the int.band/bor/bxor/bshl/bshr floor. No ownership.
         let bitop = match func {

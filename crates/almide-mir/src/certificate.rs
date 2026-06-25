@@ -189,6 +189,13 @@ pub fn cap_witness(func: &MirFunction) -> CapWitness {
         if let Op::Prim { kind: crate::PrimKind::ArgsGetList, .. } = op {
             used.push(Capability::CliArgs);
         }
+        // The `read_text_file` primitive is the FS-READ floor op — reached by the self-hosted
+        // `fs.read_text`, so a fn using it must declare FsRead (the same accounting as ArgsGetList →
+        // CliArgs). The transitive `reachable_caps` follows the CallFn edge into `fs.read_text`, so a
+        // caller inherits this FsRead and is caps-verified against its declared bound.
+        if let Op::Prim { kind: crate::PrimKind::ReadTextFile, .. } = op {
+            used.push(Capability::FsRead);
+        }
         // SOUNDNESS CRUX: a CallIndirect invokes a closure that may reach ANY capability.
         // When the table index resolves to a KNOWN lifted lambda (a `FuncRef` in THIS
         // function), its REAL caps are folded transitively by `reachable_caps` (which
@@ -663,6 +670,16 @@ pub fn ownership_certificate(func: &MirFunction) -> String {
             // this the heap result would be an unbacked object the cert never opens — the
             // verify_ownership/cert agreement breaks for the env.args body.
             Op::Prim { kind: PrimKind::ArgsGetList, dst: Some(d), .. } => {
+                s.of.insert(*d, *d);
+                s.event(*d, 'i');
+            }
+            // `read_text_file` ALLOCATES a fresh owned `Result[String, String]` (the cap-as-tag
+            // block owning one payload String) — a +1, like `Alloc`. Its path arg is BORROWED (the
+            // caller still owns it — no cert event). It feeds no loop, so it gets its own stream
+            // (`i`), balanced by the caller's scope-end `DropListStr` (a `d`) or a heap-return
+            // move-out (`m`). Without this the heap result would be an unbacked object the cert
+            // never opens — the verify_ownership/cert agreement breaks for the fs.read_text body.
+            Op::Prim { kind: PrimKind::ReadTextFile, dst: Some(d), .. } => {
                 s.of.insert(*d, *d);
                 s.event(*d, 'i');
             }

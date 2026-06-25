@@ -11,8 +11,22 @@ fn has_result_err(body: &IrExpr) -> bool {
     struct V(bool);
     impl IrVisitor for V {
         fn visit_expr(&mut self, e: &IrExpr) {
+            // A direct `err(…)` (`ResultErr`) OR a RESULT-CONSTRUCTING PRIM whose Err arm is
+            // runtime-reachable. `prim.read_text_file` builds an `Err(message)` inside the WASI
+            // render (path_open failure) — invisible to the IR as a `ResultErr` node, but the fn
+            // genuinely CAN return `Err`. So a `fn f() = prim.read_text_file(p)` (the self-host
+            // `fs_read_text`) is can-err: its `!` must NOT be stripped as never-err (which would bind
+            // the whole Result block where the Ok String was expected). `fs.read_text` reaches main
+            // as a `Module` call so the strip already leaves it; this keeps the analysis honest if a
+            // `Named`-call form ever appears (e.g. after inlining).
             if matches!(&e.kind, IrExprKind::ResultErr { .. }) {
                 self.0 = true;
+            }
+            if let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, .. } = &e.kind
+            {
+                if module.as_str() == "prim" && func.as_str() == "read_text_file" {
+                    self.0 = true;
+                }
             }
             walk_expr(self, e);
         }

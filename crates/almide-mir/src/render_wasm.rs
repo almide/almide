@@ -50,9 +50,19 @@ use std::collections::{BTreeMap, BTreeSet};
 const NWRITTEN_ADDR: u32 = 0; // i32 scratch for fd_write's bytes-written out-param
 const IOVEC_ADDR: u32 = 8; // [buf: i32][len: i32]
 const ITOA_TMP_ADDR: u32 = 32; // reversed-digit scratch (≤ 20 bytes)
-const LABELS_ADDR: u32 = 64; // print labels (the data section)
+// The fs.read_text path_open error message — a CONST byte run in the data section
+// (the `$read_text_file` Err arm copies it into a canonical String). Reserved BELOW the
+// dynamic print labels so the per-function label writer (which starts at `LABELS_ADDR`)
+// never overlaps it.
+const RTF_NOTFOUND_ADDR: u32 = 64; // "file not found" message bytes
+const RTF_NOTFOUND_LEN: u32 = 14; // len of "file not found"
+const LABELS_ADDR: u32 = 80; // print labels (the data section)
 const SCRATCH_ADDR: u32 = 512; // the line build buffer
 const HEAP_BASE: u32 = 8192; // bump allocator start
+// The Ok/Err tag of a cap-as-tag `Result[String, String]` lives in the HIGH 32 bits of
+// the 1-slot block's element (@16) — the `materialize_result_str` layout `$read_text_file`
+// reproduces so the caller's match/`!`/DropListStr reads it identically.
+const RTF_TAG_OFFSET: u32 = LIST_HEADER + I32_SIZE; // @16 = the slot's high half
 
 // Field sizes / offsets (derived so the relationships show — no bare literals).
 // list = [rc:i32 @0][len:i32 @4][cap:i32 @8][data:i64 @12…].
@@ -78,6 +88,7 @@ const ASCII_ZERO: u32 = 48;
 const ASCII_EQUALS: u32 = 61;
 const ASCII_COMMA: u32 = 44;
 const ASCII_NEWLINE: u32 = 10;
+const ASCII_SLASH: u32 = 47; // '/' — stripped from an absolute fs.read_text path
 
 /// The line buffer for printing lives in `[SCRATCH_ADDR, HEAP_BASE)`; one element
 /// appends at most a separator comma plus the digits of a u64 (≤ 20). The print
@@ -526,10 +537,15 @@ fn value_reprs_wasm(func: &MirFunction) -> BTreeMap<ValueId, Repr> {
                 m.insert(*dst, SCALAR_REPR);
             }
             // A `LoadHandle` result is a heap PTR (i32 handle); an `ArgsGetList` result is a
-            // freshly-allocated heap `List[String]` PTR (i32 handle) — both keep Ptr repr (no
+            // freshly-allocated heap `List[String]` PTR; a `ReadTextFile` result is a
+            // freshly-allocated heap `Result[String, String]` PTR — all keep Ptr repr (no
             // i64 zero-extend). Every other prim result (a load, fd_write errno, or
             // handle→address) is a scalar i64.
-            Op::Prim { dst: Some(dst), kind: PrimKind::LoadHandle | PrimKind::ArgsGetList, .. } => {
+            Op::Prim {
+                dst: Some(dst),
+                kind: PrimKind::LoadHandle | PrimKind::ArgsGetList | PrimKind::ReadTextFile,
+                ..
+            } => {
                 m.insert(*dst, Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT });
             }
             Op::Prim { dst: Some(dst), .. } => {

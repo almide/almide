@@ -523,6 +523,14 @@ fn render_op(
                 // (i32 handle, value_reprs_wasm), so the call result sets the local DIRECTLY
                 // (no i64 extend) — exactly like a LoadHandle.
                 PrimKind::ArgsGetList => "(call $args_get_list)".to_string(),
+                // read_text_file(path) — the WASI file-read floor; opens + reads the file at
+                // `path` and builds a fresh owned `Result[String, String]` in the preamble helper.
+                // The path arg is a heap Ptr local (i32 handle, like a $list ptr), passed DIRECTLY
+                // (no i32.wrap — it is already i32, like `Handle`'s arg). dst is a heap Ptr
+                // (value_reprs_wasm), so the call result sets the local directly (no i64 extend).
+                PrimKind::ReadTextFile => {
+                    format!("(call $read_text_file (local.get {}))", local(args[0]))
+                }
                 // RAW refcount ops (the self-host drop/copy mechanism) — reuse the proven $rc_dec/
                 // $rc_inc on the i32-wrapped handle. dst is None (Unit), so the `match dst` below
                 // emits the call as a STATEMENT (no local.set).

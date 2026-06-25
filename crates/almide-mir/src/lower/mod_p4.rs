@@ -668,6 +668,21 @@ pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], resu
     if func == "fold" && matches!(module, "list" | "map" | "set") && is_heap_ty(result_ty) {
         return format!("{module}.fold_hacc");
     }
+    // `option.unwrap_or(o, d)` over an `Option[String]` (the pipe/UFCS form
+    // `list.get(xs, i) |> option.unwrap_or("")`, NOT the `??` operator that
+    // `try_lower_option_unwrap_or` desugars) must route to `option.unwrap_or_str`: the
+    // generic `option.unwrap_or` takes its default as an i64 SCALAR (`Option[Int]`), so a
+    // String fallback (an i32 handle) and a String result repr-mismatch it — invalid wasm
+    // (`expected i64, found i32` in the call + the i64 result). `option.unwrap_or_str`
+    // (param i32 i32) (result i32) is the rc-correct String variant (deep-copies the kept
+    // payload so result + source can both drop). Keyed on the Option payload being String.
+    if module == "option" && func == "unwrap_or" {
+        if let Some(Ty::Applied(TypeConstructorId::Option, a)) = arg_tys.first() {
+            if a.len() == 1 && matches!(a[0], Ty::String) {
+                return "option.unwrap_or_str".to_string();
+            }
+        }
+    }
     if module == "list" {
         // List[Float] ordering uses IEEE-754 totalOrder (f64::total_cmp), NOT a signed-int slot
         // compare. Float is SCALAR (is_heap_ty false), so the heap routes below never fire for it —
