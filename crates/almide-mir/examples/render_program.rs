@@ -110,6 +110,14 @@ fn main() {
     let mut functions = Vec::new();
     let mut walled = Vec::new();
     for func in &inlined_fns {
+        // `test "…" { … }` blocks lower to functions whose bodies call the test harness
+        // (`assert_eq`, …) — runtime symbols with no wasm definition. They are NEVER
+        // reachable from `_start`/`main`, so they are not part of the EXECUTABLE program
+        // this renderer emits for ③ execution parity. Skip them: rendering a test fn would
+        // only pull in dangling `(call $assert_eq …)` references and wall the whole module.
+        if func.is_test {
+            continue;
+        }
         // lower_function_all_with_types returns the main function plus any lambda-lifted
         // auxiliaries (index 0 is main); all go into the module so the function table
         // covers them. The record registry is threaded so `Ty::Named` records materialize.
