@@ -33,6 +33,7 @@ empty_collection_annotated  out-of-interp-scope capability: set.new
 empty_collection_fold  out-of-interp-scope capability: map.new
 empty_from_list_mono  out-of-interp-scope capability: map.from_list
 encoding_base64  out-of-interp-scope capability: bytes.from_string
+env_args  out-of-interp-scope capability: env.args
 fan_any_allfail  out-of-interp-scope capability: fan.any
 fan_deterministic  out-of-interp-scope capability: fan.map
 fan_map_err  out-of-interp-scope capability: fan.map
