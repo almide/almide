@@ -1,0 +1,22 @@
+// @contract: C-118
+// env.args() must work on the WASM target (was a stub that always returned the
+// empty list) and agree with native. It maps to the native almide_rt_env_args =
+// std::env::args() with argv[0] (the binary name) SKIPPED — only the real program
+// args. On WASM it shares the WASI args_sizes_get / args_get builder with
+// process.args, but with skip=1 so argv[0] is dropped (process.args uses skip=0).
+//
+// The cross-target harness runs both legs with NO extra program args, so the
+// underlying argv is [program] on both => after skipping argv[0] env.args() is the
+// EMPTY list on both. That makes this fixture argv-content-independent (it never
+// prints an element verbatim — argv[0] differs between a temp binary path and the
+// wasm module path), while still exercising the real builder: it allocates a
+// canonical 8-byte-header [len][cap] List of length argc-1, and list.len reads
+// len@0. The previous stub hard-coded an empty 4-byte-header list; the fix builds
+// the real one. Both legs print length 0, byte-identical. #276
+import env
+
+effect fn main() -> () = {
+  let args = env.args()
+  println(int.to_string(list.len(args)))
+  println(if list.len(args) == 0 then "no-program-args" else "has-program-args")
+}

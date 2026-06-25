@@ -2,22 +2,17 @@
 
 use super::FuncCompiler;
 use almide_ir::IrExpr;
-use almide_lang::types::Ty;
-use super::values;
-use wasm_encoder::Instruction;
 
 impl FuncCompiler<'_> {
-    pub(super) fn emit_env_call(&mut self, func: &str, args: &[IrExpr]) {
+    pub(super) fn emit_env_call(&mut self, func: &str, _args: &[IrExpr]) {
         match func {
             "args" => {
-                // env.args() → List[String]: return empty list (WASI args not implemented yet)
-                let s = self.scratch.alloc_i32();
-                wasm!(self.func, {
-                    i32_const(4); call(self.emitter.rt.alloc); local_set(s);
-                    local_get(s); i32_const(0); i32_store(0);
-                    local_get(s);
-                });
-                self.scratch.free_i32(s);
+                // env.args() → List[String]. Mirrors native almide_rt_env_args =
+                // std::env::args() with argv[0] (the binary name) skipped — only the
+                // real program args. Shares the WASI argv→List[String] builder with
+                // process.args (calls_process.rs); skip=1 drops argv[0]. (process.args
+                // uses skip=0 to keep the full argv.)
+                self.emit_wasi_argv_list(1);
             }
             "unix_timestamp" => {
                 // WASI clock_time_get(id=0 realtime, precision=0, time_ptr)

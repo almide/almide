@@ -2,14 +2,15 @@
 
 use super::FuncCompiler;
 use almide_ir::IrExpr;
-use almide_lang::types::Ty;
-use super::values;
 // Canonical heap layout offsets ([len@0][cap@4][data@8]) — process.args /
 // stdin_lines build List[String] + the inner Strings and MUST frame them with
 // the same 8-byte header the consumers (list.get / string.len / emit_member)
 // read with, or every element/byte is read at the wrong offset (#645).
 use super::rt_string::{string_hdr, string_data_off, string_cap_off, list_hdr, list_data_off, list_cap_off};
-use wasm_encoder::Instruction;
+
+/// Stride, in bytes, of one `List[String]` element slot: each element is an i32
+/// pointer to an Almide String, so the data region is `count` 4-byte words.
+const LIST_ELEM_STRIDE: i32 = 4;
 
 impl FuncCompiler<'_> {
     /// process module: exit, stdin_lines
@@ -279,12 +280,41 @@ impl FuncCompiler<'_> {
             "args" => {
                 // process.args() -> List[String]
                 // Mirror native almide_rt_process_args = std::env::args().collect()
-                // (argv[0] = program path, then any program args). Uses WASI
-                // args_sizes_get / args_get; builds the same List[String] layout
-                // as stdin_lines above: [count:i32][strptr0:i32][strptr1:i32]...
+                // (argv[0] = program path, then any program args). skip=0 keeps the
+                // full argv, including argv[0]. env.args (calls_env.rs) shares the
+                // same builder with skip=1 to drop argv[0].
+                self.emit_wasi_argv_list(0);
+            }
+            _ => panic!(
+                "[ICE] emit_wasm: no WASM dispatch for `process.{}` — \
+                 add an arm in emit_process_call or resolve upstream",
+                func
+            ),
+        }
+}
+
+    /// Build a `List[String]` from the WASI program arguments, skipping the
+    /// first `skip` leading argv entries.
+    ///
+    /// This is the shared body behind BOTH `process.args` (skip=0, the full argv
+    /// including argv[0] = program path — mirrors native `almide_rt_process_args`
+    /// = `std::env::args().collect()`) and `env.args` (skip=1, dropping argv[0] —
+    /// mirrors native `almide_rt_env_args` = `std::env::args()` with the binary
+    /// name removed). Leaves the result list pointer on the wasm stack.
+    ///
+    /// Mechanism: WASI `args_sizes_get` / `args_get` give us `argc` and a flat
+    /// NUL-terminated argv buffer. We allocate the canonical 8-byte-header
+    /// `List[String]` of length `argc - skip`, then for each result slot `j` we
+    /// take `argv[j + skip]`, `strlen`-scan it, allocate a canonical Almide
+    /// String, and copy the bytes in. The `skip` leading C-strings are simply
+    /// never visited. All scratch locals are freed before returning (#645: the
+    /// header layout MUST be [len@0][cap@4][data@8] so list.get / string.len
+    /// read at the right offsets).
+    pub(super) fn emit_wasi_argv_list(&mut self, skip: i32) {
                 let argc_ptr = self.scratch.alloc_i32();
                 let bufsize_ptr = self.scratch.alloc_i32();
                 let argc = self.scratch.alloc_i32();
+                let count = self.scratch.alloc_i32();
                 let buf_size = self.scratch.alloc_i32();
                 let argv_ptr = self.scratch.alloc_i32();
                 let argv_buf = self.scratch.alloc_i32();
@@ -305,6 +335,17 @@ impl FuncCompiler<'_> {
                     drop; // discard errno
                     local_get(argc_ptr); i32_load(0); local_set(argc);
                     local_get(bufsize_ptr); i32_load(0); local_set(buf_size);
+                    // count = result-list length = max(argc - skip, 0). skip leading
+                    // argv entries are dropped (env.args skips argv[0]; process.args
+                    // skips nothing). Clamp so a degenerate argc < skip can never
+                    // underflow the unsigned loop bound below. `select` is
+                    // `val1 val2 cond -> (cond ? val1 : val2)`, so the condition MUST
+                    // be pushed LAST: val1=(argc-skip), val2=0, cond=(argc>=skip).
+                    local_get(argc); i32_const(skip); i32_sub;          // val1 = argc - skip
+                    i32_const(0);                                        // val2 = 0
+                    local_get(argc); i32_const(skip); i32_ge_u;         // cond = argc >= skip
+                    select;                                             // cond ? (argc-skip) : 0
+                    local_set(count);
                 });
 
                 // --- Phase 2: alloc the pointer array + the string buffer, fill them ---
@@ -326,16 +367,18 @@ impl FuncCompiler<'_> {
                 });
 
                 // --- Phase 3: build List[String] = [len][cap][strptr0][strptr1]... ---
+                // Result length is `count` (= argc - skip). The per-slot argv index
+                // is `i + skip`, so the `skip` leading C-strings are never visited.
                 wasm!(self.func, {
-                    local_get(argc); i32_const(4); i32_mul; i32_const(list_hdr()); i32_add;
+                    local_get(count); i32_const(LIST_ELEM_STRIDE); i32_mul; i32_const(list_hdr()); i32_add;
                     call(self.emitter.rt.alloc); local_set(result);
-                    local_get(result); local_get(argc); i32_store(0);
-                    local_get(result); i32_const(list_cap_off()); i32_add; local_get(argc); i32_store(0); // cap = len
+                    local_get(result); local_get(count); i32_store(0);
+                    local_get(result); i32_const(list_cap_off()); i32_add; local_get(count); i32_store(0); // cap = len
                     i32_const(0); local_set(i);
                     block_empty; loop_empty;
-                      local_get(i); local_get(argc); i32_ge_u; br_if(1);
-                      // cstr_ptr = argv_ptr[i]
-                      local_get(argv_ptr); local_get(i); i32_const(4); i32_mul; i32_add;
+                      local_get(i); local_get(count); i32_ge_u; br_if(1);
+                      // cstr_ptr = argv_ptr[i + skip]
+                      local_get(argv_ptr); local_get(i); i32_const(skip); i32_add; i32_const(LIST_ELEM_STRIDE); i32_mul; i32_add;
                       i32_load(0); local_set(cstr_ptr);
                       // str_len = strlen(cstr_ptr): scan to NUL
                       i32_const(0); local_set(str_len);
@@ -379,15 +422,9 @@ impl FuncCompiler<'_> {
                 self.scratch.free_i32(argv_buf);
                 self.scratch.free_i32(argv_ptr);
                 self.scratch.free_i32(buf_size);
+                self.scratch.free_i32(count);
                 self.scratch.free_i32(argc);
                 self.scratch.free_i32(bufsize_ptr);
                 self.scratch.free_i32(argc_ptr);
-            }
-            _ => panic!(
-                "[ICE] emit_wasm: no WASM dispatch for `process.{}` — \
-                 add an arm in emit_process_call or resolve upstream",
-                func
-            ),
-        }
-}
+    }
 }

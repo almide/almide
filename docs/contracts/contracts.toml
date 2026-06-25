@@ -1374,3 +1374,13 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/branch_lift_in_loop.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-118"
+title     = "env.args works on WASM and matches native (argv[0] skipped)"
+statement = "env.args() runs on the WASM target (previously a stub that always returned the empty list) and agrees with native. It maps to almide_rt_env_args = std::env::args() with argv[0] (the binary name) SKIPPED — only the real program args. On WASM it is built from the WASI args_sizes_get / args_get imports by the SAME builder process.args uses (emit_wasm/calls_process.rs::emit_wasi_argv_list), parameterized by a leading-argv skip count: env.args passes skip=1 (drop argv[0]); process.args passes skip=0 (full argv). The result List and each inner String are framed with the canonical 8-byte [len][cap][data] header. Verified byte-identical native == wasm on the argument COUNT: with no extra program args the underlying argv is [program] on both legs, so after the skip env.args() is the empty list (length 0) on both — an argv[0]-content-independent invariant, since argv[0] itself differs between a temp binary path and the wasm module path."
+since     = "0.27.8"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/env_args.almd", class = "fixture" },
+]
