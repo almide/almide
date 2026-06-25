@@ -150,3 +150,16 @@ column too), not deferred.
 
 ## 8. Review must-fixes (folded into §2–§5 above)
 1. `is_known_free` narrowing must land BEFORE B7 + cover BOTH fold closures (else dotted cap call = accept-but-unsafe). 2. `CallIndirect` taint = `Capability::ALL` (derived) + B4 asserts coverage. 3. B2 relabelled NEEDS-FRESH, atomic with B6. 4. B11 is tier-3 OFFSET, not "safe and done". 5. B15 = DEFER (not UNSAFE-floor-only). 6. B10 needs a static scratch-region map first. 7. tier check verifies the byte-assertion, not just test existence. 8. `process.args` differs test-runner vs `almide run --` (production parity). 9. B4 hoisted to parallel-with-strong-proof.
+
+## env.args v1 — validated design + the entanglement (2026-06-25)
+
+env.args is the WASI floor's FIRST I/O capability for v1. It MIRRORS the proven random.int mechanism (the ONE admitted effectful call today): self-host stdlib fn → a `prim.*` op that carries a Capability → transitive cap_witness → `used ⊆ declared` cert verification → render emits the WASI call. The exact pieces:
+1. `Capability::CliArgs` (lib.rs:599 enum; the Coq registry mapping lib.rs:614 must stay injective+stable: Stdout=0, Entropy=1, CliArgs=2) — the FORMAL trust-spine addition.
+2. `PrimKind::ArgsSizesGet` + `PrimKind::ArgsGet` (lib.rs:443 region) carrying `Capability::CliArgs` (cert accounting at certificate.rs:178, mirroring random_get→Entropy).
+3. `stdlib/env_args.almd` — self-host `env_args() -> List[String]`: `prim.args_sizes_get(argc_p, bufsize_p)` → alloc argv+buf → `prim.args_get` → loop the argc null-terminated strings into a `List[String]` (the buffer parsing — more involved than random.int's single i64 read).
+4. render_wasm WASI runtime for the 2 prims (render_wasm HAS the WASI floor — random.int's random_get works on v1).
+5. calls.rs:187 admit `env.args` (extend the `is_admitted_effectful` predicate).
+
+🚨 ENTANGLEMENT (why this is bigger than a clean capability add): the BYTE-MATCH ORACLE is broken. `almide run --target wasm -- file.csv` does NOT forward the `--` args to the wasm execution (env.args() returns EMPTY → csv-to-json prints "usage" instead of the JSON) — the args plumbing is broken EVEN in the full emit backend. And the wasm_cross harness runs pure fixtures only (no program-args support). So before env.args can be cert-byte-verified, the args plumbing (CLI runner forwarding + the harness passing identical argv to native and wasmtime) must be fixed — that is the genuine FIRST step of "段階的に", a CLI/test-infra brick separate from the trust-spine capability work.
+
+SEQUENCING: (a) fix the args plumbing + wasm_cross harness args support (the byte-match oracle), THEN (b) the env.args capability mirroring random.int (steps 1-5). csv-to-json ALSO needs fs.read_text (path_open+fd_read self-host + Capability::FsRead), and almide-grep + fs.walk — each its own capability brick. The full WASI file-I/O floor for these two apps is ~3-4 capability bricks + the infra. Recommended as a focused fresh effort (delegate+gate per capability).
