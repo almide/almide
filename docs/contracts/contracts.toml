@@ -1364,3 +1364,13 @@ evidence  = [
   { path = "spec/wasm_cross/bool_literal_tail.almd", class = "fixture" },
   { path = "spec/wasm_cross/float_parse_special.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-117"
+title     = "In-loop let-bound heap if/match is lifted to a tail helper and renders on v1"
+statement = "A heap-result `if`/`match` bound to a `let`/`var` INSIDE a for-in/while body produces stdout byte-identical to native on the v1 trust-spine wasm path. The branch_lift pass (almide-optimize, the shared frontend pipeline) hoists the inline branch into a synthesized tail helper fn `__branch_lift_N(free_vars) -> T = <branch>` and rebinds the local to its call result — a proven shape (tail heap-result branch + let-bound call result), so v1 renders it where the inline branch walled (the flat cert could not attribute one scope-end drop to one-of-two exclusive arm-allocs). The existing MIR tail-duplication desugar handles the non-loop cases; this closes the loop-body residual (the #1 real-app v1 coverage lever — binary-search and kin). Native is the oracle; the lift is semantics-preserving (0 backend-split across the 3-way oracle)."
+since     = "0.27.7"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/branch_lift_in_loop.almd", class = "fixture" },
+]

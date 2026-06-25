@@ -1,0 +1,16 @@
+// @contract: C-117
+// Ratchets the in-loop heap-branch lift (branch_lift pass): a `let`-bound heap-result match/if
+// INSIDE a for-in/while body is hoisted into a synthesized tail helper fn + a let-bound call result
+// (the v1 trust-spine renders that proven shape, where the inline branch walled). The #1 v1 app
+// coverage lever — binary-search and kin. Byte-identical native == wasm.
+fn classify(n: Int) -> Option[Int] = if n > 0 then some(n) else none
+
+effect fn main() -> Unit = {
+  for t in [3, -1, 5, 0, 8] {
+    let label = match classify(t) {
+      some(v) => "positive " + int.to_string(v)
+      none => "non-positive"
+    }
+    println(int.to_string(t) + ": " + label)
+  }
+}
