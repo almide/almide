@@ -121,16 +121,20 @@ pub fn lift_heap_branch_binds(program: &mut IrProgram) {
 
 /// A mut-visitor that lifts heap-branch binds. It descends the whole IR via
 /// `walk_stmt_mut` / `walk_expr_mut` (so nested binds in blocks, loop bodies, and
-/// branch arms are all reached), and at each `Bind` statement — WHEN INSIDE A LOOP
-/// BODY — whose value is a heap-typed `if`/`match`, replaces that value with a
-/// call to a synthesized tail helper. The visitor walks children FIRST (bottom-up),
-/// so a branch arm that itself contains a liftable bind is rewritten before the
-/// outer bind is lifted — the outer helper body then already contains the inner
-/// helper call.
+/// branch arms are all reached), and at each `Bind` statement whose value is a
+/// heap-typed `if`/`match`, replaces that value with a call to a synthesized tail
+/// helper. The visitor walks children FIRST (bottom-up), so a branch arm that itself
+/// contains a liftable bind is rewritten before the outer bind is lifted — the outer
+/// helper body then already contains the inner helper call.
 ///
-/// `loop_depth` tracks `for-in` / `while` nesting: lifting fires only when
-/// `loop_depth > 0`, leaving the existing MIR tail-duplication desugar to handle
-/// every out-of-loop case (see module docs).
+/// `loop_depth` tracks `for-in` / `while` nesting. Lifting fires for: any heap
+/// `if`/`match` inside a loop body (the region the MIR tail-duplication desugar
+/// cannot reach), PLUS an out-of-loop heap VARIANT `match` (Some/None/Ok/Err/…) —
+/// the desugar covers an out-of-loop `if` but not a `match`, and a variant match's
+/// subject materializes once (so MIR call count == IR call count). An out-of-loop
+/// LITERAL-pattern `match` is left to the desugar: its `subject == lit` chain
+/// duplicates the subject's calls, which `count_ir_calls` can't predict (a `mir > ir`
+/// caps-backing breach). See `visit_stmt_mut` and the module docs.
 struct BranchLifter<'a> {
     vt: &'a mut VarTable,
     counter: &'a mut u32,
@@ -158,11 +162,41 @@ impl<'a> IrMutVisitor for BranchLifter<'a> {
         // Bottom-up: lift inside the value's sub-expressions first.
         walk_stmt_mut(self, stmt);
 
-        if self.loop_depth == 0 {
-            return;
-        }
         if let IrStmtKind::Bind { ty, value, .. } = &mut stmt.kind {
-            if is_heap_ty(ty) && matches!(value.kind, IrExprKind::If { .. } | IrExprKind::Match { .. }) {
+            if !is_heap_ty(ty) {
+                return;
+            }
+            let fire = match &value.kind {
+                // Inside a loop body the desugar cannot reach, lift any heap `if`/`match`.
+                // Out of a loop, the MIR tail-duplication desugar already covers an `if`, so an
+                // `if` is left to it. It does NOT cover a `match` — lift exactly an OPTION/RESULT
+                // match (`some/none/ok/err`, plus binder/wildcard catch-alls): its subject is
+                // materialized ONCE and the tail handler (`try_lower_variant_value_match` /
+                // `try_lower_result_match`) renders it for both scalar AND heap payloads (verified).
+                //   • A LITERAL-pattern match (`"a" => …`, `0 => …`) lowers to an `if subject == lit`
+                //     chain that DUPLICATES the subject's calls — a count `count_ir_calls` can't
+                //     predict, tripping the `mir > ir` caps-backing wall.
+                //   • A custom-variant / tuple / list / record-pattern match can still wall in the
+                //     tail handler, so lifting it just relocates the wall into a dead helper.
+                // Both are left to the existing desugar (or a later widening of this gate).
+                IrExprKind::Match { arms, .. } => {
+                    self.loop_depth > 0
+                        || arms.iter().all(|a| {
+                            matches!(
+                                a.pattern,
+                                IrPattern::Some { .. }
+                                    | IrPattern::None
+                                    | IrPattern::Ok { .. }
+                                    | IrPattern::Err { .. }
+                                    | IrPattern::Bind { .. }
+                                    | IrPattern::Wildcard
+                            )
+                        })
+                }
+                IrExprKind::If { .. } => self.loop_depth > 0,
+                _ => false,
+            };
+            if fire {
                 self.lift_bind_value(ty.clone(), value);
             }
         }
