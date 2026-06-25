@@ -53,3 +53,13 @@ The balance is CROSS-FUNCTION (producer `__varr_copy` fills N child-incs; the ba
 5. **Composition theorem (Coq)** — a container that is BLOCK-balanced (OwnershipChecker.v i/d) AND CHILD-balanced (CoownLoop.v fill/drop) is fully leak/double-free-free. This is the one new lemma combining the two models; everything else is Rust (the ElementOf provenance + the two recognizers + the cert section). With it, __copy_value/__varr_copy/value.merge are cert-PROVEN and the rc whitelist (calls_p4.rs) is retired.
 
 Until then: the whitelist + leak-floor fixtures are the trusted gate, now GROUNDED in CoownLoop.v (calls_p4.rs comment) — a name belongs there iff it follows the proven co-own/recursive-drop pattern.
+
+## Brick 3 integration — Coq half DONE; Rust half confirmed MULTI-WEEK (2026-06-25)
+
+The COMPOSITION half is landed + kernel-checked: proofs/CoownCompose.v `lifecycle_safe` (block-balanced ∧ children-source-owned ⇒ fully safe), composing OwnershipChecker.v (block) with CoownLoop.v (child). In the proof gate.
+
+The ELEMENTOF (Rust cert-section) half was scoped with adversarial verification, which REFUTED the hoped-for small slice:
+- The "strict refinement rides the existing block i/d pairing (no corpus regression)" claim is FALSE: a co-own producer's fill (`__varr_copy`) and its balancing recursive drop (`__vdrop_arr`/`__drop_value`) are in DIFFERENT functions, so the child account is genuinely cross-function — no per-function cert refinement catches it.
+- It does NOT catch reduce_value's str-a/arr-a leak: that leak is an UNDER-RELEASED load64-fed CHILD (the recursive drop IS present and runs; the imbalance is a cross-function, element-count-keyed count that is load64-fed = invisible to both the block account and the carrier-rc brick). Catching it needs the full load64→ElementOf(container,index) provenance + ContainerFill↔ContainerDrop pairing across the two functions — confirmed MULTI-WEEK fresh engineering, tracked distinctly.
+
+TRACTABLE TODAY (landed): the rc whitelist — the actual trust anchor — is promoted to ONE shared source (crates/almide-mir/src/coown_names.rs: COOWN_PRODUCERS / COOWN_DROPS / COOWN_SET_REPLACE), grounded in CoownLoop.v + CoownCompose.v, consumed by calls_p4.rs, and pinned by the `coown_names_documented` test so the producer/consumer halves cannot silently drift. corpus-wall ACCEPT (behavior-preserving), mir 503/0.

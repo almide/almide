@@ -26,6 +26,7 @@
 #![forbid(unsafe_code)]
 
 pub mod certificate;
+pub mod coown_names;
 pub mod lower;
 pub mod purity;
 pub mod render_rust;

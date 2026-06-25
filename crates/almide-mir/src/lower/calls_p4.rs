@@ -821,35 +821,11 @@ impl LowerCtx {
             // producer per-function (retiring the whitelist) needs the typed nested-element model + the
             // cross-function fill↔drop pairing that consumes CoownLoop.v — the remaining Brick-3
             // engineering (docs/roadmap/active/value-rc-cert.md).
+            // The co-own producer / recursive-drop whitelist lives in ONE shared anchor
+            // (crate::coown_names) grounded in proofs/CoownLoop.v + CoownCompose.v — see that module.
             "rc_dec" | "rc_inc"
-                if matches!(
-                    self.fn_name.as_str(),
-                    "__drop_value"
-                        | "__drop_list_value"
-                        | "__svdrop_list"
-                        | "__ssdrop_list"
-                        | "__isdrop_list" // List[(Int,String)] recursive free (list.enumerate)
-                        | "__drop_list_str_value"
-                        | "__drop_result_lv"
-                        | "__varr_copy"
-                        | "__vfill"
-                        | "__lc_copy_rc"
-                        | "__copy_slots_rc" // list.set_str: rc-copy each String element (co-own)
-                        | "__set_slot_str"  // list.set_str: rc_dec the replaced element + rc_inc the new
-                        | "list_set_str"    // (also reaches rc via the helpers above; admit by name)
-                        | "__ldls_share" // list.take/drop_liststr sublist (rc_inc each shared inner list)
-                        | "value_get"     // Object linear-scan get (rc_inc the found value)
-                        | "__vobj_fill"   // Object shallow-copy (rc_inc each key/value) — value.object
-                        | "__vdrop_obj"   // Object recursive free (rc_dec key, __drop_value value)
-                        | "__lsv_copy"    // list.set_value: rc-copy each Value element (co-own)
-                        | "__lsv_set"     // list.set_value: __drop_value the replaced + rc_inc the new
-                        | "list_set_value"
-                        | "__lsv_insert_fill" // list.insert_value: rc_inc the inserted Value
-                        | "__ls_insert_fill"  // list.insert_str: rc_inc the inserted String
-                        | "__sort_copy_rc"    // list.sort_str: rc-copy each String element (co-own)
-                        | "__vmerge_fill_a" // value.merge: rc_inc each kept/overridden key+value (co-own)
-                        | "__vmerge_app_b"  // value.merge: rc_inc each appended b key+value (co-own)
-                ) || self.fn_name.starts_with("__drop_") =>
+                if crate::coown_names::is_coown_rc_routine(self.fn_name.as_str())
+                    || self.fn_name.starts_with("__drop_") =>
             {
                 // `__drop_*` also covers the GENERATED per-type custom-variant recursive drops
                 // (`__drop_Expr`, ADT brick 5b) — the same trusted prim-only free routine.
