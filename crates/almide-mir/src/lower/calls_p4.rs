@@ -808,6 +808,19 @@ impl LowerCtx {
             // the as_array element-list fill (`__vfill`, rc_inc), and the heap-element list-concat copy
             // (`__lc_copy_rc`, rc_inc — the new list co-owns each appended element, balanced by the
             // source's recursive DropListStr/DropListValue). See docs/roadmap/active/v1-value-model.md.
+            //
+            // TRUST GROUNDING (柱C Brick 3): these names are a CO-OWN-PRODUCER / RECURSIVE-DROP whitelist
+            // — a producer (`__varr_copy`/`__vobj_fill`/`__copy_value`/`__lc_copy_rc`/…) rc_inc's each
+            // loaded element (+1) into a fresh container; its balancing rc_dec lives in the SEPARATE
+            // recursive drop (`__drop_value`/`__vdrop_arr`/…) over the SAME elements. That cross-loop,
+            // element-count-keyed balance is PROVEN leak/double-free-free on the Coq kernel by
+            // proofs/CoownLoop.v (`coown_fill_drop_neutral` ⇒ `coown_copy_no_leak` + `…no_double_free`,
+            // in the check.sh proof gate). So this gate is no longer bare trust: a name belongs here iff
+            // it is a co-own producer or recursive-drop consumer following that proven pattern, and its
+            // adherence is ratcheted by the spec/wasm_cross/*_leak_loop fixtures. Cert-PROVING each
+            // producer per-function (retiring the whitelist) needs the typed nested-element model + the
+            // cross-function fill↔drop pairing that consumes CoownLoop.v — the remaining Brick-3
+            // engineering (docs/roadmap/active/value-rc-cert.md).
             "rc_dec" | "rc_inc"
                 if matches!(
                     self.fn_name.as_str(),

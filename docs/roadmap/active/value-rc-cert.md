@@ -41,3 +41,15 @@ Indivisible: cannot cert-prove ONE producer (reduce_value's __copy_value) withou
 
 ## Containment-hardening (the tractable near-term, 2026-06-24)
 The trust floor is INTACT: load64-fed rc is an unmodeled no-op GATED by the rc_inc/rc_dec whitelist (calls_p4.rs — only named trusted producers/consumers may name rc_inc/rc_dec; any other .almd fn calling them REJECTS at lowering) + leak-loop fixtures (value_array, value_as_array, list_set_value, list_sort_str, value_merge, + value_object added here). Optional further hardening (deferred, low value): registry-ify the manual whitelist (GOTCHA 3 — it grows by hand-edited match arm).
+
+## Brick 3 integration — the precise fresh-engineering spec (consumes CoownLoop.v, 2026-06-25)
+
+The balance is CROSS-FUNCTION (producer `__varr_copy` fills N child-incs; the balancing N child-decs live in the SEPARATE `__drop_value`), so NO per-function checker change works — modeling child rc inside `__varr_copy` alone would FALSE-REJECT it (the decs are elsewhere). CoownLoop.v proves the PRINCIPLE; the integration must pair the two sides by container. Design:
+
+1. **Typed nested-element model (MIR/lib.rs)** — a load `prim.load64(container + 12 + i*8)` from a TRACKED container at an element offset yields an `ElementOf(container)` handle (not a ghost rc[o]=0 on an arbitrary address). This is the provenance the carrier-rc brick lacked for load64.
+2. **Co-own-producer recognition** — a fn that, in a `0..len(container)` loop, rc_inc's each `ElementOf(dst)` and stores into `dst` emits ONE abstract `ContainerFill dst` event (N child-incs, N = len). The whitelist (calls_p4.rs) becomes the recognized set.
+3. **Recursive-drop recognition** — `__drop_value`/`__vdrop_arr`/`__vdrop_obj` that rc_dec each `ElementOf(v)` in a `0..len(v)` loop emits `ContainerDrop v` (N child-decs).
+4. **Cert section + pairing** — at the CALLER, a container (value.array/object/copy result) is alloc'd (`i`, block) + filled (`ContainerFill`) and later dropped (`DropValue` = block `d` + `ContainerDrop`). The proven checker pairs `ContainerFill c` with `ContainerDrop c` by container identity; CoownLoop.v gives the per-element balance for any N.
+5. **Composition theorem (Coq)** — a container that is BLOCK-balanced (OwnershipChecker.v i/d) AND CHILD-balanced (CoownLoop.v fill/drop) is fully leak/double-free-free. This is the one new lemma combining the two models; everything else is Rust (the ElementOf provenance + the two recognizers + the cert section). With it, __copy_value/__varr_copy/value.merge are cert-PROVEN and the rc whitelist (calls_p4.rs) is retired.
+
+Until then: the whitelist + leak-floor fixtures are the trusted gate, now GROUNDED in CoownLoop.v (calls_p4.rs comment) — a name belongs there iff it follows the proven co-own/recursive-drop pattern.
