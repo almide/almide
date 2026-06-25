@@ -37,6 +37,17 @@ frontiers, the **let-bound heap-result `if`** (needs a checker/Coq scope-end-dro
 or a tail-duplication-into-recursion rewrite that composes with the TCO) and the **heap-payload
 `Result`/variant match** (Camp-4). These are the next real design slices, not incremental fixes.
 
+## Update (2026-06-25) — the WASI capability floor + the first I/O app + the #1 frontier's in-loop slice
+
+Three advances since 2026-06-22, all byte-verified native==v1 and on the axiom-clean proof spine:
+
+- **The capability vocabulary doubled.** `Stdout`(0) → `Entropy`(1, rsa) → **`CliArgs`(2, `env.args`)** → **`FsRead`(3, `fs.read_text`)**. The WASI floor now covers host entropy, CLI argv, AND file reads — each a self-host fn reaching a capability-bearing prim, so the transitive `used ⊆ declared` cert verifies it (a pure `fn` can never reach one un-witnessed). Adding a capability needs **no Coq edit** — `CapabilityBound.v`'s checker is generic over `list nat`; only the `Capability::id` map stays injective+stable. `args_get_list` / `read_text_file` render the WASI sequences (`args_*`, `path_open`+`fd_read`) and build owned heap results dropped at scope end.
+- **The first real I/O application runs end-to-end on v1.** `csv-to-json` (reads a file named by argv, parses, emits JSON) renders through the MIR→WAT→wasmtime spine and is **byte-identical to native** (`wasmtime --dir=/ … input.csv` == `almide run … -- input.csv`). It exercises `env.args` + `fs.read_text` + `!`-propagation + the pure CSV/JSON string logic — the first program that touches the host filesystem on the trust spine.
+- **The #1 deep frontier — the let-bound heap-result `if` — has its in-loop slice closed.** A new `branch_lift` pass (in the shared optimize pipeline, so the v1 renderer sees it) hoists a heap-typed `let`-bound `if`/`match` **inside a `for`/`while` body** into a synthesized TAIL helper fn + a let-bound call result (a proven shape) — **no checker/Coq change**, the residual the existing MIR tail-duplication desugar couldn't reach. `binary-search` now fully renders + byte-matches. The remaining frontier (non-loop deeply-nested accumulators + the recursion-continuation case — base64 `decode_chunks`, most of `toml`) still needs the scope-end-drop-attribution proof OR the tail-duplication-into-recursion rewrite.
+- **柱C Value-rc cert depth: the co-own/recursive-drop balance is PROVEN.** `proofs/CoownLoop.v` (`coown_fill_drop_neutral`) + `proofs/CoownCompose.v` (`lifecycle_safe`) are kernel-checked, axiom-clean, and in the proof gate — the formal spine for the nested-element Value rc that the leak-loop floor previously only guarded empirically (the `__copy_value`/`__varr_copy` class). The MIR/cert integration that consumes it (a cross-function `ContainerFill`↔`ContainerDrop` pairing) is the remaining engineering.
+
+The per-repo table below is the 2026-06-22 sweep; the `branch_lift` in-loop slice + the two new capabilities lower the wall counts for the I/O- and loop-accumulator-heavy repos — re-run `scripts/org-trust-status.sh` to refresh.
+
 ## Per-repo (sorted by walls)
 
 | repo | lowers | walls | status | top wall reason |
