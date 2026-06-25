@@ -525,9 +525,11 @@ fn value_reprs_wasm(func: &MirFunction) -> BTreeMap<ValueId, Repr> {
             | Op::IntBinOp { dst, .. } => {
                 m.insert(*dst, SCALAR_REPR);
             }
-            // A `LoadHandle` result is a heap PTR (i32 handle); every other prim result (a load,
-            // fd_write errno, or handle→address) is a scalar i64.
-            Op::Prim { dst: Some(dst), kind: PrimKind::LoadHandle, .. } => {
+            // A `LoadHandle` result is a heap PTR (i32 handle); an `ArgsGetList` result is a
+            // freshly-allocated heap `List[String]` PTR (i32 handle) — both keep Ptr repr (no
+            // i64 zero-extend). Every other prim result (a load, fd_write errno, or
+            // handle→address) is a scalar i64.
+            Op::Prim { dst: Some(dst), kind: PrimKind::LoadHandle | PrimKind::ArgsGetList, .. } => {
                 m.insert(*dst, Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT });
             }
             Op::Prim { dst: Some(dst), .. } => {

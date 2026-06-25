@@ -179,6 +179,15 @@ fn fd_write(fd: Int, iov: Int, count: Int, nw: Int) -> Int = _
 @intrinsic("almide_rt_prim_random_get")
 fn random_get(buf: Int, len: Int) -> Int = _
 
+// The args_sizes_get + args_get WASI host calls, packaged as ONE high-level HEAP-RESULT prim
+// — the CLI-ARGS sandbox exit (reaches Capability::CliArgs). Returns a fresh OWNED
+// `List[String]` of the program arguments `argv[1..]` (SKIPS argv[0] = the program path, to
+// match native `env.args`). Reached only by the self-hosted `env.args` (env_args.almd) in the
+// v1 trust-spine wasm backend; the render emits the WASI args_sizes_get/args_get + list-build
+// sequence. No native runtime impl — the native target uses env.args' own @intrinsic.
+@intrinsic("almide_rt_prim_args_get_list")
+fn args_get_list() -> List[String] = _
+
 // The FLOAT floor: a `Float` is the i64-uniform value holding the f64 BITS; each op
 // reinterprets i64→f64, computes the wasm f64 instruction, and reinterprets back (a
 // compare / f2i yields a real Int). Pure scalar — the cert is untouched. This is what

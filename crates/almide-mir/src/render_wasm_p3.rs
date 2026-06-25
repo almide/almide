@@ -7,6 +7,10 @@ fn preamble() -> String {
     (func $fd_write (param i32 i32 i32 i32) (result i32)))
   (import "wasi_snapshot_preview1" "random_get"
     (func $random_get (param i32 i32) (result i32)))
+  (import "wasi_snapshot_preview1" "args_sizes_get"
+    (func $args_sizes_get (param i32 i32) (result i32)))
+  (import "wasi_snapshot_preview1" "args_get"
+    (func $args_get (param i32 i32) (result i32)))
   (memory (export "memory") 1)
   (global $bump (mut i32) (i32.const {HEAP_BASE}))
   ;; the free-list head (0 = empty) — physical reclamation (A1.2-render), the
@@ -202,6 +206,70 @@ fn preamble() -> String {
                (i32.sub (local.get $cur) (i32.const {SCRATCH_ADDR})))
     (drop (call $fd_write (i32.const {STDOUT_FD}) (i32.const {IOVEC_ADDR})
                           (i32.const {IOVS_COUNT}) (i32.const {NWRITTEN_ADDR}))))
+
+  ;; env.args() — build a fresh OWNED `List[String]` of the program arguments
+  ;; argv[1..] (SKIP argv[0] = program path, mirroring native `env.args`). The
+  ;; WASI floor: `args_sizes_get` gives argc + the flat NUL-terminated argv buffer
+  ;; size; `args_get` fills a pointer array + that buffer. We then build the
+  ;; canonical `[rc][len][cap][data:i64…]` list of `argc-1` Strings, each a
+  ;; canonical `[rc][len][cap][bytes…]` String copied from the argv C-string. The
+  ;; result is the third sandbox exit (Capability::CliArgs) — its dst is an owned
+  ;; heap handle the caller's scope-end DropListStr balances.
+  (func $args_get_list (result i32)
+    (local $argc_ptr i32) (local $bufsz_ptr i32) (local $argc i32)
+    (local $count i32) (local $bufsz i32) (local $argv i32) (local $argbuf i32)
+    (local $result i32) (local $i i32) (local $cstr i32) (local $slen i32)
+    (local $str i32) (local $j i32)
+    ;; Phase 1: argc + total argv buffer size (two i32 out-params from the bump heap).
+    (local.set $argc_ptr (call $alloc (i32.const 4)))
+    (local.set $bufsz_ptr (call $alloc (i32.const 4)))
+    (drop (call $args_sizes_get (local.get $argc_ptr) (local.get $bufsz_ptr)))
+    (local.set $argc (i32.load (local.get $argc_ptr)))
+    (local.set $bufsz (i32.load (local.get $bufsz_ptr)))
+    ;; count = max(argc - 1, 0): drop argv[0]. Clamp so a degenerate argc 0 never
+    ;; underflows the unsigned loop bound below.
+    (local.set $count
+      (select (i32.sub (local.get $argc) (i32.const 1)) (i32.const 0)
+              (i32.ge_u (local.get $argc) (i32.const 1))))
+    ;; Phase 2: alloc the pointer array (argc i32 ptrs, +4 guard) + the string buffer,
+    ;; then fill them via args_get.
+    (local.set $argv (call $alloc (i32.add (i32.mul (local.get $argc) (i32.const 4)) (i32.const 4))))
+    (local.set $argbuf (call $alloc (i32.add (local.get $bufsz) (i32.const 4))))
+    (drop (call $args_get (local.get $argv) (local.get $argbuf)))
+    ;; Phase 3: build the List[String] (len = cap = count). Per result slot $i, take
+    ;; argv[$i + 1], strlen-scan it, alloc a canonical String, copy the bytes, store
+    ;; the i64-widened String pointer into the slot.
+    (local.set $result (call $list_new (local.get $count) (local.get $count)))
+    (local.set $i (i32.const 0))
+    (block $done (loop $loop
+      (br_if $done (i32.ge_u (local.get $i) (local.get $count)))
+      ;; cstr = argv[$i + 1]
+      (local.set $cstr (i32.load (i32.add (local.get $argv)
+                                          (i32.mul (i32.add (local.get $i) (i32.const 1)) (i32.const 4)))))
+      ;; slen = strlen(cstr): scan to NUL
+      (local.set $slen (i32.const 0))
+      (block $sdone (loop $sloop
+        (br_if $sdone (i32.eqz (i32.load8_u (i32.add (local.get $cstr) (local.get $slen)))))
+        (local.set $slen (i32.add (local.get $slen) (i32.const 1)))
+        (br $sloop)))
+      ;; alloc a canonical String [rc][len][cap][bytes] and set its header
+      (local.set $str (call $alloc (i32.add (i32.const {LIST_HEADER}) (local.get $slen))))
+      (i32.store (i32.add (local.get $str) (i32.const {LIST_RC_OFFSET})) (i32.const {RC_INITIAL}))
+      (i32.store (i32.add (local.get $str) (i32.const {LIST_LEN_OFFSET})) (local.get $slen))
+      (i32.store (i32.add (local.get $str) (i32.const {LIST_CAP_OFFSET})) (local.get $slen))
+      ;; copy $slen bytes from cstr into str+LIST_HEADER
+      (local.set $j (i32.const 0))
+      (block $cdone (loop $cloop
+        (br_if $cdone (i32.ge_u (local.get $j) (local.get $slen)))
+        (i32.store8 (i32.add (i32.add (local.get $str) (i32.const {LIST_HEADER})) (local.get $j))
+                    (i32.load8_u (i32.add (local.get $cstr) (local.get $j))))
+        (local.set $j (i32.add (local.get $j) (i32.const 1)))
+        (br $cloop)))
+      ;; result[$i] = str (i64-widened pointer in the 8-byte element slot)
+      (call $list_set (local.get $result) (local.get $i) (i64.extend_i32_u (local.get $str)))
+      (local.set $i (i32.add (local.get $i) (i32.const 1)))
+      (br $loop)))
+    (local.get $result))
 
 "#
     )

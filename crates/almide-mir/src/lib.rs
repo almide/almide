@@ -441,6 +441,17 @@ pub enum PrimKind {
     /// cap_witness counts it exactly like `FdWrite` → Stdout), so a function using it is
     /// caps-verified ONLY if it declares Entropy — never accept-but-unsafe.
     RandomGet,
+    /// The `args_sizes_get` + `args_get` WASI host calls, packaged as ONE high-level
+    /// HEAP-RESULT prim — no args, dst = a fresh OWNED `List[String]` of the program
+    /// arguments `argv[1..]` (SKIP argv[0], matching native `env.args`). Each element
+    /// is a canonical Almide String copied from the NUL-terminated argv C-string. The
+    /// third sandbox exit, reached only by the self-hosted `env.args`. Carries
+    /// [`Capability::CliArgs`] (the cap_witness counts it exactly like `RandomGet` →
+    /// Entropy), so a function using it is caps-verified ONLY if it declares CliArgs —
+    /// never accept-but-unsafe. Its dst is a heap Ptr (like `LoadHandle`), so the
+    /// ownership certificate emits an `i` (alloc) for it, balanced by the caller's
+    /// scope-end drop (a recursive `DropListStr` over the owned element Strings).
+    ArgsGetList,
     /// Release one reference of a RAW heap handle (`(call $rc_dec …)`), the inverse of [`RcInc`].
     /// The MECHANISM the self-hosted recursive `value.__drop_value` frees a dynamic Value tree with
     /// (the §4.1-compliant alternative to a hand-written WAT drop): it operates on raw Int handles,
@@ -605,17 +616,24 @@ pub enum Capability {
     /// declares ∅, so it can NEVER reach entropy un-witnessed (the checker REJECTS
     /// `used ⊄ allowed`); only an `effect fn` (which declares the host caps) may.
     Entropy,
+    /// Reading the program's COMMAND-LINE ARGUMENTS — the WASI `args_sizes_get` /
+    /// `args_get` floor ([`PrimKind::ArgsGetList`]), reached by the self-hosted
+    /// `env.args`. The third sandbox exit. Accounted exactly like Entropy/Stdout: a
+    /// pure `fn` declares ∅ and so can NEVER read argv un-witnessed (the checker
+    /// REJECTS `used ⊄ allowed`); only an `effect fn` (which declares the host caps) may.
+    CliArgs,
 }
 
 impl Capability {
     /// The stable registry id — the ONLY place a `Capability` becomes a number.
     /// proofs/CapabilityBound.v's checker is GENERIC over `list nat` (a `subset_check`,
     /// no per-capability enumeration), so it needs no edit to admit a new id — only
-    /// this mapping must stay injective + stable (Stdout = 0, Entropy = 1).
+    /// this mapping must stay injective + stable (Stdout = 0, Entropy = 1, CliArgs = 2).
     pub const fn id(self) -> u32 {
         match self {
             Capability::Stdout => 0,
             Capability::Entropy => 1,
+            Capability::CliArgs => 2,
         }
     }
 }

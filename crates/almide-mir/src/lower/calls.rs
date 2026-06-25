@@ -179,12 +179,15 @@ impl LowerCtx {
         func: &str,
         args: &[IrExpr],
     ) -> Result<Vec<CallArg>, LowerError> {
-        // `random.int` is the ONE admitted EFFECTFUL stdlib call: it is self-hosted (random_int.almd,
-        // linked here), so its `prim.random_get` is in the program map and the transitive cap_witness
-        // counts its Entropy — UNLIKE a bodyless effectful intrinsic (which would contribute 0 caps =
-        // accept-but-unsafe, the reason is_pure walls the rest). The caller is an `effect fn` (declares
-        // Entropy) so the `used ⊆ declared` checker verifies it; a pure caller is a frontend error.
-        let is_admitted_effectful = module == "random" && func == "int";
+        // `random.int` / `env.args` are the admitted EFFECTFUL stdlib calls: each is self-hosted
+        // (random_int.almd / env_args.almd, linked here), so its prim floor (`prim.random_get` /
+        // `prim.args_get_list`) is in the program map and the transitive cap_witness counts its
+        // capability (Entropy / CliArgs) — UNLIKE a bodyless effectful intrinsic (which would
+        // contribute 0 caps = accept-but-unsafe, the reason is_pure walls the rest). The caller is
+        // an `effect fn` (declares the host caps) so the `used ⊆ declared` checker verifies it; a
+        // pure caller is a frontend error.
+        let is_admitted_effectful =
+            (module == "random" && func == "int") || (module == "env" && func == "args");
         if !purity::is_pure(module, func) && !is_admitted_effectful {
             return Err(LowerError::Unsupported(format!(
                 "effectful/impure stdlib Module call {module}.{func} needs a declared capability not in this brick"

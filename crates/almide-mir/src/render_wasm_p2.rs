@@ -518,6 +518,11 @@ fn render_op(
                 PrimKind::RandomGet => {
                     format!("(i64.extend_i32_u (call $random_get {} {}))", w(0), w(1))
                 }
+                // args_get_list() — the WASI CLI-args floor; builds a fresh owned
+                // `List[String]` of argv[1..] in the preamble helper. dst is a heap Ptr
+                // (i32 handle, value_reprs_wasm), so the call result sets the local DIRECTLY
+                // (no i64 extend) — exactly like a LoadHandle.
+                PrimKind::ArgsGetList => "(call $args_get_list)".to_string(),
                 // RAW refcount ops (the self-host drop/copy mechanism) — reuse the proven $rc_dec/
                 // $rc_inc on the i32-wrapped handle. dst is None (Unit), so the `match dst` below
                 // emits the call as a STATEMENT (no local.set).

@@ -764,6 +764,18 @@ impl LowerCtx {
             self.live_heap_handles.retain(|h| *h != piece);
             return Ok(None);
         }
+        // `prim.args_get_list()` — the WASI args→`List[String]` floor (env.args). NO
+        // args; its dst is a FRESH OWNED `List[String]` of `argv[1..]` (a heap Ptr, like
+        // an Alloc), so it is registered like `alloc_list_str`: a NESTED-OWNERSHIP list
+        // whose scope-end drop is the recursive `DropListStr` (frees the owned element
+        // Strings) — a flat `Drop` would leak them. Carries Capability::CliArgs (counted
+        // in cap_witness). The render emits the WASI args_sizes_get/args_get sequence.
+        if func == "args_get_list" {
+            let dst = self.fresh_value();
+            self.ops.push(Op::Prim { kind: PrimKind::ArgsGetList, dst: Some(dst), args: vec![] });
+            self.heap_elem_lists.insert(dst);
+            return Ok(Some(dst));
+        }
         // Bitwise binary ops lower to a scalar `Op::IntBinOp` (i64 and/or/xor/shl/shr_s),
         // not an `Op::Prim` — the int.band/bor/bxor/bshl/bshr floor. No ownership.
         let bitop = match func {

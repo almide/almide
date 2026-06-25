@@ -182,6 +182,13 @@ pub fn cap_witness(func: &MirFunction) -> CapWitness {
         if let Op::Prim { kind: crate::PrimKind::RandomGet, .. } = op {
             used.push(Capability::Entropy);
         }
+        // The `args_get_list` primitive is the CLI-ARGS floor op — reached by the self-hosted
+        // `env.args`, so a fn using it must declare CliArgs (the same accounting as RandomGet →
+        // Entropy). The transitive `reachable_caps` follows the CallFn edge into `env.args`, so a
+        // caller inherits this CliArgs and is caps-verified against its declared bound.
+        if let Op::Prim { kind: crate::PrimKind::ArgsGetList, .. } = op {
+            used.push(Capability::CliArgs);
+        }
         // SOUNDNESS CRUX: a CallIndirect invokes a closure that may reach ANY capability.
         // When the table index resolves to a KNOWN lifted lambda (a `FuncRef` in THIS
         // function), its REAL caps are folded transitively by `reachable_caps` (which
@@ -649,6 +656,15 @@ pub fn ownership_certificate(func: &MirFunction) -> String {
                 if let Some(&o) = args.first().and_then(|a| s.of.get(a)) {
                     s.event(o, 'd');
                 }
+            }
+            // `args_get_list` ALLOCATES a fresh owned `List[String]` (argv[1..]) — a +1, like
+            // `Alloc`. It feeds no loop, so it gets its own stream (`i`), balanced by the
+            // caller's scope-end `DropListStr` (a `d`) or a heap-return move-out (`m`). Without
+            // this the heap result would be an unbacked object the cert never opens — the
+            // verify_ownership/cert agreement breaks for the env.args body.
+            Op::Prim { kind: PrimKind::ArgsGetList, dst: Some(d), .. } => {
+                s.of.insert(*d, *d);
+                s.event(*d, 'i');
             }
             // No refcount change: Borrow/MakeUnique/Const/Pure/IntBinOp/SetLocal, and
             // a call with a void/scalar result (its heap-handle args are borrowed).

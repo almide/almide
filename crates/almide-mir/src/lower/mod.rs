@@ -620,13 +620,14 @@ fn lower_function_all_impl(
     // "reaches nothing" — so an effectful function is now caps-VERIFIED against its
     // own declared bound, not merely excluded.
     // An `effect fn` declares it MAY reach the modeled host capabilities (the v1 effect system is
-    // binary: pure vs host-reaching, not per-capability). So it admits BOTH Stdout and Entropy — the
-    // `used ⊆ declared` checker then verifies its body stays within that bound. A pure `fn` declares ∅,
-    // so reaching EITHER cap (a `print`/`random.int` from a non-effect fn — already a frontend type
-    // error) would REJECT here too: the soundness floor (pure stays pure) is unchanged; only the
-    // host-reaching set grows. (A per-capability effect signature is a later precision refinement.)
+    // binary: pure vs host-reaching, not per-capability). So it admits Stdout, Entropy AND CliArgs —
+    // the `used ⊆ declared` checker then verifies its body stays within that bound. A pure `fn`
+    // declares ∅, so reaching ANY cap (a `print`/`random.int`/`env.args` from a non-effect fn —
+    // already a frontend type error) would REJECT here too: the soundness floor (pure stays pure) is
+    // unchanged; only the host-reaching set grows. (A per-capability effect signature is a later
+    // precision refinement.)
     let declared_caps = if func.is_effect {
-        vec![crate::Capability::Stdout, crate::Capability::Entropy]
+        vec![crate::Capability::Stdout, crate::Capability::Entropy, crate::Capability::CliArgs]
     } else {
         Vec::new()
     };

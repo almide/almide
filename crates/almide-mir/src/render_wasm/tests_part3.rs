@@ -513,17 +513,34 @@
     /// stdlib routine." The ratchet on the open surface stays exactly as strict.
     const RC_PRIMITIVE_FNS: &[&str] = &["$rc_dec", "$rc_inc"];
 
+    /// The WASI HOST-EFFECT FLOOR primitives — the irreducible host-call sequences a
+    /// `PrimKind` renders to, bounded by the CAPABILITY set, NOT by hand-mapping
+    /// discipline. `$args_get_list` (`PrimKind::ArgsGetList`, Capability::CliArgs) is
+    /// the `args_sizes_get` + `args_get` + canonical-`List[String]` assembly the
+    /// self-hosted `env.args` reaches: it CANNOT be written in Almide (it is the
+    /// host-call boundary itself, like the `$fd_write`/`$random_get` IMPORTS — those
+    /// are not `(func $…)` definitions, but a multi-value-out-param WASI sequence that
+    /// produces a heap value has no pure-Almide form). Accounted SEPARATELY from the
+    /// open stdlib surface for the same reason RC primitives are: a host-floor exit is
+    /// the trust spine's own core, not "another stdlib routine." This set grows ONLY
+    /// when the capability vocabulary gains a new heap-result host floor; the open
+    /// ratchet stays exactly as strict.
+    const WASI_FLOOR_FNS: &[&str] = &["$args_get_list"];
+
     #[test]
     fn handwritten_wasm_runtime_does_not_grow() {
         // The guard is SPLIT by principle: the proven memory-model primitives
-        // (RC_PRIMITIVE_FNS — RuntimeModel.v's rt_inc/rt_dec) are a closed set
-        // bounded by the PROOF, accounted separately; the OPEN stdlib surface is
-        // what the convergence rule (§4.1) ratchets DOWN only.
+        // (RC_PRIMITIVE_FNS — RuntimeModel.v's rt_inc/rt_dec) and the WASI host-floor
+        // primitives (WASI_FLOOR_FNS — capability-bounded host-call sequences) are
+        // closed sets accounted separately; the OPEN stdlib surface is what the
+        // convergence rule (§4.1) ratchets DOWN only.
         let pre = preamble();
         let total = pre.matches("\n  (func $").count();
         let rc_count =
             RC_PRIMITIVE_FNS.iter().filter(|n| pre.contains(&format!("\n  (func {n} "))).count();
-        let stdlib_count = total - rc_count;
+        let wasi_count =
+            WASI_FLOOR_FNS.iter().filter(|n| pre.contains(&format!("\n  (func {n} "))).count();
+        let stdlib_count = total - rc_count - wasi_count;
         // (a) The OPEN stdlib runtime surface — ratchet DOWN only, never raise.
         const BOOTSTRAP_RUNTIME_FN_BASELINE: usize = 11;
         assert!(
@@ -538,6 +555,14 @@
             "more RC primitive funcs ({rc_count}) than the proven closed set \
              ({}); an RC primitive must correspond to a RuntimeModel.v op",
             RC_PRIMITIVE_FNS.len()
+        );
+        // (c) The CLOSED WASI host-floor set — present as declared, no more. A new
+        // entry here must correspond to a Capability + a heap-result host PrimKind.
+        assert!(
+            wasi_count <= WASI_FLOOR_FNS.len(),
+            "more WASI host-floor funcs ({wasi_count}) than the closed set ({}); a \
+             host-floor helper must correspond to a Capability + heap-result PrimKind",
+            WASI_FLOOR_FNS.len()
         );
     }
 
