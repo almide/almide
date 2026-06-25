@@ -184,7 +184,12 @@ impl<'a> BranchLifter<'a> {
         // 2. Synthesize the helper name + take the branch expr out as the body.
         let id = *self.counter;
         *self.counter = id + 1;
-        let func_name = sym(&format!("__branch_lift_{}", id));
+        // NOT `__`-prefixed: this is a real user-fn DEFINITION both backends emit, but the
+        // codegen builtin-lowering pass rewrites EVERY `__`-prefixed Named CALL to a runtime
+        // intrinsic (`almide_rt_<name>`) — which mismatches this definition on the native Rust
+        // path (cannot-find-fn `almide_rt___branch_lift_0`). A plain name keeps it a user fn
+        // everywhere; the v1 MIR renderer treats it as a let-bound call result (a proven shape).
+        let func_name = sym(&format!("branch_lift_synth_{}", id));
         let body = std::mem::replace(value, IrExpr::default());
         let body_span = body.span;
 
@@ -389,7 +394,7 @@ mod tests {
         // The bind value is now a call to the synthesized helper.
         match main_bind_value_kind(&prog) {
             IrExprKind::Call { target: CallTarget::Named { name }, args, .. } => {
-                assert_eq!(name.as_str(), "__branch_lift_0", "deterministic helper name");
+                assert_eq!(name.as_str(), "branch_lift_synth_0", "deterministic helper name");
                 // Free var of the branch = the Bool cond v1 (the String literals are not vars).
                 assert_eq!(args.len(), 1, "captures exactly the one free var");
                 assert!(matches!(args[0].kind, IrExprKind::Var { id: VarId(1) }));
@@ -400,7 +405,7 @@ mod tests {
         let helper = prog
             .functions
             .iter()
-            .find(|f| f.name == sym("__branch_lift_0"))
+            .find(|f| f.name == sym("branch_lift_synth_0"))
             .expect("helper synthesized");
         assert_eq!(helper.visibility, IrVisibility::Private);
         assert_eq!(helper.ret_ty, Ty::String);
