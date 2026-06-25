@@ -24,7 +24,11 @@ The Value reference-count ops (`prim.rc_inc`/`rc_dec`, `Op::DropValue`) live in 
 ## Prototyped diff (reverted, lib.rs verify_ownership Prim arm)
 Split the `| Op::Prim { .. }` no-op into `Op::Prim { kind, dst, args } => match kind { Handle => carrier; RcInc => rc+=1 if carrier; RcDec => rc-=1 if carrier && rc≥1; _ => {} }`. Gated: cargo test -p almide-mir 501/0, corpus-wall ACCEPT 18165 (byte-identical). It is a STRICT REFINEMENT for the corpus but introduces a verify_ownership↔cert DIVERGENCE for prim.handle-fed rc — so it must land WITH the matching ownership_certificate emission (brick 1+2 atomic), never alone.
 
-## Brick 3 (load64-fed nested-element rc) — VERDICT: large-redesign-fresh, very-large (scoped 2026-06-24)
+## Brick 3 (load64-fed nested-element rc) — FOUNDATION LANDED: the core composition lemma is PROVEN (proofs/CoownLoop.v, 2026-06-25)
+
+The conceptual hardest piece is done: `proofs/CoownLoop.v` proves on the Coq kernel (axiom-clean, coqchk-reverified, in check.sh's proof gate) the CO-OWN COPY / RECURSIVE-DROP balance OwnershipLoop.v explicitly excluded — model the container's immediate elements as a refcount VECTOR; the producer co-own FILL (+1 each, the rc_inc) followed by the container's recursive DROP (-1 each, faulting at <=0) returns EVERY source element to its original rc (`coown_fill_drop_neutral`), giving `coown_copy_no_double_free` + `coown_copy_no_leak` for ANY element count. This is the net-+1-balanced-by-a-separate-recursive-drop case keyed by element count, not per-iteration. REMAINING (engineering): the MIR/cert integration that pairs a concrete producer's fill events with the matching recursive-drop by container identity (a typed nested-element model + a cert section) so __copy_value/__varr_copy/value.merge inherit the proven balance instead of riding the leak-floor. The original scope (kept below for the integration design):
+
+### Original scope — the integration that consumes CoownLoop.v (still fresh engineering)
 
 There is NO small SOUND cert-proving slice. The "structural reduces to the proven map-fill" idea is WRONG: map-fill's per-iteration body is net-0 (rebind: drop-old + inc-new), which is exactly why OwnershipLoop.v's rc-preserving Loop rule accepts it; a CO-OWN copy loop is net-+1 per element, and OwnershipLoop.v (header line 19-21) explicitly defers/excludes nested co-own. The balancing rc_dec lives in a SEPARATE raw-handle recursive routine (__vdrop_arr/__drop_value) whose cert is EMPTY, so no single-function fold can witness the balance.
 
