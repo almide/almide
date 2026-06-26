@@ -49,6 +49,35 @@ impl LowerCtx {
             IrExprKind::Lambda { params, body, .. } => (params, body.as_ref()),
             _ => return None,
         };
+        // A TUPLE-accumulator `fold((<empty-list>, <int-init>), (state, e) => { let (acc, n) = state;
+        // (acc + [<elem>], n + <step>) })` returning `(List[T], Int)` — the wasm-bindgen
+        // `wasm_record_offsets` shape. The accumulator is a 2-tuple `(List[T], Int)`; the body
+        // destructures `state` then returns a tuple whose component0 is a `acc + [<elem>]` list APPEND
+        // and component1 a scalar `n + <step>`. The scalar `result_ok` gate below rejects this (a
+        // heap-and-not-String accumulator), so handle it HERE with a dedicated loop that carries TWO
+        // slots (a List append-accumulator + an Int scalar local) and builds the result tuple ONCE
+        // after the loop. The helper does its OWN strict gating + complete rollback (any deviation →
+        // None → rolls back → walls, never a wrong-bytes tuple).
+        if func == "fold" && args.len() == 3 {
+            let tup_mark = self.ops.len();
+            let tup_lhh = self.live_heap_handles.len();
+            let tup_lifted = self.lifted.len();
+            let tup_vo = self.value_of.clone();
+            if let Some(dst) = self.try_lower_defunc_tuple_acc_fold(
+                xs,
+                params,
+                body,
+                &args[init_idx.unwrap()],
+                result_ty,
+            ) {
+                // The closure was FAITHFULLY inlined — clear the unlifted-closure flag (see the tail
+                // of this function) so the bind path treats the tuple block as a genuinely-materialized
+                // aggregate, NOT an unfaithful HOF to WALL.
+                self.last_call_had_unlifted_closure = false;
+                return Some(dst);
+            }
+            self.rollback_scalar_loop(tup_mark, tup_lhh, tup_lifted, tup_vo);
+        }
         // enumerate+map FUSION: `list.map(list.enumerate(real), (entry) => { let (i,key)=entry; <tail> })`
         // → a map-with-index over `real`, binding i=loop-index + key=element, AVOIDING the (Int,String)
         // intermediate list entirely (no enumerate self-host, no new tuple-list drop). Rebind the
@@ -456,6 +485,337 @@ impl LowerCtx {
             }
             _ => None,
         }
+    }
+
+    /// C1 DEFUNCTIONALIZATION for a TUPLE-accumulator `list.fold` whose accumulator is a 2-tuple
+    /// `(List[T], Int)` — the wasm-bindgen `wasm_record_offsets` shape:
+    ///
+    /// ```text
+    /// widths |> list.fold(([], 0), (state, w) => {
+    ///   let (acc, off) = state
+    ///   (acc + [off], off + w)
+    /// })
+    /// ```
+    ///
+    /// The accumulator carries a growing `List[T]` (the offsets) and an `Int` cursor. The scalar
+    /// `result_ok` gate (`!is_heap_ty || String`) rejects a `(List[T], Int)` accumulator (heap +
+    /// not-String), so this dedicated path carries TWO loop-state slots and builds the result tuple
+    /// ONCE after the loop:
+    ///
+    ///   1. The LIST component — a heap slot SEEDED with a fresh EMPTY `List` (an i32 `Alloc`, NOT
+    ///      registered for drop: the slot owns it). Each iteration the body's component0 `acc + [elem]`
+    ///      is lowered to a FRESH owned list via `try_lower_concat_list` (reading the slot through
+    ///      `value_of[acc]`), then the slot is DROPPED-OLD + `SetLocal`'d to the new list — the PROVEN
+    ///      `i(id)m` append-accumulator slot (identical to the String-fold arm at the top of
+    ///      `lower_defunc_list_hof_inner` and to `append_owned_sub_to_acc`).
+    ///   2. The INT component — a STABLE scalar local, `SetLocal`'d each iteration with the body's
+    ///      component1 `n + step`.
+    ///
+    /// The body's `let (acc, off) = state` destructure is NEVER materialized as a tuple block — `acc`
+    /// binds DIRECTLY to the List slot and `off` to the Int slot (read the two slots in place). The
+    /// body's final `(c0, c1)` tuple is NEVER materialized per iteration — it is destructured into the
+    /// two slot updates. After the loop the result tuple `(List_slot, Int_slot)` is built ONCE via
+    /// `try_lower_tuple_construct` (a masked block: slot0 a moved-in OWNED list handle, slot1 the Int),
+    /// so the caller's Module-call bind path tracks it as a `materialized_aggregate` with the right
+    /// heap-slot mask and its scope-end drop frees exactly the list + the block. The immediate
+    /// `match pair { (offs, _) => offs }` extraction then borrows + acquires slot 0 (see
+    /// `try_lower_tuple_extract_match`).
+    ///
+    /// SOUNDNESS — both slots are independently balanced per iteration:
+    ///  - The List slot is the proven loop-carried `i(id)m`: seeded `i` (fresh empty), each iteration a
+    ///    fresh concat (`i`), drop-old (`d`), `SetLocal` (folds the new `i` into the slot — `m`). After
+    ///    the loop its single live value is MOVED into the tuple block's slot 0 (cert `m`); the block's
+    ///    masked drop (or the move-out at the `match` extraction) frees it exactly once. No leak, no
+    ///    double-free for any iteration count.
+    ///  - The Int slot is a scalar — no ownership event (a plain `SetLocal`).
+    ///
+    /// STRICT GATE (any deviation → `None` → the caller rolls back → WALLs, never a wrong-bytes tuple):
+    /// a 2-tuple `(List[T], Int)` accumulator, an empty-list-literal + scalar-int LITERAL init, a body
+    /// that is exactly `{ let (a, b) = state; (a + [<elem>], <scalar-int>) }` (the destructure reads the
+    /// state param; component0 a `ConcatList` reading the bound list var; component1 a scalar Int).
+    fn try_lower_defunc_tuple_acc_fold(
+        &mut self,
+        xs: &IrExpr,
+        params: &[(VarId, Ty)],
+        body: &IrExpr,
+        init: &IrExpr,
+        result_ty: &Ty,
+    ) -> Option<ValueId> {
+        use almide_lang::types::constructor::TypeConstructorId;
+        use almide_ir::IrStmtKind;
+        use crate::PrimKind;
+
+        // GATE — fold has exactly TWO params (state, element).
+        if params.len() != 2 {
+            return None;
+        }
+        let state_param = params[0].0;
+        let elem_param = params[1].0;
+
+        // GATE — the accumulator/result type is a 2-tuple `(List[T], Int)`.
+        let tup_tys = match result_ty {
+            Ty::Tuple(tys) if tys.len() == 2 => tys,
+            _ => return None,
+        };
+        let list_elem_ty = match &tup_tys[0] {
+            Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 => a[0].clone(),
+            _ => return None,
+        };
+        if !matches!(tup_tys[1], Ty::Int) {
+            return None;
+        }
+        // SCALAR list element ONLY (`(List[Int], Int)` — the `wasm_record_offsets` offsets case): the
+        // slot is a FLAT `__list_concat` + flat `Drop`, and the final list MOVED into the result tuple
+        // (slot 0) is freed once by the tuple's flat masked drop. A `(List[String], Int)` accumulator
+        // is GATED OUT: its loop-carried `__list_concat_rc` slot + the tuple's masked-rc drop emit an
+        // i32/i64 type collision in the per-iteration slot reuse (a `expected i32, found i64` invalid-
+        // wasm at `function build`, confirmed by byte-match) — until that String-slot masked drop is
+        // type-correct it WALLS (honest) rather than emit invalid wasm. A heap-FIELD aggregate element
+        // (a tuple/record list) also defers (its masked recursive drop is out of this slice).
+        let list_elem_scalar = !is_heap_ty(&list_elem_ty);
+        if !list_elem_scalar {
+            return None;
+        }
+
+        // GATE — the INIT is `(<empty-list-literal>, <int-literal>)`.
+        let init_elems = match &init.kind {
+            IrExprKind::Tuple { elements } if elements.len() == 2 => elements,
+            _ => return None,
+        };
+        match &init_elems[0].kind {
+            IrExprKind::List { elements } if elements.is_empty() => {}
+            _ => return None,
+        }
+        let int_init_v = match &init_elems[1].kind {
+            IrExprKind::LitInt { value } => *value,
+            _ => return None,
+        };
+
+        // GATE — the BODY is `{ let (acc, n) = state; (c0, c1) }`: one destructure statement binding
+        // the state param's two components, then a 2-tuple tail. Any other shape defers.
+        let (stmts, tail) = match &body.kind {
+            IrExprKind::Block { stmts, expr: Some(tail) } if stmts.len() == 1 => (stmts, tail.as_ref()),
+            _ => return None,
+        };
+        let (acc_var, n_var) = match &stmts[0].kind {
+            IrStmtKind::BindDestructure { pattern, value } => {
+                // The destructured value must be the STATE param (the destructure reads the two slots,
+                // not a fresh tuple).
+                match &value.kind {
+                    IrExprKind::Var { id } if *id == state_param => {}
+                    _ => return None,
+                }
+                match pattern {
+                    IrPattern::Tuple { elements } if elements.len() == 2 => {
+                        let a = match &elements[0] {
+                            IrPattern::Bind { var, ty }
+                                if matches!(ty,
+                                    Ty::Applied(TypeConstructorId::List, l) if l.len() == 1) =>
+                            {
+                                *var
+                            }
+                            _ => return None,
+                        };
+                        let b = match &elements[1] {
+                            IrPattern::Bind { var, ty } if matches!(ty, Ty::Int) => *var,
+                            _ => return None,
+                        };
+                        (a, b)
+                    }
+                    _ => return None,
+                }
+            }
+            _ => return None,
+        };
+        // The tail must be a 2-tuple `(c0, c1)` whose component0 is a `acc + […]` ConcatList reading
+        // the destructured list var, and component1 a scalar Int. (The component0 shape is re-checked
+        // by `try_lower_concat_list` below; here we just require the tuple shape + a ConcatList whose
+        // left reads `acc_var`, so a non-append body — e.g. `(other_list, …)` — defers.)
+        let tail_elems = match &tail.kind {
+            IrExprKind::Tuple { elements } if elements.len() == 2 => elements,
+            _ => return None,
+        };
+        match &tail_elems[0].kind {
+            IrExprKind::BinOp { op: almide_ir::BinOp::ConcatList, left, .. } => {
+                match &left.kind {
+                    IrExprKind::Var { id } if *id == acc_var => {}
+                    _ => return None,
+                }
+            }
+            _ => return None,
+        }
+        if !matches!(tail_elems[0].ty,
+            Ty::Applied(TypeConstructorId::List, ref a) if a.len() == 1)
+            || !matches!(tail_elems[1].ty, Ty::Int)
+        {
+            return None;
+        }
+
+        // ----- Lowering -----
+        // Borrow the source list (evaluated once). A Var is borrowed; a fresh literal is materialized
+        // into an owned temp dropped at the OUTER scope. A non-handle iterable is out of subset.
+        let list_v = match self.lower_call_args(std::slice::from_ref(xs)).ok()?.into_iter().next()? {
+            CallArg::Handle(v) => v,
+            _ => return None,
+        };
+        let h = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![list_v] });
+        let len_v = self.load_at_offset(h, 4, PrimKind::Load { width: 4 });
+
+        // Seed the LIST slot: a fresh EMPTY `List` (an i32 Alloc dst). The loop-carried slot OWNS it —
+        // reassigned via drop-old + SetLocal each iteration (the proven i(id)m slot). NOT registered
+        // for drop here: the slot owns it; the loop's drop-old or the post-loop move-into-tuple frees
+        // it exactly once. A `List[String]` slot is marked `heap_elem_lists` so EVERY drop of it
+        // (drop-old) is the recursive `DropListStr` (frees its owned element Strings).
+        let zero_len = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: zero_len, value: 0 });
+        let list_slot = self.fresh_value();
+        self.ops.push(Op::Alloc {
+            dst: list_slot,
+            repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT },
+            init: crate::Init::DynList { len: zero_len },
+        });
+        // SCALAR-element list slot only (gated above): a flat `Drop`, no recursive `heap_elem_lists`.
+
+        // Seed the INT slot: a STABLE mutable scalar local (ConstInt-seed then SetLocal to the init —
+        // the proven loop-state model: distinct + reassignable across iterations).
+        let int_slot = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: int_slot, value: 0 });
+        let int_init_const = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: int_init_const, value: int_init_v });
+        self.ops.push(Op::SetLocal { local: int_slot, src: int_init_const });
+
+        // The loop index (stable mutable i64 local) + the +1 step constant.
+        let i_v = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: i_v, value: 0 });
+        let one_v = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: one_v, value: 1 });
+
+        self.ops.push(Op::LoopStart);
+        let cond_v = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst: cond_v, op: IntOp::Lt, a: i_v, b: len_v });
+        self.ops.push(Op::LoopBreakUnless { cond: cond_v });
+
+        // Load element[i] from the SOURCE list: addr = src_h + 12 + i*8, then load64. The source is a
+        // SCALAR list (`List[Int]` cursor input), so the element is the i64 value the body reads.
+        let i8_v = self.fresh_value();
+        let eight = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: eight, value: 8 });
+        self.ops.push(Op::IntBinOp { dst: i8_v, op: IntOp::Mul, a: i_v, b: eight });
+        let src_base = self.load_addr(h, 12);
+        let src_addr = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst: src_addr, op: IntOp::Add, a: src_base, b: i8_v });
+        let elem = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Load { width: 8 }, dst: Some(elem), args: vec![src_addr] });
+
+        // Bind the lambda params + the destructured state vars to the SLOTS (NO tuple state block):
+        //   element param → elem (the loaded value)
+        //   acc (destructured list var) → the List slot
+        //   n   (destructured int var)  → the Int slot
+        // Captures need no binding — their VarIds already resolve through `value_of`.
+        self.value_of.insert(elem_param, elem);
+        self.value_of.insert(acc_var, list_slot);
+        self.value_of.insert(n_var, int_slot);
+        // `acc` reads the List slot as a tracked nested-ownership list so a `acc + [x]` concat
+        // borrows it (the slot owns it; the concat rc-incs/byte-copies into a fresh list).
+        self.materialized_lists.insert(list_slot);
+
+        // Lower BOTH tuple components reading the OLD slot values BEFORE updating either slot (the body
+        // semantics: `(acc + [off], off + w)` reads `acc`/`off` as the iteration's incoming state).
+        let body_mark = self.live_heap_handles.len();
+        self.in_frame += 1;
+        self.in_defunc_body += 1;
+        self.scalar_loop_depth += 1;
+        // component0: `acc + [elem]` → a FRESH owned list (reads the List slot). try_lower_concat_list
+        // returns a bare ValueId (registered in the right recursive-drop set, NOT in live_heap_handles).
+        let new_list = self.try_lower_concat_list(&tail_elems[0]);
+        // component1: `n + step` → a scalar value (reads the Int slot).
+        let new_int = new_list.and_then(|_| self.lower_scalar_value(&tail_elems[1]));
+        self.scalar_loop_depth -= 1;
+        self.in_defunc_body -= 1;
+        self.in_frame -= 1;
+        let (new_list, new_int) = match (new_list, new_int) {
+            (Some(l), Some(n)) => (l, n),
+            _ => return None,
+        };
+        // SCALAR component lowering emits no heap temp; the concat's own helper temps are already
+        // balanced. Free any stray per-iteration heap temp (none expected for a `[off]` literal).
+        self.drop_arm_locals(body_mark);
+
+        // Update the LIST slot: DROP-OLD the previous value (a flat `Drop` — scalar element, gated
+        // above), then SetLocal the slot to the new list (folds the new `i` into the slot — the
+        // loop-carried `i(id)m`).
+        let drop_old = self.drop_op_for(list_slot);
+        self.ops.push(drop_old);
+        self.ops.push(Op::SetLocal { local: list_slot, src: new_list });
+
+        // Update the INT slot (a scalar SetLocal — no ownership event).
+        self.ops.push(Op::SetLocal { local: int_slot, src: new_int });
+
+        // Advance the index and close the loop.
+        let next_v = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst: next_v, op: IntOp::Add, a: i_v, b: one_v });
+        self.ops.push(Op::SetLocal { local: i_v, src: next_v });
+        self.ops.push(Op::LoopEnd);
+
+        // Build the RESULT tuple `(List_slot, Int_slot)` ONCE after the loop. The List slot's single
+        // live value is MOVED into slot 0 (cert `m`); the Int slot's value is stored into slot 1. The
+        // block is a masked aggregate (slot 0 heap), tracked by the caller's bind path for the
+        // scope-end masked drop. The slot's recursive-drop set (heap_elem_lists for String) carries to
+        // the block via `try_lower_tuple_construct`'s element handling? No — the tuple's masked drop is
+        // a flat `DropListStr` rc_dec of slot 0; for a `List[String]` slot 0 the recursive element free
+        // happens at the FINAL owner (the moved-out list at the `match` extraction / the caller), not
+        // here, since the move-out keeps the inner list's rc ≥ 1 through the tuple's flat drop.
+        //
+        // `try_lower_tuple_construct` requires the slot value to be a real owned heap field — re-tag the
+        // List slot as a live heap handle so its consume-into-the-tuple is the MOVE the construct emits.
+        if !self.live_heap_handles.contains(&list_slot) {
+            self.live_heap_handles.push(list_slot);
+        }
+        let tup = self.build_tuple_acc_result(list_slot, int_slot)?;
+        Some(tup)
+    }
+
+    /// Build the `(List, Int)` result block of a tuple-accumulator fold: a 2-slot masked aggregate
+    /// with slot 0 the MOVED-IN owned `list` handle (cert `m` — the loop slot's single live value) and
+    /// slot 1 the scalar `int`. Tracked `record_masks = [0]` + `materialized_aggregates` so a later
+    /// `t.0`/`(x,_)=>x` borrow reads the real slot and the scope-end drop frees slot 0 + the block.
+    fn build_tuple_acc_result(&mut self, list: ValueId, int: ValueId) -> Option<ValueId> {
+        use crate::{IntOp, PrimKind};
+        let len = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: len, value: 2 });
+        let dst = self.fresh_value();
+        self.ops.push(Op::Alloc {
+            dst,
+            repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT },
+            init: crate::Init::DynList { len },
+        });
+        let h = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![dst] });
+        // slot 0 = the list handle (MOVED in — extend to i64 then store64, then Consume the source).
+        let off0 = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: off0, value: 12 });
+        let addr0 = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst: addr0, op: IntOp::Add, a: h, b: off0 });
+        let lh = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(lh), args: vec![list] });
+        self.ops.push(Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args: vec![addr0, lh] });
+        self.ops.push(Op::Consume { v: list });
+        self.live_heap_handles.retain(|x| *x != list);
+        // slot 1 = the int value (store64).
+        let off1 = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: off1, value: 20 });
+        let addr1 = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst: addr1, op: IntOp::Add, a: h, b: off1 });
+        self.ops.push(Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args: vec![addr1, int] });
+        // A masked aggregate: slot 0 is the heap list, slot 1 scalar. The caller's Module-bind path
+        // re-derives this mask from the result type, but set it here too so the value is self-describing
+        // (a nested-ownership `List[String]` slot 0 is handled by the move-out at the `match` extraction;
+        // the flat masked `DropListStr` rc_dec of a still-shared list block is leak-safe — see the doc on
+        // `try_lower_defunc_tuple_acc_fold`).
+        self.record_masks.insert(dst, vec![0]);
+        self.materialized_aggregates.insert(dst);
+        Some(dst)
     }
 
     /// C1 DEFUNCTIONALIZATION for `list.flat_map` / `list.filter_map` over a `List[String]` source

@@ -75,6 +75,20 @@ impl LowerCtx {
                 }
             }
             if let IrExprKind::Match { subject, arms } = &value.kind {
+                // A single-arm tuple-destructure `let n = match pair { (_, n) => n }` extracting a
+                // SCALAR component — semantically `let n = pair.<i>` (the non-tail tuple-accumulator
+                // `fold` cursor extraction). Load the real scalar slot value (a Copy — no ownership).
+                if let Some((idx, elem_ty)) = self.tuple_extract_match_index(subject, arms) {
+                    if !is_heap_ty(&elem_ty) {
+                        let synth = Self::synth_tuple_index(subject, idx, elem_ty);
+                        let mark = self.ops.len();
+                        if let Some(dst) = self.lower_scalar_value(&synth) {
+                            self.value_of.insert(var, dst);
+                            return Ok(());
+                        }
+                        self.ops.truncate(mark);
+                    }
+                }
                 // A CUSTOM variant (user ADT) subject — tag@slot0 dispatch (ADT brick 3).
                 // `let v = match t { Num(n) => n, … }`. Without this the ctor-pattern match
                 // fell through to a deferred Const 0 (a silent miscompile).
@@ -703,9 +717,35 @@ impl LowerCtx {
             // `Init::Opaque` — an EMPTY heap value — so `println(s)` printed EMPTY instead
             // of "A"/"B": a SILENT MISCOMPILE. Reject explicitly so the function walls
             // cleanly instead of emitting wrong bytes.
-            IrExprKind::If { .. } | IrExprKind::Match { .. } => {
+            IrExprKind::Match { subject, arms } => {
+                // A single-arm tuple-destructure `let offs = match pair { (o, _) => o }` extracting a
+                // HEAP component — semantically `let offs = pair.<i>` (the non-tail tuple-accumulator
+                // `fold` extraction). BORROW the slot handle (the tuple keeps ownership) then ACQUIRE
+                // an OWNED reference (`Op::Dup`, cert `a`) the binding holds + drops at scope end — so
+                // both the tuple's masked drop and this binding's drop are balanced (no double-free, no
+                // leak). Mirrors the `Member`/`TupleIndex` heap-extraction bind arm.
+                if let Some((idx, elem_ty)) = self.tuple_extract_match_index(subject, arms) {
+                    if is_heap_ty(&elem_ty) {
+                        let synth = Self::synth_tuple_index(subject, idx, elem_ty);
+                        if let Some(borrow) = self.try_lower_heap_field_borrow(&synth) {
+                            let dst = self.fresh_value();
+                            self.ops.push(Op::Dup { dst, src: borrow });
+                            self.value_of.insert(var, dst);
+                            self.live_heap_handles.push(dst);
+                            return Ok(());
+                        }
+                    }
+                }
                 Err(LowerError::Unsupported(
-                    "heap-result `if`/`match` bound to a let/var cannot be faithfully \
+                    "heap-result `match` bound to a let/var cannot be faithfully \
+                     computed in this brick (would bind an empty deferred heap value); \
+                     the merged result has no sound scope-end drop in the flat certificate"
+                        .into(),
+                ))
+            }
+            IrExprKind::If { .. } => {
+                Err(LowerError::Unsupported(
+                    "heap-result `if` bound to a let/var cannot be faithfully \
                      computed in this brick (would bind an empty deferred heap value); \
                      the merged result has no sound scope-end drop in the flat certificate"
                         .into(),

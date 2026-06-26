@@ -188,6 +188,68 @@ impl LowerCtx {
         Some(dst)
     }
 
+    /// A single-arm tuple-destructure `match t { (…, x, …) => x }` that returns ONE bound element is
+    /// semantically the tuple-index extraction `t.<i>` — the wasm-bindgen `match pair { (offs, _) =>
+    /// offs }` / `(_, n) => n` shape that follows a tuple-accumulator `fold`. Detect that shape and
+    /// return the index of the extracted component + its type, so the caller can lower it through the
+    /// EXISTING `TupleIndex` extraction machinery (a heap component is a `param_values` BORROW; a
+    /// scalar one a value load) instead of walling the heap-result match. `None` for any other match
+    /// (a guard, a non-tuple pattern, a body that is not exactly the bound var, more than one bound
+    /// element, a non-Var/non-Wildcard sub-pattern) — the caller keeps its existing routing.
+    pub(crate) fn tuple_extract_match_index(
+        &self,
+        subject: &IrExpr,
+        arms: &[almide_ir::IrMatchArm],
+    ) -> Option<(usize, Ty)> {
+        use almide_ir::IrPattern;
+        // The subject must be a TUPLE value (the accumulator result) — a non-tuple subject is some
+        // other match this helper must not claim.
+        if !matches!(subject.ty, Ty::Tuple(_)) {
+            return None;
+        }
+        if arms.len() != 1 || arms[0].guard.is_some() {
+            return None;
+        }
+        let elements = match &arms[0].pattern {
+            IrPattern::Tuple { elements } => elements,
+            _ => return None,
+        };
+        // Exactly ONE `Bind` element, every other a `Wildcard`. Record (index, var, ty).
+        let mut bound: Option<(usize, almide_ir::VarId, Ty)> = None;
+        for (i, p) in elements.iter().enumerate() {
+            match p {
+                IrPattern::Bind { var, ty } => {
+                    if bound.is_some() {
+                        return None; // more than one bound element — not a single extraction
+                    }
+                    bound = Some((i, *var, ty.clone()));
+                }
+                IrPattern::Wildcard => {}
+                _ => return None,
+            }
+        }
+        let (idx, var, ty) = bound?;
+        // The arm body must be EXACTLY the bound var (`=> x`). A computed body is a real match this
+        // helper must not flatten to a projection.
+        match &arms[0].body.kind {
+            IrExprKind::Var { id } if *id == var => Some((idx, ty)),
+            _ => None,
+        }
+    }
+
+    /// Build a synthetic `t.<index>` (`TupleIndex`) IrExpr over `subject` for the
+    /// [`Self::tuple_extract_match_index`] projection, typed `elem_ty`. Reused by the tail / bind /
+    /// value-match routing so a `match t { (x, _) => x }` lowers through the proven field-extraction
+    /// paths.
+    pub(crate) fn synth_tuple_index(subject: &IrExpr, index: usize, elem_ty: Ty) -> IrExpr {
+        IrExpr {
+            kind: IrExprKind::TupleIndex { object: Box::new(subject.clone()), index },
+            ty: elem_ty,
+            span: subject.span,
+            def_id: None,
+        }
+    }
+
     /// Lower the body's tail expression to the function's return value.
     /// - heap `Var` tail → MOVE-OUT: the handle is consumed at the boundary
     ///   (returned as `ret`, removed from the live set so it is not also dropped).
@@ -549,6 +611,14 @@ impl LowerCtx {
                 // EXECUTES: desugar to a nested heap-result `if` and run only the matched
                 // arm; otherwise LINEARIZE to one deferred `Alloc{Opaque}`.
                 IrExprKind::Match { subject, arms } => {
+                    // A single-arm tuple-destructure `match t { (offs, _) => offs }` extracting ONE
+                    // component — semantically `t.<i>` (the wasm-bindgen post-`fold` extraction).
+                    // Re-route through the proven `TupleIndex` tail extraction (a heap component is a
+                    // borrow auto-acquired into an owned move-out; a scalar one a value read).
+                    if let Some((idx, elem_ty)) = self.tuple_extract_match_index(subject, arms) {
+                        let synth = Self::synth_tuple_index(subject, idx, elem_ty);
+                        return self.lower_tail(Some(&synth));
+                    }
                     // A CUSTOM variant (user ADT) subject with a HEAP result — tag@slot0 dispatch
                     // with heap-result arms (ADT brick 4, e.g. recursive `to_string`).
                     if let Some(dst) =
@@ -767,6 +837,19 @@ impl LowerCtx {
             // machinery (only the matched arm runs). Non-literal patterns / guards / a
             // non-scalar subject fall back to the deferred linearize + merged `Const`.
             IrExprKind::Match { subject, arms } => {
+                // A single-arm tuple-destructure `match t { (_, n) => n }` extracting ONE SCALAR
+                // component — semantically `t.<i>` (the tuple-accumulator `fold` cursor extraction).
+                // Lower the synthetic `TupleIndex` via the scalar value model (a real slot load).
+                if let Some((idx, elem_ty)) = self.tuple_extract_match_index(subject, arms) {
+                    if !is_heap_ty(&elem_ty) {
+                        let synth = Self::synth_tuple_index(subject, idx, elem_ty);
+                        let mark = self.ops.len();
+                        if let Some(dst) = self.lower_scalar_value(&synth) {
+                            return Ok(Some(dst));
+                        }
+                        self.ops.truncate(mark);
+                    }
+                }
                 // A CUSTOM variant (user ADT) subject — tag@slot0 dispatch (ADT brick 3).
                 // `fn val(t: Tok) -> Int = match t { Num(n) => n, … }`.
                 if let Some(dst) =
