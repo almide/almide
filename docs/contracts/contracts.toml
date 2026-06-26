@@ -1146,6 +1146,7 @@ evidence  = [
   { path = "spec/wasm_cross/option_eq.almd", class = "fixture" },
   { path = "spec/wasm_cross/option_heap_eq.almd", class = "fixture" },
   { path = "spec/wasm_cross/result_eq.almd", class = "fixture" },
+  { path = "spec/wasm_cross/heap_result_if_eq_cond.almd", class = "fixture" },
 ]
 
 [[contract]]

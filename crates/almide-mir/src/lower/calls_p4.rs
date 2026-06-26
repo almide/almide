@@ -111,31 +111,7 @@ impl LowerCtx {
                 if let (Some(hl), Some(hr)) =
                     (self.materialized_option_handle(left), self.materialized_option_handle(right))
                 {
-                    let tag_l = self.load_at_offset(hl, 4, crate::PrimKind::Load { width: 4 });
-                    let tag_r = self.load_at_offset(hr, 4, crate::PrimKind::Load { width: 4 });
-                    let pay_l = self.load_at_offset(hl, 12, crate::PrimKind::Load { width: 8 });
-                    let pay_r = self.load_at_offset(hr, 12, crate::PrimKind::Load { width: 8 });
-                    let tags_eq = self.fresh_value();
-                    self.ops.push(Op::IntBinOp { dst: tags_eq, op: crate::IntOp::Eq, a: tag_l, b: tag_r });
-                    let zero = self.fresh_value();
-                    self.ops.push(Op::ConstInt { dst: zero, value: 0 });
-                    let is_none = self.fresh_value();
-                    self.ops.push(Op::IntBinOp { dst: is_none, op: crate::IntOp::Eq, a: tag_l, b: zero });
-                    let pay_eq = self.fresh_value();
-                    if matches!(oa[0], Ty::Float) {
-                        self.ops.push(Op::Prim {
-                            kind: crate::PrimKind::FloatCmp(crate::FCmpOp::Eq),
-                            dst: Some(pay_eq),
-                            args: vec![pay_l, pay_r],
-                        });
-                    } else {
-                        self.ops.push(Op::IntBinOp { dst: pay_eq, op: crate::IntOp::Eq, a: pay_l, b: pay_r });
-                    }
-                    let none_or_pay = self.fresh_value();
-                    self.ops.push(Op::IntBinOp { dst: none_or_pay, op: crate::IntOp::Or, a: is_none, b: pay_eq });
-                    let dst = self.fresh_value();
-                    self.ops.push(Op::IntBinOp { dst, op: crate::IntOp::And, a: tags_eq, b: none_or_pay });
-                    return Some(dst);
+                    return Some(self.option_scalar_eq_from_handles(hl, hr, &oa[0]));
                 }
             }
             // Option[HEAP] (String / Value / List) == : a CONDITIONAL compare — the payload eq (a
@@ -168,28 +144,7 @@ impl LowerCtx {
                     if let (Some(hl), Some(hr)) =
                         (self.materialized_option_handle(left), self.materialized_option_handle(right))
                     {
-                        let tag_l = self.load_at_offset(hl, 4, crate::PrimKind::Load { width: 4 });
-                        let tag_r = self.load_at_offset(hr, 4, crate::PrimKind::Load { width: 4 });
-                        let both_some = self.fresh_value();
-                        self.ops.push(Op::IntBinOp { dst: both_some, op: crate::IntOp::And, a: tag_l, b: tag_r });
-                        let dst = self.fresh_value();
-                        self.ops.push(Op::IfThen { cond: both_some, dst: Some(dst) });
-                        // THEN (both Some): the heap payload eq — only here is data[0] dereferenced.
-                        let pay_l = self.load_at_offset(hl, 12, crate::PrimKind::LoadHandle);
-                        let pay_r = self.load_at_offset(hr, 12, crate::PrimKind::LoadHandle);
-                        let pay_eq = self.fresh_value();
-                        self.ops.push(Op::CallFn {
-                            dst: Some(pay_eq),
-                            name: name.to_string(),
-                            args: vec![CallArg::Handle(pay_l), CallArg::Handle(pay_r)],
-                            result: Some(repr_of(&Ty::Bool).ok()?),
-                        });
-                        self.ops.push(Op::Else { val: Some(pay_eq) });
-                        // ELSE: both-None → equal, one-Some-one-None → not equal (== of the tags).
-                        let tags_eq = self.fresh_value();
-                        self.ops.push(Op::IntBinOp { dst: tags_eq, op: crate::IntOp::Eq, a: tag_l, b: tag_r });
-                        self.ops.push(Op::EndIf { val: Some(tags_eq) });
-                        return Some(dst);
+                        return self.option_heap_eq_from_handles(hl, hr, name);
                     }
                 }
             }
@@ -203,47 +158,7 @@ impl LowerCtx {
                 if let (Some(hl), Some(hr)) =
                     (self.materialized_result_handle(left), self.materialized_result_handle(right))
                 {
-                    let tag_l = self.load_at_offset(hl, 4, crate::PrimKind::Load { width: 4 });
-                    let tag_r = self.load_at_offset(hr, 4, crate::PrimKind::Load { width: 4 });
-                    let zero = self.fresh_value();
-                    self.ops.push(Op::ConstInt { dst: zero, value: 0 });
-                    let ok_l = self.fresh_value();
-                    self.ops.push(Op::IntBinOp { dst: ok_l, op: crate::IntOp::Eq, a: tag_l, b: zero });
-                    let ok_r = self.fresh_value();
-                    self.ops.push(Op::IntBinOp { dst: ok_r, op: crate::IntOp::Eq, a: tag_r, b: zero });
-                    let both_ok = self.fresh_value();
-                    self.ops.push(Op::IntBinOp { dst: both_ok, op: crate::IntOp::And, a: ok_l, b: ok_r });
-                    let pay_ok_l = self.load_at_offset(hl, 12, crate::PrimKind::Load { width: 8 });
-                    let pay_ok_r = self.load_at_offset(hr, 12, crate::PrimKind::Load { width: 8 });
-                    let ok_eq = self.fresh_value();
-                    if matches!(ra[0], Ty::Float) {
-                        self.ops.push(Op::Prim {
-                            kind: crate::PrimKind::FloatCmp(crate::FCmpOp::Eq),
-                            dst: Some(ok_eq),
-                            args: vec![pay_ok_l, pay_ok_r],
-                        });
-                    } else {
-                        self.ops.push(Op::IntBinOp { dst: ok_eq, op: crate::IntOp::Eq, a: pay_ok_l, b: pay_ok_r });
-                    }
-                    let inner = self.fresh_value();
-                    self.ops.push(Op::IntBinOp { dst: inner, op: crate::IntOp::And, a: both_ok, b: ok_eq });
-                    let both_err = self.fresh_value();
-                    self.ops.push(Op::IntBinOp { dst: both_err, op: crate::IntOp::And, a: tag_l, b: tag_r });
-                    let dst = self.fresh_value();
-                    self.ops.push(Op::IfThen { cond: both_err, dst: Some(dst) });
-                    // THEN (both Err): the heap String eq — only here is @12 read as a handle.
-                    let pay_err_l = self.load_at_offset(hl, 12, crate::PrimKind::LoadHandle);
-                    let pay_err_r = self.load_at_offset(hr, 12, crate::PrimKind::LoadHandle);
-                    let err_eq = self.fresh_value();
-                    self.ops.push(Op::CallFn {
-                        dst: Some(err_eq),
-                        name: "string.eq".to_string(),
-                        args: vec![CallArg::Handle(pay_err_l), CallArg::Handle(pay_err_r)],
-                        result: Some(repr_of(&Ty::Bool).ok()?),
-                    });
-                    self.ops.push(Op::Else { val: Some(err_eq) });
-                    self.ops.push(Op::EndIf { val: Some(inner) });
-                    return Some(dst);
+                    return self.result_scalar_eq_from_handles(hl, hr, &ra[0]);
                 }
             }
         }
@@ -271,6 +186,134 @@ impl LowerCtx {
             }));
         }
         None
+    }
+
+    /// `Option[scalar] ==` core over two already-materialized Option block HANDLES (byte
+    /// addresses). Branchless masked compare over the 0-or-1-element layout (tag = len @+4:
+    /// None=0, Some=1; scalar payload at +12): eq = (tagL==tagR) AND (both-None OR payloadEq).
+    /// The +12 load is UNCONDITIONAL but MASKED (a None side's +12 is an in-bounds garbage read
+    /// the AND discards), so no control flow and no trap. Shared by the Var-operand path
+    /// (`lower_eq_typed`) and the cond-eq materialized-operand path.
+    pub(crate) fn option_scalar_eq_from_handles(
+        &mut self,
+        hl: ValueId,
+        hr: ValueId,
+        elem: &Ty,
+    ) -> ValueId {
+        let tag_l = self.load_at_offset(hl, 4, crate::PrimKind::Load { width: 4 });
+        let tag_r = self.load_at_offset(hr, 4, crate::PrimKind::Load { width: 4 });
+        let pay_l = self.load_at_offset(hl, 12, crate::PrimKind::Load { width: 8 });
+        let pay_r = self.load_at_offset(hr, 12, crate::PrimKind::Load { width: 8 });
+        let tags_eq = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst: tags_eq, op: crate::IntOp::Eq, a: tag_l, b: tag_r });
+        let zero = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: zero, value: 0 });
+        let is_none = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst: is_none, op: crate::IntOp::Eq, a: tag_l, b: zero });
+        let pay_eq = self.fresh_value();
+        if matches!(elem, Ty::Float) {
+            self.ops.push(Op::Prim {
+                kind: crate::PrimKind::FloatCmp(crate::FCmpOp::Eq),
+                dst: Some(pay_eq),
+                args: vec![pay_l, pay_r],
+            });
+        } else {
+            self.ops.push(Op::IntBinOp { dst: pay_eq, op: crate::IntOp::Eq, a: pay_l, b: pay_r });
+        }
+        let none_or_pay = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst: none_or_pay, op: crate::IntOp::Or, a: is_none, b: pay_eq });
+        let dst = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst, op: crate::IntOp::And, a: tags_eq, b: none_or_pay });
+        dst
+    }
+
+    /// `Option[heap] ==` core over two already-materialized DynListStr Option block HANDLES.
+    /// CONDITIONAL compare — the payload eq (a deref via `string.eq`/`value.eq`/`list.eq_*`) runs
+    /// ONLY when BOTH are Some, so a None side's payload handle is never dereferenced:
+    /// dst = if (tagL AND tagR) then payloadEq(data[0]) else (tagL == tagR). `eq_name` is the
+    /// payload's typed eq callee. Shared by the Var-operand and cond-eq materialized-operand paths.
+    pub(crate) fn option_heap_eq_from_handles(
+        &mut self,
+        hl: ValueId,
+        hr: ValueId,
+        eq_name: &str,
+    ) -> Option<ValueId> {
+        let tag_l = self.load_at_offset(hl, 4, crate::PrimKind::Load { width: 4 });
+        let tag_r = self.load_at_offset(hr, 4, crate::PrimKind::Load { width: 4 });
+        let both_some = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst: both_some, op: crate::IntOp::And, a: tag_l, b: tag_r });
+        let dst = self.fresh_value();
+        self.ops.push(Op::IfThen { cond: both_some, dst: Some(dst) });
+        // THEN (both Some): the heap payload eq — only here is data[0] dereferenced.
+        let pay_l = self.load_at_offset(hl, 12, crate::PrimKind::LoadHandle);
+        let pay_r = self.load_at_offset(hr, 12, crate::PrimKind::LoadHandle);
+        let pay_eq = self.fresh_value();
+        self.ops.push(Op::CallFn {
+            dst: Some(pay_eq),
+            name: eq_name.to_string(),
+            args: vec![CallArg::Handle(pay_l), CallArg::Handle(pay_r)],
+            result: Some(repr_of(&Ty::Bool).ok()?),
+        });
+        self.ops.push(Op::Else { val: Some(pay_eq) });
+        // ELSE: both-None → equal, one-Some-one-None → not equal (== of the tags).
+        let tags_eq = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst: tags_eq, op: crate::IntOp::Eq, a: tag_l, b: tag_r });
+        self.ops.push(Op::EndIf { val: Some(tags_eq) });
+        Some(dst)
+    }
+
+    /// `Result[scalar, String] ==` core over two already-materialized Result block HANDLES.
+    /// Ok is scalar (len@4=0, value@12), Err is a String (len@4=1, handle@12). The scalar okEq is
+    /// computed unconditionally (masked); the heap errEq (`string.eq`) runs ONLY in the both-Err
+    /// branch, so an Ok side's @12 (a scalar, not a handle) is never dereferenced:
+    /// dst = if bothErr then errEq else (bothOk AND okEq). Shared by both eq-operand paths.
+    pub(crate) fn result_scalar_eq_from_handles(
+        &mut self,
+        hl: ValueId,
+        hr: ValueId,
+        ok_ty: &Ty,
+    ) -> Option<ValueId> {
+        let tag_l = self.load_at_offset(hl, 4, crate::PrimKind::Load { width: 4 });
+        let tag_r = self.load_at_offset(hr, 4, crate::PrimKind::Load { width: 4 });
+        let zero = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: zero, value: 0 });
+        let ok_l = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst: ok_l, op: crate::IntOp::Eq, a: tag_l, b: zero });
+        let ok_r = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst: ok_r, op: crate::IntOp::Eq, a: tag_r, b: zero });
+        let both_ok = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst: both_ok, op: crate::IntOp::And, a: ok_l, b: ok_r });
+        let pay_ok_l = self.load_at_offset(hl, 12, crate::PrimKind::Load { width: 8 });
+        let pay_ok_r = self.load_at_offset(hr, 12, crate::PrimKind::Load { width: 8 });
+        let ok_eq = self.fresh_value();
+        if matches!(ok_ty, Ty::Float) {
+            self.ops.push(Op::Prim {
+                kind: crate::PrimKind::FloatCmp(crate::FCmpOp::Eq),
+                dst: Some(ok_eq),
+                args: vec![pay_ok_l, pay_ok_r],
+            });
+        } else {
+            self.ops.push(Op::IntBinOp { dst: ok_eq, op: crate::IntOp::Eq, a: pay_ok_l, b: pay_ok_r });
+        }
+        let inner = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst: inner, op: crate::IntOp::And, a: both_ok, b: ok_eq });
+        let both_err = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst: both_err, op: crate::IntOp::And, a: tag_l, b: tag_r });
+        let dst = self.fresh_value();
+        self.ops.push(Op::IfThen { cond: both_err, dst: Some(dst) });
+        // THEN (both Err): the heap String eq — only here is @12 read as a handle.
+        let pay_err_l = self.load_at_offset(hl, 12, crate::PrimKind::LoadHandle);
+        let pay_err_r = self.load_at_offset(hr, 12, crate::PrimKind::LoadHandle);
+        let err_eq = self.fresh_value();
+        self.ops.push(Op::CallFn {
+            dst: Some(err_eq),
+            name: "string.eq".to_string(),
+            args: vec![CallArg::Handle(pay_err_l), CallArg::Handle(pay_err_r)],
+            result: Some(repr_of(&Ty::Bool).ok()?),
+        });
+        self.ops.push(Op::Else { val: Some(err_eq) });
+        self.ops.push(Op::EndIf { val: Some(inner) });
+        Some(dst)
     }
 
     fn lower_scalar_value_inner(&mut self, expr: &IrExpr) -> Option<ValueId> {

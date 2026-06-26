@@ -1,0 +1,35 @@
+// @contract: C-099
+// Heap `==`/`!=` in the CONDITION of a heap-result `if` (the toml `emit_sections` shape
+// `if list.first(nested) == some("") then list.drop(nested, 1) else nested`). The operands are a
+// heap-returning CALL and an Option CTOR — neither a tracked Var — so they are materialized into
+// owned cond-frame temps, compared via the same typed-eq cores the Var-operand path uses, then
+// freed within the cond frame (per-cond i…d balance). Each branch is exercised; native is the
+// oracle and native == wasm output is the certified invariant.
+
+// Option[String] == some(literal): the exact toml blocker shape.
+fn drop_leading_empty(xs: List[String]) -> List[String] =
+  if list.first(xs) == some("") then list.drop(xs, 1) else xs
+
+// Option[String] != some(call/ctor over a literal).
+fn classify(xs: List[String]) -> String =
+  if list.first(xs) != some("hi") then "no-hi" else "got-hi"
+
+// String == String over a heap call result vs a literal, as the cond.
+fn upper_is_abc(s: String) -> String =
+  if string.to_upper(s) == "ABC" then "yes" else "no"
+
+fn main() -> Unit = {
+  // drop_leading_empty: then-arm (first is ""), else-arm (first is not ""), empty list.
+  println(list.join(drop_leading_empty(["", "b", "c"]), ","))
+  println(list.join(drop_leading_empty(["x", "y"]), ","))
+  println(list.join(drop_leading_empty([]), ","))
+  println(list.join(drop_leading_empty(["", ""]), ","))
+  // classify: != true (got "hi" -> else), != true (got "bye"), != over None (empty).
+  println(classify(["hi", "x"]))
+  println(classify(["bye"]))
+  println(classify([]))
+  // upper_is_abc: then-arm, else-arm, already-upper then-arm.
+  println(upper_is_abc("abc"))
+  println(upper_is_abc("xyz"))
+  println(upper_is_abc("ABC"))
+}

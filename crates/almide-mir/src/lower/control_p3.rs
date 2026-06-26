@@ -585,7 +585,236 @@ impl LowerCtx {
                 }
             }
         }
+        // A Bool-returning `==`/`!=` over HEAP operands neither of which is a tracked Var
+        // (`list.first(xs) == some("")`, `string.first(s) == some(c)` — the toml `emit_sections`
+        // blocker). `lower_scalar_value` above already covers the case where BOTH operands are
+        // materialized Vars (its Option/Result eq reads them via `materialized_option_handle`);
+        // here the operands are a heap-returning CALL and/or an Option/Result CTOR, which it
+        // declines. Materialize EACH operand into an owned block in the SAME cond-local frame, run
+        // the typed eq over their handles, then `drop_arm_locals(frame)` frees the operand temps —
+        // they are transient to the condition, owned by NEITHER arm (the per-cond `i…d` balance,
+        // exactly the pure-call-cond path's discipline). A non-materializable operand returns None
+        // → the `if` keeps its sound Opaque wall (no invalid wasm, no leak).
+        if let IrExprKind::BinOp { op: op @ (almide_ir::BinOp::Eq | almide_ir::BinOp::Neq), left, right } = &cond.kind {
+            if matches!(cond.ty, Ty::Bool) && is_heap_ty(&left.ty) {
+                if let Some(v) = self.lower_heap_eq_cond(left, right, matches!(op, almide_ir::BinOp::Neq)) {
+                    self.drop_arm_locals(frame);
+                    return Some(v);
+                }
+                // On decline, the partial ops/handles a half-materialized operand left are restored
+                // by the OUTER `try_lower_heap_result_if` rollback (ops + live_heap_handles truncated
+                // to its marks on any `None`), so the caller's Opaque fallback starts clean — no
+                // extra teardown needed here.
+            }
+        }
         None
+    }
+
+    /// Lower a HEAP `left == right` / `left != right` cond (Bool) whose operands are NOT both
+    /// tracked Vars — by MATERIALIZING each operand into an owned block (tracked in the cond
+    /// frame so `drop_arm_locals` frees it after the compare) and running the typed eq over the
+    /// two block handles. Reuses the SAME eq cores the Var-operand path uses
+    /// (`option_scalar_eq_from_handles` / `option_heap_eq_from_handles` /
+    /// `result_scalar_eq_from_handles`, `string.eq`, `value.eq`, `list.eq_*`) — no new eq op.
+    /// `negate` wraps the result as `1 - eq` (for `!=`). SELF-CONTAINED ROLLBACK: on any decline a
+    /// half-materialized operand may have emitted ops + pushed an owned temp to `live_heap_handles`;
+    /// this restores BOTH to the pre-attempt marks so the method leaves NO trace on `None` (the
+    /// rollback-safe contract the cond position requires — `lower_heap_result_cond` is reached from
+    /// paths that do NOT all wrap it in an outer truncate, e.g. the defunc HOF body). Returns None
+    /// (the caller walls) for an operand shape we cannot materialize, or a type whose eq is unhandled.
+    fn lower_heap_eq_cond(&mut self, left: &IrExpr, right: &IrExpr, negate: bool) -> Option<ValueId> {
+        let ops_mark = self.ops.len();
+        let lhh_mark = self.live_heap_handles.len();
+        let ty = &left.ty;
+        let eq = match self.lower_heap_eq_typed_materialized(left, right, ty) {
+            Some(eq) => eq,
+            None => {
+                self.ops.truncate(ops_mark);
+                self.live_heap_handles.truncate(lhh_mark);
+                return None;
+            }
+        };
+        if !negate {
+            return Some(eq);
+        }
+        let one = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: one, value: 1 });
+        let dst = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst, op: IntOp::Sub, a: one, b: eq });
+        Some(dst)
+    }
+
+    /// Materialize both operands of a heap `==` into owned blocks (in the current cond frame) and
+    /// emit the typed equality, returning the Bool ValueId. Handled operand TYPES: String,
+    /// Value, List[scalar|Value], Option[scalar|heap], Result[scalar, String]. Each operand is
+    /// materialized by `materialize_eq_operand` (a tracked Var is BORROWED, a fresh heap value is
+    /// an owned temp added to `live_heap_handles` with its recursive drop set). The eq BORROWS the
+    /// operand handles (it only reads), so the owned temps survive to the frame teardown.
+    fn lower_heap_eq_typed_materialized(
+        &mut self,
+        left: &IrExpr,
+        right: &IrExpr,
+        ty: &Ty,
+    ) -> Option<ValueId> {
+        use almide_lang::types::constructor::TypeConstructorId as TC;
+        // String / Value / List[T] — a borrowed-handle module eq call. Reuse the same callee the
+        // Var path uses; the operands are materialized into owned blocks the call borrows.
+        let module_eq: Option<(&str, &str)> = if matches!(ty, Ty::String) {
+            Some(("string", "eq"))
+        } else if crate::lower::is_value_ty(ty) {
+            Some(("value", "eq"))
+        } else if let Ty::Applied(TC::List, es) = ty {
+            if es.len() == 1 {
+                if matches!(es[0], Ty::Int) {
+                    Some(("list", "eq_int"))
+                } else if matches!(es[0], Ty::String) {
+                    Some(("list", "eq_str"))
+                } else if matches!(es[0], Ty::Float) {
+                    Some(("list", "eq_float"))
+                } else if matches!(es[0], Ty::Bool) {
+                    Some(("list", "eq_bool"))
+                } else if crate::lower::is_value_ty(&es[0]) {
+                    Some(("list", "eq_value"))
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        if let Some((m, f)) = module_eq {
+            let lb = self.materialize_eq_operand(left, ty)?;
+            let rb = self.materialize_eq_operand(right, ty)?;
+            let lh = self.handle_of(lb);
+            let rh = self.handle_of(rb);
+            let dst = self.fresh_value();
+            self.ops.push(Op::CallFn {
+                dst: Some(dst),
+                name: format!("{m}.{f}"),
+                args: vec![CallArg::Handle(lh), CallArg::Handle(rh)],
+                result: Some(repr_of(&Ty::Bool).ok()?),
+            });
+            return Some(dst);
+        }
+        // Option[T] — the scalar masked compare or the heap conditional compare, over the two
+        // materialized DynListStr / OptSome blocks (read via their handles).
+        if let Ty::Applied(TC::Option, oa) = ty {
+            if oa.len() == 1 {
+                let lb = self.materialize_eq_operand(left, ty)?;
+                let rb = self.materialize_eq_operand(right, ty)?;
+                let lh = self.handle_of(lb);
+                let rh = self.handle_of(rb);
+                if !is_heap_ty(&oa[0]) {
+                    return Some(self.option_scalar_eq_from_handles(lh, rh, &oa[0]));
+                }
+                let eq_name: Option<&str> = if matches!(oa[0], Ty::String) {
+                    Some("string.eq")
+                } else if crate::lower::is_value_ty(&oa[0]) {
+                    Some("value.eq")
+                } else if let Ty::Applied(TC::List, es) = &oa[0] {
+                    if es.len() == 1 && matches!(es[0], Ty::Int) {
+                        Some("list.eq_int")
+                    } else if es.len() == 1 && matches!(es[0], Ty::String) {
+                        Some("list.eq_str")
+                    } else if es.len() == 1 && matches!(es[0], Ty::Float) {
+                        Some("list.eq_float")
+                    } else if es.len() == 1 && matches!(es[0], Ty::Bool) {
+                        Some("list.eq_bool")
+                    } else if es.len() == 1 && crate::lower::is_value_ty(&es[0]) {
+                        Some("list.eq_value")
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                return self.option_heap_eq_from_handles(lh, rh, eq_name?);
+            }
+        }
+        // Result[scalar, String] — the scalar/heap masked+conditional compare over the two
+        // materialized DynListStr Result blocks.
+        if let Ty::Applied(TC::Result, ra) = ty {
+            if ra.len() == 2 && !is_heap_ty(&ra[0]) && matches!(ra[1], Ty::String) {
+                let lb = self.materialize_eq_operand(left, ty)?;
+                let rb = self.materialize_eq_operand(right, ty)?;
+                let lh = self.handle_of(lb);
+                let rh = self.handle_of(rb);
+                return self.result_scalar_eq_from_handles(lh, rh, &ra[0]);
+            }
+        }
+        None
+    }
+
+    /// The byte-address (`Prim::Handle`) of a materialized block — the operand handed to an eq core.
+    fn handle_of(&mut self, block: ValueId) -> ValueId {
+        let h = self.fresh_value();
+        self.ops.push(Op::Prim { kind: crate::PrimKind::Handle, dst: Some(h), args: vec![block] });
+        h
+    }
+
+    /// Materialize ONE operand of a heap `==` cond into a block whose handle the eq core reads.
+    /// - A tracked heap `Var` is BORROWED: its existing block is returned, NOT added to the cond
+    ///   frame (it is owned elsewhere and drops at its own scope — the eq only reads it).
+    /// - Any other heap operand (a heap-returning CALL, an Option/Result CTOR, a String literal /
+    ///   concat) is materialized into a FRESH OWNED block via `lower_owned_heap_field`, which
+    ///   pushes it to `live_heap_handles`; we then register its RECURSIVE drop set
+    ///   (`heap_elem_lists` / `value_handles` / …) so the cond-frame `drop_arm_locals` frees it
+    ///   AND its owned payload (no leak). The owned temp is freed exactly once (the frame `d`),
+    ///   never double-freed (the eq borrows it, never consumes). Returns None for a non-
+    ///   materializable shape → the caller walls.
+    fn materialize_eq_operand(&mut self, expr: &IrExpr, ty: &Ty) -> Option<ValueId> {
+        if let IrExprKind::Var { id } = &expr.kind {
+            // A tracked heap Var (a param or let-local) — borrow its block, no new ownership.
+            return self.value_for(*id).ok();
+        }
+        // An Option/Result CTOR (`some("")`, `none`, `ok(v)`, `err(m)`) — `try_lower_option_ctor`
+        // (which handles BOTH Option and Result ctors) builds the DynListStr/OptSome block +
+        // registers its recursive drop set (`materialize_opt_str_some` → `heap_elem_lists` +
+        // `materialized_options`), but does NOT push to `live_heap_handles`. Push it so the cond-
+        // frame `drop_arm_locals` frees it (and its owned payload) exactly once after the
+        // (borrowing) eq.
+        if matches!(
+            &expr.kind,
+            IrExprKind::OptionSome { .. }
+                | IrExprKind::OptionNone
+                | IrExprKind::ResultOk { .. }
+                | IrExprKind::ResultErr { .. }
+        ) {
+            let obj = self.try_lower_option_ctor(expr, ty)?;
+            if !self.live_heap_handles.contains(&obj) {
+                self.live_heap_handles.push(obj);
+            }
+            return Some(obj);
+        }
+        // Otherwise a heap-returning CALL / literal / concat — materialize a fresh OWNED block
+        // (`lower_owned_heap_field` pushes it to `live_heap_handles`). The call path leaves the
+        // block FLAT, so register the recursive drop set from the operand TYPE — else an
+        // `Option[String]`/`List[String]` temp leaks its inner Strings. Idempotent.
+        let obj = self.lower_owned_heap_field(expr)?;
+        if self.live_heap_handles.contains(&obj) {
+            self.register_owned_heap_eq_drop(obj, ty);
+        }
+        Some(obj)
+    }
+
+    /// Register the recursive drop set for a freshly materialized heap eq-operand block, mirroring
+    /// the call-binding tracking in `lower_bind` so the cond-frame teardown frees nested ownership.
+    fn register_owned_heap_eq_drop(&mut self, obj: ValueId, ty: &Ty) {
+        if crate::lower::is_list_list_str_ty(ty) {
+            self.list_list_str_lists.insert(obj);
+        } else if crate::lower::is_list_str_str_ty(ty) {
+            self.str_str_elem_lists.insert(obj);
+        } else if crate::lower::is_list_int_str_ty(ty) {
+            self.variant_drop_handles.insert(obj, "list_int_str".to_string());
+        } else if is_heap_elem_list_ty(ty) {
+            // List[heap] / Option[heap] / Result[_, heap] — the DynListStr recursive free.
+            self.heap_elem_lists.insert(obj);
+        }
+        if crate::lower::is_value_ty(ty) {
+            self.value_handles.insert(obj);
+        }
     }
 
     fn lower_heap_result_if_inner(
