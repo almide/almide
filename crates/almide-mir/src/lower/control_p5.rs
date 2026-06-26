@@ -613,6 +613,16 @@ impl LowerCtx {
                 let if_expr = self.desugar_match_to_if(subject, arms, &body.ty)?;
                 self.append_body_to_str_acc(&if_expr, acc)
             }
+            // A VARIANT `match subj { some(pl) => …, none => … }` over a per-element `Option[Value]`
+            // (`match json.get(case, "payload") { some(pl) => if get_kind(pl)=="tuple" then <map>
+            // else [], none => [] }` — the bindgen `gen_variant_type/struct/class` shape). A UNIT
+            // control structure (NO merged value): tag-read @4, then APPEND each arm into `acc` by
+            // recursing the walker — never bind a merged heap-if value. The Some payload `pl` is the
+            // subject's BORROWED slot-0 handle (`param_values`), live through the some-arm; the
+            // per-iteration subject is dropped AFTER both arms. See `append_variant_match_to_str_acc`.
+            IrExprKind::Match { subject, arms } if is_variant_ty(&subject.ty) => {
+                self.append_variant_match_to_str_acc(subject, arms, acc)
+            }
             // `none` / `[]` (empty) — append nothing.
             IrExprKind::OptionNone => Some(()),
             IrExprKind::List { elements } if elements.is_empty() => Some(()),
@@ -625,15 +635,35 @@ impl LowerCtx {
                 let sub = self.materialize_str_singleton(piece);
                 self.append_owned_sub_to_acc(sub, acc, arm_mark)
             }
-            // A `List[String]` literal / concat / call / `??` leaf — an OWNED, DROPPABLE sublist (a
-            // single `i`, NOT a merged-if). Lower it owned, then append + free it.
-            IrExprKind::List { .. }
-            | IrExprKind::BinOp { op: almide_ir::BinOp::ConcatList, .. }
-            | IrExprKind::Call { .. }
-            | IrExprKind::UnwrapOr { .. } => {
+            // A `List[String]` literal / call / `??` leaf — an OWNED, DROPPABLE sublist (a single `i`,
+            // NOT a merged-if). Lower it owned, then append + free it.
+            IrExprKind::List { .. } | IrExprKind::Call { .. } | IrExprKind::UnwrapOr { .. } => {
                 let arm_mark = self.live_heap_handles.len();
                 let sub = self.lower_owned_str_sublist(body)?;
                 self.append_owned_sub_to_acc(sub, acc, arm_mark)
+            }
+            // A `left + right` ConcatList leaf. FIRST try the whole concat as ONE owned sublist (the
+            // common `acc_list + [x]` shape — unchanged). If that DECLINES (an operand is itself a
+            // UNIT control structure that has no owned-value form — the julia `match {…} + [""]`
+            // shape: the left is a variant match the str-acc walker appends, not materializes),
+            // APPEND each operand IN ORDER instead: `acc += left; acc += right`. Order-preserving
+            // (left's elements then right's, exactly `left + right`) and each operand is an
+            // independently-balanced append (the per-leaf `i(id)` discipline), so the concat is the
+            // same loop-carried `i(id)m` whether materialized whole or appended piecewise. Both
+            // operands must be appendable; otherwise the whole HOF rolls back + WALLs.
+            IrExprKind::BinOp { op: almide_ir::BinOp::ConcatList, left, right } => {
+                let ops_mark = self.ops.len();
+                let arm_mark = self.live_heap_handles.len();
+                if let Some(sub) = self.lower_owned_str_sublist(body) {
+                    return self.append_owned_sub_to_acc(sub, acc, arm_mark);
+                }
+                // Roll back EVERY op + handle the declined whole-concat attempt pushed (a partial
+                // `try_lower_concat_list` may have emitted ops before failing), then append the two
+                // operands separately (left then right — concat order).
+                self.ops.truncate(ops_mark);
+                self.live_heap_handles.truncate(arm_mark);
+                self.append_body_to_str_acc(left, acc)?;
+                self.append_body_to_str_acc(right, acc)
             }
             // A bare `Var` leaf (`{ let lines = …; lines }` — the flat_map body that binds its
             // per-element sublist to a `let` then returns it, the bindgen `gen_unpack_named` /
@@ -664,6 +694,179 @@ impl LowerCtx {
             }
             _ => None,
         }
+    }
+
+    /// A flat_map closure body that is a VARIANT `match subj { some(pl) => …, none => … }` over a
+    /// per-element `Option[Value]` subject (`match json.get(case, "payload") { … }` — the bindgen
+    /// `gen_variant_type/struct/class` shape). Lowered as a UNIT control structure that APPENDS each
+    /// arm into the loop-carried `acc` slot (NO merged heap-if value — the same discipline the `if`
+    /// case proves). Returns `Some(())` on success, `None` (the caller rolls back + WALLs) outside
+    /// the subset.
+    ///
+    /// SUBSET: a 2-arm `[some(scalar|heap bind?), none]` (no guards), over an Option whose materialize
+    /// makes it a TRACKED nested-ownership block (a self-host Option call — `json.get`/`list.first`/…).
+    /// A self-host Result subject (Ok/Err) self-gates out (only Option here); a custom variant / a
+    /// non-self-host Option declines.
+    ///
+    /// SOUNDNESS — per-iteration subject + borrowed payload, exactly the `try_lower_variant_value_match`
+    /// `str_heap_bind`/`opt_tuple_bind` path but for a UNIT append target:
+    ///  - The subject `json.get(case, "payload")` is materialized into a FRESH OWNED `Option[Value]`
+    ///    block (cert `i`) INSIDE this iteration's frame, tracked `materialized_options` +
+    ///    `heap_elem_lists` so its drop is the recursive `DropListStr` (frees the owned Value payload).
+    ///  - A `some(pl)` HEAP payload binds `pl` to the subject's slot-0 handle (`LoadHandle` @12, in
+    ///    `param_values`) — a BORROW: the subject still owns it, so `pl` is NOT a second owner and the
+    ///    some-arm's reads/appends never free it. A consuming append auto-acquires (the leaf builders
+    ///    Dup/copy into the owned sublist), so no double-free.
+    ///  - The subject must stay live THROUGH the some-arm (the borrow is read there), so it is dropped
+    ///    AFTER both arms — within THIS iteration's frame (cert `d`). So the subject is a balanced
+    ///    `i…d` episode per iteration (like the heap `if` cond's transient temps), and `acc` stays the
+    ///    loop-carried `i(id)m` slot. No leak (the subject + its payload are freed each iteration), no
+    ///    double-free (the payload is borrowed, freed once by the subject's `DropListStr`), no
+    ///    sibling-arm trap (the tag picks exactly one arm; the appends are per-arm-balanced).
+    ///  - BRANCH OWNERSHIP ISOLATION: the two arms are ALTERNATE — snapshot/restore the
+    ///    owned/borrowed sets around the some-arm so a borrow it consumes does not leak into the
+    ///    none-arm's lowering view (mirrors `try_lower_variant_value_match`). The `acc` SetLocal is a
+    ///    real op (survives the snapshot restore — only lowering-time tracking is reset).
+    fn append_variant_match_to_str_acc(
+        &mut self,
+        subject: &IrExpr,
+        arms: &[IrMatchArm],
+        acc: ValueId,
+    ) -> Option<()> {
+        use crate::PrimKind;
+        // ONLY an Option subject (the json.get / list.first shape). A Result / custom variant / a
+        // non-self-host Option declines (the merged-value path or a wall handles those).
+        if arms.len() != 2
+            || arms.iter().any(|a| a.guard.is_some())
+            || !is_self_host_option_call(subject)
+            || !is_heap_ty(&subject.ty)
+        {
+            return None;
+        }
+        let ops_mark = self.ops.len();
+        let lhh_mark = self.live_heap_handles.len();
+        // Materialize the per-element subject into a FRESH OWNED Option block + track it like the
+        // statement/value match entry does (so the heap-payload bind gate opens AND the scope-end /
+        // post-arm drop is the recursive DropListStr that frees the owned Value payload).
+        let subj = match self
+            .lower_call_args(std::slice::from_ref(subject))
+            .ok()
+            .and_then(|a| a.into_iter().next())
+        {
+            Some(CallArg::Handle(v)) => v,
+            _ => {
+                self.ops.truncate(ops_mark);
+                self.live_heap_handles.truncate(lhh_mark);
+                return None;
+            }
+        };
+        self.materialized_options.insert(subj);
+        if crate::lower::is_heap_elem_list_ty(&subject.ty) {
+            self.heap_elem_lists.insert(subj);
+        }
+        // Parse the arms into (some_body, some_bind, none_body). A SCALAR payload binds a value COPY;
+        // a HEAP payload (`pl: Value`) binds the slot-0 @12 handle as a BORROW, gated on the subject
+        // being a tracked nested-ownership list (`heap_elem_lists`). A nested ctor / heap bind over a
+        // non-nested-ownership subject declines.
+        let mut some: Option<(&IrExpr, Option<(VarId, bool)>)> = None;
+        let mut none: Option<&IrExpr> = None;
+        for arm in arms {
+            match &arm.pattern {
+                IrPattern::Some { inner } => {
+                    let bind = match inner.as_ref() {
+                        IrPattern::Bind { var, ty } if !is_heap_ty(ty) => Some((*var, false)),
+                        IrPattern::Bind { var, ty }
+                            if is_heap_ty(ty) && self.heap_elem_lists.contains(&subj) =>
+                        {
+                            Some((*var, true))
+                        }
+                        IrPattern::Wildcard => None,
+                        _ => {
+                            self.ops.truncate(ops_mark);
+                            self.live_heap_handles.truncate(lhh_mark);
+                            return None;
+                        }
+                    };
+                    if some.is_some() {
+                        self.ops.truncate(ops_mark);
+                        self.live_heap_handles.truncate(lhh_mark);
+                        return None;
+                    }
+                    some = Some((&arm.body, bind));
+                }
+                IrPattern::None | IrPattern::Wildcard => {
+                    if none.is_some() {
+                        self.ops.truncate(ops_mark);
+                        self.live_heap_handles.truncate(lhh_mark);
+                        return None;
+                    }
+                    none = Some(&arm.body);
+                }
+                _ => {
+                    self.ops.truncate(ops_mark);
+                    self.live_heap_handles.truncate(lhh_mark);
+                    return None;
+                }
+            }
+        }
+        let ((some_body, some_bind), none_body) = match (some, none) {
+            (Some(s), Some(n)) => (s, n),
+            _ => {
+                self.ops.truncate(ops_mark);
+                self.live_heap_handles.truncate(lhh_mark);
+                return None;
+            }
+        };
+        // tag = load32(handle(subj) + 4); if tag != 0 then Some-arm else None-arm (UNIT — dst None).
+        let h = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![subj] });
+        let tag = self.load_at_offset(h, 4, PrimKind::Load { width: 4 });
+        // Bind the Some payload BEFORE the IfThen so it is in scope for the some-arm. A SCALAR is a
+        // value COPY (load64); a HEAP element is `LoadHandle` (@12, an i32 Ptr) recorded in
+        // `param_values` (a BORROW — the subject owns it, freed by its post-arm DropListStr).
+        if let Some((bind_var, is_heap)) = some_bind {
+            let payload = if is_heap {
+                self.load_at_offset(h, 12, PrimKind::LoadHandle)
+            } else {
+                self.load_at_offset(h, 12, PrimKind::Load { width: 8 })
+            };
+            self.value_of.insert(bind_var, payload);
+            if is_heap {
+                self.param_values.insert(payload);
+            }
+        }
+        self.ops.push(Op::IfThen { cond: tag, dst: None });
+        // BRANCH OWNERSHIP ISOLATION: the arms are alternate — snapshot the owned/borrowed sets
+        // before the some-arm, restore before the none-arm (the emitted ops are per-branch; only the
+        // lowering-time tracking is reset). The shared payload binds survive (inserted before IfThen).
+        let pv_snapshot = self.param_values.clone();
+        let lhh_snapshot = self.live_heap_handles.clone();
+        let ma_snapshot = self.materialized_aggregates.clone();
+        self.unit_arm_depth += 1;
+        let some_ok = self.append_body_to_str_acc(some_body, acc);
+        self.ops.push(Op::Else { val: None });
+        self.param_values = pv_snapshot;
+        self.live_heap_handles = lhh_snapshot;
+        self.materialized_aggregates = ma_snapshot;
+        let none_ok = some_ok.and_then(|_| self.append_body_to_str_acc(none_body, acc));
+        self.unit_arm_depth -= 1;
+        self.ops.push(Op::EndIf { val: None });
+        if none_ok.is_none() {
+            self.ops.truncate(ops_mark);
+            self.live_heap_handles.truncate(lhh_mark);
+            return None;
+        }
+        // SUBJECT-DROP-AFTER-ARMS: the Some payload borrowed slot-0, so the subject stayed live
+        // through both arms — drop the OWNED per-iteration subject ONCE here (the recursive
+        // DropListStr frees it + its owned Value payload). A BORROWED subject (not in
+        // `live_heap_handles` — never, here: a fresh json.get result is always owned) would be left
+        // untouched. This closes the per-iteration `i…d` balance.
+        if let Some(pos) = self.live_heap_handles.iter().rposition(|&v| v == subj) {
+            self.live_heap_handles.remove(pos);
+            let op = self.drop_op_for(subj);
+            self.ops.push(op);
+        }
+        Some(())
     }
 
     /// Lower a `List[String]`-valued LEAF (a list literal, a `+` concat, a named call, or a `??`) to
