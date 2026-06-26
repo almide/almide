@@ -914,6 +914,14 @@ fn desugar_lambda_let_branches(body: &IrExpr) -> Option<IrExpr> {
             cur = Some(r);
             continue;
         }
+        // Inline a SINGLE-USE let-bound match subject INSIDE the lambda body too (`(case) => { let p =
+        // json.get(case,"payload"); match p { … } }`) — turning the let-bound-Var variant-match subject
+        // into the inline-subject form the str-acc handler C1-lowers (vs the funcref-dropping C2-lift).
+        // Value-preserving (single use ⇒ one eval); STRICT-gated so it is a no-op otherwise.
+        if let Some(r) = desugar_inline_single_use_match_subject(src) {
+            cur = Some(r);
+            continue;
+        }
         break;
     }
     let src_owned = cur;
@@ -1280,6 +1288,182 @@ fn count_var_uses(e: &IrExpr, var: VarId) -> usize {
     let mut c = C { var, n: 0 };
     c.visit_expr(e);
     c.n
+}
+
+/// Is `var`'s ONLY occurrence in `e` the SUBJECT of a VARIANT (Option/Result/ADT) `match` with NO
+/// literal-pattern arm? Walks `e` and, for the one `Var(var)`, requires it sits directly under such a
+/// `Match { subject }`. A use anywhere else (a match ARM, an arg, an operand) returns false — so the
+/// inline below never moves the bound value into a position that would re-evaluate it or change
+/// ownership. CRUCIAL: the VARIANT-subject + NO-literal-arm gate keeps this DISJOINT from
+/// `desugar_match_subject_hoist`, which deliberately HOISTS a LITERAL-arm match's call subject into a
+/// `let` — inlining THAT back would ping-pong the fixpoint forever (a stack overflow). The two desugars
+/// own non-overlapping match shapes.
+fn sole_use_is_match_subject(e: &IrExpr, var: VarId) -> bool {
+    use almide_ir::visit::{walk_expr, IrVisitor};
+    use almide_lang::types::constructor::TypeConstructorId as TC;
+    let is_inlinable_variant_match = |arms: &[almide_ir::IrMatchArm], subj_ty: &Ty| -> bool {
+        let variant_subject = matches!(subj_ty, Ty::Applied(TC::Option | TC::Result, _))
+            || matches!(subj_ty, Ty::Named(..) | Ty::Variant { .. });
+        let has_literal_arm = arms
+            .iter()
+            .any(|a| matches!(a.pattern, almide_ir::IrPattern::Literal { .. }));
+        variant_subject && !has_literal_arm
+    };
+    struct C<'a> {
+        var: VarId,
+        ok: bool,        // the one occurrence is an inlinable-variant-match subject
+        bad: bool,       // a non-(inlinable-match-subject) occurrence was seen
+        subjects: Vec<usize>, // ptr-identity of subjects of inlinable variant matches
+        pred: &'a dyn Fn(&[almide_ir::IrMatchArm], &Ty) -> bool,
+    }
+    impl IrVisitor for C<'_> {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            if let IrExprKind::Match { subject, arms } = &e.kind {
+                if (self.pred)(arms, &subject.ty) {
+                    self.subjects.push(subject.as_ref() as *const IrExpr as usize);
+                }
+            }
+            if let IrExprKind::Var { id } = &e.kind {
+                if *id == self.var {
+                    if self.subjects.contains(&(e as *const IrExpr as usize)) {
+                        self.ok = true;
+                    } else {
+                        self.bad = true;
+                    }
+                }
+            }
+            walk_expr(self, e);
+        }
+    }
+    let mut c = C { var, ok: false, bad: false, subjects: Vec::new(), pred: &is_inlinable_variant_match };
+    c.visit_expr(e);
+    c.ok && !c.bad
+}
+
+/// INLINE a SINGLE-USE let-bound MATCH SUBJECT: `{ …; let p = <expr>; …; match p { … } }` →
+/// `{ …; …; match <expr> { … } }` WHEN `p`'s ONLY occurrence (across the remaining block stmts + tail)
+/// is that match's subject. This turns a let-bound-Var variant-match subject (`let p = json.get(case,
+/// "payload"); match p { some(pl) => …inner flat_map(pf => f(pf, capture))… }`) into the INLINE-subject
+/// form the variant-match str-acc handler lowers via C1 (materializes `<expr>` fresh/owned + C1-inlines
+/// the inner capturing flat_map) — instead of the let-bound Var routing the inner flat_map to the
+/// funcref-dropping C2-lift (which now WALLS, the value-position-HOF guard). The bindgen / wasm-bindgen
+/// `gen_pack_variant` / `emit_variant_helpers` value-position-HOF blocker.
+///
+/// VALUE-PRESERVING + ownership-neutral: `<expr>` is evaluated EXACTLY ONCE either way (the SINGLE-use
+/// gate ⇒ no duplicated evaluation, no duplicated allocation), and moving it into the (sole) subject
+/// position is exactly what the inline-subject source would have produced — the variant-match handler
+/// materializes/owns it identically. STRICT: `p` is a `let` (not `var`), used EXACTLY ONCE, and that one
+/// use is the match SUBJECT (`sole_use_is_match_subject`). A multi-use `p`, or a use elsewhere, declines
+/// (NO inline — duplicating the value's evaluation would change semantics/ownership). A pure IR→IR
+/// rewrite applied desugar-before-both, so the lowering + the `count_ir_calls` caps gate see the same
+/// tree (mir == ir by construction — the call moves position, it is not duplicated).
+pub fn desugar_inline_single_use_match_subject(body: &IrExpr) -> Option<IrExpr> {
+    let IrExprKind::Block { stmts, expr: tail } = &body.kind else {
+        return None;
+    };
+    // Find a `let p = <expr>` whose `p` is used EXACTLY ONCE — as a match subject — in everything that
+    // FOLLOWS it (the later stmts + the tail). (A use BEFORE the bind is impossible — `p` is not yet in
+    // scope — so counting the suffix is the whole live range.)
+    let (i, p, value) = stmts.iter().enumerate().find_map(|(i, s)| match &s.kind {
+        IrStmtKind::Bind { var, value, mutability: almide_ir::Mutability::Let, .. } => {
+            let rest_stmts = &stmts[i + 1..];
+            let uses: usize = rest_stmts.iter().map(|s| count_var_uses_in_stmt(s, *var)).sum::<usize>()
+                + tail.as_ref().map(|t| count_var_uses(t, *var)).unwrap_or(0);
+            if uses != 1 {
+                return None;
+            }
+            // The sole use must be a match subject in EXACTLY the position it occurs (the rest stmts OR
+            // the tail). Check both — exactly one holds (uses == 1).
+            let in_rest = rest_stmts.iter().any(|s| stmt_sole_use_is_match_subject(s, *var));
+            let in_tail = tail.as_ref().map(|t| sole_use_is_match_subject(t, *var)).unwrap_or(false);
+            if in_rest || in_tail {
+                Some((i, *var, value.clone()))
+            } else {
+                None
+            }
+        }
+        _ => None,
+    })?;
+    // Substitute `p` → `<expr>` in the FOLLOWING stmts + tail, drop the bind. `<expr>` lands exactly in
+    // the (sole) match-subject slot.
+    let mut new_stmts: Vec<IrStmt> = stmts[..i].to_vec();
+    for s in &stmts[i + 1..] {
+        new_stmts.push(almide_ir::substitute::substitute_var_in_stmt(s, p, &value));
+    }
+    let new_tail = tail
+        .as_ref()
+        .map(|t| Box::new(almide_ir::substitute::substitute_var_in_expr(t, p, &value)));
+    Some(IrExpr {
+        kind: IrExprKind::Block { stmts: new_stmts, expr: new_tail },
+        ty: body.ty.clone(),
+        span: body.span.clone(),
+        def_id: body.def_id,
+    })
+}
+
+/// `count_var_uses` over a STATEMENT's value-bearing children (Bind/Assign/Expr/…).
+fn count_var_uses_in_stmt(s: &IrStmt, var: VarId) -> usize {
+    use almide_ir::visit::{walk_stmt, IrVisitor};
+    struct C {
+        var: VarId,
+        n: usize,
+    }
+    impl IrVisitor for C {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            if let IrExprKind::Var { id } = &e.kind {
+                if *id == self.var {
+                    self.n += 1;
+                }
+            }
+            almide_ir::visit::walk_expr(self, e);
+        }
+    }
+    let mut c = C { var, n: 0 };
+    walk_stmt(&mut c, s);
+    c.n
+}
+
+/// `sole_use_is_match_subject` over a STATEMENT's value-bearing children (same variant-only gate).
+fn stmt_sole_use_is_match_subject(s: &IrStmt, var: VarId) -> bool {
+    use almide_ir::visit::{walk_stmt, IrVisitor};
+    use almide_lang::types::constructor::TypeConstructorId as TC;
+    let is_inlinable_variant_match = |arms: &[almide_ir::IrMatchArm], subj_ty: &Ty| -> bool {
+        let variant_subject = matches!(subj_ty, Ty::Applied(TC::Option | TC::Result, _))
+            || matches!(subj_ty, Ty::Named(..) | Ty::Variant { .. });
+        let has_literal_arm = arms
+            .iter()
+            .any(|a| matches!(a.pattern, almide_ir::IrPattern::Literal { .. }));
+        variant_subject && !has_literal_arm
+    };
+    struct C<'a> {
+        var: VarId,
+        ok: bool,
+        bad: bool,
+        subjects: Vec<usize>,
+        pred: &'a dyn Fn(&[almide_ir::IrMatchArm], &Ty) -> bool,
+    }
+    impl IrVisitor for C<'_> {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            if let IrExprKind::Match { subject, arms } = &e.kind {
+                if (self.pred)(arms, &subject.ty) {
+                    self.subjects.push(subject.as_ref() as *const IrExpr as usize);
+                }
+            }
+            if let IrExprKind::Var { id } = &e.kind {
+                if *id == self.var {
+                    if self.subjects.contains(&(e as *const IrExpr as usize)) {
+                        self.ok = true;
+                    } else {
+                        self.bad = true;
+                    }
+                }
+            }
+            almide_ir::visit::walk_expr(self, e);
+        }
+    }
+    let mut c = C { var, ok: false, bad: false, subjects: Vec::new(), pred: &is_inlinable_variant_match };
+    walk_stmt(&mut c, s);
+    c.ok && !c.bad
 }
 
 /// `{ …; let v = <heap expr>; recurse(.., v, ..) }` — a let-bound heap accumulator passed to the block
