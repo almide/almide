@@ -847,7 +847,19 @@ fn desugar_nested_branch_arms(body: &IrExpr, next_var: &mut u32) -> Option<IrExp
         // Applied BEFORE both the defunc lowering and the `count_ir_calls` gate (desugar-before-both:
         // both see the IDENTICAL duplicated lambda body, mir==ir 1:1 by construction). Params/lambda_id
         // are preserved so the defunc inliner binds the same params.
-        IrExprKind::Call { target, args, type_args } => {
+        // SKIP a `list.fold` lambda: the tuple-accumulator fold (`try_lower_defunc_tuple_acc_fold`)
+        // lowers its OWN multi-statement body — a `let store = if/match` INTERIOR stmt is materialized
+        // by `lower_bind` (the heap-result-`if` merged-owned-value path) reading the slots directly.
+        // Tail-DUPLICATING that `let store = if` here would turn the body `{ let store=if; (acc+[store],
+        // n+1) }` into `if c then {(acc+[A],n+1)} else {…}` — an if-of-TUPLES the tuple-fold gate (which
+        // requires a `(c0, c1)` tuple tail) cannot match → it declines to the self-host `fold_hacc`.
+        // (map/flat_map's str-acc DOES handle the if-of-tuples-equivalent via its unit-append `if`, so
+        // those keep the desugar.)
+        IrExprKind::Call { target, args, type_args }
+            if !matches!(target,
+                CallTarget::Module { module, func, .. }
+                    if module.as_str() == "list" && func.as_str() == "fold") =>
+        {
             let mut changed = false;
             let new_args: Vec<IrExpr> = args
                 .iter()
@@ -1040,8 +1052,15 @@ fn desugar_lambda_let_branches(body: &IrExpr) -> Option<IrExpr> {
             }
         }
         // An inner HOF call (`get_arr(pl,"fields") |> list.flat_map((pe) => { … })`): recurse into its
-        // lambda args so a let-bound branch in a NESTED loop body is reached too.
-        IrExprKind::Call { target, args, type_args } => {
+        // lambda args so a let-bound branch in a NESTED loop body is reached too. SKIP a `list.fold`
+        // lambda — the tuple-accumulator fold lowers its OWN multi-statement body (a `let store =
+        // if/match` interior stmt materialized by `lower_bind`); tail-duplicating it here would turn the
+        // `(acc+[store], n+step)` tuple body into an if-of-tuples the tuple-fold gate cannot match.
+        IrExprKind::Call { target, args, type_args }
+            if !matches!(target,
+                CallTarget::Module { module, func, .. }
+                    if module.as_str() == "list" && func.as_str() == "fold") =>
+        {
             let mut changed = false;
             let new_args: Vec<IrExpr> = args
                 .iter()

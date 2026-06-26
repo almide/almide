@@ -591,14 +591,14 @@ impl LowerCtx {
             _ => return None,
         };
 
-        // GATE — the BODY is `{ let (acc, n) = state; (c0, c1) }`: one destructure statement binding
-        // the state param's two components, then a 2-tuple tail. Any other shape defers. (A MULTI-
-        // statement body — the wasm-bindgen `field_stores` `let store = match get_kind(f) {…}` — is a
-        // SEPARATE frontier: its interior `match`-bound heap String + the body lowering emit a fresh
-        // i32/i64 + arg-count wasm-local collision, so it stays walled until that body shape is type-
-        // correct.)
+        // GATE — the BODY is `{ let (acc, n) = state; <interior pure lets…>; (c0, c1) }`: the FIRST
+        // statement destructures the state param's two components, then ZERO OR MORE pure value-binding
+        // statements (the element destructure `let (i,f)=fe`, a scalar `let off_s = int.to_string(off)`,
+        // a heap `let store = match get_kind(f) {…}` — the wasm-bindgen `field_stores` shape), then a
+        // 2-tuple tail. The interior statements are lowered as per-iteration EFFECTS (their heap temps
+        // freed within the iteration frame); a statement the body subset cannot lower → None → walls.
         let (stmts, tail) = match &body.kind {
-            IrExprKind::Block { stmts, expr: Some(tail) } if stmts.len() == 1 => (stmts, tail.as_ref()),
+            IrExprKind::Block { stmts, expr: Some(tail) } if !stmts.is_empty() => (stmts, tail.as_ref()),
             _ => return None,
         };
         let (acc_var, n_var) = match &stmts[0].kind {
@@ -740,15 +740,65 @@ impl LowerCtx {
         // borrows it (the slot owns it; the concat rc-incs/byte-copies into a fresh list).
         self.materialized_lists.insert(list_slot);
 
-        // Lower BOTH tuple components reading the OLD slot values BEFORE updating either slot (the body
-        // semantics: `(acc + [elem], off + w)` reads `acc`/`off` as the iteration's incoming state).
+        // Lower the INTERIOR statements (`stmts[1..]` — `let (i,f)=fe`, `let off_s = int.to_string(off)`,
+        // `let store = match get_kind(f) {…}`) as per-iteration EFFECTS, then BOTH tuple components,
+        // reading the OLD slot values BEFORE updating either slot (the body semantics: `(acc + [store],
+        // off + w)` reads `acc`/`off` as the iteration's incoming state). A heap temp an interior stmt
+        // binds (the `store` String) is freed within the per-iteration frame by `drop_arm_locals`; the
+        // concat already copied/rc-inc'd it into the new list, so it is single-owned + freed.
         let body_mark = self.live_heap_handles.len();
         self.in_frame += 1;
         self.in_defunc_body += 1;
         self.scalar_loop_depth += 1;
+        let mut stmts_ok = true;
+        for s in &stmts[1..] {
+            // A `let store = if/match {…}` interior stmt binds a HEAP-result branch. `lower_stmt` →
+            // `lower_bind` WALLS that (the function-scope `im·im·d` it cannot prove). HERE it is sound:
+            // materialize the merged owned `dst` (per-arm `"im"`), bind `store`, and push it to
+            // `live_heap_handles` so the PER-ITERATION `drop_arm_locals(body_mark)` frees it once —
+            // the proven `i…d` per-iteration frame (NOT a function-scope drop). The concat `acc + [store]`
+            // copies/rc-incs it into the new list before that drop. Other stmts use the normal `lower_stmt`.
+            if let IrStmtKind::Bind { var, ty: bty, value, .. } = &s.kind {
+                if is_heap_ty(bty)
+                    && matches!(&value.kind, IrExprKind::If { .. } | IrExprKind::Match { .. })
+                {
+                    let merged = match &value.kind {
+                        IrExprKind::If { cond, then, else_ } => {
+                            self.try_lower_heap_result_if(cond, then, else_, bty)
+                        }
+                        IrExprKind::Match { subject, arms } => self
+                            .desugar_match_to_if(subject, arms, bty)
+                            .and_then(|if_e| match &if_e.kind {
+                                IrExprKind::If { cond, then, else_ } => {
+                                    self.try_lower_heap_result_if(cond, then, else_, bty)
+                                }
+                                _ => None,
+                            }),
+                        _ => None,
+                    };
+                    match merged {
+                        Some(dst) => {
+                            self.value_of.insert(*var, dst);
+                            if !self.live_heap_handles.contains(&dst) {
+                                self.live_heap_handles.push(dst);
+                            }
+                            continue;
+                        }
+                        None => {
+                            stmts_ok = false;
+                            break;
+                        }
+                    }
+                }
+            }
+            if self.lower_stmt(s).is_err() {
+                stmts_ok = false;
+                break;
+            }
+        }
         // component0: `acc + [elem]` → a FRESH owned list (reads the List slot). try_lower_concat_list
         // returns a bare ValueId (registered in the right recursive-drop set, NOT in live_heap_handles).
-        let new_list = self.try_lower_concat_list(&tail_elems[0]);
+        let new_list = if stmts_ok { self.try_lower_concat_list(&tail_elems[0]) } else { None };
         // component1: `n + step` → a scalar value (reads the Int slot).
         let new_int = new_list.and_then(|_| self.lower_scalar_value(&tail_elems[1]));
         self.scalar_loop_depth -= 1;
