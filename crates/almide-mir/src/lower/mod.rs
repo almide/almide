@@ -144,6 +144,106 @@ pub fn repr_of(ty: &Ty) -> Result<Repr, LowerError> {
     Ok(Repr::Scalar { width: w })
 }
 
+/// Map a declared Almide scalar/heap type to its host wasm IMPORT valtype (the
+/// `@extern(wasm, …)` ABI): `Int`/narrow ints → `I64`, `Float` → `F64`, `Bool` →
+/// `I32`, a `String`/heap pointer → `I32`. A type with no flat valtype mapping
+/// (a record/tuple/Value/Unknown) returns `None` — the caller WALLS rather than
+/// guess an ABI. `Unit` is handled by the caller (a void result), not here.
+fn extern_wasm_abi(ty: &Ty) -> Option<crate::WasmAbi> {
+    use crate::WasmAbi;
+    match ty {
+        Ty::Int | Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64 | Ty::UInt8 | Ty::UInt16
+        | Ty::UInt32 | Ty::UInt64 => Some(WasmAbi::I64),
+        Ty::Float | Ty::Float32 | Ty::Float64 => Some(WasmAbi::F64),
+        Ty::Bool => Some(WasmAbi::I32),
+        // A String / list / map / any heap value crosses the boundary as an i32 POINTER.
+        _ if is_heap_ty(ty) => Some(WasmAbi::I32),
+        _ => None,
+    }
+}
+
+/// The `@extern(wasm, module, name)` attribute on a function, iff present (the
+/// browser-import case — a `rust`/`rs` target keeps walling: there is no wasm host
+/// for it, so emitting an import would be a hollow lie). Returns `(module, name)`.
+fn extern_wasm_target(func: &IrFunction) -> Option<(String, String)> {
+    func.extern_attrs.iter().find_map(|a| {
+        if a.target.as_str() == "wasm" {
+            Some((a.module.as_str().to_string(), a.function.as_str().to_string()))
+        } else {
+            None
+        }
+    })
+}
+
+/// Lower a body-less `@extern(wasm, module, name)` function to a thin wasm-IMPORT
+/// call body (the browser dom/fetch/timer/console host stubs). The function becomes
+/// a `(call $__import_module_name <params>)` that returns the host's result —
+/// FAITHFUL: its behavior IS the host's, so it calls the host, it does NOT fabricate
+/// a value (an `Opaque`/`0` would be a silent miscompile). The wasm module is valid;
+/// a browser host satisfies the import (it does not instantiate under wasmtime, which
+/// is expected — these fns are 🟡 lower, not byte-matchable on the wasmtime oracle).
+///
+/// Returns `Ok(Some(MirFunction))` when this is a wasm-extern fn whose param + return
+/// types all map to flat valtypes; `Ok(None)` when it is NOT a wasm-extern (the caller
+/// lowers it normally); `Err(Unsupported)` when a param/return type has no flat-valtype
+/// ABI (WALL — never guess a signature). SOUNDNESS: a `rust`/`rs` extern is NOT a wasm
+/// import (no wasm host) → `extern_wasm_target` is `None` → it keeps walling.
+fn try_lower_extern_wasm(func: &IrFunction) -> Result<Option<MirFunction>, LowerError> {
+    let Some((module, name)) = extern_wasm_target(func) else { return Ok(None) };
+    // Bind params to fresh MIR values (the borrow-by-default convention) — a heap param
+    // is a borrowed i32 pointer, a scalar an i64 local; both are read into the call.
+    let mut ctx = LowerCtx { fn_name: func.name.as_str().to_string(), ..Default::default() };
+    let params = ctx.bind_params(&func.params)?;
+    // The import-call args + their per-arg valtypes, parallel to the params. A heap param
+    // is BORROWED (a `Handle` — the caller owns it, no refcount change here); a scalar is
+    // passed by value (`Scalar`). The ABI of each comes from the DECLARED param type.
+    let mut args: Vec<crate::CallArg> = Vec::new();
+    let mut abi: Vec<crate::WasmAbi> = Vec::new();
+    for (p, ip) in params.iter().zip(func.params.iter()) {
+        let a = extern_wasm_abi(&ip.ty).ok_or_else(|| {
+            LowerError::Unsupported(format!(
+                "@extern(wasm) param type {:?} has no flat wasm valtype (not lowered to an import)",
+                ip.ty
+            ))
+        })?;
+        abi.push(a);
+        args.push(if p.repr.is_heap() {
+            crate::CallArg::Handle(p.value)
+        } else {
+            crate::CallArg::Scalar(p.value)
+        });
+    }
+    // The result: `Unit` → a void import (no MIR result); else map the return type to its
+    // valtype + a fresh dst the call binds. A heap return is a FRESH OWNED pointer the host
+    // returns (the caller now owns it — moved out as `ret`, like an `Alloc` result).
+    let (dst, result, result_abi, ret) = if matches!(func.ret_ty, Ty::Unit) {
+        (None, None, None, None)
+    } else {
+        let rabi = extern_wasm_abi(&func.ret_ty).ok_or_else(|| {
+            LowerError::Unsupported(format!(
+                "@extern(wasm) return type {:?} has no flat wasm valtype (not lowered to an import)",
+                func.ret_ty
+            ))
+        })?;
+        let repr = repr_of(&func.ret_ty)?;
+        let d = ctx.fresh_value();
+        (Some(d), Some(repr), Some(rabi), Some(d))
+    };
+    ctx.ops.push(Op::CallImport { dst, module, name, args, abi, result, result_abi });
+    Ok(Some(MirFunction {
+        name: func.name.as_str().to_string(),
+        params,
+        ops: ctx.ops,
+        // A wasm import reaches a BROWSER host capability (dom/fetch/timer/console), which is
+        // OUTSIDE the v1 WASI-floor cap vocabulary (Stdout/Entropy/CliArgs/FsRead). So it
+        // declares no MODELED cap here; the `CallImport` reaches no modeled WASI cap either,
+        // so `used ⊆ declared` holds vacuously — honest (it is not claimed to reach a WASI cap).
+        ret,
+        declared_caps: Vec::new(),
+        heap_slot_masks: Default::default(),
+    }))
+}
+
 /// Lower one function to MIR. Parameters are seeded first (the v1 borrow-by-
 /// default calling convention — see [`LowerCtx::bind_params`]), then the body.
 pub fn lower_function(
@@ -851,6 +951,13 @@ fn lower_function_all_impl(
     record_layouts: &RecordLayouts,
     variant_layouts: &VariantLayouts,
 ) -> Result<Vec<MirFunction>, LowerError> {
+    // A body-less `@extern(wasm, module, name)` function lowers to a thin host-IMPORT
+    // call (the browser dom/fetch/timer/console stubs) — its behavior IS the host's, so
+    // it CALLS the import, never fabricates a value. Gated STRICTLY on target == "wasm"
+    // (a `rust`/`rs` extern has no wasm host → `None` → it keeps walling as before).
+    if let Some(import_fn) = try_lower_extern_wasm(func)? {
+        return Ok(vec![import_fn]);
+    }
     let mut ctx = LowerCtx {
         globals: globals.clone(),
         global_inits: global_inits.clone(),

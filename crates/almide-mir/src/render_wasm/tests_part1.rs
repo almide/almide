@@ -189,6 +189,107 @@
         }
     }
 
+    /// An `@extern(wasm, module, name)` body-less fn lowers to a host-IMPORT call:
+    /// the module DECLARES `(import "module" "name" (func …))` and the wrapper body
+    /// `(call $__import_…)`s it, coercing each i64-uniform MIR local to the import
+    /// valtype (Float ↔ f64 reinterpret). The module is structurally valid wasm; a
+    /// browser host (not wasmtime) satisfies the import — so these fns LOWER (🟡).
+    #[test]
+    fn extern_wasm_fn_lowers_to_host_import() {
+        let prog = lower_source(
+            r#"
+            @extern(wasm, "dom", "create_element")
+            fn create_element(tag_id: Int) -> Int = _
+
+            @extern(wasm, "console", "log_float")
+            fn log_float(value: Float) -> Unit = _
+
+            @extern(wasm, "dom", "get_offset_width")
+            fn get_offset_width(el_id: Int) -> Float = _
+
+            fn main() -> Unit = {
+              let el = create_element(7)
+              let w = get_offset_width(el)
+              log_float(w)
+            }
+            "#,
+        );
+        let wat = render_wasm_program(&prog);
+        // The import section declares each host function with its mapped signature
+        // (Int→i64, Float→f64, Unit→no result), under the mangled `$__import_…` symbol.
+        assert!(
+            wat.contains(r#"(import "dom" "create_element" (func $__import_dom_create_element (param i64) (result i64)))"#),
+            "missing/incorrect create_element import:\n{wat}"
+        );
+        assert!(
+            wat.contains(r#"(import "console" "log_float" (func $__import_console_log_float (param f64)))"#),
+            "missing/incorrect log_float import (Unit return = no result, Float param = f64):\n{wat}"
+        );
+        assert!(
+            wat.contains(r#"(import "dom" "get_offset_width" (func $__import_dom_get_offset_width (param i64) (result f64)))"#),
+            "missing/incorrect get_offset_width import:\n{wat}"
+        );
+        // The wrapper body calls the import. The Float arg is reinterpreted from the
+        // i64 MIR local that holds its bits; the f64 result is reinterpreted back.
+        assert!(
+            wat.contains("(call $__import_console_log_float (f64.reinterpret_i64"),
+            "Float import arg must reinterpret i64 bits → f64:\n{wat}"
+        );
+        assert!(
+            wat.contains("(i64.reinterpret_f64 (call $__import_dom_get_offset_width"),
+            "f64 import result must reinterpret back to the i64 MIR local:\n{wat}"
+        );
+        // The emitted module is structurally VALID wasm (it just needs a browser host
+        // to instantiate). Validate when a wasm toolchain is present; skip otherwise.
+        assert_wasm_valid("extern_import", &wat);
+    }
+
+    /// A `@extern(rs, …)`/`@extern(rust, …)` (NATIVE) extern has NO wasm host — emitting
+    /// an import would be a hollow lie. So it must NOT lower to a `CallImport`: it WALLS
+    /// (its body-less Hole stays Unsupported), leaving NO import declaration. Only the
+    /// `wasm` target becomes a host import.
+    #[test]
+    fn extern_rust_target_does_not_become_a_wasm_import() {
+        let prog = lower_source(
+            r#"
+            @extern(rs, "native_lib", "reverse")
+            fn reverse(s: Int) -> Int = _
+
+            fn main() -> Unit = ()
+            "#,
+        );
+        let wat = render_wasm_program(&prog);
+        assert!(
+            !wat.contains("__import_native_lib_reverse") && !wat.contains(r#"(import "native_lib""#),
+            "a @extern(rs, …) must NOT emit a wasm import (no wasm host):\n{wat}"
+        );
+    }
+
+    /// Validate `wat` as a real wasm module with whatever toolchain is on PATH
+    /// (`wasm-tools validate` or `wat2wasm`). A browser-import module FAILS to
+    /// INSTANTIATE on wasmtime (no host) — that is expected — so this checks PARSE/
+    /// VALIDATE only. Skips cleanly when no toolchain is present (CI may lack one).
+    fn assert_wasm_valid(label: &str, wat: &str) {
+        let dir = std::env::temp_dir().join(format!("almide_mir_validate_{label}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        let wat_path = dir.join("m.wat");
+        std::fs::write(&wat_path, wat).unwrap();
+        for (bin, args) in [("wasm-tools", vec!["validate"]), ("wat2wasm", vec!["--no-check"])] {
+            match Command::new(bin).args(&args).arg(&wat_path).output() {
+                Ok(o) if o.status.code() != Some(127) => {
+                    assert!(
+                        o.status.success(),
+                        "{bin} rejected the module:\n{}\n--- wat ---\n{wat}",
+                        String::from_utf8_lossy(&o.stderr)
+                    );
+                    return; // validated by the first available tool
+                }
+                _ => {} // tool unavailable → try the next
+            }
+        }
+        // No wasm toolchain present — skip (the text assertions above still ran).
+    }
+
     /// Lower real `.almd` SOURCE to a `MirProgram` through the existing frontend
     /// feeder (the same cut point as `examples/render_program.rs`) — for end-to-end
     /// tests over REAL lowering rather than hand-built MIR. Dev-only deps.

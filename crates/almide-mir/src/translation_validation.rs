@@ -56,6 +56,11 @@ pub fn wasm_pattern(op: &crate::Op) -> Option<String> {
         Op::Call { func: RtFn::ListSet, .. } => "call $list_set".into(),
         Op::Call { func: RtFn::ListPush, .. } => "call $list_push".into(),
         Op::CallFn { name, .. } => format!("call ${name}"),
+        // A host wasm IMPORT renders to `(call $<import>)`; the import name is the
+        // mangled `__import_<module>_<name>` the render declares (see `import_symbol`).
+        Op::CallImport { module, name, .. } => {
+            format!("call ${}", crate::render_wasm::import_symbol(module, name))
+        }
         Op::ConstInt { .. } => "i64.const".into(),
         Op::IntBinOp { op: IntOp::Add, .. } => "i64.add".into(),
         Op::IntBinOp { op: IntOp::Sub, .. } => "i64.sub".into(),

@@ -91,7 +91,11 @@ pub fn name_witness(func: &MirFunction) -> NameWitness {
                 }
                 used.extend(args.iter().copied());
             }
-            Op::Call { dst, args, .. } | Op::CallFn { dst, args, .. } => {
+            Op::Call { dst, args, .. }
+            | Op::CallFn { dst, args, .. }
+            // A CallImport defines its result and USES its (borrowed/scalar) args, exactly
+            // like a CallFn — its name is the host import, resolved structurally by the render.
+            | Op::CallImport { dst, args, .. } => {
                 if let Some(d) = dst {
                     defined.push(*d);
                 }
@@ -504,6 +508,7 @@ fn loop_carried_slots(func: &MirFunction) -> (BTreeMap<ValueId, ValueId>, BTreeS
             }
             Op::Call { dst: Some(d), result: Some(r), .. }
             | Op::CallFn { dst: Some(d), result: Some(r), .. }
+            | Op::CallImport { dst: Some(d), result: Some(r), .. }
             | Op::CallIndirect { dst: Some(d), result: Some(r), .. }
                 if r.is_heap() =>
             {
@@ -609,6 +614,7 @@ pub fn ownership_certificate(func: &MirFunction) -> String {
             // param points to one — so the result is always owned, never borrowed.
             Op::Call { dst: Some(d), result: Some(r), .. }
             | Op::CallFn { dst: Some(d), result: Some(r), .. }
+            | Op::CallImport { dst: Some(d), result: Some(r), .. }
             | Op::CallIndirect { dst: Some(d), result: Some(r), .. }
                 if r.is_heap() =>
             {

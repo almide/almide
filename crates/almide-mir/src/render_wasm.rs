@@ -332,12 +332,62 @@ pub fn render_wasm_program(prog: &MirProgram) -> String {
     } else {
         String::new()
     };
+    // Host wasm IMPORTS for every `@extern(wasm, module, name)` the program calls
+    // (an `Op::CallImport`). Each `(import "module" "name" (func $__import_… <sig>))`
+    // must precede ALL non-import definitions in the function index space, so it is
+    // injected into the preamble's import region — right after the WASI imports,
+    // before the first `(memory …)`. Deduped + sorted for host-determinism.
+    let extern_imports = render_extern_imports(prog);
+    let preamble = if extern_imports.is_empty() {
+        preamble()
+    } else {
+        // The preamble begins `(module\n  (import "wasi…` — splice the extern imports
+        // in right after the opening `(module\n` so they sit in the import block.
+        let pre = preamble();
+        match pre.split_once('\n') {
+            Some((head, rest)) => format!("{head}\n{extern_imports}{rest}"),
+            None => pre,
+        }
+    };
     // `main` is `Unit` (v0 rejects a non-`Unit` main — it must implement
     // `Termination`), so `_start` discards nothing: a void `(call $main)` matches.
     format!(
         "{preamble}{data}{closure_table}{funcs}  (func (export \"_start\") (call $main))\n)\n",
-        preamble = preamble(),
     )
+}
+
+/// The `(import …)` declarations for every distinct `@extern(wasm, module, name)`
+/// host function the program calls (an [`Op::CallImport`]). The import signature is
+/// the import's wasm valtypes (`abi`/`result_abi`, mapped from the declared Almide
+/// types at lowering), so the declared `(func (param …) (result …))` matches exactly
+/// what the call site supplies. Deduped by symbol + sorted (host-deterministic). A
+/// program with no host import renders the empty string (byte-identical to before).
+fn render_extern_imports(prog: &MirProgram) -> String {
+    let mut decls: BTreeMap<String, String> = BTreeMap::new();
+    for f in &prog.functions {
+        for op in &f.ops {
+            if let Op::CallImport { module, name, abi, result_abi, .. } = op {
+                let sym = import_symbol(module, name);
+                let params = if abi.is_empty() {
+                    String::new()
+                } else {
+                    format!(
+                        " (param {})",
+                        abi.iter().map(|a| a.wat()).collect::<Vec<_>>().join(" ")
+                    )
+                };
+                let result = result_abi
+                    .map(|r| format!(" (result {})", r.wat()))
+                    .unwrap_or_default();
+                decls.entry(sym.clone()).or_insert_with(|| {
+                    format!(
+                        "  (import {module:?} {name:?} (func ${sym}{params}{result}))\n"
+                    )
+                });
+            }
+        }
+    }
+    decls.into_values().collect()
 }
 
 /// Render one MIR function with its signature (params, locals, result).
@@ -504,6 +554,7 @@ fn defined_value(op: &Op) -> Option<ValueId> {
         | Op::IntBinOp { dst, .. }
         | Op::Pure { dst, .. } => Some(*dst),
         Op::CallFn { dst, .. } | Op::Call { dst, .. } => *dst,
+        Op::CallImport { dst, .. } => *dst,
         Op::CallIndirect { dst, .. } => *dst,
         Op::Prim { dst, .. } => *dst,
         Op::IfThen { dst, .. } => *dst,
@@ -590,12 +641,51 @@ fn local(v: ValueId) -> String {
     format!("$v{}", v.0)
 }
 
+/// The wasm `$func` symbol an `@extern(wasm, module, name)` IMPORT is declared and
+/// called under. Mangled `$__import_<module>_<name>` so it cannot collide with a
+/// user/runtime function of the same bare `name` (the wrapper fn keeps its own
+/// name and `(call $__import_…)`s this). Single source for the import declaration
+/// (render_wasm_program), the call render (`render_op`), and the translation-
+/// validation pattern.
+pub fn import_symbol(module: &str, name: &str) -> String {
+    format!("__import_{module}_{name}")
+}
+
 
 fn render_arg_wasm(arg: &CallArg) -> String {
     match arg {
         CallArg::Handle(v) | CallArg::Scalar(v) => format!("(local.get {})", local(*v)),
         CallArg::Imm(n) => format!("(i64.const {n})"),
         CallArg::Label(l) => panic!("label arg {l:?} not valid for a user call"),
+    }
+}
+
+/// Render one `Op::CallImport` arg, COERCED from its i64-uniform / i32-heap MIR
+/// local to the import-signature valtype `ty`. A scalar MIR local is i64: an `F64`
+/// import param reads the f64 BITS it holds (`f64.reinterpret_i64`), an `I32` Bool
+/// param narrows (`i32.wrap_i64`), an `I64` param passes through. A heap handle is
+/// already an i32 pointer for an `I32` param. An immediate matches the valtype's
+/// constant form.
+fn render_import_arg_wasm(arg: &CallArg, ty: crate::WasmAbi) -> String {
+    use crate::WasmAbi;
+    match arg {
+        CallArg::Handle(v) => match ty {
+            // A heap handle is an i32 pointer — exactly the `I32` import valtype.
+            WasmAbi::I32 => format!("(local.get {})", local(*v)),
+            // A heap handle to an i64/f64 param is a type error the lowering never emits.
+            _ => format!("(local.get {})", local(*v)),
+        },
+        CallArg::Scalar(v) => match ty {
+            WasmAbi::I64 => format!("(local.get {})", local(*v)),
+            WasmAbi::F64 => format!("(f64.reinterpret_i64 (local.get {}))", local(*v)),
+            WasmAbi::I32 => format!("(i32.wrap_i64 (local.get {}))", local(*v)),
+        },
+        CallArg::Imm(n) => match ty {
+            WasmAbi::I64 => format!("(i64.const {n})"),
+            WasmAbi::F64 => format!("(f64.reinterpret_i64 (i64.const {n}))"),
+            WasmAbi::I32 => format!("(i32.const {n})"),
+        },
+        CallArg::Label(l) => panic!("label arg {l:?} not valid for a host import call"),
     }
 }
 

@@ -240,6 +240,39 @@ fn render_op(
                 None => format!("    (call ${name} {argstr})\n"),
             }
         }
+        // A host wasm IMPORT call (`@extern(wasm, module, name)`). Emit a `(call
+        // $__import_module_name …)`; the matching `(import …)` is declared at module
+        // scope by render_wasm_program. The MIR is i64-uniform for scalars / i32 for
+        // heap handles, so each arg is COERCED to its import valtype (`abi`, parallel to
+        // `args`): a Float arg's i64 local holds the f64 BITS → `f64.reinterpret_i64`; a
+        // Bool arg → `i32.wrap_i64`; an Int/heap arg passes through. The result is
+        // coerced back to the MIR dst valtype (a heap dst i32, else a scalar i64).
+        Op::CallImport { dst, module, name, args, abi, result, result_abi } => {
+            let sym = crate::render_wasm::import_symbol(module, name);
+            let argstr = args
+                .iter()
+                .zip(abi.iter())
+                .map(|(a, ty)| render_import_arg_wasm(a, *ty))
+                .collect::<Vec<_>>()
+                .join(" ");
+            let call = format!("(call ${sym} {argstr})");
+            match (dst, result_abi) {
+                (Some(d), Some(rt)) => {
+                    // Coerce the import's result valtype back to the i64-uniform / i32-heap
+                    // MIR local: an f64 result → its i64 bits; an i32 Bool result → i64;
+                    // an i32 heap pointer or i64 → the dst local directly.
+                    let dst_heap = result.map(|r| r.is_heap()).unwrap_or(false);
+                    let coerced = match rt {
+                        crate::WasmAbi::F64 => format!("(i64.reinterpret_f64 {call})"),
+                        crate::WasmAbi::I32 if !dst_heap => format!("(i64.extend_i32_u {call})"),
+                        _ => call,
+                    };
+                    format!("    (local.set {} {coerced})\n", local(*d))
+                }
+                // A Unit-returning import (`-> Unit`, no MIR result) is a void call.
+                _ => format!("    {call}\n"),
+            }
+        }
         // A release: decrement the refcount cell (RuntimeModel.v's rt_dec). The
         // `$rc_dec` primitive traps if the cell is already 0 — the double-free /
         // use-after-free sentinel. This is the byte the perceus V binds each

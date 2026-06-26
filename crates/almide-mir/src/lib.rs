@@ -340,6 +340,30 @@ pub enum Op {
     /// callee (the compositionality lever for ownership).
     CallFn { dst: Option<ValueId>, name: String, args: Vec<CallArg>, result: Option<Repr> },
 
+    /// Call a host-provided WASM IMPORT — the body of an `@extern(wasm, module,
+    /// name)` function. The renderer emits `(call $<import>)` and DECLARES the
+    /// matching `(import "module" "name" (func …))` at module scope. This is
+    /// FAITHFUL: the function's behavior IS the host's, so a call (not a fabricated
+    /// value) is the only sound lowering — the wasm module is valid and a browser
+    /// host satisfies the import (it does NOT instantiate under wasmtime, which has
+    /// no such host; that is expected for a browser-targeted module).
+    ///
+    /// Ownership is exactly an [`Op::Call`]'s: heap-handle args are BORROWED
+    /// (live-checked, refcount unchanged), and a heap `result` is a FRESH OWNED
+    /// value (the host returns a pointer the caller now owns). `abi`/`result_abi`
+    /// carry the import's wasm SIGNATURE valtypes (mapped from the declared Almide
+    /// types: Int→i64, Float→f64, Bool→i32, String/heap→i32), parallel to `args`;
+    /// the render coerces each i64-uniform MIR local to/from the import valtype.
+    CallImport {
+        dst: Option<ValueId>,
+        module: String,
+        name: String,
+        args: Vec<CallArg>,
+        abi: Vec<WasmAbi>,
+        result: Option<Repr>,
+        result_abi: Option<WasmAbi>,
+    },
+
     /// Call a CLOSURE VALUE indirectly: `dst = (table[table_idx])(args)` — the
     /// function-value invocation `(f)(x)` the higher-order self-host (list.map/filter/
     /// fold) needs, lowered to wasm `call_indirect`. `table_idx` is a scalar (the closure
@@ -663,6 +687,32 @@ impl Capability {
     }
 }
 
+/// A wasm IMPORT-signature value type — the host-facing valtype an
+/// [`Op::CallImport`] argument/result is mapped to from its declared Almide type
+/// (Int→`I64`, Float→`F64`, Bool→`I32`, String/heap pointer→`I32`). The MIR is
+/// i64-uniform for scalars (a Float local holds the f64 BITS) and i32 for heap
+/// handles, so the render coerces each local to/from this valtype at the call.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WasmAbi {
+    /// A 64-bit integer — the MIR scalar local passes through directly.
+    I64,
+    /// A 64-bit float — the MIR i64 local holds its bits; reinterpret around the call.
+    F64,
+    /// A 32-bit integer — a heap pointer (MIR i32, direct) or a Bool (MIR i64, wrapped).
+    I32,
+}
+
+impl WasmAbi {
+    /// The WAT valtype keyword for an import signature.
+    pub fn wat(self) -> &'static str {
+        match self {
+            WasmAbi::I64 => "i64",
+            WasmAbi::F64 => "f64",
+            WasmAbi::I32 => "i32",
+        }
+    }
+}
+
 /// An argument to a runtime [`Op::Call`] / user [`Op::CallFn`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CallArg {
@@ -860,6 +910,10 @@ pub fn verify_ownership(func: &MirFunction) -> Result<(), Vec<Violation>> {
             // `dst` becomes a new owned object, like Alloc.
             Op::Call { args, dst, result, .. }
             | Op::CallFn { args, dst, result, .. }
+            // A CallImport (a host wasm import) has the SAME ownership shape: heap-handle
+            // args are BORROWED, a heap result is a FRESH OWNED value (the host returns a
+            // pointer the caller now owns). Its scalar args carry no ownership.
+            | Op::CallImport { args, dst, result, .. }
             // A CallIndirect has the same ownership shape as a CallFn: its heap-arg handles
             // must be live, a heap result is a FRESH OWNED value. The `table_idx` is a
             // scalar closure value (no ownership).
