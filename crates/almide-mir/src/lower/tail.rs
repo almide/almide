@@ -316,11 +316,40 @@ impl LowerCtx {
                     self.lower_while(cond, body)?;
                     Ok(None)
                 }
+                // A Unit-typed TAIL `g()` / `g()!` (effect-fn call propagating its
+                // `Result[Unit, _]`): the frontend wraps it in `Try`/`Unwrap` for the
+                // auto-`?`. The Result is the function's own Unit return, so strip the
+                // wrapper and lower the inner effect call — exactly the heap-`Unwrap`
+                // tail rule (line below), but for a discarded-Unit result.
+                IrExprKind::Try { expr } | IrExprKind::Unwrap { expr } => {
+                    self.lower_tail(Some(expr))
+                }
                 other => Err(LowerError::Unsupported(format!(
                     "Unit-typed tail {} not in this brick",
                     kind_name(other)
                 ))),
             };
+        }
+        // A tail of type `Result[Unit, _]` is the return of an `effect fn … -> Unit`
+        // (its auto-`?` effect Result). The v1 pipeline lowers such a fn to a VOID wasm
+        // function, so its tail must produce NO return value — an EFFECT call (`effect fn
+        // main() = loop(xs)`), or a `Try`/`Unwrap` over one (`= loop(xs)?` / `!`). The
+        // `Result[Unit, _]` type is `is_heap_ty` (a `Ty::Applied`), so WITHOUT this it
+        // fell into the heap branch's `Call` arm, which emits `(local.set $r (call $f …))`
+        // expecting an i32 the void callee never returns — invalid wasm. Stripping a
+        // `Try`/`Unwrap` recurses to the inner call, which lands back here (still
+        // `Result[Unit, _]`) and lowers as the effect call.
+        if is_unit_result_ty(&tail.ty) {
+            match &tail.kind {
+                IrExprKind::Try { expr } | IrExprKind::Unwrap { expr } => {
+                    return self.lower_tail(Some(expr));
+                }
+                IrExprKind::Call { .. } => {
+                    self.lower_effect_call(tail)?;
+                    return Ok(None);
+                }
+                _ => {}
+            }
         }
         if is_heap_ty(&tail.ty) {
             return match &tail.kind {

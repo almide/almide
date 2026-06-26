@@ -435,6 +435,17 @@ impl LowerCtx {
     /// real printing program's capability witness is derived from real source).
     /// Anything outside the set is an explicit `Unsupported` (totality).
     pub(crate) fn lower_effect_call(&mut self, call: &IrExpr) -> Result<(), LowerError> {
+        // An effect-fn call in STATEMENT position carries the auto-`?` of effect-Result
+        // propagation: `g()` where `g` returns `Result[Unit, _]` is lowered by the
+        // frontend as `Try { g() }` (or `Unwrap` for an explicit `g()!`). In statement
+        // position the Result is DISCARDED (Unit), so there is no value to compute wrong —
+        // the call simply runs for effect, and Err-propagation is the same loop-completion
+        // model the heap-`Unwrap` tail already relies on (see `lower_tail`). Strip the
+        // wrapper and lower the inner call. (A value-position `Unwrap` is still walled —
+        // there the unwrapped value is load-bearing; here it is thrown away.)
+        if let IrExprKind::Try { expr } | IrExprKind::Unwrap { expr } = &call.kind {
+            return self.lower_effect_call(expr);
+        }
         // A primitive-floor STATEMENT (`prim.store32(...)` / a discarded `prim.*`):
         // `@intrinsic` lowers it to a `RuntimeCall`; map the `almide_rt_prim_*` symbol
         // to an `Op::Prim` (a store is Unit, so the dst is None — nothing to discard).

@@ -247,6 +247,16 @@ impl LowerCtx {
                 IrExprKind::Call { .. } if matches!(tail.ty, Ty::Unit) => {
                     self.lower_effect_call(tail)?
                 }
+                // A Unit arm-tail effect call wrapped in `Try`/`Unwrap` (the auto-`?` of an
+                // effect-fn call, e.g. the recursive `loop(rest)` tail or `eff_call(x)`):
+                // its `Result[Unit, _]` is discarded, so `lower_effect_call` strips the
+                // wrapper and runs the call for effect. WITHOUT this arm it would fall to
+                // `record_elided_calls` below — which captures the inner calls as caps
+                // markers but EMITS NO call, silently dropping the effect (and, for a
+                // recursive tail, the recursion itself).
+                IrExprKind::Try { .. } | IrExprKind::Unwrap { .. } if matches!(tail.ty, Ty::Unit) => {
+                    self.lower_effect_call(tail)?
+                }
                 // A nested Unit `if` arm-tail EXECUTES (only the taken arm runs) — so a
                 // chained `else if … else …` (fizzbuzz) runs ONE branch, not all of them;
                 // else it falls back to linearization.

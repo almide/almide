@@ -685,6 +685,18 @@ pub(crate) fn is_list_int_str_ty(ty: &Ty) -> bool {
             Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::Int) && matches!(tys[1], Ty::String)))
 }
 
+/// `Result[Unit, _]` — the static type of an `effect fn … -> Unit` CALL (the auto-`?`
+/// effect Result carrying no value). The v1 MIR pipeline lowers such an effect fn to a
+/// VOID wasm function (no `func.ret`), so a call to it is an EFFECT statement, never a
+/// scalar/heap value. Used to route a `Result[Unit, _]`-typed tail/value call to the
+/// effect-call path instead of the scalar-call path (which would expect an i32 result
+/// the void callee never produces — an invalid-wasm type mismatch).
+pub(crate) fn is_unit_result_ty(ty: &Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    matches!(ty, Ty::Applied(TypeConstructorId::Result, a)
+        if a.len() == 2 && matches!(a[0], Ty::Unit))
+}
+
 /// A `Result[Value, String]` — the `ok(value.array(...))` shape. Its Ok payload is a dynamic Value
 /// (freed RECURSIVELY via `$__drop_value`), its Err a String. Its scope-end drop must be
 /// [`Op::DropResultValue`] (the tag-dispatched recursive free); a flat `DropListStr` would leak the
