@@ -564,16 +564,16 @@ impl LowerCtx {
         if !matches!(tup_tys[1], Ty::Int) {
             return None;
         }
-        // SCALAR list element ONLY (`(List[Int], Int)` — the `wasm_record_offsets` offsets case): the
-        // slot is a FLAT `__list_concat` + flat `Drop`, and the final list MOVED into the result tuple
-        // (slot 0) is freed once by the tuple's flat masked drop. A `(List[String], Int)` accumulator
-        // is GATED OUT: its loop-carried `__list_concat_rc` slot + the tuple's masked-rc drop emit an
-        // i32/i64 type collision in the per-iteration slot reuse (a `expected i32, found i64` invalid-
-        // wasm at `function build`, confirmed by byte-match) — until that String-slot masked drop is
-        // type-correct it WALLS (honest) rather than emit invalid wasm. A heap-FIELD aggregate element
-        // (a tuple/record list) also defers (its masked recursive drop is out of this slice).
+        // A SCALAR list element (`(List[Int], Int)` — `wasm_record_offsets`) OR a `String` element
+        // (`(List[String], Int)`). Both are admitted: the scalar slot is a FLAT `__list_concat` + flat
+        // `Drop`; the String slot is `__list_concat_rc` + the recursive `DropListStr` (marked
+        // `heap_elem_lists`), and the SOURCE element of a heap (`List[String]`) source is read as the
+        // slot's i32 HANDLE (`LoadHandle`, below) — reading it as an i64 scalar was the
+        // `expected i32, found i64` invalid-wasm bug. A heap-FIELD aggregate element (a tuple/record
+        // list) still defers (its masked recursive drop is out of this slice).
         let list_elem_scalar = !is_heap_ty(&list_elem_ty);
-        if !list_elem_scalar {
+        let list_elem_str = matches!(list_elem_ty, Ty::String);
+        if !list_elem_scalar && !list_elem_str {
             return None;
         }
 
@@ -592,7 +592,11 @@ impl LowerCtx {
         };
 
         // GATE — the BODY is `{ let (acc, n) = state; (c0, c1) }`: one destructure statement binding
-        // the state param's two components, then a 2-tuple tail. Any other shape defers.
+        // the state param's two components, then a 2-tuple tail. Any other shape defers. (A MULTI-
+        // statement body — the wasm-bindgen `field_stores` `let store = match get_kind(f) {…}` — is a
+        // SEPARATE frontier: its interior `match`-bound heap String + the body lowering emit a fresh
+        // i32/i64 + arg-count wasm-local collision, so it stays walled until that body shape is type-
+        // correct.)
         let (stmts, tail) = match &body.kind {
             IrExprKind::Block { stmts, expr: Some(tail) } if stmts.len() == 1 => (stmts, tail.as_ref()),
             _ => return None,
@@ -675,7 +679,9 @@ impl LowerCtx {
             repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT },
             init: crate::Init::DynList { len: zero_len },
         });
-        // SCALAR-element list slot only (gated above): a flat `Drop`, no recursive `heap_elem_lists`.
+        if list_elem_str {
+            self.heap_elem_lists.insert(list_slot);
+        }
 
         // Seed the INT slot: a STABLE mutable scalar local (ConstInt-seed then SetLocal to the init —
         // the proven loop-state model: distinct + reassignable across iterations).
@@ -696,8 +702,15 @@ impl LowerCtx {
         self.ops.push(Op::IntBinOp { dst: cond_v, op: IntOp::Lt, a: i_v, b: len_v });
         self.ops.push(Op::LoopBreakUnless { cond: cond_v });
 
-        // Load element[i] from the SOURCE list: addr = src_h + 12 + i*8, then load64. The source is a
-        // SCALAR list (`List[Int]` cursor input), so the element is the i64 value the body reads.
+        // Load element[i] from the SOURCE list: addr = src_h + 12 + i*8. The READ WIDTH depends on the
+        // SOURCE element type — a SCALAR source (`List[Int]`) is the i64 VALUE (`Load { width: 8 }`); a
+        // HEAP source (`List[String]`) is the slot's String HANDLE (`LoadHandle` = i32 Ptr), read as a
+        // BORROWED heap value the body copies (`acc + [w]`, `string.len(w)`). Hardcoding the i64 load
+        // for a heap source declared the element local i64 while `string.len`/`__list_concat_rc` expect
+        // an i32 handle — the `expected i32, found i64` invalid wasm. Mirrors `lower_defunc_list_hof_
+        // inner`'s `src_heap` element read.
+        let src_heap = matches!(&xs.ty,
+            Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && is_heap_ty(&a[0]));
         let i8_v = self.fresh_value();
         let eight = self.fresh_value();
         self.ops.push(Op::ConstInt { dst: eight, value: 8 });
@@ -706,14 +719,21 @@ impl LowerCtx {
         let src_addr = self.fresh_value();
         self.ops.push(Op::IntBinOp { dst: src_addr, op: IntOp::Add, a: src_base, b: i8_v });
         let elem = self.fresh_value();
-        self.ops.push(Op::Prim { kind: PrimKind::Load { width: 8 }, dst: Some(elem), args: vec![src_addr] });
+        let read_kind = if src_heap { PrimKind::LoadHandle } else { PrimKind::Load { width: 8 } };
+        self.ops.push(Op::Prim { kind: read_kind, dst: Some(elem), args: vec![src_addr] });
 
         // Bind the lambda params + the destructured state vars to the SLOTS (NO tuple state block):
-        //   element param → elem (the loaded value)
+        //   element param → elem (the loaded value/handle)
         //   acc (destructured list var) → the List slot
         //   n   (destructured int var)  → the Int slot
         // Captures need no binding — their VarIds already resolve through `value_of`.
         self.value_of.insert(elem_param, elem);
+        // A HEAP source element is a BORROW (the source list owns it) — record it so the body's
+        // `acc + [w]` rc-incs/copies it rather than moving it out (no double-free with the source's
+        // own drop). A scalar element is a value copy, no ownership.
+        if src_heap {
+            self.param_values.insert(elem);
+        }
         self.value_of.insert(acc_var, list_slot);
         self.value_of.insert(n_var, int_slot);
         // `acc` reads the List slot as a tracked nested-ownership list so a `acc + [x]` concat
@@ -721,7 +741,7 @@ impl LowerCtx {
         self.materialized_lists.insert(list_slot);
 
         // Lower BOTH tuple components reading the OLD slot values BEFORE updating either slot (the body
-        // semantics: `(acc + [off], off + w)` reads `acc`/`off` as the iteration's incoming state).
+        // semantics: `(acc + [elem], off + w)` reads `acc`/`off` as the iteration's incoming state).
         let body_mark = self.live_heap_handles.len();
         self.in_frame += 1;
         self.in_defunc_body += 1;
@@ -738,13 +758,14 @@ impl LowerCtx {
             (Some(l), Some(n)) => (l, n),
             _ => return None,
         };
-        // SCALAR component lowering emits no heap temp; the concat's own helper temps are already
-        // balanced. Free any stray per-iteration heap temp (none expected for a `[off]` literal).
+        // Free any stray per-iteration heap temp (the concat's arg temps) within the iteration frame.
         self.drop_arm_locals(body_mark);
 
-        // Update the LIST slot: DROP-OLD the previous value (a flat `Drop` — scalar element, gated
-        // above), then SetLocal the slot to the new list (folds the new `i` into the slot — the
-        // loop-carried `i(id)m`).
+        // Update the LIST slot: DROP-OLD the previous value, then SetLocal. The new list inherits the
+        // slot's recursive-drop set (String → heap_elem_lists) so the slot's drop stays the right kind.
+        if list_elem_str {
+            self.heap_elem_lists.insert(new_list);
+        }
         let drop_old = self.drop_op_for(list_slot);
         self.ops.push(drop_old);
         self.ops.push(Op::SetLocal { local: list_slot, src: new_list });
