@@ -251,6 +251,32 @@ impl LowerCtx {
                 self.live_heap_handles.push(obj);
                 Some(obj)
             }
+            // A heap-result `if`/`match` ELEMENT (`(if retries == 0 then "pass-1shot" else "pass-retry",
+            // "")` — the dojo `classify` tuple-result-if shape). EXECUTE it via the proven heap-result-`if`
+            // machinery: each arm `Alloc`s + `Consume`s its value (the per-arm `"im"` move-out balance),
+            // and the merged `IfThen` `dst` is the ONE owned rc=1 result (whichever arm ran). Push it to
+            // `live_heap_handles` so the enclosing tuple's per-slot `Consume` (`m`) + `retain` MOVES it
+            // into the slot — exactly the Named-call / concat element's `i`/`m` balance, UNCONDITIONAL
+            // (a value is always produced, both arms), so flat-cert-provable. A `match` desugars to the
+            // nested-`if` chain first; an out-of-subset arm rolls back (`None`) → the tuple defers.
+            IrExprKind::If { cond, then, else_ } => {
+                let obj = self.try_lower_heap_result_if(cond, then, else_, &expr.ty)?;
+                if !self.live_heap_handles.contains(&obj) {
+                    self.live_heap_handles.push(obj);
+                }
+                Some(obj)
+            }
+            IrExprKind::Match { subject, arms } => {
+                let if_expr = self.desugar_match_to_if(subject, arms, &expr.ty)?;
+                let IrExprKind::If { cond, then, else_ } = &if_expr.kind else {
+                    return None;
+                };
+                let obj = self.try_lower_heap_result_if(cond, then, else_, &expr.ty)?;
+                if !self.live_heap_handles.contains(&obj) {
+                    self.live_heap_handles.push(obj);
+                }
+                Some(obj)
+            }
             _ => None,
         }
     }
