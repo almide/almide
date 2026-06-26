@@ -406,9 +406,278 @@ fn recursive_aggregate_name(ty: &Ty, rec_names: &std::collections::HashSet<Strin
     let n = match ty {
         Ty::Named(n, _) => n.as_str().to_string(),
         Ty::Applied(TypeConstructorId::UserDefined(n), _) => n.clone(),
+        // An ANONYMOUS record field that itself needs the recursive drop (a heap-nested anon
+        // record, e.g. `{ st: Cfb8State }` inside another anon record) routes to its synthesized
+        // `__drop_<anon_hash>` (registered by `anon_record_drop_name`). It is NOT in `type_decls`,
+        // so `rec_names` won't carry it — admit it directly here.
+        Ty::Record { fields } if anon_record_needs_recursive_drop(fields) => {
+            return Some(anon_record_drop_name(fields));
+        }
         _ => return None,
     };
     rec_names.contains(&n).then_some(n)
+}
+
+/// A DETERMINISTIC, host-independent synthetic type name for an ANONYMOUS record shape, used as the
+/// suffix of its synthesized recursive drop `$__drop_<name>` (and the `variant_drop_handles` route).
+/// FNV-1a over the ordered `(field-name, field-type-tag)` shape — the SAME shape two structurally
+/// equal anon records share, so they dedup to one `__drop`. The `anonrec_` prefix keeps it disjoint
+/// from any user type name. Stable across native/wasm hosts (pure arithmetic, no pointer/order deps).
+pub(crate) fn anon_record_drop_name(fields: &[(almide_lang::intern::Sym, Ty)]) -> String {
+    let mut h: u64 = 0xcbf29ce484222325;
+    let mut mix = |bytes: &[u8]| {
+        for &b in bytes {
+            h ^= b as u64;
+            h = h.wrapping_mul(0x100000001b3);
+        }
+    };
+    for (name, ty) in fields {
+        mix(name.as_str().as_bytes());
+        mix(b"\x00");
+        mix(ty_shape_tag(ty).as_bytes());
+        mix(b"\x00");
+    }
+    format!("anonrec_{h:016x}")
+}
+
+/// A structural string tag for a field type, fine enough that two anon records with DIFFERENT field
+/// types (hence different drop bodies) get different names, recursing into nested aggregates so a
+/// `{ st: A }` and `{ st: B }` never collide. Only the drop-relevant structure matters.
+fn ty_shape_tag(ty: &Ty) -> String {
+    use almide_lang::types::constructor::TypeConstructorId;
+    match ty {
+        Ty::Named(n, _) => format!("N{}", n.as_str()),
+        Ty::Applied(TypeConstructorId::UserDefined(n), _) => format!("N{n}"),
+        Ty::Applied(c, a) => {
+            let inner: Vec<String> = a.iter().map(ty_shape_tag).collect();
+            format!("A{c:?}[{}]", inner.join(","))
+        }
+        Ty::Record { fields } | Ty::OpenRecord { fields } => {
+            let inner: Vec<String> =
+                fields.iter().map(|(k, t)| format!("{}:{}", k.as_str(), ty_shape_tag(t))).collect();
+            format!("R{{{}}}", inner.join(","))
+        }
+        Ty::Tuple(elems) => {
+            let inner: Vec<String> = elems.iter().map(ty_shape_tag).collect();
+            format!("T({})", inner.join(","))
+        }
+        other => format!("{other:?}"),
+    }
+}
+
+/// Does an ANONYMOUS record (`Ty::Record`) need a SYNTHESIZED recursive `$__drop_<hash>`? It does iff
+/// ANY field needs a recursive drop ([`record_field_needs_recursive_drop`]) — EXACTLY the predicate
+/// `recursive_record_drop_names` uses for NAMED records, since the slot layout is identical. A flat
+/// one-level mask `rc_dec`s only each field's HANDLE: that fully frees a flat-heap field (Bytes /
+/// String — a single buffer) but only frees the BLOCK of a field that itself holds heap handles (a
+/// nested record / Value / Map / `List[heap]`), leaking what's inside. So an anon record that owns
+/// any heap field at all needs the synthesized recursive drop (the body flat-frees the
+/// single-buffer fields and recurses into the handle-holding ones via `record_drop_field_frees`).
+/// `record_field_needs_recursive_drop` is structural and host-independent.
+pub(crate) fn anon_record_needs_recursive_drop(fields: &[(almide_lang::intern::Sym, Ty)]) -> bool {
+    fields.iter().any(|(_, t)| record_field_needs_recursive_drop(t))
+}
+
+/// The per-field FREE statements of a record's recursive `$__drop` body (shared by the named-record
+/// and the synthesized anon-record generators — the SINGLE source of truth for record field drops,
+/// so the two can never drift). Each field at `slot_offset(i)` is freed by its CONCRETE type:
+/// `String → rc_dec`, `Map[String,String] → __drop_map_ss`, `List[String] → __drop_list_str`,
+/// `List[<recursive record>] → __drop_list_<R>`, a recursive record (named or anon) → `__drop_<R>`,
+/// a `Value → __drop_value`, a scalar-only nested aggregate / `List[scalar]` → flat `rc_dec`, a
+/// scalar → skip. Records the needed shared-helper flags into the caller's accumulators so they are
+/// emitted once at the end.
+fn record_drop_field_frees(
+    field_tys: &[Ty],
+    rec_names: &std::collections::HashSet<String>,
+    list_drops: &mut std::collections::BTreeSet<String>,
+    need_map_ss: &mut bool,
+    need_list_str: &mut bool,
+) -> String {
+    use almide_lang::types::constructor::TypeConstructorId;
+    let mut frees = String::new();
+    for (i, ty) in field_tys.iter().enumerate() {
+        let off = layout::slot_offset(i);
+        match ty {
+            Ty::String => {
+                frees.push_str(&format!("    prim.rc_dec(prim.load64(h + {off}))\n"));
+            }
+            Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 => {
+                if let Some(rn) = recursive_aggregate_name(&a[0], rec_names) {
+                    list_drops.insert(rn.clone());
+                    frees.push_str(&format!(
+                        "    let f{i}: List[{rn}] = prim.load_handle(h + {off})\n    __drop_list_{rn}(f{i})\n"
+                    ));
+                } else if matches!(a[0], Ty::String) {
+                    *need_list_str = true;
+                    frees.push_str(&format!(
+                        "    let f{i}: List[String] = prim.load_handle(h + {off})\n    __drop_list_str(f{i})\n"
+                    ));
+                } else {
+                    // List[scalar] or List[non-recursive heap]: flat free the block.
+                    frees.push_str(&format!("    prim.rc_dec(prim.load64(h + {off}))\n"));
+                }
+            }
+            Ty::Applied(TypeConstructorId::Map, a)
+                if a.len() == 2 && matches!(a[0], Ty::String) && matches!(a[1], Ty::String) =>
+            {
+                *need_map_ss = true;
+                frees.push_str(&format!(
+                    "    let f{i}: Map[String, String] = prim.load_handle(h + {off})\n    __drop_map_ss(f{i})\n"
+                ));
+            }
+            t if is_value_ty(t) => {
+                frees.push_str(&format!(
+                    "    let f{i}: Value = prim.load_handle(h + {off})\n    __drop_value(f{i})\n"
+                ));
+            }
+            t => {
+                if let Some(rn) = recursive_aggregate_name(t, rec_names) {
+                    let src = aggregate_source_ty(t);
+                    frees.push_str(&format!(
+                        "    let f{i}: {src} = prim.load_handle(h + {off})\n    __drop_{rn}(f{i})\n"
+                    ));
+                } else if is_heap_ty(t) {
+                    // a non-recursive heap field (scalar-only nested record, Bytes, scalar map) — flat.
+                    frees.push_str(&format!("    prim.rc_dec(prim.load64(h + {off}))\n"));
+                }
+                // a scalar field — skip (no free).
+            }
+        }
+    }
+    frees
+}
+
+/// The ALMIDE SOURCE TYPE for a recursive-aggregate field (the `let fN: <ty> =` binding type in a
+/// drop body). A NAMED aggregate renders to its name; an ANONYMOUS record renders to its structural
+/// `{ k: T, … }` form (so a heap-nested anon-record field binds + recurses through `__drop_<hash>`).
+fn aggregate_source_ty(ty: &Ty) -> String {
+    use almide_lang::types::constructor::TypeConstructorId;
+    match ty {
+        Ty::Named(n, _) => n.as_str().to_string(),
+        Ty::Applied(TypeConstructorId::UserDefined(n), _) => n.clone(),
+        Ty::Record { fields } | Ty::OpenRecord { fields } => anon_record_source_ty(fields),
+        _ => field_source_ty(ty),
+    }
+}
+
+/// The ALMIDE SOURCE rendering of an anonymous record TYPE — `{ k0: T0, k1: T1 }` — used as the
+/// synthesized `__drop_<hash>` parameter type and a nested anon-record field binding type. Field
+/// types render via [`field_source_ty`] (the drop-relevant subset: Bytes/String/Int/.../named
+/// records / `List[..]` / `Map[..]` / `Value` / nested anon records).
+fn anon_record_source_ty(fields: &[(almide_lang::intern::Sym, Ty)]) -> String {
+    let inner: Vec<String> = fields
+        .iter()
+        .map(|(k, t)| format!("{}: {}", k.as_str(), field_source_ty(t)))
+        .collect();
+    format!("{{ {} }}", inner.join(", "))
+}
+
+/// Render a record FIELD type back to Almide source for a drop binding/param. Total over the field
+/// types a recursive-drop record can carry; an unhandled exotic type falls back to `Bytes` (a flat
+/// heap block) ONLY as a defensive default — discovery (`anon_record_needs_recursive_drop`) never
+/// synthesizes a drop for a shape whose fields it cannot classify, so this fallback is unreachable
+/// for the registered shapes.
+fn field_source_ty(ty: &Ty) -> String {
+    use almide_lang::types::constructor::TypeConstructorId;
+    match ty {
+        Ty::Int | Ty::Int64 => "Int".to_string(),
+        Ty::Int8 => "Int8".to_string(),
+        Ty::Int16 => "Int16".to_string(),
+        Ty::Int32 => "Int32".to_string(),
+        Ty::UInt8 => "UInt8".to_string(),
+        Ty::UInt16 => "UInt16".to_string(),
+        Ty::UInt32 => "UInt32".to_string(),
+        Ty::UInt64 => "UInt64".to_string(),
+        Ty::Float | Ty::Float64 => "Float".to_string(),
+        Ty::Float32 => "Float32".to_string(),
+        Ty::Bool => "Bool".to_string(),
+        Ty::String => "String".to_string(),
+        Ty::Bytes => "Bytes".to_string(),
+        Ty::Named(n, _) => n.as_str().to_string(),
+        Ty::Applied(TypeConstructorId::UserDefined(n), _) => n.clone(),
+        Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 => {
+            format!("List[{}]", field_source_ty(&a[0]))
+        }
+        Ty::Applied(TypeConstructorId::Map, a) if a.len() == 2 => {
+            format!("Map[{}, {}]", field_source_ty(&a[0]), field_source_ty(&a[1]))
+        }
+        t if is_value_ty(t) => "Value".to_string(),
+        Ty::Record { fields } | Ty::OpenRecord { fields } => anon_record_source_ty(fields),
+        Ty::Tuple(elems) => {
+            let inner: Vec<String> = elems.iter().map(field_source_ty).collect();
+            format!("({})", inner.join(", "))
+        }
+        // Defensive: a shape the synthesizer never registers (see doc). Bytes = a flat heap block.
+        _ => "Bytes".to_string(),
+    }
+}
+
+/// Walk the IR (every function's signature + body-expr types, every type decl's record fields) and
+/// COLLECT the distinct ANONYMOUS record shapes that need a synthesized recursive drop — the input
+/// to [`generate_record_drop_sources`]'s anon-drop loop. A shape qualifies iff at least one field
+/// frees NON-flat (the flat one-level mask would leak — `anon_record_needs_recursive_drop`), where a
+/// NAMED field record's recursiveness is resolved through the program's `rec_names`. Deduped by the
+/// content-hash drop name. This is the discovery half; the generation half is the anon loop in
+/// `generate_record_drop_sources`.
+pub fn collect_recursive_anon_records(
+    program: &almide_ir::IrProgram,
+) -> Vec<Vec<(almide_lang::intern::Sym, Ty)>> {
+    let mut all_decls: Vec<almide_ir::IrTypeDecl> = program.type_decls.clone();
+    // A visitor that inspects every expression's type (every IrExpr carries its `ty`), collecting
+    // the distinct anon record shapes that need a synthesized recursive drop (deduped by drop name).
+    // RECURSES into a qualifying anon record's own anon-record FIELDS so a nested anon shape
+    // (`{ st: { iv: Bytes } }`) gets its inner `__drop_anonrec_<hash>` generated too (the outer drop
+    // body `let f: { iv: Bytes } = …; __drop_anonrec_<inner>(f)` would otherwise call a missing fn).
+    struct TyCollector {
+        seen: std::collections::HashSet<String>,
+        out: Vec<Vec<(almide_lang::intern::Sym, Ty)>>,
+    }
+    impl TyCollector {
+        fn consider(&mut self, ty: &Ty) {
+            use almide_lang::types::constructor::TypeConstructorId;
+            match ty {
+                Ty::Record { fields } if anon_record_needs_recursive_drop(fields) => {
+                    let name = anon_record_drop_name(fields);
+                    if self.seen.insert(name) {
+                        self.out.push(fields.clone());
+                    }
+                    // Recurse into field types so a nested anon record / a `List[anon]` element
+                    // also registers its drop.
+                    for (_, fty) in fields {
+                        self.consider(fty);
+                    }
+                }
+                Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 => self.consider(&a[0]),
+                Ty::Tuple(elems) => {
+                    for e in elems {
+                        self.consider(e);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    impl almide_ir::visit::IrVisitor for TyCollector {
+        fn visit_expr(&mut self, expr: &almide_ir::IrExpr) {
+            self.consider(&expr.ty);
+            almide_ir::visit::walk_expr(self, expr);
+        }
+    }
+
+    let mut collector = TyCollector { seen: std::collections::HashSet::new(), out: Vec::new() };
+    let funcs = program
+        .functions
+        .iter()
+        .chain(program.modules.iter().flat_map(|m| m.functions.iter()));
+    for f in funcs {
+        collector.consider(&f.ret_ty);
+        let param_tys: Vec<Ty> = f.params.iter().map(|p| p.ty.clone()).collect();
+        for ty in &param_tys {
+            collector.consider(ty);
+        }
+        almide_ir::visit::IrVisitor::visit_expr(&mut collector, &f.body);
+    }
+    collector.out
 }
 
 /// Generate the ALMIDE SOURCE for each RECORD type's recursive drop `$__drop_<R>` (the records
@@ -417,11 +686,15 @@ fn recursive_aggregate_name(ty: &Ty, rec_names: &std::collections::HashSet<Strin
 /// __drop_map_ss`, `List[String] → __drop_list_str`, `List[<recursive record>] → __drop_list_<R>`,
 /// a recursive record → `__drop_<R>`, a `Value → __drop_value`, a scalar-only nested aggregate or
 /// `List[scalar]` → flat `rc_dec` of the block, a scalar → skip. Emits the needed `__drop_list_<R>`
-/// loops + the generic `__drop_map_ss` / `__drop_list_str` helpers. All `__drop_`-prefixed ⇒ on the
+/// loops + the generic `__drop_map_ss` / `__drop_list_str` helpers. Also emits a synthesized
+/// `__drop_anonrec_<hash>` for each ANONYMOUS record shape in `anon_records` that needs the
+/// recursive drop (a heap-nested anon record return — aes cfb8). All `__drop_`-prefixed ⇒ on the
 /// `prim.rc_dec` whitelist + an empty ownership cert (a trusted free, leak-loop verified).
-pub fn generate_record_drop_sources(type_decls: &[almide_ir::IrTypeDecl]) -> String {
+pub fn generate_record_drop_sources(
+    type_decls: &[almide_ir::IrTypeDecl],
+    anon_records: &[Vec<(almide_lang::intern::Sym, Ty)>],
+) -> String {
     use almide_ir::IrTypeDeclKind;
-    use almide_lang::types::constructor::TypeConstructorId;
     let rec_names = recursive_record_drop_names(type_decls);
     let mut out = String::new();
     let mut list_drops: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
@@ -433,59 +706,50 @@ pub fn generate_record_drop_sources(type_decls: &[almide_ir::IrTypeDecl]) -> Str
             continue;
         }
         let tname = decl.name.as_str();
+        let field_tys: Vec<Ty> = fields.iter().map(|f| f.ty.clone()).collect();
         out.push_str(&format!("fn __drop_{tname}(e: {tname}) -> Unit = {{\n"));
         out.push_str("  let h = prim.handle(e)\n");
         out.push_str("  if prim.load32(h + 0) == 1 then {\n");
-        let mut frees = String::new();
-        for (i, f) in fields.iter().enumerate() {
-            let off = layout::slot_offset(i);
-            match &f.ty {
-                Ty::String => {
-                    frees.push_str(&format!("    prim.rc_dec(prim.load64(h + {off}))\n"));
-                }
-                Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 => {
-                    if let Some(rn) = recursive_aggregate_name(&a[0], &rec_names) {
-                        list_drops.insert(rn.clone());
-                        frees.push_str(&format!(
-                            "    let f{i}: List[{rn}] = prim.load_handle(h + {off})\n    __drop_list_{rn}(f{i})\n"
-                        ));
-                    } else if matches!(a[0], Ty::String) {
-                        need_list_str = true;
-                        frees.push_str(&format!(
-                            "    let f{i}: List[String] = prim.load_handle(h + {off})\n    __drop_list_str(f{i})\n"
-                        ));
-                    } else {
-                        // List[scalar] or List[non-recursive heap]: flat free the block.
-                        frees.push_str(&format!("    prim.rc_dec(prim.load64(h + {off}))\n"));
-                    }
-                }
-                Ty::Applied(TypeConstructorId::Map, a)
-                    if a.len() == 2 && matches!(a[0], Ty::String) && matches!(a[1], Ty::String) =>
-                {
-                    need_map_ss = true;
-                    frees.push_str(&format!(
-                        "    let f{i}: Map[String, String] = prim.load_handle(h + {off})\n    __drop_map_ss(f{i})\n"
-                    ));
-                }
-                t if is_value_ty(t) => {
-                    frees.push_str(&format!(
-                        "    let f{i}: Value = prim.load_handle(h + {off})\n    __drop_value(f{i})\n"
-                    ));
-                }
-                t => {
-                    if let Some(rn) = recursive_aggregate_name(t, &rec_names) {
-                        frees.push_str(&format!(
-                            "    let f{i}: {rn} = prim.load_handle(h + {off})\n    __drop_{rn}(f{i})\n"
-                        ));
-                    } else if is_heap_ty(t) {
-                        // a non-recursive heap field (scalar-only nested record, scalar map) — flat free.
-                        frees.push_str(&format!("    prim.rc_dec(prim.load64(h + {off}))\n"));
-                    }
-                    // a scalar field — skip (no free).
-                }
-            }
+        out.push_str(&record_drop_field_frees(
+            &field_tys,
+            &rec_names,
+            &mut list_drops,
+            &mut need_map_ss,
+            &mut need_list_str,
+        ));
+        out.push_str("  } else ()\n");
+        out.push_str("  prim.rc_dec(h)\n");
+        out.push_str("}\n");
+    }
+    // SYNTHESIZED recursive drops for the ANONYMOUS record return/binding shapes the corpus uses
+    // (`{ data: Bytes, state: Cfb8State }` — aes cfb8). An anon record is NOT a `type` decl, so the
+    // loop above never names it; it would otherwise drop via the flat one-level mask `DropListStr`,
+    // which `rc_dec`s the `state` BLOCK but LEAKS the Bytes INSIDE Cfb8State. Each shape gets a
+    // content-hashed `__drop_anonrec_<hash>` (dedup'd) with the SAME per-field-type recursion the
+    // named generator emits — so the `state` field is freed through `__drop_Cfb8State`. The param is
+    // the structural anon record type in source (`e: { data: Bytes, state: Cfb8State }`). Sorted by
+    // name for host-determinism. (The discovery of WHICH anon shapes appear is the caller's; see
+    // `generate_anon_record_drop_sources`.)
+    let mut anon_sorted: Vec<&Vec<(almide_lang::intern::Sym, Ty)>> = anon_records.iter().collect();
+    anon_sorted.sort_by_key(|fields| anon_record_drop_name(fields));
+    anon_sorted.dedup_by_key(|fields| anon_record_drop_name(fields));
+    for fields in anon_sorted {
+        if !anon_record_needs_recursive_drop(fields) {
+            continue;
         }
-        out.push_str(&frees);
+        let name = anon_record_drop_name(fields);
+        let field_tys: Vec<Ty> = fields.iter().map(|(_, t)| t.clone()).collect();
+        let param_ty = anon_record_source_ty(fields);
+        out.push_str(&format!("fn __drop_{name}(e: {param_ty}) -> Unit = {{\n"));
+        out.push_str("  let h = prim.handle(e)\n");
+        out.push_str("  if prim.load32(h + 0) == 1 then {\n");
+        out.push_str(&record_drop_field_frees(
+            &field_tys,
+            &rec_names,
+            &mut list_drops,
+            &mut need_map_ss,
+            &mut need_list_str,
+        ));
         out.push_str("  } else ()\n");
         out.push_str("  prim.rc_dec(h)\n");
         out.push_str("}\n");

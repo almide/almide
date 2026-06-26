@@ -45,6 +45,36 @@ impl LowerCtx {
             if let Some(borrowed) = self.try_lower_heap_field_borrow(expr) {
                 return Ok(borrowed);
             }
+        } else if self.binding_var.is_some_and(|v| self.loop_reassigned_vars.contains(&v)) {
+            // A MUTABLE var bound to a heap FIELD that is REASSIGNED INSIDE A LOOP (`var iv =
+            // state.iv` then `iv = concat(iv, …)` in a `for`/`while` — the aes cfb8 shape): the
+            // owned field-`Dup` below is VALUE-correct but its initial owned copy + the option-C
+            // per-iteration drop are an UNPROVEN ownership coordination the kernel cert REJECTS as a
+            // leak. WALL it (the loop-carried mutable-owned-field-var release is a separate brick) —
+            // never a silent miscompile (container-grain) nor a leak (Dup + option-C). A
+            // STRAIGHT-LINE-reassigned or never-reassigned mutable field var is NOT here and takes
+            // the sound owned-`Dup` below.
+            return Err(LowerError::Unsupported(
+                "mutable `var` bound to a heap record/tuple FIELD and REASSIGNED inside a loop \
+                 (`var iv = state.iv` + `iv = …` in a for/while) cannot be faithfully owned in this \
+                 brick: the loop-carried owned-field-var release is a separate brick (the owned \
+                 copy + option-C per-iteration drop is an unproven ownership coordination) — walled \
+                 to avoid a leak"
+                    .into(),
+            ));
+        } else if let Some(borrowed) = self.try_lower_heap_field_borrow(expr) {
+            // A MUTABLE var bound to a heap FIELD ACCESS (`var iv = state.iv`, `var b = box.items`)
+            // that is NOT loop-reassigned: the container-grain `Dup` below would bind the WHOLE
+            // CONTAINER (so a later `bytes.len(iv)` reads the record header = a silent miscompile).
+            // Instead, resolve the PRECISE field borrow and `Dup` it into a fresh OWNED,
+            // independently-mutable copy (cert `a` + scope-end `d`) — the value-correct owning copy a
+            // mutable var needs. `borrowed` is a `param_values` borrow (the container still owns the
+            // slot); the Dup'd `owned` is a distinct reference NOT in `param_values`, so the caller
+            // adds it to the scope-end drop set (balanced). Falls through to the container-grain Dup
+            // only when the field borrow doesn't resolve (a non-aggregate container).
+            let owned = self.fresh_value();
+            self.ops.push(Op::Dup { dst: owned, src: borrowed });
+            return Ok(owned);
         }
         let container = extraction_container(expr).ok_or_else(|| {
             LowerError::Unsupported(format!(

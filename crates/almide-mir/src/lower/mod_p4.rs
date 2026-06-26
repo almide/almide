@@ -33,6 +33,42 @@ pub(crate) fn body_breaks_or_continues(stmts: &[IrStmt]) -> bool {
 /// The executable `try_lower_scalar_while`/`_for_*` paths already decline a heap reassign
 /// and roll back, so a body reaching the fallback with one cannot be faithfully run — the
 /// caller WALLs it instead of silently eliding the accumulation.
+/// VarIds that are the TARGET of an `Assign` (`x = …`) lexically INSIDE a `while`/`for` loop in
+/// `body` — the loop-carried (option-C) reassignment slots. Used to wall a mutable `var x = r.field`
+/// owned-field-`Dup` bind whose `x` is loop-reassigned (the initial owned copy + the per-iteration
+/// option-C drop are an unproven ownership coordination the kernel cert REJECTS). A straight-line
+/// (top-level) reassignment is NOT included — that owned-Dup + scope-end drop is balanced and sound.
+pub(crate) fn loop_reassigned_vars(body: &IrExpr) -> std::collections::HashSet<VarId> {
+    use almide_ir::visit::{walk_expr, IrVisitor};
+    struct Scan {
+        in_loop: u32,
+        found: std::collections::HashSet<VarId>,
+    }
+    impl IrVisitor for Scan {
+        fn visit_stmt(&mut self, stmt: &IrStmt) {
+            if self.in_loop > 0 {
+                if let IrStmtKind::Assign { var, .. } = &stmt.kind {
+                    self.found.insert(*var);
+                }
+            }
+            almide_ir::visit::walk_stmt(self, stmt);
+        }
+        fn visit_expr(&mut self, e: &IrExpr) {
+            match &e.kind {
+                IrExprKind::ForIn { .. } | IrExprKind::While { .. } => {
+                    self.in_loop += 1;
+                    walk_expr(self, e);
+                    self.in_loop -= 1;
+                }
+                _ => walk_expr(self, e),
+            }
+        }
+    }
+    let mut s = Scan { in_loop: 0, found: std::collections::HashSet::new() };
+    s.visit_expr(body);
+    s.found
+}
+
 pub(crate) fn body_reassigns_heap(stmts: &[IrStmt]) -> bool {
     use almide_ir::visit::{walk_expr, walk_stmt, IrVisitor};
     struct Scan {

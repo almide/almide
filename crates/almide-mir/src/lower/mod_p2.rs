@@ -477,6 +477,18 @@ pub(crate) struct LowerCtx {
     /// so it must take an OWNED container-grain `Dup` (mutable in place), NOT a precise borrow
     /// (a shared field handle the value-model refuses to mutate). Read by `lower_heap_extraction`.
     binding_is_mutable: bool,
+    /// The VarId of the CURRENT `Bind` being lowered (set by `lower_stmt`), so the value-lowering
+    /// can ask whether THIS var is loop-reassigned (`loop_reassigned_vars`). `None` outside a
+    /// statement bind (a sub-expression / argument materialization).
+    binding_var: Option<VarId>,
+    /// VarIds that are the TARGET of an `Assign` lexically INSIDE a loop (`while`/`for`) in the
+    /// current function body — the loop-carried-reassignment (option-C) slots. A MUTABLE `var x =
+    /// r.field` whose `x` is in this set must NOT take the owned field-`Dup` (the initial owned copy
+    /// + the option-C per-iteration drop are an UNPROVEN ownership coordination that the kernel cert
+    /// REJECTS as a leak); such a bind WALLS (`lower_heap_extraction`). A var reassigned only at
+    /// straight-line top level is NOT here (that owned-Dup + scope-end drop is balanced). Computed
+    /// once per function in `lower_body_into`.
+    loop_reassigned_vars: std::collections::HashSet<VarId>,
     /// Named-record layout registry (the VALUE-MODEL field structure): type NAME →
     /// (declared generic param names, declared fields in declaration order). A record
     /// literal / field access typed `Ty::Named(name, args)` resolves its fields here

@@ -545,8 +545,11 @@ impl LowerCtx {
                     self.materialized_aggregates.insert(dst);
                     self.record_masks.insert(dst, heap_slots);
                     // A record with a Map/List[heap]/record/Value field drops RECURSIVELY ($__drop_<R>),
-                    // not the flat masked DropListStr (which would leak the nested heap) — route it.
-                    if let Some(name) = self.record_drop_type_name(ty) {
+                    // not the flat masked DropListStr (which would leak the nested heap) — route it. An
+                    // ANONYMOUS record return whose flat one-level mask would leak a nested heap field
+                    // (`{ data: Bytes, state: Cfb8State }` — aes cfb8) routes to its synthesized
+                    // `__drop_anonrec_<hash>` (so `state` is freed through `__drop_Cfb8State`).
+                    if let Some(name) = self.record_or_anon_drop_type_name(ty) {
                         self.variant_drop_handles.insert(dst, name);
                     }
                 }

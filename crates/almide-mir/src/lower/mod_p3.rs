@@ -142,6 +142,13 @@ impl LowerCtx {
         if let Some(rewritten) = desugar_heap_branches(body) {
             return self.lower_body_into(&rewritten);
         }
+        // The set of vars reassigned INSIDE a loop (option-C slots) — gates the mutable
+        // `var x = r.field` owned-field-`Dup` (a loop-reassigned such var would leak; see
+        // `lower_heap_extraction`). Computed once over this (possibly tail-duplicated) body; a later
+        // recompute over a rewritten body only adds (never removes) entries, so the gate stays sound.
+        for v in crate::lower::loop_reassigned_vars(body) {
+            self.loop_reassigned_vars.insert(v);
+        }
         let (stmts, tail): (&[IrStmt], Option<&IrExpr>) = match &body.kind {
             IrExprKind::Block { stmts, expr } => (stmts, expr.as_deref()),
             _ => (&[], Some(body)),
@@ -172,9 +179,12 @@ impl LowerCtx {
                 // `Dup`), NOT a precise borrow (which cannot be mutated in place). Flag it so
                 // `lower_heap_extraction` skips the borrow optimization for this bind.
                 let prev = self.binding_is_mutable;
+                let prev_var = self.binding_var;
                 self.binding_is_mutable = matches!(mutability, almide_ir::Mutability::Var);
+                self.binding_var = Some(*var);
                 let r = self.lower_bind(*var, ty, value);
                 self.binding_is_mutable = prev;
+                self.binding_var = prev_var;
                 r
             }
             // `x = value` — reassignment.
@@ -649,6 +659,27 @@ impl LowerCtx {
         tys.iter()
             .any(record_field_needs_recursive_drop)
             .then_some(name)
+    }
+
+    /// The recursive-drop handle name for a record VALUE of type `ty` — a NAMED recursive record's
+    /// `<name>` (→ `$__drop_<name>`, generated from its `type` decl) OR a synthesized
+    /// `anonrec_<hash>` for an ANONYMOUS record that owns any heap field whose nested heap a flat
+    /// one-level mask would LEAK (`{ data: Bytes, state: Cfb8State }` — aes cfb8;
+    /// `__drop_anonrec_<hash>` is emitted by `generate_record_drop_sources` from
+    /// `collect_recursive_anon_records`). `None` for a non-record / scalar-only record (the flat
+    /// masked `DropListStr` is sound). The synthesis predicate is structural
+    /// (`record_field_needs_recursive_drop`), so this lowering-side decision matches the
+    /// generation-side one exactly.
+    pub(crate) fn record_or_anon_drop_type_name(&self, ty: &Ty) -> Option<String> {
+        if let Some(name) = self.record_drop_type_name(ty) {
+            return Some(name);
+        }
+        if let Ty::Record { fields } = ty {
+            if crate::lower::anon_record_needs_recursive_drop(fields) {
+                return Some(crate::lower::anon_record_drop_name(fields));
+            }
+        }
+        None
     }
 
     pub(crate) fn drop_op_for(&self, v: ValueId) -> Op {

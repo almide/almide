@@ -55,6 +55,24 @@ impl LowerCtx {
                 self.live_heap_handles.push(dup);
                 Some(dup)
             }
+            // A HEAP FIELD ACCESS field (`{ key: state.key, … }` — the aes cfb8 nested record copies
+            // its key/expanded_key from the `state` PARAM): BORROW the source slot's handle
+            // (`LoadHandle` of `container_handle + slot_offset`, the still-owning param keeps its
+            // reference) then `Dup` it so the new aggregate owns a DISTINCT reference (cert `a`).
+            // Same borrow-then-Dup the spread-record copy (`try_lower_spread_record_construct`) and
+            // the tuple-element borrow use — no double-free (the source param's masked drop frees its
+            // own ref; the new aggregate's drop frees the Dup'd one). Defers (`None`) for an
+            // unresolvable container (`f().key`) or a non-heap slot (the scalar path owns those).
+            IrExprKind::Member { object, field } => {
+                let offset = self.aggregate_field_offset_any(&object.ty, field.as_str())?;
+                let h = self.resolve_aggregate_container_handle(object)?;
+                Some(self.dup_borrowed_slot(h, offset))
+            }
+            IrExprKind::TupleIndex { object, index } => {
+                let offset = self.aggregate_index_offset_any(&object.ty, *index)?;
+                let h = self.resolve_aggregate_container_handle(object)?;
+                Some(self.dup_borrowed_slot(h, offset))
+            }
             // A user-call element (`(parse_inline(after), pos + 1)` — the dominant yaml tuple shape):
             // the callee returns a FRESH owned heap value (CallFn result = cert `i`, rc 1), tracked
             // so the enclosing tuple's per-slot `Consume` (`m`) moves it into the slot — the tuple
@@ -168,16 +186,41 @@ impl LowerCtx {
                 self.live_heap_handles.push(obj);
                 Some(obj)
             }
-            // A NESTED RECORD LITERAL field (`Outer { p: Point { x: 1, y: 2 }, n: 5 }`) —
+            // A NESTED RECORD LITERAL field that is itself a recursive-drop record — a NAMED one
+            // (`{ data, state: Cfb8State { … } }` — Cfb8State owns Bytes fields) or an ANONYMOUS one
+            // that owns heap (`{ st: { iv: Bytes } }`) — build it RECURSIVELY via
+            // `try_lower_record_construct` (which moves each heap field in + sets its own
+            // `record_masks`), and route its drop to the generated `__drop_<R>` /
+            // `__drop_anonrec_<hash>` so a heap-IN-nested field is freed by the inner record's OWN
+            // recursive drop, NOT a flat one-level mask `rc_dec` (which would leak it). The outer
+            // record then routes ITS drop of this field through the same `__drop_…` (the field's
+            // slot is tagged in the outer's synthesized recursive drop — see
+            // `collect_recursive_anon_records` / `record_drop_field_frees`). The borrow-by-default
+            // cert is unchanged: the inner is `i…m` (alloc + move-in), and its `d` is the recursive
+            // `__drop_…` (a trusted prim-only routine, leak-loop verified).
+            IrExprKind::Record { .. }
+                if self.record_or_anon_drop_type_name(&expr.ty).is_some() =>
+            {
+                let obj = self.try_lower_record_construct(expr)?;
+                if let Some(name) = self.record_or_anon_drop_type_name(&expr.ty) {
+                    self.variant_drop_handles.insert(obj, name);
+                }
+                if !self.live_heap_handles.contains(&obj) {
+                    self.live_heap_handles.push(obj);
+                }
+                Some(obj)
+            }
+            // A NESTED RECORD/TUPLE LITERAL field (`Outer { p: Point { x: 1, y: 2 }, n: 5 }`) —
             // materialize the inner block as a fresh OWNED aggregate the outer owns. Its own
             // construction (scalar / mixed-heap) registers it in `materialized_aggregates`, so
             // the recursive `${outer}` Display reads the inner's real slots. The outer's masked
             // drop `rc_dec`s the inner block; if the INNER has heap fields of its OWN, those are
             // freed by the inner block's own mask — but the outer mask only `rc_dec`s the inner
             // BLOCK (one level), so a heap-IN-nested field would leak. To stay sound, admit a
-            // nested aggregate ONLY when it is SCALAR-only (no nested heap to leak); a nested
-            // aggregate with its own heap field defers (`None`) → the outer walls (never wrong
-            // bytes, never a leak).
+            // nested aggregate ONLY when it is SCALAR-only (no nested heap to leak) — the
+            // recursive-drop NAMED-record case above handles a heap-nested NAMED record; an
+            // ANONYMOUS heap-nested aggregate (no `__drop_<R>` to route through) defers (`None`)
+            // → the outer walls (never wrong bytes, never a leak).
             IrExprKind::Record { .. } | IrExprKind::Tuple { .. } => {
                 let scalar_only = self
                     .aggregate_field_tys(&expr.ty)
@@ -195,6 +238,25 @@ impl LowerCtx {
             }
             _ => None,
         }
+    }
+
+    /// BORROW the heap handle at `container_handle + offset` (`LoadHandle` — the container keeps its
+    /// own reference) then `Dup` it to a fresh OWNED reference (cert `a`) the caller's aggregate
+    /// owns. Tracked in `live_heap_handles` so the caller's `Consume` (move-in) balances it. The
+    /// borrow+Dup pair is the SAME machinery `try_lower_spread_record_construct` uses for a copied
+    /// heap field — no double-free (two distinct refs, two distinct drops).
+    fn dup_borrowed_slot(&mut self, container_handle: ValueId, offset: u32) -> ValueId {
+        use crate::{IntOp, PrimKind};
+        let off = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: off, value: offset as i64 });
+        let addr = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst: addr, op: IntOp::Add, a: container_handle, b: off });
+        let borrowed = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::LoadHandle, dst: Some(borrowed), args: vec![addr] });
+        let owned = self.fresh_value();
+        self.ops.push(Op::Dup { dst: owned, src: borrowed });
+        self.live_heap_handles.push(owned);
+        owned
     }
 
     /// Shared block-builder for a scalar tuple/list: lower each element to a scalar value, alloc a
