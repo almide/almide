@@ -838,6 +838,27 @@ impl LowerCtx {
             self.heap_elem_lists.insert(dst);
             return Ok(Some(dst));
         }
+        // `prim.read_dir(path)` — the WASI directory-listing floor (fs.list_dir). ONE BORROWED
+        // `String` arg (the path). Its dst is a FRESH OWNED `Result[List[String], String]` built
+        // by the render ($read_dir) in the cap-as-tag layout (1-slot wrapper, payload @12 = a
+        // List[String], tag @16). Tracked like a heap-Ok Result: `materialized_results_str` so a
+        // downstream `match`/`!` reads tag @16, AND `heap_elem_lists` so the heap-payload bind
+        // gates open, AND `list_str_result_results` so the scope-end drop is the RECURSIVE
+        // `DropResultListStr` (frees the payload List's element Strings + block; a flat
+        // `DropListStr` would leak them) — checked BEFORE heap_elem_lists in `drop_op_for`.
+        // Carries Capability::FsRead (counted in cap_witness). The render emits the WASI
+        // path_open(O_DIRECTORY)/fd_readdir sequence (skip `.`/`..`, sort, build the list).
+        if func == "read_dir" {
+            let path = self.lower_scalar_value(&args[0]).ok_or_else(|| {
+                LowerError::Unsupported("prim.read_dir path is not a lowerable scalar/handle".into())
+            })?;
+            let dst = self.fresh_value();
+            self.ops.push(Op::Prim { kind: PrimKind::ReadDir, dst: Some(dst), args: vec![path] });
+            self.materialized_results_str.insert(dst);
+            self.heap_elem_lists.insert(dst);
+            self.list_str_result_results.insert(dst);
+            return Ok(Some(dst));
+        }
         // Bitwise binary ops lower to a scalar `Op::IntBinOp` (i64 and/or/xor/shl/shr_s),
         // not an `Op::Prim` — the int.band/bor/bxor/bshl/bshr floor. No ownership.
         let bitop = match func {

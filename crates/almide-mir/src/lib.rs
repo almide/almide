@@ -288,6 +288,17 @@ pub enum Op {
     /// is the trusted raw-handle routine (leak-loop verified). The List-tuple counterpart of
     /// `DropResultStrInt`.
     DropResultListStrInt { v: ValueId },
+    /// `drop_result_list_str v` — release a `Result[List[String], String]` (the `fs.list_dir`
+    /// `ok([name, …])` shape). Same cap-as-tag wrapper `[rc][len@4=1][cap@8=1][@12 payload]
+    /// [@16 tag]` as `DropResultStrInt`, but the Ok payload @12 is a `List[String]` handle (no
+    /// tuple layer — the DIRECT list, unlike `DropResultListStrInt`'s `(List[String], Int)`):
+    /// the RENDER frees it RECURSIVELY (Ok: at the List's last ref `rc_dec` each element String,
+    /// then the List block; Err: `rc_dec` the String @12), THEN the wrapper block. A flat
+    /// `DropListStr` would `rc_dec` the @12 List HANDLE only — leaking the List's element
+    /// Strings AND the List block. Inline (no helper). Single cert `d`; the recursion is the
+    /// trusted raw-handle routine (leak-loop verified). The non-tuple counterpart of
+    /// `DropResultListStrInt`.
+    DropResultListStr { v: ValueId },
     /// `drop_list_list_str v` — release a `List[List[String]]` whose element slots hold owned
     /// `List[String]` blocks (the csv `rows` shape: a list of rows, each a list of cells). The render
     /// emits a NESTED loop: at the outer list's last ref (rc==1), for each element it frees the inner
@@ -493,6 +504,26 @@ pub enum PrimKind {
     /// it, balanced by the caller's scope-end drop (the flat `DropListStr` over the one owned
     /// payload String).
     ReadTextFile,
+    /// The WASI `path_open(O_DIRECTORY)` + `fd_readdir` directory-listing sequence, packaged
+    /// as ONE high-level HEAP-RESULT prim — `args = [path]` (a BORROWED `String` handle), dst
+    /// = a fresh OWNED `Result[List[String], String]`. Opens the directory at `path` (same
+    /// preopen-relative resolution as [`ReadTextFile`]) and reads its entries via an
+    /// `fd_readdir` re-read-on-truncation loop, parsing each variable-length dirent record
+    /// (`d_next u64 / d_ino u64 / d_namlen u32 / d_type u8 / name[d_namlen]`), SKIPPING `.`
+    /// and `..` (WASI yields them, native `std::fs::read_dir` does not), then SORTING the names
+    /// lexicographically (to byte-match the Rust runtime's `names.sort()`), and builds
+    /// `Ok([name, …])` where the payload is a fresh owned `List[String]`. On a path_open error
+    /// it builds `Err(<message>)`. The result block is the cap-as-tag layout `[rc][len@4=1]
+    /// [cap@8=1][@12 List[String] handle][@16 tag]` (tag 0 = Ok, 1 = Err) — the SAME shape as
+    /// [`ReadTextFile`], only the @12 payload is a nested `List[String]` (so the scope-end drop
+    /// is the RECURSIVE [`StmtKind::DropResultListStr`], not the flat `DropListStr` that would
+    /// leak the inner element Strings). The FIFTH sandbox exit, reached only by the self-hosted
+    /// `fs.list_dir`. Carries [`Capability::FsRead`] (the cap_witness counts it exactly like
+    /// [`ReadTextFile`] → FsRead), so a function using it is caps-verified ONLY if it declares
+    /// FsRead — never accept-but-unsafe. Its dst is a heap Ptr (like [`ReadTextFile`]), so the
+    /// ownership certificate emits an `i` (alloc) for it, balanced by the caller's scope-end
+    /// recursive drop (or a heap-return move-out).
+    ReadDir,
     /// Release one reference of a RAW heap handle (`(call $rc_dec …)`), the inverse of [`RcInc`].
     /// The MECHANISM the self-hosted recursive `value.__drop_value` frees a dynamic Value tree with
     /// (the §4.1-compliant alternative to a hand-written WAT drop): it operates on raw Int handles,
@@ -876,6 +907,7 @@ pub fn verify_ownership(func: &MirFunction) -> Result<(), Vec<Violation>> {
             | Op::DropResultValueInt { v }
             | Op::DropResultListValueInt { v }
             | Op::DropResultListStrInt { v }
+            | Op::DropResultListStr { v }
             | Op::DropListListStr { v }
             | Op::DropVariant { v, .. } => {
                 match release(&object_of, &mut rc, &mut dead, &borrowed, *v) {

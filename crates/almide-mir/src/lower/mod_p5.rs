@@ -37,6 +37,11 @@ pub fn is_self_host_result_str_module_fn(module: &str, func: &str) -> bool {
             // expected — a 1-byte garbage print (low byte of the payload pointer) / an i64↔i32 width
             // mismatch downstream in csv-to-json.
             | ("fs", "read_text")
+            // `fs.list_dir` returns the cap-as-tag `Result[List[String], String]` ($read_dir builds
+            // it in the same `materialize_result_str` layout — payload @12 a List[String], tag @16).
+            // So a `match`/`!` over it must read tag @16 + bind the @12 payload list handle, exactly
+            // like fs.read_text (only the Ok payload type differs: a List[String], not a String).
+            | ("fs", "list_dir")
     )
 }
 

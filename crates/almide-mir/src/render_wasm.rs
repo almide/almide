@@ -56,7 +56,9 @@ const ITOA_TMP_ADDR: u32 = 32; // reversed-digit scratch (≤ 20 bytes)
 // never overlaps it.
 const RTF_NOTFOUND_ADDR: u32 = 64; // "file not found" message bytes
 const RTF_NOTFOUND_LEN: u32 = 14; // len of "file not found"
-const LABELS_ADDR: u32 = 80; // print labels (the data section)
+const RDIR_ERR_ADDR: u32 = 80; // "directory not found" message bytes (fs.list_dir Err)
+const RDIR_ERR_LEN: u32 = 19; // len of "directory not found"
+const LABELS_ADDR: u32 = 112; // print labels (the data section) — after the fixed messages
 const SCRATCH_ADDR: u32 = 512; // the line build buffer
 const HEAP_BASE: u32 = 8192; // bump allocator start
 // The Ok/Err tag of a cap-as-tag `Result[String, String]` lives in the HIGH 32 bits of
@@ -442,12 +444,18 @@ pub fn render_wasm_fn(
     }
     // A recursive List[String] drop needs two i32 scratch locals (loop index + length); they
     // are function-wide (DropListStr ops never nest) and only declared when one is present.
-    if func.ops.iter().any(|op| matches!(op, Op::DropListStr { .. } | Op::DropResultListStrInt { .. })) {
+    // `DropResultListStr` (Result[List[String], String]) also loops the Ok payload list with
+    // $dlsi/$dlsn, so it joins this gate.
+    if func.ops.iter().any(|op| matches!(op,
+        Op::DropListStr { .. } | Op::DropResultListStrInt { .. } | Op::DropResultListStr { .. })) {
         locals.push("(local $dlsi i32) (local $dlsn i32)".to_string());
     }
     // DropResultListStrInt reuses the List[List[String]] scratch ($dlli = tuple handle, $dllinner =
-    // the inner List handle) for its nested Ok-tuple List free; declare them when no DropListListStr did.
-    if func.ops.iter().any(|op| matches!(op, Op::DropResultListStrInt { .. }))
+    // the inner List handle) for its nested Ok-tuple List free; `DropResultListStr` reuses just $dlli
+    // (the Ok payload List handle — no inner $dllinner, its payload is the direct list). Declare them
+    // when no DropListListStr did.
+    if func.ops.iter().any(|op| matches!(op,
+        Op::DropResultListStrInt { .. } | Op::DropResultListStr { .. }))
         && !func.ops.iter().any(|op| matches!(op, Op::DropListListStr { .. }))
     {
         locals.push("(local $dlli i32) (local $dlln i32) (local $dllinner i32)".to_string());
@@ -457,7 +465,8 @@ pub fn render_wasm_fn(
     // the inner-loop locals, so declare those too when no plain DropListStr already did.
     if func.ops.iter().any(|op| matches!(op, Op::DropListListStr { .. })) {
         locals.push("(local $dlli i32) (local $dlln i32) (local $dllinner i32)".to_string());
-        if !func.ops.iter().any(|op| matches!(op, Op::DropListStr { .. })) {
+        if !func.ops.iter().any(|op| matches!(op,
+            Op::DropListStr { .. } | Op::DropResultListStr { .. })) {
             locals.push("(local $dlsi i32) (local $dlsn i32)".to_string());
         }
     }
@@ -589,12 +598,13 @@ fn value_reprs_wasm(func: &MirFunction) -> BTreeMap<ValueId, Repr> {
             }
             // A `LoadHandle` result is a heap PTR (i32 handle); an `ArgsGetList` result is a
             // freshly-allocated heap `List[String]` PTR; a `ReadTextFile` result is a
-            // freshly-allocated heap `Result[String, String]` PTR — all keep Ptr repr (no
+            // freshly-allocated heap `Result[String, String]` PTR; a `ReadDir` result is a
+            // freshly-allocated heap `Result[List[String], String]` PTR — all keep Ptr repr (no
             // i64 zero-extend). Every other prim result (a load, fd_write errno, or
             // handle→address) is a scalar i64.
             Op::Prim {
                 dst: Some(dst),
-                kind: PrimKind::LoadHandle | PrimKind::ArgsGetList | PrimKind::ReadTextFile,
+                kind: PrimKind::LoadHandle | PrimKind::ArgsGetList | PrimKind::ReadTextFile | PrimKind::ReadDir,
                 ..
             } => {
                 m.insert(*dst, Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT });

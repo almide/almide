@@ -1,6 +1,6 @@
 /// The fixed WAT runtime: WASI import, memory, bump allocator, list ops, integer
 /// formatting, and line printing. Addresses are the named constants above.
-fn preamble() -> String {
+pub(crate) fn preamble() -> String {
     format!(
         r#"(module
   (import "wasi_snapshot_preview1" "fd_write"
@@ -19,9 +19,13 @@ fn preamble() -> String {
     (func $fd_close (param i32) (result i32)))
   (import "wasi_snapshot_preview1" "fd_filestat_get"
     (func $fd_filestat_get (param i32 i32) (result i32)))
+  (import "wasi_snapshot_preview1" "fd_readdir"
+    (func $fd_readdir (param i32 i32 i32 i64 i32) (result i32)))
   (memory (export "memory") 1)
   ;; the fs.read_text path_open error message — a CONST byte run the Err arm copies.
   (data (i32.const {RTF_NOTFOUND_ADDR}) "file not found")
+  ;; the fs.list_dir path_open(O_DIRECTORY) error message — a CONST byte run the Err arm copies.
+  (data (i32.const {RDIR_ERR_ADDR}) "directory not found")
   (global $bump (mut i32) (i32.const {HEAP_BASE}))
   ;; the free-list head (0 = empty) — physical reclamation (A1.2-render), the
   ;; realization of proofs/FreeList.v. A freed block is pushed here; $alloc reuses
@@ -377,6 +381,138 @@ fn preamble() -> String {
     ;; @16 := the Ok/Err tag (the slot's high 32 bits).
     (i32.store (i32.add (local.get $obj) (i32.const {RTF_TAG_OFFSET})) (local.get $tag))
     (local.get $obj))
+
+  ;; helper: lexicographic LESS-THAN over two canonical String handles $a, $b (byte order =
+  ;; UTF-8 code-point order for valid UTF-8 = Rust's `str` Ord). Returns 1 if $a < $b, else 0.
+  ;; Compares min(len_a, len_b) bytes; on the first differing byte the smaller byte wins; if one
+  ;; is a prefix of the other the shorter is less. Used by $read_dir's insertion sort to match
+  ;; native fs.list_dir's `names.sort()`.
+  (func $str_lt (param $a i32) (param $b i32) (result i32)
+    (local $la i32) (local $lb i32) (local $n i32) (local $i i32) (local $ca i32) (local $cb i32)
+    (local.set $la (i32.load (i32.add (local.get $a) (i32.const {LIST_LEN_OFFSET}))))
+    (local.set $lb (i32.load (i32.add (local.get $b) (i32.const {LIST_LEN_OFFSET}))))
+    (local.set $n (select (local.get $la) (local.get $lb) (i32.le_u (local.get $la) (local.get $lb))))
+    (local.set $i (i32.const 0))
+    (block $done (loop $cmp
+      (br_if $done (i32.ge_u (local.get $i) (local.get $n)))
+      (local.set $ca (i32.load8_u (i32.add (i32.add (local.get $a) (i32.const {LIST_HEADER})) (local.get $i))))
+      (local.set $cb (i32.load8_u (i32.add (i32.add (local.get $b) (i32.const {LIST_HEADER})) (local.get $i))))
+      (if (i32.lt_u (local.get $ca) (local.get $cb)) (then (return (i32.const 1))))
+      (if (i32.gt_u (local.get $ca) (local.get $cb)) (then (return (i32.const 0))))
+      (local.set $i (i32.add (local.get $i) (i32.const 1)))
+      (br $cmp)))
+    ;; common prefix equal — the shorter string is less.
+    (i32.lt_u (local.get $la) (local.get $lb)))
+
+  ;; fs.list_dir(path) — the WASI directory-listing floor. $path is a borrowed canonical String.
+  ;; Opens the directory (path_open with oflags=O_DIRECTORY(2), rights=fd_readdir(0x4000),
+  ;; preopen fd 3, leading '/' stripped — same resolution as $read_text_file), reads its entries
+  ;; via fd_readdir into a 4 KiB buffer, parses each dirent (`d_next 8 / d_ino 8 / d_namlen 4 /
+  ;; d_type 4` = 24-byte header, then name[d_namlen]) SKIPPING "." and "..", builds an owned
+  ;; List[String] of the names, SORTS it lexicographically (insertion sort via $str_lt) to match
+  ;; native `names.sort()`, and wraps it Ok via $rtf_result. On a path_open error wraps the
+  ;; "directory not found" message Err. The FIFTH sandbox exit (Capability::FsRead) — the result
+  ;; is an owned Result[List[String], String] the caller's scope-end DropResultListStr balances.
+  (func $read_dir (param $path i32) (result i32)
+    (local $pdata i32) (local $plen i32) (local $fd_out i32) (local $errno i32)
+    (local $fd i32) (local $buf i32) (local $bufbase i32) (local $bufused_p i32) (local $bufused i32)
+    (local $off i32) (local $namlen i32) (local $skip i32) (local $count i32)
+    (local $list i32) (local $ci i32) (local $name i32) (local $msg i32)
+    (local $namebase i32) (local $si i32) (local $sj i32) (local $hi i64) (local $hj i64)
+    ;; path bytes + length; strip a leading '/' so the path is relative to preopen fd 3.
+    (local.set $pdata (i32.add (local.get $path) (i32.const {LIST_HEADER})))
+    (local.set $plen (i32.load (i32.add (local.get $path) (i32.const {LIST_LEN_OFFSET}))))
+    (if (i32.and (i32.gt_u (local.get $plen) (i32.const 0))
+                 (i32.eq (i32.load8_u (local.get $pdata)) (i32.const {ASCII_SLASH})))
+      (then
+        (local.set $pdata (i32.add (local.get $pdata) (i32.const 1)))
+        (local.set $plen (i32.sub (local.get $plen) (i32.const 1)))))
+    ;; path_open(dirfd=3, dirflags=1, path, plen, oflags=2 [O_DIRECTORY],
+    ;;   rights_base = fd_readdir(0x4000), rights_inheriting=0, fdflags=0, fd_out)
+    (local.set $fd_out (call $alloc8 (i32.const 4)))
+    (local.set $errno
+      (call $path_open (i32.const 3) (i32.const 1) (local.get $pdata) (local.get $plen)
+                       (i32.const 2) (i64.const 16384) (i64.const 16384) (i32.const 0) (local.get $fd_out)))
+    (if (result i32) (i32.ne (local.get $errno) (i32.const 0))
+      (then
+        (local.set $msg (call $rtf_str (i32.const {RDIR_ERR_ADDR}) (i32.const {RDIR_ERR_LEN})))
+        (call $rtf_result (local.get $msg) (i32.const 1)))
+      (else
+        (local.set $fd (i32.load (local.get $fd_out)))
+        ;; fd_readdir(fd, buf, buf_len, cookie=0, bufused_p) — one pass (4 KiB holds a typical
+        ;; directory; a fuller re-read loop is a future refinement). The 4 KiB buffer is a
+        ;; RECLAIMABLE $list_new block (512 i64 slots = 4096 data bytes after the header) so a
+        ;; list_dir LOOP frees it each call (rc_dec below) instead of leaking immortal $alloc8
+        ;; scratch (which OOMs a tight loop). The WASI write target is `$bufbase = buf + HEADER`,
+        ;; keeping the rc cell @0 intact for the final $rc_dec. fd_out/bufused_p stay $alloc8
+        ;; (4-byte immortal scratch, like read_text_file's out-params — negligible).
+        (local.set $buf (call $list_new (i32.const 0) (i32.const 512)))
+        (local.set $bufbase (i32.add (local.get $buf) (i32.const {LIST_HEADER})))
+        (local.set $bufused_p (call $alloc8 (i32.const 4)))
+        (drop (call $fd_readdir (local.get $fd) (local.get $bufbase) (i32.const 4096)
+                                (i64.const 0) (local.get $bufused_p)))
+        (local.set $bufused (i32.load (local.get $bufused_p)))
+        (drop (call $fd_close (local.get $fd)))
+        ;; PASS 1 — count entries (skip "." and ".."). 24-byte dirent header; d_namlen @16, name @24.
+        (local.set $off (i32.const 0))
+        (local.set $count (i32.const 0))
+        (block $c1done (loop $c1
+          ;; stop when the next header would exceed bufused (a truncated trailing record).
+          (br_if $c1done (i32.gt_u (i32.add (local.get $off) (i32.const 24)) (local.get $bufused)))
+          (local.set $namlen (i32.load (i32.add (i32.add (local.get $bufbase) (local.get $off)) (i32.const 16))))
+          (local.set $namebase (i32.add (i32.add (local.get $bufbase) (local.get $off)) (i32.const 24)))
+          (local.set $skip (call $is_dot_entry (local.get $namebase) (local.get $namlen)))
+          (if (i32.eqz (local.get $skip))
+            (then (local.set $count (i32.add (local.get $count) (i32.const 1)))))
+          (local.set $off (i32.add (i32.add (local.get $off) (i32.const 24)) (local.get $namlen)))
+          (br $c1)))
+        ;; allocate the List[String] (len = cap = count).
+        (local.set $list (call $list_new (local.get $count) (local.get $count)))
+        ;; PASS 2 — build each entry String, store into the list (same skip logic).
+        (local.set $off (i32.const 0))
+        (local.set $ci (i32.const 0))
+        (block $c2done (loop $c2
+          (br_if $c2done (i32.gt_u (i32.add (local.get $off) (i32.const 24)) (local.get $bufused)))
+          (local.set $namlen (i32.load (i32.add (i32.add (local.get $bufbase) (local.get $off)) (i32.const 16))))
+          (local.set $namebase (i32.add (i32.add (local.get $bufbase) (local.get $off)) (i32.const 24)))
+          (if (i32.eqz (call $is_dot_entry (local.get $namebase) (local.get $namlen)))
+            (then
+              (local.set $name (call $rtf_str (local.get $namebase) (local.get $namlen)))
+              (call $list_set (local.get $list) (local.get $ci) (i64.extend_i32_u (local.get $name)))
+              (local.set $ci (i32.add (local.get $ci) (i32.const 1)))))
+          (local.set $off (i32.add (i32.add (local.get $off) (i32.const 24)) (local.get $namlen)))
+          (br $c2)))
+        ;; free the readdir buffer (all names are now copied into the list) — reclaimable, so a
+        ;; list_dir loop reuses it instead of leaking.
+        (call $rc_dec (local.get $buf))
+        ;; SORT the names lexicographically (insertion sort) — match native names.sort().
+        (local.set $si (i32.const 1))
+        (block $sdone (loop $sloop
+          (br_if $sdone (i32.ge_s (local.get $si) (local.get $count)))
+          (local.set $hi (call $list_get (local.get $list) (local.get $si)))
+          (local.set $sj (i32.sub (local.get $si) (i32.const 1)))
+          (block $shift (loop $sin
+            (br_if $shift (i32.lt_s (local.get $sj) (i32.const 0)))
+            (local.set $hj (call $list_get (local.get $list) (local.get $sj)))
+            ;; while list[sj] > key (i.e. key < list[sj]): shift list[sj] up.
+            (br_if $shift (i32.eqz (call $str_lt (i32.wrap_i64 (local.get $hi)) (i32.wrap_i64 (local.get $hj)))))
+            (call $list_set (local.get $list) (i32.add (local.get $sj) (i32.const 1)) (local.get $hj))
+            (local.set $sj (i32.sub (local.get $sj) (i32.const 1)))
+            (br $sin)))
+          (call $list_set (local.get $list) (i32.add (local.get $sj) (i32.const 1)) (local.get $hi))
+          (local.set $si (i32.add (local.get $si) (i32.const 1)))
+          (br $sloop)))
+        (call $rtf_result (local.get $list) (i32.const 0)))))
+
+  ;; helper: 1 if the dirent name at $base (length $len) is "." or "..", else 0 (WASI yields
+  ;; these; native std::fs::read_dir excludes them — so $read_dir skips them for byte-match).
+  (func $is_dot_entry (param $base i32) (param $len i32) (result i32)
+    (if (i32.eq (local.get $len) (i32.const 1))
+      (then (return (i32.eq (i32.load8_u (local.get $base)) (i32.const 46)))))
+    (if (i32.eq (local.get $len) (i32.const 2))
+      (then (return (i32.and (i32.eq (i32.load8_u (local.get $base)) (i32.const 46))
+                             (i32.eq (i32.load8_u (i32.add (local.get $base) (i32.const 1))) (i32.const 46))))))
+    (i32.const 0))
 
 "#
     )

@@ -488,6 +488,35 @@ fn render_op(
                  \x20   (call $rc_dec (local.get {p}))\n"
             )
         }
+        // `Result[List[String], String]` (fs.list_dir's `ok([name,…])`): the cap-as-tag
+        // wrapper `[rc][len@4=1][cap@8=1][@12 payload][@16 tag]`. At the wrapper's last ref
+        // (rc==1), Ok (tag@16==0): the @12 payload is a `List[String]` — at ITS last ref
+        // `rc_dec` each element String (the [@12 + i*8] slots, len@4), then the List block;
+        // Err (tag 1): `rc_dec` the String @12. THEN the wrapper block. A flat `DropListStr`
+        // would `rc_dec` the @12 List HANDLE only, leaking the element Strings + the List block.
+        // Mirrors `DropResultListStrInt` minus the tuple layer (payload IS the list, not a
+        // (list, int) tuple) — reuses the $dlli / $dlsi / $dlsn scratch.
+        Op::DropResultListStr { v } => {
+            let p = local(*v);
+            let payload = format!("(i32.load (i32.add (local.get {p}) (i32.const 12)))");
+            format!(
+                "    (if (i32.eq (i32.load (local.get {p})) (i32.const 1)) (then\n\
+                 \x20     (if (i32.eq (i32.load (i32.add (local.get {p}) (i32.const 16))) (i32.const 0))\n\
+                 \x20       (then\n\
+                 \x20         (local.set $dlli {payload})\n\
+                 \x20         (if (i32.eq (i32.load (local.get $dlli)) (i32.const 1)) (then\n\
+                 \x20           (local.set $dlsi (i32.const 0))\n\
+                 \x20           (local.set $dlsn (i32.load (i32.add (local.get $dlli) (i32.const 4))))\n\
+                 \x20           (block $dlsbrk (loop $dlscont\n\
+                 \x20             (br_if $dlsbrk (i32.ge_s (local.get $dlsi) (local.get $dlsn)))\n\
+                 \x20             (call $rc_dec (i32.wrap_i64 (i64.load (i32.add (local.get $dlli) (i32.add (i32.const 12) (i32.mul (local.get $dlsi) (i32.const 8)))))))\n\
+                 \x20             (local.set $dlsi (i32.add (local.get $dlsi) (i32.const 1)))\n\
+                 \x20             (br $dlscont)))))\n\
+                 \x20         (call $rc_dec (local.get $dlli)))\n\
+                 \x20       (else (call $rc_dec {payload})))))\n\
+                 \x20   (call $rc_dec (local.get {p}))\n"
+            )
+        }
         // RECURSIVE drop of a CUSTOM variant (ADT brick 5b) — the GENERATED per-type
         // `$__drop_<ty>` (the `$__drop_value` shape, auto-linked from generated Almide): at the
         // last ref it reads the tag, recursively frees each variant ctor field + rc_dec's each
@@ -566,6 +595,13 @@ fn render_op(
                 // (value_reprs_wasm), so the call result sets the local directly (no i64 extend).
                 PrimKind::ReadTextFile => {
                     format!("(call $read_text_file (local.get {}))", local(args[0]))
+                }
+                // read_dir(path) — the WASI directory-listing floor; path_open(O_DIRECTORY) +
+                // fd_readdir, parses the dirent buffer (skipping `.`/`..`), sorts the names, and
+                // builds a fresh owned `Result[List[String], String]` in the preamble helper.
+                // Same heap-Ptr path arg + heap-Ptr dst conventions as ReadTextFile.
+                PrimKind::ReadDir => {
+                    format!("(call $read_dir (local.get {}))", local(args[0]))
                 }
                 // RAW refcount ops (the self-host drop/copy mechanism) — reuse the proven $rc_dec/
                 // $rc_inc on the i32-wrapped handle. dst is None (Unit), so the `match dst` below

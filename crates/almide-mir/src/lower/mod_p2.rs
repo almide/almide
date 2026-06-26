@@ -407,6 +407,11 @@ pub(crate) struct LowerCtx {
     /// (Ok → free the (List[String], Int) tuple recursively: each element String, the List block, the
     /// tuple block; Err → `rc_dec` the String) — a flat `DropListStr` would leak the List's Strings.
     list_str_int_result_results: HashSet<ValueId>,
+    /// MIR values that are a `Result[List[String], String]` wrapper (the `fs.list_dir` `ok([name,…])`
+    /// shape — NO tuple). A scope-end drop emits [`Op::DropResultListStr`] (Ok → free the List[String]
+    /// payload recursively: each element String, then the List block; Err → `rc_dec` the String) — a
+    /// flat `DropListStr` would `rc_dec` only the @12 List HANDLE, leaking the element Strings + block.
+    list_str_result_results: HashSet<ValueId>,
     /// MIR values KNOWN to be a REAL, POPULATED list block (a list LITERAL, a heap-list PARAM —
     /// the v1 convention passes a genuine block —, or a self-host list-returning CALL whose closure
     /// args ALL lifted, so the callee actually fills it). A direct `xs[i]` (`lower_scalar_index_access`)
@@ -744,6 +749,19 @@ pub fn is_list_str_int_result_ty(ty: &Ty) -> bool {
                 && matches!(&ts[0], Ty::Applied(TypeConstructorId::List, le)
                     if le.len() == 1 && matches!(le[0], Ty::String))
                 && matches!(ts[1], Ty::Int))
+            && matches!(a[1], Ty::String))
+}
+
+/// `Result[List[String], String]` — the `fs.list_dir` `ok([name,…])` shape (NO tuple, the DIRECT
+/// list). The Ok payload @12 is a `List[String]`; routed to `list_str_result_results` (recursive
+/// `Op::DropResultListStr`, which frees the inner List's element Strings + block). Distinct from
+/// `is_list_str_int_result_ty` (that one's Ok is a `(List[String], Int)` tuple).
+pub fn is_list_str_result_ty(ty: &Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    matches!(ty, Ty::Applied(TypeConstructorId::Result, a)
+        if a.len() == 2
+            && matches!(&a[0], Ty::Applied(TypeConstructorId::List, le)
+                if le.len() == 1 && matches!(le[0], Ty::String))
             && matches!(a[1], Ty::String))
 }
 

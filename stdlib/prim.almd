@@ -199,6 +199,18 @@ fn args_get_list() -> List[String] = _
 @intrinsic("almide_rt_prim_read_text_file")
 fn read_text_file(path: String) -> Result[String, String] = _
 
+// The `read_dir` WASI directory-listing floor — the FIFTH sandbox exit (reaches
+// Capability::FsRead, like read_text_file). Opens the directory at `path` (preopen-relative,
+// same resolution as read_text_file) via path_open(O_DIRECTORY), reads entries via an
+// fd_readdir re-read-on-truncation loop, parses each dirent (skipping `.`/`..`), SORTS the
+// names lexicographically (to byte-match native fs.list_dir's `names.sort()`), and returns a
+// fresh OWNED `Result[List[String], String]`: `Ok([name,…])` on success, `Err(message)` on a
+// path_open error. Reached only by the self-hosted `fs.list_dir` (fs_list_dir.almd) in the v1
+// trust-spine wasm backend; the render emits the WASI path_open/fd_readdir + Result-build
+// sequence. No native runtime impl — the native target uses fs.list_dir's own @intrinsic.
+@intrinsic("almide_rt_prim_read_dir")
+fn read_dir(path: String) -> Result[List[String], String] = _
+
 // The FLOAT floor: a `Float` is the i64-uniform value holding the f64 BITS; each op
 // reinterprets i64→f64, computes the wasm f64 instruction, and reinterprets back (a
 // compare / f2i yields a real Int). Pure scalar — the cert is untouched. This is what

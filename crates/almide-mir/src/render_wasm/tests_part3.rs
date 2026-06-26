@@ -527,12 +527,21 @@
     /// They CANNOT be written in Almide (each is the host-call boundary itself, like the
     /// `$fd_write`/`$random_get` IMPORTS — a multi-value-out-param WASI sequence that
     /// turns raw host bytes/handles into a heap value has no pure-Almide form).
-    /// Accounted SEPARATELY from the open stdlib surface for the same reason RC
-    /// primitives are: a host-floor exit is the trust spine's own core, not "another
-    /// stdlib routine." This set grows ONLY when the capability vocabulary gains a new
-    /// heap-result host floor; the open ratchet stays exactly as strict.
-    const WASI_FLOOR_FNS: &[&str] =
-        &["$args_get_list", "$read_text_file", "$rtf_str", "$rtf_result", "$alloc8"];
+    /// `$read_dir` (`PrimKind::ReadDir`, Capability::FsRead) is the `path_open(O_DIRECTORY)`
+    /// + `fd_readdir` + dirent-parse + canonical-`Result[List[String], String]` assembly the
+    /// self-hosted `fs.list_dir` reaches — the directory-listing twin of `$read_text_file`;
+    /// its two leaves `$str_lt` (lexicographic compare of two raw dirent names, the sort that
+    /// matches native `names.sort()`) and `$is_dot_entry` (the `.`/`..` skip over a raw dirent
+    /// buffer pointer) operate on the raw fd_readdir buffer, not canonical values, so — like
+    /// `$rtf_str`/`$rtf_result` for read_text — they are inseparable leaves of that one host
+    /// sequence with no pure-Almide form. Accounted SEPARATELY from the open stdlib surface for
+    /// the same reason RC primitives are: a host-floor exit is the trust spine's own core, not
+    /// "another stdlib routine." This set grows ONLY when the capability vocabulary gains a new
+    /// heap-result host floor (here: directory listing); the open ratchet stays exactly as strict.
+    const WASI_FLOOR_FNS: &[&str] = &[
+        "$args_get_list", "$read_text_file", "$rtf_str", "$rtf_result", "$alloc8",
+        "$read_dir", "$str_lt", "$is_dot_entry",
+    ];
 
     #[test]
     fn handwritten_wasm_runtime_does_not_grow() {

@@ -96,6 +96,8 @@ pub fn wasm_pattern(op: &crate::Op) -> Option<String> {
         Op::DropResultListValueInt { .. } => "call $__drop_list_value_tuple".into(),
         // Inline-rendered (nested loop, no helper) — cert-claimed token is the final wrapper rc_dec.
         Op::DropResultListStrInt { .. } => "call $rc_dec".into(),
+        // Inline-rendered (Ok-payload list loop, no helper) — cert-claimed token is the final wrapper rc_dec.
+        Op::DropResultListStr { .. } => "call $rc_dec".into(),
         Op::DropListListStr { .. } => "drop_list_list_str".into(),
         Op::DropVariant { ty, .. } => format!("call $__drop_{ty}"),
         // A copy-on-write: MakeUnique clones a SHARED block before in-place
@@ -154,8 +156,15 @@ fn drop_count(mir: &crate::MirFunction) -> usize {
 /// dropped an op, FAILS here. The `$rc_dec` sentinel traps a double-free at run.
 pub fn validate_translation_perceus(wat: &str, mir: &crate::MirFunction) -> bool {
     let positives = mir.ops.iter().all(|op| wasm_pattern(op).is_none_or(|p| wat.contains(&p)));
-    let rc_decs = wat.matches("call $rc_dec").count();
-    positives && rc_decs >= drop_count(mir)
+    // Count releases in the USER FUNCTION ONLY — the FIXED runtime preamble's WASI-floor funcs
+    // now contain their OWN `call $rc_dec` (e.g. `$read_dir` frees its readdir buffer), which are
+    // NOT part of THIS function's certified release trace. Subtract the preamble's intrinsic
+    // count (a fixed constant) so the leak-freedom comparison stays precise: an under-freeing
+    // user body must still fail even though the preamble frees internally.
+    let preamble_rc_decs = crate::render_wasm::preamble().matches("call $rc_dec").count();
+    let total_rc_decs = wat.matches("call $rc_dec").count();
+    let body_rc_decs = total_rc_decs.saturating_sub(preamble_rc_decs);
+    positives && body_rc_decs >= drop_count(mir)
 }
 
 #[cfg(test)]
@@ -263,7 +272,9 @@ mod tests {
             ..Default::default()
         };
         let wat = render_wasm(&mir);
-        // Two drops but only one release in the bytes → leak → fail.
+        // Two drops but only one release in the bytes → leak → fail. (The validator subtracts
+        // the fixed preamble's intrinsic `call $rc_dec` count, so stripping ANY one release —
+        // even a preamble-internal one — leaves the user body under-freeing vs its drop_count.)
         let under = wat.replacen("call $rc_dec", "nop", 1);
         assert!(
             !validate_translation_perceus(&under, &mir),

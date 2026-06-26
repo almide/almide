@@ -113,6 +113,12 @@ impl LowerCtx {
                         self.materialized_results_str.insert(v);
                         if crate::lower::is_result_listval_ty(&subject.ty) {
                             self.value_result_lists.insert(v);
+                        } else if crate::lower::is_list_str_result_ty(&subject.ty) {
+                            // `Result[List[String], String]` (fs.list_dir) — the Ok payload is a
+                            // List[String]; route the scope-end drop to the RECURSIVE DropResultListStr
+                            // (frees each element String + the list block), NOT the flat DropListStr
+                            // (heap_elem_lists) which would leak them.
+                            self.list_str_result_results.insert(v);
                         } else if crate::lower::is_heap_elem_list_ty(&subject.ty) {
                             self.heap_elem_lists.insert(v);
                         }

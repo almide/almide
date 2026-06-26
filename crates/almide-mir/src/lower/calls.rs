@@ -205,17 +205,18 @@ impl LowerCtx {
         func: &str,
         args: &[IrExpr],
     ) -> Result<Vec<CallArg>, LowerError> {
-        // `random.int` / `env.args` / `fs.read_text` are the admitted EFFECTFUL stdlib calls: each
-        // is self-hosted (random_int.almd / env_args.almd / fs_read_text.almd, linked here), so its
-        // prim floor (`prim.random_get` / `prim.args_get_list` / `prim.read_text_file`) is in the
-        // program map and the transitive cap_witness counts its capability (Entropy / CliArgs /
-        // FsRead) — UNLIKE a bodyless effectful intrinsic (which would contribute 0 caps =
-        // accept-but-unsafe, the reason is_pure walls the rest). The caller is an `effect fn`
-        // (declares the host caps) so the `used ⊆ declared` checker verifies it; a pure caller is a
-        // frontend error.
+        // `random.int` / `env.args` / `fs.read_text` / `fs.list_dir` are the admitted EFFECTFUL
+        // stdlib calls: each is self-hosted (random_int.almd / env_args.almd / fs_read_text.almd /
+        // fs_list_dir.almd, linked here), so its prim floor (`prim.random_get` / `prim.args_get_list`
+        // / `prim.read_text_file` / `prim.read_dir`) is in the program map and the transitive
+        // cap_witness counts its capability (Entropy / CliArgs / FsRead / FsRead) — UNLIKE a bodyless
+        // effectful intrinsic (which would contribute 0 caps = accept-but-unsafe, the reason is_pure
+        // walls the rest). The caller is an `effect fn` (declares the host caps) so the `used ⊆
+        // declared` checker verifies it; a pure caller is a frontend error.
         let is_admitted_effectful = (module == "random" && func == "int")
             || (module == "env" && func == "args")
-            || (module == "fs" && func == "read_text");
+            || (module == "fs" && func == "read_text")
+            || (module == "fs" && func == "list_dir");
         if !purity::is_pure(module, func) && !is_admitted_effectful {
             return Err(LowerError::Unsupported(format!(
                 "effectful/impure stdlib Module call {module}.{func} needs a declared capability not in this brick"

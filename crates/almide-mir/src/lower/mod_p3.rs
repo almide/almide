@@ -697,6 +697,8 @@ impl LowerCtx {
             Op::DropResultListValueInt { v }
         } else if self.list_str_int_result_results.contains(&v) {
             Op::DropResultListStrInt { v }
+        } else if self.list_str_result_results.contains(&v) {
+            Op::DropResultListStr { v }
         } else if self.value_elem_lists.contains(&v) {
             Op::DropListValue { v }
         } else if self.str_value_elem_lists.contains(&v) {

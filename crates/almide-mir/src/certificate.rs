@@ -69,6 +69,7 @@ pub fn name_witness(func: &MirFunction) -> NameWitness {
             | Op::DropResultValueInt { v }
             | Op::DropResultListValueInt { v }
             | Op::DropResultListStrInt { v }
+            | Op::DropResultListStr { v }
             | Op::DropListListStr { v }
             | Op::DropVariant { v, .. }
             | Op::Consume { v }
@@ -198,6 +199,14 @@ pub fn cap_witness(func: &MirFunction) -> CapWitness {
         // CliArgs). The transitive `reachable_caps` follows the CallFn edge into `fs.read_text`, so a
         // caller inherits this FsRead and is caps-verified against its declared bound.
         if let Op::Prim { kind: crate::PrimKind::ReadTextFile, .. } = op {
+            used.push(Capability::FsRead);
+        }
+        // The `read_dir` primitive is the FS-READ floor op for directory listing — reached by
+        // the self-hosted `fs.list_dir`, so a fn using it must declare FsRead (the SAME
+        // accounting as ReadTextFile → FsRead; both are filesystem reads). The transitive
+        // `reachable_caps` follows the CallFn edge into `fs.list_dir`, so a caller inherits this
+        // FsRead and is caps-verified against its declared bound.
+        if let Op::Prim { kind: crate::PrimKind::ReadDir, .. } = op {
             used.push(Capability::FsRead);
         }
         // SOUNDNESS CRUX: a CallIndirect invokes a closure that may reach ANY capability.
@@ -592,6 +601,7 @@ pub fn ownership_certificate(func: &MirFunction) -> String {
             | Op::DropResultValueInt { v }
             | Op::DropResultListValueInt { v }
             | Op::DropResultListStrInt { v }
+            | Op::DropResultListStr { v }
             | Op::DropListListStr { v }
             | Op::DropVariant { v, .. } => {
                 let o = s.object_of(*v);
@@ -686,6 +696,16 @@ pub fn ownership_certificate(func: &MirFunction) -> String {
             // move-out (`m`). Without this the heap result would be an unbacked object the cert
             // never opens — the verify_ownership/cert agreement breaks for the fs.read_text body.
             Op::Prim { kind: PrimKind::ReadTextFile, dst: Some(d), .. } => {
+                s.of.insert(*d, *d);
+                s.event(*d, 'i');
+            }
+            // `read_dir` ALLOCATES a fresh owned `Result[List[String], String]` (the cap-as-tag
+            // block owning one payload `List[String]`) — a +1, like `ReadTextFile`/`Alloc`. Its
+            // path arg is BORROWED (no cert event). Its own stream (`i`), balanced by the
+            // caller's scope-end recursive `DropResultListStr` (`d`) or a heap-return move-out
+            // (`m`). Without this the heap result would be an unbacked object the cert never
+            // opens — the verify_ownership/cert agreement breaks for the fs.list_dir body.
+            Op::Prim { kind: PrimKind::ReadDir, dst: Some(d), .. } => {
                 s.of.insert(*d, *d);
                 s.event(*d, 'i');
             }
