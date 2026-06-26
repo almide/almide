@@ -356,12 +356,33 @@ impl LowerCtx {
                 // materialized into an owned temp via `Alloc`, borrowed into the
                 // call, dropped at scope end — cert `i` (alloc) + `d` (drop), both
                 // backed, identical to the verified fresh-heap bind.
+                // A TUPLE argument (`f((slice, pos))`): the same masked nested-ownership block as a
+                // record arg — heap elements via `try_lower_tuple_construct` (each `lower_owned_heap_field`
+                // moved in), all-scalar via `try_lower_scalar_tuple_construct`, borrowed into the call +
+                // dropped at scope end. `materialized_call_arg` already seeds the Tuple's `record_masks`
+                // + recursive `$__drop_<R>` (calls_p4.rs), so the leaf fields then the block are freed —
+                // no leak, no double-free. An unlowerable element returns `None` and WALLs (never Opaque).
+                IrExprKind::Tuple { elements } => {
+                    let repr = repr_of(&a.ty)?;
+                    match self
+                        .try_lower_tuple_construct(elements)
+                        .or_else(|| self.try_lower_scalar_tuple_construct(elements))
+                    {
+                        Some(dst) => self.materialized_call_arg(dst, repr, &a.ty),
+                        None => {
+                            return Err(LowerError::Unsupported(
+                                "Tuple argument cannot be faithfully materialized in this brick \
+                                 (an element outside the executable subset)"
+                                    .into(),
+                            ))
+                        }
+                    }
+                }
                 IrExprKind::LitStr { .. }
                 | IrExprKind::List { .. }
                 | IrExprKind::MapLiteral { .. }
                 | IrExprKind::EmptyMap
                 | IrExprKind::SpreadRecord { .. }
-                | IrExprKind::Tuple { .. }
                 // A CLOSURE value argument (`register((x) => …)`): a fresh heap env,
                 // materialized + borrowed into the call. The callee borrows it per the
                 // borrow-by-default convention; its body's calls are elided ⇒ the gate

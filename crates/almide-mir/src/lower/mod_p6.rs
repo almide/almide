@@ -192,6 +192,44 @@ fn extract_first_callarg_branch(e: &IrExpr, tmp: VarId) -> Option<(IrExpr, IrExp
         }
         return None;
     }
+    // A heap CONCAT operand may wrap a call-arg branch (`"len=" + (if c then a else b)` — a returned
+    // String/List concat whose operand is a heap branch). Recurse into each operand so the inner
+    // branch is ANF-lifted (`let t = if …; lhs + t`), which `desugar_let_bound_heap_branch` then
+    // tail-duplicates into a heap-result `if` with concat arms — both already lower
+    // (`try_lower_heap_result_if` + `try_lower_concat_str`/`try_lower_concat_list`). `count_ir_calls`
+    // counts each Concat node as one call on the SAME desugared tree, so mir==ir is preserved.
+    if let IrExprKind::BinOp {
+        op: bop @ (almide_ir::BinOp::ConcatStr | almide_ir::BinOp::ConcatList),
+        left,
+        right,
+    } = &e.kind
+    {
+        let mk = |nl: Box<IrExpr>, nr: Box<IrExpr>| IrExpr {
+            kind: IrExprKind::BinOp { op: *bop, left: nl, right: nr },
+            ty: e.ty.clone(),
+            span: e.span.clone(),
+            def_id: e.def_id,
+        };
+        if let Some((branch, nl)) = extract_first_callarg_branch(left, tmp) {
+            return Some((branch, mk(Box::new(nl), right.clone())));
+        }
+        if let Some((branch, nr)) = extract_first_callarg_branch(right, tmp) {
+            return Some((branch, mk(left.clone(), Box::new(nr))));
+        }
+        let var_of = |b: &IrExpr| IrExpr {
+            kind: IrExprKind::Var { id: tmp },
+            ty: b.ty.clone(),
+            span: b.span.clone(),
+            def_id: None,
+        };
+        if is_heap_branch(left) {
+            return Some((left.as_ref().clone(), mk(Box::new(var_of(left)), right.clone())));
+        }
+        if is_heap_branch(right) {
+            return Some((right.as_ref().clone(), mk(left.clone(), Box::new(var_of(right)))));
+        }
+        return None;
+    }
     let IrExprKind::Call { target, args, type_args } = &e.kind else {
         return None;
     };

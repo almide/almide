@@ -87,6 +87,15 @@ pub fn is_option_liststr_ty(ty: &Ty) -> bool {
             if e.len() == 1 && matches!(e[0], Ty::String)))
 }
 
+/// Is `ty` an `Option[List[Value]]` (the `json.as_array(v)` shape)? Its `??` routes to
+/// `option.listvalue_unwrap_or`, the List[Value] analogue of `option.liststr_unwrap_or`.
+pub fn is_option_listvalue_ty(ty: &Ty) -> bool {
+    use almide_lang::types::constructor::TypeConstructorId;
+    matches!(ty, Ty::Applied(TypeConstructorId::Option, a)
+        if a.len() == 1 && matches!(&a[0], Ty::Applied(TypeConstructorId::List, e)
+            if e.len() == 1 && is_value_ty(&e[0])))
+}
+
 pub(crate) fn alloc_init(value: &IrExpr) -> Init {
     if let IrExprKind::LitStr { value } = &value.kind {
         return Init::Str(value.clone());

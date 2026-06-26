@@ -164,7 +164,7 @@ pub fn is_self_host_option_module_fn(module: &str, func: &str) -> bool {
         // so it returns a materialized Option[Value] — `json.get(v,k) ?? d` (→ option.value_unwrap_or)
         // and a `match` over it EXECUTE. The ubiquitous json-accessor idiom, the root of the
         // wasm-bindgen get_str/get_kind cascade.
-        "json" => matches!(func, "as_int" | "as_float" | "as_bool" | "as_string" | "get"),
+        "json" => matches!(func, "as_int" | "as_float" | "as_bool" | "as_string" | "get" | "as_array"),
         _ => false,
     }
 }

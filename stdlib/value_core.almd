@@ -567,6 +567,20 @@ fn option_liststr_unwrap_or(o: Option[List[String]], d: List[String]) -> List[St
   }
 }
 
+// `?? d` over an Option[List[Value]] (`json.as_array(v) ?? []`): the SAME len-as-tag prim shape as
+// option_liststr_unwrap_or, with a List[Value] payload — the Some arm loads the @12 inner-list handle
+// and the bare-Var tail auto-acquires (Dup, freed recursively by DropListValue), the None arm returns
+// the fallback. Mirrors result_list_value_unwrap_or's List[Value] Ok-acquire; the root of get_arr.
+fn option_listvalue_unwrap_or(o: Option[List[Value]], d: List[Value]) -> List[Value] = {
+  let h = prim.handle(o)
+  let tag = prim.load32(h + 4)
+  if tag == 0 then d
+  else {
+    let v: List[Value] = prim.load_handle(h + 12)
+    v
+  }
+}
+
 // list.get / first / last over a List[Value] → Option[Value]. The repr-poly `_str` variants DEEP-COPY
 // the element as a String (`string.repeat`), which corrupts a dynamic Value (an Object copied as a
 // string is empty). The Value accessor instead SHARES the element: `Some(@i)` Dup's the Value handle
