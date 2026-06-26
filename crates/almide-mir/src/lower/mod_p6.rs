@@ -887,6 +887,28 @@ fn desugar_nested_branch_arms(body: &IrExpr, next_var: &mut u32) -> Option<IrExp
                 def_id: body.def_id,
             })
         }
+        // A `(<flat_map call>) + [tail]` ConcatList/ConcatStr — the bindgen `gen_pack_variant` /
+        // `gen_variant_struct` outer shape `(cases |> list.flat_map(…)) + ["${indent}}"]`. The HOF
+        // call whose lambda hides a let-bound heap-branch sits in a BinOp OPERAND, unreachable by the
+        // `Call`/`Block`/arm cases above. Recurse into BOTH operands so the flat_map's lambda-let-if is
+        // tail-duplicated (otherwise the outer flat_map declines → the concat walls `heap-result BinOp`).
+        IrExprKind::BinOp { op, left, right } => {
+            let nl = desugar_nested_branch_arms(left, next_var);
+            let nr = desugar_nested_branch_arms(right, next_var);
+            if nl.is_none() && nr.is_none() {
+                return None;
+            }
+            Some(IrExpr {
+                kind: IrExprKind::BinOp {
+                    op: *op,
+                    left: Box::new(nl.unwrap_or_else(|| (**left).clone())),
+                    right: Box::new(nr.unwrap_or_else(|| (**right).clone())),
+                },
+                ty: body.ty.clone(),
+                span: body.span.clone(),
+                def_id: body.def_id,
+            })
+        }
         _ => None,
     }
 }
