@@ -10,6 +10,41 @@ own vectors/tests on native AND `--target wasm`). `🟡 lowers, byte-match TODO`
 reached wall=0 but have not yet been byte-verified — exactly where a silent miscompile can hide
 (e.g. the `var v=w` scalar-aliasing bug that faked an early sha1=0 until the RFC vectors caught it).
 
+## Update (2026-06-26 pm) — wall-clearing campaign + the feasibility floor
+
+A focused lever sweep (diagnose all walls → fix the contained ones, byte-matched + corpus-wall
+ACCEPT + 0 backend-split each): **9/16 `src/` repos now at wall=0** (yaml, sha1, svg, rsa, csv,
+bigint, base64, almide-lander, **almide-bindgen** new). Levers landed this round, with per-repo wall
+deltas (single-file sweep): **tuple call-args** (3→0); **concat-operand heap branches** (`lhs + if…`
+ANF-lifted); **`json.as_array` self-host** + `option.listvalue_unwrap_or` (the get_arr List[Value]
+sibling of json.get); **flat_map/filter_map defunctionalizer** (capturing closures lower inline —
+dojo `hints_block`); **heap-nested record returns** (a record field that is itself a recursive-drop
+record, via a synthesized `__drop_anonrec_<hash>` for the anonymous outer); and a real **mutable
+heap-field-var silent-miscompile fix** (`var iv = state.iv` had bound the whole container — a
+header-read miscompile). Net: **almide-wasm-bindgen 15→3**, **almide-bindgen 1→0**, porta 33→31,
+dojo 2→1.
+
+**The feasibility floor (why "all walls = 0" is partly structural, not a lowering gap):**
+
+- **porta (~31) + almide-sqlite (~20) are NATIVE-ONLY host bindings.** Their walls are body-less
+  `@extern(rust, "wasmtime_bridge"/"sqlite", …)` / `= _` host stubs (`IrExprKind::Hole`) — wasmtime
+  process-spawning and the sqlite3 C library have **no wasm form**, so there is no sound wasm value
+  to lower to (a fabricated `Opaque`/`0` would be a silent miscompile; emitting an unsatisfiable
+  wasm import would be a hollow wall=0 that no host can instantiate). These repos are **not
+  wasm-trust-spine candidates** — the wall is the correct answer, the same category as a `▫` row.
+- **almide-web (~22) is the only host-stub repo that IS wasm-targetable** — its stubs are
+  `@extern(wasm, "dom"/"fetch"/"timer"/"console", …)` BROWSER imports. Emitting real wasm
+  `(import …)` + `(call $…)` bodies lowers them (wall=0) faithfully, but they are 🟡 — a browser
+  host, not wasmtime, satisfies the imports, so they are not byte-matchable on the wasmtime oracle.
+- **The remaining ~10 (wasm-bindgen 3, grammar 3, aes 2, dojo 1, toml 1) are genuine but DEEP
+  frontiers:** the let-bound heap-result `if` with a MIXED-ownership arm (`else version` borrowed)
+  and the loop-reassigned owned-field var (aes cfb8 `iv`) — both need an ownership-cert / Coq rule
+  (the `IfThen`-merged single-drop lemma; the option-C per-iteration owned-slot release), walled to
+  avoid a leak rather than mis-lowered.
+
+So the achievable wall=0 frontier is the pure-data + browser-import repos; porta/sqlite are a
+native-host category the wasm spine cannot (and should not) absorb.
+
 ## Update (2026-06-25) — the WASI capability floor + the first I/O app + the #1 frontier's in-loop slice
 
 Three advances since 2026-06-22, all byte-verified native==v1 and on the axiom-clean proof spine:
