@@ -635,6 +635,33 @@ impl LowerCtx {
                 let sub = self.lower_owned_str_sublist(body)?;
                 self.append_owned_sub_to_acc(sub, acc, arm_mark)
             }
+            // A bare `Var` leaf (`{ let lines = …; lines }` — the flat_map body that binds its
+            // per-element sublist to a `let` then returns it, the bindgen `gen_unpack_named` /
+            // `gen_variant_type` shape). The Var is an OWNED, tracked `List[String]` local (its `let`
+            // pushed it to `live_heap_handles` + `heap_elem_lists`, freed by the ENCLOSING block's
+            // `drop_arm_locals`). APPEND it to `acc` by BORROW: `__list_concat_rc(acc, lines)` rc-incs
+            // its elements into the new acc, then drop-old acc + SetLocal — exactly the owned-sublist
+            // append, but WITHOUT taking ownership of `lines` (no `Consume`, no per-leaf
+            // `drop_arm_locals` over it). `lines` is freed EXACTLY ONCE by its own `let` scope (the
+            // block teardown), and the concat co-acquired its elements into `acc` — no double-free, no
+            // leak. A BORROWED Var (a param/loop-element in `param_values`, owned elsewhere) is also
+            // safe: the concat only borrows it, and we never free it here. An untracked/global Var (no
+            // `value_for`) declines → the HOF rolls back + the caller WALLs (honest).
+            IrExprKind::Var { id } => {
+                let sub = self.value_for(*id).ok()?;
+                let new = self.fresh_value();
+                self.ops.push(Op::CallFn {
+                    dst: Some(new),
+                    name: "__list_concat_rc".to_string(),
+                    args: vec![CallArg::Handle(acc), CallArg::Handle(sub)],
+                    result: Some(crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT }),
+                });
+                self.heap_elem_lists.insert(new);
+                let drop_acc = self.drop_op_for(acc);
+                self.ops.push(drop_acc);
+                self.ops.push(Op::SetLocal { local: acc, src: new });
+                Some(())
+            }
             _ => None,
         }
     }
