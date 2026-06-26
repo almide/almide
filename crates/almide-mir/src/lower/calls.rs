@@ -141,7 +141,33 @@ impl LowerCtx {
             }
         }
         let arg_tys: Vec<Ty> = args.iter().map(|a| a.ty.clone()).collect();
+        let ops_mark = self.ops.len();
         let lowered = self.lower_pure_module_call_args(module, func, args)?;
+        // WALL an UNFAITHFUL self-host HOF combinator BEFORE emitting its `CallFn`. When the closure
+        // arg is a CAPTURING/param-invoking lambda (no liftable FuncRef), `lower_pure_module_call_args`
+        // DROPS it (`last_call_had_unlifted_closure = true`) — so `lowered` omits the funcref. A SELF-
+        // HOST-linked combinator (`list.flat_map`/`map`/`filter`/`fold`/`filter_map`) has a real wasm
+        // body expecting `(list i32, funcref i64)`; emitting `(call $list.flat_map list)` with the
+        // funcref dropped is INVALID WASM (`expected [i32, i64] but got [i32]` — the value-position
+        // C2-lift bug, e.g. c/cpp/ruby `gen_pack_variant`'s inner `get_arr(pl,…) |> flat_map((pf) =>
+        // gpe(pf, indent))` whose lambda captures the outer `indent`). The BIND position already walls
+        // this via its `faithful` gate (binds_p2), but a VALUE-position call (inside a match arm / the
+        // str-acc some-arm) reaches here without that guard — so the function silently emitted invalid
+        // wasm. WALL it (→ Err), making the value position CONSISTENT with the bind position: never emit
+        // invalid wasm. Truncate the partial closure/list temps we just pushed so the rolled-back
+        // function starts clean. A non-HOF call, or a FAITHFULLY-lifted/C1-inlined closure, is
+        // unaffected (`last_call_had_unlifted_closure` is false ⇒ this guard never fires for them).
+        if module == "list"
+            && matches!(func, "map" | "filter" | "fold" | "flat_map" | "filter_map")
+            && crate::lower::is_higher_order(args)
+            && self.last_call_had_unlifted_closure
+        {
+            self.ops.truncate(ops_mark);
+            return Err(LowerError::Unsupported(format!(
+                "{module}.{func} with an unliftable/closure-list higher-order argument cannot execute \
+                 faithfully in this brick (walled, not mis-valued)"
+            )));
+        }
         let dst = self.fresh_value();
         let repr = repr_of(result_ty)?;
         // `string.slice(s, start)` is the 2-arg overload of `string.slice(s, start, end)` with the
