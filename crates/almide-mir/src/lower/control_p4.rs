@@ -983,6 +983,18 @@ impl LowerCtx {
             _ => return false,
         };
         let elem_heap = is_heap_ty(&elem_ty);
+        // A heap-AGGREGATE element (tuple/record) read via a direct FIELD/INDEX projection
+        // (`for p in ps { p.0 }`) projects off the WRONG handle here — a silent miscompile. Decline
+        // ONLY that projecting case (`body_reads_var_field`) so it falls to lower_for_in, which WALLs
+        // it (honest). A `let (x, y) = p` destructure (tuple PATTERN) or passing `p` whole is loaded
+        // correctly by this real per-element loop, so it is NOT declined (no regression).
+        if elem_heap
+            && self.aggregate_field_tys(&elem_ty).is_some()
+            && var_tuple.is_none()
+            && body_reads_var_field(body, var)
+        {
+            return false;
+        }
         // The element SHAPE (scalar vs heap) comes from the iterable's element type, so the loop var
         // is bound correctly even when it is UNUSED in the body (an `for _ in xs`, or a loop kept for
         // its effect count) — `find_var_ty` returns None then, which must NOT fall to the model-one-

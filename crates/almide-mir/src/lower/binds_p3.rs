@@ -490,6 +490,34 @@ impl LowerCtx {
         Some(dst)
     }
 
+    /// A heap-element `List` LITERAL RETURNED in TAIL position (`fn aliases() ->
+    /// List[(String, String)] = [("Ok", "ok"), …]`, `fn keyword_groups() ->
+    /// List[KeywordGroup] = [KeywordGroup { … }, …]`) — build the SAME nested-ownership block
+    /// as [`Self::try_lower_record_list_literal`] (each element moved in via
+    /// `lower_owned_heap_field`, the recursive drop registered: `DropListStrStr` for a
+    /// `(String, String)` list, `$__drop_list_<R>` via `variant_drop_handles="list_<R>"` for a
+    /// `List[Record]`), then MOVE IT OUT as the return — i.e. REMOVE it from `live_heap_handles`
+    /// so the function does NOT also emit a scope-end drop. The caller owns the returned list and
+    /// frees it (its own recursive drop selected by `drop_op_for` from the SAME registered set).
+    ///
+    /// SOUNDNESS (no new op / no certificate change): identical to the tail Record / Tuple ctor
+    /// move-out (`try_lower_record_construct` at the heap-tail head, `try_lower_tuple_construct`):
+    /// the block is `i…m` — alloc (cert `i`), each element moved in (cert `m`), then the whole
+    /// list moved out as the return (cert `m`). It is NEVER in `live_heap_handles`, so it is
+    /// never among the scope-end `d`s — no double-free; and it is a REAL populated block (not a
+    /// deferred `Opaque` EMPTY value), so no silent miscompile. The drop-set registration
+    /// (`str_str_elem_lists` / `variant_drop_handles`) is keyed by the moved-out `ValueId` but is
+    /// only ever consulted for a value that IS in `live_heap_handles` (scope-end) or is a
+    /// subject/arm local — none apply to a moved-out tail result — so the stale entry is inert.
+    pub(crate) fn try_lower_record_list_literal_tail(&mut self, value: &IrExpr) -> Option<ValueId> {
+        let dst = self.try_lower_record_list_literal(value)?;
+        // MOVE OUT: the caller owns + drops the returned list, so it must NOT also be released by
+        // this function's scope-end drops (that would be a double-free). Exactly the `Var`/Tuple/
+        // Record tail move-out — drop the tracking, keep the recursive-drop-set registration.
+        self.live_heap_handles.retain(|h| *h != dst);
+        Some(dst)
+    }
+
     /// Construct a SPREAD record `R { ...base, f: override, … }`: a FRESH block of the
     /// SAME uniform-slot layout, where each declared field's slot is either the supplied
     /// OVERRIDE value or COPIED from `base`. The copy preserves value semantics — `base`

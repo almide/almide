@@ -105,6 +105,43 @@ pub(crate) fn body_reassigns_heap(stmts: &[IrStmt]) -> bool {
     s.found
 }
 
+/// Does `body` directly project a FIELD/INDEX off `v` — a `v.field` Member or `v.N` TupleIndex
+/// EXPRESSION whose object is `Var(v)`? A `for-in` heap-AGGREGATE element is bound as the whole
+/// element handle, which is correct for a `let (x, y) = v` destructure (a tuple PATTERN) or passing
+/// `v` whole, but a direct `v.field` / `v.N` projection on the loop element currently reads off the
+/// wrong handle (a silent miscompile). Only that projecting case must wall.
+pub(crate) fn body_reads_var_field(body: &[IrStmt], v: VarId) -> bool {
+    use almide_ir::visit::{walk_expr, IrVisitor};
+    struct Scan {
+        v: VarId,
+        found: bool,
+    }
+    impl IrVisitor for Scan {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            if self.found {
+                return;
+            }
+            let obj = match &e.kind {
+                IrExprKind::Member { object, .. } => Some(object),
+                IrExprKind::TupleIndex { object, .. } => Some(object),
+                _ => None,
+            };
+            if let Some(o) = obj {
+                if matches!(&o.kind, IrExprKind::Var { id } if *id == self.v) {
+                    self.found = true;
+                    return;
+                }
+            }
+            walk_expr(self, e);
+        }
+    }
+    let mut s = Scan { v, found: false };
+    for stmt in body {
+        s.visit_stmt(stmt);
+    }
+    s.found
+}
+
 /// Find the type a variable is USED at in a body (its first reference's `ty`) — for
 /// a `for-in` loop variable, this is its element type (the `ForIn` node carries no
 /// explicit element type). `None` if the variable is unused (then its heap-ness does

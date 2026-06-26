@@ -351,6 +351,17 @@ impl LowerCtx {
                             return Ok(Some(dst));
                         }
                     }
+                    // A heap-ELEMENT list literal RETURNED — a `List[(String, String)]`
+                    // (`fn keyword_aliases() = [("Ok", "ok"), …]`) or a `List[Record]`
+                    // (`fn keyword_groups() = [KeywordGroup { … }, …]`, `fn precedence_table() =
+                    // [PrecLevel { … }, …]`). Build the real nested-ownership block (each element
+                    // moved in, the recursive per-element drop registered), MOVED OUT as the return
+                    // (NOT tracked → no scope-end drop; the caller owns it). Without this the literal
+                    // fell through `try_lower_str_list_literal` (which returns None for these heap
+                    // elements) to the Opaque alloc = an empty len-0 list (a silent miscompile).
+                    if let Some(dst) = self.try_lower_record_list_literal_tail(tail) {
+                        return Ok(Some(dst));
+                    }
                     // A `List[String]` literal RETURNED (`fn make() = [e0, e1]`) — build a real
                     // nested-ownership DynListStr (each element moved/Dup'd in), moved out as the
                     // return (NOT tracked, so no scope-end DropListStr — the caller owns it). Without

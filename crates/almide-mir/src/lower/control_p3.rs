@@ -377,8 +377,28 @@ impl LowerCtx {
         };
         for v in vars {
             // A heap element aliases the whole container; a scalar element is a Const.
-            let elem_heap = find_var_ty(body, v).map(|t| is_heap_ty(&t)).unwrap_or(false);
+            let elem_ty = find_var_ty(body, v);
+            let elem_heap = elem_ty.as_ref().map(|t| is_heap_ty(t)).unwrap_or(false);
             if elem_heap {
+                // The model-one-iteration fallback aliases the element to the WHOLE container (a `Dup`
+                // of the list handle) — the real per-element loop (`try_lower_scalar_for_list`) only
+                // covers List[scalar]/List[String], which never reach here. A heap-AGGREGATE element
+                // (tuple/record) DOES reach here, and reading a field of it (`for p in ps { p.0 }`)
+                // would read the CONTAINER's slot, not the element's — a SILENT MISCOMPILE. Now that
+                // the producer side materializes List[tuple]/List[record] returns, that consumer is
+                // reachable, so WALL it (honest) until the heap-aggregate per-element borrow lands.
+                if elem_ty.as_ref().is_some_and(|t| self.aggregate_field_tys(t).is_some())
+                    && body_reads_var_field(body, v)
+                {
+                    return Err(LowerError::Unsupported(
+                        "for-in over a List of heap aggregates (tuple/record) whose element is read \
+                         via a direct field/index (`for p in ps { p.0 }`) is not in this brick: the \
+                         model-one-iteration fallback aliases the element to the whole container, so \
+                         the projection would read the container — walled to avoid a silent \
+                         miscompile (needs the heap-aggregate per-element borrow)"
+                            .into(),
+                    ));
+                }
                 let src = container.ok_or_else(|| {
                     LowerError::Unsupported(
                         "for-in heap loop variable over a non-container iterable not in this brick".into(),

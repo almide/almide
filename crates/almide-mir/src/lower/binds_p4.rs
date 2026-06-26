@@ -105,21 +105,36 @@ impl LowerCtx {
             // materialize the scalar-element block (flat slots, no nested ownership) as a fresh
             // OWNED list. The aggregate owns it; its masked recursive drop `rc_dec`s the block
             // (sound: scalar elements need no per-element free). An EMPTY scalar list is a valid
-            // 0-length block (so `{ items: [] }` materializes, not Opaque-with-garbage). A
-            // heap-element list (`List[String]`/`List[Record]`) DEFERS (`None`) — its elements
-            // need a per-element recursive free not wired through the single-level mask — so the
-            // aggregate falls back to Opaque and the field-read path WALLS (never wrong bytes).
+            // 0-length block (so `{ items: [] }` materializes, not Opaque-with-garbage).
+            //
+            // A NON-EMPTY heap-element list field — a `List[Record]` (`children: [rect(…), …]`,
+            // via the record-list builder) OR a `List[String]` (`words: ["if", "then", …]`, via the
+            // str-list builder) — materializes as a fresh OWNED nested-ownership block the aggregate
+            // owns. The enclosing record's generated `$__drop_<R>` frees this field RECURSIVELY
+            // (`__drop_list_<E>` / `__drop_list_str` of the slot handle — see
+            // `record_drop_field_frees`, which routes a `List[heap]` field to its recursive list
+            // drop, NOT the flat one-level mask), so no leak. The handle is pushed to
+            // `live_heap_handles` so the caller's `Consume` (move-in) + `retain` balances it.
             IrExprKind::List { elements } => {
                 use almide_lang::types::constructor::TypeConstructorId;
                 let scalar_list = matches!(&expr.ty,
                     Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && !is_heap_ty(&a[0]));
-                // A NON-EMPTY List[Record] literal (`children: [rect(…), …]`) materializes via the
-                // record-list builder (each Element moved in; drop → $__drop_list_<R>).
                 if !scalar_list && !elements.is_empty() {
+                    // A `List[Record]` / `List[(String,String)]` field — the record-list builder
+                    // already tracks it in `live_heap_handles` + routes its drop (`$__drop_list_<R>`
+                    // / `DropListStrStr`), so return it directly (do NOT re-push).
                     if let Some(obj) = self.try_lower_record_list_literal(expr) {
                         return Some(obj);
                     }
-                    // A NON-EMPTY non-record heap-element list field is the recursive-record frontier → defer.
+                    // A `List[String]` (and the other heap-element list shapes the str-list builder
+                    // admits) field — materialize the real nested-ownership block. The builder
+                    // registers the recursive drop set + `materialized_lists` but does NOT push to
+                    // `live_heap_handles`, so push it here for the caller's move-in to balance.
+                    if let Some(obj) = self.try_lower_str_list_literal(expr) {
+                        self.live_heap_handles.push(obj);
+                        return Some(obj);
+                    }
+                    // Any other non-record heap-element list field is the recursive frontier → defer.
                     return None;
                 }
                 let obj = self.try_lower_scalar_list_slots(elements)?;
