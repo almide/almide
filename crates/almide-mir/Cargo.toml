@@ -21,3 +21,9 @@ almide-lang = { path = "../almide-lang" }
 [dev-dependencies]
 almide-frontend = { path = "../almide-frontend" }
 almide-optimize = { path = "../almide-optimize" }
+# The workspace-root `almide` binary crate's lib — reused ONLY by the org-sweep
+# examples (`render_program`, `classify_corpus`) for the CANONICAL cross-module
+# discovery (`resolve::resolve_imports_with_deps`), so `import self.<submodule>`
+# resolves its sibling `src/*.almd` exactly like `almide run`/`almide check`.
+# Acyclic: `almide` does NOT depend on `almide-mir` (`cargo tree -p almide` = 0).
+almide = { path = "../.." }

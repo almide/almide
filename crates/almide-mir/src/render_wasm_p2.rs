@@ -494,7 +494,10 @@ fn render_op(
         // leaf field, then the block. Single cert `d`; the recursion is the trusted prim-only
         // routine (empty cert), verified by the create+drop LEAK LOOP.
         Op::DropVariant { v, ty } => {
-            format!("    (call $__drop_{} (local.get {}))\n", ty, local(*v))
+            // A cross-module record/variant type carries its module prefix (`types.RunResult`);
+            // sanitize the dot to match the generated `__drop_…` fn name (`drop_fn_ident`). For a
+            // single-file (dot-free) type this is the identity — byte-identical render.
+            format!("    (call $__drop_{} (local.get {}))\n", ty.replace('.', "_"), local(*v))
         }
         // COPY-ON-WRITE before an in-place mutation (A1.3-render, refining
         // CowSafety.v): if the block is SHARED (rc > 1), clone it so the mutation

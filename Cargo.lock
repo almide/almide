@@ -140,6 +140,7 @@ dependencies = [
 name = "almide-mir"
 version = "0.1.0"
 dependencies = [
+ "almide",
  "almide-frontend",
  "almide-ir",
  "almide-lang",

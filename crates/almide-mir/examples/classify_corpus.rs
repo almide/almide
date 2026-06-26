@@ -361,10 +361,112 @@ enum FrontendOutcome {
     Panicked,
 }
 
+/// Discover the input file's SIBLING `src/*.almd` modules so `import self.<submodule>`
+/// resolves exactly as it does under `almide run`/`almide check` — reusing the CANONICAL
+/// driver discovery (`almide::resolve::resolve_imports_with_deps`). Pure-local (empty
+/// `dep_paths` ⇒ only project `self.*` siblings, no network). A NON-self-import file
+/// returns an empty set ⇒ the original single-file path (byte-identical for the v0 corpus
+/// / spec fixtures). Resolution failure (an unfetched external dep in the chain) ⇒ empty
+/// set, so the sweep still classifies the file rather than aborting.
+fn discover_self_modules(
+    path: &Path,
+    prog: &almide_lang::ast::Program,
+) -> Vec<(String, almide_lang::ast::Program, bool)> {
+    let has_self_import = prog.imports.iter().any(|d| {
+        matches!(
+            d,
+            almide_lang::ast::Decl::Import { path, .. }
+                if path.first().map(|s| s.as_str()) == Some("self")
+        )
+    });
+    if !has_self_import {
+        return Vec::new();
+    }
+    match almide::resolve::resolve_imports_with_deps(&path.to_string_lossy(), prog, &[]) {
+        Ok(resolved) => resolved
+            .modules
+            .into_iter()
+            .map(|(name, p, _pkg, is_self)| (name, p, is_self))
+            .collect(),
+        Err(_) => Vec::new(),
+    }
+}
+
+/// The mangled flat name a user-module function gets when resolved to a user `CallFn`
+/// (`bindgen` + `get_str` → `almide_rt_bindgen_get_str`) — the v1 analogue of v0's
+/// `ir_link_flatten` module-fn renaming.
+fn user_module_fn_name(module: &str, func: &str) -> String {
+    format!("almide_rt_{}_{}", module.replace('.', "_"), func.replace('.', "_"))
+}
+
+/// Resolve a USER-package/-module call (`bindgen.get_str` via `import self as bindgen`,
+/// `self.classifier.classify`) to a real user `CallFn` (`CallTarget::Module` → `Named`,
+/// `almide_rt_<m>_<f>`). The MIR lowering then treats it as an ordinary user call instead of
+/// walling it as an opaque "impure stdlib Module" call. SOUNDNESS (caps): the resolved name
+/// carries NO dot, so the transitive caps gate analyzes it as a user call (via the in-profile
+/// map, or TAINTS the caller if the callee is a cross-file/unanalyzable definition) — NOT as a
+/// pure dotted stdlib call (`is_known_free`). A self-pkg call to an EFFECTFUL user fn thus
+/// surfaces its capability transitively, exactly like any user call — never the
+/// accept-but-unsafe omission the Module-call purity wall guarded against. STDLIB modules are
+/// NOT rewritten. No-op when there are no linked user modules.
+fn resolve_user_module_calls(ir: &mut almide_ir::IrProgram) {
+    use almide_ir::{CallTarget, IrExprKind, IrMutVisitor, walk_expr_mut};
+    use almide_lang::intern::sym;
+    let user_mods: BTreeMap<String, HashSet<String>> = ir
+        .modules
+        .iter()
+        .filter(|m| !almide_lang::stdlib_info::is_any_stdlib(m.name.as_str()))
+        .map(|m| {
+            (
+                m.name.as_str().to_string(),
+                m.functions.iter().map(|f| f.name.as_str().to_string()).collect(),
+            )
+        })
+        .collect();
+    if user_mods.is_empty() {
+        return;
+    }
+    struct Rw<'a> {
+        user_mods: &'a BTreeMap<String, HashSet<String>>,
+    }
+    impl IrMutVisitor for Rw<'_> {
+        fn visit_expr_mut(&mut self, e: &mut almide_ir::IrExpr) {
+            walk_expr_mut(self, e);
+            if let IrExprKind::Call { target, .. } = &mut e.kind {
+                if let CallTarget::Module { module, func, .. } = target {
+                    let (m, f) = (module.as_str(), func.as_str());
+                    if self.user_mods.get(m).is_some_and(|fs| fs.contains(f)) {
+                        *target = CallTarget::Named { name: sym(&user_module_fn_name(m, f)) };
+                    }
+                }
+            }
+        }
+    }
+    let mut rw = Rw { user_mods: &user_mods };
+    for func in &mut ir.functions {
+        rw.visit_expr_mut(&mut func.body);
+    }
+    for tl in &mut ir.top_lets {
+        rw.visit_expr_mut(&mut tl.value);
+    }
+    for m in &mut ir.modules {
+        for func in &mut m.functions {
+            rw.visit_expr_mut(&mut func.body);
+        }
+        for tl in &mut m.top_lets {
+            rw.visit_expr_mut(&mut tl.value);
+        }
+    }
+}
+
 /// Drive source → linked IR with NO `die()` — every failure becomes a value, so
 /// the sweep never aborts on a single bad file. Mirrors `emit_cert_from_source`'s
-/// pipeline (the same public frontend functions almide-interp uses).
-fn source_to_ir(source: &str) -> FrontendOutcome {
+/// pipeline (the same public frontend functions almide-interp uses). `path` is the
+/// file's location so `import self.<submodule>` resolves its sibling `src/*.almd`
+/// (the canonical driver discovery) — exactly the cut point `render_program` uses, so
+/// the wall report counts a cross-module function's REAL lowerability, not the
+/// missing-sibling artifact. A lone single file (no `import self.*`) is unchanged.
+fn source_to_ir(path: &Path, source: &str) -> FrontendOutcome {
     let result = catch_unwind(AssertUnwindSafe(|| -> Result<almide_ir::IrProgram, String> {
         let tokens = Lexer::tokenize(source);
         let mut parser = Parser::new(tokens);
@@ -372,7 +474,11 @@ fn source_to_ir(source: &str) -> FrontendOutcome {
         if !parser.errors.is_empty() {
             return Err(format!("parse errors: {:?}", parser.errors));
         }
-        let canon = canonicalize::canonicalize_program(&prog, std::iter::empty());
+        let modules = discover_self_modules(path, &prog);
+        let canon = canonicalize::canonicalize_program(
+            &prog,
+            modules.iter().map(|(n, p, s)| (n.as_str(), p, *s)),
+        );
         let mut checker = Checker::from_env(canon.env);
         let diags = checker.infer_program(&mut prog);
         let errors: Vec<_> = diags
@@ -384,6 +490,43 @@ fn source_to_ir(source: &str) -> FrontendOutcome {
             return Err(format!("type errors ({} diag)", errors.len()));
         }
         let mut ir = lower_program(&prog, &checker.env, &checker.type_map);
+        // Lower each resolved sibling MODULE into `ir.modules` — the SAME sequence the real
+        // driver runs (infer_module → per-module import table → lower_module → push), so a
+        // cross-module record/variant type reaches `build_record_layouts`. Non-bundled stdlib
+        // modules are skipped (their defs come from the runtime registry, not user lowering).
+        for (name, mod_prog, _is_self) in &modules {
+            if almide_lang::stdlib_info::is_stdlib_module(name)
+                && !almide_lang::stdlib_info::is_bundled_module(name)
+            {
+                continue;
+            }
+            let mut mod_prog = mod_prog.clone();
+            checker.infer_module(&mut mod_prog, name);
+            let self_name = checker.env.self_module_name.map(|s| s.to_string());
+            let import_table_name = self_name.as_deref().unwrap_or(name.as_str());
+            let (mod_table, _) = almide_frontend::import_table::build_import_table(
+                &mod_prog,
+                Some(import_table_name),
+                &checker.env.user_modules,
+            );
+            let saved_table = std::mem::replace(&mut checker.env.import_table, mod_table);
+            let mod_ir = almide_frontend::lower::lower_module(
+                name,
+                &mod_prog,
+                &checker.env,
+                &checker.type_map,
+                None,
+            );
+            checker.env.import_table = saved_table;
+            ir.modules.push(mod_ir);
+        }
+        // Resolve self-pkg / imported user-module calls to real user CallFns (Module → Named,
+        // `almide_rt_<m>_<f>`), so the MIR lowering treats them as ordinary user calls instead of
+        // walling them as opaque "impure stdlib Module" calls. SOUNDNESS: the resolved name has no
+        // dot, so the transitive caps gate analyzes it as a user call (in-profile map / taint),
+        // NOT a pure dotted stdlib call — a self-pkg call to an effectful user fn surfaces its
+        // capability transitively. No-op when there are no linked user modules.
+        resolve_user_module_calls(&mut ir);
         optimize::optimize_program(&mut ir);
         mono::monomorphize(&mut ir);
         ir_link::ir_link(&mut ir);
@@ -606,7 +749,7 @@ fn main() {
                 continue;
             }
         };
-        let ir = match source_to_ir(&source) {
+        let ir = match source_to_ir(file, &source) {
             FrontendOutcome::Ir(ir) => ir,
             FrontendOutcome::Rejected => {
                 t.frontend_rejected += 1;

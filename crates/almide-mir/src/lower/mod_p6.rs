@@ -507,6 +507,173 @@ pub fn desugar_callarg_unwrap(body: &IrExpr, next_var: &mut u32) -> Option<IrExp
     None
 }
 
+/// Is `e` a PURE, freely-duplicable match subject — a `Var` or a literal? `build_match_chain`
+/// inlines such a subject into EACH literal arm's `==` test (no re-eval cost / effect). A
+/// non-pure subject (a CALL) inlined per arm would be EVALUATED once per arm — wrong if it has
+/// effects, wasteful always, and it makes the MIR carry N subject-calls where the source had one
+/// (a `mir > ir` caps-gate breach). [`desugar_match_subject_hoist`] lifts those to a single eval.
+fn is_pure_match_subject(e: &IrExpr) -> bool {
+    matches!(
+        &e.kind,
+        IrExprKind::Var { .. }
+            | IrExprKind::LitInt { .. }
+            | IrExprKind::LitBool { .. }
+            | IrExprKind::LitFloat { .. }
+            | IrExprKind::LitStr { .. }
+    )
+}
+
+/// HOIST a non-pure (call) subject of a NON-VARIANT `match` (the `build_match_chain` literal-arm
+/// shape) into a single `let __m = subject` and rewrite the match to dispatch on `Var(__m)` — so
+/// the subject call is EVALUATED ONCE, not duplicated into each arm's `==` test. This is both a
+/// correctness fix (a side-effecting subject must run once) and the alignment that keeps the caps
+/// gate exact: `count_ir_calls` then sees ONE subject call (matching the MIR's one), so `mir <= ir`
+/// holds for a resolved cross-module/self-pkg call subject (`match q.kind(x) { "a" => .., .. }`).
+/// Applied in the SHARED [`desugar_heap_branches`] so the lowering and the count gate agree.
+/// FIRES ONLY for a non-variant match (Int/String/Bool literal arms) whose subject is non-pure —
+/// a variant (Option/Result/ADT) match already evaluates its subject once (`bind_subject` /
+/// `try_lower_variant_value_match`), so it is left untouched (no v0-corpus shape changes). Recurses
+/// into block stmts / tails / if & match arms so a nested such match is hoisted too.
+fn desugar_match_subject_hoist(body: &IrExpr, next_var: &mut u32) -> Option<IrExpr> {
+    use almide_lang::types::constructor::TypeConstructorId as TC;
+    use almide_lang::types::Ty;
+    // A variant subject (Option/Result/user ADT) goes through the variant path (single-eval),
+    // NOT build_match_chain — leave it alone.
+    let is_variant_subject = |ty: &Ty| {
+        matches!(ty, Ty::Applied(TC::Option | TC::Result, _))
+            || matches!(ty, Ty::Named(..) | Ty::Variant { .. })
+    };
+    if let IrExprKind::Match { subject, arms } = &body.kind {
+        let has_literal_arm = arms
+            .iter()
+            .any(|a| matches!(a.pattern, almide_ir::IrPattern::Literal { .. }));
+        if has_literal_arm
+            && !is_pure_match_subject(subject)
+            && !is_variant_subject(&subject.ty)
+        {
+            let tmp = VarId(*next_var);
+            *next_var += 1;
+            let tmp_var = IrExpr {
+                kind: IrExprKind::Var { id: tmp },
+                ty: subject.ty.clone(),
+                span: subject.span.clone(),
+                def_id: None,
+            };
+            // The match dispatching on the hoisted `Var(tmp)` (arms unchanged — they reference the
+            // subject only through the desugar's `subject.clone()`, now the cheap Var).
+            let new_match = IrExpr {
+                kind: IrExprKind::Match { subject: Box::new(tmp_var), arms: arms.clone() },
+                ty: body.ty.clone(),
+                span: body.span.clone(),
+                def_id: body.def_id,
+            };
+            let bind = IrStmt {
+                kind: IrStmtKind::Bind {
+                    var: tmp,
+                    mutability: almide_ir::Mutability::Let,
+                    ty: subject.ty.clone(),
+                    value: (**subject).clone(),
+                },
+                span: body.span.clone(),
+            };
+            return Some(IrExpr {
+                kind: IrExprKind::Block { stmts: vec![bind], expr: Some(Box::new(new_match)) },
+                ty: body.ty.clone(),
+                span: body.span.clone(),
+                def_id: body.def_id,
+            });
+        }
+    }
+    // Recurse into the structural positions a match can hide in.
+    match &body.kind {
+        IrExprKind::Block { stmts, expr } => {
+            // Recurse into each stmt's value (Bind / Expr / Assign — the value-bearing stmts a
+            // match can sit in) by cloning the stmt and replacing its value via `map_children`.
+            for (i, s) in stmts.iter().enumerate() {
+                let v = match &s.kind {
+                    IrStmtKind::Expr { expr } => Some(expr),
+                    IrStmtKind::Bind { value, .. } => Some(value),
+                    IrStmtKind::Assign { value, .. } => Some(value),
+                    _ => None,
+                };
+                if let Some(v) = v {
+                    if let Some(nv) = desugar_match_subject_hoist(v, next_var) {
+                        let mut ns = stmts.clone();
+                        ns[i].kind = match s.kind.clone() {
+                            IrStmtKind::Expr { .. } => IrStmtKind::Expr { expr: nv },
+                            IrStmtKind::Bind { var, mutability, ty, .. } => {
+                                IrStmtKind::Bind { var, mutability, ty, value: nv }
+                            }
+                            IrStmtKind::Assign { var, .. } => IrStmtKind::Assign { var, value: nv },
+                            other => other,
+                        };
+                        return Some(IrExpr {
+                            kind: IrExprKind::Block { stmts: ns, expr: expr.clone() },
+                            ty: body.ty.clone(),
+                            span: body.span.clone(),
+                            def_id: body.def_id,
+                        });
+                    }
+                }
+            }
+            if let Some(t) = expr {
+                if let Some(nt) = desugar_match_subject_hoist(t, next_var) {
+                    return Some(IrExpr {
+                        kind: IrExprKind::Block { stmts: stmts.clone(), expr: Some(Box::new(nt)) },
+                        ty: body.ty.clone(),
+                        span: body.span.clone(),
+                        def_id: body.def_id,
+                    });
+                }
+            }
+            None
+        }
+        IrExprKind::If { cond, then, else_ } => {
+            if let Some(nt) = desugar_match_subject_hoist(then, next_var) {
+                return Some(IrExpr {
+                    kind: IrExprKind::If {
+                        cond: cond.clone(),
+                        then: Box::new(nt),
+                        else_: else_.clone(),
+                    },
+                    ty: body.ty.clone(),
+                    span: body.span.clone(),
+                    def_id: body.def_id,
+                });
+            }
+            if let Some(ne) = desugar_match_subject_hoist(else_, next_var) {
+                return Some(IrExpr {
+                    kind: IrExprKind::If {
+                        cond: cond.clone(),
+                        then: then.clone(),
+                        else_: Box::new(ne),
+                    },
+                    ty: body.ty.clone(),
+                    span: body.span.clone(),
+                    def_id: body.def_id,
+                });
+            }
+            None
+        }
+        IrExprKind::Match { subject, arms } => {
+            for (i, a) in arms.iter().enumerate() {
+                if let Some(nb) = desugar_match_subject_hoist(&a.body, next_var) {
+                    let mut na = arms.clone();
+                    na[i].body = nb;
+                    return Some(IrExpr {
+                        kind: IrExprKind::Match { subject: subject.clone(), arms: na },
+                        ty: body.ty.clone(),
+                        span: body.span.clone(),
+                        def_id: body.def_id,
+                    });
+                }
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
 /// Apply the call-arg ANF-lift ([`desugar_callarg_heap_if`]) and the heap-branch tail-duplication
 /// ([`desugar_let_bound_heap_branch`]) repeatedly to a FIXPOINT — the exact rewrite sequence
 /// `lower_body_into` performs before lowering. Both the lowering and the `count_ir_calls` caps gate
@@ -524,6 +691,14 @@ fn desugar_heap_branches_inner(body: &IrExpr, next_var: &mut u32) -> Option<IrEx
     let mut cur: Option<IrExpr> = None;
     loop {
         let src = cur.as_ref().unwrap_or(body);
+        // FIRST: hoist a non-pure (call) match subject to a single eval, so the literal-arm chain
+        // dispatches on a cheap Var instead of duplicating the call per arm — a correctness fix
+        // (single eval) and the alignment that keeps `mir <= ir` for a resolved cross-module/self-pkg
+        // call subject. Runs before the call-arg lifts so they see the hoisted (Var-subject) form.
+        if let Some(r) = desugar_match_subject_hoist(src, next_var) {
+            cur = Some(r);
+            continue;
+        }
         if let Some(r) = desugar_if_arm_unwrap(src) {
             cur = Some(r);
             continue;

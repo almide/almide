@@ -398,6 +398,17 @@ pub fn variant_type_names(
         .collect()
 }
 
+/// The `__drop_<T>` FUNCTION IDENTIFIER for a (possibly module-prefixed) type name. A cross-module
+/// type carries its module prefix in the IR (`self.types.RunResult` → `Ty::Named("types.RunResult")`);
+/// a dot is illegal in an Almide function name, so the generated drop fn / its call sites / the
+/// rendered `(call $__drop_…)` all sanitize dots to underscores — the SAME mangling v0 codegen
+/// applies (`almide_rt_types_RunResult`). For a single-file (dot-free) type this is the identity, so
+/// the v0 corpus / spec fixtures render byte-identically. The `Op::DropVariant` renderer applies the
+/// IDENTICAL transform, keeping the call site and the definition in lockstep.
+pub fn drop_fn_ident(type_name: &str) -> String {
+    type_name.replace('.', "_")
+}
+
 /// Generate the ALMIDE SOURCE for each variant type's recursive drop fn `__drop_<T>` (ADT brick
 /// 5b) — the `$__drop_value` shape: at the last ref (rc==1) read the tag, recursively
 /// `__drop_<V>` each nested-variant field + `prim.rc_dec` each leaf `String` field, then release
@@ -416,7 +427,10 @@ pub fn generate_variant_drop_sources(type_decls: &[almide_ir::IrTypeDecl]) -> St
         }
         let IrTypeDeclKind::Variant { cases, .. } = &decl.kind else { continue };
         let tname = decl.name.as_str();
-        out.push_str(&format!("fn __drop_{tname}(e: {tname}) -> Unit = {{\n"));
+        // The fn NAME sanitizes the module prefix (`types.RunResult` → `types_RunResult`); the param
+        // TYPE annotation keeps the dotted module-qualified name (a valid Almide type reference).
+        let fname = drop_fn_ident(tname);
+        out.push_str(&format!("fn __drop_{fname}(e: {tname}) -> Unit = {{\n"));
         out.push_str("  let h = prim.handle(e)\n");
         out.push_str("  if prim.load32(h + 0) == 1 then {\n");
         out.push_str(&format!("    let t = prim.load64(h + {})\n", layout::slot_offset(0)));
@@ -435,8 +449,9 @@ pub fn generate_variant_drop_sources(type_decls: &[almide_ir::IrTypeDecl]) -> St
             for (i, ty) in tys.iter().enumerate() {
                 let off = layout::slot_offset(1 + i);
                 if let Some(fv) = variant_field_name(ty, &names) {
+                    let fv_fn = drop_fn_ident(&fv);
                     frees.push_str(&format!(
-                        "        let f{idx}: {fv} = prim.load_handle(h + {off})\n        __drop_{fv}(f{idx})\n"
+                        "        let f{idx}: {fv} = prim.load_handle(h + {off})\n        __drop_{fv_fn}(f{idx})\n"
                     ));
                     idx += 1;
                 } else if matches!(ty, Ty::String) {
@@ -604,8 +619,9 @@ fn record_drop_field_frees(
             Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 => {
                 if let Some(rn) = recursive_aggregate_name(&a[0], rec_names) {
                     list_drops.insert(rn.clone());
+                    let rn_fn = drop_fn_ident(&rn);
                     frees.push_str(&format!(
-                        "    let f{i}: List[{rn}] = prim.load_handle(h + {off})\n    __drop_list_{rn}(f{i})\n"
+                        "    let f{i}: List[{rn}] = prim.load_handle(h + {off})\n    __drop_list_{rn_fn}(f{i})\n"
                     ));
                 } else if matches!(a[0], Ty::String) {
                     *need_list_str = true;
@@ -633,8 +649,9 @@ fn record_drop_field_frees(
             t => {
                 if let Some(rn) = recursive_aggregate_name(t, rec_names) {
                     let src = aggregate_source_ty(t);
+                    let rn_fn = drop_fn_ident(&rn);
                     frees.push_str(&format!(
-                        "    let f{i}: {src} = prim.load_handle(h + {off})\n    __drop_{rn}(f{i})\n"
+                        "    let f{i}: {src} = prim.load_handle(h + {off})\n    __drop_{rn_fn}(f{i})\n"
                     ));
                 } else if is_heap_ty(t) {
                     // a non-recursive heap field (scalar-only nested record, Bytes, scalar map) — flat.
@@ -806,8 +823,9 @@ pub fn generate_record_drop_sources(
             continue;
         }
         let tname = decl.name.as_str();
+        let fname = drop_fn_ident(tname);
         let field_tys: Vec<Ty> = fields.iter().map(|f| f.ty.clone()).collect();
-        out.push_str(&format!("fn __drop_{tname}(e: {tname}) -> Unit = {{\n"));
+        out.push_str(&format!("fn __drop_{fname}(e: {tname}) -> Unit = {{\n"));
         out.push_str("  let h = prim.handle(e)\n");
         out.push_str("  if prim.load32(h + 0) == 1 then {\n");
         out.push_str(&record_drop_field_frees(
@@ -861,14 +879,17 @@ pub fn generate_record_drop_sources(
     let mut list_drop_names: Vec<&String> = rec_names.iter().collect();
     list_drop_names.sort();
     for rn in list_drop_names {
+        // fn NAMES sanitize the module prefix; the `List[{rn}]` / `e: {rn}` type annotations keep
+        // the dotted module-qualified name (a valid Almide type reference).
+        let rn_fn = drop_fn_ident(rn);
         out.push_str(&format!(
-            "fn __drop_list_{rn}(xs: List[{rn}]) -> Unit = {{\n  \
+            "fn __drop_list_{rn_fn}(xs: List[{rn}]) -> Unit = {{\n  \
                let h = prim.handle(xs)\n  \
-               if prim.load32(h + 0) == 1 then __drop_list_{rn}_loop(h, prim.load32(h + 4), 0) else ()\n  \
+               if prim.load32(h + 0) == 1 then __drop_list_{rn_fn}_loop(h, prim.load32(h + 4), 0) else ()\n  \
                prim.rc_dec(h)\n}}\n\
-             fn __drop_list_{rn}_loop(h: Int, n: Int, i: Int) -> Unit =\n  \
+             fn __drop_list_{rn_fn}_loop(h: Int, n: Int, i: Int) -> Unit =\n  \
                if i >= n then ()\n  \
-               else {{ let e: {rn} = prim.load_handle(h + 12 + i * 8)\n         __drop_{rn}(e)\n         __drop_list_{rn}_loop(h, n, i + 1) }}\n"
+               else {{ let e: {rn} = prim.load_handle(h + 12 + i * 8)\n         __drop_{rn_fn}(e)\n         __drop_list_{rn_fn}_loop(h, n, i + 1) }}\n"
         ));
     }
     if need_map_ss {

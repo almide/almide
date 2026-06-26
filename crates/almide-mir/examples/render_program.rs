@@ -23,15 +23,139 @@ fn die(msg: String) -> ! {
     std::process::exit(2);
 }
 
+/// Discover the input file's SIBLING `src/*.almd` modules so `import self.<submodule>`
+/// resolves exactly as it does under `almide run`/`almide check` — reusing the CANONICAL
+/// driver discovery (`almide::resolve::resolve_imports_with_deps`), never a divergent
+/// re-implementation. Pure-local: `dep_paths` is empty, so only project-local `self.*`
+/// siblings are loaded (no network). A NON-cross-module file (no `import self.*`, no
+/// `almide.toml`) yields an empty module set — byte-identical to the prior single-file
+/// behavior. If resolution fails (e.g. a sibling needs an unfetched external dep), fall
+/// back to single-file mode: the file still lowers as before (its cross-module fns wall),
+/// never aborting the harness. Returns the resolved `(name, Program, is_self)` triples.
+fn discover_self_modules(
+    path: &str,
+    prog: &almide_lang::ast::Program,
+) -> Vec<(String, almide_lang::ast::Program, bool)> {
+    // Only worth resolving when the file actually self-imports — keeps the lone-file path
+    // a strict no-op (no almide.toml walk, no dir scan) for the v0 corpus / spec fixtures.
+    let has_self_import = prog.imports.iter().any(|d| {
+        matches!(
+            d,
+            almide_lang::ast::Decl::Import { path, .. }
+                if path.first().map(|s| s.as_str()) == Some("self")
+        )
+    });
+    if !has_self_import {
+        return Vec::new();
+    }
+    match almide::resolve::resolve_imports_with_deps(path, prog, &[]) {
+        Ok(resolved) => resolved
+            .modules
+            .into_iter()
+            .map(|(name, p, _pkg, is_self)| (name, p, is_self))
+            .collect(),
+        // A self-import file whose sibling chain reaches an unresolvable (external,
+        // unfetched) dep: keep the prior single-file behavior rather than abort — the
+        // harness must remain TOTAL over the corpus. The cross-module fns then wall as
+        // before (honest), exactly the pre-change outcome.
+        Err(_) => Vec::new(),
+    }
+}
+
 /// Lower `.almd` source to a linked `IrProgram` (`parse → check → lower → optimize →
-/// mono → ir_link`) — the SAME frontend cut point emit_cert_from_source uses.
-fn source_to_ir(source: &str) -> almide_ir::IrProgram {
+/// mono → ir_link`) — the SAME frontend cut point emit_cert_from_source uses. `modules`
+/// are the resolved cross-module siblings (empty ⇒ the original single-file path). When
+/// The mangled flat name a user-module function gets when resolved to a user `CallFn`
+/// (`bindgen` + `get_str` → `almide_rt_bindgen_get_str`) — the v1 analogue of v0's
+/// `ir_link_flatten` module-fn renaming, and the call-site target this resolution emits.
+fn user_module_fn_name(module: &str, func: &str) -> String {
+    format!("almide_rt_{}_{}", module.replace('.', "_"), func.replace('.', "_"))
+}
+
+/// Resolve a USER-package/-module call (`bindgen.get_str(…)` via `import self as bindgen`,
+/// `self.classifier.classify(…)`) to a real user `CallFn`. WITHOUT this, the MIR lowering
+/// sees `CallTarget::Module { module: "bindgen", … }` and walls it as an "effectful/impure
+/// stdlib Module call" — but `bindgen` is a USER module whose function is right here in
+/// `ir.modules` (thanks to the sibling-link). This rewrites the CALL TARGET only (no IR-level
+/// flatten — that would collide the per-module VarId regions; the sibling DEFINITIONS are
+/// lowered separately to MIR with the same mangled name, see `main`):
+///   • a `CallTarget::Module { m, f }` where `m` is a user module that defines `f` becomes
+///     `CallTarget::Named { name: "almide_rt_<m>_<f>" }` — an ORDINARY user call.
+/// SOUNDNESS (caps): the resolved name carries NO dot, so the transitive caps gate treats it
+/// as a user call (analyzed via the in-profile map / tainted if unknown), NOT as a pure
+/// dotted stdlib call (`is_known_free`). A self-pkg call to an EFFECTFUL user fn therefore
+/// surfaces its capability transitively, exactly like any direct user call — never the
+/// accept-but-unsafe omission the Module-call purity wall was guarding against. A STDLIB
+/// module (`string`, bundled `json`, …) is NOT rewritten — those keep the self-host /
+/// pure-combinator dispatch. No-op when there are no linked user modules.
+fn resolve_user_module_calls(ir: &mut almide_ir::IrProgram) {
+    use almide_ir::{CallTarget, IrExprKind, IrMutVisitor, walk_expr_mut};
+    use almide_lang::intern::sym;
+    let user_mods: std::collections::HashMap<String, std::collections::HashSet<String>> = ir
+        .modules
+        .iter()
+        .filter(|m| !almide_lang::stdlib_info::is_any_stdlib(m.name.as_str()))
+        .map(|m| {
+            (
+                m.name.as_str().to_string(),
+                m.functions.iter().map(|f| f.name.as_str().to_string()).collect(),
+            )
+        })
+        .collect();
+    if user_mods.is_empty() {
+        return; // single-file / stdlib-only — strict no-op.
+    }
+    struct Rw<'a> {
+        user_mods: &'a std::collections::HashMap<String, std::collections::HashSet<String>>,
+    }
+    impl IrMutVisitor for Rw<'_> {
+        fn visit_expr_mut(&mut self, e: &mut almide_ir::IrExpr) {
+            walk_expr_mut(self, e);
+            if let IrExprKind::Call { target, .. } = &mut e.kind {
+                if let CallTarget::Module { module, func, .. } = target {
+                    let (m, f) = (module.as_str(), func.as_str());
+                    if self.user_mods.get(m).is_some_and(|fs| fs.contains(f)) {
+                        *target = CallTarget::Named { name: sym(&user_module_fn_name(m, f)) };
+                    }
+                }
+            }
+        }
+    }
+    let mut rw = Rw { user_mods: &user_mods };
+    for func in &mut ir.functions {
+        rw.visit_expr_mut(&mut func.body);
+    }
+    for tl in &mut ir.top_lets {
+        rw.visit_expr_mut(&mut tl.value);
+    }
+    for m in &mut ir.modules {
+        for func in &mut m.functions {
+            rw.visit_expr_mut(&mut func.body);
+        }
+        for tl in &mut m.top_lets {
+            rw.visit_expr_mut(&mut tl.value);
+        }
+    }
+}
+
+/// non-empty, each sibling is inferred + lowered (`lower_module`) and pushed into
+/// `ir.modules` — exactly the driver assembly in `src/cli/build.rs` — so a cross-module
+/// record/variant type (`self.types.RunResult`) reaches `build_record_layouts` and the
+/// lowering finds its field layout instead of walling. `dep_paths` is empty (the siblings
+/// are pure-local), so `versioned` is always `None`.
+fn source_to_ir_with(
+    source: &str,
+    modules: &[(String, almide_lang::ast::Program, bool)],
+) -> almide_ir::IrProgram {
     let tokens = Lexer::tokenize(source);
     let mut prog = match Parser::new(tokens).parse() {
         Ok(p) => p,
         Err(e) => die(format!("parse error: {e:?}")),
     };
-    let canon = canonicalize::canonicalize_program(&prog, std::iter::empty());
+    let canon = canonicalize::canonicalize_program(
+        &prog,
+        modules.iter().map(|(n, p, s)| (n.as_str(), p, *s)),
+    );
     let mut checker = Checker::from_env(canon.env);
     let diags = checker.infer_program(&mut prog);
     let errors: Vec<_> = diags
@@ -43,10 +167,61 @@ fn source_to_ir(source: &str) -> almide_ir::IrProgram {
         die(format!("type errors: {errors:?}"));
     }
     let mut ir = lower_program(&prog, &checker.env, &checker.type_map);
+
+    // Lower each resolved sibling MODULE into `ir.modules` — the SAME sequence the real
+    // driver runs after `lower_program` (infer_module → per-module import table →
+    // lower_module → push). Bundled stdlib modules carried by `resolve` are skipped (their
+    // defs come from the runtime/self-host registry, not user lowering); only real user
+    // siblings (`self.types`, `self.classifier`, …) contribute their type_decls + fns.
+    for (name, mod_prog, is_self) in modules {
+        // Skip NON-bundled stdlib modules (their defs come from the runtime/self-host
+        // registry, not user lowering) — but KEEP bundled .almd stdlib + real user
+        // siblings, mirroring the driver's `is_stdlib_module && !is_bundled_module` skip.
+        if almide_lang::stdlib_info::is_stdlib_module(name)
+            && !almide_lang::stdlib_info::is_bundled_module(name)
+        {
+            continue;
+        }
+        let mut mod_prog = mod_prog.clone();
+        // A self-module's own decls resolve against `self.*`; mirror the driver's
+        // self_module_name handling (None ⇒ plain prefix, which is the dep_paths-empty case).
+        let _ = is_self;
+        checker.infer_module(&mut mod_prog, name);
+        let self_name = checker.env.self_module_name.map(|s| s.to_string());
+        let import_table_name = self_name.as_deref().unwrap_or(name.as_str());
+        let (mod_table, _) = almide_frontend::import_table::build_import_table(
+            &mod_prog,
+            Some(import_table_name),
+            &checker.env.user_modules,
+        );
+        let saved_table = std::mem::replace(&mut checker.env.import_table, mod_table);
+        let mod_ir = almide_frontend::lower::lower_module(
+            name,
+            &mod_prog,
+            &checker.env,
+            &checker.type_map,
+            None,
+        );
+        checker.env.import_table = saved_table;
+        ir.modules.push(mod_ir);
+    }
+
+    // Resolve self-pkg / imported user-module calls (`bindgen.get_str` → `almide_rt_bindgen_get_str`)
+    // to real user CallFns and flatten those user functions into the root, so the MIR lowering
+    // treats them as ordinary user calls (caps-tracked transitively) instead of walling them as
+    // opaque "impure stdlib Module" calls. No-op when there are no linked USER modules.
+    resolve_user_module_calls(&mut ir);
+
     optimize::optimize_program(&mut ir);
     mono::monomorphize(&mut ir);
     ir_link::ir_link(&mut ir);
     ir
+}
+
+/// Single-file convenience (no cross-module siblings) — the bundled-runtime / drop-source
+/// re-lowering paths, which never carry `import self.*`.
+fn source_to_ir(source: &str) -> almide_ir::IrProgram {
+    source_to_ir_with(source, &[])
 }
 
 fn main() {
@@ -55,18 +230,40 @@ fn main() {
         .unwrap_or_else(|| die("usage: render_program <file.almd>".into()));
     let source =
         std::fs::read_to_string(&path).unwrap_or_else(|e| die(format!("cannot read {path}: {e}")));
-    let ir = source_to_ir(&source);
+    // Resolve the input file's `import self.<submodule>` siblings (canonical driver
+    // discovery), so a cross-module program (dojo's parse.almd → self.types) lowers its
+    // record types instead of walling. Empty for a lone single file (no-op).
+    let probe_tokens = Lexer::tokenize(&source);
+    let probe_prog = Parser::new(probe_tokens)
+        .parse()
+        .unwrap_or_else(|e| die(format!("parse error: {e:?}")));
+    let self_modules = discover_self_modules(&path, &probe_prog);
+    let ir = source_to_ir_with(&source, &self_modules);
     // ADT brick 5b: GENERATE the recursive-drop fns (`__drop_<T>`) for nested-variant types and
     // re-lower with them in scope (so their `type` decls resolve). These are v1-trust-spine-only —
     // v0 (the native oracle) manages its own memory and never sees them. Two-pass: the generation
     // needs the type_decls from pass 1.
     let anon_recs = almide_mir::lower::collect_recursive_anon_records(&ir);
+    // A cross-module record/variant type lives in `ir.modules[*].type_decls` (the linker's phase-1
+    // `ir_link` leaves modules intact). The drop generators must see the WHOLE program's type decls
+    // (root + every module) so a `self.types.RunResult` field gets its `__drop_types_RunResult`
+    // emitted. Union them. For a single-file program `ir.modules` is empty ⇒ exactly `ir.type_decls`.
+    let mut all_type_decls = ir.type_decls.clone();
+    for m in &ir.modules {
+        all_type_decls.extend(m.type_decls.iter().cloned());
+    }
     let drops = format!(
         "{}{}",
-        almide_mir::lower::generate_variant_drop_sources(&ir.type_decls),
-        almide_mir::lower::generate_record_drop_sources(&ir.type_decls, &anon_recs),
+        almide_mir::lower::generate_variant_drop_sources(&all_type_decls),
+        almide_mir::lower::generate_record_drop_sources(&all_type_decls, &anon_recs),
     );
-    let ir = if drops.trim().is_empty() { ir } else { source_to_ir(&format!("{source}\n{drops}")) };
+    let ir = if drops.trim().is_empty() {
+        ir
+    } else {
+        // Re-lower WITH the same self-modules in scope — the drop fns may reference
+        // cross-module record/variant type decls (the resolved siblings).
+        source_to_ir_with(&format!("{source}\n{drops}"), &self_modules)
+    };
 
     // Top-level `let` globals (VarId -> Ty), union of program + module top_lets.
     let mut globals: HashMap<almide_ir::VarId, almide_lang::types::Ty> = HashMap::new();
@@ -141,6 +338,48 @@ fn main() {
         );
         for w in &walled {
             eprintln!("  {w}");
+        }
+    }
+
+    // Lower the linked USER-module functions (`bindgen.get_str`, `self.classifier.classify`) that
+    // the target's resolved `CallTarget::Named { almide_rt_<m>_<f> }` now references, renamed to the
+    // SAME mangled name — so the call resolves to a real wasm definition. Each is lowered SEPARATELY
+    // (its own per-module VarId region + the shared globals), avoiding any IR-level var_table merge.
+    // A sibling that itself WALLS is silently skipped (NOT reported — Task-1 dedup: a sibling's own
+    // walls are reported only when that sibling is the sweep TARGET); the target then fails the
+    // unlinked-call render wall if it truly needed that sibling, which is honest. Stdlib modules stay
+    // out (handled by the self-host runtime auto-link below). No-op when there are no user modules.
+    let already: std::collections::HashSet<String> =
+        functions.iter().map(|f| f.name.clone()).collect();
+    for m in &ir.modules {
+        if almide_lang::stdlib_info::is_any_stdlib(m.name.as_str()) {
+            continue;
+        }
+        let mname = m.name.as_str().to_string();
+        for func in &m.functions {
+            if func.is_test {
+                continue;
+            }
+            let mangled = user_module_fn_name(&mname, func.name.as_str());
+            if already.contains(&mangled) {
+                continue;
+            }
+            if let Ok(mirs) = almide_mir::lower::lower_function_all_with_globals(
+                func,
+                &globals,
+                &global_inits,
+                &record_layouts,
+                &variant_layouts,
+            ) {
+                // mirs[0] is the sibling fn — rename to the mangled call-site name; lambda-lifted
+                // auxiliaries (mirs[1..]) keep their fresh names (already unique).
+                for (i, mut mir) in mirs.into_iter().enumerate() {
+                    if i == 0 {
+                        mir.name = mangled.clone();
+                    }
+                    functions.push(mir);
+                }
+            }
         }
     }
 
