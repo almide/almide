@@ -135,7 +135,7 @@ impl LowerCtx {
         // (a capturing lambda has no liftable FuncRef). A non-inlinable form (a first-class
         // Var closure, a heap element/result, a side-effecting body) returns `None` and
         // falls through to the existing `lift_lambda` / self-host-combinator routing.
-        if module == "list" && matches!(func, "map" | "filter" | "fold") {
+        if module == "list" && matches!(func, "map" | "filter" | "fold" | "flat_map" | "filter_map") {
             if let Some(dst) = self.try_lower_defunc_list_hof(func, args, result_ty) {
                 return Ok(dst);
             }

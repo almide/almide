@@ -161,6 +161,9 @@ impl LowerCtx {
         // value isn't tracked here cannot be Dup'd → defer.
         let all_lowerable = elements.iter().all(|e| match &e.kind {
             IrExprKind::LitStr { .. } | IrExprKind::BinOp { op: BinOp::ConcatStr, .. } => true,
+            // A `${...}` interpolation element (`["", "[[${emit_path(...)}]]"]` — the toml
+            // emit_sections shape): a fresh owned String, moved into the slot exactly like a concat.
+            IrExprKind::StringInterp { .. } => elem_str,
             IrExprKind::Var { id } => self.value_of.contains_key(id),
             IrExprKind::Record { .. } => elem_scalar_aggregate,
             IrExprKind::Tuple { .. } => elem_scalar_aggregate || elem_str_value || elem_int_str,
@@ -250,6 +253,8 @@ impl LowerCtx {
                     });
                     obj
                 }
+                // A `${...}` interpolation element → a fresh owned String via the interp concat chain.
+                IrExprKind::StringInterp { parts } => self.try_lower_string_interp(parts)?,
                 _ => self.try_lower_concat_str(elem)?,
             };
             let off = self.fresh_value();
