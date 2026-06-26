@@ -734,8 +734,11 @@ impl LowerCtx {
         acc: ValueId,
     ) -> Option<()> {
         use crate::PrimKind;
-        // ONLY an Option subject (the json.get / list.first shape). A Result / custom variant / a
-        // non-self-host Option declines (the merged-value path or a wall handles those).
+        // ONLY an INLINE self-host Option CALL subject (`match json.get(case, "payload") { … }`). A
+        // let-bound Var subject (`let pv = json.get(…); match pv { … }`) is NOT admitted: borrowing
+        // that Option block in the unit-append context produced an EMPTY some-arm (WRONG bytes — a value
+        // miscompile the leak oracle does not catch), so it WALLs honestly until that read is
+        // understood. A Result / custom variant / a non-self-host Option also declines.
         if arms.len() != 2
             || arms.iter().any(|a| a.guard.is_some())
             || !is_self_host_option_call(subject)
@@ -745,9 +748,10 @@ impl LowerCtx {
         }
         let ops_mark = self.ops.len();
         let lhh_mark = self.live_heap_handles.len();
-        // Materialize the per-element subject into a FRESH OWNED Option block + track it like the
-        // statement/value match entry does (so the heap-payload bind gate opens AND the scope-end /
-        // post-arm drop is the recursive DropListStr that frees the owned Value payload).
+        // Materialize the per-element subject into a FRESH OWNED Option block (cert `i`), dropped AFTER
+        // the arms (cert `d`) within THIS iteration — the per-iteration `i…d` balance. Track it like the
+        // statement/value match entry (so the heap-payload bind gate opens AND the post-arm drop is the
+        // recursive DropListStr that frees the owned Value payload).
         let subj = match self
             .lower_call_args(std::slice::from_ref(subject))
             .ok()
@@ -856,11 +860,11 @@ impl LowerCtx {
             self.live_heap_handles.truncate(lhh_mark);
             return None;
         }
-        // SUBJECT-DROP-AFTER-ARMS: the Some payload borrowed slot-0, so the subject stayed live
-        // through both arms — drop the OWNED per-iteration subject ONCE here (the recursive
-        // DropListStr frees it + its owned Value payload). A BORROWED subject (not in
-        // `live_heap_handles` — never, here: a fresh json.get result is always owned) would be left
-        // untouched. This closes the per-iteration `i…d` balance.
+        // SUBJECT-DROP-AFTER-ARMS: the Some payload borrowed slot-0, so the fresh per-iteration Option
+        // stayed live through both arms — drop it ONCE here (the recursive DropListStr frees it + its
+        // owned Value payload), closing the per-iteration `i…d` balance. The subject is ALWAYS a fresh
+        // owned inline-call result (the Var-subject borrow form is gated out above), so this drop is
+        // unconditional.
         if let Some(pos) = self.live_heap_handles.iter().rposition(|&v| v == subj) {
             self.live_heap_handles.remove(pos);
             let op = self.drop_op_for(subj);

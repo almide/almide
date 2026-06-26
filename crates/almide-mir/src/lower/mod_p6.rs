@@ -787,15 +787,278 @@ fn desugar_nested_branch_arms(body: &IrExpr, next_var: &mut u32) -> Option<IrExp
             })
         }
         IrExprKind::Block { stmts, expr: Some(tail) } => {
-            let nt = desugar_heap_branches_inner(tail, next_var)?;
+            // Recurse into BOTH the block's `let`-bind STMT values AND its tail. A HOF call binding
+            // `let case_lines = cases |> list.flat_map((entry) => { … let cond = if … ; … })` hides a
+            // let-bound heap `if` inside the lambda arg — only reachable by descending the bind value.
+            // The stmt-value recursion uses the FOCUSED `desugar_lambda_let_branches` (let-bound-branch
+            // duplication ONLY, into nested if/match/block/lambda) — NOT the full `desugar_heap_branches
+            // _inner` fixpoint, whose function-body-tuned passes regress an already-lowerable bind value
+            // (julia `gen_variant_types`'s `let case_lines = <flat_map of match {…}+[""]>` walled when run
+            // through the full fixpoint). The tail KEEPS the full fixpoint (the existing nested-arm path).
+            let mut changed = false;
+            let new_stmts: Vec<IrStmt> = stmts
+                .iter()
+                .map(|s| match &s.kind {
+                    IrStmtKind::Bind { var, mutability, ty, value } => {
+                        match desugar_lambda_let_branches(value) {
+                            Some(nv) => {
+                                changed = true;
+                                IrStmt {
+                                    kind: IrStmtKind::Bind {
+                                        var: *var,
+                                        mutability: *mutability,
+                                        ty: ty.clone(),
+                                        value: nv,
+                                    },
+                                    span: s.span.clone(),
+                                }
+                            }
+                            None => s.clone(),
+                        }
+                    }
+                    _ => s.clone(),
+                })
+                .collect();
+            let nt = desugar_heap_branches_inner(tail, next_var);
+            if nt.is_some() {
+                changed = true;
+            }
+            if !changed {
+                return None;
+            }
             Some(IrExpr {
-                kind: IrExprKind::Block { stmts: stmts.clone(), expr: Some(Box::new(nt)) },
+                kind: IrExprKind::Block {
+                    stmts: new_stmts,
+                    expr: Some(Box::new(nt.unwrap_or_else(|| (**tail).clone()))),
+                },
+                ty: body.ty.clone(),
+                span: body.span.clone(),
+                def_id: body.def_id,
+            })
+        }
+        // A `list.map`/`flat_map`/… CALL carrying an INLINE-LAMBDA arg whose body hides a LET-BOUND
+        // heap `if`/`match` (the bindgen `gen_pack_variant` outer flat_map's `let cond = if idx==0
+        // then "if" else "elseif"`). Apply ONLY the let-bound-branch tail-duplication INSIDE the
+        // lambda body (`desugar_lambda_let_branches`) — NOT the full `desugar_heap_branches_inner`
+        // fixpoint, whose other passes (match-subject-hoist, call-arg `if`/unwrap lifts) are tuned for
+        // the FUNCTION-body lowering path and would mangle an already-lowerable defunc-lambda shape (a
+        // `match {…} + [""]` body regressed when run through the full fixpoint). This stays a STRICT
+        // no-op for a lambda WITHOUT a let-bound heap-branch (julia `gen_variant_types` is untouched).
+        // Applied BEFORE both the defunc lowering and the `count_ir_calls` gate (desugar-before-both:
+        // both see the IDENTICAL duplicated lambda body, mir==ir 1:1 by construction). Params/lambda_id
+        // are preserved so the defunc inliner binds the same params.
+        IrExprKind::Call { target, args, type_args } => {
+            let mut changed = false;
+            let new_args: Vec<IrExpr> = args
+                .iter()
+                .map(|a| match &a.kind {
+                    IrExprKind::Lambda { params, body: lam_body, lambda_id } => {
+                        match desugar_lambda_let_branches(lam_body) {
+                            Some(nb) => {
+                                changed = true;
+                                IrExpr {
+                                    kind: IrExprKind::Lambda {
+                                        params: params.clone(),
+                                        body: Box::new(nb),
+                                        lambda_id: *lambda_id,
+                                    },
+                                    ty: a.ty.clone(),
+                                    span: a.span.clone(),
+                                    def_id: a.def_id,
+                                }
+                            }
+                            None => a.clone(),
+                        }
+                    }
+                    _ => a.clone(),
+                })
+                .collect();
+            if !changed {
+                return None;
+            }
+            Some(IrExpr {
+                kind: IrExprKind::Call {
+                    target: target.clone(),
+                    args: new_args,
+                    type_args: type_args.clone(),
+                },
                 ty: body.ty.clone(),
                 span: body.span.clone(),
                 def_id: body.def_id,
             })
         }
         _ => None,
+    }
+}
+
+/// FOCUSED let-bound-heap-branch desugar for a DEFUNC-LAMBDA BODY (`(entry) => { … let cond = if …;
+/// … }`). Applies ONLY the let-bound-branch tail-duplication (`desugar_let_bound_heap_branch`),
+/// recursing through the body's nested structure (Block stmts + tail, if/match arms, and INNER HOF
+/// lambdas) — NOT the full `desugar_heap_branches_inner` fixpoint, whose match-subject-hoist /
+/// call-arg lift passes are tuned for the function-body lowering and REGRESS an already-lowerable
+/// defunc-lambda shape (a `match {…} + [""]` body). A STRICT no-op when the lambda body has no
+/// let-bound heap-branch. Returns `Some(rewritten)` when a duplication fired, `None` otherwise.
+///
+/// SOUNDNESS: identical to `desugar_let_bound_heap_branch` — a PURE IR→IR tail-duplication (each arm
+/// binds its value + runs the continuation, per-arm `i…d` balance, only one arm runs = v0-identical,
+/// NO cert/Coq change). Applied desugar-before-both (the shared desugar runs over the lambda body for
+/// BOTH the defunc lowering and the caps `count_ir_calls` gate), so mir==ir 1:1 holds by construction.
+fn desugar_lambda_let_branches(body: &IrExpr) -> Option<IrExpr> {
+    // Fixpoint: apply the let-bound-branch duplication at THIS position until it stops firing (the
+    // continuation may expose a second let-bound branch — the bounded gate caps the depth), then
+    // recurse structurally so a duplication INSIDE an arm / inner lambda is reached too.
+    let mut cur: Option<IrExpr> = None;
+    loop {
+        let src = cur.as_ref().unwrap_or(body);
+        if let Some(r) = desugar_let_bound_heap_branch(src) {
+            cur = Some(r);
+            continue;
+        }
+        break;
+    }
+    let src_owned = cur;
+    let src = src_owned.as_ref().unwrap_or(body);
+    // Recurse structurally (let-branch desugar only) into the parts that may host a defunc lambda or a
+    // nested let-bound branch. A change anywhere — here or the top-level duplication above — yields Some.
+    let recursed = match &src.kind {
+        IrExprKind::Block { stmts, expr: Some(tail) } => {
+            let mut changed = false;
+            let new_stmts: Vec<IrStmt> = stmts
+                .iter()
+                .map(|s| match &s.kind {
+                    IrStmtKind::Bind { var, mutability, ty, value } => {
+                        match desugar_lambda_let_branches(value) {
+                            Some(nv) => {
+                                changed = true;
+                                IrStmt {
+                                    kind: IrStmtKind::Bind {
+                                        var: *var,
+                                        mutability: *mutability,
+                                        ty: ty.clone(),
+                                        value: nv,
+                                    },
+                                    span: s.span.clone(),
+                                }
+                            }
+                            None => s.clone(),
+                        }
+                    }
+                    _ => s.clone(),
+                })
+                .collect();
+            let nt = desugar_lambda_let_branches(tail);
+            if nt.is_some() {
+                changed = true;
+            }
+            if changed {
+                Some(IrExpr {
+                    kind: IrExprKind::Block {
+                        stmts: new_stmts,
+                        expr: Some(Box::new(nt.unwrap_or_else(|| (**tail).clone()))),
+                    },
+                    ty: src.ty.clone(),
+                    span: src.span.clone(),
+                    def_id: src.def_id,
+                })
+            } else {
+                None
+            }
+        }
+        IrExprKind::If { cond, then, else_ } => {
+            let nt = desugar_lambda_let_branches(then);
+            let ne = desugar_lambda_let_branches(else_);
+            if nt.is_none() && ne.is_none() {
+                None
+            } else {
+                Some(IrExpr {
+                    kind: IrExprKind::If {
+                        cond: cond.clone(),
+                        then: Box::new(nt.unwrap_or_else(|| (**then).clone())),
+                        else_: Box::new(ne.unwrap_or_else(|| (**else_).clone())),
+                    },
+                    ty: src.ty.clone(),
+                    span: src.span.clone(),
+                    def_id: src.def_id,
+                })
+            }
+        }
+        IrExprKind::Match { subject, arms } => {
+            let mut changed = false;
+            let new_arms: Vec<almide_ir::IrMatchArm> = arms
+                .iter()
+                .map(|a| match desugar_lambda_let_branches(&a.body) {
+                    Some(nb) => {
+                        changed = true;
+                        almide_ir::IrMatchArm {
+                            pattern: a.pattern.clone(),
+                            guard: a.guard.clone(),
+                            body: nb,
+                        }
+                    }
+                    None => a.clone(),
+                })
+                .collect();
+            if changed {
+                Some(IrExpr {
+                    kind: IrExprKind::Match { subject: subject.clone(), arms: new_arms },
+                    ty: src.ty.clone(),
+                    span: src.span.clone(),
+                    def_id: src.def_id,
+                })
+            } else {
+                None
+            }
+        }
+        // An inner HOF call (`get_arr(pl,"fields") |> list.flat_map((pe) => { … })`): recurse into its
+        // lambda args so a let-bound branch in a NESTED loop body is reached too.
+        IrExprKind::Call { target, args, type_args } => {
+            let mut changed = false;
+            let new_args: Vec<IrExpr> = args
+                .iter()
+                .map(|a| match &a.kind {
+                    IrExprKind::Lambda { params, body: lam_body, lambda_id } => {
+                        match desugar_lambda_let_branches(lam_body) {
+                            Some(nb) => {
+                                changed = true;
+                                IrExpr {
+                                    kind: IrExprKind::Lambda {
+                                        params: params.clone(),
+                                        body: Box::new(nb),
+                                        lambda_id: *lambda_id,
+                                    },
+                                    ty: a.ty.clone(),
+                                    span: a.span.clone(),
+                                    def_id: a.def_id,
+                                }
+                            }
+                            None => a.clone(),
+                        }
+                    }
+                    _ => a.clone(),
+                })
+                .collect();
+            if changed {
+                Some(IrExpr {
+                    kind: IrExprKind::Call {
+                        target: target.clone(),
+                        args: new_args,
+                        type_args: type_args.clone(),
+                    },
+                    ty: src.ty.clone(),
+                    span: src.span.clone(),
+                    def_id: src.def_id,
+                })
+            } else {
+                None
+            }
+        }
+        _ => None,
+    };
+    // Some if EITHER the top-level duplication fired OR a structural recursion changed something.
+    match (src_owned, recursed) {
+        (_, Some(r)) => Some(r),
+        (Some(s), None) => Some(s),
+        (None, None) => None,
     }
 }
 
