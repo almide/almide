@@ -13,15 +13,22 @@ reached wall=0 but have not yet been byte-verified — exactly where a silent mi
 ## Update (2026-06-26 pm) — wall-clearing campaign + the feasibility floor
 
 A focused lever sweep (diagnose all walls → fix the contained ones, byte-matched + corpus-wall
-ACCEPT + 0 backend-split each): **9/16 `src/` repos now at wall=0** (yaml, sha1, svg, rsa, csv,
-bigint, base64, almide-lander, **almide-bindgen** new). Levers landed this round, with per-repo wall
-deltas (single-file sweep): **tuple call-args** (3→0); **concat-operand heap branches** (`lhs + if…`
-ANF-lifted); **`json.as_array` self-host** + `option.listvalue_unwrap_or` (the get_arr List[Value]
-sibling of json.get); **flat_map/filter_map defunctionalizer** (capturing closures lower inline —
-dojo `hints_block`); **heap-nested record returns** (a record field that is itself a recursive-drop
-record, via a synthesized `__drop_anonrec_<hash>` for the anonymous outer); and a real **mutable
-heap-field-var silent-miscompile fix** (`var iv = state.iv` had bound the whole container — a
-header-read miscompile). Net: **almide-wasm-bindgen 15→3**, **almide-bindgen 1→0**, porta 33→31,
+ACCEPT + 0 backend-split each): **11/16 `src/` repos now at wall=0** (yaml, sha1, svg, rsa, csv,
+bigint, base64, almide-lander, **almide-bindgen**, **almide-web**, **almide-grammar** — last three
+new). Levers landed this round, with per-repo wall deltas (single-file sweep): **tuple call-args**
+(3→0); **concat-operand heap branches** (`lhs + if…` ANF-lifted); **`json.as_array` self-host** +
+`option.listvalue_unwrap_or` (the get_arr List[Value] sibling of json.get); **flat_map/filter_map
+defunctionalizer** (capturing closures lower inline — dojo `hints_block`); **heap-nested record
+returns** (a record field that is itself a recursive-drop record, via a synthesized
+`__drop_anonrec_<hash>` for the anonymous outer); a real **mutable heap-field-var silent-miscompile
+fix** (`var iv = state.iv` had bound the whole container — a header-read miscompile); **`@extern(wasm)`
+→ real wasm imports** (almide-web 22→0, browser host imports — 🟡 not wasmtime-byte-matchable);
+**heap-element List literal returns** (almide-grammar 3→0); and — caught BY that grammar work — a
+**`for p in <heap-aggregate-list> { p.0 }` silent-miscompile walled** (the model-one-iteration
+fallback aliased the loop element to the whole container, so a field/index projection read the
+container; now honestly walled for exactly the projecting shape, destructure/scalar/whole-element
+unaffected). Net: **almide-wasm-bindgen 15→3**, **almide-bindgen 1→0**, **almide-web 22→0**,
+**almide-grammar 3→0**, porta 33→31,
 dojo 2→1.
 
 **The feasibility floor (why "all walls = 0" is partly structural, not a lowering gap):**
@@ -32,14 +39,17 @@ dojo 2→1.
   to lower to (a fabricated `Opaque`/`0` would be a silent miscompile; emitting an unsatisfiable
   wasm import would be a hollow wall=0 that no host can instantiate). These repos are **not
   wasm-trust-spine candidates** — the wall is the correct answer, the same category as a `▫` row.
-- **almide-web (~22) is the only host-stub repo that IS wasm-targetable** — its stubs are
-  `@extern(wasm, "dom"/"fetch"/"timer"/"console", …)` BROWSER imports. Emitting real wasm
-  `(import …)` + `(call $…)` bodies lowers them (wall=0) faithfully, but they are 🟡 — a browser
-  host, not wasmtime, satisfies the imports, so they are not byte-matchable on the wasmtime oracle.
-- **The remaining ~10 (wasm-bindgen 3, grammar 3, aes 2, dojo 1, toml 1) are genuine but DEEP
-  frontiers:** the let-bound heap-result `if` with a MIXED-ownership arm (`else version` borrowed)
-  and the loop-reassigned owned-field var (aes cfb8 `iv`) — both need an ownership-cert / Coq rule
-  (the `IfThen`-merged single-drop lemma; the option-C per-iteration owned-slot release), walled to
+- **almide-web (22→0, DONE) was the one host-stub repo that IS wasm-targetable** — its stubs were
+  `@extern(wasm, "dom"/"fetch"/"timer"/"console", …)` BROWSER imports, now emitted as real wasm
+  `(import …)` + `(call $…)` bodies (wall=0) faithfully. They are 🟡 — a browser host, not wasmtime,
+  satisfies the imports, so they are not byte-matchable on the wasmtime oracle (the module validates;
+  wasmtime reports "unknown import", the expected signal).
+- **The remaining ~7 (wasm-bindgen 3, aes 2, dojo 1, toml 1) are genuine but DEEP
+  frontiers:** the let-bound heap-result `if` with a MIXED-ownership arm (`else version` borrowed —
+  toml/dojo), the loop-reassigned owned-field var (aes cfb8 `iv`), the heap-payload variant `match`
+  (wasm-bindgen, Camp-4), and the for-loop heap-aggregate per-element borrow (now walled, honest) —
+  all need an ownership-cert / Coq rule (the `IfThen`-merged single-drop lemma; the option-C
+  per-iteration owned-slot release; the per-element aggregate borrow), walled to
   avoid a leak rather than mis-lowered.
 
 So the achievable wall=0 frontier is the pure-data + browser-import repos; porta/sqlite are a
