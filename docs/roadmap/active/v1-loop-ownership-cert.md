@@ -582,3 +582,29 @@ ACCEPT, 0 backend-split. `generate_wit` fully clears.
   effect-monad let-bind-`!` (#22) on top of the value/record-element conditional append.
 - **porta 29 + sqlite 20 native-only** — `@extern(rust)` host stubs, no wasm form (physically not
   lowerable; reclassify only — a user accounting decision, not a lowering task).
+
+## The 5 real lowering-walls (user-approved 2026-06-27 "両方: 分離 + 5 実装") — precise diagnoses
+
+The @extern(rust) reclassification (39 native-FFI host-imports → separate category) is DONE in
+org-trust-status.md. The 5 real lowering walls to implement:
+
+1. **wasm-bindgen generate_dts/esm (2)** — capturing list.filter/filter_map over List[Value]: needs the
+   OwnershipFilter.v CondLoop integration (the conditional-acquire). OwnershipFilter.v (the Coq core) is
+   proven + in the gate (5d3b642f); the capturing String/Value filter write-cursor clone+consume already
+   lowers (5a0a9efb) — the residual is the (List,List) tuple-fold dedup + the nested-defunc shapes.
+2. **dojo backfill_dir (1)** — capturing filter_map whose closure calls fs.read_text: the effect-monad
+   let-bind-`!` (#22) + the value/record-element conditional append.
+3. **porta proxy.start (1)** — heap-result `match` + `validate(c)!` (the effect-monad let-bind-`!`, #22).
+4. **porta observability.format_tool_log (1)** — `"…${if success then "ok" else "error"}"`: a StringInterp
+   with an embedded heap-result-`if` part. PRECISE DIAGNOSIS: the manual ConcatStr `("" + "a=") + (if c
+   then "x" else "y")` LOWERS + byte-matches (the desugared form is fine), but the StringInterp PATH walls
+   — try_lower_string_interp (calls_p2.rs:188-189) desugars to that exact tree then lowers it via
+   `try_lower_concat_str` (→ lower_call_args, which declines the heap-result-if operand), whereas a manual
+   ConcatStr return goes through lower_tail's ConcatStr handling (which materializes the if). SAME IR tree,
+   DIFFERENT lowering entry. FIX: route try_lower_string_interp's desugared tree through the same
+   if-materializing path lower_tail uses for a ConcatStr (not try_lower_concat_str), OR teach
+   try_lower_concat_str / lower_call_args to materialize a heap-result-if operand. Needs a MIR-op dump of
+   nest (works) vs sc2 (walls) to pin the exact entry difference. #60 (StringInterp desugar) territory.
+
+#22 (effect-monad let-bind-`!`) is the keystone for walls 2 + 3. The OwnershipLoop conditional-acquire +
+the (List,List) tuple-fold is the keystone for wall 1. Wall 4 is the StringInterp-if path fix above.
