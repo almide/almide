@@ -547,9 +547,24 @@ ACCEPT, 0 backend-split. `generate_wit` fully clears.
   flat_map Block arm DOES lower inner stmts via lower_stmt (so `let param_ty` registers), yet the synthetic
   `fs |> flat_map((f) => { let tag = (p)=>p+":"+f; ["a","b"] |> map(tag) })` (tag captures the outer
   flat_map param `f`) still walls the OUTER flat_map — a deeper interaction between the outer str-acc body
-  walk and an inner map(captured-let-lambda) whose capture is the outer HOF param. Precise next step: trace
-  why the outer flat_map's lower_defunc_str_acc_hof declines when its body's tail is an inner-map result
-  that closes over the outer element param. (yaml-style deep frontier, multi-feature.)
+  walk and an inner map(captured-let-lambda) whose capture is the outer HOF param. NARROWED FURTHER (2026-06-27) to a PRECISE position-dependent bug: `xs |> list.map(tag)` where
+  `tag` is a let-bound lambda (`let tag = (p) => …`) LOWERS in TAIL/value position (the 9757d56a fix —
+  n2/n1d byte-match) but WALLS in BIND position (`let parts = xs |> list.map(tag); parts` — n1e/n1f/n1h all
+  wall "list.map with an unliftable/closure-list higher-order argument"), for BOTH heap (List[String]) and
+  scalar (List[Int]) results, capturing or not. BOTH positions call the SAME
+  lower_pure_module_value_call → try_lower_defunc_list_hof (calls.rs:89/139), with `tag` registered in
+  lambda_bindings (binds_p2:280, unconditional) before the use — yet the bind position's
+  try_lower_defunc_list_hof returns None (→ funcref-drop → last_call_had_unlifted_closure=true → the
+  binds_p2:642 guard walls), while the tail's returns Some (the 211 clear). An INLINE-lambda bind
+  (`let parts = xs |> map((p) => …)`) works in bind position — so it is SPECIFIC to the let-bound-lambda
+  (Var) resolution differing by position. The defunc path does NOT read binding_var/binding_is_mutable, so
+  the difference is subtler (IR args structure of `tag` in the bind RHS vs the tail, or a state set by
+  lower_bind before calls.rs:609). NEXT: dump the MIR ops/args for n1d (works) vs n1e (walls) and diff the
+  `tag` arg node + the lambda_bindings state at the try_lower_defunc_list_hof call — a focused IR-level
+  session. Fixing blind risks masking a real unfaithful-HOF wall (a silent miscompile), so it must land
+  with the ops-diff + byte-match, not a guess. generate_dts/esm's `sigs` hits exactly this (the inner
+  `params |> list.map((p) => …${param_ty(p)}…)` where `param_ty` is a let lambda, AND the `let params_str =`
+  bind of that map).
 - **dojo backfill_dir (1)** — the capturing `filter_map` whose closure calls fs.read_text → needs the
   effect-monad let-bind-`!` (#22) on top of the value/record-element conditional append.
 - **porta 29 + sqlite 20 native-only** — `@extern(rust)` host stubs, no wasm form (physically not
