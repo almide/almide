@@ -76,6 +76,30 @@ impl LowerCtx {
         })?;
         let src = match &container.kind {
             IrExprKind::Var { id } if is_heap_ty(&container.ty) => self.value_or_global(*id)?,
+            // ANF-LIFT a CALL-result container (`f(x).field`, `f(x)[i]`, `f(x).0` — the aes
+            // `cfb8_encrypt(state, plain).data` / dojo `classify(r).0` shape). The container is a
+            // Call producing a FRESH OWNED heap value, not a let-bound var, so neither the
+            // container-grain `Dup` (no source value to alias) nor the precise field borrow (keyed
+            // on a tracked Var) can fire. MATERIALIZE the call to a fresh synthetic temp by reusing
+            // the exact `lower_bind` path a `let tmp = f(x)` takes — it emits the `CallFn`, tracks
+            // the result in `live_heap_handles` for a single scope-end (recursive) drop, and seeds
+            // its READ shape (`materialized_aggregates` + masks / `seed_variant_param`). Then RE-RUN
+            // this extraction over a synthetic `Var` denoting the temp: the precise field/element
+            // borrow now resolves exactly as it does for a source `let tmp = f(x); tmp.field`. The
+            // borrowed field is alive for the whole expression (the temp outlives it, dropped at
+            // scope end), so it is a sound lifetime — identical cert to the proven let-bound form.
+            IrExprKind::Call { .. } if is_heap_ty(&container.ty) => {
+                let tmp = self.fresh_synth_var();
+                self.lower_bind(tmp, &container.ty, container)?;
+                let synth_container = IrExpr {
+                    kind: IrExprKind::Var { id: tmp },
+                    ty: container.ty.clone(),
+                    span: container.span,
+                    def_id: None,
+                };
+                let synth_extraction = rebuild_extraction(expr, synth_container);
+                return self.lower_heap_extraction(&synth_extraction);
+            }
             other => {
                 return Err(LowerError::Unsupported(format!(
                     "heap extraction whose container is {} (not a tracked heap var) not in this brick",

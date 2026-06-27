@@ -170,6 +170,34 @@ pub(crate) fn extraction_container(expr: &IrExpr) -> Option<&IrExpr> {
     }
 }
 
+/// Rebuild a field/element/tuple/map EXTRACTION `expr` with its container (object) replaced by
+/// `new_container`, preserving the extracted field/index and the result type/span. Used to ANF-lift
+/// a Call-result container (`f(x).field`) to a synthetic temp Var before re-running the extraction
+/// (see [`LowerCtx::lower_heap_extraction`]). Precondition: `expr` is one of the four extraction
+/// kinds (the caller checked via [`extraction_container`]); any other kind is returned unchanged.
+pub(crate) fn rebuild_extraction(expr: &IrExpr, new_container: IrExpr) -> IrExpr {
+    let kind = match &expr.kind {
+        IrExprKind::Member { field, .. } => IrExprKind::Member {
+            object: Box::new(new_container),
+            field: *field,
+        },
+        IrExprKind::TupleIndex { index, .. } => IrExprKind::TupleIndex {
+            object: Box::new(new_container),
+            index: *index,
+        },
+        IrExprKind::IndexAccess { index, .. } => IrExprKind::IndexAccess {
+            object: Box::new(new_container),
+            index: index.clone(),
+        },
+        IrExprKind::MapAccess { key, .. } => IrExprKind::MapAccess {
+            object: Box::new(new_container),
+            key: key.clone(),
+        },
+        _ => return expr.clone(),
+    };
+    IrExpr { kind, ty: expr.ty.clone(), span: expr.span, def_id: expr.def_id }
+}
+
 /// True if any argument is a FUNCTION-typed value (a closure / lambda / fn-ref).
 /// A stdlib call with such an argument invokes USER code, so its effective
 /// capabilities are its-own ∪ the closure's — unmodelled in the pure-only Module

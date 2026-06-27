@@ -5,6 +5,16 @@ impl LowerCtx {
         id
     }
 
+    /// A fresh SYNTHETIC temp VarId, allocated descending from `u32::MAX` so it can never collide
+    /// with a frontend-assigned source VarId. Used to ANF-lift a Call-result whose heap field /
+    /// element / tuple component is extracted directly (`f(x).field`): bind the call to this temp
+    /// (materialized + tracked exactly like a source `let`), then extract from the temp.
+    pub(crate) fn fresh_synth_var(&mut self) -> almide_ir::VarId {
+        let id = almide_ir::VarId(u32::MAX - self.synth_var_count);
+        self.synth_var_count += 1;
+        id
+    }
+
     /// Seed the parameters: each param's VarId maps to a fresh MIR value (so uses
     /// in the body resolve) and becomes a [`MirParam`] carrying its [`Repr`] (so
     /// the name-totality witness counts it as DEFINED — every param use must have

@@ -652,6 +652,11 @@ pub(crate) struct LowerCtx {
     /// so it must take an OWNED container-grain `Dup` (mutable in place), NOT a precise borrow
     /// (a shared field handle the value-model refuses to mutate). Read by `lower_heap_extraction`.
     binding_is_mutable: bool,
+    /// Count of SYNTHETIC temp VarIds allocated while lowering this function (for ANF-lifting a
+    /// Call-result whose heap field/element/tuple is extracted directly — `f(x).field`). Each
+    /// synthetic id is `u32::MAX - n`, descending from the top of the VarId space so it can never
+    /// collide with a frontend-assigned source VarId. See [`LowerCtx::fresh_synth_var`].
+    synth_var_count: u32,
     /// The VarId of the CURRENT `Bind` being lowered (set by `lower_stmt`), so the value-lowering
     /// can ask whether THIS var is loop-reassigned (`loop_reassigned_vars`). `None` outside a
     /// statement bind (a sub-expression / argument materialization).

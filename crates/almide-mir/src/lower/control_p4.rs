@@ -1026,18 +1026,13 @@ impl LowerCtx {
             _ => return false,
         };
         let elem_heap = is_heap_ty(&elem_ty);
-        // A heap-AGGREGATE element (tuple/record) read via a direct FIELD/INDEX projection
-        // (`for p in ps { p.0 }`) projects off the WRONG handle here — a silent miscompile. Decline
-        // ONLY that projecting case (`body_reads_var_field`) so it falls to lower_for_in, which WALLs
-        // it (honest). A `let (x, y) = p` destructure (tuple PATTERN) or passing `p` whole is loaded
-        // correctly by this real per-element loop, so it is NOT declined (no regression).
-        if elem_heap
-            && self.aggregate_field_tys(&elem_ty).is_some()
-            && var_tuple.is_none()
-            && body_reads_var_field(body, var)
-        {
-            return false;
-        }
+        // A heap-AGGREGATE element (tuple/record) is bound below as the slot's BORROWED block handle
+        // (`LoadHandle` + registered in `materialized_aggregates`), so a direct FIELD/INDEX projection
+        // (`for p in ps { p.0 }` / `for r in rs { r.x }`) projects off the ELEMENT block — the same
+        // per-element borrow map/filter give a `List[record]`/`List[Value]` lambda param. A `let (x, y)
+        // = p` destructure (tuple PATTERN) or passing `p` whole already worked; both now share the
+        // element-precise borrow.
+        let elem_is_aggregate = elem_heap && self.aggregate_field_tys(&elem_ty).is_some();
         // The element SHAPE (scalar vs heap) comes from the iterable's element type, so the loop var
         // is bound correctly even when it is UNUSED in the body (an `for _ in xs`, or a loop kept for
         // its effect count) — `find_var_ty` returns None then, which must NOT fall to the model-one-
@@ -1136,6 +1131,15 @@ impl LowerCtx {
             self.ops.push(Op::Prim { kind: PrimKind::LoadHandle, dst: Some(elem), args: vec![addr] });
             self.value_of.insert(var, elem);
             self.param_values.insert(elem);
+            // A heap-AGGREGATE element (tuple/record): register the borrowed block handle as a
+            // materialized aggregate so a `p.0`/`r.x` field projection and a `let (x, y) = p`
+            // destructure read the ELEMENT's slots (not the container) — the same per-element borrow
+            // map/filter give an aggregate lambda param. The list still OWNS the element (its
+            // recursive drop frees it), so this is a BORROW (already in `param_values`), not a second
+            // owner — no double-free.
+            if elem_is_aggregate {
+                self.materialized_aggregates.insert(elem);
+            }
         }
 
         let body_mark = self.live_heap_handles.len();
