@@ -43,11 +43,20 @@ impl LowerCtx {
             "fold" if args.len() == 3 => (&args[0], 2usize, Some(1usize)),
             _ => return None,
         };
-        // The CLOSURE arg MUST be an INLINE lambda (`(x) => …`). A first-class Var/FnRef
-        // closure is C2 (not inlinable here) — defer to the self-host path / WALL.
-        let (params, body) = match &args[lambda_idx].kind {
-            IrExprKind::Lambda { params, body, .. } => (params, body.as_ref()),
-            _ => return None,
+        // The CLOSURE arg is an INLINE lambda (`(x) => …`) OR a `Var` statically bound to a let lambda
+        // (`let g = (x) => …; xs |> list.map(g)` — the wasm-bindgen generate_dts/esm `sigs` shape, where
+        // a flat_map body defines `param_ty` and maps with it). A let-bound lambda is resolved through the
+        // EXISTING `lambda_bindings` registry (the same one the C1 direct-call inline uses) and inlined
+        // identically — its captures resolve through `value_of` exactly like an inline lambda. A first-
+        // class/opaque/FnRef closure is C2 (not inlinable here) → defer to the self-host path / WALL.
+        let resolved_lambda: Option<(Vec<(VarId, Ty)>, IrExpr)> = match &args[lambda_idx].kind {
+            IrExprKind::Lambda { params, body, .. } => Some((params.clone(), (**body).clone())),
+            IrExprKind::Var { id } => self.lambda_bindings.get(id).cloned(),
+            _ => None,
+        };
+        let (params, body) = match &resolved_lambda {
+            Some((p, b)) => (p, b),
+            None => return None,
         };
         // A TUPLE-accumulator `fold((<empty-list>, <int-init>), (state, e) => { let (acc, n) = state;
         // (acc + [<elem>], n + <step>) })` returning `(List[T], Int)` — the wasm-bindgen
