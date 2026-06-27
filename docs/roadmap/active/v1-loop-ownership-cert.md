@@ -917,3 +917,27 @@ on Err. So the COMPLETE dojo fresh-session plan: (1) locate the record/Value-ele
 match body handler, (2) extend it for Result/Ok-Err + Result-call subject + inverse tag (mirroring the
 Option/Some-None logic already there), (3) byte-match a Result-ok/err → List[record] filter_map fixture +
 corpus-wall + oracle. This is the sound, localized mechanism (5 hoist attempts were a detour). lowering-walls=2.
+
+### ⭐ dojo filter_map wall SOLVED (Workflow, commit e44637b0) — the hoist was wrong; write-cursor keep/skip was right
+The 5 hoist attempts were the WRONG mechanism. The actual fix (found by the dojo-record-variant-handler
+Workflow): `try_lower_defunc_list_hof` had NO arm for a filter_map whose result is List[heap-non-String]
+(record/Value). Added `result_filter_map_heap` → `lower_defunc_filter_map_hof`: a WRITE-CURSOR result list
+(like `filter`) that keeps the Ok/Some-arm-built OWNED element (lower_heap_result_arm cert `i` + Consume
+`m`) and skips the Err/None arm, alloc'd at len(xs) and patched to the cursor after the loop — the proven
+capturing-filter conditional-acquire (5a0a9efb). NO hoist, NO tree rewrite. Verified: corpus-wall ALL
+ACCEPT (ownership 19338 / caps 3432), parity 124/124, oracle 0 backend-split, byte-match scalar+str-Result
+→ List[record]. backfill_dir's filter_map wall is GONE. The hoist notes above are superseded — the
+defunc-handler extension (a NEW combinator arm, not a desugar) was the answer, exactly the "extend the
+defunc body lowering" alternative flagged after attempt 4.
+
+### dojo backfill_dir — now walls on fs.write (the LAST dojo wall, a new-capability effectful brick)
+With filter_map cleared, backfill_dir walls on `fs.write(path, content)`: "effectful/impure stdlib Module
+call fs.write needs a declared capability not in this brick" (it was masked by the filter_map wall all
+along). fs.write is NOT in is_admitted_effectful (calls.rs:216, which lists random.int/env.args/
+fs.read_text/fs.list_dir). The fix mirrors the ReadDir brick but needs a NEW capability FsWrite (not
+FsRead): (1) admit fs.write in is_admitted_effectful, (2) a self-host fs_write.almd → prim.write_text_file,
+(3) Op::Prim::WriteTextFile (lib.rs) carrying Capability::FsWrite, (4) lower prim.write_text_file
+(calls_p4.rs, mirror read_text_file:880), (5) the v1 wasm runtime func (path_open O_CREAT|O_WRONLY +
+fd_write), (6) Capability::FsWrite in the Rust enum AND the Coq Capability registry (single-source, #35) +
+cap_witness + the caps gate. The new capability + Coq registry single-source is the soundness-critical part.
+This is the effectful-27 / WASI-write floor (#61 family) — a real brick, the last thing between dojo and 0.
