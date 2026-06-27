@@ -434,3 +434,50 @@ append accumulators.
 
 After C lands end-to-end: the 11 walls fall (with value.object/stringify + tuple-heap for the Value-parser
 subset), driving yaml → 0 — on a PROVEN spine, the v1 completeness ideal.
+
+## ORG wall=0 — the remaining 6 non-native walls, precisely scoped (2026-06-27)
+
+After the cross-module + str-acc/defunc + ReadDir + correctness-sweep campaigns, the org wall surface is
+**12 repos at wall=0; 6 non-native walls + porta 29/sqlite 20 native-only**. The 6 split into TWO mechanisms,
+both verified by reading the actual `.almd` + the wall site:
+
+### Mechanism 1 — aes (2 walls: `cfb8_encrypt`, `cfb8_decrypt`) — REUSES the PROVEN Loop cert, NO new Coq
+Shape (`aes/src/mod.almd:168-193`): `var iv = state.iv` (a `var` bound to a BORROWED heap record FIELD),
+then in `for i in 0..len { … iv = bytes.concat(bytes.slice(iv,1,16), …) }` (reassigned to a FRESH OWNED
+`bytes` each iter), then moved out into the result record (`iv: iv`). This is EXACTLY the proven
+loop-carried slot `[Inc; Loop[FDec;FInc]; MoveOut]` (OwnershipLoop.v) — net-0 per iteration (drop-old +
+acquire-new), move out the final.
+- **Wall site**: `lower/tail.rs:48-64` deliberately WALLS a loop-reassigned (`loop_reassigned_vars`)
+  mutable heap-FIELD var. The non-loop sibling (`:65-78`) already owned-`Dup`s a mutable field var.
+- **The cert machinery ALREADY handles it**: `certificate.rs loop_carried_slots` registers ANY heap-result
+  Call SetLocal'd inside `LoopStart…LoopEnd` as a slot — `bytes.concat` (heap-result) → `iv` slot, loop
+  `(id)`, move-out `m`. The blocker is ONLY that the wall stops lowering before the slot machinery runs.
+- **The fix (approach-3, mirrors the append-accumulator)**: the slot's INIT must be a clean `i`
+  (Alloc/heap-result-Call), NOT a `Dup` (which emits cert `a` with `of[slot]≠slot`). So replace the wall
+  with: emit `var iv`'s init as an OWNED heap-result COPY of the field (a `bytes` clone call →
+  `loop_carried_slots` sees its `i` → routes into the slot), then the loop SetLocal + the move-out fold to
+  `i(id)m` — the PROVEN cert. **Gate: aes ships NIST FIPS-197 test vectors** (`mod.almd:200+`) — a
+  byte-match oracle for free; corpus-wall ownership ACCEPT catches any cert error. aes 2→0, wall 6→4.
+
+### Mechanism 2 — filter/filter_map (4 walls: wasm-bindgen generate_wit/esm/dts, dojo backfill_dir) — NEEDS a NEW Coq construct
+Shape: `types |> list.filter((t) => list.contains(used_names, get_str(t,"name")))` (a CAPTURING closure —
+captures `used_names`); dojo's `list.filter_map((f) => match fs.read_text(dir+"/"+f) {…})` ALSO captures
+`dir` AND is EFFECTFUL. Walled by the campaign's value-position HOF honesty guard (`calls.rs`,
+`last_call_had_unlifted_closure`).
+- **Why it's the genuine Coq frontier** (empirically confirmed: an agent's C1-inline made it byte-match but
+  corpus-wall REJECTed): filter's per-element acquire is **CONDITIONAL** — `if pred then {Inc x; append to
+  out}`. The output list `out` accumulates a RUNTIME-VARIABLE number of clones (k = #trues), balanced not
+  per-iteration but by `out`'s bulk DropList at the end (k Decs). The current OwnershipLoop Loop rule
+  requires the body PRESERVE rc EXACTLY (net-0) — a conditional +k does not. So it REJECTS a SAFE program:
+  a NEW completeness hole, one level beyond the net-0 accumulator.
+- **The needed extension**: a Coq construct for a **conditional-acquire-into-accumulator + bulk-drain** — a
+  loop body that conditionally raises an accumulator's element-count (monotone, non-faulting), balanced by a
+  final `Drain` that releases all. Soundness: for ANY trues-count k, (k conditional Incs into out) =
+  (len out) = (k Decs by DropList out) — balanced regardless of k. Then extract to the OCaml checker, emit
+  the cert for the C1-inlined capturing filter, and route the lowering. dojo's filter_map ALSO needs the
+  effect-monad `!` (the #22 / let-bind-`!` frontier) since its closure is effectful. This is the real,
+  irreducible `#31` Coq work — multi-layer (Coq → extraction → Rust cert → lowering), soundness-critical.
+
+**Plan toward wall=0**: (1) aes (proven-spine reuse, NIST-gated, tractable) → 6→4; (2) the conditional-acquire
+OwnershipLoop construct (new Coq) → wasm-bindgen 3→0 → 4→1; (3) the effect-monad + conditional-acquire for
+dojo's effectful filter_map → 1→0. Then the only walls left are porta/sqlite native-only (reclassify).
