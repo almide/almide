@@ -628,6 +628,18 @@ fn render_op(
                 PrimKind::ReadDir => {
                     format!("(call $read_dir (local.get {}))", local(args[0]))
                 }
+                // write_text_file(path, content) — the WASI file-WRITE floor; path_open(O_CREAT|
+                // O_TRUNC) + fd_write of `content`'s bytes, then builds a fresh owned
+                // `Result[Unit, String]` (Ok(()) / Err) in the preamble helper. Both args are heap
+                // Ptr locals (i32 handles), passed DIRECTLY (no i32.wrap). dst is a heap Ptr
+                // (value_reprs_wasm), so the call result sets the local directly (no i64 extend).
+                PrimKind::WriteTextFile => {
+                    format!(
+                        "(call $write_text_file (local.get {}) (local.get {}))",
+                        local(args[0]),
+                        local(args[1])
+                    )
+                }
                 // RAW refcount ops (the self-host drop/copy mechanism) — reuse the proven $rc_dec/
                 // $rc_inc on the i32-wrapped handle. dst is None (Unit), so the `match dst` below
                 // emits the call as a STATEMENT (no local.set).

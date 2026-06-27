@@ -985,6 +985,18 @@ fn lower_function_all_impl(
         fn_name: func.name.as_str().to_string(),
         record_layouts: record_layouts.clone(),
         variant_layouts: variant_layouts.clone(),
+        // An EXPLICIT `Result`/`Option` declared return is a REAL heap value the caller inspects
+        // (e.g. `fs.write -> Result[Unit, String]`), so a `Result[Unit, _]` tail must NOT be voided
+        // — see `LowerCtx::decl_ret_is_result`. A declared-`Unit` effect fn (the synthetic Result)
+        // keeps the void convention.
+        decl_ret_is_result: matches!(
+            &func.ret_ty,
+            Ty::Applied(
+                almide_lang::types::constructor::TypeConstructorId::Result
+                    | almide_lang::types::constructor::TypeConstructorId::Option,
+                _
+            )
+        ),
         ..Default::default()
     };
     let params = ctx.bind_params(&func.params)?;
@@ -1024,6 +1036,7 @@ fn lower_function_all_impl(
             crate::Capability::Entropy,
             crate::Capability::CliArgs,
             crate::Capability::FsRead,
+            crate::Capability::FsWrite,
         ]
     } else {
         Vec::new()

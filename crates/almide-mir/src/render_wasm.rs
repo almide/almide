@@ -58,6 +58,8 @@ const RTF_NOTFOUND_ADDR: u32 = 64; // "file not found" message bytes
 const RTF_NOTFOUND_LEN: u32 = 14; // len of "file not found"
 const RDIR_ERR_ADDR: u32 = 80; // "directory not found" message bytes (fs.list_dir Err)
 const RDIR_ERR_LEN: u32 = 19; // len of "directory not found"
+const WRITE_ERR_ADDR: u32 = 100; // "write failed" message bytes (fs.write Err) — 100..112
+const WRITE_ERR_LEN: u32 = 12; // len of "write failed"
 const LABELS_ADDR: u32 = 112; // print labels (the data section) — after the fixed messages
 const SCRATCH_ADDR: u32 = 512; // the line build buffer
 const HEAP_BASE: u32 = 8192; // bump allocator start
@@ -606,7 +608,11 @@ fn value_reprs_wasm(func: &MirFunction) -> BTreeMap<ValueId, Repr> {
             // handle→address) is a scalar i64.
             Op::Prim {
                 dst: Some(dst),
-                kind: PrimKind::LoadHandle | PrimKind::ArgsGetList | PrimKind::ReadTextFile | PrimKind::ReadDir,
+                kind: PrimKind::LoadHandle
+                    | PrimKind::ArgsGetList
+                    | PrimKind::ReadTextFile
+                    | PrimKind::ReadDir
+                    | PrimKind::WriteTextFile,
                 ..
             } => {
                 m.insert(*dst, Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT });

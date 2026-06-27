@@ -42,6 +42,13 @@ pub fn is_self_host_result_str_module_fn(module: &str, func: &str) -> bool {
             // So a `match`/`!` over it must read tag @16 + bind the @12 payload list handle, exactly
             // like fs.read_text (only the Ok payload type differs: a List[String], not a String).
             | ("fs", "list_dir")
+            // `fs.write` returns the cap-as-tag `Result[Unit, String]` ($write_text_file builds it in
+            // the same layout — Ok with len@4=0 + @12=0 + tag@16=0, Err with len@4=1 + @12=msg +
+            // tag@16=1). So a `match`/`!` over it must read tag @16 (NOT len-as-tag @4 — that would
+            // MISREAD the Ok len-0 block AND linearize both arms, a silent miscompile printing both).
+            // The Ok arm has NO @12 payload (Unit), so `ok(_)` discards a null handle (never used);
+            // the flat DropListStr frees nothing on Ok, the @12 msg on Err — exact for both arms.
+            | ("fs", "write")
     )
 }
 

@@ -685,6 +685,18 @@ pub(crate) struct LowerCtx {
     /// `drop_op_for` consults this before the flat/masked drops. Populated by
     /// `try_lower_variant_ctor` for a type that [`VariantLayouts::needs_recursive_drop`] (ADT brick 5b).
     variant_drop_handles: HashMap<ValueId, String>,
+    /// True when THIS function's DECLARED return type is an explicit `Result`/`Option` (e.g.
+    /// `effect fn fs.write(...) -> Result[Unit, String]`). Such a return is a REAL inspectable
+    /// heap value the caller `match`es on — so a `Result[Unit, _]` TAIL must produce the heap
+    /// Result (the heap path), NOT be voided. It is ONLY the SYNTHETIC `Result[Unit, _]` of an
+    /// `effect fn … -> Unit` (declared return `Unit`, this flag FALSE) that the
+    /// `is_unit_result_ty` voiding in `lower_tail` should turn into a void wasm function. Without
+    /// this discriminator a `-> Result[Unit, String]` fn (fs.write) would be emitted void while
+    /// its call site treats it as a heap result — a `(local.set $r (call $void))` type mismatch
+    /// (invalid wasm). EXACTLY the `lifted_effect_fn_names` predicate's complement (an effect fn
+    /// already declaring Result/Option is NOT lifted — its return is real). Set in
+    /// `lower_function_all_impl`; defaults false (the void convention) for the bare entries.
+    decl_ret_is_result: bool,
 }
 
 /// Type NAME → (generic param names, declaration-ordered fields) — the VALUE-MODEL

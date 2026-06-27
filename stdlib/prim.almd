@@ -211,6 +211,18 @@ fn read_text_file(path: String) -> Result[String, String] = _
 @intrinsic("almide_rt_prim_read_dir")
 fn read_dir(path: String) -> Result[List[String], String] = _
 
+// The path_open(O_CREAT|O_TRUNC) + fd_write WASI host calls, packaged as ONE high-level
+// HEAP-RESULT prim — the FS-WRITE sandbox exit (reaches Capability::FsWrite, a DISTINCT
+// capability from FsRead: a write is strictly greater authority). Opens (creating +
+// truncating) the file at `path` (preopen-relative, leading '/' stripped — the same
+// resolution read_text_file uses) and writes `content`'s bytes, returning a fresh OWNED
+// `Result[Unit, String]`: `Ok(())` on success, `Err(message)` on a path_open error. Reached
+// only by the self-hosted `fs.write` (fs_write.almd) in the v1 trust-spine wasm backend; the
+// render emits the WASI path_open/fd_write + Result-build sequence. No native runtime impl —
+// the native target uses fs.write's own @intrinsic.
+@intrinsic("almide_rt_prim_write_text_file")
+fn write_text_file(path: String, content: String) -> Result[Unit, String] = _
+
 // The FLOAT floor: a `Float` is the i64-uniform value holding the f64 BITS; each op
 // reinterprets i64→f64, computes the wasm f64 instruction, and reinterprets back (a
 // compare / f2i yields a real Int). Pure scalar — the cert is untouched. This is what

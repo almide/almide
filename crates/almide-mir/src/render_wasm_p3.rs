@@ -26,6 +26,8 @@ pub(crate) fn preamble() -> String {
   (data (i32.const {RTF_NOTFOUND_ADDR}) "file not found")
   ;; the fs.list_dir path_open(O_DIRECTORY) error message — a CONST byte run the Err arm copies.
   (data (i32.const {RDIR_ERR_ADDR}) "directory not found")
+  ;; the fs.write path_open/fd_write error message — a CONST byte run the Err arm copies.
+  (data (i32.const {WRITE_ERR_ADDR}) "write failed")
   (global $bump (mut i32) (i32.const {HEAP_BASE}))
   ;; the free-list head (0 = empty) — physical reclamation (A1.2-render), the
   ;; realization of proofs/FreeList.v. A freed block is pushed here; $alloc reuses
@@ -407,6 +409,57 @@ pub(crate) fn preamble() -> String {
     ;; @16 := the Ok/Err tag (the slot's high 32 bits).
     (i32.store (i32.add (local.get $obj) (i32.const {RTF_TAG_OFFSET})) (local.get $tag))
     (local.get $obj))
+
+  ;; fs.write(path, content) — the WASI file-WRITE floor. $path and $content are BORROWED
+  ;; canonical Strings. Opens (creating + truncating) the file at $path (path_open with
+  ;; oflags=O_CREAT(1)|O_TRUNC(8)=9, rights_base=fd_seek(4)|fd_write(64)|fd_filestat_set_size
+  ;; (0x400000)=0x400044, preopen fd 3, leading '/' stripped — same resolution as
+  ;; $read_text_file), writes $content's bytes via fd_write, and closes the fd. Builds a fresh
+  ;; OWNED `Result[Unit, String]`: Ok(()) as a 1-slot block with len@4=0 + @12=0 + tag@16=0 (the
+  ;; `materialize_result_ok` convention — the scope-end flat $drop_list_str frees nothing at @12),
+  ;; or Err("write failed") via $rtf_result on a path_open error (len@4=1, @12=msg, tag@16=1). The
+  ;; FIFTH host-write sandbox exit (Capability::FsWrite — DISTINCT from FsRead). The result is an
+  ;; owned heap handle the caller's scope-end DropListStr balances.
+  (func $write_text_file (param $path i32) (param $content i32) (result i32)
+    (local $pdata i32) (local $plen i32) (local $fd_out i32) (local $errno i32)
+    (local $fd i32) (local $iov i32) (local $nwritten i32) (local $obj i32) (local $msg i32)
+    ;; path bytes + length; strip a leading '/' so the path is relative to preopen fd 3.
+    (local.set $pdata (i32.add (local.get $path) (i32.const {LIST_HEADER})))
+    (local.set $plen (i32.load (i32.add (local.get $path) (i32.const {LIST_LEN_OFFSET}))))
+    (if (i32.and (i32.gt_u (local.get $plen) (i32.const 0))
+                 (i32.eq (i32.load8_u (local.get $pdata)) (i32.const {ASCII_SLASH})))
+      (then
+        (local.set $pdata (i32.add (local.get $pdata) (i32.const 1)))
+        (local.set $plen (i32.sub (local.get $plen) (i32.const 1)))))
+    ;; path_open(dirfd=3, dirflags=0, path_ptr, path_len, oflags=O_CREAT|O_TRUNC=9,
+    ;;   rights_base = fd_seek|fd_write|fd_filestat_set_size = 0x400044, rights_inheriting=0,
+    ;;   fdflags=0, fd_out)
+    (local.set $fd_out (call $alloc8 (i32.const 4)))
+    (local.set $errno
+      (call $path_open (i32.const 3) (i32.const 0) (local.get $pdata) (local.get $plen)
+                       (i32.const 9) (i64.const 4194372) (i64.const 0) (i32.const 0) (local.get $fd_out)))
+    ;; On a path_open error build Err("write failed").
+    (if (result i32) (i32.ne (local.get $errno) (i32.const 0))
+      (then
+        (local.set $msg (call $rtf_str (i32.const {WRITE_ERR_ADDR}) (i32.const {WRITE_ERR_LEN})))
+        (call $rtf_result (local.get $msg) (i32.const 1)))
+      (else
+        (local.set $fd (i32.load (local.get $fd_out)))
+        ;; iov = [content_data_ptr, content_len]; write it, then close.
+        (local.set $iov (call $alloc8 (i32.const 8)))
+        (i32.store (local.get $iov) (i32.add (local.get $content) (i32.const {LIST_HEADER})))
+        (i32.store (i32.add (local.get $iov) (i32.const 4))
+                   (i32.load (i32.add (local.get $content) (i32.const {LIST_LEN_OFFSET}))))
+        (local.set $nwritten (call $alloc8 (i32.const 4)))
+        (drop (call $fd_write (local.get $fd) (local.get $iov) (i32.const 1) (local.get $nwritten)))
+        (drop (call $fd_close (local.get $fd)))
+        ;; Build Ok(()) — a 1-slot block with len@4=0 (no owned payload — the
+        ;; `materialize_result_ok` convention). @12 (and its high half @16=tag) zeroed by the
+        ;; i64.store so the flat DropListStr frees nothing and a `match` reads tag 0 = Ok.
+        (local.set $obj (call $list_new (i32.const 1) (i32.const 1)))
+        (i64.store (i32.add (local.get $obj) (i32.const {LIST_HEADER})) (i64.const 0))
+        (i32.store (i32.add (local.get $obj) (i32.const {LIST_LEN_OFFSET})) (i32.const 0))
+        (local.get $obj))))
 
   ;; helper: lexicographic LESS-THAN over two canonical String handles $a, $b (byte order =
   ;; UTF-8 code-point order for valid UTF-8 = Rust's `str` Ord). Returns 1 if $a < $b, else 0.

@@ -917,6 +917,34 @@ impl LowerCtx {
             self.list_str_result_results.insert(dst);
             return Ok(Some(dst));
         }
+        // `prim.write_text_file(path, content)` — the WASI file-WRITE floor (fs.write). TWO
+        // BORROWED `String` args (the path + the content; the caller still owns both). Its dst is a
+        // FRESH OWNED `Result[Unit, String]` built by the render ($write_text_file): Ok(()) with
+        // `len@4 = 0` (no payload String — the `materialize_result_ok` convention) so the scope-end
+        // flat `DropListStr` frees nothing at @12, or Err(msg) with `len@4 = 1` + `@12 = msg` (the
+        // flat drop frees the one owned message). Tracked like a heap Result: `materialized_results_str`
+        // so a downstream `match`/`!` reads the @16 tag, AND `heap_elem_lists` so the heap-payload
+        // bind gates open AND the scope-end drop is the flat `DropListStr` (sound for BOTH arms given
+        // the `len@4 = 0` Ok convention — NO `list_str_result_results`: there is no nested payload).
+        // Carries Capability::FsWrite (counted in cap_witness). The render emits the WASI
+        // path_open(O_CREAT|O_TRUNC)/fd_write sequence.
+        if func == "write_text_file" {
+            let path = self.lower_scalar_value(&args[0]).ok_or_else(|| {
+                LowerError::Unsupported("prim.write_text_file path is not a lowerable scalar/handle".into())
+            })?;
+            let content = self.lower_scalar_value(&args[1]).ok_or_else(|| {
+                LowerError::Unsupported("prim.write_text_file content is not a lowerable scalar/handle".into())
+            })?;
+            let dst = self.fresh_value();
+            self.ops.push(Op::Prim {
+                kind: PrimKind::WriteTextFile,
+                dst: Some(dst),
+                args: vec![path, content],
+            });
+            self.materialized_results_str.insert(dst);
+            self.heap_elem_lists.insert(dst);
+            return Ok(Some(dst));
+        }
         // Bitwise binary ops lower to a scalar `Op::IntBinOp` (i64 and/or/xor/shl/shr_s),
         // not an `Op::Prim` — the int.band/bor/bxor/bshl/bshr floor. No ownership.
         let bitop = match func {

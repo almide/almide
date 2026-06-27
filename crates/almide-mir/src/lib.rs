@@ -533,6 +533,25 @@ pub enum PrimKind {
     /// ownership certificate emits an `i` (alloc) for it, balanced by the caller's scope-end
     /// recursive drop (or a heap-return move-out).
     ReadDir,
+    /// The WASI `path_open(O_CREAT|O_TRUNC)` + `fd_write` file-WRITE sequence, packaged as ONE
+    /// high-level HEAP-RESULT prim — `args = [path, content]` (both BORROWED `String` handles,
+    /// the caller still owns them), dst = a fresh OWNED `Result[Unit, String]`. Opens (creating +
+    /// truncating) the file at `path` (relative to the first preopened dir, leading `/` stripped —
+    /// the same resolution [`ReadTextFile`] uses) and writes `content`'s bytes via `fd_write`: on
+    /// success builds `Ok(())`, on a path_open / fd_write error builds `Err(<message>)`. The result
+    /// block reuses the cap-as-tag layout `[rc][len@4][cap@8][@12][@16 tag]` (tag 0 = Ok, 1 = Err),
+    /// but DIVERGES from [`ReadTextFile`] in the Ok arm: a `Unit` payload owns NO String, so Ok is
+    /// built with `len@4 = 0` (and `@12 = 0`, `@16 = 0`) — EXACTLY the `materialize_result_ok`
+    /// convention — so the caller's scope-end flat `DropListStr` frees NOTHING at @12 (it would
+    /// trap on a null `rc_dec` if Ok carried a phantom `len = 1`). The Err arm sets `len@4 = 1`,
+    /// `@12 = msg String`, `@16 tag = 1` (the flat `DropListStr` frees the one owned message). The
+    /// FIFTH host-write sandbox exit, reached only by the self-hosted `fs.write`. Carries
+    /// [`Capability::FsWrite`] — a DISTINCT capability from FsRead (a write is strictly greater
+    /// authority), counted in cap_witness — so a function using it is caps-verified ONLY if it
+    /// declares FsWrite; never accept-but-unsafe. Its dst is a heap Ptr (like [`ReadTextFile`]),
+    /// so the ownership certificate emits an `i` (alloc) for it, balanced by the caller's scope-end
+    /// flat `DropListStr` (sound for BOTH arms given the `len@4 = 0` Ok convention above).
+    WriteTextFile,
     /// Release one reference of a RAW heap handle (`(call $rc_dec …)`), the inverse of [`RcInc`].
     /// The MECHANISM the self-hosted recursive `value.__drop_value` frees a dynamic Value tree with
     /// (the §4.1-compliant alternative to a hand-written WAT drop): it operates on raw Int handles,
@@ -709,6 +728,15 @@ pub enum Capability {
     /// and so can NEVER read a file un-witnessed (the checker REJECTS `used ⊄ allowed`);
     /// only an `effect fn` (which declares the host caps) may.
     FsRead,
+    /// Writing a FILE to the host filesystem — the WASI `path_open(O_CREAT|O_TRUNC)` /
+    /// `fd_write` floor ([`PrimKind::WriteTextFile`]), reached by the self-hosted `fs.write`.
+    /// The fifth sandbox exit. A STRICTLY GREATER authority than [`Self::FsRead`] (a write
+    /// creates/truncates host state), so it is a DISTINCT capability with its own id — never
+    /// aliased to FsRead (conflating read and write would be a capability lie: a fn declaring
+    /// only read could mutate the filesystem). Accounted exactly like FsRead: a pure `fn`
+    /// declares ∅ and so can NEVER write a file un-witnessed (the checker REJECTS
+    /// `used ⊄ allowed`); only an `effect fn` (which declares the host caps) may.
+    FsWrite,
 }
 
 impl Capability {
@@ -716,13 +744,14 @@ impl Capability {
     /// proofs/CapabilityBound.v's checker is GENERIC over `list nat` (a `subset_check`,
     /// no per-capability enumeration), so it needs no edit to admit a new id — only
     /// this mapping must stay injective + stable (Stdout = 0, Entropy = 1, CliArgs = 2,
-    /// FsRead = 3).
+    /// FsRead = 3, FsWrite = 4).
     pub const fn id(self) -> u32 {
         match self {
             Capability::Stdout => 0,
             Capability::Entropy => 1,
             Capability::CliArgs => 2,
             Capability::FsRead => 3,
+            Capability::FsWrite => 4,
         }
     }
 }

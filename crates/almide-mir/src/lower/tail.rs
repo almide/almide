@@ -331,7 +331,13 @@ impl LowerCtx {
         // expecting an i32 the void callee never returns — invalid wasm. Stripping a
         // `Try`/`Unwrap` recurses to the inner call, which lands back here (still
         // `Result[Unit, _]`) and lowers as the effect call.
-        if is_unit_result_ty(&tail.ty) {
+        // …UNLESS this function's DECLARED return is an explicit `Result`/`Option` (e.g. `fs.write
+        // -> Result[Unit, String]`): then the `Result[Unit, _]` tail is the function's REAL heap
+        // return value the caller `match`es on, so it must flow to the HEAP path below (produce the
+        // owned Result block) — voiding it would emit a void `$fs.write` while the call site does
+        // `(local.set $r (call $fs.write …))`, a type mismatch (invalid wasm). The voiding stays in
+        // force for the SYNTHETIC `Result[Unit, _]` of a declared-`Unit` effect fn (flag false).
+        if is_unit_result_ty(&tail.ty) && !self.decl_ret_is_result {
             match &tail.kind {
                 IrExprKind::Try { expr } | IrExprKind::Unwrap { expr } => {
                     return self.lower_tail(Some(expr));
