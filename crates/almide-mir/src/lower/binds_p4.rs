@@ -542,6 +542,16 @@ impl LowerCtx {
                         });
                         p
                     }
+                    // `Some(Some(..))` / `Some(None)` / `Some(Ok(..))` / `Some(Err(..))` — a NESTED
+                    // Option/Result ctor payload. Build the inner Option/Result block recursively
+                    // (a fresh OWNED handle), then MOVE it into the outer Some's slot — exactly like
+                    // an owned `Var`/Named-call payload. Without this case the nested ctor fell to
+                    // `_ => None` and the whole `some(some(42))` degraded to an EMPTY Opaque list
+                    // (the nested-Option construction miscompile).
+                    IrExprKind::OptionSome { .. }
+                    | IrExprKind::OptionNone
+                    | IrExprKind::ResultOk { .. }
+                    | IrExprKind::ResultErr { .. } => self.try_lower_option_ctor(expr, &expr.ty)?,
                     _ => return None,
                 };
                 // materialize_opt_str_some tracks materialized_options + heap_elem_lists.

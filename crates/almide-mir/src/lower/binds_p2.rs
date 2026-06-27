@@ -619,6 +619,21 @@ impl LowerCtx {
                 if is_scalar_elem_list_ty(ty) && faithful {
                     self.materialized_lists.insert(dst);
                 }
+                // A faithful `List[heap]` result (`string.split`/`chars`/`lines` → `List[String]`,
+                // or a heap-element list combinator) is ALSO a REAL, POPULATED nested-ownership block
+                // whose slots hold owned element HANDLES — so a value-position `xs[i]` over the bound
+                // var can LoadHandle element i at `$elem_addr` (the heap-element borrow path in
+                // `try_lower_heap_field_borrow`, gated on `materialized_lists`). Without registering
+                // it, `parts[i]` fell to the container-grain `Dup` of the WHOLE list → a String
+                // consumer read the list HEADER bytes (the `string.split`-subscript miscompiles).
+                // Narrowed to `List[heap]` (NOT the broader Option/Result/Map that
+                // `is_heap_elem_list_ty` also matches) — only a real list is `[i]`-indexable here.
+                if matches!(ty, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, a)
+                        if a.len() == 1 && is_heap_ty(&a[0]))
+                    && faithful
+                {
+                    self.materialized_lists.insert(dst);
+                }
                 // A BORROW result (`prim.load_str` of a list slot — the list still owns it) is NOT
                 // added to the scope-end drop set; everything else is a fresh owned value.
                 if !self.param_values.contains(&dst) {

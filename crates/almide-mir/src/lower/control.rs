@@ -708,17 +708,17 @@ impl LowerCtx {
         // payload (Option[String]) is bound as a BORROW of the Option's element (LoadHandle =
         // i32, recorded in param_values), gated to a subject that is a nested-ownership list (so
         // the Option keeps ownership through its scope-end DropListStr; a consuming arm auto-Dups).
-        let mut some: Option<(&IrExpr, Option<(VarId, bool)>)> = None;
+        let mut some: Option<(&IrExpr, Option<(VarId, bool, Ty)>)> = None;
         let mut none: Option<&IrExpr> = None;
         for arm in arms {
             match &arm.pattern {
                 IrPattern::Some { inner } => {
                     let bind = match inner.as_ref() {
-                        IrPattern::Bind { var, ty } if !is_heap_ty(ty) => Some((*var, false)),
+                        IrPattern::Bind { var, ty } if !is_heap_ty(ty) => Some((*var, false, ty.clone())),
                         IrPattern::Bind { var, ty }
                             if is_heap_ty(ty) && self.heap_elem_lists.contains(&subj) =>
                         {
-                            Some((*var, true))
+                            Some((*var, true, ty.clone()))
                         }
                         IrPattern::Wildcard => None,
                         _ => return false, // heap bind w/o nested-ownership subject / nested ctor
@@ -755,7 +755,7 @@ impl LowerCtx {
         // frame. A SCALAR is a value COPY (load64); a HEAP element is `LoadHandle` (an i32 Ptr)
         // recorded in `param_values` (BORROWED) — the Option owns it (DropListStr frees it at
         // scope end), so the bound var is not a second owner; a consuming use auto-Dups.
-        if let Some((bind_var, is_heap)) = some_bind {
+        if let Some((bind_var, is_heap, bind_ty)) = some_bind {
             let payload = if is_heap {
                 self.load_at_offset(h, 12, PrimKind::LoadHandle)
             } else {
@@ -764,6 +764,24 @@ impl LowerCtx {
             self.value_of.insert(bind_var, payload);
             if is_heap {
                 self.param_values.insert(payload);
+                // The Some payload is itself an Option/Result (`some(inner)` where
+                // `inner: Option[Int]` — a NESTED match): track it so an INNER `match inner {…}`
+                // BRANCHES (reads its tag @4) instead of LINEARIZING (running every arm). The
+                // payload is a BORROWED handle of the OUTER Option's owned inner block — the same
+                // materialized-Option read-shape, no new ownership. Without this the nested match
+                // fell to the both-arms linearization (printing every arm + a garbage 0).
+                use almide_lang::types::constructor::TypeConstructorId;
+                if matches!(&bind_ty, Ty::Applied(TypeConstructorId::Option, _)) {
+                    self.materialized_options.insert(payload);
+                    if crate::lower::is_heap_elem_list_ty(&bind_ty) {
+                        self.heap_elem_lists.insert(payload);
+                    }
+                } else if crate::lower::is_result_ty(&bind_ty) {
+                    self.materialized_results.insert(payload);
+                    if crate::lower::is_heap_elem_list_ty(&bind_ty) {
+                        self.heap_elem_lists.insert(payload);
+                    }
+                }
             }
         }
         let some_ok = self.lower_branch_arm(None, some_body).is_ok();
