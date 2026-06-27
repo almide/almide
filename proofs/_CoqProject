@@ -2,6 +2,7 @@
 Subset.v
 OwnershipChecker.v
 OwnershipLoop.v
+OwnershipFilter.v
 CoownLoop.v
 CoownCompose.v
 ALS.v
