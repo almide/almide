@@ -764,8 +764,32 @@ impl LowerCtx {
                 // MIR ⇒ the `ir_calls > mir_calls` gate TAINTS the function caps-
                 // unverified (honest — the callee's capabilities are unknown). The
                 // result value is deferred, like every Opaque.
-                IrExprKind::Call { .. } => {
+                IrExprKind::Call { target, args: inner, .. } => {
                     if is_heap_ty(&a.ty) {
+                        // C1 HEAP DIRECT-CALL INLINE: a heap-result `Computed` call `f(x)` whose
+                        // callee is a statically-known let-bound INLINE lambda is DEFUNCTIONALIZED
+                        // to its inlined body — a FRESH OWNED heap value (tracked for scope-end
+                        // drop), BORROWED into this outer call. This EXECUTES `"${param_ty(p)}"`
+                        // (the bindgen `generate_dts` inner-map cell) instead of walling. Rollback-
+                        // safe (`try_inline_direct_lambda_call_heap` restores ops + handles on a
+                        // miss), so a non-let-lambda `Method`/`Computed` callee falls through to the
+                        // reject below — the sound silent-miscompile guard is preserved.
+                        if let CallTarget::Computed { callee } = target {
+                            let mark = self.ops.len();
+                            let lhh = self.live_heap_handles.len();
+                            if let Some(v) =
+                                self.try_inline_direct_lambda_call_heap(callee, inner, &a.ty)
+                            {
+                                // `v` is already in `live_heap_handles` (the inline tracks it), so
+                                // pass it by Handle WITHOUT `materialized_call_arg` (which would
+                                // double-track → a double-free). A String result drops via the flat
+                                // `Op::Drop` (rc_dec), already correct for the default scope-end drop.
+                                out.push(CallArg::Handle(v));
+                                continue;
+                            }
+                            self.ops.truncate(mark);
+                            self.live_heap_handles.truncate(lhh);
+                        }
                         // An unresolvable `Method`/`Computed` call with a HEAP result as a
                         // call ARGUMENT (`f(obj.m())`, `f((g)())`) would borrow an empty
                         // deferred heap value into the callee = a SILENT MISCOMPILE. Reject.

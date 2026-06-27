@@ -506,6 +506,26 @@ impl LowerCtx {
                 }
                 None
             }
+            // A heap-result `Computed`-callee call arm (`xs |> list.map((p) => param_ty(p))` — the
+            // bindgen inner-map cell calls a let-bound INLINE lambda returning String). C1 HEAP
+            // DIRECT-CALL INLINE: defunctionalize it to its inlined body — a FRESH OWNED heap value,
+            // moved out by this arm's `Consume` (cert `m`), the same per-arm `"im"` balance as the
+            // Named-call arm. The inline tracks its result in `live_heap_handles`; detach it (it is
+            // moved out, not a scope-end local) before `Consume`, then `drop_arm_locals` frees any
+            // arg/body temp the inline left. A non-let-lambda callee rolls back (`None`) → the caller
+            // keeps its sound Opaque/wall (no invalid wasm).
+            IrExprKind::Call { target: CallTarget::Computed { callee }, args, .. }
+                if is_heap_ty(&arm.ty) =>
+            {
+                let arm_mark = self.live_heap_handles.len();
+                let obj = self.try_inline_direct_lambda_call_heap(callee, args, result_ty)?;
+                // The inlined result is moved out of this arm (Consume), so detach it from the live
+                // set; `drop_arm_locals` then frees only the inline's transient temps.
+                self.live_heap_handles.retain(|h| *h != obj);
+                self.ops.push(Op::Consume { v: obj });
+                self.drop_arm_locals(arm_mark);
+                Some(obj)
+            }
             _ => None,
         }
     }

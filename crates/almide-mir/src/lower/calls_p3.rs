@@ -184,6 +184,116 @@ impl LowerCtx {
         }
     }
 
+    /// C1 HEAP DIRECT-CALL INLINE — the heap-result twin of [`Self::try_inline_direct_lambda_call`].
+    /// Defunctionalize a `f(args)` whose callee `f` is a statically-known let-bound INLINE lambda
+    /// RETURNING A HEAP value (a String, …). The body is lowered INLINE to a FRESH OWNED heap value
+    /// tracked in `live_heap_handles` for a single scope-end drop (cert `i…d`), via
+    /// [`Self::lower_inline_lambda_heap_body`] over the existing owned-heap-value machinery — exactly
+    /// as if the lambda's body expression were written at the call site. Returns the tracked owned
+    /// `ValueId`, or `None` (fully rolled back: ops + handles restored) when a param or the body is
+    /// outside the executable subset — the caller then keeps its sound defer/wall.
+    ///
+    /// SOUNDNESS: each PARAM is BOUND through `value_of` to the lowered argument — a SCALAR arg is a
+    /// value (no ownership), a HEAP-Var arg is BORROWED (`value_for` — the caller still owns it,
+    /// dropped once at its own scope end), so no new owner and no double-free; this is the same
+    /// borrow the captures already use. A param VarId is UNIQUE per lambda, so binding it cannot
+    /// clobber a live caller local. The body produces ONE distinct owned heap value (a `Dup` of a
+    /// borrowed param/Var is a fresh independent reference), identical to the proven owned-heap-field
+    /// lowering. A heap arg that is not a simple Var (a fresh call / literal) is out of this slice →
+    /// `None` (defer), conservative.
+    pub(crate) fn try_inline_direct_lambda_call_heap(
+        &mut self,
+        callee: &IrExpr,
+        args: &[IrExpr],
+        ty: &Ty,
+    ) -> Option<ValueId> {
+        if !is_heap_ty(ty) {
+            return None;
+        }
+        let callee_var = match &callee.kind {
+            IrExprKind::Var { id } => *id,
+            _ => return None,
+        };
+        let (params, body) = self.lambda_bindings.get(&callee_var)?.clone();
+        if params.len() != args.len() {
+            return None;
+        }
+        let ops_mark = self.ops.len();
+        let lhh_mark = self.live_heap_handles.len();
+        // Bind each param to its argument value: a SCALAR arg is lowered as a value; a HEAP arg is
+        // admitted ONLY as a Var, BORROWED via `value_for` (no ownership event). Anything else defers.
+        for ((pvar, pty), arg) in params.iter().zip(args.iter()) {
+            let bound = if is_heap_ty(pty) {
+                match &arg.kind {
+                    IrExprKind::Var { id } => self.value_for(*id).ok(),
+                    _ => None,
+                }
+            } else {
+                self.lower_scalar_value(arg)
+            };
+            match bound {
+                Some(v) => {
+                    self.value_of.insert(*pvar, v);
+                }
+                None => {
+                    self.ops.truncate(ops_mark);
+                    self.live_heap_handles.truncate(lhh_mark);
+                    return None;
+                }
+            }
+        }
+        match self.lower_inline_lambda_heap_body(&body) {
+            Some(v) => Some(v),
+            None => {
+                self.ops.truncate(ops_mark);
+                self.live_heap_handles.truncate(lhh_mark);
+                None
+            }
+        }
+    }
+
+    /// Lower a let-lambda BODY (inlined at a call site) to a FRESH OWNED heap value tracked in
+    /// `live_heap_handles` for a single scope-end drop. A BLOCK body lowers its statements as effects
+    /// in a per-block frame (their heap let-locals ride into the frame), then its tail recursively,
+    /// then DROPS the block's own inner heap lets (everything tracked since the frame mark) while
+    /// KEEPING the tail's owned value — exactly the per-arm `drop_arm_locals` discipline, but the
+    /// tail VALUE survives (it is a distinct reference, freed once at the caller's scope end). Any
+    /// other body kind delegates to [`Self::lower_owned_heap_field`] (LitStr / concat / `${interp}` /
+    /// a Dup'd Var / a Member borrow / a Named or pure-Module call / a heap-result `if` / `match` /
+    /// Option·Result ctor — all of which produce a fresh owned tracked value). `None` rolls the
+    /// caller back to its sound defer/wall.
+    fn lower_inline_lambda_heap_body(&mut self, body: &IrExpr) -> Option<ValueId> {
+        match &body.kind {
+            IrExprKind::Block { stmts, expr } => {
+                let tail = expr.as_deref()?;
+                let mark = self.live_heap_handles.len();
+                self.in_frame += 1;
+                let mut ok = true;
+                for stmt in stmts {
+                    if self.lower_stmt(stmt).is_err() {
+                        ok = false;
+                        break;
+                    }
+                }
+                let obj = if ok { self.lower_inline_lambda_heap_body(tail) } else { None };
+                self.in_frame -= 1;
+                let obj = obj?;
+                // Drop the block's inner heap lets (LIFO) EXCEPT the tail value `obj`, then re-track
+                // `obj` so the caller's scope-end drop frees it exactly once.
+                let frame = self.live_heap_handles.split_off(mark.min(self.live_heap_handles.len()));
+                for v in frame.into_iter().rev() {
+                    if v != obj {
+                        let op = self.drop_op_for(v);
+                        self.ops.push(op);
+                    }
+                }
+                self.live_heap_handles.push(obj);
+                Some(obj)
+            }
+            _ => self.lower_owned_heap_field(body),
+        }
+    }
+
     /// Lower a SCALAR `Int` expression to a `ValueId` holding its REAL value (the
     /// scalar-value foundation): a Var/param, an `Int` literal (`ConstInt`), or an
     /// `Int` Add/Sub/Mul (`IntBinOp` over recursively-lowered operands). Returns
