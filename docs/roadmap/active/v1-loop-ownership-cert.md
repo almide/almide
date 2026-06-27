@@ -875,3 +875,21 @@ lower_defunc_list_hof_inner) to accept an effect-call/non-pure match SUBJECT dir
 (2 overflow, 1 instrument, 1 terminating-walls+regress, 1 entry-once-walls), all reverted clean
 (lowering-walls=2). The "hoist direction verified" claim is now IN DOUBT (only real-dojo dojo3 cleared, and
 that single reading may itself be a render-stops-at-first-wall artifact — must be re-verified first).
+
+### dojo backfill_dir — ⭐ THE PRECISE FIX POINT (corrects 5 hoist attempts): defunc variant-match handler is Option-ONLY
+
+The hoist was the WRONG mechanism (5 attempts). Root cause PINNED by reading the defunc body lowering:
+`append_variant_match_to_str_acc` (control_p5.rs:1207) — which lowers a `match subj { … }` inside a
+defunc'd filter_map/flat_map closure — handles ONLY `IrPattern::Some` / `IrPattern::None` (lines ~50-58:
+it scans for Some/None arms). It does NOT handle `IrPattern::Ok` / `IrPattern::Err`. dojo backfill_dir's
+closure is `match fs.read_text(p) { ok(content) => some(…), err(_) => none }` — a RESULT (ok/err) match,
+so the handler finds no Some/None arms → returns None → the filter_map walls "unliftable". (The synthetic
+m_str `match mk(x) { ok(v)=>some(…), err=>none }` walls for the SAME reason — confirming it's the handler,
+not the subject/hoist.) THE FIX (fresh session, NOT a hoist): extend `append_variant_match_to_str_acc`
+(and its record/Value-result sibling for List[record] results) to ALSO accept `Ok`/`Err` arms — treat
+`ok(x) => some(e)` like `some(x) => some(e)` (the Ok payload is the kept element) and `err(_) => none` like
+`none` (skip). The subject's effect call (fs.read_text) is then lowered as the match subject in the
+per-element loop (the handler already materializes the subject — line ~31 `CallArg::Handle`). This is a
+LOCALIZED handler extension (Option→Option+Result), NOT the hoist (which mangled the tree) and NOT Coq.
+VERIFY: extend the handler, then byte-match a Result-ok/err filter_map fixture + corpus-wall + oracle.
+This supersedes all the hoist notes above — the hoist is abandoned; the Ok/Err handler extension is the path.
