@@ -501,14 +501,26 @@ EMPIRICAL findings (probed each filter shape via render_program vs native):
   capture has no FuncRef), and C1-inline `try_lower_defunc_list_hof` DECLINES a heap filter at
   control_p5.rs:116 (`filter` not in the heap-source allowlist) + :138-139 (`filter` result must be
   non-heap). So it falls to the funcref-drop + the value-position guard (calls.rs:163) → WALL.
-THE FIX: extend `try_lower_defunc_list_hof` to INLINE a heap-source/heap-result `filter` (like `map`'s heap
-case at :123/:135) — inline the predicate (captures resolve via `value_of`, already supported), and per
-KEPT element CONDITIONALLY acquire it into the write-cursor output list: clone the borrowed source handle
-(cert `a`/`i`, +1) + store into `out[cursor]` (consume `m` into the list), tracked in heap_elem_lists/
-value_elem_lists for the scope-end DropListStr/DropListValue. The per-iteration body is net-0 in BOTH
-branches (true = acquire+move = 0; false = nothing = 0) = EXACTLY OwnershipFilter.v's CondLoop. So the
-cert side needs: (i) the Rust `verify_ownership` + the extracted OCaml checker to accept a CONDITIONAL
-loop-carried acquire (the CondLoop check — currently only the net-0 Loop is implemented; the Coq proof
-exists, the checker impl is the gap), and (ii) the lowering to emit it. dojo's `filter_map` ALSO needs the
-effect-monad (its closure calls fs.read_text — the #22 let-bind-`!` frontier) on top. Gates: byte-match
-(the capturing filters' real output) + corpus-wall ownership ACCEPT (the CondLoop cert) + 0 backend-split.
+THE FIX (REFINED 2026-06-27 by probing each element type): `filter(pred) ≡ filter_map((x) => if pred(x)
+then some(x) else none)` — and a CAPTURING `filter_map` is ALREADY lowered + corpus-wall-ACCEPTED by the
+proven str-acc conditional-append path **for List[String]** (verified: `xs |> filter_map((s) => if
+list.contains(names,s) then some(s) else none)` byte-matches `bb,ccc`; the conditional append/skip is the
+already-accepted cert OwnershipFilter.v now proves sound). So the List[String] filter wall is a pure
+filter→filter_map DESUGAR (a routing gap, no new checker code). BUT the wasm-bindgen walls are NOT
+List[String] — they are **List[Value]** (`fns`/`types` from `get_arr` = `json.as_array`). A capturing
+List[Value] `filter_map` ALSO WALLS (verified): the str-acc path's `result_str_acc` (control_p5:131-133)
+matches ONLY `List[String]`, so a `List[Value]` filter_map declines → C2-lift fails on the capture → wall.
+
+So the precise remaining work splits:
+1. **filter→filter_map desugar** (List[String]) — a routing gap, verified-ready, clears any List[String]
+   capturing filter (general capability; does NOT itself clear a wasm-bindgen wall).
+2. **value-element capturing filter/filter_map inline** (the 3 wasm-bindgen walls) — generalize the
+   str-acc conditional-append path from String elements to **Value elements** (`value_elem_lists` +
+   `__list_concat_rc` for Values, both already exist for the unconditional value append per the heap-element
+   concat brick above; extend to the CONDITIONAL filter_map append). The cert is the SAME conditional
+   append the String path emits (OwnershipFilter.v's CondLoop, already corpus-wall-accepted for String) —
+   so likely NO new checker code, a value-element routing extension. Gate: byte-match + corpus-wall ACCEPT.
+3. **dojo filter_map** (1 wall) — its closure calls fs.read_text (effectful) → needs the effect-monad
+   let-bind-`!` (the #22 frontier) ON TOP of the value/record-element conditional append. The hardest.
+Gates throughout: byte-match (the capturing filters' real output) + corpus-wall ownership ACCEPT + 0
+backend-split. The OwnershipFilter.v Coq core (committed) is the soundness foundation for all three.
