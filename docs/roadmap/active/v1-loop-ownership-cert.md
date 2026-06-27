@@ -693,3 +693,23 @@ nested let-bound lambda [#1], (b) an effect call [#2], and `try_lower_defunc_tup
 (List,List) conditional fold [#3]. Cracking #1 (nested defunctionalization) likely clears generate_dts +
 generate_esm record_helpers; #3 clears generate_esm tuple_helpers; #2 clears dojo. All gate-verifiable
 (byte-match + corpus-wall + the proof gate). This is the LAST org lowering frontier.
+
+### CRITICAL refinement: sub-case #1 (nested HOF) needs the NESTED-LOOP cert (a Coq frontier)
+
+Tracing the nl1 decline deeper: a flat_map closure containing an INNER `list.map` means the inner map's
+per-element LOOP nests INSIDE the outer flat_map's loop. But OwnershipLoop.v's proven `Loop` is FLAT —
+"Loop bodies are FLAT (no nested loop) … nested loops are a future compose-able extension" (the 2026-06-20
+LANDED note). So `try_lower_defunc_list_hof` declining a closure body that contains another HOF is SOUND
+(it correctly refuses to emit a nested loop the cert can't verify), not a mere engineering gap. generate_dts
+`sigs` / generate_esm `record_helpers` (inner `params |> list.map(… param_ty …)` over a variable-length
+list — NOT unrollable) therefore need the **nested-loop ownership cert** (extend OwnershipLoop.v: a Loop
+whose body contains a Loop, the rc-preservation composed) — a #31-class Coq frontier, NOT just a
+defunctionalizer tweak. Ranking the 3 remaining by tractability:
+- **#3 (List,List) conditional tuple-fold** (generate_esm `tuple_helpers`) — MOST tractable: the CondLoop is
+  ALREADY proven (OwnershipFilter.v), two FLAT loop-carried slots, no nesting. Extend
+  `try_lower_defunc_tuple_acc_fold` to (List[heap], List[heap]) + a conditional body. Provable today.
+- **#2 effect-in-closure** (dojo `backfill_dir`) — medium: the filter_map closure's per-element body runs an
+  effect call; thread the effect (Stdout/FsRead cap) through the defunc per-element loop. FLAT loop, but the
+  effect-`!`-inside-a-closure (vs the block-level desugar already shipped) is new machinery.
+- **#1 nested HOF** (generate_dts/esm) — DEEPEST: needs the nested-loop Coq cert first.
+So generate_esm's two walls split: `tuple_helpers` (#3, tractable) vs `record_helpers` (#1, Coq). dojo = #2.
