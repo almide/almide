@@ -402,9 +402,44 @@ impl LowerCtx {
             // The written value (and an index expression) are deferred — record any
             // call inside them so the caps fold is not blind to their effects.
             IrStmtKind::IndexAssign { target, index, value } => {
+                // COW-guard the buffer (rebinds the local to a unique copy if shared), then ACTUALLY
+                // STORE: `xs[i] = v` → `i64.store($elem_addr(handle(xs), i), v)`. WITHOUT the store the
+                // assignment lowered to ONLY the MakeUnique guard (a silent no-op — `xs[1] = 99` never
+                // wrote; v1-spine hole #29). The `$elem_addr` is bounds-checked (traps OOB, matching
+                // native's panic). The store runs AFTER MakeUnique so it writes the unique copy.
                 self.lower_place_mutation(*target)?;
-                self.record_elided_calls(index);
-                self.record_elided_calls(value);
+                // The SCALAR-element store subset (`List[Int/Float/Bool]`, a lowerable scalar index +
+                // value) — the #29 shape. Attempt it; on a miss (a heap-element store, or a non-scalar
+                // index/value) ROLL BACK to the prior behavior (record the operands' calls for caps,
+                // no store) rather than walling — so a corpus IndexAssign that lowered before keeps
+                // lowering (no coverage regression). The heap-element / complex case is the recursive-
+                // ownership frontier, left exactly as it was (NOT made worse).
+                let ops_mark = self.ops.len();
+                let lhh_mark = self.live_heap_handles.len();
+                let stored = if !is_heap_ty(&value.ty) {
+                    if let (Ok(list), Some(idx), Some(val)) = (
+                        self.value_for(*target),
+                        self.lower_scalar_value(index),
+                        self.lower_scalar_value(value),
+                    ) {
+                        let h = self.fresh_value();
+                        self.ops.push(Op::Prim { kind: crate::PrimKind::Handle, dst: Some(h), args: vec![list] });
+                        let addr = self.fresh_value();
+                        self.ops.push(Op::Prim { kind: crate::PrimKind::ElemAddr, dst: Some(addr), args: vec![h, idx] });
+                        self.ops.push(Op::Prim { kind: crate::PrimKind::Store { width: 8 }, dst: None, args: vec![addr, val] });
+                        true
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                };
+                if !stored {
+                    self.ops.truncate(ops_mark);
+                    self.live_heap_handles.truncate(lhh_mark);
+                    self.record_elided_calls(index);
+                    self.record_elided_calls(value);
+                }
                 Ok(())
             }
             IrStmtKind::FieldAssign { target, value, .. } => {

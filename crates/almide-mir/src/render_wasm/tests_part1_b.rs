@@ -122,17 +122,24 @@
             "`not` must lower to IntBinOp Sub (1 - b), got {:?}",
             bnot.ops
         );
-        // `and` / `or` over params in a cond must lower to real IntOp And/Or (eager == v0).
+        // `and` / `or` over params in a cond now SHORT-CIRCUIT (v1-spine hole E2): native + interp
+        // evaluate the RHS lazily, so `a and b` → `if a then b else false` and `a or b` → `if a then
+        // true else b` — lowered to IfThen/Else/EndIf control flow (the RHS ops emitted INSIDE the
+        // taken branch), NOT the prior EAGER `IntOp::And`/`Or` over both operands (which traps on a
+        // side-effecting/trapping RHS). Assert the short-circuit markers are present and NO eager
+        // And/Or IntBinOp remains.
         let band = prog.functions.iter().find(|f| f.name == "band").unwrap();
         let bor = prog.functions.iter().find(|f| f.name == "bor").unwrap();
         assert!(
-            band.ops.iter().any(|op| matches!(op, Op::IntBinOp { op: IntOp::And, .. })),
-            "`and` must lower to IntOp And, got {:?}",
+            band.ops.iter().any(|op| matches!(op, Op::IfThen { .. }))
+                && !band.ops.iter().any(|op| matches!(op, Op::IntBinOp { op: IntOp::And, .. })),
+            "`and` must SHORT-CIRCUIT to IfThen control flow (no eager IntOp And), got {:?}",
             band.ops
         );
         assert!(
-            bor.ops.iter().any(|op| matches!(op, Op::IntBinOp { op: IntOp::Or, .. })),
-            "`or` must lower to IntOp Or, got {:?}",
+            bor.ops.iter().any(|op| matches!(op, Op::IfThen { .. }))
+                && !bor.ops.iter().any(|op| matches!(op, Op::IntBinOp { op: IntOp::Or, .. })),
+            "`or` must SHORT-CIRCUIT to IfThen control flow (no eager IntOp Or), got {:?}",
             bor.ops
         );
         if let Some(out) = build_and_run("value_unop_and_or", &render_wasm_program(&prog)) {

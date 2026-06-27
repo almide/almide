@@ -536,6 +536,57 @@ impl LowerCtx {
                         return Some(dst);
                     }
                 }
+                // SHORT-CIRCUIT `and`/`or` — native AND the interp oracle evaluate the RHS LAZILY
+                // (only when the LHS does not already decide the result). The prior EAGER `IntOp::And`/
+                // `Or` (materializing BOTH operands) made a RHS with a trap/side effect (`a != 0 and
+                // (10 / a) > 0`, `len > 5 and xs[5] == 0`) execute unconditionally → a divide-by-zero /
+                // OOB-`elem_addr` trap native never reaches. Lower to control flow so the RHS ops are
+                // emitted INSIDE the taken branch only:
+                //   `a and b` → `if a then b else false`   (RHS only when a is true)
+                //   `a or  b` → `if a then true else b`    (RHS only when a is false)
+                // Uses the same IfThen/Else/EndIf scalar markers as `try_lower_scalar_if`; the LHS is a
+                // pure Bool scalar, so no per-arm heap frame is needed. A non-lowerable operand rolls
+                // back (truncate) and falls through to the deferred path — never both-arms, never wrong.
+                if matches!(op, BinOp::And | BinOp::Or) && matches!(left.ty, Ty::Bool) {
+                    let ops_mark = self.ops.len();
+                    let lhh_mark = self.live_heap_handles.len();
+                    // The RHS is evaluated INSIDE the taken IfThen/Else branch, so use
+                    // `lower_scalar_operand` — it wraps the operand in a per-branch frame that frees any
+                    // transient heap temp it allocates (a `contains(y, "@")` materializes its String
+                    // arg) WITHIN the branch, keeping it `i…d`-balanced. (The eager path used
+                    // `lower_scalar_operand` too; using bare `lower_scalar_value` walled those heap-temp
+                    // operands → a coverage regression.) The LHS (a pure Bool) is likewise framed.
+                    if let Some(lhs) = self.lower_scalar_operand(left) {
+                        let dst = self.fresh_value();
+                        self.ops.push(Op::IfThen { cond: lhs, dst: Some(dst) });
+                        // THEN branch: `and` evaluates RHS here; `or` yields the constant `true`.
+                        let then_val = if matches!(op, BinOp::And) {
+                            self.lower_scalar_operand(right)
+                        } else {
+                            let t = self.fresh_value();
+                            self.ops.push(Op::ConstInt { dst: t, value: 1 });
+                            Some(t)
+                        };
+                        if let Some(tv) = then_val {
+                            self.ops.push(Op::Else { val: Some(tv) });
+                            // ELSE branch: `and` yields the constant `false`; `or` evaluates RHS here.
+                            let else_val = if matches!(op, BinOp::And) {
+                                let f = self.fresh_value();
+                                self.ops.push(Op::ConstInt { dst: f, value: 0 });
+                                Some(f)
+                            } else {
+                                self.lower_scalar_operand(right)
+                            };
+                            if let Some(ev) = else_val {
+                                self.ops.push(Op::EndIf { val: Some(ev) });
+                                return Some(dst);
+                            }
+                        }
+                    }
+                    self.ops.truncate(ops_mark);
+                    self.live_heap_handles.truncate(lhh_mark);
+                    return None;
+                }
                 let iop = match op {
                     BinOp::AddInt => crate::IntOp::Add,
                     BinOp::SubInt => crate::IntOp::Sub,
@@ -557,39 +608,13 @@ impl LowerCtx {
                     // admitted; a Float/String/compound `==` still needs a distinct op.)
                     BinOp::Eq if matches!(left.ty, Ty::Int | Ty::Bool) => crate::IntOp::Eq,
                     BinOp::Neq if matches!(left.ty, Ty::Int | Ty::Bool) => crate::IntOp::Ne,
-                    // Logical `and`/`or` on Bool operands → EAGER `i64.and`/`i64.or` of the
-                    // two lowered Bools (each an i64 0/1: a `LitBool` materializes ConstInt
-                    // 0/1, a Var loads its 0/1, a nested compare yields 0/1). This is
-                    // BIT-EXACT with v0, which itself evaluates BOTH operands unconditionally
-                    // (`emit(left); emit(right); i32.and/i32.or` — NO short-circuit) — so
-                    // eager `and`/`or` is the faithful transcription, not an approximation.
-                    // 0/1 ∧ 0/1 (resp. ∨) stays in {0,1}, so the result is a valid Bool the
-                    // `if` condition / `to_string` reads uniformly. The SOUNDNESS subtlety
-                    // (v0 is eager so there is no observable to short-circuit) is moot for a
-                    // pure operand; a SIDE-EFFECTING operand (a printing call) would still be
-                    // executed once by v0's eager emit, but to keep the cert/effect reasoning
-                    // simple we only admit operands that `lower_scalar_value` accepts as a
-                    // pure scalar predicate below — a non-lowerable operand returns None
-                    // (WALL), never both-arms / never 0.
-                    BinOp::And if matches!(left.ty, Ty::Bool) => crate::IntOp::And,
-                    BinOp::Or if matches!(left.ty, Ty::Bool) => crate::IntOp::Or,
+                    // (Logical `and`/`or` are SHORT-CIRCUITED via control flow above — they never
+                    // reach this eager `IntBinOp` path. Native + interp evaluate the RHS lazily.)
                     // Pow, Float, concat, non-Int/Bool compares: defer.
                     _ => return None,
                 };
-                // `and`/`or` admit only PURE operands. v0's eager emit evaluates BOTH
-                // unconditionally, so an effect-free operand is bit-exact; but a
-                // heap-materializing operand (`is_empty(x) and contains(y, "@")`) would
-                // register an owned temp whose consume escapes the enclosing per-arm
-                // frame (a dangling `m`). Gate it out → WALL to the sound prior lowering.
-                // The arithmetic/comparison ops keep the plain `lower_scalar_value`: by
-                // type their operands are Int/Float/Bool scalars that never materialize a
-                // heap temp, so the pure-gate would be a no-op there.
-                let is_logic = matches!(iop, crate::IntOp::And | crate::IntOp::Or);
-                let (a, b) = if is_logic {
-                    (self.lower_scalar_operand(left)?, self.lower_scalar_operand(right)?)
-                } else {
-                    (self.lower_scalar_value(left)?, self.lower_scalar_value(right)?)
-                };
+                let a = self.lower_scalar_value(left)?;
+                let b = self.lower_scalar_value(right)?;
                 let dst = self.fresh_value();
                 self.ops.push(Op::IntBinOp { dst, op: iop, a, b });
                 Some(dst)
@@ -714,6 +739,39 @@ impl LowerCtx {
             // emits its own balanced Option materialize/drop, exactly like the scalar-Call arm above.
             IrExprKind::UnwrapOr { expr, fallback } if !is_heap_ty(&fallback.ty) => {
                 self.try_lower_option_unwrap_or(expr, fallback, false)
+            }
+            // A scalar `e!` (Unwrap) in a VALUE/OPERAND position (`acc + int.parse(s)!`) over a
+            // `Result[scalar, String]` call. The auto-`?` left the operand as `Unwrap{Call(Result)}`
+            // (the let-bind position got it type-stripped to a bare scalar Call; the BinOp operand
+            // did not). Lower the inner call to its OWNED Result block, then EXTRACT the Ok scalar
+            // payload @12 (the same len-as-tag layout `let x = parse(s)!` reads). The `!` traps on
+            // Err in the v1 model; the Ok-payload read is correct for the Ok path. WITHOUT this arm
+            // the operand fell to `_ => None` → the whole BinOp arg rolled back to `Const 0` (the
+            // recursive `acc + parse!` accumulator silently summed 0). Scalar Ok only — a heap-Ok
+            // `Result[String,String]!` value operand stays walled (the recursive-ownership frontier).
+            IrExprKind::Unwrap { expr: inner }
+                if !is_heap_ty(&expr.ty) && is_result_ty(&inner.ty) =>
+            {
+                let ops_mark = self.ops.len();
+                let lhh_mark = self.live_heap_handles.len();
+                // Lower the inner call as a heap value (the materialized Result block). Reuse the
+                // scalar-call machinery with the inner's REAL Result type so it builds/borrows the
+                // block (registered `materialized_results`), exactly like the bind.
+                if let Some(block) = self.try_lower_scalar_call(inner, &inner.ty) {
+                    // Ok payload @12 (len-as-tag: Ok = len 0, the scalar in slot 0 @12).
+                    let h = self.fresh_value();
+                    self.ops.push(Op::Prim { kind: crate::PrimKind::Handle, dst: Some(h), args: vec![block] });
+                    let off = self.fresh_value();
+                    self.ops.push(Op::ConstInt { dst: off, value: 12 });
+                    let addr = self.fresh_value();
+                    self.ops.push(Op::IntBinOp { dst: addr, op: crate::IntOp::Add, a: h, b: off });
+                    let payload = self.fresh_value();
+                    self.ops.push(Op::Prim { kind: crate::PrimKind::Load { width: 8 }, dst: Some(payload), args: vec![addr] });
+                    return Some(payload);
+                }
+                self.ops.truncate(ops_mark);
+                self.live_heap_handles.truncate(lhh_mark);
+                None
             }
             _ => None,
         }
