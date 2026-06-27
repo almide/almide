@@ -796,3 +796,23 @@ find the recursion, OR take the OTHER route (extend the defunc body lowering to 
 variant-match SUBJECT directly — materialize it like the top-level variant-match does — instead of
 hoisting). The direction (effect-match-subject must become a per-element bind/materialized value) is proven;
 the safe mechanism is still open. Two blind attempts is the signal to STOP and use a debugger next time.
+
+### dojo hoist — SHARPENED (debugger pass): direction IS verified; my DESUGAR builds a malformed tree
+
+Careful exit-code-checked bisection (the earlier "0 walls" readings were CRASH false-positives — render exit
+134 emits empty wat + zero "Unsupported" lines, so grep-for-Unsupported read 0):
+- **MANUAL pre-hoist of the REAL dojo** (`filter_map((f) => { let rr = fs.read_text(p); match rr {…} })`
+  edited into backfill.almd source) → backfill_dir CLEARS (no `backfill_dir:` wall; the exit-2 is an
+  unrelated module-level wall). So the hoist DIRECTION is genuinely verified — the defunc CAN lower a
+  Block-bodied `{let rr=…; match rr{…}}` filter_map closure when the tree comes from the FRONTEND.
+- **MY DESUGAR-built hoist** of the SAME logical program → STACK OVERFLOW (exit 134). Same logical shape,
+  but my programmatically-constructed IR differs from the frontend's and crashes the lowering.
+- (A minimal synthetic manual pre-hoist `m_str`/`m_rec` WALLS rather than lowers — a different result-type
+  path; not the dojo shape. The dojo shape specifically is what the manual-real-dojo test verified.)
+So the bug is NOT the lowering (manual tree lowers) and NOT the desugar fixpoint (idempotent, converges) —
+it is my desugar producing a MALFORMED tree vs the frontend's. Prime suspects: (1) I preserve the original
+`lambda_id` on the rewritten lambda (`lambda_id: *lambda_id`) — a STALE id whose cached lifted-form/captures
+no longer match the new body (try `lambda_id: None`); (2) a Block-structure / type mismatch vs the
+frontend's normal form. FRESH-SESSION: `--emit-ast` the manual-pre-hoist source vs an IR-dump of the
+desugar output and DIFF them to pin the malformation (almost certainly a 1-field fix once seen). The hoist
+is the RIGHT fix for dojo; only the tree-construction detail remains. Reverted (lowering-walls=2, clean).
