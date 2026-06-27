@@ -237,6 +237,15 @@ pub enum Op {
     /// the tuple, then the list block. Same single cert `d` as [`Op::Drop`]; the (String,String)
     /// counterpart of `DropListStrValue`.
     DropListStrStr { v: ValueId },
+    /// `drop_list_int_str v` — release a `List[(Int, String)]` whose element slots hold owned
+    /// `(Int, String)` TUPLE blocks (the `list.enumerate` / `[(1,"a"),…]` shape). At the list's last
+    /// ref, for each element: free the tuple at ITS last ref — `rc_dec` ONLY the String slot1 @20 (the
+    /// Int slot0 @12 is scalar) — then the tuple block; then the list block. A flat `DropListStr` would
+    /// `rc_dec` each tuple HANDLE only, leaking the tuple's String + block. Inline (no helper — the
+    /// prior routing emitted a call to a never-generated `$__drop_list_int_str` → invalid wat). Same
+    /// single cert `d`; the per-tuple recursion is the trusted raw-handle routine (leak-loop verified).
+    /// The (Int,String) counterpart of `DropListStrStr`.
+    DropListIntStr { v: ValueId },
     /// `drop_result_lv v` — release a `value.as_array` Result `Result[List[Value], String]` (the
     /// cap-as-tag 1-slot block `[rc][len@4=1][cap@8][@12 payload][@16 tag]`). IFF the last reference
     /// (rc==1), the RENDER tag-dispatches on @16: Ok (0) frees the `List[Value]` payload @12
@@ -901,6 +910,7 @@ pub fn verify_ownership(func: &MirFunction) -> Result<(), Vec<Violation>> {
             | Op::DropListValue { v }
             | Op::DropListStrValue { v }
             | Op::DropListStrStr { v }
+            | Op::DropListIntStr { v }
             | Op::DropResultListValue { v }
             | Op::DropResultValue { v }
             | Op::DropResultStrInt { v }

@@ -65,6 +65,22 @@ pub(crate) fn preamble() -> String {
     ;; not found: bump the frontier (a genuinely fresh block)
     (local.set $p (global.get $bump))
     (global.set $bump (i32.add (local.get $p) (local.get $n)))
+    ;; GROW the linear memory if the new frontier passed the last allocated page. The wasm memory
+    ;; starts at 1 page (64 KiB) with no max; a program that allocates more (a deep recursive
+    ;; List-accumulator, a large file read) MUST grow it or the next store traps OOB. `memory.size`
+    ;; returns the current page count; grow by exactly enough whole pages to cover `$bump`. This
+    ;; touches ONLY the page count — no rc cell, no free-list link, no allocation identity — so the
+    ;; FreeList.v / ownership accounting is unchanged (the proof surface is byte addresses below the
+    ;; frontier, which growing only extends). `memory.grow` returning -1 (host refused) leaves the
+    ;; trap-on-OOB behavior exactly as before — never a silent wrong value.
+    (if (i32.gt_u (global.get $bump) (i32.mul (memory.size) (i32.const 65536)))
+      (then
+        (drop (memory.grow
+          (i32.add
+            (i32.div_u (i32.sub (i32.sub (global.get $bump) (i32.const 1))
+                                (i32.mul (memory.size) (i32.const 65536)))
+                       (i32.const 65536))
+            (i32.const 1))))))
     (local.get $p))
 
   ;; 8-byte-ALIGNED bump alloc for TRANSIENT WASI out-param scratch (fd_out/stat/iov/
@@ -78,6 +94,16 @@ pub(crate) fn preamble() -> String {
     (local $p i32)
     (local.set $p (i32.and (i32.add (global.get $bump) (i32.const 7)) (i32.const -8)))
     (global.set $bump (i32.add (local.get $p) (local.get $n)))
+    ;; Grow the linear memory past the last page if this (possibly large — a 4 KiB readdir buffer, a
+    ;; file-content buffer) scratch alloc crossed it. Same page-count-only grow as `$alloc`.
+    (if (i32.gt_u (global.get $bump) (i32.mul (memory.size) (i32.const 65536)))
+      (then
+        (drop (memory.grow
+          (i32.add
+            (i32.div_u (i32.sub (i32.sub (global.get $bump) (i32.const 1))
+                                (i32.mul (memory.size) (i32.const 65536)))
+                       (i32.const 65536))
+            (i32.const 1))))))
     (local.get $p))
 
   (func $list_new (param $len i32) (param $cap i32) (result i32)

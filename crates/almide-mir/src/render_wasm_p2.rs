@@ -392,6 +392,31 @@ fn render_op(
         Op::DropListStrStr { v } => {
             format!("    (call $__drop_list_str_str (local.get {}))\n", local(*v))
         }
+        // INLINE recursive drop of a `List[(Int, String)]` (`list.enumerate` / `[(1,"a"),…]`). At the
+        // list's last ref (rc==1), loop each element: load the `(Int, String)` tuple handle (@12 + i*8);
+        // at the tuple's last ref `rc_dec` ONLY its String slot1 @20 (the Int slot0 @12 is scalar), then
+        // the tuple block; then the list block. The prior routing emitted a call to a never-generated
+        // `$__drop_list_int_str` → invalid wat (#11/#28). Self-contained (no helper); single cert `d`.
+        Op::DropListIntStr { v } => {
+            let p = local(*v);
+            format!(
+                "    (if (i32.eq (i32.load (local.get {p})) (i32.const 1))\n\
+                 \x20     (then\n\
+                 \x20       (local.set $dlli (i32.const 0))\n\
+                 \x20       (local.set $dlln (i32.load (i32.add (local.get {p}) (i32.const 4))))\n\
+                 \x20       (block $dllbrk (loop $dllcont\n\
+                 \x20         (br_if $dllbrk (i32.ge_s (local.get $dlli) (local.get $dlln)))\n\
+                 \x20         (local.set $dllinner (i32.wrap_i64 (i64.load (i32.add (local.get {p}) (i32.add (i32.const 12) (i32.mul (local.get $dlli) (i32.const 8)))))))\n\
+                 \x20         (if (i32.eq (i32.load (local.get $dllinner)) (i32.const 1))\n\
+                 \x20           (then\n\
+                 \x20             (call $rc_dec (i32.wrap_i64 (i64.load (i32.add (local.get $dllinner) (i32.const 20)))))\n\
+                 \x20             (call $rc_dec (local.get $dllinner))))\n\
+                 \x20         (local.set $dlli (i32.add (local.get $dlli) (i32.const 1)))\n\
+                 \x20         (br $dllcont))))\n\
+                 \x20     )\n\
+                 \x20   (call $rc_dec (local.get {p}))\n"
+            )
+        }
         // RECURSIVE drop of a `value.as_array` Result `Result[List[Value], String]` — the self-hosted
         // `$__drop_result_lv` (value_core.almd) tag-dispatches at the last ref: Ok frees the
         // `List[Value]` payload recursively, Err frees the String, then the block. A flat `DropListStr`

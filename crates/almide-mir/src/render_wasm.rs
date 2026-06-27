@@ -454,8 +454,10 @@ pub fn render_wasm_fn(
     // the inner List handle) for its nested Ok-tuple List free; `DropResultListStr` reuses just $dlli
     // (the Ok payload List handle — no inner $dllinner, its payload is the direct list). Declare them
     // when no DropListListStr did.
+    // `DropListIntStr` (List[(Int,String)]) loops with $dlli/$dlln/$dllinner too (no $dlsi/$dlsn —
+    // its per-element free is a single rc_dec of the tuple's String slot, not a nested loop).
     if func.ops.iter().any(|op| matches!(op,
-        Op::DropResultListStrInt { .. } | Op::DropResultListStr { .. }))
+        Op::DropResultListStrInt { .. } | Op::DropResultListStr { .. } | Op::DropListIntStr { .. }))
         && !func.ops.iter().any(|op| matches!(op, Op::DropListListStr { .. }))
     {
         locals.push("(local $dlli i32) (local $dlln i32) (local $dllinner i32)".to_string());

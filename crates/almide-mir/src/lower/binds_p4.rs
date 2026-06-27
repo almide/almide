@@ -404,6 +404,23 @@ impl LowerCtx {
                     if matches!(ty, Ty::Tuple(_)) || self.aggregate_field_tys(ty).is_some() {
                         self.materialized_aggregates.insert(v);
                     }
+                    // A tuple slot that is itself an Option/Result (`let (a, b) = (some(7), some(8))`):
+                    // track the borrowed slot handle so a later `match a { some(n) => … }` BRANCHES
+                    // (reads its tag) instead of LINEARIZING (running every arm + a garbage 0). Same
+                    // materialized-Option read-shape Batch 2 gave the payload-bound / field-Option match
+                    // subjects — a BORROW of the tuple's owned slot, no new ownership.
+                    use almide_lang::types::constructor::TypeConstructorId;
+                    if matches!(ty, Ty::Applied(TypeConstructorId::Option, _)) {
+                        self.materialized_options.insert(v);
+                        if crate::lower::is_heap_elem_list_ty(ty) {
+                            self.heap_elem_lists.insert(v);
+                        }
+                    } else if crate::lower::is_result_ty(ty) {
+                        self.materialized_results.insert(v);
+                        if crate::lower::is_heap_elem_list_ty(ty) {
+                            self.heap_elem_lists.insert(v);
+                        }
+                    }
                 } else {
                     self.ops.push(Op::Prim { kind: PrimKind::Load { width: 8 }, dst: Some(v), args: vec![addr] });
                 }

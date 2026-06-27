@@ -719,7 +719,15 @@ impl LowerCtx {
 
     pub(crate) fn drop_op_for(&self, v: ValueId) -> Op {
         if let Some(ty) = self.variant_drop_handles.get(&v) {
-            Op::DropVariant { v, ty: ty.clone() }
+            // `List[(Int, String)]` was routed here as a pseudo-"variant" but has no generated
+            // `$__drop_list_int_str` ADT helper (the `DropVariant` render emitted a dangling call →
+            // invalid wat). Route it to the dedicated INLINE `DropListIntStr` (frees each tuple's
+            // String slot + block, then the list). Every real user-ADT variant keeps `DropVariant`.
+            if ty == "list_int_str" {
+                Op::DropListIntStr { v }
+            } else {
+                Op::DropVariant { v, ty: ty.clone() }
+            }
         } else if self.value_result_lists.contains(&v) {
             Op::DropResultListValue { v }
         } else if self.value_result_results.contains(&v) {
