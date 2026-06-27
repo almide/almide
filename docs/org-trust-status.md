@@ -12,6 +12,30 @@ own vectors/tests on native AND `--target wasm`). `🟡 lowers, byte-match TODO`
 reached wall=0 but have not yet been byte-verified — exactly where a silent miscompile can hide
 (e.g. the `var v=w` scalar-aliasing bug that faked an early sha1=0 until the RFC vectors caught it).
 
+## Update (2026-06-27 pm) — adversarial byte-correctness sweep + cluster-fix campaign (IN PROGRESS)
+
+With the wall surface at its proven frontier (6 Coq #31 + native-only — see line 5), the work pivoted from *wall count* to *byte-correctness*: exactly what the "wall=0 ≠ correct" note above warns about. The effect-fn value-return hole (line 7) — a real "never emit invalid wasm" hole the corpus-wall (checks **certs, not wat-validity**) + output-parity (only **124 files**) both missed — proved such holes exist OUTSIDE the v0 corpus. So a **systematic adversarial sweep** of `render_program` (the v1 spine) vs native was run: 8 shape-categories (effect-fn / HOF / control / compound / string / recursion / operators / binding) × ~25 generated shapes each, each classified invalid-wat / trap / miscompile / wall-ok / byte-match-ok, then a verify pass to reject test artifacts.
+
+**Result: 30 confirmed v1-spine correctness holes** (all re-verified reproducing in `render_program`), clustered into ~13 real root causes, captured in [docs/roadmap/active/v1-spine-correctness-holes.md](roadmap/active/v1-spine-correctness-holes.md). The fix campaign (each cluster: delegate → independent per-repro byte-match + wat2wasm-validate + corpus-wall ALL ACCEPT + output-parity 124/124 + **0 backend-split** → commit):
+
+| cluster | holes | root cause (v1 spine) | status |
+|---|---|---|---|
+| **A** filter_map/map heap-result source-element load width | 4 | control_p5.rs LoadHandle hardcode → select by source_elem_ty | ✅ `5b20a777` |
+| **E1** value-pos subscript on let-bound List[heap] (string群) | 6 | tail.rs borrow gated on materialized_lists; register List[heap] | ✅ `ce4a2827` |
+| **E4** nested/payload-bound Option match linearized | 1 | control.rs register Option payload in materialized_options | ✅ `ce4a2827` |
+| **B** arm-local heap-temp drop hoisted past if/else → **trap** | 1 | control_p4.rs per-arm drop_arm_locals frame (rc_dec(0) underflow) | ✅ `33b3e255` |
+| **C** match-arm tuple-pattern slot loads | 2 | route Tuple pattern through try_lower_tuple_destructure | ✅ `33b3e255` |
+| **D** record-pattern destructure + record-ctor Option field | 5 | try_lower_record_destructure + Option-ctor arm | ✅ `33b3e255` |
+| **E2** `and`/`or` eager (no short-circuit) → **trap** | 3 | calls_p4.rs lower to `if a then b else false` control flow | ✅ committing |
+| **E3** IndexAssign not stored (silent no-op) | 1 | mod_p3.rs emit ElemAddr+Store after MakeUnique | ✅ committing |
+| **E5** scalar `e!` (Unwrap) in operand position → 0 | 1 (#21) | calls_p4.rs scalar Unwrap arm (Ok-payload @12) | ✅ committing |
+| **#22** recursive effect-call-in-block-tail elision → 0 | 1 | (NEW cluster, pre-existing, distinct from E5) | ⏳ todo |
+| **F** tuple-of-heap-element construction | 1 | binds_p3/p4 Option-ctor element | ⏳ todo |
+| **G** missing `$__drop_list_int_str` helper → invalid-wat | 2 | render_wasm_p2.rs Op::DropListIntStr render | ⏳ todo |
+| **H** non-tail recursion list-concat accumulator leak | 2 | no-TCO/no-grow (64KiB page) — deep, may wall/defer | ⏳ todo |
+
+**24 of 30 holes closed** (19 committed + 5 in final oracle), 6 remaining (#22 + F + G + H). corpus-wall ownership rose 18741→18773 across the fixes and stays **ACCEPT** at every step — the new element-borrow / destructure / per-arm-drop paths add correctly-tracked heap witnesses, each kernel-re-verified (cert↔emission consistency, no REJECT, no silent drop). **This is the live frontier: extending the v1 trust spine's proven byte-correctness to shapes beyond the v0 corpus.** None of these holes affect the wall surface (still 6 Coq #31 + native); they are pure byte-correctness fixes.
+
 ## Update (2026-06-26 pm) — wall-clearing campaign + the feasibility floor
 
 A focused lever sweep (diagnose all walls → fix the contained ones, byte-matched + corpus-wall
