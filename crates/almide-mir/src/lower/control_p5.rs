@@ -953,8 +953,18 @@ impl LowerCtx {
         self.ops.push(Op::IntBinOp { dst: cond_v, op: IntOp::Lt, a: i_v, b: len_v });
         self.ops.push(Op::LoopBreakUnless { cond: cond_v });
 
-        // Load element[i] from the SOURCE list: addr = src_h + 12 + i*8. The source is a `List[String]`
-        // (heap), so the element is the slot's HANDLE — a BORROWED String the inlined body reads.
+        // Load element[i] from the SOURCE list: addr = src_h + 12 + i*8. The READ WIDTH depends on the
+        // SOURCE element type, NOT the heap String OUTPUT this HOF accumulates: a HEAP source
+        // (`List[String]`/`List[Value]`) element is the slot's HANDLE (`LoadHandle` = i32 Ptr, a
+        // BORROWED heap value the body reads); a SCALAR source (`List[Int]` — e.g. `filter_map((x:Int)
+        // => Some(int.to_string(x)))`) element is the i64 VALUE (`Load { width: 8 }`). Hardcoding
+        // `LoadHandle` for a scalar source loaded each i64 Int element as an i32, corrupting every i64
+        // op consuming it (`i64.rem_s`/`i64.gt_s`/`i64.eq`/`int.to_string`) → invalid wasm (the
+        // filter_map heap-result-element-load-width holes). Mirrors `lower_defunc_list_hof_inner`'s
+        // `src_heap` element read.
+        let src_heap = matches!(&xs.ty,
+            Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, a)
+                if a.len() == 1 && is_heap_ty(&a[0]));
         let i8_v = self.fresh_value();
         let eight = self.fresh_value();
         self.ops.push(Op::ConstInt { dst: eight, value: 8 });
@@ -963,14 +973,18 @@ impl LowerCtx {
         let src_addr = self.fresh_value();
         self.ops.push(Op::IntBinOp { dst: src_addr, op: IntOp::Add, a: src_base, b: i8_v });
         let elem = self.fresh_value();
-        self.ops.push(Op::Prim { kind: PrimKind::LoadHandle, dst: Some(elem), args: vec![src_addr] });
+        let read_kind = if src_heap { PrimKind::LoadHandle } else { PrimKind::Load { width: 8 } };
+        self.ops.push(Op::Prim { kind: read_kind, dst: Some(elem), args: vec![src_addr] });
 
-        // Bind the lambda PARAM (the element) to the BORROWED slot handle. CAPTURES resolve through
-        // `value_of` (already in scope). Register `elem` as a borrow (`param_values`) — the source list
-        // owns it, so a body that tries to MOVE it out (a bare `some(elem)`) auto-acquires its own ref
-        // rather than a bare move-out the checker would reject.
+        // Bind the lambda PARAM (the element) to the loaded value/handle. CAPTURES resolve through
+        // `value_of`. Only a HEAP element is a BORROW (`param_values`) — the source list owns it, so a
+        // body that MOVES it out (`some(elem)`) auto-acquires its own ref. A SCALAR element is a plain
+        // i64 value (no ownership, no `param_values`) — registering it as a borrow would mis-route its
+        // (non-existent) drop.
         self.value_of.insert(params[0].0, elem);
-        self.param_values.insert(elem);
+        if src_heap {
+            self.param_values.insert(elem);
+        }
 
         // Lower the closure BODY by PUSHING its control flow (if/match/block) DOWN and APPENDING each
         // terminal sublist to the loop-carried `acc` slot — NEVER binding a merged-if heap value (which
