@@ -620,10 +620,17 @@ impl LowerCtx {
                 // Otherwise the result is unmaterialized and a `xs[i]` over it would TRAP on cap 0, so
                 // it is left deferring to `Const 0` (mis-valued, never a new runtime crash).
                 let data_arg_has_fn = args.iter().any(|a| {
+                    // A let-bound lambda passed BY NAME (`let g = (x) => …; xs |> list.map(g)`) is a
+                    // CLOSURE arg — try_lower_defunc_list_hof resolves it via lambda_bindings and inlines
+                    // it faithfully (calls.rs). Without recognizing the `Var` here it is misread as a
+                    // fn-typed DATA arg (a `list.map(fns, …)` over a list-of-closures the v1 model can't
+                    // represent) and the guard below WALLS it — even though the inline succeeded. This is
+                    // the bind-vs-tail discrepancy: the tail/value position has no such data-arg guard, so
+                    // `let g = …; xs |> map(g)` lowered as a TAIL but walled as a `let r = xs |> map(g)`.
                     let is_closure_arg = matches!(
                         &a.kind,
                         IrExprKind::Lambda { .. } | IrExprKind::FnRef { .. } | IrExprKind::ClosureCreate { .. }
-                    );
+                    ) || matches!(&a.kind, IrExprKind::Var { id } if self.lambda_bindings.contains_key(id));
                     !is_closure_arg && crate::lower::ty_contains_fn(&a.ty)
                 });
                 let faithful = !self.last_call_had_unlifted_closure && !data_arg_has_fn;
