@@ -893,3 +893,15 @@ per-element loop (the handler already materializes the subject — line ~31 `Cal
 LOCALIZED handler extension (Option→Option+Result), NOT the hoist (which mangled the tree) and NOT Coq.
 VERIFY: extend the handler, then byte-match a Result-ok/err filter_map fixture + corpus-wall + oracle.
 This supersedes all the hoist notes above — the hoist is abandoned; the Ok/Err handler extension is the path.
+
+### dojo — REFINED fix point (the exact gates): handler is self-host-OPTION-call + Some/None gated
+`append_variant_match_to_str_acc` (control_p5:1207) gates on (1) `is_self_host_option_call(subject)` (1221)
+and (2) Some/None arms (1256/1278). dojo's `match fs.read_text(p) { ok(content)=>some(…), err(_)=>none }`
+fails BOTH: fs.read_text returns Result (not a self-host Option call), and the arms are Ok/Err. So the fresh-
+session fix = extend this handler (and the List[record/Value]-result sibling path dojo actually uses, since
+parse_task_md returns a record/Value not String) to also admit: a self-host RESULT-call subject (add
+`is_self_host_result_call`), Ok/Err arms (Ok≈Some keep, Err≈None skip), and the INVERSE tag (Result Ok =
+tag==0 vs Option Some = tag!=0; `is_result_ty` already distinguishes). The subject materialization
+(lower_call_args → CallArg::Handle, line 1232) already handles any heap call, so the effect call lowers as
+the per-element subject with its FsRead cap folded. This is the SOUND, localized mechanism the 5 hoist
+attempts were a detour from — a handler extension, NOT a tree rewrite, NOT Coq. lowering-walls=2.
