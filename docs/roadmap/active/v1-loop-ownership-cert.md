@@ -838,3 +838,20 @@ LIKELY FIX (fresh session): do NOT apply the hoist inside lower_body_into's recu
 fixpoint; apply it ONCE as a single full-tree pass at the function-body ENTRY (mod.rs ~1003, before
 lower_body_into), so a re-fire is structurally impossible. The hoist DIRECTION remains verified (manual
 real-dojo pre-hoist clears backfill_dir); only the desugar's fixpoint-placement / idempotency is the bug.
+
+### dojo hoist — FOURTH attempt (single-pass at function entry): fixes the crash, but the tree still walls + regresses
+
+Backtrace-derived fix: apply the hoist as a SINGLE top-down full-pass ONCE at the function-body entry
+(mod.rs ~1003, before desugar_heap_branches), NOT in the lower_body_into fixpoint. Result: the STACK
+OVERFLOW is GONE (exit 2, not 134) — the single-pass-at-entry placement IS the termination fix. BUT
+backfill_dir STILL walls "filter_map unliftable" (the SAME wall as un-hoisted) AND dojo total went 1→2 (a
+REGRESSION elsewhere). So even correctly-terminating, my desugar-constructed `{let $r = subj; match $r{…}}`
+tree is NOT equivalent to the frontend's manual pre-hoist (which DOES clear backfill_dir, verified): the
+defunc still declines my tree, and the count-side (count_ir_calls doesn't see the entry-only hoist) likely
+introduced the +1. So the IRREDUCIBLE blocker is confirmed: the desugar-built IR differs from the frontend
+IR in a way that (a) the defunc won't lower and (b) breaks the desugar-before-both caps invariant. FOUR
+attempts (2 stack-overflow, 1 instrument-only, 1 terminating-but-walls+regresses), all reverted clean.
+DEFINITIVE fresh-session plan: (1) emit/dump the FRONTEND IR of the manual pre-hoist source vs the
+desugar-built tree and DIFF (the malformation is in there); (2) apply the hoist in the SHARED
+desugar-before-both path (so count_ir_calls sees it too) — entry-only breaks the caps invariant. The hoist
+DIRECTION stays verified; the desugar's IR-fidelity + gate-placement are the open items. lowering-walls=2.
