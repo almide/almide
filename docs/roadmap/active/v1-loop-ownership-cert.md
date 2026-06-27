@@ -481,3 +481,34 @@ captures `used_names`); dojo's `list.filter_map((f) => match fs.read_text(dir+"/
 **Plan toward wall=0**: (1) aes (proven-spine reuse, NIST-gated, tractable) → 6→4; (2) the conditional-acquire
 OwnershipLoop construct (new Coq) → wasm-bindgen 3→0 → 4→1; (3) the effect-monad + conditional-acquire for
 dojo's effectful filter_map → 1→0. Then the only walls left are porta/sqlite native-only (reclassify).
+
+### ✅ STEP 1 DONE (commit 6a38227e): aes 2→0 (a routing gap, NOT Coq — see the aes section above).
+
+### ✅ STEP 2a DONE (commit 5d3b642f): the CONDITIONAL-acquire Coq core — OwnershipFilter.v.
+`CondLoop thenb elseb` + `ccheck_unroll_sound`: BOTH branches rc-preserving ⇒ any per-iteration predicate
+outcome sequence is double-free/leak-free. Kernel-checked + coqchk + axiom-clean, in the proof gate
+(PROOF SPINE OK). The filter slot cert `[CInc; CondLoop [FDec;FInc] []; CMove]` ACCEPTS; leaky/draining
+branches REJECT; the unconditional Loop is the special case thenb=elseb. This is the irreducible Coq part.
+
+### STEP 2b REMAINING (the integration — precisely diagnosed 2026-06-27): heap-filter inline + conditional-acquire cert/checker.
+EMPIRICAL findings (probed each filter shape via render_program vs native):
+- a NON-capturing heap filter (`xs |> list.filter((s) => string.len(s) > 1)`, List[String]) WORKS — via
+  C2-LIFT (the self-host `(call $list.filter list funcref)` combinator, its own proven cert), NOT the inline.
+- a SCALAR filter (`[1,2,3] |> filter((x) => x > 2)`) WORKS — via C1-INLINE (try_lower_defunc_list_hof):
+  a write-cursor + conditional store of an i64 VALUE (no ownership ⇒ no element cert events; the existing
+  checker already accepts this conditional store).
+- a CAPTURING heap filter (ALL captures — scalar, string, list — wall) FAILS: C2-lift is impossible (a
+  capture has no FuncRef), and C1-inline `try_lower_defunc_list_hof` DECLINES a heap filter at
+  control_p5.rs:116 (`filter` not in the heap-source allowlist) + :138-139 (`filter` result must be
+  non-heap). So it falls to the funcref-drop + the value-position guard (calls.rs:163) → WALL.
+THE FIX: extend `try_lower_defunc_list_hof` to INLINE a heap-source/heap-result `filter` (like `map`'s heap
+case at :123/:135) — inline the predicate (captures resolve via `value_of`, already supported), and per
+KEPT element CONDITIONALLY acquire it into the write-cursor output list: clone the borrowed source handle
+(cert `a`/`i`, +1) + store into `out[cursor]` (consume `m` into the list), tracked in heap_elem_lists/
+value_elem_lists for the scope-end DropListStr/DropListValue. The per-iteration body is net-0 in BOTH
+branches (true = acquire+move = 0; false = nothing = 0) = EXACTLY OwnershipFilter.v's CondLoop. So the
+cert side needs: (i) the Rust `verify_ownership` + the extracted OCaml checker to accept a CONDITIONAL
+loop-carried acquire (the CondLoop check — currently only the net-0 Loop is implemented; the Coq proof
+exists, the checker impl is the gap), and (ii) the lowering to emit it. dojo's `filter_map` ALSO needs the
+effect-monad (its closure calls fs.read_text — the #22 let-bind-`!` frontier) on top. Gates: byte-match
+(the capturing filters' real output) + corpus-wall ownership ACCEPT (the CondLoop cert) + 0 backend-split.
