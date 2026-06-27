@@ -378,6 +378,25 @@ impl LowerCtx {
                         }
                     }
                 }
+                // A heap-result `if` operand (`"a=" + (if c then "x" else "y")` — the StringInterp
+                // `${if …}` desugar; `f(if c then a else b)`): materialize it via try_lower_heap_result_if
+                // into an OWNED+TRACKED value (cert `i`, scope-end `d`) — EXACTLY the let-bound heap-if
+                // path (`let s = if …; f(s)` already lowers) — then BORROW it into the call
+                // (`CallArg::Handle`). Without this a heap-result-`if` operand fell to the deferred Opaque
+                // arm below (rejected → the function walled). Closes the StringInterp-with-`${if}` wall
+                // (porta `format_tool_log`) + any call/concat with a heap-result-`if` arg.
+                IrExprKind::If { cond, then, else_ } if is_heap_ty(&a.ty) => {
+                    match self.try_lower_heap_result_if(cond, then, else_, &a.ty) {
+                        Some(dst) => CallArg::Handle(dst),
+                        None => {
+                            return Err(LowerError::Unsupported(
+                                "heap-result `if` in a call-argument position outside the executable \
+                                 subset"
+                                    .into(),
+                            ))
+                        }
+                    }
+                }
                 IrExprKind::LitStr { .. }
                 | IrExprKind::List { .. }
                 | IrExprKind::MapLiteral { .. }
