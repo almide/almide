@@ -524,3 +524,25 @@ So the precise remaining work splits:
    let-bind-`!` (the #22 frontier) ON TOP of the value/record-element conditional append. The hardest.
 Gates throughout: byte-match (the capturing filters' real output) + corpus-wall ownership ACCEPT + 0
 backend-split. The OwnershipFilter.v Coq core (committed) is the soundness foundation for all three.
+
+### ✅ STEP 2b PARTIAL (commit 5a0a9efb): capturing heap filter LOWERED → wasm-bindgen 3→2.
+The capturing heap `list.filter` (List[String] + List[Value]) now lowers via the write-cursor + a
+LOCALLY-balanced conditional acquire: keep the source element by CLONING it (Dup `a`) + MOVING it into
+the output list (Consume `m`) INSIDE the predicate-true then-arm. Because the `a..m` is balanced within
+the then-arm (else does nothing; the output list is alloc'd once, NOT a SetLocal-rebound slot), the
+EXISTING flat checker accepts it WITHOUT the loop-carried CondLoop — OwnershipFilter.v's CondLoop proves
+the more general loop-carried form, this locally-balanced shape needs only the base checker. control_p5
+lower_defunc_list_hof_inner: allow heap source+result for filter, body stays Bool, then-arm clones+consumes,
+output tracked heap_elem_lists/value_elem_lists. byte-match List[String]+List[Value], corpus-wall 18795
+ACCEPT, 0 backend-split. `generate_wit` fully clears.
+
+### REMAINING (org non-native = 3): the deep frontiers.
+- **generate_dts / generate_esm (wasm-bindgen 2)** — NOT a simple heap-result-if (every isolated shape —
+  flat_map-conditional-call, let-bound big-list-if — lowers + byte-matches). The real blocker is the
+  `sigs = supported |> list.flat_map((f) => { … let param_ty = (p: Value) => { … }; … })` shape: a
+  **flat_map body that DEFINES and uses a LOCAL LAMBDA** (`param_ty`) — a NESTED-HOF / lambda-in-HOF-body
+  defunctionalization (the yaml-style multi-feature deep frontier), not a one-lever fix.
+- **dojo backfill_dir (1)** — the capturing `filter_map` whose closure calls fs.read_text → needs the
+  effect-monad let-bind-`!` (#22) on top of the value/record-element conditional append.
+- **porta 29 + sqlite 20 native-only** — `@extern(rust)` host stubs, no wasm form (physically not
+  lowerable; reclassify only — a user accounting decision, not a lowering task).
