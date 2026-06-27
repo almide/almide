@@ -1223,7 +1223,13 @@ pub fn desugar_let_bound_heap_branch(body: &IrExpr) -> Option<IrExpr> {
     // BOUNDED-DUPLICATION: the continuation is copied into BOTH arms, so each remaining heap let-bound
     // `if`/`match` in `rest` doubles the leaf-arm count as the fixpoint resolves them one at a time. A
     // FEW are fine (block_scalar = 2: `let joined = if…; let tmp = if…(value.str arg, ANF-lifted)`), so
-    // allow up to 2 (≤ 2^3 = 8 leaves) and refuse beyond that to keep the duplication bounded.
+    // allow up to 3 (≤ 2^4 = 16 leaves) and refuse beyond that to keep the duplication bounded. The
+    // wasm-bindgen `generate_esm` shape stacks 4 top-level optional-list `if`s (matrix/bytes/import_shim/
+    // shim_noop, each `if cond then [LITERALS] else []`); the FIRST sees rest = 3, so the old `> 2` gate
+    // bailed → the merged let-bound `if` walled. Raising to `> 3` lets the proven per-arm-balanced
+    // tail-duplication resolve all 4 (each leaf independently binds + drops its own list — corpus-wall
+    // re-verifies every arm). The leaves are mostly literal-list concats (cheap), so 16× is tolerable for
+    // a build-time codegen tool; deeper stacks still WALL rather than blow up.
     let rest_branch_binds = stmts[i + 1..]
         .iter()
         .filter(|s| {
@@ -1235,7 +1241,7 @@ pub fn desugar_let_bound_heap_branch(body: &IrExpr) -> Option<IrExpr> {
             )
         })
         .count();
-    if rest_branch_binds > 2 {
+    if rest_branch_binds > 3 {
         return None;
     }
     let result_ty = &body.ty;

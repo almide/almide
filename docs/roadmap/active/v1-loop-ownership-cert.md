@@ -713,3 +713,28 @@ defunctionalizer tweak. Ranking the 3 remaining by tractability:
   effect-`!`-inside-a-closure (vs the block-level desugar already shipped) is new machinery.
 - **#1 nested HOF** (generate_dts/esm) — DEEPEST: needs the nested-loop Coq cert first.
 So generate_esm's two walls split: `tuple_helpers` (#3, tractable) vs `record_helpers` (#1, Coq). dojo = #2.
+
+## ⭐ CORRECTION + WIN (2026-06-27): generate_esm was the BOUNDED-DUPLICATION GATE (not Coq), now CLEARED
+
+Full-module bisection (the ONLY reliable method — render_program standalone doesn't link string.starts_with/
+list.contains, so isolated repros mislead) of the REAL wasm-bindgen mod.almd corrected my repeated
+mis-diagnosis:
+- **generate_esm**: NOT nested-HOF, NOT Coq. Its wall was `desugar_let_bound_heap_branch`'s BOUNDED-
+  DUPLICATION gate (mod_p6.rs:1238, was `rest_branch_binds > 2`). generate_esm stacks **4 top-level
+  optional-list `if`s** (matrix_helpers/bytes_helpers/import_shim/shim_noop, each `if cond then [LITERALS]
+  else []`); the first sees rest=3 > 2 → the gate bailed → the merged let-bound `if` walled "no sound
+  scope-end drop". Raising the gate to `> 3` (≤ 2^4 = 16 leaves; the tail-duplication is PROVEN per-arm
+  balanced) CLEARS generate_esm. Verified: corpus-wall ownership **18854→19338 ACCEPT** (+484 corpus
+  let-bound-ifs now duplicate-and-lower, all kernel-re-verified), output-parity 124/124, corpus-wall fast
+  (1:52, no blowup). **wasm-bindgen 2→1.**
+- **generate_dts**: GENUINELY the nested-loop frontier. Bisection pinned its wall to the `sigs` flat_map
+  closure's `param_ty` — `params |> list.map((p) => "${name}: ${param_ty(p)}") |> join` is an INNER map
+  nested inside the outer flat_map loop (removing param_ty clears generate_dts). A loop-inside-a-loop-body
+  is unrepresentable in OwnershipLoop.v (flat Loop body) → needs the **nested-loop ownership cert (Coq)**.
+- **dojo backfill_dir**: effect-call-in-closure (`filter_map` whose body calls fs.read_text + yields
+  Option[record]) — the effect-in-defunc-loop machinery.
+
+NET: lowering-walls **3→2** (generate_esm cleared). Remaining 2 = generate_dts (nested-loop Coq) + dojo
+(effect-in-closure). The "deep/Coq" meta-pattern held HALF the time: generate_esm was a 1-line gate (the
+meta-lesson "deep was repeatedly an empirical mischaracterization — verify per-wall" applied AGAIN), but
+generate_dts's nested loop is a real Coq frontier.
