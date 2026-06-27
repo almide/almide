@@ -507,6 +507,99 @@ pub fn desugar_callarg_unwrap(body: &IrExpr, next_var: &mut u32) -> Option<IrExp
     None
 }
 
+/// Desugar a STATEMENT/let-bind effect-`!` (`Unwrap`) into a NESTED-MATCH continuation — the standard
+/// monadic do-desugar — so a CAN-ERR effect-`!` propagates without a mid-function early-return (which the
+/// v1 MIR has no Op for):
+///
+///   { before; let x = f()!; after }  →  { before; match f() { err(e) => err(e), ok(x) => { after } } }
+///   { before;     f()!    ; after }  →  { before; match f() { err(e) => err(e), ok(_) => { after } } }
+///
+/// The continuation (`after`) nests in the Ok-arm; the Err-arm reconstructs `err(e)` at the enclosing
+/// fn's `Result[_, String]` type. The fn's tail becomes the (nested) match, which the EXISTING
+/// heap-result-`match` tail lowering already handles — VERIFIED to byte-match for scalar/String/Value/
+/// record Ok (porta.start's every shape). Call-count-INVARIANT (`f()` appears once before and after; the
+/// continuation nests in ONE arm — no duplication; `err(e)` is a constructor, not a call), so `mir == ir`
+/// holds without the count gate re-running it. Only a TOP-LEVEL stmt `!` (a `let x = f()!` Bind value or
+/// a bare `f()!` Expr stmt); a tail `f()!` is the fn's return (tail.rs pass-through), and a `!` nested in
+/// an operand is handled by `desugar_callarg_unwrap`. Closes the porta.start / dojo effect-monad wall
+/// WITHOUT the major Return-op subsystem.
+pub fn desugar_effect_unwrap(body: &IrExpr) -> Option<IrExpr> {
+    let mut next_var = max_var_id(body) + 1;
+    desugar_effect_unwrap_inner(body, &mut next_var)
+}
+
+fn desugar_effect_unwrap_inner(body: &IrExpr, next_var: &mut u32) -> Option<IrExpr> {
+    use almide_ir::{IrMatchArm, IrPattern};
+    use almide_lang::types::Ty;
+    let IrExprKind::Block { stmts, expr: tail } = &body.kind else {
+        return None;
+    };
+    for (i, s) in stmts.iter().enumerate() {
+        // A TOP-LEVEL effect-`!` — the WHOLE stmt value is `Unwrap { f() }`:
+        //   let-bind `let x = f()!` → the Ok-arm binds `x` to the payload
+        //   bare stmt `f()!`        → the Ok-arm discards the (Unit) payload (`_`)
+        let (inner, ok_pat) = match &s.kind {
+            IrStmtKind::Bind { var, ty, value, .. } => match &value.kind {
+                IrExprKind::Unwrap { expr } => (
+                    (**expr).clone(),
+                    IrPattern::Ok { inner: Box::new(IrPattern::Bind { var: *var, ty: ty.clone() }) },
+                ),
+                _ => continue,
+            },
+            IrStmtKind::Expr { expr } => match &expr.kind {
+                IrExprKind::Unwrap { expr } => {
+                    ((**expr).clone(), IrPattern::Ok { inner: Box::new(IrPattern::Wildcard) })
+                }
+                _ => continue,
+            },
+            _ => continue,
+        };
+        // The continuation = the rest of the block `{ stmts[i+1..]; tail }`, typed as the whole body
+        // (it produces the fn's return). RECURSE so a LATER `!` in the continuation also desugars.
+        let cont = IrExpr {
+            kind: IrExprKind::Block { stmts: stmts[i + 1..].to_vec(), expr: tail.clone() },
+            ty: body.ty.clone(),
+            span: body.span.clone(),
+            def_id: body.def_id,
+        };
+        let cont = desugar_effect_unwrap_inner(&cont, next_var).unwrap_or(cont);
+        // err(e): a fresh `e` bound by the Err-pattern, reconstructed at the fn's Result return type.
+        let e_var = VarId(*next_var);
+        *next_var += 1;
+        let err_arm = IrMatchArm {
+            pattern: IrPattern::Err { inner: Box::new(IrPattern::Bind { var: e_var, ty: Ty::String }) },
+            guard: None,
+            body: IrExpr {
+                kind: IrExprKind::ResultErr {
+                    expr: Box::new(IrExpr {
+                        kind: IrExprKind::Var { id: e_var },
+                        ty: Ty::String,
+                        span: body.span.clone(),
+                        def_id: None,
+                    }),
+                },
+                ty: body.ty.clone(),
+                span: body.span.clone(),
+                def_id: body.def_id,
+            },
+        };
+        let ok_arm = IrMatchArm { pattern: ok_pat, guard: None, body: cont };
+        let m = IrExpr {
+            kind: IrExprKind::Match { subject: Box::new(inner), arms: vec![err_arm, ok_arm] },
+            ty: body.ty.clone(),
+            span: body.span.clone(),
+            def_id: body.def_id,
+        };
+        return Some(IrExpr {
+            kind: IrExprKind::Block { stmts: stmts[..i].to_vec(), expr: Some(Box::new(m)) },
+            ty: body.ty.clone(),
+            span: body.span.clone(),
+            def_id: body.def_id,
+        });
+    }
+    None
+}
+
 /// Is `e` a PURE, freely-duplicable match subject — a `Var` or a literal? `build_match_chain`
 /// inlines such a subject into EACH literal arm's `==` test (no re-eval cost / effect). A
 /// non-pure subject (a CALL) inlined per arm would be EVALUATED once per arm — wrong if it has

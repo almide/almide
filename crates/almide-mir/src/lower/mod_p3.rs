@@ -139,6 +139,14 @@ impl LowerCtx {
         // ANF-LIFT a heap-result `if`/`match` out of a call ARGUMENT first (`println(if c then
         // "a" else "b")` → `let tmp = if..; println(tmp)`), so the tail-duplication below then
         // recovers it. Same rewrite runs in the count gate (desugar-before-both).
+        // EFFECT-MONAD desugar FIRST: a statement/let-bind effect-`!` (`let x = f()!; rest` / `f()!;
+        // rest`) becomes a NESTED-MATCH continuation (`match f() { err(e) => err(e), ok(x) => { rest } }`)
+        // — err-propagation WITHOUT a mid-function Return op. Re-enter so a later `!` in the continuation
+        // also desugars, then desugar_heap_branches handles any heap-`if` continuations. Call-count-
+        // invariant (no duplication), so `count_ir_calls` stays exact without re-running it.
+        if let Some(rewritten) = desugar_effect_unwrap(body) {
+            return self.lower_body_into(&rewritten);
+        }
         if let Some(rewritten) = desugar_heap_branches(body) {
             return self.lower_body_into(&rewritten);
         }
