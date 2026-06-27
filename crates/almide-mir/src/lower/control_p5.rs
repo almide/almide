@@ -113,14 +113,14 @@ impl LowerCtx {
         // handle like map's). `flat_map`/`filter_map` admit a heap source too (the toml/dojo cases
         // map over a `List[String]` of keys/codes — the element is a borrowed String handle). `filter`
         // stays scalar-source.
-        if !src_scalar && !matches!(func, "map" | "fold" | "flat_map" | "filter_map") {
+        if !src_scalar && !matches!(func, "map" | "filter" | "fold" | "flat_map" | "filter_map") {
             return None;
         }
         // map: a HEAP-element result list (`List[String]`/`List[Value]`) is now built too — each
         // slot holds an OWNED handle the per-element body produces (via lower_heap_result_arm), and
         // the result list is tracked for the recursive scope-end drop. filter keeps scalar results;
         // fold a scalar accumulator. (A heap accumulator / heap-filter still defers.)
-        let result_heap_elem = func == "map"
+        let result_heap_elem = matches!(func, "map" | "filter")
             && matches!(result_ty,
                 Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && is_heap_ty(&a[0]));
         // `flat_map`/`filter_map` over a `List[String]` source build a `List[String]` result by
@@ -135,8 +135,9 @@ impl LowerCtx {
             "map" => result_heap_elem
                 || matches!(result_ty,
                     Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && !is_heap_ty(&a[0])),
-            "filter" => matches!(result_ty,
-                Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && !is_heap_ty(&a[0])),
+            "filter" => result_heap_elem
+                || matches!(result_ty,
+                    Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && !is_heap_ty(&a[0])),
             // A SCALAR accumulator (Int/Bool/Float), OR a heap STRING accumulator (`fold("", (acc,x)
             // => acc + …)`): the inlined `acc = <body>` is the loop-carried slot's drop-old + SetLocal
             // (the proven i(id)m append-accumulator pattern), reclaiming each transient String.
@@ -378,7 +379,10 @@ impl LowerCtx {
         let body_mark = self.live_heap_handles.len();
         self.in_frame += 1;
         self.in_defunc_body += 1;
-        let body_v = if let Some(elem_ty) = &result_elem {
+        // `filter`'s body is the PREDICATE (a Bool) regardless of the result element type — the kept
+        // ELEMENT (not the body) is stored. Only map/flat_map-style HOFs lower the body AS the heap
+        // result element. So route filter to the scalar (Bool) path even when result_elem is Some.
+        let body_v = if let Some(elem_ty) = result_elem.as_ref().filter(|_| func != "filter") {
             self.lower_heap_result_arm(body, elem_ty)
         } else if fold_acc_ty.is_some() {
             // A heap (String) fold accumulator: the body `acc + s` is a ConcatStr producing a FRESH
@@ -437,7 +441,26 @@ impl LowerCtx {
                 let rbase = self.load_addr(rh, 12);
                 let raddr = self.fresh_value();
                 self.ops.push(Op::IntBinOp { dst: raddr, op: IntOp::Add, a: rbase, b: c8 });
-                self.ops.push(Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args: vec![raddr, elem] });
+                // A HEAP filter keeps the source ELEMENT (a BORROWED handle, `param_values`): CLONE it
+                // (Dup, cert `a` = a new owned ref) and MOVE it into the output list (Consume, cert `m`).
+                // The `a..m` is LOCALLY balanced — both in THIS then-arm, the else-arm does nothing — so
+                // the existing flat certificate accepts it WITHOUT a loop-carried conditional slot (the
+                // output list is alloc'd once, not a SetLocal-rebound slot; per kept element a fresh
+                // Dup'd object is acquired and immediately moved into the list, whose recursive
+                // DropListStr/DropListValue frees it). A SCALAR filter stores the i64 value directly (no
+                // ownership). OwnershipFilter.v's CondLoop proves the more general loop-carried form; this
+                // locally-balanced shape needs only the base checker.
+                let stored = if result_elem.is_some() {
+                    let cloned = self.fresh_value();
+                    self.ops.push(Op::Dup { dst: cloned, src: elem });
+                    self.ops.push(Op::Consume { v: cloned });
+                    let eh = self.fresh_value();
+                    self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(eh), args: vec![cloned] });
+                    eh
+                } else {
+                    elem
+                };
+                self.ops.push(Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args: vec![raddr, stored] });
                 let cnext = self.fresh_value();
                 self.ops.push(Op::IntBinOp { dst: cnext, op: IntOp::Add, a: cur, b: one_v });
                 self.ops.push(Op::SetLocal { local: cur, src: cnext });
