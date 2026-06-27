@@ -816,3 +816,25 @@ no longer match the new body (try `lambda_id: None`); (2) a Block-structure / ty
 frontend's normal form. FRESH-SESSION: `--emit-ast` the manual-pre-hoist source vs an IR-dump of the
 desugar output and DIFF them to pin the malformation (almost certainly a 1-field fix once seen). The hoist
 is the RIGHT fix for dojo; only the tree-construction detail remains. Reverted (lowering-walls=2, clean).
+
+### dojo hoist — THIRD attempt + BACKTRACE: the loop is the lower_body_into fixpoint re-applying a non-idempotent hoist
+
+Instrumented (HOIST_DEBUG env): the hoist fired **874 times, ALL with tmp=VarId(5)** before stack overflow.
+A panic-at-2nd-fire backtrace pinned the cycle:
+```
+hoist_variant_subject  (self-recursive ×3 — descends nested Blocks)
+hoist_hof_call_lambda_subject
+desugar_hof_match_subject_hoist (×2)
+lower_body_into  (×5 — the `if let Some(r)=hoist(body){return lower_body_into(&r)}` fixpoint)
+```
+So lower_body_into's hoist fixpoint NEVER converges: each pass my hoist returns Some (re-fires on its OWN
+output), lower_body_into recurses, → overflow. tmp=VarId(5) EVERY pass (never escalates) even though the
+constructed tree is correct (dump: `Bind{var:5, ty:Result, value:mk(Var2)}` + `Match{subject:Var(5)…}`,
+subject IS pure Var(5)) AND walk_expr has a Lambda arm. The non-idempotency root (why hoist_variant_subject
+re-fires on `{let 5; match Var(5)}` whose subject is pure, and why nv stays 5) resists pure reasoning +
+dump + backtrace — it needs a STEP-THROUGH of the exact tree mutation per pass (print body before/after
+each lower_body_into level). REVERTED cleanly (3rd time; lowering-walls=2, build 0-error, dojo clean wall).
+LIKELY FIX (fresh session): do NOT apply the hoist inside lower_body_into's recursive `Some→re-enter`
+fixpoint; apply it ONCE as a single full-tree pass at the function-body ENTRY (mod.rs ~1003, before
+lower_body_into), so a re-fire is structurally impossible. The hoist DIRECTION remains verified (manual
+real-dojo pre-hoist clears backfill_dir); only the desugar's fixpoint-placement / idempotency is the bug.
