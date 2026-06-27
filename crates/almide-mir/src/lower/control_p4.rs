@@ -365,19 +365,32 @@ impl LowerCtx {
             IrExprKind::ResultOk { expr }
                 if is_heap_ty(&expr.ty) && Self::is_heap_ok_result(result_ty) =>
             {
+                // FRAME the payload-build temps: a `${…}`/concat Ok payload (`ok("ok" +
+                // int.to_string(k))`) materializes intermediate concat Strings (`lower_result_str_piece`
+                // pushes them to `live_heap_handles`) that must be freed WITHIN this arm; the final
+                // `piece` is MOVED into the Ok block (Consume — not dropped). WITHOUT the per-arm frame
+                // those temps escaped to `emit_scope_end_drops`, emitting an UNCONDITIONAL post-join
+                // `rc_dec` that ran on the NOT-TAKEN (err) arm where the temp local is 0 → the `$rc_dec`
+                // double-free sentinel `unreachable` trap. Mirrors the sibling Err arm below.
+                let arm_mark = self.live_heap_handles.len();
                 let repr = repr_of(result_ty).ok()?;
                 let piece = self.lower_result_str_piece(expr)?;
                 let obj = self.materialize_result_str(piece, repr, false, false);
                 self.ops.push(Op::Consume { v: obj });
+                self.drop_arm_locals(arm_mark);
                 Some(obj)
             }
             IrExprKind::ResultErr { expr }
                 if is_heap_ty(&expr.ty) && Self::is_heap_ok_result(result_ty) =>
             {
+                // Same per-arm frame as the Ok arm above (and the non-heap-ok Err arm below): free the
+                // Err message-build intermediate temps within the arm; the final `piece` is moved in.
+                let arm_mark = self.live_heap_handles.len();
                 let repr = repr_of(result_ty).ok()?;
                 let piece = self.lower_result_str_piece(expr)?;
                 let obj = self.materialize_result_str(piece, repr, true, false);
                 self.ops.push(Op::Consume { v: obj });
+                self.drop_arm_locals(arm_mark);
                 Some(obj)
             }
             IrExprKind::ResultOk { expr } if !is_heap_ty(&expr.ty) => {

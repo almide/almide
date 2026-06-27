@@ -277,6 +277,23 @@ impl LowerCtx {
                 }
                 Some(obj)
             }
+            // An Option/Result CTOR field (`Node { val: 5, next: some(10) }` — a record/tuple whose
+            // field is `some(..)`/`none`/`ok(..)`/`err(..)`): build the Option/Result block via the
+            // shared `try_lower_option_ctor` (a fresh OWNED 0-or-1-element block), then push it to
+            // `live_heap_handles` so the enclosing aggregate's per-slot `Consume` (`m`) MOVES it into
+            // the slot — exactly the Named-call element's `i`/`m` balance. WITHOUT this arm an
+            // Option-ctor field fell to `_ => None` → `try_lower_record_construct` returned None → the
+            // whole record degraded to an empty `Alloc{Opaque}` (a later `n.val`/`n.next` read 0).
+            IrExprKind::OptionSome { .. }
+            | IrExprKind::OptionNone
+            | IrExprKind::ResultOk { .. }
+            | IrExprKind::ResultErr { .. } => {
+                let obj = self.try_lower_option_ctor(expr, &expr.ty)?;
+                if !self.live_heap_handles.contains(&obj) {
+                    self.live_heap_handles.push(obj);
+                }
+                Some(obj)
+            }
             _ => None,
         }
     }
@@ -396,6 +413,70 @@ impl LowerCtx {
         true
     }
 
+    /// Per-field record destructure `let { x, y } = p` — the record sibling of
+    /// `try_lower_tuple_destructure`. A record block is `[rc][len][cap][f0@12, f1@20, …]` with fields
+    /// at the SAME uniform `slot_offset(idx)` as tuple elements (idx = the field's declaration
+    /// position in `rec_ty`). Each pattern field is loaded from its OWN slot: a SCALAR field is a
+    /// value COPY (`Load{width:8}`); a HEAP field is the slot's BORROWED owned handle (`LoadHandle` =
+    /// i32 Ptr — the record keeps ownership via its masked drop, so the bound var joins `param_values`,
+    /// not the scope-end drop set). WITHOUT this, `bind_pattern` aliased the WHOLE record pointer for
+    /// each field (`Op::Dup`/`Const 0`) → `i64.add` on two record pointers (invalid wat) / String
+    /// fields = NUL bytes. `rec_ty` supplies the declaration order (field name → index → offset).
+    /// Returns false (caller falls back to container-grain) on an unresolvable field / a heap field
+    /// over a non-borrowable subject.
+    fn try_lower_record_destructure(
+        &mut self,
+        fields: &[almide_ir::IrFieldPattern],
+        rec_ty: &Ty,
+        subject: ValueId,
+    ) -> bool {
+        use crate::{IntOp, PrimKind};
+        let Some((names, tys)) = self.aggregate_field_tys(rec_ty) else {
+            return false;
+        };
+        // A heap field is a BORROW — sound only when the subject owns its slots (a tracked masked
+        // aggregate) or is itself a borrow (param / borrowed handle). Mirror the tuple gate.
+        let heap_borrow_ok =
+            self.materialized_aggregates.contains(&subject) || self.param_values.contains(&subject);
+        // Pre-resolve every pattern field to (var, ty, slot index); bail if any is shorthand
+        // (no bound var), unknown, or a heap field without a borrowable subject.
+        let mut binds: Vec<(VarId, Ty, usize)> = Vec::with_capacity(fields.len());
+        for f in fields {
+            let var = match &f.pattern {
+                Some(IrPattern::Bind { var, .. }) => *var,
+                _ => return false, // shorthand / nested / non-bind field — defer
+            };
+            let Some(idx) = names.iter().position(|n| n.as_str() == f.name.as_str()) else {
+                return false;
+            };
+            let fty = tys[idx].clone();
+            if is_heap_ty(&fty) && !heap_borrow_ok {
+                return false;
+            }
+            binds.push((var, fty, idx));
+        }
+        let h = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![subject] });
+        for (var, fty, idx) in binds {
+            let off = self.fresh_value();
+            self.ops.push(Op::ConstInt { dst: off, value: 12 + (idx as i64) * 8 });
+            let addr = self.fresh_value();
+            self.ops.push(Op::IntBinOp { dst: addr, op: IntOp::Add, a: h, b: off });
+            let v = self.fresh_value();
+            if is_heap_ty(&fty) {
+                self.ops.push(Op::Prim { kind: PrimKind::LoadHandle, dst: Some(v), args: vec![addr] });
+                self.param_values.insert(v);
+                if matches!(fty, Ty::Tuple(_)) || self.aggregate_field_tys(&fty).is_some() {
+                    self.materialized_aggregates.insert(v);
+                }
+            } else {
+                self.ops.push(Op::Prim { kind: PrimKind::Load { width: 8 }, dst: Some(v), args: vec![addr] });
+            }
+            self.value_of.insert(var, v);
+        }
+        true
+    }
+
     /// Introduce the variables a destructuring `pattern` binds, CONTAINER-GRAIN: a
     /// HEAP payload/field/element aliases the WHOLE `subject` (`Op::Dup`), a SCALAR one
     /// is a `Const`. Aliasing the container keeps it (and thus the bound value within
@@ -440,7 +521,27 @@ impl LowerCtx {
                 }
                 Ok(())
             }
-            IrPattern::Tuple { elements } | IrPattern::List { elements } => {
+            IrPattern::Tuple { elements } => {
+                // A tuple-pattern match arm (`match t { (a, b) => … }`) must read each component from
+                // its tuple SLOT (base+12+i*8), NOT alias the whole tuple container-grain (which left
+                // `a`/`b` reading the tuple pointer / an uninitialized 0). Route through the same
+                // layout-aware per-slot loader `let (a, b) = t` uses, when the subject is a tracked
+                // materialized aggregate (its slots are real). Falls back to the container-grain
+                // recursion below only when there is no per-slot subject (an untracked/None subject).
+                if let Some(subj) = subject {
+                    if self.materialized_aggregates.contains(&subj) || self.param_values.contains(&subj)
+                    {
+                        if self.try_lower_tuple_destructure(elements, subj) {
+                            return Ok(());
+                        }
+                    }
+                }
+                for p in elements {
+                    self.bind_pattern(p, subject)?;
+                }
+                Ok(())
+            }
+            IrPattern::List { elements } => {
                 for p in elements {
                     self.bind_pattern(p, subject)?;
                 }

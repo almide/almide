@@ -115,6 +115,37 @@ impl LowerCtx {
                             .into(),
                     ));
                 }
+                // A single-arm tuple-destructure `let r = match t { (a, b) => <body> }` binding
+                // MULTIPLE components (not the single-extract case above): bind each component from its
+                // tuple SLOT (the layout-aware loader), then lower the arm body as the bound value.
+                // WITHOUT this the multi-bind tuple match fell to the deferred `Const 0` below (a, b
+                // read 0). SCALAR result only (a heap arm value needs the merged-result path); rolls
+                // back to the Const on a miss.
+                if matches!(subject.ty, Ty::Tuple(_))
+                    && arms.len() == 1
+                    && arms[0].guard.is_none()
+                    && matches!(&arms[0].pattern, almide_ir::IrPattern::Tuple { .. })
+                    && !is_heap_ty(ty)
+                {
+                    if let almide_ir::IrPattern::Tuple { elements } = &arms[0].pattern {
+                        let mark = self.ops.len();
+                        let lhh = self.live_heap_handles.len();
+                        // Materialize the tuple subject as a borrowed handle (its slots are real).
+                        if let Ok(Some(CallArg::Handle(subj))) = self
+                            .lower_call_args(std::slice::from_ref(subject))
+                            .map(|v| v.into_iter().next())
+                        {
+                            if self.try_lower_tuple_destructure(elements, subj) {
+                                if let Some(dst) = self.lower_scalar_value(&arms[0].body) {
+                                    self.value_of.insert(var, dst);
+                                    return Ok(());
+                                }
+                            }
+                        }
+                        self.ops.truncate(mark);
+                        self.live_heap_handles.truncate(lhh);
+                    }
+                }
                 if let Some(if_expr) = self.desugar_match_to_if(subject, arms, ty) {
                     // `If` (literal arms) OR `Block` (`{ let x = subj; if … }` for a
                     // binder/guarded arm) — `lower_scalar_arm` runs both; roll back on a miss.
@@ -905,6 +936,30 @@ impl LowerCtx {
                     }
                 }
                 if self.try_lower_tuple_destructure(elements, subj) {
+                    return Ok(());
+                }
+            }
+        }
+        // PRECISE record field extraction (`let { x, y } = p`) — the record sibling of the tuple
+        // path above. Load each field from its OWN layout slot instead of the container-grain alias
+        // (`bind_pattern` bound every field to the record pointer → `i64.add` on two ptrs / NUL
+        // Strings). A CALL-RESULT record (`let { … } = mk()`) is seeded as a masked aggregate first
+        // (so heap fields borrow + the scope-end drop frees them), exactly like the tuple seed.
+        if let IrPattern::RecordPattern { fields, .. } = pattern {
+            if let Some(subj) = subject {
+                if !self.materialized_aggregates.contains(&subj)
+                    && self.live_heap_handles.contains(&subj)
+                {
+                    if let Some((_, tys)) = self.aggregate_field_tys(&value.ty) {
+                        let heap_slots: Vec<usize> =
+                            (0..tys.len()).filter(|&i| is_heap_ty(&tys[i])).collect();
+                        if !heap_slots.is_empty() {
+                            self.record_masks.insert(subj, heap_slots);
+                        }
+                        self.materialized_aggregates.insert(subj);
+                    }
+                }
+                if self.try_lower_record_destructure(fields, &value.ty, subj) {
                     return Ok(());
                 }
             }

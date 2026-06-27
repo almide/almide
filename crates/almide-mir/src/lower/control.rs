@@ -89,6 +89,28 @@ impl LowerCtx {
                 // list Option — gets that result TRACKED so the variant-match executes over
                 // it. (A direct `Some`/`None` bound var is already tracked at construction.)
                 if let Some(v) = subject_value {
+                    // A `match` whose SUBJECT is a record/tuple FIELD that is an Option/Result
+                    // (`match n.next { some(x) => … }` over `next: Option[Int]`): the field-borrow
+                    // already loaded the field's owned handle into `v` (a real 0-or-1-element Option
+                    // block the record owns). Track it so the match BRANCHES (reads tag @4) instead of
+                    // LINEARIZING. The handle is a BORROW of the record's owned field — no new ownership
+                    // (the record's masked drop frees it); a Some-payload bind auto-Dups if it escapes.
+                    if matches!(&subject.kind,
+                        IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. } | IrExprKind::IndexAccess { .. })
+                    {
+                        use almide_lang::types::constructor::TypeConstructorId;
+                        if matches!(&subject.ty, Ty::Applied(TypeConstructorId::Option, _)) {
+                            self.materialized_options.insert(v);
+                            if crate::lower::is_heap_elem_list_ty(&subject.ty) {
+                                self.heap_elem_lists.insert(v);
+                            }
+                        } else if crate::lower::is_result_ty(&subject.ty) {
+                            self.materialized_results.insert(v);
+                            if crate::lower::is_heap_elem_list_ty(&subject.ty) {
+                                self.heap_elem_lists.insert(v);
+                            }
+                        }
+                    }
                     if is_self_host_option_call(subject) {
                         self.materialized_options.insert(v);
                         // An `Option[heap]` (e.g. `Option[(Int,Int)]` from option.zip) OWNS its
