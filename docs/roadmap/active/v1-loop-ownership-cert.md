@@ -608,3 +608,23 @@ org-trust-status.md. The 5 real lowering walls to implement:
 
 #22 (effect-monad let-bind-`!`) is the keystone for walls 2 + 3. The OwnershipLoop conditional-acquire +
 the (List,List) tuple-fold is the keystone for wall 1. Wall 4 is the StringInterp-if path fix above.
+
+## porta.start / dojo effect-monad #22 — PRECISE statement-`!` finding (2026-06-27)
+
+Traced the porta.start keystone to the STATEMENT-position effect-`!` over a CAN-ERR real-Result callee
+(`validate(c)!` where `fn validate(c) -> Result[Unit,String]` constructs ok/err):
+- `lower_effect_call` (calls.rs:438, the statement path from lower_stmt:576) STRIPS Try/Unwrap (line 10)
+  and lowers the inner call. This strip is a TAIL-only shortcut (sound when the call IS the fn's return).
+- For a MID-BODY statement `validate(c)!`: the stripped `validate(c)` produces a heap Result handle that is
+  (a) left on the stack undropped → INVALID-WAT (verified: `validate(n)!; ok(42)` → "type mismatch at end
+  of function, expected [] but got [i32]"), or (b) if dropped, LOSES the err-propagation → silent
+  miscompile. So a sound lowering NEEDS the real early-return: `match validate(c) { ok(_) => <drop result,
+  continue>, err(e) => return err(e) }`. (A let-bind `!` over a SCALAR-Ok real-Result callee — `let x =
+  mk(n)!` — ALREADY lowers, lb1; the statement-`!` and heap-Ok let-bind-`!` are the gaps.)
+- TWO sub-deliverables: (1) the statement-`!` early-return (tag-check + return-err + drop-ok-handle), and
+  (2) make the strip WALL (not invalid-wat) for a mid-body can-err heap-Result statement as a stop-gap
+  "never emit invalid wasm" fix. The full fix = the effect-`!` early-return machinery (the v0 side already
+  supports it via emit_early_return_decs; the v1 statement/let-bind path needs the tag-branch + ok-drop).
+  This is the #22 keystone, localized to real-Result callees (NOT the full bare-value-effect-fn subsystem —
+  validate/json.parse return real Results, so the tag exists to branch on). dojo.backfill_dir's
+  `dash_item(...)!` let-bind is the same family + the capturing filter_map.
