@@ -565,6 +565,19 @@ ACCEPT, 0 backend-split. `generate_wit` fully clears.
   with the ops-diff + byte-match, not a guess. generate_dts/esm's `sigs` hits exactly this (the inner
   `params |> list.map((p) => …${param_ty(p)}…)` where `param_ty` is a let lambda, AND the `let params_str =`
   bind of that map).
+  **✅ BIND-vs-TAIL FIXED (commit 1dee4752): the let-bound-lambda HOF arg now lowers in BIND position too**
+  (binds_p2's data_arg_has_fn misclassified a let-lambda Var as a fn-typed data arg → walled; now
+  recognized as a closure arg). n1e/n1f/n1h byte-match. But generate_dts/esm STILL wall — the let-lambda was
+  NOT their first blocker.
+  **TRUE generate_esm BLOCKER (fully characterized 2026-06-27): a (List[String], List[String]) TUPLE-of-two-
+  heap-lists accumulator fold** — `tuple_helpers`: `all_tuples |> list.fold(([], []), (state, ty) => { let
+  (lines, seen) = state; let sig = …; if list.contains(seen, sig) then (lines, seen) else (lines +
+  emit_tuple_helpers(ty), seen + [sig]) })` (the dedup pattern). The accumulator is a tuple of TWO heap
+  Lists, and the body is a heap-result-`if` returning that tuple. The existing tuple-acc fold (#69) handles
+  ONLY (List[T], Int) — one heap list + one scalar; TWO heap-list slots (each its own DropListStr, the
+  conditional reusing one or building the other) is a substantial extension. generate_dts's `matrix_iface_block`
+  + `sigs` are the analogous deep shapes. dojo's `backfill_dir` is the effect-monad (#22). These are
+  genuinely deep, multi-feature lowerings (not single routing-gap levers), each its own fresh brick.
 - **dojo backfill_dir (1)** — the capturing `filter_map` whose closure calls fs.read_text → needs the
   effect-monad let-bind-`!` (#22) on top of the value/record-element conditional append.
 - **porta 29 + sqlite 20 native-only** — `@extern(rust)` host stubs, no wasm form (physically not
