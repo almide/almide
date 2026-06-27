@@ -738,3 +738,22 @@ NET: lowering-walls **3→2** (generate_esm cleared). Remaining 2 = generate_dts
 (effect-in-closure). The "deep/Coq" meta-pattern held HALF the time: generate_esm was a 1-line gate (the
 meta-lesson "deep was repeatedly an empirical mischaracterization — verify per-wall" applied AGAIN), but
 generate_dts's nested loop is a real Coq frontier.
+
+## dojo backfill_dir — PRECISE: the blocker is an EFFECT CALL as the filter_map closure's match SUBJECT (2026-06-27)
+
+Full-module bisection of the REAL dojo module (the reliable method) pinned backfill_dir's wall EXACTLY:
+`task_files |> list.filter_map((f) => match fs.read_text(dir+"/"+f) { ok(c) => some(parse_task_md(f,c)),
+err(_) => none })`. Two cuts:
+- Replace `fs.read_text` (effect) with a PURE call but KEEP the match + Option[record] result + the
+  capture of `dir` → **backfill_dir LOWERS (0 walls)**. So the match-in-closure, the `Option[Task]` (record)
+  result, the `List[Task]` (List[record]) filter_map, and the `dir` capture ALL work already.
+- The ONLY blocker is the EFFECT call `fs.read_text` as the match SUBJECT inside the defunc'd filter_map
+  loop body. (NOT List[record], NOT Coq — another "deep" mis-diagnosis corrected by bisection.)
+fs.read_text lowers fine at TOP level (the ReadTextFile prim, FsRead cap, shipped dojo 3→1) but the defunc
+body's match-subject lowering (append_body_to_str_acc / append_variant_match_to_str_acc / the heap-element
+inner path) declines an effectful Module call as the subject. THE FIX = let the defunc per-element body
+lower an admitted effectful stdlib call (fs.read_text → CallFn + FsRead cap-witness) as a match subject,
+threading the cap into the enclosing fn's declared_caps + owning/dropping the per-iteration Result. This is
+the effect-in-defunc-loop machinery — substantial but NOT Coq (unlike generate_dts's genuine nested-loop).
+So of the final 2 org lowering-walls: **dojo = effect-in-defunc-loop (engineering)**, **generate_dts =
+nested-loop ownership cert (Coq)**.
