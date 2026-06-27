@@ -394,7 +394,17 @@ impl LowerCtx {
                 Some(obj)
             }
             IrExprKind::ResultOk { expr } if !is_heap_ty(&expr.ty) => {
-                let payload = self.lower_scalar_value(expr)?;
+                // `ok(())` — a Result[Unit, String] Ok with a UNIT payload (porta `validate`/`stop`:
+                // `if cond then err(msg) else ok(())`). Unit has no value, so lower_scalar_value declines
+                // it; use a 0 placeholder — the Ok tag (@4 = 0) is what consumers read, the payload @12 is
+                // never extracted for a Unit Ok. Without this the whole heap-result `if` walled.
+                let payload = if matches!(&expr.kind, IrExprKind::Unit) {
+                    let z = self.fresh_value();
+                    self.ops.push(Op::ConstInt { dst: z, value: 0 });
+                    z
+                } else {
+                    self.lower_scalar_value(expr)?
+                };
                 let repr = repr_of(result_ty).ok()?;
                 let obj = self.materialize_result_ok(payload, repr);
                 self.ops.push(Op::Consume { v: obj });
