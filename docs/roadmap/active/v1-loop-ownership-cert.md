@@ -538,10 +538,18 @@ ACCEPT, 0 backend-split. `generate_wit` fully clears.
 
 ### REMAINING (org non-native = 3): the deep frontiers.
 - **generate_dts / generate_esm (wasm-bindgen 2)** — NOT a simple heap-result-if (every isolated shape —
-  flat_map-conditional-call, let-bound big-list-if — lowers + byte-matches). The real blocker is the
-  `sigs = supported |> list.flat_map((f) => { … let param_ty = (p: Value) => { … }; … })` shape: a
-  **flat_map body that DEFINES and uses a LOCAL LAMBDA** (`param_ty`) — a NESTED-HOF / lambda-in-HOF-body
-  defunctionalization (the yaml-style multi-feature deep frontier), not a one-lever fix.
+  flat_map-conditional-call, let-bound big-list-if, MIDDLE-concat heap-result-if `A + throws_line + B`, a
+  top-level let-bound-lambda HOF arg — ALL lower + byte-match, the last fixed in commit 9757d56a). The
+  residual blocker is the `sigs = supported |> list.flat_map((f) => { … let param_ty = (p: Value) => {…};
+  let params_str = params |> list.map((p) => "…${param_ty(p)}…") |> list.join(", "); … })` shape: a
+  let-bound lambda DEFINED INSIDE a flat_map body and called by an INNER map's inline lambda (`param_ty(p)`)
+  — a NESTED-defunc-body let-lambda. The top-level form now inlines (9757d56a, via lambda_bindings); the
+  flat_map Block arm DOES lower inner stmts via lower_stmt (so `let param_ty` registers), yet the synthetic
+  `fs |> flat_map((f) => { let tag = (p)=>p+":"+f; ["a","b"] |> map(tag) })` (tag captures the outer
+  flat_map param `f`) still walls the OUTER flat_map — a deeper interaction between the outer str-acc body
+  walk and an inner map(captured-let-lambda) whose capture is the outer HOF param. Precise next step: trace
+  why the outer flat_map's lower_defunc_str_acc_hof declines when its body's tail is an inner-map result
+  that closes over the outer element param. (yaml-style deep frontier, multi-feature.)
 - **dojo backfill_dir (1)** — the capturing `filter_map` whose closure calls fs.read_text → needs the
   effect-monad let-bind-`!` (#22) on top of the value/record-element conditional append.
 - **porta 29 + sqlite 20 native-only** — `@extern(rust)` host stubs, no wasm form (physically not
