@@ -658,3 +658,38 @@ bare `f()!` Expr stmt), split before/after, rewrite to the nested match above (O
 subsystem I wrongly claimed. dojo.backfill_dir ADDS the capturing-effectful-`filter_map` (the closure body
 calls fs.read_text per element + yields Option[record]) on top — that's the closure-as-effectful-loop-body
 frontier, the genuinely harder remaining piece.
+
+## ⭐ The remaining 3 lowering-walls ALL reduce to ONE frontier: the UNLIFTABLE HOF CLOSURE (2026-06-27)
+
+After the effect-monad `!` desugar (9af74ed5) + porta.start's native-FFI re-classification, the 3 remaining
+org lowering-walls (wasm-bindgen generate_dts/esm, dojo backfill_dir) ALL hit the SAME decline:
+`list.{map,filter,flat_map,filter_map,fold} with an unliftable/closure-list higher-order argument`
+(calls.rs:166 / binds_p2:651 — `try_lower_defunc_list_hof` returned None AND
+`last_call_had_unlifted_closure`). Three isolated sub-cases (each verified — the SIMPLER shapes all lower,
+only these stacked forms wall, so the defunctionalizer is the single lever):
+
+1. **NESTED LAMBDA + INNER HOF in the closure body** (generate_dts `sigs`, generate_esm `record_helpers`).
+   MINIMAL REPRO (walls): `xs |> list.flat_map((f) => { let tag = (p) => if … then "BIG" else p; ["a","Mb"]
+   |> list.map((p) => "x:" + tag(p)) |> list.join(", "); [f + "(" + parts + ")"] })`. A flat_map closure
+   whose body defines a let-bound lambda (`tag`/`param_ty`) AND runs an INNER `list.map` calling it.
+   `try_lower_defunc_list_hof` inlines the OUTER closure body but cannot defunctionalize the INNER HOF
+   nested inside it (nested defunctionalization). A block-bodied closure with let-bound LISTS lowers fine
+   (sig1/sig2 verified) — ONLY a nested lambda + inner HOF declines. NOTE: a flat_map closure with a plain
+   heap-result-`if`-CHAIN body (no inner HOF) ALSO lowers (fmc/fm2 verified) — so the if-chain is NOT the
+   gap, the inner HOF is.
+2. **EFFECT CALL inside the closure body** (dojo `backfill_dir`): `task_files |> list.filter_map((f) =>
+   match fs.read_text(dir+"/"+f) { ok(c) => some(parse_task_md(f,c)), err(_) => none })` — the closure
+   captures `dir`, runs an EFFECT call per element, yields `Option[record]`. The block-level effect-`!`
+   desugar does NOT reach an effect call buried in a HOF closure; the closure-as-effectful-loop-body needs
+   the effect threaded through the defunctionalized per-element loop.
+3. **(List,List) CONDITIONAL tuple-fold** (generate_esm `tuple_helpers`): `all_tuples |> list.fold(([],[]),
+   (st, ty) => { let (lines, seen) = st; if list.contains(seen, sig(ty)) then (lines, seen) else (lines +
+   emit(ty), seen + [sig]) })` — TWO heap-list loop-carried slots with a CONDITIONAL acquire (both branches
+   rc-preserving — the OwnershipFilter.v CondLoop pattern, already PROVEN). `try_lower_defunc_tuple_acc_fold`
+   (control_p5:75) handles (List[T], Int) only; extend to (List[heap], List[heap]) + a conditional body.
+
+THE KEYSTONE = extend `try_lower_defunc_list_hof` to handle a closure body containing (a) an inner HOF +
+nested let-bound lambda [#1], (b) an effect call [#2], and `try_lower_defunc_tuple_acc_fold` for the
+(List,List) conditional fold [#3]. Cracking #1 (nested defunctionalization) likely clears generate_dts +
+generate_esm record_helpers; #3 clears generate_esm tuple_helpers; #2 clears dojo. All gate-verifiable
+(byte-match + corpus-wall + the proof gate). This is the LAST org lowering frontier.
