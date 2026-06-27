@@ -779,3 +779,20 @@ safely at the end of a very long session. REVERTED cleanly (working tree back to
 with a termination guard (e.g. a "changed exactly once" fixpoint or a single non-looping pass that descends
 into HOF lambda args), then verify byte-match on a Result-ok/err + Option[record] filter_map fixture +
 corpus-wall + oracle. The DIRECTION is proven; only a terminating implementation remains.
+
+### dojo hoist — SECOND attempt (one-shot lower_body_into fixpoint) ALSO stack-overflowed → it is the LOWERING, not the desugar loop
+
+Re-implemented the hoist as a self-recursive ONE-HOIST-PER-PASS transform applied in lower_body_into's
+`if let Some` fixpoint (OUTSIDE desugar_heap_branches' loop, to avoid the first attempt's loop interaction).
+By construction it should converge: each pass hoists one subject; a hoisted `match Var {…}` has a PURE
+subject so it is never re-hoisted (idempotent → second pass returns None). On paper the desugar fixpoint
+terminates. Yet render STILL stack-overflowed (exit 134) on the real dojo AND the h3 synthetic. So the
+non-termination is NOT the desugar fixpoint — it is in LOWERING the hoisted form (the defunc inlining the
+`{ let r = <effect/call>; match r {…} }` lambda body recurses, or a downstream pass re-enters). Pinning it
+needs a debugger / instrumentation (a recursion-depth trace), not the blind idempotency reasoning that has
+now failed twice. REVERTED cleanly both times (lowering-walls back to 2, build 0-error, dojo at its clean
+wall exit-2). FRESH-SESSION: instrument the lowering of a hoisted HOF-closure `{let r=…; match r{…}}` to
+find the recursion, OR take the OTHER route (extend the defunc body lowering to accept an effect-call
+variant-match SUBJECT directly — materialize it like the top-level variant-match does — instead of
+hoisting). The direction (effect-match-subject must become a per-element bind/materialized value) is proven;
+the safe mechanism is still open. Two blind attempts is the signal to STOP and use a debugger next time.
