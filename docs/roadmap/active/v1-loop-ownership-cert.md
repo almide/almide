@@ -757,3 +757,25 @@ threading the cap into the enclosing fn's declared_caps + owning/dropping the pe
 the effect-in-defunc-loop machinery — substantial but NOT Coq (unlike generate_dts's genuine nested-loop).
 So of the final 2 org lowering-walls: **dojo = effect-in-defunc-loop (engineering)**, **generate_dts =
 nested-loop ownership cert (Coq)**.
+
+## dojo backfill_dir — the HOIST APPROACH is verified-correct, but my desugar impl NON-TERMINATED (reverted)
+
+Bisection proved the fix DIRECTION: manually rewriting `filter_map((f) => match fs.read_text(p) { ok(c) =>
+some(parse(f,c)), err(_) => none })` to `filter_map((f) => { let r = fs.read_text(p); match r { … } })`
+makes backfill_dir LOWER (the defunc inliner handles an effect call as a per-element let-bind, but NOT as a
+declined variant-match subject). So the dojo fix = a desugar that hoists a non-pure/effect VARIANT-match
+subject inside a HOF closure lambda body to a let-bind. NOT Coq, NOT List[record] (both verified to work
+with a pure subject / the hoisted form).
+
+I IMPLEMENTED this (`desugar_hof_match_subject_hoist` + `hoist_hof_call_lambda_subject` +
+`hoist_variant_subject`, wired into `desugar_heap_branches_inner`) but it STACK-OVERFLOWED (render exit 134,
+empty wat — the "dojo total: 0" I first saw was the CRASH suppressing the Unsupported line, NOT a real
+clear; verify-don't-assert caught it via the empty wat + h3 synthetic also overflowing). The desugar
+appears idempotent on paper (the hoisted `match Var {…}` has a pure subject → no re-fire) yet the
+lower_body_into / desugar_heap_branches fixpoint did not terminate — a subtle interaction (likely
+desugar_nested_branch_arms recursion or a sibling desugar re-firing on the hoisted form) I could not pin
+safely at the end of a very long session. REVERTED cleanly (working tree back to lowering-walls=2, build
+0-error, dojo at its clean wall, generate_esm still cleared). FRESH-SESSION TODO: re-implement the hoist
+with a termination guard (e.g. a "changed exactly once" fixpoint or a single non-looping pass that descends
+into HOF lambda args), then verify byte-match on a Result-ok/err + Option[record] filter_map fixture +
+corpus-wall + oracle. The DIRECTION is proven; only a terminating implementation remains.
