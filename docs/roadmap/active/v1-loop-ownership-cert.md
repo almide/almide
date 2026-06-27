@@ -905,3 +905,15 @@ tag==0 vs Option Some = tag!=0; `is_result_ty` already distinguishes). The subje
 (lower_call_args → CallArg::Handle, line 1232) already handles any heap call, so the effect call lowers as
 the per-element subject with its FsRead cap folded. This is the SOUND, localized mechanism the 5 hoist
 attempts were a detour from — a handler extension, NOT a tree rewrite, NOT Coq. lowering-walls=2.
+
+### dojo — FINAL path confirmation: result is List[RunResult] (record), so it is the record/Value path
+`parse_task_md` returns `RunResult` (a record, dojo types.almd), so backfill_dir's `filter_map` builds a
+List[record], NOT List[String]. Therefore the fix is NOT append_variant_match_to_str_acc (that is the
+String-accumulator path) but the RECORD/Value-element filter_map handler (the heap-element list path in
+lower_defunc_list_hof_inner / its per-element variant-match body lowering). The SAME extension applies
+there: admit a self-host RESULT-call subject + Ok/Err arms + inverse tag (Ok=tag==0), materializing the
+effect-call subject per element (FsRead cap folded), keeping the Ok-payload-built record on Ok and skipping
+on Err. So the COMPLETE dojo fresh-session plan: (1) locate the record/Value-element filter_map variant-
+match body handler, (2) extend it for Result/Ok-Err + Result-call subject + inverse tag (mirroring the
+Option/Some-None logic already there), (3) byte-match a Result-ok/err → List[record] filter_map fixture +
+corpus-wall + oracle. This is the sound, localized mechanism (5 hoist attempts were a detour). lowering-walls=2.
