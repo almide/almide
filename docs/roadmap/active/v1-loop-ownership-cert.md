@@ -628,3 +628,33 @@ Traced the porta.start keystone to the STATEMENT-position effect-`!` over a CAN-
   This is the #22 keystone, localized to real-Result callees (NOT the full bare-value-effect-fn subsystem —
   validate/json.parse return real Results, so the tag exists to branch on). dojo.backfill_dir's
   `dash_item(...)!` let-bind is the same family + the capturing filter_map.
+
+## ⭐ CORRECTION (2026-06-27): porta.start/dojo need NESTED-MATCH desugar, NOT a v1 MIR Return op
+
+My earlier "v1 MIR has no mid-function early-return (Return op), so porta.start + dojo need a MAJOR
+structural subsystem" was WRONG (verify, don't assert — corrected by testing the target form). The effect-`!`
+does NOT need an early-return Op: it desugars to a NESTED-MATCH continuation (the standard monadic do-desugar):
+
+    { before; let x = f()!; after }   →   { before; match f() { ok(x) => { after }, err(e) => err(e) } }
+    { before;     f()!    ; after }   →   { before; match f() { ok(_) => { after }, err(e) => err(e) } }
+
+The continuation (`after`) nests in the Ok-arm; the Err-arm reconstructs `err(e)` (same `Result[_, String]`
+error type as the enclosing fn) — NO early return, NO Return op. The function's tail becomes the (nested)
+match, which the EXISTING heap-result-match tail lowering already handles.
+
+VERIFIED — the explicit nested-match TARGET byte-matches for EVERY Ok type porta.start/dojo use:
+- scalar Ok: `match validate(n) { ok(_) => ok(42), err(e) => err(e) }` → `42`/`bad` ✓
+- nested (two `!`): `match validate(n) { err(e)=>err(e), ok(_)=> match parse(n) {err(e)=>err(e), ok(p)=>ok(p+1)} }` → `1`/`bad` ✓
+- String Ok: `match parse(s) { err(e)=>err(e), ok(p)=>ok(p+"?") }` → `a!?`/`E:empty` ✓
+- record Ok (porta.start's `Result[ProxyHandle, String]`): `match validate(n){err(e)=>err(e),ok(_)=>if … then err … else ok({handle,port})}` → `5:10`/`E:bad` ✓
+
+So the REMAINING WORK for porta.start (and the effect part of dojo) is a FRONTEND/IR `desugar_effect_unwrap`
+Block pass: scan an effect-fn body Block for the first `Unwrap`/`Try` (a `let x = f()!` Bind value OR a
+bare `f()!` Expr stmt), split before/after, rewrite to the nested match above (Ok-pattern = the let var or
+`_`; Err-pattern binds a fresh `e`; recurse on `after` + the arms). Entry: alongside `desugar_heap_branches`
+(mod.rs:1003), threading a function-wide `next_var` (like the block_line fresh-VarId fix). Structures:
+`IrExprKind::Match{subject,arms}`, `IrMatchArm{pattern,guard:None,body}`, `IrPattern::{Ok,Err,Bind,Wildcard}`,
+`IrExprKind::ResultErr{expr:Var(e)}`. This is TRACTABLE (verified target) — NOT the major Return-op
+subsystem I wrongly claimed. dojo.backfill_dir ADDS the capturing-effectful-`filter_map` (the closure body
+calls fs.read_text per element + yields Option[record]) on top — that's the closure-as-effectful-loop-body
+frontier, the genuinely harder remaining piece.
