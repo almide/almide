@@ -296,6 +296,18 @@ impl LowerCtx {
                     }
                     _ => None,
                 }),
+            // A SCALAR-typed `Try`/`Unwrap` tail over a never-err effect call (`else { … loop(n-1, acc) }`
+            // — the recursive value-accumulator: the frontend wraps the propagating effect call in
+            // `Try` for the auto-`?`, and the call-type unwrap pass already made its `.ty` the raw scalar
+            // `T`). The `?`/`!` over a never-err call is a no-op (it always returns Ok), so strip it and
+            // lower the inner call as the scalar value. WITHOUT this the `Try`/`Unwrap` fell to the
+            // `_ => lower_scalar_value | try_lower_scalar_call` arm (neither handles a `Try`/`Unwrap`
+            // node) → the arm FAILED → the scalar-`if` rolled back → the whole body collapsed to a
+            // deferred Const (the recursive accumulator returned a garbage 0). The scalar-arm twin of
+            // the statement/tail effect-`Try` fix.
+            IrExprKind::Try { expr } | IrExprKind::Unwrap { expr } if !is_heap_ty(&t.ty) => {
+                self.lower_scalar_value(expr).or_else(|| self.try_lower_scalar_call(expr, &expr.ty))
+            }
             _ => self.lower_scalar_value(t).or_else(|| self.try_lower_scalar_call(t, &t.ty)),
         });
         self.in_frame -= 1;

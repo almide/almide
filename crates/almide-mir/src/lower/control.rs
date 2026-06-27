@@ -130,6 +130,22 @@ impl LowerCtx {
                     // HEAP-Ok `Result[heap,String]` is constructed cap-tag @16 (materialize_result_str)
                     // so it reads cap-tag @16 (materialized_results_str) + the by-type drop. WITHOUT this
                     // a user-Result statement match LINEARIZES (runs BOTH arms) = a silent miscompile.
+                    // A `match <never-err lifted-effect call> {…}` that `rewrite_never_err_effect_match`
+                    // could NOT turn into a `let`-block (an `ok(_)`/structured/guarded Ok arm): its
+                    // subject's `.ty` is the lifted `Result[T, String]` but the callee returns RAW `T`,
+                    // so reading it as a Result handle TRAPs (the `$rc_dec` sentinel over raw bytes).
+                    // WALL it cleanly — never a trap. (The common `ok(x)` shape is already rewritten away
+                    // and never reaches here.)
+                    if let IrExprKind::Call { target: CallTarget::Named { name }, .. } = &subject.kind {
+                        if crate::lower::NEVER_ERR_LIFTED_FNS.with(|s| s.borrow().contains(name.as_str())) {
+                            return Err(LowerError::Unsupported(
+                                "match over a never-err effect-fn call with a non-`ok(x)` Ok pattern \
+                                 (ok(_)/structured/guarded) not in this brick — the effect-fn returns a \
+                                 raw value, so there is no Result tag to dispatch on (the heap-effect-fn \
+                                 error-model frontier)".into(),
+                            ));
+                        }
+                    }
                     if matches!(&subject.kind, IrExprKind::Call { target: CallTarget::Named { .. }, .. })
                         && crate::lower::is_result_ty(&subject.ty)
                     {

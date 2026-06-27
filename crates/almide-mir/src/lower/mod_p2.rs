@@ -1,4 +1,17 @@
 
+thread_local! {
+    /// The names of NEVER-ERR LIFTED user effect fns (an `effect fn` whose declared return is
+    /// non-Result, so the frontend lifts its call type to `Result[T, String]`, but whose body builds
+    /// no `err` and returns raw `T`). Populated by `inline_mutual_tail_recursion` (which knows the
+    /// `can_err` × `lifted_effect_fns` sets) and read by the match-subject lowering so an UN-REWRITTEN
+    /// `match <such call> {…}` (an `ok(_)`/structured/guarded Ok arm the `rewrite_never_err_effect_match`
+    /// pass left in place) WALLs cleanly instead of reading the raw handle as a Result block (a trap).
+    /// A common `ok(x)` match is already rewritten away to a `let`-block, so this only catches the rare
+    /// residue. Thread-local because lowering runs single-threaded per program right after the pre-pass.
+    pub(crate) static NEVER_ERR_LIFTED_FNS: std::cell::RefCell<std::collections::HashSet<String>> =
+        std::cell::RefCell::new(std::collections::HashSet::new());
+}
+
 /// A function CAN-ERR (returns `Err` on some input) iff its body has a direct `err(…)` (`ResultErr`) OR
 /// it `!`-PROPAGATES (an `Unwrap` over a `Named` call to) a can-err function. A function whose entire
 /// `!`-call closure is err-free NEVER returns `Err`, so `let pat = f()!` over it is faithfully
@@ -106,6 +119,154 @@ pub fn strip_never_err_unwraps(body: &mut IrExpr, can_err: &std::collections::Ha
     S(can_err).visit_expr_mut(body);
 }
 
+/// Rewrite a NEVER-ERR user `effect fn` `Named` CALL's result type from the lifted-ABI
+/// `Result[T, String]` (what the frontend reports so consumers `auto_unwrap`) back to the RAW `T`
+/// the v1 function body actually returns. A never-err effect fn's body returns the bare value (no
+/// `ok`/`err` wrap — `$f` is `(result i64)`/raw String/List handle, NOT a Result block), so EVERY
+/// value-position consumer must see raw `T`: an arg `g(f())`, `list.len(lst())`, a value tail, a
+/// `let` — all read the call as a scalar/heap `T`, never a Result handle. Without this the consumer
+/// keyed off the `Result[T, _]` `.ty` emitted Result-handle reads (`i32.load` + DropListStr / cap-tag)
+/// over the raw i64/handle the never-err callee returns → INVALID WAT (scalar i32/i64 mismatch) or a
+/// runtime TRAP (heap: the DropListStr walks the raw String's bytes as element pointers, hitting the
+/// `$rc_dec` double-free sentinel). The bind position already works because `lower_bind` uses the
+/// LET's unwrapped type; this extends that consistency to arg/value positions, for BOTH scalar and
+/// heap `T` (the heap re-type is sound — corpus-wall ACCEPTs — because it is gated to LIFTED effect
+/// fns only, whose body genuinely returns a raw handle, so the plain-heap drop is the CORRECT drop,
+/// not the trapping Result-as-tag one). A CAN-ERR callee is LEFT untouched (real `Result[T, String]`
+/// handle); a PURE `fn` returning a real Result is NOT in `lifted_effect_fns`; a bundled stdlib
+/// effect fn is a `Module` call (never matched here). The `match` shape is handled by
+/// `rewrite_never_err_effect_match` FIRST (it needs the Result tag to pick the Ok arm); a `Match`
+/// SUBJECT call is SKIPPED here so an un-rewritten `match` keeps its lifted type and WALLs cleanly.
+pub fn unwrap_never_err_call_types(
+    body: &mut IrExpr,
+    can_err: &std::collections::HashSet<String>,
+    lifted_effect_fns: &std::collections::HashSet<String>,
+) {
+    use almide_ir::{walk_expr_mut, IrMutVisitor};
+    use almide_lang::types::constructor::TypeConstructorId;
+    struct S<'a>(&'a std::collections::HashSet<String>, &'a std::collections::HashSet<String>);
+    impl IrMutVisitor for S<'_> {
+        fn visit_expr_mut(&mut self, expr: &mut IrExpr) {
+            // A `match SUBJ {…}` whose SUBJ is a never-err lifted-effect call: do NOT unwrap the
+            // subject's lifted Result type here. `rewrite_never_err_effect_match` (run before this)
+            // already turned every REWRITABLE such `match` into `{ let ok-pat = call; ok-arm }`; any
+            // `match` that REMAINS (an un-rewritable Ok pattern) must keep its lifted Result type so
+            // the match-subject lowering WALLs it (a clean Unsupported) rather than reading a raw
+            // handle as a Result block (a trap). Still recurse into the arm bodies.
+            if matches!(&expr.kind, IrExprKind::Match { .. }) {
+                if let IrExprKind::Match { subject, arms } = &mut expr.kind {
+                    let skip_subject = matches!(&subject.kind,
+                        IrExprKind::Call { target: CallTarget::Named { name }, .. }
+                            if self.1.contains(name.as_str()) && !self.0.contains(name.as_str()));
+                    if skip_subject {
+                        for arm in arms.iter_mut() {
+                            self.visit_expr_mut(&mut arm.body);
+                        }
+                        return;
+                    }
+                }
+            }
+            walk_expr_mut(self, expr);
+            if let IrExprKind::Call { target: CallTarget::Named { name }, .. } = &expr.kind {
+                // Unwrap ONLY a call to a LIFTED user effect fn that is also NEVER-err. (Pure Result
+                // fns are excluded — not in `lifted_effect_fns` — the list_iter_tco regression fix.)
+                if self.1.contains(name.as_str()) && !self.0.contains(name.as_str()) {
+                    if let Ty::Applied(TypeConstructorId::Result, a) = &expr.ty {
+                        if a.len() == 2 && matches!(a[1], Ty::String) {
+                            expr.ty = a[0].clone();
+                        }
+                    }
+                }
+            }
+        }
+    }
+    S(can_err, lifted_effect_fns).visit_expr_mut(body);
+}
+
+/// Rewrite `match <never-err lifted-effect call> { ok(pat) => A, err(_) => B }` to `{ let pat =
+/// <call>; A }`. A never-err lifted effect fn always returns Ok (its body builds no `err`), and its
+/// v1 result is the RAW `T` — so the `match` has no real Result tag to dispatch on (reading the raw
+/// handle as a Result block TRAPs / linearizes both arms). The sound, byte-matching lowering is: bind
+/// the Ok arm's pattern to the raw call result and run the Ok arm; the `err` arm is dead. Handles the
+/// common `ok(x)` (Bind) and `ok(_)` (Wildcard) Ok patterns; an Ok arm with a NESTED/structured
+/// pattern, a guard, or no Ok arm is LEFT untouched so it stays a `match` that the call-type-unwrap
+/// SKIPS and the match-subject lowering WALLs cleanly (never a trap). Runs BEFORE
+/// `unwrap_never_err_call_types`.
+pub fn rewrite_never_err_effect_match(
+    body: &mut IrExpr,
+    can_err: &std::collections::HashSet<String>,
+    lifted_effect_fns: &std::collections::HashSet<String>,
+) {
+    use almide_ir::{walk_expr_mut, IrMutVisitor, IrPattern};
+    use almide_lang::types::constructor::TypeConstructorId;
+    struct S<'a>(&'a std::collections::HashSet<String>, &'a std::collections::HashSet<String>);
+    impl IrMutVisitor for S<'_> {
+        fn visit_expr_mut(&mut self, expr: &mut IrExpr) {
+            walk_expr_mut(self, expr);
+            let is_target = matches!(&expr.kind, IrExprKind::Match { subject, .. }
+                if matches!(&subject.kind,
+                    IrExprKind::Call { target: CallTarget::Named { name }, .. }
+                        if self.1.contains(name.as_str()) && !self.0.contains(name.as_str())));
+            if !is_target {
+                return;
+            }
+            let IrExprKind::Match { subject, arms } = &expr.kind else { return };
+            let Some(ok_arm) = arms.iter().find(|a| matches!(&a.pattern, IrPattern::Ok { .. })) else {
+                return;
+            };
+            if ok_arm.guard.is_some() {
+                return;
+            }
+            let IrPattern::Ok { inner } = &ok_arm.pattern else { return };
+            // The raw Ok payload type = the subject call's Ok type (Result[T, String] → T).
+            let ok_ty = match &subject.ty {
+                Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 => a[0].clone(),
+                _ => return,
+            };
+            let raw_call = IrExpr { ty: ok_ty.clone(), ..(**subject).clone() };
+            // Only the `ok(x)` BIND pattern is rewritten — the bound `var` gives the raw call result a
+            // named owner with a sound scope-end drop. An `ok(_)` WILDCARD is LEFT as a `match` (it then
+            // WALLs cleanly via the un-rewritten path): binding the result to a fresh throwaway var would
+            // need a unique VarId the pre-pass cannot mint, and a bare `Expr`-statement call leaves the
+            // heap result un-owned on the stack (invalid wat). A clean wall beats that.
+            let bind_stmt = match &**inner {
+                IrPattern::Bind { var, .. } => IrStmt {
+                    kind: IrStmtKind::Bind {
+                        var: *var,
+                        mutability: almide_ir::Mutability::Let,
+                        ty: ok_ty,
+                        value: raw_call,
+                    },
+                    span: None,
+                },
+                _ => return,
+            };
+            let body_expr = ok_arm.body.clone();
+            let result_ty = expr.ty.clone();
+            expr.kind = IrExprKind::Block { stmts: vec![bind_stmt], expr: Some(Box::new(body_expr)) };
+            expr.ty = result_ty;
+        }
+    }
+    S(can_err, lifted_effect_fns).visit_expr_mut(body);
+}
+
+/// The set of user functions whose CALL type the frontend LIFTS to `Result[T, String]`: an
+/// `effect fn` whose DECLARED return is non-Result (so the call site sees the lifted Result while the
+/// body returns raw `T`). EXACTLY the predicate in `check/calls.rs` (`sig.is_effect &&
+/// !ret.is_result()`). A pure fn, or an effect fn already declaring `Result`/`Option`, is excluded —
+/// its return type is real and must not be unwrapped.
+pub fn lifted_effect_fn_names(fns: &[IrFunction]) -> std::collections::HashSet<String> {
+    use almide_lang::types::constructor::TypeConstructorId;
+    fns.iter()
+        .filter(|f| {
+            f.is_effect
+                && !matches!(&f.ret_ty,
+                    Ty::Applied(TypeConstructorId::Result | TypeConstructorId::Option, _))
+        })
+        .map(|f| f.name.as_str().to_string())
+        .collect()
+}
+
 /// PROGRAM-level pre-pass: inline a MUTUAL-recursive tail SIBLING so the caller becomes DIRECT
 /// self-recursive — exposing the parser loops (`flow_rec ⇄ flow_step`, `collect_seq ⇄ seq_item`, …)
 /// to the append-accumulator TCO, which only fires on a SELF-call.
@@ -148,11 +309,20 @@ pub fn inline_mutual_tail_recursion(
     // parser cluster (entirely never-err) TCO; `safe_div` & co. (can-err) keep their `!` and stay walled.
     // Done HERE, before the inline guard's try-lower, so inlined-F sees the stripped body and lowers.
     let can_err = compute_can_err(fns);
+    let lifted_effect_fns = lifted_effect_fn_names(fns);
+    // Publish the never-err lifted set (lifted ∖ can-err) for the match-subject wall (the rare residue
+    // `rewrite_never_err_effect_match` cannot turn into a `let`-block — `ok(_)`/structured/guarded Ok).
+    NEVER_ERR_LIFTED_FNS.with(|s| {
+        *s.borrow_mut() =
+            lifted_effect_fns.iter().filter(|n| !can_err.contains(*n)).cloned().collect();
+    });
     let stripped: Vec<IrFunction> = fns
         .iter()
         .map(|f| {
             let mut nf = f.clone();
             strip_never_err_unwraps(&mut nf.body, &can_err);
+            rewrite_never_err_effect_match(&mut nf.body, &can_err, &lifted_effect_fns);
+            unwrap_never_err_call_types(&mut nf.body, &can_err, &lifted_effect_fns);
             nf
         })
         .collect();
