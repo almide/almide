@@ -368,21 +368,47 @@ enum FrontendOutcome {
 /// returns an empty set ⇒ the original single-file path (byte-identical for the v0 corpus
 /// / spec fixtures). Resolution failure (an unfetched external dep in the chain) ⇒ empty
 /// set, so the sweep still classifies the file rather than aborting.
+/// The cached dep source dirs for the project owning `path` — walk up to its `almide.toml`,
+/// parse it, `fetch_all_deps` (cache-hit ⇒ no network; the SAME computation `almide` runs).
+/// Empty when no project / no deps / fetch failure (graceful: an unresolved external import
+/// then walls honestly). Lets a file importing an EXTERNAL package (`import almai`) resolve
+/// here as under `almide run`, instead of being skipped as an unmeasurable xmod under-count.
+fn dep_paths_for(path: &Path) -> Vec<(almide::project::PkgId, std::path::PathBuf)> {
+    let mut dir = path.parent();
+    while let Some(d) = dir {
+        let toml = d.join("almide.toml");
+        if toml.exists() {
+            if let Ok(proj) = almide::project::parse_toml(&toml) {
+                if let Ok(deps) = almide::project_fetch::fetch_all_deps(&proj) {
+                    return deps.into_iter().map(|fd| (fd.pkg_id, fd.source_dir)).collect();
+                }
+            }
+            return Vec::new();
+        }
+        dir = d.parent();
+    }
+    Vec::new()
+}
+
 fn discover_self_modules(
     path: &Path,
     prog: &almide_lang::ast::Program,
 ) -> Vec<(String, almide_lang::ast::Program, bool)> {
-    let has_self_import = prog.imports.iter().any(|d| {
-        matches!(
-            d,
-            almide_lang::ast::Decl::Import { path, .. }
-                if path.first().map(|s| s.as_str()) == Some("self")
-        )
+    // Resolve a `self.<submodule>` OR an EXTERNAL (non-stdlib) package import — so a
+    // cross-module file works under `almide run`-equivalent resolution (incl. fetched deps),
+    // not just self-imports. A lone / stdlib-only file stays a strict no-op.
+    let needs_resolve = prog.imports.iter().any(|d| {
+        matches!(d, almide_lang::ast::Decl::Import { path, .. }
+            if path.first().map(|s| {
+                let s = s.as_str();
+                s == "self" || !almide_lang::stdlib_info::is_stdlib_module(s)
+            }).unwrap_or(false))
     });
-    if !has_self_import {
+    if !needs_resolve {
         return Vec::new();
     }
-    match almide::resolve::resolve_imports_with_deps(&path.to_string_lossy(), prog, &[]) {
+    let deps = dep_paths_for(path);
+    match almide::resolve::resolve_imports_with_deps(&path.to_string_lossy(), prog, &deps) {
         Ok(resolved) => resolved
             .modules
             .into_iter()
