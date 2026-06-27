@@ -855,3 +855,23 @@ DEFINITIVE fresh-session plan: (1) emit/dump the FRONTEND IR of the manual pre-h
 desugar-built tree and DIFF (the malformation is in there); (2) apply the hoist in the SHARED
 desugar-before-both path (so count_ir_calls sees it too) — entry-only breaks the caps invariant. The hoist
 DIRECTION stays verified; the desugar's IR-fidelity + gate-placement are the open items. lowering-walls=2.
+
+### dojo hoist — FIFTH attempt + IR-diff CORRECTION: my baseline was the WALLING synthetic, not the clearing real-dojo
+
+Applied the single-full-pass hoist ONCE at the function-body entry (mod.rs) — this DID fix the stack
+overflow (5th attempt: exit 2, not 134). But backfill_dir STILL walls "filter_map unliftable". An IR-dump
+(DUMP_IR env probe) confirmed backfill_dir's filter_map lambda body IS `Match { Call read_text, [ok,err] }`
+— the exact shape the hoist targets, so the hoist DOES fire. Yet the result still walls. The IR-diff that
+earlier suggested "my tree is structurally identical to the manual" was done against the manual SYNTHETIC
+(`proc` with a pure `mk`, Option[String]) — but that synthetic ITSELF WALLS (m_str). Only the manual REAL
+dojo (dojo3, fs.read_text + Option[record]) was observed to clear backfill_dir. So I compared my output to
+a WALLING baseline; the CLEARING baseline (real-dojo manual) was never IR-dumped. CORRECTED fresh-session
+plan: (1) RE-VERIFY that the manual real-dojo pre-hoist genuinely clears backfill_dir (exit + per-fn wall,
+not just "no line"); (2) if it does, DUMP that clearing tree's backfill_dir IR and diff vs my hoist output
+on the real dojo (the malformation is the delta); (3) the str_acc/heap-element filter_map path may simply
+NOT accept ANY `{let r; match r}`-bodied closure (synthetic m_str walls too) — in which case the hoist is
+the WRONG mechanism and the fix is to extend the defunc body lowering (append_body_to_str_acc /
+lower_defunc_list_hof_inner) to accept an effect-call/non-pure match SUBJECT directly. FIVE attempts
+(2 overflow, 1 instrument, 1 terminating-walls+regress, 1 entry-once-walls), all reverted clean
+(lowering-walls=2). The "hoist direction verified" claim is now IN DOUBT (only real-dojo dojo3 cleared, and
+that single reading may itself be a render-stops-at-first-wall artifact — must be re-verified first).
