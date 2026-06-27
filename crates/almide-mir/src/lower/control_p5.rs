@@ -140,6 +140,16 @@ impl LowerCtx {
         let result_str_acc = matches!(func, "flat_map" | "filter_map")
             && matches!(result_ty,
                 Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 && matches!(a[0], Ty::String));
+        // A `filter_map` building a HEAP-but-non-String element list (`List[record]`/`List[Value]`/
+        // `List[(String,Value)]` — the dojo `backfill_dir` `task_files |> filter_map((f) => match
+        // fs.read_text(dir+"/"+f) { ok(c) => some(parse_task_md(f,c)), err(_) => none })`). A
+        // write-cursor result list (like `filter`) keeping the Ok/Some-arm-built OWNED element and
+        // skipping the Err/None arm — `lower_defunc_filter_map_hof`. (String-element filter_map stays
+        // the `result_str_acc` accumulator path above.)
+        let result_filter_map_heap = func == "filter_map"
+            && matches!(result_ty,
+                Ty::Applied(TypeConstructorId::List, a)
+                    if a.len() == 1 && is_heap_ty(&a[0]) && !matches!(a[0], Ty::String));
         let result_ok = match func {
             "map" => result_heap_elem
                 || matches!(result_ty,
@@ -151,7 +161,8 @@ impl LowerCtx {
             // => acc + …)`): the inlined `acc = <body>` is the loop-carried slot's drop-old + SetLocal
             // (the proven i(id)m append-accumulator pattern), reclaiming each transient String.
             "fold" => !is_heap_ty(result_ty) || matches!(result_ty, Ty::String),
-            "flat_map" | "filter_map" => result_str_acc,
+            "flat_map" => result_str_acc,
+            "filter_map" => result_str_acc || result_filter_map_heap,
             _ => false,
         };
         if !result_ok {
@@ -176,7 +187,7 @@ impl LowerCtx {
 
         // The result element type for a heap-element map (the per-element body's owned result is
         // moved into a slot; the result list is recursively dropped). None ⇒ the scalar path.
-        let result_elem: Option<Ty> = if result_heap_elem {
+        let result_elem: Option<Ty> = if result_heap_elem || result_filter_map_heap {
             match result_ty {
                 Ty::Applied(TypeConstructorId::List, a) if a.len() == 1 => Some(a[0].clone()),
                 _ => None,
@@ -190,6 +201,13 @@ impl LowerCtx {
             // (flat_map) or `Option[String]` (filter_map) — both are a `DynListStr` the concat appends,
             // and the per-leaf walker handles `some`/`none`/`[]`/list-concat uniformly by body shape.
             self.lower_defunc_str_acc_hof(xs, params, body)
+        } else if result_filter_map_heap {
+            // filter_map → `List[record]`/`List[Value]`/`List[(String,Value)]`: a write-cursor result
+            // list keeping the Ok/Some-arm-built OWNED element, skipping Err/None (the dojo shape).
+            match result_elem.as_ref() {
+                Some(elem) => self.lower_defunc_filter_map_hof(xs, params, body, elem),
+                None => None,
+            }
         } else {
             self.lower_defunc_list_hof_inner(
                 func,
@@ -1044,6 +1062,151 @@ impl LowerCtx {
         Some(acc)
     }
 
+    /// C1 DEFUNCTIONALIZATION for a `list.filter_map` building a HEAP-but-non-String element list
+    /// (`List[record]`/`List[Value]`/`List[(String,Value)]`) — the dojo `backfill_dir` shape
+    /// `task_files |> list.filter_map((f) => match fs.read_text(dir+"/"+f) { ok(c) =>
+    /// some(parse_task_md(f, c)), err(_) => none })`. A write-cursor result list (like `filter`)
+    /// combined with a keep/skip VARIANT match (like the str-acc path, but the kept element is an
+    /// OWNED record/Value MOVED into the cursor slot instead of a String appended to an accumulator).
+    ///
+    /// The per-element body MUST be a 2-arm variant `match subj { … }` over a self-host Option/Result
+    /// CALL subject (`append_variant_match_to_result_list`): the keep arm yields `some(<elem>)` (build
+    /// the element, store at the cursor, bump), the skip arm yields `none` (no-op). A non-match body,
+    /// a non-self-host subject, or an out-of-subset element returns `None` → the caller rolls back +
+    /// WALLs.
+    ///
+    /// SOUNDNESS by REUSE: the result list is alloc'd once at `len(xs)` (the MAX) with its real length
+    /// patched to the write-cursor after the loop (exactly `filter`, control_p5 `filter` arm); each
+    /// KEPT element is a FRESH OWNED record/Value (`lower_heap_result_arm`, cert `i`) MOVED into the
+    /// slot (`Consume` = `m`), the list's recursive `DropList*` freeing all `cursor` elements at scope
+    /// end — the proven capturing-filter conditional-acquire (5a0a9efb). The per-iteration subject is a
+    /// balanced `i…d` episode (dropped after the arms), its payload borrowed through the keep arm.
+    fn lower_defunc_filter_map_hof(
+        &mut self,
+        xs: &IrExpr,
+        params: &[(VarId, Ty)],
+        body: &IrExpr,
+        result_elem: &Ty,
+    ) -> Option<ValueId> {
+        use crate::PrimKind;
+        // The body must be a 2-arm variant match (the keep/skip decision). Defer anything else.
+        let (subject, arms) = match &body.kind {
+            IrExprKind::Match { subject, arms } if is_variant_ty(&subject.ty) => {
+                (subject.as_ref(), arms.as_slice())
+            }
+            _ => return None,
+        };
+
+        // Borrow the source list (evaluated once); a non-handle iterable is out of subset.
+        let list_v = match self.lower_call_args(std::slice::from_ref(xs)).ok()?.into_iter().next()? {
+            CallArg::Handle(v) => v,
+            _ => return None,
+        };
+        let h = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![list_v] });
+        let len_v = self.load_at_offset(h, 4, PrimKind::Load { width: 4 });
+
+        // A fresh OWNED `DynList` of `len(xs)` slots (the MAX; the real length is patched to the
+        // write-cursor after the loop). The recursive scope-end drop set follows the element type,
+        // exactly like the `map` heap-element result: a `(String, Value)` tuple → DropListStrValue, a
+        // dynamic Value → DropListValue, else (a String or a record handle) → the recursive DropListStr
+        // (rc_dec each owned element handle — the convention the C2-lifted record `map` already uses).
+        let dst = self.fresh_value();
+        self.ops.push(Op::Alloc {
+            dst,
+            repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT },
+            init: crate::Init::DynList { len: len_v },
+        });
+        let rh = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(rh), args: vec![dst] });
+        let result_is_str_value_tuple = matches!(result_elem,
+            Ty::Tuple(tys) if tys.len() == 2
+                && matches!(tys[0], Ty::String) && crate::lower::is_value_ty(&tys[1]));
+        if result_is_str_value_tuple {
+            self.str_value_elem_lists.insert(dst);
+        } else if crate::lower::is_value_ty(result_elem) {
+            self.value_elem_lists.insert(dst);
+        } else {
+            self.heap_elem_lists.insert(dst);
+        }
+        // The write-cursor (count of kept elements) — a stable mutable local.
+        let cursor = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: cursor, value: 0 });
+
+        // The loop index (stable mutable i64 local) + the +1 step constant.
+        let i_v = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: i_v, value: 0 });
+        let one_v = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: one_v, value: 1 });
+
+        self.ops.push(Op::LoopStart);
+        let cond_v = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst: cond_v, op: IntOp::Lt, a: i_v, b: len_v });
+        self.ops.push(Op::LoopBreakUnless { cond: cond_v });
+
+        // Load element[i] from the SOURCE list (a handle for a heap source, an i64 value for a scalar
+        // source) — mirrors `lower_defunc_list_hof_inner`'s `src_heap` element read.
+        let eight = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: eight, value: 8 });
+        let i8_v = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst: i8_v, op: IntOp::Mul, a: i_v, b: eight });
+        let src_base = self.load_addr(h, 12);
+        let src_addr = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst: src_addr, op: IntOp::Add, a: src_base, b: i8_v });
+        let src_heap = matches!(&xs.ty,
+            Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, a)
+                if a.len() == 1 && is_heap_ty(&a[0]));
+        let elem = self.fresh_value();
+        let read_kind = if src_heap { PrimKind::LoadHandle } else { PrimKind::Load { width: 8 } };
+        self.ops.push(Op::Prim { kind: read_kind, dst: Some(elem), args: vec![src_addr] });
+
+        // Bind the lambda PARAM (the element). Captures resolve through `value_of`. A HEAP element is a
+        // BORROW (`param_values`); a heap AGGREGATE is also a materialized aggregate (so a `let
+        // (k,v)=pair` destructure borrows its slots).
+        self.value_of.insert(params[0].0, elem);
+        if src_heap {
+            self.param_values.insert(elem);
+            if let Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, a) = &xs.ty {
+                if a.len() == 1
+                    && (matches!(&a[0], Ty::Tuple(_)) || self.aggregate_field_tys(&a[0]).is_some())
+                {
+                    self.materialized_aggregates.insert(elem);
+                }
+            }
+        }
+
+        // Lower the per-element keep/skip variant match into the write-cursor result list.
+        self.in_frame += 1;
+        self.in_defunc_body += 1;
+        let ok = self
+            .append_variant_match_to_result_list(subject, arms, rh, cursor, result_elem, eight)
+            .is_some();
+        self.in_defunc_body -= 1;
+        self.in_frame -= 1;
+        if !ok {
+            return None;
+        }
+
+        // Advance the index and close the loop.
+        let next_v = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst: next_v, op: IntOp::Add, a: i_v, b: one_v });
+        self.ops.push(Op::SetLocal { local: i_v, src: next_v });
+        self.ops.push(Op::LoopEnd);
+
+        // Patch the result list's `len` field (offset 4) to the write-cursor (the count of kept
+        // elements); the unused tail slots are harmless (a `${list}`/`xs[i]` reads `len`).
+        let four = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: four, value: 4 });
+        let lenaddr = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst: lenaddr, op: IntOp::Add, a: rh, b: four });
+        self.ops.push(Op::Prim {
+            kind: PrimKind::Store { width: 4 },
+            dst: None,
+            args: vec![lenaddr, cursor],
+        });
+        Some(dst)
+    }
+
     /// Walk a `flat_map`/`filter_map` closure BODY, pushing its control flow (if / match / block)
     /// DOWN and appending each TERMINAL sublist to the loop-carried `acc` slot. The body returns
     /// `List[String]` (flat_map) or `Option[String]` (filter_map); each terminal is one of:
@@ -1348,6 +1511,271 @@ impl LowerCtx {
             self.ops.push(op);
         }
         Some(())
+    }
+
+    /// A `filter_map` closure body that is a 2-arm VARIANT `match subj { … }` deciding keep/skip,
+    /// lowered into a WRITE-CURSOR result list (`lower_defunc_filter_map_hof`). The subject is a
+    /// self-host Option CALL (`some(pl)`/`none`) OR a self-host Result(-str) CALL (`ok(pl)`/`err(_)`)
+    /// — the dojo `match fs.read_text(dir+"/"+f) { ok(content) => some(parse_task_md(f, content)),
+    /// err(_) => none }`. Mirrors `append_variant_match_to_str_acc` (UNIT control, per-arm action,
+    /// branch isolation, drop-subject-after) BUT (a) ADMITS Result `ok`/`err` arms with the INVERSE
+    /// tag (Result Ok = tag==0 vs Option Some = tag!=0) exactly as `try_lower_variant_value_match`
+    /// already does (control_p2), and (b) the keep arm stores an OWNED record/Value at the cursor
+    /// instead of appending a String. Returns `Some(())` on success, `None` (the caller rolls back +
+    /// WALLs) outside the subset.
+    ///
+    /// SOUNDNESS — per-iteration subject + borrowed payload, exactly the Option path:
+    ///  - The subject (`fs.read_text(…)`) is materialized into a FRESH OWNED block (cert `i`) INSIDE
+    ///    this iteration's frame, tracked so its post-arm drop frees the owned payload recursively. A
+    ///    str-Result (cap-as-tag @16) is `materialized_results_str` + `heap_elem_lists` (DropListStr
+    ///    frees slot-0's String); a scalar Result (len-as-tag @4) is `materialized_results`; an Option
+    ///    (len-as-tag @4) is `materialized_options` (+ `heap_elem_lists` for a heap payload).
+    ///  - A `some(pl)`/`ok(pl)` HEAP payload binds `pl` to the subject's slot-0 @12 handle as a BORROW
+    ///    (`param_values`) — the subject still owns it, freed once by its post-arm drop. The keep arm
+    ///    builds a FRESH OWNED element (`lower_heap_result_arm`), so no double-free.
+    ///  - The subject must stay live THROUGH the keep arm (the borrow is read there) → dropped AFTER
+    ///    both arms (cert `d`), closing the per-iteration `i…d` balance.
+    ///  - BRANCH OWNERSHIP ISOLATION around the then-arm (snapshot/restore param_values +
+    ///    live_heap_handles + materialized_aggregates), so a consume in one alternate arm does not
+    ///    leak into the other's lowering view.
+    fn append_variant_match_to_result_list(
+        &mut self,
+        subject: &IrExpr,
+        arms: &[IrMatchArm],
+        rh: ValueId,
+        cursor: ValueId,
+        result_elem: &Ty,
+        eight: ValueId,
+    ) -> Option<()> {
+        use crate::PrimKind;
+        // Gate: a 2-arm guard-free match over a heap (variant) subject. The subject must materialize to
+        // a self-host Option/Result(-str) CALL or a USER `Named` call returning Option/Result (NOT a
+        // let-bound Var — only a Call subject passes the tracking below, mirroring
+        // `try_lower_variant_value_match`). A custom variant / non-variant subject rolls back at the
+        // `is_option/is_result` check.
+        if arms.len() != 2 || arms.iter().any(|a| a.guard.is_some()) || !is_heap_ty(&subject.ty) {
+            return None;
+        }
+        let ops_mark = self.ops.len();
+        let lhh_mark = self.live_heap_handles.len();
+        let rollback = |s: &mut Self| {
+            s.ops.truncate(ops_mark);
+            s.live_heap_handles.truncate(lhh_mark);
+            None
+        };
+        // Materialize the per-element subject into a FRESH OWNED block (cert `i`), dropped AFTER the
+        // arms (cert `d`) within THIS iteration.
+        let subj = match self
+            .lower_call_args(std::slice::from_ref(subject))
+            .ok()
+            .and_then(|a| a.into_iter().next())
+        {
+            Some(CallArg::Handle(v)) => v,
+            _ => return rollback(self),
+        };
+        // Track the subject EXACTLY as `try_lower_variant_value_match` (control_p2): a self-host or
+        // user `Named` Option/Result, with the type-driven drop set so the per-iteration subject drop
+        // frees its owned payload correctly. The arm tag arrangement is the uniform skeleton then=tag≠0
+        // / else=tag==0 (Option → then=Some/else=None; Result → then=Err/else=Ok).
+        let is_named_call =
+            matches!(&subject.kind, IrExprKind::Call { target: CallTarget::Named { .. }, .. });
+        if is_self_host_option_call(subject)
+            || (is_named_call
+                && is_variant_ty(&subject.ty)
+                && !crate::lower::is_result_ty(&subject.ty))
+        {
+            self.materialized_options.insert(subj);
+            if crate::lower::is_heap_elem_list_ty(&subject.ty) {
+                self.heap_elem_lists.insert(subj);
+            }
+        }
+        if is_self_host_result_call(subject)
+            || (is_named_call
+                && crate::lower::is_result_ty(&subject.ty)
+                && !Self::is_heap_ok_result(&subject.ty))
+        {
+            self.materialized_results.insert(subj);
+            // Scalar-Ok / heap-Err `Result[Int, String]` (the byte-match fixture's `mkResult`): the
+            // len-as-tag read stays @4, but track heap_elem_lists so the Err arm's String payload drops
+            // via DropListStr (Ok=len0 frees nothing, Err=len1 frees slot-0's String).
+            if let Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, a) =
+                &subject.ty
+            {
+                if a.len() == 2 && !is_heap_ty(&a[0]) && is_heap_ty(&a[1]) {
+                    self.heap_elem_lists.insert(subj);
+                }
+            }
+        }
+        if is_self_host_result_str_call(subject)
+            || (is_named_call && Self::is_heap_ok_result(&subject.ty))
+        {
+            self.materialized_results_str.insert(subj);
+            if crate::lower::is_result_listval_ty(&subject.ty) {
+                self.value_result_lists.insert(subj);
+            } else if crate::lower::is_value_result_ty(&subject.ty) {
+                self.value_result_results.insert(subj);
+            } else if crate::lower::is_str_int_result_ty(&subject.ty) {
+                self.str_int_result_results.insert(subj);
+            } else if crate::lower::is_value_int_result_ty(&subject.ty) {
+                self.value_int_result_results.insert(subj);
+            } else if crate::lower::is_list_str_int_result_ty(&subject.ty) {
+                self.list_str_int_result_results.insert(subj);
+            } else if crate::lower::is_list_value_int_result_ty(&subject.ty) {
+                self.list_value_int_result_results.insert(subj);
+            } else {
+                self.heap_elem_lists.insert(subj);
+            }
+        }
+        let is_option = self.materialized_options.contains(&subj);
+        let is_result_str = self.materialized_results_str.contains(&subj);
+        let is_result = self.materialized_results.contains(&subj) || is_result_str;
+        if !is_option && !is_result {
+            return rollback(self);
+        }
+        let tag_off = if is_result_str { 16 } else { 4 };
+        // Parse the arms into (then_body, then_bind) [tag != 0] and (else_body, else_bind) [tag == 0],
+        // the uniform skeleton: Option → then=Some / else=None; Result → then=Err / else=Ok. A heap
+        // payload binds the @12 handle as a BORROW (gated on the subject being a nested-ownership list);
+        // a scalar payload a value copy; a wildcard nothing.
+        let heap_or_scalar_bind = |s: &Self, inner: &IrPattern| -> Result<Option<(VarId, bool)>, ()> {
+            match inner {
+                IrPattern::Bind { var, ty } if !is_heap_ty(ty) => Ok(Some((*var, false))),
+                IrPattern::Bind { var, ty }
+                    if is_heap_ty(ty)
+                        && (s.heap_elem_lists.contains(&subj)
+                            || s.value_result_lists.contains(&subj)
+                            || s.value_result_results.contains(&subj)) =>
+                {
+                    Ok(Some((*var, true)))
+                }
+                IrPattern::Wildcard => Ok(None),
+                _ => Err(()),
+            }
+        };
+        let mut then_slot: Option<(&IrExpr, Option<(VarId, bool)>)> = None;
+        let mut else_slot: Option<(&IrExpr, Option<(VarId, bool)>)> = None;
+        for arm in arms {
+            let parsed: Result<(bool, Option<(VarId, bool)>), ()> = match &arm.pattern {
+                IrPattern::Some { inner } if is_option => {
+                    heap_or_scalar_bind(self, inner).map(|b| (true, b))
+                }
+                IrPattern::None | IrPattern::Wildcard if is_option => Ok((false, None)),
+                IrPattern::Err { inner } if !is_option => {
+                    heap_or_scalar_bind(self, inner).map(|b| (true, b))
+                }
+                IrPattern::Ok { inner } if !is_option => {
+                    heap_or_scalar_bind(self, inner).map(|b| (false, b))
+                }
+                _ => Err(()),
+            };
+            match parsed {
+                Ok((true, bind)) if then_slot.is_none() => then_slot = Some((&arm.body, bind)),
+                Ok((false, bind)) if else_slot.is_none() => else_slot = Some((&arm.body, bind)),
+                _ => return rollback(self),
+            }
+        }
+        let ((then_body, then_bind), (else_body, else_bind)) = match (then_slot, else_slot) {
+            (Some(t), Some(e)) => (t, e),
+            _ => return rollback(self),
+        };
+        // tag = load32(handle(subj) + tag_off); bind payload(s) BEFORE the IfThen (in scope for the
+        // arm that reads them); then a UNIT IfThen (dst None) with per-arm keep/skip.
+        let h = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![subj] });
+        let tag = self.load_at_offset(h, tag_off, PrimKind::Load { width: 4 });
+        let bind_payload = |s: &mut Self, bind: Option<(VarId, bool)>| {
+            if let Some((bind_var, is_heap)) = bind {
+                let payload = if is_heap {
+                    s.load_at_offset(h, 12, PrimKind::LoadHandle)
+                } else {
+                    s.load_at_offset(h, 12, PrimKind::Load { width: 8 })
+                };
+                s.value_of.insert(bind_var, payload);
+                if is_heap {
+                    s.param_values.insert(payload);
+                }
+            }
+        };
+        bind_payload(self, then_bind);
+        bind_payload(self, else_bind);
+        self.ops.push(Op::IfThen { cond: tag, dst: None });
+        let pv_snapshot = self.param_values.clone();
+        let lhh_snapshot = self.live_heap_handles.clone();
+        let ma_snapshot = self.materialized_aggregates.clone();
+        self.unit_arm_depth += 1;
+        let then_ok = self.emit_filter_map_arm(then_body, rh, cursor, result_elem, eight);
+        self.ops.push(Op::Else { val: None });
+        self.param_values = pv_snapshot;
+        self.live_heap_handles = lhh_snapshot;
+        self.materialized_aggregates = ma_snapshot;
+        let else_ok =
+            then_ok.and_then(|_| self.emit_filter_map_arm(else_body, rh, cursor, result_elem, eight));
+        self.unit_arm_depth -= 1;
+        self.ops.push(Op::EndIf { val: None });
+        if else_ok.is_none() {
+            return rollback(self);
+        }
+        // SUBJECT-DROP-AFTER-ARMS: the keep arm borrowed slot-0, so the fresh per-iteration subject
+        // stayed live through both arms — drop it ONCE here, closing the per-iteration `i…d` balance.
+        if let Some(pos) = self.live_heap_handles.iter().rposition(|&v| v == subj) {
+            self.live_heap_handles.remove(pos);
+            let op = self.drop_op_for(subj);
+            self.ops.push(op);
+        }
+        Some(())
+    }
+
+    /// One arm of a `filter_map` keep/skip variant match (`append_variant_match_to_result_list`):
+    ///   - `none` / `[]` (empty) → SKIP (no store).
+    ///   - `some(<elem>)` → KEEP: build `<elem>` as a FRESH OWNED record/Value (`lower_heap_result_arm`,
+    ///     which Consumes it = moved out of the iteration scope), store its handle at `result[cursor*8]`,
+    ///     then `cursor += 1`. The element is already owned (rc 1) → just store, NO `Dup` (unlike
+    ///     `filter`, which keeps a BORROWED source element).
+    /// A `e!` wrapper is stripped (effect-fn error propagation is identity on its inner value here).
+    /// Any other body shape returns `None` → the caller rolls back + WALLs.
+    fn emit_filter_map_arm(
+        &mut self,
+        body: &IrExpr,
+        rh: ValueId,
+        cursor: ValueId,
+        result_elem: &Ty,
+        eight: ValueId,
+    ) -> Option<()> {
+        use crate::PrimKind;
+        let body = match &body.kind {
+            IrExprKind::Unwrap { expr } => expr.as_ref(),
+            _ => body,
+        };
+        match &body.kind {
+            IrExprKind::OptionNone => Some(()),
+            IrExprKind::List { elements } if elements.is_empty() => Some(()),
+            IrExprKind::OptionSome { expr } => {
+                let arm_mark = self.live_heap_handles.len();
+                let elem_v = self.lower_heap_result_arm(expr, result_elem)?;
+                // store the OWNED element handle at result[cursor*8].
+                let c8 = self.fresh_value();
+                self.ops.push(Op::IntBinOp { dst: c8, op: IntOp::Mul, a: cursor, b: eight });
+                let rbase = self.load_addr(rh, 12);
+                let raddr = self.fresh_value();
+                self.ops.push(Op::IntBinOp { dst: raddr, op: IntOp::Add, a: rbase, b: c8 });
+                let eh = self.fresh_value();
+                self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(eh), args: vec![elem_v] });
+                self.ops.push(Op::Prim {
+                    kind: PrimKind::Store { width: 8 },
+                    dst: None,
+                    args: vec![raddr, eh],
+                });
+                // cursor += 1.
+                let one = self.fresh_value();
+                self.ops.push(Op::ConstInt { dst: one, value: 1 });
+                let cnext = self.fresh_value();
+                self.ops.push(Op::IntBinOp { dst: cnext, op: IntOp::Add, a: cursor, b: one });
+                self.ops.push(Op::SetLocal { local: cursor, src: cnext });
+                self.drop_arm_locals(arm_mark);
+                Some(())
+            }
+            _ => None,
+        }
     }
 
     /// Lower a `List[String]`-valued LEAF (a list literal, a `+` concat, a named call, or a `??`) to
