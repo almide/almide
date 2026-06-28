@@ -580,7 +580,63 @@ impl LowerCtx {
                 self.drop_arm_locals(arm_mark);
                 Some(obj)
             }
+            // A bare heap-FIELD-projection arm (`preopen_dirs: if … then opts.preopen_dirs else […]`
+            // — the porta build_config spread-override If's then-arm is `opts.preopen_dirs`, a
+            // `Member`). The arm must MOVE OUT an owned reference, but the field is still owned by its
+            // container (`opts`, a borrowed param the caller owns). BORROW the slot handle
+            // (`LoadHandle` of `container_handle + offset`) and ACQUIRE a fresh owned reference
+            // (`dup_borrowed_slot` = `Op::Dup`, cert `a`-grade), then MOVE it out (`Op::Consume` =
+            // cert `m`) — the SAME per-arm `"am"` balance as the bare-Var arm, with the ORIGINAL
+            // slot untouched (no double-free: the Dup'd ref is independent; the container drops its
+            // own ref once at its scope end). A `TupleIndex` projection is identical.
+            // `dup_borrowed_slot` tracks the owned ref in `live_heap_handles`; the `retain` detaches
+            // it (it is moved out, NOT a scope-end local) before the per-arm teardown. Defers (`None`)
+            // for an unresolvable container / non-heap slot — the caller keeps its sound wall.
+            //
+            // SCOPED to a BORROWED-PARAM container (`is_borrowed_param_container` — `opts` is a record
+            // param the CALLER owns): this is the RETURN-materializer brick for projecting a borrowed
+            // param's heap field. A LOCAL container (`else result.out` over a `list.fold` result, the
+            // playground `wrap_lists`) is the LOOP-CARRIED-accumulator frontier (the `(B)` mechanism) —
+            // admitting it makes the enclosing fold body lower, whose defunctionalized elided-call
+            // count then outruns the source count-gate (a caps WALL BREACH). Defer the local-container
+            // case (`None`) so it keeps its existing wall — the loop-slot work owns it. The param case
+            // is exactly the documented borrow-then-`Dup` `dup_borrowed_slot` is built for.
+            IrExprKind::Member { object, field } if self.is_borrowed_param_container(object) => {
+                let offset = self.aggregate_field_offset_any(&object.ty, field.as_str())?;
+                let arm_mark = self.live_heap_handles.len();
+                let h = self.resolve_aggregate_container_handle(object)?;
+                let owned = self.dup_borrowed_slot(h, offset);
+                self.ops.push(Op::Consume { v: owned });
+                self.live_heap_handles.retain(|x| *x != owned);
+                self.drop_arm_locals(arm_mark);
+                Some(owned)
+            }
+            IrExprKind::TupleIndex { object, index } if self.is_borrowed_param_container(object) => {
+                let offset = self.aggregate_index_offset_any(&object.ty, *index)?;
+                let arm_mark = self.live_heap_handles.len();
+                let h = self.resolve_aggregate_container_handle(object)?;
+                let owned = self.dup_borrowed_slot(h, offset);
+                self.ops.push(Op::Consume { v: owned });
+                self.live_heap_handles.retain(|x| *x != owned);
+                self.drop_arm_locals(arm_mark);
+                Some(owned)
+            }
             _ => None,
+        }
+    }
+
+    /// Is `container` a direct reference to a BORROWED heap PARAM (a record/tuple param the caller
+    /// owns — its handle is in `param_values`)? Gates the heap-FIELD-projection return-materializer
+    /// arm to exactly the build_config `opts.preopen_dirs` shape, excluding a fold/loop-derived LOCAL
+    /// container (the `(B)` loop-accumulator frontier) whose lowering breaches the elided-call count
+    /// gate. A non-Var / unbound / non-param container is NOT borrowed-param → `false` (defer).
+    pub(crate) fn is_borrowed_param_container(&self, container: &IrExpr) -> bool {
+        match &container.kind {
+            IrExprKind::Var { id } => self
+                .value_for(*id)
+                .map(|v| self.param_values.contains(&v))
+                .unwrap_or(false),
+            _ => false,
         }
     }
 

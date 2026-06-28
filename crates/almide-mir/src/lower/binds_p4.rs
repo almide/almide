@@ -303,7 +303,7 @@ impl LowerCtx {
     /// owns. Tracked in `live_heap_handles` so the caller's `Consume` (move-in) balances it. The
     /// borrow+Dup pair is the SAME machinery `try_lower_spread_record_construct` uses for a copied
     /// heap field — no double-free (two distinct refs, two distinct drops).
-    fn dup_borrowed_slot(&mut self, container_handle: ValueId, offset: u32) -> ValueId {
+    pub(crate) fn dup_borrowed_slot(&mut self, container_handle: ValueId, offset: u32) -> ValueId {
         use crate::{IntOp, PrimKind};
         let off = self.fresh_value();
         self.ops.push(Op::ConstInt { dst: off, value: offset as i64 });
