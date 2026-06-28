@@ -109,10 +109,15 @@ fn count_eq_calls(ty: &almide_lang::types::Ty, registry: &almide_mir::lower::Rec
     }
 }
 
-fn count_ir_calls(body: &almide_ir::IrExpr, registry: &almide_mir::lower::RecordLayouts) -> usize {
+fn count_ir_calls(
+    body: &almide_ir::IrExpr,
+    registry: &almide_mir::lower::RecordLayouts,
+    variant_layouts: &almide_mir::lower::VariantLayouts,
+) -> usize {
     struct CallCounter<'a> {
         n: usize,
         registry: &'a almide_mir::lower::RecordLayouts,
+        variant_layouts: &'a almide_mir::lower::VariantLayouts,
     }
     impl almide_ir::visit::IrVisitor for CallCounter<'_> {
         fn visit_expr(&mut self, e: &almide_ir::IrExpr) {
@@ -200,7 +205,11 @@ fn count_ir_calls(body: &almide_ir::IrExpr, registry: &almide_mir::lower::Record
                     ) if a.len() == 1
                         && (!almide_mir::lower::is_heap_ty(&a[0])
                             || matches!(a[0], almide_lang::types::Ty::String)
-                            || almide_mir::lower::is_value_ty(&a[0]))
+                            || almide_mir::lower::is_value_ty(&a[0])
+                            // A FLAT-variant element (`acc + [r.val]`, `acc: List[ValType]`) also lowers
+                            // to ONE `__list_concat_rc` (rc-incrementing copy), so count its NODE too —
+                            // keeps `mir_calls <= ir_calls` by construction. `__list_concat_rc` is pure.
+                            || self.variant_layouts.is_flat_variant_ty(&a[0]))
                 );
                 if lowered {
                     self.n += 1;
@@ -312,7 +321,7 @@ fn count_ir_calls(body: &almide_ir::IrExpr, registry: &almide_mir::lower::Record
             almide_ir::visit::walk_expr(self, e);
         }
     }
-    let mut cc = CallCounter { n: 0, registry };
+    let mut cc = CallCounter { n: 0, registry, variant_layouts };
     // `visit_expr` (NOT `walk_expr`) so a ROOT-position call is counted too — an
     // expression-bodied `fn f() = g(x)` has the call AT the body root; `walk_expr`
     // would descend past it and undercount (masking a nested elision in its args,
@@ -966,7 +975,7 @@ fn main() {
                     // cluster has MORE IR calls than MIR call-ops some call was elided
                     // SOMEWHERE within it, so EVERY function of the cluster is conservatively
                     // TAINTED below (we cannot tell which member hid it).
-                    let ir_calls = count_ir_calls(&eff_body, &record_layouts);
+                    let ir_calls = count_ir_calls(&eff_body, &record_layouts, &variant_layouts);
                     let mir_calls = mirs
                         .iter()
                         .flat_map(|m| m.ops.iter())

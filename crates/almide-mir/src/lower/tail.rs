@@ -214,6 +214,28 @@ impl LowerCtx {
         Some(dst)
     }
 
+    /// Read-only predicate mirroring [`Self::try_lower_heap_field_borrow`]'s container gate: does a
+    /// field/index extraction over `container` resolve to a MATERIALIZED/param heap-aggregate block
+    /// (so a borrow would succeed)? Used by the list-literal builder's `all_lowerable` pre-check to
+    /// admit a `Member`/`TupleIndex` element ONLY when the loop's borrow `?` will succeed — keeping the
+    /// pre-check and the build loop in lockstep (no partial-ops leak on a mid-build decline).
+    pub(crate) fn heap_field_container_tracked(&self, container: &IrExpr) -> bool {
+        match &container.kind {
+            IrExprKind::Var { id } if is_heap_ty(&container.ty) => self
+                .value_for(*id)
+                .map(|src| {
+                    self.materialized_aggregates.contains(&src) || self.param_values.contains(&src)
+                })
+                .unwrap_or(false),
+            IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. }
+                if is_heap_ty(&container.ty) =>
+            {
+                self.heap_field_container_tracked(object)
+            }
+            _ => false,
+        }
+    }
+
     /// A single-arm tuple-destructure `match t { (…, x, …) => x }` that returns ONE bound element is
     /// semantically the tuple-index extraction `t.<i>` — the wasm-bindgen `match pair { (offs, _) =>
     /// offs }` / `(_, n) => n` shape that follows a tuple-accumulator `fold`. Detect that shape and

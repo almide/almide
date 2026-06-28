@@ -183,6 +183,15 @@ impl LowerCtx {
             {
                 true
             }
+            // A flat-variant FIELD EXTRACTION element (`acc + [r.val]`) — admitted ONLY when the field
+            // BORROW resolves (a tracked/param heap-aggregate container), so the build loop's `?` never
+            // fails mid-build (which would leak partial ops). Mirrors `try_lower_heap_field_borrow`'s
+            // container gate so the two never disagree.
+            IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. }
+                if elem_flat_variant && is_heap_ty(&e.ty) =>
+            {
+                self.heap_field_container_tracked(object)
+            }
             IrExprKind::Call { target: CallTarget::Named { .. } | CallTarget::Module { .. }, .. } => {
                 // A Value-returning ctor call (elem_value), OR — for a List[String] — a String-returning
                 // call element (`[string.slice(s,a,b)]` in `acc + [string.slice(…)]`, the dominant yaml
@@ -276,6 +285,21 @@ impl LowerCtx {
                     if elem_flat_variant && self.variant_layouts.ctor_to_type.contains_key(name.as_str()) =>
                 {
                     self.try_lower_variant_ctor(elem)?
+                }
+                // A flat-variant FIELD EXTRACTION element (`acc + [r.val]`, `r.val: ValType` — the
+                // wasm-binary `read_vec_valtype_acc` recursive accumulator, where the unwrapped result
+                // record `r` carries >1 heap field so `r.val` stays a `Member` rather than folding to a
+                // `Var`). BORROW the field handle (the container keeps owning it, freed by its own
+                // recursive drop) and `Dup` a fresh OWNED reference to MOVE into the slot. The list
+                // co-owns the rc-inc'd block; its `DropListStr` `rc_dec` balances the `Dup`, and a flat
+                // variant block owns no inner handle so `rc_dec` is its full free — no double-free
+                // (rc-aware). Cert-identical to the `Var` element case (the extra `LoadHandle` is a
+                // cert-neutral prim load): `Dup` = `a`, `Consume` = the move into the list `i…m`.
+                IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. } if elem_flat_variant => {
+                    let borrowed = self.try_lower_heap_field_borrow(elem)?;
+                    let dup = self.fresh_value();
+                    self.ops.push(Op::Dup { dst: dup, src: borrowed });
+                    dup
                 }
                 // A `${...}` interpolation element → a fresh owned String via the interp concat chain.
                 IrExprKind::StringInterp { parts } => self.try_lower_string_interp(parts)?,

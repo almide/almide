@@ -448,6 +448,11 @@ pub fn drop_fn_ident(type_name: &str) -> String {
 pub fn generate_variant_drop_sources(type_decls: &[almide_ir::IrTypeDecl]) -> String {
     use almide_ir::{IrTypeDeclKind, IrVariantKind};
     let names = variant_type_names(type_decls);
+    // A variant FIELD that is itself a FLAT variant (e.g. `BlockType.BlockVal(ValType)`) is a single
+    // owned tag-block with no inner handle: it must be freed by a flat `rc_dec`, NOT a recursive
+    // `__drop_<flatvariant>` (which is never generated for a flat variant — it has no heap field — and
+    // would render a DANGLING call). Mirrors the record-drop generator's `is_flat_variant_elem` treatment.
+    let flat_names = flat_variant_type_names(type_decls);
     let mut out = String::new();
     for decl in type_decls {
         if !variant_needs_recursive_drop(decl, &names) {
@@ -477,11 +482,19 @@ pub fn generate_variant_drop_sources(type_decls: &[almide_ir::IrTypeDecl]) -> St
             for (i, ty) in tys.iter().enumerate() {
                 let off = layout::slot_offset(1 + i);
                 if let Some(fv) = variant_field_name(ty, &names) {
-                    let fv_fn = drop_fn_ident(&fv);
-                    frees.push_str(&format!(
-                        "        let f{idx}: {fv} = prim.load_handle(h + {off})\n        __drop_{fv_fn}(f{idx})\n"
-                    ));
-                    idx += 1;
+                    if flat_names.contains(&fv) {
+                        // A flat-variant field — a single owned block, freed by one `rc_dec` (no
+                        // recursive `__drop_<fv>` exists for a flat variant). No `let` binding needed.
+                        frees.push_str(&format!(
+                            "        prim.rc_dec(prim.load64(h + {off}))\n"
+                        ));
+                    } else {
+                        let fv_fn = drop_fn_ident(&fv);
+                        frees.push_str(&format!(
+                            "        let f{idx}: {fv} = prim.load_handle(h + {off})\n        __drop_{fv_fn}(f{idx})\n"
+                        ));
+                        idx += 1;
+                    }
                 } else if matches!(ty, Ty::String) {
                     frees.push_str(&format!(
                         "        prim.rc_dec(prim.load64(h + {off}))\n"

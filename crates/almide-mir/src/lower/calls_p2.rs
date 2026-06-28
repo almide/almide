@@ -97,8 +97,16 @@ impl LowerCtx {
         // the Int @12 is scalar). Routed via variant_drop_handles (a DropVariant, like the record case).
         let int_str_elem = matches!(&elem_ty,
             Ty::Tuple(tys) if tys.len() == 2 && matches!(tys[0], Ty::Int) && matches!(tys[1], Ty::String));
+        // A FLAT-variant ELEMENT (`acc + [r.val]` where `acc: List[ValType]`, the wasm-binary
+        // recursive-accumulator shape) — each element is a single OWNED tag-block (no inner handle),
+        // so `__list_concat_rc` rc-incs each element handle (the new list co-owns each block) and the
+        // scope-end `DropListStr` `rc_dec`s each element + the list block (a flat variant block's
+        // `rc_dec` IS its full free). Byte-identical to the proven `List[String]` cert — mirrors the
+        // `elem_flat_variant` arm of the List-LITERAL builder (binds.rs). A variant carrying a
+        // `String`/nested/`List` field is NOT flat (`is_flat_variant_ty` = false) and stays walled.
+        let flat_variant_elem = self.variant_layouts.is_flat_variant_ty(&elem_ty);
         if !scalar_elem && !heap_elem && !str_value_elem && !list_str_elem && !str_str_elem
-            && !int_str_elem && record_elem.is_none()
+            && !int_str_elem && !flat_variant_elem && record_elem.is_none()
         {
             return None;
         }
@@ -130,6 +138,11 @@ impl LowerCtx {
             } else {
                 self.heap_elem_lists.insert(dst);
             }
+        } else if flat_variant_elem {
+            // A flat-variant element block owns no inner handle, so the per-element-`rc_dec`
+            // `DropListStr` (each element + the list block) IS its full free — the SAME cert as a
+            // `List[String]`. (Checked AFTER `heap_elem`, before the tuple/record arms.)
+            self.heap_elem_lists.insert(dst);
         } else if str_value_elem {
             self.str_value_elem_lists.insert(dst);
         } else if str_str_elem {
