@@ -103,6 +103,9 @@ pub fn wasm_pattern(op: &crate::Op) -> Option<String> {
         Op::DropResultListStr { .. } => "call $rc_dec".into(),
         Op::DropListListStr { .. } => "drop_list_list_str".into(),
         Op::DropVariant { ty, .. } => format!("call $__drop_{ty}"),
+        // Inline-rendered (rc==1-gated recurse into the @12 record via `$__drop_<drop_fn>`, then the
+        // wrapper block) — the cert-claimed token is the final wrapper `call $rc_dec`, like DropListStr.
+        Op::DropWrapperRec { .. } => "call $rc_dec".into(),
         // A copy-on-write: MakeUnique clones a SHARED block before in-place
         // mutation — realized by `call $list_copy` (in the cow's then-branch).
         Op::MakeUnique { .. } => "call $list_copy".into(),

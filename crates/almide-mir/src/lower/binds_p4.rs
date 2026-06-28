@@ -631,6 +631,21 @@ impl LowerCtx {
                 let piece = self.lower_owned_heap_field(expr)?;
                 Some(self.materialize_opt_str_some(piece, repr))
             }
+            // `some(<record>)` RETURNED — Option wrapping a heap RECORD (porta find_eq_pos's tail).
+            // Materialize the owned record (`try_lower_record_construct`, recursive-drop) and wrap it
+            // in the 0-or-1 Option, routing the Option's drop to the recursive `$__drop_<R>`
+            // (`Op::DropWrapperRec`) — NOT the flat `DropListStr` that leaks the record's nested heap
+            // fields. The tail counterpart of the heap-result-arm record-Some case. Gated on the record
+            // needing a recursive drop; a scalar-only record falls through (no `$__drop_<R>`).
+            IrExprKind::OptionSome { expr }
+                if matches!(expr.kind, IrExprKind::Record { .. })
+                    && self.record_or_anon_drop_type_name(&expr.ty).is_some() =>
+            {
+                let repr = repr_of(ty).ok()?;
+                let drop_fn = self.record_or_anon_drop_type_name(&expr.ty)?;
+                let piece = self.try_lower_record_construct(expr)?;
+                Some(self.materialize_opt_aggregate_some(piece, repr, drop_fn))
+            }
             IrExprKind::OptionSome { expr } if is_heap_ty(&expr.ty) => {
                 let repr = repr_of(ty).ok()?;
                 let piece = match &expr.kind {

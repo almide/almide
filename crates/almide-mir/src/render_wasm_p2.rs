@@ -553,6 +553,38 @@ fn render_op(
             // single-file (dot-free) type this is the identity — byte-identical render.
             format!("    (call $__drop_{} (local.get {}))\n", ty.replace('.', "_"), local(*v))
         }
+        // RECURSIVE drop of an Option/Result WRAPPER whose @12 payload is a heap RECORD (the
+        // `some({key, val})` / `ok({val, next})` shape). At the wrapper's LAST ref (rc==1), recurse
+        // into the record via the generated `$__drop_<drop_fn>` (which at the record's OWN last ref
+        // frees its nested heap fields then the record block — a flat `rc_dec` of the @12 handle would
+        // free only the record BLOCK, leaking those fields). Then `rc_dec` the wrapper block. The
+        // Option shape recurses iff `len@4 > 0` (Some, not None); the Result shape iff `tag@16 == 0`
+        // (Ok-record, not an Err String — which is freed by a flat `rc_dec`). Dot-sanitized to match
+        // `drop_fn_ident`. Cert = the final wrapper `call $rc_dec` (`d`); the recursion is the trusted
+        // generated routine. Mirrors `DropResultValue` (Value payload) / the masked `DropListStr`.
+        Op::DropWrapperRec { v, drop_fn, is_result } => {
+            let p = local(*v);
+            let dn = drop_fn.replace('.', "_");
+            if *is_result {
+                let payload = format!("(i32.load (i32.add (local.get {p}) (i32.const 12)))");
+                format!(
+                    "    (if (i32.eq (i32.load (local.get {p})) (i32.const 1)) (then\n\
+                     \x20     (if (i32.eq (i32.load (i32.add (local.get {p}) (i32.const 16))) (i32.const 0))\n\
+                     \x20       (then (call $__drop_{dn} {payload}))\n\
+                     \x20       (else (call $rc_dec {payload})))))\n\
+                     \x20   (call $rc_dec (local.get {p}))\n"
+                )
+            } else {
+                let payload =
+                    format!("(i32.wrap_i64 (i64.load (i32.add (local.get {p}) (i32.const 12))))");
+                format!(
+                    "    (if (i32.eq (i32.load (local.get {p})) (i32.const 1)) (then\n\
+                     \x20     (if (i32.gt_s (i32.load (i32.add (local.get {p}) (i32.const 4))) (i32.const 0))\n\
+                     \x20       (then (call $__drop_{dn} {payload})))))\n\
+                     \x20   (call $rc_dec (local.get {p}))\n"
+                )
+            }
+        }
         // COPY-ON-WRITE before an in-place mutation (A1.3-render, refining
         // CowSafety.v): if the block is SHARED (rc > 1), clone it so the mutation
         // touches no alias. The `rc_dec` runs FIRST (rc 2→1 — the alias keeps the

@@ -743,6 +743,16 @@ impl LowerCtx {
             // String slot + block, then the list). Every real user-ADT variant keeps `DropVariant`.
             if ty == "list_int_str" {
                 Op::DropListIntStr { v }
+            } else if let Some(drop_fn) = ty.strip_prefix("optrec:") {
+                // An Option WRAPPER holding a heap RECORD payload (`some({key, val})`): recurse into
+                // the @12 record via `$__drop_<drop_fn>` at the wrapper's last ref, then free the
+                // wrapper block. The `optrec:` prefix is injected by `materialize_opt_aggregate_some`.
+                Op::DropWrapperRec { v, drop_fn: drop_fn.to_string(), is_result: false }
+            } else if let Some(drop_fn) = ty.strip_prefix("resrec:") {
+                // A Result WRAPPER holding a heap RECORD Ok payload (`ok({val, next})`): recurse into
+                // the @12 record (tag@16==0) via `$__drop_<drop_fn>`, else `rc_dec` the @12 Err
+                // String, then free the wrapper. Injected by `materialize_result_aggregate`.
+                Op::DropWrapperRec { v, drop_fn: drop_fn.to_string(), is_result: true }
             } else {
                 Op::DropVariant { v, ty: ty.clone() }
             }

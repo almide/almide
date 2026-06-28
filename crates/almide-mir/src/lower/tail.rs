@@ -176,7 +176,17 @@ impl LowerCtx {
         let h = match &container.kind {
             IrExprKind::Var { id } if is_heap_ty(&container.ty) => {
                 let src = self.value_or_global(*id).ok()?;
-                if !self.materialized_aggregates.contains(&src) {
+                // The container must be a REAL block with the uniform slot layout: a locally
+                // materialized aggregate, OR a BORROWED aggregate handle owned elsewhere
+                // (`param_values` — a function param, a destructure/match-bound payload handle).
+                // A `param_values` aggregate handle ALWAYS points at a real block (a deferred
+                // `Init::Opaque` aggregate is owned-and-tracked in `live_heap_handles`, never
+                // borrowed), so dereferencing its slot is sound — EXACTLY as the sibling
+                // `try_lower_{tuple,record}_destructure` already trust `param_values` for the
+                // identical `LoadHandle(container + offset)`. This closes the asymmetry that left a
+                // match-bound record payload's String field (`match o { some(r) => r.k }`) falling to
+                // the container-grain `Dup` (which read the record HEADER as a String = garbage).
+                if !self.materialized_aggregates.contains(&src) && !self.param_values.contains(&src) {
                     return None;
                 }
                 let h = self.fresh_value();
@@ -524,6 +534,13 @@ impl LowerCtx {
                         if let Some(dst) = self.try_lower_option_unwrap_or(expr, fallback, false) {
                             return Ok(Some(dst));
                         }
+                    }
+                    // `ok({val, next})` / `err(msg)` RETURNED for a `Result[heap-record, String]` (porta
+                    // read_valtype): materialize the record-Ok / String-Err block, MOVED OUT as the
+                    // return (the recursive `Op::DropWrapperRec` frees it via `$__drop_<R>` at the
+                    // caller's scope end). Checked before the generic ctor paths below.
+                    if let Some(dst) = self.try_lower_result_record_ctor(tail, &tail.ty) {
+                        return Ok(Some(dst));
                     }
                     // `ok(value.array(...))` / `err(msg)` RETURNED for a `Result[Value, String]` (csv
                     // `parse`): materialize the Value-Ok / String-Err Result block, MOVED OUT as the

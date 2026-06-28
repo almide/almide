@@ -236,6 +236,28 @@ impl LowerCtx {
             // and the whole Option is freed recursively (`DropListStr`) at scope end. Same `Alloc`
             // = `i` + `Consume` = `m` per-arm balance as the scalar case; reuses the proven
             // List[String] cert (init-agnostic). Only a Var payload (the owned slice, let-bound).
+            // A `some(<record>)` arm — Option wrapping a heap RECORD (porta find_eq_pos's
+            // `some({key: key, val: val})`). Materialize the owned record payload
+            // (`try_lower_record_construct`, recursive-drop), wrap it in the 0-or-1 Option, and route
+            // the Option's scope-end drop to the recursive `$__drop_<R>` (`Op::DropWrapperRec`) so the
+            // record's nested heap fields are freed — NOT the flat `DropListStr` that leaks them. Same
+            // per-arm `"im"` balance (Alloc `i` + the move-out `Consume` `m`); the record-construct's
+            // transient temps are freed within the arm (`drop_arm_locals`). Gated on the record needing
+            // a recursive drop (`record_or_anon_drop_type_name`) — a scalar-only record has no
+            // `$__drop_<R>` and is not reached here (it would fall through to the deferred path).
+            IrExprKind::OptionSome { expr }
+                if matches!(expr.kind, IrExprKind::Record { .. })
+                    && self.record_or_anon_drop_type_name(&expr.ty).is_some() =>
+            {
+                let arm_mark = self.live_heap_handles.len();
+                let repr = repr_of(result_ty).ok()?;
+                let drop_fn = self.record_or_anon_drop_type_name(&expr.ty)?;
+                let piece = self.try_lower_record_construct(expr)?;
+                let obj = self.materialize_opt_aggregate_some(piece, repr, drop_fn);
+                self.ops.push(Op::Consume { v: obj });
+                self.drop_arm_locals(arm_mark);
+                Some(obj)
+            }
             IrExprKind::OptionSome { expr } if is_heap_ty(&expr.ty) => {
                 let repr = repr_of(result_ty).ok()?;
                 // The owned String payload: a let-bound Var (its handle), or a direct user-call
@@ -356,6 +378,22 @@ impl LowerCtx {
             {
                 let arm_mark = self.live_heap_handles.len();
                 let obj = self.try_lower_result_list_value_int_ctor(arm, result_ty)?;
+                self.ops.push(Op::Consume { v: obj });
+                self.drop_arm_locals(arm_mark);
+                Some(obj)
+            }
+            // HEAP-Ok `Result[heap-record, String]` (porta read_valtype's `ok({val, next})`): the Ok
+            // payload is a heap RECORD, the Err a String. Checked BEFORE the generic heap-Ok String arm
+            // (which routes a record Ok through a flat `DropListStr`, leaking the record's nested heap
+            // fields). `try_lower_result_record_ctor` wraps the materialized record (Ok) / String (Err)
+            // and routes the wrapper's drop to the recursive `$__drop_<R>` (`Op::DropWrapperRec`). Same
+            // per-arm frame as the Value-Result arm. Guard = `Result[<recursive-drop record>, String]`,
+            // so a `Result[String, String]` keeps its existing path below.
+            IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. }
+                if self.is_record_result_ty(result_ty) =>
+            {
+                let arm_mark = self.live_heap_handles.len();
+                let obj = self.try_lower_result_record_ctor(arm, result_ty)?;
                 self.ops.push(Op::Consume { v: obj });
                 self.drop_arm_locals(arm_mark);
                 Some(obj)
@@ -555,6 +593,40 @@ impl LowerCtx {
         obj
     }
 
+    /// `Some(<record>)` — an `Option[heap-record]` as a 1-element list holding the record handle @12
+    /// (`some({key, val})` — porta find_eq_pos). SAME block as `materialize_opt_str_some` (the record
+    /// is MOVED in at slot 0), but the Option's drop must RECURSIVELY free the record's nested heap
+    /// fields — route it to `$__drop_<drop_fn>` via `variant_drop_handles="optrec:<drop_fn>"` (→
+    /// [`Op::DropWrapperRec`] `is_result=false`), NOT the flat `heap_elem_lists`/`DropListStr` (which
+    /// would `rc_dec` the record HANDLE only, leaking its String/List/Value fields). Cert is identical
+    /// (Alloc `i` + the record `m` + the scope-end recursive `d`); only the drop ROUTE differs.
+    pub(crate) fn materialize_opt_aggregate_some(
+        &mut self,
+        piece: ValueId,
+        repr: crate::Repr,
+        drop_fn: String,
+    ) -> ValueId {
+        use crate::PrimKind;
+        let one = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: one, value: 1 });
+        let obj = self.fresh_value();
+        self.ops.push(Op::Alloc { dst: obj, repr, init: Init::DynListStr { len: one } });
+        let oh = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(oh), args: vec![obj] });
+        let twelve = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: twelve, value: 12 });
+        let addr = self.fresh_value();
+        self.ops.push(Op::IntBinOp { dst: addr, op: IntOp::Add, a: oh, b: twelve });
+        let ph = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(ph), args: vec![piece] });
+        self.ops.push(Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args: vec![addr, ph] });
+        self.ops.push(Op::Consume { v: piece });
+        self.live_heap_handles.retain(|h| *h != piece);
+        self.variant_drop_handles.insert(obj, format!("optrec:{drop_fn}"));
+        self.materialized_options.insert(obj);
+        obj
+    }
+
     /// `Some((Int, String))` — an `Option[(Int, String)]` as a 1-element list holding the tuple handle
     /// (the `list.find` over a `List[(Int,String)]` result). SAME as `materialize_opt_str_some` but the
     /// payload is a TUPLE, so the Option's drop must RECURSIVELY free it (`$__drop_list_int_str`, the
@@ -600,6 +672,16 @@ impl LowerCtx {
     /// the `cap` field (@8): 0=Ok, 1=Err. `len` stays 1 so `DropListStr` frees the String regardless
     /// of which arm. Cert = `materialize_opt_str_some` (Alloc `i` + the String `m` + scope-end `d`);
     /// the cap-tag store is an opaque prim op. Tracked in `materialized_results_str` for the match.
+    /// Is `ty` a `Result[<record needing recursive drop>, String]` (porta read_valtype's
+    /// `Result[{val, next}, String]`)? Gates the record-Ok Result ctor (arm + tail) — distinct from
+    /// `is_heap_ok_result` (which would route a record Ok through the leaky flat `DropListStr`).
+    pub(crate) fn is_record_result_ty(&self, ty: &Ty) -> bool {
+        use almide_lang::types::constructor::TypeConstructorId;
+        matches!(ty, Ty::Applied(TypeConstructorId::Result, a)
+            if a.len() == 2 && matches!(a[1], Ty::String)
+                && self.record_or_anon_drop_type_name(&a[0]).is_some())
+    }
+
     /// Is `ty` a `Result[heap, heap]` (e.g. `Result[String, String]`)? Both Ok and Err own a heap
     /// payload, so it uses the cap-as-tag heap-Ok materialization, NOT the scalar len-as-tag one.
     pub(crate) fn is_heap_ok_result(ty: &Ty) -> bool {
@@ -694,6 +776,83 @@ impl LowerCtx {
         }
         self.materialized_results_str.insert(obj);
         obj
+    }
+
+    /// `ok(<record>)` / `err(<String>)` for a `Result[heap-record, String]` (porta read_valtype's
+    /// `ok({val, next})`). SAME cap-as-tag block as `materialize_result_str` (`is_err` selects the
+    /// @16 tag; the payload — record handle for Ok, String for Err — is MOVED into @12), but the
+    /// wrapper's drop must, at the Ok arm, RECURSIVELY free the record's nested heap fields. Route it
+    /// to `$__drop_<drop_fn>` via `variant_drop_handles="resrec:<drop_fn>"` (→ [`Op::DropWrapperRec`]
+    /// `is_result=true`, which tag-dispatches: Ok → `$__drop_<drop_fn>`, Err → flat `rc_dec` of the
+    /// @12 String), NOT the flat `heap_elem_lists`/`DropListStr` (which would leak the Ok record's
+    /// fields). Same cert as `materialize_result_str` (Alloc `i` + payload `m` + recursive `d`).
+    pub(crate) fn materialize_result_aggregate(
+        &mut self,
+        piece: ValueId,
+        repr: crate::Repr,
+        is_err: bool,
+        drop_fn: String,
+    ) -> ValueId {
+        use crate::PrimKind;
+        let one = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: one, value: 1 });
+        let obj = self.fresh_value();
+        self.ops.push(Op::Alloc { dst: obj, repr, init: Init::DynListStr { len: one } });
+        let oh = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(oh), args: vec![obj] });
+        let off12 = self.const_add(oh, 12);
+        let ph = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(ph), args: vec![piece] });
+        self.ops.push(Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args: vec![off12, ph] });
+        self.ops.push(Op::Consume { v: piece });
+        self.live_heap_handles.retain(|h| *h != piece);
+        let off16 = self.const_add(oh, 16);
+        let tag = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: tag, value: if is_err { 1 } else { 0 } });
+        self.ops.push(Op::Prim { kind: PrimKind::Store { width: 4 }, dst: None, args: vec![off16, tag] });
+        self.variant_drop_handles.insert(obj, format!("resrec:{drop_fn}"));
+        self.materialized_results_str.insert(obj);
+        obj
+    }
+
+    /// Construct a `Result[heap-record, String]` `ok(<record>)` / `err(<String>)` — porta
+    /// read_valtype's `ok({val, next})`. Ok materializes the owned record (`try_lower_record_construct`,
+    /// recursive-drop) and wraps it (the wrapper's [`Op::DropWrapperRec`] recurses via `$__drop_<R>`);
+    /// Err wraps a String. `None` outside `Result[<recursive-drop record>, String]` or a
+    /// non-materializable payload — so a `Result[String, String]` keeps its existing flat path.
+    pub(crate) fn try_lower_result_record_ctor(
+        &mut self,
+        expr: &IrExpr,
+        result_ty: &Ty,
+    ) -> Option<ValueId> {
+        use almide_lang::types::constructor::TypeConstructorId;
+        // Exactly `Result[<record needing recursive drop>, String]`.
+        let ok_ty = match result_ty {
+            Ty::Applied(TypeConstructorId::Result, a)
+                if a.len() == 2 && matches!(a[1], Ty::String) =>
+            {
+                &a[0]
+            }
+            _ => return None,
+        };
+        let drop_fn = self.record_or_anon_drop_type_name(ok_ty)?;
+        let repr = repr_of(result_ty).ok()?;
+        // Both arms use `lower_result_str_piece` — EXACTLY the payload set the leaky `is_heap_ok_result`
+        // path admits (a Record literal routes through its `_ => lower_owned_heap_field` recursive-drop
+        // case; an Ok record Var / call / the Err String are handled directly) — so intercepting here
+        // un-walls nothing extra and re-walls nothing (no regression), only swapping the flat
+        // `DropListStr` for the recursive `Op::DropWrapperRec`.
+        match &expr.kind {
+            IrExprKind::ResultOk { expr: inner } => {
+                let piece = self.lower_result_str_piece(inner)?;
+                Some(self.materialize_result_aggregate(piece, repr, false, drop_fn))
+            }
+            IrExprKind::ResultErr { expr: inner } => {
+                let piece = self.lower_result_str_piece(inner)?;
+                Some(self.materialize_result_aggregate(piece, repr, true, drop_fn))
+            }
+            _ => None,
+        }
     }
 
     /// Construct a `Result[Value, String]` `ok(<Value>)` / `err(<String>)` (the `ok(value.array(...))`
